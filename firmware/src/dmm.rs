@@ -344,9 +344,10 @@ pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3
 /// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
 /// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
 /// docs/data/short.csv, the stock row's own tap: VDS15 default, AGNDP7 ON,
-/// AGNDP8 ON on r5). r0 (60 ohm) = r1 in the default variant (the range
-/// always runs it, `Dmm::write_config`). r6 (60 M, the current-source row):
-/// not measured, None.
+/// AGNDP8 ON on r5). r0 (60 ohm, always the default variant,
+/// `Dmm::write_config`) = r1's default value, inferred: its own row has the
+/// same tap and Rref switches but was not measured. r6 (60 M, the
+/// current-source row): not measured, None.
 pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
     [Some(8.983e-4), Some(8.983e-4)],
     [Some(8.983e-4), Some(2.795e-4)],

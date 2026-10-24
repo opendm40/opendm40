@@ -374,14 +374,15 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   short-circuit current per range (600 Ω / 6 k / 60 k / 600 k / 6 MΩ):
   0.90 mA / 197 µA / 20 µA / 2.2 µA / 215 nA in the default variant (OP3
   VREF tap VDS15), 0.28 mA / 58 µA / 6.6 µA / 0.66 µA / 86 nA in the "ON"
-  variant (AGNDP7; AGNDP8 on 6 MΩ); 60 Ω = the 600 Ω default; 60 MΩ (the
-  current-source row) not measured. Open-circuit voltage at the jack with
-  the 1 k Rref: about 2.17 V (default), 0.78 V (ON). Only 600 Ω is limited
-  by OP3; above it the ~2 V source behind Rref sets the current. Measured
-  on one unit with `DBG:SRC`, jacks shorted / open
+  variant (AGNDP7; AGNDP8 on 6 MΩ). Open-circuit voltage at the jack with
+  the 1 k Rref: about 2.17 V (default), 0.78 V (ON). Measured on one unit
+  with `DBG:SRC`, jacks shorted / open
   ([`device-check-2026-10-21.md`](../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc),
-  `dmm::OHM_ISC` in [`firmware/src/dmm.rs`](../firmware/src/dmm.rs)). Diode
-  test 0.75 mA (owners' reports, not measured yet).
+  `dmm::OHM_ISC` in [`firmware/src/dmm.rs`](../firmware/src/dmm.rs)).
+  60 Ω and 60 MΩ (the current-source row) not measured; the firmware shows
+  the 600 Ω default value on 60 Ω (*inferred*). *Inferred* from the drops:
+  only 600 Ω is limited by OP3; above it the ~2 V source behind Rref sets
+  the current. Diode test 0.75 mA (owners' reports, not measured yet).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.

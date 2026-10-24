@@ -3611,8 +3611,10 @@ r6 (60 MΩ, the current-source row) VDS16 in both.
 | 6 MΩ (10 M) | 215 nA | 85.6 nA (AGNDP8; AGNDP7 would give 66.5 nA) |
 | 60 MΩ (CS path) | not measured | not measured |
 
-60 Ω runs the 600 Ω default row's source (`Dmm::write_config`). Only 600 Ω is limited by OP3 (drop
-0.90 V, source node 2.04 V); above it the drop is 1.97-2.17 V, the source behind Rref.
+60 Ω (its own row `f10_p8clr` r0, always the default variant) was not measured; the firmware shows
+the 600 Ω default value for it (*inferred*: same tap and Rref switches). *Inferred* from the drops:
+only 600 Ω is limited by OP3 (drop 0.90 V, source node 2.04 V); above it the drop is 1.97-2.17 V, the
+source behind Rref.
 
 **Open-circuit voltage at the jack (jacks open, V_input)**
 
