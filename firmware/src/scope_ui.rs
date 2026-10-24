@@ -2621,7 +2621,7 @@ const C_ROLL: Color = 0xfd20;
 pub const TB_ROW_PX: i32 = 30;
 
 /// Fastest timebase the list offers (`set_tb_lo`): TB_MIN, or WAVE_TB_MIN
-/// while the DMM wave view runs (its 5 ms/div floor: the faster entries
+/// while the DMM wave view runs (its 1 ms/div floor: the faster entries
 /// only clamped back to it).
 static TB_LO: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(crate::scope::TB_MIN as u8);
 
