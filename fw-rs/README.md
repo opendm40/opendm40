@@ -66,10 +66,10 @@ temperature functions can show a false A-JACK. While the scope is powered
 
 ## Install
 
-**Back up first.** Each meter has its own calibration record and boot data,
-and an update file cannot restore them. Make a backup with the memrw kit
-([firmware/patch/kit/README.md](../firmware/patch/kit/README.md)) and keep it
-off the meter. Charge the battery.
+**Backups.** Installing fw-rs rewrites only the application area; then back
+up the unit data from its USB drive, as in
+[README.md, Back up with fw-rs](../README.md#back-up-with-fw-rs). Charge the
+battery.
 
 1. Build `dm40-fw-native.bin` (see "Build" below).
 2. On the stock meter: Settings > Other Settings > USB Connect.
