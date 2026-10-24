@@ -15,7 +15,7 @@ Evidence tags:
   `fw-rs/docs/acdc-stock-vs-fwrs.md`.
 * **INFERRED** = what the row bytes + the stock scale constants imply about the
   board wiring (RESEARCH.md open point 5: the DM40 PA/PB netlist is not known),
-  BOM-based conclusions from `docs/dm40-feature-request.md`, or chip behaviour
+  BOM-based conclusions ([hw/README.md](../../hw/README.md)), or chip behaviour
   the datasheet does not state.
 * **UNKNOWN** = needs the device or the schematic; listed with the test that
   settles it.
@@ -94,9 +94,8 @@ Row bytes are R20..R35 (index 0..21). The decoded facts used below:
 * **Relay states**: V modes 0/1 and A modes 4..9 all use the PA9/PA10 latching
   relay in state 0 (`dmm_v2_6.h` "PA 0", `dmm.rs write_config` `pa = 0` for
   0 | 1 | 4..=9); the relay only separates "V/A" from "mV / ohm / cap / diode /
-  cont / Hz / temp". The shunt MOSFETs (PE0 / PE1, "RUH30J51M dual N-MOSFET,
-  automatic range switching in a single current jack", `dm40-feature-request.md`
-  1.1) select 10 mohm (PE0 = 1), 0.5 ohm (PE1 = 1) or 47.5 ohm (both 0); V
+  cont / Hz / temp". The shunt MOSFETs (PE0 / PE1, RUH30J51M dual N-MOSFET,
+  [hw/README.md Main parts](../../hw/README.md#main-parts)) select 10 mohm (PE0 = 1), 0.5 ohm (PE1 = 1) or 47.5 ohm (both 0); V
   modes write "both 0" (`relay_pe(2)`). So **in every V mode the divider and
   the shunt network are connected at the same time** - nothing new is energised
   by a power mode; it is only a question of which converter looks at which node.
@@ -295,8 +294,8 @@ machine is the stock's own pattern.
 ### 3.6 Wiring, burden and safety (COM is shared)
 
 The meter has V/ohm, COM and one A jack, isolated from the USB/MCU ground
-(CA-IS3741 isolator + VPS8504B supplies, `dm40-feature-request.md` 1.2,
-INFERRED there and consistent with the repo's ground-check instruction). The
+(CA-IS3741 isolator + VPS8504B supplies; VERIFIED by the owner 2026-10-24,
+[hw/README.md Isolation boundary](../../hw/README.md#isolation-boundary)). The
 voltage is measured V-COM, the current A-COM: **the load current flows through
 COM**, and COM is at the potential of the conductor you break into.
 
@@ -363,8 +362,9 @@ Safety:
   current range is shown with the fuse rating.
 * Long sessions (energy): inhibit auto-dim / auto-off while the integrator
   runs and the current is above the floor; the stock's "do not measure while
-  charging" stays as a warning toast (the isolation makes it safe only if the
-  INFERRED topology is right).
+  charging" stays as a warning toast (the DMM isolation is verified, owner
+  2026-10-24; the toast is for the scope / generator, which share the USB
+  ground).
 * Mains: the usual DMM rules (CAT rating of the leads, both leads rated,
   never break the neutral of a circuit you cannot de-energise). The entry
   dialog should state the current rating and that COM carries the load current.

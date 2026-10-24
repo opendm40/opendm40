@@ -10,7 +10,7 @@ Tags: **VERIFIED** = read in the stock disassembly / fw-rs driver that runs on t
 device, or exercised on the device; **INFERRED** = interpretation (board wiring
 is not traced; no schematic in the repo). Sources: `fw-rs/src/*.rs`,
 `firmware/re/analysis/*.h`, `firmware/re/analysis/app_decompile.c`,
-`docs/dm40-feature-request.md` (BOM from photos; its "[Вывод]" = inference).
+[`hw/README.md`](../../hw/README.md) (board description: BOM, photos, pins).
 
 ## 1. DAC channels
 
@@ -20,7 +20,7 @@ is not traced; no schematic in the repo). Sources: `fw-rs/src/*.rs`,
 | DAC ch2 = PA5 (`DAC_OUT1`) | **Scope trigger level** for a hardware comparator: `DHR12R2` = 1780 + (code - t0)(2401 - 1780)/(t1 - t0); written at every acquisition start; comparator output -> PA15 AF1 TIM2_CH1 | VERIFIED (stock programs DAC2/PA5 analog and PA15/TIM2: FUN_08012260 `app_decompile.c:13615`, FUN_0801241a); comparator chip itself INFERRED ("guess" in the header) | `scope_gen_v2_6.h:50-59`; `scope_gen_ui_v2_6.h:119-125,471-472` (`SCOPE_TRIG_DAC_HI/LO`) |
 | (not a DAC) PC8 TIM3_CH3 PWM, ARR 20000 | Scope vertical offset (CCR3 8800..11636 maps to ADC code ~280..730) | VERIFIED | `scope.rs:260-271,432-439`; `scope_gen_v2_6.h:89-91` |
 | PB12 GPIO | Generator output-path select: 0 = DAC (PA4), 1 = PWM (PB14 TIM12_CH1, square > 50 kHz) | VERIFIED (pin use); the switch is very likely the SGM3157 SPDT a user burned at 12 V | `gen.rs:6,232-235`; `scope_gen_v2_6.h:130-131`; `fw-rs/docs/user-feedback.md:250,307` (INFERRED) |
-| External DAC on SPI/I2C | none: SPI peripherals are W25Q128 flash and the bit-banged HY3131; no DAC in the BOM | INFERRED (negative) | `hy3131_v2_6.h:4-6`; `docs/dm40-feature-request.md:30-50` |
+| External DAC on SPI/I2C | none: SPI peripherals are W25Q128 flash and the bit-banged HY3131; no DAC in the BOM | INFERRED (negative) | `hy3131_v2_6.h:4-6`; [hw/README.md Main parts](../../hw/README.md#main-parts) |
 
 fw-rs never enables DAC ch2, PA15 or TIM2: the trigger is found in software in
 the record (`scope.rs:8-9,777-800`; no `TIM2`/`PA15` in `fw-rs/src`). The
@@ -83,13 +83,12 @@ meaning from the datasheet field names, `hy3131_v2_6.h:56-68`):
 - These give zero / reference-ratio / supply / temperature self-checks of the
   meter chain **without the MCU DAC**. There is no HY3131 pin that could accept
   the generator signal: the meter is on an isolated domain (CA-IS3741 digital
-  isolator + VPS8504B supplies, `docs/dm40-feature-request.md:38-39,55-70`), so only
-  SPI crosses the barrier. Isolation INFERRED (marked "[Вывод]" there), consistent
-  with the repo's ground-check instruction (`:85`).
+  isolator + VPS8504B supplies), so only SPI crosses the barrier. Isolation
+  VERIFIED (owner, 2026-10-24; [hw/README.md Isolation boundary](../../hw/README.md#isolation-boundary)).
 
-Connectors (`docs/dm40-feature-request.md:46,55-70`): banana V / COM / A = DMM only
-(isolated domain); MCX = scope input and generator output. The repo does not say
-whether these are one or two physical MCX jacks (the diagram draws two); UNKNOWN.
+Connectors ([hw/README.md Main parts](../../hw/README.md#main-parts)): banana V / COM / A = DMM only
+(isolated domain); two coaxial jacks (MCX per BOM), CHA = scope input and GEN =
+generator output (photos).
 No jack is shared between the meter and the scope/generator.
 
 ## 4. MCU-internal paths

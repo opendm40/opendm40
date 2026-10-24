@@ -296,6 +296,10 @@ connector is unusual (#15801).
 
 ## 12. Hardware-only issues (cannot be fixed in firmware)
 
+The board itself (parts, pins, the cited owner reports in context) is
+described in [hw/README.md](../../hw/README.md); this table is the owners'
+view.
+
 | Issue | Users | Evidence |
 |---|---:|---|
 | Scope bandwidth roll-off from ~3 MHz; 50 MS/s aliasing; single channel | 12 | §6.3 |
