@@ -416,6 +416,23 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // node itself up to 2.47 V with AD1 in the source map, not OP1O); if OP1
 // clipped lower, a source would read "free" and the A-JACK would stay as
 // on the old code (the check never turns an open jack into "driven").
+// Device a2e9766 showed exactly that: OP1O peaked at 2.25 V (5 V DC, 600 ohm),
+// 2.14 V (5 V, 60 Mohm), 2.02-2.03 V (10 V), inside the band of the rows' own
+// sources, so RES kept its false A-JACK at 5 / 10 V and the square.
+//
+// BOTH (device a2e9766, 2da1011 E4): in those RES runs the comparator on PB1
+// read CMPHO and CMPLO in one CTSTA read (0x70), the sign of an overdriven
+// comparator (`sample_cmp`; the same 0x70 as DC V's V tap on a steady 5 V,
+// E3, and DC A at 24 V on V-COM), while 1 V and 3 V gave no hit at all. A
+// current in A puts I x 47.5 ohm on PB1 (0.5 mA .. tens of mA = 24 mV ..
+// ~1 V), one side of the window: one bit per read, an AC one CMPHO and
+// CMPLO in different reads. So in the jack-check comparator rows (ohm, the
+// resistive temperature sensors) a both-bit read within the last
+// AJACK_CLEAR_MS is "driven" as an OP1O verdict above the line is (no
+// A-JACK, LIVE?; `v_both`); DBG:SENT? field 14 reads 2 then. INFERRED: a
+// current large enough to push PB1 out of the comparator's input range
+// (tens of mA, PB1 > ~2.4 V) may read 0x70 too and would then show LIVE?
+// instead of the A-JACK badge (not checked: the A jack was never wired).
 
 /// AD2 codes per volt at IG 0.5 (19-bit codes, PB6 / AGND = 1.25 V).
 pub const JACK_CODES_PER_V: f32 = 0.5 / 1.25 * 262_144.0;
@@ -901,6 +918,12 @@ pub struct Sentinel {
     jack_t: u64,
     jack_drv: bool,
     pub jack_mv: i32,
+    /// JCHK, comparator rows (ohm, the resistive temperature sensors): the
+    /// last CTSTA read with CMPHO and CMPLO at once (0 none; `both_drv`).
+    both_t: u64,
+    /// ... and at the last window's close it was within AJACK_CLEAR_MS
+    /// (DBG:SENT? field 14 = 2).
+    both_drv: bool,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
     /// emu/hy3131/switchtest.py): the last LOG_N alerts that came on, as
     /// (alert, kind, ms); `log_n` = assertions logged so far.
@@ -959,6 +982,8 @@ impl Sentinel {
             jack_t: 0,
             jack_drv: false,
             jack_mv: 0,
+            both_t: 0,
+            both_drv: false,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
             log_n: 0,
         }
@@ -996,6 +1021,8 @@ impl Sentinel {
             self.vdrv = false;
             self.jack_t = 0;
             self.jack_drv = false;
+            self.both_t = 0;
+            self.both_drv = false;
             if !matches!(self.alert, Alert::None | Alert::Overload | Alert::AProt) {
                 self.alert = Alert::None;
             }
@@ -1146,6 +1173,11 @@ impl Sentinel {
             return false;
         }
         self.samples = self.samples.wrapping_add(1);
+        if both_now && self.jchk && self.kind == Kind::CmpA {
+            // JCHK: the comparator overdriven by a source on V-COM (BOTH
+            // below), not a current in A
+            self.both_t = now.max(1);
+        }
         if self.alt && self.alt_v {
             // V-tap window (AC?): both bits within the window = the tap swings
             // both ways; both in one read is the comparator, not the tap (no
@@ -1168,6 +1200,11 @@ impl Sentinel {
                 self.ac.feed(now, both && self.ac_dc_ok, HINT_ASSERT_MS, HINT_CLEAR_MS);
             } else {
                 self.window(now, hit);
+                self.both_drv = self.both_t != 0 && now.saturating_sub(self.both_t) < AJACK_CLEAR_MS;
+                if hit && self.both_drv {
+                    // driven (BOTH): LIVE? instead of A-JACK
+                    self.live_reading(now, true);
+                }
             }
             if self.alt {
                 self.alt_v = !self.alt_v;
@@ -1308,6 +1345,13 @@ impl Sentinel {
         }
     }
 
+    /// JCHK, comparator rows: a CTSTA read with both bits within the last
+    /// AJACK_CLEAR_MS (BOTH): V-COM driven. Not "since the run began": a
+    /// source taken off with a current in A at once keeps the hit run going.
+    fn v_both(&self, now: u64) -> bool {
+        self.both_t != 0 && now.saturating_sub(self.both_t) < AJACK_CLEAR_MS
+    }
+
     /// Current-mode reading: the current is below 0.5 % of the range (the
     /// V-JACK? precondition), or not.
     pub fn current_small(&mut self, now: u64, small: bool) {
@@ -1342,14 +1386,15 @@ impl Sentinel {
                 if on {
                     now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS
                         && !(self.vgate && self.vdrv)
-                        && !(self.jchk && self.jack_drv)
+                        && !(self.jchk && (self.jack_drv || self.v_both(now)))
                 } else {
                     // V_GATE: a V-side result since the run began (+ vlag) said
                     // V-COM is free; JCHK: so did the jack check
                     let t0 = self.run_t0 + self.vlag as u64;
                     self.streak >= AJACK_WINDOWS
                         && (!self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= t0)))
-                        && (!self.jchk || (!self.jack_drv && self.jack_t != 0 && self.jack_t >= self.run_t0))
+                        && (!self.jchk
+                            || (!self.jack_drv && !self.v_both(now) && self.jack_t != 0 && self.jack_t >= self.run_t0))
                 }
             }
             _ => false,
@@ -1365,9 +1410,14 @@ impl Sentinel {
         };
         let live = self.mask & M_LIVE != 0 && {
             let on = matches!(self.alert, Alert::Live);
+            // (a run of live results LIVE_CLEAR_MS old asserts no more: a
+            // poll between its clearing and the next reading, which drops
+            // `live_t0`, re-asserted it; device a2e9766 note 3, LIVE
+            // flapping every poll after the source went off)
+            let fresh = now.saturating_sub(self.live_last) < LIVE_CLEAR_MS;
             match self.live_t0 {
-                Some(_) if on => now.saturating_sub(self.live_last) < LIVE_CLEAR_MS,
-                Some(t0) => self.live_last.saturating_sub(t0) >= LIVE_ASSERT_MS,
+                Some(_) if on => fresh,
+                Some(t0) => fresh && self.live_last.saturating_sub(t0) >= LIVE_ASSERT_MS,
                 None => false,
             }
         };
@@ -1407,7 +1457,8 @@ impl Sentinel {
 
     /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,
     /// probe mA, A-PROT ms, V side (V_GATE), soft (badge-only A-JACK), jack
-    /// check (-1 none, 0 free, 1 driven), its peak (mV).
+    /// check (-1 none, 0 free, 1 driven by OP1O, 2 driven by the comparator's
+    /// both-bit reads, BOTH), the OP1O peak (mV).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -1429,7 +1480,15 @@ impl Sentinel {
         // the last comparator row's, stale: the f0d21eb check's "AC V reads
         // 0x70 after TEMP" was TEMP's last read).
         let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
-        let jd = if self.jchk && self.jack_t != 0 { self.jack_drv as i32 } else { -1 };
+        let jd = if !self.jchk {
+            -1
+        } else if self.both_drv {
+            2
+        } else if self.jack_t != 0 {
+            self.jack_drv as i32
+        } else {
+            -1
+        };
         for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32, jd, self.jack_mv] {
             put(b",");
             put(itoa(&mut nb, v));
@@ -2314,6 +2373,119 @@ mod tests {
         assert_eq!(s.alert, Alert::AJack);
         assert!(!s.jack_due(1300));
         assert!(s.jack_due(1550));
+    }
+
+    #[test]
+    fn ajack_gated_by_both_bit_reads() {
+        // Device a2e9766 (RES, A jack empty, 5 / 10 V DC or the square on V-COM): CTSTA 0x70
+        // in the hit windows and OP1O at 2.0-2.25 V, the jack check's "free" band: BOTH says
+        // driven -> LIVE?, never A-JACK.
+        let v = |x: f32| (x * JACK_CODES_PER_V) as i32;
+        let run = |s: &mut Sentinel, t0: u64, t1: u64, ct: &dyn Fn(u64) -> u8| {
+            for t in (t0..t1).step_by(10) {
+                s.sample_cmp(t, ct(t));
+                if t % 100 == 0 {
+                    s.jack_result(t, true, v(2.13), v(2.25));
+                    s.v_side(t, false);
+                }
+            }
+        };
+        for sq in [false, true] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.vgate = true;
+            s.jchk = true;
+            // the square: 0x70 in its high half only (40 Hz: 12.5 ms), 0 in the low one
+            let ct = move |t: u64| if !sq || (t / 10) % 3 != 0 { 0x70 } else { 0 };
+            let mut seen = false;
+            let mut t = 0;
+            while t < 3000 {
+                run(&mut s, t, t + 100, &ct);
+                assert_ne!(s.alert, Alert::AJack, "t {} sq {}", t, sq);
+                seen |= s.alert == Alert::Live;
+                t += 100;
+            }
+            assert!(seen && s.alert == Alert::Live, "sq {}", sq);
+            let mut b = [0u8; 120];
+            let n = s.diag_text(&mut b);
+            let d = core::str::from_utf8(&b[..n]).unwrap();
+            assert!(d.ends_with(",2,2249") || d.ends_with(",2,2250"), "{}", d);
+        }
+        // A current in A, V-COM open: one bit per read (CMPHO; AC: CMPHO / CMPLO apart) and
+        // OP1O at its own source: A-JACK as before.
+        for ac in [false, true] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.vgate = true;
+            s.jchk = true;
+            let ct = move |t: u64| if ac && (t / 10) % 2 == 1 { 0x50 } else { 0x60 };
+            for t in (0..400).step_by(10) {
+                s.sample_cmp(t, ct(t));
+                if t % 100 == 50 {
+                    s.jack_result(t, true, v(2.16), v(2.18));
+                    s.v_side(t, false);
+                }
+            }
+            assert_eq!(s.alert, Alert::AJack, "ac {}", ac);
+            // ... and a source on V-COM coming on drops it (LIVE?)
+            for t in (400..900).step_by(10) {
+                s.sample_cmp(t, 0x70);
+            }
+            assert_eq!(s.alert, Alert::Live, "ac {}", ac);
+        }
+        // The source taken off and a current in A at once (the hit run goes on): A-JACK once
+        // the last both-bit read is AJACK_CLEAR_MS old.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        s.jchk = true;
+        run(&mut s, 0, 1000, &|_| 0x70);
+        assert_eq!(s.alert, Alert::Live);
+        run(&mut s, 1000, 1900, &|_| 0x60);
+        assert_ne!(s.alert, Alert::AJack);
+        for t in (1900..2600).step_by(10) {
+            s.sample_cmp(t, 0x60);
+            if t % 100 == 0 {
+                s.jack_result(t, true, v(2.16), v(2.18));
+            }
+        }
+        assert_eq!(s.alert, Alert::AJack);
+        // Not in the rows without the jack check (DC V: A-JACK on any hit).
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..300).step_by(10) {
+            s.sample_cmp(t, 0x70);
+        }
+        assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
+    fn live_does_not_flap_after_the_source() {
+        // Device a2e9766 note 3: RES 600 ohm, the 5 V switched off: LIVE? came on again every
+        // poll (5-10 ms) once it had cleared, until the next reading. Polls here every 5 ms
+        // (the comparator samples), the readings ~400 ms apart.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..600).step_by(100) {
+            s.live_reading(t, true);
+        }
+        assert_eq!(s.alert, Alert::Live);
+        let n0 = s.log_n;
+        let mut changes = 0;
+        let mut was = s.alert;
+        for t in (600..3000).step_by(5) {
+            s.sample_cmp(t, 0);
+            if t % 400 == 0 {
+                s.live_reading(t, false);
+            }
+            if s.alert != was {
+                changes += 1;
+                was = s.alert;
+            }
+        }
+        assert_eq!(s.alert, Alert::None);
+        assert_eq!(changes, 1, "LIVE? -> NONE once");
+        assert_eq!(s.log_n, n0, "no new log entries");
     }
 
     #[test]
