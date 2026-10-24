@@ -18,7 +18,7 @@
 //!   markers vertical, time markers horizontal) for the whole gesture; the
 //!   per-event split applies only to presses off the markers;
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
-//!   sec. 3): Halves (stock: a tap off the zones, left half slower, right
+//!   sec. 1): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
 //!   a still hold there repeats; elsewhere a tap does nothing) or Off; the
 //!   marker zones win over both. Value-preview tabs in the bottom corners

@@ -78,7 +78,7 @@ pub const TB_BADGE: Rect = rect(79, 1, 62, 17);
 pub const VDIV_BADGE: Rect = rect(286, 1, 62, 17);
 pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 
-// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3). The rects are
+// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1). The rects are
 // absolute; both views share the frame's bottom edge (y 300), so they are
 // the same in the combined view.
 /// Value-preview tabs (left: the next slower timebase, right: the next
@@ -179,7 +179,7 @@ pub struct Model {
     /// Math mode of the math pill label (stock S+0xd4: 0 "--" .. 5 FFT, 6
     /// ABS; shown even while math is off). opendm40 has no math engine: 0.
     pub math_mode: u8,
-    /// opendm40 timebase tabs (docs/scope-scale-ux.md sec. 3): TAB_SHOW_L /
+    /// opendm40 timebase tabs (docs/scope-scale-ux.md sec. 1): TAB_SHOW_L /
     /// TAB_SHOW_R shown, TAB_PRESS_L / TAB_PRESS_R in pressed style
     /// (`tabs_of`); 0 = none (the stock page).
     pub tabs: u8,
@@ -2019,7 +2019,7 @@ pub fn cells_step(m: &Model, texts: &[&str]) -> bool {
 }
 
 // ------------------------------------------------------------------ tap step
-// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3): value-preview
+// opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1): value-preview
 // tabs, tap zones, the press decision, the hold repeat. Pure functions of
 // the model and the touch so the host tests (tools/touch-test, ui-render)
 // run exactly what the page runs.
@@ -2781,7 +2781,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
     }
 }
 
-// opendm40 timebase list popup (docs/scope-scale-ux.md sec. 3): the stock
+// opendm40 timebase list popup (docs/scope-scale-ux.md sec. 1): the stock
 // popup box and header, the stock spinner widget over every timebase. The
 // box's top row is y 21: y 20 is the frame line in the same colour (the
 // stock popups start at y 20), and the box keeps 3 px from the badges.
