@@ -33,6 +33,9 @@ transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
                                               flight, Ctrl-C too (LOG:STAT OFF,
                                               the rest drained, the trailer; a
                                               second Ctrl-C abandons the drain)
+                                              --format packed|dlg: LOG:FORMat of
+                                              LOG:DATA? (3 B / ~1-3 B per sample
+                                              instead of 12; the same CSV)
     dm40scpi.py ad2 torn|noise [-n 2000] [--sync] [--rungs ...]
                                               AD2 device experiments (opendm40
                                               DBG:AD2:TORN? / NOISE?, meter in an
@@ -285,13 +288,79 @@ def check_err(link, what):
 
 
 def log_records(raw):
-    """(seq, ts_us, code) of a LOG:DATA? #4nnnn block."""
+    """(seq, ts_us, code) of a LOG:DATA? #4nnnn block (LOG:FORMat ROWS)."""
     import struct
     if not raw.startswith(b'#4'):
         raise IOError('LOG:DATA? answered %r' % bytes(raw[:20]))
     n = int(raw[2:6])
     d = raw[6:6 + n]
     return [struct.unpack_from('<IIi', d, o) for o in range(0, n - n % 12, 12)]
+
+
+# LOG:FORMat PACKed / DLG replies (opendm40 logger.rs "Compact LOG:DATA?"):
+# a 20-byte header {'LP' | 'LD', u8 version 1, u8 source (0 AD1, 1 AD2), u32
+# rate mHz, f32 a, f32 b, u32 records left}, then 16-byte blocks {u32 seq, u32
+# t0_us, u16 n, u8 width (3 / 4; 0 = DLG chunks follow), u8 flags (1 session
+# start, 2 gap), u32 lost_before} with n samples each (PACKed) or one block
+# and kind-3 chunks of all n rows (DLG, docs/compact-log-format.md).
+FMT_HDR, FMT_BLK = 20, 16
+LOG_FORMATS = {'rows': 'ROWS', 'packed': 'PACK', 'dlg': 'DLG'}
+
+
+def log_reply(raw):
+    """(rows, info) of one LOG:DATA? reply in any LOG:FORMat. rows: (seq,
+    ts_us, code, lost_before) with ts_us the low 32 bits of the device time
+    (PACKed: t0 + round(i / rate), the grid) and lost_before None for ROWS
+    (the caller derives it from the stamps); info: {'format', 'left',
+    'blocks', 'rate_mhz', 'a', 'b', 'source'} (only 'format' for ROWS)."""
+    import struct
+    if not raw.startswith(b'#4'):
+        raise IOError('LOG:DATA? answered %r' % bytes(raw[:20]))
+    n = int(raw[2:6])
+    d = bytes(raw[6:6 + n])
+    if len(d) != n:
+        raise IOError('LOG:DATA? block short: %d of %d bytes' % (len(d), n))
+    magic = d[:2]
+    if n < FMT_HDR or magic not in (b'LP', b'LD'):
+        return [(s, t, c, None) for s, t, c in log_records(raw)], {'format': 'rows'}
+    ver, src, rate, a, b, left = struct.unpack_from('<BBIffI', d, 2)
+    if ver != 1:
+        raise IOError('LOG:DATA? reply version %d (this tool reads 1)' % ver)
+    info = {'format': 'packed' if magic == b'LP' else 'dlg', 'left': left, 'rate_mhz': rate,
+            'a': a, 'b': b, 'source': src, 'blocks': 0}
+    rows = []
+    o = FMT_HDR
+    if magic == b'LP':
+        while o < n:
+            seq, t0, cnt, w, _fl, lost = struct.unpack_from('<IIHBBI', d, o)
+            o += FMT_BLK
+            if w not in (3, 4) or o + cnt * w > n:
+                raise IOError('LOG:DATA? PACKed block at %d: width %d, %d samples' % (o - FMT_BLK, w, cnt))
+            for i in range(cnt):
+                code = int.from_bytes(d[o:o + w], 'little', signed=True)
+                t = (t0 + (i * 1000000000 + 500 * rate // 1000) // rate) & 0xFFFFFFFF
+                rows.append((seq + i, t, code, lost if i == 0 else 0))
+                o += w
+            info['blocks'] += 1
+        return rows, info
+    import dlog
+    seq0, _t0, cnt, _w, _fl, lost0 = struct.unpack_from('<IIHBBI', d, o)
+    o += FMT_BLK
+    while o < n:
+        if not dlog.chunk_ok(d, o):
+            raise IOError('LOG:DATA? DLG chunk at %d: torn or CRC error' % o)
+        pl, _, row0 = struct.unpack_from('<HII', d, o + 2)
+        for j, (t, code, dt) in enumerate(dlog.fast_chunk(d, o, rate)):
+            if not rows:
+                lost = lost0
+            else:
+                lost = max(dlog.round_half_up(dt, rate) - 1, 0)
+            rows.append((row0 + 1 + j, t & 0xFFFFFFFF, code, lost))
+        o += dlog.CHDR + pl
+        info['blocks'] += 1
+    if len(rows) != cnt or (rows and rows[0][0] != seq0):
+        raise IOError('LOG:DATA? DLG reply: %d rows for a count of %d' % (len(rows), cnt))
+    return rows, info
 
 
 def do_stream(link, args):
@@ -310,7 +379,8 @@ def do_stream(link, args):
         link.query('LOG:SRAT %d' % args.rate)
     elif args.osr is not None:
         link.query('LOG:OSR %d' % args.osr)
-    check_err(link, 'LOG settings')
+    link.query('LOG:FORM %s' % LOG_FORMATS[args.format])
+    check_err(link, 'LOG settings (LOG:FORMat needs opendm40 with compact LOG:DATA?)' if args.format != 'rows' else 'LOG settings')
     t_start = time.monotonic()
     link.query('LOG:STAT ON')
     # From here on the logger runs: LOG:STAT OFF on every way out (Ctrl-C
@@ -380,6 +450,9 @@ def _stream_session(link, args, ad2, t_start):
                 f.write('# scale,%.9g %s/code (IG 1.0, VR 1.25 V, stock range factor; calibration NOT applied)\n' % (scale or 0, unit))
         else:
             f.write('# osr,%d\n# nominal_period_us,%d\n# scale,raw AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)\n' % (osr, nom_us))
+        if args.format != 'rows':
+            f.write('# format,%s (t_s: %s)\n' % (args.format, 'the time grid t0 + i / rate of each gap-free block'
+                                                  if args.format == 'packed' else 'the device stamps'))
         f.write('# start,%s\n' % iso_now())
         f.write('seq,t_s,raw,%s,lost_before\n' % ('value_' + unit if ad2 else 'value'))
 
@@ -389,18 +462,24 @@ def _stream_session(link, args, ad2, t_start):
             nonlocal rows, last_seq, last_ts, wrap
             got = 0
             while True:
-                recs = log_records(link.query_raw('LOG:DATA?'))
-                short = len(recs) < 500
+                recs, info = log_reply(link.query_raw('LOG:DATA?'))
+                # ROWS: 511 records fill a reply; the compact ones say how many are left
+                short = len(recs) < 500 if info['format'] == 'rows' else info['left'] == 0
                 if args.n:
                     recs = recs[:max(0, args.n - rows)]
-                for seq, ts, code in recs:
+                for seq, ts, code, dev_lost in recs:
                     if last_ts is not None and ts < last_ts:
                         wrap += 1 << 32
                     t = (ts + wrap) / 1e6
                     lost = 0
-                    if last_seq is not None:
+                    if dev_lost is not None:
+                        # the meter's count (PACKed: the grid's stamps; DLG: from the exact stamps)
+                        lost = dev_lost if last_seq is not None else 0
+                    elif last_seq is not None:
                         # conversions between two kept rows: from the time (stalls) or the seq (ring overflow)
                         lost = max(round((ts + wrap - last_t_us[0]) / period_us) - 1, seq - last_seq - 1, 0)
+                    if last_seq is not None and seq != last_seq + 1:
+                        lost = max(lost, seq - last_seq - 1)
                     last_t_us[0] = ts + wrap
                     f.write('%d,%.6f,%d,%s,%d\n' % (seq, t, code, '%.7g' % (off + code * scale) if scale else '', lost))
                     last_seq, last_ts = seq, ts
@@ -648,6 +727,10 @@ def main():
     s.add_argument('--rate', type=int, default=2400, help='(ad2) requested S/s: 1200, 2400, 4800, 9600, 19200, 38400 (nearest rung; 19200 / 38400 with the ad2-isr stream ISR)')
     s.add_argument('--chop', choices=['on', 'off'], help='(stream) converter chopper (default on; ad2: same rungs either way)')
     s.add_argument('--osr', type=int, help='(ad1) AD1OSR code 0..7')
+    s.add_argument('--format', choices=sorted(LOG_FORMATS), default='rows',
+                   help='(stream) LOG:FORMat of LOG:DATA?: rows (12 B per sample, default), packed (3 B per sample on '
+                   'the time grid, a new block at every gap) or dlg (the disk fast stream\'s coding, ~1-3 B per sample, '
+                   'exact stamps); the CSV is the same')
     s.add_argument('-i', '--interval', type=float, default=1.0)
     s.add_argument('-n', type=int, default=0, help='stop after N readings')
     s.add_argument('-d', '--duration', type=float, default=0, help='stop after S seconds')

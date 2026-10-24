@@ -2260,6 +2260,59 @@ mod tests {
         assert_eq!(out[6 + FMT_HDR + 11], FL_START);
     }
 
+    /// With LOGFMT_OUT=<dir> (tools/logfmt-test/run.sh): the replies of
+    /// streams with gaps, full-scale codes and a stamp wrap in both
+    /// compact formats, and the rows they must decode to, for the host
+    /// decoder (tools/dm40scpi.py `log_reply`).
+    #[test]
+    fn fmt_dump_for_the_host_decoder() {
+        let Ok(dir) = std::env::var("LOGFMT_OUT") else { return };
+        use std::io::Write;
+        let full = |i: u64| match (i % 1001, i % 11) {
+            (4, _) => 0x0123_4567, // width 4
+            (_, 0) => 262_143,
+            (_, 1) => -262_144,
+            (_, 2) => 8_388_607,
+            (_, 3) => -8_388_608,
+            _ => ((i * 7919) % 2001) as i32 - 1000,
+        };
+        let sets: [(&str, u32, u64, &[(u64, u64)]); 3] = [
+            ("a768", 13_021, 1000, &[(10, 1), (777, 5), (2500, 300), (4999, 2)]),
+            ("wrap384", 26_042, (1 << 32) - 20_000, &[(1500, 3)]),
+            ("ad1", 1_562_500, 0, &[(100, 1)]),
+        ];
+        for (name, p, t0, holes) in sets {
+            let s = stream(6000, p as u64, t0, holes, &full);
+            let rate = (1_000_000_000_000u64 / p as u64) as u32;
+            for (fmt, fname) in [(FMT_PACKED, "packed"), (FMT_DLG, "dlg")] {
+                let mut l = session(true, p);
+                let mut f = std::fs::File::create(std::format!("{}/{}-{}.bin", dir, name, fname)).unwrap();
+                l.set_fmt(fmt);
+                let par = FmtPar { rate_mhz: rate, a: 0.25, b: 2e-6 };
+                let mut out = std::vec![0u8; 6144];
+                for part in s.chunks(1700) {
+                    for &(t, v, _) in part {
+                        feed(&mut l, t, v);
+                    }
+                    loop {
+                        let n = l.encode_fmt(&mut out, &par);
+                        f.write_all(&(n as u32).to_le_bytes()).unwrap();
+                        f.write_all(&out[..n]).unwrap();
+                        if n == 6 {
+                            break;
+                        }
+                    }
+                }
+                assert_eq!(l.overwritten(), 0);
+            }
+            let mut f = std::fs::File::create(std::format!("{}/{}.txt", dir, name)).unwrap();
+            writeln!(f, "{}", p).unwrap();
+            for (i, x) in s.iter().enumerate() {
+                writeln!(f, "{} {} {} {}", i + 1, x.0 & 0xFFFF_FFFF, x.1, x.2).unwrap();
+            }
+        }
+    }
+
     #[test]
     fn producer_clock_counts_cycles() {
         let mut p = Producer::new();
