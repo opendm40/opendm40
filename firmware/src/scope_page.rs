@@ -97,9 +97,16 @@ pub(super) struct Touch {
     pan: i32,
     /// Axis-lock mode: the decided axis. A press on a marker zone locks it
     /// at the press for the whole gesture (level group: V, time group: H),
-    /// in every drag mode: a vertical drag of the trigger level whose
-    /// finger path wobbles sideways must not move the trigger position.
+    /// in every drag mode, except the trigger-level marker of a running
+    /// scope (`both`).
     axis: Option<Axis>,
+    /// The press grabbed the trigger-level marker of a running scope: the
+    /// drag moves the trigger point in 2-D, level by dy and position by dx
+    /// on every event; the trace stays put (`sp_render`), only the trigger
+    /// markers and their guide lines follow the finger (owner 2026-10-24:
+    /// "it should drag the vertical trigger line, not the waveform"). The
+    /// next acquisition after the release re-triggers at the new point.
+    both: bool,
     /// Hold mode: grabbed.
     grabbed: bool,
     /// Combined view: sub-row remainder of vertical moves.
@@ -794,9 +801,16 @@ impl App {
             Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
             None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
-        // A stopped pan moves the record under the trigger column.
+        // A stopped pan moves the record under the trigger column; a
+        // trigger-point drag (`Touch::both`) moves only the markers.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
-        let hpos = if s.run { s.hpos } else { c.hpos + pan };
+        let hpos = if self.sp.touch.is_some_and(|t| t.both) {
+            c.hpos
+        } else if s.run {
+            s.hpos
+        } else {
+            c.hpos + pan
+        };
         let zr = (140 + s.pos) as f32;
         let d_pos = s.pos - c.pos;
         for j in 0..399 {
@@ -1307,6 +1321,12 @@ impl App {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
+                let both = hit && !self.sp.last_h && self.sp.sel_v == 1 && s.run && !self.scope.rolling();
+                if both {
+                    // The trigger position follows dx: select it (its T
+                    // marker fills, its guide line shows).
+                    self.sp.sel_h = 0;
+                }
                 self.sp.touch = Some(Touch {
                     p0: p,
                     last: p,
@@ -1319,7 +1339,8 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
+                    axis: (hit && !both).then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
+                    both,
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1470,6 +1491,19 @@ impl App {
             t.moving = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
+        if t.both {
+            // Trigger point: both axes on every event.
+            t.applied = p;
+            self.sp.touch = Some(t);
+            self.sp.guide_until = now + GUIDE_MS;
+            if dy != 0 {
+                self.sp_move_v(dy, now);
+            }
+            if dx != 0 {
+                self.sp_move_h(dx, now);
+            }
+            return;
+        }
         if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() {
             if t.axis.is_none() {
                 let (ax, ay) = ((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs());
