@@ -3487,7 +3487,8 @@ Emulator (emu/):
       `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device a2e9766
       (device-check doc "a2e9766: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
       alarm. AUTO -> AUTO+ on 60 mV: 6 V within 0.9-1.0 s (AC and DC).
-- [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (A jack empty; 35fce2a 7b / E4,
+- [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (**RES: still fails on the device,
+      a2e9766, see the jack-check item below**; A jack empty; 35fce2a 7b / E4,
       f0d21eb item 4, 46370df new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
       the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
       (continuity) or below -0.9 V = driven -> LIVE?, no A-JACK; at its own source (ohm 0.78-2.17 V open,
@@ -3512,6 +3513,8 @@ Emulator (emu/):
       reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
       driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
       once after a range change. The hunt itself (a source that is not a resistor) not investigated.
+- [ ] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
+      DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack

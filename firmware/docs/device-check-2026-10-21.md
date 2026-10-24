@@ -3859,7 +3859,7 @@ switched the calibrator off at once on an alarm, and in the AC modes also on any
 | 2a. AC AUTO under the square (2da1011) | **PASS**: 60 mV -> 600 mV at 0.3 s -> 6 V at 0.76 s, **4.835 V** (the 46370df Wave view read 4.84 Vrms) |
 | 2b. AUTO -> AUTO+ on the range page while on 60 mV (03858c9) | **PASS**: AC V 60 mV -> 6 V, DC V 60 mV -> 6 V, each at the first poll after OK (0.9-1.0 s after the AUTO+ tap; a screenshot sat in between) |
 | 3. Ohm label 6 MΩ -> 60 MΩ (753938b) | **PASS** in both variants: 6 M shows "I 0.22 uA" (default) / "I 86 nA" (ON), 60 M shows no label. Contact sheet `sheet-var1.png` |
-| 4a. `log --source ad2 --rate 76800 --format packed -d 30`, AC V 6 V, calibrator off (540a30c) | **PASS**: 2 runs, lost 0, **ring overwritten 0** (2 303 964 / 2 303 992 rows), 958 / 947 replies/s, 271 kB/s, round trip p50 0.9 ms, p99 1.4-1.5 ms, max 28 ms. The panel ("DATA LOGGING / AD2 76798/76800 Sa/s / Display paused") is drawn during a session (screenshot of a separate undrained session; a screenshot during a drained run stalls the stream: two clients on one USBTMC link) |
+| 4a. `log --source ad2 --rate 76800 --format packed -d 30`, AC V 6 V, calibrator off (540a30c) | **PASS**: 2 runs, lost 0, **ring overwritten 0** (2 303 964 / 2 303 992 rows), 958 / 947 replies/s, 271 kB/s, round trip p50 0.9 ms, p99 1.4-1.5 ms, max 28 ms. The panel ("DATA LOGGING / AD2 76798/76800 Sa/s / Display paused") is drawn during a session (screenshot of a separate undrained session; a screenshot during a drained run stalls the stream: two clients on one USBTMC link). Whether it drew during the drained runs: not checked |
 | 4b. LOG:PRE? / CSV header (023c7b5) | **PASS**: LOG:PRE? nominal_mhz **76 800 000**; CSV `# nominal_sps,76800.000`. The disk DLG header not rechecked |
 | 5a. NR3 (653fce1) | **PASS**: ACQ:SRAT? in the Wave view +7.680000E+04 (1 ms/div), +3.840000E+04 (2 ms/div), +4.800000E+03 (10 ms/div); scope +1.250000E+07; TIM:SCAL? +2.000000E-04, +1.000000E-02; VOLT:RANG? +6.000000E-02; FETC? on the calibrator's 1 V +1.001166E+00, on 1.234 V +1.234780E+00. **New**: VOLT:RES? +9.999999E-06 (note 2) |
 | 5b. MMEM with a wrong directory prefix (7b43034) | **PASS**: own file LOGS/FAST000.DLG (`dm40scpi.py fast --source ad2 --rate 38400 --dur 3`, 123 055 B). `MMEM:DATA? "SHOTS/FAST000.DLG",0`, `"SCOPE/FAST000.DLG"`, `"SHOTS/FAST000.CSV"`: empty reply and -256; `MMEM:DEL "SHOTS/..."`, `"SCOPE/..."`: -256, the file still listed. `"LOGS/FAST000.DLG"` and `"FAST000.DLG"` read it. Deleted by its exact name afterwards |
@@ -3878,8 +3878,8 @@ switched the calibrator off at once on an alarm, and in the AC modes also on any
 3. **A burst of LIVE events in RES 600 Ω** when the calibrator's 5 V was switched off (the screenshot step of
    1a): DBG:SENT:LOG? went from 17 to 41 entries, the last 8 all `LIVE,CMP_PB1` 5-10 ms apart
    (882 598-882 663 ms). Which step made them is inferred from the order of the runs.
-4. Not run: doc 4.13 check list item 4 (a current in A: not wired); the DLG format at 76 800; the disk DLG
-   header.
+4. Not run: doc 4.13 check list item 4 (a current in A: not wired); RTD / NTC (the same jack check as
+   ohm); the DLG format at 76 800; the disk DLG header.
 
 ### State at the end
 
@@ -3887,7 +3887,8 @@ switched the calibrator off at once on an alarm, and in the AC modes also on any
   (0.90 mA); Wave view timebase 10 ms/div as found; LOG AD1 / 4800 / HOST / `LOG:DUR` 60 / ROWS / CHOP 1 /
   `LOG:STAT` 0; `DBG:AD2:DRAW 1`. Volume 50, danger alarm LOUD, `DBG:IDLE?` Shutdown 1 800 000 ms,
   `SYST:ALER?` NONE, `SYST:ERR?` empty, `OUTP?` 0. Crash count 0, HEALTHY, marker VALID, stack high water
-  23 684 / 45 148.
+  23 684 / 45 148. The scope page's Measure menu was left open (seen after leaving the Wave view; whether it was
+  open before the session is not known).
 - **USB disk:** `DBG:VDISK:RO?` was already 1,1 ("Files live" in force and asked) at the start: the mode is
   volatile and the install's reset had set it back. Re-plugged through the hub (port 2) at the end anyway:
   1,1, the volume mounted read-only.
