@@ -475,8 +475,8 @@ over USB. About 6 min wall for the default 8 cases at `--jobs 8`.
 Scenario tests change the input at fixed virtual times (`--script` /
 `--dmm SPEC@T`) and read the firmware's uptime (DBG:PING?). The two clocks
 differ by the boot: fw-rs's uptime is the virtual time since its last DWT
-CYCCNT write (`Clock::new` in main), 2.85 s of virtual time on a fresh disk
-image with `--fast` (1.90 s at the default `--mips 200`; pre_main's SPI-disk
+CYCCNT write (`Clock::new` in main), 3.56 s of virtual time on a fresh disk (7bd7f6f;
+2.85 s on ab7184c before the device-like SPI byte time) with `--fast` (1.90 s on ab7184c at `--mips 200`; pre_main's SPI-disk
 work: fatdir, calbackup, `vdisk::mirror_boot`).
 The offset is the same in every run (virtual time is deterministic, host load
 or not), but it grows whenever the boot does: it was 0.5, 0.9, 1.3, 1.8 s as

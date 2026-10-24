@@ -42,7 +42,7 @@ import emusync  # noqa: E402
 # uptime at which the model applied the change. `acts` run at their distance from the start
 # of the phase they fall in. The windows were written for inputs at fw ~t - 0.5 s: the
 # script puts the changes VLAG later in virtual time (and runs VLAG longer), which keeps
-# them there with the boot of emusync.BOOT_S (2.85 s, fresh disk); if the boot changes,
+# them there with the boot of emusync.BOOT_S (3.56 s, fresh disk); if the boot changes,
 # only the phase lengths move (the markers keep the windows on the inputs).
 VLAG = emusync.BOOT_S - 0.5
 SC = {
