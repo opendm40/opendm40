@@ -64,7 +64,7 @@ protocol notes are for stock V2.6.
 
 ## Vendor files
 
-[vendor/](vendor/README.md) holds the latest official stock firmware,
+[firmware/vendor/](firmware/vendor/README.md) holds the latest official stock firmware,
 `dm40_v_2_6.bin` (Alientek's, unmodified, not under the MIT licence; see
 its README). It returns a meter to stock and feeds the emulator and the
 stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
@@ -73,7 +73,7 @@ stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
 the repo root (ignored by git):
 
 ```
-python3 firmware/dm40fw.py decode vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
+python3 firmware/dm40fw.py decode firmware/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
 ```
 
 ## Toolchain
