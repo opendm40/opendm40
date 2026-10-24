@@ -3243,7 +3243,7 @@ calibrator on V-COM, DC V on the **6 V range, manual** (`VOLT:RANG 6`) for every
 hunting on the 10 Hz square), **RATE MED**, Danger alarm **Loud** and key / alert volume **50 %** (the owner's
 settings: read, never changed; the run stayed in DC V, so no misconnect alarm). `OUTP?` 0 throughout. Files in
 the session scratchpad's `osr/`: `st.py` (stream helper: one session per CSV, the LOG:PREamble?, LOG:COUNt? and
-DBG:ISR? in its header), `model.py` (the dc-aliasing.md kernel), `lvl.py`, `fr.py`, `sqmean.py`, `settle.py`,
+DBG:ISR? in its header), `model.py` (the AD1 sinc² kernel of [dmm-rate-filter-survey.md §1.3](dmm-rate-filter-survey.md#13-the-owners-observations-explained), as in the table note below), `lvl.py`, `fr.py`, `sqmean.py`, `settle.py`,
 `drift.py` (the runs), `an_lvl.py`, `an_fr.py`, `an_fr2.py`, `an_st2.py`, `an_drift.py` (analysis), and `out/`
 (one CSV per stream, logs, the analysis outputs `an_*.txt`, PNGs).
 
@@ -3251,14 +3251,14 @@ DBG:ISR? in its header), `model.py` (the dc-aliasing.md kernel), `lvl.py`, `fr.p
 code difference) = **1.6755 uV per code** on 6 V (nominal 1.389 V x 10 / 2^23 = 1.6557, +1.2 %); one display
 count (100 uV) = 59.7 codes. 1 V reads 597 000 codes, as expected. The codes R22 = 0x15 / 0x16 / 0x17 are
 OSR 8192 / 16384 / 32768 chopped, 0x06 / 0x07 OSR 16384 / 32768 unchopped. Measured periods: 100.782,
-**200.789** (new; not in dc-aliasing.md), 400.784, 99.995, 200.000 ms.
+**200.789**, 400.784, 99.995, 200.000 ms.
 
 **Logger quirk (not a converter effect).** Some sessions repeat each conversion: the record holds the same code
 twice, 50-80 ms apart (`fr_40_15.csv` right after a 640/s session: 121 copies in 294 records; `fr_40_16.csv` 149
 of 289; `fr_60_16.csv` 18). That is the main-loop sampler's rescue read (logger.rs `sample`) after `p_meas`
 locked below the period. The analysis drops a record equal to its predecessor; the conversion count then
 matches the session length / period (e.g. 140 for 28 s at 0x16). In those sessions the time stamps are not
-conversion times. dc-aliasing.md's "duplicated records at --osr 4 / 6" is the same thing.
+conversion times.
 
 ### 0 V: the calibrator cannot make a short
 
@@ -3280,7 +3280,7 @@ codes whose alias beats more than 20 times in the window. Stream lengths: 20 s (
 40 s (0x17), longer where the model beat is slow (0x16 at 5 Hz 115 s, 0x17 at 2.5 Hz 125 s); the first 2 s of
 each session are dropped.
 
-p-p = the reading's peak-to-peak over the window (V), in brackets the dc-aliasing.md kernel's p-p over all
+p-p = the reading's peak-to-peak over the window (V), in brackets the model kernel's p-p over all
 phases for this square (chopped: the mean of two sinc^2 conversions one measured P apart; unchopped: one
 sinc^2 per conversion). Mean error in mV; "(n beats)" = the window covered only n beats of a slow alias, so
 that mean is biased by the unfinished beat, not a converter error.
