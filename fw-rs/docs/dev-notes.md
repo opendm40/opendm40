@@ -214,30 +214,19 @@ dark for several seconds: do not power-cycle) and checks `DBG:BOOT?`: the
 loader marker must equal the header of the new file ("installed OK", ~1 min).
 `--no-build`, `--image FILE`, `--wait S`: see `tools/reload.sh --help`.
 
-**First install** (the meter runs stock): on the stock "USB Connect" disk
-(`28e9:028f`), `tools/reload.sh --from-stock` stages the file and tells you to
-power-cycle (the stock update procedure), then waits for fw-rs. By hand: copy
-`dm40-fw-native.bin` onto that disk (or the vendor loader's update-screen
-disk, same id) as `dm40_fwrs.bin` (the only `dm40*.bin`), eject, power-cycle
-or press "update". The stock path has not been run on the device: the logged
-installs went through a running fw-rs (`DBG:UPDATE`) or the loader's update
-screen, and the stock app's own updater (it flashes a `dm40*.bin` when USB is
-unplugged) is unverified for a non-stock image length (native-review L7).
+**First install** (the meter runs stock): `tools/reload.sh --from-stock`
+stages the file on the stock "USB Connect" disk (`28e9:028f`) and tells you to
+power-cycle (the stock update procedure), then waits for fw-rs. The by-hand
+steps and what is verified: [README.md, Install](../README.md#install).
 
-**Recovery** (fw-rs hangs or does not start): the loader update screen and its
-USB disk appear by themselves after a second watchdog reset within 60 s of
-the first (not yet checked on the device). By hand:
-from off, hold the power key ~4 s until the beep, keep holding 0.5 s more (let
-go within 0.5 s to abort: normal boot; not yet checked on the device); or
-`python3 tools/dm40dbg.py update` while fw-rs still answers. Then copy an image
-(e.g. `dm40-fw-native.bin`, or `INFO/FIRMWARE.BIN` from the USB volume = the
-image that was running), renamed `dm40_fwrs.bin`, onto the loader's disk and
-press "update".
+**Recovery** (fw-rs hangs or does not start) and the update-file rules:
+[README.md, Recovery](../README.md#recovery). `INFO/FIRMWARE.BIN` on the USB
+volume (the running image) or `dm40-fw-native.bin` both work as the image.
 
-**Back to stock:** `tools/reload.sh --stock ../firmware/patch/build-memrw/dm40_patched.bin`
-(patched stock with Bluetooth memrw, built by `../firmware/patch/kit/mkkit.sh`)
-or `--stock ../dm40_v_2_6.bin` (official, not in git: see the top-level README).
-From the loader screen: copy the stock file onto its disk, press "update".
+**Back to stock** from a running fw-rs: `tools/reload.sh --stock FILE` with
+`../firmware/patch/build-memrw/dm40_patched.bin` (patched stock with Bluetooth
+memrw, built by `../firmware/patch/kit/mkkit.sh`) or the official
+[`../firmware/vendor/dm40_v_2_6.bin`](../../firmware/vendor/dm40_v_2_6.bin).
 Back to fw-rs from stock: `tools/reload.sh --from-stock`.
 
 Native image, shim, recovery and boot info fields: [native-boot.md](native-boot.md).
