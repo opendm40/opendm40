@@ -57,6 +57,13 @@ def shows(coup, value, rel=0.01, ab=0.002):
     return lambda d: d['C'] == coup and near(d['V'], value, rel, ab)
 
 
+def tie(want, rel):
+    """A tie (AC = DC): either part, or +9.91E37 (num: NaN) while AUTO has not decided yet
+    (a tie can take ~10 s; FETCh? answers +9.91E37 until the first decision,
+    fw-rs docs/switch-latency.md 6.2)."""
+    return lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], want, rel) or math.isnan(d['V']))
+
+
 def both(*fs):
     return lambda d: all(f(d) for f in fs)
 
@@ -155,7 +162,7 @@ SC = {
         (0, 'open;acv:1.2@50,dc=1', shows('AUTO,AC', 1.2), 'enter in band, AC 1.2 + DC 1: AC (larger)'),
         (14, 'open;acv:0.8@50,dc=1', shows('AUTO,DC', 1.0), 're-enter in band, AC 0.8 + DC 1: DC (larger)'),
         (28, 'open;acv:1.2@50,dc=-1', shows('AUTO,AC', 1.2), 're-enter in band, AC 1.2 + DC -1: AC (larger)'),
-        (40, 'open;acv:1@50,dc=1', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 1.0, 0.02), 're-enter, tie AC 1 + DC 1: either part'),
+        (40, 'open;acv:1@50,dc=1', tie(1.0, 0.02), 're-enter, tie AC 1 + DC 1: either part'),
         (52, 'open;acv:1.05@50,dc=1', shows('AUTO,AC', 1.05), 're-enter, near tie AC 1.05 + DC 1: AC (larger)'),
         (64, 'open;acv:0.95@50,dc=1', shows('AUTO,DC', 1.0), 're-enter, near tie AC 0.95 + DC 1: DC (larger)'),
     ], {15: 'VOLT:COUP DC', 16: 'VOLT:COUP AUTO', 29: 'VOLT:COUP DC', 30: 'VOLT:COUP AUTO', 41: 'VOLT:COUP DC', 42: 'VOLT:COUP AUTO',
@@ -164,7 +171,7 @@ SC = {
     # (0..9.55 V, AC = DC: a tie, either part), then 5 V DC: C stayed on the AC part
     # (~4.056 V) and hunted 6 <-> 60 V; A showed DC 4.998 V. 5.5 V the same; 4.5 V was fine.
     'sq5': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 54, [
-        (0, 'open;acv:4.776@40,dc=4.776,shape=square', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 'square 0..9.55 V @40: either part (a tie)'),
+        (0, 'open;acv:4.776@40,dc=4.776,shape=square', tie(4.776, 0.01), 'square 0..9.55 V @40: either part (a tie)'),
         (14, 'open;dcv:5', shows('AUTO,DC', 5.0, 0.002), '5 V DC after the square: -> DC'),
         (30, 'open;dcv:5.5', shows('AUTO,DC', 5.5, 0.002), '5.5 V DC: DC'),
         (42, 'open;dcv:4.5', shows('AUTO,DC', 4.5, 0.002), '4.5 V DC: DC'),
@@ -177,11 +184,9 @@ SC = {
     # one change, to the decided part) and the same part in every entry (STABLE below: not
     # decided by a transient).
     'sqtie': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 50, [
-        (0, 'open;acv:4.776@40,dc=4.776,shape=square', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 'square: either part (a tie)'),
-        # (a re-entry on a tie may still be deciding at the check (~10 s): FETCh? is +9.91E37
-        # until AUTO's first decision, switch-latency.md 6.2)
-        (16, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], 4.776, 0.01) or d['V'] > 9e37 or math.isnan(d['V'])), 're-enter on the square'),
-        (32, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], 4.776, 0.01) or d['V'] > 9e37 or math.isnan(d['V'])), 're-enter on the square'),
+        (0, 'open;acv:4.776@40,dc=4.776,shape=square', tie(4.776, 0.01), 'square: either part (a tie)'),
+        (16, None, tie(4.776, 0.01), 're-enter on the square'),
+        (32, None, tie(4.776, 0.01), 're-enter on the square'),
     ], {16: 'VOLT:COUP DC', 17: 'VOLT:COUP AUTO', 32: 'VOLT:COUP DC', 33: 'VOLT:COUP AUTO'}),
 }
 EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?'], 'iac': ['SYST:ALER?', 'CONF?'], 'idc': ['SYST:ALER?', 'CONF?'], 'vac230': ['CONF?'], 'iacfill': ['SYST:ALER?', 'CONF?']}
