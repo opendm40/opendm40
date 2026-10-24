@@ -3023,3 +3023,112 @@ host gets the wrong values too. New bug 1 below.
 - **Calibrator:** back on the 10 Hz square, enabled. Registers equal to the start dump except 0x2C (live) and
   0x0E / 0x2E 0x18 -> 0x17 (the read-only live value). Right after the restore 0x0C read 0x2711 and 0x23 0x31C9
   (as on f0d21eb); 15 min later both matched. During the check: 1 V, 5 V DC, 390 / 100 ohm, the 10 / 40 Hz square.
+
+## 0774e70: FREQ first reading, mirror pacing, sentinel2 (2026-10-24 05:37 - 06:50)
+
+The coordinator had installed 0774e70 (rust-fw-poc; code equal to 7bd7f6f: freqfirst 36ceea4, mirror-bw, sentinel2).
+`*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`, `DBG:FLASH?` `EF4018,4096,0,...`. INFO/FIRMWARE.BIN, read with the page
+cache dropped, is byte-equal to the image (614 016 B, sha256 c039aae1…f432). `DBG:VDISK:MIR?` `1,4,1,5223,0,0,0`
+(WRITTEN on this first boot, 5.22 s). Crash count 0, marker VALID, HEALTHY at the start and the end. No flashing.
+**Quiet rule (owner asleep):** `SYST:ALER:ALARm?` OFF and `SYST:BEEP:VOL?` 0 at the start, during and at the end;
+no sound tests; the danger alarm was never set to Loud. Files are in the session scratchpad's `chk7/`: `freq1.py`
+(prev -> 3 s -> CONF:FREQ, 5 READ? with times, odd reps change the view first), `fscope.py`, `ftl.py`, `fshot.py`
+(one shot per entry at a fixed delay), `powtl.py` (FETC:POW:ALL? timeline), `sessM.py` / `sessB.py` (chk5's, plus
+DBG:VDISK:MIR? per round and the LOG:DISK? timeline), `wv.py` (plus DBG:PROF?), `spoll.py` (commands, then DBG:SENT?
+/ SYST:ALER? / CONF? / FETC? polls), `sent5.py` (step 5: DBG:SENT:REG? before / after, raw ctsta), `sentE.py`, and
+`out/` (JSON, PNG; `out/ref/` = the 8 INFO files read at the start with no stream). The calibrator was found on the
+10 Hz square, enabled; the meter on the DMM page, DC V AUTO+, RATE FAST. A jack not wired.
+
+### FREQ first reading (TODO "FREQ first-reading" device retest 1-6; 40 Hz square)
+
+| # | check | result |
+|---|---|---|
+| 1 | DC V, 3 s, CONF:FREQ, 5 READ? x10, odd reps after a DMM <-> combined view change (4.4-4.6 s before) (`freq1_dcv.json`) | **FAIL, 10 of 10**: READ? at 1.37 / 1.71 / 2.06 s = **0.000 Hz**, 40.0017 Hz from 2.42 s; the same on both pages, with or without the view change. f0d21eb gave 40.0017 at 1.37 s in most entries (`chk4/out/fentry_*.json`) |
+| 2 | In Hz: Scope page 2 s -> back to DMM / combined, 3x each (`fscope_*.json`) | **FAIL, 6 of 6**: 0.000 / 0.000 / 0.000 Hz at 0.16-0.87 s, 40.0017 from 1.21 s |
+| 3 | AC V -> Hz and AC+DC -> Hz, 5x each (`freq1_acv.json`, `freq1_acdc.json`) | **FAIL, 10 of 10**: the same three 0.000 readings, 40.00 from 2.42 s. Hz -> Hz (no row write) is 40.00 at once |
+| 4 | AC V on the square: the secondary line (shots at 0.6-4.0 s, `sheet_acv2.png`, `sheet_acv3.png`) | **PASS**: "--Hz --%" at 0.6 s, "40.00Hz 50.0%" from 0.7 s, never a wrong value |
+| 5 | CONF:POW, POW:COUP AC (`powtl_a.json`, `powtl_rng.json`, `pow_5.0.png`, `pow_7.png`) | **PASS**: F (FETC:POW:ALL? field 7) +9.91E37 then 40.0017 one poll later (5.07 -> 5.17 s, after the I ranging); after `CONF:POW 60` (V range MAN 60) F stays 40.00, no wrong value. Screen: F "--" then "40.0 Hz" |
+| 6 | Capacitance 1 uF / 100 nF entries | **Not run**: no capacitor on the bench (the calibrator has no C output) |
+
+The screen during the zeros (`dcv_hz_s16_1.6.png`): **"0.000 Hz" and "0.0 %" in amber**, and MIN / MAX / AVG start
+at 0.000, so the statistics hold a false 0.
+
+**Cause (from the code, consistent with the fixed pattern; not probed on the device):** `poll_freq_mode` alternates
+the two counter sources (0xF0, then 0x08). A result with f = 0 is not a glitch (`freq_glitch` needs f > 0), so it
+sets `seen[i]` and `last[i] = 0`; `freq_change` ranks it 1e6. On this input source 0 (0xF0) reads 0 Hz and 0 %
+duty (CTB = CTC = 0) in its first gates: read 1 (source 0 = 0, alone) shows 0; read 2 (source 1's first result,
+change 1e6) ties with source 0's 1e6, and the tie goes to source 0 -> 0; read 3 (source 0 = 0 again, 1e6) -> 0;
+read 4 (source 1, change 0) wins -> 40.00. The emulator's counter model gives both sources 40 Hz, so freqtest
+passed. A fix would treat f == 0 like a glitch for `seen` (a source with no edges is no result), and/or let a
+tie at 1e6 go to the non-zero source. Whether source 0 keeps reading 0 after the entry (the steady 40.00 then
+comes from source 1 alone) is not known; a DBG counter readout per source would tell.
+
+### mirror-bw (TODO "Device retest of mirror-bw" 1-6; the 10 Hz square on V, DC V)
+
+| # | check | result |
+|---|---|---|
+| 1 | 76800 `LOG:DUR 0` (until full) disk session, cp of the 8 INFO/*.BIN every 30 s from state 3 (`m768.json`) | **PASS**: state 3 at 40.6 s, full (state 6) at 169.7 s; **9 820 200 rows, lost_before 0**, gate 1 (76800 kept), late 0, overruns 0, dropped 0, max_lat 280 ns. 5 rounds, 40 copies byte-equal: FIRMWARE.BIN 1.71-1.74 s (612c45c: 2.0 s), LOADER.BIN 0.68-0.71 s (> 0.5 s, as expected), the rest <= 0.11 s. DBG:VDISK:MIR? per round: +505 mirror sectors, +1 072..1 133 holds, longest hold 11 ms |
+| 1' | LOADER.BIN 6 s after state 3, 20 s 76800 session (M2c's case, `c768L.json`) | **PASS**: lost 0 (612c45c: 21 745), 1 536 002 rows, copy 0.70 s, byte-equal |
+| 2 | LOADER.BIN at state 3 = inside the writer trial, 3 runs (`trial1..3.json`) | **PASS**: gate 1 every time (no 38400 fallback; 612c45c fell back), lost 0, 1 536 002 rows; the copy takes 1.65-1.67 s; longest hold now **50 ms** (the "pressed" cap), ~12 900 holds per run |
+| 3 | LOG:DISK? field 14 at 76800, no copy (`nocp768.json`) | median **508 permille** (min 487 in state 3 after the trial, max 526) = headroom ~492 (emulator: 589 / 411). With copies 491-506. One read of 1000 at 1 s after state 3 in `c768L` (the trial window's end), not repeated |
+| 4 | 38400 `LOG:DUR 240`, cp rounds every 60 s (`m384.json`) | **PASS**: 9 216 006 rows (240 s), lost 0, late 0, overruns 0; 4 rounds byte-equal, FIRMWARE.BIN 0.86-0.87 s, LOADER.BIN 0.32 s (612c45c M2a: 1.06 / 0.51 s); field 14 ~268 |
+| 5 | Wave view (DC V, MF > Wave) at 1 ms/div (ACQ:SRAT? 76 800), 200 s, cp rounds every 40 s (`wv.json`, `wv_end.png`) | **PASS**: DBG:ISR? **dropped 0** over 200 s (612c45c: ~50/s); late 0, overruns 0, max_lat 300 ns; 5 rounds byte-equal (FIRMWARE.BIN 1.9-2.3 s). DBG:PROF?: loop max **17.5 ms** (< 26), no pass >= 20 ms; s.paint max 14.6 ms, 12.5 fps |
+| 6 | Host kernel log (`journalctl -k`; dmesg is not readable here) 05:52-06:10 | **PASS**: only the " sda:" rescans after each session's file create / delete; no usb-storage reset, timeout or sense line |
+
+Every session's DLG (LOGS/FAST000.DLG) was the only new name and was deleted by exact name. The first 76800
+attempt did not start because the meter was in the power meter (CONF:POW) when LOG:STATe ON came: state stayed 0
+with no SYST:ERR? entry left (the script read it first); the scripts now stop after 10 s of state 0. Not checked
+further.
+
+### sentinel2 (TODO "Device retest (sentinel2 image)" 1-8; A jack open, calibrator on V-COM)
+
+"Open" V-COM is not available on this bench; rows marked "off" are the calibrator with its output disabled.
+
+| # | check | result |
+|---|---|---|
+| 1 | AC A 10 / 0.06 / 0.0006, 30 s each, at 1 V, 24 V DC and "off" (`sp_s1_*.json`) | **No false V-JACK? at 1 V / off: PASS** (9 of 9 quiet). **The AD1 peak is not constant: FAIL vs the criterion.** At 1 V and off pkhmin = pkhmax = **-262 144** (the rail) from the first fresh read (~0.9 s) on. At 24 V it **ramps** from ~-48 000 / -98 000 (0.5-0.9 s) to the rail by 3.3 s; the ramp's swing in one hold (9 000-12 000 codes) passes `PKV_SWING_THR` (4 270): **V-JACK? at 1.5-3.5 s in 60 mA and 600 uA** (then gone), not in 10 A (swing ~5 000, streak broke) |
+| 1' | `DBG:SENT:VAR 32` (the old SENSE - PB5 row), 1 V, 10 A (`sp_s1_var32_v1_10.json`) | the rail from the first fresh read, no V-JACK?: with the swing rule the old row no longer alarms either, so this does not separate PB5 from AGND. VAR 0 after |
+| 2 | AC on V: the calibrator's 0 / 9.5 V square, 10 Hz (10 A / 60 mA / 600 uA) and 40 Hz (10 A), 15 s each (`sp_s2_*.json`) | **PASS**: V-JACK? at 1.87 / 2.12 / 2.07 / 1.87 s, held to the end; pkhmax - pkhmin ~15 000-16 000 codes at 10 Hz (pk ~-196 000 / -180 000); at 40 Hz the peaks walk up to +217 000 / +230 000 |
+| 3 | 1 V and 5 V: CONF:CURR:AC 10, 2 s, CONF:CURR:AC 0.06, x5 each, 4 s at 50 ms (`sp_s3_*.json`) | **PASS**: CONF? stays 60 mA 10 of 10, no OVERLOAD, no +9.9E37. Observation: for ~0.9 s FETC? still answers the 10 A row's last value (e.g. 1.90E-02), then one 60 mA reading of the same mantissa / 100 (1.90E-04): the filter's carry-over |
+| 4 | Real overload through A | **Skipped** (needs a wire) |
+| 5 | 24 V: DC A (`CONF:CURR:DC 10`) after DC V 60 V, RES, TEMP, AC V, DC V (auto, 60 V), Scope -> back; DBG:SENT? every ~70 ms for 12 s (`sent5_p0.json`) | **REG? the same 48 digits in every DC A entry**: `10DD1583 35000055 31000000 10000881 80C73EAC 00500000` (relay 0, mode 7, range 1; emulator's `...1783 35010055 ... 3DA4` differs in R22 / R25 / R34-35 but is constant too): no register carries the history, confirmed on the device. a_blind 1 / 1 / **0** / 1 / 1 / 1. ctsta raw: DC V 60 V -> 0 from 0.69 s (missed); RES -> 0x70 to 7.07 s, 0x50, 0 from 7.31 s (missed); **TEMP -> 0x70 throughout, V-JACK? from 7.98 s**; AC V -> 0 (one 0x50 at 0.69 s; missed); DC V -> 0 (missed); Scope -> back (entered DC A after DC V) -> 0x70 to 8.26 s, 0x50, 0 from 8.44 s (missed) |
+| 5' | `DBG:SENT:PREC` 100 / 300 / 1000 ms, 24 V (`sent5_p100/p300/p1000.json`) | **The precondition brings V-JACK? back in every case**: DC V 60 V -> DC A: ctsta 0x70 from 0.81 / 1.01 / 1.71 s, V-JACK? at **1.90 / 2.10 / 2.80 s**; RES -> DC A: 0x70 throughout, V-JACK? at **1.89 / 2.09 / 2.79 s**; Scope -> back (DC A entered with PREC, a_blind 0): 0x70 throughout, V-JACK? at 8.74-8.77 s (the restart mask). 100 ms is enough. No false hit: calibrator off, RES / DC V 60 V -> PREC 300 / 1000 -> DC A: ctsta 0 throughout, no alert (`sent5_off_p*.json`); **5 V**, PREC 300: ctsta 0 from ~1 s, no alert; 5 V after TEMP (PREC 0): 0 from 0.7 s (`sent5_v5_*.json`). PREC 0 after. Each PREC run pulses the relay (a click, not the buzzer) |
+| 6 | Continuity, 5 V DC, 30 s (`sp_s6_cont_v5.json`) | pkhmin / pkhmax **-99 100 / +124 800** (f0d21eb: -97 000 / +123 000); A-JACK badge from 0.42 s, held; soft 1 |
+| 7 | Danger alarm (left **Off**, per the quiet rule): RES and continuity at 5 V 30 s; E1 subset at 5 V / 1 V / off (`sp_s7_res_v5.json`, `E_e1_5/1/off.json`) | **PASS within what Off can show**: DBG:ALARm? `0,0,0,2` before and after every run (events 0); DBG:SENT? last field **1** in every RES / continuity row, 0 elsewhere. A-JACK in RES at 5 V 6 of 6 (0.47-0.61 s, CMP_PB1; known owner item), none at 1 V / off; no V-JACK? in DC A after RES. With the alarm Off the events counter cannot show a Loud event, so the soft flag is the evidence |
+| 8 | 24 V, TEMP 3.5 s -> AC+DC A (`CONF:CURR:ACDC 10`) and -> AUTO A (`CURR:COUP AUTO`), 20 s at 100 ms (`sp_s8_*.json`) | **PASS**: V-JACK? from 8.29 / 8.78 s and held through every later phase change (CMP_SENSE <-> AD1PK_SENSE every ~1 s), no flapping. Without TEMP (after DC V auto 60 V): never seen in 20 s (the step 5 blindness) |
+
+**What decides the next fix (step 5):** the 24 V miss is the SENSE comparator's history, not a register: the same
+row reads 0x70 after TEMP (or after the PREC temperature row, 100 ms is enough) and 0 after DC V 60 V / AC V / a
+restart, while 5 V reads 0 either way and an open input stays 0. Making the precondition the default (100-300 ms,
+on entry with a_blind) is supported by this data; its cost is the relay pulse and the blocked loop. The 7-8 s to
+V-JACK? when 0x70 is present from the start (TEMP, Scope -> back with a_blind 0) is the restart / exit mask, not
+the comparator.
+
+### New bugs
+
+1. **FREQ: three 0.000 Hz readings (~1 s) after every Hz entry** (DC V / AC V / AC+DC -> Hz, Scope -> back), shown
+   in amber, answered to READ?, and kept in MIN / AVG. Worse than f0d21eb (40.00 at 1.37 s). Cause above (f = 0
+   counts as a clean result of source 0; ties go to source 0).
+2. **AC A at 24 V DC: a 2 s V-JACK? in 60 mA / 600 uA** (1.5-3.5 s after the entry): the SENSE - AGND peak still
+   ramps to the rail at 24 V and the ramp's swing within one hold passes the swing threshold. At 1 V / off the
+   peak sits at the rail (-262 144) from ~0.9 s, so the AC A sentinel's AD1 is at the rail in the normal case too;
+   whether the swing rule still sees mains on V with the peak near the rail is answered only for the calibrator's
+   square (step 2: yes).
+3. Minor: a disk session started (LOG:STATe ON) while the meter is in the power meter stays in state 0 with no
+   error left in SYST:ERR? (seen once; the script consumed the error queue, not checked further).
+
+### State at the end
+
+- **Device:** 0774e70, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC), RATE FAST, the bargraph row
+  (`e_dmm.png`). LOG: AD1 / 4800 / HOST / DUR 60 / STAT 0. `DBG:SENT:PREC?` 0, `DBG:SENT:VAR?` 0. `OUTP?` 0
+  throughout (never switched on). `SYST:ERR?` "No error", `SYST:ALER?` NONE, `SYST:ALER:ALARm?` OFF,
+  `SYST:BEEP:VOL?` 0, `DBG:ALARm?` 0,0,0,2, `DBG:VDISK:MIR?` 1,4,1,5223,8108,52402,50. Crash count 0, marker VALID,
+  HEALTHY.
+- **Settings:** 1/3 and 3/3 byte-equal to the start (`s_set*.png` vs `e_set*.png`); 2/3 differs only in the live
+  rate digits (x 277-329, y 48-67). Dim / Shutdown Never, backlight 10 %, volume 0 %, Start page Multimeter, DMM row
+  Bargraph, USB disk "Files live" (`DBG:VDISK:RO?` 1,1), Danger alarm Off.
+- **Disk:** `MMEM:CAT?` equals the start string exactly. 8 LOGS/FAST000.DLG files were made (one per disk session)
+  and each deleted by exact name after it was the one new name; two filled the disk for a short while (m768, m384).
+- **Calibrator:** back on the 10 Hz square, enabled. Registers equal to the start dump except 0x2C (live) and 0x01
+  0x1057 -> 0x1056 (not written by the tools; read-only). During the check: 1 V, 5 V, 24 V DC, output off, the
+  10 / 40 Hz square.
