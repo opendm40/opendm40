@@ -34,7 +34,8 @@ differ; without it the tool refuses on a mismatch.
 
 DBG:SRC? reply (scpi.rs): 1,cycles,vref,path,sense,V_in,V_far,I,V_vref,
 V_drop,V_com,VDDA-AGND,AGND-VSS;10 AD1 codes;R20..R35 hex. Volts are
-relative to AGND; V_in is PB0 x the path's divider (10 in DIODE).
+relative to AGND; V_in is PB0 x the path's divider (10 in DIODE). The CSV's
+V_jack = V_in - V_com is the voltage V/ohm - COM (what --ext v measures).
 """
 import argparse
 import csv
@@ -232,7 +233,9 @@ def main():
                     continue
                 _, vals, codes, rowhex = got
                 rec.update(vals)
-                rec['I_load'] = vals['V_input'] / r_load if r_load else NAN
+                # the jack voltage V/ohm - COM (V_in and V_com are both against AGND)
+                rec['V_jack'] = vals['V_input'] - vals['V_com']
+                rec['I_load'] = rec['V_jack'] / r_load if r_load else NAN
                 rec['ext'] = ext.value() if ext else NAN
                 rec['codes'] = ' '.join(str(c) for c in codes)
                 rec['row'] = rowhex
@@ -250,7 +253,7 @@ def main():
             if ext:
                 ext.close()
 
-    cols = ['vref', 'path', 'sense', 'load'] + FIELDS + ['I_load', 'ext', 'codes', 'row', 'status']
+    cols = ['vref', 'path', 'sense', 'load'] + FIELDS + ['V_jack', 'I_load', 'ext', 'codes', 'row', 'status']
     with open(a.out, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=cols, restval='')
         w.writeheader()
@@ -271,11 +274,11 @@ def summary(rows, vrefs, paths, load, ext):
 
     print()
     if load == 'open':
-        print('Open-circuit voltage at the input (V_in vs AGND, V) per VREF tap x path; V_vref = the tap:')
+        print('Open-circuit voltage V/ohm - COM (V_jack = V_in - V_com, V) per VREF tap x path; V_vref = the tap vs AGND:')
         print('%-7s %8s ' % ('vref', 'V_vref') + ' '.join('%8s' % p for p in paths) + ('  %8s' % 'ext' if ext else ''))
         for v in vrefs:
             vv = next((ok[(v, p)]['V_vref'] for p in paths if (v, p) in ok), NAN)
-            line = '%-7s %8s ' % (v, '-' if vv != vv else '%+.4f' % vv) + ' '.join('%8s' % cell(v, p, 'V_input', '%+.4f') for p in paths)
+            line = '%-7s %8s ' % (v, '-' if vv != vv else '%+.4f' % vv) + ' '.join('%8s' % cell(v, p, 'V_jack', '%+.4f') for p in paths)
             if ext:
                 e = [ok[(v, p)]['ext'] for p in paths if (v, p) in ok]
                 line += '  %8s' % ('%+.4f' % e[0] if e else '-')

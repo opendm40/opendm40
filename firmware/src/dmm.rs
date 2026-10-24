@@ -29,8 +29,24 @@ pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
 #[path = "acdcm.rs"]
 pub mod am;
+#[cfg(target_os = "none")]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
+/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
+#[cfg(not(target_os = "none"))]
+mod src {
+    pub fn active() -> bool {
+        false
+    }
+    pub fn row(_: u8, _: usize) -> Option<[u8; super::hy::CFG_LEN]> {
+        None
+    }
+    impl super::Dmm {
+        pub(super) fn poll_src(&mut self, _: u64) -> Option<super::Reading> {
+            None
+        }
+    }
+}
 use pw::Pw;
 
 const GPIOA: u32 = 0x4002_0000;
