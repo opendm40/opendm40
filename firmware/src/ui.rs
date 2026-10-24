@@ -248,6 +248,12 @@ pub struct DmmView {
     /// history row holds the power boxes, never the bargraph.
     pub power: bool,
     pub pwc: pw::PwCache,
+    /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
+    ohm_on: bool,
+    /// Ohm test current label as last drawn: range | variant << 3, 255 =
+    /// none drawn, 254 = to redraw / clear (after `invalidate`, or partly
+    /// cleared).
+    last_iohm: u8,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -467,6 +473,8 @@ impl DmmView {
             last_col: VALUE,
             power: false,
             pwc: pw::PwCache::new(),
+            ohm_on: false,
+            last_iohm: 254,
         }
     }
 
@@ -560,6 +568,7 @@ impl DmmView {
                 sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
             }
         }
+        self.ohm_on = ohm_on;
         let sel = button_index(button);
         let mode = if button == Button::Power { 255 } else { mode };
         // 36 px tall (rows 280..315) and from x 4: 4 px off the screen edges.
@@ -580,6 +589,7 @@ impl DmmView {
         self.aux_val = [None; 2];
         self.aux_unit = [None; 2];
         self.pwc = pw::PwCache::new();
+        self.last_iohm = 254;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -687,14 +697,32 @@ impl DmmView {
             // The AUTO-coupling label shares the limit badge's slot.
             self.last_lim = 255;
             if !r.parts() {
-                // Leaving AC+DC / AUTO: the tag slots left of the aux values.
+                // Leaving AC+DC / AUTO: the tag slots left of the aux values
+                // (the ohm test current label's left part).
                 for i in 0..2 {
                     lcd::fill_rect(AUX_TAG_X[i] as u16, 36, (AUX_VX[i] - AUX_TAG_X[i]) as u16, 30, BG);
+                }
+                if self.last_iohm != 255 {
+                    self.last_iohm = 254;
                 }
             }
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
         let (aux, lp, bd) = aux_shown(r);
+        // Ohm: the range's test current, small, in the empty aux1 slot
+        // (`ohm_current_label`). Cleared before the aux rows (an aux1 that
+        // replaces it paints over the cleared box), drawn after them (the
+        // aux1 clear below and the unit change above mark it for a redraw).
+        let ik = if r.mode == 10 && aux[0].is_none() && !self.power {
+            r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3
+        } else {
+            255
+        };
+        if ik == 255 && self.last_iohm != 255 {
+            let b = OHM_I_RECT;
+            lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+            self.last_iohm = 255;
+        }
         let temp = r.mode == 15 && self.label.is_some();
         let load = r.power.is_some_and(|p| p.comp) && self.power;
         for (i, a) in aux.iter().enumerate() {
@@ -806,12 +834,19 @@ impl DmmView {
                     // without its parts): from the part's tag slot.
                     let x0 = if i == 0 || r.parts() { AUX_TAG_X[i] } else { vx - 30 };
                     lcd::fill_rect(x0 as u16, 36, (ux + 76 - x0) as u16, 30, BG);
+                    if i == 0 && self.last_iohm != 255 {
+                        self.last_iohm = 254;
+                    }
                     self.last_aux[i] = false;
                     self.aux_val[i] = None;
                     self.aux_unit[i] = None;
                 }
                 None => {}
             }
+        }
+        if ik != 255 && self.last_iohm != ik {
+            ohm_current_label(r.range, self.ohm_on);
+            self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
         // repaint every second otherwise.
@@ -859,6 +894,30 @@ impl DmmView {
         }
     }
 
+}
+
+/// The ohm test current label's box: the aux1 slot's left part (the
+/// burden caption's place in the A functions).
+const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
+
+/// "I 0.85 mA": the short-circuit test current of ohm range `range` in the
+/// variant (dmm::ohm_test_current; inferred), two significant digits, in
+/// DIM F14 (small: a property of the range, not a reading).
+#[inline(never)] // drawn on a range / variant change only
+fn ohm_current_label(range: i8, on: bool) {
+    let i = crate::dmm::ohm_test_current(range, on as u8);
+    let (v, u) = if i >= 0.2e-3 {
+        (i * 1e3, " mA")
+    } else if i >= 0.2e-6 {
+        (i * 1e6, " uA")
+    } else {
+        (i * 1e9, " nA")
+    };
+    let mut b = [0u8; 16];
+    let mut t = crate::scope_ui::Txt::new("I ");
+    t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
+    t.push(u);
+    sf::label(sf::F14, OHM_I_RECT, t.as_str(), DIM, BG, 1, 1);
 }
 
 /// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
@@ -1220,7 +1279,10 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
 }
 
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
-pub const OHM_VARS: [&str; 2] = ["Normal", "Low current ON"];
+/// Labelled with the variant's short-circuit test current on the 600 ohm
+/// range (dmm::ohm_test_current(1, var): T_VSRC / OHM_VSRC_ON over the
+/// 1 k Rref; inferred); "ON" = the button's stock tag.
+pub const OHM_VARS: [&str; 2] = ["0.85 mA", "0.27 mA ON"];
 
 /// `range_press` targets besides the range items (0..): RP_ERR + the Err
 /// code of `range_hit`, the Wave and Inrush buttons.

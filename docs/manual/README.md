@@ -439,7 +439,7 @@ sub-mode:
 |---|---|
 | **V** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
 | **A** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
-| **Ω** | Normal → Low current → Normal ([test currents](#resistance)) |
+| **Ω** | Test current 0.85 mA → 0.27 mA (ON) → 0.85 mA |
 | Capacitance | (none) |
 | Diode / continuity | Diode → Continuity → Diode |
 | **Hz / °C** | Frequency → Temperature → Frequency |
@@ -548,19 +548,28 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
 - The 60 Ω range (milliohm resolution) is manual only; AUTO never goes
   below 600 Ω.
-- Two test currents (into a short, measured by owners on real meters):
-  - **Normal**: about 0.85 mA;
-  - **Low current**: about 0.27 mA, for measuring in a circuit. Second tap on
-    Ω, or **Low current ON** on the range page; the Ω button shows a small
-    **ON** tag.
+- Two test currents. **0.85 mA** (the default) and **0.27 mA ON** (second
+  tap on Ω, or **0.27 mA ON** on the range page): the smaller one is for
+  measuring in a circuit. With 0.27 mA the Ω button shows a small **ON**
+  tag. The 60 Ω range always uses 0.85 mA.
+- Top left, small: the test current of the selected range, for example
+  **I 85 uA** on 6 kΩ. It is the short-circuit current, the most the range
+  drives through the leads; with a resistor between them it is less.
 
-  The 60 Ω range always uses the normal current.
+  | Range | 60 Ω | 600 Ω | 6 kΩ | 60 kΩ | 600 kΩ | 6 MΩ | 60 MΩ |
+  |---|---|---|---|---|---|---|---|
+  | 0.85 mA | 0.85 mA | 0.85 mA | 85 µA | 8.5 µA | 0.85 µA | 85 nA | 13 nA |
+  | 0.27 mA ON | 0.85 mA | 0.27 mA | 27 µA | 2.7 µA | 0.27 µA | 27 nA | 4.3 nA |
+
+  *Inferred*: computed from the 0.85 V / 0.27 V source behind the range's
+  reference resistor (1 kΩ … 63 MΩ), not measured per range; the 0.85 mA
+  and 0.27 mA on 600 Ω come from user reports.
 - While the meter looks for the range, the values are grey.
 
 
-| ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with Low current on](img/range-ohm.png) |
+| ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.27 mA on](img/range-ohm.png) |
 |---|---|
-| 4.7 kΩ | The range page with Low current on |
+| 4.7 kΩ on 6 kΩ: test current 85 µA | The range page with 0.27 mA (ON) on |
 
 #### Continuity
 
@@ -1580,8 +1589,10 @@ The V and A inputs share **COM**, so the current flows through COM:
 2. Load − → **A** jack; **COM** → source −.
 3. **V** jack → the + wire, on the source side.
 
-The current into the A jack counts as positive: a load reads positive
-power, a source negative.
+The arrows show the current: through the load into **A**, inside the
+meter through the shunt to **COM**, and back to the source. The current
+into the A jack counts as positive: a load reads positive power, a source
+negative.
 
 Maximum 10 A. Above 6 A the meter counts down 30 s, then warns ([Current
 limit](#current-limit)).
@@ -2499,7 +2510,7 @@ before.
 | Kept | Not kept |
 |---|---|
 | All [settings](#settings) except **USB disk** | **USB disk** (back to Files live) |
-| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, Low current Ω, the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, the Ω test current (0.85 / 0.27 mA), the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements, display settings and the FFT settings | The trigger mode: the scope starts running, in trigger mode Auto |
 | Generator: the waveform, frequency, amplitude, offset and duty | The output: off after power-on |
 
@@ -2527,7 +2538,7 @@ Untested on a real meter:
   hangs.
 - Multimeter: currents through the A jack (overload handling, AUTO
   coupling on current, burden with current), the continuity beeper and the
-  diode beeps, Low current Ω, PT100, PT1000 and the NTC sensors.
+  diode beeps, the 0.27 mA Ω test current, PT100, PT1000 and the NTC sensors.
 - Alerts: the alerts that need a current through the A jack (A-JACK,
   A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
   re-check.
