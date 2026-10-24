@@ -212,8 +212,7 @@ updates.
 - This unit: Hynitron CST-type at 7-bit 0x5A, chip type byte 0xA8. The stock
   probes a Goodix GT1158 at 0x14 first (absent here), so other units may carry
   it.
-- The four touch keys below the screen (review: Menu, Start/Stop, Auto,
-  manual range) are reported by the touch controller itself as key codes 0..3,
+- The four touch keys left of the screen (MENU, RUN, AUTO, MF) are reported by the touch controller itself as key codes 0..3,
   not by GPIOs ([`touch.rs`](../firmware/src/touch.rs), measured X 372/628/884/1140).
 - Pull-up strength unknown; opendm40 measures the rise time before going to
   400 kHz.
