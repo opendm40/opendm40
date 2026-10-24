@@ -5,7 +5,8 @@ reading (DBG:READout? kind F, FETCh?) may come from a conversion the
 switch spoiled, and a manual mA range must stay. The model's opt-in knobs
 replay what the device showed (emu/hy3131/HY3131.cs, INFERRED shapes):
 
-  r22part / r22off / r22n   an R22 (AD1 OSR) change ends the conversion in progress
+  r22part / r22off / r22n / r22win   an R22 (AD1 OSR) change (r22win: within that
+                     many ms of the row write) ends the conversion in progress
                      as one partial result (frac x input + an offset of
                      alternating sign): DC V at MED read ~40 % once after
                      the 0x15 -> 0x17 step; the DC mA entry from DC V 6 V at
@@ -29,6 +30,14 @@ the switch meets the old conversion at other phases):
   aca-step     FAST, open jack, 1 V on V: CONF:CURR:AC 10, 2 s, CONF:CURR:AC
                0.06: every F below 0.1 mA, CONF? stays CURR:AC 0.06
 
+dcv-acv-med, dcv-res-slow and res-med also check the time between two new
+readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
+conversions after the early OSR step, 0.85-0.9 s). The model's r22win 1000
+gives partials only for an R22 change within 1 s of the row write (INFERRED:
+the device showed none for the same OSR steps later in a function), so these
+scenarios show that the firmware makes no slow-OSR step that early, not where
+the device's boundary lies.
+
   emu/hy3131/firstrdtest.py --app firmware/opendm40.bin --port 47700 [names]
 """
 import argparse
@@ -45,8 +54,8 @@ BOOT_OFS = 0.906
 T0 = 8.0
 REPS = 4
 W = 44.0
-OFF = 'r22part:-1;r22off:0;r22n:1;acastep:0;acasteptau:0'
-R22 = 'r22part:0.4;r22off:2400000;r22n:1'
+OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0'
+R22 = 'r22part:0.4;r22off:2400000;r22n:1;r22win:1000'
 
 # name, input, rate, (pre command, s)..., switch command, check (kind, limit), conf prefix that must stay
 SCEN = [
@@ -54,17 +63,26 @@ SCEN = [
      ('abs', 1e-3), 'CURR +6.0'),
     ('dcma-slow', 'open;vsrc:1;' + R22, 'SLOW', [('CONF:VOLT:AC', 1.5), ('CONF:VOLT:DC 6', 3.0)], 'CONF:CURR:DC 0.06',
      ('abs', 1e-3), 'CURR +6.0'),
-    ('dcv-acv-med', 'dcv:1.0;r22part:0.4;r22off:0;r22n:2', 'MED', [('CONF:VOLT:AC', 2.0)], 'CONF:VOLT:DC 6',
+    ('dcv-acv-med', 'dcv:1.0;r22part:0.4;r22off:0;r22n:2;r22win:1000', 'MED', [('CONF:VOLT:AC', 2.0)], 'CONF:VOLT:DC 6',
      ('rel', 1.0, 0.001), 'VOLT +6.0'),
-    ('dcv-res-slow', 'dcv:1.0;r22part:0.4;r22off:0;r22n:2', 'SLOW', [('CONF:RES', 2.0)], 'CONF:VOLT:DC 6',
+    ('dcv-res-slow', 'dcv:1.0;r22part:0.4;r22off:0;r22n:2;r22win:1000', 'SLOW', [('CONF:RES', 2.0)], 'CONF:VOLT:DC 6',
      ('rel', 1.0, 0.001), 'VOLT +6.0'),
-    ('res-med', 'ohm:390;r22part:0.32;r22off:0;r22n:2', 'MED', [('CONF:VOLT:DC', 2.0)], 'CONF:RES',
+    ('res-med', 'ohm:390;r22part:0.32;r22off:0;r22n:2;r22win:1000', 'MED', [('CONF:VOLT:DC', 2.0)], 'CONF:RES',
      ('final', 0.001), 'RES'),
-    ('fuse-open', 'open;r22part:0;r22off:2100000;r22n:2', 'MED', [('CONF:VOLT:DC', 2.0)], 'SYST:FUSE:TEST',
+    ('fuse-open', 'open;r22part:0;r22off:2100000;r22n:2;r22win:1000', 'MED', [('CONF:VOLT:DC', 2.0)], 'SYST:FUSE:TEST',
      ('fuse', 'OPEN'), ''),
     ('aca-step', 'open;vsrc:1;acastep:200000;acastepms:600;acasteptau:25', 'FAST', [('CONF:CURR:AC 10', 2.0)],
      'CONF:CURR:AC 0.06', ('abs', 1e-4), 'CURR:AC +6.0'),
 ]
+
+# Longest wait between two new readings (grey or final) after the first one,
+# s (R22_LATE: no 400 ms conversions dropped after an early R22 change at
+# MED / SLOW; e1cec01: 1.2 s on DC V, 0.85 s on RES).
+# Counted for waits that begin within GAP_UNTIL s of the switch: the step to
+# the slow OSR ~2 s after the row write restarts the converter (one 400 ms
+# conversion), by design.
+GAP = {'dcv-acv-med': 0.6, 'dcv-res-slow': 0.6, 'res-med': 0.6}
+GAP_UNTIL = 1.8
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native image')
@@ -135,6 +153,7 @@ try:
         q('SENS:RATE %s;:SYST:ERR?' % rate)
         why = []
         firsts = []
+        gaps = []
         for rep in range(REPS):
             for c, d in pre:
                 t.write(c)
@@ -153,10 +172,13 @@ try:
                 continue
             first = None
             fs = []
+            seen = []  # (s, kind, value) at each new reading (G or F)
             dur = 6.0 if chk[0] == 'final' else 3.0
             while up() < t0 + dur:
                 ro = q('DBG:READout?').split(',')
                 cf = q('CONF?')
+                if ro[0] in ('F', 'G') and len(ro) > 2 and (not seen or seen[-1][1:] != (ro[0], ro[2])):
+                    seen.append((up() - t0, ro[0], ro[2]))
                 if ro[0] == 'F':
                     v = num(ro[2])
                     fs.append((round(up() - t0, 2), v))
@@ -167,6 +189,10 @@ try:
                 if not cf.strip('"').startswith(conf):
                     why.append('rep %d: CONF? %s at +%.2f s' % (rep, cf, up() - t0))
                     break
+            gap = max([b[0] - a[0] for a, b in zip(seen, seen[1:]) if a[0] < GAP_UNTIL] or [0.0])
+            gaps.append(round(gap, 2))
+            if name in GAP and gap > GAP[name]:
+                why.append('rep %d: %.2f s without a new reading after the first one (limit %.2f)' % (rep, gap, GAP[name]))
             f = q('FETC?')
             if chk[0] == 'final':
                 fin = num(f)
@@ -178,7 +204,7 @@ try:
         err = q('SYST:ERR?')
         if err.split(',')[0].strip() not in ('0', '+0'):
             why.append('SYST:ERR? %s' % err)
-        print('  %s %-12s first F (s, value) %s%s' % ('ok ' if not why else 'BAD', name, firsts,
+        print('  %s %-12s first F (s, value) %s, gaps %s%s' % ('ok ' if not why else 'BAD', name, firsts, gaps,
                                                      '' if not why else '  ' + '; '.join(why[:4])), flush=True)
         if why:
             bad.append('%s: %s' % (name, '; '.join(why[:4])))

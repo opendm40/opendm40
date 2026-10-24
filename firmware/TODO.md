@@ -1611,6 +1611,9 @@ Firmware:
       conversion at 0.31 s (that range read 0.984-1.021 V, as on bab5dd4); 600 V's read 0.9967-0.9997 V. First 6 V conversion read: from
       600 V 0.88-0.92 s (bab5dd4 0.81 s: +0.1 s), from 60 V 0.61 s (0.56-0.60 s), from 1000 V 1.22 s (1.06 s:
       +0.16 s); +0.05-0.16 s, inside the expected +0.1-0.3 s except from 60 V.
+      Recheck 2026-10-24 (emulator, autorangetest with ad1mix:1): PASS on 6dddfdf and with R22_LATE. The
+      cover is `vet_ad1` (f4925f5), not R22_DROP (f63a189): the 6 V row goes out at the R22 the 60 V row
+      already had, so no R22 changes there.
 - [x] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
       0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
       such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
@@ -3422,12 +3425,30 @@ Emulator (emu/):
       entries 0 wrong of 24; RES 0 wrong of 12; fuse check open OPEN 10 of 10, calibrator 48 ohm OK,47.04-
       47.06 10 of 10. Costs: first value DC V from RES 1.65 s, RES FAST 1.72 s / MED 2.6 s, CONF -> READ?
       DC V / A at MED 1.5-1.8 s (was 0.5-1.0 s with a wrong value possible).
-  - [ ] The MED / SLOW cost above: R22_DROP drops two conversions after every early R22 change, also
+  - [x] The MED / SLOW cost above: R22_DROP drops two conversions after every early R22 change, also
         where the device may not need it (an in-function OSR step did not show the effect). A narrower
-        rule needs the mechanism (next item).
+        rule needs the mechanism (next item). Done without it (dmm.rs R22_LATE): the step to the slow OSR
+        (0x17) waits until R22_DROP_WIN_MS (2 s) after the row write, so no 400 ms conversions are
+        dropped; until then the readings come at OSR 8192 (100 ms, unaveraged, no +1 digit), the average
+        starts after the step. Ohm's in-range OSR in the window is OSR_FAST (two 100 ms conversions
+        dropped), the steady one after it. No drop at the late step: that it is clean is INFERRED from
+        the device's later in-function steps (osrstep.py), not measured at 2 s. Emulator (firstrdtest
+        with the model's new `r22win:1000`, partials only within 1 s of a row write, INFERRED): no wrong
+        value; DC V from AC V at MED first final 0.4-0.5 s and the next 0.1 s later (e1cec01: the next
+        0.9 s later), from RES at SLOW first final 0.5 s (1.3 s), RES at MED 1.8-1.9 s (2.3-2.6 s), DC mA
+        gap 0.4 s (0.9 s). Device check: t1rt.py MED (CONF -> READ? DC V / A, expect ~0.5-0.8 s with its
+        0.4 s of polling), dcv1st.py (DC V 6 V from AC V / DC A / RES at MED / SLOW: no value off
+        > 0.1 %, also around 2 s, where the slow step now lands), t1ohm.py (RES MED first final, no
+        wrong value), osrstep.py (unchanged).
   - [ ] Why the two conversions after an early R22 change read ~32-40 %: UNKNOWN. The same OSR steps later
         in a function (DC V MED / SLOW, 1 <-> 2 V) did not. A stream at 640/s across a CONF change would
-        show where the bad conversions sit.
+        show where the bad conversions sit. The HY3131 datasheet (DS-HY3131-V10_EN 13.1, p. 30) does
+        not explain it: AD1 is a sigma-delta modulator with a sinc^2 comb ("Comb Filter^2"; AD2 / AD3
+        ^3), AD1CHOP 1x (0x13 / 0x15 / 0x17) swaps the input every OSR period and halves the output
+        rate, and there is nothing on an OSR change in a running conversion or on settling. A plain
+        sinc^2 with its decimation changed gives one transitional result (~72 % for 8192 -> 32768 at a
+        period boundary), not two at ~32-40 %, so no "drop exactly N" follows from it; R22_DROP_N stays
+        2 (the device count). (The model's `ad1mix` memory is a sinc^3 shape, also INFERRED.)
   - [ ] AUTO coupling decided at 5.76-5.85 s on the 10 Hz square (3 of 4; one not within 6 s), grab-power
         image; ab7184c's MEAS:VOLT:AUTO? took 1.28-3.91 s. Not looked into.
 - [x] AD1 logger copies (device 10242c3, AD1 OSR check: right after a 640/s session each conversion
