@@ -217,6 +217,12 @@ the combined view switches to the next sub-mode of the current function
 - **Shutdown** (Settings, default 30 min): without input for this long, the
   meter switches off. 30 s before, it beeps and shows **Auto power-off in
   30 s** (then 20, 10); touch the screen or press a key to keep it on.
+- A connected computer or phone also keeps the meter on: any SCPI command
+  over USB or Bluetooth, a phone-app request, and the computer reading or
+  writing the USB disk count as use for **Shutdown**, so the meter does not
+  switch off in the middle of a remote session or a firmware update. They
+  do not count for **Dim screen**: during a long remote session the screen
+  still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
   MIN/MAX/AVG session runs, or while the power meter counts energy with a
   current flowing. The screen still dims.

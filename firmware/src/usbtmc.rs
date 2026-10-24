@@ -19,6 +19,7 @@
 use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, RequestType};
 use usb_device::Result;
+use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 const CLASS: u8 = 0xFE;
 const SUBCLASS: u8 = 0x03;
@@ -52,6 +53,15 @@ const STATUS_TRANSFER_NOT_IN_PROGRESS: u8 = 0x81;
 const MPS: usize = 64;
 pub const CMD_MAX: usize = 256;
 pub const RSP_MAX: usize = 6144;
+/// A Bulk-OUT message left incomplete for this long is dropped
+/// (`expire_partial`).
+pub const OUT_STALE_MS: u32 = 1000;
+const OUT_STALE_CYC: u32 = OUT_STALE_MS * (crate::clock::HCLK_HZ / 1000);
+/// DWT cycle count of the last Bulk-OUT bytes. It wraps every ~21 s; the
+/// check of every main-loop pass sees a stale message long before that
+/// (only a pass blocked for over ~20 s could alias). A static, not a field:
+/// the Usbtmc lives in main.rs `run`'s frame (the worst stack path).
+static OUT_CYC: AtomicU32 = AtomicU32::new(0);
 /// The response terminator (`terminate`).
 const NL: u8 = b'\n';
 
@@ -172,6 +182,34 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
         } else {
             None
         }
+    }
+
+    /// Drop a Bulk-OUT message that stopped half-way: a header, payload or
+    /// padding still to come, or a transfer without EOM waiting for the rest
+    /// of its message, and no byte of it for OUT_STALE_MS. A host whose
+    /// process died in the middle of a write (Linux usbtmc kills the URB on
+    /// close and sends no clear) leaves that state; the next client's header
+    /// would then be read as the old message's payload and its command be
+    /// garbled or lost. Checked every main-loop pass and again when the
+    /// next packet arrives: a pass that blocked longer than OUT_STALE_MS
+    /// reads the new client's bytes before its own check, and their gap to
+    /// the old ones still tells (in the emulator the per-pass check alone
+    /// let a cut message eat the next query now and then; the cause was not
+    /// found). The other side, not observed: a main-loop stall of over
+    /// OUT_STALE_MS between two packets of one host message drops that
+    /// message. Not while a complete command waits for the application
+    /// (the endpoint is NAKed then, no byte can arrive).
+    #[inline(always)]
+    pub fn expire_partial(&mut self) {
+        if self.partial() && crate::prof::cyc().wrapping_sub(OUT_CYC.load(Relaxed)) >= OUT_STALE_CYC {
+            self.abort_out();
+        }
+    }
+
+    /// A Bulk-OUT message is part-way in (`expire_partial`).
+    #[inline(always)]
+    fn partial(&self) -> bool {
+        !self.cmd_ready && (self.hdr_len > 0 || self.out_left > 0 || self.out_pad > 0 || self.cmd_len > 0)
     }
 
     /// True once after INITIATE_CLEAR / INITIATE_ABORT_BULK_IN / a bus
@@ -354,6 +392,8 @@ impl<'a, B: UsbBus> Usbtmc<'a, B> {
     }
 
     fn on_out_bytes(&mut self, mut d: &[u8]) {
+        self.expire_partial();
+        OUT_CYC.store(crate::prof::cyc(), Relaxed);
         while !d.is_empty() {
             if self.out_left == 0 && self.out_pad == 0 {
                 // Header.

@@ -28,6 +28,20 @@ reply checked byte-exactly where it is deterministic:
   abortout a multi-packet command cut after its first packet,
            INITIATE_ABORT_BULK_OUT / CHECK_ABORT_BULK_OUT_STATUS / CLEAR_FEATURE
   read     READ? (a DMM reading; any number)
+  partial  a dead client's message cut after its first packet (header +
+           52 bytes of 150, no abort, no clear: Linux usbtmc kills the URB
+           on close and sends nothing else), then after 2 s (virtual
+           time, from the DBG:PING? uptime) a plain
+           query must answer (opendm40 drops the stale part after
+           usbtmc::OUT_STALE_MS; before that the next header was read as
+           its payload)
+  session  tools/dm40dbg.py's own upload (cmd_upload, over this USB/IP
+           link: DbgLink) of a small valid update file, after an earlier
+           client left an error in the queue (an undefined command) and,
+           half the time, a cut message (as `partial`): the upload must
+           succeed (it failed with the stale -113 "Undefined header" at
+           DBG:UPLOAD:BEGIN, TODO "reload.sh first-upload failures"); a
+           second BEGIN + ABORT then deletes the DM40FW.BIN again
   compound one message mixing commands the main loop runs later (OUTP,
            SOUR:FREQ with suffixes and with bad values (no reply, the
            error queue in order),
@@ -45,16 +59,25 @@ seconds) and the run stops with the history of the last exchanges (and,
 with --monitor PORT, the USBFS registers read through the Renode monitor).
 """
 import argparse
+import atexit
+import contextlib
+import io
 import random
 import re
 import socket
 import struct
 import sys
+import tempfile
 import time
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import usbip_client as u  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'firmware', 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'stock'))
+import dm40dbg  # noqa: E402
+import dm40fw  # noqa: E402
 
 DEV_DEP_MSG_OUT, REQUEST_DEV_DEP_MSG_IN = 1, 2
 # The native identity; its serial field (the chip UID as 24 hex digits,
@@ -186,6 +209,50 @@ class Tmc:
     def query(self, text, **kw):
         self.write(text)
         return self.read(what=text[:40], **kw)
+
+    def device_clear(self):
+        """INITIATE_CLEAR, CHECK_CLEAR_STATUS until done (reading Bulk-IN
+        up to a short packet while PENDING), CLEAR_FEATURE(HALT) of
+        Bulk-OUT: what Linux usbtmc's USBTMC_IOCTL_CLEAR sends."""
+        st = self.ctl_in(0xA1, 5, 0, self.iface, 1, 'INITIATE_CLEAR')
+        self.note('INITIATE_CLEAR -> %s' % st.hex())
+        if st[0] != 0x01:
+            raise IOError('INITIATE_CLEAR %s' % st.hex())
+        for _ in range(200):
+            cs = self.ctl_in(0xA1, 6, 0, self.iface, 2, 'CHECK_CLEAR_STATUS')
+            self.note('CHECK_CLEAR_STATUS -> %s' % cs.hex())
+            if cs[0] == 0x02:
+                if cs[1] & 1:
+                    while len(self.bulk_in(64, 'clear drain')) == 64:
+                        pass
+                continue
+            if cs[0] != 0x01:
+                raise IOError('CHECK_CLEAR_STATUS %s' % cs.hex())
+            break
+        else:
+            raise IOError('clear: still pending')
+        self.ctl_out(0x02, 1, 0, self.ep_out, 'CLEAR_FEATURE(HALT) OUT')
+
+
+class DbgLink(dm40dbg.Link):
+    """tools/dm40dbg.py's Link over this USB/IP connection instead of
+    /dev/usbtmcN: its own query / try_query / upload code runs unchanged."""
+
+    def __init__(self, tmc):
+        self.t, self.fd, self.cleared = tmc, None, 0
+
+    def write(self, cmd):
+        self.t.write(cmd)
+
+    def write_raw(self, msg):
+        self.t.note('OUT raw %r' % msg[:40])
+        self.t.bulk_out(self.t.out_msg(msg), 'DEV_DEP_MSG_OUT raw %r' % msg[:30])
+
+    def read(self, n=1 << 16):
+        return self.t.read(what='dm40dbg read')
+
+    def clear(self):
+        self.t.device_clear()
 
 
 def nl(got, what):
@@ -343,24 +410,7 @@ class Stress:
             tag, req = self.t.req_msg(self.r.choice([4096, 20, 5]))
             self.t.bulk_out(req, 'REQUEST before clear')
         time.sleep(self.d())
-        st = self.t.ctl_in(0xA1, 5, 0, self.t.iface, 1, 'INITIATE_CLEAR')
-        self.t.note('INITIATE_CLEAR -> %s' % st.hex())
-        if st[0] != 0x01:
-            raise IOError('INITIATE_CLEAR %s' % st.hex())
-        for _ in range(200):
-            cs = self.t.ctl_in(0xA1, 6, 0, self.t.iface, 2, 'CHECK_CLEAR_STATUS')
-            self.t.note('CHECK_CLEAR_STATUS -> %s' % cs.hex())
-            if cs[0] == 0x02:
-                if cs[1] & 1:
-                    while len(self.t.bulk_in(64, 'clear drain')) == 64:
-                        pass
-                continue
-            if cs[0] != 0x01:
-                raise IOError('CHECK_CLEAR_STATUS %s' % cs.hex())
-            break
-        else:
-            raise IOError('clear: still pending')
-        self.t.ctl_out(0x02, 1, 0, self.t.ep_out, 'CLEAR_FEATURE(HALT) OUT')
+        self.t.device_clear()
         expect(self.t.query('*IDN?', delay=self.d()), self.idn(), '*IDN? after clear')
 
     def c_abortin(self):
@@ -390,6 +440,54 @@ class Stress:
             raise IOError('CHECK_ABORT_BULK_OUT_STATUS %s' % cs.hex())
         self.t.ctl_out(0x02, 1, 0, self.t.ep_out, 'CLEAR_FEATURE(HALT) OUT')
         expect(self.t.query('*IDN?', delay=self.d()), self.idn(), '*IDN? after abort-out')
+
+    def cut_message(self):
+        """A dead client's message: its first packet only (header + 52 of
+        150 bytes), no abort, no clear."""
+        msg = self.t.out_msg((b'*CLS;' * 30)[:-1] + b'\n')
+        self.t.note('cut message tag %d: 64 of %d bytes' % (msg[1], len(msg)))
+        self.t.bulk_out(msg[:64], 'cut message first packet')
+
+    def uptime(self):
+        return int(nl(self.t.query('DBG:PING?'), 'DBG:PING?').split(b',')[0]), time.monotonic()
+
+    def c_partial(self):
+        # 2 s of virtual time, twice OUT_STALE_MS (the emulator runs slower
+        # than the wall clock under load, and not evenly): its rate from two
+        # DBG:PING? 0.5 s apart.
+        v0, w0 = self.uptime()
+        time.sleep(0.5)
+        v1, w1 = self.uptime()
+        rate = max((v1 - v0) / 1000 / max(w1 - w0, 1e-3), 0.05)
+        self.cut_message()
+        self.t.note('virtual time rate %.2f: waiting %.1f s' % (rate, min(2 / rate, 30)))
+        time.sleep(min(2 / rate, 30))
+        expect(self.t.query('*IDN?', delay=self.d()), self.idn(), '*IDN? after a cut message')
+
+    def c_session(self):
+        # The earlier client: an undefined command (its -113 stays queued:
+        # nobody read SYST:ERR?), maybe a cut message.
+        self.t.write('FOO:BAR')
+        if self.r.random() < 0.5:
+            self.cut_message()
+        path = os.path.join(SESSION_DIR, 'dm40_session_%d.bin' % os.getpid())
+        if not os.path.exists(path):
+            with open(path, 'wb') as f:
+                f.write(dm40fw.build(bytes(range(256)) * 8, pad=True))
+            atexit.register(os.remove, path)
+        ln = DbgLink(self.t)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                r = dm40dbg.cmd_upload(ln, path, quiet=True)
+        except SystemExit as e:
+            raise IOError('dm40dbg upload after a stale client: %s (output %r)' % (e, out.getvalue()))
+        if r != 0 or 'earlier client' not in out.getvalue():
+            raise IOError('dm40dbg upload returned %r, output %r (want 0 and the stale error reported)' % (r, out.getvalue()))
+        # BEGIN deletes every dm40*.bin of the root: the disk as before.
+        self.t.write('DBG:UPLOAD:BEGIN 128,0')
+        self.t.write('DBG:UPLOAD:ABORT')
+        self.drain_errors()
 
     def c_read(self):
         rep = nl(self.t.query('READ?', delay=self.d()), 'READ?')
@@ -450,7 +548,10 @@ class Stress:
                 return
 
 
-CASES = dict(pair=8, combo=3, split=2, big=3, small=3, pipe=3, stale=2, clear=2, abortin=2, abortout=1, read=1, compound=3)
+CASES = dict(pair=8, combo=3, split=2, big=3, small=3, pipe=3, stale=2, clear=2, abortin=2, abortout=1, read=1, compound=3,
+             partial=1, session=1)
+# The small update file of the `session` case.
+SESSION_DIR = tempfile.gettempdir()
 
 
 def monitor_dump(port):
