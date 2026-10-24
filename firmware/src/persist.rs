@@ -1,10 +1,22 @@
-//! Settings kept in the 4 KiB backup SRAM (0x40024000): it survives resets and,
-//! with the backup domain powered, power-off. (The stock firmware keeps its
-//! user settings in config.bin on the SPI disk.) Layout: magic, version,
-//! payload, CRC32; anything that does not check out falls back to defaults.
-//! The boot shim's words at the end of the 4 KiB (boot.rs, 0x40024FF0..) are
-//! outside the record (v5: 0x40024000..0x400240CB).
+//! Settings: the live copy in the 4 KiB backup SRAM (0x40024000), a copy on
+//! the SPI disk in `_SETTING.BIN` (setfile.rs). The backup SRAM keeps its
+//! content over a reset and a firmware update, but it is not powered while
+//! the meter is off (device 2026-10-24: POR + BOR after a key power-off, the
+//! record gone), so the file copy is what survives a power-off. The stock
+//! firmware keeps its own settings in config.bin on the same disk; neither
+//! firmware touches the other's file.
+//!
+//! Backup SRAM layout: magic, version, payload, CRC32; anything that does not
+//! check out falls back to the file copy, then to the defaults. The file
+//! slots carry the same version and payload (setfile.rs), decoded through
+//! the same `words_of` table, so an older record migrates the same way from
+//! either copy. `seq` (two words below the boot shim's) is the file
+//! sequence number the backup SRAM copy continues: at boot a file slot with
+//! a higher one is newer than the backup SRAM. The boot shim's words at the
+//! end of the 4 KiB (boot.rs, 0x40024FF0..) are outside the record (v10:
+//! 0x40024000..0x4002410B).
 
+#[cfg_attr(not(target_os = "none"), allow(unused_imports))]
 use crate::mmio::{modify32, r32, w32};
 
 const RCU_AHB1EN: u32 = 0x4002_3830;
@@ -31,7 +43,7 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v10: 64 words; p[62..64] W_LIM_W, the power meter's W limits (lower /
 /// upper, f32 bits; their on / set bits are bit 17 of p[18] and bits 9 / 25
 /// of p[19], 0 in older records = off / unset).
-const VERSION: u32 = 10;
+pub const VERSION: u32 = 10;
 pub const WORDS: usize = 64;
 const V9_WORDS: usize = 62;
 /// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
@@ -57,12 +69,36 @@ pub const W_DMM_EXT: usize = 38;
 /// f32 bits with the sign bit set (app.rs persist_words / restore).
 pub const W_GEN_OFFS: usize = 39;
 const V3_WORDS: usize = 24;
-/// The record (magic, version, WORDS, CRC) must end below the boot shim's
-/// words at 0x40024FF0 (boot.rs BKP_CRASH..BKP_LAST).
-const _: () = assert!(BKP + 4 * (WORDS as u32 + 3) <= 0x4002_4FF0, "persist record overlaps the boot words");
+/// The file sequence number the backup SRAM copy continues (`seq`): the
+/// value and its complement, below the boot shim's words.
+const BKP_SEQ: u32 = 0x4002_4FE8;
+/// The record (magic, version, WORDS, CRC) must end below the sequence words
+/// and they below the boot shim's words at 0x40024FF0 (boot.rs
+/// BKP_CRASH..BKP_LAST).
+const _: () = assert!(BKP + 4 * (WORDS as u32 + 3) <= BKP_SEQ, "persist record overlaps the sequence words");
+const _: () = assert!(BKP_SEQ + 8 <= 0x4002_4FF0, "persist sequence words overlap the boot words");
 const V2_WORDS: usize = 16;
 
-fn crc(words: &[u32]) -> u32 {
+/// Payload words of a record of format `version` (2..VERSION), None for a
+/// version this build does not know. Shared by the backup SRAM and the file
+/// slots (setfile.rs): an older record is loaded zero-extended to `WORDS`.
+pub fn words_of(version: u32) -> Option<usize> {
+    Some(match version {
+        VERSION => WORDS,
+        9 => V9_WORDS,
+        8 => V8_WORDS,
+        7 => V7_WORDS,
+        6 => V6_WORDS,
+        5 => V5_WORDS,
+        4 => V4_WORDS,
+        3 => V3_WORDS,
+        2 => V2_WORDS,
+        _ => return None,
+    })
+}
+
+/// CRC-32 (IEEE, as calbackup::crc32) of the words' little-endian bytes.
+pub fn crc(words: &[u32]) -> u32 {
     let mut c = 0xFFFF_FFFFu32;
     for &w in words {
         for b in w.to_le_bytes() {
@@ -75,6 +111,7 @@ fn crc(words: &[u32]) -> u32 {
     !c
 }
 
+#[cfg(target_os = "none")]
 pub fn init() {
     unsafe {
         modify32(RCU_APB1EN, 0, 1 << 28); // PMU
@@ -100,18 +137,7 @@ pub fn load() -> Option<Record> {
         return None;
     }
     let version = rd(1);
-    let n = match version {
-        VERSION => WORDS,
-        9 => V9_WORDS,
-        8 => V8_WORDS,
-        7 => V7_WORDS,
-        6 => V6_WORDS,
-        5 => V5_WORDS,
-        4 => V4_WORDS,
-        3 => V3_WORDS,
-        2 => V2_WORDS,
-        _ => return None,
-    };
+    let n = words_of(version)?;
     let mut p = [0u32; WORDS];
     for (i, w) in p[..n].iter_mut().enumerate() {
         *w = rd(2 + i);
@@ -129,6 +155,7 @@ pub fn load() -> Option<Record> {
 /// The boot shim records every normal opendm40 boot in BKP_LAST
 /// (boot.rs; DBG:UPDATE / DBG:RECOVER clear it, a recovery leaves "RCVR"), so
 /// only a previous boot that was a normal opendm40 one continues the mode.
+#[cfg(target_os = "none")]
 pub fn same_session() -> bool {
     // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
     const LAST_NORMAL: u32 = 0x4C4D_524E;
@@ -143,5 +170,38 @@ pub fn save(p: &[u32; WORDS]) {
             w32(BKP + 8 + 4 * i as u32, v);
         }
         w32(BKP + 8 + 4 * WORDS as u32, crc(p));
+    }
+}
+
+/// Version and stored CRC of the backup SRAM record, without checking the
+/// CRC (setfile.rs `poll`: a cheap "did it change" per main-loop pass; the
+/// copy into the file checks it). None: no record of a known version.
+#[inline(always)]
+pub fn stored() -> Option<(u32, u32)> {
+    let rd = |i: usize| unsafe { r32(BKP + 4 * i as u32) };
+    if rd(0) != MAGIC {
+        return None;
+    }
+    let n = words_of(rd(1))?;
+    Some((rd(1), rd(2 + n)))
+}
+
+/// Payload word `i` of the backup SRAM record (setfile.rs copies it).
+#[inline(always)]
+pub fn word(i: usize) -> u32 {
+    unsafe { r32(BKP + 8 + 4 * i as u32) }
+}
+
+/// The file sequence number the backup SRAM copy continues, None when the
+/// two words do not check out (power-on, an older build).
+pub fn seq() -> Option<u32> {
+    let (s, n) = unsafe { (r32(BKP_SEQ), r32(BKP_SEQ + 4)) };
+    if s == !n { Some(s) } else { None }
+}
+
+pub fn set_seq(s: u32) {
+    unsafe {
+        w32(BKP_SEQ, s);
+        w32(BKP_SEQ + 4, !s);
     }
 }

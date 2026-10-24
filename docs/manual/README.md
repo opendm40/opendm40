@@ -2499,20 +2499,29 @@ before.
 | Kept | Not kept |
 |---|---|
 | All [settings](#settings) except **USB disk** | **USB disk** (back to Files live) |
-| Multimeter: the function, the autorange choices, Low current Ω, the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, Low current Ω, the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements, display settings and the FFT settings | The trigger mode: the scope starts running, in trigger mode Auto |
 | Generator: the waveform, frequency, amplitude, offset and duty | The output: off after power-on |
 
-The stock firmware keeps its own settings separately; switching between the
-two firmwares does not mix them. After the stock firmware has run, opendm40
-starts on DC V.
+The meter saves the settings to its internal disk, in the file
+`_SETTING.BIN`, about 5 s after the last change and again when it switches
+off: by the power key, the two-finger swipe or the **Shutdown** timer. The file has
+two copies, written in turn, so an interrupted save keeps the one before.
+A change made in the last few seconds before the battery is removed, or
+before the meter loses power in another way, can be lost. A restart keeps
+everything, also without the file.
+
+The stock firmware keeps its own settings separately, in `config.bin`;
+switching between the two firmwares does not mix them. After the stock
+firmware has run, opendm40 starts on DC V.
 
 ## Known limitations
 
 Untested on a real meter:
 
 - Getting started and recovery: keeping the settings across a full
-  power-off (a restart keeps them); installing over the stock firmware's
+  power-off (the copy in `_SETTING.BIN`; tested in the emulator only);
+  installing over the stock firmware's
   **USB Connect** disk; the update from the **PC can edit** disk; entering
   the update loader with the power key; the automatic entry after repeated
   hangs.

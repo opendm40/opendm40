@@ -495,9 +495,13 @@ pub fn finish_disk_writes(now: u64) {
     crate::screenshot::prep_finish();
 }
 
-/// Power off as the stock: both analog rails / power hold low.
+/// Power off as the stock: both analog rails / power hold low. The callers
+/// save the settings to the backup SRAM first (App::persist_now); the copy
+/// in the settings file is brought up to date here (setfile.rs), after the
+/// other disk writers finished.
 fn power_off() -> ! {
     finish_disk_writes(0);
+    crate::setfile::flush();
     unsafe {
         w32(0x4002_1000 + 0x18, 1 << (2 + 16)); // PE2 = 0
         w32(0x4002_0800 + 0x18, 1 << (4 + 16)); // PC4 = 0
@@ -652,7 +656,10 @@ impl App {
             fast_req: None,
         };
         crate::persist::init();
-        if let Some(rec) = crate::persist::load() {
+        // The backup SRAM record, or the newer / only copy in the settings
+        // file on the SPI disk (setfile.rs; after a power-off the backup
+        // SRAM holds none).
+        if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             a.restore(&rec, crate::persist::same_session(), clk);
         }
         backlight(a.backlight);
@@ -1478,6 +1485,7 @@ impl App {
         // Nor during a CSV recording (Record page: a 24 h log on battery;
         // decisions-2026-10-22.md #1).
         if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+            self.persist_now();
             power_off();
         }
         // Not while a screenshot reads the panel (its toast would land in the
@@ -1535,6 +1543,7 @@ impl App {
             (false, Some(_)) => {
                 self.pd6_since = None;
                 if self.pd6_off {
+                    self.persist_now();
                     power_off();
                 }
                 if self.pd6_click.take().is_some() {
@@ -1919,7 +1928,14 @@ impl App {
         // units upgraded from it start in the new Auto default.) Bit 14: SCPI
         // *IDN? emulation (SYST:IDN:EMUL 34401A; never used before, 0 = OFF).
         p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
-        p[2] = self.dmm.func() as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
+        // The DMM function as restore_func starts it: AUTO's own steps
+        // between V and mV (modes 2 / 3 <-> 0 / 1) are no settings change
+        // (setfile.rs: a save per change).
+        let f = match self.dmm.func() {
+            f @ (2 | 3) => f - 2,
+            f => f,
+        };
+        p[2] = f as u32 | (self.dmm.v_auto() as u32) << 8 | (self.dmm.a_auto() as u32) << 16 | (self.dmm.ohm_var() as u32) << 24;
         p[3] = Wave::ALL.iter().position(|&w| w == g.wave).unwrap_or(0) as u32 | (g.duty as u32) << 8;
         p[4] = g.freq_hz;
         p[5] = g.amp_v.to_bits();
@@ -2098,13 +2114,22 @@ impl App {
         self.cursors_from_selection();
     }
 
-    /// Save the settings now and then (cheap: 40 words of backup SRAM).
+    /// Save the settings now and then (cheap: 64 words of backup SRAM; the
+    /// SPI-disk copy follows from main.rs, setfile::poll).
     pub fn persist(&mut self, now: u64) {
         if now >= self.persist_next {
             self.persist_next = now + 2000;
-            let w = self.persist_words();
-            crate::persist::save(&w);
+            self.persist_now();
         }
+    }
+
+    /// The settings into the backup SRAM at once (before a power-off). Not
+    /// inlined: the 256-byte word array is gone before power_off's disk
+    /// writes run.
+    #[inline(never)]
+    fn persist_now(&self) {
+        let w = self.persist_words();
+        crate::persist::save(&w);
     }
 
     /// Index of the current range in the MF page list.
@@ -2516,6 +2541,7 @@ impl App {
                 (crate::dialog::Overlay::PowerOff { .. }, Gesture::Tap(p)) => match crate::dialog::power_off_hit(p.x, p.y) {
                     Some(true) => {
                         backlight(0);
+                        self.persist_now();
                         power_off();
                     }
                     Some(false) => self.overlay_close(),

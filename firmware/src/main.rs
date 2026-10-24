@@ -1551,6 +1551,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw || force_draw);
+        // The settings' copy on the SPI disk (setfile.rs): a few seconds
+        // after a change, never during an AD1 logger session.
+        setfile::poll(now, logger.disk_writes_blocked());
         if force_draw {
             dialog::log_panel_reset(); // the repaint covered it: draw it again
         }
@@ -2293,6 +2296,7 @@ mod fastenc;
 mod fastlog;
 mod gallery;
 mod fatdir;
+mod setfile;
 mod upload;
 mod native;
 mod uid;

@@ -180,7 +180,8 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 - Backup domain (RTC, backup SRAM): not powered while the meter is off. After
   a power-off by the key, the next boot shows the POR and BOR reset flags and
   the 4 KiB backup SRAM content is gone; a reset or a firmware update keeps
-  it. LSE (32 kHz crystal): not traced.
+  it. opendm40 therefore keeps a copy of its settings on the SPI flash
+  ([`firmware/src/setfile.rs`](../firmware/src/setfile.rs)). LSE (32 kHz crystal): not traced.
 
 ## SPI flash (USB disk)
 

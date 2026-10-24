@@ -1993,6 +1993,23 @@ written / conflict / differs = decimal bit masks (bit 0 CALIB, 1 BOOTDATA,
 (and recognises the old `UNCHANGED` / `WRITTEN` / `_NOFW` statuses of earlier
 builds).
 
+### Settings copy (SPI disk root, [`src/setfile.rs`](../src/setfile.rs))
+
+The backup SRAM, the live copy of the settings ([`src/persist.rs`](../src/persist.rs)),
+is not powered while the meter is off ([hw/README.md](../../hw/README.md) "Backup
+domain"). `_SETTING.BIN` (8 KiB, root) holds two one-block slots, each with
+the persist version, a sequence number and a CRC-32; `setfile::boot`
+(`pre_main`, after `fatdir::boot`) makes it once (all 0xFF; seeded from a
+valid backup SRAM record), later saves rewrite one slot's block in place (no
+FAT or directory write). App::new takes the backup SRAM record unless the
+newest slot's sequence is higher than `persist::seq`; without a valid
+backup SRAM record the newest valid slot; else the defaults. Saves: 5 s
+after the last change (main loop, `setfile::poll`), deferred while another
+disk writer, an AD1 logger session or the AD2 stream runs; at every
+power-off (`power_off`, after `finish_disk_writes`). `DBG:BOOT?` appends
+`SETTINGS,<BKP|FILE|DEFAULTS>,<slot|->,<seq>,SETFILE,<state>,SAVE,<status>,<saves>,<seq>`.
+Host test: fatren-test "setfile"; emulator: [`emu/settingstest.py`](../../emu/settingstest.py).
+
 ### Host tests (`tools/fatren-test/run.sh`, every check fatal)
 
 Safety copy: first boot writes exactly the three files (nothing else); second
