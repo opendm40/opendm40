@@ -19,7 +19,7 @@ Cases (each on a fresh copy of the MSC dump: no _SETTING.BIN yet):
          SETFILE,PRESENT, SYST:ALER:ALAR? VOLUME.
   key    SYST:ALER:ALAR OFF at uptime ~29 s, the power key held at virtual
          30..32 s (run.py power-hold: off at the release), so no timed save
-         can come first (DBG:BOOT? just before: no save yet). Second boot:
+         can come first (DBG:BOOT?: the save count unchanged after the change). Second boot:
          SETTINGS,FILE, SYST:ALER:ALAR? OFF.
 Exit status 0 = PASS. Per-process names, private disk copies; USB/IP port in
 63900-63999 unless --port.
@@ -142,10 +142,13 @@ def case(name):
         else:
             while int(l.q('DBG:PING?').split(',')[0]) < (KEY_AT - 1.0) * 1000:
                 time.sleep(0.1)
+            # (The defaults of the first boot were saved ~5 s after it.)
+            n0 = settings(l.q('DBG:BOOT?'))
             l.w('SYST:ALER:ALAR %s' % want)
             s = settings(l.q('DBG:BOOT?'))
             up = l.q('DBG:PING?').split(',')[0]
-            check(s[s.index('SAVE') + 2] == '0', 'no save yet right before the key (%s, uptime %s ms)' % (','.join(s), up))
+            check(s[s.index('SAVE') + 2] == n0[n0.index('SAVE') + 2],
+                  'no save of the change before the key (%s, uptime %s ms)' % (','.join(s), up))
         check(l.q('SYST:ALER:ALAR?') == want, 'setting now %s' % want)
         l.close()
         # The run's end saves the SPI flash (--save-disk).
