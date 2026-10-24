@@ -28,7 +28,7 @@ picture again, long press the **A** button, or **MF > Wiring**.
 
 On entry both inputs autorange: V starts on 600 V, I on 10 A and steps
 down. Until the current range is found, the page shows the voltage and **I
-ranging...** (up to about 10 s).
+ranging...** (a few seconds).
 
 ## The screen
 
@@ -86,7 +86,7 @@ AC part (**AC present: use AC+DC**).
 | **A** ranges 600uA, 6mA, 60mA, 600mA, 6A, 10A, AUTO | Fix the current range, or autorange. |
 | **At load** | OFF (default): V and P at the jacks. ON: subtracts the meter's own voltage drop, so V and P are those at the load. **@load** marks the values. Use it when the V lead is on the source side (the normal wiring). |
 | **Zero** | Measures and stores the zero offsets. Disconnect the leads and nothing in A; takes about 12 s. Refused if a signal is present. |
-| **V cal** | Calibrates the power meter's voltage against the multimeter's own DC V or AC V on the current range: apply a steady voltage of 10 % to 70 % of the range; takes about 8 s. |
+| **V cal** | Calibrates the power meter's voltage against the multimeter's own DC V or AC V on the current range: apply a steady voltage of 10 % to 70 % of the range (DC: up to 100 %); takes about 8 s. |
 | **DC / AC / AC+DC** | The coupling; the help line explains the chosen one. |
 | **Reset Wh** | Resets Wh, VAh and the time at once. |
 | **Wiring** | Shows the wiring picture. |

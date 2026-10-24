@@ -18,7 +18,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   - Record bar: while stopped, brackets show which part of the stored
     record is on screen; **ROLL** in roll mode; **G 1.00kHz** while the
     generator runs.
-  - **MCX | DMM**: the input source; tap to switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
+  - **MCX | DMM**: the input source (MCX is the **CHA** jack); tap to switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Graph**: 10 × 8 divisions. On the left edge, the markers **A** (the
   trace's zero), **T** (trigger level) and **M** (math / FFT). On the top
   edge, **T** marks the trigger position.
@@ -121,8 +121,9 @@ A second finger during a drag undoes it.
 
 Press **AUTO**. The scope looks for a signal and sets the V/div, the
 position, the trigger level (middle of the signal) and the timebase (about 2
-to 6 periods on screen). It takes 1 to 2 s; **MENU** cancels and restores
-the old settings.
+to 6 periods on screen). It takes 1 to 2 s and leaves the trigger mode on
+Auto. **MENU** cancels (the old settings come back) and opens the main
+menu.
 
 - AC coupling stays AC. Only if nothing is found in AC does it switch to DC
   and say **AUTO: DC (no AC signal)**.
@@ -228,7 +229,8 @@ To open it:
 - If the multimeter was in autorange, the Wave view steps up a range when
   the signal nears the top.
 - Timebase: 1 ms/div to 50 s/div. Sample rate: 76 800/s at 1 ms/div, down
-  to 1200/s from 200 ms/div. Opens at 10 ms/div.
+  to 1200/s from 200 ms/div. Opens at 10 ms/div the first time, then at the timebase you last used in
+  it (until you switch the meter off).
 - Coupling: AC V is AC-coupled; tap the V/div in the top bar or **CHA** to
   switch between the DC V and the AC V signal path. AC mV and the current
   paths are DC-coupled. DC A uses the AC A path (DC-coupled).
@@ -243,7 +245,7 @@ To leave: tap the badge (back to the CHA input), press **MENU** or change
 the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
-meter, nor while a recording or a fast recording runs; the meter says why.
+meter, nor while a recording runs; the meter says why.
 
 ## What is kept
 
