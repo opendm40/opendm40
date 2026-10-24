@@ -37,6 +37,7 @@ forum post number).
 ## Contents
 
 - [Block diagram](#block-diagram)
+  - [Isolation boundary](#isolation-boundary)
 - [Main parts](#main-parts)
 - [MCU and clocks](#mcu-and-clocks)
 - [SPI flash (USB disk)](#spi-flash-usb-disk)
@@ -44,6 +45,7 @@ forum post number).
 - [Touch panel and touch keys](#touch-panel-and-touch-keys)
 - [Power key, PA2, buzzer](#power-key-pa2-buzzer)
 - [Debug header and hardware recovery](#debug-header-and-hardware-recovery)
+  - [Hardware recovery](#hardware-recovery)
 - [USB](#usb)
 - [Bluetooth](#bluetooth)
 - [DMM front end (HY3131)](#dmm-front-end-hy3131)
@@ -175,8 +177,9 @@ Verified (owner, 2026-10-24): the DMM domain (HY3131, reference, divider,
 relay, shunts, banana jacks) is galvanically isolated from the MCU domain.
 The reasoning below predates that confirmation; it is kept because it is also
 the argument for what else is on the MCU / USB ground (inferred, from the BOM
-and the manual; first written in
-[docs/dm40-feature-request.md](../docs/dm40-feature-request.md)):
+and the manual; moved here from
+[docs/dm40-feature-request.md](../docs/dm40-feature-request.md) 1.2 on
+2026-10-24):
 
 1. The TP4056 runs from VBUS and charges the battery directly, so USB ground
    = battery ground.
@@ -197,11 +200,11 @@ Quick check that tells the sides apart (meter off, USB-C breakout):
 continuity USB GND - CHA / GEN shield (expected ~0 ohm) and USB GND - COM
 (expected open, > 1 Mohm). Not recorded as done in this repo.
 
-Where the two isolated supplies go is not settled: the BOM-based diagram in
-the feature request puts VPS8504B #1 + LT61-117 on the DMM side and
-VPS8504B #2 + LT61-113 on the MCU side as a negative supply for the analog
-front end (inferred there); this page draws both as the barrier (photos show
-both next to the DMM area). See [Unknowns](#unknowns).
+Where the two isolated supplies go is not settled: the feature request's
+BOM-based inference (2026-10-13, since moved here) put VPS8504B #1 + LT61-117
+on the DMM side and VPS8504B #2 + LT61-113 on the MCU side as a negative
+supply for the scope / generator front end; this page draws both on the
+barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 
 ## Main parts
 
@@ -630,11 +633,12 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 
 1. No schematic. The DMM domain's isolation is verified (owner, 2026-10-24);
    the rest of the topology (what else sits on which side, where each isolated
-   supply goes) is inferred from the BOM and the photos. The BOM-based
-   diagram in [docs/dm40-feature-request.md](../docs/dm40-feature-request.md)
-   put VPS8504B #2 + LT61-113 on the MCU side as a negative supply for the
-   analog front end; this page draws both supplies on the barrier, next to
-   the DMM area as in the photos. Not settled.
+   supply goes) is inferred from the BOM and the photos. An earlier
+   BOM-based inference (feature request, 2026-10-13; recorded in
+   [Isolation boundary](#isolation-boundary)) put VPS8504B #2 + LT61-113 on
+   the MCU side as a negative supply for the scope / generator front end;
+   this page draws both supplies on the barrier, next to the DMM area as in
+   the photos. Not settled.
 2. Which rail(s) hold the power on: PE2, PC4 or both; how the power key turns
    the unit on from off. [`fw-rs/src/boot.rs`](../fw-rs/src/boot.rs) and `native-boot.md` (shim
    steps) treat PE2 as the power hold; `native-boot.md` section 1 (older text)
@@ -671,3 +675,6 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
     barrier somehow, so the relay and MOSFET drive is the likelier load.
 16. Shock sensitivity of the latching relay (BOM post: false switching when
     shaken): not reproduced here.
+17. RTC power while off: the feature request (2026-10-13) assumed the RTC is
+    always powered from the main battery; nothing in this repo traces VBAT or
+    the LSE crystal, and it depends on which rail holds the power (item 2).
