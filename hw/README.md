@@ -226,30 +226,30 @@ barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 
 | Function | Part | Status / source |
 |---|---|---|
-| MCU | GigaDevice GD32F427VGT6, Cortex-M4F, LQFP100 | verified: marking `GD32F427 VGT6` in photo [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg); review; BOM |
+| MCU | GigaDevice [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F, LQFP100 | verified: marking `GD32F427 VGT6` in photo [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg); review; BOM |
 | MCU crystal | 25.000 MHz | verified: photo ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg), crystal next to the SPI flash) and PLL read back on the device ([`fw-rs/src/clock.rs`](../fw-rs/src/clock.rs)). The community BOM says 26 MHz (contradiction, see [Unknowns](#unknowns)) |
-| SPI flash | Winbond W25Q128JV, 16 MiB | verified in code ([`fw-rs/src/spiflash.rs`](../fw-rs/src/spiflash.rs), JEDEC check at boot); BOM. The BOM calls it QSPI: the chip can do quad I/O, but the board wires it as a plain 4-wire SPI ([SPI flash](#spi-flash-usb-disk)) |
-| LCD controller | ILI9488 (ID read 0x9488) | verified on the device (ID 0x9488 read by `board::init`, [`fw-rs/TODO.md`](../fw-rs/TODO.md) T1); stock init sequence `lcd_buzzer_v2_6.h`. Not in the BOM |
+| SPI flash | Winbond [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf), 16 MiB | verified in code ([`fw-rs/src/spiflash.rs`](../fw-rs/src/spiflash.rs), JEDEC check at boot); BOM. The BOM calls it QSPI: the chip can do quad I/O, but the board wires it as a plain 4-wire SPI ([SPI flash](#spi-flash-usb-disk)) |
+| LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | verified on the device (ID 0x9488 read by `board::init`, [`fw-rs/TODO.md`](../fw-rs/TODO.md) T1); stock init sequence `lcd_buzzer_v2_6.h`. Not in the BOM |
 | LCD panel | 3.5" IPS, 480 x 320, active area 74 x 50 mm | review |
 | Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | verified on the device ([`fw-rs/src/touch.rs`](../fw-rs/src/touch.rs)); GT1158 path from the stock code only. Not in the BOM (the touch controller sits on the panel FPC) |
 | Bluetooth | Jieli BP2A838-20A2, 24 MHz crystal, PCB meander antenna | BOM (custom Jieli chip, no public datasheet); antenna and 24.000 MHz crystal next to a chip with the Jieli logo in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
-| DMM front end | Hycon HY3131 | verified in code (register protocol, `hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
+| DMM front end | Hycon [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) | verified in code (register protocol, `hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
 | HY3131 crystal | 4.9152 MHz | verified: photo and stock constant 4915.2 (`hy3131_v2_6.h`) |
-| Voltage reference | MAX6190 (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM (also: placed outside the shield can, see [Unknowns](#unknowns)); 1.25 V reference voltage verified by the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
+| Voltage reference | [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM (also: placed outside the shield can, see [Unknowns](#unknowns)); 1.25 V reference voltage verified by the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
 | Divider network | TC1746B6 (B / C), 0.1 %, 10 ppm/°C; discrete resistors on the A | BOM; chat reports #25087, #51830 ([`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) 12) |
-| Digital isolator | Chipanalog CA-IS3741HW | verified marking: photos [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg), [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
-| Isolated supplies | 2 x VPS8504B push-pull driver + transformers LT61-117 and LT61-113; micropower (hundreds of mW, BOM) | verified markings: photos [isolated-supply-vps8504b-lt61.jpg](photos/isolated-supply-vps8504b-lt61.jpg), [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg) |
+| Digital isolator | Chipanalog [CA-IS3741HW](datasheets/chipanalog-ca-is374x-v1.08.pdf) | verified marking: photos [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg), [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
+| Isolated supplies | 2 x [VPS8504B](datasheets/vpsc-vps8504b-cn.pdf) push-pull driver + transformers LT61-117 and LT61-113; micropower (hundreds of mW, BOM) | verified markings: photos [isolated-supply-vps8504b-lt61.jpg](photos/isolated-supply-vps8504b-lt61.jpg), [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg) |
 | Optocouplers | 2 x EL3H7, 2 x "174 F163H" | what they carry is inferred: the BOM guesses the HY3131 INT plus the relay and MOSFET drive; see [Unknowns](#unknowns). BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg) |
-| DMM relay | Hongfa HFD4/3-LS (DPDT, 3 V, latching per BOM) | the BOM post blames this latching relay for false switching when the meter is shaken (not checked here). verified marking: photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
+| DMM relay | Hongfa [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) (DPDT, 3 V, latching per BOM) | the BOM post blames this latching relay for false switching when the meter is shaken (not checked here). verified marking: photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (chat report #41820) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is inferred from the markings only |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD "R500"), 47.5 ohm | 0.5 ohm verified marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and fw-rs checks (below) |
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); rating unknown |
-| Scope ADC | 3PEAK 3PA1030, 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 verified in code ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)) |
-| Scope gain mux | HC4051 (header says "HCF4051") | BOM, `scope_gen_v2_6.h` |
-| Scope op amp | "8091" (Gainsil GS8091?) | BOM, after gadefox in the EEVblog thread; the scope path is not traced, unconfirmed |
+| Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 verified in code ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)) |
+| Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, `scope_gen_v2_6.h` |
+| Scope op amp | "8091" (Gainsil [GS8091](datasheets/gainsil-gs8091.pdf)?) | BOM, after gadefox in the EEVblog thread; the scope path is not traced, unconfirmed |
 | Generator path switch | SGM3157 SPDT | chat report (#24902: killed by 12 V); [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md) 1 |
-| Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg); review |
+| Charger | [TP4056](datasheets/toppower-tp4056-cn.pdf) (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg); review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | verified: label in [battery-ln425272-label.jpg](photos/battery-ln425272-label.jpg) |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
 | Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK, verified; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). Flash read protection is set (level 1 in the option bytes; [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
@@ -516,7 +516,7 @@ seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
 
 ## Oscilloscope
 
-- ADC: 3PA1030, 10 bit, data on PB0..PB9 read as GPIOB IDR by DMA1, clocked by
+- ADC: [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, data on PB0..PB9 read as GPIOB IDR by DMA1, clocked by
   TIM8_CH1 on PC6 (AF3) at 50 MHz. verified ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)).
 - Sample rates: 50 MS/s down to 50 S/s (timer-paced DMA from the 50 MHz
   stream). The ADC never runs faster than 50 MS/s; at 100 and 200 ns/div the
