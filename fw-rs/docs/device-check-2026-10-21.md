@@ -3233,3 +3233,242 @@ from DBG:SENT:LOG? against DBG:PING? uptime), `settle.py` (item 2: FETC? every ~
 - **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
 - **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C, 0x0E and 0x2E
   (live). During the check: 1 V, 5 V, 24 V DC, output off, the 10 / 40 Hz square.
+
+## AD1 OSR characterization (10242c3) (2026-10-24 14:33 - 15:45)
+
+The numbers the DC rate / filter decision needs (dmm-rate-filter-survey.md §8.3 tests 1-4, option E). Reads
+only: AD1 streams through `LOG:SOURce AD1` + `LOG:OSR` / `LOG:CHOP` (no firmware change, no flashing), the
+calibrator on V-COM, DC V on the **6 V range, manual** (`VOLT:RANG 6`) for every stream. The meter ran 10242c3
+(`*IDN?` `Alientek,DM40A,<UID>,dm40-fw 0.1`). It was found on the DMM page, DC V AUTO+ (on the 60 V range,
+hunting on the 10 Hz square), **RATE MED**, Danger alarm **Loud** and key / alert volume **50 %** (the owner's
+settings: read, never changed; the run stayed in DC V, so no misconnect alarm). `OUTP?` 0 throughout. Files in
+the session scratchpad's `osr/`: `st.py` (stream helper: one session per CSV, the LOG:PREamble?, LOG:COUNt? and
+DBG:ISR? in its header), `model.py` (the dc-aliasing.md kernel), `lvl.py`, `fr.py`, `sqmean.py`, `settle.py`,
+`drift.py` (the runs), `an_lvl.py`, `an_fr.py`, `an_fr2.py`, `an_st2.py`, `an_drift.py` (analysis), and `out/`
+(one CSV per stream, logs, the analysis outputs `an_*.txt`, PNGs).
+
+**Scale.** Raw codes are converted with the meter's own calibration: (READ? at 5 V - READ? at 0 V) / (the 0x17
+code difference) = **1.6755 uV per code** on 6 V (nominal 1.389 V x 10 / 2^23 = 1.6557, +1.2 %); one display
+count (100 uV) = 59.7 codes. 1 V reads 597 000 codes, as expected. The codes R22 = 0x15 / 0x16 / 0x17 are
+OSR 8192 / 16384 / 32768 chopped, 0x06 / 0x07 OSR 16384 / 32768 unchopped. Measured periods: 100.782,
+**200.789** (new; not in dc-aliasing.md), 400.784, 99.995, 200.000 ms.
+
+**Logger quirk (not a converter effect).** Some sessions repeat each conversion: the record holds the same code
+twice, 50-80 ms apart (`fr_40_15.csv` right after a 640/s session: 121 copies in 294 records; `fr_40_16.csv` 149
+of 289; `fr_60_16.csv` 18). That is the main-loop sampler's rescue read (logger.rs `sample`) after `p_meas`
+locked below the period. The analysis drops a record equal to its predecessor; the conversion count then
+matches the session length / period (e.g. 140 for 28 s at 0x16). In those sessions the time stamps are not
+conversion times. dc-aliasing.md's "duplicated records at --osr 4 / 6" is the same thing.
+
+### 0 V: the calibrator cannot make a short
+
+No jumper is on the bench, so there is no real short. Two stand-ins: the calibrator at 0.000 V, output on ("0
+V"), and its output disabled ("off"). "Off" is the quieter one at every code (0x07: 33 vs 116 uV sd; 0x15: 40
+vs 58 uV), and 0 V drifted: 0x15 read +160 uV more at the end of its 4-min block than at the start. So the
+noise floor below comes from "off" (the calibrator's disabled output; its impedance is not known), and offsets
+are taken from "off" as well.
+
+### 1. Frequency response (the calibrator's square, 0 / 9.586 V)
+
+The calibrator's frequency output is a square only (func 2, frequencies in mHz); there is no sine. Its levels,
+from 640/s unchopped streams at 2.5 / 40 Hz: low 0.024 V (the OSR-256 offset), high 9.609 V, i.e.
+**A = 9.586 V** (a 0.1 V overshoot on the rising edge, ~10 ms). Its mean also changes with each re-setting by
+up to ~13 mV (4.736-4.818 V between settings), so the mean error below is measured against the in-session mean
+of the codes that null that frequency (minus each code's offset vs 0x17 from the 40 Hz square, where all null),
+not against an absolute mean. 2.5 and 16.7 Hz have no nulling code; there the reference is the mean of the
+codes whose alias beats more than 20 times in the window. Stream lengths: 20 s (0x15, 0x06), 30 s (0x16, 0x07),
+40 s (0x17), longer where the model beat is slow (0x16 at 5 Hz 115 s, 0x17 at 2.5 Hz 125 s); the first 2 s of
+each session are dropped.
+
+p-p = the reading's peak-to-peak over the window (V), in brackets the dc-aliasing.md kernel's p-p over all
+phases for this square (chopped: the mean of two sinc^2 conversions one measured P apart; unchopped: one
+sinc^2 per conversion). Mean error in mV; "(n beats)" = the window covered only n beats of a slow alias, so
+that mean is biased by the unfinished beat, not a converter error.
+
+| f, Hz | 0x15 p-p (model) | err | 0x16 p-p (model) | err | 0x17 p-p (model) | err | 0x06 p-p (model) | err | 0x07 p-p (model) | err |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2.5 | 9.583 (9.584) | +5.9 | 0.076 (0.077) | -7.3 | 3.515 (4.793) | (0.6 beats) | 9.255 (9.585) * | +9.2 | 4.617 (4.793) * | -7.8 |
+| 5 | 0.151 (0.152) | +0.5 | 4.793 (4.792) | (2.2 beats) | 0.0003 (0) | 0.0 | 2.620 (4.793) * | -7.1 | 0.0003 (0) | 0.0 |
+| 10 | 4.791 (4.792) | (2.3 beats) | 0.0004 (0) | +0.05 | 0.0003 (0) | 0.0 | 0.0004 (0) | +0.06 | 0.0003 (0) | -0.12 |
+| 16.7 | 0.301 (0.302) | +0.2 | 0.148 (0.149) | -0.5 | 0.0485 (0.0488) | +0.1 | 0.330 (0.330) | 0.0 | 0.0856 (0.0854) | +0.1 |
+| 20 | 0.0004 (0) | +0.2 | 0.0003 (0) | +0.1 | 0.0003 (0) | -0.1 | 0.0004 (0) | 0.0 | 0.0003 (0) | -0.2 |
+| 25 | 0.0298 (0.0300) | +0.2 | 0.191 (0.191) | (2.7 beats) | 0.0003 (0) | +0.2 | 0.191 (0.192) | -0.1 | 0.0003 (0) | -0.2 |
+| 40 | 0.0006 (0) | 0 (ref) | 0.0003 (0) | 0 | 0.0003 (0) | 0 | 0.0005 (0) | 0 | 0.0005 (0) | 0 |
+| 50 | 0.191 (0.191) | +0.5 | 0.0003 (0) | +0.2 | 0.0003 (0) | 0.0 | 0.0005 (0) | 0.0 | 0.0004 (0) | -0.2 |
+| 60 | 0.0003 (0) | +0.1 | 0.0003 (0) | +0.1 | 0.0002 (0) | 0.0 | 0.0004 (0) | 0.0 | 0.0004 (0) | -0.1 |
+
+\* An exact sub-multiple of the unchopped rate (0x06 at 2.5 / 5 Hz, 0x07 at 2.5 Hz): the conversions lock to
+fixed phases of the square, so the p-p depends on that phase; the model column is the maximum over all phases.
+0x17 at 2.5 Hz: the alias is 0.0049 Hz (a 203 s beat); 123 s showed 3.5 V of the predicted 4.79 V p-p.
+
+**The model holds at every code**: the p-p of all 45 streams agree with the kernel within 1 % (or within
+0.6 mV where the model says 0), the 10 Hz beat of 0x15 included (4.791 V p-p). Each code leaks 0.405 of the
+fundamental at the frequency equal to its reading rate (0x15: 10 Hz, 0x16 / 0x06: 5 Hz, 0x17 / 0x07: 2.5 Hz)
+and that leak beats near DC. Where a code nulls the input the reading's mean is right within +-0.2 mV
+(0.004 %, at the 0x07 / 0x15 noise). Where it leaks with a fast alias (16.7 Hz, 0x15 at 25 / 50 Hz) the mean is
+also right within 0.5 mV, but the reading itself swings by the p-p.
+
+**50 / 60 Hz rejection** (leak = p-p / 2 against the fundamental's 6.10 V peak). ">=": the p-p is at the floor of
+this setup, which is the 40 Hz square (every code nulls it): 0.3-0.6 mV p-p at ~4.8 V, the calibrator's level
+noise plus the converter's; the true rejection is at least the figure given:
+
+| | 0x15 | 0x16 | 0x17 | 0x06 | 0x07 |
+|---|---|---|---|---|---|
+| 50 Hz | **36.1 dB** (model 36) | >= 92 dB | >= 94 dB | >= 89 dB | >= 90 dB |
+| 60 Hz | >= 91 dB | >= 93 dB | >= 95 dB | >= 90 dB | >= 90 dB |
+
+Only 0x15 leaks mains (50 Hz, -36 dB, a 0.19 V p-p beat at 0.39 Hz for this 9.6 V square). The others are at
+the noise floor; the sinc^2 nulls are exact (crystal-timed), so the real rejection is set by how far the
+mains frequency is from 50.000 / 60.000 Hz, not measured here (the calibrator's frequency is accurate to
+~40 ppm).
+
+### 2. Noise per code (6 V range, 195-230 conversions each)
+
+sd and p-p over 18-83 s (the first 2 s dropped); counts = 100 uV display counts. "x sqrt(T)" = sd x sqrt(1 /
+rate), the noise for equal measuring time.
+
+| code | rate | off: sd uV (counts) | off: p-p uV | off: sd x sqrt(T), uV.s^0.5 | 0 V on: sd / p-p uV | 1 V: sd / p-p uV | 5 V: sd / p-p uV |
+|---|---|---|---|---|---|---|---|
+| 0x15 | 9.92/s | 39.7 (0.40) | 245 | 12.6 | 58 / 283 | 126 / 648 | 139 / 746 |
+| 0x16 | 4.98/s | **19.9 (0.20)** | 109 | **8.9** | 20 / 101 | 145 / 811 | 127 / 665 |
+| 0x17 | 2.50/s | 17.2 (0.17) | 96 | 10.9 | 20 / 161 | 161 / 754 | 126 / 578 |
+| 0x06 | 10.0/s | 35.3 (0.35) | 208 | 11.2 | 56 / 305 | 132 / 650 | 151 / 791 |
+| 0x07 | 5.00/s | 33.1 (0.33) | 174 | 14.8 | 116 / 529 | 130 / 603 | 139 / 687 |
+
+In codes: off sd 23.7 / 11.9 / 10.2 / 21.1 / 19.7 (0x15 / 16 / 17 / 06 / 07). At 1 V and 5 V every code reads
+125-160 uV sd: that is the calibrator's DC output noise (~25 ppm of 5 V), not the converter, so only the "off"
+column measures the converter. There:
+
+- 0x16 halves 0x15's sd (39.7 -> 19.9 uV, the white-noise sqrt(2) would give 28); **0x17 hardly improves on
+  0x16** (17.2 uV). For the same measuring time 0x16 is the quietest code; the floor of ~17-20 uV
+  (0.2 count) is reached at 0x16.
+- Unchopped is about as noisy as chopped at 10/s (0x06 35.3 uV vs 0x15 39.7), and at 5/s 0x07 (33.1 uV) is
+  no better than 0x06 and much worse than 0x16 (19.9): low-frequency (1/f) noise the chopper
+  removes.
+- The +1 digit (10 uV on 6 V) needs sd <~ 10 uV: 0x16 needs ~4 conversions averaged, 0x17 ~3, 0x15 ~16 (if the
+  noise averages down as white; not checked beyond these windows).
+
+### 3. Scale across codes, under one calibration
+
+Each level ran the codes back to back (0x15, 0x16, 0x17, 0x06, 0x07, 0x15 again), ~4.5 min per level. Mean
+differences vs 0x17, uV:
+
+| level | 0x15 | 0x16 | 0x06 | 0x07 | 0x15 repeat |
+|---|---|---|---|---|---|
+| off | -3.0 | -2.0 | **+22 222** | **+22 233** | -5.0 |
+| 0 V | +34.3 | +1.9 | +22 237 | +22 530 | +194.2 |
+| 1 V | -33.6 | -109.5 | +22 227 | +22 345 | +41.2 |
+| 5 V | +102.0 | +12.0 | +22 271 | +22 211 | +28.4 |
+| 4.81 V (40 Hz square, §1) | -140 | -130 | +22 240 | +22 400 | |
+
+Fit over 0 / 1 / 5 V (code mean = a x 0x17 mean + b): gain 0x15 +19 ppm, 0x16 +10, 0x06 +8, 0x07 -55, 0x15
+repeat -25 ppm; residuals up to 72 uV. The 0x15 repeat moves by up to 160 uV against the first 0x15 in the same
+block, so the calibrator's drift over a block (+-100 uV at 0-5 V) sets the resolution: **no gain difference
+between the five codes is resolved above ~50 ppm** (0.005 %, 2.5 counts at 5 V).
+
+**The unchopped offset is an offset, not gain: +22.22 mV at 0 V (off), +22.23 mV at 1 V, +22.27 mV at 5 V** (0x06;
+0x07 the same within its noise). That is the +22 mV dcalias saw at 4.74 V; on the 6 V range it is 222 counts,
+13 260 codes, i.e. ~2.2 mV at the AD1 input. The chopped codes agree with each other at "off" within 5 uV.
+
+### 4. Settling
+
+**0 -> 5 V step** (and 5 -> 0 V), `set_value` on the calibrator with its output left on, 3 steps per code at
+different phases. The calibrator itself, seen at 640/s: 10-90 % in ~40 ms, within 5 mV after ~190 ms (up) /
+~240 ms (down), and a slow tail: -2.1 mV at 0.4 s, -0.9 mV at 0.8 s, -0.25 mV at 3 s. Conversions after the
+first one that moved (mV vs the end of the plateau, the three steps):
+
+| code | conversion 1 (straddles) | conversion 2 | conversion 3 | conversion 4 | conv. 3 comes after |
+|---|---|---|---|---|---|
+| 0x15 | -3060..-4605 | -567..-2144 | -8..-41 | -2.6..-3.5 | 0.2 s |
+| 0x16 | -2605..-4955 | -107..-2477 | -1.7..-22 | -0.9..-1.5 | 0.4 s |
+| 0x17 | -3111..-4979 | -612..-2485 | -0.9..-5.1 | -0.4..-0.7 | 0.8 s |
+| 0x06 | -3741..-4357 | -342..-780 | -6.7..-11 | -2.5..-2.7 | 0.2 s |
+| 0x07 | -3916..-4986 | -330..-2361 | -2.2..-16 | -0.7..-1.4 | 0.4 s |
+
+(Down steps alike, mirrored.) At every code the first two conversions after a step are partial: the chopped
+kernel is two sinc^2 conversions one period apart, and the unchopped sinc^2 spans two periods, so neither
+settles faster per conversion. The third conversion's residual is the calibrator's own ~20 ms edge and tail
+(larger at the fast codes, which sample the tail earlier). So: **first good reading = the third conversion
+after the step**, 0.2-0.3 s at 0x15 / 0x06, 0.4-0.6 s at 0x16 / 0x07, 0.8-1.2 s at 0x17.
+
+**Range change.** A range command during a session is refused (`VOLT:RANG 60` mid-stream: `-100 "Settings
+conflict"`, the session ran on), so this measures the session start on 6 V with 5 V applied, either straight
+(already on 6 V) or right after `VOLT:RANG 60` -> `VOLT:RANG 6` (the session started immediately after the range
+command), 2 reps each. Conversions 1, 2, 3 vs the settled value (mV):
+
+| code | 6 V -> session | 60 V -> 6 V -> session | 3rd conversion at |
+|---|---|---|---|
+| 0x15 | +4540, +4540, 0.1 | -11000..-11700, -8700..-9500, 0.1 | 0.33 s |
+| 0x16 | 0.1, 0.0, 0.1 | -2800..-4100, -560..-1890, 0.4 | 0.5-0.7 s |
+| 0x17 | 0.4, 0.4, 0.3 | -2970..-3520, -720..-1270, 0.3 | 1.0 s |
+| 0x06 | +9030, -10040, 0.1 | -3040..+5070, -2020..-2690, 0.2 | 0.2-0.36 s |
+| 0x07 | -2510..-2530, 0..-11, 0.0 | -2550..-4580, -11..-1130, 0.2 | 0.44-0.56 s |
+
+**A range change costs two conversions at every code**: after 60 V -> 6 V the first two are wrong by volts
+(the second still by 0.01-2.7 V), the third is within 0.4 mV. Without a range change a session start at 0x16
+/ 0x17 is clean from the first conversion; at 0x15 / 0x06 / 0x07 its first one or two records are stale codes
+(+4.5 V, +9 V, -2.5 V off; the previous session's AD1 state), so the logger alone does not separate those two
+cases there. The DMM path has its own discard rules, not measured here.
+
+### 5. Option E: unchopped 0x06 as FAST
+
+Noise and rejection are in §1-2: at 10/s, 0x06 is about as quiet as 0x15 (35.3 vs 39.7 uV sd, 0.35 vs 0.40 count)
+and rejects 50 Hz by >= 89 dB instead of 36 dB; its blind spot moves from 10 Hz to 5 Hz (0.405 leak). Gain
+equals the chopped codes within the ~50 ppm resolution of §3. What is left is the offset.
+
+**Offset drift**: 10 blocks of 0x06 (28 s) and 0x16 (28 s) alternated for 9.5 min, calibrator output off,
+6 V range (`drift.py off 10`, `an_drift.txt`; an earlier start at "0 V on" was stopped after 1.5 blocks because
+that source drifts, `drift_0on_aborted.log`):
+
+| | first block | last block | range over 9 min | sd of the block means |
+|---|---|---|---|---|
+| 0x06 (unchopped) | +22 242.9 uV | +22 205.4 uV | 39 uV | 11 uV |
+| 0x16 (chopped) | -13.6 uV | -21.7 uV | 22 uV | 6 uV |
+| 0x06 - 0x16 | 22 256.5 uV | 22 227.1 uV | 31 uV | 9.9 uV |
+
+Block-mean noise alone would give ~2-3 uV, so the unchopped offset wanders by ~10 uV (0.1 count) on the scale of
+minutes, about twice as much as the chopped one. A **periodic zero** (each 0x06 block corrected by the mean of
+the neighbouring 0x16 blocks, the offset learnt once) leaves **6 uV sd, 20 uV range** (0.2 count); a constant
+learnt once leaves 39 uV (0.4 count) over these 9 minutes. Both are far below one count; the 22.2 mV itself
+(222 counts) must be subtracted. Not measured: the offset on the other ranges (only 6 V was run; if it is
+the AD1 input's ~2.2 mV it scales with the range decade), its temperature coefficient (the meter sat at room
+temperature, powered for hours), and the offset of the DMM path itself (the streams bypass dmm.rs).
+
+**So E works** on these numbers, with a per-range offset subtraction that a periodic chopped reference keeps
+within 0.2 count; a one-time constant would do over minutes at constant temperature, but nothing here bounds
+it over temperature.
+
+### Verdict for the survey (§8.3 summary table there)
+
+| | B: FAST 0x15 / MED 0x16 / SLOW 0x17 (+ filter) | E: FAST 0x06 unchopped |
+|---|---|---|
+| 50 / 60 Hz | 0x15 36 dB / >= 91 dB; 0x16, 0x17 >= 92 dB both | >= 89 / >= 90 dB |
+| leaks (0.405) at | 10 / 5 / 2.5 Hz | 5 Hz |
+| noise, off, sd | 40 / 20 / 17 uV (0.40 / 0.20 / 0.17 count) | 35 uV (0.35 count) |
+| scale vs 0x17 | gain within ~50 ppm, offset within 5 uV | gain within ~50 ppm, **offset +22.2 mV** (stable to 39 uV / 9 min; 6 uV sd with a 0x16 zero) |
+| first good reading after a step / range change | 3rd conversion: 0.2-0.3 / 0.4-0.6 / 0.8-1.2 s | 3rd conversion: 0.2-0.3 s |
+
+- **B is supported by every measurement**: the kernel model predicts all 45 streams, 0x16 nulls 10 Hz and
+  both mains frequencies, is the quietest code per unit time, needs no recalibration (same scale as 0x15 /
+  0x17), and settles in 3 conversions. 0x17 buys little noise over 0x16 (17.2 vs 19.9 uV), so SLOW's value is
+  the 2.5 Hz-multiple nulls, not resolution.
+- **E is feasible**: same noise as 0x15 at the same 10/s, mains rejected, but only with a per-range offset
+  subtraction (+22.2 mV on 6 V); a periodic 0x16 zero holds it to 0.2 count. Temperature and the other ranges
+  are untested.
+
+### State at the end
+
+- **Device:** 10242c3, DMM page, DC V AUTO+ (`VOLT:RANG:AUTO?` 1, `VOLT:COUP?` DC; the range hunts 6 <-> 60 V
+  on the 10 Hz square, as at the start), RATE **MED** (as found). LOG settings as found: AD1, OSR 3, CHOP 1,
+  SRAT 4800, DUR 60, DEST HOST, STAT 0. `OUTP?` 0 throughout. `SYST:ERR?` "No error", `SYST:ALER?` NONE,
+  `SYST:ALER:ALARm?` LOUD and `SYST:BEEP:VOL?` 50 (the owner's, never written), `DBG:ALARm?` 0,0,0,0,
+  `DBG:SENT:PREC?` 100, `DBG:SENT:VAR?` 0, `DBG:VDISK:MIR?` 1,3,0,303,0,0,0 (unchanged), `DBG:VDISK:RO?` 1,1.
+  Every `osr/out/start.json` query answers the same in `end.json` except `CONF?` / `VOLT:RANG?` (the live
+  autorange range).
+- **Settings:** 1/3 and 3/3 byte-equal to the start (`s_set*.png` vs `e_set*.png`); 2/3 differs only in the
+  live rate digits (x 266-318, y 48-67: "MED 10/s" vs "MED 9.6/s"). Dim screen 5 min, Shutdown 30 min,
+  backlight 55 %, key / alert volume 50 %, Bluetooth ON, Start page Multimeter, Danger alarm Loud, USB disk
+  "Files live". (The first screenshot try hit the dimmed screen: the first MENU key only woke it.)
+- **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
+- **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C (live).
+  During the check: 0 / 1 / 5 V DC, output off, the square at 2.5-60 Hz.
