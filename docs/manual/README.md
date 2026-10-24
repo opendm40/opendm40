@@ -439,7 +439,7 @@ sub-mode:
 |---|---|
 | **V** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
 | **A** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
-| **Ω** | 0.85 mA → 0.27 mA (ON) → 0.85 mA (test current) |
+| **Ω** | Test current 0.85 mA → 0.27 mA (ON) → 0.85 mA |
 | Capacitance | (none) |
 | Diode / continuity | Diode → Continuity → Diode |
 | **Hz / °C** | Frequency → Temperature → Frequency |
@@ -552,7 +552,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   tap on Ω, or **0.27 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.27 mA the Ω button shows a small **ON**
   tag. The 60 Ω range always uses 0.85 mA.
-- Top left, small: the test current of the current range, for example
+- Top left, small: the test current of the selected range, for example
   **I 85 uA** on 6 kΩ. It is the short-circuit current, the most the range
   drives through the leads; with a resistor between them it is less.
 
