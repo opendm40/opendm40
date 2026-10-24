@@ -586,7 +586,7 @@ on the device yet; every number in 7.2 is from the Renode emulator.
 | ring | `logger.rs` | unchanged: 2048 records of 8 B (seq implicit, d957027), 16 KiB of SRAM (+40 B of stats). Only 213 ms at 9600/s: the host must drain `LOG:DATA?` (511 records per block) at least ~5x/s, else `overwritten` counts the loss; a bigger ring does not fit (SRAM free ~4.5 KB). Wire format unchanged (12-byte {seq, ts_us, raw}). |
 | hooks (E0) | `src/ad2exp.rs`, `DBG:AD2:*` | `TORN? r26,n[,SYNC]`: n back-to-back pairs of R03..R05 reads, INTF after each pair; same / differ-with-new-conversion / differ-without / signbad + a histogram of bit_length(\|a-b\|) (tears show as a bump at 9 or 17 above the noise). `NOISE? r26,n[,op1chop]`: n flag-synced samples: mean, sd (1/1000 code), min, max, readout us; ENOB = log2(2^19/sd) on the host. `DRAW 0\|1\|2`: during a log session no panel / the panel / panel + a full DMM-view repaint every 100 ms (the DMM page's redraw load). Bounded (n <= 2000 per call, watchdog kicked), refused while logging or outside an AC row (no reply: `dm40scpi.py ad2` checks FUNC? first), the row is rewritten afterwards. |
 | host | `tools/dm40scpi.py` | `log out.csv --source ad2 --rate N [--chop off] -d S`: CSV `seq,t_s,raw,value_<unit>,lost_before` (scaled with IG 1.0, VR 1.25 V and the stock range factor, calibration NOT applied, said in the header; lost_before from the timestamps and the seq), trailer with measured rate, counts and gaps; `ad2 torn\|noise [--sync] [--op1chop k] [--rungs ...]` sweeps the rungs. `--usbip BUSID` talks to the emulator. |
-| emulator | `emu/hy3131/HY3131.cs` (+ peripherals copy), tests | AD2 on its own grid (one AD2F and one fresh result per period; before: the flag was set and the code resampled on every bus access after the first period), per-result noise model, the logger's row variant still recognised. `emu/hy3131/tests`: `Ad2Stream` (960 conversions in 100 ms at 9600/s, one flag each, code of 12.3 mA in AC mA r0, noise model). |
+| emulator | `emu/hy3131/HY3131.cs` (peripherals/ symlink), tests | AD2 on its own grid (one AD2F and one fresh result per period; before: the flag was set and the code resampled on every bus access after the first period), per-result noise model, the logger's row variant still recognised. `emu/hy3131/tests`: `Ad2Stream` (960 conversions in 100 ms at 9600/s, one flag each, code of 12.3 mA in AC mA r0, noise model). |
 
 ### 7.2 Emulator results (plumbing only, not the device)
 
@@ -647,7 +647,7 @@ the bit-banged read path are gone since (bit-banged writes stay, 8.6).
 | CS timing | `spi::{begin,end}` | CS low -> first edge ~200 ns, last edge -> CS high ~100 ns, CS high >= ~500 ns between frames (the bit-banged bus had ~1 us; the datasheet gives no minimum). |
 | self-test | `src/hyspi.rs`, `DBG:HYSPI:SELF? n[,div]` | in the current row (run it in an AC row: AD2 on): reference = first read of R1F..R35 (INTE + the row: the HY3131 has no ID / version register); n x {read1(R20), read(R00,6) AD2 sign copy, read(R1F,23) = ref, write(R36, pattern) + read1(R36) = pattern}; reply `div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1`. `div` 8 / 16 / 32 runs that call at 6.25 / 3.125 / 1.5625 MHz (the margin probe), then back to /16. The write-pattern check is absolute (a consistently shifted bus fails it even though the reference would shift too). DMM paused and its row rewritten afterwards, refused while logging, n <= 2000. In the fallback build the same test runs on the bit-banged bus (div 0). |
 | fallback | Cargo feature `hyspi-bitbang` (removed after 8.6) | the old bit-banged bus, nothing else changed. |
-| emulator | `emu/hy3131/HY3131.cs` (= `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the existing bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back bit-banged, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. |
+| emulator | `emu/hy3131/HY3131.cs` (symlinked as `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the existing bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back bit-banged, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. |
 
 ### 8.2 Timing budget (why /16)
 
@@ -1228,7 +1228,7 @@ protect.
 
 ### 11.5 Emulator: the race, a crystal offset, SPI2 with DMA
 
-- `emu/hy3131/HY3131.cs` (= `emu/peripherals/HY3131.cs`):
+- `emu/hy3131/HY3131.cs` (symlinked as `emu/peripherals/HY3131.cs`):
   - An INTF read advances the chip to its own time. A conversion completed
     within `IntfRaceWindow` before the read is cleared unreported
     (`Swallowed`). The default is 0.7 us in the Renode peripheral

@@ -1,14 +1,15 @@
 # HY3131 model for the DM40 emulator
 
 `emu/hy3131/HY3131.cs` is the detailed model of the Hycon HY3131 DMM front end
-(the file installed as `emu/peripherals/HY3131.cs` is a copy of it; keep them
-identical). What it is based on: `RESEARCH.md` (datasheet, application note,
+(`emu/peripherals/HY3131.cs` and `emu/peripherals/DM40Frontend.cs` are relative
+symlinks to the files here, so there is one copy to edit; emu/run.py reads them
+through the links). What it is based on: `RESEARCH.md` (datasheet, application note,
 Hycon tool data, open-source drivers) and the stock firmware analysis in
 `firmware/re/analysis/hy3131_v2_6.h` / `dmm_v2_6.h`.
 
 ```
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
-emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / ohm network (installed as emu/peripherals/DM40Frontend.cs)
+emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / ohm network (emu/peripherals/DM40Frontend.cs links here)
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, results below
 emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/power-meter-and-misconnect.md 3.11)
@@ -20,7 +21,7 @@ emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature a
 emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (fw-rs/docs/power-meter-and-misconnect.md 3.15)
 emu/hy3131/inrushtest.py  fw-rs inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (fw-rs/docs/inrush-current.md)
 emu/hy3131/btwaketest.py  fw-rs DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
-emu/hy3131/runemu.py      emu/run.py with this directory's HY3131.cs compiled in (development)
+emu/hy3131/runemu.py      emu/run.py with a separate merged compile unit (the same files since the peripherals/ symlinks)
 emu/hy3131/RESEARCH.md    sources, facts, open points
 emu/hy3131/ref/           transcribed register map and mux tables
 ```

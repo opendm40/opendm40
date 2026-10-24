@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """emu/run.py with the HY3131 model under development swapped in.
 
-Runs emu/run.py unchanged (same arguments) but compiles emu/hy3131/HY3131.cs
-instead of emu/peripherals/HY3131.cs when HY3131_MODEL=dev (the default here;
-HY3131_MODEL=tree uses the working tree's peripheral). The merged compile
-unit goes to emu/out/dm40-models-hy3131.cs so the regular runs are untouched.
+Runs emu/run.py unchanged (same arguments). emu/peripherals/HY3131.cs and
+DM40Frontend.cs are symlinks to the files in this directory, so HY3131_MODEL=dev
+(the default here) and HY3131_MODEL=tree now compile the same source; the only
+difference left is the merged compile unit's name (emu/out/dm40-models-hy3131.cs
+for dev, so parallel regular runs never rewrite it). Kept because modetest.py
+runs through it.
 """
 import glob
 import os
