@@ -152,8 +152,28 @@ mod wdt {
 }
 #[allow(dead_code)]
 mod mmio {
-    pub unsafe fn r32(_: u32) -> u32 {
-        0
+    /// The 4 KiB backup SRAM (persist.rs, setfile test); every other
+    /// address reads 0 (calbackup's DWT cycle counter).
+    pub static mut BKP: [u32; 1024] = [0; 1024];
+    const LO: u32 = 0x4002_4000;
+    pub unsafe fn r32(a: u32) -> u32 {
+        if (LO..LO + 4096).contains(&a) {
+            BKP[((a - LO) / 4) as usize]
+        } else {
+            0
+        }
+    }
+    pub unsafe fn w32(a: u32, v: u32) {
+        if (LO..LO + 4096).contains(&a) {
+            BKP[((a - LO) / 4) as usize] = v;
+        }
+    }
+    pub unsafe fn modify32(a: u32, clr: u32, set: u32) {
+        w32(a, (r32(a) & !clr) | set);
+    }
+    /// A power-off: the backup SRAM is not powered (device 2026-10-24).
+    pub fn bkp_lost() {
+        unsafe { BKP = [0; 1024] };
     }
 }
 #[allow(dead_code)]
@@ -246,6 +266,11 @@ mod fatren;
 
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+#[path = "../../src/persist.rs"]
+#[allow(dead_code)]
+mod persist;
+#[path = "../../src/setfile.rs"]
+mod setfile;
 
 #[path = "../../src/vdisk.rs"]
 mod vdisk;
@@ -1198,6 +1223,10 @@ fn main() {
         save(&a[1], &img.d);
         return;
     }
+    if a[2] == "setfile" {
+        setfile_cmd(&a, img);
+        return;
+    }
     if a[2] == "fatdir" {
         fatdir_cmd(&a, &mut img);
         save(&a[1], &img.d);
@@ -1874,4 +1903,211 @@ fn fast(a: &[String], img: &mut Img) {
         out.extend_from_slice(&r[..k]);
     }
     fs::write(format!("{}.ref.csv", a[1]), &out).unwrap();
+}
+
+/// `main <img> setfile all|wrongsize`: setfile.rs (the settings' copy in
+/// `_SETTING.BIN`) with persist.rs on the stub backup SRAM (mmio::BKP).
+/// all: create, timed saves (debounce, the minimum gap, equal = no write,
+/// a held disk defers, flush), only the slot blocks written after the
+/// create; then boots: after a power-off (the newest slot), backup SRAM
+/// valid (kept), the file newer (file), a CRC failure and a torn slot (the
+/// other slot), both bad (defaults), a v9 slot (zero-extended), an unknown
+/// version (skipped), sequence wrap. wrongsize: a 100-byte _SETTING.BIN is
+/// replaced by the 8 KiB file.
+fn setfile_cmd(a: &[String], img: Img) {
+    use setfile::{From, Save};
+    let img: &'static mut Img = Box::leak(Box::new(img));
+    let raw: *mut Img = img;
+    unsafe { setfile::HOST_DEV = Some(&mut *raw) };
+    let im = || unsafe { &mut *raw };
+    let mut fails = 0;
+    let mut check = |ok: bool, what: &str| {
+        println!("{}: setfile {what}", if ok { "ok" } else { "FAIL" });
+        if !ok {
+            fails += 1;
+        }
+    };
+    let words = |tag: u32| -> [u32; persist::WORDS] {
+        let mut w = [0u32; persist::WORDS];
+        for (i, x) in w.iter_mut().enumerate() {
+            *x = tag.wrapping_mul(0x9E37_79B9) ^ i as u32;
+        }
+        w
+    };
+    let boot = || {
+        let i = im();
+        setfile::boot(i);
+        setfile::pick(persist::load())
+    };
+    if a[3] == "wrongsize" {
+        // With a valid backup SRAM record (a unit updated to this build):
+        // the new file gets it in slot 0 at once.
+        persist::save(&words(1));
+        setfile::boot(im());
+        let (_, _, _, f, _, _, _) = setfile::info();
+        check(f == setfile::FileState::Created, &format!("wrong-size file replaced ({f:?})"));
+        let mut cl = [0u16; 2];
+        let (data, _, size, _) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
+        let o = (data + cl[0] as u32 - 2) as usize * 4096;
+        let seeded = setfile::record(&im().d[o..o + 4096]).is_some_and(|(r, q)| q == 1 && r.words == words(1));
+        check(size == setfile::SIZE && seeded, "the new file seeded from the backup SRAM: slot 0 seq 1");
+        let r = setfile::pick(persist::load());
+        check(setfile::info().0 == From::Bkp && r.is_some(), "then the backup SRAM is used");
+        save(&a[1], &im().d);
+        std::process::exit(if fails == 0 { 0 } else { 1 });
+    }
+    // Pure parts.
+    check(setfile::newest(&[Some(u32::MAX), Some(0)]) == Some(1), "sequence wraps (0 is newer than 0xFFFFFFFF)");
+    check(setfile::newest(&[None, None]).is_none(), "no valid slot");
+    check(setfile::newest(&[Some(7), None]) == Some(0), "the only valid slot");
+    // First boot: the file is made (the backup SRAM is empty: nothing in it).
+    let w0 = im().writes.len();
+    let r = boot();
+    let (from, _, _, f, _, _, _) = setfile::info();
+    check(f == setfile::FileState::Created && r.is_none() && from == From::Defaults, &format!("first boot: {f:?}, {from:?}"));
+    let create_writes = im().writes.len() - w0;
+    println!("  create: {} block writes {:?}", create_writes, &im().writes[w0..]);
+    // The slots' blocks, from the file entry.
+    let mut cl = [0u16; 2];
+    let (data, spc, size, n) = calbackup::chain_of(im(), &setfile::NAME, &mut cl).unwrap();
+    check(size == setfile::SIZE && spc == 1 && n == 2, "file 8 KiB, 2 clusters of one block");
+    let lba = [data + cl[0] as u32 - 2, data + cl[1] as u32 - 2];
+    let slot = |k: usize| -> Vec<u8> { im().d[lba[k] as usize * 4096..][..4096].to_vec() };
+    let seq_of = |k: usize| setfile::decode(&slot(k)).map(|d| d.1);
+    let wstart = im().writes.len();
+    // A change: saved DEBOUNCE_MS after it, not before.
+    persist::save(&words(1));
+    setfile::poll(0, false);
+    setfile::poll(4000, false);
+    check(seq_of(0).is_none() && seq_of(1).is_none(), "nothing written 4 s after a change");
+    setfile::poll(5500, false);
+    check(seq_of(0) == Some(1) && setfile::info().4 == Save::Ok, "written 5.5 s after the change: slot 0, seq 1");
+    // Unchanged: nothing.
+    for t in (6000..60_000).step_by(500) {
+        persist::save(&words(1));
+        setfile::poll(t, false);
+    }
+    check(im().writes.len() == wstart + 1, "equal record: no further write");
+    // A second change: the other slot.
+    persist::save(&words(2));
+    setfile::poll(60_000, false);
+    setfile::poll(66_000, false);
+    check(seq_of(1) == Some(2) && seq_of(0) == Some(1), "second change: slot 1 seq 2, slot 0 kept");
+    // A change while the disk is held: deferred, written once free.
+    persist::save(&words(3));
+    setfile::HOST_BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
+    setfile::poll(130_000, false);
+    setfile::poll(136_000, false);
+    check(seq_of(0) == Some(1) && setfile::info().4 == Save::Deferred, "disk held: deferred");
+    setfile::poll(137_000, true);
+    setfile::HOST_BUSY.store(false, std::sync::atomic::Ordering::Relaxed);
+    check(seq_of(0) == Some(1), "AD1 logger session (hold): deferred");
+    setfile::poll(137_500, false);
+    check(seq_of(0) == Some(3), "disk free again: slot 0 seq 3");
+    // flush (power-off): at once, no debounce, no gap.
+    persist::save(&words(4));
+    setfile::flush();
+    check(seq_of(1) == Some(4), "flush: slot 1 seq 4 at once");
+    setfile::flush();
+    check(seq_of(0) == Some(3), "flush with nothing changed: nothing written");
+    let only_slots = im().writes[wstart..].iter().all(|l| lba.contains(l));
+    check(only_slots, &format!("saves wrote only the slot blocks ({:?})", &im().writes[wstart..]));
+    // Boot after a power-off: the backup SRAM is gone, the newest slot.
+    mmio::bkp_lost();
+    let r = boot();
+    let (from, sl, sq, f, ..) = setfile::info();
+    check(f == setfile::FileState::Present && from == From::File && sl == 1 && sq == 4, &format!("power-off: {from:?} slot {sl} seq {sq}"));
+    check(r.as_ref().is_some_and(|r| r.words == words(4) && r.version == persist::VERSION), "power-off: the settings of the last save");
+    check(persist::seq() == Some(4), "the backup SRAM continues seq 4");
+    // The backup SRAM valid and as new as the file: kept.
+    persist::save(&words(5));
+    let r = boot();
+    check(setfile::info().0 == From::Bkp && r.is_some_and(|r| r.words == words(5)), "backup SRAM valid, seq = the file's: backup SRAM");
+    // The backup SRAM valid but older than the file (seq 3 < 4): the file.
+    persist::set_seq(3);
+    let r = boot();
+    check(setfile::info().0 == From::File && r.is_some_and(|r| r.words == words(4)), "file newer than the backup SRAM: file");
+    // The backup SRAM without sequence words (an older build): kept.
+    unsafe { mmio::BKP[0x3FA] = 0; mmio::BKP[0x3FB] = 0 };
+    persist::save(&words(5));
+    let r = boot();
+    check(setfile::info().0 == From::Bkp && r.is_some_and(|r| r.words == words(5)) && persist::seq() == Some(4), "no sequence words: backup SRAM, continues seq 4");
+    // CRC failure in the newest slot: the other one.
+    let o = lba[1] as usize * 4096 + 40;
+    im().d[o] ^= 0x10;
+    mmio::bkp_lost();
+    let r = boot();
+    let (from, sl, sq, ..) = setfile::info();
+    check(from == From::File && sl == 0 && sq == 3 && r.is_some_and(|r| r.words == words(3)), &format!("CRC failure in slot 1: slot {sl} seq {sq}"));
+    // The next save goes to the bad slot (after the newest valid one).
+    persist::save(&words(6));
+    setfile::flush();
+    check(seq_of(1) == Some(4) && seq_of(0) == Some(3), "save after a bad slot: slot 1 rewritten, seq 4");
+    // Power cut in a save: slot 0 erased, its first page programmed only.
+    let mut b = vec![0u8; 4096];
+    setfile::encode(&mut b, persist::VERSION, 5, persist::WORDS, |i| words(7)[i]);
+    let o = lba[0] as usize * 4096;
+    im().d[o..o + 4096].fill(0xFF);
+    im().d[o..o + 256].copy_from_slice(&b[..256]);
+    mmio::bkp_lost();
+    let r = boot();
+    let (from, sl, sq, ..) = setfile::info();
+    check(from == From::File && sl == 1 && sq == 4 && r.is_some_and(|r| r.words == words(6)), &format!("torn slot 0 (seq 5): slot {sl} seq {sq}"));
+    // A power cut during the erase (slot all 0xFF): the same.
+    im().d[o..o + 4096].fill(0xFF);
+    let r = boot();
+    check(setfile::info().0 == From::File && r.is_some_and(|r| r.words == words(6)), "erased slot 0: slot 1");
+    // Both bad: defaults.
+    let o1 = lba[1] as usize * 4096;
+    im().d[o1..o1 + 4096].fill(0xFF);
+    mmio::bkp_lost();
+    let r = boot();
+    check(setfile::info().0 == From::Defaults && r.is_none(), "both slots bad, no backup SRAM: defaults");
+    // A v9 slot (62 words, before the power limits): zero-extended.
+    let v9 = persist::words_of(9).unwrap();
+    setfile::encode(&mut b, 9, 9, v9, |i| words(9)[i]);
+    im().d[o..o + 4096].copy_from_slice(&b);
+    let r = boot();
+    let ok = r.as_ref().is_some_and(|r| r.version == 9 && r.words[..v9] == words(9)[..v9] && r.words[v9..].iter().all(|&w| w == 0));
+    check(ok && setfile::info().0 == From::File, "v9 slot: loaded as version 9, zero-extended");
+    // An unknown version (a newer build's), newer by seq: skipped.
+    setfile::encode(&mut b, 99, 10, 70, |i| i as u32);
+    im().d[o1..o1 + 4096].copy_from_slice(&b);
+    let r = boot();
+    check(r.is_some_and(|r| r.version == 9) && setfile::info().1 == 0, "unknown version 99 in slot 1: slot 0 used");
+    // The next save from the v9 load: the current version, seq after 9.
+    persist::save(&words(11));
+    setfile::flush();
+    check(seq_of(1) == Some(10) && setfile::decode(&slot(1)).is_some_and(|d| d.0 == persist::VERSION), "save after the v9 load: slot 1, current version, seq 10");
+    // The wear budget: a change every 6 s; BUDGET saves, then one per
+    // REFILL_MS (a fresh boot: a full budget).
+    let r = boot();
+    check(r.is_some(), "budget: boot");
+    let n0 = setfile::info().5;
+    let mut t = 0u64;
+    let mut first = None;
+    for i in 0..(setfile::BUDGET as u32 + 5) {
+        persist::save(&words(100 + i));
+        for _ in 0..12 {
+            setfile::poll(t, false);
+            if first.is_none() && setfile::info().5 > n0 {
+                first = Some(t);
+            }
+            t += 500;
+        }
+    }
+    let n = setfile::info().5 - n0;
+    check(n == setfile::BUDGET as u32 && setfile::info().4 == Save::Deferred, &format!("budget: {n} saves of {} changes in {} s, then deferred", setfile::BUDGET + 5, t / 1000));
+    let due = first.unwrap() + setfile::REFILL_MS;
+    while t < due + 1000 {
+        setfile::poll(t, false);
+        t += 500;
+    }
+    check(setfile::info().5 - n0 == n + 1 && setfile::info().4 == Save::Ok, "budget: one more save REFILL_MS after the first");
+    println!("  saves wrote {} blocks, erases per slot block: {:?} {:?}", im().writes.len() - wstart, im().erases.get(&lba[0]), im().erases.get(&lba[1]));
+    save(&a[1], &im().d);
+    if fails != 0 {
+        println!("setfile: {fails} FAIL");
+        std::process::exit(1);
+    }
 }
