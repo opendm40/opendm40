@@ -13,7 +13,10 @@
 //!   moves the selected level item (CH1 position, trigger level, Y cursor)
 //!   by dy rows, else the selected time item (trigger position / stored
 //!   record pan, X cursor) by dx px; a 4 px tap tolerance before the first
-//!   move applies (the stock nudges the item on a wobbly tap);
+//!   move applies (the stock nudges the item on a wobbly tap). opendm40: a
+//!   press on a marker zone locks the drag to that marker's axis (level
+//!   markers vertical, time markers horizontal) for the whole gesture; the
+//!   per-event split applies only to presses off the markers;
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 3): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -92,7 +95,10 @@ pub(super) struct Touch {
     /// pan so far (px).
     anchor: Option<usize>,
     pan: i32,
-    /// Axis-lock mode: the decided axis.
+    /// Axis-lock mode: the decided axis. A press on a marker zone locks it
+    /// at the press for the whole gesture (level group: V, time group: H),
+    /// in every drag mode: a vertical drag of the trigger level whose
+    /// finger path wobbles sideways must not move the trigger position.
     axis: Option<Axis>,
     /// Hold mode: grabbed.
     grabbed: bool,
@@ -1313,7 +1319,7 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: None,
+                    axis: hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1464,7 +1470,7 @@ impl App {
             t.moving = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
-        if self.sp.drag_mode == DRAG_AXIS {
+        if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() {
             if t.axis.is_none() {
                 let (ax, ay) = ((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs());
                 if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
