@@ -3535,13 +3535,25 @@ Emulator (emu/):
       (LIVE?, 974-1760 mV) and AC mV (V_GATE driven, no A-JACK) pass; RES at 1 / 3 V: no PB1 hits. Not run:
       check list item 4 (a current in A); "V-COM open" was the calibrator's disabled output (RES reads
       ~24 Ω on 600 Ω, 0.10 MΩ on 6 MΩ, OL on 600 kΩ), not an open input.
+      **Fixed (branch ajres-fix, doc 4.13 "both-bit reads"):** in those runs CTSTA read 0x70 (CMPHO and
+      CMPLO in one read: the comparator overdriven), which a current in A (one side of the window) cannot
+      give (inferred). In the jack-check comparator rows (ohm, RTD / NTC) a both-bit read within the last 1 s =
+      driven: LIVE?, no A-JACK; DBG:SENT? field 14 = 2. The OP1O check stays. Emulator model
+      corrected first (OP1O stops at 2.47 - 0.044 x V, `ohmop1k`; >= 4 V on the jack sets both bits,
+      `ohmboth`): senttest ohm-v5 / ohm-v5-600, switchtest dc5-pickup / sq-pickup, loudtest ajack-res fail
+      on cd1ec9a and pass. INFERRED gap: a current in A large enough to push PB1 out of the comparator's
+      range may read 0x70 too (LIVE? then, not the badge). Device: doc 4.13 check list items 4-5.
 - [ ] FETCh? does not answer within 5 s while RES AUTO hunts (device a2e9766, device-check doc "a2e9766:
       bug-fix recheck" note 1): on the calibrator's disabled output, RES AUTO stepped 6 MΩ <-> 600 kΩ (6 MΩ
       reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
       driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
       once after a range change. The hunt itself (a source that is not a resistor) not investigated.
-- [ ] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
+- [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
       DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
+      Cause: once LIVE? cleared (the last live result 1 s old), the next poll re-asserted it from the old
+      run (`live_t0` stays until the next ohm reading). Fixed: a run whose last live result is
+      LIVE_CLEAR_MS old asserts no more (sentinel test live_does_not_flap_after_the_source). Device: doc
+      4.13 check list item 5.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
