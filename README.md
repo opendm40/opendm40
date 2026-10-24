@@ -73,10 +73,10 @@ protocol notes are for stock V2.6.
      with Yes (installs that file through the loader directly); or
      `fw-rs/tools/reload.sh --stock FILE` (the same for a stock file);
    - **hardware, whatever the firmware does:** short the debug header's TX
-     pad (PA2) to GND at power-on, see [hw/README.md](hw/README.md)
-     "Hardware recovery";
+     pad (PA2) to GND at power-on, see
+     [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery);
    - fw-rs's own triggers (power-key hold from off, two watchdog resets):
-     [fw-rs/README.md](fw-rs/README.md) "Recovery" (checked in the emulator,
+     [fw-rs/README.md, Recovery](fw-rs/README.md#recovery) (checked in the emulator,
      the device check is pending).
 2. Copy the official stock firmware
    [firmware/vendor/dm40_v_2_6.bin](firmware/vendor/dm40_v_2_6.bin) (back to stock) or a fw-rs

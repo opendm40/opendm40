@@ -120,14 +120,15 @@ To reach the update screen from fw-rs:
 
 If fw-rs is too broken for any of these: open the case and short the debug
 header's TX pad (PA2) to GND at power-on, see
-[../hw/README.md](../hw/README.md) "Hardware recovery" (owner-checked on the
-device).
+[hw/README.md, Hardware recovery](../hw/README.md#hardware-recovery)
+(owner-checked on the device).
 
 Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
 "update". `INFO/FIRMWARE.BIN` on the fw-rs USB drive is the running image as
 an update file; keep a copy.
 
-**Back to stock:** copy the official `dm40_v_2_6.bin` (`../vendor/dm40_v_2_6.bin`)
+**Back to stock:** copy the official
+[`dm40_v_2_6.bin`](../firmware/vendor/dm40_v_2_6.bin)
 onto the loader's disk and press "update", or run
 `tools/reload.sh --stock FILE` while fw-rs runs (device-checked with patched
 stock). Details: [docs/native-boot.md](docs/native-boot.md).
