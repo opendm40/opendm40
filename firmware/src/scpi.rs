@@ -152,7 +152,8 @@
 //!     in 0.1 C steps (thermocouple: applied to the cold junction)
 //!   [SENSe:]TEMPerature:NTC <R25_ohm>,<Beta> / ?   the NTCUSER parameters
 //!   [SENSe:]TEMPerature:EXCitation?   range,R_ohm,I_A,P_W of a resistive sensor
-//!     (I, P estimated with the inferred 0.85 V ohm source; TC: error)
+//!     (I, P estimated from the measured ohm short-circuit current;
+//!     TC: error)
 //!   MEASure:TEMPerature:CJ?   cold junction (HY3131 internal sensor, C, incl.
 //!     the TC offset),age_s. Measured only in thermocouple mode; outside it the
 //!     last value with its age (and "Data stale" in SYST:ERR?); never measured:

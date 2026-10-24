@@ -3587,3 +3587,47 @@ device may not need them (TODO "First readings after a switch").
 - **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
 - **Calibrator:** back on the 10 Hz square, enabled; registers equal to the session's start dump except
   0x2C (live).
+
+## Ohm test current map (DBG:SRC)
+
+Measured on one unit with `DBG:SRC` ([`src/dbgsrc.rs`](../src/dbgsrc.rs)), swept by
+[`tools/srcmap.py`](../tools/srcmap.py) over every OP3 VREF tap x path, sense PB0: once with
+V/Ω - COM shorted ([`data/short.csv`](data/short.csv)), once open ([`data/open2.csv`](data/open2.csv)).
+Each point is the stock `f10_p8clr` row of the range with only R31 SFUVR (the tap) changed, plus the
+AD1 phase bytes; the stock `f10_p8set` ("ON") rows differ from `f10_p8clr` only in that tap, so the
+taps below stand for both variants. Short-circuit current I = V_drop / Rref (the CSV `I` column).
+
+Stock taps (R31 low nibble): `f10_p8clr` r0..r5 VDS15, `f10_p8set` r1..r4 AGNDP7, **r5 AGNDP8**;
+r6 (60 MΩ, the current-source row) VDS16 in both.
+
+**Short-circuit current (jacks shorted)**
+
+| Range (Rref) | Default (VDS15) | ON (AGNDP7) |
+|---|---|---|
+| 600 Ω (1 k) | 0.898 mA | 0.279 mA |
+| 6 kΩ (10 k) | 197 µA | 58.4 µA |
+| 60 kΩ (100 k) | 20.3 µA | 6.56 µA |
+| 600 kΩ (1 M) | 2.17 µA | 0.664 µA |
+| 6 MΩ (10 M) | 215 nA | 85.6 nA (AGNDP8; AGNDP7 would give 66.5 nA) |
+| 60 MΩ (CS path) | not measured | not measured |
+
+60 Ω (its own row `f10_p8clr` r0, always the default variant) was not measured; the firmware shows
+the 600 Ω default value for it (*inferred*: same tap and Rref switches). *Inferred* from the drops:
+only 600 Ω is limited by OP3 (drop 0.90 V, source node 2.04 V); above it the drop is 1.97-2.17 V, the
+source behind Rref.
+
+**Open-circuit voltage at the jack (jacks open, V_input)**
+
+| Path | Default (VDS15) | ON (AGNDP7) |
+|---|---|---|
+| R1K (600 Ω) | 2.17 V | 0.78 V |
+| R10K (6 kΩ) | 2.17 V | 0.79 V |
+| R100K (60 kΩ) | 2.15 V | 0.80 V |
+| R1M (600 kΩ) | 2.08 V | 0.90 V |
+| R10M (6 MΩ) | 1.62 V | 1.14 V (AGNDP8: 1.18 V) |
+
+*Inferred*: on R1M / R10M the open reading is pulled by the input network through the large Rref, so
+the R1K values are the source's open-circuit voltage.
+
+The firmware's table is `dmm::OHM_ISC` ([`src/dmm.rs`](../src/dmm.rs)); the diode current (0.75 mA)
+is still from owners' reports.

@@ -411,8 +411,8 @@ Functions:
   is added to the cold junction. Offsets are always in C.
 - `TEMPerature:NTC` sets the parameters of the `NTCUSER` sensor.
 - `TEMPerature:EXCitation?` gives the present range and the sensor's
-  resistance, current and dissipated power; with the thermocouple it is a
-  `Settings conflict`.
+  resistance, current and dissipated power; with the thermocouple, and on
+  the 60 MΩ range (no measured test current), it is a `Settings conflict`.
 - `MEASure:TEMPerature:CJ?` is fresh only while the thermocouple is
   measured; otherwise it gives the last value with its age and queues
   `Data stale` (`+9.9E37` if it was never measured).
