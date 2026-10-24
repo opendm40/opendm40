@@ -3825,3 +3825,13 @@ volume mounted read-only by udisks at `/run/media/$USER/DM40`. Scripts and data 
   same names and sizes.
 - **Health:** crash count 0, HEALTHY, marker VALID, stack high water 23 676 / 45 172.
 - **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled, as found.
+
+### Screenshot preparation: power cut (step 3), 46370df, 2026-10-24
+
+A shot (SHOTS/S012.BMP saved 2.3 s after the gesture), prep state 1 from 3.7 s
+(2, then 14 of 76 clusters ready); battery and USB pulled at about 6 s. Power on:
+POR + BOR, settings from the file (SETTINGS,FILE,0,75). MMEM:CAT? lists the shot.
+`fsck.fat -n` of DEBUG/SPIFLASH.BIN (read with the page cache dropped): no lost
+clusters, 72 files, only the dirty bit and the label note. Prep back to state 2 /
+76 ready within ~15 s; the next shot (S013) saved (frozen 1301 ms, 0 erased).
+PASS.

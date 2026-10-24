@@ -694,7 +694,7 @@ Code work (in this order):
       2 PASS (back-to-back on blank flash 2332 ms, 0 erased; onto dirty clusters 1954 ms with 14 erased, ~42 ms
       each); 4 PASS (free 0: state 2 / 0 ready, "Disk full", no BMP); 5 CSV commits PASS (0 -> 1 -> 2 in
       2.3-2.8 s), fast-log PASS (state 0 all session, resumes 2 s after); 6 PASS (state 1 with 76 erases: loop
-      max 13.9 ms vs idle 12.0 on the AC+DC page). Open for the owner: 3 (battery pull) and 5's "PC can edit"
+      max 13.9 ms vs idle 12.0 on the AC+DC page). Step 3 (battery pull) PASS on 46370df (device-check "Screenshot preparation: power cut"). Open for the owner: 5's "PC can edit"
       + DM40*.BIN install half.
       Device 46370df (2026-10-24, docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
