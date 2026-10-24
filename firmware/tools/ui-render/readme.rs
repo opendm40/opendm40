@@ -1,4 +1,4 @@
-//! The screens of firmware/README.md (docs/img/*.png), 1x, with ordinary
+//! The screens of the root README.md (firmware/docs/img/*.png), 1x, with ordinary
 //! values and an ordinary status bar (00:12:34, no REC, no host on BT), not
 //! the worst cases of the matrix. Synthetic data, drawn by the firmware's
 //! own code; each screen also goes through the layout rules.
