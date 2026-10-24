@@ -328,15 +328,18 @@ host side's endpoint calls are serialised (`DWC2_OTG.HostLock`); a Bulk-OUT
 URB longer than 64 bytes is split into packets (a USBTMC message over 52
 bytes used to be dropped). [`usbtmc_stress.py`](usbtmc_stress.py) (thousands of command / query
 pairs, multi-packet messages and replies, small TransferSize rounds,
-pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`, `--seed`,
+pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts, a dead client's cut
+message, and [`dm40dbg.py`](../firmware/tools/dm40dbg.py)'s own upload after a
+client that left an error queued; `--port`, `--seed`,
 `--cases`) exercises opendm40's USBTMC over USB/IP: 3000 iterations pass on the
-model's server (144 s). Every reply must end with the `\n` terminator (a
+model's server (508 s; the `partial` case waits 2 s each time). Every reply must end with the `\n` terminator (a
 block reply too, after the block). A Bulk-IN URB for which the device never sends data stays
 pending on its own endpoint only (with Renode's server it blocked every
 later URB).
 
 Tests that start their own emulator take its USB/IP port from `--port`;
-without it [`mscresettest.py`](mscresettest.py) and [`ejecttest.py`](ejecttest.py) pick a free one
+without it [`mscresettest.py`](mscresettest.py), [`idletest.py`](idletest.py) (the automatic
+power-off held off by USB, Bluetooth and USB disk traffic) and [`ejecttest.py`](ejecttest.py) pick a free one
 (`run.free_port`: random in 61000-64999, above the kernel's ephemeral range
 32768-60999 and outside the ranges handed to parallel runs, e.g.
 48000-48999; the port is printed). `DM40_EMU_PORTS=lo-hi` narrows

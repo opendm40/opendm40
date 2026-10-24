@@ -8,7 +8,7 @@
 # over USBTMC into the SPI disk's root as DM40FW.BIN (tools/dm40dbg.py upload
 # = DBG:UPLOAD, src/upload.rs: any other dm40*.bin there is removed, the file
 # is re-read and its CRC-32 checked on the meter; the opendm40 USB disk is a
-# read-only generated volume), send DBG:UPDATE (the vendor loader installs
+# read-only generated volume; a failed upload is retried once), send DBG:UPDATE (the vendor loader installs
 # the file and deletes it), wait for opendm40 to come back and check with
 # DBG:BOOT? that the loader marker is the header of the new file ("installed
 # OK"). A running opendm40 without DBG:UPLOAD (older build): staged on its
@@ -247,7 +247,15 @@ Plug in the cable; on stock choose \"USB Connect\"."
 fi
 
 if ((UPLOAD)); then
-    "${DBG[@]}" upload "$IMG" || die "upload failed (nothing installed; the meter runs on unchanged)"
+    # dm40dbg.py upload starts with a device clear + *CLS (Link.fresh) and
+    # prints the meter's SCPI error if a step fails. One retry: an upload
+    # that failed left nothing installed, and BEGIN starts over.
+    if ! "${DBG[@]}" upload "$IMG"; then
+        echo "reload.sh: upload attempt 1 failed (the error is above); retrying once" >&2
+        sleep 1
+        "${DBG[@]}" upload "$IMG" ||
+            die "upload failed twice (the meter's error is above; nothing installed, the meter runs on unchanged)"
+    fi
 else
     DEV=$(fs_dev "$DISK")
     MNT=$(mount_fs "$DEV")
