@@ -85,6 +85,9 @@ const BAND_MS: u64 = 4000;
 /// Combined view: the scope band paints at most one frame per this many ms
 /// (25 fps; `App::sp_throttled`).
 const COMBO_FRAME_MS: u64 = 40;
+/// `App::sp_paint_pass`: a measurement cell in the same pass only after a
+/// paint shorter than this (cycles, 4 ms).
+const CELLS_AFTER_PAINT_CYC: u32 = crate::clock::HCLK_HZ / 250;
 /// Scope drags kept for DBG:GEST?.
 const GEST_N: usize = 32;
 
@@ -2366,11 +2369,18 @@ impl App {
     /// A scope pass without a new frame to build: the paint of the last one
     /// (a slice, scope_ui FLUSH_BUDGET), then one changed measurement cell.
     fn sp_paint_pass(&mut self, now: u64, covered: bool) {
+        self.wave_keep();
+        let t0 = crate::prof::cyc();
         crate::prof::enter(crate::prof::PAINT);
         self.sp_tick(now);
         self.sp.paint_due = false;
         crate::prof::exit(crate::prof::PAINT);
-        if self.sp.cells_due && !covered {
+        // A long paint (a status change repaints the status badge and the
+        // record bar, ~14 ms on the device model): the cell waits for the
+        // next pass, so no pass stacks paint + cell (~10 ms) on top of the
+        // acquisition (the wave view's ring holds 26.7 ms at 76 800 S/s).
+        if self.sp.cells_due && !covered && crate::prof::cyc().wrapping_sub(t0) < CELLS_AFTER_PAINT_CYC {
+            self.wave_keep();
             crate::prof::enter(crate::prof::MTXT);
             self.sp_cells_step();
             crate::prof::exit(crate::prof::MTXT);
