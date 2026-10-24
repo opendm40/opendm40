@@ -250,8 +250,8 @@ pub struct DmmView {
     pub pwc: pw::PwCache,
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
-    /// Ohm test current label as last drawn: range | variant << 3, 255 =
-    /// none drawn, 254 = to redraw / clear (after `invalidate`, or partly
+    /// Test current label as last drawn: ohm range | variant << 3, 0x10
+    /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
 }
@@ -709,14 +709,14 @@ impl DmmView {
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
         let (aux, lp, bd) = aux_shown(r);
-        // Ohm: the range's test current, small, in the empty aux1 slot
-        // (`ohm_current_label`). Cleared before the aux rows (an aux1 that
+        // Ohm / diode: the test current, small, in the empty aux1 slot
+        // (`test_current_label`). Cleared before the aux rows (an aux1 that
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
-        let ik = if r.mode == 10 && aux[0].is_none() && !self.power {
-            r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3
-        } else {
-            255
+        let ik = match r.mode {
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3,
+            12 if aux[0].is_none() && !self.power => 0x10,
+            _ => 255,
         };
         if ik == 255 && self.last_iohm != 255 {
             let b = OHM_I_RECT;
@@ -845,7 +845,7 @@ impl DmmView {
             }
         }
         if ik != 255 && self.last_iohm != ik {
-            ohm_current_label(r.range, self.ohm_on);
+            test_current_label(r.mode, r.range, self.ohm_on);
             self.last_iohm = ik;
         }
         // The phase is part of the key only while it alternates: no
@@ -896,16 +896,17 @@ impl DmmView {
 
 }
 
-/// The ohm test current label's box: the aux1 slot's left part (the
-/// burden caption's place in the A functions).
+/// The test current label's box: the aux1 slot's left part (the burden
+/// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 
-/// "I 0.85 mA": the short-circuit test current of ohm range `range` in the
-/// variant (dmm::ohm_test_current; inferred), two significant digits, in
-/// DIM F14 (small: a property of the range, not a reading).
-#[inline(never)] // drawn on a range / variant change only
-fn ohm_current_label(range: i8, on: bool) {
-    let i = crate::dmm::ohm_test_current(range, on as u8);
+/// "I 0.85 mA": the test current of `mode` (dmm::test_current; inferred):
+/// ohm, the short-circuit current of range `range` in the variant `on`;
+/// diode, the source current. Two significant digits, DIM F14 (small: a
+/// property of the function, not a reading).
+#[inline(never)] // drawn on a function / range / variant change only
+fn test_current_label(mode: u8, range: i8, on: bool) {
+    let Some(i) = crate::dmm::test_current(mode, range, on as u8) else { return };
     let (v, u) = if i >= 0.2e-3 {
         (i * 1e3, " mA")
     } else if i >= 0.2e-6 {
