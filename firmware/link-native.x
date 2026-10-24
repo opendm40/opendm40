@@ -265,6 +265,10 @@ SECTIONS
         *(.text.*8opendm406csvlog6delete*);
         /* ... their disk bodies (the `_on` variants and their closures). */
         *(.text.*8opendm406csvlog9delete_on*);
+        /* MMEM:DATA? / MMEM:DELete's name argument (its directory prefix
+         * checked against the file's; device 46370df). Not run by anything
+         * a host polls during a stream. */
+        *(.text.*8opendm406csvlog10parse_path*);
         /* Tap / page-only code that sat inlined in hot callers (region B
          * audit 2026-10-22 #2): the temperature page's draw / key helper
          * (App::with_temp_page), the scope's Save CSV

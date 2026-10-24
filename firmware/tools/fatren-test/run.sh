@@ -125,6 +125,9 @@ W=$(mktemp -d)
 trap '[ -n "$KEEP" ] && rm -rf "$KEEP" && cp -r "$W" "$KEEP"; rm -rf "$W"' EXIT
 rustc --edition 2021 -O --cfg 'feature="recovery-file"' --cfg 'feature="vdisk"' main.rs -o "$W/t"
 export MTOOLS_SKIP_CHECK=1
+echo "=== MMEM names: a directory prefix must be the file's own (csvlog::parse_path)"
+"$W/t" names | grep -v "^ok" || true
+"$W/t" names > /dev/null || { "$W/t" names | grep FAIL; echo "FAIL: names"; exit 1; }
 mkimg() {
     rm -f $1; truncate -s 16M $1                       # sparse (/tmp quota, see save() in main.rs)
     mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null

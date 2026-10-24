@@ -19,6 +19,9 @@ scope view, scope STOPped):
   * the BMP: the stock 66-byte header (480x320, 16 bpp BI_BITFIELDS
     F800/07E0/001F, bottom-up rows), 307266 bytes, its pixels equal the
     reference;
+  * the first shot's name with another directory's prefix (LOGS/Snnn.BMP):
+    MMEM:DATA? and MMEM:DELete answer -256 "File name not found" and the
+    shot stays listed (device 46370df: the prefix was dropped, not checked);
   * --out: the BMPs and the reference frames are kept there (<name>.bmp,
     <name>.lcd565), so two builds can be compared byte for byte
     (cmp DIR1/x.bmp DIR2/x.bmp).
@@ -196,6 +199,7 @@ try:
 
     print('flash timing: tPP %d us, tSE %d us' % (A.tpp, A.tse), flush=True)
     FREEZE = []
+    DIRS_DONE = []
     for name in A.screens.split(','):
         print('--- %s' % name, flush=True)
         if name != 'again':
@@ -221,6 +225,20 @@ try:
         FREEZE.append((name, f[2], f[5]))
         if A.max_freeze:
             check(f[2] <= A.max_freeze, '%s: frozen %d ms <= %d ms' % (name, f[2], A.max_freeze))
+        if not DIRS_DONE:
+            DIRS_DONE.append(fn)
+            other = 'LOGS/' + fn.split('/')[-1]
+            q('*CLS')  # MMEM:CAT? polls during the shot queue -250 "Mass storage busy"
+            t.write('MMEM:DATA? "%s",0,100' % other)
+            try:
+                r = t.read(maxlen=8192, timeout=10)
+            except Exception:
+                r = b''
+            e = q('SYST:ERR?')
+            check(not r.startswith(b'#') and e.startswith('-256,'), 'MMEM:DATA? "%s": no data (%r), %s' % (other, r[:16], e))
+            q('MMEM:DEL "%s"' % other)
+            e = q('SYST:ERR?')
+            check(e.startswith('-256,') and fn in shots(), 'MMEM:DEL "%s": %s, %s still listed' % (other, e, fn))
         ref1 = lcd565()
         bmp = fetch(fn, 307266)
         check(len(bmp) == 307266 and bmp[:66] == HDR, '%s: 307266 bytes, the stock header' % fn)
