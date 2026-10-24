@@ -918,7 +918,7 @@ impl App {
         } else {
             "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
         });
-        crate::scope_csv::set(rec, a, b, fs as f32, t0, &h);
+        crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
             return;
