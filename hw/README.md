@@ -265,7 +265,7 @@ firmware, [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md) 1) show read protect
 with it a debugger cannot read or write the flash, and lifting it
 mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
 calibration and the UID-bound boot data. Use SWD only as a last resort, after
-the opendm40 backup (root README, [Back up with opendm40](../README.md#back-up-with-fw-rs)),
+the opendm40 backup (root README, [Back up with opendm40](../README.md#back-up-with-opendm40)),
 and restore in the order given there.
 
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
@@ -294,7 +294,7 @@ Not verified yet: the exact timing, i.e. whether the short must be in place at p
 it must be held.
 
 Software ways to the same screen while opendm40 runs (`DBG:UPDATE`, the key-hold
-recovery, the double-hang rule) are in [firmware/README.md, Recovery](../firmware/README.md#recovery).
+recovery, the double-hang rule) are in [README.md, Recovery](../README.md#recovery).
 
 ## USB
 
