@@ -279,7 +279,7 @@ def functions_row():
     im, d = canvas(w + 40, h + 190)
     x0, y0 = 20, 95
     paste(im, d, row, x0, y0)
-    labels = ['DC, AC,\nAC+DC, AUTO', 'DC, AC,\nAC+DC, AUTO', 'normal,\nlow current', 'capacitance', 'diode,\ncontinuity', 'frequency,\ntemperature', 'power meter:\nDC, AC, AC+DC']
+    labels = ['DC, AC,\nAC+DC, AUTO', 'DC, AC,\nAC+DC, AUTO', 'test current\n0.85 / 0.27 mA', 'capacitance', 'diode,\ncontinuity', 'frequency,\ntemperature', 'power meter:\nDC, AC, AC+DC']
     f = font(14)
     for i, t in enumerate(labels):
         cx = x0 + (4 + 68 * i + 32) * sc

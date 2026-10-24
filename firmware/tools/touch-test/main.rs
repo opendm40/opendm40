@@ -688,7 +688,7 @@ fn hit_tests(ck: &mut Ck) {
             want.extend([100, 101, 103, 106]); // DC / AC / AC+DC / AUTO (AC/DC)
         }
         if b == dmm::Button::Ohm {
-            want.extend([100, 101]); // Normal / Low current ON
+            want.extend([100, 101]); // 0.85 mA / 0.27 mA ON
         }
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }

@@ -2550,8 +2550,23 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
+        // The test current label (top left) of every range in both
+        // variants; the saved one: 600 kohm, "ON" (I 0.27 uA).
+        for on in [false, true] {
+            for rg in 0..7i8 {
+                host::reset(0);
+                let (r, _) = find("ohm_k");
+                let r = Reading { range: rg, ..r };
+                let mut dv = ui::DmmView::new();
+                dv.label = None;
+                dv.draw_static(Button::Ohm, r.mode, false, on);
+                dv.reading(&r, 0, 0);
+                ck.check(&format!("dmm-ohm-i/{}/r{rg}", on as u8), &dmm_page_regions);
+            }
+        }
         host::reset(0);
         let (r, _) = find("ohm_k");
+        let r = Reading { range: 4, ..r };
         dv.label = None;
         dv.draw_static(Button::Ohm, r.mode, false, true);
         dv.reading(&r, 0, 0);

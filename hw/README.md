@@ -374,7 +374,9 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   range); ratiometric AD1 ([`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) mode 10). Ohm source
   short-circuit current about 0.85 mA in the default ohm variant and 0.27 mA
   in the "ON" variant; diode test 0.75 mA (chat reports;
-  [`firmware/src/dmm.rs`](../firmware/src/dmm.rs), [`emu/hy3131/README.md`](../emu/hy3131/README.md)).
+  [`firmware/src/dmm.rs`](../firmware/src/dmm.rs), [`emu/hy3131/README.md`](../emu/hy3131/README.md)). Per range the firmware
+  shows 0.85 V (0.27 V) / Rref as the test current (*inferred*: the
+  source modelled as a fixed voltage behind Rref; `dmm::ohm_test_current`).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
