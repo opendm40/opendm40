@@ -335,8 +335,8 @@ Functions:
   comes within 0.85 s.
 - Just switched by this host (`MEASure?` with a new function, `CONFigure`
   then `READ?`): the first reading after the input has settled: a fraction
-  of a second for DC V, about 3 s for resistance (settling and the range
-  search), up to 3.9 s for the AUTO coupling. `+9.91E37` and `Data stale`
+  of a second for DC V and DC A, about 2 s for resistance (settling and the
+  range search; the high ranges longer), up to 3.9 s for the AUTO coupling. `+9.91E37` and `Data stale`
   if no reading comes within 1.9 s after settling.
 - Changed on the meter (touch, keys, the phone app, the other link) while a
   `READ?` waits, or between this host's `FUNCtion?` / `CONFigure?` and its
@@ -722,7 +722,9 @@ the disk.
   out.
 - `MMEMory:DATA?` reads up to 6000 bytes; read a large file in pieces with
   rising offsets until the block is shorter than asked. The name may have
-  its folder (`LOGS/`, `SHOTS/`, `SCOPE/`) or not. Asking for
+  its folder (`LOGS/`, `SHOTS/`, `SCOPE/`) or not; a folder must be the
+  file's own (`SHOTS/LOG005.DLG` answers `File name not found`, as does
+  `MMEMory:DELete` with it). Asking for
   `LOGnnn.CSV`, `SCOPnnn.CSV` or `FASTnnn.CSV` returns the CSV file the
   meter makes from the `.DLG` recording (the same CSV the USB disk shows).
 - `MMEMory:DELete` deletes one screenshot or recording; not the one being
