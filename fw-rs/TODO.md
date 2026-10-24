@@ -647,6 +647,21 @@ Code work (in this order):
       rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access (Chrome cannot claim a
       kernel-bound interface); Windows needs WinUSB (Zadig). Option: Web Bluetooth over the BLE "DM40A" link
       (stock app protocol, no SCPI) for cable-free use. A claude.ai artifact sandbox likely blocks WebUSB.
+- [ ] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
+      'Loading'"). Today the screen stays dark or frozen while pre_main does the SPI-disk work before
+      main's LCD init: the FAT dir check, calbackup, `vdisk::mirror_boot` (+0.22 s every boot, +1..9 s on
+      the first boot after a new image or calibration change; device 612c45c MIR? 5.16-5.3 s) and the
+      boot refresh. In the emulator main's clock starts 3.56 s after reset (harness-sync).
+      Plan:
+      - Bring up the LCD and backlight at the very start of pre_main.
+      - Draw a minimal splash: product name and "Loading...", in the stock font, region-B safe.
+      - Show a step line or a progress bar per boot phase. On a slow step, say what it is, e.g.
+        "Updating INFO/ copy (first boot after an update)".
+      - Keep it ISR-free and watchdog-fed; no region-C code once streaming exists (it doesn't yet at boot).
+      Also:
+      - Measure each boot phase on the device: DBG timestamps per phase, reported by DBG:BOOT?.
+      - Then cut what can move after the first screen, e.g. run mirror_boot lazily in idle time instead
+        of before USB comes up.
 - [ ] Protocol decoders (owner 2026-10-23): UART, Modbus RTU, etc. The usual problem with scope decoders is that
       they only decode what fits in one short record (here ~53 KB). Make long traffic convenient instead: decode
       **while streaming**, keep only the decoded frames and let the raw samples go.
