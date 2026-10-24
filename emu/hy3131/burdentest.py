@@ -33,14 +33,17 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 OL = 9.9e37
 # (t, connection, SCPI at the start, expected FETC:BURD? / READ? ratio (ohm)
 # or 'OL' = +9.9E37, or ('TOT', I) = I (the total RMS, A) x POW:BURD?, not
-# READ? x it, expected DISP:BURD?, screenshot name). A phase is
-# checked from t + 5 s (settle, autorange) to the next t - 3 s (the source
-# steps at virtual time t, the fw uptime lags it by ~2 s under load: a 1 s
-# margin caught the next phase's source at the window's end, base 1eb4d7e too).
+# READ? x it, expected DISP:BURD?, screenshot name). The source steps at virtual
+# time t; the phase starts at that step's input marker (emu/emusync.py, README "Input
+# markers": the fw uptime of the change; 2.85 s behind t with a fresh disk), its SCPI
+# goes out 0.5 s after, and it is checked from its start + 5 s (settle, autorange) to
+# the next phase's start - 1 s. (It was keyed on uptime t with a guessed lag of ~2 s:
+# the window's end caught the next phase's source.)
 PHASES = [
     (0, 'open;isrc:0.05', ['CONF:CURR:DC', 'DISP:BURD ON'], 0.5, '1', 'dc-ma'),
     # AUTO moves -2 mA to the uA shunt (6000 uA range).
@@ -70,10 +73,13 @@ def main():
             if ph[5]:
                 t1 = PHASES[i + 1][0] if i + 1 < len(PHASES) else RUN_FOR
                 shots += ['--shot', os.path.join(OUT, 'burden-%s.png@%g' % (ph[5], t1 - 0.5))]
+    name = 'burden.%d' % os.getpid()
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(RUN_FOR), '--script', sp, '--name', 'burden.%d' % os.getpid()] \
+           '--usbip-port', str(A.port), '--run-for', str(RUN_FOR), '--script', sp, '--name', name] \
         + shots + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, name))
+    tl = emusync.Timeline([(ph[0], ph[1]) for ph in PHASES], RUN_FOR, mk)
     rows = []
     t_wall = time.time()
     tm = None
@@ -84,6 +90,8 @@ def main():
             print('attach:', type(e).__name__, e, flush=True)
             time.sleep(1)
     done = set()
+    if tm is not None and mk.wait_clock() is None:
+        print('no clock marker (dwt: CYCCNT write) in the log', flush=True)
     if tm is not None:
         try:
             while p.poll() is None:
@@ -96,18 +104,21 @@ def main():
                 print('%6.2f %-8s READ %-16s BURD %-16s disp %s POW:BURD %s' % (
                     row['t'], row['FUNC?'], row['READ?'], row['FETC:BURD?'], row['DISP:BURD?'], row['POW:BURD?']), flush=True)
                 for i, ph in enumerate(PHASES):
-                    if i not in done and row['t'] >= ph[0] + 0.5:
+                    b = tl.start(i, predict=True)
+                    if i not in done and b is not None and row['t'] >= b + 0.5:
                         done.add(i)
                         for c in ph[2]:
                             tm.write(c)
         except Exception as e:
             print('link ended:', e, flush=True)
     out, _ = p.communicate()
-    ok = True
-    bad = []
+    bad = emusync.check_sync(mk, tl, 'burden')
+    ok = not bad
     for i, (t, _, _, want, disp, _) in enumerate(PHASES):
-        t0 = t + 5.0
-        t1 = (PHASES[i + 1][0] if i + 1 < len(PHASES) else RUN_FOR) - 3.0
+        if tl.start(i) is None or tl.stop(i) is None:
+            continue  # a marker is missing: check_sync failed the run
+        t0 = tl.start(i) + 5.0
+        t1 = tl.stop(i) - 1.0
         seen = [r for r in rows if t0 <= r['t'] <= t1]
         if not seen:
             ok = False
@@ -141,7 +152,8 @@ def main():
             if rd == OL or abs(bd - rd * want) > 0.002 * abs(rd * want) + 1e-6:
                 ok = False
                 bad.append('%.2f FETC:BURD? %g != READ? %g x %g' % (r['t'], bd, rd, want))
-    res = {'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else ''}
+    res = {'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else '',
+           'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, 'burden.json'), 'w') as f:
         json.dump(res, f, indent=1)
     try:

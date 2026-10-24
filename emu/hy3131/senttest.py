@@ -33,16 +33,18 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
-# name: (SCPI function, run_for, [(t, spec)], [(t0, t1, allowed alerts)])
 # name: (SCPI function, run_for, [(t, spec, allowed alerts in this phase)]); a phase is checked
-# from its start + 2 s to the next start - 1.5 s (fw uptime lags the virtual time by ~0.5 s;
-# A-JACK clears 1 s after the last hit, V-JACK? needs 1 s + the settle).
-# The fw uptime lags the virtual time by ~1.7 s now (present on 1eb4d7e, not
-# bisected; the ovl-* scenarios saw the next phase's source inside a window):
-# the connection changes go into the script VLAG later, which restores the
-# ~0.5 s lag the windows were written for.
-VLAG = 1.2
+# from its start + 2.5 s to the next phase's start - 1.0 s (the first phase from fw 5 s; the
+# last to the run's end); A-JACK clears 1 s after the last hit, V-JACK? needs 1 s + the settle.
+# The phase starts are the input markers (emu/emusync.py, README "Input markers"): the fw
+# uptime at which the model applied the change. `acts` run at their distance from the start
+# of the phase they fall in. The windows were written for inputs at fw ~t - 0.5 s: the
+# script puts the changes VLAG later in virtual time (and runs VLAG longer), which keeps
+# them there with the boot of emusync.BOOT_S (2.85 s, fresh disk); if the boot changes,
+# only the phase lengths move (the markers keep the windows on the inputs).
+VLAG = emusync.BOOT_S - 0.5
 SC = {
     'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'dcv-neg':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'AJACK'})]),
@@ -185,8 +187,10 @@ SC = {
                      {'monitor': ['sysbus.hy3131 Ad2StartGlitch 3000']}),
     # A current function ends the latch (its own shunt switching takes over).
     # (DC A AUTO: the source's amps on the mA shunt are a quiet hop to the A shunt, no OVERLOAD)
+    # CONF:CURR:DC at 17 (was 16: 0.5 s before the APROT window's end, and the latch ends
+    # ~0.3 s after it, so a poll in between failed the run now and then).
     'aprot-to-dca': ('VOLT:DC', 30, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (18, 'avsrc:12', {'NONE'})],
-                     [], {'acts': {16: 'CONF:CURR:DC'}}),
+                     [], {'acts': {17: 'CONF:CURR:DC'}}),
 }
 
 
@@ -195,11 +199,7 @@ def run(name):
     setup = SC[name][3] if len(SC[name]) > 3 else []
     xtra = SC[name][4] if len(SC[name]) > 4 else {}
     script = [(ph[0], ph[1]) for ph in phases]
-    expect = []
-    for i, ph in enumerate(phases):
-        t = ph[0]
-        t1 = phases[i + 1][0] - 1.5 if i + 1 < len(phases) else run_for
-        expect.append((t + 2.0 if t > 0 else 5.0, t1, ph[2], ph[3] if len(ph) > 3 else None))
+    vt = [t + VLAG if t > 0 else t for t, _ in script]
     if uc.port_busy(A.port):
         print('RESULT %s FAIL port %d in use (another emulator?): pass a free --port' % (name, A.port), flush=True)
         return False
@@ -212,13 +212,17 @@ def run(name):
     with open(sp, 'w') as f:
         for m in xtra.get('monitor', []):
             f.write('0 monitor %s\n' % m)
-        for t, spec in script:
-            f.write('%g dmm %s\n' % (t + VLAG if t > 0 else t, spec))
+        for v, (t, spec) in zip(vt, script):
+            f.write('%g dmm %s\n' % (v, spec))
     # USB/IP from 3 s: an attach before fw-rs enumerated can leave the server stuck
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for + VLAG), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
+    # Phase times as the fw uptimes the scenario was written for (the inputs at fw t - 0.5):
+    # `acts` (fw uptime values) keep their distance from their phase's input.
+    tl = emusync.Timeline([(t - 0.5 if t > 0 else t, spec) for t, spec in script], run_for + VLAG, mk, vt=vt)
     rows = []
     t_wall = time.time()
     tm = None
@@ -237,7 +241,11 @@ def run(name):
             for c in setup:
                 time.sleep(1.0)
                 tm.write(c)
-            acts = dict(xtra.get('acts', {}))
+            if mk.wait_clock() is None:
+                print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+            # fw uptime: the distance from the start of the act's phase (predicted by the
+            # clock marker = the value of the phase's input marker)
+            acts = {tl.at(ta, predict=True) if mk.zero is not None else ta: c for ta, c in xtra.get('acts', {}).items()}
             while p.poll() is None:
                 row = {}
                 for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:SENT?', 'STAT:QUES:COND?', 'READ?'] + xtra.get('queries', []):
@@ -256,8 +264,14 @@ def run(name):
     for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
         if os.path.exists(x):
             os.remove(x)
-    ok = True
-    bad = []
+    bad = emusync.check_sync(mk, tl, name)
+    ok = not bad
+    expect = []
+    for i, ph in enumerate(phases):
+        b0, b1 = tl.start(i), tl.stop(i)
+        if b0 is None or b1 is None:
+            continue  # its marker is missing: check_sync failed the run
+        expect.append((b0 + 2.5 if i > 0 else 5.0, b1 - 1.0 if i + 1 < len(phases) else b1, ph[2], ph[3] if len(ph) > 3 else None))
     for t0, t1, allowed, win in expect:
         seen = [r for r in rows if t0 <= r['t'] <= t1]
         if not seen:
@@ -315,7 +329,8 @@ def run(name):
         if not rows or rows[-1].get('FUNC?') != '"CURR"':
             ok = False
             bad.append('function after the check: %s' % (rows[-1].get('FUNC?') if rows else None))
-    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else ''}
+    res = {'name': name, 'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-600:] if p.returncode else '',
+           'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, tag + '.json'), 'w') as f:
         json.dump(res, f, indent=1)
     print('RESULT %s %s %s' % (name, 'OK' if ok else 'FAIL', '; '.join(bad[:5])), flush=True)

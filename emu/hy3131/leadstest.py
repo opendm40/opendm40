@@ -33,18 +33,21 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 # (t, connection or None, SCPI at the start, expected reminder count, expected
 # last (from, to) (from None: any current function; DC A autoranges over the
 # modes 7..9, AC A over 4..6) or None = any, expected SYST:ALER:ENAB?). A phase is checked
-# from t + 2.5 s to the next t - 1 s (fw uptime; SCPI goes out at t + 0.5).
+# from its start + 2.5 s to the next phase's start - 1 s (fw uptime; its SCPI goes out at
+# its start + 0.5). Phase starts (emu/emusync.py, README "Input markers"): a connection's
+# phase at its input marker, the tap's at the tap's virtual time on the fw clock (the
+# clock marker), any other phase its distance in t after the previous phase's start.
 TAP_T = 10.0
-# Virtual-time events (connections, the tap) go into the run.py script this
-# much later than their phase's t: the fw uptime the windows and the SCPI use
-# lags the virtual time by ~1.3-2 s since c2709aa (the tap at virtual 10 s
-# counted at uptime 8.7, inside the previous phase's window); 1.5 s puts them
-# within -0.5..+1.5 s of t for a lag of 0..2 s.
-VLAG = 1.5
+# Virtual-time events (connections, the tap) go into the run.py script this much later
+# than their phase's t (and the run is this much longer): with the boot of emusync.BOOT_S
+# (2.85 s, fresh disk) they land at fw ~t, where the phases were written. Not needed for
+# correctness: with another boot only the phase lengths move.
+VLAG = emusync.BOOT_S
 PHASES = [
     (0, 'open', ['CONF:CURR:DC'], 0, None, '15'),
     # The DMM page's V button (DBG-free: a real touch, virtual time TAP_T).
@@ -80,10 +83,14 @@ def main():
     shots = ['--shot', os.path.join(OUT, 'leads-before.png@%g' % (TAP_T + VLAG - 0.5)),
              '--shot', os.path.join(OUT, 'leads-toast.png@%g' % (TAP_T + VLAG + 1.3)),
              '--shot', os.path.join(OUT, 'leads-after.png@%g' % (TAP_T + VLAG + 3.5))]
+    name = 'leads.%d' % os.getpid()
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(RUN_FOR), '--script', sp, '--name', 'leads.%d' % os.getpid()] \
+           '--usbip-port', str(A.port), '--run-for', str(RUN_FOR + VLAG), '--script', sp, '--name', name] \
         + shots + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, name))
+    ph = [(t, conn if conn else (emusync.EVENT if t == TAP_T else None)) for t, conn, *_ in PHASES]
+    tl = emusync.Timeline(ph, RUN_FOR + VLAG, mk, vt=[t + VLAG if t > 0 else t for t, *_ in PHASES])
     rows = []
     t_wall = time.time()
     tm = None
@@ -94,6 +101,8 @@ def main():
             print('attach:', type(e).__name__, e, flush=True)
             time.sleep(1)
     done = set()
+    if tm is not None and mk.wait_clock() is None:
+        print('no clock marker (dwt: CYCCNT write) in the log', flush=True)
     if tm is not None:
         try:
             while p.poll() is None:
@@ -107,18 +116,21 @@ def main():
                     row['t'], row['FUNC?'], row['DBG:LEADs?'], row['SYST:ALER?'], row['SYST:ALER:ENAB?'],
                     row['STAT:QUES:COND?'], row['SYST:FUSE?']), flush=True)
                 for i, ph in enumerate(PHASES):
-                    if i not in done and row['t'] >= ph[0] + 0.5:
+                    b = tl.start(i, predict=True)
+                    if i not in done and b is not None and row['t'] >= b + 0.5:
                         done.add(i)
                         for c in ph[2]:
                             tm.write(c)
         except Exception as e:
             print('link ended:', e, flush=True)
     out, _ = p.communicate()
-    ok = True
-    bad = []
+    bad = emusync.check_sync(mk, tl, 'leads')
+    ok = not bad
     for i, (t, _, _, n, last, enab) in enumerate(PHASES):
-        t0 = t + 2.5
-        t1 = (PHASES[i + 1][0] if i + 1 < len(PHASES) else RUN_FOR) - 1.0
+        if tl.start(i) is None or tl.stop(i) is None:
+            continue  # a marker is missing: check_sync failed the run
+        t0 = tl.start(i) + 2.5
+        t1 = tl.stop(i) - 1.0
         seen = [r for r in rows if t0 <= r['t'] <= t1]
         if not seen:
             ok = False
@@ -140,12 +152,15 @@ def main():
             if r['SYST:ALER:ENAB?'] != enab:
                 ok = False
                 bad.append('%.2f SYST:ALER:ENAB? %s, want %s' % (r['t'], r['SYST:ALER:ENAB?'], enab))
-    # The fuse check ran (and came back to DC A) within its phase.
-    fz = [r for r in rows if 46 <= r['t'] <= 49]
+    # The fuse check ran (and came back to DC A) within its phase (SYST:FUSE:TEST at its
+    # start + 0.5 s; 2..5 s after the start).
+    f0 = tl.at(46)
+    fz = [r for r in rows if f0 is not None and f0 <= r['t'] <= f0 + 3]
     if not any(r['SYST:FUSE?'].startswith('OK') and r['FUNC?'].strip('"').startswith('CURR') for r in fz):
         ok = False
-        bad.append('fuse check: no OK back in CURR in 46..49 s')
-    res = {'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else ''}
+        bad.append('fuse check: no OK back in CURR in %s..+3 s' % ('?' if f0 is None else '%.2f' % f0))
+    res = {'ok': ok, 'bad': bad, 'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else '',
+           'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, 'leads.json'), 'w') as f:
         json.dump(res, f, indent=1)
     try:

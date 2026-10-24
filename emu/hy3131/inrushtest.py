@@ -8,7 +8,8 @@ USB/IP connection.
   cd fw-rs && ./build.sh
   emu/hy3131/inrushtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
 
-Timeline (virtual seconds; the scheduled input changes):
+Timeline (virtual seconds; the scheduled input changes; the client waits on
+their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
   0      A-COM 0.05 A DC (idle)
   T1     a lamp-like DC step: 12 A for 20 ms, 6 A for 80 ms, then 3 A:
          Irms(100 ms) = sqrt((144 * 20 + 36 * 80) / 100) = 7.59 A, peak 12 A
@@ -61,6 +62,7 @@ T3 = T2 + 8.0
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 FAIL = []
 
@@ -93,6 +95,7 @@ cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '-
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', tag, '--log', log,
        '--disk', disk, '--dmm', 'isrc:0.05', '--script', script]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+mk = emusync.Markers(log)
 
 
 class Done(Exception):
@@ -170,6 +173,12 @@ try:
         return int(q('DBG:ISR?').split(',')[1])
 
     print('*IDN?', q('*IDN?'), flush=True)
+    if mk.wait_clock() is None:
+        sys.exit('inrushtest: no clock marker (dwt: CYCCNT write) in %s' % log)
+    # The steps in fw uptime (s): their markers (predicted by the clock marker
+    # until logged; the same value).
+    F1, F2, F3 = mk.at(T1), mk.at(T2), mk.at(T3)
+    print('  fw clock zero at %.4f s virtual: steps at fw %.3f / %.3f / %.3f s' % (mk.zero, F1, F2, F3), flush=True)
     q('CONF:CURR:DC')
     wait_ms(3000)
     print('  DC A before: READ? %s A' % q('READ?'), flush=True)
@@ -187,10 +196,10 @@ try:
     check(pre[:2] == ['4', '1'], 'the 10 A range of AC A (the stream: LOG:PRE? mode,range %s)' % pre[:2])
     shot('i01-armed')
     now = up()
-    check(now < T1 * 1000 - 500, 'armed before the step (up %.1f s, step at %.1f s)' % (now / 1000, T1))
-    if now >= T1 * 1000 - 500:
+    check(now < F1 * 1000 - 500, 'armed before the step (up %.1f s, step at %.1f s)' % (now / 1000, F1))
+    if now >= F1 * 1000 - 500:
         raise Done
-    wait_until(T1 + 0.5)
+    wait_until(F1 + 0.5)
     c = cond()
     check(c in ('TRIGGERED', 'SAVING', 'DONE'), 'the DC step triggers (%s)' % c)
     shot('i02-triggered')
@@ -249,20 +258,18 @@ try:
     shot('i04-closed')
 
     # The AC load: running from T2, the step at T3 (SCPI entry).
-    wait_until(T2 + 1.0)
+    wait_until(F2 + 1.0)
     q('INR:THReshold 1')
     q('INR:STATe ON')
     c = wait_cond(('ARMED',), 3000)
     check(c == 'ARMED', 'INR:STAT ON with the 2 A AC load running: armed (%s)' % c)
     now = up()
-    check(now < T3 * 1000 - 1500, 'armed before the AC step (up %.1f s)' % (now / 1000))
-    # (DBG:PING? uptime runs behind the virtual time of the scheduled
-    # inputs by the boot chain: a margin of 2 s.)
-    wait_until(T3 - 2.0)
+    check(now < F3 * 1000 - 1500, 'armed before the AC step (up %.1f s)' % (now / 1000))
+    wait_until(F3 - 1.0)
     c = cond()
-    check(c == 'ARMED', 'a running 2 A rms load does not trigger a 1 A step (%s, %.1f s of it)' % (c, T3 - 2.0 - T2))
+    check(c == 'ARMED', 'a running 2 A rms load does not trigger a 1 A step (%s, %.1f s of it)' % (c, F3 - 1.0 - F2))
     shot('i05-armed-ac')
-    wait_until(T3 + 0.5)
+    wait_until(F3 + 0.5)
     c = wait_cond(('DONE',), 12000)
     r = fetch()
     print('  AC step: INR:FETCh? %s' % r, flush=True)

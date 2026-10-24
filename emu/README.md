@@ -350,7 +350,7 @@ Check 5 (see "Use" below): `emu/out/stock-scope.png` and `emu/out/fwrs-scope.png
 | block | model | notes |
 |---|---|---|
 | CPU, NVIC, SysTick | Renode `cortex-m4f`, SysTick at 200 MHz | PerformanceInMips 200 so busy loops roughly match virtual time |
-| DWT CYCCNT | `DM40_DWT.cs` from virtual time | fw-rs's time base |
+| DWT CYCCNT | `DWT.cs` (sysbus.dwt) from virtual time | fw-rs's time base; every CYCCNT write is logged (the clock marker, "Input markers" below); `ZeroedAt` / `FwUptime` from the monitor |
 | CPU cost | `CpuCost.cs` (sysbus.cpucost) | the device is ~1.8x slower per instruction than PerformanceInMips 200: `--mips 110` matches its idle AC V main-loop pass (22 vs 23 us) and its 76.8 kS/s disk Run pass (617-681 vs 718 us, ~1400 vs 1272 passes/s; fw-rs device check 7409b92). `IsrStallNs n`: n ns per stream ISR entry inside the busy window fw-rs measures (cpu_permille; 700 at --mips 110 gives ~520 against the device's 544 at 76 800 S/s: the device runs 1.48 ISR entries per sample there, the model 1.13); it lengthens every entry, so a large n adds overruns the device does not have. `PcSampleStart` / `PcSampleDump path`: the interrupted main-code PC at every ISR entry (a profile of the main loop while the stream runs). Default: off, --mips 200 |
 | flash 1 MiB, SRAM 192 K, TCM 64 K, backup SRAM, system memory (OTP/UID) | mapped memory | option bytes via the flash controller's region |
 | FMC flash controller | Renode `STM32F4_FlashController` | key/lock, sector erase (STM32F4 sector map), BUSY never set; programming = plain writes (the FS-loader's install and fw-rs's marker zeroing work) |
@@ -469,6 +469,42 @@ hold -> FS-loader update screen), the watchdog crash counter (one hang = a
 reboot, a second hang within 60 s of running main loop = the update screen,
 a second one after 60 s = a reboot) and, with `--cases release`, DBG:RELEASE
 over USB. About 6 min wall for the default 8 cases at `--jobs 8`.
+
+### Input markers (test timing)
+
+Scenario tests change the input at fixed virtual times (`--script` /
+`--dmm SPEC@T`) and read the firmware's uptime (DBG:PING?). The two clocks
+differ by the boot: fw-rs's uptime is the virtual time since its last DWT
+CYCCNT write (`Clock::new` in main), 2.85 s of virtual time on a fresh disk
+image with `--fast` (1.90 s at the default `--mips 200`; pre_main's SPI-disk
+work: fatdir, calbackup, `vdisk::mirror_boot`).
+The offset is the same in every run (virtual time is deterministic, host load
+or not), but it grows whenever the boot does: it was 0.5, 0.9, 1.3, 1.8 s as
+code was added, and tests carried those guesses (VLAG / LAG / BOOT_OFS /
+"next phase - 4.5 s"). With 2.85 s, couptest's and powtest's check windows
+reached 0.35 s past the next phase's input; whether a reading landed there
+depended on where the main loop's reading cadence fell (the A AUTO coupling
+reads in bursts every ~1.9 s), which looked like a bimodal offset under load
+(couptest idc: the 0.3 A input "at fw 13.2 or 14.8 s"; it was at 13.15 s
+both times, seen by this burst or the next).
+
+The model logs both clocks instead, and the tests key on that:
+
+    dwt: CYCCNT write 0x00000000 at 2.849631           (DWT.cs: the clock marker)
+    hy3131: input: open;dca:0.3 at 16.0000 fw 13.1504  (HY3131 SetInput: every input change)
+
+`emu/emusync.py` reads the run's Renode log as it is written (`Markers`:
+`wait_clock()` after the USB attach, `fw(v)`, `input_fw(v)`, `at(v)`) and
+places a scenario's phases in fw uptime (`Timeline`: a phase starts at its
+input's marker, or at its script distance after the previous start when it
+starts with an action; actions at their distance from their phase's start;
+check windows from the next phase's start backwards). A run whose markers are
+missing, or whose fw clock restarted (a reset), fails. Keyed this way:
+couptest, powtest, senttest, burdentest, leadstest, acdcmethtest,
+autowaittest, switchlat, inrushtest, dcvtest (the 25 V step), loudtest (its
+actions on the script's clock), switchtest (`later` inputs land inside the
+first step). Tests driven only by SCPI handshakes and uptime (autorangetest,
+modetest, switchtest's steps) need nothing.
 
 ## Files the emulator reads (never writes)
 

@@ -64,6 +64,7 @@ if A.child:
     os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 PH = 12.0  # s per phase
 # (signal spec, dc, ac rms, unit 'V' / 'A', label)
@@ -96,10 +97,11 @@ E8_WIN = ((1.0, 4.0), (4.0, 8.5))
 if A.e8:
     PH = E8_PH
     SIG = [('open;dcv:%g' % v, v, 0.0, 'V', 'e8 %s V %g' % ('60' if it == 2 else '6', v)) for v, it in E8[A.e8]]
-# The firmware's uptime (DBG:PING?) lags the virtual time of the event
-# script by the boot: 1.34 s (B / C runs: their first reading after the
-# 5 V -> 2 V AC step at 12 s came at uptime 10.66 / 10.68 s; the boot is
-# deterministic in virtual time).
+# The phases in fw uptime: each starts at its input's marker (emu/emusync.py,
+# README "Input markers"; the fw uptime trails the script by the boot, 2.85 s on a
+# fresh disk, once assumed a constant 1.34 s here). A sample at fw t is at script
+# time sv(t) = i * PH + (t - start_i) in phase i. LAG: only for result files
+# written before the markers (no 'starts' in them).
 LAG = 1.34
 T_A = sum(1 for x in SIG if x[3] == 'V') * PH  # the A phases start here (CURR:COUP ACDC)
 RUN_FOR = len(SIG) * PH + 2
@@ -140,6 +142,8 @@ def run(meth, port, res):
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3', '--usbip-port', str(port),
            '--run-for', str(RUN_FOR), '--script', sp, '--name', rtag, '--app', os.path.abspath(A.app)]
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
+    tl = emusync.Timeline([(i * PH, spec) for i, (spec, *_x) in enumerate(SIG)], RUN_FOR, mk)
     rows = []
     tm = None
     t_wall = time.time()
@@ -158,6 +162,14 @@ def run(meth, port, res):
             if it != last:
                 cmds.append((i * PH, 'DBG:ACDC:RANG %d' % it))
                 last = it
+    if tm is not None and mk.wait_clock() is None:
+        print(meth, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+
+    def fw(ts):
+        # script time -> fw uptime (predicted by the clock marker = the input markers' value)
+        return tl.at(ts, predict=True) if mk.zero is not None else ts - LAG
+    cmds = [(fw(ts + (0.3 if ts == 0 else 0.0)), c) for ts, c in cmds]
+    t_switch = fw(T_A + 0.3)
     if tm is not None:
         try:
             m = meth[0]
@@ -171,11 +183,11 @@ def run(meth, port, res):
                 t = int(row['DBG:PING?'].split(',')[0]) / 1000.0
                 st = row['DBG:ACDC:STAT?'].split(',')
                 rows.append({'t': t, 'v': num(row['FETC?']), 'st': st, 'f': row['FUNC?']})
-                while cmds and t + LAG >= cmds[0][0] + (0.3 if cmds[0][0] == 0 else 0.0):
+                while cmds and t >= cmds[0][0]:
                     tm.write(cmds.pop(0)[1])
                 if A.e8:
                     continue
-                if t + LAG >= T_A + 0.3 and not switched:
+                if t >= t_switch and not switched:
                     tm.write('CURR:COUP ACDC')
                     switched = True
         except Exception as e:
@@ -184,23 +196,38 @@ def run(meth, port, res):
     for x in (sp, os.path.join(OUT, 'flash-%s.bin' % rtag), os.path.join(OUT, rtag + '.resc')):
         if os.path.exists(x):
             os.remove(x)
-    res[meth] = {'rows': rows, 'rc': p.returncode, 'log': out[-800:] if p.returncode else ''}
+    bad = emusync.check_sync(mk, tl, meth)
+    res[meth] = {'rows': rows, 'rc': p.returncode or (4 if bad else 0), 'log': out[-800:] if p.returncode else '; '.join(bad),
+                 'starts': [tl.start(i) for i in range(len(SIG))], 'sync': emusync.summary(mk, tl)}
     with open(os.path.join(OUT, '%s-p%d.json' % (tag, port)), 'w') as f:
         json.dump(res[meth], f)
+
+
+def script_time(d):
+    """fw uptime -> script time for run result d: phase i (the last whose start,
+    its input marker, is at or before t) at i * PH + (t - start_i)."""
+    st = d.get('starts')
+    if not st or any(x is None for x in st):
+        return lambda t: t + LAG
+
+    def sv(t):
+        i = max([k for k, b in enumerate(st) if b <= t] or [0])
+        return i * PH + (t - st[i])
+    return sv
 
 
 def analyse(meth, d, w=None):
     """Per phase: (label, mean err %, p-p %, rate /s, settle s, n samples);
     `w` (from, to) s after the phase start, else its 6th to 1.5th last s."""
     rows = d.get('rows', [])
-    lag = LAG
+    sv = script_time(d)
     out = []
     for i, (_spec, dc, ac, unit, label) in enumerate(SIG):
         t0, t1 = i * PH, (i + 1) * PH
         truth = math.hypot(dc, ac)
         w0, w1 = (t0 + w[0], t0 + w[1]) if w else (t1 - 6.0, t1 - 1.5)
-        ph = [r for r in rows if t0 <= r['t'] + lag < t1]
-        win = [r for r in ph if w0 <= r['t'] + lag <= w1 and not math.isnan(r['v'])]
+        ph = [r for r in rows if t0 <= sv(r['t']) < t1]
+        win = [r for r in ph if w0 <= sv(r['t']) <= w1 and not math.isnan(r['v'])]
         if not win:
             out.append((label, float('nan'), float('nan'), float('nan'), float('nan'), 0, None))
             continue
@@ -214,7 +241,7 @@ def analyse(meth, d, w=None):
         settle = float('nan')
         for k, r in enumerate(ph):
             if all(not math.isnan(x['v']) and abs(x['v'] - truth) <= tol for x in ph[k:]):
-                settle = r['t'] + lag - t0
+                settle = sv(r['t']) - t0
                 break
         # method C extras: DC / AC parts (DBG:ACDC:STAT? 5 / 4) against the source, range changes
         dcp = [num(r['st'][5]) for r in win]
@@ -246,11 +273,12 @@ def e8_report(meths, res):
                 bad = abs(extra[0]) > rule
                 line += ' %+8.3f%s' % (extra[0] * 1e3, '*' if bad else ' ')
                 ok = ok and not bad
-            rows = [r for r in d.get('rows', []) if i * PH <= r['t'] + LAG < (i + 1) * PH]
+            sv = script_time(d)
+            rows = [r for r in d.get('rows', []) if i * PH <= sv(r['t']) < (i + 1) * PH]
             gs = rows[-1]['st'][17] if rows and len(rows[-1]['st']) > 17 else '?'
             if rows and len(rows[-1]['st']) > 20:
                 gs += ' src %s dis %s' % (rows[-1]['st'][18], rows[-1]['st'][19])
-            rg = sorted(set(r['st'][3] for r in rows if E8_WIN[0][0] <= r['t'] + LAG - i * PH))
+            rg = sorted(set(r['st'][3] for r in rows if E8_WIN[0][0] <= sv(r['t']) - i * PH))
             line += '  %6.2f  %s  %s' % (rule * 1e3, ','.join(rg), gs)
             print(line)
         if d.get('err') or d.get('rc'):

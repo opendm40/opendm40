@@ -44,6 +44,7 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 # Steps: a name -> the SCPI commands that select it. 'WAVE' = MF -> Wave view
 # (V / A functions), 3 s there, MENU back to the DMM.
@@ -144,9 +145,10 @@ SC = {
     # real conditions: how fast after a switch in (settle + the detector)
     'real-ajack': ('open;isrc:0.001', 'ajack', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv', 'aca', 'dcv', 'acv', 'cont', 'acv'],
                    {'dcv': ('AJACK', 1.0), 'acv': ('AJACK', 1.6), 'cont': ('AJACK', 1.0)}),
-    # 24 V across A-COM connected at virtual 9 s, during RES (A-JACK only there, no probe), then
-    # the switch into DC V: A-PROT after the switch (a source on from boot latches in DC V at once)
-    'real-aprot': ('open', 'aprot', [], ['res', 'dcv'], {'dcv': ('APROT', 1.5)}, [(9, 'avsrc:24')]),
+    # 24 V across A-COM connected at virtual 12 s (fw ~9.2 s), during RES (A-JACK only there, no
+    # probe), then the switch into DC V: A-PROT after the switch (a source on from boot latches in
+    # DC V at once). RES holds until 1 s after the connection's marker (`later` in run()).
+    'real-aprot': ('open', 'aprot', [], ['res', 'dcv'], {'dcv': ('APROT', 1.5)}, [(12, 'avsrc:24')]),
     'real-achint': ('open;vsrc:0,ac=2,f=50', 'ac2', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv'], {'dcv': ('AC', 4.0)}),
     'real-dchint': ('open;vsrc:5', 'dc5', [], ['dcv', 'acv', 'res', 'acv', 'temp', 'acv'], {'acv': ('DC', 6.0)}),
     'real-vjack': ('open;vsrc:24', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'aca', 'dca'], {'dca': ('VJACK', 4.0)}),
@@ -199,6 +201,7 @@ def run(name):
            '--usbip-port', str(A.port), '--run-for', str(int(run_for)), '--script', sp, '--name', rtag] \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
     t_wall = time.time()
     tm = None
     while p.poll() is None and tm is None and time.time() - t_wall < 300:
@@ -225,6 +228,12 @@ def run(name):
             q('*IDN?')
             while up() < 6.0 and p.poll() is None:  # past the boot's own settle
                 time.sleep(0.3)
+            # `later` inputs (virtual t) land during the first step: in fw uptime (their
+            # markers, emu/emusync.py; predicted by the clock marker) it holds until 1 s after
+            # them, whatever the boot's length; one before the first step fails the run.
+            if later and mk.wait_clock() is None:
+                bad.append('no clock marker (dwt: CYCCNT write) in the log')
+            pend = sorted(mk.at(t) for t, _ in later) if later and mk.zero is not None else []
             prev = None
             for c in SETUP.get(name, []):
                 tm.write(c)
@@ -250,6 +259,10 @@ def run(name):
                     fn = st
                 rec = []
                 until = ts + max(A.dwell, real[fn][1] + 1.0 if fn in real else 0) + (2.5 if st in SLOW else 0)
+                if i == 0 and pend:
+                    if pend[0] <= ts:
+                        bad.append('step 0 %s: a later input landed before it (fw %.2f s, step at %.2f s)' % (st, pend[0], ts))
+                    until = max([until] + [x + 1.0 for x in pend])
                 while p.poll() is None:
                     t = up()
                     rec.append((t, q('SYST:ALER?'), q('DBG:SENT?')))

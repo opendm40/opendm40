@@ -66,13 +66,15 @@ def func(name):
 
 
 # name: (setup SCPI, coupling query, run_for, [(t, spec, check, label)], {t: command});
-# t: script (virtual) time of the input change (spec None: the phase starts with an
-# action at t, no input change). Timing is keyed on the input markers (emu/emusync.py,
-# README "Input markers"): a phase starts at its input's fw uptime as logged by the
-# model; an action at t runs at its distance from the start of the phase it falls in
-# (fw uptime); a phase is checked on its samples from 3.0 s to 0.5 s before the next
-# phase's start (the last phase: before the run's end). No boot-offset guess: the
-# offset (2.85 s on a fresh disk, was assumed 1.5-1.8 s) only shows in the markers.
+# t: the phase's time (spec None: the phase starts with an action at t, no input change).
+# Timing is keyed on the input markers (emu/emusync.py, README "Input markers"): a phase
+# starts at its input's fw uptime as logged by the model; an action at t runs at its
+# distance from the start of the phase it falls in (fw uptime); a phase is checked on its
+# samples 2.7 .. 0.7 s before the next phase's input marker (4.5 .. 2.5 s before a phase
+# that starts with an action; the last phase: 2.7 .. 0.3 s before the run's end). The
+# script puts the input changes emusync.BOOT_S later in virtual time (and runs that much
+# longer), so they land at fw ~t; a check never depends on that (the offset was assumed
+# 1.5-1.8 s here, while it had grown to 2.85 s).
 # AUTO rule (dmm.rs): to AC when AC > 1.5 |DC| (and above the floor), to DC
 # when AC < 0.75 |DC|; in between the part shown stays (AC = |DC| below).
 SC = {
@@ -96,11 +98,14 @@ SC = {
     # AUTO, quiet (no latch / alert), and the DC phase must not walk down on
     # hypot(0, ~0) before the AC part is known (dmm.rs acdc_down_ok). Every
     # sample of the run is checked (ALWAYS below): SYST:ALER? NONE, never
-    # the uA shunt, so a trip or a wrong step anywhere fails it.
-    'iac': (['CURR:COUP AUTO'], 'CURR:COUP?', 40, [
+    # the uA shunt, so a trip or a wrong step anywhere fails it. The AC 300 mA phase is 16 s
+    # (was 13): AUTO walks 6 A -> 60 mA (AUTO,DC, the DC part ~0) -> 600 mA there and settles
+    # 8.5 .. 10.6 s after the change (+9.91E37 until then), which the 13 s phase's window
+    # caught in 1 of 40 loaded runs (2026-10-24).
+    'iac': (['CURR:COUP AUTO'], 'CURR:COUP?', 43, [
         (0, 'open;aca:1@60', shows('AUTO,AC', 1.0, ab=0.005), 'enter AUTO with AC 1 A: AC, no OVERLOAD'),
         (14, 'open;aca:0.3@60', shows('AUTO,AC', 0.3, ab=0.001), 'AC 300 mA: AC (down to the mA shunt)'),
-        (27, 'open;dca:0.3', shows('AUTO,DC', 0.3, ab=0.001), 'DC 300 mA: -> DC'),
+        (30, 'open;dca:0.3', shows('AUTO,DC', 0.3, ab=0.001), 'DC 300 mA: -> DC'),
     ], {}),
     # Entering AUTO with DC 1 A (TODO "AC+DC / AUTO down-range on one part"): the quiet hop
     # mA -> A is a unit change (reset_values: the DC part reads 0 until measured again); a
@@ -237,13 +242,13 @@ def run(name):
     sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         for t, spec in script:
-            f.write('%g dmm %s\n' % (t, spec))
+            f.write('%g dmm %s\n' % (t + emusync.BOOT_S if t > 0 else t, spec))
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for + emusync.BOOT_S), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     mk = emusync.Markers(emusync.log_path(OUT, rtag))
-    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for, mk)
+    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for + emusync.BOOT_S, mk, vt=emusync.shifted(phases))
     rows = []
     t_wall = time.time()
     tm = None

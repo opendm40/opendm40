@@ -27,6 +27,13 @@ uptime: a phase with an input starts at that input's marker (0 when the
 input was there before the firmware's clock started); a phase without one
 starts its script distance after the previous phase's start. Actions and
 check windows are placed relative to those starts.
+
+BOOT_S: the boot's virtual length on a fresh disk with run.py --fast (2.85 s,
+measured on rust-fw-poc ab7184c, 2026-10-24; 1.90 s at the default --mips 200). Scripts written in "fw uptime" terms put
+their input changes BOOT_S later in virtual time (and run BOOT_S longer), so
+the phases keep the lengths they were written with; no check depends on it
+(a longer boot only shortens the phases, the markers keep every window on
+its inputs).
 """
 import os
 import re
@@ -35,6 +42,13 @@ import time
 RE_ZERO = re.compile(r'dwt: CYCCNT write 0x([0-9A-Fa-f]+) at ([0-9.]+)')
 RE_INPUT = re.compile(r'hy3131: input: (.*) at (-?[0-9.]+) fw (-?[0-9.]+)\s*$')
 HCLK = 200e6
+BOOT_S = 2.85
+
+
+def shifted(phases, shift=BOOT_S):
+    """Virtual times of the phases' input changes for a script shifted by
+    `shift` (t = 0, the connection at power-on, stays at 0)."""
+    return [t + shift if t > 0 else t for t, *_ in phases]
 
 
 class Markers:
@@ -106,21 +120,37 @@ class Markers:
                 return max(0.0, ifw)
         return None
 
+    def at(self, v):
+        """fw uptime of the input change at virtual v: its marker once
+        logged, else predicted by the clock marker (the same value: the
+        relation is exact; None without either). For a live harness."""
+        self.poll()
+        got = self.input_fw(v)
+        return got if got is not None else self.fw(v)
+
     def restarts(self, after=0.5):
         """CYCCNT writes after the first main-loop one (a reset in the run)."""
         z = [x for x in self.zeros if x >= after]
         return z[1:]
 
 
+EVENT = '<event>'
+
+
 class Timeline:
     """Phase starts of a scenario in fw uptime, keyed on the markers.
 
     phases: [(t, spec)] in script order (t = virtual s of the input change;
-    spec None = no input change, the phase starts with an action);
-    run_for: the run's virtual length."""
+    spec None = no input change, the phase starts with an action; spec
+    EVENT = a script event the model does not log (a touch): the phase
+    starts at its virtual time on the fw clock, m.fw(vt));
+    run_for: the run's virtual length; vt: the virtual times of the phases'
+    input changes when the script shifts them from t (default: t; e.g.
+    senttest puts its inputs a fixed time later than its phase times)."""
 
-    def __init__(self, phases, run_for, markers):
+    def __init__(self, phases, run_for, markers, vt=None):
         self.phases = [(float(t), s) for t, s in phases]
+        self.vt = [float(v) for v in vt] if vt is not None else [t for t, _ in self.phases]
         self.run_for = float(run_for)
         self.m = markers
 
@@ -131,13 +161,16 @@ class Timeline:
         live harness need not wait for the log; the checks after the run
         use the logged markers only."""
         t, spec = self.phases[i]
+        v = self.vt[i]
+        if spec == EVENT:
+            return self.m.fw(v)
         if spec is not None:
-            got = self.m.input_fw(t)
+            got = self.m.input_fw(v)
             if got is not None:
                 return got
-            if t == 0:
+            if v == 0:
                 return 0.0
-            return self.m.fw(t) if predict else None
+            return self.m.fw(v) if predict else None
         if i == 0:
             return t
         prev = self.start(i - 1, predict)
@@ -152,7 +185,7 @@ class Timeline:
 
     def missing(self):
         """Labels of the phases whose input marker is not in the log."""
-        return ['%g %s' % (t, s) for i, (t, s) in enumerate(self.phases) if s is not None and t > 0 and self.m.input_fw(t) is None]
+        return ['%g %s' % (t, s) for i, (t, s) in enumerate(self.phases) if s not in (None, EVENT) and self.vt[i] > 0 and self.m.input_fw(self.vt[i]) is None]
 
     def end(self):
         """fw uptime at the run's end (virtual run_for)."""
@@ -162,10 +195,20 @@ class Timeline:
         """fw uptime at which phase i ends: the next phase's start or the run's end."""
         return self.start(i + 1) if i + 1 < len(self.phases) else self.end()
 
-    def window(self, i, pre=3.0, post=0.5):
-        """Phase i's check window: [its end - pre, its end - post] fw s."""
+    def window(self, i):
+        """Phase i's check window (fw s), back from its end: before the next
+        phase's input marker 2.7 .. 0.7 s (where couptest / powtest's windows
+        sat with the ~1.8 s offset they assumed), before a next phase that
+        starts with an action 4.5 .. 2.5 s (as they were: such a boundary
+        was always on the fw clock), before the run's end 2.7 .. 0.3 s."""
         e = self.stop(i)
-        return None if e is None else (e - pre, e - post)
+        if e is None:
+            return None
+        if i + 1 == len(self.phases):
+            return (e - 2.7, e - 0.3)
+        if self.phases[i + 1][1] is None:
+            return (e - 4.5, e - 2.5)
+        return (e - 2.7, e - 0.7)
 
     def describe(self):
         return ' '.join('%g->%s' % (t, '?' if self.start(i) is None else '%.3f' % self.start(i))

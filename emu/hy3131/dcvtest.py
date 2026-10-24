@@ -47,6 +47,7 @@ os.makedirs(os.path.dirname(SCRIPT), exist_ok=True)
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 FAIL = []
 
@@ -61,6 +62,7 @@ cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--u
        '--usbip-port', str(A.port), '--run-for', '3000', '--name', 'dcvtest-%d' % A.port,
        '--dmm', 'vsrc:2.0,ac=0.3,f=50;ad2dcg:%g' % DCG, '--dmm', 'vsrc:25.0@%d' % T25]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+mk = emusync.Markers(emusync.log_path(os.path.join(EMU, 'out'), 'dcvtest-%d' % A.port))
 try:
     t = None
     for _ in range(150):
@@ -178,8 +180,13 @@ try:
     check(len(vals) > 1000 and abs(mean - ref) < 0.003, 'the file\'s values (its header scale) mean %.5f = %.5f V' % (mean, ref))
     q('LOG:DEST HOST')
 
-    # 25 V DC from virtual T25 s on (run.py --dmm SPEC@T): the 60 V range.
-    while up() < T25 * 1000 + 500:
+    # 25 V DC from virtual T25 s on (run.py --dmm SPEC@T): the 60 V range. Its fw
+    # uptime is its input marker (emu/emusync.py; predicted by the clock marker).
+    if mk.wait_clock() is None:
+        sys.exit('dcvtest: no clock marker (dwt: CYCCNT write) in %s' % mk.log)
+    f25 = mk.at(T25)
+    check(up() < f25 * 1000, 'the 2 V part done before the 25 V input (fw %.2f s, now %.2f s)' % (f25, up() / 1000))
+    while up() < f25 * 1000 + 500:
         time.sleep(0.5)
     q('CONF:VOLT:DC')
     wait_ms(4000)
