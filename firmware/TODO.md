@@ -3568,7 +3568,7 @@ Emulator (emu/):
       tools/ui-render range pairs ending on 60 M against a fresh draw. Device a2e9766: 6 M -> 60 M clears
       the label in both variants (device-check doc "a2e9766: bug-fix recheck" 3). The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
-- [ ] Bluetooth: stale errors on the first connection (device 46370df, device-check doc "46370df" new bug 5:
+- [x] Bluetooth: stale errors on the first connection (device 46370df, device-check doc "46370df" new bug 5:
       the first `--bt` client found -113, -102, -113 queued; later connections none). USB and BT already had
       separate queues. Cause (INFERRED, no device trace): the module's own text reaches the SCPI parser while
       no host is linked: an `OK` = -113, an echoed `AT+SBNDM40A` = -102 ('+' in a header), `OK` = -113, e.g.
@@ -3597,5 +3597,6 @@ Emulator (emu/):
       parser sees any of it; PC14 gates nothing (a drop still resets a partial line). Emulator:
       BtModule.cs models the banner, the PC14 pulse and the 400 ms PC14 lag; emu/btchattertest.py A (boot,
       first command at once) and B (Settings OFF / ON, link in the pulse): base FAIL (no reply; 8 queued),
-      fix PASS. Device check pending: BT off / on x3, then a first SYST:ERR:COUN? = 0; a query sent at once
-      after the connect is answered.
+      fix PASS. Device 0e69979 (device-check doc "7b1b6d1 / 0e69979"): first SYST:ERR:COUN? 0 after
+      boot and after 3 BT off / on cycles; *IDN? 0-0.3 s after a connect answered 15 / 15; a link 0.4 s
+      after BT on answered; stock btpoll 200 / 200.
