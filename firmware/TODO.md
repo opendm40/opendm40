@@ -547,6 +547,14 @@ Code work (in this order):
       steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (5ba89b3; verify on device)
 
 ## Backlog (user ideas)
+- [ ] Inductance (owner 2026-10-24). Options, none started:
+      (1) GEN square -> external R -> L, scope on L: fit tau, L = tau * (R + R_gen + R_L); ~100 uH .. 1 H.
+      (2) GEN sweep + known C (measured by the DM40's cap mode): resonance peak, L = 1 / ((2 pi f0)^2 C).
+      (3) GEN square -> L -> A jack (0.5 / 47.5 ohm shunt) -> COM, AD2 at 76.8 kS/s logs i(t): tau from the
+          shape, R_total = V_gen / I_inf, L = tau * V_gen / I_inf; no external R; from ~3-6 mH (R_gen ~50 ohm
+          inferred, current path bandwidth ~20 kHz).
+      (4) OP3 step through Rref 1 k on V/ohm (DBG:SRC): only L >= ~100 mH.
+      A real LCR (two synchronous channels, V and I phase) is not possible with one scope channel.
 - [ ] **Settings are lost at power-off** (device 2026-10-24): the backup SRAM is not powered while the
       meter is off (POR + BOR flags after a key power-off; a marker setting and the crash word were gone; a
       reset and a firmware update keep it). Keep a copy of the settings on the SPI disk (as the stock's
