@@ -698,7 +698,7 @@ Code work (in this order):
       + DM40*.BIN install half.
       Device 46370df (2026-10-24, docs/device-check-2026-10-21.md "46370df: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
-      shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved); 4 PASS (free 0: 2 / 0 ready,
+      shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
       **Pending (owner): 3 (battery pull while prep state 1) and 5's "PC can edit" + DM40*.BIN install half.**
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
@@ -2369,6 +2369,10 @@ Firmware:
             not its FAT chain. Workaround: drop the file's pages (`posix_fadvise` DONTNEED / drop_caches) or remount
             before copying. Document it in README.TXT / the user doc, or find something that makes the kernel drop
             the pages (untested).
+      - [ ] 76.8 kS/s: two nominals for one rung (device 46370df): LOG:PRE? / the CSV and DLG headers say
+            76 799.016 (`Logger::nominal_mhz` = 1e12 / the rounded 13 021 ns period), ACQ:SRAT? / the Wave view
+            76 800 (`ad2_rate_mhz(0)`), 12.8 ppm apart. Option: compute the logger's from the mHz directly.
+      - [ ] `nr3` (scpi.rs) prints 76 800 as `+7.680001E+04` (repeated f32 division by 10); cosmetic.
       - [ ] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix is dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
             returned LOGS/LOG005.DLG; device 46370df). Harmless while names are unique; decide whether a wrong
             directory should be -256.
