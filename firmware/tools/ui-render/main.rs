@@ -1056,7 +1056,7 @@ fn main() {
         t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
     }
 
-    // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3): the
+    // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1): the
     // preview tabs (every label, rest / pressed, both views, markers and
     // cursors clamped at the bottom, worst measurement cells) and the list
     // popup (every centre index) under the full layout rules against the
