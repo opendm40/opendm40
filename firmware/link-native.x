@@ -228,6 +228,9 @@ SECTIONS
         *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
+        /* The ohm / diode test-current label: drawn on a function / range /
+         * variant change only (no AD2 stream runs in ohm / diode). */
+        *(.text.*8opendm402ui18test_current_label*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
