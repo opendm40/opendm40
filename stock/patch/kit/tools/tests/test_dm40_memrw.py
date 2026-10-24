@@ -21,7 +21,7 @@ spec.loader.exec_module(m)
 
 # --- 1. packet encoding matches the original client byte-for-byte ----------
 def _orig_pkt(sub, addr, n=0, payload=b''):
-    """Verbatim copy of the ORIGINAL client's crc()/pkt() (firmware/patch)."""
+    """Verbatim copy of the ORIGINAL client's crc()/pkt() (stock/patch)."""
     ID = bytes([0x05, 0x03])
 
     def crc(d):

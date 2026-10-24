@@ -41,7 +41,7 @@ import os
 import sys
 import time
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # fw-rs/tools: dm40scpi, mr9270
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # firmware/tools: dm40scpi, mr9270
 sys.path.insert(0, HERE)
 
 K = [10.0, 100.0, 1000.0, 10000.0]

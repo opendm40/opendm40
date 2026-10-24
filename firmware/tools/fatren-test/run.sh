@@ -2,7 +2,7 @@
 # Host test of src/fatren.rs, src/calbackup.rs and src/vdisk.rs on a DM40-geometry FAT16
 # image (4096-byte sectors, 2 FATs, 512 root entries, 16 MiB; same cluster
 # count as the device, 4087). Update files are real packed images
-# (firmware/dm40fw.py pack); the "marker" is the decoded 12-byte header of the
+# (stock/dm40fw.py pack); the "marker" is the decoded 12-byte header of the
 # installed one (what the loader writes to 0x08008000).
 # fatren (review 2026-10-13 H1: only the file equal to the marker is renamed):
 #   1. old _DM40PRV.BIN + dm40_v_2_6.bin (LFN, installed) + DM40FW.BIN (staged)
@@ -129,7 +129,7 @@ mkimg() {
     rm -f $1; truncate -s 16M $1                       # sparse (/tmp quota, see save() in main.rs)
     mkfs.fat -F 16 -S 4096 -s 1 -f 2 -r 512 -R 1 -n "ATK-DM40" $1 >/dev/null
 }
-FW=../../../firmware/dm40fw.py
+FW=../../../stock/dm40fw.py
 # mkfw <body> <out.bin>: pack a body into an update file (--pad: whole
 # 128-byte blocks, as build.sh does), print its marker.
 mkfw() {
@@ -243,7 +243,7 @@ mkdir $W/src
 # run in a clean checkout). Synthetic data is seeded random; the bytes the
 # tests below change (CALIB 400 / 500, LOADER 0x1F000) are forced to 0 so
 # every change is one.
-DUMPS=../../../firmware/re/dumps
+DUMPS=../../../stock/re/dumps
 DUMP=$DUMPS/full-20261013/flash_08000000_1MB.bin
 python3 -I - $W/src <<'PY'
 import random, sys
@@ -592,7 +592,7 @@ echo "=== screenshot"
 # bmpok <img> <name>: size, header (vs the stock dump), pixels vs lcd::pattern.
 bmpok() {
     mcopy -n -i $1 ::$2 $W/shot.bmp
-    python3 -I - $W/shot.bmp ../../../firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin <<'PY' || { echo "FAIL: $2"; exit 1; }
+    python3 -I - $W/shot.bmp ../../../stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin <<'PY' || { echo "FAIL: $2"; exit 1; }
 import os, struct, sys
 d = open(sys.argv[1], 'rb').read()
 assert len(d) == 307266, len(d)

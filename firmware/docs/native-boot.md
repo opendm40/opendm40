@@ -13,7 +13,7 @@ before the application on every boot, so it is a permanent escape hatch.
 
 ## 1. Established facts vs. unknowns
 
-### Boot chain (ESTABLISHED — `firmware/re/ANALYSIS.md` §1, §3)
+### Boot chain (ESTABLISHED — `stock/re/ANALYSIS.md` §1, §3)
 
 ```
 0x08000000  ROM bootloader  16 KB   SP 0x20021820  reset 0x080001c1   (sector 0)
@@ -49,10 +49,10 @@ before the application on every boot, so it is a permanent escape hatch.
   onto the SPI-flash FAT and reboot.* The FS-loader does the rest, independent
   of whatever is (or is not) at `0x08004000`.
 
-### Update-file format (ESTABLISHED — `ANALYSIS.md` §2, `firmware/dm40fw.py`)
+### Update-file format (ESTABLISHED — `ANALYSIS.md` §2, `stock/dm40fw.py`)
 
 Decoded file = 12-byte LE header `word0 word1 word2` + body (flashed at
-`0x08004000`). `firmware/dm40fw.py` implements the whole thing and reproduces
+`0x08004000`). `stock/dm40fw.py` implements the whole thing and reproduces
 all 11 official files byte-for-byte:
 
 - `word1` = body length (`dm40fw.py:build`).
@@ -82,7 +82,7 @@ include the padding; the loader flashes it like any body byte):
   packs as is (vendor round trip) but refuses a hazardous body;
   `info` / `unpack` warn about a hazardous input (`tail_hazard`);
 - `build.sh` packs with `--pad` and fails unless the file is a multiple
-  of 128; `firmware/patch/patcher.py` builds with `pad=True`;
+  of 128; `stock/patch/patcher.py` builds with `pad=True`;
 - `INFO/FIRMWARE.BIN` on the USB volume (`calbackup::FwFile`) is 12 +
   `word1` bytes, so it is whole blocks for every image built that way; for an
   installed image whose file would end in a hazardous block,
@@ -92,7 +92,7 @@ include the padding; the loader flashes it like any body byte):
 - host test: `tools/fatren-test/run.sh` ("short last 128-byte block").
 
 So `dm40fw.py pack --pad body.bin out.bin` produces a correct update file for
-**any** body length, with no `--like` needed. **`firmware/README.md` is stale**
+**any** body length, with no `--like` needed. **`stock/README.md` is stale**
 where it says words 0/2 are not understood — that was true earlier; the code now
 computes both.
 
@@ -100,13 +100,13 @@ computes both.
 
 | Unknown | Impact | How to verify |
 |---|---|---|
-| Exact trigger that makes the FS-loader enter **its own** USB-disk mode at boot (not isolated — `ANALYSIS.md` §3). | Would let the shim bring up stock MSC with ~zero code (Option A below). Not required for safety. | Disassemble FS-loader around its USB init; or set candidate flags via the BT `memrw` patch (`firmware/patch/kit/tools/dm40_memrw.py`) and reboot, watch for USB disk enumerating. |
+| Exact trigger that makes the FS-loader enter **its own** USB-disk mode at boot (not isolated — `ANALYSIS.md` §3). | Would let the shim bring up stock MSC with ~zero code (Option A below). Not required for safety. | Disassemble FS-loader around its USB init; or set candidate flags via the BT `memrw` patch (`stock/patch/kit/tools/dm40_memrw.py`) and reboot, watch for USB disk enumerating. |
 | Purpose of the `0x080ff000` "one-word boot flag" (`ANALYSIS.md` §1). A whole-image word scan found the value `0x080ff000` only inside an `ldm/stm` data-copy in the app (`0x08044844`), i.e. a false positive — **no confirmed pointer use**. | None if unused. If it is the FS-loader's disk-mode trigger, it enables Option A. | Read it over `memrw`; correlate with entering "USB Connect". |
 | Whether the FS-loader leaves HCLK at 200 MHz / correct FMC wait states when it jumps to the app. | fw-rs currently **assumes** 200 MHz (`src/clock.rs:3`); XIP from flash needs correct wait states. | Read `RCU_CFG0`/`FMC_WS` in the shim over `DBG:` once Stage 1 runs; or disassemble the FS-loader clock init (`0x080a0ac1`, confirmed to set CPACR+VTOR+RCU). |
 | Which flash sectors the FS-loader erases for an app update. | Confirms our hole/layout assumptions. | Disassemble the FS-loader erase path; or observe before/after dumps. |
 
 Self-hold / power-latch: **no dedicated CPU self-hold GPIO is evident in
-`fw-rs/src/power.rs` or the RE headers.** The power **key is PD6** (`dmm_v2_6.h`
+`firmware/src/power.rs` or the RE headers.** The power **key is PD6** (`dmm_v2_6.h`
 "Power key PD6, 1.5 s hold -> power off"; the stock TIM7 1 kHz ISR polls it,
 `lcd_buzzer_v2_6.h:52`). `PE2`/`PC4` are the DMM/scope **analog rails**, not a
 CPU latch. The current RAM-loaded fw-rs runs fine without asserting any latch
@@ -315,15 +315,15 @@ Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
 
 ## 9. Tooling changes
 
-- **`firmware/dm40fw.py`** — already complete; `pack body.bin out.bin` computes
+- **`stock/dm40fw.py`** — already complete; `pack body.bin out.bin` computes
   both header words for our body length. The dead `like`/`check is None` branch
   and the stale docstring can be cleaned up but are not blocking.
 - **File naming for the FS-loader scan:** it installs the first `dm40*.bin` in
   FAT order, so two files give an order-dependent, possibly wrong install
-  (`ANALYSIS.md` §3; user rule: [fw-rs/README.md, Recovery](../README.md#recovery)). Our file and
+  (`ANALYSIS.md` §3; user rule: [firmware/README.md, Recovery](../README.md#recovery)). Our file and
   the stock file must not coexist on the disk; the toggle procedure removes one
   before adding the other.
-- **`fw-rs/build.sh`** — in addition to `dm40-fw.bin` (now the raw body), emit
+- **`firmware/build.sh`** — in addition to `dm40-fw.bin` (now the raw body), emit
   `dm40-fw.update.bin` = `dm40fw.py pack dm40-fw.bin`. Name the *on-disk* copy
   `dm40*.bin` only at flash time (per the stock app's deletion caveat in
   `docs/history/custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
@@ -383,8 +383,8 @@ known starting point; the risky one is the clock/FMC, addressed in §3.
   read **PD6** (power key), check an SRAM magic and a boot-attempt counter; on
   watchdog reset / long key-hold / explicit request / crash-loop -> recovery,
   else branch to fw-rs. It touches almost no hardware.
-- **Update format is solved** in `firmware/dm40fw.py` (`pack` computes both
-  header words for any body length); `firmware/README.md` is stale on this.
+- **Update format is solved** in `stock/dm40fw.py` (`pack` computes both
+  header words for any body length); `stock/README.md` is stale on this.
 - **Biggest real change:** fw-rs now runs **XIP from flash at `0x08004000`**, so
   `clock.rs` must configure the PLL **and FMC wait states/cache** itself instead
   of assuming 200 MHz, and `link.x`/`startup.rs` drop the SRAM copy and reserve
@@ -855,14 +855,14 @@ calibration; slow flash, so `.cold`-class code only; and the
 - word0 = `0x2002F7F8`;
 - the reset vector is a Thumb address in region A.
 
-It then runs `../firmware/dm40fw.py pack --pad`, which pads the body with 0xFF
+It then runs `../stock/dm40fw.py pack --pad`, which pads the body with 0xFF
 to whole 128-byte file blocks ("Update-file format" above) and computes both
 header words itself (no `--like`):
 - word1 = body length (incl. the padding);
 - word2 = `0x10000 | CRC16(body without the 12 marker bytes)`;
 - word0 = CRC16 of words 1–2, with its complement in the high half.
 
-Finally it runs `dm40fw.py info`. Current `fw-rs/dm40-fw-native.bin`:
+Finally it runs `dm40fw.py info`. Current `firmware/dm40-fw-native.bin`:
 
 ```
 word0  0xa83657c9   length 0x000384c4 (end 0x0803c4c4)   word2  0x0001e49e
@@ -1108,7 +1108,7 @@ FWDGT start, recovery and vectors (`.text` 1544).
 
 **User procedure:** the meter restarts into the loader's update screen
 ("open file error") with its USB disk (28e9:028f); what to copy and press is in
-[fw-rs/README.md, Recovery](../README.md#recovery).
+[firmware/README.md, Recovery](../README.md#recovery).
 
 **Other entries** to the same state from a running native fw-rs:
 - `DBG:UPDATE`, or its alias `DBG:RECOVER`:
@@ -1240,7 +1240,7 @@ installed file (and deleted the old backup). fatren now renames only a
 `dm40*.bin` whose **decoded 12-byte update header equals the 12-byte record at
 `0x08008000`** — the loader writes exactly that header there when it installs
 an image. The first 128-byte block of the file is decoded as in
-`firmware/dm40fw.py` `decode_block` (`fatren::header_of`). Every other match is
+`stock/dm40fw.py` `decode_block` (`fatren::header_of`). Every other match is
 left alone and counted as `staged` (the loader installs it on its next run).
 
 **When:**
@@ -2145,7 +2145,7 @@ else /16 for this boot because `DIFF1`/`DIFF2` (a /4 read differed),
 T1 and T2 used RAM test images loaded over Bluetooth into the running stock
 firmware (`./build.sh test-initcore | test-recovery`, `tools/reload.sh
 <mode>`); both passed on the device on 2026-10-13 and the images were removed
-with the RAM build on 2026-10-22. They are kept here as the record. Keep `firmware/patch/build-memrw/dm40_patched.bin` (`firmware/patch/kit/mkkit.sh`) and a stock
+with the RAM build on 2026-10-22. They are kept here as the record. Keep `stock/patch/build-memrw/dm40_patched.bin` (`stock/patch/kit/mkkit.sh`) and a stock
 `dm40_v_2_6.bin` at hand. After T1 and T2, the device must be back on
 (patched) stock.
 
@@ -2214,7 +2214,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    vendor key-hold entry only if T2b proved it; do **not** rely on "a long key
    hold at power-on reaches the loader" otherwise, and do not use patched
    stock's own update path (unverified for a non-stock length). On the
-   loader's USB disk, copy `fw-rs/dm40-fw-native.bin` as `dm40_fwrs.bin` (the
+   loader's USB disk, copy `firmware/dm40-fw-native.bin` as `dm40_fwrs.bin` (the
    only `dm40*.bin`, [why](../README.md#recovery)), `sync` and eject, then press "update". The loader
    installs it and resets (warm, SW reset), or the next cold power-on (short
    press) launches it.
@@ -2303,7 +2303,7 @@ fb6be06; the docs-only changes since build the same bytes):
   battery.
 
 Before: fw-rs running, USB connected; on the PC a copy of the installed image
-(`fw-rs/dm40-fw-native.bin` of the installed build, or `INFO/FIRMWARE.BIN`
+(`firmware/dm40-fw-native.bin` of the installed build, or `INFO/FIRMWARE.BIN`
 from the fw-rs USB drive) to reinstall after each recovery. Reinstall: copy
 it onto the loader's USB disk as `dm40_fwrs.bin` ([the only `dm40*.bin`](../README.md#recovery)),
 `sync`, eject, press "Update".

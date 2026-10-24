@@ -1,5 +1,5 @@
 //! HY3131 DMM front end on PC10 / PC11 / PC12 + CS PD2
-//! (firmware/re/analysis/hy3131_v2_6.h).
+//! (stock/re/analysis/hy3131_v2_6.h).
 //!
 //! SCK = PC10, MOSI = PC12, MISO = PC11, CS = PD2 (active low). MSB first, SCK
 //! idle low, CS low for the whole transfer. Command byte = (reg << 1) | rd;

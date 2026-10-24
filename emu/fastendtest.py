@@ -3,8 +3,8 @@
 while a host reads the USB volume, then MMEM:DATA? of the new file
 (device check f3aea2f 6b: the meter hung there and the watchdog reset it).
 
-  cd fw-rs && ./build.sh
-  emu/fastendtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/fastendtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 One USB/IP connection with the URBs demultiplexed by sequence number, so
 the volume reader (MSC, its own thread) and the SCPI client (USBTMC) run
@@ -272,7 +272,7 @@ def run_emu():
     disk = os.path.join(OUT, TAG + '-disk.bin')
     src = os.path.join(OUT, 'disk.bin')
     if not os.path.exists(src):
-        shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
+        shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
     else:
         shutil.copy(src, disk)
     script = os.path.join(OUT, TAG + '.script')

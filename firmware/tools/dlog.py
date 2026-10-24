@@ -4,7 +4,7 @@
 Standalone (stdlib only). The output is byte-identical to the CSV the device
 serves for the same file (virtual LOGnnn.CSV on the "DM40 info" USB volume,
 SCPI MMEM:DATA? "LOGnnn.CSV"), i.e. to what the pre-DLG firmware wrote.
-Format: fw-rs/docs/compact-log-format.md.
+Format: firmware/docs/compact-log-format.md.
 
     dlog.py LOG000.DLG                 CSV to stdout
     dlog.py LOG000.DLG -o LOG000.CSV

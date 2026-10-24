@@ -3,8 +3,8 @@
 through the whole boot chain: ROM -> FS-loader -> fw-rs, the real vendor
 FS-loader included (run.py chain mode).
 
-  cd fw-rs && ./build.sh
-  emu/recoverytest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/recoverytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 The emulator models what the shim decides on (emu/peripherals/FWDGT.cs):
 the free watchdog resets the machine ~20 s after the last reload, RCU_RSTSCK

@@ -7,8 +7,8 @@ and a USB port reset when that does not help. (Device check f3aea2f 6b: a
 command never completed, usb-storage reset the meter twice, then the
 meter hung and the watchdog reset it.)
 
-  cd fw-rs && ./build.sh
-  emu/mscresettest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/mscresettest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 Cases (each: then a TEST UNIT READY, READ(10) of the boot sector and of
 README.TXT must give the right bytes, and *IDN? must answer):
@@ -31,7 +31,7 @@ README.TXT must give the right bytes, and *IDN? must answer):
                 DBG:VDISK:EJECT? = 1; a Bulk-Only reset keeps it ejected;
                 then LoEj=1 Start=1 (load): one UNIT ATTENTION 06/28/00;
   eject-port    eject, then a USB port reset (a re-plug): the medium is back;
-  serial        the unit serial number (fw-rs/src/uid.rs: the chip UID as 24
+  serial        the unit serial number (firmware/src/uid.rs: the chip UID as 24
                 hex digits; run.py --uid gives the emulator its own): the USB
                 iSerial string, INQUIRY VPD page 0x80, the serial field of
                 *IDN?, all equal to it; VPD page 0x00 lists 00 and 80; another
@@ -171,7 +171,7 @@ def healthy(l, boot, readme, what):
 
 disk = os.path.join(OUT, TAG + '-disk.bin')
 src = os.path.join(OUT, 'disk.bin')
-shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
+shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 emu = subprocess.Popen([sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01',
                         '--usbip-port', str(A.port), '--uid', SERIAL, '--run-for', '3000', '--name', TAG, '--disk', disk],
                        cwd=ROOT, stdout=open(os.path.join(OUT, TAG + '.out'), 'w'), stderr=subprocess.STDOUT,

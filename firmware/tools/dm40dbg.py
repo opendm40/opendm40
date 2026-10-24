@@ -45,8 +45,8 @@
     dm40dbg.py recover                   DESTRUCTIVE, = DBG:UPDATE without the
                                          checks/wait of `update` (`recover -h`)
 
-Debug commands are SCPI DBG:... (see fw-rs/src/scpi.rs); needs read/write
-access to /dev/usbtmcN (udev rule). Native boot: fw-rs/docs/native-boot.md.
+Debug commands are SCPI DBG:... (see firmware/src/scpi.rs); needs read/write
+access to /dev/usbtmcN (udev rule). Native boot: firmware/docs/native-boot.md.
 """
 import argparse
 import glob
@@ -61,7 +61,7 @@ VID, PID = 0x1209, 0x0001
 STOCK_VID, STOCK_PID = 0x28e9, 0x028f   # stock "USB Connect" disk = loader update disk
 W, H = 480, 320
 FIRMWARE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                        'firmware')
+                        'stock')
 APP_BASE, APP_END = 0x08004000, 0x080A0000
 
 RECOVER_HELP = """\
@@ -76,7 +76,7 @@ dm40*.bin was already on the disk (copied, synced and ejected before the
 command), the loader installs it straight away. "Flash error" = the marker did
 not read back as zero; no reset was done.
 
-Back to fw-rs from stock: fw-rs/tools/reload.sh --from-stock (stages the image
+Back to fw-rs from stock: firmware/tools/reload.sh --from-stock (stages the image
 on the stock disk).
 """
 
@@ -237,7 +237,7 @@ def open_link(timeout):
 # ---- update files ----------------------------------------------------------
 
 def image_info(path):
-    """Validate a dm40*.bin update file (the vendor format, firmware/dm40fw.py).
+    """Validate a dm40*.bin update file (the vendor format, stock/dm40fw.py).
     Returns dict(header=(w0, length, w2), sp, reset, end, last, problems=[...]);
     the header is what the loader writes to the marker at 0x08008000; last =
     the length of the last 128-byte obfuscation block (128 = whole blocks). A
@@ -259,7 +259,7 @@ def image_info(path):
         n, ka, kp = haz
         probs.append('short last block (%d bytes) with key position 0x%02x outside it '
                      '([0x1F] = 0x%02x): the FS-loader mis-decodes it ("update error", app '
-                     'erased); repack with firmware/dm40fw.py pack --pad' % (n, kp, ka))
+                     'erased); repack with stock/dm40fw.py pack --pad' % (n, kp, ka))
     if w0 != dm40fw.header_word0(length, w2):
         probs.append('header word0 (CRC of words 1/2) wrong: 0x%08x' % w0)
     if w2 >> 16 != 1 or (w2 & 0xFFFF) != dm40fw.body_checksum(body):

@@ -3,7 +3,7 @@
 the firmware switches an input inside one function / range (the owner: "скачет, некрасиво").
 
 The fw-rs switches are built here from the firmware's own constants, independently of gtkpanel's
-FrontendView.model_variants table (fw-rs/src/sentinel.rs, dmm.rs; power-meter-and-misconnect.md 4.4):
+FrontendView.model_variants table (firmware/src/sentinel.rs, dmm.rs; power-meter-and-misconnect.md 4.4):
   * DC V 6 V: the comparator alternates PB1 (A-jack sentinel, R20 0x90) / SENSE (AC? hint, R20 0x10)
     every 100 ms window; after a comparator hit the A-PROT probe joins (probe_row: OP2 x1 on PB2, AD2 =
     OP2O - PB3 with refs PB6 / AGND (R27 0x6D), peak hold on AD2) and leaves again; DC mV the probe;

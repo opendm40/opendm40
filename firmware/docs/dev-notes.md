@@ -1,6 +1,6 @@
 # fw-rs developer notes
 
-Paths in this file are relative to `fw-rs/`, and the commands run there.
+Paths in this file are relative to `firmware/`, and the commands run there.
 
 Replacement firmware for the Alientek DM40 (GD32F427, Cortex-M4F @ 200 MHz):
 multimeter, scope and generator running at the same time, stock-like GUI with
@@ -183,7 +183,7 @@ Goal and remaining work: see [TODO.md](../TODO.md).
    rendering with the stock fonts.
 3. **(done)** [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) driver and measurement loop, calibration read from the
    stock settings record at 0x080C0000.
-4. **(done)** Multimeter GUI matching `../firmware/re/analysis/` notes, main value
+4. **(done)** Multimeter GUI matching `../stock/re/analysis/` notes, main value
    in red; scope and generator pages, menus, touch.
 5. **(done)** USBTMC + SCPI over USBFS, composite with a mass-storage disk on
    the SPI flash.
@@ -223,9 +223,9 @@ steps and what is verified: [README.md, Install](../README.md#install).
 volume (the running image) or `dm40-fw-native.bin` both work as the image.
 
 **Back to stock** from a running fw-rs: `tools/reload.sh --stock FILE` with
-`../firmware/patch/build-memrw/dm40_patched.bin` (patched stock with Bluetooth
-memrw, built by `../firmware/patch/kit/mkkit.sh`) or the official
-[`../firmware/vendor/dm40_v_2_6.bin`](../../firmware/vendor/dm40_v_2_6.bin).
+`../stock/patch/build-memrw/dm40_patched.bin` (patched stock with Bluetooth
+memrw, built by `../stock/patch/kit/mkkit.sh`) or the official
+[`../stock/vendor/dm40_v_2_6.bin`](../../stock/vendor/dm40_v_2_6.bin).
 Back to fw-rs from stock: `tools/reload.sh --from-stock`.
 
 Native image, shim, recovery and boot info fields: [native-boot.md](native-boot.md).

@@ -1,6 +1,6 @@
 //
 // Bluetooth SPP/BLE module on UART4 as the DM40 firmware expects it
-// (firmware/re/analysis/bt_meas_v2_6.h, fw-rs/src/bt.rs): answers AT lines
+// (stock/re/analysis/bt_meas_v2_6.h, firmware/src/bt.rs): answers AT lines
 // ("AT+SBN<name>" -> OK, "AT+CBN" -> "CBN+<name>", "AT+SLED0"/"AT+RESET" ->
 // OK, anything else "AT..." -> OK). PC14 ("connected") is driven high while a
 // host is attached to the TCP port. With a port, a TCP server passes the

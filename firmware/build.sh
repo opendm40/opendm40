@@ -4,7 +4,7 @@
 # (`native` is accepted as a no-op first argument for older callers, e.g.
 # emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at
 # 0x08008000 as 0xFF, linked with link-native.x, packed by
-# ../firmware/dm40fw.py pack --pad (0xFF-padded to whole 128-byte blocks,
+# ../stock/dm40fw.py pack --pad (0xFF-padded to whole 128-byte blocks,
 # checked below) into the stock update format (renamed to dm40*.bin only when
 # staged on the device). tools/reload.sh passes its arguments here.
 # DM40_TDIR / DM40_OUT (environment) build elsewhere than target/native /
@@ -54,7 +54,7 @@ head -1 $TDIR/stackdepth.txt
 BODY=$TDIR/dm40-fw-native.body.bin
 rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
-python3 ../firmware/dm40fw.py pack --pad "$BODY" "$OUT"
+python3 ../stock/dm40fw.py pack --pad "$BODY" "$OUT"
 python3 - "$BODY" "$ELF" "$TDIR" <<'PY'
 import struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
@@ -106,7 +106,7 @@ assert pad == b'\xff' * len(pad), 'padding between region A2 and region B is not
 assert body[:4] == struct.pack('<I', 0x2002F7F8)
 assert BASE <= entry - 1 < MARK and entry & 1, 'reset vector not in region A (thumb)'
 PY
-python3 ../firmware/dm40fw.py info "$OUT"
+python3 ../stock/dm40fw.py info "$OUT"
 # The FS-loader mis-decodes a short last 128-byte block whose key position is
 # outside it (docs/native-boot.md "Update file format"); dm40fw.py pack --pad pads
 # the body so the file is whole blocks. Fail the build if it is not.

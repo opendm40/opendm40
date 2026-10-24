@@ -16,7 +16,7 @@ by the h ink box, h's yoff), adv = w + 1 as the W (the font's h / K
 advance-minus-width, 4 / 2, left a wider k-W gap than W-h in "kWh"). HIST (1 bpp pixel font, 2 px strokes) gets its M mirrored top to
 bottom, the pixel-font W of the same family.
 
-    /usr/bin/python3 tools/mkwglyph.py      (from fw-rs/; needs PIL + the face)
+    /usr/bin/python3 tools/mkwglyph.py      (from firmware/; needs PIL + the face)
 """
 import ast
 import os

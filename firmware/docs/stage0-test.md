@@ -16,7 +16,7 @@ a battery pull alone already returns the device to stock. Honest framing (per
 the review): Stage 0 proves **auto-install of a file already on the FAT**, not
 dead-app recovery — that harder case is a Stage 1 concern.
 
-## Verified mechanism (do not re-derive — see `firmware/re/ANALYSIS.md` §1, §3)
+## Verified mechanism (do not re-derive — see `stock/re/ANALYSIS.md` §1, §3)
 
 - On every reset the ROM bootloader at `0x08000000` launches the FS-loader at
   `0x080a0000` (it has **no** reference to the app at `0x08004000` — it can only
@@ -55,7 +55,7 @@ confirmation than anything the firmware could report.
 
 ## Test procedure
 
-1. With fw-rs running (RAM-loaded via `fw-rs/tools/reload.sh`), it enumerates a
+1. With fw-rs running (RAM-loaded via `firmware/tools/reload.sh`), it enumerates a
    USB mass-storage disk. Mount it on the host.
 2. Copy the official stock update file to the disk root. It lives at the repo
    root:
@@ -72,7 +72,7 @@ confirmation than anything the firmware could report.
    the write actually reaches the SPI flash.
 4. Trigger recovery:
 
-       fw-rs/tools/dm40dbg.py recover
+       firmware/tools/dm40dbg.py recover
 
    (`dm40dbg.py recover -h` prints this same procedure.)
 5. The device reboots. **Expect the stock splash / stock UI** to come up — the
@@ -84,7 +84,7 @@ confirmation than anything the firmware could report.
    boot does not reinstall it.
 7. Return to fw-rs: run
 
-       fw-rs/tools/reload.sh
+       firmware/tools/reload.sh
 
    which rebuilds and RAM-loads fw-rs over Bluetooth. It does not touch the FAT.
 

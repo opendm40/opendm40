@@ -9,7 +9,7 @@
 //!     block itself); the SPI flash is internal storage only (fatdir.rs);
 //!   without `vdisk`, and recovery-usb: the on-board
 //!     W25Q128 (spiflash.rs), the stock FAT16 volume with 4096-byte sectors
-//!     (firmware/re/analysis/spiflash_v2_6.h), writable.
+//!     (stock/re/analysis/spiflash_v2_6.h), writable.
 //! INQUIRY gives each device's product name (removable); with EVPD, page
 //! 0x00 (supported pages: 00, 80) and 0x80 (unit serial number = the chip
 //! UID, src/uid.rs, as the USB iSerial), any other page fails 05/24/00

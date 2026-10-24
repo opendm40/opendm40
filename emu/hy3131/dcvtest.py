@@ -2,8 +2,8 @@
 """fw-rs DC-coupled V row on AD2 (feasibility 1.3 last row / E7, src/ad2exp.rs
 `dcv_row` / `dc_enter`) in the emulator: LOG:SOURce AD2 in DC V.
 
-  cd fw-rs && ./build.sh
-  emu/hy3131/dcvtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/hy3131/dcvtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 Input: 2 V DC + 0.3 V rms 50 Hz on V/COM, the model's OP1 offset (op1vos,
 0.37 mV x 10 at OP1O in 6 V) and an AD2 gain deviation (ad2dcg 1.01) that
@@ -172,7 +172,7 @@ try:
             break
     path = os.path.join(EMU, 'out', 'dcvtest-%d.dlg' % A.port)
     open(path, 'wb').write(dlg)
-    out = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), path], capture_output=True, text=True).stdout
+    out = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'firmware/tools/dlog.py'), path], capture_output=True, text=True).stdout
     rows = [[x.strip() for x in l.split(',')] for l in out.splitlines() if l.strip()[:1] in '0123456789']
     vals = [float(x[2]) for x in rows if len(x) > 3 and x[2]]
     mean = sum(vals) / max(len(vals), 1)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs AUTO coupling of V / A (fw-rs/src/dmm.rs AUTO_*, docs/acdc-stock-vs-fwrs.md
+"""fw-rs AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, docs/acdc-stock-vs-fwrs.md
 section 11) in the emulator: fw-rs native + the HY3131 model, a timed
 connection script per scenario (DC -> AC -> mixed signals, both ways through
 the hysteresis band), SCPI over USB/IP (setup, then DBG:PING? uptime,
@@ -7,7 +7,7 @@ VOLT:COUP? / CURR:COUP?, FETCh?, FUNCtion? in a loop); the last samples of
 every phase must match its expectation.
 
   emu/hy3131/couptest.py                          # all scenarios, fw-rs built from HEAD
-  emu/hy3131/couptest.py --app fw-rs/dm40-fw-native.bin --port 3391 v
+  emu/hy3131/couptest.py --app firmware/dm40-fw-native.bin --port 3391 v
   emu/hy3131/couptest.py --list
   emu/hy3131/couptest.py --meth C v i        # on AC+DC method B / C (acdcm.rs)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs "Leads in A?" reminder (fw-rs/docs/power-meter-and-misconnect.md
+"""fw-rs "Leads in A?" reminder (firmware/docs/power-meter-and-misconnect.md
 4.9) in the emulator: fw-rs native + the HY3131 model, function changes by
 SCPI and by a tap on the DMM page's V button; DBG:LEADs? (count, last
 from / to function) must count exactly the changes from a current function
@@ -10,7 +10,7 @@ DC A page before the tap, the toast over the DC V page with its first
 reading, the page after the toast ended by itself.
 
   emu/hy3131/leadstest.py                        # fw-rs built from HEAD
-  emu/hy3131/leadstest.py --app fw-rs/dm40-fw-native.bin --port 3379
+  emu/hy3131/leadstest.py --app firmware/dm40-fw-native.bin --port 3379
 
 Results: emu/out/leads.json, emu/out/leads-*.png. One emulator at a time
 per port.

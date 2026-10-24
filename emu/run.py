@@ -15,7 +15,7 @@ Modes
 Images are composed in emu/out/ and never written back to the dumps.
 --model A|B|C sets the DM40 model byte of the calibration record (flash
 0x080C0168, record CRC rewritten) in the composed image; both the stock
-firmware and fw-rs read the model there (fw-rs/docs/model-variants.md).
+firmware and fw-rs read the model there (firmware/docs/model-variants.md).
 Default: the base dump's own byte (this unit: 0 = DM40A).
 Events (--tap/--key/--shot/--vin/--script) are scheduled in virtual time.
 """
@@ -33,14 +33,14 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(HERE, 'out')
-sys.path.insert(0, os.path.join(ROOT, 'firmware'))
+sys.path.insert(0, os.path.join(ROOT, 'stock'))
 import dm40fw  # noqa: E402
 
-DUMP = os.path.join(ROOT, 'firmware/re/dumps/full-20261013/flash_08000000_1MB.bin')
-OTP = os.path.join(ROOT, 'firmware/re/dumps/full-20261013/otp_1FFF7800.bin')
+DUMP = os.path.join(ROOT, 'stock/re/dumps/full-20261013/flash_08000000_1MB.bin')
+OTP = os.path.join(ROOT, 'stock/re/dumps/full-20261013/otp_1FFF7800.bin')
 UID = os.path.join(ROOT, 'private/memrw-kit-test/full/uid_1FFF7A10.bin')
 STOCK_DEC = os.path.join(ROOT, 'dm40_v_2_6.dec.bin')
-DISK_SRC = os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
+DISK_SRC = os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
 RENODE = os.path.join(HERE, '.renode/current/renode')
 
 APP_BASE = 0x08004000
@@ -94,9 +94,9 @@ def emu_uid(port, base=UID):
     port `port`: this unit's UID file (a fixed pattern without it) with bytes
     4 and 9 = the port, big-endian. The stock genuine check (UID against the
     dump's 0x080A4000 block) never reads bytes 4 and 9
-    (fw-rs/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
+    (firmware/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
     and DBG:GENUINE? stays GENUINE, while fw-rs's USB / SCSI / *IDN? serial
-    number (the UID as hex, fw-rs/src/uid.rs) differs from the real meter's
+    number (the UID as hex, firmware/src/uid.rs) differs from the real meter's
     and between instances on different ports: udisks merges disks with the
     same vendor / model / serial into one drive."""
     u = bytearray(read(base)) if os.path.exists(base) else bytearray(b'EMU-DM40-UID')
@@ -216,9 +216,15 @@ def build_fwrs(worktree=None, rev='HEAD'):
     import fcntl
     wt = worktree or os.path.join(OUT, 'fwrs-worktree')
     commit = subprocess.check_output(['git', 'rev-parse', rev], cwd=ROOT, text=True).strip()
-    tree = subprocess.check_output(['git', 'rev-parse', commit + ':fw-rs'], cwd=ROOT, text=True).strip()
-    elf = os.path.join(wt, 'fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw')
-    stamp = os.path.join(wt, 'fw-rs/target/native/built-tree')
+    # The firmware directory and ELF name of that commit (fw-rs/ and dm40-fw
+    # before the firmware/ layout).
+    sub = 'firmware' if subprocess.run(['git', 'cat-file', '-e', commit + ':firmware/build.sh'],
+                                       cwd=ROOT).returncode == 0 else 'fw-rs'
+    cargo = subprocess.check_output(['git', 'show', commit + ':' + sub + '/Cargo.toml'], cwd=ROOT, text=True)
+    name = re.search(r'^name = "([^"]+)"', cargo, re.M).group(1)
+    tree = subprocess.check_output(['git', 'rev-parse', commit + ':' + sub], cwd=ROOT, text=True).strip()
+    elf = os.path.join(wt, sub, 'target/native/thumbv7em-none-eabihf/release', name)
+    stamp = os.path.join(wt, sub, 'target/native/built-tree')
     os.makedirs(OUT, exist_ok=True)
     with open(os.path.join(OUT, 'fwrs-worktree.lock'), 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -226,7 +232,7 @@ def build_fwrs(worktree=None, rev='HEAD'):
         if built == tree and os.path.exists(elf):
             print('fw-rs: tree %s of %s already built (%s)' % (tree[:12], commit[:12], rel(elf)))
             return elf
-        if not os.path.isdir(os.path.join(wt, 'fw-rs')):
+        if not os.path.exists(os.path.join(wt, '.git')):
             subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, commit], cwd=ROOT)
         else:
             subprocess.check_call(['git', 'checkout', '--quiet', '--detach', commit], cwd=wt)
@@ -237,7 +243,7 @@ def build_fwrs(worktree=None, rev='HEAD'):
             ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
         # `native`: the only build now (a no-op argument); older commits (--rev)
         # need it to select the native image instead of their RAM default.
-        subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, 'fw-rs'))
+        subprocess.check_call(['./build.sh', 'native'], cwd=os.path.join(wt, sub))
         with open(stamp, 'w') as f:
             f.write(tree + '\n')
     return elf

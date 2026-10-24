@@ -28,7 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
-DUMP = os.path.join(ROOT, 'firmware/re/dumps/full-20261013/flash_08000000_1MB.bin')
+DUMP = os.path.join(ROOT, 'stock/re/dumps/full-20261013/flash_08000000_1MB.bin')
 RUNNER = os.path.join(HERE, 'runemu.py')
 
 # name, input spec, stock mode byte (cmd 06), SCPI function, expected SI value,

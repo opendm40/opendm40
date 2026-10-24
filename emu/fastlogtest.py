@@ -3,8 +3,8 @@
 emulator, with the W25Q128 model's busy timing on (page program / erase
 times, virtual time): the sustainable rate into the flash per rung.
 
-  cd fw-rs && ./build.sh
-  emu/fastlogtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/fastlogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 Per flash profile (--profiles: typ = tPP 0.4 ms, tSE 45 ms, tBE64 150 ms;
 max = 3 ms, 400 ms, 2 s; datasheet W25Q128JV) and per session (--sessions:
@@ -181,7 +181,7 @@ def decode(dlg, tag):
     """tools/dlog.py of the bytes: (rows, sum lost_before, header ok)."""
     path = os.path.join(HERE, 'out', 'fastlog-%d-%s.dlg' % (A.port, tag))
     open(path, 'wb').write(dlg)
-    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), path], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'firmware/tools/dlog.py'), path], capture_output=True, text=True)
     if r.returncode:
         return 0, 0, False
     rows = [l for l in r.stdout.splitlines() if l[:1] in ' 0123456789']
@@ -197,7 +197,7 @@ def vol_read(q, n, tag):
     vdisk.rs): read as a host does, 64 sectors per READ(10); compared with
     tools/dlog.py of the DLG; KB per second of device (virtual) time."""
     ref = os.path.join(HERE, 'out', 'fastlog-%d-%s.dlg' % (A.port, tag))
-    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), ref, '-o', ref + '.csv'], capture_output=True)
+    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'firmware/tools/dlog.py'), ref, '-o', ref + '.csv'], capture_output=True)
     want = open(ref + '.csv', 'rb').read() if r.returncode == 0 else None
     m = uc.Msc(T[0].d)
     name = b'FAST%03d CSV' % n

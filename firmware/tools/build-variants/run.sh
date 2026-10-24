@@ -10,7 +10,7 @@
 #   fatren-dry-run, keep-screen
 # Each one is a full build.sh run (link asserts: TCM stack, SRAM, regions
 # A2 / B / C; stackdepth.py --check 20480; pack + whole 128-byte blocks) into
-# its own DM40_TDIR / DM40_OUT under target/variants/, so fw-rs/target/native
+# its own DM40_TDIR / DM40_OUT under target/variants/, so firmware/target/native
 # and dm40-fw-native.bin (the image tools/reload.sh installs) are never
 # replaced. Not run on any device. One line per variant, then PASS / FAIL.
 # ~1-2 min per variant (a full release link each).

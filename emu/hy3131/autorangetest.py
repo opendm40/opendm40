@@ -2,8 +2,8 @@
 """fw-rs DC V autorange after a multi-step range change, and READ? across a
 range change (device bab5dd4, device-check doc "bab5dd4" 1 / 3).
 
-  cd fw-rs && ./build.sh
-  emu/hy3131/autorangetest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/hy3131/autorangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 Input: 1 V DC on V/COM with the model's AD1 decimation memory on
 (`ad1mix:1`, HY3131.cs Ad1Mix): a row write that does not restart AD1 (the

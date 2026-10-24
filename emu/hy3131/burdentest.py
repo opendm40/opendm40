@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs burden voltage readout (fw-rs/docs/power-meter-and-misconnect.md
+"""fw-rs burden voltage readout (firmware/docs/power-meter-and-misconnect.md
 3.15) in the emulator: fw-rs native + the HY3131 model, a current source in
 the A jack through the DC / AC current functions, SCPI over USB/IP. Each
 phase checks FETC:BURD? against READ? x the R_path of the shunt in use
@@ -10,7 +10,7 @@ coupling on 200 mA DC + 100 mA AC: FETC:BURD? = the total RMS x R_path
 DMM page with the readout at the end of the DC / AC phases.
 
   emu/hy3131/burdentest.py                       # fw-rs built from HEAD
-  emu/hy3131/burdentest.py --app fw-rs/dm40-fw-native.bin --port 3378
+  emu/hy3131/burdentest.py --app firmware/dm40-fw-native.bin --port 3378
 
 Results: emu/out/burden.json, emu/out/burden-<phase>.png. One emulator at a
 time per port.

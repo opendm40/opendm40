@@ -5,23 +5,23 @@
 symlinks to the files here, so there is one copy to edit; emu/run.py reads them
 through the links). What it is based on: [`RESEARCH.md`](RESEARCH.md) (datasheet, application note,
 Hycon tool data, open-source drivers) and the stock firmware analysis in
-[`firmware/re/analysis/hy3131_v2_6.h`](../../firmware/re/analysis/hy3131_v2_6.h) / [`dmm_v2_6.h`](../../firmware/re/analysis/dmm_v2_6.h).
+[`stock/re/analysis/hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h) / [`dmm_v2_6.h`](../../stock/re/analysis/dmm_v2_6.h).
 
 ```
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
 emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / ohm network (emu/peripherals/DM40Frontend.cs links here)
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, results below
-emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (fw-rs/docs/power-meter-and-misconnect.md 3.11)
-emu/hy3131/couptest.py    fw-rs AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (fw-rs/docs/acdc-stock-vs-fwrs.md 11)
-emu/hy3131/autorangetest.py fw-rs DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; fw-rs/docs/acdc-stock-vs-fwrs.md 12)
+emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (firmware/docs/power-meter-and-misconnect.md 3.11)
+emu/hy3131/couptest.py    fw-rs AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (firmware/docs/acdc-stock-vs-fwrs.md 11)
+emu/hy3131/autorangetest.py fw-rs DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; firmware/docs/acdc-stock-vs-fwrs.md 12)
 emu/hy3131/switchtest.py  fw-rs misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
-emu/hy3131/ohmhunt.py      fw-rs ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; fw-rs/docs/switch-latency.md 6.2)
+emu/hy3131/ohmhunt.py      fw-rs ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; firmware/docs/switch-latency.md 6.2)
 emu/hy3131/autowaittest.py fw-rs READ? / MEAS? / FETCh? and HOLD while AUTO coupling decides, the placeholder unit after CONF (switch-latency.md 6, 6.2)
-emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (fw-rs/docs/dmm-input-scope-feasibility.md 9)
+emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (firmware/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
-emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (fw-rs/docs/power-meter-and-misconnect.md 3.15)
-emu/hy3131/inrushtest.py  fw-rs inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (fw-rs/docs/inrush-current.md)
+emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (firmware/docs/power-meter-and-misconnect.md 3.15)
+emu/hy3131/inrushtest.py  fw-rs inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (firmware/docs/inrush-current.md)
 emu/hy3131/btwaketest.py  fw-rs DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
 emu/hy3131/runemu.py      emu/run.py with a separate merged compile unit (the same files since the peripherals/ symlinks)
 emu/hy3131/RESEARCH.md    sources, facts, open points
@@ -33,7 +33,7 @@ emu/hy3131/ref/           transcribed register map and mux tables
 [`DM40Frontend.cs`](DM40Frontend.cs) (`Dm40Frontend`) sits between the jacks and the chip. The
 user says what is **connected** to V-ohm / COM / A; the firmware's own relay
 pulses (PA9 / PA10 latching pair = V/A path or the ohm-mV network, PE0 / PE1 =
-A / mA / none shunt, PC7 = frequency mode; [`fw-rs/src/dmm.rs`](../../fw-rs/src/dmm.rs) relay_pa /
+A / mA / none shunt, PC7 = frequency mode; [`firmware/src/dmm.rs`](../../firmware/src/dmm.rs) relay_pa /
 relay_pe / pc7, stock FUN_08012780 / FUN_080127be) and its [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) row decide
 the route, so a fixed connection behaves like on the real meter when the
 function changes:
@@ -107,14 +107,14 @@ Chip (datasheet DS-HY3131-V10):
   edge: CTB whole cycles, CTC high time, CTF; no edges -> CTA keeps running,
   CTB = 0, no CTF; CTBOV on CTB overflow. Source ACPO (comparator) or the CNT
   pin (ENCNTI).
-* fw-rs misconnect sentinel nodes (fw-rs/src/sentinel.rs): the comparator on
+* fw-rs misconnect sentinel nodes (firmware/src/sentinel.rs): the comparator on
   SCMPI = PB1 sees the A current times the relay-selected shunt (DC V / mV /
   ohm / temperature roles), on SCMPI = SENSE in DC A the V jack / 1000 when SS5
   is closed (CMPHO / CMPLO instantaneous, DC + AC waveform); AD1 on PB1 - PB3
   in the AC V / mV roles, with the AD1 peak hold over every elapsed conversion.
   Row matching ignores AD1's fields in rows that leave AD1 off, PKHSEL /
   ENPKH, and SS5 in the current rows.
-* fw-rs power meter rows ([`fw-rs/docs/power-meter-and-misconnect.md`](../../fw-rs/docs/power-meter-and-misconnect.md) 3.1,
+* fw-rs power meter rows ([`firmware/docs/power-meter-and-misconnect.md`](../../firmware/docs/power-meter-and-misconnect.md) 3.1,
   assignment B; role `Power`, mode 16, `Power vr<V range> iu<I unit> ir<I
   range>`, Range = vr * 6 + iu * 2 + ir): the 16 distinct rows of the design's
   builder (`Hy3131Core.PowerRow`; iu 1 / 2 share the bytes, PE tells mA from
@@ -165,7 +165,7 @@ Chip (datasheet DS-HY3131-V10):
 * Noise: Gaussian, 25 AD1 counts at OSR 32768 scaled by 1/sqrt(OSR) (acdc doc
   6c), RMS floor 30 counts; `noise:0` turns it off (deterministic seed).
 * Empirical, optional: the AD2/AD3 enable-order beat of
-  [`fw-rs/docs/acdc-stock-vs-fwrs.md`](../../fw-rs/docs/acdc-stock-vs-fwrs.md) 10 (`beat:1`; off by default: the stock's
+  [`firmware/docs/acdc-stock-vs-fwrs.md`](../../firmware/docs/acdc-stock-vs-fwrs.md) 10 (`beat:1`; off by default: the stock's
   emulated SPI skew is not the real one).
 
 Board (DM40, from the stock rows and formulas): the input terminals are a
@@ -256,7 +256,7 @@ AC A rows with both jacks driven).
 
 [`emu/hy3131/modetest.py`](modetest.py) runs the stock firmware and fw-rs in the emulator:
 the input is scripted, the stock is switched with Bluetooth command 06 and
-polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../firmware/re/analysis/bt_meas_v2_6.h)), fw-rs
+polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../stock/re/analysis/bt_meas_v2_6.h)), fw-rs
 with `CONF:<f>` / `READ?` over the same link. Results (last reported value
 after settling; stock Bluetooth is enabled by patching settings byte 0x115 in
 the emulated flash with a recomputed CRC):

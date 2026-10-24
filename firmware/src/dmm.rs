@@ -1,5 +1,5 @@
 //! Multimeter engine: a port of the stock measurement behaviour.
-//! Sources: firmware/re/analysis/hy3131_v2_6.h (bus, config rows, calibration
+//! Sources: stock/re/analysis/hy3131_v2_6.h (bus, config rows, calibration
 //! layout) and dmm_v2_6.h (per-mode formulas, filters, settle deadlines,
 //! autorange, display formats). Stock field names in comments (m+x, S+x).
 //!

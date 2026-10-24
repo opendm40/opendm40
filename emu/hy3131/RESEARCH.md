@@ -26,11 +26,11 @@ Not found: HY3131-AK01 / evaluation board user guide, Hycon reference DMM firmwa
 register tables (amobbs / 21ic / CSDN / Gitee: no hits), any public statement on
 AD1CHOP halving the rate, on the LPF / RMS output rate or on SPHACAL.
 
-In this repo: `firmware/re/analysis/hy3131_v2_6.h` (bus protocol, the stock
+In this repo: `stock/re/analysis/hy3131_v2_6.h` (bus protocol, the stock
 firmware's 60 configuration rows with a decoded reading of each, calibration
 layout), `dmm_v2_6.h` (per-mode formulas, filters, settle deadlines),
-`fw-rs/src/hy3131.rs` / `hy3131_tables.rs` (fw-rs driver, identical rows),
-`fw-rs/docs/acdc-stock-vs-fwrs.md` (device measurements: AC+DC cadence, AC
+`firmware/src/hy3131.rs` / `hy3131_tables.rs` (fw-rs driver, identical rows),
+`firmware/docs/acdc-stock-vs-fwrs.md` (device measurements: AC+DC cadence, AC
 coupling transient, AD2/AD3 enable-order beat).
 
 ## 2. Key facts from the datasheet (DS-HY3131-V10_EN)
@@ -113,8 +113,8 @@ OP3 source / sink 600..900 uA; comparator BW 6 MHz; NMR 120 dB at 5 sps, 75 dB a
 
 ## 3. Conversion rate: resolving "~9.4/s vs OSR/SYSCLK"
 
-Before f306cf5, `fw-rs/src/dmm.rs` assumed the stock's ~9.4 readings/s come from
-OSR 32768 and `fw-rs/src/hy3131.rs::osr_period_us` modelled OSR / SYSCLK (OSR
+Before f306cf5, `firmware/src/dmm.rs` assumed the stock's ~9.4 readings/s come from
+OSR 32768 and `firmware/src/hy3131.rs::osr_period_us` modelled OSR / SYSCLK (OSR
 2048 -> 417 us). Neither matched the datasheet. Fixed in f306cf5:
 `osr_period_us` is gone, `hy3131::ad1_period_us` / `ad1_period_us_r22` use the
 formula below and dmm.rs's FR-05 table (and the data logger's nominal period)

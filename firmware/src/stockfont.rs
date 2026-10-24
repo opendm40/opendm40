@@ -1,7 +1,7 @@
 //! Text with the stock firmware's bitmap fonts: our own copy of the glyph
 //! tables + bitmaps, embedded from stockfont_data.rs (extracted by
 //! tools/mkstockfont.py), so no stock app in flash is needed.
-//! Stock format and placement rules: firmware/re/analysis/gui_v2_6.h sec. 5;
+//! Stock format and placement rules: stock/re/analysis/gui_v2_6.h sec. 5;
 //! our storage (docs/fonts.md): CJK glyphs dropped, 4 bpp glyphs as
 //! row-major nibble runs (RLE4), 1 bpp glyphs cropped to their ink rows;
 //! the drawn pixels are the stock ones (tools/font-matrix).

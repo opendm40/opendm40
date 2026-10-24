@@ -1,6 +1,6 @@
 //! Host renderer of the STOCK DM40 V2.6 oscilloscope UI (tools/stock-ui).
 //!
-//! Draws the stock scope page from the spec in fw-rs/docs/stock-scope-ui.md
+//! Draws the stock scope page from the spec in firmware/docs/stock-scope-ui.md
 //! (element by element, stock coordinates, colours, fonts, pixel rules) with
 //! the real stock fonts read from the stock image mapped at 0x08000000, so
 //! reference images exist for every state even without device screenshots,

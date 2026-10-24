@@ -271,7 +271,7 @@ over 4 KiB is either always live or live with the scope.
 
 ## Tests (2026-10-22, on 34a5a6e rebased onto 367b933)
 
-- Host: every fw-rs/tools/*/run.sh passes (fatren-test includes the
+- Host: every firmware/tools/*/run.sh passes (fatren-test includes the
   screenshot writer on the stub screen: BMP = the stub pattern byte for
   byte, the stock header, power cut / abort after every slice, shots
   interleaved with csvlog commits; and the calbackup boot cases 6-9).

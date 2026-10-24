@@ -11,12 +11,12 @@ the 30-minute device plan. Evaluates two owner ideas for the TODO:
 
 Evidence tags as in `power-meter-and-misconnect.md`: **VERIFIED** = datasheet
 text (`docs/DS-HY3131_EN.pdf`, transcribed in `emu/hy3131/ref/registers.md`,
-`RESEARCH.md`), the stock row bytes / formulas (`firmware/re/analysis/
+`RESEARCH.md`), the stock row bytes / formulas (`stock/re/analysis/
 hy3131_v2_6.h`, `dmm_v2_6.h`), fw-rs code, the GD32F4xx User Manual (DMA
 request table, bus clocks), or a device measurement already in
 `acdc-stock-vs-fwrs.md` / a `DBG:PROF?` capture; **INFERRED** = follows from
 those but is not stated anywhere; **UNKNOWN** = needs the device. Nothing under
-`firmware/re/history/` was used. The sibling doc `power-meter-and-misconnect.md`
+`stock/re/history/` was used. The sibling doc `power-meter-and-misconnect.md`
 (sections 1-3) already establishes the AD2/AD3 mux, OP1/OP2 routing and the
 row facts; they are cited, not re-derived.
 

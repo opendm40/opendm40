@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """fw-rs DMM frequency: the first readings after an entry (device check
-2026-10-24, fw-rs/docs/device-check-2026-10-21.md "Crosstalk and cold-junction
+2026-10-24, firmware/docs/device-check-2026-10-21.md "Crosstalk and cold-junction
 self-heating (f0d21eb)": on a steady 40 Hz square the first 1-2 READ? after
 DC V -> CONF:FREQ read 19.94 / 0.00 / 0.99 / 0.94 / 17.04 Hz, then 40.0018).
 
@@ -14,7 +14,7 @@ returns the counts so far for a read during an open gate, and with
 after a row change, as the device's half / third first results suggest.
 
   emu/hy3131/freqtest.py --port 55100                       # all scenarios, fw-rs built from HEAD
-  emu/hy3131/freqtest.py --app fw-rs/dm40-fw-native.bin --port 55100 entry wake
+  emu/hy3131/freqtest.py --app firmware/dm40-fw-native.bin --port 55100 entry wake
 
 Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
   entry        DC V (3 s) -> CONF:FREQ, READ? x4; REPS times

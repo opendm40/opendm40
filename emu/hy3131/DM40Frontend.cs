@@ -9,9 +9,9 @@
 // fixed connection behaves like on the real meter when the function changes
 // (ohm on a powered circuit, current mode with nothing in A, a source in the
 // wrong jack ...). No Renode dependency; the HY3131 peripheral feeds the GPIO
-// levels in. Board facts: firmware/re/analysis/hy3131_v2_6.h (relays, shunts,
+// levels in. Board facts: stock/re/analysis/hy3131_v2_6.h (relays, shunts,
 // divider scale), the datasheet typical circuit (10M divider, 900k/100k diode
-// divider), fw-rs/src/dmm.rs relay_pa / relay_pe / pc7. The V-jack network
+// divider), firmware/src/dmm.rs relay_pa / relay_pe / pc7. The V-jack network
 // constants are the stock's nominal scale factors; the DM40 netlist itself is
 // not known (emu/hy3131/README.md).
 //

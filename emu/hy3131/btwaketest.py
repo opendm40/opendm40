@@ -4,7 +4,7 @@
 (HY3131.RailModel, on by default: with PE2 low the chip is unpowered, a PE2
 rise is a power-on reset and the chip ignores the bus for PowerUpMs).
 
-  emu/hy3131/btwaketest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [-- run.py args]
+  emu/hy3131/btwaketest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [-- run.py args]
 
 Timed by the run.py script (virtual s): DC 1 V; MENU -> Oscilloscope (the
 DMM rail goes off); a BT host (run.py --bt-port, wall clock, gated on the

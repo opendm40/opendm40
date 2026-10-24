@@ -6,11 +6,11 @@ Everything below was verified on the live device (2026-10-13).
 ## Toolchain
 
 - `arm-none-eabi-gcc` ( Debian: `gcc-arm-none-eabi`), `make`, python3.
-- Build: `cd firmware/patch && make ORIG=../../dm40_v_2_6.bin SRCS="src/startup.c src/<your>.c"`
+- Build: `cd stock/patch && make ORIG=../../dm40_v_2_6.bin SRCS="src/startup.c src/<your>.c"`
 - Output: `build/dm40_patched.bin`. Flash: copy to the USB MSC disk of the
   device (Settings -> Other Settings -> USB Connection), eject, power-cycle.
   The bootloader accepts any `dm40*.bin` name.
-- Header words (`word0`/`word2`) are computed by `firmware/dm40fw.py`;
+- Header words (`word0`/`word2`) are computed by `stock/dm40fw.py`;
   `patcher.py` already calls it. V2.6 and V2.8 bodies are byte-identical,
   one patch fits both (verified: `cmp` of decoded 2.6 vs 2.8 = 0 diffs).
 

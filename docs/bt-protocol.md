@@ -2,12 +2,12 @@
 
 Bluetooth protocol of the Alientek DM40 multimeter as used by the stock
 firmware and its phone app. The meter communicates via Bluetooth RFCOMM. The replacement firmware
-[fw-rs](../fw-rs/README.md) keeps the DM40 commands below and adds SCPI
-([fw-rs/docs/bt-scpi.md](../fw-rs/docs/bt-scpi.md)).
+[fw-rs](../firmware/README.md) keeps the DM40 commands below and adds SCPI
+([firmware/docs/bt-scpi.md](../firmware/docs/bt-scpi.md)).
 
-Host tools for a meter running fw-rs: `fw-rs/tools/dm40scpi.py --bt` (SCPI
+Host tools for a meter running fw-rs: `firmware/tools/dm40scpi.py --bt` (SCPI
 over Bluetooth, and `btpoll` for these stock frames) and
-[`fw-rs/tools/dm40bt_scpi.py`](../fw-rs/tools/dm40bt_scpi.py). They need a Python with Bluetooth sockets
+[`firmware/tools/dm40bt_scpi.py`](../firmware/tools/dm40bt_scpi.py). They need a Python with Bluetooth sockets
 (`/usr/bin/python3` on Linux; linuxbrew's has none).
 
 ## Connection Setup
@@ -101,7 +101,7 @@ range) with P (W) as the main value in the V group's units: the app shows
 "230.02 V" for 230.02 W, mW as mV, a source negative; value 2 / 3 are
 `FF FF`. Command 06 with that byte keeps the power meter, any other byte
 leaves it. The full power readings are on BT SCPI (`FETC:POW:ALL?`); see
-[fw-rs/docs/power-meter-and-misconnect.md](../fw-rs/docs/power-meter-and-misconnect.md) 3.13.
+[firmware/docs/power-meter-and-misconnect.md](../firmware/docs/power-meter-and-misconnect.md) 3.13.
 
 ### Measurement Response (17 bytes)
 ```
@@ -138,12 +138,12 @@ Bit 7      Set by the firmware in one mode when the main value exceeds 0xFFF0
 
 ## DM40 Firmware Image
 
-Firmware update files (`dm40_v_X_Y.bin`) are obfuscated. [firmware/dm40fw.py](../firmware/dm40fw.py)
-decodes and re-encodes them, see [firmware/README.md](../firmware/README.md) for
+Firmware update files (`dm40_v_X_Y.bin`) are obfuscated. [stock/dm40fw.py](../stock/dm40fw.py)
+decodes and re-encodes them, see [stock/README.md](../stock/README.md) for
 building modified images:
 
 ```
-python3 firmware/dm40fw.py decode dm40_v_2_6.bin dm40_v_2_6.dec.bin
+python3 stock/dm40fw.py decode dm40_v_2_6.bin dm40_v_2_6.dec.bin
 ```
 
 ### Obfuscation
@@ -167,7 +167,7 @@ Offset  Description
 
 CRC-16: polynomial 0x8005, init 0xFFFF, MSB first, no reflection, no final
 XOR. The 12 bytes skipped by the body CRC (flash `0x08008000`) are a marker
-that the bootloader manages. [`dm40fw.py`](../firmware/dm40fw.py) computes both words.
+that the bootloader manages. [`dm40fw.py`](../stock/dm40fw.py) computes both words.
 
 The bootloader below `0x08004000` is not part of the update file.
 
