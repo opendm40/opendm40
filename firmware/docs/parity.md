@@ -1,4 +1,4 @@
-# fw-rs vs stock DM40 V2.6 — parity report
+# opendm40 vs stock DM40 V2.6 — parity report
 
 Item-by-item comparison of the Rust replacement firmware (`firmware/src/*.rs`) against
 the reverse-engineered stock behaviour (`stock/re/analysis/*_v2_6.h`). Status
@@ -18,7 +18,7 @@ match. Nothing in the DMM value path looks wrong.
 
 ## 1. Multimeter (DMM)
 
-Stock: `hy3131_v2_6.h`, `dmm_v2_6.h`. fw-rs: `dmm.rs`, `hy3131.rs`,
+Stock: `hy3131_v2_6.h`, `dmm_v2_6.h`. opendm40: `dmm.rs`, `hy3131.rs`,
 `hy3131_tables.rs`, `meter.rs`.
 
 | Item | Status | Notes |
@@ -31,7 +31,7 @@ Stock: `hy3131_v2_6.h`, `dmm_v2_6.h`. fw-rs: `dmm.rs`, `hy3131.rs`,
 | Autorange thresholds + settle deadlines | MATCH | Per-mode `set(...settle)` values match the deadline table in `dmm_v2_6.h` §"SETTLE DEADLINES". |
 | AD1 OSR switching (R22 jump thresholds) | MATCH | `osr()` `dmm.rs:697`; DC V 0x206, DC mV 0xE22-0x960·r, DC A 0x168, cont 0x206. |
 | Ohm: ratiometric, q-based autorange, p8set/clr | MATCH | `poll_ohm` `dmm.rs:896`; R22 0x13/0x17 switching, 2500 ms fast-down gate. |
-| Continuity | MATCH (beep is hardware) | `poll_cont` `dmm.rs:956`; stock drives the buzzer from the HY3131 CMPO pin, not firmware, so fw-rs correctly does nothing. UNKNOWN whether the comparator-to-buzzer path works without stock init — verify on device. |
+| Continuity | MATCH (beep is hardware) | `poll_cont` `dmm.rs:956`; stock drives the buzzer from the HY3131 CMPO pin, not firmware, so opendm40 correctly does nothing. UNKNOWN whether the comparator-to-buzzer path works without stock init — verify on device. |
 | Diode + beeper pattern classes | MATCH | `poll_diode` + `diode_beep` `dmm.rs:964`,`1001`; classes/steps/`beep_n<=6` gating match; aux "ohm" = V·gain/0.765. |
 | Capacitance RC (r0..4) + ramp (r5..7) | MATCH | `poll_cap` `dmm.rs:1184`; median-5, 35-sample batch, comparator-flip flush, R21 by slope class, discharge row. |
 | Frequency / duty, dual-source in mode 14 | MATCH | `poll_freq_mode`/`freq_secondary` `dmm.rs:1056`,`1081`; reciprocal counter, 350 ms gate. |
@@ -51,12 +51,12 @@ temperature-F factor differ; both are deliberate.
 
 ## 2. Oscilloscope
 
-Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. fw-rs: `scope.rs`, `scope_meas.rs`.
+Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. opendm40: `scope.rs`, `scope_meas.rs`.
 
 | Item | Status | Notes |
 |---|---|---|
 | Timebase hardware (TIM1/8 psc/arr, DMA) | MATCH | `HW` table `scope.rs:49` = stock `scope_timebase[31]`. |
-| User timebase range | PARTIAL (slow end) | fw-rs `TB_MIN=3`..`TB_MAX=23` = 100 ns/div..500 ms/div (`scope.rs:125`); stock user range is 3..29 = **100 ns..50 s/div** (`SCOPE_TB_USER_MAX 29`). fw-rs stops at 500 ms because it uses one record per frame instead of the stock 65520-sample ping-pong/zoom scheme. 1 s..50 s/div MISSING. |
+| User timebase range | PARTIAL (slow end) | opendm40 `TB_MIN=3`..`TB_MAX=23` = 100 ns/div..500 ms/div (`scope.rs:125`); stock user range is 3..29 = **100 ns..50 s/div** (`SCOPE_TB_USER_MAX 29`). opendm40 stops at 500 ms because it uses one record per frame instead of the stock 65520-sample ping-pong/zoom scheme. 1 s..50 s/div MISSING. |
 | V/div 10 mV..10 V, front-end GPIO rows | MATCH | `VDIV`/`GPIO_ROW` `scope.rs:130` = `scope_range_gpio`; PC13 relay 200 ms wait kept. |
 | Probe x0.1..x1000 | MATCH | `probe` scales readouts/labels only (`scope.rs` Settings.probe), matching stock semantics; the full stock list `scope_probe[13]` (`scope::PROBES`) in the scope settings window, Settings tab (UF-12). |
 | Gain/offset calibration from record | MATCH | `cal_pair` `scope.rs:184` reads +0x08 (gain) / +0xA8 (offset) with defaults; CCR3 offset PWM formula matches `FUN_080302d6`. |
@@ -69,15 +69,15 @@ Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. fw-rs: `scope.rs`, `scope_meas
 | Cursors X2-1 / Xf / Y2-1 | MATCH | Items 7/8/17 present; formulas in `app.rs`/`scope_meas.rs`. |
 | Persistence | MATCH | Trace persistence in `app.rs` (commit fb8f7db). |
 | Settings window (MF) | MATCH | `View::ScopeMenu` tabs. |
-| AUTO-set | PARTIAL | fw-rs has an autoset state machine (`app.rs:81`), two-phase. Not verified to reproduce the stock period→timebase table (`FUN_08033388`) exactly. UNKNOWN on device. |
-| Zoom in STOP | MISSING | Stock re-renders a stored 65520-sample record at a new s/div while stopped (`scope_gen_ui_v2_6.h` §3 Zoom). fw-rs keeps one screen per frame, so no stop-and-zoom. |
-| Math / FFT channel | MISSING | Stock has a math/FFT channel (S+0xd4, purple markers). Not in fw-rs. Likely out of scope. |
+| AUTO-set | PARTIAL | opendm40 has an autoset state machine (`app.rs:81`), two-phase. Not verified to reproduce the stock period→timebase table (`FUN_08033388`) exactly. UNKNOWN on device. |
+| Zoom in STOP | MISSING | Stock re-renders a stored 65520-sample record at a new s/div while stopped (`scope_gen_ui_v2_6.h` §3 Zoom). opendm40 keeps one screen per frame, so no stop-and-zoom. |
+| Math / FFT channel | MISSING | Stock has a math/FFT channel (S+0xd4, purple markers). Not in opendm40. Likely out of scope. |
 
 ---
 
 ## 3. Generator
 
-Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. fw-rs: `gen.rs`.
+Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. opendm40: `gen.rs`.
 
 | Item | Status | Notes |
 |---|---|---|
@@ -86,9 +86,9 @@ Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. fw-rs: `gen.rs
 | PWM square >50 kHz | MATCH | `pwm()` `gen.rs:147`; PWM_HZ/PSC/PER match `gen_pwm_*`. |
 | Vpp 0.5..3.0, duty 0..10000 | MATCH | Clamped in `apply()` `gen.rs:130`. |
 | Runs while other pages shown (DMA/timers) | MATCH | Output is DMA/timer driven; state shown on the scope bar. |
-| **Default wave/freq** | PARTIAL | fw-rs default = **Sine, 1000 Hz** (`gen.rs:60`); stock default = **Square, 2 MHz** (`GEN_DEF_WAVE 1`, `GEN_DEF_FREQ_HZ 2000000`, corrected in `scope_gen_ui_v2_6.h:291`). |
-| Freq snap 50k..100k | PARTIAL | Stock snaps square 50k–100k **down to 50 kHz** (`scope_gen_ui_v2_6.h:294`). fw-rs `snap_freq` rounds **up to 100 kHz** (`gen.rs:70`, rev-find returns PWM_HZ[0]). |
-| Non-square >50 kHz | PARTIAL | Stock sets freq to **0 Hz (silent, on-flag kept)**. fw-rs clamps to **50 kHz and keeps outputting** (`gen.rs:78`). |
+| **Default wave/freq** | PARTIAL | opendm40 default = **Sine, 1000 Hz** (`gen.rs:60`); stock default = **Square, 2 MHz** (`GEN_DEF_WAVE 1`, `GEN_DEF_FREQ_HZ 2000000`, corrected in `scope_gen_ui_v2_6.h:291`). |
+| Freq snap 50k..100k | PARTIAL | Stock snaps square 50k–100k **down to 50 kHz** (`scope_gen_ui_v2_6.h:294`). opendm40 `snap_freq` rounds **up to 100 kHz** (`gen.rs:70`, rev-find returns PWM_HZ[0]). |
+| Non-square >50 kHz | PARTIAL | Stock sets freq to **0 Hz (silent, on-flag kept)**. opendm40 clamps to **50 kHz and keeps outputting** (`gen.rs:78`). |
 | Keypads (freq H/K/M, numeric Vpp/duty) | MATCH | `View::Keypad`, stock layouts (commit 2464fca). |
 | RUN toggles output | MATCH | In `app.rs` RUN handling. |
 
@@ -96,12 +96,12 @@ Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. fw-rs: `gen.rs
 
 ## 4. Bluetooth phone-app protocol
 
-Stock: `bt_meas_v2_6.h`. fw-rs: `bt.rs` (+ `power.rs` for the status it should report).
+Stock: `bt_meas_v2_6.h`. opendm40: `bt.rs` (+ `power.rs` for the status it should report).
 
 | Item | Status | Notes |
 |---|---|---|
 | Frame format, CRC, id 0503/FFFF, len≤0xC2 | MATCH | `poll()` `bt.rs:92`; broadcast detection, resync on bad id/len. |
-| Transport: UART4, 115200 8N1, DMA RX | MATCH (DMA vs ISR) | `bt.rs:54`; stock uses RBNE interrupt, fw-rs uses circular DMA (IRQs are masked). Functionally equivalent. |
+| Transport: UART4, 115200 8N1, DMA RX | MATCH (DMA vs ISR) | `bt.rs:54`; stock uses RBNE interrupt, opendm40 uses circular DMA (IRQs are masked). Functionally equivalent. |
 | cmd 00 discover (model letter) | MATCH | `bt.rs:229`. |
 | cmd 01 nop, 02 version (boot data) | MATCH | `bt.rs:231`; version bytes from 0x080A4000. |
 | cmd 03 reset, 04 hold, 05 rel | MATCH | `bt.rs:239`; REL gating (not HOLD/not OL, modes <11 or 14). |
@@ -109,61 +109,61 @@ Stock: `bt_meas_v2_6.h`. fw-rs: `bt.rs` (+ `power.rs` for the status it should r
 | cmd 07 set name / 08 get name (AT) | MATCH | `bt.rs:259`; AT+SBN / AT+CBN, "OK"/"CBN+" parsing. |
 | cmd 09 measurement reply (fmt + values) | PARTIAL | Encoding in `encode()` `bt.rs:183` matches format-byte rules incl. continuity 0xFFF0 bit 7 and diode value-3. BUT see flags row. |
 | **Flags byte (bit0-2 battery, bit3 charge, bit6 lock)** | PARTIAL | `bt.rs:285` hardcodes `... | 5` (battery always level 5) and never sets charging (bit 3) or key-lock (bit 6). `power.rs` computes real `bars`/`charging()` and `app.rs` tracks `locked`, but none is passed into `Bt::serve`. Reports HOLD (bit7) and REL (bit5) correctly. |
-| **Startup AT init (SBNDM40A/SLED0/RESET)** | MISSING | Stock configures the module name/LED on first BT-on (`bt_meas_v2_6.h` §"AT commands sent without a request"). fw-rs only handles set/get-name requests; it assumes the module is already configured. |
-| PC14 "connected" / PC0 power control | MATCH | `power.rs` reads PC14; `Bt::power` drives PC0 low (module on) while Bluetooth is ON and high when OFF, plus the stock's 100 ms high pulse after a successful cmd 07. Until 2026-10-22 native fw-rs left PC0 high from `board::init` (the stock boot level): the module stayed off and the meter was unreachable over BT. Deviation: stock powers the module only on its meter page, fw-rs on every view (UF-36). |
-| Temperature F in reply = 1.82 (stock bug) | DEVIATION | fw-rs uses 1.8 for the LCD; if the BT path reuses that, the phone app will read a slightly different F than stock. Confirm the BT value matches whatever the app expects. |
+| **Startup AT init (SBNDM40A/SLED0/RESET)** | MISSING | Stock configures the module name/LED on first BT-on (`bt_meas_v2_6.h` §"AT commands sent without a request"). opendm40 only handles set/get-name requests; it assumes the module is already configured. |
+| PC14 "connected" / PC0 power control | MATCH | `power.rs` reads PC14; `Bt::power` drives PC0 low (module on) while Bluetooth is ON and high when OFF, plus the stock's 100 ms high pulse after a successful cmd 07. Until 2026-10-22 native opendm40 left PC0 high from `board::init` (the stock boot level): the module stayed off and the meter was unreachable over BT. Deviation: stock powers the module only on its meter page, opendm40 on every view (UF-36). |
+| Temperature F in reply = 1.82 (stock bug) | DEVIATION | opendm40 uses 1.8 for the LCD; if the BT path reuses that, the phone app will read a slightly different F than stock. Confirm the BT value matches whatever the app expects. |
 
 ---
 
 ## 5. GUI / menus
 
-Stock: `gui_v2_6.h`, `gui_render_v2_6.h`, `lcd_buzzer_v2_6.h`. fw-rs: `ui.rs`,
+Stock: `gui_v2_6.h`, `gui_render_v2_6.h`, `lcd_buzzer_v2_6.h`. opendm40: `ui.rs`,
 `app.rs`, `text.rs`, `stockfont.rs`, `fonts.rs`, `lcd.rs`.
 
 | Item | Status | Notes |
 |---|---|---|
 | DMM screen layout, stock fonts, pixel layout | MATCH | Rendered in place from the stock app fonts; main value red. |
-| Main menu tiles | PARTIAL (by design) | Stock: 4 tiles + "正点原子" logo (`gui_v2_6.h:53`). fw-rs: `ui::main_menu` with no Alientek logo (requirement). Tiles present via view selection. |
+| Main menu tiles | PARTIAL (by design) | Stock: 4 tiles + "正点原子" logo (`gui_v2_6.h:53`). opendm40: `ui::main_menu` with no Alientek logo (requirement). Tiles present via view selection. |
 | Settings: dim, shutdown, backlight, volume, BT, start page | MATCH | `View::Settings` `app.rs:288`; dim indices 5/10/30/never, shutdown 10/30/60/never. |
-| Language selection (zh-CN/zh-TW/en) | MISSING (by design) | fw-rs is English only; stock has 3 languages (`CFG_LANGUAGE`). Acceptable unless CJK is wanted. |
-| Device / About page (Vendor/Web/Model/version) | MISSING | Stock §6 Device page. fw-rs has none. Minor. |
-| Per-function DMM settings pages (MF: Voltage/Current/Resistor/Cap Settings) | PARTIAL | Stock opens dedicated per-function settings screens from MF (`gui_v2_6.h:65`). fw-rs uses a `View::Range` popup + `ScopeMenu`; fewer per-function options. |
+| Language selection (zh-CN/zh-TW/en) | MISSING (by design) | opendm40 is English only; stock has 3 languages (`CFG_LANGUAGE`). Acceptable unless CJK is wanted. |
+| Device / About page (Vendor/Web/Model/version) | MISSING | Stock §6 Device page. opendm40 has none. Minor. |
+| Per-function DMM settings pages (MF: Voltage/Current/Resistor/Cap Settings) | PARTIAL | Stock opens dedicated per-function settings screens from MF (`gui_v2_6.h:65`). opendm40 uses a `View::Range` popup + `ScopeMenu`; fewer per-function options. |
 | "Other Settings" toggles (Anti-drop, Mode Remember, BT) | MATCH-ish | Anti-drop = `reassert_relay`; Mode Remember / persist via backup SRAM; BT toggle present. Stored in backup SRAM instead of config.bin. |
 | Idle dim + auto power-off | MATCH | `tick()` `app.rs:344`; dims backlight, power-off dialog/action. |
-| Combined view (menu row "combo") | NEW | fw-rs adds a DMM+Scope combined view (no stock equivalent). |
+| Combined view (menu row "combo") | NEW | opendm40 adds a DMM+Scope combined view (no stock equivalent). |
 
 ---
 
 ## 6. Touch
 
-Stock: `touch_v2_6.h`. fw-rs: `touch.rs`, `gesture.rs`.
+Stock: `touch_v2_6.h`. opendm40: `touch.rs`, `gesture.rs`.
 
 | Item | Status | Notes |
 |---|---|---|
 | Hynitron 0x5A protocol (D1 01 / D2 04 / D1 09, D0 00 frame, 0xAB, ack) | MATCH | `touch.rs:236`,`259`; chip-type 0xA8 check, extra points read+dropped, D0 00 AB ack. |
 | Coordinate decode X/Y, landscape | MATCH | `decode()` `touch.rs:198`. |
 | Side keys MENU/RUN/AUTO/MF from key-report X | MATCH | `touch.rs:285`; thresholds 500/750/1000 (measured 372/628/884/1140). |
-| Debounce / long-press filtering | MATCH (fw-rs adds more) | `DEBOUNCE_MS` + two-identical-frames; long-press-as-key suppression `touch.rs:279`. Stock relies on controller filtering only. |
+| Debounce / long-press filtering | MATCH (opendm40 adds more) | `DEBOUNCE_MS` + two-identical-frames; long-press-as-key suppression `touch.rs:279`. Stock relies on controller filtering only. |
 | Gestures (tap/long-press/swipe/drag) | NEW | `gesture.rs`; stock has no gestures. Used for view switching. |
 | Power key PD6 (hold 1.5 s off, double lock) | MATCH | `app.rs:354`-`362`. |
 | **I2C transport** | MATCH (no DMA) | Hardware I2C2 (400/100 kHz by rise time, bit-bang fallback) + EXTI5 pending-bit gating; no DMA (`touch.rs` header). Stock uses the I2C2 peripheral + DMA + EXTI interrupt. Raw bus/IRQ counters in DBG:DIAG? bytes 20..59. |
-| **Goodix GT1158 fallback (0x14)** | MISSING | Stock probes GT1158 first, falls back to 0x5A. fw-rs supports 0x5A only, so a unit with the Goodix panel would have no touch. UNKNOWN which panels ship. |
-| Multi-touch (up to 5 points) | PARTIAL | fw-rs reports point 0 + count only; stock stores up to 5. Single-finger UI, so fine. |
+| **Goodix GT1158 fallback (0x14)** | MISSING | Stock probes GT1158 first, falls back to 0x5A. opendm40 supports 0x5A only, so a unit with the Goodix panel would have no touch. UNKNOWN which panels ship. |
+| Multi-touch (up to 5 points) | PARTIAL | opendm40 reports point 0 + count only; stock stores up to 5. Single-finger UI, so fine. |
 
 ---
 
 ## 7. USB
 
 Stock: mass-storage disk only (`spiflash_v2_6.h`) + the BT phone protocol. There
-is **no USBTMC/SCPI in stock** — it is a fw-rs addition, so "parity" here means
+is **no USBTMC/SCPI in stock** — it is an opendm40 addition, so "parity" here means
 the mass-storage disk must stay compatible and USBTMC is a superset.
 
-fw-rs: `usb.rs`, `usbtmc.rs`, `scpi.rs`, `msc.rs`, `spiflash.rs`.
+opendm40: `usb.rs`, `usbtmc.rs`, `scpi.rs`, `msc.rs`, `spiflash.rs`.
 
 | Item | Status | Notes |
 |---|---|---|
 | Mass storage = stock FAT16 on W25Q128, 4096 B blocks | MATCH | `spiflash.rs` BlockDevice, `msc.rs`; `DBG:FLASH?` returns JEDEC EF4018 (README). LBA == sector == flash/4096 as stock. |
-| SPI access read-only vs read/write | UNKNOWN | fw-rs implements writes (erase+program); a block write stalls the loop ~50 ms (up to 400 ms). Mount/write/read round-trip **not logged on device** (TODO.md). |
+| SPI access read-only vs read/write | UNKNOWN | opendm40 implements writes (erase+program); a block write stalls the loop ~50 ms (up to 400 ms). Mount/write/read round-trip **not logged on device** (TODO.md). |
 | Disk always attached (like stock disk mode) | MATCH | Composite always present. |
 | USBTMC/USB488 + SCPI (DMM) | NEW | `scpi.rs`: `*IDN? *RST *CLS *OPC? SYST:ERR?`, `CONF/MEAS/READ/FETC`, `FUNC`. Superset of stock. |
 | SCPI scope/generator | NEW | `SOUR:*`, `TIM/CHAN/TRIG`, `RUN/STOP/SING`, `SCOP:MEAS?`, `WAV:DATA?/PRE?`. |
@@ -172,13 +172,13 @@ fw-rs: `usb.rs`, `usbtmc.rs`, `scpi.rs`, `msc.rs`, `spiflash.rs`.
 
 ---
 
-## 8. Combined / simultaneous operation (fw-rs only)
+## 8. Combined / simultaneous operation (opendm40 only)
 
-Stock switches instruments; fw-rs runs DMM + scope + generator at once and only
-switches the view. Constraints and how fw-rs handles them:
+Stock switches instruments; opendm40 runs DMM + scope + generator at once and only
+switches the view. Constraints and how opendm40 handles them:
 
 - **Analog power rails PC4 (scope) / PE2 (DMM)**: stock powers one side per page
-  (`scope.rs:280` `power()`); fw-rs adds `power_both()` (`scope.rs:309`) to keep
+  (`scope.rs:280` `power()`); opendm40 adds `power_both()` (`scope.rs:309`) to keep
   both up. This is **off by default** and the stock never does it, so accuracy of
   simultaneous DMM+scope is UNKNOWN (crosstalk between the two analog front ends
   on the shared supply is untested). The view switcher calls one-side power for
@@ -195,7 +195,7 @@ switches the view. Constraints and how fw-rs handles them:
 
 ## 9. Data logger (FR-38) — new feature, not a parity gap
 
-Stock has no logger mode. fw-rs has none yet (no module). Relevant HY3131 facts
+Stock has no logger mode. opendm40 has none yet (no module). Relevant HY3131 facts
 for FR-38, from `hy3131_v2_6.h`:
 
 - **Fastest conversion** is set by R22 `AD1OSR`, `OSR = 256 << (R22 & 7)`. The

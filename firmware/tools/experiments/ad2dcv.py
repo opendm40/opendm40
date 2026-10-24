@@ -5,7 +5,7 @@ row on AD2 (feasibility 1.3 last row, E7) against AD1, per DC V tap.
 For every DC V range (0..3 = 6 / 60 / 600 / 1000 V) and DC level, the
 calibrator (tools/mr9270.py, V/COM) is set, then per row variant:
 
-  DBG:AD2:DCV? range,r26,n,flags   (fw-rs src/ad2exp.rs `dcv_test`)
+  DBG:AD2:DCV? range,r26,n,flags   (opendm40 src/ad2exp.rs `dcv_test`)
       A  AD1 alone in the row (SENSE - PB5, ENAD2 off)
       B  AD1 + AD2: the AD2 mean over the same AD1 conversions
       C  AD2 alone (AD1 off: what the stream sees)
@@ -29,7 +29,7 @@ reference). Raw rows go to a CSV.
     /usr/bin/python3 tools/experiments/ad2dcv.py --no-cal --points 1   # calibrator left alone
     tools/experiments/ad2dcv.py --usbip 1-0 --no-cal --points 1        # the emulator
 
-The meter must be on fw-rs, USB connected (USBTMC), leads on V / COM. The
+The meter must be on opendm40, USB connected (USBTMC), leads on V / COM. The
 range stays manual during the run; at the end CONF:VOLT:DC (AUTO) and the
 calibrator back to 1 V DC, output on. Levels are capped at 24 V (the
 calibrator's real top level, tools/mr9270.py VOLTAGE_MAX).

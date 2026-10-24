@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static worst-case stack depth of the fw-rs native image. fw-rs runs with
+"""Static worst-case stack depth of the opendm40 native image. opendm40 runs with
 interrupts masked, so one call tree from the reset path covers it, plus the
 one interrupt handler a build may have (ISRS below: the AD2 stream ISR of
 the `ad2-isr` feature, docs/decisions-2026-10-22.md #3): it runs on the same

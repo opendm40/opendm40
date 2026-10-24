@@ -1125,7 +1125,7 @@ The image was already installed by the owner. `DBG:BOOT?` matched the header of 
 | 5 | E7 DC V on AD2 | **PASS**; the clip autorange was seen on the device for the first time. Bug fixed: Wave view `CONF?` in DC V | `e*.png`, `e7-*.csv` |
 | 6 | The calibrator's "50 Hz" | **calibrator / tool, not the meter**: `mr9270.py` frequency scale fixed | below |
 
-### 2. AUTO coupling (doc acdc-stock-vs-fwrs.md §11, voltage side)
+### 2. AUTO coupling (doc acdc-stock-vs-opendm40.md §11, voltage side)
 
 - **Glyph:** 16f5b0f (the "~/⎓" button) **is** in a0985e4 (`git merge-base --is-ancestor`).
 - **Taps:** four taps on V from DC V: FUNC? `VOLT:AC` -> `VOLT:ACDC` -> `VOLT:AUTO` (`AUTO,DC`) -> `VOLT`. The button glyph is DC / AC / AC+DC / the AC/DC mark; "AUTO" (F14) sits left of the glyph above the unit. Zoomed: no overlap with the digits, the glyph or the button edges (`a1-sheet.png`, `a1-zoom.png`).
@@ -2031,7 +2031,7 @@ Candidate fixes (none made; the owner decides): (a) keep a gain whose span is la
 - **Health:** `DBG:BOOT?` NORMAL, crash count 0, VALID, HEALTHY. Four deliberate `dm40dbg.py reset`s (09:02 before e8s; 09:33 / 09:34 / 09:35 before each `tc6` repeat), no crash.
 - **Calibrator:** 1 V DC, enabled.
 
-## ceb5ca5: the settle-fix retest (TODO items of "bab5dd4" B4 / B5, acdc-stock-vs-fwrs.md §12) (2026-10-23 09:44 - 10:35)
+## ceb5ca5: the settle-fix retest (TODO items of "bab5dd4" B4 / B5, acdc-stock-vs-opendm40.md §12) (2026-10-23 09:44 - 10:35)
 
 The owner had installed ceb5ca5 (install OK, crash count 0). It carries the settle-fix branch (f4925f5 `vet_ad1` / `reading_pending` / `acs_flat` / input-step settle, 7e10110 no DC-phase step down during an input-step settle). `DBG:BOOT?` NORMAL, crash count 0, VALID, CLEAN at the start and the end; no reset.
 - **Wiring:** the calibrator (`/dev/ttyACM1`) on V/COM: 1 V DC (items 1-3), the 40 Hz square (4, 6), DC 4..7 V (5). The A jack, the MCX probe and the generator output were not wired.

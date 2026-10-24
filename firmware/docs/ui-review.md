@@ -1,6 +1,6 @@
-# fw-rs UI/UX review
+# opendm40 UI/UX review
 
-Review of the fw-rs replacement firmware's user interface on the Alientek DM40
+Review of the opendm40 replacement firmware's user interface on the Alientek DM40
 (480x320 landscape colour LCD, capacitive touch with a resistive feel, 4 side
 keys MENU / RUN / AUTO / MF, plus gestures). All three instruments (DMM, scope,
 generator) run at once; only the displayed view changes.
@@ -14,7 +14,7 @@ Sources read: `src/ui.rs`, `src/app.rs`, `src/scope.rs`, `src/gen.rs`,
 `docs/parity.md`, and the stock reference `stock/re/analysis/gui_v2_6.h`,
 `gui_render_v2_6.h`, `scope_gen_ui_v2_6.h`.
 
-Context the user supplied: fw-rs no longer needs to match stock 1:1 —
+Context the user supplied: opendm40 no longer needs to match stock 1:1 —
 improvements are welcome. The DMM+scope combined view is being reworked to give
 the scope more room (smaller DMM text + top bar). A fast-USB data logger and a
 CSV-to-disk record mode (started from the DMM screen by a swipe) are planned.
@@ -57,7 +57,7 @@ Note also a second, *vestigial* font system: the anti-aliased `fonts.rs`
 `ui::button_row` and `DMM_BUTTONS` (`ui.rs:58`-`85`), none of which are called
 by `app.rs`. Dead weight; worth deleting or wiring up, but not a UX issue.
 
-A render-model plus worth keeping: fw-rs already diffs the main readout per
+A render-model plus worth keeping: opendm40 already diffs the main readout per
 digit (`stockfont.rs` `cells_diff`, `ui.rs:249`/`256`) and per scope column
 (`ScopeView::frame`, `ui.rs:742`), where stock blindly redraws the whole rect
 every 50 ms (`gui_render_v2_6.h` §2). The UI is flicker-free and cheap; none of
@@ -328,7 +328,7 @@ Each: what / why / effort (S/M/L) / stock deviation. Quick wins marked ★.
    drag; dragging a scope cursor/trigger switches view mid-gesture. Suppress
    swipe once a `Drag` was consumed (app returns "handled"), and require a
    dominance ratio. *Why:* correctness bug and a prerequisite for swipe-to-record.
-   **S. Fixes fw-rs behaviour (gestures are fw-rs-only).**
+   **S. Fixes opendm40 behaviour (gestures are opendm40-only).**
 2. ★ **Unified top bar on all four cycle views** — one height/colour carrying
    battery, charge, BT, **lock**, REC/LOG, page dots. Today lock is invisible on
    Scope/Gen and Gen shows no status, so a locked device on the scope page looks
@@ -337,7 +337,7 @@ Each: what / why / effort (S/M/L) / stock deviation. Quick wins marked ★.
    the three stock bars).**
 3. ★ **Swallow the wake tap** — after idle-dim, the first input should only
    un-dim, not act (`app.rs:836`-`839`). *Why:* prevents accidental function/
-   trigger changes. **S. fw-rs behaviour.**
+   trigger changes. **S. opendm40 behaviour.**
 4. ★ **Relabel the scope middle buttons** — show `DC`/`AC` on the yellow middle
    button (it toggles coupling) and `Auto`/`Norm`/`Sing` on the purple one (it
    cycles trigger mode), instead of the V/div value and "Time"
@@ -358,7 +358,7 @@ Each: what / why / effort (S/M/L) / stock deviation. Quick wins marked ★.
 8. **Trigger handle + markers, wider cursor grab** — stop trigger-on-any-tap
    (`app.rs:1187`), draw zero/trigger markers on the left strip, widen cursor grab
    to ~20 px with visible handles (`app.rs:865`). *Why:* error-prone precision on
-   a finger screen. **M. Deviates (stock had markers; fw-rs dropped them).**
+   a finger screen. **M. Deviates (stock had markers; opendm40 dropped them).**
 9. ★ **Generator status + tappable RUN/STOP** — draw battery/uptime/lock on the
    gen page; make the RUN/STOP label a button (`app.rs:1192`, `ui.rs:1034`).
    *Why:* only page with no charge indicator; output toggle hidden behind a key.

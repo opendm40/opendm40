@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""fw-rs misconnect sentinel (firmware/src/sentinel.rs) in the emulator: fw-rs
+"""opendm40 misconnect sentinel (firmware/src/sentinel.rs) in the emulator: opendm40
 native + the HY3131 model, a timed connection script per scenario, SCPI over
 USB/IP (CONF:<f>, then DBG:PING? uptime, SYST:ALER?, DBG:SENT?, READ? in a
 loop); each phase of the script must show only its expected alerts.
 
-  emu/hy3131/senttest.py                         # all scenarios, fw-rs built from HEAD
+  emu/hy3131/senttest.py                         # all scenarios, opendm40 built from HEAD
   emu/hy3131/senttest.py --app firmware/opendm40.bin --port 3377 dcv-adc acv
   emu/hy3131/senttest.py --list
 
@@ -26,7 +26,7 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('names', nargs='*')
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3377, help='USB/IP port (default 3377)')
 ap.add_argument('--list', action='store_true')
 A = ap.parse_args()
@@ -220,7 +220,7 @@ def run(name):
             f.write('0 monitor %s\n' % m)
         for v, (t, spec) in zip(vt, script):
             f.write('%g dmm %s\n' % (v, spec))
-    # USB/IP from 3 s: an attach before fw-rs enumerated can leave the server stuck
+    # USB/IP from 3 s: an attach before opendm40 enumerated can leave the server stuck
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(run_for + VLAG), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])

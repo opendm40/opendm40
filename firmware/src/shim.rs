@@ -59,7 +59,7 @@ __VECTORS:
     .word default_handler
     .endr
     /* IRQ 55, TIMER6 (STM32 TIM7): the AD2 stream ISR (logger.rs `isr`,
-       feature ad2-isr, the only interrupt fw-rs enables); without the
+       feature ad2-isr, the only interrupt opendm40 enables); without the
        feature default_handler, never enabled either. */
     .word "#,
     irq55!(),

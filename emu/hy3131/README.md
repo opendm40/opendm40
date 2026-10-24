@@ -11,18 +11,18 @@ Hycon tool data, open-source drivers) and the stock firmware analysis in
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
 emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / ohm network (emu/peripherals/DM40Frontend.cs links here)
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
-emu/hy3131/modetest.py    stock + fw-rs through every DMM mode in the emulator, results below
-emu/hy3131/powtest.py     fw-rs power meter end to end over USB/IP (firmware/docs/power-meter-and-misconnect.md 3.11)
-emu/hy3131/couptest.py    fw-rs AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (firmware/docs/acdc-stock-vs-fwrs.md 11)
-emu/hy3131/autorangetest.py fw-rs DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; firmware/docs/acdc-stock-vs-fwrs.md 12)
-emu/hy3131/switchtest.py  fw-rs misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
-emu/hy3131/ohmhunt.py      fw-rs ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; firmware/docs/switch-latency.md 6.2)
-emu/hy3131/autowaittest.py fw-rs READ? / MEAS? / FETCh? and HOLD while AUTO coupling decides, the placeholder unit after CONF (switch-latency.md 6, 6.2)
-emu/hy3131/ad2streamtest.py fw-rs AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (firmware/docs/dmm-input-scope-feasibility.md 9)
-emu/hy3131/wavetest.py    fw-rs DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
-emu/hy3131/burdentest.py  fw-rs burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (firmware/docs/power-meter-and-misconnect.md 3.15)
-emu/hy3131/inrushtest.py  fw-rs inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (firmware/docs/inrush-current.md)
-emu/hy3131/btwaketest.py  fw-rs DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
+emu/hy3131/modetest.py    stock + opendm40 through every DMM mode in the emulator, results below
+emu/hy3131/powtest.py     opendm40 power meter end to end over USB/IP (firmware/docs/power-meter-and-misconnect.md 3.11)
+emu/hy3131/couptest.py    opendm40 AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (firmware/docs/acdc-stock-vs-opendm40.md 11)
+emu/hy3131/autorangetest.py opendm40 DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; firmware/docs/acdc-stock-vs-opendm40.md 12)
+emu/hy3131/switchtest.py  opendm40 misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
+emu/hy3131/ohmhunt.py      opendm40 ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; firmware/docs/switch-latency.md 6.2)
+emu/hy3131/autowaittest.py opendm40 READ? / MEAS? / FETCh? and HOLD while AUTO coupling decides, the placeholder unit after CONF (switch-latency.md 6, 6.2)
+emu/hy3131/ad2streamtest.py opendm40 AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (firmware/docs/dmm-input-scope-feasibility.md 9)
+emu/hy3131/wavetest.py    opendm40 DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
+emu/hy3131/burdentest.py  opendm40 burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (firmware/docs/power-meter-and-misconnect.md 3.15)
+emu/hy3131/inrushtest.py  opendm40 inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (firmware/docs/inrush-current.md)
+emu/hy3131/btwaketest.py  opendm40 DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
 emu/hy3131/runemu.py      emu/run.py with a separate merged compile unit (the same files since the peripherals/ symlinks)
 emu/hy3131/RESEARCH.md    sources, facts, open points
 emu/hy3131/ref/           transcribed register map and mux tables
@@ -95,7 +95,7 @@ Chip (datasheet DS-HY3131-V10):
   `Ad2NoiseCodes`; a model, not a measurement), an unread result overwritten;
   a read is never torn (the chip advances at CS low only). The row
   recognition also accepts an AC row with AD3 / RMS / LPF off and another
-  AD2 rate (fw-rs data logger, LOG:SOURce AD2).
+  AD2 rate (opendm40 data logger, LOG:SOURce AD2).
   Conversions are evaluated lazily when the firmware touches the bus (no
   Renode timers): `Hy3131Core.Update(now)`.
 * AD1 transfer: `code = IG * Vin / (RG * VR) * 2^23 + DCOS / RG * 2^23`, IG /
@@ -107,14 +107,14 @@ Chip (datasheet DS-HY3131-V10):
   edge: CTB whole cycles, CTC high time, CTF; no edges -> CTA keeps running,
   CTB = 0, no CTF; CTBOV on CTB overflow. Source ACPO (comparator) or the CNT
   pin (ENCNTI).
-* fw-rs misconnect sentinel nodes (firmware/src/sentinel.rs): the comparator on
+* opendm40 misconnect sentinel nodes (firmware/src/sentinel.rs): the comparator on
   SCMPI = PB1 sees the A current times the relay-selected shunt (DC V / mV /
   ohm / temperature roles), on SCMPI = SENSE in DC A the V jack / 1000 when SS5
   is closed (CMPHO / CMPLO instantaneous, DC + AC waveform); AD1 on PB1 - PB3
   in the AC V / mV roles, with the AD1 peak hold over every elapsed conversion.
   Row matching ignores AD1's fields in rows that leave AD1 off, PKHSEL /
   ENPKH, and SS5 in the current rows.
-* fw-rs power meter rows ([`firmware/docs/power-meter-and-misconnect.md`](../../firmware/docs/power-meter-and-misconnect.md) 3.1,
+* opendm40 power meter rows ([`firmware/docs/power-meter-and-misconnect.md`](../../firmware/docs/power-meter-and-misconnect.md) 3.1,
   assignment B; role `Power`, mode 16, `Power vr<V range> iu<I unit> ir<I
   range>`, Range = vr * 6 + iu * 2 + ir): the 16 distinct rows of the design's
   builder (`Hy3131Core.PowerRow`; iu 1 / 2 share the bytes, PE tells mA from
@@ -138,18 +138,18 @@ Chip (datasheet DS-HY3131-V10):
   the stock AC A gains folded in (AC part / cal(0xC4 + 4 ci), DC part /
   cal(0xF4 + 4 ci) or, while that is the default 1.0, / cal(0xC4 + 4 ci);
   ci = iu * 2 + ir, no offsets); Y carries the factory-derived tap gain
-  (6 V: DC V r0 x AC V r1 / DC V r1, else AC V r1..r3; fw-rs
+  (6 V: DC V r0 x AC V r1 / DC V r1, else AC V r1..r3; opendm40
   pw::v_gain_factory) times `powvg:` (a deviation for the V self-cal tests).
   `powz:1` adds the device's LPF zeros (Y +1080 codes, X +888 with OP1 x10,
   +155 with x1; doc 3.11 T1 / T3). The comparator / counter: SCMPI = SENSE
   sees the V tap DC-coupled (dc + AC against VRH / VRL: a unipolar signal
   never crosses a negative VRL), SCMPI = PB4 the current's AC at OP1O. The
-  fw-rs DC row (powermeter.rs `dc_row`: the power row at YY plus AD1 = OP1O
+  opendm40 DC row (powermeter.rs `dc_row`: the power row at YY plus AD1 = OP1O
   - PB3 with the DC A row's AD1 bytes) is a power row with AD1 on the
   current, the stock DC A calibration folded in (`powz:1`: +300 codes of
   AD1 zero). The f8_9 DC A rows fold the uA calibration when PE selects the
   47.5 ohm shunt (stock mode 9).
-* fw-rs DC-coupled V row (ad2exp.rs `dcv_row`, feasibility E7): an AC V row
+* opendm40 DC-coupled V row (ad2exp.rs `dcv_row`, feasibility E7): an AC V row
   with SAD2IP = OP1O is DC-coupled: OP1O = g (SENSE + Vos), SENSE = the V
   jack through the row's tap (6 V: /100 with OP1 x10), OP1+ on AGND = Vos
   alone; OP1's chopper (OP1CHOP 1 / 2) flips Vos only while AD1 converts.
@@ -165,7 +165,7 @@ Chip (datasheet DS-HY3131-V10):
 * Noise: Gaussian, 25 AD1 counts at OSR 32768 scaled by 1/sqrt(OSR) (acdc doc
   6c), RMS floor 30 counts; `noise:0` turns it off (deterministic seed).
 * Empirical, optional: the AD2/AD3 enable-order beat of
-  [`firmware/docs/acdc-stock-vs-fwrs.md`](../../firmware/docs/acdc-stock-vs-fwrs.md) 10 (`beat:1`; off by default: the stock's
+  [`firmware/docs/acdc-stock-vs-opendm40.md`](../../firmware/docs/acdc-stock-vs-opendm40.md) 10 (`beat:1`; off by default: the stock's
   emulated SPI skew is not the real one).
 
 Board (DM40, from the stock rows and formulas): the input terminals are a
@@ -173,7 +173,7 @@ Board (DM40, from the stock rows and formulas): the input terminals are a
 triangle, duty; A terminal current; R / C / diode on the ohm path; thermocouple
 and die temperature). Each stock configuration row (hy3131_v2_6.h, 42 rows) is
 recognised by a masked compare of R20..R35 (R21 / R22 ignored, enable bits,
-SFUVR, SOP1P / ENOP1 and SAD1I masked, so fw-rs's enable-order variant and the
+SFUVR, SOP1P / ENOP1 and SAD1I masked, so opendm40's enable-order variant and the
 run-time R22 / R32 / R33 writes still match) and gives the analog path:
 
 | role (stock mode) | converter and path | chain used by the model |
@@ -188,7 +188,7 @@ run-time R22 / R32 / R33 writes still match) and gives the analog path:
 | capacitance 13 r5..r7 | constant current ramp on AD1 | `dV/dt = I[r] / C` (4.06 / 41 / 400 uA at the AD1 node) between the R21 thresholds, ACPO toggles, discharge row -> 0 V |
 | frequency 14 | comparator on the input (+-20.8 mV) or CNT pin | counter; AD2 RMS of the level |
 | temperature 15 | AD1: sensor phases (R33), thermocouple on the mV x10 path | type K EMF (NIST ITS-90) of (hot - cold junction) |
-| power (fw-rs, mode 16) | AD2 = I (stock AC A path), AD3 = V tap through OP2, RMS = XX / XY / YY by R34, LPF | `X = I * shunt * OP1 * AD2IG`, `Y = V / kV[vr] * OP2 * AD3IG` in 1.25 V / 2^18 codes; XY signed (above) |
+| power (opendm40, mode 16) | AD2 = I (stock AC A path), AD3 = V tap through OP2, RMS = XX / XY / YY by R34, LPF | `X = I * shunt * OP1 * AD2IG`, `Y = V / kV[vr] * OP2 * AD3IG` in 1.25 V / 2^18 codes; XY signed (above) |
 
 The real PA / PB wiring of the DM40 is not known (hy3131_v2_6.h); the chain
 constants are the stock's nominal scale factors, i.e. the design intent of the
@@ -201,7 +201,7 @@ The meter multiplies every raw reading by the gains of its calibration record
 (flash 0x080C0168; e.g. DC V r0 gain 1.012 on the dumped unit). The model
 therefore produces the raw codes of *this* board: at the first SPI transfer it
 reads the record from the emulated flash and inverts the stock's correction
-(`raw = (x + offset) / (gain * scale)` per path), so the stock and fw-rs
+(`raw = (x + offset) / (gain * scale)` per path), so the stock and opendm40
 display the scripted input. `SetCalConsistent false` (or `cal:0` in the input
 spec) gives the ideal chain instead (the stock then shows 1.234 V as 1.2488 V).
 
@@ -250,18 +250,18 @@ pins like the firmware: 297 checks of the register semantics, the frame,
 conversion timing, DC / AC / A / ohm / continuity / diode / capacitance /
 frequency / temperature physics, calibration consistency, the AC coupling
 transient, the AC+DC cadence, the (optional) enable-order beat, the misconnect
-sentinel and the fw-rs power rows (recognition, PF 1 / 0.5 / 0 / -1, DC, the
+sentinel and the opendm40 power rows (recognition, PF 1 / 0.5 / 0 / -1, DC, the
 38-bit sign, SPHACAL, statistic-switch mixing, the counter, the stock AC V /
 AC A rows with both jacks driven).
 
-[`emu/hy3131/modetest.py`](modetest.py) runs the stock firmware and fw-rs in the emulator:
+[`emu/hy3131/modetest.py`](modetest.py) runs the stock firmware and opendm40 in the emulator:
 the input is scripted, the stock is switched with Bluetooth command 06 and
-polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../stock/re/analysis/bt_meas_v2_6.h)), fw-rs
+polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../stock/re/analysis/bt_meas_v2_6.h)), opendm40
 with `CONF:<f>` / `READ?` over the same link. Results (last reported value
 after settling; stock Bluetooth is enabled by patching settings byte 0x115 in
 the emulated flash with a recomputed CRC):
 
-| scenario | input | expected | stock shows (BT cmd 09) | fw-rs READ? |
+| scenario | input | expected | stock shows (BT cmd 09) | opendm40 READ? |
 |---|---|---|---|---|
 | dcv | `dcv:1.234` | 1.234 V | 1.2340 | 1.234 |
 | dcv-neg | `dcv:-12.5` | -12.5 V | -12.500 | -12.5 |
@@ -289,7 +289,7 @@ the poll (every 255 ms + 10 ms granularity) while dV spans whole AD1
 conversions (50 ms at the ramp row's OSR 4096 with the chopper), so dt / dV is
 quantised to 250 / 300 ms steps and the trimmed mean lands ~4 % high; the
 factory calibration leaves the r5..r7 gains at 1.0. Whether the real meter
-shows the same bias is unknown. fw-rs's +2 % has the same
+shows the same bias is unknown. opendm40's +2 % has the same
 origin with its own timing. Run time per scenario: 8..18 virtual seconds,
 25..80 s wall at `-j 6`.
 
@@ -325,9 +325,9 @@ reading; cells are the last value after the settle; blank = not run):
 
 Reading the table: a voltage source alone in ohm gives OL (the ratiometric
 node clips); in continuity the stock shows "0.00" (it clamps the negative
-code to 0) and fw-rs the negative value: a firmware difference, not the
+code to 0) and opendm40 the negative value: a firmware difference, not the
 model; the same source in diode mode reads its own voltage (1.234 V < 3 V
-full scale); in AC V the stock settles at 0 while fw-rs keeps ~18 mV of the
+full scale); in AC V the stock settles at 0 while opendm40 keeps ~18 mV of the
 coupling transient on a DC input (the device-measured stock autoranges to mV
 and reads 1 mV, acdc doc 6a); 0.5 V across the A jack reads 8.2 A on the
 auto-selected 10 A range (no fuse in the model); a thermocouple with the die

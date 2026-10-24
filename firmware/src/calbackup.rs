@@ -14,7 +14,7 @@
 //! survives that, so one copy of the calibration has to live there before it
 //! is needed (docs/user-feedback.md UF-20; docs/native-boot.md "Calibration
 //! safety copy"). Write-once: the first copy is the unit's factory state
-//! (or the state of the first fw-rs boot); a later boot never replaces it
+//! (or the state of the first opendm40 boot); a later boot never replaces it
 //! with whatever the flash holds then (e.g. a corrupted or foreign record),
 //! the owner deletes it to have it made again.
 //!
@@ -278,7 +278,7 @@ impl Source for &[u8] {
 
 // --- The running firmware as its update file ------------------------------------
 
-/// Flash address of the update body (stock and fw-rs) and of the loader
+/// Flash address of the update body (stock and opendm40) and of the loader
 /// marker inside it; the body may reach at most up to the FS-loader.
 pub const FW_BASE: u32 = 0x0800_4000;
 pub const FW_MARKER_OFF: usize = 0x4000;
@@ -296,7 +296,7 @@ pub const FW_MAX_BODY: usize = 0x080A_0000 - 0x0800_4000;
 /// encoded in 128-byte blocks (fatren::encode_block). Rename it to
 /// dm40*.bin and the loader reinstalls exactly this firmware.
 ///
-/// Whole blocks: fw-rs build.sh packs with `dm40fw.py pack --pad` (body padded
+/// Whole blocks: opendm40 build.sh packs with `dm40fw.py pack --pad` (body padded
 /// with 0xFF so the update file, 12 + word1 bytes, is a multiple of 128;
 /// word1 and the body CRC include the padding), and this file is 12 + word1
 /// bytes, so an image built that way gives full blocks only. The

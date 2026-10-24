@@ -5,12 +5,12 @@
 // OK, anything else "AT..." -> OK). PC14 ("connected") is driven high while a
 // host is attached to the TCP port. With a port, a TCP server passes the
 // firmware's UART bytes to the host and the host's bytes to the firmware, so
-// the stock measurement protocol (AF 05 03 ...) and fw-rs's SCPI can be used
+// the stock measurement protocol (AF 05 03 ...) and opendm40's SCPI can be used
 // from the host; AT lines are still answered locally.
 //
 // Module power (PC0, bt_meas_v2_6.h section 1: the stock drives it low at the
 // BT UART init on the meter page and high when the page is left; high = off is
-// the header's guess, confirmed by fw-rs native builds that left PC0 high and
+// the header's guess, confirmed by opendm40 native builds that left PC0 high and
 // were unreachable over BT): the module is on only while PC0 is an output
 // driven low (the stock boot drives it high first thing, so the reset state
 // counts as off). While off it answers no AT line and keeps PC14 low; a host

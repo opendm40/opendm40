@@ -1465,7 +1465,7 @@ mod tests {
             // (0xe0, 0xc0): no counter, no CMP pin either way.
             assert_eq!(r[0] & 0x0E, 0, "mode {m}");
             // R21 = 0xdd: AGNDP1 / AGNDN1 = +-20.8 mV (ohm r7 0xcf is the
-            // only exception; it is not used in fw-rs autorange).
+            // only exception; it is not used in opendm40 autorange).
         }
         for r in CFG_F1.iter().chain(CFG_F3.iter()).chain(CFG_F15.iter()) {
             assert_eq!(r[1], 0xdd);

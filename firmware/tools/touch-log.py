@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch and summarise the fw-rs touch log (DBG:TOUCH?, src/touch.rs log_text).
+"""Fetch and summarise the opendm40 touch log (DBG:TOUCH?, src/touch.rs log_text).
 
     touch-log.py                 query the device (USBTMC), print the summary
     touch-log.py --clear         clear the log on the device (DBG:TOUCH 0)

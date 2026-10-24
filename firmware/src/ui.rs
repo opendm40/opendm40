@@ -26,7 +26,7 @@ pub const SEL: Color = 0x0419; // (0, 128, 200) selected button
 /// meter strip): the stock value colour GUI_C_VALUE 0xFC40 (RGB 248,136,0;
 /// stock/re/analysis/gui_v2_6.h:157/169/243, every DMM value label of the
 /// stock layout table gui_v2_6.h:330-339 uses it). Owner request: back to
-/// the stock colour (an earlier fw-rs build drew the reading red).
+/// the stock colour (an earlier opendm40 build drew the reading red).
 pub const VALUE: Color = 0xFC40;
 /// Stock value colour in the V functions from 30 V (gui_v2_6.h:157/175,
 /// GUI_C_VALUE_HV); the lightning glyph comes on at 100 V.
@@ -1045,7 +1045,7 @@ pub(crate) fn lim_badge(v: u8) {
 /// MF range page (stock "Voltage / Current / Resistor Settings"): title bar,
 /// range buttons, DC / AC buttons. Items: (label, set_range argument).
 /// Labels: the stock DM40C set (60000 counts, flash strings 0x08078704..
-/// 0x0807889c hold the 4/5/6 sets per model); fw-rs always uses the DM40C
+/// 0x0807889c hold the 4/5/6 sets per model); opendm40 always uses the DM40C
 /// limits (dmm.rs COUNTS_MODEL).
 pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
     match b {
@@ -1116,7 +1116,7 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     }
     if matches!(b, Button::Volt | Button::Amp) {
         // Stock: DC (8,182), AC (162,182), AC+DC (319,182), 150x38 each;
-        // fw-rs adds the AUTO coupling ("AC/DC": AUTO is the range button
+        // opendm40 adds the AUTO coupling ("AC/DC": AUTO is the range button
         // above), so four on the range grid's columns (`cpl_rect`).
         for (i, name) in CPL_NAMES.iter().enumerate() {
             let c = if i as u8 == sub { SEL } else { 0x2966 };
@@ -2727,13 +2727,13 @@ pub fn help_page(page: usize) {
     }
 }
 
-/// fw-rs firmware version, from Cargo.toml at compile time. This is the
+/// opendm40 firmware version, from Cargo.toml at compile time. This is the
 /// replacement firmware's own version, NOT the stock "Software V2.6".
 pub const FW_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
-/// in the fw-rs settings style (title bar + rows) so it matches the other
+/// in the opendm40 settings style (title bar + rows) so it matches the other
 /// menu pages. `lines` are (label, value) pairs built by the caller.
 #[inline(never)] // .cold (link-native.x): page draw
 pub fn device_page(lines: &[(&str, &str)]) {

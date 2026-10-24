@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DMM switch latency: time from a function / coupling / range switch (or an
 input step under AUTO range) to the first reading and to the reading within
-0.1 % of its final value, for fw-rs and for the stock firmware, on one
+0.1 % of its final value, for opendm40 and for the stock firmware, on one
 scripted timeline per firmware (firmware/docs/switch-latency.md).
 
   cd firmware && ./build.sh
@@ -14,12 +14,12 @@ Timeline: window k starts at T0 + k * W; the window's input is set at its
 start, its preparation (taps, ranges) comes at +0.5 / +1.5 s, the switch
 (or the input step) at +SW, and readings are sampled until the window ends.
 Switches are what a user does: function bar taps (V again cycles the
-coupling), the MF range page (stock) / SCPI <f>:RANGe (fw-rs; the same
+coupling), the MF range page (stock) / SCPI <f>:RANGe (opendm40; the same
 Dmm::set_range), input steps by the HY3131 model's SetInput.
 
-fw-rs: the run is a usbip run of emu/run.py with the input steps in a
+opendm40: the run is a usbip run of emu/run.py with the input steps in a
 --script (virtual time); a USB/IP client follows the same timeline on the
-fw-rs uptime (DBG:PING?, DWT CYCCNT = virtual time, emu/peripherals/DWT.cs)
+opendm40 uptime (DBG:PING?, DWT CYCCNT = virtual time, emu/peripherals/DWT.cs)
 and polls `DBG:PING?;CALC:AVER:COUNt?;FETCh?` back to back. A reading is
 fresh when CALC:AVER:COUNt? moved (the statistics restart at a function
 change; the script clears them at every switch). Function changes are
@@ -32,7 +32,7 @@ kohm) and the settle deadline S+0x40 (0x200200bc) every 50 ms of virtual
 time with `sysbus ReadDoubleWord`; the readout redraws every 50 ms from m,
 and a mode change clears the values (0 until the first reading).
 
-Ports: --port (fw-rs USB/IP), 45000-45999 for agent runs.
+Ports: --port (opendm40 USB/IP), 45000-45999 for agent runs.
 """
 import argparse
 import json
@@ -48,11 +48,11 @@ ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 NAN = 9.9e37
 
-T0 = 8.0      # first window (s, virtual); fw-rs boots into DC V AUTO+ by ~4 s
+T0 = 8.0      # first window (s, virtual); opendm40 boots into DC V AUTO+ by ~4 s
 W = 14.0      # window length
 SW = 7.0      # switch / step time inside the window
 SAMPLE = 0.05  # stock sampling period
-# The fw-rs script's input events are shifted by BOOT_OFS (virtual s). The client's
+# The opendm40 script's input events are shifted by BOOT_OFS (virtual s). The client's
 # timeline is keyed on the input markers (emu/emusync.py, README "Input markers"):
 # window k starts at the fw uptime of its input change, an input step's switch time
 # is the step's marker. (BOOT_OFS was the boot, 0.906 s, once; now 2.85 s on a fresh
@@ -64,7 +64,7 @@ M = 0x10001C04
 S_DEADLINE = 0x2002007C + 0x40
 F_DCV, F_ACV, F_DCA, F_ACDC, F_OHM = 0xC0, 0xC4, 0xCC, 0xD8, 0xDC
 
-# function bar (x, y): stock 6 buttons of 80 px, fw-rs 7 of ~68 px
+# function bar (x, y): stock 6 buttons of 80 px, opendm40 7 of ~68 px
 BAR = {
     'stock': {'V': (40, 300), 'A': (120, 300), 'OHM': (200, 300)},
     'fwrs': {'V': (35, 300), 'A': (103, 300), 'OHM': (172, 300)},
@@ -216,7 +216,7 @@ def run_stock(a):
     return {'fw': 'stock', 'model': a.model, 'windows': res, 'log': os.path.relpath(log, ROOT)}
 
 
-# ------------------------------------------------------------------ fw-rs
+# ------------------------------------------------------------------ opendm40
 
 def run_fwrs(a):
     os.environ['USBIP_PORT'] = str(a.port)
@@ -428,13 +428,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('fw', choices=['fwrs', 'stock', 'report'])
     ap.add_argument('files', nargs='*', help='report: JSON files')
-    ap.add_argument('--app', help='fw-rs native ELF')
+    ap.add_argument('--app', help='opendm40 native ELF')
     ap.add_argument('--port', type=int, default=45010)
     ap.add_argument('--rate', default='MED', choices=['SLOW', 'MED', 'FAST'])
-    ap.add_argument('--dc-only', action='store_true', help='fw-rs: only the DC scenarios (the rate applies)')
+    ap.add_argument('--dc-only', action='store_true', help='opendm40: only the DC scenarios (the rate applies)')
     ap.add_argument('--model', default='C')
     ap.add_argument('--part', type=int, default=0, help='stock: 1 = windows 0-6, 2 = the rest (parallel runs)')
-    ap.add_argument('--poll-wall', type=float, default=0.1, help='fw-rs: wall seconds between polls')
+    ap.add_argument('--poll-wall', type=float, default=0.1, help='opendm40: wall seconds between polls')
     ap.add_argument('--json', help='write the raw series here')
     a = ap.parse_args()
     if a.fw == 'report':

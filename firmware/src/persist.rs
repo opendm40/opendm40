@@ -120,15 +120,15 @@ pub fn load() -> Option<Record> {
 }
 
 /// Whether the DMM function in the record belongs to the session the user
-/// just left. The record is only rewritten while fw-rs runs; the stock
+/// just left. The record is only rewritten while opendm40 runs; the stock
 /// firmware (own settings in config.bin, power-on default DC V) and the
 /// vendor loader never touch it. So after a round trip through other
-/// firmware it holds whatever fw-rs measured last, possibly days and another
+/// firmware it holds whatever opendm40 measured last, possibly days and another
 /// firmware ago (seen: the first native boot came up in AC+DC from an old
 /// session although the user had been measuring DC V on the stock firmware).
-/// The boot shim records every normal fw-rs boot in BKP_LAST
+/// The boot shim records every normal opendm40 boot in BKP_LAST
 /// (boot.rs; DBG:UPDATE / DBG:RECOVER clear it, a recovery leaves "RCVR"), so
-/// only a previous boot that was a normal fw-rs one continues the mode.
+/// only a previous boot that was a normal opendm40 one continues the mode.
 pub fn same_session() -> bool {
     // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
     const LAST_NORMAL: u32 = 0x4C4D_524E;

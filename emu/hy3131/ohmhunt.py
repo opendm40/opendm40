@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ohm range hunt: no unvetted value as final (fw-rs dmm.rs poll_ohm,
+"""Ohm range hunt: no unvetted value as final (opendm40 dmm.rs poll_ohm,
 device check ab7184c new bug 1, docs/switch-latency.md 6.2). DC V -> RES on
 a resistor with the HY3131 model's ohm node lag (`ohmtau:ms`, opt-in: the
 node relaxes to its value after every ohm row change, so the first
@@ -49,7 +49,7 @@ SCEN = [
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=58610, help='USB/IP port')
 ap.add_argument('--fetch-only', action='store_true', help='no DBG:READout? (firmware without it)')
 ap.add_argument('names', nargs='*', help='scenarios (default all)')

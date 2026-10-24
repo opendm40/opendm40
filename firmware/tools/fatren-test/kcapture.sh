@@ -1,5 +1,5 @@
 #!/bin/bash
-# Capture what a real Linux kernel writes on the fw-rs USB volume
+# Capture what a real Linux kernel writes on the opendm40 USB volume
 # (tools/fatren-test/captures/*.vcap.gz, replayed by run.sh "vwrite"):
 # usbip_msc.py serves the volume code (vserve) on 127.0.0.1:3240, the kernel
 # attaches it (vhci_hcd), GNOME / udisks mounts it as the desktop does

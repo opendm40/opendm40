@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""fw-rs "Leads in A?" reminder (firmware/docs/power-meter-and-misconnect.md
-4.9) in the emulator: fw-rs native + the HY3131 model, function changes by
+"""opendm40 "Leads in A?" reminder (firmware/docs/power-meter-and-misconnect.md
+4.9) in the emulator: opendm40 native + the HY3131 model, function changes by
 SCPI and by a tap on the DMM page's V button; DBG:LEADs? (count, last
 from / to function) must count exactly the changes from a current function
 (DC / AC / AC+DC A, the power meter) to a non-current one, none with
@@ -9,7 +9,7 @@ SYST:ALER? stays NONE (the reminder is no alert state). Screenshots: the
 DC A page before the tap, the toast over the DC V page with its first
 reading, the page after the toast ended by itself.
 
-  emu/hy3131/leadstest.py                        # fw-rs built from HEAD
+  emu/hy3131/leadstest.py                        # opendm40 built from HEAD
   emu/hy3131/leadstest.py --app firmware/opendm40.bin --port 3379
 
 Results: emu/out/leads.json, emu/out/leads-*.png. One emulator at a time
@@ -27,7 +27,7 @@ EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', help='fw-rs native image (default: run.py builds HEAD)')
+ap.add_argument('--app', help='opendm40 native image (default: run.py builds HEAD)')
 ap.add_argument('--port', type=int, default=3379, help='USB/IP port (default 3379)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)

@@ -1,7 +1,7 @@
 //! What the user sees on top of the raw DMM readings: HOLD, AutoHold, REL,
 //! MIN/MAX/AVG and the Hi/Lo limits. Behaviour of HOLD / REL / MIN/MAX from
 //! dmm_v2_6.h section 8 and bt_meas_v2_6.h (BT commands 03..05); AutoHold
-//! (FR-01), AVG (FR-02) and limits (FR-06) are fw-rs additions
+//! (FR-01), AVG (FR-02) and limits (FR-06) are opendm40 additions
 //! (../docs/dm40-feature-request.md).
 //!
 //! `hold` is the manual HOLD only (RUN key, BT command 04, BT status bit 7):
@@ -448,7 +448,7 @@ pub fn ext_settings(w: u32) -> ExtSettings {
 // is too little to tell open leads from a signal. DC mV r0 (60.000 mV, dec
 // 3) made it 0.3 mV, while the stock measured an open-lead / disabled-source
 // residual of 0.487 mV with sd 4.2 uV (p-p 22 uV over 20 s; docs/
-// acdc-stock-vs-fwrs.md section 6c): steady, so it was captured. DC V / mV
+// acdc-stock-vs-opendm40.md section 6c): steady, so it was captured. DC V / mV
 // is therefore idle below max(300 counts, 5 mV) (10x that residual; from
 // the 6 V range up the 300 counts, >= 30 mV, already exceed it). DC A is
 // idle below max(300 counts, 1 uA): the open A input reads -0.007..+0.018

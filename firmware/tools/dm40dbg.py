@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host side of the dm40-fw debug commands (USBTMC, VID:PID 1209:0001).
+"""Host side of the opendm40 debug commands (USBTMC, VID:PID 1209:0001).
 
     dm40dbg.py ping
     dm40dbg.py hold [seconds]            keep the watchdog fed while running
@@ -30,7 +30,7 @@
                                          NATIVE: DBG:UPDATE = zero the loader
                                          marker + reset; the vendor loader then
                                          installs the one dm40*.bin of the SPI
-                                         disk's root. --wait: wait for fw-rs to
+                                         disk's root. --wait: wait for opendm40 to
                                          come back and print `boot`.
                                          tools/reload.sh does the whole flow
                                          (upload, update, check)
@@ -41,7 +41,7 @@
     dm40dbg.py release                   stop feeding the watchdog: the WDT
                                          reset (~20 s) = crash (2nd in a row ->
                                          recovery, which ZEROES the app marker)
-    dm40dbg.py reset                     reboot fw-rs
+    dm40dbg.py reset                     reboot opendm40
     dm40dbg.py recover                   DESTRUCTIVE, = DBG:UPDATE without the
                                          checks/wait of `update` (`recover -h`)
 
@@ -65,7 +65,7 @@ FIRMWARE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 APP_BASE, APP_END = 0x08004000, 0x080A0000
 
 RECOVER_HELP = """\
-fw-rs (native image at 0x08004000, docs/native-boot.md): DBG:RECOVER is an
+opendm40 (native image at 0x08004000, docs/native-boot.md): DBG:RECOVER is an
 alias of DBG:UPDATE and is DESTRUCTIVE (a one-way door into the vendor
 updater). It programs the 12-byte app marker at 0x08008000 to zero and resets.
 The ROM and the FS-loader then refuse to launch the app on every boot and show
@@ -76,7 +76,7 @@ dm40*.bin was already on the disk (copied, synced and ejected before the
 command), the loader installs it straight away. "Flash error" = the marker did
 not read back as zero; no reset was done.
 
-Back to fw-rs from stock: firmware/tools/reload.sh --from-stock (stages the image
+Back to opendm40 from stock: firmware/tools/reload.sh --from-stock (stages the image
 on the stock disk).
 """
 
@@ -115,7 +115,7 @@ def find_dev(required=True):
             return '/dev/' + os.path.basename(d)
     if not required:
         return None
-    sys.exit('dm40-fw USBTMC device not found (is the firmware running and the cable in?)')
+    sys.exit('opendm40 USBTMC device not found (is the firmware running and the cable in?)')
 
 
 # linux/usb/tmc.h: _IO(USBTMC_IOC_NR = 91, 2)
@@ -135,7 +135,7 @@ class Link:
     one query late, also for new processes, until a USBTMC device clear
     (TODO "dm40scpi.py log stopped by SIGINT", device e7ec2cc). So `read`
     holds SIGINT for the duration of the read (Ctrl-C acts once the reply is
-    in), and `query` takes an empty reply (fw-rs never sends one: every reply
+    in), and `query` takes an empty reply (opendm40 never sends one: every reply
     ends with '\\n'; a missing reply times out instead) as that state: it
     clears the device and asks once more."""
 
@@ -516,7 +516,7 @@ def cmd_update(ln, wait, expect):
         r, err = ln.try_query('SYST:ERR?')
         sys.exit('DBG:UPDATE: the device did not reset (SYST:ERR? -> %s).\n'
                  '"Flash error" = the marker did not read back as zero (nothing changed);\n'
-                 '"Undefined header" = an fw-rs build without DBG:UPDATE.'
+                 '"Undefined header" = an opendm40 build without DBG:UPDATE.'
                  % (r.decode(errors='replace').strip() if r else err))
     try:
         os.close(ln.fd)
@@ -524,9 +524,9 @@ def cmd_update(ln, wait, expect):
         pass  # usbtmc's flush on close fails with ENODEV once the device is gone
     print('DBG:UPDATE: marker zeroed, device reset; the vendor loader installs the dm40*.bin.')
     if not wait:
-        print('Wait for fw-rs to re-enumerate (1209:0001), then: dm40dbg.py boot --expect FILE')
+        print('Wait for opendm40 to re-enumerate (1209:0001), then: dm40dbg.py boot --expect FILE')
         return 0
-    print('waiting up to %d s for fw-rs (first boot after an install is slow and dark: '
+    print('waiting up to %d s for opendm40 (first boot after an install is slow and dark: '
           'do not power-cycle) ...' % wait)
     t0 = time.time()
     stock_since = None
@@ -537,7 +537,7 @@ def cmd_update(ln, wait, expect):
         if usb_present(STOCK_VID, STOCK_PID):
             stock_since = stock_since or time.time()
             if time.time() - stock_since > 20:
-                print('28e9:028f (vendor loader / stock disk) has been up for 20 s instead of fw-rs:\n'
+                print('28e9:028f (vendor loader / stock disk) has been up for 20 s instead of opendm40:\n'
                       '  the loader update screen means the install failed or found no file\n'
                       '  (bad/missing dm40*.bin), or a stock image was installed. To retry:\n'
                       '  tools/reload.sh --from-stock --no-build  (stages opendm40.bin on\n'
@@ -546,12 +546,12 @@ def cmd_update(ln, wait, expect):
         else:
             stock_since = None
         if el > wait:
-            print('timeout: fw-rs did not come back within %d s. Look at the meter: loader\n'
+            print('timeout: opendm40 did not come back within %d s. Look at the meter: loader\n'
                   'screen ("open file error"/"update error") -> copy opendm40.bin as\n'
                   'dm40_fwrs.bin onto its disk and press "update".' % wait)
             return 4
         time.sleep(0.5)
-    print('fw-rs is back after %.0f s' % (time.time() - t0))
+    print('opendm40 is back after %.0f s' % (time.time() - t0))
     ln = open_link(15)
     if ln is None:
         print('USBTMC device present but cannot be opened (udev permissions?)')
@@ -613,7 +613,7 @@ def main():
     p = sub.add_parser('update', help='NATIVE: DBG:UPDATE (zero the loader marker + reset; the '
                        'loader installs the dm40*.bin staged on the SPI disk)')
     p.add_argument('--wait', type=int, default=0, metavar='S',
-                   help='wait up to S s for fw-rs to come back, then print `boot`')
+                   help='wait up to S s for opendm40 to come back, then print `boot`')
     p.add_argument('--expect', metavar='FILE', help='with --wait: check the marker against FILE')
     sub.add_parser('genuine', help='DBG:GENUINE? device-authenticity check (when the build has it)')
     p = sub.add_parser('image', help='offline: validate a dm40*.bin update file')

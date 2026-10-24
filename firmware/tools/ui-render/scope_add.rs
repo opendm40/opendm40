@@ -1,4 +1,4 @@
-//! fw-rs additions on the stock-replica scope page that are not in the
+//! opendm40 additions on the stock-replica scope page that are not in the
 //! stock (src/scope_ui.rs): the FFT axis-scale boxes, the peak readout and
 //! marker (UF-11), the trigger-type rows of the Trigger tab (UF-13), the
 //! cursor tab (UF-08) and the zoom buttons (UF-10). Every item under the

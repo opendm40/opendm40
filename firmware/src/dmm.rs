@@ -46,7 +46,7 @@ const CAL: u32 = SETTINGS + 0x168;
 /// stream ISR ~21.8 us, device b6909d6), and its readers run while a stream
 /// may (`ad2_scale` per Wave view frame / LOG:SCALe?, the scope's gain /
 /// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
-/// fw-rs never writes the record. Before the copy (and in the host tests)
+/// opendm40 never writes the record. Before the copy (and in the host tests)
 /// the flash is read.
 const REC_LEN: usize = 0x400;
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -73,7 +73,7 @@ pub fn rec_u32(off: u32) -> u32 {
 /// Model index used for the counts-dependent limits: 0 = DM40A (40000 counts),
 /// 1 = DM40B (50000), 2 = DM40C (60000). The stock picks FACTOR/OVER by the
 /// calibration model byte (dmm_v2_6.h:297-299, hy3131_v2_6.h:147-155); the HY3131
-/// setup is identical for all three, so fw-rs always uses the DM40C values.
+/// setup is identical for all three, so opendm40 always uses the DM40C values.
 /// Set to `self.model` in factor()/over() to restore the stock behaviour.
 const COUNTS_MODEL: u8 = 2;
 const FACTOR: [f32; 3] = [4.0, 5.0, 6.0];
@@ -171,7 +171,7 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // never in FAST (one OSR-8192 conversion has ~2x the noise of one at 32768),
 // in MEDIUM / SLOW from the 8th conversion after a step / range change, i.e.
 // ~3.2 s at 400 ms plus the moving-OSR conversions before the switch (before
-// fw-rs 2026-10-13 the digit was drawn from the first conversion on).
+// opendm40 2026-10-13 the digit was drawn from the first conversion on).
 // Applies to DC V, DC mV, DC A / mA / uA and ohm, not in AC+DC (the DC phase
 // stays at the row's OSR 8192, ACDC_STOCK_OSR; its own phase logic). Not applicable (stock timing in every rate):
 // AC (AD2 / RMS converter, its filter is the RMS EMA), capacitance and
@@ -1070,14 +1070,14 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
 }
 
 // AC+DC: what reaches the HY3131 and the board, as the stock does it
-// (docs/acdc-stock-vs-fwrs.md sections 7 and 8.1), one switch per difference
-// so they can be bisected on the device (false = the fw-rs 9421fd5 way).
+// (docs/acdc-stock-vs-opendm40.md sections 7 and 8.1), one switch per difference
+// so they can be bisected on the device (false = the opendm40 9421fd5 way).
 //
 /// DC phase at the config row's OSR 8192 (R22 = 0x15), and no R22 write
 /// while it runs. The stock's 0x17 write is gated by a once-flag that stays
 /// set in steady AC+DC, so its DC phase stays at 8192; but an AD1 step (a
-/// range change, which fw-rs vets) clears it and the next steady result
-/// writes 0x17 once. fw-rs did that too until device check ad97fd7
+/// range change, which opendm40 vets) clears it and the next steady result
+/// writes 0x17 once. opendm40 did that too until device check ad97fd7
 /// (DBG:ACDC:TRACE): after a range change that lands in a DC phase, the next
 /// DC phase's first result is read at its settle deadline, up to a
 /// conversion late, so that 0x17 write lands in the middle of the running
@@ -1118,7 +1118,7 @@ const ACDC_DIAG_N: usize = 4;
 // range page) for ~2-4 s, then a tail 18 -> 1 mV over ~10 s, READ? up to
 // +6 %; 60 -> 6 V 0.15 V for ~2 s. The emulator's node (tau 0.3 s, charged
 // in the AC phases only) shows 5.3 V for the first AC phase. The stock does
-// nothing about it (OL + 600 ms, docs/acdc-stock-vs-fwrs.md 2). fw-rs
+// nothing about it (OL + 600 ms, docs/acdc-stock-vs-opendm40.md 2). opendm40
 // discards the AC results until the transient is over (`ac_settle_step`):
 // it only adds to the RMS and decays result by result (device: a few % per
 // 100 ms result), while a real AC part stays, so the AC part is settled
@@ -1196,7 +1196,7 @@ const VET_FLOOR: i32 = 4000;
 /// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
 /// is S+0x70, the end of the window in which the range steps down one at a
 /// time (OHM_SINGLE_MS, `poll_ohm`), so it hunts down from 60 Mohm one range
-/// per ~150 ms from the start (emulator: 4.7 kohm at 1.15 s). fw-rs entered
+/// per ~150 ms from the start (emulator: 4.7 kohm at 1.15 s). opendm40 entered
 /// with a 2500 ms deadline instead: no conversion for 2.5 s, and the single
 /// step window ended with it (3.1 s emulator, 2.7 s device). The entry
 /// now waits as a range write does.
@@ -1236,7 +1236,7 @@ const OHM_VET_CNT: f32 = 8.0;
 /// settle: 1.5 s is 15 / 4 conversions).
 const OHM_VET_MAX_MS: u64 = 1500;
 
-// AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
+// AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-opendm40.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
 // them: the AC part's RMS when it dominates the DC part, else the DC part.
 //   to AC: AC > AUTO_TO_AC x |DC| and AC > the range's floor (on)
@@ -1333,7 +1333,7 @@ impl Dmm {
         hy::init_pins();
         // Stock rule (docs/model-variants.md): calibration byte 0, clamped to
         // 2; a record the stock would reject is replaced by its defaults
-        // (model 0 = DM40A). fw-rs checks the version word only (cal_ok).
+        // (model 0 = DM40A). opendm40 checks the version word only (cal_ok).
         let model = if cal_ok() { Self::model_raw().min(2) } else { 0 };
         Dmm {
             model,
@@ -1536,7 +1536,7 @@ impl Dmm {
 
     /// UF-21: the V autorange is the mV-first AUTO (stock default, `v_auto`
     /// 3) and V is measured in auto range: the UI shows MV_AUTO_WARN (Range
-    /// page / status line). AUTO+ (1, the fw-rs default) never warns.
+    /// page / status line). AUTO+ (1, the opendm40 default) never warns.
     pub fn mv_auto_warn(&self) -> bool {
         self.button() == Button::Volt && !self.manual && self.v_auto == 3
     }
@@ -1742,7 +1742,7 @@ impl Dmm {
         }
         // AC+DC DC phase: at the row's OSR 8192 (see ACDC_STOCK_OSR); every
         // result after the settle deadline is used, none dropped
-        // (docs/acdc-stock-vs-fwrs.md 8.2).
+        // (docs/acdc-stock-vs-opendm40.md 8.2).
         if !ACDC_STOCK_OSR && self.acdc && matches!(m, 1 | 3 | 7..=9) {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
@@ -2219,7 +2219,7 @@ impl Dmm {
         self.cpl_auto && !self.pw.on
     }
 
-    /// V / A sub-mode (stock m+5): 0 DC, 1 AC, 2 AC+DC; fw-rs 3 = AUTO.
+    /// V / A sub-mode (stock m+5): 0 DC, 1 AC, 2 AC+DC; opendm40 3 = AUTO.
     pub fn sub(&self) -> u8 {
         if self.cpl_auto {
             3
@@ -2682,7 +2682,7 @@ impl Dmm {
         let m = self.mode;
         if same && matches!(b, Button::Volt | Button::Amp) {
             // DC -> AC -> AC+DC -> AUTO -> DC (the stock: DC -> AC ->
-            // AC+DC, skipping AC+DC for model 0; AUTO is fw-rs).
+            // AC+DC, skipping AC+DC for model 0; AUTO is opendm40).
             let next = (self.sub() + 1) % 4;
             self.set_sub(clk, next);
             return;
@@ -3863,7 +3863,7 @@ impl Dmm {
         let seed = acdc && was && !settling;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
-        // as the stock (docs/acdc-stock-vs-fwrs.md 8.2).
+        // as the stock (docs/acdc-stock-vs-opendm40.md 8.2).
         if seed {
             self.ac_raw = ac;
             self.f_ac = ac;

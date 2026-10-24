@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rasterise the round Wiren Board logo for the status bars of fw-rs.
+"""Rasterise the round Wiren Board logo for the status bars of opendm40.
 
 Source: fonts/wb-logo-round.png (212x212 RGBA, the official wirenboard/brand
 logos/logo-round: green #5cb400 circle, white "wb" mark; the SVG next to it

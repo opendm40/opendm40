@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs inrush current capture (src/inrush.rs, src/app_inrush.rs, TODO
+"""opendm40 inrush current capture (src/inrush.rs, src/app_inrush.rs, TODO
 "Inrush current", docs/inrush-current.md) in the emulator: stepped currents
 into the A jack (the DM40 front-end model's isrc source, switched at fixed
 virtual times), driven like a user (DBG:KEY / DBG:TAP) and over SCPI on one
@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF (a build with the stream ISR, the default)')
+ap.add_argument('--app', required=True, help='opendm40 native ELF (a build with the stream ISR, the default)')
 ap.add_argument('--port', type=int, default=3597, help='USB/IP port (default 3597)')
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')

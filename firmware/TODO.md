@@ -1,4 +1,4 @@
-# fw-rs TODO
+# opendm40 TODO
 
 ## Goal
 
@@ -177,9 +177,9 @@ Code work (in this order):
   scheme: build a full firmware in the stock update-file format, flashed like the stock one at
   0x08004000. Our image starts with a tiny shim "bootloader": power key held ~2 s at start
   (optionally with USB cable) or a watchdog-reset cause -> start the native updater (the one
-  that brings up mass storage); otherwise run fw-rs. Shim as small and simple as possible.
-  Must be unbrickable and allow easy stock <-> fw-rs toggling.
-  HARD CONSTRAINT (user): recovery must NOT depend on fw-rs running or on fw-rs's MSC. With the
+  that brings up mass storage); otherwise run opendm40. Shim as small and simple as possible.
+  Must be unbrickable and allow easy stock <-> opendm40 toggling.
+  HARD CONSTRAINT (user): recovery must NOT depend on opendm40 running or on opendm40's MSC. With the
   app dead there is otherwise no way to put a file on the SPI FAT. The shim itself must give the
   host a way to place a stock dm40*.bin: jump into the FS-loader's own host-facing disk mode if
   it has one, else carry a minimal self-contained USB-MSC + SPI/FatFs in the shim.
@@ -187,16 +187,16 @@ Code work (in this order):
         0x080a0000 (own USB MSC + FatFs) reflashes any dm40*.bin from the SPI FAT on boot
         and is never overwritten by an app update -> unbrickable recovery already exists.
         Shim stays tiny (RCU_RSTSCK FWDGTRSTF, PD6 power key, SRAM magic + boot counter).
-        dm40fw.py `pack` already computes both header words. fw-rs must move to XIP from
+        dm40fw.py `pack` already computes both header words. opendm40 must move to XIP from
         0x08004000 (clock.rs to set PLL+FMC waitstates+cache; link.x reserve 0x08008000 hole;
         drop the SRAM copy in startup.rs).
   - [x] Opus review (`docs/native-boot-review.md`). Verdict: Stage 0 SAFE; Stage 1 NOT until
         dead-app recovery is closed. App reachable ONLY via FS-loader (runs every boot); it
         installs ANY dm40*.bin on EVERY boot (must delete after good install). MANDATORY before
-        Stage 1: shim carries its OWN USB-MSC (Option B; fw-rs MSC is dead when recovery needed);
+        Stage 1: shim carries its OWN USB-MSC (Option B; opendm40 MSC is dead when recovery needed);
         PD6 release-then-hold gesture; clock.rs own PLL+FMC-WS+cache + VTOR=0x08004000; boot magic
         in backup SRAM; 12-byte 0x08008000 hole truly 0xFF.
-  - [x] Stage 0 PROVEN on device (2026-10-13): staged dm40_v_2_6.bin on the FAT via fw-rs MSC,
+  - [x] Stage 0 PROVEN on device (2026-10-13): staged dm40_v_2_6.bin on the FAT via opendm40 MSC,
         then COLD power-on -> the loader installed it to 0x08004000 and deleted the file (confirmed
         gone). App-independent recovery works. KEY FINDING: a WARM reset (SYSRESETREQ / DBG:RECOVER)
         does NOT trigger the loader install; only a COLD power-on does. So the shim's recovery =
@@ -223,7 +223,7 @@ Code work (in this order):
         reading of PA2 is withdrawn: no observation supports it.) Full analysis: docs/fsloader-install-trigger.md.
   - [x] Recovery = program 12 zero bytes over the 0x08008000 marker + SYSRESETREQ (works on warm reset,
         no FAT/SPI/USB/LCD in the shim); DBG:UPDATE / DBG:RECOVER do the same (dev flow: copy a
-        dm40*.bin onto fw-rs's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
+        dm40*.bin onto opendm40's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
         1712 B); DM40RCVR.BIN / own-USB variants kept behind recovery-file / recovery-usb.
         (device-verified by T2 and the T3 way back)
   - [x] Test: power-on holding the power key ~5 s with no dm40*.bin -> stock booted. No vendor
@@ -244,11 +244,11 @@ Code work (in this order):
         USB disk. Restored dm40_patched.bin through it.
   - [x] T3 / Stage 1 on device (2026-10-13 17:28): native dm40_fwrs.bin (commit 70bf333) installed via
         the loader screen; DBG:BOOT? NORMAL/HXTAL/VALID marker, CALBK WRITTEN (8 backup files on the disk),
-        STACK 30760/39000, PD6 pull-down, DMM reading OK. Way back proven: dm40_patched.bin on the fw-rs
+        STACK 30760/39000, PD6 pull-down, DMM reading OK. Way back proven: dm40_patched.bin on the opendm40
         disk + DBG:UPDATE -> loader installed patched stock (marker = its header, memrw answers).
         The loader (not the stock app) deletes the installed dm40*.bin (340faca) -> the running
         firmware's update file is regenerated from flash as a backup on the disk (db679a3).
-  - [x] T3 recovery triggers in the emulator (emu/recoverytest.py, ROM -> FS-loader -> fw-rs with the real
+  - [x] T3 recovery triggers in the emulator (emu/recoverytest.py, ROM -> FS-loader -> opendm40 with the real
         loader; FWDGT + sticky RCU_RSTSCK flags modelled in emu/peripherals/FWDGT.cs): normal boot, short
         power-on press, key held to the beep and released in the 0.5 s window (normal), key held from off
         7 s (marker zeroed -> loader "open file error / Update" screen at shim + 4.8 s), one hang (reboot,
@@ -441,8 +441,8 @@ Code work (in this order):
       scope rail: below the 0.5 °C threshold, no correction needed. Stock not measured (no stock number in
       user-feedback §3, only "~1 h idle"). Open: a stock run for the comparison, and the CJ vs a room thermometer
       (FR-26).
-- [ ] UF-19 (P1) Measure fw-rs battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
-- [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in fw-rs; shares the FAT writer). §2, §10  (a20a52d; verify on device)
+- [ ] UF-19 (P1) Measure opendm40 battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
+- [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in opendm40; shares the FAT writer). §2, §10  (a20a52d; verify on device)
 - [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (a20a52d; verify on device)
 - [x] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4  (device-verified: CALBK WRITTEN in T3)
 - [x] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1  (7399d86; verify on device: an upgraded unit boots in AUTO+; Range page warning)
@@ -460,7 +460,7 @@ Code work (in this order):
       pass. Source: the record around the frame (decimated by the mean of k samples when the screen
       holds >= 2048, else 2048 record samples centred on it). Stock math pill / popup (Mode FFT/ABS,
       Color, Hz/Div = 4 1-2-5 values, Window, Unit) live; the M strip marker (0 dBV row) and the M
-      top marker (FFT centre, drag pans) as the stock; fw-rs: "10dB/div", "50kHz/div" boxes, peak
+      top marker (FFT centre, drag pans) as the stock; opendm40: "10dB/div", "50kHz/div" boxes, peak
       readout "f dBV" + white peak marker. ABS math too. Emulator (1 IPC, so ~1.5x on the device):
       FFT section avg 0.54 ms, max 1.3 ms per pass; frame 6 ms avg. Persist v5 (48 words).
       Not in roll (no linear record).
@@ -521,7 +521,7 @@ Code work (in this order):
 - [x] Always 60000 counts (DM40C behaviour) regardless of the model byte; IDN/Device keep real model,
       + physical power-key short/long/double press as in stock; PD6 pressed level.  (verify on device)
 - [x] Scope UI redesign (docs/scope-ui-plan.md): superseded by the stock scope port
-      (docs/stock-scope-port-plan.md, 9a6baae..29ba03c, S1-S9) + fw-rs extras (b9c6ddd, e4bae33).
+      (docs/stock-scope-port-plan.md, 9a6baae..29ba03c, S1-S9) + opendm40 extras (b9c6ddd, e4bae33).
 - [x] Calibration (0x080C0000) + boot data (0x080A4000) + UID copied to the SPI disk at every boot
       (only when missing/changed) so they're reachable over USB.  (device-verified: CALBK WRITTEN in T3)
 - [x] Analog rails: default OFF (stock-like alternation per page); both on automatically in the
@@ -531,7 +531,7 @@ Code work (in this order):
 - [x] Milliohm resolution on the lowest resistance range (units of mΩ).  (776003c; device-verified: 10.117 Ohm, 19:10 run)
 
 - [x] AutoHold idle threshold absolute on small ranges (meter.rs ah_cfg): DC V/mV idle below max(300 counts,
-      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, docs/acdc-stock-vs-fwrs.md 6c),
+      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, docs/acdc-stock-vs-opendm40.md 6c),
       DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.  (86a408a; verify on device)
 
 - [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed
@@ -562,7 +562,7 @@ Code work (in this order):
       ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
 - [x] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal and shows which one it chose. Decisions
-      (docs/acdc-stock-vs-fwrs.md section 11; dmm.rs AUTO_*):
+      (docs/acdc-stock-vs-opendm40.md section 11; dmm.rs AUTO_*):
       - measurement: AUTO runs the AC+DC alternation (the only place both parts are seen: AC V is
         AC-coupled) and shows one part, the DC part (signed) or the AC part's RMS; autorange on the total.
       - rule / hysteresis (once per ~1.9 s cycle, both parts fresh): to AC when AC > 1.5 x |DC| and above
@@ -599,7 +599,7 @@ Code work (in this order):
       Not on the UT197 model: there it is "Auto-V LoZ", the auto selection comes with a ~2 kohm input
       load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
       (hum on open leads) still read, as AC above the floor.
-  - [ ] Device check (AUTO coupling): see docs/acdc-stock-vs-fwrs.md section 11 "Device check".
+  - [ ] Device check (AUTO coupling): see docs/acdc-stock-vs-opendm40.md section 11 "Device check".
   - [x] FETC:BURD? in AUTO used the part shown (understated a mixed current): now the total RMS (AC+DC,
         what drops across the shunt), OL by the total; the aux burden readout is not shown in AUTO (aux
         rows = the parts, as AC+DC). burdentest AC+DC / AUTO phases (200 mA DC + 100 mA AC).
@@ -644,14 +644,14 @@ Code work (in this order):
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
       removed, the new one replaces it). One local HTML page (firmware/tools/web/dm40.html) that talks SCPI to
-      fw-rs over BOTH links and covers ALL functions: big DMM reading with every function / range /
+      opendm40 over BOTH links and covers ALL functions: big DMM reading with every function / range /
       coupling / rate, trend + CSV, power meter, scope via WAV:PRE? / WAV:DATA? (timebase, V/div, trigger,
       RUN/STOP, measurements), generator, loggers (LOG:*), the USB-disk / gallery files, settings, alerts,
       and an SCPI console.
       - USB: WebUSB (Chrome/Edge) on the USBTMC interface (class 0xFE; the MSC interface stays the OS's).
         Linux needs a udev rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access
         (Chrome cannot claim a kernel-bound interface); Windows needs WinUSB (Zadig).
-      - Bluetooth: Web Bluetooth to the "DM40A" module carrying fw-rs's SCPI-over-BT (docs/bt-scpi.md).
+      - Bluetooth: Web Bluetooth to the "DM40A" module carrying opendm40's SCPI-over-BT (docs/bt-scpi.md).
         Check that the module exposes a BLE GATT serial service Chrome can open: Web Bluetooth has no
         classic SPP/RFCOMM. If it doesn't, the BT path needs a different route, e.g. Web Serial to an OS
         RFCOMM port.
@@ -693,7 +693,7 @@ Code work (in this order):
       - Constraints: the decoder runs per DMA half-buffer in the main loop, so it must keep up at 1.25 MS/s and stay
         in region B (no region-C code while streaming). DMM / generator keep running alongside.
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
-      Done in the emulator (branch scope-full-record): fw-rs WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
+      Done in the emulator (branch scope-full-record): opendm40 WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,
       CHANnel1:OFFSet, ACQuire:SRATe? (src/scope_wav.rs, docs/bt-scpi.md "Scope waveform readout"); the
       default WAV:DATA? is unchanged. The 53 KB record streams over USBTMC from the scope buffer
@@ -731,10 +731,10 @@ Code work (in this order):
       (7) PASS partly: after a killed mid-read the next command answers at once, no USBTMC clear; the 2 s
       stall timeout itself not isolated; (8) PASS on 1 V DC only (record 1.0007 V = screen; AC not run: the
       calibrator could not be driven); (9) blocked.
-- [x] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 8087c7d: fw-rs ends USBTMC
+- [x] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 8087c7d: opendm40 ends USBTMC
       replies without '\n' (Bluetooth adds one); scopehal's SCPITMCTransport::ReadReply reads 1 byte at a time
       until '\n' and ReadRawData's inner loop reads again when it got exactly len bytes. Done (tmcnl-fix,
-      "fw-rs USBTMC: every reply ends with '\n'"): usbtmc.rs `terminate` ends every reply with '\n' (text,
+      "opendm40 USBTMC: every reply ends with '\n'"): usbtmc.rs `terminate` ends every reply with '\n' (text,
       ';'-joined, DBG blocks, definite-length blocks after the data incl. the streamed WAV:DATA?; text that
       already ends in '\n' keeps one). The scopehal loop is left as is (with the newline no reply has
       exactly the asked length). Emulator on vhci_hcd (the real Linux usbtmc driver): OUTP? -> "0\n", a
@@ -763,7 +763,7 @@ Code work (in this order):
       on the device via usbtmc/1209.0001; RES was blocked by H1 (fixed in 258c833). 2026-10-21: every
       function passes with sigrok-cli in the emulator (emu/usbip_client.py scpi-tcp, tcp-raw; replies
       <= 0.86 s), AC+DC now also waits 3 s (first reading 1.4-1.6 s); patch regenerated as one squashed
-      commit (branch alientek-dm40-upstream). Done in fw-rs (809000a): CONF? (Agilent-style reply),
+      commit (branch alientek-dm40-upstream). Done in opendm40 (809000a): CONF? (Agilent-style reply),
       INIT/ABORT no-ops, SYST:IDN:EMUL OFF|34401A (persisted, default OFF) for unpatched
       libsigrok >= 0.5.2 / SmuView (verified with the distro libsigrok 0.5.2 in the emulator).
       Remaining: SmuView on the device (needs a SmuView built against libsigrok-dm40/install; the
@@ -772,7 +772,7 @@ Code work (in this order):
       already gone with a87f4de (READ? capped at 0.85 s after a change not made by this host); left
       were the samples around it. Chosen fix = both sides, since libsigrok's USBTMC Bulk-IN timeout
       is a hard 1000 ms in the transport (no profile setting reaches it) and only the meter knows a
-      reading is missing: fw-rs answers "no reading" with +9.91E37 (SCPI NaN) instead of the overload
+      reading is missing: opendm40 answers "no reading" with +9.91E37 (SCPI NaN) instead of the overload
       +9.9E37 (READ? / MEAS? / FETCh? "Data stale"); a READ? waiting when the function changes on the
       meter answers at once with NaN, and so does a READ? / FETCh? whose preceding FUNC? / CONF?
       named another function and the host made no change since (scpi::take_asked / forget_asked:
@@ -800,7 +800,7 @@ Code work (in this order):
       AC / ACDC / AUTO, A DC / AC / ACDC / AUTO, POW, V DC; BT = "the other transport", like a tap):
       911 READ?, 880 samples, 31 NaN skipped, max READ? 0.853 s, no error, every change followed
       (POW read as W).
-      2026-10-23 Range + Digits (SmuView showed both greyed out: the profile had neither): fw-rs
+      2026-10-23 Range + Digits (SmuView showed both greyed out: the profile had neither): opendm40
       CONF:<f> <range>[,<res>] (CONF without one = autorange, also on the current function),
       [SENS:]<f>:RANG <v>|AUTO|MIN|MAX|DEF / ?, :RANG:AUTO ON|OFF|ONCE / ?, :RES <v>|MIN|MAX|DEF / ?
       (scpi.rs header "Ranges and resolution"; RANG = the MF page's items, AUTO = the AUTO key,
@@ -879,7 +879,7 @@ Code work (in this order):
       (65a82fe), G3 pinch (above), R1 redraw profiling (ba9960e).  (verify on device; G4 A/B on device)
 - [x] AC+DC: the AC part read ~5% low and wandered phase to phase (4.5..5.3 V on a 40 Hz 0..9.6 V
       square): AD3 enabled before AD2 (3b9251c). (device-verified: AC+DC 6.8000..6.8004 V, sd 0.3 mV;
-      docs/acdc-stock-vs-fwrs.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
+      docs/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
 
 ## Device run 2026-10-13 19:10, native e07c11a (+docs) installed OK
 - Verified: READ? ~0.5 s, MEAS:VOLT:AC? 0.5 s, MEAS:FREQ? 1.0 s; USBTMC survives a libusb timeout
@@ -911,7 +911,7 @@ Code work (in this order):
 - [x] Measure the real DMM conversion period per rate — resolved by the datasheet + emulator
       (emu/hy3131/RESEARCH.md 3), device confirmation pending: AD1 period = OSR * 30 / SYSCLK, x2
       with AD1CHOP (set in every stock R22): 0x15 (OSR 8192) 100 ms, 0x17 (OSR 32768) 400 ms. Both
-      old guesses were wrong (~9.4/s at OSR 32768 and OSR / SYSCLK ~150/s). fw-rs: FAST 10/s, MED
+      old guesses were wrong (~9.4/s at OSR 32768 and OSR / SYSCLK ~150/s). opendm40: FAST 10/s, MED
       10/s moving / 2.5/s steady, SLOW as MED (one reading per conversion, 16-conversion window, 32
       on ohm r0..r3); hy3131::ad1_period_us, dmm.rs FR-05 table. Device: SENS:RATE:PER? per rate on
       a steady input (expect 0.4 s for MED and SLOW, 0.1 s for FAST).
@@ -953,7 +953,7 @@ Firmware:
       (bdbbfcb: offset stepper + keypad, no Offset 0; verify on device)
 - [x] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
       (bdbbfcb: R25 / Beta fields on the temperature page; verify on device)
-- [x] Second resistance mode present in the stock is missing in fw-rs — check stock parity (dmm_v2_6.h) and add it.
+- [x] Second resistance mode present in the stock is missing in opendm40 — check stock parity (dmm_v2_6.h) and add it.
       (d6fc216: stock "ON" low-current variant made visible; verify on device)
 - [x] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
@@ -1264,7 +1264,7 @@ Firmware:
       Done on 0667175 (docs/device-check-2026-10-21.md "Bluetooth (0667175)"): 900 s 38400 DMA frames with a host btpoll (50 ms) linked the whole time:
       34 560 269 records, lost 0, bad 0, seq / stamp gaps 0, max gap 27 us, CPU 17.5 %; BT cmd 09 replies
       during the stream 0 (by design, UF-36), BT answered right after.
-- [x] BT module power (PC0): native fw-rs (since e3a457d) left PC0 high from board::init, the stock boot
+- [x] BT module power (PC0): native opendm40 (since e3a457d) left PC0 high from board::init, the stock boot
       level = module off, and never lowered it (the stock does at its BT UART init); the RAM-loaded builds
       had inherited a powered module from the stock app. bt.rs `Bt::power` now follows the Bluetooth setting
       (low = on, high = off), waits 1 s after power-on before the AT init, pulses PC0 high
@@ -1566,7 +1566,7 @@ Firmware:
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
       (device bab5dd4, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
-      Branch settle-fix (`acs_flat`, docs/acdc-stock-vs-fwrs.md 12): flat = fell by <= 0.1 % (ACS_STEP)
+      Branch settle-fix (`acs_flat`, docs/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
       and, with two falls in a row in one AC phase, the rest of the decay d q / (1 - q) <= 0.05 %
       (ACS_REM); ACS_MAX_MS 6 -> 5 s, and the cap also ends the settle in a DC phase with the last AC
       result (`ac_settle_cap`): gap < 6 s. On the device's numbers 4.821 / 4.790 are not flat, the next
@@ -1938,16 +1938,16 @@ Firmware:
       steps: the first 4 KiB with usb_bulk_msg_killable (only a fatal signal stops it), the rest in
       usbtmc_generic_read (wait_event_interruptible: SIGINT kills its URBs). A LOG:DATA? block is 6006 B, so a
       Ctrl-C there leaves the rest of the transfer on the meter. The next read gets those stale packets, the
-      driver logs "wrong MsgID" and returns 0 bytes (no -EPROTO; auto_abort is off by default); fw-rs then
+      driver logs "wrong MsgID" and returns 0 bytes (no -EPROTO; auto_abort is off by default); opendm40 then
       starts the reply to that query, which nobody reads, and since a transfer already handed to the IN
       endpoint survives a new DEV_DEP_MSG_OUT (usbtmc.rs on_out_bytes) every later read gets the previous
       reply ("wrong bTag N != N+2" in dmesg, 0 bytes to the process): one reply late for ever, across
       processes. Only replies over 4084 B can start it (LOG:DATA?, MMEM:DATA? pieces, WAV:DATA?, DBG:LCD?).
       INITIATE_CLEAR recovers it (CHECK_CLEAR_STATUS pending while in flight, the driver reads the Bulk-IN to a
-      short packet): checked in the emulator, so **fw-rs unchanged**; a firmware-side fix would need a DWC2
+      short packet): checked in the emulator, so **opendm40 unchanged**; a firmware-side fix would need a DWC2
       Tx-FIFO flush on a new command (cutting the unsent rest alone keeps the one-behind offset).
       Fixed host side (tools): dm40dbg.Link.read holds SIGINT during the read (Ctrl-C acts once the reply is
-      in, at most the driver's 5 s timeout later); Link.query takes an empty reply (fw-rs never sends one; a
+      in, at most the driver's 5 s timeout later); Link.query takes an empty reply (opendm40 never sends one; a
       missing reply times out instead) as the desync: USBTMC clear, ask again, a note on stderr; Link.clear().
       dm40scpi's UsbLink goes through Link.query (every dm40scpi / acdcmeth / ad2dcv / ad2n7 query self-heals
       after another program left the meter out of step). `log --source`: the first Ctrl-C ends the session
@@ -1959,7 +1959,7 @@ Firmware:
       38400`: the old tool "LOG:DATA? answered b''" and *IDN? empty afterwards (= the device); the new one
       10 / 10 clean exits with the trailer, *IDN? / LOG:STAT? 0 right after; a desync made on purpose
       (repro: a read cut by SIGALRM) is repaired by the next dm40scpi query. Double Ctrl-C: exit 130, LOG:STAT? 0.
-      Device retest (host only, any fw-rs image): `dm40scpi.py log x.csv --source ad2 --rate 38400 -d 60`,
+      Device retest (host only, any opendm40 image): `dm40scpi.py log x.csv --source ad2 --rate 38400 -d 60`,
       Ctrl-C after ~5 s, several times: clean end with the trailer, `dm40scpi.py info` answers at once, no
       "empty USBTMC reply" note; then make the desync on purpose (kill -INT while `cat /proc/PID/wchan` reads
       usbtmc_generic_read, with the old tool from 0100788) and check that `dm40scpi.py info` repairs it.
@@ -2234,7 +2234,7 @@ Firmware:
       - [x] Firmware update without the writable disk: DBG:UPLOAD BEGIN / DATA (raw binary, before the SCPI
             parser) / END? / ABORT (src/upload.rs: DM40FW.BIN in the SPI root, other dm40*.bin removed, CRC
             re-read, header checked, data -> FAT -> directory); tools/dm40dbg.py upload; tools/reload.sh uses it
-            (falls back to the USB disk for an older fw-rs); emu/usbip_client.py upload (emulator: 480 KB in
+            (falls back to the USB disk for an older opendm40); emu/usbip_client.py upload (emulator: 480 KB in
             7.9 s). Recovery path (the loader's own disk) untouched.
       - [ ] Device: (the default "Files live" volume, decision #6) Linux kernel attach + udisks ro mount of the 2 GiB volume; a recording / screenshot while
             mounted -> new file visible after F5 (UA at once); Windows Explorer and macOS Finder with the UA
@@ -2284,11 +2284,11 @@ Firmware:
             reset (USBDEVFS_RESET, the re-plug stand-in) -> back, auto-mounted ro, README equal. **`gio mount -e`
             (= Files / Nautilus Eject) does NOT eject on this host:** it unmounts, then gvfs runs util-linux
             `eject` as the user -> "cannot open /dev/sda: Permission denied" (root:disk 0660); the meter never sees
-            a 0x1B (EJECT? 0,0,0). Host side, not fw-rs (ejecttest.py passed through its Drive.Eject fallback).
+            a 0x1B (EJECT? 0,0,0). Host side, not opendm40 (ejecttest.py passed through its Drive.Eject fallback).
             Not run: PC can edit + cp + Eject (owner setting + disk write), host load (eject -t needs /dev/sda),
             Windows.
       - [x] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
-            multimeter (dm40-fw)" under Other devices with code 28 (device b6909d6). The MSC interface works
+            multimeter (opendm40)" under Other devices with code 28 (device b6909d6). The MSC interface works
             regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
             (USBTMC), or WinUSB via Zadig + pyvisa-py. Done (9cac903): README "USB on a PC", docs/bt-scpi.md
             "USBTMC on Windows" (not tried on Windows yet; Help text not changed).
@@ -2615,12 +2615,12 @@ Emulator (emu/):
       PB4 follows OP1's input, RLD on the Ω net, every closed PA switch with its P / D / F / S letters, the
       divider ratio from the SS taps (power meter /1000 etc.), the test-source band names the node by its
       pins and derives its AD1 / comparator chain; columns reserved so nothing moves between functions.
-      Checked on 24 fw-rs emulator states + all 47 table rows at 700 / 1000 / 1400 px. Visible change for the
+      Checked on 24 opendm40 emulator states + all 47 table rows at 700 / 1000 / 1400 px. Visible change for the
       owner to confirm: an enabled comparator nothing reads (stock R20 0xf0, SCMPI = PB4) now shows PB4 into
       CMP in the DC rows, and AC V r0 says divider /100 (PA6 tap; the old range table said /10))
 - [x] Signal-flow diagram jumped every 100 ms in DC V 6 V (owner: "скачет, некрасиво"): the comparator's
       PB1 / SENSE time-share added / removed the A-jack PB1 row and re-routed the CMP wire. The layout is now
-      held per function / range: every pin / input any state of the row can use is reserved (fw-rs's switches
+      held per function / range: every pin / input any state of the row can use is reserved (opendm40's switches
       predicted from their register signature, the rest learnt from the state history), an alternation seen in
       the last 8 updates is drawn steadily (both wires dashed, "CMP PB1 ⇄ SENSE", "alternates every 100 ms
       (A-jack / AC? hint)"). Same for AC V's AD1 PB1 - PB3 / SENSE - PB5, the A-PROT probe (OP2 on PB2, AD2),
@@ -2657,9 +2657,9 @@ Emulator (emu/):
 - [x] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
       coupling capacitor charges to the raw jack DC (UpdateAcNode: src = dc * NodeRatioAc) while the
       seen step uses the calibration-folded node DC (NodeDcAc: DcQ(...)), so step = dcNode - vc never
-      reaches 0: residual = 1.5 x V x (cal gain/offset error) = 17.7 mV at 1.234 V. With `cal:0` fw-rs
+      reaches 0: residual = 1.5 x V x (cal gain/offset error) = 17.7 mV at 1.234 V. With `cal:0` opendm40
       settles at 0.64 mV (the model's noise floor). The stock escapes it because its mV-first AUTO steps
-      to AC mV (DC coupled in the model, no coupling term); fw-rs stays on the 6 V range (AUTO+, UF-21).
+      to AC mV (DC coupled in the model, no coupling term); opendm40 stays on the 6 V range (AUTO+, UF-21).
       Fix belongs in emu/hy3131/HY3131.cs (charge vc towards the same DcQ-folded level).
       Fixed in cd80de8 (vc charges to the calibration-adjusted level; test settles to the floor).
 - [x] UF-30 bargraph wired: in the history row's place (8,154,464,18; the 7 px strip under the digits
@@ -2817,7 +2817,7 @@ Emulator (emu/):
 - [x] MENU on the Device page returned to Settings 3/3 (device 35fce2a, the "State at the end" note).
       Stock: Device is a section of the one Settings screen; what MENU does there is not traced, the main
       menu is the likely answer. **3f32bc3:** MENU on Device -> the main menu; a tap on Device still goes
-      to Settings 3/3; MENU on Settings 3/3 / 2/3 still steps back a page (fw-rs's own paging; Help -> Settings
+      to Settings 3/3; MENU on Settings 3/3 / 2/3 still steps back a page (opendm40's own paging; Help -> Settings
       unchanged). Emulator: fastlogtest --ui-nav page tree. Device retest: Settings > More > More > Device,
       MENU: the main menu.
       **Device d330877 (device-check-2026-10-21.md "d330877" 1c): PASS.**
@@ -2827,7 +2827,7 @@ Emulator (emu/):
       at 310,204 at 21 s, 13 s after the long press, does not reset the energy: Wh keeps counting; it passed
       at f42a09e per the device-check doc). (`acdc-floor` failed once in the 20-emulator parallel run and
       passes alone, as noted at f42a09e.)
-      Done (5301fb7): no regression to bisect. f42a09e..0100788 changes only acdcm.rs (method C) in fw-rs and
+      Done (5301fb7): no regression to bisect. f42a09e..0100788 changes only acdcm.rs (method C) in opendm40 and
       the emulator's LPF creep (7c0de2d); f42a09e itself FAILs on its own emulator and 72f011e passes there,
       run to run. A race with two sides:
       1. Test: pure DC on AC+DC raises the DC? hint ~2 s after the first reading (5..9 s in the emulator);
@@ -2983,7 +2983,7 @@ Emulator (emu/):
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
-      calibrator's 1 V: meter or calibrator?"): no fw-rs state in the DC V path, the factory record unchanged,
+      calibrator's 1 V: meter or calibrator?"): no opendm40 state in the DC V path, the factory record unchanged,
       the 6 V and 60 V ranges agree, a level pattern (1 / 2 / 3 / 5 / 10 / 20 V: -0.9 / -1.4 / -2.5 / -2.0 /
       -3.0 / -1.3 mV) that is neither gain nor offset, the same pattern on 2026-10-22 20:24 before 7409b92.
 - [x] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.

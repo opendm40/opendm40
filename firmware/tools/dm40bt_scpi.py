@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""SCPI over Bluetooth for a DM40 running fw-rs (docs/bt-scpi.md).
+"""SCPI over Bluetooth for a DM40 running opendm40 (docs/bt-scpi.md).
 
-fw-rs answers SCPI text lines on the same Bluetooth serial link as the stock
+opendm40 answers SCPI text lines on the same Bluetooth serial link as the stock
 phone-app protocol: a line starting with a letter, '*' or ':' and ending in
 '\\n' goes to the same parser as USBTMC; the reply comes back ending in '\\n'
 (a #-block too: #<n><len><data>\\n). DBG:* commands are refused over
@@ -292,7 +292,7 @@ def do_bench(link, args):
 
 def main():
     p = argparse.ArgumentParser(
-        description='SCPI over Bluetooth for a DM40 running fw-rs.',
+        description='SCPI over Bluetooth for a DM40 running opendm40.',
         formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     p.add_argument('--mac', default=os.environ.get('DM40_MAC'),
                    help='meter classic Bluetooth MAC (or DM40_MAC); found via '

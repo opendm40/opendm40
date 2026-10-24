@@ -4,7 +4,7 @@
 (PA5) sets the level, the comparator output on PA15 (AF1 TIM2_CH1) starts TIM2,
 whose OC2REF (TRGO) gates TIM1, the sample-request timer, off `post` samples
 later. The record (circular over the whole 26 K ring) freezes in hardware, so no
-interrupt is needed (fw-rs has no peripheral ISRs). Status: wired (H0..H8
+interrupt is needed (opendm40 has no peripheral ISRs). Status: wired (H0..H8
 integrated with `patch_scope.py` unchanged against the scope.rs of commit
 aa51ae5; `DEFAULT_ENABLED = false`, so the device runs the software trigger
 until `DBG:HWTRIG:ENABLE 1`). The script refuses the patched file (its anchors

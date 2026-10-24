@@ -44,7 +44,7 @@
 //! the byte sequence on the wire is the same whichever transport carries it):
 //!   * Hardware I2C2 (GD32 I2C v1 = STM32F4 style, base 0x4000_5C00, PA8/PC9
 //!     AF4 open drain + pull-up, stock FUN_0800cb86), blocking, register-polled
-//!     with a DWT timeout on every flag wait (no IRQ, no DMA: fw-rs runs with
+//!     with a DWT timeout on every flag wait (no IRQ, no DMA: opendm40 runs with
 //!     PRIMASK set and DMA0 ch2, the stock I2C2 RX channel, now belongs to
 //!     bt.rs). 400 kHz when the measured SCL/SDA rise time allows it (the pull-
 //!     up strength is unknown; measured at init, see `rise_ns`), else the stock
@@ -59,7 +59,7 @@
 //!   * Bit-banged I2C on the same pins (GPIO open drain), T = 4 us half bit:
 //!     the fallback, byte-identical to the previous driver.
 //! INT = PE5 is latched by EXTI line 5 (falling edge, pending bit polled; the
-//! line's NVIC IRQ 23 is kept disabled, fw-rs has no ISRs). `poll()` reads a
+//! line's NVIC IRQ 23 is kept disabled, opendm40 has no ISRs). `poll()` reads a
 //! frame when the edge latched, or when INT is still low 10 ms after the last
 //! read (= the old level-polled behaviour as the worst case, so a controller
 //! that holds INT low, or an edge lost to a dropped frame, cannot stall touch).
@@ -743,7 +743,7 @@ impl Bus {
 fn exti_init() {
     unsafe {
         w32(NVIC_ICER0, 1 << IRQ_EXTI5_9);
-        // I2C2 EV/ER (IRQ 72/73): never vector into fw-rs's table.
+        // I2C2 EV/ER (IRQ 72/73): never vector into opendm40's table.
         w32(NVIC_ICER2, 3 << (72 - 64));
         modify32(RCU_APB2EN, 0, RCU_SYSCFG);
         modify32(SYSCFG_EXTISS1, 0xF << 4, 4 << 4); // line 5 = port E
@@ -952,7 +952,7 @@ fn screen(p: Point) -> Point {
 // ---------------------------------------------------------------------------
 // DBG:TOUCH? log: one timeline of the frames read, the debounced events and
 // the gesture decisions (gesture.rs logs into it), for checking real-finger
-// taps on the device. Single-threaded (fw-rs has no ISRs).
+// taps on the device. Single-threaded (opendm40 has no ISRs).
 
 /// Entries kept (12 bytes each); ~6 taps with all their frames.
 pub const LOG_N: usize = 160;

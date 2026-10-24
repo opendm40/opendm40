@@ -1,7 +1,7 @@
 //
 // ILI9488 TFT controller on the DM40: 16-bit 8080 bus on FSMC bank 1 (NE1).
 // Register select = FSMC A16 = sysbus offset bit 17 (0x6001FFFE command,
-// 0x60020000 data). Models the commands the stock firmware and fw-rs use:
+// 0x60020000 data). Models the commands the stock firmware and opendm40 use:
 // 0x2A/0x2B window, 0x2C RAM write, 0x2E RAM read (RGB666 read-back packing),
 // 0x36 MADCTL, 0x3A COLMOD, 0xD3 ID read (0x009488), 0x11/0x29 and the rest
 // as no-ops with parameters. GRAM is the physical 320x480 panel; Screenshot

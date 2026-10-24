@@ -21,7 +21,7 @@ mod ad2exp;
 mod ad2pll;
 
 /// The critical-section implementation: compiler fences only, no PRIMASK.
-/// fw-rs runs with interrupts masked except while the AD2 stream ISR runs
+/// opendm40 runs with interrupts masked except while the AD2 stream ISR runs
 /// (decision #3), and that ISR touches nothing a `critical_section::with`
 /// protects (synopsys-usb-otg's endpoint buffers and register RMWs, the
 /// only users): masking it there only delayed it (device 4b98128: max_lat
@@ -2243,10 +2243,10 @@ fn panic(_info: &PanicInfo) -> ! {
 // (src/boot.rs): INITIAL_HOLD_MS above makes the main loop feed the FWDGT for
 // as long as it runs.
 // DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
-// counts it as a crash: the 1st reboots fw-rs normally (WDT_RETRY), a 2nd one
+// counts it as a crash: the 1st reboots opendm40 normally (WDT_RETRY), a 2nd one
 // without 60 s of healthy main loop in between (boot::mark_healthy) enters
 // recovery (marker zeroed -> vendor update screen). DBG:RESET = SYSRESETREQ ->
-// normal reboot of fw-rs. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
+// normal reboot of opendm40. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
 // marker (boot::enter_loader_update) and reset -> the vendor loader's update
 // screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
 // request word is set by any command now.)

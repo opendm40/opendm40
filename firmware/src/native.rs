@@ -1,4 +1,4 @@
-//! Entry after the boot decision: RAM init, then recovery or the normal fw-rs
+//! Entry after the boot decision: RAM init, then recovery or the normal opendm40
 //! main with the board bring-up the stock firmware used to do.
 
 use crate::boot::{self, BootInfo, Mode};
@@ -146,7 +146,7 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
     }
 }
 
-/// Board bring-up + fatren + calibration backup, then fw-rs main (normal mode).
+/// Board bring-up + fatren + calibration backup, then opendm40 main (normal mode).
 fn normal(_info: &BootInfo, dry: bool) -> ! {
     pre_main(dry);
     crate::main()

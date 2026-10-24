@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs on-device screenshot (src/screenshot.rs, 3-finger swipe down) in the
+"""opendm40 on-device screenshot (src/screenshot.rs, 3-finger swipe down) in the
 emulator: the BMP the firmware writes to the SPI disk must be the panel's
 frame at the gesture, pixel for pixel, read back through the ILI9488 model's
 RAMRD (emu/peripherals/ILI9488.cs: dummy word, RGB666 packed 2 pixels per 3
@@ -48,7 +48,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=17310, help='USB/IP port (default 17310)')
 ap.add_argument('--out', help='keep the BMPs and reference frames here')
 ap.add_argument('--mips', default='200')

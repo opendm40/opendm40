@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs AD2 stream ISR (feature ad2-isr, docs/decisions-2026-10-22.md #3) in
+"""opendm40 AD2 stream ISR (feature ad2-isr, docs/decisions-2026-10-22.md #3) in
 the emulator: TIMER6 (TIM7, GD32_Timer in dm40.repl) -> IRQ 55 -> the ISR's
 SPI2 reads through HY3131SpiPort; SCPI over USB/IP on one connection.
 
@@ -41,13 +41,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image built with --features ad2-isr')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image built with --features ad2-isr')
 ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 3378)')
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default 0 = the datasheet\'s 76 800, as the device (fw-rs device check of e7ec2cc))')
-ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (fw-rs region C audit)')
+                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of e7ec2cc))')
+ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (opendm40 region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
                 'level (model MisoErrRate, default 1e-3): the 76.8 kS/s probe frames run /8 mode 0')
@@ -217,7 +217,7 @@ try:
         check(isr[22] == (1 if dma == 1 else 0) and isr[19] == want_div,
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
         # The rung's nominal (LOG:PREamble? nominal_mhz) is the datasheet's
-        # rate at every rung (fw-rs hy3131.rs AD2_OSR32_REAL_MHZ, device
+        # rate at every rung (opendm40 hy3131.rs AD2_OSR32_REAL_MHZ, device
         # e7ec2cc). The model's 76800 runs --osr32-ppm off it (default 0).
         rung = min(rate, 76800 if dma == 1 else 38400)
         nom = rung

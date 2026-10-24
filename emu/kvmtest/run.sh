@@ -11,10 +11,10 @@
 #
 #   emu/kvmtest/run.sh <app.elf> <usbip port> <LOG:DURation s> <log> ["dm40direct=1 dm40wait=240"]
 #
-# With the slow-bank mirror (fw-rs vdisk.rs mirror_boot, DBG:VDISK:MIR? in
+# With the slow-bank mirror (opendm40 vdisk.rs mirror_boot, DBG:VDISK:MIR? in
 # the log) the copies finish while the stream runs ("COPIED DURING THE
 # STREAM"); dm40wait=<s> starts them that long into the stream. Without it,
-# fw-rs vdisk.rs answers those files' slow-bank sectors NOT READY 02/04/01
+# opendm40 vdisk.rs answers those files' slow-bank sectors NOT READY 02/04/01
 # while the stream runs: Linux retries for (retries + 1) x timeout = 6 x 30 s
 # from the request (scsi_lib.c scsi_cmd_runtime_exceeced); within that the
 # copy is only delayed. The emulator runs ~10x slower than real time under

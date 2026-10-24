@@ -6,7 +6,7 @@
 Modes
   stock   pristine V2.6 application at 0x08004000 (from dm40_v_2_6.dec.bin),
           ROM/FS-loader/calibration from the flash dump, start at the app.
-  fwrs    fw-rs native image at 0x08004000 (--app <opendm40.bin|body.bin|ELF>,
+  fwrs    opendm40 native image at 0x08004000 (--app <opendm40.bin|body.bin|ELF>,
           default: build from a clean worktree of HEAD), start at the app.
   chain   start at the ROM bootloader (0x08000000): ROM -> FS-loader -> app.
           The app is the stock one unless --app is given; --app dump keeps the
@@ -15,7 +15,7 @@ Modes
 Images are composed in emu/out/ and never written back to the dumps.
 --model A|B|C sets the DM40 model byte of the calibration record (flash
 0x080C0168, record CRC rewritten) in the composed image; both the stock
-firmware and fw-rs read the model there (firmware/docs/model-variants.md).
+firmware and opendm40 read the model there (firmware/docs/model-variants.md).
 Default: the base dump's own byte (this unit: 0 = DM40A).
 Events (--tap/--key/--shot/--vin/--script) are scheduled in virtual time.
 """
@@ -95,7 +95,7 @@ def emu_uid(port, base=UID):
     4 and 9 = the port, big-endian. The stock genuine check (UID against the
     dump's 0x080A4000 block) never reads bytes 4 and 9
     (firmware/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
-    and DBG:GENUINE? stays GENUINE, while fw-rs's USB / SCSI / *IDN? serial
+    and DBG:GENUINE? stays GENUINE, while opendm40's USB / SCSI / *IDN? serial
     number (the UID as hex, firmware/src/uid.rs) differs from the real meter's
     and between instances on different ports: udisks merges disks with the
     same vendor / model / serial into one drive."""
@@ -110,7 +110,7 @@ def emu_uid(port, base=UID):
 def uid_arg(spec, port):
     """--uid: none = emu_uid(port); 'unit' = the UID file as it is (this
     unit's own serial: never next to the real meter on one PC); 24 hex
-    digits (memory order, as fw-rs's serial); or a 12-byte file."""
+    digits (memory order, as opendm40's serial); or a 12-byte file."""
     if not spec:
         return emu_uid(port)
     if spec == 'unit':
@@ -209,8 +209,8 @@ def compose_flash(mode, app, out_path, base=DUMP, zero_marker=False, model=None)
 
 
 def build_fwrs(worktree=None, rev='HEAD'):
-    """Build fw-rs native at `rev` of the main repo (default: its HEAD) in a
-    separate worktree; skip the build when the ELF already matches the fw-rs
+    """Build opendm40 native at `rev` of the main repo (default: its HEAD) in a
+    separate worktree; skip the build when the ELF already matches the opendm40
     tree of that commit. A lock file serialises parallel runs (the worktree
     checkout is not reentrant)."""
     import fcntl
@@ -219,7 +219,7 @@ def build_fwrs(worktree=None, rev='HEAD'):
     # The firmware directory and ELF name of that commit (fw-rs/ and dm40-fw
     # before the firmware/ layout).
     sub = 'firmware' if subprocess.run(['git', 'cat-file', '-e', commit + ':firmware/build.sh'],
-                                       cwd=ROOT).returncode == 0 else 'fw-rs'
+                                       cwd=ROOT).returncode == 0 else 'opendm40'
     cargo = subprocess.check_output(['git', 'show', commit + ':' + sub + '/Cargo.toml'], cwd=ROOT, text=True)
     name = re.search(r'^name = "([^"]+)"', cargo, re.M).group(1)
     tree = subprocess.check_output(['git', 'rev-parse', commit + ':' + sub], cwd=ROOT, text=True).strip()
@@ -230,7 +230,7 @@ def build_fwrs(worktree=None, rev='HEAD'):
         fcntl.flock(lock, fcntl.LOCK_EX)
         built = read(stamp).decode().strip() if os.path.exists(stamp) else ''
         if built == tree and os.path.exists(elf):
-            print('fw-rs: tree %s of %s already built (%s)' % (tree[:12], commit[:12], rel(elf)))
+            print('opendm40: tree %s of %s already built (%s)' % (tree[:12], commit[:12], rel(elf)))
             return elf
         if not os.path.exists(os.path.join(wt, '.git')):
             subprocess.check_call(['git', 'worktree', 'add', '--detach', wt, commit], cwd=ROOT)
@@ -239,7 +239,7 @@ def build_fwrs(worktree=None, rev='HEAD'):
         tc = os.path.join(wt, 'toolchain')
         if not os.path.exists(tc):
             os.symlink(os.path.join(ROOT, 'toolchain'), tc)
-        print('fw-rs: building %s (%s)' % (commit[:12], subprocess.check_output(
+        print('opendm40: building %s (%s)' % (commit[:12], subprocess.check_output(
             ['git', 'log', '-1', '--format=%s', commit], cwd=ROOT, text=True).strip()))
         # `native`: the only build now (a no-op argument); older commits (--rev)
         # need it to select the native image instead of their RAM default.
@@ -312,7 +312,7 @@ def main(argv=None):
     ap.add_argument('--flash', help='use this 1 MiB flash image as-is (no composition)')
     ap.add_argument('--base', default=DUMP, help='1 MiB flash dump to compose from')
     ap.add_argument('--app', help='application: .dec.bin / packed dm40*.bin / body / ELF, or "dump"')
-    ap.add_argument('--rev', default='HEAD', help='fwrs: build fw-rs from this commit of the main repo (default HEAD)')
+    ap.add_argument('--rev', default='HEAD', help='fwrs: build opendm40 from this commit of the main repo (default HEAD)')
     ap.add_argument('--disk', help='16 MiB SPI-flash image (default: working copy of the MSC dump in emu/out/)')
     ap.add_argument('--disk-add', action='append', default=[], metavar='FILE[::NAME]',
                     help='copy FILE into the working disk image (mtools), e.g. opendm40.bin::DM40_FW.BIN')
@@ -444,11 +444,11 @@ def main(argv=None):
     uid = uid_arg(a.uid, a.usbip_port)
     for i in range(3):
         s.add('sysbus WriteDoubleWord 0x%08X 0x%08X' % (0x1FFF7A10 + 4 * i, struct.unpack_from('<I', uid, 4 * i)[0]))
-    print('chip UID:   ', uid.hex().upper(), '(fw-rs USB serial)')
+    print('chip UID:   ', uid.hex().upper(), '(opendm40 USB serial)')
     s.add('sysbus WriteWord 0x1FFF7A22 0x0400')
     s.add('sysbus.spi2.spiflash Load %s' % q(disk))
     # The disk bus's write-wait-read byte as on the device (~0.97 us at 12.5
-    # MHz, fw-rs spiflash.rs `xfer`; peripherals/GD32_SPI.cs IdleStartNs).
+    # MHz, opendm40 spiflash.rs `xfer`; peripherals/GD32_SPI.cs IdleStartNs).
     s.add('sysbus.spi2 IdleStartNs %g' % a.spi_disk_gap_ns)
     s.add('sysbus.gpioPortD OnGPIO 6 false')  # power key released
     # Reset cause (peripherals/FWDGT.cs): RCU_RSTSCK's flag bits come from the
@@ -476,7 +476,7 @@ def main(argv=None):
         s.add('emulation SetGlobalQuantum "%s"' % a.quantum)
     vtor = 0x08000000 if a.mode == 'chain' else APP_BASE
     s.add('cpu VectorTableOffset 0x%08X' % vtor)
-    # SYSRESETREQ (the FS-loader after an install, fw-rs recovery): Renode runs
+    # SYSRESETREQ (the FS-loader after an install, opendm40 recovery): Renode runs
     # the machine's `reset` macro; the flash keeps its (possibly updated)
     # content, only the vector table base is restored.
     s.add('macro reset\n"""\n    cpu VectorTableOffset 0x%08X\n"""' % vtor)

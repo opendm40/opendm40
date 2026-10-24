@@ -1,4 +1,4 @@
-//! Host stand-ins for the hardware layer under the real fw-rs drawing code
+//! Host stand-ins for the hardware layer under the real opendm40 drawing code
 //! (tools/ui-render): an ILI9488 emulator behind `mmio::w16` (window +
 //! RAMWR, the only LCD protocol the drawing code uses), no-op register
 //! access, and the internal flash mapped as erased (0xFF) at 0x08000000 so

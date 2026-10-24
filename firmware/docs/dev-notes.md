@@ -1,4 +1,4 @@
-# fw-rs developer notes
+# opendm40 developer notes
 
 Paths in this file are relative to `firmware/`, and the commands run there.
 
@@ -9,14 +9,14 @@ Calibration and the vendor boot data are read from their stock locations, never
 rewritten (served read-only on the USB disk, plus one write-once safety copy
 of the calibration on the SPI flash).
 
-fw-rs is installed like a stock update: `opendm40.bin` is a vendor-format
+opendm40 is installed like a stock update: `opendm40.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
 front of it handles the power key, the watchdog and recovery
 ([native-boot.md](native-boot.md)). This is the only build.
 
 ## USB debug link
 
-fw-rs enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
+opendm40 enumerates as a composite USBTMC + mass storage device (`1209:0001`) on
 USBFS. Debug commands are SCPI `DBG:...` over USBTMC ([`src/scpi.rs`](../src/scpi.rs)); the host
 tool [`tools/dm40dbg.py`](../tools/dm40dbg.py) (PIL for screenshots) needs read/write access to
 `/dev/usbtmc*` (udev rule). Mass storage is ONE removable disk "DM40"
@@ -33,12 +33,12 @@ python3 tools/dm40dbg.py shot out.png        # full screen in ~0.8 s
 python3 tools/dm40dbg.py boot                # DBG:BOOT? decoded: reset cause, marker, crash counter...
 python3 tools/dm40dbg.py scpi 'DBG:FLASH?'   # SPI flash: EF4018,4096,0 (last = write error)
 python3 tools/dm40dbg.py upload FILE         # update file -> DM40FW.BIN in the SPI root (DBG:UPLOAD)
-python3 tools/dm40dbg.py reset               # reboot fw-rs
+python3 tools/dm40dbg.py reset               # reboot opendm40
 python3 tools/dm40dbg.py image FILE          # offline: is FILE a valid dm40*.bin update file?
 ```
 
 Watchdog (native): fed while the main loop runs. A hang, a panic (magenta bar
-at the bottom) or `DBG:RELEASE` resets it after ~20 s and fw-rs reboots once;
+at the bottom) or `DBG:RELEASE` resets it after ~20 s and opendm40 reboots once;
 a second one within 60 s enters recovery (the loader update screen, below).
 
 Bring-up status squares (top left): white = running, then PLLSAI locked, USB
@@ -198,7 +198,7 @@ Needs the pinned toolchain in `../toolchain` (rustup + stable +
 tools/fatren-test/run.sh         # host tests (also tools/genuine-test/run.sh)
 ```
 
-**Reload while fw-rs runs** (the normal developer loop):
+**Reload while opendm40 runs** (the normal developer loop):
 
 ```
 tools/reload.sh [cargo args]     # e.g. --features keep-screen
@@ -208,24 +208,24 @@ builds, uploads the image over USBTMC as `DM40FW.BIN` into the SPI flash's
 root (`dm40dbg.py upload` = `DBG:UPLOAD`; other `dm40*.bin` there are
 removed, the meter re-reads and checks the CRC-32), sends `DBG:UPDATE`
 (zero the loader marker + reset; the vendor loader installs the file and
-deletes it), waits for fw-rs to come back (the first boot after an install is
+deletes it), waits for opendm40 to come back (the first boot after an install is
 dark for several seconds: do not power-cycle) and checks `DBG:BOOT?`: the
 loader marker must equal the header of the new file ("installed OK", ~1 min).
 `--no-build`, `--image FILE`, `--wait S`: see `tools/reload.sh --help`.
 
 **First install** (the meter runs stock): `tools/reload.sh --from-stock`
 stages the file on the stock "USB Connect" disk (`28e9:028f`) and tells you to
-power-cycle (the stock update procedure), then waits for fw-rs. The by-hand
+power-cycle (the stock update procedure), then waits for opendm40. The by-hand
 steps and what is verified: [README.md, Install](../README.md#install).
 
-**Recovery** (fw-rs hangs or does not start) and the update-file rules:
+**Recovery** (opendm40 hangs or does not start) and the update-file rules:
 [README.md, Recovery](../README.md#recovery). `INFO/FIRMWARE.BIN` on the USB
 volume (the running image) or `opendm40.bin` both work as the image.
 
-**Back to stock** from a running fw-rs: `tools/reload.sh --stock FILE` with
+**Back to stock** from a running opendm40: `tools/reload.sh --stock FILE` with
 `../stock/patch/build-memrw/dm40_patched.bin` (patched stock with Bluetooth
 memrw, built by `../stock/patch/kit/mkkit.sh`) or the official
 [`../stock/vendor/dm40_v_2_6.bin`](../../stock/vendor/dm40_v_2_6.bin).
-Back to fw-rs from stock: `tools/reload.sh --from-stock`.
+Back to opendm40 from stock: `tools/reload.sh --from-stock`.
 
 Native image, shim, recovery and boot info fields: [native-boot.md](native-boot.md).

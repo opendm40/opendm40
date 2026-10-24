@@ -2,7 +2,7 @@
 """Headless check of the GTK signal-flow diagram (gtkpanel.FrontendView): the layout must not move when
 the firmware switches an input inside one function / range (the owner: "скачет, некрасиво").
 
-The fw-rs switches are built here from the firmware's own constants, independently of gtkpanel's
+The opendm40 switches are built here from the firmware's own constants, independently of gtkpanel's
 FrontendView.model_variants table (firmware/src/sentinel.rs, dmm.rs; power-meter-and-misconnect.md 4.4):
   * DC V 6 V: the comparator alternates PB1 (A-jack sentinel, R20 0x90) / SENSE (AC? hint, R20 0x10)
     every 100 ms window; after a comparator hit the A-PROT probe joins (probe_row: OP2 x1 on PB2, AD2 =
@@ -16,7 +16,7 @@ FrontendView.model_variants table (firmware/src/sentinel.rs, dmm.rs; power-meter
   * every peak-hold row: ENPKH 0 for a few ms at a restart.
 Each sequence goes through FrontendView.update() (the history the panel keeps) and is rendered at each
 width; height, every wire segment, every block and every pin label must be identical in all frames,
-from the first one, and no two labels / blocks closer than 3 px. The state lines are fw-rs emulator
+from the first one, and no two labels / blocks closer than 3 px. The state lines are opendm40 emulator
 captures (HY3131 StateFile, conn= dropped).
 
   emu/flowtest.py [--png DIR] [--widths 1000,700,1400]
@@ -127,7 +127,7 @@ PROBE = dict(op2='1', sop2p='PB2', ops2='0', ad2='1', sad2ip='OP2O', sad2in='PB3
 
 
 def toggles(st):
-    """-> [(name, [states 100 ms apart])]: the switches fw-rs makes in this row"""
+    """-> [(name, [states 100 ms apart])]: the switches opendm40 makes in this row"""
     r, role = [], st.get('role')
     cm = st.get('scmpi') if st.get('cmp') == '1' else None
     if role == 'DcV' and st.get('range') == '0' and cm in ('PB1', 'SENSE'):

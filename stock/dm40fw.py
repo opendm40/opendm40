@@ -10,7 +10,7 @@
 The file is obfuscated in 128-byte blocks from file offset 0 (header
 included). The vendor FS-loader mis-decodes a SHORT final block (0x1F < len
 < 128) whose key position is outside it (see tail_hazard()). build() / pack
-refuse to write such a file; `--pad` (build(pad=True), used for fw-rs and
+refuse to write such a file; `--pad` (build(pad=True), used for opendm40 and
 patched images) pads the body with 0xFF so the whole file (12-byte header +
 body) is a multiple of 128 and the hazard cannot occur. Without --pad the
 body is packed as is, so pack(unpack(vendor file)) == vendor file. `info` /
@@ -251,7 +251,7 @@ def main():
     s.add_argument('--like', help='original update file to take word 2 from')
     s.add_argument('--pad', action='store_true',
                    help='pad the body with 0xFF so the file is whole 128-byte blocks '
-                        '(required for new images: fw-rs build.sh, patcher)')
+                        '(required for new images: opendm40 build.sh, patcher)')
     s.set_defaults(f=cmd_pack)
     a = p.parse_args()
     a.f(a)

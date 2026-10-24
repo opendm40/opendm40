@@ -6,7 +6,7 @@ or calibrate? Short answer: **only at the MCU pin level (DAC pin read back by
 the MCU's own ADC) and through the trigger comparator; never into the scope
 ADC or the HY3131.** Everything else needs a cable.
 
-Tags: **VERIFIED** = read in the stock disassembly / fw-rs driver that runs on the
+Tags: **VERIFIED** = read in the stock disassembly / opendm40 driver that runs on the
 device, or exercised on the device; **INFERRED** = interpretation (board wiring
 is not traced; no schematic in the repo). Sources: `firmware/src/*.rs`,
 `stock/re/analysis/*.h`, `stock/re/analysis/app_decompile.c`,
@@ -22,19 +22,19 @@ is not traced; no schematic in the repo). Sources: `firmware/src/*.rs`,
 | PB12 GPIO | Generator output-path select: 0 = DAC (PA4), 1 = PWM (PB14 TIM12_CH1, square > 50 kHz) | VERIFIED (pin use); the switch is very likely the SGM3157 SPDT a user burned at 12 V | `gen.rs:6,232-235`; `scope_gen_v2_6.h:130-131`; `firmware/docs/user-feedback.md:250,307` (INFERRED) |
 | External DAC on SPI/I2C | none: SPI peripherals are W25Q128 flash and the bit-banged HY3131; no DAC in the BOM | INFERRED (negative) | `hy3131_v2_6.h:4-6`; [hw/README.md Main parts](../../hw/README.md#main-parts) |
 
-fw-rs never enables DAC ch2, PA15 or TIM2: the trigger is found in software in
+opendm40 never enables DAC ch2, PA15 or TIM2: the trigger is found in software in
 the record (`scope.rs:8-9,777-800`; no `TIM2`/`PA15` in `firmware/src`). The
 generator DAC output buffer is off (BOFF1 = 1) for sine/triangle/ramp, which
 implies an external buffer/op-amp stage on PA4 (INFERRED, `scope_gen_v2_6.h:126-127`).
 
 ## 2. MCU ADC channels
 
-Only **ADC0** is used, by both stock and fw-rs:
+Only **ADC0** is used, by both stock and opendm40:
 
 | ADC0 channel / pin | Source | Status | Evidence |
 |---|---|---|---|
 | ch15 = PC5 (`ADC012_IN15`) | Battery, Vbat = raw * 3.0/4096 * 2 | VERIFIED | `power.rs:2,50-59`; `dmm_v2_6.h:278,369`; stock configures exactly one channel (FUN_0800458e(adc, 0, 0xf, 6), single call site `app_decompile.c:6360`) |
-| ch16 (internal temperature sensor, TSVREN) | MCU die temperature | VERIFIED (fw-rs only) | `power.rs:6-7,54-56` |
+| ch16 (internal temperature sensor, TSVREN) | MCU die temperature | VERIFIED (opendm40 only) | `power.rs:6-7,54-56` |
 | ch4 = PA4 (`ADC012_IN4`) | **Generator DAC pin read back** (`DIAG:DAC?`): 512 samples / ~21 ms, min/max/mid-crossings | VERIFIED on device (levels and frequencies of all 4 waves matched the settings) | `power.rs:87-125`, `app.rs:2269-2279`, `scpi.rs:164-165`; commit `0e930c9` |
 
 Nothing from the scope front end reaches an MCU ADC pin: the scope ADC is the
@@ -52,7 +52,7 @@ Scope front end (all VERIFIED pin use; meaning INFERRED from gain steps,
 - PC13 = input attenuator **relay** (1 = direct, 0 = /50), 200 ms settle.
 - PB15 / PD12 / PD13 = **HCF4051** select code -> amplifier gain x0.5..x20
   (stock table `[11][4]`; code `100` unused, `000` = stock row 10: 20 V/div x0.5 /
-  channel off, not used by fw-rs). The 4051 sits in
+  channel off, not used by opendm40). The 4051 sits in
   the gain/feedback path, not an input selector; no row routes anything but the MCX
   signal (INFERRED).
 - PE3 = coupling (1 = DC, 0 = AC). PC4 = scope/generator analog rail; PE2 = DMM

@@ -1,4 +1,4 @@
-//! Host renderer + layout check for the fw-rs screens (tools/ui-render/run.sh).
+//! Host renderer + layout check for the opendm40 screens (tools/ui-render/run.sh).
 //!
 //! The real drawing code (src/ui.rs, src/stockfont.rs with the embedded stock
 //! fonts, src/lcd.rs) runs against an ILI9488 emulator (host.rs). Built with
@@ -408,7 +408,7 @@ impl Checker {
         }
     }
 
-    /// fw-rs additions on the stock-replica page (timebase tabs, list
+    /// opendm40 additions on the stock-replica page (timebase tabs, list
     /// popup): the full layout rules for every item inside one of the `add`
     /// rects: >= 3 px inside its container (the smallest shape holding it,
     /// else the smallest of `regions`), glyphs of one text not touching,
@@ -1042,7 +1042,7 @@ fn main() {
         t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
     }
 
-    // 0a. fw-rs timebase tap step (docs/scope-scale-ux.md sec. 3): the
+    // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 3): the
     // preview tabs (every label, rest / pressed, both views, markers and
     // cursors clamped at the bottom, worst measurement cells) and the list
     // popup (every centre index) under the full layout rules against the
@@ -1198,7 +1198,7 @@ fn main() {
         scope_ui::set_tb_lo(scope::TB_MIN);
     }
 
-    // 0c. fw-rs additions on the replica page (FFT boxes / peak, ...).
+    // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
 
     // 0b. Combined view in the stock language (scope_ui meter strip, port

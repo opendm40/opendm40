@@ -28,7 +28,7 @@ read on the virtual LUN 1, by SCPI and by tools/dlog.py).
    real jitter on the device. Then decide whether the stamp may be snapped to
    the grid (this changes the CSV time column at the ms level).
 4. **Scope records: a clear win.** They are stored uncompressed today (u16 per
-   10-bit code). A fixed polynomial predictor + Rice (the coder fw-rs already
+   10-bit code). A fixed polynomial predictor + Rice (the coder opendm40 already
    has) brings them to 0.35-0.53 B/sample instead of 2.0 (4-6x). That is
    FLAC-level compression. Packing the codes into 10 bits gives 1.6x with almost
    no risk.

@@ -21,7 +21,7 @@ if [ -n "$REV" ]; then
     git worktree add --detach "$WT" "$REV" > /dev/null
     # The harness of this tree against that tree's fonts (fw-rs/ before the
     # firmware/ layout).
-    D=firmware; [ -f "$WT/firmware/Cargo.toml" ] || D=fw-rs
+    D=firmware; [ -f "$WT/firmware/Cargo.toml" ] || D=opendm40
     mkdir -p "$WT/$D/tools/font-matrix"; cp main.rs "$WT/$D/tools/font-matrix/main.rs"
     (cd "$WT/$D/tools/font-matrix" && rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r")
     "$B/r" > "$OUT.$REV"

@@ -1,9 +1,9 @@
 # Native-format firmware with a recovery shim
 
-Goal: stop RAM-loading fw-rs. Build it as a **full firmware in the stock update
+Goal: stop RAM-loading opendm40. Build it as a **full firmware in the stock update
 format**, flashed exactly like a stock update at `0x08004000`, with a tiny shim
 at our reset vector that keeps the device unbrickable and lets the user toggle
-stock <-> fw-rs easily.
+stock <-> opendm40 easily.
 
 This design is **recovery-first**. The single most important fact is that the
 stock **FS-loader** cannot be overwritten by a normal firmware update and runs
@@ -102,14 +102,14 @@ computes both.
 |---|---|---|
 | Exact trigger that makes the FS-loader enter **its own** USB-disk mode at boot (not isolated — `ANALYSIS.md` §3). | Would let the shim bring up stock MSC with ~zero code (Option A below). Not required for safety. | Disassemble FS-loader around its USB init; or set candidate flags via the BT `memrw` patch (`stock/patch/kit/tools/dm40_memrw.py`) and reboot, watch for USB disk enumerating. |
 | Purpose of the `0x080ff000` "one-word boot flag" (`ANALYSIS.md` §1). A whole-image word scan found the value `0x080ff000` only inside an `ldm/stm` data-copy in the app (`0x08044844`), i.e. a false positive — **no confirmed pointer use**. | None if unused. If it is the FS-loader's disk-mode trigger, it enables Option A. | Read it over `memrw`; correlate with entering "USB Connect". |
-| Whether the FS-loader leaves HCLK at 200 MHz / correct FMC wait states when it jumps to the app. | fw-rs currently **assumes** 200 MHz (`src/clock.rs:3`); XIP from flash needs correct wait states. | Read `RCU_CFG0`/`FMC_WS` in the shim over `DBG:` once Stage 1 runs; or disassemble the FS-loader clock init (`0x080a0ac1`, confirmed to set CPACR+VTOR+RCU). |
+| Whether the FS-loader leaves HCLK at 200 MHz / correct FMC wait states when it jumps to the app. | opendm40 currently **assumes** 200 MHz (`src/clock.rs:3`); XIP from flash needs correct wait states. | Read `RCU_CFG0`/`FMC_WS` in the shim over `DBG:` once Stage 1 runs; or disassemble the FS-loader clock init (`0x080a0ac1`, confirmed to set CPACR+VTOR+RCU). |
 | Which flash sectors the FS-loader erases for an app update. | Confirms our hole/layout assumptions. | Disassemble the FS-loader erase path; or observe before/after dumps. |
 
 Self-hold / power-latch: **no dedicated CPU self-hold GPIO is evident in
 `firmware/src/power.rs` or the RE headers.** The power **key is PD6** (`dmm_v2_6.h`
 "Power key PD6, 1.5 s hold -> power off"; the stock TIM7 1 kHz ISR polls it,
 `lcd_buzzer_v2_6.h:52`). `PE2`/`PC4` are the DMM/scope **analog rails**, not a
-CPU latch. The current RAM-loaded fw-rs runs fine without asserting any latch
+CPU latch. The current RAM-loaded opendm40 runs fine without asserting any latch
 because stock already set the pin state. Treat the self-hold mechanism as
 **UNVERIFIED** and have the shim **leave GPIO as the FS-loader left it** and only
 *read* PD6. (If a self-hold pin is later found, the shim must assert it before
@@ -142,7 +142,7 @@ settings).
 
 ---
 
-## 3. XIP impact (fw-rs runs from flash now, not SRAM)
+## 3. XIP impact (opendm40 runs from flash now, not SRAM)
 
 `0x08004000` is inside the zero-wait first 512 KiB, so the reason for the
 SRAM-copy (`src/startup.rs` `.boot` copies `.text`+`.rodata` into SRAM0 because
@@ -174,7 +174,7 @@ sector 8 at `0x08080000` is slow) **goes away**:
 
 The shim is the first code the FS-loader jumps to. Keep it tiny: no C runtime,
 no `.data`, no peripherals beyond a GPIO read and a reset. It decides in a few
-hundred bytes, then either falls through to fw-rs `main` or triggers recovery.
+hundred bytes, then either falls through to opendm40 `main` or triggers recovery.
 
 ```
 shim_reset (image word[1]):
@@ -195,7 +195,7 @@ shim_reset (image word[1]):
   else:
      tries += 1 ; store BOOT_TRIES
      VTOR = 0x08004000
-     branch to fw_main_reset   (the real fw-rs startup)
+     branch to fw_main_reset   (the real opendm40 startup)
 ```
 
 - **Power-key hold:** if PD6 reads pressed, loop ~2 s **feeding FWDGT**
@@ -206,7 +206,7 @@ shim_reset (image word[1]):
   writes are: GPIOD mode for PD6 (restore after), `RSTSCK.RSTFC`, the SRAM magic
   and counter, and `VTOR`.
 - **Boot-attempt counter** (`BOOT_TRIES` in a fixed SRAM word): the shim
-  increments it; fw-rs `main` clears it once it has reached a known-good point
+  increments it; opendm40 `main` clears it once it has reached a known-good point
   (e.g. first full UI frame drawn). `MAX_TRIES` (e.g. 3) catches crash loops
   that are **not** watchdog resets (a hard fault that resets via a default
   handler, or a hang the watchdog later catches). Place `BOOT_TRIES` and
@@ -237,7 +237,7 @@ Estimated shim size: well under 1 KB of code, no data.
   `RECOVERY_MAGIC` then doing `SYSRESETREQ`, not by the reset kind.
 - A single transient watchdog reset lands in recovery, but recovery **also
   offers a normal boot** (short key press, or a timeout that falls through to
-  fw-rs) so one glitch does not strand the device.
+  opendm40) so one glitch does not strand the device.
 
 ---
 
@@ -249,13 +249,13 @@ the native scheme the meaning changes:
 
 | Event | Old meaning | New meaning |
 |---|---|---|
-| fw-rs feeds FWDGT normally | bounded then release | **feed continuously while healthy** (we are the firmware now) |
+| opendm40 feeds FWDGT normally | bounded then release | **feed continuously while healthy** (we are the firmware now) |
 | panic handler | stop feeding -> stock | stop feeding -> WDT reset -> shim sees `FWDGTRSTF` -> **recovery** |
-| `DBG:` keepalive timeout | stop feeding -> stock | optional: keep it as a dev safety on debug builds; in production fw-rs feeds unconditionally |
-| `dm40dbg reset` | reset to stock | `SYSRESETREQ` -> **normal reboot of fw-rs** |
+| `DBG:` keepalive timeout | stop feeding -> stock | optional: keep it as a dev safety on debug builds; in production opendm40 feeds unconditionally |
+| `dm40dbg reset` | reset to stock | `SYSRESETREQ` -> **normal reboot of opendm40** |
 | new `dm40dbg recover` | — | set `RECOVERY_MAGIC` + `SYSRESETREQ` -> **recovery/updater** |
 
-fw-rs's app FWDGT policy: feed from the main loop once running; the shim feeds
+opendm40's app FWDGT policy: feed from the main loop once running; the shim feeds
 only during its key-hold wait. The "never feed unconditionally" rule
 (`docs/history/custom-fw-handover.txt`) still holds in spirit — the deliberate exits are now
 (a) the panic/hang -> recovery path and (b) the explicit `recover` command.
@@ -286,24 +286,24 @@ emergency reflash despite read-protection (after a mass-erase), and whether
 
 ## 8. Staged rollout (Stage 0 first — nothing is risked)
 
-**Stage 0 — prove recovery from TODAY's RAM-loaded fw-rs. No native image yet.**
-Add a `DBG:RECOVER` SCPI command to the *current* sector-8 fw-rs that:
-1. writes a known-good stock `dm40_v_2_6.bin` to the SPI-flash FAT (fw-rs already
+**Stage 0 — prove recovery from TODAY's RAM-loaded opendm40. No native image yet.**
+Add a `DBG:RECOVER` SCPI command to the *current* sector-8 opendm40 that:
+1. writes a known-good stock `dm40_v_2_6.bin` to the SPI-flash FAT (opendm40 already
    exposes this FAT over its own MSC and has `spiflash.rs`), named `dm40*.bin`;
 2. does `SYSRESETREQ`.
 Expected: the ROM bootloader + FS-loader install stock with **no stock app
 involved**, and the device comes up stock. If this works, the entire recovery
-concept is proven and reversible. If it fails, we have lost nothing (fw-rs is
+concept is proven and reversible. If it fails, we have lost nothing (opendm40 is
 still RAM-loaded; a battery pull returns to stock). **Do not proceed past Stage
 0 until it passes and is logged in the README.**
 
-**Stage 1 — native image = shim + current fw-rs app.**
+**Stage 1 — native image = shim + current opendm40 app.**
 - Build the body at `0x08004000`, reserve the `0x08008000` hole, `dm40fw.py
   pack` it into an update file.
 - Install it the stock way: copy the file onto the FAT (via stock "USB Connect"
-  while stock is running, or via fw-rs's own MSC), reboot, FS-loader flashes it.
-- Toggle **stock <-> fw-rs several times**: fw-rs -> stock by copying
-  `dm40_v_2_6.bin` + reboot; stock -> fw-rs by copying our file + reboot.
+  while stock is running, or via opendm40's own MSC), reboot, FS-loader flashes it.
+- Toggle **stock <-> opendm40 several times**: opendm40 -> stock by copying
+  `dm40_v_2_6.bin` + reboot; stock -> opendm40 by copying our file + reboot.
 - Exercise every recovery trigger: power-hold, injected panic (WDT path),
   `DBG:RECOVER`, and crash-loop counter.
 
@@ -323,23 +323,23 @@ Remove `stub/`, `tools/legacy/flash.py`, the BT RAM loader path and the sector-8
   (`ANALYSIS.md` §3; user rule: [firmware/README.md, Recovery](../README.md#recovery)). Our file and
   the stock file must not coexist on the disk; the toggle procedure removes one
   before adding the other.
-- **`firmware/build.sh`** — in addition to `dm40-fw.bin` (now the raw body), emit
-  `dm40-fw.update.bin` = `dm40fw.py pack dm40-fw.bin`. Name the *on-disk* copy
+- **`firmware/build.sh`** — in addition to `opendm40.bin` (now the raw body), emit
+  `opendm40.update.bin` = `dm40fw.py pack opendm40.bin`. Name the *on-disk* copy
   `dm40*.bin` only at flash time (per the stock app's deletion caveat in
   `docs/history/custom-fw-handover.txt`: the stock app scans for `dm40*.bin` on USB unplug;
   that is the intended path for installing us).
 - **`tools/reload.sh` / `tools/legacy/flash.py`** — the BT RAM loader becomes obsolete
-  after Stage 2. The new "load fw-rs" flow is: copy the update file to the FAT
+  after Stage 2. The new "load opendm40" flow is: copy the update file to the FAT
   (host file copy over whichever MSC is up) + reboot.
-- **`tools/dm40dbg.py reset`** — now a normal `SYSRESETREQ` reboot of fw-rs; add
+- **`tools/dm40dbg.py reset`** — now a normal `SYSRESETREQ` reboot of opendm40; add
   `recover` (set magic + reset) and keep `shot`/`scpi`/`ping`.
 - **Switch to stock from the host:** copy `dm40_v_2_6.bin` onto the FAT over
-  fw-rs's MSC, then `dm40dbg reset` (or power-cycle). The FS-loader flashes
+  opendm40's MSC, then `dm40dbg reset` (or power-cycle). The FS-loader flashes
   stock and deletes the file itself after the successful install.
 
 ---
 
-## 10. fw-rs impact list
+## 10. opendm40 impact list
 
 Files to change:
 
@@ -357,12 +357,12 @@ Files to change:
 - **`src/wdt.rs`** — feed continuously while healthy; panic handler stops
   feeding (-> recovery) instead of "-> stock".
 - **`src/scpi.rs`** — `DBG:RECOVER` (magic + `SYSRESETREQ`); `DBG:` reset now a
-  normal reboot. Add it to current fw-rs first for Stage 0.
+  normal reboot. Add it to current opendm40 first for Stage 0.
 - **`src/main.rs`** — clear `BOOT_TRIES` after the first healthy frame.
 - **`build.sh` / `Cargo.toml`** — emit the packed update file; no new crates.
 
 Behaviour that currently depends on stock having run first (must now be done by
-fw-rs or inherited from the FS-loader, verify each): the **clock tree** (see
+opendm40 or inherited from the FS-loader, verify each): the **clock tree** (see
 clock.rs), initial **GPIO state**, the **power self-hold** (inherited from the
 FS-loader — do not disturb), **backup/SRAM init**, and the **SPI-flash disk**
 state. The FS-loader runs immediately before us, so most peripheral state is a
@@ -376,20 +376,20 @@ known starting point; the risky one is the clock/FMC, addressed in §3.
   runs before the app on every boot, and installs any `dm40*.bin` on the FAT
   into `0x08004000` with CRC checks, writer bounded below `0x080a0000`. It is
   never overwritten by an app update, so the device is inherently hard to brick.
-- **Recovery = get a valid `dm40*.bin` onto the FAT + reboot.** fw-rs already
-  exposes that FAT over its own MSC, so toggling stock <-> fw-rs is a file copy
+- **Recovery = get a valid `dm40*.bin` onto the FAT + reboot.** opendm40 already
+  exposes that FAT over its own MSC, so toggling stock <-> opendm40 is a file copy
   plus a reset.
 - The **shim** is tiny: read `RCU_RSTSCK` (`0x40023874`, `FWDGTRSTF` bit 29),
   read **PD6** (power key), check an SRAM magic and a boot-attempt counter; on
   watchdog reset / long key-hold / explicit request / crash-loop -> recovery,
-  else branch to fw-rs. It touches almost no hardware.
+  else branch to opendm40. It touches almost no hardware.
 - **Update format is solved** in `stock/dm40fw.py` (`pack` computes both
   header words for any body length); `stock/README.md` is stale on this.
-- **Biggest real change:** fw-rs now runs **XIP from flash at `0x08004000`**, so
+- **Biggest real change:** opendm40 now runs **XIP from flash at `0x08004000`**, so
   `clock.rs` must configure the PLL **and FMC wait states/cache** itself instead
   of assuming 200 MHz, and `link.x`/`startup.rs` drop the SRAM copy and reserve
   the `0x08008000` marker hole.
-- **Do Stage 0 first:** a `DBG:RECOVER` in the *current* RAM fw-rs that stages a
+- **Do Stage 0 first:** a `DBG:RECOVER` in the *current* RAM opendm40 that stages a
   stock file and resets, proving the FS-loader reflashes stock end-to-end before
   we ever replace the stock app.
 
@@ -397,10 +397,10 @@ known starting point; the risky one is the clock/FMC, addressed in §3.
 1. Physical backstop: answered 2026-10-24, the TX (PA2) to GND short on the
    debug header ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)). SWD / `BOOT0` still open.
 2. Is Option A worth chasing — i.e. finding the FS-loader's own USB-disk trigger
-   so the shim needs no MSC at all — or is fw-rs's existing MSC in recovery mode
+   so the shim needs no MSC at all — or is opendm40's existing MSC in recovery mode
    (Option B) good enough? Option B is the safe default.
 3. OK to run the Stage 0 reflash-to-stock test on the device (it reflashes stock
-   over BT-loaded fw-rs; recoverable by a battery pull if it misbehaves)?
+   over BT-loaded opendm40; recoverable by a battery pull if it misbehaves)?
 
 
 ---
@@ -715,7 +715,7 @@ A2 assert takes a font out of `A2_FONTS`.
 whole 128-byte blocks), and the emulator's full chain (`emu/run.py chain
 --app dump --zero-marker --disk-add opendm40.bin::DM40_FW.BIN`):
 the real FS-loader installs the file, the flash at `0x08004000` equals
-the body, the marker holds the update header, and fw-rs boots from it.
+the body, the marker holds the update header, and opendm40 boots from it.
 
 ### Region C audit #1 (2026-10-22)
 
@@ -776,7 +776,7 @@ bus: none called), ad2streamtest, inrushtest, dcvtest, couptest, powtest,
 senttest, leadstest, burdentest, btwaketest, the HY3131 model unit tests.
 Two wall-clock checks failed once under a load average of ~60 and passed
 on a rerun (ad2streamtest "every captured record drained": 861 < 1000
-records at 1200 S/s; powtest acdc-floor); modetest's fw-rs scenarios get
+records at 1200 S/s; powtest acdc-floor); modetest's opendm40 scenarios get
 no BT reply on the base image as well (0 readings, pre-existing).
 
 Candidates left (measured or estimated, not done):
@@ -827,7 +827,7 @@ The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
 emu/run.py models it): sectors 0-3 16 KiB, 4 64 KiB, 5-11 128 KiB, erase
 by whole sector. Only the low 512 KiB are zero-wait. The FS-loader writes
 an update body only to `0x08004000..0x080A0000`, so anything outside would
-have to be programmed by fw-rs itself (from a companion file on the SPI disk
+have to be programmed by opendm40 itself (from a companion file on the SPI disk
 or a compressed copy in the body), not by the update file.
 
 | range | sector | 0xFF in the dump | usable? |
@@ -836,7 +836,7 @@ or a compressed copy in the body), not by the update file.
 | `0x0800460c..0x08008000` | 1 (region A tail) | 14.8 KB | inside the image, zero-wait: used since 2026-10-22 as region A2 (the `.a2` output section, "Region A2" above) |
 | `0x080AE700..0x080C0000` | 9 (FS-loader + boot data at `0x080A4000`) | ~70 KB | write-once: it can be programmed but never erased (the erase takes the FS-loader and the UID-bound data with it), so never updated |
 | `0x080C0400..0x080E0000` | 10 (calibration / settings) | ~127 KB | write-once likewise (an erase loses the calibration); whether the stock app rewrites this sector on a settings save is not known: a return to stock could wipe it |
-| `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install (fsloader-install-trigger.md): fw-rs would re-program it after each update |
+| `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install (fsloader-install-trigger.md): opendm40 would re-program it after each update |
 
 Sector 11 is the only candidate. Its risks: a version mismatch between the
 image and the overlay (needs a CRC / version check and a "not available"
@@ -1110,12 +1110,12 @@ FWDGT start, recovery and vectors (`.text` 1544).
 ("open file error") with its USB disk (28e9:028f); what to copy and press is in
 [firmware/README.md, Recovery](../README.md#recovery).
 
-**Other entries** to the same state from a running native fw-rs:
+**Other entries** to the same state from a running native opendm40:
 - `DBG:UPDATE`, or its alias `DBG:RECOVER`:
   - Clear `BKP_LAST` (H3), zero the marker, then the deferred SYSRESETREQ.
   - "Flash error" with no reset only if the marker did not read back as zero.
   - **Sync and eject** a just-copied file first (L5).
-- **Developer flow:** copy a new `dm40*.bin` onto fw-rs's own disk, then send
+- **Developer flow:** copy a new `dm40*.bin` onto opendm40's own disk, then send
   `DBG:UPDATE`. The loader finds the file and installs it.
 - The shim still honours the backup-SRAM request word (`BKP_REQ`), but nothing
   sets it now. It is kept for a later in-app "enter recovery".
@@ -1136,9 +1136,9 @@ FWDGT start, recovery and vectors (`.text` 1544).
 ## Normal native mode
 
 `native::start` → `pre_main` (`board::init()` → fatren → calbackup) → the unchanged
-fw-rs `main()`.
+opendm40 `main()`.
 
-**What the stock had been initialising, which fw-rs relied on silently.** This
+**What the stock had been initialising, which opendm40 relied on silently.** This
 comes from an audit of all modules; `board.rs` now does each item, with values
 from the stock boot FUN_0800af34:
 
@@ -1147,7 +1147,7 @@ from the stock boot FUN_0800af34:
   - `lcd`, `Dmm::new` (`hy3131::init_pins`, run once), `dmm.select` (relays)
     and `buzzer_init` (PA7 AF) all ran earlier. On a cold boot their GPIO
     writes would have been lost.
-- **DMA0 clock (AHB1EN bit 21).** fw-rs never enabled it. The BT UART RX DMA
+- **DMA0 clock (AHB1EN bit 21).** opendm40 never enabled it. The BT UART RX DMA
   and the generator DAC DMA only worked because stock had done it. DMA1
   (bit 22) is enabled too.
 - **Rails as at stock boot:** PC0 = 1 (BT module), PE2 = 1 (DMM supply / power
@@ -1170,10 +1170,10 @@ from the stock boot FUN_0800af34:
   - APB1EN bit 7; PSC 99, ARR 99; CCMR1 0x68 (PWM1 + preload); CCER CC1E.
   - CCR1 = 0, dark until `App::new` sets the level.
   - CR1 = ARPE | CEN; PA6 AF9.
-  - fw-rs used to write CCR1 only.
+  - opendm40 used to write CCR1 only.
 - **Clock, TIMPRE and the PLLSAI input:** set by the shim's `init_core`.
   PLLSAI itself stays in `usb.rs`.
-- **FWDGT:** started by the shim. fw-rs used to only feed it.
+- **FWDGT:** started by the shim. opendm40 used to only feed it.
 - **Fonts:** `native` implies `embedded-fonts`.
 - **Unchanged:**
   - spiflash, usb and persist were already self-contained.
@@ -1318,7 +1318,7 @@ the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
   - the same marker again: `CLEAN`, nothing written; no marker: nothing
     renamed; the marker of `DM40FW.BIN`: it is renamed, replacing the backup;
     then `CLEAN`, nothing written;
-  - H1 scenario: a staged stock file with fw-rs installed is not renamed and
+  - H1 scenario: a staged stock file with opendm40 installed is not renamed and
     the backup survives; once the marker is that file's header it is renamed;
   - a long name with leading spaces is handled.
 - **Recovery trigger:**
@@ -1675,7 +1675,7 @@ the AD1 stream ISR).
 - **The settings / calibration record** (`dmm.rs` `load_record` /
   `rec_u32`): read once at start-up into a 1 KiB SRAM copy; `Dmm::ad2_scale`
   (every Wave view frame, LOG:SCALe?), `dmm::cal`, the scope's gain /
-  offset pairs and hwtrig's trigger map read the copy. fw-rs never writes
+  offset pairs and hwtrig's trigger map read the copy. opendm40 never writes
   the record.
 - **Boot-data version bytes** (0x080A4010..12, BT command 02, Device page):
   copied by `Bt::new` (`bt::boot_ver`).
@@ -1915,7 +1915,7 @@ FAT untouched until END); while an upload is active it owns the disk
 (screenshot / csvlog commit / gallery wait), it is dropped after 30 s
 without data. Then `DBG:UPDATE` as before (the loader installs the file and
 deletes it). ~8 s for 480 KB in the emulator. reload.sh falls back to
-staging on the writable USB disk when the running fw-rs has no
+staging on the writable USB disk when the running opendm40 has no
 `DBG:UPLOAD` (older build). The recovery path is untouched (the loader's
 update screen exposes its own USB disk).
 
@@ -2152,7 +2152,7 @@ with the RAM build on 2026-10-22. They are kept here as the record. Keep `stock/
 ### T1 — `test-initcore` (RAM, from the stock 200 MHz state)
 
 1. `tools/reload.sh test-initcore`. Expected:
-   - the screen re-initialises (black, then the fw-rs UI);
+   - the screen re-initialises (black, then the opendm40 UI);
    - the composite 1209:0001 enumerates.
 2. `dm40dbg.py scpi 'DBG:BOOT?'`. Expected:
    - `HXTAL`;
@@ -2218,7 +2218,7 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    only `dm40*.bin`, [why](../README.md#recovery)), `sync` and eject, then press "update". The loader
    installs it and resets (warm, SW reset), or the next cold power-on (short
    press) launches it.
-   - fw-rs comes up in normal mode. The reason is normally `NONE`; it is
+   - opendm40 comes up in normal mode. The reason is normally `NONE`; it is
      `WDT_STALE` only if a watchdog flag from the stock session is still
      latched (stock never clears the flags; SW or POR set means it is never
      counted as our crash). Never `WATCHDOG`/`WDT_RETRY` here.
@@ -2242,10 +2242,10 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
        ≤ about 34 000.
    - The disk now holds `_DM40PRV.BIN` and the backup files.
 2. **First prove the way back.**
-   - Over fw-rs's own disk, copy `dm40_patched.bin` as `dm40_v_2_6.bin`, then
+   - Over opendm40's own disk, copy `dm40_patched.bin` as `dm40_v_2_6.bin`, then
      send `DBG:UPDATE`.
    - The loader installs the patched stock (warm path).
-   - Return to fw-rs the same way from stock, or through the loader screen.
+   - Return to opendm40 the same way from stock, or through the loader screen.
    - Do this before relying on any recovery trigger.
 3. **`DBG:RESET`:** normal boot. `DBG:BOOT?` shows SW (bit 28) and `NONE`.
    fatren runs on every normal boot (no reset-cause gate, review H1); with the
@@ -2260,11 +2260,11 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
    - **Confirm:** hold through the beep for at least 0.5 s more.
      - The marker is zeroed, and the loader update screen and its disk
        appear (PA2 is not the key; it is the debug header's TX pad).
-   - Copy back `_DM40PRV.BIN` as `dm40_fwrs.bin`, then press "update". fw-rs
+   - Copy back `_DM40PRV.BIN` as `dm40_fwrs.bin`, then press "update". opendm40
      returns.
    - `DBG:BOOT?` then shows `last` = `RCVR` and `last_trigger` = `0x54520010`.
 5. **`DBG:RELEASE`:**
-   - About 20 s later the WDT resets, and fw-rs reboots normally.
+   - About 20 s later the WDT resets, and opendm40 reboots normally.
      `DBG:BOOT?` shows `WDT_RETRY` and crash word `0x43520001`.
    - `DBG:RELEASE` again within 60 s of that boot: the WDT reset now goes to
      recovery, and the loader screen appears. Reinstall as in step 4.
@@ -2274,10 +2274,10 @@ the vendor update screen on every boot until `dm40_patched.bin` (or
 7. **Back to patched stock from recovery:** on the loader's disk, copy
    `dm40_patched.bin` as `dm40_v_2_6.bin` and press "update".
 8. **Optional:** idle auto-off on USB power keeps the unit dark and fed (no
-   recovery after 20 s); a key press reboots fw-rs.
+   recovery after 20 s); a key press reboots opendm40.
 9. **H3 check:**
    1. Under stock, cause an FWDGT reset without a power cycle.
-   2. Reinstall fw-rs through the loader.
+   2. Reinstall opendm40 through the loader.
    3. Expect a normal boot: `WDT_STALE`, or `NONE`, never recovery.
 
 ### T3 recovery triggers: owner steps (2026-10-24)
@@ -2286,13 +2286,13 @@ What the shim does, checked in the emulator with the real ROM and FS-loader
 (`emu/recoverytest.py`, all PASS on image sha256 `1372e957…`, built from
 fb6be06; the docs-only changes since build the same bytes):
 
-- **Key:** fw-rs is entered ~0.7 s after power-on (emulator; ROM + loader).
+- **Key:** opendm40 is entered ~0.7 s after power-on (emulator; ROM + loader).
   The shim lights the backlight at once, waits up to 4 s with the key held,
   then blinks the backlight + beeps (~0.3 s), then needs 0.5 s more. Full
   gesture ≈ 5.5 s from power-on. Released earlier, or within the 0.5 s after
   the beep: normal boot.
 - **Watchdog:** one hang (or DBG:RELEASE) = a reboot ~20 s later
-  (`WDT_RETRY`, crash word `0x43520001`). A second one before fw-rs has run
+  (`WDT_RETRY`, crash word `0x43520001`). A second one before opendm40 has run
   60 s (main loop) since that reboot = recovery. After 60 s of running the
   count is cleared (`HEALTHY`, `0x43520000`), so a later hang only reboots.
 - **Recovery** = the 12 marker bytes at `0x08008000` zeroed, then a SW reset:
@@ -2302,26 +2302,26 @@ fb6be06; the docs-only changes since build the same bytes):
   previous mode). It survives resets, not necessarily a power-off without
   battery.
 
-Before: fw-rs running, USB connected; on the PC a copy of the installed image
+Before: opendm40 running, USB connected; on the PC a copy of the installed image
 (`firmware/opendm40.bin` of the installed build, or `INFO/FIRMWARE.BIN`
-from the fw-rs USB drive) to reinstall after each recovery. Reinstall: copy
+from the opendm40 USB drive) to reinstall after each recovery. Reinstall: copy
 it onto the loader's USB disk as `dm40_fwrs.bin` ([the only `dm40*.bin`](../README.md#recovery)),
 `sync`, eject, press "Update".
 
 1. **Short press (normal start).** Power off. Press the power key ~0.5 s.
-   Expect the backlight at once, fw-rs normally.
+   Expect the backlight at once, opendm40 normally.
    `tools/dm40dbg.py boot`: `NORMAL`, reason `NONE`, `hold_ms` < 1000.
 2. **Abort.** Power off. Hold the key; ~4.7 s after power-on the backlight blinks and it
-   beeps; let go right at the beep (within 0.5 s). Expect fw-rs normally;
+   beeps; let go right at the beep (within 0.5 s). Expect opendm40 normally;
    `boot`: `KEY_HOLD_ABORTED`, `hold_ms` 4000..4500.
 3. **Key recovery.** Power off. Hold the key through the beep and keep
    holding until the loader's "open file error / Update" screen appears
    (emulator: ~5.5 s after power-on; on the device the shim's 4 s start only
    after the ROM / loader hand-off, so it may be later). Holding longer is
    harmless: once the 0.5 s after the beep have passed, recovery runs whether
-   the key is still down or not. Expect that screen and its USB disk. Reinstall fw-rs. `boot`: `last` = `0x52564352` (RCVR),
+   the key is still down or not. Expect that screen and its USB disk. Reinstall opendm40. `boot`: `last` = `0x52564352` (RCVR),
    `last_trigger` `0x54520010`, marker `VALID`.
-4. **One hang.** `tools/dm40dbg.py release`. ~20 s later fw-rs reboots.
+4. **One hang.** `tools/dm40dbg.py release`. ~20 s later opendm40 reboots.
    `boot`: `WDT_RETRY`, crash word `0x43520001`, `-` (not yet healthy).
 5. **Healthy clear.** Wait 70 s, then `boot`: `HEALTHY`, `0x43520000`.
    `release` again: reboot, `WDT_RETRY`, `0x43520001` (no recovery).
@@ -2337,7 +2337,7 @@ it onto the loader's USB disk as `dm40_fwrs.bin` ([the only `dm40*.bin`](../READ
 
 ## Developer workflow
 
-Proven on the device (2026-10-13): native fw-rs enumerates as `1209:0001`
+Proven on the device (2026-10-13): native opendm40 enumerates as `1209:0001`
 (USBTMC + a USB disk; since 2026-10-21 the read-only generated volume, the
 SPI FAT no longer exported); `DBG:UPDATE` zeroes the marker and resets, the
 vendor loader then installs the single `dm40*.bin` in the SPI FAT's root
@@ -2348,7 +2348,7 @@ installs the same way.
 1. `./build.sh [cargo args]`; `tools/dm40dbg.py image` validates the
    file (vendor header CRC, body CRC, size, reset vector) before anything is
    staged.
-2. A running fw-rs that does not answer `DBG:BOOT?` (no `DBG:UPDATE`) is
+2. A running opendm40 that does not answer `DBG:BOOT?` (no `DBG:UPDATE`) is
    refused. `28e9:028f` (stock "USB Connect" or the loader
    update screen) is refused unless `--from-stock`.
 3. `dm40dbg.py upload <file>` (2026-10-21, the USB volume is read-only):
@@ -2356,7 +2356,7 @@ installs the same way.
    other `dm40*.bin` there removed first (`_DM40PRV.BIN` kept), CRC-32
    checked on a re-read by the meter ("Unit data" → "Firmware update without
    the writable disk"); then `DBG:FLASH?` must report no SPI write error. A
-   running fw-rs without `DBG:UPLOAD` (older build): the old way, the fw-rs
+   running opendm40 without `DBG:UPLOAD` (older build): the old way, the opendm40
    disk found by USB id through `/sys`, mounted with `udisksctl`, every other
    `dm40*.bin` removed, the image copied as `dm40_fwrs.bin`, synced, compared
    after dropping its pages from the page cache, unmounted.
@@ -2370,4 +2370,4 @@ installs the same way.
 Options: `--no-build`, `--image FILE`, `--wait S`, `--stock FILE` (stock or
 patched stock, same flow, no wait: stock does not enumerate `1209:0001`),
 `--from-stock` (stage onto the `28e9:028f` disk, the user presses "update" or
-power-cycles, waits up to 300 s for fw-rs).
+power-cycles, waits up to 300 s for opendm40).

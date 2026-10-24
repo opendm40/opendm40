@@ -1,4 +1,4 @@
-"""The USB volume's INFO/ files and the slow flash bank (fw-rs vdisk.rs
+"""The USB volume's INFO/ files and the slow flash bank (opendm40 vdisk.rs
 `read_busy`, device b6909d6): while the AD2 stream ISR runs, nothing may load
 from internal flash >= 0x08080000. Those sectors are served from the mirror
 on the SPI disk (vdisk.rs `mirror_boot`, DBG:VDISK:MIR? field 1 = 1); without

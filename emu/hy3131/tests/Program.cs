@@ -177,7 +177,7 @@ namespace Hy3131Tests
         private static readonly byte[] F8R1 = Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50");
 
         /// Fixed connections through the firmware's function changes (relays + rows as the firmware drives them).
-        // fw-rs misconnect sentinel rows (firmware/src/sentinel.rs): the stock row with the idle
+        // opendm40 misconnect sentinel rows (firmware/src/sentinel.rs): the stock row with the idle
         // comparator / AD1 repointed. R20 0x90 = SCMPI PB1 + ENCMP; R20 0x10 = SENSE + ENCMP and
         // R2C |= SS5 in DC A; AC V / mV: R22 0, ENAD1, R24 0x95 (PB1 - PB3), AD1IG 3.6, PKHSEL AD1.
         private static byte[] Sent(byte[] row, int mode)
@@ -210,7 +210,7 @@ namespace Hy3131Tests
 
         private static void SentinelLater()
         {
-            Console.WriteLine("fw-rs sentinels added after 9dd1222 (frequency, AC A, continuity, diode, cap r0..4)");
+            Console.WriteLine("opendm40 sentinels added after 9dd1222 (frequency, AC A, continuity, diode, cap r0..4)");
             foreach(var (row, mode, name) in new[] { (F14, 14, "Freq m14 r0"), (F4R1, 4, "AcA m4 r1"), (F5R0, 5, "AcA m5 r0"), (F11, 11, "Cont m11 r0"),
                                                      (F12, 12, "Diode m12 r0"), (F13R2, 13, "CapOsc m13 r2") })
             {
@@ -241,7 +241,7 @@ namespace Hy3131Tests
                 m.Chip.SetInput("vsrc:5");
                 p = Peak(m, r[9], 0.1);
                 // 5 mV at the tap: 3.6 * 0.005 / 1.25 * 2^18 = 3775
-                Near(p[1], 3775, 150, "  5 V DC on V-COM: PKHMAX ~ 3.8 k (fw-rs threshold 1.51 k = 2 V)");
+                Near(p[1], 3775, 150, "  5 V DC on V-COM: PKHMAX ~ 3.8 k (opendm40 threshold 1.51 k = 2 V)");
                 m.Chip.SetInput("vsrc:0,ac=230,f=50");
                 p = Peak(m, r[9], 0.1);
                 Check(p[1] > 200000 && p[0] < -200000, "  230 V AC: both signs far over", p[0] + ".." + p[1]);
@@ -265,7 +265,7 @@ namespace Hy3131Tests
                 Check(p[1] < 200 && p[0] > -200, what + ", A jack open: AD2 peak near 0", p[0] + ".." + p[1]);
                 m.Chip.SetInput("isrc:0.001");
                 p = Peak(m, r[9], 0.1);
-                Near(p[1], 19900, 500, "  1 mA DC into A: PKHMAX ~ 19.9 k (fw-rs threshold 9.9 k)");
+                Near(p[1], 19900, 500, "  1 mA DC into A: PKHMAX ~ 19.9 k (opendm40 threshold 9.9 k)");
                 m.Chip.SetInput("isrc:0,ac=0.002,f=50");
                 p = Peak(m, r[9], 0.1);
                 Check(p[1] > 30000 && p[0] < -30000, "  2 mA AC: both signs", p[0] + ".." + p[1]);
@@ -339,7 +339,7 @@ namespace Hy3131Tests
                 m2.Chip.SetInput("vsrc:0,ac=5,f=50");
                 p = Peak(m2, r2[9], 0.1);
                 // 5 V rms = 7.07 mV peak at the tap: 3.6 * 0.00707 / 1.25 * 2^18 = 5 338
-                Near(p[1] - p[0], 10676, 300, "  5 V rms AC: swing ~10.7 k (fw-rs swing threshold 4.27 k)");
+                Near(p[1] - p[0], 10676, 300, "  5 V rms AC: swing ~10.7 k (opendm40 swing threshold 4.27 k)");
             }
             {
                 // senseneg (device 0774e70): AC A's SENSE - AGND ramps to the rail at 24 V, ~10 k per hold
@@ -419,7 +419,7 @@ namespace Hy3131Tests
             return r;
         }
 
-        /// fw-rs AC+DC methods (dmm.rs acdc_row): the AD1 ripple window, note 7, the merged
+        /// opendm40 AC+DC methods (dmm.rs acdc_row): the AD1 ripple window, note 7, the merged
         /// and the DC-coupled rows.
         private static void AcdcMethods()
         {
@@ -547,7 +547,7 @@ namespace Hy3131Tests
 
         private static void Sentinel()
         {
-            Console.WriteLine("fw-rs misconnect sentinel (comparator on PB1 / SENSE tap, AD1 peak on PB1 - PB3)");
+            Console.WriteLine("opendm40 misconnect sentinel (comparator on PB1 / SENSE tap, AD1 peak on PB1 - PB3)");
             foreach(var (row, mode, name) in new[] { (F1R0, 1, "DcV m1 r0"), (F1R1, 1, "DcV m1 r1"), (F3R1, 3, "DcMv m3 r1"), (F10R1, 10, "Ohm m10 r1"), (F15R0, 15, "Temp m15 r0"),
                                                      (F0R0, 0, "AcV m0 r0"), (F0R1, 0, "AcV m0 r1"), (F2R1, 2, "AcMv m2 r1"), (F8R0, 8, "DcA m8 r0") })
             {
@@ -628,7 +628,7 @@ namespace Hy3131Tests
                 m.Write(0x29, (byte)(Sent(F0R1, 0)[9] & 0xFB)); m.Write(0x29, Sent(F0R1, 0)[9]);
                 m.Advance(0.12);
                 b = m.Read(0x00, 20);
-                Near(S24(b, 17), 18000, 400, "  0.5 mA DC: PKHMAX ~ 18 k (the fw-rs threshold 17.9 k)");
+                Near(S24(b, 17), 18000, 400, "  0.5 mA DC: PKHMAX ~ 18 k (the opendm40 threshold 17.9 k)");
             }
             {
                 // DC A: comparator on SENSE through the /1000 tap (SS5)
@@ -652,7 +652,7 @@ namespace Hy3131Tests
             }
         }
 
-        // fw-rs power meter rows (firmware/docs/power-meter-and-misconnect.md 3.1 B): written as
+        // opendm40 power meter rows (firmware/docs/power-meter-and-misconnect.md 3.1 B): written as
         // hy3131::configure does: the row with ENAD2 / ENAD3 clear, R36, R34, then R26.
         private static void PowerConfigure(Master m, byte[] row, int iu, int sph = 0)
         {
@@ -696,7 +696,7 @@ namespace Hy3131Tests
 
         private static void Power()
         {
-            Console.WriteLine("fw-rs power meter rows (X = AD2 = I, Y = AD3 = V)");
+            Console.WriteLine("opendm40 power meter rows (X = AD2 = I, Y = AD3 = V)");
             const double C = 262144.0 / 1.25; // codes per volt at IG 1.0
             foreach(var (vr, iu, ir, hex) in new[] { (1, 0, 1, "12 dd 15 03 52 40 80 2d 31 f8 20 00 00 09 28 a0 80 c7 8e ac 88 54"),
                                                     (0, 1, 0, "12 dd 14 03 35 41 80 2d 31 f8 06 00 00 90 28 a0 80 c7 8d ac 88 54"),
@@ -849,7 +849,7 @@ namespace Hy3131Tests
                 Near(ctb / (double)(cta + 0x40000) * 4915200, 60, 0.01, "power row counter: the voltage's 60 Hz (current at 50 Hz)");
             }
             {
-                // fw-rs power meter follow-ups (doc 3.11): a unipolar square (the T1 calibrator,
+                // opendm40 power meter follow-ups (doc 3.11): a unipolar square (the T1 calibrator,
                 // 0..9.6 V) on the 60 V tap never crosses the default -20.8 mV: no count; the
                 // window around its DC (R21 0xBF: +62.5 / +20.8 mV) counts 40 Hz.
                 foreach(var r21 in new byte[] { 0xDD, 0xBF })
@@ -885,7 +885,7 @@ namespace Hy3131Tests
                     Near(Lpf(PowerStat(m, 0x80)), 155, 1, "powz:1 X LPF zero (x1)");
                     m.Chip.SetInput("powz:0");
                 }
-                // fw-rs DC row (powermeter.rs dc_row(1, 5)): a power role with AD1 = OP1O - PB3 on
+                // opendm40 DC row (powermeter.rs dc_row(1, 5)): a power role with AD1 = OP1O - PB3 on
                 // the shunt: 2 A on 10 A x1 -> AD1 = 2 * 0.01 * 0.9 / 1.25 * 2^23; Y LPF = 12 V / 100.
                 {
                     var m = NewChip();
@@ -1085,17 +1085,17 @@ namespace Hy3131Tests
             Check(m.Chip.Transfers > 0, "transfer counter");
         }
 
-        /// FR-38 (B): the data logger's AD2 source (fw-rs hy3131::set_ad2_stream): one AD2F and
+        /// FR-38 (B): the data logger's AD2 source (opendm40 hy3131::set_ad2_stream): one AD2F and
         /// one fresh R03..R05 per conversion period on the chip's grid, the code of the DC-coupled
         /// AC mA row, the rung's rate, and the per-result noise model.
         private static string Hex(byte[] b) => BitConverter.ToString(b).Replace("-", " ");
 
         /// The hardware-SPI byte path (HY3131SpiPort / SpiByte) against the
-        /// bit-banged frames: fw-rs hy3131.rs's SPI2 frame (pulse) and the
+        /// bit-banged frames: opendm40 hy3131.rs's SPI2 frame (pulse) and the
         /// alternative shifted framing (cmd + n + 1 bytes).
         private static void HwSpi()
         {
-            Console.WriteLine("Hardware SPI byte path (fw-rs SPI2 bus)");
+            Console.WriteLine("Hardware SPI byte path (opendm40 SPI2 bus)");
             var m = NewChip();
             m.Configure(F0R0, 0);
             m.Write(0x36, 0x5A);
@@ -1126,7 +1126,7 @@ namespace Hy3131Tests
             // it (side effects included) on BB, pulse and shift alike; the shift's
             // 6 further clocks add nothing. R15..R1D runs into R1E = INTF (clear-
             // on-read): cleared on all three; R15..R1C (tail R1D) on none.
-            // (fw-rs uses the pulse framing: the same clocks as BB.)
+            // (opendm40 uses the pulse framing: the same clocks as BB.)
             foreach(var fr in new[] { 0, 1, 2 })
             {
                 var nm = new[] { "BB", "HW pulse", "HW shift" }[fr];
@@ -1139,7 +1139,7 @@ namespace Hy3131Tests
             m.Chip.Core.ForceIntf(0x1C);
             Check(m.HwRead(0x1E, 1, true)[0] == 0x1C && m.Chip.Core.Intf == 0, "INTF read over HWS: value, then cleared like BB");
             m.Configure(F0R0, 0);
-            // A bit-banged frame right after SPI frames (fw-rs switches the pins for
+            // A bit-banged frame right after SPI frames (opendm40 switches the pins for
             // its references): the SPI's DI bits must not stick in the GPIO's MOSI.
             m.Configure(F0R0, 0);
             m.HwRead(0x1F, 23, false);
@@ -1153,7 +1153,7 @@ namespace Hy3131Tests
         }
 
         /// The timed byte path (GD32_SPI -> HY3131SpiPort.TransmitTimed): CKPH,
-        /// the mode-0 DO margin at /8, a read across an AD2 edge (fw-rs TODO
+        /// the mode-0 DO margin at /8, a read across an AD2 edge (opendm40 TODO
         /// "76.8 kS/s").
         private static void TimedSpi()
         {
@@ -1275,7 +1275,7 @@ namespace Hy3131Tests
             m.Chip.SetInput("dca:0.0123");
             m.Configure(F5R0, 5); // AC mA r0: OP1+ = PB1 (0.5 ohm) x10, AD2 = OP1O - PB3, DC-coupled
             m.Advance(0.05);
-            // fw-rs set_ad2_stream(0x23): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 256 = 9600/s
+            // opendm40 set_ad2_stream(0x23): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 256 = 9600/s
             // (the chopper does not halve the rate: device check of 9dd1222)
             m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0xA3); m.Write(0x1E, 0);
             Near(m.Chip.Core.Ad2Period * 1e6, 104.167, 0.01, "R26 0xA3: 104.167 us (9600/s)");
@@ -1331,7 +1331,7 @@ namespace Hy3131Tests
             }
         }
 
-        /// The INTF read-clears-flag race and the chip-clock offset (fw-rs AD2 stream
+        /// The INTF read-clears-flag race and the chip-clock offset (opendm40 AD2 stream
         /// ISR, docs/dmm-input-scope-feasibility.md 10): an AD2 result completing
         /// within IntfRaceWindow before an INTF read is cleared unreported, its data
         /// stays; ClockPpm moves every conversion grid.
@@ -1801,7 +1801,7 @@ namespace Hy3131Tests
             for(var i = 0; i < 12; i++) { m.Read1(0x1E); var b = ReadAfter(m, 0x10, 1); vals.Add(SqrtRms(b) * 1.25 / 262144 * 100); }
             lo = double.MaxValue; hi = double.MinValue; foreach(var v in vals) { lo = Math.Min(lo, v); hi = Math.Max(hi, v); }
             Check(hi - lo > 0.3, "beat on, row order (AD2 first): +-5 % wander", string.Format("{0:F3}..{1:F3}", lo, hi));
-            // fw-rs order: both off in the row, AD3 then AD2
+            // opendm40 order: both off in the row, AD3 then AD2
             var row = (byte[])F0R1.Clone(); row[6] &= 0x7F; row[20] &= 0x7F;
             m.Configure(row, 0); m.Write(0x34, F0R1[20]); m.Write(0x26, F0R1[6]);
             m.Advance(3.0);

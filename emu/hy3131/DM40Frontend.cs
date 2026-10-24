@@ -88,7 +88,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public CurrentSource ISrc;        // between A and COM
         public VoltageSource VSrcA;       // voltage source between A and COM (wrong jack)
         public double RLoadA = double.PositiveInfinity; // resistor between A and COM
-        public bool LeadVA;               // a test lead from V/ohm to A (the fw-rs fuse check)
+        public bool LeadVA;               // a test lead from V/ohm to A (the opendm40 fuse check)
         public bool FuseOpen;             // the A-jack fuse is blown (a meter property: kept by "open")
 
         public double Die => DieFollowsCj ? CjTemp : DieTemp;

@@ -12,7 +12,7 @@
 //! this is a one-way door into the vendor updater, by design.
 //!
 //! User procedure: the meter restarts into the loader's update screen and a
-//! USB disk appears -> copy a firmware dm40*.bin (the native fw-rs image, or
+//! USB disk appears -> copy a firmware dm40*.bin (the native opendm40 image, or
 //! dm40_v_2_6.bin) onto it -> press "update" on the screen (or power-cycle).
 //!
 //! Recovery needs no SPI flash, FAT, USB, LCD, fonts, touch, HY3131, scope,

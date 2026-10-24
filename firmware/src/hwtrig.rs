@@ -19,7 +19,7 @@
 //! `trig_delay` (2 us at every fast rate) is the comparator latency: the data
 //! crossing sits about 2 us *before* the PA15 edge.
 //!
-//! fw-rs has no peripheral interrupts and must not stop the DMA from an ISR,
+//! opendm40 has no peripheral interrupts and must not stop the DMA from an ISR,
 //! so the stop is moved into hardware:
 //!   * TIM2 CH2 runs in PWM1 with CCR2 = post count; OC2REF is TIM2's TRGO
 //!     (MMS = 5). Before the trigger CNT = 0 < CCR2, so OC2REF is high.

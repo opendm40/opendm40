@@ -1,7 +1,7 @@
 # DM40 emulator (Renode)
 
 A full-system emulator of the Alientek DM40 ([GD32F427VGT6](../hw/datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F at
-200 MHz) that runs the **stock firmware**, our **fw-rs native image** and the
+200 MHz) that runs the **stock firmware**, our **opendm40 native image** and the
 complete **ROM -> FS-loader -> app boot chain** from the flash dump, renders the
 [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) LCD to PNG, accepts injected touches / side keys / the power key,
 feeds scripted DMM and scope inputs, answers the Bluetooth module's AT setup,
@@ -9,12 +9,12 @@ and exposes the machine over GDB.
 
 Everything lives under `emu/`. Nothing here touches the device.
 
-| stock firmware V2.6 | fw-rs |
+| stock firmware V2.6 | opendm40 |
 |---|---|
-| ![stock DMM page](img/stock-dmm.png) | ![fw-rs DMM page](img/fwrs-dmm.png) |
+| ![stock DMM page](img/stock-dmm.png) | ![opendm40 DMM page](img/fwrs-dmm.png) |
 
 *The emulated LCD with 3.3012 V DC on the V-COM jacks (`--dmm dcv:3.3012`):
-the vendor firmware (left, `emu/run.py stock`) and fw-rs (right) both read
+the vendor firmware (left, `emu/run.py stock`) and opendm40 (right) both read
 it through the [HY3131](../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) model.*
 
 ```
@@ -52,7 +52,7 @@ Modes:
 | mode    | flash image                                                                 | starts at |
 |---------|------------------------------------------------------------------------------|-----------|
 | `stock` | dump + pristine V2.6 body (`dm40_v_2_6.dec.bin`) at 0x08004000, marker = header | app (0x08004000) |
-| `fwrs`  | dump + fw-rs native body (`--app ELF|body|dm40*.bin`, default: build from a clean worktree of HEAD) | app |
+| `fwrs`  | dump + opendm40 native body (`--app ELF|body|dm40*.bin`, default: build from a clean worktree of HEAD) | app |
 | `chain` | as `stock` unless `--app` is given (`--app dump` keeps the dump's own app)     | ROM (0x08000000) |
 
 The 1 MiB flash image is composed in `emu/out/flash-<name>.bin` from the
@@ -64,7 +64,7 @@ memory at run time (the stock `SystemInit` only configures the 200 MHz PLL when
 its UID check against 0x080A4000 passes; without the UID file the stock runs at
 16 MHz). By default the UID's bytes 4 and 9 are replaced with the USB/IP port
 ([`run.py`](run.py) `emu_uid`; the stock check never reads those two bytes), so each
-instance has a chip UID, and with it a fw-rs USB / SCSI / `*IDN?` serial
+instance has a chip UID, and with it an opendm40 USB / SCSI / `*IDN?` serial
 number, of its own, never the real meter's: udisks merges disks with the same
 vendor / model / serial into one drive. `--uid HEX24|FILE|unit` sets it
 (`unit` = this unit's UID as is). The SPI-flash FAT comes from
@@ -78,7 +78,7 @@ None of these inputs are committed; generated images are git-ignored.
 * `--model A|B|C` DM40 model: patches the calibration model byte (flash
   0x080C0168) and the record CRC in the composed image (with `--flash`: in a
   copy). Default: the dump's byte (this unit: DM40A). The stock then shows the
-  4000/5000/6000-count range sets and AC+DC only on B/C; fw-rs reports it in
+  4000/5000/6000-count range sets and AC+DC only on B/C; opendm40 reports it in
   `*IDN?` / `SYST:MOD?` ([firmware/docs/model-variants.md](../firmware/docs/model-variants.md)). GTK panel: the DM40A/B/C
   dropdown in the header bar (restarts the emulator; also the printed label).
 * `--disk IMG`, `--disk-add FILE[::NAME]` (mtools copy into a private copy of the
@@ -96,7 +96,7 @@ None of these inputs are committed; generated images are git-ignored.
 * `--gdb [PORT]` GDB server (default 3333), `--pause` do not start the CPU,
   `--interactive` keep the Renode monitor open (`--dry` only writes the `.resc`).
 * `--bt-port PORT` TCP passthrough of the Bluetooth UART (stock measurement
-  protocol / fw-rs SCPI from the host). From scripts: `monitor sysbus.btmodule
+  protocol / opendm40 SCPI from the host). From scripts: `monitor sysbus.btmodule
   SetConnected true` raises PC14 ("module connected"), `SendText "..."` /
   `SendHex ...` inject host bytes (queued as a timed action, so they are safe
   from a script line while the emulation is paused and arrive after resume);
@@ -116,19 +116,19 @@ Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
 (244,166) Settings (190x106 each; [`stock/re/analysis/gui_v2_6.h`](../stock/re/analysis/gui_v2_6.h)).
 
-### fw-rs screens
+### opendm40 screens
 
 All screenshots below come from the emulator, with scripted input signals.
 `run.py --shot` saves the LCD through Renode
-(`sysbus.lcd Screenshot`). The fw-rs pages were opened over USB/IP with
+(`sysbus.lcd Screenshot`). The opendm40 pages were opened over USB/IP with
 `DBG:KEY` / `DBG:TAP` / `DBG:SWIPE` and `CONF:*`, then read back with `DBG:LCD?`
 or a timed `shot` script line.
 
 | | |
 |---|---|
-| ![fw-rs combined view](img/fwrs-combined.png) | ![fw-rs DMM wave view](img/fwrs-wave.png) |
+| ![opendm40 combined view](img/fwrs-combined.png) | ![opendm40 DMM wave view](img/fwrs-wave.png) |
 | *Combined DMM + scope view (`DBG:SWIPE L`): AC V 2.5 V at 50 Hz on the jacks (`--dmm acv:2.5@50@0`), a 1 kHz 2 Vpp sine on the scope input (`--scope sine,1000,2.0`).* | *DMM wave view (MF -> Wave, the scope page with source DMM): a 50 Hz square with 30 % duty and 2.5 V RMS on V-COM, drawn from the [HY3131](../hw/datasheets/hycon-hy3131-datasheet-v10.pdf)'s AD2 stream.* |
-| ![fw-rs power meter](img/fwrs-power.png) | ![fw-rs generator page](img/fwrs-gen.png) |
+| ![opendm40 power meter](img/fwrs-power.png) | ![opendm40 generator page](img/fwrs-gen.png) |
 | *Power meter (`CONF:POW`): 230 V / 50 Hz on V-COM and 1.2 A with PF 0.8 into the A jack (`--dmm 'open;pow:230,f=50,i=1.2,pf=0.8@0'`): P, S, Q, PF, f and energy.* | *Signal generator page (MENU -> Signal), in its default state. The emulator does not model the analog output.* |
 
 ### Live window (`emu/live.py`)
@@ -177,7 +177,7 @@ Renode's monitor TCP port (`renode -P`), so the GUI never blocks the emulation.
   host or Fast mode put virtual time ahead of the wall clock; live.py pauses
   the emulation over the monitor while virtual time is ahead and resumes it
   when the clock has caught up (no catch-up of time lost while slower). Fast
-  fw-rs DMM / scope runs: 0.97x average, <= 1.05x in any 1 s window (uncapped:
+  opendm40 DMM / scope runs: 0.97x average, <= 1.05x in any 1 s window (uncapped:
   up to 1.23x). [`run.py`](run.py) (batch) is not capped.
 * Header bar: firmware (stock / fwrs / chain, restarts the machine), Fast
   (PerformanceInMips 50, roughly real time on this host), real-time cap, pause, restart,
@@ -210,7 +210,7 @@ emu/usbip_client.py config 1-0           # interfaces + endpoints
 emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,<chip UID hex = emu_uid>,dm40-fw 0.1
 emu/usbip_client.py scpi-tcp 1-0 5025    # SCPI lines on TCP 5025 <-> USBTMC, e.g. for
                                          # sigrok-cli -d scpi-dmm:conn=tcp-raw/127.0.0.1/5025
-emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY, READ(10) LBA 0 (FAT boot sector); fw-rs native:
+emu/usbip_client.py msc    1-0 0         # INQUIRY, READ CAPACITY, READ(10) LBA 0 (FAT boot sector); opendm40 native:
                                          # ONE LUN, the generated volume (4160541 x 512 B, src/vdisk.rs; read-only
                                          # by default, writable after Settings 3/3 USB disk = PC can edit + re-attach)
 emu/usbip_client.py luns   1-0           # GET MAX LUN + per-LUN INQUIRY / TUR / capacity / MODE SENSE WP /
@@ -218,7 +218,7 @@ emu/usbip_client.py luns   1-0           # GET MAX LUN + per-LUN INQUIRY / TUR /
 emu/usbip_client.py mscdump 1-0 0 out.img  # FAT volume of a LUN (metadata + used clusters, incl. the 16 MiB
                                          # DEBUG/SPIFLASH.BIN: ~2 min) for fsck.fat / mtools; resumable
                                          # (exit 2: restart the emulator, rerun)
-emu/usbip_client.py upload 1-0 opendm40.bin  # fw-rs DBG:UPLOAD -> DM40FW.BIN in the SPI root (~8 s)
+emu/usbip_client.py upload 1-0 opendm40.bin  # opendm40 DBG:UPLOAD -> DM40FW.BIN in the SPI root (~8 s)
 USBIP_PORT=3251 emu/usbip_client.py ...  # a server on another port (--usbip-port 3251)
 emu/usbip_client.py read   1-0 0x1FFF7A10 12    # usbrw image: vendor EP0 read (the UID)
 emu/usbip_client.py write  1-0 0x20028FC0 02    # usbrw image: vendor EP0 write + read-back
@@ -231,7 +231,7 @@ Renode's (`emulation CreateUSBIPServer` + `host.usb Register`), which only
 speed. With Renode's server, the usbrw image (ep0 memrw session) passes its
 acceptance (descriptor 28e9:02f0, UID read, RAM write + read-back); on the
 model's server it has not been run (its control OUT with a data stage is
-untested). fw-rs enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
+untested). opendm40 enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
 MSC. Stock firmware: the device exists only after Settings > Other > USB
 Connect; a DEVLIST / IMPORT whose descriptor read gets no answer within 3 s
 lists no device / refuses the import. After USB Connect the stock (V2.6,
@@ -269,7 +269,7 @@ boots a KVM guest (the host's Ubuntu -generic kernel from its .deb, the
 host's modules and usbip tool, busybox) that attaches the emulator over
 vhci-hcd with `usbip --tcp-port`, mounts the volume (usb-storage, sd, vfat)
 and drives SCPI over /dev/usbtmc0: a fast-log session, then INFO/ copies
-while it streams (the NOT READY answer of fw-rs vdisk.rs
+while it streams (the NOT READY answer of opendm40 vdisk.rs
 `read_busy`; firmware/docs/native-boot.md "The slow flash bank while an AD2
 stream runs"). Ports in 39000-39999 for parallel runs.
 
@@ -304,7 +304,7 @@ server:
   re-enumerates; the reply waits until it handled USBRST) followed by
   SET_ADDRESS(1): vhci-hcd handles SET_ADDRESS itself and never sends it,
   and the stock's GD32 library STALLs SET_CONFIGURATION in the Default state
-  (fw-rs's usb-device accepts it); one import at a time; DEVLIST of an
+  (opendm40's usb-device accepts it); one import at a time; DEVLIST of an
   imported device answers from cached descriptors.
 * EP0 STALL is cleared when the driver pops the SETUP from the Rx FIFO
   (GRXSTSP), not when the host queues it, and the host ignores an EP0 STALL
@@ -329,7 +329,7 @@ URB longer than 64 bytes is split into packets (a USBTMC message over 52
 bytes used to be dropped). [`usbtmc_stress.py`](usbtmc_stress.py) (thousands of command / query
 pairs, multi-packet messages and replies, small TransferSize rounds,
 pipelined URBs, stale REQUESTs, INITIATE_CLEAR, aborts; `--port`, `--seed`,
-`--cases`) exercises fw-rs's USBTMC over USB/IP: 3000 iterations pass on the
+`--cases`) exercises opendm40's USBTMC over USB/IP: 3000 iterations pass on the
 model's server (144 s). Every reply must end with the `\n` terminator (a
 block reply too, after the block). A Bulk-IN URB for which the device never sends data stays
 pending on its own endpoint only (with Renode's server it blocked every
@@ -344,7 +344,7 @@ the choice to a range of one's own, e.g. `DM40_EMU_PORTS=48000-48999
 emu/mscresettest.py --app ...`.
 [`ejecttest.py`](ejecttest.py) still needs TCP 3240 for its `usbip attach` proxy.
 
-`gallerytest.py --app <ELF> [--port P] [--shots DIR]` drives the fw-rs
+`gallerytest.py --app <ELF> [--port P] [--shots DIR]` drives the opendm40
 gallery (src/gallery.rs) like a user over USB/IP (DBG:KEY / TAP / SWIPE) on
 a private copy of the MSC dump with 8 screenshots (S003..S007 added): grid
 pages and swipes, the viewer (the whole screen read back with DBG:LCD? must
@@ -352,7 +352,7 @@ equal the BMP), Delete -> Cancel, Delete -> Delete (MMEM:CAT? 8 -> 7),
 MENU back out (~8 min).
 
 `wavtest.py --app <ELF> [--port P] [--bt-port P]` checks the scope waveform
-readout (fw-rs src/scope_wav.rs) against the scope feeder's sine: the
+readout (opendm40 src/scope_wav.rs) against the scope feeder's sine: the
 default WAV:DATA?, WAV:POIN / FORM / PRE?, DIGitize / SINGle / TRIG:STAT?,
 the 53 KB WORD record streamed over USBTMC in 4096-byte rounds and in one
 64 KiB round, decimation, CHAN1:OFFS, an abandoned stream, and the
@@ -361,7 +361,7 @@ comparator trigger off: the comparator path sometimes never completes a
 frame after a restart in the emulator.
 
 A scenario test prints one line per case and a `RESULT` line per scenario,
-e.g. [`emu/hy3131/freqtest.py`](hy3131/freqtest.py) (fw-rs DMM frequency after a function change,
+e.g. [`emu/hy3131/freqtest.py`](hy3131/freqtest.py) (opendm40 DMM frequency after a function change,
 40 Hz 1 V square on V-COM; two of its scenarios):
 
 ```
@@ -393,18 +393,18 @@ commands go to the Renode monitor (`monitor sysbus.lcd Screenshot @/tmp/x.png`).
 |---|---|---|
 | a | stock app boots to its main UI -> PNG | **reached**: DMM page at ~1 s virtual, 3 s run takes ~30 s wall |
 | b | stock DMM and scope pages via injected taps -> PNG | **reached**: MENU key -> main menu -> Oscilloscope tile; scope page acquires and measures the fed waveform (`emu/out/stock-scope.png`) |
-| c | fw-rs native image boots through the shim -> PNG | **reached**: DMM page with the scripted input, BT module set-up, menu, scope page (`emu/out/fwrs-scope.png`); USBTMC `*IDN?` and MSC over USB/IP |
-| d | full chain ROM -> FS-loader -> app from the dump | **reached** (`--trace-boot`): ROM at 0, FS-loader at 0.50 s, app at 0.64 s; with PA2 held the loader shows its "open file error / Update" screen; with `--zero-marker --disk-add <update>` the loader installs the file into flash (verified byte-for-byte against the fw-rs body) and resets into it |
+| c | opendm40 native image boots through the shim -> PNG | **reached**: DMM page with the scripted input, BT module set-up, menu, scope page (`emu/out/fwrs-scope.png`); USBTMC `*IDN?` and MSC over USB/IP |
+| d | full chain ROM -> FS-loader -> app from the dump | **reached** (`--trace-boot`): ROM at 0, FS-loader at 0.50 s, app at 0.64 s; with PA2 held the loader shows its "open file error / Update" screen; with `--zero-marker --disk-add <update>` the loader installs the file into flash (verified byte-for-byte against the opendm40 body) and resets into it |
 
 ## What is modelled, what is stubbed
 
 | block | model | notes |
 |---|---|---|
 | CPU, NVIC, SysTick | Renode `cortex-m4f`, SysTick at 200 MHz | PerformanceInMips 200 so busy loops roughly match virtual time |
-| DWT CYCCNT | [`DWT.cs`](peripherals/DWT.cs) (sysbus.dwt) from virtual time | fw-rs's time base; every CYCCNT write is logged (the clock marker, "Input markers" below); `ZeroedAt` / `FwUptime` from the monitor |
-| CPU cost | [`CpuCost.cs`](peripherals/CpuCost.cs) (sysbus.cpucost) | the device is ~1.8x slower per instruction than PerformanceInMips 200: `--mips 110` matches its idle AC V main-loop pass (22 vs 23 us) and its 76.8 kS/s disk Run pass (617-681 vs 718 us, ~1400 vs 1272 passes/s; fw-rs device check 7409b92). `IsrStallNs n`: n ns per stream ISR entry inside the busy window fw-rs measures (cpu_permille; 700 at --mips 110 gives ~520 against the device's 544 at 76 800 S/s: the device runs 1.48 ISR entries per sample there, the model 1.13); it lengthens every entry, so a large n adds overruns the device does not have. `PcSampleStart` / `PcSampleDump path`: the interrupted main-code PC at every ISR entry (a profile of the main loop while the stream runs). Default: off, --mips 200 |
+| DWT CYCCNT | [`DWT.cs`](peripherals/DWT.cs) (sysbus.dwt) from virtual time | opendm40's time base; every CYCCNT write is logged (the clock marker, "Input markers" below); `ZeroedAt` / `FwUptime` from the monitor |
+| CPU cost | [`CpuCost.cs`](peripherals/CpuCost.cs) (sysbus.cpucost) | the device is ~1.8x slower per instruction than PerformanceInMips 200: `--mips 110` matches its idle AC V main-loop pass (22 vs 23 us) and its 76.8 kS/s disk Run pass (617-681 vs 718 us, ~1400 vs 1272 passes/s; opendm40 device check 7409b92). `IsrStallNs n`: n ns per stream ISR entry inside the busy window opendm40 measures (cpu_permille; 700 at --mips 110 gives ~520 against the device's 544 at 76 800 S/s: the device runs 1.48 ISR entries per sample there, the model 1.13); it lengthens every entry, so a large n adds overruns the device does not have. `PcSampleStart` / `PcSampleDump path`: the interrupted main-code PC at every ISR entry (a profile of the main loop while the stream runs). Default: off, --mips 200 |
 | flash 1 MiB, SRAM 192 K, TCM 64 K, backup SRAM, system memory (OTP/UID) | mapped memory | option bytes via the flash controller's region |
-| FMC flash controller | Renode `STM32F4_FlashController` | key/lock, sector erase (STM32F4 sector map), BUSY never set; programming = plain writes (the FS-loader's install and fw-rs's marker zeroing work) |
+| FMC flash controller | Renode `STM32F4_FlashController` | key/lock, sector erase (STM32F4 sector map), BUSY never set; programming = plain writes (the FS-loader's install and opendm40's marker zeroing work) |
 | RCC, PWR | Renode `STM32F4_RCC`, `STM32_PWR` | ready bits follow enable bits (HSE/PLL/PLLSAI), over-drive handshake modelled; clock *values* are not: every timer runs at 200 MHz (TIMPRE) |
 | FSMC | registers = RAM; bank 1 = [`ILI9488.cs`](peripherals/ILI9488.cs) | A16 = RS; 2A/2B/2C/2E (RGB666 read-back packing), 36 MADCTL, 3A, D3 ID = 0x9488, 11/29; `Screenshot path`, `AutoShot dir n`, `DumpGram` |
 | GPIO A..I | [`GD32_GPIO.cs`](peripherals/GD32_GPIO.cs) | own model: Renode 1.17.0's `STM32_GPIOPort` writes every pin's input state on an ODR write (no mode check), which broke the bit-banged [HY3131](../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) MISO. Pull-ups give the idle level of undriven inputs (PA2 reads high unless driven). PE5 -> EXTI line 5, PA15 -> TIM2 CH1 |
@@ -413,9 +413,9 @@ commands go to the Renode monitor (`monitor sysbus.lcd Screenshot @/tmp/x.png`).
 | TIM4, TIM7, TIM9..11 | Renode `STM32_Timer` at 200 MHz | interrupt tick timers |
 | TIM3, TIM6, TIM12..14 | [`PwmTimer.cs`](peripherals/PwmTimer.cs) | PWM / DAC trigger: registers, CNT from virtual time, no events |
 | DMA1/DMA2 | [`GD32_DMA.cs`](peripherals/GD32_DMA.cs) | own model: one request = one data unit, NDTR counts down, HTIF/TCIF, circular, double buffer, M2M; `Feed(stream, value)` for the ADC feeder |
-| SPI1 (0x40003800) + W25Q128 | [`GD32_SPI.cs`](peripherals/GD32_SPI.cs) (timed bytes) + [`W25Q128.cs`](peripherals/W25Q128.cs) | file-backed 16 MiB, CS = PE4; READ/FAST READ/PP/SE/BE/CE/WREN/RDSR/REMS/JEDEC/RUID; `Load`, `Save`; busy times `ProgramUs` / `Erase*Us` (fastlogtest profiles); `StrictBusy` (default): a command other than a status read during BUSY is ignored (a READ gives 0xFF), as on the chip. The bus's `IdleStartNs` (run.py `--spi-disk-gap-ns`, default 330): a byte written to an idle shifter starts that much later, so a polled write-wait-read byte costs ~0.97 us at 12.5 MHz as on the device (back-to-back page-program bytes 0.64 us); without it the INFO/ mirror's reads during a 76800 disk session looked ~20x cheaper than on the device (fw-rs TODO, device 612c45c M2) |
+| SPI1 (0x40003800) + W25Q128 | [`GD32_SPI.cs`](peripherals/GD32_SPI.cs) (timed bytes) + [`W25Q128.cs`](peripherals/W25Q128.cs) | file-backed 16 MiB, CS = PE4; READ/FAST READ/PP/SE/BE/CE/WREN/RDSR/REMS/JEDEC/RUID; `Load`, `Save`; busy times `ProgramUs` / `Erase*Us` (fastlogtest profiles); `StrictBusy` (default): a command other than a status read during BUSY is ignored (a READ gives 0xFF), as on the chip. The bus's `IdleStartNs` (run.py `--spi-disk-gap-ns`, default 330): a byte written to an idle shifter starts that much later, so a polled write-wait-read byte costs ~0.97 us at 12.5 MHz as on the device (back-to-back page-program bytes 0.64 us); without it the INFO/ mirror's reads during a 76800 disk session looked ~20x cheaper than on the device (opendm40 TODO, device 612c45c M2) |
 | I2C2 (0x40005C00) + touch | [`GD32_I2C.cs`](peripherals/GD32_I2C.cs) + [`CST_Touch.cs`](peripherals/CST_Touch.cs) | own I2C master (SBSEND/ADDSEND/BTC/TBE/RBNE, AERR for absent addresses, ACKEN/POAP, DMA RX/TX requests, DMALST); Hynitron 0x5A protocol (D1 01/09, D2 04, D0 00 frame, D0 07.., D0 00 AB ack); `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
-| HY3131 DMM ADC | `HY3131.cs` (a symlink to [`emu/hy3131/HY3131.cs`](hy3131/HY3131.cs), as is `DM40Frontend.cs`; that README has the research and tests) | full register map with the datasheet semantics (INTF cleared on read, CTA/CTB/CTC counter, ENxxx clears, R37 reset); conversion timing: AD1 period = OSR1 * 30 / SYSCLK, doubled with the chopper (25 / 100 / 400 ms), AD2/AD3 + LPF + true RMS at their own rates, frequency counter, comparator (CMP pin), peak hold, temperature sensor; a per-row analog model of every stock configuration (V, mV, A ranges, ohm, continuity, diode, capacitance by RC oscillator and current ramp, Hz/duty, thermocouple with cold junction) that applies the meter's own calibration so the stock and fw-rs show the scripted input. Inputs: `SetInput "spec"` / `--dmm SPEC[@T]` / script `T dmm SPEC`; `SetVin V` kept for old scripts |
+| HY3131 DMM ADC | `HY3131.cs` (a symlink to [`emu/hy3131/HY3131.cs`](hy3131/HY3131.cs), as is `DM40Frontend.cs`; that README has the research and tests) | full register map with the datasheet semantics (INTF cleared on read, CTA/CTB/CTC counter, ENxxx clears, R37 reset); conversion timing: AD1 period = OSR1 * 30 / SYSCLK, doubled with the chopper (25 / 100 / 400 ms), AD2/AD3 + LPF + true RMS at their own rates, frequency counter, comparator (CMP pin), peak hold, temperature sensor; a per-row analog model of every stock configuration (V, mV, A ranges, ohm, continuity, diode, capacitance by RC oscillator and current ramp, Hz/duty, thermocouple with cold junction) that applies the meter's own calibration so the stock and opendm40 show the scripted input. Inputs: `SetInput "spec"` / `--dmm SPEC[@T]` / script `T dmm SPEC`; `SetVin V` kept for old scripts |
 | [3PA1030](../hw/datasheets/3peak-3pa1030-reva1.pdf) scope ADC + comparator | [`ScopeFeeder.cs`](peripherals/ScopeFeeder.cs) | sample n = TIM1 update event n (`GD32_Timer.UpdateEventsUntil/TimeOfUpdate`, so TIM5's trigger start, one-pulse stops and TIM2 gating are exact); code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; samples go to DMA2 stream 4 in bulk every 100 us and before any stream register access (NDTR exact). Comparator: crossings found one tick ahead, PA15 driven at the crossing's virtual time + 2 us (the board's comparator latency = stock `trig_delay`), INVERTED (high while signal < level, as [`firmware/src/hwtrig.rs`](../firmware/src/hwtrig.rs) documents), level = DAC2 with the stock default map (1780 -> code 300, 2401 -> 780), 2 codes hysteresis |
 | UART4 + BT module | Renode `STM32_UART` + [`BtModule.cs`](peripherals/BtModule.cs) | AT+SBN/CBN/SLED0/RESET answered, PC14 "connected" while a TCP host is attached (`--bt-port`), `SendHex`/`SendText` from scripts |
 | ADC0 | [`SimpleADC.cs`](peripherals/SimpleADC.cs) | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
@@ -453,7 +453,7 @@ instructions):
    Renode compiled each `include` separately (start-up 5.6 s -> 3.2 s).
 4. `--fast` = `PerformanceInMips 50`. Both firmwares spin in their main loops,
    so the wall time is set by instructions per virtual second; at 50 MIPS the
-   UI work takes up to 4x longer in virtual time (fw-rs needs ~4 s instead of
+   UI work takes up to 4x longer in virtual time (opendm40 needs ~4 s instead of
    ~2.5 s before it takes the first key), timing-sensitive code is unchanged
    (all delays are timer / DWT based). Screens differ only where the UI is
    mid-update.
@@ -469,7 +469,7 @@ would need per-firmware hooks and was not done.
 
 * Speed: 2-4x slower than real time at full MIPS, about real time
   with `--fast`.
-* fw-rs: taps and side keys work; horizontal swipes were not recognised by
+* opendm40: taps and side keys work; horizontal swipes were not recognised by
   the gesture engine in the emulator (the drag reports arrive every 20 ms
   with an INT pulse each; not investigated).
 * Scope trigger (`--fast`, screenshots in `emu/out/`):
@@ -479,7 +479,7 @@ would need per-firmware hooks and was not done.
   of the sine lands at 5 us/div = 50 MS/s with a continuous trace through
   the marker (`stock-trigger-1khz-5us.png`); Normal mode -> `T'D` with the
   signal and `WAIT` after `--scope dc,0,0` (`stock-trigger-normal-*.png`).
-  fw-rs: its comparator engine (TIM2 PWM2 OC2REF gating TIM1 from ITR1) runs
+  opendm40: its comparator engine (TIM2 PWM2 OC2REF gating TIM1 from ITR1) runs
   in the emulator once enabled (`fwrs-hwtrig.png`); `DBG:HWTRIG:ENABLE 0|1`
   over USB/IP switches it (`DBG:*` is refused over Bluetooth). Timebase/trigger controls of the
   stock: MF key -> popup, Trigger tab at (263,42), Rising (55,92) /
@@ -491,15 +491,15 @@ would need per-firmware hooks and was not done.
 
 ## Use
 
-| stock | fw-rs |
+| stock | opendm40 |
 |---|---|
-| ![stock scope page](img/stock-scope.png) | ![fw-rs scope page](img/fwrs-scope.png) |
+| ![stock scope page](img/stock-scope.png) | ![opendm40 scope page](img/fwrs-scope.png) |
 
 *Scope pages. Stock (left): its default 10 ms/div, so the 1 kHz 1 Vpp sine
-is a dense band; it measures Freq 1.00 kHz, Vp-p 902 mV, Vrms 342 mV. fw-rs
+is a dense band; it measures Freq 1.00 kHz, Vp-p 902 mV, Vrms 342 mV. opendm40
 (right): a 1 kHz 2 Vpp sine at 200 us/div.*
 
-`emu/out/stock-scope.png` and `emu/out/fwrs-scope.png` (the stock and fw-rs
+`emu/out/stock-scope.png` and `emu/out/fwrs-scope.png` (the stock and opendm40
 scope pages with the same input; the stock measures Vrms 341-342 mV) are
 generated by:
 
@@ -511,12 +511,12 @@ emu/run.py fwrs --name fwrs-scope --run-for 6 --key menu@2.5 --tap 339,105@3.2 \
 ```
 
 Other useful checks: `--vin 1.234` shows 1.2488 V on the stock (the dump's
-calibration gain applied) and the raw-scaled value on fw-rs; the loader
+calibration gain applied) and the raw-scaled value on opendm40; the loader
 install path (`chain --pa2 -1 --zero-marker --disk-add <dm40 update>`) exercises
 the flash controller, the SPI disk and the reset path end to end.
 
-Recovery triggers (fw-rs shim, [`firmware/src/boot.rs`](../firmware/src/boot.rs)): `emu/recoverytest.py
---app <fw-rs ELF>` runs the chain ROM -> FS-loader -> fw-rs and checks the
+Recovery triggers (opendm40 shim, [`firmware/src/boot.rs`](../firmware/src/boot.rs)): `emu/recoverytest.py
+--app <opendm40 ELF>` runs the chain ROM -> FS-loader -> opendm40 and checks the
 power-key hold from off (short press, abort in the confirm window, the full
 hold -> FS-loader update screen), the watchdog crash counter (one hang = a
 reboot, a second hang within 60 s of running main loop = the update screen,
@@ -527,7 +527,7 @@ over USB. About 6 min wall for the default 8 cases at `--jobs 8`.
 
 Scenario tests change the input at fixed virtual times (`--script` /
 `--dmm SPEC@T`) and read the firmware's uptime (DBG:PING?). The two clocks
-differ by the boot: fw-rs's uptime is the virtual time since its last DWT
+differ by the boot: opendm40's uptime is the virtual time since its last DWT
 CYCCNT write (`Clock::new` in main): 3.56 s of virtual time on a fresh disk
 with `--fast` at 7bd7f6f (pre_main's SPI-disk work: fatdir, calbackup,
 `vdisk::mirror_boot`); 2.85 s at ab7184c, before the device-like SPI byte
@@ -566,6 +566,6 @@ modetest, switchtest's steps) need nothing.
 * `private/memrw-kit-test/full/uid_1FFF7A10.bin` (bytes 4 / 9 = the USB/IP port; `--uid` to set it)
 * `stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` (copied to `emu/out/disk.bin`)
 * `dm40_v_2_6.dec.bin` (stock body), [`stock/dm40fw.py`](../stock/dm40fw.py) (header words)
-* fw-rs: `git worktree add --detach emu/out/fwrs-worktree HEAD` + `./build.sh native`
+* opendm40: `git worktree add --detach emu/out/fwrs-worktree HEAD` + `./build.sh native`
   (`native` is the only build; the argument lets `--rev` build older commits).
   The worktree stays for reuse; `git worktree remove emu/out/fwrs-worktree` drops it.

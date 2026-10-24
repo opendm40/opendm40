@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run the stock firmware and fw-rs through every DMM mode in the emulator with
+"""Run the stock firmware and opendm40 through every DMM mode in the emulator with
 scripted HY3131 inputs and compare what they report with the input.
 
 Stock: the Bluetooth measurement protocol (bt_meas_v2_6.h, cmd 06 sets the
-mode, cmd 09 returns the shown values); fw-rs: SCPI over the same UART
+mode, cmd 09 returns the shown values); opendm40: SCPI over the same UART
 (CONF:<f>, READ?). Both go through run.py's --bt-port passthrough: a TCP
 client polls (wall clock, the emulation runs ~10x slower than real time),
 switches the function once the firmware answers, and keeps polling until the
@@ -58,7 +58,7 @@ SCENARIOS = [
 # An expectation is a number (value +- max(atol, rtol * value) with the per-function tolerance),
 # 'zero' (|x| < zero floor), 'ol' (no valid reading / over range), or None (record only).
 CROSS_CONNECTIONS = [
-    # cont with a source / diode / capacitor: the stock clamps the negative code to 0 ohm, fw-rs shows the
+    # cont with a source / diode / capacitor: the stock clamps the negative code to 0 ohm, opendm40 shows the
     # negative value; diode mode on a stiff 1.234 V source reads the source (below the 3 V full scale)
     ('V 1.234', 'vsrc:1.234', {'dcv': 1.234, 'acv': 'zero', 'dca': 'zero', 'aca': 'zero', 'ohm': 'ol', 'cont': None,
                                'diode': 1.234, 'cap': None, 'hz': None, 'temp': None}),
@@ -82,7 +82,7 @@ CROSS_CONNECTIONS = [
 ]
 CROSS_FUNCTIONS = {  # name: (stock mode byte, SCPI function, tolerance rel, abs, zero floor, run_for)
     'dcv': (0x28, 'VOLT:DC', 0.001, 0.0002, 0.0005, 8),
-    'acv': (0x68, 'VOLT:AC', 0.01, 0.002, 0.02, 9),  # zero floor 20 mV: fw-rs keeps ~18 mV of the entry transient on a DC source
+    'acv': (0x68, 'VOLT:AC', 0.01, 0.002, 0.02, 9),  # zero floor 20 mV: opendm40 keeps ~18 mV of the entry transient on a DC source
     'dca': (0x31, 'CURR:DC', 0.02, 2e-5, 5e-5, 9),
     'aca': (0x71, 'CURR:AC', 0.01, 5e-5, 1e-4, 9),
     'ohm': (0x32, 'RES', 0.005, 1.0, 1.0, 11),
@@ -110,7 +110,7 @@ def cross_scenarios(only=None):
 
 STOCK_SETTINGS = 0x080C0000
 POLL_WALL = 1.5  # seconds of wall time between requests (~0.15 s virtual)
-START_LOCK = threading.Lock()  # run.py's fw-rs preparation (git checkout in the shared worktree) is not reentrant
+START_LOCK = threading.Lock()  # run.py's opendm40 preparation (git checkout in the shared worktree) is not reentrant
 
 
 def crc16_8005(data, init=0xFFFF):
@@ -316,7 +316,7 @@ def run_one(fw, sc, port, fast):
     if want is None:
         res['ok'] = True  # record only
     elif want == 'ol':
-        # no valid reading: the stock sends 0xFFFF (None), fw-rs +9.9E37 (filtered out) -> last stays None
+        # no valid reading: the stock sends 0xFFFF (None), opendm40 +9.9E37 (filtered out) -> last stays None
         res['ok'] = res['last'] is None
         if fw == 'fwrs' and res['last'] is None and not any(isinstance(v, float) and v >= 9e37 for v in res['readings']):
             res['ok'] = False  # no reply at all
@@ -375,12 +375,12 @@ def main():
     jobs = [(fw, sc) for fw in fws for sc in scs]
     os.makedirs(OUT, exist_ok=True)
     if 'fwrs' in fws:
-        # build fw-rs once up front: parallel first runs would race in the shared worktree
+        # build opendm40 once up front: parallel first runs would race in the shared worktree
         pre_tag = 'hy-prebuild-%d' % os.getpid()
         pre = subprocess.run([sys.executable, RUNNER, 'fwrs', '--name', pre_tag, '--dry'], cwd=ROOT,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if not os.path.exists(os.path.join(OUT, pre_tag + '.resc')):  # --dry exits 1 with the .resc path
-            sys.exit('fw-rs build failed:\n' + pre.stdout[-2000:])
+            sys.exit('opendm40 build failed:\n' + pre.stdout[-2000:])
         for x in (pre_tag + '.resc', 'flash-%s.bin' % pre_tag):
             if os.path.exists(os.path.join(OUT, x)):
                 os.remove(os.path.join(OUT, x))

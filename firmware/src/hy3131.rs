@@ -222,7 +222,7 @@ pub fn isr_read(reg: u8, buf: &mut [u8]) -> bool {
 
 /// TIMER6 (STM32 name TIM7, 0x4000_1400, APB1, IRQ 55): the AD2 stream tick
 /// (decisions #3: a timer, not EXTI11 on PC11, which is also SPI2 MISO).
-/// Free in fw-rs: TIM1/2/3/5/8 hwtrig + scope, TIM6/12 generator, TIM13/14
+/// Free in opendm40: TIM1/2/3/5/8 hwtrig + scope, TIM6/12 generator, TIM13/14
 /// backlight / buzzer; only the stock firmware's key scan used it.
 /// Kernel clock 200 MHz (APB1 x4, TIMPRE, clock.rs); PSC 3 -> 50 MHz count
 /// (20 ns), the 16-bit ARR up to 1.31 ms: the ISR sets every interval
@@ -942,7 +942,7 @@ pub fn configure(cfg: &[u8; CFG_LEN]) {
         // starts in a bad phase of the shared AD2/AD3 decimation (period
         // OSR2 / FAD2CLK = 13 us) sqrt(RMS) beats against the signal for as
         // long as the row stays: +-11 % on the 40 Hz PWM at AC V r1, both in
-        // plain AC and in AC+DC (docs/acdc-stock-vs-fwrs.md, "Read-path
+        // plain AC and in AC+DC (docs/acdc-stock-vs-opendm40.md, "Read-path
         // investigation"). Enabling AD3 first and AD2 last was clean for
         // every skew tried (0..15 us), so the row goes out with both off
         // and they are switched on in that order.
@@ -1011,7 +1011,7 @@ pub fn lpf19(b: &[u8]) -> i32 {
 // emu/hy3131/RESEARCH.md 3; the emulator models this formula (and agrees
 // with the data logger's 38 Hz measured on the device at 0x13); a direct
 // device measurement of the DMM rates is still pending (TODO.md).
-// Before 2026-10-14 fw-rs assumed OSR / SYSCLK here (16x too short at OSR
+// Before 2026-10-14 opendm40 assumed OSR / SYSCLK here (16x too short at OSR
 // 2048: 417 us) and an "SPI-limited" logger; the bit-banged link needs
 // ~122 us per sample (read1(INTF) ~45 us + 3-byte AD1 read ~77 us), far
 // below every conversion period, so the chip sets the pace at every code.

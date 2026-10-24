@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A USB/IP mass-storage device for a real kernel, backed by the fw-rs USB
+"""A USB/IP mass-storage device for a real kernel, backed by the opendm40 USB
 volume code (vdisk.rs + vwrite.rs through `main ... vserve`, vserve.py):
 the kernel attaches it with `sudo usbip attach -r 127.0.0.1 -b 1-1`, mounts
 it (udisks / GNOME), and whatever Linux writes for rm / mv to the trash /

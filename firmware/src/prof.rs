@@ -14,7 +14,7 @@
 //! without it); it fires on any drawing, related to the touch or not.
 //!
 //! Hooks outside main.rs are optional: a section that was never entered
-//! prints n = 0. fw-rs is single-threaded with no ISRs, so plain statics.
+//! prints n = 0. opendm40 is single-threaded with no ISRs, so plain statics.
 //! Cost: a CYCCNT read and ~20 cycles of bookkeeping per call; one integer
 //! division (cycles -> us) per exit.
 //!

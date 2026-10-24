@@ -3,7 +3,7 @@
 
 Reusable class to source a known signal (voltage, mV, current, resistance,
 frequency, PWM, ...) and read it back, used by verify_dmm.py to check the
-Alientek DM40 running fw-rs against a reference.
+Alientek DM40 running opendm40 against a reference.
 
 Hardware / protocol (register map below; resistance: func 3 mode 1, i32 = 0.1 ohm, max 4000):
   - USB CDC-ACM, typically /dev/ttyACM1 (VID:PID 0483:5740).

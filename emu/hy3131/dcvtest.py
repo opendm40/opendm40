@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs DC-coupled V row on AD2 (feasibility 1.3 last row / E7, src/ad2exp.rs
+"""opendm40 DC-coupled V row on AD2 (feasibility 1.3 last row / E7, src/ad2exp.rs
 `dcv_row` / `dc_enter`) in the emulator: LOG:SOURce AD2 in DC V.
 
   cd firmware && ./build.sh
@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=3611, help='USB/IP port (default 3611)')
 A = ap.parse_args()
 NOM = 10 * 1.25 / 262144.0

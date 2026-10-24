@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs: the INFO/ slow-bank mirror on the SPI disk (src/vdisk.rs
+"""opendm40: the INFO/ slow-bank mirror on the SPI disk (src/vdisk.rs
 `mirror_boot`, docs/native-boot.md "The slow flash bank while an AD2 stream
 runs") across boots. Each boot runs the emulator for --run-for virtual
 seconds with --save-disk / --save-flash, asks DBG:VDISK:MIR? (served,
@@ -34,8 +34,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF (image A)')
-ap.add_argument('--app2', required=True, help='another fw-rs native ELF (image B, e.g. --features keep-screen)')
+ap.add_argument('--app', required=True, help='opendm40 native ELF (image A)')
+ap.add_argument('--app2', required=True, help='another opendm40 native ELF (image B, e.g. --features keep-screen)')
 ap.add_argument('--port', type=int, default=None, help='USB/IP port (default: run.free_port, DM40_EMU_PORTS)')
 ap.add_argument('--run-for', type=float, default=30, help='virtual seconds per boot (the disk is saved at the end)')
 ap.add_argument('--fallback-only', action='store_true', help='only boot 6 (a blank SPI disk: no mirror, NOT READY)')

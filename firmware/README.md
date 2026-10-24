@@ -1,6 +1,6 @@
-# fw-rs: open firmware for the Alientek DM40
+# opendm40: open firmware for the Alientek DM40
 
-fw-rs is a replacement firmware, written in Rust, for the Alientek DM40
+opendm40 is a replacement firmware, written in Rust, for the Alientek DM40
 multimeter, oscilloscope and signal generator. The multimeter, the scope and
 the generator run at the same time; you only switch what the screen shows.
 It keeps the stock look and touch model and adds a power meter, data
@@ -53,7 +53,7 @@ temperature functions can show a false A-JACK. While the scope is powered
 
 ## Differences from the stock firmware (V2.6)
 
-| | Stock | fw-rs |
+| | Stock | opendm40 |
 |---|---|---|
 | Instruments | One at a time (the generator keeps running with the scope) | DMM, scope and generator together; combined view |
 | Ranges | By model: 400 mV, 4 V ... (A), 500 mV ... (B), 600 mV ... (C) | 600 mV, 6 V ... (60000 counts) on every model |
@@ -66,9 +66,9 @@ temperature functions can show a false A-JACK. While the scope is powered
 
 ## Install
 
-**Backups.** Installing fw-rs rewrites only the application area; then back
+**Backups.** Installing opendm40 rewrites only the application area; then back
 up the unit data from its USB drive, as in
-[README.md, Back up with fw-rs](../README.md#back-up-with-fw-rs). Charge the
+[README.md, Back up with opendm40](../README.md#back-up-with-fw-rs). Charge the
 battery.
 
 1. Build `opendm40.bin` (see "Build" below).
@@ -76,15 +76,15 @@ battery.
 3. Copy the file onto that USB disk as `dm40_fwrs.bin`, as the only
    `dm40*.bin` there ([why](#recovery)). Eject.
 4. Power the meter off and on (a cold boot): the stock update procedure.
-   `tools/reload.sh --from-stock` stages the file for you and waits for fw-rs.
+   `tools/reload.sh --from-stock` stages the file for you and waits for opendm40.
 5. **The first boot is dark for a few seconds.** Do not power-cycle in the
    first 10 s.
 
-Tested: fw-rs installs from a running fw-rs ([`tools/reload.sh`](tools/reload.sh))
+Tested: opendm40 installs from a running opendm40 ([`tools/reload.sh`](tools/reload.sh))
 and from the vendor loader's update screen. Steps 2-4 were used on this meter
 with a stock-size image (the patched stock of the memrw kit) but **not yet
-with an fw-rs image**. The stock app can also flash a `dm40*.bin` from its
-disk by itself when USB is unplugged; that is not checked for an fw-rs image
+with an opendm40 image**. The stock app can also flash a `dm40*.bin` from its
+disk by itself when USB is unplugged; that is not checked for an opendm40 image
 either. If the meter stops on the loader's update screen, copy the file onto
 the loader's USB disk and press "update" (see Recovery).
 
@@ -107,26 +107,26 @@ disk on every boot until a good file is installed.
 
 To reach the update screen:
 
-- `python3 tools/dm40dbg.py update` (`DBG:UPDATE`) while fw-rs answers on USB;
-- with fw-rs's drive in "PC can edit" mode (Settings 3/3, "USB disk"), copy a
-  `dm40*.bin` onto it and answer "Install it now?" with Yes: fw-rs hands that
+- `python3 tools/dm40dbg.py update` (`DBG:UPDATE`) while opendm40 answers on USB;
+- with opendm40's drive in "PC can edit" mode (Settings 3/3, "USB disk"), copy a
+  `dm40*.bin` onto it and answer "Install it now?" with Yes: opendm40 hands that
   file to the loader directly;
 - from off, hold the power key ~5 s: the screen lights, ~4 s later the
   backlight blinks and it beeps; keep holding at least 0.5 s after the beep.
   Letting go during those 0.5 s cancels (normal start). Checked in the
   emulator ([`../emu/recoverytest.py`](../emu/recoverytest.py)), not yet on the device;
-- automatically after a second hang (watchdog reset) before fw-rs has run
-  60 s since the first one: the first hang only reboots fw-rs, a second one
+- automatically after a second hang (watchdog reset) before opendm40 has run
+  60 s since the first one: the first hang only reboots opendm40, a second one
   with less than 60 s of running in between opens the update screen. Each
   watchdog reset comes ~20 s after the hang, so the two resets can be up to
   ~80 s apart. Checked in the emulator, not yet on the device;
-- if fw-rs is too broken for any of these, whatever the firmware does: open
+- if opendm40 is too broken for any of these, whatever the firmware does: open
   the case and short the debug header's TX pad (PA2) to GND at power-on, see
   [hw/README.md, Hardware recovery](../hw/README.md#hardware-recovery).
 
 Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
 "update". The loader deletes the file after a successful install.
-`INFO/FIRMWARE.BIN` on the fw-rs USB drive is the running image as an update
+`INFO/FIRMWARE.BIN` on the opendm40 USB drive is the running image as an update
 file; keep a copy.
 
 **One update file at a time.** Keep exactly one `dm40*.bin` on the disk: the
@@ -139,7 +139,7 @@ not leave files with that name there by accident.
 **Back to stock:** copy the official
 [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin)
 onto the loader's disk and press "update", or run
-`tools/reload.sh --stock FILE` while fw-rs runs (tested with a patched stock
+`tools/reload.sh --stock FILE` while opendm40 runs (tested with a patched stock
 image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
 
 ## Build
@@ -148,11 +148,11 @@ image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
 ./build.sh                    # -> opendm40.bin (needs ../toolchain)
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
-../emu/run.py fwrs --run-for 4 --shot out.png   # run fw-rs in the emulator
+../emu/run.py fwrs --run-for 4 --shot out.png   # run opendm40 in the emulator
 ```
 
 The emulator ([emu/README.md](../emu/README.md)) runs both the stock
-firmware and fw-rs. It needs a flash dump of your own meter (not in the
+firmware and opendm40. It needs a flash dump of your own meter (not in the
 repo).
 
 ## More
@@ -163,6 +163,6 @@ repo).
 - [docs/parity.md](docs/parity.md): item-by-item comparison with the stock firmware
 - [docs/device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log
 - Feature docs: [power meter and alerts](docs/power-meter-and-misconnect.md),
-  [inrush](docs/inrush-current.md), [AC+DC](docs/acdc-stock-vs-fwrs.md),
+  [inrush](docs/inrush-current.md), [AC+DC](docs/acdc-stock-vs-opendm40.md),
   [log format](docs/compact-log-format.md), [Bluetooth SCPI](docs/bt-scpi.md),
   [DM40A / B / C](docs/model-variants.md)

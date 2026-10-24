@@ -1,14 +1,14 @@
 //
-// CPU cost model (2026-10-23, fw-rs TODO "76.8 kS/s"). The emulator runs one
+// CPU cost model (2026-10-23, opendm40 TODO "76.8 kS/s"). The emulator runs one
 // instruction per 200 MHz cycle with no flash / APB / bus wait states; the
 // device is ~1.8x slower per instruction (an idle AC V main-loop pass: 23 us
 // on the device, 12.7 us here, 22-23 us at `run.py --mips 110`). That
 // factor is the CPU's PerformanceInMips (run.py --mips, fastlogtest.py
-// --mips). On top of it `IsrStallNs n` stalls every interrupt handler (fw-rs
+// --mips). On top of it `IsrStallNs n` stalls every interrupt handler (opendm40
 // enables one: TIMER6, the stream ISR) for n ns of virtual time, right after
 // the handler's first DWT CYCCNT read (DWT.cs calls OnCycRead; Renode
 // realizes a SkipTime at the next time sync, the handler's last CYCCNT read):
-// inside the busy window fw-rs measures (logger.rs BUSY16, DBG:ISR?
+// inside the busy window opendm40 measures (logger.rs BUSY16, DBG:ISR?
 // cpu_permille), after the sample's stamp. 0 = off (the default).
 // It stands for ISR work the model does not produce (device 7409b92 at
 // 76 800 S/s: 1.48 handlers per sample against 1.13 here, cpu_permille 544

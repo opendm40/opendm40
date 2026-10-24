@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs scope waveform readout (src/scope_wav.rs: WAV:POINts / FORMat /
+"""opendm40 scope waveform readout (src/scope_wav.rs: WAV:POINts / FORMat /
 PREamble? / DATA?, DIGitize, TRIGger:STATus?, CHANnel1:OFFSet, ACQ:SRATe?)
 in the emulator, against the scope input model's sine.
 
@@ -43,7 +43,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF / image')
+ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=24140, help='USB/IP port (default 24140)')
 ap.add_argument('--bt-port', type=int, default=24141, help='BT passthrough port (default 24141)')
 ap.add_argument('--hz', type=float, default=1000.0, help='input sine frequency')

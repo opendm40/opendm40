@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs gallery (src/gallery.rs, region C) end to end in the emulator:
+"""opendm40 gallery (src/gallery.rs, region C) end to end in the emulator:
 open, page scroll, the full-screen viewer, file steps, the Delete dialog
 (Cancel, then Delete), back, driven like a user (DBG:KEY / DBG:TAP /
 DBG:SWIPE) and checked over SCPI (MMEM:CAT?, DBG:LCD?).
@@ -34,7 +34,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-ap.add_argument('--app', required=True, help='fw-rs native ELF')
+ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=19310, help='USB/IP port (default 19310)')
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')

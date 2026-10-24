@@ -38,7 +38,7 @@ pub const STAGES_PER_STEP: u8 = 3;
 pub const DB_FLOOR: f32 = -200.0;
 
 /// FFT windows: the stock five (Math popup, Other tab; the stock spells
-/// "Hanming") and flat-top (fw-rs, amplitude-accurate).
+/// "Hanming") and flat-top (opendm40, amplitude-accurate).
 pub const WIN_NAMES: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
 pub const W_RECT: u8 = 0;
 pub const W_BLACKMAN: u8 = 1;
