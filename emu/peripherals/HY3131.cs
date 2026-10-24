@@ -709,6 +709,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swhz": SwTrHz = o.Value; break;
                 case "ctsettle": CtSettleMs = o.Value; break;
                 case "ctretain": CtRetain = o.Value != 0; break;
+                case "ct0dead": Ct0DeadMs = o.Value; break;
                 case "powvg": PowVGain = o.Value; break;
                 case "powz": PowZeros = o.Value != 0; break;
                 case "vnoise": vNoise = o.Value; break;
@@ -967,13 +968,16 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             if(!ctEnabled || !double.IsNaN(ctStop)) return;
             double f, duty;
+            ctNow = now;
             CounterSignal(out f, out duty);
             if(f <= 0) return; // no edges: CTA runs, nothing else happens
             var period = 1.0 / f;
             if(!ctStartDecided)
             {
                 // first (seen) rising edge after enable opens the gate
-                var k = Math.Ceiling((ctEnableTime - ctPhase) / period);
+                // (not before the end of a ct0dead window: those edges were not seen)
+                var t0 = Ct0DeadMs > 0 && role == Role.Freq && !EnCntI ? Math.Max(ctEnableTime, Ct0DeadEnd) : ctEnableTime;
+                var k = Math.Ceiling((t0 - ctPhase) / period);
                 if(EdgeHidden((long)k, period)) k++;
                 ctStart = ctPhase + k * period;
                 ctStartDecided = true;
@@ -1012,6 +1016,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double CtSettleMs;
         /// Datasheet CTA<23:8> retention across ENCTR = 0 (SetCounterEnable); "ctretain:0" = off.
         public bool CtRetain = true;
+        /// Frequency row, comparator source: no edges for this long after a row change
+        /// ("ct0dead:ms", CounterSignal; off by default).
+        public double Ct0DeadMs;
+        private double Ct0DeadEnd => swT0 + Ct0DeadMs * 1e-3;
+        private double ctNow;
         private double CtSettleEnd => swT0 + CtSettleMs * 1e-3;
         private bool EdgeHidden(long k, double period)
         {
@@ -1037,6 +1046,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private void CounterSignal(out double f, out double duty)
         {
             f = 0; duty = 0;
+            // ct0dead: the frequency row's comparator source (ENCNTI = 0) counts no edges for
+            // ct0dead ms after the row change (device 0774e70: 0 Hz / 0 % in source 0xf0's
+            // first gates after every Hz entry; source 0x08 read the signal).
+            if(Ct0DeadMs > 0 && role == Role.Freq && !EnCntI && ctNow < Ct0DeadEnd) return;
             if(role == Role.CapOsc)
             {
                 var r = CapOscR();
