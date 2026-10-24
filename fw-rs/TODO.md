@@ -149,6 +149,20 @@ Code work (in this order):
         and wins alone, then the 1e6 tie with source 1's first result. Fix: f == 0 is no result for `seen`, and a
         1e6 tie goes to the non-zero source. AC V secondary line "--" then 40.00 from 0.7 s; power meter F
         +9.91E37 then 40.00, unchanged by CONF:POW 60.
+        **Fixed (branch freqfirst2, emulator only):** `Freq::take`: a gate without edges (CTB 0), one still
+        inside its 53.3 ms (CTA >= 0xfc0000, `ctr_valid`), f = 0 or a glitch is no result (the source drops
+        out, the other shows); nothing valid = no reading (the placeholder "--" stays, READ? and the
+        statistics wait); 0.000 Hz only when both sources counted nothing twice in a row (once each after a
+        value was shown). The first gate after the settle is source 1's (0x08), as f0d21eb's clean 1.37 s
+        readings were. Model: `ct0dead:MS` (the Hz row's comparator source counts nothing for MS after the row
+        change); freqtest `entry-dead` / `wake` / `acv` (ct0dead:2500) fail on 7bd7f6f with 0.000 Hz first
+        readings, `nosig` checks 0.000 Hz with nothing connected.
+        **Device retest (freqfirst2):** as 1-3 above (10x DC V -> Hz with 5 READ?, Scope -> back 3x per page,
+        AC V / AC+DC -> Hz 5x): every READ? 40.00 Hz, the first at ~1.4 s (Scope -> back ~0.9 s), the screen
+        "--" (never "0.000 Hz" / "0.0 %") until then, MIN / MAX / AVG start at 40.00. (7) Nothing on V-COM
+        (calibrator off), CONF:FREQ: READ? 0.000 Hz within ~3 s, no hang. (8) Calibrator 40 Hz -> off while in
+        Hz: 0.000 Hz within ~1 s. (9) Optional, if a DBG counter readout is added: does source 0 (0xf0) ever
+        read the signal on the Hz row?
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
         SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).

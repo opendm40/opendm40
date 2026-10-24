@@ -601,13 +601,87 @@ struct Freq {
     /// (`freq_restart_fresh`). Device 2026-10-24: DC V -> Hz read 0.00 /
     /// 0.99 / 17.04 / 19.94 Hz on the first READ? of a 40 Hz square.
     fresh: bool,
-    /// The source has a clean result since the restart (`freq_best`).
+    /// The source's latest result is a clean, non-zero one (`Freq::take`).
     seen: [bool; 2],
+    /// Results in a row without counted edges per source (`Freq::take`).
+    zc: [u8; 2],
+    /// A value was shown since the restart (`Freq::take`).
+    shown: bool,
     last: [f32; 2],
+    /// The duty (%) of each source's `last`.
+    lastd: [f32; 2],
     change: [f32; 2],
     f_khz: f32,
     duty: f32,
     range: u8,
+}
+
+/// `Freq::take`: what this gate's result lets the frequency mode show.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum FreqPick {
+    /// Nothing yet (no reading: the display keeps "--", READ? waits).
+    None,
+    /// The source's `last` value.
+    Src(usize),
+    /// No signal: both sources counted no edges (0.000 Hz).
+    NoSignal,
+}
+
+impl Freq {
+    /// The sources start over (a row write, `poll_freq_mode`).
+    fn restart_sources(&mut self) {
+        self.seen = [false; 2];
+        self.zc = [0; 2];
+        self.shown = false;
+        self.change = [1e6; 2];
+    }
+
+    /// One gate's result of source `i` (`f` kHz, duty `d` %, `ok`: a whole
+    /// gate with counted edges, `ctr_valid`). Device 0774e70 (2026-10-24):
+    /// after every Hz entry source 0 (0xf0) read 0 Hz / 0 % in its first
+    /// gates and was shown (0.000 Hz in amber, into READ? and MIN / AVG)
+    /// until source 1 won at 2.42 s. So a gate without edges is no result:
+    /// the source drops out (`seen` false) and the other one shows; a
+    /// glitch (`freq_glitch`) is no result either. 0.000 Hz (no signal)
+    /// only once both sources counted nothing NO_SIGNAL_N times in a row
+    /// (once each after a value was shown: the signal went away).
+    fn take(&mut self, i: usize, f: f32, d: f32, ok: bool) -> FreqPick {
+        const NO_SIGNAL_N: u8 = 2;
+        let glitch = freq_glitch(f, d);
+        if !ok || f <= 0.0 {
+            self.seen[i] = false;
+            self.zc[i] = self.zc[i].saturating_add(1);
+            self.change[i] = 1e6;
+        } else if glitch {
+            // Edges missed: neither a value nor "no signal"; the last clean
+            // value stays the source's.
+            self.change[i] = 1e6;
+            self.zc[i] = 0;
+            if self.seen[i] {
+                // A source whose latest gate glitched does not show now.
+                self.seen[i] = false;
+            }
+        } else {
+            // A source's first clean result has no change to rank it by
+            // (1e6: shown only while it is the one source with a result).
+            self.change[i] = if self.seen[i] { freq_change(f, d, self.last[i]) } else { 1e6 };
+            self.last[i] = f;
+            self.lastd[i] = d;
+            self.seen[i] = true;
+            self.zc[i] = 0;
+        }
+        let pick = match freq_best(self.seen, self.last, self.change) {
+            Some(b) => FreqPick::Src(b),
+            None => {
+                let n = if self.shown { 1 } else { NO_SIGNAL_N };
+                if self.zc[0] >= n && self.zc[1] >= n { FreqPick::NoSignal } else { FreqPick::None }
+            }
+        };
+        if pick != FreqPick::None {
+            self.shown = true;
+        }
+        pick
+    }
 }
 
 /// HY3131 counter registers (CTC R15..17, CTB R18..1A, CTA R1B..1D) ->
@@ -655,6 +729,13 @@ pub(crate) fn freq_best(seen: [bool; 2], last: [f32; 2], change: [f32; 2]) -> Op
         return Some(hi);
     }
     Some((change[1] < change[0]) as usize)
+}
+
+/// A counter read is a whole gate with counted edges: CTB > 0, and CTA past
+/// its overflow (it counts up from the 0xfc0000 preset; at or above it the
+/// 53.3 ms have not run out, the counts are a gate in progress).
+pub(crate) fn ctr_valid(ctb: u32, cta: u32) -> bool {
+    ctb > 0 && cta < 0xFC_0000
 }
 
 /// Restart the HY3131 counter on source `src` (R20 without ENCTR): ENCTR
@@ -1285,7 +1366,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], last: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -1957,8 +2038,7 @@ impl Dmm {
         // counter, an earlier frequency session): the first two results
         // of each source decide afresh.
         self.freq.last = [0.0; 2];
-        self.freq.change = [1e6; 2];
-        self.freq.seen = [false; 2];
+        self.freq.restart_sources();
         self.freq.src_alt = false;
         self.ramp.first = true;
     }
@@ -4026,11 +4106,19 @@ impl Dmm {
     }
 
     fn read_counters(&mut self, src: u8) -> (f32, f32) {
+        let (f, d, _) = self.read_counters_ok(src);
+        (f, d)
+    }
+
+    /// `read_counters` plus whether the gate is a result (`ctr_valid`).
+    fn read_counters_ok(&mut self, src: u8) -> (f32, f32, bool) {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         ctr_restart(src);
-        counter_vals(u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]))
+        let (ctc, ctb, cta) = (u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]));
+        let (f, d) = counter_vals(ctc, ctb, cta);
+        (f, d, ctr_valid(ctb, cta))
     }
 
     /// The first counter access after a row write (`Freq::fresh`): the gate
@@ -4222,11 +4310,13 @@ impl Dmm {
     }
 
     fn poll_freq_mode(&mut self, now: u64) -> Option<Reading> {
-        if self.freq_restart_fresh(now, 0xF0) {
-            // The next gate is source 0's (0xf0); the sources start over.
-            self.freq.src_alt = false;
-            self.freq.seen = [false; 2];
-            self.freq.change = [1e6; 2];
+        if self.freq_restart_fresh(now, 0x08) {
+            // The first gate is source 1's (0x08): source 0 (0xf0) counted
+            // nothing in its first gates after every Hz entry on the device
+            // (0774e70; f0d21eb's clean first readings at 1.37 s were source
+            // 1's too). The sources start over.
+            self.freq.src_alt = true;
+            self.freq.restart_sources();
             return None;
         }
         if now < self.freq.next {
@@ -4237,25 +4327,20 @@ impl Dmm {
         // restart it with the other one (0xf0 comparator / 0x08 ENCNTI).
         let i = self.freq.src_alt as usize;
         let next_src = if self.freq.src_alt { 0xF0 } else { 0x08 };
-        let (f, d) = self.read_counters(next_src);
-        let glitch = freq_glitch(f, d);
-        // A source's first clean result has no change to rank it by (1e6:
-        // shown only while it is the one source with a result).
-        self.freq.change[i] = if self.freq.seen[i] { freq_change(f, d, self.freq.last[i]) } else { 1e6 };
-        // A glitch result is not kept as the source's last value either.
-        if !glitch {
-            self.freq.last[i] = f;
-            self.freq.seen[i] = true;
-        }
+        let (f, d, ok) = self.read_counters_ok(next_src);
         self.freq.src_alt = !self.freq.src_alt;
-        let best = freq_best(self.freq.seen, self.freq.last, self.freq.change)?;
-        if glitch && best == i {
-            // Neither source has a clean result: no reading this gate.
-            return None;
-        }
-        self.freq.f_khz = self.freq.last[best];
-        if best == i {
-            self.freq.duty = d;
+        match self.freq.take(i, f, d, ok) {
+            // Nothing valid yet: no reading (the display keeps "--", READ?
+            // and the statistics wait).
+            FreqPick::None => return None,
+            FreqPick::NoSignal => {
+                self.freq.f_khz = 0.0;
+                self.freq.duty = 0.0;
+            }
+            FreqPick::Src(best) => {
+                self.freq.f_khz = self.freq.last[best];
+                self.freq.duty = self.freq.lastd[best];
+            }
         }
         if !self.manual {
             self.freq_range();
@@ -4752,6 +4837,54 @@ mod tests {
         // No history after a function change: a clean first result (change
         // from 0) still beats a glitch.
         assert!(freq_change(f, 50.0, 0.0) < freq_change(0.013334, 100.0, 0.013334));
+    }
+
+    fn freq0() -> Freq {
+        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0 }
+    }
+
+    #[test]
+    fn freq_take_zero_is_no_result() {
+        let f = 0.0400017f32;
+        // Device 0774e70: source 0 reads 0 Hz / 0 % in its first gates,
+        // source 1 the signal. Entry order as poll_freq_mode: 1, 0, 1, 0.
+        let mut q = freq0();
+        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::Src(1));
+        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, true), FreqPick::Src(1)); // f 0: no result even when "whole"
+        assert_eq!(q.lastd[1], 50.0);
+        // Source 0 first with 0, then source 1 with 0 too: nothing (not 0.000 Hz).
+        let mut q = freq0();
+        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
+        // ... no signal: both counted nothing twice -> 0.000 Hz.
+        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::NoSignal);
+        // A signal comes: shown at once.
+        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+        // It goes away: one empty gate each is enough now.
+        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::Src(0));
+        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::NoSignal);
+        // An incomplete gate (`ok` false) with a value is no result either.
+        let mut q = freq0();
+        assert_eq!(q.take(1, 0.013, 30.0, false), FreqPick::None);
+        // A glitch is no result, and does not count as "no signal".
+        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
+        // Both clean and equal: the tie stays with one of them (source 0).
+        let mut q = freq0();
+        q.take(1, f, 50.0, true);
+        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+    }
+
+    #[test]
+    fn ctr_valid_gate() {
+        assert!(ctr_valid(3, 0x01_2000)); // whole gate: CTA past the overflow
+        assert!(!ctr_valid(0, 0x01_2000)); // no edges
+        assert!(!ctr_valid(2, 0xFD_0000)); // the 53.3 ms not run out
     }
 
     #[test]
