@@ -1,146 +1,8 @@
-# opendm40: open firmware for the Alientek DM40
+# opendm40 firmware: developer README
 
-opendm40 is a replacement firmware, written in Rust, for the Alientek DM40
-multimeter, oscilloscope and signal generator. The multimeter, the scope and
-the generator run at the same time; you only switch what the screen shows.
-It keeps the stock look and touch model and adds a power meter, data
-logging, USBTMC/SCPI and more. It installs like a stock update file and
-leaves the vendor bootloader, the vendor update loader and the calibration
-untouched.
-
-**Status: experimental.** Developed and tested on one DM40A. DM40B and DM40C
-ran only in the emulator. In the table, *device* means checked on that DM40A
-([device check log](docs/device-check-2026-10-21.md)); *emulator* means
-checked only in the emulator or in host tests.
-
-![DMM main screen](docs/img/dmm.png)
-
-## Features
-
-| Feature | What it does | Checked |
-|---|---|---|
-| Multimeter | All 16 stock functions. 60000-count ranges and AC+DC on every model. HOLD, AutoHold, REL, MIN/MAX/AVG, limits, trend chart, bargraph. | device |
-| DMM + scope at once | Combined view: the DMM reading in a strip above the live scope. | device |
-| Scope | Stock timebases and V/div, Auto/Normal/Single, hardware trigger, 20 measurements, FFT, Save CSV; pulse and runt trigger, cursors. | device; pulse / runt trigger and cursors: emulator |
-| Generator | Sine, triangle and ramp up to 50 kHz, square up to 10 MHz, DC offset; keeps running on every page. | ran on the device; output not measured there |
-| Power meter (W) | V and I at the same time: P, S, Q, PF, f, Wh, VAh. DC, AC or AC+DC coupling, with the DC and AC parts. | device without current; with current: emulator |
-| AUTO AC/DC | Shows the DC or the AC part, whichever the signal is. | device on V; on A: emulator |
-| Inrush current | 10 A range: triggers on a current step, shows the RMS of the first 100 ms and the peak, saves the trace. | emulator |
-| Burden voltage | Voltage drop across the shunt in the A / mA / uA functions (off by default). | device without current |
-| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, "Leads in A jack?" reminder, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | reminder: device; A-JACK / A-PROT and the alarm: emulator (no current through A on the device yet); fuse check: not yet |
-| Record page | Logs the DMM to the internal disk: every reading, or the mean per 1 s / 10 s / 1 min, until stopped or for 10 min .. 24 h. | device |
-| Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device up to 38.4 kS/s; 76.8 kS/s: emulator |
-| USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows 11 read-only (VM); macOS untested |
-| USBTMC / SCPI | 34401A-style `CONF` / `MEAS?` / `READ?`, plus the scope, the generator, the power meter and the loggers. | device |
-| sigrok | A libsigrok `scpi-dmm` profile for the DM40 (not upstream yet); a 34401A emulation for unpatched sigrok / SmuView. | profile: device (sigrok-cli, every selectable function); emulation: emulator |
-| Bluetooth | The stock phone-app protocol, plus SCPI over the same link. | device |
-| Screenshots, gallery | 3-finger swipe saves a BMP (as on stock); a gallery shows screenshots and logs on the meter. | device |
-
-| | | |
-|---|---|---|
-| ![DMM + scope](docs/img/combined.png) DMM + scope, generator on | ![Scope with FFT](docs/img/scope.png) Scope with FFT | ![Generator](docs/img/generator.png) Generator |
-| ![Power meter](docs/img/power.png) Power meter, AC+DC parts | ![AUTO AC/DC](docs/img/auto-acdc.png) AUTO AC/DC | ![Inrush](docs/img/inrush.png) Inrush current |
-| ![Burden voltage](docs/img/burden.png) Burden voltage | ![A-JACK alert](docs/img/ajack.png) A-JACK alert | ![Record page](docs/img/record.png) Record page |
-
-The screens are renders of the firmware's own drawing code with synthetic
-values (`tools/ui-render/run.sh OUT --readme`), not photos.
-
-Known open issues ([TODO.md](TODO.md)): with 5-10 V on V-COM, the ohm and
-temperature functions can show a false A-JACK. While the scope is powered
-(combined view, scope page), a fast square on the DMM input reads about
-0.2 % high. In the combined view, power units are clipped ("mW" looks like
-"mV").
-
-## Differences from the stock firmware (V2.6)
-
-| | Stock | opendm40 |
-|---|---|---|
-| Instruments | One at a time (the generator keeps running with the scope) | DMM, scope and generator together; combined view |
-| Ranges | By model: 400 mV, 4 V ... (A), 500 mV ... (B), 600 mV ... (C) | 600 mV, 6 V ... (60000 counts) on every model |
-| AC+DC | DM40B / C only | Every model |
-| Power meter, inrush, burden, AUTO AC/DC, misconnect alerts | No | Yes |
-| Data logging | No | Record page, fast logger |
-| USB | Mass storage ("USB Connect") | USBTMC/SCPI + a generated drive with CSV files |
-| Bluetooth | Phone-app protocol | Same, plus SCPI |
-| Languages | Chinese (simplified, traditional), English | English only |
-
-## Install
-
-**Backups.** Installing opendm40 rewrites only the application area; then back
-up the unit data from its USB drive, as in
-[README.md, Back up with opendm40](../README.md#back-up-with-fw-rs). Charge the
-battery.
-
-1. Build `opendm40.bin` (see "Build" below).
-2. On the stock meter: Settings > Other Settings > USB Connect.
-3. Copy the file onto that USB disk as `dm40_fwrs.bin`, as the only
-   `dm40*.bin` there ([why](#recovery)). Eject.
-4. Power the meter off and on (a cold boot): the stock update procedure.
-   `tools/reload.sh --from-stock` stages the file for you and waits for opendm40.
-5. **The first boot is dark for a few seconds.** Do not power-cycle in the
-   first 10 s.
-
-Tested: opendm40 installs from a running opendm40 ([`tools/reload.sh`](tools/reload.sh))
-and from the vendor loader's update screen. Steps 2-4 were used on this meter
-with a stock-size image (the patched stock of the memrw kit) but **not yet
-with an opendm40 image**. The stock app can also flash a `dm40*.bin` from its
-disk by itself when USB is unplugged; that is not checked for an opendm40 image
-either. If the meter stops on the loader's update screen, copy the file onto
-the loader's USB disk and press "update" (see Recovery).
-
-**USB on a PC.** The drive needs no driver. After Eject it stays ejected
-until the cable is re-plugged. SCPI is USBTMC: Linux has a driver, Windows
-has none (the interface sits under "Other devices", code 28). On Windows,
-install NI-VISA or Keysight IO Libraries, or bind WinUSB with Zadig and use
-pyvisa-py ([docs/bt-scpi.md](docs/bt-scpi.md#usbtmc-on-windows)).
-Each meter has its own serial number: the chip's unique ID as 24 hex
-digits (USB serial, the disk's SCSI serial, the third field of `*IDN?`; the
-same digits as `INFO/UID.BIN`). Two meters on one PC are two drives
-([docs/native-boot.md](docs/native-boot.md#usb-serial-number-srcuidrs)).
-
-## Recovery
-
-An update only rewrites the application area. The vendor bootloader and the
-vendor update loader stay, so a bad image cannot brick the meter: after a
-failed or bad file, the loader shows its update screen with a working USB
-disk on every boot until a good file is installed.
-
-To reach the update screen:
-
-- `python3 tools/dm40dbg.py update` (`DBG:UPDATE`) while opendm40 answers on USB;
-- with opendm40's drive in "PC can edit" mode (Settings 3/3, "USB disk"), copy a
-  `dm40*.bin` onto it and answer "Install it now?" with Yes: opendm40 hands that
-  file to the loader directly;
-- from off, hold the power key ~5 s: the screen lights, ~4 s later the
-  backlight blinks and it beeps; keep holding at least 0.5 s after the beep.
-  Letting go during those 0.5 s cancels (normal start). Checked in the
-  emulator ([`../emu/recoverytest.py`](../emu/recoverytest.py)), not yet on the device;
-- automatically after a second hang (watchdog reset) before opendm40 has run
-  60 s since the first one: the first hang only reboots opendm40, a second one
-  with less than 60 s of running in between opens the update screen. Each
-  watchdog reset comes ~20 s after the hang, so the two resets can be up to
-  ~80 s apart. Checked in the emulator, not yet on the device;
-- if opendm40 is too broken for any of these, whatever the firmware does: open
-  the case and short the debug header's TX pad (PA2) to GND at power-on, see
-  [hw/README.md, Hardware recovery](../hw/README.md#hardware-recovery).
-
-Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
-"update". The loader deletes the file after a successful install.
-`INFO/FIRMWARE.BIN` on the opendm40 USB drive is the running image as an update
-file; keep a copy.
-
-**One update file at a time.** Keep exactly one `dm40*.bin` on the disk: the
-loader installs the first match in directory order (not the newest, no
-version check), so a second file can install the wrong image
-([docs/fsloader-install-trigger.md](docs/fsloader-install-trigger.md)). The
-stock firmware also installs any `dm40*.bin` it finds on its USB disk, so do
-not leave files with that name there by accident.
-
-**Back to stock:** copy the official
-[`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin)
-onto the loader's disk and press "update", or run
-`tools/reload.sh --stock FILE` while opendm40 runs (tested with a patched stock
-image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
+Sources, tools and docs of opendm40. Features, install, backup and recovery
+are in the [root README](../README.md). Paths below are relative to
+`firmware/`.
 
 ## Build
 
@@ -151,18 +13,76 @@ tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 ../emu/run.py fwrs --run-for 4 --shot out.png   # run opendm40 in the emulator
 ```
 
-The emulator ([emu/README.md](../emu/README.md)) runs both the stock
-firmware and opendm40. It needs a flash dump of your own meter (not in the
-repo).
+`build.sh` links with [`link-native.x`](link-native.x), checks the stack
+([`tools/stack-depth/stackdepth.py`](tools/stack-depth/stackdepth.py)) and
+the flash / SRAM budgets, and packs the body into the stock update format with
+[`../stock/dm40fw.py`](../stock/dm40fw.py). The emulator
+([emu/README.md](../emu/README.md)) needs a flash dump of your own meter (not
+in the repo).
 
-## More
+### Toolchain
 
-- [TODO.md](TODO.md): what is done and what is open
-- [docs/dev-notes.md](docs/dev-notes.md): USB debug link, SCPI list, developer workflow
-- [docs/native-boot.md](docs/native-boot.md): update format, shim, recovery
-- [docs/parity.md](docs/parity.md): item-by-item comparison with the stock firmware
-- [docs/device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log
-- Feature docs: [power meter and alerts](docs/power-meter-and-misconnect.md),
-  [inrush](docs/inrush-current.md), [AC+DC](docs/acdc-stock-vs-opendm40.md),
-  [log format](docs/compact-log-format.md), [Bluetooth SCPI](docs/bt-scpi.md),
-  [DM40A / B / C](docs/model-variants.md)
+A pinned Rust toolchain in `toolchain/` at the repo root (ignored, local).
+`build.sh` and the host tests use `../toolchain`. Create it once (tested with
+stable 1.99), from the repo root:
+
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+RUSTUP_HOME=$PWD/toolchain/rustup CARGO_HOME=$PWD/toolchain/cargo \
+    sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal \
+    --default-toolchain stable --target thumbv7em-none-eabihf --component llvm-tools
+```
+
+The host tests also need `mtools` ([`tools/fatren-test`](tools/fatren-test)).
+
+## Layout
+
+| Path | What |
+|---|---|
+| [`src/`](src) | The firmware (crate `opendm40`) |
+| [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), font and table generators) and the host test suites (`tools/*/run.sh`) |
+| [`docs/`](docs) | Firmware docs, see [Documentation](#documentation) |
+| [`fonts/`](fonts) | Boot logo source (`wb-logo-round.svg` / `.png`) |
+| [`ref/`](ref) | Reference screenshot of the stock firmware |
+| [`vendor/usbd-storage/`](vendor/usbd-storage) | usbd-storage 3.0.0 with the DM40 patches ([`Cargo.toml`](Cargo.toml)) |
+| [`TODO.md`](TODO.md) | What is done and what is open |
+
+## Documentation
+
+Reference:
+
+- [native-boot.md](docs/native-boot.md): update format, shim, install, recovery, memory budget
+- [dev-notes.md](docs/dev-notes.md): USB debug link, SCPI list, developer workflow
+- [bt-scpi.md](docs/bt-scpi.md): SCPI over Bluetooth and USBTMC on Windows
+- [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md): power meter and misconnect alerts
+- [inrush-current.md](docs/inrush-current.md): inrush current capture
+- [compact-log-format.md](docs/compact-log-format.md): DLG log format on the disk, CSV on read
+- [log-format-standards.md](docs/log-format-standards.md): standard log formats compared with DLG
+- [fonts.md](docs/fonts.md): stock fonts, their cost and storage
+- [model-variants.md](docs/model-variants.md): how the firmware tells DM40A / B / C apart
+- [parity.md](docs/parity.md): item-by-item parity with the stock firmware V2.6
+- [genuine-check.md](docs/genuine-check.md): the stock genuine-device check (UID-bound loader data)
+- [fsloader-install-trigger.md](docs/fsloader-install-trigger.md): how the FS-loader installs a staged `dm40*.bin`
+- [ram-budget.md](docs/ram-budget.md): RAM users and when each is live
+
+Design notes:
+
+- [acdc-approaches.md](docs/acdc-approaches.md): AC+DC in other meters and DMM chips, what fits the HY3131
+- [acdc-stock-vs-opendm40.md](docs/acdc-stock-vs-opendm40.md): AC+DC of the stock V2.6, measured live, vs opendm40
+- [switch-latency.md](docs/switch-latency.md): DMM function switch latency, opendm40 vs stock
+- [dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md): DMM reading rate, integration time and filtering
+- [dmm-input-scope-feasibility.md](docs/dmm-input-scope-feasibility.md): DMM inputs as a scope source (AD2 streaming)
+- [dac-adc-paths.md](docs/dac-adc-paths.md): DAC to ADC loopback paths for self-test
+- [hwtrig-integration.md](docs/hwtrig-integration.md): the hardware trigger comparator
+- [combined-view-design.md](docs/combined-view-design.md): DMM + scope combined view, scope gestures
+- [scope-scale-ux.md](docs/scope-scale-ux.md): scope scale and position by touch
+- [stock-scope-ui.md](docs/stock-scope-ui.md): pixel and interaction spec of the stock scope UI
+- [ui-review.md](docs/ui-review.md): UI/UX review
+- [user-feedback.md](docs/user-feedback.md): DM40 owners' feedback triaged into items
+
+Logs and history:
+
+- [device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log
+- [decisions-2026-10-22.md](docs/decisions-2026-10-22.md): product and engineering decisions
+- [stage0-test.md](docs/stage0-test.md): native-boot Stage 0 recovery test (historical)
+- [integration-queue.md](docs/integration-queue.md): integration queue (empty)

@@ -216,10 +216,10 @@ loader marker must equal the header of the new file ("installed OK", ~1 min).
 **First install** (the meter runs stock): `tools/reload.sh --from-stock`
 stages the file on the stock "USB Connect" disk (`28e9:028f`) and tells you to
 power-cycle (the stock update procedure), then waits for opendm40. The by-hand
-steps and what is verified: [README.md, Install](../README.md#install).
+steps and what is verified: [README.md, Install](../../README.md#install).
 
 **Recovery** (opendm40 hangs or does not start) and the update-file rules:
-[README.md, Recovery](../README.md#recovery). `INFO/FIRMWARE.BIN` on the USB
+[README.md, Recovery](../../README.md#recovery). `INFO/FIRMWARE.BIN` on the USB
 volume (the running image) or `opendm40.bin` both work as the image.
 
 **Back to stock** from a running opendm40: `tools/reload.sh --stock FILE` with
