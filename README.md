@@ -52,10 +52,10 @@ protocol notes are for stock V2.6.
   - `DEBUG/SPIFLASH.BIN`: the raw 16 MiB SPI flash (the meter's own disk).
 
   `CALIB.BIN`, `BOOTDATA.BIN` and `UID.BIN` cannot be rebuilt: no update
-  file contains them. fw-rs also keeps one write-once safety copy of these
-  three on the SPI flash (files `CALIB.BIN`, `BOOTDATA.BIN`, `UID.BIN` in the
-  root of its internal disk, never overwritten; [`fw-rs/src/calbackup.rs`](fw-rs/src/calbackup.rs)),
-  because the SPI flash survives an SWD mass erase of the MCU.
+  file contains them. fw-rs also writes one copy of these three files, once
+  and never overwritten, to the root of its internal SPI-flash disk
+  ([`fw-rs/src/calbackup.rs`](fw-rs/src/calbackup.rs)), because the SPI flash
+  survives an SWD mass erase of the MCU.
 - **Full restore after an SWD mass erase** (from `BACKUP.TXT`): write
   `ROMBOOT.BIN` at `0x08000000`, then `LOADER.BIN` at `0x080A0000` and
   `CALIB.BIN` at `0x080C0000`, then install a firmware. The loader data only
