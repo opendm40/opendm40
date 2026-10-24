@@ -279,7 +279,9 @@ struct Avg {
 
 const AVG_MAX: usize = 32;
 /// Readings with at least this many slow conversions averaged have the full
-/// +1 digit resolution (`Val::ext`); also what SCPI MEAS? waits for.
+/// +1 digit resolution (`Val::ext`). SCPI MEAS? after a function change
+/// prefers such a reading but waits for it only SCPI_SETTLE_MS (main.rs),
+/// which a full window never meets (~5.3 s after the switch, R22_LATE).
 pub const AVG_FULL: u8 = 8;
 
 impl Avg {
