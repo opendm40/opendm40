@@ -1024,14 +1024,19 @@ fn main() {
             }
         };
         t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
-        t("trigger level marker zone", pick(&d, 0, 0, false, 6, 125) == Some((true, 1)));
+        t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, 406, 125) == Some((true, 1)));
         t("T marker zone (incl. 10 px of the top bar)", pick(&d, 0, 0, false, 214, 12) == Some((false, 0)));
         t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
         let mut m = d;
         m.trig_row = 140;
         let a = pick(&m, 0, 0, false, 6, 160);
         let b = pick(&m, 1, 0, false, 6, 160);
-        t("overlapping zones cycle: CH1 -> level -> CH1", a == Some((true, 1)) && b == Some((true, 0)));
+        let c = pick(&m, 0, 0, false, 406, 160);
+        t("CH1 and trigger level on one row: separate zones (left / right edge)", a == Some((true, 0)) && b == Some((true, 0)) && c == Some((true, 1)));
+        m.ycur = Some([140, 220]);
+        let a = pick(&m, 0, 0, false, 6, 160);
+        let b = pick(&m, 3, 0, false, 6, 160);
+        t("overlapping zones cycle: CH1 -> Y1 -> CH1", a == Some((true, 3)) && b == Some((true, 0)));
         let mut m = d;
         m.xcur = Some([200, 205]);
         let a = pick(&m, 0, 0, true, 214, 25);
