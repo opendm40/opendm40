@@ -2534,12 +2534,12 @@ Firmware:
             label at once, holds the first decided value (ac-hold, meter-test), the RES / restart V-JACK? mask
             ends 1 s after the last 0x70 (max 12 s; switchtest ohmexit-long with a SCOPE step), the
             placeholder follows CONF's range (a10-unit / ma-unit). New `DBG:READout?`.
-            Suites on fastswitch2: ohmhunt, autowaittest (13), autorangetest, freqtest, meter-test (100),
-            ui-render 0 violations, switchtest all OK but real-vjack-blind (fails without DBG:SENT:PREC, as
-            documented; -prec OK). Same failures as base 7bd7f6f run side by side under host load (the
-            uptime-skew harness issue above): loudtest vjack-off (alarm tone 35.195 s both), couptest v / i /
-            iac / idc / vac230 / band / sq5, powtest all 15. couptest sqtie / band tie checks now accept
-            +9.91E37 while a tie is undecided (FETCh? rule); sqtie OK.
+            Suites on fastswitch2 rebased on 92ef9f6 (harness-sync markers): ohmhunt (10, incl. a noisy 60 Mohm
+            FAST case for the OHM_VET_MAX_MS escape), autowaittest (13), autorangetest, freqtest, loudtest,
+            meter-test (102), ui-render 0 violations, switchtest all OK but real-vjack-blind (fails without
+            DBG:SENT:PREC, as documented; -prec OK); couptest (10) and powtest (30) all OK on both base 92ef9f6
+            and fastswitch2 run side by side. couptest sqtie / band tie checks accept +9.91E37 while a tie is
+            undecided (the FETCh? rule).
             **Device retest of fastswitch2** (calibrator 390 / 100 ohm and, if at hand, real 100 ohm / 4.7 kohm /
             10 Mohm resistors; RATE FAST and MED; settle.py / shots2.py / extra.py of chk6):
             1. DC V -> RES on each resistor: no amber value and no FETC? / READ? answer off the final one by more
