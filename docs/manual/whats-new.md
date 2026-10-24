@@ -17,7 +17,7 @@ different. Details are on the pages linked.
 
 | | Stock | opendm40 |
 |---|---|---|
-| Counts | By model: 40000 (DM40A), 50000 (B), 60000 (C) | 60000 on every model; ranges 600 mV, 6 V ... |
+| Counts | By model: 40000 (DM40A, 400 mV, 4 V ...), 50000 (B), 60000 (C) | 60000 on every model (the hardware is the same); ranges 600 mV, 6 V ... |
 | AC+DC | DM40B and C only; the first value can be computed from the DC part alone | Every model; shown only when both parts are measured, with the AC and DC parts |
 | AUTO coupling | — | Shows the DC or the AC part, whichever the signal is |
 | Volt autorange | Starts on mV | **AUTO+** by default: never steps down to mV |

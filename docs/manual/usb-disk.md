@@ -96,6 +96,5 @@ The gallery also shows the screenshots made by the stock firmware.
 
 ## Known limitations
 
-The USB disk works with Linux and Windows 11 (read-only mode). macOS has not
-been tried. Deleting files and installing an update from the computer in
-**PC can edit** mode have not been tried on a real meter yet.
+Untested: the USB disk on macOS; **PC can edit** mode (deleting files,
+installing an update) on a real meter.

@@ -64,4 +64,4 @@ While the multimeter side is off, the multimeter shows its last reading.
 - While the scope side is powered (combined view, scope page, generator on,
   or **Both always**), a fast square wave on the multimeter input reads
   about 0.2 % high. DC readings are not affected noticeably.
-- The long press on the strip has not been tried on a real meter yet.
+- Untested on a real meter: the long press on the strip.

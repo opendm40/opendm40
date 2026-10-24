@@ -253,10 +253,8 @@ you switch off. The scope starts running, in trigger mode Auto.
 
 ## Known limitations
 
-- Not yet tried on a real meter: pulse and runt triggers, cursors, pinch,
+- Untested on a real meter: pulse and runt triggers, cursors, pinch,
   double tap, long-press centring, holding a corner to repeat, Axis lock
   and Hold drag, the persistence modes, auto-set keeping AC coupling.
-- The stock firmware stores 65 520 samples per capture; opendm40 stores
-  26 624.
 - The help page says "Scope: right edge: Drag trigger level"; the trigger
   level marker is on the left edge.

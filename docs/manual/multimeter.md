@@ -66,15 +66,9 @@ shows:
 - the AC part and the DC part in the two small rows.
 
 One full cycle takes about 2 s; the first value comes after about 1.3 s.
-Until both parts are measured, the parts are grey. There is no rate choice
-and no extra digit in AC+DC.
-
-**Stock vs opendm40:** the stock firmware offers AC+DC only on the DM40B
-and DM40C; opendm40 offers it on every model. The stock shows a total at
-once, at first computed from the DC part alone, so the first value can be
-wrong. opendm40 waits until both parts are measured, and after a range
-change it waits for the AC part to settle, so it does not show a false AC
-part.
+Until both parts are measured, the parts are grey. After a range change the
+meter waits for the AC part to settle. There is no rate choice and no extra
+digit in AC+DC.
 
 ### AUTO coupling (AC/DC)
 
@@ -96,8 +90,6 @@ appears next to it. Both parts are always in the small rows.
 
 ![AUTO coupling on a DC source](img/auto-acdc.png)
 
-The stock firmware has no AUTO coupling.
-
 ### Current: A, mA, µA
 
 All current ranges use the **A** jack and **COM**. The meter switches the
@@ -115,15 +107,11 @@ large for the µA or mA ranges moves straight to the 6 A range. On a fixed µA
 or mA range, an overload moves the meter to the 10 A shunt and shows
 **OVLD** ([Safety and alerts](safety-and-alerts.md)).
 
-**Stock vs opendm40:** the stock firmware always shows a percentage in DC
-mA, also a negative one below 4 mA. opendm40 labels it **4-20mA** and shows
-it only where it makes sense.
-
 ### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
 - The 60 Ω range (milliohm resolution) is manual only; AUTO starts from
-  600 Ω. The stock firmware never uses this range.
+  600 Ω.
 - **Low current** (second tap on Ω, or **Low current ON** on the range
   page): a smaller test current, for measuring in a circuit. The Ω button
   shows a small **ON** tag. The 60 Ω range always uses the normal current.
@@ -182,10 +170,8 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page:
   Correct it with the offset or with REL.
 - The supplied thermocouple is rated to 300 °C.
 
-**Stock vs opendm40:** the stock firmware knows only the K thermocouple
-and has no offset. Early units read 3.6 to 6 °C low; with opendm40 you set
-the offset once. °F uses the correct factor 1.8 (the stock firmware uses
-1.82).
+Owners report early units reading the thermocouple 3.6 to 6 °C low: set
+the offset once.
 
 ## Ranges: the range page (MF)
 
@@ -216,9 +202,8 @@ Choosing a range turns REL off.
 With AUTO on volts, the range page warns in orange: **AUTO starts on mV:
 AUTO+ is safer**.
 
-**Stock vs opendm40:** the stock firmware's volt autorange starts on mV.
-Owners linked a damaged input to applying a high voltage while the meter
-sat on mV; opendm40 makes AUTO+ the default.
+AUTO+ is the default for volts because owners have linked damaged inputs
+to a high voltage applied while the meter sat on the mV range.
 
 ### Overload
 
@@ -228,10 +213,6 @@ sat on mV; opendm40 makes AUTO+ the default.
 ## Counts, rate and the extra digit
 
 opendm40 uses 60000 counts on every model (ranges 600 mV, 6 V, 60 V ...).
-
-**Stock vs opendm40:** the stock firmware limits the counts by model:
-DM40A 40000 (400 mV, 4 V ...), DM40B 50000 (500 mV, 5 V ...), DM40C 60000.
-The hardware is the same, so opendm40 gives every model the DM40C ranges.
 
 ### Rate: FAST, MED, SLOW
 
@@ -258,9 +239,6 @@ input or a range change the average restarts, so a change shows at once.
 The extra digit appears smaller, after the main digits, on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
 3.2 s (MED) after the input settles.
-
-**Stock vs opendm40:** the stock firmware has one fixed behaviour (the
-speeds of MED, 60000 counts, no averaging).
 
 ### Smoothing
 
@@ -293,8 +271,6 @@ while you lift the probes. It captures again after the input went away (open
 leads, OL) or changed by more than about 0.5 %. The statistics and the chart
 keep running on the live value.
 
-The stock firmware has no AutoHold.
-
 ### REL
 
 Tap the **REL** box on the right. The current reading becomes the zero;
@@ -317,8 +293,6 @@ since they were last reset, and a timer **T hh:mm:ss**.
   to stop.
 - **Long press the column**: reset MIN/MAX/AVG.
 
-**Stock vs opendm40:** AVG, the session and the long-press reset are new.
-
 ## The bargraph and the history row
 
 **Settings > More > DMM row** chooses what the row under the reading
@@ -326,8 +300,7 @@ shows: **Bargraph** (default) or **History**.
 
 - **Bargraph**: 50 segments, each 2 % of the range. Centre zero in DC V and
   DC A, from zero elsewhere. It follows every conversion, not smoothed and
-  without REL, and keeps moving during HOLD. The stock firmware has no
-  bargraph.
+  without REL, and keeps moving during HOLD.
 - **History**: five boxes. Tap the row to store the shown value (also a held
   value); the newest is orange. Long press the row to clear it.
 
@@ -366,8 +339,6 @@ Limits: DC V**.
 - The fail beep sounds when the reading crosses out of the limits, at most
   once per second.
 
-The stock firmware has no limits.
-
 ## Burden voltage
 
 A current meter drops a small voltage across its shunt (the burden
@@ -384,8 +355,6 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 
 ![Burden voltage](img/burden.png)
 
-The stock firmware has no burden display.
-
 ## Recording
 
 Swipe down on the multimeter page to start or stop a recording to the disk;
@@ -400,7 +369,7 @@ the meter starts in autorange.
 
 ## Known limitations
 
-- Not yet tried on a real meter: currents through the A jack (overload
+- Untested on a real meter: currents through the A jack (overload
   handling, AUTO coupling on current, burden with current), the
   continuity beeper and the diode beeps, Low current Ω, PT100, PT1000 and the
   NTC sensors.

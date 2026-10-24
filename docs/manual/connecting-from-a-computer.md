@@ -126,8 +126,7 @@ talks to the meter through libusb and takes the interface away from the
 kernel driver: `/dev/usbtmcN` disappears until you re-plug the meter. Use
 either PyVISA or the `/dev/usbtmcN` tools, not both at the same time.
 
-With PyVISA on Linux, a single query has been tried; the example as a whole
-is untested.
+The PyVISA example is untested as a whole.
 
 ## Windows
 
@@ -204,7 +203,7 @@ sigrok-cli -d scpi-dmm:conn=usbtmc/<bus>.<address> --samples 10
 
 The setting is kept; `SYST:IDN:EMUL OFF` switches back. In this mode the
 host sees only the 34401A functions (no capacitance, temperature or AC+DC)
-and cannot set ranges. Tested in the emulator only.
+and cannot set ranges. Untested on a real meter.
 
 ## Troubleshooting
 

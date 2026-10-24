@@ -121,4 +121,4 @@ logging](scpi-reference.md#data-logging-log)):
 
 ## Known limitations
 
-The fast recorder at 76 800 samples/s has only run in the emulator.
+Untested on a real meter: the fast recorder at 76 800 samples/s.

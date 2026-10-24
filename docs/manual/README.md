@@ -42,7 +42,6 @@ mistake.
 
 ## Status
 
-opendm40 is experimental. It has been developed and used on one DM40A;
-DM40B and DM40C have only run in an emulator. Features that have not yet
-been tried on a real meter are listed under "Known limitations" at the end
-of each page.
+opendm40 is experimental. It is developed on a DM40A; DM40B and DM40C are
+untested. Each page lists what is untested under "Known limitations" at its
+end.
