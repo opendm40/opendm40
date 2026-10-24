@@ -423,8 +423,8 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // BOTH (device a2e9766, 2da1011 E4): in those RES runs the comparator on PB1
 // read CMPHO and CMPLO in one CTSTA read (0x70), the sign of an overdriven
 // comparator (`sample_cmp`; the same 0x70 as DC V's V tap on a steady 5 V,
-// E3, and DC A at 24 V on V-COM), while 1 V and 3 V gave no hit at all. A
-// current in A puts I x 47.5 ohm on PB1 (0.5 mA .. tens of mA = 24 mV ..
+// E3, and DC A at 24 V on V-COM), while 1 V and 3 V gave no hit. INFERRED:
+// a current in A puts I x 47.5 ohm on PB1 (0.5 mA .. tens of mA = 24 mV ..
 // ~1 V), one side of the window: one bit per read, an AC one CMPHO and
 // CMPLO in different reads. So in the jack-check comparator rows (ohm, the
 // resistive temperature sensors) a both-bit read within the last
