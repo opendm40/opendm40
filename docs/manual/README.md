@@ -445,7 +445,7 @@ sub-mode:
 |---|---|
 | **V** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
 | **A** | DC → AC → AC+DC → AUTO (AC/DC) → DC |
-| **Ω** | Test current 0.85 mA → 0.27 mA (ON) → 0.85 mA |
+| **Ω** | Test current 0.90 mA → 0.28 mA (ON) → 0.90 mA |
 | Capacitance | (none) |
 | Diode / continuity | Diode → Continuity → Diode |
 | **Hz / °C** | Frequency → Temperature → Frequency |
@@ -554,28 +554,29 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
 - The 60 Ω range (milliohm resolution) is manual only; AUTO never goes
   below 600 Ω.
-- Two test currents. **0.85 mA** (the default) and **0.27 mA ON** (second
-  tap on Ω, or **0.27 mA ON** on the range page): the smaller one is for
-  measuring in a circuit. With 0.27 mA the Ω button shows a small **ON**
-  tag. The 60 Ω range always uses 0.85 mA.
+- Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
+  tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
+  measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
+  tag. The 60 Ω range always uses 0.90 mA.
 - Top left, small: the test current of the selected range, for example
-  **I 85 uA** on 6 kΩ. It is the short-circuit current, the most the range
-  drives through the leads; with a resistor between them it is less.
+  **I 197 uA** on 6 kΩ. It is the short-circuit current, the most the range
+  drives through the leads; with a resistor between them it is less. On
+  60 MΩ nothing is shown (not measured yet).
 
   | Range | 60 Ω | 600 Ω | 6 kΩ | 60 kΩ | 600 kΩ | 6 MΩ | 60 MΩ |
   |---|---|---|---|---|---|---|---|
-  | 0.85 mA | 0.85 mA | 0.85 mA | 85 µA | 8.5 µA | 0.85 µA | 85 nA | 13 nA |
-  | 0.27 mA ON | 0.85 mA | 0.27 mA | 27 µA | 2.7 µA | 0.27 µA | 27 nA | 4.3 nA |
+  | 0.90 mA | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
+  | 0.28 mA ON | 0.90 mA | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
-  *Inferred*: computed from the 0.85 V / 0.27 V source behind the range's
-  reference resistor (1 kΩ … 63 MΩ), not measured per range; the 0.85 mA
-  and 0.27 mA on 600 Ω come from user reports.
+  Short-circuit currents measured on one unit with `DBG:SRC`, jacks
+  shorted ([device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
+  The open-circuit voltage on 600 Ω is about 2.17 V (0.78 V with ON).
 - While the meter looks for the range, the values are grey.
 
 
-| ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.27 mA on](img/range-ohm.png) |
+| ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
 |---|---|
-| 4.7 kΩ on 6 kΩ: test current 85 µA | The range page with 0.27 mA (ON) on |
+| 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
 
 #### Continuity
 
@@ -605,7 +606,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 - Shows the forward voltage with four decimals; **0L** above 3.12 V.
 - Top left, small: the test current, **I 0.75 mA** (*inferred*: from
-  user reports, not measured on this firmware).
+  owners' reports, not measured yet).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
@@ -2546,7 +2547,7 @@ before.
 | Kept | Not kept |
 |---|---|
 | All [settings](#settings) except **USB disk** | **USB disk** (back to Files live) |
-| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, the Ω test current (0.85 / 0.27 mA), the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, the Ω test current (0.90 / 0.28 mA), the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements, display settings and the FFT settings | The trigger mode: the scope starts running, in trigger mode Auto |
 | Generator: the waveform, frequency, amplitude, offset and duty | The output: off after power-on |
 
@@ -2574,7 +2575,7 @@ Untested on a real meter:
   hangs.
 - Multimeter: currents through the A jack (overload handling, AUTO
   coupling on current, burden with current), the continuity beeper and the
-  diode beeps, the 0.27 mA Ω test current, PT100, PT1000 and the NTC sensors.
+  diode beeps, the 0.28 mA Ω test current, PT100, PT1000 and the NTC sensors.
 - Alerts: the alerts that need a current through the A jack (A-JACK,
   A-PROT, OVLD) and the danger alarm's sound. The fuse check needs a
   re-check.

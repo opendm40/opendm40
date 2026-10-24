@@ -934,9 +934,9 @@ fn ol_word(r: sf::Rect, c: Color) {
 /// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 
-/// "I 0.85 mA": the test current of `mode` (dmm::test_current; inferred):
-/// ohm, the short-circuit current of range `range` in the variant `on`;
-/// diode, the source current. Two significant digits, DIM F14 (small: a
+/// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
+/// measured short-circuit current of range `range` in the variant `on`
+/// (none on 60 M); diode, the source current (owners' reports). Two significant digits, DIM F14 (small: a
 /// property of the function, not a reading).
 #[inline(never)] // drawn on a function / range / variant change only
 fn test_current_label(mode: u8, range: i8, on: bool) {
@@ -1320,9 +1320,8 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
 
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 /// Labelled with the variant's short-circuit test current on the 600 ohm
-/// range (dmm::ohm_test_current(1, var): T_VSRC / OHM_VSRC_ON over the
-/// 1 k Rref; inferred); "ON" = the button's stock tag.
-pub const OHM_VARS: [&str; 2] = ["0.85 mA", "0.27 mA ON"];
+/// range (dmm::OHM_ISC r1, measured); "ON" = the button's stock tag.
+pub const OHM_VARS: [&str; 2] = ["0.90 mA", "0.28 mA ON"];
 
 /// `range_press` targets besides the range items (0..): RP_ERR + the Err
 /// code of `range_hit`, the Wave and Inrush buttons.

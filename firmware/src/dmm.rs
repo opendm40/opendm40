@@ -157,8 +157,8 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
 // used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
 // reference / 10) that the stock never selects: manual only here, always with
-// the default ohm variant (SFUVR = 2, the ~0.85 mA one; the "ON" variant gives
-// ~0.27 mA - community measurements on r1). Calibration slot 0x124[0] is the
+// the default ohm variant (SFUVR = 2, the 0.90 mA one; the "ON" variant gives
+// 0.28 mA on r1, OHM_ISC). Calibration slot 0x124[0] is the
 // factory default 1.005 on the dumped unit (r1..r6 are calibrated), and the
 // single offset 0x144 is the r1..r6 one: use REL, check the gain on hardware.
 
@@ -328,40 +328,45 @@ impl Avg {
 //     Callendar-Van Dusen (IEC 60751), -200..850 C.
 //   NTC (Beta model, 1/T = 1/T25 + ln(R/R25)/B), -55..300 C: r2..r6 with
 //     hysteresis, starting at the lowest range that holds R25.
-// Excitation: the ohm source looks like a ~0.85 V open-circuit source behind
-// Rref (community: 0.85 mA short-circuit current on the 600 ohm range in the
-// default variant, 0.27 mA in the "ON" variant; NOT from a datasheet - verify
-// on hardware). I = VSRC / (Rref + R), P = I^2 R; see `t_excitation`.
+// Excitation: the measured short-circuit current of the range (OHM_ISC,
+// default variant) scaled as if the drop across Rref stayed at its
+// short-circuit value: I = Isc * Rref / (Rref + R), P = I^2 R; see
+// `t_excitation`. *Inferred*: the source is not that simple (open-circuit
+// 2.17 V, short-circuit drop 0.90 V on r1, where OP3 limits the current).
 // Lead resistance is not modelled separately: a 2-wire lead pair adds
 // 0.39 C per 0.1 ohm on a PT100 (0.039 C on a PT1000, negligible for NTCs);
 // trim it with the per-sensor offset (or REL).
 
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
-// Test sources shown on the DMM page (`test_current`): the ohm source
-// voltages below over OHM_RREF, and the diode current. All three are
-// community figures, not from a datasheet; the DBG:SRC map with the jacks
-// shorted (tools/srcmap.py) replaces them here.
-/// Inferred open-circuit voltage of the ohm source (see above).
-pub const T_VSRC: f32 = 0.85;
-/// The same for the "ON" ohm variant (m+8, p8set rows): 0.27 mA
-/// short-circuit current on r1 (Rref 1 k), community measurement; inferred.
-pub const OHM_VSRC_ON: f32 = 0.27;
+// Test sources shown on the DMM page (`test_current`).
+/// Ohm short-circuit test current (A) per range, [default variant, "ON"
+/// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
+/// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
+/// docs/data/short.csv, the stock row's own tap: VDS15 default, AGNDP7 ON,
+/// AGNDP8 ON on r5). r0 (60 ohm, always the default variant,
+/// `Dmm::write_config`) = r1's default value, inferred: its own row has the
+/// same tap and Rref switches but was not measured. r6 (60 M, the
+/// current-source row): not measured, None.
+pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
+    [Some(8.983e-4), Some(8.983e-4)],
+    [Some(8.983e-4), Some(2.795e-4)],
+    [Some(1.969e-4), Some(5.842e-5)],
+    [Some(2.026e-5), Some(6.559e-6)],
+    [Some(2.172e-6), Some(6.640e-7)],
+    [Some(2.153e-7), Some(8.557e-8)],
+    [None, None],
+];
 /// Diode test current (A): OP3 as a current source (SMODE 0110, SCP / SCN)
-/// through RLD, not an Rref; ~0.75 mA from chat reports (hw/README.md);
-/// inferred.
+/// through RLD, not an Rref; ~0.75 mA from owners' reports (hw/README.md),
+/// not measured yet.
 pub const DIODE_I: f32 = 0.75e-3;
 
-/// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var): the
-/// short-circuit current of the inferred source (T_VSRC / OHM_VSRC_ON)
-/// behind Rref, i.e. the most the range drives through the probes (with R
-/// between them: V / (Rref + R)). r0 uses the 1 k r1 reference (its 0.1 k
-/// constant is that reference / 10, the OP1 x10 gain) and always the
-/// default variant. Inferred: computed, not measured per range.
-pub fn ohm_test_current(r: i8, var: u8) -> f32 {
-    let r = r.clamp(0, 6) as usize;
-    let v = if var == 1 && r != 0 { OHM_VSRC_ON } else { T_VSRC };
-    v / (OHM_RREF[r.max(1)] * 1e3)
+/// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
+/// OHM_ISC, the most the range drives through the probes (with R between
+/// them it is less). None where it is not measured (r6).
+pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
+    OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
@@ -370,7 +375,7 @@ pub fn ohm_test_current(r: i8, var: u8) -> f32 {
 /// ohm variant's and no current for it is known.
 pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
     match mode {
-        10 => Some(ohm_test_current(r, var)),
+        10 => ohm_test_current(r, var),
         12 => Some(DIODE_I),
         _ => None,
     }
@@ -2488,14 +2493,18 @@ impl Dmm {
         }
     }
 
-    /// Resistive sensor excitation estimate: (range, R ohm, I A, P W), with
-    /// the inferred source T_VSRC behind Rref. None for the thermocouple.
+    /// Resistive sensor excitation estimate: (range, R ohm, I A, P W) from
+    /// the range's measured short-circuit current (OHM_ISC, default variant:
+    /// the p8clr rows) as Isc * Rref / (Rref + R); inferred (see the
+    /// temperature notes). None for the thermocouple and on r6 (no
+    /// measured current).
     pub fn t_excitation(&self) -> Option<(i8, f32, f32, f32)> {
         if self.t_sensor == 0 {
             return None;
         }
         let r = self.range.clamp(1, 6);
-        let i = T_VSRC / (OHM_RREF[r as usize] * 1e3 + self.t_res.max(0.0));
+        let rref = OHM_RREF[r as usize] * 1e3;
+        let i = ohm_test_current(r, 0)? * rref / (rref + self.t_res.max(0.0));
         Some((r, self.t_res, i, i * i * self.t_res.max(0.0)))
     }
 
