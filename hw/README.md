@@ -14,8 +14,9 @@ This page is about hardware only: chips, pins, circuits. Flash layout and boot
 chain: see [firmware/docs/native-boot.md](../firmware/docs/native-boot.md) (and
 [`fsloader-install-trigger.md`](../firmware/docs/fsloader-install-trigger.md), [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md)).
 
-No schematic of the DM40 is public. Facts are verified unless marked
-*inferred* or listed under [Unknowns](#unknowns). The pointer after a fact
+No schematic of the DM40 is public. Facts without a mark are stated by the
+source after them; the rest are marked *inferred* or listed under
+[Unknowns](#unknowns). The pointer after a fact
 says where to check it: stock code (RE headers in
 [`stock/re/analysis/`](../stock/re/analysis)), opendm40 code, a photo or a
 datasheet. *Inferred*: deduced from register settings, scaling constants, the
@@ -291,7 +292,7 @@ bootloader and the FS-loader before the application runs.
    then press "update" on the screen.
 5. Remove the short.
 
-Not verified yet: the exact timing, i.e. whether the short must be in place at power-on
+Untested: the exact timing, i.e. whether the short must be in place at power-on
 (as written above) or also works when applied during a reset, and how long
 it must be held.
 
