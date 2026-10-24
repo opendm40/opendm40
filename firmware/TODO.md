@@ -85,6 +85,9 @@ Code work (in this order):
       emu/fastlogtest.py take `--extra-script FILE` (e.g. the hook lines).
 ## Remaining work
 
+- [ ] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" is
+      wrong: the trigger-level marker T is on the left edge of the graph. Change it to "Scope: left
+      edge". docs/manual/scope.md lists it under Known limitations until then.
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).
       `tools/reload.sh` is the native reload flow (fa29a80); no serial/ttyACM references remain.
 - [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and
@@ -2132,7 +2135,7 @@ Firmware:
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
-      page unchanged around it: 5 ms..50 s/div (9600 / 4800 / 2400 / 1200 S/s per band, roll from 200 ms/div),
+      page unchanged around it: 1 ms..50 s/div (76 800 / 38 400 / 9600 / 4800 / 2400 / 1200 S/s per band, roll from 200 ms/div; opens at 10 ms/div),
       V/div = the DMM range (+ / - step it), coupling = the row's (AC V AC-coupled, mV / A DC-coupled, no DC V
       row: says so), units V / A, measurements / cursors / STOP / zoom / Save CSV / FFT as the MCX scope; trigger
       (edge / pulse / runt) detected per sample IN the stream ISR (trigsoft::Stream; no dead time; decision #3
@@ -2167,7 +2170,7 @@ Firmware:
             200 mV/div and back. (verify on device: CONF? at 2 V / 20 V / 200 mV/div in the Wave view)
 - [ ] (A) device test of the Wave view (feasibility 10.6, 15 min) - after the ISR loss fix (E3/E4 device item:
       its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request
-      queue), DC-coupled V row (E7). Done: the timebase list starts at 5 ms/div in the wave view
+      queue), DC-coupled V row (E7). Done: the timebase list starts at 1 ms/div in the wave view (WAVE_TB_MIN)
       (scope_ui::set_tb_lo from app_wave; touch-test + ui-render s01-tb-list-wave).
 - [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 16b3eb9.
       d957027: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch

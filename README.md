@@ -8,6 +8,10 @@ and touch model and adds a power meter, data logging, USBTMC/SCPI and more.
 It installs like a stock update file and leaves the vendor bootloader, the
 vendor update loader and the calibration untouched.
 
+**[User manual](docs/manual/README.md)**: how to install opendm40 and use
+every feature, connecting from a computer, and the
+[SCPI reference](docs/manual/scpi-reference.md).
+
 **Status: experimental.** Developed and tested on one DM40A. DM40B and DM40C
 ran only in the emulator. In the table, *device* means checked on that DM40A
 ([device check log](firmware/docs/device-check-2026-10-21.md)); *emulator* means
@@ -27,7 +31,7 @@ checked only in the emulator or in host tests.
 | AUTO AC/DC | Shows the DC or the AC part, whichever the signal is. | device on V; on A: emulator |
 | Inrush current | 10 A range: triggers on a current step, shows the RMS of the first 100 ms and the peak, saves the trace. | emulator |
 | Burden voltage | Voltage drop across the shunt in the A / mA / uA functions (off by default). | device without current |
-| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, "Leads in A jack?" reminder, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | reminder: device; A-JACK / A-PROT and the alarm: emulator (no current through A on the device yet); fuse check: not yet |
+| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | A-JACK / A-PROT and the alarm: emulator (no current through A on the device yet); fuse check: ran once on the device, the bug it found is fixed, re-check pending |
 | Record page | Logs the DMM to the internal disk: every reading, or the mean per 1 s / 10 s / 1 min, until stopped or for 10 min .. 24 h. | device |
 | Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device up to 38.4 kS/s; 76.8 kS/s: emulator |
 | USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows 11 read-only (VM); macOS untested |
@@ -46,10 +50,9 @@ The screens are renders of the firmware's own drawing code with synthetic
 values (`firmware/tools/ui-render/run.sh OUT --readme`), not photos.
 
 Known open issues ([firmware/TODO.md](firmware/TODO.md)): with 5-10 V on V-COM, the ohm and
-temperature functions can show a false A-JACK. While the scope is powered
+continuity functions can show a false A-JACK (fixed for the thermocouple). While the scope is powered
 (combined view, scope page), a fast square on the DMM input reads about
-0.2 % high. In the combined view, power units are clipped ("mW" looks like
-"mV").
+0.2 % high.
 
 ## Differences from the stock firmware (V2.6)
 

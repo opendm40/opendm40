@@ -69,6 +69,7 @@ mod trigsoft;
 mod scope_ui;
 mod scope_add;
 mod readme;
+mod manual;
 mod stock;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
@@ -884,6 +885,10 @@ fn main() {
     // `main <out> --readme`: only the README screens (readme.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--readme") {
         std::process::exit(if readme::run(&out) == 0 { 0 } else { 1 });
+    }
+    // `main <out> --manual`: the user manual's screens (manual.rs), 1x.
+    if std::env::args().nth(2).as_deref() == Some("--manual") {
+        std::process::exit(if manual::run(&out) == 0 { 0 } else { 1 });
     }
     if std::env::args().nth(2).as_deref() == Some("--stock") {
         let dir = std::env::args().nth(3).unwrap_or_else(|| out.clone());

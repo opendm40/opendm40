@@ -7,6 +7,9 @@
 #   tools/ui-render/run.sh [out dir]
 #   tools/ui-render/run.sh <out dir> --readme   the README screens only (1x,
 #                                               readme.rs; for ../../docs/img/)
+#   tools/ui-render/run.sh <out dir> --manual   the user manual's screens (1x,
+#                                               manual.rs; manual-img.py makes
+#                                               ../../../docs/manual/img/)
 # Exit status 1 when any rule is violated. Needs no hardware.
 set -e
 cd "$(dirname "$0")"
