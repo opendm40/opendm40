@@ -153,6 +153,14 @@ impl App {
         self.scope.poll_src(now, Some(&mut RingSrc))
     }
 
+    /// The ring into the wave record between the slow parts of a scope
+    /// pass (`Scope::wave_keep`).
+    pub(super) fn wave_keep(&mut self) {
+        if self.scope.wave_on() {
+            self.scope.wave_keep(&mut RingSrc);
+        }
+    }
+
     /// Open the wave view on the current DMM function (MF "Wave", the
     /// source badge). Refused (toast) where there is no AD2 waveform.
     #[inline(never)] // .cold (link-native.x): on a tap

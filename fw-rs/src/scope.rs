@@ -1910,6 +1910,20 @@ impl Scope {
         self.busy = true;
     }
 
+    /// The wave view between the scope pass's slow parts (app.rs
+    /// `sp_paint_pass`: before the paint and before a measurement cell):
+    /// the ring into BUF so it never holds more than one part's time. The
+    /// ring holds 2048 samples, 26.7 ms at 76 800 S/s, and a pass with a
+    /// status change (status badge ~6 ms + record bar ~7.6 ms) plus a cell
+    /// (~10 ms) after the acquisition (~6 ms) took ~30 ms (emulator --mips
+    /// 110, a 10 Hz square at 1 ms/div): the ring overflowed, `dropped` grew
+    /// (device 612c45c M3: ~50/s) and every overflow restarted the record.
+    pub fn wave_keep(&mut self, src: &mut dyn WaveSource) {
+        if self.wave && wv().live && self.busy {
+            self.wave_drain(src);
+        }
+    }
+
     /// Ring -> BUF (and the roll columns).
     fn wave_drain(&mut self, src: &mut dyn WaveSource) {
         let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
