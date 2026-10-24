@@ -242,7 +242,7 @@ barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 | Optocouplers | 2 x EL3H7, 2 x "174 F163H" | what they carry is inferred: the BOM guesses the HY3131 INT plus the relay and MOSFET drive; see [Unknowns](#unknowns). BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg) |
 | DMM relay | Hongfa [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) (DPDT, 3 V, latching per BOM) | the BOM post blames this latching relay for false switching when the meter is shaken (not checked here). verified marking: photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (chat report #41820) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is inferred from the markings only |
-| Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD "R500"), 47.5 ohm | 0.5 ohm verified marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and fw-rs checks (below) |
+| Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47.5 ohm (MELF 0207, *inferred*) | 0.5 ohm verified marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and fw-rs checks (below) |
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); rating unknown |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 verified in code ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)) |
@@ -505,7 +505,13 @@ copper-coloured wire bridge between the jacks in
 | mA | 0.5 ohm | 0.24..0.6 V |
 | uA | 47.5 ohm | ~0.19 V |
 
-The 47.5 ohm resistor is assumed a 2512 / ~1 W part (owner, not measured).
+The 47.5 ohm part is the blue MELF resistor between "R500" and the fuse in
+[input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) (*inferred* from its position).
+Scaled against the 2512 "R500" next to it (6.4 x 3.2 mm), its body is about
+5.5 x 2 mm: a MELF 0207, a size usually rated 0.4..1 W depending on the
+series (*inferred*). Its colour bands read yellow-violet-black-brown, i.e.
+47 ohm 1 % (*inferred* from the photo; the firmware uses the stock's 47.5 ohm
+nominal, and calibration absorbs the difference).
 
 **No jack sensing.** The DM40 has no jack sense switches or pins: the stock
 DMM GPIO list is the one above. fw-rs detects leads in the wrong jack only
@@ -689,7 +695,7 @@ header's RX pad, verified), PB13, PC1, PC15. Whether they are connected is unkno
    when PB10 = 1 and PB11 = 0; `bt_meas_v2_6.h` and [`fw-rs/src/power.rs`](../fw-rs/src/power.rs) use
    PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
 6. Fuse rating and type (A input), and whether there is a separate mA fuse.
-   The 47.5 ohm resistor's power rating.
+   The 47.5 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the HY3131 CNT pin source; how the
    buzzer is driven (PA7 and the HY3131 CMP pin) across the isolation.
 8. The scope trigger comparator chip; which of PB15 / PD12 / PD13 is the 4051
