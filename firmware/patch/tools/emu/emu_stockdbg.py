@@ -13,7 +13,7 @@ replaced by Python stubs, and checks that:
     gap or overlap.
 
 No hardware. Requires: pip install unicorn capstone  (a venv is fine).
-Build the image first:  make dbg ORIG=../../vendor/dm40_v_2_6.bin
+Build the image first:  make dbg ORIG=../../firmware/vendor/dm40_v_2_6.bin
 
 Exit status 0 = all checks passed.
 """
