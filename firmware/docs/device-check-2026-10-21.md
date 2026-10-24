@@ -3835,3 +3835,62 @@ POR + BOR, settings from the file (SETTINGS,FILE,0,75). MMEM:CAT? lists the shot
 clusters, 72 files, only the dirty bit and the label note. Prep back to state 2 /
 76 ready within ~15 s; the next shot (S013) saved (frozen 1301 ms, 0 erased).
 PASS.
+
+## a2e9766: bug-fix recheck (2026-10-24 23:57 - 2026-10-25 00:26)
+
+Image a2e9766, installed just before through the USB disk ("PC can edit"). `DBG:BOOT?` NORMAL / HEALTHY,
+crash count 0, marker VALID, `FATDIR,7,0,0` at the start and the end. The A jack, the MCX probe and the
+generator output were not wired; `OUTP?` 0 throughout. The calibrator (`/dev/ttyACM1`) was on V/Ω–COM.
+"V-COM open" below means its **disabled output**, which is not an open input: RES reads ~24 Ω on 600 Ω,
+0.104 MΩ on 6 MΩ and OL on 600 kΩ there. The danger alarm stayed LOUD (the owner's setting); the scripts
+switched the calibrator off at once on an alarm, and in the AC modes also on any A-JACK. It never sounded
+(`DBG:ALARm?` 0,0,0,0 throughout). Scripts and data are in the session scratchpad `ck/` (not in git):
+`jack.py` (per mode and level, 10 s: SYST:ALER?, DBG:ALARm?, DBG:SENT? and DBG:READout? every ~0.3 s),
+`autoplus.py`, `fetc.py`, `j-*.log`, `seq-*.json`, the screenshots.
+
+### Summary
+
+| item | result |
+|---|---|
+| 1a. RES AUTO and manual 600 Ω: V-COM open, 1, 3, 5, 10 V DC, 40 Hz 0 / 9.5 V square, 10 s each (28ce4f0) | **FAIL**: open, 1 V and 3 V: no PB1 hits, no alert. 5 V, 10 V and the square: **A-JACK for the whole 10 s** (AUTO: 5 V / 10 V / square; 600 Ω: 5 V / 10 V), `AJACK,CMP_PB1` in DBG:SENT:LOG?. The A-JACK is the badge only (field 13 soft = 1): no sound, alarm events 0. Only the square on 600 Ω read "driven" (2381 mV): no A-JACK, SYST:ALER? NONE (no LIVE? either). Screenshot `res600-5v.png`: the red A-JACK badge, 0L, "Overload" |
+| 1b. DBG:SENT? fields 14 / 15 (jack check verdict, OP1O peak) in RES | steady while the source is on: **5 V: 0 / 2139-2140 mV (AUTO, on 60 MΩ), 0 / 2249-2251 mV (600 Ω); 10 V: 0 / 2019-2030 mV (both); square: 0 / 2132-2133 mV (AUTO), 1 / 2381 mV (600 Ω)**. "Driven" values of 2381-2446 mV showed up only in the first windows after the source was switched off. So the inferred "OP1O above ~2.35 V for a source on V-COM" does not hold here: OP1O stays at 2.0-2.25 V, the band of the row's own open level (600 Ω: 2.17 V, doc 4.13); 10 V reads lower than 5 V |
+| 1c. Continuity, the same levels | **PASS**: no A-JACK; LIVE? from 1 V. Fields 14 / 15: 1 / 974 mV (1 V), 1 / 1686-1693 mV (3 V, 5 V), 1 / 1759 mV (10 V), 1 / 1687-1759 mV (square); open -1 |
+| 1d. AC V AUTO (mV-first, on 60 mV before the square), manual 60 mV and 600 mV, the square, 10 s | **PASS**: no A-JACK, no alarm, DBG:SENT:LOG? unchanged. Field 12 (V_GATE) 1 = driven while PB1 hits (93 hits in 10 s on 60 / 600 mV manual); 60 mV reads 61.7 mV, 600 mV 607.4 mV (over range) |
+| 2a. AC AUTO under the square (2da1011) | **PASS**: 60 mV -> 600 mV at 0.3 s -> 6 V at 0.76 s, **4.835 V** (the 46370df Wave view read 4.84 Vrms) |
+| 2b. AUTO -> AUTO+ on the range page while on 60 mV (03858c9) | **PASS**: AC V 60 mV -> 6 V, DC V 60 mV -> 6 V, each at the first poll after OK (0.9-1.0 s after the AUTO+ tap; a screenshot sat in between) |
+| 3. Ohm label 6 MΩ -> 60 MΩ (753938b) | **PASS** in both variants: 6 M shows "I 0.22 uA" (default) / "I 86 nA" (ON), 60 M shows no label. Contact sheet `sheet-var1.png` |
+| 4a. `log --source ad2 --rate 76800 --format packed -d 30`, AC V 6 V, calibrator off (540a30c) | **PASS**: 2 runs, lost 0, **ring overwritten 0** (2 303 964 / 2 303 992 rows), 958 / 947 replies/s, 271 kB/s, round trip p50 0.9 ms, p99 1.4-1.5 ms, max 28 ms. The panel ("DATA LOGGING / AD2 76798/76800 Sa/s / Display paused") is drawn during a session (screenshot of a separate undrained session; a screenshot during a drained run stalls the stream: two clients on one USBTMC link). Whether it drew during the drained runs: not checked |
+| 4b. LOG:PRE? / CSV header (023c7b5) | **PASS**: LOG:PRE? nominal_mhz **76 800 000**; CSV `# nominal_sps,76800.000`. The disk DLG header not rechecked |
+| 5a. NR3 (653fce1) | **PASS**: ACQ:SRAT? in the Wave view +7.680000E+04 (1 ms/div), +3.840000E+04 (2 ms/div), +4.800000E+03 (10 ms/div); scope +1.250000E+07; TIM:SCAL? +2.000000E-04, +1.000000E-02; VOLT:RANG? +6.000000E-02; FETC? on the calibrator's 1 V +1.001166E+00, on 1.234 V +1.234780E+00. **New**: VOLT:RES? +9.999999E-06 (note 2) |
+| 5b. MMEM with a wrong directory prefix (7b43034) | **PASS**: own file LOGS/FAST000.DLG (`dm40scpi.py fast --source ad2 --rate 38400 --dur 3`, 123 055 B). `MMEM:DATA? "SHOTS/FAST000.DLG",0`, `"SCOPE/FAST000.DLG"`, `"SHOTS/FAST000.CSV"`: empty reply and -256; `MMEM:DEL "SHOTS/..."`, `"SCOPE/..."`: -256, the file still listed. `"LOGS/FAST000.DLG"` and `"FAST000.DLG"` read it. Deleted by its exact name afterwards |
+| 6. Test-current labels | **PASS**: default variant 60 Ω / 600 Ω "I 0.90 mA", 6 k "I 197 uA", 60 k "I 20 uA", 600 k "I 2.2 uA", 6 M "I 0.22 uA"; diode **"I 0.76 mA"**; continuity no label (`sheet-labels.png`) |
+
+### Notes
+
+1. **FETCh? silent while RES AUTO hunts.** On the calibrator's disabled output RES AUTO stepped between
+   6 MΩ and 600 kΩ (6 MΩ reads 0.104 MΩ, 600 kΩ OL; a non-ohmic source, inferred), DBG:READout?
+   `P,MΩ,NAN,0`, and 8 of 8 FETC? got no reply within the driver's 5 s (SYST:ERR? then -410 Query
+   INTERRUPTED, and once -350 Queue overflow). The scpi.rs timing notes say FETCh? answers +9.91E37 at once
+   after a range change. Not investigated; the item 1 polls used DBG:READout? instead.
+2. **VOLT:RES? +9.999999E-06** on DC V 6 V (rate MED): `pow10f` divides an f32 by 10 five times; the exact
+   nr3 of 653fce1 now prints that f32 as it is. CONF? on the same range said +1.000000E-05 (and once
+   +1.000000E-04 earlier in the session; why not read). Cosmetic.
+3. **A burst of LIVE events in RES 600 Ω** when the calibrator's 5 V was switched off (the screenshot step of
+   1a): DBG:SENT:LOG? went from 17 to 41 entries, the last 8 all `LIVE,CMP_PB1` 5-10 ms apart
+   (882 598-882 663 ms). Which step made them is inferred from the order of the runs.
+4. Not run: doc 4.13 check list item 4 (a current in A: not wired); RTD / NTC (the same jack check as
+   ohm); the DLG format at 76 800; the disk DLG header.
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ ("AUTO+" in the status bar), `CONF?` "VOLT +6,+1E-05"; ohm variant default
+  (0.90 mA); Wave view timebase 10 ms/div as found; LOG AD1 / 4800 / HOST / `LOG:DUR` 60 / ROWS / CHOP 1 /
+  `LOG:STAT` 0; `DBG:AD2:DRAW 1`. Volume 50, danger alarm LOUD, `DBG:IDLE?` Shutdown 1 800 000 ms,
+  `SYST:ALER?` NONE, `SYST:ERR?` empty, `OUTP?` 0. Crash count 0, HEALTHY, marker VALID, stack high water
+  23 684 / 45 148. The scope page's Measure menu was left open (seen after leaving the Wave view; whether it was
+  open before the session is not known).
+- **USB disk:** `DBG:VDISK:RO?` was already 1,1 ("Files live" in force and asked) at the start: the mode is
+  volatile and the install's reset had set it back. Re-plugged through the hub (port 2) at the end anyway:
+  1,1, the volume mounted read-only.
+- **Files:** LOGS/FAST000.DLG made and deleted by exact name; `MMEM:CAT?` equals the start byte for byte.
+- **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled, as found.
