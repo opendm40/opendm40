@@ -1,14 +1,14 @@
 # Alientek DM40 Bluetooth protocol
 
 Bluetooth protocol of the Alientek DM40 multimeter as used by the stock
-firmware, with a Python client in [tools/dm40.py](../tools/dm40.py). The meter
-communicates via Bluetooth RFCOMM. The replacement firmware
+firmware and its phone app. The meter communicates via Bluetooth RFCOMM. The replacement firmware
 [fw-rs](../fw-rs/README.md) keeps the DM40 commands below and adds its own
 (see `fw-rs/README.md`).
 
-Usage: `/usr/bin/python3 tools/dm40.py <MAC>` (the MAC can also come from
-`DM40_MAC`). A Python build without
-Bluetooth sockets (e.g. linuxbrew) cannot run them.
+Host tools for a meter running fw-rs: `fw-rs/tools/dm40scpi.py --bt` (SCPI
+over Bluetooth, and `btpoll` for these stock frames) and
+`fw-rs/tools/dm40bt_scpi.py`. They need a Python with Bluetooth sockets
+(`/usr/bin/python3` on Linux; linuxbrew's has none).
 
 ## Connection Setup
 
@@ -78,7 +78,7 @@ AF 05 03 04 01 00 44    HOLD off
 AF 05 03 00 00 49       discovery
 ```
 
-Note: `AF 05 03 09 01 3F` (used by earlier versions of `tools/dm40.py`) also works,
+Note: `AF 05 03 09 01 3F` (used by an earlier version of the old Python client) also works,
 but only by accident: `3F` is taken as a data byte and the checksum then
 happens to match a zero byte from the cleared receive buffer.
 
