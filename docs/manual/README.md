@@ -1578,8 +1578,10 @@ The V and A inputs share **COM**, so the current flows through COM:
 2. Load − → **A** jack; **COM** → source −.
 3. **V** jack → the + wire, on the source side.
 
-The current into the A jack counts as positive: a load reads positive
-power, a source negative.
+The arrows show the current: through the load into **A**, inside the
+meter through the shunt to **COM**, and back to the source. The current
+into the A jack counts as positive: a load reads positive power, a source
+negative.
 
 Maximum 10 A. Above 6 A the meter counts down 30 s, then warns ([Current
 limit](#current-limit)).
