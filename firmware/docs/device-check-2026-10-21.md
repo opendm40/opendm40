@@ -3472,3 +3472,118 @@ it over temperature.
 - **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
 - **Calibrator:** back on the 10 Hz square, enabled; registers equal to the start dump except 0x2C (live).
   During the check: 0 / 1 / 5 V DC, output off, the square at 2.5-60 Hz.
+
+## v0.1-pre1: fastswitch2, first readings after a switch, the logger copies (2026-10-24 15:30 - 20:40)
+
+The meter ran several images during this session; all hold the fastswitch2 code of v0.1-pre1 (8fc4eaa):
+v0.1-pre1 itself (15:30 - 16:20), then the coordinator's `opendm40-trig2.bin`, `opendm40-trig-pinch.bin`
+and `opendm40-grab-power.bin` (scope changes on top). Which image each run used is noted per row. The
+fixes were then checked on e1cec01 and 83650bc (flashed by the coordinator). `*IDN?`
+`Alientek,DM40A,<UID>,opendm40 0.1`. The owner power-cycled the meter in between: every setting went
+back to its default (the backup SRAM does not survive a power-off), so the end state is compared with
+the state after that. The owner's settings (Danger
+alarm Loud, key / alert volume 50 %) were read and left as found. The alarm was set Off only during the
+A -> V touch runs of the "Leads in A?" item and set back to Loud right after. The calibrator was found
+on the 10 Hz square. The A jack is not wired: every current reading here is on an open jack. Files are
+in the session scratchpad's `chk10/`: `dev.py`, `start.py` / `setshots.py` (state), `rep2.py` (task 2
+repro), `dcv1st.py`, `osrstep.py`, `t1ohm.py`, `t1auto.py`, `t1vj.py`, `t1fuse.py`, `t1rt.py`, `ajk*.py`,
+and `out/` (JSON per run, logs, PNGs).
+
+### Summary
+
+| item | result |
+|---|---|
+| 1. Ohm vet (DC V -> RES, calibrator 390 / 100 ohm and output off, FAST / MED, 2 reps each) | **FAIL** in 6 of 12 entries (grab-power): a wrong value in amber, also to READ? / FETC?: 390 ohm at MED 125.9 / 122.1 ohm (2 of 2), 100 ohm 57.3 (FAST) and 30.0 (MED), open (~420 kohm) 134 kohm (MED, 2 of 2). Each time the right value came first (grey), then two conversions at ~32 % that agreed with each other, so the vet took the second one. Then the right value. `CONF:RES;:READ?` answered the right value in 0.03-0.34 s (the meter had settled) |
+| 2. FETCh? while AUTO decides (`VOLT:COUP AUTO`, 10 Hz square, FAST / MED, 2 reps each) | **PASS**: +9.91E37 in at most 31 ms every time (58-60 polls each) until the decision. Decision (first value) at 5.76-5.85 s in 3 runs, none within 6 s in 1 (grab-power; ab7184c: MEAS:VOLT:AUTO? 1.28-3.91 s) |
+| 3. Armed HOLD (RUN 1 s after `VOLT:COUP AUTO`, 10 Hz square, FAST / MED, 2 reps each) | **PASS**: DBG:READout? `G,..,1` from the press. The grey value keeps moving (8-9 values). Where a decision came within 7 s (2 of 4), `F,..,1` with one value to the end. RUN again releases |
+| 4. A / mA -> Scope -> DMM with 5 V on V-COM, 10 times, FAST (grab-power) | **PASS**: no V-JACK?, nothing new in DBG:SENT:LOG?. ctsta never read 0x70 or 0x50 in the 12 s after the return (ab7184c: 0x70 to 7.75 s) |
+| 5. Placeholder unit (`CONF:CURR:DC 10` / `0.06` from DC V, DBG:READout? from the same message on, FAST / MED x 2) | **PASS**: "A" / "mA" from the first readout |
+| 6. Fuse check, 10 times, open jacks (calibrator output off; `CONF:RES 600;:READ?` OL) | **FAIL** (grab-power): OPEN once, then `FAIL,285.83` 9 times (decided 0.85 s after SYST:FUSE:TEST, while the readout still showed a grey OL), and `FAIL,279.31` in a later run. Same cause as item 1 (below). No V/ohm -> A lead is possible on this bench, so the ~48 ohm OK path was not run |
+| 7. CONF round trips (16 functions / ranges, `CONF:<f>;:DBG:READout?`, READ?, CONF?, FAST / MED x 2, calibrator off) | **PASS** for CONF? (always the function and range asked for), SYST:ERR? (no error) and the placeholder unit. CONF to READ? answered: DC V 0.40-0.80 s, DC A 10 A 0.71-0.96 s, AC V 0.43 s, AC A 0.43-0.97 s, RES 0.80-1.07 s, CONT / DIOD / CAP 0.41-0.78 s (OL, open), FREQ 2.41 s, TEMP 2.01 s, AC+DC 1.33 s, AUTO 1.28-1.33 s. **Wrong first READ?:** `CONF:CURR:DC 10` at MED +0.117 / +0.120 A on the open jack (2 of 2), `CONF:RES` at MED 135.6 kohm for 423 kohm (1 of 2) |
+| Task 2a: AC A 10 A -> 60 mA (FETC? / DBG:READout?, FAST, 1 V on V, 6 reps) | **FAIL**, reproduced (v0.1-pre1): the first 60 mA reading was 28.7-59.5 mA in 6 of 6, final (amber) and to FETC?, which blocked until it came (0.31-0.84 s). Then it fell ~100x per result to ~1e-6 A |
+| Task 2b: DC mA entry at MED / SLOW (from DC V 6 V, 1 V on V, 5 reps x 2 rates) | **FAIL**, reproduced (v0.1-pre1): `CONF:CURR:DC 0.06` ended on the 10 A range 5 of 10 (MED 3, SLOW 2), one first reading +53.8 mA; `CONF:CURR:DC` (auto) read OL first in the 600 mA row 3 of 5 at SLOW. FAST, 12 entries: none |
+| Task 3: AD1 logger copies | cause found in the code; e1cec01 still made copies in 1 of 3 sessions; 83650bc: none (below) |
+| "Current in A jack" after A -> V (owner report) | not A-JACK: the "Leads in A jack? Move to V" toast (below); removed |
+
+### The first conversions after a switch
+
+DC V 6 V entered at MED / SLOW (1 V, `dcv1st.py`, 4 reps per case; v0.1-pre1):
+
+- from DC A: the first reading (0.30 s) was 0.90 / 1.07 / 2.11-2.13 V in 5 of 8, final. The next
+  conversion, 10 ms later, was right.
+- from AC V and from RES: 1.000 V at 0.30 s, then 0.376-0.405 V twice (0.45 and 0.55 s, the second
+  one final), then 1.000 V from 0.96 s. 10 of 16. At SLOW from RES the first value was OL twice.
+
+At FAST none of this showed (no R22 change in the function). The two wrong conversions come right after
+the firmware's first OSR write after the entry: `osr` writes 0x17 once two conversions agree at ~0.4 s,
+and RES's in-range branch writes the steady OSR. The same OSR steps later in a function did not do it:
+DC V 6 V at MED / SLOW, calibrator 1 -> 2 -> 1 V (`osrstep.py`, 8 steps) showed only the input's own
+two-conversion settling. Why the chip reads ~32-40 % there is **unknown**; it depends on how soon the
+R22 write comes after the row write. The DC A -> DC V and DC mA cases are the entry's own first
+conversion, which the switch-latency.md proposal 5 shortcut took unvetted at MED / SLOW (an R22
+change at the row write). The ohm case (item 1) and the fuse check (item 6) are the in-range and the
+OL (0x13) OSR writes of `poll_ohm`.
+
+AC A 10 A -> 60 mA: the RMS block carries the switch step for up to ~0.85 s, then falls ~100x per
+107 ms result. The filters restart on the range step since 0774e70, so the first in-range result seeds
+them.
+
+### Fix (e1cec01)
+
+The fix and its tests are in the commit "DMM first readings after a switch" (merged in e1cec01) and are
+listed under TODO "First readings after a switch". The emulator tests
+[emu/hy3131/firstrdtest.py](../../emu/hy3131/firstrdtest.py) and
+[emu/hy3131/logduptest.py](../../emu/hy3131/logduptest.py) fail on v0.1-pre1 (8fc4eaa) and pass on the
+fix. The model's knobs that replay the device (`r22part` / `r22off` / `r22n`, `acasteptau`,
+`chophalf`; [emu/hy3131/HY3131.cs](../../emu/hy3131/HY3131.cs)) are shapes inferred from the numbers
+above, not measured waveforms.
+
+### Logger copies (task 3)
+
+`osr/out/fr_40_15.csv` (10242c3, the session right after a 640/s one): record 1 at 2.1 ms (a stale
+code), record 2 at 54.0 ms, then a copy of each record stamped exactly 51.87 ms after it, and the real
+records 100.8 ms apart. 51.87 ms is the interval from the session's first flag to the first conversion.
+[logger.rs](../src/logger.rs) `sample` took it as `p_meas`. With p_meas at half the period, the
+rescue (no flag 1.25 p_meas after the last sample) read the old result once more before every
+conversion, and because `rescued != 0` at the next flag, the period was never measured again. The
+same goes for 0x16 (149 of 289): its first interval was ~half of 200.8 ms. Fix: the period is measured
+between two real flags, from the session's second flag on, whatever rescues came between. Emulator
+`logduptest`: 59 / 29 / 60 copies per session on v0.1-pre1, 0 on the fix.
+
+### "Current in A jack" after A -> V
+
+Owner report: a red "check leads" box for ~1 s after tapping A, then V, nothing connected. A -> V by
+DBG:TAP (hold 0.3 / 0.8 / 2.5 s, FAST / MED / SLOW, 22 times) and 31 SCPI / touch changes from A,
+mA, uA, 10 A, AC A, AC+DC A, RES, CONT and DIOD into DC V: SYST:ALER? NONE every time, DBG:SENT:LOG?
+unchanged. DBG:LCD shots at +0.4 / +1.0 / +1.6 s show the toast "Leads in A jack? Move to V" (not at
++2.2 s), and DBG:LEADs? counted each change. The owner had the reminder removed (commit "Remove the
+'Leads in A jack? Move to V' reminder").
+
+### Fix on the device (e1cec01, logger 83650bc)
+
+| check | before | e1cec01 |
+|---|---|---|
+| AC A 10 A -> 60 mA, FAST, 6 reps (`rep2.py a`) | 28.7-59.5 mA final, 6 of 6 | first final value at 1.05 s; max final / FETC? 1.1e-6 A |
+| `CONF:CURR:DC 0.06` / `CONF:CURR:DC` from DC V 6 V, MED / SLOW, 5 reps each | 10 A range 5 of 10, +53.8 mA once, OL first 3 of 5 | 10 A range 0 of 20; max final 1.2e-6 A, no OL; first final 0.52-0.72 s |
+| DC V 6 V from AC V / DC A / RES at MED / SLOW, 4 reps each (`dcv1st.py`) | wrong final value in 16+ of 24 | 0 of 24; first value 0.41-0.50 s (AC V), 0.53-0.57 s (DC A), 1.65 s (RES) |
+| DC V -> RES on 390 / 100 ohm / open, FAST / MED (`t1ohm.py`) | wrong final value 6 of 12 | 0 of 12; first final value FAST 1.72 s, MED 2.6 s (390 / 100 ohm), open 1.0 / 1.9 s |
+| Fuse check, open jacks, 10 runs | OPEN 1, FAIL,279-286 ohm 9 | OPEN 10 of 10 (0.83-0.89 s) |
+| Fuse check, calibrator 48.0 ohm on V-COM, 10 runs | not run | OK,47.04-47.06 10 of 10 (1.93-1.98 s; `CONF:RES 600;:READ?` 47.05) |
+| CONF round trips (`t1rt.py`) | MED CURR:DC 10 first READ? +0.12 A, RES 135.6 kohm once | right values; CONF -> READ? DC V / DC A at MED 1.5-1.8 s (was 0.5-1.0 s) |
+| FETC? in AUTO / armed HOLD (`t1auto.py`) | PASS | PASS (+9.91E37 in <= 32 ms; HOLD as before). The decision on the 10 Hz square: 3.4 s to over 6 s, as on pre1; 10 Hz is OSR 8192's alias, so the DC part beats there |
+| Logger copies (`logdev.py`: 640/s 2 s, then OSR 8192 / 16384 / 8192 chopped, 20 s each) | 10242c3: 121 of 294 | e1cec01: 0, 0, 16 of 232 (flags 78.4 / 123.2 ms apart in turn); 83650bc, 6 sessions: 0 copies in 998 records |
+
+The fix costs time at MED / SLOW: two dropped conversions after an early R22 change, also where the
+device may not need them (TODO "First readings after a switch").
+
+### State at the end
+
+- **Device:** 83650bc (the coordinator's flash), DMM page, DC V AUTO+, RATE MED, Danger alarm Loud, key
+  / alert volume 50 % (as found after the reflash). `OUTP?` 0 throughout (never switched on). Every
+  `start4.json` query answers the same at the end except `CONF?`'s resolution field (live),
+  `DBG:FLASH?`'s last field and `DBG:VDISK:MIR?` (the reflash). `SYST:ERR?` "No error".
+- **Settings:** 1/3 and 3/3 byte-equal to the start shots (`s4_set*.png` vs `e4_set*.png`); 2/3 differs
+  only in the live rate digits (x 266-297, y 50-65).
+- **Disk:** `MMEM:CAT?` equal to the start string; no files made (screens are DBG:LCD? reads).
+- **Calibrator:** back on the 10 Hz square, enabled; registers equal to the session's start dump except
+  0x2C (live).
