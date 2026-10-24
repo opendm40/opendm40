@@ -277,6 +277,13 @@ fn read(addr: u32, buf: &mut [u8]) {
     cs(false);
 }
 
+/// One RDSR on the configured bus: the chip runs an erase / page program
+/// (vdisk.rs: a mirror sector is read between the fast logger's page
+/// programs, never waiting for one).
+pub fn chip_busy() -> bool {
+    SpiFlash::busy()
+}
+
 impl SpiFlash {
     /// Raw bytes at flash address `addr` (any length; dlog.rs reads the
     /// binary logs for the CSV export without a 4 KiB block buffer). Waits

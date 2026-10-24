@@ -283,6 +283,13 @@ pub struct Job {
     g_permille: u32,
     /// The dry pages' busy end (cycles).
     dry_until: u32,
+    /// The writer's CPU (LOG:DISK? field 14, `writer_permille`): the Run
+    /// passes' own cycles, and the main loop's cycles (wall minus the stream
+    /// ISR's) from the first pass on; the last pass's start (cycles, ISR
+    /// cycles; 0 = none yet).
+    cpu_own: u64,
+    cpu_main: u64,
+    cpu_last: (u32, u32),
     /// The Run pass's batch (here, not on the stack: no zeroing per pass).
     buf: [Rec; BATCH],
     /// The file header (text + parameters) of a trial's session: put in
@@ -338,6 +345,9 @@ const JOB0: Job = Job {
     g_max: 0,
     g_permille: 0,
     dry_until: 0,
+    cpu_own: 0,
+    cpu_main: 0,
+    cpu_last: (0, 0),
     buf: [(0, 0); BATCH],
     hdr: [0; HDR_MAX],
     hdr_n: 0,
@@ -388,6 +398,37 @@ impl<T: BlockDevice + Nor> Disk for T {
 #[inline(always)]
 pub fn active() -> bool {
     matches!(job().state, State::Prep | State::Ready | State::Run | State::Stop)
+}
+
+/// `mirror_level`: the run has caught up (a mirror sector may be read this
+/// pass), it is behind (only after vdisk.rs MIR_WAIT_SOFT_MS of waiting),
+/// it is pressed (only after MIR_WAIT_HARD_MS).
+pub const MIR_FREE: u8 = 0;
+pub const MIR_BEHIND: u8 = 1;
+pub const MIR_PRESSED: u8 = 2;
+/// Ring records / FIFO bytes at a pass's start up to which the run counts
+/// as caught up (`mirror_level`): ~5 ms of samples at 76 800 S/s (a pass
+/// that drained the ring leaves ~1 ms), 4 pages.
+const MIR_FREE_RECS: u32 = 384;
+const MIR_FREE_FIFO: u32 = 1024;
+
+/// How far behind the run is, for the SPI-disk mirror's reads (vdisk.rs
+/// `mirror_pass`; `waiting` / `cap`: the ring's fill now and capacity):
+/// MIR_FREE without a run or when caught up, MIR_PRESSED during the writer
+/// trial (a copy must not tip its verdict) or with the ring over half full,
+/// else MIR_BEHIND.
+#[inline(always)]
+pub fn mirror_level(waiting: u32, cap: u32) -> u8 {
+    let j = job();
+    if j.state != State::Run {
+        MIR_FREE
+    } else if j.gate == Gate::Trial || waiting > cap / 2 {
+        MIR_PRESSED
+    } else if waiting > MIR_FREE_RECS || j.enc.wr.wrapping_sub(j.enc.done) > MIR_FREE_FIFO {
+        MIR_BEHIND
+    } else {
+        MIR_FREE
+    }
 }
 
 /// The session holds the SPI disk (and calbackup::scratch, csvlog's FIFO):
@@ -535,6 +576,11 @@ pub struct Status {
     pub gate: u32,
     pub gate_permille: u32,
     pub gate_fill: u32,
+    /// The writer's (Run passes') share of the main loop's CPU so far,
+    /// permille (the stream ISR's time taken out of both): 1000 - this =
+    /// the headroom the rest of the main loop (USB, the panel, a host's
+    /// disk reads) has at this rate.
+    pub writer_permille: u32,
     #[allow(dead_code)] // not reported (LOG:DISK? has no chunk count)
     pub chunks: u32,
 }
@@ -569,6 +615,7 @@ pub fn status() -> Status {
         },
         gate_permille: j.g_permille,
         gate_fill: j.g_max,
+        writer_permille: if j.cpu_main > 0 { (j.cpu_own.min(j.cpu_main) * 1000 / j.cpu_main) as u32 } else { 0 },
         chunks: j.enc.chunks,
     }
 }
@@ -654,6 +701,11 @@ impl Job {
         let fifo = &mut crate::csvlog::lend_fifo()[..];
         let t0 = cyc();
         let b0 = src.isr_cyc();
+        if self.cpu_last.0 != 0 {
+            let (lt, lb) = self.cpu_last;
+            self.cpu_main += t0.wrapping_sub(lt).saturating_sub(b0.wrapping_sub(lb)) as u64;
+        }
+        self.cpu_last = (t0 | 1, b0);
         let trial = self.gate == Gate::Trial;
         if trial {
             if let Some(ev) = self.trial_step(src, fifo, t0, logger_on) {
@@ -711,6 +763,7 @@ impl Job {
             }
         }
         self.dry_until = dry.until;
+        self.cpu_own += cyc().wrapping_sub(t0).saturating_sub(src.isr_cyc().wrapping_sub(b0)) as u64;
         if trial && (stop.is_some() || self.stop_req || !logger_on) {
             // Stopped (or failed) during the trial: nothing is in the file;
             // abandoned as in Ready (the entry and its chain removed; the
@@ -776,6 +829,9 @@ impl Job {
         let ok = src.dropped() == self.g_drop && self.g_min[1] <= self.g_min[0].saturating_add(cap / 16);
         if ok {
             self.gate = Gate::Kept;
+            // The writer's CPU from the file's start (the trial's pages
+            // were dry).
+            (self.cpu_own, self.cpu_main, self.cpu_last) = (0, 0, (0, 0));
             self.enc.restart();
             self.enc.put_raw(fifo, &self.hdr[..self.hdr_n as usize]);
             self.hw = 0;
@@ -1347,6 +1403,7 @@ mod prep {
         j.ph = Ph::Run;
         j.state = State::Run;
         j.hw = 0;
+        (j.cpu_own, j.cpu_main, j.cpu_last) = (0, 0, (0, 0));
         // The writer trial first when asked for and the rung is above
         // 40 kS/s (not after a slow page probe capped it to 38400).
         if j.gate == Gate::Want {
