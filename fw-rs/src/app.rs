@@ -4328,6 +4328,26 @@ impl App {
                 crate::put_u32(out, gesture::grab_ms() as u32);
                 true
             }
+            C::DbgReadout => {
+                // Emulator tests (ohmhunt, autowaittest, switchtest): what
+                // the DMM readout draws now, whatever the view.
+                match self.shown_reading() {
+                    Some(r) => {
+                        out.put_bytes(if !r.prov { b"F," } else if r.main.v.is_nan() { b"P," } else { b"G," });
+                        out.put_bytes(r.main.unit.as_bytes());
+                        out.put_bytes(b",");
+                        if r.main.v.is_nan() && !r.main.ol {
+                            out.put_bytes(b"NAN");
+                        } else {
+                            out.put_reading(&r);
+                        }
+                    }
+                    None => out.put_bytes(b"N,,NAN"),
+                }
+                out.put_bytes(b",");
+                crate::put_u32(out, self.meter.hold_state() as u32);
+                true
+            }
             C::DbgView => {
                 // <view>,<settings page 1..3>,<wave view on> (emulator
                 // tests: where a DBG:KEY / DBG:TAP landed).
