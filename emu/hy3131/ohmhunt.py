@@ -41,6 +41,11 @@ SCEN = [
     ('r390-read-fast', 'ohm:390;' + LAG, 'FAST', 'read', 390.0, 3.9),
     ('r390-read-med', 'ohm:390;' + LAG, 'MED', 'read', 390.0, 3.9),
     ('r4k7-nolag', 'ohm:4700;ohmtau:0', 'MED', 'poll', 4700.0, 2.5),  # (knobs persist: off again)
+    # Noise above the vet's 0.1 % (60 Mohm range at FAST, x400 the model's AD1 noise, ~1-2 % rms): the
+    # conversions rarely agree; the vet must still end (OHM_VET_MAX_MS), not stay grey, and show no
+    # amber value off by more than the noise (7th: TOL). (Seeded noise: two still agree by chance
+    # within ~1 s, so this does not fail without the escape.)
+    ('r10M-fast-noisy', 'ohm:10e6;ohmtau:0;noise:400', 'FAST', 'poll', 10e6, 3.5, 0.08),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -97,7 +102,9 @@ try:
         while up() < s:
             time.sleep(0.2)
 
-    for k, (name, _, rate, how, nom, tmax) in enumerate(scen):
+    for k, sc in enumerate(scen):
+        name, _, rate, how, nom, tmax = sc[:6]
+        tol = sc[6] if len(sc) > 6 else TOL
         w0 = T0 + k * W
         wait_until(w0 + 3)
         q('CONF:VOLT:DC;:RATE %s;:SYST:ERR?' % rate)
@@ -139,16 +146,16 @@ try:
                     break
                 time.sleep(0.01)
             final = rows[-1][1]
-        if not abs(final - nom) <= 0.01 * nom:
+        if not abs(final - nom) <= max(0.01, tol) * nom:
             why.append('final %g (nominal %g)' % (final, nom))
         first = None
         for (s, f, kind, rv) in rows:
             if f < 9e37 and f == f:
                 if first is None:
                     first = s
-                if abs(f - final) > TOL * abs(final):
+                if abs(f - final) > tol * abs(final):
                     why.append('FETC? %g at +%.2f s (final %g)' % (f, s, final))
-            if kind == 'F' and abs(rv - final) > TOL * abs(final):
+            if kind == 'F' and abs(rv - final) > tol * abs(final):
                 why.append('amber readout %g at +%.2f s (final %g)' % (rv, s, final))
         if how == 'poll' and (first is None or first > tmax):
             why.append('first final FETC? at %s s (max %g)' % (first, tmax))
