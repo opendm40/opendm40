@@ -1629,6 +1629,29 @@ the AD1 stream ISR).
   - Privacy: CALIB / BOOTDATA bytes were already on the SPI disk (the
     write-once safety copy, calbackup.rs) and leave the meter only through
     the USB volume as before (INFO/, DEBUG/SPIFLASH.BIN). Nothing logs them.
+  - Pacing (2026-10-24, branch mirror-bw; device 612c45c M2: a 76800 disk
+    session lost ~21 700 samples per host copy of LOADER.BIN). A mirror
+    sector costs the main loop its whole SPI read (512 polled bytes, ~0.97
+    us each, plus a wait for a page program in the chip): ~1.1 ms of wall
+    time with the stream ISR at ~54 %, taken from the fast logger's coder.
+    So while `streaming()` a mirror sector is read only when the pass grants
+    it (`vdisk::mirror_pass`, main.rs once per pass before the MSC poll, the
+    level from `fastlog::mirror_level`; `mir_hold` via msc.rs
+    `BlockDevice::read_wait`): at most one per pass, with the chip idle
+    (one RDSR, `spiflash::chip_busy`), and only when the logger has caught
+    up (ring <= 384 records, FIFO <= 1 KiB at the pass's start). Behind:
+    after 10 ms of waiting; pressed (ring over half full, the writer
+    trial): after 50 ms. Otherwise the READ waits in its data phase (the
+    host's IN tokens NAK; no NOT READY, no retry, no 180 s exposure); a
+    240-sector READ needs <= 12 s against its 30 s timeout even at the
+    50 ms bound. Without a fast-log session (Wave view, inrush, AD1 / host
+    sessions) the level is always free: one sector per pass. Memory-served
+    sectors are not paced (they cost ~nothing; emulator: 7.7 MB of
+    ROMBOOT.BIN during a 76800 session, lost 0). Region B
+    (`.text.vdisk_rd`), checked with emu/regionc.py. DBG:VDISK:MIR? fields
+    5-7: sectors read from the mirror while streaming, holds (one per poll),
+    the longest hold (ms). The fast logger's own CPU share: LOG:DISK?
+    field 14.
   - A failed SPI read of the mirror (`mir_read`) switches it off for the
     rest of the boot; msc.rs then answers that READ NOT READY (read_busy)
     instead of MEDIUM ERROR, and the fallback below applies.
@@ -1695,6 +1718,14 @@ sd, vfat; the NOT READY change, then the final image cafab0a):
   close the view / end the session and copy again.
 - Windows (classpnp) is expected to retry 02/04/01 too; how long it keeps
   trying is not known here: not verified (device retest).
+
+Pacing (branch mirror-bw, emulator --mips 110 --isr-stall-ns 700 with the
+device's polled SPI byte, 24547cf): a host reading LOADER.BIN back to back
+from 3 s into a 76800 run lost 119 853 of 768 000 samples on e3e81d4, 0
+with the pacing (rung kept; a copy inside the writer trial no longer
+makes it fall back); every INFO/ file + DBG:PROF? polls at 38400 / 76800
+`--region-c`: lost 0, no region C, no NOT READY. Device: retest (TODO
+"Device retest of mirror-bw").
 
 Verified with the mirror (2026-10-24, 12a1d9c): fastlogtest
 `--region-c --host-read --dur 20` at 38400 / 76800 S/s (typ chip timing):
