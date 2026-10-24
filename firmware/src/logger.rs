@@ -515,6 +515,8 @@ pub struct Logger {
     isr_sess: bool,
     /// `plan` ran for the next session (`r26` holds its rung).
     planned: bool,
+    /// The session's nominal rate, mHz (`nominal_mhz`), set by `plan`.
+    nom_mhz: u32,
     /// The stream ISR session's lock watch (`poll`): its rate (mHz), the
     /// DWT count of its (re)start, and whether it was re-acquired once.
     isr_rate: u32,
@@ -580,6 +582,7 @@ impl Logger {
             isr: false,
             isr_sess: false,
             planned: false,
+            nom_mhz: 0,
             isr_rate: 0,
             isr_t0: 0,
             isr_retried: false,
@@ -691,10 +694,13 @@ impl Logger {
     pub fn nominal_us(&self) -> u32 {
         self.prod.nominal_us
     }
-    /// Nominal (chip) rate of the session in mHz.
+    /// Nominal (chip) rate of the session in mHz: the chip's conversion
+    /// rate from its clock (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`,
+    /// the rate the stream ISR runs at and ACQ:SRATe? reports), not
+    /// 1e12 / the period rounded to 1 ns (device 46370df: 76 799 016 for
+    /// the 76.8 kS/s rung's 13 021 ns, against ACQ:SRAT? 76 800).
     pub fn nominal_mhz(&self) -> u32 {
-        let p = self.prod.period_ns;
-        if p == 0 { 0 } else { (1_000_000_000_000u64 / p as u64) as u32 }
+        self.nom_mhz
     }
     pub fn buffered(&self) -> u32 {
         self.ring().len()
@@ -784,9 +790,11 @@ impl Logger {
             #[cfg(not(feature = "ad2-isr"))]
             let req = self.req_hz();
             self.r26 = hy::ad2_r26_for(req, self.chop());
+            self.nom_mhz = hy::ad2_real_rate_mhz(self.r26);
             hy::ad2_real_period_ns(self.r26)
         } else {
             self.r26 = 0;
+            self.nom_mhz = hy::ad1_rate_mhz(self.osr, self.chop());
             hy::ad1_period_us(self.osr, self.chop()) * 1000
         };
         self.prod.period_ns = period_ns;
@@ -1890,6 +1898,7 @@ mod tests {
         l.ad2 = ad2;
         l.prod.period_ns = period_ns;
         l.prod.nominal_us = (period_ns + 500) / 1000;
+        l.nom_mhz = (1_000_000_000_000u64 / period_ns as u64) as u32;
         l.active = true;
         l
     }
@@ -2463,6 +2472,40 @@ mod tests {
         l.set_chop(false);
         l.set_req_hz(600);
         assert_eq!(hy::ad2_rate_mhz(l.r26()), 1_200_000);
+    }
+
+    /// One nominal per rung (device 46370df): LOG:PREamble? / the CSV and
+    /// DLG headers (`nominal_mhz`) equal the stream ISR's rate and
+    /// ACQ:SRATe? (`scope::wave_real_fs` from `hy::ad2_real_rate_mhz`), not
+    /// 1e12 / the rounded period (76 799 016 at 76.8 kS/s).
+    #[test]
+    fn nominal_is_the_chip_rate() {
+        let mut l = Logger::new();
+        l.set_ad2(true);
+        l.set_chop(false);
+        for hz in [76_800u32, 38_400, 9600, 1200] {
+            l.set_req_hz(hz);
+            let _ = l.plan(1, 0);
+            assert_eq!(l.nominal_mhz(), hz * 1000, "AD2 {hz}");
+            assert_eq!(l.nominal_mhz(), hy::ad2_real_rate_mhz(l.r26()), "AD2 {hz}");
+        }
+        l.set_req_hz(76_800);
+        let _ = l.plan(1, 0);
+        assert_eq!(l.nominal_mhz(), 76_800_000);
+        assert_eq!((l.nominal_mhz() + 500) / 1000, 76_800);
+        l.set_ad2(false);
+        for code in 0..8u8 {
+            for chop in [false, true] {
+                l.set_osr(code);
+                l.set_chop(chop);
+                let _ = l.plan(1, 0);
+                assert_eq!(l.nominal_mhz(), hy::ad1_rate_mhz(l.osr, chop), "AD1 {code} {chop}");
+            }
+        }
+        l.set_osr(0);
+        l.set_chop(false);
+        let _ = l.plan(1, 0);
+        assert_eq!(l.nominal_mhz(), 640_000);
     }
 }
 
