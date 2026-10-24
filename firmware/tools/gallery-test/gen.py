@@ -279,7 +279,7 @@ def fmt6(v):
 
 
 def csv(name, func, unit, rng, n, dt_ms, fn, flags=lambda i: ''):
-    lines = ['# Alientek DM40A, fw-rs 0.1.0, function %s, range %s, started uptime 12.345 s' % (func, rng),
+    lines = ['# Alientek DM40A, opendm40 0.1.0, function %s, range %s, started uptime 12.345 s' % (func, rng),
              '# time_s = seconds since the start of this recording (no real-time clock); empty value = overload',
              'time_s,value,unit,flags']
     vals = []

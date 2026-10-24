@@ -115,7 +115,7 @@ Why the FAST prefix and not a new "INRnnn": the prefix is what fatdir,
 vdisk, dlog, csvlog's catalogue and the gallery know; a new one touches all
 of them. The header says what it is:
 
-    # Alientek DM40A, fw-rs 0.0.1, inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal 9599.969 S/s
+    # Alientek DM40A, opendm40 0.0.1, inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal 9599.969 S/s
     # trigger: 1 ms mean |I| above the idle peak + 1.000 A; t0 at t_s 0.200000; Irms(100 ms) 7.5672 A, peak 12.016 A, idle 0.0506 A rms, lost 0
     # t_s from the first sample (nominal rate); raw = AD2 code / 8; value = the DMM's AD2 calibration; lost_before = conversions missing before the row
     t_s,raw,value_A,lost_before

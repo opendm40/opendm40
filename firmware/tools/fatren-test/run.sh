@@ -927,7 +927,7 @@ path, n, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 raw = open(path, 'rb').read()
 assert raw.isascii() and raw.endswith(b'\r\n'), 'ASCII, CRLF, ends with a whole row'
 lines = raw.decode().split('\r\n')
-assert lines[0].startswith('# Alientek DM40A, fw-rs ') and ', function DC V, range AUTO 6 V, started uptime 5.000 s' in lines[0], lines[0]
+assert lines[0].startswith('# Alientek DM40A, opendm40 ') and ', function DC V, range AUTO 6 V, started uptime 5.000 s' in lines[0], lines[0]
 assert lines[1].startswith('# time_s = seconds since the start'), lines[1]
 rd = csv.reader(open(path, newline=''))
 rows = [r for r in rd if r and not r[0].startswith('#')]
@@ -983,16 +983,17 @@ mcopy -i $IMGC $W/keep.bin ::CONFIG.BIN
 "$W/t" $IMGC fatdir boot >/dev/null                  # LOGS/ SHOTS/ SCOPE/ as after a native boot
 cp $IMGC $W/csvbase.img
 "$W/t" $IMGC csv rec 3000 | tee $W/c1
-grep -q "csv=Done file=Some(0) rows=3000 bytes=25520 committed=25520 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
-grep -q "LOG:CSV? -> 3,0,3000,25520,25520,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "csv=Done file=Some(0) rows=3000 bytes=25523 committed=25523 dropped=0 medium_changed=true result=true" $W/c1 && echo "ok: 3000 rows recorded and committed as LOG000.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
+grep -q "LOG:CSV? -> 3,0,3000,25523,25523,0" $W/c1 && echo "ok: LOG:CSV? reply" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "session_flag=false" $W/c1 && grep -q "data_max_per_block=1 " $W/c1 && echo "ok: host writes allowed again; no data block erased twice (tail rewrites program-only)" || { echo "FAIL at line $LINENO"; exit 1; }
 grep -q "erases: fat=14 dir=8 data=7" $W/c1 && echo "ok: 8 commits = 8 LOGS/ block erases, 7 clusters = 2 x 7 FAT erases" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGC
 csvok $IMGC LOGS/LOG000.DLG 3000 full
 # The pre-DLG writer's LOG000.CSV of the same 3000 push() calls (76028 bytes,
-# commit 5a0dd55's csvlog.rs): the decoded CSV is byte-identical.
-[ "$(md5sum < $W/log.csv | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && [ $(stat -c%s $W/log.csv) = 76028 ] && echo "ok: decoded CSV == the old CSV writer's file, byte for byte (76028 bytes from 25520: 3.0x on this worst-case decade sweep)" || { echo "FAIL at line $LINENO"; exit 1; }
-[ "$(mdir -i $IMGC ::LOGS | grep LOG000 | awk '{print $3}')" = 25520 ] && echo "ok: directory size 25520" || { echo "FAIL at line $LINENO"; exit 1; }
+# commit 5a0dd55's csvlog.rs), with the header naming opendm40 instead of
+# fw-rs (+3 bytes): the decoded CSV is byte-identical.
+[ "$(md5sum < $W/log.csv | cut -c1-32)" = f472ae744af8f5f895b1c2dcc27cfe81 ] && [ $(stat -c%s $W/log.csv) = 76031 ] && echo "ok: decoded CSV == the old CSV writer's file, byte for byte (76031 bytes from 25523: 3.0x on this worst-case decade sweep)" || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(mdir -i $IMGC ::LOGS | grep LOG000 | awk '{print $3}')" = 25523 ] && echo "ok: directory size 25523" || { echo "FAIL at line $LINENO"; exit 1; }
 mcopy -n -i $IMGC ::CONFIG.BIN $W/o && cmp $W/o $W/keep.bin && echo "ok: CONFIG.BIN untouched" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGC csv rec 50 | grep -q "csv=Done file=Some(1) rows=50" && echo "ok: next recording is LOG001.DLG" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMGC
@@ -1228,7 +1229,7 @@ volok() {
 volok $VD.1 $VS && echo "ok: step 1: every CSV == dlog.py of its DLG (LOG005 from the root), BMPs == the SPI files (S007 from the root), DEBUG/SPIFLASH.BIN == the SPI image (fsck clean)" || exit 1
 mdir -b -i $VD.1 ::LOGS ::SHOTS ::SCOPE | grep -qE "LOG002|SNAP" && { echo "FAIL at line $LINENO: foreign / unnumbered file shown"; exit 1; }
 echo "ok: the foreign LOG002.DLG and the unnumbered SNAP.BMP are not shown"
-[ "$(mcopy -n -i $VD.1 ::LOGS/LOG000.CSV - | md5sum | cut -c1-32)" = bf3b94db37e0b9c57d7d34479af4661a ] && [ "$(mcopy -n -i $VD.1 ::SCOPE/SCOP000.CSV - | md5sum | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && echo "ok: LOGS/LOG000.CSV and SCOPE/SCOP000.CSV == the old CSV writer's files" || { echo "FAIL at line $LINENO"; exit 1; }
+[ "$(mcopy -n -i $VD.1 ::LOGS/LOG000.CSV - | md5sum | cut -c1-32)" = f472ae744af8f5f895b1c2dcc27cfe81 ] && [ "$(mcopy -n -i $VD.1 ::SCOPE/SCOP000.CSV - | md5sum | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && echo "ok: LOGS/LOG000.CSV and SCOPE/SCOP000.CSV == the old CSV writer's files" || { echo "FAIL at line $LINENO"; exit 1; }
 mtype -i $VD.1 ::README.TXT | grep -q "DBG:UPLOAD" && echo "ok: README.TXT" || { echo "FAIL at line $LINENO"; exit 1; }
 # places <a> <b> <rule>: directory slot + first cluster of every LOGS /
 # SCOPE / SHOTS file in two dumps (independent parse).

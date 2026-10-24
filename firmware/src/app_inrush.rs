@@ -381,7 +381,7 @@ impl App {
         };
         let mut w = crate::dlog::Txt { b: &mut out[..], n: 0 };
         let mut t = [0u8; 16];
-        w.s("# Alientek DM40A, fw-rs ");
+        w.s("# Alientek DM40A, opendm40 ");
         w.s(match option_env!("CARGO_PKG_VERSION") {
             Some(v) => v,
             None => "dev",

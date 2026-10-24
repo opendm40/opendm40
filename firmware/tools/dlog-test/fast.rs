@@ -138,7 +138,7 @@ fn sets() -> Vec<Set> {
     v
 }
 
-const HDR_TXT: &[u8] = b"# Alientek DM40A, fw-rs test, fast log\r\nt_s,raw,value,lost_before\r\n";
+const HDR_TXT: &[u8] = b"# Alientek DM40A, opendm40 test, fast log\r\nt_s,raw,value,lost_before\r\n";
 
 /// Code `s` through FastEnc + the chip. (file bytes, chip, enc).
 fn run(s: &Set, seed: u64) -> (Vec<u8>, Chip, FastEnc, Vec<u8>) {

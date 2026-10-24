@@ -238,8 +238,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let (mut vd_gen, mut vd_t) = (dlog::gen(), 0u64);
     let mut dev = UsbDeviceBuilder::new(&bus, USB_VID_PID)
         .strings(&[StringDescriptors::default()
-            .manufacturer("dm40-fw")
-            .product("DM40 multimeter (dm40-fw)")
+            .manufacturer("opendm40")
+            .product("DM40 multimeter (opendm40)")
             .serial_number(uid::serial())])
         .unwrap()
         .build();
@@ -2126,7 +2126,7 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         None => b"cts",
     };
     let mut w = dlog::Txt { b: &mut out[..], n: 0 };
-    w.s("# Alientek DM40A, fw-rs ");
+    w.s("# Alientek DM40A, opendm40 ");
     w.s(match option_env!("CARGO_PKG_VERSION") {
         Some(v) => v,
         None => "dev",
