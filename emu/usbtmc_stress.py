@@ -58,7 +58,7 @@ DEV_DEP_MSG_OUT, REQUEST_DEV_DEP_MSG_IN = 1, 2
 # The native identity; its serial field (the chip UID as 24 hex digits,
 # firmware/src/uid.rs, emu/run.py --uid) is taken from the first *IDN? (main).
 IDN = None
-IDN_RE = re.compile(rb'Alientek,DM40[ABC],[0-9A-F]{24},dm40-fw 0\.1')
+IDN_RE = re.compile(rb'Alientek,DM40[ABC],[0-9A-F]{24},opendm40 0\.1')
 IDN_34401A = b'HEWLETT-PACKARD,34401A,0,dm40-fw 0.1'
 
 
@@ -487,7 +487,7 @@ def main():
     global IDN
     IDN = t.query('*IDN?').rstrip(b'\n')
     if not IDN_RE.fullmatch(IDN):
-        print('FAIL: *IDN? %r (want Alientek,DM40A|B|C,<24 hex digits>,dm40-fw 0.1)' % IDN)
+        print('FAIL: *IDN? %r (want Alientek,DM40A|B|C,<24 hex digits>,opendm40 0.1)' % IDN)
         return 1
     print('*IDN? %s' % IDN.decode(), flush=True)
     counts = {c: 0 for c in names}

@@ -126,7 +126,7 @@
 //!   page (REL off); refused while the data logger runs or the Wave view
 //!   is open ("Settings conflict"; CONF then only selects the function).
 //!
-//! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,dm40-fw 0.1"
+//! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,opendm40 0.1"
 //! (the serial number = the USB one, src/uid.rs).
 //! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
 //! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
@@ -246,12 +246,12 @@
 
 use crate::dmm::Reading;
 
-/// *IDN?: "Alientek,DM40<m>,<serial>,dm40-fw 0.1", <m> = the calibration
+/// *IDN?: "Alientek,DM40<m>,<serial>,opendm40 0.1", <m> = the calibration
 /// model letter (`model`), <serial> = the chip UID as 24 hex digits
 /// (src/uid.rs; the USB serial number too). libsigrok shows it as [S/N: ..],
 /// ngscopeclient as the serial; both take any comma-free field.
 const IDN_HEAD: &[u8] = b"Alientek,DM40";
-const IDN_TAIL: &[u8] = b",dm40-fw 0.1";
+const IDN_TAIL: &[u8] = b",opendm40 0.1";
 
 /// Model index (0 DM40A, 1 DM40B, 2 DM40C) and the raw calibration byte
 /// (record 0x080C0000 + 0x168, docs/model-variants.md), set once by App::new

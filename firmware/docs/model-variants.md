@@ -64,7 +64,7 @@ Everything else (scope, generator, UI layout, calibration use) is the same.
   `0x080C0000`, `dm40scpi.py get CALIB.BIN`; DBG:BOOT? shows `CALBK` with no
   difference against the flash) is byte-identical to the dump's 800-byte
   record: model byte `00`. opendm40 on the device answers
-  `*IDN?` -> `Alientek,DM40A,0,dm40-fw 0.1`.
+  `*IDN?` -> `Alientek,DM40A,0,opendm40 0.1`.
 * Manual and community: most owners have DM40C (docs/user-feedback.md); this
   repo's unit is one of the few DM40A.
 
@@ -83,7 +83,7 @@ The model is in the calibration record and the hardware is the same, so the
   (set it to `self.model` in `factor()` / `over()` for the stock limits).
   The capacitance comparator follows the real model byte, as the stock does.
 * `ui.rs range_items`: DM40C labels (600mV / 6V / ...) on all models.
-* `*IDN?`: `Alientek,DM40<A|B|C>,<serial>,dm40-fw 0.1` from the model (was a
+* `*IDN?`: `Alientek,DM40<A|B|C>,<serial>,opendm40 0.1` from the model (was a
   constant DM40A until 2026-10-22; serial `0` until 2026-10-23, now the chip
   UID as 24 hex digits, docs/native-boot.md "USB serial number").
   `SYST:IDN:EMUL 34401A` unchanged.
@@ -110,6 +110,6 @@ Verified 2026-10-22 (stock V2.6, MF key on the DMM page, `emu/run.py stock
 | B | 500mV, 5V, 50V, 500V, 1000V, AUTO, AUTO+; AC, DC, AC+DC |
 | C | 600mV, 6V, 60V, 600V, 1000V, AUTO, AUTO+; AC, DC, AC+DC |
 
-fw-rs with `--model B`: `*IDN?` -> `Alientek,DM40B,0,dm40-fw 0.1`,
+opendm40 with `--model B`: `*IDN?` -> `Alientek,DM40B,0,opendm40 0.1`,
 `SYST:MOD?` -> `DM40B,1,60000`; its Voltage page keeps 600mV .. 1000V and
 AC+DC (section 4).

@@ -39,7 +39,7 @@ impl Dev {
             None => (s.clone(), String::new()),
         };
         match head.as_str() {
-            "*IDN?" => Act::Text(b"Alientek,DM40A,0,dm40-fw 0.1".to_vec()),
+            "*IDN?" => Act::Text(b"Alientek,DM40A,0,opendm40 0.1".to_vec()),
             "*OPC?" => Act::Text(b"1".to_vec()),
             "*CLS" => {
                 self.err = None;
@@ -159,13 +159,13 @@ fn main() {
     case("POW:PHAS:CAL RES;SYST:ERR?;SYST:ERR?", Some("-100,\"FLAT\";0,\"No error\""));
     case("POW:PHAS:CAL RES;:POW:PHAS:CAL?;:SYST:ERR?", Some("FLAT;-100,\"FLAT\""));
     // Replies in order, one response.
-    case("*IDN?;*OPC?", Some("Alientek,DM40A,0,dm40-fw 0.1;1"));
+    case("*IDN?;*OPC?", Some("Alientek,DM40A,0,opendm40 0.1;1"));
     case("OUTP ON;:OUTP?;*OPC?;:SYST:ERR?", Some("1;1;0,\"No error\""));
     case("*CLS;*CLS;*CLS;OUTP 0;OUTP?", Some("0"));
     // Separators: ';' ';:' '\n' '\r\n', empty commands.
     case("*OPC?;;*OPC?\r\n", Some("1;1"));
     case(";*OPC?;", Some("1"));
-    case("*OPC?\n*IDN?", Some("1;Alientek,DM40A,0,dm40-fw 0.1"));
+    case("*OPC?\n*IDN?", Some("1;Alientek,DM40A,0,opendm40 0.1"));
     // No query: no response (also for an error).
     case("OUTP ON", None);
     case("BOGUS", None);
@@ -178,7 +178,7 @@ fn main() {
     case("*OPC?;BOGUS?;*OPC?", Some("1;1"));
     // A query waiting for a reading pauses the message; the rest runs after.
     case("READ?", Some("+1.234567E+00"));
-    case("*IDN?;READ?;:SYST:ERR?", Some("Alientek,DM40A,0,dm40-fw 0.1;+1.234567E+00;0,\"No error\""));
+    case("*IDN?;READ?;:SYST:ERR?", Some("Alientek,DM40A,0,opendm40 0.1;+1.234567E+00;0,\"No error\""));
     case("READ?;READ?", Some("+1.234567E+00;+1.234567E+00"));
     case("POW:PHAS:CAL RES;READ?;SYST:ERR?", Some("+1.234567E+00;-100,\"FLAT\""));
     // Block replies: alone (with commands around) as before; refused next
@@ -187,7 +187,7 @@ fn main() {
     case("*CLS;MMEM:DATA? \"LOG001.DLG\";OUTP ON", Some("#40003abc"));
     case("MMEM:DATA? \"NOPE.DLG\"", Some(""));
     case("MMEM:DATA? \"NOPE.DLG\";:SYST:ERR?", Some("-100,\"Query error\""));
-    case("*IDN?;MMEM:DATA? \"LOG001.DLG\";SYST:ERR?", Some("Alientek,DM40A,0,dm40-fw 0.1;-100,\"Query error\""));
+    case("*IDN?;MMEM:DATA? \"LOG001.DLG\";SYST:ERR?", Some("Alientek,DM40A,0,opendm40 0.1;-100,\"Query error\""));
     // A non-query's text (DBG "OK") is a unit too.
     case("DBG:OK;*OPC?", Some("OK;1"));
     // 405-byte WAV:DATA? fits with a short reply beside it; more does not

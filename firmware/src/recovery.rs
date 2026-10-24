@@ -112,8 +112,8 @@ fn usb_disk(mut disk: spiflash::SpiFlash) -> ! {
     );
     let mut dev = UsbDeviceBuilder::new(&bus, crate::USB_VID_PID)
         .strings(&[StringDescriptors::default()
-            .manufacturer("dm40-fw")
-            .product("DM40 recovery disk (dm40-fw)")
+            .manufacturer("opendm40")
+            .product("DM40 recovery disk (opendm40)")
             .serial_number(crate::uid::serial())])
         .unwrap()
         .build();
