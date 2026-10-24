@@ -436,6 +436,26 @@ fn pinch_state_tests(ck: &mut Ck) {
         }
     }
     ck.t("pinch_step: every result inside its own table", ok);
+    // Pinch modes (DBG:PINCH): STEP one table step per 1.25x, several in a
+    // gesture; LIVE snaps to the nearest step in log scale; both inside the
+    // table for any ratio.
+    use scope_ui::{pinch_step_mode, PINCH_LIVE, PINCH_STEP};
+    let st = |s: u16| pinch_step_mode(PINCH_STEP, None, true, 200, s, 13, 6, 3, 29).i;
+    ck.t("pinch step mode: 1.2x nothing, 1.25x one step in, 1.6x two, 0.8x one out", st(240) == 13 && st(250) == 12 && st(320) == 11 && st(160) == 14);
+    let sv = |s: u16| pinch_step_mode(PINCH_STEP, None, false, 200, s, 13, 6, 3, 29).i;
+    ck.t("pinch step mode, vertical: 1.25x one range down", sv(250) == 5 && sv(200) == 6);
+    let lv = |s: u16| pinch_step_mode(PINCH_LIVE, None, true, 200, s, 13, 6, 3, 29).i;
+    ck.t("pinch live mode: snaps to the nearest step (1.1x stays, 2x one step, 0.5x one out)", lv(220) == 13 && lv(400) == 12 && lv(100) == 14);
+    let mut ok = true;
+    for mode in [PINCH_STEP, PINCH_LIVE] {
+        for horizontal in [false, true] {
+            for s in [1u16, 10, 99, 200, 400, 999] {
+                let n = pinch_step_mode(mode, None, horizontal, 200, s, 13, 6, 3, 29);
+                ok &= if horizontal { (3..=29).contains(&n.i) } else { n.i <= scope_ui::RANGE_MAX };
+            }
+        }
+    }
+    ck.t("pinch modes: every result inside its own table", ok);
 }
 
 fn raw_tests(ck: &mut Ck) {
