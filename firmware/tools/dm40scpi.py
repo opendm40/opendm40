@@ -385,8 +385,15 @@ def do_stream(link, args):
         link.query('LOG:SRAT %d' % args.rate)
     elif args.osr is not None:
         link.query('LOG:OSR %d' % args.osr)
+    check_err(link, 'LOG settings')
+    # LOG:FORMat is kept by the meter (another client may have left PACKed):
+    # always set it. Firmware before LOG:FORMat answers "Undefined header"
+    # and sends ROWS, which is fine for --format rows.
     link.query('LOG:FORM %s' % LOG_FORMATS[args.format])
-    check_err(link, 'LOG settings (LOG:FORMat needs opendm40 with compact LOG:DATA?)' if args.format != 'rows' else 'LOG settings')
+    e = link.query('SYST:ERR?') or ''
+    if e and not e.startswith('0') and not e.startswith('+0'):
+        if args.format != 'rows' or 'Undefined header' not in e:
+            raise IOError('LOG:FORMat %s: %s (needs opendm40 with compact LOG:DATA?)' % (LOG_FORMATS[args.format], e))
     t_start = time.monotonic()
     link.query('LOG:STAT ON')
     # From here on the logger runs: LOG:STAT OFF on every way out (Ctrl-C
