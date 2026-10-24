@@ -773,6 +773,29 @@ def stock_dmm_pairs():
     pair('new-temp-f', (sd, 'stock-tc-100c'), 'Stock: 214.5 °F', (RENDERS, 'dmm-temp-f'), 'opendm40: 212.5 °F')
 
 
+def power_screen():
+    sc = 1.5
+    s = shot('power-ac', sc)
+    w, h = s.size
+    im, d = canvas(w + 140, h + 40)
+    x0, y0 = 70, 20
+    paste(im, d, s, x0, y0)
+    g = lambda x, y: (x0 + x * sc, y0 + y * sc)
+    # On the screen, in empty areas next to the item: 1 V, 2 I, 3 the main
+    # value, 6 the chart; outside with a leader: 4 the row of boxes (left),
+    # 5 the right column (right).
+    for n, (x, y) in [(1, (60, 50)), (2, (262, 50)), (3, (110, 105)), (6, (240, 205))]:
+        cx, cy = g(x, y)
+        d.ellipse((cx - 16, cy - 16, cx + 16, cy + 16), fill=WHITE)
+        badge(d, cx, cy, n)
+    for n, at, bx in [(4, (4, 164), x0 - 36), (5, (477, 226), x0 + w + 36)]:
+        ax, ay = g(*at)
+        d.line((bx, ay, ax, ay), fill=BLUE, width=2)
+        d.ellipse((ax - 4, ay - 4, ax + 4, ay + 4), fill=BLUE)
+        badge(d, bx, ay, n)
+    save(im, 'power-screen')
+
+
 def main():
     global RENDERS, STOCK
     if len(sys.argv) not in (2, 3):
@@ -810,6 +833,7 @@ def main():
     ajack_wiring()
     scope_topbar()
     stock_dmm_pairs()
+    power_screen()
     if STOCK:
         stock_pairs()
 
