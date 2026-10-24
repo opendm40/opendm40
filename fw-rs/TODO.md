@@ -2534,12 +2534,17 @@ Firmware:
             label at once, holds the first decided value (ac-hold, meter-test), the RES / restart V-JACK? mask
             ends 1 s after the last 0x70 (max 12 s; switchtest ohmexit-long with a SCOPE step), the
             placeholder follows CONF's range (a10-unit / ma-unit). New `DBG:READout?`.
-            Suites on fastswitch2 rebased on 92ef9f6 (harness-sync markers): ohmhunt (10, incl. a noisy 60 Mohm
-            FAST case for the OHM_VET_MAX_MS escape), autowaittest (13), autorangetest, freqtest, loudtest,
-            meter-test (102), ui-render 0 violations, switchtest all OK but real-vjack-blind (fails without
-            DBG:SENT:PREC, as documented; -prec OK); couptest (10) and powtest (30) all OK on both base 92ef9f6
-            and fastswitch2 run side by side. couptest sqtie / band tie checks accept +9.91E37 while a tie is
-            undecided (the FETCh? rule).
+            Fuse check (owner on 10242c3: 18 ohm instead of 48, "Check leads"): it now decides on the first
+            final reading whose ohm vet saw two conversions agree on the 600 ohm row (8 s timeout kept);
+            senttest fuse-ok-lag (ohmtau 800 ms): old FAIL,38.92, new OK,47.34.
+            Suites on fastswitch2 rebased on ec2580e (sentinel3 + tidy): ohmhunt (10), autowaittest (13),
+            switchtest all 22 OK (real-vjack-blind now passes with the PRECOND default; ohmexit-long OK),
+            senttest 63 OK (incl. fuse-ok-lag), loudtest 7, freqtest 6, meter-test 102, ui-render 0
+            violations, couptest 10 / 10 and powtest 30 / 30 on both base ec2580e and fastswitch2 side by side
+            (powtest acdc-floor failed once under load on fastswitch2, OK alone; known flaky), fastlogtest
+            --region-c --host-read ad2:38400: no region C code or slow-bank read while streaming. couptest
+            sqtie / band tie checks accept +9.91E37 while a tie is undecided (the FETCh? rule).
+            Device retest step 6: the fuse check (lead V/ohm -> A) 10 times: always FUSE OK 44..54 ohm.
             **Device retest of fastswitch2** (calibrator 390 / 100 ohm and, if at hand, real 100 ohm / 4.7 kohm /
             10 Mohm resistors; RATE FAST and MED; settle.py / shots2.py / extra.py of chk6):
             1. DC V -> RES on each resistor: no amber value and no FETC? / READ? answer off the final one by more
