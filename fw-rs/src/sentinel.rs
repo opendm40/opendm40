@@ -251,10 +251,15 @@ pub const VAR_HINTS_OFF: u8 = 16;
 /// bit 5: AC A's V-JACK? AD1 back on SENSE - PB5 (the f0d21eb row, device
 /// comparison of the 2a drift).
 pub const VAR_ACA_PB5: u8 = 32;
+/// bit 6: AC A's V-JACK? AD1 at IG 0.9 instead of 3.6 (device diagnostic:
+/// where SENSE sits in the A rows; at IG 3.6 the hold is at the rail,
+/// below -347 mV, with V-COM at 1 V or the source off: device 0774e70).
+/// The swing threshold is not rescaled (4x fewer codes per volt).
+pub const VAR_ACA_IG09: u8 = 64;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 pub fn set_variant(v: u8) {
-    VARIANT.store(v & 63, core::sync::atomic::Ordering::Relaxed);
+    VARIANT.store(v & 127, core::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn variant() -> u8 {
@@ -333,7 +338,11 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
             c[2] = 0x00;
             c[3] |= 0x80;
             c[4] = if var & VAR_ACA_PB5 != 0 { R24_SENSE_PB5 } else { R24_SENSE_AGND };
-            c[5] |= R25_AD1IG_36;
+            if var & VAR_ACA_IG09 == 0 {
+                c[5] |= R25_AD1IG_36;
+            } else {
+                c[5] &= !R25_AD1IG_36;
+            }
             c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
             c[12] |= R2C_SS5;
             c[19] &= !R33_OP1CHOP;
@@ -406,6 +415,18 @@ pub const PKV_THR: i32 = 1_510;
 /// in an AC current function (mains on the V jack); DC on V is the DC A
 /// comparator's (and AC+DC / AUTO A's DC phase). A hold pinned at a rail
 /// with no swing is the drift of 2a, no hit either way.
+///
+/// Device 0774e70: the A rows' SENSE (the /1000 tap through SS5) is no
+/// defined node either; SENSE - AGND sat at the negative rail (< -347 mV)
+/// from ~0.9 s with V-COM at 1 V / the source off, and with 24 V DC it
+/// RAMPED to the rail over ~3 s: 9 000-12 000 codes per hold, a false
+/// V-JACK? at 1.5-3.5 s in 60 mA / 600 uA. A ramp moves the hold's range
+/// from one window to the next (consecutive holds barely overlap); an AC
+/// signal fills the same range again in every window. So a hit needs the
+/// swing in this hold AND an overlap of at least PKV_SWING_THR with the
+/// previous hold's range (`pk_prev`): the signal came back over the same
+/// span (a reversal), also when one side is clipped at the rail. The
+/// first hold after a row has no previous one: +1 window (~107 ms).
 pub const PKV_SWING_THR: i32 = 4_270;
 /// Window length (ms) of the comparator samples; a window with any trip is
 /// a "hit".
@@ -749,6 +770,8 @@ pub struct Sentinel {
     pub ac_dc_ok: bool,
     /// The last V-tap window's peak pair (DC?), for `dmm.rs`.
     pub pk_v: Option<(i32, i32)>,
+    /// AC A V-JACK?: the previous hold's (min, max) (PKV_SWING_THR).
+    pk_prev: Option<(i32, i32)>,
     /// Ohm / temperature (set by `dmm.rs` with the row): the comparator's
     /// A-JACK needs the row's own V-side result to say V-COM is not driven
     /// (`v_side`, V_GATE below); `vside_t` = when the last one came,
@@ -816,6 +839,7 @@ impl Sentinel {
             alt_v: false,
             ac_dc_ok: false,
             pk_v: None,
+            pk_prev: None,
             vgate: false,
             bridge: false,
             soft: false,
@@ -846,6 +870,7 @@ impl Sentinel {
         self.alt_v = false;
         self.ac_dc_ok = false;
         self.pk_v = None;
+        self.pk_prev = None;
         if kind.family() != self.kind.family() || reset {
             self.streak = 0;
             self.low_since = None;
@@ -1044,7 +1069,9 @@ impl Sentinel {
             _ => PK_THR,
         };
         let hit = if self.kind == Kind::PeakV {
+            let prev = core::mem::replace(&mut self.pk_prev, Some((pkmin, pkmax)));
             pkmax - pkmin > PKV_SWING_THR
+                && prev.is_some_and(|(a, b)| pkmax.min(b) - pkmin.max(a) > PKV_SWING_THR)
         } else {
             pkmax >= pkmin && (pkmax > thr || pkmin < -thr)
         };
@@ -1850,6 +1877,31 @@ mod tests {
         b.configured(Kind::PeakV, tb, true);
         b.sample_peak(tb + 107, 18_090, 18_150);
         assert_eq!(b.streak, 0);
+        // Device 0774e70: 24 V DC, SENSE - AGND ramps to the rail, 9 000 -
+        // 12 000 codes per hold, contiguous holds: no hit (was V-JACK? at
+        // 1.5-3.5 s). Then mains clipped at the rail on one side: hits.
+        let mut r = Sentinel::new();
+        r.configured(Kind::PeakV, 0, true);
+        let (mut tr, mut top) = (0u64, -48_000i32);
+        while top > -262_144 {
+            let bot = (top - 11_000).max(-262_144);
+            r.sample_peak(tr, bot, top);
+            r.current_small(tr, true);
+            top = bot;
+            tr += 107;
+        }
+        while tr < 6000 {
+            r.sample_peak(tr, -262_144, -262_144);
+            r.current_small(tr, true);
+            tr += 107;
+        }
+        assert_eq!((r.alert, r.hits), (Alert::None, 0));
+        while tr < 8000 {
+            r.sample_peak(tr, -262_144, -200_000);
+            r.current_small(tr, true);
+            tr += 107;
+        }
+        assert_eq!(r.alert, Alert::VJack);
         // 2.5 V rms 50 Hz on V: +-3.5 mV at SENSE = +-2 670 codes.
         while t < 9000 {
             s.sample_peak(t, -2_670, 2_670);

@@ -647,7 +647,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 scpi::Out::Fetch => match app.meter.shown().copied() {
                     // A range change with no reading yet (READ?'s rule; not
                     // while HOLD freezes the readout).
-                    Some(_) if app.dmm.reading_pending() && app.meter.hold_state() == 0 => {
+                    Some(r) if (app.dmm.reading_pending() || !app.dmm.reading_current(&r)) && app.meter.hold_state() == 0 => {
                         scpi.len = 0;
                         scpi.put_bytes(scpi::NAN);
                         true
