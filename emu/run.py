@@ -346,6 +346,9 @@ def main(argv=None):
     ap.add_argument('--usbip', type=float, default=None, metavar='T',
                     help='start a USB/IP server (TCP 3240) at virtual time T and export the USB device as busid 1-0 '
                          '(use with a long --run-for or --interactive); 0 = from the start')
+    ap.add_argument('--spi-disk-gap-ns', type=float, default=330, metavar='NS',
+                    help='SPI disk bus: delay of a byte written to an idle shifter (default 330 = the device\'s ~0.97 us '
+                         'per polled byte at 12.5 MHz; 0 = the old model)')
     ap.add_argument('--usbip-port', type=int, default=3240, metavar='P', help='USB/IP server TCP port (default 3240)')
     ap.add_argument('--usbip-renode', action='store_true',
                     help="use Renode's own USB/IP server instead of the model's (peripherals/DWC2_OTG_USBIP.cs); "
@@ -438,6 +441,9 @@ def main(argv=None):
     print('chip UID:   ', uid.hex().upper(), '(fw-rs USB serial)')
     s.add('sysbus WriteWord 0x1FFF7A22 0x0400')
     s.add('sysbus.spi2.spiflash Load %s' % q(disk))
+    # The disk bus's write-wait-read byte as on the device (~0.97 us at 12.5
+    # MHz, fw-rs spiflash.rs `xfer`; peripherals/GD32_SPI.cs IdleStartNs).
+    s.add('sysbus.spi2 IdleStartNs %g' % a.spi_disk_gap_ns)
     s.add('sysbus.gpioPortD OnGPIO 6 false')  # power key released
     # Reset cause (peripherals/FWDGT.cs): RCU_RSTSCK's flag bits come from the
     # watchdog model (sticky across resets, cleared by RSTFC), and a

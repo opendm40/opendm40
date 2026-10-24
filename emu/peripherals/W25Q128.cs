@@ -10,8 +10,8 @@
 // Erase64kUs / Erase32kUs set how long RDSR1 reports BUSY (bit 0) after a
 // page program / erase, in virtual time (datasheet W25Q128JV: tPP 0.4 ms
 // typ / 3 ms max, tSE 45 / 400 ms, tBE1 120 / 1600 ms, tBE2 150 / 2000 ms).
-// A command other than RDSR while busy is counted (BusyViolations) and
-// still executed. The SPI byte time is the controller's (dm40.repl spi2 =
+// A command other than a status read while busy is counted (BusyViolations)
+// and ignored as on the chip (StrictBusy, default; a READ then returns 0xFF). The SPI byte time is the controller's (dm40.repl spi2 =
 // GD32_SPI: 0.64 us per byte at fw-rs's 12.5 MHz).
 //
 using System;
@@ -192,9 +192,18 @@ namespace Antmicro.Renode.Peripherals.SPI
 
         private byte StartCommand(byte c)
         {
-            if(c != 0x05 && Now < busyUntil)
+            if(c != 0x05 && c != 0x35 && c != 0x15 && Now < busyUntil)
             {
                 BusyViolations++;
+                if(StrictBusy)
+                {
+                    // The chip ignores the instruction during a program /
+                    // erase (datasheet 8.1: only the status reads and
+                    // suspend / resume are accepted): a READ returns 0xFF
+                    // (DO stays released), a PP / erase / WREN does nothing.
+                    cmd = c; state = State.Done;
+                    return 0xFF;
+                }
             }
             cmd = c; addr = 0; nAddr = 0;
             switch(c)
@@ -225,6 +234,11 @@ namespace Antmicro.Renode.Peripherals.SPI
             Erases++;
             Busy(len == 0x1000 ? Erase4kUs : len == 0x8000 ? Erase32kUs : len == 0x10000 ? Erase64kUs : Erase64kUs * 256);
         }
+
+        /// A command other than a status read while BUSY is ignored, as on
+        /// the chip (true, the default since 2026-10-24); false = the old
+        /// model (executed anyway, only counted in BusyViolations).
+        public bool StrictBusy { get; set; } = true;
 
         public double ProgramUs { get; set; }
         public double Erase4kUs { get; set; }

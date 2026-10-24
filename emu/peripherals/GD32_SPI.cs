@@ -140,6 +140,15 @@ namespace Antmicro.Renode.Peripherals.SPI
             if(cpu is BaseCPU b) b.SkipTime(TimeInterval.FromNanoseconds((ulong)Math.Ceiling(ns)));
         }
 
+        /// A DATA write with the shifter idle starts shifting this much later
+        /// (ns; 0 = at once). The device's write-wait-read byte exchange
+        /// (fw-rs spiflash.rs `xfer`, every read of the SPI disk) takes ~0.97
+        /// us per byte at 12.5 MHz against 0.64 us of SCK: APB1 register
+        /// latency and the TBE -> shift start, which the model had at zero
+        /// (dm40.repl sets 330 ns on the disk's bus). Back-to-back bytes (the
+        /// buffer already loaded: page programs, `tx_burst`) are not delayed.
+        public double IdleStartNs { get; set; }
+
         /// Bytes exchanged; bytes written while the buffer was full (lost);
         /// bytes abandoned by SPIEN off (diagnostics).
         public ulong Bytes { get; private set; }
@@ -169,7 +178,7 @@ namespace Antmicro.Renode.Peripherals.SPI
             }
             if(!shifting)
             {
-                Start(b, TNow);
+                Start(b, TNow + IdleStartNs * 1e-9);
             }
             else if(!bufFull)
             {
