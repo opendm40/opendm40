@@ -102,7 +102,7 @@ change nothing; the touch screen and keys always stay active.
 - `LOG:STATe ON` is refused (`Rate too high for Bluetooth`) for AD2
   sessions (AD1 sessions, at most 640 samples/s, work). `LOG:DATA?` over
   Bluetooth of such a session (started over USB) answers an empty block with
-  the same error.
+  the same error. These limits are the same in every `LOG:FORMat`.
 - A block reply must fit 6144 bytes. A longer `WAVeform:DATA?` answers `#10`
   and queues `Too much data`: use `WAVeform:POINts 2000` or less with WORD.
 - Lines are handled one at a time: the next line is read after the reply to
@@ -631,7 +631,8 @@ the disk.
 | `LOG:SRATe[?]` | AD2 rate, S/s (default 4800) | the requested rate: `4800` | both |
 | `LOG:DEST[?]` | `HOST` (default) or `DISK` | `HOST` or `DISK` | both |
 | `LOG:DURation[?]` | DISK session length, s (0 = until stopped or full; default 60) | `60` | both |
-| `LOG:DATA?` | | block of 12-byte records, oldest first | both |
+| `LOG:FORMat[?]` | `ROWS` (default), `PACKed` or `DLG` | `ROWS`, `PACK` or `DLG` | both |
+| `LOG:DATA?` | | block of records, oldest first, in the `LOG:FORMat` layout | both |
 | `LOG:PREamble?` | | `mode,range,osr,nominal_us,measured_hz,chop,source,req_hz,nominal_mhz,r26,coupling` | both |
 | `LOG:SCALe?` | | `a,b`: value = a + b * raw, in V or A (AD2); `0,0` for AD1 | both |
 | `LOG:RATE?` | | Measured mean sample rate, Hz | both |
@@ -648,10 +649,28 @@ the disk.
   frequency and temperature cannot be streamed (`Settings conflict`).
   Source, OSR, chop and rate take effect at the next `LOG:STATe ON`.
 - While a session runs the multimeter does not update its readings.
-- **To the host** (`LOG:DEST HOST`): read `LOG:DATA?` repeatedly. Each
-  record is `u32 sequence, u32 time in us, i32 raw code`, little-endian. The
+- **To the host** (`LOG:DEST HOST`): read `LOG:DATA?` repeatedly. The
   buffer holds 2048 records; when it is full the newest are dropped
-  (`overwritten`).
+  (`overwritten`). An empty buffer answers `#40000` in every format.
+- **`LOG:FORMat ROWS`** (default): each record is `u32 sequence, u32 time in
+  us, i32 raw code`, little-endian, 12 bytes; at most 511 records per
+  reply.
+- **`LOG:FORMat PACKed`**: 3 bytes per sample. A 20-byte reply header
+  (`LP`, version, source, rate in mHz, `a`, `b` of `LOG:SCALe?`, records
+  left), then blocks: a 16-byte header (first sequence number, its time in
+  us, sample count, sample width, flags, conversions lost before the block)
+  and the samples. Sample `i` of a block was taken at `t0 + i / rate`. Every
+  gap starts a new block, so the lost samples show in the block header,
+  never inside a block. Up to ~2030 samples per reply.
+- **`LOG:FORMat DLG`**: the same reply header (`LD`), one block header,
+  then the samples coded as in the meter's fast log files (`FASTnnn.DLG`):
+  exact times and values, about 1 to 3 bytes per sample (it depends on the
+  signal's noise), up to 4 KiB of data per reply.
+- The format can be changed at any time; each reply describes itself. The
+  byte layout is in
+  [`firmware/src/logger.rs`](../../firmware/src/logger.rs) ("Compact
+  LOG:DATA?"), and `dm40scpi.py log --format` decodes both formats
+  ([Connecting from a computer](connecting-from-a-computer.md#fast-stream-to-a-csv-file)).
 - **Raw codes.** AD1: counts; 1.389 V / 8388607 counts at the converter,
   times the range's decade; the calibration is not applied. AD2: use
   `LOG:SCALe?`.

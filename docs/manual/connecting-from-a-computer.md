@@ -88,10 +88,37 @@ More commands of the tool:
 | `conf dcv` (also `acv`, `acdcv`, `dci`, `aci`, `acdci`, `res`, `cont`, `diode`, `cap`, `freq`, `temp`) | Choose the function. |
 | `read -n 10 -i 0.5` | Read 10 values, one every 0.5 s. |
 | `log out.csv -i 1 -d 60` | Log one value per second for 60 s to a CSV file. |
+| `log fast.csv --source ad2 --rate 38400 --format packed -d 10` | Record every conversion for 10 s ([below](#fast-stream-to-a-csv-file)). |
 | `get NAME -o FILE` | Copy a file from the meter's disk. |
 | `scpi 'CMD' ...` | Send any SCPI commands. |
 
 If you have more than one meter, choose one with `DM40_USBTMC=/dev/usbtmc1`.
+
+### Fast stream to a CSV file
+
+`log --source` records every conversion of the meter's converter
+([SCPI reference, fast stream](scpi-reference.md#fast-stream)):
+
+```
+$ python3 firmware/tools/dm40scpi.py conf acv
+$ python3 firmware/tools/dm40scpi.py log fast.csv --source ad2 --rate 38400 --format packed -d 10
+```
+
+`--format` sets how the samples travel over USB (`LOG:FORMat`); the CSV
+file has the same columns in every format:
+
+| `--format` | Bytes per sample | Times in the CSV |
+|---|---|---|
+| `rows` (default) | 12 | the meter's time of each sample |
+| `packed` | 3 | `t0 + i / rate` of each gap-free block |
+| `dlg` | about 1 to 3 | the meter's time of each sample |
+
+At 76 800 samples/s use `packed` or `dlg`: `rows` carries about 40 000
+samples/s over USB, and the meter drops the rest (`overwritten` in the
+summary line). The column `lost_before` counts the
+conversions lost before each row in every format. The compact formats are
+untested on a real meter, and writing CSV text at 76 800 rows/s may be too
+slow for Python on your computer; that is untested too.
 
 ### Without any tool
 
