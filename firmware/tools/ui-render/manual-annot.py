@@ -487,7 +487,7 @@ def usb_disk():
 
 def usb_row():
     sc = 2
-    s = render('settings3-edit', scale=sc, crop=(0, 132, 480, 165))
+    s = render('settings3-edit', scale=sc, crop=(0, 102, 480, 135))
     im, d = canvas(s.size[0] + 40, s.size[1] + 70)
     paste(im, d, s, 20, 20)
     text_c(d, im.size[0] / 2, s.size[1] + 34, 'PC can edit, waiting for the re-plug', font(14), MID)
