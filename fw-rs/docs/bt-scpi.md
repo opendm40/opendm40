@@ -3,15 +3,15 @@
 fw-rs answers SCPI on the meter's Bluetooth serial link, next to the stock
 phone-app protocol, so PyVISA, sigrok and simple loggers can talk to the meter
 without a cable. The same parser as USBTMC handles the commands
-(`src/scpi.rs`, `Scpi::handle`); only the transport is different.
+([`src/scpi.rs`](../src/scpi.rs), `Scpi::handle`); only the transport is different.
 
-Code: `src/bt_scpi.rs` (dispatcher, command filter, TX ring; no hardware),
-`src/bt.rs` (UART4 + DMA, `ScpiPort`), `src/main.rs` (one `Scpi` session and
+Code: [`src/bt_scpi.rs`](../src/bt_scpi.rs) (dispatcher, command filter, TX ring; no hardware),
+[`src/bt.rs`](../src/bt.rs) (UART4 + DMA, `ScpiPort`), [`src/main.rs`](../src/main.rs) (one `Scpi` session and
 one READ?/MEAS? wait per transport, `bt.pump()` every loop, replies through
 `ScpiPort`, `Out::Dbg` refused when `!port.trusted()`). DBG:DIAG? bytes 60
 (TX DMA path working, 0 = blocking fallback) and 64..67 (u32 bytes dropped on
-a full TX ring). Host test: `tools/bt-scpi-test/run.sh`.
-Client: `tools/dm40bt_scpi.py`.
+a full TX ring). Host test: [`tools/bt-scpi-test/run.sh`](../tools/bt-scpi-test/run.sh).
+Client: [`tools/dm40bt_scpi.py`](../tools/dm40bt_scpi.py).
 
 ## Wire format
 
@@ -33,8 +33,7 @@ on the first byte of each request:
   overrun".
 - Replies: the text plus `\n`. A definite-length block (`WAV:DATA?`,
   `LOG:DATA?`) is `#<n><len><data>` plus `\n`. USBTMC ends its replies the
-  same way (IEEE 488.2 NL^END, since the 8087c7d follow-up: a host reading
-  until `\n`, libscopehal's usbtmc transport, hung on one-byte replies).
+  same way (IEEE 488.2 NL^END).
 - Messages run one at a time: the next line is read only after the reply to
   the previous query has gone out, as on a serial instrument. Pipelined
   queries are answered in order, and none is cut short ("Query INTERRUPTED"
@@ -88,9 +87,9 @@ loop. RX goes to a 1 KiB circular DMA ring (89 ms of input).
 | `WAV:DATA?` | 406 B | 35 ms | ~50-100 ms |
 | `WAV:DATA?` with `WAV:POIN 2000` (WORD) | ~3.8 kB | 0.33 s | ~0.4 s |
 | `WAV:DATA?` full record (`WAV:POIN MAX`) | 26.6 / 53.2 kB | refused | `#10` + "Too much data" |
-| `LOG:DATA?` | <= 6145 B | 0.53 s | ~0.6 s (AD1 <= 640 S/s only, see below) |
+| `LOG:DATA?` | <= 6145 B | 0.53 s | ~0.6 s (AD1 <= 640 S/s only) |
 
-The data logger over Bluetooth (`LOG:STATe ON`, `LOG:DATA?`; 2026-10-22):
+The data logger over Bluetooth (`LOG:STATe ON`, `LOG:DATA?`):
 12-byte records at 11.5 kB/s are 960 records/s with the link 100 % busy;
 each block also waits for the query's round trip (RFCOMM ~20-60 ms per
 511-record block of 0.53 s), so ~870 records/s is the realistic ceiling.
@@ -103,9 +102,9 @@ from Bluetooth while a faster session runs (started over USB) answers an
 empty block and the same error, so it never steals the USB host's
 records. `LOG:DEST DISK` sessions are USB only ("Command protected", as
 `LOG:CSV ON`). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
-docs/compact-log-format.md "Fast stream"). Host: `tools/dm40scpi.py --bt
+[compact-log-format.md](compact-log-format.md) "Fast stream"). Host: `tools/dm40scpi.py --bt
 log --source ad1 --osr 0` (it warns about the ceiling). Emulator check:
-emu/fastlogtest.py (the refusals, an AD1 session drained over BT).
+[emu/fastlogtest.py](../../emu/fastlogtest.py) (the refusals, an AD1 session drained over BT).
 
 The module has no RTS/CTS wiring. Classic SPP keeps up with 115200. Over BLE
 (20-byte notifications at the connection interval) the module may not keep up
@@ -114,7 +113,7 @@ uses classic SPP anyway.
 
 ## Scope waveform readout
 
-The same commands on USBTMC and Bluetooth (`src/scope_wav.rs`; the scope
+The same commands on USBTMC and Bluetooth ([`src/scope_wav.rs`](../src/scope_wav.rs); the scope
 settings are the meter's, shared by both transports and the screen):
 
 | Command | |
@@ -166,8 +165,7 @@ factory name, not a calibrator), and the BLE device "DM40A" / "B" / "C" for
 the phone app, whose address has the first byte one lower. RFCOMM channel 1
 of the classic address is the one to use. "Host is down" from it means the
 module does not answer pages at all: Bluetooth OFF in Settings, or a phone
-holding the module's one connection, or (fw-rs before 2026-10-22) the module
-left unpowered (PC0 high).
+holding the module's one connection.
 
 The address is found like the memrw kit finds it (`bluetoothctl`, the classic
 device with the Serial Port UUID, cached in `~/.config/dm40-memrw/mac`).
@@ -225,7 +223,7 @@ print(dmm.query('*IDN?'))
 ```
 
 Not yet tried with the meter: only the code 28 state was seen (Windows 11,
-docs/device-check-2026-10-21.md "b6909d6: ... Windows 11", item 6).
+[device-check-2026-10-21.md](device-check-2026-10-21.md) "b6909d6: ... Windows 11", item 6).
 
 ### sigrok
 
@@ -236,10 +234,10 @@ sigrok-cli -d scpi-dmm:conn=/dev/rfcomm0:serialcomm=115200/8n1 --samples 10
 
 libsigrok's serial SCPI transport ends commands with CR LF, which works here
 because CR ends the line and the LF is ignored. scpi-dmm needs the DM40
-profile from the libsigrok branch in TODO.md to recognise the `*IDN?` string.
+profile from the libsigrok branch in [TODO.md](../TODO.md) to recognise the `*IDN?` string.
 
 Range and digits (the profile's SR_CONF_RANGE / SR_CONF_DIGITS, SmuView's
-"Range" and "Digits"; 2026-10-23): `--show` lists the ranges of the current
+"Range" and "Digits"): `--show` lists the ranges of the current
 function, `-c range=60V` / `Auto` sets one (`<f>:RANG <v>` /
 `<f>:RANG:AUTO ON`; scpi.rs header "Ranges and resolution"):
 
@@ -267,10 +265,8 @@ coupling (`VOLT:AC:RANG?`) names that coupling's function. A query of a
 function that is not selected is no error: `:RANG:AUTO?` answers 1
 (selecting a function or coupling starts it in autorange), `:RANG?` /
 `:RES?` `+9.91E37` (no range until it is selected); a set naming it is
-"Settings conflict". (Before 2026-10-24 the bare header meant DC only and
-any other function's query raised "Settings conflict": `VOLT:RANG:AUTO?` in
-AC V gave `+9.91E37`.) The same ranges on DM40A / B / C (fw-rs uses the 60000
-counts limits on all models, docs/model-variants.md). Digits: `5` = RATE FAST
+"Settings conflict". The same ranges on DM40A / B / C (fw-rs uses the 60000
+counts limits on all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
 600000 counts once the moving average is full (~3.2 s after a change) in DC
 V 600 mV .. 600 V and ohm 600 ohm .. 60 kohm; elsewhere it stays 60000
@@ -283,8 +279,8 @@ A function changed on the meter during an acquisition does not end it: the
 `READ?` waiting at that moment, and every `READ?` until the new function has
 a reading, answers within 0.85 s with `+9.91E37` (SCPI NaN, "Data stale";
 `+9.9E37` stays the overload). The DM40 profile skips those samples and
-labels the next ones from `CONF?` (`FUNC?` before 2026-10-23; both name
-the function and arm the check); other hosts see +inf for them. A function
+labels the next ones from `CONF?` (older profile versions ask `FUNC?`; both
+name the function and arm the check); other hosts see +inf for them. A function
 changed over Bluetooth while sigrok reads over USBTMC counts as a change on
 the meter (device check 2026-10-22: 16 changes, 880 samples, no stop). `FUNC?`
 names of the fw-rs extras: `"VOLT:AUTO"` / `"CURR:AUTO"` (the profile's
@@ -295,7 +291,7 @@ or with `CONF:POW`; not selectable from sigrok: its range hunt takes up to
 
 AUTO coupling (`CONF:VOLT:AUTO`, `MEAS:VOLT:AUTO?`, the CURR twins): its
 values before the first DC / AC decision are provisional (shown grey on the
-meter, docs/switch-latency.md 6) and never answered. `READ?` / `MEAS?` after
+meter, [switch-latency.md](switch-latency.md) 6) and never answered. `READ?` / `MEAS?` after
 the host's change wait for the decision: ~1.3 s on a DC signal, ~3.5 s on a
 clear AC one; at most until 3.9 s after the coupling was entered
 (`AUTO_WAIT_MS`; a query after that waits at most 0.85 s), then the part AUTO
@@ -304,4 +300,4 @@ decide: its DC part is answered), never +9.91E37 / "Data stale". `FETCh?`
 answers +9.91E37 until the decision. A host timeout of 5 s covers
 `MEAS:VOLT:AUTO?`; libsigrok's DM40 profile (`READ?` 3 s after `CONF`, a hard
 1 s USBTMC read) gets its reply within 0.85 s.
-(emu/hy3131/autowaittest.py.)
+Test: [emu/hy3131/autowaittest.py](../../emu/hy3131/autowaittest.py).
