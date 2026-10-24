@@ -2,6 +2,7 @@
 # Note: this also hides any future .bin that should be tracked; add a
 # `!path/to/file.bin` exception for it.
 *.bin
+!vendor/dm40_v_2_6.bin
 *.apk
 *.zip
 

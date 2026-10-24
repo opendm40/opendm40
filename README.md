@@ -67,14 +67,16 @@ protocol notes are for stock V2.6.
 
 ## Vendor files
 
-The vendor firmware update files, the Android app and the manuals are not in
-this repo. Copies of the official update files live in
-`wirenboard/alientek-dm40-tools` (`vendor/`). The tools expect the official
-`dm40_v_2_6.bin` at the repo root (ignored by git); `fw-rs/tools/mkstockfont.py`
-also needs its decoded copy:
+[vendor/](vendor/README.md) holds the latest official stock firmware,
+`dm40_v_2_6.bin` (Alientek's, unmodified, not under the MIT licence; see
+its README). It returns a meter to stock and feeds the emulator and the
+stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
+(`vendor/`). The Android app and the manuals are not in this repo.
+`emu/run.py stock` and `fw-rs/tools/mkstockfont.py` need the decoded body at
+the repo root (ignored by git):
 
 ```
-python3 firmware/dm40fw.py decode dm40_v_2_6.bin dm40_v_2_6.dec.bin
+python3 firmware/dm40fw.py decode vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
 ```
 
 ## Toolchain

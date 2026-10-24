@@ -11,7 +11,7 @@ set -e
 KIT=$(cd "$(dirname "$0")" && pwd)
 PATCH=$(dirname "$KIT")
 ROOT=$(cd "$PATCH/../.." && pwd)
-ORIG=$(realpath "${1:-$ROOT/dm40_v_2_6.bin}")
+ORIG=$(realpath "${1:-$ROOT/vendor/dm40_v_2_6.bin}")
 OUT=$ROOT/dist/dm40-memrw-kit
 
 [ -f "$ORIG" ] || { echo "missing vendor file $ORIG" >&2; exit 1; }
