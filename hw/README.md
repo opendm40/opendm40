@@ -26,7 +26,7 @@ Sources used most: [`fw-rs/src/board.rs`](../fw-rs/src/board.rs) and the other d
 `firmware/re/analysis/*_v2_6.h`, [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md),
 [`fw-rs/docs/power-meter-and-misconnect.md`](../fw-rs/docs/power-meter-and-misconnect.md), [`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md),
 [`docs/dm40-feature-request.md`](../docs/dm40-feature-request.md) 1.1 (community BOM of board V1.1, after
-jebem / mydigit.cn), [`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (owner reports, cited by
+jebem in the [EEVblog DM40C thread](https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-(dm40a-dm40b-dm40c)/), from the [mydigit.cn teardown](https://www.mydigit.cn/thread-486604-1-1.html), registration needed), [`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (owner reports, cited by
 forum post number).
 
 ## Contents
