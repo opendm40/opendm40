@@ -46,7 +46,6 @@ All settings are kept when you switch off, except **USB disk**.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Jack alerts** | ON, A-JACK only, OFF | ON | Wrong-connection alerts. ON: all of them (A-JACK, A-PROT, V-JACK?, LIVE? and the hints DC?, AC?, FUSE?). A-JACK only: A-JACK and A-PROT. OFF: none of these ([Safety and alerts](safety-and-alerts.md)). |
-| **A-lead reminder** | ON, OFF | ON | **Leads in A jack?** reminder when you leave a current function. |
 | **Danger alarm** | Loud, Volume, Off | Loud | The alarm for dangerous connections. Loud: full volume, whatever the key volume. Volume: at the key/alert volume. |
 | **USB disk** | Files live, PC can edit | Files live | Whether the computer may delete files and copy an update file. Takes effect at the next USB plug; until then the row shows **(re-plug)**. Back to Files live at every power-on ([USB disk](usb-disk.md#two-modes-files-live-and-pc-can-edit)). |
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the voltage drop of the current shunt ([Multimeter, Burden voltage](multimeter.md#burden-voltage)). |

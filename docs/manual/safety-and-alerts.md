@@ -48,15 +48,6 @@ How they end:
 Sounds: A-JACK and A-PROT sound the [danger alarm](#the-danger-alarm).
 LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 
-## The "Leads in A jack?" reminder
-
-When you leave a current function (A or the power meter) for any other
-function, the meter beeps once and shows **Leads in A jack? Move to V**. It
-cannot see whether you moved the lead, so it reminds you once; if a current
-then flows, A-JACK takes over.
-
-To switch it off: **Settings > More > More > A-lead reminder**.
-
 ## The danger alarm
 
 A loud two-tone alarm for connections that can damage the meter or the
@@ -88,13 +79,10 @@ combined view).
 
 ## Settings
 
-**Settings > More > More**:
-
-- **Jack alerts**: **ON** (all alerts above, default), **A-JACK only**
-  (A-JACK and A-PROT), **OFF** (none of them, and no A-PROT protection).
-  OVLD and the 10 A alarm are always on.
-- **A-lead reminder**: ON (default) / OFF.
-- **Danger alarm**: Loud / Volume / Off.
+**Settings > More > More > Jack alerts**: **ON** (all alerts above,
+default), **A-JACK only** (A-JACK and A-PROT), **OFF** (none of them, and no
+A-PROT protection). OVLD and the 10 A alarm are always on. The danger alarm
+has its own row ([Settings, page 3](settings.md#page-3)).
 
 ## Fuse check
 
@@ -121,7 +109,7 @@ The check tests the path through the µA and mA shunts, not the 10 A shunt.
 
 ## What cannot be detected
 
-- A lead in the A jack with no current flowing (the reminder helps).
+- A lead in the A jack with no current flowing.
 - A voltage source across A and COM while you measure current: it reads as
   a current. Mains blows the fuse in under a millisecond.
 - A blown fuse: the meter reads 0 A. FUSE? appears after a minute; the fuse

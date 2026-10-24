@@ -47,7 +47,7 @@ See [Multimeter](multimeter.md).
 
 | Stock | opendm40 |
 |---|---|
-| Only the high-voltage warning (red from 30 V, lightning from 100 V) | Also alerts for wrong connections (A-JACK, A-PROT, V-JACK?, LIVE?, hints), protection of the small current shunt, a loud danger alarm, the "Leads in A jack?" reminder, a fuse check |
+| Only the high-voltage warning (red from 30 V, lightning from 100 V) | Also alerts for wrong connections (A-JACK, A-PROT, V-JACK?, LIVE?, hints), protection of the small current shunt, a loud danger alarm, a fuse check |
 
 See [Safety and alerts](safety-and-alerts.md).
 
