@@ -73,7 +73,7 @@ fn save(path: &str, d: &[u8]) {
 
 #[allow(dead_code)]
 mod msc {
-    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 9 methods,
+    /// Same trait as fw-rs src/msc.rs (kept in sync by hand; 10 methods,
     /// write_step with its default = the whole write at once).
     pub trait BlockDevice {
         fn present(&self) -> bool;
@@ -82,6 +82,10 @@ mod msc {
         fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
         fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
         fn read_only(&self) -> bool {
+            false
+        }
+        fn read_wait(&mut self, lba: u32) -> bool {
+            let _ = lba;
             false
         }
         fn take_media_changed(&mut self) -> bool {
