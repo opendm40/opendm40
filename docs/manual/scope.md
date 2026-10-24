@@ -20,8 +20,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
     generator runs.
   - **MCX | DMM**: the input source (MCX is the **CHA** jack); tap to switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Graph**: 10 × 8 divisions. On the left edge, the markers **A** (the
-  trace's zero), **T** (trigger level) and **M** (math / FFT). On the top
-  edge, **T** marks the trigger position.
+  trace's zero) and **M** (math / FFT); on the right edge, **T** (trigger
+  level). On the top edge, **T** marks the trigger position.
 - **Timebase tabs** in the bottom corners of the graph, for example
   **<500us** and **100us>**: the next slower and faster timebase.
 - **CUR** tab at the bottom of the graph: cursors.
@@ -72,7 +72,7 @@ in the left or right half of the graph steps), **Off**.
 
 ## Trigger
 
-- **Drag** the **T** marker on the left edge to set the trigger level.
+- **Drag** the **T** marker on the right edge up or down to set the trigger level.
 - **Drag sideways** to move the trigger position (the **T** on the top
   edge).
 - **Long press** a marker to centre it: the trigger level goes to the middle
@@ -106,6 +106,18 @@ A drag moves the selected marker: a vertical drag moves the selected level
 (the trace, the trigger level, a Y cursor, the FFT), a horizontal drag the
 selected time item (the trigger position, an X cursor, the FFT centre).
 Press on a marker to select it; markers that overlap are selected in turn.
+A drag that starts on or near a marker (within about 12 pixels) moves that
+marker; no tap to select it first. When markers are close, the nearest one is
+taken; the selected one wins if it is about as near. While the guide lines
+show, a drag along one moves its item too. A tap on the selected marker
+selects the next one under the finger.
+
+A drag that starts on a marker moves only along that marker's axis until you
+lift the finger: up and down for the level markers, sideways for the time
+markers. The **T** trigger-level marker of a running scope is the exception:
+it moves the trigger point both ways (level and position); the trace stays
+put until the next capture, which triggers at the new point. A drag along a
+guide line takes the axis it starts moving in.
 
 **Settings > Scope drag** sets how a drag starts:
 
@@ -258,5 +270,3 @@ you switch off. The scope starts running, in trigger mode Auto.
 - Untested on a real meter: pulse and runt triggers, cursors, pinch,
   double tap, long-press centring, holding a corner to repeat, Axis lock
   and Hold drag, the persistence modes, auto-set keeping AC coupling.
-- The help page says "Scope: right edge: Drag trigger level"; the trigger
-  level marker is on the left edge.

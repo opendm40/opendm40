@@ -43,6 +43,20 @@ impl App {
         self.beep(now, 50);
     }
 
+    /// While the wiring dialog is open: its current path's dashes march at
+    /// 10 fps (one repaint of the path wires per 100 ms).
+    pub(super) fn pw_entry_tick(&mut self, now: u64, can_draw: bool) {
+        use core::sync::atomic::{AtomicU32, Ordering};
+        static PH: AtomicU32 = AtomicU32::new(0);
+        if !can_draw || !matches!(self.overlay, Some(crate::dialog::Overlay::PowerEntry { .. })) {
+            return;
+        }
+        let ph = (now / 100) as u32;
+        if PH.swap(ph, Ordering::Relaxed) != ph {
+            ui::pw::entry_anim(ph);
+        }
+    }
+
     /// The dialog's OK: enter the power meter on the DMM page.
     pub(super) fn pw_enter(&mut self, clk: &mut Clock) {
         self.overlay = None;

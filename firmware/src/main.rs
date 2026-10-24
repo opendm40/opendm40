@@ -769,7 +769,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                     scpi::Dbg::Drag(v) => {
                         let (p0, p1) = (touch::Point { x: v[0], y: v[1] }, touch::Point { x: v[2], y: v[3] });
-                        gestures.synth_drag(p0, p1, v[4], v[5], now, |g| app.gesture(&mut clk, g));
+                        gestures.synth_drag(p0, p1, v[4], v[5], v[6], now, |g| app.gesture(&mut clk, g));
                         // All events ran in this pass: time from the release
                         // to the first frame drawn (acquisition restart cost).
                         prof::touch(prof::cyc());

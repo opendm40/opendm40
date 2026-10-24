@@ -13,7 +13,10 @@
 //!   moves the selected level item (CH1 position, trigger level, Y cursor)
 //!   by dy rows, else the selected time item (trigger position / stored
 //!   record pan, X cursor) by dx px; a 4 px tap tolerance before the first
-//!   move applies (the stock nudges the item on a wobbly tap);
+//!   move applies (the stock nudges the item on a wobbly tap). opendm40: a
+//!   press on a marker zone locks the drag to that marker's axis (level
+//!   markers vertical, time markers horizontal) for the whole gesture; the
+//!   per-event split applies only to presses off the markers;
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 3): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -92,8 +95,21 @@ pub(super) struct Touch {
     /// pan so far (px).
     anchor: Option<usize>,
     pan: i32,
-    /// Axis-lock mode: the decided axis.
+    /// Axis-lock mode: the decided axis. A press on a marker zone locks it
+    /// at the press for the whole gesture (level group: V, time group: H),
+    /// in every drag mode, except the trigger-level marker of a running
+    /// scope (`both`).
     axis: Option<Axis>,
+    /// The press grabbed the trigger-level marker of a running scope: the
+    /// drag moves the trigger point in 2-D, level by dy and position by dx
+    /// on every event; the trace stays put (`sp_render`), only the trigger
+    /// markers and their guide lines follow the finger (owner 2026-10-24:
+    /// "it should drag the vertical trigger line, not the waveform"). The
+    /// next acquisition after the release re-triggers at the new point.
+    both: bool,
+    /// A line-zone press: the axis is decided by the first motion (as the
+    /// Axis lock drag mode), not locked at the press.
+    decide: bool,
     /// Hold mode: grabbed.
     grabbed: bool,
     /// Combined view: sub-row remainder of vertical moves.
@@ -129,6 +145,19 @@ pub(super) struct Pinch {
     /// the table of `axis` (scope_ui::pinch_step).
     i0: usize,
     i: usize,
+    /// Span ratio (now / start): the live stretch of PINCH_LIVE.
+    r: f32,
+}
+
+/// Pinch mode (scope_ui::PINCH_*; DBG:PINCH, RAM only).
+static PINCH_MODE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(su::PINCH_STEP);
+
+pub fn pinch_mode() -> u8 {
+    PINCH_MODE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_pinch_mode(m: u8) {
+    PINCH_MODE.store(m.min(su::PINCH_LIVE), core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Column rows (280-row model) of the frame shown, per engine column, and
@@ -330,6 +359,11 @@ pub(super) struct Sp {
     /// UF-08: the press is on the cursor tab; the selection before the
     /// cursor tab turned the cursors on. UF-09: the last plain tap.
     cur_press: bool,
+    /// The press picked the item that was already selected (a still tap
+    /// then cycles to the next overlapping one, `sp_release`).
+    presel: bool,
+    /// The press hit a line zone, not a marker glyph (`sp_select`).
+    line_press: bool,
     cur_saved: Option<([u8; 4], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
@@ -387,6 +421,8 @@ impl Sp {
             list: None,
             tb_drawn: (255, false),
             cur_press: false,
+            presel: false,
+            line_press: false,
             cur_saved: None,
             last_tap: None,
             math: Math::DEFAULT,
@@ -782,15 +818,27 @@ impl App {
         }
         let s = &self.scope.s;
         let (ky, kx) = match self.sp.pinch {
+            // PINCH_LIVE: the shown frame stretched with the fingers.
+            Some(p) if pinch_mode() == su::PINCH_LIVE => {
+                let (ky, kx) = (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]);
+                if p.axis == Axis::V { (ky * p.r, kx) } else { (ky, kx * p.r) }
+            }
             // (Indices clamped again: a safety net, pinch_step keeps them in
             // their tables.)
             Some(p) if p.axis == Axis::V => (scope::VDIV[c.range.min(9)] / scope::VDIV[p.i.min(9)], 1.0),
             Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
             None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
-        // A stopped pan moves the record under the trigger column.
+        // A stopped pan moves the record under the trigger column; a
+        // trigger-point drag (`Touch::both`) moves only the markers.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
-        let hpos = if s.run { s.hpos } else { c.hpos + pan };
+        let hpos = if self.sp.touch.is_some_and(|t| t.both) {
+            c.hpos
+        } else if s.run {
+            s.hpos
+        } else {
+            c.hpos + pan
+        };
         let zr = (140 + s.pos) as f32;
         let d_pos = s.pos - c.pos;
         for j in 0..399 {
@@ -1210,9 +1258,16 @@ impl App {
     /// hit, the tap-step side armed).
     fn sp_select(&mut self, p: Point) -> (bool, Option<bool>) {
         self.sp.cur_press = false;
+        self.sp.presel = false;
         let m = self.sp_model(self.now);
+        // A line zone (cursor / guide line) selects its item, but the drag
+        // decides its axis from the first motion (`Touch::decide`): a
+        // sideways pan along the CH1 zero line still pans.
+        self.sp.line_press = su::graph_pick(&m, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16).is_some_and(|q| q.line());
         match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
             su::Press::Marker(level, id) => {
+                // Already the selection: a still tap cycles on release.
+                self.sp.presel = level == !self.sp.last_h && id == if level { self.sp.sel_v } else { self.sp.sel_h };
                 if level {
                     self.sp.sel_v = id;
                     self.sp.last_h = false;
@@ -1301,6 +1356,13 @@ impl App {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
+                let decide = hit && self.sp.line_press;
+                let both = hit && !decide && !self.sp.last_h && self.sp.sel_v == 1 && s.run && !self.scope.rolling();
+                if both {
+                    // The trigger position follows dx: select it (its T
+                    // marker fills, its guide line shows).
+                    self.sp.sel_h = 0;
+                }
                 self.sp.touch = Some(Touch {
                     p0: p,
                     last: p,
@@ -1313,7 +1375,9 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: None,
+                    axis: (hit && !both && !decide).then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
+                    both,
+                    decide,
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1377,6 +1441,7 @@ impl App {
                 // centre row.
                 if let Some(t) = self.sp.touch {
                     if t.hit && !t.moving {
+                        self.sp.presel = false; // no tap cycling on its release
                         self.sp_recentre(now);
                     }
                 }
@@ -1464,7 +1529,20 @@ impl App {
             t.moving = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
-        if self.sp.drag_mode == DRAG_AXIS {
+        if t.both {
+            // Trigger point: both axes on every event.
+            t.applied = p;
+            self.sp.touch = Some(t);
+            self.sp.guide_until = now + GUIDE_MS;
+            if dy != 0 {
+                self.sp_move_v(dy, now);
+            }
+            if dx != 0 {
+                self.sp_move_h(dx, now);
+            }
+            return;
+        }
+        if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() || t.decide {
             if t.axis.is_none() {
                 let (ax, ay) = ((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs());
                 if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
@@ -1650,6 +1728,22 @@ impl App {
                 self.sp_settings_changed();
             } else {
                 self.scope.refresh();
+            }
+            return;
+        }
+        // A still tap on the marker that was already selected: the next
+        // overlapping one (the stock cycling; the press picked the nearest,
+        // preferring the selection).
+        if t.hit && t.still() && self.sp.presel {
+            self.sp.presel = false;
+            let m = self.sp_model(now);
+            if let Some((level, id)) = su::graph_cycle(&m, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, t.p0.x as i16, t.p0.y as i16) {
+                if level {
+                    self.sp.sel_v = id;
+                } else {
+                    self.sp.sel_h = id;
+                }
+                self.sp.last_h = !level;
             }
             return;
         }
@@ -1876,9 +1970,12 @@ impl App {
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
         let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
-        let n = su::pinch_step(prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
-        let p = Pinch { axis, i0: n.i0, i: n.i };
-        let changed = prev.map_or(true, |q| q != n);
+        let mode = pinch_mode();
+        let n = su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
+        let r = s.max(1) as f32 / s0.max(1) as f32;
+        let p = Pinch { axis, i0: n.i0, i: n.i, r };
+        let live_moved = mode == su::PINCH_LIVE && self.sp.pinch.map_or(true, |q| q.r != r);
+        let changed = prev.map_or(true, |q| q != n) || live_moved;
         if changed || !self.sp.bubble {
             self.sp.pinch = Some(p);
             self.sp_render();

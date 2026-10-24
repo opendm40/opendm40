@@ -85,9 +85,9 @@ Code work (in this order):
       emu/fastlogtest.py take `--extra-script FILE` (e.g. the hook lines).
 ## Remaining work
 
-- [ ] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" is
-      wrong: the trigger-level marker T is on the left edge of the graph. Change it to "Scope: left
-      edge". docs/manual/scope.md lists it under Known limitations until then.
+- [x] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" was
+      wrong while the trigger-level marker T was on the left edge; the marker moved to the graph's
+      right edge (scope_ui.rs `strip_items`), so the help text is now correct.
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (a3427d4).
       `tools/reload.sh` is the native reload flow (fa29a80); no serial/ttyACM references remain.
 - [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and

@@ -553,8 +553,9 @@ impl Tracker {
     /// p1 in `ms` ms (a point every 20 ms), released. Every gesture goes to
     /// `app` at once (timestamps are synthetic, from `now`); when it returns
     /// true the touch is captured, as in the main loop. Anything in progress
-    /// is dropped first.
-    pub fn synth_drag(&mut self, p0: Point, p1: Point, ms: u16, hold: u16, now: u64, mut app: impl FnMut(Gesture) -> bool) {
+    /// is dropped first. `jitter` px: the path's x gets a sawtooth (+j, +j/2,
+    /// 0 per 3 points; the last point exact), a finger wobbling sideways.
+    pub fn synth_drag(&mut self, p0: Point, p1: Point, ms: u16, hold: u16, jitter: u16, now: u64, mut app: impl FnMut(Gesture) -> bool) {
         let keys = self.keys;
         *self = Tracker::new();
         self.keys = keys;
@@ -578,7 +579,9 @@ impl Tracker {
         let n = (ms / 20).max(1) as i32;
         for i in 1..=n {
             let lerp = |a: u16, b: u16| (a as i32 + (b as i32 - a as i32) * i / n) as u16;
-            let g = self.event(&ev(Point { x: lerp(p0.x, p1.x), y: lerp(p0.y, p1.y) }), t1 + (ms as i32 * i / n) as u64);
+            let j = if i == n { 0 } else { [jitter, jitter / 2, 0][i as usize % 3] };
+            let x = (lerp(p0.x, p1.x) + j).min(479);
+            let g = self.event(&ev(Point { x, y: lerp(p0.y, p1.y) }), t1 + (ms as i32 * i / n) as u64);
             feed(self, g);
         }
         let g = self.event(&Event { keys, ..Event::default() }, t1 + ms as u64 + 10);
