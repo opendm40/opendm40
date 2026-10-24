@@ -1707,7 +1707,12 @@ Firmware:
       This branch: **lost 0**, rung kept, 2 279 mirror sectors read in the run, longest hold 39 ms; copy in
       the trial: kept 76800, lost 0; every INFO/ file + DBG:PROF? polls at 38400 / 76800 with `--region-c`:
       lost 0, no region C code / slow-bank load, no NOT READY; --noise 1000 (2.43 B/sample, 730 pages/s) +
-      LOADER.BIN: lost 0. Headroom (LOG:DISK? field 14, no copy): the writer takes 589 permille of the main
+      LOADER.BIN: lost 0. Linux usb-storage (emu/kvmtest, KVM_MIPS=110 KVM_ISR_STALL_NS=700, dm40rate=76800):
+      `cat` of CALIB / BOOTDATA / LOADER / FIRMWARE.BIN with drop_caches, byte-identical, no kernel sense /
+      reset lines; started 40 s into the run, 2 rounds: lost 0; started inside the writer trial: e3e81d4 fell
+      back to 38400, this branch kept 76800 with lost 0 in one run and 20 (0.26 ms, cause not isolated) in
+      another. The copy is slower than before (4 files: ~27-35 s of guest time vs ~11 s; the emulator runs
+      ~10x slower than real time). Headroom (LOG:DISK? field 14, no copy): the writer takes 589 permille of the main
       loop at 76800 / 1.21 B/sample, 702 at 2.43 B/sample, 300 at 38400. Device retest: below.
 - [x] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on 612c45c. **Fixed on branch
       mirror-bw (emulator).** `dropped` (field 6) = logger ring overflows: the stream ISR found the 2048-record
