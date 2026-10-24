@@ -2860,22 +2860,45 @@ fn nr3(b: &mut [u8; 20], v: f32) -> usize {
     let mut i = 0;
     b[i] = if v < 0.0 { b'-' } else { b'+' };
     i += 1;
-    let mut x = if v < 0.0 { -v } else { v };
+    let x = if v < 0.0 { -v } else { v };
+    // The exponent first (approximate), then the 7 digits from `x` scaled
+    // by 10^(6 - e) in f64 (exact for an f32 times 10^n, n <= 22) with one
+    // rounding, so an exact value such as 76 800 prints exactly
+    // (+7.680000E+04). The former repeated f32 `x /= 10.0` rounded at
+    // every step (+7.680001E+04, device 46370df).
     let mut e: i32 = 0;
+    let mut m = 0u32;
     if x != 0.0 {
-        while x >= 10.0 {
-            x /= 10.0;
+        let mut y = x;
+        while y >= 10.0 && e < 40 {
+            y /= 10.0;
             e += 1;
         }
-        while x < 1.0 {
-            x *= 10.0;
+        while y < 1.0 && e > -46 {
+            y *= 10.0;
             e -= 1;
         }
-    }
-    let mut m = (x * 1_000_000.0 + 0.5) as u32;
-    if m >= 10_000_000 {
-        m /= 10;
-        e += 1;
+        // The estimate can be one off near a power of ten.
+        for _ in 0..3 {
+            m = nr3_scale(x, 6 - e);
+            if m >= 10_000_000 {
+                e += 1;
+            } else if m < 1_000_000 {
+                e -= 1;
+            } else {
+                break;
+            }
+        }
+        // 9 999 999 estimated as E+07 rounds up to 1.000000: one more digit.
+        if m == 1_000_000 {
+            let m2 = nr3_scale(x, 7 - e);
+            if m2 < 10_000_000 {
+                m = m2;
+                e -= 1;
+            }
+        }
+        // Not finite (no reading gives one): 9.999999E+40, not garbage.
+        m = m.min(9_999_999);
     }
     let digits = [m / 1_000_000, m / 100_000 % 10, m / 10_000 % 10, m / 1000 % 10, m / 100 % 10, m / 10 % 10, m % 10];
     b[i] = b'0' + digits[0] as u8;
@@ -2894,4 +2917,17 @@ fn nr3(b: &mut [u8; 20], v: f32) -> usize {
     b[i] = b'0' + (ea / 10 % 10) as u8;
     b[i + 1] = b'0' + (ea % 10) as u8;
     i + 2
+}
+
+/// `x * 10^n` rounded to an integer, with one rounding: in f64, where
+/// 10^n by repeated multiplication is exact for |n| <= 22 (a negative `n`
+/// divides by 10^-n). For nr3's 7 digits.
+fn nr3_scale(x: f32, n: i32) -> u32 {
+    let mut p = 1.0f64;
+    for _ in 0..n.unsigned_abs().min(60) {
+        p *= 10.0;
+    }
+    let x = x as f64;
+    let y = if n >= 0 { x * p } else { x / p };
+    (y + 0.5) as u32
 }
