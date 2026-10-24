@@ -160,7 +160,7 @@ Host: the libscopehal / ngscopeclient driver `alientek_dm40`
 
 **Which address.** The module is dual-mode, so BlueZ lists the meter twice:
 the classic device with the Serial Port UUID, stock name
-"C-1-ATK-DM40-CALI" (this unit: XX:XX:XX:XX:XX:XX; "CALI" is the module's
+"C-1-ATK-DM40-CALI" ("CALI" is the module's
 factory name, not a calibrator), and the BLE device "DM40A" / "B" / "C" for
 the phone app, whose address has the first byte one lower. RFCOMM channel 1
 of the classic address is the one to use. "Host is down" from it means the
