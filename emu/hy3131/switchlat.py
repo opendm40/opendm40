@@ -2,7 +2,7 @@
 """DMM switch latency: time from a function / coupling / range switch (or an
 input step under AUTO range) to the first reading and to the reading within
 0.1 % of its final value, for opendm40 and for the stock firmware, on one
-scripted timeline per firmware (firmware/docs/switch-latency.md).
+scripted timeline per firmware (docs/history/switch-latency.md).
 
   cd firmware && ./build.sh
   emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \

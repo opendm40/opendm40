@@ -1,59 +1,65 @@
 # DMM inputs as a scope source (AD2 streaming): feasibility
 
-Date 2026-10-21. Sections 0-6: research (no opendm40 source changed then).
-Section 7: (B) implemented on the main loop (E0 + E1), emulator results and
-the 30-minute device plan. Evaluates two owner ideas for the TODO:
+How opendm40 streams the HY3131's fast converter AD2 from the DMM jacks: as
+the data-logger source `LOG:SOURce AD2` (idea **(B)**, a logger faster than
+AD1's 640 S/s) and as the DMM **wave view**, a slow isolated scope on the DMM
+jacks shown on the stock-scope page (idea **(A)**). Sections 0-6 are the
+2026-10-21 study, with its predictions replaced by what was built; sections
+7-13 describe each implementation step (E0-E7) and its device results. Code
+and [TODO.md](../TODO.md) cite this doc by section number.
 
-* **(A)** a "scope-like" mode on the DMM jacks: switch the HY3131 to its fast
-  ADC (AD2), stream raw samples, show them with the stock-scope page, trigger
-  in software;
-* **(B)** a data-logger source faster than AD1 allows (today 40 .. 640 S/s).
-
-Evidence tags as in `power-meter-and-misconnect.md`: **VERIFIED** = datasheet
-text (`docs/DS-HY3131_EN.pdf`, transcribed in `emu/hy3131/ref/registers.md`,
-`RESEARCH.md`), the stock row bytes / formulas (`stock/re/analysis/
-hy3131_v2_6.h`, `dmm_v2_6.h`), opendm40 code, the GD32F4xx User Manual (DMA
-request table, bus clocks), or a device measurement already in
-`acdc-stock-vs-opendm40.md` / a `DBG:PROF?` capture; **INFERRED** = follows from
-those but is not stated anywhere; **UNKNOWN** = needs the device. Nothing under
-`stock/re/history/` was used. The sibling doc `power-meter-and-misconnect.md`
-(sections 1-3) already establishes the AD2/AD3 mux, OP1/OP2 routing and the
-row facts; they are cited, not re-derived.
+Tags: **INFERRED** = follows from the cited sources but is stated nowhere;
+**UNKNOWN** = not known. Untagged facts come from the source cited with them:
+the HY3131 datasheet ([`hycon-hy3131-datasheet-v10.pdf`](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf),
+transcribed in [`emu/hy3131/ref/registers.md`](../../emu/hy3131/ref/registers.md) and
+[`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md)), the stock rows
+([`stock/re/analysis/hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h)), the opendm40 source,
+the GD32F4xx User Manual, or a device measurement with its commit. Short
+names: "acdc" = [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md),
+"power doc" = [power-meter-and-misconnect.md](power-meter-and-misconnect.md)
+(sections 1-3: the AD2 / AD3 mux, OP1 / OP2 routing, the row facts),
+"device check" = [device-check-2026-10-21.md](device-check-2026-10-21.md).
+The board (pins, isolator, input network, shunt nodes):
+[hw/README.md "DMM front end (HY3131)"](../../hw/README.md#dmm-front-end-hy3131).
 
 ## 0. Verdict
 
-| idea | verdict | one line |
+| idea | 2026-10-21 verdict | outcome |
 |---|---|---|
-| (A) DMM-input scope | **GO, conditional**, as a *slow* scope: ~5-20 ms/div .. 50 s/div roll, 2.4-9.6 kS/s, bandwidth ~1-2.5 kHz | single AD2 conversions are readable (R03..R05, flag AD2F; ~14 ENOB), but there is no FIFO and opendm40 has no ISRs; the usable rate is set by the main-loop stalls (1-25 ms) and the bit-banged link (~122 us per sample), not by the chip (76.8 kS/s). Gap-free capture needs one small architectural change (section 5.2). Not "1 ms/div". |
-| (B) AD2 logger | **GO** (low effort) | adds the 600 .. 9600 S/s rungs above AD1's 640 S/s, ~14-16 bits, gaps marked by the existing seq/timestamp scheme; same readout machinery as (A). Do (B) first: it is the device experiment for (A). |
+| (A) DMM-input scope | GO as a *slow* scope, 5-20 ms/div .. 50 s/div, conditional on a gap-free readout (an ISR) | built (section 10, default build): 1 ms/div .. 50 s/div at 1200 .. 76 800 S/s, V / mV / A on the isolated jacks, DC- or AC-coupled |
+| (B) AD2 logger | GO, low effort, first | built (sections 7, 9, 11): `LOG:SOURce AD2`, 1200 .. 76 800 S/s, 0 lost on the device up to 38.4 kS/s to the host (11.10, 11.11) and 76.8 kS/s to the disk (11.12) |
 
-The decisive UNKNOWN for both: whether the HY3131 latches the 3-byte AD2 data
-register for the duration of a read (torn reads) and how many samples the real
-loop drops at each rate. Section 6 is a one-session device plan that settles
-both before any UI work.
+The two unknowns of the study are settled: the AD2 data register holds a
+result for a whole period and a read never tears (device 9dd1222, 1.4), and
+the main loop's stalls are taken out of the path by one timer ISR that owns
+the bus during a stream (sections 9, 11).
 
 ## 1. AD2 / AD3 facts
 
-### 1.1 Rate, resolution, range (VERIFIED, datasheet 11, 13.2; registers.md)
+### 1.1 Rate, resolution, range (datasheet 11, 13.2; registers.md)
 
 * AD2CLK = SYSCLK/2 (SAD2CLK = 0) or /4 (SAD2CLK = 1); SYSCLK = 4.9152 MHz
   crystal. Output rate = FAD2CLK / OSR2, OSR2 = 32, 64, 128, 256, 512, 1024
-  (AD2OSR codes 5, 6, 7 are all 1024). ENCHOPAD2 halves it. AD3 shares the
-  clock and OSR. The rate ladder, in samples/s:
+  (AD2OSR codes 5, 6, 7 are all 1024). AD3 shares the clock and OSR.
+  ENCHOPAD2 does **not** change the rate (device 9dd1222: R26 0x25 and 0x05
+  both 422 us per flag-synced sample, 0x24 and 0x04 both 232 us), although
+  the study assumed it halves it. The ladder (`hy3131::ad2_r26_for`, the
+  same rungs with and without the chopper):
 
-  | OSR2 | /2 clock | /4 clock | /4 + chop |
-  |---|---|---|---|
-  | 32 | 76 800 (13.02 us, the stock AC rows) | 38 400 | 19 200 |
-  | 64 | 38 400 | 19 200 | 9 600 |
-  | 128 | 19 200 | 9 600 | 4 800 |
-  | 256 | 9 600 | 4 800 | 2 400 |
-  | 512 | 4 800 | 2 400 | 1 200 |
-  | 1024 | 2 400 | 1 200 | 600 |
+  | OSR2 | /2 clock | /4 clock |
+  |---|---|---|
+  | 32 | 76 800 (13.02 us, the stock AC rows) | 38 400 |
+  | 64 | 38 400 | 19 200 |
+  | 128 | 19 200 | 9 600 |
+  | 256 | 9 600 | 4 800 |
+  | 512 | 4 800 | 2 400 |
+  | 1024 | 2 400 | 1 200 (the slowest the chip has) |
 
-  Below that the LPF (OSR4 = 128 .. 16384 on the AD2 stream) gives a properly
-  decimated stream down to a few S/s, but its real output period on the device
-  is half the datasheet formula (RESEARCH.md 8.1: 106.7 ms measured vs 213 ms
-  for LPFBW = 111) - any LPF-as-source rate must be measured per LPFBW.
+  The logger uses /2 for 2400 .. 76 800 S/s and /4 only for 1200. Below
+  that the LPF (OSR4 = 128 .. 16384 on the AD2 stream) gives a decimated
+  stream down to a few S/s, but its real output period on the device is half
+  the datasheet formula (RESEARCH.md 8.1: 106.7 ms measured vs 213 ms for
+  LPFBW = 111); no LPF rate is used as a source.
 * Data: AD2<18:0> signed 19 bit in R03..R05 (LSB first, bits 23:19 = sign
   copy; max 0x3FFFF, min 0xFC0000). Transfer (datasheet 13.2, RESEARCH 2):
   code = IG * Vin / (RG * VR) * 2^18, IG = 0.5 / 1.0 / 1.5 / 2.0 (AD2IG), RG =
@@ -62,153 +68,115 @@ both before any UI work.
   +-2.5 V at IG 0.5; 4.77 uV / code at IG 1.0.
 * Inputs (mux, registers.md): AD2IP = OP1O, OP2O, PB4, PB7; AD2IN = RLU, AGND,
   PB3, PB5. SDO23 = 1 routes AD3's data into the same R03..R05 register
-  instead (one data register for both fast ADCs, VERIFIED 13.2 "MUX").
-* Gain drift 10 (typ) / 30 ppm/C (AD2/AD3, VERIFIED table 6) vs 2.5 ppm/C for
-  AD1; no AD2 noise, ENOB, linearity or bandwidth figure anywhere in the
-  datasheet (searched: the only bandwidth entries are OP1/OP2 2 MHz and the
-  comparator 6 MHz).
+  instead (one data register for both fast ADCs, 13.2 "MUX").
+* Gain drift 10 (typ) / 30 ppm/C (AD2/AD3, table 6) vs 2.5 ppm/C for AD1; no
+  AD2 noise, ENOB, linearity or bandwidth figure anywhere in the datasheet
+  (the only bandwidth entries are OP1/OP2 2 MHz and the comparator 6 MHz).
 
-### 1.2 Resolution actually available (INFERRED)
+### 1.2 Resolution actually available
 
 The device floor in the stock AC V 4 V row is 31..33 `sqrt(RMS)` counts with a
-quiet input (acdc doc 6a, 6b). RMS = sum(X^2)/N of the high-passed AD2 stream,
+quiet input (acdc 6a, 6b). RMS = sum(X^2)/N of the high-passed AD2 stream,
 so that is the per-sample rms noise: **~32 codes against the 2^19 full span
 at 76.8 kS/s = 14.0 ENOB** by Hycon's own definition (APD-DMM001 eq. 3: ENOB =
 log2(FSR / rms noise), FSR = the full code span; the same convention is used
-for AD1 below); ~11.3 noise-free bits (pp ~ 6.6 sd). It includes the divider / OP1 front-end noise,
-so the converter alone is at least that good. At higher OSR2 the comb filter
-averages the modulator noise: white-noise scaling predicts ~16 ENOB at OSR2 =
-512 (4.8 kS/s), but the 1/f part of the front end does not scale, so treat
-14 .. 16 bits as the range until the shorted-input test (section 6, step 4).
-For a 280-row display that is 5-7 bits more than needed; for the logger it
-sits between AD1's 24-bit DC path and the scope's 10 bits.
+for AD1 below); ~11.3 noise-free bits (pp ~ 6.6 sd). It includes the divider /
+OP1 front-end noise.
 
-For comparison AD1 at its fastest (OSR 256 unchopped, 640 S/s): 25 counts sd
-at OSR 32768 chopped (6c) scaled by 1/sqrt(OSR) (the emulator's model, INFERRED)
-gives ~280 counts of 2^24, ~15.9 ENOB. So AD2 at 2.4-9.6 kS/s and AD1 at 640
-S/s have similar effective resolution (14-16 vs 15.9); AD2 buys rate, not bits.
+Measured with `DBG:AD2:NOISE?` on the open AC A path (device 9dd1222, the
+converter floor): 47.5 codes sd = 13.4 ENOB at 76.8 kS/s, 2.7..7.2 codes =
+16.1..17.6 ENOB at the slower rungs. For comparison AD1 at its fastest (OSR
+256 unchopped, 640 S/s): 25 counts sd at OSR 32768 chopped (acdc 6c) scaled
+by 1/sqrt(OSR) gives ~280 counts of 2^24, ~15.9 ENOB (INFERRED, the
+emulator's model). AD2 buys rate, not bits.
 
-### 1.3 Coupling: which jack reaches AD2, and how (VERIFIED rows + device)
+### 1.3 Coupling: which jack reaches AD2, and how (stock rows + device)
 
 | path | stock row | AD2 input | coupling | evidence |
 |---|---|---|---|---|
-| V (4 .. 1000 V) | f0 AC V r0..r3: R27 0x9d, R32 0x38 | PB4 - AGND, PB4 fed from OP1O (OP1+ = SENSE tap) through an external capacitor | **AC**, tau ~0.3 s (fc ~0.5 Hz) | acdc 5 / 6a transient; RESEARCH 7; power doc 2 |
+| V (4 .. 1000 V) | f0 AC V r0..r3: R27 0x9d, R32 0x38 | PB4 - AGND, PB4 fed from OP1O (OP1+ = SENSE tap) through an external capacitor ([hw/README.md](../../hw/README.md#dmm-front-end-hy3131) input network) | **AC**, tau ~0.3 s (fc ~0.5 Hz) | acdc 5 / 6a transient; RESEARCH 7; power doc 2 |
 | mV (40 / 400 mV) | f2 AC mV: R27 0x5d, R32 0xaa | OP2O - AGND, OP1+ = OP2+ = RLU | **DC** (the LPF reports the full DC: 6a "LPF = 495 mV") | acdc 6a |
-| A / mA / uA | f4, f5_6 AC A: R27 0x2d, R32 0x3e / 0x3d | OP1O - PB3, OP1+ = PB2 (10 mohm) / PB1 (0.5 ohm, 47.5 ohm), x10 / x1 | **DC** (6b: LPF = 8.8 uA constant offset on the open uA range) | acdc 6b |
-| V, DC-coupled | none in the stock | **register-only new row**: a DC V / AC V row's switch bytes (tap PA7 /10, PA6 /100, PA5 /1000, PA4+PA5 /10000) + ENOP1, OP1+ = SENSE (R32 0x38, which the stock itself writes in the AC+DC DC phase) + SAD2IP = 00 (OP1O) instead of PB4, SAD2IN = AGND or RLU, IG 1.0 | DC | VERIFIED, device test 6.5 (section 13): the AC V row of the range with SAD2IP = OP1O, linear to 0.003 % of the range, 3..10 codes sd at 4800 S/s; implemented (E7, ad2exp.rs `dcv_row`) |
+| A / mA / uA | f4, f5_6 AC A: R27 0x2d, R32 0x3e / 0x3d | OP1O - PB3, OP1+ = PB2 (10 mohm) / PB1 (0.5 ohm, 47.5 ohm), x10 / x1 (shunt nodes: [hw/README.md](../../hw/README.md#dmm-front-end-hy3131) current path) | **DC** (6b: LPF = 8.8 uA constant offset on the open uA range) | acdc 6b |
+| V, DC-coupled | none in the stock | **register-only new row**: the AC V row of the range with SAD2IP = 00 (OP1O) instead of PB4, OP1+ = SENSE (R32 0x38, which the stock itself writes in the AC+DC DC phase), SAD2IN = AGND, IG 1.0 | DC | device test 6.5 (section 13): linear to 0.003 % of the range, 3..10 codes sd at 4800 S/s; implemented (E7, [`ad2exp.rs`](../src/ad2exp.rs) `dcv_row`) |
 
-So current waveforms (through the A shunt, DC included) and mV waveforms need
+So current waveforms (through the shunt, DC included) and mV waveforms need
 no new row: the stock AC A / AC mV rows already put the DC-coupled signal on
-AD2; only the readout changes. Voltage waveforms are AC-coupled with the stock
-row (fine for mains / audio, DC lost) and DC-coupled with the new row.
+AD2; only the readout changes. Voltage waveforms are AC-coupled with the
+stock row and DC-coupled with the new row.
 
-Enable rules that matter for a streaming mode (VERIFIED datasheet notes):
+Enable rules that matter for a streaming mode (datasheet notes):
 * 13.1 note 7: do not switch AD2/AD3 on or off while AD1 converts (AD1 offset
-  shifts). Enable AD2 *with* the row and leave it; for the AC rows it already is.
+  shifts; measured in 13.1 / 13.2). Enable AD2 *with* the row and leave it;
+  for the AC rows it already is.
 * Turning ENAD2 off clears R03..R05 (13.2 (1)).
-* AD2 and AD3 together: enable AD3 first (hy3131.rs `configure`, the beat fix,
-  acdc 10). AD3 is not needed for a single-channel waveform; a streaming row
-  should run AD2 alone with RMS/LPF off (or SDO23 = 0 and both on: the stock
-  row, if the DMM AC reading is to continue in parallel, see 3.4).
+* AD2 and AD3 together: enable AD3 first ([`hy3131.rs`](../src/hy3131.rs) `configure`, the
+  beat fix, acdc 10). The stream runs AD2 alone with AD3 and RMS / LPF off
+  (`hy3131::set_ad2_stream`), so AD2F paces one grid only.
 
-### 1.4 Readability of single conversions (VERIFIED where stated)
+### 1.4 Readability of single conversions
 
 * Register: R03..R05 (3 bytes, auto-increment read in one CS frame).
   **Width** 19 bit signed. **Flag**: INTF.1 AD2F set on every AD2 (and AD3)
   conversion; INTF is cleared by *reading it* (all flags at once, AD1F / RMSF /
   LPFF included) or by writing 0s; flags accumulate until read (datasheet 10).
   Optional **IRQ pin**: with INTE.AD2IE = 1, DO (= MISO, PC11) is high while CS
-  is high and a flag is pending (datasheet 7.2 (4)) - a hardware data-ready
-  line on an existing pin, unused by the stock (INTE stays 0) and by opendm40.
+  is high and a flag is pending (datasheet 7.2 (4)); unused by the stock
+  (INTE stays 0) and by opendm40.
 * **No FIFO, no buffer.** The datasheet lists one data register per converter
-  and no depth; the emulator and the RE headers model one register. An unread
-  conversion is overwritten by the next (INFERRED from the register set; no
-  text says otherwise).
-* **Latch semantics UNKNOWN.** Nothing says whether R03..R05 are frozen during
-  a CS-low read. At OSR2 = 32 the register changes every 13 us while a
-  bit-banged 3-byte read takes ~77 us, so a read straddles 5-6 conversions. The
-  stock never uses AD2 raw (it stores it at m+0xac and ignores it) and reads
-  RMS/LPF right after RMSF, so no stock behaviour tells. The two "garbage"
-  `sqrt(RMS)` values the stock dropped (acdc 6b, 370726 > 0x40000) are
-  consistent with a torn 5-byte read but not proof. **This is device test 6.2
-  and it bounds the usable OSR2 for any readout scheme: the read must finish
-  well inside one conversion period, and must start right after AD2F.**
+  and no depth; an unread conversion is overwritten by the next (INFERRED
+  from the register set).
+* **No torn reads.** Device 9dd1222 (`DBG:AD2:TORN?`, device check "9dd1222"
+  1): signbad 0 and no difference without a new conversion on every rung, no
+  bump at 9 or 17 bits in the difference histogram; flag-synced pairs at the
+  slow rungs are 2000 of 2000 identical. R03..R05 hold one result for a whole
+  period; the stream ISR relies on that (11.1, 11.2). The read still has to
+  fit between two conversion edges (11.2, 11.12).
 
 ## 2. Readout bottleneck
 
-### 2.1 What a sample costs on today's bit-banged bus (VERIFIED, hy3131.rs)
+### 2.1 What a sample cost on the bit-banged bus (2026-10-21)
 
-`HALF` = 40 spins ~ 1 us (the logger.rs numbers 45 / 77 us pin it down). `tx`
-is 3 half-periods per bit (MOSI, spin, clock = 2 spins) = 24 us/byte, `rx` 2
-per bit = 16 us/byte, begin 1, end 2, the read-period clock 2:
-
-| frame | half-periods | time |
-|---|---|---|
-| `read1(R1E)` flag check: cmd + read period + 1 byte | 1 + 24 + 2 + 16 + 2 = 45 | 45 us |
-| `read(R03, 3)` AD2 sample | 1 + 24 + 2 + 48 + 2 = 77 | 77 us |
-| flag check + sample | | **122 us** (as AD1 today) |
-| `read(R00, 6)` AD1 + AD2 in one frame | 1 + 24 + 2 + 96 + 2 = 125 | 125 us |
-| `read(R00, 20)` the stock AC poll | 349 | 349 us |
-
-INTF (R1E) and AD2 (R03) are not adjacent, so the flag cannot be fetched in
-the same frame as the data (R03..R1E would be 28 bytes = 475 us). Link-only
-ceiling: ~8 kS/s blind, ~4 kS/s with the flag check, at 100 % CPU in the
-bit-bang loop. Realistic from the main loop: see 2.3.
+The bit-banged bus of the study is gone (reads since 7889e6c, writes since
+b81abf2: section 8). Its costs, for the record: a flag check (`read1(R1E)`) 45
+us, a 3-byte AD2 read 77 us, both 122 us; the 20-byte stock AC poll 349 us.
+INTF (R1E) and AD2 (R03) are not adjacent, so the flag needs its own frame.
+Measured link ceiling on the device: ~6.2-6.6 kS/s (9dd1222), not the ~8 kS/s
+predicted.
 
 ### 2.2 Hardware SPI on the same pins
 
 * **Pins.** PC10 / PC11 / PC12 are SPI3 SCK / MISO / MOSI on alternate
   function 6 in the STM32F4 pin map that the GD32F4xx follows (GD32 naming:
-  **SPI2**, base 0x4000_3C00, APB1, VERIFIED in the UM memory map; the AF
-  assignment VERIFIED in the GD32F450xx datasheet Rev1.1 table 5 (p. 29:
-  PC10 SPI2_SCK, PC11 SPI2_MISO, PC12 SPI2_MOSI, all AF6; same GD32F4xx pin
-  map as the F427), SPI2EN = RCU_APB1EN bit 15, SPI_CTL0 / SPI_STAT layout
-  per GD32F4xx UM V2.2 21.11.1 / 21.11.3; implemented, section 8). CS = PD2 stays a GPIO (no hardware-NSS
-  framing is possible there; the UM's hardware NSS only toggles per transfer
-  burst or per word in TI mode, neither matches a multi-byte HY3131 frame).
-  SPI mode 0 (CK idle low, DO changes on the falling edge: datasheet 7.2
-  (7)/(8); the MCU samples on the rising edge), MSB first.
+  **SPI2**, base 0x4000_3C00, APB1; the AF assignment in the GD32F450xx
+  datasheet Rev1.1 table 5 (p. 29: PC10 SPI2_SCK, PC11 SPI2_MISO, PC12
+  SPI2_MOSI, all AF6), SPI2EN = RCU_APB1EN bit 15, SPI_CTL0 / SPI_STAT per
+  GD32F4xx UM V2.2 21.11.1 / 21.11.3; pins: [hw/README.md](../../hw/README.md#dmm-front-end-hy3131)).
+  CS = PD2 stays a GPIO (the hardware NSS toggles per transfer burst or per
+  word in TI mode, neither matches a multi-byte HY3131 frame). SPI mode 0 (CK
+  idle low, DO changes on the falling edge: datasheet 7.2 (7)/(8)), MSB first.
 * **Clock.** APB1 = 50 MHz (RCU_CFG0 0x940A read back on the device: APB1 /4,
-  clock.rs). SPI prescalers give 25 / 12.5 / 6.25 / 3.125 MHz. HY3131 limits
-  (VERIFIED table 6): TCKHI >= 20 ns, TCKLO >= 60 ns, DO ready 60 ns after
-  the falling edge -> a symmetric clock may not exceed 6.25 MHz (80 ns low),
-  and the 60 ns DO delay leaves 20 ns of margin at that speed *before* the
-  isolator: the SPI crosses a CA-IS3741 digital isolator ([hw/README.md](../../hw/README.md#isolation-boundary);
-  ~10-15 ns per direction) -> ~85-100 ns round
-  trip, so **3.125 MHz** (160 ns half period) is the safe setting and 6.25 MHz
-  must be proven by read-back (test 6.1).
+  [`clock.rs`](../src/clock.rs)). SPI prescalers give 25 / 12.5 / 6.25 / 3.125 MHz. HY3131
+  limits (table 6): TCKHI >= 20 ns, TCKLO >= 60 ns, DO ready 60 ns after the
+  falling edge. The bus crosses the CA-IS3741 isolator
+  ([hw/README.md](../../hw/README.md#isolation-boundary)), so /16 = 3.125 MHz is
+  the bus and /8 = 6.25 MHz needs the CKPH = 1 data phase (8.2, 11.3).
 * **The 9th clock.** A read is 8 command bits, one blank "read period" clock,
-  then 8n data bits (7.2 (2)). A byte-oriented SPI cannot emit one clock, so
-  clock cmd + (n + 1) bytes and shift the received bit stream left by one: RX
-  byte k (k >= 1) holds [1 blank or carry bit | 7 MSBs of data byte k], the
-  next byte supplies the LSB. For the 3-byte AD2 read that is 5 bytes = 40
-  clocks (the extra 7 clocks read into R06, harmless; "readout stops when CS
-  goes high"). Writes need no shift (7.2 (3)). **Implemented instead**
-  (section 8): the 9th clock as one GPIO pulse on PC10 between the SPI
-  bytes (the exact datasheet frame, no extra clocks).
-* **Cost.** At 3.125 MHz: flag check 3 bytes = 7.7 us, AD2 read 5 bytes =
-  12.8 us, plus ~1-2 us of CS handling: **~22 us per sample with the flag
-  check, ~14 us blind**; at 6.25 MHz half of that. The 20-byte DMM AC poll
-  drops from 349 us to ~60 us. Link ceiling ~45 kS/s (flag-checked) - the
-  link stops being the limit; the MCU's attention does.
-* **DMA.** SPI2_RX -> DMA0 channel 0 (or 2, busy: UART4_RX), SPI2_TX -> DMA0
-  channel 7 (or 5, busy: DAC0) (VERIFIED UM table 10-5; channel use from
-  bt.rs / gen.rs; the scope's two streams are on DMA1). A fully autonomous
-  timer-paced capture (timer CC -> DMA writes GPIOD_BOP for CS, DMA writes 5
-  bytes into SPI_DATA, RX DMA into a ring) needs 4-6 timer events per sample
-  spread over 3-4 DMA channels (TIMER3_UP/CH1/CH2 on channels 6/3/7 collide
-  with the SPI channels) and still cannot honour AD2F, so it reads on its own
-  grid and tears or duplicates once per beat of the two crystals. It is
-  high-effort and uncertain; **not recommended**. The simple SPI-with-polling
-  path (per-frame CPU work ~15-22 us) is enough if something runs it
-  regularly, which is the real question:
+  then 8n data bits (7.2 (2)). The CPU frames make it as one GPIO pulse on
+  PC10 between the SPI bytes (the exact datasheet frame, section 8); the DMA
+  frames clock cmd + (n + 1) bytes and shift the received bits by one
+  ("shift framing", 11.8). Writes need no extra clock (7.2 (3)).
+* **Cost at /16** (device, `DBG:HYSPI:SELF?`, 8.6 / 11.3 / 11.9): 1-byte read
+  8.0 us, 6-byte read 21.6 us, 23-byte read 69 us, 1-register write ~10 us.
+* **DMA.** SPI2_RX -> DMA0 channel 0, SPI2_TX -> DMA0 channel 7 (UM table
+  10-5; the other channels' users: 11.8). A fully autonomous timer-paced
+  capture is not possible on this board (11.8); the stream ISR starts each
+  DMA frame (~1 us of CPU per sample).
 
 ### 2.3 Who runs the read: the main loop vs an interrupt
 
-opendm40 runs with interrupts masked (`cpsid i`, shim.rs / startup.rs; logger.rs
-header: "there are NO ISRs"). Everything is polled from one main loop whose
-period is tiny most of the time but not always (two `DBG:PROF?` captures of the
-device, 104-120 s each, DMM page):
+At the time of the study opendm40 ran every task from one main loop with
+interrupts masked. Two `DBG:PROF?` captures on the DMM page (2026-10-21,
+104-120 s each; raw files not committed):
 
 | metric | capture 1 | capture 2 |
 |---|---|---|
@@ -219,82 +187,40 @@ device, 104-120 s each, DMM page):
 | `d.read` (DMM poll, bit-bang) max | - | 15.5 ms |
 | `d.chart` (strip chart redraw) | - | 0.9 .. 3.2 ms |
 
-(VERIFIED numbers from `DBG:PROF?` captures found in the session scratchpad,
-`prof-before.txt` / `prof-after.txt`, taken earlier on 2026-10-21 on the DMM
-page, 104-120 s each; raw files not committed, this table is the record - as
-acdc doc 9 does for its /tmp captures. The sections are the ones prof.rs
-names. No device was used for this study.) The 1-25 ms
-stalls are LCD redraws, the 20-byte bit-banged DMM read, the 10 ms relay pulse
-and SPI-flash writes (45-400 ms per sector erase, logger.rs header).
+The 1-25 ms stalls are LCD redraws, the DMM poll, the 10 ms relay pulse and
+SPI-flash writes. With no FIFO, a polled reader loses every conversion inside
+a stall (48 per 5 ms at 9.6 kS/s). The main-loop sampler (section 7) showed
+it on the device: 8 % lost at 4800 S/s and 11 % at 9600 over SPI2 (7889e6c),
+and the DMM page repaint costs a 26 ms gap every 100 ms (9dd1222).
 
-Consequences for a polled AD2 reader with no FIFO:
-
-| rate (OSR2) | period | samples lost per 5 ms stall | per 16 ms stall | gap-free without ISR? |
-|---|---|---|---|---|
-| 600 S/s | 1.67 ms | 3 | 10 | no (loses on every redraw) |
-| 2 400 | 417 us | 12 | 38 | no |
-| 9 600 | 104 us | 48 | 154 | no |
-| 40 S/s (AD1 today) | 25 ms | 0 | 0 | yes (the logger's 38 Hz measured) |
-
-Gap-free capture at any kS/s rate therefore needs either (i) the display and
-flash traffic frozen while capturing (a "capture then show" single-shot
-scope, no live redraw: the stalls that remain are the DMM poll and the relay
-pulse, which the streaming mode controls), or (ii) **one interrupt**: a timer
-or EXTI (the HY3131 IRQ on PC11 = EXTI line 11, free; touch uses line 5)
-handler that owns the HY3131 bus, performs the 2-frame read in ~15-22 us and
-pushes the sample into a ring the main loop drains. Cost per rate at 3.125
-MHz: 5 % of the CPU at 2.4 kS/s, 10 % at 4.8 kS/s, 21 % at 9.6 kS/s, 42 % at
-19.2 kS/s (the practical top). The ISR preempts bit-banged timing loops
-(DWT-based delays, touch I2C fallback) harmlessly - all tolerate stretched
-timing - and the scope's own DMA capture is unaffected. Shared state is one
-SPSC ring (ISR writes, main reads) plus the INTF shadow of 3.4.
-
-Jitter: with either scheme the *sample instants* are the chip's regular
-conversion grid; the read instant only has to fall inside the same period
-(timer at ~1.05x the AD2 rate, or the IRQ edge). What the MCU adds is the
-ISR latency (< 1 us) - irrelevant - or, polled, nothing until a stall, which
-then costs whole samples (detectable: the flag-check-then-read scheme sees
-AD2F already set with a new conversion having overwritten the old one only if
-the timestamp gap says so, as logger.rs's `missed` does today).
-
-Sustainable rates, summary (3.125 MHz hardware SPI, flag-checked reads, torn
-reads excluded by reading right after AD2F):
-
-| scheme | gap-free rate | best-effort rate | effort |
-|---|---|---|---|
-| main loop, bit-bang (today's driver) | ~40 S/s | 600-2 400 S/s with gaps on every redraw | none |
-| main loop, display frozen during capture, bit-bang | 600-1 200 S/s (DMM poll suspended) | 2 400 | small |
-| ISR + bit-bang | 2 400 S/s (ISR 29 % busy) | 4 800 (58 %) | small, policy change |
-| ISR + SPI2 at 3.125 MHz | 4 800-9 600 S/s | 19 200 | medium |
-| ISR + SPI2 at 6.25 MHz (if the isolator allows) | 9 600-19 200 S/s | 38 400 | medium |
-
-The AD2F-synchronised read bounds OSR2 from below as well: INTF frame + data
-frame must fit the conversion period with margin (22 us vs 52 us at OSR2 = 128
-fits; 26 us at OSR2 = 64 does not) -> **19.2 kS/s is the ceiling** of any
-flag-synchronised scheme on this bus, 9.6 kS/s the comfortable one.
+So the stream got **one interrupt** (decision #3 of
+[decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md)): TIMER6 owns
+the HY3131 bus while a stream runs, reads each conversion and pushes it into
+the logger's ring, which the main loop drains (section 9; its loss fixed in
+11). The study's ceiling of 19.2 kS/s for flag-synchronised reads does not
+apply to the blind, phase-locked reads of 11.2: 38.4 kS/s with 0 lost on the
+device at 17.5 % CPU (DMA frames, 11.10) and 76.8 kS/s with hybrid frames
+(11.12).
 
 ## 3. What that gives as a scope
 
 ### 3.1 Timebases
 
-The stock-scope screen is 400 columns / 10 divisions (scope.rs COLS). One
-sample per column needs 40 / (s/div) samples per second:
+The stock-scope screen is 400 columns / 10 divisions (scope.rs COLS). The
+wave view's bands (`scope::wave_fs_for`, from `WAVE_TB_MIN`):
 
-| s/div | samples/s for 1 per column | source |
+| s/div | AD2 rate | samples per screen |
 |---|---|---|
-| 1 ms | 40 000 | out of reach (section 2) |
-| 2 ms | 20 000 | 19.2 kS/s at 42 % CPU: marginal |
-| 5 ms | 8 000 | 9.6 kS/s |
-| 10 ms | 4 000 | 4.8 kS/s (mains: 5 cycles per screen) |
-| 20 .. 100 ms | 2 000 .. 400 | 2.4 kS/s with 1.2 .. 6 samples per column |
-| 200 ms .. 50 s | roll | 600 S/s .. LPF rates, min/max per column |
+| 1 ms | 76 800 (hybrid DMA frames, 11.12) | 768 |
+| 2 ms | 38 400 | 768 |
+| 5 ms | 9 600 | 480 |
+| 10 / 20 ms | 4 800 | 480 / 960 |
+| 50 / 100 ms | 2 400 | 1 200 / 2 400 |
+| >= 200 ms | 1 200; roll from 200 ms/div as the MCX scope (TB_ROLL), per-column min / max | |
 
-Practical range: **5 (or 10) ms/div .. 50 s/div**, roll from 200 ms/div as the
-scope does (TB_ROLL). Below 5 ms/div the display would interpolate 1-2
-samples per column (sinc.rs, UF-41) with nothing new to show: the AD2 band
-ends there anyway (3.2). Decimation for the slow timebases must come from the
-chip (OSR2 / LPF ladder) or per-column min/max of the full stream, never from
-dropping samples (aliasing).
+Decimation for the slow timebases comes from the chip (OSR2) or the
+per-column min / max of the full stream, never from dropping samples
+(aliasing).
 
 ### 3.2 Bandwidth and anti-aliasing (INFERRED)
 
@@ -305,12 +231,10 @@ modulator rate, |H| = (sin(pi f N / fm) / (N sin(pi f / fm)))^3: -3 dB at
 rate and its multiples, i.e. the folding bands are attenuated (> 50 dB at an
 offset of 10 % of fs from the null). So the useful band is **~0.25 x output
 rate**: 2.5 kHz at 9.6 kS/s, 1.2 kHz at 4.8 kS/s, 20 kHz at 76.8 kS/s (the
-stock AC rows). Above the AD2 band the DMM front end limits anyway: the manual
-specifies "AC response 10 kHz" (VERIFIED, manual table 1.1), the divider has
-the ACC compensation array for AC V, and the 0.3 s coupling time constant sets
-the low end of the AC V path at ~0.5 Hz. The real scope channel: 10 MHz, 50
-MS/s, 10 bit, 1 Mohm (manual 1.2). The DMM scope is three to four decades
-slower and 5-9 bits finer.
+stock AC rows). Above the AD2 band the DMM front end limits anyway (AC
+bandwidth ~20 kHz: [hw/README.md](../../hw/README.md#dmm-front-end-hy3131)), and the
+0.3 s coupling time constant sets the low end of the AC V path at ~0.5 Hz.
+The real scope channel: 10 MHz, 50 MS/s, 10 bit, 1 Mohm (manual 1.2).
 
 **The comb's droop in the measurements (device f3aea2f, 2026-10-22).** The
 Wave view's Vrms of a 40 Hz square read 4.74 V up to 20 ms/div and 4.69 V
@@ -332,15 +256,13 @@ the samples (host model, same as the device within its calibrator drift):
 | 1 200 | -3.8 % | -0.85 % | -43 % |
 
 So it cannot be fixed after the fact: the samples are already band-limited
-(the edge content is gone or aliased; an inverse-sinc FIR would only lift the
-passband and amplify the noise). The rate is the lever: a band at 9600 S/s
-up to 100 ms/div (4 800 / 9 600 samples per screen, in the record) would
-halve-to-quarter the loss on edges, at 9600 S/s's main-loop drain deadline
-(213 ms, the ring) for every YT timebase; not done (the bands stay as in 10,
-TODO "Wave view Vrms"). The Wave view's RMS is the RMS of the band-limited
+(an inverse-sinc FIR would only lift the passband and amplify the noise). The
+rate is the lever (a faster band for the slower YT timebases); not done
+(TODO "Vrms -1.6 % from 50 ms/div"). The Wave view's RMS is the RMS of the band-limited
 waveform it shows; the DMM's AC reading is the reference for a true RMS of
-signals with fast edges. The emulator's AD2 model samples the input point-wise
-(no comb), so wavetest's sine passes at every rate and cannot show this.
+signals with fast edges. The emulator's AD2 model samples the input
+point-wise (no comb), so wavetest's sine passes at every rate and cannot show
+this.
 
 ### 3.3 Vertical ranges, scaling, accuracy
 
@@ -356,244 +278,175 @@ R25 0x40; r0 rows 0x43 = IG 1.0 with OPS1/OPS2 x10):
 | mA 40 / 400 mA (0.5 ohm) | 5 / 0.5 V/A | +-250 mA / +-2.5 A | 0.95 / 9.5 uA |
 | uA 400 / 4000 uA (47.5 ohm) | 475 / 47.5 V/A | +-2.6 / +-26 mA | 10 / 100 nA |
 
-Headroom above the DMM range is ~3x (peak), enough for crest factors of
-mains / PWM waveforms; the DMM autorange (which watches the RMS) can keep
-working in parallel (3.4) and the scope view follows the range.
+Headroom above the DMM range is ~3x (peak), enough for crest factors of mains
+/ PWM waveforms.
 
-Scaling: `V = code * 1.25 / 2^18 / IG * k` with the stock range factor k,
-exactly the LPF formula of dmm_v2_6.h; the stock calibration record holds a
-**gain and offset for the LPF (DC mean of AD2) of every AC row** (0x64/0x74 V,
-0x84/0x8c mV, 0xf4/0x10c A, VERIFIED hy3131_v2_6.h), i.e. a calibrated DC
-scale of the AD2 path for the DC-coupled rows (mV, A) - apply it to the raw
-samples. For the AC-coupled V row the RMS gain (0x34/0x44) is the AC scale.
-The new DC-coupled V row has no stock calibration: self-calibrate against AD1
-(both converters can see the same tap; the mean of AD2 over an AD1 conversion
-must equal the AD1 reading; one-shot at mode entry) - UNKNOWN until 6.5.
-Expected accuracy: +-0.5 % of the DMM range after that (AD2 gain drift 10-30
-ppm/C, OP1 offset 2 mV without chopper = 20 mV at the 4 V range: use OP1CHOP
-as the stock AC rows do, or subtract the zero), vs the scope channel's 10-bit
-+-3 %.
+Scaling (`dmm::ad2_scale_of`): `V = code * 1.25 / 2^18 / IG * k` with the
+stock range factor k, exactly the LPF formula of the stock; the stock
+calibration record holds a **gain and offset for the LPF (DC mean of AD2) of
+every AC row** (0x64/0x74 V, 0x84/0x8c mV, 0xf4/0x10c A, hy3131_v2_6.h), i.e.
+a calibrated DC scale of the AD2 path for the DC-coupled rows (mV, A), which
+the wave view and the logger apply to the raw samples. The DC-coupled V row
+has no stock calibration: it is self-calibrated against AD1 at every start
+(13.3 `dc_enter`), within 0.02 % of the range on the device (13.4).
 
 ### 3.4 Isolation (the plus) and conflicts
 
 * The DMM side is the isolated domain: HY3131, reference, divider, shunts and
-  the banana jacks sit behind a CA-IS3741 digital isolator and VPS8504B
-  isolated supplies ([hw/README.md Isolation
-  boundary](../../hw/README.md#isolation-boundary); the MCU, USB, scope ADC and MCX share the
-  battery ground, INFERRED). Hence a
+  the banana jacks sit behind the CA-IS3741 digital isolator and the
+  VPS8504B isolated supplies; the MCU, USB, scope and generator share one
+  ground ([hw/README.md](../../hw/README.md#isolation-boundary)). Hence a
   **floating, 1000 V / 10 A waveform channel**: mains-side voltage waveforms,
   current waveforms through the A shunt (half-wave rectifier draw, PWM motor
-  current, inrush) with the USB cable connected - none of which the MCX scope
-  input (40 Vrms CAT II at x1, shared ground) can do. Current waveforms are the
-  strongest case: the scope has no current input at all.
-* DMM readings: in the **DC rows they need not stop** - AD1 converts
-  independently of a raw AD2 read. In the **AC rows only partly**: the RMS/LPF
-  chain is clocked by the same OSR2, so streaming at OSR2 = 128 .. 1024 slows
-  the RMS/LPF cadence 4-32x (106 ms -> 0.4-3.4 s) and moves the comb response
-  the stock calibration was taken at; keeping OSR2 = 32 preserves the AC
-  reading but the readout cannot follow 76.8 kS/s. So in the Wave view either
-  pause the AC reading (the first cut below) or compute RMS / mean from the
-  record in software. Note also that AD2F is set by AD3 conversions too (13.2
-  "in common with AD2"): with both converters on, the flag / IRQ paces at
-  both. Rules: enable AD2 with the row (note 7),
-  never toggle it during the mode; INTF is cleared by every read, so the
-  streaming reader must keep a **shadow of the flags it clears** (AD1F, RMSF,
-  LPFF, CTF) for dmm.rs's poll, and dmm.rs's own frames must go through the
-  same bus owner (queued and executed between two sample reads: a 20-byte AC
-  poll is ~60 us on hardware SPI, i.e. one 104 us period at 9.6 kS/s has room
-  for it only at 6.25 MHz; at 3.125 MHz accept one dropped sample per DMM
-  poll or run the DMM poll at the 2-frame granularity). Simplest first cut:
-  pause dmm.rs while the waveform view is live and show the last reading.
-* Row / relay switching: every range or function change is the stock sequence
-  (quiesce R26/R34/R36, 10 ms relay pulse, 22-byte row, settle 300-900 ms;
-  dmm.rs `write_config`) - a visible gap of ~0.5-1 s in the waveform, like the
-  DMM's own blanking. Autorange while streaming should be off or confirmed by
-  a tap (the scope-page V/div buttons map to the DMM range).
+  current, inrush, section 12) with the USB cable connected, none of which
+  the MCX scope input (40 Vrms CAT II at x1, shared ground) can do. The scope
+  has no current input at all.
+* DMM readings: the stream needs AD2 at the stream's OSR with RMS / LPF off,
+  and every INTF read clears the DMM's flags too, so the DMM reading
+  **pauses** while a stream runs (decision #3: exclusive bus hand-off); the
+  DMM row is rewritten afterwards. A reading alongside (a request queue for
+  the DMM's frames between two samples) is not built (10.5). AD2F is also
+  set by AD3 conversions (13.2 "in common with AD2"): the stream turns AD3
+  off.
+* Row / relay switching: every range or function change is the stock
+  sequence (quiesce, 10 ms relay pulse, 22-byte row, settle 300-900 ms;
+  [`dmm.rs`](../src/dmm.rs) `write_config`), a gap of ~0.5-1 s in the waveform.
+  The DMM autorange does not run while streaming; the wave view's V/div
+  buttons step the DMM range (10.1).
 * Functions with no waveform: ohm, continuity, diode, capacitance, frequency,
-  temperature. The mode is offered for V, mV, A (DC or AC sub-mode).
+  temperature. The wave view is offered for V, mV and A.
 * AC V row: the AC coupling means the trace has no DC and a 0.3 s settling
-  after any switch (acdc 6a); label the channel "AC" and offer the DC row.
+  after any switch (acdc 6a); the wave view labels it "AC" and offers the DC
+  row (13.3).
 
 ## 4. Data logger via AD2
 
-| | AD1 today (logger.rs) | AD2 |
+| | AD1 (logger.rs) | AD2 |
 |---|---|---|
-| rates | 40 / 80 / 160 / 320 / 640 S/s nominal (chopped 2048 .. unchopped 256); 38 / ~80 / 318 / 634 measured | 600, 1 200, 2 400, 4 800, 9 600 (19 200) S/s, section 2.3 limits |
-| resolution | 24 bit, ~16 ENOB at 640 S/s, chopper-cancelled offset, 2.5 ppm/C | 19 bit, 14-16 ENOB (1.2), offset via ENCHOPAD2 (halves the rate) or OP1CHOP, 10-30 ppm/C |
-| functions | DC V / mV / A (AD1 rows) | mV, A directly (DC-coupled AC rows), V with the new DC row; AC-coupled V with the stock row |
-| gaps | none below 640 S/s (main loop 30 us typical) when nothing stalls | every stall drops samples until the ISR variant; marked by the seq / timestamp scheme (logger.rs `missed`, `overwritten`), as the FR-38 design already requires |
-| ring | 2048 x 12 B = 24 KiB = 51 s at 40 S/s | 213 ms at 9.6 kS/s: size per rate; 16 K x 4 B (24-bit sample + seq byte) = 64 KiB = 1.7 s at 9.6 kS/s covers a 400 ms sector erase |
-| USBTMC | 480 B/s | 115 kB/s at 9.6 kS/s with 12 B records, 38 kB/s packed 4 B: fine for full-speed bulk (`LOG:DATA?` blocks of 511 records) |
-| BT 115200 | fine | 11.5 kB/s -> ~1 kS/s packed, 2.4 kS/s with 16-bit deltas: BT is the limit, not the chip |
-| CSV to the SPI disk | works at 40 S/s (csvlog.rs slices) | text at ~20 B/sample x 9.6 kS/s = 190 kB/s exceeds the flash's erase-limited ~90 kB/s and the erases stall the loop: disk logging only at <= 1 kS/s, binary, with the big ring |
+| rates | 40 / 80 / 160 / 320 / 640 S/s nominal (chopped 2048 .. unchopped 256); 160 .. 640 S/s unchopped on the stream ISR | 1200 .. 76 800 S/s (1.1), each rung on the stream ISR |
+| resolution | 24 bit, ~16 ENOB at 640 S/s, chopper-cancelled offset, 2.5 ppm/C | 19 bit, 13.4 ENOB at 76.8 kS/s .. 16-17.6 at the slow rungs (1.2), offset via ENCHOPAD2 (the logger default), 10-30 ppm/C |
+| functions | DC V / mV / A (AD1 rows) | mV, A directly (DC-coupled AC rows), DC V with the E7 row (13), AC-coupled V with the stock row; refused in AC+DC / AUTO coupling / the power meter (alternating rows) |
+| gaps | marked by the seq / timestamp scheme ([`logger.rs`](../src/logger.rs) `missed`, `overwritten`, LOG:GAPs?) | the same; the stream ISR's own counters in `DBG:ISR?` (11.2) |
+| ring | 2048 x 8 B = 16 KiB in SRAM: 51 s at 40 S/s | 427 ms at 4800 S/s, 26.7 ms at 76.8 kS/s: the host must drain `LOG:DATA?` often, else `overwritten` counts the loss |
+| to the host | USBTMC `LOG:DATA?` | rows of 12 B, or `LOG:FORMat PACKed \| DLG` ([compact-log-format.md](compact-log-format.md)) for the faster rates; a raw Python drain reached ~37-46 k rows/s on the device (11.10, device check "e7ec2cc") |
+| to the disk | [`fastlog.rs`](../src/fastlog.rs) (the Record page / `LOG:DEST DISK`): DLG files | up to 76.8 kS/s after a page-program probe of the SPI flash, else 38.4 kS/s (11.12) |
+| BT 115200 | fine | the link, not the chip, is the limit |
 
-Noise trade: at 2.4 kS/s AD2 gives ~15-16 bits per sample; averaging 4 samples
-on the host matches AD1's 640 S/s figure, so (B) only pays off for the rates
-AD1 cannot do (> 640 S/s) and for the AC-coupled / current paths. Accuracy:
-the stock LPF calibration applies to mV and A; the V DC row is uncalibrated
-until the AD1 self-cal (3.3). Plumbing: logger.rs already has OSR / chop /
-preamble / ring / drain; it needs a source enum (AD1 | AD2), per-function row
-selection (AD2 rows), the 3-byte vs 4-byte sample, and the `LOG:SOURce`
-command plus `dm40scpi.py` scaling. Low effort once the readout (section 5.2)
-exists; without it, a main-loop AD2 logger at 600-2 400 S/s with gaps is a
-one-day change and is the natural first device experiment.
+AD2 pays off for the rates AD1 cannot do (> 640 S/s) and for the AC-coupled
+and current paths; at 2.4 kS/s AD2 averaged 4:1 matches AD1's 640 S/s figure.
 
-## 5. Recommendation
+## 5. Recommendation (2026-10-21) and what was built
 
 ### 5.1 Go / no-go
 
-* **(B) GO.** Build it first, on the existing logger: it is the cheapest way to
-  measure everything (A) depends on (torn reads, loss per rate, noise per OSR,
-  the DC V row) and is useful on its own (current / mV logging at kS/s to the
-  host).
-* **(A) GO as a slow floating scope**, scoped honestly: 5-10 ms/div .. 50 s/div,
-  ~1-2.5 kHz bandwidth, 14+ bits, V / mV / A on the isolated jacks, with the
-  stock-scope rendering, trigger, roll, stop-and-zoom and cursors; **not** a
-  replacement for the MCX channel and not "1 ms/div". Condition: the gap-free
-  readout of 5.2 (an ISR), because a waveform display with a hole at every
-  redraw is worse than no waveform. Decide on the ISR policy before UI work.
+(B) first, then (A) as a slow floating scope, conditional on a gap-free
+readout. Both were built in that order (sections 7-11).
 
 ### 5.2 Architecture
 
+As built:
+
 ```
-HY3131 ----SPI2 (PC10/11/12, 3.125 MHz) + CS PD2----> hy3131 bus owner (ISR or main loop)
-   |  AD2F / IRQ on DO (EXTI11) or TIMER at ~1.05 x rate                 |
-   |                                                                     v
-   |   INTF shadow (AD1F RMSF LPFF CTF) <--- dmm.rs poll via request queue
-   |                                                                     |
-   +--> sample ring (i32 or u16, 8-16 K) --> wavesrc (DMM) --+--> scope_page / scope_ui
-                                                            |      (Frame.data u16, fs, trig)
-   3PA1030 DMA ring (unchanged) ------------------------> scope.rs ----+
-                                                            +--> logger.rs (LOG:SOURce AD2)
+HY3131 --SPI2 (PC10/11/12, /16 = 3.125 MHz; /8 + CKPH for the data phase) + CS PD2 GPIO
+   |
+   |  main loop: dmm.rs poll (paused while a stream runs)
+   |  stream: hy3131::stream hands the bus to TIMER6 (IRQ 55), logger::isr
+   |          phase-locked blind reads (ad2pll.rs), CPU or DMA frames
+   v
+logger ring (2048 x 8 B, SPSC) --+--> LOG:DATA? (host)
+                                 +--> fastlog.rs (disk)
+                                 +--> logger::wave::drain --> scope.rs record (10-bit) --> scope_page / scope_ui
+                                       trigger per sample in the ISR (trigsoft::Stream)
 ```
 
-1. **hy3131.rs**: a `Bus` with two back ends (bit-bang as today, SPI2 with the
-   one-bit shift), a single owner, a request queue for dmm.rs's frames, and
-   the INTF shadow. The DMM path keeps its semantics (`read1(R_INTF)` returns
-   shadow | live).
-2. **One ISR** (TIMER or EXTI11 on the HY3131 IRQ): flag check, 5-byte AD2
-   read, push to the ring, run one queued DMM frame if the period allows.
-   Policy change for opendm40 ("no ISRs"): keep it the only one, document the
-   shared state (SPSC ring, shadow byte, queue), keep `cpsid` everywhere else.
-3. **Source abstraction for the scope**: `Frame.data: &[u16]` is what
-   scope_ui renders; AD2 19-bit -> u16 (>> 3, offset binary) loses nothing
-   visible (280 rows). Add a `WaveSource` behind `Scope::poll` with its own
-   `fs`, ring (not the scope's BUF: DMM and scope stay simultaneous),
-   `volts(code)` (3.3 scaling) and timebase table (3.1). The trigger search
-   (`stream_poll` / find_trigger with hysteresis) is written for a DMA ring
-   position; generalise its ring accessor. Roll mode and stop-and-zoom reuse
-   the existing code once the record is a `[u16]`.
-4. **UI**: in the DMM page a **"Wave" view** (swipe / MF menu entry next to
-   the strip chart) that opens the stock-scope page with the DMM source: the
-   top bar shows the DMM function and range instead of CH1 V/div (V/div +/-
-   step the DMM range; the "AC/DC" coupling pill selects the AC V row vs the
-   DC row), the trigger, timebase, run/stop, cursors and measurements as the
-   scope (RMS / mean / freq from the record at 14 bits are better than the
-   MCX channel's). In the scope page a **source badge "MCX | DMM"** opens the
-   same view, so the owner's "DMM input source in the scope page" and the
-   "Wave view in the DMM" are one screen reached from both sides. The DMM
-   reading (last value) stays in the top strip as the combined view does.
-   Overlap check and contact sheet before any screen (memory rule).
-5. **Logger**: `LOG:SOURce AD1|AD2`, row selection, 4-byte records option,
-   `dm40scpi.py` scaling from the preamble.
+1. **Bus** ([`hy3131.rs`](../src/hy3131.rs)): SPI2 is the only bus, reads and writes (section 8,
+   11.7); no bit-banged back end.
+2. **One ISR**: TIMER6 (not the EXTI on the HY3131 IRQ), phase-locked to the
+   chip's conversions (11.2), the bus exclusively its own while a stream runs;
+   any main-loop bus access stops the stream first (9.1 guard). No request
+   queue and no INTF shadow: the DMM reading pauses.
+3. **Scope source**: the record holds 10-bit codes like the MCX record, not
+   u16 = 19 bit >> 3 (10.1, deviation note), so the renderer, measurements,
+   cursors, STOP / zoom, CSV and FFT run unchanged.
+4. **UI**: "Wave" on the MF range page of V / A and the source badge
+   "MCX | DMM" on the scope page open the same view; V/div steps the DMM range;
+   the coupling key switches V between the DC and the AC row (10.1, 13.3).
+5. **Logger**: `LOG:SOURce AD1|AD2`, `LOG:SRATe`, `LOG:SCALe?`; scaling on
+   the host from `LOG:PREamble?` / `LOG:SCALe?` (`tools/dm40scpi.py`).
 
 ### 5.3 Effort
 
-| step | effort | depends on |
+| step | what | status |
 |---|---|---|
-| E0 device experiment plan (section 6), through `DBG:` commands and the logger | 1 day + device | - |
-| E1 main-loop AD2 logger (bit-bang, gaps marked), `LOG:SOURce` | 1 day | E0 |
-| E2 SPI2 back end with the shift trick, read-back self-test, speed probe | 1-2 days | E0 |
-| E3 bus owner + INTF shadow + request queue; dmm.rs on it | 2 days | E2 |
-| E4 the ISR (policy decision), ring, loss statistics | 1-2 days | E3 |
-| E5 `WaveSource` + scope.rs source abstraction + trigger generalisation | 3 days | E4 |
-| E6 UI: Wave view / source badge, range-as-V/div, coupling pill, mockups + overlap check | 3 days | E5 |
-| E7 DC-coupled V row + AD1 self-cal + autorange handling | 1-2 days + device | E0 (6.5) - **done**, section 13 |
-| total | ~2.5-3 weeks for (A) incl. (B); (B) alone E0-E1 2 days (E2-E4 upgrade it later) | |
+| E0 | device experiment hooks (section 6) | done (7.1, `DBG:AD2:*`) |
+| E1 | main-loop AD2 logger | done (7) |
+| E2 | SPI2 back end | done (8) |
+| E3 / E4 | the bus hand-off and the stream ISR | done (9, replaced by 11) |
+| E5 / E6 | the wave source and UI | done (10) |
+| E7 | DC-coupled V row + AD1 self-cal | done (13) |
 
 ### 5.4 Risks
 
-1. Torn reads (1.4) unresolvable at the wanted OSR -> cap the rate at the OSR
-   where the AD2F-synchronised read fits (probably 9.6 kS/s). Low risk for
-   the scoped feature, fatal only for the "1 ms/div" ambition, already excluded.
-2. The ISR policy: opendm40's single-threaded design is a deliberate simplicity
-   and safety property (prof.rs, review docs). Mitigation: one ISR, one SPSC
-   ring, no other shared state; the whole streaming path can be compiled out.
-3. SPI2 across the isolator at 3.125 MHz fails read-back -> 1.56 MHz
-   (frames 2x longer, ceiling 4.8-9.6 kS/s). Still a GO.
-4. AD2 on OP1O in the DC V row (E7) shows an offset / noise that the AD1
-   self-cal cannot remove (OP1 common-mode, note 7 interactions) -> V stays
-   AC-coupled (stock row), DC V waveforms limited to the 4 V range through
-   r0's OP1 path (already OP1O - RLU on AD1; AD2 on OP1O - RLU is the same
-   node) - UNKNOWN until 6.5.
-5. CPU share at 9.6 kS/s (~20 %) lengthens the LCD redraw stalls the owner
-   already complains about (scope drag lag): keep the default at 4.8 kS/s and
-   let the timebase pick the OSR (slower timebases -> higher OSR -> less
-   CPU and more bits).
-6. The DMM poll competing for the bus during streaming: first cut pauses the
-   DMM reading in the Wave view (the stock scope page has no DMM either);
-   simultaneous reading is E3's queue.
+1. Torn reads: none on the device (1.4).
+2. The ISR policy: one ISR, one SPSC ring, the bus handed over exclusively
+   (9.3); a build without the `ad2-isr` feature has no interrupt.
+3. SPI2 across the isolator: /16 clean; /8 needs the CKPH = 1 data phase
+   (11.3).
+4. The DC V row on AD2: works after the AD1 self-cal (13.4); AD1 shifts while
+   AD2 converts (13.1, 13.2), so the DMM's DC V row keeps AD2 off.
+5. CPU share: 17.5 % at 38.4 kS/s with DMA frames, ~46 % at 76.8 kS/s
+   (11.10, 11.12).
+6. The DMM poll during a stream: paused (3.4).
 
 ## 6. Device experiment plan (one session, before any UI work)
 
-All through `DBG:` SCPI on opendm40; a calibrator / signal generator on the
-jacks; log with `dm40scpi.py`.
+All through `DBG:` SCPI and `tools/dm40scpi.py`. Each step and where its
+result is:
 
-1. **SPI2 pins and speed** (E2 prototype as a DBG command): configure
-   PC10/11/12 AF6, read R20..R35 back at 1.56 / 3.125 / 6.25 MHz and compare
-   with the row just written bit-banged; 1000 frames each, count mismatches.
-   Settles: AF mapping (INFERRED -> VERIFIED), the isolator-limited clock.
-2. **Torn reads**: DC-coupled row (AC mA r1 or AC mV r1, DC source so that the
-   code sits near a byte boundary, e.g. 0x00FF80 +- noise, and a slow ramp),
-   AD2 alone (R34 = 0, R29 = 0), OSR2 = 1024 .. 32: 10 000 blind reads per
-   OSR, histogram of |x[n] - x[n-1]| -> outliers of 256 / 65536 codes are
-   tears; repeat flag-synchronised (INTF then data). Settles 1.4 and the
-   OSR floor of every scheme.
-3. **Loss per rate**: logger session at 600 / 2 400 / 9 600 S/s with the
-   DMM page redrawing, then with the display frozen: `missed`, `overwritten`,
-   measured rate vs nominal (the logger already reports them). Settles the
-   section 2.3 table on the real loop.
-4. **Noise / ENOB**: input shorted (mV) and 0 A, 1 s per OSR2 at 76.8 kS/s ..
-   600 S/s: sd of the samples in codes -> ENOB per rung (1.2). Also with
-   ENCHOPAD2 and with OP1CHOP on/off.
-5. **DC-coupled V row**: AC V r1 bytes + R32 0x38 + R27 SAD2IP = OP1O (two
-   variants: AD2IN = AGND, = RLU), 10 V DC and 5 V 50 Hz: mean of AD2 vs the
-   DC V reading (AD1 in the same row, r1 = SENSE - PB5), ripple, and the AD1
-   reading with AD2 on vs off (note 7). Settles 1.3 last row and E7.
-   **Done** (section 13.1): the row works; AD1 shifts while AD2 converts.
-6. **Waveform sanity**: AC A r0 with a 40 Hz PWM load (the calibrator used in
-   acdc doc 10): record 1 s at 4.8 kS/s to the host, plot: edges, duty,
-   amplitude vs the DMM AC A reading.
-
-Total: a half day with the DBG commands of E0/E1 in place. Outcomes map
-directly to the rate table of 2.3 and to the GO conditions of 5.1.
+1. **SPI2 pins and speed** (`DBG:HYSPI:SELF?`): reads clean at /16 and /32,
+   /8 only with the CKPH = 1 data phase; writes needed a fix (8.5, 8.6, 11.3,
+   11.6, 11.7).
+2. **Torn reads** (`DBG:AD2:TORN?`): none at any rung (1.4; device check
+   "9dd1222" 1).
+3. **Loss per rate** (the logger with `DBG:AD2:DRAW 0|1|2`): the main-loop
+   sampler loses on every redraw (2.3); the stream ISR 0 (11.6-11.11).
+4. **Noise / ENOB** (`DBG:AD2:NOISE?`): 1.2.
+5. **DC-coupled V row** (`DBG:AD2:DCV?`): the row works; AD1 shifts while AD2
+   converts (13.1).
+6. **Waveform sanity**: AC V and AC mV waveforms on 9dd1222 (device check
+   "9dd1222" 1); the wave view on f3aea2f and a239aa6 (10.6, 11.11). The
+   current waveform with a PWM load is not run (TODO "(A) device test of
+   the Wave view").
 
 ## 7. (B) implemented: main-loop AD2 logger + the E0 hooks (2026-10-21)
 
-Status: E0 (the DBG hooks of section 6, steps 2-4) and E1 (main-loop AD2
-logger, bit-banged, gaps marked) are in opendm40. No ISR, no SPI2 (E2-E4 wait for
-the owner's ISR decision and the device numbers below). Nothing of it has run
-on the device yet; every number in 7.2 is from the Renode emulator.
+E0 (the DBG hooks of section 6) and E1 (the AD2 logger sampled from the main
+loop). Since b81abf2 the default build streams on the timer ISR (sections 9,
+11) with the same ring, counters and host side; the main-loop sampler is what
+a build without the `ad2-isr` feature uses (`--no-default-features
+--features vdisk`).
 
 ### 7.1 What exists
 
 | piece | where | what |
 |---|---|---|
-| rate ladder | `hy3131::ad2_r26_for`, `ad2_period_ns` | requested S/s -> R26 low bits. Chop ON (default, `LOG:CHOP`): 600 = /4 OSR 1024, 1200 / 2400 / 4800 / 9600 = /2 OSR 1024 / 512 / 256 / 128, all with ENCHOPAD2. Chop OFF: 1200 = /4 OSR 1024, 2400..9600 = /2 OSR 1024..256 (600 needs the chopper). Nearest rung in log scale; the achieved rung is reported, never silently another rate. Tested against the 1.1 table (meter-test). |
-| stream setup | `hy3131::set_ad2_stream` | after the full stock row (dmm.start): ENAD1 cleared if set (the misconnect sentinel runs AD1 in AC V / mV; off first, so note 7 cannot apply), R34 = 0 (AD3 off: the row starts it before AD2, so with both on AD2F would come twice per period on two skewed grids), R29 = 0 (RMS / LPF off), R26 = ENAD2 \| rung, INTF cleared. ENAD2 never toggled. LOG:STATe OFF rewrites the row, sentinel included (unchanged path). |
-| rows | `Logger::mode_ok` | AD2: AC mV (2) and AC A / mA / uA (4..6) **DC-coupled** (OP2O / OP1O, stock rows unchanged), AC V (0) **AC-coupled** (PB4, ~0.5 Hz; preamble `coupling` = 1). AC+DC (16/17) refused (alternating rows). DC V (1) and DC mV (3) since E7 (section 13): the DC-coupled V row / the AC mV row. |
-| sampling | `Logger::poll` | AD2F-gated (INTF read, then R03..R05), P/2 gate from the last sample, timestamp at the flag observation. Since one sample costs ~122 us bit-banged and the period is 104..1667 us, a call keeps sampling while the next result is due within `AD2_BURST_US` = 500 us of the call. A read whose bits 23:19 are not a copy of bit 18 is dropped and counted (`bad`, a torn read for sure). |
-| honesty | LOG:COUNt?, LOG:GAPs?, LOG:PREamble?, panel | `lost` = round(span / nominal period) + 1 - captured (counts the steady "slightly late" losses of a rate the link cannot sustain, which the per-gap `missed` cannot); gap histogram in periods (2, 3-4, 5-16, 17-128, >128) + max gap; preamble `...,source,req_hz,nominal_mhz,r26,coupling` (requested vs chip rate; measured_hz in field 5); the on-screen panel shows "AD2 measured/nominal Sa/s", samples and "lost N (x.x%)" (ui-render checked, no overlaps). |
-| ring | `logger.rs` | unchanged: 2048 records of 8 B (seq implicit, d957027), 16 KiB of SRAM (+40 B of stats). Only 213 ms at 9600/s: the host must drain `LOG:DATA?` (511 records per block) at least ~5x/s, else `overwritten` counts the loss; a bigger ring does not fit (SRAM free ~4.5 KB). Wire format unchanged (12-byte {seq, ts_us, raw}). |
-| hooks (E0) | `src/ad2exp.rs`, `DBG:AD2:*` | `TORN? r26,n[,SYNC]`: n back-to-back pairs of R03..R05 reads, INTF after each pair; same / differ-with-new-conversion / differ-without / signbad + a histogram of bit_length(\|a-b\|) (tears show as a bump at 9 or 17 above the noise). `NOISE? r26,n[,op1chop]`: n flag-synced samples: mean, sd (1/1000 code), min, max, readout us; ENOB = log2(2^19/sd) on the host. `DRAW 0\|1\|2`: during a log session no panel / the panel / panel + a full DMM-view repaint every 100 ms (the DMM page's redraw load). Bounded (n <= 2000 per call, watchdog kicked), refused while logging or outside an AC row (no reply: `dm40scpi.py ad2` checks FUNC? first), the row is rewritten afterwards. |
-| host | `tools/dm40scpi.py` | `log out.csv --source ad2 --rate N [--chop off] -d S`: CSV `seq,t_s,raw,value_<unit>,lost_before` (scaled with IG 1.0, VR 1.25 V and the stock range factor, calibration NOT applied, said in the header; lost_before from the timestamps and the seq), trailer with measured rate, counts and gaps; `ad2 torn\|noise [--sync] [--op1chop k] [--rungs ...]` sweeps the rungs. `--usbip BUSID` talks to the emulator. |
-| emulator | `emu/hy3131/HY3131.cs` (peripherals/ symlink), tests | AD2 on its own grid (one AD2F and one fresh result per period; before: the flag was set and the code resampled on every bus access after the first period), per-result noise model, the logger's row variant still recognised. `emu/hy3131/tests`: `Ad2Stream` (960 conversions in 100 ms at 9600/s, one flag each, code of 12.3 mA in AC mA r0, noise model). |
+| rate ladder | `hy3131::ad2_r26_for`, `ad2_period_ns` | requested S/s -> R26 low bits: 1200 = /4 OSR 1024, 2400 .. 76 800 = /2 OSR 1024 .. 32; ENCHOPAD2 set with `LOG:CHOP ON` (the default), the same rate either way (1.1). Nearest rung in log scale; the achieved rung is reported, never silently another rate. The stream's read divider caps the rung (`stream::max_rate_hz`, 11.3). Tested against the 1.1 table (meter-test). |
+| stream setup | `hy3131::set_ad2_stream` | after the full stock row (dmm.start): ENAD1 cleared if set (the misconnect sentinel runs AD1 in AC V / mV; off first, so note 7 cannot apply), R34 = 0 (AD3 off: the row starts it before AD2, so with both on AD2F would come twice per period on two skewed grids), R29 = 0 (RMS / LPF off), R26 = ENAD2 \| rung, INTF cleared. ENAD2 never toggled. LOG:STATe OFF rewrites the row, sentinel included. |
+| rows | `Logger::mode_ok` | AD2: AC mV (2) and AC A / mA / uA (4..6) **DC-coupled** (OP2O / OP1O, stock rows unchanged), AC V (0) **AC-coupled** (PB4, ~0.5 Hz; preamble `coupling` = 1), DC V (1) and DC mV (3) since E7 (section 13): the DC-coupled V row / the AC mV row. AC+DC, AUTO coupling and the power meter refused (alternating rows). |
+| sampling (main-loop sampler) | `Logger::poll` | AD2F-gated (INTF read, then R03..R05), P/2 gate from the last sample, timestamp at the flag observation; a call keeps sampling while the next result is due within `AD2_BURST_US` = 500 us of the call. A read whose bits 23:19 are not a copy of bit 18 is dropped and counted (`bad`, a torn read for sure). |
+| honesty | LOG:COUNt?, LOG:GAPs?, LOG:PREamble?, panel | main-loop sampler: `lost` = round(span / nominal period) + 1 - captured (counts the steady "slightly late" losses of a rate the link cannot sustain, which the per-gap `missed` cannot); stream ISR: `lost` = A entries - captured (11.2). Gap histogram in periods (2, 3-4, 5-16, 17-128, >128) + max gap; preamble `...,source,req_hz,nominal_mhz,r26,coupling` (requested vs chip rate; measured_hz in field 5); the on-screen panel shows "AD2 measured/nominal Sa/s", samples and "lost N (x.x%)". |
+| ring | `logger.rs` `RING`, `CAP` | 2048 records of 8 B (seq implicit, d957027), 16 KiB of SRAM: 213 ms at 9600/s, so the host must drain `LOG:DATA?` (511 records per block) at least ~5x/s, else `overwritten` counts the loss. Single producer / single consumer since 9.1. Wire format: 12-byte {seq, ts_us, raw} rows, or the compact formats ([compact-log-format.md](compact-log-format.md)). |
+| hooks (E0) | [`src/ad2exp.rs`](../src/ad2exp.rs), `DBG:AD2:*` | `TORN? r26,n[,SYNC]`: n back-to-back pairs of R03..R05 reads, INTF after each pair; same / differ-with-new-conversion / differ-without / signbad + a histogram of bit_length(\|a-b\|) (tears show as a bump at 9 or 17 above the noise). `NOISE? r26,n[,op1chop]`: n flag-synced samples: mean, sd (1/1000 code), min, max, readout us; ENOB = log2(2^19/sd) on the host. `DRAW 0\|1\|2`: during a log session no panel / the panel / panel + a full DMM-view repaint every 100 ms (the DMM page's redraw load). Bounded (n <= 2000 per call, watchdog kicked), refused while logging or outside an AC row (no reply: `dm40scpi.py ad2` checks FUNC? first), the row is rewritten afterwards. |
+| host | `tools/dm40scpi.py` | `log out.csv --source ad2 --rate N [--chop off] -d S`: CSV `seq,t_s,raw,value_<unit>,lost_before` (scaled with `LOG:SCALe?`, lost_before from the timestamps and the seq), trailer with measured rate, counts and gaps; `ad2 torn\|noise [--sync] [--op1chop k] [--rungs ...]` sweeps the rungs. `--usbip BUSID` talks to the emulator. |
+| emulator | `emu/hy3131/HY3131.cs` (peripherals/ symlink), tests | AD2 on its own grid (one AD2F and one fresh result per period), per-result noise model. `emu/hy3131/tests`: `Ad2Stream` (960 conversions in 100 ms at 9600/s, one flag each, code of 12.3 mA in AC mA r0, noise model). |
 
 ### 7.2 Emulator results (plumbing only, not the device)
 
 `emu/run.py fwrs --fast` (50 MIPS: a quarter of the device's 200 MHz, so the
 bit-banged readout costs ~4x the device's) with `isrc:0.5,ac=0.3,f=50`, AC A
-(the meter picked mA r1), 15-20 s per run, USB/IP draining LOG:DATA?:
+(the meter picked mA r1), 15-20 s per run, USB/IP draining LOG:DATA?. The
+rungs are the 2026-10-21 labels (the chop-ON rate error of 1.1 was in the
+model too):
 
 | requested | chip | measured | lost | gaps (2 / 3-4 / 5-16 / 17-128 / >128), max |
 |---|---|---|---|---|
@@ -604,51 +457,41 @@ bit-banged readout costs ~4x the device's) with `isrc:0.5,ac=0.3,f=50`, AC A
 | 9600, DMM-view repaint every 100 ms (DRAW 2) | 9600.0 | 685 | 93 % | 0 / 2182 / 3095 / 333 / 83, 47 ms |
 
 `ad2 noise` (DC 50 mA, the emulator's noise model): sd 31.5 codes at 76.8
-kS/s (ENOB 14.0) .. 8.3 at 600/s (16.0); `ad2 torn --sync`: signbad 0, no
-difference without a conversion (the model latches by construction). Readout
-426 us per flag-synced sample at 50 MIPS. What this shows: the AD2 path,
-the ladder, the counters and the host CSV work end to end, the counters
-expose loss honestly, and the repaint costs whole tens of ms. The rates are
-the emulator's, not the device's: at 200 MHz expect ~4x the readout speed
-(~8 kS/s link ceiling, section 2.1).
+kS/s (ENOB 14.0) .. 8.3 at the slowest rung (16.0); `ad2 torn --sync`:
+signbad 0 (the model latches by construction). Readout 426 us per
+flag-synced sample at 50 MIPS. The AD2 path, the ladder, the counters and the
+host CSV work end to end; the rates are the emulator's.
 
-### 7.3 Device test plan (30 minutes)
+### 7.3 Device session (9dd1222)
 
-Meter on opendm40 with this build, USB to the PC (`tools/dm40scpi.py`, USBTMC);
-a DC source and a signal generator; write the outputs into a new section of
-this doc. Step 1 is the go/no-go for every higher rate.
-
-| min | step | commands | record / pass |
-|---|---|---|---|
-| 0-3 | setup | AC mV on the meter (V key -> mV, AC; `dm40scpi.py info`: FUNC? VOLT:AC); DC 0.312 V into V-COM (AD2 code ~0x00FF80, a byte boundary at 400 mV x1) | - |
-| 3-8 | torn reads (6.2) | `dm40scpi.py ad2 torn -n 2000` then `... --sync` | per rung: signbad, diff(no conv), the bits histogram. Pass = signbad 0 and no bump at 9 / 17 beyond the noise. A bump at a rung = the rate cap of every flag-synced scheme (1.4) |
-| 8-18 | loss per rate (6.3) | for r in 600 2400 4800 9600, for d in 1 0 2: `dm40scpi.py scpi "DBG:AD2:DRAW $d"; dm40scpi.py log l$r-$d.csv --source ad2 --rate $r -d 20` (then DRAW 1) | the trailer line: measured S/s, lost %, gaps. Fills the 2.3 table with the real loop: expected loss-free at 600-2400 with DRAW 0 / 1, the link ceiling (~8 kS/s) at 9600 |
-| 18-23 | noise / ENOB (6.4) | V-COM shorted (mV): `dm40scpi.py ad2 noise -n 2000`; AC A, jacks open: `ad2 noise -n 2000 --op1chop 0` and `--op1chop 3` | sd / ENOB per rung (compare 1.2: 14-16 bits; the emulator's model is 14.0 .. 16.0) |
-| 23-28 | waveform (6.6) | AC mV, generator 50 Hz 100 mV rms + 50 mV DC: `log w.csv --source ad2 --rate 4800 -d 2`; AC V, 5 V 50 Hz: `log v.csv --source ad2 --rate 2400 -d 2` | plot value vs t_s: amplitude and mean vs the DMM's AC mV / DC mV readings (calibration not applied: expect < 1 %); AC V: no DC (coupling AC in the header) |
-| 28-30 | profile | during one 9600 session: `dm40scpi.py scpi "DBG:PROF?"` | the longest main-loop passes while logging (what still stalls) |
-
-Not covered by this plan: the DC-coupled V row (6.5, E7), which needs code
-that is not written yet. SPI2 (6.1, E2): section 8.
+The 30-minute plan (torn reads, loss per rate with DRAW 0 / 1 / 2, noise,
+waveforms, profile) ran on 9dd1222 with the bit-banged bus; the results are
+in the device check, "9dd1222" 1:
+* no torn reads at any rung (1.4);
+* the chop-ON rungs ran at the chop-OFF rate (1.1; the ladder was fixed);
+* the bit-banged link topped out at ~6.2-6.6 kS/s; the DMM page repaint
+  (DRAW 2) cost a ~26 ms gap every 100 ms at every rate;
+* the converter floor 13.4 ENOB at 76.8 kS/s, 16-17.6 at the slow rungs
+  (1.2);
+* AC V and AC mV waveforms of the 40 Hz square and of a DC level as
+  expected, uncalibrated (-1.2..-1.7 %).
 
 ## 8. E2 implemented: the HY3131 on the hardware SPI2 (2026-10-22)
 
-Owner decision: no runtime switch between bit-bang and SPI2; if the hardware
-bus is reliable it is simply the bus. opendm40 now talks to the HY3131 over SPI2
-only; the bit-banged bus survived as a compile-time fallback (`--features
-hyspi-bitbang`) until the device check passed (8.6, 7889e6c); the feature and
-the bit-banged read path are gone since (bit-banged writes stay, 8.6).
+There is no runtime switch between bit-bang and SPI2: SPI2 is the bus. Reads
+moved in 8e5efa6 / 7889e6c (device check passed, 8.6), writes in b81abf2
+(11.7). The bit-banged bus and its build feature `hyspi-bitbang` are gone.
 
 ### 8.1 What exists
 
 | piece | where | what |
 |---|---|---|
-| bus | `src/hy3131.rs` (`init_pins`, `spi::read` / `write`) | SPI2 @ 0x4000_3C00, PCLK1 50 MHz / 16 = **3.125 MHz**, master, mode 0 (CKPL = CKPH = 0), MSB first, 8 bit, software NSS; PC10 / PC11 / PC12 AF6 (VERIFIED, 2.2), OSPEED 25 MHz on SCK / MOSI; CS = PD2 GPIO. `read` / `write` keep their signatures, so the DMM, the AD2 logger, ad2exp and the sentinel all use it unchanged. Polled byte exchange (TBE, DATA, RBNE), TRANS idle before CS goes high. No buffers, no ISR. |
-| read period | `spi::read` | command byte on SPI2; wait TRANS = 0 (SCK low); PC10 MODER AF -> output (ODR bit = 0, the SPI idle level: no edge), one pulse (~100 ns high, ~100 ns low), back to AF; then the n data bytes (MOSI = 1 as on the bit-banged bus). The datasheet frame exactly (8 + 1 + 8n clocks), so the register after the frame sees what it saw before (its MSB fetched at the last falling edge). The "shift" alternative (cmd + n + 1 bytes, RX shifted one bit) is not used: it clocks 6 more bits of reg + n, which after the counter frame (R15..R1D) is R1E = INTF, clear-on-read. |
-| pin hand-over | `init_pins` | CS high first, SCK low as GPIO, SPI2 configured and enabled (drives SCK low), then AFRH, then MODER: SCK never moves while CS is high, CS never glitches (and the chip ignores CK while CS is high, DS 7.2 (6)). Only at init; no switching back at run time. |
-| CS timing | `spi::{begin,end}` | CS low -> first edge ~200 ns, last edge -> CS high ~100 ns, CS high >= ~500 ns between frames (the bit-banged bus had ~1 us; the datasheet gives no minimum). |
-| self-test | `src/hyspi.rs`, `DBG:HYSPI:SELF? n[,div]` | in the current row (run it in an AC row: AD2 on): reference = first read of R1F..R35 (INTE + the row: the HY3131 has no ID / version register); n x {read1(R20), read(R00,6) AD2 sign copy, read(R1F,23) = ref, write(R36, pattern) + read1(R36) = pattern}; reply `div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1`. `div` 8 / 16 / 32 runs that call at 6.25 / 3.125 / 1.5625 MHz (the margin probe), then back to /16. The write-pattern check is absolute (a consistently shifted bus fails it even though the reference would shift too). DMM paused and its row rewritten afterwards, refused while logging, n <= 2000. In the fallback build the same test runs on the bit-banged bus (div 0). |
-| fallback | Cargo feature `hyspi-bitbang` (removed after 8.6) | the old bit-banged bus, nothing else changed. |
-| emulator | `emu/hy3131/HY3131.cs` (symlinked as `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the existing bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back bit-banged, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. |
+| bus | [`src/hy3131.rs`](../src/hy3131.rs) (`init_pins`, `spi::read` / `write`) | SPI2 @ 0x4000_3C00, PCLK1 50 MHz / 16 = **3.125 MHz**, master, mode 0 (CKPL = CKPH = 0), MSB first, 8 bit, software NSS; PC10 / PC11 / PC12 AF6 (2.2), OSPEED 25 MHz on SCK / MOSI; CS = PD2 GPIO. `read` / `write` are used by the DMM, the logger, ad2exp, the sentinel and the stream ISR's CPU frames. Polled byte exchange (TBE, DATA, RBNE), TRANS idle before CS goes high. The stream's own variants: `read_fast` (pipelined), the CKPH = 1 data phase at /8 (11.3), DMA frames (11.8) and hybrid frames (11.12). |
+| read period | `spi::read` | command byte on SPI2; wait TRANS = 0 (SCK low); PC10 MODER AF -> output (ODR bit = 0, the SPI idle level: no edge), one pulse (~100 ns high, ~100 ns low), back to AF; then the n data bytes (MOSI = 1). The datasheet frame exactly (8 + 1 + 8n clocks), so the register after the frame sees what it saw before (its MSB fetched at the last falling edge). The "shift" framing (cmd + n + 1 bytes, RX shifted one bit) is used only by the DMA frames of R03..R05 (11.8): after other registers it clocks bits of reg + n, which after the counter frame (R15..R1D) is R1E = INTF, clear-on-read. |
+| pin hand-over | `init_pins` | CS high first, SCK low as GPIO, SPI2 configured and enabled (drives SCK low), then AFRH, then MODER: SCK never moves while CS is high, CS never glitches (and the chip ignores CK while CS is high, DS 7.2 (6)). Only at init. |
+| CS timing | `spi::{begin,end}` | CS low -> first edge ~200 ns, last edge -> CS high ~100 ns, CS high >= ~500 ns between frames (the datasheet gives no minimum). |
+| self-test | [`src/hyspi.rs`](../src/hyspi.rs), `DBG:HYSPI:SELF? n[,div[,cpha]]` | in the current row (run it in an AC row: AD2 on): reference = 8 reads of R1F..R35 (INTE + the row: the HY3131 has no ID / version register), bytes that differ between them are live and masked; n x {read1 of a stable byte, read(R00,6) AD2 sign copy, read(R1F,23) = ref, write(R36, pattern) + read1(R36) = pattern}; reply `div,n,bad_r1,bad_r23,bad_w1,signbad,us_r1,us_r6,us_r23,us_w1,stable,ref`. `div` 8 / 16 / 32 runs that call at 6.25 / 3.125 / 1.5625 MHz, `cpha` 1 the data phase at CKPH = 1. The write-pattern check is absolute (a consistently shifted bus fails it even though the reference would shift too). DMM paused and its row rewritten afterwards, refused while logging, n <= 2000. `DBG:HYSPI:WR? mode[,div]` is the write experiment of 11.6. |
+| emulator | `emu/hy3131/HY3131.cs` (symlinked as `emu/peripherals/HY3131.cs`), `emu/dm40.repl` | `HY3131SpiPort` (ISPIPeripheral) on Renode's STM32SPI `spi3` @ 0x40003C00 hands each byte to `HY3131.SpiByte`, which runs the bit engine for 8 mode-0 clocks (sample DO, rising, falling); the GPIO pulse on PC10 lands in the same engine. Host tests (`emu/hy3131/tests`, "Hardware SPI byte path"): R1F..R35, R36 and live R00..R05 equal on bit-bang / SPI-pulse / SPI-shift, 256 SPI writes read back, a 22-byte row written over SPI, INTF side effects of the frame tails, a byte with CS high is ignored. Timed SPI bytes since 11.12. |
 
 ### 8.2 Timing budget (why /16)
 
@@ -664,49 +507,21 @@ datasheet).
 | TCKLO >= 60 / TCKHI >= 20 ns | ok | ok | ok |
 | byte | 1.28 us | 2.56 us | 5.12 us |
 
-So /16 is the bus; /8 is only probed (SELF? n,8) to see the real margin;
-/32 is the step back if /16 shows any error on the device.
+So /16 is the bus. /8 in mode 0 shows read errors on the device (11.3); /8
+works with the data phase sampled at CKPH = 1 (11.3), which the stream uses.
 
 ### 8.3 Emulator results (plumbing only, not the device)
 
-`emu/run.py fwrs --fast` (50 MIPS), DC V 1.2 V / AC V 0.5 V 50 Hz, both
-images built from this tree:
-
-| | SPI2 build | `hyspi-bitbang` build |
-|---|---|---|
-| READ? DC V / AC V | 1.19999 / 0.49990 | 1.20000 / 0.49995 |
-| SELF? 200 (AC V) at 16 / 8 / 32: bad_r1, bad_r23, bad_w1, signbad | 0 on all | 0 |
-| us per frame r1 / r6 / r23 / w1 | 5 / 7 / 11 / 6 (Renode quantum noise) | 156 / 435 / 1381 / 178 |
-| AD2 logger 2400 S/s, 10 s: measured, lost | 2364 S/s, 1.5 % | 2017 S/s, 15.9 % |
-| AD2 logger 9600 S/s, 10 s: measured, lost | 8806 S/s, 8.3 % | 2010 S/s, 79 % |
-
-The SPI bytes are instantaneous in Renode, so the SPI2 us are CPU overhead
-under the emulator's quantum, not bus time; the bit-banged numbers scale ~4x
-down on the device (200 MHz). Device expectation from 2.2: flag check ~8 us,
-3-byte AD2 read ~13 us, the 20-byte AC poll ~60 us at 3.125 MHz, i.e. SELF?
-us_r1 ~ 6-8, us_r6 ~ 19-21, us_r23 ~ 62-66, us_w1 ~ 6-7.
+`emu/run.py fwrs --fast` (50 MIPS), DC V 1.2 V / AC V 0.5 V 50 Hz, the SPI2
+build against the bit-banged build of the same tree: readings equal, SELF?
+200 clean at /8, /16 and /32, the AD2 logger at 9600 S/s 8.3 % lost (bit-bang
+79 %). The emulator's SPI bytes were instantaneous then, so its us per frame
+were CPU overhead, not bus time.
 
 ### 8.4 Device check (10 minutes)
 
-One build: the SPI2 image (this tree, `./build.sh native`). Meter on USB,
-`tools/dm40scpi.py`; a DC source (1-10 V) and a 50 Hz sine (a few V) for V-COM.
-
-| min | step | commands | pass |
-|---|---|---|---|
-| 0-1 | boots, DMM reads | DC V, 5 V in: `dm40scpi.py scpi "READ?"` x3 | the source's value (compare the last bit-banged session's reading of the same source) |
-| 1-4 | bus self-test | AC V, sine in: `scpi "DBG:HYSPI:SELF? 2000"`, then `"DBG:HYSPI:SELF? 2000,32"`, then `"DBG:HYSPI:SELF? 2000,8"` | /16 and /32: every bad_* and signbad = 0, us_r1 ~6-8, us_r6 ~19-21 (8.3). /8: record the counts (errors there are the expected margin answer, not a failure) |
-| 4-6 | DMM functions | DC V, AC V (sine), ohm (a resistor), FREQ (the sine: the 9-byte counter frame) - `READ?` each | readings as on the bit-bang firmware, no flicker / no stuck reading |
-| 6-9 | logger | AC mV or AC V: `dm40scpi.py log s9.csv --source ad2 --rate 9600 -d 10` and `--rate 2400` | lost well below the bit-bang emulator figures; signbad (`bad`) 0 |
-| 9-10 | profile | `scpi "DBG:PROF?"` on the DMM page | the DMM poll no longer near the top |
-
-If step 1 or 2 fails at /16 and /32 (bad_w1 > 0, nonsense readings), flash
-the fallback build `./build.sh native --features hyspi-bitbang` (identical
-otherwise) to keep the meter usable, and report the SELF? lines: bad_w1 with
-good bad_r23 points at the read-period pulse (PULSE_LO / CS_SETUP in
-hy3131.rs), all bad at every divider at the pin mux / AF, errors only at /16
-at the isolator margin (then make /32 the bus). On a pass: remove the
-fallback feature and the bit-banged code.
-
+The plan (READ?, `DBG:HYSPI:SELF?` at /16, /32, /8, the DMM functions, the
+logger, `DBG:PROF?`) ran on 8e5efa6: 8.5.
 
 ### 8.5 Device result of 8e5efa6 and the DIAG image (2026-10-22)
 
@@ -723,35 +538,15 @@ Reading it:
 - us_r1 7.71 at /16 = 16 clocks x 320 ns + ~2.6 us, 12.57 at /32 = 16 x 640
   + ~2.3 us: APB1 is 50 MHz and the PSC coding is right.
 - w1 (write R36, read back) fails ~25 % at /16 AND /32: independent of the
-  bit period -> a fixed-time quantity at a frame boundary, not SPI edge
-  timing. Candidates: CS hold after the last clock (~100 ns), CS high
-  between frames (~500 ns), CS setup (~200 ns); the bit-banged bus had ~1 us
-  for each. The HY3131 runs on a 4.9152 MHz SYSCLK (203 ns): a write commit
-  or CS sampling synchronised to it and lost on a per-frame phase basis
-  gives exactly a divider-independent fraction. DC V wrong fits: single-byte
-  config writes (R22, R23, INTE, R26 / R34 enables) lost one time in four.
-- r23 is unusable as evidence: 51 % "bad" on the bit-banged bus too (the
+  bit period. DC V wrong fits: single-byte config writes lost one time in
+  four. The cause is in 8.6.
+- r23 was unusable as evidence: 51 % "bad" on the bit-banged bus too (the
   reference was one read; bytes of the row change between reads). SELF? now
-  takes 8 bit-banged reads and masks live bytes (reported as `..`).
+  takes 8 reads and masks live bytes (8.1).
 
-The DIAG image (this commit; REMOVE the DIAG pieces before the final bus):
-every bus parameter is runtime (`DBG:HYSPI:DIAG div,cpol,cpha,frame,setup,
-hold,idle,phi,plo,ospeed`, `DIAG?` also prints DWT cycles of spin(1000)),
-`DBG:HYSPI:RAW?` (256 values into R36 three ways: A SPI2 write / bit-bang
-read, B bit-bang write / SPI2 read, C SPI2 both; each mismatch with the
-previous value written, so `got = previous` = a lost write), SELF? on the
-current parameters with the masked reference. Every scratch write is
-followed by an empty write frame to R00 so a missed CS high could only put
-0x00 into R37 (test mode). Defaults = 8e5efa6's constants (the first run
-reproduces); frame 2 = bit-bang at run time for comparison.
-
-First device runs (in this order): `DIAG?` (spin calibration); `RAW?` with
-the defaults (classify: A failures = write side, B = read side, got =
-previous = write lost); `DIAG ,,,,40,40,40` (~1 us setup / hold / idle like
-bit-bang) then `READ?` on the 1 V calibrator + `SELF? 2000` + `RAW?`; if
-that is clean, bring hold and idle down separately (20, 10, 5) to find the
-cliff, and set the final constants at >= 2x it. The emulator cannot show
-any of this (SPI bytes are instantaneous, the model has no SYSCLK phase).
+A DIAG image (fca31fd, removed since) made every bus parameter a runtime
+setting and added a three-way write / read-back test (`DBG:HYSPI:RAW?`) for
+8.6.
 
 ### 8.6 Device bring-up with the DIAG image fca31fd, and the fix (2026-10-22)
 
@@ -779,79 +574,48 @@ byte is out; a 1 wins). Command bytes always have bit 7 = 0, so reads are
 not affected. Not a timing margin: no divider, CS time or edge rate changes
 it.
 
-Fix (this commit): reads on SPI2 (/16, pulse framing, the constants of
-8e5efa6), writes bit-banged with the three pins switched to GPIO for the
-frame (SCK low on both sides of the switch, CS high, SPI2 left enabled and
-idle). DIAG / RAW removed. Writes are rare (mode changes, counter restarts,
-the power meter's R34 phases), ~25 us per byte. A pure-SPI2 write (keep
-TX continuous so no byte ends early, plus a dummy byte with MSB = the last
-LSB while CS rises mid-byte) is possible but timing-delicate and untested.
-
-Emulator (plumbing): DC V 0.99999, AC V 0.50000, SELF? 200 clean at /16 and
-/32, AD2 logger 9600 S/s 7.1 % lost (bit-bang 79 %).
-
-Device verification of this image (5 min, the meter on USB, 1 V DC on V/COM):
-1. `READ?` x3 in DC V: 1.0000 V (the 8e5efa6 SPI2 build read -0.0002).
-2. `DBG:HYSPI:SELF? 2000`, `... 2000,32`: every bad_* and signbad = 0
-   (w1 included now: writes are bit-banged), 23 stable bytes, us_r1 ~8.
-3. AC V and FREQ on a 50 Hz sine (or the calibrator's AC): readings as on the
-   bit-bang build; ohm on a resistor.
-4. `dm40scpi.py log s.csv --source ad2 --rate 9600 -d 10` in AC V / mV: lost
-   well below the bit-banged ~6.5 kS/s ceiling; bad 0.
-Fail -> the fallback build `./build.sh native --features hyspi-bitbang`.
-(Passed on the device, TODO 2026-10-22; the fallback feature is removed.)
+Fix on 7889e6c: reads on SPI2 (/16, pulse framing), writes bit-banged with
+the three pins switched to GPIO for the frame. Device check of 7889e6c (TODO, 2026-10-22):
+DC V 0.99979..0.99990 V on the 1 V calibrator, `SELF? 2000` at /16 and /32
+clean, the main-loop AD2 logger 8.0 % lost at 4800 S/s and 11.1 % at 9600.
+Writes moved to SPI2 in b81abf2 with a dummy byte whose MSB equals the data's
+LSB (11.6, 11.7).
 
 ## 9. E3/E4 implemented: the AD2 stream on one timer ISR (2026-10-22)
 
-Decision #3 of docs/decisions-2026-10-22.md, behind the Cargo feature
-`ad2-isr` (**off by default** until the device acceptance in 9.5: invariant 1,
-the default build has no interrupt and behaves as before, except the ring
-policy noted in 9.1). Image for the device: `./build.sh --features ad2-isr`.
-Everything below is emulator plumbing; the device numbers are 9.5's job.
+Decision #3 of [decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md):
+one timer ISR owns the HY3131 bus while an AD2 session runs, behind the Cargo
+feature `ad2-isr` (in the default features since b81abf2; a build without it
+has no interrupt at all). Section 9's first read scheme (a tick at 4 x the
+rate, a 7/8 P gate, an INTF read per sample) lost conversions on the device
+(9.5) and was replaced by the phase-locked blind reads of 11.2; the hand-off,
+the guard, the ring and the preemption rules below still hold.
 
 ### 9.1 What exists
 
 | piece | where | what |
 |---|---|---|
-| vector | `src/shim.rs` | the table runs to IRQ 55 (72 words, region A still 0x0800460c); IRQ 55 = `ad2_stream_irq` with the feature, `default_handler` without (cfg'd in the asm, no weak symbol: LTO rejects a weak + strong pair in one module). |
-| timer | `hy3131::stream` | TIMER6 (STM32 TIM7, 0x4000_1400, APB1EN bit 5; free: TIM1/2/3/5/8 scope + hwtrig, TIM6/12 generator, TIM13/14 backlight / buzzer). 200 MHz kernel, PSC 3 = 50 MHz count, ARR for 4 x the AD2 rate (4800 .. 38400 Hz), URS so UG does not raise UIF, UIE. |
-| hand-off | `hy3131::stream::start` / `stop` | start (main loop, after the session's last bus access `set_ad2_stream`): TIM7 set up, SysTick off + PENDSTCLR / PENDSVCLR, ICER and ICPR on all 8 NVIC words (whatever the FS-loader left), IPR[55] = 0, `HANDED` = true, ISER bit 55, `cpsie i`, CEN. stop (main loop): CEN / UIE off, ICER bit 55, `cpsid i`, SR and ICPR bit 55 cleared, `HANDED` = false. PRIMASK is cleared nowhere else. "Wait for a running ISR": nothing to wait for on one core (the main loop runs only between ISR entries, and the ISR always ends its frame: CS high, SPI2 idle). |
-| guard | `hy3131::read` / `write` / `set_div` | every main-loop bus call checks `HANDED` and, if set, stops the stream BEFORE its frame: a main-loop frame can never interleave with the ISR's. The decision asked for a debug assertion; one main-loop path legitimately gets here (a function / range change while logging: touch, key, CONF -> dmm.start), which the logger's auto-stop used to catch only after the fact, so it is a runtime guard in every build. `forced_stops` counts (DBG:ISR? last field), `Logger::poll` ends the session and main.rs reports "Settings conflict". |
-| ring | `logger::RING` | the same 2048 x 8 B (+ counters, 16468 B in .dmabuf; `Logger` itself is 72 B now). Single producer (the ISR, or the main loop for AD1 / the main-loop AD2 sampler), single consumer (LOG:DATA?): `head` / `tail` u32 atomics, Release / Acquire; every counter has one writer; the 64-bit span is two words read hi-lo-hi. Full ring: the NEWEST sample is dropped (the producer must not move the consumer's tail), `overwritten` counts it, the seqs stay consecutive and the host sees a timestamp gap (before: oldest overwritten, a seq gap). This is the one behaviour change of the default build (AD1 and the main-loop sampler use the same ring). |
-| ISR | `logger::isr::ad2_stream_irq` | clear UIF (and read CNT = entry latency); inside the read gate (7/8 P after the last seen conversion) nothing else; else INTF (1-byte SPI2 frame), on AD2F R03..R05 (3 bytes), sign-copy check, `Producer::push` (stats + ring). Status waits capped (`spi::wait`, 2000 polls ~100 us; `timeouts`). No register write, no dmm.rs, no LCD / flash / watchdog, no float, no panic path (checked in the disassembly: callees `spi::read`, `spin`, `Producer::push`, `__aeabi_uldivmod`). |
-| counters | `DBG:ISR?` | `feature,active,ticks,captured,empty,gated,dropped,bad,timeouts,overruns,max_isr_ns,max_lat_ns,tick_mhz,forced`: ticks = captured + empty + gated + bad; overruns = a tick already pending at exit; max_isr_ns from DWT; max_lat_ns = TIM7 CNT at entry x 20 ns; timeouts = HY3131 frames abandoned since boot. LOG:COUNt? / GAPs? / PREamble? unchanged. |
+| vector | [`src/shim.rs`](../src/shim.rs) | the table runs to IRQ 55 (72 words); IRQ 55 = the stream ISR's entry (`ad2_irq_entry`, which passes the interrupted PC for `lat_pc`) with the feature, `default_handler` without (cfg'd in the asm, no weak symbol: LTO rejects a weak + strong pair in one module). |
+| timer | `hy3131::stream` | TIMER6 (STM32 TIM7, 0x4000_1400, APB1EN bit 5; free: TIM1/2/3/5/8 scope + hwtrig, TIM6/12 generator, TIM13/14 backlight / buzzer). 200 MHz kernel, PSC 3 = 50 MHz count; the ISR writes ARR per interval (11.2). |
+| hand-off | `hy3131::stream::start` / `stop` | start (main loop, after the session's last bus access `set_ad2_stream`): TIM7 set up, SysTick off + PENDSTCLR / PENDSVCLR, ICER and ICPR on all 8 NVIC words (whatever the FS-loader left), IPR[55] = 0, `HANDED` = true, ISER bit 55, `cpsie i`, CEN. stop (main loop): CEN / UIE off, ICER bit 55, `cpsid i`, SR and ICPR bit 55 cleared, `HANDED` = false; the read divider back to /16 mode 0 for the DMM. PRIMASK is cleared nowhere else. Nothing to wait for on one core: the main loop runs only between ISR entries. |
+| guard | `hy3131::read` / `write` / `set_div` | every main-loop bus call checks `HANDED` and, if set, stops the stream BEFORE its frame: a main-loop frame can never interleave with the ISR's. One main-loop path legitimately gets here (a function / range change while logging: touch, key, CONF -> dmm.start), so it is a runtime guard in every build. `forced_stops` counts (DBG:ISR? `forced`), `Logger::poll` ends the session and main.rs reports "Settings conflict". |
+| ring | `logger::RING` | 2048 x 8 B (+ counters) in `.dmabuf`. Single producer (the ISR, or the main loop for the main-loop samplers), single consumer (LOG:DATA?, the disk writer or the wave view): `head` / `tail` u32 atomics, Release / Acquire; every counter has one writer; the 64-bit span is two words read hi-lo-hi. Full ring: the NEWEST sample is dropped (the producer must not move the consumer's tail), `overwritten` counts it, the seqs stay consecutive and the host sees a timestamp gap (before 9.1: oldest overwritten, a seq gap). |
+| ISR | `logger::isr` | the A / B / C entries of 11.2 / 11.8 / 11.12. Status waits capped (`spi::wait`, 2000 polls ~100 us; `timeouts`). No register write, no dmm.rs, no LCD / flash / watchdog, no float, no panic path. |
+| counters | `DBG:ISR?` | the field list in 11.2 ([`scpi.rs`](../src/scpi.rs) has the current one). LOG:COUNt? / GAPs? / PREamble? unchanged. |
 | default rate | `logger::DEFAULT_AD2_HZ` | 4800 S/s with the feature (2400 without). |
-| stack | `tools/stack-depth/stackdepth.py` | the ISR runs on the MSP on top of any main-loop frame: worst = main path + ISR path (176 B) + exception frame (26 words with the FPU's lazy-stacking space + 4 alignment = 108 B). The tool also follows IT-block calls (`bllo`) and conditional tail calls now, which it missed before: the main path grew by 336 B (a pre-existing undercount). Feature build: 30632 of 48088 B, headroom 17456 (>= 16384 checked by build.sh). |
-| SRAM | | +32 B in SRAM (0x2002f250, 3504 B free below 0x20030000), +72 B TCM .bss (the ISR's producer state). |
-| emulator | `emu/dm40.repl`, `emu/hy3131/ad2streamtest.py` | timer7 is a `GD32_Timer` (IRQ -> nvic@55) instead of Renode's STM32_Timer; the ISR's SPI2 frames go through `HY3131SpiPort` as the main loop's. The test boots the feature build at 200 MIPS and checks 9.4's sessions plus a function change mid-stream. |
+| stack, memory | `tools/stack-depth/stackdepth.py`, build.sh | the ISR runs on the MSP on top of any main-loop frame: worst = main path + ISR path + exception frame (26 words with the FPU's lazy-stacking space + 4 alignment = 108 B). The tool follows IT-block calls (`bllo`) and conditional tail calls. The budgets: [native-boot.md](native-boot.md) "Memory budget". |
+| emulator | `emu/dm40.repl`, `emu/hy3131/ad2streamtest.py` | timer7 is a `GD32_Timer` (IRQ -> nvic@55) instead of Renode's STM32_Timer; the ISR's SPI2 frames go through `HY3131SpiPort` as the main loop's. The test boots the default build and checks logger sessions plus a function change mid-stream. |
 
 ### 9.2 Tick rate and stamps (deviation from "~1.05 x")
 
 The record stamp is the observation time (decision #2: "when the firmware
-saw it"). With a tick period T the stamp is late by d in [0, T).
-
-- **1.05 x** (T = 0.95 P), measured first: d walks down by P - T per sample
-  and wraps every ~21 samples (one empty tick), so consecutive stamps differ
-  by T normally and by 2T = 1.9 P at each wrap. A genuine single miss gives
-  ~2 P: no rule on two stamps can tell them apart. Emulator 4800 S/s, 10 s:
-  LOG:COUNt? lost 0, but 1622 of 32464 records (5 %) in the "2 periods" gap
-  bucket and 1622 false `lost_before` in the host CSV. The latency margin is
-  only P - T (10 us at 4.8 kS/s, 5 us at 9.6).
-- **2.1 x + P/2 gate**: d < T = 0.476 P, but d + entry latency can pass P/2:
-  190 false gaps in 139493 at 9.6 kS/s.
-- **4 x + 7/8 P gate** (implemented): after a read that saw conversion k at
-  tick t, ticks t + T .. t + 3T are gated (bus-free) and t + 4T = t + P reads,
-  i.e. one period after the previous read, so it sees conversion k + 1 with the
-  same d: the stamps are as regular as the two crystals plus the entry
-  latency. The timer / chip mismatch (ARR rounding, at most ~65 ppm, plus the
-  crystals) walks d slowly to 0; then one read comes just before the
-  conversion (`empty`: 9 in 27345 samples at 4800) and the next tick takes it,
-  a stamp step of at most T + latency < P/2 for latency < P/4: round(gap / P)
-  is exact. A conversion is lost only when an entry is delayed by more than
-  P - d > 3/4 P (156 us at 4.8 kS/s, 78 us at 9.6). Cost per sample: one hit
-  (~21.5 us on the device: SELF? r1 7.65 + r6-per-3-bytes ~13.5) + 3 gated
-  entries (~0.5 us each): ~11 % CPU at 4.8 kS/s, ~22 % at 9.6, as
-  invariant 5 budgets. Revert = `TICKS` / `GATE_EIGHTHS` in logger.rs `isr`.
+saw it"). A tick at ~1.05 x the rate (the study's plan) makes the stamp lag
+walk and wrap every ~21 samples: a 2-period stamp step that looks like a
+miss (emulator: 5 % false gaps). Section 9 therefore ticked at 4 x the rate
+and read one period after the last read (a 7/8 P gate). That still read
+INTF on every sample, which lost conversions to the INTF read-clear race
+(11.1). Since 11.2 the stamp is the DWT time of the A entry, one per period,
+and the stamps are as regular as the two crystals plus the entry latency.
 
 ### 9.3 Preemption and shared state
 
@@ -859,18 +623,17 @@ saw it"). With a tick period T the stamp is late by d in [0, T).
   each start, only IRQ 55 enabled; SysTick (SYST_CSR = 0) and PendSV can not
   fire; faults go to `default_handler` (`b .`) as before: the FWDGT resets.
   The ISR never kicks the watchdog: a main loop that stops kicking still
-  resets, an ISR hang (impossible with the capped waits) would too.
-- **What masks the ISR.** Only `critical_section::with` in synopsys-usb-otg
-  (endpoint buffer copies, a 64-byte packet: ~1 us) and the ~20 instructions
-  of `stream::stop`. opendm40 has no other `cpsid`. Measured entry latency in
-  the emulator at 200 MIPS: max 3.5 us in most sessions, 10 .. 27 us in some
-  4800 S/s DRAW 2 ones (most likely Renode's execution quantum: nothing in
-  the firmware masks that long); the device number is DBG:ISR? max_lat_ns.
+  resets.
+- **What masks the ISR.** Only the ~20 instructions of `stream::stop`.
+  critical-section is implemented with compiler fences only (main.rs
+  `NoMask`, 11.4): the synopsys-usb-otg endpoint copies no longer mask it.
+  Measured entry latency on the device: 0.24-0.28 us (11.9-11.11), as long as
+  no code or data above 0x08080000 is read during a stream (11.4).
 - **What the ISR preempts.** The main loop anywhere: LCD (FSMC), USB polling,
-  spin-delays (stretched by <= 22 us, all tolerate it), BT UART polling. DMA
-  users (BT UART4 TX, generator DAC / TIM6 and PWM / TIM12, scope DMA2 +
-  TIM1/5/8) share no register with SPI2 / TIM7 / PC10..12 and keep running;
-  the scope is not polled while logging anyway (main.rs).
+  spin-delays (stretched by up to one ISR entry; all tolerate it), BT UART
+  polling. DMA users (BT UART4, generator DAC / TIM6 and PWM / TIM12, scope
+  DMA1 + TIM1/5/8) share no register with SPI2 / TIM7 / PC10..12 and keep
+  running (11.11 sharing matrix).
 - **GPIOC MODER.** The ISR's read-period pulse is a read-modify-write of
   GPIOC MODER (PC10 AF -> output -> AF). If it lands inside a main-loop RMW of
   the same register, the main loop writes back the value it read, which has
@@ -878,101 +641,71 @@ saw it"). With a tick period T the stamp is late by d in [0, T).
   never changes PC10..12 while handed off (only `hy3131::write` does, and the
   guard stops the stream first).
 - **INTF.** Reading INTF clears AD1F / RMSF / LPFF too: harmless, the DMM
-  poll is paused while logging (as before) and restarts the row after.
+  poll is paused while streaming and restarts the row after.
 - **Shared state** = `RING` (atomics + slots published by `head`) and
-  `HANDED`; the ISR's clock / stats state (`isr::PROD`) is written by the
-  main loop only before the hand-off.
+  `HANDED`; the ISR's clock / stats state is written by the main loop only
+  before the hand-off.
 
 ### 9.4 Emulator results (plumbing only, not the device)
 
-`emu/run.py fwrs --mips 200` (the device's instruction rate; Renode's SPI is
-instantaneous, so the ISR's own time is CPU only), AC V, 0.5 V 50 Hz,
-host draining LOG:DATA? continuously on one USB/IP connection, *IDN? every
-second:
-
-| build | rate, DBG:AD2:DRAW | captured | lost | stamp gaps | DBG:ISR? empty / overruns / max_lat | *IDN? max |
-|---|---|---|---|---|---|---|
-| main-loop sampler (feature off) | 4800, 2 | 26339 | 7855 (23 %) | 361 (max 19 ms) | - | 23 ms |
-| main-loop sampler | 4800, 1 | 29907 | 110 (0.4 %) | 24 | - | 4 ms |
-| main-loop sampler | 9600, 1 | 57301 | 697 (1.2 %) | 2799 | - | 4 ms |
-| ad2-isr, 1.05 x (first try, 50 MIPS) | 4800, 1 | 32464 | 0 | 1622 (false) | 1622 / 0 / 68 us | - |
-| **ad2-isr, 4 x** | **4800, 2** | 27345 | **0** | **0** | 9 / 0 / 9.9 us (27 us in a rerun) | 15 ms |
-| **ad2-isr, 4 x** | **9600, 1** | 49928 | **0** | **0** | 13 / 0 / 3.6 us | < 1 ms |
-| **ad2-isr, 4 x** | **1200, 2** | 3588 | **0** | **0** | 3 / 0 / 3.5 us | 6 ms |
-
-ticks = 4.00 x captured in every session; dropped / bad / timeouts /
-forced 0; READ? 0.5000 V AC after each stream; a CONF:VOLT:DC mid-stream
-stopped the stream first (forced 0 -> 1, "Settings conflict", LOG:STATe? 0),
-DC V then ~0, AC V 0.5 V again, DBG:HYSPI:SELF? 200 clean. DBG:PROF? at
-9600 S/s with DRAW 2: loop max 22 ms (the repaint), USB section max 43 us.
-At 50 MIPS (`--fast`) 9600 S/s with DRAW 2 starves the main loop (the
-repaint alone exceeds its 100 ms period there): an emulator-speed artefact.
+`emu/run.py fwrs --mips 200`, AC V 0.5 V 50 Hz, LOG:DATA? drained: the
+main-loop sampler lost 23 % at 4800 S/s with DRAW 2 and 0.4-1.2 % with DRAW 1;
+the 4 x tick lost 0 at 1200 / 4800 / 9600 S/s with DRAW 1 / 2, and a
+CONF:VOLT:DC mid-stream stopped the stream first (forced + 1, "Settings
+conflict"). The emulator's INTF read had no race then, so it could not show
+the device's loss (9.5, 11.5).
 
 ### 9.5 Device check (10 minutes)
 
-Image: `./build.sh --features ad2-isr` (the path is in the hand-over). Meter
-on USB, `tools/dm40scpi.py`; AC V with a 50 Hz sine of a few V on V/COM (or
-AC mV). Record every reply in this section.
-
-| min | step | commands | pass |
-|---|---|---|---|
-| 0-1 | build | `scpi "DBG:ISR?"`, `scpi "READ?"` | first field 1; the reading as before |
-| 1-3 | 4800, full DMM repaint every 100 ms (the decision's acceptance) | `scpi "DBG:AD2:DRAW 2"`; `log a48.csv --source ad2 --rate 4800 -d 60`; `scpi "DBG:ISR?"` | trailer lost 0 (0.00 %), gaps all 0, bad 0, overwritten 0; DBG:ISR? overruns 0, timeouts 0, forced 0, max_isr_ns ~22000-26000, max_lat_ns < ~5000 (larger: something masks interrupts, report it) |
-| 3-4 | 9600 | `log a96.csv --source ad2 --rate 9600 -d 30`; `scpi "DBG:ISR?"` | lost 0 or a few (7889e6c main loop: 11 %) |
-| 4-6 | profile while streaming, USB alive | `scpi "LOG:SOURce AD2" "LOG:SRATe 9600" "DBG:PROF:RESET" "LOG:STATe ON"`, wait 10 s, `scpi "*IDN?" "DBG:PROF?" "DBG:ISR?" "LOG:COUNt?"`, `scpi "LOG:STATe OFF"` | *IDN? answers at once; PROF loop max ~ the repaint (no ISR-made stalls); COUNt? lost 0 (overwritten > 0 is expected: nobody drained) |
-| 6-8 | DMM after a stream | `scpi "DBG:AD2:DRAW 1" "READ?" "READ?"`, DC V on a 1 V source: `scpi "CONF:VOLT:DC" "READ?"`, `scpi "DBG:HYSPI:SELF? 2000"` | readings as before the streams; SELF? all error counts 0 |
-| 8-10 | function change mid-stream | AC V again; `scpi "LOG:SOURce AD2" "LOG:STATe ON"`, then press the V key (or `scpi "CONF:VOLT:DC"`); `scpi "LOG:STATe?" "SYST:ERR?" "DBG:ISR?" "READ?"` | STATe? 0, "Settings conflict", forced + 1, the reading of the new function |
-
-On a pass: `ad2-isr` becomes a default feature (TODO), then the Wave view
-(E5 / E6). A hang or a reset during a stream: report DBG:BOOT? (the shim's
-crash counter) and the last DBG:ISR?.
+Run on 5f14d38 (device check "5f14d38 (+ad2-isr)" 1): **FAIL**, 1.4 % lost at
+4800 S/s and 2.6 % at 9600, in ~11.5 ms bursts every ~3948 conversions
+(11.1), and max_lat ~20 us whenever the logger panel drew (11.4). The DMM
+after the streams, SELF? and the mid-stream function change passed. Fixed in
+section 11.
 
 ## 10. (A) implemented: the DMM wave view (E5 / E6, 2026-10-22)
 
-TODO (A), decision #3 (C: one timer ISR, exclusive bus hand-off). The
-stock-replica scope page with a second source: the HY3131 AD2 stream of the
-DMM's AC row, i.e. a slow, floating, isolated scope on the DMM jacks (V, mV,
-A, mA, uA). It exists only in builds with the stream ISR (`--features
-ad2-isr`, still off by default: 9.5 / the 5f14d38 device check); without it
-the entries are not drawn and the code is dead (no interrupt, no change).
-Everything below is emulator evidence; the device plan is 10.6.
+The stock-replica scope page with a second source: the HY3131 AD2 stream of
+the DMM's row, i.e. a slow, floating, isolated scope on the DMM jacks (V, mV,
+A, mA, uA). Decision #3 (one timer ISR, exclusive bus hand-off). In the
+default build; without the `ad2-isr` feature the entries are not drawn and
+the code is dead ([`app_wave.rs`](../src/app_wave.rs) `WAVE_BUILD`). User-facing
+behaviour: [docs/manual/README.md](../../docs/manual/README.md).
 
 ### 10.1 What exists
 
 | piece | where | what |
 |---|---|---|
-| entry | `ui::wave_button` (MF range page, V / A: "Wave" between Hold/Limits and OK, the AC button's column), the scope page's source badge "MCX \| DMM" (`scope_ui::src_badge`, left of the record bar, which is 70 px instead of 137 then) | from DC V / DC A the AC row is selected first (toast "DC V: wave is AC-coupled"); refused (toast) in AC+DC, the power meter, ohm / cap / ..., during a CSV recording; a host LOG session closes it ("Data logger running") |
-| exit | the badge, MENU, any view change (`App::show`), a host scope setting that is MCX-only (`CHAN1:SCAL`, `CHAN1:COUP`, `DBG:HWTRIG`) | MCX settings restored (`Scope::mcx_settings` is what is persisted), the DMM autorange restored (AUTO / AUTO+), the DMM row rewritten by main.rs (the logger's ON -> OFF edge: `dmm.start`) |
-| ownership | `app_wave.rs` `WaveReq` -> main.rs, `Logger::start_wave` | the stream is a logger session flagged `wave` (the host's LOG:SOURce / SRATe kept; LOG:STATe ON refused "Settings conflict", LOG:STATe? 0, LOG:DATA? an empty block). main.rs `busy` (logger active: no DMM poll, no BT serve / AT init) vs `logging` (a host session: GUI frozen, no touch, no scope poll). A range step is stop -> `dmm.set_range` -> start in one pass, so the bus guard never fires for it; anything else that touches the bus (a host CONF, the locked power key's sub-mode cycle) stops the stream (forced) and the view closes ("Wave stopped: DMM changed") |
-| record | `scope.rs` "source DMM (wave)" | every poll drains the ring (`logger::wave::drain`) into BUF as a continuous circular record of 10-bit codes (`trigsoft::ad2_code10`: the full AD2 window +-1.25 V / IG over 0..1023); frames are linear windows (BUF rotated so the oldest sample is at 0), so the renderer, measurements, cursors, STOP / zoom / pan, Save CSV and FFT work unchanged: the MCX record buffer and roll columns are reused (the MCX acquisition is idle). The wave state (`Wave`, ~300 B incl. the saved MCX / wave settings) is a TCM static |
-| holes | `logger::wave::dropped` = ring full + ISR `missed` | a hole restarts the record at the newest sample (no triggered frame spans it); roll goes on with a short gap |
-| timebases | `scope::WAVE_TB_MIN` = 17, `wave_fs_for` | 5 ms/div .. 50 s/div; AD2 rate per band: 5 ms 9600 S/s (decision #3's opt-in rate), 10 / 20 ms 4800, 50 / 100 ms 2400, >= 200 ms 1200 (>= 400 samples per screen up to 20 ms/div); a band change restarts the stream (~1 pass). Roll from 200 ms/div as the MCX scope (per-column min / max accumulated while draining, so 50 s/div = 600 k samples needs no buffer); YT up to 1 s/div (12 000 samples at 1200 S/s) |
-| vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `wave_vdiv` | SI = the DMM's own LPF formula of `poll_ac` with its calibration gain / offset (the DC mean of AD2, feasibility 3.3); V/div = the smallest 1-2-5 step with 4 div >= the range (6 V -> 2 V/div, 600 mV -> 200 mV, 1000 V -> 500 V, 10 A -> 5 A, 60 mA -> 20 mA, 600 uA -> 200 uA). V/div + / - (panel magnifiers) step the DMM range (the MF list: V 600 mV .. 1000 V, A 600 uA .. 10 A; 600 mV is the AC mV row, DC-coupled). Pinch V off, AUTO refused (toast) |
-| coupling | the V/div badge glyph, the CH1 button / V/div badge tap: a note | AC V AC-coupled (~0.5 Hz, the row's capacitor); AC mV, AC A / mA / uA DC-coupled. Since E7 (section 13): DC V / DC mV stream their DC rows, and the coupling key switches V between DC and AC at the same range |
+| entry | `ui::wave_button` (MF range page, V / A: "Wave"), the scope page's source badge "MCX \| DMM" (`scope_ui::src_badge`, left of the record bar, which is shorter then) | DC V / DC mV stream their DC rows (13.3); from DC A the AC A row (DC-coupled) is selected first (toast "Wave: AC A row (DC-coupled)"); refused (toast) in AC+DC / AUTO coupling, the power meter, ohm / cap / ..., during a CSV recording; a host LOG session closes it ("Data logger running") |
+| exit | the badge, MENU, any view change (`App::show`), a host scope setting that is MCX-only (`CHAN1:SCAL`, `CHAN1:COUP`, `DBG:HWTRIG`) | the view change waits for the stream's stop (`App::wave_exit_done`, 5ca0557: no region C code under the stream); MCX settings restored (`Scope::mcx_settings` is what is persisted), the DMM autorange restored (AUTO / AUTO+), the DMM row rewritten by main.rs (the logger's ON -> OFF edge: `dmm.start`) |
+| ownership | `app_wave.rs` `WaveReq` -> main.rs, `Logger::start_wave` | the stream is a logger session flagged `wave` (the host's LOG:SOURce / SRATe kept; LOG:STATe ON refused "Settings conflict", LOG:STATe? 0, LOG:DATA? an empty block). main.rs `busy` (logger active: no DMM poll, no BT serve / AT init) vs `logging` (a host session: GUI frozen, no touch, no scope poll). A range or coupling step is stop -> `dmm.set_range` / `set_sub` -> start in one pass (the new scale's repaint before the restart), so the bus guard never fires for it; anything else that touches the bus (a host CONF, the locked power key's sub-mode cycle) stops the stream (forced) and the view closes ("Wave stopped: DMM changed") |
+| record | `scope.rs` `WaveSource` | every poll drains the ring (`logger::wave::drain`) into BUF as a continuous circular record of 10-bit codes (`trigsoft::ad2_code10`: the full AD2 window +-1.25 V / IG over 0..1023); frames are linear windows (BUF rotated so the oldest sample is at 0), so the renderer, measurements, cursors, STOP / zoom / pan, Save CSV and FFT work unchanged: the MCX record buffer and roll columns are reused (the MCX acquisition is idle). The ring is drained again between the slow parts of a scope pass (1a6c65b: 0 drops at 1 ms/div) |
+| holes | `logger::wave::dropped` = ring full + ISR misses | a hole restarts the record at the newest sample (no triggered frame spans it); roll goes on with a short gap |
+| timebases | `scope::WAVE_TB_MIN` = 15, `wave_fs_for` | 1 ms/div .. 50 s/div, the bands of 3.1; a band change restarts the stream (~1 pass). Roll from 200 ms/div as the MCX scope (per-column min / max accumulated while draining, so 50 s/div = 600 k samples needs no buffer); YT up to 1 s/div (12 000 samples at 1200 S/s). The 76 800 band needs DMA frames: with CPU frames (`DBG:AD2:DMA 0`) the view closes ("Wave: rate needs DMA frames") |
+| vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `wave_vdiv` | SI = the DMM's own LPF formula with its calibration gain / offset (3.3), the E7 self-cal for DC V; V/div = the smallest 1-2-5 step with 4 div >= the range (6 V -> 2 V/div, 600 mV -> 200 mV, 1000 V -> 500 V, 10 A -> 5 A, 60 mA -> 20 mA, 600 uA -> 200 uA). V/div + / - (panel magnifiers) step the DMM range (the MF list: V 600 mV .. 1000 V, A 600 uA .. 10 A; 600 mV is the AC mV row, DC-coupled). Pinch V off, AUTO refused (toast) |
+| coupling | the V/div badge glyph, the CH1 button / V/div badge tap | V: the coupling key switches DC (the E7 row) <-> AC (the stock AC V row, AC-coupled, ~0.5 Hz) at the same range (`WaveReq::Coupling`); A: a note that the AC A row is DC-coupled |
 | labels | `Model::{src, amps, wvdiv, ch1_txt}` | CH1 button "AC V" / "AC mA", V/div "2V" / "200uA", trigger badge and cells in A for the current rows ("Ip-p", "Irms": `scope_meas::format_unit`), CSV header "source DMM AC mA (AD2, isolated jacks)" and the value column's unit |
-| SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL? act on the wave view (V/div = the DMM range's); the MCX-only setters close it |
-| budgets | build.sh | stack headroom 16 888 B (feature build, >= 16 384; f4df76f: 17 608; the wave state's ~300 B come out of the TCM stack), 17 620 B without the feature; SRAM +80 B (`.dmabuf`: the ring's trigger words), ~2.3 KB free below 0x20030000 (f4df76f: ~2.4 KB) |
+| SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL?, CONF? (from the streamed row) act on the wave view (V/div = the DMM range's); the MCX-only setters close it ([docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md)) |
 
-Deviation from 5.2 point 3 ("19 bit -> u16 >> 3"): the record holds 10-bit
-codes, as the MCX record, because the whole display / measurement / trigger
-stack is 10-bit (histogram of 1024 codes, the +-2 code hysteresis, `& 0x3FF`
-masks) and the V/div is a DMM range step, not a digital zoom. Cost: 1 code =
-512 AD2 codes = 0.2 % of the AD2 window (e.g. 24.4 mV in the 6 V range,
-whose screen is +-8 V = 656 codes over 280 rows), so Vrms / Vpp of a
-full-scale signal are good to ~0.1-0.3 % (noise dithers the mean), small
-signals (< 10 % of the range) are coarse. A 16-bit record is a follow-up
-that parametrises the code width.
+Deviation from 5.2 point 3 of the study ("19 bit -> u16 >> 3"): the record
+holds 10-bit codes, as the MCX record, because the whole display /
+measurement / trigger stack is 10-bit (histogram of 1024 codes, the +-2 code
+hysteresis, `& 0x3FF` masks) and the V/div is a DMM range step, not a digital
+zoom. Cost: 1 code = 512 AD2 codes = 0.2 % of the AD2 window (e.g. 24.4 mV in
+the 6 V range, whose screen is +-8 V = 656 codes over 280 rows), so Vrms /
+Vpp of a full-scale signal are good to ~0.1-0.3 % (noise dithers the mean),
+small signals (< 10 % of the range) are coarse. A 16-bit record is a
+follow-up that parametrises the code width.
 
 ### 10.2 Trigger in the ISR (no dead time)
 
-The coordinator's question (2026-10-22: "can't we use the interrupt or the
-comparator?"): the trigger is detected **per sample in the stream ISR**
-(`logger::isr::trig`, `trigsoft::Stream`): the same edge (armed beyond the
-+-2 code band, then across the level), pulse-width (> / < / = within 5 %,
-whole samples: `trigsoft::pulse_window`) and runt rules as the MCX software
-search, on the record's 10-bit code, integers only. Host-tested against the
-slice functions (tools/trig-test: the first event at or after a minimum is
-the same, 78 cases). The ISR reports events, the main loop picks frames:
+The trigger is detected **per sample in the stream ISR** (`logger::isr::trig`,
+`trigsoft::Stream`): the same edge (armed beyond the +-2 code band, then
+across the level), pulse-width (> / < / = within 5 %, whole samples:
+`trigsoft::pulse_window`) and runt rules as the MCX software search, on the
+record's 10-bit code, integers only. Host-tested against the slice functions
+(tools/trig-test: the first event at or after a minimum is the same, 78
+cases). The ISR reports events, the main loop picks frames:
 
 * config words (`Ring::trg_w`, then `trg_gen`, Release; main loop) -> the ISR
   reloads its private copy and resets the detector on a new generation;
@@ -987,12 +720,11 @@ the same, 78 cases). The ISR reports events, the main loop picks frames:
 Because the record is continuous (10.1) and the detector sees every sample,
 there is no dead time: an isolated event (a glitch, a single pulse) is
 always caught, unlike the MCX scope's search of each finished record.
-Timing: the trigger point is a sample: jitter = 1 sample = 104 / 208 / 417 /
-833 us at 9600 / 4800 / 2400 / 1200 S/s (5 ms/div: 0.8 px; 10 ms/div: 0.8
-px). Cost: a few loads and compares per stored sample, no loop, no float;
-the ISR's stack (176 B) unchanged (the detector inlines into the handler's
-frame), negligible against the ~21.5 us of SPI per sample. Decision #3
-invariant 4 is amended for this (the status there).
+Timing: the trigger point is a sample: jitter = 1 sample = 13 us .. 833 us
+at 76 800 .. 1200 S/s (under one pixel at every band's timebase). Cost: a few
+loads and compares per stored sample, no loop, no float; the detector
+inlines into the handler's frame. Decision #3 invariant 4 is amended for
+this.
 
 The HY3131 comparator as an alternative / assist: **not used**. SCMPI
 (R20 bits 7:5) can select OP1O or PB4, the AD2 nodes of the V / A rows,
@@ -1002,19 +734,20 @@ trigger level; its outputs are CMPHO / CMPLO in CTSTA (R14) and the event /
 period counters (R15..R1D, the frequency path): no edge timestamp, each
 read is an SPI frame (~8 us, or the 9-byte counter frame) the ISR would add
 to every tick; and R20 / R21 / the counters belong to the frequency mode
-and the misconnect sentinel (dmm.rs, sentinel.rs). Events faster than the
-AD2 band (~0.25 x the rate) would not be on the trace anyway. It could
-count such events (a glitch counter) in a later feature, not trigger.
+and the misconnect sentinel ([`dmm.rs`](../src/dmm.rs), [`sentinel.rs`](../src/sentinel.rs)). Events
+faster than the AD2 band (~0.25 x the rate) would not be on the trace
+anyway. It could count such events (a glitch counter) in a later feature,
+not trigger.
 
 ### 10.3 Emulator results (plumbing only, not the device)
 
-`emu/hy3131/wavetest.py` (200 MIPS, the feature build), driven like a user
-(DBG:KEY MF, DBG:TAP the Wave button / the panel / the source badge),
-checked over SCPI, screenshots via DBG:LCD?:
+`emu/hy3131/wavetest.py` (200 MIPS), driven like a user (DBG:KEY MF, DBG:TAP
+the Wave button / the panel / the source badge), checked over SCPI,
+screenshots via DBG:LCD?:
 
 | case | result |
 |---|---|
-| V/COM 1 V rms 50 Hz sine, MF -> Wave from DC V | AC V row, DBG:ISR? active, 2 V/div (6 V range); 5 / 10 / 20 / 50 / 100 ms/div: FREQ 50.00 (49.98-50.04) Hz, VRMS 1.003-1.004 V, VPP 2.836 V |
+| V/COM 1 V rms 50 Hz sine, MF -> Wave from DC V | AC V row (before E7), DBG:ISR? active, 2 V/div (6 V range); 5 / 10 / 20 / 50 / 100 ms/div: FREQ 50.00 (49.98-50.04) Hz, VRMS 1.003-1.004 V, VPP 2.836 V |
 | NORM +0.5 V rising / -0.8 V falling | the WAV:DATA? frame crosses the level at the trigger column (0.505 V / -0.875 V at column 200: within a sample) on consecutive frames; SINGle: one frame then STOP |
 | roll 500 ms / 5 s per div | data from the right edge, RUN chip, ROLL bar |
 | V/div + / - | 6 V -> 60 V range (20 V/div): VRMS 0.995 V, VPP 2.71 V (coarser codes), back to 2 V/div |
@@ -1022,68 +755,60 @@ checked over SCPI, screenshots via DBG:LCD?:
 | source badge, then CONF:VOLT:DC mid-wave | the badge reopens the view; CONF: forced stop + 1, the view closes, DC V reads 0 |
 | A-COM 10 mA DC + 20 mA rms 40 Hz square (`--case current`) | AC mA row (DC-coupled), 20 mA/div, FREQ 40.00 Hz, mean 10.01 mA = the DC A reading 10.00 mA, Ip-p 40.0 mA, cells / badges in A |
 
-`emu/hy3131/ad2streamtest.py` (the logger sessions) still passes on the same
-image. Host: tools/trig-test (Stream = the slice rules), tools/ui-render
-(the badge, the shortened record bar, the DMM V/div / CH1 / trigger texts
-no wider than the stock texts in the same boxes, current cells, updates
-between MCX / DMM / stopped / roll equal fresh draws: 44 scenes, 0
-violations; the Wave button on the V / A range pages), the stock pixel diff
-(tools/ui-render/stock-diff.sh) and every other render identical to the
-parent commit f4df76f (the stock page draws no badge: `Model::src` =
-SRC_NONE).
+wavetest also has `--case dcv` (E7) and polls SCPI at 2 / 1 ms/div (5ca0557).
+Host: tools/trig-test (Stream = the slice rules), tools/ui-render (the badge,
+the shortened record bar, the DMM V/div / CH1 / trigger texts no wider than
+the stock texts in the same boxes, current cells; no overlaps), the stock
+pixel diff (tools/ui-render/stock-diff.sh: the stock page draws no badge,
+`Model::src` = SRC_NONE).
 
-### 10.4 Limits (v1)
+### 10.4 Limits
 
-* DC-coupled V: since E7, section 13 (before: none, V was AC-coupled).
-* The record is 10-bit (10.1). The DMM reading pauses while the view is
-  open (decision #3: exclusive bus); the last reading is not shown on the
-  scope page (the stock page has no DMM either).
+* The record is 10-bit (10.1).
+* The DMM reading pauses while the view is open (decision #3: exclusive
+  bus); the last reading is not shown on the scope page (the stock page has
+  no DMM either).
 * Roll above ~20 s/div: STOP keeps the newest 26 624 samples (22 s at 1200
   S/s) as the stored record (zoom / CSV), not the whole screen.
-* The timebase list still offers 100 ns .. 2 ms/div (picked: clamped to 5
-  ms/div); the faster corner tab is hidden at 5 ms/div.
 * The probe glyph of the V/div badge shows x1 (no probe on the DMM jacks).
-* Holes (the 5f14d38 device check: ~11.5 ms bursts every ~3950 conversions)
-  restart the record: at 4800 S/s a triggered frame every ~0.8 s can be
-  late by a screen; roll shows the gap. The ISR fix (9.5 TODO) removes them.
+* The Vrms of signals with fast edges reads low at the slow bands (3.2).
 
 ### 10.5 Not done / next
 
-16-bit record; the DMM reading alongside (decision #3's request queue);
-DC-coupled V row (E7); a glitch counter on the HY3131 comparator.
+16-bit record; the DMM reading alongside (decision #3's request queue); a
+glitch counter on the HY3131 comparator.
 
-### 10.6 Device test plan (15 minutes, after the ISR fix)
+### 10.6 Device test plan (15 minutes)
 
-Image: `./build.sh --features ad2-isr`. A signal generator and a DC source;
-the meter on USB (`tools/dm40scpi.py`). Record each result here.
+Default image. A signal generator and a DC source; the meter on USB
+(`tools/dm40scpi.py`).
 
 | min | step | how | pass |
 |---|---|---|---|
-| 0-2 | entry | DMM DC V, 1 V rms 50 Hz on V/COM: MF -> Wave | toast "DC V: wave is AC-coupled"; AC V row; T'D; 2 V/div; cells Freq 50.0 Hz, Vrms within 1 % of the DMM's AC V reading taken before; `scpi "DBG:ISR?"` active 1 |
-| 2-4 | timebases | tap the corner tabs 5 ms .. 50 s/div | a trace at every step, Freq 50 Hz up to 100 ms/div, roll from 200 ms/div; no stuck frame at a band change (5 -> 10, 20 -> 50, 100 -> 200 ms) |
+| 0-2 | entry | DMM AC V, 1 V rms 50 Hz on V/COM: MF -> Wave | AC V row; T'D; 2 V/div; cells Freq 50.0 Hz, Vrms within 1 % of the DMM's AC V reading taken before; `scpi "DBG:ISR?"` active 1 |
+| 2-4 | timebases | tap the corner tabs 1 ms .. 50 s/div | a trace at every step, Freq 50 Hz up to 100 ms/div wherever two periods or more are on screen, roll from 200 ms/div; no stuck frame at a band change |
 | 4-6 | trigger | Normal, level drag to +1 V / -1 V, rising / falling; Single | the crossing at the T marker on every frame (+-1 sample); Single: one frame, STOP |
-| 6-7 | glitch | generator: 50 Hz with a single 2 ms pulse burst (or a manual 5 V step on a 1 V sine), Normal, level above the sine | each event shown (no dead time); `scpi "LOG:COUNt?"` irrelevant here |
-| 7-9 | range | V/div + / - | 6 -> 60 -> 600 V range and back, the trace the same in volts; 600 mV (AC mV, DC-coupled): toast-free, coupling "DC" |
-| 9-11 | current | A jack, 0.5 A DC + a load switching at 10-100 Hz (or the 40 Hz PWM calibrator of acdc doc 10): A -> MF -> Wave | AC A row, DC-coupled: the mean = the DC A reading (1 %), edges of the PWM visible, cells in A |
+| 6-7 | glitch | generator: 50 Hz with a single 2 ms pulse burst (or a manual 5 V step on a 1 V sine), Normal, level above the sine | each event shown (no dead time) |
+| 7-9 | range | V/div + / - | 6 -> 60 -> 600 V range and back, the trace the same in volts; 600 mV (AC mV, DC-coupled) |
+| 9-11 | current | A jack, 0.5 A DC + a load switching at 10-100 Hz: A -> MF -> Wave | AC A row, DC-coupled: the mean = the DC A reading (1 %), edges of the PWM visible, cells in A |
 | 11-12 | STOP / Save CSV | RUN key STOP; MF Settings Save CSV | SCOPnnn.CSV with "source DMM AC A", values in A matching the screen |
 | 12-13 | exit | MENU; DMM page | the reading of the function returns within ~1 s (the row rewritten), `scpi "DBG:ISR?"` active 0, forced unchanged |
 | 13-15 | conflicts | in the wave view: `scpi "CONF:VOLT:DC"`; `scpi "LOG:STATe ON"` | CONF: the view closes with "Wave stopped: DMM changed", DC V reads; LOG:STATe ON: "Settings conflict", the view stays |
 
-Also note `DBG:PROF?` loop max while the view runs at 5 ms/div (9600 S/s,
-22 % CPU in the ISR) and any visible hole (10.4) per minute.
-
-**Device f3aea2f** (device-check-2026-10-21.md "f3aea2f" 8; the calibrator's
-40 Hz 0..9.6 V square instead of a sine, no A jack): entry, trigger, range,
-STOP / Save CSV, exit and conflicts as the table says. Found: roll from
-5 s/div moved at the 2 s/div speed (fixed: samples per column from the
-timebase), the DC V entry toast was clipped (fixed: "DC V: wave is
-AC-coupled"), 5 ms/div shows no Freq with two periods on screen, a Save CSV
-refreshes the volume in region C under the stream (max_lat 21.7 us, 15
-overruns). The current step (9-11 min) was not run.
+**Device f3aea2f** (device check "f3aea2f" 8; the calibrator's 40 Hz 0..9.6 V
+square instead of a sine, no A jack): entry, trigger, range, STOP / Save
+CSV, exit and conflicts as the table says. Found: roll from 5 s/div moved at
+the 2 s/div speed (fixed: samples per column from the timebase), the DC V
+entry toast was clipped (fixed), 5 ms/div shows no Freq with two periods on
+screen, a Save CSV refreshed the volume in region C under the stream
+(max_lat 21.7 us, 15 overruns; fixed: the refresh waits for the stream).
+**Device a239aa6** (11.11 item 3): every band 5 ms .. 1 s/div, trigger and
+exit pass. The current step (9-11 min) is not run yet (TODO "(A) device test
+of the Wave view").
 
 ## 11. The stream ISR phase-locked to the chip; slow flash; SPI2 writes; DMA frames (2026-10-22)
 
-Device check of 5f14d38 (device-check-2026-10-21.md "5f14d38 (+ad2-isr)"):
+Device check of 5f14d38 (device check "5f14d38 (+ad2-isr)", 9.5):
 1.4 % lost at 4800 S/s and 2.6 % at 9600, in ~11.5 ms bursts every ~3948
 conversions, and max_lat ~20 us whenever the logger panel drew. Both are
 fixed here (device 4b98128, 11.6). Section 9's design (a 4 x tick, a 7/8 P
@@ -1188,12 +913,13 @@ us_r6 13.9, against 8.0 / 21.6 at /16).
 | DMA | /8 + CKPH (hybrid, 11.12; automatic above 38400) | 76800 S/s |
 
 The CPU frames pipeline the data bytes (`spi::read_fast`). The DMM itself
-still reads at /16 mode 0; moving it to /8 + CKPH is a separate step (TODO).
+reads at /16 mode 0 (decision #8: it stays there until the request queue of
+decision #3 is built).
 
 ### 11.4 The ~20 us entry latency: code and data above 0x08080000
 
-Only the low 512 KiB of the GD32F4 flash are zero-wait; native-boot.md
-already called sector 8 at 0x08080000 "slow". The 5f14d38 image ended at
+Only the low 512 KiB of the GD32F4 flash are zero-wait
+([native-boot.md](native-boot.md)). The 5f14d38 image ended at
 0x08083074, and the tail of `.text` was font data: TEXT22 at 0x080800ec,
 and ASCII26 (the logger panel's font) at 0x08080f98. A read there stalls
 the bus, and the interrupt cannot be taken during a stalled access. That
@@ -1202,24 +928,21 @@ gives max_lat ~20 us exactly when the panel (DRAW 1) or the DMM view
 PRIMASK / BASEPRI use: only the synopsys-usb-otg critical sections and
 `stream::stop`.
 
-link-native.x now splits region B:
-- **B = 0x08008010..0x08080000** holds all code and read-only data that
-  may run while a stream does. The linker fails when it does not fit.
-- **C = 0x08080000..0x080A0000, `.cold`** holds modules matched by path in
-  the section names: calbackup, fatren, native, recovery, genuine, gallery,
-  screenshot, dlog, fatdir, vdisk, upload, hyspi, ad2exp, scope_csv, boot
-  (code and named rodata). It also holds the `.data` load image, which is
-  read once at boot. persist was there in f5f8e96 and went back to B: its
-  crc runs on every main-loop pass (lat_pc in persist::crc, 9..18 us).
-
-Calls from hot code into C are conditional (the gallery page, a recording's
-rows, host disk reads, uploads, boot, DBG tests), and each costs a stall
-when it runs. build.rs makes cargo relink when the script changes.
+So [`link-native.x`](../link-native.x) splits the flash: region **B**
+(0x08008010..0x08080000, zero-wait) holds all code and read-only data that
+may run or be read while a stream does, and the linker fails when it does
+not fit; region **C** (0x08080000..0x080A0000, `.cold`) holds what never
+runs in a pass of a running stream (boot-only and rarely run modules, DBG
+tests). The module list is in link-native.x; the budget and the data loads
+(calibration record, USB volume files) in [native-boot.md](native-boot.md)
+"Memory budget" and "The slow flash bank while an AD2 stream runs".
+`emu/regionc.py` watches region C fetches and loads in the emulator tests.
 
 **Rule for every change**: code that may run while a stream runs (the
 main-loop pass, USB / SCPI, drawing) stays in B. A module may go to `.cold`
-only if it never runs in a pass of a running stream. B has ~1.1 KiB left at
-b81abf2 (hot end 0x0807fbd0).
+only if it never runs in a pass of a running stream. Example: `persist` was
+in `.cold` in f5f8e96 and went back to B, because its crc runs on every
+main-loop pass (lat_pc in persist::crc, 9..18 us, 11.9).
 
 The remaining ~4.7 us latency (4b98128: lat_pc in
 `Endpoint<Out>::read`) came from critical_section::with in
@@ -1320,9 +1043,9 @@ CS goes high at the data byte's RBNE, with the dummy's first bit in
 flight. The chip drops the incomplete byte; a completed one would write
 reg + 1.
 
-The cost is ~11 us per register at /16, against ~57 us bit-banged.
-`DBG:HYSPI:WMODE 0` is the bit-banged fallback, kept until the device
-shows the matched dummy clean. `DBG:HYSPI:WR? mode[,div]` is the test.
+The cost is ~10 us per register at /16, against ~57 us bit-banged. The
+bit-banged write fallback (`DBG:HYSPI:WMODE 0` in b81abf2) was removed after
+the device check of 11.9. `DBG:HYSPI:WR? mode[,div]` is the test.
 
 ### 11.8 DMA frames (b81abf2)
 
@@ -1366,10 +1089,11 @@ So the per-sample DMA start stays in the ISR (~1 us per sample).
 
 **76.8 kS/s** needs /8 (a 7.2 us frame); /16 (12.8 us) does not fit the
 13 us period. /8 is not clean in mode 0 (11.3). The CKPH = 1 data phase
-(11.3) would give the full period of setup margin, but it cannot be
-switched inside a DMA frame without the CPU. The ENOB trade-off
-(feasibility 1.2, white-noise scaling from 13.4 ENOB measured at 76.8 k):
-~13.9 at 38.4 k, ~14.4 at 19.2 k, ~14.9 at 9.6 k.
+(11.3) gives the full period of setup margin, but it cannot be switched
+inside a DMA frame without the CPU: the hybrid frames of 11.12 do that
+switch on the CPU. The ENOB trade-off (1.2, white-noise scaling from the
+13.4 ENOB measured at 76.8 k, INFERRED): ~13.9 at 38.4 k, ~14.4 at 19.2 k,
+~14.9 at 9.6 k.
 
 ### 11.9 Device check of b81abf2 (2026-10-22)
 
@@ -1463,11 +1187,11 @@ bytes. It also needs probe frames that fit the 13 us period.
 ### 11.11 Device check of a239aa6 (2026-10-22): DMA frames as the default
 
 a239aa6 = b21756f (the memory rework) + `set_dma_req` default 1 (decision
-2026-10-22 #7); the same change is 36cc441 on rust-fw-poc (after 090f845). Installed by the owner: healthy, crash count 0. No
-`DBG:AD2:DMA` sent in the default runs. Calibrator 40 Hz square on V/COM
-(the 50 Hz sine of the decision's item 3 is not on this bench), AC V.
+2026-10-22 #7). Healthy after the install, crash count 0. No `DBG:AD2:DMA`
+sent in the default runs. Calibrator 40 Hz square on V/COM (the decision's
+item 3 asked for a 50 Hz sine; none on this bench), AC V.
 
-**Emulator** (gate "implement"): `ad2streamtest.py` with no `:dma` suffix
+**Emulator**: `ad2streamtest.py` with no `:dma` suffix
 (it sends nothing now and expects the default) at -100 and +100 ppm, 4800
 DRAW 2 / 9600 / 19200 / 38400: PASS (DMA 1, div 16 in every session).
 `wavetest.py`: PASS.
@@ -1492,11 +1216,11 @@ R26 transient samples (DMA sessions start after the lock).
 - The generator stayed on: SOUR:FUNC? SIN, FREQ? 10000, OUTP? 1 after.
 - The scope page cannot check the generator's output on this bench: the
   MCX input is not wired to the generator. The GEN badge reads 10.0 kHz.
-- **BT not exercised.** The host could not connect to the meter's SPP
-  address ("Host is down", not advertising) before, during and after the
-  streams; the cause was not found (the status bar shows the BT icon). The UART4 RX DMA was armed as usual, so the DMA controller
-  sharing with bt.rs was present but idle. The "BT connected + reconnects
-  after the stream" part is still open.
+- **BT not exercised here**: the host could not connect to the meter's SPP
+  address ("Host is down"; the cause was the BT module's power pin, fixed
+  since). Run later on 0667175 (device check "Bluetooth (0667175)"): 900 s
+  at 38 400 S/s with DMA frames and a host polling over BT the whole time,
+  34 560 269 records, lost 0, bad 0, CPU 17.5 %, BT answered right after.
 
 **3. Wave view** (MF range page -> Wave, generator still on), every band
 5 ms .. 1 s/div. "First sample" = from `TIM:SCAL` to the first captured
@@ -1527,27 +1251,24 @@ host resolution):
 **4. After the streams**: DC V AUTO+ on the 1 V calibrator reads 1.00002 ..
 1.00021 V (within 0.05 %). `DBG:HYSPI:SELF? 2000` has every count 0.
 
-**Verdict**: items 1, 3 and 4 pass. Item 2 passes for the generator DAC.
-The BT part is open: it needs a BT link that this bench could not make. The
-default stays flipped (a239aa6), and the BT run is a TODO.
+**Verdict**: items 1, 3 and 4 pass. Item 2 passes for the generator DAC
+here and for BT on 0667175. DMA frames stay the default (a239aa6).
 
 **Memory rework on the device** (b21756f's numbers, a239aa6):
 - STACK at boot: 18 328 of 46 620 B.
-- After the scope walk (scope page, CH1 popup, MF menu tabs, trigger popup,
-  FFT on, STOP + Save CSV -> SCOPE/SCOP003.DLG, AUTO, 3-finger screenshot
-  with the FFT on -> SHOTS/S007.BMP 307 266 B): **21 616 / 46 620 B (46 %)**,
-  25.0 KB of headroom.
+- After a scope walk (popups, MF menu tabs, FFT, STOP + Save CSV, AUTO, a
+  screenshot with the FFT on): **21 616 / 46 620 B (46 %)**.
 - The static worst path is 21.8 KB, and the emulator walk gave 21.4 KB.
-- The screenshot holds the FFT spectrum (read back with MMEM:DATA?), and
-  the spectrum keeps updating after the shot.
+  The current budget: [native-boot.md](native-boot.md) "Memory budget".
 
 ### 11.12 76.8 kS/s: hybrid frames (2026-10-22)
 
 The chip's top AD2 rate (OSR 32 at /2, R26 low bits 0: the stock AC rows'
 own setting) is now a rung of the ladder (`ad2_r26_for`), with DMA frames
-only. Decision 2026-10-22 #9 has the choices; this section the design and
-the emulator results. Everything here is emulator plumbing until the device
-check in the TODO item.
+only. Decision 2026-10-22 #9 has the choices; this section the design, the
+emulator results and the device outcome: host drain and Wave view passed on
+7409b92, the disk lost 54 % there and passes since 4c4b489 (TODO "76.8
+kS/s"), and the loop of e7ec2cc locks at the datasheet rate (below).
 
 **The frame** (`hy3131 spi::hybrid_kick`, logger.rs `isr`, `Dma::hyb`):
 - /16 frames (13.6 us) do not fit the 13.02 us period; /8 mode 0 data is not
@@ -1594,15 +1315,18 @@ frame is caught by the model.
 Every 76800 session on the device (7409b92, 4c4b489) ran with `f` on its
 +1000 ppm clamp (rate_mhz 76 723.4-.8), 1.48 ISR entries per sample, ~0.24
 probes per sample, 86 % of them "edge after B", max run 57; the record
-stamps give 76 574.4-.9 S/s in every session (fresh boots, disk / host /
-Wave view, CHOP on / off), LOG:PRE? measured_hz 76 574, and a 40 Hz
-calibrator square has 956..959 samples per half period. The same chip and
-crystal lock at -1.6 ppm at 4800 / 38400, also with these hybrid frames
-(DBG:AD2:DIV 8,1), so this rung converts 0.29 % slower than FAD2CLK / OSR2
-(64.188 SYSCLK per result): hy3131.rs `AD2_OSR32_REAL_MHZ` = 76 574.6 is now
-the stream's nominal (the Pll, LOG:PRE? nominal_mhz, CSV / DLG headers, the
-Wave view's measurements at 1 ms/div), the emulator's chip the same
-(`Ad2Osr32Ppm` -2935).
+stamps gave 76 574.4-.9 S/s in every session, and a 40 Hz calibrator square
+had 956..959 samples per half period. The same chip and crystal lock at
+-1.6 ppm at 4800 / 38400, also with these hybrid frames (DBG:AD2:DIV 8,1).
+e7ec2cc took that as the chip's rate (0.29 % below FAD2CLK / OSR2) and made
+76 574.6 the rung's nominal (hy3131.rs `AD2_OSR32_REAL_MHZ`, the emulator's
+`Ad2Osr32Ppm` -2935). **That was wrong**: with the loop fix below, device
+e7ec2cc (device check "e7ec2cc: the 76.8 kS/s PLL retest") locks at
+rate_mhz 76 800 0xx from a cold start, gap-free disk data has 1919.95
+samples per 40 Hz period (the old builds 1914.27) and the Wave view's
+record 960 per half period. The 76 574 came from the railed loop, not the
+chip. Since ee28b71 `AD2_OSR32_REAL_MHZ` = the datasheet's rate again (and
+`Ad2Osr32Ppm` 0); the loop fix and MAX_PPM 5000 stay.
 
 Why it railed, and what that cost: this geometry's window is lopsided. B
 may be early by up to P - beta + c_off (~590 counts) and still be read
@@ -1617,13 +1341,15 @@ edge ramp (~+-6 us; 0.5 us at 38400), i.e. conversions doubled / skipped /
 torn without any counter seeing it. In the host model the old loop also
 railed from a word started ~600 ppm long or a chip that much fast.
 
-Since then (`Pll::result` / `on_a`, hybrid geometry only): `f` holds during
-a run of one sign longer than RUN_GEAR_UP (a walk), the probes stay dense
-(every period C allows) for CALM = 256 results after the start and after a
-run longer than 2 x RUN_GEAR_UP, with KI_DENSE = 4 x the frequency step, so
-a word still off the chip's rate is pulled in before a sparse 16-period
-interval can drift the phase out of the window; MAX_PPM is 5000 (a unit at
-the datasheet's 76 800 is +2935 ppm from the new nominal). The 76.8 kS/s
+The loop fix (`Pll::result` / `on_a`, hybrid geometry only): `f` holds
+during a run of one sign longer than RUN_GEAR_UP (a walk), the probes stay
+dense (every period C allows) for CALM = 256 results after the start and
+after a run longer than 2 x RUN_GEAR_UP, with KI_DENSE = 4 x the frequency
+step, so a word still off the chip's rate is pulled in before a sparse
+16-period interval can drift the phase out of the window; MAX_PPM is 5000.
+Device e7ec2cc: 1.125 ISR entries per sample (was 1.478), cpu 455-457
+permille (was 546-548), late / bad / overruns / slips 0, the transition
+samples within 0.41-0.62 us rms of their stamps (was 3.0-3.45 us). The 76.8 kS/s
 rung carries its own lock to its next session (logger.rs `REL_HYB`); the
 shared `REL` takes a lock only within 1000 ppm. Host model
 (`hybrid_76k8_far_from_the_nominal`): chips -3000 .. +3000 ppm, starts -1000
@@ -1633,8 +1359,10 @@ search's error, ~3 us) still shows in about every second emulator session,
 as with the old build (max run ~45, TornAd2 ~28, a slip or two), but no
 longer drags `f`.
 
-Emulator, --mips 110 --isr-stall-ns 700 (the device's speed), AC V 0.5 V
-50 Hz; ISR entries per sample = DBG:ISR? ticks / captured:
+Emulator at e7ec2cc, --mips 110 --isr-stall-ns 700 (the device's speed),
+AC V 0.5 V 50 Hz; ISR entries per sample = DBG:ISR? ticks / captured. The
+"76 574.2" rows model the chip at the rate the old loop reported, which the
+device later showed to be wrong (above):
 
 | build | chip at 76800 (model) | session | rate_mhz | entries / sample | ISR | doubled / skipped (model) |
 |---|---|---|---|---|---|---|
@@ -1661,11 +1389,7 @@ default 1e-3), CKPH 1 samples a full period late and garbles a command
 byte; the timer interrupt is scheduled to the ns; DWT / TIMER / the flash
 read the synced time; a STAT read that finds a byte shifting stalls the
 CPU to the byte's end (BaseCPU.SkipTime, the same virtual time as the
-spin; without it the emulator ran ~2.2x slower and modetest's BT link
-timed out). The old firmware passes every stream / wave / inrush / disk
-test under it (the boot is ~0.7 s longer now that the disk's bytes take
-their time: burdentest's phase windows needed more than 1 s before the next
-input step; b79b895 made it 3 s). The ISR's CPU share is still ~0.57x the device's
+spin). The ISR's CPU share is still ~0.57x the device's
 (no APB / AHB wait states): DMA /16 4800 1.1 % vs 1.9 %, 38400 9.8 % vs
 17.5 %.
 
@@ -1687,14 +1411,10 @@ loses nothing, the host sees the drops as stamp gaps (`overwritten`).
 SRAM has 10.9 KB free on an 8 KB floor: the ring cannot double. The
 logger panel (DRAW 1), the Wave view and the disk logger keep up.
 
-**CPU on the device (estimate)**: the emulator's 3.84 us per period splits
-into ~1.45 us of real-time waits (the command byte, the pulse; the same on
-the device) and ~2.4 us of code and register accesses, which cost the
-device ~1.76x (the DMA /16 ratio above): ~5.6 us = **~43 % of the CPU at
-76.8 kS/s** (bottom-up from 11.11's ~3.4 us DMA A entry + 1.45 + 0.3 for
-the pulse / CKPH - 0.3 for the division + the probes' 0.4: 41 %). Range
-40..46 %; DBG:ISR? cpu_permille is the measurement. For comparison: CPU
-frames at 38.4 kS/s ran 51 % with 0 lost (11.10).
+**CPU on the device**: cpu_permille 455-457 at 76.8 kS/s (e7ec2cc; 546-548
+with the railed loop of 7409b92 / 4c4b489), against an estimate of 40-46 %
+from the emulator. For comparison: CPU frames at 38.4 kS/s ran 51 % with 0
+lost (11.10).
 
 **Disk** (fastlogtest, the disk's SPI timed too: ~0.2 ms of polled CPU per
 page):
@@ -1729,23 +1449,27 @@ divisions), 5 ms/div and slower as before (`WAVE_TB_MIN` 15). With CPU
 frames (DBG:AD2:DMA 0) the rung is capped at 38400 and the view closes
 ("Wave: rate needs DMA frames") rather than draw a wrong time base.
 
-**Not done / open**: the chopper (ENCHOPAD2, the logger's default) at OSR
-32 has never run on the chip (the stock rows are unchopped); the host
-drain over USB needs 921 KB/s at 12 B per record, above what the Python
-drain reached on the device (~37 kS/s, 11.10): LOG:DATA? at 76.8 kS/s will
-show `overwritten` unless the host is faster; the disk or the Wave view are
-the full-rate consumers.
+**Host drain.** The chopper at OSR 32 (CHOP ON, the logger's default) runs
+on the chip like CHOP OFF (e7ec2cc item 1). 12-byte rows at 76.8 kS/s need
+921 KB/s; the Python drain reached ~46 k rows/s on e7ec2cc, so `LOG:DATA?`
+in rows shows `overwritten`. The compact formats `LOG:FORMat PACKed | DLG`
+(3 B and ~1.2-2.6 B per sample, [compact-log-format.md](compact-log-format.md))
+are lossless at 76.8 kS/s in the emulator without the logger panel; not
+measured on the device. The disk and the Wave view are the full-rate
+consumers.
 
 ## 12. Inrush current on the stream (2026-10-22)
 
 The AC A row of the 10 A range (1.3: OP1 x1 on the 10 mohm shunt,
 DC-coupled, +-125 A) streamed at 9600 S/s by the section 11 ISR feeds a
 step detector and a 2 s trace in the scope's BUF: Irms over the first
-100 ms, the peak, a FASTnnn.DLG of the trace. docs/inrush-current.md.
+100 ms, the peak, a FASTnnn.DLG of the trace: [inrush-current.md](inrush-current.md).
 
 ## 13. E7: DC-coupled V on AD2 (2026-10-22)
 
 ### 13.1 Device test 6.5 (4ff95f7, tools/experiments/ad2dcv.py)
+
+Script: [`tools/experiments/ad2dcv.py`](../tools/experiments/ad2dcv.py).
 
 `DBG:AD2:DCV? range,r26,n,flags` (src/ad2exp.rs `dcv_test`) writes the row
 of 1.3 last row: the stock AC V row of the range (CFG_F0: its tap, OP1 on
@@ -1787,9 +1511,11 @@ The self-cal does not need it: it reads AD1 alone first.
 
 ### 13.2 Datasheet note 7 in the stock DC rows (1ad2943, tools/experiments/ad2n7.py)
 
-The owner's question: could the DC V "AC?" hint run on AD2 + RMS, enabled
-once with the DC V row and left on, instead of the comparator alternating
-PB1 / SENSE? `DBG:AD2:N7? item,state,n` writes the stock DC row (CFG_F1 /
+Script: [`tools/experiments/ad2n7.py`](../tools/experiments/ad2n7.py).
+
+The question: could the DC V "AC?" hint run on AD2 + RMS, enabled once
+with the DC V row and left on, instead of the comparator alternating PB1 /
+SENSE? `DBG:AD2:N7? item,state,n` writes the stock DC row (CFG_F1 /
 CFG_F3, no sentinel) with AD1 enabled last, the converters never toggled
 while AD1 converts, in state 0 (stock: AD2 / AD3 off), 1 (AD2 on OP1O -
 AGND, OP1 on SENSE where the row has it off, R26 0x80 = 76.8 kS/s), 2 (1 +
@@ -1864,14 +1590,6 @@ the emulator's `--case dcv` covers it).
 a0985e4 (the 100 ms trapezoid-weighted AD2 windows): 0 V +0.06 / -0.17 mV,
 1 V -0.51 / -0.92 mV, 5 V -0.99 / -0.58 mV, 24 V (60 V) -1.8 / -2.1 mV;
 LOG:STATe ON 0.56 s.
-
-Emulator suite (a0985e4 / ec22925): dcvtest, wavetest (volt, current,
-dcv), ad2streamtest, inrush, btwake, leads, burden, couptest, the model
-tests, senttest 1/2 pass; fastlogtest's typ profile passes, its max profile
-never enumerates USB, nor does the base e054fc8; senttest ovl-dcma /
-ovl-dcua-man / aprot-to-dca and powtest manual / acdc-floor fail on the
-base e054fc8 too (ovl-pow-auto-ua / -dc and acdc-floor are flaky under
-load: pass alone).
 
 ### 13.5 Limits
 

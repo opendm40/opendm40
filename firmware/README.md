@@ -60,40 +60,62 @@ The host tests also need `mtools` ([`tools/fatren-test`](tools/fatren-test)).
 
 ## Documentation
 
-Reference:
+User documentation: the [user manual](../docs/manual/README.md) and the
+[SCPI reference](../docs/manual/scpi-reference.md). Developer documents,
+one line each:
 
-- [native-boot.md](docs/native-boot.md): update format, shim, install, recovery, memory budget
-- [dev-notes.md](docs/dev-notes.md): USB debug link, SCPI list, developer workflow
-- [bt-scpi.md](docs/bt-scpi.md): SCPI over Bluetooth and USBTMC on Windows
-- [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md): power meter and misconnect alerts
-- [inrush-current.md](docs/inrush-current.md): inrush current capture
-- [compact-log-format.md](docs/compact-log-format.md): DLG log format on the disk, CSV on read
-- [log-format-standards.md](docs/log-format-standards.md): standard log formats compared with DLG
-- [fonts.md](docs/fonts.md): stock fonts, their cost and storage
+### Reference: protocols, formats, SCPI
+
+- [scpi-reference.md](../docs/manual/scpi-reference.md): every SCPI command (checked against the parser by `tools/scpi-doc-check`)
+- [bt-scpi.md](docs/bt-scpi.md): SCPI over Bluetooth next to the stock app protocol; USBTMC on Windows
+- [bt-protocol.md](../docs/bt-protocol.md): the stock Bluetooth phone-app protocol
+- [compact-log-format.md](docs/compact-log-format.md): the DLG log format on the disk, CSV on read
+- [native-boot.md](docs/native-boot.md): flash and memory map, update format, shim, recovery, the USB disk, memory budget
+- [fsloader-install-trigger.md](docs/fsloader-install-trigger.md): how the stock FS-loader installs a `dm40*.bin`, its USB and error paths
+- [genuine-check.md](docs/genuine-check.md): the stock genuine-device check (UID-bound loader data)
 - [model-variants.md](docs/model-variants.md): how the firmware tells DM40A / B / C apart
 - [parity.md](docs/parity.md): item-by-item parity with the stock firmware V2.6
-- [genuine-check.md](docs/genuine-check.md): the stock genuine-device check (UID-bound loader data)
-- [fsloader-install-trigger.md](docs/fsloader-install-trigger.md): how the FS-loader installs a staged `dm40*.bin`
+- [stock-scope-ui.md](docs/stock-scope-ui.md): pixel and interaction spec of the stock scope UI ([renderer](tools/stock-ui/README.md))
+- [ANALYSIS.md](../stock/re/ANALYSIS.md): reverse-engineering notes on the stock firmware and flash; [stock/README.md](../stock/README.md): stock update-file tools
+
+### Design
+
+- [dev-notes.md](docs/dev-notes.md): the USB debug link and the developer workflow
 - [ram-budget.md](docs/ram-budget.md): RAM users and when each is live
-
-Design notes:
-
+- [fonts.md](docs/fonts.md): the stock fonts, their cost and storage
+- [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md): power meter and wrong-connection alerts
+- [inrush-current.md](docs/inrush-current.md): inrush current capture
+- [dmm-input-scope-feasibility.md](docs/dmm-input-scope-feasibility.md): the HY3131 AD2 stream: wave view, fast logger
 - [acdc-approaches.md](docs/acdc-approaches.md): AC+DC in other meters and DMM chips, what fits the HY3131
-- [acdc-stock-vs-opendm40.md](docs/acdc-stock-vs-opendm40.md): AC+DC of the stock V2.6, measured live, vs opendm40
-- [switch-latency.md](docs/switch-latency.md): DMM function switch latency, opendm40 vs stock
 - [dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md): DMM reading rate, integration time and filtering
-- [dmm-input-scope-feasibility.md](docs/dmm-input-scope-feasibility.md): DMM inputs as a scope source (AD2 streaming)
-- [dac-adc-paths.md](docs/dac-adc-paths.md): DAC to ADC loopback paths for self-test
-- [hwtrig-integration.md](docs/hwtrig-integration.md): the hardware trigger comparator
-- [combined-view-design.md](docs/combined-view-design.md): DMM + scope combined view, scope gestures
+- [dac-adc-paths.md](docs/dac-adc-paths.md): DAC to ADC paths for self-test
+- [combined-view-design.md](docs/combined-view-design.md): the DMM + scope combined view
 - [scope-scale-ux.md](docs/scope-scale-ux.md): scope scale and position by touch
-- [stock-scope-ui.md](docs/stock-scope-ui.md): pixel and interaction spec of the stock scope UI
-- [ui-review.md](docs/ui-review.md): UI/UX review
-- [user-feedback.md](docs/user-feedback.md): DM40 owners' feedback triaged into items
+- [user-feedback.md](docs/user-feedback.md): DM40 owners' feedback triaged into UF-nn items
+- [dm40-feature-request.md](../docs/dm40-feature-request.md): the FR-nn feature list (Russian)
 
-Logs and history:
+### Hardware
 
-- [device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log
-- [decisions-2026-10-22.md](docs/decisions-2026-10-22.md): product and engineering decisions
-- [stage0-test.md](docs/stage0-test.md): native-boot Stage 0 recovery test (historical)
-- [integration-queue.md](docs/integration-queue.md): integration queue (empty)
+- [hw/README.md](../hw/README.md): the board: block diagram, parts, pins, DMM front end, scope, power; the only place for hardware facts
+- [HY3131 model](../emu/hy3131/README.md), [HY3131 research notes](../emu/hy3131/RESEARCH.md), [HY3131 registers](../emu/hy3131/ref/registers.md)
+
+### Testing
+
+- [emu/README.md](../emu/README.md): the emulator (Renode): run, screenshots, scenarios
+- Host tests: `tools/*/run.sh` (one suite per directory in [`tools/`](tools), e.g. [`fatren-test`](tools/fatren-test), [`scpi-test`](tools/scpi-test), [`touch-test`](tools/touch-test), [`ui-render`](tools/ui-render)); `tools/linkcheck.py` and `tools/scpi-doc-check` for the docs
+- [device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log, appended per build
+
+### History
+
+Finished plans, reviews, investigations and decision logs; not maintained.
+The full list is [docs/history/README.md](../docs/history/README.md). Archived from `docs/`:
+
+- [native-boot-plan.md](../docs/history/native-boot-plan.md): the 2026-10-13 native-image plan and its T1 / T2 / T3 tests
+- [stage0-test.md](../docs/history/stage0-test.md): Stage 0, the FS-loader re-installs a staged file
+- [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md): nine product / engineering decisions, cited by the code as `#N`
+- [switch-latency.md](../docs/history/switch-latency.md): DMM switch latency and the proposals cited by the code
+- [acdc-stock-vs-opendm40.md](../docs/history/acdc-stock-vs-opendm40.md): AC+DC and AUTO coupling of the stock, measured live
+- [log-format-standards.md](../docs/history/log-format-standards.md): standard log formats against DLG
+- [ui-review.md](../docs/history/ui-review.md): UI/UX review
+- [hwtrig-integration.md](../docs/history/hwtrig-integration.md): the hooks that wired the comparator trigger
+- [integration-queue.md](../docs/history/integration-queue.md): the queue of hooks into shared files (empty)

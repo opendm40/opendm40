@@ -111,7 +111,7 @@ Code work (in this order):
   - [x] Scope: slow timebases to 50 s/div (TB_MAX 29, roll from 200 ms/div, YT ceiling 1 s/div);
         stop-and-zoom re-renders the stored 26 K record at the selected timebase. Horizontal
         position = the stock T marker drag (stock scope port). Not done: full 65 K record (DMARAM budget).
-  - [x] Scope hardware (comparator) trigger, src/hwtrig.rs (H0..H8 of docs/hwtrig-integration.md),
+  - [x] Scope hardware (comparator) trigger, src/hwtrig.rs (H0..H8 of ../docs/history/hwtrig-integration.md),
         DBG:HWTRIG[?|:ENABLE|:CAL?|:STAT?|:STAT:RESET]. On by default since 49ec62e (enabled in
         Scope::new; hwtrig::DEFAULT_ENABLED stays the module default). (device-verified: Auto/Normal/
         Single, 100 us..100 ms/div all T'D, 0 misses)
@@ -278,7 +278,7 @@ Code work (in this order):
 - [x] UI: HOLD repaint fixed (label only drawn inside reading(), skipped while held), Settings back
       navigation (parent chain), Settings rows like vendor (8 rows, value next to label, "< Back"
       title bar), compact DMM+scope view (22 px bar, 30 px value, scope +56 px). Not verified on device.
-- [ ] UI/UX review punch-list (docs/ui-review.md §4) remainder. Done: #1 drag-misread-as-swipe
+- [ ] UI/UX review punch-list (../docs/history/ui-review.md §4) remainder. Done: #1 drag-misread-as-swipe
       (gesture.rs: a drag never swipes), #2 unified status block with lock/BT/battery on every bar,
       #5 page dots, #4/#8 superseded by the stock scope port (stock right panel, markers, T/trigger
       handles). Done 2026-10-21 (verify on device):
@@ -328,7 +328,7 @@ Code work (in this order):
         point); only where a single tap does nothing (Corners: the graph middle; Off: anywhere;
         never in Halves, every tap steps there). (2c47fa5; verify on device)
 - [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (a1a7e74; verify on device)
-      decided: see docs/decisions-2026-10-22.md #1 (Record page: intervals, mean per row, duration, estimate)
+      decided: see ../docs/history/decisions-2026-10-22.md #1 (Record page: intervals, mean per row, duration, estimate)
   - [x] Record page (decision #1): "Record" row on Hold & Limits -> View::Record: Interval (every reading /
         1 s / 10 s / 1 min, -/+ stepper), Duration (until stopped / 10 min / 1 h / 8 h / 24 h), "Free: about
         N h left" (free clusters x 2 B/row at the interval or the measured reading period, scanned on page
@@ -352,7 +352,7 @@ Code work (in this order):
       (Since the USB storage redesign the PC cannot write or mount the SPI disk: no "Disk in use"
       refusals any more; files in LOGS/ on the SPI flash.)
 - [x] Compact binary logs, CSV only on read (owner 2026-10-21: "not CSV on the disk, RLE or a
-      decided: see docs/decisions-2026-10-22.md #2 (timestamps stay real main-loop time, no grid snap)
+      decided: see ../docs/history/decisions-2026-10-22.md #2 (timestamps stay real main-loop time, no grid snap)
       standard compressed format; CSV only for export"). docs/compact-log-format.md: own DLG format
       (adaptive Rice of delta-of-delta time + 6-digit value deltas, CRC chunk per commit) chosen over
       gzip / sigrok / FLAC on measured data: 0.9..1.9 B per DMM reading vs ~21 B CSV (11..26x; 13 MB of
@@ -363,7 +363,7 @@ Code work (in this order):
       - [x] csvlog.rs records LOGnnn.DLG (same swipe / LOG:CSV UI); numbers shared with legacy LOGnnn.CSV;
             fatren-test: md5 of the decoded CSV == the old writer's LOG000.CSV, cut sweeps, disk full.
       - [x] scope "Save CSV" writes SCOPnnn.DLG, CSV md5 == the old SCOPnnn.CSV. Coded (owner
-            2026-10-21, docs/log-format-standards.md 4): fixed predictor order 0-3 per 4096-sample
+            2026-10-21, ../docs/history/log-format-standards.md 4): fixed predictor order 0-3 per 4096-sample
             block (or raw 10-bit) + adaptive Rice, 3.7-5.8x smaller than u16 (emulator record 4231 B);
             the length is planned at Save, the writer fills 512-byte pieces per pass.
             (verify on device: a real noisy record's size; the ~10-20 ms planning stall at Save)
@@ -534,7 +534,7 @@ Code work (in this order):
 - [x] Milliohm resolution on the lowest resistance range (units of mΩ).  (776003c; device-verified: 10.117 Ohm, 19:10 run)
 
 - [x] AutoHold idle threshold absolute on small ranges (meter.rs ah_cfg): DC V/mV idle below max(300 counts,
-      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, docs/acdc-stock-vs-opendm40.md 6c),
+      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, ../docs/history/acdc-stock-vs-opendm40.md 6c),
       DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.  (86a408a; verify on device)
 
 - [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed
@@ -618,7 +618,7 @@ Code work (in this order):
       ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
 - [x] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal and shows which one it chose. Decisions
-      (docs/acdc-stock-vs-opendm40.md section 11; dmm.rs AUTO_*):
+      (../docs/history/acdc-stock-vs-opendm40.md section 11; dmm.rs AUTO_*):
       - measurement: AUTO runs the AC+DC alternation (the only place both parts are seen: AC V is
         AC-coupled) and shows one part, the DC part (signed) or the AC part's RMS; autorange on the total.
       - rule / hysteresis (once per ~1.9 s cycle, both parts fresh): to AC when AC > 1.5 x |DC| and above
@@ -655,7 +655,7 @@ Code work (in this order):
       Not on the UT197 model: there it is "Auto-V LoZ", the auto selection comes with a ~2 kohm input
       load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
       (hum on open leads) still read, as AC above the floor.
-  - [ ] Device check (AUTO coupling): see docs/acdc-stock-vs-opendm40.md section 11 "Device check".
+  - [ ] Device check (AUTO coupling): see ../docs/history/acdc-stock-vs-opendm40.md section 11 "Device check".
   - [x] FETC:BURD? in AUTO used the part shown (understated a mixed current): now the total RMS (AC+DC,
         what drops across the shunt), OL by the total; the aux burden readout is not shown in AUTO (aux
         rows = the parts, as AC+DC). burdentest AC+DC / AUTO phases (200 mA DC + 100 mA AC).
@@ -940,7 +940,7 @@ Code work (in this order):
       (65a82fe), G3 pinch (above), R1 redraw profiling (ba9960e).  (verify on device; G4 A/B on device)
 - [x] AC+DC: the AC part read ~5% low and wandered phase to phase (4.5..5.3 V on a 40 Hz 0..9.6 V
       square): AD3 enabled before AD2 (3b9251c). (device-verified: AC+DC 6.8000..6.8004 V, sd 0.3 mV;
-      docs/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
+      ../docs/history/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
 
 ## Device run 2026-10-13 19:10, native e07c11a (+docs) installed OK
 - Verified: READ? ~0.5 s, MEAS:VOLT:AC? 0.5 s, MEAS:FREQ? 1.0 s; USBTMC survives a libusb timeout
@@ -1020,7 +1020,7 @@ Firmware:
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
       (24f7080: FAST/MED/SLOW with a counts / rate toast; verified on device 9dd1222)
 - [x] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
-      decided: see docs/decisions-2026-10-22.md #4 (energy counter resets on boot)
+      decided: see ../docs/history/decisions-2026-10-22.md #4 (energy counter resets on boot)
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
       Researched: GO, docs/power-meter-and-misconnect.md §3 (I on the stock OP1 path, V via OP2→AD3 DC-coupled,
       signed 38-bit X·Y RMS read, ~10-12 days). Gate: device test T1 (OP2 on SENSE). Owner: fuse/CAT/10 A limits.
@@ -1124,7 +1124,7 @@ Firmware:
         1, HI badge) OK; RES refusal text OK. Left: the phone app itself, limits / beep with a real load,
         persist v10 over a reboot, REAC cal on a capacitor.
 - [x] Detect wrong connection (voltage on the A jack / current mode with voltage present, leads in the wrong jacks) and warn.
-      decided: see docs/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
+      decided: see ../docs/history/decisions-2026-10-22.md #5 (A-JACK / LIVE? alternate with HOLD in the status slot)
       Done (decision #5): ui::slot_alert / alert_alternates; DmmView.alt = the app's 1 s strip_alt (now
       toggled in every view); the live alert (meter.live) is drawn while HOLD / AutoHold freeze the readout
       and an alert change under HOLD repaints at once (shown_state); strip_data the same rule. ui-render:
@@ -1254,7 +1254,7 @@ Firmware:
       lost_before), `ad2 torn|noise`; emulator AD2 grid + noise model. Hooks: DBG:AD2:TORN? / NOISE? / DRAW.
       Emulator only so far (50 MIPS: ~2 kS/s readout, not the device's): docs/dmm-input-scope-feasibility.md 7.
 - [ ] (B) device session (30 min, feasibility doc 7.3): torn reads per OSR, loss per rate with / without redraw,
-      decided: see docs/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
+      decided: see ../docs/history/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
       shorted-input ENOB, a waveform; then decide the rate cap and the ISR (E2-E4).
       Partly done on device 9dd1222 (docs/device-check-2026-10-21.md "9dd1222" 1): torn reads none at any rung;
       waveforms AC V / AC mV ok; converter floor ENOB 16-17.6 (AC A open). FOUND: the chop-ON rungs give AD2F
@@ -1316,7 +1316,7 @@ Firmware:
 - [x] Device a0cdb4e (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
       7.8 %; CPU /8 + CKPH 38400 lost 0 at 51 %, 4800 DRAW 2 / 9600 lost 0. Host: a raw drain tops out at ~37 kS/s.
 - [x] Decide: DMA frames as the stream default; the wave view gains the most.
-      decided: see docs/decisions-2026-10-22.md #7 (DMA frames default, gated on one device run with the
+      decided: see ../docs/history/decisions-2026-10-22.md #7 (DMA frames default, gated on one device run with the
       default flipped: 60 s runs, a 15-min 38.4 k sharing matrix with gen DAC + BT, the wave bands)
       done a239aa6 (`set_dma_req` default 1; DBG:AD2:DMA 0 = CPU frames). Device 11.11: 60 s 4800 DRAW 2 /
       9600 / 19200 DRAW 2 / 38400 lost 0 at 1.9 / 3.9 / 7.8 / 17.5 % CPU; 900 s 38400 with the generator
@@ -1366,7 +1366,7 @@ Firmware:
       Device ea29bc4: AC V wake READ? -0.8 % (first answer after 2 s), Wave view MENU -> READ? correct with no
       rail drop, 1g / 1h PASS again.
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
-      decided: see docs/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
+      decided: see ../docs/history/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
 - [x] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at a4907d0; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
@@ -1666,7 +1666,7 @@ Firmware:
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
       (device bab5dd4, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
-      Branch settle-fix (`acs_flat`, docs/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
+      Branch settle-fix (`acs_flat`, ../docs/history/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
       and, with two falls in a row in one AC phase, the rest of the decay d q / (1 - q) <= 0.05 %
       (ACS_REM); ACS_MAX_MS 6 -> 5 s, and the cap also ends the settle in a DC phase with the last AC
       result (`ac_settle_cap`): gap < 6 s. On the device's numbers 4.821 / 4.790 are not flat, the next
@@ -2469,7 +2469,7 @@ Firmware:
             _VHOSTnn.TMP files, deleted at the eject / next boot), dirty flags and dates; everything else
             DATA PROTECT. Layout frozen while the host has it mounted (new recordings / screenshots appear
             at the eject / re-plug: the cost of writability; a UNIT ATTENTION would make Linux drop writes).
-            decided: see docs/decisions-2026-10-22.md #6 (read-only "Files live" by default; Settings 3/3
+            decided: see ../docs/history/decisions-2026-10-22.md #6 (read-only "Files live" by default; Settings 3/3
             "USB disk" = "PC can edit" -> the writable volume, volatile, applied at the next USB plug)
             IMPLEMENTED 2026-10-22: vwrite.rs mode in force / asked for (applied at the bus reset), Settings 3/3
             row + toast "Re-plug USB to apply", Help 6/6 "USB disk", README.TXT, DBG:VDISK:RO? = in force,
@@ -2573,7 +2573,7 @@ Firmware:
             RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
             DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
             screen is blank until then. AC V of a DC input settles into 0.1 % in 2.5-2.9 s. Stock not measured.
-            **Done on branch fastswitch (docs/switch-latency.md 6, owner-approved proposals 1-6; 7-8 wait):**
+            **Done on branch fastswitch (../docs/history/switch-latency.md 6, owner-approved proposals 1-6; 7-8 wait):**
             the new function's frame at once (unit + grey dashes, never 0.0000); ohm entry 150 ms (no 2.5 s
             deadline; the stock's single-step window works again); V / A entry 300 ms; manual V range 250 ms;
             no held first conversion where a function change restarted AD1 (R22 changed); provisional values
@@ -2655,7 +2655,7 @@ Firmware:
             7. PASS for RES -> A / mA (70 switches, 1 / 5 V). A-JACK in RES at 5 V (known) now from 0.46 s.
                **New: 0.5 s V-JACK? at 8.06 s after A / mA -> Scope -> DMM at 5 V** (ctsta 0x70 tail to 7.75 s,
                past the 7 s cap; 612c45c 6.34 s).
-            **Fixed on branch fastswitch2 (docs/switch-latency.md 6.2; each with a test that fails on ab7184c):**
+            **Fixed on branch fastswitch2 (../docs/history/switch-latency.md 6.2; each with a test that fails on ab7184c):**
             ohm hunt vet (a conversion is final only when the one before it on the same ohm row agrees within
             0.1 % + 8 counts; grey before; ohmhunt.py with the model's `ohmtau`), FETCh? +9.91E37 at once while
             AUTO decides (autowaittest ac-fetch / dc-fetch), HOLD before the first settled reading armed: HOLD

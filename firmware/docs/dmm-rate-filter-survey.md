@@ -1,9 +1,11 @@
 # DMM reading rate, integration time and filtering: survey and options for opendm40
 
-Date: 2026-10-24. Research only: no firmware change, no device run. opendm40
-reference: `firmware/src/dmm.rs` "FR-05 conversion rate" (`Rate`, `avg_cfg`,
-`Avg`) and `firmware/src/meter.rs` (`Smooth`) at 92ef9f6. Sources are listed at
-the end (§9). "PDF p." means the page number in the PDF file where the printed
+How bench, system and handheld DMMs set integration time and filtering, what
+that means for the HY3131 AD1 in the DM40, and the options for the opendm40
+Rate / averaging / smoothing settings (2026-10-24). The current opendm40 code
+is in [`src/dmm.rs`](../src/dmm.rs) "FR-05 conversion rate" (`Rate`,
+`avg_cfg`, `Avg`) and [`src/meter.rs`](../src/meter.rs) (`Smooth`); none of
+the options below is implemented yet. Sources are listed at the end (§9). "PDF p." means the page number in the PDF file where the printed
 page number was not checked. A source marked *secondary* is a review, a
 retailer or a forum post, not the manufacturer.
 
@@ -68,7 +70,7 @@ This model explains the owner's three observations (§1.3):
 - **A 10 Hz square aliases into a slow ±2.4 V swing.** 10 Hz is not a notch of
   the 50 ms comb, and it equals the 10/s reading rate, so the leak folds to
   near DC and beats. A second-order comb (sinc², what the datasheet block
-  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square (assuming the owner used the calibrator's 0..9.6 V level from device-check-2026-10-21).
+  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square (the 0..9.6 V level is inferred: the calibrator level of [device-check-2026-10-21.md](device-check-2026-10-21.md)).
   At 0x16 or 0x17, 10 Hz is a notch.
 - **Small changes take 3.2-6.4 s.** That is the default 8 / 16-conversion
   window of MEDIUM / SLOW. User feedback P3 asks for no smoothing by default.
@@ -92,17 +94,23 @@ Before committing, measure four things on the device: H(f) at 0x15 / 0x16 /
 | setting | AD1 OSR | averaging (dmm.rs `Avg`) | readings |
 |---|---|---|---|
 | FAST | 0x15 (8192) always | none | 10/s |
-| MEDIUM (default) | 0x15 while moving, 0x17 once stable (the stock rule) | 8 conversions on V r0..r2 / mV r1 (3.2 s at 0x17), 16 on ohm r0..r3; reset on a step of > ~2 counts | 10/s moving, 2.5/s steady |
-| SLOW | as MEDIUM | 16 everywhere (6.4 s), 32 on ohm r0..r3 | as MEDIUM |
+| MEDIUM (default) | 0x15 while moving, 0x17 once stable (the stock rule) | 8 conversions on V r0..r2 / mV r1 (3.2 s at 0x17), 16 on ohm r0..r3, none elsewhere; reset on a step of > ~2 counts and on every moving-OSR (0x15) conversion | 10/s moving, 2.5/s steady |
+| SLOW | as MEDIUM | 16 on every DC V / mV / A / mA / uA / ohm range (6.4 s), 32 on ohm r0..r3 (12.8 s) | as MEDIUM |
+
+None of this applies in AC+DC (its own phase logic) or to the AC, Hz,
+capacitance, temperature, continuity and diode paths (stock timing in every
+rate, the FR-05 comment in `dmm.rs`).
 
 On top of that, `meter.rs` `Smooth` (`CALC:SMOothing`, OFF / LOW / HIGH, off by
-default) runs a second moving average over the displayed readings, with its
-own step reset (3 counts or 0.05 %). The +1 digit (`Val::ext`) appears in
+default) runs a second moving average over the displayed readings (4 / 16
+readings on DC V / A and ohm), with its own step reset (DC V / A: 3 counts or
+0.05 %; ohm 3 counts or 0.1 %; AC 30 counts or 0.3 %; `meter.rs` per
+function). The +1 digit (`Val::ext`) appears in
 MEDIUM / SLOW once the dmm.rs window holds 8 slow conversions.
 
 The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 (~8.6 counts) and 0x15 otherwise, shows every conversion, and does not average
-(`firmware/docs/acdc-stock-vs-opendm40.md` §4).
+([acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md) §4).
 
 ### 1.2 HY3131 AD1: what the datasheet and app notes say
 
@@ -136,7 +144,7 @@ The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
   "under construction" readme.
 - **Other HY3131 products.** The OWON B35 runs AD1 at OSR 16384 / 32768
   **unchopped**, i.e. 100 / 200 ms, both mains-notching (essentialscrap.com
-  OWON fix, as summarised in `emu/hy3131/RESEARCH.md` §1). The stock DM40
+  OWON fix, as summarised in [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md) §1). The stock DM40
   runs 0x15 / 0x17 chopped (the same RESEARCH.md §3 table). Both stock
   designs stay at the datasheet's 5-10 sps for DC; neither publishes a rate
   setting.
@@ -158,7 +166,7 @@ in the time domain: the sinc² kernel is a 100 ms triangle, so the reading is
 whose rate is the frequency mismatch. That is the "slow swing". The chop pair
 evidently does **not** form a contiguous 100 ms boxcar: a boxcar would null
 10 Hz exactly. That is consistent with the earlier 40 Hz test (40 Hz square
-0..9.6 V read 4.77-4.81 V in DC V, `device-check-2026-10-21.md`): 40 Hz is a
+0..9.6 V read 4.77-4.81 V in DC V, [device-check-2026-10-21.md](device-check-2026-10-21.md)): 40 Hz is a
 notch of every code from 0x14 up. At **0x16 (notches every 10 Hz) and 0x17
 (every 5 Hz), 10 Hz is nulled.** This is a model fitted to two data points;
 §8.3 test 1 checks it.
@@ -169,7 +177,7 @@ change smaller than the reset threshold (2 counts) crawls through the 8- or
 a moving average with a step window (Keithley, DMM7510 and 34465A all do the
 same), but opendm40 applies it **by default** in MEDIUM. The users' P3 praise
 ("settles instantly") and the decision to keep smoothing off by default
-(`user-feedback.md` P3, FR-05 row) argue against that.
+([user-feedback.md](user-feedback.md) P3, FR-05 row) argue against that.
 
 **Where the blind spots are, per code.** A chopped reading every 2·Tc
 aliases any input near k / (2·Tc) to near DC. Those inputs that are not comb
@@ -315,7 +323,7 @@ explains why front-panel defaults are slow on purpose: "if … it is reading
   Third-party drivers expose the same `AVERage` set (repeat / moving / hybrid,
   count 1..100) [pymeasure DMM6500 docs]. A Keithley preset for precise DCV
   uses 5 NPLC, autozero and a 20-reading moving filter [element14 blog,
-  secondary]. The same command set as the DMM7510 is assumed, not verified.
+  secondary]. The same command set as the DMM7510 is assumed (unchecked).
 
 ### 2.7 Fluke 8845A / 8846A (and Tektronix DMM4050)
 
@@ -339,8 +347,8 @@ explains why front-panel defaults are slow on purpose: "if … it is reading
   aperture".
 - **AC filter.** 3 Hz slow / 20 Hz (power-up default) / 200 Hz [p.3-9,
   p.4-6]; 0.47 / 1.64 / 4.5 readings/s [p.1-23].
-- **DMM4050.** Widely reported to be the same platform as the 8846A; **not
-  independently verified** here.
+- **DMM4050.** Widely reported to be the same platform as the 8846A; not
+  checked here.
 
 ### 2.8 Fluke 8508A / 8588A (reference multimeters)
 
@@ -477,12 +485,14 @@ Patterns:
 Common numbers: AD1 periods 100 / 200 / 400 ms at 0x15 / 0x16 / 0x17 (chopped).
 Noise per conversion is assumed white: σ(0x16) ≈ σ(0x15)/√2,
 σ(0x17) ≈ σ(0x15)/2, consistent with the dmm.rs note that one 0x15 conversion
-has ~2x the noise of one 0x17 conversion. Not measured yet (§8.3 test 2). A
+has ~2x the noise of one 0x17 conversion. The device run (§8.3 results) found
+0x17 barely quieter than 0x16, so the white-noise figures are optimistic. A
 single 0x17 conversion has 6-7.5 codes per +1-digit step (the dmm.rs +1 digit
 table), so the +1 digit needs about 8 slow conversions (3.2 s) either way.
 "Step" = a change larger than the filter window; "drift" = a change smaller
-than it. Settling after a step is assumed to take 2 conversions (sinc² spans
-2·Tc, plus the chop pair); §8.3 test 4 measures it.
+than it. Settling after a step was assumed to take 2 conversions (sinc² spans
+2·Tc, plus the chop pair); the device run found the 3rd conversion the first
+good one (§8.3 results).
 
 ### Option A: fixed integration presets only
 
@@ -689,7 +699,8 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
   `CALC:SMO`.
 - UI: the FILT chip and HiRes toggle; the rate chip shows F / M / S.
 - AC+DC keeps its own phase logic (its DC phase at 0x15 is a separate
-  decision, `acdc-*.md`).
+  decision: [acdc-approaches.md](acdc-approaches.md),
+  [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)).
 
 ### 8.3 Device tests before committing (no new hardware needed)
 
@@ -711,7 +722,7 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
    for an FTP-FTN capacitor (a possible Fluke-style analog filter, DS §12.4).
 
 **Results, tests 1-4 and option E (device, 10242c3, 2026-10-24;**
-`device-check-2026-10-21.md` "AD1 OSR characterization (10242c3)"**).** AD1
+[device-check-2026-10-21.md](device-check-2026-10-21.md) "AD1 OSR characterization (10242c3)"**).** AD1
 streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 0 / 1 / 5 V DC and its disabled output (no real short on the bench).
 
@@ -726,12 +737,12 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 | gain vs 0x17 | within ~50 ppm (the calibrator's drift limits it) | | | | |
 | first good conversion after a step or range change | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s | 3rd: 0.8-1.2 s | 3rd: 0.2-0.3 s | 3rd: 0.4-0.6 s |
 
-- Test 1: the dc-aliasing.md kernel (chopped = two sinc^2 conversions one
+- Test 1: the aliasing kernel of §1.3 (chopped = two sinc^2 conversions one
   period apart) predicts the p-p of all 45 streams (9 frequencies x 5 codes)
   within 1 %. Nulled inputs read their mean within +-0.2 mV.
 - Test 2: 0x17 is barely quieter than 0x16 (not the white-noise 1/sqrt(2));
   unchopped 0x07 is noisier than chopped 0x16 at the same 5/s (1/f).
-- Option E: the +22 mV that dcalias saw is an offset (the same at 0, 1 and 5 V),
+- Option E: the +22 mV seen in the earlier aliasing run is an offset (the same at 0, 1 and 5 V),
   not gain. Over 9.5 min it moved 39 uV (0.4 count); corrected by alternating
   0x16 reference blocks it stays within 6 uV sd / 20 uV range. Untested: the
   other ranges and temperature.
@@ -743,20 +754,21 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 
 ## 9. Sources
 
-Local (repository `docs/`):
+The HYCON documents are in [hw/datasheets/](../../hw/datasheets/README.md):
 
-- HYCON DS-HY3131 V10: `docs/DS-HY3131_EN.pdf`: p.4 features (5 Hz output
+- HYCON DS-HY3131 V10: [hycon-hy3131-datasheet-v10.pdf](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf): p.4 features (5 Hz output
   rate), p.13 NMR (5 / 10 sps), §12.4 p.27 pre-filter, §13.1 pp. 30-31 AD1
   (chop, AD1OSR, comb-filter diagram).
-- HYCON APD-DMM001 (EVA test tool): `docs/APD-DMM001_EN.pdf` §1 p.3 (RMS
+- HYCON APD-DMM001 (EVA test tool): [hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf](../../hw/datasheets/hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf) §1 p.3 (RMS
   noise / ENOB, ≥ 1024 samples), §4 p.17 (Avr. Times).
-- HYCON APD-DMM003 (configurations): `docs/APD-DMM003_EN.pdf` §1 p.6 (DCmV
+- HYCON APD-DMM003 (configurations): [hycon-hy313x-configurations-apd-dmm003.pdf](../../hw/datasheets/hycon-hy313x-configurations-apd-dmm003.pdf) §1 p.6 (DCmV
   50/60 Hz pickup, pre-filter advice).
-- HYCON APN-HY3131001 (SPI timing; nothing on rate): `docs/APN-HY3131001_EN.pdf`.
-- `emu/hy3131/RESEARCH.md` §1 (OWON HY3131 OSR, after
+- HYCON APN-HY3131001 (SPI timing; nothing on rate): [hycon-hy313x-spi-appnote-apn-hy3131001.pdf](../../hw/datasheets/hycon-hy313x-spi-appnote-apn-hy3131001.pdf).
+- [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md) §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
-- `firmware/docs/acdc-stock-vs-opendm40.md` §4, `firmware/docs/user-feedback.md` (P3,
-  UF-25, UF-30), `firmware/docs/device-check-2026-10-21.md` (40 Hz square in DC V).
+- [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md) §4,
+  [user-feedback.md](user-feedback.md) (P3, UF-25, UF-30),
+  [device-check-2026-10-21.md](device-check-2026-10-21.md) (40 Hz square in DC V).
 
 Bench / system:
 

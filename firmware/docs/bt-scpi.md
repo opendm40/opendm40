@@ -2,8 +2,11 @@
 
 opendm40 answers SCPI on the meter's Bluetooth serial link, next to the stock
 phone-app protocol, so PyVISA, sigrok and simple loggers can talk to the meter
-without a cable. The same parser as USBTMC handles the commands
-([`src/scpi.rs`](../src/scpi.rs), `Scpi::handle`); only the transport is different.
+without a cable. This page describes the transport, its limits and the host
+setup (also USBTMC on Windows). The same parser as USBTMC handles the commands
+([`src/scpi.rs`](../src/scpi.rs), `Scpi::handle`); the command list and the
+Bluetooth refusals for users are in
+[docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md#bluetooth-differences).
 
 Code: [`src/bt_scpi.rs`](../src/bt_scpi.rs) (dispatcher, command filter, TX ring; no hardware),
 [`src/bt.rs`](../src/bt.rs) (UART4 + DMA, `ScpiPort`), [`src/main.rs`](../src/main.rs) (one `Scpi` session and
@@ -100,7 +103,7 @@ opendm40 therefore refuses `LOG:STATe ON` from Bluetooth when the session's
 nominal rate is above 800 S/s or the source is AD2 (whose slowest rung is
 1200 S/s): `SYST:ERR?` = "Rate too high for Bluetooth"; every AD1 setting
 (LOG:OSR / LOG:CHOP, 2.5 .. 640 S/s) works (640 S/s = 7.7 kB/s, 67 % of
-the link; the 2048-record ring covers 3.2 s of host stalls). `LOG:DATA?`
+the link; the 2048-record ring, `logger::CAP`, covers 3.2 s of host stalls). `LOG:DATA?`
 from Bluetooth while a faster session runs (started over USB) answers an
 empty block and the same error, so it never steals the USB host's
 records. `LOG:DEST DISK` sessions are USB only ("Command protected", as
@@ -108,33 +111,25 @@ records. `LOG:DEST DISK` sessions are USB only ("Command protected", as
 parser and reply builder (logger.rs "Compact LOG:DATA?"): a reply is at
 most 6145 B as with ROWS (DLG: ~4 KiB), built in the same stack buffer
 (`Bt::respond_with`) and queued whole in the 8 KiB TX ring; the refusals
-above do not depend on the format (BT_MAX_HZ is still the ROWS budget; a
-higher limit for the compact formats is not set). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
+above do not depend on the format (`BT_MAX_HZ` in [`src/main.rs`](../src/main.rs) is the ROWS
+budget; there is no higher limit for the compact formats). For AD2 rates use USBTMC or the disk (LOG:DEST DISK,
 [compact-log-format.md](compact-log-format.md) "Fast stream"). Host: `tools/dm40scpi.py --bt
 log --source ad1 --osr 0` (it warns about the ceiling). Emulator check:
 [emu/fastlogtest.py](../../emu/fastlogtest.py) (the refusals, an AD1 session drained over BT).
 
 The module has no RTS/CTS wiring. Classic SPP keeps up with 115200. Over BLE
 (20-byte notifications at the connection interval) the module may not keep up
-with a burst like `LOG:DATA?`. That is not measured yet. Standard software
-uses classic SPP anyway.
+with a burst like `LOG:DATA?` (untested). Standard software uses classic
+SPP anyway.
 
 ## Scope waveform readout
 
-The same commands on USBTMC and Bluetooth ([`src/scope_wav.rs`](../src/scope_wav.rs); the scope
-settings are the meter's, shared by both transports and the screen):
-
-| Command | |
-|---|---|
-| `WAVeform:POINts SCReen\|MAXimum\|<n>` / `?` | SCReen (default): the 400 screen columns (mean code of each). MAXimum: the whole acquisition record (26624 samples; fewer only after a STOP that cut an acquisition short). `<n>`: the record decimated to at most n points (every ceil(len/n)-th sample). `?` = the points the next `WAV:DATA?` holds. |
-| `WAVeform:FORMat BYTE\|WORD` / `?` | BYTE: code >> 2 (0..255). WORD: the 10-bit ADC code as 16-bit little endian (0..1023). |
-| `WAVeform:SOURce CHANnel1` / `?` | Accepted for drivers; one channel. |
-| `WAVeform:PREamble?` | `format,type,points,count,xinc,xorig,xref,yinc,yorig,yref` (Keysight / Rigol order): format 0 BYTE, 1 WORD; type 0 screen columns, 2 record (RAW); count 1. Point i: t = (i - xref) * xinc + xorig seconds from the trigger point (untriggered: the screen centre; screen columns: from the trigger column), volts = (d - yref) * yinc + yorig at the probe tip (wave view: the DMM jacks' V or A). **Changed** from the earlier 4-field `400,xinc,yinc,yorig`. |
-| `WAVeform:DATA?` | `#<d><len><data>`. SCReen + BYTE (the defaults) is the old `#3400` + 400 bytes and still joins other replies (`*OPC?;WAV:DATA?`); every other form is a block of its own. The record forms need the scope stopped: while it runs the reply is `#10` and `SYST:ERR?` = "Settings conflict". |
-| `DIGitize` | One acquisition with the current sweep (Auto: triggered or, after the timeout, untriggered; Normal: the next trigger), then STOP. The sweep setting stays (`SINGle` sets it to Single); roll mode is skipped for it. |
-| `TRIGger:STATus?` | `STOP` (stopped: the record is readable), `WAIT`, `AUTO` (untriggered frames), `TD` (triggered), `RUN` (roll). |
-| `CHANnel1:OFFSet <V>` / `?` | The vertical position as a voltage added to the signal (positive = the trace moves up; Rigol / libscopehal sign), steps of 4 div / 141. |
-| `ACQuire:SRATe?` | The ADC rate of the timebase, S/s (2.5 kS/s at 1 s/div .. 50 MS/s). |
+The commands (`WAV:POIN`, `WAV:FORM`, `WAV:PRE?`, `WAV:DATA?`, `DIG`,
+`TRIG:STAT?`, `CHAN1:OFFS`, `ACQ:SRAT?`) are the same on USBTMC and
+Bluetooth ([`src/scope_wav.rs`](../src/scope_wav.rs); the scope settings are
+the meter's, shared by both transports and the screen):
+[scpi-reference.md, Scope](../../docs/manual/scpi-reference.md#scope). The
+record is `scope::CAP` = 26 624 samples. What differs per transport:
 
 Reading a record: `STOP` (or `SINGle` / `DIGitize` and poll `TRIG:STAT?`
 for `STOP`), `WAV:POIN MAX`, `WAV:FORM WORD`, `WAV:PRE?`, `WAV:DATA?`.
@@ -150,9 +145,8 @@ Over Bluetooth the reply has to fit the 6 KiB reply buffer: a longer one
 is refused with `#10` and "Too much data"; `WAV:POIN 2000` with WORD
 (3.8 kB, 0.33 s on the UART) is the practical full-width record there.
 
-Host: the libscopehal / ngscopeclient driver `alientek_dm40`
-(`../../ngscopeclient-dm40/README.md`) uses exactly this sequence, with
-`DIG` per record.
+Host: the libscopehal / ngscopeclient driver `alientek_dm40` (in a separate
+repository) uses this sequence, with `DIG` per record.
 
 ## Host side
 
@@ -230,7 +224,7 @@ dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
 print(dmm.query('*IDN?'))
 ```
 
-Not yet tried with the meter: only the code 28 state was seen (Windows 11,
+Both ways are untested with the meter: only the code 28 state was seen (Windows 11,
 [device-check-2026-10-21.md](device-check-2026-10-21.md) "b6909d6: ... Windows 11", item 6).
 
 ### sigrok
@@ -263,18 +257,11 @@ sigrok-cli -d scpi-dmm:conn=... -c digits=5 --samples 10     # RATE FAST
 | capacitance, frequency | Auto only | 6nF .. 60mF, 60Hz .. 60MHz (when REL holds one) |
 | continuity, diode, temperature, power | none | |
 
-`Auto` returns to the autorange chosen on the meter (AUTO+ or AUTO; SCPI
-keeps that choice). One range state per V / A button: a bare `VOLT` /
-`CURR` header (`VOLT:RANG:AUTO?`, `CURR:RANG?`, `VOLT:RES?`) names the
-quantity in whatever coupling is selected (DC, AC, AC+DC, AUTO), and in the
-power meter `VOLT:RANG?` / `CURR:RANG?` / `:RANG:AUTO?` answer its V / I
-channel (as `POW:VOLT:RANG?`; sets there: `POW:VOLT:RANG`). An explicit
-coupling (`VOLT:AC:RANG?`) names that coupling's function. A query of a
-function that is not selected is no error: `:RANG:AUTO?` answers 1
-(selecting a function or coupling starts it in autorange), `:RANG?` /
-`:RES?` `+9.91E37` (no range until it is selected); a set naming it is
-"Settings conflict". The same ranges on DM40A / B / C (opendm40 uses the 60000
-counts limits on all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
+Range semantics (one range state per V / A button, queries of a function
+that is not selected, the power meter's channels):
+[scpi-reference.md, SENSe](../../docs/manual/scpi-reference.md#sense-function-coupling-range-rate).
+The same ranges on DM40A / B / C (opendm40 uses the 60000-count limits on
+all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
 600000 counts once the moving average is full (~3.2 s after a change) in DC
 V 600 mV .. 600 V and ohm 600 ohm .. 60 kohm; elsewhere it stays 60000
@@ -299,7 +286,7 @@ or with `CONF:POW`; not selectable from sigrok: its range hunt takes up to
 
 AUTO coupling (`CONF:VOLT:AUTO`, `MEAS:VOLT:AUTO?`, the CURR twins): its
 values before the first DC / AC decision are provisional (shown grey on the
-meter, [switch-latency.md](switch-latency.md) 6) and never answered. `READ?` / `MEAS?` after
+meter, [switch-latency.md](../../docs/history/switch-latency.md) 6) and never answered. `READ?` / `MEAS?` after
 the host's change wait for the decision: ~1.3 s on a DC signal, ~3.5 s on a
 clear AC one; at most until 3.9 s after the coupling was entered
 (`AUTO_WAIT_MS`; a query after that waits at most 0.85 s), then the part AUTO

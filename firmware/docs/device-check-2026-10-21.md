@@ -2899,7 +2899,7 @@ enabled; the meter on the DMM page, DC V AUTO+, RATE FAST.
 
 ## ab7184c: switch latency on the device (2026-10-24 04:15 - 05:35)
 
-The coordinator had installed ab7184c (rust-fw-poc: the fastswitch branch, docs/switch-latency.md 6: the new
+The coordinator had installed ab7184c (rust-fw-poc: the fastswitch branch, ../docs/history/switch-latency.md 6: the new
 function's frame at once, provisional readings in grey, ohm entry 150 ms, V / A entry 300 ms, manual V range 250 ms,
 vet_fresh, the AUTO READ? / MEAS? wait). `*IDN?` = `Alientek,DM40A,<UID>,dm40-fw 0.1`, `DBG:FLASH?`
 `EF4018,4096,0,...`. INFO/FIRMWARE.BIN, read with the page cache dropped, is byte-equal to the image (sha256

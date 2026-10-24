@@ -39,7 +39,7 @@
  *   with it the AD2 stream ISR's entry (device 5f14d38: max_lat 18.8-21.8
  *   us whenever the logger panel drew ASCII26 glyphs, which had grown past
  *   0x08080000; 4.6 us without the panel; docs/dmm-input-scope-feasibility.md
- *   10.3). Code in C costs that per call: only what never runs while a
+ *   11.4). Code in C costs that per call: only what never runs while a
  *   stream does (or seldom, outside the main loop's every-pass path).
  *   DATA loads too, from anywhere >= 0x08080000 (region C's rodata, the
  *   calibration record, the loader data): device b6909d6, the USB volume's

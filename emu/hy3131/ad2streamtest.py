@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""opendm40 AD2 stream ISR (feature ad2-isr, docs/decisions-2026-10-22.md #3) in
+"""opendm40 AD2 stream ISR (feature ad2-isr, docs/history/decisions-2026-10-22.md #3) in
 the emulator: TIMER6 (TIM7, GD32_Timer in dm40.repl) -> IRQ 55 -> the ISR's
 SPI2 reads through HY3131SpiPort; SCPI over USB/IP on one connection.
 
