@@ -53,6 +53,7 @@ cited by message number).
 - [USB](#usb)
 - [Bluetooth](#bluetooth)
 - [DMM front end (HY3131)](#dmm-front-end-hy3131)
+  - [Measured node behaviour](#measured-node-behaviour)
 - [Oscilloscope](#oscilloscope)
 - [Generator](#generator)
 - [Power and battery](#power-and-battery)
@@ -351,7 +352,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Counter | CTA / CTB / CTC, gate preset 0xFC0000 = 0x40000 SYSCLK = 53.3 ms | frequency (reciprocal), capacitance (RC oscillator) |
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
-AD1 on a periodic input aliases (the "AD1 beat"): see `firmware/docs/dc-aliasing.md` (on branch `dcalias`, not merged yet).
+AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../firmware/docs/device-check-2026-10-21.md#ad1-osr-characterization-10242c3-2026-10-24-1433---1545).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
 of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md)).
@@ -436,6 +437,94 @@ through the shunt node (HY3131 PB1 comparator) and the divider tap
 ([`sentinel.rs`](../firmware/src/sentinel.rs), [`power-meter-and-misconnect.md`](../firmware/docs/power-meter-and-misconnect.md) 4.1). A blown fuse cannot be
 seen by the meter (the A side of the fuse has no path into the chip); opendm40's
 "Fuse check" measures A-COM in ohm mode instead.
+
+### Measured node behaviour
+
+What the HY3131 nodes and blocks did on one DM40A with opendm40 rows
+(the commit is the firmware that ran; the A jack was never wired, the
+MR9270S+ calibrator was on V-COM). The firmware rules built on these are in
+[`power-meter-and-misconnect.md`](../firmware/docs/power-meter-and-misconnect.md)
+section 4 (sentinels) and 3 (power meter).
+
+- **AD2 and AD3 on the same node** differ by ~0.1 % in gain: sum X^2 = 9919,
+  sum Y^2 = 9930 in plain AC V r1
+  ([`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md) 10.1).
+- **V on OP2 x1 -> AD3** (the power row: the divider tap through OP2 instead
+  of OP1), against the stock AC V / DC V on the same input (device 7dce69f,
+  the power meter's T1 test; 40 Hz square 0..9.6 V and DC 1 V / 5 V):
+
+  | range | AC part vs stock AC V | DC part vs DC V |
+  |---|---|---|
+  | 6 V | -2.27 % (the square's 0.96 V peak at the tap clips) | slope -2.05 % |
+  | 60 V | -1.63 % | -1.62 %, slope -1.67 % |
+  | 600 V | -0.33 % | -0.32 % |
+
+  The AC and the offset-corrected DC part agree to ~0.1 % on every range and
+  every square frequency: a constant per-range gain of tap + OP2 + AD3. The
+  LPF zero is ~1080 codes on AD3 (~5 mV at AD3, a phantom DC of 0.05 / 0.5 /
+  5 V on 6 / 60 / 600 V) and ~888 codes on AD2 in the x10 current ranges. AD3IN = RLU reads
+  the same gain, AD3IN = PB5 0.58 % lower.
+- **The RMS block's high-pass filter cannot be bypassed** (device 7889e6c):
+  power row, AC, 6 V range, 1.000 V DC on V-COM, R34 frozen at YY. Each
+  reserved bit set alone (R34 bits 6, 1, 0; R26 bit 6; R35 bits 0, 1) left
+  RMS (sum Y^2 / N) at 1803-1863 codes (the noise; 1830 without a poke) and
+  LPF at 21589-21600 codes (the DC); a bypass would give ~21592^2 = 4.7e8.
+- **CTSTA** took only 0x00, 0x10, 0x50 and 0x70 over ~233 000 `DBG:SENT?`
+  reads, never 0x20 or 0x60 (device f0d21eb): CMPHO never comes without
+  CMPLO. *Inferred* reading: CMPHO = node above VRH, CMPLO = node above VRL,
+  ACPO (bit 6) a latch set above VRH and reset below VRL; 0x70 = above the
+  window, 0x50 = inside coming from above, 0x10 = inside coming from below,
+  0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70).
+- **Both bits in one read (0x70)** also mark an overdriven comparator: on
+  PB1 in the ohm rows with 5 V or 10 V DC or the 0 / 9.5 V square on V-COM
+  (1 V and 3 V: no hit), on DC V's V tap with a steady 5 V, and on SENSE in
+  DC A with 24 V on V-COM (devices a2e9766, 2da1011). After leaving ohm or a
+  chip restart the A rows' SENSE comparator reads 0x70 for ~4.4 s, then 0x50
+  (device ad74e93); after the DMM rail came back from the Scope page, 0x70
+  for 7.75 s (device ab7184c).
+- **PB1 follows the V side** in rows that leave it to the input network:
+  - ohm rows: the PB1 comparator trips with 5 V or 10 V on V-COM, not up to
+    3 V (35fce2a); the ohm row's input buffer OP1O then peaks at 2.14 V (5 V,
+    60 MΩ row), 2.25 V (5 V, 600 Ω), 2.02-2.03 V (10 V), 2.13 V (the square)
+    and does not follow the source (a2e9766; why is unknown, *inferred*:
+    clipped or limited);
+  - continuity: the AD2 peak on PB1 read -97 000..+123 000 (~±230 mV at PB1)
+    at 5 V DC and ±400 at 1 V (f0d21eb);
+  - frequency: the AD1 peak on PB1 - PB3 (the AC rows' settings) stands at
+    ~+41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at 5 V,
+    -850 at 10 V (f3aea2f); the row leaves the input divider open (R2C / R2D
+    0);
+  - DC V 60 / 600 / 1000 V: the comparator on PB1 tripped for as long as
+    10 V was on V-COM, never on 6 V at 1 V (9dd1222). Those rows drive the
+    power bus from OP3 (R2F SMODE 0100, PS6 + PS8 closed); the 6 V row leaves
+    it off.
+- **OP1's chopper** (OP1CHOP = 10, 2 kHz in the stock AC V row, with AD1 off)
+  starts when AD1 is turned on in that row: a 2 kHz square of OP1's offset
+  (x10 in 6 V) at OP1O -> PB4 put a constant ~37 mV RMS floor on AC V 6 V
+  (9dd1222). *Inferred*: the chopper clock runs only while AD1 converts (the
+  stock pairs them in DC V 6 V and DC A).
+- **SENSE and PB5 in the A rows are not driven** (*inferred*: those rows run
+  the power bus as SGND with PA8 P):
+  - PB5 is defined only by the DC V 60 V+ rows (their power bus / OP3). In
+    the AC A rows AD1 on SENSE - PB5 ran from ~-117 000 codes at 0.7 s to the
+    negative rail (-262 144) by ~2 s with V-COM open, 1, 5, 10 or 24 V alike
+    (f0d21eb);
+  - AD1 on SENSE - AGND (the /1000 tap through SS5) sat at the negative rail
+    (below -347 mV at IG 3.6) from ~0.9 s with 1 V or the source off and
+    ramped there over ~3 s with 24 V DC, 9 000-12 000 codes per 107 ms peak
+    hold (0774e70);
+  - the DC A comparator on SENSE reads 0 (below VRL: SENSE > ~21 mV low) with
+    V-COM open; 24 V on V/Ω is 24 mV at the /1000 tap against the 20.8 mV
+    threshold (f0d21eb). After a DC V 60 V+ row, an ohm-network row or a chip
+    restart it missed 24 V in DC A, with R20..R37 reading back the same in
+    every entry; 100 / 300 / 1000 ms of the temperature row before DC A
+    brought the trip back at 1.9 / 2.1 / 2.8 s (0774e70). *Inferred*: board
+    state (the divider and its capacitors, the power bus / PA8 node, the relay).
+
+Sources: [device-check-2026-10-21.md](../firmware/docs/device-check-2026-10-21.md)
+sections by commit ("9dd1222", "f3aea2f", "35fce2a", "ad74e93", "ab7184c",
+"f0d21eb", "0774e70", "a2e9766: bug-fix recheck"); 7dce69f (T1) and 7889e6c
+(HPF) are recorded here only.
 
 ## Oscilloscope
 

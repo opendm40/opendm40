@@ -44,7 +44,7 @@ Short names: "acdc" = [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-
   **DTM0660**; if a different part was meant, that row is open.
 * **No DMM chip surveyed has a native AC+DC mode.** The HY3131's RMS block is
   defined after a high-pass filter (datasheet 13.2), no reserved bit bypasses
-  it (device probe, power doc "HPF bypass probe"), and HYCON gives no AC+DC
+  it (device probe, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)), and HYCON gives no AC+DC
   recipe anywhere: APD-DMM003 configures ACV and DCV separately, and HYCON's
   own ENOB tool runs its ACV reference row with **AD1 off** (R23 = 0x03).
   DTM0660 (DSP RMS, 1 kHz) lists no AC+DC mode; FS9922-DMM4 is an
@@ -135,7 +135,7 @@ Reading of the table:
 
 | chip | AC method | AC+DC | source |
 |---|---|---|---|
-| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (power doc "HPF bypass probe", 7889e6c). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; HYCON's "DemoCode" zips contain only a "website under construction" readme. HYCON's ENOB tool (`HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
+| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (7889e6c, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; HYCON's "DemoCode" zips contain only a "website under construction" readme. HYCON's ENOB tool (`HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
 | HYCON HY3132 | nothing found on the web (no datasheet, no mention) | UNKNOWN | - |
 | Dream Tech DTM0660 | "built-in DSP, it can measure true RMS up to 1 kHz without any additional components", "AC Rectification: built-in true RMS processor ... 1 kHz bandwidth, error < 0.5 %", 14-bit sigma-delta, 3 readings/s | not in the feature list; function table has DC/AC only | DTM0660 datasheet p. 1-2 (shaddack mirror) |
 | Fortune FS9922-DMM4 | "AC rectifier OPAMP" (average responding, no RMS) | none (DC/AC mode bit per function) | FS9922-DMM4 DS rev 1.3, sec. 12.10, function table |
