@@ -80,7 +80,7 @@ off the meter. Charge the battery.
 5. **The first boot is dark for a few seconds.** Do not power-cycle in the
    first 10 s.
 
-What is verified: fw-rs installs from a running fw-rs (`tools/reload.sh`)
+Tested: fw-rs installs from a running fw-rs ([`tools/reload.sh`](tools/reload.sh))
 and from the vendor loader's update screen. Steps 2-4 were used on this meter
 with a stock-size image (the patched stock of the memrw kit) but **not yet
 with an fw-rs image**. The stock app can also flash a `dm40*.bin` from its
@@ -107,15 +107,14 @@ disk on every boot until a good file is installed.
 
 To reach the update screen:
 
-- `python3 tools/dm40dbg.py update` (`DBG:UPDATE`) while fw-rs answers on USB
-  (device-checked);
+- `python3 tools/dm40dbg.py update` (`DBG:UPDATE`) while fw-rs answers on USB;
 - with fw-rs's drive in "PC can edit" mode (Settings 3/3, "USB disk"), copy a
   `dm40*.bin` onto it and answer "Install it now?" with Yes: fw-rs hands that
   file to the loader directly;
 - from off, hold the power key ~5 s: the screen lights, ~4 s later the
   backlight blinks and it beeps; keep holding at least 0.5 s after the beep.
   Letting go during those 0.5 s cancels (normal start). Checked in the
-  emulator (`../emu/recoverytest.py`), not yet on the device;
+  emulator ([`../emu/recoverytest.py`](../emu/recoverytest.py)), not yet on the device;
 - automatically after a second hang (watchdog reset) before fw-rs has run
   60 s since the first one: the first hang only reboots fw-rs, a second one
   with less than 60 s of running in between opens the update screen. Each
@@ -123,8 +122,7 @@ To reach the update screen:
   ~80 s apart. Checked in the emulator, not yet on the device;
 - if fw-rs is too broken for any of these, whatever the firmware does: open
   the case and short the debug header's TX pad (PA2) to GND at power-on, see
-  [hw/README.md, Hardware recovery](../hw/README.md#hardware-recovery)
-  (owner-checked on the device).
+  [hw/README.md, Hardware recovery](../hw/README.md#hardware-recovery).
 
 Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
 "update". The loader deletes the file after a successful install.
@@ -141,8 +139,8 @@ not leave files with that name there by accident.
 **Back to stock:** copy the official
 [`dm40_v_2_6.bin`](../firmware/vendor/dm40_v_2_6.bin)
 onto the loader's disk and press "update", or run
-`tools/reload.sh --stock FILE` while fw-rs runs (device-checked with patched
-stock). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
+`tools/reload.sh --stock FILE` while fw-rs runs (tested with a patched stock
+image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
 
 ## Build
 
