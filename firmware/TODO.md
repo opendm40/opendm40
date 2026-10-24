@@ -2132,7 +2132,7 @@ Firmware:
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
       "MCX | DMM" source badge; the AD2 stream drained into the scope record (continuous, 10-bit codes), the stock
-      page unchanged around it: 5 ms..50 s/div (9600 / 4800 / 2400 / 1200 S/s per band, roll from 200 ms/div),
+      page unchanged around it: 1 ms..50 s/div (76 800 / 38 400 / 9600 / 4800 / 2400 / 1200 S/s per band, roll from 200 ms/div; opens at 10 ms/div),
       V/div = the DMM range (+ / - step it), coupling = the row's (AC V AC-coupled, mV / A DC-coupled, no DC V
       row: says so), units V / A, measurements / cursors / STOP / zoom / Save CSV / FFT as the MCX scope; trigger
       (edge / pulse / runt) detected per sample IN the stream ISR (trigsoft::Stream; no dead time; decision #3
