@@ -1052,6 +1052,7 @@ impl Logger {
         let t = ring.tail.load(Relaxed);
         let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len() / REC_BYTES);
         let base = ring.buf.get() as *const Rec;
+        let mut last = 0u32;
         for i in 0..n {
             let k = t.wrapping_add(i as u32);
             // SAFETY: k is below the Acquire-loaded head: published, and the
@@ -1062,8 +1063,15 @@ impl Logger {
             out[o..o + 4].copy_from_slice(&seq.to_le_bytes());
             out[o + 4..o + 8].copy_from_slice(&r.ts_us.to_le_bytes());
             out[o + 8..o + 12].copy_from_slice(&r.raw.to_le_bytes());
+            last = r.ts_us;
         }
         ring.tail.store(t.wrapping_add(n as u32), Release);
+        if n > 0 {
+            // A compact reply after this one counts its lost_before from
+            // here (LOG:FORMat may change between replies).
+            self.drained_ts = last;
+            self.drained = true;
+        }
         n * REC_BYTES
     }
 
@@ -2343,6 +2351,44 @@ mod tests {
                 writeln!(f, "{} {} {} {}", i + 1, x.0 & 0xFFFF_FFFF, x.1, x.2).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn fmt_switch_between_replies() {
+        // ROWS -> PACKed -> ROWS -> DLG in one session: each compact reply's
+        // lost_before counts from the last record of the previous reply,
+        // whatever its format.
+        let p = 104_167u32;
+        let mut l = session(true, p);
+        let par = FmtPar { rate_mhz: 9_600_000, a: 0.0, b: 0.0 };
+        let mut out = std::vec![0u8; 6144];
+        let mut t = 0u64;
+        let mut fill = |l: &mut Logger, n: u64, hole: u64| {
+            t += hole * 104_167 / 1000;
+            for _ in 0..n {
+                feed(l, t, 5);
+                t += 104;
+            }
+        };
+        fill(&mut l, 100, 0);
+        l.set_fmt(FMT_ROWS);
+        assert_eq!(l.encode_fmt(&mut out, &par), 6 + 1200);
+        fill(&mut l, 100, 4);
+        l.set_fmt(FMT_PACKED);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        decode(&out[..n], &mut r);
+        assert_eq!((r[0].0, r[0].3, out[6 + FMT_HDR + 11]), (101, 4, FL_GAP));
+        fill(&mut l, 100, 0);
+        l.set_fmt(FMT_ROWS);
+        l.encode_fmt(&mut out, &par);
+        fill(&mut l, 100, 7);
+        l.set_fmt(FMT_DLG);
+        let n = l.encode_fmt(&mut out, &par);
+        let mut r = std::vec::Vec::new();
+        decode(&out[..n], &mut r);
+        assert_eq!((r[0].0, r[0].3), (301, 7));
+        assert!(r[1..].iter().all(|x| x.3 == 0));
     }
 
     #[test]
