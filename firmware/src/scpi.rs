@@ -544,6 +544,10 @@ pub enum Log {
 ///                           (0 V/A, 1 ohm network, 255 unknown), mode, range,
 ///                           a_blind (1 = no temperature row since DC V 60 V+ /
 ///                           an ohm-network row / a chip restart)
+///   DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF   ohm-source map row (src/dbgsrc.rs):
+///                           OP3 VREF = SFUVR tap <vref> on the stock ohm / diode row <path>
+///   DBG:SRC?                0 | 1,cycles,vref,path,sense,V_in,V_far,I,V_vref,V_drop,V_com,
+///                           VDDA-AGND,AGND-VSS;10 AD1 codes;R20..R35 hex
 ///   DBG:SENTinel:PRECond <ms> / ?  RAM only, default 100, 0 = off: entering
 ///                           DC A / mA / uA while a_blind (V-JACK? enabled),
 ///                           run the temperature row for <ms> (<= 2000, blocking)
@@ -882,6 +886,9 @@ pub enum Cmd {
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
     DbgSentReg,
+    /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
+    /// the ohm-source map row (src/dbgsrc.rs).
+    DbgSrc(Option<crate::dbgsrc::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
     DbgSentPrec(Option<u16>),
@@ -2156,6 +2163,16 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"SRC" => {
+                    if query {
+                        out = Out::Instr(Cmd::DbgSrc(None));
+                    } else {
+                        match crate::dbgsrc::parse(arg) {
+                            Some(r) => out = Out::Instr(Cmd::DbgSrc(Some(r))),
+                            None => self.err = Some("Illegal parameter value"),
+                        }
+                    }
+                }
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "PRECond")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentPrec(None)),
