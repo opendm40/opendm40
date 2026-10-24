@@ -6,7 +6,7 @@ RAMRD (emu/peripherals/ILI9488.cs: dummy word, RGB666 packed 2 pixels per 3
 words, as the real panel; the device itself must still be checked).
 
   cd firmware && ./build.sh
-  emu/shottest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--out DIR]
+  emu/shottest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--out DIR]
 
 Per screen (DMM DC V with HOLD on; the Settings menu; the combined DMM +
 scope view, scope STOPped):

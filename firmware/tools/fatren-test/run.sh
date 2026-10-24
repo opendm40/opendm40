@@ -378,7 +378,7 @@ PY
     echo "ok: FIRMWARE.BIN byte-identical to $(basename $2), valid update file"
 }
 STOCK=../../../dm40_v_2_6.bin
-NATIVE=../../dm40-fw-native.bin
+NATIVE=../../opendm40.bin
 # Untracked inputs (L5): stand-ins when absent.
 # mkbody <len> <out>: random body with the 12 marker-gap bytes at 0x4000 0xFF.
 mkbody() {

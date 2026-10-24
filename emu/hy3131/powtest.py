@@ -6,7 +6,7 @@ POW:VOLT:RANG?, POW:CURR:RANG? in a loop); the last samples of every phase
 must match its expectation.
 
   emu/hy3131/powtest.py                          # all scenarios, fw-rs built from HEAD
-  emu/hy3131/powtest.py --app firmware/dm40-fw-native.bin --port 3381 mains
+  emu/hy3131/powtest.py --app firmware/opendm40.bin --port 3381 mains
   emu/hy3131/powtest.py --list
 
 FETC:POW:ALL? fields: P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V.

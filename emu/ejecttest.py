@@ -6,7 +6,7 @@ attach`), mounted and ejected with udisks / gio as a desktop does.
 02/3A/00, until a re-plug; Windows used to mount it again at once.)
 
   cd firmware && ./build.sh
-  emu/ejecttest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--port P]
+  emu/ejecttest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P]
 
 Steps (exit status 0 = PASS):
   live       "Files live" (read-only) volume: mounted, README.TXT read,
@@ -50,8 +50,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF')
-ap.add_argument('--image', default=os.path.join(ROOT, 'firmware/dm40-fw-native.bin'),
-                help='update file copied in the install step (default firmware/dm40-fw-native.bin)')
+ap.add_argument('--image', default=os.path.join(ROOT, 'firmware/opendm40.bin'),
+                help='update file copied in the install step (default firmware/opendm40.bin)')
 ap.add_argument('--port', type=int, default=None,
                 help='emulator USB/IP port (default: a free one in 61000-64999, run.free_port)')
 ap.add_argument('--steps', default='live,poweroff,install')

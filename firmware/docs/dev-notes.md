@@ -9,7 +9,7 @@ Calibration and the vendor boot data are read from their stock locations, never
 rewritten (served read-only on the USB disk, plus one write-once safety copy
 of the calibration on the SPI flash).
 
-fw-rs is installed like a stock update: `dm40-fw-native.bin` is a vendor-format
+fw-rs is installed like a stock update: `opendm40.bin` is a vendor-format
 update file that the vendor FS-loader flashes to `0x08004000`; a small shim in
 front of it handles the power key, the watchdog and recovery
 ([native-boot.md](native-boot.md)). This is the only build.
@@ -194,7 +194,7 @@ Needs the pinned toolchain in `../toolchain` (rustup + stable +
 `thumbv7em-none-eabihf`); crates come from crates.io into `../toolchain/cargo`.
 
 ```
-./build.sh [cargo args]          # -> dm40-fw-native.bin (vendor update file, 0x08004000)
+./build.sh [cargo args]          # -> opendm40.bin (vendor update file, 0x08004000)
 tools/fatren-test/run.sh         # host tests (also tools/genuine-test/run.sh)
 ```
 
@@ -220,7 +220,7 @@ steps and what is verified: [README.md, Install](../README.md#install).
 
 **Recovery** (fw-rs hangs or does not start) and the update-file rules:
 [README.md, Recovery](../README.md#recovery). `INFO/FIRMWARE.BIN` on the USB
-volume (the running image) or `dm40-fw-native.bin` both work as the image.
+volume (the running image) or `opendm40.bin` both work as the image.
 
 **Back to stock** from a running fw-rs: `tools/reload.sh --stock FILE` with
 `../stock/patch/build-memrw/dm40_patched.bin` (patched stock with Bluetooth

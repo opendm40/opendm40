@@ -180,7 +180,7 @@ def apply(v, host_before, host_after, order='asc', expect=W_OK, seed=1):
     # cluster as it was, so after a delete + copy into the freed clusters it
     # still holds the deleted file's bytes there while the volume (rightly)
     # has the zeros written here (a short DM40FW.BIN, e.g. run.sh's synthetic
-    # stand-in for a missing dm40-fw-native.bin: "holes" failed every time).
+    # stand-in for a missing opendm40.bin: "holes" failed every time).
     fa, fb = g.fat(), Geo(host_after).fat()
     have = {l for l, _ in ws}
     z = bytes(SECTOR)

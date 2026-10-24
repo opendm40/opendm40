@@ -614,7 +614,7 @@ What must change:
   typical frame costs 1–3 ms.
 
 **Memory** (native build, measured from the current
-`target/native/.../dm40-fw`):
+`target/native/.../opendm40`):
 
 | Resource | Free |
 |---|---|

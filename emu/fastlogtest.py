@@ -4,7 +4,7 @@ emulator, with the W25Q128 model's busy timing on (page program / erase
 times, virtual time): the sustainable rate into the flash per rung.
 
   cd firmware && ./build.sh
-  emu/fastlogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/fastlogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Per flash profile (--profiles: typ = tPP 0.4 ms, tSE 45 ms, tBE64 150 ms;
 max = 3 ms, 400 ms, 2 s; datasheet W25Q128JV) and per session (--sessions:
@@ -701,8 +701,8 @@ if A.region_c:
     # watch would still report it (prep_step loads its literal pool from
     # region C: "data screenshot::prep_step+0x.. <- 0x0808....").
     RC = regionc.Hooks(A.app, os.path.join(HERE, 'out'), 'fastlog-%d-%d' % (A.port, os.getpid()),
-                       exclude=('fastlog::prep::', 'dm40_fw::fatren::',
-                                'dm40_fw::screenshot::prep_step', 'dm40_fw::screenshot::disk'))
+                       exclude=('fastlog::prep::', 'opendm40::fatren::',
+                                'opendm40::screenshot::prep_step', 'opendm40::screenshot::disk'))
     if not RC.script:
         sys.exit('fastlogtest: --region-c needs llvm-nm and the ELF symbols')
 for profile in A.profiles.split(','):

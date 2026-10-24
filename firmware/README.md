@@ -71,7 +71,7 @@ up the unit data from its USB drive, as in
 [README.md, Back up with fw-rs](../README.md#back-up-with-fw-rs). Charge the
 battery.
 
-1. Build `dm40-fw-native.bin` (see "Build" below).
+1. Build `opendm40.bin` (see "Build" below).
 2. On the stock meter: Settings > Other Settings > USB Connect.
 3. Copy the file onto that USB disk as `dm40_fwrs.bin`, as the only
    `dm40*.bin` there ([why](#recovery)). Eject.
@@ -145,7 +145,7 @@ image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).
 ## Build
 
 ```
-./build.sh                    # -> dm40-fw-native.bin (needs ../toolchain)
+./build.sh                    # -> opendm40.bin (needs ../toolchain)
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 ../emu/run.py fwrs --run-for 4 --shot out.png   # run fw-rs in the emulator

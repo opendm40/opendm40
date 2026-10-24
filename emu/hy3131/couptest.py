@@ -7,7 +7,7 @@ VOLT:COUP? / CURR:COUP?, FETCh?, FUNCtion? in a loop); the last samples of
 every phase must match its expectation.
 
   emu/hy3131/couptest.py                          # all scenarios, fw-rs built from HEAD
-  emu/hy3131/couptest.py --app firmware/dm40-fw-native.bin --port 3391 v
+  emu/hy3131/couptest.py --app firmware/opendm40.bin --port 3391 v
   emu/hy3131/couptest.py --list
   emu/hy3131/couptest.py --meth C v i        # on AC+DC method B / C (acdcm.rs)
 

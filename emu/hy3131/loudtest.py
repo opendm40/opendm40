@@ -14,8 +14,8 @@ pitch (ARR 11199) and CCR1 0 after every stop, the setting Off (no alarm),
 Volume (the alarm at the key volume), V-JACK? (no alarm) and a current above
 the 10 A rating.
 
-  emu/hy3131/loudtest.py --app firmware/dm40-fw-native.bin --port 53101          # all
-  emu/hy3131/loudtest.py --app firmware/dm40-fw-native.bin --port 53101 aprot ajack
+  emu/hy3131/loudtest.py --app firmware/opendm40.bin --port 53101          # all
+  emu/hy3131/loudtest.py --app firmware/opendm40.bin --port 53101 aprot ajack
   emu/hy3131/loudtest.py --list
 
 The key / alert volume is set to 0 % (SYST:BEEP:VOL 0, the owner's setting):

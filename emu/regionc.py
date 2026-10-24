@@ -73,7 +73,7 @@ class Hooks:
                 self.funcs.append((a & ~1, p[2]))
             if p[1] in 'tT' and C_LO <= a < C_HI and not any(x in p[2] for x in exclude):
                 self.syms[a & ~1] = p[2]
-            elif p[2].startswith('dm40_fw::hy3131::HANDED'):
+            elif p[2].startswith('opendm40::hy3131::HANDED'):
                 handed = a
         if handed is None or not self.syms:
             return

@@ -5,7 +5,7 @@ input step under AUTO range) to the first reading and to the reading within
 scripted timeline per firmware (firmware/docs/switch-latency.md).
 
   cd firmware && ./build.sh
-  emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+  emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 \
       --port 45010 --rate MED --json emu/out/swl-fwrs-med.json
   emu/hy3131/switchlat.py stock --json emu/out/swl-stock.json
   emu/hy3131/switchlat.py report emu/out/swl-*.json

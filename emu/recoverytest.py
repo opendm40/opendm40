@@ -4,7 +4,7 @@ through the whole boot chain: ROM -> FS-loader -> fw-rs, the real vendor
 FS-loader included (run.py chain mode).
 
   cd firmware && ./build.sh
-  emu/recoverytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/recoverytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 The emulator models what the shim decides on (emu/peripherals/FWDGT.cs):
 the free watchdog resets the machine ~20 s after the last reload, RCU_RSTSCK
@@ -95,9 +95,9 @@ def word(path, off):
 
 
 SYMS = nm(A.app)
-HANG = SYMS['dm40_fw::wait_for_watchdog']
-RECOVERY = SYMS['dm40_fw::recovery::run']
-HELD_FOR = SYMS['dm40_fw::boot::held_for']  # the shim's key-hold windows (4 s, then 0.5 s)
+HANG = SYMS['opendm40::wait_for_watchdog']
+RECOVERY = SYMS['opendm40::recovery::run']
+HELD_FOR = SYMS['opendm40::boot::held_for']  # the shim's key-hold windows (4 s, then 0.5 s)
 with open(A.app, 'rb') as f:
     ELF_ENTRY = struct.unpack_from('<I', f.read(0x40), 0x18)[0] & ~1
 ROM_RESET = word(run.DUMP, 4) & ~1

@@ -210,7 +210,7 @@ Code work (in this order):
         it on). The native image has room for the 83 KB; sector-8 RAM layout does not.
   - [x] clock.rs: own PLL bring-up (`init_core`, measured stock RCU_PLL 0x29406419, no FLASH_ACR
         write, bounded waits, IRC16M fallback). (device-verified by T1)
-  - [x] Native build (`./build.sh native` -> dm40-fw-native.bin): shim (FWDGT, power hold, reset
+  - [x] Native build (`./build.sh native` -> opendm40.bin): shim (FWDGT, power hold, reset
         flags, PD6 hold 2.5 s, WDT only after our own normal boot), recovery = zero the loader
         marker + reset, board init audit, fatren (rename installed dm40*.bin to _DM40PRV.BIN,
         cold boot + valid marker only). See docs/native-boot.md "Implementation".
@@ -2329,7 +2329,7 @@ Firmware:
             TCM failed the 42 KiB TCM stack assert): fixed (MSC_BLK in .sram_bss when the SPI disk is the
             LUN). tools/build-variants/run.sh builds recovery-usb, recovery-file, no-ad2-isr, spi-disk (no
             vdisk), fatren-dry-run and keep-screen with all build.sh checks into target/variants/ (build.sh
-            DM40_TDIR / DM40_OUT; dm40-fw-native.bin untouched), ~2 min; part of the tools/*/run.sh suite.
+            DM40_TDIR / DM40_OUT; opendm40.bin untouched), ~2 min; part of the tools/*/run.sh suite.
             (2376145: all six ok; recovery-usb stack headroom 21 856, B 46 780, C 23 004 free.)
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is

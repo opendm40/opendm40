@@ -99,43 +99,43 @@ SECTIONS
 
     /* Claimed before .text (the first matching rule wins), placed in C by
      * its region. Module paths in the v0-mangled section names:
-     * <len><name> after the crate (7dm40_fw). */
+     * <len><name> after the crate (8opendm40). */
     .cold ORIGIN(FLASH_C) :
     {
         __cold_start = .;
-        *(.text.*7dm40_fw9calbackup*);
-        *(.text.*7dm40_fw6fatren*);
-        *(.text.*7dm40_fw6native*);
-        *(.text.*7dm40_fw3uid4init*);
-        *(.text.*7dm40_fw8recovery*);
-        *(.text.*7dm40_fw7genuine*);
-        *(.text.*7dm40_fw7gallery*);
-        *(.text.*7dm40_fw10screenshot*);
-        *(.text.*7dm40_fw4dlog*);
-        *(.text.*7dm40_fw6fatdir*);
-        *(.text.*7dm40_fw5vdisk*);
-        *(.text.*7dm40_fw6upload*);
-        *(.text.*7dm40_fw5hyspi*);
+        *(.text.*8opendm409calbackup*);
+        *(.text.*8opendm406fatren*);
+        *(.text.*8opendm406native*);
+        *(.text.*8opendm403uid4init*);
+        *(.text.*8opendm408recovery*);
+        *(.text.*8opendm407genuine*);
+        *(.text.*8opendm407gallery*);
+        *(.text.*8opendm4010screenshot*);
+        *(.text.*8opendm404dlog*);
+        *(.text.*8opendm406fatdir*);
+        *(.text.*8opendm405vdisk*);
+        *(.text.*8opendm406upload*);
+        *(.text.*8opendm405hyspi*);
         /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV?) and main.rs dbg_dcv: in
          * region B since region C audit #1 (relocated, 3.8 KB, while B had
          * ~80 KB free; on-demand DBG replies, zero-wait is no cost). */
-        *(.text.*7dm40_fw9scope_csv*);
+        *(.text.*8opendm409scope_csv*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
          * polls them while the Wave view's stream runs (device e7ec2cc:
          * max_lat 6.16 us at scope_wav::query; emu/hy3131/wavetest.py
          * polls them under the region C hooks). Region B, ~2 KB. */
-        *(.text.*7dm40_fw4boot*);
-        *(.text.*7dm40_fw3app9app_press*);
+        *(.text.*8opendm404boot*);
+        *(.text.*8opendm403app9app_press*);
         /* Inrush current: open / arm / close / results / save glue and the
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
-        *(.text.*7dm40_fw3app10app_inrush*);
-        *(.text.*7dm40_fw2ui3inr4page*);
-        *(.text.*7dm40_fw2ui3inr5trace*);
-        *(.text.*7dm40_fw6inrush*3Cap7results*);
-        *(.text.*7dm40_fw6inrush*3Cap9linearize*);
-        *(.text.*7dm40_fw6inrush*3Cap7records*);
+        *(.text.*8opendm403app10app_inrush*);
+        *(.text.*8opendm402ui3inr4page*);
+        *(.text.*8opendm402ui3inr5trace*);
+        *(.text.*8opendm406inrush*3Cap7results*);
+        *(.text.*8opendm406inrush*3Cap9linearize*);
+        *(.text.*8opendm406inrush*3Cap7records*);
         /* dlog's per-reading row coder is `.text.dlog_row` (src/dlog.rs),
          * not matched here: region B. So is `.text.vdisk_rd`: the USB
          * volume's per-sector read path (VDisk::read_block, the FAT / data
@@ -149,53 +149,53 @@ SECTIONS
         /* The fast logger's Prep / Stop (fastlog::prep: before / after the
          * logger session, never while the AD2 ISR streams); its Run and
          * fastenc.rs stay in B. */
-        *(.text.*7dm40_fw7fastlog4prep*);
-        *(.text.*7dm40_fw9fast_head*);
-        *(.text.*7dm40_fw10fast_start*);
-        *(.text.*7dm40_fw8fast_req*);
-        *(.text.*7dm40_fw12log_on_check*);
-        *(.text.*7dm40_fw10stale_read*);
+        *(.text.*8opendm407fastlog4prep*);
+        *(.text.*8opendm409fast_head*);
+        *(.text.*8opendm4010fast_start*);
+        *(.text.*8opendm408fast_req*);
+        *(.text.*8opendm4012log_on_check*);
+        *(.text.*8opendm4010stale_read*);
         /* NOT fast_scpi (LOG:DEST / LOG:DURation, set and query): region B.
          * Device b6909d6: LOG:DEST? / LOG:DUR? in the Wave view at 76800
          * gave late 1, max_lat 2.8 / 5.8 us at lat_pc fast_scpi. */
-        *(.text.*7dm40_fw12fast_next_hz*);
-        *(.text.*7dm40_fw7fastlog5begin*);
-        *(.text.*7dm40_fw7fastlog10plan_bytes*);
-        *(.text.*7dm40_fw11fast_events*);
-        *(.text.*7dm40_fw2ui11record_page*);
-        *(.text.*7dm40_fw3app*3App11record_page*);
-        *(.text.*7dm40_fw3app*3App9fast_rate*);
-        *(.text.*7dm40_fw3app*3App15record_fast_tap*);
-        *(.text.*7dm40_fw3app*3App16record_page_fast*);
-        *(.text.*7dm40_fw3app*3App10fast_ended*);
-        *(.text.*7dm40_fw3dmm*3Dmm7wd_slow*);
+        *(.text.*8opendm4012fast_next_hz*);
+        *(.text.*8opendm407fastlog5begin*);
+        *(.text.*8opendm407fastlog10plan_bytes*);
+        *(.text.*8opendm4011fast_events*);
+        *(.text.*8opendm402ui11record_page*);
+        *(.text.*8opendm403app*3App11record_page*);
+        *(.text.*8opendm403app*3App9fast_rate*);
+        *(.text.*8opendm403app*3App15record_fast_tap*);
+        *(.text.*8opendm403app*3App16record_page_fast*);
+        *(.text.*8opendm403app*3App10fast_ended*);
+        *(.text.*8opendm403dmm*3Dmm7wd_slow*);
         /* Burden voltage SCPI (FETC:BURD?, DISP:BURD, POW:BURD's shunt). */
-        *(.text.*7dm40_fw3app*3App11burden_scpi*);
-        *(.text.*7dm40_fw3app*3App12burden_shunt*);
-        *(.text.*7dm40_fw3dmm*3Dmm9burden_of*);
+        *(.text.*8opendm403app*3App11burden_scpi*);
+        *(.text.*8opendm403app*3App12burden_shunt*);
+        *(.text.*8opendm403dmm*3Dmm9burden_of*);
         /* "Leads in A?" reminder's beep / toast (once per function change;
          * the per-pass check App::leads_tick stays in B). */
-        *(.text.*7dm40_fw3app*3App12leads_remind*);
-        *(.text.*7dm40_fw3app*3App11leads_toast*);
+        *(.text.*8opendm403app*3App12leads_remind*);
+        *(.text.*8opendm403app*3App11leads_toast*);
         /* NOT persist: its crc runs on every main-loop pass (device
          * f5f8e96: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */
-        *(.rodata.*7dm40_fw9calbackup*);
-        *(.rodata.*7dm40_fw6fatren*);
-        *(.rodata.*7dm40_fw6native*);
-        *(.rodata.*7dm40_fw8recovery*);
-        *(.rodata.*7dm40_fw7genuine*);
-        *(.rodata.*7dm40_fw7gallery*);
-        *(.rodata.*7dm40_fw10screenshot*);
-        *(.rodata.*7dm40_fw4dlog*);
-        *(.rodata.*7dm40_fw6fatdir*);
-        *(.rodata.*7dm40_fw5vdisk*);
-        *(.rodata.*7dm40_fw6upload*);
-        *(.rodata.*7dm40_fw5hyspi*);
-        *(.rodata.*7dm40_fw9scope_csv*);
-        *(.rodata.*7dm40_fw4boot*);
-        *(.rodata.*7dm40_fw3app9app_press*);
-        *(.rodata.*7dm40_fw7fastlog4prep*);
+        *(.rodata.*8opendm409calbackup*);
+        *(.rodata.*8opendm406fatren*);
+        *(.rodata.*8opendm406native*);
+        *(.rodata.*8opendm408recovery*);
+        *(.rodata.*8opendm407genuine*);
+        *(.rodata.*8opendm407gallery*);
+        *(.rodata.*8opendm4010screenshot*);
+        *(.rodata.*8opendm404dlog*);
+        *(.rodata.*8opendm406fatdir*);
+        *(.rodata.*8opendm405vdisk*);
+        *(.rodata.*8opendm406upload*);
+        *(.rodata.*8opendm405hyspi*);
+        *(.rodata.*8opendm409scope_csv*);
+        *(.rodata.*8opendm404boot*);
+        *(.rodata.*8opendm403app9app_press*);
+        *(.rodata.*8opendm407fastlog4prep*);
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct
@@ -207,27 +207,27 @@ SECTIONS
          * (~3.7 KB): a SOUR:* / OUTP setting from a host may come during an
          * AD2 stream (fastlogtest --region-c --host-read --poll 'SOUR:FREQ
          * 1000;...'), so they stay in B. */
-        *(.text.*7dm40_fw7new_app*);
-        *(.text.*7dm40_fw3app*3App11fuse_dialog*);
-        *(.text.*7dm40_fw3app*3App11limits_page*);
-        *(.text.*7dm40_fw3app*3App7kp_open*);
-        *(.text.*7dm40_fw3app9app_power*3App13pw_open_entry*);
+        *(.text.*8opendm407new_app*);
+        *(.text.*8opendm403app*3App11fuse_dialog*);
+        *(.text.*8opendm403app*3App11limits_page*);
+        *(.text.*8opendm403app*3App7kp_open*);
+        *(.text.*8opendm403app9app_power*3App13pw_open_entry*);
         /* The power page after a coupling change (once per change). */
-        *(.text.*7dm40_fw3app9app_power*3App15pw_coup_changed*);
-        *(.text.*7dm40_fw3app9app_power*3App15pw_pending_draw*);
-        *(.text.*7dm40_fw3dmm2pw*3Dmm10pw_pending);
-        *(.text.*7dm40_fw2ui8settings*);
-        *(.text.*7dm40_fw2ui9temp_page*);
-        *(.text.*7dm40_fw2ui8temp_key*);
-        *(.text.*7dm40_fw2ui9help_page*);
-        *(.text.*7dm40_fw2ui10gen_values*);
-        *(.text.*7dm40_fw2ui11gen_preview*);
-        *(.text.*7dm40_fw2ui10gen_static*);
-        *(.text.*7dm40_fw2ui14auto_cpl_label*);
-        *(.text.*7dm40_fw2ui10range_page*);
+        *(.text.*8opendm403app9app_power*3App15pw_coup_changed*);
+        *(.text.*8opendm403app9app_power*3App15pw_pending_draw*);
+        *(.text.*8opendm403dmm2pw*3Dmm10pw_pending);
+        *(.text.*8opendm402ui8settings*);
+        *(.text.*8opendm402ui9temp_page*);
+        *(.text.*8opendm402ui8temp_key*);
+        *(.text.*8opendm402ui9help_page*);
+        *(.text.*8opendm402ui10gen_values*);
+        *(.text.*8opendm402ui11gen_preview*);
+        *(.text.*8opendm402ui10gen_static*);
+        *(.text.*8opendm402ui14auto_cpl_label*);
+        *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
-        *(.text.*7dm40_fw2ui11range_press*);
-        *(.text.*7dm40_fw2ui2pw14settings_press*);
+        *(.text.*8opendm402ui11range_press*);
+        *(.text.*8opendm402ui2pw14settings_press*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?).
@@ -241,29 +241,29 @@ SECTIONS
          * (main.rs log_scale: a host scales the session's data with it;
          * fastlogtest --poll, 2026-10-23: region C code and its literal
          * loads while streaming). */
-        *(.text.*7dm40_fw4scpi7dcv_arg*);
+        *(.text.*8opendm404scpi7dcv_arg*);
         /* SCPI ranges / resolution: one command each. */
-        *(.text.*7dm40_fw4scpi9range_cmd*);
-        *(.text.*7dm40_fw4scpi8conf_cmd*);
-        *(.text.*7dm40_fw3app*3App10scpi_range*);
-        *(.text.*7dm40_fw4scpi8range_si*);
-        *(.text.*7dm40_fw4scpi9range_arg*);
-        *(.text.*7dm40_fw4scpi7res_arg*);
-        *(.text.*7dm40_fw4scpi8step_exp*);
-        *(.text.*7dm40_fw4scpi6pow10f*);
-        *(.text.*7dm40_fw4scpi6n7_arg*);
-        *(.text.*7dm40_fw6dbg_n7*);
-        *(.text.*7dm40_fw5touch8log_text*);
-        *(.text.*7dm40_fw10touch_diag*);
-        *(.text.*7dm40_fw6csvlog6delete*);
+        *(.text.*8opendm404scpi9range_cmd*);
+        *(.text.*8opendm404scpi8conf_cmd*);
+        *(.text.*8opendm403app*3App10scpi_range*);
+        *(.text.*8opendm404scpi8range_si*);
+        *(.text.*8opendm404scpi9range_arg*);
+        *(.text.*8opendm404scpi7res_arg*);
+        *(.text.*8opendm404scpi8step_exp*);
+        *(.text.*8opendm404scpi6pow10f*);
+        *(.text.*8opendm404scpi6n7_arg*);
+        *(.text.*8opendm406dbg_n7*);
+        *(.text.*8opendm405touch8log_text*);
+        *(.text.*8opendm4010touch_diag*);
+        *(.text.*8opendm406csvlog6delete*);
         /* ... their disk bodies (the `_on` variants and their closures). */
-        *(.text.*7dm40_fw6csvlog9delete_on*);
+        *(.text.*8opendm406csvlog9delete_on*);
         /* Tap / page-only code that sat inlined in hot callers (region B
          * audit 2026-10-22 #2): the temperature page's draw / key helper
          * (App::with_temp_page), the scope's Save CSV
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
-        *(.text.*7dm40_fw3app*3App14with_temp_page*);
-        *(.text.*7dm40_fw3app*3App11sp_save_csv*);
+        *(.text.*8opendm403app*3App14with_temp_page*);
+        *(.text.*8opendm403app*3App11sp_save_csv*);
         /* Region B audit #3 (2026-10-22, 11.9 KB free on c58ae48):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
          * callers. App::wave_open runs at event rate. (App::tap with
@@ -281,32 +281,32 @@ SECTIONS
          * SCOP:CAL with HwTrig::calibrate). Start-up only: Touch::new,
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
-        *(.text.*7dm40_fw3app*3App9wave_open*);
-        *(.text.*7dm40_fw3app*3App9rec_start*);
-        *(.text.*7dm40_fw2ui2pw13settings_page*);
-        *(.text.*7dm40_fw2ui11device_page*);
-        *(.text.*7dm40_fw6dialog10fuse_check*);
-        *(.text.*7dm40_fw3dmm*3Dmm14acdc_diag_text*);
-        *(.text.*7dm40_fw3dmm*3Dmm8reg_text*);
-        *(.text.*7dm40_fw3dmm*3Dmm12precondition*);
+        *(.text.*8opendm403app*3App9wave_open*);
+        *(.text.*8opendm403app*3App9rec_start*);
+        *(.text.*8opendm402ui2pw13settings_page*);
+        *(.text.*8opendm402ui11device_page*);
+        *(.text.*8opendm406dialog10fuse_check*);
+        *(.text.*8opendm403dmm*3Dmm14acdc_diag_text*);
+        *(.text.*8opendm403dmm*3Dmm8reg_text*);
+        *(.text.*8opendm403dmm*3Dmm12precondition*);
         /* acdcm.rs: the AC+DC methods' entry / range-change / SCPI steps
            (poll_am, the per-result path, stays in region B) */
-        *(.text.*7dm40_fw3dmm2am*8am_enter*);
-        *(.text.*7dm40_fw3dmm2am*11am_set_meth*);
-        *(.text.*7dm40_fw3dmm2am*11am_set_zero*);
-        *(.text.*7dm40_fw3dmm2am*7am_zero*);
-        *(.text.*7dm40_fw3dmm2am*7am_stat*);
-        *(.text.*7dm40_fw3dmm2am*7am_mode*);
-        *(.text.*7dm40_fw3dmm2am*6am_row*);
-        *(.text.*7dm40_fw3dmm2am*6am_ref*);
-        *(.text.*7dm40_fw3dmm2am*11am_cal_step*);
-        *(.text.*7dm40_fw8sentinel*8Sentinel9diag_text*);
-        *(.text.*7dm40_fw5scope*5Scope12hw_calibrate*);
-        *(.text.*7dm40_fw6hwtrig*6HwTrig9calibrate*);
-        *(.text.*7dm40_fw5touch*5Touch3new*);
-        *(.text.*7dm40_fw2bt*2Bt3new*);
-        *(.text.*7dm40_fw8spiflash*8SpiFlash3new*);
-        *(.text.*7dm40_fw3usb7init_hw*);
+        *(.text.*8opendm403dmm2am*8am_enter*);
+        *(.text.*8opendm403dmm2am*11am_set_meth*);
+        *(.text.*8opendm403dmm2am*11am_set_zero*);
+        *(.text.*8opendm403dmm2am*7am_zero*);
+        *(.text.*8opendm403dmm2am*7am_stat*);
+        *(.text.*8opendm403dmm2am*7am_mode*);
+        *(.text.*8opendm403dmm2am*6am_row*);
+        *(.text.*8opendm403dmm2am*6am_ref*);
+        *(.text.*8opendm403dmm2am*11am_cal_step*);
+        *(.text.*8opendm408sentinel*8Sentinel9diag_text*);
+        *(.text.*8opendm405scope*5Scope12hw_calibrate*);
+        *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
+        *(.text.*8opendm405touch*5Touch3new*);
+        *(.text.*8opendm402bt*2Bt3new*);
+        *(.text.*8opendm408spiflash*8SpiFlash3new*);
+        *(.text.*8opendm403usb7init_hw*);
         /* Menu / list / keypad page helpers (already their own symbols):
          * drawn or hit-tested only on the Menu, Settings, Record, Limits,
          * Keypad, Help and Device pages, where no stream runs (leaving the
@@ -314,32 +314,32 @@ SECTIONS
          * the logger runs). NOT ui::main_menu_hit: a DBG:TAP on the menu
          * during a fast-log session reached it (fastlogtest --ui-nav;
          * region B since 2026-10-23, ~0.2 KB). */
-        *(.text.*7dm40_fw2ui9menu_item*);
-        *(.text.*7dm40_fw2ui9list_page*);
-        *(.text.*7dm40_fw2ui10page_title*);
-        *(.text.*7dm40_fw2ui11set_stepper*);
-        *(.text.*7dm40_fw2ui12keypad_input*);
-        *(.text.*7dm40_fw2ui10keypad_key*);
-        *(.text.*7dm40_fw2ui10keypad_hit*);
-        *(.text.*7dm40_fw3app*3App9kp_labels*);
-        *(.text.*7dm40_fw3app*3App8lim_unit*);
+        *(.text.*8opendm402ui9menu_item*);
+        *(.text.*8opendm402ui9list_page*);
+        *(.text.*8opendm402ui10page_title*);
+        *(.text.*8opendm402ui11set_stepper*);
+        *(.text.*8opendm402ui12keypad_input*);
+        *(.text.*8opendm402ui10keypad_key*);
+        *(.text.*8opendm402ui10keypad_hit*);
+        *(.text.*8opendm403app*3App9kp_labels*);
+        *(.text.*8opendm403app*3App8lim_unit*);
         /* The generator page's boxes and its 1 s status (Gen / Keypad page
          * only: no stream runs there) and vwrite's temp-file purge (the
          * first pass after a start, a host write session's purge). */
-        *(.text.*7dm40_fw2ui7gen_box*);
-        *(.text.*7dm40_fw2ui10gen_status*);
-        *(.text.*7dm40_fw2ui13gen_box_frame*);
-        *(.text.*7dm40_fw2ui16gen_box_value_bg*);
-        *(.text.*7dm40_fw2ui12gen_wave_box*);
-        *(.text.*7dm40_fw2ui12gen_box_note*);
-        *(.text.*7dm40_fw6vwrite9purge_tmp*);
+        *(.text.*8opendm402ui7gen_box*);
+        *(.text.*8opendm402ui10gen_status*);
+        *(.text.*8opendm402ui13gen_box_frame*);
+        *(.text.*8opendm402ui16gen_box_value_bg*);
+        *(.text.*8opendm402ui12gen_wave_box*);
+        *(.text.*8opendm402ui12gen_box_note*);
+        *(.text.*8opendm406vwrite9purge_tmp*);
         /* ... and its post-write steps (a host wrote a file on the volume;
          * MSC writes are refused while a logger session runs): the update
          * file's park / check / finalize / commit. */
-        *(.text.*7dm40_fw6vwrite4park*);
-        *(.text.*7dm40_fw6vwrite5check*);
-        *(.text.*7dm40_fw6vwrite8finalize*);
-        *(.text.*7dm40_fw6vwrite6commit*);
+        *(.text.*8opendm406vwrite4park*);
+        *(.text.*8opendm406vwrite5check*);
+        *(.text.*8opendm406vwrite8finalize*);
+        *(.text.*8opendm406vwrite6commit*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C

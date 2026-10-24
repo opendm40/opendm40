@@ -8,7 +8,7 @@ command never completed, usb-storage reset the meter twice, then the
 meter hung and the watchdog reset it.)
 
   cd firmware && ./build.sh
-  emu/mscresettest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/mscresettest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 Cases (each: then a TEST UNIT READY, READ(10) of the boot sector and of
 README.TXT must give the right bytes, and *IDN? must answer):

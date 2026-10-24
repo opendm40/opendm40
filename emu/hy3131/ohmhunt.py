@@ -10,7 +10,7 @@ within TOL of the final value; values off by more may only be grey
 (kind G). Each window: input at its start, CONF:VOLT:DC at +3 s, the switch
 at +8 s (fw uptime), then FETCh? (+ DBG:READout?) back to back for 5 s.
 
-  emu/hy3131/ohmhunt.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw --port 58610
+  emu/hy3131/ohmhunt.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 58610
   emu/hy3131/ohmhunt.py --app ... --fetch-only   # a firmware without DBG:READout? (before the fix)
 """
 import argparse

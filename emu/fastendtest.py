@@ -4,7 +4,7 @@ while a host reads the USB volume, then MMEM:DATA? of the new file
 (device check f3aea2f 6b: the meter hung there and the watchdog reset it).
 
   cd firmware && ./build.sh
-  emu/fastendtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  emu/fastendtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
 
 One USB/IP connection with the URBs demultiplexed by sequence number, so
 the volume reader (MSC, its own thread) and the SCPI client (USBTMC) run

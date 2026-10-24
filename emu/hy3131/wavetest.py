@@ -4,7 +4,7 @@ src/app_wave.rs, TODO (A)) in the emulator, driven like a user (DBG:KEY /
 DBG:TAP) and checked over SCPI on one USB/IP connection.
 
   cd firmware && ./build.sh --features ad2-isr
-  emu/hy3131/wavetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
+  emu/hy3131/wavetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--shots DIR]
 
 Input: --dmm (default a 1 V rms 50 Hz sine on V/COM; the DMM model's AD2
 path is AC-coupled in AC V like the meter). Checks:

@@ -12,7 +12,7 @@ alignment) are added to the main worst path.
 Disassembles ELF with the toolchain's llvm-objdump, takes each function's
 frame from its prologue (push / stmdb sp! / vpush / sub sp,#imm) and its
 callees from bl / b.w / b to a symbol (tail calls included), and prints the
-deepest call path from the root (default dm40_fw::native::start, the native
+deepest call path from the root (default opendm40::native::start, the native
 entry after the shim) plus the largest frames.
 
 Limits: indirect calls (blx rN: trait objects, fn pointers) are not
@@ -104,15 +104,15 @@ EXC_FRAME = 26 * 4 + 4
 # `respond_with` calls the reply builder, a `run` closure, through
 # `&mut dyn FnMut` (Bt's has a 6 KiB stack buffer, main.rs MMEM / LOG:DATA).
 INDIRECT = [
-    (r'^dm40_fw::run$', r' as dm40_fw::bt::ScpiPort>::'),
-    (r' as dm40_fw::bt::ScpiPort>::respond_with$', r'^dm40_fw::run::\{closure#\d+\}$'),
+    (r'^opendm40::run$', r' as opendm40::bt::ScpiPort>::'),
+    (r' as opendm40::bt::ScpiPort>::respond_with$', r'^opendm40::run::\{closure#\d+\}$'),
 ]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('elf')
-    ap.add_argument('--root', default='dm40_fw::native::start')
+    ap.add_argument('--root', default='opendm40::native::start')
     ap.add_argument('--top', type=int, default=15, help='largest frames to list (0: none)')
     ap.add_argument('--check', type=int, metavar='BYTES', help='required headroom; exit 1 below it')
     a = ap.parse_args()

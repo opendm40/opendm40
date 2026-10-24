@@ -540,14 +540,14 @@ def cmd_update(ln, wait, expect):
                 print('28e9:028f (vendor loader / stock disk) has been up for 20 s instead of fw-rs:\n'
                       '  the loader update screen means the install failed or found no file\n'
                       '  (bad/missing dm40*.bin), or a stock image was installed. To retry:\n'
-                      '  tools/reload.sh --from-stock --no-build  (stages dm40-fw-native.bin on\n'
+                      '  tools/reload.sh --from-stock --no-build  (stages opendm40.bin on\n'
                       '  that disk), then press "update" on the meter.')
                 return 5
         else:
             stock_since = None
         if el > wait:
             print('timeout: fw-rs did not come back within %d s. Look at the meter: loader\n'
-                  'screen ("open file error"/"update error") -> copy dm40-fw-native.bin as\n'
+                  'screen ("open file error"/"update error") -> copy opendm40.bin as\n'
                   'dm40_fwrs.bin onto its disk and press "update".' % wait)
             return 4
         time.sleep(0.5)
