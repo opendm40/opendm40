@@ -25,7 +25,7 @@
 //!
 //! Non-default alternatives, kept for tests:
 //!   `recovery-file`: write a 0-byte DM40RCVR.BIN root entry on the SPI FAT
-//!     and power off; the next COLD boot reaches the loader only with PA2 low
+//!     and power off; the next boot reaches the loader only with PA2 held low
 //!     (PA2 = the debug header's TX pad, not the power key: hw/README.md
 //!     "Hardware recovery"), which then zeroes the marker itself. Fragile:
 //!     with PA2 high the ROM launches the app directly.

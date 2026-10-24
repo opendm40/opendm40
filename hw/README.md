@@ -35,8 +35,8 @@ retold from the [mydigit.cn teardown](https://www.mydigit.cn/thread-486604-1-1.h
 registration needed; first collected in this repo in
 [docs/dm40-feature-request.md](../docs/dm40-feature-request.md)), the DM40
 manual V1.5 ([ManualsLib](https://www.manualslib.com/manual/3720530/Alientek-Dm40.html)),
-[`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (owner reports, cited by
-forum post number).
+[`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) (reports from the DM40 owners' Telegram chat, a private export; cited
+by message number, no public links).
 
 ## Contents
 
@@ -236,19 +236,19 @@ barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 | DMM front end | Hycon HY3131 | verified in code (register protocol, `hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in `dmm-isolation-hy3131-shield-area.jpg`) |
 | HY3131 crystal | 4.9152 MHz | verified: photo and stock constant 4915.2 (`hy3131_v2_6.h`) |
 | Voltage reference | MAX6190 (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM (also: placed outside the shield can, see [Unknowns](#unknowns)); 1.25 V reference voltage verified by the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
-| Divider network | TC1746B6 (B / C), 0.1 %, 10 ppm/°C; discrete resistors on the A | BOM; owner reports #25087, #51830 ([`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) 12) |
+| Divider network | TC1746B6 (B / C), 0.1 %, 10 ppm/°C; discrete resistors on the A | BOM; chat reports #25087, #51830 ([`fw-rs/docs/user-feedback.md`](../fw-rs/docs/user-feedback.md) 12) |
 | Digital isolator | Chipanalog CA-IS3741HW | verified marking: photos `dmm-isolation-hy3131-shield-area.jpg`, `main-board-mcu-gd32f427.jpg` |
 | Isolated supplies | 2 x VPS8504B push-pull driver + transformers LT61-117 and LT61-113; micropower (hundreds of mW, BOM) | verified markings: photos `isolated-supply-vps8504b-lt61.jpg`, `dmm-isolation-hy3131-shield-area.jpg` |
 | Optocouplers | 2 x EL3H7, 2 x "174 F163H" | what they carry is inferred: the BOM guesses the HY3131 INT plus the relay and MOSFET drive; see [Unknowns](#unknowns). BOM; the "174 F163H" (4-pin) next to the relay and the EL3H7 (marked "D424 EL3H7") are in `dmm-isolation-hy3131-shield-area.jpg` |
 | DMM relay | Hongfa HFD4/3-LS (DPDT, 3 V, latching per BOM) | the BOM post blames this latching relay for false switching when the meter is shaken (not checked here). verified marking: photos `input-jacks-shunts-fuse-relay.jpg`, `relay-hfd4-and-varistor-closeup.jpg`; review |
-| Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (owner report #41820) | photos (`relay-hfd4-and-varistor-closeup.jpg`, `input-jacks-shunts-fuse-relay.jpg`); which disc is a PTC and which a MOV is inferred from the markings only |
+| Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (chat report #41820) | photos (`relay-hfd4-and-varistor-closeup.jpg`, `input-jacks-shunts-fuse-relay.jpg`); which disc is a PTC and which a MOV is inferred from the markings only |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD "R500"), 47.5 ohm | 0.5 ohm verified marking in `input-jacks-shunts-fuse-relay.jpg`; values from the stock scaling and fw-rs checks (below) |
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo `input-jacks-shunts-fuse-relay.jpg` and `opened-case-overview.jpg`; rating not readable, unknown |
 | Scope ADC | 3PEAK 3PA1030, 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 verified in code ([`fw-rs/src/scope.rs`](../fw-rs/src/scope.rs)) |
 | Scope gain mux | HC4051 (header says "HCF4051") | BOM, `scope_gen_v2_6.h` |
 | Scope op amp | "8091" (Gainsil GS8091?) | BOM, after gadefox in the EEVblog thread; the scope path is not traced, unconfirmed |
-| Generator path switch | SGM3157 SPDT | owner report (#24902: killed by 12 V); [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md) 1 |
+| Generator path switch | SGM3157 SPDT | chat report (#24902: killed by 12 V); [`fw-rs/docs/dac-adc-paths.md`](../fw-rs/docs/dac-adc-paths.md) 1 |
 | Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo `charger-tp4056-and-power.jpg`; review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | verified: label in `battery-ln425272-label.jpg` |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
@@ -371,11 +371,8 @@ and restore in the order given there.
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
 as a UART TX. The stock firmware never enables USART1 (as far as the RE notes
 show), and neither does fw-rs: in practice the pad is only the boot strap.
-PA2 reads low only when it is shorted to GND, or possibly when something
-connected to the header loads it. Earlier observations that some cold
-power-ons went to the loader without a short (PA2 low for a while after a
-cold power-on) remain unexplained ([`fw-rs/TODO.md`](../fw-rs/TODO.md),
-[`fw-rs/docs/fsloader-install-trigger.md`](../fw-rs/docs/fsloader-install-trigger.md) 6).
+PA2 reads low only when it is shorted to GND, or when something connected to
+the header pulls it low.
 
 ### Hardware recovery
 
@@ -396,8 +393,7 @@ bootloader and the FS-loader before the application runs.
 Verified by the owner: the short enters the update mode. Not verified yet:
 the exact timing, i.e. whether the short must be in place at power-on
 (as written above) or also works when applied during a reset, and how long
-it must be held. Mind the isolation: the header is on the MCU / USB ground,
-not on the DMM side; keep the probe leads disconnected while the case is open.
+it must be held.
 
 Software ways to the same screen while fw-rs runs (`DBG:UPDATE`, the key-hold
 recovery, the double-hang rule) are in [fw-rs/README.md, Recovery](../fw-rs/README.md#recovery).
@@ -406,8 +402,7 @@ recovery, the double-hang rule) are in [fw-rs/README.md, Recovery](../fw-rs/READ
 
 USB-C, USBFS only: DM PA11, DP PA12 (AF10). No VBUS sensing (PA9/PA10, the
 usual VBUS/ID pins, drive the relay). verified ([`fw-rs/src/usb.rs`](../fw-rs/src/usb.rs)). The USB
-port also charges the battery (TP4056); a TVS on VBUS failed at 21 V in one
-owner report (#36290). USB-PD trigger chargers work (owner report). USB data
+port also charges the battery (TP4056). USB data
 and the DMM are galvanically separate (isolation verified by the owner,
 2026-10-24, [Isolation boundary](#isolation-boundary)); USB ground is the MCU,
 scope and generator ground (inferred).
@@ -454,7 +449,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
 AD1 on a periodic input aliases (the "AD1 beat"): see `fw-rs/docs/dc-aliasing.md` (branch `dcalias`, not merged yet)
-(on branch `dcalias`, not on `rust-fw-poc` yet). AC bandwidth is about 20 kHz (-3 dB, owner reports #24765,
+(on branch `dcalias`, not on `rust-fw-poc` yet). AC bandwidth is about 20 kHz (-3 dB, chat reports #24765,
 #16732); the AC V path has an external coupling capacitor with a time constant
 of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), `acdc-stock-vs-fwrs.md`).
 
@@ -479,7 +474,7 @@ of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), 
   datasheet's 10 M / 1.111 M / 101.01 k / 10.01 k / 1 k network.
 - Ohm: OP3 drives reference resistors on HY3131 PA2..PA7 (Rref 1 k .. 63 M per
   range); ratiometric AD1 (`hy3131_v2_6.h` mode 10). Ohm source current about
-  0.85 mA short circuit, diode test 0.75 mA (owner reports, [`emu/hy3131/README.md`](../emu/hy3131/README.md)).
+  0.85 mA short circuit, diode test 0.75 mA (chat reports, [`emu/hy3131/README.md`](../emu/hy3131/README.md)).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
@@ -492,7 +487,7 @@ of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), 
 *DMM input area under the shield plate: relay, input resistors and varistors, 0.5 ohm "R500" shunt, wire shunt between the jacks, fuse in clips, COM and A/mA/uA jacks.*
 
 **Current path.** One A jack for A / mA / uA (silkscreen "A/mA/uA"); the
-MOSFETs switch the range, not the user (owner report #26977). Series chain
+MOSFETs switch the range, not the user (chat report #26977). Series chain
 from the A jack: fuse -> 10 mohm -> 0.5 ohm -> 47.5 ohm -> COM, with PE0 / PE1
 MOSFETs shorting the lower parts (inferred from the mode table;
 `sentinel.rs` fuse check, `power-meter-and-misconnect.md` 4.1 / 4.8).
@@ -553,10 +548,10 @@ seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
   (inferred). verified ([`fw-rs/src/gen.rs`](../fw-rs/src/gen.rs), `scope_gen_v2_6.h`).
 - PWM path (square above 50 kHz): TIM12_CH1 on PB14 (AF9), 200 MHz / D.
 - PB12 selects the path: 1 = PWM, 0 = DAC; the switch is very likely the
-  SGM3157 (owner report). No attenuator or relay after it.
+  SGM3157 (chat report). No attenuator or relay after it.
 - PA4 can be read back by ADC0 channel 4 (`DIAG:DAC?`, verified on the device).
 - Connector: coaxial "GEN". No protection: 12 V on the output killed the
-  switch in one owner report (#24902).
+  switch in one chat report (#24902).
 - Spec (review): sine / triangle / sawtooth 1 Hz..50 kHz, square up to 10 MHz,
   0.5..3 V.
 
@@ -571,7 +566,7 @@ seen by the meter (the A side of the fuse has no path into the chip); fw-rs's
 *Battery label: LN425272, 3.7 V, 2000 mAh, 7.4 Wh, made 2025-02-10.*
 
 - Battery: 1-cell Li-ion polymer LN425272, 2000 mAh, with protection PCB,
-  2-pin connector "VBAT" (photo). Runtime 10..15 h (owner reports; review:
+  2-pin connector "VBAT" (photo). Runtime 10..15 h (chat reports; review:
   12 h DMM / 10 h scope).
 - Charger: TP4056, linear, from USB VBUS. Charging takes ~2 h 35 min (owner
   report #16625). Status: PB10 / PB11 inputs (meaning guessed; the two RE
@@ -663,7 +658,7 @@ header's RX pad, verified), PB13, PC1, PC15. Whether they are connected is unkno
 - Hardware difference reported by owners: the A has a discrete divider instead
   of the TC1746B6 network (#25087, #34902, #51830). Whether anything else
   differs (reference, shunts) is unknown.
-- The A measures AC+DC as well; the stock hides it by model (owner reports,
+- The A measures AC+DC as well; the stock hides it by model (chat reports,
   `user-feedback.md` UF-03).
 - The review says only the top model (DM40C) has Bluetooth. This repo's unit
   is a DM40A and its Bluetooth works ([`docs/bt-protocol.md`](../docs/bt-protocol.md), `bt.rs`); the
@@ -687,8 +682,7 @@ header's RX pad, verified), PB13, PC1, PC15. Whether they are connected is unkno
    the unit on from off. [`fw-rs/src/boot.rs`](../fw-rs/src/boot.rs) and `native-boot.md` (shim
    steps) treat PE2 as the power hold; `native-boot.md` section 1 (older text)
    says no self-hold GPIO is evident and calls it unverified.
-3. Why some cold power-ons without a short reached the loader (PA2 low for a
-   while); whether anything else on the board drives PA2.
+3. Whether anything else on the board drives PA2.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
    is the one the running firmware depends on.

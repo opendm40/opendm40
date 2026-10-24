@@ -219,8 +219,8 @@ Code work (in this order):
         "update error" and expose a WORKING USB disk on every boot until a valid image is installed
         via its "update" button. Header is checked before any erase (app sectors untouched).
         Boot gate is PA2, not the reset cause: ROM polls PA2 x1000; high -> ROM verifies the marker +
-        body CRC and launches the app itself; low or invalid app -> loader install state. That is why
-        "cold installed / warm didn't". Full analysis: docs/fsloader-install-trigger.md.
+        body CRC and launches the app itself; low or invalid app -> loader install state. (The earlier "cold installed / warm didn't"
+        reading of PA2 is withdrawn: no observation supports it.) Full analysis: docs/fsloader-install-trigger.md.
   - [x] Recovery = program 12 zero bytes over the 0x08008000 marker + SYSRESETREQ (works on warm reset,
         no FAT/SPI/USB/LCD in the shim); DBG:UPDATE / DBG:RECOVER do the same (dev flow: copy a
         dm40*.bin onto fw-rs's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
@@ -229,8 +229,7 @@ Code work (in this order):
   - [x] Test: power-on holding the power key ~5 s with no dm40*.bin -> stock booted. No vendor
         button entry; PA2 is not the power key. 2026-10-24 (owner, device): PA2 = the debug
         header's TX pad (pull-up); a TX-GND short enters the loader's install state = the hardware
-        recovery (hw/README.md "Hardware recovery"). Why some cold power-ons without a short read
-        PA2 low for a while remains unexplained. So our marker-zero recovery is required; per code
+        recovery (hw/README.md "Hardware recovery"). So our marker-zero recovery is required; per code
         an invalid marker sends the ROM to the loader regardless of PA2 (to be confirmed by T2).
   - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: firmware/re/dumps/full-20261013/.
         RDP is level 1 (SWD/DFU only via mass erase), so the software recovery path matters.
