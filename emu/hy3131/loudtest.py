@@ -44,6 +44,7 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 ARR_HI, ARR_LO = 11199, 13999
 LOUD = {(ARR_HI, 5544), (ARR_LO, 6930)}
@@ -53,8 +54,13 @@ BADGE = 'tap 160 17'      # DMM status slot (ui::hold_label 119..202 x 1..33)
 TOAST = 'tap 240 160'     # dialog::TOAST centre
 
 # name: dict(func=SCPI CONF or None, run_for, setup=[SCPI after attach],
-#            script=[(virtual s, run.py script line)], acts={fw uptime s: SCPI},
+#            script=[(virtual s, run.py script line)], acts={virtual s: SCPI},
 #            checks=[...], alerts=[(t0, t1 virtual-ish fw uptime, alert that must be seen)])
+# acts are sent when the fw uptime reaches their virtual time on the fw clock (the clock
+# marker, emu/emusync.py, README "Input markers"): on the script's clock, as the checks
+# (they were fw uptime values written for a ~1.5 s offset: 16.5 / 20.5 / 31.5, now the
+# virtual 18 / 22 / 33 they meant; with the 2.85 s boot of a fresh disk the last one came
+# at virtual 34.35, 0.15 s before the end of its 'starts' window).
 # checks: ('quiet', t0, t1)                   no alarm duty written in t0..t1 (s)
 #         ('loud', t0, t1, set)               the alarm sounds in t0..t1: >= 2 bursts of
 #                                             (ARR, CCR1) pairs from `set`, both tones
@@ -94,7 +100,7 @@ SC = {
     # probe; the latch holds there): no new alarm.
     'aprot-ohm': dict(func=None, run_for=26, setup=['SYST:BEEP:VOL 0'],
                       script=[(0, 'dmm open'), (10, 'dmm avsrc:12'), (15, 'dmm open')],
-                      acts={16.5: ['CONF:RES']},
+                      acts={18: ['CONF:RES']},
                       checks=[('quiet', 6, 10), ('starts', 10, 11.2, LOUD), ('loud', 10, 15, LOUD), ('stops', 15, 15.6),
                               ('quiet', 15.6, 26)],
                       seen=[('APROT', '1,0,1,0'), ('APROT', '0,0,1,0')],
@@ -104,7 +110,7 @@ SC = {
     # in DC V makes no sound; then Volume at 40 %: the alarm at the key volume.
     'vjack-off': dict(func='CURR:DC', run_for=40, setup=['SYST:BEEP:VOL 0'],
                       script=[(0, 'dmm open'), (10, 'dmm vsrc:24'), (19, 'dmm vsrc:none;vsrc:1.234'), (26, 'dmm isrc:0.001')],
-                      acts={20.5: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 31.5: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
+                      acts={22: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 33: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
                       checks=[('quiet', 6, 33), ('starts', 33, 34.5, VOL40), ('loud', 33, 40, VOL40)],
                       seen=[('VJACK', '0,0,0,0'), ('AJACK', '0,0,1,2'), ('AJACK', '1,0,1,1')]),
     # A-JACK where V-COM can fake it (doc 4.10 / 4.11; device 612c45c: the RES 5 V false A-JACK
@@ -229,6 +235,7 @@ def run(name):
            '--usbip-port', str(A.port), '--run-for', str(sc['run_for']), '--script', sp, '--name', rtag,
            '--buzzer-log', buzz, '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    mk = emusync.Markers(emusync.log_path(OUT, rtag))
     rows = []
     t_wall = time.time()
     tm = None
@@ -243,7 +250,9 @@ def run(name):
         try:
             for c in sc['setup'] + (['CONF:' + sc['func']] if sc['func'] else []):
                 tm.write(c)
-            acts = dict(sc.get('acts', {}))
+            if mk.wait_clock() is None and sc.get('acts'):
+                print(name, 'no clock marker (dwt: CYCCNT write) in the log', flush=True)
+            acts = {mk.fw(ta) if mk.zero is not None else ta: c for ta, c in sc.get('acts', {}).items()}
             while p.poll() is None:
                 row = {}
                 for q in ['DBG:PING?', 'SYST:ALER?', 'DBG:ALARm?', 'SYST:ALER:ALARm?', 'SYST:BEEP:VOL?', 'FUNC?']:

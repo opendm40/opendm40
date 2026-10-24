@@ -7,8 +7,8 @@ after the coupling was entered (a later query: at most 0.85 s), and then
 answers the part AUTO shows: never +9.91E37 / "Data stale"; libsigrok's
 READ? 3 s after CONF inside its 1 s timeout. FETCh? stays non-blocking-ish
 (+9.91E37 until the decision). Each window: input at its start, VOLT:DC at
-+3 s, the query at +8 s (fw uptime), the reply time from DBG:PING? before
-and after.
++3 s, the query at +8 s (fw uptime from the window's input marker,
+emu/emusync.py), the reply time from DBG:PING? before and after.
 
   emu/hy3131/autowaittest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw --port 47600
 """
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
-BOOT_OFS = 0.906  # virtual time - fw uptime (switchlat.py)
+BOOT_OFS = 0.906  # the inputs' shift in virtual time (switchlat.py); the windows key on their markers
 T0 = 8.0
 W = 20.0
 
@@ -46,6 +46,7 @@ A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
+import emusync  # noqa: E402
 
 os.makedirs(OUT, exist_ok=True)
 tag = 'autowait-%d-%d' % (A.port, os.getpid())
@@ -57,6 +58,7 @@ end = T0 + len(SCEN) * W + 2 + BOOT_OFS
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01', '--usbip-port', str(A.port),
        '--run-for', '%.1f' % end, '--name', tag, '--script', script]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+mk = emusync.Markers(emusync.log_path(OUT, tag))
 bad = []
 try:
     t = None
@@ -80,8 +82,10 @@ try:
         while up() < s:
             time.sleep(0.2)
 
+    if mk.wait_clock() is None:
+        sys.exit('autowaittest: no clock marker (dwt: CYCCNT write) in %s' % mk.log)
     for k, (name, _, query, want, rel, tmax) in enumerate(SCEN):
-        w0 = T0 + k * W
+        w0 = mk.at(T0 + k * W + BOOT_OFS)  # fw uptime of the window's input change
         wait_until(w0 + 3)
         q('CONF:VOLT:DC;:SYST:ERR?')
         wait_until(w0 + 8)

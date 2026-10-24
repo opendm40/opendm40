@@ -69,13 +69,15 @@ def both(*fs):
     return lambda d: all(f(d) for f in fs)
 
 
-# name: (setup SCPI, run_for, [(t, spec, check, label)]); t: script (virtual) time of
-# the input change (spec None: the phase starts with an action at t). Timing is keyed
-# on the input markers (emu/emusync.py, README "Input markers"): a phase starts at its
-# input's fw uptime as logged by the model; ACTIONS / GATE / the BT actions run at
-# their distance from the start of the phase they fall in; a phase is checked on its
-# samples from 3.0 s to 0.5 s before the next phase's start (the last phase: before
-# the run's end). No boot-offset guess (2.85 s on a fresh disk; it was assumed ~1.8 s).
+# name: (setup SCPI, run_for, [(t, spec, check, label)]); t: the phase's time (spec
+# None: the phase starts with an action at t). Timing is keyed on the input markers
+# (emu/emusync.py, README "Input markers"): a phase starts at its input's fw uptime as
+# logged by the model; ACTIONS / GATE / the BT actions run at their distance from the
+# start of the phase they fall in; a phase is checked on its samples 2.7 .. 0.7 s before
+# the next phase's input marker (4.5 .. 2.5 s before a phase that starts with an action;
+# the last phase: 2.7 .. 0.3 s before the run's end). The script puts the input changes
+# emusync.BOOT_S later in virtual time (and runs that much longer): they land at fw ~t;
+# no check depends on it (the offset was assumed ~1.8 s here, it had grown to 2.85 s).
 SC = {
     'mains': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'], 58, [
         (0, 'open;pow:230@50,i=1,pf=1', both(pw(230, 1, 230, 1, f=50), ranges('6.000000E+02', '1.000000E+01')), 'resistive 230 V 1 A: PF 1, 50 Hz, 600 V / 10 A'),
@@ -374,15 +376,15 @@ def run(name):
     sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         for t, spec in script:
-            f.write('%g dmm %s\n' % (t, spec))
+            f.write('%g dmm %s\n' % (t + emusync.BOOT_S if t > 0 else t, spec))
     bt_port = A.port + A.bt_offset if name == 'bt' else 0
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
-           '--usbip-port', str(A.port), '--run-for', str(run_for), '--script', sp, '--name', rtag,
+           '--usbip-port', str(A.port), '--run-for', str(run_for + emusync.BOOT_S), '--script', sp, '--name', rtag,
            '--shot', os.path.join(OUT, tag + '.png')] + (['--app', os.path.abspath(A.app)] if A.app else []) \
         + (['--bt-port', str(bt_port)] if bt_port else [])
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     mk = emusync.Markers(emusync.log_path(OUT, rtag))
-    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for, mk)
+    tl = emusync.Timeline([(t, spec) for t, spec, _, _ in phases], run_for + emusync.BOOT_S, mk, vt=emusync.shifted(phases))
     rows = []
     t_wall = time.time()
     tm = None

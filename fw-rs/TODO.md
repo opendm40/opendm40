@@ -2427,6 +2427,23 @@ Firmware:
             iac / sq5 and powtest bt phase 1 fail that way on base a064df0 and on fastswitch alike (idc:
             base 1 of 2, fastswitch 2 of 2 at 13.2 s; band fails on base too); they passed on fastswitch at
             lower load. The tests' windows should key on an input marker, not on uptime: follow-up.
+            **Done (branch harness-sync, emulator only):** the offset is not bimodal. It is a fixed 2.85 s
+            (main's DWT CYCCNT write after pre_main's SPI-disk work on the fresh disk image: fatdir,
+            calbackup, mirror_boot), identical in every run, loaded or not (virtual time is deterministic;
+            4 parallel boot probes and 4 parallel idc runs: the 0.3 A input at fw 13.1504 s in all). The
+            tests assumed 1.5-1.8 s, so their windows reached 0.35 s past the next input; the A AUTO
+            coupling reads in bursts every ~1.9 s, and whether a burst fell in those 0.35 s decided pass /
+            fail (13.2 = this burst, 14.8 = the next). Fix: the model logs a clock marker (DWT.cs: every
+            CYCCNT write) and an input marker (HY3131 SetInput: virtual time + fw uptime), emu/emusync.py
+            places phases, actions and windows on them (emu/README.md "Input markers"); couptest, powtest,
+            senttest, burdentest, leadstest, acdcmethtest, autowaittest, switchlat, inrushtest, dcvtest,
+            loudtest, switchtest converted. Under load (5 emulators at once, host load ~12-20): before
+            idc 0/3, band 0/3, iac 0/3, sq5 0/3, powtest bt 2/3; after 3/3 each. couptest iac's AC 300 mA
+            phase is 16 s now: AUTO walks 6 A -> 60 mA -> 600 mA there and settles 8.5-10.6 s after the
+            change (watch on the device: a 0.3 A AC step down from 1 A in A AUTO).
+            `fastlogtest --ui-nav --region-c` "MENU on Device -> main menu": not timing, not a firmware
+            regression (a064df0's build fails the same): 7faf91b put "Danger alarm" into Settings 3/3, Device
+            moved to row 5 and the tap at y 177 toggled Burden voltage. NAV taps y 207 now: PASS.
             **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in ad74e93, settle.py):
             1. DC V -> RES on 4.7 kohm: screen shows "- - Mohm" within ~0.2 s, the number by ~1.0-1.3 s (was
                3.0 s), no range stuck on 60 Mohm; an open input reads 0L, a 10 Mohm / 100 ohm resistor settles

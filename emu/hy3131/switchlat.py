@@ -52,10 +52,11 @@ T0 = 8.0      # first window (s, virtual); fw-rs boots into DC V AUTO+ by ~4 s
 W = 14.0      # window length
 SW = 7.0      # switch / step time inside the window
 SAMPLE = 0.05  # stock sampling period
-# fw-rs uptime = virtual time - BOOT_OFS: fw-rs zeroes DWT CYCCNT at start,
-# 0.906 s of virtual time after reset in `run.py fwrs` (CYCCNT read by the
-# monitor at 2.0 / 3.0 s: 1.094 / 2.094 s). The fw-rs script's input events
-# are shifted by it, so they land on the client's uptime timeline.
+# The fw-rs script's input events are shifted by BOOT_OFS (virtual s). The client's
+# timeline is keyed on the input markers (emu/emusync.py, README "Input markers"):
+# window k starts at the fw uptime of its input change, an input step's switch time
+# is the step's marker. (BOOT_OFS was the boot, 0.906 s, once; now 2.85 s on a fresh
+# disk: the windows only start later in virtual time than they did.)
 BOOT_OFS = 0.906
 
 # stock m struct (TCM) and the poll state S
@@ -221,6 +222,7 @@ def run_fwrs(a):
     os.environ['USBIP_PORT'] = str(a.port)
     sys.path.insert(0, EMU)
     import usbip_client as uc
+    import emusync
     scens = scen_for('fwrs', a.dc_only)
     tag = 'swl-fwrs-%s-%d' % (a.rate, a.port)
     script = os.path.join(OUT, tag + '.script')
@@ -240,6 +242,7 @@ def run_fwrs(a):
            '--usbip', '0.01', '--usbip-port', str(a.port), '--run-for', '%.1f' % (end + 30),
            '--name', tag, '--script', script]
     emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
+    mk = emusync.Markers(emusync.log_path(OUT, tag))
     res = []
     try:
         t = None
@@ -282,12 +285,16 @@ def run_fwrs(a):
             return None
 
         print('fwrs %s: uptime %d ms at connect' % (a.rate, up()), flush=True)
-        wait_until(int(T0 * 1000) - 3000)
+        if mk.wait_clock() is None:
+            sys.exit('switchlat: no clock marker (dwt: CYCCNT write) in %s' % mk.log)
+        print('fwrs %s: fw clock zero at %.4f s virtual' % (a.rate, mk.zero), flush=True)
+        wait_until(int(mk.at(T0 + BOOT_OFS) * 1000) - 3000)
         cmdw('RATE %s' % a.rate)
         q('SYST:ERR?')
         for k, sc in enumerate(scens):
             name, inp, prep, sw = sc[:4]
-            w0 = int((T0 + k * W) * 1000)
+            v0 = T0 + k * W + BOOT_OFS  # the window's input change (virtual)
+            w0 = int(round(mk.at(v0) * 1000))
             for tt, a_ in prep:
                 c = act(a_)
                 if c:
@@ -306,7 +313,7 @@ def run_fwrs(a):
                     else:
                         u0 = int(q('CALC:AVER:CLE;DBG:PING?').split(',')[0])
                     sent = True
-                    sw_up = u0 if c_ else ts  # input steps: the script's virtual time
+                    sw_up = u0 if c_ else int(round(mk.at(v0 + SW) * 1000))  # input steps: the step's marker
                     continue
                 ser.append({'u': u, 'n': c, 'v': v})
                 if u >= w0 + int(W * 1000) - 150:
