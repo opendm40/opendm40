@@ -1071,7 +1071,9 @@ namespace Hy3131Tests
             Check(r[2] == 0xFC && (r[0] | r[1]) != 0, "CTA counts SYSCLK while ENCTR = 1 and ignores writes", BitConverter.ToString(r));
             m.Write(0x20, 0x50);
             r = m.Read(0x18, 6);
-            Check(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0 && r[4] == 0 && r[5] == 0xFC, "ENCTR = 0 clears CTB and CTA<7:0>, keeps CTA<23:8>", BitConverter.ToString(r));
+            // CtRetain (807a9c5, datasheet 14): CTA<23:8> keeps the count the gate reached,
+            // not the written preset (00-FC), so CTA<15:8> is the counted byte here.
+            Check(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0 && r[4] != 0 && r[5] == 0xFC, "ENCTR = 0 clears CTB and CTA<7:0>, CTA<23:8> keeps the count reached", BitConverter.ToString(r));
             // ENPKH preset
             m.Write(0x29, 0x00);
             r = m.Read(0x0E, 6);
