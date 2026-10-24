@@ -45,7 +45,7 @@ import emusync  # noqa: E402
 TAP_T = 10.0
 # Virtual-time events (connections, the tap) go into the run.py script this much later
 # than their phase's t (and the run is this much longer): with the boot of emusync.BOOT_S
-# (2.85 s, fresh disk) they land at fw ~t, where the phases were written. Not needed for
+# (3.56 s, fresh disk) they land at fw ~t, where the phases were written. Not needed for
 # correctness: with another boot only the phase lengths move.
 VLAG = emusync.BOOT_S
 PHASES = [

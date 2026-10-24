@@ -28,8 +28,8 @@ input was there before the firmware's clock started); a phase without one
 starts its script distance after the previous phase's start. Actions and
 check windows are placed relative to those starts.
 
-BOOT_S: the boot's virtual length on a fresh disk with run.py --fast (2.85 s,
-measured on rust-fw-poc ab7184c, 2026-10-24; 1.90 s at the default --mips 200). Scripts written in "fw uptime" terms put
+BOOT_S: the boot's virtual length on a fresh disk with run.py --fast (3.56 s on 7bd7f6f, 2.85 s
+on ab7184c before mirror-bw's device-like SPI byte time; 1.90 s there at --mips 200). Scripts written in "fw uptime" terms put
 their input changes BOOT_S later in virtual time (and run BOOT_S longer), so
 the phases keep the lengths they were written with; no check depends on it
 (a longer boot only shortens the phases, the markers keep every window on
@@ -42,7 +42,7 @@ import time
 RE_ZERO = re.compile(r'dwt: CYCCNT write 0x([0-9A-Fa-f]+) at ([0-9.]+)')
 RE_INPUT = re.compile(r'hy3131: input: (.*) at (-?[0-9.]+) fw (-?[0-9.]+)\s*$')
 HCLK = 200e6
-BOOT_S = 2.85
+BOOT_S = 3.56
 
 
 def shifted(phases, shift=BOOT_S):
