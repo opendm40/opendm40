@@ -655,7 +655,7 @@ pub fn run(out: &str) -> usize {
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
+        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
         ck.check_opts("manual/settings3-edit", &page, false);
         save1(out, "settings3-edit");
     }
@@ -680,6 +680,27 @@ pub fn run(out: &str) -> usize {
         dmm_page(&Dp { rate: false, label: Some("TC K"), ..dp(rd(15, val(212.5, 1, f), Some(val(77.0, 1, f)), None, false)) });
         ck.check("manual/dmm-temp-f", &DMM_REGIONS);
         save1(out, "dmm-temp-f");
+    }
+
+    // Temperature with a user NTC (R25 4.7 k, Beta 3977): the sensor page,
+    // the R25 and Beta keypads over it, the reading.
+    {
+        let tp = ui::TempPage { sensor: 6, offs: 0.0, unit_f: false, r25: 4_700.0, beta: 3977.0, info: "" };
+        host::reset(0);
+        ui::temp_page(&tp);
+        ck.check_opts("manual/temp-ntc", &page, false);
+        save1(out, "temp-ntc");
+        for (name, title, input, unit) in [("temp-r25", "R25", "4.7", "k"), ("temp-beta", "Beta", "3977", "K")] {
+            host::reset(0);
+            ui::temp_page(&tp);
+            ui::keypad(ui::KP_NUM, title, input, unit, true);
+            ck.check_replica(&format!("manual/{name}"));
+            save1(out, name);
+        }
+        let c = "\u{b0}C";
+        dmm_page(&Dp { rate: false, label: Some("NTC user"), ..dp(rd(15, val(24.86, 2, c), Some(val(4.721, 3, "k\u{3a9}")), None, false)) });
+        ck.check("manual/dmm-ntc", &DMM_REGIONS);
+        save1(out, "dmm-ntc");
     }
 
     // Power meter: the current range being found; AC on the mains; the

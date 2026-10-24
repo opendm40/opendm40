@@ -109,7 +109,7 @@ update file**.
 
 ### Keys
 
-The DM40 has four touch keys below the screen and one power key on the side.
+The DM40 has four touch keys left of the screen and one power key on the left edge.
 
 ![The four touch keys and the power key](img/keys.png)
 
@@ -461,9 +461,9 @@ Bluetooth.
 
 ### Functions
 
-![The jacks](img/jacks.png)
+![The jacks: V Ω, COM and A on the front, OUT and OSC on the top edge](img/jacks.png)
 
-*The jacks.*
+*The jacks: V Ω, COM and A on the front, OUT and OSC on the top edge.*
 
 #### DC and AC voltage
 
@@ -642,6 +642,14 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 | **PT100**, **PT1000** | -200 to 850 °C, 2-wire. |
 | **10k 3950**, **10k 3435**, **100k 3950** (NTC thermistors, B value 3950 or 3435) | -55 to 300 °C. |
 | **NTC user** | Set **R25** (100 Ω to 10 MΩ) and **Beta** (1000 to 10000) with the keypad. |
+
+| ![NTC user selected: R25 and Beta below it](img/temp-ntc.png) | ![The reading; the sensor's resistance above it](img/dmm-ntc.png) |
+|---|---|
+| NTC user selected: R25 and Beta below it | The reading; the sensor's resistance above it |
+
+| ![Tap R25: the keypad, in kΩ](img/temp-r25.png) | ![Tap Beta: the keypad, in K](img/temp-beta.png) |
+|---|---|
+| Tap R25: the keypad, in kΩ | Tap Beta: the keypad, in K |
 
 - The value above the reading is the sensor's resistance (resistive
   sensors) or the cold junction (TC K); the chip on the right names the
@@ -1057,9 +1065,13 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
 
 ## Oscilloscope
 
-The oscilloscope uses the **CHA** jack. The [Wave
-view](#wave-view-the-scope-on-the-multimeter-inputs) shows the signal on
-the multimeter inputs instead.
+The oscilloscope input is the **OSC** jack on the top edge (**CHA** on the
+screen). The [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+shows the signal on the multimeter inputs instead.
+
+![The top edge: the OSC jack](img/top-osc.png)
+
+*The top edge: the OSC jack.*
 
 To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
@@ -1081,7 +1093,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   - Record bar: while stopped, brackets show which part of the stored
     record is on screen; **ROLL** in roll mode; **G 1.00kHz** while the
     [generator](#signal-generator) runs.
-  - **MCX | DMM**: the input source (MCX is the **CHA** jack); tap to
+  - **MCX | DMM**: the input source (MCX is the **OSC** jack); tap to
     switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Graph**: 10 × 8 divisions. On the left edge, the markers **A** (the
   trace's zero) and **M** (math / FFT); on the right edge, **T** (trigger
@@ -1397,7 +1409,7 @@ meter, nor while a recording runs; the meter says why.
 
 The combined view shows the multimeter reading in a strip above the live
 oscilloscope. Both measure at the same time: the multimeter on its V / A
-jacks, the scope on **CHA**. The generator can run too.
+jacks, the scope on the **OSC** jack. The generator can run too.
 
 To open it: main menu, **Combined view: DMM + Scope** (the bottom row), or
 swipe left from the multimeter page.
@@ -1472,9 +1484,14 @@ resumes when you come back.
 
 ## Signal generator
 
-The generator output is the **GEN** jack. It keeps running on every page,
-also while you use the multimeter or the scope (the scope page shows **G**
-and the frequency in its top bar, the combined view **GEN**).
+The generator output is the **OUT** jack on the top edge. It keeps running
+on every page, also while you use the multimeter or the scope (the scope
+page shows **G** and the frequency in its top bar, the combined view
+**GEN**).
+
+![The top edge: the OUT jack](img/top-out.png)
+
+*The top edge: the OUT jack.*
 
 To open it: main menu, **Signal**, or swipe right from the multimeter page.
 
@@ -1482,7 +1499,7 @@ To open it: main menu, **Signal**, or swipe right from the multimeter page.
 
 *A 1 kHz sine, 2 Vpp, running.*
 
-**Never connect the GEN output to a voltage source.** It has no protection;
+**Never connect the OUT jack to a voltage source.** It has no protection;
 an external voltage can destroy the output.
 
 ### The generator page
@@ -1588,6 +1605,10 @@ The V and A inputs share **COM**, so the current flows through COM:
 1. Break the **return** wire (−) between the source and the load.
 2. Load − → **A** jack; **COM** → source −.
 3. **V** jack → the + wire, on the source side.
+
+![The wiring: the − wire broken through A and COM, V on the + wire](img/power-wiring-dev.png)
+
+*The wiring: the − wire broken through A and COM, V on the + wire.*
 
 The arrows show the current: through the load into **A**, inside the
 meter through the shunt to **COM**, and back to the source. The current
@@ -2546,7 +2567,7 @@ Untested on a real meter:
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
   the persistence modes, auto-set keeping AC coupling.
 - Combined view: the long press on the strip.
-- Generator: the signal at the GEN jack (the real amplitude, the output
+- Generator: the signal at the OUT jack (the real amplitude, the output
   impedance, the quality above 50 kHz).
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).

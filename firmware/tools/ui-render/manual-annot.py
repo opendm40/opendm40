@@ -9,7 +9,8 @@ tools/stock-ui/run.sh folder (the stock scope page for the stock vs
 opendm40 pairs; without it those pictures stay as they are). The stock
 multimeter screens in stock-shots/ are captures of the stock firmware in
 the emulator (emu/run.py stock). Everything else is built from the
-screenshots already in docs/manual/img. One visual language: white
+screenshots already in docs/manual/img. The device itself (front and top
+edge) is drawn by emu/panel_draw.py, the emulator window's panel drawing. One visual language: white
 background, #0a7bd6 arrows and callouts, DejaVu Sans labels, a thin grey
 frame around each screenshot. Stored as palette PNGs (256 colours).
 """
@@ -188,24 +189,22 @@ def gestures():
 
 
 def keys():
-    s = 0.6
-    scr = shot('dmm-bar', s)
-    w, h = scr.size
-    im, d = canvas(w + 260, h + 150)
-    x0, y0 = 30, 30
-    d.rounded_rectangle((x0 - 18, y0 - 18, x0 + w + 18, y0 + h + 92), radius=22, outline=MID, width=3)
-    paste(im, d, scr, x0, y0)
-    f = font(14, bold=True)
-    kw = (w - 30) / 4
-    for k, t in enumerate(['MENU', 'RUN', 'AUTO', 'MF']):
-        kx = x0 + k * (kw + 10)
-        d.rounded_rectangle((kx, y0 + h + 22, kx + kw, y0 + h + 62), radius=8, fill=(225, 236, 247), outline=BLUE, width=2)
-        text_c(d, kx + kw / 2, y0 + h + 32, t, f, BLUE)
-    px = x0 + w + 18
-    d.rounded_rectangle((px - 4, y0 + 60, px + 8, y0 + 130), radius=4, fill=BLUE)
-    callout(d, 'Power key', (px + 8, y0 + 95), px + 50, y0 + 95, font(15))
-    text_c(d, px + 110, y0 + 112, '(on the side)', font(13), MID)
-    text_c(d, x0 + w / 2, y0 + h + 100, 'touch keys below the screen', font(13), MID)
+    s = 6.0
+    dev, g, pd = device(s, top=False)
+    w, h = dev.size
+    im, d = canvas(w + 300, h + 40)
+    x0, y0 = 280, 20
+    im.paste(dev, (x0, y0))
+    G = offs(g, x0, y0)
+    f = font(15)
+    cell = pd.STRIP[3] / 4
+    lab = ['MENU: main menu', 'RUN: HOLD; run / stop', 'AUTO: autorange; auto-set', 'MF: range page; scope menu']
+    # RUN's leader runs above the power key (its cell's top part).
+    ys = [pd.STRIP[1] + 0.5 * cell, pd.STRIP[1] + cell + 1.0, pd.STRIP[1] + 2.5 * cell, pd.STRIP[1] + 3.5 * cell]
+    for t, y in zip(lab, ys):
+        side_label(d, t, G(pd.STRIP[0] + 1.0, y), x0 - 30, f, right=False)
+    px, py, pw, ph = pd.POWER
+    side_label(d, 'Power key (left edge)', G(px + 0.3, py + ph - 3.0), x0 - 30, f, right=False)
     save(im, 'keys')
 
 
@@ -219,16 +218,16 @@ def box(d, x, y, w, h, title, lines=(), fill=(240, 246, 252)):
 
 
 def install():
-    im, d = canvas(880, 260)
+    im, d = canvas(940, 260)
     box(d, 20, 60, 190, 120, 'Computer', ['dm40_opendm40_', 'v0.1.bin'])
     arrow(d, (215, 120), (285, 120))
     text_c(d, 250, 90, 'USB', font(13), MID)
     box(d, 290, 60, 210, 120, 'Meter: USB disk', ['(stock: USB Connect)', 'the only dm40*.bin'])
     arrow(d, (505, 120), (585, 120))
     text_c(d, 545, 132, 'eject,\nswitch off\nand on', font(13), MID)
-    s = shot('dmm-bar', 0.5)
-    paste(im, d, s, 600, 50)
-    text_c(d, 600 + s.size[0] / 2, 20, 'opendm40 starts', font(15, bold=True))
+    m = meter(320)
+    im.paste(m, (600, 50))
+    text_c(d, 600 + m.size[0] / 2, 20, 'opendm40 starts', font(15, bold=True))
     save(im, 'install')
 
 
@@ -299,22 +298,38 @@ def jack(d, x, y, label, r=24, fill=(60, 60, 60)):
 
 
 def jacks():
-    im, d = canvas(860, 290)
-    text_c(d, 245, 14, 'Multimeter (isolated)', font(15, bold=True), MID)
-    text_c(d, 680, 14, 'Scope and generator', font(15, bold=True), MID)
-    d.rounded_rectangle((20, 40, 470, 270), radius=14, outline=GREY, width=2)
-    d.rounded_rectangle((500, 40, 840, 270), radius=14, outline=GREY, width=2)
-    for t, x in {'V/Ω': 100, 'COM': 245, 'A': 390}.items():
-        jack(d, x, 90, t)
-    jack(d, 600, 90, 'CHA')
-    jack(d, 740, 90, 'GEN')
-    f = font(14)
-    text_c(d, 100, 160, 'V, Ω, continuity,\ndiode, capacitance,\nHz, °C', f)
-    text_c(d, 245, 160, 'common', f)
-    text_c(d, 390, 160, 'A, mA, µA', f)
-    text_c(d, 600, 160, 'oscilloscope\ninput', f)
-    text_c(d, 740, 160, 'generator\noutput', f)
-    text_c(d, 245, 238, 'Power meter: V/Ω, COM and A at once', font(13), MID)
+    s = 6.0
+    dev, g, pd = device(s, top=True)
+    w, h = dev.size
+    im, d = canvas(w + 380, h + 40)
+    x0, y0 = 20, 20
+    im.paste(dev, (x0, y0))
+    G = offs(g, x0, y0)
+    f, fb = font(15), font(15, bold=True)
+    R = x0 + w + 24
+    jr = pd.JACK_R
+    for key, title, text in [('v', 'V Ω', 'V, Ω, continuity, diode,\ncapacitance, Hz, °C'), ('com', 'COM', 'common to all'), ('a', 'A mA uA', 'A, mA, µA; the power\nmeter\'s current')]:
+        jx, jy = pd.JACKS[key]
+        at = G(jx + jr, jy)
+        d.line((at[0], at[1], R - 6, at[1]), fill=BLUE, width=2)
+        d.ellipse((at[0] - 4, at[1] - 4, at[0] + 4, at[1] + 4), fill=BLUE)
+        d.text((R, at[1] - 22), title, font=fb, fill=DARK)
+        for i, l in enumerate(text.split('\n')):
+            d.text((R, at[1] + i * 19), l, font=f, fill=DARK)
+    # OSC: a straight leader to the right; OUT: down into the case edge,
+    # under OSC, then right.
+    sx, sy = pd.MCX['scope']
+    gx, gy = pd.MCX['gen']
+    a = G(sx + pd.MCX_R, sy)
+    d.line((a[0], a[1], R - 6, a[1]), fill=BLUE, width=2)
+    d.ellipse((a[0] - 4, a[1] - 4, a[0] + 4, a[1] + 4), fill=BLUE)
+    d.text((R, a[1] - 10), 'OSC: oscilloscope input', font=fb, fill=DARK)
+    d.text((R, a[1] + 10), '(CHA on the screen)', font=f, fill=DARK)
+    b = G(gx, gy + pd.MCX_R)
+    yb = G(0, gy + pd.MCX_R + 2.0)[1]
+    d.line((b[0], b[1], b[0], yb, R - 6, yb), fill=BLUE, width=2)
+    d.ellipse((b[0] - 4, b[1] - 4, b[0] + 4, b[1] + 4), fill=BLUE)
+    d.text((R, yb + 2), 'OUT: generator output', font=fb, fill=DARK)
     save(im, 'jacks')
 
 
@@ -444,19 +459,19 @@ def gen_offset():
 
 
 def csv_flow():
-    im, d = canvas(900, 230)
-    s = shot('dmm-rec', 0.4)
-    paste(im, d, s, 20, 50)
-    text_c(d, 20 + s.size[0] / 2, 20, 'Recording', font(15, bold=True))
-    arrow(d, (225, 115), (290, 115))
-    box(d, 300, 60, 210, 110, 'USB disk', ['LOGS/LOG007.CSV'])
-    arrow(d, (515, 115), (580, 115))
+    im, d = canvas(940, 230)
+    m = meter(220, 'dmm-rec')
+    im.paste(m, (20, 50))
+    text_c(d, 20 + m.size[0] / 2, 20, 'Recording', font(15, bold=True))
+    arrow(d, (250, 115), (310, 115))
+    box(d, 320, 60, 210, 110, 'USB disk', ['LOGS/LOG007.CSV'])
+    arrow(d, (535, 115), (600, 115))
     rows = ['time_s,value,unit,flags', '0.250,1.23456,V,', '0.750,,V,OL']
-    d.rectangle((590, 60, 880, 170), outline=GREY, fill=(248, 248, 248))
+    d.rectangle((610, 60, 920, 170), outline=GREY, fill=(248, 248, 248))
     fm = font(14, mono=True)
     for i, r in enumerate(rows):
-        d.text((602, 75 + i * 28), r, font=fm, fill=DARK)
-    text_c(d, 735, 20, 'Spreadsheet', font(15, bold=True))
+        d.text((622, 75 + i * 28), r, font=fm, fill=DARK)
+    text_c(d, 765, 20, 'Spreadsheet', font(15, bold=True))
     save(im, 'csv-flow')
 
 
@@ -487,7 +502,7 @@ def usb_disk():
 
 def usb_row():
     sc = 2
-    s = render('settings3-edit', scale=sc, crop=(0, 132, 480, 165))
+    s = render('settings3-edit', scale=sc, crop=(0, 102, 480, 135))
     im, d = canvas(s.size[0] + 40, s.size[1] + 70)
     paste(im, d, s, 20, 20)
     text_c(d, im.size[0] / 2, s.size[1] + 34, 'PC can edit, waiting for the re-plug', font(14), MID)
@@ -495,10 +510,10 @@ def usb_row():
 
 
 def usb_link(name, ejected):
-    im, d = canvas(820, 200)
+    m = meter(250)
+    im, d = canvas(880, max(200, m.size[1] + 40))
     box(d, 20, 60, 160, 70, 'Computer')
-    s = shot('dmm-bar', 0.4)
-    paste(im, d, s, 620, 40)
+    im.paste(m, (620, 20))
     fb = font(15, bold=True)
     ya, yb = 80, 112
     if ejected:
@@ -526,17 +541,17 @@ def delete_bar():
 
 
 def bt_names():
-    im, d = canvas(860, 220)
-    s = shot('dmm-bar', 0.4)
-    paste(im, d, s, 20, 40)
-    box(d, 580, 20, 260, 50, 'Phone app')
-    box(d, 580, 140, 260, 50, 'Computer (SCPI)')
-    arrow2(d, (220, 80), (570, 45))
-    arrow2(d, (220, 120), (570, 165))
+    m = meter(220)
+    im, d = canvas(880, max(220, m.size[1] + 40))
+    im.paste(m, (20, 30))
+    box(d, 600, 20, 260, 50, 'Phone app')
+    box(d, 600, 140, 260, 50, 'Computer (SCPI)')
+    arrow2(d, (250, 80), (590, 45))
+    arrow2(d, (250, 120), (590, 165))
     f = font(14, mono=True)
-    text_c(d, 395, 30, 'DM40A (Bluetooth LE)', f, BLUE)
-    text_c(d, 395, 168, 'C-1-ATK-DM40-CALI (SPP)', f, BLUE)
-    text_c(d, 395, 92, 'one at a time', font(13), MID)
+    text_c(d, 420, 30, 'DM40A (Bluetooth LE)', f, BLUE)
+    text_c(d, 420, 168, 'C-1-ATK-DM40-CALI (SPP)', f, BLUE)
+    text_c(d, 420, 92, 'one at a time', font(13), MID)
     save(im, 'bt-names')
 
 
@@ -590,22 +605,28 @@ def loader_install():
 
 
 def cannot_detect():
-    im, d = canvas(860, 300)
+    s = 5.0
+    dev, g, pd = device(s, screen='dmm-ma')
+    cx0 = round(104 * s)
+    crop = dev.crop((cx0, 0, dev.size[0], dev.size[1]))
+    w, h = crop.size
+    im, d = canvas(2 * (w + 300) + 20, h + 60)
     fb = font(15, bold=True)
-    for k, (t, src) in enumerate([('A lead in A, no current: not seen', False), ('Voltage across A and COM: reads as a current', True)]):
-        x0 = 20 + k * 430
-        text_c(d, x0 + 200, 14, t, fb)
-        d.rounded_rectangle((x0, 45, x0 + 400, 285), radius=14, outline=GREY, width=2)
-        xs = {'V/Ω': x0 + 80, 'COM': x0 + 200, 'A': x0 + 320}
-        for n, x in xs.items():
-            jack(d, x, 100, n, r=20)
-        d.line((xs['COM'], 160, xs['COM'], 230), fill=DARK, width=4)
-        d.line((xs['A'], 160, xs['A'], 230), fill=(200, 30, 30), width=4)
+    for k, (t, src) in enumerate([('A lead in A, no current:\nnot seen', False), ('Voltage across A and COM:\nreads as a current', True)]):
+        x0, y0 = 20 + k * (w + 300), 50
+        im.paste(crop, (x0, y0))
+        G = lambda x, y: (x0 + x * s - cx0, y0 + y * s)
+        text_c(d, x0 + (w + 220) / 2, 4, t, fb)
+        com, a = G(*pd.JACKS['com']), G(*pd.JACKS['a'])
+        ex = x0 + w + 110
         if src:
-            d.rectangle((xs['COM'] - 10, 230, xs['A'] + 10, 270), outline=DARK, width=2)
-            text_c(d, (xs['COM'] + xs['A']) / 2, 240, 'voltage source', font(13))
+            lead(d, [com, (com[0] + 60, com[1]), (ex, com[1] + 30)], (30, 30, 30))
+            lead(d, [a, (a[0] + 60, a[1]), (ex, a[1] - 20)], (190, 30, 30))
+            d.rounded_rectangle((ex, com[1] + 10, ex + 120, a[1]), radius=8, fill=(240, 246, 252), outline=BLUE, width=2)
+            text_c(d, ex + 60, (com[1] + a[1]) / 2 - 18, 'voltage\nsource', font(14, bold=True))
         else:
-            text_c(d, (xs['COM'] + xs['A']) / 2, 240, 'nothing flows', font(13), MID)
+            lead(d, [a, (a[0] + 60, a[1]), (ex + 40, a[1] + 10)], (190, 30, 30))
+            text_c(d, ex + 40, a[1] + 26, 'probe touches\nnothing', font(13), MID)
     save(im, 'cannot-detect')
 
 
@@ -711,18 +732,20 @@ def src_shot(item, scale):
 
 
 def ajack_wiring():
-    im, d = canvas(560, 340)
-    text_c(d, 280, 14, 'DC V selected, the leads still in A and COM', font(15, bold=True))
-    d.rounded_rectangle((20, 45, 540, 325), radius=14, outline=GREY, width=2)
-    xs = {'V/Ω': 120, 'COM': 280, 'A': 440}
-    for n, x in xs.items():
-        jack(d, x, 100, n, r=20)
-    d.line((xs['COM'], 160, xs['COM'], 240), fill=DARK, width=4)
-    d.line((xs['A'], 160, xs['A'], 240), fill=(200, 30, 30), width=4)
-    d.rectangle((xs['COM'] - 10, 240, xs['A'] + 10, 285), outline=DARK, width=2)
-    text_c(d, 360, 252, 'voltage source', font(14))
-    arrow(d, (xs['A'] + 24, 230), (xs['A'] + 24, 165), w=3, head=10)
-    text_c(d, 280, 292, 'a current flows through A: A-JACK', font(14, bold=True), RED)
+    s = 5.0
+    dev, g, pd = device(s, screen='ajack')
+    w, h = dev.size
+    im, d = canvas(w + 300, h + 60)
+    x0, y0 = 20, 40
+    im.paste(dev, (x0, y0))
+    G = offs(g, x0, y0)
+    bx, by, bw, bh = x0 + w + 110, y0 + h * 0.35, 150, 90
+    com, a = G(*pd.JACKS['com']), G(*pd.JACKS['a'])
+    lead(d, [com, (com[0] + 70, com[1]), (bx, by + 25)], (30, 30, 30))
+    lead(d, [a, (a[0] + 70, a[1]), (bx, by + bh - 25)], (190, 30, 30))
+    d.rounded_rectangle((bx, by, bx + bw, by + bh), radius=8, fill=(240, 246, 252), outline=BLUE, width=2)
+    text_c(d, bx + bw / 2, by + 22, 'voltage\nsource', font(15, bold=True))
+    text_c(d, x0 + w / 2, 8, 'DC V selected, the leads still in A and COM: a current flows through A, A-JACK', font(14, bold=True), RED)
     save(im, 'ajack-wiring')
 
 
@@ -796,6 +819,102 @@ def power_screen():
     save(im, 'power-screen')
 
 
+def device(s, screen='dmm-bar', top=False, front=True):
+    """The DM40 drawn by emu/panel_draw.py (the emulator's panel) at s px
+    per mm, with a manual screenshot in the display. Returns (image, g):
+    g(x_mm, y_mm) -> pixel position in the image. top: the top edge view
+    (USB, OUT, OSC) above the front; front=False: the top view only."""
+    import cairo
+    sys.path.insert(0, os.path.normpath(os.path.join(HERE, '../../../emu')))
+    import panel_draw as pd
+    art = pd.PanelArt()
+    art.show_top = top
+    y0 = pd.TOPV_Y if top else 0.0
+    y1 = pd.DEV_H if front else -pd.TOPV_GAP
+    w, h = round(pd.DEV_W * s), round((y1 - y0) * s)
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+    cr = cairo.Context(surf)
+    cr.set_source_rgb(1, 1, 1)
+    cr.paint()
+    cr.scale(s, s)
+    cr.translate(0, -y0)
+    if front:
+        art.draw_panel(cr)
+    else:
+        art.draw_top_view(cr)
+    im = Image.frombuffer('RGBA', (w, h), bytes(surf.get_data()), 'raw', 'BGRA', 0, 1).convert('RGB')
+    g = lambda x, y: (x * s, (y - y0) * s)
+    if front and screen:
+        dx, dy, dw, dh = pd.DISP
+        sc = shot(screen).resize((round(dw * s), round(dh * s)), Image.LANCZOS)
+        im.paste(sc, (round(dx * s), round((dy - y0) * s)))
+    return im, g, pd
+
+
+def offs(g, x0, y0):
+    return lambda x, y: (x0 + g(x, y)[0], y0 + g(x, y)[1])
+
+
+def lead(d, pts, colour):
+    d.line(pts, fill=colour, width=7, joint='curve')
+    d.line(pts, fill=tuple(min(255, c + 60) for c in colour), width=2, joint='curve')
+
+
+def jack_front(screen, s=6.0):
+    """The device front, and the canvas room right of the jacks."""
+    dev, g, pd = device(s, screen=screen)
+    return dev, g, pd
+
+
+def power_wiring_dev():
+    s = 5.0
+    dev, g, pd = device(s, screen='power-dc')
+    w, h = dev.size
+    im, d = canvas(w + 440, h + 40)
+    x0, y0 = 20, 20
+    im.paste(dev, (x0, y0))
+    G = offs(g, x0, y0)
+    v, com, a = G(*pd.JACKS['v']), G(*pd.JACKS['com']), G(*pd.JACKS['a'])
+    sx, lx, bw = x0 + w + 130, x0 + w + 290, 110
+    btop, bbot = y0 + 70, com[1] - 30
+    wire_y = y0 + 30
+    fb, f = font(15, bold=True), font(13)
+    for x, t in [(sx, 'SOURCE'), (lx, 'LOAD')]:
+        d.rounded_rectangle((x, btop, x + bw, bbot), radius=8, fill=(240, 246, 252), outline=BLUE, width=2)
+        text_c(d, x + bw / 2, (btop + bbot) / 2 - 10, t, fb)
+        text_c(d, x + bw / 2, btop + 4, '+', font(18, bold=True))
+        text_c(d, x + bw / 2, bbot - 26, '−', font(18, bold=True))
+    # The + wire, source + to load +, extended left to the V tap.
+    vx = sx - 40
+    d.line((vx, wire_y, lx + bw / 2, wire_y), fill=DARK, width=3)
+    d.line((sx + bw / 2, wire_y, sx + bw / 2, btop), fill=DARK, width=3)
+    d.line((lx + bw / 2, wire_y, lx + bw / 2, btop), fill=DARK, width=3)
+    d.text((sx + bw / 2 + 8, wire_y - 22), '+ wire', font=f, fill=MID)
+    lead(d, [v, (vx, v[1]), (vx, wire_y)], (190, 30, 30))
+    lead(d, [com, (sx + bw / 2, com[1]), (sx + bw / 2, bbot)], (30, 30, 30))
+    lead(d, [a, (lx + bw / 2, a[1]), (lx + bw / 2, bbot)], (190, 30, 30))
+    save(im, 'power-wiring-dev')
+
+
+def top_view(name, key, label):
+    s = 7.0
+    dev, g, pd = device(s, top=True, front=False)
+    w, h = dev.size
+    im, d = canvas(w + 40, h + 90)
+    x0, y0 = 20, 20
+    im.paste(dev, (x0, y0))
+    G = offs(g, x0, y0)
+    cx, cy = pd.MCX[key]
+    down_label(d, label, G(cx, cy + pd.MCX_R), y0 + h + 30, font(15))
+    save(im, name)
+
+
+def meter(width, screen='dmm-bar'):
+    """The device front scaled to `width` px."""
+    dev, g, pd = device(width / 140.0, screen=screen)
+    return dev
+
+
 def main():
     global RENDERS, STOCK
     if len(sys.argv) not in (2, 3):
@@ -830,6 +949,9 @@ def main():
     loader_key()
     loader_install()
     cannot_detect()
+    power_wiring_dev()
+    top_view('top-osc', 'scope', 'OSC: the oscilloscope input')
+    top_view('top-out', 'gen', 'OUT: the generator output')
     ajack_wiring()
     scope_topbar()
     stock_dmm_pairs()
