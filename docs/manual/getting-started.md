@@ -26,8 +26,8 @@ To install opendm40 on a meter that runs the stock firmware:
    ([firmware/README.md, Build](../../firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
-3. Copy the file onto that disk as `dm40_fwrs.bin`. It must be the only file
-   named `dm40*.bin` on the disk: the loader installs the first one it finds.
+3. Copy the file onto that disk as `dm40_fwrs.bin`. Keep it the only
+   `dm40*.bin` file on the disk ([why](recovery.md#install-a-file-from-the-update-loader)).
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.

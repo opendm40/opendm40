@@ -14,7 +14,7 @@ All settings are kept when you switch off, except **USB disk**.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input. |
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input; it warns 30 s before. Not during a recording, a MIN/MAX/AVG session, or while the power meter counts energy. |
+| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input ([details](getting-started.md#power-battery-and-sleep)). |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
 | **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. The auto power-off warning always sounds at least at 50 %; the danger alarm has its own setting (page 3). |
 | **Bluetooth** | ON, OFF | ON | The Bluetooth module ([Remote control](remote-control.md)). |
