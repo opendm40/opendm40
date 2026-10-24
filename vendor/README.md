@@ -17,7 +17,7 @@ Retrieved on 2026-10-13. Older versions (V1.6 .. V2.5) are kept in
 `wirenboard/alientek-dm40-tools` (`vendor/`).
 
 - **Back to stock:** copy this file onto the FS-loader's USB disk as the only
-  `dm40*.bin` and press "update" (see the root README, "Safety").
+  `dm40*.bin` and press "update" (see [Safety](../README.md#safety) in the root README).
 - **Decoded body** (needed by `emu/run.py stock`, `fw-rs/tools/mkstockfont.py`
   and the patch kit), written to the repo root, which git ignores:
 
