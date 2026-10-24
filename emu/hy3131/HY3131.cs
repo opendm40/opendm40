@@ -189,7 +189,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 intf &= v; // 0s clear, 1s cannot be set
                 return;
             }
-            if(reg == 0x1F) { regs[reg] = (byte)(v & 0x1F); return; }
+            if(reg == 0x1F) { regs[reg] = (byte)(v & 0x1F); rowT = now; return; } // R_INTE: the end of a row write
             if(reg >= 0x38) { regs[reg] = v; return; }
 
             // Ad1Mix: the AD1 input as the configuration before this write burst (its first
@@ -209,8 +209,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 0x20:
                 SetCounterEnable((masked & 0x02) != 0, now);
                 break;
+            case 0x21:
+                r21T = now;
+                break;
             case 0x22:
-                if(old != masked && R22PartFrac >= 0 && EnAd1 && !(r22PartT > now))
+                // R22PartWinMs: only an R22 change within that long of the last row write (or in
+                // the row write itself: R21 written just before) ends as a partial
+                var early = R22PartWinMs <= 0 || now - rowT <= R22PartWinMs * 1e-3 || now - r21T < 1e-4;
+                if(old != masked && R22PartFrac >= 0 && EnAd1 && !(r22PartT > now) && early)
                 {
                     // R22PartFrac: the conversion in progress ends on the old period's grid
                     var pOld = (256 << (old & 7)) * 30.0 / SysClk * ((old & 0x10) != 0 ? 2 : 1);
@@ -525,6 +531,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// conversion in progress is 100 ms, not 400). The device showed none for the same R22 steps
         /// later in a function; the model does not tell the two apart. Off (frac -1) by default.
         public double R22PartFrac = -1, R22OffCodes, R22PartN = 1;
+        /// ... only for an R22 change within this many ms of the last row write (opt-in,
+        /// "r22win:ms"; 0 = any change, the default). INFERRED from device v0.1-pre1: the partials
+        /// came after an R22 write ~0.4 s after the row write, not after the same OSR steps later
+        /// in a function (input steps at MED / SLOW, osrstep.py).
+        public double R22PartWinMs;
+        private double rowT = double.NegativeInfinity, r21T = double.NegativeInfinity;
         private int r22PartLeft;
         /// Chopped AD1 restart (opt-in, "chophalf:1"; INFERRED from device 10242c3, osr/ fr_40_15:
         /// the first record of an OSR 8192 chopped session after a 640/s one came 51.9 ms after the
@@ -790,6 +802,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "r22part": R22PartFrac = o.Value; break;
                 case "r22off": R22OffCodes = o.Value; break;
                 case "r22n": R22PartN = o.Value; break;
+                case "r22win": R22PartWinMs = o.Value; break;
                 case "chophalf": ChopHalf = o.Value != 0; break;
                 case "chopskew": ChopSkewMs = o.Value; break;
                 case "vjblind": VjBlind = o.Value != 0; break;

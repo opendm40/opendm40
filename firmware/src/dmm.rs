@@ -1309,6 +1309,20 @@ const VET_FLOOR: i32 = 4000;
 //   R22_DROP_WIN_MS of the row write, and a row write that changes the R22
 //   the chip ran (RES at SLOW -> DC V read OL, then 0.40 V twice), drop the
 //   next R22_DROP_N conversions.
+//   The HY3131 datasheet (DS-HY3131-V10 13.1) does not explain the effect:
+//   it gives AD1 as a sinc^2 comb ("Comb Filter^2"; AD2 / AD3: ^3) whose
+//   chopped modes (AD1CHOP 1x: 0x13 / 0x15 / 0x17) swap the input every OSR
+//   period and halve the rate, and says nothing about an OSR change in a
+//   running conversion. A sinc^2 restart would give one transitional result,
+//   not two at ~32-40 %, so N is not derived from it (it stays 2, the device
+//   count).
+// - R22_LATE (`r22_early`): the step to the slow OSR (0x17) of MED / SLOW
+//   waits until R22_DROP_WIN_MS after the row write, so it no longer drops two
+//   400 ms conversions (CONF -> READ? DC V at MED: 1.5-1.8 s on e1cec01). Until
+//   then the readings come at OSR_FAST (100 ms, unaveraged); ohm's in-range
+//   OSR is OSR_FAST in the window (two 100 ms conversions dropped), the steady
+//   one after it. That a step after the window is clean is INFERRED from the
+//   device's input steps later in a function (osrstep.py, v0.1-pre1).
 const OVER_TWICE: bool = true;
 const R22_DROP_N: u8 = 2;
 const R22_DROP_WIN_MS: u64 = 2000;
@@ -3524,7 +3538,9 @@ impl Dmm {
                 self.avg_skip = true;
             }
         } else if (ad1 - self.prev_ad1).abs() <= thr {
-            if self.r22 != OSR_SLOW {
+            // Not within R22_DROP_WIN_MS of the row write (R22_LATE): the
+            // fast OSR goes on until then, no conversions dropped.
+            if self.r22 != OSR_SLOW && !self.r22_early() {
                 hy::write(0x22, &[OSR_SLOW]);
                 self.r22 = OSR_SLOW;
                 self.avg_skip = true;
@@ -3543,9 +3559,15 @@ impl Dmm {
     /// R22_DROP_WIN_MS of the row write, drop the next R22_DROP_N
     /// conversions.
     fn r22_dropping(&mut self) {
-        if R22_DROP_N != 0 && self.t_poll < self.row_t + R22_DROP_WIN_MS {
+        if R22_DROP_N != 0 && self.r22_early() {
             self.r22_drop = R22_DROP_N;
         }
+    }
+
+    /// Within R22_DROP_WIN_MS of the row write: an R22 change now would
+    /// cost R22_DROP_N conversions (R22_LATE).
+    fn r22_early(&self) -> bool {
+        self.t_poll < self.row_t + R22_DROP_WIN_MS
     }
 
     /// A conversion to drop (`r22_dropping`): true = drop it.
@@ -4344,7 +4366,11 @@ impl Dmm {
                 hy::write(0x22, &[0x13]);
                 self.r22_dropping();
             }
-        } else if r22 != steady {
+        } else if r22 != steady && !(r22 == OSR_FAST && self.r22_early()) {
+            // Within R22_DROP_WIN_MS of the row write the in-range OSR is
+            // OSR_FAST (two dropped conversions of 100 ms, not of 400 ms at
+            // MED / SLOW); the steady one after it (R22_LATE).
+            let steady = if self.r22_early() { OSR_FAST } else { steady };
             hy::write(0x22, &[steady]);
             self.deadline = now + 150;
             self.avg_skip = true;
