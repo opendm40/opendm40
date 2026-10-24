@@ -146,6 +146,10 @@ class Link:
     def write(self, cmd):
         os.write(self.fd, cmd.encode() + b'\n')
 
+    def write_raw(self, msg):
+        """One message of raw bytes, nothing appended (DBG:UPLOAD:DATA)."""
+        os.write(self.fd, msg)
+
     def read(self, n=1 << 16):
         """One reply. SIGINT stays pending until the read returns (a timeout
         ends it after the driver's 5 s), so Ctrl-C never cuts a reply."""
@@ -177,6 +181,25 @@ class Link:
               file=sys.stderr)
         self.write(cmd)
         return self.read()
+
+    def fresh(self):
+        """Start a session from a known state: a USBTMC device clear (an
+        earlier client may have died in the middle of a message or a reply:
+        Linux usbtmc sends no clear on close), then *CLS. The SCPI error
+        queue is a FIFO that lives across clients, so without this the first
+        SYST:ERR? of a session reports an error some earlier client left
+        (TODO "reload.sh first-upload failures": a stale -113 "Undefined
+        header" read as DBG:UPLOAD:BEGIN's). The stale errors are returned
+        (read before the *CLS), for the record."""
+        self.clear()
+        stale = []
+        for _ in range(9):  # opendm40 keeps 8 (scpi.rs ERRQ) + 1
+            e = self.query('SYST:ERR?').decode(errors='replace').strip()
+            if not e or e.startswith(('0,', '+0,')):
+                break
+            stale.append(e)
+        self.write('*CLS')
+        return stale
 
     def try_query(self, cmd):
         """(reply, None) or (None, error text). An unknown query gets no reply:
@@ -478,17 +501,24 @@ def cmd_upload(ln, path, quiet=False):
     `path` becomes DM40FW.BIN in the SPI disk's root (src/upload.rs)."""
     data = open(path, 'rb').read()
     crc = zlib.crc32(data)
+    stale = ln.fresh()
+    if stale:
+        print('dm40: %d error(s) an earlier client left in the meter\'s queue (cleared, not from this upload): %s'
+              % (len(stale), '; '.join(stale)), file=sys.stderr)
     ln.write('DBG:UPLOAD:BEGIN %d,%d' % (len(data), crc))
     e = syst_err(ln)
     if not e.startswith('0,'):
-        sys.exit('DBG:UPLOAD:BEGIN: %s%s' % (e, ' (firmware without DBG:UPLOAD?)' if 'Undefined' in e else ''))
+        hint = ''
+        if 'Undefined header' in e and ln.try_query('DBG:UPLOAD?')[0] is None:
+            hint = ' (DBG:UPLOAD? does not answer either: a firmware without DBG:UPLOAD?)'
+        sys.exit('DBG:UPLOAD:BEGIN failed: the meter reports SCPI error %s%s' % (e, hint))
     t0 = time.time()
     for i, off in enumerate(range(0, len(data), UPLOAD_CHUNK)):
-        os.write(ln.fd, b'DBG:UPLOAD:DATA %d,' % off + data[off:off + UPLOAD_CHUNK])
+        ln.write_raw(b'DBG:UPLOAD:DATA %d,' % off + data[off:off + UPLOAD_CHUNK])
         if i % 256 == 255:
             e = syst_err(ln)
             if not e.startswith('0,'):
-                sys.exit('DBG:UPLOAD:DATA at %d: %s' % (off, e))
+                sys.exit('DBG:UPLOAD:DATA failed at offset %d: the meter reports SCPI error %s' % (off, e))
             if not quiet:
                 print('\r%d / %d bytes' % (off + UPLOAD_CHUNK, len(data)), end='', flush=True)
     r, err = ln.try_query('DBG:UPLOAD:END?')
@@ -497,13 +527,14 @@ def cmd_upload(ln, path, quiet=False):
     want = '%d,%d' % (len(data), crc)
     got = r.decode(errors='replace').strip() if r else None
     if got != want:
-        sys.exit('DBG:UPLOAD:END?: %s (want %s)' % (got or err, want))
+        sys.exit('DBG:UPLOAD:END? failed: %s (want %s)' % (got or 'the meter reports %s' % err, want))
     print('uploaded %s: %d bytes, CRC-32 %08x, as DM40FW.BIN in %.1f s' % (path, len(data), crc, time.time() - t0))
     return 0
 
 
 def cmd_update(ln, wait, expect):
     """DBG:UPDATE; True once the device dropped off USB (= marker zeroed, reset)."""
+    ln.fresh()  # the SYST:ERR? below must be DBG:UPDATE's, not an earlier client's
     ln.write('DBG:UPDATE')
     # The reset waits for pending disk writes first (a CSV recording's last
     # commit, a screenshot: app::finish_disk_writes, up to ~14 s).

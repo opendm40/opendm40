@@ -478,6 +478,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         bt.pump(); // BT TX DMA: next segment of a long reply
         prof::lap(prof::USB);
+        tmc.expire_partial();
         if tmc.take_cleared() {
             // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
             scpi_wait[USB] = None;
