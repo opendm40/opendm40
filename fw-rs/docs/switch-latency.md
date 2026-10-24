@@ -287,7 +287,14 @@ DBG:READout? query where the test needs it) and passes after the fix.
    range) a conversion is final only when the one before it on the same row
    agrees within 0.1 % plus 8 counts of the range (two OL agree); until then
    it is provisional (grey, `Reading::prov`: no SCPI, BT, statistics,
-   limits, REL). Once a row is vetted its conversions are final. The
+   limits, REL). Once a row is vetted its conversions are final. Escape
+   (OHM_VET_MAX_MS, a deviation from a strict "two agree" rule, as the V
+   vet's VET_HELD_MAX): a conversion 1.5 s or more after the row write is
+   final whatever the one before, so a range whose noise is above 0.1 %
+   (60 Mohm at FAST, a source on the jacks) is never grey forever
+   (ohmhunt r10M-fast-noisy, model noise x400, ~1-2 %: final at 1.15 s,
+   no wrong amber value; it does not prove the escape: with this seeded
+   noise two conversions still agree by chance, also without it). The
    provisional ones still pass the sentinel / watchdog (`prov_side`, as
    AUTO's G7: LIVE? / A-JACK keep their timing) and restart the averager.
    The first in-range conversion is now the vet's reference instead of a

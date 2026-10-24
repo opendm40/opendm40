@@ -2548,6 +2548,8 @@ Firmware:
                value expected ~0.1-0.4 s later than ab7184c's (one vet conversion). Real resistors vs the
                calibrator: whether the wrong values come from the meter or from the simulator's lag (log
                DBG:READout? every 20 ms: grey values and their times).
+               10 Mohm (or open) at FAST: the 60 Mohm range's value turns amber at most ~1.5 s after the
+               hunt's last range step (OHM_VET_MAX_MS), never stuck grey; same on a live source (LIVE?).
             2. `VOLT:COUP AUTO` on the 10 / 40 Hz square, FETC? every 0.1 s: +9.91E37 within ~10 ms each until the
                decision, then the value; MEAS:VOLT:AUTO? / READ? as before (1.28 / 3.45 / 3.91 s).
             3. RUN at 1 s after `VOLT:COUP AUTO` (10 Hz square): "HOLD" in the status bar at once, the grey value

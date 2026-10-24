@@ -873,6 +873,8 @@ pub struct Dmm {
     /// row agreed on it (its conversions are final from then on).
     ohm_prev: f32,
     ohm_ok: bool,
+    /// Time of this row's write (ms; OHM_VET_MAX_MS).
+    ohm_t0: u64,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1218,6 +1220,13 @@ const OHM_SINGLE_MS: u64 = 2500;
 /// a range step). Once a row is vetted its conversions stay final.
 const OHM_VET_REL: f32 = 0.001;
 const OHM_VET_CNT: f32 = 8.0;
+/// ... and a row whose conversions never agree that closely (noise above
+/// 0.1 %, e.g. a high range at FAST, a source on the jacks) is not grey
+/// forever: a conversion OHM_VET_MAX_MS or more after the row write is
+/// final whatever the one before (as VET_HELD_MAX for V / A; a time, not a
+/// count, so FAST's 100 ms conversions get as long as MED's 400 ms ones to
+/// settle: 1.5 s is 15 / 4 conversions).
+const OHM_VET_MAX_MS: u64 = 1500;
 
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-fwrs.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
@@ -1362,6 +1371,7 @@ impl Dmm {
             ohm_settled: false,
             ohm_prev: f32::NAN,
             ohm_ok: false,
+            ohm_t0: 0,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -1835,6 +1845,7 @@ impl Dmm {
         self.vet_first = self.vet_fresh(old.0, r22_was);
         self.ohm_prev = f32::NAN;
         self.ohm_ok = false;
+        self.ohm_t0 = now;
         self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
@@ -4033,6 +4044,8 @@ impl Dmm {
         let x = if kraw / lim > ov { f32::INFINITY } else { kraw };
         let p = core::mem::replace(&mut self.ohm_prev, x);
         if (x.is_infinite() && p.is_infinite()) || (x - p).abs() <= OHM_VET_REL * p.abs() + OHM_VET_CNT * lim / 60000.0 {
+            self.ohm_ok = true;
+        } else if now >= self.ohm_t0 + OHM_VET_MAX_MS {
             self.ohm_ok = true;
         }
         let prov = !self.ohm_ok;
