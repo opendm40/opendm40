@@ -3968,3 +3968,35 @@ end). Scripts and data are in the session scratchpad `chk11/` (not in git): `con
   21 656 / 45 148.
 - **Files:** none made; `MMEM:CAT?` equals the start listing.
 - **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled (it was used in voltage and resistance).
+
+## 7b1b6d1 / 0e69979: the Bluetooth start-up banner (2026-10-25 01:15 - 01:40)
+
+7b1b6d1 is a diagnostic image (7dd18ab plus `DBG:BTTRace?`, a USB-readable log of every BT UART byte, PC14
+edge and module power edge with ms stamps; not merged). 0e69979 is the fix (bt.rs `StartText`). Host
+`/usr/bin/python3` + `dm40bt_scpi.Link`, RFCOMM channel 1 on XX:XX:XX:XX:XX:XX. Settings BT toggles are taps on
+the Bluetooth row (240,178). Scripts and traces are in the session scratchpad `btse/` (not in git).
+
+**What the module sends (7b1b6d1).** On every module start (the power-up at boot, a Settings BT on, and the
+AT init's `AT+RESET`), PC14 reads high for 644-663 ms with no host. The module prints a 0x00, then, 145-195 ms
+after the start, 7 CR LF lines: `BLE03:VER2.1-20240615` (with a 0x00 before the CR), `CBN:DM40A`,
+`CBMAC:<12 hex>`, `CSN:C-1-ATK-DM40-CALI`, `CSMAC:<12 hex>`, `CBSW:1`, `CSSW:1`. These are the cd1ec9a errors
+-102 / -113 / -113 / -102 / -113 / -113 / -113, in order. All 7 lines were parsed with PC14 high (traced at boot
+and on 2 toggles). The banner after `AT+RESET` fell in the 2 s quiet window and was dropped. The AT init
+(`AT+SBNDM40A` -> `OK` in 12 ms, `AT+SLED0` -> `OK`, `AT+RESET` with no `OK`) runs once per boot, so the
+toggles had no AT traffic. With the module off, PC14 also read high (`powered` masks it).
+**Connect without a power-up:** the host's `*IDN?` arrived 335 ms before PC14 rose, and the PC14 gate dropped
+it. **Fast connect:** a client that retried from the ON tap linked 0.32 s after the start, after the banner
+and inside the PC14 pulse.
+
+**Fix (0e69979)**, `DBG:BOOT?` NORMAL, BT ON:
+
+| step | result |
+|---|---|
+| 1. After the flash reboot, no client before: connect, `SYST:ERR:COUN?` sent at once | **PASS**: `0` (1 of 1) |
+| 2. Settings BT off / on, 10 s wait, then connect, `SYST:ERR:COUN?` at once | **PASS**: `0` 3 of 3 |
+| 3. Reconnect without a power-up, `*IDN?` 0 / 0.05 / 0.1 / 0.2 / 0.3 s after the connect | **PASS**: 15 of 15 answered, `SYST:ERR:COUN?` 0 after each (cd1ec9a: 14 of 17 at 0-0.3 s got no reply) |
+| 4. BT on, connect as soon as possible (retrying), `*IDN?` at once | **PASS**: linked ~0.4 s after the ON tap, answered, count 0 (2 of 2) |
+| 5. Stock protocol: `dm40scpi.py --bt info`, `btpoll -p 50 -d 10` | **PASS**: info OK; 200 / 200 replies, median 35.6 ms |
+
+One BT OFF tap with a 4 s connect attempt timed out (the toggles do switch the module). State at the end: DMM
+page, BT ON, `SYST:ERR?` empty over USB, `SYST:ALER?` NONE. No files made.
