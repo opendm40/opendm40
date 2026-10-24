@@ -3,8 +3,8 @@
 src/app_wave.rs, TODO (A)) in the emulator, driven like a user (DBG:KEY /
 DBG:TAP) and checked over SCPI on one USB/IP connection.
 
-  cd fw-rs && ./build.sh --features ad2-isr
-  emu/hy3131/wavetest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
+  cd firmware && ./build.sh --features ad2-isr
+  emu/hy3131/wavetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
 
 Input: --dmm (default a 1 V rms 50 Hz sine on V/COM; the DMM model's AD2
 path is AC-coupled in AC V like the meter). Checks:
@@ -25,7 +25,7 @@ path is AC-coupled in AC V like the meter). Checks:
     resumed), no SYST:ERR?;
   * a host CONF mid-wave: the view closes (forced stop), DC V then reads ~0;
   * region C (flash above 0x08080000, not zero-wait: ~20 us ISR entry
-    stalls on the device, fw-rs/link-native.x) while the stream ISR owns the
+    stalls on the device, firmware/link-native.x) while the stream ISR owns the
     bus: a Renode hook on every function of C logs the first call made
     while hy3131::HANDED is set. STOP + MF Settings "Save CSV" in the wave
     view (the DLG write pauses the stream, the USB volume refresh waits
@@ -105,7 +105,7 @@ HOOKS = RC and RC.script
 # record): parallel runs share nothing (port + pid in every name).
 DISK = os.path.join(OUT, TAG + '.disk.bin')
 import shutil  # noqa: E402
-shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), DISK)
+shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), DISK)
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG,
        '--log', os.path.join(OUT, TAG + '.log'), '--disk', DISK, '--dmm', A.dmm] + (['--script', HOOKS] if HOOKS else [])
@@ -198,7 +198,7 @@ try:
         import struct
         ref = os.path.join(OUT, '%s-%s' % (TAG, os.path.basename(dlg)))
         open(ref, 'wb').write(get_file(dlg))
-        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'fw-rs/tools/dlog.py'), ref, '-o', ref + '.csv'],
+        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'firmware/tools/dlog.py'), ref, '-o', ref + '.csv'],
                            capture_output=True)
         want = open(ref + '.csv', 'rb').read() if r.returncode == 0 else None
         m = uc.Msc(t.d)

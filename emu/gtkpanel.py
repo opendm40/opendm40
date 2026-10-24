@@ -1060,7 +1060,7 @@ class FrontendView(Gtk.DrawingArea):
     # ---------- inputs the firmware switches inside one function / range ----------
     # The drawing holds its geometry per function / range: every pin, wire and line any of these states
     # can need is reserved, so a toggle never adds or removes a row (the owner: "скачет, некрасиво").
-    # fw-rs time-shares inputs (fw-rs/src/dmm.rs, sentinel.rs; power-meter-and-misconnect.md 4.4):
+    # fw-rs time-shares inputs (firmware/src/dmm.rs, sentinel.rs; power-meter-and-misconnect.md 4.4):
     #  - DC V 6 V: the comparator alternates PB1 (A-jack sentinel) / SENSE (AC? hint), one 100 ms window each;
     #  - AC V: AD1 (peak hold) alternates PB1 - PB3 (A-jack) / SENSE - PB5 (DC? hint), 100 ms windows;
     #  - DC V 6 V / DC mV: after a comparator hit the A-PROT probe (OP2 on PB2, AD2 = OP2O - PB3, peak hold

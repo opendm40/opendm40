@@ -56,7 +56,7 @@ import usbip_client as u  # noqa: E402
 
 DEV_DEP_MSG_OUT, REQUEST_DEV_DEP_MSG_IN = 1, 2
 # The native identity; its serial field (the chip UID as 24 hex digits,
-# fw-rs/src/uid.rs, emu/run.py --uid) is taken from the first *IDN? (main).
+# firmware/src/uid.rs, emu/run.py --uid) is taken from the first *IDN? (main).
 IDN = None
 IDN_RE = re.compile(rb'Alientek,DM40[ABC],[0-9A-F]{24},dm40-fw 0\.1')
 IDN_34401A = b'HEWLETT-PACKARD,34401A,0,dm40-fw 0.1'

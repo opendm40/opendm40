@@ -8,22 +8,22 @@ ADC or the HY3131.** Everything else needs a cable.
 
 Tags: **VERIFIED** = read in the stock disassembly / fw-rs driver that runs on the
 device, or exercised on the device; **INFERRED** = interpretation (board wiring
-is not traced; no schematic in the repo). Sources: `fw-rs/src/*.rs`,
-`firmware/re/analysis/*.h`, `firmware/re/analysis/app_decompile.c`,
+is not traced; no schematic in the repo). Sources: `firmware/src/*.rs`,
+`stock/re/analysis/*.h`, `stock/re/analysis/app_decompile.c`,
 [`hw/README.md`](../../hw/README.md) (board description: BOM, photos, pins).
 
 ## 1. DAC channels
 
 | Channel / pin | Drives | Status | Evidence |
 |---|---|---|---|
-| DAC ch1 = PA4 (`DAC_OUT0`) | Generator waveform: TIM6 TRGO at 10 MHz/(PSC+1), DMA0 stream 5 ch7 from the wave table, 12-bit unipolar 0..amp (3.0 V ref assumed) | VERIFIED | `fw-rs/src/gen.rs:3-7,232-252`; `scope_gen_v2_6.h:105-131` (FUN_080166a4) |
+| DAC ch1 = PA4 (`DAC_OUT0`) | Generator waveform: TIM6 TRGO at 10 MHz/(PSC+1), DMA0 stream 5 ch7 from the wave table, 12-bit unipolar 0..amp (3.0 V ref assumed) | VERIFIED | `firmware/src/gen.rs:3-7,232-252`; `scope_gen_v2_6.h:105-131` (FUN_080166a4) |
 | DAC ch2 = PA5 (`DAC_OUT1`) | **Scope trigger level** for a hardware comparator: `DHR12R2` = 1780 + (code - t0)(2401 - 1780)/(t1 - t0); written at every acquisition start; comparator output -> PA15 AF1 TIM2_CH1 | VERIFIED (stock programs DAC2/PA5 analog and PA15/TIM2: FUN_08012260 `app_decompile.c:13615`, FUN_0801241a); comparator chip itself INFERRED ("guess" in the header) | `scope_gen_v2_6.h:50-59`; `scope_gen_ui_v2_6.h:119-125,471-472` (`SCOPE_TRIG_DAC_HI/LO`) |
 | (not a DAC) PC8 TIM3_CH3 PWM, ARR 20000 | Scope vertical offset (CCR3 8800..11636 maps to ADC code ~280..730) | VERIFIED | `scope.rs:260-271,432-439`; `scope_gen_v2_6.h:89-91` |
-| PB12 GPIO | Generator output-path select: 0 = DAC (PA4), 1 = PWM (PB14 TIM12_CH1, square > 50 kHz) | VERIFIED (pin use); the switch is very likely the SGM3157 SPDT a user burned at 12 V | `gen.rs:6,232-235`; `scope_gen_v2_6.h:130-131`; `fw-rs/docs/user-feedback.md:250,307` (INFERRED) |
+| PB12 GPIO | Generator output-path select: 0 = DAC (PA4), 1 = PWM (PB14 TIM12_CH1, square > 50 kHz) | VERIFIED (pin use); the switch is very likely the SGM3157 SPDT a user burned at 12 V | `gen.rs:6,232-235`; `scope_gen_v2_6.h:130-131`; `firmware/docs/user-feedback.md:250,307` (INFERRED) |
 | External DAC on SPI/I2C | none: SPI peripherals are W25Q128 flash and the bit-banged HY3131; no DAC in the BOM | INFERRED (negative) | `hy3131_v2_6.h:4-6`; [hw/README.md Main parts](../../hw/README.md#main-parts) |
 
 fw-rs never enables DAC ch2, PA15 or TIM2: the trigger is found in software in
-the record (`scope.rs:8-9,777-800`; no `TIM2`/`PA15` in `fw-rs/src`). The
+the record (`scope.rs:8-9,777-800`; no `TIM2`/`PA15` in `firmware/src`). The
 generator DAC output buffer is off (BOFF1 = 1) for sine/triangle/ramp, which
 implies an external buffer/op-amp stage on PA4 (INFERRED, `scope_gen_v2_6.h:126-127`).
 

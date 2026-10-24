@@ -1,7 +1,7 @@
 # fw-rs vs stock DM40 V2.6 — parity report
 
-Item-by-item comparison of the Rust replacement firmware (`fw-rs/src/*.rs`) against
-the reverse-engineered stock behaviour (`firmware/re/analysis/*_v2_6.h`). Status
+Item-by-item comparison of the Rust replacement firmware (`firmware/src/*.rs`) against
+the reverse-engineered stock behaviour (`stock/re/analysis/*_v2_6.h`). Status
 per item: **MATCH**, **PARTIAL** (what is missing in parentheses), **MISSING**,
 **UNKNOWN** (needs an on-device check). The device in hand is a DM40A (model
 byte 0). AC+DC and the 50/60 k-count model variants are DM40B/C only and out of

@@ -2,7 +2,7 @@
 //! from the stock firmware (audit in docs/native-boot.md "Implementation").
 //! Runs after clock::init_core and before `main` (normal boot).
 //!
-//! Values are the stock ones (firmware/re/analysis/lcd_buzzer_v2_6.h,
+//! Values are the stock ones (stock/re/analysis/lcd_buzzer_v2_6.h,
 //! scope_gen_ui_v2_6.h, and the stock boot FUN_0800af34 -> FUN_0800b410 rails,
 //! FUN_0800aac4 GPIO/FSMC/backlight, FUN_0800a0e4 panel init).
 

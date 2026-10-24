@@ -1,6 +1,6 @@
 //
 // Hynitron CST2xx/3xx-class touch controller at 7-bit address 0x5A as the
-// DM40 uses it (firmware/re/analysis/touch_v2_6.h): 16-bit big-endian register
+// DM40 uses it (stock/re/analysis/touch_v2_6.h): 16-bit big-endian register
 // addresses, D1 01 / D1 09 info mode, D2 04 chip info ([2] = 0xA8), D0 00
 // 7-byte frame (point 0 + count + 0xAB), D0 07/0C/11/16 further points,
 // D0 00 AB acknowledge. INT (PE5) pulses low for every report.

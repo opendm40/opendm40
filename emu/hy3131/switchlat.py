@@ -2,10 +2,10 @@
 """DMM switch latency: time from a function / coupling / range switch (or an
 input step under AUTO range) to the first reading and to the reading within
 0.1 % of its final value, for fw-rs and for the stock firmware, on one
-scripted timeline per firmware (fw-rs/docs/switch-latency.md).
+scripted timeline per firmware (firmware/docs/switch-latency.md).
 
-  cd fw-rs && ./build.sh
-  emu/hy3131/switchlat.py fwrs --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+  cd firmware && ./build.sh
+  emu/hy3131/switchlat.py fwrs --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
       --port 45010 --rate MED --json emu/out/swl-fwrs-med.json
   emu/hy3131/switchlat.py stock --json emu/out/swl-stock.json
   emu/hy3131/switchlat.py report emu/out/swl-*.json
@@ -26,7 +26,7 @@ change; the script clears them at every switch). Function changes are
 DBG:TAP on the function bar (a meter-side change: FETCh? never waits).
 
 stock: no host channel; the --script samples the stock's DMM struct m
-(TCM 0x10001c04, firmware/re/analysis/dmm_v2_6.h: +1 range, +2 mode, value
+(TCM 0x10001c04, stock/re/analysis/dmm_v2_6.h: +1 range, +2 mode, value
 fields +0xc0 DC V/mV, +0xc4 AC V/mV, +0xcc DC A, +0xd8 AC+DC, +0xdc ohm
 kohm) and the settle deadline S+0x40 (0x200200bc) every 50 ms of virtual
 time with `sysbus ReadDoubleWord`; the readout redraws every 50 ms from m,

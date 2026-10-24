@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """DM40 stock remote-debug tool (debug firmware variant dm40_dbg.bin).
 
-Talks to a DM40 running the DEBUG patch (firmware/patch/build-dbg/dm40_dbg.bin)
+Talks to a DM40 running the DEBUG patch (stock/patch/build-dbg/dm40_dbg.bin)
 over Bluetooth RFCOMM. It is a strict superset of dm40_memrw.py: the same
 read/write/dump, plus LCD screenshot read-back (BT cmd 0x0B sub 3/4) and
 memory-browsing helpers. Connection and auto-discovery are reused from
@@ -12,7 +12,7 @@ Because the stock firmware pumps the Bluetooth parser ONLY from the multimeter
 page loop, every command here - memory reads AND screenshots - is answered
 only while the meter shows the MULTIMETER (DMM) page. `shot` therefore
 captures the DMM page. Capturing the scope/generator pages needs the
-experimental scope-page build (see firmware/patch/README).
+experimental scope-page build (see stock/patch/README).
 
 Screenshots read the ILI9488 GRAM in the panel's native 320x480 DRIVER space;
 the stock GUI draws the 480x320 landscape view onto it column-major, so the
@@ -180,7 +180,7 @@ def orient(driver_rows, args):
     return img
 
 
-# --- named RAM symbols (from firmware/re/analysis/*.h) ----------------------
+# --- named RAM symbols (from stock/re/analysis/*.h) ----------------------
 SYMBOLS = {
     'meas':      (0x20027C74, 11, 'DMM measurement snapshot (BT cmd 9 packet)'),
     'touch':     (0x2002561C, 32, 'touch driver state block (queue ring base)'),
@@ -262,7 +262,7 @@ def do_peek(dev, args):
         print('  model = %s' % {0: 'A', 1: 'B', 2: 'C'}.get(data[0], '?'))
 
 
-# Touch-queue entry flags (firmware/re/analysis/touch_v2_6.h):
+# Touch-queue entry flags (stock/re/analysis/touch_v2_6.h):
 #   bit0..2 n_pressed, bit3..4 key code, bit5 key report, bit6 any pressed,
 #   bit7..9 n_reported. A screen point down = n_pressed 1, bit6, n_reported 1.
 PRESS_FLAGS = 0x01 | 0x40 | 0x80            # 0xC1

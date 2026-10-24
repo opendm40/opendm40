@@ -1,6 +1,6 @@
 // Host unit tests of the HY3131 model (emu/hy3131/HY3131.cs) through the real
 // SPI frame. Run: emu/hy3131/tests/run.sh  (dotnet 8).
-// The "stock" formulas below are those of firmware/re/analysis/dmm_v2_6.h.
+// The "stock" formulas below are those of stock/re/analysis/dmm_v2_6.h.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -177,7 +177,7 @@ namespace Hy3131Tests
         private static readonly byte[] F8R1 = Master.Row("f0 dd 15 83 35 00 00 55 31 00 00 00 00 00 08 81 80 c7 3d ac 00 50");
 
         /// Fixed connections through the firmware's function changes (relays + rows as the firmware drives them).
-        // fw-rs misconnect sentinel rows (fw-rs/src/sentinel.rs): the stock row with the idle
+        // fw-rs misconnect sentinel rows (firmware/src/sentinel.rs): the stock row with the idle
         // comparator / AD1 repointed. R20 0x90 = SCMPI PB1 + ENCMP; R20 0x10 = SENSE + ENCMP and
         // R2C |= SS5 in DC A; AC V / mV: R22 0, ENAD1, R24 0x95 (PB1 - PB3), AD1IG 3.6, PKHSEL AD1.
         private static byte[] Sent(byte[] row, int mode)
@@ -652,7 +652,7 @@ namespace Hy3131Tests
             }
         }
 
-        // fw-rs power meter rows (fw-rs/docs/power-meter-and-misconnect.md 3.1 B): written as
+        // fw-rs power meter rows (firmware/docs/power-meter-and-misconnect.md 3.1 B): written as
         // hy3131::configure does: the row with ENAD2 / ENAD3 clear, R36, R34, then R26.
         private static void PowerConfigure(Master m, byte[] row, int iu, int sph = 0)
         {

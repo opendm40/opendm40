@@ -86,8 +86,8 @@ def tail_hazard(data):
     the app is erased; reproduced on the real FS-loader in the Renode
     emulator). Safe: whole blocks; a final block of <= 0x1F bytes (stored as
     is by both sides); a short block with kp < last_len (the vendor's
-    dm40_v_2_6.bin: 36 bytes, kp 8). Same rule in fw-rs/src/calbackup.rs
-    (FwFile::tail_hazard) and fw-rs/tools/dm40dbg.py (`image`); equivalent to
+    dm40_v_2_6.bin: 36 bytes, kp 8). Same rule in firmware/src/calbackup.rs
+    (FwFile::tail_hazard) and firmware/tools/dm40dbg.py (`image`); equivalent to
     alientek-dm40-tools fw/dm40fw.py final_block_unsafe()."""
     n = len(data) % BLOCK
     if not ADD_POS < n < BLOCK:

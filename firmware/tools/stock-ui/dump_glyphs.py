@@ -11,7 +11,7 @@ fonts keep their 16 levels * 17), an index glyphs.txt with the metrics, and a
 contact sheet per font (font_<addr>.png) with the hex code under each glyph.
 --all dumps every font object found in the image instead of the scope list.
 
-Font format (firmware/re/analysis/gui_v2_6.h sec. 5, extract_fonts.py): font
+Font format (stock/re/analysis/gui_v2_6.h sec. 5, extract_fonts.py): font
 object F = { D*, vtable*, u16 line_h, i16 descent }; D = { u8 *bits, entry
 *tab, u32 n, u8 fmt }; class A entry (12 B) = { u32 code, u32 off, i8 yoff,
 u8 w, u8 h, u8 adv }; class B entry (8 B) = { u32 code, u32 off<<8|w }, h =

@@ -3,8 +3,8 @@
 PREamble? / DATA?, DIGitize, TRIGger:STATus?, CHANnel1:OFFSet, ACQ:SRATe?)
 in the emulator, against the scope input model's sine.
 
-  cd fw-rs && ./build.sh
-  emu/wavtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/wavtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
   * the default WAV:DATA? is unchanged: #3400 + 400 bytes, joinable with

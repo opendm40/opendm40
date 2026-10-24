@@ -1,4 +1,4 @@
-//! The stock DM40 V2.6 scope page, drawn from the spec fw-rs/docs/stock-scope-ui.md
+//! The stock DM40 V2.6 scope page, drawn from the spec firmware/docs/stock-scope-ui.md
 //! (sources: notes/layout.md, notes/graph.md, notes/popups.md). Every number
 //! here is a spec value; the spec says where it comes from. Scenes at the end,
 //! including our combined-view mockup in the stock's visual language.

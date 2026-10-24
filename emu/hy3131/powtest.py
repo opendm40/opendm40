@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""fw-rs power meter (fw-rs/src/powermeter.rs) in the emulator: fw-rs native +
+"""fw-rs power meter (firmware/src/powermeter.rs) in the emulator: fw-rs native +
 the HY3131 model's Power role, a timed connection script per scenario, SCPI
 over USB/IP (setup commands, then DBG:PING? uptime, FETCh:POWer:ALL?,
 POW:VOLT:RANG?, POW:CURR:RANG? in a loop); the last samples of every phase
 must match its expectation.
 
   emu/hy3131/powtest.py                          # all scenarios, fw-rs built from HEAD
-  emu/hy3131/powtest.py --app fw-rs/dm40-fw-native.bin --port 3381 mains
+  emu/hy3131/powtest.py --app firmware/dm40-fw-native.bin --port 3381 mains
   emu/hy3131/powtest.py --list
 
 FETC:POW:ALL? fields: P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V.

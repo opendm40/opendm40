@@ -4,8 +4,8 @@ open, page scroll, the full-screen viewer, file steps, the Delete dialog
 (Cancel, then Delete), back, driven like a user (DBG:KEY / DBG:TAP /
 DBG:SWIPE) and checked over SCPI (MMEM:CAT?, DBG:LCD?).
 
-  cd fw-rs && ./build.sh
-  emu/gallerytest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh
+  emu/gallerytest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw
 
 The disk is a private copy (per process: port + pid) of the 2026-10-13 MSC
 dump (S000..S002.BMP, 480 x 320 16 bpp) with S003..S007.BMP added (copies
@@ -59,7 +59,7 @@ OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
 tag = 'gallery-%d-%d' % (A.port, os.getpid())
 disk = os.path.join(OUT, '%s.disk.bin' % tag)
-shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
+shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 tmp = tempfile.mkdtemp(prefix=tag)
 env = dict(os.environ, MTOOLS_SKIP_CHECK='1')
 BMPS = {}

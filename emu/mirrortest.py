@@ -16,9 +16,9 @@ to the internal flash 0x08080000..0x080C1000 of that boot.
   6 a blank SPI disk, image A: no mirror (BADBPB); an AD2 stream to the
     host while INFO/ is read: NOT READY from exactly the slow-bank sectors
 
-  cd fw-rs && ./build.sh && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --features keep-screen
-  emu/mirrortest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \\
-      --app2 fw-rs/target/ks/thumbv7em-none-eabihf/release/dm40-fw
+  cd firmware && ./build.sh && DM40_TDIR=target/ks DM40_OUT=/tmp/ks.bin ./build.sh --features keep-screen
+  emu/mirrortest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \\
+      --app2 firmware/target/ks/thumbv7em-none-eabihf/release/dm40-fw
 
 Never prints the mirrored bytes (calibration / loader data are per-unit
 private). Exit status 0 = PASS.
@@ -142,7 +142,7 @@ def verify(n, what, mir, dd, win, want_status):
 
 
 src = os.path.join(OUT, 'disk.bin')
-fresh = src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
+fresh = src if os.path.exists(src) else os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin')
 check(mirror_file(open(fresh, 'rb').read()) is None, 'the starting SPI disk has no mirror')
 try:
     if not A.fallback_only:

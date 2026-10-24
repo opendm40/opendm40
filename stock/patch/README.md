@@ -60,7 +60,7 @@ as in the proven memrw image.
 
 ## Modified address ranges
 
-Decoded-body diff (`firmware/dm40fw.py`), flash addresses:
+Decoded-body diff (`stock/dm40fw.py`), flash addresses:
 
 **stock V2.6 → dm40_dbg**
 - `0x080041b4` (3 B) — startup ctor-init redirect **(identical to memrw)**.
@@ -199,7 +199,7 @@ the armed path costs at most a reboot.
   (`0x0800d5f6`, the same gate the DMM page uses) parse it into a dedicated
   scratch frame and run the 0x0B handler — so `read`/`shot` work on the scope
   page; (2) play one queued touch entry into the stock touch queue
-  (`0x2002561c`, 22-byte entries, see `firmware/re/analysis/touch_v2_6.h`):
+  (`0x2002561c`, 22-byte entries, see `stock/re/analysis/touch_v2_6.h`):
   tap = press then release, drag = a short path, key = key-report bit + code.
 - The parser runs cooperatively (the DMM-page caller cannot run while the scope
   page is shown — single superloop), so there is no concurrent parser.
@@ -248,7 +248,7 @@ poll-limited.
   request with the measurement snapshot. The stock USB device library is usable
   for bulk/CDC (ep_init `0x08017744`, ep_send `0x080178c4`, ep_recv `0x0801782a`,
   ctl_send `0x080179e6`; per-EP FIFO table at `0x2002030a`). See
-  `firmware/re/ANALYSIS.md` §5.
+  `stock/re/ANALYSIS.md` §5.
 - **Feasibility**: a vendor-specific bulk interface carrying these debug
   commands is feasible, but it requires enabling USB from a resident hook (the
   meter-page tail), i.e. **new always-executed code** — the opposite of the

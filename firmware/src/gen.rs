@@ -1,4 +1,4 @@
-//! Signal generator (firmware/re/analysis/scope_gen_v2_6.h, GENERATOR).
+//! Signal generator (stock/re/analysis/scope_gen_v2_6.h, GENERATOR).
 //!
 //! DAC path: DAC channel 1 on PA4, triggered by TIM6 TRGO at 200 MHz /
 //! ((PSC+1)(ARR+1)) <= 10 MS/s, fed by DMA0 stream 5 (request 7) circularly

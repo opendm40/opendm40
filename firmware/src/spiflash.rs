@@ -1,5 +1,5 @@
 //! On-board SPI NOR flash (W25Q128JV, 16 MiB) as the USB disk medium
-//! (firmware/re/analysis/spiflash_v2_6.h).
+//! (stock/re/analysis/spiflash_v2_6.h).
 //!
 //! SPI1 @ 0x40003800 (APB1 50 MHz): SCK = PD3, MISO = PC2, MOSI = PC3 (AF5),
 //! CS = PE4 (GPIO, active low). Mode 3, MSB first, polled byte exchange, the

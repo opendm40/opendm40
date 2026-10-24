@@ -56,7 +56,7 @@ Modes:
 | `chain` | as `stock` unless `--app` is given (`--app dump` keeps the dump's own app)     | ROM (0x08000000) |
 
 The 1 MiB flash image is composed in `emu/out/flash-<name>.bin` from the
-dump `firmware/re/dumps/full-20261013/flash_08000000_1MB.bin` (ROM,
+dump `stock/re/dumps/full-20261013/flash_08000000_1MB.bin` (ROM,
 FS-loader, UID-bound loader data at 0x080A4000, calibration at 0x080C0000); the
 OTP (`otp_1FFF7800.bin`) and the chip UID
 (`private/memrw-kit-test/full/uid_1FFF7A10.bin`) are loaded into system
@@ -68,7 +68,7 @@ instance has a chip UID, and with it a fw-rs USB / SCSI / `*IDN?` serial
 number, of its own, never the real meter's: udisks merges disks with the same
 vendor / model / serial into one drive. `--uid HEX24|FILE|unit` sets it
 (`unit` = this unit's UID as is). The SPI-flash FAT comes from
-`firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin`, copied once to
+`stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin`, copied once to
 `emu/out/disk.bin` (the working copy; the dump is never written).
 None of these inputs are committed; generated images are git-ignored.
 
@@ -79,7 +79,7 @@ None of these inputs are committed; generated images are git-ignored.
   0x080C0168) and the record CRC in the composed image (with `--flash`: in a
   copy). Default: the dump's byte (this unit: DM40A). The stock then shows the
   4000/5000/6000-count range sets and AC+DC only on B/C; fw-rs reports it in
-  `*IDN?` / `SYST:MOD?` ([fw-rs/docs/model-variants.md](../fw-rs/docs/model-variants.md)). GTK panel: the DM40A/B/C
+  `*IDN?` / `SYST:MOD?` ([firmware/docs/model-variants.md](../firmware/docs/model-variants.md)). GTK panel: the DM40A/B/C
   dropdown in the header bar (restarts the emulator; also the printed label).
 * `--disk IMG`, `--disk-add FILE[::NAME]` (mtools copy into a private copy of the
   disk), `--save-disk OUT`, `--save-flash OUT` (write the images back at the end).
@@ -114,7 +114,7 @@ None of these inputs are committed; generated images are git-ignored.
 
 Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
-(244,166) Settings (190x106 each; [`firmware/re/analysis/gui_v2_6.h`](../firmware/re/analysis/gui_v2_6.h)).
+(244,166) Settings (190x106 each; [`stock/re/analysis/gui_v2_6.h`](../stock/re/analysis/gui_v2_6.h)).
 
 ### fw-rs screens
 
@@ -255,8 +255,8 @@ emu/run.py fwrs --fast --usbip 0.01 --usbip-port 3240 --run-for 3600 &   # usbip
 sudo modprobe vhci-hcd
 sudo usbip attach -r 127.0.0.1 -b 1-0       # lsusb: a second 1209:0001, on the vhci bus (9 here)
 ls /sys/bus/usb/devices/9-1:1.0/usbmisc/    # its /dev/usbtmcN (the real DM40 has another one)
-DM40_USBTMC=emu fw-rs/tools/dm40scpi.py info    # emu = the usbtmc under vhci_hcd, real = the other,
-DM40_USBTMC=emu fw-rs/tools/dm40dbg.py ping     # or DM40_USBTMC=/dev/usbtmcN
+DM40_USBTMC=emu firmware/tools/dm40scpi.py info    # emu = the usbtmc under vhci_hcd, real = the other,
+DM40_USBTMC=emu firmware/tools/dm40dbg.py ping     # or DM40_USBTMC=/dev/usbtmcN
 udisksctl mount -b /dev/sdX                 # sdX: the disk under vhci_hcd (/sys/block/sdX/device), mounts ro
 sigrok-cli -d scpi-dmm:conn=usbtmc/9.N --samples 3   # libsigrok's usbtmc is libusb (bus.address);
                                             # scpi-dmm knows the IDN after SYST:IDN:EMUL 34401A
@@ -270,7 +270,7 @@ host's modules and usbip tool, busybox) that attaches the emulator over
 vhci-hcd with `usbip --tcp-port`, mounts the volume (usb-storage, sd, vfat)
 and drives SCPI over /dev/usbtmc0: a fast-log session, then INFO/ copies
 while it streams (the NOT READY answer of fw-rs vdisk.rs
-`read_busy`; fw-rs/docs/native-boot.md "The slow flash bank while an AD2
+`read_busy`; firmware/docs/native-boot.md "The slow flash bank while an AD2
 stream runs"). Ports in 39000-39999 for parallel runs.
 
 Tested with kernel 7.0: enumeration (device, BOS, strings,
@@ -365,7 +365,7 @@ e.g. [`emu/hy3131/freqtest.py`](hy3131/freqtest.py) (fw-rs DMM frequency after a
 40 Hz 1 V square on V-COM; two of its scenarios):
 
 ```
-$ emu/hy3131/freqtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+$ emu/hy3131/freqtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
       --port 61160 --reps 2 entry nosig
 entry 0 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.07 40.00065@+2.42
 entry 1 first 40.00065 at +1.39 s; then 40.00065@+1.72 40.00065@+2.06 40.00065@+2.42
@@ -380,7 +380,7 @@ RESULT nosig OK first-reading +2.44/2.44 s
 ```sh
 emu/run.py stock --gdb 3333 --pause --interactive
 # other terminal:
-arm-none-eabi-gdb emu/out/fwrs-worktree/fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw \
+arm-none-eabi-gdb emu/out/fwrs-worktree/firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw \
     -ex 'target remote :3333'
 ```
 
@@ -416,7 +416,7 @@ commands go to the Renode monitor (`monitor sysbus.lcd Screenshot @/tmp/x.png`).
 | SPI1 (0x40003800) + W25Q128 | [`GD32_SPI.cs`](peripherals/GD32_SPI.cs) (timed bytes) + [`W25Q128.cs`](peripherals/W25Q128.cs) | file-backed 16 MiB, CS = PE4; READ/FAST READ/PP/SE/BE/CE/WREN/RDSR/REMS/JEDEC/RUID; `Load`, `Save`; busy times `ProgramUs` / `Erase*Us` (fastlogtest profiles); `StrictBusy` (default): a command other than a status read during BUSY is ignored (a READ gives 0xFF), as on the chip. The bus's `IdleStartNs` (run.py `--spi-disk-gap-ns`, default 330): a byte written to an idle shifter starts that much later, so a polled write-wait-read byte costs ~0.97 us at 12.5 MHz as on the device (back-to-back page-program bytes 0.64 us); without it the INFO/ mirror's reads during a 76800 disk session looked ~20x cheaper than on the device (fw-rs TODO, device 612c45c M2) |
 | I2C2 (0x40005C00) + touch | [`GD32_I2C.cs`](peripherals/GD32_I2C.cs) + [`CST_Touch.cs`](peripherals/CST_Touch.cs) | own I2C master (SBSEND/ADDSEND/BTC/TBE/RBNE, AERR for absent addresses, ACKEN/POAP, DMA RX/TX requests, DMALST); Hynitron 0x5A protocol (D1 01/09, D2 04, D0 00 frame, D0 07.., D0 00 AB ack); `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
 | HY3131 DMM ADC | `HY3131.cs` (a symlink to [`emu/hy3131/HY3131.cs`](hy3131/HY3131.cs), as is `DM40Frontend.cs`; that README has the research and tests) | full register map with the datasheet semantics (INTF cleared on read, CTA/CTB/CTC counter, ENxxx clears, R37 reset); conversion timing: AD1 period = OSR1 * 30 / SYSCLK, doubled with the chopper (25 / 100 / 400 ms), AD2/AD3 + LPF + true RMS at their own rates, frequency counter, comparator (CMP pin), peak hold, temperature sensor; a per-row analog model of every stock configuration (V, mV, A ranges, ohm, continuity, diode, capacitance by RC oscillator and current ramp, Hz/duty, thermocouple with cold junction) that applies the meter's own calibration so the stock and fw-rs show the scripted input. Inputs: `SetInput "spec"` / `--dmm SPEC[@T]` / script `T dmm SPEC`; `SetVin V` kept for old scripts |
-| [3PA1030](../hw/datasheets/3peak-3pa1030-reva1.pdf) scope ADC + comparator | [`ScopeFeeder.cs`](peripherals/ScopeFeeder.cs) | sample n = TIM1 update event n (`GD32_Timer.UpdateEventsUntil/TimeOfUpdate`, so TIM5's trigger start, one-pulse stops and TIM2 gating are exact); code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; samples go to DMA2 stream 4 in bulk every 100 us and before any stream register access (NDTR exact). Comparator: crossings found one tick ahead, PA15 driven at the crossing's virtual time + 2 us (the board's comparator latency = stock `trig_delay`), INVERTED (high while signal < level, as [`fw-rs/src/hwtrig.rs`](../fw-rs/src/hwtrig.rs) documents), level = DAC2 with the stock default map (1780 -> code 300, 2401 -> 780), 2 codes hysteresis |
+| [3PA1030](../hw/datasheets/3peak-3pa1030-reva1.pdf) scope ADC + comparator | [`ScopeFeeder.cs`](peripherals/ScopeFeeder.cs) | sample n = TIM1 update event n (`GD32_Timer.UpdateEventsUntil/TimeOfUpdate`, so TIM5's trigger start, one-pulse stops and TIM2 gating are exact); code = 512 + V * counts/V of the front-end range read from PC13/PB15/PD12/PD13; samples go to DMA2 stream 4 in bulk every 100 us and before any stream register access (NDTR exact). Comparator: crossings found one tick ahead, PA15 driven at the crossing's virtual time + 2 us (the board's comparator latency = stock `trig_delay`), INVERTED (high while signal < level, as [`firmware/src/hwtrig.rs`](../firmware/src/hwtrig.rs) documents), level = DAC2 with the stock default map (1780 -> code 300, 2401 -> 780), 2 codes hysteresis |
 | UART4 + BT module | Renode `STM32_UART` + [`BtModule.cs`](peripherals/BtModule.cs) | AT+SBN/CBN/SLED0/RESET answered, PC14 "connected" while a TCP host is attached (`--bt-port`), `SendHex`/`SendText` from scripts |
 | ADC0 | [`SimpleADC.cs`](peripherals/SimpleADC.cs) | SW-started single conversions, GD32 calibration bits self-clear; channel 15 = 4.0 V battery by default (`SetVolts ch v`) |
 | DAC | RAM | DHR12R2 is read by the scope feeder for the trigger level; no analog output |
@@ -515,7 +515,7 @@ calibration gain applied) and the raw-scaled value on fw-rs; the loader
 install path (`chain --pa2 -1 --zero-marker --disk-add <dm40 update>`) exercises
 the flash controller, the SPI disk and the reset path end to end.
 
-Recovery triggers (fw-rs shim, [`fw-rs/src/boot.rs`](../fw-rs/src/boot.rs)): `emu/recoverytest.py
+Recovery triggers (fw-rs shim, [`firmware/src/boot.rs`](../firmware/src/boot.rs)): `emu/recoverytest.py
 --app <fw-rs ELF>` runs the chain ROM -> FS-loader -> fw-rs and checks the
 power-key hold from off (short press, abort in the confirm window, the full
 hold -> FS-loader update screen), the watchdog crash counter (one hang = a
@@ -562,10 +562,10 @@ modetest, switchtest's steps) need nothing.
 
 ## Files the emulator reads (never writes)
 
-* `firmware/re/dumps/full-20261013/flash_08000000_1MB.bin`, `otp_1FFF7800.bin`
+* `stock/re/dumps/full-20261013/flash_08000000_1MB.bin`, `otp_1FFF7800.bin`
 * `private/memrw-kit-test/full/uid_1FFF7A10.bin` (bytes 4 / 9 = the USB/IP port; `--uid` to set it)
-* `firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` (copied to `emu/out/disk.bin`)
-* `dm40_v_2_6.dec.bin` (stock body), [`firmware/dm40fw.py`](../firmware/dm40fw.py) (header words)
+* `stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` (copied to `emu/out/disk.bin`)
+* `dm40_v_2_6.dec.bin` (stock body), [`stock/dm40fw.py`](../stock/dm40fw.py) (header words)
 * fw-rs: `git worktree add --detach emu/out/fwrs-worktree HEAD` + `./build.sh native`
   (`native` is the only build; the argument lets `--rev` build older commits).
   The worktree stays for reuse; `git worktree remove emu/out/fwrs-worktree` drops it.

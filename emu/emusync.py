@@ -1,7 +1,7 @@
 """Input / clock markers from the Renode log: tests key their timing on them.
 
 fw-rs's uptime (DBG:PING?) is the virtual time since its last DWT CYCCNT
-write (fw-rs/src/clock.rs Clock::new in main). The boot before that write
+write (firmware/src/clock.rs Clock::new in main). The boot before that write
 is ~2.85 s of virtual time on a fresh disk image (pre_main's SPI-disk work:
 fatdir, calbackup, vdisk::mirror_boot) and it changes whenever the boot
 does, so a test must not place its windows by a guessed offset (couptest,

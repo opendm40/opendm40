@@ -18,8 +18,8 @@
 #   --no-build      do not build, use the existing image
 #   --image FILE    install FILE instead of dm40-fw-native.bin (implies --no-build)
 #   --stock FILE    install a stock / patched stock update file the same way
-#                   (e.g. ../firmware/patch/build-memrw/dm40_patched.bin, built
-#                   by firmware/patch/kit/mkkit.sh); does not
+#                   (e.g. ../stock/patch/build-memrw/dm40_patched.bin, built
+#                   by stock/patch/kit/mkkit.sh); does not
 #                   wait for fw-rs afterwards
 #   --from-stock    the meter runs stock or shows the loader update screen
 #                   (USB disk 28e9:028f): stage the image there, then you press
@@ -179,7 +179,7 @@ EOF
 check_image() {
     "${DBG[@]}" image "$1" || die "$1 is not a valid update file (see BAD above); not staged"
     # Belt and braces for the last-block rule (independent of dm40dbg.py).
-    "$PY" -I - "$ROOT/firmware" "$1" <<'PY' || die "$1: short last block the FS-loader would corrupt; not staged"
+    "$PY" -I - "$ROOT/stock" "$1" <<'PY' || die "$1: short last block the FS-loader would corrupt; not staged"
 import sys
 sys.path.insert(0, sys.argv[1])
 import dm40fw
@@ -285,7 +285,7 @@ The loader installs $(basename "$STOCK") and starts it; the stock firmware does
 not enumerate $FWRS_ID, so there is nothing to wait for here. Verify:
   - the meter shows the stock splash, then the stock UI (version in its
     settings/about page);
-  - patched stock: $PY -I $ROOT/firmware/patch/kit/tools/dm40_memrw.py \
+  - patched stock: $PY -I $ROOT/stock/patch/kit/tools/dm40_memrw.py \
       --mac <mac> read 0x08008000 12
     must show the loader marker = the update header (little-endian words):
 EOF

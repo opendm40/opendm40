@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """fw-rs misconnect sentinel through function / range / coupling switches
-(fw-rs/src/sentinel.rs, owner 2026-10-23: "the AC hint and A-JACK / A-PROT
+(firmware/src/sentinel.rs, owner 2026-10-23: "the AC hint and A-JACK / A-PROT
 trip falsely when switching from other modes") in the emulator: fw-rs native
 + the HY3131 model with a fixed connection, a sequence of switches over SCPI
 over USB/IP (CONF:<f> [range], VOLT:COUP, the MF -> Wave view and back),
@@ -11,7 +11,7 @@ of the step must hold only the alerts the connection allows in that
 function.
 
   emu/hy3131/switchtest.py                        # all scenarios, fw-rs built from HEAD
-  emu/hy3131/switchtest.py --app fw-rs/dm40-fw-native.bin --port 44101 open dc5
+  emu/hy3131/switchtest.py --app firmware/dm40-fw-native.bin --port 44101 open dc5
   emu/hy3131/switchtest.py --full open            # every ordered pair of the functions (long)
   emu/hy3131/switchtest.py --list
 

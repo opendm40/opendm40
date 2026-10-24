@@ -19,9 +19,11 @@ echo "$(wc -l < "$OUT") cases -> $OUT"
 if [ -n "$REV" ]; then
     WT="$B/wt"
     git worktree add --detach "$WT" "$REV" > /dev/null
-    # The harness of this tree against that tree's fonts.
-    cp main.rs "$WT/fw-rs/tools/font-matrix/main.rs" 2>/dev/null || { mkdir -p "$WT/fw-rs/tools/font-matrix"; cp main.rs "$WT/fw-rs/tools/font-matrix/"; }
-    (cd "$WT/fw-rs/tools/font-matrix" && rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r")
+    # The harness of this tree against that tree's fonts (fw-rs/ before the
+    # firmware/ layout).
+    D=firmware; [ -f "$WT/firmware/Cargo.toml" ] || D=fw-rs
+    mkdir -p "$WT/$D/tools/font-matrix"; cp main.rs "$WT/$D/tools/font-matrix/main.rs"
+    (cd "$WT/$D/tools/font-matrix" && rustc --edition 2021 -O --cfg test -A warnings main.rs -o "$B/r")
     "$B/r" > "$OUT.$REV"
     if cmp -s "$OUT" "$OUT.$REV"; then
         echo "identical to $REV ($(wc -l < "$OUT") cases)"

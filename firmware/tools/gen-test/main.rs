@@ -1,4 +1,4 @@
-// Host test of fw-rs/src/genplan.rs (run.sh builds and runs this).
+// Host test of firmware/src/genplan.rs (run.sh builds and runs this).
 // Checks the generator frequency search (register ranges, error bounds,
 // exact hits, comparison with the stock algorithm and with a brute-force
 // single-period optimum), the per-wave clamp (UF-14), the PWM path, table

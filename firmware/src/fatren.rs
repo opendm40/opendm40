@@ -548,7 +548,7 @@ pub fn free_root_slot(dev: &mut dyn BlockDevice, v: &Vol, buf: &mut [u8; BLK]) -
 
 /// The decoded first 12 bytes (update header) of a dm40*.bin whose first
 /// data block is `b`. The update file is encoded in 128-byte blocks
-/// (firmware/dm40fw.py decode_block): a = b[0x1F], key position kp = a if
+/// (stock/dm40fw.py decode_block): a = b[0x1F], key position kp = a if
 /// a < 128 else a >> 1, k = b[kp]; plain = ((c ^ k) - a) except at 0x1F and kp.
 pub(crate) fn header_of(b: &[u8]) -> [u8; 12] {
     let a = b[0x1F];

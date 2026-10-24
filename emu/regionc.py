@@ -1,4 +1,4 @@
-"""Region C hooks for the emulator tests (fw-rs/link-native.x: .cold code in
+"""Region C hooks for the emulator tests (firmware/link-native.x: .cold code in
 0x08080000..0x080A0000, flash that is not zero-wait; a fetch from it while
 the AD2 stream ISR owns the bus stalls the ISR's entry ~20 us on the device).
 

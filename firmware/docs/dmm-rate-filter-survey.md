@@ -1,8 +1,8 @@
 # DMM reading rate, integration time and filtering: survey and options for fw-rs
 
 Date: 2026-10-24. Research only: no firmware change, no device run. fw-rs
-reference: `fw-rs/src/dmm.rs` "FR-05 conversion rate" (`Rate`, `avg_cfg`,
-`Avg`) and `fw-rs/src/meter.rs` (`Smooth`) at 92ef9f6. Sources are listed at
+reference: `firmware/src/dmm.rs` "FR-05 conversion rate" (`Rate`, `avg_cfg`,
+`Avg`) and `firmware/src/meter.rs` (`Smooth`) at 92ef9f6. Sources are listed at
 the end (§9). "PDF p." means the page number in the PDF file where the printed
 page number was not checked. A source marked *secondary* is a review, a
 retailer or a forum post, not the manufacturer.
@@ -102,7 +102,7 @@ MEDIUM / SLOW once the dmm.rs window holds 8 slow conversions.
 
 The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 (~8.6 counts) and 0x15 otherwise, shows every conversion, and does not average
-(`fw-rs/docs/acdc-stock-vs-fwrs.md` §4).
+(`firmware/docs/acdc-stock-vs-fwrs.md` §4).
 
 ### 1.2 HY3131 AD1: what the datasheet and app notes say
 
@@ -755,8 +755,8 @@ Local (repository `docs/`):
 - HYCON APN-HY3131001 (SPI timing; nothing on rate): `docs/APN-HY3131001_EN.pdf`.
 - `emu/hy3131/RESEARCH.md` §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
-- `fw-rs/docs/acdc-stock-vs-fwrs.md` §4, `fw-rs/docs/user-feedback.md` (P3,
-  UF-25, UF-30), `fw-rs/docs/device-check-2026-10-21.md` (40 Hz square in DC V).
+- `firmware/docs/acdc-stock-vs-fwrs.md` §4, `firmware/docs/user-feedback.md` (P3,
+  UF-25, UF-30), `firmware/docs/device-check-2026-10-21.md` (40 Hz square in DC V).
 
 Bench / system:
 

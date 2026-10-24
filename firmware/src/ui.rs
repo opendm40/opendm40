@@ -1,5 +1,5 @@
 //! Screens. Geometry and colours of the multimeter page measured on read-backs
-//! of the stock screen (fw-rs/ref/); the main reading is red instead of the
+//! of the stock screen (firmware/ref/); the main reading is red instead of the
 //! stock orange. No framebuffer: every element is drawn as complete cells /
 //! columns so redraws do not flicker.
 
@@ -24,7 +24,7 @@ pub const BTN: Color = 0x2966; // (40, 44, 48) buttons / boxes
 pub const SEL: Color = 0x0419; // (0, 128, 200) selected button
 /// DMM readings (main value, extra digit, unit, mode glyph, aux values,
 /// meter strip): the stock value colour GUI_C_VALUE 0xFC40 (RGB 248,136,0;
-/// firmware/re/analysis/gui_v2_6.h:157/169/243, every DMM value label of the
+/// stock/re/analysis/gui_v2_6.h:157/169/243, every DMM value label of the
 /// stock layout table gui_v2_6.h:330-339 uses it). Owner request: back to
 /// the stock colour (an earlier fw-rs build drew the reading red).
 pub const VALUE: Color = 0xFC40;

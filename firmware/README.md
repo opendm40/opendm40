@@ -137,7 +137,7 @@ stock firmware also installs any `dm40*.bin` it finds on its USB disk, so do
 not leave files with that name there by accident.
 
 **Back to stock:** copy the official
-[`dm40_v_2_6.bin`](../firmware/vendor/dm40_v_2_6.bin)
+[`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin)
 onto the loader's disk and press "update", or run
 `tools/reload.sh --stock FILE` while fw-rs runs (tested with a patched stock
 image). Design and rationale: [docs/native-boot.md](docs/native-boot.md).

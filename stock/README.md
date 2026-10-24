@@ -35,7 +35,7 @@ erased. `pack --pad` (`build(pad=True)`) pads the body with 0xFF so header +
 body is a multiple of 128 (word 1 and the body CRC include the padding);
 `pack` without `--pad` refuses such a body; `info` / `unpack` warn about such
 a file (`tail_hazard`). Vendor files are safe (V2.6: 36-byte last block, key
-position 8). fw-rs [`build.sh`](../fw-rs/build.sh) and [`patch/patcher.py`](patch/patcher.py) always pad.
+position 8). fw-rs [`build.sh`](../firmware/build.sh) and [`patch/patcher.py`](patch/patcher.py) always pad.
 
 **Header checksum.** `pack` computes both header check words: word 0 is a
 CRC-16 of words 1 and 2 with its complement in the high half, word 2 is

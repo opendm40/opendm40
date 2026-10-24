@@ -13,7 +13,7 @@ replaced by Python stubs, and checks that:
     gap or overlap.
 
 No hardware. Requires: pip install unicorn capstone  (a venv is fine).
-Build the image first:  make dbg ORIG=../../firmware/vendor/dm40_v_2_6.bin
+Build the image first:  make dbg ORIG=../../stock/vendor/dm40_v_2_6.bin
 
 Exit status 0 = all checks passed.
 """
@@ -29,7 +29,7 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,
                                UC_ARM_REG_PC)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PATCH = os.path.normpath(os.path.join(HERE, '..', '..'))  # firmware/patch
+PATCH = os.path.normpath(os.path.join(HERE, '..', '..'))  # stock/patch
 
 # --- fixed stock entry points the patch calls (Thumb, even address) --------
 FW_PARSE = 0x0800d2fa

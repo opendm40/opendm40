@@ -1,6 +1,6 @@
 //
-// 3PA1030 scope ADC path + trigger comparator (firmware/re/analysis/
-// scope_gen_v2_6.h, fw-rs/src/scope.rs, hwtrig.rs). The real chain: TIM1_CH4
+// 3PA1030 scope ADC path + trigger comparator (stock/re/analysis/
+// scope_gen_v2_6.h, firmware/src/scope.rs, hwtrig.rs). The real chain: TIM1_CH4
 // requests -> DMA2 stream 4 reads GPIOB->IDR (PB0..PB9, 10-bit) at the TIM1
 // update rate (below 50 MS/s through the TIM8-latched word); the comparator
 // compares the front-end node with DAC2 and drives PA15 = TIM2_CH1.
@@ -14,7 +14,7 @@
 // edge's own virtual time; level = DAC2 code mapped with the stock default
 // calibration (DAC 1780 -> code 300, 2401 -> code 780), 2 codes hysteresis.
 // The board's comparator output is INVERTED (PA15 high while signal < level;
-// fw-rs/src/hwtrig.rs: a rising-edge trigger captures a falling PA15) and
+// firmware/src/hwtrig.rs: a rising-edge trigger captures a falling PA15) and
 // lags the crossing by about 2 us (the stock's trig_delay); both modelled.
 // SetWave(shape, hz, vpp, offset): sine | square | triangle | ramp | dc | noise.
 //

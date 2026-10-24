@@ -1,6 +1,6 @@
 //! Capacitive touch panel on I2C2 (STM32 "I2C3"; SCL = PA8, SDA = PC9, AF4), reset = PE6,
 //! INT = PE5 (falling edge, pull-up). Two controllers are supported, selected at
-//! init by probing in the stock order (firmware/re/analysis/touch_v2_6.h):
+//! init by probing in the stock order (stock/re/analysis/touch_v2_6.h):
 //!   1. Goodix GT1158 at 7-bit 0x14 (8-bit 0x28) — probed first (header §Goodix,
 //!      lines 8/110-118/140). Absent on this unit; the probe NAKs and we fall
 //!      back to 0x5A, so the 0x5A bus traffic below is byte-identical to before.

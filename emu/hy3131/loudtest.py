@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fw-rs danger alarm (fw-rs/src/danger.rs, fw-rs/docs/power-meter-and-misconnect.md
+"""fw-rs danger alarm (firmware/src/danger.rs, firmware/docs/power-meter-and-misconnect.md
 4.10) in the emulator: fw-rs native + the HY3131 model, a timed connection /
 touch / key script per scenario, the buzzer timer's register writes logged
 by the model (run.py --buzzer-log: TIM14 ARR = pitch, CCR1 = duty, in virtual
@@ -14,8 +14,8 @@ pitch (ARR 11199) and CCR1 0 after every stop, the setting Off (no alarm),
 Volume (the alarm at the key volume), V-JACK? (no alarm) and a current above
 the 10 A rating.
 
-  emu/hy3131/loudtest.py --app fw-rs/dm40-fw-native.bin --port 53101          # all
-  emu/hy3131/loudtest.py --app fw-rs/dm40-fw-native.bin --port 53101 aprot ajack
+  emu/hy3131/loudtest.py --app firmware/dm40-fw-native.bin --port 53101          # all
+  emu/hy3131/loudtest.py --app firmware/dm40-fw-native.bin --port 53101 aprot ajack
   emu/hy3131/loudtest.py --list
 
 The key / alert volume is set to 0 % (SYST:BEEP:VOL 0, the owner's setting):

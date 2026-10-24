@@ -1,7 +1,7 @@
 //! Stock-exact drawing primitives for the host renderer (tools/stock-ui).
 //!
 //! Everything here reproduces the stock GUI's pixel rules
-//! (firmware/re/analysis/gui_v2_6.h sec. 1/5, gui_render_v2_6.h sec. 3/4):
+//! (stock/re/analysis/gui_v2_6.h sec. 1/5, gui_render_v2_6.h sec. 3/4):
 //!   * fonts are read live from the stock image mapped at 0x08000000 (all
 //!     classes: A, B, B+ with the 0x0805471c ASCII fallback, composite);
 //!   * glyph pixels: 4 bpp coverage v -> alpha v * 17; with anti-aliasing

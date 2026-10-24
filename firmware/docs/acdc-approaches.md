@@ -5,7 +5,7 @@ tags as in the sibling docs: **VERIFIED** = a datasheet / manual page, a stock
 row byte, fw-rs code or a device measurement already written up
 (`acdc-stock-vs-fwrs.md` = "acdc", `dmm-input-scope-feasibility.md` =
 "feasibility", `power-meter-and-misconnect.md` = "power"); **INFERRED** = follows
-from those; **UNKNOWN** = needs the device. Nothing under `firmware/re/history/`
+from those; **UNKNOWN** = needs the device. Nothing under `stock/re/history/`
 was used. Web sources are listed in section 9; the PDFs were read with
 `pdftotext` (the Fluke, Keysight, Hioki, Brymen and 121GW manuals) or are the
 HYCON documents in `docs/`.
@@ -185,7 +185,7 @@ construction. Everyone building on an HY3131 with its own blocks is in camp 1.
   against 2.5 ppm/C for AD1** (DS p. 11). Device floor in the stock AC V 4 V
   row: 31..33 sqrt(RMS) counts ~ 14 ENOB per sample (feasibility 1.2).
 * **AD2 as a DC converter (test 6.5, owner-reported results of
-  `fw-rs/tools/experiments/ad2dcv.py`, not yet written up in a doc).** The register-only
+  `firmware/tools/experiments/ad2dcv.py`, not yet written up in a doc).** The register-only
   DC-coupled V row (feasibility 1.3 last row: the DC V tap, OP1 x1 on SENSE,
   SAD2IP = OP1O, IG 1.0) is **linear to <= 0.003 % of range**, noise **3..10
   codes** (over the ~100 ms of one AD1 conversion), gain vs the nominal
@@ -216,7 +216,7 @@ construction. Everyone building on an HY3131 with its own blocks is in camp 1.
   written "with all three converters off, then AD3, AD2 and AD1 last, so AD2 /
   AD3 never switch while AD1 converts" (power 3.12). Note 8 (AD2IN != AD3IN or
   both AGND) is met by the stock AC V row (both AGND).
-* **Row differences at r0 (6 V)** (`fw-rs/src/hy3131_tables.rs` CFG_F0 /
+* **Row differences at r0 (6 V)** (`firmware/src/hy3131_tables.rs` CFG_F0 /
   CFG_F1, switch bytes R2C..R2E decoded with `emu/hy3131/ref/registers.md`:
   R2D = PS7 DS7 FS7 SS7 | PS6 DS6 FS6 SS6). f0 AC V r0: R2D 0x09 = **tap PA6
   (/100)** with R25 0x43 = OPS1 = OPS2 = 1 (OP1 through the external x10
@@ -747,7 +747,7 @@ response are INFERRED, the note-7 numbers are the device's):
   alone), modetest `--fast` 35 of 36 (stock `cap-big` 0.105 mF fails the
   same way on 5f9b5a0 without this change; without `--fast` every fw-rs
   scenario gets "BT host refused: module off" under load, also on
-  5f9b5a0), the emulator host tests (396), every fw-rs/tools/*/run.sh.
+  5f9b5a0), the emulator host tests (396), every firmware/tools/*/run.sh.
 
 ### 10.4 Device session plan (`tools/acdcmeth.py`, calibrator on /dev/ttyACM1)
 
@@ -937,7 +937,7 @@ Reproduction (emulator, the final model; acdcmethtest with method C held to the 
 Final runs of the fix (the branch head's image): acdcmethtest A / B / C / B~ RESULT OK (the table above for
 C; A and B unchanged); couptest `v` `i` `tap` `band` `sq5` OK with `--meth A`, `B` and `C`; senttest 57 OK;
 powtest 27 of 29 in the full run under a load average of ~31 (`zero`, `bt`; both pass alone, as `ereset`); modetest `--fast` 35 of
-36 (stock `cap-big`, as before); every fw-rs/tools/*/run.sh OK (font-matrix identical to 8087c7d); emulator
+36 (stock `cap-big`, as before); every firmware/tools/*/run.sh OK (font-matrix identical to 8087c7d); emulator
 host tests 491. The emulator's LPF window (sinc^2 over 213 ms, INFERRED) leaves +-0.4 % of
 a 40 Hz square on the DC part (the C square phase's 0.39 % p-p); the device's C DC part on the square had an
 sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF rejects 40 Hz far better than the model.
@@ -1102,7 +1102,7 @@ AC settle of c4a0b09 / 803854d) and passed on ddd5c9e (settle 5.9 s) and b4fb7b9
 AC settle, not this change (fixed on branch settle-fix, 7e10110: no DC-phase step down while an input-step settle
 runs, acdc-stock-vs-fwrs.md 12); senttest 57 OK; powtest 26 of 29 in the full run (`ereset`, `acdc-floor`, `bt`), all
 three OK alone (e7ec2cc alone: `ereset` and `bt` FAIL, the same flakes); modetest `--fast -f fwrs` 18 of 18 (the stock
-side not run); every fw-rs/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
+side not run); every firmware/tools/*/run.sh OK (font-matrix identical to rust-fw-poc); emulator host tests 491;
 dcvtest PASS. Cost against b4fb7b9: region B 62 636 -> 61 892 B free, region C 17 868 -> 17 716 B, SRAM 58 716 ->
 58 660 B, static stack headroom 21 448 -> 21 440 B.
 
@@ -1266,7 +1266,7 @@ and `C` (`i --meth A` included); senttest 57 / 57; powtest 27 / 29 in the full r
 or repeated: `acdc-floor` OK 2 of 3, `ereset` OK 1 of 3, and 27b1a68 with the same model fails `ereset` alone too,
 a7d233c once (the flakes of 10.9; the power meter never runs acdcm.rs and its role has none of the new model
 terms); autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18; emulator host tests 501; every
-fw-rs/tools/*/run.sh OK (font-matrix identical to 27b1a68; stock-ui needs the stock image link,
+firmware/tools/*/run.sh OK (font-matrix identical to 27b1a68; stock-ui needs the stock image link,
 dm40_v_2_6.dec.bin, in the worktree root). On a7d233c (before the AC gate) acdcmethtest failed C's square: the
 AC part 4.811 V (max) after the reference's row rewrite.
 
@@ -1411,7 +1411,7 @@ Final runs on b94bfb8 with the 7c0de2d model (ports 34000-34999):
 * autorangetest PASS; dcvtest PASS; modetest `--fast -f fwrs` 18 / 18.
 * senttest 57 / 57 alone. The parallel run hit its 40 min timeout at 55 / 55 under load.
 * powtest 28 / 29 in the parallel run (`ereset`, the known flake of 10.9 / 10.12); `ereset` OK alone.
-* Emulator host tests 501; every fw-rs/tools/*/run.sh OK (font-matrix identical to 6d488dc, 178 360 cases).
+* Emulator host tests 501; every firmware/tools/*/run.sh OK (font-matrix identical to 6d488dc, 178 360 cases).
 
 Cost against 6d488dc: region B 57 756 -> 57 668 B free, region C 16 976 -> 16 920 B, SRAM 53 092 -> 53 076 B,
 static stack headroom 21 400 B (unchanged).

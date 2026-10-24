@@ -13,7 +13,7 @@ the start (a10-unit). Each window: input at its start, VOLT:DC at +3 s, the
 query at +8 s (fw uptime from the window's input marker, emu/emusync.py),
 the reply time from DBG:PING? before and after.
 
-  emu/hy3131/autowaittest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw --port 47600
+  emu/hy3131/autowaittest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw --port 47600
 """
 import argparse
 import os

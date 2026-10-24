@@ -26,12 +26,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def mkfw500(out):
     """The update file of the captures: a deterministic 500000-byte body
-    (marker gap 0xFF) packed with firmware/dm40fw.py pack --pad."""
+    (marker gap 0xFF) packed with stock/dm40fw.py pack --pad."""
     import random
     body = bytearray(random.Random(500).randbytes(500000))
     body[0x4000:0x400C] = b'\xff' * 12
     open(out + '.body', 'wb').write(body)
-    subprocess.run([sys.executable, '-I', os.path.join(HERE, '../../../firmware/dm40fw.py'), 'pack', '--pad', out + '.body', out],
+    subprocess.run([sys.executable, '-I', os.path.join(HERE, '../../../stock/dm40fw.py'), 'pack', '--pad', out + '.body', out],
                    check=True, capture_output=True)
     return out
 

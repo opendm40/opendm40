@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""fw-rs misconnect sentinel (fw-rs/src/sentinel.rs) in the emulator: fw-rs
+"""fw-rs misconnect sentinel (firmware/src/sentinel.rs) in the emulator: fw-rs
 native + the HY3131 model, a timed connection script per scenario, SCPI over
 USB/IP (CONF:<f>, then DBG:PING? uptime, SYST:ALER?, DBG:SENT?, READ? in a
 loop); each phase of the script must show only its expected alerts.
 
   emu/hy3131/senttest.py                         # all scenarios, fw-rs built from HEAD
-  emu/hy3131/senttest.py --app fw-rs/dm40-fw-native.bin --port 3377 dcv-adc acv
+  emu/hy3131/senttest.py --app firmware/dm40-fw-native.bin --port 3377 dcv-adc acv
   emu/hy3131/senttest.py --list
 
 Results: emu/out/sent-<name>.json (+ .png of the end; Renode log

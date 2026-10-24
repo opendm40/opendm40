@@ -9,7 +9,7 @@
  *   - BT cmd 0x0B sub 5 (program a touch-injection sequence) and sub 6
  *     (arm/disarm the scope hook).
  *
- * Safety model (see firmware/patch/README.md):
+ * Safety model (see stock/patch/README.md):
  *   - The scope hook's armed state is a MAGIC word in verified-mapped SRAM0+1
  *     (0x2000f100), cleared to 0 by patch_init() at boot, so after EVERY reset
  *     the hook is a bit-identical passthrough of the stock thunk until a BT

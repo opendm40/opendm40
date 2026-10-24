@@ -231,7 +231,7 @@ Code work (in this order):
         header's TX pad (pull-up); a TX-GND short enters the loader's install state = the hardware
         recovery (hw/README.md "Hardware recovery"). So our marker-zero recovery is required; per code
         an invalid marker sends the ROM to the loader regardless of PA2 (to be confirmed by T2).
-  - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: firmware/re/dumps/full-20261013/.
+  - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: stock/re/dumps/full-20261013/.
         RDP is level 1 (SWD/DFU only via mass erase), so the software recovery path matters.
   - [x] Review of the native image + shim (docs/native-review-2026-10-13.md): T1/T2 GO, T3 NO-GO until
         B1 (native stack overflow: fatren buffers live during main) and B2 (shim reads PD6 without
@@ -425,7 +425,7 @@ Code work (in this order):
       FR-33 is USBTMC+MSC (we chose DBG over CDC). (verify on device)
 - [x] Repo tidy-up (user request): ../TIDY-PLAN.md executed 2026-10-13 (26ba0e5..5d3d005); the repo is
       now private (wirenboard/opendm40). Left to the user: whether vendor-derived material
-      (firmware/re/analysis/app_decompile.c) and BT MACs stay tracked if it ever goes public again.
+      (stock/re/analysis/app_decompile.c) and BT MACs stay tracked if it ever goes public again.
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
@@ -643,7 +643,7 @@ Code work (in this order):
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
-      removed, the new one replaces it). One local HTML page (fw-rs/tools/web/dm40.html) that talks SCPI to
+      removed, the new one replaces it). One local HTML page (firmware/tools/web/dm40.html) that talks SCPI to
       fw-rs over BOTH links and covers ALL functions: big DMM reading with every function / range /
       coupling / rate, trend + CSV, power meter, scope via WAV:PRE? / WAV:DATA? (timebase, V/div, trigger,
       RUN/STOP, measurements), generator, loggers (LOG:*), the USB-disk / gallery files, settings, alerts,
@@ -900,7 +900,7 @@ Code work (in this order):
       from docs/native-review-2026-10-13.md "Pre-flash review e07c11a".  (258c833, 636bf88; verify on device)
 - [x] AC agent questions (a) 40 Hz PWM AC part low, (b) AC+DC AC part = plain AC V, (e07c11a wander):
       answered by 3b9251c (above). (c) A input open: the 150 uA item. (d) FREQ: the crosstalk item.
-- [x] firmware/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (165b37a)
+- [x] stock/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (165b37a)
 
 ## UI toolkit decision (user, 2026-10-13)
 - Keep our own renderer + layer compositor (docs/combined-view-design.md §7) for now. Considered:
@@ -2122,7 +2122,7 @@ Firmware:
             every CSW (a DIEPCTL read-modify-write, the stream ISR widening it) re-armed the IN endpoint with
             XFRSIZ 0: a spurious ZLP broke the host's next command; Linux's reset recovery then gave usbd-storage
             an invalid CBW, it called our callback with the old command and `set_status` panicked -> FWDGT.
-            Fixed: usbd-storage vendored with fixes (fw-rs/vendor, "dm40 patch"), msc.rs / usb::abort_in.
+            Fixed: usbd-storage vendored with fixes (firmware/vendor, "dm40 patch"), msc.rs / usb::abort_in.
             Emulator: emu/fastendtest.py (a60f8ce 2 of 6 pass, fix 3 of 3), emu/mscresettest.py.
             Device 1eb4d7e: the 6b repro PASS (0 lost, the reader went on after the UNIT ATTENTION, MMEM:DATA?
             of the new 26.5 MB CSV complete, no usb-storage reset), a port reset during a volume read PASS.

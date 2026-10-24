@@ -21,7 +21,7 @@ import os
 import sys
 import time
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # fw-rs/tools: dm40scpi, mr9270
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # firmware/tools: dm40scpi, mr9270
 sys.path.insert(0, HERE)
 LEVELS = {0: 0.3, 1: 3.0, 2: 24.0, 3: 24.0, 4: 24.0}
 NAMES = ['600 mV', '6 V', '60 V', '600 V', '1000 V']

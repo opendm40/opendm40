@@ -5,8 +5,8 @@ attach`), mounted and ejected with udisks / gio as a desktop does.
 (src/msc.rs: after START STOP UNIT LoEj=1 Start=0 the medium stays absent,
 02/3A/00, until a re-plug; Windows used to mount it again at once.)
 
-  cd fw-rs && ./build.sh
-  emu/ejecttest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--port P]
+  cd firmware && ./build.sh
+  emu/ejecttest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--port P]
 
 Steps (exit status 0 = PASS):
   live       "Files live" (read-only) volume: mounted, README.TXT read,
@@ -26,7 +26,7 @@ under vhci_hcd; the real meter's is never opened), the block device is the
 one under vhci_hcd only. `usbip attach` only connects to TCP 3240: a proxy
 here listens there and forwards to the emulator on --port. The emulator gets
 a chip UID of its own (run.py --uid, emu_uid: the unit's UID with bytes 4 / 9
-= the port), so fw-rs's USB serial (the UID as hex, fw-rs/src/uid.rs)
+= the port), so fw-rs's USB serial (the UID as hex, firmware/src/uid.rs)
 differs from the real meter's: udisks takes two disks with the same vendor /
 model / serial for one multipath drive, and with a real DM40 plugged in a
 drive-level Eject / PowerOff could then act on the real meter. (Until
@@ -50,14 +50,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='fw-rs native ELF')
-ap.add_argument('--image', default=os.path.join(ROOT, 'fw-rs/dm40-fw-native.bin'),
-                help='update file copied in the install step (default fw-rs/dm40-fw-native.bin)')
+ap.add_argument('--image', default=os.path.join(ROOT, 'firmware/dm40-fw-native.bin'),
+                help='update file copied in the install step (default firmware/dm40-fw-native.bin)')
 ap.add_argument('--port', type=int, default=None,
                 help='emulator USB/IP port (default: a free one in 61000-64999, run.free_port)')
 ap.add_argument('--steps', default='live,poweroff,install')
 A = ap.parse_args()
 os.environ['DM40_USBTMC'] = 'emu'
-sys.path.insert(0, os.path.join(ROOT, 'fw-rs/tools'))
+sys.path.insert(0, os.path.join(ROOT, 'firmware/tools'))
 import dm40dbg  # noqa: E402
 sys.path.insert(0, HERE)
 import run  # noqa: E402  (emu/run.py: emu_uid, UID, free_port)
@@ -331,7 +331,7 @@ if vhci_block():
 os.makedirs(OUT, exist_ok=True)
 disk = os.path.join(OUT, TAG + '-disk.bin')
 src = os.path.join(OUT, 'disk.bin')
-shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
+shutil.copy(src if os.path.exists(src) else os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 emu = subprocess.Popen([sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--fast', '--usbip', '0.01',
                         '--usbip-port', str(A.port), '--uid', EMU_SERIAL, '--run-for', '3600', '--name', TAG, '--disk', disk],
                        cwd=ROOT, stdout=open(os.path.join(OUT, TAG + '.out'), 'w'), stderr=subprocess.STDOUT,

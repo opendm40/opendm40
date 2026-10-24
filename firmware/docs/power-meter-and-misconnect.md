@@ -9,10 +9,10 @@ Evidence tags:
 
 * **VERIFIED** = datasheet text (`docs/DS-HY3131_EN.pdf`, transcribed in
   `emu/hy3131/ref/registers.md` and `RESEARCH.md`), the stock configuration row
-  bytes (`firmware/re/analysis/hy3131_v2_6.h`, byte-identical copies in
-  `fw-rs/src/hy3131_tables.rs`), the stock formulas and relay table
+  bytes (`stock/re/analysis/hy3131_v2_6.h`, byte-identical copies in
+  `firmware/src/hy3131_tables.rs`), the stock formulas and relay table
   (`dmm_v2_6.h`, `hy3131_v2_6.h`) or a device measurement already in
-  `fw-rs/docs/acdc-stock-vs-fwrs.md`.
+  `firmware/docs/acdc-stock-vs-fwrs.md`.
 * **INFERRED** = what the row bytes + the stock scale constants imply about the
   board wiring (RESEARCH.md open point 5: the DM40 PA/PB netlist is not known),
   BOM-based conclusions ([hw/README.md](../../hw/README.md)), or chip behaviour
@@ -20,7 +20,7 @@ Evidence tags:
 * **UNKNOWN** = needs the device or the schematic; listed with the test that
   settles it.
 
-Nothing under `firmware/re/history/` was used.
+Nothing under `stock/re/history/` was used.
 
 Summary:
 
@@ -496,7 +496,7 @@ days; phase cal + tests 2 days; emulator role 2 days.
 
 ### 3.11 Implemented (fw-rs, 2026-10-22; follow-ups in 3.12)
 
-`fw-rs/src/powermeter.rs` (a child of dmm.rs: row builder, phase machine,
+`firmware/src/powermeter.rs` (a child of dmm.rs: row builder, phase machine,
 scaling, energy, autorange, burden, limit; host tests), `src/ui_power.rs`
 (page slots, wiring dialog, Power Settings page), `src/app_power.rs`
 (taps, settings words, SCPI), hooks in `dmm.rs` / `hy3131.rs` / `app.rs` /
@@ -974,7 +974,7 @@ renders p07 (settings + status), p09 (I ranging), p10 (refused V cal), p11
 ### 3.13 The TODO remainder (fw-rs, 2026-10-22): BT, W limits, phase cal
 
 **Bluetooth: the stock phone protocol.** The protocol (docs/bt-protocol.md,
-`firmware/re/analysis/bt_meas_v2_6.h`) has no unit field: the phone app
+`stock/re/analysis/bt_meas_v2_6.h`) has no unit field: the phone app
 derives the unit from the mode byte's group (V group: base mV, A group:
 base uA, ohm, nF, Hz, ...) and the format byte's x1000 prefix, and the mode
 byte has no free group for a 16th function (groups 6 / 7 are undefined: the
@@ -1661,7 +1661,7 @@ day; fuse check dialog 0.5 day; tests 1 day.
 
 ### 4.6 Implemented (fw-rs, 2026-10-21)
 
-`fw-rs/src/sentinel.rs` (row builder, alert state machine, host tests),
+`firmware/src/sentinel.rs` (row builder, alert state machine, host tests),
 hooks in `dmm.rs` (`write_config`, `poll`, `poll_ac`, ohm / continuity /
 diode), `app.rs` / `ui.rs` (badge, toast, beep, Settings 3/3), `scpi.rs`.
 What was built, against the plan of 4.5:
@@ -2122,7 +2122,7 @@ owner keeps it at 0 %). Code: `src/danger.rs` (pattern, event rules, the
 each reading and the pub `Sentinel::probe_a`.
 
 **The stock has nothing to copy.** The V2.6 RE notes
-(`firmware/re/analysis/lcd_buzzer_v2_6.h`, `dmm_v2_6.h`) show no misconnect
+(`stock/re/analysis/lcd_buzzer_v2_6.h`, `dmm_v2_6.h`) show no misconnect
 alarm at all (no jack sensing, 4.1); the buzzer is TIM14 CH1 (PA7) at
 3.57 kHz (PSC 4, ARR 11200), loudness = duty, `min(v/3, 0.99) x 0.5`, so
 the stock's loudest is 49.5 % duty at volume 100 %; it beeps from a 2-entry

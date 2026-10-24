@@ -11,7 +11,7 @@ name over the number if they drift.
 
 Sources read: `src/ui.rs`, `src/app.rs`, `src/scope.rs`, `src/gen.rs`,
 `src/text.rs`, `src/stockfont.rs`, `src/gesture.rs`, `src/touch.rs`,
-`docs/parity.md`, and the stock reference `firmware/re/analysis/gui_v2_6.h`,
+`docs/parity.md`, and the stock reference `stock/re/analysis/gui_v2_6.h`,
 `gui_render_v2_6.h`, `scope_gen_ui_v2_6.h`.
 
 Context the user supplied: fw-rs no longer needs to match stock 1:1 —
@@ -384,7 +384,7 @@ Each: what / why / effort (S/M/L) / stock deviation. Quick wins marked ★.
 Suggested order to ship: 1, 3, 4, 2, 5, 11 (all quick, high-impact) → 9, 10, 13,
 14 → 6, 7, 8 → 12, 15.
 
-**Status 2026-10-21** (fw-rs/TODO.md has the commits): done 1, 2, 3, 5, 6, 9, 10, 12, 13 (incl. the stock >= 30 V red value on the DMM page);
+**Status 2026-10-21** (firmware/TODO.md has the commits): done 1, 2, 3, 5, 6, 9, 10, 12, 13 (incl. the stock >= 30 V red value on the DMM page);
 4 / 7 / 8 superseded by the stock scope port; 11 keypads only; 14 won't do (stock
 geometry); 15 duplicate arms gone, dead `ui::bar` / `button_row` / `DMM_BUTTONS` /
 fonts.rs deleted 2026-10-21 (with text.rs, mkfont.py, Roboto). The line numbers above are from the review date and stale.

@@ -62,7 +62,7 @@ port) talks USBTMC to emu/run.py ... --usbip through emu/usbip_client.py.
 
 Bluetooth options (with --bt): --mac AA:BB:.. (or DM40_MAC; found via
 bluetoothctl when omitted), --dev /dev/rfcomm0, --rescan. Close the phone app
-first (one link at a time). SCPI reference: fw-rs/src/scpi.rs header.
+first (one link at a time). SCPI reference: firmware/src/scpi.rs header.
 """
 import argparse
 import datetime

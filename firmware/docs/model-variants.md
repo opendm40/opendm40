@@ -5,7 +5,7 @@ Owner question (2026-10-22): "does the stock firmware think it's a DM40A?"
 2026-10-13 flash dump and on the device today (section 3), and the stock
 V2.6 firmware shows the DM40A ranges for it.
 
-Sources: `firmware/re/analysis/hy3131_v2_6.h` (calibration record, model byte),
+Sources: `stock/re/analysis/hy3131_v2_6.h` (calibration record, model byte),
 `dmm_v2_6.h` (limits per model), `bt_meas_v2_6.h` (BT name / cmd 00),
 `gui_v2_6.h` (About page), the flash dump, and emulator runs of the stock
 binary with the byte patched (section 5). Manual: Table 2.3.1 (A = 4000-count
@@ -20,7 +20,7 @@ One byte: **calibration struct byte 0 = internal flash `0x080C0168`**
 | What | Value |
 |---|---|
 | Record | `0x080C0000`, 800 bytes: `u16 crc`, `u16 ~crc`, `u32 version = 1`, data |
-| CRC | CRC-16 poly 0x8005, init 0xFFFF, MSB-first, no final XOR (`firmware/dm40fw.py crc16`), over record bytes 4..0x31F, stored little-endian at +0 with the complement at +2. This unit: `c7 8a 38 75` = 0x8AC7 / 0x7538 (checked) |
+| CRC | CRC-16 poly 0x8005, init 0xFFFF, MSB-first, no final XOR (`stock/dm40fw.py crc16`), over record bytes 4..0x31F, stored little-endian at +0 with the complement at +2. This unit: `c7 8a 38 75` = 0x8AC7 / 0x7538 (checked) |
 | Model | byte `+0x168`: 0 DM40A, 1 DM40B, 2 DM40C; BT cmd 00 clamps it to 2 (bt_meas_v2_6.h); a clamp for the FACTOR / OVER tables is not traced |
 | Bad CRC / version | the stock uses the calibration defaults (flash `0x0804C45C`, byte 0 = `00`) -> DM40A. Emulator check: byte set to 2 without fixing the CRC -> the stock shows the DM40A ranges |
 | Writer | only the factory menu "import factor.bin" (whole 800-byte record from the USB disk, CRC and version checked). Nothing else in the firmware writes it |
@@ -58,7 +58,7 @@ Everything else (scope, generator, UI layout, calibration use) is the same.
 
 ## 3. This unit
 
-* Dump 2026-10-13 (`firmware/re/dumps/full-20261013/flash_08000000_1MB.bin`):
+* Dump 2026-10-13 (`stock/re/dumps/full-20261013/flash_08000000_1MB.bin`):
   `0x080C0168` = `00`, record CRC valid -> **DM40A**.
 * Device, 2026-10-22, read-only: `CALIB.BIN` (the fw-rs safety copy of
   `0x080C0000`, `dm40scpi.py get CALIB.BIN`; DBG:BOOT? shows `CALBK` with no
@@ -70,7 +70,7 @@ Everything else (scope, generator, UI layout, calibration use) is the same.
 
 ## 4. fw-rs
 
-User decisions 2026-10-13 (fw-rs/TODO.md, "User decisions"): **60000 counts
+User decisions 2026-10-13 (firmware/TODO.md, "User decisions"): **60000 counts
 (DM40C limits) on every model**, **AC+DC on every model** (the DM40A hardware
 measures it: same HY3131 rows), **IDN / Device page keep the real model**.
 The model is in the calibration record and the hardware is the same, so the

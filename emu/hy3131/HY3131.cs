@@ -1,7 +1,7 @@
 //
 // HY3131 DMM analog front end (Hycon, DS-HY3131-V10_EN) on the DM40's bit-banged
-// SPI (SCK PC10, MOSI PC12, MISO PC11, CS PD2; firmware/re/analysis/hy3131_v2_6.h,
-// fw-rs/src/hy3131.rs). Research, open points and the per-row analog model:
+// SPI (SCK PC10, MOSI PC12, MISO PC11, CS PD2; stock/re/analysis/hy3131_v2_6.h,
+// firmware/src/hy3131.rs). Research, open points and the per-row analog model:
 // emu/hy3131/RESEARCH.md and emu/hy3131/README.md.
 //
 // Two classes:
@@ -1937,7 +1937,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         }
 
         // ------------------------------------------------------------ power role (fw-rs power meter)
-        // fw-rs/docs/power-meter-and-misconnect.md 3.1 "assignment B": X = AD2 = OP1O - PB3 (the A-jack
+        // firmware/docs/power-meter-and-misconnect.md 3.1 "assignment B": X = AD2 = OP1O - PB3 (the A-jack
         // shunt through OP1, as the stock AC A rows), Y = AD3 = OP2O - AGND (OP2 x1 on SENSE = the V
         // divider tap of the row's switch bytes). Both DC coupled. The RMS block: SDO23 -> sum(Yac^2),
         // else SVXI -> sum(Xac*Yac) (signed), else sum(Xac^2); the LPF: SDO23 -> DC of Y, else of X.
@@ -2245,7 +2245,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly int[] RowMask = {
             0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xF7, 0xFC, 0x7F, 0xFF };
 
-        // Stock DM40 V2.6 configuration rows (firmware/re/analysis/hy3131_v2_6.h) with their role.
+        // Stock DM40 V2.6 configuration rows (stock/re/analysis/hy3131_v2_6.h) with their role.
         private static readonly RowDef[] Rows = WithPowerRows(new[] {
             new RowDef(Role.AcV, 0, 0, "f2 dd 16 03 33 43 80 9d 31 fc 20 00 00 09 28 a0 80 c7 38 ac 88 94"),
             new RowDef(Role.AcV, 0, 1, "f2 dd 16 03 33 40 80 9d 31 fc 20 00 00 09 28 a0 80 c7 38 ac 88 94"),

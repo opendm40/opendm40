@@ -5,8 +5,8 @@ into the A jack (the DM40 front-end model's isrc source, switched at fixed
 virtual times), driven like a user (DBG:KEY / DBG:TAP) and over SCPI on one
 USB/IP connection.
 
-  cd fw-rs && ./build.sh
-  emu/hy3131/inrushtest.py --app fw-rs/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
+  cd firmware && ./build.sh
+  emu/hy3131/inrushtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/dm40-fw [--shots DIR]
 
 Timeline (virtual seconds; the scheduled input changes; the client waits on
 their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
@@ -77,7 +77,7 @@ OUT = os.path.join(EMU, 'out')
 os.makedirs(OUT, exist_ok=True)
 tag = 'inrush-%d-%d' % (A.port, os.getpid())
 disk = os.path.join(OUT, '%s.disk.bin' % tag)
-shutil.copy(os.path.join(ROOT, 'firmware/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
+shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 script = os.path.join(OUT, '%s.script' % tag)
 sys.path.insert(0, EMU)
 import regionc  # noqa: E402
