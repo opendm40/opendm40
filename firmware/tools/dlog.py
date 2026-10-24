@@ -61,6 +61,34 @@ class Bits:
         return (q << k) | self.get(k)
 
 
+class SBits:
+    """`Bits` over a '0'/'1' string (str.find for the unary part): the
+    kind-3 decoder's reader, fast enough for a 76.8 kS/s LOG:DATA? drain."""
+    def __init__(self, d, pos, end):
+        n = end - pos
+        self.s = bin(int.from_bytes(d[pos:end], 'big') | 1 << (8 * n))[3:] if n else ''
+        self.pos = 0
+
+    def get(self, n):
+        p = self.pos + n
+        if p > len(self.s):
+            raise EOFError
+        v = int(self.s[self.pos:p], 2) if n else 0
+        self.pos = p
+        return v
+
+    def rice(self, k):
+        z = self.s.find('0', self.pos, self.pos + QMAX)
+        if z < 0:
+            if self.pos + QMAX > len(self.s):
+                raise EOFError
+            self.pos += QMAX
+            return self.get(32)
+        q = z - self.pos
+        self.pos = z + 1
+        return (q << k) | self.get(k)
+
+
 def unzz(u):
     return (u >> 1) ^ -(u & 1)
 
@@ -203,13 +231,42 @@ def fast_row(t, raw, lost, a, b, scaled):
     return s + '%7d\r\n' % min(lost, 9999999)
 
 
+def fast_chunk(d, off, rate):
+    """The rows (t_us, raw, dt_us) of the kind-3 chunk at `off` (header
+    checked by the caller): t from the chunk's 48-bit t0, dt = 0 for the
+    first row when the chunk header's dt0 is 0. Also the decoder of
+    LOG:FORMat DLG replies (tools/dm40scpi.py)."""
+    pl, _, _, t0lo, t0hi, nr, dt0, v0 = struct.unpack_from('<HIIIHHIi', d, off + 2)
+    t, v, dt = t0lo | t0hi << 32, v0, (1000000000 + rate // 2) // rate
+    yield t, v, dt0
+    bits = SBits(d, off + CHDR, off + CHDR + pl)
+    at, av = Ad(4), Ad(16)
+    for _ in range(nr - 1):
+        x = bits.rice(at.k())
+        at.upd(x)
+        dt = (dt + unzz(x)) & 0xFFFFFFFF
+        t += dt
+        u = bits.rice(av.k())
+        av.upd(u)
+        v = ((v + unzz(u) + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+        yield t, v, dt
+
+
+def chunk_ok(d, off):
+    """The kind-3 chunk at `off` is whole and its CRC matches."""
+    if off + CHDR > len(d) or d[off:off + 2] != b'DC':
+        return False
+    pl, crc = struct.unpack_from('<HI', d, off + 2)
+    end = off + CHDR + pl
+    return end <= len(d) and zlib.crc32(d[off + 8:off + CHDR], zlib.crc32(d[off + CHDR:end])) == crc
+
+
 def fast_decode(d, off, out, errors):
     """Kind 3 (fast logger): parameters at `off`, then chunks."""
     if zlib.crc32(d[off:off + 28]) != struct.unpack_from('<I', d, off + 28)[0]:
         raise ValueError('bad fast-log parameters')
     a, b, rate = struct.unpack_from('<ffI', d, off)
     scaled = d[off + 12] & 1
-    p_us = (1000000000 + rate // 2) // rate
     off += 32
     rows = chunks = 0
     while off < len(d):
@@ -225,19 +282,8 @@ def fast_decode(d, off, out, errors):
         if row0 != rows:
             errors.append('chunk at %d: out of sequence' % off)
             break
-        t, v, dt = t0lo | t0hi << 32, v0, p_us
-        bits = Bits(d, off + CHDR, end)
-        at, av = Ad(4), Ad(16)
-        out.append(fast_row(t, v, max(round_half_up(dt0, rate) - 1, 0) if dt0 else 0, a, b, scaled))
-        for _ in range(nr - 1):
-            x = bits.rice(at.k())
-            at.upd(x)
-            dt = (dt + unzz(x)) & 0xFFFFFFFF
-            t += dt
-            u = bits.rice(av.k())
-            av.upd(u)
-            v = ((v + unzz(u) + 0x80000000) & 0xFFFFFFFF) - 0x80000000
-            out.append(fast_row(t, v, max(round_half_up(dt, rate) - 1, 0), a, b, scaled))
+        for t, v, dt in fast_chunk(d, off, rate):
+            out.append(fast_row(t, v, max(round_half_up(dt, rate) - 1, 0) if dt else 0, a, b, scaled))
         rows += nr
         chunks += 1
         off = end
