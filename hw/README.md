@@ -371,11 +371,17 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   datasheet's 10 M / 1.111 M / 101.01 k / 10.01 k / 1 k network.
 - Ohm: OP3 drives reference resistors on HY3131 PA2..PA7 (Rref 1 k .. 63 M per
   range); ratiometric AD1 ([`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) mode 10). Ohm source
-  short-circuit current about 0.85 mA in the default ohm variant and 0.27 mA
-  in the "ON" variant; diode test 0.75 mA (chat reports;
-  [`firmware/src/dmm.rs`](../firmware/src/dmm.rs), [`emu/hy3131/README.md`](../emu/hy3131/README.md)). Per range the firmware
-  shows 0.85 V (0.27 V) / Rref as the test current (*inferred*: the
-  source modelled as a fixed voltage behind Rref; `dmm::ohm_test_current`).
+  short-circuit current per range (600 Ω / 6 k / 60 k / 600 k / 6 MΩ):
+  0.90 mA / 197 µA / 20 µA / 2.2 µA / 215 nA in the default variant (OP3
+  VREF tap VDS15), 0.28 mA / 58 µA / 6.6 µA / 0.66 µA / 86 nA in the "ON"
+  variant (AGNDP7; AGNDP8 on 6 MΩ); 60 Ω = the 600 Ω default; 60 MΩ (the
+  current-source row) not measured. Open-circuit voltage at the jack with
+  the 1 k Rref: about 2.17 V (default), 0.78 V (ON). Only 600 Ω is limited
+  by OP3; above it the ~2 V source behind Rref sets the current. Measured
+  on one unit with `DBG:SRC`, jacks shorted / open
+  ([`device-check-2026-10-21.md`](../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc),
+  `dmm::OHM_ISC` in [`firmware/src/dmm.rs`](../firmware/src/dmm.rs)). Diode
+  test 0.75 mA (owners' reports, not measured yet).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
