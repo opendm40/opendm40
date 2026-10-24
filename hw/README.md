@@ -180,35 +180,11 @@ The same as text:
 
 *The two isolated supplies: VPS8504B drivers under the LT61-1xx transformers.*
 
-The DMM domain ([HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf), reference, divider, relay, shunts, banana jacks) is
-galvanically isolated from the MCU domain.
-What else is on the MCU / USB ground is inferred from the BOM and the manual
-([docs/dm40-feature-request.md](../docs/dm40-feature-request.md) 1.2):
-
-1. The [TP4056](datasheets/toppower-tp4056-cn.pdf) runs from VBUS and charges the battery directly, so USB ground
-   = battery ground.
-2. MCU + backlight + 50 MS/s ADC + Bluetooth take about 1..1.5 W; micropower
-   isolated supplies (hundreds of mW) cannot carry that, so the MCU is on the
-   battery ground.
-3. The USB disk needs the MCU's USB device; the BOM has no USB isolator
-   (ADuM3160 class), so USB ground = MCU ground.
-4. The [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) bus (10 bit x 50 MS/s) cannot pass a 4-channel isolator, so
-   the scope (and the generator) are on the MCU ground.
-5. The HY3131 draws a few mA and its SPI is 4 lines = one [CA-IS3741](datasheets/chipanalog-ca-is374x-v1.08.pdf), so
-   exactly the DMM is isolated.
-6. The manual says "for safety, do not measure while charging"; with an
-   isolated USB that warning would be unnecessary (it matters for the scope
-   and generator, whose ground is the USB / PC ground).
-
-Quick check that tells the sides apart (meter off, USB-C breakout):
-continuity USB GND - CHA / GEN shield (expected ~0 ohm) and USB GND - COM
-(expected open, > 1 Mohm).
-
-Where the two isolated supplies go is not settled: the feature request's
-BOM-based inference (2026-10-13) put [VPS8504B](datasheets/vpsc-vps8504b-cn.pdf) #1 + LT61-117
-on the DMM side and VPS8504B #2 + LT61-113 on the MCU side as a negative
-supply for the scope / generator front end; this page draws both on the
-barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
+The DMM part ([HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf), reference, divider, relay, shunts, banana jacks)
+is galvanically isolated from the rest of the meter through the
+[CA-IS3741](datasheets/chipanalog-ca-is374x-v1.08.pdf) digital isolator, the optocouplers and the
+[VPS8504B](datasheets/vpsc-vps8504b-cn.pdf) + LT61 isolated supplies. Everything else (MCU, USB, battery,
+scope, generator) shares one ground.
 
 ## Main parts
 
@@ -658,9 +634,8 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 
 ## Unknowns
 
-1. No schematic. Apart from the DMM domain's isolation, the rest of the topology (what else sits on which side, where each isolated
-   supply goes) is inferred from the BOM and the photos; the two readings of
-   the isolated supplies are in [Isolation boundary](#isolation-boundary).
+1. No schematic; circuit details beyond the parts list are inferred from the
+   BOM and the photos.
 2. Which rail(s) hold the power on: PE2, PC4 or both; how the power key turns
    the unit on from off. [`fw-rs/src/boot.rs`](../fw-rs/src/boot.rs) and [`native-boot.md`](../fw-rs/docs/native-boot.md) (shim
    steps) treat PE2 as the power hold; [`native-boot.md`](../fw-rs/docs/native-boot.md) section 1 (older text)
