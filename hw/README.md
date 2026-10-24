@@ -252,7 +252,7 @@ barrier (photos show both next to the DMM area). See [Unknowns](#unknowns).
 | Charger | TP4056 (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | verified marking: photo `charger-tp4056-and-power.jpg`; review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | verified: label in `battery-ln425272-label.jpg` |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
-| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD, inferred; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). SWD read-out is locked (read protection set, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
+| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK, verified; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). SWD read-out is locked (read protection set, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1) |
 
 Small SOT-23 / SOT-89 / MSOP parts in `charger-tp4056-and-power.jpg`
 ("A2SHB", "93N44", "XFHVB", "K14", "S1K", "NE.", inductor "2R2", tantalum
@@ -358,7 +358,14 @@ original is kept unchanged). The silkscreen is readable in both review photos.*
 | GND | MCU-domain ground, next to TX | verified by the owner on the device, 2026-10-24 |
 | RX | **PA3** (USART1_RX on the GD32F4; unused by the stock firmware and fw-rs) | verified by the owner on the device, 2026-10-24 |
 | VCC | ~3.1 V while the meter is on; **not** wired directly to the MCU supply (some series element or a separate rail in between, not traced) | measured by the owner, 2026-10-24 |
-| V, D, C, G | SWD: VCC, SWDIO (PA13), SWCLK (PA14), GND | inferred from the labels, unverified |
+| V, D, C, G | SWD: V = VCC, D = **PA13** (SWDIO), C = **PA14** (SWCLK), G = GND | verified by the owner on the device, 2026-10-24 |
+
+SWD connects, but the flash is read-protected (level 1, [`firmware/re/ANALYSIS.md`](../firmware/re/ANALYSIS.md) 1).
+A debugger can neither read nor write it, and lifting the protection
+mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
+calibration and the UID-bound boot data. Use SWD only as a last resort, after
+the fw-rs backup (root README, [Back up with fw-rs](../README.md#back-up-with-fw-rs)),
+and restore in the order given there.
 
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
 as a UART TX. The stock firmware never enables USART1 (as far as the RE notes
@@ -604,7 +611,7 @@ the stock code as stated; the board-level meaning may still be inferred.
 | PA10 | DMM relay drive (pulse) | out | verified, `dmm.rs` |
 | PA11 | USB DM (AF10) | io | verified, `usb.rs` |
 | PA12 | USB DP (AF10) | io | verified, `usb.rs` |
-| PA13 / PA14 | SWD (pads "D" / "C") | io | inferred (standard pins; pads in photo) |
+| PA13 / PA14 | SWD (pads "D" / "C") | io | verified (owner, 2026-10-24) |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | verified (stock), `hwtrig.rs` |
 | PB0..PB9 | 3PA1030 data D0..D9 | in | verified, `scope.rs` |
 | PB10 | charge status / control (meaning guessed) | in / od | stock code, `dmm_v2_6.h`, `power.rs` |
@@ -695,9 +702,9 @@ header's RX pad, verified), PB13, PC1, PC15. Whether they are connected is unkno
    A / B / C; the exact gain resistors.
 9. The scope op amp ("8091") and the generator output stage after the SGM3157.
 10. The regulators and the power path parts in `charger-tp4056-and-power.jpg`.
-11. The debug header's V / D / C / G pads (TX = PA2, RX = PA3 and GND are
-    verified; VCC reads ~3.1 V and is not the MCU supply directly; what sits
-    between them is not traced).
+11. The debug headers' VCC pads: ~3.1 V while on, not the MCU supply
+    directly; what sits between them is not traced. (All other pads are
+    verified: TX = PA2, RX = PA3, GND; V / D = PA13 / C = PA14 / G = GND.)
 12. LCD panel FPC pinout; touch panel vendor beyond the controller ID.
 13. Exact HY3131 wiring (ohm reference resistors, divider taps, shunt nodes):
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
