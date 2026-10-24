@@ -1580,6 +1580,7 @@ impl App {
             self.redraw = true;
         }
         self.fuse_tick(clk, now);
+        self.pw_entry_tick(now, can_draw);
         if self.overlay.is_some_and(|o| now >= o.until()) {
             #[cfg(feature = "vdisk")]
             if matches!(self.overlay, Some(crate::dialog::Overlay::FwInstall { .. })) {

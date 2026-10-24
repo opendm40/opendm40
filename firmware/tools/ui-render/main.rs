@@ -2682,6 +2682,9 @@ fn main() {
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         ui::pw::entry_dialog(5.0, 30);
         save(&out, "p06-power-entry");
+        // A later frame of the current path's marching dashes (10 fps).
+        ui::pw::entry_anim(2);
+        save(&out, "p06b-power-entry-anim");
         host::reset(0);
         power_page(pcs[0].1, 0, sentinel::Alert::None, rc);
         crate::dialog::energy_reset();
