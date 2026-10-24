@@ -1,4 +1,4 @@
-// Host unit tests of the HY3131 model (emu/peripherals/HY3131.cs) through the real
+// Host unit tests of the HY3131 model (emu/hy3131/HY3131.cs) through the real
 // SPI frame. Run: emu/hy3131/tests/run.sh  (dotnet 8).
 // The "stock" formulas below are those of firmware/re/analysis/dmm_v2_6.h.
 using System;
