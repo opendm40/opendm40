@@ -43,11 +43,19 @@ on the first byte of each request:
   only happens on USBTMC).
 - USBTMC and Bluetooth have separate SCPI sessions (error queue, pending
   `READ?`), so one host does not see or consume the other's errors.
-- The BT module's own answers (`OK`, `CBN+...`) arriving up to 0.5 s after an
-  AT exchange, or 2 s after `AT+RESET`, are dropped rather than parsed.
-  Anything else the module prints on its own (a connect message, if this
-  module sends one) goes to the parser and only adds an "Undefined header" to
-  `SYST:ERR?`; it gets no reply.
+- SCPI lines are taken only while a host is linked (PC14 high). With no link
+  the module's own text (AT answers and echoes, start-up output) is dropped:
+  no command runs and no error is queued. Device 46370df: the first client
+  found -113 / -102 / -113 queued; that they came from such text (an `OK`,
+  an echoed `AT+...`) is INFERRED. Emulator:
+  [`emu/btchattertest.py`](../../emu/btchattertest.py).
+  Stock frames are served either way. A line in progress when the link
+  comes up is dropped up to its terminator.
+- With a link, the BT module's own answers (`OK`, `CBN+...`) arriving up to
+  0.5 s after an AT exchange, or 2 s after `AT+RESET`, are dropped rather
+  than parsed. Anything else the module prints on its own while linked (a
+  connect message, if this module sends one) goes to the parser and only
+  adds an "Undefined header" to `SYST:ERR?`; it gets no reply.
 - SCPI over Bluetooth works only while Bluetooth is enabled in the meter's
   settings (`app.bt_on`), like the phone-app protocol.
 
