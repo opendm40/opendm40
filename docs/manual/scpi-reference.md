@@ -38,7 +38,8 @@ the function USB reads, and the same as one set by touch.
   `\r` (CR LF is fine). Every response ends with `\n`, also after a binary
   block.
 - **Sizes.** A message is at most 256 bytes. One command (header and its
-  parameters) is cut after 64 characters. A joined text response is at most
+  parameters) is at most 64 characters; a longer one is refused with
+  `Syntax error`. A joined text response is at most
   512 bytes; a reply that does not fit is dropped and `Out of memory` is
   queued.
 - **Binary blocks.** Some queries answer with an IEEE 488.2 definite-length
@@ -50,8 +51,15 @@ the function USB reads, and the same as one set by touch.
   `+9.90000000E+37` is an overload (OL on the screen), `+9.91000000E+37`
   means "no value" (SCPI NaN: no reading yet, or not measured).
 - **Numbers in parameters** are plain or in exponent form: `0.001`, `1E-3`,
-  `-2.5`. A suffix letter multiplies: `K` = 10^3, `M` = 10^6, `U` = 10^-6,
-  `N` = 10^-9. There is no milli suffix (`1m` is 1 000 000); use `1E-3`.
+  `-2.5`, optionally with a suffix (IEEE 488.2, not case-sensitive, a space
+  before it is allowed): a multiplier `G` = 10^9, `MA` = 10^6, `K` = 10^3,
+  `M` = 10^-3, `U` = 10^-6, `N` = 10^-9, `P` = 10^-12, then the
+  parameter's unit if it has one (`V`, `A`, `OHM`, `HZ`, `S`, `PCT`):
+  `1m` and `1M` are 0.001, `1MA` is 1 000 000, `500MV` is 0.5 V,
+  `100US` is 100 µs. `MHZ` and `MOHM` are the exceptions: megahertz and
+  megohm (`2.5MHZ`, `1MOHM`). With the unit A, `MA` is milliampere
+  (`6MA` = 0.006 A); mega-ampere would be `MAA`. A unit that is not the
+  parameter's (`SOUR:FREQ 1V`) is `Illegal parameter value`.
 - **ON / OFF** parameters also take `1` / `0`. Replies to ON / OFF queries
   are `1` or `0`.
 - **Unanswerable queries.** A message with a query always gets a response.
@@ -61,29 +69,40 @@ the function USB reads, and the same as one set by touch.
 
 ### Errors
 
-`SYSTem:ERRor?` returns the last error and clears it: `-100,"<text>"`, or
-`0,"No error"`. The meter keeps one error only: a new error replaces an
-unread one. `*CLS` and `*RST` clear it. The texts:
+Each link keeps an error queue of 8 entries. `SYSTem:ERRor?` returns the
+oldest error and removes it: `<code>,"<text>"`, or `0,"No error"` when the
+queue is empty. `SYSTem:ERRor:COUNt?` answers the number of entries. When
+the queue is full, the newest entry becomes `-350,"Queue overflow"` and
+later errors are lost until it is read. `*CLS` clears it; `*RST` does not.
 
-| Text | Meaning |
-|---|---|
-| `Undefined header` | Unknown command, or a query form that does not exist. |
-| `Command error` | `CONFigure` / `MEASure` with an unknown function. |
-| `Illegal parameter value` | A parameter is missing, unknown or out of range. |
-| `Data out of range` | A range value above the largest range. |
-| `Settings conflict` | Not possible in the present state (wrong function, a logger running, the scope running, ...). Some add the reason after a colon or semicolon. |
-| `Data stale` | No fresh value: the reply is `+9.91E37` / `+9.9E37` or an old value. |
-| `Query INTERRUPTED` | USB: a new message came while a `READ?` / `MEASure?` was still waiting; that query gets no reply. |
-| `Query error` | A block query together with other queries in one message. |
-| `Out of memory` | The joined response would exceed 512 bytes. |
-| `Too much data` | A block reply larger than the link can send at once (Bluetooth). |
-| `Command protected` | Refused over Bluetooth (see below). |
-| `Rate too high for Bluetooth` | A logger session faster than the Bluetooth link. |
-| `Input buffer overrun` | Bluetooth: a line longer than 256 bytes (dropped). |
-| `Queue overflow` | Bluetooth: a reply did not fit the send buffer. |
-| `Mass storage busy` | The disk is in use (a recording commits, a screenshot is saved, the PC has it mounted). |
-| `Mass storage error`, `Mass storage full` | Disk failure / no space. |
-| `File name not found` | `MMEMory` file name not on the disk. |
+A set command with a bad value changes nothing and does not answer: it
+queues `Missing parameter` (no value), `Illegal parameter value` (not a
+number or keyword of the command) or `Data out of range` (a number the
+setting cannot take, e.g. `SOUR:FREQ 0`). The codes and texts:
+
+| Code | Text | Meaning |
+|---|---|---|
+| -100 | `Command error` | `CONFigure` / `MEASure` with an unknown function. |
+| -102 | `Syntax error` | A character not allowed in a header, or a command over 64 characters. |
+| -108 | `Parameter not allowed` | A parameter after a command that takes none (`*IDN? 1`, `READ? 2`). |
+| -109 | `Missing parameter` | A set command without its value (`SOUR:FREQ`). |
+| -113 | `Undefined header` | Unknown command, or a query form that does not exist. |
+| -200 | (its own text) | Other execution errors: `Upload not started`, `Not an update file`, `CRC mismatch`, `Verify failed`, `Rate too high for Bluetooth`, `Output buffer overflow` (Bluetooth: a reply did not fit the send buffer), ... |
+| -203 | `Command protected` | Refused over Bluetooth (see below). |
+| -221 | `Settings conflict` | Not possible in the present state (wrong function, a logger running, the scope running, ...). Some add the reason after a colon or semicolon. |
+| -222 | `Data out of range` | A number outside what the setting takes; a range value above the largest range. |
+| -223 | `Too much data` | A block reply larger than the link can send at once (Bluetooth). |
+| -224 | `Illegal parameter value` | A parameter that is unknown or not a number. |
+| -225 | `Out of memory` | The joined response would exceed 512 bytes. |
+| -230 | `Data stale` | No fresh value: the reply is `+9.91E37` / `+9.9E37` or an old value. |
+| -240 | `Flash error` | The loader marker could not be written (`DBG:UPDATE`). |
+| -250 | `Mass storage busy`, `Mass storage error` | The disk is in use (a recording commits, a screenshot is saved, the PC has it mounted), or a disk failure. |
+| -254 | `Mass storage full` | No space on the disk. |
+| -256 | `File name not found` | `MMEMory` file name not on the disk. |
+| -350 | `Queue overflow` | The error queue was full (see above). |
+| -363 | `Input buffer overrun` | Bluetooth: a line longer than 256 bytes (dropped). |
+| -400 | `Query error` | A block query together with other queries in one message. |
+| -410 | `Query INTERRUPTED` | USB: a new message came while a `READ?` / `MEASure?` was still waiting; that query gets no reply. |
 
 ### Status reporting
 
@@ -95,8 +114,9 @@ change nothing; the touch screen and keys always stay active.
 
 ### Bluetooth differences
 
-- Every `DBG:` command is refused. A message that contains one is refused as
-  a whole (nothing of it runs, no reply) and queues `Command protected`.
+- Every `DBG:` command and `DIAG?` / `DIAG:PWM?` are refused. A message that
+  contains one is refused as a whole (nothing of it runs, no reply) and
+  queues `Command protected`.
 - Also refused with `Command protected`: `MMEMory:DELete`, `LOG:CSV ON`,
   `LOG:STATe ON` with `LOG:DEST DISK`, and the firmware upload.
 - `LOG:STATe ON` is refused (`Rate too high for Bluetooth`) for AD2
@@ -172,9 +192,9 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,dm40-fw 0.1` | both |
-| `*RST` | | Clears the error queue and the questionable event bits. Settings are not reset. | both |
-| `*CLS` | | Same as `*RST`. | both |
+| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.1` | both |
+| `*RST` | | Accepted; changes nothing (settings, the error queue and the event bits stay). | both |
+| `*CLS` | | Clears the error queue and the questionable event bits. | both |
 | `*OPC?` | | `1` | both |
 | `*ESR?` | | `0` | both |
 | `*STB?` | | `0` | both |
@@ -183,7 +203,8 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `SYSTem:ERRor?` | | `-100,"<text>"` or `0,"No error"` (see [Errors](#errors)) | both |
+| `SYSTem:ERRor?` | | The oldest queued error, `<code>,"<text>"`, or `0,"No error"` (see [Errors](#errors)) | both |
+| `SYSTem:ERRor:COUNt?` | | Errors in the queue, `0`..`8` | both |
 | `SYSTem:MODel?` | | `<model>,<model byte>,<counts>`: the model (`DM40A`, `DM40B`, `DM40C`) and the raw model byte of the calibration record, then the count limit, always `60000` | both |
 | `SYSTem:IDN:EMULation[?]` | `OFF` (default) or `34401A` | `OFF` or `34401A` | both |
 | `SYSTem:LOCal` | | Accepted, does nothing. | both |
@@ -510,12 +531,12 @@ and `MEASure:POWer?` then give the real power P in W.
 | `SINGle` | | Sets the sweep to Single and starts. | both |
 | `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
 | `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |
-| `TIMebase:SCALe[?]` | s/div, 100E-9 .. 50 | `+1.000000E-03` | both |
+| `TIMebase[:MAIN]:SCALe[?]` | s/div, 100E-9 .. 50 | `+1.000000E-03` | both |
 | `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.01 .. 10 (times the probe factor) | `+1.000000E+00` | both |
 | `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
 | `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
-| `TRIGger:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
-| `TRIGger:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
+| `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
+| `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07` | both |
 | `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
@@ -531,7 +552,9 @@ and `MEASure:POWer?` then give the real power P in W.
 - Scope commands turn the scope on if it is off; the meter's screen shows
   the same settings.
 - Time and voltage settings snap to the nearest step at or above the value
-  (1-2-5 steps).
+  (1-2-5 steps). A scale of 0 or below is `Data out of range`; a value that
+  is no number or keyword of the command is `Illegal parameter value`
+  (nothing changes).
 - Volts are at the probe tip: the probe factor set in the scope settings
   window applies. There is no probe command.
 - Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
@@ -565,6 +588,8 @@ and `MEASure:POWer?` then give the real power P in W.
 | `SOURce:FUNCtion:SQUare:DCYCle[?]` | duty cycle, % (0 .. 100) | the duty produced: `+5.000000E+01` | both |
 | `OUTPut[?]` | `ON` or `OFF` | `1` or `0` | both |
 
+- A frequency of 0 or below, a negative amplitude or a duty outside 0 .. 100
+  is `Data out of range`; the setting stays as it was.
 - Sine, triangle and ramp go up to 50 kHz, square up to 10 MHz.
   `SOURce:FREQuency?` and `DCYCle?` report what the output really produces
   (limited and rounded to the generator's steps).
@@ -696,13 +721,13 @@ it from the USB disk. `DISPlay:BURDen` is listed under
 ## Debug commands
 
 For diagnostics and development; they may change between versions. All
-`DBG:` commands work over USB only. Replies are comma-separated numbers
+`DBG:` and `DIAG` commands work over USB only. Replies are comma-separated numbers
 unless shown otherwise.
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | both |
-| `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | both |
+| `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
+| `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
 | `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>` | USB |
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:GENUINE?` | | `<uid hex>,<stored hex>,<expected hex>,GENUINE\|MISMATCH` | USB |
