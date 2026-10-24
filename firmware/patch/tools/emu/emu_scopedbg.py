@@ -70,7 +70,7 @@ def body(path):
     return dm40fw.split(dm40fw.decode(open(path, 'rb').read()))[3]
 
 
-STOCK = body(os.path.join(ROOT, 'dm40_v_2_6.bin'))
+STOCK = body(os.path.join(ROOT, 'vendor', 'dm40_v_2_6.bin'))
 SCOPE = body(os.path.join(PATCH, 'build-dbg', 'dm40_dbgscope.bin'))
 
 
