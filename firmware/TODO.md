@@ -3502,3 +3502,14 @@ Emulator (emu/):
       its box; device 46370df, both variants). Fixed: the box is cleared when the range has no value;
       tools/ui-render range pairs ending on 60 M against a fresh draw. Device: untested. The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
+- [x] Bluetooth: stale errors on the first connection (device 46370df, device-check doc "46370df" new bug 5:
+      the first `--bt` client found -113, -102, -113 queued; later connections none). USB and BT already had
+      separate queues. Cause (INFERRED, no device trace): the module's own text reaches the SCPI parser while
+      no host is linked: an `OK` = -113, an echoed `AT+SBNDM40A` = -102 ('+' in a header), `OK` = -113, e.g.
+      init_module's AT exchange when an answer comes later than its 50 / 100 ms window + AT_QUIET_MS. Fix:
+      bt_scpi.rs `Rx::set_link` (PC14 every poll): with no link no SCPI line or overrun is reported (stock
+      frames as before); a line in progress when the link changes is dropped to its terminator.
+      tools/bt-scpi-test 7b; emu/btchattertest.py (the module text with no link, then a host: base
+      -113 / -102 / -113 / -363, fix 0). Device check: power the meter on, wait 10 s, connect
+      `dm40scpi.py --bt` and send SYST:ERR:COUN? first: 0; repeat after a Settings BT off / on. A connect
+      banner printed after PC14 rises would still be parsed (would show as -113 there).
