@@ -1,0 +1,38 @@
+%%{init: {"flowchart": {"nodeSpacing": 40, "rankSpacing": 34}}}%%
+flowchart TB
+  subgraph SCOPE["Scope"]
+    direction LR
+    CHA(["CHA"])
+    ATT["Relay /50<br>+ AC/DC"]
+    GAIN["Gain: 4051<br>+ op amp"]
+    SADC["3PA1030"]
+    CHA --> ATT --> GAIN --> SADC
+  end
+  TCH["Touch"]
+  UART["Debug UART"]
+  SWD["SWD"]
+  MCU["GD32F427VGT6"]
+  LCD["ILI9488"]
+  FLASH["W25Q128JV"]
+  BT["Jieli BT"]
+  BUZ["Buzzer"]
+  subgraph GENB["Generator"]
+    direction LR
+    SW["SGM3157"]
+    OUTS["Output<br>stage"]
+    GEN(["GEN"])
+    SW --> OUTS --> GEN
+  end
+
+  SCOPE <-->|"PB0..PB9, PC6 clock,<br>PC4 rail"| MCU
+  TCH -->|"I2C2"| MCU
+  UART <-->|"PA2 / PA3"| MCU
+  SWD <-->|"PA13 / PA14"| MCU
+  MCU -->|"FSMC"| LCD
+  MCU <-->|"SPI1"| FLASH
+  MCU <-->|"UART4"| BT
+  MCU -->|"TIM14 PA7"| BUZ
+  MCU -->|"DAC0 PA4,<br>TIM12 PB14"| GENB
+
+  classDef inferred stroke-dasharray: 6 4
+  class ATT,GAIN,SW,OUTS inferred
