@@ -3681,3 +3681,64 @@ voltage input with the jacks otherwise open ([cs-diode-v.csv](data/cs-diode-v.cs
   0.02-0.17 V).
 - The capacitor array (R30 ACC<6:0>) is 0 in every stock row and opendm40
   never sets it.
+
+## 46370df: compact LOG:DATA?, 60 mV, auto power-off, USBTMC cut messages, test-current labels (2026-10-24 20:20 - 20:54)
+
+Image 46370df (`*IDN?` `Alientek,DM40A,<UID>,opendm40 0.1`, loader marker VALID). The A jack is not wired;
+V/Ω–COM was open for item 1 and the calibrator's output terminals were on it from item 2 on (output
+disabled except during the 60 mV steps). The owner's settings (volume 50, Danger alarm Loud) were left
+as found. The changes for the tests were set back: V autorange AUTO+, ohm variant default, Burden display OFF,
+`POW:COUP DC`, `LOG:FORMat ROWS`, `DBG:AD2:DRAW 1`, `DBG:IDLE 0` (set again to 20000 for 3b; the power-off clears it). `OUTP?` was 0 throughout. Nothing was written to the meter's
+disk. Scripts and data are in the session scratchpad (`lograte.py` wraps `dm40scpi.py log` and times each
+LOG:DATA? reply; `diskread.py`, `mv60.py`, `mvac.py`, `tmcpartial.py`, `ohmshots.sh`; `run/`, `shots/`).
+
+### Summary
+
+| item | result |
+|---|---|
+| 1a. `log --source ad2 --rate 76800 --format packed -d 30` (USB, AC V, open input, logger panel on) | **PASS with one start-up hole**: lost 0, 2 303 814 of 2 303 993 rows. Ring overwritten 179, all in one block right after the first 2048 samples (t = 29 ms: the panel's first draw). 978 replies/s, 272 kB/s, round trip p50 0.9 ms, p99 2.2 ms, max 27.9 ms |
+| 1b. The same with `--format dlg` | **PASS with one start-up hole**: lost 0, overwritten 275, again one block after sample 2048 at 31 ms. 802 replies/s, 152 kB/s, round trip p50 1.0 ms, p99 1.8 ms, max 27.2 ms |
+| 1c. PACKed with `DBG:AD2:DRAW 0` (no panel), 10 s | **PASS**: overwritten 0, 767 993 rows, 1039 replies/s |
+| 1d. PACKed, panel on, 3 x 5 s | overwritten 159 / 113 / 123, each time one block after sample 2048; nothing later |
+| 1e. Host CSV | 81.5 MB per 30 s session; host CPU 3.5 s (PACKed) and 6.8 s (DLG) per 30 s; the drain keeps up |
+| 1f. Bluetooth, AD1 640 S/s (OSR 0, chop off, DC V), 30 s each | **PASS**: ROWS / PACKed / DLG lost 0, overwritten 0 (19 161 / 19 054 / 19 217 rows). 15.1 / 32.6 / 30.9 replies/s, 7.7 / 3.3 / 3.8 kB/s, round trip p50 66 / 30 / 31 ms |
+| 2a. 60 mV: range page item, `VOLT:RANG 0.05`, `VOLT:RANG MIN`, `CONF:VOLT:AC 0.06` | **PASS**: the "60mV" item selects 0.06 manual (`RANG:AUTO?` 0, display "mV", -0.059 mV open). `VOLT:RANG 0.05` and `MIN` give 0.06. AC 60 mV reads the open-input hum (3.77 mV, 50.07 Hz). No errors |
+| 2b. DC AUTO (mV-first), calibrator mV | **PASS**: 100 mV -> 600 mV. 65.4 / 59.8 / 59.0 mV stay on 600 mV. 58.0 mV -> 60 mV (1.1-2.3 s). 60.4 mV stays on 60 mV. 62.1 / 63.3 mV -> 600 mV (0.6-1.3 s). 30 mV stays on 60 mV |
+| 2c. AC AUTO (mV-first) | **PASS for the steps**: open input (3.2 mV hum): 6 V -> 600 mV -> 60 mV within 1.3 s of entry. 40 Hz square (0 / ~9.5 V) -> 600 mV after 0.7 s. Output off -> 60 mV after 1.2 s. **Two new bugs** (below): with the square applied, AUTO stayed on 600 mV reading 0.606 V for 12 s, and a false A-JACK alarm sounded |
+| 3a. Auto power-off counts USB disk reads (`DBG:IDLE 20000`, a 16 KB file read every 4 s with its page cache dropped, no USBTMC traffic) | **PASS**: the meter stayed on for 68 s past the 20 s limit. DBG:VDISK:RD? went from 9718 to 10893. `DBG:IDLE 0` -> 1800000 (the Shutdown setting) |
+| 3b. The same with no traffic (`DBG:IDLE 20000`, then nothing) | **PASS**: the meter switched itself off 20.5 s later (USB gone). The owner switched it on again. Pending: after the power-on, `DBG:IDLE?` should give 1800000 again (the RAM-only test value gone, the Shutdown setting untouched), and the settings should be intact. The meter was still off when this was written |
+| 4a. `partial` on the device: a dead client's cut message (raw `USBTMC_IOCTL_WRITE`: header TransferSize 150 + 52 bytes, no abort, no clear), new client 1.5 s later | **PASS** 10 / 10: `*IDN?` answered at once, SYST:ERR? 0, no device clear needed |
+| 4b. The same with only 0.3 s between them (inside the 1 s window; control) | as designed, 3 / 3: the new `*IDN?` became the cut message's payload. Its read timed out after 5 s with no error queued, and the next query answered without a clear |
+| 4c. `session`: an earlier client leaves `DBG:NOSUCH:CMD 1` (and every second time a cut message), then a new client `Link.fresh()` | **PASS** 6 / 6: fresh() reported `-113,"Undefined header"` as stale; `*IDN?` and SYST:ERR? clean afterwards. The upload and reload.sh's retry were not run (no flashing) |
+| 5a. Ohm test-current label, default variant, per range | **PASS** against `OHM_ISC` / docs/data/short.csv: 60 Ω "I 0.90 mA" (inferred value), 600 Ω 0.90 mA, 6 k 197 uA, 60 k 20 uA, 600 k 2.2 uA, 6 M 0.22 uA. On 60 M there is no label when entered from DC V. **Bug**: 6 M -> 60 M keeps "I 0.22 uA" (below) |
+| 5b. The "ON" variant (second Ω tap) | **PASS**: 60 Ω 0.90 mA (r0 always uses the default row), 600 Ω 0.28 mA, 6 k 58 uA, 60 k 6.6 uA, 600 k 0.66 uA, 6 M 86 nA. 60 M keeps "86 nA" (same bug) |
+| 5c. Diode label, continuity | **PASS**: diode "I 0.75 mA" (the image predates ce458d6: 0.756 mA measured). Continuity has no label (by design) |
+| 5d. "Overload" next to 0L | **PASS**: shown in ohm (60 Ω .. 60 k with the calibrator output off), diode and continuity, in the readout colour, clear of the unit and the bar |
+| 6. Power wiring dialog (long press on A) | **PASS**: the dialog shows source / load, the COM / V / A jacks, the shunt, arrows on the current path, "COM carries the load current; P > 0: I into A" and "Max 10 A; above 6.0 A: 30 s". Two screenshots 0.8 s apart were identical; one 2.1 s later differed in the wire area (108,61)-(372,191), so the dashes do march. Cancel returned to DC V |
+| 7a. Burden (doc 3.15 check list step 6, the parts without current) | **PASS**: `DISP:BURD ON`: DC A aux1 "Burden 0.00 mV", AC A aux2 "Burden 0.00 mV" (aux1 Hz). OFF: AC A shows the duty "0.0 %" again, DC A aux1 is empty, no stale caption. REL was not run (no SCPI for it). Steps 1-5 and 7 need current |
+| 7b. Power meter V2 (doc 3.17 parts layout, steps 1 / 3 without current, open input) | **PASS**: AC+DC: "DC x V AC y V" / "DC x uA AC y uA" sub-lines, "DC x mW + AC y mW", PF 1.000, S / Q 0, the "DC?" badge. Back to DC: the 3.14 layout with the Vb / VAh rows, no sub-lines left. Step 1's first 4 s showed "--" everywhere while FETC:POW:ALL? already answered zeros. Not investigated. The open A jack read 9.18 uA DC in AC+DC and 0.13 uA in DC (not investigated) |
+| 7c. Power meter round 5 (doc 3.16) | not run: the remaining steps (1, 2, 4, 5, 6's hints-off case) need current through A |
+| 7d. Region A2: taps on the inrush page while armed | **PASS**: `INR ON` -> ARMED. Taps "+" "+" "-" "-" set the threshold 2 / 5 / 2 / 1 A and it stayed ARMED. Cancel -> IDLE, Back -> DC V. DBG:ISR? while armed: late 0, dropped 0, max_lat 14.4 us 3 s after arming (lat_pc 0x0808d59c) and 16.2 us after the taps (lat_pc 0x0808cc54). Those are above the < 2 us of the logger sessions, not chased. The page read "Armed: 0.069 A now" with nothing in A |
+
+### New bugs
+
+1. **False A-JACK alarm from a large AC signal on V-COM in AC V mV-first AUTO.** The meter was in AC V
+   AUTO (mV-first) and had stepped down to 60 mV on the open input. Then the calibrator's 40 Hz square
+   (0 / ~9.5 V) went on V-COM. DBG:SENT:LOG? `AJACK,AD1PK_PB1` came at that time, and the danger alarm
+   sounded (the owner heard it). Nothing was in the A jack. SYST:ALER? was NONE again ~40 s later, after
+   the output was switched off.
+2. **AC V AUTO stuck on 600 mV with the same square applied**: VOLT:RANG? 0.6 and READ? 0.606 V for the
+   12 s the square was on. The square's AC RMS is about 4.7 V (the 6 V range). Whether the A-JACK alert
+   froze the autorange is not known.
+3. **The ohm test-current label stays on 60 M** after a range change from 6 M (both variants): `test_current_label`
+   returns without clearing its box when the range has no value. Entering 60 M from another function
+   shows no label.
+4. **AUTO -> AUTO+ while on 60 mV stays on 60 mV** (VOLT:RANG? 0.06, `RANG:AUTO?` 1, ~0 V input) until
+   the function is entered again. AUTO+ "never steps to mV" but does not leave it either.
+5. **Bluetooth: stale errors on the first connection.** The first `--bt` client of the session found
+   `-113`, `-102`, `-113` in its error queue (a `--conf dcv` log then failed on the stale -102). Three later
+   connections found none. Where they came from is not known.
+
+Observed, not investigated: in continuity, on the calibrator's disabled output, the readout showed 0L
+while MAX / AVG / MIN showed 625.85 Ω. After CONF:RES 6M -> 600, the REL box and the chart axis kept "MΩ"
+for a while (the chart history).

@@ -584,14 +584,19 @@ Code work (in this order):
       opendm40 drops a Bulk-OUT message left incomplete for 1 s (usbtmc::expire_partial, checked every
       main-loop pass and when the next packet arrives).
       emu/usbtmc_stress.py cases `session` (dm40dbg.py's own cmd_upload over USB/IP after a stale error
-      and a cut message; failed with the -113 before) and `partial` (hung before). Not run on the device.
+      and a cut message; failed with the -113 before) and `partial` (hung before). Device 46370df
+      (device-check doc "46370df" 4): a real cut message (raw USBTMC_IOCTL_WRITE, 52 of 150 bytes) then a
+      new client 1.5 s later 10 / 10 clean; 0.3 s later the query is eaten (5 s timeout, recovers alone, as
+      designed); Link.fresh() reports the stale -113 6 / 6. The upload / reload.sh retry not run on the device.
 - [x] Auto power-off during a remote session (device 2026-10-24: the meter switched off during a firmware
       flash over USB): the idle shutdown counts USBTMC messages, Bluetooth SCPI lines / phone-app frames and
       now USB disk READ / WRITE commands (msc::HOST_IO) as activity; the idle dim counts touches and keys
       only (a dimmed screen costs a remote session nothing). DBG:IDLE <ms> / DBG:IDLE? (test power-off
       time, idle times); emu/idletest.py (usb, bt, msc keep it on for 40 s past a 20 s power-off time,
-      off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Not run on the
-      device.
+      off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Device 46370df
+      (device-check doc "46370df" 3): DBG:IDLE 20000 + a disk read every 4 s, no USBTMC: on 68 s past the
+      limit; with no traffic off 20.5 s after DBG:IDLE 20000.
+      Pending: DBG:IDLE? = 1800000 and the settings after the power-on (the meter was left off).
 - [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
       is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
       range), switching the range / divider only where the next step needs it.
@@ -1068,6 +1073,7 @@ Firmware:
         AC y W" under P, from the measured LPF / RMS / X*Y parts with the AC floors and "@load" per part; main
         readout +7 px, lower row +17, chart 81 px from 192, side column without VAh, in AC+DC only (every other
         page pixel-identical). ui-render p26..p29, touch-test both layouts.
+        Device 46370df (device-check doc "46370df" 7b, open jacks): steps 1 / 3 layout PASS; steps 2 / 4 need current.
         - [ ] Verify on device: the check list of doc §3.17.
               Device 5e52761 (no current): sub-lines under V / I / P, tap to Wh / VAh empties the P line, back
               to DC with no leftover pixels: PASS. Cosmetic: a coupling switch keeps the old layout / values for
@@ -1374,7 +1380,7 @@ Firmware:
       (33.3 -> 37.8 without ad2-isr), C 10.1 -> 17.8 KB (12.2 -> 19.9).
 - [x] Device check of region A2 (device 5e52761: marker VALID = the image header, INFO/FIRMWARE.BIN = the
       installed file byte for byte, logger panel text correct, max_lat 0.28 / 0.30 us at AD2 38400 with the
-      panel, 0 lost; the inrush taps while armed not run): install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
+      panel, 0 lost; the inrush taps while armed: device 46370df, threshold +/- taps and Cancel while ARMED work, late 0 / dropped 0, max_lat 14-16 us while armed, not chased): install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
       the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
       A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
       the inrush page while armed (App::tap now in B).
@@ -1526,7 +1532,7 @@ Firmware:
       p5.py Wave view 1 / 2 ms/div: max_lat 280 / 260 ns, dropped +0, 0 / 0 / 0. The range commands answer
       (VOLT:RANG? / 60 / SENS:VOLT:RANG:AUTO ON / VOLT:RES? / CURR:DC:RANG? = +9.91E37 + "Settings conflict"
       while in V, as documented).
-- [ ] 76.8 kS/s to the host in real time: `LOG:FORMat ROWS|PACKed|DLG` (branch feat/log-format; logger.rs
+- [x] 76.8 kS/s to the host in real time: `LOG:FORMat ROWS|PACKed|DLG` (branch feat/log-format; logger.rs
       "Compact LOG:DATA?"). PACKed = 3 B per sample on the grid t0 + i / rate, a new block (own seq, t0,
       lost_before) at every sample more than half a period off the grid; DLG = the disk fast stream's kind-3
       chunks (fastenc.rs `FastEnc`) in a 4 KiB FIFO of the reply buffer. Host: `dm40scpi.py log --format`,
@@ -1550,6 +1556,13 @@ Firmware:
       Device check (untested on the meter): AC V 40 Hz square, LOG:SRAT 76800, `dm40scpi.py log --source ad2
       --rate 76800 --format packed -d 30` and `--format dlg`: lost 0 / overwritten 0 in the summary, the
       replies/s; the first blocks' lost_before (the panel); the same over Bluetooth at AD1 640 S/s.
+      **Device 46370df (device-check doc "46370df" 1, open input instead of the square):** PACKed / DLG
+      30 s lost 0, 978 / 802 replies/s (round trip p50 0.9 / 1.0 ms, max 28 ms), host CPU 3.5 / 6.8 s per
+      30 s; the only hole is one block of 113-275 samples overwritten right after the first 2048 (t 29-31
+      ms, the logger panel's first draw; none with DBG:AD2:DRAW 0). Bluetooth AD1 640 S/s ROWS / PACKed /
+      DLG lost 0, 15 / 33 / 31 replies/s.
+- [ ] 76.8 kS/s host stream: the logger panel's first draw overwrites 113-275 samples once at the start of
+      every session (device 46370df). Split that draw or hold the panel until the drain has run once.
 - [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
       CURRent in [SENS:]<q>:RANG / :RANG:AUTO / :RES is the quantity in any coupling (scpi.rs `ANY_CPL`; DC, AC,
@@ -3405,5 +3418,14 @@ Emulator (emu/):
 - [x] 7. 60 mV (DC / AC mV r0): on the range page ("60mV"), SCPI (VOLT:RANG 0.06 / MIN), and the
       mV-first AUTO steps 600 mV -> 60 mV below 58.3 mV, back above 61.8 mV (the stock factors;
       the stock has the row, no item and only up-steps in mV). emu/hy3131/mvrangetest.py.
-      AUTO+ never enters mV (unchanged). Untested: on the device; the Wave view opened on 60 mV
-      (its V/div steps start at 600 mV).
+      AUTO+ never enters mV (unchanged). Device 46370df (device-check doc "46370df" 2): range page item,
+      VOLT:RANG 0.05 / MIN, AC 60 mV, DC AUTO 58.0 mV down, 60.4 / 59.0 mV stay, 62.1 mV up, AC AUTO down on
+      the hum and up on a square: PASS. Untested: the Wave view opened on 60 mV (its V/div steps start at
+      600 mV).
+- [ ] 60 mV follow-ups (device 46370df, device-check doc "46370df" new bugs 1, 2, 4): a 40 Hz 0 / 9.5 V
+      square on V-COM in AC V AUTO (mV-first, from 60 mV) tripped a false A-JACK (AD1PK_PB1, the danger
+      alarm sounded) and AUTO stayed on 600 mV reading 0.606 V for 12 s; AUTO -> AUTO+ on the range page
+      while on 60 mV stays on 60 mV until the function is entered again.
+- [ ] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
+      its box; device 46370df, both variants). The labels on the other ranges, diode 0.75 mA and "Overload"
+      next to 0L: PASS on the device.
