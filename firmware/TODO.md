@@ -3501,7 +3501,7 @@ Emulator (emu/):
       raises A-JACK** (badge only, no sound) with 5 V, 10 V DC and the square on V-COM: the jack check reads
       OP1O peaks of 2139-2140 mV (5 V, AUTO on 60 MΩ), 2249-2251 mV (5 V, 600 Ω), 2019-2030 mV (10 V),
       2132-2133 mV (square, AUTO), all under the 2.35 V "driven" line, so the verdict is "free" and A-JACK
-      stays for the whole 10 s. Only the square on manual 600 Ω read 2381 mV (driven, LIVE?, no A-JACK).
+      stays for the whole 10 s. Only the square on manual 600 Ω read 2381 mV (driven: no A-JACK, alert NONE).
       So OP1O does not swing above ~2.35 V for a source on V-COM; it sits near the ohm row's own open level
       (600 Ω open: 2.17 V, doc 4.13), and a fixed threshold cannot split them on 600 Ω (inferred). Continuity
       (LIVE?, 974-1760 mV) and AC mV (V_GATE driven, no A-JACK) pass; RES at 1 / 3 V: no PB1 hits. Not run:
