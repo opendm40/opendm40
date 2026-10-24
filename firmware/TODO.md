@@ -544,6 +544,9 @@ Code work (in this order):
       steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (5ba89b3; verify on device)
 
 ## Backlog (user ideas)
+- [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
+      is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
+      range), switching the range / divider only where the next step needs it.
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
       tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; device 0667175: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
