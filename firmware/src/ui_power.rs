@@ -467,6 +467,52 @@ fn vwire(x: i16, y0: i16, y1: i16) {
     lcd::fill_rect(x as u16, y0 as u16, 2, (y1 - y0) as u16, WIRE);
 }
 
+/// The current path of the wiring dialog, in the direction of the current
+/// (the "< I" labels' convention: P > 0, the load current into A): wire
+/// runs (x, y, dx, dy, len) as drawn by `hwire` / `vwire` (2 px), x / y the
+/// first pixel, (dx, dy) the step. SOURCE + -> LOAD +; (the load) LOAD -
+/// -> A; (the meter) COM -> SOURCE -.
+const FLOW_PATH: [(i16, i16, i16, i16, i16); 5] = [
+    (108, 69, 1, 0, 264),
+    (371, 155, -1, 0, 73),
+    (299, 156, 0, 1, 19),
+    (179, 174, 0, -1, 20),
+    (180, 155, -1, 0, 73),
+];
+/// Marching dashes on the path: on / period (px), colour; the dashes move
+/// FLOW_STEP px per frame (`entry_anim`, 10 fps: 30 px/s).
+const FLOW_ON: i16 = 6;
+const FLOW_P: i16 = 14;
+const FLOW_STEP: u32 = 3;
+const FLOW: Color = 0xFFFF;
+
+/// Dash phase `ph` (frames) of the wiring dialog's current path: the wires
+/// of FLOW_PATH repainted as runs of WIRE and FLOW (about 450 px x 2).
+pub fn entry_anim(ph: u32) {
+    let off = ((ph * FLOW_STEP) % FLOW_P as u32) as i16;
+    let mut s = 0i16; // distance along the path at a run's first pixel
+    for &(x, y, dx, dy, len) in FLOW_PATH.iter() {
+        let mut i = 0;
+        while i < len {
+            // Run of equal colour from pixel i.
+            let on = |k: i16| (s + k - off).rem_euclid(FLOW_P) < FLOW_ON;
+            let c = on(i);
+            let mut j = i + 1;
+            while j < len && on(j) == c {
+                j += 1;
+            }
+            // Pixels i..j-1 along (dx, dy): a rect from the lower corner.
+            let (a, b) = (i.min(j - 1), i.max(j - 1));
+            let (x0, x1) = if dx < 0 { (x - b, x - a) } else { (x + a * dx, x + b * dx) };
+            let (y0, y1) = if dy < 0 { (y - b, y - a) } else { (y + a * dy, y + b * dy) };
+            let (w, h) = if dx != 0 { (x1 - x0 + 1, 2) } else { (2, y1 - y0 + 1) };
+            lcd::fill_rect(x0 as u16, y0 as u16, w as u16, h as u16, if c { FLOW } else { WIRE });
+            i = j;
+        }
+        s += len;
+    }
+}
+
 /// The power-meter entry dialog (a modal overlay, dialog.rs): the wiring of
 /// doc 3.6 (V/ohm on the source side, the return conductor broken through
 /// A and COM), the sign convention, the current rating, Cancel / OK.
@@ -501,6 +547,9 @@ pub fn entry_dialog(i_cont: f32, t_lim: u16) {
     sf::label(sf::F14, rect(120, 137, 50, 14), "< I", STATUS_FG, DLG_BODY, 0, 1);
     sf::label(sf::F14, rect(306, 137, 64, 14), "< I in A", STATUS_FG, DLG_BODY, 0, 1);
     sf::label(sf::F14, rect(250, 80, 116, 14), "V: source side", DIM, DLG_BODY, 0, 1);
+    // The current path: marching dashes (moved by `entry_anim` while the
+    // dialog is open).
+    entry_anim(0);
     // Notes: what COM carries, the sign, the rating.
     let mut t = T::new();
     let mut b = [0u8; 16];
