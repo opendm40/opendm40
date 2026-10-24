@@ -2527,6 +2527,30 @@ Firmware:
             7. PASS for RES -> A / mA (70 switches, 1 / 5 V). A-JACK in RES at 5 V (known) now from 0.46 s.
                **New: 0.5 s V-JACK? at 8.06 s after A / mA -> Scope -> DMM at 5 V** (ctsta 0x70 tail to 7.75 s,
                past the 7 s cap; 612c45c 6.34 s).
+            **Fixed on branch fastswitch2 (docs/switch-latency.md 6.2; each with a test that fails on ab7184c):**
+            ohm hunt vet (a conversion is final only when the one before it on the same ohm row agrees within
+            0.1 % + 8 counts; grey before; ohmhunt.py with the model's `ohmtau`), FETCh? +9.91E37 at once while
+            AUTO decides (autowaittest ac-fetch / dc-fetch), HOLD before the first settled reading armed: HOLD
+            label at once, holds the first decided value (ac-hold, meter-test), the RES / restart V-JACK? mask
+            ends 1 s after the last 0x70 (max 12 s; switchtest ohmexit-long with a SCOPE step), the
+            placeholder follows CONF's range (a10-unit / ma-unit). New `DBG:READout?`.
+            **Device retest of fastswitch2** (calibrator 390 / 100 ohm and, if at hand, real 100 ohm / 4.7 kohm /
+            10 Mohm resistors; RATE FAST and MED; settle.py / shots2.py / extra.py of chk6):
+            1. DC V -> RES on each resistor: no amber value and no FETC? / READ? answer off the final one by more
+               than 0.1 % (the 8.8 / 7.1 / 12 Mohm and 219 / 126 / 57 / 30 ohm of ab7184c may still appear, but
+               grey); `CONF:RES;:READ?` answers the right value (MED: ~2-2.5 s, never "Data stale"); first right
+               value expected ~0.1-0.4 s later than ab7184c's (one vet conversion). Real resistors vs the
+               calibrator: whether the wrong values come from the meter or from the simulator's lag (log
+               DBG:READout? every 20 ms: grey values and their times).
+            2. `VOLT:COUP AUTO` on the 10 / 40 Hz square, FETC? every 0.1 s: +9.91E37 within ~10 ms each until the
+               decision, then the value; MEAS:VOLT:AUTO? / READ? as before (1.28 / 3.45 / 3.91 s).
+            3. RUN at 1 s after `VOLT:COUP AUTO` (10 Hz square): "HOLD" in the status bar at once, the grey value
+               keeps moving, the decided value (amber) appears and then stays frozen; RUN again releases it.
+               DBG:READout? shows G,..,1 then F,..,1.
+            4. A / mA -> Scope -> DMM with 5 V on V-COM, 10 times (seqE): no V-JACK? (ab7184c: 0.5 s at 8.06 s);
+               DBG:SENT? ctsta: note the end of the 0x70 tail (7.75 s on ab7184c). A real V-JACK? source (24 V on
+               V in DC A after RES): V-JACK? within ~2 s if it reads CMPHO alone, else by ~13 s.
+            5. `CONF:CURR:DC 10` from DC V: the placeholder shows "A" from the first frame (shots2.py).
 - [x] Burden voltage in the A / mA / uA modes (as the EEVblog 121GW, owner 2026-10-22): I * R_path of the
       shunt in use in the aux row, "Burden" caption: DC A aux1 (signed), AC A aux2 instead of the duty
       (RMS); none in AC+DC (both rows hold the parts) and in the power meter (its own At-load line). R_path

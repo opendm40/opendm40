@@ -274,3 +274,75 @@ same as ad74e93): DC V -> AC V 460-462 ms, AC V -> DC V 457-460 ms, DC V ->
 RES 2672 ms, RES -> DC V 554-558 ms, DC V -> A 758 ms, DC V -> mA 557-559
 ms, AC V -> AC+DC 1372-1377 ms, DC V 6 -> 60 V 509-557 ms. Retest steps:
 TODO.md "Switch latency".
+
+### 6.2 Device ab7184c follow-up (branch fastswitch2, 2026-10-24)
+
+The device check of ab7184c (device-check-2026-10-21.md "ab7184c: switch
+latency on the device") found five bugs. Each has an emulator / host test
+that fails on the ab7184c code (rust-fw-poc 7bd7f6f, plus only the
+DBG:READout? query where the test needs it) and passes after the fix.
+
+1. **Ohm hunt values shown / sent as final** (dmm.rs `poll_ohm`, OHM_VET_*).
+   After every ohm row write (the entry, each autorange step, a manual
+   range) a conversion is final only when the one before it on the same row
+   agrees within 0.1 % plus 8 counts of the range (two OL agree); until then
+   it is provisional (grey, `Reading::prov`: no SCPI, BT, statistics,
+   limits, REL). Once a row is vetted its conversions are final. The
+   provisional ones still pass the sentinel / watchdog (`prov_side`, as
+   AUTO's G7: LIVE? / A-JACK keep their timing) and restart the averager.
+   The first in-range conversion is now the vet's reference instead of a
+   150 ms wait. READ? / MEAS:RES? after the host's change: the settle wait
+   follows the hunt's deadlines (main.rs, as the power meter's), at most
+   8 s. Emulator: knob `ohmtau:ms` (the ohm node relaxes to its value after
+   each ohm row change; 150 ms chosen, not measured) reproduces the device
+   shape: ab7184c answers FETC? / READ? 302 ohm for 390, 81 for 100, 4541
+   for 4.7 k, 9.71 M for 10 M. `emu/hy3131/ohmhunt.py`: every FETCh?, READ?
+   and amber readout value within 0.5 % of the final one. fastswitch2, first
+   final FETCh? with `ohmtau:150` (the vet waits out the lag; ab7184c
+   answered the wrong value at 1.05 / 1.30 s): 390 ohm FAST 1.82 / MED
+   2.52 s, 100 ohm 1.72 / 2.12 s, 4.7 kohm MED 2.37 s, 10 Mohm MED 1.75 s,
+   `CONF:RES;:READ?` 390 ohm 1.84 / 2.55 s, the grey values sampled before;
+   without the lag 4.7 kohm MED 1.17 s (ab7184c 1.15 s): the vet costs
+   nothing when consecutive conversions already agree.
+2. **FETCh? while AUTO decides** (main.rs `Out::Fetch`): +9.91E37 at once
+   (no wait, no error) while nothing settled is shown in AUTO; READ? /
+   MEAS? keep AUTO_WAIT_MS. autowaittest ac-fetch / dc-fetch: ab7184c
+   blocked 0.9-2.0 s and answered the DC part (0.1999 V) of a 1 V AC +
+   0.2 V DC input; now +9.91E37 in < 0.25 s at every poll, the decided
+   value afterwards.
+3. **RUN (HOLD) while AUTO decides** (meter.rs `update`, app.rs
+   `shown_reading`). The decision never stalled (VOLT:COUP? AUTO,AC on
+   ab7184c in the emulator); the readout did: HOLD with nothing shown froze
+   the draw, so neither the HOLD label nor the decided value appeared. Now
+   HOLD pressed before the function's first settled reading is armed: the
+   grey provisional value / placeholder stays live under the HOLD label,
+   and the first settled reading is shown and held (no statistics).
+   autowaittest ac-hold (DBG:READout? kind and hold state, FETC?; ab7184c:
+   "N" with hold 1 for 8 s), meter-test
+   `hold_before_the_first_reading_holds_it`, ui-render sw15.
+4. **V-JACK? flicker at 8.06 s after A / mA -> Scope -> DMM** (sentinel.rs
+   OHM_EXIT_*). The 7 s cap now slides: a 0x70 read inside the window moves
+   its end to 1 s after it (OHM_EXIT_QUIET_MS), at most 12 s after the
+   event (OHM_EXIT_MAX_MS); row writes after the same event keep the slid
+   end. Why the tail is longer since the fast-switch builds (7.75 s vs
+   6.34 s on 612c45c) is not known: the emulator can only replay it. Cost:
+   a source that reads 0x70 steadily gets V-JACK? ~13 s after the switch
+   (was ~8 s); CMPHO alone keeps ~2 s. Emulator: `ohmexitrst:1` starts the
+   ohmexit trace at a chip reset too; switchtest `ohmexit-long`
+   (`ohmexit:7.75;ohmexitlo:0.26`, 5 V on V, a new SCOPE step: MENU ->
+   Oscilloscope -> MENU -> Multimeter): ab7184c logs V-JACK? at +7.90-8.05 s
+   in all four A entries (two after the Scope page, two after RES), as the
+   device. The model's ohmexit trace had stopped firing on RES -> A (fw-rs
+   quiesces before the relay pulse, so the row role was None at the pulse;
+   the older `ohmexit` scenarios passed without seeing a tail): it now
+   counts the last real role. meter-test: the 7.75 s tail with row
+   rewrites (no V-JACK?), a steady 0x70 (V-JACK? after 12 s).
+5. **Placeholder unit after `CONF:CURR:DC 10`** (app.rs `prov_follow`): the
+   placeholder follows a range / unit change made before the first reading
+   (at the end of CONF and on every tick). autowaittest a10-unit / ma-unit
+   (DBG:READout? in the CONF's own message and for 1.2 s; ab7184c: "mA"
+   in the first three reads).
+
+`DBG:READout?` (new): kind,unit,value,hold of what the DMM readout draws
+(P placeholder, G grey, F final, N none). Device retest: TODO.md "Switch
+latency", "Device retest of fastswitch2".

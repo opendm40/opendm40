@@ -178,8 +178,10 @@ SC = {
     # decided by a transient).
     'sqtie': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 50, [
         (0, 'open;acv:4.776@40,dc=4.776,shape=square', lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 'square: either part (a tie)'),
-        (16, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 're-enter on the square'),
-        (32, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and near(d['V'], 4.776, 0.01), 're-enter on the square'),
+        # (a re-entry on a tie may still be deciding at the check (~10 s): FETCh? is +9.91E37
+        # until AUTO's first decision, switch-latency.md 6.2)
+        (16, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], 4.776, 0.01) or d['V'] > 9e37 or math.isnan(d['V'])), 're-enter on the square'),
+        (32, None, lambda d: d['C'] in ('AUTO,AC', 'AUTO,DC') and (near(d['V'], 4.776, 0.01) or d['V'] > 9e37 or math.isnan(d['V'])), 're-enter on the square'),
     ], {16: 'VOLT:COUP DC', 17: 'VOLT:COUP AUTO', 32: 'VOLT:COUP DC', 33: 'VOLT:COUP AUTO'}),
 }
 EXTRA = {'tap': ['CURR:COUP?'], 'sqtie': ['DBG:ACDC:STAT?'], 'iac': ['SYST:ALER?', 'CONF?'], 'idc': ['SYST:ALER?', 'CONF?'], 'vac230': ['CONF?'], 'iacfill': ['SYST:ALER?', 'CONF?']}
