@@ -27,7 +27,7 @@
 //! header): a log of a moving average would hide the spread and lag steps,
 //! and the time column would no longer be the time of the value.
 //!
-//! Interval mode (Record page, docs/decisions-2026-10-22.md #1; `set_next`
+//! Interval mode (Record page, ../docs/history/decisions-2026-10-22.md #1; `set_next`
 //! before `start`, also for the swipe-down REC and LOG:CSV ON): one row per
 //! interval I (1 s / 10 s / 1 min) instead of per reading. Interval k covers
 //! readings at [(k-1) I, k I) from the start; its row has time_s = k I (the

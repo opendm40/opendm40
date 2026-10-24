@@ -1356,7 +1356,7 @@ impl Logger {
 
 /// The stream ISR (feature `ad2-isr`; AD2, and AD1 unchopped at 160 .. 640 S/s with
 /// R00..R02 / AD1F in place of R03..R05 / AD2F, CPU frames at /16, the
-/// timer at 20 ns << KSH per count; docs/decisions-2026-10-22.md #3,
+/// timer at 20 ns << KSH per count; ../docs/history/decisions-2026-10-22.md #3,
 /// docs/dmm-input-scope-feasibility.md 10): TIMER6 (STM32 TIM7, IRQ 55, the
 /// only interrupt opendm40 ever enables), phase-locked to the HY3131's
 /// conversion grid by src/ad2pll.rs. Entry A, once per conversion period,

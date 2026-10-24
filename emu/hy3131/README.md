@@ -13,11 +13,11 @@ emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / 
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + opendm40 through every DMM mode in the emulator, results below
 emu/hy3131/powtest.py     opendm40 power meter end to end over USB/IP (firmware/docs/power-meter-and-misconnect.md 3.11)
-emu/hy3131/couptest.py    opendm40 AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (firmware/docs/acdc-stock-vs-opendm40.md 11)
-emu/hy3131/autorangetest.py opendm40 DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; firmware/docs/acdc-stock-vs-opendm40.md 12)
+emu/hy3131/couptest.py    opendm40 AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (docs/history/acdc-stock-vs-opendm40.md 11)
+emu/hy3131/autorangetest.py opendm40 DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; docs/history/acdc-stock-vs-opendm40.md 12)
 emu/hy3131/mvautotest.py  opendm40 V autorange around the mV ranges: AUTO -> AUTO+ on 60 mV leaves mV at once, AC V AUTO (mV-first) under a square the mV input clamps (mvclamp / mvpb1, device 46370df) up to 6 V and back
 emu/hy3131/switchtest.py  opendm40 misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
-emu/hy3131/ohmhunt.py      opendm40 ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; firmware/docs/switch-latency.md 6.2)
+emu/hy3131/ohmhunt.py      opendm40 ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; docs/history/switch-latency.md 6.2)
 emu/hy3131/autowaittest.py opendm40 READ? / MEAS? / FETCh? and HOLD while AUTO coupling decides, the placeholder unit after CONF (switch-latency.md 6, 6.2)
 emu/hy3131/ad2streamtest.py opendm40 AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (firmware/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    opendm40 DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
@@ -167,7 +167,7 @@ Chip (datasheet DS-HY3131-V10):
 * Noise: Gaussian, 25 AD1 counts at OSR 32768 scaled by 1/sqrt(OSR) (acdc doc
   6c), RMS floor 30 counts; `noise:0` turns it off (deterministic seed).
 * Empirical, optional: the AD2/AD3 enable-order beat of
-  [`firmware/docs/acdc-stock-vs-opendm40.md`](../../firmware/docs/acdc-stock-vs-opendm40.md) 10 (`beat:1`; off by default: the stock's
+  [`docs/history/acdc-stock-vs-opendm40.md`](../../docs/history/acdc-stock-vs-opendm40.md) 10 (`beat:1`; off by default: the stock's
   emulated SPI skew is not the real one).
 
 Board (DM40, from the stock rows and formulas): the input terminals are a

@@ -4816,7 +4816,7 @@ impl App {
                 out.put_bytes(if pb12 { b",PB12=1" } else { b",PB12=0" });
                 Some(())
             }
-            // Comparator trigger (hwtrig.rs, docs/hwtrig-integration.md H8);
+            // Comparator trigger (hwtrig.rs, ../docs/history/hwtrig-integration.md H8);
             // a scope command: the scope rail is on for it (calibration).
             C::DbgHwTrig(op, on) => {
                 let hw = &mut self.scope.hw;

@@ -14,8 +14,9 @@ This page is about hardware only: chips, pins, circuits. Flash layout and boot
 chain: see [firmware/docs/native-boot.md](../firmware/docs/native-boot.md) (and
 [`fsloader-install-trigger.md`](../firmware/docs/fsloader-install-trigger.md), [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md)).
 
-No schematic of the DM40 is public. Facts are verified unless marked
-*inferred* or listed under [Unknowns](#unknowns). The pointer after a fact
+No schematic of the DM40 is public. Facts without a mark are stated by the
+source after them; the rest are marked *inferred* or listed under
+[Unknowns](#unknowns). The pointer after a fact
 says where to check it: stock code (RE headers in
 [`stock/re/analysis/`](../stock/re/analysis)), opendm40 code, a photo or a
 datasheet. *Inferred*: deduced from register settings, scaling constants, the
@@ -147,7 +148,7 @@ scope, generator) shares one ground.
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (*inferred*, chat report [#41820](https://t.me/S2084K/41820)) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is *inferred* from the markings |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47 ohm (MELF 0207, *inferred*; uA shunt 0.5 + 47 = 47.5 ohm) | 0.5 ohm: marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and opendm40 checks (below) |
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM only |
-| Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); rating unknown |
+| Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); one 10 A ceramic fuse for all shunts by the Alientek DM40 manual (not in the repo) |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
 | Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, [`scope_gen_v2_6.h`](../stock/re/analysis/scope_gen_v2_6.h) |
 | Scope op amp | "8091" (Gainsil [GS8091](datasheets/gainsil-gs8091.pdf)?) | BOM only, after gadefox in the EEVblog thread |
@@ -200,7 +201,9 @@ updates.
   ([`firmware/src/board.rs`](../firmware/src/board.rs), [`firmware/src/lcd.rs`](../firmware/src/lcd.rs), [`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h)).
 - FSMC timing as the stock: BCR1 0x5091, BTR1 0x0F04, BWTR1 0x0FF00201
   (device read-back, [`firmware/TODO.md`](../firmware/TODO.md) T1).
-- Pixel format RGB565 on writes; reads return RGB666 ([`lcd.rs`](../firmware/src/lcd.rs)).
+- Pixel format RGB565 on writes. A GRAM read returns one dummy word, then
+  RGB666 at 3 bytes per pixel, packed big-endian into the 16-bit words
+  ([`lcd.rs`](../firmware/src/lcd.rs)). The ID register 0xD3 reads `00 94 88` on this unit.
 - Backlight: PA6 AF9 = TIM13_CH1, 20 kHz PWM ([`board.rs`](../firmware/src/board.rs)).
 - Panel: 3.5" IPS 480 x 320 (review). The panel's FPC pinout is unknown.
 
@@ -225,7 +228,7 @@ updates.
   the power path) is unknown.
 - **PA2**: the "TX" pad of the debug header. The Alientek primary bootloader and the FS-loader enable a
   pull-up on PA2 and poll it ~1000 times each at boot; low for the whole poll
-  sends the boot to the FS-loader's install state ([`firmware/docs/fsloader-install-trigger.md`](../firmware/docs/fsloader-install-trigger.md) 1). PA2 is not the power key.
+  sends the boot to the FS-loader's install state ([Boot decision chain](../firmware/docs/fsloader-install-trigger.md#boot-decision-chain)). PA2 is not the power key.
   See [Debug header and hardware recovery](#debug-header-and-hardware-recovery).
 - **Buzzer**: PA7 AF9 = TIM14_CH1 PWM,
   200 MHz / 5 / 11200 = 3.57 kHz, loudness = duty
@@ -291,7 +294,7 @@ bootloader and the FS-loader before the application runs.
    then press "update" on the screen.
 5. Remove the short.
 
-Not verified yet: the exact timing, i.e. whether the short must be in place at power-on
+Untested: the exact timing, i.e. whether the short must be in place at power-on
 (as written above) or also works when applied during a reset, and how long
 it must be held.
 
@@ -301,7 +304,10 @@ recovery, the double-hang rule) are in [README.md, Recovery](../README.md#recove
 ## USB
 
 USB-C, USBFS only: DM PA11, DP PA12 (AF10). No VBUS sensing (PA9/PA10, the
-usual VBUS/ID pins, drive the relay) ([`firmware/src/usb.rs`](../firmware/src/usb.rs)). The USB port
+usual VBUS/ID pins, drive the relay) ([`firmware/src/usb.rs`](../firmware/src/usb.rs)).
+GSNPSID reads 0 on this GD32; GRSTCTL.AHBIDL shows that the USBFS core is
+clocked. A core reset keeps the D+ pull-up, so the host sees no disconnect:
+the firmware drives PA11 / PA12 low for 100 ms to force one. The USB port
 also charges the battery ([TP4056](datasheets/toppower-tp4056-cn.pdf)). USB data and the DMM are galvanically
 separate ([Isolation boundary](#isolation-boundary)); USB ground is the MCU,
 scope and generator ground (*inferred*).
@@ -338,7 +344,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Block | What | Rates on the DM40 |
 |---|---|---|
 | AD1 | 24-bit sigma-delta, IG 0.9..3.6, reference PB6 (1.25 V) or internal | AD1CLK = SYSCLK / 30; OSR 256..32768. Stock steady 32768, moving 8192 ([`firmware/src/dmm.rs`](../firmware/src/dmm.rs)) |
-| AD2 / AD3 | 19-bit fast converters, shared clock and OSR | 76.8 kS/s in the stock AC rows (SYSCLK / 2 / 32); ladder down to 600 S/s ([`dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 1.1) |
+| AD2 / AD3 | 19-bit fast converters, shared clock and OSR | 76.8 kS/s in the stock AC rows (SYSCLK / 2 / 32); ladder down to 1200 S/s; chopping (ENCHOPAD2) does not change the rate (one unit, device 9dd1222; [`dmm-input-scope-feasibility.md`](../firmware/docs/dmm-input-scope-feasibility.md) 1.1) |
 | RMS / LPF | digital true RMS (sum X^2 or X*Y) and low-pass of AD2 | ~106.7 ms per result measured with LPFBW 111 (half the datasheet formula, [`RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8) |
 | Peak hold | on AD2, AD1<23:5> or LPF | used by opendm40's A-jack probe ([`firmware/src/sentinel.rs`](../firmware/src/sentinel.rs)) |
 | Comparator | window comparator, thresholds from R21; output CMPO / CMP pin | continuity beeper, capacitance ramp, frequency, opendm40 sentinels |
@@ -348,7 +354,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 AD1 on a periodic input aliases (the "AD1 beat"): see `firmware/docs/dc-aliasing.md` (on branch `dcalias`, not merged yet).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../firmware/docs/acdc-stock-vs-opendm40.md)).
+of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md)).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
 [`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
@@ -356,7 +362,7 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
 | MCU pin | Function | Notes |
 |---|---|---|
 | PA9 / PA10 | [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) latching relay, 10 ms pulse. Arg 0: PA10 = 1, PA9 = 0; arg 1: PA10 = 0, PA9 = 1 | V/A path vs the ohm / mV network. One latching relay with a single coil driven in either polarity is *inferred* from the drive pattern (one relay in the photos; the BOM says DPDT, 3 V, latching); the drive crosses the isolation (optocouplers, *inferred*) |
-| PE0 / PE1 | shunt MOSFETs: PE0 = 1 -> A (10 mohm), PE1 = 1 -> mA (0.5 ohm), both 0 -> uA (47.5 ohm chain) | the resting state in every non-current mode is both 0 ([`power-meter-and-misconnect.md`](../firmware/docs/power-meter-and-misconnect.md) 4.1) |
+| PE0 / PE1 | shunt MOSFETs: PE0 = 1 -> A (10 mohm), PE1 = 1 -> mA (0.5 ohm), both 0 -> uA (47.5 ohm chain) | the resting state in every non-current mode is both 0 (the stock rows in [`hy3131_tables.rs`](../firmware/src/hy3131_tables.rs); a user report, [#59918](https://t.me/S2084K/59918)) |
 | PC7 | 1 only in the frequency mode (mode 14) | what it switches is unknown |
 
 ![HFD4/3-LS relay and a 07D681K varistor](photos/relay-hfd4-and-varistor-closeup.jpg)
@@ -586,8 +592,9 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    BOM and the photos.
 2. Which rail(s) hold the power on: PE2, PC4 or both; how the power key turns
    the unit on from off. [`firmware/src/boot.rs`](../firmware/src/boot.rs) and [`native-boot.md`](../firmware/docs/native-boot.md) (shim
-   steps) treat PE2 as the power hold; [`native-boot.md`](../firmware/docs/native-boot.md) section 1 (older text)
-   says no self-hold GPIO is evident and calls it unverified.
+   steps) treat PE2 as the power hold. The ROM bootloader drives PE2 and PC4
+   high at every reset (`0x08000574`), and the loader's and the stock app's
+   power-off path drives both low; their role as the hold is *inferred*.
 3. Whether anything else on the board drives PA2.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
@@ -595,7 +602,7 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 5. Charge status pins: [`dmm_v2_6.h`](../stock/re/analysis/dmm_v2_6.h) says the stock shows the charging icon
    when PB10 = 1 and PB11 = 0; [`bt_meas_v2_6.h`](../stock/re/analysis/bt_meas_v2_6.h) and [`firmware/src/power.rs`](../firmware/src/power.rs) use
    PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
-6. Fuse rating and type (A input), and whether there is a separate mA fuse.
+6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the
    buzzer is driven (PA7 and the HY3131 CMP pin) across the isolation.
