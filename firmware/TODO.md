@@ -596,7 +596,7 @@ Code work (in this order):
       off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Device 46370df
       (device-check doc "46370df" 3): DBG:IDLE 20000 + a disk read every 4 s, no USBTMC: on 68 s past the
       limit; with no traffic off 20.5 s after DBG:IDLE 20000.
-      Pending: DBG:IDLE? = 1800000 and the settings after the power-on (the meter was left off).
+      After the power-on: DBG:IDLE? 1800000, settings from the file (seq 71), volume 50, alarm LOUD.
 - [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
       is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
       range), switching the range / divider only where the next step needs it.
