@@ -2021,10 +2021,10 @@ of old and new parts (device check
 [46370df](../../firmware/docs/device-check-2026-10-21.md#46370df-screenshot-preparation-the-768-kss-nominal-ee28b71-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
 files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
 each new or changed file its own new entry. The meter cannot make Linux drop
-the old parts: for a file it already knows, Linux does not read the
-directory entry again while the drive is mounted (inferred from the kernel
-sources: `fs/fat`, `block/disk-events.c`; not tested with a changed date or
-entry).
+the old parts: Linux re-reads the folders, but keeps what it already knows
+about a file it has seen (its entry and its data) while the drive is mounted
+(inferred from the kernel sources: `fs/fat`, `block/disk-events.c`; not
+tested with a changed date or entry).
 
 To get a current copy, do one of these first:
 

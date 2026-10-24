@@ -2380,8 +2380,9 @@ Firmware:
             76 799.016 (`Logger::nominal_mhz` = 1e12 / the rounded 13 021 ns period), ACQ:SRAT? / the Wave view
             76 800 (`ad2_rate_mhz(0)`), 12.8 ppm apart. Fixed: `Logger::plan` keeps the chip rate
             (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`, the stream ISR's), so LOG:PRE? nominal_mhz is
-            76 800 000 and the headers 76800.000 (AD1 rungs likewise: 640.000, not 639.795 from 1563 us).
-            meter-test `nominal_is_the_chip_rate`. Device: not rechecked.
+            76 800 000, which the CSV / DLG headers print (no header generated in a test; dlog-test /
+            logfmt-test fixtures keep their own period-derived rates). AD1 rungs likewise (640.000, not
+            639.795 from 1563 us). meter-test `nominal_is_the_chip_rate`. Device: not rechecked.
       - [x] `nr3` (scpi.rs) printed 76 800 as `+7.680001E+04` (repeated f32 division by 10). Fixed: one
             scaling in f64; scpi-test `nr3_exact` (exact values, a 200 000-value sweep vs `{:.6E}`).
       - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
