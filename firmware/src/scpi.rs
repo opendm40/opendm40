@@ -514,10 +514,15 @@ pub enum Log {
 ///                           grey provisional, F final, N none; value NAN for
 ///                           dashes, +9.9E37 OL; hold Meter::hold_state)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
+///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
+///                           of finger span, 1 one step per 1.25x (default), 2 live
+///                           stretch, snapped to the nearest step on release
 ///   DBG:GEST?               last scope drags, oldest first: n then per drag
 ///                           ";target,axis,delta_px,ms" (target 1 level, 2 trigger
 ///                           position / pan, 3 offset, 4/5 X/Y cursor a, 14/15 b;
-///                           axis H|V)
+///                           axis H|V), then "|POS hpos,trig_row,pos" (the
+///                           trigger position px, trigger row, CH1 position now),
+///                           then "|AUTO..." (the last AUTO-set)
 ///   DBG:SENTinel?           misconnect sentinel (sentinel.rs): kind,alert,mask,
 ///                           ctsta,pkhmin,pkhmax,streak,hit_windows,samples,
 ///                           probe_mA,aprot_ms (A-jack protection, doc 4.8),
@@ -576,11 +581,13 @@ pub enum Log {
 ///   DBG:ACDC?               AC+DC phase diagnostic (Dmm::acdc_diag_text): phases
 ///                           started, then per recent AC phase (oldest first)
 ///                           ";late_ms:sq/lpf/dcp,..."; read-only
-///   DBG:DRAG x0,y0,x1,y1,ms[,hold]
+///   DBG:DRAG x0,y0,x1,y1,ms[,hold[,jitter]]
 ///                           synthetic one-finger drag through the gesture
 ///                           tracker (axis lock, capture): down at x0,y0, held
 ///                           still hold ms, moved to x1,y1 in ms ms (0 = 300),
-///                           released; runs synchronously
+///                           released; runs synchronously; jitter px: a
+///                           sideways sawtooth on the path (+j, +j/2, 0 per 3
+///                           points: a jump out, a slow drift back)
 ///   DBG:HWTRIG?             comparator trigger (hwtrig.rs): TIM2 SR,CNT,CCR1,
 ///                           PA15<<16|DOR2,enabled,available,map rising lo,hi,
 ///                           map falling lo,hi,post_ticks (available = enabled,
@@ -640,8 +647,8 @@ pub enum Log {
 pub enum Dbg {
     Ping(u32),
     Input(u8, u16, u16),
-    /// x0, y0, x1, y1, ms, hold ms.
-    Drag([u16; 6]),
+    /// x0, y0, x1, y1, ms, hold ms, jitter px.
+    Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
@@ -833,6 +840,8 @@ pub enum Cmd {
     CalcSmoResp(Option<u8>),
     /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
     DbgGrab(Option<u16>),
+    /// DBG:PINCH 0|1|2 / ?: scope pinch mode (scope_page::set_pinch_mode).
+    DbgPinch(Option<u8>),
     /// DBG:GEST?: log of the last scope drags.
     DbgGest,
     /// DBG:VIEW?: the page shown (App::scpi).
@@ -1908,6 +1917,9 @@ impl Scpi {
                 }
                 // Scope drag A/B aids (App::scpi): DBG:GRAB <ms> (0 = direct
                 // drag) / DBG:GRAB?, DBG:GEST? (last drags).
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"PINCH"[..]) => {
+                    out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
                     out = Out::Instr(Cmd::DbgGrab(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 5000.0) as u16) }))
                 }
@@ -2055,9 +2067,9 @@ impl Scpi {
                             _ => Dbg::Input(1, 0, 0),
                         },
                         b"DRAG" => {
-                            let v = nums::<6>(a);
+                            let v = nums::<7>(a);
                             let ms = if v[4] == 0 { 300 } else { v[4].min(10_000) };
-                            Dbg::Drag([v[0].min(479) as u16, v[1].min(319) as u16, v[2].min(479) as u16, v[3].min(319) as u16, ms as u16, v[5].min(10_000) as u16])
+                            Dbg::Drag([v[0].min(479) as u16, v[1].min(319) as u16, v[2].min(479) as u16, v[3].min(319) as u16, ms as u16, v[5].min(10_000) as u16, v[6].min(50) as u16])
                         }
                         b"KEY" => { let v = nums::<2>(a); Dbg::Input(3, v[0] as u16, v[1].min(60_000) as u16) } // n[,hold_ms]
                         b"LCD" => {

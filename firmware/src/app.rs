@@ -1580,6 +1580,7 @@ impl App {
             self.redraw = true;
         }
         self.fuse_tick(clk, now);
+        self.pw_entry_tick(now, can_draw);
         if self.overlay.is_some_and(|o| now >= o.until()) {
             #[cfg(feature = "vdisk")]
             if matches!(self.overlay, Some(crate::dialog::Overlay::FwInstall { .. })) {
@@ -4344,6 +4345,14 @@ impl App {
                 self.redraw |= self.view == View::Settings;
                 false
             }
+            C::DbgPinch(Some(m)) => {
+                scope_page::set_pinch_mode(m);
+                false
+            }
+            C::DbgPinch(None) => {
+                crate::put_u32(out, scope_page::pinch_mode() as u32);
+                true
+            }
             C::DbgGrab(None) => {
                 crate::put_u32(out, gesture::grab_ms() as u32);
                 true
@@ -4390,6 +4399,17 @@ impl App {
                     crate::put_u32(out, d.unsigned_abs() as u32);
                     out.put_bytes(b",");
                     crate::put_u32(out, ms as u32);
+                }
+                // Positions now: trigger position (px), trigger row, CH1 pos.
+                out.put_bytes(b"|POS ");
+                for (k, v) in [self.scope.s.hpos, self.scope.s.trig_row, self.scope.s.pos].into_iter().enumerate() {
+                    if k > 0 {
+                        out.put_bytes(b",");
+                    }
+                    if v < 0 {
+                        out.put_bytes(b"-");
+                    }
+                    crate::put_u32(out, v.unsigned_abs());
                 }
                 // The last AUTO-set's decisions (scope_page.rs autoset_log).
                 out.put_bytes(b"|AUTO");

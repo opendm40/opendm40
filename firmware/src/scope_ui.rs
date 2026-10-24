@@ -85,9 +85,12 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 /// faster one), in the bottom graph corners. 52 px wide (the doc's 50 px
 /// left 2 px beside the widest labels, "<500ms" is 45 px in the 12 px font).
 pub const TAB_L: Rect = rect(23, 280, 52, 17);
-pub const TAB_R: Rect = rect(358, 280, 52, 17);
+pub const TAB_R: Rect = rect(338, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
-/// starts after the strip markers' press zones (x <= 22).
+/// starts after the strip markers' press zones (x <= 22). The right one
+/// reaches the frame; the right-edge trigger-level marker's zone wins over
+/// it where they meet (marker priority), and its tab (`TAB_R`) ends before
+/// that marker's column (x 401..412).
 pub const ZONE_L: Rect = rect(23, 228, 80, 73);
 pub const ZONE_R: Rect = rect(333, 228, 80, 73);
 /// `Model::tabs` bits.
@@ -864,13 +867,21 @@ impl MarkInk {
     }
 }
 
-/// Strip marker slots (CH1, trigger level, math offset, runt level, Y
+/// Level-item slots (CH1, trigger level, math offset, runt level, Y
 /// cursors).
 pub const NSTRIP: usize = 6;
+/// Level-item id of the trigger level.
+const TRIG_LEVEL: u8 = 1;
+/// x of the trigger-level marker: inside the graph at its right edge (x
+/// 401..412, frame at 413).
+const RIGHT_X: i16 = 401;
 
-/// Strip markers in creation order with their level-item ids (CH1 zero 0,
+/// Level markers in creation order with their level-item ids (CH1 zero 0,
 /// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
-/// 3.1). Rows scaled to the frame for the combined view.
+/// 3.1). Rows scaled to the frame for the combined view. opendm40: the
+/// trigger level sits on the graph's right edge (pointing left, the stock
+/// glyphs mirrored), so it never covers the CH1 marker on the left strip;
+/// the others are on the left strip as on the stock page.
 pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let top = m.top();
     let h = m.frame_h();
@@ -885,12 +896,30 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
             Mark::new(1, top + fy - 6, fam, RIGHT, sel, col)
         }
     };
+    // Right edge: inside the frame (rows 1..h-2), below the top markers'
+    // row (y top+1..top+12) where one of them is at the right edge.
+    let top_right = {
+        let mut g = [Mark::NONE; NGRAPH];
+        graph_marks_top(m, &mut g);
+        g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13)
+    };
+    let y_min = if top_right { top + 13 } else { top + 1 };
+    let right = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
+        let fy = line_fy(h, row as i32);
+        if fy < 0 {
+            Mark::new(RIGHT_X, y_min, fam, UP, sel, col)
+        } else if fy > h - 1 {
+            Mark::new(RIGHT_X, top + h - 13, fam, DOWN, sel, col)
+        } else {
+            Mark::new(RIGHT_X, (top + fy - 6).clamp(y_min, top + h - 13), fam, LEFT, sel, col)
+        }
+    };
     // CH1 / math range is +-140 rows around the centre (the 280-row model).
     let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
     out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    out[n] = (1, level(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
@@ -912,17 +941,17 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     n
 }
 
-/// Strip markers in draw order (creation order, the selected level item
-/// last).
+/// Left-strip markers in draw order (creation order, the selected level
+/// item last; the trigger level is a graph marker, `graph_marks`).
 pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let n = strip_items(m, &mut items);
     let mut k = 0;
-    for &(_, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v) {
+    for &(_, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v && i.0 != TRIG_LEVEL) {
         out[k] = mk;
         k += 1;
     }
-    for &(_, mk) in items[..n].iter().filter(|i| i.0 == m.sel_v) {
+    for &(_, mk) in items[..n].iter().filter(|i| i.0 == m.sel_v && i.0 != TRIG_LEVEL) {
         out[k] = mk;
         k += 1;
     }
@@ -944,15 +973,28 @@ fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     }
 }
 
-/// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak.
-pub const NGRAPH: usize = 5;
-/// Time-item id of each graph marker slot (255: not selectable).
-const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255];
+/// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak,
+/// trigger level (right edge).
+pub const NGRAPH: usize = 6;
+/// Time-item id of each graph marker slot (255: not a time item; the
+/// trigger level's zone is a level zone, from `strip_items`).
+const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255, 255];
 
 /// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
 /// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (opendm40: a white
-/// filled 'M' pointing down at the peak, its tip on the peak row).
+/// filled 'M' pointing down at the peak, its tip on the peak row), the
+/// trigger level on the right edge (opendm40, `strip_items`).
 pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
+    graph_marks_top(m, out);
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let n = strip_items(m, &mut items);
+    if let Some(&(_, mk)) = items[..n].iter().find(|i| i.0 == TRIG_LEVEL) {
+        out[5] = mk;
+    }
+}
+
+/// `graph_marks` without the trigger level.
+fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
     out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
@@ -973,38 +1015,66 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
     }
 }
 
-/// A touch zone of a marker (sec. 10.2): the 12x12 glyph rect grown by 10
-/// px on every side; `level`: level group (CH1 0, trigger level 1, Y
-/// cursors 3 / 4), else time group (trigger position 0, X cursors 2 / 3).
+/// A touch zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
+/// by 10 px, opendm40: by `GROW`) or of a line; `level`: level group (CH1 0,
+/// trigger level 1, Y cursors 3 / 4), else time group (trigger position 0,
+/// X cursors 2 / 3); `o`: the object itself (the glyph, the 1 px line),
+/// for the distance in `pick_near`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Zone {
     pub level: bool,
     pub id: u8,
     pub r: Rect,
+    pub o: Rect,
 }
 
 impl Zone {
-    pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0) };
+    pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
+    /// A line zone (cursor / guide line), not a marker glyph.
+    pub fn line(&self) -> bool {
+        self.o.w > 12 || self.o.h > 12
+    }
+    /// Distance (px, Chebyshev) from (x, y) to the zone's object; None
+    /// outside the zone.
+    pub fn dist(&self, x: i16, y: i16) -> Option<i16> {
+        if !self.r.has(x, y) {
+            return None;
+        }
+        let (x0, y0) = (self.o.x, self.o.y);
+        let (x1, y1) = (self.o.x + self.o.w - 1, self.o.y + self.o.h - 1);
+        let dx = (x0 - x).max(x - x1).max(0);
+        let dy = (y0 - y).max(y - y1).max(0);
+        Some(dx.max(dy))
+    }
 }
+
+/// Marker zones: the glyph grown by this much (owner 2026-10-24: a drag
+/// that starts near a marker grabs it; the stock 10 px).
+pub const GROW: i16 = 12;
+/// Line zones: +-this many px around a cursor / guide line.
+pub const LINE_GROW: i16 = 12;
+/// `pick_near`: a selected item this much farther than the nearest still
+/// wins (the marker last selected is preferred among close ones).
+const NEAR_TIE: i16 = 4;
 
 /// Most zones (strip markers + selectable graph markers).
 pub const NZONE: usize = NSTRIP + NGRAPH;
 
 /// The marker zones of the page in creation order (level group first).
 pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
-    let grow = |r: Rect| rect(r.x - 10, r.y - 10, r.w + 20, r.h + 20);
+    let grow = |r: Rect| rect(r.x - GROW, r.y - GROW, r.w + 2 * GROW, r.h + 2 * GROW);
     let mut n = 0;
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let k = strip_items(m, &mut items);
     for &(id, mk) in &items[..k] {
-        out[n] = Zone { level: true, id, r: grow(mk.rect()) };
+        out[n] = Zone { level: true, id, r: grow(mk.rect()), o: mk.rect() };
         n += 1;
     }
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
     for (k, mk) in g.iter().enumerate() {
         if mk.some() && GRAPH_IDS[k] != 255 {
-            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()) };
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()), o: mk.rect() };
             n += 1;
         }
     }
@@ -1019,17 +1089,127 @@ pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
     let mut n = 0;
     if let Some(xc) = m.xcur {
         for (k, c) in xc.iter().enumerate() {
-            out[n] = Zone { level: false, id: 2 + k as u8, r: rect(14 + c - 12, top, 25, h) };
+            out[n] = vline_zone(false, 2 + k as u8, *c, top, h);
             n += 1;
         }
     }
     if let Some(yc) = m.ycur {
         for (k, r) in yc.iter().enumerate() {
-            out[n] = Zone { level: true, id: 3 + k as u8, r: rect(13, top + trace_fy(h, *r as i32) - 12, 401, 25) };
+            out[n] = hline_zone(3 + k as u8, top + trace_fy(h, *r as i32));
             n += 1;
         }
     }
     n
+}
+
+/// Zone of a vertical line at graph column `c` (x 14 + c), the frame height.
+fn vline_zone(level: bool, id: u8, c: i16, top: i16, h: i16) -> Zone {
+    Zone { level, id, r: rect(14 + c - LINE_GROW, top, 2 * LINE_GROW + 1, h), o: rect(14 + c, top, 1, h) }
+}
+
+/// Zone of a horizontal level line at screen row `y`, the graph width.
+fn hline_zone(id: u8, y: i16) -> Zone {
+    Zone { level: true, id, r: rect(13, y - LINE_GROW, 401, 2 * LINE_GROW + 1), o: rect(13, y, 401, 1) }
+}
+
+/// opendm40 (owner 2026-10-24): while the guide lines show, they are zones
+/// too: the selected level item's line (CH1, trigger level, math offset,
+/// runt level; the Y cursors have `line_zones`) and the trigger position's
+/// line. Rows as the guide lines (`Deco`).
+pub fn guide_zones(m: &Model, out: &mut [Zone; 2]) -> usize {
+    if !m.guide {
+        return 0;
+    }
+    let (top, h) = (m.top(), m.frame_h());
+    let mut n = 0;
+    let row = match m.sel_v {
+        0 => Some(140 + m.pos as i32),
+        1 => Some(m.trig_row as i32),
+        2 if m.math_on => Some(140 + m.math_off as i32),
+        5 => m.runt_row.map(|r| r as i32),
+        _ => None,
+    };
+    if let Some(r) = row {
+        let fy = line_fy(h, r);
+        if (0..h).contains(&fy) {
+            out[n] = hline_zone(m.sel_v, top + fy);
+            n += 1;
+        }
+    }
+    if m.sel_h == 0 && (1..=399).contains(&m.trig_px) {
+        out[n] = vline_zone(false, 0, m.trig_px, top, h);
+        n += 1;
+    }
+    n
+}
+
+/// All press zones: markers (`zones`), cursor lines, guide lines.
+pub const NALL: usize = NZONE + 4 + 2;
+
+pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
+    let mut z = [Zone::NONE; NZONE];
+    let mut n = 0;
+    let k = zones(m, &mut z);
+    for q in z[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    let mut l = [Zone::NONE; 4];
+    let k = line_zones(m, &mut l);
+    for q in l[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    let mut g = [Zone::NONE; 2];
+    let k = guide_zones(m, &mut g);
+    for q in g[..k].iter() {
+        out[n] = *q;
+        n += 1;
+    }
+    n
+}
+
+/// opendm40 press pick (owner 2026-10-24: "a drag that starts on or near a
+/// marker grabs it"): the zone whose object is nearest to (x, y); the
+/// selected item (of the last used group first, then of the other group)
+/// wins when it is at most NEAR_TIE px farther; equal distances keep the
+/// zone order (markers before lines). Repeated taps still cycle through
+/// overlapping zones: `pick_zone` on a still release (scope_page.rs).
+pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
+    let mut best: Option<(usize, i16)> = None;
+    for (i, q) in z.iter().enumerate() {
+        if let Some(d) = q.dist(x, y) {
+            if best.map_or(true, |(_, bd)| d < bd) {
+                best = Some((i, d));
+            }
+        }
+    }
+    let (bi, bd) = best?;
+    for (level, id) in [(!last_h, if last_h { sel_h } else { sel_v }), (last_h, if last_h { sel_v } else { sel_h })] {
+        let pref = z.iter().enumerate().filter(|(_, q)| q.level == level && q.id == id).filter_map(|(i, q)| q.dist(x, y).map(|d| (i, d))).min_by_key(|&(_, d)| d);
+        if let Some((i, d)) = pref {
+            if d <= bd + NEAR_TIE {
+                return Some(i);
+            }
+        }
+    }
+    Some(bi)
+}
+
+/// The zone a press at (x, y) picks (`pick_near` over `all_zones`).
+pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<Zone> {
+    let mut z = [Zone::NONE; NALL];
+    let n = all_zones(m, &mut z);
+    pick_near(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| z[k])
+}
+
+/// A still tap on a marker that was already selected: the next zone under
+/// (x, y) in the stock search order (`pick_zone`: repeated taps cycle
+/// through overlapping markers), or None.
+pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<(bool, u8)> {
+    let mut z = [Zone::NONE; NALL];
+    let n = all_zones(m, &mut z);
+    pick_zone(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| (z[k].level, z[k].id))
 }
 
 /// The stock zone search for a press at (x, y): the group other than the
@@ -1039,11 +1219,11 @@ pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
 /// other group from its first zone. Index into `z`.
 pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let same_level = !last_h;
-    let of = |level: bool| -> ([usize; NZONE], usize) {
-        let mut l = [0usize; NZONE];
+    let of = |level: bool| -> ([usize; NALL], usize) {
+        let mut l = [0usize; NALL];
         let mut k = 0;
         for (i, q) in z.iter().enumerate() {
-            if q.level == level && k < NZONE {
+            if q.level == level && k < NALL {
                 l[k] = i;
                 k += 1;
             }
@@ -1973,18 +2153,11 @@ pub enum Press {
 }
 
 /// The page's press decision at (x, y) inside INNER: the object under the
-/// finger wins: the stock marker zones (search order, `pick_zone`), then
-/// the cursor lines (opendm40), and only then the tap-step zone of `mode`.
+/// finger wins: the nearest marker / cursor line / shown guide line
+/// (`pick_near`), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
-    let mut z = [Zone::NONE; NZONE];
-    let n = zones(m, &mut z);
-    if let Some(k) = pick_zone(&z[..n], sel_v, sel_h, last_h, x, y) {
-        return Press::Marker(z[k].level, z[k].id);
-    }
-    let mut lz = [Zone::NONE; 4];
-    let k = line_zones(m, &mut lz);
-    if let Some(i) = pick_zone(&lz[..k], sel_v, sel_h, last_h, x, y) {
-        return Press::Marker(lz[i].level, lz[i].id);
+    if let Some(q) = graph_pick(m, sel_v, sel_h, last_h, x, y) {
+        return Press::Marker(q.level, q.id);
     }
     if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
         return Press::Cur;
@@ -3004,17 +3177,63 @@ pub const RANGE_MAX: usize = 9;
 /// end was lost must never carry its index into the other axis' table:
 /// pre-flash review 7dc32ac B1). The result is always inside the table of
 /// its own axis: tb `tb_min..=tb_max`, range `0..=RANGE_MAX`.
+/// Pinch modes (DBG:PINCH, owner 2026-10-24 "pinch needs a big stretch
+/// before anything changes"): PINCH_STOCK the first opendm40 rule (one
+/// table step per span ratio e^0.767 = 2.15, rounded: the first step at
+/// 1.47x); PINCH_STEP (default) one step per 1.25x of span, truncated (the
+/// first step at 1.25x, the next at 1.56x, ...: each step re-anchors);
+/// PINCH_LIVE the trace stretches continuously with the fingers (a
+/// screen-only scale of the shown frame), the release snaps to the nearest
+/// table step (`pinch_snap`).
+pub const PINCH_STOCK: u8 = 0;
+pub const PINCH_STEP: u8 = 1;
+pub const PINCH_LIVE: u8 = 2;
+/// ln(1.25): the PINCH_STEP ratio per step.
+const LN_STEP: f32 = 0.223_143_55;
+
 pub fn pinch_step(prev: Option<PinchState>, horizontal: bool, s0: u16, s: u16, tb: usize, range: usize, tb_min: usize, tb_max: usize) -> PinchState {
+    pinch_step_mode(PINCH_STOCK, prev, horizontal, s0, s, tb, range, tb_min, tb_max)
+}
+
+/// `pinch_step` in pinch mode `mode` (PINCH_LIVE: `i` is the step the
+/// release would snap to, see `pinch_snap`).
+pub fn pinch_step_mode(mode: u8, prev: Option<PinchState>, horizontal: bool, s0: u16, s: u16, tb: usize, range: usize, tb_min: usize, tb_max: usize) -> PinchState {
     let cur = if horizontal { tb } else { range };
     let p = match prev {
         Some(p) if p.horizontal == horizontal => p,
         _ => PinchState { horizontal, i0: cur, i: cur },
     };
     let r = s.max(1) as f32 / s0.max(1) as f32;
-    let k = round_i(ln_f(r) / 0.767);
     let (lo, hi) = if horizontal { (tb_min, tb_max) } else { (0, RANGE_MAX) };
+    if mode == PINCH_LIVE {
+        return PinchState { i: pinch_snap(horizontal, p.i0, r, lo, hi), ..p };
+    }
+    let k = if mode == PINCH_STEP {
+        let x = ln_f(r) / LN_STEP;
+        x as i32 // toward zero: a step only once its ratio is reached
+    } else {
+        round_i(ln_f(r) / 0.767)
+    };
     let i = (p.i0 as i32 - k).clamp(lo as i32, hi as i32) as usize;
     PinchState { i, ..p }
+}
+
+/// The table step nearest (in log scale) to the start step `i0` zoomed by
+/// span ratio `r` (fingers apart = zoom in = smaller per-div value), in
+/// lo..=hi. `div` gives the per-div value of a table index.
+pub fn pinch_snap(horizontal: bool, i0: usize, r: f32, lo: usize, hi: usize) -> usize {
+    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VDIV[i] } };
+    let want = ln_f(div(i0)) - ln_f(r.max(1e-3));
+    let mut best = i0.clamp(lo, hi);
+    let mut bd = f32::MAX;
+    for i in lo..=hi {
+        let d = (ln_f(div(i)) - want).abs();
+        if d < bd {
+            bd = d;
+            best = i;
+        }
+    }
+    best
 }
 
 /// ln(x) for x > 0 (no libm): exponent + a short series on the mantissa.

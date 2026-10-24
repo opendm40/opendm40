@@ -710,7 +710,7 @@ unless shown otherwise.
 | `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
 | `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
-| `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>]` | One-finger drag. | USB |
+| `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>[,<jitter px>]]` | One-finger drag; the jitter wobbles the path sideways. | USB |
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
@@ -720,7 +720,8 @@ unless shown otherwise.
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
 | `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
-| `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|AUTO...`: the last scope drags | USB |
+| `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
+| `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |
 | `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
 | `DBG:LEADs?` | | `<count>,<from>,<to>`: "Leads in A?" reminders | USB |
 | `DBG:SENTinel?` | | Wrong-connection detector state | USB |
