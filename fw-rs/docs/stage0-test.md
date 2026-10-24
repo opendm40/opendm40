@@ -8,7 +8,7 @@ Goal: prove end-to-end that the stock **FS-loader** will re-install a firmware
 image from the SPI-flash FAT on reset, **before** we ever replace the stock app.
 This is the first, zero-risk step of the plan in
 [`native-boot.md`](native-boot.md) (reviewed in
-[`native-boot-review.md`](native-boot-review.md)).
+[`native-boot-review.md`](../../docs/history/native-boot-review.md)).
 
 **This test reflashes STOCK over the (still intact) stock app.** The current
 fw-rs is only RAM-loaded over Bluetooth, so nothing we rely on is at risk:

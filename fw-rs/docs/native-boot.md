@@ -876,7 +876,7 @@ any SP plausibility check it may make passes exactly as it does for stock.
 
 ## Shim (reset path)
 
-*Revised after the safety review `docs/native-review-2026-10-13.md` (B2, H2,
+*Revised after the safety review `../docs/history/native-review-2026-10-13.md` (B2, H2,
 H3, M1, M4, M5, L1, L3, L6).*
 
 `reset` (asm):

@@ -1,5 +1,5 @@
 //! Replica of the stock DM40 V2.6 oscilloscope page (docs/stock-scope-ui.md,
-//! port plan docs/stock-scope-port-plan.md; host reference renderer
+//! port plan ../docs/history/stock-scope-port-plan.md; host reference renderer
 //! tools/stock-ui/scope.rs). Everything is drawn straight to the panel (no
 //! frame buffer) by composition (stockfont::paint): each widget is one LCD
 //! window whose pixels are computed from its layers, with AA off and the

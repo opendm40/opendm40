@@ -1,4 +1,4 @@
-//! The stock-replica scope page on the App side (docs/stock-scope-port-plan.md
+//! The stock-replica scope page on the App side (../docs/history/stock-scope-port-plan.md
 //! S4/S5): the stock interaction model (docs/stock-scope-ui.md sec. 10) and
 //! the responsive drag path, drawing through src/scope_ui.rs.
 //!

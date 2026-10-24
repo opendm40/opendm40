@@ -1,5 +1,5 @@
 //! Touch gestures from the point track: tap, long press, swipes and drag, plus
-//! the finger-count-aware global gestures (docs/scope-ui-plan.md §2.6):
+//! the finger-count-aware global gestures (../docs/history/scope-ui-plan.md §2.6):
 //!
 //! * One finger: `Down` at touch-down, `Drag` once it moved more than SLOP
 //!   and its axis is locked, `LongPress` held still, and on release `Tap`

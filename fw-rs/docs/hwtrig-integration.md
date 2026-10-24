@@ -437,7 +437,7 @@ acquisition would take the comparator path on the first flash. Enable it with
 `DBG:HWTRIG:ENABLE 1` for the device test below; flip the constant once the
 test has passed. The calibration result (`hw.calibrate`) lives in RAM only;
 writing it back to the settings record is a follow-up, as is writing DAC2 on a
-level drag without a restart (`docs/scope-ui-plan.md`, "write DAC2 only").
+level drag without a restart (`../docs/history/scope-ui-plan.md`, "write DAC2 only").
 
 ## Cost
 

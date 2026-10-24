@@ -2432,7 +2432,7 @@ impl App {
     /// Handle a gesture. Returns true when the app takes the touch (a
     /// touch-down or drag in the scope graph): the caller then tells the
     /// tracker (`gesture::Tracker::capture`), so its release is never a view
-    /// swipe or a tap (docs/scope-ui-plan.md §2.6).
+    /// swipe or a tap (../docs/history/scope-ui-plan.md §2.6).
     pub fn gesture(&mut self, clk: &mut Clock, g: Gesture) -> bool {
         let now = clk.now_ms();
         self.last_input = now;
