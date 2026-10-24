@@ -317,6 +317,71 @@ fn error_queue() {
     }
 }
 
+/// `Scpi::put_f32` (nr3) of `v`.
+fn nr3(v: f32) -> String {
+    let mut s = Scpi::new();
+    s.len = 0;
+    s.put_f32(v);
+    String::from_utf8_lossy(&s.buf[..s.len]).into_owned()
+}
+
+/// nr3 prints exact values exactly (device 46370df: ACQ:SRAT? 76 800 was
+/// "+7.680001E+04"), and any other value within one unit of the 7th digit
+/// of the correctly rounded decimal.
+fn nr3_exact() {
+    for (v, want) in [
+        (76800.0f32, "+7.680000E+04"),
+        (38400.0, "+3.840000E+04"),
+        (4800.0, "+4.800000E+03"),
+        (9600.0, "+9.600000E+03"),
+        (1.0, "+1.000000E+00"),
+        (10.0, "+1.000000E+01"),
+        (6.0, "+6.000000E+00"),
+        (600.0, "+6.000000E+02"),
+        (1000.0, "+1.000000E+03"),
+        (1.0e6, "+1.000000E+06"),
+        (4_915_200.0, "+4.915200E+06"),
+        (0.5, "+5.000000E-01"),
+        (0.25, "+2.500000E-01"),
+        (-76800.0, "-7.680000E+04"),
+        (0.0, "+0.000000E+00"),
+        (9_999_999.0, "+9.999999E+06"),
+        (0.001, "+1.000000E-03"),
+        (1.0e-6, "+1.000000E-06"),
+        (6.0e-4, "+6.000000E-04"),
+    ] {
+        let r = nr3(v);
+        check(r == want, &format!("nr3 {v} = {r} (want {want})"));
+    }
+    // A sweep against Rust's correctly rounded {:.6E}.
+    let mut bad = 0;
+    let mut seed: u32 = 12345;
+    for k in 0..200_000u32 {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let v = if k % 2 == 0 {
+            f32::from_bits((seed >> 9) | (((seed % 70) + 97) << 23)) // 1e-9 .. 1e12
+        } else {
+            (seed % 2_000_000) as f32
+        };
+        let r = nr3(v);
+        let w = format!("{:.6E}", v as f64);
+        let (rm, re) = r[1..].split_once('E').unwrap();
+        let (wm, we) = w.split_once('E').unwrap();
+        let rm: f64 = rm.parse().unwrap();
+        let wm: f64 = wm.parse().unwrap();
+        let rv = rm * 10f64.powi(re.parse().unwrap());
+        let wv = wm * 10f64.powi(we.parse().unwrap());
+        let ulp = 10f64.powi(we.parse::<i32>().unwrap() - 6);
+        if (rv - wv).abs() > ulp * 1.01 || !(1.0..10.0).contains(&rm) {
+            if bad < 5 {
+                println!("     nr3 {v:e}: {r} vs {w}");
+            }
+            bad += 1;
+        }
+    }
+    check(bad == 0, &format!("nr3 sweep: {bad} of 200000 off by more than one digit"));
+}
+
 fn idn() {
     let mut s = Scpi::new();
     let r = reply(&mut s, "*IDN?");
@@ -334,6 +399,7 @@ fn main() {
     set_commands();
     error_queue();
     idn();
+    nr3_exact();
     let f = unsafe { FAILS };
     if f > 0 {
         println!("{f} FAILED");
