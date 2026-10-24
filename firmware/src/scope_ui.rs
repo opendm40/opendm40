@@ -85,11 +85,12 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 /// faster one), in the bottom graph corners. 52 px wide (the doc's 50 px
 /// left 2 px beside the widest labels, "<500ms" is 45 px in the 12 px font).
 pub const TAB_L: Rect = rect(23, 280, 52, 17);
-pub const TAB_R: Rect = rect(358, 280, 52, 17);
+pub const TAB_R: Rect = rect(338, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
-/// starts after the strip markers' press zones (x <= 22).
+/// starts after the strip markers' press zones (x <= 22), the right one
+/// ends before the right-edge trigger-level marker's zone (x >= 391).
 pub const ZONE_L: Rect = rect(23, 228, 80, 73);
-pub const ZONE_R: Rect = rect(333, 228, 80, 73);
+pub const ZONE_R: Rect = rect(311, 228, 80, 73);
 /// `Model::tabs` bits.
 pub const TAB_SHOW_L: u8 = 1;
 pub const TAB_SHOW_R: u8 = 2;
@@ -864,13 +865,21 @@ impl MarkInk {
     }
 }
 
-/// Strip marker slots (CH1, trigger level, math offset, runt level, Y
+/// Level-item slots (CH1, trigger level, math offset, runt level, Y
 /// cursors).
 pub const NSTRIP: usize = 6;
+/// Level-item id of the trigger level.
+const TRIG_LEVEL: u8 = 1;
+/// x of the trigger-level marker: inside the graph at its right edge (x
+/// 401..412, frame at 413).
+const RIGHT_X: i16 = 401;
 
-/// Strip markers in creation order with their level-item ids (CH1 zero 0,
+/// Level markers in creation order with their level-item ids (CH1 zero 0,
 /// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
-/// 3.1). Rows scaled to the frame for the combined view.
+/// 3.1). Rows scaled to the frame for the combined view. opendm40: the
+/// trigger level sits on the graph's right edge (pointing left, the stock
+/// glyphs mirrored), so it never covers the CH1 marker on the left strip;
+/// the others are on the left strip as on the stock page.
 pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let top = m.top();
     let h = m.frame_h();
@@ -885,12 +894,30 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
             Mark::new(1, top + fy - 6, fam, RIGHT, sel, col)
         }
     };
+    // Right edge: inside the frame (rows 1..h-2), below the top markers'
+    // row (y top+1..top+12) where one of them is at the right edge.
+    let top_right = {
+        let mut g = [Mark::NONE; NGRAPH];
+        graph_marks_top(m, &mut g);
+        g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13)
+    };
+    let y_min = if top_right { top + 13 } else { top + 1 };
+    let right = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
+        let fy = line_fy(h, row as i32);
+        if fy < 0 {
+            Mark::new(RIGHT_X, y_min, fam, UP, sel, col)
+        } else if fy > h - 1 {
+            Mark::new(RIGHT_X, top + h - 13, fam, DOWN, sel, col)
+        } else {
+            Mark::new(RIGHT_X, (top + fy - 6).clamp(y_min, top + h - 13), fam, LEFT, sel, col)
+        }
+    };
     // CH1 / math range is +-140 rows around the centre (the 280-row model).
     let off_row = |off: i16| if off < -140 { -1 } else if off > 140 { 281 } else { 140 + off };
     let mut n = 0;
     out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    out[n] = (1, level(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
     n += 1;
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
@@ -912,17 +939,17 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     n
 }
 
-/// Strip markers in draw order (creation order, the selected level item
-/// last).
+/// Left-strip markers in draw order (creation order, the selected level
+/// item last; the trigger level is a graph marker, `graph_marks`).
 pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let n = strip_items(m, &mut items);
     let mut k = 0;
-    for &(_, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v) {
+    for &(_, mk) in items[..n].iter().filter(|i| i.0 != m.sel_v && i.0 != TRIG_LEVEL) {
         out[k] = mk;
         k += 1;
     }
-    for &(_, mk) in items[..n].iter().filter(|i| i.0 == m.sel_v) {
+    for &(_, mk) in items[..n].iter().filter(|i| i.0 == m.sel_v && i.0 != TRIG_LEVEL) {
         out[k] = mk;
         k += 1;
     }
@@ -944,15 +971,28 @@ fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     }
 }
 
-/// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak.
-pub const NGRAPH: usize = 5;
-/// Time-item id of each graph marker slot (255: not selectable).
-const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255];
+/// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak,
+/// trigger level (right edge).
+pub const NGRAPH: usize = 6;
+/// Time-item id of each graph marker slot (255: not a time item; the
+/// trigger level's zone is a level zone, from `strip_items`).
+const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255, 255];
 
 /// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
 /// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (opendm40: a white
-/// filled 'M' pointing down at the peak, its tip on the peak row).
+/// filled 'M' pointing down at the peak, its tip on the peak row), the
+/// trigger level on the right edge (opendm40, `strip_items`).
 pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
+    graph_marks_top(m, out);
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let n = strip_items(m, &mut items);
+    if let Some(&(_, mk)) = items[..n].iter().find(|i| i.0 == TRIG_LEVEL) {
+        out[5] = mk;
+    }
+}
+
+/// `graph_marks` without the trigger level.
+fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
     out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
@@ -1758,7 +1798,7 @@ pub fn fft_peak_rect(m: &Model) -> Rect {
     rect(266, m.top() + 34, 144, 17)
 }
 /// Horizontal scale box: bottom row (both views share the frame bottom),
-/// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
+/// outside the Corners tap zones (x 23..102 / 311..390) and the cursor tab.
 pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
 
 /// The stock FFT label: no fill (the graph background shows through), 1 px
