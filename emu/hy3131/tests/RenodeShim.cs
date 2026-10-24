@@ -1,4 +1,4 @@
-// Minimal stand-ins for the Renode types used by emu/peripherals/HY3131.cs so the
+// Minimal stand-ins for the Renode types used by emu/hy3131/HY3131.cs so the
 // real model file compiles on the host (dotnet 8, no Renode assemblies).
 using System;
 using System.Collections.Generic;
@@ -94,4 +94,15 @@ namespace Antmicro.Renode.Peripherals.SPI
 namespace Antmicro.Renode.Peripherals.CPU
 {
     public interface ICPU { void SyncTime(); }
+}
+
+namespace Antmicro.Renode.Peripherals.Miscellaneous
+{
+    // emu/peripherals/DWT.cs: HY3131.SetInput logs FwUptime from the instance
+    // (null on the host, so the marker says fw -1).
+    public class DM40_DWT
+    {
+        public static DM40_DWT Instance;
+        public double FwUptime => -1;
+    }
 }
