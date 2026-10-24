@@ -52,8 +52,13 @@ chmod +x $R/init
 (cd $R && find . | cpio -o -H newc 2>/dev/null | gzip -1 > $W/initrd.gz)
 
 cd $(dirname $EMU)
+# KVM_MIPS / KVM_ISR_STALL_NS: the device's speed (110 / 700, emu/peripherals/CpuCost.cs).
+SCR=$EMU/out/kvm-$PORT.script
+: > $SCR
+[ -n "$KVM_ISR_STALL_NS" ] && echo "0 monitor sysbus.cpucost IsrStallNs $KVM_ISR_STALL_NS" >> $SCR
+printf '0 monitor sysbus.spi2.spiflash ProgramUs 400\n0 monitor sysbus.spi2.spiflash Erase4kUs 45000\n' >> $SCR
 setsid python3 emu/run.py fwrs --app $ELF --usbip 0.01 --usbip-port $PORT --run-for 3600 --name kvm-$PORT \
-    --dmm 'vsrc:0.2,ac=0.5,f=50' > $LOG.emu 2>&1 &
+    --mips ${KVM_MIPS:-200} --script $SCR --dmm 'vsrc:0.2,ac=0.5,f=50' > $LOG.emu 2>&1 &
 PID=$!
 trap 'kill -- -$PID 2>/dev/null' EXIT
 until ss -ltn | grep -q ":$PORT "; do sleep 1; done
