@@ -641,12 +641,20 @@ Code work (in this order):
       + DM40*.BIN install half.
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
       rate + sample count, 1 s refresh), view repainted on stop.  (5fd7871; verify on device)
-- [ ] Browser client (owner 2026-10-22: later, not now): one local HTML page (fw-rs/tools/web/dm40.html) over WebUSB
-      (Chrome/Edge) on the USBTMC interface (class 0xFE; the MSC interface stays the OS's): big DMM reading, trend +
-      CSV, scope via WAV:PRE? / WAV:DATA? (timebase, trigger, RUN/STOP), generator, SCPI console. Linux needs a udev
-      rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access (Chrome cannot claim a
-      kernel-bound interface); Windows needs WinUSB (Zadig). Option: Web Bluetooth over the BLE "DM40A" link
-      (stock app protocol, no SCPI) for cable-free use. A claude.ai artifact sandbox likely blocks WebUSB.
+- [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
+      removed, the new one replaces it). One local HTML page (fw-rs/tools/web/dm40.html) that talks SCPI to
+      fw-rs over BOTH links and covers ALL functions: big DMM reading with every function / range /
+      coupling / rate, trend + CSV, power meter, scope via WAV:PRE? / WAV:DATA? (timebase, V/div, trigger,
+      RUN/STOP, measurements), generator, loggers (LOG:*), the USB-disk / gallery files, settings, alerts,
+      and an SCPI console.
+      - USB: WebUSB (Chrome/Edge) on the USBTMC interface (class 0xFE; the MSC interface stays the OS's).
+        Linux needs a udev rule that unbinds the usbtmc kernel driver from 1209:0001 and grants access
+        (Chrome cannot claim a kernel-bound interface); Windows needs WinUSB (Zadig).
+      - Bluetooth: Web Bluetooth to the "DM40A" module carrying fw-rs's SCPI-over-BT (docs/bt-scpi.md).
+        Check that the module exposes a BLE GATT serial service Chrome can open: Web Bluetooth has no
+        classic SPP/RFCOMM. If it doesn't, the BT path needs a different route, e.g. Web Serial to an OS
+        RFCOMM port.
+      - A claude.ai artifact sandbox likely blocks WebUSB.
 - [ ] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
       'Loading'"). Today the screen stays dark or frozen while pre_main does the SPI-disk work before
       main's LCD init: the FAT dir check, calbackup, `vdisk::mirror_boot` (+0.22 s every boot, +1..9 s on
