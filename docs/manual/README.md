@@ -559,7 +559,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   | Range | 60 Ω | 600 Ω | 6 kΩ | 60 kΩ | 600 kΩ | 6 MΩ | 60 MΩ |
   |---|---|---|---|---|---|---|---|
-  | 0.90 mA | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 215 nA | — |
+  | 0.90 mA | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
   | 0.28 mA ON | 0.90 mA | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
   Short-circuit currents measured on one unit with `DBG:SRC`, jacks
