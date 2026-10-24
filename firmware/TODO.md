@@ -547,6 +547,11 @@ Code work (in this order):
       steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (5ba89b3; verify on device)
 
 ## Backlog (user ideas)
+- [ ] **Settings are lost at power-off** (device 2026-10-24): the backup SRAM is not powered while the
+      meter is off (POR + BOR flags after a key power-off; a marker setting and the crash word were gone; a
+      reset and a firmware update keep it). Keep a copy of the settings on the SPI disk (as the stock's
+      config.bin): written a few seconds after a change and before a power-off, read at boot when the backup
+      SRAM copy is invalid. Then update the manual's "What is kept when you switch off" and Known limitations.
 - [ ] Longer scope record (owner 2026-10-24: "worth doing, not now"): 26 624 samples today vs the stock
       65 520. u16 per 10-bit sample makes 65 520 = 131 KB, too much next to the screenshot CAP (49 KB) and the
       logger rings. Packed 4 samples in 5 bytes: 65 520 = ~82 KB, +29 KB over today, within the free SRAM.

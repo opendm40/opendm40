@@ -177,8 +177,10 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
   for USBFS ([`firmware/src/usb.rs`](../firmware/src/usb.rs)).
 - On-chip blocks the board uses: USBFS, two 12-bit DAC channels (both used,
   [Generator](#generator) and [Oscilloscope](#oscilloscope)), DMA, ADC0.
-- RTC / LSE: not traced here. Whether the RTC domain stays powered from the
-  battery while the meter is off is unknown.
+- Backup domain (RTC, backup SRAM): not powered while the meter is off. After
+  a power-off by the key, the next boot shows the POR and BOR reset flags and
+  the 4 KiB backup SRAM content is gone; a reset or a firmware update keeps
+  it. LSE (32 kHz crystal): not traced.
 
 ## SPI flash (USB disk)
 
