@@ -201,9 +201,11 @@ unpopulated, silkscreened. Seen with the board as in
 | left | G, C, D, V | V |
 | right | GND, TX, RX, VCC | VCC |
 
-Annotated: [photos/debug-header-annotated.jpg](photos/debug-header-annotated.jpg)
-(a marked-up crop of `main-board-mcu-gd32f427.jpg`; the original is kept
-unchanged). The silkscreen is readable in both review photos.
+![Debug header: TX (PA2) and GND marked](photos/debug-header-annotated.jpg)
+
+*A marked-up crop of [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg)
+(photo © CTAHOK, mysku.club, see [photos/README.md](photos/README.md); the
+original is kept unchanged). The silkscreen is readable in both review photos.*
 
 | Pad | Signal | Status |
 |---|---|---|
