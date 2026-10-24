@@ -1125,7 +1125,7 @@ FWDGT start, recovery and vectors (`.text` 1544).
 - **`recovery-file`:** writes one 0-byte `DM40RCVR.BIN` root entry on the SPI
   FAT, only the root block, FAT untouched (`fatren::make_trigger`), then powers
   off (PE2 = PC4 = 0).
-  - The update screen appears only on a cold boot with PA2 low long enough.
+  - The update screen appears only with PA2 held low (debug-header TX shorted to GND).
   - The `test-recovery` image is 9632 bytes.
 - **`recovery-usb`:** our own minimal USB-MSC disk on the W25Q128 (msc.rs path,
   no USBTMC; serial = the chip UID as in normal mode, `REC1` until 2026-10-23).
