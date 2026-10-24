@@ -373,8 +373,8 @@ const SHOW_MIN_MS: u64 = 80;
 //              LIVE?; 0 = on), EXT_ALERT_OFF_SHIFT
 //   bit 14     burden voltage readout in the A functions (0 = off, the
 //              stock aux row), EXT_BURDEN
-//   bit 15     the "Leads in A?" reminder switched OFF (sentinel::M_LEADS;
-//              0 = on), EXT_LEADS_OFF
+//   bit 15     unused (was the removed "Leads in A?" reminder's OFF; ignored
+//              on load, written 0; do not reuse)
 //   bits 16..17 the danger alarm (danger.rs: 0 Loud, 1 Volume, 2 Off; 0 =
 //              Loud, the default), EXT_DANGER_SHIFT
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
@@ -388,9 +388,6 @@ pub const EXT_HISTORY_ROW: u32 = 1 << 10;
 pub const EXT_ALERT_OFF_SHIFT: u32 = 11;
 /// p[38] bit 14: burden voltage readout on (DC A aux1 / AC A aux2).
 pub const EXT_BURDEN: u32 = 1 << 14;
-/// p[38] bit 15: the "Leads in A?" reminder DISABLED (0 = on, the default
-/// of every older record).
-pub const EXT_LEADS_OFF: u32 = 1 << 15;
 /// p[38] bits 16..17: the danger alarm setting (danger::LOUD = 0, the
 /// default of every older record; VOLUME 1, OFF 2).
 pub const EXT_DANGER_SHIFT: u32 = 16;

@@ -386,6 +386,11 @@ struct Producer {
     /// which `lost` counts the span in.
     p_sum: u64,
     p_n: u32,
+    /// AD1: `now_us` of the last conversion seen by its flag (not a rescue)
+    /// and the flags seen this session: the period is measured flag to flag
+    /// (`sample`), so a rescue never hides the next real interval.
+    last_flag_us: u64,
+    flags: u32,
 }
 
 impl Producer {
@@ -405,11 +410,14 @@ impl Producer {
             p_meas: 0,
             p_sum: 0,
             p_n: 0,
+            last_flag_us: 0,
+            flags: 0,
         }
     }
 
-    /// AD1: one flag-to-flag interval of `d` us (one period, no rescue
-    /// in between): the last one for the rescue, the mean for `lost`.
+    /// AD1: one flag-to-flag interval of `d` us (one period; a swallowed
+    /// flag in between makes it ~2, outside `sample`'s window): the last
+    /// one for the rescue, the mean for `lost`.
     fn note_period(&mut self, d: u32) {
         self.p_meas = d;
         self.p_sum += d as u64;
@@ -1018,10 +1026,21 @@ impl Logger {
                 let _ = self.prod.push(ring, self.prod.last_sample_us as u32, hy::read_ad1());
             } else if ready {
                 self.prod.tick(); // the flag-observed moment
-                let d = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
+                // AD1's period: flag to flag, not from a rescue's stamp, and not
+                // from the session's first flag (it can be one raised before the
+                // start: device 10242c3, after a 640/s session, a first interval
+                // of 52 ms at OSR 8192 chopped (100.8 ms) became p_meas, and with
+                // `rescued != 0` before every later flag it was never measured
+                // again: each conversion was rescued once more, a copy 52 ms
+                // after it, in 121 of 294 records (osr/ fr_40_15)).
                 let nom = self.prod.nominal_us as u64;
-                if !self.ad2 && self.prod.have_last && self.prod.rescued == 0 && d > nom / 2 && d < nom * 3 / 2 {
-                    self.prod.note_period(d as u32);
+                if !self.ad2 {
+                    let d = self.prod.now_us.wrapping_sub(self.prod.last_flag_us);
+                    if self.prod.flags >= 2 && d > nom / 2 && d < nom * 3 / 2 {
+                        self.prod.note_period(d as u32);
+                    }
+                    self.prod.flags = self.prod.flags.saturating_add(1);
+                    self.prod.last_flag_us = self.prod.now_us;
                 }
                 self.prod.rescued = 0;
                 self.prod.last_sample_us = self.prod.now_us;
