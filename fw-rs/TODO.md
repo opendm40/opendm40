@@ -17,6 +17,8 @@ Additional requirements:
 ## Next up (groomed 2026-10-14)
 
 Device needed (in this order):
+0. Branch mirror-bw: the INFO/ mirror paced against the 76800 fast logger + the Wave view's ring drops
+   ("Device retest of mirror-bw" below).
 1. UF-01 continuity CMPO beeper + diode beep, latency < 10 ms.
 2. Both-rails crosstalk: DMM accuracy with the scope running; combined-view FREQ (13.3 Hz on 40 Hz);
    AC V of a 0.5 V DC source decaying. Device f3aea2f (docs/device-check-2026-10-21.md "f3aea2f" 7): DC 1 / 5 / 10 V within 0.04 %, FREQ
@@ -1682,11 +1684,51 @@ Firmware:
       (gate 2). >= 5 min was not possible: the free 12.9 MB hold ~286 s at 38400 and ~130 s at 76800.
       (3) Wave view 200 s, 5 rounds: copies fast and byte-equal, late 0 / overruns 0; ring `dropped` grows
       ~50/s with or without a copy (open, below). (4) not run.
-- [ ] **76800 disk session + cp of a mirrored INFO/ file loses samples** (device 612c45c, doc "612c45c" M2):
-      the mirror's SPI reads compete with the logger's page programs; the emulator's chip timing did not show
-      it. Options: refuse / NOT READY the mirror at the 76800 rung, or rate-limit mirror reads per page program.
-- [ ] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on 612c45c (200 s: 11 185; a 30 s
-      idle window 0, the next 68); d330877 saw +0 in short windows. max_lat 300 ns once. Not chased.
+- [x] **76800 disk session + cp of a mirrored INFO/ file loses samples** (device 612c45c, doc "612c45c" M2).
+      **Fixed on branch mirror-bw (emulator; device retest pending).** Cause: not the chip's busy time but the
+      main loop's CPU. A mirror sector is a polled 512-byte SPI read (~0.97 us per byte on the device, plus a
+      wait for a page program in the chip), ~1.1 ms of wall time with the stream ISR at ~54 % of the CPU; a
+      host copying back to back got one or more of those every pass and the fast logger's coder fell behind
+      (memory-served INFO/ files cost almost nothing: loss in proportion to the mirrored bytes, LOADER.BIN 128
+      KiB ~21 700, a round ~46 000). The emulator missed it: its polled byte took 0.64 us (no APB / TBE-to-shift
+      latency). Fix (vdisk.rs `mirror_pass` / `mir_hold`, msc.rs `read_wait`, fastlog.rs `mirror_level`):
+      while the stream runs a mirror sector is read only when the pass grants it: at most one per main-loop
+      pass, only with the chip idle, and only when the fast logger has caught up (ring <= 384 records and
+      FIFO <= 1 KiB at the pass's start); behind: after 10 ms of waiting; pressed (ring over half full, or the
+      writer trial): after 50 ms. Until then the READ waits in its data phase (IN NAKed, no NOT READY, nothing
+      for the host to retry); a 240-sector READ takes <= 12 s even when every sector waits the full 50 ms.
+      DBG:VDISK:MIR? fields 5-7: mirror sectors read while streaming, holds, longest hold (ms). LOG:DISK?
+      field 14 (new): the writer's share of the main loop's CPU (permille, ISR out) = 1000 - headroom.
+      Emulator model (24547cf): GD32_SPI IdleStartNs 330 (run.py --spi-disk-gap-ns) gives the device's 0.97 us
+      polled byte; W25Q128 StrictBusy ignores a READ / program during BUSY. Results (--mips 110
+      --isr-stall-ns 700, typ chip, LOG:DUR 10, `fastlogtest --host-read --host-files LOADER.BIN --host-only
+      --host-delay 3`): e3e81d4 lost 6 428 with the old model, **119 853 of 768 000** with the new one (~10 000
+      per LOADER.BIN copy; device ~21 700); a copy inside the trial: fell back to 38400 (as on the device).
+      This branch: **lost 0**, rung kept, 2 279 mirror sectors read in the run, longest hold 39 ms; copy in
+      the trial: kept 76800, lost 0; every INFO/ file + DBG:PROF? polls at 38400 / 76800 with `--region-c`:
+      lost 0, no region C code / slow-bank load, no NOT READY; --noise 1000 (2.43 B/sample, 730 pages/s) +
+      LOADER.BIN: lost 0. Headroom (LOG:DISK? field 14, no copy): the writer takes 589 permille of the main
+      loop at 76800 / 1.21 B/sample, 702 at 2.43 B/sample, 300 at 38400. Device retest: below.
+- [x] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on 612c45c. **Fixed on branch
+      mirror-bw (emulator).** `dropped` (field 6) = logger ring overflows: the stream ISR found the 2048-record
+      ring (26.7 ms at 76800) full and dropped the newest samples; each one also restarts the wave record (no
+      triggered frame across a hole), so it was a real loss of displayed frames, not decimation. Cause: a
+      scope pass with a status change (status badge ~6 ms + record bar ~7.6 ms, ~5/s with a 10 Hz square in
+      AUTO at 1 ms/div) plus one measurement cell (~10 ms) after the acquisition took ~30 ms (emulator
+      --mips 110: `emu/wavedroptest.py --dmm vsrc:0,ac=2,f=10,shape=square`: ~400 drops/s, passes up to 30.5
+      ms; a flat DC input: 0, as the device's idle windows). Fix (app.rs `sp_paint_pass`, scope.rs
+      `wave_keep`): the ring is drained into the record before the paint and before the cell, and the cell
+      waits for the next pass after a paint over 4 ms. After: 0 drops in 40 s, loop max 20.6 ms. Device
+      retest: below.
+- [ ] **Device retest of mirror-bw** (the image built from the branch's last commit): (1) 76800 `LOG:DUR 0`
+      disk session, cp of the 8 INFO/*.BIN every 30 s (M2b's sessM.py) and LOADER.BIN 6 s after state 3
+      (M2c): lost_before / LOG:COUNt? lost 0, gate 1 (76800 kept), copies byte-equal; note each cp's time and
+      DBG:VDISK:MIR? fields 5-7 (expect cp LOADER.BIN slower than 0.5 s, all holds <= 50 ms). (2) cp of
+      LOADER.BIN inside the writer trial: gate 1 (no fallback), lost 0. (3) LOG:DISK? field 14 at 76800 with
+      no copy: the device's headroom (1000 - it; emulator 411). (4) 38400 with cp every 60 s: lost 0, cp times
+      as M2a (~1.1 s per round of LOADER.BIN). (5) Wave view at 1 ms/div with the 10 Hz square (wv.py 200 s,
+      cp rounds every 40 s): DBG:ISR? dropped +0, DBG:PROF? loop max < 26 ms. (6) dmesg on the host: no
+      usb-storage reset / timeout during the copies.
 - [x] UI navigation during a fast-log session (menu pages / the scope page with the scope source open while the
       session streams). **Done in 3f32bc3 / 7225b36** (`fastlogtest --ui-nav`, DBG:VIEW? checks each landing).
       Note: on the device only DBG:KEY / DBG:TAP can do this; real touch and the side keys stop a disk session
