@@ -64,12 +64,13 @@ Before you start:
 
 To install opendm40 on a meter that runs the stock firmware:
 
-1. Get the update file `opendm40.bin`. Today you build it from the source
+1. Get the update file `dm40_opendm40_v<version>.bin`, for example
+   `dm40_opendm40_v0.1.bin`. Today you build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
-3. Copy the file onto that disk as `dm40_fwrs.bin`. Keep it the only
-   `dm40*.bin` file on the disk ([why](#install-a-file-from-the-update-loader)).
+3. Copy the file onto that disk (any `dm40*.bin` name works). Keep it the
+   only `dm40*.bin` file on the disk ([why](#install-a-file-from-the-update-loader)).
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
@@ -88,8 +89,8 @@ opendm40:
 1. **Settings > More > More > USB disk**: tap until it reads
    **PC can edit (re-plug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
-3. Copy the update file onto the disk, into the top folder, as
-   `dm40_fwrs.bin` (any `dm40*.bin` name works).
+3. Copy the update file onto the disk, into the top folder
+   (`dm40_opendm40_v<version>.bin`; any `dm40*.bin` name works).
 4. The meter checks the file and asks **Firmware received. Install it
    now?** Tap **Yes**. The meter restarts into the update loader, installs
    the file and starts the new firmware.
@@ -1156,7 +1157,8 @@ samples) stays in memory:
 The CSV starts with comment lines (timebase, V/div, probe, coupling,
 sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
-the probe tip.
+the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
+on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Wave view: the scope on the multimeter inputs
 
@@ -1301,6 +1303,8 @@ To use it:
 2. Tap a value box to type a new value ([The keypad](#the-keypad)).
 3. Tap **RUN / STOP** in the top bar, or press **RUN**, to switch the
    output on or off.
+
+The **AUTO** key does nothing on this page.
 
 The output is off after power-on. On the very first start the generator is
 set as on the stock firmware: square, 2 MHz, 3 Vpp.
@@ -1714,9 +1718,9 @@ A change of the mode takes effect at the next USB plug: unplug the cable
 and plug it in again. Until then the row shows **(re-plug)**. The meter
 always starts in **Files live**.
 
-A file manager usually moves a deleted file to the trash, and a file only
-moved to the trash comes back after the eject. Empty the trash (or use
-Shift+Delete) before you eject.
+A file manager usually moves a deleted file to the trash. A file moved to
+the trash is deleted on the meter at the eject, unless you take it out of
+the trash before; the trash itself is not kept on the meter.
 
 #### Eject
 
@@ -2171,8 +2175,9 @@ update file has been installed.
 
 1. Connect the meter to the computer. The loader's USB disk appears.
 2. Copy the update file onto it, as the only file named `dm40*.bin`:
-   - opendm40: `opendm40.bin`, copied as `dm40_fwrs.bin`, or the
-     `FIRMWARE.BIN` from your backup, copied as `dm40_fwrs.bin`;
+   - opendm40: `dm40_opendm40_v<version>.bin`, or the `FIRMWARE.BIN`
+     from your backup, copied under a `dm40*.bin` name (for example
+     `dm40_opendm40_v0.1.bin`);
    - stock firmware: `dm40_v_2_6.bin`.
 3. Press **update** on the meter's screen.
 
