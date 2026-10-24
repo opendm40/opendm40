@@ -2,12 +2,12 @@
 
 Bluetooth protocol of the Alientek DM40 multimeter as used by the stock
 firmware and its phone app. The meter communicates via Bluetooth RFCOMM. The replacement firmware
-[fw-rs](../fw-rs/README.md) keeps the DM40 commands below and adds its own
-(see `fw-rs/README.md`).
+[fw-rs](../fw-rs/README.md) keeps the DM40 commands below and adds SCPI
+([fw-rs/docs/bt-scpi.md](../fw-rs/docs/bt-scpi.md)).
 
 Host tools for a meter running fw-rs: `fw-rs/tools/dm40scpi.py --bt` (SCPI
 over Bluetooth, and `btpoll` for these stock frames) and
-`fw-rs/tools/dm40bt_scpi.py`. They need a Python with Bluetooth sockets
+[`fw-rs/tools/dm40bt_scpi.py`](../fw-rs/tools/dm40bt_scpi.py). They need a Python with Bluetooth sockets
 (`/usr/bin/python3` on Linux; linuxbrew's has none).
 
 ## Connection Setup
@@ -78,8 +78,7 @@ AF 05 03 04 01 00 44    HOLD off
 AF 05 03 00 00 49       discovery
 ```
 
-Note: `AF 05 03 09 01 3F` (used by an earlier version of the old Python client) also works,
-but only by accident: `3F` is taken as a data byte and the checksum then
+Note: `AF 05 03 09 01 3F` also works, but only by accident: `3F` is taken as a data byte and the checksum then
 happens to match a zero byte from the cleared receive buffer.
 
 ### Mode Byte
@@ -102,7 +101,7 @@ range) with P (W) as the main value in the V group's units: the app shows
 "230.02 V" for 230.02 W, mW as mV, a source negative; value 2 / 3 are
 `FF FF`. Command 06 with that byte keeps the power meter, any other byte
 leaves it. The full power readings are on BT SCPI (`FETC:POW:ALL?`); see
-fw-rs/docs/power-meter-and-misconnect.md 3.13.
+[fw-rs/docs/power-meter-and-misconnect.md](../fw-rs/docs/power-meter-and-misconnect.md) 3.13.
 
 ### Measurement Response (17 bytes)
 ```
@@ -168,7 +167,7 @@ Offset  Description
 
 CRC-16: polynomial 0x8005, init 0xFFFF, MSB first, no reflection, no final
 XOR. The 12 bytes skipped by the body CRC (flash `0x08008000`) are a marker
-that the bootloader manages. `dm40fw.py` computes both words.
+that the bootloader manages. [`dm40fw.py`](../firmware/dm40fw.py) computes both words.
 
 The bootloader below `0x08004000` is not part of the update file.
 
@@ -187,7 +186,6 @@ PSEUDOCODE:
 
 - All multi-byte values use little-endian byte order
 - Float values are IEEE 754 single precision (4 bytes)
-- CRC is calculated as `256 - sum(data) % 256`
 - Always wait for response before sending next command
 - Device discovery triggers AT+CBN Bluetooth command on host
 - String values are null-padded to fixed lengths
