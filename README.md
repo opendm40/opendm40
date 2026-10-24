@@ -50,7 +50,9 @@ Known open issues ([firmware/TODO.md](firmware/TODO.md)): with 5-10 V on V-COM, 
 AC mV no longer show a false A-JACK on the meter; the second fix for Ω (LIVE? instead) is not yet
 checked on a meter. While the scope is powered
 (combined view, scope page), a fast square on the DMM input reads about
-0.2 % high.
+0.2 % high. Over Bluetooth, the first SCPI client after the module powers up
+finds a few stale errors, and a command in the first ~0.3 s after connecting
+can go unanswered.
 
 ## Differences from the stock firmware (V2.6)
 
