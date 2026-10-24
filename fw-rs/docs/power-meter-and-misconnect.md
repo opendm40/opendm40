@@ -1513,7 +1513,7 @@ lower row, rate chip, chart column, function row) in both layouts.
 In every non-current mode the stock writes PE0 = PE1 = 0 (`relay_pe(2)`, VERIFIED),
 which is the uA state: both MOSFETs off, the A jack sees 10 mohm + 0.5 ohm +
 47.5 ohm ~ 48 ohm to COM (INFERRED from the mode table; a user confirms the idle
-input "rests on the 47 ohm mA shunt", user-feedback #59918). Consequences:
+input "rests on the 47 ohm mA shunt", user-feedback [#59918](https://t.me/S2084K/59918)). Consequences:
 
 * A voltage source across A-COM while in V / ohm / ... mode draws V / 48 ohm:
   5 V -> 0.1 A (0.5 W in the 47.5 ohm resistor), 12 V -> 0.25 A (3 W), 24 V ->
