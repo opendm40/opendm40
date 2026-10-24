@@ -176,7 +176,13 @@ pub struct App {
     volume: u8,
     start_page: usize,
     combo: View,
+    /// Last touch / side key: the idle dim and the idle shutdown.
     last_input: u64,
+    /// Last host activity (`note_host_activity`): the idle shutdown only.
+    last_host: u64,
+    /// DBG:IDLE <ms>: the shutdown time in ms instead of the Shutdown setting
+    /// (0 = the setting). RAM only, for tests (emu/idletest.py).
+    off_test_ms: u32,
     /// A slider (temperature offset) owns the current touch.
     /// Temperature page key drawn pressed (ui::temp_key), if any.
     tp_pressed: Option<u8>,
@@ -548,6 +554,8 @@ impl App {
             start_page: 0,
             combo: View::DmmScope,
             last_input: 0,
+            last_host: 0,
+            off_test_ms: 0,
             dimmed: false,
             wake_gate: None,
             pd6_since: None,
@@ -1392,12 +1400,44 @@ impl App {
         }
     }
 
-    /// The host is talking to us (USBTMC command, BT request): counts as user
-    /// activity for the idle shutdown, so a host-driven session (SCPI polling,
-    /// a log being read out) never powers the unit off under the host. Does not
-    /// undim the backlight (nobody is necessarily looking at the screen).
+    /// The host is talking to us (a USBTMC message, a Bluetooth SCPI line or
+    /// phone-app frame, a USB disk READ / WRITE): counts as activity for the
+    /// idle shutdown, so a host-driven session (SCPI polling, a firmware
+    /// upload, a log or file being read out) never powers the unit off under
+    /// the host. The idle dim still runs on touches and keys alone, and host
+    /// activity does not undim: nobody is necessarily looking at the screen,
+    /// and a dimmed backlight costs the session nothing.
     pub fn note_host_activity(&mut self, now: u64) {
-        self.last_input = self.last_input.max(now);
+        self.last_host = self.last_host.max(now);
+    }
+
+    /// The idle shutdown time in ms (0 = never): the Shutdown setting, or
+    /// DBG:IDLE's test value.
+    fn off_ms(&self) -> u64 {
+        if self.off_test_ms != 0 {
+            self.off_test_ms as u64
+        } else {
+            OFF_MS[self.off_idx]
+        }
+    }
+
+    /// DBG:IDLE <ms> (0 = back to the Shutdown setting; `set`) and DBG:IDLE?
+    /// -> <ms since the last touch / key>,<ms since the last input or host
+    /// activity>,<shutdown ms, 0 = never> into `out` (emu/idletest.py).
+    #[inline(never)] // its frame stays out of main.rs `run`
+    pub fn dbg_idle(&mut self, set: Option<u32>, now: u64, out: &mut crate::scpi::Scpi) {
+        if let Some(ms) = set {
+            self.off_test_ms = ms;
+            return;
+        }
+        let since = |t: u64| now.saturating_sub(t).min(u32::MAX as u64) as u32;
+        out.len = 0;
+        for (i, v) in [since(self.last_input), since(self.last_input.max(self.last_host)), self.off_ms() as u32].iter().enumerate() {
+            if i > 0 {
+                out.put_bytes(b",");
+            }
+            out.put_u32(*v);
+        }
     }
 
     /// Repaint the whole view on the next drawing tick (main.rs: after the
@@ -1428,7 +1468,7 @@ impl App {
     /// Only drawing (and the 10 ms blocking relay re-assert) is skipped then:
     /// battery poll, settings save, the PD6 power key and the idle timers keep
     /// running. A no-draw period is host activity (a screenshot or a log
-    /// session), so it holds off the idle dim / shutdown: a log that runs
+    /// session), so it holds off the idle shutdown: a log that runs
     /// longer than the shutdown time cannot power the unit off the moment it
     /// stops, with unread records in the ring.
     // Not inlined into main.rs `run`: its frame would add to the worst
@@ -1462,10 +1502,12 @@ impl App {
             self.band_close();
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
-        // key PD6 (hold 1.5 s -> off).
-        let idle = now.saturating_sub(self.last_input);
+        // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
+        // shutdown host activity too (`note_host_activity`).
+        let dim_idle = now.saturating_sub(self.last_input);
+        let idle = now.saturating_sub(self.last_input.max(self.last_host));
         self.pw_tick(now);
-        if DIM_MS[self.dim_idx] != 0 && idle > DIM_MS[self.dim_idx] && !self.dimmed {
+        if DIM_MS[self.dim_idx] != 0 && dim_idle > DIM_MS[self.dim_idx] && !self.dimmed {
             self.dimmed = true;
             backlight(5);
         }
@@ -1474,7 +1516,7 @@ impl App {
         // Nor while the power meter integrates energy with a current flowing.
         // Nor during a CSV recording (Record page: a 24 h log on battery;
         // decisions-2026-10-22.md #1).
-        if OFF_MS[self.off_idx] != 0 && idle > OFF_MS[self.off_idx] && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
             self.persist_now();
             power_off();
         }
@@ -2777,7 +2819,7 @@ impl App {
     /// with a beep that ignores a 0 % volume. Not an input: the countdown
     /// goes on unless the user touches the screen or a key.
     fn off_warn(&mut self, now: u64, idle: u64) {
-        let off = OFF_MS[self.off_idx];
+        let off = self.off_ms();
         if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
