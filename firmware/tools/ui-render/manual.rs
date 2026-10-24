@@ -171,7 +171,7 @@ pub fn run(out: &str) -> usize {
 
     // Voltage range page: AUTO+ selected, DC, the AUTO+ note, Wave.
     host::reset(0);
-    ui::range_page(Button::Volt, Some(5), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+    ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
     ui::wave_button();
     ck.check_opts("manual/range-v", &page, false);
     save1(out, "range-v");
@@ -644,7 +644,7 @@ pub fn run(out: &str) -> usize {
         ck.check("manual/danger", &DMM_REGIONS);
         save1(out, "danger");
         host::reset(0);
-        ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
+        ui::range_page(Button::Volt, Some(7), 0, Some((dmm::MV_AUTO_WARN, true)));
         ui::wave_button();
         ck.check_opts("manual/range-v-auto", &page, false);
         save1(out, "range-v-auto");

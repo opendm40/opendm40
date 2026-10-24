@@ -220,10 +220,10 @@ def box(d, x, y, w, h, title, lines=(), fill=(240, 246, 252)):
 
 def install():
     im, d = canvas(880, 260)
-    box(d, 20, 60, 190, 120, 'Computer', ['opendm40.bin', 'copied as', 'dm40_fwrs.bin'])
+    box(d, 20, 60, 190, 120, 'Computer', ['dm40_opendm40_', 'v0.1.bin'])
     arrow(d, (215, 120), (285, 120))
     text_c(d, 250, 90, 'USB', font(13), MID)
-    box(d, 290, 60, 210, 120, 'Meter: USB disk', ['(stock: USB Connect)', 'dm40_fwrs.bin', 'the only dm40*.bin'])
+    box(d, 290, 60, 210, 120, 'Meter: USB disk', ['(stock: USB Connect)', 'the only dm40*.bin'])
     arrow(d, (505, 120), (585, 120))
     text_c(d, 545, 132, 'eject,\nswitch off\nand on', font(13), MID)
     s = shot('dmm-bar', 0.5)
@@ -581,7 +581,7 @@ def loader_key():
 
 def loader_install():
     im, d = canvas(860, 230)
-    box(d, 20, 50, 250, 120, 'Computer', ['dm40_fwrs.bin', 'or dm40_v_2_6.bin'])
+    box(d, 20, 50, 250, 120, 'Computer', ['dm40_opendm40_v0.1.bin', 'or dm40_v_2_6.bin'])
     arrow(d, (275, 110), (345, 110))
     box(d, 350, 50, 230, 120, "Loader's USB disk", ['one dm40*.bin', 'only'])
     arrow(d, (585, 110), (655, 110))
