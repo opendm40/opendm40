@@ -315,7 +315,8 @@ a fuse check.
 From top to bottom:
 
 - the [status bar](#the-status-bar);
-- the reading, with the unit and the coupling symbol on the right;
+- the reading, with the unit and the coupling symbol on the right, and up to
+  two small values above it (for example the frequency and the duty cycle);
 - a row with the [bargraph or the last five stored
   readings](#the-bargraph-and-the-history-row);
 - the [trend chart](#the-trend-chart), with its timebase and the rate on the
@@ -353,8 +354,8 @@ Bluetooth.
 #### DC and AC voltage
 
 - DC V: the signed voltage.
-- AC V: the true RMS voltage, with the frequency and the duty cycle in the
-  small rows below.
+- AC V: the true RMS voltage, with the frequency and the duty cycle above
+  it.
 - Ranges: 600 mV, 6 V, 60 V, 600 V, 1000 V.
 - From 30 V the value turns red; from 100 V a lightning symbol appears.
 
@@ -372,7 +373,7 @@ rail. The meter measures the AC part and the DC part one after the other and
 shows:
 
 - the total, √(AC² + DC²), as the main value;
-- the AC part and the DC part in the two small rows.
+- the AC part (left) and the DC part (right) above it.
 
 One full cycle takes about 2 s; the first value comes after about 1.3 s.
 Until both parts are measured, the parts are grey. After a range change the
@@ -390,8 +391,8 @@ AUTO coupling shows the DC part or the AC part, whichever the signal is:
 - a DC voltage with a little ripple: the DC value, signed;
 - an AC voltage with little DC: the RMS of the AC part.
 
-The coupling symbol next to the unit shows which part you see, and **AUTO**
-appears next to it. Both parts are always in the small rows.
+The coupling symbol above the unit shows which part you see, with **AUTO**
+above it. Both parts are always shown above the reading.
 
 ![AUTO coupling on a DC source](img/auto-acdc.png)
 
@@ -411,7 +412,7 @@ All current ranges use the **A** jack and **COM**. The meter switches the
 shunt inside.
 
 - Ranges: 600 µA, 6000 µA, 60 mA, 600 mA, 6 A, 10 A.
-- DC A: the signed current. In the mA ranges the small row shows the
+- DC A: the signed current. In the mA ranges the value above it shows the
   **4-20 mA** loop percentage: 4 mA = 0 %, 20 mA = 100 %. It is hidden below
   3.6 mA and above 125 %.
 - AC A: the RMS current, with frequency and duty cycle.
@@ -478,7 +479,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle in the small row.
+- The frequency, with the duty cycle above it.
 - A new value every 0.35 s. **--** until the first clean result.
 - MF opens the Hold & Limits page (there are no range choices).
 
@@ -497,13 +498,14 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 
 | Sensor | Notes |
 |---|---|
-| **TC K** (type K thermocouple) | -40 to 1000 °C. The small row shows the cold-junction temperature (the meter's own sensor). About 2 s per reading. |
+| **TC K** (type K thermocouple) | -40 to 1000 °C. The value above the reading is the cold-junction temperature (the meter's own sensor). About 2 s per reading. |
 | **PT100**, **PT1000** | -200 to 850 °C, 2-wire. |
 | **10k 3950**, **10k 3435**, **100k 3950** (NTC thermistors, B value 3950 or 3435) | -55 to 300 °C. |
 | **NTC user** | Set **R25** (100 Ω to 10 MΩ) and **Beta** (1000 to 10000) with the keypad. |
 
-- The small row shows the sensor's resistance (resistive sensors) or the
-  cold junction (TC K); the chip under it names the sensor.
+- The value above the reading is the sensor's resistance (resistive
+  sensors) or the cold junction (TC K); the chip on the right names the
+  sensor.
 - **Offset**: -20 to +20 °C in 0.1 °C steps, one per sensor. Tap **-** /
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
@@ -730,17 +732,18 @@ A current meter drops a small voltage across its shunt (the burden
 voltage), which the circuit under test loses. To show it: **Settings >
 More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 
-- DC: the burden voltage in the first small row, labelled **Burden**.
-- AC: in the second small row, instead of the duty cycle.
+- DC: the burden voltage above the reading, on the left, labelled
+  **Burden**.
+- AC: above the reading on the right, instead of the duty cycle.
 - Not shown in AC+DC, AUTO coupling or the power meter.
 - It is computed from the shunt resistance alone (10 mΩ for A, 0.5 Ω for
   mA, 47.5 Ω for µA); the fuse and the wiring add a little more.
 - At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
   (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
 
-![123.45 µA; the burden voltage, 5.9 mV, in the small row](img/burden.png)
+![123.45 µA; the burden voltage, 5.9 mV, above it](img/burden.png)
 
-*123.45 µA; the burden voltage, 5.9 mV, in the small row.*
+*123.45 µA; the burden voltage, 5.9 mV, above it.*
 
 ## Safety and alerts
 
@@ -998,7 +1001,7 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
   (**<**) or equal to (**=**, within 5 %) a width. Set the width with
   **-** / **+**, 20 ns to 10 s. Rising = a positive pulse.
 - **Runt**: triggers on a pulse that crosses the first level but not the
-  second. Drag the orange **T** to set the second level.
+  second. Drag the orange **T** on the left edge to set the second level.
 - Pulse and runt triggers look at each complete capture; a pulse in the
   short gap between captures can be missed. They do not work in roll mode.
 
