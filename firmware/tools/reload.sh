@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Developer reload of opendm40 (native image, docs/native-boot.md "Developer workflow").
+# Developer reload of opendm40 (native image, docs/dev-notes.md "Developer workflow").
 #
 #   tools/reload.sh [options] [build args...]     e.g. --features keep-screen
 #

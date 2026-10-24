@@ -1,98 +1,40 @@
 # Compact log format (DLG): binary on the disk, CSV on read
 
-Owner request 2026-10-21: "store the logged data in RLE or something like that
-to save space. Not in CSV. CSV only for export, e.g. on read. Or maybe there is
-a standard format with compression instead of CSV."
+opendm40 stores its logs on the SPI flash in its own compressed format, DLG,
+and produces CSV only when a file is read (USB volume, SCPI, host tool). This
+page specifies the format, the writers and the readers.
 
-Scope: the DMM recording (src/csvlog.rs, DMM page swipe down / `LOG:CSV ON`),
-the scope record (src/scope_csv.rs, UF-13 "Save CSV", c8db910) and, as a
-stream kind 3, the FR-38 fast logger to the disk (src/fastlog.rs, section
-"Fast stream (kind 3)").
+Users of the format: the DMM recording ([`src/csvlog.rs`](../src/csvlog.rs),
+DMM page swipe down / `LOG:CSV ON`), the scope record
+([`src/scope_csv.rs`](../src/scope_csv.rs), "Save CSV") and the fast logger
+to the disk ([`src/fastlog.rs`](../src/fastlog.rs), section "Fast stream
+(kind 3)"). Codec and CSV generator: [`src/dlog.rs`](../src/dlog.rs).
 
-## 1. What the CSV costs today
+## 1. Why DLG
 
-Measured with the csvlog.rs formatter ported bit for bit to Python
-(scratchpad prototype, synthetic data below):
+A CSV row is ~21 bytes (`1234.567,1.23456,V,\r\n`; ~25 for the fast
+logger). DLG codes the typical row ("time +-3 ms, value +-few digits") in
+~9-12 bits with delta / zigzag / adaptive Rice: 11-26x smaller than CSV on
+synthetic sets, against 3-3.5x for an MCU-sized deflate (a 32 KiB gzip window
+does not fit the RAM). The standard formats (gzip CSV, sigrok session, FLAC,
+ASAM MDF4, HDF5 / Parquet / TDMS) were compared in
+[log-format-standards.md](../../docs/history/log-format-standards.md): none
+is appendable in small power-cut-safe commits from the MCU and compresses
+as well, so DLG stays; the CSV export makes the format invisible to users.
 
-| data | rows/s | CSV bytes/row |
-|---|---|---|
-| noisy DC V 1.2345x V, sigma 30 uV | 10 | 20.7 |
-| steady 10.0012 kOhm, +-1 digit 10 % of rows | 2.5 | 22.7 |
-| battery ramp 4.2 -> 3.0 V | 2.5 | 21.2 |
-| AC V 230 V wandering | 10 | 20.7 |
-| Hz 50.000 wandering | 3 | 22.1 |
-| ohm with OL bursts | 10 | 20.4 |
-| MEDIUM rate (10/s moving, 2.5/s steady) + autorange steps | 2.5 | 21.8 |
-| FR-38 raw AD1 counts as `seq,t_s,counts` | 40 / 640 | 24.4 / 25.5 |
-| scope record row (fixed width) | 26624 per record | 26 |
+RLE is implicit: a repeated value with an unchanged interval costs 2 bits
+(k = 0 codes for 0 and 0).
 
-The row is ~21 bytes: `1234.567,1.23456,V,\r\n`; time (8..10 chars), value
-(7..11), unit and separators. The long-run timestamp grows by a char per
-decade of seconds.
+Hours of logging in ~13 MB of free SPI disk (16 MiB FAT16 minus the firmware
+backup `_DM40PRV.BIN`, the calibration safety copy and a few screenshots):
 
-Disk: W25Q128 16 MiB = one FAT16 volume, 4087 clusters of 4 KiB = 15.96 MiB.
-Taken out: the firmware backup `_DM40PRV.BIN` (~0.4 MB), the write-once
-calibration safety copy (~25 KB), a few screenshots (300 KB each). **13 MB
-free** is the working assumption below.
-
-Hours of logging in 13 MB:
-
-| rate | CSV (21 B DMM / 25 B FR-38) | DLG (measured, below) | gain |
+| rate | CSV (21 B DMM / 25 B fast logger) | DLG | gain |
 |---|---|---|---|
-| 1/s DMM | 172 h (7 days) | 2800 h (117 days; 1.29 B/row; one recording ends at 49.7 days, the u32 ms time) | 16x |
-| 10/s DMM | 17 h | 325 h (13.5 days; 1.11 B/row) | 19x |
-| 40/s FR-38 | 3.6 h | 41 h (2.2 B/row) | 11x |
-| 634/s FR-38 | 14 min | 2.6 h (2.15 B/row) | 11x |
+| 1/s DMM | 172 h (7 days) | 2800 h (1.29 B/row; one recording ends at 49.7 days, the u32 ms time) | 16x |
+| 10/s DMM | 17 h | 325 h (1.11 B/row) | 19x |
+| 40/s fast logger | 3.6 h | 41 h (2.2 B/row) | 11x |
+| 634/s fast logger | 14 min | 2.6 h (2.15 B/row) | 11x |
 | scope record | 690 KB / record, 18 records | ~9-14 KB / record, ~1000 records | 50-75x |
-
-## 2. Candidates
-
-Synthetic sets (Python, seed 1; times jittered +-3 ms as the main loop does);
-bytes per row:
-
-| set | CSV | gzip -9 | gzip member/min | deflate fixed-Huffman 1 KiB window | xz | bz2 | varint dod+delta | **adaptive Rice** |
-|---|---|---|---|---|---|---|---|---|
-| noisy DCV 10/s | 20.70 | 4.25 | 4.28 | 5.93 | 2.50 | 3.36 | 2.00 | **1.11** |
-| steady ohm 2.5/s | 22.71 | 3.52 | 3.94 | 5.17 | 2.00 | 3.04 | 2.00 | **0.88** |
-| ramp 2.5/s | 21.23 | 5.69 | 5.45 | 7.45 | 3.04 | 6.03 | 2.00 | **1.26** |
-| ACV 230 10/s | 20.70 | 5.38 | 5.19 | 7.09 | 2.88 | 4.50 | 2.01 | **1.43** |
-| Hz 50 3/s | 22.08 | 5.13 | 5.22 | 7.01 | 2.91 | 4.13 | 2.00 | **1.26** |
-| ohm + OL bursts | 20.25 | 4.61 | 4.52 | 6.21 | 2.57 | 3.57 | 2.94 | **1.86** |
-| MEDIUM + autorange | 21.77 | 4.71 | 4.99 | 6.48 | 3.02 | 3.70 | 2.00 | **1.25** |
-| FR-38 40/s | 24.35 | 8.16 | | 11.37 | 4.26 | 6.33 | 2.13 | **2.25** |
-| FR-38 640/s | 25.53 | 8.61 | | 12.28 | 4.31 | 6.74 | 2.76 | **2.15** |
-
-Ratios vs CSV: gzip 4..5x (desktop zlib, 32 KiB window), an MCU-sized
-deflate 3..3.5x, xz 7..8x (not MCU-feasible), own Rice coding **11..26x**.
-
-**(b) Standard formats.**
-* *gzip CSV, one gzip member per commit* (`LOG000.CSV.GZ`): the only standard
-  option with broad tool support (zcat, Python/pandas, 7-Zip; Excel does not
-  open it). Multi-member gzip is valid and power-cut friendly (each commit a
-  member). But a compressor that fits: RAM is the limit (native image:
-  ~5 KB of SRAM and ~6 KB of TCM left), so a 32 KiB window is out; a 1 KiB
-  window with fixed Huffman (uzlib-class, ~1.5 KB code, ~1.5 KB RAM for the
-  window + hash) reaches only **3.5x** (5.9 B/row). And on read the CSV still
-  has to be decompressed by the user.
-* *sigrok session (.sr)*: a ZIP with float32 analog samples per channel at a
-  fixed samplerate; the ZIP central directory is at the end (not appendable,
-  not power-cut safe), no per-sample timestamps (DMM readings are irregular:
-  MEDIUM switches 10/s <-> 2.5/s), no OL. 4 B/sample before deflate. Good as
-  an *export* target for the scope record later, not as the storage format.
-* *FLAC*: integer samples at a fixed rate, excellent residual coding (the
-  idea used below), but no timestamps / OL / units, and only audio tools.
-* HDF5 / Parquet / TDMS: far too big for the MCU.
-
-**(a) Own block format** wins by 3..5x over the best MCU-feasible standard
-option, and the CSV export is generated anyway. Choice: own format **DLG**,
-CSV produced on read (section 4).
-
-Why adaptive Rice and not byte varints / RLE: the varint coding is floored at
-2 bytes per row (one byte for time, one for value); Rice codes the typical
-"time +-3 ms, value +-few digits" row in ~9 bits. RLE is implicit: a repeated
-value with an unchanged interval costs 2 bits (k = 0 codes for 0 and 0); an
-explicit run token would save at most ~0.25 B/row on steady signals, not
-worth a second code path.
 
 ## 3. The DLG format (version 1)
 
@@ -119,7 +61,7 @@ first row number and the CSV byte offset of its first row, so:
 | 6 | 2 | header text length `hl` |
 | 8 | 4 | CRC-32 (zlib) of bytes 12 .. 12 + 12 + hl |
 | 12 | 12 | unit (ASCII, `ul` bytes used, rest 0) as in each CSV row |
-| 24 | hl | the CSV header text exactly as the old writer printed it (the two `#` lines and `time_s,value,unit,flags`, CRLF); an interval recording (Record page, decisions-2026-10-22.md #1) has a third `#` line before the column names: `# interval N s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it` |
+| 24 | hl | the CSV header text exactly as the old writer printed it (the two `#` lines and `time_s,value,unit,flags`, CRLF); an interval recording (Record page, [decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md) #1) has a third `#` line before the column names: `# interval N s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it` |
 
 ### Chunk (kind 1)
 
@@ -182,7 +124,7 @@ code; f32 dt, s/sample; u32 t0, the index of time 0; u32 n; u32 CRC-32 of
 these 20), the block table (per 4096-sample block: u32 coded bytes, u32
 CRC-32 of them; then u32 CRC-32 of the table), then the coded blocks.
 
-A block (../docs/history/log-format-standards.md section 4): 3 bits mode, 0..3 = the
+A block ([log-format-standards.md](../../docs/history/log-format-standards.md) section 4): 3 bits mode, 0..3 = the
 FLAC fixed polynomial predictor of that order (chosen per block: the least
 sum of |residual|), 4 = raw 10-bit codes (used when it is smaller, so a
 block is never above 1.25 B/sample); then per sample the adaptive Rice code
@@ -199,7 +141,7 @@ encoder (dlog::SEnc) continues where the last piece stopped, so no sample is
 coded twice and a pass costs ~2500 samples at most. No truncation, no
 over-allocation.
 
-Size (tools/dlog-test, synthetic 26624-sample records), bytes per sample:
+Size ([`tools/dlog-test`](../tools/dlog-test), synthetic 26624-sample records), bytes per sample:
 
 | record | u16 (before) | DLG | vs u16 |
 |---|---|---|---|
@@ -218,12 +160,12 @@ bytes for 26624 samples (0.16 B/sample; the model has no ADC noise; u16
 would be 53624), decoded by dlog.py to the 692552-byte CSV. The generated CSV is byte
 for byte the old SCOPnnn.CSV (fatren-test md5, dlog-test vs scope_row).
 
-### Fast stream (kind 3: the fast logger, implemented 2026-10-22)
+### Fast stream (kind 3: the fast logger)
 
-The FR-38 / AD2 stream to the disk (src/fastlog.rs session, src/fastenc.rs
-coder + pager; TODO "FR-38 logger to disk", "(B) AD2 samples to the SPI
-disk"): `LOGS/FASTnnn.DLG`, served as `LOGS/FASTnnn.CSV` on the USB volume
-and by `MMEM:DATA? "FASTnnn.CSV"`, decoded by tools/dlog.py.
+The FR-38 / AD2 stream to the disk (`fastlog.rs` session,
+[`src/fastenc.rs`](../src/fastenc.rs) coder + pager): `LOGS/FASTnnn.DLG`,
+served as `LOGS/FASTnnn.CSV` on the USB volume and by
+`MMEM:DATA? "FASTnnn.CSV"`, decoded by [`tools/dlog.py`](../tools/dlog.py).
 
 File: the file header (kind 3; unit `V` / `A` for AD2, `cts` for AD1; the
 CSV header text), then 32 bytes of parameters:
@@ -270,7 +212,7 @@ nominal period) - 1: the conversions missing before the row (a main-loop
 stall of the AD1 sampler, the ring full because the flash fell behind, a
 stall of the run): every loss is visible, none silent.
 
-Size (tools/dlog-test fast sets, 2026-10-22):
+Size (`tools/dlog-test` fast sets):
 
 | set | B/sample | file B/s |
 |---|---|---|
@@ -304,7 +246,7 @@ uses 3 B/sample (fastlog::BPS_*); a file that fills up first ends Full.
     Stop   the ring's rest, the last chunk and pages; the entry's size = the
            bytes written; the unused clusters freed in both FATs.
 
-Power cut (tools/fatren-test "fastlog": a cut before every block write,
+Power cut ([`tools/fatren-test`](../tools/fatren-test) "fastlog": a cut before every block write,
 page program and erase of a session): before the chain nothing is visible;
 during the chain / entry at worst lost clusters; during the run the file has
 the allocation's size and every chunk programmed so far decodes (the rest
@@ -316,8 +258,8 @@ longer than the file (fsck truncates) at worst.
 #### Rate limits (the flash)
 
 The chip: W25Q128JV page program tPP 0.4 ms typ / 3 ms max (256 bytes);
-the 12.5 MHz SPI clocks a page out in ~0.17 ms of CPU (polled, back to back
-since 2026-10-23: `tx_burst`; ~0.25 ms before); a chunk header costs one
+the 12.5 MHz SPI clocks a page out in ~0.17 ms of CPU (polled, back to back:
+`tx_burst`); a chunk header costs one
 more short program per 4 KiB chunk.
 
 | | per page | pages/s | bytes/s |
@@ -335,28 +277,20 @@ more short program per 4 KiB chunk.
 | AD1 640 | ~1.3 KB/s | large | | ~2.8 h |
 | AD1 40 | ~0.1 KB/s | large | | ~1.5 days |
 
-76800 S/s (2026-10-22, feasibility 11.12, decision 2026-10-22 #9): the
-emulator with the disk's SPI timed (GD32_SPI on SPI1: the ~0.2 ms per page
-is charged now) keeps up with a typical chip up to 196 KB/s (767 pages/s,
-~full-scale white noise, FIFO high water 460 of 8192 B) and loses 28-54 %
-with tPP 3 ms on every page. So a disk session above 38400 S/s first times
-4 page programs at the end of Prep (`fastlog::set_probe`, LOG:DISK? tpp
-fields) and runs at 76800 only when the mean is <= 800 us and the max <=
-1.5 ms, else at 38400.
+76800 S/s ([dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md)
+11.12, decision 2026-10-22 #9): in the emulator with the disk's SPI timed, a
+typical chip keeps up to 196 KB/s (767 pages/s), a chip at tPP 3 ms on every
+page loses 28-54 %. So a disk session above 38400 S/s first times 4 page
+programs at the end of Prep (`fastlog::set_probe`, LOG:DISK? tpp fields) and
+runs at 76800 only when the mean is <= 800 us (`TPP_OK_MEAN_US`) and the max
+<= 1.5 ms (`TPP_OK_MAX_US`), else at 38400.
 
-**The CPU (device 7409b92, 2026-10-23).** With a typical chip (tPP 0.38 ms)
-the 76800 rung lost 54 % on the device: the stream ISR took 54 % of the CPU
-(cpu_permille 544), the Run pass's budget counted wall cycles (the coder got
-~138 us of a 300 us pass) and the coder needed ~10 us of CPU per row (64-bit
-shifts in the bit buffer, a CRC call per byte, 12-byte record packing at
-opt-level z, 64-bit divisions for the log panel every pass). The emulator
-had not shown it: it runs one instruction per cycle (`--mips 200`); the
-device is ~1.8x slower (emu/peripherals/CpuCost.cs: `--mips 110` matches the
-device's idle pass and its 76.8 kS/s Run pass; `--isr-stall-ns 700` its ISR
-share). Under that model the old firmware lost 37-46 %. Now (PC samples of
-the main code at the ISR entries, `PcSampleStart`): the writer takes ~2.5 us
-per row for the coder and ~0.17 ms per page, ~60 % of the main loop's CPU at
-1.8 B/sample; 0 lost at 1.2-2.45 B/sample with the ISR at 52-62 %.
+**The CPU.** At 76800 the stream ISR takes ~52-62 % of the CPU. The writer
+needs ~2.5 us per row for the coder and ~0.17 ms per page, ~60 % of the main
+loop's CPU at 1.8 B/sample (emulator with the device's speed model,
+`--mips 110 --isr-stall-ns 700`, emu/peripherals/CpuCost.cs). The Run pass
+budget counts its own CPU (wall time minus the ISR's busy time). Before this
+was tuned (device 7409b92) the 76800 rung lost 54 % on the device.
 
 **The writer trial** (fastlog.rs `Gate`, every disk session above 38.4
 kS/s whose tPP probe passed): the stream's first 1 s (after a 100 ms
@@ -375,40 +309,28 @@ fields 11..13: the verdict (0 none, 1 kept, 2 fell back), the window's ISR
 permille, the ring's high water. A stop during the trial abandons the
 session as one in Ready (the file is removed).
 
-Emulator, 76800 to the disk, flash typ (emu/fastlogtest.py --mips 110
---isr-stall-ns 700, 2026-10-23):
+Emulator, 76800 to the disk, flash typ (`emu/fastlogtest.py --mips 110
+--isr-stall-ns 700`, 2026-10-23; "before" = 8087c7d):
 
 | firmware | input | rows | lost | B/sample | pages/s | ISR % | trial |
 |---|---|---|---|---|---|---|---|
 | 8087c7d (before), --mips 110 alone | 0.5 V 50 Hz | 96 520 of 153 602 | 57 081 (37 %) | 1.99 | 596 | 46 | - |
 | 8087c7d (before) | 0.5 V 50 Hz | 82 977 of 153 639 | 70 662 (46 %) | 2.12 | 636 | 52 | - |
-| this | 0.5 V 50 Hz | 153 602 | 0 | 1.22 | 366 | 52 | kept |
-| this | + noise 40 / 200 / 1000 | 768 002 / 307 201 / 306 422 | 0 | 1.81 / 2.09 / 2.45 | 544 / 628 / 734 | 52 / 52 / 62 | kept |
-| this, the trial at 12.7 s uptime (--start-at 11) | 0.5 V 50 Hz | 153 601 | 0 | 1.21 | 363 | 52 | kept |
-| this, --isr-stall-ns 1500 | 0.5 V 50 Hz | 307 201 | 0 | 1.24 | 372 | 59 | kept |
-| this, --mips 80 / 70 (a slower main loop) | 0.5 V 50 Hz | 153 602 / 76 802 at 38400 | 0 | 1.27 / 1.34 | 190 / 201 | 27 / 30 (63 / 69 in the trial) | fell back |
-
-(--isr-stall-ns 3000 makes the model's ISR itself late: thousands of late
-samples and overruns at any writer speed, a state the device never showed.)
-
-(The device's 76800 rate finding of 7409b92 showed in the emulator: a 76800
-session after any earlier stream session of the same boot (a 38400 one, a
-76800 one stopped in its trial), or with a heavy noise (--noise 1000), locked
-at rate_mhz 76 723.6 / ppm_x10 +9952 with 1.39 ISR entries per sample and
-the ISR at 61 % (the first one after boot: 76 800.0, 1.13, 52 %); still 0
-lost, trial kept, ring high water ~1800 of 2048. The causes: the rung's
-real rate, 76 574.6 S/s (now the nominal), and the hybrid probe window's 1.2
-us late side with a loop that integrated the walk past it
-(docs/dmm-input-scope-feasibility.md 11.12, fixed 2026-10-23).)
+| after | 0.5 V 50 Hz | 153 602 | 0 | 1.22 | 366 | 52 | kept |
+| after | + noise 40 / 200 / 1000 | 768 002 / 307 201 / 306 422 | 0 | 1.81 / 2.09 / 2.45 | 544 / 628 / 734 | 52 / 52 / 62 | kept |
+| after, the trial at 12.7 s uptime (--start-at 11) | 0.5 V 50 Hz | 153 601 | 0 | 1.21 | 363 | 52 | kept |
+| after, --isr-stall-ns 1500 | 0.5 V 50 Hz | 307 201 | 0 | 1.24 | 372 | 59 | kept |
+| after, --mips 80 / 70 (a slower main loop) | 0.5 V 50 Hz | 153 602 / 76 802 at 38400 | 0 | 1.27 / 1.34 | 190 / 201 | 27 / 30 (63 / 69 in the trial) | fell back |
 
 So: up to 19200 S/s the disk keeps up even at the datasheet's worst page
 time; 38400 S/s keeps up with typical parts (~5x margin) but not with a
 chip at tPP max on every page, where the ring (53 ms at 38400) overflows
-and the CSV shows lost_before rows. The emulator measurement (busy model in
-emu/peripherals/W25Q128.cs, emu/fastlogtest.py) is below; the device run is
-in the TODO.
+and the CSV shows lost_before rows. Emulator measurement below (busy model in
+[emu/peripherals/W25Q128.cs](../../emu/peripherals/W25Q128.cs),
+[emu/fastlogtest.py](../../emu/fastlogtest.py)); the device check is open
+([TODO.md](../TODO.md) "Fast logger device check").
 
-Emulator (emu/fastlogtest.py, 2026-10-22; 200 MIPS, AC V 0.5 V 50 Hz on
+Emulator (`emu/fastlogtest.py`, 2026-10-22; 200 MIPS, AC V 0.5 V 50 Hz on
 0.2 V DC / DC V for AD1, LOG:DURation 2; the model's signal is cleaner than
 a real input, so its B/sample is low):
 
@@ -422,24 +344,21 @@ a real input, so its B/sample is low):
 Every session kept up, also 38400 S/s with tPP = 3 ms on every page (217 of
 the ~310 pages/s; the ring never overflowed): at this signal's 1.45
 B/sample. A noisier input (2.93 B/sample worst case: ~440 pages/s) at
-38400 would not keep up with a worst-case chip; the device run decides.
+38400 would not keep up with a worst-case chip (untested on the device).
 The Prep time is the erase of a zero-filled emulator disk (worst: every
-sector dirty); a fresh area that is already blank skips it. Bluetooth in
-the same run: AD2 refused ("Rate too high for Bluetooth"), a DISK session
-refused ("Command protected"), an AD1 40 S/s session drained over BT
-LOG:DATA? (349 records in ~20 s wall).
+sector dirty); a fresh area that is already blank skips it. Over Bluetooth
+AD2 and disk sessions are refused ([bt-scpi.md](bt-scpi.md#throughput)).
 
 ## 4. Export: CSV on read
 
-The DLG files live on the SPI flash (internal storage, src/fatdir.rs) as
-`LOGS/LOGnnn.DLG` / `LOGS/FASTnnn.DLG` / `SCOPE/SCOPnnn.DLG` (files of earlier builds in its
-root); the firmware neither writes nor reads text CSV files there (owner
-2026-10-21: the CSV is only the export). CSV is produced three ways from one
-generator in src/dlog.rs:
+The DLG files live on the SPI flash (internal storage,
+[`src/fatdir.rs`](../src/fatdir.rs)) as `LOGS/LOGnnn.DLG` / `LOGS/FASTnnn.DLG`
+/ `SCOPE/SCOPnnn.DLG` (files of earlier builds in its root); the firmware
+writes no text CSV files there. CSV is produced three ways from one
+generator in `dlog.rs`:
 
-1. **Generated files on the read-only USB volume** (vdisk.rs, the only USB
-   disk since the 2026-10-21 storage redesign): `LOGS/LOGnnn.CSV` for each
-   finished `LOGnnn.DLG`, `SCOPE/SCOPnnn.CSV` for each `SCOPnnn.DLG`, exact
+1. **Generated files on the USB volume** ([`src/vdisk.rs`](../src/vdisk.rs)): `LOGS/LOGnnn.CSV` for each
+   finished `LOGnnn.DLG` and `FASTnnn.DLG`, `SCOPE/SCOPnnn.CSV` for each `SCOPnnn.DLG`, exact
    size from the chunk headers / block table. Section 5.
 2. **SCPI** `MMEMory:DATA? "<name>"[,<offset>[,<length>]]`: definite-length
    block `#4nnnn` of up to 6000 bytes of the file starting at `offset`
@@ -447,20 +366,20 @@ generator in src/dlog.rs:
    generated CSV, any other file as its raw bytes (the name decides the
    directory; a `LOGS/` / `SCOPE/` / `SHOTS/` prefix is accepted). The host
    loops until a short block. `MMEM:CAT?` lists the gallery files (S*.BMP,
-   LOG*.DLG, SCOP*.DLG; those in a directory with it), all as `BIN`:
+   LOG*.DLG, FAST*.DLG, SCOP*.DLG; those in a directory with it), all as `BIN`:
    `"LOGS/LOG000.DLG,BIN,<bytes>"`.
-3. **Host decoders**: `tools/dlog.py` (standalone, stdlib only:
+3. **Host decoders**: [`tools/dlog.py`](../tools/dlog.py) (standalone, stdlib only:
    `dlog.py LOG000.DLG > LOG000.CSV`, `--check` reports chunk errors) and
    `tools/dm40scpi.py get LOGS/LOG000.CSV` (over USBTMC, `MMEM:DATA?`).
 
 The gallery reads `.DLG` directly (chunk decoder into its min / avg / max and
 sparkline passes).
 
-## 5. The USB volume's CSV files (vdisk.rs `refresh`, implemented)
+## 5. The USB volume's CSV files (`vdisk::refresh`)
 
 `vdisk::refresh(exclude)` scans the SPI directories (dlog.rs `each_entry`
 over cluster chains, `dir_start`) and keeps a table of the generated files
-(docs/native-boot.md "Unit data": existing files keep their slot and
+([native-boot.md, Unit data](native-boot.md#unit-data-the-usb-volume-srcvdiskrs-the-spi-disk-srcfatdirrs-and-the-calibration-safety-copy-srccalbackuprs): existing files keep their slot and
 clusters, new ones are appended, a compaction only while unmounted); a new
 DLG's CSV size comes from `Gen::open` (every chunk header + CRC; once per
 file, not per refresh; kind 3: the chunk headers and the CRCs of the last 4
@@ -478,46 +397,39 @@ directory scan plus `Gen::open` of the new DLGs, ~0.1 s per 100 KB of new
 logs at the 12.5 MHz SPI clock. The volume is 1.98 GiB (32 KiB clusters):
 CSVs are ~10-20x their DLG, so a full 16 MB SPI disk of logs fits.
 
-Large FAST files (2026-10-22, device 036cc55: 26 / 53 MB CSVs too slow to
-read over the volume). Causes and fixes, measured on the host by
-tools/fatren-test `vread` (1.1 M AD2 rows: a 2.2 MB DLG, a 50.6 MB CSV, read
-sector by sector as a host does; the SPI time estimated at 0.64 us per byte
-+ ~6 us per read):
+Large FAST files (a 2.2 MB DLG is a ~50 MB CSV):
 
-| | before | after |
-|---|---|---|
-| `Gen::open` at the volume refresh (CSV size) | CRC of every chunk: 2.2 MB read, ~1.5 s main-loop stall | headers + the last 4 chunks' CRCs: 34 KB, ~0.04 s |
-| the same again at the first read of the file | ~1.5 s | ~0.04 s |
-| SPI reads for the whole CSV | 171 k (153 k 2-byte FAT reads: every chunk step re-read the current chunk's header, a step back that walked the FAT chain from the start, quadratic in the size) | 13 k (`fast_seek` / `seek` go on from the next chunk) |
-| SPI time for the whole CSV | ~4.1 s | ~1.5 s (~32 MB/s SPI-bound) |
-| code | the generator, the vdisk sector path in region C (slow flash) | `.text.vdisk_rd` in region B (~6 KB) |
-| USB | usbd-storage sends one 64-byte packet per poll: ~2 per main-loop pass | main.rs polls on while a READ's data phase runs, 2 ms per pass (0.5 ms in a logger session) |
+- `Gen::open` checks the chunk headers and only the last 4 chunks' CRCs
+  (~34 KB of reads, ~0.04 s), at the volume refresh and at the first read.
+  A chunk corrupted inside the file (not the torn tail) is then not
+  detected by the volume / MMEM:DATA? (its rows decode as garbage, their
+  count right); `tools/dlog.py` checks every CRC.
+- `fast_seek` / `seek` go on from the next chunk (no FAT walk from the
+  start): ~13 k SPI reads for a 50 MB CSV, ~1.5 s of SPI time (host
+  estimate, `tools/fatren-test` `vread`).
+- The sector read path is `.text.vdisk_rd` in region B (zero-wait flash).
+- main.rs keeps polling USB while a READ's data phase runs, 2 ms per pass
+  (0.5 ms in a logger session). The device throughput is not measured
+  (TODO.md "Fast logger device check").
 
-Host CPU for the 50 MB CSV: 0.2 s (x86). The device throughput is to be
-measured (TODO "Fast logger device check" 8). A chunk corrupted inside the
-file (not the torn tail) is no longer detected by the volume / MMEM:DATA?
-(its rows decode as garbage, their count right); tools/dlog.py still
-checks every CRC.
-
-Tested: tools/fatren-test (the USB volume over a SPI image with logs, scope
+Tested: `tools/fatren-test` (the USB volume over a SPI image with logs, scope
 records and screenshots: dumped, fsck, mtools, LOGS/LOG000.CSV == the old
 writer's file by md5, SCOPE/SCOP000.CSV too, every CSV == dlog.py) and the
 emulator (USB/IP `mscdump`).
 
 ## 6. Cost on the MCU
 
-* Encoder: per row the old text formatter (for the CSV length) + ~40
-  instructions of bit coding; no new RAM (the coded bytes go to the
-  existing 8 KiB FIFO, the chunk header is patched there before the commit).
-  The FIFO now holds ~2 min (worst case) to ~10 min of readings while a PC
-  write or mount defers commits (was ~27 s).
-* Code: the whole change is +~19 KB of native .text (codec, generator,
-  USB-volume table, MMEM:DATA?, gallery reader); .bss +~1 KB.
+* Encoder: per row the text formatter (for the CSV length) + ~40
+  instructions of bit coding; the coded bytes go to the 8 KiB csvlog FIFO,
+  the chunk header is patched there before the commit. The FIFO holds ~2 min
+  (worst case) to ~10 min of readings while a commit is deferred.
+* Code: ~19 KB of native .text (codec, generator, USB-volume table,
+  MMEM:DATA?, gallery reader).
 * Gallery: same decoder, one chunk per main-loop pass.
 
 ## 7. Results
 
-Host (tools/dlog-test, 6000 rows per set, chunks of 1..1200 rows):
+Host (`tools/dlog-test`, 6000 rows per set, chunks of 1..1200 rows):
 
 | set | CSV B/row | DLG B/row | ratio |
 |---|---|---|---|
@@ -531,9 +443,9 @@ Host (tools/dlog-test, 6000 rows per set, chunks of 1..1200 rows):
 | decade sweep (worst case) | 22.5 | 7.20 | 3.1x |
 | 10 h at 10/s, 1-min chunks | 21.7 | 1.16 | 18.7x |
 
-Emulator (native image, Renode, USB/IP): `LOG:CSV ON` for 60 s on a 1.234 V
-input (154 readings, MEDIUM 2.5/s): LOG000.DLG 455 bytes (248 of them the
-header), CSV 3108 bytes; `MMEM:DATA? "LOG000.CSV"` == tools/dlog.py of
-`MMEM:DATA? "LOG000.DLG"` == LUN-1 LOG000.CSV read over MSC (the two-LUN layout of that day).
+Emulator (native image): `LOG:CSV ON` for 60 s on a 1.234 V input (154
+readings, MEDIUM 2.5/s): LOG000.DLG 455 bytes (248 of them the header), CSV
+3108 bytes; `MMEM:DATA? "LOG000.CSV"` == `tools/dlog.py` of
+`MMEM:DATA? "LOG000.DLG"` == the USB volume's LOG000.CSV.
 
-Status and the device checklist: TODO.md "Compact binary logs".
+Status and the device checklist: [TODO.md](../TODO.md) "Compact binary logs".
