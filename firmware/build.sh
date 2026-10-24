@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build opendm40: the native update file -> opendm40.bin.
+# Build opendm40: the native update file -> opendm40.bin, and the same file
+# under its install name dm40_opendm40_v<version>.bin.
 #   ./build.sh [native] [cargo args]       e.g. ./build.sh --features keep-screen
 # (`native` is accepted as a no-op first argument for older callers, e.g.
 # emu/run.py.) Body = 0x08004000..end with the 12-byte loader marker at
@@ -120,6 +121,16 @@ if [ $((0x08004000 + n - 12)) -gt $((0x080A0000)) ]; then
     echo "build.sh: the padded body ends past 0x080A0000 (FS-loader)" >&2
     rm -f "$OUT"
     exit 1
+fi
+# The install name, dm40_opendm40_v<version>.bin: a copy next to
+# opendm40.bin (the file tools/reload.sh and the emulator take). <version> is
+# the one *IDN? and Settings > Device show (src/ident.rs VERSION): Cargo.toml's
+# version without a ".0" patch (0.1.0 -> 0.1, 0.1.0-pre1 -> 0.1-pre1).
+# Not for DM40_OUT builds.
+if [ -z "${DM40_OUT:-}" ]; then
+    VER=$(tools/fw-version.sh)
+    cp "$OUT" "dm40_opendm40_v$VER.bin"
+    echo "install file: dm40_opendm40_v$VER.bin"
 fi
 # Region A2 (zero-wait, 0x0800460c..0x08008000) below 2 KiB free: a banner
 # (the link fails when A2 reaches the loader marker at 0x08008000).

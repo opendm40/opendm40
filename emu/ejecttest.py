@@ -17,7 +17,7 @@ Steps (exit status 0 = PASS):
   poweroff   `udisksctl power-off` (STOP without LoEj, then the USB device
              removed): the disk goes away; re-plug: back;
   install    "PC can edit" (DBG:VDISK:RO 0 + re-plug): rw mount, the built
-             update image copied as dm40_fwrs.bin and ejected at once (`gio
+             update image copied as dm40_opendm40_v0.1.bin and ejected at once (`gio
              mount -e`: flush, umount, Allow, eject): the meter commits it
              (DBG:VDISK:WR? firmware files committed + 1, state ask / asked),
              the medium stays ejected; re-plug: back, still writable.
@@ -381,7 +381,7 @@ try:
             mp = m.mount()
             check('rw' in m.options().split(','), 'install: mounted read-write (%s)' % m.options())
             wr0 = m.q('DBG:VDISK:WR?').split(',')
-            shutil.copyfile(A.image, os.path.join(mp, 'dm40_fwrs.bin'))
+            shutil.copyfile(A.image, os.path.join(mp, 'dm40_opendm40_v0.1.bin'))
             t0 = time.time()
             check(m.eject(mp), 'install: copied, ejected at once (%.1f s)' % (time.time() - t0))
             wr = wr0

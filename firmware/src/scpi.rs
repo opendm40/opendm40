@@ -129,7 +129,7 @@
 //! *IDN? = "Alientek,DM40A|B|C,<24 hex digits of the chip UID>,opendm40 0.1"
 //! (the serial number = the USB one, src/uid.rs).
 //! *IDN? compatibility (SYSTem:IDN:EMULation, persisted, default OFF): with
-//! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,dm40-fw 0.1" so that hosts
+//! 34401A, *IDN? answers "HEWLETT-PACKARD,34401A,0,opendm40 0.1" so that hosts
 //! with a 34401A profile only (libsigrok >= 0.5.2 / SmuView without the DM40
 //! profile) take the meter; READ? then never waits longer than the quick
 //! budget (+9.91E37, read as +inf there, until the first reading after a
@@ -246,30 +246,21 @@
 
 use crate::dmm::Reading;
 
-/// *IDN?: "Alientek,DM40<m>,<serial>,opendm40 0.1", <m> = the calibration
-/// model letter (`model`), <serial> = the chip UID as 24 hex digits
-/// (src/uid.rs; the USB serial number too). libsigrok shows it as [S/N: ..],
-/// ngscopeclient as the serial; both take any comma-free field.
+/// *IDN?: "Alientek,DM40<m>,<serial>,opendm40 <version>", <m> = the
+/// calibration model letter (ident.rs), <serial> = the chip UID as 24 hex
+/// digits (src/uid.rs; the USB serial number too), <version> =
+/// `ident::VERSION`. libsigrok shows it as [S/N: ..], ngscopeclient as the
+/// serial; both take any comma-free field.
 const IDN_HEAD: &[u8] = b"Alientek,DM40";
-const IDN_TAIL: &[u8] = b",opendm40 0.1";
-
-/// Model index (0 DM40A, 1 DM40B, 2 DM40C) and the raw calibration byte
-/// (record 0x080C0000 + 0x168, docs/model-variants.md), set once by App::new
-/// from `Dmm::model()` / `Dmm::model_raw()`. *IDN? and SYSTem:MODel? report it.
-static MODEL: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
-
-pub fn set_model(index: u8, raw: u8) {
-    MODEL.store(index.min(2) as u16 | (raw as u16) << 8, core::sync::atomic::Ordering::Relaxed);
-}
+const IDN_TAIL: &[u8] = b",opendm40 ";
 
 fn model() -> (u8, u8) {
-    let v = MODEL.load(core::sync::atomic::Ordering::Relaxed);
-    (v as u8, (v >> 8) as u8)
+    crate::ident::model()
 }
 /// *IDN? while SYST:IDN:EMUL 34401A is on: the HP 34401A identity (vendor
 /// as the real meter's, libsigrok maps it to "HP"), our firmware in the
-/// version field.
-pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0,dm40-fw 0.1";
+/// version field: "HEWLETT-PACKARD,34401A,0,opendm40 <version>".
+pub const IDN_34401A: &[u8] = b"HEWLETT-PACKARD,34401A,0";
 
 /// *IDN? compatibility mode (SYSTem:IDN:EMULation OFF|34401A; persisted, app.rs
 /// persist_words p[0] bit 14): 0 = off (default), 1 = HP 34401A. For hosts
@@ -1624,12 +1615,17 @@ impl Scpi {
                 self.put(b";");
             }
             match (p0, query) {
-                (b"*IDN", true) if idn_emul() == 1 => self.put(IDN_34401A),
+                (b"*IDN", true) if idn_emul() == 1 => {
+                    self.put(IDN_34401A);
+                    self.put(IDN_TAIL);
+                    self.put(crate::ident::VERSION.as_bytes());
+                }
                 (b"*IDN", true) => {
                     self.put(IDN_HEAD);
                     self.put(&[b'A' + model().0, b',']);
                     self.put(crate::uid::bytes());
                     self.put(IDN_TAIL);
+                    self.put(crate::ident::VERSION.as_bytes());
                 }
                 // SYSTem:MODel?: "DM40A|B|C,<raw byte>,<counts>": the model the
                 // calibration record names (stock rule: record +0x168, a record

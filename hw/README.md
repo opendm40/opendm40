@@ -285,7 +285,7 @@ bootloader and the FS-loader before the application runs.
 3. Keep the short until the update screen appears ("open file error" and the
    FS-loader's own USB disk on the PC).
 4. Copy an update file onto that disk under a `dm40*.bin` name: the official
-   [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) from [`stock/vendor/`](../stock/vendor) in this repo (back to stock) or an opendm40 image (e.g. `dm40_fwrs.bin`),
+   [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) from [`stock/vendor/`](../stock/vendor) in this repo (back to stock) or an opendm40 image (e.g. `dm40_opendm40_v0.1.bin`),
    then press "update" on the screen.
 5. Remove the short.
 

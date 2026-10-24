@@ -13,6 +13,7 @@ mod msc;
 mod spiflash;
 mod hy3131;
 mod hy3131_tables;
+mod ident;
 mod hyspi;
 mod lcd;
 mod logger;
@@ -2126,11 +2127,10 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         None => b"cts",
     };
     let mut w = dlog::Txt { b: &mut out[..], n: 0 };
-    w.s("# Alientek DM40A, opendm40 ");
-    w.s(match option_env!("CARGO_PKG_VERSION") {
-        Some(v) => v,
-        None => "dev",
-    });
+    w.s("# Alientek ");
+    w.s(ident::model_name());
+    w.s(", opendm40 ");
+    w.s(ident::VERSION);
     w.s(", fast log, source ");
     w.s(if ad2 { "AD2" } else { "AD1" });
     w.s(", mode ");

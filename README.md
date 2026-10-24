@@ -71,10 +71,12 @@ Item by item: [firmware/docs/parity.md](firmware/docs/parity.md).
 Back up first: see [Back up with opendm40](#back-up-with-opendm40). Charge the
 battery.
 
-1. Build `opendm40.bin` ([firmware/README.md, Build](firmware/README.md#build)).
+1. Build the image ([firmware/README.md, Build](firmware/README.md#build)):
+   `firmware/dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.1.bin`
+   (a release asset: `dm40_opendm40_v<version>[-preN].bin`).
 2. On the stock meter: Settings > Other Settings > USB Connect.
-3. Copy the file onto that USB disk as `dm40_fwrs.bin`, as the only
-   `dm40*.bin` there ([why](#recovery)). Eject.
+3. Copy the file onto that USB disk, as the only `dm40*.bin` there
+   ([why](#recovery)). Any `dm40*.bin` name installs. Eject.
 4. Power the meter off and on (a cold boot): the stock update procedure.
    `firmware/tools/reload.sh --from-stock` stages the file for you and waits for opendm40.
 5. **The first boot is dark for a few seconds.** Do not power-cycle in the
@@ -161,7 +163,7 @@ To reach the update screen:
   the case and short the debug header's TX pad (PA2) to GND at power-on, see
   [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
 
-Then copy a good image onto the loader's disk as `dm40_fwrs.bin` and press
+Then copy a good image (`dm40_opendm40_v<version>.bin`, any `dm40*.bin` name) onto the loader's disk and press
 "update". The loader deletes the file after a successful install.
 `INFO/FIRMWARE.BIN` on the opendm40 USB drive is the running image as an update
 file; keep a copy.
