@@ -480,11 +480,8 @@ would need per-firmware hooks and was not done.
   the marker (`stock-trigger-1khz-5us.png`); Normal mode -> `T'D` with the
   signal and `WAIT` after `--scope dc,0,0` (`stock-trigger-normal-*.png`).
   fw-rs: its comparator engine (TIM2 PWM2 OC2REF gating TIM1 from ITR1) runs
-  in the emulator once enabled (`fwrs-hwtrig.png`); `DBG:*` is refused over
-  Bluetooth, so until USB exists enable it by patching `HwTrig::available`
-  to `movs r0,#1; bx lr` before start (script lines
-  `0 monitor sysbus WriteWord 0x08025870 0x2001` / `0x08025872 0x4770`,
-  address from `llvm-nm` of the ELF). Timebase/trigger controls of the
+  in the emulator once enabled (`fwrs-hwtrig.png`); `DBG:HWTRIG:ENABLE 0|1`
+  over USB/IP switches it (`DBG:*` is refused over Bluetooth). Timebase/trigger controls of the
   stock: MF key -> popup, Trigger tab at (263,42), Rising (55,92) /
   Falling (115,92), Auto (245,92) / Normal (305,92) / Single (365,92).
 * USB: EP0, USBTMC and MSC work over USB/IP with the forked DWC2 model;
