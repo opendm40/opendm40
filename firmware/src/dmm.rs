@@ -340,6 +340,21 @@ impl Avg {
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
 /// Inferred open-circuit voltage of the ohm source (see above).
 pub const T_VSRC: f32 = 0.85;
+/// The same for the "ON" ohm variant (m+8, p8set rows): 0.27 mA
+/// short-circuit current on r1 (Rref 1 k), community measurement; inferred.
+pub const OHM_VSRC_ON: f32 = 0.27;
+
+/// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var): the
+/// short-circuit current of the inferred source (T_VSRC / OHM_VSRC_ON)
+/// behind Rref, i.e. the most the range drives through the probes (with R
+/// between them: V / (Rref + R)). r0 uses the 1 k r1 reference (its 0.1 k
+/// constant is that reference / 10, the OP1 x10 gain) and always the
+/// default variant. Inferred: computed, not measured per range.
+pub fn ohm_test_current(r: i8, var: u8) -> f32 {
+    let r = r.clamp(0, 6) as usize;
+    let v = if var == 1 && r != 0 { OHM_VSRC_ON } else { T_VSRC };
+    v / (OHM_RREF[r.max(1)] * 1e3)
+}
 
 /// Natural log (no libm): exponent * ln2 + atanh series of the mantissa.
 fn ln(x: f32) -> f32 {
