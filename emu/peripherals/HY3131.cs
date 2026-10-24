@@ -455,6 +455,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// range changes), so SENSE - PB5 falls ("pb5drift:0.6;pb5tau:2.2"; off by default).
         /// SENSE - AGND (the fixed row) does not drift.
         public double Pb5DriftV, Pb5DriftTau = 2.2;
+        /// AC A rows, SENSE itself (either AD1 reference; device 0774e70): with 24 V DC on V-COM
+        /// SENSE - AGND ramped from ~-64 mV at 0.5 s to the negative rail (< -347 mV at IG 3.6) by
+        /// ~3.3 s, 9 000-12 000 codes per 107 ms hold. Replay: SENSE falls by senseneg V x
+        /// (1 - exp(-t / sensetau s)) from the first AC A row ("senseneg:0.75;sensetau:5"; off by
+        /// default).
+        public double SenseNegV, SenseNegTau = 5;
         private double acaT0 = double.NegativeInfinity;
         /// AC A 10 A -> mA / uA (device f0d21eb: CONF:CURR:AC 10, then 0.06, the A jack empty:
         /// the first 60 mA result read OL): the AD2 node (OP1O - PB3) carries a step of acastep
@@ -702,6 +708,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
+                case "senseneg": SenseNegV = o.Value; break;
+                case "sensetau": SenseNegTau = o.Value; break;
                 case "acastep": AcaStepCodes = o.Value; break;
                 case "acastepms": AcaStepMs = o.Value; break;
                 case "vjblind": VjBlind = o.Value != 0; break;
@@ -1406,6 +1414,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // instantaneous; PB5 drifts with pb5drift (above)
                 var vin = SenseTapVolts(t);
                 if(fn_ == 7 && Pb5DriftV != 0 && t >= acaT0) vin -= Pb5DriftV * (1 - Math.Exp(-(t - acaT0) / Pb5DriftTau));
+                if(SenseNegV != 0 && t >= acaT0) vin -= SenseNegV * (1 - Math.Exp(-(t - acaT0) / SenseNegTau));
                 code = ig * vin / (rg * Vref) * fs;
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
