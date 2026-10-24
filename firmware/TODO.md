@@ -3448,6 +3448,12 @@ Emulator (emu/):
         0.4 s of polling), dcv1st.py (DC V 6 V from AC V / DC A / RES at MED / SLOW: no value off
         > 0.1 %, also around 2 s, where the slow step now lands), t1ohm.py (RES MED first final, no
         wrong value), osrstep.py (unchanged).
+        Device cd1ec9a (device-check doc "cd1ec9a: the old DMM bugs"): PASS. CONF -> READ? at MED DC V
+        0.36-0.62 s, DC A 0.51-0.60 s (t1rt.py 0.40-0.71 s); DC V 6 V entries 24, largest deviation from the
+        settled value 0.048 %, first final 0.33-0.50 s, 0.1 s cadence to 2.0-2.1 s then 0.4 s with no gap;
+        RES on 100 / 390 ohm no wrong final, first final MED 1.72-1.83 s, FAST 1.67-2.03 s (open jacks not
+        tested: the calibrator's disabled output is no open); osrstep.py unchanged. The +1 digit comes back
+        at ~5-6 s after a switch (AVG_FULL 8 x 0.4 s after the step), not at 2 s.
   - [ ] Why the two conversions after an early R22 change read ~32-40 %: UNKNOWN. The same OSR steps later
         in a function (DC V MED / SLOW, 1 <-> 2 V) did not. A stream at 640/s across a CONF change would
         show where the bad conversions sit. The HY3131 datasheet (DS-HY3131-V10_EN 13.1, p. 30) does
@@ -3550,7 +3556,7 @@ Emulator (emu/):
       tools/ui-render range pairs ending on 60 M against a fresh draw. Device a2e9766: 6 M -> 60 M clears
       the label in both variants (device-check doc "a2e9766: bug-fix recheck" 3). The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
-- [x] Bluetooth: stale errors on the first connection (device 46370df, device-check doc "46370df" new bug 5:
+- [ ] Bluetooth: stale errors on the first connection (device 46370df, device-check doc "46370df" new bug 5:
       the first `--bt` client found -113, -102, -113 queued; later connections none). USB and BT already had
       separate queues. Cause (INFERRED, no device trace): the module's own text reaches the SCPI parser while
       no host is linked: an `OK` = -113, an echoed `AT+SBNDM40A` = -102 ('+' in a header), `OK` = -113, e.g.
@@ -3561,3 +3567,11 @@ Emulator (emu/):
       -113 / -102 / -113 / -363, fix 0). Device check: power the meter on, wait 10 s, connect
       `dm40scpi.py --bt` and send SYST:ERR:COUN? first: 0; repeat after a Settings BT off / on. A connect
       banner printed after PC14 rises would still be parsed (would show as -113 there).
+      Device cd1ec9a (device-check doc "cd1ec9a: the old DMM bugs" item 6, note 4): **FAIL**. After every
+      module power-up (first connection of the session, Settings BT off / on with 10 s and 30 s waits: 5 of
+      5) the first client finds 7 errors, always -102 / -113 / -113 / -102 / -113 / -113 / -113; reconnects
+      without a power-up 0. The status-bar BT glyph (PC14) never showed with no host (sampled 2-30 s after
+      BT on; a short pulse would be missed). Where the lines come from: unknown (not through a PC14-high
+      window, INFERRED). New with the fix: a line sent before the meter sees PC14 high is dropped without
+      a reply or an error (first query 0-0.3 s after the connect: no reply in 14 of 17 connects; at
+      0.5 s 6 of 6 answered), so a client that sends at once loses its first query.

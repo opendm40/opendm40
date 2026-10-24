@@ -3894,3 +3894,77 @@ switched the calibrator off at once on an alarm, and in the AC modes also on any
   1,1, the volume mounted read-only.
 - **Files:** LOGS/FAST000.DLG made and deleted by exact name; `MMEM:CAT?` equals the start byte for byte.
 - **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled, as found.
+
+## cd1ec9a: the old DMM bugs, R22_LATE (765acd4) and the BT chatter (abc345d) (2026-10-25 00:15 - 01:05)
+
+Image cd1ec9a, flashed by the owner just before. `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, marker VALID,
+`FATDIR,7,0,0` at the start and the end. The calibrator (`/dev/ttyACM1`) was on V/Ω–COM; the A jack, the MCX
+probe and the generator output were not wired; `OUTP?` 0 throughout. The danger alarm stayed LOUD and the volume
+50 (the owner's settings, asserted unchanged after every script); it never sounded (`DBG:ALARm?` 0,0,0,0 at the
+end). Scripts and data are in the session scratchpad `chk11/` (not in git): `confread.py`, `t1rt.py`,
+`dcv1st.py`, `t1ohm.py`, `osrstep.py` (from `chk10/`, small changes noted below), `shots5*.py`, `btchk.py`,
+`btre.py`, `btprobe.py`, `out/*.log`, `out/*.json`, the screenshots.
+
+### Summary
+
+| item | result |
+|---|---|
+| 1. CONF -> READ? DC V / DC A at MED (765acd4) | **PASS**. `CONF:<f>;:READ?` in one message, calibrator 1 V, 3 reps (`confread.py`): MED DC V from AC V 0.51-0.62 s, from RES / DC A 0.36-0.37 s; DC A (600 µA) from DC V / AC V 0.51-0.57 s; DC mA 60 mA manual 0.60 s. FAST 0.32-0.61 s. `t1rt.py` (its 0.4 s of polling included, the measure of the e1cec01 numbers): MED DC V 0.40-0.71 s, A 10 A 0.71 s, mA 0.41-0.57 s, DC V 6 0.50 s (e1cec01: 1.5-1.8 s) |
+| 2. DC V 6 V entry from AC V / DC A / RES at MED and SLOW, 1 V in (765acd4) | **PASS**: 24 entries (4 per pre-function and rate), `DBG:READout?` for 4 s after `CONF:VOLT:DC 6`. **Largest deviation of any final value from that entry's settled value (median after 3 s): 0.048 %**; around the slow step (1.5-3 s) at most 0.048 %. First final value **0.33-0.50 s** (from DC A / RES 0.33-0.39 s, from AC V 0.41-0.50 s). The readout updates every 0.1 s until 2.00-2.10 s, then every 0.4 s, with no longer gap at the step (no dropped conversion seen) |
+| 3. Ohm entry from DC V at FAST and MED (765acd4) | **PASS** on the calibrator's 100 Ω (reads 100.12) and 390 Ω (reads 392.88), 3 reps each: **no final value off** (0.1 % + 0.08 Ω of the end value), first final value **MED 1.72-1.83 s** (e1cec01: 2.6 s), FAST 1.67-2.03 s; `CONF:VOLT:DC;:CONF:RES;:READ?` 1.81-1.93 s. One grey (provisional) 10.29 MΩ at 0.30 s (FAST, 1 of 6 on 100 Ω), no final. **Open jacks: not tested** (note 2) |
+| 4. OSR steps later in a function (`osrstep.py`, DC V 6 V, 1 -> 2 -> 1 V, 3 reps at MED and SLOW) | **PASS, unchanged**: 12 steps, each shows only the input's own transition (two to three 0.1 s readings, e.g. 1.0185, 1.5161, 1.9984, then 2.0003-2.0010), then the 0.4 s cadence; no 32-40 % value |
+| 5. The visible change (765acd4): first 2 s after a switch unaveraged, without the +1 digit | **As described, the +1 digit comes back later than 2 s**. AC V -> DC V 6, 1 V in: at 0.5 s both rates still show the grey dashes (the first value comes at 0.41-0.50 s from AC V; `sw_MED_0.5.png`, `sw_SLOW_0.5.png`); from 0.6 s the value has 4 decimals and no +1 digit, the rate label reads "MED 9.6/s" / "SLOW 9.5/s" (the 0.1 s conversions); at 3.0 s still no +1 digit ("MED 4.3/s", `sw_MED_3.0.png`, `sw_SLOW_3.0.png`); **the +1 digit is back at 6.0 s, not yet at 4.8 s** (both rates; value strips `swc_sheet_MED.png`, `swc_sheet_SLOW.png`); the label reads 2.5-2.6/s then. That fits dmm.rs `AVG_FULL` (8 slow conversions of 0.4 s after the step at ~2.05 s: ~5.3 s; from the code, not timed closer) |
+| 6. Bluetooth: no stale errors for the first client (abc345d) | **FAIL**. Every client after a module power-up found **7 errors queued**, the same sequence each time: `-102,-113,-113,-102,-113,-113,-113` ("Syntax error" / "Undefined header"). Seen 5 of 5: the first connection of this session (~17 min after boot, before any toggle; whether another client had connected since the flash is not known), 3 Settings BT off / on cycles with 10 s wait, 1 cycle with 30 s wait. Reconnects without a power-up: 0 errors (6 of 6). **New:** a line sent right after the RFCOMM connect gets no reply and no error (note 4) |
+
+### Notes
+
+1. **Item 2 reference.** The calibrator's "1 V" reads 1.0011-1.0015 V on the meter (a2e9766: FETC? 1.001166);
+   against nominal 1.000 every value is off by 0.1-0.17 %, so the deviation above is taken against each entry's
+   settled value.
+2. **Ohm: the calibrator range and "open".** This MR9270S+ caps its resistance output at ~399 Ω here: 500,
+   1000, 2000 and 3900 Ω requests all read 398.90-398.91 Ω (600 Ω range, `out/ohmprobe.log`); why (a compliance
+   limit at the 0.9 mA test current?) is not known. Only 100 and 390 Ω were usable. The open-jack case was
+   not available: the calibrator's disabled output is no open input. On it RES AUTO stepped MΩ <-> kΩ every
+   ~0.25 s with dashes (`P`) for the whole 6 s, 6 of 6, no final value; a `READ?` there got no reply within
+   the driver's 5 s (SYST:ERR? -410 afterwards; this ended the first `t1rt.py` run, so the second ran on 1 kΩ,
+   i.e. the capped 398.9 Ω). Same as the a2e9766 note 1 (FETCh?), not new.
+3. **Screenshots during the first seconds.** Back-to-back full-frame grabs (`DBG:LCD?`, ~0.6-0.9 s each)
+   froze the panel: six grabs from 0.6 to 5.2 s after a switch all showed the same frame (status-bar clock
+   00:14:25, empty chart), while `DBG:READout?` moved on (`swb_sheet_*.png`, not used above). With 0.3 s strip
+   grabs spaced 0.4 s apart the clock advanced (`swc_*`). Whether the main loop skips drawing while the
+   debug reads come back to back: not looked into.
+4. **BT details.** Host `/usr/bin/python3` + `dm40bt_scpi.Link`, RFCOMM channel 1 on **XX:XX:XX:XX:XX:XX**
+   (the cached SPP address, scan name "C-1-ATK-DM40-CALI"); the scanned "DM40A" address XX:XX:XX:XX:XX:XX
+   refuses RFCOMM (Permission denied). Settings BT toggles were taps on the Bluetooth row (240,178) with
+   grabs of the row (`bt_p30b_sheet.png`: OFF, then ON); after 5 min idle the first tap only wakes the dimmed
+   screen (one cycle of `btprobe.py` lost its OFF that way; not counted above).
+   - **First line dropped:** with the first query sent 0 / 0.05 / 0.1 / 0.2 / 0.3 / 0.5 s after the connect
+     returned, it got no reply in 5 s for 5/5, 3/3, 2/3, 3/3, 1/3 and 0/6 connects; the next query was
+     answered and `SYST:ERR:COUN?` said 0 (`out/btre*.log`). So a line that comes before the meter sees PC14
+     high is dropped silently (bt_scpi.rs `set_link`: no line while no link, a line cut by the change dropped
+     to its terminator). `dm40bt_scpi.py scpi '<query>'` and other clients that send at once now wait 5 s and
+     fail their first query; before abc345d that line was parsed (INFERRED from the code; not run on an
+     older image today).
+   - **Where the 7 lines come from: unknown.** They come from the module power-up, not from the connect
+     (reconnects 0), and they are a fixed set (10 s and 30 s waits give the same 7). The status-bar BT glyph
+     (drawn from PC14, `power.bt_connected()`) never showed in 508 samples (~0.06 s apart, 2-30 s after BT on,
+     no host), and it does show with a host linked (`bt_hold3.png`). The status bar is not redrawn on every
+     sample, so a short PC14 pulse would not show; that PC14 stays low during the module start is INFERRED.
+     If it does, the lines reach the parser some other way than `Rx` with the link up (e.g. kept in the
+     module or the UART ring until the link is up, or the AT exchange in `init_module`); not tested. The
+     pattern looks like two runs of the AT+SBNDM40x / OK exchange (INFERRED).
+5. `MEAS:VOLT:DC?` from AC V answers at 1.51-1.57 s at MED and SLOW (`out/meas.log`), i.e. from the 0.1 s
+   conversions before the slow step; dmm.rs says `AVG_FULL` is "also what SCPI MEAS? waits for". Whether
+   MEAS? should wait for the full average (~5.3 s now): a question for the owner.
+6. `CONF?` read right after a switch gives resolution +1E-04 on DC V 6 V at MED; after a few seconds
+   +1E-05 (start and end of the session). Consistent with item 5.
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+, rate MED, `CONF?` "VOLT +6,+1E-05", Bluetooth ON (as found; the toggles
+  saved the settings, `SAVE,OK`), volume 50, danger alarm LOUD, `DBG:IDLE?` Shutdown 1 800 000 ms,
+  `SYST:ALER?` NONE, `SYST:ERR?` empty over USB and over BT (queue drained by the last client), `OUTP?` 0,
+  `LOG:SOUR?` AD1, `DBG:VDISK:RO?` 1,1 as found. Crash count 0, HEALTHY, marker VALID, stack high water
+  21 656 / 45 148.
+- **Files:** none made; `MMEM:CAT?` equals the start listing.
+- **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled (it was used in voltage and resistance).
