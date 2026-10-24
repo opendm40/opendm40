@@ -214,7 +214,7 @@ Stock has no logger. opendm40 (`logger.rs`, `fastlog.rs`, `csvlog.rs`):
   (`LOG:DEST DISK`: `LOGS/FASTnnn.DLG`, `fastlog.rs`).
 - Over Bluetooth only AD1 sessions (`Rate too high for Bluetooth`).
 - Formats: [compact-log-format.md](compact-log-format.md),
-  [log-format-standards.md](log-format-standards.md).
+  [log-format-standards.md](../../docs/history/log-format-standards.md).
 
 ---
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """READ? / MEASure? in the AUTO coupling (opendm40 main.rs AUTO_WAIT_MS,
-docs/switch-latency.md 6): AUTO's values before its first decision are
+../docs/history/switch-latency.md 6): AUTO's values before its first decision are
 provisional (never to SCPI), so a READ? / MEAS:VOLT:AUTO? right after the
 host's change waits for the decision, at most until AUTO_WAIT_MS (3.9 s)
 after the coupling was entered (a later query: at most 0.85 s), and then

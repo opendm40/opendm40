@@ -1,4 +1,4 @@
-"""Shared pieces of the log-codec lab (firmware/docs/log-format-standards.md).
+"""Shared pieces of the log-codec lab (docs/history/log-format-standards.md).
 
 * load(csv, dlg)   rows of a reference CSV (+ the chunk cuts of its DLG file)
 * dlg_bits()       bit-exact cost model of the DLG v1 coder (src/dlog.rs)

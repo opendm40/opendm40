@@ -498,7 +498,7 @@ pub struct Reading {
     /// Power meter (`pw`): all its values; main = P (fallback: S), aux1 =
     /// V, aux2 = I, `mode` = the AC A mode of the current range.
     pub power: Option<pw::PowerVals>,
-    /// Provisional (docs/switch-latency.md proposals 1 / 6): a value a gate
+    /// Provisional (../docs/history/switch-latency.md proposals 1 / 6): a value a gate
     /// still holds (the first DC conversions after a range / function
     /// change, AC+DC before both parts, the AC part settling, the AUTO
     /// coupling's first decision), or the new function's placeholder (`main`
@@ -1138,7 +1138,7 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
 }
 
 // AC+DC: what reaches the HY3131 and the board, as the stock does it
-// (docs/acdc-stock-vs-opendm40.md sections 7 and 8.1), one switch per difference
+// (../docs/history/acdc-stock-vs-opendm40.md sections 7 and 8.1), one switch per difference
 // so they can be bisected on the device (false = the opendm40 9421fd5 way).
 //
 /// DC phase at the config row's OSR 8192 (R22 = 0x15), and no R22 write
@@ -1186,7 +1186,7 @@ const ACDC_DIAG_N: usize = 4;
 // range page) for ~2-4 s, then a tail 18 -> 1 mV over ~10 s, READ? up to
 // +6 %; 60 -> 6 V 0.15 V for ~2 s. The emulator's node (tau 0.3 s, charged
 // in the AC phases only) shows 5.3 V for the first AC phase. The stock does
-// nothing about it (OL + 600 ms, docs/acdc-stock-vs-opendm40.md 2). opendm40
+// nothing about it (OL + 600 ms, ../docs/history/acdc-stock-vs-opendm40.md 2). opendm40
 // discards the AC results until the transient is over (`ac_settle_step`):
 // it only adds to the RMS and decays result by result (device: a few % per
 // 100 ms result), while a real AC part stays, so the AC part is settled
@@ -1343,7 +1343,7 @@ const OHM_VET_CNT: f32 = 8.0;
 /// settle: 1.5 s is 15 / 4 conversions).
 const OHM_VET_MAX_MS: u64 = 1500;
 
-// AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; docs/acdc-stock-vs-opendm40.md
+// AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; ../docs/history/acdc-stock-vs-opendm40.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
 // them: the AC part's RMS when it dominates the DC part, else the DC part.
 //   to AC: AC > AUTO_TO_AC x |DC| and AC > the range's floor (on)
@@ -1856,7 +1856,7 @@ impl Dmm {
         }
         // AC+DC DC phase: at the row's OSR 8192 (see ACDC_STOCK_OSR); every
         // result after the settle deadline is used, none dropped
-        // (docs/acdc-stock-vs-opendm40.md 8.2).
+        // (../docs/history/acdc-stock-vs-opendm40.md 8.2).
         if !ACDC_STOCK_OSR && self.acdc && matches!(m, 1 | 3 | 7..=9) {
             hy::write(0x22, &[0x17]);
             self.r22 = 0x17;
@@ -4025,7 +4025,7 @@ impl Dmm {
         let seed = acdc && was && !settling;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
-        // as the stock (docs/acdc-stock-vs-opendm40.md 8.2).
+        // as the stock (../docs/history/acdc-stock-vs-opendm40.md 8.2).
         if seed {
             self.ac_raw = ac;
             self.f_ac = ac;

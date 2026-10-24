@@ -803,7 +803,7 @@ Fail -> the fallback build `./build.sh native --features hyspi-bitbang`.
 
 ## 9. E3/E4 implemented: the AD2 stream on one timer ISR (2026-10-22)
 
-Decision #3 of docs/decisions-2026-10-22.md, behind the Cargo feature
+Decision #3 of ../docs/history/decisions-2026-10-22.md, behind the Cargo feature
 `ad2-isr` (**off by default** until the device acceptance in 9.5: invariant 1,
 the default build has no interrupt and behaves as before, except the ring
 policy noted in 9.1). Image for the device: `./build.sh --features ad2-isr`.

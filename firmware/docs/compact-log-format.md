@@ -182,7 +182,7 @@ code; f32 dt, s/sample; u32 t0, the index of time 0; u32 n; u32 CRC-32 of
 these 20), the block table (per 4096-sample block: u32 coded bytes, u32
 CRC-32 of them; then u32 CRC-32 of the table), then the coded blocks.
 
-A block (docs/log-format-standards.md section 4): 3 bits mode, 0..3 = the
+A block (../docs/history/log-format-standards.md section 4): 3 bits mode, 0..3 = the
 FLAC fixed polynomial predictor of that order (chosen per block: the least
 sum of |residual|), 4 = raw 10-bit codes (used when it is smaller, so a
 block is never above 1.25 B/sample); then per sample the adaptive Rice code

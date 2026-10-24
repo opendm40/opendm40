@@ -48,7 +48,7 @@
 //!     "Data stale" in SYST:ERR? only if the current function has no
 //!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
 //!   - AUTO coupling before its first decision (its values are provisional,
-//!     docs/switch-latency.md 6): FETCh? answers +9.91E37 at once (no wait,
+//!     ../docs/history/switch-latency.md 6): FETCh? answers +9.91E37 at once (no wait,
 //!     no error); READ? / MEAS? wait for the decision until AUTO_WAIT_MS
 //!     (3.9 s) after the coupling was entered, then answer the part AUTO
 //!     shows.

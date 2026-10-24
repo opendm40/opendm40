@@ -68,7 +68,7 @@ Reference:
 - [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md): power meter and misconnect alerts
 - [inrush-current.md](docs/inrush-current.md): inrush current capture
 - [compact-log-format.md](docs/compact-log-format.md): DLG log format on the disk, CSV on read
-- [log-format-standards.md](docs/log-format-standards.md): standard log formats compared with DLG
+- [log-format-standards.md](../docs/history/log-format-standards.md): standard log formats compared with DLG
 - [fonts.md](docs/fonts.md): stock fonts, their cost and storage
 - [model-variants.md](docs/model-variants.md): how the firmware tells DM40A / B / C apart
 - [parity.md](docs/parity.md): item-by-item parity with the stock firmware V2.6
@@ -79,21 +79,21 @@ Reference:
 Design notes:
 
 - [acdc-approaches.md](docs/acdc-approaches.md): AC+DC in other meters and DMM chips, what fits the HY3131
-- [acdc-stock-vs-opendm40.md](docs/acdc-stock-vs-opendm40.md): AC+DC of the stock V2.6, measured live, vs opendm40
-- [switch-latency.md](docs/switch-latency.md): DMM function switch latency, opendm40 vs stock
+- [acdc-stock-vs-opendm40.md](../docs/history/acdc-stock-vs-opendm40.md): AC+DC of the stock V2.6, measured live, vs opendm40
+- [switch-latency.md](../docs/history/switch-latency.md): DMM function switch latency, opendm40 vs stock
 - [dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md): DMM reading rate, integration time and filtering
 - [dmm-input-scope-feasibility.md](docs/dmm-input-scope-feasibility.md): DMM inputs as a scope source (AD2 streaming)
 - [dac-adc-paths.md](docs/dac-adc-paths.md): DAC to ADC loopback paths for self-test
-- [hwtrig-integration.md](docs/hwtrig-integration.md): the hardware trigger comparator
+- [hwtrig-integration.md](../docs/history/hwtrig-integration.md): the hardware trigger comparator
 - [combined-view-design.md](docs/combined-view-design.md): DMM + scope combined view, scope gestures
 - [scope-scale-ux.md](docs/scope-scale-ux.md): scope scale and position by touch
 - [stock-scope-ui.md](docs/stock-scope-ui.md): pixel and interaction spec of the stock scope UI
-- [ui-review.md](docs/ui-review.md): UI/UX review
+- [ui-review.md](../docs/history/ui-review.md): UI/UX review
 - [user-feedback.md](docs/user-feedback.md): DM40 owners' feedback triaged into items
 
 Logs and history:
 
 - [device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log
-- [decisions-2026-10-22.md](docs/decisions-2026-10-22.md): product and engineering decisions
-- [stage0-test.md](docs/stage0-test.md): native-boot Stage 0 recovery test (historical)
-- [integration-queue.md](docs/integration-queue.md): integration queue (empty)
+- [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md): product and engineering decisions
+- [stage0-test.md](../docs/history/stage0-test.md): native-boot Stage 0 recovery test (historical)
+- [integration-queue.md](../docs/history/integration-queue.md): integration queue (empty)
