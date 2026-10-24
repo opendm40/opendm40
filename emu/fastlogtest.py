@@ -369,10 +369,10 @@ class HostRead:
 
 # UI navigation (--ui-nav): (command, the DBG:VIEW? page it must land on).
 # Coordinates: ui.rs TILES (main menu), the settings rows (SET_Y0 44, pitch
-# 30: row 8 "More" y 297, Settings 3/3 row 4 "Device" y 177), scope_ui.rs
+# 30: row 8 "More" y 297, Settings 3/3 row 5 "Device" y 207 since 66af464 added "Burden voltage" as row 4), scope_ui.rs
 # SRC_BADGE (the source badge, top bar).
 NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 240,297', 'Settings,2'),
-       ('DBG:TAP 240,297', 'Settings,3'), ('DBG:TAP 240,177', 'Device'), ('DBG:KEY 0', 'Main menu'),
+       ('DBG:TAP 240,297', 'Settings,3'), ('DBG:TAP 240,207', 'Device'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 341,107', 'Oscilloscope'), ('DBG:TAP 177,10', 'Oscilloscope'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 140,107', 'Multimeter')]
 
