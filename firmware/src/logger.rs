@@ -391,6 +391,9 @@ struct Producer {
     /// (`sample`), so a rescue never hides the next real interval.
     last_flag_us: u64,
     flags: u32,
+    /// The code of the last sample pushed (a rescue that reads it again
+    /// read no new conversion: `sample`).
+    last_raw: i32,
 }
 
 impl Producer {
@@ -412,6 +415,7 @@ impl Producer {
             p_n: 0,
             last_flag_us: 0,
             flags: 0,
+            last_raw: 0,
         }
     }
 
@@ -463,6 +467,7 @@ impl Producer {
     /// One captured sample at `now_us` (wire stamp `ts_us`): statistics,
     /// then the ring. True when the ring took it (not full).
     fn push(&mut self, ring: &Ring, ts_us: u32, raw: i32) -> bool {
+        self.last_raw = raw;
         inc(&ring.captured);
         // Timestamp-gap estimate of samples the producer was too late for.
         if self.have_last {
@@ -1020,10 +1025,20 @@ impl Logger {
                 // in a row (a converter that stopped is not read as a
                 // stream of copies; a tight polling loop, the emulator's,
                 // loses one flag in ~4 at 40 S/s); counted in DBG:ISR? `late`.
-                self.prod.rescued += 1;
-                self.prod.last_sample_us += p;
-                inc(&ring.late);
-                let _ = self.prod.push(ring, self.prod.last_sample_us as u32, hy::read_ad1());
+                // The same code as the last sample: R00..R02 still hold that
+                // conversion, so no flag was lost, the next one is late (the
+                // main loop's observation of a flag jitters by up to ~50 ms:
+                // device e1cec01, OSR 8192 chopped after a 640/s session,
+                // flags seen 73-79 / 123-128 ms apart, a copy before every
+                // other one); keep waiting. A swallowed flag whose code
+                // repeats the last one (~1-2 % at these noise levels) is lost.
+                let raw = hy::read_ad1();
+                if raw != self.prod.last_raw {
+                    self.prod.rescued += 1;
+                    self.prod.last_sample_us += p;
+                    inc(&ring.late);
+                    let _ = self.prod.push(ring, self.prod.last_sample_us as u32, raw);
+                }
             } else if ready {
                 self.prod.tick(); // the flag-observed moment
                 // AD1's period: flag to flag, not from a rescue's stamp, and not
@@ -1042,7 +1057,7 @@ impl Logger {
                     self.prod.flags = self.prod.flags.saturating_add(1);
                     self.prod.last_flag_us = self.prod.now_us;
                 }
-                self.prod.rescued = 0;
+                let after_rescue = core::mem::take(&mut self.prod.rescued) != 0;
                 self.prod.last_sample_us = self.prod.now_us;
                 let ts = self.prod.now_us as u32;
                 if self.ad2 {
@@ -1053,7 +1068,13 @@ impl Logger {
                         inc(&ring.bad);
                     }
                 } else {
-                    let _ = self.prod.push(ring, ts, hy::read_ad1());
+                    // A rescue that read this conversion before its flag
+                    // came (the conversion ended between the flag check and
+                    // the read): the same code again, not a new sample.
+                    let raw = hy::read_ad1();
+                    if !(after_rescue && raw == self.prod.last_raw) {
+                        let _ = self.prod.push(ring, ts, raw);
+                    }
                 }
             }
             self.prod.tick();

@@ -34,18 +34,19 @@ import dm40scpi  # noqa: E402
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native image')
 ap.add_argument('--port', type=int, default=47710, help='USB/IP port')
+ap.add_argument('--skew', type=float, default=22.4, help='model chopskew, ms (0 = the 10242c3 case alone)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
 
 # (LOG:OSR, chop, nominal period s)
-SESS = [(5, 'ON', 0.1008), (6, 'ON', 0.2008), (5, 'ON', 0.1008)]
+SESS = [(5, 'ON', 0.1008, 0), (6, 'ON', 0.2008, 0), (5, 'ON', 0.1008, 0)]
 os.makedirs(OUT, exist_ok=True)
 tag = 'logdup-%d-%d' % (A.port, os.getpid())
 script = os.path.join(OUT, tag + '.script')
 with open(script, 'w') as f:
-    f.write('0 dmm dcv:1.0;chophalf:1\n')
+    f.write('0 dmm dcv:1.0;chophalf:1;chopskew:%g\n' % A.skew)
 end = 120.0
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01', '--usbip-port', str(A.port),
        '--run-for', '%.1f' % end, '--name', tag, '--script', script]
@@ -91,7 +92,7 @@ try:
     for c in ['CONF:VOLT:DC 6', 'LOG:DEST HOST', 'LOG:SOUR AD1', 'LOG:DUR 60']:
         t.write(c)
     wait_dev(2.0)
-    for osr, chop, per in SESS:
+    for osr, chop, per, _ in SESS:
         session(0, 'OFF', 1.5)
         recs = session(osr, chop, 6.0)
         dup = [(a[0], (b[1] - a[1]) / 1e3) for a, b in zip(recs, recs[1:]) if a[2] == b[2] and b[1] - a[1] < 0.75 * per * 1e6]
