@@ -3742,3 +3742,86 @@ LOG:DATA? reply; `diskread.py`, `mv60.py`, `mvac.py`, `tmcpartial.py`, `ohmshots
 Observed, not investigated: in continuity, on the calibrator's disabled output, the readout showed 0L
 while MAX / AVG / MIN showed 625.85 Ω. After CONF:RES 6M -> 600, the REL box and the chart axis kept "MΩ"
 for a while (the chart history).
+
+## 46370df: screenshot preparation, the 76.8 kS/s nominal (ee28b71), the "Files live" volume on Linux (2026-10-24 21:45 - 22:14)
+
+Image 46370df (it contains e429dc9 and ee28b71). `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, marker VALID,
+`FATDIR,7,0,0` at the start and the end. Uptime was 130 s at the start (the owner had just powered it on), and
+`DBG:ISR?` was all 0, so item 2's first 76 800 session was the first AD2 session since boot. No reset, no
+flashing. The calibrator (`/dev/ttyACM1`) was on V/COM: the 40 Hz square only in AC V on the **manual 6 V range**
+(`VOLT:RANG?` 6, `RANG:AUTO?` 0 before the output was enabled; SYST:ALER? NONE throughout), 1 V DC for items 1
+and 3. The A jack, the MCX probe and the generator output were not wired; `OUTP?` 0 throughout. Host Linux, the
+volume mounted read-only by udisks at `/run/media/$USER/DM40`. Scripts and data are in the session scratchpad
+`open/` (not in git): `isrlog.py` (`dm40scpi.py log` plus `DBG:ISR?` every 5 s on the same link), `spp.py`,
+`wavrec.py`, `shot.py`, `b2b.py`, `diagdel.py`, `fill.py`, `full.py`, `csvprep.py`, `fastprep.py`, `mntshot.py`,
+`fatwatch.py`, `shotfsck.py`, `cachetest.py`.
+
+### Summary
+
+| item | result |
+|---|---|
+| 1.1 Screenshot prep: shots of DC V and AC+DC (TODO "screenshot preparation" 1) | **PASS**: prep state 2 / 76 ready before each shot. frozen_ms **1304** (DC V), **1324 / 1314** (AC+DC); blocks_erased **0**; slices 531. Each BMP equals the panel read just before the gesture: **0 px** different (3 shots). Prep was at 2 / 76 again 9 s after each job's end (11.1-11.4 s after the gesture). A first DC V shot, right after the AC V -> DC V switch, had frozen 1635 ms / 681 slices (its pixels were not compared: the script read the panel in the wrong format) |
+| 1.2 A shot right after another (2) | **PASS (saved), slower than the estimate**: second swipe 4.87 s after the first, while prep was in state 1 with 12 of 76 ready: frozen **5328 ms**, total 5987 ms, **63 blocks erased**, 1958 slices; SHOTS/S017.BMP saved (307 266 B, the AC+DC page). 5.3 s is above the TODO's 3-5 s and ~1.3 s above the per-erase model of 8087c7d (~1.3 s + 42 ms x 63 = ~4.0 s); the swipe hit prep in state 1 (cause inferred, not isolated). The "Saved" toast was not captured |
+| 1.4 Disk full (4) | **PASS**: an AD2 76 800 disk session (`LOG:DUR 0`) filled the disk (LOG:DISK? state 6, free 0 after 152 s). Then prep state 2 with **0 ready**. The swipe showed the red **"Disk full"** toast at 0.5 s and wrote no BMP (frozen / total 71 ms, 6 slices) |
+| 1.5a CSV commits (5) | **PASS**: `LOG:CSV ON` for 135 s on DC V: at 0, 60.3 and 120.3 s prep went 2 -> 0 -> 1 (after 2.0-2.4 s) -> 2 / 76 (after 2.4-2.8 s), with 0-1 erases each. The same after `LOG:CSV OFF` (2 / 76 at +2.4 s) |
+| 1.5b Fast-log session (5) | **PASS**: AD2 38 400 `LOG:DUR 10` to the disk: prep state 0 while preparing / running (LOG:DISK? 1, 3, 4), 1 at 3.5 s after the session's end, 2 / 76 at 3.9 s |
+| 1.5c "PC can edit" + a DM40*.BIN copy (5) | **not run** (it installs firmware) |
+| 1.6 Loop max while preparing (6) | **PASS**: `MMEM:DEL "SHOTS/S012.BMP"` (this session's file) on the AC+DC page; prep erased 76 blocks in ~6 s. `DBG:DIAG?` loop max1s: idle before the delete **15.1 ms** max (median 11.6), state 1 **15.1 ms** max (median 11.2), state 2 afterwards 12.0 (11.2). The state-0 windows right after the delete reach 65.5 ms (the delete's FAT write, as on 8087c7d) |
+| 1.3 Power cut while prep state = 1 (3) | **pending (owner)**: battery out |
+| 2a 76 800 host drain, first AD2 session after boot (`isrlog.py ... log --source ad2 --rate 76800 --format packed -d 60`, AC V 6 V, 40 Hz square) | **PASS**: locked from the first snapshot; **ppm_x10 -2..-4** from 5 s on (+67 at 0 s), rate_mhz 76 800 006-037; **entries 1.1252** (4 756 357 ticks / 4 227 287 captured at 55 s); cpu 461 permille; late / bad / timeouts / overruns / slips 0; max_lat 260 ns. CSV: lost 0 of 4 608 031, ring overwritten 165 (one start-up hole, as on 46370df item 1d) |
+| 2b LOG:PRE? / CSV header | **PASS**: LOG:PRE? nominal_mhz **76 799 016**; `# nominal_sps,76799.016` |
+| 2c Rate against the calibrator | gap-free CSV run of 4 605 818 samples: **1919.948 samples per 40 Hz period** (sd 0.008), 76 797.9 S/s by the calibrator (e7ec2cc: 1919.95) |
+| 2d Wave view, 1 ms/div, the record | **PASS**: `WAV:PRE?` (MAX, WORD) xinc **1.302084E-05** s; 26 624 points, half periods 959.6 / 960.3 alternating, **1919.946 samples per period = 40.0011 Hz**. DBG:ISR? in the view: ppm_x10 -5 / -6, entries 1.125, late 0. The screen showed Vp-p 10.5 V, Vrms 4.84 V, "Freq: --" (less than one period on the screen, as on e7ec2cc) |
+| 2e ACQ:SRAT? | **76 800, not the 76 799 the TODO expected**: the reply was `+7.680001E+04` at 1 ms/div (`+3.840000E+04` at 2 ms/div). See note 1 |
+| 2f The disk DLG header | **PASS**: `dm40scpi.py fast --rate 76800 --dur 5` -> LOGS/FAST000.DLG, CSV header "nominal 76799.016 S/s", 384 002 samples, lost 0 |
+| 3a Kernel attach | **PASS**: `usb 3-1.2.2: New USB device ... idVendor=1209, idProduct=0001`, `usb-storage`, `ALIENTEK DM40 files 0.2`, `[sdb] 4160541 512-byte logical blocks: (2.13 GB/1.98 GiB)`, `Write Protect is on`, `Attached SCSI removable disk`. Before it, two "Device not responding to setup address" / "error -71" attempts at the power-on (see note 4) |
+| 3b udisks read-only mount | **PASS**: `udisksctl unmount` / `mount -b /dev/sdb` (1.9 s): vfat, ro, label DM40, UUID E523-E098, ReadOnly true, size 2 129 920 000 B; DEBUG INFO LOGS README.TXT SCOPE SHOTS |
+| 3c A screenshot while mounted | **PASS**: the new BMP listed on the mount **3.3-5.9 s** after the gesture (4 shots: 4.33, 3.30, 3.80, 5.89 s; the 5.89 s run read SPIFLASH.BIN every 0.4 s meanwhile, and two of those reads got EIO at the UA, the next one worked); the mounted copy equals `MMEM:DATA?` byte for byte |
+| 3d A recording while mounted | **PASS**: `LOG:CSV OFF` after 135 s -> LOGS/LOG005.CSV on the mount **2.8 s** after the stop; it equals `dm40scpi.py get LOGS/LOG005.CSV` and `get LOG005.CSV` byte for byte (6676 B, 337 rows) |
+| 3e `fsck.fat -n` on a copied DEBUG/SPIFLASH.BIN | **PASS on a fresh read** (`shotfsck.py`: a shot, the copy started when the BMP showed up): 81 files, 1666 / 4087 clusters, only "Dirty bit is set" and the label note. **A plain `cp` taken ~6 s after a shot showed the new BMP's chain missing** (`/SHOTS/S012.BMP Contains a free cluster (732)`): stale host page cache, see note 2. Copy speed ~350 KB/s (16 MiB in 48-53 s) |
+| 3f FATDIR boot fields | `FATDIR,7,0,0` (LOGS / SHOTS / SCOPE present, none created, none failed). The first-boot case (created 0x7) and the boot time of `vdisk::boot_refresh` with many logs were not run (they need an install) |
+| 3g MMEM:CAT? / DATA? / DEL with directories | **PASS**: CAT? lists `LOGS/...`, `SHOTS/...`, `SCOPE/...`; `dm40scpi.py get LOGS/LOG005.CSV`, `get SHOTS/S012.BMP` work; `MMEM:DEL "SHOTS/S012.BMP"`, `"LOGS/FAST001.DLG"` delete (gone from CAT? and from the mount); `MMEM:DEL "LOGS/NOPE0.DLG"` -> -256 "File name not found". The prefix is not checked against the file's directory: `MMEM:DATA? "SHOTS/LOG005.DLG",0` returned LOGS/LOG005.DLG (note 3) |
+| 3h Windows Explorer / macOS Finder, reload.sh | **not run** (no Windows / macOS host here; reload.sh flashes) |
+| 4 A stream starting inside a multi-block READ(10) | **not run**: `read_busy` (vdisk.rs) refuses only while the slow-bank mirror is off (`MIR_OK` false after a failed SPI read). `DBG:VDISK:MIR?` was `1,3,0,302,...` (mirror OK), so on a healthy meter the path cannot be reached from the host |
+
+### Notes
+
+1. **ACQ:SRAT? in the Wave view is 76 800.** `wave_real_fs(76800)` is `(ad2_rate_mhz(0) + 500) / 1000`, and
+   `ad2_rate_mhz(0)` = 4 915 200 * 1000 / 64 = **76 800 000 mHz** exactly. The 76 799.016 of LOG:PRE? and
+   the headers is `Logger::nominal_mhz` = 1e12 / the 13 021 ns period (rounded ns), 12.8 ppm lower. So the two
+   "nominal" figures differ by the period rounding, and the TODO's "ACQ:SRAT? 76 799" was a wrong prediction,
+   not a firmware fault. Both are within 0.03 ‰ of the measured rate. Also cosmetic: `nr3` prints 76 800 as
+   `+7.680001E+04` (repeated f32 division by 10).
+2. **Linux keeps stale pages of DEBUG/SPIFLASH.BIN across the UNIT ATTENTION.** The file's size and directory
+   entry never change, so the vfat inode and its page cache survive the volume refresh. `cachetest.py`: a
+   plain read of the FAT region after a new shot still showed 1666 used clusters, and the same read after
+   `posix_fadvise(DONTNEED)` showed 1742 (+76, the new BMP). The first copy's FAT lacked exactly the new
+   S012's 76 clusters while its SHOTS directory cluster (further into the file; not cached, inferred) had the entry. Which
+   process had read SPIFLASH.BIN before (after the remount) is not known. To get a consistent copy: drop
+   the file's pages (`posix_fadvise` DONTNEED, `echo 1 > /proc/sys/vm/drop_caches`) or remount first. Files
+   that only grow are not affected in the same way (not tested).
+   Not an on-device inconsistency: `fatwatch.py` read the FAT with the cache dropped every 0.4 s and saw the
+   +76 clusters at 3.65 s, before the BMP was listed (5.9 s).
+3. **MMEM names: the directory prefix is dropped, not checked.** `"SHOTS/LOG005.DLG"` finds LOGS/LOG005.DLG.
+   Names are unique across the directories in practice (S / LOG / FAST / SCOP prefixes), so this is harmless now.
+   Not checked for MMEM:DEL.
+4. **Enumeration retries at the power-on** (21:46:46): two "Device not responding to setup address" /
+   "device not accepting address 107/108, error -71" before the third attempt enumerated. Possibly the pre_main
+   SPI-disk work (TODO "Boot indication") delaying USB; not investigated. Also "`/dev/sdb: Can't open blockdev`"
+   2 s after each attach / mount (a read-write open of the write-protected disk by some prober, inferred).
+5. The one `-113,"Undefined header"` of the session came from this session's own `SYST:VOL?` probe (the
+   command is `SYST:BEEPer:VOLume`), sent just before. The two `-250,"Mass storage busy"` in the queue later
+   came from this session's own `MMEM:CAT?` polls during the shot jobs (b2b.py; inferred, not isolated).
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+ (`RANG:AUTO?` 1), `CONF?` "VOLT +6,+1E-05" (as at the start), rate MED (`SENS:RATE?` was not read at the start); LOG restored to
+  AD1 / 4800 / HOST / `LOG:DUR` 60 / `LOG:FORMat ROWS` (item 2's packed run had left PACK) / CHOP 1 / `LOG:STAT` 0 /
+  `LOG:CSV` 0. Volume 50, Danger alarm LOUD, `DBG:IDLE?` Shutdown 1 800 000 ms, `DBG:VDISK:RO?` 1,1 (Files live),
+  `SYST:ALER?` NONE, `SYST:ERR?` empty, `OUTP?` 0. The Wave view's timebase was left at 1 ms/div (its value
+  before the session was not read). The settings file was saved again (`SAVE,OK,4,75`; the function changes).
+- **Files:** every file this session made was deleted by exact name (LOGS/FAST000.DLG, LOGS/FAST001.DLG twice,
+  LOGS/LOG005.DLG, SHOTS/S012-S020.BMP). `MMEM:CAT?` equals the start: used / free 3 809 280 / 12 931 072,
+  same names and sizes.
+- **Health:** crash count 0, HEALTHY, marker VALID, stack high water 23 676 / 45 172.
+- **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled, as found.
