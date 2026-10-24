@@ -1415,6 +1415,7 @@ Firmware:
       Device retest: CONF:VOLT:AC / :ACDC / :AUTO and CONF:CURR:AC / :ACDC / :AUTO: VOLT:RANG:AUTO? /
       CURR:RANG:AUTO? = 1 (0 after <q>:RANG:AUTO OFF), VOLT:RANG? / CURR:RANG? the range, SYST:ERR? 0; in
       CONF:POW VOLT:RANG? = POW:VOLT:RANG?'s value.
+      **Device 612c45c: PASS** (doc "612c45c" R1; every row SYST:ERR? 0).
 - [x] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
       0.767-0.790 V (77-79 %) in 5 of 35 tries (600 V: 3 of 20 + 1 of 5, 1000 V: 1 of 10; from 60 V, one
       step: 0 of 10). It is the second reading on 6 V, ~0.8 s after the command; the chart MIN records it
@@ -1656,6 +1657,19 @@ Firmware:
       before, DBG:ISR? max_lat 280 ns / late 0, LOG:COUNt? lost 0, LOG:DISK? fields unchanged vs a session
       without the copy (the SPI reads share the chip with the logger's page programs). (3) The same in the
       Wave view at 1 ms/div for > 3 min. (4) Windows Explorer copy of INFO/ during a session.
+      **Device 612c45c (device-check-2026-10-21.md "612c45c" M1-M5): (1) PASS** (first boot `1,4,1,5164`,
+      after DBG:RESET `1,3,0,302`). **(2) 38400 PASS, 76800 FAIL**: 38400, 286 s until the disk was full, 5 cp
+      rounds of the 8 files: each returns in ~1.1 s, byte-equal, lost 0, late 0, max_lat 280 ns. 76800: every
+      cp of a mirrored file after the writer trial drops samples (LOADER.BIN alone: 21 745; the 8 files: ~46 000
+      per round; CALIB.BIN 4 KiB / non-mirrored files: 0); a cp during the trial makes it fall back to 38400
+      (gate 2). >= 5 min was not possible: the free 12.9 MB hold ~286 s at 38400 and ~130 s at 76800.
+      (3) Wave view 200 s, 5 rounds: copies fast and byte-equal, late 0 / overruns 0; ring `dropped` grows
+      ~50/s with or without a copy (open, below). (4) not run.
+- [ ] **76800 disk session + cp of a mirrored INFO/ file loses samples** (device 612c45c, doc "612c45c" M2):
+      the mirror's SPI reads compete with the logger's page programs; the emulator's chip timing did not show
+      it. Options: refuse / NOT READY the mirror at the 76800 rung, or rate-limit mirror reads per page program.
+- [ ] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on 612c45c (200 s: 11 185; a 30 s
+      idle window 0, the next 68); d330877 saw +0 in short windows. max_lat 300 ns once. Not chased.
 - [x] UI navigation during a fast-log session (menu pages / the scope page with the scope source open while the
       session streams). **Done in 3f32bc3 / 7225b36** (`fastlogtest --ui-nav`, DBG:VIEW? checks each landing).
       Note: on the device only DBG:KEY / DBG:TAP can do this; real touch and the side keys stop a disk session
@@ -1709,6 +1723,7 @@ Firmware:
       either session, rows 307 201 / 614 401, lost 0.
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
+      **Device 612c45c: PASS** (doc "612c45c" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
@@ -2800,6 +2815,10 @@ Emulator (emu/):
       (run.py --buzzer-log: TIM14 ARR / CCR1 writes).
 - [ ] Device: doc 4.10 "Device check list (danger alarm)" (needs a current in the A jack); the measurement
       coupling check (item 4) and the low tone's loudness (item 5).
+      Device 612c45c (doc "612c45c" D1-D4), no current: Settings row and SYST:ALER:ALARm? read, V-JACK? and
+      OVERLOAD leave DBG:ALARm? idle. Not run: the coupling check (no debug command makes it sound; and the
+      owner asked for no sound at night). **New: the known false A-JACK in RES with 5 V on V-COM (35fce2a 7b)
+      now sounds the loud alarm** (6 events during the E1 subset). The setting is OFF for the night (owner).
 
 ## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on ad74e93 / 35fce2a)
 
