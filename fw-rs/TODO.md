@@ -142,6 +142,13 @@ Code work (in this order):
         Hz, never a wrong value. (5) CONF:POW on 230 V / 50 Hz (or the 40 Hz square): F "--" then 50.00, after
         an entry and after a range change. (6) Capacitance 1 uF / 100 nF entries (the gate now preset at the
         row write): readings as before.
+        **Device 0774e70 (device-check-2026-10-21.md "0774e70"): (1)-(3) FAIL, (4)-(5) PASS, (6) not run.**
+        Every Hz entry (DC V / AC V / AC+DC -> Hz, Scope -> back, both pages, 26 of 26) reads **0.000 Hz / 0.0 %
+        three times** (1.37 / 1.71 / 2.06 s, amber, READ?, MIN / AVG), 40.0017 from 2.42 s (f0d21eb: 40.00 at 1.37
+        s). Fits: source 0 (0xF0) reads f = 0 in its first gates; f = 0 is not a glitch, so it sets seen / last = 0
+        and wins alone, then the 1e6 tie with source 1's first result. Fix: f == 0 is no result for `seen`, and a
+        1e6 tie goes to the non-zero source. AC V secondary line "--" then 40.00 from 0.7 s; power meter F
+        +9.91E37 then 40.00, unchanged by CONF:POW 60.
   - [x] Device/About page: Menu->Settings->Device (Vendor/Web/Model/Bootloader/Software/Hardware);
         HW+bootloader ver read from the stock boot-data block 0x080A4000 (survives app updates).
         SN + BT name omitted (not sourceable without inventing a value / a blocking AT round-trip).
@@ -1734,6 +1741,11 @@ Firmware:
       as M2a (~1.1 s per round of LOADER.BIN). (5) Wave view at 1 ms/div with the 10 Hz square (wv.py 200 s,
       cp rounds every 40 s): DBG:ISR? dropped +0, DBG:PROF? loop max < 26 ms. (6) dmesg on the host: no
       usb-storage reset / timeout during the copies.
+      **Device 0774e70 (device-check-2026-10-21.md "0774e70"): PASS 1-6.** (1) 76800 until full, 5 rounds: 9 820 200
+      rows, lost 0, gate 1, copies byte-equal (FIRMWARE.BIN 1.7 s, LOADER.BIN 0.7 s), longest hold 11 ms; LOADER.BIN
+      at state 3 + 6 s: lost 0 (was 21 745). (2) in the trial x3: gate 1, lost 0, copy 1.65 s, holds up to 50 ms.
+      (3) field 14 ~508 (headroom ~492; emulator 411). (4) 38400 240 s: lost 0, FIRMWARE.BIN 0.87 s. (5) Wave view
+      200 s with 5 rounds: dropped 0, loop max 17.5 ms. (6) kernel log clean.
 - [x] UI navigation during a fast-log session (menu pages / the scope page with the scope source open while the
       session streams). **Done in 3f32bc3 / 7225b36** (`fastlogtest --ui-nav`, DBG:VIEW? checks each landing).
       Note: on the device only DBG:KEY / DBG:TAP can do this; real touch and the side keys stop a disk session
@@ -3106,6 +3118,16 @@ Emulator (emu/):
          CONF:VOLT:DC -> the loud alarm within ~1 s.
       8. AC+DC A / AUTO A with 24 V DC on V-COM after TEMP (the seeing state): V-JACK? holds
          across the phases (no flapping each AC phase).
+      **Device 0774e70 (device-check-2026-10-21.md "0774e70"; alarm Off, no sound):** 1 no false
+      V-JACK? at 1 V / off, but the AD1 peak sits at the rail (-262 144) from ~0.9 s, and at 24 V it
+      still ramps to the rail with a swing that gives a 2 s V-JACK? in 60 mA / 600 uA (new bug); VAR 32
+      no longer separates (the swing rule). 2 PASS (V-JACK? at 1.9-2.1 s on the 10 / 40 Hz square). 3
+      PASS (10 of 10 stay 60 mA). 4 skipped (wire). 5: REG? identical in every DC A entry (no register
+      history, confirmed); missed after DC V 60 V / RES / AC V / DC V / Scope -> back, seen only after
+      TEMP (7.98 s). **PREC 100 / 300 / 1000 brings V-JACK? back at 1.9 / 2.1 / 2.8 s** after DC V 60 V
+      and RES; off and 5 V stay quiet with PREC. -> Next fix: make the precondition the default (100 ms).
+      6 continuity 5 V pk -99 100 / +124 800. 7 soft 1 in RES / CONT, DBG:ALARm? events 0 (Off). 8 PASS
+      (V-JACK? from 8.3 / 8.8 s, held across phases).
 - [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device 612c45c: the RES
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
