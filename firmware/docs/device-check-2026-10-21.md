@@ -3761,7 +3761,7 @@ volume mounted read-only by udisks at `/run/media/$USER/DM40`. Scripts and data 
 | item | result |
 |---|---|
 | 1.1 Screenshot prep: shots of DC V and AC+DC (TODO "screenshot preparation" 1) | **PASS**: prep state 2 / 76 ready before each shot. frozen_ms **1304** (DC V), **1324 / 1314** (AC+DC); blocks_erased **0**; slices 531. Each BMP equals the panel read just before the gesture: **0 px** different (3 shots). Prep was at 2 / 76 again 9 s after each job's end (11.1-11.4 s after the gesture). A first DC V shot, right after the AC V -> DC V switch, had frozen 1635 ms / 681 slices (its pixels were not compared: the script read the panel in the wrong format) |
-| 1.2 A shot right after another (2) | **PASS**: second swipe 4.87 s after the first, while prep was in state 1 with 12 of 76 ready: frozen **5328 ms**, total 5987 ms, **63 blocks erased**, 1958 slices; SHOTS/S017.BMP saved (307 266 B, the AC+DC page). The "Saved" toast was not captured |
+| 1.2 A shot right after another (2) | **PASS (saved), slower than the estimate**: second swipe 4.87 s after the first, while prep was in state 1 with 12 of 76 ready: frozen **5328 ms**, total 5987 ms, **63 blocks erased**, 1958 slices; SHOTS/S017.BMP saved (307 266 B, the AC+DC page). 5.3 s is above the TODO's 3-5 s and ~1.3 s above the per-erase model of 8087c7d (~1.3 s + 42 ms x 63 = ~4.0 s); the swipe hit prep in state 1 (cause inferred, not isolated). The "Saved" toast was not captured |
 | 1.4 Disk full (4) | **PASS**: an AD2 76 800 disk session (`LOG:DUR 0`) filled the disk (LOG:DISK? state 6, free 0 after 152 s). Then prep state 2 with **0 ready**. The swipe showed the red **"Disk full"** toast at 0.5 s and wrote no BMP (frozen / total 71 ms, 6 slices) |
 | 1.5a CSV commits (5) | **PASS**: `LOG:CSV ON` for 135 s on DC V: at 0, 60.3 and 120.3 s prep went 2 -> 0 -> 1 (after 2.0-2.4 s) -> 2 / 76 (after 2.4-2.8 s), with 0-1 erases each. The same after `LOG:CSV OFF` (2 / 76 at +2.4 s) |
 | 1.5b Fast-log session (5) | **PASS**: AD2 38 400 `LOG:DUR 10` to the disk: prep state 0 while preparing / running (LOG:DISK? 1, 3, 4), 1 at 3.5 s after the session's end, 2 / 76 at 3.9 s |
@@ -3809,14 +3809,13 @@ volume mounted read-only by udisks at `/run/media/$USER/DM40`. Scripts and data 
    "device not accepting address 107/108, error -71" before the third attempt enumerated. Possibly the pre_main
    SPI-disk work (TODO "Boot indication") delaying USB; not investigated. Also "`/dev/sdb: Can't open blockdev`"
    2 s after each attach / mount (a read-write open of the write-protected disk by some prober, inferred).
-5. One `-113,"Undefined header"` appeared in the first batch (`CONF:VOLT:AC 6`, `FUNC?`, `VOLT:RANG?`,
-   `VOLT:RANG:AUTO?`, `SYST:ERR?`). Each of those commands was then sent again on its own with `SYST:ERR?`: no error.
-   Not reproduced. The two `-250,"Mass storage busy"` in the queue later came from this session's own
-   `MMEM:CAT?` polls during the shot jobs (b2b.py).
+5. The one `-113,"Undefined header"` of the session came from this session's own `SYST:VOL?` probe (the
+   command is `SYST:BEEPer:VOLume`), sent just before. The two `-250,"Mass storage busy"` in the queue later
+   came from this session's own `MMEM:CAT?` polls during the shot jobs (b2b.py; inferred, not isolated).
 
 ### State at the end
 
-- **Device:** DMM page, DC V, AUTO+ (`RANG:AUTO?` 1), `CONF?` "VOLT +6,+1E-05", rate MED; LOG restored to
+- **Device:** DMM page, DC V, AUTO+ (`RANG:AUTO?` 1), `CONF?` "VOLT +6,+1E-05" (as at the start), rate MED (`SENS:RATE?` was not read at the start); LOG restored to
   AD1 / 4800 / HOST / `LOG:DUR` 60 / `LOG:FORMat ROWS` (item 2's packed run had left PACK) / CHOP 1 / `LOG:STAT` 0 /
   `LOG:CSV` 0. Volume 50, Danger alarm LOUD, `DBG:IDLE?` Shutdown 1 800 000 ms, `DBG:VDISK:RO?` 1,1 (Files live),
   `SYST:ALER?` NONE, `SYST:ERR?` empty, `OUTP?` 0. The Wave view's timebase was left at 1 ms/div (its value
