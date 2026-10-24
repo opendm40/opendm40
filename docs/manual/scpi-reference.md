@@ -213,7 +213,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 | `SYSTem:RAIL[?]` | `AUTO` (default) or `BOTH` | `AUTO` or `BOTH` | both |
 | `SYSTem:RAIL:STATe?` | | `<dmm on 1/0>,<scope on 1/0>,<n>,<n>,<n>` | both |
 | `SYSTem:ALERt?` | | `NONE`, `OVERLOAD`, `AJACK`, `APROT`, `VJACK`, `LIVE`, `DC`, `AC` or `FUSE` | both |
-| `SYSTem:ALERt:ENABle[?]` | `0`..`15`, `ON` (= 15, default) or `OFF` (= 0) | the mask, `15` | both |
+| `SYSTem:ALERt:ENABle[?]` | `0`..`15` (8 is ignored), `ON` (= 7, default) or `OFF` (= 0) | the mask, `7` | both |
 | `SYSTem:ALERt:ALARm[?]` | `LOUD` (default), `VOLume` or `OFF` | `LOUD`, `VOLUME` or `OFF` | both |
 | `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the volume, `0`..`100` | both |
 | `SYSTem:FUSE:TEST` | | Starts the fuse check; returns at once. | both |
@@ -237,7 +237,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
   that the input has DC on AC V / AC on DC V; `FUSE` a current function
   reading zero for 60 s.
 - `SYSTem:ALERt:ENABle` bits: 1 AJACK, 2 VJACK and the DC / AC / FUSE hints,
-  4 LIVE, 8 the "Leads in A?" reminder when leaving a current function.
+  4 LIVE. 8 is accepted and ignored (it was the removed "Leads in A?" reminder).
   OVERLOAD cannot be turned off. Stored.
 - `SYSTem:ALERt:ALARm`: the two-tone alarm for AJACK, APROT and a current
   above 10 A, at full volume (`LOUD`), at the key volume (`VOLume`) or off.
@@ -766,7 +766,6 @@ unless shown otherwise.
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
 | `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |
 | `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
-| `DBG:LEADs?` | | `<count>,<from>,<to>`: "Leads in A?" reminders | USB |
 | `DBG:SENTinel?` | | Wrong-connection detector state | USB |
 | `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
 | `DBG:SENTinel:REG?` | | Measurement chip registers and relay state | USB |

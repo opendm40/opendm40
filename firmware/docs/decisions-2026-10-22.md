@@ -310,9 +310,9 @@ HOLD only.
 10 A switch) joins the alternating set (A-JACK / LIVE? / OVLD); the grey hints
 DC? / AC? / FUSE? take V-JACK?'s place below HOLD (never alternating).
 
-**"Leads in A?" reminder (2026-10-22, misconnect 4.9).** Not part of this
-alternation: it is a one-shot toast + beep on leaving a current function, no
-alert state, so the slot and the strip never show it and HOLD stays as it is.
+**"Leads in A?" reminder (2026-10-22, misconnect 4.9; removed 2026-10-24).** It was
+not part of this alternation: it was a one-shot toast + beep on leaving a current
+function, with no alert state.
 
 **Revisit.** If the device check of the sentinel re-check list (A-JACK false trips) shows the
 alert is too noisy to blink over HOLD, go back to A for the slot and keep the beep, rather than

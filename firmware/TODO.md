@@ -1197,6 +1197,9 @@ Firmware:
         beep), 5 (OFF / ENAB 7 / Jack alerts cycle / reboot) PASS; 3, 6, 7 not run. Open (cosmetic): the
         toast comes at the first reading, before the page's chart / stats repaint: ~1.5 s of the old A
         page's chart labels / REL unit under it.
+        **Removed 2026-10-24 (owner):** the toast on A -> V read as a false "Current in A jack" (doc 4.9).
+        The toast, beep, Settings row, ENAB bit 3 (ignored now), DBG:LEADs? and leadstest are gone;
+        p[38] bit 15 is ignored on load and not reused.
   - [x] Fuse check (UT197's procedure, our doc §4.3 design): guided dialog in ohm mode (600 ohm, PE = 2),
         lead V/ohm -> A, ~48 ohm = OK, OL = FUSE OPEN, else "Check leads"; the 0.05 ohm (PE0) step left out
         (it tests the MOSFET, not the fuse). FUSE? hint: 60 s below 0.1 % of the range (AC 5 %). Doc §4.7.
