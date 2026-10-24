@@ -167,7 +167,7 @@ with schemdraw.Drawing(show=False) as d:
     jack(d, (6.8, IY), 'COM', 'right')
     wire(d, (7.0, IY), (C, IY))
     d += elm.Dot().at((C, IY))
-    d += inf(elm.Resistor().at((C, IY)).to((P1, IY)).label('47.5 Ω', loc='top', fontsize=FS))
+    d += inf(elm.Resistor().at((C, IY)).to((P1, IY)).label('47 Ω', loc='top', fontsize=FS))
     d += elm.Dot().at((P1, IY))
     d += elm.Resistor().at((P1, IY)).to((NA, IY)).label('0.5 Ω', loc='top', fontsize=FS)
     d += elm.Dot().at((NA, IY))
@@ -176,9 +176,9 @@ with schemdraw.Drawing(show=False) as d:
     d += elm.Fuse().at((P2, IY)).to((22.4, IY)).label('fuse', loc='top', fontsize=FS)
     jack(d, (22.6, IY), 'A/mA/µA', 'left')
 
-    # taps (README: PB2 top of 10 mohm, PB1 top of 47.5 ohm, PB3 low side)
+    # taps (README: PB2 top of 10 mohm, PB1 between 10 mohm and 0.5 ohm, PB3 low side)
     wire(d, hy.PB3, (C, IY), inferred=True)
-    wire(d, hy.PB1, (hy.PB1[0], -1.05), (P1, -1.05), (P1, IY), inferred=True)
+    wire(d, hy.PB1, (hy.PB1[0], -1.05), (NA, -1.05), (NA, IY), inferred=True)
     wire(d, hy.PB2, (hy.PB2[0], -0.75), (P2, -0.75), (P2, IY), inferred=True)
 
     # MOSFETs across the lower shunts, to the COM node
