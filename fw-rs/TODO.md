@@ -3165,6 +3165,19 @@ Emulator (emu/):
       and RES; off and 5 V stay quiet with PREC. -> Next fix: make the precondition the default (100 ms).
       6 continuity 5 V pk -99 100 / +124 800. 7 soft 1 in RES / CONT, DBG:ALARm? events 0 (Off). 8 PASS
       (V-JACK? from 8.3 / 8.8 s, held across phases).
+- [ ] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open:
+      1. 24 V DC on V-COM, no DBG:SENT:PREC command (the default 100 ms): DC A / mA after DC V 60 V,
+         RES, AC V, DC V auto (60 V) and Scope -> back: V-JACK? within ~2.5 s (Scope -> back: the
+         restart mask, ~8 s). DBG:SENT:PREC? answers 100. Source off and 5 V: same entries, no alert.
+      2. Switch latency (fastswitch's settle.py / switchlat): DC V -> DC A first reading, once
+         right after RES (blind: expect ~+0.2 s, emulator 0.34 -> 0.55 s) and once from DC V 6 V with
+         no blind row before (expect unchanged).
+      3. AC A at 24 V DC, 1 V and off, 10 A / 60 mA / 600 uA, 30 s each: no V-JACK? (was 1.5-3.5 s
+         in 60 mA / 600 uA at 24 V). The square on V: V-JACK? within ~2.2 s (was 1.9-2.1 s).
+      4. DBG:SENT:VAR 64 (AD1 at IG 0.9) in AC A at 1 V / off / 24 V: where pkmin / pkmax sit (the
+         SENSE level in the A rows). VAR 0 after.
+      5. CONF:CURR:AC 10, 2 s, CONF:CURR:AC 0.06, FETC? every 50 ms: +9.91E37 until the first 60 mA
+         reading, which is not 1 % of the 10 A value.
 - [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device 612c45c: the RES
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
