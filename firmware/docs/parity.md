@@ -4,12 +4,11 @@ Item-by-item comparison of the Rust replacement firmware (`firmware/src/*.rs`) a
 the reverse-engineered stock behaviour (`stock/re/analysis/*_v2_6.h`). Status
 per item: **MATCH**, **PARTIAL** (what is missing in parentheses), **MISSING**,
 **UNKNOWN** (needs an on-device check). The device in hand is a DM40A (model
-byte 0). AC+DC and the 50/60 k-count model variants are DM40B/C only and out of
-scope for this unit.
+byte 0). The stock offers AC+DC and the 50/60 k-count ranges only on DM40B/C;
+opendm40 offers both on every model.
 
 Overall: the DMM, scope and generator engines are close ports of the stock
-numerics. The real gaps are in reporting/telemetry (BT flags, Device/About page),
-a few generator snap edge cases, the generator default, touch robustness
+numerics. The real gaps are in reporting/telemetry (BT flags), touch robustness
 (single controller, no Goodix fallback, bit-banged I2C), and the entirely new
 features (combined views, USBTMC, data logger) which have no stock equivalent to
 match. Nothing in the DMM value path looks wrong.
@@ -42,7 +41,7 @@ Stock: `hy3131_v2_6.h`, `dmm_v2_6.h`. opendm40: `dmm.rs`, `hy3131.rs`,
 | HV warning ≥100 V, main value colour | MATCH (intended red) | Main value drawn red (requirement) instead of stock orange/red-from-30 V split (`dmm_v2_6.h:239`). |
 | MF manual-range popup, AUTO/AUTO+ | MATCH | `set_range` `dmm.rs:473`; V/A/ohm items, AUTO+ flags. |
 | Calibration read from 0x080C0000 +0x168 | MATCH | `cal()` `dmm.rs:130`, CRC/version sanity check; **read-only** as required. |
-| AC+DC sub-mode | N/A (DM40A) | Not implemented by design; stock only offers it on B/C. |
+| AC+DC sub-mode | DEVIATION | Every model (stock: DM40B/C only). The total is shown only once both the AC and the DC part are measured; the stock first shows a total computed from the DC part alone. `dmm.rs`, `acdcm.rs`. |
 
 DMM verdict: faithful. Only the intentional red main value and the corrected
 temperature-F factor differ; both are deliberate.
@@ -56,7 +55,7 @@ Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. opendm40: `scope.rs`, `scope_m
 | Item | Status | Notes |
 |---|---|---|
 | Timebase hardware (TIM1/8 psc/arr, DMA) | MATCH | `HW` table `scope.rs:49` = stock `scope_timebase[31]`. |
-| User timebase range | PARTIAL (slow end) | opendm40 `TB_MIN=3`..`TB_MAX=23` = 100 ns/div..500 ms/div (`scope.rs:125`); stock user range is 3..29 = **100 ns..50 s/div** (`SCOPE_TB_USER_MAX 29`). opendm40 stops at 500 ms because it uses one record per frame instead of the stock 65520-sample ping-pong/zoom scheme. 1 s..50 s/div MISSING. |
+| User timebase range | MATCH | `TB_MIN=3`..`TB_MAX=29` = 100 ns/div..50 s/div, as the stock `SCOPE_TB_USER_MIN`/`MAX`; YT (non-roll) up to `TB_YT_MAX=24` = 1 s/div, 200 ms..50 s/div in roll mode (`scope.rs`). |
 | V/div 10 mV..10 V, front-end GPIO rows | MATCH | `VDIV`/`GPIO_ROW` `scope.rs:130` = `scope_range_gpio`; PC13 relay 200 ms wait kept. |
 | Probe x0.1..x1000 | MATCH | `probe` scales readouts/labels only (`scope.rs` Settings.probe), matching stock semantics; the full stock list `scope_probe[13]` (`scope::PROBES`) in the scope settings window, Settings tab (UF-12). |
 | Gain/offset calibration from record | MATCH | `cal_pair` `scope.rs:184` reads +0x08 (gain) / +0xA8 (offset) with defaults; CCR3 offset PWM formula matches `FUN_080302d6`. |
@@ -70,8 +69,8 @@ Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. opendm40: `scope.rs`, `scope_m
 | Persistence | MATCH | Trace persistence in `app.rs` (commit fb8f7db). |
 | Settings window (MF) | MATCH | `View::ScopeMenu` tabs. |
 | AUTO-set | PARTIAL | opendm40 has an autoset state machine (`app.rs:81`), two-phase. Not verified to reproduce the stock period→timebase table (`FUN_08033388`) exactly. UNKNOWN on device. |
-| Zoom in STOP | MISSING | Stock re-renders a stored 65520-sample record at a new s/div while stopped (`scope_gen_ui_v2_6.h` §3 Zoom). opendm40 keeps one screen per frame, so no stop-and-zoom. |
-| Math / FFT channel | MISSING | Stock has a math/FFT channel (S+0xd4, purple markers). Not in opendm40. Likely out of scope. |
+| Zoom in STOP | PARTIAL (shorter record) | While stopped, a timebase or V/div change re-renders the stored record, and a drag pans it (`scope.rs` "Stop-and-zoom"). The record is 26 624 samples; the stock keeps 65 520. |
+| Math / FFT channel | MATCH, extended | `fft.rs`: 2048 points, six windows (Rectangular, Blackman, Hanning, Hamming, Triangular, Flat-top), dB or Vrms; ABS math mode. opendm40 adds the dB/div, centre-frequency, Hz/div and peak readouts. |
 
 ---
 
@@ -84,11 +83,11 @@ Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. opendm40: `gen
 | Waveforms sine/square/triangle/ramp | MATCH | `dac()` `gen.rs:168`; same sample formulas incl. sine (c,w)=(50,4045)/(200,4095) split, DAC buffer on for square only. |
 | DAC path n / TIM6 PSC | MATCH | `gen.rs:170`: f>5000 PSC=0 n=10e6/f; else k=round(5000/f). |
 | PWM square >50 kHz | MATCH | `pwm()` `gen.rs:147`; PWM_HZ/PSC/PER match `gen_pwm_*`. |
-| Vpp 0.5..3.0, duty 0..10000 | MATCH | Clamped in `apply()` `gen.rs:130`. |
+| Vpp, duty 0..10000 | DEVIATION | Vpp 0..3.0 (stock 0.5..3.0), so that an offset with 0 Vpp is a DC output; adjustable offset (stock: fixed 0..Vpp). `genplan.rs` `AMP_MIN`. |
 | Runs while other pages shown (DMA/timers) | MATCH | Output is DMA/timer driven; state shown on the scope bar. |
-| **Default wave/freq** | PARTIAL | opendm40 default = **Sine, 1000 Hz** (`gen.rs:60`); stock default = **Square, 2 MHz** (`GEN_DEF_WAVE 1`, `GEN_DEF_FREQ_HZ 2000000`, corrected in `scope_gen_ui_v2_6.h:291`). |
-| Freq snap 50k..100k | PARTIAL | Stock snaps square 50k–100k **down to 50 kHz** (`scope_gen_ui_v2_6.h:294`). opendm40 `snap_freq` rounds **up to 100 kHz** (`gen.rs:70`, rev-find returns PWM_HZ[0]). |
-| Non-square >50 kHz | PARTIAL | Stock sets freq to **0 Hz (silent, on-flag kept)**. opendm40 clamps to **50 kHz and keeps outputting** (`gen.rs:78`). |
+| Default wave/freq | MATCH | Square, 2 MHz, 3 Vpp, output off (`genplan.rs` `Settings::DEFAULT`), as the stock. |
+| Freq snap 50k..100k | DEVIATION | Stock snaps a square of 50k–100k down to 50 kHz (`scope_gen_ui_v2_6.h:294`). opendm40 runs it on the PWM path at the nearest frequency 200 MHz / D can make (`genplan.rs` `plan_pwm`), and shows that real frequency. |
+| Non-square >50 kHz | DEVIATION | Stock sets the frequency to 0 Hz (silent, on-flag kept). opendm40 runs at 50 kHz and shows "max 50 kHz"; the set value is kept (`genplan.rs` `target_hz`, `max_note`). |
 | Keypads (freq H/K/M, numeric Vpp/duty) | MATCH | `View::Keypad`, stock layouts (commit 2464fca). |
 | RUN toggles output | MATCH | In `app.rs` RUN handling. |
 
@@ -126,7 +125,7 @@ Stock: `gui_v2_6.h`, `gui_render_v2_6.h`, `lcd_buzzer_v2_6.h`. opendm40: `ui.rs`
 | Main menu tiles | PARTIAL (by design) | Stock: 4 tiles + "正点原子" logo (`gui_v2_6.h:53`). opendm40: `ui::main_menu` with no Alientek logo (requirement). Tiles present via view selection. |
 | Settings: dim, shutdown, backlight, volume, BT, start page | MATCH | `View::Settings` `app.rs:288`; dim indices 5/10/30/never, shutdown 10/30/60/never. |
 | Language selection (zh-CN/zh-TW/en) | MISSING (by design) | opendm40 is English only; stock has 3 languages (`CFG_LANGUAGE`). Acceptable unless CJK is wanted. |
-| Device / About page (Vendor/Web/Model/version) | MISSING | Stock §6 Device page. opendm40 has none. Minor. |
+| Device / About page (Vendor/Web/Model/version) | MATCH | Settings > More > More > Device (`app.rs`): vendor, web, model, bootloader, software and hardware versions, plus the board temperature. |
 | Per-function DMM settings pages (MF: Voltage/Current/Resistor/Cap Settings) | PARTIAL | Stock opens dedicated per-function settings screens from MF (`gui_v2_6.h:65`). opendm40 uses a `View::Range` popup + `ScopeMenu`; fewer per-function options. |
 | "Other Settings" toggles (Anti-drop, Mode Remember, BT) | MATCH-ish | Anti-drop = `reassert_relay`; Mode Remember / persist via backup SRAM; BT toggle present. Stored in backup SRAM instead of config.bin. |
 | Idle dim + auto power-off | MATCH | `tick()` `app.rs:344`; dims backlight, power-off dialog/action. |
@@ -222,28 +221,20 @@ for FR-38, from `hy3131_v2_6.h`:
 2. **On-device verification of USBTMC + SPI disk** — TODO.md items; mount /
    write / read round-trip and `*IDN?`/screenshot/tap/swipe are unlogged. Fastest
    to close by running `tools/dm40dbg.py` once the native-boot work lands.
-3. **Generator defaults and snap edge cases** — `gen.rs:60` default should be
-   Square/2 MHz to match stock; `snap_freq` (`gen.rs:70`) should snap square
-   50k–100k **down to 50 kHz** and set non-square >50 kHz to **0 Hz/silent** rather
-   than clamping to 50 kHz.
-4. **Touch robustness** — add the Goodix GT1158 fallback (`touch.rs`, stock
+3. **Touch robustness** — add the Goodix GT1158 fallback (`touch.rs`, stock
    `touch_v2_6.h` §Goodix) for units without the 0x5A panel, and move the
    bit-banged I2C to the I2C2 peripheral + EXTI so a disk write / long loop does
    not drop touch frames.
-5. **Scope slow timebases + stop-zoom** — extend `TB_MAX` past 500 ms/div toward
-   50 s/div and add the stored-record re-render in STOP (`scope.rs`,
-   `scope_gen_ui_v2_6.h` §3), using the 65520-sample record instead of one screen.
-6. **Confirm simultaneous DMM+scope accuracy** — characterise crosstalk with both
+4. **Confirm simultaneous DMM+scope accuracy** — characterise crosstalk with both
    analog rails on (`scope.rs:309`); decide whether the combined view needs
    recalibration or a warning.
-7. **Device/About page** — add the stock §6 Device info (vendor/model/HW/FW) to
-   the menu; low effort, low priority.
-8. **BT module startup AT init** — send `AT+SBNDM40x` / `AT+SLED0` / `AT+RESET`
+5. **BT module startup AT init** — send `AT+SBNDM40x` / `AT+SLED0` / `AT+RESET`
    once on BT-on so a factory module is named/LED-configured like stock
    (`bt.rs`, `bt_meas_v2_6.h`). Only matters on a fresh module.
-9. **Data logger (FR-38)** — new feature; needs a timer-driven, constant-interval
+6. **Data logger (FR-38)** — new feature; needs a timer-driven, constant-interval
    HY3131 read path with timestamps + sequence numbers, separate from the GUI loop.
 
 Deliberate deviations (not gaps): red main value, no Alientek logo, English-only
-UI, temperature F factor 1.8 (stock bug was 1.82), combined views, USBTMC, touch
-gestures.
+UI, temperature F factor 1.8 (stock bug was 1.82), AC+DC on every model, the
+generator's 50 kHz clamp and nearest-frequency square, combined views, USBTMC,
+touch gestures.
