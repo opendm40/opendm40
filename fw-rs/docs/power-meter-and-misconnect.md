@@ -2338,6 +2338,62 @@ Emulator (opt-in knobs, `emu/hy3131/README.md`): `pb5drift:0.6;pb5tau:2.2`
 switchtest: `aca-drift`, `aca-ovl`, `real-vjack-ac`, `real-vjack-blind`,
 `real-vjack-blind-prec`.
 
+### 4.12 Device 0774e70 follow-up (fw-rs branch sentinel3, 2026-10-24)
+
+Device check "0774e70" in `device-check-2026-10-21.md` (raw: the session
+scratchpad's `chk7/out/sp_s*.json`, `sent5_*.json`).
+
+**The DC A precondition is on by default (100 ms).** The device showed
+that no register carries the 24 V history (`DBG:SENT:REG?` was the same 48
+hex digits in every DC A entry), and that 100 / 300 / 1000 ms of the
+temperature row before the DC A row bring V-JACK? back at 1.9 / 2.1 / 2.8 s
+after DC V 60 V and after RES, with no false hit at 5 V or with the source
+off. `Dmm::precond_ms` now defaults to `PRECOND_MS` = 100. It runs only
+when a DC A / mA / uA row is entered as a function change while `a_blind`
+(set by DC V 60 V+, an ohm-network row or a chip restart; cleared by a
+temperature row or by the precondition itself), with V-JACK? enabled and no
+fuse check. `DBG:SENT:PREC 0` turns it off. **Cost** (emulator,
+switchlat `--dc-only`, FAST): the first fresh DC A reading after ohm went
+from 0.34 s to 0.55 s. That is the blocking 100 ms, the relay pulse there
+and back (2 x 10 ms), and the AD1 grid. Entries that are not blind (from DC
+V 6 V, AC V, the other A rows, a second entry) pay nothing.
+
+**AC A: SENSE itself is the drifting node, not PB5.** With AD1 on SENSE -
+AGND the device hold still sat at the negative rail (below -347 mV at IG
+3.6) from ~0.9 s at 1 V and with the source off, and at 24 V DC it ramped
+there over ~3 s. `DBG:SENT:VAR 32` (the old PB5 row) looked the same. So the
+/1000 tap on SENSE through SS5 is not a defined node in the A rows: they run
+the power bus as SGND with PA8 P, and the divider's reference is not
+driven. This is the same node that the DC A comparator reads as below its
+window with V-COM open (4.11). What the firmware can use is an AC swing.
+A ramp gave 9 000-12 000 codes per 107 ms hold, above the 4 270-code swing
+threshold: a false V-JACK? at 1.5-3.5 s in 60 mA / 600 uA. **The swing rule
+now also needs a reversal.** The hold's range must overlap the previous
+hold's range by more than `PKV_SWING_THR`. Consecutive holds of a ramp
+barely overlap; an AC signal fills the same span in every window, and so
+does one clipped at the rail on one side. Cost: one hold more (~107 ms) to
+the first hit. `DBG:SENT:VAR +64` runs this AD1 at IG 0.9 (full scale
+1.39 V) to see where SENSE sits on the device. The swing threshold is not
+rescaled for that diagnostic.
+
+**No reading crosses a range change.** Device: for ~0.9 s after
+`CONF:CURR:AC 10` -> `0.06`, FETC? answered the 10 A row's value, and the
+first 60 mA reading was 1 % of it (1.902e-2 -> 1.925e-4, 4.92e-2 ->
+4.92e-4). That is the AC EMA's 0.99 step from the old value. FETC? now
+answers +9.91E37 when the shown reading is not from the row the chip runs
+(`Dmm::reading_current`: mode, AC+DC either phase, and range; not in Hz,
+whose readings carry the counter's range, nor in the power meter, nor under
+HOLD / AutoHold). The AC filters (`f_ac`, `f_lpf`, `ac_raw`) restart on
+every plain range step, not only on a mode change. The emulator does not
+reproduce the device's stale FETC? (its first 60 mA reading is fresh), so
+the guard is checked by reasoning and on the device.
+
+Emulator: `senseneg:0.75;sensetau:5` (AC A SENSE falls V x (1 -
+exp(-t / tau)) from the first AC A row: the 24 V ramp, ~10 k codes per hold
+at 1 s, the rail by ~3.5 s); switchtest `aca-ramp` (24 V DC through AC A /
+mA / uA / 10 A: FAIL on e7d5382, OK now); `real-vjack-blind` passes with the
+default precondition (it failed on e7d5382).
+
 ## 5. Open points for the owner
 
 1. The DM40 manual's A-input fuse rating(s), CAT rating and 10 A time limit
