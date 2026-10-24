@@ -46,7 +46,12 @@
 //!     function change itself.
 //!   - +9.91E37 (SCPI NaN, "no reading"; +9.9E37 stays the overload) and
 //!     "Data stale" in SYST:ERR? only if the current function has no
-//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
+//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline. READ? /
+//!     MEAS:RES? follow the ohm range hunt (each step moves the deadline,
+//!     at most 8 s); FETCh? does not: at most SCPI_WAIT_MS after the
+//!     deadline it was asked at, and +9.91E37 at once (no error) once an
+//!     autorange step came since the entry (the range-change rule below;
+//!     device a2e9766: a hunt kept FETCh? silent for the driver's 5 s).
 //!   - AUTO coupling before its first decision (its values are provisional,
 //!     ../docs/history/switch-latency.md 6): FETCh? answers +9.91E37 at once (no wait,
 //!     no error); READ? / MEAS? wait for the decision until AUTO_WAIT_MS
