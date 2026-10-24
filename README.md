@@ -8,6 +8,10 @@ and touch model and adds a power meter, data logging, USBTMC/SCPI and more.
 It installs like a stock update file and leaves the vendor bootloader, the
 vendor update loader and the calibration untouched.
 
+**[User manual](docs/manual/README.md)**: how to install opendm40 and use
+every feature, connecting from a computer, and the
+[SCPI reference](docs/manual/scpi-reference.md).
+
 **Status: experimental.** Developed and tested on one DM40A. DM40B and DM40C
 ran only in the emulator. In the table, *device* means checked on that DM40A
 ([device check log](firmware/docs/device-check-2026-10-21.md)); *emulator* means

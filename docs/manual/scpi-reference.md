@@ -1,0 +1,777 @@
+# SCPI command reference
+
+opendm40 accepts SCPI commands from a computer, so a script can read the
+multimeter, set it up, read scope waveforms, drive the generator and fetch
+files. This page lists every command. How to connect (drivers, cable,
+Bluetooth pairing, PyVISA, sigrok) is in
+[Connecting from a computer](connecting-from-a-computer.md).
+
+## Links
+
+| Link | What it is | Notes |
+|---|---|---|
+| USB | USBTMC (USB488) interface of the USB cable connection | All commands. |
+| Bluetooth | The meter's Bluetooth serial link (the one the phone app uses) | Works while Bluetooth is on in the meter's settings. Some commands are refused; see [Bluetooth differences](#bluetooth-differences). |
+
+Each link has its own session: its own error queue and its own waiting
+`READ?`. The meter's settings are shared: a function set over Bluetooth is
+the function USB reads, and the same as one set by touch.
+
+## Message rules
+
+- **Case and forms.** Commands are not case-sensitive. Each part of a header
+  is accepted in its short form (the capital letters in this reference,
+  `MEAS`) or its long form (`MEASURE`), nothing in between. Parts written all
+  in capitals here (`DBG:PING`, `RUN`) have one form only.
+- **Optional parts** are in brackets: `[SENSe:]VOLTage:RANGe` is
+  `VOLT:RANG` or `SENS:VOLT:RANG`. A leading `:` is allowed.
+- **Parameters** follow the header after a space; several parameters are
+  separated by commas: `CONF:VOLT 60,MAX`.
+- **Queries** end in `?`. `[?]` in this reference means the command sets a
+  value and the same header with `?` reads it back.
+- **Several commands in one message** are separated by `;`. Each command is a
+  full header from the root (`SOUR:FREQ 1000;SOUR:VOLT 2`, not
+  `SOUR:FREQ 1000;VOLT 2`). The commands run in order. The replies to the
+  queries come back as one response, in order, separated by `;`.
+- **Termination.** Over USB a message is one USBTMC transfer; a `\n` at its
+  end is optional. Over Bluetooth a message is one line ending in `\n` or
+  `\r` (CR LF is fine). Every response ends with `\n`, also after a binary
+  block.
+- **Sizes.** A message is at most 256 bytes. One command (header and its
+  parameters) is cut after 64 characters. A joined text response is at most
+  512 bytes; a reply that does not fit is dropped and `Out of memory` is
+  queued.
+- **Binary blocks.** Some queries answer with an IEEE 488.2 definite-length
+  block: `#`, one digit n, n digits of length, the data, then `\n`
+  (`#3400` followed by 400 bytes). A block query must be the only query in
+  its message; otherwise it is refused with `Query error`.
+- **Numbers in replies** are in SCPI NR3 with 7 significant digits:
+  `+1.234567E-03`, in SI units (V, A, ohm, F, Hz, s, W). Two special values:
+  `+9.90000000E+37` is an overload (OL on the screen), `+9.91000000E+37`
+  means "no value" (SCPI NaN: no reading yet, or not measured).
+- **Numbers in parameters** are plain or in exponent form: `0.001`, `1E-3`,
+  `-2.5`. A suffix letter multiplies: `K` = 10^3, `M` = 10^6, `U` = 10^-6,
+  `N` = 10^-9. There is no milli suffix (`1m` is 1 000 000); use `1E-3`.
+- **ON / OFF** parameters also take `1` / `0`. Replies to ON / OFF queries
+  are `1` or `0`.
+- **Unanswerable queries.** A message with a query always gets a response.
+  When a query cannot be answered (unknown header, wrong state), its reply is
+  left out; if nothing is left, the response is an empty line. Ask
+  `SYSTem:ERRor?` for the reason.
+
+### Errors
+
+`SYSTem:ERRor?` returns the last error and clears it: `-100,"<text>"`, or
+`0,"No error"`. The meter keeps one error only: a new error replaces an
+unread one. `*CLS` and `*RST` clear it. The texts:
+
+| Text | Meaning |
+|---|---|
+| `Undefined header` | Unknown command, or a query form that does not exist. |
+| `Command error` | `CONFigure` / `MEASure` with an unknown function. |
+| `Illegal parameter value` | A parameter is missing, unknown or out of range. |
+| `Data out of range` | A range value above the largest range. |
+| `Settings conflict` | Not possible in the present state (wrong function, a logger running, the scope running, ...). Some add the reason after a colon or semicolon. |
+| `Data stale` | No fresh value: the reply is `+9.91E37` / `+9.9E37` or an old value. |
+| `Query INTERRUPTED` | USB: a new message came while a `READ?` / `MEASure?` was still waiting; that query gets no reply. |
+| `Query error` | A block query together with other queries in one message. |
+| `Out of memory` | The joined response would exceed 512 bytes. |
+| `Too much data` | A block reply larger than the link can send at once (Bluetooth). |
+| `Command protected` | Refused over Bluetooth (see below). |
+| `Rate too high for Bluetooth` | A logger session faster than the Bluetooth link. |
+| `Input buffer overrun` | Bluetooth: a line longer than 256 bytes (dropped). |
+| `Queue overflow` | Bluetooth: a reply did not fit the send buffer. |
+| `Mass storage busy` | The disk is in use (a recording commits, a screenshot is saved, the PC has it mounted). |
+| `Mass storage error`, `Mass storage full` | Disk failure / no space. |
+| `File name not found` | `MMEMory` file name not on the disk. |
+
+### Status reporting
+
+There is no status or event reporting: `*STB?` and `*ESR?` always answer `0`,
+there is no service request (SRQ), and `*OPC?` answers `1` at once. USB488
+remote / local requests (REN, GO TO LOCAL, LOCAL LOCKOUT) are accepted and
+change nothing; the touch screen and keys always stay active.
+`STATus:QUEStionable` reports the wrong-connection alerts.
+
+### Bluetooth differences
+
+- Every `DBG:` command is refused. A message that contains one is refused as
+  a whole (nothing of it runs, no reply) and queues `Command protected`.
+- Also refused with `Command protected`: `MMEMory:DELete`, `LOG:CSV ON`,
+  `LOG:STATe ON` with `LOG:DEST DISK`, and the firmware upload.
+- `LOG:STATe ON` is refused (`Rate too high for Bluetooth`) when the session
+  is faster than 800 samples/s or uses the AD2 converter. `LOG:DATA?` over
+  Bluetooth of such a session (started over USB) answers an empty block with
+  the same error.
+- A block reply must fit 6144 bytes. A longer `WAVeform:DATA?` answers `#10`
+  and queues `Too much data`: use `WAVeform:POINts 2000` or less with WORD.
+- Lines are handled one at a time: the next line is read after the reply to
+  the previous one has been sent. Send the next query after reading the
+  reply.
+- The link carries 11.5 kB/s (115200 baud). A `READ?` reply takes about 1 ms
+  on the link; a 6 kB block about 0.5 s.
+
+## Example session
+
+```
+> *IDN?
+< Alientek,DM40C,0123456789ABCDEF01234567,opendm40 0.1
+```
+
+The four fields: maker, model (`DM40A`, `DM40B` or `DM40C`, from the meter's
+calibration record), serial number (the chip's unique ID as 24 hex digits,
+the same as the USB serial number), firmware name and version.
+
+A DC voltage reading, then the function and range:
+
+```
+> CONF:VOLT:DC
+> READ?
+< +1.234567E+00
+> CONF?
+< "VOLT +6.000000E+00,+1.000000E-05"
+> MEAS:RES?
+< +4.701230E+03
+```
+
+`READ?` right after `CONF` waits for the first settled reading (up to about
+3 s); give the host a timeout of 5 s or more.
+
+A full scope record as 16-bit samples:
+
+```
+> STOP
+> WAV:POIN MAX
+> WAV:FORM WORD
+> WAV:PRE?
+< 1,2,<points>,1,<xinc>,<xorig>,0,<yinc>,<yorig>,0
+> WAV:DATA?
+< #<n><length><length bytes>
+```
+
+Sample i (a little-endian 16-bit word) is at time `i * xinc + xorig` seconds
+from the trigger point and has the value `code * yinc + yorig` volts at the
+probe tip. In Python with PyVISA:
+
+```python
+import pyvisa
+rm = pyvisa.ResourceManager()
+m = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
+                     read_termination='\n', write_termination='\n', timeout=5000)
+print(m.query('*IDN?'))
+m.write('CONF:VOLT:DC')
+print(float(m.query('READ?')))
+m.write('STOP;:WAV:POIN MAX;:WAV:FORM WORD')
+fmt, typ, n, _, xinc, xorig, xref, yinc, yorig, yref = map(float, m.query('WAV:PRE?').split(','))
+codes = m.query_binary_values('WAV:DATA?', datatype='H', container=list)
+volts = [(c - yref) * yinc + yorig for c in codes]
+```
+
+## IEEE 488.2 common commands
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.1` | both |
+| `*RST` | | Clears the error queue and the questionable event bits. Settings are not reset. | both |
+| `*CLS` | | Same as `*RST`. | both |
+| `*OPC?` | | `1` | both |
+| `*ESR?` | | `0` | both |
+| `*STB?` | | `0` | both |
+
+## SYSTem and STATus
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `SYSTem:ERRor?` | | `-100,"<text>"` or `0,"No error"` (see [Errors](#errors)) | both |
+| `SYSTem:MODel?` | | `<model>,<model byte>,<counts>`: the model (`DM40A`, `DM40B`, `DM40C`) and the raw model byte of the calibration record, then the count limit, always `60000` | both |
+| `SYSTem:IDN:EMULation[?]` | `OFF` (default) or `34401A` | `OFF` or `34401A` | both |
+| `SYSTem:LOCal` | | Accepted, does nothing. | both |
+| `SYSTem:REMote` | | Accepted, does nothing. | both |
+| `SYSTem:TEMPerature?` | | Temperature of the meter's processor, in the `UNIT:TEMPerature` unit: `+3.120000E+01` | both |
+| `SYSTem:RAIL[?]` | `AUTO` (default) or `BOTH` | `AUTO` or `BOTH` | both |
+| `SYSTem:RAIL:STATe?` | | `<dmm on 1/0>,<scope on 1/0>,<n>,<n>,<n>` | both |
+| `SYSTem:ALERt?` | | `NONE`, `OVERLOAD`, `AJACK`, `APROT`, `VJACK`, `LIVE`, `DC`, `AC` or `FUSE` | both |
+| `SYSTem:ALERt:ENABle[?]` | `0`..`15`, `ON` (= 15, default) or `OFF` (= 0) | the mask, `15` | both |
+| `SYSTem:ALERt:ALARm[?]` | `LOUD` (default), `VOLume` or `OFF` | `LOUD`, `VOLUME` or `OFF` | both |
+| `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the volume, `0`..`100` | both |
+| `SYSTem:FUSE:TEST` | | Starts the fuse check; returns at once. | both |
+| `SYSTem:FUSE?` | | `IDLE`, `BUSY`, `OK,<ohm>`, `OPEN`, `FAIL,<ohm>` or `FAIL,NONE` | both |
+| `STATus:QUEStionable:CONDition?` | | Bits now: bit 9 (512) a red alert (AJACK, APROT, OVERLOAD), bit 1 (2) OVERLOAD | both |
+| `STATus:QUEStionable[:EVENt]?` | | The same bits collected since the last read or `*CLS`; reading clears them | both |
+| `UNIT:TEMPerature[?]` | `C` or `F` | `C` or `F` | both |
+
+- `SYSTem:IDN:EMULation 34401A` makes `*IDN?` report an HP 34401A, for
+  programs that know that meter but not the DM40 (sigrok and SmuView without
+  the DM40 profile). It is stored. With it on, `READ?` and `MEASure?` never
+  wait longer than 0.85 s and answer `+9.91E37` until the first reading after
+  a function change.
+- `SYSTem:RAIL BOTH` keeps the multimeter and the scope powered at the same
+  time; `AUTO` powers only what the shown page needs. It is stored.
+- `SYSTem:ALERt?` names the wrong-connection alert in force: `OVERLOAD` the
+  uA / mA shunt was overloaded and the meter moved to the 10 A shunt;
+  `AJACK` current in the A jack while not measuring current; `APROT` the A
+  jack protection; `VJACK` a voltage on V/ohm while measuring current;
+  `LIVE` a powered circuit in ohm / continuity / diode; `DC` / `AC` a hint
+  that the input has DC on AC V / AC on DC V; `FUSE` a current function
+  reading zero for 60 s.
+- `SYSTem:ALERt:ENABle` bits: 1 AJACK, 2 VJACK and the DC / AC / FUSE hints,
+  4 LIVE, 8 the "Leads in A?" reminder when leaving a current function.
+  OVERLOAD cannot be turned off. Stored.
+- `SYSTem:ALERt:ALARm`: the two-tone alarm for AJACK, APROT and a current
+  above 10 A, at full volume (`LOUD`), at the key volume (`VOLume`) or off.
+  Stored.
+- `SYSTem:FUSE:TEST`: plug one lead from V/ohm into A, nothing else. The
+  meter measures 600 ohm for three readings, then returns to the function
+  before. `OK` is about 48 ohm; `OPEN` is a blown fuse or lead.
+
+## Measurement: CONFigure, MEASure, READ, FETCh
+
+`CONFigure` selects a function and its range; `READ?` returns the next
+reading. `MEASure?` selects the function and returns a reading in one step.
+`FETCh?` returns the reading on the display without waiting for a new one.
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `CONFigure:VOLTage[:DC]` | `[<range>\|AUTO\|MIN\|MAX\|DEF[,<resolution>\|MIN\|MAX\|DEF]]` | | both |
+| `CONFigure:VOLTage:AC` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:VOLTage:ACDC` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:VOLTage:AUTO` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:CURRent[:DC]` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:CURRent:AC` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:CURRent:ACDC` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:CURRent:AUTO` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:RESistance` | as `CONFigure:VOLTage` | | both |
+| `CONFigure:FRESistance` | Same as `CONFigure:RESistance` (2-wire). | | both |
+| `CONFigure:CONTinuity` | none | | both |
+| `CONFigure:DIODe` | none | | both |
+| `CONFigure:CAPacitance` | `[AUTO\|DEF]` | | both |
+| `CONFigure:FREQuency` | `[AUTO\|DEF]` | | both |
+| `CONFigure:TEMPerature` | `[<sensor>]` | | both |
+| `CONFigure:POWer` | `[<V range>\|AUTO[,<A range>\|AUTO]]` (see [Power meter](#power-meter)) | | both |
+| `CONFigure?` | | `"<function> <range>,<resolution>"`: `"VOLT +6.000000E+00,+1.000000E-04"`; `"CONT"`, `"DIOD"`; power meter `"POW AUTO,AUTO"` | both |
+| `MEASure:VOLTage[:DC]?` | | a reading: `+1.234567E+00` | both |
+| `MEASure:VOLTage:AC?` | | a reading | both |
+| `MEASure:VOLTage:ACDC?` | | a reading | both |
+| `MEASure:VOLTage:AUTO?` | | a reading | both |
+| `MEASure:CURRent[:DC]?` | | a reading | both |
+| `MEASure:CURRent:AC?` | | a reading | both |
+| `MEASure:CURRent:ACDC?` | | a reading | both |
+| `MEASure:CURRent:AUTO?` | | a reading | both |
+| `MEASure:RESistance?` | | a reading in ohm | both |
+| `MEASure:FRESistance?` | | as `MEASure:RESistance?` | both |
+| `MEASure:CONTinuity?` | | a reading in ohm | both |
+| `MEASure:DIODe?` | | a reading in V | both |
+| `MEASure:CAPacitance?` | | a reading in F | both |
+| `MEASure:FREQuency?` | | a reading in Hz | both |
+| `MEASure:TEMPerature?` | `[<sensor>]` | a reading in the `UNIT:TEMPerature` unit | both |
+| `MEASure:POWer?` | | real power P in W | both |
+| `READ?` | | the next reading of the present function | both |
+| `FETCh?` | | the reading on the display; if the function has no reading yet, the first one | both |
+| `INITiate` | | Accepted, does nothing (the meter measures all the time). | both |
+| `ABORt` | | Accepted, does nothing. | both |
+
+Functions:
+
+| Function | Header | Ranges (`<range>` values) |
+|---|---|---|
+| DC voltage | `VOLTage[:DC]` | 0.6, 6, 60, 600, 1000 V |
+| AC voltage (RMS) | `VOLTage:AC` | as DC voltage |
+| AC+DC voltage (RMS of both) | `VOLTage:ACDC` | as DC voltage |
+| Voltage, AC or DC chosen by the meter | `VOLTage:AUTO` | as DC voltage |
+| DC current | `CURRent[:DC]` | 0.0006, 0.006, 0.06, 0.6, 6, 10 A |
+| AC current, AC+DC current, AUTO | `CURRent:AC`, `CURRent:ACDC`, `CURRent:AUTO` | as DC current |
+| Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm |
+| Continuity | `CONTinuity` | none |
+| Diode | `DIODe` | none |
+| Capacitance | `CAPacitance` | autorange only (6 nF .. 60 mF) |
+| Frequency | `FREQuency` | autorange only (60 Hz .. 60 MHz) |
+| Temperature | `TEMPerature` | none |
+| Power meter | `POWer` | see [Power meter](#power-meter) |
+
+- **Range.** A number selects the smallest range that holds it
+  (`CONF:VOLT 10` = 60 V); `MIN` the smallest range, `MAX` the largest;
+  `AUTO`, `DEF` or no range = autorange. A value above the largest range is
+  `Data out of range`.
+- **Resolution.** A value at least the range's 60000-count step (or `MAX`)
+  sets the fast rate (`RATE FAST`, 60000 counts); a finer value, `MIN` or
+  `DEF` sets the medium rate with one more digit where the range has it
+  (`RATE MED`; `RATE SLOW` stays SLOW). The rate is one setting for all
+  functions.
+- **Temperature sensors** (`<sensor>`): `TCK` (K thermocouple, also `TC`
+  or `K`), `PT100`, `PT1000`, `NTC10K3950`, `NTC10K3435`, `NTC100K3950`,
+  `NTCUSER` (see `TEMPerature:NTC`). Without one, the present sensor stays.
+- `MEASure` takes no range: a range given is ignored, and a newly selected
+  function starts in autorange. `MEASure:TEMPerature?` takes a sensor.
+- **AUTO coupling** (`VOLTage:AUTO`, `CURRent:AUTO`): the reading is the DC
+  or the AC part, whichever the meter shows. `[SENSe:]VOLTage:COUPling?`
+  says which.
+- **Overload** reads `+9.9E37`.
+
+**When the reply comes.** `READ?` and `MEASure?` return a fresh reading:
+
+- Function already running: the next reading, or the latest one if none
+  comes within 0.85 s.
+- Just switched by this host (`MEASure?` with a new function, `CONFigure`
+  then `READ?`): the first reading after the input has settled: a fraction
+  of a second for DC V, about 3 s for resistance (settling and the range
+  search), up to 3.9 s for the AUTO coupling. `+9.91E37` and `Data stale`
+  if no reading comes within 1.9 s after settling.
+- Changed on the meter (touch, keys, the phone app, the other link) while a
+  `READ?` waits, or between this host's `FUNCtion?` / `CONFigure?` and its
+  `READ?` / `FETCh?`: the reply is `+9.91E37` with `Data stale` at once, so
+  a reading is never filed under the wrong function. Until the new function
+  has a reading, `READ?` answers `+9.91E37` within 0.85 s.
+- `FETCh?` answers `+9.91E37` while the range has just changed and no reading
+  of the new range exists yet.
+- While a data logger session runs (`LOG:STATe ON`), `READ?` and
+  `MEASure?` answer `+9.9E37` at once; `FETCh?` returns the displayed
+  reading if there is one, else `+9.9E37`.
+
+## SENSe: function, coupling, range, rate
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `[SENSe:]FUNCtion[?]` | `"<function>"`: a header from the table above, quoted or not: `"VOLT:AC"` | `"VOLT"`, `"VOLT:AC"`, `"VOLT:ACDC"`, `"VOLT:AUTO"`, `"CURR"`, `"CURR:AC"`, `"CURR:ACDC"`, `"CURR:AUTO"`, `"RES"`, `"CONT"`, `"DIOD"`, `"CAP"`, `"FREQ"`, `"TEMP"`, `"POW"` | both |
+| `[SENSe:]VOLTage:COUPling[?]` | `DC`, `AC`, `ACDC` or `AUTO`: selects voltage with that coupling | `DC`, `AC`, `ACDC`, `AUTO,DC` or `AUTO,AC` | both |
+| `[SENSe:]CURRent:COUPling[?]` | as `VOLTage:COUPling`, for current | as `VOLTage:COUPling?` | both |
+| `[SENSe:]VOLTage:RANGe[?]` | `<range>`, `AUTO`, `MIN`, `MAX` or `DEF` | the present range: `+6.000000E+00` | both |
+| `[SENSe:]VOLTage:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` autorange, `0` fixed | both |
+| `[SENSe:]VOLTage:RESolution[?]` | `<resolution>`, `MIN`, `MAX` or `DEF` | the resolution: `+1.000000E-05` | both |
+| `[SENSe:]CURRent:RANGe[?]` | as `VOLTage:RANGe` | as `VOLTage:RANGe?` | both |
+| `[SENSe:]CURRent:RANGe:AUTO[?]` | as `VOLTage:RANGe:AUTO` | as `VOLTage:RANGe:AUTO?` | both |
+| `[SENSe:]CURRent:RESolution[?]` | as `VOLTage:RESolution` | as `VOLTage:RESolution?` | both |
+| `[SENSe:]RESistance:RANGe[?]` | as `VOLTage:RANGe` | as `VOLTage:RANGe?` | both |
+| `[SENSe:]RESistance:RANGe:AUTO[?]` | as `VOLTage:RANGe:AUTO` | as `VOLTage:RANGe:AUTO?` | both |
+| `[SENSe:]RESistance:RESolution[?]` | as `VOLTage:RESolution` | as `VOLTage:RESolution?` | both |
+| `[SENSe:]CAPacitance:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E-06` | both |
+| `[SENSe:]CAPacitance:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
+| `[SENSe:]FREQuency:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E+03` | both |
+| `[SENSe:]FREQuency:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
+| `[SENSe:]RATE[?]` | `SLOW`, `MEDium` or `FAST` | `SLOW`, `MED` or `FAST` | both |
+| `[SENSe:]RATE:PERiod?` | | Time between readings in s, measured: `+1.000000E-01` (0 before two readings) | both |
+
+- **Range commands** act on the present function. `VOLTage` and `CURRent`
+  without a coupling mean that quantity in whatever coupling is selected;
+  add `:DC`, `:AC`, `:ACDC` or `:AUTO` to name one (`VOLT:AC:RANG?`). Every
+  form of `CONFigure`'s function headers is accepted (`FRESistance:RANGe`,
+  `CAPacitance:RESolution?`, ...).
+- Setting the range of a function that is not selected is a
+  `Settings conflict`. Querying it is no error: `:RANGe:AUTO?` answers `1`,
+  `:RANGe?` and `:RESolution?` answer `+9.91E37`.
+- `:RANGe:AUTO ON` returns to the autorange chosen on the meter (AUTO+ or
+  AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
+  off.
+- `:RANGe?` also reports the range while autoranging, including 60 mV,
+  which only the mV-first autorange reaches.
+- In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
+  report the power meter's V and I channels; set them with
+  `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
+- Continuity, diode and temperature have no range (`Undefined header`).
+- Range and resolution changes are refused (`Settings conflict`) while a data
+  logger session runs or the Wave view is open; `CONFigure` then only
+  selects the function.
+- **Rate:** `FAST` 10 readings/s with 60000 counts; `MEDium` and `SLOW`
+  2.5 readings/s in steady state with one more digit (in DC V 600 mV ..
+  600 V and resistance 600 ohm .. 60 kohm); `SLOW` also averages 16
+  conversions. It applies to DC voltage, DC current and resistance; other
+  functions keep their own timing. Stored.
+
+## Temperature
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `[SENSe:]TEMPerature:TRANsducer[?]` | `<sensor>` (see [sensors](#measurement-configure-measure-read-fetch)) | `TCK`, `PT100`, `PT1000`, `NTC10K3950`, `NTC10K3435`, `NTC100K3950` or `NTCUSER` | both |
+| `[SENSe:]TEMPerature:OFFSet[?]` | offset in C, -20 .. 20 in 0.1 C steps | `+0.000000E+00` | both |
+| `[SENSe:]TEMPerature:NTC[?]` | `<R25 in ohm>,<Beta>` | `+1.000000E+04,+3.950000E+03` | both |
+| `[SENSe:]TEMPerature:EXCitation?` | | `<range>,<R ohm>,<I A>,<P W>` of a resistive sensor | both |
+| `MEASure:TEMPerature:CJ?` | | `<cold junction temperature>,<age s>` | both |
+
+- `TEMPerature:OFFSet` belongs to the present sensor; for the thermocouple it
+  is added to the cold junction. Offsets are always in C.
+- `TEMPerature:NTC` sets the parameters of the `NTCUSER` sensor.
+- `TEMPerature:EXCitation?` gives the present range and the sensor's
+  resistance, current and dissipated power; with the thermocouple it is a
+  `Settings conflict`.
+- `MEASure:TEMPerature:CJ?` is fresh only while the thermocouple is
+  measured; otherwise it gives the last value with its age and queues
+  `Data stale` (`+9.9E37` if it was never measured).
+
+## Burden voltage
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `FETCh:BURDen?` | | Voltage across the shunt for the latest current reading, V: `+1.234000E-02` | both |
+| `DISPlay:BURDen[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
+
+- `FETCh:BURDen?` uses the shunt in use (or the resistance set with
+  `POWer:BURDen`); DC readings are signed, AC and AC+DC are RMS. Outside the
+  current functions it answers `+9.9E37` with `Data stale`.
+- `DISPlay:BURDen` shows the burden voltage on the DMM page (DC A and AC A).
+  Stored.
+
+## CALCulate: hold, statistics, limits, smoothing
+
+These act on the present DMM function; values are in its SI unit (W in the
+power meter).
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `CALCulate:AHOLd[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:AVERage[:AVERage]?` | | Mean: `+1.234567E+00` | both |
+| `CALCulate:AVERage:MINimum?` | | Minimum | both |
+| `CALCulate:AVERage:MAXimum?` | | Maximum | both |
+| `CALCulate:AVERage:COUNt?` | | Number of samples: `120` | both |
+| `CALCulate:AVERage:CLEar` | | Restarts the statistics. | both |
+| `CALCulate:AVERage:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:LIMit:LOWer[?]` | `<value>` | `+1.000000E+00`, or `+9.9E37` when not set | both |
+| `CALCulate:LIMit:UPPer[?]` | `<value>` | as `LIMit:LOWer?` | both |
+| `CALCulate:LIMit:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:LIMit:CLEar` | | Removes both limits. | both |
+| `CALCulate:LIMit:FAIL?` | | `1` the value is outside the limits, else `0` | both |
+| `CALCulate:SMOothing[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:SMOothing:RESPonse[?]` | `SLOW`, `MEDium` or `FAST` | `SLOW` or `FAST` | both |
+
+- `AHOLd`: AutoHold, as a long press on RUN.
+- `AVERage...?` before the first sample answer `+9.9E37` with `Data stale`.
+- `AVERage:STATe ON` starts a recording session: the statistics restart and
+  the meter does not power off when idle.
+- Setting a limit turns the limit check on.
+- Smoothing changes the displayed value and `READ?` / `MEASure?` /
+  `FETCh?`; the statistics and the CSV log use the unsmoothed readings.
+  `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one.
+  Stored.
+
+## Power meter
+
+The power meter measures voltage (V/COM) and current (A jacks) at the same
+time. Select it with `CONFigure:POWer` (or on the meter); `READ?`, `FETCh?`
+and `MEASure:POWer?` then give the real power P in W.
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `FETCh:POWer:ALL?` | | `P,S,Q,PF,Vrms,Irms,F,E_Wh,seconds,Vdc,Idc,VAh,burden_V` | both |
+| `MEASure:POWer:APParent?` | | S, VA | both |
+| `MEASure:POWer:REACtive?` | | Q, var | both |
+| `MEASure:POWer:PFACtor?` | | Power factor | both |
+| `MEASure:POWer:ENERgy?` | | Energy, Wh | both |
+| `MEASure:POWer:VOLTage?` | | Vrms | both |
+| `MEASure:POWer:CURRent?` | | Irms | both |
+| `[SENSe:]POWer:VOLTage:RANGe[?]` | `<V>` (6, 60, 600, 1000) or `AUTO` | `AUTO,+6.000000E+02` or `MAN,+6.000000E+01` | both |
+| `[SENSe:]POWer:CURRent:RANGe[?]` | `<A>` (0.0006 .. 10) or `AUTO` | as `VOLTage:RANGe?` | both |
+| `[SENSe:]POWer:COUPling[?]` | `DC`, `AC` or `ACDC` | `DC`, `AC` or `ACDC` | both |
+| `[SENSe:]POWer:ENERgy:RESet` | | Restarts energy and time. | both |
+| `[SENSe:]POWer:ENERgy:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `[SENSe:]POWer:BURDen[?]` | `<ohm>` (0 .. 1000) or `DEFault` | `+1.000000E-02` | both |
+| `[SENSe:]POWer:BURDen:STATe[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
+| `[SENSe:]POWer:METHod[?]` | `SIMultaneous` or `ALTernate` | `SIM` or `ALT` | both |
+| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0 .. 10 A, 0 .. 3600 s (default 30) | `+1.000000E+01,30` | both |
+| `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
+| `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
+| `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
+| `[SENSe:]POWer:ZERO[?]` | none (start) or `CLEar` | `<result>,SET\|NONE,<V zero>,<6 current zeros>,<6 DC zeros>` | both |
+| `[SENSe:]POWer:VOLTage:CALibrate[?]` | none (start) or `DEFault` | `<result>,<V range>,<gain>,SELF\|FACT` | both |
+| `[SENSe:]POWer:VOLTage:GAIN?` | | the four V range gains | both |
+
+- `CONFigure:POWer [<V>|AUTO[,<A>|AUTO]]` selects the power meter and its
+  ranges: a number picks the smallest range that holds it. From another
+  function the coupling starts as DC: send `POWer:COUPling` after
+  `CONFigure:POWer`.
+- `MEASure:POWer?` from another function waits for the range search, up to
+  15 s.
+- `FETCh:POWer:ALL?` and `MEASure:POWer:<x>?` answer only in the power
+  meter (else no reply, `Settings conflict`). A part with no value is
+  `+9.91E37` (PF, S, Q and F below their AC thresholds; F when no frequency
+  is measured).
+- `BURDen`: the resistance of the current path, used for the burden voltage
+  and for "At load" (`BURDen:STATe ON`: V and P corrected for the drop in
+  the meter). `DEFault` restores the shunt's value.
+- `METHod ALTernate` measures V and I in turn (a fallback without P); the
+  default `SIMultaneous` measures P directly.
+- `LIMit`: the continuous current and the time allowed above it before the
+  meter warns.
+- `PHASe` and `PHASe:CALibrate`: a phase correction between the V and I
+  channels; calibrate with a reactive load (a capacitor or inductor, PF near
+  0) in AC or AC+DC coupling. `RESistive` is refused.
+- `ZERO` (leads open, nothing in A, about 6 s) measures the zero offsets;
+  `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
+  `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
+- `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
+  on V/COM) matches the V channel's gain on the present range to the meter's
+  voltmeter; `DEFault` returns to the factory-derived gain.
+- Ranges, coupling, burden, zeros and gains are stored.
+
+## Scope
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `RUN` | | Starts acquiring. | both |
+| `STOP` | | Stops. | both |
+| `SINGle` | | Sets the sweep to Single and starts. | both |
+| `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
+| `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |
+| `TIMebase:SCALe[?]` | s/div, 100E-9 .. 50 | `+1.000000E-03` | both |
+| `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.01 .. 10 (times the probe factor) | `+1.000000E+00` | both |
+| `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
+| `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
+| `TRIGger:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
+| `TRIGger:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
+| `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
+| `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07` | both |
+| `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
+| `SCOPe:MEASure:VAVG?` | | Mean, V | both |
+| `SCOPe:MEASure:VRMS?` | | RMS, V | both |
+| `SCOPe:MEASure:FREQuency?` | | Frequency, Hz | both |
+| `WAVeform:SOURce[?]` | `CHANnel1` | `CHAN1` | both |
+| `WAVeform:FORMat[?]` | `BYTE` (default) or `WORD` | `BYTE` or `WORD` | both |
+| `WAVeform:POINts[?]` | `SCReen` (default), `MAXimum` or `<n>` | points of the next `WAVeform:DATA?` | both |
+| `WAVeform:PREamble?` | | `format,type,points,count,xinc,xorig,xref,yinc,yorig,yref` | both |
+| `WAVeform:DATA?` | | block: `#3400` and 400 bytes for SCReen + BYTE | both (see notes) |
+
+- Scope commands turn the scope on if it is off; the meter's screen shows
+  the same settings.
+- Time and voltage settings snap to the nearest step at or above the value
+  (1-2-5 steps).
+- Volts are at the probe tip: the probe factor set in the scope settings
+  window applies. There is no probe command.
+- Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
+  multimeter-input scope); timebase, trigger, the queries and the waveform
+  commands work on it.
+- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each),
+  `MAXimum` the whole acquisition record, `<n>` the record thinned to at
+  most n points.
+- `WAVeform:FORMat`: `BYTE` one byte per point (the 10-bit code divided by
+  4), `WORD` the 10-bit code as a little-endian 16-bit word.
+- `WAVeform:PREamble?`: format 0 BYTE / 1 WORD; type 0 screen columns, 2
+  record; count 1. Point i is at time `(i - xref) * xinc + xorig` seconds
+  from the trigger point (screen centre when untriggered) and has
+  `(data - yref) * yinc + yorig` volts.
+- `WAVeform:DATA?` for the record (any POINts other than SCReen) needs the
+  scope stopped (`STOP`, `SINGle` or `DIGitize`, then `TRIGger:STATus?` =
+  `STOP`); while it runs the reply is `#10` with `Settings conflict`. Over
+  USB a reply of any length is sent (the full WORD record is about 53 kB);
+  over Bluetooth at most 6 kB.
+- Only the SCReen + BYTE reply may be combined with other queries in one
+  message.
+
+## Generator (SOURce)
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `SOURce:FUNCtion[?]` | `SINusoid`, `SQUare`, `TRIangle` or `RAMP` | `SIN`, `SQU`, `TRI` or `RAMP` | both |
+| `SOURce:FREQuency[?]` | Hz, 1 .. 10E6 (whole Hz) | the frequency produced: `+1.000000E+03` | both |
+| `SOURce:VOLTage[?]` | amplitude Vpp, 0 .. 3 | `+1.000000E+00` | both |
+| `SOURce:VOLTage:OFFSet[?]` | centre level, V, or `AUTO` | `+1.500000E+00` | both |
+| `SOURce:FUNCtion:SQUare:DCYCle[?]` | duty cycle, % (0 .. 100) | the duty produced: `+5.000000E+01` | both |
+| `OUTPut[?]` | `ON` or `OFF` | `1` or `0` | both |
+
+- Sine, triangle and ramp go up to 50 kHz, square up to 10 MHz.
+  `SOURce:FREQuency?` and `DCYCle?` report what the output really produces
+  (limited and rounded to the generator's steps).
+- `SOURce:VOLTage:OFFSet` is the centre of the waveform. It is kept within
+  Vpp/2 .. 3 - Vpp/2; `AUTO` is the default 0 .. Vpp output (the query then
+  answers Vpp/2). With an offset and 0 Vpp the output is a DC level.
+- The generator keeps running on every page.
+
+## Inrush current
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `INRush[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
+| `INRush:ARM` | | Arms a new capture (opens the page if needed). | both |
+| `INRush:THReshold[?]` | trigger step, A, 0.1 .. 50 (default 1) | `+1.000000E+00` | both |
+| `INRush:CONDition?` | | `OFF`, `IDLE`, `ARMING`, `ARMED`, `TRIGGERED`, `SAVING` or `DONE` | both |
+| `INRush:FETCh?` | | `<Irms first 100 ms>,<Ipeak>,<Iidle>,<lost samples>`: `+1.234000E+01,+2.500000E+01,+1.000000E-01,0` | both |
+| `INRush:FILE?` | | `"LOGS/FASTnnn.DLG"` of the capture, or `""` | both |
+| `INRush:PREamble?` | | `<rate Hz>,<samples>,<trigger index>,<a>,<b>`: current = a + b * code | both |
+| `INRush:DATA?` | `[<start>[,<count>]]`, count at most 3000 (default) | block of little-endian 16-bit codes | both |
+
+- `INRush ON` opens the Inrush Current page (current function, 10 A range)
+  and arms it; `OFF` closes it and restores the previous settings.
+- `INRush:FETCh?` without a capture answers `+9.9E37` in the first three
+  fields with `Data stale`; a peak beyond the range is `+9.9E37`.
+- The trace has 19200 samples at 9600 Hz, the trigger at sample 1920. Read
+  it in pieces: `INR:DATA? 0,3000`, `INR:DATA? 3000,3000`, ...
+
+## Data logging (LOG)
+
+Two loggers: the **CSV recorder** writes the multimeter's readings to the
+meter's disk (as the Record page), and the **fast stream** delivers every
+conversion of the meter's converter, either to the host (`LOG:DATA?`) or to
+the disk.
+
+### CSV recorder
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `LOG:CSV[?]` | `ON` or `OFF` | `<state>,<file>,<rows>,<bytes>,<committed>,<dropped>` | both; `ON` USB only |
+| `LOG:CSV:INTerval[?]` | `0` (every reading, default), `1`, `10` or `60` s | `0` | both |
+| `LOG:CSV:DURation[?]` | `0` (until stopped, default), `600`, `3600`, `28800` or `86400` s | `0` | both |
+| `LOG:CSV:FREE?` | | Free bytes on the disk | both |
+
+- `LOG:CSV?` state: 0 idle, 1 recording, 2 stopping, 3 done, 4 disk full, 5
+  no disk, 6 error; file is -1 until the first save.
+- `INTerval` and `DURation` apply to the next recording (`Settings
+  conflict` while one runs). With an interval, each row is the mean of the
+  readings in it.
+- `LOG:CSV ON` fails with `Settings conflict: Wave view`, `Settings
+  conflict: inrush page`, or `Settings conflict` (no reading yet, a
+  recording already on, the disk not available).
+- The recordings are `LOGS/LOGnnn` files; fetch them with `MMEMory:DATA?`.
+
+### Fast stream
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `LOG:STATe[?]` | `ON` or `OFF` | `1` or `0` | both (see notes) |
+| `LOG:SOURce[?]` | `AD1` (default) or `AD2` | `AD1` or `AD2` | both |
+| `LOG:OSR[?]` | `0` .. `7` (default 3) | `3` | both |
+| `LOG:CHOP[?]` | `ON` (default) or `OFF` | `1` or `0` | both |
+| `LOG:SRATe[?]` | AD2 rate, S/s | the requested rate: `2400` | both |
+| `LOG:DEST[?]` | `HOST` (default) or `DISK` | `HOST` or `DISK` | both |
+| `LOG:DURation[?]` | DISK session length, s (0 = until stopped or full; default 60) | `60` | both |
+| `LOG:DATA?` | | block of 12-byte records, oldest first | both |
+| `LOG:PREamble?` | | `mode,range,osr,nominal_us,measured_hz,chop,source,req_hz,nominal_mhz,r26,coupling` | both |
+| `LOG:SCALe?` | | `a,b`: value = a + b * raw, in V or A (AD2); `0,0` for AD1 | both |
+| `LOG:RATE?` | | Measured mean sample rate, Hz | both |
+| `LOG:COUNt?` | | `buffered,captured,overwritten,missed,lost` | both |
+| `LOG:GAPs?` | | `bad,max_gap_us,g2,g3_4,g5_16,g17_128,g129` | both |
+| `LOG:DISK?` | | `state,file,alloc,bytes,rows,prep_pct,fifo_hw,programs,tpp_us,tpp_max_us,gate,gate_isr_permille,gate_fill,writer_permille` | both |
+
+- **Sources.** `AD1`: DC voltage, DC millivolt and DC current; the rate is
+  set by `LOG:OSR` (0 = 320/s .. 3 = 40/s .. 7 = 2.5/s; `LOG:CHOP OFF`
+  doubles it). `AD2`: the AC voltage, AC millivolt and AC current rows and
+  DC voltage, at `LOG:SRATe`: the nearest of 1200, 2400, 4800, 9600, 19200,
+  38400 and 76800 S/s. Set the function on the meter (or with `CONFigure`)
+  first; AC+DC, AUTO coupling, the power meter, resistance, capacitance,
+  frequency and temperature cannot be streamed (`Settings conflict`).
+  Source, OSR, chop and rate take effect at the next `LOG:STATe ON`.
+- While a session runs the multimeter does not update its readings.
+- **To the host** (`LOG:DEST HOST`): read `LOG:DATA?` repeatedly. Each
+  record is `u32 sequence, u32 time in us, i32 raw code`, little-endian. The
+  buffer holds 2048 records; when it is full the newest are dropped
+  (`overwritten`).
+- **Raw codes.** AD1: counts; 1.389 V / 8388607 counts at the converter,
+  times the range's decade; the calibration is not applied. AD2: use
+  `LOG:SCALe?`.
+- **To the disk** (`LOG:DEST DISK`, USB only): `LOG:STATe ON` reserves and
+  erases space for `LOG:DURation` (progress in `LOG:DISK?`), then records
+  to `LOGS/FASTnnn.DLG` until `LOG:STATe OFF`, the duration or a full disk.
+  `LOG:DATA?` answers an empty block meanwhile. `LOG:DISK?` state: 0 idle,
+  1 preparing, 2 ready, 3 running, 4 stopping, 5 done, 6 full, 7 no disk,
+  8 error; file is -1 until the file exists.
+- Over Bluetooth, sessions up to 800 S/s from AD1 to the host work; faster
+  ones and every AD2 or disk session are refused.
+
+## Files on the disk (MMEMory)
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `MMEMory:CATalog?` | | `<used bytes>,<free bytes>{,"<name>,BIN,<size>"}` | both |
+| `MMEMory:DATA?` | `"<name>"[,<offset>[,<length>]]`, length at most 6000 (default) | block of the file's bytes from offset | both |
+| `MMEMory:DELete` | `"<name>"` | | USB only |
+
+- `MMEMory:CATalog?` lists the screenshots, CSV recordings and scope records,
+  each as `"<folder>/<name>,BIN,<size>"`: `"SHOTS/S000.BMP,BIN,<size>"`,
+  `"LOGS/LOG000.DLG,BIN,<size>"`, `"SCOPE/SCOP000.DLG,BIN,<size>"`. The
+  sizes are in bytes.
+- `MMEMory:DATA?` reads up to 6000 bytes; read a large file in pieces with
+  rising offsets until the block is shorter than asked. The name may have
+  its folder (`LOGS/`, `SHOTS/`, `SCOPE/`) or not. Asking for
+  `LOGnnn.CSV`, `SCOPnnn.CSV` or `FASTnnn.CSV` returns the CSV file the
+  meter makes from the `.DLG` recording (the same CSV the USB disk shows).
+- `MMEMory:DELete` deletes one screenshot or recording; not the one being
+  recorded.
+
+## Display and screenshots
+
+There is no regular SCPI command that takes a screenshot. A three-finger
+swipe down on the screen saves one as `SHOTS/Snnn.BMP` (over USB the debug
+command `DBG:SWIPE D,3` does the same); fetch it with `MMEMory:DATA?` or copy
+it from the USB disk. `DISPlay:BURDen` is listed under
+[Burden voltage](#burden-voltage).
+
+## Debug commands
+
+For diagnostics and development; they may change between versions. All
+`DBG:` commands work over USB only. Replies are comma-separated numbers
+unless shown otherwise.
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | both |
+| `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | both |
+| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>` | USB |
+| `DBG:BOOT?` | | Boot and reset information | USB |
+| `DBG:GENUINE?` | | `<uid hex>,<stored hex>,<expected hex>,GENUINE\|MISMATCH` | USB |
+| `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>` | USB |
+| `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
+| `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
+| `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
+| `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>]` | One-finger drag. | USB |
+| `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
+| `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
+| `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
+| `DBG:PROF[?]` | | Main loop timing table | USB |
+| `DBG:PROF:RESET` | | Clears the timing table. | USB |
+| `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
+| `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
+| `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
+| `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|AUTO...`: the last scope drags | USB |
+| `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
+| `DBG:LEADs?` | | `<count>,<from>,<to>`: "Leads in A?" reminders | USB |
+| `DBG:SENTinel?` | | Wrong-connection detector state | USB |
+| `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
+| `DBG:SENTinel:REG?` | | Measurement chip registers and relay state | USB |
+| `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
+| `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
+| `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
+| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
+| `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
+| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>` | USB |
+| `DBG:ACDC:R0[?]` | `1` or `2` | `1` | USB |
+| `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
+| `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...` | USB |
+| `DBG:HWTRIG?` | | Comparator trigger state | USB |
+| `DBG:HWTRIG:ENABLE` | `1` or `0` | | USB |
+| `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |
+| `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
+| `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
+| `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report | USB |
+| `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report | USB |
+| `DBG:AD2:TORN?` | `<r26>,<n>[,SYNChronous]` | Converter read test report (AC rows) | USB |
+| `DBG:AD2:NOISE?` | `<r26>,<n>[,<op1chop>]` | Converter noise report (AC rows) | USB |
+| `DBG:AD2:DCV?` | `<range>,<r26>,<n>[,<flags>]` | DC V converter test report | USB |
+| `DBG:AD2:N7?` | `<item>,<state>,<n>` | DC row test report | USB |
+| `DBG:AD2:DRAW` | `0`, `1` or `2` | Logger panel redraw level. | USB |
+| `DBG:AD2:DIV` | `0`, `8`, `16` or `32`[,`<cpha>`] | Stream read divider (0 = automatic). | USB |
+| `DBG:AD2:DMA[?]` | `0` or `1` | `1` | USB |
+| `DBG:POWer:ROW?` | | Power meter chip row, hex | USB |
+| `DBG:POWer:RAW?` | | Power meter raw sample ring | USB |
+| `DBG:POWer:POKE` | `<register 0..21>,<value>` or `CLEar` | | USB |
+| `DBG:POWer:STAT` | `XY`, `XX`, `YY` or `AUTO` | | USB |
+| `DBG:POWer:DISC[?]` | `0` .. `8` | `2` | USB |
+| `DBG:VDISK:EJECT[?]` | `<n>` | `<ejected>,<start-stops>,<last>` | USB |
+| `DBG:VDISK:STAT?` | | `<files>,<next free cluster>,<files left out>` | USB |
+| `DBG:VDISK:RO[?]` | `0` or `1` | `<read-only>,<pending>` | USB |
+| `DBG:VDISK:RD?` | | USB disk read counters | USB |
+| `DBG:VDISK:MIR?` | | USB disk mirror state | USB |
+| `DBG:VDISK:WR?` | | Host write counters (13 fields) | USB |
+| `DBG:UPLoad:BEGin` | `<size>,<crc32>` (decimal) | Starts a firmware file upload. | USB |
+| `DBG:UPLOAD:DATA` | `<offset>,<raw bytes>` | One piece of the file (see notes). | USB |
+| `DBG:UPLoad:END?` | | `<size>,<crc32>` when the file is complete and checked | USB |
+| `DBG:UPLoad:ABORt` | | Cancels the upload. | USB |
+| `DBG:UPLoad?` | | `<active 1/0>,<received>,<size>` | USB |
+| `DBG:UPDATE` | | Makes the vendor loader install the uploaded file: the meter restarts. | USB |
+| `DBG:RECOVER` | | Same as `DBG:UPDATE`. | USB |
+| `DBG:RESET` | | Restarts the meter. | USB |
+| `DBG:RELEASE` | | Stops feeding the watchdog: the meter resets in about 20 s and counts a crash. | USB |
+
+- `DBG:UPLOAD:DATA` must be written exactly so, in capitals, followed by one
+  space; the bytes after the comma are binary and run to the end of the USB
+  message. The offset is the number of bytes sent so far.
+  `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
+- `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
+  file; without one it stays on its update screen with its own USB disk
+  until a firmware file is copied there. `DBG:RELEASE`: a second crash in a
+  row leads to the same screen.
