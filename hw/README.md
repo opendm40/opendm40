@@ -202,7 +202,7 @@ What else is on the MCU / USB ground is inferred from the BOM and the manual
 
 Quick check that tells the sides apart (meter off, USB-C breakout):
 continuity USB GND - CHA / GEN shield (expected ~0 ohm) and USB GND - COM
-(expected open, > 1 Mohm). Not recorded in this repo.
+(expected open, > 1 Mohm).
 
 Where the two isolated supplies go is not settled: the feature request's
 BOM-based inference (2026-10-13) put [VPS8504B](datasheets/vpsc-vps8504b-cn.pdf) #1 + LT61-117
@@ -457,8 +457,10 @@ of ~0.3 s ([`fw-rs/docs/acdc-approaches.md`](../fw-rs/docs/acdc-approaches.md), 
   ([`power-meter-and-misconnect.md`](../fw-rs/docs/power-meter-and-misconnect.md) 3.1, [`RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7). The taps follow the
   datasheet's 10 M / 1.111 M / 101.01 k / 10.01 k / 1 k network.
 - Ohm: OP3 drives reference resistors on HY3131 PA2..PA7 (Rref 1 k .. 63 M per
-  range); ratiometric AD1 ([`hy3131_v2_6.h`](../firmware/re/analysis/hy3131_v2_6.h) mode 10). Ohm source current about
-  0.85 mA short circuit, diode test 0.75 mA (chat reports, [`emu/hy3131/README.md`](../emu/hy3131/README.md)).
+  range); ratiometric AD1 ([`hy3131_v2_6.h`](../firmware/re/analysis/hy3131_v2_6.h) mode 10). Ohm source
+  short-circuit current about 0.85 mA in the default ohm variant and 0.27 mA
+  in the "ON" variant; diode test 0.75 mA (chat reports;
+  [`fw-rs/src/dmm.rs`](../fw-rs/src/dmm.rs), [`emu/hy3131/README.md`](../emu/hy3131/README.md)).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
