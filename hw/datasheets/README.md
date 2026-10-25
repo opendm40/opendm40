@@ -21,6 +21,7 @@ some of them are listed in [emu/hy3131/RESEARCH.md](../../emu/hy3131/RESEARCH.md
 | [hycon-hy313x-spi-appnote-apn-hy3131001.pdf](hycon-hy313x-spi-appnote-apn-hy3131001.pdf) | "HY313x Series SPI Communication" application note, HYCON FAE Dept., 2017-11-17, 7 pages | `APN-HY3131001_EN.pdf` | 3313c37544344a988c823c2ba4854096 |
 | [hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf](hycon-hy313x-eva-test-tool-manual-apd-dmm001.pdf) | "HY313X EVA Test Tool User Manual", APD-DMM001-V02_EN, 2012, 24 pages (ENOB / noise-free resolution test tool) | `APD-DMM001_EN.pdf` | 0fddee10b6c92442e1ec0e17e8a57de1 |
 | [hycon-hy313x-configurations-apd-dmm003.pdf](hycon-hy313x-configurations-apd-dmm003.pdf) | "HY313X Configurations", APD-DMM003-V05_EN, 2020, 55 pages (block diagrams per function) | `APD-DMM003_EN.pdf` | 2aed1e738acc1c47526704636b7b1f23 |
+| [hycon-hy-adc-enob-test-apd-sd18001.pdf](hycon-hy-adc-enob-test-apd-sd18001.pdf) | "HY-ADC ENOB Test User's Manual", APD-SD18001-V02_EN, 2008-2011, 12 pages (ENOB / noise-free bits and the test software) | `APD-SD18001_EN.pdf` | 306418d3d0eba8047cbd766d040e89f3 |
 
 [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md) cites APD-DMM003 **V02** (2012, the essentialscrap
 mirror); the copy here is the newer **V05**.
