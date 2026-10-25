@@ -123,7 +123,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter: back to autorange (also clears HOLD and REL). Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -692,7 +692,10 @@ Limits](#limits-and-autohold)).
 | The voltage range page | The current range page |
 
 - Tap a range to fix it (the status bar shows **MANU**). Tap **AUTO** or
-  **AUTO+** to return to autorange, or press the **AUTO** key.
+  **AUTO+** to return to autorange, or hold the **AUTO** key for 1 s.
+- A short press of the **AUTO** key fixes the present range, or steps to
+  the next higher one; after the highest comes the lowest (the
+  [key table](#keys) has the details).
 - The coupling row: **DC**, **AC**, **AC+DC**, **AC/DC** (AUTO coupling).
 - **Hold/Limits** opens the [Hold & Limits page](#limits-and-autohold).
 - **OK** or **MF** goes back.

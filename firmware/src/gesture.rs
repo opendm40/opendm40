@@ -226,7 +226,14 @@ pub struct Tracker {
     /// The current one-finger touch is the remaining finger of a multi-finger
     /// one: no gesture until it is up.
     residual: bool,
+    /// Side keys as reported by gestures so far (1 << code)...
     keys: u8,
+    /// ... and as the last event has them. They differ after an event that
+    /// changed more than one key (the debounce went from one key straight to
+    /// another: a release frame lost, or replaced inside the debounce by the
+    /// next key's report): the rest is reported one key per call, releases
+    /// first, at the next event or tick (`key_step`).
+    keys_want: u8,
 }
 
 impl Tracker {
@@ -249,6 +256,7 @@ impl Tracker {
             multi_end: None,
             residual: false,
             keys: 0,
+            keys_want: 0,
         }
     }
 
@@ -288,13 +296,30 @@ impl Tracker {
         g
     }
 
+    /// One side-key change towards `keys_want`: a released key first (its
+    /// KeyUp ends what it started, e.g. RUN's AutoHold timer), then a
+    /// pressed one. The old code took the lowest changed bit as the code
+    /// and "down" from the whole new mask: RUN -> AUTO without a release
+    /// between gave KeyDown(RUN) for the AUTO press and no KeyUp(RUN).
+    fn key_step(&mut self) -> Option<Gesture> {
+        let up = self.keys & !self.keys_want;
+        let down = self.keys_want & !self.keys;
+        let (m, g): (u8, fn(u8) -> Gesture) = if up != 0 {
+            (up, Gesture::KeyUp)
+        } else if down != 0 {
+            (down, Gesture::KeyDown)
+        } else {
+            return None;
+        };
+        let code = m.trailing_zeros() as u8;
+        self.keys ^= 1 << code;
+        Some(g(code))
+    }
+
     fn step(&mut self, ev: &Event, now: u64) -> Option<Gesture> {
-        if ev.keys != self.keys {
-            let changed = ev.keys ^ self.keys;
-            let code = changed.trailing_zeros() as u8;
-            let down = ev.keys & changed != 0;
-            self.keys = ev.keys;
-            return Some(if down { Gesture::KeyDown(code) } else { Gesture::KeyUp(code) });
+        self.keys_want = ev.keys;
+        if let Some(g) = self.key_step() {
+            return Some(g);
         }
         let n = (ev.points as usize).min(MAX_POINTS) as u8;
         if n == 0 {
@@ -502,6 +527,10 @@ impl Tracker {
     }
 
     fn tick_step(&mut self, now: u64) -> Option<Gesture> {
+        // The rest of a multi-key change (`keys_want`).
+        if let Some(g) = self.key_step() {
+            return Some(g);
+        }
         let (p0, t0) = self.down?;
         if let Some(g) = self.grab(now) {
             return Some(g);
@@ -535,6 +564,7 @@ impl Tracker {
         let keys = self.keys;
         *self = Tracker::new();
         self.keys = keys;
+        self.keys_want = keys;
         let n = fingers.clamp(1, MAX_POINTS as u8);
         let mut ev = Event { keys, ..Event::default() };
         for step in 0..=8u16 {
@@ -559,6 +589,7 @@ impl Tracker {
         let keys = self.keys;
         *self = Tracker::new();
         self.keys = keys;
+        self.keys_want = keys;
         let mut feed = |tr: &mut Tracker, g: Option<Gesture>| {
             if let Some(g) = g {
                 if app(g) {

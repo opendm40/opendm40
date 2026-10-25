@@ -5,8 +5,11 @@
 //! Side keys (touch controller key codes 0..3, stock events 0x10 << code):
 //!   0 MENU: menu.  1 RUN: DMM HOLD / scope run-stop; in the DMM views held
 //!   for RUN_LONG_MS = AutoHold on/off (FR-01).
-//!   2 AUTO: DMM auto range / scope auto-set.  3 MF: DMM range page (Hold &
-//!   Limits page where the function has no range page).
+//!   2 AUTO: DMM range (V / A / ohm, on release: in autorange fix the
+//!   current range, then each press the next higher manual range, wrapping;
+//!   held for RUN_LONG_MS: back to the default autorange, AUTO+ on V; other
+//!   functions: auto range at key-down) / scope auto-set.  3 MF: DMM range
+//!   page (Hold & Limits page where the function has no range page).
 //! Power key PD6: double click = touch / key lock, click while locked = DMM
 //! sub-mode cycle, hold 1.5 s = power off (see tick()).
 
@@ -279,9 +282,11 @@ pub struct App {
     hold_shown: u32,
     /// Time of the last tick (ms), for the reading path (AutoHold windows).
     now: u64,
-    /// RUN key went down at this time in a DMM view, not released yet
-    /// (long press = AutoHold toggle, see RUN_LONG_MS).
+    /// RUN key went down at this time in a DMM view, or AUTO in a function
+    /// with ranges (`run_key` 1 / 2), not released yet (long press = AutoHold
+    /// toggle / default autorange, see RUN_LONG_MS).
     run_down: Option<u64>,
+    run_key: u8,
     /// Limits keypad: the display unit the typed value is in.
     kp_unit: &'static str,
     /// Last limit-fail beep (rate limit for a reading that hovers at a limit).
@@ -595,6 +600,7 @@ impl App {
             hold_shown: 0,
             now: 0,
             run_down: None,
+            run_key: 1,
             kp_unit: "",
             fail_beep_at: 0,
             alert_seq: 0,
@@ -1529,14 +1535,19 @@ impl App {
             self.off_warn(now, idle);
         }
         // RUN held in a DMM view: AutoHold on/off. The key-down already
-        // toggled HOLD; set_ahold releases it again.
+        // toggled HOLD; set_ahold releases it again. AUTO held: the default
+        // autorange.
         if self.run_down.is_some_and(|t| now.saturating_sub(t) >= RUN_LONG_MS) {
             self.run_down = None;
-            let on = !self.meter.ahold;
-            self.meter.set_ahold(on);
-            self.dmm_view.invalidate();
-            self.beep(now, if on { 200 } else { 60 });
-            self.redraw |= self.view == View::Limits;
+            if self.run_key == 2 {
+                self.auto_key_end(clk, true);
+            } else {
+                let on = !self.meter.ahold;
+                self.meter.set_ahold(on);
+                self.dmm_view.invalidate();
+                self.beep(now, if on { 200 } else { 60 });
+                self.redraw |= self.view == View::Limits;
+            }
         }
         // Power key PD6, as the stock (pressed = 1, pull-down; boot.rs
         // PD6_PRESSED_HIGH): press = activity (backlight back, FUN_08020248);
@@ -2181,24 +2192,29 @@ impl App {
     /// Index of the current range in the MF page list.
     fn range_sel(&self) -> Option<usize> {
         let b = self.dmm.button();
-        let items = ui::range_items(b);
-        let want: Option<u8> = if self.dmm.is_auto() {
-            match b {
-                Button::Volt if self.dmm.v_auto() == 1 => Some(255),
-                Button::Amp if self.dmm.a_auto() == 1 => Some(255),
-                _ => None,
-            }
-        } else {
-            let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
-            Some(match m {
-                2 | 3 if r == 0 => 5,
-                2 | 3 => 0,
-                0 | 1 => r + 1,
-                4..=9 => (2 - (m - 4) % 3) * 2 + r,
-                _ => r,
-            })
+        if !self.dmm.is_auto() {
+            return self.range_sel_manual();
+        }
+        let want: Option<u8> = match b {
+            Button::Volt if self.dmm.v_auto() == 1 => Some(255),
+            Button::Amp if self.dmm.a_auto() == 1 => Some(255),
+            _ => None,
         };
-        items.iter().position(|it| it.1 == want)
+        ui::range_items(b).iter().position(|it| it.1 == want)
+    }
+
+    /// Index in the MF page list of the manual item for the range the DMM
+    /// is in now (also while it autoranges).
+    fn range_sel_manual(&self) -> Option<usize> {
+        let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
+        let want = Some(match m {
+            2 | 3 if r == 0 => 5,
+            2 | 3 => 0,
+            0 | 1 => r + 1,
+            4..=9 => (2 - (m - 4) % 3) * 2 + r,
+            _ => r,
+        });
+        ui::range_items(self.dmm.button()).iter().position(|it| it.1 == want)
     }
 
     /// Temperature sensor name for the DMM status bar (temperature only).
@@ -2733,7 +2749,9 @@ impl App {
                 self.beep(now, 50);
                 self.key(clk, c);
             }
-            Gesture::KeyUp(1) => self.run_down = None,
+            Gesture::KeyUp(1) if self.run_key == 1 => self.run_down = None,
+            // AUTO released before RUN_LONG_MS: the short press.
+            Gesture::KeyUp(2) if self.run_key == 2 && self.run_down.take().is_some() => self.auto_key_end(clk, false),
             Gesture::Tap(_) | Gesture::SwipeLeft | Gesture::SwipeRight if self.view == View::Gallery => {
                 if matches!(g, Gesture::Tap(_)) {
                     self.beep(now, 30);
@@ -3175,6 +3193,7 @@ impl App {
                     self.dmm_view.invalidate();
                     if matches!(self.view, View::Dmm | View::DmmScope) {
                         self.run_down = Some(now);
+                        self.run_key = 1;
                     }
                 }
             },
@@ -3184,6 +3203,12 @@ impl App {
             // function: the key does nothing there (it used to set the
             // DMM's autorange).
             2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
+            // V / A / ohm: the range step on release, the autorange when held
+            // (auto_key_end).
+            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm) => {
+                self.run_down = Some(now);
+                self.run_key = 2;
+            }
             2 => {
                 self.meter.rel_off();
                 self.meter.set_hold(false);
@@ -3210,6 +3235,42 @@ impl App {
                 _ => {}
             },
         }
+    }
+
+    /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
+    /// Short: in autorange the current range becomes the manual one; in a
+    /// manual range the next higher one (the MF page's order, 60 mV and
+    /// 60 ohm included), the highest wrapping to the lowest. Long: the
+    /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
+    /// REL as before; AutoHold stays as it is.
+    #[inline(never)]
+    fn auto_key_end(&mut self, clk: &mut Clock, long: bool) {
+        let now = clk.now_ms();
+        let b = self.dmm.button();
+        // The function changed while the key was held: nothing.
+        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm) {
+            return;
+        }
+        self.meter.rel_off();
+        self.meter.set_hold(false);
+        let item = if long {
+            self.beep(now, 200);
+            if b == Button::Volt { Some(255) } else { None }
+        } else {
+            let items = ui::range_items(b);
+            let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
+            let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
+            let cur = self.range_sel_manual();
+            let i = match cur {
+                Some(i) if !self.dmm.is_auto() => (i + 1) % n.max(1),
+                Some(i) => i,
+                None => 0,
+            };
+            manual(i)
+        };
+        self.dmm.set_range(clk, item);
+        self.dmm_view.invalidate();
+        self.redraw |= matches!(self.view, View::Range | View::Limits);
     }
 
     #[inline(never)] // .cold (link-native.x): on a tap
