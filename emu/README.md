@@ -354,6 +354,14 @@ pages and swipes, the viewer (the whole screen read back with DBG:LCD? must
 equal the BMP), Delete -> Cancel, Delete -> Delete (MMEM:CAT? 8 -> 7),
 MENU back out (~8 min).
 
+`touchpagetest.py --app <ELF> [--port P] [--keep DIR]` opens the touch test
+page (opendm40 src/app_touchtest.rs) from Settings 3/3 with scripted
+touches of the touch controller model, taps targets, drags, holds MENU,
+taps Clear, and leaves the page with a 2 s hold and with the power key;
+screenshots are checked for the dots, the lit key box and the cleared
+page, DBG:VIEW? for the page sequence (USB/IP port in 65200-65300 unless
+--port).
+
 `btchattertest.py --app <image> [--port P]`: the BT model prints the
 module's start-up banner with PC14 high on every start, and lets a host's
 bytes through 400 ms before PC14 rises (BtModule.cs `BootModel`,

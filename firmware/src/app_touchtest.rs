@@ -67,6 +67,10 @@ struct Tt {
     tap: Point,
     /// Last repaint of the text lines.
     text_at: u32,
+    /// Touch keys lit (bit = code) and the raw X of each key's last report
+    /// (0 = none yet).
+    keys_lit: u8,
+    key_x: [u16; 4],
 }
 
 /// The touch stayed within HOLD_SLOP of its down point, one finger.
@@ -93,6 +97,8 @@ const TT0: Tt = Tt {
     fl: 0,
     tap: Point { x: 0, y: 0 },
     text_at: 0,
+    keys_lit: 0,
+    key_x: [0; 4],
 };
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -142,6 +148,12 @@ impl App {
     pub(super) fn tt_draw(&mut self) {
         tt::page();
         let s = st();
+        for k in 0..4u8 {
+            let x = s.key_x[k as usize];
+            if x != 0 {
+                tt::key(k, s.keys_lit & (1 << k) != 0, Some(x));
+            }
+        }
         s.fl |= FL_RAW | FL_CNT;
         s.fl &= !FL_HINT;
         tt_text(s, true);
@@ -183,20 +195,35 @@ impl App {
                 }
             } else if b & 0x80 != 0 {
                 // A key report: held while the status's low nibble is set
-                // (0x83 held, 0x80 released; touch.rs `decode`).
+                // (0x83 held, 0x80 released; touch.rs `decode`). Another
+                // key that is still lit was let go.
+                let k = b & 3;
+                let on = c & 0x0F != 0;
+                s.key_x[k as usize] = p.x;
+                tt_keys_off(s, !(1 << k), draw);
+                if on {
+                    s.keys_lit |= 1 << k;
+                } else {
+                    s.keys_lit &= !(1 << k);
+                }
                 if draw {
-                    tt::key(b & 3, c & 0x0F != 0, Some(p.x));
+                    tt::key(k, on, Some(p.x));
                 }
-            } else if b > 0 {
-                // A frame at the last frame's point is not drawn again: it
-                // would cover the debounced dot of a resting finger.
-                if draw && p != s.raw && p.x < crate::lcd::W && p.y < crate::lcd::H {
-                    tt::dot(p, tt::DOT_RAW, tt::C_RAW);
+            } else {
+                // A screen frame: no key is held (the emulator's touch
+                // model ends a key with a plain release frame).
+                tt_keys_off(s, 0xFF, draw);
+                if b > 0 {
+                    // A frame at the last frame's point is not drawn again:
+                    // it would cover the debounced dot of a resting finger.
+                    if draw && p != s.raw && p.x < crate::lcd::W && p.y < crate::lcd::H {
+                        tt::dot(p, tt::DOT_RAW, tt::C_RAW);
+                    }
+                    s.raw = p;
+                    s.raw_n = b;
+                    s.max_pts = s.max_pts.max(b);
+                    s.fl |= FL_RAW;
                 }
-                s.raw = p;
-                s.raw_n = b;
-                s.max_pts = s.max_pts.max(b);
-                s.fl |= FL_RAW;
             }
         }
         // Hold to exit.
@@ -282,6 +309,22 @@ impl App {
                     self.tt_close(clk);
                 }
                 false
+            }
+        }
+    }
+}
+
+/// Draw the lit keys in `mask` not lit (their last X kept).
+fn tt_keys_off(s: &mut Tt, mask: u8, draw: bool) {
+    let off = s.keys_lit & mask;
+    if off == 0 {
+        return;
+    }
+    s.keys_lit &= !off;
+    if draw {
+        for k in 0..4u8 {
+            if off & (1 << k) != 0 {
+                tt::key(k, false, Some(s.key_x[k as usize]));
             }
         }
     }
