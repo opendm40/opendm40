@@ -95,8 +95,9 @@ try:
     want = [6, 60, 600, 1000, 0.06, 0.6, 6]
     check(seen == want, 'each press the next higher range, wrapping (%s)' % want)
     check(q('CALC:AHOL?') == '1', 'AutoHold kept')
-    rd = q('DBG:READout?')
-    check(len(rd.split(',')) == 4, 'DBG:READout? fields: %s' % rd)
+    # kind,unit,value,hold,range (scpi.rs DBG:READout?): a fixed range = MANU.
+    rd = q('DBG:READout?').split(',')
+    check(len(rd) == 5 and rd[4] == 'MANU', 'DBG:READout? fields: %s' % ','.join(rd))
     key(1200)
     r = rng('VOLT')
     check(r[1] == '1', 'held 1.2 s: autorange (%g, auto %s)' % r)
@@ -106,9 +107,9 @@ try:
     # HOLD released by a short press.
     q('DBG:KEY 1;*OPC?')
     wait(300)
-    h1 = q('DBG:READout?').split(',')[-1]
+    h1 = q('DBG:READout?').split(',')[3]
     key()
-    h2 = q('DBG:READout?').split(',')[-1]
+    h2 = q('DBG:READout?').split(',')[3]
     check(h1 == '1' and h2 == '0', 'HOLD released by AUTO (hold state %s -> %s)' % (h1, h2))
     # Ohm: 60 ohm in the cycle (open input: autorange sits on 60 Mohm).
     q('CONF:RES;*OPC?')
