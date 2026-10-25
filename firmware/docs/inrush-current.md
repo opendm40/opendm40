@@ -244,7 +244,7 @@ section 5); its time-current behaviour is unknown: keep a motor's start
 
 | step | how | pass |
 |---|---|---|
-| entry | A function, MF -> Inrush | AC A 10 A, "Armed: 0.000 A now" after ~0.2 s; `INR:COND?` ARMED; `DBG:ISR?` late / slips 0 |
+| entry | A function, MF -> Inrush | AC A 10 A, "Armed: 0.000 A now" after ~0.3 s; `INR:COND?` ARMED; `DBG:ISR?` late / slips 0 |
 | lamp (12 V car bulb on a bench supply, or 230 V 40-100 W with care) | switch it on | "Triggered", 2 s later the result + "Saved LOGS/FASTnnn.DLG"; peak ~5-10x the run current; Irms 100 ms between the peak and the run current; the trace a decay over ~50-200 ms |
 | second meter | an inrush clamp (Fluke 376 / 323 / UT21x) or the scope + shunt on the same wire | Irms 100 ms within ~5 % of the clamp's inrush value (clamps differ in their window start); peak vs the scope's |
 | motor (drill, fan, small pump) | switch it on | trigger; the start-up band; `INR:FETC?` lost 0 |
@@ -262,7 +262,9 @@ or redraw while armed caused a hole (`lost`).
 
 The capture adds ~5.4 KB to region B (the drain, the detector, the live
 state line, the state queries), no SRAM (the trace lives in BUF) and ~200 B
-of stack (the session state is a TCM static); measured on 6dfffec. Region C
+of stack (the session state is a TCM static); measured on 6dfffec. The
+zero's measurement (`Cap::zero_in`, run with the stream) added ~0.2 KB to
+region B (09dc594). Region C
 holds app_inrush.rs, the page and trace drawing, `Cap::results` /
 `linearize` / `records`, the SCPI fetch / data / setters. Current numbers:
 [native-boot.md](native-boot.md) "Memory budget".
