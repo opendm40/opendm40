@@ -4525,7 +4525,13 @@ impl App {
                 true
             }
             C::DbgTouchTest(on) => self.tt_scpi(clk, on, out),
-            C::DbgTouchCal(op) => app_touchtest::tc_scpi(op, out),
+            C::DbgTouchCal(op) => {
+                // A change redraws the touch test page (its Cal lines).
+                if op != 0 && self.view == View::TouchTest {
+                    self.redraw = true;
+                }
+                app_touchtest::tc_scpi(op, out)
+            }
             C::DbgView => {
                 // <view>,<settings page 1..3>,<wave view on> (emulator
                 // tests: where a DBG:KEY / DBG:TAP landed).
