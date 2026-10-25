@@ -644,7 +644,10 @@ Code work (in this order):
       (every range, full-scale + one intermediate step), wavetest (steps, AUTO; `--case fullv / fulla`:
       +-96.7 % of 6 V / 60 mA inside the drawn rows). docs/dmm-input-scope-feasibility.md 10.1.
       Open: 0..range (a unipolar signal over the 8 divisions) is a position drag, not a step; the trace rows
-      clamp at 0..278 (stock), so the outer ~1-2 % of +-full sits on the frame edge; device check pending.
+      clamp at 0..278 (stock), so the outer ~1-2 % of +-full sits on the frame edge.
+      **Device 3e6abe7 (2026-10-25): PASS.** DC V 6 V range, 1.0 V from the calibrator, MF -> Wave: 1.5 V/div;
+      + 2, + 5 (the 60 V range), - 2, 1.5, 1, 0.5 (6 V), - 0.2 (the 600 mV range), + 0.5 (6 V); AUTO key 1.5 V/div
+      on 6 V. The trace at 1.0 V (2/3 div above the centre at 1.5 V/div), Vrms 1.00 V (screenshot).
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
       tools/dm40bt_scpi.py.  (4f59485, eb3439b; device 3d19ea1: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
