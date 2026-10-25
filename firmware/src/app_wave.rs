@@ -360,6 +360,9 @@ impl App {
         if item != a.item {
             self.wave_req = Some(WaveReq::Range(item));
             self.wave_auto = None;
+        } else if matches!(self.wave_req, Some(WaveReq::Range(_))) {
+            // Back on this range before a range step asked for ran.
+            self.wave_req = None;
         }
     }
 

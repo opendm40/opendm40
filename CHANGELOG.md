@@ -36,6 +36,11 @@ section named after the tag as the release notes; how to cut a release:
 - Auto power-off: USB disk reads and writes count as host activity; the
   screen dims on input only.
 - Wave view: the timebase starts at 1 ms/div. Scope: CH1 Type is removed.
+- Wave view: V/div steps with one full-scale step per range (± the range on
+  the 8 divisions: 1.5 V/div on 6 V, 15 V/div on 60 V, 2.5 A/div on 10 A)
+  and 1-2-5 steps between that only rescale the screen; the range changes
+  only where a step needs it. The pinch and AUTO work in the Wave view; 60 mV
+  is in its list.
 
 ### Fixed
 
