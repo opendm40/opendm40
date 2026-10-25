@@ -14,6 +14,23 @@ Additional requirements:
 - Debug commands live in USBTMC as `DBG:*` SCPI commands (no CDC).
 - Data-logger mode (see FR-38 in `../docs/dm40-feature-request.md`).
 
+## Owner decisions pending (2026-10-25)
+
+What waits for the owner; each line links to the material.
+
+- [ ] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
+      device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
+- [ ] DMM function after a power-off: the last one (settings file) or DC V as the stock.
+- [ ] RES AUTO: include the 60 Ω range or not.
+- [ ] Repository split: confirm the list of paths moved to the private wirenboard/alientek-dm40-fw-analysis repo and
+      purged from history (stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger, stock-scope-ui,
+      native-review / native-boot-plan / native-boot-review, acdc-stock-vs-opendm40, with their old fw-rs/ names;
+      two BT MACs masked). A dry run of the rewrite is done; nothing pushed.
+- [ ] Before the public release: the licence of stock/patch, the vendor .bin and the datasheets in docs/; delete the
+      rust-fw-poc and bt-protocol branches; cut v0.1-pre2 through CI and drop v0.1-pre1; README known issues.
+- [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
+      (AC+DC mV A-JACK); DC V against a third reference.
+
 ## Next up (groomed 2026-10-14)
 
 Device needed (in this order):
@@ -3712,6 +3729,16 @@ Emulator (emu/):
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
       `DBG:ACDC?` does not list the two dropped results (the drop comes before its entry): the first one logged is
       ~0.13 s past the deadline. Not changed: AC+DC's phase switches (its own settle, `ac_settle_step`).
+      **Device 3c7c876 (2026-10-25): PASS.** DC V 6 -> AC V on the calibrator's 0 / 9.5 V square, 2 runs each at 20 / 50 /
+      90 Hz: the first final (0.47-0.48 s) within 0.19 % of the steady value (4.796 / 4.810 / 4.826 V). CONF:VOLT:AC 60 ->
+      VOLT:AC:RANG:AUTO ON on the 50 Hz square, 4 runs: lands on 6 V, no 0 and no reading 1 % low; but the first finals
+      on 6 V read high, +3.6..+4.0 % (5.00 / 4.93 / 4.89 V for 4.81 V), settling within 1 % ~0.35 s after the step
+      (item below).
+- [ ] AC V autorange step 60 -> 6 V overshoot (device 3c7c876, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
+      finals on 6 V read +3.6..+4.0 % high (5.00, 4.93, 4.89 V for 4.81 V) and settle within 1 % ~0.35 s after the
+      step; the cause is unknown (the AC filter seeded from a block that spans the range switch is one candidate,
+      INFERRED). Script: scratchpad acauto.py pattern (CONF:VOLT:AC 60, 3 s, VOLT:AC:RANG:AUTO ON, DBG:READout?
+      every 50 ms for 4 s).
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
@@ -3727,6 +3754,9 @@ Emulator (emu/):
       trace of it). Device check (10 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
       off, 6 runs each, `SYST:ALER?` + `DBG:SENT:LOG?` every 0.1 s for 6 s after the off): no A-JACK; then a current in
       A (V-COM open): A-JACK.
+      **Device 3c7c876 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
+      6 runs each: SYST:ALER? / DBG:SENT:LOG? every 0.1 s for 6 s after the off, no A-JACK in 12 of 12. Not done: a
+      current into A with V-COM open (needs a current source on A).
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device cd1ec9a note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
@@ -3773,6 +3803,8 @@ Emulator (emu/):
       (`INR:PRE?` a 0), pass (a -0.0717 A, idle below 20 mA); host tests inrush::measured_zero_*. Device check (2 min):
       A jack open, MF -> Inrush: "Armed: 0.00x A now", `INR:PREamble?` a ~ -0.07 A; a lamp capture's idle below
       ~20 mA.
+      **Device 3c7c876 (2026-10-25): PASS.** A jack open, INR:STAT ON: ARMED, `INR:PREamble?` a -0.0757 A. The lamp
+      capture's idle not checked.
 
 ## Failing / flaky tests 2026-10-25 (branch fix/regressions-1025, from f4cd2cd)
 
