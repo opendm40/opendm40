@@ -34,8 +34,6 @@
                                          come back and print `boot`.
                                          tools/reload.sh does the whole flow
                                          (upload, update, check)
-    dm40dbg.py genuine                   DBG:GENUINE? (device-authenticity check,
-                                         only in builds that have it)
     dm40dbg.py image FILE                offline: validate a dm40*.bin update
                                          file (header CRC, body CRC, size)
     dm40dbg.py release                   stop feeding the watchdog: the WDT
@@ -648,7 +646,6 @@ def main():
     p.add_argument('--wait', type=int, default=0, metavar='S',
                    help='wait up to S s for opendm40 to come back, then print `boot`')
     p.add_argument('--expect', metavar='FILE', help='with --wait: check the marker against FILE')
-    sub.add_parser('genuine', help='DBG:GENUINE? device-authenticity check (when the build has it)')
     p = sub.add_parser('image', help='offline: validate a dm40*.bin update file')
     p.add_argument('file')
     sub.add_parser('release')
@@ -724,18 +721,6 @@ def main():
         sys.exit(cmd_upload(ln, a.file))
     elif a.cmd == 'update':
         sys.exit(cmd_update(ln, a.wait, a.expect))
-    elif a.cmd == 'genuine':
-        r, err = ln.try_query('DBG:GENUINE?')
-        if r is None:
-            sys.exit('DBG:GENUINE? not available in this firmware build (%s)' % err)
-        v = r.decode(errors='replace').strip().split(',')
-        names = ['uid', 'stored', 'expected', 'result']  # hex x3 (12 bytes), GENUINE|MISMATCH
-        if len(v) == len(names):
-            for nm, x in zip(names, v):
-                print('  %-9s %s' % (nm + ':', x))
-        else:
-            print(','.join(v))
-        sys.exit(0 if v[-1] == 'GENUINE' else 2)
     elif a.cmd == 'release':
         ln.write('DBG:RELEASE')
     elif a.cmd == 'reset':

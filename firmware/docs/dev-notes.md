@@ -42,7 +42,7 @@ python3 tools/dm40dbg.py release             # stop feeding the watchdog (counts
 python3 tools/dm40dbg.py recover             # DESTRUCTIVE: into the vendor update screen (recover -h)
 ```
 
-`python3 tools/dm40dbg.py -h` lists the rest (`hold`, `lcdread`, `genuine`).
+`python3 tools/dm40dbg.py -h` lists the rest (`hold`, `lcdread`).
 
 **Watchdog.** The main loop feeds it while it runs. A hang, a panic (magenta
 bar at the bottom) or `DBG:RELEASE` resets the meter after ~20 s and opendm40

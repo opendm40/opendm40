@@ -146,6 +146,8 @@ section named after the tag as the release notes; how to cut a release:
   [`firmware/tools/linkcheck.py`](firmware/tools/linkcheck.py) checks the
   Markdown links.
 - CI and releases on GitHub Actions ([.github/workflows/](.github/workflows)).
+- `DBG:GENUINE?` (the stock genuine-device check, debug only) and
+  `dm40dbg.py genuine` are removed.
 
 ## v0.1-pre1 (2026-10-24)
 

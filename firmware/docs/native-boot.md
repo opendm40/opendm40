@@ -137,9 +137,8 @@ is exposed.
   `_DM40PRV.BIN` on a normal boot. Normally the loader has already deleted it
   ("fatren" below); the running firmware's update file is
   `INFO/FIRMWARE.BIN` on the USB volume ("Unit data").
-- **Device-authenticity check** ([`src/genuine.rs`](../src/genuine.rs),
-  `stock/re/docs/genuine-check.md`): informational only (`DBG:GENUINE?`),
-  not in the boot path.
+- **Device-authenticity check** (`stock/re/docs/genuine-check.md`, in the
+  private analysis repo): the stock's; opendm40 does not run it.
 
 ## Files
 
@@ -1284,7 +1283,7 @@ one Linux PC shared a udisks drive, and a drive-level Eject or Power Off
 could act on the other unit. Since 2026-10-23 the serial is the GD32's
 96-bit unique ID (`0x1FFF7A10`, 12 bytes) as 24 uppercase hex digits, bytes
 in memory order (word 0 low byte first): the digits of `xxd -p -u
-INFO/UID.BIN` and of the UID field of `DBG:GENUINE?`. The same string is:
+INFO/UID.BIN`. The same string is:
 
 - the USB iSerial (normal mode and `recovery-usb`);
 - the SCSI unit serial number, INQUIRY VPD page 0x80 (msc.rs);
@@ -1299,8 +1298,8 @@ The UID is in system memory, not in the slow flash bank (`0x08080000..`),
 and the serial paths do not read it at request time: `uid::init` (region C,
 `.cold`) reads it once in `native::start`, before the recovery / normal
 decision is acted on, into a 24-byte TCM static; the USB descriptors, the
-VPD page and `*IDN?` use that copy. (INFO/UID.BIN, `vdisk::mem_read`, and
-`DBG:GENUINE?` still read 0x1FFF7A10 directly, as before.) The VID:PID (1209:0001) is unchanged, so udev rules keyed on it
+VPD page and `*IDN?` use that copy. (INFO/UID.BIN, `vdisk::mem_read`, still
+reads 0x1FFF7A10 directly, as before.) The VID:PID (1209:0001) is unchanged, so udev rules keyed on it
 still match; `/dev/disk/by-id/usb-ALIENTEK_DM40_files_...` names and the
 Windows device instance path change once (a new device instance: Windows
 installs it again, a WinUSB binding made with Zadig must be made again).

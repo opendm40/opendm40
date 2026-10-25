@@ -5,9 +5,8 @@
 # Needs the toolchain (README "Toolchain"; the suites take ../../../toolchain,
 # CI links toolchain/rustup and toolchain/cargo to its rustup install),
 # python3 with Pillow, mtools and dosfstools (fatren-test, gallery-test).
-# Not in the list: genuine-test (needs this unit's flash and UID dumps, not
-# in git), build-variants (a separate CI step), the emulator tests (emu/,
-# Renode).
+# Not in the list: build-variants (a separate CI step), the emulator tests
+# (emu/, Renode).
 cd "$(dirname "$0")"
 ROOT=$(cd ../.. && pwd)
 SUITES="bargraph-test bt-scpi-test dbgsrc-test dlog-test fft-test gen-test
