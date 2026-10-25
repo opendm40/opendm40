@@ -86,9 +86,11 @@ const KEEPALIVE_MAX_MS: u64 = 600_000;
 /// MEASure:<f>? after a function change waits for a full averaging window at
 /// most this long (then any fresh reading answers), ms. A full window
 /// (dmm::AVG_FULL = 8 conversions at OSR 32768, 400 ms each) needs ~3.2 s
-/// after the switch to the steady OSR, so within this budget the answer is
-/// a partial average without the +1 digit; a later READ? has it. Kept short
-/// for the 2 s PyVISA default timeout rather than raised to ~4.5 s.
+/// after the switch to the steady OSR, which comes ~2 s after the row write
+/// (dmm.rs R22_LATE): ~5.3 s. So on DC V / A at MED / SLOW the answer
+/// is the fresh reading at this limit (an OSR 8192 one, no +1 digit); a
+/// later READ? has the digit. Kept short for the 2 s PyVISA default timeout
+/// (decided 2026-10-14, TODO "SLOW reports every conversion").
 const SCPI_SETTLE_MS: u64 = 1500;
 /// READ? / MEASure? / FETCh? with no reading of the current function yet
 /// (after a function change): give up this long after the converter's settle
