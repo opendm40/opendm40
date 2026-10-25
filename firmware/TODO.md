@@ -37,6 +37,13 @@ What waits for the owner; each line links to the material.
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
       history was rewritten (git-filter-repo: those paths removed; the UID, its derived block and two BT MACs
       replaced); a rescan in every text form and in the blobs finds none. Doc hashes mapped to the new history.
+- [x] Touch (device 4ea9518 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
+      mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
+      -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),
+      -1,+9 (centre). The stock applies no scale or offset either (stock/re/analysis/touch_v2_6.h); whether the
+      remaining offsets are the panel or the aim is unknown: the touch test screen (owner request) shows it.
+      AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
+      held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
 - [ ] Public release (owner 2026-10-25): the one blocker is the touch fix (screen and the four touch keys). Still
       to do at that time, not blockers: the licence of stock/patch, the vendor .bin and the datasheets in docs/;
       delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
