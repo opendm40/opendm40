@@ -4101,3 +4101,60 @@ every 0.05 s), `s6.py` (step 6), `s1-*.log`, `s2*.log`, `s4.log`.
   Crash count 0, HEALTHY, marker VALID, stack high water 21 696 / 45 124.
 - **Files:** none made; `MMEM:CAT?` equals the start listing.
 - **Calibrator:** frequency 90 Hz (90 000 mHz), output disabled, as found.
+
+## 489f956: plain AC first readings (049bb65), AC+DC mV A-JACK (0bcc40c), two open triage items, scope trigger level in volts / nearest-marker drag (f593d45, 41a9704) (2026-10-25)
+
+Image 489f956, flashed by the owner just before. `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, marker VALID at the
+start and the end. The calibrator (`/dev/ttyACM1`) was on V/Ω–COM: 1 V DC read 0.99924 V in DC V. The A jack, the
+MCX probe and the generator output were not wired; `OUTP?` 0 throughout. The CH1 trace showed only noise (the
+owner had not wired CH1), so the scope steps ran without a signal. The calibrator has no low-amplitude AC output.
+Its frequency output is a 0 / 9.5 V square, so every AC step used that square (AC part ~4.81 V, on the 6 V range),
+not the 1 V sine of the TODO steps. Danger alarm `SYST:ALER:ALARm OFF` for steps 2 and 4, then LOUD. Scripts are in
+the session scratchpad `s/` (not in git): `t1*.py` (step 1), `t2*.py` (step 2), `t3*.py` (step 3), `t5.py`,
+`t6.py`, `t7*.py`; `out.csv` (step 4).
+
+### Summary
+
+| step | result |
+|---|---|
+| 1. Plain AC V autorange step and entry (049bb65): no final 0, no first reading 1 % low | **PASS for the 049bb65 bugs; FAIL on entry.** `CONF:VOLT:AC 60`, then `VOLT:AC:RANG:AUTO ON` (square, 50 Hz, twice): 60 -> 6 V; FETC? +9.91E37 for 0.45-0.5 s, `DBG:READout?` the last 60 V value; **no 0** and no 1 % low reading. The first final on 6 V reads **+7 % high** (5.162 / 5.150 V for 4.811 V), then 4.92-5.01 V, and settles within 0.1 % after ~1 s. `CONF:VOLT:DC 6` -> `CONF:VOLT:AC`: the **first final reads 3.397 / 3.408 V for 4.811 V (29 % low: 1/√2 of the steady value)**; the next one, 0.15 s later, reads 4.813 V. The same at 20 and 90 Hz (3.391 / 3.385 / 3.411 / 3.414 V; ratio 0.706-0.707). Note 1 |
+| 2. AC+DC mV, manual 600 mV: square, then 5 V DC on V-COM; no A-JACK, no alarm event (0bcc40c) | **PASS while the voltage is on, FAIL after it goes off.** No A-JACK while the square or 5 V was on (0 in 13 runs of 10-25 s). **A-JACK 0.45-0.9 s after the source was switched off in 8 of 13 runs** (`DBG:SENT:LOG?` `AJACK,AD1PK_PB1`; square off 5 of 6, 5 V off 3 of 7; the first run's two events are assigned by their timing, 28.9 s apart), and it stays on while the input is open (still on 6 s later, until the next source cleared it). The readout was OL (`+9.9E37` mV) in the failing runs, about 0.7 mV in the others. 1 V DC on and off: no A-JACK (1 run). Plain AC mV 600 mV, the same cycles (square and 5 V, 3 each): **0 A-JACK**. `DBG:ALARm?` events 8 at the end (the alarm was OFF, so nothing sounded). Note 2 |
+| 3. AC V entry transient (open triage item) | **No 2.78-3.9 V first reading and no 60 V visit.** 0 V DC on V-COM, `CONF:VOLT:AC 0.6`, 3 s, then `CONF:VOLT:AC 6` (twice) or `VOLT:AC:RANG 6` (twice): the first final reads **0.0249 / 0.0357 V** and **0.0186 / 0.0179 V**, then 15-17 mV, 9-10 mV, 5-6 mV, 3 mV at 1 s. The square, `CONF:VOLT:AC 0.6` (608 mV, clipped) -> `CONF:VOLT:AC` (3 runs): `VOLT:AC:RANG?` **6 V only** (polled every 50 ms for 4 s). The readout then overshoots: first final 5.03-5.39 V, **a peak of 5.79 / 5.82 / 5.93 V (+20-23 %) about 0.3 s later**, and the steady 4.812 V after ~1.3 s (the emulator tail was 4.90 V) |
+| 4. Inrush idle 0.069 A (open triage item) | **It is an offset.** AC A 10 A (`CONF:CURR:AC 10`), A jack open, `dm40scpi.py log --source ad2 --rate 9600 -d 1`: 9553 samples, 0 lost; **mean +150.38 codes = +0.07171 A**, **rms about the mean 3.60 codes = 1.72 mA** (min / max 135 / 165 codes). The meter's scale is 4.768372E-04 A/code with **offset 0 A** (`LOG:SCALe?` 0, the cal 0x10C row for 10 A, i.e. 0x110: not set or not used, the same `ad2_scale`). The 0.069 A matches the mean, not the noise |
+| 5. Trigger level in volts (f593d45) | **PASS.** `CHAN1:SCAL 1`, `TRIG:LEV 0.8` (reads +8.226950E-01: snapped to the 1 V/div row), then 1 / 0.5 / 2 / 0.05 / 1 V/div: `TRIG:LEV?` +8.226950E-01 throughout; the marker row (`DBG:GEST?` POS) 163 / 134 / 178 / **-10** (off screen) / 163. A screenshot at 0.5 V/div shows the marker at y 153 (row 134) and the label 823 mV. In the opposite order (`TRIG:LEV 0.8` at 5 V/div, then the scales) it reads 0.851 V throughout (rows 162 / 132 / 177 / -10 / 162) |
+| 6. Nearest-marker drag (41a9704) | **PASS.** 1 V/div, CH1 selected (panel `CHA`), trigger row y 183, CH1 y 212: `DBG:DRAG 200,186,200,216,300` -> `DBG:GEST?` target 1 (level) V +30; trigger row 163 -> 193, CH1 52 -> 52, trigger position 239 -> 239 (`TRIG:LEV?` 0.823 -> -0.028 V). Horizontal `DBG:DRAG 150,100,230,100,400` -> target 2 H +80: trigger position 239 -> 319, row and CH1 unchanged. A vertical drag 3 px above CH1 moved CH1 (target 3, 52 -> 32), and the trigger row with it (193 -> 173: the level kept in volts) |
+| 7. Drag lag (DBG:PROF?) | **Numbers only. The real touch rate cannot be run:** `DBG:DRAG` feeds all its 20 ms points in one main-loop pass (gesture.rs `synth_drag`), so no frame is drawn during a synthetic drag. Four 100 px trigger-level drags (1000 ms, 50 points each), at 5 ms/div with no signal (AUTO, auto-triggered): touch events 4 (one per drag), **touch->frame 490.6 ms avg (max 490.8)**, loop max 73 ms (the drag's pass), hist <0.5 ms 14854, <2 1, <5 2, <10 25, <20 8, <50 4, >=50 1; idle on that page **2.0 fps**. The same at 1 ms/div: **touch->frame 91.0 ms avg (max 91.3)**, loop max 31 ms (scpi section 20.6 ms: the drag), idle 9.3 fps (also at 0.1 ms/div). `gesture` section 0 calls (not timed in the synthetic path). Each drag's host round trip 31-32 ms. Note 3 |
+
+### Notes
+
+1. **AC V entry: the first result is stale (INFERRED).** `DBG:ACDC?` after DC V -> AC V on the square: the first
+   AC result came 4 ms after the settle deadline with INTF 0x1f (0x1e on every later result) and sq 70 808 against
+   ~100 170 steady (0.707). The next came **18 ms** later at sq 98 089 (2 % low), then every 105-110 ms at 100 186-100 198.
+   So the first result is one that the chip latched during the settle (INTF is not read before the deadline,
+   dmm.rs `poll` returns early), and its window was half before the AC path carried the input. The
+   autorange step shows the same flags (first result at 0 ms late, INTF 0x1f, sq 107 487 = +7 %, LPF 50 049 against
+   ~280 steady: the coupling step), then 83 ms to the next. 049bb65 seeds `f_ac` with that first result, so it is
+   shown as a final reading. Before 049bb65 the EMA's 0.99 step showed 0.99 of the same value. Not changed here
+   (no flash in this session). Candidate fixes (untested): drop a plain AC result whose INTF was latched before the
+   deadline, or clear INTF at the deadline and take the first result after it.
+2. **AC+DC mV A-JACK after the voltage goes off.** Seen only in AC+DC on manual 600 mV (not in plain AC mV), only after
+   the square or 5 V was switched off (the calibrator's output relay opens; the mV input is left floating). The
+   readout was OL in the failing runs, so the input held a charge above 600 mV. One trace of a run without A-JACK:
+   `DBG:SENT?` vside 1 (driven) for ~1.2 s after the off, then 0, the streak 0 from 0.3 s on. How the free
+   verdict meets a hit run in the failing runs (an AC-phase result that reads "free" while a charge on the input
+   gives DC-phase comparator hits, sentinel.rs `decide`) is INFERRED, not traced. A real lead removal
+   would be the same case.
+3. **What the numbers say about "sluggish".** After a release, the next frame waits for the next acquisition: ~0.5 s
+   at 5 ms/div without a trigger, 0.09 s at 1 ms/div. The marker preview during a real drag (one frame per touch
+   report) is not measured: `DBG:DRAG` has no real-time mode. With a triggering signal (the owner's 90 Hz square)
+   the acquisitions come faster than the auto-trigger timeout; untested here (CH1 not wired).
+4. Not run: a 1 V sine on AC V (no source), the steps with a signal on CH1.
+
+### State at the end
+
+- **Device:** DMM page, DC V, `VOLT:RANG:AUTO?` 1, volume 50, danger alarm LOUD (`DBG:ALARm?` 0,0,8,0: the 8
+  A-JACK events of step 2), `SYST:ALER?` NONE, `OUTP?` 0, `SYST:ERR?` empty. Scope settings back as found
+  (5 V/div, offset -7.376 V, `TRIG:LEV` 1.986 V, 5 ms/div, trigger position 239). Crash count 0, HEALTHY, marker
+  VALID, stack 23 724 / 45 116.
+- **Files:** none made on the meter (the AD2 log streams to the host).
+- **Calibrator:** frequency 90 Hz (90 000 mHz), output disabled, as found.
