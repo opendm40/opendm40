@@ -65,6 +65,9 @@ section named after the tag as the release notes; how to cut a release:
 - Logger: one 76.8 kS/s nominal rate; no hole in the panel at the 76.8 kS/s
   start.
 - The 6 M ohm test-current label is cleared on 60 M.
+- Scope: the trigger-level marker follows a drag more closely (each step
+  repaints its guide line as whole rows, the marker before the trigger
+  badge).
 
 ### Docs
 

@@ -3816,3 +3816,36 @@ Emulator (emu/):
       exits 1 with FileNotFoundError, modetest showed "0 readings") or without `private` (no genuine check pass)
       gives no readings; the f4cd2cd log is not at hand. Notes in [emu/hy3131/README.md](../emu/hy3131/README.md)
       under the modetest results table.
+
+## Scope trigger-level drag lag (owner 2026-10-25, branch fix/scope-drag-lag)
+
+- [x] "Dragging the trigger level feels laggy". Each move report of a level drag repaints the frame held since
+      the press ([src/scope_page.rs](src/scope_page.rs) `sp_move`: no acquisition while the finger moves);
+      [emu/draglat.py](../emu/draglat.py) times report -> marker on the screen in emulator time. At
+      `--mips 110` (the device model, [emu/peripherals/CpuCost.cs](../emu/peripherals/CpuCost.cs)), 5 ms/div:
+      a trigger-level step was a 10-20 ms pass, the marker on the screen 15 ms after the report: the guide line's
+      old and new rows repainted per graph column (two LCD windows in each of 399 columns,
+      [src/scope_ui.rs](src/scope_ui.rs) `Graph::flush`), and the trigger badge (3.3 ms) drawn before the graph.
+      Fixed: changed horizontal lines painted as row runs between the holes after the columns; the badge after
+      the graph. Report -> marker 7 ms (median of 15 move reports); CH1 drag 3 ms before and after (its marker is in the
+      strip, drawn before the graph). The pass is still 10-20 ms per trigger-level step (the marker columns and
+      the badge). ui-render: each drag step equals its fresh draw (tabs, cursors, FFT boxes over the guide row).
+- [ ] Device check (5 min): scope page, 5 ms/div, Auto, a signal on CH1. (1) Drag the trigger-level marker slowly
+      and fast, up and down: marker and dashed guide line under the finger, no dashes left behind on the old
+      rows, the badge value follows. (2) The same with the corner tabs shown (Settings "Scope tap step"
+      Corners) and with the X / Y cursors on: the guide line does not paint over the tabs / cursor tab, the
+      cursor lines stay whole where the guide line crosses them. (3) `DBG:PROF:RESET`, one 1 s level drag,
+      `DBG:PROF?`: note `s.frame` max_us and the loop histogram (emulator after the fix: s.frame max 12.5 ms).
+      (4) CH1 and trigger-position drags as before; after the release `TRIG:LEV?` is the dragged level.
+- [ ] After the release the trace re-triggers only with the next acquisition (the release applies the level and
+      restarts it, `Scope::apply`). Inferred from [src/scope.rs](src/scope.rs) `auto_timeout` (500 ms at 5 ms/div):
+      a level outside the signal shows the next (untriggered) frame after ~0.5 s, the "updates at the
+      acquisition rate" seen after a drag; a level inside it, a triggered frame within ~0.1 s (a 5 ms/div record is 53 ms). Not
+      measured: the emulator shows no frames at 2 ms/div and slower with the comparator trigger on (DBG:PROF?
+      0 fps at 2 / 5 / 10 ms/div, 10.5 fps at 1 ms/div; [emu/README.md](../emu/README.md): "the comparator path
+      sometimes never completes a frame after a restart"). Device check: drag the level outside the signal ->
+      untriggered frame after ~0.5 s; back inside -> a frame within ~0.1 s.
+- Not changed: the touch-down debounce ([src/touch.rs](src/touch.rs) `Debounce`) reports the second pressed
+      frame's point as the down point, so a finger that already moves in its first report loses that
+      report's travel (5 px in `emu/draglat.py --still 0`); a landing finger (one still report) loses none.
+
