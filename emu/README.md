@@ -114,7 +114,7 @@ None of these inputs are committed; generated images are git-ignored.
 
 Coordinates are the 480x320 landscape frame the user sees. The stock main menu
 tiles are at (46,52) Multimeter, (244,52) Oscilloscope, (46,166) Signal,
-(244,166) Settings (190x106 each; [`stock/re/analysis/gui_v2_6.h`](../stock/re/analysis/gui_v2_6.h)).
+(244,166) Settings (190x106 each; `stock/re/analysis/gui_v2_6.h` (in the private analysis repo)).
 
 ### opendm40 screens
 

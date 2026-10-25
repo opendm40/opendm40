@@ -40,7 +40,7 @@
 //!   that remaining finger (the controller can report a release frame
 //!   between two lifts) and is ignored until it is up as well.
 //!
-//! * Raw moves (the stock scope drag model, docs/stock-scope-ui.md sec. 10.2):
+//! * Raw moves (the stock scope drag model, stock/re/docs/stock-scope-ui.md sec. 10.2):
 //!   when the app captures a touch-down after `raw_next(true)`, every later
 //!   one-finger report that moved is sent as `Move(prev, p)` (no slop, no
 //!   axis lock) instead of `Drag`; the app attributes each event itself.

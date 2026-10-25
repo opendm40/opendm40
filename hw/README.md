@@ -12,13 +12,16 @@ for reference only and not under this repo's license; sources and details in
 
 This page is about hardware only: chips, pins, circuits. Flash layout and boot
 chain: see [firmware/docs/native-boot.md](../firmware/docs/native-boot.md) (and
-[`fsloader-install-trigger.md`](../firmware/docs/fsloader-install-trigger.md), [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md)).
+`stock/re/docs/fsloader-install-trigger.md`, `stock/re/ANALYSIS.md`). The
+`stock/re/...` paths on this page are in the private stock-firmware analysis
+repo, cloned into `stock/re/` by those with access
+([README.md, Supporting material](../README.md#supporting-material)).
 
 No schematic of the DM40 is public. Facts without a mark are stated by the
 source after them; the rest are marked *inferred* or listed under
 [Unknowns](#unknowns). The pointer after a fact
 says where to check it: stock code (RE headers in
-[`stock/re/analysis/`](../stock/re/analysis)), opendm40 code, a photo or a
+`stock/re/analysis`), opendm40 code, a photo or a
 datasheet. *Inferred*: deduced from register settings, scaling constants, the
 community BOM or the photos. *BOM only*: the community BOM is the only
 source.
@@ -134,12 +137,12 @@ scope, generator) shares one ground.
 | MCU | GigaDevice [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F, LQFP100 | marking `GD32F427 VGT6` in photo [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg); review; BOM |
 | MCU crystal | 25.000 MHz | photo ([main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg), crystal next to the SPI flash) and PLL read back ([`firmware/src/clock.rs`](../firmware/src/clock.rs)). The community BOM says 26 MHz (contradiction, see [Unknowns](#unknowns)) |
 | SPI flash | Winbond [W25Q128JV](datasheets/winbond-w25q128jv-revI.pdf), 16 MiB | code ([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), JEDEC check at boot); BOM. The BOM calls it QSPI: the chip can do quad I/O, but the board wires it as a plain 4-wire SPI ([SPI flash](#spi-flash-usb-disk)) |
-| LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | ID 0x9488 read by `board::init` ([`firmware/TODO.md`](../firmware/TODO.md) T1); stock init sequence [`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h). Not in the BOM |
+| LCD controller | [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) (ID read 0x9488) | ID 0x9488 read by `board::init` ([`firmware/TODO.md`](../firmware/TODO.md) T1); stock init sequence `stock/re/analysis/lcd_buzzer_v2_6.h`. Not in the BOM |
 | LCD panel | 3.5" IPS, 480 x 320, active area 74 x 50 mm | review |
 | Touch | Hynitron CST-type controller at I2C 0x5A (chip type byte 0xA8) on this unit; the stock also supports a Goodix GT1158 at 0x14 | [`firmware/src/touch.rs`](../firmware/src/touch.rs); GT1158 path from the stock code only. Not in the BOM (the touch controller sits on the panel FPC) |
 | Bluetooth | Jieli BP2A838-20A2, 24 MHz crystal, PCB meander antenna | BOM (custom Jieli chip, no public datasheet); antenna and 24.000 MHz crystal next to a chip with the Jieli logo in [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
-| DMM front end | Hycon [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) | code (register protocol, [`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h)); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
-| HY3131 crystal | 4.9152 MHz | photo and stock constant 4915.2 ([`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h)) |
+| DMM front end | Hycon [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) | code (register protocol, `stock/re/analysis/hy3131_v2_6.h`); the chip itself is under the shield can (4.9152 MHz crystal and VDD/VSS silkscreen next to it in [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg)) |
+| HY3131 crystal | 4.9152 MHz | photo and stock constant 4915.2 (`stock/re/analysis/hy3131_v2_6.h`) |
 | Voltage reference | [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) (1.25 V, 5 ppm/°C) on HY3131 PB6 | BOM only for the part (placement: see [Unknowns](#unknowns)); the 1.25 V value matches the stock scaling ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7) |
 | Divider network | TC1746B6 (B / C), 0.1 %, 10 ppm/°C; discrete resistors on the A | BOM only; chat reports [#25087](https://t.me/S2084K/25087), [#51830](https://t.me/S2084K/51830) ([`firmware/docs/user-feedback.md`](../firmware/docs/user-feedback.md) 12) |
 | Digital isolator | Chipanalog [CA-IS3741HW](datasheets/chipanalog-ca-is374x-v1.08.pdf) | marking in photos [dmm-isolation-hy3131-shield-area.jpg](photos/dmm-isolation-hy3131-shield-area.jpg), [main-board-mcu-gd32f427.jpg](photos/main-board-mcu-gd32f427.jpg) |
@@ -151,13 +154,13 @@ scope, generator) shares one ground.
 | Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM only |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); one 10 A ceramic fuse for all shunts by the Alientek DM40 manual (not in the repo) |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
-| Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, [`scope_gen_v2_6.h`](../stock/re/analysis/scope_gen_v2_6.h) |
+| Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, `stock/re/analysis/scope_gen_v2_6.h` |
 | Scope op amp | "8091" (Gainsil [GS8091](datasheets/gainsil-gs8091.pdf)?) | BOM only, after gadefox in the EEVblog thread |
 | Generator path switch | SGM3157 SPDT | *inferred* from chat report [#24902](https://t.me/S2084K/24902); [`firmware/docs/dac-adc-paths.md`](../firmware/docs/dac-adc-paths.md) 1 |
 | Charger | [TP4056](datasheets/toppower-tp4056-cn.pdf) (marked "TP4056 2413"), linear, 1 cell, not isolated (on VBUS) | marking in photo [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg); review |
 | Battery | LN425272 Li-ion polymer, 3.7 V, 2000 mAh, 7.4 Wh, 4.2 V charge limit, made 2025-02-10 by 东莞市立能电子科技有限公司, with protection PCB | label in [battery-ln425272-label.jpg](photos/battery-ln425272-label.jpg) |
 | Connectors | USB-C; two coaxial (MCX per BOM) jacks silkscreened CHA (scope) and GEN (generator); banana V/ohm, COM, A/mA/uA | photos; review ("coaxial, not BNC") |
-| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). Flash read protection is set (level 1 in the option bytes; [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md) 1) |
+| Debug header | two rows of 4 holes: "VCC RX TX GND" (TX = PA2, the boot strap) and "V D C G" (SWD: D = PA13 SWDIO, C = PA14 SWCLK; the BOM lists only this 4-pin service header) | see [Debug header and hardware recovery](#debug-header-and-hardware-recovery). Flash read protection is set (level 1 in the option bytes; `stock/re/ANALYSIS.md` 1) |
 
 Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg)
 ("A2SHB", "93N44", "XFHVB", "K14", "S1K", "NE.", inductor "2R2", tantalum
@@ -171,7 +174,7 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 
 - [GD32F427VGT6](datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf): Cortex-M4F, 1 MB internal flash, 256 KB SRAM as 64 KB TCM
   (0x10000000) + 128 KB SRAM0/1 (0x20000000) + 64 KB ADDSRAM (0x20020000).
-  ([`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md) 4: dump sizes and stack top).
+  (`stock/re/ANALYSIS.md` 4: dump sizes and stack top).
 - HXTAL 25 MHz, PLL M=25 N=400 P=2 -> 200 MHz SYSCLK / HCLK; APB1 50 MHz,
   timer kernel clocks 200 MHz (TIMPRE). RCU_PLL read back on the device
   ([`firmware/src/clock.rs`](../firmware/src/clock.rs), [`firmware/src/genplan.rs`](../firmware/src/genplan.rs)).
@@ -191,7 +194,7 @@ Small SOT-23 / SOT-89 / MSOP parts in [charger-tp4056-and-power.jpg](photos/char
 MOSI PC3 (AF5), CS PE4 (GPIO, active low), mode 3. The stock runs it at
 3.125 MHz, opendm40 at 12.5 MHz after a boot self-check. The whole chip is one
 FAT16 volume with 4096-byte sectors: the USB disk of the meter
-([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), [`spiflash_v2_6.h`](../stock/re/analysis/spiflash_v2_6.h)). The FS-loader also uses it for
+([`firmware/src/spiflash.rs`](../firmware/src/spiflash.rs), `stock/re/analysis/spiflash_v2_6.h`). The FS-loader also uses it for
 updates.
 
 ## LCD
@@ -199,7 +202,7 @@ updates.
 - [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf), 16-bit 8080 bus on FSMC bank 1 NE1: D0..D15 on PD0 PD1 PD8 PD9
   PD10 PD14 PD15 PE7..PE15, NOE PD4, NWE PD5, NE1 PD7, RS = A16 on PD11
   (command 0x6001FFFE, data 0x60020000). No reset GPIO, no DMA
-  ([`firmware/src/board.rs`](../firmware/src/board.rs), [`firmware/src/lcd.rs`](../firmware/src/lcd.rs), [`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h)).
+  ([`firmware/src/board.rs`](../firmware/src/board.rs), [`firmware/src/lcd.rs`](../firmware/src/lcd.rs), `stock/re/analysis/lcd_buzzer_v2_6.h`).
 - FSMC timing as the stock: BCR1 0x5091, BTR1 0x0F04, BWTR1 0x0FF00201
   (device read-back, [`firmware/TODO.md`](../firmware/TODO.md) T1).
 - Pixel format RGB565 on writes. A GRAM read returns one dummy word, then
@@ -212,7 +215,7 @@ updates.
 
 - I2C2 (GD32 naming; STM32 "I2C3", base 0x40005C00): SCL PA8, SDA PC9 (AF4),
   INT PE5 (falling edge), reset PE6 ([`firmware/src/touch.rs`](../firmware/src/touch.rs),
-  [`touch_v2_6.h`](../stock/re/analysis/touch_v2_6.h)).
+  `stock/re/analysis/touch_v2_6.h`).
 - This unit: Hynitron CST-type at 7-bit 0x5A, chip type byte 0xA8. The stock
   probes a Goodix GT1158 at 0x14 first (absent here), so other units may carry
   it.
@@ -229,11 +232,11 @@ updates.
   the power path) is unknown.
 - **PA2**: the "TX" pad of the debug header. The Alientek primary bootloader and the FS-loader enable a
   pull-up on PA2 and poll it ~1000 times each at boot; low for the whole poll
-  sends the boot to the FS-loader's install state ([Boot decision chain](../firmware/docs/fsloader-install-trigger.md#boot-decision-chain)). PA2 is not the power key.
+  sends the boot to the FS-loader's install state (Boot decision chain (`stock/re/docs/fsloader-install-trigger.md`)). PA2 is not the power key.
   See [Debug header and hardware recovery](#debug-header-and-hardware-recovery).
 - **Buzzer**: PA7 AF9 = TIM14_CH1 PWM,
   200 MHz / 5 / 11200 = 3.57 kHz, loudness = duty
-  ([`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h), opendm40 [`app.rs`](../firmware/src/app.rs)). The continuity / diode beep is not
+  (`stock/re/analysis/lcd_buzzer_v2_6.h`, opendm40 [`app.rs`](../firmware/src/app.rs)). The continuity / diode beep is not
   made by the MCU: the stock only toggles the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CMP pin buffer (ENPCMPO),
   so the HY3131 comparator output drives the buzzer stage (*inferred*,
   [`firmware/docs/parity.md`](../firmware/docs/parity.md)). The only buzzer-like part in
@@ -267,7 +270,7 @@ unpopulated, silkscreened. Seen with the board as in
 | V, D, C, G | SWD: V = VCC, D = **PA13** (SWDIO), C = **PA14** (SWCLK), G = GND |
 
 SWD itself has not been tried. The option bytes (dumped from the running
-firmware, [`stock/re/ANALYSIS.md`](../stock/re/ANALYSIS.md) 1) show read protection level 1:
+firmware, `stock/re/ANALYSIS.md` 1) show read protection level 1:
 with it a debugger cannot read or write the flash, and lifting it
 mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
 calibration and the UID-bound boot data. Use SWD only as a last resort, after
@@ -320,7 +323,7 @@ scope and generator ground (*inferred*).
   [`docs/bt-protocol.md`](../docs/bt-protocol.md)) and BLE ([`firmware/src/bt.rs`](../firmware/src/bt.rs)).
 - UART4: TX PA0, RX PA1 (AF8), 115200 8N1, no RTS/CTS ([`bt.rs`](../firmware/src/bt.rs)).
 - PC0 = module power, **low = on**, high = off ([`bt.rs`](../firmware/src/bt.rs),
-  [`bt_meas_v2_6.h`](../stock/re/analysis/bt_meas_v2_6.h); [`board.rs`](../firmware/src/board.rs) sets it high at boot = off, as the stock).
+  `stock/re/analysis/bt_meas_v2_6.h`; [`board.rs`](../firmware/src/board.rs) sets it high at boot = off, as the stock).
 - PC14 = link status input, high = connected ([`power.rs`](../firmware/src/power.rs), [`bt.rs`](../firmware/src/bt.rs)).
 - AT commands the firmware sends: `AT+SBN<name>`, `AT+SLED0`, `AT+RESET`,
   `AT+CBN` ([`bt.rs`](../firmware/src/bt.rs), [`docs/bt-protocol.md`](../docs/bt-protocol.md)).
@@ -330,7 +333,7 @@ scope and generator ground (*inferred*).
 Overview of the chip: [emu/hy3131/RESEARCH.md](../emu/hy3131/RESEARCH.md) 2
 and the datasheet in [datasheets/](datasheets/README.md). The 60 stock
 configuration rows (R20..R35 per mode and range) and their decoding are in
-[`stock/re/analysis/hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h); the terminal-level model is
+`stock/re/analysis/hy3131_v2_6.h`; the terminal-level model is
 [emu/hy3131/README.md](../emu/hy3131/README.md).
 
 **Bus.** SCK PC10, MISO PC11, MOSI PC12, CS PD2 (active low), mode 0. The stock
@@ -355,10 +358,10 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../firmware/docs/device-check-2026-10-21.md#ad1-osr-characterization-10242c3-2026-10-24-1433---1545).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), [`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md)).
+of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), `stock/re/docs/history/acdc-stock-vs-opendm40.md`).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
-[`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
+`stock/re/analysis/hy3131_v2_6.h` lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
 
 | MCU pin | Function | Notes |
 |---|---|---|
@@ -377,7 +380,7 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   ([`power-meter-and-misconnect.md`](../firmware/docs/power-meter-and-misconnect.md) 3.1, [`RESEARCH.md`](../emu/hy3131/RESEARCH.md) 7). The taps follow the
   datasheet's 10 M / 1.111 M / 101.01 k / 10.01 k / 1 k network.
 - Ohm: OP3 drives reference resistors on HY3131 PA2..PA7 (Rref 1 k .. 63 M per
-  range); ratiometric AD1 ([`hy3131_v2_6.h`](../stock/re/analysis/hy3131_v2_6.h) mode 10). Ohm source
+  range); ratiometric AD1 (`stock/re/analysis/hy3131_v2_6.h` mode 10). Ohm source
   short-circuit current per range (600 Ω / 6 k / 60 k / 600 k / 6 MΩ):
   0.90 mA / 197 µA / 20 µA / 2.2 µA / 215 nA in the default variant (OP3
   VREF tap VDS15), 0.28 mA / 58 µA / 6.6 µA / 0.66 µA / 86 nA in the "ON"
@@ -448,7 +451,7 @@ section 4 (sentinels) and 3 (power meter).
 
 - **AD2 and AD3 on the same node** differ by ~0.1 % in gain: sum X^2 = 9919,
   sum Y^2 = 9930 in plain AC V r1
-  ([`acdc-stock-vs-opendm40.md`](../docs/history/acdc-stock-vs-opendm40.md) 10.1).
+  (`stock/re/docs/history/acdc-stock-vs-opendm40.md` 10.1).
 - **V on OP2 x1 -> AD3** (the power row: the divider tap through OP2 instead
   of OP1), against the stock AC V / DC V on the same input (device 7dce69f,
   the power meter's T1 test; 40 Hz square 0..9.6 V and DC 1 V / 5 V):
@@ -537,7 +540,7 @@ sections by commit ("9dd1222", "f3aea2f", "35fce2a", "ad74e93", "ab7184c",
   ~3 MHz and -3 dB at 11.5..17 MHz, input capacitance ~30..35 pF
   ([`user-feedback.md`](../firmware/docs/user-feedback.md) 6.3).
 - Front end (meaning of the pins *inferred* from the gain steps,
-  [`scope_gen_v2_6.h`](../stock/re/analysis/scope_gen_v2_6.h), [`dac-adc-paths.md`](../firmware/docs/dac-adc-paths.md) 3):
+  `stock/re/analysis/scope_gen_v2_6.h`, [`dac-adc-paths.md`](../firmware/docs/dac-adc-paths.md) 3):
   - PC13: input attenuator relay, 1 = direct, 0 = /50; 200 ms settle.
   - PB15 / PD12 / PD13: 4051 select code, gain x0.5 .. x20 in the amplifier
     feedback (which pin is A / B / C is unknown).
@@ -556,7 +559,7 @@ sections by commit ("9dd1222", "f3aea2f", "35fce2a", "ad74e93", "ab7184c",
   DMA0 stream 5. Up to 10 MS/s. Output 0..3 V unipolar (DAC
   reference 3.0 V, assumed in code); the stock turns the DAC output buffer
   off for sine / triangle / ramp, so an external buffer stage follows
-  (*inferred*) ([`firmware/src/gen.rs`](../firmware/src/gen.rs), [`scope_gen_v2_6.h`](../stock/re/analysis/scope_gen_v2_6.h)).
+  (*inferred*) ([`firmware/src/gen.rs`](../firmware/src/gen.rs), `stock/re/analysis/scope_gen_v2_6.h`).
 - PWM path (square above 50 kHz): TIM12_CH1 on PB14 (AF9), 200 MHz / D.
 - PB12 selects the path: 1 = PWM, 0 = DAC; the switch is the SGM3157
   (*inferred* from a chat report). No attenuator or relay after it.
@@ -584,7 +587,7 @@ sections by commit ("9dd1222", "f3aea2f", "35fce2a", "ad74e93", "ab7184c",
   headers disagree, see [Unknowns](#unknowns)).
 - Battery voltage: PC5 = ADC0 channel 15, 1:2 divider, 3.0 V reference
   assumed: Vbat = raw * 3.0 / 4096 * 2. Firmware powers off below ~3.31 V.
-  ([`firmware/src/power.rs`](../firmware/src/power.rs), [`dmm_v2_6.h`](../stock/re/analysis/dmm_v2_6.h)); the divider ratio is
+  ([`firmware/src/power.rs`](../firmware/src/power.rs), `stock/re/analysis/dmm_v2_6.h`); the divider ratio is
   *inferred* from the scaling.
 - Rails switched by the MCU ([`board.rs`](../firmware/src/board.rs), [`scope.rs`](../firmware/src/scope.rs) `rails`,
   [`boot.rs`](../firmware/src/boot.rs)):
@@ -612,7 +615,7 @@ opendm40 or stock code that drives the pin.
 | PA4 | DAC channel 1: generator; ADC0 ch4 read-back | analog | [`gen.rs`](../firmware/src/gen.rs), [`power.rs`](../firmware/src/power.rs) |
 | PA5 | DAC channel 2: scope trigger level (stock) | analog | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PA6 | TIM13_CH1 (AF9) backlight PWM 20 kHz | out | [`board.rs`](../firmware/src/board.rs) |
-| PA7 | TIM14_CH1 (AF9) buzzer | out | [`lcd_buzzer_v2_6.h`](../stock/re/analysis/lcd_buzzer_v2_6.h) |
+| PA7 | TIM14_CH1 (AF9) buzzer | out | `stock/re/analysis/lcd_buzzer_v2_6.h` |
 | PA8 | I2C2 SCL, touch (AF4) | od | [`touch.rs`](../firmware/src/touch.rs) |
 | PA9 | DMM relay drive (pulse) | out | [`dmm.rs`](../firmware/src/dmm.rs) |
 | PA10 | DMM relay drive (pulse) | out | [`dmm.rs`](../firmware/src/dmm.rs) |
@@ -621,8 +624,8 @@ opendm40 or stock code that drives the pin.
 | PA13 / PA14 | SWD (pads "D" / "C") | io | debug header |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PB0..PB9 | [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) data D0..D9 | in | [`scope.rs`](../firmware/src/scope.rs) |
-| PB10 | charge status / control (meaning *inferred*) | in / od | stock code, [`dmm_v2_6.h`](../stock/re/analysis/dmm_v2_6.h), [`power.rs`](../firmware/src/power.rs) |
-| PB11 | charge status (meaning *inferred*) | in, pull-up | stock code, [`dmm_v2_6.h`](../stock/re/analysis/dmm_v2_6.h), [`power.rs`](../firmware/src/power.rs) |
+| PB10 | charge status / control (meaning *inferred*) | in / od | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
+| PB11 | charge status (meaning *inferred*) | in, pull-up | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
 | PB12 | generator path select, 1 = PWM, 0 = DAC | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB14 | TIM12_CH1 (AF9) generator square | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB15 | scope 4051 select bit | out | [`scope.rs`](../firmware/src/scope.rs) |
@@ -651,7 +654,7 @@ opendm40 or stock code that drives the pin.
 | PE0 | A shunt MOSFET (10 mohm) | out | [`dmm.rs`](../firmware/src/dmm.rs) |
 | PE1 | mA shunt MOSFET (0.5 ohm) | out | [`dmm.rs`](../firmware/src/dmm.rs) |
 | PE2 | DMM analog rail / power hold | out | [`boot.rs`](../firmware/src/boot.rs) |
-| PE3 | scope coupling, 1 = DC, 0 = AC | out | [`scope_gen_ui_v2_6.h`](../stock/re/analysis/scope_gen_ui_v2_6.h) |
+| PE3 | scope coupling, 1 = DC, 0 = AC | out | `stock/re/analysis/scope_gen_ui_v2_6.h` |
 | PE4 | SPI1 CS, flash | out | [`spiflash.rs`](../firmware/src/spiflash.rs) |
 | PE5 | touch INT (falling edge) | in | [`touch.rs`](../firmware/src/touch.rs) |
 | PE6 | touch reset | out | [`touch.rs`](../firmware/src/touch.rs) |
@@ -688,8 +691,8 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
    is the one the running firmware depends on.
-5. Charge status pins: [`dmm_v2_6.h`](../stock/re/analysis/dmm_v2_6.h) says the stock shows the charging icon
-   when PB10 = 1 and PB11 = 0; [`bt_meas_v2_6.h`](../stock/re/analysis/bt_meas_v2_6.h) and [`firmware/src/power.rs`](../firmware/src/power.rs) use
+5. Charge status pins: `stock/re/analysis/dmm_v2_6.h` says the stock shows the charging icon
+   when PB10 = 1 and PB11 = 0; `stock/re/analysis/bt_meas_v2_6.h` and [`firmware/src/power.rs`](../firmware/src/power.rs) use
    PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).

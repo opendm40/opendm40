@@ -20,7 +20,7 @@ front end (relay, shunts, MOSFETs, HY3131 nodes) in
 Evidence: untagged statements come from the cited source: the HY3131
 datasheet ([`hycon-hy3131-datasheet-v10.pdf`](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf),
 transcribed in [`emu/hy3131/ref/registers.md`](../../emu/hy3131/ref/registers.md)),
-the stock rows ([`hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h),
+the stock rows (`stock/re/analysis/hy3131_v2_6.h` (in the private analysis repo),
 byte-identical in [`src/hy3131_tables.rs`](../src/hy3131_tables.rs)), the
 code, or a device check with its commit
 ([device-check-2026-10-21.md](device-check-2026-10-21.md)).
@@ -242,7 +242,7 @@ needs 2 discards; the cost with a real current is untested.
   (AD2): the datasheet order plus the AD3-first enable that avoids the
   AD2 / AD3 "beat" (sum(X*Y) above the Cauchy-Schwarz bound when AD2 starts
   first,
-  [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)
+  `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo)
   10).
 * SPHACAL is set by the reactive phase calibration (3.13); the resistive
   method is refused.

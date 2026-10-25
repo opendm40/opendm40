@@ -110,7 +110,7 @@ MEDIUM / SLOW once the dmm.rs window holds 8 slow conversions.
 
 The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
 (~8.6 counts) and 0x15 otherwise, shows every conversion, and does not average
-([acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md) §4).
+(`stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo) §4).
 
 ### 1.2 HY3131 AD1: what the datasheet and app notes say
 
@@ -700,7 +700,7 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
 - UI: the FILT chip and HiRes toggle; the rate chip shows F / M / S.
 - AC+DC keeps its own phase logic (its DC phase at 0x15 is a separate
   decision: [acdc-approaches.md](acdc-approaches.md),
-  [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)).
+  `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo)).
 
 ### 8.3 Device tests before committing (no new hardware needed)
 
@@ -766,7 +766,7 @@ The HYCON documents are in [hw/datasheets/](../../hw/datasheets/README.md):
 - HYCON APN-HY3131001 (SPI timing; nothing on rate): [hycon-hy313x-spi-appnote-apn-hy3131001.pdf](../../hw/datasheets/hycon-hy313x-spi-appnote-apn-hy3131001.pdf).
 - [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md) §1 (OWON HY3131 OSR, after
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
-- [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md) §4,
+- `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo) §4,
   [user-feedback.md](user-feedback.md) (P3, UF-25, UF-30),
   [device-check-2026-10-21.md](device-check-2026-10-21.md) (40 Hz square in DC V).
 

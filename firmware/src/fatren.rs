@@ -3,7 +3,7 @@
 //!
 //! Why: in its install state the FS-loader (0x080a0000) installs the first
 //! dm40*.bin in the root, even an identical image, and deletes it only after
-//! a successful install (`f_unlink`, docs/fsloader-install-trigger.md). A copy
+//! a successful install (`f_unlink`, stock/re/docs/fsloader-install-trigger.md). A copy
 //! left behind would be re-flashed (~480 KB) on its next install-state boot.
 //! Renaming (not deleting) keeps the image: remove the leading underscore.
 //!

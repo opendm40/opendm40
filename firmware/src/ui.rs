@@ -2463,7 +2463,7 @@ fn row_only() -> Option<RowPress> {
 }
 
 /// Pressed stepper key / Start button (already the accent colour): the
-/// stock popups' pressed colour (tools/stock-ui/notes/popups.md).
+/// stock popups' pressed colour (stock/re/stock-ui-notes/popups.md).
 const KEY_PRESSED: Color = 0x7BEF;
 
 /// Settings/menu-page title bar: 40 px, bg 0x2966 (stock gui_v2_6.h:101).

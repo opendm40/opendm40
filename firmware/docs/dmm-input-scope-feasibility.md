@@ -13,9 +13,9 @@ Tags: **INFERRED** = follows from the cited sources but is stated nowhere;
 the HY3131 datasheet ([`hycon-hy3131-datasheet-v10.pdf`](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf),
 transcribed in [`emu/hy3131/ref/registers.md`](../../emu/hy3131/ref/registers.md) and
 [`emu/hy3131/RESEARCH.md`](../../emu/hy3131/RESEARCH.md)), the stock rows
-([`stock/re/analysis/hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h)), the opendm40 source,
+(`stock/re/analysis/hy3131_v2_6.h`, in the private analysis repo), the opendm40 source,
 the GD32F4xx User Manual, or a device measurement with its commit. Short
-names: "acdc" = [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md),
+names: "acdc" = `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo),
 "power doc" = [power-meter-and-misconnect.md](power-meter-and-misconnect.md)
 (sections 1-3: the AD2 / AD3 mux, OP1 / OP2 routing, the row facts),
 "device check" = [device-check-2026-10-21.md](device-check-2026-10-21.md).

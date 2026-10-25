@@ -884,7 +884,7 @@ pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
 }
 
 // ---------------------------------------------------------------------------
-// Stock-exact drawing for the replica scope page (docs/stock-scope-ui.md sec. 0,
+// Stock-exact drawing for the replica scope page (stock/re/docs/stock-scope-ui.md sec. 0,
 // the port of tools/stock-ui/gfx.rs): anti-aliasing OFF (a glyph pixel is ink
 // iff its coverage >= 8 of 15), the stock text placement without our
 // "space >= line_h / 3" rule, rounded boxes and 1 px rings with the stock
@@ -907,7 +907,7 @@ pub const SC_DIGITS: Font = Font(0x0805_C5DC); // 20 px digits (generator / keyp
 
 /// Row j (0 = outermost) of a rounded corner of radius r starts INSET[r][j]
 /// px in (FUN_0801d754 / FUN_0801d0e4 thresholded a > 0x7f; port
-/// tools/stock-ui/notes/tools/rounded_mask.py, radius 1..10).
+/// stock/re/stock-ui-notes/tools/rounded_mask.py, radius 1..10).
 const INSET: [[u8; 10]; 11] = [
     [0; 10],
     [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],

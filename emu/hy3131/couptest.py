@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""opendm40 AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, docs/history/acdc-stock-vs-opendm40.md
+"""opendm40 AUTO coupling of V / A (firmware/src/dmm.rs AUTO_*, stock/re/docs/history/acdc-stock-vs-opendm40.md
 section 11) in the emulator: opendm40 native + the HY3131 model, a timed
 connection script per scenario (DC -> AC -> mixed signals, both ways through
 the hysteresis band), SCPI over USB/IP (setup, then DBG:PING? uptime,

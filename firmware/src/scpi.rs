@@ -610,7 +610,7 @@ pub enum Log {
 ///   DBG:HWTRIG:STAT?        hits,misses,delta_last,delta_min,delta_max,mean
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
-///   DBG:GENUINE?            device check (src/genuine.rs, docs/genuine-check.md):
+///   DBG:GENUINE?            device check (src/genuine.rs, stock/re/docs/genuine-check.md):
 ///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
 ///                           each, memory order); read-only
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
@@ -2319,7 +2319,7 @@ impl Scpi {
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
-                        // Stock device-authenticity check, read-only (docs/genuine-check.md).
+                        // Stock device-authenticity check, read-only (stock/re/docs/genuine-check.md).
                         b"GENUINE" => {
                             let i = crate::genuine::inspect();
                             self.len = 0;

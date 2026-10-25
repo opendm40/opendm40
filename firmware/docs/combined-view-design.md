@@ -13,7 +13,7 @@ interaction, the combined-view branch of the gesture handler),
 [`src/ui.rs`](../src/ui.rs) (`strip_data`, `func_band`, `func_band_hit`),
 [`src/app.rs`](../src/app.rs) (`band_open` / `band_close`, `sp_throttled`).
 The scope page itself follows the stock spec,
-[stock-scope-ui.md](stock-scope-ui.md). Host checks:
+`stock/re/docs/stock-scope-ui.md` (in the private analysis repo). Host checks:
 [`tools/ui-render`](../tools/ui-render/main.rs) (layout rules over every
 strip case) and [`tools/touch-test`](../tools/touch-test/main.rs) (hit maps).
 Reference mockups `mk01-combined` / `mk02-combined-hold-stop` are scenes of
@@ -100,7 +100,7 @@ view paints at most one frame per 40 ms (`COMBO_FRAME_MS`, 25 fps,
 
 ### 6.1 One finger
 
-The stock model ([stock-scope-ui.md](stock-scope-ui.md) §10): a press
+The stock model (`stock/re/docs/stock-scope-ui.md` (in the private analysis repo) §10): a press
 selects the marker under the finger (32x32 zones, the stock search order),
 then each move event moves the selected level item by dy if |dx| <= |dy|,
 else the selected time item by dx. opendm40 locks a drag that starts on a
