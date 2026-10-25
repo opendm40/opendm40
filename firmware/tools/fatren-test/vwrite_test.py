@@ -29,7 +29,7 @@ Scenarios:
   replay    captured kernel sequences (usbip_msc.py --capture): the same
             accept / refuse answers, the final checks of the capture.
 """
-import os, random, shutil, struct, subprocess, sys
+import concurrent.futures, os, random, shutil, struct, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vserve import VServe, diff, sectors, Geo, SECTOR, W_OK, W_REFUSED, W_BUSY
 
@@ -38,6 +38,9 @@ CAPS = sys.argv[9:]
 os.environ['MTOOLS_SKIP_CHECK'] = '1'
 os.makedirs(WORK, exist_ok=True)
 NOK = 0
+# Independent cut points run at once (trash session): FATREN_JOBS, default
+# the CPU count, at most 4.
+PAR = int(os.environ.get('FATREN_JOBS') or min(4, os.cpu_count() or 1))
 
 
 def ok(msg):
@@ -691,6 +694,7 @@ ws = diff(base, host)
 # update files' delete, the FAT chain, the root entry), every 25th of the
 # staging before it.
 pts = sorted(set(range(0, nw, 25)) | set(range(max(0, nw - 40), nw)))
+T0 = tree(SPI0)
 for k in pts:
     vv = VServe(T, spi_copy('cut.spi'), FLASH, SRC, cut=k)
     vv.lock(True)
@@ -708,8 +712,7 @@ for k in pts:
         if t['::/DM40FW.BIN'] != hashlib.md5(open(FW1, 'rb').read()).hexdigest():
             fail('cut %d: a partial DM40FW.BIN' % k)
     t.pop('::/DM40FW.BIN', None)
-    t0 = tree(SPI0)
-    if t != t0:
+    if t != T0:
         fail('cut %d: other files changed' % k)
     vv.close()
 ok('%d of %d cut points: fsck at worst lost clusters / FAT 1 ahead, DM40FW.BIN absent or whole, every other file intact' % (len(pts), nw))
@@ -722,8 +725,8 @@ v.close()
 for op in tops:
     run(op[0], '-i', host, *op[1:])
 tw = diff(base, host)
-def trash_session(cut):
-    vv = VServe(T, spi_copy('tcut.spi'), FLASH, SRC, cut=cut)
+def trash_session(cut, name='tcut.spi'):
+    vv = VServe(T, spi_copy(name), FLASH, SRC, cut=cut)
     vv.lock(True)
     vv.idle(300)
     for lba, x in tw:
@@ -738,8 +741,12 @@ def trash_session(cut):
     return sp, n
 sp, nt = trash_session(None)
 same_tree(SPI0, sp, 'trash session', gone=['::/SHOTS/S001.BMP'])
-for k in range(nt):
-    sp, _ = trash_session(k)
+T0 = tree(SPI0)
+T0.pop('::/SHOTS/S001.BMP', None)
+def trash_cut(k):
+    # Own file names per cut point: the cut points run in parallel.
+    name = 'tcut%d.spi' % k
+    sp, _ = trash_session(k, name)
     fsck_cut(sp, 'trash cut %d' % k)
     shutil.copy(sp, sp + '.boot')
     vb = VServe(T, sp + '.boot', FLASH, SRC)
@@ -747,13 +754,25 @@ for k in range(nt):
     sb = vb.save()
     vb.close()
     fsck_cut(sb, 'trash cut %d + boot' % k)
-    t, t0 = tree(sb), tree(SPI0)
+    t = tree(sb)
     if any(p.startswith('::/_VHOST') for p in t):
         fail('trash cut %d: a temp file survived the next boot' % k)
     t.pop('::/SHOTS/S001.BMP', None)
-    t0.pop('::/SHOTS/S001.BMP', None)
-    if t != t0:
+    if t != T0:
         fail('trash cut %d: other files changed' % k)
+    for f in (name, name + '.out', name + '.out.boot', name + '.out.boot.out'):
+        try:
+            os.remove(os.path.join(WORK, f))
+        except FileNotFoundError:
+            pass
+# Every cut point, PAR at a time (each one's work is in its vserve child);
+# a fail() in one (SystemExit) ends the run at its result().
+ex = concurrent.futures.ThreadPoolExecutor(PAR)
+try:
+    for r in [ex.submit(trash_cut, k) for k in range(nt)]:
+        r.result()
+finally:
+    ex.shutdown(cancel_futures=True)
 ok('%d cut points of a trash session: fsck at worst lost clusters / FAT 1 ahead; after the next boot no temp file is left, S001 deleted or whole, nothing else changed' % nt)
 
 for cap in CAPS:
