@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+## v0.1.0-pre2 (2026-10-25)
+
 ### New
 
 - Touch calibration: **Calibrate** on the touch test page (Settings > More
