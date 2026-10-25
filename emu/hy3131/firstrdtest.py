@@ -35,6 +35,12 @@ the switch meets the old conversion at other phases):
   acv-auto-up  the same up: 8 V AC on CONF:VOLT:AC 6 -> 60 V
   aca-auto-dn  0.8 A AC: CONF:CURR:AC 10, CURR:AC:RANG:AUTO ON (-> 6 A)
   acv-entry    1 V AC: CONF:VOLT:DC 6 -> CONF:VOLT:AC: every F 1 V +-0.5 %
+  acv-entry-sq the same on the device's 0 / 9.5 V 50 Hz square (AC part 4.776 V) with
+               the model's acarrive 160 ms (the last RMS block before the 300 ms
+               settle half over the AC's arrival): every F 4.776 V +-0.5 % (f4cd2cd:
+               the block latched during the settle seeded the filter, 0.707 x; device
+               489f956 3.39-3.41 V for 4.81 V)
+  acv-entry-arr  the same on 1 V 50 Hz (sine)
 
 dcv-acv-med, dcv-res-slow and res-med also check the time between two new
 readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
@@ -60,7 +66,7 @@ BOOT_OFS = 0.906
 T0 = 8.0
 REPS = 4
 W = 44.0
-OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0'
+OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0;acarrive:0'
 R22 = 'r22part:0.4;r22off:2400000;r22n:1;r22win:1000'
 
 # name, input, rate, (pre command, s)..., switch command, check (kind, limit), conf prefix that must stay
@@ -89,6 +95,12 @@ SCEN = [
     ('aca-auto-dn', 'open;isrc:0,ac=0.8,f=50', 'MED', [('CONF:CURR:AC 10', 3.0)], 'CURR:AC:RANG:AUTO ON',
      ('rel', 0.8, 0.005), 'CURR:AC +'),
     ('acv-entry', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
+     ('rel', 1.0, 0.005), 'VOLT:AC'),
+    # Plain AC entry: the RMS block the chip latched during the settle (its window partly before
+    # the AC reached the node, the model's acarrive) must not be a reading (device 489f956).
+    ('acv-entry-sq', 'open;acarrive:160;vsrc:4.776,ac=4.776,f=50,shape=square', 'MED', [('CONF:VOLT:DC 6', 3.0)],
+     'CONF:VOLT:AC', ('rel', 4.776, 0.005), 'VOLT:AC'),
+    ('acv-entry-arr', 'open;acarrive:160;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
      ('rel', 1.0, 0.005), 'VOLT:AC'),
 ]
 

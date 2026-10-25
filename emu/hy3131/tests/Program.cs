@@ -100,6 +100,7 @@ namespace Hy3131Tests
             TimedSpi();
             Rail();
             Ad1Mix();
+            Knobs489();
             Console.WriteLine("{0} passed, {1} failed", passes, failures);
             return failures == 0 ? 0 : 1;
         }
@@ -1568,6 +1569,33 @@ namespace Hy3131Tests
                 var b = ReadAfter(m, 0x18, 1);
                 Near(Lpf(b) * 1.25 / 262144 * 100, 0.0, 0.1, "AC+DC: LPF < 0.1 V at the first AC result after the DC phase");
                 Near(SqrtRms(b) * 1.25 / 262144 * 100, 3.4, 0.02, "  AC part stable");
+            }
+        }
+
+        /// Device 489f956 knobs: acarrive (the AC V node's AC after the entry).
+        private static void Knobs489()
+        {
+            Console.WriteLine("489f956 knobs");
+            {
+                // acarrive: DC V -> AC V; against the same run without it, the RMS blocks before the
+                // arrival read nothing, the one over it a part, the later ones the same
+                var runs = new System.Collections.Generic.List<double>[2];
+                for(var k = 0; k < 2; k++)
+                {
+                    var m = NewChip();
+                    m.Chip.SetInput("acv:1.0@50;acarrive:" + (k == 0 ? "0" : "160"));
+                    m.Configure(F1R1, 1);
+                    m.Advance(0.5);
+                    m.Configure(F0R1, 0);
+                    var t0 = m.Now;
+                    runs[k] = new System.Collections.Generic.List<double>();
+                    while(m.Now < t0 + 0.6) runs[k].Add(SqrtRms(ReadAfter(m, 0x10, 1)));
+                }
+                var q = new System.Collections.Generic.List<double>();
+                for(var i = 0; i < Math.Min(runs[0].Count, runs[1].Count); i++) q.Add(runs[1][i] / runs[0][i]);
+                var parts = q.FindAll(x => x > 0.05 && x < 0.95).Count;
+                Check(q[0] < 0.05 && parts == 1 && Math.Abs(q[q.Count - 1] - 1) < 1e-6, "acarrive:160: one RMS block over the arrival, partial",
+                      string.Join(" ", q.ConvertAll(x => x.ToString("F3"))));
             }
         }
 

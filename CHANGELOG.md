@@ -54,6 +54,9 @@ section named after the tag as the release notes; how to cut a release:
   (`VOLT:RES?` gives `+9.999999E-06`).
 - `MMEM`: a directory prefix must be the file's own directory.
 - First readings after a function change: every entry is checked; AC A too.
+  AC V / mV / A: the first reading after the entry no longer comes from a
+  conversion that began before the AC input was there (DC V -> AC V read
+  1/√2 of a square), nor 0 or 1 % low after an autorange step.
 - Logger: one 76.8 kS/s nominal rate; no hole in the panel at the 76.8 kS/s
   start.
 - The 6 M ohm test-current label is cleared on 60 M.
