@@ -1768,7 +1768,7 @@ fn main() {
         uc.extend((0..20).map(|_| (444.44 + noise(5) as f32 * 0.01, 2, "mV")));
         runs.push(("unit", uc));
         runs.push(("dec", (0..340).map(|i| (0.5 + noise(2) as f32 * 1e-4, if i < 325 { 4 } else { 3 }, "V")).collect()));
-        let rc = ui::RateChip { rate: 1, period_ms: 106, applies: true };
+        let rc = ui::RateChip { rate: 1, period_ms: 200, applies: true };
         for (name, vals) in &runs {
             let mut cc = ui::ChartCache::new();
             let mut pts: Vec<f32> = vec![];
@@ -2245,7 +2245,33 @@ fn main() {
     ui::main_menu(ui::view_name(ui::View::DmmScope));
     save(&out, "m04-main-menu");
 
-    // 6c. Toasts (dialog.rs) over the DMM page: the longest texts.
+    // 6c. Toasts (dialog.rs) over the DMM page: the longest texts. The tap
+    // on the DMM value (ui::rate_toast): every rate, rated function and
+    // range fits the toast and the logger panel's toast; the widest one and
+    // FAST's go through the checks below.
+    let (rate_widest, rate_fast) = {
+        let lim = dialog::TOAST.2.min(dialog::LOG_TOAST.2) as i16 - 8;
+        let mut all = Vec::new();
+        for r in dmm::Rate::ALL {
+            for m in [1u8, 3, 7, 8, 9, 10] {
+                for g in -1i8..=7 {
+                    let (n, ext) = dmm::rate_window(r, false, m, g);
+                    let mut b = [0u8; 40];
+                    let t = ui::rate_toast(&mut b, r as u8, dmm::rate_period(r, m), n, ext).to_string();
+                    let w = stockfont::text_width(stockfont::ASCII26, &t, 2);
+                    ck.cases += 1;
+                    if w > lim {
+                        ck.fail("toast/rate-width", format!("{t:?} {w} px > {lim}"));
+                    }
+                    all.push((w, t));
+                }
+            }
+        }
+        let widest = all.iter().max_by_key(|(w, _)| *w).unwrap().1.clone();
+        let fast = all[0..].iter().find(|(_, t)| t.starts_with("FAST")).unwrap().1.clone();
+        println!("rate toast: widest {widest:?}, {}", all.iter().map(|(_, t)| t.as_str()).collect::<std::collections::BTreeSet<_>>().into_iter().collect::<Vec<_>>().join(" | "));
+        (&*Box::leak(widest.into_boxed_str()), &*Box::leak(fast.into_boxed_str()))
+    };
     let toasts = [
         ("Disk in use by PC - eject first", false),
         ("Saved LOG000.DLG", true),
@@ -2256,8 +2282,8 @@ fn main() {
         (dialog::AUTO_DC, true),
         ("Auto power-off in 30 s", false),
         // Tap on the DMM value (resolution / rate), widest variants.
-        ("SLOW 600000 counts / 12.8 s", true),
-        ("FAST 60000 counts / 10/s", true),
+        (rate_widest, true),
+        (rate_fast, true),
         ("Fixed rate in this function", false),
         // Wrong-connection alerts (sentinel.rs).
         (sentinel::Alert::AJack.toast(), false),
@@ -2529,7 +2555,7 @@ fn main() {
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
         let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
-        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 106, applies: true });
+        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
         host::reset(0);
         let (r, l) = find("acdc_600mv");

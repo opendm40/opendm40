@@ -288,6 +288,27 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
     (n > 1).then_some((n, thr, ext))
 }
 
+/// What `rate` gives in function `mode` / `range`: (code window in
+/// conversions, 1 = none; the +1 digit is shown). See the FR-05 and +1
+/// digit tables: FAST never averages; MEDIUM / SLOW average 8..32 steady
+/// conversions (`rate_period` each) where the table says so.
+pub fn rate_window(rate: Rate, acdc: bool, mode: u8, range: i8) -> (usize, bool) {
+    avg_cfg(rate, acdc, mode, range).map_or((1, false), |(n, _, ext)| (n, ext))
+}
+
+/// AD1 conversion period of `rate` in function `mode`, ms: one reading per
+/// conversion (FR-05 table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm
+/// FAST 200, MED and SLOW 400).
+pub fn rate_period(rate: Rate, mode: u8) -> u32 {
+    let dc = matches!(mode, 1 | 3 | 7..=9);
+    match rate {
+        Rate::Fast if dc => 100,
+        Rate::Fast => 200,
+        Rate::Medium if dc => 200,
+        _ => 400,
+    }
+}
+
 /// The extra digit is real: an ext-capable range with at least AVG_FULL
 /// slow conversions in the window (FAST never averages, see `avg_cfg`).
 fn ext_ok(ext: bool, n: u8) -> bool {
@@ -1795,23 +1816,15 @@ impl Dmm {
 
     /// What `rate` gives in the current function and range: (code window
     /// in conversions, 1 = none; the +1 digit is shown). See the FR-05 and
-    /// +1 digit tables: FAST never averages; MEDIUM / SLOW average 8..32
-    /// steady OSR-32768 conversions (400 ms each) where the table says so.
+    /// +1 digit tables (`rate_window`).
     pub fn rate_info(&self, rate: Rate) -> (usize, bool) {
-        avg_cfg(rate, self.acdc, self.mode, self.range).map_or((1, false), |(n, _, ext)| (n, ext))
+        rate_window(rate, self.acdc, self.mode, self.range)
     }
 
-    /// AD1 conversion period of `rate` in the current function, ms (FR-05
-    /// table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm FAST 200, MED
-    /// and SLOW 400).
+    /// AD1 conversion period of `rate` in the current function, ms
+    /// (`rate_period`).
     pub fn rate_period_ms(&self, rate: Rate) -> u32 {
-        let dc = matches!(self.mode, 1 | 3 | 7..=9);
-        match rate {
-            Rate::Fast if dc => 100,
-            Rate::Fast => 200,
-            Rate::Medium if dc => 200,
-            _ => 400,
-        }
+        rate_period(rate, self.mode)
     }
 
     /// The rate setting changes something in the current function (DC V /

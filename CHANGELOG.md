@@ -7,6 +7,16 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Multimeter: the message after a tap on the reading gives the readings per
+  second as the rate chip shows them and the averaging time of the extra
+  digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
+  1.6 s"). The manual's pictures showed an outdated message and rate chip
+  ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
+  6.4 s for the extra digit in Ω; it shows after 3.2 s
+  ([manual](docs/manual/README.md#rate-fast-med-slow)).
+
 ## v0.2.0 (2026-10-25)
 
 ### New

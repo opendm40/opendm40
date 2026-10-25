@@ -184,6 +184,9 @@ SECTIONS
         *(.text.*8opendm402ui11record_page*);
         *(.text.*8opendm403app*3App11record_page*);
         *(.text.*8opendm403app*3App9fast_rate*);
+        /* A tap on the DMM value: the rate step's toast text (the rate
+         * chip's rps_text stays in B, drawn every chart pass). */
+        *(.text.*8opendm402ui10rate_toast*);
         *(.text.*8opendm403app*3App15record_fast_tap*);
         *(.text.*8opendm403app*3App16record_page_fast*);
         *(.text.*8opendm403app*3App10fast_ended*);
