@@ -2063,6 +2063,10 @@ impl App {
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
+        // v11: the touch calibration (touchcal.rs; 0 = none).
+        for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
+            *w = c as u32;
+        }
         p
     }
 
@@ -2073,8 +2077,9 @@ impl App {
     /// the limits, rate and smoothing, the scope's acquisition, trigger,
     /// math and measurements, the power meter and the Record page. Otherwise
     /// only the preferences are restored (display, sound, power, BT, alerts,
-    /// units, sensor, scope look and touch, the generator's setup) and the
-    /// rest keeps its defaults, as the stock after a power-on.
+    /// units, sensor, scope look and touch, the touch calibration, the
+    /// generator's setup) and the rest keeps its defaults, as the stock
+    /// after a power-on.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.dim_idx = (p[0] & 3) as usize;
@@ -2158,6 +2163,13 @@ impl App {
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
         self.gen.s = g.normalised();
+        // v11: the touch calibration, a preference (0 = none; one that
+        // fails the checks reads as none).
+        let mut tc = [0i32; 6];
+        for (c, w) in tc.iter_mut().zip(&p[crate::persist::W_TOUCH_CAL..]) {
+            *c = *w as i32;
+        }
+        app_touchtest::tc_restore(tc);
         if !same_session {
             return;
         }
@@ -4513,6 +4525,13 @@ impl App {
                 true
             }
             C::DbgTouchTest(on) => self.tt_scpi(clk, on, out),
+            C::DbgTouchCal(op) => {
+                // A change redraws the touch test page (its Cal lines).
+                if op != 0 && self.view == View::TouchTest {
+                    self.redraw = true;
+                }
+                app_touchtest::tc_scpi(op, out)
+            }
             C::DbgView => {
                 // <view>,<settings page 1..3>,<wave view on> (emulator
                 // tests: where a DBG:KEY / DBG:TAP landed).
