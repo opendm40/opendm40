@@ -690,6 +690,9 @@ pub enum Dbg {
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
+    /// DBG:FAST?: FR-05 FAST's offset refreshes used, rejected, and the
+    /// VOS (AD1 codes) of the current path (dmm.rs `fast_info`).
+    Fast,
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -2363,6 +2366,7 @@ impl Scpi {
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
+                        b"FAST" if query => Dbg::Fast,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
                         // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader

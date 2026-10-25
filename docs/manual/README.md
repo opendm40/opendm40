@@ -758,18 +758,33 @@ The rate sets the speed and the resolution in DC V, DC mV, DC A and Ω:
 
 | Rate | What you get |
 |---|---|
-| **FAST** | 10 readings/s, 60000 counts. |
-| **MED** (default) | 10 readings/s while the input changes, 2.5/s once it is steady. On suitable ranges, an average over 3.2 s gives an extra digit (600000 counts). |
-| **SLOW** | As MED, with a 6.4 s average, on every DC V, DC A and Ω range (the extra digit only on the ranges listed below). |
+| **FAST** | 10 readings/s, 60000 counts. In Ω: 5 readings/s. |
+| **MED** (default) | 5 readings/s (Ω: 2.5/s). On suitable ranges, an average over 1.6 s gives an extra digit (600000 counts). |
+| **SLOW** | 2.5 readings/s, with a 6.4 s average on every DC V, DC A and Ω range (the extra digit only on the ranges listed below). |
 
-In Ω from 60 Ω to 60 kΩ the averages are twice as long (MED 6.4 s, SLOW
+Every rate rejects 50 Hz and 60 Hz mains hum on a DC reading: each
+conversion integrates the input over 100 ms (FAST, MED) or 200 ms (SLOW),
+a whole number of periods of both.
+
+In DC V, DC mV and DC A, FAST runs the converter without its built-in
+offset cancellation (the chopper), which is what makes it twice as fast as
+MED. The meter measures and subtracts that offset itself: 2 s after a
+function or range change and then every 30 s, it reads the input once with
+the opposite polarity. Each time two readings are skipped (a 0.2 s pause).
+It takes the measurement only while the input is steady, and tries again
+5 s later otherwise. Until the first measurement on a range, FAST uses the
+last offset it measured on another range, so a reading in those first 2 s
+can be a little off. A FAST reading is a little noisier than a MED one
+(more low-frequency noise); for the extra digit use MED or SLOW.
+
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 12.8 s). After a step of the input or a range change the average restarts,
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
   measured readings per second. Tap it: FAST → MED → SLOW → FAST.
 - **Tap the reading** to step the rate the same way; a message says what you
-  get, for example **MED 600000 counts / 3.2 s**.
+  get, for example **MED 600000 counts / 1.6 s**.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
@@ -782,7 +797,8 @@ so a change shows at once.
 
 The extra digit appears smaller, after the main digits, on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
-3.2 s (MED) after the input settles, about 5-6 s after a function change.
+1.6 s (MED; Ω 6.4 s) after the input settles, a little later after a
+function change.
 
 #### Smoothing
 

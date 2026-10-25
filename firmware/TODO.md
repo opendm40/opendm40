@@ -18,8 +18,27 @@ Additional requirements:
 
 What waits for the owner; each line links to the material.
 
-- [ ] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
+- [x] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
       device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
+      **Owner 2026-10-25: FAST unchopped with a firmware offset, MED / SLOW chopped, all three rejecting 50 / 60 Hz**
+      (the "bug fixes only" rule does not apply to this one). Done on branch feat/rate-unchopped-fast:
+      [fastvos.rs](src/fastvos.rs), dmm.rs FR-05 (the rate's R22 in the row), survey §8.4, the manual;
+      emu/hy3131/fastratetest.py.
+      - [x] Device 1184b096: SENS:RATE:PER? 0.10 / 0.20 / 0.40 s (FAST / MED / SLOW), ohm 0.2 / 0.4 / 0.4 s;
+            0 V on 6 V FAST - MED +24 uV; ohm 300 ohm FAST = MED within 0.6 mohm.
+      - [x] Device 1184b096: VOS per path differs (6 V 13 235, 60 V+ ~12 600, A 6 A 12 865: survey §8.4):
+            per-path defaults in fastvos VOS_DEFAULT (60 mV not measured).
+      - [x] Device 1184b096: the -95 ppm gain was wrong (FAST - MED -87 / -90 ppm with it, alternating blocks):
+            GAIN = 1. The refresh gate rejected 20 of 45 on the calibrator's noisy 1 V..24 V output: now the
+            00-mean shift against the groups' scatter.
+      - [x] Device c8ce8def (rebased): the gate change and the defaults: 1 V calibrator output, 65 s FAST: 2 used,
+            0 rejected; 10 V on 60 / 600 V, FAST in the first 2 s after the range change +0.3 / +0.4 counts from MED,
+            after the refresh -0.3 / +0.1.
+      - [ ] 60 mV: the refresh is still rejected on an open input (the default VOS of 600 mV stays in use):
+            why (its noise in codes, ~0.017 uV per code)?
+      - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
+      - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
+      - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
