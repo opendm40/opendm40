@@ -3300,7 +3300,12 @@ impl App {
             };
             manual(i)
         };
+        // Held into AUTO: the placeholder (AUTO, dashes) at once, as the
+        // range page's AUTO item and RES:RANG:AUTO do; before, the last
+        // manual reading stayed with MANU until the next conversion.
+        let was = self.dmm.is_auto();
         self.dmm.set_range(clk, item);
+        self.auto_entered(was);
         self.dmm_view.invalidate();
         self.redraw |= matches!(self.view, View::Range | View::Limits);
     }
