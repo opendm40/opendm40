@@ -3984,6 +3984,8 @@ Emulator (emu/):
       (`Meter::set_hold` does not touch `ahold`). Power meter, capacitance, continuity / diode, Hz / temperature,
       scope, inrush, generator: as before. The short press acts on the release now, not at the key-down (so a
       long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
+      The test's two DBG:READout? checks were stale (4 fields, HOLD read from the last one) after the range field was
+      added: now 5 fields, HOLD from the fourth; the firmware releases HOLD on a short press (PASS).
 - [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
