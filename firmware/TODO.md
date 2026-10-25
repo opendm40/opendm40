@@ -4072,12 +4072,15 @@ Emulator (emu/):
       `low-0.5` .. `low-50`.
 - [ ] Unknown (device data decides): that CTA stands still after the gate's end on the chip (datasheet: "then it
       will stop counting"; the emulator models it so). If it does not, every gate times out: Hz reads 0.000 Hz at any
-      frequency (step 2 below shows it at once).
+      frequency (step 1 below shows it at once). Inferred, not measured: the gate opens on an input edge (the 10 Hz
+      readings of the recording are within 27 ppm; a gate from the restart would be off by up to a period); a chip
+      that misses the opening edge needs a period more, which the 3.5-period limit covers above ~0.7 Hz.
 - [ ] Device check (5 min, MMB3.0 frequency output on V-COM): (1) Hz function, 10 Hz: a reading within 1 s, new values
       every ~0.35 s, the reading shows the small digit (10.000x Hz). (2) 50 Hz, 1 kHz, 10 kHz as in
       [docs/data/freq-steps-2026-10-25.md](docs/data/freq-steps-2026-10-25.md): the same values as that recording
       (50.000 Hz without the small digit, 1.0000x kHz with it). (3) 5 Hz: a reading (~5.0000x Hz) within ~2 s, a new
       value every ~0.4 s or faster. (4) 2 Hz: a reading within ~3 s, new values about once a second; duty ~50 %.
-      (5) Output off / leads apart: 0.000 Hz within ~3 s. (6) AC V with 2 Hz on the output (if the MMB3.0 gives an AC
+      (5) Output off / leads apart while 10 Hz shows: 0.000 Hz within ~1 s; Hz entered with nothing connected: 0.000 Hz
+      after ~3.3 s ("--" before). (6) AC V with 2 Hz on the output (if the MMB3.0 gives an AC
       level at 2 Hz): the frequency above the reading reads ~2 Hz. (7) Optionally a CSV recording at 2 / 5 / 10 Hz
       (Log, Hz) for docs/data.
