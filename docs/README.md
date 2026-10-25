@@ -78,10 +78,8 @@ All documentation of opendm40, by reader. Start at the
 
 - [device-check-2026-10-21.md](history/device-check-2026-10-21.md):
   the device test log, per build (archived).
-- Measurements against a calibrator, with the CSV files:
-  [DC V](../firmware/docs/data/dcv-steps-2026-10-25.md),
-  [DC A](../firmware/docs/data/dca-steps-2026-10-25.md),
-  [frequency](../firmware/docs/data/freq-steps-2026-10-25.md).
+- [Accuracy against calibrators](../firmware/docs/data/README.md): DC V, DC A,
+  frequency and resistance, with the CSV files.
 
 ## Hardware
 

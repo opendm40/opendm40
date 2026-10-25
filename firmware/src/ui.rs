@@ -1796,6 +1796,43 @@ pub fn rps_text(buf: &mut [u8; 16], period_ms: u32) -> &str {
     core::str::from_utf8(&buf[..n + 2]).unwrap_or("")
 }
 
+/// The toast of a tap on the DMM value (App::resolution_cycle): the rate
+/// `rate` (dmm::Rate as u8) with its readings/s as the rate chip writes them
+/// (`rps_text` of the conversion period `period_ms`, dmm::rate_period), and
+/// what the code window of `n` conversions gives (dmm::rate_window):
+/// "FAST 10/s, 60000 counts"; with the extra digit (`ext`) the time until
+/// it shows (dmm::AVG_FULL conversions in the window), "MED 5.0/s, +1 digit
+/// in 1.6 s"; else the window, "SLOW 2.5/s, 6.4 s average".
+#[inline(never)] // .cold (link-native.x): a tap on the DMM value
+pub fn rate_toast(buf: &mut [u8; 40], rate: u8, period_ms: u32, n: usize, ext: bool) -> &str {
+    let mut k = 0;
+    let mut put = |t: &str| {
+        let m = t.len().min(40 - k);
+        buf[k..k + m].copy_from_slice(&t.as_bytes()[..m]);
+        k += m;
+    };
+    put(crate::dmm::RATE_NAMES.get(rate as usize).copied().unwrap_or(""));
+    put(" ");
+    let mut t = [0u8; 16];
+    put(rps_text(&mut t, period_ms));
+    if n > 1 {
+        let w = if ext { n.min(crate::dmm::AVG_FULL as usize) } else { n };
+        let s = crate::dmm::format(&mut t, (w as u32 * period_ms) as f32 / 1000.0, 1);
+        if ext {
+            put(", +1 digit in ");
+            put(s);
+            put(" s");
+        } else {
+            put(", ");
+            put(s);
+            put(" s average");
+        }
+    } else {
+        put(", 60000 counts");
+    }
+    core::str::from_utf8(&buf[..k]).unwrap_or("")
+}
+
 /// Right column of the DMM chart (FR-02): MAX / AVG above the REL box, MIN
 /// and the time since the statistics started below it (display units).
 /// `rec`: a recording session is on (no idle shutdown): "REC" in orange.
@@ -1833,6 +1870,26 @@ impl ChartCache {
     pub fn invalidate(&mut self) {
         *self = ChartCache::new();
     }
+}
+
+/// The rate chip (`chart` draws it with every chart point; App::
+/// resolution_cycle at once, before its toast: the page under a toast is
+/// not drawn until the toast goes, and the chip is outside the toast).
+/// Repainted only when what it shows changes (`RateChip::shown`).
+pub fn rate_chip(c: &mut ChartCache, rc: RateChip) {
+    if c.rchip == Some(rc.shown()) {
+        return;
+    }
+    c.rchip = Some(rc.shown());
+    // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
+    // where the rate setting changes nothing (AC, Hz, cap, temperature..).
+    let mut rb = [0u8; 16];
+    let mut b = [0u8; 24];
+    let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
+    let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
+    let r = rect(4, chart_geom().rate, 73, RATE_CHIP_H);
+    sf::rbox(r, 4, BTN, BG);
+    sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
 }
 
 /// `side` None: the right column is not touched (the power meter draws its
@@ -1948,18 +2005,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
-    if c.rchip != Some(rc.shown()) {
-        c.rchip = Some(rc.shown());
-        // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
-        // where the rate setting changes nothing (AC, Hz, cap, temperature..).
-        let mut rb = [0u8; 16];
-        let mut b = [0u8; 24];
-        let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
-        let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
-        let r = rect(4, g.rate, 73, RATE_CHIP_H);
-        sf::rbox(r, 4, BTN, BG);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
-    }
+    rate_chip(c, rc);
     let Some(side) = side else { return };
     // Right column (x 405..475, the stock REL box rows 205..242 kept as the
     // tap target): MAX and AVG above the REL box, MIN and the session time

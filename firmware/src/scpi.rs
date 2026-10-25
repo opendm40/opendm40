@@ -689,8 +689,9 @@ pub enum Dbg {
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
-    /// DBG:FAST?: FR-05 FAST's offset refreshes used, rejected, and the
-    /// VOS (AD1 codes) of the current path (dmm.rs `fast_info`).
+    /// DBG:FAST?: FR-05 FAST's offset refreshes used, rejected, the VOS
+    /// (AD1 codes) of the current path and the AD1 conversion period in ms
+    /// (dmm.rs `fast_info`).
     Fast,
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
