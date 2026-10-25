@@ -54,6 +54,15 @@ What waits for the owner; each line links to the material.
       calibrator's off state reads ~50 MΩ, not open). PASS. Open: on 60 Ω the readings were 8.88 Ω for 10 Ω and
       48.13 Ω for 50 Ω (100 Ω read 100.13, 300 Ω 302.25); whether that is the 60 Ω row's zero / the leads or the
       calibrator's low-resistance accuracy is unknown (a 4-wire reference or REL on shorted leads decides).
+- [ ] 60 Ω range gain (fix/ohm60-gain): device 2026-10-25, manual ranges, mean of 5 READ?: 10 / 20 / 50 Ω read
+      0.9730 / 0.9734 / 0.9738 x the 600 Ω range. Cause: r0's calibration slot 0x124[0] is the unused 1.005 and
+      the row reads 2.9 % below the stock scale (Rref 0.1 k) for a reason not known (the OP1 x10 pairs of the
+      record point the other way; [dmm.rs](src/dmm.rs) `OHM_R0_K`). Fix: r0 gain = r1's calibration gain x 1.0291
+      (`ohm_row_gain`), fitted to those same points, so the check below confirms the fit, not an independent
+      calibration; another meter may need its own factor. Emulator: the r0 source models the same factor
+      ([HY3131.cs](../emu/hy3131/HY3131.cs) `OhmR0K`), [resautotest.py](../emu/hy3131/resautotest.py) checks
+      30 / 59.5 Ω on 60 Ω within 0.3 %. Device check: the calibrator's resistance output on V-COM, 10 / 20 / 50 Ω,
+      manual 60 Ω and manual 600 Ω, mean of 5 READ? each: the ratio 60 / 600 within 1 +- 0.003 for each value.
 - [x] Touch (device 4ea9518 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
       mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
       -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),

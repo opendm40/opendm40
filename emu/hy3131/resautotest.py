@@ -28,6 +28,9 @@ The 60 ohm range in AUTO (owner 2026-10-25; dmm.rs `ohm_auto_floor`): a row's op
   ol      one of the last five polls shows a final OL;
   on_at   the same, s seconds after the AUTO command (AUTO already on 60 ohm: to 600 ohm);
   steps   with `later` / `on_at`: the most range changes after the first final readout;
+  tol     the first final AUTO readout's tolerance (default 0.01; 0.003 on the 60 ohm range:
+          its gain is dmm.rs OHM_R0_K, the emulator models the device's r0 the same way, before
+          the fix 60 ohm read 2.6 % low);
   late    the AUTO command takes this long (s; a held AUTO key, `DBG:KEY 2,1200`): the AUTO
           status bar is checked from then on.
 Rows: 30 ohm from DC V / manual 600 / manual 60 lands on 60 ohm; 300 ohm from manual 60 on
@@ -64,13 +67,13 @@ SCEN = [
     ('sink-600', SINK, 'CONF:RES 600', AUTO, None, 6.0),
     ('sink-dcv', SINK, None, AUTO, None, 6.0),
     ('open-600', 'open', 'CONF:RES 600', AUTO, None, 6.0),
-    ('r30-dcv', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 60}),
-    ('r30-600', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 60}),
-    ('r30-60', 'ohm:30', 'CONF:RES 60', AUTO, 30.0, 3.0, {'range': 60}),
+    ('r30-dcv', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 60, 'tol': 0.003}),
+    ('r30-600', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 60, 'tol': 0.003}),
+    ('r30-60', 'ohm:30', 'CONF:RES 60', AUTO, 30.0, 3.0, {'range': 60, 'tol': 0.003}),
     ('r30-60-key', 'ohm:30', 'CONF:RES 60', 'DBG:KEY 2,1200', 30.0, 4.0, {'range': 60, 'late': 1.5}),
     ('r300-60', 'ohm:300', 'CONF:RES 60', AUTO, 300.0, 3.0, {'range': 600}),
     ('r59-600', 'ohm:59.5', 'CONF:RES 600', AUTO, 59.5, 3.0, {'range': 600}),
-    ('r59-60', 'ohm:59.5', 'CONF:RES 60', AUTO, 59.5, 3.0, {'range': 60}),
+    ('r59-60', 'ohm:59.5', 'CONF:RES 60', AUTO, 59.5, 3.0, {'range': 60, 'tol': 0.003}),
     ('r30-300-30', 'ohm:30', None, AUTO, None, 4.0, {'range': 60, 'later': [(5.0, 'ohm:300'), (10.0, 'ohm:30')], 'steps': 3, 'hold': 15.0}),
     ('open-60', 'open', 'CONF:RES 60', AUTO, None, 6.0, {'range': 6e7, 'ol': True}),
     ('r30-on-late', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 600, 'on_at': 5.0, 'steps': 1, 'hold': 10.0}),
@@ -198,8 +201,8 @@ try:
             v = num(ro[2])
             if s > final_max:
                 why.append('first final AUTO readout at +%.2f s (max %g)' % (s, final_max))
-            if want is not None and abs(v - want) > want * 0.01:
-                why.append('first final AUTO readout %g (want %g)' % (v, want))
+            if want is not None and abs(v - want) > want * o.get('tol', 0.01):
+                why.append('first final AUTO readout %g (want %g +- %g %%)' % (v, want, 100 * o.get('tol', 0.01)))
             if 'range' in o:
                 after = [r for r in rows if r[0] >= s]
                 seen = [r[1] for r in after]

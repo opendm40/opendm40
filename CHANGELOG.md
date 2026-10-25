@@ -69,6 +69,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Ohm: the 60 Ω range read ~2.7 % low (against the 600 Ω range). Its gain
+  is now the 600 Ω range's calibration times a factor measured on one meter
+  (1.0291); the 60 Ω entry of the calibration record is not a calibration
+  (the stock never uses that range). Whether other meters need the same
+  factor is unknown.
 - Touch: a read of the touch controller while its INT line is still low
   returned the cleared buffer (status 0xAB), which was taken for a press of
   the MENU key between the real frames; taps were lost and keys mixed up.

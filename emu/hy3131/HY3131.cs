@@ -1920,7 +1920,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Ohm)
             {
                 vs = OhmSourceVolts();
-                rref = OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
+                // r0 (60 ohm, never selected by the stock): its slot is not a calibration; the
+                // device reads like Rref 0.1 k x r1's gain x 1.0291 (firmware dmm.rs OHM_R0_K,
+                // measured on one unit, cause unknown).
+                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * OhmR0K
+                    : OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
                 Fe.LeadOhm = CalOffs(0x144) * 1000.0;
             }
             else if(role == Role.Cont)
@@ -2586,6 +2590,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] Shunt = { 0.01, 0.0005, 4.75e-5 }; // ohm / kohm / Mohm
         private static readonly double[] AUnit = { 1, 1e3, 1e6 };           // A -> A / mA / uA
         private static readonly double[] OhmRref = { 0.1, 1, 10, 100, 1000, 10000, 63000 };
+        private const double OhmR0K = 1.0291;
         private static readonly double[] CapK = { 1020, 1003, 102.7, 10.68, 1.5, 4.06, 41, 400 };
         private static readonly double[] DcvNegK = { 1.0, 1.00008, 1.00011, 1.0015 };
         private static readonly double[] K1 = { 0, 1 / 36.0, 2 / 36.0, 4 / 36.0, 8 / 36.0, 10 / 36.0, 12 / 36.0, 14 / 36.0, 16 / 36.0, 18 / 36.0,
