@@ -41,7 +41,8 @@ What waits for the owner; each line links to the material.
       2. 100 Ω and 300 Ω: 600 Ω range. Then 50 Ω -> 300 Ω -> 50 Ω: 60 -> 600 -> 60 Ω, no back-and-forth.
       3. Near the band, if the calibrator resolves it: 57 Ω from 600 Ω -> 60 Ω; 60 Ω from either range stays.
       4. Open input (output off and the leads removed), from 60 Ω: AUTO ends on 60 MΩ with OL, no step down.
-      5. 0.28 mA ON (range page), 50 Ω: AUTO stays on 600 Ω with I 0.28 mA; the 60 Ω item still selects 60 Ω.
+      5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
+         there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their

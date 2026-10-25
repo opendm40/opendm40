@@ -26,13 +26,15 @@ The 60 ohm range in AUTO (owner 2026-10-25; dmm.rs `ohm_auto_floor`): a row's op
   on      the 0.28 mA "ON" ohm variant is chosen first (the MF page's ON button, DBG:KEY 3 /
           DBG:TAP): AUTO then never goes below 600 ohm;
   ol      one of the last five polls shows a final OL;
+  on_at   the same, s seconds after the AUTO command (AUTO already on 60 ohm: to 600 ohm);
+  steps   with `later` / `on_at`: the most range changes after the first final readout;
   late    the AUTO command takes this long (s; a held AUTO key, `DBG:KEY 2,1200`): the AUTO
           status bar is checked from then on.
 Rows: 30 ohm from DC V / manual 600 / manual 60 lands on 60 ohm; 300 ohm from manual 60 on
 600 ohm; 59.5 ohm (inside the 58.25..61.8 ohm band) stays on the range it starts on; 30 -> 300 ->
 30 ohm steps 60 -> 600 -> 60 (60 -> 600 by way of 60 Mohm: an over-range on a settled range
 jumps to the top, as the stock's probe-opened rule); an open input from manual 60 ends on 60 Mohm, OL; 30 ohm with ON
-stays on 600 ohm.
+stays on 600 ohm, and ON chosen while AUTO is on 60 ohm moves it to 600 ohm.
 
   emu/hy3131/resautotest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 64731
 """
@@ -71,6 +73,7 @@ SCEN = [
     ('r59-60', 'ohm:59.5', 'CONF:RES 60', AUTO, 59.5, 3.0, {'range': 60}),
     ('r30-300-30', 'ohm:30', None, AUTO, None, 4.0, {'range': 60, 'later': [(5.0, 'ohm:300'), (10.0, 'ohm:30')], 'steps': 3, 'hold': 15.0}),
     ('open-60', 'open', 'CONF:RES 60', AUTO, None, 6.0, {'range': 6e7, 'ol': True}),
+    ('r30-on-late', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 600, 'on_at': 5.0, 'steps': 1, 'hold': 10.0}),
     ('r30-on', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 600, 'on': True}),
 ]
 
@@ -147,23 +150,29 @@ try:
         if manual:
             wait_until(w0 + 5)
             q(manual + ';:SYST:ERR?')
-        if o.get('on'):
+        def ohm_on():
             # The MF page (DBG:KEY 3), its ON button (ui::range_hit: y 179..223, x >= 240), OK.
-            wait_until(w0 + 6)
             q('DBG:KEY 3;*OPC?')
             time.sleep(0.5)
             q('DBG:TAP 360,200;*OPC?')
             time.sleep(0.5)
             q('DBG:TAP 400,259;*OPC?')
+        if o.get('on'):
+            wait_until(w0 + 6)
+            ohm_on()
         wait_until(w0 + 9)
         why = []
         before = q('DBG:READ?')
         t1 = up()
         first = q(auto + ';:DBG:READ?').split(',')
         rows = [(0.0, float('nan'), first)]  # (s, range, readout fields)
+        on_at = o.get('on_at')
         while True:
             rng, ro = q('RES:RANG?;:DBG:READ?').split(';', 1)
             s = up() - t1
+            if on_at is not None and s >= on_at:
+                on_at = None
+                ohm_on()
             rows.append((s, num(rng), ro.split(',')))
             if s > o.get('hold', HOLD):
                 break
@@ -195,7 +204,7 @@ try:
                 after = [r for r in rows if r[0] >= s]
                 seen = [r[1] for r in after]
                 ch = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
-                if not o.get('later'):
+                if 'steps' not in o:
                     off = [r for r in after if r[1] != o['range']]
                     if off:
                         why.append('range %g at +%.2f s after the first final readout (want %g only)' % (off[0][1], off[0][0], o['range']))
