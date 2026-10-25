@@ -58,7 +58,7 @@ matches a local build is inferred (compare the artifact's `SHA256SUMS`).
 ## CI and releases
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push
-and pull request to `main` and `rust-fw-poc`:
+and pull request to `main`; a push that changes only documentation (Markdown, `docs/`, `firmware/docs/`, `hw/`, images, data) skips the Build and Host tests jobs:
 
 | Job | What |
 |---|---|
