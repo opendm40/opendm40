@@ -3943,7 +3943,7 @@ Emulator (emu/):
       whether it ever drops the release report. The (4) log above shows it (frames `F,e,k<code>` per press). If
       releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
       repeat period. Every key-down is accepted 40 ms after its single report (`DEBOUNCE_MS`; the stock has no
-      debounce, [touch_v2_6.h](../stock/re/analysis/touch_v2_6.h) "No other debounce"): inferred, not the cause.
+      debounce, `stock/re/analysis/touch_v2_6.h` (in the private analysis repo) "No other debounce"): inferred, not the cause.
 - [x] AUTO key range cycle (owner 2026-10-25): V / A / ohm, [src/app.rs](src/app.rs) `auto_key_end` on the release
       (short) or after `RUN_LONG_MS` held (long; the RUN key's timer `run_down`, `run_key` 2). Short: autorange ->
       the present range fixed; manual -> the next higher item of `ui::range_items` (60 mV, 60 ohm included), the
