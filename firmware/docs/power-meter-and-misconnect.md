@@ -1288,10 +1288,19 @@ input range (tens of mA, PB1 above ~2.4 V) may also read 0x70. It would then
 show LIVE? instead of the A-JACK badge. This is not checked: the A jack has
 not been wired.
 
+Device c5ac0c5 ([device check, "c5ac0c5: the RES jack fix"](device-check-2026-10-21.md#c5ac0c5-the-res-jack-fix-eef96f7-both-bit-reads-live-after-the-source-2026-10-25)),
+A jack empty: in RES AUTO and 600 Ω, 5 V and 10 V read CTSTA 112 on all but
+the first poll, field 14 = 2, LIVE?, no A-JACK; the square read 112 on about
+half of the polls (0 on the rest), field 14 = 2, LIVE?, no A-JACK. 1 V and
+3 V: no hits. The OP1O peaks (field 15) were those of a2e9766. The current-in-A
+side (check list item 4) is not run.
+
 **LIVE? after the source goes off.** Device a2e9766 note 3: in RES 600 Ω,
 LIVE? came on again at every poll (5-10 ms apart) once it had cleared, until
 the next ohm reading reset its run (+24 `DBG:SENT:LOG?` entries). A run of
 live results whose last one is `LIVE_CLEAR_MS` old no longer asserts.
+Device c5ac0c5: after the off, LIVE? stayed ~1.0-1.25 s and did not return;
+`DBG:SENT:LOG?` +0 entries in 5 of 5 (5 V x 3, 10 V, the square).
 
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
 1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
@@ -1337,7 +1346,10 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    DC and the 0 / 9.5 V square, 10 s each. Expect no A-JACK; LIVE? from 5 V
    (RES) / 1 V (continuity). Note fields 14 / 15 wherever field 8 (hits)
    grows: they settle the OP1O point above.
-2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0.
+2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0. Device
+   c5ac0c5: -1 under RES AUTO; after a switch from another ohm-network row
+   they keep the verdict of the switch's hits (0 / 2150 mV in 600 Ω), no
+   alert (device-check note 3).
 3. AC V AUTO (mV-first) and manual 60 / 600 mV with the square: no A-JACK in
    the log.
 4. With a current in A (not wired yet), V-COM open: RES, continuity, AC mV:
@@ -1346,7 +1358,9 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    112.
 5. RES (AUTO and 600 Ω) with 5 V, 10 V and the square: field 4 reads 112
    (0x70) while field 8 grows, field 14 = 2, LIVE?, no A-JACK. Then switch the
-   source off: `DBG:SENT:LOG?` grows by at most one entry.
+   source off: `DBG:SENT:LOG?` grows by at most one entry. Device c5ac0c5:
+   **PASS** (and items 1 and 3 with manual 60 / 600 mV; the mV-first AUTO,
+   item 4 and RTD / NTC not run).
 
 ## 5. Fuse, CAT and current limits (the DM40 manual)
 
