@@ -3697,7 +3697,7 @@ Emulator (emu/):
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
       the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
       (INFERRED: half its window before the AC row carried the input). 049bb65 seeds `f_ac` with it, so it shows as
-      final. Fixed (69df26b; AC V / mV only since the next commit: AC A's own vet, ACA_VET_*, already holds results
+      final. Fixed (69df26b; AC V / mV only since 0623341: AC A's own vet, ACA_VET_*, already holds results
       until two agree, and the drop there put switchtest real-vjack-ac's V-JACK? at 3.42 s, over its 3 s, base 2.89 s):
       after a plain AC V / mV reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
       what INTF latched (its read clears it) and the next result too (its window began before that read, the device's
