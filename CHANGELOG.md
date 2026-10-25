@@ -12,7 +12,8 @@ section named after the tag as the release notes; how to cut a release:
 - Frequency: 2 Hz and 5 Hz gave no reading. The counter's gate is now read
   when it ends on an input edge instead of every 0.35 s, so frequencies down
   to 0.5 Hz read (one value per gate below about 7 Hz; 0.35 s above, as
-  before). The same for the frequency next to AC V / AC A.
+  before). The same for the frequency next to AC V / AC A. The Hz reading
+  shows one more digit (small) where the counter's resolution supports it
   ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
 
 ## v0.2.0 (2026-10-25)

@@ -725,7 +725,7 @@ struct Freq {
     t0: u32,
     /// SYSCLK ticks of each source's `last` gate (`counter_vals` n).
     lastn: [u32; 2],
-    /// Ticks of the shown value's gate (0: none / no signal).
+    /// Ticks of the shown value's gate (0: none / no signal): `freq_ext`.
     n: u32,
 }
 
@@ -783,6 +783,20 @@ pub(crate) fn gate_check(ctc: u32, ctb: u32, cta: u32, cta2: u32, el_ms: u32, f_
         return Gate::Wait;
     }
     Gate::Timeout { quiet: !edges && el_ms >= FREQ_NOEDGE_MS }
+}
+
+/// The extra (small) digit of a frequency readout `v` (display units, `dec`
+/// decimals) from a gate of `n` SYSCLK ticks: the reciprocal count resolves
+/// v / n (one tick of the gate), shown when that is at most one count of the
+/// extra digit, 10^-(dec+1). E.g. 10 Hz (one 100 ms period, n = 491520):
+/// 0.00002 Hz <= 0.0001 Hz, 10.0000 Hz; 50 Hz (three periods, 60 ms):
+/// 0.00017 Hz > 0.0001 Hz, 50.000 Hz.
+pub(crate) fn freq_ext(v: f32, dec: u8, n: u32) -> bool {
+    let mut w = 1.0f32;
+    for _ in 0..=dec {
+        w *= 0.1;
+    }
+    n > 0 && v >= 0.0 && v / n as f32 <= w
 }
 
 /// `Freq::take`: what this gate's result lets the frequency mode show.
@@ -5126,6 +5140,7 @@ impl Dmm {
         let fs = FREQ_DEC[r] * self.factor();
         let ol = self.freq.f_khz / fs > self.over();
         let (fv, dv) = self.freq_vals(false);
+        let fv = fv.with_ext(freq_ext(fv.v, fv.dec, self.freq.n));
         let mut rd = self.reading(if ol { Val::ol(fv.dec, fv.unit) } else { fv }, self.freq.f_khz * 1e3);
         rd.range = r as i8;
         rd.aux2 = Some(dv);
@@ -5734,6 +5749,17 @@ mod tests {
         assert_eq!(gate_check(5, 1, 0x00_1000, 0x00_1000, 400, f32::NAN), Gate::Done);
         assert_eq!(gate_check(5, 1, 0xFD_0000, 0xFD_0000, 400, f32::NAN), Gate::Wait);
         assert_eq!(gate_check(5, 0, 0x00_1000, 0x00_1100, 4400, f32::NAN), Gate::Timeout { quiet: false });
+    }
+
+    #[test]
+    fn freq_extra_digit() {
+        // One tick of the gate against one count of the extra digit.
+        assert!(freq_ext(10.0, 3, 491_520)); // 10 Hz, 100 ms: 0.00002 Hz
+        assert!(!freq_ext(50.0, 3, 294_912)); // 50 Hz, 60 ms: 0.00017 Hz
+        assert!(freq_ext(2.0, 3, 2_457_640)); // 2 Hz, 500 ms
+        assert!(freq_ext(1.0, 4, 262_400)); // 1 kHz (kHz, 4 decimals): 0.0000038 kHz
+        assert!(!freq_ext(5.0, 4, 262_400)); // 5 kHz: 0.000019 kHz
+        assert!(!freq_ext(10.0, 3, 0)); // no gate
     }
 
     #[test]

@@ -612,6 +612,10 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("hz_mhz", rd(14, val(9.9999, 4, "MHz"), None, Some(val(100.0, 1, "%")), false), None),
         ("hz_khz", rd(14, val(99.999, 3, "kHz"), None, Some(val(44.4, 1, "%")), false), None),
         ("hz_ol", rd(14, ol(4, "MHz"), None, Some(ol(1, "%")), false), None),
+        // The small extra digit (dmm.rs `freq_ext`): 2 Hz, 1 kHz, 61.8 Hz.
+        ("hz_ext_2", rd(14, Val { ext: true, ..val(2.00003, 3, "Hz") }, None, Some(val(50.0, 1, "%")), false), None),
+        ("hz_ext_khz", rd(14, Val { ext: true, ..val(1.00005, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false), None),
+        ("hz_ext_top", rd(14, Val { ext: true, ..val(61.7999, 3, "Hz") }, None, Some(val(0.5, 1, "%")), false), None),
         ("temp_tc", rd(15, val(-200.0, 1, c), Some(val(26.5, 1, c)), None, false), Some("TC K")),
         ("temp_tc_ol", rd(15, ol(1, c), Some(val(-44.4, 1, c)), None, false), Some("TC K")),
         ("temp_ntc", rd(15, val(125.00, 2, c), Some(val(444.444, 3, "k\u{3a9}")), None, false), Some("NTC100k B3950")),

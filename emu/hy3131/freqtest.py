@@ -30,7 +30,8 @@ Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
                0.000 Hz / 0.0 % at 1.37 / 1.71 / 2.06 s, 40.00 from 2.42 s)
   nosig        nothing connected (ct0dead:2500): READ? must answer 0.000 Hz
   low-F        F = 0.5 / 1 / 2 / 5 / 10 / 50 Hz square: DC V -> CONF:FREQ,
-               READ? until the first number (12 s at most), then 3 more
+               READ? until the first number (12 s at most), then 3 more;
+               CONF?'s resolution shows the small digit (1E-4 Hz) below 35 Hz
                (the gate waits for its end: firmware/src/dmm.rs `gate_check`)
 wake also runs with ct0dead:2500. Every READ? must be 40 Hz (nosig: 0 Hz)
 within TOL (default 0.05 %). The first READ?'s fw
@@ -177,6 +178,18 @@ def run(name):
                     '  BAD' if wrong else ''), flush=True)
                 if wrong:
                     bad.append('rep %d: %s' % (k, ' '.join('%s@+%.2f' % x for x in wrong)))
+                if kind == 'low':
+                    # The small extra digit (dmm.rs `freq_ext`): CONF?'s
+                    # resolution 1E-4 Hz up to ~35 Hz, 1E-3 Hz at 50 Hz.
+                    conf = q('CONF?')
+                    try:
+                        res = float(conf.strip('"').split(',')[-1])
+                    except ValueError:
+                        res = None
+                    exp = 1e-4 if want < 35 else 1e-3
+                    print('%s %d CONF? %s' % (name, k, conf), flush=True)
+                    if res is None or abs(res - exp) > exp * 1e-3:
+                        bad.append('rep %d: CONF? %s, resolution %g expected' % (k, conf, exp))
         except Exception as e:
             print(name, 'link ended:', type(e).__name__, e, flush=True)
             bad.append('link ended: %s' % e)

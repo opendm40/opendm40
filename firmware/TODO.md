@@ -4065,15 +4065,18 @@ Emulator (emu/):
       then every 20 ms, and takes the counts once CTA stands still past the overflow (the counter stopped); it gives
       up after 2.2 s without counts (no signal: `Freq::take` `quiet`), 4.4 s with counts, or 3.5 periods of the
       shown value + 150 ms (at least 350 ms). Hz and the AC V / AC A secondary readout (`freq_secondary`; AC+DC keeps
-      the stock's blind read: its phases change the source). Tests: [tools/meter-test](tools/meter-test/main.rs)
-      `freq_gate_low_frequencies` (a simulated gate, 0.5 Hz .. 1 kHz, every phase), `freq_gate_limits`, `freq_take_quiet_gate`; emulator [emu/hy3131/freqtest.py](../emu/hy3131/freqtest.py)
+      the stock's blind read: its phases change the source). Hz shows the small extra digit when one SYSCLK tick
+      over the gate is at most one count of it (`freq_ext`). Tests: [tools/meter-test](tools/meter-test/main.rs)
+      `freq_gate_low_frequencies` (a simulated gate, 0.5 Hz .. 1 kHz, every phase), `freq_gate_limits`,
+      `freq_extra_digit`, `freq_take_quiet_gate`; emulator [emu/hy3131/freqtest.py](../emu/hy3131/freqtest.py)
       `low-0.5` .. `low-50`.
 - [ ] Unknown (device data decides): that CTA stands still after the gate's end on the chip (datasheet: "then it
       will stop counting"; the emulator models it so). If it does not, every gate times out: Hz reads 0.000 Hz at any
       frequency (step 2 below shows it at once).
 - [ ] Device check (5 min, MMB3.0 frequency output on V-COM): (1) Hz function, 10 Hz: a reading within 1 s, new values
-      every ~0.35 s. (2) 50 Hz, 1 kHz, 10 kHz as in
-      [docs/data/freq-steps-2026-10-25.md](docs/data/freq-steps-2026-10-25.md): the same values as that recording (3) 5 Hz: a reading (~5.000 Hz) within ~2 s, a new
+      every ~0.35 s, the reading shows the small digit (10.000x Hz). (2) 50 Hz, 1 kHz, 10 kHz as in
+      [docs/data/freq-steps-2026-10-25.md](docs/data/freq-steps-2026-10-25.md): the same values as that recording
+      (50.000 Hz without the small digit, 1.0000x kHz with it). (3) 5 Hz: a reading (~5.0000x Hz) within ~2 s, a new
       value every ~0.4 s or faster. (4) 2 Hz: a reading within ~3 s, new values about once a second; duty ~50 %.
       (5) Output off / leads apart: 0.000 Hz within ~3 s. (6) AC V with 2 Hz on the output (if the MMB3.0 gives an AC
       level at 2 Hz): the frequency above the reading reads ~2 Hz. (7) Optionally a CSV recording at 2 / 5 / 10 Hz
