@@ -61,7 +61,12 @@ What waits for the owner; each line links to the material.
       remaining offsets are the panel or the aim is unknown: the touch test screen (owner request) shows it.
       AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
       held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
-- [ ] Public release (owner 2026-10-25): the one blocker is the touch fix (screen and the four touch keys). Still
+- [ ] Public release (owner 2026-10-25): the one blocker was the touch fix (screen and the four touch keys).
+      **Done (device 0b3b73c1, 2026-10-25):** the stale 0xAB reads fixed (taps no longer lost, no phantom MENU),
+      the key lag / AUTO-RUN mix-up fixed, a per-device touch calibration on the touch test page. The owner
+      calibrated this unit: x = 0.9887x - 0.0076y + 0.08, y = 0.0057x + 0.9555y - 2.77 (DBG:TOUCH:CAL?), "the
+      calibration helps". The four touch keys are reported by the controller as fixed points (x 372 / 627 / 883
+      / 1140); a touch between two keys gives no report (device log), so there is nothing to show or map there. Still
       to do at that time, not blockers: the licence of stock/patch, the vendor .bin and the datasheets in docs/;
       delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
 - [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
