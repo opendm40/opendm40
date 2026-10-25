@@ -939,6 +939,57 @@ def usb_steps():
     tap_pair('update-steps', (RENDERS, 'settings3-edit'), (445, 119), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
 
 
+def shunt_chain():
+    """The A jack's current path: the fuse, the 47 / 0.5 ohm / 10 mohm
+    shunts in a row, the MOSFETs that short the larger ones (PE1: mA, PE0:
+    A), back to COM (the order is inferred from the shunt values)."""
+    s = 5.0
+    dev, g, pd = device(s, screen='alert-ovld')
+    cx0 = round(104 * s)
+    crop = dev.crop((cx0, 0, dev.size[0], dev.size[1]))
+    w, h = crop.size
+    im, d = canvas(w + 760, h + 100)
+    x0, y0 = 20, 20
+    im.paste(crop, (x0, y0))
+    G = lambda x, y: (x0 + x * s - cx0, y0 + y * s)
+    a, com = G(*pd.JACKS['a']), G(*pd.JACKS['com'])
+    ya, yc = a[1], com[1]
+    f, fb = font(14), font(15, bold=True)
+    X = x0 + w + 30
+    # Elements on the A row: fuse, 47 ohm, 0.5 ohm, 10 mohm.
+    parts = [('fuse 10 A', X + 30, 110), ('47 Ω', X + 190, 90), ('0.5 Ω', X + 340, 90), ('10 mΩ', X + 490, 90)]
+    d.line((a[0], ya, X + 30, ya), fill=DARK, width=3)
+    prev = None
+    for t, x, bw in parts:
+        if prev is not None:
+            d.line((prev, ya, x, ya), fill=DARK, width=3)
+        d.rectangle((x, ya - 16, x + bw, ya + 16), fill=WHITE, outline=DARK, width=3)
+        text_c(d, x + bw / 2, ya - 9, t, fb)
+        prev = x + bw
+    # From the 10 mohm back to COM.
+    xe = X + 640
+    d.line((prev, ya, xe, ya), fill=DARK, width=3)
+    d.line((xe, ya, xe, yc), fill=DARK, width=3)
+    d.line((xe, yc, com[0], yc), fill=DARK, width=3)
+    # MOSFET bypasses (switches) above the row: PE1 across the 47 ohm,
+    # PE0 across 47 + 0.5 ohm.
+    def switch(xa, xb, y, label):
+        d.line((xa, ya, xa, y), fill=BLUE, width=3)
+        d.line((xb, ya, xb, y), fill=BLUE, width=3)
+        m = (xa + xb) / 2
+        d.line((xa, y, m - 18, y), fill=BLUE, width=3)
+        d.line((m + 18, y, xb, y), fill=BLUE, width=3)
+        d.line((m - 18, y, m + 14, y - 16), fill=BLUE, width=3)
+        d.ellipse((m - 22, y - 4, m - 14, y + 4), fill=BLUE)
+        d.ellipse((m + 14, y - 4, m + 22, y + 4), fill=BLUE)
+        text_c(d, m, y + 10, label, f, BLUE)
+    switch(X + 165, X + 305, ya + 60, 'MOSFET PE1: mA ranges')
+    switch(X + 160, X + 455, ya + 130, 'MOSFET PE0: A ranges, OVLD, A-PROT')
+    # Ranges under the row.
+    text_c(d, X + 300, yc - 70, 'µA: both off, 47.5 Ω    mA: PE1 on, 0.5 Ω    A: PE0 on, 10 mΩ', f, MID)
+    save(im, 'shunt-chain')
+
+
 def main():
     global RENDERS, STOCK
     if len(sys.argv) not in (2, 3):
@@ -981,6 +1032,7 @@ def main():
     stock_dmm_pairs()
     power_screen()
     usb_steps()
+    shunt_chain()
     if STOCK:
         stock_pairs()
 
