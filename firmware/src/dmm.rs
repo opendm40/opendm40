@@ -721,6 +721,68 @@ struct Freq {
     f_khz: f32,
     duty: f32,
     range: u8,
+    /// The running gate's start (a restart), ms (low 32 bits of `now`).
+    t0: u32,
+    /// SYSCLK ticks of each source's `last` gate (`counter_vals` n).
+    lastn: [u32; 2],
+    /// Ticks of the shown value's gate (0: none / no signal).
+    n: u32,
+}
+
+/// The first counter check after a restart (the stock's 350 ms period:
+/// above ~6.7 Hz the gate is over by then, so the update rate is the
+/// stock's), ms.
+const FREQ_CHECK_MS: u64 = 350;
+/// Later checks while the gate still runs, ms.
+const FREQ_RECHECK_MS: u64 = 20;
+/// A gate that counted nothing (CTB = CTC = 0) this long gives up: no edge
+/// in 2.2 s is no signal (a 0.5 Hz input has an edge every 2 s), ms.
+const FREQ_NOEDGE_MS: u32 = 2200;
+/// A gate with counts but no end gives up after this, ms. A gate takes up
+/// to two input periods plus 53.3 ms (the wait for the opening edge, then
+/// the 0x40000-tick minimum, then the next edge): 4.05 s at 0.5 Hz; this
+/// limit measures down to ~0.45 Hz.
+const FREQ_GATE_MAX_MS: u32 = 4400;
+
+/// The longest a gate may run (`gate_check`): with a value shown (`f_khz`
+/// > 0) 3.5 of its periods + 150 ms (a gate takes up to two periods + 53.3
+/// ms; the margin covers a missed opening edge, unknown on the chip; a
+/// signal gone or much slower then reads as no signal about as fast as
+/// before), at least FREQ_CHECK_MS; at most FREQ_NOEDGE_MS without counts
+/// (`edges` false), else FREQ_GATE_MAX_MS.
+pub(crate) fn gate_limit_ms(f_khz: f32, edges: bool) -> u32 {
+    let cap = if edges { FREQ_GATE_MAX_MS } else { FREQ_NOEDGE_MS };
+    let p = if f_khz > 0.0 { 3.5 / f_khz + 150.0 } else { cap as f32 };
+    (p.min(cap as f32) as u32).max(FREQ_CHECK_MS as u32)
+}
+
+/// A counter check (`Dmm::freq_gate`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum Gate {
+    /// Still counting: check again later.
+    Wait,
+    /// A whole gate: the counts are a result.
+    Done,
+    /// Given up; `quiet`: nothing counted for the whole FREQ_NOEDGE_MS (no
+    /// signal, `Freq::take`).
+    Timeout { quiet: bool },
+}
+
+/// The HY3131 counter is a reciprocal one (DS-HY3131 14): after the
+/// 0x40000-tick minimum (CTA overflow) it counts on until CTB holds a whole
+/// number of input cycles, then stops (CTF). So a gate is over when CTA is
+/// past the overflow and stands still between two reads (`cta`, `cta2`)
+/// with cycles counted; its length then follows the input, not a fixed
+/// window. Else it waits up to `gate_limit_ms` (`el_ms` since the restart).
+pub(crate) fn gate_check(ctc: u32, ctb: u32, cta: u32, cta2: u32, el_ms: u32, f_khz: f32) -> Gate {
+    if ctr_valid(ctb, cta) && cta == cta2 {
+        return Gate::Done;
+    }
+    let edges = ctb > 0 || ctc > 0;
+    if el_ms < gate_limit_ms(f_khz, edges) {
+        return Gate::Wait;
+    }
+    Gate::Timeout { quiet: !edges && el_ms >= FREQ_NOEDGE_MS }
 }
 
 /// `Freq::take`: what this gate's result lets the frequency mode show.
@@ -752,12 +814,16 @@ impl Freq {
     /// glitch (`freq_glitch`) is no result either. 0.000 Hz (no signal)
     /// only once both sources counted nothing NO_SIGNAL_N times in a row
     /// (once each after a value was shown: the signal went away).
-    fn take(&mut self, i: usize, f: f32, d: f32, ok: bool) -> FreqPick {
+    /// `n`: the gate's SYSCLK ticks; `quiet`: a gate that counted nothing
+    /// for FREQ_NOEDGE_MS (`Gate::Timeout`) counts as NO_SIGNAL_N empty
+    /// gates (no signal after one such gate per source, ~4.4 s from an
+    /// entry, not four).
+    fn take(&mut self, i: usize, f: f32, d: f32, ok: bool, n: u32, quiet: bool) -> FreqPick {
         const NO_SIGNAL_N: u8 = 2;
         let glitch = freq_glitch(f, d);
         if !ok || f <= 0.0 {
             self.seen[i] = false;
-            self.zc[i] = self.zc[i].saturating_add(1);
+            self.zc[i] = if quiet { self.zc[i].max(NO_SIGNAL_N) } else { self.zc[i].saturating_add(1) };
             self.change[i] = 1e6;
         } else if glitch {
             // Edges missed: neither a value nor "no signal"; the last clean
@@ -774,6 +840,7 @@ impl Freq {
             self.change[i] = if self.seen[i] { freq_change(f, d, self.last[i]) } else { 1e6 };
             self.last[i] = f;
             self.lastd[i] = d;
+            self.lastn[i] = n;
             self.seen[i] = true;
             self.zc[i] = 0;
         }
@@ -1642,7 +1709,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0 },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -2451,6 +2518,7 @@ impl Dmm {
         self.freq.f_khz = f32::NAN;
         self.freq.duty = f32::NAN;
         self.freq.range = 0;
+        self.freq.n = 0;
         // No source history from another function (AC+DC's secondary
         // counter, an earlier frequency session): the first two results
         // of each source decide afresh.
@@ -4714,20 +4782,44 @@ impl Dmm {
         self.beep_next = now + step;
     }
 
+    /// Read the counter and restart it with `src` (the stock's blind read:
+    /// capacitance, AC+DC).
     fn read_counters(&mut self, src: u8) -> (f32, f32) {
-        let (f, d, _) = self.read_counters_ok(src);
-        (f, d)
-    }
-
-    /// `read_counters` plus whether the gate is a result (`ctr_valid`).
-    fn read_counters_ok(&mut self, src: u8) -> (f32, f32, bool) {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         ctr_restart(src);
+        counter_vals(u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]))
+    }
+
+    /// A counter check (`gate_check`) at most every FREQ_RECHECK_MS from
+    /// FREQ_CHECK_MS after the restart: None while the gate runs; at its end
+    /// or timeout the counts (f kHz, duty %, a whole gate, its SYSCLK ticks,
+    /// `Gate::Timeout` quiet) and a restart with `src`.
+    #[inline(never)]
+    fn freq_gate(&mut self, now: u64, src: u8) -> Option<(f32, f32, bool, u32, bool)> {
+        if now < self.freq.next {
+            return None;
+        }
+        let mut b = [0u8; 9];
+        hy::read(0x15, &mut b);
         let (ctc, ctb, cta) = (u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]));
+        // CTA again: standing still = the counter stopped (a running CTA
+        // moves every 0.2 us; this read takes tens of us).
+        let mut a = [0u8; 3];
+        hy::read(0x1B, &mut a);
+        let el = (now as u32).wrapping_sub(self.freq.t0);
+        let g = gate_check(ctc, ctb, cta, u24(&a), el, self.freq.f_khz);
+        if g == Gate::Wait {
+            self.freq.next = now + FREQ_RECHECK_MS;
+            return None;
+        }
+        self.diag_ctr = self.diag_ctr.saturating_add(1);
+        ctr_restart(src);
+        self.freq.t0 = now as u32;
+        self.freq.next = now + FREQ_CHECK_MS;
         let (f, d) = counter_vals(ctc, ctb, cta);
-        (f, d, ctr_valid(ctb, cta))
+        Some((f, d, g == Gate::Done, cta.wrapping_add(0x40000) & 0xFF_FFFF, g == (Gate::Timeout { quiet: true })))
     }
 
     /// The first counter access after a row write (`Freq::fresh`): the gate
@@ -4740,7 +4832,8 @@ impl Dmm {
         }
         self.freq.fresh = false;
         ctr_restart(src);
-        self.freq.next = now + 350;
+        self.freq.t0 = now as u32;
+        self.freq.next = now + FREQ_CHECK_MS;
         true
     }
 
@@ -4966,12 +5059,24 @@ impl Dmm {
     }
 
     /// FUN_08013450 as the secondary readout in V/A modes, every 350 ms.
+    /// Outside AC+DC it waits for the gate's end as the Hz function
+    /// (`freq_gate`): low frequencies read too; a gate given up reads 0 Hz.
+    /// AC+DC keeps the stock's blind 350 ms read and restart (its phases
+    /// change the counter's source).
     fn freq_secondary(&mut self, now: u64, src: u8) {
         if self.freq_restart_fresh(now, src) || now < self.freq.next {
             return;
         }
-        self.freq.next = now + 350;
-        let (f, d) = self.read_counters(src);
+        let (f, d) = if self.acdc {
+            self.freq.next = now + FREQ_CHECK_MS;
+            self.read_counters(src)
+        } else {
+            match self.freq_gate(now, src) {
+                None => return,
+                Some((f, d, true, ..)) => (f, d),
+                Some(_) => (0.0, 0.0),
+            }
+        };
         self.freq.f_khz = f;
         self.freq.duty = d;
         self.freq_range();
@@ -4992,27 +5097,26 @@ impl Dmm {
             self.freq.restart_sources();
             return None;
         }
-        if now < self.freq.next {
-            return None;
-        }
-        self.freq.next = now + 350;
-        // The counter just read was gated with the source selected last time;
-        // restart it with the other one (0xf0 comparator / 0x08 ENCNTI).
+        // The counter's gate ran with the source selected last time; at its
+        // end (or timeout) restart it with the other one (0xf0 comparator /
+        // 0x08 ENCNTI).
         let i = self.freq.src_alt as usize;
         let next_src = if self.freq.src_alt { 0xF0 } else { 0x08 };
-        let (f, d, ok) = self.read_counters_ok(next_src);
+        let (f, d, ok, n, quiet) = self.freq_gate(now, next_src)?;
         self.freq.src_alt = !self.freq.src_alt;
-        match self.freq.take(i, f, d, ok) {
+        match self.freq.take(i, f, d, ok, n, quiet) {
             // Nothing valid yet: no reading (the display keeps "--", READ?
             // and the statistics wait).
             FreqPick::None => return None,
             FreqPick::NoSignal => {
                 self.freq.f_khz = 0.0;
                 self.freq.duty = 0.0;
+                self.freq.n = 0;
             }
             FreqPick::Src(best) => {
                 self.freq.f_khz = self.freq.last[best];
                 self.freq.duty = self.freq.lastd[best];
+                self.freq.n = self.freq.lastn[best];
             }
         }
         if !self.manual {
@@ -5513,7 +5617,7 @@ mod tests {
     }
 
     fn freq0() -> Freq {
-        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0 }
+        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0 }
     }
 
     #[test]
@@ -5522,35 +5626,126 @@ mod tests {
         // Device d2aff22: source 0 reads 0 Hz / 0 % in its first gates,
         // source 1 the signal. Entry order as poll_freq_mode: 1, 0, 1, 0.
         let mut q = freq0();
-        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::Src(1));
-        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
-        assert_eq!(q.take(0, 0.0, 0.0, true), FreqPick::Src(1)); // f 0: no result even when "whole"
+        assert_eq!(q.take(1, f, 50.0, true, 1, false), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, false, 1, false), FreqPick::Src(1));
+        assert_eq!(q.take(1, f, 50.0, true, 1, false), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, true, 1, false), FreqPick::Src(1)); // f 0: no result even when "whole"
         assert_eq!(q.lastd[1], 50.0);
         // Source 0 first with 0, then source 1 with 0 too: nothing (not 0.000 Hz).
         let mut q = freq0();
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, false, 1, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 1, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, false, 1, false), FreqPick::None);
         // ... no signal: both counted nothing twice -> 0.000 Hz.
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::NoSignal);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 1, false), FreqPick::NoSignal);
         // A signal comes: shown at once.
-        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+        assert_eq!(q.take(0, f, 50.0, true, 1, false), FreqPick::Src(0));
         // It goes away: one empty gate each is enough now.
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::Src(0));
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::NoSignal);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 1, false), FreqPick::Src(0));
+        assert_eq!(q.take(0, 0.0, 0.0, false, 1, false), FreqPick::NoSignal);
         // An incomplete gate (`ok` false) with a value is no result either.
         let mut q = freq0();
-        assert_eq!(q.take(1, 0.013, 30.0, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.013, 30.0, false, 1, false), FreqPick::None);
         // A glitch is no result, and does not count as "no signal".
-        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.013334, 100.0, true, 1, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 1, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.013334, 100.0, true, 1, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 1, false), FreqPick::None);
         // Both clean and equal: the tie stays with one of them (source 0).
         let mut q = freq0();
-        q.take(1, f, 50.0, true);
-        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+        q.take(1, f, 50.0, true, 1, false);
+        assert_eq!(q.take(0, f, 50.0, true, 1, false), FreqPick::Src(0));
+    }
+
+    /// A simulated reciprocal gate (DS-HY3131 14, the emulator's model): the
+    /// restart at t = 0, the gate opens on the first rising edge at `ph` s,
+    /// CTA counts SYSCLK from 0xfc0000 and stops on the first edge after the
+    /// overflow. Checks as `Dmm::freq_gate` (350 ms, then every 20 ms) until
+    /// a result or a timeout: (time ms, Gate, f kHz).
+    fn sim_gate(hz: f32, ph: f32, shown_khz: f32) -> (u32, Gate, f32) {
+        const CLK: f64 = 4_915_280.0;
+        let (hz, ph) = (hz as f64, ph as f64);
+        let periods = if hz > 0.0 { (0.0533333 * hz).ceil().max(1.0) } else { 0.0 };
+        let stop = ph + periods / hz.max(1e-9);
+        let mut t = FREQ_CHECK_MS as u32;
+        loop {
+            let ts = t as f64 / 1000.0;
+            let (ctb, ctc, cta) = if hz <= 0.0 || ts < ph {
+                (0, 0, 0xFC_0000)
+            } else {
+                let te = ts.min(stop);
+                let ticks = ((te - ph) * CLK) as u32;
+                let cyc = if ts >= stop { periods } else { ((ts - ph) * hz).floor() };
+                (cyc as u32, ticks / 2, (0xFC_0000 + ticks) & 0xFF_FFFF)
+            };
+            // The second CTA read, 50 us later.
+            let cta2 = if hz <= 0.0 || ts < ph || ts >= stop { cta } else { cta + 245 };
+            let g = gate_check(ctc, ctb, cta, cta2, t, shown_khz);
+            if g != Gate::Wait {
+                let (f, _) = counter_vals(ctc, ctb, cta);
+                return (t, g, f);
+            }
+            t += FREQ_RECHECK_MS as u32;
+        }
+    }
+
+    #[test]
+    fn freq_gate_low_frequencies() {
+        // 0.5 .. 50 Hz, the opening edge anywhere in the first period: a
+        // whole gate, within two periods + 53.3 ms (+ a recheck), at most
+        // 350 ms above ~6.7 Hz; f to 10 ppm.
+        for hz in [0.5f32, 1.0, 2.0, 5.0, 10.0, 50.0, 1000.0] {
+            for k in 0..8 {
+                let ph = k as f32 / 8.0 / hz;
+                for shown in [f32::NAN, 0.0, hz / 1000.0] {
+                    let (t, g, f) = sim_gate(hz, ph, shown);
+                    assert_eq!(g, Gate::Done, "{hz} Hz ph {ph} shown {shown}");
+                    assert!((f * 1000.0 - hz).abs() <= hz * 1e-5, "{hz} Hz: {f} kHz");
+                    let worst = (2000.0 / hz + 53.4).max(FREQ_CHECK_MS as f32) + FREQ_RECHECK_MS as f32;
+                    assert!(t as f32 <= worst, "{hz} Hz: {t} ms > {worst}");
+                    if hz > 6.8 {
+                        assert_eq!(t, FREQ_CHECK_MS as u32, "{hz} Hz");
+                    }
+                }
+            }
+        }
+        // No signal: given up after FREQ_NOEDGE_MS, quiet (no signal at
+        // once); with a 1 kHz value shown, at the first check (as before).
+        assert_eq!(sim_gate(0.0, 0.0, f32::NAN).1, Gate::Timeout { quiet: true });
+        assert!((FREQ_NOEDGE_MS..FREQ_NOEDGE_MS + FREQ_RECHECK_MS as u32).contains(&sim_gate(0.0, 0.0, f32::NAN).0));
+        assert_eq!(sim_gate(0.0, 0.0, 1.0), (FREQ_CHECK_MS as u32, Gate::Timeout { quiet: false }, 0.0));
+        // Below the range (0.2 Hz): no whole gate, given up.
+        assert!(matches!(sim_gate(0.2, 1.0, f32::NAN).1, Gate::Timeout { .. }));
+    }
+
+    #[test]
+    fn freq_gate_limits() {
+        assert_eq!(gate_limit_ms(f32::NAN, false), FREQ_NOEDGE_MS);
+        assert_eq!(gate_limit_ms(f32::NAN, true), FREQ_GATE_MAX_MS);
+        assert_eq!(gate_limit_ms(0.0, true), FREQ_GATE_MAX_MS);
+        assert_eq!(gate_limit_ms(1.0, true), FREQ_CHECK_MS as u32); // 1 kHz
+        assert!((1899..=1900).contains(&gate_limit_ms(0.002, true))); // 2 Hz: 3.5 x 500 + 150
+        assert!((1899..=1900).contains(&gate_limit_ms(0.002, false)));
+        assert_eq!(gate_limit_ms(0.0005, true), FREQ_GATE_MAX_MS); // 0.5 Hz: 7.15 s capped
+        assert_eq!(gate_limit_ms(0.0005, false), FREQ_NOEDGE_MS);
+        // A gate still counting below the limit waits; past the overflow
+        // but CTA moving is not over.
+        assert_eq!(gate_check(5, 1, 0x00_1000, 0x00_1100, 400, f32::NAN), Gate::Wait);
+        assert_eq!(gate_check(5, 1, 0x00_1000, 0x00_1000, 400, f32::NAN), Gate::Done);
+        assert_eq!(gate_check(5, 1, 0xFD_0000, 0xFD_0000, 400, f32::NAN), Gate::Wait);
+        assert_eq!(gate_check(5, 0, 0x00_1000, 0x00_1100, 4400, f32::NAN), Gate::Timeout { quiet: false });
+    }
+
+    #[test]
+    fn freq_take_quiet_gate() {
+        // One quiet gate per source (2.2 s each without counts) is no
+        // signal at once after an entry.
+        let mut q = freq0();
+        assert_eq!(q.take(1, 0.0, 0.0, false, 0, true), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, false, 0, true), FreqPick::NoSignal);
+        let mut q = freq0();
+        q.take(1, 0.002, 50.0, true, 2_457_640, false);
+        assert_eq!(q.lastn[1], 2_457_640);
     }
 
     #[test]

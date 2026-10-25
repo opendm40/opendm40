@@ -635,8 +635,15 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle above it.
-- A new value every 0.35 s. **--** until the first clean result.
+- The frequency, with the duty cycle above it. From 0.5 Hz up.
+- A new value every 0.35 s from about 7 Hz up. Below that, one value per
+  counter gate: the counter waits for an input edge, counts at least
+  53.3 ms and ends on the next edge, so a gate takes up to two input
+  periods plus 53.3 ms (about 1 s at 2 Hz, up to about 4 s at 0.5 Hz).
+- **--** until the first clean result (up to about 5 s at 0.5 Hz).
+  **0.000 Hz** (no signal) after about 4.5 s without an input edge from the
+  start; once a value was shown, after about 7 of its periods plus
+  0.3 s (at least 0.7 s) without an edge.
 - MF opens the Hold & Limits page (there are no range choices).
 
 

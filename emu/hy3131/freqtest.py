@@ -29,6 +29,9 @@ Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
                counts nothing for 2.5 s after the row change (device d2aff22:
                0.000 Hz / 0.0 % at 1.37 / 1.71 / 2.06 s, 40.00 from 2.42 s)
   nosig        nothing connected (ct0dead:2500): READ? must answer 0.000 Hz
+  low-F        F = 0.5 / 1 / 2 / 5 / 10 / 50 Hz square: DC V -> CONF:FREQ,
+               READ? until the first number (12 s at most), then 3 more
+               (the gate waits for its end: firmware/src/dmm.rs `gate_check`)
 wake also runs with ct0dead:2500. Every READ? must be 40 Hz (nosig: 0 Hz)
 within TOL (default 0.05 %). The first READ?'s fw
 uptime from the CONF (or the return to the DMM page) is printed. Results:
@@ -72,6 +75,13 @@ SC = {
     # nothing on V-COM: READ? answers 0.000 Hz (no signal), not "--" forever
     'nosig': ('open' + DEAD, 'conf', 'CONF:VOLT:DC', 0.0),
 }
+# Low frequencies (owner 2026-10-25, MMB3.0: 2 Hz and 5 Hz gave no reading
+# with the blind 350 ms read-and-restart): DC V -> CONF:FREQ, READ? until
+# the first number (at most LOW_FIRST_S), then 4 READ? all within TOL.
+LOW = [0.5, 1, 2, 5, 10, 50]
+LOW_FIRST_S = 12.0
+for _f in LOW:
+    SC['low-%g' % _f] = ('hz:%g,amp=1' % _f, 'low', 'CONF:VOLT:DC', float(_f))
 
 
 def run(name):
@@ -85,7 +95,7 @@ def run(name):
     sp = os.path.join(OUT, rtag + '.script')
     with open(sp, 'w') as f:
         f.write('0 dmm %s\n' % spec)
-    run_for = 40 + A.reps * 14
+    run_for = 40 + A.reps * (30 if kind == 'low' else 14)
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(int(run_for)), '--script', sp, '--name', rtag] \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
@@ -119,7 +129,7 @@ def run(name):
                 tm.write('CONF:FREQ')
                 wait_up(up() + 3.0)
             for k in range(A.reps):
-                if kind == 'conf':
+                if kind in ('conf', 'low'):
                     tm.write(before)
                     wait_up(up() + 3.0)
                     ts = up()
@@ -136,7 +146,19 @@ def run(name):
                     ts = up()
                     tm.write('DBG:TAP 141,105')  # Multimeter: the rail wake
                 vals = []
-                for i in range(4):
+                if kind == 'low':
+                    # "--" (+9.91E37, no reading) until the first gate's end
+                    while True:
+                        v = q('READ?')
+                        t = up()
+                        try:
+                            fv = float(v)
+                        except ValueError:
+                            fv = None
+                        if (fv is not None and fv < 9e37) or t - ts > LOW_FIRST_S:
+                            break
+                    vals.append((fv, round(t - ts, 3)))
+                for i in range(4 - len(vals)):
                     v = q('READ?')
                     t = up()
                     try:
