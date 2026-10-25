@@ -1,195 +1,144 @@
-# opendm40: open firmware for the Alientek DM40
+# opendm40
 
-opendm40 is a replacement firmware, written in Rust, for the Alientek DM40
-(DM40A / DM40B / DM40C) multimeter, oscilloscope and signal generator
-(GD32F427, Cortex-M4F). The multimeter, the scope and the generator run at
-the same time; you only switch what the screen shows. It keeps the stock look
-and touch model and adds a power meter, data logging, USBTMC/SCPI and more.
-It installs like a stock update file and leaves the vendor bootloader, the
-vendor update loader and the calibration untouched.
+Open-source replacement firmware for the Alientek DM40 multimeter,
+oscilloscope and signal generator (DM40A, DM40B, DM40C).
 
-**[User manual](docs/manual/README.md)**: how to install opendm40 and use
-every feature, connecting from a computer, and the
-[SCPI reference](docs/manual/scpi-reference.md).
+The multimeter, the oscilloscope and the generator run at the same time; the
+screen only chooses what you see, and the combined view shows the meter
+reading above the live scope. opendm40 keeps the stock look and touch control
+and adds a power meter, inrush current capture, wrong-connection alerts, data
+logging, remote control over USB (USBTMC / SCPI) and Bluetooth, and a USB disk
+with your logs and screenshots as CSV and BMP files.
 
-**Status: experimental.** Developed and tested on one DM40A. DM40B and DM40C
-ran only in the emulator. In the table, *device* means checked on that DM40A
-([device check log](firmware/docs/device-check-2026-10-21.md)); *emulator* means
-checked only in the emulator or in host tests.
+It installs like a stock update file and does not touch the Alientek
+bootloader, the update loader or your meter's calibration, so you can always
+go back to the stock firmware.
 
-![DMM main screen](firmware/docs/img/dmm.png)
+![opendm40 on a DM40A: the multimeter page](docs/manual/img/dmm.png)
 
-## Features
+*opendm40 on a DM40A: the multimeter page.*
 
-| Feature | What it does | Checked |
-|---|---|---|
-| Multimeter | All 16 stock functions. 60000-count ranges and AC+DC on every model. HOLD, AutoHold, REL, MIN/MAX/AVG, limits, trend chart, bargraph. | device |
-| DMM + scope at once | Combined view: the DMM reading in a strip above the live scope. | device |
-| Scope | Stock timebases and V/div, Auto/Normal/Single, hardware trigger, 20 measurements, FFT, Save CSV; pulse and runt trigger, cursors. | device; pulse / runt trigger and cursors: emulator |
-| Generator | Sine, triangle and ramp up to 50 kHz, square up to 10 MHz, DC offset; keeps running on every page. | ran on the device; output not measured there |
-| Power meter (W) | V and I at the same time: P, S, Q, PF, f, Wh, VAh. DC, AC or AC+DC coupling, with the DC and AC parts. | device without current; with current: emulator |
-| AUTO AC/DC | Shows the DC or the AC part, whichever the signal is. | device on V; on A: emulator |
-| Inrush current | 10 A range: triggers on a current step, shows the RMS of the first 100 ms and the peak, saves the trace. | emulator |
-| Burden voltage | Voltage drop across the shunt in the A / mA / uA functions (off by default). | device without current |
-| Misconnect alerts | A-JACK (current in the A jack while measuring volts), A-PROT, fuse check. A-JACK, A-PROT and a current above 10 A sound a loud two-tone alarm, also at volume 0 (Settings: Danger alarm Loud / Volume / Off; tap the badge or press a key to silence it). | A-JACK / A-PROT with a current through A: emulator (none on the device yet); the alarm's sound and the fuse check: device |
-| Record page | Logs the DMM to the internal disk: every reading, or the mean per 1 s / 10 s / 1 min, until stopped or for 10 min .. 24 h. | device |
-| Fast logger | Raw ADC samples to the disk at up to 38.4 kS/s (76.8 kS/s if the SPI flash is fast enough). | device |
-| USB disk | Read-only drive with `LOGS/`, `SCOPE/`, `SHOTS/` (CSV and BMP files) and `INFO/` (calibration copy, running firmware). New files appear while it is mounted. Optional "PC can edit" mode: delete files, drop in an update file. | device (Linux); Windows 11 read-only (VM); macOS untested |
-| USBTMC / SCPI | 34401A-style `CONF` / `MEAS?` / `READ?`, plus the scope, the generator, the power meter and the loggers. | device |
-| sigrok | A libsigrok `scpi-dmm` profile for the DM40 (not upstream yet); a 34401A emulation for unpatched sigrok / SmuView. | profile: device (sigrok-cli, every selectable function); emulation: emulator |
-| Bluetooth | The stock phone-app protocol, plus SCPI over the same link. | device |
-| Screenshots, gallery | 3-finger swipe saves a BMP (as on stock); a gallery shows screenshots and logs on the meter. | device |
+## Status
 
-| | | |
-|---|---|---|
-| ![DMM + scope](firmware/docs/img/combined.png) DMM + scope, generator on | ![Scope with FFT](firmware/docs/img/scope.png) Scope with FFT | ![Generator](firmware/docs/img/generator.png) Generator |
-| ![Power meter](firmware/docs/img/power.png) Power meter, AC+DC parts | ![AUTO AC/DC](firmware/docs/img/auto-acdc.png) AUTO AC/DC | ![Inrush](firmware/docs/img/inrush.png) Inrush current |
-| ![Burden voltage](firmware/docs/img/burden.png) Burden voltage | ![A-JACK alert](firmware/docs/img/ajack.png) A-JACK alert | ![Record page](firmware/docs/img/record.png) Record page |
+Experimental. Developed and tested on one DM40A. DM40B and DM40C ran only in
+the emulator. Everything that has not run on a real meter yet, chiefly
+everything with a current through the A jack, is listed in the manual under
+[Known limitations](docs/manual/README.md#known-limitations).
 
-Known open issues ([firmware/TODO.md](firmware/TODO.md)): with 5-10 V on V-COM, continuity and
-AC mV no longer show a false A-JACK on the meter; the second fix for Ω (LIVE? instead) is not yet
-checked on a meter. While the scope is powered
-(combined view, scope page), a fast square on the DMM input reads about
-0.2 % high.
+Downloads: [Releases](https://github.com/wirenboard/opendm40/releases).
+Changes per release: [CHANGELOG.md](CHANGELOG.md).
 
-## Differences from the stock firmware (V2.6)
+## What it does
 
-| | Stock | opendm40 |
-|---|---|---|
-| Instruments | One at a time (the generator keeps running with the scope) | DMM, scope and generator together; combined view |
-| Ranges | By model: 400 mV, 4 V ... (A), 500 mV ... (B), 600 mV ... (C) | 600 mV, 6 V ... (60000 counts) on every model |
-| AC+DC | DM40B / C only | Every model |
-| Power meter, inrush, burden, AUTO AC/DC, misconnect alerts | No | Yes |
-| Data logging | No | Record page, fast logger |
-| USB | Mass storage ("USB Connect") | USBTMC/SCPI + a generated drive with CSV files |
-| Bluetooth | Phone-app protocol | Same, plus SCPI |
-| Languages | Chinese (simplified, traditional), English | English only |
+| | |
+|---|---|
+| ![Multimeter and scope at once](docs/manual/img/combined.png) | ![Scope with FFT](docs/manual/img/scope.png) |
+| Multimeter and scope at once | Scope: hardware trigger, 20 measurements, FFT, cursors, Save CSV |
+| ![Power meter](docs/manual/img/power.png) | ![A-JACK alert](docs/manual/img/ajack.png) |
+| Power meter: P, S, Q, PF, f, Wh with DC, AC or AC+DC coupling | Alerts for wrong connections, with a loud alarm for dangerous ones |
+| ![Recording](docs/manual/img/record.png) | ![Generator](docs/manual/img/generator.png) |
+| Recording to the internal disk, read as CSV over USB | Generator, running on every page |
 
-Item by item: [firmware/docs/parity.md](firmware/docs/parity.md).
+- **Multimeter:** all 16 stock functions; 60000-count ranges and AC+DC on
+  every model; AUTO AC/DC; HOLD, AutoHold, REL, MIN/MAX/AVG, limits, trend
+  chart; burden voltage.
+- **Oscilloscope:** stock timebases and V/div, Auto / Normal / Single, edge,
+  pulse and runt triggers; a slow isolated Wave view on the multimeter jacks.
+- **Generator:** sine, triangle and ramp up to 50 kHz, square up to 10 MHz,
+  DC offset.
+- **Power meter and inrush current** on the 10 A range.
+- **Data:** a Record page, a fast logger of raw samples (up to 38.4 kS/s),
+  screenshots and an on-screen gallery.
+- **Computer:** a USB disk that needs no driver; USBTMC / SCPI in the style of
+  the 34401A; SCPI and the stock phone-app protocol over Bluetooth; a libsigrok
+  profile (not upstream yet) and a 34401A emulation for unpatched sigrok.
+
+What is new compared with the stock firmware, feature by feature, and what
+the stock firmware has that opendm40 does not (in short: the menus are
+English only):
+[the manual, What's new](docs/manual/README.md#whats-new-compared-with-the-stock-firmware).
+Item by item against the stock firmware V2.6: [parity.md](firmware/docs/parity.md).
 
 ## Install
 
-Back up first: see [Back up with opendm40](#back-up-with-opendm40). Charge the
-battery.
+You need a DM40 with the stock firmware, a USB cable and a charged battery.
 
-1. Download the install file from the latest
-   [release](https://github.com/wirenboard/opendm40/releases/latest):
-   `dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.2.0.bin`. Check it
-   against the release's `SHA256SUMS` if you like (`sha256sum -c SHA256SUMS`).
-   To build it yourself instead: [firmware/README.md, Build](firmware/README.md#build)
-   (the same name, in `firmware/`).
-2. On the stock meter: Settings > Other Settings > USB Connect.
-3. Copy the file onto that USB disk, as the only `dm40*.bin` there
-   ([why](#recovery)). Any `dm40*.bin` name installs. Eject.
-4. Power the meter off and on (a cold boot): the stock update procedure.
-   `firmware/tools/reload.sh --from-stock` stages the file for you and waits for opendm40.
-5. **The first boot is dark for a few seconds.** Do not power-cycle in the
-   first 10 s.
+1. Download `dm40_opendm40_v<version>.bin` from the latest
+   [release](https://github.com/wirenboard/opendm40/releases/latest)
+   (`SHA256SUMS` next to it), or build it ([firmware/README.md, Build](firmware/README.md#build)).
+2. On the meter: **Settings > Other Settings > USB Connect**, and connect the
+   cable. A USB disk appears.
+3. Copy the file onto it, as the only `dm40*.bin` file there. Eject the disk.
+4. Switch the meter off and on. The stock update procedure installs the file.
+   The first start is dark for a few seconds: do not switch off in the first
+   10 seconds.
+5. Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
+   your computer and keep it ([Back up](#back-up-with-opendm40)).
 
-Tested: opendm40 installs from a running opendm40 ([`firmware/tools/reload.sh`](firmware/tools/reload.sh))
-and from the vendor loader's update screen. Steps 2-4 were used on this meter
-with a stock-size image (the patched stock of the memrw kit) but **not yet
-with an opendm40 image**. The stock app can also flash a `dm40*.bin` from its
-disk by itself when USB is unplugged; that is not checked for an opendm40 image
-either. If the meter stops on the loader's update screen, copy the file onto
-the loader's USB disk and press "update" (see [Recovery](#recovery)).
+Installing over the stock **USB Connect** disk has not been tried with an
+opendm40 image yet. If the meter stops on the loader's update screen,
+[install the file from there](docs/manual/README.md#install-a-file-from-the-update-loader).
 
-**USB on a PC.** The drive needs no driver. After Eject it stays ejected
-until the cable is re-plugged. SCPI is USBTMC: Linux has a driver, Windows
-has none (the interface sits under "Other devices", code 28). On Windows,
-install NI-VISA or Keysight IO Libraries, or bind WinUSB with Zadig and use
-pyvisa-py ([firmware/docs/bt-scpi.md](firmware/docs/bt-scpi.md#usbtmc-on-windows)).
-Each meter has its own serial number: the chip's unique ID as 24 hex
-digits (USB serial, the disk's SCSI serial, the third field of `*IDN?`; the
-same digits as `INFO/UID.BIN`). Two meters on one PC are two drives
-([firmware/docs/native-boot.md](firmware/docs/native-boot.md#usb-serial-number-srcuidrs)).
+The same steps with pictures, and updating from a running opendm40:
+[the manual, Getting started](docs/manual/README.md#getting-started).
 
-## Back up with opendm40
+<a id="back-up-with-opendm40"></a>
+<a id="recovery"></a>
 
-- **Installing opendm40 first is safe.** The vendor FS-loader rewrites only the
-  application area from `0x08004000`. The Alientek bootloader (`0x08000000`),
-  the FS-loader (`0x080A0000`), its UID-bound boot data (`0x080A4000`) and the
-  calibration record (`0x080C0000`) are not touched
-  ([firmware/docs/native-boot.md](firmware/docs/native-boot.md)). opendm40 reads the
-  calibration in place and never writes it.
-- **Then copy to the PC**, from the opendm40 USB drive:
-  - the whole `INFO/` folder (read-only, generated from the MCU memory):
+## Back up, recovery and back to stock
 
-    | File | What |
-    |---|---|
-    | `CALIB.BIN` | settings + calibration record, `0x080C0000`, 4 KiB. **Unit-specific** |
-    | `BOOTDATA.BIN` | UID-bound FS-loader data, `0x080A4000`, 16 KiB. **Unit-specific** |
-    | `UID.BIN` | the chip's 96-bit unique ID; says which unit the boot data belongs to. **Unit-specific** |
-    | `ROMBOOT.BIN` | the Alientek bootloader, `0x08000000`, 16 KiB |
-    | `LOADER.BIN` | the FS-loader incl. the boot data, `0x080A0000`, 128 KiB |
-    | `OPTBYTES.BIN`, `OTP.BIN` | option bytes, OTP area |
-    | `FIRMWARE.BIN` | the running firmware as a vendor update file |
-    | `BACKUP.TXT` | addresses, sizes, CRC-32s and the restore notes |
+An update rewrites only the firmware part of the meter's memory. A bad update
+file cannot brick the meter: the update loader then shows its update screen
+and its own USB disk until a good file is installed.
 
-  - `DEBUG/SPIFLASH.BIN`: the raw 16 MiB SPI flash (the meter's own disk).
+- **Back up:** right after the install, copy the `INFO/` folder from the
+  opendm40 USB disk. It holds the calibration and the boot data of your unit,
+  which no update file contains
+  ([what is in it](docs/manual/README.md#back-up-your-meter)).
+- **Back to stock:** install the official
+  [`dm40_v_2_6.bin`](stock/vendor/dm40_v_2_6.bin) the same way. Your
+  calibration was never changed.
+- **If opendm40 does not start:** from off, hold the power key until the
+  meter beeps, then half a second more, and install a file from the update
+  loader; or open the case and use the debug header
+  ([Reach the update loader](docs/manual/README.md#reach-the-update-loader)).
 
-  `CALIB.BIN`, `BOOTDATA.BIN` and `UID.BIN` cannot be rebuilt: no update
-  file contains them. opendm40 also writes one copy of these three files, once
-  and never overwritten, to the root of its internal SPI-flash disk
-  ([`firmware/src/calbackup.rs`](firmware/src/calbackup.rs)), because the SPI flash
-  survives an SWD mass erase of the MCU.
-- **Full restore after an SWD mass erase** (from `BACKUP.TXT`): write
-  `ROMBOOT.BIN` at `0x08000000`, then `LOADER.BIN` at `0x080A0000` and
-  `CALIB.BIN` at `0x080C0000`, then install a firmware. The loader data only
-  works on the unit whose `UID.BIN` it was made with.
-- Keep backups off the meter. Dumps contain personal data (calibration, chip
-  UID, boot data): keep them in `private/` or `stock/re/dumps/` (both
-  ignored by git); never commit them.
+Step by step: [the manual, Backup, recovery and back to
+stock](docs/manual/README.md#backup-recovery-and-back-to-stock).
 
-## Recovery
+## Safety and warranty
 
-An update only rewrites the application area. The vendor bootloader and the
-vendor update loader stay, so a bad image cannot brick the meter: after a
-failed or bad file, the loader shows its update screen with a working USB
-disk on every boot until a good file is installed.
+- opendm40 is experimental software and comes **without any warranty**
+  ([LICENSE](LICENSE)). Installing it may void the vendor's warranty.
+- It is not certified. The meter's safety ratings come from its hardware and
+  from Alientek's user manual; opendm40 does not change the input protection
+  or the ratings. Follow the safety rules and limits in Alientek's user
+  manual.
+- The wrong-connection alerts work from what the meter measures and cannot
+  catch every mistake
+  ([What cannot be detected](docs/manual/README.md#what-cannot-be-detected)).
+  Do not rely on them for your safety.
 
-To reach the update screen:
+## Use it from a computer
 
-- `python3 firmware/tools/dm40dbg.py update` (`DBG:UPDATE`) while opendm40 answers on USB;
-- with opendm40's drive in "PC can edit" mode (Settings 3/3, "USB disk"), copy a
-  `dm40*.bin` onto it and answer "Install it now?" with Yes: opendm40 hands that
-  file to the loader directly;
-- from off, hold the power key ~5 s: the screen lights, ~4 s later the
-  backlight blinks and it beeps; keep holding at least 0.5 s after the beep.
-  Letting go during those 0.5 s cancels (normal start). Checked in the
-  emulator ([`emu/recoverytest.py`](emu/recoverytest.py)), not yet on the device;
-- automatically after a second hang (watchdog reset) before opendm40 has run
-  60 s since the first one: the first hang only reboots opendm40, a second one
-  with less than 60 s of running in between opens the update screen. Each
-  watchdog reset comes ~20 s after the hang, so the two resets can be up to
-  ~80 s apart. Checked in the emulator, not yet on the device;
-- if opendm40 is too broken for any of these, whatever the firmware does: open
-  the case and short the debug header's TX pad (PA2) to GND at power-on, see
-  [hw/README.md, Hardware recovery](hw/README.md#hardware-recovery).
+The meter appears as a USB disk (no driver) and a USBTMC instrument.
+[Connecting on Linux, Windows and macOS, PyVISA, sigrok, Bluetooth](docs/manual/README.md#remote-control-and-connecting-from-a-computer);
+every command: [SCPI reference](docs/manual/scpi-reference.md).
 
-Then copy a good image (`dm40_opendm40_v<version>.bin`, any `dm40*.bin` name) onto the loader's disk and press
-"update". The loader deletes the file after a successful install.
-`INFO/FIRMWARE.BIN` on the opendm40 USB drive is the running image as an update
-file; keep a copy.
+## Documentation
 
-**One update file at a time.** Keep exactly one `dm40*.bin` on the disk: the
-loader installs the first match in directory order (not the newest, no
-version check), so a second file can install the wrong image
-(`stock/re/docs/fsloader-install-trigger.md`, in the private analysis repo). The
-stock firmware also installs any `dm40*.bin` it finds on its USB disk, so do
-not leave files with that name there by accident.
-
-**Back to stock:** copy the official
-[`dm40_v_2_6.bin`](stock/vendor/dm40_v_2_6.bin)
-onto the loader's disk and press "update", or run
-`firmware/tools/reload.sh --stock FILE` while opendm40 runs (tested with a patched stock
-image). Design and rationale: [firmware/docs/native-boot.md](firmware/docs/native-boot.md).
+- [User manual](docs/manual/README.md)
+- [SCPI reference](docs/manual/scpi-reference.md)
+- Developer documentation, hardware, the emulator and archived documents:
+  [firmware/README.md, Documentation](firmware/README.md#documentation)
 
 ## Build and develop
 
-[firmware/README.md](firmware/README.md): build, toolchain, source layout,
-host tools and the index of the firmware docs. The emulator
-([emu/README.md](emu/README.md)) runs both the stock firmware and opendm40.
+The firmware is written in Rust for the GD32F427 (Cortex-M4F). Build,
+debug link, tests and releases: [firmware/README.md](firmware/README.md). The
+[emulator](emu/README.md) runs opendm40 and the stock firmware without a
+meter. The hardware as far as it is known: [hw/README.md](hw/README.md).
+Tools for the stock update file: [stock/README.md](stock/README.md).
 
 ## Releases
 
@@ -199,43 +148,24 @@ install file `dm40_opendm40_v<version>.bin`; the changes per release are in
 [CHANGELOG.md](CHANGELOG.md), the rules in
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
-## Supporting material
+## Licence
 
-| Path | What |
-|---|---|
-| [stock/](stock/README.md) | Stock-firmware tooling: [`dm40fw.py`](stock/dm40fw.py) (update file decode / encode / pack incl. header CRCs), [`merge_boot.py`](stock/merge_boot.py) |
-| [stock/patch/](stock/patch/AGENTS.md) | Patch kit for the stock firmware (BT memory read/write, USB live stream); needs `gcc-arm-none-eabi`, `make`, `zip` |
-| [stock/patch/kit/](stock/patch/kit/README.md) | memrw backup kit: [`dm40_memrw.py`](stock/patch/kit/tools/dm40_memrw.py), tests, [`mkkit.sh`](stock/patch/kit/mkkit.sh) (builds `dist/`) |
-| `stock/re/` | Not in this repo: a clone of the private `wirenboard/alientek-dm40-fw-analysis` for those with access. Reverse-engineering notes on the stock firmware V2.6, the bootloader and the update format (`ANALYSIS.md`, `analysis/*.h`), capstone helpers, Ghidra scripts, the stock-firmware docs. The emulator needs the developer's own flash dumps in `stock/re/dumps/` |
-| [stock/vendor/](stock/vendor/README.md) | The latest official stock firmware, [`dm40_v_2_6.bin`](stock/vendor/dm40_v_2_6.bin) (Alientek's, unmodified, not under the MIT licence) |
-| [hw/](hw/README.md) | Hardware: chips, pins, front ends, power; teardown photos ([`hw/photos/`](hw/photos)) and datasheets ([`hw/datasheets/`](hw/datasheets)) |
-| [emu/](emu/README.md) | Renode emulator of the DM40 (stock firmware and opendm40) |
-| [docs/bt-protocol.md](docs/bt-protocol.md) | Bluetooth protocol of the stock DM40 (opendm40 keeps it) |
-| [docs/dm40-feature-request.md](docs/dm40-feature-request.md) | DM40C feature request and UX gap analysis (Russian) |
-| [docs/history/](docs/history/README.md) | Archived plans, reviews and handover notes (done or superseded) |
+opendm40 is under the MIT licence ([LICENSE](LICENSE)), © Wiren Board.
 
-The vendor update file returns a meter to stock and feeds the emulator and
-the stock-firmware tools. Older versions live in `wirenboard/alientek-dm40-tools`
-(`vendor/`). The Android app and the manuals are not in this repo.
-`emu/run.py stock` and [`firmware/tools/mkstockfont.py`](firmware/tools/mkstockfont.py) need the decoded body at
-the repo root (ignored by git):
+Not under the MIT licence:
 
-```
-python3 stock/dm40fw.py decode stock/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin
-```
+- [`stock/vendor/dm40_v_2_6.bin`](stock/vendor/README.md): Alientek's
+  unmodified update file, kept to return a meter to stock.
+- The bitmap fonts of the stock firmware V2.6, which opendm40 copies into its
+  image for the stock look
+  ([`firmware/src/stockfont_data.rs`](firmware/src/stockfont_data.rs),
+  [how they are made](firmware/docs/fonts.md)).
+- [`hw/photos/`](hw/photos/README.md) and [`hw/datasheets/`](hw/datasheets/README.md):
+  third-party material under its owners' copyright (the review author, the
+  chip manufacturers), kept for reference.
 
-Bluetooth tools need a Python with `AF_BLUETOOTH` sockets
-(`/usr/bin/python3` on Linux; the linuxbrew one has none).
+[`stock/patch/`](stock/patch) contains addresses and symbol names of the
+stock firmware V2.6.
 
-## License
-
-MIT, see [LICENSE](LICENSE). [`stock/patch/`](stock/patch) and the private analysis repo contain
-addresses, symbols and decompiled code of the vendor firmware. The vendor
-update file in [`stock/vendor/`](stock/vendor/README.md) is unmodified
-and under its own notice. [`firmware/fonts/`](firmware/fonts) carries its own font
-license.
-
-[`hw/photos/`](hw/photos) and [`hw/datasheets/`](hw/datasheets) are third-party material under their
-owners' copyright (the review author, the chip manufacturers), kept for
-reference and not covered by the MIT license; see [hw/photos/README.md](hw/photos/README.md),
-[hw/datasheets/README.md](hw/datasheets/README.md) and [stock/vendor/README.md](stock/vendor/README.md).
+The names Alientek and DM40 belong to their owner and are used here only to
+identify the hardware. opendm40 is not affiliated with or endorsed by Alientek.
