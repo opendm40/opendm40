@@ -13,7 +13,7 @@ open work in [TODO.md](../TODO.md).
 
 ## USB debug link
 
-opendm40 enumerates as a composite USBTMC + mass-storage device (`1209:0001`)
+opendm40 enumerates as a composite USBTMC + mass-storage device (`1209:D040`; builds before 0.1.0: `1209:0001`)
 on USBFS. Debug commands are SCPI `DBG:...` over USBTMC
 ([`src/scpi.rs`](../src/scpi.rs)), refused over Bluetooth. The host tool
 [`tools/dm40dbg.py`](../tools/dm40dbg.py) (PIL for screenshots) needs
@@ -100,7 +100,7 @@ stages the file on the stock "USB Connect" disk and tells you to press
 with the official [`../stock/vendor/dm40_v_2_6.bin`](../../stock/vendor/dm40_v_2_6.bin)
 or `../stock/patch/build-memrw/dm40_patched.bin` (patched stock with
 Bluetooth memrw, built by [`../stock/patch/kit/mkkit.sh`](../../stock/patch/kit/mkkit.sh)).
-Same flow, no wait (stock does not enumerate `1209:0001`).
+Same flow, no wait (stock does not enumerate `1209:D040`).
 
 **Recovery** (opendm40 hangs or does not start):
 [README.md, Recovery](../../README.md#recovery). `INFO/FIRMWARE.BIN` on the

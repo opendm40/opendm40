@@ -37,7 +37,8 @@ FW=$(cd "$(dirname "$0")/.." && pwd)
 ROOT=$(dirname "$FW")
 PY=${PYTHON:-/usr/bin/python3}
 DBG=("$PY" -I "$FW/tools/dm40dbg.py")
-FWRS_ID=1209:0001
+# opendm40: 1209:d040; builds before it enumerated as the pid.codes test PID 0001.
+FWRS_ID='1209:(d040|0001)'
 STOCK_ID=28e9:028f
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; }
@@ -65,7 +66,7 @@ usb_present() {
     for f in /sys/bus/usb/devices/*/idVendor; do
         [ -e "$f" ] || continue
         d=$(dirname "$f")
-        [ "$(cat "$f"):$(cat "$d/idProduct" 2>/dev/null)" = "$1" ] && return 0
+        [[ "$(cat "$f"):$(cat "$d/idProduct" 2>/dev/null)" =~ ^($1)$ ]] && return 0
     done
     return 1
 }
@@ -78,7 +79,7 @@ find_disk() {
         [ -e "$b/partition" ] && continue
         d=$(readlink -f "$b/device")
         while [ "$d" != / ] && [ ! -f "$d/idVendor" ]; do d=$(dirname "$d"); done
-        if [ -f "$d/idVendor" ] && [ "$(cat "$d/idVendor"):$(cat "$d/idProduct")" = "$1" ]; then
+        if [ -f "$d/idVendor" ] && [[ "$(cat "$d/idVendor"):$(cat "$d/idProduct")" =~ ^($1)$ ]]; then
             echo "/dev/$(basename "$b")"
             return 0
         fi

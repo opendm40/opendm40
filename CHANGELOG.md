@@ -38,6 +38,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- USB ID `1209:D040` (opendm40's own PID under the pid.codes VID) instead
+  of the pid.codes test ID `1209:0001`; udev rules and VISA resource
+  strings change accordingly. The host tools accept both.
 - Multimeter rate (DC V, mV, A and Ω): every rate now rejects 50 Hz and
   60 Hz hum. FAST: 10 readings/s (Ω 5/s); in DC V / mV / A the converter
   runs without its chopper and the meter measures its offset itself (2 s

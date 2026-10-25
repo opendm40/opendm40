@@ -221,7 +221,7 @@ code 28. The USB drive (mass storage) works without any driver. Choose one:
 
 - Install NI-VISA or Keysight IO Libraries Suite. Both bring a USBTMC
   driver. Then `pyvisa.ResourceManager()` (the VISA library) lists the
-  meter as `USB0::0x1209::0x0001::...::INSTR`.
+  meter as `USB0::0x1209::0xD040::...::INSTR`.
 - Or bind WinUSB to the USBTMC interface with Zadig (Options > List All
   Devices, pick the DM40's USBTMC interface, **not** the mass-storage one,
   choose WinUSB, Install Driver). Then use pyvisa-py with pyusb and
@@ -231,7 +231,7 @@ code 28. The USB drive (mass storage) works without any driver. Choose one:
 ```python
 import pyvisa
 rm = pyvisa.ResourceManager('@py')    # or ResourceManager() with NI / Keysight VISA
-dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0x0001::?*')[0],
+dmm = rm.open_resource(rm.list_resources('USB?*::0x1209::0xD040::?*')[0],
                        read_termination='\n', write_termination='\n', timeout=5000)
 print(dmm.query('*IDN?'))
 ```

@@ -204,7 +204,7 @@ emu/run.py fwrs  --fast --usbip 0.01 --run-for 600     # headless: USB/IP on TCP
                                                       # (the model's server; --usbip-renode: Renode's)
 emu/run.py stock --app ../alientek-dm40-tools/patch/build/dm40_patched.bin --fast --usbip 6 --run-for 600
 # other terminal (plain TCP, no root, no vhci):
-emu/usbip_client.py list                 # busid=1-0 1209:0001 interfaces fe/03/01 08/06/50
+emu/usbip_client.py list                 # busid=1-0 1209:d040 interfaces fe/03/01 08/06/50
 emu/usbip_client.py desc   1-0           # device descriptor
 emu/usbip_client.py config 1-0           # interfaces + endpoints
 emu/usbip_client.py usbtmc 1-0 "*IDN?"   # -> Alientek,DM40A,<chip UID hex = emu_uid>,opendm40 0.1
@@ -231,7 +231,7 @@ Renode's (`emulation CreateUSBIPServer` + `host.usb Register`), which only
 speed. With Renode's server, the usbrw image (ep0 memrw session) passes its
 acceptance (descriptor 28e9:02f0, UID read, RAM write + read-back); on the
 model's server it has not been run (its control OUT with a data stage is
-untested). opendm40 enumerates as 1209:0001, answers SCPI over USBTMC and serves the SPI disk over
+untested). opendm40 enumerates as 1209:D040, answers SCPI over USBTMC and serves the SPI disk over
 MSC. Stock firmware: the device exists only after Settings > Other > USB
 Connect; a DEVLIST / IMPORT whose descriptor read gets no answer within 3 s
 lists no device / refuses the import. After USB Connect the stock (V2.6,
@@ -253,7 +253,7 @@ kernel times out twice (2 x 5 s, unlinked) and goes on.
 ```sh
 emu/run.py fwrs --fast --usbip 0.01 --usbip-port 3240 --run-for 3600 &   # usbip attach only knows TCP 3240
 sudo modprobe vhci-hcd
-sudo usbip attach -r 127.0.0.1 -b 1-0       # lsusb: a second 1209:0001, on the vhci bus (9 here)
+sudo usbip attach -r 127.0.0.1 -b 1-0       # lsusb: a second 1209:d040, on the vhci bus (9 here)
 ls /sys/bus/usb/devices/9-1:1.0/usbmisc/    # its /dev/usbtmcN (the real DM40 has another one)
 DM40_USBTMC=emu firmware/tools/dm40scpi.py info    # emu = the usbtmc under vhci_hcd, real = the other,
 DM40_USBTMC=emu firmware/tools/dm40dbg.py ping     # or DM40_USBTMC=/dev/usbtmcN

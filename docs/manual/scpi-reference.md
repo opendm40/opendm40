@@ -176,7 +176,7 @@ probe tip. In Python with PyVISA:
 ```python
 import pyvisa
 rm = pyvisa.ResourceManager('@py')
-names = [r for r in rm.list_resources() if '::4617::1::' in r or '::0x1209::0x0001::' in r]
+names = [r for r in rm.list_resources() if '::4617::53312::' in r or '::0x1209::0xD040::' in r]
 m = rm.open_resource(names[0], read_termination='\n', write_termination='\n',
                      timeout=5000)
 print(m.query('*IDN?'))

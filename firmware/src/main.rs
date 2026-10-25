@@ -145,8 +145,10 @@ fn scpi_func_key(d: &dmm::Dmm) -> (u8, u8) {
     (scpi::func_id(d.func()), d.t_sensor())
 }
 
-/// pid.codes test VID/PID, for the debug build only.
-const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0x0001);
+/// pid.codes VID 1209, PID D040 for opendm40 (owner 2026-10-25; the pid.codes
+/// request is filed once the repository is public). Builds before 0.1.0 used
+/// the pid.codes test PID 0001; the host tools accept both.
+const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0xD040);
 
 // CPU-only USB buffers in TCM .bss (2026-10-22 memory budget: the stack
 // has the headroom now, SRAM is the tighter one; they were .sram_bss).
