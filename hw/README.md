@@ -6,8 +6,9 @@ and the mysku.club review they come from (CTAHOK, 2025-04-25,
 https://mysku.club/blog/aliexpress/103047.html). Datasheets are in
 [datasheets/](datasheets/README.md).
 
-All photos on this page are © CTAHOK (mysku.club review, 2025-04-25), kept
-for reference only and not under this repo's license; sources and details in
+The teardown photos on this page are © CTAHOK (mysku.club review, 2025-04-25), kept
+for reference only and not under this repo's license; the photos taken for this
+repo are under its MIT licence. Sources and details in
 [photos/README.md](photos/README.md).
 
 This page is about hardware only: chips, pins, circuits. Flash layout and boot
@@ -151,7 +152,7 @@ scope, generator) shares one ground.
 | DMM relay | Hongfa [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) (DPDT, 3 V, latching per BOM) | marking in photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (*inferred*, chat report [#41820](https://t.me/S2084K/41820)) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is *inferred* from the markings |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47 ohm (MELF 0207, *inferred*; uA shunt 0.5 + 47 = 47.5 ohm) | 0.5 ohm: marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and opendm40 checks (below) |
-| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM only |
+| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A, and a second MOSFET marked RU30J30M (not in the BOM); switch the current ranges inside the one A jack | BOM for the RUH30J51M; both markings on the board bottom next to the A jack in [bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg](photos/bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg); what the RU30J30M switches is *inferred* |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); one 10 A ceramic fuse for all shunts by the Alientek DM40 manual (not in the repo) |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
 | Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, `stock/re/analysis/scope_gen_v2_6.h` |
@@ -730,8 +731,11 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
 14. [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) placement: the BOM post says the reference sits outside the
     shielded zone; this page's diagram draws it in the (shielded) DMM domain,
-    which is about the isolated side, not the shield can. Not checked on the
-    photos.
+    which is about the isolated side, not the shield can. The photo
+    [dmm-area-max6190-shunt-fuse.jpg](photos/dmm-area-max6190-shunt-fuse.jpg)
+    shows it on the top side in the area under the DMM shield plate, next to the
+    AGND test point, outside the small shield can; whether that plate counts as
+    the BOM's "shielded zone" is unknown.
 15. What the four optocouplers carry: the BOM post guesses the HY3131 INT plus
     the relay and MOSFET drive; the stock firmware does not use the HY3131
     IRQ ([DMM front end](#dmm-front-end-hy3131)), and the MCU drives four
