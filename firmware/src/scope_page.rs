@@ -9,14 +9,19 @@
 //!   taps on overlapping zones cycle through them; the selected marker turns
 //!   filled, the guide lines of the selection show from the press until 2 s
 //!   after the last event;
-//! * per-event drag (raw `Move` reports, no slop or axis lock): |dx| <= |dy|
-//!   moves the selected level item (CH1 position, trigger level, Y cursor)
-//!   by dy rows, else the selected time item (trigger position / stored
-//!   record pan, X cursor) by dx px; a 4 px tap tolerance before the first
-//!   move applies (the stock nudges the item on a wobbly tap). opendm40: a
-//!   press on a marker zone locks the drag to that marker's axis (level
-//!   markers vertical, time markers horizontal) for the whole gesture; the
-//!   per-event split applies only to presses off the markers;
+//! * drag (opendm40, owner 2026-10-25: "drag only ONE thing, along ONE
+//!   axis, until the finger is lifted"; the stock split every move report:
+//!   |dx| <= |dy| moved the selected level item, else the selected time
+//!   item, so a sideways pan with vertical wobble also moved the trigger
+//!   level): one item per gesture, chosen at the press (the marker under
+//!   the finger, else the selected items), one axis, decided by the first
+//!   motion (LOCK_SLOP) and kept until the release. Off the markers:
+//!   horizontal moves the selected time item (trigger position / stored
+//!   record pan, X cursor), vertical the selected level item (CH1 position,
+//!   trigger level, Y cursor). On a marker: only along its own axis (level
+//!   markers vertical, time markers horizontal); a first motion across it
+//!   moves nothing for the rest of the gesture. A 4 px tap tolerance
+//!   before the first move;
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 1): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -31,9 +36,9 @@
 //!   Trigger tab;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
 //!   on (swipes that start outside the drag area: top bar, panel);
-//! * alternatives (Settings "Scope drag"): Axis lock (the first 15 px decide
-//!   the axis, then only that axis), Hold 300 ms (moves count after a still
-//!   hold; the beep marks the grab).
+//! * alternatives (Settings "Scope drag"): Hold 300 ms (moves count after a
+//!   still hold; the beep marks the grab). "Stock" and "Axis lock" both lock
+//!   the axis now (above).
 //! Responsiveness (owner, 2026-10-13: "dragging the trace lags"): while a
 //! drag is active the acquisition is not polled (no new frames, no restart
 //! per event); each event re-renders the frame already shown from its
@@ -57,8 +62,6 @@ const DOUBLE_MS: u64 = 400;
 /// Movement (px from the press) a touch may wobble and still be a tap; the
 /// drag starts beyond it (with the accumulated delta, nothing is lost).
 const TAP_TOL: i32 = 4;
-/// Axis-lock mode: travel that decides the axis (gesture.rs SLOP).
-const LOCK_SLOP: i32 = 15;
 /// Pressed-button feedback (one stock pressed colour frame), ms.
 const PRESS_MS: u64 = 120;
 /// Timebase badge flash / stepped tab pressed style after a step, ms.
@@ -95,21 +98,11 @@ pub(super) struct Touch {
     /// pan so far (px).
     anchor: Option<usize>,
     pan: i32,
-    /// Axis-lock mode: the decided axis. A press on a marker zone locks it
-    /// at the press for the whole gesture (level group: V, time group: H),
-    /// in every drag mode, except the trigger-level marker of a running
-    /// scope (`both`).
+    /// The axis the first motion decided (kept until the release).
     axis: Option<Axis>,
-    /// The press grabbed the trigger-level marker of a running scope: the
-    /// drag moves the trigger point in 2-D, level by dy and position by dx
-    /// on every event; the trace stays put (`sp_render`), only the trigger
-    /// markers and their guide lines follow the finger (owner 2026-10-24:
-    /// "it should drag the vertical trigger line, not the waveform"). The
-    /// next acquisition after the release re-triggers at the new point.
-    both: bool,
-    /// A line-zone press: the axis is decided by the first motion (as the
-    /// Axis lock drag mode), not locked at the press.
-    decide: bool,
+    /// The press grabbed a marker: its axis (level group V, time group H);
+    /// a gesture whose first motion goes the other way moves nothing.
+    own: Option<Axis>,
     /// Hold mode: grabbed.
     grabbed: bool,
     /// Combined view: sub-row remainder of vertical moves.
@@ -362,8 +355,6 @@ pub(super) struct Sp {
     /// The press picked the item that was already selected (a still tap
     /// then cycles to the next overlapping one, `sp_release`).
     presel: bool,
-    /// The press hit a line zone, not a marker glyph (`sp_select`).
-    line_press: bool,
     cur_saved: Option<([u8; 4], usize)>,
     last_tap: Option<(u64, Point)>,
     /// Math display settings; what the FFT additions show (from `sp_math`).
@@ -422,7 +413,6 @@ impl Sp {
             tb_drawn: (255, false),
             cur_press: false,
             presel: false,
-            line_press: false,
             cur_saved: None,
             last_tap: None,
             math: Math::DEFAULT,
@@ -829,16 +819,9 @@ impl App {
             Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
             None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
-        // A stopped pan moves the record under the trigger column; a
-        // trigger-point drag (`Touch::both`) moves only the markers.
+        // A stopped pan moves the record under the trigger column.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
-        let hpos = if self.sp.touch.is_some_and(|t| t.both) {
-            c.hpos
-        } else if s.run {
-            s.hpos
-        } else {
-            c.hpos + pan
-        };
+        let hpos = if s.run { s.hpos } else { c.hpos + pan };
         let zr = (140 + s.pos) as f32;
         let d_pos = s.pos - c.pos;
         for j in 0..399 {
@@ -1260,10 +1243,6 @@ impl App {
         self.sp.cur_press = false;
         self.sp.presel = false;
         let m = self.sp_model(self.now);
-        // A line zone (cursor / guide line) selects its item, but the drag
-        // decides its axis from the first motion (`Touch::decide`): a
-        // sideways pan along the CH1 zero line still pans.
-        self.sp.line_press = su::graph_pick(&m, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16).is_some_and(|q| q.line());
         match su::graph_press(&m, self.sp.tap_mode, self.sp.sel_v, self.sp.sel_h, self.sp.last_h, p.x as i16, p.y as i16) {
             su::Press::Marker(level, id) => {
                 // Already the selection: a still tap cycles on release.
@@ -1356,13 +1335,6 @@ impl App {
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let (hit, side) = self.sp_select(p);
                 let s = self.scope.s;
-                let decide = hit && self.sp.line_press;
-                let both = hit && !decide && !self.sp.last_h && self.sp.sel_v == 1 && s.run && !self.scope.rolling();
-                if both {
-                    // The trigger position follows dx: select it (its T
-                    // marker fills, its guide line shows).
-                    self.sp.sel_h = 0;
-                }
                 self.sp.touch = Some(Touch {
                     p0: p,
                     last: p,
@@ -1375,9 +1347,8 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: (hit && !both && !decide).then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
-                    both,
-                    decide,
+                    axis: None,
+                    own: hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1529,43 +1500,19 @@ impl App {
             t.moving = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
-        if t.both {
-            // Trigger point: both axes on every event.
-            t.applied = p;
-            self.sp.touch = Some(t);
-            self.sp.guide_until = now + GUIDE_MS;
-            if dy != 0 {
-                self.sp_move_v(dy, now);
-            }
-            if dx != 0 {
-                self.sp_move_h(dx, now);
-            }
-            return;
-        }
-        if self.sp.drag_mode == DRAG_AXIS || t.axis.is_some() || t.decide {
-            if t.axis.is_none() {
-                let (ax, ay) = ((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs());
-                if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
-                    t.axis = Some(Axis::H);
-                } else if 2 * ay >= 3 * ax && ay > LOCK_SLOP / 2 {
-                    t.axis = Some(Axis::V);
-                } else if ax.max(ay) > 2 * LOCK_SLOP {
-                    t.axis = Some(if ax >= ay { Axis::H } else { Axis::V });
-                } else {
+        // One axis per gesture, decided by the first motion (every drag
+        // mode; the stock per-event split is gone): scope_ui::drag_axis /
+        // drag_delta.
+        if t.axis.is_none() {
+            match su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) {
+                Some(h) => t.axis = Some(if h { Axis::H } else { Axis::V }),
+                None => {
                     self.sp.touch = Some(t);
                     return;
                 }
             }
-            match t.axis {
-                Some(Axis::H) => dy = 0,
-                _ => dx = 0,
-            }
-        } else if dx.abs() <= dy.abs() {
-            // Stock per-event attribution.
-            dx = 0;
-        } else {
-            dy = 0;
         }
+        (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), t.own.map(|o| o == Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
         if dx == 0 && dy == 0 {

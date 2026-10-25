@@ -1030,7 +1030,7 @@ pub struct Zone {
 
 impl Zone {
     pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
-    /// A line zone (cursor / guide line), not a marker glyph.
+    /// A line zone (cursor line), not a marker glyph.
     pub fn line(&self) -> bool {
         self.o.w > 12 || self.o.h > 12
     }
@@ -1051,7 +1051,7 @@ impl Zone {
 /// Marker zones: the glyph grown by this much (owner 2026-10-24: a drag
 /// that starts near a marker grabs it; the stock 10 px).
 pub const GROW: i16 = 12;
-/// Line zones: +-this many px around a cursor / guide line.
+/// Line zones: +-this many px around a cursor line.
 pub const LINE_GROW: i16 = 12;
 /// `pick_near`: a selected item this much farther than the nearest still
 /// wins (the marker last selected is preferred among close ones).
@@ -1112,39 +1112,10 @@ fn hline_zone(id: u8, y: i16) -> Zone {
     Zone { level: true, id, r: rect(13, y - LINE_GROW, 401, 2 * LINE_GROW + 1), o: rect(13, y, 401, 1) }
 }
 
-/// opendm40 (owner 2026-10-24): while the guide lines show, they are zones
-/// too: the selected level item's line (CH1, trigger level, math offset,
-/// runt level; the Y cursors have `line_zones`) and the trigger position's
-/// line. Rows as the guide lines (`Deco`).
-pub fn guide_zones(m: &Model, out: &mut [Zone; 2]) -> usize {
-    if !m.guide {
-        return 0;
-    }
-    let (top, h) = (m.top(), m.frame_h());
-    let mut n = 0;
-    let row = match m.sel_v {
-        0 => Some(140 + m.pos as i32),
-        1 => Some(m.trig_row as i32),
-        2 if m.math_on => Some(140 + m.math_off as i32),
-        5 => m.runt_row.map(|r| r as i32),
-        _ => None,
-    };
-    if let Some(r) = row {
-        let fy = line_fy(h, r);
-        if (0..h).contains(&fy) {
-            out[n] = hline_zone(m.sel_v, top + fy);
-            n += 1;
-        }
-    }
-    if m.sel_h == 0 && (1..=399).contains(&m.trig_px) {
-        out[n] = vline_zone(false, 0, m.trig_px, top, h);
-        n += 1;
-    }
-    n
-}
-
-/// All press zones: markers (`zones`), cursor lines, guide lines.
-pub const NALL: usize = NZONE + 4 + 2;
+/// All press zones: markers (`zones`) and cursor lines (owner 2026-10-25:
+/// the guide lines are not zones; a drag on the trace near a shown guide
+/// line grabbed its item instead of panning).
+pub const NALL: usize = NZONE + 4;
 
 pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
     let mut z = [Zone::NONE; NZONE];
@@ -1157,12 +1128,6 @@ pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
     let mut l = [Zone::NONE; 4];
     let k = line_zones(m, &mut l);
     for q in l[..k].iter() {
-        out[n] = *q;
-        n += 1;
-    }
-    let mut g = [Zone::NONE; 2];
-    let k = guide_zones(m, &mut g);
-    for q in g[..k].iter() {
         out[n] = *q;
         n += 1;
     }
@@ -1194,6 +1159,39 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
         }
     }
     Some(bi)
+}
+
+/// Drag axis decision: travel (px) that decides it (gesture.rs SLOP).
+const LOCK_SLOP: i32 = 15;
+
+/// The axis of a scope drag from its travel since the press (|dx|, |dy|):
+/// Some(true) horizontal, Some(false) vertical, None undecided. Past
+/// LOCK_SLOP / 2 px along an axis that leads 3:2, or past 2 * LOCK_SLOP
+/// along the larger one.
+pub fn drag_axis(ax: i32, ay: i32) -> Option<bool> {
+    if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
+        Some(true)
+    } else if 2 * ay >= 3 * ax && ay > LOCK_SLOP / 2 {
+        Some(false)
+    } else if ax.max(ay) > 2 * LOCK_SLOP {
+        Some(ax >= ay)
+    } else {
+        None
+    }
+}
+
+/// What a move report (dx, dy) applies once the drag's axis is decided
+/// (`horizontal`): only that axis; a grabbed marker (`own`: its axis,
+/// Some(true) a time marker) only along its own axis, nothing across it
+/// (owner 2026-10-25: one item, one axis per gesture).
+pub fn drag_delta(horizontal: bool, own: Option<bool>, dx: i32, dy: i32) -> (i32, i32) {
+    if own.is_some_and(|o| o != horizontal) {
+        (0, 0)
+    } else if horizontal {
+        (dx, 0)
+    } else {
+        (0, dy)
+    }
 }
 
 /// The zone a press at (x, y) picks (`pick_near` over `all_zones`).
@@ -2153,7 +2151,7 @@ pub enum Press {
 }
 
 /// The page's press decision at (x, y) inside INNER: the object under the
-/// finger wins: the nearest marker / cursor line / shown guide line
+/// finger wins: the nearest marker / cursor line
 /// (`pick_near`), and only then the tap-step zone of `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
     if let Some(q) = graph_pick(m, sel_v, sel_h, last_h, x, y) {

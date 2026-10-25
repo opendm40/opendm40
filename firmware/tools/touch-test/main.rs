@@ -920,24 +920,51 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("near grab: the nearer marker wins (X1 2 px off, T 7 px off)", gs(&m, 0, 0, true, 226, 26) == Press::Marker(false, 2));
     ck.t("near grab: the selected marker wins within the tie (T 3 px off, X1 on it)", gs(&m, 0, 0, true, 222, 26) == Press::Marker(false, 0));
     ck.t("near grab: no tie preference for the unselected (X1 selected, 5 px off; T on it)", gs(&m, 0, 2, true, 208, 26) == Press::Marker(false, 0));
+    // Owner 2026-10-25: the guide lines are not zones: a drag on the trace
+    // next to the shown trigger-level / trigger-position / CH1 line pans.
     let mut m = d;
     m.guide = true;
     m.sel_v = 1;
-    ck.t("guide line zone: the trigger-level line, 10 px off, mid-graph", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::Marker(true, 1));
     m.sel_h = 0;
-    ck.t("guide line zone: the trigger-position line, 10 px off", gs(&m, 1, 0, false, 214 + 10, 200) == Press::Marker(false, 0));
-    m.guide = false;
-    ck.t("guide line zones only while the guides show", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::None && gs(&m, 1, 0, false, 224, 200) == Press::None);
+    ck.t("no guide line zones: 10 px off the shown trigger-level line, mid-graph, is no marker", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::None && gs(&m, 1, 0, false, 200, 20 + 105) == Press::None);
+    ck.t("no guide line zones: next to the trigger-position line, CH1 zero line", gs(&m, 1, 0, false, 224, 200) == Press::None && gs(&m, 0, 0, false, 200, 165) == Press::None);
     let mut m = d;
     m.trig_row = 140; // trigger-level marker x 401..412 and CH1 at row 140
     m.ycur = Some([140, 220]); // Y1 line on the same row
     ck.t("near grab: CH1 marker over the Y1 line (equal distance: the marker)", gs(&m, 3, 0, false, 6, 160) == Press::Marker(true, 3) && gs(&m, 4, 0, false, 6, 160) == Press::Marker(true, 0));
     ck.t("tap cycling: CH1 selected, a tap on it -> Y1", su::graph_cycle(&m, 0, 0, false, 6, 160) == Some((true, 3)));
-    let mut m = d;
-    m.guide = true; // CH1 selected (sel_v 0), its zero line at y 160
-    let q = su::graph_pick(&m, 0, 0, false, 200, 165);
-    ck.t("guide line of CH1: a line zone (the drag decides its axis, a pan still pans)", q.is_some_and(|q| q.level && q.id == 0 && q.line()));
     ck.t("marker glyph zones are not line zones", su::graph_pick(&d, 0, 0, false, 406, 125).is_some_and(|q| !q.line()));
+    // One item, one axis per gesture (owner 2026-10-25): a finger path
+    // through drag_axis / drag_delta as scope_page.rs sp_move applies it.
+    let run = |own: Option<bool>, path: &[(i32, i32)]| -> (i32, i32) {
+        let (mut ax, mut sx, mut sy) = (None, 0, 0);
+        let mut last = (0, 0);
+        for &(x, y) in path {
+            if ax.is_none() {
+                ax = su::drag_axis(x.abs(), y.abs());
+                if ax.is_none() {
+                    continue; // undecided: nothing applied, the delta kept
+                }
+            }
+            let (dx, dy) = su::drag_delta(ax.unwrap(), own, x - last.0, y - last.1);
+            sx += dx;
+            sy += dy;
+            last = (x, y);
+        }
+        (sx, sy)
+    };
+    // A sideways pan with vertical wobble (every 3rd report mostly
+    // vertical: the stock split moved the selected level item with them).
+    let pan: Vec<(i32, i32)> = (1..=30).map(|i| (4 * i, [0, 6, 2][i as usize % 3])).collect();
+    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(None, &pan) == (120, 0));
+    let vert: Vec<(i32, i32)> = (1..=20).map(|i| ([0, 4, 2][i as usize % 3], 3 * i)).collect();
+    ck.t("vertical drag with sideways jitter: vertical only", run(None, &vert) == (0, 60));
+    ck.t("trigger-level marker (level, vertical): a sideways first motion moves nothing", run(Some(false), &pan) == (0, 0));
+    ck.t("trigger-level marker dragged vertically with jitter: vertical only", run(Some(false), &vert) == (0, 60));
+    ck.t("T position marker (time): vertical first motion moves nothing", run(Some(true), &vert) == (0, 0));
+    let diag: Vec<(i32, i32)> = (1..=20).map(|i| (3 * i, 2 * i)).collect();
+    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(None, &diag); r.1 == 0 && r.0 == 60 });
+    ck.t("drag_axis: undecided below the slop, 3:2 lead past 7 px", su::drag_axis(7, 0).is_none() && su::drag_axis(8, 5) == Some(true) && su::drag_axis(5, 8) == Some(false) && su::drag_axis(20, 20).is_none() && su::drag_axis(31, 30) == Some(true));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
     su::invalidate();
