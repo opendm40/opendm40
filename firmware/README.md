@@ -7,7 +7,7 @@ are in the [root README](../README.md). Paths below are relative to
 ## Build
 
 ```
-./build.sh                    # -> opendm40.bin + dm40_opendm40_v<version>.bin (needs ../toolchain)
+./build.sh                    # -> opendm40.bin + dm40_opendm40_v<version>.bin
 tools/reload.sh               # build, upload over USBTMC, install, check
 tools/ui-render/run.sh OUT    # render every screen to PNG + layout check
 tools/scpi-doc-check/run.sh   # SCPI parser vs docs/manual/scpi-reference.md
@@ -45,6 +45,61 @@ RUSTUP_HOME=$PWD/toolchain/rustup CARGO_HOME=$PWD/toolchain/cargo \
 ```
 
 The host tests also need `mtools` ([`tools/fatren-test`](tools/fatren-test)).
+
+Without `../toolchain` (CI, another checkout) `build.sh` takes the rustup
+install that `RUSTUP_HOME` / `CARGO_HOME` name (default `~/.rustup`,
+`~/.cargo`), with the same target and `llvm-tools`. The image bytes depend
+only on the commit and the rustc version: `build.sh` remaps every absolute
+path (checkout, rustup, cargo registry) and nothing in the image is
+time-stamped, so rustc 1.99.0 gives the same `opendm40.bin` in any
+directory and in CI.
+
+## CI and releases
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every push
+and pull request to `main` and `rust-fw-poc`:
+
+| Job | What |
+|---|---|
+| Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
+| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): every `tools/*/run.sh` suite that needs no personal dumps (all but `genuine-test`); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
+| Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh) |
+| Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not |
+
+The emulator tests ([emu/README.md](../emu/README.md)) are not in CI: they
+need a flash dump of a meter.
+
+### Releasing
+
+Versions are `0.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown without a
+`.0` patch; the tag is `v` + the shown version:
+
+| Cargo.toml | Shown, tag | When |
+|---|---|---|
+| `0.1.0-pre2` | `0.1-pre2`, `v0.1-pre2` | a pre-release on the way to 0.1 (also `-rcN`) |
+| `0.1.0` | `0.1`, `v0.1` | MINOR: new features or changed behaviour |
+| `0.1.1` | `0.1.1`, `v0.1.1` | PATCH: fixes only |
+
+1. Set `version` in [`Cargo.toml`](Cargo.toml) and run `./build.sh` once, so
+   that `Cargo.lock` follows (CI builds with `--locked` and fails on a stale
+   lock).
+2. In [`../CHANGELOG.md`](../CHANGELOG.md), rename `## Unreleased` to
+   `## v<version> (<date>)` and start a new empty `## Unreleased` above it.
+3. Commit both files, push the branch, wait for CI.
+4. Tag and push the tag: `git tag -a v0.1-pre2 -m "opendm40 v0.1-pre2"`,
+   `git push origin v0.1-pre2`.
+
+The tag starts [`.github/workflows/release.yml`](../.github/workflows/release.yml):
+the CI jobs, then a check that the tag is `v` + [`tools/fw-version.sh`](tools/fw-version.sh)
+(a mismatch fails the release), a clean `build.sh --locked`, and the GitHub
+release with `dm40_opendm40_v<version>.bin` and `SHA256SUMS`, a pre-release
+for a `-pre` / `-rc` tag. The notes ([`tools/release-notes.sh`](tools/release-notes.sh))
+are the install, backup and recovery steps, then the tag's
+`CHANGELOG.md` section, or GitHub's generated notes when there is none.
+
+After a release, the next firmware change needs a new version before it is
+pushed (the Version job fails otherwise): bump to the next `-preN` or
+release version in the same commit.
 
 ## Layout
 
