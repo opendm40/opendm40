@@ -31,7 +31,18 @@ What waits for the owner; each line links to the material.
       on: SETTINGS,FILE, DC V, AUTO, AutoHold 0, limits off, 200 us/div, the alarm LOUD kept. The same set, then
       `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
       manual says: a fixed range is never kept).
-- [ ] RES AUTO: include the 60 Ω range or not.
+- [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 4f52089d (dmm.rs `poll_ohm`,
+      `ohm_auto_floor`). The stock autorange never selects r0 (its clamp is r1..r6,
+      [dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 2), so the step uses the stock rule of the other ohm steps:
+      600 -> 60 Ω below 0.1 x limit / over = 58.25 Ω, 60 -> 600 Ω above limit x over = 61.8 Ω. With 0.28 mA ON
+      AUTO stops at 600 Ω (60 Ω always drives 0.90 mA); a manual 60 Ω still works. emu/hy3131/resautotest.py PASS.
+      Device check (calibrator on V-COM, RES AUTO, `RES:RANG?` and the status bar after each step):
+      1. 10 Ω and 50 Ω: 60 Ω range, milliohm digits, test current I 0.90 mA; no range change while it stays.
+      2. 100 Ω and 300 Ω: 600 Ω range. Then 50 Ω -> 300 Ω -> 50 Ω: 60 -> 600 -> 60 Ω, no back-and-forth.
+      3. Near the band, if the calibrator resolves it: 57 Ω from 600 Ω -> 60 Ω; 60 Ω from either range stays.
+      4. Open input (output off and the leads removed), from 60 Ω: AUTO ends on 60 MΩ with OL, no step down.
+      5. 0.28 mA ON (range page), 50 Ω: AUTO stays on 600 Ω with I 0.28 mA; the 60 Ω item still selects 60 Ω.
+      6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
