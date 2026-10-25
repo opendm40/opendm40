@@ -12,6 +12,9 @@
 //!      Reported per page (not failures): how far each hit area reaches past
 //!      its drawn box, and the dead pixels next to buttons (a tap there does
 //!      nothing).
+//!   5. touchcal.rs: the affine fit (synthetic taps through a known map
+//!      give it back; outliers, a bad scale or shift are refused) and
+//!      touch.rs `screen()` with a calibration (keys never mapped);
 //!   main [-v]     prints "cases N, failures M", exit 1 if M > 0
 #![allow(dead_code, unused, static_mut_refs)]
 
@@ -64,6 +67,8 @@ mod scope_ui;
 mod stockfont;
 #[path = "../../src/touch.rs"]
 mod touch;
+#[path = "../../src/touchcal.rs"]
+mod touchcal;
 #[path = "../../src/ui.rs"]
 mod ui;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
@@ -1335,6 +1340,97 @@ fn wave_step_tests(ck: &mut Ck) {
     }
 }
 
+// ------------------------------------------------------- 5. calibration
+
+/// The touch test page's nine targets (ui_touchtest.rs TARGETS).
+const TGT: [(u16, u16); 9] = ui::touchtest::TARGETS;
+
+/// Raw taps (`per` per target) of a panel whose controller reports
+/// raw = inverse of (a..f) at each target, plus `noise` (deterministic,
+/// +-noise px), as (raw, target) lists.
+fn taps(k: [f64; 6], per: usize, noise: i32) -> (Vec<(i16, i16)>, Vec<(i16, i16)>) {
+    // Invert x' = a x + b y + c, y' = d x + e y + f.
+    let det = k[0] * k[4] - k[1] * k[3];
+    let (mut raw, mut tgt) = (vec![], vec![]);
+    let mut seed = 12345u32;
+    for &(tx, ty) in TGT.iter() {
+        for _ in 0..per {
+            let (u, v) = (tx as f64 - k[2], ty as f64 - k[5]);
+            let x = (k[4] * u - k[1] * v) / det;
+            let y = (-k[3] * u + k[0] * v) / det;
+            let mut r = || {
+                seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+                if noise == 0 { 0 } else { (seed >> 16) as i32 % (2 * noise + 1) - noise }
+            };
+            let (nx, ny) = (r(), r());
+            raw.push(((x.round() as i32 + nx) as i16, (y.round() as i32 + ny) as i16));
+            tgt.push((tx as i16, ty as i16));
+        }
+    }
+    (raw, tgt)
+}
+
+fn cal_tests(ck: &mut Ck) {
+    use touchcal::{fit, Bad};
+    // This unit's fit (DBG:TOUCH? taps on the nine targets): given back.
+    let unit = [0.9961, 0.0101, -5.65, 0.0061, 0.9523, 0.70];
+    let (raw, tgt) = taps(unit, 2, 0);
+    let f = fit(&raw, &tgt, &TGT);
+    let k = f.map(|f| touchcal::to_f32(&f.cal)).unwrap_or([0.0; 6]);
+    let near = |a: f32, b: f64, tol: f64| ((a as f64) - b).abs() <= tol;
+    ck.t("fit: the unit's map given back (scale / cross within 0.003)", [0, 1, 3, 4].iter().all(|&i| near(k[i], unit[i], 0.003)));
+    ck.t("fit: offsets within 0.6 px", near(k[2], unit[2], 0.6) && near(k[5], unit[5], 0.6));
+    ck.t("fit: accepted, residual <= 1 px", f.is_some_and(|f| f.bad.is_none() && f.max <= 10));
+    ck.t("fit: raw error before ~ 8 px mean", f.is_some_and(|f| (50..=120).contains(&f.before)));
+    // The same with +-6 px finger scatter: accepted, residual under the limit.
+    let (raw, tgt) = taps(unit, 2, 6);
+    let f = fit(&raw, &tgt, &TGT);
+    ck.t("fit with +-6 px scatter: accepted, max <= 12 px", f.is_some_and(|f| f.bad.is_none() && f.max <= 120));
+    let k = f.map(|f| touchcal::to_f32(&f.cal)).unwrap_or([0.0; 6]);
+    ck.t("fit with scatter: scale within 0.02", near(k[0], unit[0], 0.02) && near(k[4], unit[4], 0.02));
+    // Identity: a panel without error gives ~ the identity.
+    let (raw, tgt) = taps([1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 1, 0);
+    ck.t("fit: identity in, identity out", fit(&raw, &tgt, &TGT).is_some_and(|f| f.cal.iter().all(|v| v.abs() <= 1) && f.mean == 0));
+    // One wild tap (40 px off): the residual limit refuses the fit.
+    let (mut raw, tgt) = taps(unit, 2, 0);
+    raw[8].0 += 40;
+    raw[8].1 -= 35;
+    ck.t("fit: an outlier tap is refused (residual)", fit(&raw, &tgt, &TGT).is_some_and(|f| f.bad == Some(Bad::Resid)));
+    // A scale beyond 1.15 / a shift beyond 40 px: refused.
+    let (raw, tgt) = taps([1.2, 0.0, -24.0, 0.0, 1.0, 0.0], 1, 0);
+    ck.t("fit: scale 1.2 refused", fit(&raw, &tgt, &TGT).is_some_and(|f| f.bad == Some(Bad::Scale)));
+    let (raw, tgt) = taps([1.0, 0.0, 45.0, 0.0, 1.0, 0.0], 1, 0);
+    ck.t("fit: shift 45 px refused", fit(&raw, &tgt, &TGT).is_some_and(|f| f.bad == Some(Bad::Shift)));
+    // Degenerate: all taps on one line, too few.
+    let raw: Vec<(i16, i16)> = (0..9).map(|i| (20 + 50 * i, 160)).collect();
+    let tgt = raw.clone();
+    ck.t("fit: collinear points give none", fit(&raw, &tgt, &TGT).is_none());
+    ck.t("fit: two points give none", fit(&raw[..2], &tgt[..2], &TGT).is_none());
+    // Coefficients <-> Cal.
+    let c = touchcal::from_f32(&[0.9961, 0.0101, -5.65, 0.0061, 0.9523, 0.70]).unwrap();
+    let k = touchcal::to_f32(&c);
+    ck.t("from_f32 / to_f32 round trip", near(k[0], 0.9961, 1e-4) && near(k[2], -5.65, 1e-4) && near(k[4], 0.9523, 1e-4));
+    ck.t("from_f32: NaN refused", touchcal::from_f32(&[f32::NAN, 0.0, 0.0, 0.0, 1.0, 0.0]).is_none());
+    ck.t("check: the unit's map passes", touchcal::check(&c, &TGT).is_ok());
+
+    // screen() with a calibration, through the debounce.
+    touch::set_cal(c);
+    let down = |x: u16, y: u16| deb(&[(0, Some(pressed(x, y))), (10, Some(pressed(x, y)))]).first().map(|e| e.1.p);
+    // Raw (25, 20) -> 0.9961*25 + 0.0101*20 - 5.65 = 19.45 -> 19; y 0.0061*25
+    // + 0.9523*20 + 0.7 = 19.9 -> 20.
+    ck.t("screen: (25,20) -> (19,20)", down(25, 20) == Some(Point { x: 19, y: 20 }));
+    // Raw (466, 313) -> 461.6 -> 462, 301.6 -> 302 (the bottom right).
+    ck.t("screen: (466,313) -> (462,302)", down(466, 313) == Some(Point { x: 462, y: 302 }));
+    // Raw (2, 1) -> -3.6 -> 0 (clamped), 1.7 -> 2.
+    ck.t("screen: clamped at the panel edge", down(2, 1) == Some(Point { x: 0, y: 2 }));
+    // A touch key's report is not mapped (keys carry no screen point).
+    let mut s = vec![(1000, Some(key(1))), (1010, Some(key(1)))];
+    s.extend(idle(1020, 1060));
+    ck.t("screen: key reports unaffected", deb(&s).first().is_some_and(|e| e.1.keys == 2 && e.1.points == 0));
+    touch::set_cal(touchcal::IDENTITY);
+    ck.t("screen: identity again = the raw point", down(25, 20) == Some(Point { x: 25, y: 20 }));
+}
+
 fn main() {
     let verbose = std::env::args().any(|a| a == "-v");
     let mut ck = Ck { cases: 0, fails: 0, verbose };
@@ -1346,6 +1442,7 @@ fn main() {
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     wave_step_tests(&mut ck);
+    cal_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);
     std::process::exit(if ck.fails == 0 { 0 } else { 1 });
 }

@@ -2283,13 +2283,14 @@ reports, to check where a tap lands:
 |---|---|
 | Crosses (grey) | Nine targets: the corners 20 px in, the middle of each edge, the centre. |
 | Orange dots | Every point the touch screen reports. |
-| Green dots | The points the meter accepts as a touch (after filtering out short contacts and bounce). |
+| Green dots | The points the meter accepts as a touch (after filtering out short contacts and bounce), moved by the [touch calibration](#touch-calibration) if there is one. |
 | Red cross | Where a touch started: where a tap lands. |
 | **Raw** | The last reported point and how many fingers it had. |
 | **Tap**, **Off** | Where the last touch started, and how far that is from the nearest target (`+` = right of / below it). |
 | **Frames**, **max** | Reports read since the page opened; the most fingers in one report. |
 | **Stale**, **Bad** | Reads that found no new report, and reads that failed. |
 | MENU, RUN, AUTO, MF | The four touch keys: a box lights up while the touch screen reports its key; `x` is the reported position along the key strip. |
+| **Cal** (small text) | The touch calibration in use: `none (stock)`, or its two equations (below). |
 
 Touch every target and compare the red crosses with them. The touch keys
 do nothing on this page.
@@ -2297,6 +2298,52 @@ do nothing on this page.
 - **Clear**: tap it to clear the dots.
 - To leave the page, press the power key, or hold one finger still
   anywhere for 2 s. Both go back to Settings page 3.
+
+#### Touch calibration
+
+If the green dots land beside the targets, **Calibrate** on the touch test
+page fits a correction for this meter's touch screen. Without a
+calibration the meter uses the touch screen's points unchanged, as the
+stock firmware does.
+
+![The touch calibration walk](img/touch-cal.png)
+
+*The walk: the fifth target, after a second tap that was refused.*
+
+![The touch calibration result](img/touch-cal-result.png)
+
+*The result: the taps (orange) and where the correction moves them
+(green).*
+
+1. Tap **Calibrate**. One target at a time turns yellow.
+2. Tap the yellow cross twice, with a short still tap each time. The
+   line under the centre says what is wrong with a tap that is not taken:
+   - **Too far from the cross**: the tap was more than 60 px away.
+   - **Taps differ: tap again**: the two taps of one target were more
+     than 30 px apart; both taps of that target are asked again.
+   - **Moved: tap again**: the finger slid during the tap.
+3. After the ninth target the result shows:
+
+   | Line | What it shows |
+   |---|---|
+   | **Fit error** | How far the corrected taps are from their targets, mean and largest. What is left is mostly the scatter of the finger. |
+   | **Before** | The mean distance of the taps from their targets without a correction. |
+   | **x' =**, **y' =** | The correction: the point the meter uses (x', y') from the point the touch screen reports (x, y). |
+
+4. **Save** applies the correction at once and keeps it in the settings
+   (also across a power-off). **Cancel** keeps the calibration as it was.
+
+The result offers **Try again** instead of **Save** when the correction
+looks wrong: a scale outside 0.85..1.15, a shift of more than 40 px at a
+target, or a tap more than 25 px from where the correction puts it.
+
+**Reset** on the walk's screen removes the calibration (the stock
+behaviour). During the walk and on the result, holding a finger does not
+leave the page; the power key does, without changing the calibration.
+
+The touch keys (MENU, RUN, AUTO, MF) are not affected by the calibration.
+Over USB, `DBG:TOUCH:CAL?` reads the calibration and `DBG:TOUCH:CAL RESET`
+removes it ([SCPI reference](scpi-reference.md)).
 
 The page does not open during a [fast recording](#fast-recording) or while
 the `LOG:` commands stream readings to a computer

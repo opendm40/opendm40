@@ -359,8 +359,12 @@ page (opendm40 src/app_touchtest.rs) from Settings 3/3 with scripted
 touches of the touch controller model, taps targets, drags, holds MENU,
 taps Clear, and leaves the page with a 2 s hold and with the power key;
 screenshots are checked for the dots, the lit key box and the cleared
-page, DBG:VIEW? for the page sequence (USB/IP port in 65200-65300 unless
---port).
+page, DBG:VIEW? for the page sequence. Case `cal` (`--cases page,cal`,
+default both) runs the touch calibration with taps at the points of a
+panel with a known affine error, checks that later taps land corrected,
+and that the calibration survives a DBG:RESET and a power-off (a second
+run from the saved SPI flash, as [`settingstest.py`](settingstest.py))
+(USB/IP port in 65200-65300 unless --port).
 
 `btchattertest.py --app <image> [--port P]`: the BT model prints the
 module's start-up banner with PC14 high on every start, and lets a host's

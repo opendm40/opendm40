@@ -145,6 +145,11 @@ SECTIONS
          * tt_poll only without a session). */
         *(.text.*8opendm403app13app_touchtest*);
         *(.text.*8opendm402ui9touchtest*);
+        /* The touch calibration's fit and checks (src/touchcal.rs): the
+         * touch test page, DBG:TOUCH:CAL and the settings restore at boot
+         * (the per-frame apply is touch.rs `screen`, region B). */
+        *(.text.*8opendm408touchcal*);
+        *(.text.*8opendm404scpi8tcal_arg*);
         *(.text.*8opendm402ui3inr4page*);
         *(.text.*8opendm402ui3inr5trace*);
         *(.text.*8opendm406inrush*3Cap7results*);
@@ -215,6 +220,7 @@ SECTIONS
         *(.rodata.*8opendm407fastlog4prep*);
         *(.rodata.*8opendm403app13app_touchtest*);
         *(.rodata.*8opendm402ui9touchtest*);
+        *(.rodata.*8opendm408touchcal*);
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct

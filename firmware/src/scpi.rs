@@ -621,6 +621,10 @@ pub enum Log {
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
+///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
+///                           b y + c, y' = d x + e y + f (touchcal.rs; RESET =
+///                           none, 1,0,0,0,1,0; a set outside the limits is
+///                           "Data out of range")
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
@@ -754,6 +758,22 @@ fn n7_arg(a: &[u8]) -> Dbg {
     Dbg::Ad2(6, w[1].min(2) as u8, w[2].clamp(1, 40) as u16, w[0].min(4) as u8)
 }
 
+/// DBG:TOUCH:CAL a,b,c,d,e,f: six numbers into touchcal.rs (false: not
+/// six numbers).
+#[inline(never)] // .cold (link-native.x)
+fn tcal_arg(a: &[u8]) -> bool {
+    let mut v = [0f32; 6];
+    let mut n = 0;
+    for part in a.split(|&b| b == b',') {
+        match parse_num(part) {
+            Some(x) if n < 6 => v[n] = x,
+            _ => return false,
+        }
+        n += 1;
+    }
+    n == 6 && crate::touchcal::scpi_put(&v)
+}
+
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
     let mut out = [0u32; N];
     for (i, part) in a.split(|&b| b == b',').take(N).enumerate() {
@@ -869,6 +889,9 @@ pub enum Cmd {
     /// DBG:TOUCH:TEST ON|OFF (Some) / ? (None): the touch test page
     /// (app_touchtest.rs).
     DbgTouchTest(Option<bool>),
+    /// DBG:TOUCH:CAL? (0) / RESET (1) / a,b,c,d,e,f (2, the values in
+    /// touchcal.rs `scpi_take`): the touch calibration (app_touchtest.rs).
+    DbgTouchCal(u8),
     /// DBG:READout?: the DMM readout as drawn (App::scpi).
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
@@ -2137,6 +2160,18 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"TOUCH" && kw(parts[2], "CAL") => {
+                    let a = trim(arg);
+                    if query {
+                        out = Out::Instr(Cmd::DbgTouchCal(0));
+                    } else if kw(a, "RESet") {
+                        out = Out::Instr(Cmd::DbgTouchCal(1));
+                    } else if tcal_arg(a) {
+                        out = Out::Instr(Cmd::DbgTouchCal(2));
+                    } else {
+                        self.err_arg(no_arg, BAD);
+                    }
+                }
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"TOUCH" && kw(parts[2], "TEST") => {
                     match (query, on_off(trim(arg))) {
                         (true, _) => out = Out::Instr(Cmd::DbgTouchTest(None)),
