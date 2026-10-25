@@ -73,15 +73,12 @@ const STG0: usize = CAP - STG;
 /// Highest sample rate with the packed ring (from 100 ms/div).
 const PK_FS: u32 = 25_000;
 const _: () = assert!(PCAP * 10 / 8 + 4 <= STG0 * 2 && CAP % 4 == 0);
-/// The part of BUF lent to the inrush capture (its ring length, as before
-/// the record grew).
-pub const INRUSH_LEN: usize = 26 * 1024;
 /// Linear record length at sample rate `fs`: the whole CAP, but no longer
 /// in time than max(26 K samples, 0.1 s), so a slow timebase's pulse / runt
 /// frame (one complete linear record each) does not wait longer than
 /// before the record grew.
 fn lin_len(fs: u32) -> usize {
-    (fs as usize / 10).clamp(INRUSH_LEN, CAP)
+    (fs as usize / 10).clamp(26 * 1024, CAP)
 }
 
 #[link_section = ".dmabuf"]
@@ -1178,7 +1175,8 @@ impl Scope {
     fn pk_drain(&mut self, now: u64) -> bool {
         let r = rg();
         let wr = (STG - unsafe { r32(S4 + 0x04) } as usize % (STG + 1)) % STG;
-        let lost = now.saturating_sub(r.t) * self.sample_rate() as u64 / 1000 + 64 >= STG as u64;
+        // ms * S/s in u32 (fs <= PK_FS): samples in the gap, x 1000.
+        let lost = (now.saturating_sub(r.t).min(100_000) as u32) * self.sample_rate() + 64_000 >= STG as u32 * 1000;
         r.t = now;
         let stg = unsafe { &(&*core::ptr::addr_of!(BUF))[STG0..] };
         let (mut rd, mut slot, mut n) = (r.rd, r.slot, self.roll_written);
@@ -1491,7 +1489,7 @@ impl Scope {
     /// Wire-free comparator calibration (hwtrig::calibrate) at range 6 / DC
     /// with the scope's own offset points; the current settings are restored
     /// (acquisition restarts from poll). Needs PC4 on and nothing on the MCX.
-    #[inline(never)] // .cold (link-native.x): SCPI calibration
+    #[inline(never)] // SCPI calibration (region B: link-native.x)
     pub fn hw_calibrate(&mut self, now: u64, clk: &mut crate::clock::Clock) -> Result<hwtrig::CalResult, hwtrig::CalError> {
         if !self.powered {
             return Err(hwtrig::CalError::NoComparator);
@@ -2071,7 +2069,7 @@ impl Scope {
     pub fn lent_buf(&self) -> Option<&'static mut [u16]> {
         // SAFETY: main loop only; while lent nothing else in scope.rs
         // touches BUF (poll_frame returns at once, no DMA runs).
-        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..INRUSH_LEN] })
+        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..] })
     }
 
     /// BUF back to the scope: the next poll starts an acquisition.

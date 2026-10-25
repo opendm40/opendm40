@@ -7,6 +7,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Added
+
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  43 008 at the faster timebases (was 26 624), for the stopped zoom / pan,
+  Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
+  capture (at most 10 s) with the trigger point at the trigger position
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+
 ### Fixed
 
 - Multimeter: the message after a tap on the reading gives the readings per

@@ -692,10 +692,23 @@ Code work (in this order):
       (power cycle = two runs, the disk carried over). Device 25b6ec3 (2026-10-24): first boot SETFILE CREATED seeded
       from BKP; SYST:BEEP:VOL 40 -> SAVE OK seq 2; key power-off + on: POR+BOR, SETTINGS,FILE,1,2, volume 40. Open: after a power-off the
       DMM function starts on DC V (persist::same_session needs BKP_LAST, which is gone).
-- [ ] Longer scope record (owner 2026-10-24: "worth doing, not now"): 26 624 samples today vs the stock
-      65 520. u16 per 10-bit sample makes 65 520 = 131 KB, too much next to the screenshot CAP (49 KB) and the
-      logger rings. Packed 4 samples in 5 bytes: 65 520 = ~82 KB, +29 KB over today, within the free SRAM.
-      DMA writes u16, so pack after the capture (or capture in chunks) and unpack for the render / zoom / CSV.
+- [x] Longer scope record (owner 2026-10-24: "worth doing, not now"; done 2026-10-26, branch
+      feat/scope-long-record): was 26 624 samples vs the stock 65 520 (u16 per 10-bit sample makes 65 520 =
+      131 KB; the screenshot buffer the item once named is gone since 2026-10-22). Now 65 520 packed 4 in 5
+      bytes at <= 25 kS/s (from 100 ms/div) and in the wave view, 43 008 raw (packed when it stops) faster;
+      Single / DIGitize fill the whole record. Design and costs: docs/ram-budget.md "The scope record".
+      Emulator: emu/wavtest.py (lengths at 1 / 100 / 200 ms/div, no seam, the trigger at the centre, Save
+      CSV of the long record = WAV:DATA?, stopped zoom).
+- [ ] Device check of the long scope record (feat/scope-long-record): DIGitize at several timebases
+      (50 MS/s .. 25 S/s) against an MR9270 square / frequency: WAV:POIN? / the record length, the
+      frequency and levels in WAV:DATA? WORD, the trigger position; stopped zoom / pan through it; Save CSV;
+      a screenshot of the stopped scope; DBG:DIAG? drop / late counters 0 with the wave view and a fast-log
+      session.
+- [ ] Not possible / not done for the long record (docs/ram-budget.md "The scope record"): 65 520 at the
+      fast timebases needs a 131 KB raw ring in one piece (BUF + logger::RING + calbackup::SCRATCH + the
+      csvlog buffers + gen::WAVE lent for the capture: no logging / screenshot / CSV / FFT / generator
+      meanwhile); an 8-bit byte-DMA capture cannot work on this board (the ADC's 10 bits are PB0..PB9, a
+      byte read of GPIOB gives PB0..7 or PB8..15).
 - [x] reload.sh --image: the first upload failed twice in a row on 2026-10-24 ("upload failed, nothing
       installed"), the immediate retry worked both times (once with the Scope view open). Cause: the SCPI
       error queue is a FIFO that lives across USBTMC clients, and dm40dbg.py upload took the first

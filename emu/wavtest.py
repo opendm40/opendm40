@@ -173,6 +173,61 @@ def connect():
     sys.exit('wavtest: no USB/IP device on port %d' % A.port)
 
 
+def scop_files(t):
+    cat = t.q('MMEM:CAT?')
+    return {f.split(',')[0]: int(f.split(',')[2]) for f in cat.split('"')[1::2] if f.upper().startswith('SCOP')}
+
+
+def csv_check(t, p, codes):
+    """MF > Settings > Save CSV of the stopped long record (scope page,
+    driven by DBG:KEY / DBG:TAP): a new SCOPnnn.DLG whose decoded CSV
+    (firmware/tools/dlog.py) has one row per record sample, the volts of
+    WAV:DATA? (preamble-scaled codes) and t = 0 at the trigger sample."""
+    sys.path.insert(0, os.path.join(ROOT, 'firmware', 'tools'))
+    import dlog  # noqa: E402
+    before = scop_files(t)
+    v0 = t.vtime()
+    def until(dt):
+        v = t.vtime()
+        while t.vtime() < v + dt:
+            time.sleep(0.05)
+    t.w('DBG:KEY 0')
+    until(0.5)
+    t.w('DBG:TAP 341,107')  # the Oscilloscope tile
+    until(1.5)
+    view = t.q('DBG:VIEW?')
+    t.w('DBG:KEY 3')  # MF popup
+    until(0.5)
+    t.w('DBG:TAP 330,40')  # Settings tab
+    until(0.5)
+    t.w('DBG:TAP 154,93')  # Save CSV
+    new = {}
+    while t.vtime() < v0 + 60 and not new:
+        until(1.0)
+        t.w('*CLS')  # MMEM:CAT? during the write queues "Mass storage busy"
+        new = {k: z for k, z in scop_files(t).items() if k not in before}
+    check(view.startswith('Oscilloscope') and len(new) == 1, 'Save CSV of the long record: %s (%s)' % (new, view))
+    if not new:
+        return
+    name, size = next(iter(new.items()))
+    d = bytearray()
+    while len(d) < size:
+        b = block(t.qraw('MMEM:DATA? "%s",%d,6000' % (name, len(d)), timeout=30))
+        if not b:
+            break
+        d += b
+    errors = []
+    text, info = dlog.decode(bytes(d), errors)
+    rows = [r.split(',') for r in text.splitlines() if r[:1] in '+-']
+    n = len(codes)
+    vs = [float(r[1]) for r in rows]
+    ok = len(rows) == n and not errors
+    dv = max(abs(vs[i] - (p['yorig'] + p['yinc'] * codes[i])) for i in range(n)) if ok else float('nan')
+    i0 = min(range(len(rows)), key=lambda i: abs(float(rows[i][0]))) if rows else -1
+    check(ok and dv < 0.003, '%s: %d bytes, %d rows (record %d), volts = WAV:DATA? within %.4f V %s' % (name, size, len(rows), n, dv, errors))
+    check(i0 == round(-p['xorig'] / p['xinc']), '%s: t = 0 at row %d (trigger sample %d)' % (name, i0, round(-p['xorig'] / p['xinc'])))
+
+
 def long_checks(t):
     """Slow timebases: the packed 65 520-sample ring. DIGitize at 100 ms/div
     (25 kS/s): the record is the whole ring less the margins (64 656 ..
@@ -194,12 +249,25 @@ def long_checks(t):
     check(abs(f - A.hz) < A.hz * 0.02 and abs(vpp - A.vpp) < A.vpp * 0.2, '100 ms/div record: %.2f Hz, %.3f Vpp' % (f, vpp))
     i0 = round(-p['xorig'] / p['xinc'])
     ok = 2 <= i0 < n - 2
-    check(ok and abs(i0 - n / 2) < 0.03 * n and abs(v[i0]) < 0.1 * A.vpp and v[i0 + 1] > v[i0 - 1],
+    check(ok and -0.03 * n < i0 - n / 2 < sr / A.hz + 0.03 * n and abs(v[i0]) < 0.1 * A.vpp and v[i0 + 1] > v[i0 - 1],
           '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
     # A smooth sine end to end: no seam from the ring / staging (25 samples
     # per period: neighbours differ by at most ~0.13 Vpp).
     jump = max(abs(v[i + 1] - v[i]) for i in range(n - 1))
     check(jump < 0.25 * A.vpp, '100 ms/div record: no seam (largest step %.3f V)' % jump)
+    csv_check(t, p, codes)
+    # Stopped zoom into the long record: 1 ms/div shows 250 of its samples
+    # (the screen columns of WAV:DATA? follow the re-rendered frame).
+    t.w('TIM:SCAL 1e-3')
+    t.w('WAV:POIN SCR')
+    v1 = t.vtime()
+    while t.vtime() < v1 + 1.0:
+        time.sleep(0.05)
+    ps = pre(t)
+    vz, _ = volts(ps, block(t.qraw('WAV:DATA?')))
+    fz, vppz, _ = sine_fit(vz, ps['xinc'])
+    check(abs(fz - A.hz) < A.hz * 0.05 and abs(vppz - A.vpp) < A.vpp * 0.25, 'stopped zoom to 1 ms/div: %.1f Hz, %.3f Vpp on screen' % (fz, vppz))
+    t.w('WAV:POIN MAX')
     t.w('TIM:SCAL 0.2')
     t.w('RUN')
     v0 = t.vtime()
@@ -393,7 +461,8 @@ try:
     if 2 <= i0 < len(v) - 2:
         slope = v[i0 + 2] - v[i0 - 2]
         check(abs(v[i0]) < 0.08 * A.vpp and slope > 0, 'trigger point (t = 0, sample %d of %d): %.3f V, rising' % (i0, len(v), v[i0]))
-        check(abs(i0 - n / 2) < 0.03 * n, 'DIGitize: the trigger at the record centre (trigger position 50 %%: %d of %d)' % (i0, n))
+        per = sr / A.hz
+        check(-0.03 * n < i0 - n / 2 < per + 0.03 * n, 'DIGitize: the trigger at the record centre (trigger position 50 %%; the first edge after it: %d of %d)' % (i0, n))
     else:
         check(False, 'trigger point inside the record (sample %d of %d)' % (i0, len(v)))
     wcodes = codes

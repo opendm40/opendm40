@@ -127,6 +127,7 @@ impl Codes {
     }
 
     /// Codes a .. b of this view (b clamped to len).
+    #[inline(never)]
     pub fn sub(&self, a: usize, b: usize) -> Codes {
         let b = b.min(self.len);
         let a = a.min(b);
