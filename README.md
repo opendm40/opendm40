@@ -172,7 +172,7 @@ file; keep a copy.
 **One update file at a time.** Keep exactly one `dm40*.bin` on the disk: the
 loader installs the first match in directory order (not the newest, no
 version check), so a second file can install the wrong image
-([firmware/docs/fsloader-install-trigger.md](firmware/docs/fsloader-install-trigger.md)). The
+(`stock/re/docs/fsloader-install-trigger.md`, in the private analysis repo). The
 stock firmware also installs any `dm40*.bin` it finds on its USB disk, so do
 not leave files with that name there by accident.
 
@@ -195,7 +195,7 @@ host tools and the index of the firmware docs. The emulator
 | [stock/](stock/README.md) | Stock-firmware tooling: [`dm40fw.py`](stock/dm40fw.py) (update file decode / encode / pack incl. header CRCs), [`merge_boot.py`](stock/merge_boot.py) |
 | [stock/patch/](stock/patch/AGENTS.md) | Patch kit for the stock firmware (BT memory read/write, USB live stream); needs `gcc-arm-none-eabi`, `make`, `zip` |
 | [stock/patch/kit/](stock/patch/kit/README.md) | memrw backup kit: [`dm40_memrw.py`](stock/patch/kit/tools/dm40_memrw.py), tests, [`mkkit.sh`](stock/patch/kit/mkkit.sh) (builds `dist/`) |
-| [stock/re/](stock/re/README.md) | Reverse-engineering notes on the stock firmware V2.6, the bootloader and the update format ([ANALYSIS.md](stock/re/ANALYSIS.md), `analysis/*.h`), capstone helpers, Ghidra scripts |
+| `stock/re/` | Not in this repo: a clone of the private `wirenboard/alientek-dm40-fw-analysis` for those with access. Reverse-engineering notes on the stock firmware V2.6, the bootloader and the update format (`ANALYSIS.md`, `analysis/*.h`), capstone helpers, Ghidra scripts, the stock-firmware docs. The emulator needs the developer's own flash dumps in `stock/re/dumps/` |
 | [stock/vendor/](stock/vendor/README.md) | The latest official stock firmware, [`dm40_v_2_6.bin`](stock/vendor/dm40_v_2_6.bin) (Alientek's, unmodified, not under the MIT licence) |
 | [hw/](hw/README.md) | Hardware: chips, pins, front ends, power; teardown photos ([`hw/photos/`](hw/photos)) and datasheets ([`hw/datasheets/`](hw/datasheets)) |
 | [emu/](emu/README.md) | Renode emulator of the DM40 (stock firmware and opendm40) |
@@ -218,7 +218,7 @@ Bluetooth tools need a Python with `AF_BLUETOOTH` sockets
 
 ## License
 
-MIT, see [LICENSE](LICENSE). [`stock/re/`](stock/re) and [`stock/patch/`](stock/patch) contain
+MIT, see [LICENSE](LICENSE). [`stock/patch/`](stock/patch) and the private analysis repo contain
 addresses, symbols and decompiled code of the vendor firmware. The vendor
 update file in [`stock/vendor/`](stock/vendor/README.md) is unmodified
 and under its own notice. [`firmware/fonts/`](firmware/fonts) carries its own font

@@ -12,7 +12,7 @@ settings are in Settings: Scope drag / Scope swipe / Scope press); Save CSV
 shows a toast (no scope CSV yet); the toast restyle (dialog.rs) is not done.
 S9 waits for the owner's V2.6 captures (sec. 7).
 
-2026-10-13. Spec: `docs/stock-scope-ui.md` (+ `tools/stock-ui/notes/`).
+2026-10-13. Spec: `stock/re/docs/stock-scope-ui.md` (+ `stock/re/stock-ui-notes/`).
 Tooling: `tools/stock-ui/` (renderer of the spec, diff tool, glyph dump).
 Owner verdict: the stock scope UI is "two heads better" than ours, and it is
 "responsive and intuitive, everything can be dragged". Decision: reproduce
@@ -269,7 +269,7 @@ collisions (the "glyphs touch" rule is off for the 12 px font anyway).
 * `tools/stock-ui/regions.json` (23 regions for diff.py) and `scope.rs
   REGIONS` (10 regions for the layout check) are two tables; merge when the
   firmware port needs a third copy.
-* `tools/stock-ui/notes/` also holds the agents' scratch (`__pycache__`,
+* `stock/re/stock-ui-notes/` also holds the agents' scratch (`__pycache__`,
   `_crop*.png`, helper scripts); the four `*.md` plus `rounded_masks.txt`,
   `fontC_08054828.txt`, `glyphs_*.txt` and `tools/rounded_mask.py` are the
   parts worth keeping.

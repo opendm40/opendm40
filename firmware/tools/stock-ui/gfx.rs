@@ -148,7 +148,7 @@ pub fn fill(r: Rect, c: Color) {
 /// Corner shape of a rounded box (FUN_0801d754 circle mask, FUN_0801d0e4
 /// coverage, thresholded a > 0x7f as the scope page draws with AA off):
 /// row j (0 = outermost) of a corner of radius r starts `INSET[r][j]` px in.
-/// Tables from the literal port notes/tools/rounded_mask.py (radius clamped
+/// Tables from the literal port stock/re/stock-ui-notes/tools/rounded_mask.py (radius clamped
 /// to min(w, h) / 2 by the stock before this applies).
 const INSET: [[u8; 10]; 11] = [
     [0; 10],

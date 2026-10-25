@@ -5,7 +5,7 @@
 symlinks to the files here, so there is one copy to edit; emu/run.py reads them
 through the links). What it is based on: [`RESEARCH.md`](RESEARCH.md) (datasheet, application note,
 Hycon tool data, open-source drivers) and the stock firmware analysis in
-[`stock/re/analysis/hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h) / [`dmm_v2_6.h`](../../stock/re/analysis/dmm_v2_6.h).
+`stock/re/analysis/hy3131_v2_6.h` (in the private analysis repo) / `stock/re/analysis/dmm_v2_6.h` (in the private analysis repo).
 
 ```
 emu/hy3131/HY3131.cs      the model: Hy3131Core (chip, no Renode types) + HY3131 (Renode peripheral)
@@ -13,8 +13,8 @@ emu/hy3131/DM40Frontend.cs the DM40 front end: jacks, relays, shunts, divider / 
 emu/hy3131/tests/         host unit tests (dotnet 8): tests/run.sh
 emu/hy3131/modetest.py    stock + opendm40 through every DMM mode in the emulator, results below
 emu/hy3131/powtest.py     opendm40 power meter end to end over USB/IP (firmware/docs/power-meter-and-misconnect.md 3.11)
-emu/hy3131/couptest.py    opendm40 AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (docs/history/acdc-stock-vs-opendm40.md 11)
-emu/hy3131/autorangetest.py opendm40 DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; docs/history/acdc-stock-vs-opendm40.md 12)
+emu/hy3131/couptest.py    opendm40 AUTO coupling of V / A: DC -> AC -> mixed signals through the hysteresis band, taps, SCPI (stock/re/docs/history/acdc-stock-vs-opendm40.md 11)
+emu/hy3131/autorangetest.py opendm40 DC V AUTO from 600 / 1000 / 60 V with the model's AD1 filter memory (ad1mix:1), READ? +9.91E37 through an AC+DC range change (device bab5dd4; stock/re/docs/history/acdc-stock-vs-opendm40.md 12)
 emu/hy3131/mvautotest.py  opendm40 V autorange around the mV ranges: AUTO -> AUTO+ on 60 mV leaves mV at once, AC V AUTO (mV-first) under a square the mV input clamps (mvclamp / mvpb1, device 46370df) up to 6 V and back
 emu/hy3131/switchtest.py  opendm40 misconnect sentinel through ~60 function / range / coupling switches (and the Wave view) per connection: every alert assertion (DBG:SENTinel:LOG?) must be one the connection explains; real-* scenarios time A-JACK / A-PROT / AC? / DC? / V-JACK? after a switch in; swtr: the model's hypothetical switch transient
 emu/hy3131/ohmhunt.py      opendm40 ohm range hunt with the model's ohm node lag (ohmtau): no FETCh? / READ? / amber readout value off the final one (device ab7184c new bug 1; docs/history/switch-latency.md 6.2)
@@ -167,7 +167,7 @@ Chip (datasheet DS-HY3131-V10):
 * Noise: Gaussian, 25 AD1 counts at OSR 32768 scaled by 1/sqrt(OSR) (acdc doc
   6c), RMS floor 30 counts; `noise:0` turns it off (deterministic seed).
 * Empirical, optional: the AD2/AD3 enable-order beat of
-  [`docs/history/acdc-stock-vs-opendm40.md`](../../docs/history/acdc-stock-vs-opendm40.md) 10 (`beat:1`; off by default: the stock's
+  `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo) 10 (`beat:1`; off by default: the stock's
   emulated SPI skew is not the real one).
 
 Board (DM40, from the stock rows and formulas): the input terminals are a
@@ -258,7 +258,7 @@ AC A rows with both jacks driven).
 
 [`emu/hy3131/modetest.py`](modetest.py) runs the stock firmware and opendm40 in the emulator:
 the input is scripted, the stock is switched with Bluetooth command 06 and
-polled with command 09 (the values the LCD shows, [`bt_meas_v2_6.h`](../../stock/re/analysis/bt_meas_v2_6.h)), opendm40
+polled with command 09 (the values the LCD shows, `stock/re/analysis/bt_meas_v2_6.h` (in the private analysis repo)), opendm40
 with `CONF:<f>` / `READ?` over the same link. Results (last reported value
 after settling; stock Bluetooth is enabled by patching settings byte 0x115 in
 the emulated flash with a recomputed CRC):
@@ -286,7 +286,7 @@ the emulated flash with a recomputed CRC):
 
 (`modetest.py -j 6` at d07fedc.) All within the
 meter's specification except the capacitance ramp ranges. The stock's +4 % is its
-own arithmetic ([`dmm_v2_6.h`](../../stock/re/analysis/dmm_v2_6.h) section 4):
+own arithmetic (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 4):
 C = gain * I * dt / median5(dV), dt from its millisecond counter between two reads.
 A read waits until 255 ms after the previous one (deadline = that read + 0xff) on the
 DMM screen's 10 ms poll, so dt = 260 ms; dV spans whole AD1 conversions (50 ms at the

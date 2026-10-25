@@ -212,7 +212,7 @@ Code work (in this order):
         dm40fw.py `pack` already computes both header words. opendm40 must move to XIP from
         0x08004000 (clock.rs to set PLL+FMC waitstates+cache; link.x reserve 0x08008000 hole;
         drop the SRAM copy in startup.rs).
-  - [x] Opus review (`docs/native-boot-review.md`). Verdict: Stage 0 SAFE; Stage 1 NOT until
+  - [x] Opus review (`stock/re/docs/history/native-boot-review.md`). Verdict: Stage 0 SAFE; Stage 1 NOT until
         dead-app recovery is closed. App reachable ONLY via FS-loader (runs every boot); it
         installs ANY dm40*.bin on EVERY boot (must delete after good install). MANDATORY before
         Stage 1: shim carries its OWN USB-MSC (Option B; opendm40 MSC is dead when recovery needed);
@@ -223,7 +223,7 @@ Code work (in this order):
         gone). App-independent recovery works. KEY FINDING: a WARM reset (SYSRESETREQ / DBG:RECOVER)
         does NOT trigger the loader install; only a COLD power-on does. So the shim's recovery =
         host stages a valid dm40*.bin via the shim's own MSC (Option B) + power-cycle. See the
-        FS-loader-trigger investigation (docs/fsloader-install-trigger.md) for whether a marker can
+        FS-loader-trigger investigation (stock/re/docs/fsloader-install-trigger.md) for whether a marker can
         make install happen on a warm reset.
   - [x] Own fonts (prereq for independence): tools/mkstockfont.py extracts the 19 used fonts
         (714 glyphs, ~83 KB) from the stock image into src/stockfont_data.rs; stockfont.rs reads
@@ -242,7 +242,7 @@ Code work (in this order):
         via its "update" button. Header is checked before any erase (app sectors untouched).
         Boot gate is PA2, not the reset cause: ROM polls PA2 x1000; high -> ROM verifies the marker +
         body CRC and launches the app itself; low or invalid app -> loader install state. (The earlier "cold installed / warm didn't"
-        reading of PA2 is withdrawn: no observation supports it.) Full analysis: docs/fsloader-install-trigger.md.
+        reading of PA2 is withdrawn: no observation supports it.) Full analysis: stock/re/docs/fsloader-install-trigger.md.
   - [x] Recovery = program 12 zero bytes over the 0x08008000 marker + SYSRESETREQ (works on warm reset,
         no FAT/SPI/USB/LCD in the shim); DBG:UPDATE / DBG:RECOVER do the same (dev flow: copy a
         dm40*.bin onto opendm40's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
@@ -255,7 +255,7 @@ Code work (in this order):
         an invalid marker sends the ROM to the loader regardless of PA2 (to be confirmed by T2).
   - [x] Full verified flash dump (1 MiB, OB, OTP) taken before Stage 1: stock/re/dumps/full-20261013/.
         RDP is level 1 (SWD/DFU only via mass erase), so the software recovery path matters.
-  - [x] Review of the native image + shim (docs/native-review-2026-10-13.md): T1/T2 GO, T3 NO-GO until
+  - [x] Review of the native image + shim (stock/re/docs/history/native-review-2026-10-13.md): T1/T2 GO, T3 NO-GO until
         B1 (native stack overflow: fatren buffers live during main) and B2 (shim reads PD6 without
         pull-down; stock = input + pull-down, pressed = 1) are fixed; H1 fatren renames only the file whose
         header == marker; H2 key-hold trap (light backlight at once, cue before zeroing); H3 stale flags;
@@ -553,7 +553,7 @@ Code work (in this order):
 - [x] Milliohm resolution on the lowest resistance range (units of mΩ).  (776003c; device-verified: 10.117 Ohm, 19:10 run)
 
 - [x] AutoHold idle threshold absolute on small ranges (meter.rs ah_cfg): DC V/mV idle below max(300 counts,
-      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, ../docs/history/acdc-stock-vs-opendm40.md 6c),
+      5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, stock/re/docs/history/acdc-stock-vs-opendm40.md 6c),
       DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.  (86a408a; verify on device)
 
 - [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed
@@ -646,7 +646,7 @@ Code work (in this order):
       ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
 - [x] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal and shows which one it chose. Decisions
-      (../docs/history/acdc-stock-vs-opendm40.md section 11; dmm.rs AUTO_*):
+      (stock/re/docs/history/acdc-stock-vs-opendm40.md section 11; dmm.rs AUTO_*):
       - measurement: AUTO runs the AC+DC alternation (the only place both parts are seen: AC V is
         AC-coupled) and shows one part, the DC part (signed) or the AC part's RMS; autorange on the total.
       - rule / hysteresis (once per ~1.9 s cycle, both parts fresh): to AC when AC > 1.5 x |DC| and above
@@ -683,7 +683,7 @@ Code work (in this order):
       Not on the UT197 model: there it is "Auto-V LoZ", the auto selection comes with a ~2 kohm input
       load (no LoZ hardware here, feature-request HW-6), so ours is the 10 Mohm variant: ghost voltages
       (hum on open leads) still read, as AC above the floor.
-  - [ ] Device check (AUTO coupling): see ../docs/history/acdc-stock-vs-opendm40.md section 11 "Device check".
+  - [ ] Device check (AUTO coupling): see stock/re/docs/history/acdc-stock-vs-opendm40.md section 11 "Device check".
   - [x] FETC:BURD? in AUTO used the part shown (understated a mixed current): now the total RMS (AC+DC,
         what drops across the shunt), OL by the total; the aux burden readout is not shown in AUTO (aux
         rows = the parts, as AC+DC). burdentest AC+DC / AUTO phases (200 mA DC + 100 mA AC).
@@ -975,7 +975,7 @@ Code work (in this order):
       (65a82fe), G3 pinch (above), R1 redraw profiling (ba9960e).  (verify on device; G4 A/B on device)
 - [x] AC+DC: the AC part read ~5% low and wandered phase to phase (4.5..5.3 V on a 40 Hz 0..9.6 V
       square): AD3 enabled before AD2 (3b9251c). (device-verified: AC+DC 6.8000..6.8004 V, sd 0.3 mV;
-      ../docs/history/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
+      stock/re/docs/history/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
 
 ## Device run 2026-10-13 19:10, native e07c11a (+docs) installed OK
 - Verified: READ? ~0.5 s, MEAS:VOLT:AC? 0.5 s, MEAS:FREQ? 1.0 s; USBTMC survives a libusb timeout
@@ -993,7 +993,7 @@ Code work (in this order):
       (258c833; verify on device)
 - [x] Review M1 (CHECK_CLEAR_STATUS pending only while a reply is in flight), L1 (ABORT_BULK_IN marks
       cleared), L2 (Bulk-OUT left while a command is pending), L3 (toggle reset never writes EPENA/EPDIS)
-      from docs/native-review-2026-10-13.md "Pre-flash review e07c11a".  (258c833, 636bf88; verify on device)
+      from stock/re/docs/history/native-review-2026-10-13.md "Pre-flash review e07c11a".  (258c833, 636bf88; verify on device)
 - [x] AC agent questions (a) 40 Hz PWM AC part low, (b) AC+DC AC part = plain AC V, (e07c11a wander):
       answered by 3b9251c (above). (c) A input open: the 150 uA item. (d) FREQ: the crosstalk item.
 - [x] stock/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (165b37a)
@@ -1705,7 +1705,7 @@ Firmware:
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
       (device bab5dd4, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
-      Branch settle-fix (`acs_flat`, ../docs/history/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
+      Branch settle-fix (`acs_flat`, stock/re/docs/history/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
       and, with two falls in a row in one AC phase, the rest of the decay d q / (1 - q) <= 0.05 %
       (ACS_REM); ACS_MAX_MS 6 -> 5 s, and the cap also ends the settle in a DC phase with the last AC
       result (`ac_settle_cap`): gap < 6 s. On the device's numbers 4.821 / 4.790 are not flat, the next
@@ -3838,8 +3838,8 @@ Emulator (emu/):
       stays; the link fails below 8 KiB). wavetest volt fails on f4cd2cd and passes; dcv / current pass.
 - [x] [emu/hy3131/modetest.py](../emu/hy3131/modetest.py) stock cap-big (100 uF) read 104.1 uF against 100 uF +- 3 %;
       on f4cd2cd it got no readings. The 104 is the stock's own arithmetic, not the HY3131 model or the test setup
-      ([dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 4; FUN_08013734 case 0xd in
-      [app_decompile.c](../stock/re/analysis/app_decompile.c)): C = gain * I * dt / median5(dV); a read is due 255 ms
+      (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 4; FUN_08013734 case 0xd in
+      `stock/re/analysis/app_decompile.c` (in the private analysis repo)): C = gain * I * dt / median5(dV); a read is due 255 ms
       after the previous one (deadline = that read + 0xff) and runs on the DMM screen's 10 ms poll, so dt = 260 ms,
       while dV spans whole 50 ms AD1 conversions (ramp row OSR 4096, chopper): 5 between most reads, 6 between one
       in 5, median 250 ms. 260 / 250 = 1.040; the r5..r7 calibration gains are 1.0. With the model's ramp-row AD1

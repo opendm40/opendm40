@@ -7,7 +7,7 @@
 //! valid, on any reset (cold or warm, whatever PA2 reads), so the loader shows
 //! "open file error" and brings up its own working USB disk (28e9:028f) on
 //! every boot until a valid dm40*.bin is installed through it
-//! (docs/fsloader-install-trigger.md, "Update-loader install & error paths").
+//! (stock/re/docs/fsloader-install-trigger.md, "Update-loader install & error paths").
 //! The app bytes stay intact but the app cannot run again until that install:
 //! this is a one-way door into the vendor updater, by design.
 //!

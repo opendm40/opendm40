@@ -11,7 +11,7 @@ total = hypot(AC, DC) ([`src/dmm.rs`](../src/dmm.rs) `dc_out` / `poll_ac`).
 Tags: **INFERRED** = follows from the cited sources but is stated nowhere;
 **UNKNOWN** = not known. Untagged facts come from the cited datasheet or
 manual page, a stock row byte, the opendm40 source or a device measurement.
-Short names: "acdc" = [acdc-stock-vs-opendm40.md](../../docs/history/acdc-stock-vs-opendm40.md)
+Short names: "acdc" = `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo)
 (the stock's AC+DC measured live), "feasibility" =
 [dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md), "power" =
 [power-meter-and-misconnect.md](power-meter-and-misconnect.md), "device check" =
