@@ -340,17 +340,9 @@ impl App {
         st[i.min(st.len() - 1)].0
     }
 
-    /// The pinch in the wave view: the step for span ratio `r` (fingers
-    /// apart = zoom in) from step `i0`, taken once its V/div is reached.
+    /// The pinch in the wave view (`scope::wave_pinch_step`).
     pub(super) fn wave_pinch_step(&self, i0: usize, r: f32) -> usize {
-        let st = scope::wave_steps(self.scope.wave_scale_now().amps);
-        let i0 = i0.min(st.len() - 1);
-        let want = st[i0].0 / r.max(1e-3);
-        if r >= 1.0 {
-            (0..=i0).find(|&i| st[i].0 >= want * 0.999).unwrap_or(i0)
-        } else {
-            (i0..st.len()).rev().find(|&i| st[i].0 <= want * 1.001).unwrap_or(i0)
-        }
+        scope::wave_pinch_step(self.scope.wave_scale_now().amps, i0, r)
     }
 
     /// Show wave step `i`: on the current range only the screen rescales

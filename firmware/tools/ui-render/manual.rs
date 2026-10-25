@@ -404,12 +404,12 @@ pub fn run(out: &str) -> usize {
         }
     }
 
-    // Wave view: mains on the 600 V range (200 V/div), triggered at 10 V,
+    // Wave view: mains on the 600 V range (its full-scale step, 150 V/div), triggered at 10 V,
     // at 10 ms/div (5 periods), 50 ms/div and 2 ms/div; a 1.5 A current.
     {
         let mut m = scope_base().m;
         m.src = scope_ui::SRC_DMM;
-        m.wvdiv = 200.0;
+        m.wvdiv = 150.0;
         m.ch1_txt = "AC V";
         m.ac = true;
         m.trig_v = 10.0;
@@ -419,21 +419,21 @@ pub fn run(out: &str) -> usize {
             m.tb = tb;
             m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, tb, scope_ui::tb_top(true, false), false, None);
             let cells = vec!["Freq:50.0Hz", "Vp-p:651V", "Cycl:20.0ms", "Vrms:230V"];
-            let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 1.63, periods)), persist: None, cols: 399, cells };
+            let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 325.0 / 150.0, periods)), persist: None, cols: 399, cells };
             scope_shot(&mut ck, out, name, &s2, &popvals(&m));
             save1(out, name);
         }
-        // A current: 1.5 A AC on the 6 A range (2 A/div), 10 ms/div.
+        // A current: 1.5 A AC on the 6 A range (its full-scale step, 1.5 A/div), 10 ms/div.
         m.tb = 18;
         m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, 18, scope_ui::tb_top(true, false), false, None);
         m.amps = true;
         m.ac = false;
-        m.wvdiv = 2.0;
+        m.wvdiv = 1.5;
         m.ch1_txt = "AC A";
         m.trig_v = 0.1;
-        m.trig_row = 138;
+        m.trig_row = 140;
         let cells = vec!["Freq:50.0Hz", "Ip-p:4.24A", "Cycl:20.0ms", "Irms:1.50A"];
-        let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 1.06, 5.0)), persist: None, cols: 399, cells };
+        let s2 = stock::Scene { name: "manual-wave", m, popup: scope_ui::Popup::None, trace: Some(trig_sine(&m, 2.121 / 1.5, 5.0)), persist: None, cols: 399, cells };
         scope_shot(&mut ck, out, "wave-amps", &s2, &popvals(&m));
         save1(out, "wave-amps");
     }

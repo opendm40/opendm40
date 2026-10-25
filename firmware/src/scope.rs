@@ -467,6 +467,20 @@ pub fn wave_step_of(amps: bool, vdiv: f32) -> Option<usize> {
     wave_steps(amps).iter().position(|s| s.0 == vdiv)
 }
 
+/// The pinch in the wave view: the step for span ratio `r` (now / start;
+/// fingers apart = zoom in) from step `i0`, taken once its V/div is
+/// reached (as PINCH_STEP: a step only once its ratio is reached).
+pub fn wave_pinch_step(amps: bool, i0: usize, r: f32) -> usize {
+    let st = wave_steps(amps);
+    let i0 = i0.min(st.len() - 1);
+    let want = st[i0].0 / r.max(1e-3);
+    if r >= 1.0 {
+        (0..=i0).find(|&i| st[i].0 >= want * 0.999).unwrap_or(i0)
+    } else {
+        (i0..st.len()).rev().find(|&i| st[i].0 <= want * 1.001).unwrap_or(i0)
+    }
+}
+
 /// Minimum interval between two triggered wave frames (ms): the drawing,
 /// not the trigger, is the limit (25 frames/s).
 const WAVE_FRAME_MS: u64 = 40;
