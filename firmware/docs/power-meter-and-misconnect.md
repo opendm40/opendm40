@@ -1326,6 +1326,21 @@ the onset in the emulator). Emulator senttest
 `acdcmv-sq600` / `acdcmv-dc5`: FAIL on 5fdd812 (A-JACK from ~1.5 s after
 the voltage on), pass with the gate.
 
+**AC+DC mV after the source goes off.** Device
+[489f956](device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25)
+(manual 600 mV): A-JACK 0.45-0.9 s after the square or 5 V was switched
+off in 8 of 13 runs, held while the input was open, the readout OL; plain
+AC mV 0 of 6. How the input holds a charge there and why PB1 hits are
+*inferred*; the AC phase's results are under 1.5 x the range, i.e.
+"free". Now a DC phase result whose magnitude is over the range
+(`Dmm::mv_dc_drv`, the readout's OL) makes the AC phase's results say
+driven until the next DC result. Emulator: the model's `mvhold` (the open
+input keeps 0.75 V and PB1 picks up 40 mV after the source goes off, seen
+by both mV rows or, `mvholdrows:1`, by the DC mV row only); senttest
+`acdcmv-sq600-off` / `acdcmv-dc5-off` / `acdcmv-off-dcrow`: FAIL on
+f4cd2cd (A-JACK ~1 s after the off), pass now; a current in A with a
+source back on V-COM still asserts A-JACK there.
+
 **Emulator.** Since the a2e9766 check the model reproduces the device's
 RES numbers: OP1O in the ohm rows stops at 2.47 - 0.044 x V for a source of
 V volts (`ohmop1k`, 2.25 V at 5 V, 2.03 V at 10 V; the line is *inferred*

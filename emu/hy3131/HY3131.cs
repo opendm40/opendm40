@@ -82,7 +82,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             role = Role.None; roleMode = -1; roleRange = 0;
             if(OhmExitRst) ohmExitT = now;
             ohmLagV = 0; ohmLagT = now; ohmLagTarget = 0;
-            vjSee = false; acaT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
+            vjSee = false; acaT0 = double.NegativeInfinity; acvT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
             Rewrites = 0;
             rng = new Random(12345);
             faultRng = new Random(777);
@@ -390,6 +390,21 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// row is INFERRED. Used by couptest `iacfill` (TODO "AC+DC / AUTO down-range on one
         /// part": a settle that outlasts an AC phase). "rmsfill:s".
         public double RmsFill = 0;
+        /// The AC V node carrying the jack's AC only from this long after the AC V row was entered
+        /// from another function (opt-in, "acarrive:ms"; 0 = at once): an RMS block over the arrival
+        /// reports the share of its window after it of the input's mean square (the rest of the
+        /// window had none). Device 489f956 (DC V -> AC V on the 0 / 9.5 V square, 20 / 50 / 90 Hz):
+        /// the first result read after the 300 ms settle was latched during it and read 0.707 of
+        /// the input (half the mean square), the next one ~107 ms later was right. The path's delay
+        /// (relays / coupling) and its timing are INFERRED: "acarrive:160" with the blocks on the
+        /// row write's grid puts the last block before the deadline half over the arrival.
+        public double AcArriveMs = 0;
+        /// An input offset of the AC A rows' AD2 path (opt-in, "acaoff:mV" referred to the shunt's input,
+        /// through the row's OP1 gain; 0 = none): the LPF and the AD2 samples read it as a DC current.
+        /// Device 489f956: the AC A 10 A row's AD2 stream with the A jack open averaged +150.4 codes =
+        /// +0.0717 A (rms about it 1.72 mA), i.e. "acaoff:0.717" on the 10 mohm shunt. Where it arises
+        /// is INFERRED (an offset at OP1 / AD2, the same on every shunt).
+        public double AcaOffMv = 0;
         /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
         /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
@@ -525,6 +540,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// default).
         public double SenseNegV, SenseNegTau = 5;
         private double acaT0 = double.NegativeInfinity;
+        /// When the AC V row was entered from another role (AcArriveMs).
+        private double acvT0 = double.NegativeInfinity;
         /// AC A 10 A -> mA / uA (device f0d21eb: CONF:CURR:AC 10, then 0.06, the A jack empty:
         /// the first 60 mA result read OL): the AD2 node (OP1O - PB3) carries a step of acastep
         /// codes for acastepms ms from that row write, in the LPF and the RMS blocks it overlaps
@@ -843,6 +860,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "agndz": AgndZeroScale = o.Value; break;
                 case "hpftau": HpfTau = o.Value; break;
                 case "rmsfill": RmsFill = o.Value; break;
+                case "acarrive": AcArriveMs = o.Value; break;
+                case "acaoff": AcaOffMv = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
                 case "lpfcreep": LpfCreepScale = o.Value; break;
@@ -1045,6 +1064,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 {
                     var fill = Math.Min(1.0, (t - lpfStart) / RmsFill);
                     sq *= fill * fill;
+                }
+                if(AcArriveMs > 0 && role == Role.AcV && !cDc)
+                {
+                    // AcArriveMs: the share of the block [t - p, t] after the AC's arrival
+                    var ta = acvT0 + AcArriveMs * 1e-3;
+                    sq *= Math.Max(0.0, Math.Min(1.0, (t - ta) / p));
                 }
                 if(Svxi && !Sdo23 && EnAd3)
                 {
@@ -1449,6 +1474,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(!double.IsNaN(Fe.MvHoldFor(true))) { jdc = Fe.MvHoldFor(true); jac = 0; }
                 if(MvClampV > 0) MvClamp(jdc, jac, hz, shape, duty, out jdc, out jac);
                 ac = AcQ(jac * 1000, 0x54 + 4 * r, 0x5c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
                 dc = DcQ(jdc * 1000, 0x84 + 4 * r, 0x8c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
@@ -1464,6 +1490,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var g = Fe.ShuntR * MvDiv[r] / unit;
                 ac = AcQ(jac * unit, 0xc4 + 4 * i, 0xdc + 4 * i) * g / Ad2IgRow();
                 dc = DcQ(jdc * unit, 0xf4 + 4 * i, 0x10c + 4 * i) * g / Ad2IgRow();
+                dc += AcaOffMv * 1e-3 * MvDiv[r] / Ad2IgRow();
                 break;
             }
             case Role.Freq:
@@ -1485,6 +1512,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.DcMv:
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(!double.IsNaN(Fe.MvHoldFor(false))) { jdc = Fe.MvHoldFor(false); jac = 0; }
                 dc = jdc * NodeRatioAc(); ac = jac * NodeRatioAc();
                 break;
             case Role.DcA:
@@ -1614,6 +1642,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                if(!double.IsNaN(Fe.MvHoldFor(false))) jdc = Fe.MvHoldFor(false);
                 var q = jdc * 1000 + vNoise * 1000 * Gauss();
                 code = DcQ(q, 0x24 + 4 * r, 0x2c + 4 * r) / (1.38889 / MvDiv[r] / 8388.606);
                 code *= (ig / rowIg) / (rg / rowRg);
@@ -2121,6 +2150,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var j = Wave(t, dc, ac, hz, shape, duty);
                 v += MvPb1Mv * 1e-3 * (j - Math.Max(-MvClampV, Math.Min(MvClampV, j)));
             }
+            // the floating mV input's PB1 pickup after a source went off (Fe.MvHoldPb1Mv)
+            if(Fe.MvHeld && Fe.MvHoldPb1Mv != 0 && (role == Role.AcMv || role == Role.DcMv)) v += Fe.MvHoldPb1Mv * 1e-3;
             return v;
         }
 
@@ -2459,6 +2490,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
                 // (the quiesce writes pass through no-role states: the last real role counts)
                 if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
+                if(newRole == Role.AcV && lastRole != Role.AcV) acvT0 = now;
                 if(newRole == Role.AcA && lastRole == Role.AcA && lastMode == 4 && newMode >= 5) acaStepT = now;
                 if(newRole != Role.None) { lastRole = newRole; lastMode = newMode; }
                 if(OhmTauMs > 0) OhmLagAdvance(now); // the old row's target up to this write

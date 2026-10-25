@@ -96,6 +96,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double RLoadA = double.PositiveInfinity; // resistor between A and COM
         public bool LeadVA;               // a test lead from V/ohm to A (the opendm40 fuse check)
         public bool FuseOpen;             // the A-jack fuse is blown (a meter property: kept by "open")
+        /// The floating mV input after a source on V-COM goes off (opt-in, "mvhold:V"; 0 = none): the
+        /// mV rows read MvHoldV DC on the jack, and PB1 picks up MvHoldPb1Mv mV DC ("mvholdpb1:mV"), until
+        /// the next source on V-COM. "mvholdrows:" which mV rows see the level: 1 DC mV, 2 AC mV, 3 both
+        /// (the default). Device 489f956 (AC+DC mV, manual 600 mV): after the 0 / 9.5 V square or 5 V DC
+        /// was switched off (the calibrator's output relay opens) the readout stayed OL and
+        /// AJACK,AD1PK_PB1 came 0.45-0.9 s later in 8 of 13 runs, held while the input was open. The
+        /// charge, which rows see it and the PB1 pickup are INFERRED (phenomenological). Kept by "open".
+        public double MvHoldV, MvHoldPb1Mv;
+        public int MvHoldRows = 3;
+        /// The hold is in force (a source went off with MvHoldV set).
+        public bool MvHeld;
+        /// MvHoldV for the AC mV (`ac`) or DC mV row, NaN when not held there.
+        public double MvHoldFor(bool ac) => MvHeld && (MvHoldRows & (ac ? 2 : 1)) != 0 ? MvHoldV : double.NaN;
 
         public double Die => DieFollowsCj ? CjTemp : DieTemp;
 
@@ -323,13 +336,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 switch(key)
                 {
                 case "open":
+                    if(VSrc != null && MvHoldV > 0) MvHeld = true;
                     Clear();
                     break;
                 case "short":
                     R = 0; C = 0; DiodeVf = double.NaN; VSrc = null; ISrcV = null; Tc = false;
                     break;
                 case "vsrc": case "dcv": case "acv": case "hz":
-                    if(none) { VSrc = null; break; }
+                    if(none) { MvHeld |= VSrc != null && MvHoldV > 0; VSrc = null; break; }
+                    MvHeld = false;
                     VSrc = new VoltageSource();
                     if(key == "dcv") { VSrc.Dc = v; VSrc.Ac = Opt(opts, "ac", 0); }
                     else if(key == "acv") { VSrc.Ac = v; VSrc.Dc = Opt(opts, "dc", 0); }
@@ -419,8 +434,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(none) { DieFollowsCj = true; break; }
                     DieTemp = v; DieFollowsCj = false;
                     break;
+                case "mvhold": MvHoldV = v; if(v <= 0) MvHeld = false; break;
+                case "mvholdpb1": MvHoldPb1Mv = v; break;
+                case "mvholdrows": MvHoldRows = (int)v; break;
                 case "noise": case "cal": case "beat": case "powmix": case "ad1mix": case "ohmexit": case "ohmexitlo": case "ohmexitrst": case "ohmtau": case "swtr": case "swtau": case "swhz": case "ctsettle": case "ctretain": case "ct0dead": case "powvg": case "powz": case "op1vos": case "ad2dcg":
-                case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsfill": case "rmsbig": case "rmsbigp":
+                case "n7": case "n7g": case "n7a": case "ad1acg": case "ad3sh": case "hpftau": case "rmsfill": case "acarrive": case "acaoff": case "rmsbig": case "rmsbigp":
                 case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                 case "pb5drift": case "pb5tau": case "acastep": case "acastepms": case "acasteptau": case "r22part": case "r22off": case "r22n": case "r22win": case "chophalf": case "chopskew": case "vjblind": case "senseneg": case "sensetau":
                 case "mvclamp": case "mvpb1":
