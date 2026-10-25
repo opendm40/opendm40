@@ -2659,12 +2659,17 @@ before.
 
 ## What is kept when you switch off
 
-| Kept | Not kept |
-|---|---|
-| All [settings](#settings) except **USB disk** | **USB disk** (back to Files live) |
-| Multimeter: the function (after a restart; after switching off the meter starts on DC V, as the stock), the autorange choices, the Ω test current (0.90 / 0.28 mA), the rate, smoothing, the DMM row, the temperature sensor and unit, the offsets, AutoHold, the limits and the fail beep | HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
-| Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements, display settings and the FFT settings | The trigger mode: the scope starts running, in trigger mode Auto |
-| Generator: the waveform, frequency, amplitude, offset and duty | The output: off after power-on |
+Switching off starts a new measurement: the meter comes back with your
+preferences and with the measurement settings at their defaults, on DC V,
+as the stock. A restart (a reset, a firmware update) continues the
+measurement as it was.
+
+| Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
+|---|---|---|
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
+| Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
@@ -2683,7 +2688,8 @@ firmware has run, opendm40 starts on DC V.
 Untested on a real meter:
 
 - Getting started and recovery: keeping the settings across a full
-  power-off (the copy in `_SETTING.BIN`; tested in the emulator only);
+  power-off (the copy in `_SETTING.BIN`; tested in the emulator only), and
+  the reset of the measurement settings after it;
   installing over the stock firmware's
   **USB Connect** disk; entering
   the update loader with the power key; the automatic entry after repeated
