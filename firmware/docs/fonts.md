@@ -80,7 +80,7 @@ pixels per token.
 Every blob is a named array with its own section, so `llvm-nm` shows each
 with its size: the tables in `.rodata.fonts.<NAME>_E`, the blobs in
 `.rodata.fonts.<NAME>_B`, which the `.text` output section takes into
-region B (zero-wait flash). ASCII26, F14, LETTERS and UNIT (`A2_FONTS` in
+region B (zero-wait flash). ASCII26, F14, LETTERS, UNIT and SC_PROBE (`A2_FONTS` in
 `mkstockfont.py`) go to `.rodata.a2.<NAME>`, which
 [`link-native.x`](../link-native.x) places in region A2 (zero-wait flash
 after the shim, below the loader marker; [native-boot.md, Region

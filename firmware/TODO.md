@@ -1475,6 +1475,12 @@ Firmware:
       New emu/gallerytest.py (open / swipe pages / viewer = BMP bytes / Delete Cancel + Delete / back).
       Left as candidates there (more DBG-only code to B ~6.8 KB, gating the AD2 experiments 2.6 KB, one
       shared fat_get ~0.2 KB).
+- [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 49d7c10c
+      region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
+      SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
+- [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
+      before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
+      pages open.
 - [ ] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
       (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
       scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.
