@@ -383,6 +383,32 @@ fn nr3_exact() {
     check(bad == 0, &format!("nr3 sweep: {bad} of 200000 off by more than one digit"));
 }
 
+/// `pow10f` (VOLT:RES? = 10^step_exp, the RES set threshold) is the f32
+/// nearest 10^e, so nr3 prints it exactly (device a2e9766: VOLT:RES? on
+/// DC V 6 V MED "+9.999999E-06", from an f32 divided by 10 five times).
+fn pow10f_exact() {
+    for e in -15..=6 {
+        let v = scpi::pow10f(e);
+        let want: f32 = format!("1e{e}").parse().unwrap();
+        check(v == want, &format!("pow10f({e}) = {v:e} (want {want:e})"));
+        let r = nr3(v);
+        let w = format!("+1.000000E{}{:02}", if e < 0 { '-' } else { '+' }, e.abs());
+        check(r == w, &format!("nr3(pow10f({e})) = {r} (want {w})"));
+    }
+    // Every range's resolution as VOLT:RES? computes it (the +1 digit too).
+    for &v in &[0.06f32, 0.6, 6.0, 60.0, 600.0, 1000.0, 6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0, 60.0, 600.0, 6e3, 6e4, 6e5, 6e6, 6e7] {
+        for fine in 0..2 {
+            let e = scpi::step_exp(v, false) - fine;
+            let r = nr3(scpi::pow10f(e));
+            check(r.starts_with("+1.000000E"), &format!("RES of range {v:e} fine {fine}: {r}"));
+        }
+    }
+    for &v in &[6e-9f32, 6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3] {
+        let r = nr3(scpi::pow10f(scpi::step_exp(v, true)));
+        check(r.starts_with("+1.000000E"), &format!("RES of cap range {v:e}: {r}"));
+    }
+}
+
 /// MMEM:DATA? / MMEM:DELete with a prefix of another directory (the stub
 /// parse_path: "WRONG/..."): -256, nothing for the main loop to run (device
 /// 46370df: "SHOTS/LOG005.DLG" read LOGS/LOG005.DLG; a delete would have
@@ -418,6 +444,7 @@ fn main() {
     error_queue();
     idn();
     nr3_exact();
+    pow10f_exact();
     mmem_dirs();
     let f = unsafe { FAILS };
     if f > 0 {
