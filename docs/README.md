@@ -11,8 +11,7 @@ All documentation of opendm40, by reader. Start at the
 - [SCPI reference](manual/scpi-reference.md): every SCPI command, over USB
   and Bluetooth.
 - [CHANGELOG.md](../CHANGELOG.md): the changes per release.
-- [CONTRIBUTING.md](../CONTRIBUTING.md): how to report a bug;
-  [SECURITY.md](../SECURITY.md): how to report a safety problem privately.
+- [CONTRIBUTING.md](../CONTRIBUTING.md): how to report a bug.
 
 ## Develop
 

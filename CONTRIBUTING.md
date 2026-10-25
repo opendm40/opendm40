@@ -14,10 +14,6 @@ with the bug report form. Say:
 - if the meter hung or restarted: the output of
   `python3 firmware/tools/dm40dbg.py boot` (`DBG:BOOT?`).
 
-A bug that can make a reading or an alert unsafe (a dangerous voltage shown
-as safe, an alert that does not fire): report it privately, see
-[SECURITY.md](SECURITY.md).
-
 Check the manual's [Known limitations](docs/manual/README.md#known-limitations)
 first: what has not run on a real meter yet is listed there.
 

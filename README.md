@@ -119,9 +119,6 @@ stock](docs/manual/README.md#backup-recovery-and-back-to-stock).
   ([What cannot be detected](docs/manual/README.md#what-cannot-be-detected)).
   Do not rely on them for your safety.
 
-A bug that can make a reading or an alert unsafe: report it privately
-([SECURITY.md](SECURITY.md)).
-
 ## Use it from a computer
 
 The meter appears as a USB disk (no driver) and a USBTMC instrument.
