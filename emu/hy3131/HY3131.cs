@@ -395,6 +395,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// (relays / coupling) and its timing are INFERRED: "acarrive:160" with the blocks on the
         /// row write's grid puts the last block before the deadline half over the arrival.
         public double AcArriveMs = 0;
+        /// An input offset of the AC A rows' AD2 path (opt-in, "acaoff:mV" referred to the shunt's input,
+        /// through the row's OP1 gain; 0 = none): the LPF and the AD2 samples read it as a DC current.
+        /// Device 489f956: the AC A 10 A row's AD2 stream with the A jack open averaged +150.4 codes =
+        /// +0.0717 A (rms about it 1.72 mA), i.e. "acaoff:0.717" on the 10 mohm shunt. Where it arises
+        /// is INFERRED (an offset at OP1 / AD2, the same on every shunt).
+        public double AcaOffMv = 0;
         /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
         /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
@@ -851,6 +857,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hpftau": HpfTau = o.Value; break;
                 case "rmsfill": RmsFill = o.Value; break;
                 case "acarrive": AcArriveMs = o.Value; break;
+                case "acaoff": AcaOffMv = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
                 case "lpfcreep": LpfCreepScale = o.Value; break;
@@ -1479,6 +1486,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var g = Fe.ShuntR * MvDiv[r] / unit;
                 ac = AcQ(jac * unit, 0xc4 + 4 * i, 0xdc + 4 * i) * g / Ad2IgRow();
                 dc = DcQ(jdc * unit, 0xf4 + 4 * i, 0x10c + 4 * i) * g / Ad2IgRow();
+                dc += AcaOffMv * 1e-3 * MvDiv[r] / Ad2IgRow();
                 break;
             }
             case Role.Freq:

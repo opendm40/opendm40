@@ -139,6 +139,7 @@ SECTIONS
         *(.text.*8opendm406inrush*3Cap7results*);
         *(.text.*8opendm406inrush*3Cap9linearize*);
         *(.text.*8opendm406inrush*3Cap7records*);
+        *(.text.*8opendm406inrush*3Cap3arm*);
         /* dlog's per-reading row coder is `.text.dlog_row` (src/dlog.rs),
          * not matched here: region B. So is `.text.vdisk_rd`: the USB
          * volume's per-sector read path (VDisk::read_block, the FAT / data

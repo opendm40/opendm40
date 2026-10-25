@@ -58,6 +58,8 @@ section named after the tag as the release notes; how to cut a release:
   AC V / mV / A: the first reading after the entry no longer comes from a
   conversion that began before the AC input was there (DC V -> AC V read
   1/√2 of a square), nor 0 or 1 % low after an autorange step.
+- Inrush page: the zero is measured at the arm ("Armed: 0.069 A now" with
+  nothing in A; the idle and the results were 0.07 A off).
 - Logger: one 76.8 kS/s nominal rate; no hole in the panel at the 76.8 kS/s
   start.
 - The 6 M ohm test-current label is cleared on 60 M.
