@@ -60,7 +60,7 @@ confirmation than anything the firmware could report.
 2. Copy the official stock update file to the disk root. It lives at the repo
    root:
 
-       cp ~/work/board/alientek-dm40/dm40_v_2_6.bin  /run/media/<you>/<DM40 disk>/
+       cp dm40_v_2_6.bin  /run/media/$USER/<DM40 disk>/
 
    - Use the **obfuscated official** file `dm40_v_2_6.bin`, **not**
      `dm40_v_2_6.dec.bin` (the decoded body). The FS-loader expects the packaged
