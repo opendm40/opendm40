@@ -922,7 +922,7 @@ impl App {
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, self.scope.row_volts(s.runt_row), unit);
+                su::fmt_v(&mut b, self.scope.runt_volts(), unit);
                 h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
             }
             _ => {
@@ -2080,7 +2080,7 @@ impl App {
             ttype: s.ttype,
             pcond: s.pcond,
             pwidth: s.pwidth,
-            runt_v: self.scope.row_volts(s.runt_row),
+            runt_v: self.scope.runt_volts(),
         }
     }
 
