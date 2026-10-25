@@ -1463,6 +1463,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(!double.IsNaN(Fe.MvHoldFor(true))) { jdc = Fe.MvHoldFor(true); jac = 0; }
                 if(MvClampV > 0) MvClamp(jdc, jac, hz, shape, duty, out jdc, out jac);
                 ac = AcQ(jac * 1000, 0x54 + 4 * r, 0x5c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
                 dc = DcQ(jdc * 1000, 0x84 + 4 * r, 0x8c + 4 * r) / 1000 * MvDiv[r] / Ad2IgRow();
@@ -1499,6 +1500,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case Role.DcMv:
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
                 sigHz = hz; sigShape = shape; sigDuty = duty;
+                if(!double.IsNaN(Fe.MvHoldFor(false))) { jdc = Fe.MvHoldFor(false); jac = 0; }
                 dc = jdc * NodeRatioAc(); ac = jac * NodeRatioAc();
                 break;
             case Role.DcA:
@@ -1628,6 +1630,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                if(!double.IsNaN(Fe.MvHoldFor(false))) jdc = Fe.MvHoldFor(false);
                 var q = jdc * 1000 + vNoise * 1000 * Gauss();
                 code = DcQ(q, 0x24 + 4 * r, 0x2c + 4 * r) / (1.38889 / MvDiv[r] / 8388.606);
                 code *= (ig / rowIg) / (rg / rowRg);
@@ -2135,6 +2138,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 var j = Wave(t, dc, ac, hz, shape, duty);
                 v += MvPb1Mv * 1e-3 * (j - Math.Max(-MvClampV, Math.Min(MvClampV, j)));
             }
+            // the floating mV input's PB1 pickup after a source went off (Fe.MvHoldPb1Mv)
+            if(Fe.MvHeld && Fe.MvHoldPb1Mv != 0 && (role == Role.AcMv || role == Role.DcMv)) v += Fe.MvHoldPb1Mv * 1e-3;
             return v;
         }
 

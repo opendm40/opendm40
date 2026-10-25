@@ -105,6 +105,26 @@ SC = {
                                          (10, 'vsrc:5', {'NONE'}),
                                          (22, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
                    {'never': [('AJACK', 1, 2)]}),
+    # The same, then the source switched off with the input left open (device 489f956: the readout
+    # OL, AJACK,AD1PK_PB1 0.45-0.9 s after the off in 8 of 13 runs, held while open). The model's
+    # mvhold: the floating input keeps 0.75 V (OL on 600 mV, under MV_DRV_K x the range) and PB1
+    # picks up 40 mV (INFERRED); -dcrow: only the DC mV row sees the level (the AC row reads 0).
+    # Never A-JACK until a current in A (the last phase, the hold ended by a source on V-COM).
+    'acdcmv-sq600-off': ('VOLT:ACDC 0.6', 42, [(0, 'open;mvclamp:1.212;mvpb1:10;mvhold:0.75;mvholdpb1:40;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                               (10, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}),
+                                               (20, 'vsrc:none', {'NONE'}),
+                                               (30, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                         {'never': [('AJACK', 1, 3)]}),
+    'acdcmv-dc5-off': ('VOLT:ACDC 0.6', 42, [(0, 'open;mvclamp:1.212;mvpb1:10;mvhold:0.75;mvholdpb1:40;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                             (10, 'vsrc:5', {'NONE'}),
+                                             (20, 'vsrc:none', {'NONE'}),
+                                             (30, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                       {'never': [('AJACK', 1, 3)]}),
+    'acdcmv-off-dcrow': ('VOLT:ACDC 0.6', 42, [(0, 'open;mvclamp:1.212;mvpb1:10;mvhold:0.75;mvholdpb1:40;mvholdrows:1;vsrc:0,ac=0.003,f=50', {'NONE'}),
+                                               (10, 'vsrc:5', {'NONE'}),
+                                               (20, 'vsrc:none', {'NONE'}),
+                                               (30, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                         {'never': [('AJACK', 1, 3)]}),
     'temp-v5':  ('TEMP', 42, [(0, 'open;tc:100;cj:25', {'NONE'}), (8, 'vsrc:5', {'NONE'}), (16, 'vsrc:10', {'NONE'}),
                               (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'NONE'}), (32, 'open;isrc:0.005', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10']}),

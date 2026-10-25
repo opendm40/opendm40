@@ -3706,10 +3706,21 @@ Emulator (emu/):
       aca-auto-dn (049bb65's) pass. Device check (5 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
       the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
-- [ ] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
+- [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
       How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) note 2.
+      Fixed: a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
+      AC phase's V_GATE results say driven until the next DC result, so the "free" AC result (|LPF| + 1.41 x RMS under
+      1.5 x the range) no longer asserts A-JACK while the input reads OL
+      ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
+      Emulator: the model's `mvhold` (INFERRED: the open input keeps 0.75 V, PB1 picks up 40 mV, until the next source;
+      `mvholdrows:1`: only the DC mV row sees it); senttest acdcmv-sq600-off / acdcmv-dc5-off / acdcmv-off-dcrow: FAIL on
+      f4cd2cd (A-JACK ~1 s after the off), pass; their last phase (a current in A) and acdcmv-sq600 / acdcmv-dc5 /
+      acmv-* still A-JACK. Not covered: an open input that reads within the range while PB1 still hits (no device
+      trace of it). Device check (10 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
+      off, 6 runs each, `SYST:ALER?` + `DBG:SENT:LOG?` every 0.1 s for 6 s after the off): no A-JACK; then a current in
+      A (V-COM open): A-JACK.
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device cd1ec9a note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
