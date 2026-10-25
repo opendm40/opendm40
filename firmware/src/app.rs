@@ -2123,6 +2123,8 @@ impl App {
         sc.probe = if scope::PROBES.contains(&pr) { pr } else { 1.0 };
         let h = (p[6] >> 18 & 0x3FF) as i32;
         sc.hpos = if h == 0 { 200 } else { h - 1 };
+        // The saved level row is at the saved scale: its volts from there.
+        self.scope.levels_reset();
         self.scope.apply(sc, 0);
         let n = (p[10] as usize).min(4);
         // Only valid measurement ids (0..19, index into meas_res.v), no

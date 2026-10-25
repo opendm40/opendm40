@@ -1181,17 +1181,45 @@ pub fn drag_axis(ax: i32, ay: i32) -> Option<bool> {
 }
 
 /// What a move report (dx, dy) applies once the drag's axis is decided
-/// (`horizontal`): only that axis; a grabbed marker (`own`: its axis,
-/// Some(true) a time marker) only along its own axis, nothing across it
-/// (owner 2026-10-25: one item, one axis per gesture).
-pub fn drag_delta(horizontal: bool, own: Option<bool>, dx: i32, dy: i32) -> (i32, i32) {
-    if own.is_some_and(|o| o != horizontal) {
-        (0, 0)
-    } else if horizontal {
-        (dx, 0)
+/// (`horizontal`): only that axis (owner 2026-10-25: one item, one axis
+/// per gesture).
+pub fn drag_delta(horizontal: bool, dx: i32, dy: i32) -> (i32, i32) {
+    if horizontal { (dx, 0) } else { (0, dy) }
+}
+
+/// The item a drag moves (owner 2026-10-25: always the marker nearest to
+/// where the finger went down, never the selection): `horizontal`, the
+/// time marker whose column is nearest to x0 (trigger position T, the X
+/// cursors when shown, the FFT centre in FFT mode), else the level marker
+/// whose drawn row is nearest to y0 (`strip_items`: CH1, trigger level,
+/// math offset when on, runt level when shown, Y cursors when shown; an
+/// off-screen level at its edge marker). No distance limit; a tie goes to
+/// the one drawn later (on top). (level group, item id).
+#[inline(never)] // .cold (link-native.x): once per drag
+pub fn drag_target(m: &Model, horizontal: bool, x0: i16, y0: i16) -> Option<(bool, u8)> {
+    let mut best: Option<(u8, i16)> = None;
+    let mut take = |id: u8, d: i16| {
+        if best.map_or(true, |(_, bd)| d <= bd) {
+            best = Some((id, d));
+        }
+    };
+    if horizontal {
+        take(0, (14 + m.trig_px - x0).abs());
+        if let Some(xc) = m.xcur {
+            take(2, (14 + xc[0] - x0).abs());
+            take(3, (14 + xc[1] - x0).abs());
+        }
+        if m.math_on && m.math_mode == 5 {
+            take(1, (14 + 200 - x0).abs());
+        }
     } else {
-        (0, dy)
+        let mut items = [(0u8, Mark::NONE); NSTRIP];
+        let n = strip_items(m, &mut items);
+        for &(id, mk) in &items[..n] {
+            take(id, (mk.y + 6 - y0).abs());
+        }
     }
+    best.map(|(id, _)| (!horizontal, id))
 }
 
 /// The zone a press at (x, y) picks (`pick_near` over `all_zones`).

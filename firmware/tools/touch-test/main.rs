@@ -417,6 +417,78 @@ fn pinch_tests(ck: &mut Ck) {
 /// release, MF), horizontal pinch closing to ~0.68 -> the index must be a
 /// valid timebase, never a range >= 10; and every pinch result stays in its
 /// own table.
+/// The trigger level keeps its volts across scale changes (owner
+/// 2026-10-25: a V/div change kept the row, so the volts changed): V/div
+/// up / down, off screen and back, probe x10, a CH1 position move, a level
+/// drag, a reload at the saved scale; the runt level too.
+fn trig_volts_tests(ck: &mut Ck) {
+    let mut sc = scope::Scope::new();
+    let d = scope::Settings::DEFAULT; // 1 V/div, pos 0, level row 105
+    sc.apply(d, 0);
+    let v0 = sc.trig_volts();
+    let near = |a: f32, b: f32| (a - b).abs() <= 1e-4 * b.abs().max(1e-3);
+    let mut seen = vec![];
+    let mut ok = true;
+    for r in [5usize, 7, 4, 9, 2, 0, 6] {
+        let mut s = sc.s;
+        s.range = r;
+        sc.apply(s, 0);
+        ok &= near(sc.trig_volts(), v0);
+        seen.push((r, sc.s.trig_row));
+    }
+    let row = |r: usize| seen.iter().find(|x| x.0 == r).unwrap().1;
+    ck.t(&format!("trigger level: V/div changes keep the volts, the row moves ({seen:?})"), ok && row(5) == 70 && row(7) == 123 && row(9) == 137 && row(6) == 105);
+    ck.t("trigger level off screen after a zoom: the marker at the edge, the level kept, back on screen at its row", row(0) == -10 && row(2) == -10 && row(6) == 105);
+    let mut s = sc.s;
+    s.probe = 10.0;
+    sc.apply(s, 0);
+    let r10 = sc.s.trig_row;
+    ck.t(&format!("trigger level: probe x10 keeps the tip volts (row {r10})"), near(sc.trig_volts(), v0) && r10 == 137);
+    s.probe = 1.0;
+    sc.apply(s, 0);
+    ck.t("trigger level: probe back, row back", sc.s.trig_row == 105 && near(sc.trig_volts(), v0));
+    // A CH1 drag moves the level row with the position (scope_page.rs).
+    let mut s = sc.s;
+    s.pos += 20;
+    s.trig_row += 20;
+    sc.preview(s);
+    ck.t("trigger level: a CH1 position move keeps the volts", sc.s.trig_row == 125 && near(sc.trig_volts(), v0));
+    let mut s = sc.s;
+    s.range = 4; // 200 mV/div: the level (~1 V) is off screen (top)
+    sc.apply(s, 0);
+    let mut s = sc.s;
+    s.pos -= 20;
+    s.trig_row -= 20; // CH1 back while the level is clamped at the edge
+    sc.preview(s);
+    sc.apply(sc.s, 0);
+    let mut s = sc.s;
+    s.range = 6;
+    sc.apply(s, 0);
+    ck.t("trigger level: a CH1 move while the level is off screen keeps it", near(sc.trig_volts(), v0) && sc.s.trig_row == 105);
+    // A level drag sets the volts.
+    let mut s = sc.s;
+    s.trig_row = 70;
+    sc.preview(s);
+    let v1 = sc.trig_volts();
+    ck.t("trigger level: a drag sets new volts", near(v1, 70.0 * 4.0 / 141.0));
+    // Reload: the saved row at the saved scale (0.5 V/div, row 70).
+    let mut s = sc.s;
+    s.range = 5;
+    s.trig_row = 70;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    ck.t("trigger level: a loaded row converts at its saved scale", near(sc.trig_volts(), 70.0 * 2.0 / 141.0));
+    // Runt: the second level the same way.
+    let mut s = sc.s;
+    s.range = 6;
+    sc.apply(s, 0);
+    let rv = sc.runt_volts();
+    let mut s = sc.s;
+    s.range = 7;
+    sc.apply(s, 0);
+    ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
+}
+
 fn pinch_state_tests(ck: &mut Ck) {
     use scope_ui::{pinch_step, PinchState};
     let (tb, range, tb_min, tb_max) = (13usize, 9usize, 3usize, 24usize);
@@ -936,7 +1008,7 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("marker glyph zones are not line zones", su::graph_pick(&d, 0, 0, false, 406, 125).is_some_and(|q| !q.line()));
     // One item, one axis per gesture (owner 2026-10-25): a finger path
     // through drag_axis / drag_delta as scope_page.rs sp_move applies it.
-    let run = |own: Option<bool>, path: &[(i32, i32)]| -> (i32, i32) {
+    let run = |path: &[(i32, i32)]| -> (i32, i32) {
         let (mut ax, mut sx, mut sy) = (None, 0, 0);
         let mut last = (0, 0);
         for &(x, y) in path {
@@ -946,7 +1018,7 @@ fn tap_step_tests(ck: &mut Ck) {
                     continue; // undecided: nothing applied, the delta kept
                 }
             }
-            let (dx, dy) = su::drag_delta(ax.unwrap(), own, x - last.0, y - last.1);
+            let (dx, dy) = su::drag_delta(ax.unwrap(), x - last.0, y - last.1);
             sx += dx;
             sy += dy;
             last = (x, y);
@@ -956,14 +1028,33 @@ fn tap_step_tests(ck: &mut Ck) {
     // A sideways pan with vertical wobble (every 3rd report mostly
     // vertical: the stock split moved the selected level item with them).
     let pan: Vec<(i32, i32)> = (1..=30).map(|i| (4 * i, [0, 6, 2][i as usize % 3])).collect();
-    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(None, &pan) == (120, 0));
+    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(&pan) == (120, 0));
     let vert: Vec<(i32, i32)> = (1..=20).map(|i| ([0, 4, 2][i as usize % 3], 3 * i)).collect();
-    ck.t("vertical drag with sideways jitter: vertical only", run(None, &vert) == (0, 60));
-    ck.t("trigger-level marker (level, vertical): a sideways first motion moves nothing", run(Some(false), &pan) == (0, 0));
-    ck.t("trigger-level marker dragged vertically with jitter: vertical only", run(Some(false), &vert) == (0, 60));
-    ck.t("T position marker (time): vertical first motion moves nothing", run(Some(true), &vert) == (0, 0));
+    ck.t("vertical drag with sideways jitter: vertical only", run(&vert) == (0, 60));
     let diag: Vec<(i32, i32)> = (1..=20).map(|i| (3 * i, 2 * i)).collect();
-    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(None, &diag); r.1 == 0 && r.0 == 60 });
+    // The item (owner 2026-10-25: never the selection): the nearest
+    // marker of the decided axis to the press point (drag_target).
+    let dt = |m: &su::Model, h: bool, x: i16, y: i16| su::drag_target(m, h, x, y);
+    // Default: CH1 marker centre y 160 (row 140), trigger level y 125
+    // (row 105, right edge), T column 200 (x 214).
+    let mut m = d;
+    m.sel_v = 0; // CH1 selected: ignored
+    ck.t("drag target V: nearest level row, not the selection (y 130 -> trigger level, y 150 -> CH1)", dt(&m, false, 200, 130) == Some((true, 1)) && dt(&m, false, 30, 150) == Some((true, 0)));
+    ck.t("drag target V: no distance limit (y 290 -> CH1, the nearer)", dt(&m, false, 200, 290) == Some((true, 0)));
+    m.trig_row = 140;
+    ck.t("drag target V: a tie goes to the one drawn later (trigger level over CH1)", dt(&m, false, 200, 160) == Some((true, 1)));
+    let mut m = d;
+    m.ycur = Some([60, 250]);
+    ck.t("drag target V: the Y cursors when shown (y 82 -> Y1)", dt(&m, false, 200, 82) == Some((true, 3)));
+    let mut m = d;
+    m.trig_row = 300; // off screen: the edge marker at the bottom
+    ck.t("drag target V: an off-screen level by its edge marker", dt(&m, false, 200, 292) == Some((true, 1)));
+    let mut m = d;
+    m.sel_h = 2;
+    m.xcur = Some([100, 300]);
+    ck.t("drag target H: nearest column (x 120 -> X1, x 250 -> T, x 330 -> X2), not the selection", dt(&m, true, 120, 200) == Some((false, 2)) && dt(&m, true, 250, 200) == Some((false, 0)) && dt(&m, true, 330, 200) == Some((false, 3)));
+    ck.t("drag target H: T alone, anywhere", dt(&d, true, 30, 280) == Some((false, 0)));
+    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(&diag); r.1 == 0 && r.0 == 60 });
     ck.t("drag_axis: undecided below the slop, 3:2 lead past 7 px", su::drag_axis(7, 0).is_none() && su::drag_axis(8, 5) == Some(true) && su::drag_axis(5, 8) == Some(false) && su::drag_axis(20, 20).is_none() && su::drag_axis(31, 30) == Some(true));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
@@ -1122,6 +1213,7 @@ fn main() {
     gesture_tests(&mut ck);
     log_tests(&mut ck);
     hit_tests(&mut ck);
+    trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);
