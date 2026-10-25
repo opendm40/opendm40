@@ -14,11 +14,13 @@
 //!   * the first refresh FIRST_MS after the row write, then every
 //!     REFRESH_MS: NA clean 00 conversions, R22 -> 01 (R22_FAST_B), the
 //!     next conversion dropped (mixed), NB clean 01 ones, R22 -> 00, the
-//!     next dropped, NA clean 00 ones. VOS = (mean 00 - mean 01) / 2, the
+//!     next dropped, NA clean 00 ones (NA = NB = 4: 1.4 s; one refresh's
+//!     VOS has ~0.3 x the noise of one conversion, ~6 codes = 0.1 count on
+//!     the device's 6 V row). VOS = (mean 00 - mean 01) / 2, the
 //!     00 means before and after the 01 ones averaged, so a linear drift of
 //!     the input cancels. Used only if the 00 means before and after agree
-//!     within `thr` (the DMM's moving threshold, ~2 counts) and the two 01
-//!     conversions too: a moving input or AC content (device: a 5 Hz square
+//!     within `thr` (THR, ~2 counts) and the 00 / 01 conversions of each
+//!     group within it too: a moving input or AC content (device: a 5 Hz square
 //!     moved an ungated estimate by ~350 mV) is not taken for an offset; a
 //!     rejected refresh is tried again RETRY_MS later. A later one moves VOS
 //!     by ALPHA of the difference. The 01 conversions are readings too
@@ -56,8 +58,8 @@ pub const RETRY_MS: u64 = 5_000;
 /// noise is ~21 codes per FAST conversion on the device, 6 V row).
 pub const THR: i32 = 120;
 /// Clean 00 conversions on each side of the 01 ones, clean 01 conversions.
-const NA: usize = 2;
-const NB: usize = 2;
+const NA: usize = 4;
+const NB: usize = 4;
 /// Weight of a new VOS measurement on a path measured before.
 const ALPHA: f32 = 0.3;
 /// Paths: DC V r0..r3, DC mV r0..r1, DC A / mA / uA r0..r1 (`path`).
@@ -301,9 +303,16 @@ mod tests {
         f.start(0, 5000);
         // A square of +-1000 codes at 2.5 Hz (period 4 conversions).
         let _ = run(&mut f, 300, 13_000.0, &|t| if (t / 200) % 2 == 0 { 1000.0 } else { -1000.0 });
+        // Never NA steady 00 conversions in a row: no refresh is even tried.
         assert_eq!(f.used, 0);
-        assert!(f.rejected > 0);
         assert_eq!(f.vos(), VOS_DEFAULT);
+        // A square too slow for that (period 20 conversions): tried, the
+        // 00 means before / after or the 01 ones disagree on every edge.
+        let mut h = Fast::new();
+        h.start(0, 5000);
+        let _ = run(&mut h, 600, 13_000.0, &|t| if (t / 1000) % 2 == 0 { 1000.0 } else { -1000.0 });
+        assert!(h.rejected > 0, "rejected {}", h.rejected);
+        assert!((h.vos() - 13_000.0).abs() < 1.0 || h.vos() == VOS_DEFAULT, "{}", h.vos());
         // Back to a steady input: the next try is taken.
         let mut g = Fast::new();
         g.start(0, 5000);

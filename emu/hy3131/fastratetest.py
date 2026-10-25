@@ -11,13 +11,15 @@ running window (ad1chopjit, default +-5 ms).
 Checks, DC V 6 V manual, 1 V on V-COM:
   * MED: a reading every ~200 ms, the reference value (mean);
   * SLOW: every ~400 ms, the same value;
-  * FAST: every ~100 ms; from 3.2 s after the rate change on (the first
-    refresh starts 2 s after it and takes 7 conversions), every reading
-    within 2 counts (0.2 mV) of the reference; DBG:FAST? counts that refresh and the later ones, none
-    rejected, VOS = the model's +-10 codes; at most 2 conversions lost per
+  * FAST: every ~100 ms; from 4 s after the rate change on (the first
+    refresh starts 2 s after it and takes 14 conversions), every reading
+    within 3 counts (0.3 mV: ~5 sd of the model's noise, ~35 codes per
+    unchopped conversion) and their mean within 0.05 mV of the reference;
+    DBG:FAST? counts that refresh and the later ones, none rejected, VOS =
+    the model's +-40 codes (~4 sd of one refresh); at most 2 conversions lost per
     refresh;
   * FAST again after MED (the path's VOS is known): every reading from the
-    third one on within 2 counts;
+    third one on within 3 counts;
   * AUTO with 10 V on the input: the 60 V range (its path not measured
     yet: the last VOS), every reading within 3 counts (3 mV; the model's
     noise there is ~0.6 count sd) and the mean within 0.5 count of 10 V x
@@ -127,8 +129,9 @@ try:
     t.write('SENS:RATE FAST')
     rs = readings(40)
     early = [v for s, v in rs if s < 1.8]
-    late = [(s, v) for s, v in rs if s > 3.2]  # the first refresh: 2 s + ~0.7 s (7 conversions)
-    off = [x for x in late if abs(x[1] - ref) > 0.0002]
+    late = [(s, v) for s, v in rs if s > 4.0]  # the first refresh: 2 s + 1.4 s (14 conversions)
+    off = [x for x in late if abs(x[1] - ref) > 0.0003]
+    lm = sum(v for _, v in late) / max(1, len(late))
     fi = q('DBG:FAST?').split(',')
     used, rej, vos = int(fi[0]), int(fi[1]), int(fi[2])
     span = rs[-1][0] - rs[0][0]
@@ -136,14 +139,15 @@ try:
     check('fast-rate', abs(med_dt(rs) - 0.1) < 0.02, 'interval %.3f s, %d readings in %.1f s (%d not shown)' % (med_dt(rs), len(rs), span, lost))
     check('fast-default', bool(early) and abs(sum(early) / len(early) - ref) > 0.002,
           'before the first refresh (default VOS): mean %.5f V vs ref %.5f' % (sum(early) / max(1, len(early)), ref))
-    check('fast-value', not off, '%d of %d readings after the refresh off by > 0.2 mV%s' % (len(off), len(late), (' e.g. %s' % off[:3]) if off else ''))
-    check('fast-refresh', used >= 2 and rej == 0 and abs(vos - 15000) <= 10, 'DBG:FAST? %s' % ','.join(fi))
+    check('fast-value', not off and abs(lm - ref) < 0.00005,
+          'mean %.6f V (ref %.6f); %d of %d readings off by > 0.3 mV%s' % (lm, ref, len(off), len(late), (' e.g. %s' % off[:3]) if off else ''))
+    check('fast-refresh', used >= 2 and rej == 0 and abs(vos - 15000) <= 40, 'DBG:FAST? %s' % ','.join(fi))
     check('fast-lost', lost <= 2 * used + 2, '%d conversions not shown for %d refreshes' % (lost, used))
     t.write('SENS:RATE MED')
     wait_until(up() + 3)
     t.write('SENS:RATE FAST')
     rs = readings(5)
-    off = [x for x in rs[2:] if abs(x[1] - ref) > 0.0002]
+    off = [x for x in rs[2:] if abs(x[1] - ref) > 0.0003]
     check('fast-again', len(rs) > 30 and not off, '%d readings, %d off%s' % (len(rs), len(off), (' e.g. %s' % off[:3]) if off else ''))
     t.write('VOLT:RANG:AUTO ON')
     wait_until(mk.at(T_10V) + 4)

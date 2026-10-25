@@ -45,6 +45,8 @@ mod ad2exp {
         [0; crate::hy3131::CFG_LEN]
     }
 }
+#[path = "../../src/fastvos.rs"]
+mod fastvos;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/gen.rs"]
