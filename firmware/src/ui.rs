@@ -1163,8 +1163,8 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
-        // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution), manual
-        // only (dmm.rs +1 digit notes).
+        // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
+        // +1 digit notes), also in AUTO unless the 0.28 mA "ON" variant.
         Button::Ohm => &[
             ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),

@@ -29,6 +29,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- Resistance: AUTO includes the 60 Ω range (milliohm resolution): down from
+  600 Ω below about 58.3 Ω, up above about 61.8 Ω. With the 0.28 mA test
+  current (ON) AUTO stops at 600 Ω, since 60 Ω always uses 0.90 mA.
 - Multimeter AUTO key (voltage, current, resistance): a short press fixes
   the present range, then steps to the next higher range, wrapping from the
   highest to the lowest; held 1 s it returns to the default autorange

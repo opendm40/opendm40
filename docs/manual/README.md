@@ -287,7 +287,7 @@ scope.
 | Temperature offset | — | An offset per sensor |
 | °F | Multiplies by 1.82 instead of 1.8: at 100.3 °C it shows 214.5 °F | °F computed correctly (212.5 °F), on the screen and over Bluetooth |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
-| 60 Ω range | — | Manual range with milliohm resolution |
+| 60 Ω range | Not on the range page, never chosen by AUTO | Milliohm resolution; on the range page; AUTO steps into it (not with 0.28 mA ON) |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
@@ -558,8 +558,12 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Resistance
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
-- The 60 Ω range (milliohm resolution) is manual only; AUTO never goes
-  below 600 Ω.
+- The 60 Ω range has milliohm resolution. AUTO steps from 600 Ω down to
+  60 Ω below about 58.3 Ω and back up above about 61.8 Ω (the stock
+  autorange factors applied to one more range; the stock firmware never
+  selects this range). With 0.28 mA ON, AUTO stops at
+  600 Ω, because 60 Ω always uses 0.90 mA; choose 60 Ω on the range page
+  to use it anyway.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**

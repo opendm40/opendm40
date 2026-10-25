@@ -156,7 +156,9 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // AC+DC. Noise floor: not measured yet.
 // Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
 // used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
-// reference / 10) that the stock never selects: manual only here, always with
+// reference / 10) that the stock never selects (its autorange clamps to r1..r6,
+// dmm_v2_6.h section 2). Here it is in the autorange too (owner 2026-10-25,
+// `ohm_auto_floor`: not with the "ON" variant) and a manual range, always with
 // the default ohm variant (SFUVR = 2, the 0.90 mA one; the "ON" variant gives
 // 0.28 mA on r1, OHM_ISC). Calibration slot 0x124[0] is the
 // factory default 1.005 on the dumped unit (r1..r6 are calibrated), and the
@@ -1712,13 +1714,23 @@ impl Dmm {
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
         self.ohm_var = v & 1;
         if self.mode == 10 {
-            let r = self.range.clamp(0, 6);
+            // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
+            let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
         }
     }
 
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
+    }
+
+    /// The lowest range of the ohm autorange: r0 (60 ohm) with the default
+    /// variant, r1 (600 ohm) with the "ON" one. r0 always drives the default
+    /// variant's 0.90 mA (`write_config`), so the autorange stays out of it
+    /// when the user chose the 0.28 mA test current; a manual 60 ohm still
+    /// works (at 0.90 mA). The stock autorange never goes below r1.
+    fn ohm_auto_floor(&self) -> i8 {
+        if self.ohm_var == 1 { 1 } else { 0 }
     }
     /// Restore m+6 / m+7 / m+8 (settings): only the values the UI / BT can
     /// set (V, A: 1 = AUTO+, 3 = AUTO; ohm variant 0 / 1); anything else
@@ -2976,8 +2988,9 @@ impl Dmm {
         }
         match self.mode {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
-            // The 60 ohm range is manual only: AUTO continues from 600 ohm.
-            10 if self.range == 0 => self.set(clk, 10, 1, 150),
+            // A manual 60 ohm with the "ON" variant: AUTO continues from
+            // 600 ohm (`ohm_auto_floor`); with the default one from 60 ohm.
+            10 if self.range < self.ohm_auto_floor() => self.set(clk, 10, 1, 150),
             // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
             4..=9 if self.a_auto == 1 => {
                 if self.sub() == 1 {
@@ -3002,7 +3015,7 @@ impl Dmm {
     /// (0..4), 5 = 60 mV (the DC / AC mV r0 row, OP1 x10; the stock tables
     /// have it, its UI offers no 60 mV item); A items 600 uA, 6000 uA,
     /// 60 mA, 600 mA, 6 A, 10 A; ohm 1..6 (DM40C labels, COUNTS_MODEL),
-    /// ohm 0 = the manual-only 60 ohm range. `None` = AUTO, `Some(255)` =
+    /// ohm 0 = the 60 ohm range (the stock has no item for it). `None` = AUTO, `Some(255)` =
     /// AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         self.ovl_clear(clk.now_ms());
@@ -3056,7 +3069,7 @@ impl Dmm {
             }
             (Button::Ohm, None) => {
                 self.manual = false;
-                if self.mode == 10 && self.range == 0 {
+                if self.mode == 10 && self.range < self.ohm_auto_floor() {
                     self.set(clk, 10, 1, 150);
                 }
             }
@@ -4410,7 +4423,7 @@ impl Dmm {
         if self.r22_drop_one() {
             return None;
         }
-        // r0 (60 ohm) only by a manual choice (set_range); autorange r1..r6.
+        // Autorange r0..r6, r1..r6 with the "ON" variant (`ohm_auto_floor`).
         let r = self.range.clamp(0, 6) as usize;
         let r22 = hy::read1(0x22);
         let steady = self.steady_osr();
@@ -4484,10 +4497,12 @@ impl Dmm {
                     self.set(clk, 10, to, 150);
                     return None;
                 }
-            } else if q > 10.0 * ov * ov && r > 1 && !held {
+            } else if q > 10.0 * ov * ov && r as i8 > self.ohm_auto_floor() && !held {
                 // Down below 0.1 * lim / over, as V / A. The stock tests
                 // q > 10 (R < over * lim / 10), which is exactly the next lower
-                // range's up threshold: no hysteresis band at all.
+                // range's up threshold: no hysteresis band at all. 600 -> 60
+                // ohm (not in the stock autorange) by the same rule: down
+                // below 58.25 ohm, up above 61.8 ohm (DM40C, over 1.03).
                 let step = if now < self.entry + OHM_SINGLE_MS {
                     1
                 } else if q > 1e5 {
@@ -4502,7 +4517,7 @@ impl Dmm {
                     1
                 };
                 self.ohm_settled = false;
-                self.set(clk, 10, (r as i8 - step).max(1), 150);
+                self.set(clk, 10, (r as i8 - step).max(self.ohm_auto_floor()), 150);
                 self.ohm_down_r = r as i8;
                 self.ohm_down_k = kohm;
                 return None;
