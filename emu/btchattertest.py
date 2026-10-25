@@ -18,6 +18,13 @@ a start, and its bytes pass 400 ms before PC14 rises.
   B. Settings: Bluetooth OFF, a host waits, ON: it links inside the start's
      PC14 pulse, right after the banner; its SYST:ERR:COUN? sent at once must
      be answered with 0.
+  C. (in A's link) "AT" inside the firmware's data to a linked host: the DMM
+     reads 2.1569 V DC (--dmm), so a stock cmd 09 reply frame ends in the
+     value 21569 = 0x5441 little-endian, the bytes "AT", then the checksum.
+     The BT model's AT parser once answered "OK" to that, which the
+     firmware took as a host line (-113; the logfmttest --bt-port flake on
+     LOG:DATA? blocks). Five cmd 09 frames: each reply carries "AT", and
+     SYST:ERR:COUN? stays 0.
 Exit status 0 = passed.
 """
 import argparse
@@ -41,7 +48,7 @@ if uc.port_busy(A.port):
 mk = tempfile.mkdtemp(prefix='btchat-')
 TAG = 'btchat-%d-%d' % (A.port, os.getpid())
 B_OFF, B_ON = 40.0, 44.0
-script = ['10.0 shot %s/A.png' % mk,
+script = ['0 dmm dcv:2.1569', '10.0 shot %s/A.png' % mk,
           # B: MENU -> Settings, the Bluetooth row OFF, then ON.
           '%.1f key menu' % (B_OFF - 2), '%.1f tap 339 219' % (B_OFF - 1), '%.1f tap 240 178' % B_OFF,
           '%.1f shot %s/B.png' % (B_OFF + 0.5, mk), '%.1f tap 240 178' % B_ON]
@@ -86,6 +93,23 @@ class Host:
         line, _, self.buf = self.buf.partition(b'\n')
         return line.decode(errors='replace').strip()
 
+    def frame(self, cmd, data=b''):
+        """A stock request frame (AF 05 03 cmd len data sum); the reply
+        frame DF 05 03 cmd len data sum, None if none within 30 s."""
+        f = bytes([0xAF, 0x05, 0x03, cmd, len(data)]) + data
+        self.s.sendall(f + bytes([-sum(f) & 0xFF]))
+        while len(self.buf) < 5 or len(self.buf) < 6 + self.buf[4]:
+            try:
+                d = self.s.recv(4096)
+            except socket.timeout:
+                return None
+            if not d:
+                return None
+            self.buf += d
+        n = 6 + self.buf[4]
+        r, self.buf = self.buf[:n], self.buf[n:]
+        return r
+
 
 try:
     marker('A.png')
@@ -101,6 +125,16 @@ try:
     h.s.sendall(b'NOSUCH:CMD\n')
     e = h.q('SYST:ERR?')
     check(e is not None and e.startswith('-113'), 'A: the host\'s own bad command: SYST:ERR? %s (want -113)' % e)
+    at = 0
+    for _ in range(5):
+        r = h.frame(9)
+        at += bool(r and r[:4] == b'\xdf\x05\x03\x09' and b'AT' in r)
+        time.sleep(0.5)
+    n = h.q('SYST:ERR:COUN?')
+    check(at == 5, 'C: cmd 09 replies holding "AT" (the value 21569): %d of 5' % at)
+    check(n is not None and n.lstrip('+') == '0', 'C: SYST:ERR:COUN? after them: %s (want 0)' % n)
+    if n is not None and n.lstrip('+') not in ('', '0'):
+        print('       queued: %s' % [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))])
     h.s.close()
     marker('B.png')
     h = Host()   # linked by the model once the module is on again

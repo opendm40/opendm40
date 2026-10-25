@@ -8,7 +8,9 @@
 // start, which also prints the start-up banner (BootModel). With a port, a TCP server passes the
 // firmware's UART bytes to the host and the host's bytes to the firmware, so
 // the stock measurement protocol (AF 05 03 ...) and opendm40's SCPI can be used
-// from the host; AT lines are still answered locally.
+// from the host; AT lines are still answered locally, while a host is linked
+// only the ones that start a line of the firmware's output and that it sends
+// linked (OnChar: an "AT" inside a reply is data).
 //
 // Module power (PC0, bt_meas_v2_6.h section 1: the stock drives it low at the
 // BT UART init on the meter page and high when the page is left; high = off is
@@ -166,9 +168,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 try { c.GetStream().WriteByte(b); } catch(Exception) { client = null; }
             }
-            // AT parser: lines starting with "AT" terminated by \r\n (or 50 ms idle for
-            // the stock's "AT+SBNDM40A" without a terminator).
-            if(line.Count == 0 && b != (byte)'A') return;
+            // AT parser: lines starting with "AT" terminated by \r\n (or 20 ms idle for
+            // the stock's "AT+SBNDM40A" without a terminator). While a host is
+            // linked the firmware's bytes are data for it (SCPI replies, LOG:DATA?
+            // blocks, stock frames), which may hold "AT" anywhere: an AT line then
+            // has to start a line of the firmware's output (after CR / LF or
+            // AtGapUs of quiet) and be one of the commands the firmware sends
+            // while linked (cmd 07 AT+SBN, cmd 08 AT+CBN; `Complete`). Before
+            // this an "AT" inside a reply made the model inject "OK" (logfmttest
+            // --bt-port: -113 from the firmware's parser). What the real module
+            // does with AT text while linked is not known (INFERRED: it answers
+            // the stock's cmd 07 / 08 AT lines, which the stock sends linked).
+            var now = (ulong)(machine.ElapsedVirtualTime.TimeElapsed.TotalSeconds * 1e6);
+            var lineStart = prevTx == (byte)'\n' || prevTx == (byte)'\r' || now - lastTxUs >= AtGapUs;
+            prevTx = b;
+            lastTxUs = now;
+            if(line.Count == 0 && (b != (byte)'A' || (client != null && !lineStart))) return;
             if(line.Count == 1 && b != (byte)'T') { line.Clear(); return; }
             line.Add(b);
             if(b == (byte)'\n' || b == (byte)'\r')
@@ -188,6 +203,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var s = Encoding.ASCII.GetString(line.ToArray()).Trim();
             line.Clear();
             if(s.Length < 2) return;
+            if(client != null && !(s.StartsWith("AT+SBN") || s.StartsWith("AT+CBN") || s.StartsWith("AT+SLED") || s.StartsWith("AT+RESET")))
+            {
+                // Linked: data for the host that only looks like AT (see OnChar).
+                return;
+            }
             AtCommands++;
             this.Log(LogLevel.Debug, "AT command: {0}", s);
             string reply;
@@ -340,6 +360,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly List<byte> line = new List<byte>();
         private readonly List<byte> txLine = new List<byte>();
         private bool inAt;
+        private byte prevTx = (byte)'\n';
+        private ulong lastTxUs;
+        /// Firmware TX quiet that starts a new line for the AT parser while linked.
+        private const ulong AtGapUs = 2000;
         private int idleGen;
         private volatile int linkGen;
         private int bootGen;

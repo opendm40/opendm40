@@ -3746,3 +3746,11 @@ Emulator (emu/):
       harness bug. It imported the USB/IP device a second time for the MSC reads while the USBTMC import was
       open, which the server refuses. Fixed: the MSC reads use the same import (`uc.Msc(t.d)`, as
       wavetest.py does). It passes now: 1.17 MB of INFO/LOADER.BIN read in 10 s at 1 ms/div, 0 dropped.
+- [x] emu/logfmttest.py --bt-port ended once with -113. Cause in the BT model (emu/peripherals/BtModule.cs): its AT
+      parser ran on every firmware byte, also while a host was linked, so an "A" "T" pair inside a reply
+      (LOG:DATA? PACKed / DLG blocks, a stock cmd 09 frame) started an "AT line" and the model sent "OK" into
+      the firmware's UART, which ran it as a host line (-113 Undefined header). Fixed in the model: while a
+      host is linked an AT line has to start a line of the firmware's output (after CR / LF or 2 ms of quiet)
+      and be one the firmware sends linked (AT+SBN / AT+CBN for cmd 07 / 08; also AT+SLED / AT+RESET). What
+      the real module does with AT text while linked is not known. emu/btchattertest.py case C (the DMM at
+      2.1569 V: each cmd 09 reply ends in "AT"): 5 x -113 with the old model, 0 with the new one.
