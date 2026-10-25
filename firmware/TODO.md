@@ -3600,7 +3600,7 @@ Emulator (emu/):
 ## Bug triage 2026-10-25 (branch bugtriage-5fdd812)
 
 - [x] Plain AC (V / mV / A) autorange step published a 0 reading: the result that stepped the range went on to
-      publish `f_ac`, which `set` had just reset (the 0774e70 fix), as a final reading on the new range (FETCh?,
+      publish `f_ac`, which `set` had just reset (the reset added after device 0774e70), as a final reading on the new range (FETCh?,
       READ?, the screen); then the EMA's 0.99 step from 0 read 1 % low and closed over ~1 s, also at every plain
       AC entry (DC V -> AC V on 1 V AC: 0.990 V first). Fixed (049bb65): no reading from the stepping result;
       the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
