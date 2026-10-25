@@ -580,8 +580,9 @@ struct ChopSeq {
     gap: u32,
     lfsr: u32,
     /// Writes done, writes later than 2 ms past their due time, the largest
-    /// gap between two INTF checks of the session (us: the bound on how late
-    /// a flag was seen) and its check stamp.
+    /// gap between an INTF check that found no flag and the next check (us:
+    /// the bound on how late a flag was seen) and that check's stamp (0 =
+    /// the last check saw the flag).
     writes: u32,
     late: u32,
     max_poll_gap: u32,
@@ -1152,11 +1153,13 @@ impl Logger {
             }
             let ready = if self.ad2 { hy::ad2_ready() } else { hy::ad1_ready() };
             if self.cs.on {
+                // Only after a check that found no flag: the gap after a
+                // sample is the P/2 gate, not an observation delay.
                 let c = &mut self.cs;
                 if c.last_poll_us != 0 {
                     c.max_poll_gap = c.max_poll_gap.max((self.prod.now_us - c.last_poll_us).min(u32::MAX as u64) as u32);
                 }
-                c.last_poll_us = self.prod.now_us;
+                c.last_poll_us = if ready { 0 } else { self.prod.now_us };
             }
             let p = if self.prod.p_meas != 0 { self.prod.p_meas } else { self.prod.nominal_us } as u64;
             let since = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
