@@ -1,6 +1,6 @@
 # DM40 teardown photos
 
-**Copyright.** All photos in this folder are © CTAHOK, the author of the
+**Copyright.** The photos in the first table are © CTAHOK, the author of the
 review below. They are kept here for reference only and are **not** covered
 by this repository's MIT license. Ask the author before any further use.
 
@@ -25,5 +25,17 @@ by this repository's MIT license. Ask the author before any further use.
 | [isolated-supply-vps8504b-lt61.jpg](isolated-supply-vps8504b-lt61.jpg) | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/0bdf36.jpg | Close-up: two VPS8504B transformer drivers under the LT61-1xx transformers, silkscreen TOUCH |
 | [debug-header-annotated.jpg](debug-header-annotated.jpg) | derived from 46e50d.jpg (crop, 1.5x, annotations added in this repo) | The debug header: TX = PA2, RX = PA3, GND, VCC ~3.1 V; SWD row V, D = PA13, C = PA14, G |
 | [relay-hfd4-and-varistor-closeup.jpg](relay-hfd4-and-varistor-closeup.jpg) | https://art.mysku-st.net/uploads/arts/01/56/73/2025/04/24/e5b7e4.jpg | Close-up: HFD4/3-LS relay and a 07D681K varistor (680 V) in the input network |
+
+## Photos taken for this repository
+
+Taken by the opendm40 maintainer on 2026-10-24 (camera metadata removed).
+Unlike the photos above, they are under this repository's MIT licence.
+
+| File | What it shows |
+|---|---|
+| [main-board-top-dmm-area-open.jpg](main-board-top-dmm-area-open.jpg) | Main board, top side, with the shield plate over the DMM area removed: GD32F427 at the top, scope area can on the left, DMM area with the HFD4/3-LS relay, input resistors and varistors, the "R500" shunt, the wire shunt and the fuse at the bottom |
+| [dmm-area-max6190-shunt-fuse.jpg](dmm-area-max6190-shunt-fuse.jpg) | Close-up of the DMM area: CA-IS3741HW, a 48-pin QFP, MAX6190 ("MAX6190 AESA +124") next to the AGND test point, two EL3H7, the precision resistor row, the "R500" shunt, the fuse in clips |
+| [bottom-input-jacks-and-mosfets.jpg](bottom-input-jacks-and-mosfets.jpg) | Board bottom at the input jacks (V/Ω/Hz, COM, A/mA/µA): two power MOSFETs next to the A jack, MOVs on the V input |
+| [bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg](bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg) | Close-up of the two MOSFETs at the A jack, marked "RU30J30M 2AD11039" and "RUH30J51M 4AD28989" |
 
 How these photos are used: [../README.md](../README.md).
