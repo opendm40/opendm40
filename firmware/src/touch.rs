@@ -814,6 +814,8 @@ pub struct Touch {
     /// Debug ring of the last 8 frames (7 bytes each) and its next index.
     pub ring: [[u8; 7]; 8],
     pub ring_i: u8,
+    /// The last Hynitron read found no new report (status 0xAB, `read_hyn`).
+    stale: bool,
     /// Frame -> state debounce (pure, see `Debounce`).
     deb: Debounce,
     /// Goodix only: last time the buffer-ready flag was force-polled (see
@@ -1161,6 +1163,7 @@ impl Touch {
             raw: [0; 7],
             ring: [[0; 7]; 8],
             ring_i: 0,
+            stale: false,
             deb: Debounce::new(),
             last_gt_poll: 0,
             last_read: 0,
@@ -1256,10 +1259,14 @@ impl Touch {
                     log(b'F', now, src, pts, self.raw[0], p);
                 }
                 // 0x5A: bad / absent frame; Goodix: buffer not ready (not logged).
+                // A stale buffer (status 0xAB) is logged with that status.
+                None if self.ctrl == Ctrl::Hynitron && self.stale => log(b'F', now, src | 0x80, 0, 0xAB, Point::default()),
                 None if self.ctrl == Ctrl::Hynitron => log(b'F', now, src | 0x80, 0, 0, Point::default()),
                 None => {}
             }
-            if f.is_none() && self.ctrl == Ctrl::Hynitron {
+            // A bad frame leaves the debounce as it is; a stale buffer is no
+            // new data, so the pending state is flushed after its silence.
+            if f.is_none() && self.ctrl == Ctrl::Hynitron && !self.stale {
                 return None;
             }
             f
@@ -1287,9 +1294,19 @@ impl Touch {
     /// and is handled without touching pending, as before.
     fn read_hyn(&mut self) -> Option<Frame> {
         let mut b = [0u8; 7];
+        self.stale = false;
         let good = self.bus.read_reg(0xD000, &mut b) && b[6] == 0xAB;
         self.bus.frame_check(good);
         if !good {
+            return None;
+        }
+        // Status 0xAB: the buffer as our clear (D0 00 AB) left it, no new
+        // report. A read on the INT level while a finger is down returns it
+        // between the real frames (device 2026-10-25, DBG:TOUCH?: 0x06 frames
+        // interleaved with 0xAB ones every 10 ms); decoded, it is a key-0
+        // (MENU) press that breaks the touch debounce.
+        self.stale = b[0] == 0xAB;
+        if self.stale {
             return None;
         }
         self.raw = b;
