@@ -57,6 +57,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Touch: a read of the touch controller while its INT line is still low
+  returned the cleared buffer (status 0xAB), which was taken for a press of
+  the MENU key between the real frames; taps were lost and keys mixed up.
+  Such a read is now "no new data", as the stock reads only on INT edges.
 - Side keys: a key pressed right after another one (within ~40 ms of its
   release, or with the release report lost) acted as the earlier key, and
   RUN's release was then never seen, so AutoHold turned on by itself 1 s
