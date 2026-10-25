@@ -4,9 +4,6 @@ about: Something in opendm40 does not work as the manual says
 labels: bug
 ---
 
-A bug that can make a reading or an alert unsafe: do not open an issue,
-report it privately (https://github.com/wirenboard/opendm40/security/policy).
-
 **Meter**
 
 - Model (DM40A / DM40B / DM40C):
