@@ -31,8 +31,11 @@ What waits for the owner; each line links to the material.
       - [x] Device 1184b096: the -95 ppm gain was wrong (FAST - MED -87 / -90 ppm with it, alternating blocks):
             GAIN = 1. The refresh gate rejected 20 of 45 on the calibrator's noisy 1 V..24 V output: now the
             00-mean shift against the groups' scatter.
-      - [ ] Device: the gate change and the defaults (a build after 1184b096): DBG:FAST? used >> rejected on the
-            calibrator's DC output; FAST - MED within 2 counts on 6 V / 60 V right after a range change.
+      - [x] Device c8ce8def (rebased): the gate change and the defaults: 1 V calibrator output, 65 s FAST: 2 used,
+            0 rejected; 10 V on 60 / 600 V, FAST in the first 2 s after the range change +0.3 / +0.4 counts from MED,
+            after the refresh -0.3 / +0.1.
+      - [ ] 60 mV: the refresh is still rejected on an open input (the default VOS of 600 mV stays in use):
+            why (its noise in codes, ~0.017 uV per code)?
       - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
       - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
       - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
