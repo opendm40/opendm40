@@ -1411,9 +1411,10 @@ shows nothing in AC mV; in DC mV an open input that reads OL (a charge
 left after a source, 185c066) hides A-JACK / A-PROT until it reads within
 the range. Emulator: the model's `hfbw` / `hfdc` / `hfpb1` / `hfpb2`
 (*inferred* ratios that replay the device's alerts; [README](../../emu/hy3131/README.md)),
-senttest `acmv-hf600`, `acmv-hf60`, `dcmv-hf600`, `acv-hf`: FAIL on
-8a0f59d1 (A-JACK, A-PROT, DC?), pass now; their last phase (a current in
-A) still asserts A-JACK. `aprot-dcmv-12` / `-24` time the DC mV trip.
+senttest `acmv-hf600`, `acmv-hf60`, `dcmv-hf600`, `dcmv-hf600-slow`, `acv-hf`,
+`acv-auto-hf`, loudtest `ajack-acmv-hf`, `ajack-dcmv-hf`: FAIL on
+8a0f59d1 (A-JACK, A-PROT, DC?), pass now; the last phase of the mV ones (a
+current in A) still asserts A-JACK. `aprot-dcmv-12` / `-24` time the DC mV trip.
 
 #### Device check list (jack check)
 

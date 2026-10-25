@@ -116,6 +116,16 @@ SC = {
                                        (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
                                        (20, 'vsrc:none;isrc:0.002', {'AJACK'})], [],
                    {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    # The same at the SLOW rate (0.4 s conversions; the V gate's lag is 250 ms) and through AC V
+    # AUTO (mV-first, as the owner switched).
+    'dcmv-hf600-slow': ('VOLT:DC 0.6', 30, [(0, 'open;%s;vsrc:0.1' % HF, {'NONE'}),
+                                            (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
+                                            (20, 'vsrc:none;isrc:0.002', {'AJACK'})], ['SENS:RATE SLOW'],
+                        {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'acv-auto-hf': ('VOLT:AC', 30, [(0, 'open;%s;vsrc:0,ac=0.003,f=50' % HF, {'NONE'}),
+                                    (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
+                                    (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                    {'never': [('AJACK', 1, 2), ('APROT', 0, 3), ('DC', 1, 2)]}),
     'acv-hf':     ('VOLT:AC 6', 24, [(0, 'open;%s;vsrc:0,ac=1,f=50' % HF, {'NONE'}),
                                      (10, 'vsrc:0,ac=3,f=66000', {'NONE'})], [], {'never': [('DC', 1, 2)]}),
     # AC+DC V on manual 600 mV (doc 4.13 gap): its AC phase is the AC mV row with the same AD1

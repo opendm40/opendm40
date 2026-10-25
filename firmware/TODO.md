@@ -68,24 +68,6 @@ What waits for the owner; each line links to the material.
       5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
          there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
-- [ ] False A-JACK / A-PROT from a 66 kHz signal on V-COM (owner 2026-10-26, 0.2.0, A jack empty, modes through
-      AUTO): AC mV 600 mV `AJACK,AD1PK_PB1` (26.57 mV), DC mV 600 mV OL with `CMP_PB1` A-JACK then A-PROT, AC mV
-      60 mV A-PROT (the latch from DC mV), AC V 6 V a DC? hint (1.162 mV). Cause: the RMS block misses a signal
-      above the ~20 kHz AC bandwidth, so AC mV's V_GATE said "free"; plain DC mV had no V gate and its A-PROT probe
-      on PB2 read the pickup; DC? compared the V tap's DC with an AC reading that misses the AC part. Fix (branch
-      fix/hf-false-ajack, 0.2.1, [doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)):
-      the counter above `V_HF_KHZ` (10 kHz) = driven in plain AC mV and no DC? in AC V; DC mV OL = driven, also for
-      the A-PROT trip. That the counter sees the signal in those rows is INFERRED. Emulator: senttest acmv-hf600 /
-      acmv-hf60 / dcmv-hf600 / acv-hf FAIL on 8a0f59d1, pass; aprot-dcmv-24 latency 137 -> 444 ms.
-      Device check (alarm OFF, the 66 kHz generator on V-COM, A jack empty; `SYST:ALER?`, `DBG:SENT?`,
-      `DBG:SENT:LOG?`, `READ?` every 0.5 s for 10 s per step; ~2 min):
-      1. AC V 6 V: the Hz secondary reads ~66 kHz; no DC (note `DBG:SENT?` fields 5 / 6 for the DC? cause).
-      2. AC mV 600 mV and 60 mV (manual): the Hz secondary ~66 kHz (if it reads "--" or 0, the counter premise
-         fails: report it), no AJACK, no new AJACK in the log; `DBG:SENT?` field 12 = 1.
-      3. DC mV 600 mV: OL, no AJACK / APROT, field 12 = 1.
-      4. AC V AUTO, then DC V AUTO with the same signal: no AJACK / APROT.
-      5. Generator off, V-COM open: DC mV reads within the range (not OL), field 12 = 0.
-      6. If the A jack can be wired: a current in A with V-COM open in AC mV and DC mV: AJACK within ~1 s.
 - [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
       in whole runs `r30-300-30` failed 4 of 5 (ranges 60, 60 M, 6000, 600, 60: the first step down from 60 MΩ is
       4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
@@ -3815,6 +3797,26 @@ Emulator (emu/):
       LIVE_CLEAR_MS old asserts no more (sentinel test live_does_not_flap_after_the_source). Device: doc
       4.13 check list item 5. **Device c6a3ac3: PASS**, DBG:SENT:LOG? +0 after the off in 5 of 5 (5 V x 3,
       10 V, the square); LIVE? clears 1.0-1.25 s after the off and stays off.
+- [ ] False A-JACK / A-PROT from a 66 kHz signal on V-COM (owner 2026-10-26, 0.2.0, A jack empty, modes through
+      AUTO): AC mV 600 mV `AJACK,AD1PK_PB1` (26.57 mV), DC mV 600 mV OL with `CMP_PB1` A-JACK then A-PROT, AC mV
+      60 mV A-PROT (the latch from DC mV), AC V 6 V a DC? hint (1.162 mV). Cause: the RMS block misses a signal
+      above the ~20 kHz AC bandwidth, so AC mV's V_GATE said "free"; plain DC mV had no V gate and its A-PROT probe
+      on PB2 read the pickup; DC? compared the V tap's DC with an AC reading that misses the AC part. Fix (branch
+      fix/hf-false-ajack, 0.2.1, [doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)):
+      the counter above `V_HF_KHZ` (10 kHz) = driven in plain AC mV and no DC? in AC V; DC mV OL = driven, also for
+      the A-PROT trip. That the counter sees the signal in those rows is INFERRED. Emulator: senttest acmv-hf600 /
+      acmv-hf60 / dcmv-hf600 / dcmv-hf600-slow / acv-hf / acv-auto-hf, loudtest ajack-acmv-hf / ajack-dcmv-hf FAIL
+      on 8a0f59d1, pass; aprot-dcmv-24 latency 137 -> 444 ms. The two AC mV ranges disagree on the same input
+      (26.57 mV on 600 mV, 2.16 mV on 60 mV, ~12x), so neither reading is the input's RMS (cause unknown).
+      Device check (alarm OFF, the 66 kHz generator on V-COM, A jack empty; `SYST:ALER?`, `DBG:SENT?`,
+      `DBG:SENT:LOG?`, `READ?` every 0.5 s for 10 s per step; ~2 min):
+      1. AC V 6 V: the Hz secondary reads ~66 kHz; no DC (note `DBG:SENT?` fields 5 / 6 for the DC? cause).
+      2. AC mV 600 mV and 60 mV (manual): the Hz secondary ~66 kHz (if it reads "--" or 0, the counter premise
+         fails: report it), no AJACK, no new AJACK in the log; `DBG:SENT?` field 12 = 1.
+      3. DC mV 600 mV: OL, no AJACK / APROT, field 12 = 1.
+      4. AC V AUTO, then DC V AUTO with the same signal: no AJACK / APROT.
+      5. Generator off, V-COM open: DC mV reads within the range (not OL), field 12 = 0.
+      6. If the A jack can be wired: a current in A with V-COM open in AC mV and DC mV: AJACK within ~1 s.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 2f56ff9 new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
