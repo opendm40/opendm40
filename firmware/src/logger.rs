@@ -555,7 +555,7 @@ pub struct Logger {
 /// in an unchopped AD1 main-loop session (LOG:CHOP OFF), R22's AD1CHOP is
 /// rewritten 00 (VX + VOS) / 01 (VX - VOS) after conversions. Modes: 0 off,
 /// 1 blocks (the polarity flips every `param` conversions; 1 = ABAB), 2
-/// PRBS (a xorshift bit per conversion), 3 rare (00, one 01 conversion
+/// PRBS (a xorshift bit per conversion), 3 rare (00, 01 for two conversions
 /// after a random gap of param/2 .. 3 param/2). The write goes `delay_ms`
 /// after the flag was seen (0 = right after the data read). Every record's
 /// raw is tagged: bits 23:0 the code, bit 28 the polarity in R22 when the
@@ -578,6 +578,7 @@ struct ChopSeq {
     /// Conversions read this session; mode 3: conversions to the next 01.
     k: u32,
     gap: u32,
+    held: u32,
     lfsr: u32,
     /// Writes done, writes later than 2 ms past their due time, the largest
     /// gap between an INTF check that found no flag and the next check (us:
@@ -602,6 +603,7 @@ impl ChopSeq {
             due_us: 0,
             k: 0,
             gap: 0,
+            held: 0,
             lfsr: 0,
             writes: 0,
             late: 0,
@@ -630,7 +632,14 @@ impl ChopSeq {
             1 => ((self.k / (self.param as u32).max(1)) & 1) as u8,
             2 => (self.rand() >> 7 & 1) as u8,
             3 => {
+                // 01 for two conversions: the first is mixed (the switch
+                // lands inside its sinc^2 window), the second is clean.
                 if self.pol == 1 {
+                    self.held += 1;
+                    if self.held < 2 {
+                        return 1;
+                    }
+                    self.held = 0;
                     self.gap = self.rare_gap();
                     0
                 } else if self.gap <= 1 {
