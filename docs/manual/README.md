@@ -1178,6 +1178,9 @@ in the left or right half of the graph steps), **Off**.
 
 - **Drag** the **T** marker on the right edge up or down to set the
   trigger level.
+- The trigger level is kept in volts: changing the V/div, the probe or the
+  position moves its marker, not the level. A level off screen shows its
+  marker on the edge.
 - **Drag sideways** to move the trigger position (the **T** on the top
   edge).
 - **Long press** a marker to centre it: the trigger level goes to the middle
@@ -1226,20 +1229,20 @@ edges between captures.
 *Drags: the trigger level, the trigger position, the trace.*
 
 A drag moves one thing along one axis until you lift the finger. The first
-movement (about 8 pixels) decides the axis.
+movement (about 8 pixels) decides the axis, and the axis decides what moves:
 
-- A drag that starts on or near a marker (within about 12 pixels) moves that
-  marker, with no tap to select it first. It moves only along the marker's
-  own axis: up and down for the level markers (the trace, the trigger level,
-  the runt level, a Y cursor, the math / FFT offset), sideways for the time
-  markers (the trigger position, an X cursor). A first movement the other way
-  moves nothing.
-- A drag that starts elsewhere moves the selected items: sideways the
-  selected time item (the trigger position, an X cursor, the FFT centre), up
-  and down the selected level.
-- When markers are close, the nearest one is taken; the selected one wins if
-  it is about as near. A tap on the selected marker selects the next one
-  under the finger.
+- **Up or down**: the level marker nearest to where the finger went down
+  (the trace, the trigger level, the runt level, a Y cursor, the math / FFT
+  offset), however far it is. A level off screen counts at its marker on the
+  edge.
+- **Sideways**: the time marker nearest to where the finger went down (the
+  trigger position, an X cursor, the FFT centre). On a stopped scope, moving
+  the trigger position pans the stored record.
+- What is selected does not matter; the moved marker becomes the selection.
+  When two markers are equally near, the one drawn on top moves.
+
+A tap on a marker selects it; a tap on the selected marker selects the next
+one under the finger.
 
 **Settings > Scope drag** sets how a drag starts:
 
