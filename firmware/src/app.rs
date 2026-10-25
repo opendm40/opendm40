@@ -657,8 +657,9 @@ impl App {
         crate::persist::init();
         // The backup SRAM record, or the newer / only copy in the settings
         // file on the SPI disk (setfile.rs; after a power-off the backup
-        // SRAM holds none). A power-off starts in DC V as the stock (owner
-        // 2026-10-25): the function is continued only from the backup SRAM.
+        // SRAM holds none). A power-off starts a new measurement (owner
+        // 2026-10-25): DC V and the measurement settings at their defaults;
+        // only a reset (the backup SRAM) continues them.
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
             a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
@@ -2035,11 +2036,15 @@ impl App {
         p
     }
 
-    /// Backup SRAM words -> settings. `same_session`: the DMM function is
-    /// continued only after a normal opendm40 boot (persist::same_session)
-    /// that kept the backup SRAM (a reset, not a power-off); otherwise, and
-    /// for any code this build does not know, DC V as the stock's power-on
-    /// default.
+    /// Backup SRAM words -> settings. `same_session`: after a normal
+    /// opendm40 boot (persist::same_session) that kept the backup SRAM (a
+    /// reset, not a power-off) the measurement continues: the DMM function
+    /// (an unknown code reads as DC V), its ranges / AUTO flags, AutoHold,
+    /// the limits, rate and smoothing, the scope's acquisition, trigger,
+    /// math and measurements, the power meter and the Record page. Otherwise
+    /// only the preferences are restored (display, sound, power, BT, alerts,
+    /// units, sensor, scope look and touch, the generator's setup) and the
+    /// rest keeps its defaults, as the stock after a power-on.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.dim_idx = (p[0] & 3) as usize;
@@ -2053,7 +2058,9 @@ impl App {
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
         self.sp_restore(p[1], p[11]);
-        self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
+        if same_session {
+            self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
+        }
         gesture::set_grab_ms((p[11] >> 16) as u16);
         let mut o = [0i16; 7];
         for (i, v) in o.iter_mut().enumerate() {
@@ -2065,14 +2072,16 @@ impl App {
         }
         // v4: AutoHold, limits (all zero in older records = off / unset).
         let m = &mut self.meter;
-        m.ahold = p[18] & 1 != 0;
         m.lim_beep = p[18] & 2 == 0;
-        for (i, l) in m.lim.iter_mut().enumerate() {
-            let f = |w: u32, set: bool| Some(f32::from_bits(w)).filter(|v| set && v.is_finite());
-            let w = if i == crate::meter::LIM_POWER { crate::persist::W_LIM_W } else { 20 + 2 * i };
-            l.on = p[18] >> (8 + i) & 1 != 0;
-            l.lo = f(p[w], p[19] >> i & 1 != 0);
-            l.hi = f(p[w + 1], p[19] >> (16 + i) & 1 != 0);
+        if same_session {
+            m.ahold = p[18] & 1 != 0;
+            for (i, l) in m.lim.iter_mut().enumerate() {
+                let f = |w: u32, set: bool| Some(f32::from_bits(w)).filter(|v| set && v.is_finite());
+                let w = if i == crate::meter::LIM_POWER { crate::persist::W_LIM_W } else { 20 + 2 * i };
+                l.on = p[18] >> (8 + i) & 1 != 0;
+                l.lo = f(p[w], p[19] >> i & 1 != 0);
+                l.hi = f(p[w + 1], p[19] >> (16 + i) & 1 != 0);
+            }
         }
         // Sensor and autorange flags before the mode, so a restored mode
         // enters with them.
@@ -2080,8 +2089,10 @@ impl App {
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
-        self.dmm.set_rate(ext.rate);
-        self.meter.set_smoothing(ext.smooth);
+        if same_session {
+            self.dmm.set_rate(ext.rate);
+            self.meter.set_smoothing(ext.smooth);
+        }
         self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
         self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
         // Before the first row is written (select below).
@@ -2091,13 +2102,15 @@ impl App {
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
         // An unknown value (3) reads as Loud.
         self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
-        self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
-        self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
-        // v8: Record page interval / duration (0 = the defaults; csvlog
-        // maps an unknown index to the default).
-        crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
-        let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
-        self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
+        if same_session {
+            self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
+            self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
+            // v8: Record page interval / duration (0 = the defaults; csvlog
+            // maps an unknown index to the default).
+            crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
+            let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
+            self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
+        }
         let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
         // Entering the power meter starts in DC (as V / A); a restart in it
         // keeps its coupling, as V / A keep theirs in the function code.
@@ -2115,6 +2128,9 @@ impl App {
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
         self.gen.s = g.normalised();
+        if !same_session {
+            return;
+        }
         let mut sc = self.scope.s;
         sc.tb = (p[6] & 0xFF) as usize;
         sc.range = (p[6] >> 8 & 0xFF) as usize;

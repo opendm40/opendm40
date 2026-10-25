@@ -20,16 +20,21 @@ What waits for the owner; each line links to the material.
 
 - [ ] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
       device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
-- [x] DMM function after a power-off: DC V as the stock (owner 2026-10-25). Done: app.rs continues the function only
-      from the backup SRAM (a reset); from `_SETTING.BIN` (a power-off) it starts in DC V. Device check: AC V, power
-      off with the key, power on: DC V; AC V, `DBG:RESET` or a firmware update: as before.
+- [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
+      at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
+      math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
+      alerts, units, sensor, scope look and touch, the generator's setup). A reset or an update continues all.
+      Done: app.rs `restore` (`same_session` = from the backup SRAM after a normal boot); emu/settingstest.py PASS.
+      Device check: AC V, AutoHold on, a limit set, 10 ms/div on the scope; power off with the key and on: DC V,
+      AutoHold off, no limit, the scope's defaults, the brightness kept; the same after `DBG:RESET`: all kept.
 - [ ] RES AUTO: include the 60 Ω range or not.
 - [ ] Repository split: confirm the list of paths moved to the private wirenboard/alientek-dm40-fw-analysis repo and
       purged from history (stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger, stock-scope-ui,
       native-review / native-boot-plan / native-boot-review, acdc-stock-vs-opendm40, with their old fw-rs/ names;
       two BT MACs masked). A dry run of the rewrite is done; nothing pushed.
-- [ ] Before the public release: the licence of stock/patch, the vendor .bin and the datasheets in docs/; delete the
-      rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1; README known issues.
+- [ ] Public release (owner 2026-10-25): the one blocker is the touch fix (screen and the four touch keys). Still
+      to do at that time, not blockers: the licence of stock/patch, the vendor .bin and the datasheets in docs/;
+      delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
 - [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
       (AC+DC mV A-JACK); DC V against a third reference.
 
