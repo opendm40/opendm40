@@ -56,7 +56,7 @@ make SRCS="src/startup.c src/my.c"      # choose patch sources
   ends at `0x0807ce18`) and patch variables at `0x2002f800`. Flash above
   `0x080a0000` must not be used: `0x080a4000` holds bootloader data that the
   firmware checks against the chip UID, `0x080c0000` holds settings.
-  The patch RAM area is a placeholder; it is not yet verified to be unused.
+  The patch RAM area is a placeholder; whether the stock firmware leaves it unused is *unknown*.
 - [`fw_v2_6.S`](patch/fw_v2_6.S) / [`fw_v2_6.h`](patch/fw_v2_6.h) declare functions of the original firmware that
   patches can call. Addresses are valid for V2.6 only.
 - Hooks are declared in C next to the code:
@@ -78,7 +78,7 @@ make SRCS="src/startup.c src/my.c"      # choose patch sources
 - [`patcher.py`](patch/patcher.py) applies the linked patch to the original update file.
 
 Calling convention: patches are compiled with `-mfloat-abi=hard`. Calls into
-the firmware with float arguments are not verified to use the same ABI.
+the firmware with float arguments: whether they use the same ABI is *unknown*.
 
 The memrw patch ([`src/memrw.c`](patch/src/memrw.c), Bluetooth memory read/write) has been used on
 a device; [patch/AGENTS.md](patch/AGENTS.md) lists what works (including the
