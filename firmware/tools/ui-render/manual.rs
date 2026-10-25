@@ -165,7 +165,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/settings2", &page, false);
     save1(out, "settings2");
     host::reset(0);
-    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", ""]);
+    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", ""]);
     ck.check_opts("manual/settings3", &page, false);
     save1(out, "settings3");
 
@@ -226,6 +226,12 @@ pub fn run(out: &str) -> usize {
     ]);
     ck.check_opts("manual/device", &page, false);
     save1(out, "device");
+
+    // Touch test page: taps on the targets (a scale error), MENU held.
+    host::reset(0);
+    super::touchtest_scene(2, false);
+    ck.check_opts("manual/touch-test", &[("screen", Bx::new(0, 0, 480, 320))], false);
+    save1(out, "touch-test");
 
     // On-screen help, page 1 (gestures).
     host::reset(0);
@@ -655,7 +661,7 @@ pub fn run(out: &str) -> usize {
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]);
+        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", ""]);
         ck.check_opts("manual/settings3-edit", &page, false);
         save1(out, "settings3-edit");
     }

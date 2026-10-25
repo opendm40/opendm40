@@ -762,6 +762,7 @@ unless shown otherwise.
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
+| `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:PROF[?]` | | Main loop timing table | USB |
 | `DBG:PROF:RESET` | | Clears the timing table. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |

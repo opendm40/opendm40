@@ -1097,6 +1097,23 @@ impl W<'_> {
     }
 }
 
+/// Entries written to the log since the last clear (the ring holds the last
+/// LOG_N of them): the touch test page's cursor (app_touchtest.rs).
+pub fn log_count() -> u32 {
+    log_ref().n
+}
+
+/// Entry `i` (0 = the first since the last clear) as (kind, a, b, c, point),
+/// see `LogEntry`; None when not written yet or already overwritten.
+pub fn log_entry(i: u32) -> Option<(u8, u8, u8, u8, Point)> {
+    let l = log_ref();
+    if i >= l.n || l.n - i > LOG_N as u32 {
+        return None;
+    }
+    let e = l.e[i as usize % LOG_N];
+    Some((e.kind, e.a, e.b, e.c, Point { x: e.x, y: e.y }))
+}
+
 fn int_low() -> bool {
     (unsafe { r32(GPIOE + 0x10) } & (1 << INT)) == 0
 }
