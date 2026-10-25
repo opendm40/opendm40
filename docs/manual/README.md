@@ -1225,28 +1225,26 @@ edges between captures.
 
 *Drags: the trigger level, the trigger position, the trace.*
 
-A drag moves the selected marker: a vertical drag moves the selected level
-(the trace, the trigger level, a Y cursor, the FFT), a horizontal drag the
-selected time item (the trigger position, an X cursor, the FFT centre).
-Press on a marker to select it; markers that overlap are selected in turn.
-A drag that starts on or near a marker (within about 12 pixels) moves that
-marker; no tap to select it first. When markers are close, the nearest one is
-taken; the selected one wins if it is about as near. While the guide lines
-show, a drag along one moves its item too. A tap on the selected marker
-selects the next one under the finger.
+A drag moves one thing along one axis until you lift the finger. The first
+movement (about 8 pixels) decides the axis.
 
-A drag that starts on a marker moves only along that marker's axis until you
-lift the finger: up and down for the level markers, sideways for the time
-markers. The **T** trigger-level marker of a running scope is the exception:
-it moves the trigger point both ways (level and position); the trace stays
-put until the next capture, which triggers at the new point. A drag along a
-guide line takes the axis it starts moving in.
+- A drag that starts on or near a marker (within about 12 pixels) moves that
+  marker, with no tap to select it first. It moves only along the marker's
+  own axis: up and down for the level markers (the trace, the trigger level,
+  the runt level, a Y cursor, the math / FFT offset), sideways for the time
+  markers (the trigger position, an X cursor). A first movement the other way
+  moves nothing.
+- A drag that starts elsewhere moves the selected items: sideways the
+  selected time item (the trigger position, an X cursor, the FFT centre), up
+  and down the selected level.
+- When markers are close, the nearest one is taken; the selected one wins if
+  it is about as near. A tap on the selected marker selects the next one
+  under the finger.
 
 **Settings > Scope drag** sets how a drag starts:
 
-- **Stock** (default): each movement goes to the axis it moves most.
-- **Axis lock**: the first 15 pixels decide the axis; then only that axis
-  moves.
+- **Stock** (default) and **Axis lock**: the drag moves as soon as the
+  finger moves.
 - **Hold 300 ms**: hold the finger still first; the meter beeps, then the
   drag moves.
 

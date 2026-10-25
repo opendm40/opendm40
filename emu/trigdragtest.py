@@ -16,10 +16,12 @@ part); DBG:GEST?'s "|POS hpos,trig_row,pos" is read before and after.
     wobble to 0; the stock split would have moved it +j px per 3 points);
   * the CH1 marker (left strip, x 6), the same: CH1 moves, the trigger
     position does not (axis lock of a level marker);
-  * a sideways drag along CH1's guide line right after (a line zone: the
-    drag decides its axis) and one off the markers (plain pan of the
-    selected time item, the trigger position) still move the trigger
-    position.
+  * right after the trigger-level drag, a slanted sideways drag (80 x 20
+    px) that starts on the trace next to the shown trigger line moves only
+    the trigger position, by 80 px (one item, one axis per gesture; the
+    guide lines are not zones);
+  * a sideways drag along CH1's guide line right after, and one off the
+    markers, still move the trigger position.
 
 Exit status 0 = all passed.
 """
@@ -111,8 +113,24 @@ try:
     check(h1 == h0, 'trigger-level drag with %d px sideways wobble kept the trigger position (%d -> %d)' % (j, h0, h1))
     check(p1 == p0, 'trigger-level drag kept CH1 (%d -> %d)' % (p0, p1))
 
+    # Right after (the trigger-level guide line shows, the trigger level
+    # selected): a slanted sideways drag (80 x 20 px) that starts on the
+    # trace 6 px under that line pans: only the trigger position, by the
+    # horizontal travel, and the level stays (owner 2026-10-25).
+    y = top + r1 + 6
+    q('DBG:DRAG 150,%d,230,%d,400,0,0' % (y, y + 20))
+    wait_ms(300)
+    hs, rs, ps = pos()
+    print('  slanted pan next to the trigger line: hpos %d, trig_row %d, pos %d' % (hs, rs, ps), flush=True)
+    check(rs == r1, 'a pan starting next to the shown trigger line keeps the trigger level (%d -> %d)' % (r1, rs))
+    check(hs == h1 + 80 and ps == p1, 'it moves only the trigger position, by the horizontal travel (%d -> %d)' % (h1, hs))
+    h1 = hs
+
     y = top + 140 + p1
-    q('DBG:DRAG 6,%d,6,%d,600,0,%d' % (y, y - 40, j))
+    # 300 ms: the first 8 px of travel must be mostly vertical (the axis
+    # is decided by the first motion; at 600 ms the 8 px jitter would come
+    # first and decide horizontal, which a level marker ignores).
+    q('DBG:DRAG 6,%d,6,%d,300,0,%d' % (y, y - 40, j))
     wait_ms(800)
     h2, r2, p2 = pos()
     print('  CH1 drag: hpos %d, trig_row %d, pos %d' % (h2, r2, p2), flush=True)
