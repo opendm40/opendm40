@@ -39,8 +39,8 @@ os.environ['MTOOLS_SKIP_CHECK'] = '1'
 os.makedirs(WORK, exist_ok=True)
 NOK = 0
 # Independent cut points run at once (trash session): FATREN_JOBS, default
-# the CPU count, at most 4.
-PAR = int(os.environ.get('FATREN_JOBS') or min(4, os.cpu_count() or 1))
+# the CPUs this process may run on, at most 4.
+PAR = int(os.environ.get('FATREN_JOBS') or min(4, len(os.sched_getaffinity(0))))
 
 
 def ok(msg):
@@ -694,7 +694,7 @@ ws = diff(base, host)
 # update files' delete, the FAT chain, the root entry), every 25th of the
 # staging before it.
 pts = sorted(set(range(0, nw, 25)) | set(range(max(0, nw - 40), nw)))
-T0 = tree(SPI0)
+T_FW = tree(SPI0)
 for k in pts:
     vv = VServe(T, spi_copy('cut.spi'), FLASH, SRC, cut=k)
     vv.lock(True)
@@ -712,7 +712,7 @@ for k in pts:
         if t['::/DM40FW.BIN'] != hashlib.md5(open(FW1, 'rb').read()).hexdigest():
             fail('cut %d: a partial DM40FW.BIN' % k)
     t.pop('::/DM40FW.BIN', None)
-    if t != T0:
+    if t != T_FW:
         fail('cut %d: other files changed' % k)
     vv.close()
 ok('%d of %d cut points: fsck at worst lost clusters / FAT 1 ahead, DM40FW.BIN absent or whole, every other file intact' % (len(pts), nw))
@@ -741,8 +741,8 @@ def trash_session(cut, name='tcut.spi'):
     return sp, n
 sp, nt = trash_session(None)
 same_tree(SPI0, sp, 'trash session', gone=['::/SHOTS/S001.BMP'])
-T0 = tree(SPI0)
-T0.pop('::/SHOTS/S001.BMP', None)
+T_TRASH = tree(SPI0)
+T_TRASH.pop('::/SHOTS/S001.BMP', None)
 def trash_cut(k):
     # Own file names per cut point: the cut points run in parallel.
     name = 'tcut%d.spi' % k
@@ -758,7 +758,7 @@ def trash_cut(k):
     if any(p.startswith('::/_VHOST') for p in t):
         fail('trash cut %d: a temp file survived the next boot' % k)
     t.pop('::/SHOTS/S001.BMP', None)
-    if t != T0:
+    if t != T_TRASH:
         fail('trash cut %d: other files changed' % k)
     for f in (name, name + '.out', name + '.out.boot', name + '.out.boot.out'):
         try:
