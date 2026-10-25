@@ -55,6 +55,20 @@ pub const THR_STEPS: [f32; 6] = [0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
 pub const THR_DEFAULT: f32 = 1.0;
 pub const THR_MIN: f32 = 0.1;
 pub const THR_MAX: f32 = 50.0;
+/// Measured zero (`Cap::arm` with b > 0): the first ZERO_SKIP samples of
+/// the stream are skipped, the next ZERO_N (100 ms) averaged; their mean is
+/// the zero when it lies within ZERO_MAX_A of the zero given (the last one
+/// measured, else the calibration's: app_inrush.rs) and their rms about it
+/// is below ZERO_RMS_A (no load running), else the zero given stays. Device 489f956: the AC A 10 A row's AD2 mean
+/// read +0.0717 A with the A jack open (rms about it 1.7 mA) and the cal
+/// record has no LPF offset for the AC A rows (0x10C.., all 0): the page
+/// read "Armed: 0.069 A now". A DC load below ZERO_MAX_A already flowing
+/// at the arm is taken for the zero (docs/inrush-current.md 11).
+pub const ZERO_SKIP: u32 = 96;
+pub const ZERO_N: u32 = 960;
+pub const ZERO_MAX_A: f32 = 0.2;
+pub const ZERO_RMS_A: f32 = 0.05;
+
 /// Code of a sample at the AD2 rail (262 143 >> 3 = 32 767, a few codes of
 /// margin): OL.
 pub const CODE_OL: i32 = 32_700;
@@ -83,10 +97,21 @@ pub enum Phase {
 #[derive(Clone, Copy)]
 pub struct Cap {
     pub phase: Phase,
-    /// Zero-current code (the AD2 calibration offset in 16-bit codes,
-    /// rounded) and the step threshold x SHORT, in codes.
+    /// Zero-current code (16-bit codes, rounded) and the step threshold x
+    /// SHORT, in codes.
     z: i32,
     step_sum: u32,
+    /// The exact zero code: the one `arm` was given, or the measured one
+    /// (`zok`).
+    pub zf: f32,
+    pub zok: bool,
+    /// Measured zero: A per code (its limits), the samples taken so far
+    /// (ZERO_SKIP + ZERO_N = done), the sums of (c - z) and its square
+    /// (f32: exact for an idle input; a load fails the limits anyway).
+    zb: f32,
+    zn: u32,
+    zs1: f32,
+    zs2: f32,
     /// Samples taken since the arm (the ring slot of sample n is n % len).
     pub tot: u64,
     /// First sample of the usable history (the arm, or after a hole).
@@ -136,6 +161,12 @@ impl Cap {
         phase: Phase::Off,
         z: 0,
         step_sum: 0,
+        zf: 0.0,
+        zok: false,
+        zb: 0.0,
+        zn: 0,
+        zs1: 0.0,
+        zs2: 0.0,
         tot: 0,
         hist0: 0,
         sum: 0,
@@ -154,13 +185,42 @@ impl Cap {
         rd: 0,
     };
 
-    /// A new capture: `z` = the zero-current code, `step_codes` = the step
-    /// threshold in codes (>= 1).
-    pub fn arm(&mut self, z: i32, step_codes: u32) {
+    /// A new capture: `zf` = the calibration's zero code, `b` = A per code
+    /// (> 0: the zero is measured first, ZERO_N; 0: `zf` as it is),
+    /// `step_codes` = the step threshold in codes (>= 1). Region C
+    /// (link-native.x): the page's and the SCPI's arm.
+    #[inline(never)]
+    pub fn arm(&mut self, zf: f32, b: f32, step_codes: u32) {
         *self = Cap::OFF;
         self.phase = Phase::Arming;
-        self.z = z;
+        self.zf = zf;
+        self.z = round_i(zf);
+        self.zb = b;
+        self.zn = if b > 0.0 { 0 } else { ZERO_SKIP + ZERO_N };
         self.step_sum = step_codes.max(1).saturating_mul(SHORT as u32);
+    }
+
+    /// One sample of the zero's measurement (`arm`); at its end the zero
+    /// moves to the mean when it passes ZERO_MAX_A / ZERO_RMS_A.
+    #[inline(never)]
+    fn zero_in(&mut self, c: i16) {
+        self.zn += 1;
+        if self.zn <= ZERO_SKIP {
+            return;
+        }
+        let d = (c as i32 - self.z) as f32;
+        self.zs1 += d;
+        self.zs2 += d * d;
+        if self.zn == ZERO_SKIP + ZERO_N {
+            let m = self.zs1 * (1.0 / ZERO_N as f32);
+            let var = self.zs2 * (1.0 / ZERO_N as f32) - m * m;
+            let b = self.zb;
+            if (m * b).abs() <= ZERO_MAX_A && var * (b * b) <= ZERO_RMS_A * ZERO_RMS_A {
+                self.zf = self.z as f32 + m;
+                self.z = round_i(self.zf);
+                self.zok = true;
+            }
+        }
     }
 
     /// A new step threshold (codes) without losing the history.
@@ -174,9 +234,15 @@ impl Cap {
     pub fn hole(&mut self, n: u32) {
         match self.phase {
             Phase::Arming | Phase::Armed => {
-                let keep = (self.z, self.step_sum, self.tot);
-                self.arm(keep.0, 1);
-                (self.step_sum, self.tot, self.hist0) = (keep.1, keep.2, keep.2);
+                // The detector afresh; a zero measured stays, one in
+                // progress starts again.
+                let (z, zf, zok, zb, st, tot, zn) = (self.z, self.zf, self.zok, self.zb, self.step_sum, self.tot, self.zn);
+                *self = Cap::OFF;
+                self.phase = Phase::Arming;
+                (self.z, self.zf, self.zok, self.zb, self.step_sum, self.tot, self.hist0) = (z, zf, zok, zb, st, tot, tot);
+                if zn >= ZERO_SKIP + ZERO_N {
+                    self.zn = zn;
+                }
             }
             Phase::Post => {
                 if self.lost == 0 {
@@ -193,6 +259,11 @@ impl Cap {
     #[inline(always)]
     pub fn push(&mut self, buf: &mut [u16], c: i16) -> bool {
         if matches!(self.phase, Phase::Off | Phase::Done) {
+            return false;
+        }
+        if self.zn < ZERO_SKIP + ZERO_N {
+            // (the history starts after the zero)
+            self.zero_in(c);
             return false;
         }
         let cap = buf.len() as u64;
@@ -263,10 +334,11 @@ impl Cap {
         self.rd = 0;
     }
 
-    /// Results over the linear trace; `b` = A per code, `zf` = the exact
-    /// zero code (the calibration offset / b).
+    /// Results over the linear trace; `b` = A per code, about the exact
+    /// zero code `zf`.
     #[inline(never)]
-    pub fn results(&self, buf: &[u16], b: f32, zf: f32) -> Res {
+    pub fn results(&self, buf: &[u16], b: f32) -> Res {
+        let zf = self.zf;
         let t = &buf[..LEN];
         let ms = |s: &[u16]| -> f32 {
             // Exact integer sums about the rounded zero, then the fraction.
@@ -371,9 +443,11 @@ pub struct Session {
     pub cap: Cap,
     /// Step threshold, A.
     pub thr: f32,
-    /// A per 16-bit code, the zero code (exact).
+    /// A per 16-bit code, the calibration's zero code (exact; the capture's
+    /// own zero: `cap.zf`), the last zero measured (NaN: none since boot).
     pub b: f32,
     pub zf: f32,
+    pub zm: f32,
     pub res: Option<Res>,
     /// logger::wave::dropped() last seen.
     pub dropped: u32,
@@ -405,6 +479,7 @@ impl Session {
         thr: THR_DEFAULT,
         b: 125.0 / 262_144.0 * 8.0,
         zf: 0.0,
+        zm: f32::NAN,
         res: None,
         dropped: 0,
         req: None,
@@ -498,7 +573,7 @@ mod tests {
     fn run(f: &mut dyn FnMut(usize) -> f32, thr: f32, z: f32) -> (Cap, Vec<u16>, Option<usize>) {
         let mut buf = vec![0u16; 26_624];
         let mut cap = Cap::OFF;
-        cap.arm(z.round() as i32, step_codes(thr, B));
+        cap.arm(z, 0.0, step_codes(thr, B));
         let done = feed(&mut cap, &mut buf, f, 60_000, z);
         (cap, buf, done)
     }
@@ -512,7 +587,7 @@ mod tests {
         // The window's first sample: at most SHORT - 1 before the step.
         assert!(cap.trig <= 5000 && cap.trig + SHORT as u64 > 5000, "trig {}", cap.trig);
         cap.linearize(&mut buf);
-        let r = cap.results(&buf, B, 3.0);
+        let r = cap.results(&buf, B);
         assert!((r.rms100 - 8.0).abs() < 0.08, "{:?}", r);
         assert!((r.peak - 8.0).abs() < 0.03, "{:?}", r);
         assert!((r.idle - 0.05).abs() < 0.01, "{:?}", r);
@@ -541,7 +616,7 @@ mod tests {
         // t = 0 may sit up to SHORT - 1 samples before the step: those are 0.
         let pre0 = (s as u64 - cap.trig) as usize;
         let want = ((144.0 * 192.0 + 36.0 * (768.0 - pre0 as f32)) / 960.0f32).sqrt();
-        let r = cap.results(&buf, B, 0.0);
+        let r = cap.results(&buf, B);
         assert!((r.rms100 - want).abs() < 0.02, "{:?} want {}", r, want);
         assert!((r.peak - 12.0).abs() < 0.01);
     }
@@ -557,7 +632,7 @@ mod tests {
         assert!(done.is_some());
         assert!(cap.trig >= 9000 - SHORT as u64 && cap.trig < 9000 + 100, "trig {}", cap.trig);
         cap.linearize(&mut buf);
-        let r = cap.results(&buf, B, 0.0);
+        let r = cap.results(&buf, B);
         // The window starts within ~1 ms of the step: rms close to 5 A.
         assert!((r.rms100 - 5.0).abs() < 0.15, "{:?}", r);
         assert!((r.idle - 2.0).abs() < 0.05, "{:?}", r);
@@ -569,7 +644,7 @@ mod tests {
         let (mut cap, mut buf, done) = run(&mut |k| if k >= 3000 { -130.0 } else { 0.0 }, 0.5, 0.0);
         assert!(done.is_some());
         cap.linearize(&mut buf);
-        let r = cap.results(&buf, B, 0.0);
+        let r = cap.results(&buf, B);
         assert!(r.ol && r.peak < -124.0, "{:?}", r);
     }
 
@@ -590,7 +665,7 @@ mod tests {
     fn hole_while_armed_restarts_history_and_records_skip_a_hole_after() {
         let mut buf = vec![0u16; 26_624];
         let mut cap = Cap::OFF;
-        cap.arm(0, step_codes(1.0, B));
+        cap.arm(0.0, 0.0, step_codes(1.0, B));
         let f = |k: usize| if k >= 6000 { 4.0f32 } else { 0.0 };
         for k in 0..3000 {
             cap.push(&mut buf, code_of(((f(k) / B) * 8.0) as i32));
@@ -627,10 +702,78 @@ mod tests {
         let (mut cap, mut buf, done) = run(&mut |k| if k >= 4000 { 0.3 } else { 0.0 }, 0.2, 200.0);
         assert!(done.is_some());
         cap.linearize(&mut buf);
-        let r = cap.results(&buf, B, 200.0);
+        let r = cap.results(&buf, B);
         assert!((r.peak - 0.3).abs() < 0.01, "{:?}", r);
         assert!((r.rms100 - 0.3).abs() < 0.01, "{:?}", r);
         assert!(r.idle.abs() < 0.005, "{:?}", r);
+    }
+
+    /// A capture with the measured zero: the cal zero `zc`, the true zero
+    /// code `z`, the current `f`.
+    fn run_mz(f: &mut dyn FnMut(usize) -> f32, zc: f32, z: f32) -> (Cap, Vec<u16>, Option<usize>) {
+        let mut buf = vec![0u16; 26_624];
+        let mut cap = Cap::OFF;
+        cap.arm(zc, B, step_codes(1.0, B));
+        let done = feed(&mut cap, &mut buf, f, 60_000, z);
+        (cap, buf, done)
+    }
+
+    #[test]
+    fn measured_zero_takes_the_ad2_offset() {
+        // Device 489f956: +0.0717 A of AD2 offset (18.8 codes), the cal's 0;
+        // nothing in A, then 8 A at sample 5000.
+        let z = 0.0717 / B;
+        let (mut cap, mut buf, done) = run_mz(&mut |k| if k >= 5000 { 8.0 } else { 0.0 } + noise(k), 0.0, z);
+        assert!((cap.zf - z).abs() < 0.2 && cap.zok, "zf {} want {}", cap.zf, z);
+        assert!(done.is_some());
+        cap.linearize(&mut buf);
+        let r = cap.results(&buf, B);
+        assert!(r.idle < 0.01, "{:?}", r);
+        assert!((r.peak - 8.0).abs() < 0.02, "{:?}", r);
+        // The same offset as a constant current at the true zero 0.
+        let (cap2, _, _) = run_mz(&mut |k| 0.0717 + noise(k), 0.0, 0.0);
+        assert!((cap2.zf * B - 0.0717).abs() < 0.002, "{}", cap2.zf * B);
+    }
+
+    #[test]
+    fn measured_zero_live_level() {
+        // The live rms while armed is about the measured zero.
+        let z = 0.0717 / B;
+        let mut buf = vec![0u16; 26_624];
+        let mut cap = Cap::OFF;
+        cap.arm(0.0, B, step_codes(1.0, B));
+        feed(&mut cap, &mut buf, &mut |k| noise(k), 6000, z);
+        assert_eq!(cap.phase, Phase::Armed);
+        assert!(cap.live_codes() * B < 0.01, "live {} A", cap.live_codes() * B);
+    }
+
+    #[test]
+    fn measured_zero_keeps_the_cal_with_a_load() {
+        // A 2 A rms load running at the arm (rms over ZERO_RMS_A) and a 0.5 A
+        // DC one (beyond ZERO_MAX_A): the cal's zero stays.
+        let sine = |k: usize| 2.0 * 1.414_213_5 * (2.0 * core::f32::consts::PI * 45.0 * k as f32 / RATE_HZ as f32).sin();
+        let (cap, _, _) = run_mz(&mut |k| sine(k), 3.0, 3.0);
+        assert!(cap.zf == 3.0 && !cap.zok);
+        let (cap, _, _) = run_mz(&mut |_| 0.5, 3.0, 3.0);
+        assert!(cap.zf == 3.0 && !cap.zok);
+    }
+
+    #[test]
+    fn hole_while_measuring_the_zero_starts_it_again() {
+        let z = 0.0717 / B;
+        let mut buf = vec![0u16; 26_624];
+        let mut cap = Cap::OFF;
+        cap.arm(0.0, B, step_codes(1.0, B));
+        feed(&mut cap, &mut buf, &mut |_| 0.0, 500, z);
+        cap.hole(3);
+        assert_eq!(cap.zf, 0.0);
+        feed(&mut cap, &mut buf, &mut |_| 0.0, (ZERO_SKIP + ZERO_N) as usize, z);
+        // (no noise: the mean is the rounded code, 19 for 18.8)
+        assert!((cap.zf - z).abs() <= 0.5, "zf {} want {}", cap.zf, z);
+        // after the zero: a hole keeps it
+        let zf = cap.zf;
+        cap.hole(3);
+        assert_eq!(cap.zf, zf);
     }
 
     #[test]

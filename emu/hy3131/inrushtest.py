@@ -10,7 +10,8 @@ USB/IP connection.
 
 Timeline (virtual seconds; the scheduled input changes; the client waits on
 their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
-  0      A-COM 0.05 A DC (idle)
+  0      nothing in A, with the model's AD2 offset of the AC A rows (acaoff 0.717 mV:
+         +0.0717 A, device 489f956)
   T1     a lamp-like DC step: 12 A for 20 ms, 6 A for 80 ms, then 3 A:
          Irms(100 ms) = sqrt((144 * 20 + 36 * 80) / 100) = 7.59 A, peak 12 A
   T2     2 A rms 50 Hz running (an AC load already on)
@@ -18,7 +19,9 @@ their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
 Checks:
   * MF in DC A -> "Inrush" (Current Settings): the AC A row of the 10 A
     range, the stream ISR runs (DBG:ISR? active), INR:COND? ARMED before T1;
-  * T1: INR:FETCh? Irms 7.59 A (+-2 %), peak 12 A (+-1 %), idle 0.05 A;
+  * armed: INR:PREamble? a = -0.0717 A (+-5 mA): the zero measured at the arm, not the
+    calibration's 0 (device 489f956: "Armed: 0.069 A now" with nothing in A);
+  * T1: INR:FETCh? Irms 7.59 A (+-2 %), peak 12 A (+-1 %), idle below 20 mA;
     INR:FILE? LOGS/FASTnnn.DLG; its CSV (MMEM:DATA?, tools/dlog.py) has
     inrush::LEN rows, 0 lost, the step at t_s ~0.200 s, values = INR:DATA?;
     the stream stopped, the DMM reads again (READ?);
@@ -93,7 +96,7 @@ with open(script, 'w') as f:
 log = os.path.join(OUT, '%s.log' % tag)
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', tag, '--log', log,
-       '--disk', disk, '--dmm', 'isrc:0.05', '--script', script]
+       '--disk', disk, '--dmm', 'open;acaoff:0.717', '--script', script]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 mk = emusync.Markers(log)
 
@@ -194,6 +197,8 @@ try:
     check(q('FUNC?').strip('"').upper() == 'CURR:AC', 'the AC A row (FUNC? %s)' % q('FUNC?'))
     pre = q('LOG:PREamble?').split(',')
     check(pre[:2] == ['4', '1'], 'the 10 A range of AC A (the stream: LOG:PRE? mode,range %s)' % pre[:2])
+    pre = q('INR:PREamble?').split(',')
+    check(abs(float(pre[3]) + 0.0717) < 0.005, 'the measured zero: INR:PRE? a %s A ~ -0.0717 A' % pre[3])
     shot('i01-armed')
     now = up()
     check(now < F1 * 1000 - 500, 'armed before the step (up %.1f s, step at %.1f s)' % (now / 1000, F1))
@@ -210,7 +215,7 @@ try:
     print('  DC step: INR:FETCh? %s (Irms want %.3f A)' % (r, want), flush=True)
     check(near(r[0], want, 0.02), 'Irms(100 ms) %.3f A ~ %.3f A' % (r[0], want))
     check(near(r[1], 12.0, 0.01), 'peak %.3f A ~ 12 A' % r[1])
-    check(abs(r[2] - 0.05) < 0.01, 'idle %.4f A ~ 0.05 A' % r[2])
+    check(abs(r[2]) < 0.02, 'idle %.4f A below 20 mA (the AD2 offset of 0.0717 A taken out)' % r[2])
     check(r[3] == 0, 'no samples lost (%d)' % r[3])
     check(isr_active() == 0, 'the stream stopped after the capture')
     shot('i03-done-dc')

@@ -1573,7 +1573,7 @@ namespace Hy3131Tests
         }
 
         /// Device 489f956 knobs: acarrive (the AC V node's AC after the entry), mvhold (the open mV
-        /// input after a source).
+        /// input after a source), acaoff (the AC A rows' AD2 offset).
         private static void Knobs489()
         {
             Console.WriteLine("489f956 knobs");
@@ -1615,6 +1615,16 @@ namespace Hy3131Tests
                 m.Advance(0.3);
                 var after = Lpf(ReadAfter(m, 0x08, 1));
                 Check(Math.Abs(after) < Math.Abs(want) * 0.2, "  a source on V-COM ends the hold", after.ToString());
+            }
+            {
+                // acaoff: the AC A 10 A row's LPF with the A jack open
+                var m = NewChip();
+                m.Chip.SetInput("open;acaoff:0.717");
+                m.Configure(F4R1, 4);
+                Check(m.Chip.Role == "AcA m4 r1", "AC A 10 A row recognised", m.Chip.Role);
+                m.Advance(0.5);
+                var b = ReadAfter(m, 0x08, 1);
+                Near(Lpf(b) * 1.25 / 0.01 / 262144.0, 0.0717, 0.003, "acaoff:0.717: the LPF reads +0.0717 A on the 10 A row", "lpf " + Lpf(b));
             }
         }
 

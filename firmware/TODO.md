@@ -3742,7 +3742,7 @@ Emulator (emu/):
       (as ACA_VET) and let held results move no range; else lower the model's level.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
-- [ ] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
+- [x] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
       live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
       (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
       not known (the emulator has no offset there). Device check (2 min): AC A 10 A (CONF:CURR:AC 10), A jack
@@ -3751,3 +3751,12 @@ Emulator (emu/):
       ~20 mA figure is what changes.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
+      Fixed: the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
+      (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the cal's
+      and its rms below 50 mA, else the cal's); `INR:PREamble?` a = minus that zero. Limit: a DC load under 0.2 A
+      already flowing at the arm is taken for the zero
+      ([inrush-current.md 11](docs/inrush-current.md#11-limits)). Emulator: the model's `acaoff:0.717` (+0.0717 A in
+      the AC A rows' AD2, INFERRED where it arises); inrushtest (now nothing in A before the lamp step): FAIL on f4cd2cd
+      (`INR:PRE?` a 0), pass (a -0.0717 A, idle below 20 mA); host tests inrush::measured_zero_*. Device check (2 min):
+      A jack open, MF -> Inrush: "Armed: 0.00x A now", `INR:PREamble?` a ~ -0.07 A; a lamp capture's idle below
+      ~20 mA.
