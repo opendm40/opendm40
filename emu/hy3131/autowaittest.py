@@ -143,8 +143,8 @@ try:
         while up() < t0 + tmax:
             ro = q('DBG:READout?').split(',')
             seen.append(ro)
-            if ro[-1] != '1':
-                why.append('hold state %s at +%.1f s' % (ro[-1], up() - t0))
+            if ro[3] != '1':
+                why.append('hold state %s at +%.1f s' % (ro[3], up() - t0))
                 break
             time.sleep(0.25)
         last = seen[-1] if seen else ['N', '', 'nan', '0']

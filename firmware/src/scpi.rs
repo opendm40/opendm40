@@ -514,9 +514,10 @@ pub enum Log {
 ///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
 ///   DBG:READout?            the DMM readout as drawn (App::shown_reading):
-///                           kind,unit,value_si,hold (kind P placeholder, G
+///                           kind,unit,value_si,hold,range (kind P placeholder, G
 ///                           grey provisional, F final, N none; value NAN for
-///                           dashes, +9.9E37 OL; hold Meter::hold_state)
+///                           dashes, +9.9E37 OL; hold Meter::hold_state; range
+///                           the status bar's AUTO / AUTO+ / MANU)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
 ///                           of finger span, 1 one step per 1.25x (default), 2 live
