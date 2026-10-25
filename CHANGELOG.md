@@ -29,6 +29,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- Multimeter AUTO key (voltage, current, resistance): a short press fixes
+  the present range, then steps to the next higher range, wrapping from the
+  highest to the lowest; held 1 s it returns to the default autorange
+  (AUTO+ on volts). It still clears HOLD and REL; AutoHold stays on.
 - A power-off starts the DMM in DC V, as the stock; a reset or a firmware
   update still continues the last function.
 - The version is shown with three parts (`0.1.0`, `dm40_opendm40_v0.1.0.bin`,

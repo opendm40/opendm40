@@ -3908,3 +3908,13 @@ Emulator (emu/):
       releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
       repeat period. Every key-down is accepted 40 ms after its single report (`DEBOUNCE_MS`; the stock has no
       debounce, [touch_v2_6.h](../stock/re/analysis/touch_v2_6.h) "No other debounce"): inferred, not the cause.
+- [x] AUTO key range cycle (owner 2026-10-25): V / A / ohm, [src/app.rs](src/app.rs) `auto_key_end` on the release
+      (short) or after `RUN_LONG_MS` held (long; the RUN key's timer `run_down`, `run_key` 2). Short: autorange ->
+      the present range fixed; manual -> the next higher item of `ui::range_items` (60 mV, 60 ohm included), the
+      highest wraps to the lowest. Long: V AUTO+, A and ohm AUTO. Both clear HOLD and REL; AutoHold kept
+      (`Meter::set_hold` does not touch `ahold`). Power meter, capacitance, continuity / diode, Hz / temperature,
+      scope, inrush, generator: as before. The short press acts on the release now, not at the key-down (so a
+      long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
+- [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
+      (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
+      AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
