@@ -13,15 +13,16 @@
 //!   axis, until the finger is lifted"; the stock split every move report:
 //!   |dx| <= |dy| moved the selected level item, else the selected time
 //!   item, so a sideways pan with vertical wobble also moved the trigger
-//!   level): one item per gesture, chosen at the press (the marker under
-//!   the finger, else the selected items), one axis, decided by the first
-//!   motion (LOCK_SLOP) and kept until the release. Off the markers:
-//!   horizontal moves the selected time item (trigger position / stored
-//!   record pan, X cursor), vertical the selected level item (CH1 position,
-//!   trigger level, Y cursor). On a marker: only along its own axis (level
-//!   markers vertical, time markers horizontal); a first motion across it
-//!   moves nothing for the rest of the gesture. A 4 px tap tolerance
-//!   before the first move;
+//!   level): one item along one axis per gesture, until the release. The
+//!   first motion decides the axis (scope_ui::drag_axis); the item is the
+//!   marker of that axis nearest to the press, whatever is selected
+//!   (scope_ui::drag_target: vertical, the level marker whose row is
+//!   nearest to the press y: CH1, trigger level, runt level, math offset,
+//!   Y cursors; horizontal, the time marker whose column is nearest to the
+//!   press x: trigger position (a stopped record: its pan), X cursors, the
+//!   FFT centre); it becomes the selection. A 4 px tap tolerance before
+//!   the first move; the acquisition holds from the first move (no frame
+//!   paint between the finger and the marker);
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 1): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -100,9 +101,6 @@ pub(super) struct Touch {
     pan: i32,
     /// The axis the first motion decided (kept until the release).
     axis: Option<Axis>,
-    /// The press grabbed a marker: its axis (level group V, time group H);
-    /// a gesture whose first motion goes the other way moves nothing.
-    own: Option<Axis>,
     /// Hold mode: grabbed.
     grabbed: bool,
     /// Combined view: sub-row remainder of vertical moves.
@@ -922,7 +920,7 @@ impl App {
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, self.scope.row_volts(s.runt_row), unit);
+                su::fmt_v(&mut b, self.scope.runt_volts(), unit);
                 h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
             }
             _ => {
@@ -1348,7 +1346,6 @@ impl App {
                     anchor: self.scope.anchor(),
                     pan: 0,
                     axis: None,
-                    own: hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V }),
                     grabbed: gesture::grab_ms() == 0,
                     acc: 0,
                     code: 0,
@@ -1498,6 +1495,11 @@ impl App {
                 return;
             }
             t.moving = true;
+            // Hold the acquisition from the first move: no frame (paint,
+            // measurements) between the finger and the marker while the
+            // axis is still being decided (owner 2026-10-25: the level drag
+            // lagged). The release applies / refreshes as for any drag.
+            self.sp.frozen = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
         // One axis per gesture, decided by the first motion (every drag
@@ -1505,14 +1507,28 @@ impl App {
         // drag_delta.
         if t.axis.is_none() {
             match su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) {
-                Some(h) => t.axis = Some(if h { Axis::H } else { Axis::V }),
+                Some(h) => {
+                    t.axis = Some(if h { Axis::H } else { Axis::V });
+                    // The item: the nearest marker of that axis to the press
+                    // (owner 2026-10-25: drags ignore the selection); it is
+                    // the selection from now on (filled, its guide line).
+                    let m = self.sp_model(now);
+                    if let Some((level, id)) = su::drag_target(&m, h, t.p0.x as i16, t.p0.y as i16) {
+                        if level {
+                            self.sp.sel_v = id;
+                        } else {
+                            self.sp.sel_h = id;
+                        }
+                        self.sp.last_h = !level;
+                    }
+                }
                 None => {
                     self.sp.touch = Some(t);
                     return;
                 }
             }
         }
-        (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), t.own.map(|o| o == Axis::H), dx, dy);
+        (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
         if dx == 0 && dy == 0 {
@@ -2080,7 +2096,7 @@ impl App {
             ttype: s.ttype,
             pcond: s.pcond,
             pwidth: s.pwidth,
-            runt_v: self.scope.row_volts(s.runt_row),
+            runt_v: self.scope.runt_volts(),
         }
     }
 
