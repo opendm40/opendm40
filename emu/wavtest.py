@@ -28,7 +28,7 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
 The comparator trigger (hwtrig.rs) is switched off (DBG:HWTRIG:ENABLE 0,
 the software trigger path) unless --hwtrig: in the emulator the comparator
 path sometimes never completes a frame after a (re)start (TRIG:STAT? WAIT
-for good, also on 83c28a0 without these changes; 2026-10-23).
+for good, also on 5af9a5c without these changes; 2026-10-23).
 Exit status 0 = all passed.
 """
 import argparse

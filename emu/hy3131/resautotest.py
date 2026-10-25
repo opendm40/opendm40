@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""RES AUTO set from a manual RES range (device 41a33a1, firmware/docs/device-check-2026-10-21.md
-"41a33a1: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
+"""RES AUTO set from a manual RES range (device c6a3ac3, firmware/docs/device-check-2026-10-21.md
+"c6a3ac3: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
 status bar on MANU and the readout on the manual range's final value (DBG:READout? `F`) while AUTO
 stepped; from DC V the same commands showed AUTO and dashes.
 
@@ -13,7 +13,7 @@ The `dcv` row is the reference (from DC V, no manual range); `key` holds the AUT
 (DBG:KEY 2,1200: back to AUTO; a short press steps to the next manual range since app.rs
 `auto_key_end`);
 `sink` is ohmsinktest.py's input (6 Mohm ~0.10 Mohm, 600 kohm OL), `open` an open input (OL).
-Before the fix (3f84f81) every row but `dcv` showed MANU and the manual final for 0.25-1.1 s.
+Before the fix (57e1241) every row but `dcv` showed MANU and the manual final for 0.25-1.1 s.
 
 Ohm rows (the 60 ohm range is removed, 2026-10-25: AUTO's lowest ohm range is 600 ohm, and
 `CONF:RES 60` selects 600 ohm; the 60 ohm rows are on branch feat/ohm60). A row's optional dict

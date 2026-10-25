@@ -37,13 +37,13 @@
  *                                      region C audit #1).
  *   Why the split: flash from 0x08080000 up is NOT zero-wait on the GD32F4
  *   (only the low 512 KiB are). A read there stalls the bus for ~20 us, and
- *   with it the AD2 stream ISR's entry (device 381ea07: max_lat 18.8-21.8
+ *   with it the AD2 stream ISR's entry (device c50425f: max_lat 18.8-21.8
  *   us whenever the logger panel drew ASCII26 glyphs, which had grown past
  *   0x08080000; 4.6 us without the panel; docs/dmm-input-scope-feasibility.md
  *   11.4). Code in C costs that per call: only what never runs while a
  *   stream does (or seldom, outside the main loop's every-pass path).
  *   DATA loads too, from anywhere >= 0x08080000 (region C's rodata, the
- *   calibration record, the loader data): device 246afc7, the USB volume's
+ *   calibration record, the loader data): device c92b605, the USB volume's
  *   INFO/ files, 21.8 us per load. None while a stream runs (RAM copies,
  *   the volume answers NOT READY; docs/native-boot.md "The slow flash bank
  *   while an AD2 stream runs"; emu/regionc.py watches the loads).
@@ -122,14 +122,14 @@ SECTIONS
         /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter and
          * dcv_row) and main.rs dbg_dcv (below): back in C since region B
          * audit #4 (2026-10-25, B at 15 KB free; they were in B from region
-         * C audit #1, 568c57a, while B had ~80 KB free). DBG replies, and
+         * C audit #1, 133f81e, while B had ~80 KB free). DBG replies, and
          * dc_enter runs in Logger::start before the stream ISR takes the
          * bus (wavetest / dcvtest's region C hooks and data watch). */
         *(.text.*8opendm406ad2exp*);
         *(.text.*8opendm409scope_csv*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
-         * polls them while the Wave view's stream runs (device 8ce42e2:
+         * polls them while the Wave view's stream runs (device c830e09:
          * max_lat 6.16 us at scope_wav::query; emu/hy3131/wavetest.py
          * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*8opendm404boot*);
@@ -175,7 +175,7 @@ SECTIONS
         *(.text.*8opendm4012log_on_check*);
         *(.text.*8opendm4010stale_read*);
         /* NOT fast_scpi (LOG:DEST / LOG:DURation, set and query): region B.
-         * Device 246afc7: LOG:DEST? / LOG:DUR? in the Wave view at 76800
+         * Device c92b605: LOG:DEST? / LOG:DUR? in the Wave view at 76800
          * gave late 1, max_lat 2.8 / 5.8 us at lat_pc fast_scpi. */
         *(.text.*8opendm4012fast_next_hz*);
         *(.text.*8opendm407fastlog5begin*);
@@ -197,7 +197,7 @@ SECTIONS
         *(.text.*8opendm403app*3App12leads_remind*);
         *(.text.*8opendm403app*3App11leads_toast*);
         /* NOT persist: its crc runs on every main-loop pass (device
-         * 95bc43a: lat_pc in persist::crc, 9..18 us stalls). */
+         * 00e088f: lat_pc in persist::crc, 9..18 us stalls). */
         /* ... and their named read-only data (tables, strings in statics). */
         *(.rodata.*8opendm409calbackup*);
         *(.rodata.*8opendm406fatren*);
@@ -260,7 +260,7 @@ SECTIONS
          * catalog_scpi with fatren's / fatdir's `.text.fat_rd` helpers)
          * nor CONF?'s
          * App::range_si: region B, asked during fast sessions / the Wave
-         * view (device 1e39149: DBG:PROF? 12 us, a sample lost at 38400;
+         * view (device 33b44bd: DBG:PROF? 12 us, a sample lost at 38400;
          * emu/fastlogtest.py --region-c --host-read, emu/hy3131/
          * wavetest.py's whole-run region C check). Nor LOG:SCALe?
          * (main.rs log_scale: a host scales the session's data with it;
@@ -287,7 +287,7 @@ SECTIONS
         *(.text.*8opendm403app*3App11sp_save_csv*);
         /* Once per scope drag, at its axis decision (scope_ui::drag_target). */
         *(.text.*8opendm408scope_ui11drag_target*);
-        /* Region B audit #3 (2026-10-22, 11.9 KB free on e7658e5):
+        /* Region B audit #3 (2026-10-22, 11.9 KB free on 1ad38aa):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
          * callers. App::wave_open runs at event rate. (App::tap with
          * pw_tap / kp_apply / range hits, App::key and App::show were here
@@ -465,9 +465,9 @@ ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free
  *   into hot callers, Gallery::poll into App::tick above all, and the
  *   f32 quicksort of poll_cap) brought it to 30 368 / 37 840 B; region C
  *   then has 31 700 / 31 764 B left below 0x080A0000 (was 48 364 / 48 428).
- *   Audit #3 (on e7658e5: 11 928 / 20 672 B): 26 160 / 32 808 B; region
+ *   Audit #3 (on 1ad38aa: 11 928 / 20 672 B): 26 160 / 32 808 B; region
  *   C 10 256 / 12 352 B left (docs/native-boot.md "Region B audit #3").
- *   Region A2 (2026-10-22, on 9361bc7: B 26 136 / 33 320, C 10 120 /
+ *   Region A2 (2026-10-22, on 06011ac: B 26 136 / 33 320, C 10 120 /
  *   12 240 B): ASCII26 + F14 blobs in A2 (2 652 B left; the link fails at
  *   the marker, build.sh warns below 2 KiB), App::tap / key / show and
  *   vdisk::describe back in B: B 30 572 / 37 836, C 17 840 / 19 880 B

@@ -313,7 +313,7 @@ fn nr3(v: f32) -> String {
     String::from_utf8_lossy(&s.buf[..s.len]).into_owned()
 }
 
-/// nr3 prints exact values exactly (device 940e8aa: ACQ:SRAT? 76 800 was
+/// nr3 prints exact values exactly (device 2f56ff9: ACQ:SRAT? 76 800 was
 /// "+7.680001E+04"), and any other value within one unit of the 7th digit
 /// of the correctly rounded decimal.
 fn nr3_exact() {
@@ -371,7 +371,7 @@ fn nr3_exact() {
 }
 
 /// `pow10f` (VOLT:RES? = 10^step_exp, the RES set threshold) is the f32
-/// nearest 10^e, so nr3 prints it exactly (device 7c04b03: VOLT:RES? on
+/// nearest 10^e, so nr3 prints it exactly (device 1a11eda: VOLT:RES? on
 /// DC V 6 V MED "+9.999999E-06", from an f32 divided by 10 five times).
 fn pow10f_exact() {
     for e in -15..=6 {
@@ -398,7 +398,7 @@ fn pow10f_exact() {
 
 /// MMEM:DATA? / MMEM:DELete with a prefix of another directory (the stub
 /// parse_path: "WRONG/..."): -256, nothing for the main loop to run (device
-/// 940e8aa: "SHOTS/LOG005.DLG" read LOGS/LOG005.DLG; a delete would have
+/// 2f56ff9: "SHOTS/LOG005.DLG" read LOGS/LOG005.DLG; a delete would have
 /// removed it).
 fn mmem_dirs() {
     let mut s = Scpi::new();

@@ -17,7 +17,7 @@
 //! rising one), software NSS, 8-bit frames, PSC /16 = 3.125 MHz. CS stays a
 //! GPIO. Budget at 3.125 MHz (160 ns half period): DO path = isolator out
 //! (CA-IS3741, ~10-15 ns, INFERRED) + TDODL <= 60 ns + back = ~80-90 ns:
-//! ~70 ns margin. Device 2026-10-22 (1826204 DIAG image): 2000 x {1, 6, 23
+//! ~70 ns margin. Device 2026-10-22 (6d35c53 DIAG image): 2000 x {1, 6, 23
 //! byte} reads and 256 values read back clean at /8, /16 and /32.
 //! The read period (the 9th clock) cannot come out of a byte-wide SPI: the
 //! command byte goes out on SPI2, PC10 is switched to GPIO output for one
@@ -27,10 +27,10 @@
 //! Writes: SPI2 too, one frame per register: [cmd, data, dummy], CS high
 //! while the dummy shifts (docs/dmm-input-scope-feasibility.md 11.6 / 11.7).
 //! The chip takes each byte's LSB late, at the MOSI level that follows it
-//! (a241bf9's byte-by-byte SPI2 write: every 1xxxxxx0 arrived with bit 0 =
+//! (0d0fd76's byte-by-byte SPI2 write: every 1xxxxxx0 arrived with bit 0 =
 //! 1, the GD32 driving the byte's MSB again after it; in a continuous frame
 //! the next byte's MSB): the dummy's MSB equals the LSB. ~10 us per register
-//! at /16 (bit-banged: ~57 us; that write is gone since 8701d51's device
+//! at /16 (bit-banged: ~57 us; that write is gone since 42cbf35's device
 //! check).
 //!
 //! Reads at /8 sample the data phase at CKPH = 1 (`set_data_cpha`, the AD2
@@ -108,7 +108,7 @@ pub fn set_div(div: u8) {
 
 /// Write `data` to `reg`, `reg + 1`, ..: over SPI2, one frame per register
 /// with an LSB-matched cut dummy (`write_spi` mode 1, at `DIV`; device
-/// 8701d51: 0 bad in 8 x 512 writes at /8, /16 and /32 - the bit-banged
+/// 42cbf35: 0 bad in 8 x 512 writes at /8, /16 and /32 - the bit-banged
 /// write it replaced is gone; see the module notes).
 pub fn write(reg: u8, data: &[u8]) {
     guard();
@@ -131,8 +131,8 @@ pub fn set_data_cpha(on: bool) {
 /// SPI2 write experiment (DBG:HYSPI:WR?, src/hyspi.rs): `mode` 1 = one
 /// frame per register, each [cmd, d, 0x00 cut after its first bits]; 2 = one
 /// continuous frame [cmd, d0 .. dn, 0x00 cut]; 3 = byte by byte with gaps and
-/// no dummy (a241bf9's write, the corrupting one). At divider `div` (reads
-/// stay at `DIV`). Device 035fc32: the chip takes each byte's LSB late, at
+/// no dummy (0d0fd76's write, the corrupting one). At divider `div` (reads
+/// stay at `DIV`). Device b48048e: the chip takes each byte's LSB late, at
 /// the MOSI level that follows it (a gap: the GD32 drives the byte's MSB
 /// again, 1xxxxxx0 -> bit 0 set; continuous: the next byte's MSB). The cut
 /// dummy: the GD32 keeps shifting a dummy byte whose MSB = the last data
@@ -285,10 +285,10 @@ pub mod stream {
     /// Main loop, before the chip set-up of a stream at `hz` S/s: the read
     /// divider for its frames, and switch to it (`stop` puts `DIV` and mode
     /// 0 back). Automatic: CPU frames at /8 with the data phase sampled at
-    /// CKPH = 1 (device 8701d51: SELF? 4000 x clean, 35.8 M samples at 38.4
+    /// CKPH = 1 (device 42cbf35: SELF? 4000 x clean, 35.8 M samples at 38.4
     /// kS/s with 0 sign errors, where plain /8 reads had 193 / 2000 bad
     /// single-byte reads); DMA frames at /16 up to 38.4 kS/s (plain /8: 61 /
-    /// 100 sign errors in 1.15 M / 2.36 M samples, device 035fc32), and at
+    /// 100 sign errors in 1.15 M / 2.36 M samples, device b48048e), and at
     /// 76.8 kS/s the hybrid frame at /8 + CKPH (`hybrid`: the CPU sends the
     /// command byte and switches CKPH, DMA reads the data; a /16 frame does
     /// not fit the 13 us period). Returns the divider; the CKPH choice is
@@ -355,7 +355,7 @@ pub mod stream {
     }
 
     /// Whether the next stream uses DMA frames (the default; DBG:AD2:DMA 0
-    /// = CPU frames at /8 + CKPH, the fallback). Device 9ccae5d: 38.4 kS/s
+    /// = CPU frames at /8 + CKPH, the fallback). Device 0471860: 38.4 kS/s
     /// at 17.5 % CPU with DMA frames against 51 % with CPU frames.
     pub fn use_dma() -> bool {
         DMA_REQ.load(Relaxed) == 1
@@ -848,7 +848,7 @@ mod spi {
 
     /// End the running DMA frame: wait (bounded, ~100 us) until every byte
     /// came back, then CS high. A frame may still run when the next entry
-    /// comes (the entry that started it was late, device 95bc43a: aborting it
+    /// comes (the entry that started it was late, device 00e088f: aborting it
     /// there left its last byte in flight, every later frame read one byte
     /// shifted - bad samples, a runaway lock). On a timeout the channels stop,
     /// the shift ends, and the receive register is emptied. True = complete.
@@ -1079,7 +1079,7 @@ pub fn read_ad1() -> i32 {
 // emu/hy3131/ref/registers.md). AD2CLK = SYSCLK / 2 (SAD2CLK = 0) or / 4;
 // one result per OSR2 = 32 << AD2OSR clocks (codes 5..7 all 1024). ENCHOPAD2
 // does NOT halve the output rate on the device, whatever the datasheet says
-// (device check of f48db7d: R26 0x25 and 0x05 both 422 us per flag-synced
+// (device check of f80524f: R26 0x25 and 0x05 both 422 us per flag-synced
 // sample, 0x24 and 0x04 both 232 us; the logger at "2400" = 0x24 took a
 // result on every P/2 gate). Every stock AC row writes R26 = 0x80:
 // /2, OSR 32, unchopped = 76.8 kS/s (13 us). The data logger's AD2 source
@@ -1112,13 +1112,13 @@ pub const fn ad2_rate_mhz(r26: u8) -> u32 {
 
 /// The 76.8 kS/s rung's conversion rate, mHz of the MCU clock (R26 low bits
 /// 0: /2, OSR 32, with or without ENCHOPAD2): the datasheet's FAD2CLK / OSR2
-/// (`ad2_rate_mhz(0)`). 8ce42e2 had 76 574.6 here, the rate the e8cc4e9 /
-/// bfb6a19 / 9292ec2 builds streamed at; device 8ce42e2 (device-check
-/// 2026-10-21 "8ce42e2: the 76.8 kS/s PLL retest") showed that rate came
+/// (`ad2_rate_mhz(0)`). c830e09 had 76 574.6 here, the rate the 20a91d0 /
+/// 825080c / decaf60 builds streamed at; device c830e09 (device-check
+/// 2026-10-21 "c830e09: the 76.8 kS/s PLL retest") showed that rate came
 /// from the old loop, not the chip: with the fixed loop (ad2pll.rs) the
 /// stream locks at rate_mhz 76 800 0xx from a cold start (-2935 ppm
 /// against 76 574.6), gap-free disk data has 1919.95 samples per 40 Hz
-/// calibrator period (9292ec2: 1914.27) and the Wave view's record 960 per
+/// calibrator period (decaf60: 1914.27) and the Wave view's record 960 per
 /// half period, so 76 574.6 made every 76800 time axis 0.29 % long.
 pub const AD2_OSR32_REAL_MHZ: u32 = ad2_rate_mhz(0);
 
@@ -1151,7 +1151,7 @@ pub const fn ad2_real_period_ns(r26: u8) -> u32 {
 /// the slowest the chip has). A request between two rungs takes the nearest
 /// one in log scale (rounding down on a tie); the achieved rung is what
 /// LOG:PREamble? reports. Above ~6.5 kS/s the bit-banged bus was the limit
-/// (device f48db7d: 6.2-6.6 kS/s captured at 9600); LOG:COUNt? lost shows
+/// (device f80524f: 6.2-6.6 kS/s captured at 9600); LOG:COUNt? lost shows
 /// what the bus in use misses.
 pub const fn ad2_r26_for(req_hz: u32, chop: bool) -> u8 {
     // (rate S/s, R26 low bits without ENCHOPAD2)
@@ -1227,10 +1227,10 @@ mod tests {
             assert_eq!(ad2_rate_mhz(r), hz * 1000, "plain {hz}");
             assert!(r & R26_CHOP == 0);
         }
-        // The device (f48db7d check): ENCHOPAD2 does not halve the rate.
+        // The device (f80524f check): ENCHOPAD2 does not halve the rate.
         assert_eq!(ad2_period_ns(0x25), ad2_period_ns(0x05));
         assert_eq!(ad2_period_ns(0x24), 208_333);
-        // The f48db7d labels: 0x2D was "600" (measured 1125/s captured,
+        // The f80524f labels: 0x2D was "600" (measured 1125/s captured,
         // 886 us spacing <= the real 833 us + the gate), 0x24 was "2400".
         assert_eq!(ad2_rate_mhz(0x2D), 1_200_000);
         // Out-of-ladder requests: nearest rung, clamped at the ends.
@@ -1249,7 +1249,7 @@ mod tests {
         assert_eq!(ad2_period_ns(ad2_r26_for(1200, true)), 833_333);
         // AD2OSR codes 5..7 are all 1024.
         assert_eq!(ad2_period_ns(7), ad2_period_ns(5));
-        // The real rates are the datasheet's at every rung (device 8ce42e2);
+        // The real rates are the datasheet's at every rung (device c830e09);
         // R26_CHOP and AD2RG do not matter.
         assert_eq!(ad2_real_rate_mhz(0x00), ad2_rate_mhz(0));
         assert_eq!(ad2_real_rate_mhz(R26_CHOP | 0x10), ad2_rate_mhz(0));

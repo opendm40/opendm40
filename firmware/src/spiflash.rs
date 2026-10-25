@@ -78,7 +78,7 @@ const CMD_JEDEC_ID: u8 = 0x9F;
 const SECTOR: usize = 4096;
 const PAGE: usize = 256;
 /// Longest BUSY wait of `wait_ready` (cycles, 1 s at 200 MHz; tSE max
-/// 400 ms), whatever the SPI clock (review 530c2e1 L2: a poll count meant
+/// 400 ms), whatever the SPI clock (review 60605d2 L2: a poll count meant
 /// ~11 s of stall on a dead chip at the /16 fallback).
 const BUSY_CYC: u32 = crate::clock::HCLK_HZ;
 /// Backstop in RDSR polls in case the DWT cycle counter is not running
@@ -318,7 +318,7 @@ impl SpiFlash {
         // A reset (DBG:RESET, the watchdog) can land while the chip runs a
         // 4 KiB erase (up to 400 ms; it does not stop on a CPU reset), and a
         // busy chip ignores 9Fh: the ID would read as no chip and the disk
-        // stay absent for the whole session (review 530c2e1 L1). So wait for
+        // stay absent for the whole session (review 60605d2 L1). So wait for
         // WIP to clear first, at most 500 ms, unless an earlier instance
         // already found no chip.
         if CLOCK.load(core::sync::atomic::Ordering::Relaxed) != ClockCheck::NoChip as u8 {

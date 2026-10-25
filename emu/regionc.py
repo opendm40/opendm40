@@ -27,7 +27,7 @@ A function is reported once per run (its hook is gone after the first hit):
 a scenario's check sees only functions no earlier step called while the
 ISR owned the bus, so the tests also check the whole run at the end.
 
-DATA reads (2026-10-23, device 246afc7: the USB volume's INFO/ files copied
+DATA reads (2026-10-23, device c92b605: the USB volume's INFO/ files copied
 out of flash >= 0x08080000 stalled the ISR 21.8 us per load, which the
 fetch hooks above cannot see): peripherals/FlashWatch.cs records every CPU
 data load from the slow bank 0x08080000..0x08100000 (region C, the

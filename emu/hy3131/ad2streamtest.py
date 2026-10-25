@@ -46,7 +46,7 @@ ap.add_argument('--port', type=int, default=3378, help='USB/IP port (default 337
 ap.add_argument('--secs', type=float, default=1.0, help='scale of the session lengths (wall clock)')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of 8ce42e2))')
+                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of c830e09))')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (opendm40 region C audit)')
 ap.add_argument('--race-us', type=float, default=None, help='INTF read-clears-flag race window, us (model default 0.7)')
 ap.add_argument('--miso-err', type=float, default=None, help='probability that a marginal mode-0 /8 bit is read at its old '
@@ -218,7 +218,7 @@ try:
               'DMA frames %d (DBG:AD2:DMA %d), div %d (1008 = /8 + CKPH data phase)' % (isr[22], dma, isr[19]))
         # The rung's nominal (LOG:PREamble? nominal_mhz) is the datasheet's
         # rate at every rung (opendm40 hy3131.rs AD2_OSR32_REAL_MHZ, device
-        # 8ce42e2). The model's 76800 runs --osr32-ppm off it (default 0).
+        # c830e09). The model's 76800 runs --osr32-ppm off it (default 0).
         rung = min(rate, 76800 if dma == 1 else 38400)
         nom = rung
         off = A.ppm + ((A.osr32_ppm or 0.0) if rung == 76800 else 0.0)

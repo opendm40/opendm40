@@ -115,7 +115,7 @@ SC = {
                       acts={22: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 33: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
                       checks=[('quiet', 6, 33), ('starts', 33, 34.5, VOL40), ('loud', 33, 40, VOL40)],
                       seen=[('VJACK', '0,0,0,0'), ('AJACK', '0,0,1,2'), ('AJACK', '1,0,1,1')]),
-    # A-JACK where V-COM can fake it (doc 4.10 / 4.11; device bb15d39: the RES 5 V false A-JACK
+    # A-JACK where V-COM can fake it (doc 4.10 / 4.11; device c785807: the RES 5 V false A-JACK
     # sounded the loud alarm): RES with 5 V on V-COM and PB1 picking it up (Pb1VjackMv 10, the
     # device's ohm-row pickup), then the same row's evidence from a real 2 mA in A with V-COM
     # open: the sensors read the same in both, so both are badge only (sentinel `soft`), no
@@ -130,13 +130,13 @@ SC = {
                       # 5 V on V-COM: LIVE? (the jack check), the real current: A-JACK
                       seen=[('AJACK', '0,0,0,0'), ('AJACK', '1,0,1,0')],
                       seen_func=[('AJACK', '0,0,0,0', '"RES"'), ('LIVE', '0,0,0,0', '"RES"')]),
-    # Continuity (the AD2 peak on PB1), a real 2 mA in A: badge only, no alarm (3e41549 item 4:
+    # Continuity (the AD2 peak on PB1), a real 2 mA in A: badge only, no alarm (40728b8 item 4:
     # 5 V on V-COM gives the same A-JACK there).
     'ajack-cont': dict(func='CONT', run_for=22, setup=['SYST:BEEP:VOL 0'],
                        script=[(0, 'dmm open;r:10'), (10, 'dmm open;isrc:0.002')],
                        checks=[('quiet', 6, 22)],
                        seen_func=[('AJACK', '0,0,0,0', '"CONT"')]),
-    # Continuity with 5 V on V-COM (device 3e41549 item 4): LIVE?, quiet; then a real 2 mA in A
+    # Continuity with 5 V on V-COM (device 40728b8 item 4): LIVE?, quiet; then a real 2 mA in A
     # with V-COM open: A-JACK, badge only (soft).
     'ajack-cont-v5': dict(func='CONT', run_for=26, setup=['SYST:BEEP:VOL 0'],
                           script=[(0, 'monitor sysbus.hy3131 Pb1VjackMv 10'), (0, 'dmm open;r:10'), (8, 'dmm open;vsrc:5'),
@@ -144,7 +144,7 @@ SC = {
                           checks=[('quiet', 6, 26)],
                           seen_func=[('LIVE', '0,0,0,0', '"CONT"'), ('AJACK', '0,0,0,0', '"CONT"')]),
     # AC mV (manual 600 mV) with the 0 / 9.5 V 40 Hz square on V-COM, the A jack empty (device
-    # 940e8aa: AJACK,AD1PK_PB1 and the loud alarm; the model's mvclamp / mvpb1): quiet, no
+    # 2f56ff9: AJACK,AD1PK_PB1 and the loud alarm; the model's mvclamp / mvpb1): quiet, no
     # A-JACK row; then the square off and a real 5 mA AC in A: loud (AC mV is not a soft row);
     # off at 26 -> stops.
     'ajack-acmv': dict(func='VOLT:AC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],

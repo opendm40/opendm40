@@ -1,12 +1,12 @@
 # Hardware trigger comparator: integrating `src/hwtrig.rs`
 
-`src/hwtrig.rs` (commit 1f22145) is the comparator trigger engine: DAC channel 2
+`src/hwtrig.rs` (commit 716c3c5) is the comparator trigger engine: DAC channel 2
 (PA5) sets the level, the comparator output on PA15 (AF1 TIM2_CH1) starts TIM2,
 whose OC2REF (TRGO) gates TIM1, the sample-request timer, off `post` samples
 later. The record (circular over the whole 26 K ring) freezes in hardware, so no
 interrupt is needed (opendm40 has no peripheral ISRs). Status: wired (H0..H8
 integrated with `patch_scope.py` unchanged against the scope.rs of commit
-7748600; `DEFAULT_ENABLED = false`, so the device runs the software trigger
+abb5d5e; `DEFAULT_ENABLED = false`, so the device runs the software trigger
 until `DBG:HWTRIG:ENABLE 1`). The script refuses the patched file (its anchors
 are gone). The text below is the wiring as applied. The hooks were compile-checked
 (`-D warnings`, thumbv7em-none-eabihf) against the 847-line scope.rs with

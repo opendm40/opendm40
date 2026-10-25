@@ -41,7 +41,7 @@ pub const CONFIRM_MS: u64 = 3000;
 /// Toast duration, ms.
 pub const TOAST_MS: u64 = 1500;
 /// Auto-cancel of the energy reset confirm, ms. It was 10 s: on the device
-/// (381ea07) a Yes that came ~13 s after the long press (a screenshot read in
+/// (c50425f) a Yes that came ~13 s after the long press (a screenshot read in
 /// between) landed on the bare power page and reset nothing; a question
 /// that answers itself while it is being read is worse than one that stays
 /// (the wiring dialog / the firmware question: 60 s).
@@ -294,7 +294,7 @@ const LOG_PANEL_STALE_MS: u16 = 200;
 
 /// main.rs, every pass: may a panel part be drawn now? `waiting` = the
 /// ring's fill during a session (None outside one). A part costs a few ms
-/// of LCD writes (a ~400 x 36 label); device 940e8aa: at 76.8 kS/s the
+/// of LCD writes (a ~400 x 36 label); device 2f56ff9: at 76.8 kS/s the
 /// first draw's parts, one per pass between the host's first queries, kept
 /// LOG:DATA? from the ring for ~29 ms and 113-275 samples were overwritten
 /// after the first 2048 of every session.

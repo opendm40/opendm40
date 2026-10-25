@@ -76,7 +76,7 @@ const FPER: u32 = (BLK / 2) as u32;
 const BATCH: usize = 32;
 /// The Run pass's own CPU (cycles, 300 us at 200 MHz: wall time minus the
 /// stream ISR's busy time, `Src::isr_cyc`); a batch may run over. While
-/// the ring is over half full, twice that. (Device e8cc4e9: a budget of
+/// the ring is over half full, twice that. (Device 20a91d0: a budget of
 /// wall cycles left the coder 138 us of a 300 us pass with the ISR at 54 %
 /// of the CPU, and the ring overflowed at 76.8 kS/s.)
 const RUN_BUDGET_CYC: u32 = crate::clock::HCLK_HZ / 3333;
@@ -143,7 +143,7 @@ pub enum Ev {
 }
 
 /// The writer trial of a session above 38.4 kS/s (decision 2026-10-23,
-/// device e8cc4e9: the ISR took 54 % of the CPU at 76.8 kS/s, the coder fell
+/// device 20a91d0: the ISR took 54 % of the CPU at 76.8 kS/s, the coder fell
 /// behind, 54 % lost). The run's first GATE_END_MS after the stream
 /// delivers: the ring drained and coded as in the run, the pages clocked
 /// out as reads (no program: nothing reaches the file) with the probe's tPP

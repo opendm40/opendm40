@@ -190,7 +190,7 @@ repaints; the link ceiling, not the chip, at 6.5 kS/s bit-banged). A waveform wi
 every redraw is worse than no waveform (feasibility 5.1). The safety value of "ISR-free" is
 that no shared state exists; C keeps that value by making ownership exclusive in time instead
 of guarded in code. A timer is the dumbest possible source. Gating on SPI2 stops the ISR from
-being built on a bus whose frame timing is still being debugged (1826204 DIAG image).
+being built on a bus whose frame timing is still being debugged (6d35c53 DIAG image).
 
 **Consequences / implement (order).** SPI2 fix + DIAG removal (E2) -> bus hand-off API in
 hy3131.rs with a debug assertion that the main loop never touches the bus while handed off
@@ -322,7 +322,7 @@ weakening the beep.
 
 ## #6 USB volume mode: writable, read-only, or read-only with writes on demand
 
-**Question.** The generated USB volume (vdisk.rs) is writable since 543edb8 / dbf0399 so the
+**Question.** The generated USB volume (vdisk.rs) is writable since 67f2fe8 / ef5977a so the
 PC can delete LOGS / SHOTS / SCOPE files and drop a `dm40*.bin` for an update (install
 confirmed on the meter). The price (native-boot.md "Host writes", Session): while a host has
 it mounted the layout is **frozen**, no media-change UNIT ATTENTION is sent (a UA on a
@@ -424,10 +424,10 @@ is the next step, not (D).
 
 ## #7 AD2 stream frames: CPU frames at /8 + CKPH or DMA frames at /16 as the default
 
-**Question.** Both frame kinds stream with 0 loss on the device (9ccae5d, feasibility 11.10):
+**Question.** Both frame kinds stream with 0 loss on the device (0471860, feasibility 11.10):
 CPU frames at /8 + CKPH = 1 (the default, `DBG:AD2:DMA 0`) cost 26 % CPU at 19.2 kS/s and
 51 % at 38.4 kS/s; DMA frames at /16 (opt-in, `DBG:AD2:DMA 1`) cost 8 % and 17.5 %. Make DMA
-the default? Robustness (the frame-shift bug fixed in 9ccae5d, bounded waits), the Wave
+the default? Robustness (the frame-shift bug fixed in 0471860, bounded waits), the Wave
 view, DMA sharing with BT / generator / scope.
 
 **Options.**
@@ -448,9 +448,9 @@ sit below the point where the kinds differ in CPU, and above it DMA wins outrigh
   the same pass budget, so it gains the most.
 - max_isr: 10.8 us (DMA) against 16.8 us (CPU /8 + CKPH): the ISR holds the bus and the CPU
   for less at every entry.
-- Correctness is equal on the device: 9ccae5d, 60 s each, lost 0 / bad 0 / timeouts 0 for
+- Correctness is equal on the device: 0471860, 60 s each, lost 0 / bad 0 / timeouts 0 for
   DMA at 19200 (DRAW 2) and 38400, the same for CPU frames at 4800 (DRAW 2) / 9600 / 38400.
-  The DMA path's one bug (an aborted frame leaving a byte in flight, 95bc43a) is fixed with a
+  The DMA path's one bug (an aborted frame leaving a byte in flight, 00e088f) is fixed with a
   bounded wait + a drained receive register, and a shifted frame would be caught by the
   sign-copy check (`bad`) rather than pass silently.
 - DMA sessions take samples only once locked, so they skip the one or two R26-transient
@@ -466,8 +466,8 @@ sit below the point where the kinds differ in CPU, and above it DMA wins outrigh
 - Decision #3's invariants hold: DMA frames add no NVIC line (the ISR polls the channel
   count / flags at the next entry), the ISR still touches only its ring and counters, and
   the exclusive bus hand-off is unchanged.
-- Against: the DMA path has one passing device run (9ccae5d) where the CPU frames have
-  three (035fc32 /16, 8701d51 incl. a 15-min 35.8 M-sample soak, 9ccae5d); and every device
+- Against: the DMA path has one passing device run (0471860) where the CPU frames have
+  three (b48048e /16, 42cbf35 incl. a 15-min 35.8 M-sample soak, 0471860); and every device
   run so far streamed with the generator off and BT idle. That is a reason for the gate, not
   for keeping a default that costs 3x the CPU.
 
@@ -540,7 +540,7 @@ between ISR frames) can make a faster DMM bus necessary, and that is when this i
 - Region B (zero-wait flash) has 28 bytes left (TODO). The CKPH switch is per-frame hot code
   (SPE off / CKPH / SPE on between the read-period pulse and the data) in `hy3131::read`,
   which runs in every pass; it cannot go to `.cold`.
-- Writes at /8: `WR? 1` gave 0 / 0 at /8 on 8701d51, but the matched-dummy trick exists
+- Writes at /8: `WR? 1` gave 0 / 0 at /8 on 42cbf35, but the matched-dummy trick exists
   because the chip takes each LSB late; halving the bit period halves that margin too, on
   the one register path (rows, ranges, calibration-dependent mux bits) where a bad bit is a
   wrong range or a wrong relay. (C) avoids that but keeps every other cost.
@@ -587,7 +587,7 @@ delegation (the task listed the planned approach); the details below are its cho
 **Decisions.**
 1. **Hybrid data frame**: CPU command byte in mode 0 at /8 (waited for, 1.28 us), the
    read-period pulse, CKPH = 1, then DMA for the 3 data bytes. Not: plain /8 DMA shift frames
-   (mode 0 data, 61 / 100 sign errors per ~2 M on 035fc32), a CPU frame (no room for the
+   (mode 0 data, 61 / 100 sign errors per ~2 M on b48048e), a CPU frame (no room for the
    probe), a second timer interrupt to avoid the command-byte wait (saves ~0.5 us per sample
    for a second entry type and a tighter schedule: not worth it at ~43 %).
 2. **Probe frames at /8 mode 0** (2-byte DMA, shift framing), every 16th period: a marginal

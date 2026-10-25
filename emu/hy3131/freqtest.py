@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """opendm40 DMM frequency: the first readings after an entry (device check
 2026-10-24, firmware/docs/device-check-2026-10-21.md "Crosstalk and cold-junction
-self-heating (3e41549)": on a steady 40 Hz square the first 1-2 READ? after
+self-heating (40728b8)": on a steady 40 Hz square the first 1-2 READ? after
 DC V -> CONF:FREQ read 19.94 / 0.00 / 0.99 / 0.94 / 17.04 Hz, then 40.0018).
 
 The cause is a stale counter gate: the Hz row (R20 = 0xF2) re-enables the
@@ -26,14 +26,14 @@ Scenarios (each its own emulator; input: a 40 Hz 1 V square on V-COM):
   acv          AC V (3 s) -> CONF:FREQ (0xF2 -> 0xF2: the counter is not
                re-enabled at all), READ? x4; with ctsettle:400 and ct0dead:2500
   entry-dead   entry with ct0dead:2500: the Hz row's comparator source (0xf0)
-               counts nothing for 2.5 s after the row change (device a3b6d0a:
+               counts nothing for 2.5 s after the row change (device d2aff22:
                0.000 Hz / 0.0 % at 1.37 / 1.71 / 2.06 s, 40.00 from 2.42 s)
   nosig        nothing connected (ct0dead:2500): READ? must answer 0.000 Hz
 wake also runs with ct0dead:2500. Every READ? must be 40 Hz (nosig: 0 Hz)
 within TOL (default 0.05 %). The first READ?'s fw
 uptime from the CONF (or the return to the DMM page) is printed. Results:
-emu/out/freq-<name>.json. Exit status 0 = passed. e0813f2 fails entry, entry-settle
-and wake (first READ? 34-45 / 19.9-30.2 / 18.1-19.6 Hz); 190d7d5 (freqfirst) fails
+emu/out/freq-<name>.json. Exit status 0 = passed. 69f3dfe fails entry, entry-settle
+and wake (first READ? 34-45 / 19.9-30.2 / 18.1-19.6 Hz); f6ec475 (freqfirst) fails
 entry-dead, wake and acv with the device's pattern (0.0 at +1.39 / 1.72 / 2.06 s).
 """
 import argparse
@@ -61,7 +61,7 @@ import usbip_client as uc  # noqa: E402
 F0 = 40.0
 SIG = 'hz:40,amp=1'
 # name: (connection spec, kind, the function before)
-DEAD = ';ct0dead:2500'  # source 0xf0 counts nothing for 2.5 s after the row change (device a3b6d0a)
+DEAD = ';ct0dead:2500'  # source 0xf0 counts nothing for 2.5 s after the row change (device d2aff22)
 # name: (connection spec, kind, the function before, expected Hz)
 SC = {
     'entry': (SIG, 'conf', 'CONF:VOLT:DC', F0),

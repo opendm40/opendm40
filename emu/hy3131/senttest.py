@@ -51,7 +51,7 @@ SC = {
     'dcv-aac':  ('VOLT:DC', 20, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'})]),
     'dcv-avs':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'avsrc:5', {'AJACK'})]),
     'dcv-small': ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.0002', {'NONE'})]),
-    # f48db7d device check: A-JACK with 10 V on the 60 V range, A jack open. The model has no
+    # f80524f device check: A-JACK with 10 V on the 60 V range, A jack open. The model has no
     # such coupling; this checks that the autorange 6 <-> 60 V leaves the r0 sentinel working.
     'dcv-step': ('VOLT:DC', 36, [(0, 'open;vsrc:1', {'NONE'}), (8, 'vsrc:10', {'NONE'}), (14, 'vsrc:1', {'NONE'}),
                                  (20, 'vsrc:10', {'NONE'}), (26, 'vsrc:1;isrc:0.001', {'AJACK'})]),
@@ -64,11 +64,11 @@ SC = {
     'dca-v':    ('CURR:DC', 28, [(0, 'open;vsrc:5', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
     'dca-vac':  ('CURR:DC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'dca-vi':   ('CURR:DC', 16, [(0, 'open;vsrc:24;isrc:0.0123', {'NONE'})]),
-    # Device 9944169 / 2ba1a1b (A jack open): 5 / 10 V DC or the 0..9.6 V 40 Hz square on V-COM
+    # Device 22c85ba / c2ddd2a (A jack open): 5 / 10 V DC or the 0..9.6 V 40 Hz square on V-COM
     # tripped the comparator on PB1 in ohm / temperature (A-JACK), 1 V did not. The model's
     # Pb1VjackMv puts the V jack on PB1 in those rows. Temperature: the thermocouple input reads
     # far beyond any thermocouple (V_GATE), no A-JACK. Ohm: the device reads OL there, not the
-    # negative code of LIVE? (2d33d3a 7b; the model's default `ohmrevol`), so the jack check
+    # negative code of LIVE? (519fb8a 7b; the model's default `ohmrevol`), so the jack check
     # (sentinel.rs JACK CHECK: AD2 on OP1O while PB1 hits) tells it: LIVE?, never A-JACK. A current
     # in A with V-COM open (the last phase) is A-JACK as before. ohm-v5-600: manual 600 ohm.
     'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
@@ -77,12 +77,12 @@ SC = {
     'ohm-v5-600': ('RES 600', 42, [(0, 'open;r:470', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
                                    (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
                    [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
-    # Continuity, the same inputs (device 3e41549 item 4 / a3b6d0a S6: A-JACK at 5 V from the AD2
+    # Continuity, the same inputs (device 40728b8 item 4 / d2aff22 S6: A-JACK at 5 V from the AD2
     # peak on PB1; LIVE? at 1 V): the jack check's window says driven -> LIVE?.
     'cont-v5':  ('CONT', 42, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
                               (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
-    # AC mV with the 0 / 9.5 V 40 Hz square on V-COM (device 940e8aa: AJACK,AD1PK_PB1; the model's
+    # AC mV with the 0 / 9.5 V 40 Hz square on V-COM (device 2f56ff9: AJACK,AD1PK_PB1; the model's
     # mvclamp / mvpb1): the row's own result is far beyond the range (V_GATE, MV_DRV_K): no
     # A-JACK; then the source off and an AC current in A with V-COM open: A-JACK. Manual 60 mV /
     # 600 mV (the range stays in the clip); acmv-dc5: 5 V DC (the clamp's DC).
@@ -105,7 +105,7 @@ SC = {
                                          (10, 'vsrc:5', {'NONE'}),
                                          (22, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
                    {'never': [('AJACK', 1, 2)]}),
-    # The same, then the source switched off with the input left open (device 8e04b1c: the readout
+    # The same, then the source switched off with the input left open (device 185c066: the readout
     # OL, AJACK,AD1PK_PB1 0.45-0.9 s after the off in 8 of 13 runs, held while open). The model's
     # mvhold: the floating input keeps 0.75 V (OL on 600 mV, under MV_DRV_K x the range) and PB1
     # picks up 40 mV (INFERRED); -dcrow: only the DC mV row sees the level (the AC row reads 0).
@@ -132,7 +132,7 @@ SC = {
     'cont-live': ('CONT', 18, [(0, 'open;r:10', {'NONE'}), (8, 'open;vsrc:1.234', {'LIVE'})]),
     'diode-live': ('DIOD', 18, [(0, 'open;diode:0.65', {'NONE'}), (8, 'open;vsrc:-1.0,rs=100', {'LIVE'})]),
     'masked':   ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.001', {'NONE'})]),
-    # Sentinels added after f48db7d (doc 4.7): AC+DC (both phases), AC A (AD1 on the V tap),
+    # Sentinels added after f80524f (doc 4.7): AC+DC (both phases), AC A (AD1 on the V tap),
     # frequency (AD1 peak on PB1), continuity / diode / cap r0..4 (AD2 + OP2 on PB1); cap r5..7
     # (the ramp) has none: the gap is asserted.
     'acdc-v':   ('VOLT:ACDC', 30, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (21, 'isrc:none', {'NONE'})]),
@@ -141,12 +141,12 @@ SC = {
     'acdc-v-hi-gap': ('VOLT:ACDC', 26, [(0, 'open;vsrc:30', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
     'acdc-a':   ('CURR:ACDC', 30, [(0, 'open', {'NONE'}), (10, 'vsrc:24', {'VJACK'}), (21, 'vsrc:none', {'NONE'})]),
     # AC A counts the AD1 swing only (sentinel.rs PKV_SWING_THR, from ~2 V rms): a DC level on
-    # SENSE cannot be told from the A rows' own offset (device 3e41549 2a); DC on V is DC A's
+    # SENSE cannot be told from the A rows' own offset (device 40728b8 2a); DC on V is DC A's
     'aca-v':    ('CURR:AC', 28, [(0, 'open;vsrc:0,ac=1,f=50', {'NONE'}), (10, 'vsrc:0,ac=5,f=50', {'VJACK'}), (19, 'vsrc:none', {'NONE'})]),
     'aca-vdc':  ('CURR:AC', 18, [(0, 'open;vsrc:24', {'NONE'})]),
     'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'aca-vi':   ('CURR:AC', 18, [(0, 'open;vsrc:24;isrc:0,ac=0.01,f=50', {'NONE'})]),
-    # Frequency carries no sentinel (device 7534701: PB1 - PB3 stands at ~54 mV in its row, a
+    # Frequency carries no sentinel (device d8e249d: PB1 - PB3 stands at ~54 mV in its row, a
     # false A-JACK; doc 4.7 gaps): a current in A shows nothing there.
     'freq-gap': ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
     'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
@@ -172,7 +172,7 @@ SC = {
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OK', 'ohm': (44, 54)}),
     'fuse-open': ('CURR:DC', 20, [(0, 'open;valead;fuseopen', {'NONE'})], ['SYST:FUSE:TEST'],
                   {'queries': ['SYST:FUSE?', 'FUNC?'], 'fuse': 'OPEN'}),
-    # owner on 2232996: "the fuse check sometimes reads 18 ohm instead of 48" (the third raw
+    # owner on ea73ea5: "the fuse check sometimes reads 18 ohm instead of 48" (the third raw
     # conversion after the fast ohm entry, the node still charging): with the model's ohm node
     # lag (800 ms, chosen so the old third conversion is ~13 % low) the verdict must come from a
     # vetted final reading (dmm.rs FUSE_READINGS / OHM_VET_*)
@@ -231,7 +231,7 @@ SC = {
     'aprot-dcv-12': ('VOLT:DC', 32, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'open', {'APROT'}),
                                      (22, 'open', {'NONE'})], [], {'acts': {19.5: 'DBG:KEY 2'}, 'aprot_ms': (400, 560)}),
     'aprot-dcv-24': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 450)}),
-    # Ohm / temperature carry no probe (device 9944169: there it follows the V input, 5 V on V-COM
+    # Ohm / temperature carry no probe (device 22c85ba: there it follows the V input, 5 V on V-COM
     # read 1.7 A and latched A-PROT): a source across A-COM is A-JACK only.
     'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'AJACK'})]),
     'aprot-temp-12': ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'avsrc:12', {'AJACK'})]),
@@ -239,7 +239,7 @@ SC = {
     # the latch ends 1 s after that (the act counts).
     'aprot-ack-early': ('VOLT:DC', 34, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'avsrc:12', {'APROT'}),
                                         (22, 'open', {'APROT', 'NONE'}), (26, 'open', {'NONE'})], [], {'acts': {14: 'DBG:KEY 2'}}),
-    # Device 7534701: A-PROT latched with the A jack open on the probe's first window (AD2 just
+    # Device d8e249d: A-PROT latched with the A jack open on the probe's first window (AD2 just
     # restarted). The model's AD2 reads 3000 codes (0.72 A) off for its first results after a
     # start: a small current (1 V across A-COM, 21 mA) brings the probe in; A-JACK only.
     'aprot-glitch': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:1', {'AJACK'})], [],
@@ -361,7 +361,7 @@ def run(name):
                 if not (win[0] <= abs(v) <= win[1]):
                     ok = False
                     bad.append('%.2f READ? %s outside %g..%g' % (r['t'], r['READ?'], win[0], win[1]))
-            # DC V 60 V+ carries no comparator sentinel (f48db7d device check)
+            # DC V 60 V+ carries no comparator sentinel (f80524f device check)
             try:
                 v = float(r['READ?'])
             except ValueError:

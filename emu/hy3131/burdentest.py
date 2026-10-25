@@ -54,7 +54,7 @@ PHASES = [
     # The readout off: FETC:BURD? still answers.
     (64, 'isrc:0,ac=0.1,f=50', ['POW:BURD DEF', 'DISP:BURD OFF'], 0.5, '0', 'ac-off'),
     # Mixed DC 200 + AC 100 mA rms: AC+DC shows the total, AUTO the DC part
-    # (AC < 0.75 DC); the burden is the total's in both (185dc99 used the
+    # (AC < 0.75 DC); the burden is the total's in both (a0f4821 used the
     # shown part in AUTO: 0.2 instead of 0.2236 A).
     (74, 'isrc:0.2,ac=0.1,f=60', ['CONF:CURR:DC', 'CURR:COUP ACDC'], ('TOT', (0.2 ** 2 + 0.1 ** 2) ** 0.5), '0', None),
     (90, 'isrc:0.2,ac=0.1,f=60', ['CURR:COUP AUTO'], ('TOT', (0.2 ** 2 + 0.1 ** 2) ** 0.5), '0', None),

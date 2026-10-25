@@ -51,7 +51,7 @@
 //!     at most 8 s); FETCh? does not: at most SCPI_WAIT_MS after the
 //!     deadline it was asked at, and +9.91E37 at once (no error) once an
 //!     autorange step came since the entry (the range-change rule below;
-//!     device 7c04b03: a hunt kept FETCh? silent for the driver's 5 s).
+//!     device 1a11eda: a hunt kept FETCh? silent for the driver's 5 s).
 //!   - AUTO coupling before its first decision (its values are provisional,
 //!     ../docs/history/switch-latency.md 6): FETCh? answers +9.91E37 at once (no wait,
 //!     no error); READ? / MEAS? wait for the decision until AUTO_WAIT_MS
@@ -76,7 +76,7 @@
 //!     the DC conversions vetted after a step, 0.1-0.4 s): READ? answers
 //!     the first reading of the new range if it comes within SCPI_QUICK_MS,
 //!     else +9.91E37 and "Data stale" as at the entry, never the latest
-//!     reading from before the change (device 9292ec2: READ? held a 3.39 V
+//!     reading from before the change (device decaf60: READ? held a 3.39 V
 //!     transient for 5 s through an AC+DC autorange step); FETCh? answers
 //!     +9.91E37 at once (not while HOLD freezes the readout).
 //!   - no late reply to a query the host gave up on: USBTMC
@@ -544,12 +544,12 @@ pub enum Log {
 ///                           n counts all, emu/hy3131/switchtest.py)
 ///   DBG:SENTinel:VARiant <0..127> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
-///                           VAR_*): +1 AC V keeps OP1's chopper (f48db7d row),
+///                           VAR_*): +1 AC V keeps OP1's chopper (f80524f row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
 ///                           +8 none of the later sentinels (AC+DC, AC A,
 ///                           continuity, diode, cap r0..4, frequency), +16 no
 ///                           DC? / AC? input alternation, +32 AC A's AD1 on
-///                           SENSE - PB5 (the 3e41549 row), +64 AC A AD1 at IG
+///                           SENSE - PB5 (the 40728b8 row), +64 AC A AD1 at IG
 ///                           0.9 (where SENSE sits; diagnostic)
 ///   DBG:SENTinel:REG?       HY3131 R20..R37 read back (48 hex digits), relay PA
 ///                           (0 V/A, 1 ohm network, 255 unknown), mode, range,
@@ -562,8 +562,8 @@ pub enum Log {
 ///   DBG:SENTinel:PRECond <ms> / ?  RAM only, default 100, 0 = off: entering
 ///                           DC A / mA / uA while a_blind (V-JACK? enabled),
 ///                           run the temperature row for <ms> (<= 2000, blocking)
-///                           first (device 3e41549: 24 V on V-COM was seen in DC
-///                           A only after TEMP; a3b6d0a: 100 ms is enough)
+///                           first (device 40728b8: 24 V on V-COM was seen in DC
+///                           A only after TEMP; d2aff22: 100 ms is enough)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
 ///                           the stock alternation; a change restarts AC+DC)
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
@@ -628,7 +628,7 @@ pub enum Log {
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
 ///                           mode 0 hy3131::write, 1 SPI2 one byte per frame + a cut
 ///                           dummy, 2 SPI2 continuous + a cut dummy, 3 SPI2 as
-///                           a241bf9 (byte by byte, no dummy)
+///                           0d0fd76 (byte by byte, no dummy)
 ///   DBG:ISR?                AD2 stream ISR (logger.rs `isr`): feature,active,ticks,
 ///                           captured,late,probes,dropped,bad,timeouts,overruns,
 ///                           max_isr_ns,max_lat_ns,rate_mhz,forced,locked,ppm_x10,
@@ -1021,7 +1021,7 @@ pub fn step_exp(v: f32, cap: bool) -> i32 {
 
 /// 10^e, the f32 nearest it for e in -16..=8 (a table: VOLT:RES? prints
 /// it as nr3, and an f32 divided by 10 five times gave +9.999999E-06,
-/// device 7c04b03). Outside the table: repeated steps (not used).
+/// device 1a11eda). Outside the table: repeated steps (not used).
 pub fn pow10f(e: i32) -> f32 {
     const T: [f32; 25] = [
         1e-16, 1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0,
@@ -2108,7 +2108,7 @@ impl Scpi {
                 // range_cmd is .cold (region C): only for a header that names
                 // RANGe / RESolution. Every other header below (LOG:DATA?,
                 // LOG:DISK?, DBG:ISR?, MMEM...) reached it, and a fetch from C
-                // while the AD2 stream runs delays the ISR (device bfb6a19:
+                // while the AD2 stream runs delays the ISR (device 825080c:
                 // max_lat 1.6-20 us at range_cmd's entry, overruns / slips,
                 // one 76800 writer trial fell back).
                 _ if parts.len() > 1
@@ -2929,7 +2929,7 @@ fn nr3(b: &mut [u8; 20], v: f32) -> usize {
     // by 10^(6 - e) in f64 (exact for an f32 times 10^n, n <= 22) with one
     // rounding, so an exact value such as 76 800 prints exactly
     // (+7.680000E+04). The former repeated f32 `x /= 10.0` rounded at
-    // every step (+7.680001E+04, device 940e8aa).
+    // every step (+7.680001E+04, device 2f56ff9).
     let mut e: i32 = 0;
     let mut m = 0u32;
     if x != 0.0 {

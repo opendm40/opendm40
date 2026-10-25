@@ -722,8 +722,8 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
 5. **AD1 pre-filter.** Read the stock DC rows' R33 (SFT1) and check the board
    for an FTP-FTN capacitor (a possible Fluke-style analog filter, DS §12.4).
 
-**Results, tests 1-4 and option E (device, 2232996, 2026-10-24;**
-[device-check-2026-10-21.md](device-check-2026-10-21.md) "AD1 OSR characterization (2232996)"**).** AD1
+**Results, tests 1-4 and option E (device, ea73ea5, 2026-10-24;**
+[device-check-2026-10-21.md](device-check-2026-10-21.md) "AD1 OSR characterization (ea73ea5)"**).** AD1
 streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 0 / 1 / 5 V DC and its disabled output (no real short on the bench).
 

@@ -4,7 +4,7 @@
 //! the probe results; host tests drive it against a model chip.
 //!
 //! Why: reading INTF clears AD2F, and a conversion that completes while the
-//! INTF frame is under way is lost to that read (device 381ea07: ~11.5 ms
+//! INTF frame is under way is lost to that read (device c50425f: ~11.5 ms
 //! bursts every ~3948 conversions while the 4 x tick walked over the edge at
 //! +63 ppm). So the sample is not found by polling the flag. The data
 //! register R03..R05 holds a result for a whole period, so the ISR reads it
@@ -74,9 +74,9 @@ const KI_SHIFT: u32 = 18;
 /// The frequency word may move at most this far from the nominal (ppm): a
 /// runaway loop cannot detune the timer by more than 0.5 %. Was 1000 (any
 /// real crystal pair) while the 76.8 kS/s stream ran 2940 ppm slow (device
-/// e8cc4e9): the word sat on the clamp and the probes' phase kicks alone
+/// 20a91d0): the word sat on the clamp and the probes' phase kicks alone
 /// held the grid (1.48 ISR entries per sample, ~9 % more ISR CPU). That
-/// rate came from the old loop's walks, not the chip (device 8ce42e2: with
+/// rate came from the old loop's walks, not the chip (device c830e09: with
 /// this loop and a 76 574.6 nominal it locked at the datasheet's 76 800,
 /// -2935 ppm, from a cold start); the nominal is the datasheet's again, and
 /// 5000 keeps the margin that showed. Nothing else depends on it: the beta / late geometry
@@ -88,7 +88,7 @@ const MAX_PPM: u64 = 5000;
 /// most this far (ppm) from its nominal: the crystal pair's offset, which
 /// every rung shares (+-100 ppm crystals). The 76.8 kS/s hybrid rung keeps
 /// its own carried word (logger.rs `REL_HYB`): its offset may be the rung's
-/// own (the device's e8cc4e9 numbers, see MAX_PPM).
+/// own (the device's 20a91d0 numbers, see MAX_PPM).
 const CARRY_PPM: i64 = 1000;
 const CARRY_Q24: i32 = ((CARRY_PPM << 24) / 1_000_000) as i32;
 
@@ -359,7 +359,7 @@ impl Pll {
         // that walk lengthened the word, which put the next B later still:
         // the loop ran onto the MAX_PPM clamp and stayed there, the phase
         // held by kicks only and slipping over and over (the emulator
-        // reproduces the device's e8cc4e9 state so with a chip at the
+        // reproduces the device's 20a91d0 state so with a chip at the
         // nominal rate: rate_mhz 76 723.6, ~86 % of the probes "after B",
         // ~0.3 probes per sample). A real frequency offset still integrates:
         // the kicks hold the phase with runs of a few results broken by the
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn hybrid_76k8_far_from_the_nominal() {
-        // The device's e8cc4e9 state: rate_mhz on the 1000 ppm clamp, 86 %
+        // The device's 20a91d0 state: rate_mhz on the 1000 ppm clamp, 86 %
         // of the probes "edge after B", ~0.25 probes per sample. Before the
         // run hold / dense probing in `result` this model got there from a
         // chip at the nominal with the word started 1000 ppm long (the

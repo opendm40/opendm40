@@ -182,7 +182,7 @@ only switches the view. Constraints and how opendm40 handles them:
   the stock powers one side per page. opendm40's policy is `SYST:RAIL AUTO|BOTH`
   (default AUTO, persisted): AUTO powers the side the view needs (both in the
   combined view and with a host scope command), BOTH keeps both up. Measured with
-  both rails on (device check 7534701, [device-check-2026-10-21.md](device-check-2026-10-21.md)):
+  both rails on (device check d8e249d, [device-check-2026-10-21.md](device-check-2026-10-21.md)):
   DC within 0.04 %; a 40 Hz 0..9.6 V square reads +0.19 % more in V (edge-rate
   dependent coupling of the powered scope front end), which is why AUTO keeps the
   scope rail off on the DMM page.

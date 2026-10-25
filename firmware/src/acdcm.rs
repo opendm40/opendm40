@@ -20,20 +20,20 @@
 //!   the RMS / LPF on and AD2's peak hold: DC part = LPF, AC part =
 //!   sqrt(RMS) (the HPF in the RMS block takes the DC out), one fixed row,
 //!   nothing switched, both parts every LPF block (106.7 ms). DC part: per
-//!   range and session an anchor (`am_cal_step`, e8cc4e9 device fix): the
+//!   range and session an anchor (`am_cal_step`, 20a91d0 device fix): the
 //!   stock DC V row's reading (AD1 alone, the DC V function's own row and
 //!   calibration = what READ? shows) against the LPF of this very row (AD3
 //!   and the RMS on: E7's self-cal anchored AD1 in the AC V row's switches
 //!   and averaged AD2 with AD3 off, and read the 60 V DC part +11 mV +
 //!   0.05 % off); the gain from an internal zero (OP1+ on AGND) when the
 //!   span is >= 10 k codes, kept per range over sessions, else the table.
-//!   The internal zero is not a real 0 V input (device 2cc47ef: ~15 codes
+//!   The internal zero is not a real 0 V input (device ac1e852: ~15 codes
 //!   off on 60 V, the gain 0.030 % high, -8 mV at 0 V), so once the input
 //!   has settled >= 10 k codes away from a reference point of the session
 //!   C takes the stock row's reading there too (`am_refine`, ~1 s of DC V
 //!   readings) and the gain from the two READ? points: measured against the
 //!   very reading the DC part is meant to equal, nothing assumed of the
-//!   hardware. "Settled" = the LPF has stopped creeping (device 2fbc5e7: 5..12
+//!   hardware. "Settled" = the LPF has stopped creeping (device 80d5b01: 5..12
 //!   codes still going after 3.6 s, a 6 V gain 143..195 ppm off): its slope
 //!   over the last ~3 s below 1 code / s, the new point = the fitted line's
 //!   last value, taken before the reference row is written (acdc-approaches.md
@@ -118,7 +118,7 @@ const RMS_BAD_MS: u64 = 2500;
 const AC_OK_MS: u64 = 2000;
 /// C V refinement (`am_refine`): the last SLOPE_N LPF results (~3 s) within
 /// the anchor's spread rule and their fitted slope below SLOPE_MAX codes / s
-/// (LPF_T s per result) = a settled input and LPF (device 2fbc5e7: the LPF
+/// (LPF_T s per result) = a settled input and LPF (device 80d5b01: the LPF
 /// crept 5..12 codes for ~8 s after a step; noise ~1.7 codes, so ~3 s for a
 /// slope error of ~0.3 code / s), and not before SLOPE_MIN results at the
 /// level (~5 s: the device's tail stayed flat for ~4 s, then fell); not
@@ -144,14 +144,14 @@ const GAIN_MOVE: f32 = 12.0;
 /// (the scale of each of the four inputs' noise: two LPF means, two READ?s,
 /// ~1 code each in the emulator) plus what a tail still creeping at the
 /// window's slope may leave (|slope| x CREEP_TAU s: the time constant of
-/// the 2fbc5e7 trace's tail, fitted as two lags of 2.5 s), at least BIAS_MIN
+/// the 80d5b01 trace's tail, fitted as two lags of 2.5 s), at least BIAS_MIN
 /// codes.
 /// The LPF's creep lags the input step: the new point sits toward the level
 /// before it, which moves the two-point gain one way only (the "lag side":
 /// a larger gain when the farther reference point lies beyond the level
 /// before, as on every step down / up of e8). On the lag side the two lines
 /// must differ by CREEP_K x the step into this level (codes) more. Device
-/// afcf151 (acdc-approaches.md 10.14): 6 V's accurate internal zero vs the
+/// a8048ba (acdc-approaches.md 10.14): 6 V's accurate internal zero vs the
 /// two-point gains at the new point: -0.9..+13 codes, 16 of 18 on the lag
 /// side, all beyond 1 code (5 -> 3 V, 41.6 k: +3.9..+13.0, 10 of 10); 60 V's
 /// biased zero: -2.5..-10 codes, 12 of 12 on the other side.

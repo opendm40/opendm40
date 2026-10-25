@@ -77,7 +77,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double R = double.PositiveInfinity; // resistor between V and COM (0 = short)
         public double C = 0;              // capacitor between V and COM (F)
         /// A current-limited path between V and COM (A, 0 = none; "isink:2.1e-7"): it holds the node at
-        /// 0 V while that takes at most ISink, else it takes ISink. Device 7c04b03 (the calibrator's
+        /// 0 V while that takes at most ISink, else it takes ISink. Device 1a11eda (the calibrator's
         /// disabled output, INFERRED: such a path, e.g. a leakage / bias current of its output stage):
         /// RES 6 Mohm read 0.104 Mohm (its ~0.215 uA test current nearly all taken), 600 kohm OL
         /// (a tenth of its ~2.17 uA taken).
@@ -99,7 +99,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// The floating mV input after a source on V-COM goes off (opt-in, "mvhold:V"; 0 = none): the
         /// mV rows read MvHoldV DC on the jack, and PB1 picks up MvHoldPb1Mv mV DC ("mvholdpb1:mV"), until
         /// the next source on V-COM. "mvholdrows:" which mV rows see the level: 1 DC mV, 2 AC mV, 3 both
-        /// (the default). Device 8e04b1c (AC+DC mV, manual 600 mV): after the 0 / 9.5 V square or 5 V DC
+        /// (the default). Device 185c066 (AC+DC mV, manual 600 mV): after the 0 / 9.5 V square or 5 V DC
         /// was switched off (the calibrator's output relay opens) the readout stayed OL and
         /// AJACK,AD1PK_PB1 came 0.45-0.9 s later in 8 of 13 runs, held while the input was open. The
         /// charge, which rows see it and the PB1 pickup are INFERRED (phenomenological). Kept by "open".

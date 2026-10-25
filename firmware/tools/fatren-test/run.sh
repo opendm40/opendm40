@@ -242,7 +242,7 @@ noold() {
 }
 mkdir $W/src
 # Sources: slices of the (untracked) device dumps when present, else
-# synthetic stand-ins of the same sizes (review 530c2e1 L5: the suite must
+# synthetic stand-ins of the same sizes (review 60605d2 L5: the suite must
 # run in a clean checkout). Synthetic data is seeded random; the bytes the
 # tests below change (CALIB 400 / 500, LOADER 0x1F000) are forced to 0 so
 # every change is one.
@@ -788,7 +788,7 @@ fsckok $IMG7
 "$W/t" $IMG7 scopecsv 300 | tee $W/sc2 | grep -q "csv=Saved(1) len=[0-9]* " && echo "ok: then SCOP001.DLG (300 samples)" || { echo "FAIL at line $LINENO"; exit 1; }
 fsckok $IMG7
 # The CSV generated from the DLG (tools/dlog.py) == the pre-DLG writer's
-# SCOP000.CSV / SCOP001.CSV for the same records (6e39d5a scope_csv.rs; md5).
+# SCOP000.CSV / SCOP001.CSV for the same records (4146aae scope_csv.rs; md5).
 mcopy -n -i $IMG7 ::SCOPE/SCOP000.DLG $W/s.dlg
 python3 -I ../dlog.py $W/s.dlg -o $W/s.csv
 mcopy -n -i $IMG7 ::SCOPE/SCOP001.DLG $W/s1.dlg
@@ -816,7 +816,7 @@ python3 -I ../dlog.py $W/sa.dlg -o $W/sa.csv
 [ "$(sed -n 2p $W/sa.csv | tr -d '\r')" = "time_s,amperes" ] && echo "ok: a current record's column is time_s,amperes" || { echo "FAIL at line $LINENO"; exit 1; }
 
 echo "--- screenshot: power cut / abort between every two slices (NOR model of write_step)"
-# Review 530c2e1 H1 / L4: the shot driven slice by slice (screenshot::poll_on)
+# Review 60605d2 H1 / L4: the shot driven slice by slice (screenshot::poll_on)
 # on a NOR model (write_step: erase in the first call, 4 pages programmed per
 # call), cut after every slice k: the image as it is then (incl. a half
 # programmed data block), and the same k stopped by screenshot::abort_on
@@ -1377,7 +1377,7 @@ reads = int(re.search(r'read: spi ([0-9]+) reads', t).group(1))
 assert amp < 0.06 and kbs > 10000 and rs < 0.2 and reads < 20000, (amp, kbs, rs, reads)
 PY
 # The same while "an indexer" re-reads the file's head every 16 sectors
-# (device d284dff: ~2.2 SPI bytes per CSV byte, ~6 ms per sector, with one
+# (device 7674c85: ~2.2 SPI bytes per CSV byte, ~6 ms per sector, with one
 # cursor dragged back and forth): two cursors + seek checkpoints.
 "$W/t" $W/vlh.csv vread $W/f1m_native $W/src/UID.BIN $W/src/OTP.BIN $W/src/OPTBYTES.BIN $IMGL LOGS FAST000.CSV head | tee $W/vlh.out
 cmp -s $W/vlh.csv $IMGL.ref.csv && python3 -I - $W/vlh.out <<'PY' && echo "ok: interleaved head reads: the copy == the reference, SPI reads bounded" || { echo "FAIL at line $LINENO"; exit 1; }

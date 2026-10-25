@@ -212,7 +212,7 @@ namespace Hy3131Tests
 
         private static void SentinelLater()
         {
-            Console.WriteLine("opendm40 sentinels added after f48db7d (frequency, AC A, continuity, diode, cap r0..4)");
+            Console.WriteLine("opendm40 sentinels added after f80524f (frequency, AC A, continuity, diode, cap r0..4)");
             foreach(var (row, mode, name) in new[] { (F14, 14, "Freq m14 r0"), (F4R1, 4, "AcA m4 r1"), (F5R0, 5, "AcA m5 r0"), (F11, 11, "Cont m11 r0"),
                                                      (F12, 12, "Diode m12 r0"), (F13R2, 13, "CapOsc m13 r2") })
             {
@@ -318,7 +318,7 @@ namespace Hy3131Tests
                 Near(Ma(m, 8, 0), 10, 0.01, "  fuse back: 10 mA");
             }
             {
-                // pb5drift (device 3e41549 2a): AC A's AD1 on SENSE - PB5 runs to the negative rail
+                // pb5drift (device 40728b8 2a): AC A's AD1 on SENSE - PB5 runs to the negative rail
                 // within ~2 s, whatever is on V; SENSE - AGND (the fixed row) stays put
                 var m = NewChip(true);
                 m.Chip.SetInput("open;pb5drift:0.6;pb5tau:2.2");
@@ -344,7 +344,7 @@ namespace Hy3131Tests
                 Near(p[1] - p[0], 10676, 300, "  5 V rms AC: swing ~10.7 k (opendm40 swing threshold 4.27 k)");
             }
             {
-                // senseneg (device a3b6d0a): AC A's SENSE - AGND ramps to the rail at 24 V, ~10 k per hold
+                // senseneg (device d2aff22): AC A's SENSE - AGND ramps to the rail at 24 V, ~10 k per hold
                 var m = NewChip(true);
                 m.Chip.SetInput("open;vsrc:24;senseneg:0.75;sensetau:5");
                 var r = Sent(F5R0, 5);
@@ -357,7 +357,7 @@ namespace Hy3131Tests
                 Check(p[0] <= -262000, "  at the rail by ~3.5 s", p[0] + ".." + p[1]);
             }
             {
-                // acastep (device 3e41549 new bug 1): AC A 10 A -> mA, the first blocks carry the step
+                // acastep (device 40728b8 new bug 1): AC A 10 A -> mA, the first blocks carry the step
                 var m = NewChip(true);
                 m.Chip.SetInput("open;acastep:200000;acastepms:700");
                 m.Configure(Sent(F4R1, 4), 4);
@@ -378,7 +378,7 @@ namespace Hy3131Tests
                 Check(SqrtRms(b) < 1000, "  DC mA -> AC 60 mA: no step", SqrtRms(b).ToString("F0"));
             }
             {
-                // vjblind (device 3e41549, 24 V on V-COM): DC A's SENSE comparator sees the source
+                // vjblind (device 40728b8, 24 V on V-COM): DC A's SENSE comparator sees the source
                 // only after a temperature row; DC V 60 V / ohm / a reset make it blind again
                 var m = NewChip();
                 m.Chip.SetInput("vsrc:24;vjblind:1");
@@ -511,7 +511,7 @@ namespace Hy3131Tests
             }
             {
                 // method C row, 6 V: the LPF's creep after an input step inside the session (lpfcreep, device
-                // 2fbc5e7 tc6: 5..12 codes still to go 3.6 s after 5 -> 3 V; three cascaded lags of 2.5 s since 10.14), none
+                // 80d5b01 tc6: 5..12 codes still to go 3.6 s after 5 -> 3 V; three cascaded lags of 2.5 s since 10.14), none
                 // without the option
                 foreach(var (opt, want) in new[] { ("lpfn:0;", 2.4e-4 * 41580 * ((1 + 1.44 + 1.44 * 1.44 / 2) * Math.Exp(-1.44) - (1 + 6.4 + 6.4 * 6.4 / 2) * Math.Exp(-6.4))), ("lpfn:0;lpfcreep:0;", 0.0) })
                 {
@@ -1073,7 +1073,7 @@ namespace Hy3131Tests
             Check(r[2] == 0xFC && (r[0] | r[1]) != 0, "CTA counts SYSCLK while ENCTR = 1 and ignores writes", BitConverter.ToString(r));
             m.Write(0x20, 0x50);
             r = m.Read(0x18, 6);
-            // CtRetain (ecf7cbd, datasheet 14): CTA<23:8> keeps the count the gate reached,
+            // CtRetain (af0cf31, datasheet 14): CTA<23:8> keeps the count the gate reached,
             // not the written preset (00-FC), so CTA<15:8> is the counted byte here.
             Check(r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0 && r[4] != 0 && r[5] == 0xFC, "ENCTR = 0 clears CTB and CTA<7:0>, CTA<23:8> keeps the count reached", BitConverter.ToString(r));
             // ENPKH preset
@@ -1278,7 +1278,7 @@ namespace Hy3131Tests
             m.Configure(F5R0, 5); // AC mA r0: OP1+ = PB1 (0.5 ohm) x10, AD2 = OP1O - PB3, DC-coupled
             m.Advance(0.05);
             // opendm40 set_ad2_stream(0x23): AD3 off, RMS / LPF off, R26 = ENAD2 | ENCHOPAD2 | OSR 256 = 9600/s
-            // (the chopper does not halve the rate: device check of f48db7d)
+            // (the chopper does not halve the rate: device check of f80524f)
             m.Write(0x34, 0); m.Write(0x29, 0); m.Write(0x26, 0xA3); m.Write(0x1E, 0);
             Near(m.Chip.Core.Ad2Period * 1e6, 104.167, 0.01, "R26 0xA3: 104.167 us (9600/s)");
             var c0 = m.Chip.Core.Ad2Conversions;
@@ -1572,11 +1572,11 @@ namespace Hy3131Tests
             }
         }
 
-        /// Device 8e04b1c knobs: acarrive (the AC V node's AC after the entry), mvhold (the open mV
+        /// Device 185c066 knobs: acarrive (the AC V node's AC after the entry), mvhold (the open mV
         /// input after a source), acaoff (the AC A rows' AD2 offset).
         private static void Knobs489()
         {
-            Console.WriteLine("8e04b1c knobs");
+            Console.WriteLine("185c066 knobs");
             {
                 // acarrive: DC V -> AC V; against the same run without it, the RMS blocks before the
                 // arrival read nothing, the one over it a part, the later ones the same

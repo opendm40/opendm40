@@ -167,7 +167,7 @@ SC = {
         (64, 'open;acv:0.95@50,dc=1', shows('AUTO,DC', 1.0), 're-enter, near tie AC 0.95 + DC 1: DC (larger)'),
     ], {15: 'VOLT:COUP DC', 16: 'VOLT:COUP AUTO', 29: 'VOLT:COUP DC', 30: 'VOLT:COUP AUTO', 41: 'VOLT:COUP DC', 42: 'VOLT:COUP AUTO',
         53: 'VOLT:COUP DC', 54: 'VOLT:COUP AUTO', 65: 'VOLT:COUP DC', 66: 'VOLT:COUP AUTO'}),
-    # The device check of e8cc4e9 (method C by hand): AUTO on the calibrator's 40 Hz square
+    # The device check of 20a91d0 (method C by hand): AUTO on the calibrator's 40 Hz square
     # (0..9.55 V, AC = DC: a tie, either part), then 5 V DC: C stayed on the AC part
     # (~4.056 V) and hunted 6 <-> 60 V; A showed DC 4.998 V. 5.5 V the same; 4.5 V was fine.
     'sq5': (['VOLT:COUP AUTO'], 'VOLT:COUP?', 54, [
@@ -176,7 +176,7 @@ SC = {
         (30, 'open;dcv:5.5', shows('AUTO,DC', 5.5, 0.002), '5.5 V DC: DC'),
         (42, 'open;dcv:4.5', shows('AUTO,DC', 4.5, 0.002), '4.5 V DC: DC'),
     ], {}),
-    # The device check of 2cc47ef (par.py): AUTO entered on the 40 Hz square (AC 4.760 ~= DC
+    # The device check of ac1e852 (par.py): AUTO entered on the 40 Hz square (AC 4.760 ~= DC
     # 4.764 V: a tie) went to DC with C and, after ~3.5 s, to AC with A (A's first AC part
     # overshot, 4.91 V, and the first evaluation decided). dmm.rs AUTO_TIE: a tie shows DC until
     # the AC part has settled on one side, then the larger part (DC when it does not settle).

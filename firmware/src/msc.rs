@@ -177,7 +177,7 @@ const SENSE_WRITE_ERROR: Sense = Sense(0x03, 0x0C, 0x00);
 /// inhibited; READs of `BlockDevice::read_busy` blocks). ASCQ 01, not 00
 /// ("cause not reportable"): Linux (scsi_io_completion_action) delays and
 /// retries 04/01 but fails 04/00 at once, i.e. a host write during a
-/// screenshot would get EIO (review 530c2e1 M1).
+/// screenshot would get EIO (review 60605d2 M1).
 const SENSE_BECOMING_READY: Sense = Sense(0x02, 0x04, 0x01);
 /// UNIT ATTENTION, NOT READY TO READY CHANGE, MEDIUM MAY HAVE CHANGED: the
 /// firmware itself wrote the disk (screenshot.rs), the host must re-read it.
@@ -198,7 +198,7 @@ pub const MAX_LUNS: usize = 2;
 /// Cleared by an Allow, a bus reset (`Msc::reset`) and an unconfigure
 /// (`set_usb_state`: Default / Addressed), NOT by a USB suspend: Linux
 /// runtime autosuspend of an idle mounted disk keeps the mount (and sends no
-/// PREVENT again on resume), review 4ab408d M2. VBUS sensing is off (usb.rs),
+/// PREVENT again on resume), review 6595d46 M2. VBUS sensing is off (usb.rs),
 /// so an unplug without eject also looks like a suspend: the lock then stays
 /// set until the replug's bus reset or a reboot, the safe side. What it
 /// gates: the writable SPI disk's UNIT ATTENTION (held back), the generated
@@ -442,7 +442,7 @@ fn handle<B: UsbBus>(
     // (SPC: they do not report it). The generated volume's goes out at once,
     // also while locked; the writable SPI disk's (screenshot.rs sets
     // MEDIUM_CHANGED) is held back while a host has it locked (mounted Linux
-    // vfat: its writes from a stale FAT would be worse, review 530c2e1 M2)
+    // vfat: its writes from a stale FAT would be worse, review 60605d2 M2)
     // and goes out after the Allow (umount).
     if first {
         // After a host load (one UNIT ATTENTION, whatever else is pending).
