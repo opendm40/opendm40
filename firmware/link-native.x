@@ -277,6 +277,8 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*8opendm403app*3App14with_temp_page*);
         *(.text.*8opendm403app*3App11sp_save_csv*);
+        /* Once per scope drag, at its axis decision (scope_ui::drag_target). */
+        *(.text.*8opendm408scope_ui11drag_target*);
         /* Region B audit #3 (2026-10-22, 11.9 KB free on c58ae48):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
          * callers. App::wave_open runs at event rate. (App::tap with

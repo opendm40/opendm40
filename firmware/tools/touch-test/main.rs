@@ -1008,7 +1008,7 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("marker glyph zones are not line zones", su::graph_pick(&d, 0, 0, false, 406, 125).is_some_and(|q| !q.line()));
     // One item, one axis per gesture (owner 2026-10-25): a finger path
     // through drag_axis / drag_delta as scope_page.rs sp_move applies it.
-    let run = |own: Option<bool>, path: &[(i32, i32)]| -> (i32, i32) {
+    let run = |path: &[(i32, i32)]| -> (i32, i32) {
         let (mut ax, mut sx, mut sy) = (None, 0, 0);
         let mut last = (0, 0);
         for &(x, y) in path {
@@ -1018,7 +1018,7 @@ fn tap_step_tests(ck: &mut Ck) {
                     continue; // undecided: nothing applied, the delta kept
                 }
             }
-            let (dx, dy) = su::drag_delta(ax.unwrap(), own, x - last.0, y - last.1);
+            let (dx, dy) = su::drag_delta(ax.unwrap(), x - last.0, y - last.1);
             sx += dx;
             sy += dy;
             last = (x, y);
@@ -1028,14 +1028,33 @@ fn tap_step_tests(ck: &mut Ck) {
     // A sideways pan with vertical wobble (every 3rd report mostly
     // vertical: the stock split moved the selected level item with them).
     let pan: Vec<(i32, i32)> = (1..=30).map(|i| (4 * i, [0, 6, 2][i as usize % 3])).collect();
-    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(None, &pan) == (120, 0));
+    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(&pan) == (120, 0));
     let vert: Vec<(i32, i32)> = (1..=20).map(|i| ([0, 4, 2][i as usize % 3], 3 * i)).collect();
-    ck.t("vertical drag with sideways jitter: vertical only", run(None, &vert) == (0, 60));
-    ck.t("trigger-level marker (level, vertical): a sideways first motion moves nothing", run(Some(false), &pan) == (0, 0));
-    ck.t("trigger-level marker dragged vertically with jitter: vertical only", run(Some(false), &vert) == (0, 60));
-    ck.t("T position marker (time): vertical first motion moves nothing", run(Some(true), &vert) == (0, 0));
+    ck.t("vertical drag with sideways jitter: vertical only", run(&vert) == (0, 60));
     let diag: Vec<(i32, i32)> = (1..=20).map(|i| (3 * i, 2 * i)).collect();
-    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(None, &diag); r.1 == 0 && r.0 == 60 });
+    // The item (owner 2026-10-25: never the selection): the nearest
+    // marker of the decided axis to the press point (drag_target).
+    let dt = |m: &su::Model, h: bool, x: i16, y: i16| su::drag_target(m, h, x, y);
+    // Default: CH1 marker centre y 160 (row 140), trigger level y 125
+    // (row 105, right edge), T column 200 (x 214).
+    let mut m = d;
+    m.sel_v = 0; // CH1 selected: ignored
+    ck.t("drag target V: nearest level row, not the selection (y 130 -> trigger level, y 150 -> CH1)", dt(&m, false, 200, 130) == Some((true, 1)) && dt(&m, false, 30, 150) == Some((true, 0)));
+    ck.t("drag target V: no distance limit (y 290 -> CH1, the nearer)", dt(&m, false, 200, 290) == Some((true, 0)));
+    m.trig_row = 140;
+    ck.t("drag target V: a tie goes to the one drawn later (trigger level over CH1)", dt(&m, false, 200, 160) == Some((true, 1)));
+    let mut m = d;
+    m.ycur = Some([60, 250]);
+    ck.t("drag target V: the Y cursors when shown (y 82 -> Y1)", dt(&m, false, 200, 82) == Some((true, 3)));
+    let mut m = d;
+    m.trig_row = 300; // off screen: the edge marker at the bottom
+    ck.t("drag target V: an off-screen level by its edge marker", dt(&m, false, 200, 292) == Some((true, 1)));
+    let mut m = d;
+    m.sel_h = 2;
+    m.xcur = Some([100, 300]);
+    ck.t("drag target H: nearest column (x 120 -> X1, x 250 -> T, x 330 -> X2), not the selection", dt(&m, true, 120, 200) == Some((false, 2)) && dt(&m, true, 250, 200) == Some((false, 0)) && dt(&m, true, 330, 200) == Some((false, 3)));
+    ck.t("drag target H: T alone, anywhere", dt(&d, true, 30, 280) == Some((false, 0)));
+    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(&diag); r.1 == 0 && r.0 == 60 });
     ck.t("drag_axis: undecided below the slop, 3:2 lead past 7 px", su::drag_axis(7, 0).is_none() && su::drag_axis(8, 5) == Some(true) && su::drag_axis(5, 8) == Some(false) && su::drag_axis(20, 20).is_none() && su::drag_axis(31, 30) == Some(true));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);

@@ -158,6 +158,18 @@ try:
     check(h3 != h2, 'a sideways drag off the markers still moves the trigger position (%d -> %d)' % (h2, h3))
     check(p3 == p2 and r3 == r2, 'a sideways drag off the markers keeps the levels')
 
+    # A vertical drag mid-plot, 3 px off the trigger row, with CH1 selected
+    # (the last drag above was CH1's... and two pans): the nearest level
+    # marker moves, the trigger level, not the selection (owner 2026-10-25).
+    h4, r4, p4 = pos()
+    y = top + r4 + 3
+    if abs(y - (top + 140 + p4)) > 20:
+        q('DBG:DRAG 200,%d,200,%d,300,0,0' % (y, y + 30))
+        wait_ms(300)
+        h5, r5, p5 = pos()
+        print('  vertical drag near the trigger row mid-plot: hpos %d, trig_row %d, pos %d' % (h5, r5, p5), flush=True)
+        check(r5 != r4 and p5 == p4 and h5 == h4, 'a vertical drag mid-plot moves the nearest level (the trigger level), not CH1 (%d -> %d)' % (r4, r5))
+
     # The trigger level keeps its volts across V/div changes (owner
     # 2026-10-25): TRIG:LEV 0.8, CH1:SCAL 0.5 / 2 / 0.05 (off screen) / 1;
     # TRIG:LEV? stays, the marker row (DBG:GEST? |POS) moves.
