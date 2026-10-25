@@ -371,6 +371,10 @@ impl Bt {
         if on {
             self.on_at = now;
             self.start.start(now);
+            // As after AT+RESET (init_module): the start text is StartText's,
+            // and a host may link before an AT answer's quiet window ends
+            // (cmd 07: the restart pulse 20 ms after a 300 ms answer wait).
+            self.quiet_until = 0;
         }
     }
 
@@ -684,8 +688,13 @@ impl Bt {
             self.at_answer(clk, 100, &mut _b);
             self.at(b"AT+RESET\r\n");
             // The module restarts: its start text again (no "OK" first).
+            // StartText takes everything up to that text's end, so the
+            // AT+SLED0 answer's quiet window (AT_QUIET_MS) ends here: a host
+            // links 0.32 s after a start (device), inside that window, and
+            // its first line was dropped (emu btwaketest).
             let now = self.ms();
             self.start.start(now);
+            self.quiet_until = 0;
         }
     }
 
