@@ -1027,7 +1027,10 @@ results are not the input (device d8e249d: a false A-PROT on the first
 window). Without an A-jack current AD2 is never on: the stock DC V
 calibration conditions stay untouched.
 
-**Only DC V and DC mV.** In ohm and temperature the probe reads the V input
+**Only DC V and DC mV.** In DC mV a trip also needs a DC mV result
+within the range since the hit run began (4.13, the 66 kHz signal): with
+a voltage on V-COM that reads OL there, the probe is not trusted.
+In ohm and temperature the probe reads the V input
 (~0.34 A per volt on V-COM with the A jack open: 5 V read 1.7 A; device
 22c85ba), so those keep the comparator's A-JACK with its V gate (4.6).
 
@@ -1365,6 +1368,52 @@ A-JACK with a current in A afterwards); switchtest `dc5-pickup`,
 with the square, loud with a current). Passing on both (regression checks):
 switchtest `real-ajack-pickup`, loudtest `ajack-acv-auto` (AUTO mV-first:
 the clip step of 2f56ff9's fix already leaves mV in the model).
+
+**A signal above the AC bandwidth on V-COM (2026-10-26).** With a 66 kHz
+signal from a generator on V-COM (amplitude unknown) and the A jack empty,
+the device raised A-JACK / A-PROT on the mV ranges and the loud alarm:
+
+| function | reading | `SYST:ALER?` | `DBG:SENT?` kind |
+|---|---|---|---|
+| AC V 6 V | 1.162 mV | DC | AD1PK_PB1 |
+| AC mV 600 mV | 26.57 mV | AJACK | AD1PK_PB1 |
+| DC mV 600 mV | OL | APROT | CMP_PB1 |
+| AC mV 60 mV | 2.16 mV | APROT (the latch from DC mV) | AD1PK_PB1 |
+
+The AC bandwidth is about 20 kHz ([hw/README.md](../../hw/README.md#dmm-front-end-hy3131)),
+so the RMS block shows little of such a signal and AC mV's `V_GATE`
+(|LPF| + 1.414 x RMS) said "free"; plain DC mV had no V gate, and the
+A-PROT probe on PB2 read the pickup as more than 300 mA. How the signal
+reaches PB1 / PB2 and the DC level that makes DC mV read OL are
+*inferred* (pickup, a rectified HF level). A-PROT in AC mV 60 mV was the
+latch from DC mV: AC mV has no probe, so the latch holds there
+(4.8). Now:
+
+* **Plain AC mV**: the row's frequency counter (the secondary readout,
+  every 350 ms) above `V_HF_KHZ` (10 kHz, half the -3 dB point) = driven.
+  A "free" result counts only when the counter's last gate began after the
+  hit run (+ the 250 ms lag) and no counter result yet in the row gives no
+  verdict. Cost: a real current in A asserts up to ~0.7 s later in AC mV
+  (emulator: 0.7 s after the onset). That the counter sees such a signal
+  in the AC mV row is *inferred* (the comparator's bandwidth is 6 MHz).
+* **Plain DC mV**: its own result over the range (the readout's OL) =
+  driven (`V_GATE`, lag `DCMV_VGATE_LAG_MS` 250 ms). A-JACK needs a result
+  within the range since the hit run began, and so does the A-PROT trip
+  (`Sentinel::v_free`). Cost: A-PROT in DC mV comes after the next DC mV
+  result (emulator: 24 V across A-COM 137 -> 444 ms, 12 V 443 -> 444 ms).
+* **AC V, DC?** (4.7): no hint while the counter reads above `V_HF_KHZ`:
+  the AC reading then misses the AC part, so "AC reading < 10 % of the DC"
+  says nothing. Whether the V tap's DC was real (a generator offset) or a
+  rectified level is not known.
+
+Gaps: a signal above `V_HF_KHZ` on V-COM together with a current in A
+shows nothing in AC mV; in DC mV an open input that reads OL (a charge
+left after a source, 185c066) hides A-JACK / A-PROT until it reads within
+the range. Emulator: the model's `hfbw` / `hfdc` / `hfpb1` / `hfpb2`
+(*inferred* ratios that replay the device's alerts; [README](../../emu/hy3131/README.md)),
+senttest `acmv-hf600`, `acmv-hf60`, `dcmv-hf600`, `acv-hf`: FAIL on
+8a0f59d1 (A-JACK, A-PROT, DC?), pass now; their last phase (a current in
+A) still asserts A-JACK. `aprot-dcmv-12` / `-24` time the DC mV trip.
 
 #### Device check list (jack check)
 

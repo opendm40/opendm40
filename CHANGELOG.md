@@ -7,6 +7,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
+  generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
+  and DC mV with the A jack empty, nor the "DC?" hint in AC V. A-PROT in DC
+  mV now comes after the next DC mV reading (~0.45 s).
+
 ## v0.2.0 (2026-10-25)
 
 ### New

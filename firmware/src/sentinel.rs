@@ -487,6 +487,20 @@ pub const MV_DRV_K: f32 = 1.5;
 /// a peak hold sees the onset first).
 pub const MV_VGATE_LAG_MS: u16 = 250;
 
+/// Plain AC mV / AC V (V_HF): the row's frequency counter (the secondary
+/// readout, every 350 ms) above this (kHz) = V-COM carries a signal the
+/// RMS / LPF blocks cannot see (the AC bandwidth is about 20 kHz, -3 dB,
+/// hw/README.md "DMM front end"; half of it here). Device (66 kHz from a generator on
+/// V-COM, A jack empty): AC V 6 V read 1.16 mV with a DC? hint, AC mV
+/// 600 mV 26.6 mV with A-JACK (AD1 peak on PB1), DC mV 600 mV OL with
+/// A-JACK / A-PROT. Such a signal is "driven" for V_GATE (no A-JACK) and
+/// no DC? (the AC reading does not show the AC part). That the counter
+/// sees such a signal in these rows is INFERRED (the comparator: 6 MHz).
+pub const V_HF_KHZ: f32 = 10.0;
+/// DC mV: a V-side result counts for V_GATE only from this long after the
+/// hit run began (a conversion started before the onset is not the input).
+pub const DCMV_VGATE_LAG_MS: u16 = 250;
+
 /// Temperature: |the thermocouple input| above this (mV) = a source on
 /// V-COM, not a thermocouple (type E: 76.4 mV at 1000 C; K 54.9 mV at
 /// 1372 C; the readout is OL above 1000 C K = 41.3 mV anyway).
@@ -1320,9 +1334,25 @@ impl Sentinel {
     /// Ohm / temperature: a result of the row's own V input, `driven` =
     /// it shows a source on V-COM (V_GATE).
     pub fn v_side(&mut self, now: u64, driven: bool) {
-        self.vside_t = Some(now);
+        self.v_side_at(now, now, driven);
+    }
+
+    /// `v_side` for evidence taken at `t` (<= now): AC mV's "free" needs the
+    /// frequency counter too, whose last result may be older (V_HF_KHZ).
+    #[inline(never)]
+    pub fn v_side_at(&mut self, now: u64, t: u64, driven: bool) {
+        self.vside_t = Some(t.min(now));
         self.vdrv = driven;
         self.decide(now);
+    }
+
+    /// V_GATE: the row's V side said "free" since the hit run began (+
+    /// `vlag`), or the row has no gate. A-JACK's assertion and (DC mV) the
+    /// A-PROT trip need it.
+    #[inline(always)]
+    pub fn v_free(&self) -> bool {
+        let t0 = self.run_t0 + self.vlag as u64;
+        !self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= t0))
     }
 
     /// Jack check (JCHK): a verdict is due (the hit run has none yet, or
@@ -1396,9 +1426,8 @@ impl Sentinel {
                 } else {
                     // V_GATE: a V-side result since the run began (+ vlag) said
                     // V-COM is free; JCHK: so did the jack check
-                    let t0 = self.run_t0 + self.vlag as u64;
                     self.streak >= AJACK_WINDOWS
-                        && (!self.vgate || (!self.vdrv && self.vside_t.is_some_and(|t| t >= t0)))
+                        && self.v_free()
                         && (!self.jchk
                             || (!self.jack_drv && !self.v_both(now) && self.jack_t != 0 && self.jack_t >= self.run_t0))
                 }
@@ -2516,6 +2545,35 @@ mod tests {
         s.sample_peak(1300, 0, 20_000);
         s.v_side(1300, false);
         assert_eq!(s.alert, Alert::AJack);
+    }
+
+    #[test]
+    fn hf_vside_counter_time_and_v_free() {
+        // AC mV with a 66 kHz signal (V_HF_KHZ): a "free" verdict dated by the counter's last
+        // result before the run began does not count; a driven one blocks A-JACK and v_free.
+        let mut s = Sentinel::new();
+        s.configured(Kind::PeakA, 0, true);
+        s.vgate = true;
+        s.vlag = MV_VGATE_LAG_MS;
+        for t in (1000..1600).step_by(100) {
+            s.sample_peak(t, 0, 20_000);
+            s.v_side_at(t, 900, false);
+        }
+        assert_eq!(s.alert, Alert::None);
+        assert!(!s.v_free());
+        s.v_side(1600, true);
+        s.sample_peak(1600, 0, 20_000);
+        assert!(!s.v_free());
+        assert_eq!(s.alert, Alert::None);
+        // a counter result after the run's start + lag says free: A-JACK (a current in A)
+        s.sample_peak(1700, 0, 20_000);
+        s.v_side_at(1700, 1350, false);
+        assert!(s.v_free());
+        assert_eq!(s.alert, Alert::AJack);
+        // no gate (DC V): v_free always
+        let mut d = Sentinel::new();
+        d.configured(Kind::CmpA, 0, true);
+        assert!(d.v_free());
     }
 
     #[test]

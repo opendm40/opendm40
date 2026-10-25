@@ -45,6 +45,8 @@ import emusync  # noqa: E402
 # them there with the boot of emusync.BOOT_S (3.56 s, fresh disk); if the boot changes,
 # only the phase lengths move (the markers keep the windows on the inputs).
 VLAG = emusync.BOOT_S - 0.5
+# The 66 kHz model knobs (the hf scenarios below; INFERRED ratios).
+HF = 'hfbw:6000;hfdc:0.3;hfpb1:10;hfpb2:1'
 SC = {
     'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'dcv-neg':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'AJACK'})]),
@@ -95,6 +97,27 @@ SC = {
     'acmv-dc5': ('VOLT:AC 0.6', 30, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
                                      (10, 'vsrc:5', {'NONE'}),
                                      (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [], {'never': [('AJACK', 1, 2)]}),
+    # A 66 kHz signal on V-COM (device 2026-10-26, A jack empty: AC mV 600 mV AJACK,AD1PK_PB1 at
+    # 26.6 mV, DC mV 600 mV OL with CMP_PB1 A-JACK / A-PROT, AC V 6 V a DC? hint at 1.16 mV). The
+    # model's HF knobs (INFERRED): the RMS blocks roll off above 6 kHz (`hfbw`), the DC mV node and
+    # the AC V tap carry 0.3 x the rms as DC (`hfdc`: DC mV OL), PB1 10 mV / V and PB2 1 mV / V of
+    # the jack (`hfpb1` / `hfpb2`). AC mV: the counter's 66 kHz says driven (sentinel V_HF_KHZ); DC mV:
+    # its OL result (V_GATE), also for A-PROT; AC V: no DC?. The last phase: a current in A with
+    # V-COM open (DC mV) or a small 50 Hz on it (AC mV) still asserts A-JACK.
+    'acmv-hf600': ('VOLT:AC 0.6', 30, [(0, 'open;%s;vsrc:0,ac=0.003,f=50' % HF, {'NONE'}),
+                                       (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
+                                       (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                   {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'acmv-hf60': ('VOLT:AC 0.06', 30, [(0, 'open;%s;vsrc:0,ac=0.003,f=50' % HF, {'NONE'}),
+                                       (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
+                                       (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                  {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'dcmv-hf600': ('VOLT:DC 0.6', 30, [(0, 'open;%s;vsrc:0.1' % HF, {'NONE'}),
+                                       (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
+                                       (20, 'vsrc:none;isrc:0.002', {'AJACK'})], [],
+                   {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'acv-hf':     ('VOLT:AC 6', 24, [(0, 'open;%s;vsrc:0,ac=1,f=50' % HF, {'NONE'}),
+                                     (10, 'vsrc:0,ac=3,f=66000', {'NONE'})], [], {'never': [('DC', 1, 2)]}),
     # AC+DC V on manual 600 mV (doc 4.13 gap): its AC phase is the AC mV row with the same AD1
     # peak sentinel; V_GATE takes the AC phase's result there too (both phases share the run).
     'acdcmv-sq600': ('VOLT:ACDC 0.6', 34, [(0, 'open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50', {'NONE'}),
@@ -231,6 +254,10 @@ SC = {
     'aprot-dcv-12': ('VOLT:DC', 32, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'}), (16, 'open', {'APROT'}),
                                      (22, 'open', {'NONE'})], [], {'acts': {19.5: 'DBG:KEY 2'}, 'aprot_ms': (400, 560)}),
     'aprot-dcv-24': ('VOLT:DC', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 450)}),
+    # DC mV (its V_GATE since the 66 kHz fix: a trip needs a DC mV result inside the range since
+    # the hit run began): the same sources, the latency of the trip.
+    'aprot-dcmv-12': ('VOLT:DC 0.6', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:12', {'APROT'})], [], {'aprot_ms': (400, 800)}),
+    'aprot-dcmv-24': ('VOLT:DC 0.6', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 800)}),
     # Ohm / temperature carry no probe (device 22c85ba: there it follows the V input, 5 V on V-COM
     # read 1.7 A and latched A-PROT): a source across A-COM is A-JACK only.
     'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'AJACK'})]),

@@ -2060,10 +2060,19 @@ impl Dmm {
         // AC mV: its own result says how far beyond the range the input is
         // (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS). AC+DC mV: the
         // AC phase is that row and its sentinel; both phases share the run
-        // and the AC phase's verdict (doc 4.13).
+        // and the AC phase's verdict (doc 4.13). Plain DC mV: its own result
+        // over the range (the readout's OL) = driven, also for A-PROT
+        // (sentinel V_HF_KHZ: a 66 kHz signal on V-COM).
         let mv = self.mode == 2 || (self.acdc && self.mode == 3);
-        self.sent.vgate = matches!(self.mode, 10 | 15) || mv;
-        self.sent.vlag = if mv { sentinel::MV_VGATE_LAG_MS } else { 0 };
+        let dcmv = self.mode == 3 && !self.acdc;
+        self.sent.vgate = matches!(self.mode, 10 | 15) || mv || dcmv;
+        self.sent.vlag = if mv {
+            sentinel::MV_VGATE_LAG_MS
+        } else if dcmv {
+            sentinel::DCMV_VGATE_LAG_MS
+        } else {
+            0
+        };
         // The jack check (sentinel JACK CHECK): ohm, continuity, the
         // resistive temperature sensors.
         self.sent.jchk = !self.acdc && (matches!(self.mode, 10 | 11) || (self.mode == 15 && self.t_sensor != 0));
@@ -3869,6 +3878,9 @@ impl Dmm {
         if m == 3 && acdc {
             // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
             self.mv_dc_drv = mag > ov * lim;
+        } else if m == 3 {
+            // plain DC mV's V_GATE: over the range (OL) = a source on V-COM
+            self.sent.v_side(now, mag > ov * lim);
         }
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
@@ -4760,7 +4772,11 @@ impl Dmm {
             let k = K_ACV[r.max(1)];
             let vdc = (mn as f32 + mx as f32) * 0.5 * 32.0 * 1.25 / (3.6 * AD1_DIV) * k;
             let fs = (self.factor() * DEC4[r]).min(1000.0);
-            let on = vdc.abs() > sentinel::DC_HINT_V.max(0.02 * fs) && self.f_ac < sentinel::DC_HINT_AC * vdc.abs();
+            // (not with a counter frequency above the AC bandwidth: the AC
+            // reading then misses the AC part, sentinel V_HF_KHZ)
+            let on = vdc.abs() > sentinel::DC_HINT_V.max(0.02 * fs)
+                && self.f_ac < sentinel::DC_HINT_AC * vdc.abs()
+                && !(self.freq.f_khz > sentinel::V_HF_KHZ);
             self.sent.dc_hint(now, on);
         }
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
@@ -4853,9 +4869,12 @@ impl Dmm {
             // Only while the comparator still sees the current: a real one
             // through the 47.5 ohm chain is far above its window (5 mA =
             // 0.24 V at PB1), so a probe reading without hits is not one.
+            // DC mV: not while its own V side says driven or has not said
+            // free since the run began (V_GATE: a 66 kHz signal on V-COM put
+            // the probe on PB2 over APROT_NOW_A with the A jack empty).
             None if run.is_some() => {
                 let hot = run.map_or(0, |t| now.saturating_sub(t));
-                if sentinel::aprot_trips(amps, hot) {
+                if sentinel::aprot_trips(amps, hot) && self.sent.v_free() {
                     relay_pe(0);
                     self.aprot = Some(AProt { ack: false, low_since: None });
                     self.sent.aprot_ms = hot.min(u32::MAX as u64) as u32;
@@ -4897,10 +4916,25 @@ impl Dmm {
     /// range (`mv_dc_drv`; device 185c066: after a source went off the open
     /// input read OL and the AC phase's results "free" while PB1 hit, a
     /// false A-JACK).
+    /// Plain AC mV: also driven while the frequency counter reads above
+    /// sentinel::V_HF_KHZ (the RMS misses such a signal: 26.6 mV of a 66 kHz
+    /// one on the device); a "free" verdict dates from the start of the
+    /// counter's last gate (none yet in this row: no verdict), so a signal
+    /// that starts within a run is judged by a gate that began after it
+    /// (emulator acmv-hf60: a gate across the onset read the 50 Hz before it).
     #[inline(never)]
     fn mv_vside(&mut self, now: u64, pk: f32) {
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
-        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv));
+        let drv = pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv);
+        if drv || self.acdc {
+            self.sent.v_side(now, drv);
+        } else if self.freq.f_khz > sentinel::V_HF_KHZ {
+            self.sent.v_side(now, true);
+        } else if !self.freq.f_khz.is_nan() {
+            // (`freq.next` = the last result + 350 ms, freq_secondary; its
+            // gate began 350 ms before that result)
+            self.sent.v_side_at(now, self.freq.next.saturating_sub(700), false);
+        }
     }
 
     /// The probe's row is the jack check's (sentinel `jack_row`): ohm and

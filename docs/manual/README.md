@@ -1165,7 +1165,8 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   alternating voltage there, or (Ω) about 3-5 V and more.
 - A current in the A jack while a voltage is also on the V/Ω jack: Ω and
   continuity show LIVE?, AC mV shows nothing (the reading is over range).
-  A-JACK shows only with the V/Ω jack free.
+  A-JACK shows only with the V/Ω jack free. The same with a signal above
+  the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
