@@ -813,6 +813,7 @@ impl App {
             }
             // (Indices clamped again: a safety net, pinch_step keeps them in
             // their tables.)
+            Some(p) if p.axis == Axis::V && self.scope.wave_on() => (self.scope.vdiv() / self.wave_step_vdiv(p.i), 1.0),
             Some(p) if p.axis == Axis::V => (scope::VDIV[c.range.min(9)] / scope::VDIV[p.i.min(9)], 1.0),
             Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
             None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
@@ -1925,17 +1926,20 @@ impl App {
         if self.sp.touch.is_some() {
             self.sp.touch = None;
         }
-        if axis == Axis::V && self.scope.wave_on() {
-            return; // the wave view's V/div is the DMM range (panel + / -)
-        }
         let st = self.scope.s;
         let h = axis == Axis::H;
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
         let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
         let mode = pinch_mode();
-        let n = su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.range, tb_min, tb_max);
         let r = s.max(1) as f32 / s0.max(1) as f32;
+        let n = if axis == Axis::V && self.scope.wave_on() {
+            // The wave view: its V/div step list (app_wave.rs), any mode.
+            let i0 = prev.filter(|p| !p.horizontal).map_or(self.wave_step_now(), |p| p.i0);
+            su::PinchState { horizontal: false, i0, i: self.wave_pinch_step(i0, r) }
+        } else {
+            su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.range, tb_min, tb_max)
+        };
         let p = Pinch { axis, i0: n.i0, i: n.i, r };
         let live_moved = mode == su::PINCH_LIVE && self.sp.pinch.map_or(true, |q| q.r != r);
         let changed = prev.map_or(true, |q| q != n) || live_moved;
@@ -1956,7 +1960,10 @@ impl App {
         self.sp.bubble = false;
         su::graph().set_hole(None);
         let mut st = self.scope.s;
-        if ok && p.i != p.i0 {
+        if ok && p.i != p.i0 && p.axis == Axis::V && self.scope.wave_on() {
+            self.wave_step_to(p.i, now);
+            self.sp_render();
+        } else if ok && p.i != p.i0 {
             if p.axis == Axis::H {
                 st.tb = p.i;
             } else {
@@ -1974,6 +1981,9 @@ impl App {
         let mut b = su::Buf::new();
         if p.axis == Axis::H {
             b.push(su::TB_LABELS[p.i.min(29)]).push("/div");
+        } else if self.scope.wave_on() {
+            su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
+            b.push("/div");
         } else {
             su::vdiv_text(&mut b, vdiv_idx(p.i, self.scope.s.probe));
             b.push("/div");
@@ -1993,7 +2003,7 @@ impl App {
     fn sp_panel(&mut self, _clk: &mut Clock, k: usize, now: u64) {
         let mut st = self.scope.s;
         if self.scope.wave_on() && k <= 2 {
-            // The wave view: V/div = the DMM range; CH1 = the coupling note.
+            // The wave view: V/div = its step list; CH1 = the coupling note.
             match k {
                 1 => self.wave_coupling_note(now),
                 _ => self.wave_range_step(k == 0, now),
@@ -2462,7 +2472,8 @@ impl App {
     /// Each record's decision is logged (DBG:GEST? after "|AUTO", `autoset_log`).
     pub(super) fn autoset_start(&mut self, now: u64) {
         if self.scope.wave_on() {
-            self.toast(now, "AUTO: MCX scope only", false);
+            self.sp_end_hold(now);
+            self.wave_autoset(now);
             return;
         }
         self.sp_end_hold(now);

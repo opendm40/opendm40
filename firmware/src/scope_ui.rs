@@ -213,7 +213,7 @@ pub struct Model {
     pub src: u8,
     /// Source DMM: the unit of the vertical values is A (current rows).
     pub amps: bool,
-    /// Source DMM: the V/div value (SI, `fmt_div`: "2V", "200uA") and the
+    /// Source DMM: the V/div value (SI, `fmt_div`: "1.5V", "200uA") and the
     /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
@@ -416,8 +416,8 @@ fn fmt_v_cut(out: &mut Buf, v: f32, unit: &str, cut: u8) {
     out.push(crate::dmm::format(&mut t, x, dec.saturating_sub(cut))).push(P[i]).push(unit);
 }
 
-/// A 1-2-5 per-division value with its prefix and unit ("2V", "200mV",
-/// "200uA", "5A"; the DMM wave view's V/div).
+/// A per-division value with its prefix and unit ("2V", "200mV", "200uA",
+/// "5A", the full-scale steps "1.5V", "2.5A"; the DMM wave view's V/div).
 pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
     const P: [&str; 5] = ["u", "m", "", "k", "M"];
     let (mut x, mut i) = (v * 1.000_01, 2usize);
@@ -429,8 +429,12 @@ pub fn fmt_div(out: &mut Buf, v: f32, unit: &str) {
         x *= 1000.0;
         i -= 1;
     }
+    // One decimal for a fractional step below 10 (the wave view's
+    // full-scale steps: "1.5V", "2.5A"); 15, 150, 250 stay whole.
+    let frac = x < 10.0 && x - (x as u32) as f32 >= 0.05;
     let mut t = [0u8; 16];
-    out.push(crate::dmm::format(&mut t, (x as u32) as f32, 0)).push(P[i]).push(unit);
+    let v = if frac { (x * 10.0) as u32 as f32 / 10.0 } else { (x as u32) as f32 };
+    out.push(crate::dmm::format(&mut t, v, frac as u8)).push(P[i]).push(unit);
 }
 
 /// "1V", "200mV": the V/div label and unit.

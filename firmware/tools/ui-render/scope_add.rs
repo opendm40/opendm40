@@ -167,8 +167,8 @@ pub fn run(ck: &mut Checker, out: &str) {
     save(out, "s03-runt-marker");
     // The DMM wave view (src/app_wave.rs): the source badge "MCX | DMM"
     // (both states), the shortened record bar beside it (running, stopped
-    // with its brackets, roll), the DMM V/div texts (widest: "500V",
-    // "200uA", "200mV", "5A"), the CH1 label ("AC uA"), the current cells
+    // with its brackets, roll), the DMM V/div texts (widest: "250V",
+    // "200uA", "200mV", "2.5A"), the CH1 label ("AC uA"), the current cells
     // ("Ip-p" / "Irms"), the trigger badge in A; updates between them and
     // to / from the stock page equal fresh draws.
     let mut nw = 0;
@@ -180,7 +180,7 @@ pub fn run(ck: &mut Checker, out: &str) {
         m.tabs = tabs;
         m.record = if status == scope_ui::ST_STOP { (0.15, 0.85) } else { (0.0, 1.0) };
         let cells: Vec<&'static str> = if src == scope_ui::SRC_DMM {
-            let (vd, amps, ch1, tv) = [(500.0f32, false, "AC V", -999.0f32), (200e-6, true, "AC uA", -1.23e-3), (0.2, false, "AC mV", 0.444), (5.0, true, "AC A", 9.99)][k % 4];
+            let (vd, amps, ch1, tv) = [(250.0f32, false, "AC V", -999.0f32), (200e-6, true, "AC uA", -1.23e-3), (0.15, false, "AC mV", 0.444), (2.5, true, "AC A", 9.99)][k % 4];
             m.wvdiv = vd;
             m.amps = amps;
             m.ch1_txt = ch1;
@@ -225,6 +225,55 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
+    // The wave view's V/div steps (scope::wave_steps): every DMM range at
+    // its full-scale step (a sine of 98 % of +-full fills the 8 divisions)
+    // and at an intermediate step of the same range (a screen-only zoom:
+    // the sine at 98 % of +-full or of +-4 div, the smaller), V and A.
+    for amps in [false, true] {
+        let st = scope::wave_steps(amps);
+        for (i, s) in st.iter().enumerate() {
+            if !s.2 {
+                continue;
+            }
+            let full = s.0 * 4.0;
+            // The intermediate step: the one below on this range, else the
+            // one above (60 mV, 600 uA: the list's first range).
+            let mid = [i.wrapping_sub(1), i + 1].into_iter().find(|&j| j < st.len() && st[j].1 == s.1);
+            for (tag, j) in [("full", Some(i)), ("step", mid)] {
+                let Some(j) = j else { continue };
+                let mut m = base.m;
+                m.src = scope_ui::SRC_DMM;
+                m.status = scope_ui::ST_TD;
+                m.tabs = 3;
+                m.wvdiv = st[j].0;
+                m.amps = amps;
+                m.ch1_txt = match (amps, full) {
+                    (false, f) if f < 1.0 => "AC mV",
+                    (false, _) => "AC V",
+                    (true, f) if f < 0.01 => "AC uA",
+                    (true, f) if f < 1.0 => "AC mA",
+                    _ => "AC A",
+                };
+                m.ac = m.ch1_txt == "AC V";
+                m.trig_row = 140;
+                m.trig_v = 0.0;
+                let amp = (0.98 * full / st[j].0).min(3.92);
+                let mut lbl = scope_ui::Buf::new();
+                scope_ui::fmt_div(&mut lbl, full, if amps { "A" } else { "V" });
+                let mut vpp = scope_ui::Buf::new();
+                scope_ui::fmt_div(&mut vpp, 2.0 * amp * st[j].0, if amps { "A" } else { "V" });
+                let pp: &'static str = Box::leak(format!("{}p-p:{}", if amps { "I" } else { "V" }, vpp.as_str()).into_boxed_str());
+                let cells = vec!["Freq:50.0Hz", pp, "Cycl:20.0ms", if amps { "Irms:-" } else { "Vrms:-" }];
+                let sc = stock::Scene { name: "wave", m, popup: scope_ui::Popup::None, trace: Some(stock::Trace::sine(amp, 5.0, 0.0)), persist: None, cols: 399, cells };
+                stock::draw(&sc);
+                let name = format!("wave/step/{}/{}", lbl.as_str(), tag);
+                ck.check_replica(&name);
+                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                nw += 1;
+                save(out, &format!("s06-wave-{}-{}", lbl.as_str(), tag));
+            }
+        }
+    }
     // The texts the wave view changes are no wider than what the stock
     // page already shows in the same box (cells: "Vp-p:" vs "Ip-p:", "mV"
     // vs "mA"; the V/div badge text box 44 px; the CH1 label in 60 px; the
@@ -232,7 +281,7 @@ pub fn run(ck: &mut Checker, out: &str) {
     let wmax = |f: stockfont::Font, ts: &[&str]| ts.iter().map(|t| stockfont::text_width(f, t, 0)).max().unwrap_or(0);
     let pairs: [(&str, stockfont::Font, &[&str], &[&str]); 4] = [
         ("cells", stockfont::SC_F12, &["Ip-p:999.9mA", "Irms:-12.3mA", "Imax:-999.9mA", "Iavg:-12.3uA", "Ivpp:999kA"], &["Vp-p:999.9mV", "Vrms:-12.3mV", "Vmax:-999.9mV", "Vavg:-12.3uV"]),
-        ("vdiv", stockfont::SC_F12, &["500V", "200uA", "200mA", "200mV", "20mV", "5A", "2mA"], &["10kV", "500mV"]),
+        ("vdiv", stockfont::SC_F12, &["250V", "200uA", "200mA", "200mV", "150mV", "150uA", "1.5mA", "15mV", "1.5V", "2.5A"], &["10kV", "500mV"]),
         ("trig", stockfont::SC_F12, &["-1.23mA", "-999uA", "-99.9A", "-12.3kV"], &["-1.23kV", "-12.3kV", "-999mV"]),
         ("ch1", stockfont::SC_F16, &["AC V", "AC mV", "AC A", "AC mA", "AC uA"], &[]),
     ];

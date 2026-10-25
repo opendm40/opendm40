@@ -5216,7 +5216,7 @@ pub struct Ad2Scale {
     pub ac: bool,
     /// Full scale of the DMM range (DM40C labels), SI: 6 V, 600 mV, 10 A, ...
     pub full: f32,
-    /// Index in the MF range list (`ui::range_items`) of this range.
+    /// `Dmm::set_range` item of this range (`ui::range_items`: 60 mV is 5).
     pub item: u8,
 }
 
@@ -5280,7 +5280,7 @@ pub fn ad2_scale_of(m: u8, r: i8) -> Option<Ad2Scale> {
         }
         3 => {
             let r = ri.min(1);
-            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], 0)
+            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], [5, 0][r])
         }
         0 => {
             let r = ri.min(3);
@@ -5288,7 +5288,7 @@ pub fn ad2_scale_of(m: u8, r: i8) -> Option<Ad2Scale> {
         }
         2 => {
             let r = ri.min(1);
-            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], 0)
+            (1.25 / MV_DIV[r] / 262.144, r, 0x84, 0x8C, 1e-3, false, [0.06, 0.6][r], [5, 0][r])
         }
         4..=6 => {
             let u = (m - 4) as usize;
