@@ -63,6 +63,11 @@ What waits for the owner; each line links to the material.
       5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
          there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
+- [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 49d7c10c (2026-10-25, host load ~5-6):
+      in whole runs `r30-300-30` failed 4 of 5 (ranges 60, 60 M, 6000, 600, 60: the first step down from 60 MΩ is
+      4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
+      failed 1 of 4. The cause is unknown (inferred: the scenario is the run's last, where its scheduled input
+      changes drift against the firmware's uptime, the file's own note on `later`).
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
@@ -1508,6 +1513,12 @@ Firmware:
       New emu/gallerytest.py (open / swipe pages / viewer = BMP bytes / Delete Cancel + Delete / back).
       Left as candidates there (more DBG-only code to B ~6.8 KB, gating the AD2 experiments 2.6 KB, one
       shared fat_get ~0.2 KB).
+- [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 49d7c10c
+      region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
+      SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
+- [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
+      before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
+      pages open.
 - [ ] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
       (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
       scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.
@@ -4017,6 +4028,8 @@ Emulator (emu/):
       (`Meter::set_hold` does not touch `ahold`). Power meter, capacitance, continuity / diode, Hz / temperature,
       scope, inrush, generator: as before. The short press acts on the release now, not at the key-down (so a
       long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
+      The test's two DBG:READout? checks were stale (4 fields, HOLD read from the last one) after the range field was
+      added: now 5 fields, HOLD from the fourth; the firmware releases HOLD on a short press (PASS).
 - [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
