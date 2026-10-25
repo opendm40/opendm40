@@ -547,7 +547,7 @@ shunt inside.
 The A function starts on a mA range in autorange. In AUTO, a current too
 large for the µA or mA ranges moves straight to the 6 A range. On a fixed µA
 or mA range, an overload moves the meter to the 10 A shunt and shows
-[**OVLD**](#the-alerts).
+[**OVLD**](#overload-the-10-a-shunt).
 
 ![DC mA in a 4-20 mA loop: 12 mA is 50 %](img/dmm-ma.png)
 
@@ -965,7 +965,7 @@ detected](#what-cannot-be-detected)).
 |---|---|---|---|
 | **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
-| **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large. The meter moves to the 10 A shunt at once. After 3 s the badge turns amber **10A**: the meter measures fine, but not on your range. | A functions and the power meter, fixed range. In autorange the meter just moves up to 6 A. |
+| **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
 | **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω and continuity a voltage on the V/Ω jack that would otherwise look like a current in the A jack (Ω: from about 3-5 V). | Ω, continuity, diode. |
 | **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V. |
@@ -979,17 +979,15 @@ How they end:
 - A-PROT stays until you choose a function, a range or press AUTO, and the
   current is below 50 mA for 1 s. Choosing a current function ends it at
   once.
-- OVLD / 10A: the meter returns to your range when the current stays below
-  85 % of it for 5 s. If it trips again within 30 s, it stays on 10 A until
-  you choose a range or function.
+- OVLD / 10A: see [Overload](#overload-the-10-a-shunt).
 
 Sounds: A-JACK and A-PROT sound the [danger alarm](#the-danger-alarm).
 LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 
 
-| ![LIVE? in Ω: a voltage on the circuit](img/alert-live.png) | ![OVLD: the meter moved to the 10 A shunt](img/alert-ovld.png) |
-|---|---|
-| LIVE? in Ω: a voltage on the circuit | OVLD: the meter moved to the 10 A shunt |
+![LIVE? in Ω: a voltage on the circuit](img/alert-live.png)
+
+*LIVE? in Ω: a voltage on the circuit.*
 
 | ![A-PROT: the 10 A shunt protects the small one](img/alert-aprot.png) | ![V-JACK?: a voltage, no current](img/alert-vjack.png) |
 |---|---|
@@ -1007,6 +1005,75 @@ LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 **ON** (all of the above, default), **A-JACK only** (A-JACK and A-PROT),
 **OFF** (none of them, and no A-PROT protection). OVLD and the 10 A alarm
 are always on.
+
+### Overload: the 10 A shunt
+
+All current ranges use the **A** jack. Behind it are one 10 A ceramic fuse
+and three shunts in a row: 47 Ω, 0.5 Ω and 10 mΩ. Two MOSFETs choose the
+shunt: on the µA ranges both are off (47.5 Ω); on the mA ranges one shorts
+the 47 Ω (0.5 Ω); on the A ranges the other shorts both (10 mΩ). The order
+of the parts and which MOSFET shorts what are *inferred* from the shunt
+values and the parts list.
+
+![The current path behind the A jack](img/shunt-chain.png)
+
+*The current path behind the A jack (the arrangement is inferred).*
+
+**Why.** The fuse opens only around 10 A, and the 0.5 Ω and 47.5 Ω shunts
+have no fuse of their own. Their heat grows with the square of the current:
+0.3 A in the 47.5 Ω is 4.3 W, 2 A in the 0.5 Ω is 2 W. The ratings of these
+resistors are unknown; about 1 W for the 47 Ω is *inferred*.
+
+**When it trips.**
+
+- On a fixed (manual) µA or mA range: in DC A, AC A, AC+DC A and AUTO
+  coupling, and on a fixed current range of the power meter.
+- When a reading is above 1.03 × the range (the reading is OL).
+- At the first reading over the range: about 0.35 s after the overload in
+  DC, about 0.75 s in AC (from the conversion and settling times; untested on
+  the meter).
+
+In autorange the same over-range is a normal range step: from the top µA or
+mA range straight to the 6 A range, with no alert, beep or latch; above
+6.18 A it steps on to 10 A.
+
+**What the meter does.**
+
+- It switches the A jack to the 10 mΩ shunt and the 10 A range at once, and
+  keeps measuring there.
+- One beep of 300 ms at the key/alert volume, the message **Overload: 10 A
+  shunt selected** and the red badge **OVLD**. After 3 s the badge turns
+  amber **10A**: the reading is right, but on the 10 A range, not yours.
+- The µA and mA shunts stay out of use while the overload holds.
+- Above 10 A for 1 s the [danger alarm](#the-danger-alarm) sounds as well.
+
+![OVLD: the meter moved to the 10 A shunt](img/alert-ovld.png)
+
+*OVLD: the meter moved to the 10 A shunt.*
+
+**How it ends.**
+
+- You choose a range or a function, or press **AUTO**: it ends at once.
+- Or the current stays below 85 % of the range you had chosen (at least
+  2 mA) for 5 s: the meter goes back to that range by itself. An OL reading
+  restarts the 5 s.
+- If it trips again within 30 s of going back, it stays on 10 A until you
+  choose a range or a function.
+
+**Stock firmware.** The stock firmware has no such protection: on a fixed
+µA or mA range it shows OL, and the current keeps flowing through the small
+shunt (*inferred*: nothing in it switches the shunt on an overload).
+
+**A-PROT** makes the same switch in the voltage functions, where leads left
+in A and COM put the 47.5 Ω shunt across the source:
+
+| | OVLD | A-PROT |
+|---|---|---|
+| Functions | A functions and the power meter, a fixed µA or mA range | DC V, DC mV |
+| Trips at | a reading above 1.03 × the range | 300 mA at once, or 125 mA for 0.4 s, through the A jack |
+| Sound | one 300 ms beep | the [danger alarm](#the-danger-alarm) |
+| Ends | 5 s back in range, or your choice of range, function or AUTO | your choice of range, function or AUTO, and less than 50 mA for 1 s |
+| Can be switched off | no | **Jack alerts OFF** turns it off |
 
 ### The danger alarm
 
