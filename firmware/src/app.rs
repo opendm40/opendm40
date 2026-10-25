@@ -3168,7 +3168,9 @@ impl App {
             2 => {
                 self.meter.rel_off();
                 self.meter.set_hold(false);
+                let was = self.dmm.is_auto();
                 self.dmm.auto_key(clk);
+                self.auto_entered(was);
                 self.dmm_view.invalidate();
             }
             _ => match self.view {
@@ -3372,7 +3374,9 @@ impl App {
                 match ui::range_hit(b, x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
+                        let was = self.dmm.is_auto();
                         self.dmm.set_range(clk, item);
+                        self.auto_entered(was);
                         self.meter.rel_off();
                         self.redraw = true;
                     }
@@ -3750,6 +3754,20 @@ impl App {
         }
     }
 
+    /// The range went from manual to AUTO (`was_auto` false; the AUTO key,
+    /// the range page's AUTO / AUTO+ item, SCPI `<f>:RANG:AUTO ON` /
+    /// `CONF:<f>`): the manual range's reading is no AUTO reading, so the
+    /// placeholder (AUTO, dimmed dashes) until AUTO's first one, as after a
+    /// function change. Before, the last manual reading stayed with MANU in
+    /// the status bar (the label is the reading's) until AUTO's first
+    /// reading: through a whole ohm autorange hunt on the device (c5ac0c5
+    /// note 2: 0.1043 Mohm for 8 s).
+    fn auto_entered(&mut self, was_auto: bool) {
+        if !was_auto && self.dmm.is_auto() && !self.dmm.pw.on {
+            self.prov = self.dmm.placeholder();
+        }
+    }
+
     fn func_changed(&mut self) {
         self.meter.reset();
         // The new function's frame at once (switch-latency.md proposal 1):
@@ -3938,6 +3956,7 @@ impl App {
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
             Rng::Auto => {
                 self.dmm.auto_key(clk);
+                self.auto_entered(false);
                 self.meter.rel_off();
             }
             Rng::Hold => self.dmm.hold_range(true),
@@ -4380,6 +4399,14 @@ impl App {
                 }
                 out.put_bytes(b",");
                 crate::put_u32(out, self.meter.hold_state() as u32);
+                // The status bar's range label as drawn (ui.rs: the shown
+                // reading's flags).
+                out.put_bytes(match self.shown_reading() {
+                    Some(r) if !r.auto => b",MANU",
+                    Some(r) if r.auto_plus => b",AUTO+",
+                    Some(_) => b",AUTO",
+                    None => b",",
+                });
                 true
             }
             C::DbgView => {
