@@ -877,6 +877,60 @@ fn page_regions_pw() -> Vec<(&'static str, Bx)> {
     vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))]
 }
 
+/// The touch test page (src/ui_touchtest.rs) in state `k`: 0 just opened,
+/// 1 after taps on every target with a scale error (the reported point
+/// moves right / down with x / y, up to +11 / +18 px, as measured on a
+/// panel with tools/touch-tap-check.py) and a short drag, 2 the touch keys
+/// (MENU and AUTO held) and a hold under way. `long`: the widest texts.
+pub fn touchtest_scene(k: u8, long: bool) {
+    use touch::Point;
+    use ui::touchtest as tt;
+    tt::page();
+    let mut lines = ["Raw: touch a target", "Tap -", "", "Frames 0  max 0 pts", "Stale 0  Bad 0"];
+    if long {
+        lines = ["Raw 479,319  5 pts", "Tap 479,319", "Off -239,-159 to 240,160", "Frames 9999999  max 5 pts", "Stale 9999999  Bad 9999999"];
+    } else if k > 0 {
+        lines = ["Raw 470,317  1 pt", "Tap 470,317", "Off +11,+18 to 459,299", "Frames 1342  max 2 pts", "Stale 61  Bad 0"];
+    }
+    for (i, t) in lines.iter().enumerate() {
+        tt::line(i, t);
+    }
+    if k >= 1 {
+        let off = |x: u16, y: u16| Point { x: x + (11 * (x as u32 - 20) / 439) as u16, y: y + (18 * (y as u32 - 20) / 279) as u16 };
+        for (i, &(x, y)) in tt::TARGETS.iter().enumerate() {
+            let p = off(x, y);
+            for j in 0..6u16 {
+                // A finger landing: the first frames a few px off.
+                let q = Point { x: p.x + (j * 7 + i as u16) % 4, y: p.y + (j * 5 + i as u16) % 3 };
+                tt::dot(Point { x: q.x.min(479), y: q.y.min(319) }, tt::DOT_RAW, tt::C_RAW);
+                if j >= 1 {
+                    tt::dot(Point { x: q.x.min(479), y: q.y.min(319) }, tt::DOT_DEB, tt::C_DEB);
+                }
+            }
+            tt::cross(Point { x: p.x.min(479), y: p.y.min(319) });
+        }
+        for j in 0..20u16 {
+            let p = Point { x: 300 + j * 6, y: 150 + j * 2 };
+            tt::dot(p, tt::DOT_RAW, tt::C_RAW);
+            if j % 3 != 0 {
+                tt::dot(p, tt::DOT_DEB, tt::C_DEB);
+            }
+        }
+    }
+    if k >= 2 {
+        tt::key(0, true, Some(372));
+        tt::key(1, false, Some(628));
+        tt::key(2, true, Some(884));
+        tt::key(3, false, Some(1140));
+        tt::hint(true);
+    }
+    if long {
+        for c in 0..4 {
+            tt::key(c, c % 2 == 0, Some(65535));
+        }
+    }
+}
+
 fn save(out: &str, name: &str) {
     host::save_ppm(&format!("{out}/{name}.ppm"), 2);
 }
@@ -1935,10 +1989,10 @@ fn main() {
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
         // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
         // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", ""]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", ""]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", ""]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", ""]),
+        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", ""]),
+        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", ""]),
+        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", ""]),
+        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", ""]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -2061,6 +2115,17 @@ fn main() {
             }
         }
         save(&out, &format!("m05-help{page}"));
+    }
+
+    // 6g. The touch test page (ui_touchtest.rs): just opened, with dots,
+    // keys lit and the hold hint, the widest texts. Targets, key boxes,
+    // legend, hint and Clear go through the layout rules; the dots and the
+    // touch-down crosses are data (not layout items).
+    for (k, long, name) in [(0u8, false, "t01-touchtest"), (1, false, "t02-touchtest-dots"), (2, false, "t03-touchtest-keys"), (0, true, "t04-touchtest-long")] {
+        host::reset(0);
+        touchtest_scene(k, long);
+        ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+        save(&out, name);
     }
 
     // 6e. Confirm dialogs (dialog.rs, one box and Yes / No): power off,
@@ -2476,7 +2541,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", ""]);
+        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", ""]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2492,7 +2557,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", ""]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", ""]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);

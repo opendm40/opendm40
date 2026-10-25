@@ -1663,6 +1663,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 None => gestures.tick(now),
             };
             prof::exit(prof::TOUCH);
+            // The touch test page draws what this poll logged (frames,
+            // debounced state; app_touchtest.rs, region C: never during a
+            // session).
+            if app.view == ui::View::TouchTest && !logging {
+                app.tt_poll(&mut clk, can_draw);
+            }
             if let Some(g) = g {
                 if reported {
                     prof::touch(t_rd); // latency from the report read
