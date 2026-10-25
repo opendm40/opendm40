@@ -46,8 +46,9 @@ section named after the tag as the release notes; how to cut a release:
 
 - Bluetooth: the module's start-up banner and its own text no longer reach
   the SCPI parser as commands.
-- No false A-JACK warning from a voltage on V-COM in ohm, continuity and AC
-  mV, nor from a source on V-COM in resistance.
+- No false A-JACK warning from a voltage on V-COM in ohm, continuity, AC mV
+  and AC+DC mV (also after the source is switched off with the input left
+  open), nor from a source on V-COM in resistance.
 - RES AUTO: no endless range hunt; `FETCh?` answers `+9.91E37` right after an
   autorange step.
 - SCPI numbers: `nr3` and powers of ten print exact values

@@ -1572,7 +1572,8 @@ namespace Hy3131Tests
             }
         }
 
-        /// Device 489f956 knobs: acarrive (the AC V node's AC after the entry).
+        /// Device 489f956 knobs: acarrive (the AC V node's AC after the entry), mvhold (the open mV
+        /// input after a source).
         private static void Knobs489()
         {
             Console.WriteLine("489f956 knobs");
@@ -1596,6 +1597,24 @@ namespace Hy3131Tests
                 var parts = q.FindAll(x => x > 0.05 && x < 0.95).Count;
                 Check(q[0] < 0.05 && parts == 1 && Math.Abs(q[q.Count - 1] - 1) < 1e-6, "acarrive:160: one RMS block over the arrival, partial",
                       string.Join(" ", q.ConvertAll(x => x.ToString("F3"))));
+            }
+            {
+                // mvhold: the AC mV row's LPF after the source went off = that of a 0.75 V source
+                var m = NewChip();
+                m.Chip.SetInput("open;vsrc:0.75");
+                m.Configure(F2R1, 2);
+                m.Advance(0.5);
+                var want = Lpf(ReadAfter(m, 0x08, 1));
+                m.Chip.SetInput("mvhold:0.75;vsrc:5");
+                m.Advance(0.3);
+                m.Chip.SetInput("vsrc:none");
+                m.Advance(0.3);
+                var held = Lpf(ReadAfter(m, 0x08, 1));
+                Near(held, want, Math.Abs(want) * 0.01 + 2, "mvhold:0.75: the open mV input reads 0.75 V after the source went off");
+                m.Chip.SetInput("vsrc:0.1");
+                m.Advance(0.3);
+                var after = Lpf(ReadAfter(m, 0x08, 1));
+                Check(Math.Abs(after) < Math.Abs(want) * 0.2, "  a source on V-COM ends the hold", after.ToString());
             }
         }
 

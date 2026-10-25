@@ -994,6 +994,9 @@ pub struct Dmm {
     /// V read 0.707 x the input, half the window before the AC reached the
     /// node); 1 = the next result, whose window began before that read.
     ac_lead: u8,
+    /// AC+DC mV: the last DC phase result's magnitude was over the range
+    /// (`mv_vside`).
+    mv_dc_drv: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1578,6 +1581,7 @@ impl Dmm {
             ohm_t0: 0,
             ac_seed: true,
             ac_lead: 2,
+            mv_dc_drv: false,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -3746,6 +3750,10 @@ impl Dmm {
         // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         let now = clk.now_ms();
+        if m == 3 && acdc {
+            // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
+            self.mv_dc_drv = mag > ov * lim;
+        }
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
         let up = self.over_ok(mag > ov * lim, vet);
@@ -4767,10 +4775,14 @@ impl Dmm {
     /// V_GATE (AC mV), per result: `pk` = the node's peak estimate (mV,
     /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
     /// the open V jack of an A-jack current (sentinel MV_DRV_K).
+    /// AC+DC mV: also driven while its DC phase's last result was over the
+    /// range (`mv_dc_drv`; device 489f956: after a source went off the open
+    /// input read OL and the AC phase's results "free" while PB1 hit, a
+    /// false A-JACK).
     #[inline(never)]
     fn mv_vside(&mut self, now: u64, pk: f32) {
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
-        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim);
+        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv));
     }
 
     /// The probe's row is the jack check's (sentinel `jack_row`): ohm and
