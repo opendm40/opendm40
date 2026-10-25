@@ -417,6 +417,78 @@ fn pinch_tests(ck: &mut Ck) {
 /// release, MF), horizontal pinch closing to ~0.68 -> the index must be a
 /// valid timebase, never a range >= 10; and every pinch result stays in its
 /// own table.
+/// The trigger level keeps its volts across scale changes (owner
+/// 2026-10-25: a V/div change kept the row, so the volts changed): V/div
+/// up / down, off screen and back, probe x10, a CH1 position move, a level
+/// drag, a reload at the saved scale; the runt level too.
+fn trig_volts_tests(ck: &mut Ck) {
+    let mut sc = scope::Scope::new();
+    let d = scope::Settings::DEFAULT; // 1 V/div, pos 0, level row 105
+    sc.apply(d, 0);
+    let v0 = sc.trig_volts();
+    let near = |a: f32, b: f32| (a - b).abs() <= 1e-4 * b.abs().max(1e-3);
+    let mut seen = vec![];
+    let mut ok = true;
+    for r in [5usize, 7, 4, 9, 2, 0, 6] {
+        let mut s = sc.s;
+        s.range = r;
+        sc.apply(s, 0);
+        ok &= near(sc.trig_volts(), v0);
+        seen.push((r, sc.s.trig_row));
+    }
+    let row = |r: usize| seen.iter().find(|x| x.0 == r).unwrap().1;
+    ck.t(&format!("trigger level: V/div changes keep the volts, the row moves ({seen:?})"), ok && row(5) == 70 && row(7) == 123 && row(9) == 137 && row(6) == 105);
+    ck.t("trigger level off screen after a zoom: the marker at the edge, the level kept, back on screen at its row", row(0) == -10 && row(2) == -10 && row(6) == 105);
+    let mut s = sc.s;
+    s.probe = 10.0;
+    sc.apply(s, 0);
+    let r10 = sc.s.trig_row;
+    ck.t(&format!("trigger level: probe x10 keeps the tip volts (row {r10})"), near(sc.trig_volts(), v0) && r10 == 137);
+    s.probe = 1.0;
+    sc.apply(s, 0);
+    ck.t("trigger level: probe back, row back", sc.s.trig_row == 105 && near(sc.trig_volts(), v0));
+    // A CH1 drag moves the level row with the position (scope_page.rs).
+    let mut s = sc.s;
+    s.pos += 20;
+    s.trig_row += 20;
+    sc.preview(s);
+    ck.t("trigger level: a CH1 position move keeps the volts", sc.s.trig_row == 125 && near(sc.trig_volts(), v0));
+    let mut s = sc.s;
+    s.range = 4; // 200 mV/div: the level (~1 V) is off screen (top)
+    sc.apply(s, 0);
+    let mut s = sc.s;
+    s.pos -= 20;
+    s.trig_row -= 20; // CH1 back while the level is clamped at the edge
+    sc.preview(s);
+    sc.apply(sc.s, 0);
+    let mut s = sc.s;
+    s.range = 6;
+    sc.apply(s, 0);
+    ck.t("trigger level: a CH1 move while the level is off screen keeps it", near(sc.trig_volts(), v0) && sc.s.trig_row == 105);
+    // A level drag sets the volts.
+    let mut s = sc.s;
+    s.trig_row = 70;
+    sc.preview(s);
+    let v1 = sc.trig_volts();
+    ck.t("trigger level: a drag sets new volts", near(v1, 70.0 * 4.0 / 141.0));
+    // Reload: the saved row at the saved scale (0.5 V/div, row 70).
+    let mut s = sc.s;
+    s.range = 5;
+    s.trig_row = 70;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    ck.t("trigger level: a loaded row converts at its saved scale", near(sc.trig_volts(), 70.0 * 2.0 / 141.0));
+    // Runt: the second level the same way.
+    let mut s = sc.s;
+    s.range = 6;
+    sc.apply(s, 0);
+    let rv = sc.runt_volts();
+    let mut s = sc.s;
+    s.range = 7;
+    sc.apply(s, 0);
+    ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
+}
+
 fn pinch_state_tests(ck: &mut Ck) {
     use scope_ui::{pinch_step, PinchState};
     let (tb, range, tb_min, tb_max) = (13usize, 9usize, 3usize, 24usize);
@@ -1122,6 +1194,7 @@ fn main() {
     gesture_tests(&mut ck);
     log_tests(&mut ck);
     hit_tests(&mut ck);
+    trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);

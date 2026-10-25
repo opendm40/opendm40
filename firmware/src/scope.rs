@@ -290,6 +290,14 @@ pub struct Scope {
     pub hw: HwTrig,
     hw_mode: bool,
     hw_t0: u64,
+    /// Trigger level and the runt's second level in volts (wave: SI) at
+    /// the probe tip: what a scale change keeps (owner 2026-10-25: a V/div
+    /// / probe / position change kept the row, so the level in volts
+    /// changed). The rows in `s` follow them (`sync_levels`), clamped to
+    /// the screen; the hardware / software trigger uses the volts. NaN:
+    /// not known yet, taken from the rows at the next `apply`.
+    trig_v: f32,
+    runt_v: f32,
     /// Position (rows) the stored record was captured with: the offset PWM
     /// had moved its codes by that much (volts(), see v_centre).
     stored_pos: i32,
@@ -556,6 +564,8 @@ impl Scope {
             hw: HwTrig::new(),
             hw_mode: false,
             hw_t0: 0,
+            trig_v: f32::NAN,
+            runt_v: f32::NAN,
             stored_pos: 0,
             stream: false,
             st_scan: 0,
@@ -687,7 +697,68 @@ impl Scope {
     }
 
     pub fn trig_volts(&self) -> f32 {
-        (140.0 + self.s.pos as f32 - self.s.trig_row as f32) * 4.0 * self.vdiv() / 141.0
+        if self.trig_v.is_finite() { self.trig_v } else { self.row_volts(self.s.trig_row) }
+    }
+
+    /// The runt's second level in volts (as `trig_volts`).
+    pub fn runt_volts(&self) -> f32 {
+        if self.runt_v.is_finite() { self.runt_v } else { self.row_volts(self.s.runt_row) }
+    }
+
+    /// V/div under settings `s` (the live wave scale in the wave view).
+    fn vdiv_of(&self, s: &Settings) -> f32 {
+        if self.wave { wv().sc.vdiv } else { VDIV[s.range.min(9)] * s.probe }
+    }
+
+    /// Keep the levels in volts across the change self.s -> `s` (`apply`,
+    /// `preview`): a row that did not move, or moved only with the position
+    /// (CH1 drag / centring keep the level's volts), is re-derived from the
+    /// volts at the new scale (clamped to the screen rows -10..290, the
+    /// level itself stays: off screen its marker sits at the edge); a row
+    /// moved on its own (a level drag, AUTO, TRIG:LEV) sets the volts.
+    fn sync_levels(&mut self, s: &mut Settings) {
+        let o = self.s;
+        let vd = self.vdiv_of(s);
+        let dp = s.pos - o.pos;
+        let volts = |row: i32| (140.0 + s.pos as f32 - row as f32) * 4.0 * vd / 141.0;
+        let row = |v: f32| {
+            let r = 140.0 + s.pos as f32 - 141.0 * v / (4.0 * vd);
+            if r.is_finite() { (if r >= 0.0 { r + 0.5 } else { r - 0.5 }).clamp(-10.0, 290.0) as i32 } else { 140 }
+        };
+        let follows = |new: i32, old: i32| new == old || new == old + dp;
+        if self.trig_v.is_finite() && follows(s.trig_row, o.trig_row) {
+            s.trig_row = row(self.trig_v);
+        } else {
+            self.trig_v = volts(s.trig_row);
+        }
+        if self.runt_v.is_finite() && follows(s.runt_row, o.runt_row) {
+            s.runt_row = row(self.runt_v);
+        } else {
+            self.runt_v = volts(s.runt_row);
+        }
+    }
+
+    /// Forget the levels' volts: the next `apply` takes them from its rows
+    /// (settings loaded from flash at their saved scale, the wave view's /
+    /// MCX's own settings swapped in).
+    pub fn levels_reset(&mut self) {
+        self.trig_v = f32::NAN;
+        self.runt_v = f32::NAN;
+    }
+
+    /// The levels' rows again at the current scale (the wave view's DMM
+    /// range changed outside `apply`).
+    fn levels_follow(&mut self) {
+        let mut s = self.s;
+        self.sync_levels(&mut s);
+        self.s.trig_row = s.trig_row;
+        self.s.runt_row = s.runt_row;
+    }
+
+    /// Screen row (unrounded, unclamped) of a level in volts.
+    fn level_row(&self, v: f32, row: i32) -> f32 {
+        let r = self.row_of_volts(v);
+        if v.is_finite() && r.is_finite() { r } else { row as f32 }
     }
 
     /// Trigger level in ADC codes of the live range: relative to the centre
@@ -696,22 +767,33 @@ impl Scope {
     /// and in c). Was g1 + trig_volts * k, which counted the position twice:
     /// after AUTOSET on a 0..9.6 V square (5 V/div, pos 33) the level sat at
     /// 9.36 V for a badge of 4.68 V.
+    /// From the level in volts (`trig_v`): a level off screen after a zoom
+    /// stays where it is, not at the clamped marker row.
     fn trig_code(&self) -> i32 {
-        self.code_of_row(self.s.trig_row)
+        self.code_of_row(self.level_row(self.trig_v, self.s.trig_row))
+    }
+
+    /// ADC code of the runt's second level (from `runt_v`).
+    fn runt_code(&self) -> i32 {
+        self.code_of_row(self.level_row(self.runt_v, self.s.runt_row))
     }
 
     /// ADC code of a level row (trig_code; the runt's second level).
-    fn code_of_row(&self, row: i32) -> i32 {
+    fn code_of_row(&self, row: f32) -> i32 {
         if self.wave {
             // The wave codes are not shifted by the position (no offset
             // PWM): the level row's SI value through the live scale.
-            let c = (self.row_volts(row) - wv().sc.a) / wv().sc.b;
+            let v = (140.0 + self.s.pos as f32 - row) * 4.0 * self.vdiv() / 141.0;
+            let c = (v - wv().sc.a) / wv().sc.b;
             return if c.is_finite() { c.clamp(-100.0, 1124.0) as i32 } else { 512 };
         }
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        let dv = (140.0 - row as f32) * 4.0 * VDIV[r] / 141.0;
-        (g1 + dv * (g0 - g1) / XR[r]) as i32
+        let dv = (140.0 - row) * 4.0 * VDIV[r] / 141.0;
+        let c = g1 + dv * (g0 - g1) / XR[r];
+        // Off screen (a level kept across a zoom): beyond the ADC span, no
+        // crossing (i32 range kept sane).
+        if c.is_finite() { c.clamp(-100_000.0, 100_000.0) as i32 } else { g1 as i32 }
     }
 
     /// Volts of a level row (the runt's second level).
@@ -726,7 +808,7 @@ impl Scope {
         let w = self.s.pwidth * self.sample_rate() as f32;
         match self.s.ttype {
             crate::trigsoft::PULSE => crate::trigsoft::pulse(d, lo, hi, l, self.s.rising, self.s.pcond, w),
-            _ => crate::trigsoft::runt(d, lo, hi, l, self.code_of_row(self.s.runt_row), self.s.rising),
+            _ => crate::trigsoft::runt(d, lo, hi, l, self.runt_code(), self.s.rising),
         }
     }
 
@@ -791,6 +873,7 @@ impl Scope {
         s.pwidth = if s.pwidth.is_finite() { s.pwidth.clamp(crate::trigsoft::W_MIN, crate::trigsoft::W_MAX) } else { 1e-3 };
         s.pos = s.pos.clamp(-392, 392);
         s.hpos = s.hpos.clamp(0, COLS as i32);
+        self.sync_levels(&mut s);
         // A comparator suspended by misses (hwtrig::note_miss: overdrive, a
         // settling front end, a bad map) gets another chance with a new
         // range / timebase / coupling / edge / mode / trigger type, e.g. the
@@ -1303,10 +1386,13 @@ impl Scope {
     /// once when the drag ends (../docs/history/scope-lag-fixes.md fix A). Labels and
     /// markers that read `s` follow at once.
     pub fn preview(&mut self, s: Settings) {
-        self.s.trig_row = s.trig_row.clamp(-10, 290);
-        self.s.runt_row = s.runt_row.clamp(-10, 290);
-        self.s.pos = s.pos.clamp(-392, 392);
-        self.s.hpos = s.hpos.clamp(0, COLS as i32);
+        let mut n = self.s;
+        n.trig_row = s.trig_row.clamp(-10, 290);
+        n.runt_row = s.runt_row.clamp(-10, 290);
+        n.pos = s.pos.clamp(-392, 392);
+        n.hpos = s.hpos.clamp(0, COLS as i32);
+        self.sync_levels(&mut n);
+        self.s = n;
     }
 
     /// The stored record must stay as it is (scope CSV being written, a
@@ -1740,6 +1826,7 @@ impl Scope {
             return;
         }
         self.halt();
+        self.levels_reset(); // the wave view's own rows, at its scale
         let ws = wv().s;
         *wv() = Wave::NEW;
         wv().s = ws;
@@ -1763,6 +1850,7 @@ impl Scope {
         self.halt();
         wv().s = self.s;
         self.wave = false;
+        self.levels_reset(); // the MCX rows, at the MCX scale
         self.stored_valid = false;
         self.hold = false;
         let m = wv().mcx;
@@ -1811,6 +1899,7 @@ impl Scope {
     /// restarts the stream on the new row, then `wave_live`).
     pub fn wave_scale(&mut self, sc: WaveScale) {
         wv().sc = sc;
+        self.levels_follow(); // the levels keep their SI value
         self.s.ac = sc.ac;
         wv().live = false;
         self.busy = false;
@@ -1896,7 +1985,7 @@ impl Scope {
                 ttype: st.ttype,
                 rising: st.rising,
                 l: self.trig_code(),
-                l2: self.code_of_row(st.runt_row),
+                l2: self.runt_code(),
                 wlo,
                 whi,
             };
