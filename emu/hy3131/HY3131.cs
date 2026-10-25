@@ -78,7 +78,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             role = Role.None; roleMode = -1; roleRange = 0;
             if(OhmExitRst) ohmExitT = now;
             ohmLagV = 0; ohmLagT = now; ohmLagTarget = 0;
-            vjSee = false; acaT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
+            vjSee = false; acaT0 = double.NegativeInfinity; acvT0 = double.NegativeInfinity; acaStepT = double.NegativeInfinity; lastRole = Role.None; lastMode = -1;
             Rewrites = 0;
             rng = new Random(12345);
             faultRng = new Random(777);
@@ -386,6 +386,15 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// row is INFERRED. Used by couptest `iacfill` (TODO "AC+DC / AUTO down-range on one
         /// part": a settle that outlasts an AC phase). "rmsfill:s".
         public double RmsFill = 0;
+        /// The AC V node carrying the jack's AC only from this long after the AC V row was entered
+        /// from another function (opt-in, "acarrive:ms"; 0 = at once): an RMS block over the arrival
+        /// reports the share of its window after it of the input's mean square (the rest of the
+        /// window had none). Device 489f956 (DC V -> AC V on the 0 / 9.5 V square, 20 / 50 / 90 Hz):
+        /// the first result read after the 300 ms settle was latched during it and read 0.707 of
+        /// the input (half the mean square), the next one ~107 ms later was right. The path's delay
+        /// (relays / coupling) and its timing are INFERRED: "acarrive:160" with the blocks on the
+        /// row write's grid puts the last block before the deadline half over the arrival.
+        public double AcArriveMs = 0;
         /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
         /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
@@ -521,6 +530,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// default).
         public double SenseNegV, SenseNegTau = 5;
         private double acaT0 = double.NegativeInfinity;
+        /// When the AC V row was entered from another role (AcArriveMs).
+        private double acvT0 = double.NegativeInfinity;
         /// AC A 10 A -> mA / uA (device f0d21eb: CONF:CURR:AC 10, then 0.06, the A jack empty:
         /// the first 60 mA result read OL): the AD2 node (OP1O - PB3) carries a step of acastep
         /// codes for acastepms ms from that row write, in the LPF and the RMS blocks it overlaps
@@ -839,6 +850,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "agndz": AgndZeroScale = o.Value; break;
                 case "hpftau": HpfTau = o.Value; break;
                 case "rmsfill": RmsFill = o.Value; break;
+                case "acarrive": AcArriveMs = o.Value; break;
                 case "rmsbig": RmsBigDcCodes = o.Value; break;
                 case "rmsbigp": RmsBigDcP = o.Value; break;
                 case "lpfcreep": LpfCreepScale = o.Value; break;
@@ -1041,6 +1053,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 {
                     var fill = Math.Min(1.0, (t - lpfStart) / RmsFill);
                     sq *= fill * fill;
+                }
+                if(AcArriveMs > 0 && role == Role.AcV && !cDc)
+                {
+                    // AcArriveMs: the share of the block [t - p, t] after the AC's arrival
+                    var ta = acvT0 + AcArriveMs * 1e-3;
+                    sq *= Math.Max(0.0, Math.Min(1.0, (t - ta) / p));
                 }
                 if(Svxi && !Sdo23 && EnAd3)
                 {
@@ -2455,6 +2473,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
                 // (the quiesce writes pass through no-role states: the last real role counts)
                 if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
+                if(newRole == Role.AcV && lastRole != Role.AcV) acvT0 = now;
                 if(newRole == Role.AcA && lastRole == Role.AcA && lastMode == 4 && newMode >= 5) acaStepT = now;
                 if(newRole != Role.None) { lastRole = newRole; lastMode = newMode; }
                 if(OhmTauMs > 0) OhmLagAdvance(now); // the old row's target up to this write

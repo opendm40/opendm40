@@ -3693,12 +3693,19 @@ Emulator (emu/):
       VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
       for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
       reading at the 60 -> 6 V step (the first final +7 %: the coupling step); the entry fails differently (next item).
-- [ ] Plain AC V entry: the first final reads 1/√2 of the input (device 489f956, DC V -> AC V on the square at 20 / 50 /
+- [x] Plain AC V entry: the first final reads 1/√2 of the input (device 489f956, DC V -> AC V on the square at 20 / 50 /
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
       the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
       (INFERRED: half its window before the AC row carried the input). 049bb65 seeds `f_ac` with it, so it shows as
-      final. Candidate fix (untested): drop a plain AC result latched before the deadline (clear INTF at the deadline).
-      Device check: as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1, also with a sine if one is available.
+      final. Fixed: after a plain AC reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
+      what INTF latched (its read clears it) and the next result too (its window began before that read, the device's
+      2 % low one); the result after seeds the filters. The first final comes ~0.1 s later (emulator: 0.43 s after
+      the entry, was 0.30 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
+      entry, INFERRED; the block over it reads 0.706 of the input); firstrdtest acv-entry-sq (the device's square) /
+      acv-entry-arr (1 V sine): FAIL on f4cd2cd (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
+      aca-auto-dn (049bb65's) pass. Device check (5 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
+      the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
+      the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
 - [ ] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
