@@ -682,7 +682,7 @@ impl DmmView {
                 -1
             };
             // Wider than the 72 px box ("MHz", "mW" in UNIT, "mWh"): the
-            // narrower LETTERS, else TEXT22 (device check 5e52761: no unit
+            // narrower LETTERS, else TEXT22 (device check 94de654: no unit
             // is cut).
             for (f, s) in [(sf::LETTERS, 0), (sf::TEXT22, 1)] {
                 if sf::text_width(uf, unit, sp) <= 72 {
@@ -877,7 +877,7 @@ impl DmmView {
         // the old key (auto && !auto_plus, .., auto_plus) was the same for
         // both and a range released by a reading (REL ended by an AUTO
         // coupling switch) left the manual label on screen (device check
-        // 5e52761). Manual: the range itself (mode * 8 + range), as the
+        // 94de654). Manual: the range itself (mode * 8 + range), as the
         // label shows it ("6V" -> "60V" repaints).
         let rk = if r.auto { 255 } else { r.mode.wrapping_mul(8).wrapping_add(r.range as u8) };
         let top = (rk, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
@@ -943,7 +943,7 @@ const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 fn test_current_label(mode: u8, range: i8, on: bool) {
     let Some(i) = crate::dmm::test_current(mode, range, on as u8) else {
         // No value (60 M): clear the box, a range change from 6 M left the
-        // 6 M label (device check 46370df).
+        // 6 M label (device check 940e8aa).
         let b = OHM_I_RECT;
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         return;
@@ -2540,7 +2540,7 @@ fn page_title(title: &str) {
     lcd::fill_rect(0, 0, lcd::W, PAGE_BAR_H as u16, 0x2966);
     // Centred on the screen; a title that would come closer than 28 px
     // (two word spaces) to "< Back" starts that far after it instead ("Help
-    // 5/7: Record + alerts" ran into it: device check 5e52761).
+    // 5/7: Record + alerts" ran into it: device check 94de654).
     let w = sf::text_width(sf::TEXT22, title, 0);
     let back = BAR_X + 3 + sf::text_width(sf::TEXT22, "< Back", 0) + 28;
     if (480 - w) / 2 >= back {
@@ -2588,7 +2588,7 @@ pub fn settings(page: u8, vals: &[&str]) {
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
 /// label + value (SET_* geometry; `settings_hit` / `list_hit` map touches).
 pub fn list_page(title: &str, names: &[&str], vals: &[&str]) {
-    // One value per row (the 1a3efbd row mis-mapping); host builds only
+    // One value per row (the e732a37 row mis-mapping); host builds only
     // (ui-render), compiled away on the device.
     if cfg!(not(target_os = "none")) {
         assert_eq!(vals.len(), names.len(), "list_page {title}: values vs rows");
@@ -2850,7 +2850,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
 /// The topic's box ends HELP_GAP before the value column: with the glyphs'
 /// blank edge column >= 1.5 TEXT22 word spaces of ink between them
 /// (closer, "Power key held 1.5 s Power off" read as one line; device
-/// check 5e52761; ui-render's line rule).
+/// check 94de654; ui-render's line rule).
 pub const HELP_COL: i16 = 228;
 pub const HELP_GAP: i16 = 19;
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller

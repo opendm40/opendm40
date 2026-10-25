@@ -135,8 +135,8 @@ SC = {
     'dc5': ('open;vsrc:5', 'dc5', [], None, {}),
     'ac2': ('open;vsrc:0,ac=2,f=50', 'ac2', [], None, {}),
     # A voltage on V-COM, the A jack empty, with the model's PB1 pickups (Pb1VjackMv: ohm /
-    # temperature / continuity, device 35fce2a 7b / f0d21eb item 4; mvclamp / mvpb1: the AC mV
-    # clamp, device 46370df): no A-JACK in any function, also through AC V AUTO's mV steps
+    # temperature / continuity, device 2d33d3a 7b / 3e41549 item 4; mvclamp / mvpb1: the AC mV
+    # clamp, device 940e8aa): no A-JACK in any function, also through AC V AUTO's mV steps
     # (acv: mV-first; CONF:VOLT:AC 0.06 / 0.6 manual) and ohm / continuity entries.
     'dc5-pickup': ('open;vsrc:5;mvclamp:1.212;mvpb1:10', 'dc5', ['sysbus.hy3131 Pb1VjackMv 10'],
                    ['dcv', 'res', 'dcv', 'cont', 'acv', 'res', 'acmv', 'cont', 'acmv60', 'dcv', 'acv', 'temp', 'res',
@@ -150,19 +150,19 @@ SC = {
                           ['dcv', 'res', 'dcv', 'cont', 'dcv', 'acmv', 'dcv', 'acmv60', 'dcv', 'res'],
                           {'res': ('AJACK', 2.0), 'cont': ('AJACK', 1.2), 'acmv': ('AJACK', 2.0), 'acmv60': ('AJACK', 2.0)}),
     # model knobs: the AD1 decimation memory (a mux switch without a restart mixes the old
-    # input into the next 3 conversions) and AD2's start-up results 3000 codes off (f3aea2f)
+    # input into the next 3 conversions) and AD2's start-up results 3000 codes off (7534701)
     'open-mix': ('open;ad1mix:1', 'open', ['sysbus.hy3131 Ad2StartGlitch 3000'], None, {}),
     'dc5-mix': ('open;vsrc:5;ad1mix:1', 'dc5', ['sysbus.hy3131 Ad2StartGlitch 3000'], None, {}),
     # the model's switch transient (HY3131.cs SwTrMv, a HYPOTHETICAL ring of the sentinel nodes
     # after every row change, until device numbers come): 300 mV, tau 50 ms, 25 Hz
     'open-swtr': ('open;swtr:300;swtau:50', 'open', [], None, {}),
     'dc5-swtr': ('open;vsrc:5;swtr:300;swtau:50', 'dc5', [], None, {}),
-    # device ad74e93 (nothing connected): RES -> A / mA, CMP_SENSE CTSTA 0x70 for ~3.5 s then 0x50
+    # device 0256df2 (nothing connected): RES -> A / mA, CMP_SENSE CTSTA 0x70 for ~3.5 s then 0x50
     # to ~5 s -> a false V-JACK? from 1.5-1.95 s; the model's ohmexit: replays that CTSTA
     'ohmexit': ('open;ohmexit:3.5;ohmexitlo:1.2', 'open', [],
                 ['res', 'dca', 'res', 'dcma', 'res', 'dcua', 'res', 'aauto', 'res', 'aacdc', 'res', 'aca', 'cont', 'dca',
                  'temp', 'dcma', 'diod', 'dca', 'cap', 'dcma', 'res', 'dcv', 'res', 'dca'], {}),
-    # device ab7184c new bug 4: A / mA -> Scope -> DMM with 5 V on V-COM, CTSTA 0x70 to 7.75 s
+    # device 0760432 new bug 4: A / mA -> Scope -> DMM with 5 V on V-COM, CTSTA 0x70 to 7.75 s
     # and 0x50 to 8.01 s after the switch, then 0 (ohmexitrst: the trace also from the chip
     # reset when the DMM rail comes back); the 7 s cap let the 0x70 tail count: V-JACK? at
     # 8.06 s. 5 V through the /1000 tap is below the comparator: no V-JACK? in DC A (dc5a).
@@ -184,13 +184,13 @@ SC = {
     'real-achint': ('open;vsrc:0,ac=2,f=50', 'ac2', [], ['acv', 'dcv', 'res', 'dcv', 'temp', 'dcv'], {'dcv': ('AC', 4.0)}),
     'real-dchint': ('open;vsrc:5', 'dc5', [], ['dcv', 'acv', 'res', 'acv', 'temp', 'acv'], {'acv': ('DC', 6.0)}),
     'real-vjack': ('open;vsrc:24', 'v24', [], ['dcv', 'dca', 'res', 'dca', 'aca', 'dca'], {'dca': ('VJACK', 4.0)}),
-    # device f0d21eb 2a: AC A's AD1 V-JACK? peak on SENSE - PB5 ran to the negative rail in ~2 s
+    # device 3e41549 2a: AC A's AD1 V-JACK? peak on SENSE - PB5 ran to the negative rail in ~2 s
     # whatever was on V (pb5drift replays it): a false V-JACK? in every AC A range
     'aca-drift': ('open;pb5drift:0.6;pb5tau:2.2', 'open', [],
                   ['dcv', 'aca', 'dcv', 'acma', 'dca', 'acua', 'res', 'aca10', 'acma', 'aacdc', 'aauto', 'dcv'], {}),
-    # device f0d21eb new bug 1: CONF:CURR:AC 10, then 0.06, the A jack empty, 1 V on V: the first
+    # device 3e41549 new bug 1: CONF:CURR:AC 10, then 0.06, the A jack empty, 1 V on V: the first
     # 60 mA result read OL -> OVERLOAD, back to 10 A (acastep replays the first-block step)
-    # device 0774e70 new bug 2: 24 V DC on V, SENSE - AGND ramps to the rail in AC A (senseneg):
+    # device a3b6d0a new bug 2: 24 V DC on V, SENSE - AGND ramps to the rail in AC A (senseneg):
     # the ramp's per-hold swing was a false V-JACK? at 1.5-3.5 s in 60 mA / 600 uA
     'aca-ramp': ('open;vsrc:24;senseneg:0.75;sensetau:5', 'dc24aca', [],
                  ['dcv', 'aca', 'dcv', 'acma', 'dcv', 'acua', 'dcv', 'aca10', 'dcv'], {}),
@@ -199,7 +199,7 @@ SC = {
     # a real AC source on V while in AC A (24 V rms): V-JACK? from the AD1 swing
     'real-vjack-ac': ('open;vsrc:0,ac=24,f=50', 'ac2', [], ['dcv', 'aca', 'dcv', 'acma', 'res', 'aca10', 'dca', 'acua'],
                       {'aca': ('VJACK', 3.0), 'acma': ('VJACK', 3.0), 'aca10': ('VJACK', 3.0), 'acua': ('VJACK', 3.0)}),
-    # device f0d21eb 3 / 2b: 24 V on V-COM read in DC A only after TEMP; DC V 60 V, RES and a chip
+    # device 3e41549 3 / 2b: 24 V on V-COM read in DC A only after TEMP; DC V 60 V, RES and a chip
     # restart left it blind (vjblind replays the observation). The firmware's mitigation is the
     # opt-in experiment DBG:SENTinel:PRECond (SETUP below); without it this scenario fails.
     'real-vjack-blind': ('open;vsrc:24;vjblind:1', 'v24', [], ['dcv60', 'dca', 'temp', 'dca', 'res', 'dcma', 'dcv', 'dca'],

@@ -7,7 +7,7 @@ Code: [`src/scope_ui.rs`](../src/scope_ui.rs) (tap-step section, `Popup::Tb`)
 and [`src/scope_page.rs`](../src/scope_page.rs). Host tests:
 [`tools/touch-test`](../tools/touch-test/main.rs) (`tap_step_tests`) and
 [`tools/ui-render`](../tools/ui-render/main.rs) (section 0a). Implemented in
-e4bae33 (UF-07 in [user-feedback.md](user-feedback.md)); untested on the
+831678f (UF-07 in [user-feedback.md](user-feedback.md)); untested on the
 device. The stock behaviour it extends: `stock/re/docs/stock-scope-ui.md` (in the private analysis repo)
 §10.3.
 

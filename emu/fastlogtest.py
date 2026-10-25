@@ -42,7 +42,7 @@ chip's busy time is the profile's, the HY3131 bus and its DMA are timed as
 on the device; the CPU runs at --mips (default 200 = one instruction per
 cycle, no flash / APB wait states). The device's speed: --mips 110
 --isr-stall-ns 700 (peripherals/CpuCost.cs; the 76.8 kS/s device check of
-7409b92: Run pass, passes/s and the stream ISR's cpu_permille).
+e8cc4e9: Run pass, passes/s and the stream ISR's cpu_permille).
 --noise raises the AD2 noise (more bytes per sample, the coder's worst
 case). Exit status 0 = every check passed; the rate table is printed
 (docs/compact-log-format.md "Fast stream: rate limits"; fifo_hw = the
@@ -69,7 +69,7 @@ ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.
 ap.add_argument('--no-bt', action='store_true')
 ap.add_argument('--ppm', type=float, default=0.0, help='HY3131 crystal offset vs the MCU, ppm (model ClockPpm)')
 ap.add_argument('--osr32-ppm', type=float, default=None, help='the 76.8 kS/s setting\'s own rate offset, ppm (model Ad2Osr32Ppm; '
-                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of e7ec2cc))')
+                'default 0 = the datasheet\'s 76 800, as the device (opendm40 device check of 8ce42e2))')
 ap.add_argument('--vol-read', action='store_true', help='after each session read LOGS/FASTnnn.CSV off the USB volume (MSC READ(10), 64 sectors each): == tools/dlog.py of the DLG; the virtual-time rate')
 ap.add_argument('--no-ad1-race', action='store_true', help='AD1F without the INTF read-clears race (model IntfRaceAd1)')
 ap.add_argument('--noise', type=float, default=None, help='HY3131 model noise scale (SetNoise; AD2: 30 codes rms x scale at OSR 32): a '
@@ -89,13 +89,13 @@ ap.add_argument('--prof', action='store_true', help='DBG:PROF:RESET when the run
 ap.add_argument('--region-c', action='store_true', help='Renode hooks on every function of region C (emu/regionc.py): none may '
                 'run while the stream ISR owns the bus (hy3131::HANDED), i.e. during a session; with --host-read')
 ap.add_argument('--host-read', action='store_true', help='while each session runs: a host reading the INFO/ files '
-                '(FIRMWARE.BIN first; device 4c4b489: calbackup::FwFile::fill, region C, max_lat 4.66 us) off the USB '
+                '(FIRMWARE.BIN first; device bfb6a19: calbackup::FwFile::fill, region C, max_lat 4.66 us) off the USB '
                 'volume (MSC READ(10), 64 sectors each) and DBG:PROF? (prof::report) between the polls')
 ap.add_argument('--host-files', default='', help='with --host-read: only these INFO/ files, ","-separated, in this order '
-                '(e.g. LOADER.BIN: all of it from the SPI-disk mirror; device 612c45c M2c: ~22 000 lost per copy at 76800)')
+                '(e.g. LOADER.BIN: all of it from the SPI-disk mirror; device bb15d39 M2c: ~22 000 lost per copy at 76800)')
 ap.add_argument('--host-sectors', type=int, default=64, help='with --host-read: sectors per READ(10) (Linux cp: up to 240)')
 ap.add_argument('--host-delay', type=float, default=0.0, help='with --host-read: start the READs this many device seconds after '
-                'the run began (LOG:DISK? state 3), e.g. 3: after a 76800 writer trial (device 612c45c M2c: LOADER.BIN 6 s '
+                'the run began (LOG:DISK? state 3), e.g. 3: after a 76800 writer trial (device bb15d39 M2c: LOADER.BIN 6 s '
                 'after state 3 lost 21 745; inside the trial the session fell back to 38400)')
 ap.add_argument('--host-only', action='store_true', help='with --host-read: no SCPI queries between the READs (back to back, '
                 'as a host cp; LOG:DISK? still polled every 8 READs)')
@@ -256,7 +256,7 @@ from infovol import SLOW_FILES, vol_dir  # noqa: E402
 class HostRead:
     """A host reading the INFO/ files (FIRMWARE.BIN first) in 64-sector
     READ(10)s, round and round, plus DBG:PROF? and LOG:DEST? / LOG:DURation?
-    (fast_scpi, device b6909d6: region C) (`step` between the LOG:DISK?
+    (fast_scpi, device 246afc7: region C) (`step` between the LOG:DISK?
     polls). A READ refused with NOT READY, BECOMING READY (the slow-bank
     sectors, vdisk.rs `read_busy`) is counted per file and the reader moves
     on to the next file; the first refusal of each file is narrowed down
@@ -399,7 +399,7 @@ def nav_to(q, steps, what):
 
 def nav_tree(q):
     """No stream: the page tree; MENU on the Device page = the main menu
-    (device check 35fce2a: it returned to Settings 3/3), a tap on Device =
+    (device check 2d33d3a: it returned to Settings 3/3), a tap on Device =
     Settings 3/3, MENU from the menu = back to the instrument (DMM)."""
     nav_to(q, NAV[:6], 'page tree, MENU on Device -> the main menu')
     nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,3'), ('DBG:KEY 0', 'Settings,2'), ('DBG:KEY 0', 'Settings,1'),
@@ -568,7 +568,7 @@ def session(q, src, rate, profile):
               % (profile, src, rate, cnt[2], cnt[4]))
     elif len(st) > 9:
         # No page-program probe below 76800: LOG:DISK? tpp 0 / 0 = none (it
-        # used to keep the last probe's numbers, device 4c4b489).
+        # used to keep the last probe's numbers, device bfb6a19).
         check(st[8] == 0 and st[9] == 0, '%s %s %d: no probe, LOG:DISK? tpp %d / %d = none' % (profile, src, rate, st[8], st[9]))
     TABLE.append((profile, src, rate, prep_s, rows, lost, cnt[2], bps, bps / 256, len(dlg) / max(rows, 1), hw, int(isr[20]) / 10))
     print('  (device uptime: LOG:STATe ON %.1f s, run %.1f s, end %.1f s)' % (up0 / 1000, (t_run or up1) / 1000, up1 / 1000))

@@ -3,7 +3,7 @@
 // (2026-10-23, opendm40 TODO "Region C DATA reads during a stream"). On the
 // GD32F427 flash from 0x08080000 up is not zero-wait: one CPU load from it
 // stalls the bus ~21.8 us and the stream ISR's entry with it (device
-// b6909d6: INFO/CALIB.BIN, LOADER.BIN, BOOTDATA.BIN and the FIRMWARE.BIN
+// 246afc7: INFO/CALIB.BIN, LOADER.BIN, BOOTDATA.BIN and the FIRMWARE.BIN
 // tail served by the USB volume while a fast-log session ran). emu/regionc.py
 // hooks the region C functions (code fetches); this watches DATA loads:
 // tlib's memory access hook (TranslationCPU.SetHookAtMemoryAccess), every

@@ -3,7 +3,7 @@
 transport) when the host recovers from a stuck or broken command, as Linux
 usb-storage does after its 30 s command timeout: Bulk-Only Mass Storage
 Reset (class request 0xFF) + CLEAR_FEATURE(HALT) of both bulk endpoints,
-and a USB port reset when that does not help. (Device check f3aea2f 6b: a
+and a USB port reset when that does not help. (Device check 7534701 6b: a
 command never completed, usb-storage reset the meter twice, then the
 meter hung and the watchdog reset it.)
 

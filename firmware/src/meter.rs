@@ -736,7 +736,7 @@ impl Meter {
         self.live = Some(d);
         let mut u = Update { live: d, raw, show: None, captured: false, fail_edge: false };
         // HOLD pressed before the function's first settled reading (the
-        // placeholder, AUTO still deciding: device ab7184c) is armed: it
+        // placeholder, AUTO still deciding: device 0760432) is armed: it
         // holds the first one (no statistics), then freezes as usual.
         let arm = self.hold && self.shown.is_none();
         if self.hold && !arm {
@@ -989,7 +989,7 @@ mod tests {
     }
 
     /// HOLD pressed before the function's first settled reading (device
-    /// ab7184c: RUN while AUTO decides froze nothing and showed RUN): it holds
+    /// 0760432: RUN while AUTO decides froze nothing and showed RUN): it holds
     /// the first one when it comes, then nothing moves it; no statistics.
     #[test]
     fn hold_before_the_first_reading_holds_it() {

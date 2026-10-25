@@ -47,7 +47,7 @@
 //! read back in one call, <= ~0.45 s, watchdog kicked in spiflash.rs), never
 //! in `write_step` slices: a FAT / root block must not be left erased or half
 //! programmed across a main-loop pass, where a power-off, a reset or a host
-//! READ could see it (review 258c833 H1, as screenshot.rs).
+//! READ could see it (review 530c2e1 H1, as screenshot.rs).
 //!
 //! RAM: rows are coded into FIFO (8 KiB ring, native) as they arrive (the
 //! file header at `start`, then per chunk a CHDR-byte header placeholder
@@ -1370,7 +1370,7 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
 /// The last MMEM:CAT? reply, valid while no program / erase reached the SPI
 /// flash since it was built (`msc::FLASH_WRITES`, bumped by every one: a
 /// recording's commit, a screenshot, a host write, the shot pre-erase).
-/// Device b6909d6: MMEM:CAT? in the Wave view at 76800 S/s took 123 ms in
+/// Device 246afc7: MMEM:CAT? in the Wave view at 76800 S/s took 123 ms in
 /// one main-loop pass (the BPB, the root and the three directories, FAT 1:
 /// ~10 polled 4 KiB reads with the stream ISR at ~50 % CPU), the view's ring
 /// (2048 samples, 27 ms) dropped +6813 per query. From the cache a reply is
@@ -1600,7 +1600,7 @@ pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
 /// directory (as MMEM:CAT? and the USB volume list it: S*.BMP in SHOTS/,
 /// LOG* / FAST* .DLG / .CSV in LOGS/, SCOP* in SCOPE/; fatdir::dir_of).
 /// False for a prefix of another directory, or for a file that is in none
-/// (device 46370df: "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG): MMEM:DATA? /
+/// (device 940e8aa: "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG): MMEM:DATA? /
 /// MMEM:DELete then answer "File name not found". True without a prefix.
 // Not .cold: MMEM:DATA? runs it during an AD2 stream (a host reading a
 // file while the Wave view streams; emu/hy3131/wavetest.py). inline(never):

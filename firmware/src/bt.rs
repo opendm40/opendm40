@@ -89,7 +89,7 @@ const START_LAST: &[u8] = b"CSSW:";
 const START_MAX_MS: u64 = 1000;
 
 /// The module's own text after each start (power-up, AT+RESET). Device
-/// 7b1b6d1 (docs/device-check-2026-10-21.md "cd1ec9a"): a 0x00, then 145-195
+/// 7b1b6d1 (docs/device-check-2026-10-21.md "d188760"): a 0x00, then 145-195
 /// ms after the start "BLE03:VER2.1-20240615\0", "CBN:<BLE name>",
 /// "CBMAC:<mac>", "CSN:<SPP name>", "CSMAC:<mac>", "CBSW:1", "CSSW:1" (CR LF
 /// each) = 7 SCPI errors -102 -113 -113 -102 -113 -113 -113 for the next
@@ -432,7 +432,7 @@ impl Bt {
 
     /// Fallback TX: write the whole queue out, byte by byte (blocks; a full
     /// 8 KiB ring is ~0.7 s at 115200, the watchdog fed meanwhile). Bounded
-    /// (review 3443cea L2): a TBE that does not come within 10 ms (one byte
+    /// (review 4ab408d L2): a TBE that does not come within 10 ms (one byte
     /// is 87 us) or 2 s in all drops the rest of the queue (counted in
     /// `tx_dropped`).
     fn pump_blocking(&mut self) {
@@ -581,7 +581,7 @@ const BOOT_DATA: u32 = 0x080A_4000;
 /// Its version bytes +0x10..+0x12 (HW major, loader major / minor), copied
 /// once by `Bt::new` at start-up: BT command 02 and the Device page read
 /// the copy. 0x080A4000 is in the slow flash bank (not zero-wait): a load
-/// there stalls the AD2 stream ISR ~21.8 us (device b6909d6), and either
+/// there stalls the AD2 stream ISR ~21.8 us (device 246afc7), and either
 /// may be used while a stream runs.
 static BOOT_VER: [core::sync::atomic::AtomicU8; 3] = [const { core::sync::atomic::AtomicU8::new(0) }; 3];
 

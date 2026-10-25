@@ -841,7 +841,7 @@ impl msc::BlockDevice for Img {
     }
 }
 
-/// Screenshot power-cut test (review 258c833 H1 / L4): the shot driven slice
+/// Screenshot power-cut test (review 530c2e1 H1 / L4): the shot driven slice
 /// by slice (`poll_on`) on the NOR model, stopped after `k` slices (power
 /// cut: the image as it is then, incl. a half-written data block), or with
 /// `abort` stopped there by `screenshot::abort_on` (the power-off / reset
@@ -1188,7 +1188,7 @@ fn vread(a: &[String]) {
     );
 }
 
-/// `t names`: csvlog::parse_path, the MMEM name argument (device 46370df:
+/// `t names`: csvlog::parse_path, the MMEM name argument (device 940e8aa:
 /// "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG). A prefix must name the file's
 /// own directory; none = any (its directory, then the root).
 fn names() {
@@ -1647,7 +1647,7 @@ fn csv(a: &[String], img: &mut Img) {
     let mut shots: Vec<u32> = vec![];
     let mut host: Option<(u32, u32)> = None;
     // mount <row> <rows>: a PC has the disk mounted (msc::host_mounted) for
-    // that many rows: no commit meanwhile (review 3443cea H1).
+    // that many rows: no commit meanwhile (review 4ab408d H1).
     // mountwin <row> <rows>: the same window, not mounted (the baseline: the
     // writes a commit makes there).
     let mut mount: Option<(u32, u32)> = None;

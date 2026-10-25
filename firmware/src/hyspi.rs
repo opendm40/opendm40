@@ -152,7 +152,7 @@ pub fn self_test(n: u32, div: u8, out: &mut [u8]) -> usize {
 }
 
 /// DBG:HYSPI:WR? mode[,div]: the SPI2 write experiment (hy3131 `write_spi`;
-/// feasibility 8.6: 8e5efa6's SPI2 writes set bit 0 of every byte 1xxxxxx0).
+/// feasibility 8.6: a241bf9's SPI2 writes set bit 0 of every byte 1xxxxxx0).
 /// Mode 0 = `hy3131::write` (the bus's write), 1 / 2 / 3 = `write_spi` modes,
 /// at `div` (default 16). 256 single-byte writes of R36 (SPHACAL) = 0..255,
 /// each read back (SPI2 at `hy3131::DIV`); then 256 two-byte writes of

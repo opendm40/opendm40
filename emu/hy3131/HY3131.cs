@@ -52,7 +52,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public const double Vdda = 3.6;     // VDSC taps are fractions of this
         public const double AcNodeTau = 0.3;        // AC coupling time constant of the AC V node (acdc doc 6a)
         // OP1O level while OP1 is off (AC mV), relative to AGND: the coupling capacitor's start on the next
-        // AC V row (INFERRED as a level). Fitted to device 489f956 (0 V, CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6:
+        // AC V row (INFERRED as a level). Fitted to device 8e04b1c (0 V, CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6:
         // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
         // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
         public const double Op1OffLevel = -0.005;
@@ -132,7 +132,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             case 0x1D: return (byte)(CtaNow(now) >> 16);
             case 0x1E:
             {
-                // The read-clears-flag race (device 5f14d38, feasibility 9.5 /
+                // The read-clears-flag race (device 381ea07, feasibility 9.5 /
                 // 10): a conversion that completes while the INTF frame is under
                 // way sets AD2F after the bit was sampled, and the clear of the
                 // same read removes it: the flag is lost, the data (R03..R05)
@@ -313,14 +313,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// AD1 conversion period in seconds (datasheet 13.1 + the chopper halving).
         public double Ad1Period => Osr1 * 30.0 / SysClk * (Ad1Chop ? 2 : 1);
-        // ENCHOPAD2 does not slow AD2 down on the device (opendm40 device check of 9dd1222), whatever the datasheet says
+        // ENCHOPAD2 does not slow AD2 down on the device (opendm40 device check of f48db7d), whatever the datasheet says
         public double Ad2Period => Osr2 * ((regs[0x26] & 0x08) != 0 ? 4.0 : 2.0) / SysClk
             / ((regs[0x26] & 0x0F) == 0 ? 1.0 + Ad2Osr32Ppm * 1e-6 : 1.0);
         /// The /2, OSR 32 setting's rate offset from FAD2CLK / OSR2, ppm (the
         /// stock AC rows' 0x80 and opendm40' 76.8 kS/s rung). 0 = the datasheet,
-        /// as the device converts (opendm40 device check of e7ec2cc; the 76 574.6
-        /// S/s of the 7409b92 / 4c4b489 streams came from opendm40' old Pll);
-        /// -2935 = the rate e7ec2cc assumed (monitor: hy3131 Ad2Osr32Ppm).
+        /// as the device converts (opendm40 device check of 8ce42e2; the 76 574.6
+        /// S/s of the e8cc4e9 / bfb6a19 streams came from opendm40' old Pll);
+        /// -2935 = the rate 8ce42e2 assumed (monitor: hy3131 Ad2Osr32Ppm).
         public double Ad2Osr32Ppm { get; set; } = 0;
         public double LpfPeriod => Ad2Period * Osr4 * LpfRateDivisor;
 
@@ -346,13 +346,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// AD2 gain deviation in that row ("ad2dcg:", 1 = nominal): the one-shot self-cal fixes the offset only.
         public double Ad2DcGain = 1.0;
         /// Per-range part of that gain, as the per_code factor (the node reads 1 / this; device test 6.5
-        /// and acdcmeth e5 of 7409b92: the self-cal's per_code against the nominal K x 1.25 / 2^18: 6 V
+        /// and acdcmeth e5 of e8cc4e9: the self-cal's per_code against the nominal K x 1.25 / 2^18: 6 V
         /// +0.96 %, 60 V +1.88 %, 600 V +0.53 %, 1000 V +0.27 %). The RMS (the AC part) of this node does not follow it: it reads like the stock
-        /// AC V row's PB4 node, through the factory AC V calibration (device e2 of 7409b92: method C's
+        /// AC V row's PB4 node, through the factory AC V calibration (device e2 of e8cc4e9: method C's
         /// sqrt(RMS) x the factory AC V gain - offset = A's AC part within +0.014 / -0.003 % on 6 / 60 V,
         /// where the DC self-cal's gain read it 0.13 / 0.23 % high).
         public double[] Ad2DcGainR = { 1.0096, 1.0188, 1.0053, 1.0027 };
-        /// Method C's 60 V DC error (device acdcmeth e2 / e5 of 7409b92: the E7 self-cal's DC part read
+        /// Method C's 60 V DC error (device acdcmeth e2 / e5 of e8cc4e9: the E7 self-cal's DC part read
         /// +13.6 mV at 4.78 V and +22.7 mV at 24 V, constant over 20 min), split INFERRED into two parts the
         /// data cannot separate further: AD1 on SENSE - PB5 in the AC V row's switch configuration (R2A FS1,
         /// R2E / R2F without DS9 / SMODE2; DC V has DS0 FS0 / DS9 / SMODE2) reads +0.047 % against the DC V
@@ -364,18 +364,18 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double Ad1AcRowScale = 1.0, Ad3ShiftScale = 1.0;
         /// Method C's internal zero (the DC-coupled V row with OP1+ on AGND, SOP1P 011) against a real 0 V
         /// input on SENSE, in AD2 / LPF codes (the AGND zero reads this many codes above). INFERRED from the
-        /// device (2563fe1, acdcmeth e8 / z60): C's 60 V gain from that zero was 0.030 % high, its errors
+        /// device (2cc47ef, acdcmeth e8 / z60): C's 60 V gain from that zero was 0.030 % high, its errors
         /// -7.77 mV + 0.302 mV/V x level with the anchor at 24 V = a zero ~14-16 codes off; 6 V showed
         /// nothing similar (slope -0.007 %), 600 / 1000 V not measured. "agndz:" scales (0 = off).
         public double[] AgndZeroCodes = { 0, 15, 0, 0 };
         public double AgndZeroScale = 1.0;
         /// The RMS block's HPF in the DC-coupled V row (method C): first order, time constant HpfTau (s); its
         /// state starts at 0 when ENRMS or ENAD2 is switched on, so a row write puts the node's whole DC
-        /// through it as a step (an input step: the change). INFERRED from the device (7409b92, by hand): the
+        /// through it as a step (an input step: the change). INFERRED from the device (e8cc4e9, by hand): the
         /// first method C reading after a 6 V row write with 5 V DC showed 2.11 V of AC = 0.42 x the DC, the
         /// RMS of the 320..427 ms block for 0.43 s. "hpftau:" (0 = an ideal HPF).
         public double HpfTau = 0.43;
-        /// Method C's RMS fault with a large DC on its X x Y node (device, 7409b92 by hand: 5 / 5.5 V DC on
+        /// Method C's RMS fault with a large DC on its X x Y node (device, e8cc4e9 by hand: 5 / 5.5 V DC on
         /// 6 V = 105 / 116 k codes gave ~0.7 readings / s, the other RMS results dropped as garbage, and the
         /// range hunted 6 <-> 60 V; 4.0 / 4.5 V = 85 / 95 k codes and the e2 square's 100.4 k mean were
         /// fine). The mechanism is not known (the power meter's YY statistic with 104 k codes of DC was fine,
@@ -393,7 +393,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// The AC V node carrying the jack's AC only from this long after the AC V row was entered
         /// from another function (opt-in, "acarrive:ms"; 0 = at once): an RMS block over the arrival
         /// reports the share of its window after it of the input's mean square (the rest of the
-        /// window had none). Device 489f956 (DC V -> AC V on the 0 / 9.5 V square, 20 / 50 / 90 Hz):
+        /// window had none). Device 8e04b1c (DC V -> AC V on the 0 / 9.5 V square, 20 / 50 / 90 Hz):
         /// the first result read after the 300 ms settle was latched during it and read 0.707 of
         /// the input (half the mean square), the next one ~107 ms later was right. The path's delay
         /// (relays / coupling) and its timing are INFERRED: "acarrive:160" with the blocks on the
@@ -401,11 +401,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double AcArriveMs = 0;
         /// An input offset of the AC A rows' AD2 path (opt-in, "acaoff:mV" referred to the shunt's input,
         /// through the row's OP1 gain; 0 = none): the LPF and the AD2 samples read it as a DC current.
-        /// Device 489f956: the AC A 10 A row's AD2 stream with the A jack open averaged +150.4 codes =
+        /// Device 8e04b1c: the AC A 10 A row's AD2 stream with the A jack open averaged +150.4 codes =
         /// +0.0717 A (rms about it 1.72 mA), i.e. "acaoff:0.717" on the 10 mohm shunt. Where it arises
         /// is INFERRED (an offset at OP1 / AD2, the same on every shunt).
         public double AcaOffMv = 0;
-        /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device c6f9670 tc6,
+        /// The LPF's slow creep after an input step in the DC-coupled V row (method C; device 2fbc5e7 tc6,
         /// acdc-approaches.md 10.11 / 10.14): after 5 -> 3 V on 6 V (41.6 k codes) the LPF was still 5..12 codes above
         /// the value it reached ~8 s later when C's second reference ended (3.6 s), while DC V (AD1) settled
         /// within 0.1 mV in ~1 s; the trace stayed ~+5 codes over the first ~4 s and fell from there (a
@@ -413,23 +413,23 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// codes extra, x the node's code of the jack's DC and s the same through LpfCreepOrder cascaded
         /// first-order lags of LpfCreepTau (s). Order 3 (10.14): a step leaves (1 + q + q^2 / 2) e^(-q) of it, q =
         /// t / tau: flat for the first seconds, so a 3 s window's slope stays below 1 code / s while ~6 codes
-        /// are left at ~5.6 s, which is what the device's second references saw (f42a09e e8s: the two-point gain
+        /// are left at ~5.6 s, which is what the device's second references saw (afcf151 e8s: the two-point gain
         /// over 5 -> 3 V +3.9..+13 codes above the accurate internal zero's at the new point; order 2 left
         /// only ~3). Keyed on the jack's DC only (an input step), not on row writes or the internal zero's OP1+
         /// switch (the device's internal-zero gain was right). Only steps while this row runs on one range:
         /// the lag survives a gap of up to CreepGap s (C's DC V reference, ~1 s; it is advanced at this row's
         /// LPF results, so a step inside the gap counts from the last one) and starts again (no creep) after a
         /// longer one or a range change (the device's entries came seconds after the calibrator's step with an
-        /// accurate internal zero; c6f9670 saw the creep on a step inside a session). 2.4e-4 / 2.5 s / order 3
+        /// accurate internal zero; 2fbc5e7 saw the creep on a step inside a session). 2.4e-4 / 2.5 s / order 3
         /// over the 41.6 k step: +10 codes at the step, +9.2 at 2.5 s, +6.0 at 5.6 s, +3.8 at 8 s, +1.4 at
         /// 12 s. "lpfcreep:" scales (0 = off), "creeptau:" s, "creepord:" 1 / 2 / 3.
         public double LpfCreep = 2.4e-4, LpfCreepScale = 1.0, LpfCreepTau = 2.5;
         public int LpfCreepOrder = 3;
         private const double CreepGap = 3.0;
-        /// The LPF's noise in that row, codes rms per result (device c6f9670 tc6: 3 V on 6 V, +-2..3 codes
+        /// The LPF's noise in that row, codes rms per result (device 2fbc5e7 tc6: 3 V on 6 V, +-2..3 codes
         /// p-p at rest, sd ~1.7); the model's LPF had none. "lpfn:" codes (0 = off).
         public double LpfDcNoise = 1.7;
-        /// ... times this per range (device f42a09e e8s, 10.14: the second reference's 3 s window, residual rms
+        /// ... times this per range (device afcf151 e8s, 10.14: the second reference's 3 s window, residual rms
         /// after a line fit, 6 V ~1.9 codes, 60 V ~1.0; 600 mV / 600 V not measured).
         public double[] LpfDcNoiseR = { 1.0, 1.0, 0.6, 0.6 };
         public bool CntPin;                    // CNT pin level (ENCNTI source); set by the board model
@@ -453,46 +453,46 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public long SwallowedAd1;
         /// AD2 start-up (opt-in, codes; 0 = none): the first Ad2StartResults
         /// results after an AD2 (re)start read this much off, as a decimation
-        /// filter that does not start from the input (device f3aea2f: the
+        /// filter that does not start from the input (device 7534701: the
         /// A-jack probe's first peak-hold window tripped A-PROT with the A
         /// jack open). Monitor: hy3131 Ad2StartGlitch 3000.
         public int Ad2StartGlitch;
         /// PB1 picks up the V jack in the ohm / temperature rows (opt-in, mV per V; 0 = none).
-        /// Device 1eb4d7e / 973df07: with the A jack open, 5 / 10 V DC or the 0..9.6 V square
+        /// Device 9944169 / 2ba1a1b: with the A jack open, 5 / 10 V DC or the 0..9.6 V square
         /// on V-COM tripped the comparator on PB1 there (A-JACK), 1 V did not; the same rows
         /// put ~3.4 mV per volt on PB2 (the probe read 0.34 A / V). The ratio is INFERRED
         /// (any k with 1 V below and 5 V above the comparator's 23.75 mV fits: 10 mV / V).
         /// Monitor: hy3131 Pb1VjackMv 10.
         public int Pb1VjackMv;
-        /// mV input clamp (opt-in, "mvclamp:V"; device 46370df: AC V AUTO, mV-first, the 40 Hz 0 / 9.5 V
+        /// mV input clamp (opt-in, "mvclamp:V"; device 940e8aa: AC V AUTO, mV-first, the 40 Hz 0 / 9.5 V
         /// square on V-COM read 0.606 V on 600 mV for 12 s, under the 1.03 x 600 mV up-range threshold):
         /// the V jack on the mV path (path 1) clipped to +-V before the AC mV node. 0.606 V AC RMS of a
         /// 0 / 9.5 V square = a node swing of 0 .. 1.21 V: "mvclamp:1.212". Where the clamp sits and its
         /// shape are INFERRED (a symmetric hard clip). AC mV rows only. 0 = none.
         public double MvClampV;
         /// Ohm: a positive source on the jack above the ohm source's open-circuit voltage (the drop
-        /// across Rref reversed) reads +full scale, OL (device 35fce2a 7b: 5 / 10 V DC on V-COM read
+        /// across Rref reversed) reads +full scale, OL (device 2d33d3a 7b: 5 / 10 V DC on V-COM read
         /// OL on every range 600 ohm .. 60 Mohm, never the negative code of a source of the other
         /// sign). Default on; "ohmrevol:0" = the plain ratio (a negative code, LIVE?).
         public bool OhmRevOl = true;
         /// Ohm: OP1O (the row's x1 buffer of the input, PB0) does not follow a source on the jack
-        /// above the open-circuit voltage: device a2e9766 (the jack check's AD2 = OP1O - PB3 peak)
+        /// above the open-circuit voltage: device 7c04b03 (the jack check's AD2 = OP1O - PB3 peak)
         /// read 2.25 V at 5 V DC (600 ohm; 2.14 V on 60 Mohm), 2.02-2.03 V at 10 V. The model clips
         /// the node at OhmOp1V0 - OhmOp1K x the jack's volts (2.47 - 0.044 V: 2.25 V at 5 V, 2.03 V
         /// at 10 V); the line and the range independence are INFERRED from those points. Default on;
         /// "ohmop1k:0" = the old swing clip (+2.55 V), which made the jack check say "driven".
         public double OhmOp1K = 0.044, OhmOp1V0 = 2.47;
         /// Ohm: a source on the jack at or above this many volts overdrives the comparator: CMPHO
-        /// and CMPLO in one read (CTSTA 0x70) on PB1. Device a2e9766 / 2da1011 E4: RES at 5 / 10 V
+        /// and CMPLO in one read (CTSTA 0x70) on PB1. Device 7c04b03 / 0bf7db1 E4: RES at 5 / 10 V
         /// DC and the 0 / 9.5 V square read CTSTA 0x70, 1 V and 3 V no hit at all; the level between
         /// 3 and 5 V is INFERRED (4 V). Instantaneous (the square reads it in its high half).
         /// Default 4; "ohmboth:0" = off (PB1 alone, Pb1VjackMv).
         public double OhmBothV = 4.0;
         /// PB1 picking up the mV clamp's current in the AC mV rows (opt-in, "mvpb1:mV per V" of the jack
-        /// beyond the clamp; device 46370df: the same square asserted AJACK,AD1PK_PB1 with the A jack
+        /// beyond the clamp; device 940e8aa: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
         public double MvPb1Mv;
-        /// AD1 decimation memory (opt-in, "ad1mix:1"; device bab5dd4, DC V AUTO from 600 V: one
+        /// AD1 decimation memory (opt-in, "ad1mix:1"; device 9292ec2, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
         /// rows at OSR 8192) leaves the conversions of the next 3 periods a sinc^3-weighted mix
@@ -505,14 +505,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// SENSE tap carry swtr mV x exp(-dt / swtau) x cos(2 pi swhz dt) on top of the input,
         /// both signs (a relay / front-end ring). Default 60 ms, 25 Hz; off (0 mV) by default.
         public double SwTrMv, SwTrTau = 60, SwTrHz = 25;
-        /// Leaving ohm (device ad74e93, 2026-10-23: RES -> DC A / mA, nothing connected): the
+        /// Leaving ohm (device 0256df2, 2026-10-23: RES -> DC A / mA, nothing connected): the
         /// relay back to the V/A path (PA10) while the chip runs an ohm row; the A rows'
         /// comparator on SENSE then reads CMPHO | CMPLO together (CTSTA 0x70) for ohmexit s and
         /// CMPLO alone (0x50) for ohmexitlo s more (the device: ~3.5 s, then 0x50 until ~5 s),
         /// whatever the input ("ohmexit:3.5;ohmexitlo:1.2"; off by default).
         public double OhmExitBoth, OhmExitLow;
         private double ohmExitT = double.NegativeInfinity;
-        /// The same CTSTA trace also from a chip reset (opt-in, "ohmexitrst:1"; device ab7184c:
+        /// The same CTSTA trace also from a chip reset (opt-in, "ohmexitrst:1"; device 0760432:
         /// A / mA -> Scope -> DMM with 5 V on V-COM, 0x70 to 7.75 s, 0x50 to 8.01 s after the
         /// switch: the DMM rail comes back, the chip resets, the A row follows). Off by default.
         public bool OhmExitRst;
@@ -521,19 +521,19 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// with this time constant after every row change (an ohm range step changes Rref, so
         /// the target), starting from 0 V (the node outside the ohm rows with a passive Rx). It
         /// stands for the input network's RC and a calibrator's resistance simulation catching
-        /// up (device ab7184c: DC V -> RES on 390 / 100 ohm read 8.8 Mohm, then 219 / 57 ohm on
+        /// up (device 0760432: DC V -> RES on 390 / 100 ohm read 8.8 Mohm, then 219 / 57 ohm on
         /// the right range before the right value). Off (0) by default.
         public double OhmTauMs;
         private double ohmLagV, ohmLagT, ohmLagTarget;
-        /// AC A rows, AD1 on SENSE - PB5 (the opendm40 f0d21eb V-JACK? sentinel): PB5 is not
+        /// AC A rows, AD1 on SENSE - PB5 (the opendm40 3e41549 V-JACK? sentinel): PB5 is not
         /// defined by the A rows (only the DC V 60 V+ rows' power bus / OP3 drive it), and the
         /// device's AD1 peak there ran from ~-117 000 at 0.7 s to the negative rail by ~2 s
-        /// whatever was on V-COM (device-check f0d21eb 2a). Replay: PB5 rises by
+        /// whatever was on V-COM (device-check 3e41549 2a). Replay: PB5 rises by
         /// pb5drift V x (1 - exp(-t / pb5tau s)) from the first AC A row write (kept across AC A
         /// range changes), so SENSE - PB5 falls ("pb5drift:0.6;pb5tau:2.2"; off by default).
         /// SENSE - AGND (the fixed row) does not drift.
         public double Pb5DriftV, Pb5DriftTau = 2.2;
-        /// AC A rows, SENSE itself (either AD1 reference; device 0774e70): with 24 V DC on V-COM
+        /// AC A rows, SENSE itself (either AD1 reference; device a3b6d0a): with 24 V DC on V-COM
         /// SENSE - AGND ramped from ~-64 mV at 0.5 s to the negative rail (< -347 mV at IG 3.6) by
         /// ~3.3 s, 9 000-12 000 codes per 107 ms hold. Replay: SENSE falls by senseneg V x
         /// (1 - exp(-t / sensetau s)) from the first AC A row ("senseneg:0.75;sensetau:5"; off by
@@ -542,7 +542,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private double acaT0 = double.NegativeInfinity;
         /// When the AC V row was entered from another role (AcArriveMs).
         private double acvT0 = double.NegativeInfinity;
-        /// AC A 10 A -> mA / uA (device f0d21eb: CONF:CURR:AC 10, then 0.06, the A jack empty:
+        /// AC A 10 A -> mA / uA (device 3e41549: CONF:CURR:AC 10, then 0.06, the A jack empty:
         /// the first 60 mA result read OL): the AD2 node (OP1O - PB3) carries a step of acastep
         /// codes for acastepms ms from that row write, in the LPF and the RMS blocks it overlaps
         /// ("acastep:200000;acastepms:600"; off by default). The shape is not measured: only
@@ -572,13 +572,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double R22PartWinMs;
         private double rowT = double.NegativeInfinity, r21T = double.NegativeInfinity;
         private int r22PartLeft;
-        /// Chopped AD1 restart (opt-in, "chophalf:1"; INFERRED from device 10242c3, osr/ fr_40_15:
+        /// Chopped AD1 restart (opt-in, "chophalf:1"; INFERRED from device 2232996, osr/ fr_40_15:
         /// the first record of an OSR 8192 chopped session after a 640/s one came 51.9 ms after the
         /// session's first (stale) flag, the later ones 100.8 ms apart): after a restart with the
         /// chopper on, the first result comes half a period later, then every period. Off by default.
         public bool ChopHalf;
         /// Chopped AD1: every other result that many ms early (opt-in, "chopskew:ms"; INFERRED from
-        /// device e1cec01, an OSR 8192 chopped session right after a 640/s one: flags 78.4 / 123.2 ms
+        /// device 4284642, an OSR 8192 chopped session right after a 640/s one: flags 78.4 / 123.2 ms
         /// apart in turn, 100.8 ms on average). Off (0) by default.
         public double ChopSkewMs;
         private double r22PartT = double.NaN;
@@ -587,7 +587,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private Role lastRole = Role.None;
         private int lastMode = -1;
         /// DC A rows' SENSE comparator blind to the V jack depending on the history (device
-        /// f0d21eb, 24 V on V-COM: CTSTA 0x70 / 0x50 in DC A only when the temperature row came
+        /// 3e41549, 24 V on V-COM: CTSTA 0x70 / 0x50 in DC A only when the temperature row came
         /// before; DC V 60 V+, an ohm-network row or a chip reset left it reading 0 for 10+ s;
         /// AC V and the A rows keep either state). "vjblind:1": SENSE reads 0 in the DC A role
         /// unless a temperature row ran since the last DC V r1+ / ohm / continuity / diode /
@@ -1221,7 +1221,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         {
             f = 0; duty = 0;
             // ct0dead: the frequency row's comparator source (ENCNTI = 0) counts no edges for
-            // ct0dead ms after the row change (device 0774e70: 0 Hz / 0 % in source 0xf0's
+            // ct0dead ms after the row change (device a3b6d0a: 0 Hz / 0 % in source 0xf0's
             // first gates after every Hz entry; source 0x08 read the signal).
             if(Ct0DeadMs > 0 && role == Role.Freq && !EnCntI && ctNow < Ct0DeadEnd) return;
             if(role == Role.CapOsc)
@@ -1412,7 +1412,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
             if(Fe.RelayPa == 1 && ac > 0) vx += Wave(t, dc, ac, hz, shape, duty) - dc;
-            // ohm: the buffer stops below the source (OhmOp1K, device a2e9766)
+            // ohm: the buffer stops below the source (OhmOp1K, device 7c04b03)
             if(role == Role.Ohm && OhmOp1K > 0) vx = Math.Min(vx, OhmOp1V0 - OhmOp1K * Math.Max(vx, 0));
             return Math.Max(-1.18, Math.Min(2.55, vx));
         }
@@ -1606,7 +1606,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             if(role == Role.AcA && fp == 0 && (fn_ == 7 || fn_ == 3))
             {
-                // opendm40 sentinel (AC A V-JACK?): AD1 on SENSE - PB5 (f0d21eb) or SENSE - AGND,
+                // opendm40 sentinel (AC A V-JACK?): AD1 on SENSE - PB5 (3e41549) or SENSE - AGND,
                 // SENSE = the V jack through the /1000 tap with SS5 closed (open otherwise),
                 // instantaneous; PB5 drifts with pb5drift (above)
                 var vin = SenseTapVolts(t);
@@ -2019,7 +2019,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 cmpLow = node < CmpLowThreshold;
                 if(role == Role.Ohm && OhmBothV > 0 && scmpiPb1)
                 {
-                    // a source on V-COM overdrives the comparator (OhmBothV, device a2e9766)
+                    // a source on V-COM overdrives the comparator (OhmBothV, device 7c04b03)
                     double dc, ac, hz, duty; string shape;
                     Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                     if(Fe.RelayPa == 1 && Math.Abs(Wave(now, dc, ac, hz, shape, duty)) >= OhmBothV) cmpHigh = cmpLow = true;
@@ -2138,8 +2138,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var v = Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
             if(Pb1VjackMv != 0 && role == Role.Cont)
             {
-                // the V jack on PB1 in the continuity row as in ohm (SentinelNode; device f0d21eb /
-                // 0774e70: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
+                // the V jack on PB1 in the continuity row as in ohm (SentinelNode; device 3e41549 /
+                // a3b6d0a: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
             }
@@ -2783,11 +2783,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// The 76.8 kS/s setting's own rate offset, ppm (Hy3131Core.Ad2Osr32Ppm,
         /// default 0 = the datasheet's 76 800, as the device (opendm40 device check
-        /// of e7ec2cc); monitor: hy3131 Ad2Osr32Ppm).
+        /// of 8ce42e2); monitor: hy3131 Ad2Osr32Ppm).
         public double Ad2Osr32Ppm { get => Core.Ad2Osr32Ppm; set => Core.Ad2Osr32Ppm = value; }
 
         /// INTF read-clears-flag race window, us (Hy3131Core.IntfRaceWindow). Default
-        /// 0.7 us: what the device's loss bursts imply (5f14d38 check: ~11.5 ms per
+        /// 0.7 us: what the device's loss bursts imply (381ea07 check: ~11.5 ms per
         /// burst at a 63 ppm tick / chip walk = 0.72 us). 0 = an ideal flag.
         public double IntfRaceUs { get => Core.IntfRaceWindow * 1e6; set => Core.IntfRaceWindow = value * 1e-6; }
 
@@ -3072,7 +3072,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         ///   With the DO path delay (TDODL 60 ns + the isolator, DoDelayNs)
         ///   above that half period (/8: 80 ns) a bit that just changed may be
         ///   sampled at its old level (MisoErrRate per such bit): device
-        ///   4b98128 / b81abf2, plain /8 reads (feasibility 11.3).
+        ///   035fc32 / 8701d51, plain /8 reads (feasibility 11.3).
         ///   CKPH 1: the master samples at the falling edge, a full period after
         ///   the change (clean at /8), and changes MOSI at the rising edge,
         ///   where the chip samples DI: the chip sees the previous bit (a

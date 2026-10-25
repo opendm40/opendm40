@@ -69,7 +69,7 @@ glyphs keep the direct column walk. Random access (`alpha`) remains for
 `Ink::at` / the scope markers (1 bpp fonts); on an RLE4 glyph it decodes
 from the top (correct, slow, not used by any 4 bpp drawing path).
 
-Result on 5f9b5a0: 32 422 B of bitmaps and 8 690 B of entries (was 90 897 +
+Result on a45c996: 32 422 B of bitmaps and 8 690 B of entries (was 90 897 +
 13 212 B), ~12.4 KB of renderer code. The RLE decode is also faster than
 the raw bitmaps (Renode, DBG:PROF?: DMM page full draw -8.7 %, DMM reading
 redraw avg 646 -> 484 us): blank rows are skipped and a run fills several

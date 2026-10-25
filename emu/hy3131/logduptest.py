@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """AD1 stream logger: no conversion recorded twice (device check of
-10242c3, AD1 OSR characterization: right after a 640/s session an OSR 8192
+2232996, AD1 OSR characterization: right after a 640/s session an OSR 8192
 chopped session held each conversion twice, identical codes ~52 ms apart,
 121 of 294 records; firmware/docs/device-check-2026-10-21.md). The main-loop
 sampler (firmware/src/logger.rs `sample`) took the session's first interval
@@ -34,7 +34,7 @@ import dm40scpi  # noqa: E402
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native image')
 ap.add_argument('--port', type=int, default=47710, help='USB/IP port')
-ap.add_argument('--skew', type=float, default=22.4, help='model chopskew, ms (0 = the 10242c3 case alone)')
+ap.add_argument('--skew', type=float, default=22.4, help='model chopskew, ms (0 = the 2232996 case alone)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)

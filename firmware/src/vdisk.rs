@@ -181,7 +181,7 @@ struct State {
 /// Internal flash from here to the end of its 1 MiB is NOT zero-wait
 /// (link-native.x region C, the FS-loader, its UID data, the calibration
 /// record): one CPU load from it stalls the bus ~21.8 us, and the AD2
-/// stream ISR's entry with it, whatever code does the load (device b6909d6:
+/// stream ISR's entry with it, whatever code does the load (device 246afc7:
 /// INFO/CALIB.BIN, BOOTDATA.BIN, LOADER.BIN and the FIRMWARE.BIN tail copied
 /// by a host during a 38400 disk session: 10 k samples lost, at 76800 289 k).
 /// The volume therefore never reads it while the stream ISR owns the bus
@@ -772,7 +772,7 @@ fn geo() -> Option<(FnRaw, Geo)> {
 /// How far cursor `c` is behind `off` when it holds file `key` (within
 /// CUR_NEAR). A fn, not a closure in `file_read`: a closure's section name
 /// carries this module's path, so the .cold rule put it in region C (device
-/// f3aea2f: DBG:ISR? lat_pc = `file_read::{closure#0}`, max_lat 9 us while a
+/// 7534701: DBG:ISR? lat_pc = `file_read::{closure#0}`, max_lat 9 us while a
 /// host read the volume during an AD2 19200 stream).
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn near(c: &dlog::Slot<(u16, u32)>, key: (u16, u32), off: u32) -> Option<u32> {
@@ -924,7 +924,7 @@ fn mir_read(addr: u32, buf: &mut [u8]) -> bool {
 // ~1.1 ms of wall time with the stream ISR at ~54 % of the CPU at 76 800
 // S/s. A host copying LOADER.BIN (128 KiB, all mirrored) back to back took
 // that from the fast logger's coder pass by pass: 21 745 samples lost per
-// copy (device 612c45c M2c), and a copy inside the writer trial made it
+// copy (device bb15d39 M2c), and a copy inside the writer trial made it
 // fall back to 38 400. So while the stream runs a mirror sector is read
 // only when this pass grants it (`mirror_pass`, main.rs, once per pass
 // before the MSC poll; at most one sector per pass) and the chip is idle

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40 DC V autorange after a multi-step range change, and READ? across a
-range change (device bab5dd4, device-check doc "bab5dd4" 1 / 3).
+range change (device 9292ec2, device-check doc "9292ec2" 1 / 3).
 
   cd firmware && ./build.sh
   emu/hy3131/autorangetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40

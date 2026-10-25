@@ -1753,7 +1753,7 @@ impl FPar {
         p
     }
     // Region B: Gen::open of a FAST CSV calls it while a host reads the
-    // volume, also during the Wave view's stream (device check a0985e4:
+    // volume, also during the Wave view's stream (device check 1e39149:
     // max_lat 21.4 us at 38400 S/s with lat_pc in this fn, region C). No
     // closure: it would get a symbol of its own in C.
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]

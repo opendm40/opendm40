@@ -2,7 +2,7 @@
 
 Static analysis of the owner report "the oscilloscope really lags" / "dragging
 the trace lags" (2026-10-13). The profiler that confirms these numbers is
-`src/prof.rs` (`DBG:PROF?`, `DBG:PROF:RESET`, commit 95287a8). Every
+`src/prof.rs` (`DBG:PROF?`, `DBG:PROF:RESET`, commit 4c94b43). Every
 millisecond figure below is an estimate from the code; nothing was measured on
 the device yet. The fixes are proposals; no source was edited.
 
