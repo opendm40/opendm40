@@ -3682,7 +3682,18 @@ Emulator (emu/):
       the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
       aca-auto-dn / acv-entry: FAIL on 5fdd812, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
       VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
-      for CONF:VOLT:DC 6 -> CONF:VOLT:AC.
+      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
+      reading at the 60 -> 6 V step (the first final +7 %: the coupling step); the entry fails differently (next item).
+- [ ] Plain AC V entry: the first final reads 1/√2 of the input (device 489f956, DC V -> AC V on the square at 20 / 50 /
+      90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
+      the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
+      (INFERRED: half its window before the AC row carried the input). 049bb65 seeds `f_ac` with it, so it shows as
+      final. Candidate fix (untested): drop a plain AC result latched before the deadline (clear INTF at the deadline).
+      Device check: as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1, also with a sine if one is available.
+- [ ] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
+      (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
+      input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
+      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) note 2.
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device cd1ec9a note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
@@ -3702,6 +3713,8 @@ Emulator (emu/):
       square from CONF:VOLT:AC 0.6 -> CONF:VOLT:AC with VOLT:AC:RANG? every 50 ms. A first final above ~0.1 V
       at 0 V or a 60 V visit = real: then hold plain AC V results after a row write until two agree
       (as ACA_VET) and let held results move no range; else lower the model's level.
+      [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
+      a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
 - [ ] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
       live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
       (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
@@ -3709,3 +3722,5 @@ Emulator (emu/):
       open, `dm40scpi.py log out.csv --source ad2 --rate 9600 -d 1`: the mean of the samples (A) against the cal
       0x10C offset, and their rms about the mean. Mean off = arm with a measured zero; noise = the plan's
       ~20 mA figure is what changes.
+      [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
+      the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
