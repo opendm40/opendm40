@@ -3918,4 +3918,39 @@ Emulator (emu/):
 - Not changed: the touch-down debounce ([src/touch.rs](src/touch.rs) `Debounce`) reports the second pressed
       frame's point as the down point, so a finger that already moves in its first report loses that
       report's travel (5 px in `emu/draglat.py --still 0`); a landing finger (one still report) loses none.
-
+- [x] Side keys "lag", "AUTO mixed with RUN", "as if related to AutoHold" (owner, build 3c7c876 and later). Cause:
+      [src/gesture.rs](src/gesture.rs) `Tracker::step` turned a change of the debounced key mask into one gesture,
+      with the code of the lowest changed bit and "down" if any key was down in the new mask. The debounce
+      ([src/touch.rs](src/touch.rs) `Debounce`) goes from one key straight to another when the release frame is
+      replaced inside its 40 ms by the next key's report (or the release report is lost / overtaken in one read
+      after a main-loop stall): RUN -> AUTO gave KeyDown(RUN) for the AUTO press and no KeyUp(RUN), so
+      [src/app.rs](src/app.rs) `run_down` stayed set and AutoHold toggled 1 s later (it is persisted, so it then
+      stays on over a power-off); MENU -> any key gave MENU again ("the previous press at the next one").
+      Emulator (CST_Touch model, RUN 150 ms, AUTO 20 ms after its release): `DBG:TOUCH?` `G,K,1` twice, then
+      `G,k,2`; `CALC:AHOL?` 1. Fixed: `Tracker::key_step` reports one key per call, releases first, the rest at the
+      next event or tick (<= 10 ms): `G,K,1 G,k,1 G,K,2 G,k,2`, `CALC:AHOL?` 0. Host test:
+      [tools/touch-test](tools/touch-test/main.rs) `key_tests` (failed 3 of 4 before). Commit "Side keys: one gesture per key change".
+      Main-loop stalls (emulator): the save after a boot with the W25Q128 erase at its 400 ms datasheet maximum
+      made a 370 ms pass (`DBG:PROF?` tick max); keys pressed during such a pass were not exercised (the
+      timed saves under test wrote blank slots, no erase). One EXTI edge is latched for the whole pass, so a
+      release and the next press inside it read as one key-to-key change: the case fixed above (inferred).
+- [ ] Device check (3 min): (1) `CALC:AHOL?`; if 1, `CALC:AHOL OFF` (or hold RUN 1 s): AutoHold may be on from this
+      bug. (2) DMM page, `DBG:TOUCH 0`; press RUN, release, and press AUTO at once (roll the thumb down the strip),
+      10 times: no A-HOLD label appears, HOLD is off after each AUTO, `CALC:AHOL?` 0. (3) Press MENU then MF quickly:
+      the range page opens (not the menu twice). (4) `firmware/tools/touch-log.py --raw`: every key shows
+      `G,K,<code>` and `G,k,<code>` in pairs with its own code. (5) Hold RUN 1 s: A-HOLD on, again: off (unchanged).
+- [ ] Unknown (device data decides): whether the 0x5A controller repeats the key report while a key is held, and
+      whether it ever drops the release report. The (4) log above shows it (frames `F,e,k<code>` per press). If
+      releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
+      repeat period. Every key-down is accepted 40 ms after its single report (`DEBOUNCE_MS`; the stock has no
+      debounce, [touch_v2_6.h](../stock/re/analysis/touch_v2_6.h) "No other debounce"): inferred, not the cause.
+- [x] AUTO key range cycle (owner 2026-10-25): V / A / ohm, [src/app.rs](src/app.rs) `auto_key_end` on the release
+      (short) or after `RUN_LONG_MS` held (long; the RUN key's timer `run_down`, `run_key` 2). Short: autorange ->
+      the present range fixed; manual -> the next higher item of `ui::range_items` (60 mV, 60 ohm included), the
+      highest wraps to the lowest. Long: V AUTO+, A and ohm AUTO. Both clear HOLD and REL; AutoHold kept
+      (`Meter::set_hold` does not touch `ahold`). Power meter, capacitance, continuity / diode, Hz / temperature,
+      scope, inrush, generator: as before. The short press acts on the release now, not at the key-down (so a
+      long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
+- [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
+      (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
+      AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
