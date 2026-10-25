@@ -81,6 +81,10 @@ To install opendm40 on a meter that runs the stock firmware:
 
 *Install: copy the file onto the stock firmware's USB disk, then restart.*
 
+![Step 2 on the stock firmware: USB Connect](img/install-stock-usb.png)
+
+*Step 2 on the stock firmware: USB Connect.*
+
 If the meter stops on the loader's update screen instead, install the file
 from there ([Install a file from the update
 loader](#install-a-file-from-the-update-loader)).
@@ -103,9 +107,9 @@ If you do not answer within 60 seconds, the answer is No and the file is
 deleted. A file that is not a DM40 update file is refused with **Not a DM40
 update file**.
 
-![The question after an update file was copied](img/confirm-install.png)
+![Steps 1 and 4: the USB disk row, the install question](img/update-steps.png)
 
-*The question after an update file was copied.*
+*Steps 1 and 4: the USB disk row, the install question.*
 
 ### Keys
 
