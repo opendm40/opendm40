@@ -1,0 +1,100 @@
+# Build, checks and host tests (firmware/README.md "CI and releases").
+name: CI
+
+on:
+  push:
+    branches: [main, rust-fw-poc]
+  pull_request:
+    branches: [main, rust-fw-poc]
+  workflow_call: # release.yml runs the same jobs before it publishes
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The local toolchain's version (firmware/README.md "Toolchain"): the same
+  # rustc gives the same image bytes. Change both together.
+  RUST_VERSION: 1.99.0
+
+jobs:
+  build:
+    name: Build image + budget checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: thumbv7em-none-eabihf
+          components: llvm-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: firmware -> target
+      # No ../toolchain here: build.sh takes the rustup install above.
+      # Stack depth, region A2 / B / C, SRAM and the update-file checks
+      # fail the build.
+      - name: build.sh --locked
+        run: firmware/build.sh --locked
+      - name: Non-default feature sets (tools/build-variants)
+        run: firmware/tools/build-variants/run.sh
+      - name: Image name and checksum
+        id: image
+        working-directory: firmware
+        run: |
+          name=dm40_opendm40_v$(tools/fw-version.sh).bin
+          test -f "$name"
+          sha256sum "$name" | tee SHA256SUMS
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opendm40-${{ github.sha }}
+          path: |
+            firmware/${{ steps.image.outputs.name }}
+            firmware/SHA256SUMS
+            firmware/target/native/stackdepth.txt
+          if-no-files-found: error
+
+  host-tests:
+    name: Host test suites
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: thumbv7em-none-eabihf
+          components: llvm-tools
+      - name: Packages (Pillow for the renders, mtools + dosfstools for the FAT tests)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil mtools dosfstools
+      # The suites take ../../../toolchain: point it at the rustup install.
+      - name: Link toolchain/
+        run: |
+          mkdir -p toolchain
+          ln -s "${RUSTUP_HOME:-$HOME/.rustup}" toolchain/rustup
+          ln -s "${CARGO_HOME:-$HOME/.cargo}" toolchain/cargo
+      - name: tools/ci-tests.sh
+        run: firmware/tools/ci-tests.sh
+
+  docs:
+    name: Doc checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Relative links and anchors (tools/linkcheck.py)
+        run: python3 firmware/tools/linkcheck.py .
+      - name: SCPI reference vs parser (tools/scpi-doc-check)
+        run: firmware/tools/scpi-doc-check/run.sh
+
+  version:
+    name: Version bumped since the last tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tags and the history since the last one
+      - name: tools/version-check.sh
+        run: firmware/tools/version-check.sh
