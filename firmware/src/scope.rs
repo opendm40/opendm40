@@ -392,20 +392,79 @@ pub const fn wave_real_fs(fs: u32) -> u32 {
     if fs == 76_800 { (crate::hy3131::ad2_real_rate_mhz(0) + 500) / 1000 } else { fs }
 }
 
-/// Smallest 1-2-5 step with 4 divisions >= `full` (the DMM range full
-/// scale fills the half screen): 6 V -> 2 V/div, 600 mV -> 200 mV/div,
-/// 1000 V -> 500 V/div, 10 A -> 5 A/div, 600 uA -> 200 uA/div.
-pub fn wave_vdiv(full: f32) -> f32 {
-    let mut d = 1e-9f32;
-    while d < 1e6 {
-        for k in [1.0f32, 2.0, 5.0] {
-            if 4.0 * d * k >= full * 0.999 {
-                return d * k;
-            }
-        }
-        d *= 10.0;
-    }
-    full / 4.0
+/// One vertical step of the wave view: V/div (SI), the MF range item
+/// (`ui::range_items`, `Dmm::set_range`) it shows, and whether it is that
+/// range's full-scale step (+-full on the 8 divisions: V/div = full / 4).
+/// Ascending; the V/div + / - buttons, the pinch and AUTO step this list.
+pub type WaveStep = (f32, u8, bool);
+
+/// V function: 60 mV (item 5), 600 mV (0), 6 / 60 / 600 / 1000 V (1..4).
+/// Between two full-scale steps the 1-2-5 values; each runs on the lowest
+/// range whose AD2 window holds its +-4 divisions with >= 20 % to spare
+/// (feasibility 3.3: +-125 mV, +-1.25 V, +-12.5 V, +-125 V, +-1250 V), so
+/// the range changes only where a step needs it (2 V/div stays on 6 V).
+pub const WAVE_STEPS_V: [WaveStep; 19] = [
+    (0.015, 5, true),
+    (0.02, 5, false),
+    (0.05, 0, false),
+    (0.1, 0, false),
+    (0.15, 0, true),
+    (0.2, 0, false),
+    (0.5, 1, false),
+    (1.0, 1, false),
+    (1.5, 1, true),
+    (2.0, 1, false),
+    (5.0, 2, false),
+    (10.0, 2, false),
+    (15.0, 2, true),
+    (20.0, 2, false),
+    (50.0, 3, false),
+    (100.0, 3, false),
+    (150.0, 3, true),
+    (200.0, 3, false),
+    (250.0, 4, true),
+];
+
+/// A function: 600 / 6000 uA, 60 / 600 mA, 6 / 10 A (items 0..5); windows
+/// +-2.6 / +-26 mA, +-250 mA, +-2.5 A, +-12.5 A (10 A: its own full-scale
+/// step only). 500 mA/div -> 1 A/div moves from the mA to the A jack, as
+/// the range step always did.
+pub const WAVE_STEPS_A: [WaveStep; 19] = [
+    (150e-6, 0, true),
+    (200e-6, 0, false),
+    (500e-6, 0, false),
+    (1e-3, 1, false),
+    (1.5e-3, 1, true),
+    (2e-3, 1, false),
+    (5e-3, 1, false),
+    (10e-3, 2, false),
+    (15e-3, 2, true),
+    (20e-3, 2, false),
+    (50e-3, 2, false),
+    (0.1, 3, false),
+    (0.15, 3, true),
+    (0.2, 3, false),
+    (0.5, 3, false),
+    (1.0, 4, false),
+    (1.5, 4, true),
+    (2.0, 4, false),
+    (2.5, 5, true),
+];
+
+/// The wave view's step list of the V (`amps` false) or A function.
+pub fn wave_steps(amps: bool) -> &'static [WaveStep] {
+    if amps { &WAVE_STEPS_A } else { &WAVE_STEPS_V }
+}
+
+/// Index of the full-scale step of range item `item` (None: no such
+/// range in the list).
+pub fn wave_full_step(amps: bool, item: u8) -> Option<usize> {
+    wave_steps(amps).iter().position(|s| s.1 == item && s.2)
+}
+
+/// Index of the step showing `vdiv` (exact: the values come from the list).
+pub fn wave_step_of(amps: bool, vdiv: f32) -> Option<usize> {
+    wave_steps(amps).iter().position(|s| s.0 == vdiv)
 }
 
 /// Minimum interval between two triggered wave frames (ms): the drawing,
@@ -413,7 +472,8 @@ pub fn wave_vdiv(full: f32) -> f32 {
 const WAVE_FRAME_MS: u64 = 40;
 
 /// Scale of a wave record: SI = a + b * code (10-bit code, trigsoft::
-/// ad2_code10), the V/div, unit and coupling (dmm::Ad2Scale).
+/// ad2_code10), the V/div shown (a `wave_steps` value: only the screen,
+/// the codes do not depend on it), unit and coupling (dmm::Ad2Scale).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct WaveScale {
     pub a: f32,
@@ -426,9 +486,9 @@ pub struct WaveScale {
 impl WaveScale {
     /// From the raw-code scale (SI = raw * per_code - offset): a code
     /// stands for the centre of its 512 raw codes.
-    pub fn of(per_code: f32, offset: f32, full: f32, amps: bool, ac: bool) -> WaveScale {
+    pub fn of(per_code: f32, offset: f32, vdiv: f32, amps: bool, ac: bool) -> WaveScale {
         let b = 512.0 * per_code;
-        WaveScale { a: (256.0 - 512.0 * 512.0) * per_code - offset, b, vdiv: wave_vdiv(full), amps, ac }
+        WaveScale { a: (256.0 - 512.0 * 512.0) * per_code - offset, b, vdiv, amps, ac }
     }
 }
 
@@ -1908,6 +1968,17 @@ impl Scope {
         if self.s.run {
             self.stored_valid = false;
         }
+    }
+
+    /// A screen-only V/div step (`wave_steps`, the same DMM row): the codes
+    /// keep their scale; the acquisition in flight restarts (the trigger
+    /// level's code follows the V/div: the level is a row), a stopped
+    /// record is drawn again at the new V/div.
+    pub fn wave_vdiv_set(&mut self, vdiv: f32, now: u64) {
+        wv().sc.vdiv = vdiv;
+        let s = self.s;
+        self.apply(s, now);
+        self.refresh();
     }
 
     /// The stream has to be (re)started at this rate (once).

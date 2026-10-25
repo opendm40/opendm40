@@ -14,9 +14,12 @@
 //! trigger: src/scope.rs `WaveSource` (this file implements it over
 //! src/logger.rs `wave`).
 //!
-//! Vertical: V/div = the DMM range (`scope::wave_vdiv`: the range fills
-//! the half screen); the V/div buttons step the DMM range (the MF list
-//! items). Coupling is the row's: AC V is AC-coupled (~0.5 Hz, the stock
+//! Vertical: the V/div steps of `scope::wave_steps` (V 15 mV .. 250 V/div,
+//! A 150 uA .. 2.5 A/div): per DMM range a full-scale step (+-range on the
+//! 8 divisions, 1.5 V/div on 6 V: the entry's and AUTO's) and 1-2-5 steps
+//! between, each on the lowest range that holds it; a step on the current
+//! range only rescales the screen, the others switch the range (the MF
+//! list item). The V/div buttons and the pinch step the list. Coupling is the row's: AC V is AC-coupled (~0.5 Hz, the stock
 //! row's coupling capacitor), AC mV and AC A / mA / uA are DC-coupled, DC
 //! V streams the DC-coupled V row (feasibility 1.3 last row / E7,
 //! ad2exp.rs `dc_enter`: the AC V row with AD2 on OP1O, its offset
@@ -85,15 +88,14 @@ impl WaveSource for RingSrc {
     }
 }
 
-/// Scope scale of a DMM AD2 scale.
-fn scale_of(a: dmm::Ad2Scale) -> WaveScale {
-    WaveScale::of(a.per_code, a.offset, a.full, a.amps, a.ac)
+/// Scope scale of a DMM AD2 scale shown at `vdiv`.
+fn scale_of(a: dmm::Ad2Scale, vdiv: f32) -> WaveScale {
+    WaveScale::of(a.per_code, a.offset, vdiv, a.amps, a.ac)
 }
 
-/// MF list length of the wave functions (V: 600 mV .. 1000 V, A: 600 uA
-/// .. 10 A; `ui::range_items` without the AUTO entries).
-fn items(b: Button) -> u8 {
-    if b == Button::Amp { 6 } else { 5 }
+/// The full-scale V/div of range `a` (`scope::wave_steps`).
+fn full_vdiv(a: &dmm::Ad2Scale) -> f32 {
+    scope::wave_full_step(a.amps, a.item).map_or(a.full / 4.0, |i| scope::wave_steps(a.amps)[i].0)
 }
 
 impl App {
@@ -145,8 +147,12 @@ impl App {
         // (AUTO on DC mV, say) clips at once.
         if self.wave_auto.is_some() && self.wave_req.is_none() && CLIP.swap(false, core::sync::atomic::Ordering::Relaxed) {
             if let Some(a) = self.dmm.ad2_scale() {
-                if a.item + 1 < items(self.dmm.button()) {
-                    self.wave_req = Some(WaveReq::Range(a.item + 1));
+                // The next range's full-scale step (wave_rescale: a V/div of
+                // another range becomes the new range's full scale).
+                let st = scope::wave_steps(a.amps);
+                let i = scope::wave_full_step(a.amps, a.item).unwrap_or(st.len());
+                if let Some(n) = st.iter().skip(i + 1).find(|s| s.2) {
+                    self.wave_req = Some(WaveReq::Range(n.1));
                 }
             }
         }
@@ -209,7 +215,7 @@ impl App {
         }
         let Some(a) = self.dmm.ad2_scale() else { return };
         self.meter.rel_off();
-        self.scope.wave_enter(scale_of(a), now);
+        self.scope.wave_enter(scale_of(a, full_vdiv(&a)), now);
         crate::scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
         crate::scope_ui::graph().clear();
         self.wave_req = None; // the scope's restart flag asks for the start
@@ -259,7 +265,7 @@ impl App {
     #[inline(never)] // not inlined into run (stack depth)
     pub fn wave_rescale(&mut self, draw_ok: bool) {
         let Some(a) = self.dmm.ad2_scale() else { return };
-        let s = scale_of(a);
+        let s = self.wave_scale_of(a);
         let now = self.scope.wave_scale_now();
         if s == now {
             return;
@@ -278,7 +284,7 @@ impl App {
     pub fn wave_live(&mut self) {
         CLIP.store(false, core::sync::atomic::Ordering::Relaxed);
         if let Some(a) = self.dmm.ad2_scale() {
-            let s = scale_of(a);
+            let s = self.wave_scale_of(a);
             let now = self.scope.wave_scale_now();
             if s != now {
                 self.scope.wave_scale(s);
@@ -311,18 +317,82 @@ impl App {
         self.toast(now, why, false);
     }
 
-    /// V/div + / - in the wave view: the next DMM range (`smaller` = the
-    /// lower range, zoom in).
-    pub(super) fn wave_range_step(&mut self, smaller: bool, now: u64) {
+    /// The scale of row `a` at the V/div shown when that is a step of
+    /// this range (a screen step, or the step a range change was asked
+    /// for: `wave_step_to`), else at the range's full scale (an
+    /// autorange, the coupling key on another row).
+    fn wave_scale_of(&self, a: dmm::Ad2Scale) -> WaveScale {
+        let v = self.scope.vdiv();
+        let st = scope::wave_steps(a.amps);
+        let mine = scope::wave_step_of(a.amps, v).is_some_and(|i| st[i].1 == a.item);
+        scale_of(a, if mine { v } else { full_vdiv(&a) })
+    }
+
+    /// Index of the V/div shown in `scope::wave_steps` (0 if none).
+    pub(super) fn wave_step_now(&self) -> usize {
+        let amps = self.scope.wave_scale_now().amps;
+        scope::wave_step_of(amps, self.scope.vdiv()).unwrap_or(0)
+    }
+
+    /// V/div of wave step `i` (clamped to the list).
+    pub(super) fn wave_step_vdiv(&self, i: usize) -> f32 {
+        let st = scope::wave_steps(self.scope.wave_scale_now().amps);
+        st[i.min(st.len() - 1)].0
+    }
+
+    /// The pinch in the wave view: the step for span ratio `r` (fingers
+    /// apart = zoom in) from step `i0`, taken once its V/div is reached.
+    pub(super) fn wave_pinch_step(&self, i0: usize, r: f32) -> usize {
+        let st = scope::wave_steps(self.scope.wave_scale_now().amps);
+        let i0 = i0.min(st.len() - 1);
+        let want = st[i0].0 / r.max(1e-3);
+        if r >= 1.0 {
+            (0..=i0).find(|&i| st[i].0 >= want * 0.999).unwrap_or(i0)
+        } else {
+            (i0..st.len()).rev().find(|&i| st[i].0 <= want * 1.001).unwrap_or(i0)
+        }
+    }
+
+    /// Show wave step `i`: on the current range only the screen rescales
+    /// (`Scope::wave_vdiv_set`); a step of another range also switches the
+    /// range (main.rs stops the stream, sets it, `wave_rescale` keeps the
+    /// V/div). A range the user picked ends the view's autorange.
+    pub(super) fn wave_step_to(&mut self, i: usize, now: u64) {
         let Some(a) = self.dmm.ad2_scale() else { return };
-        let n = items(self.dmm.button());
-        let i = if smaller { a.item.checked_sub(1) } else { (a.item + 1 < n).then_some(a.item + 1) };
-        match i {
-            Some(i) => {
-                self.wave_req = Some(WaveReq::Range(i));
-                self.wave_auto = None; // the user picked a range
-            }
-            None => self.toast(now, if smaller { "Lowest range" } else { "Highest range" }, false),
+        let Some(&(v, item, _)) = scope::wave_steps(a.amps).get(i) else { return };
+        if v != self.scope.vdiv() {
+            self.scope.wave_vdiv_set(v, now);
+            self.scope_invalidate();
+            self.sp_settings_changed();
+        }
+        if item != a.item {
+            self.wave_req = Some(WaveReq::Range(item));
+            self.wave_auto = None;
+        }
+    }
+
+    /// V/div + / - in the wave view (`smaller` = zoom in): the next step.
+    pub(super) fn wave_range_step(&mut self, smaller: bool, now: u64) {
+        let i = self.wave_step_now();
+        let n = scope::wave_steps(self.scope.wave_scale_now().amps).len();
+        let j = if smaller { i.checked_sub(1) } else { (i + 1 < n).then_some(i + 1) };
+        match j {
+            Some(j) => self.wave_step_to(j, now),
+            None => self.toast(now, if smaller { "Lowest V/div" } else { "Highest V/div" }, false),
+        }
+    }
+
+    /// AUTO in the wave view: the current range's full-scale step (+-range
+    /// on the 8 divisions), centred.
+    pub(super) fn wave_autoset(&mut self, now: u64) {
+        let Some(a) = self.dmm.ad2_scale() else { return };
+        let mut st = self.scope.s;
+        if st.pos != 0 {
+            st.pos = 0;
+            self.scope_set(st, now);
+        }
+        if let Some(i) = scope::wave_full_step(a.amps, a.item) {
+            self.wave_step_to(i, now);
         }
     }
 
