@@ -72,14 +72,14 @@ need a flash dump of a meter.
 
 ### Releasing
 
-Versions are `0.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown without a
-`.0` patch; the tag is `v` + the shown version:
+Versions are `0.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown as they
+are; the tag is `v` + the version:
 
-| Cargo.toml | Shown, tag | When |
+| Cargo.toml = shown | Tag | When |
 |---|---|---|
-| `0.1.0-pre2` | `0.1-pre2`, `v0.1-pre2` | a pre-release on the way to 0.1 (also `-rcN`) |
-| `0.1.0` | `0.1`, `v0.1` | MINOR: new features or changed behaviour |
-| `0.1.1` | `0.1.1`, `v0.1.1` | PATCH: fixes only |
+| `0.1.0-pre2` | `v0.1.0-pre2` | a pre-release on the way to 0.1.0 (also `-rcN`) |
+| `0.1.0` | `v0.1.0` | MINOR: new features or changed behaviour |
+| `0.1.1` | `v0.1.1` | PATCH: fixes only |
 
 1. Set `version` in [`Cargo.toml`](Cargo.toml) and run `./build.sh` once, so
    that `Cargo.lock` follows (CI builds with `--locked` and fails on a stale
@@ -87,8 +87,8 @@ Versions are `0.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown without a
 2. In [`../CHANGELOG.md`](../CHANGELOG.md), rename `## Unreleased` to
    `## v<version> (<date>)` and start a new empty `## Unreleased` above it.
 3. Commit both files, push the branch, wait for CI.
-4. Tag and push the tag: `git tag -a v0.1-pre2 -m "opendm40 v0.1-pre2"`,
-   `git push origin v0.1-pre2`.
+4. Tag and push the tag: `git tag -a v0.1.0-pre2 -m "opendm40 v0.1.0-pre2"`,
+   `git push origin v0.1.0-pre2`.
 
 The tag starts [`.github/workflows/release.yml`](../.github/workflows/release.yml):
 the CI jobs, then a check that the tag is `v` + [`tools/fw-version.sh`](tools/fw-version.sh)

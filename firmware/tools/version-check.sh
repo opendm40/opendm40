@@ -7,8 +7,8 @@
 # firmware inputs changed since the tag, fail: a build from HEAD would carry
 # the released version string. Fix: bump the version in Cargo.toml. Needs the
 # history and the tags (CI: fetch-depth 0).
-# --tag: exit 1 unless the tag is exactly v<fw-version.sh> (0.1.0 -> v0.1,
-# 0.1.0-pre2 -> v0.1-pre2, 0.1.1 -> v0.1.1).
+# --tag: exit 1 unless the tag is exactly v<fw-version.sh> (0.1.0 -> v0.1.0,
+# 0.1.0-pre2 -> v0.1.0-pre2).
 set -e
 cd "$(dirname "$0")/.."
 VER=$(tools/fw-version.sh)

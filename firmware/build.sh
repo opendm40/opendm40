@@ -143,7 +143,7 @@ fi
 # The install name, dm40_opendm40_v<version>.bin: a copy next to
 # opendm40.bin (the file tools/reload.sh and the emulator take). <version> is
 # the one *IDN? and Settings > Device show (src/ident.rs VERSION): Cargo.toml's
-# version without a ".0" patch (0.1.0 -> 0.1, 0.1.0-pre1 -> 0.1-pre1).
+# version as Cargo.toml has it (0.1.0, 0.1.0-pre2).
 # Not for DM40_OUT builds.
 if [ -z "${DM40_OUT:-}" ]; then
     VER=$(tools/fw-version.sh)
