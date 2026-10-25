@@ -3733,3 +3733,12 @@ Emulator (emu/):
       ~20 mA figure is what changes.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
+
+## Failing / flaky tests 2026-10-25 (branch fix/regressions-1025, from f4cd2cd)
+
+- [x] emu/hy3131/btwaketest.py failed (on 7dd18ab and on f4cd2cd): the BT host's first line got no reply, so
+      the test waited until the emulator ended. Firmware: `Bt::init_module` reads the AT+SLED0 answer, which
+      sets `quiet_until` 500 ms ahead (AT_QUIET_MS), then sends AT+RESET. A host links 0.32 s after a module
+      start (device), inside that window, so its first line was taken as a late module answer and dropped.
+      Fixed: a module start (AT+RESET, a power-up, cmd 07's restart pulse) ends the quiet window; `StartText`
+      already takes everything up to the end of the start-up text. btwaketest fails on f4cd2cd and passes with the fix. Device: not checked.
