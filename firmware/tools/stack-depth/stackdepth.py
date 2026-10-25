@@ -31,11 +31,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def tool(name):
-    pat = os.path.join(HERE, '../../../toolchain/rustup/toolchains/*/lib/rustlib/*/bin/' + name)
-    m = sorted(glob.glob(pat))
-    if not m:
-        sys.exit('stackdepth: %s not found under toolchain/' % name)
-    return m[0]
+    # build.sh's toolchain (DM40_LLVMBIN), else the repo's toolchain/, else
+    # the active rustc's sysroot (llvm-tools component).
+    pats = [os.path.join(HERE, '../../../toolchain/rustup/toolchains/*/lib/rustlib/*/bin/' + name)]
+    if os.environ.get('DM40_LLVMBIN'):
+        pats.insert(0, os.path.join(os.environ['DM40_LLVMBIN'], name))
+    else:
+        try:
+            sysroot = subprocess.run(['rustc', '--print', 'sysroot'], capture_output=True,
+                                     text=True).stdout.strip()
+            if sysroot:
+                pats.append(os.path.join(sysroot, 'lib/rustlib/*/bin/' + name))
+        except OSError:
+            pass
+    for pat in pats:
+        m = sorted(glob.glob(pat))
+        if m:
+            return m[0]
+    sys.exit('stackdepth: %s not found (toolchain/ or rustc --print sysroot)' % name)
 
 
 def nregs(lst):
