@@ -9,9 +9,10 @@
  *                                      zero-wait flash in the update body's
  *                                      sector 1 (FS-loader writes it like any
  *                                      body byte), named hot read-only data
- *                                      (`.rodata.a2.*`: the ASCII26 and F14
- *                                      font blobs, tools/mkstockfont.py
- *                                      A2_FONTS). ~14.8 KB; the link fails
+ *                                      (`.rodata.a2.*`: the ASCII26, F14,
+ *                                      LETTERS and UNIT font blobs,
+ *                                      tools/mkstockfont.py A2_FONTS).
+ *                                      ~14.8 KB; the link fails
  *                                      when it reaches the marker, build.sh
  *                                      warns below 2 KiB free.
  *      0x08008000..0x08008010  16 B    GAP, 0xFF in the binary. The ROM and the
