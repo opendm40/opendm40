@@ -64,8 +64,10 @@ Before you start:
 
 To install opendm40 on a meter that runs the stock firmware:
 
-1. Get the update file `dm40_opendm40_v<version>.bin`, for example
-   `dm40_opendm40_v0.1.0.bin`. Today you build it from the source
+1. Download the update file `dm40_opendm40_v<version>.bin`, for example
+   `dm40_opendm40_v0.2.0.bin`, from the latest
+   [release](https://github.com/wirenboard/opendm40/releases/latest). You can
+   also build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
    meter to the computer with a USB cable. A USB disk appears.
@@ -2729,7 +2731,7 @@ update file has been installed.
 2. Copy the update file onto it, as the only file named `dm40*.bin`:
    - opendm40: `dm40_opendm40_v<version>.bin`, or the `FIRMWARE.BIN`
      from your backup, copied under a `dm40*.bin` name (for example
-     `dm40_opendm40_v0.1.0.bin`);
+     `dm40_opendm40_v0.2.0.bin`);
    - stock firmware: `dm40_v_2_6.bin`.
 3. Press **update** on the meter's screen.
 
