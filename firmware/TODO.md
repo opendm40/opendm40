@@ -2421,6 +2421,8 @@ Firmware:
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
             `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device a2e9766: `"SHOTS/` / `"SCOPE/FAST000.DLG"`
             -256 for DATA? and DEL, the file still listed; `LOGS/` and no prefix read it (device-check doc "a2e9766: bug-fix recheck" 5).
+            `parse_path` was in .cold (7b43034), so MMEM:DATA? during an AD2 stream ran region C (wavetest
+            "a host reading SCOPE/SCOP000.CSV"); back in region B since fix/regressions-1025 (item below).
       - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
@@ -3754,3 +3756,11 @@ Emulator (emu/):
       and be one the firmware sends linked (AT+SBN / AT+CBN for cmd 07 / 08; also AT+SLED / AT+RESET). What
       the real module does with AT text while linked is not known. emu/btchattertest.py case C (the DMM at
       2.1569 V: each cmd 09 reply ends in "AT"): 5 x -113 with the old model, 0 with the new one.
+- [x] emu/hy3131/wavetest.py (volt) failed "a host reading SCOPE/SCOP000.CSV: no region C code while the stream
+      ISR owns the bus" (also on 3ad2e87): `csvlog::parse_path`, the MMEM name argument, sat in .cold
+      (link-native.x, 7b43034 / d3a9761), and the test's MMEM:DATA? of the DLG runs it while the Wave view
+      streams (on the device a region C fetch stalls the ISR entry ~20 us). There is no cold half to split
+      off (MMEM:DATA? and MMEM:DELete both need the prefix check, `fatdir::dir_of` is already in B), so it is
+      back in region B, written more compactly (the same results: fatren-test `names`, and the old and the
+      new function compared on 3 M random names). Region B free 15 052 -> 14 748 B (the build.sh warning
+      stays; the link fails below 8 KiB). wavetest volt fails on f4cd2cd and passes; dcv / current pass.
