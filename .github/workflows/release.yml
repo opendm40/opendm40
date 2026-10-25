@@ -1,0 +1,60 @@
+# A pushed v* tag -> CI jobs, then the GitHub release with the image and
+# SHA256SUMS (firmware/README.md "Releasing").
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: 1.99.0 # as in ci.yml
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build and publish
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag matches Cargo.toml
+        run: firmware/tools/version-check.sh --tag "$TAG"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: thumbv7em-none-eabihf
+          components: llvm-tools
+      # No cache: the release image is built from a clean target dir.
+      - name: build.sh --locked
+        run: firmware/build.sh --locked
+      - name: Image and SHA256SUMS
+        working-directory: firmware
+        run: |
+          name=dm40_opendm40_$TAG.bin
+          test -f "$name"
+          sha256sum "$name" | tee SHA256SUMS
+      - name: Release notes
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$TAG" --jq .body > auto-notes.md
+          firmware/tools/release-notes.sh "$TAG" "$(git rev-parse HEAD)" auto-notes.md > notes.md
+          cat notes.md
+      - name: Create the release
+        run: |
+          pre=
+          case $TAG in *-pre*|*-rc*) pre=--prerelease ;; esac
+          gh release create "$TAG" --verify-tag $pre \
+              --title "opendm40 $TAG" --notes-file notes.md \
+              "firmware/dm40_opendm40_$TAG.bin" firmware/SHA256SUMS
