@@ -11,9 +11,13 @@ All documentation of opendm40, by reader. Start at the
 - [SCPI reference](manual/scpi-reference.md): every SCPI command, over USB
   and Bluetooth.
 - [CHANGELOG.md](../CHANGELOG.md): the changes per release.
+- [CONTRIBUTING.md](../CONTRIBUTING.md): how to report a bug;
+  [SECURITY.md](../SECURITY.md): how to report a safety problem privately.
 
 ## Develop
 
+- [CONTRIBUTING.md](../CONTRIBUTING.md): pull requests, commit messages,
+  the documentation style.
 - [firmware/README.md](../firmware/README.md): build, toolchain, the USB debug
   link, the developer loop, tests, CI, releasing, the source layout.
 - [emu/README.md](../emu/README.md): the emulator (Renode), which runs
