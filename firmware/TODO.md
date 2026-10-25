@@ -36,9 +36,6 @@ What waits for the owner; each line links to the material.
       - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
       - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
       - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
-      - [ ] Emulator resautotest r30-300-30 fails 4 of 5 on this branch (6 of 6 pass on 0b3b73c1): after the OL
-            jump to 60 Mohm the first conversion there reads high, 60M -> 6k -> 600 instead of 60M -> 600. Not
-            explained yet (the ohm code paths are unchanged at MED).
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
