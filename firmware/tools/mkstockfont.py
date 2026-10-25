@@ -68,8 +68,10 @@ FONTS = [
 # the logger panel's font (read per draw while the AD2 stream runs; device
 # 381ea07 showed it in slow flash stalling the ISR), F14 the small texts;
 # LETTERS and UNIT since region B audit #4 (2026-10-25: B at 15 KB free, A2
-# at 7.9 KB after the font rework; A2 keeps ~4 KB for the shim).
-A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT')
+# at 7.9 KB after the font rework; A2 keeps ~4 KB for the shim); SC_PROBE
+# since region C audit #2 (2026-10-25, docs/native-boot.md: B's room for
+# .cold code moved back from C).
+A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'SC_PROBE')
 
 
 # Codes from here up (CJK, full-width punctuation) are dropped: opendm40 draws

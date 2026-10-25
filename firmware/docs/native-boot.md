@@ -542,6 +542,44 @@ after the 8 KiB warning. Relief for C is a cut, or `.cold` code moved back
 to B while B's own budget allows: nothing above `0x080A0000` is reachable
 (next section).
 
+### Region C audit #2 (2026-10-25)
+
+On 49d7c10c region C had 6 016 B free (below the 8 KiB warning), region B
+18 820 B (2 436 B above its 16 KiB warning), region A2 4 188 B. A search
+for a cut found no large one: C holds code only (no named tables), and its
+biggest functions are constructors and state machines (`new_app` with
+`App::new` / `App::restore` / `Dmm::new` inlined, 7.6 KB; `Gallery::poll`,
+6.9 KB); the most repeated inlined helper is `stockfont::rect` (1.7 KB over
+133 sites), a struct constructor, so an out-of-line copy saves nothing.
+
+The relief is a move in two steps, no code changed:
+- the SC_PROBE font blob (1 242 B, the scope's probe labels) from B to A2
+  (`A2_FONTS` in [`tools/mkstockfont.py`](../tools/mkstockfont.py); both
+  zero-wait; the regenerated
+  [`stockfont_data.rs`](../src/stockfont_data.rs) differs only in its
+  `link_section` line);
+- from C back to B: the SCPI range / resolution commands
+  (`scpi::range_cmd`, `conf_cmd`, `range_arg`, `res_arg`, `step_exp`,
+  `pow10f`, `App::scpi_range`; 2 042 B) and `ui::help_page` (572 B): their
+  patterns are gone from [`link-native.x`](../link-native.x). Code moved
+  into B cannot stall the AD2 stream ISR, so the region C rule is not
+  touched.
+
+| | before (49d7c10c) | after |
+|---|---|---|
+| region A2 free | 4 188 B | 2 948 B |
+| region B free | 18 820 B | 17 444 B |
+| region C free | 6 016 B | 8 632 B |
+| stack headroom (static worst path) | 20 548 B | unchanged |
+| SRAM free | 45 160 B | unchanged |
+
+Without `ad2-isr` (`--no-default-features --features vdisk`): A2 2 948 B,
+B 27 480 B, C 9 680 B, stack headroom 21 008 B.
+
+A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
+16 KiB warning. The next relief for C needs a real cut (the candidates of
+audit #1 above) or a larger blob moved out of B.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
