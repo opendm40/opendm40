@@ -3638,17 +3638,44 @@ Emulator (emu/):
       +9.91E37 for 0.6-0.8 s, then the value; no -410, no timeout. `CONF:RES;:READ?` 0.99-1.08 s. Swaps from the
       600 kΩ settle: 100 Ω final in 1.7-1.9 s, 390 Ω (no open between) 1.2 s, back to the open 1.6-2.0 s.
       Still to check: the 6 MΩ hold with an input that reads OL on 600 kΩ; 4.7 kΩ / 100 kΩ after it.
-- [ ] RES AUTO set over SCPI from a manual RES range leaves the screen on the manual reading (device
+- [x] RES AUTO set over SCPI from a manual RES range leaves the screen on the manual reading (device
       c5ac0c5, device-check doc "c5ac0c5: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` +
       `RES:RANG:AUTO ON` on the calibrator's disabled output: RES:RANG:AUTO? 1, RES:RANG? hunting, but the
       status bar MANU and a frozen 0.1043 MΩ (DBG:READout? `F`) for 8 s; from DC V the same commands show
       AUTO and dashes. Not tested on a resistor; cause not looked into.
       Device 82c8aca (no hunt that day): from `CONF:RES 6E6` / `CONF:RES 600` the same commands gave
       `DBG:READout?` the manual value for 0.5 s, then the 600 kΩ readings, changing per conversion; the status
-      bar not looked at. So it may need the hunt (INFERRED); still open.
-- [ ] DBG:SENT? fields 14 / 15 keep the verdict of the PB1 hits at a switch between ohm-network rows
+      bar not looked at.
+      Cause: the status bar's AUTO / MANU is the shown reading's flag (ui.rs), and `Dmm::auto_key` /
+      `set_range(None)` only clear `manual`: the manual range's last reading stayed on screen, with MANU,
+      until AUTO's first reading. That takes one conversion (or a range step) on a resistor, and the whole
+      autorange on the hunt's input (c5ac0c5 had no hunt fix: 8 s; 82c8aca, no hunt: 0.5 s). The AUTO key
+      and the range page did the same. Fixed (b8639e5, app.rs `auto_entered`): manual -> AUTO puts the
+      placeholder up (AUTO, dimmed dashes), as a function change does. Where AUTO stays on the manual
+      range, the dashes now show until the next conversion. `DBG:READout?` field 5 = the status bar's
+      AUTO / AUTO+ / MANU. Emulator emu/hy3131/resautotest.py (100 kΩ from 6 MΩ / 600 Ω and by the AUTO key,
+      the `isink` input of ohmsinktest from 6 MΩ / 600 Ω, the same from DC V, an open input from 600 Ω):
+      on 3c7c876 5 of 6 rows FAIL (MANU and the manual final for 0.25-1.1 s after the command), PASS now.
+      (verify on device: `CONF:RES 6E6`, 3 s, then `CONF:RES;:RES:RANG:AUTO ON;:DBG:READout?` -> `P,..,AUTO`
+      in the same reply; screen AUTO and dashes, never `F,..,MANU` after the command (`DBG:READout?` every
+      0.1 s for 8 s); the same from `CONF:RES 600`, from the range page's AUTO item and with the AUTO key;
+      a 4.7 kΩ / 100 kΩ resistor: its value within ~1 s; ideally on the calibrator's disabled output while
+      it gives the hunt's input)
+- [x] DBG:SENT? fields 14 / 15 keep the verdict of the PB1 hits at a switch between ohm-network rows
       (device c5ac0c5 note 3: RES AUTO -> 600 Ω, 0 / 2150 mV for the whole open level; RES -> continuity
       0 / -4 mV for ~3 s). No alert; doc 4.13 check list item 2 expects -1 / 0. Diagnostics only.
+      Cause: `jack_t` / `jack_drv` / `jack_mv` were cleared only at a function / family change
+      (`Sentinel::configured`), and `diag_text` showed the last verdict whatever run it came from. The
+      600 Ω peak (2150 mV, that row's own open level) says the verdict came from hits after the switch
+      (INFERRED), so a reset at the switch alone would not do. Fixed (7f7e8cd): `new_run` (a range /
+      function change) drops the verdict, and fields 14 / 15 show it only for the present hit run or an
+      A-JACK in force, else -1 / 0. Alert decisions unchanged (they took only the present run's verdict).
+      After a source on V-COM goes off field 14 now goes to -1 once the hits stop (c5ac0c5 step 3 logged
+      2 -> 1). Host test jack_fields_reset_at_a_row_switch (fails without the fix). The model gives no
+      hits at a switch, so no emulator case reproduces the device's.
+      (verify on device: doc 4.13 check list item 2: RES AUTO -> `CONF:RES 600` and RES -> `CONF:CONT`,
+      V-COM open: fields 14 / 15 -1 / 0 once field 8 stops growing; item 5: with 5 V field 14 = 2 while
+      field 8 grows, -1 within ~1 s after the off)
 - [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
       DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
       Cause: once LIVE? cleared (the last live result 1 s old), the next poll re-asserted it from the old
