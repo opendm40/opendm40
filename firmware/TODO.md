@@ -18,8 +18,21 @@ Additional requirements:
 
 What waits for the owner; each line links to the material.
 
-- [ ] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
+- [x] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
       device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
+      **Owner 2026-10-25: FAST unchopped with a firmware offset, MED / SLOW chopped, all three rejecting 50 / 60 Hz**
+      (the "bug fixes only" rule does not apply to this one). Done on branch feat/rate-unchopped-fast:
+      [fastvos.rs](src/fastvos.rs), dmm.rs FR-05 (the rate's R22 in the row), survey §8.4, the manual;
+      emu/hy3131/fastratetest.py.
+      - [ ] Device: DBG:FAST? and DC V 6 V FAST / MED / SLOW at 0 V and 1 V against each other (FAST within
+            2 counts of MED after its first refresh), the reading rate (SENS:RATE:PER? 0.1 / 0.2 / 0.4 s).
+      - [ ] Device: VOS (DBG:FAST? third field) on DC V 60 / 600 / 1000 V, DC mV 60 / 600 mV, DC A / mA / uA:
+            near 13 270 codes as assumed (fastvos VOS_DEFAULT)? If not, a per-path default.
+      - [ ] Device: the unchopped gain (-95 ppm, fastvos GAIN, one point) at 0.5 / 1 / 5 V on 6 V and on 60 V:
+            FAST vs MED.
+      - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
+      - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
+      - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,

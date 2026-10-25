@@ -391,11 +391,15 @@ Functions:
 - Range and resolution changes are refused (`Settings conflict`) while a data
   logger session runs or the Wave view is open; `CONFigure` then only
   selects the function.
-- **Rate:** `FAST` 10 readings/s with 60000 counts; `MEDium` and `SLOW`
-  2.5 readings/s in steady state with one more digit (in DC V 600 mV ..
-  600 V and resistance 600 ohm .. 60 kohm); `SLOW` also averages 16
-  conversions. It applies to DC voltage, DC current and resistance; other
-  functions keep their own timing. Stored.
+- **Rate:** `FAST` 10 readings/s with 60000 counts (resistance: 5/s);
+  `MEDium` 5 readings/s and `SLOW` 2.5 readings/s, with one more digit
+  (in DC V 600 mV .. 600 V and resistance 600 ohm .. 60 kohm); `SLOW` also
+  averages 16 conversions. Every rate rejects 50 and 60 Hz. In DC V, mV
+  and A, `FAST` runs the converter unchopped and measures its offset
+  itself 2 s after a function or range change and every 30 s: two
+  conversions (0.2 s) give no new reading then (`DBG:FAST?`). It applies to
+  DC voltage, DC current and resistance; other functions keep their own
+  timing. Stored.
 
 ## Temperature
 
@@ -768,6 +772,7 @@ unless shown otherwise.
 | `DBG:PROF:RESET` | | Clears the timing table. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
+| `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>` | USB |
 | `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
 | `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |

@@ -38,6 +38,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- Multimeter rate (DC V, mV, A and Ω): every rate now rejects 50 Hz and
+  60 Hz hum. FAST: 10 readings/s (Ω 5/s); in DC V / mV / A the converter
+  runs without its chopper and the meter measures its offset itself (2 s
+  after a change, then every 30 s; two readings skipped each time). MED: 5
+  readings/s, the extra digit after 1.6 s. SLOW: 2.5 readings/s. Before,
+  FAST and MED ran a 50 ms conversion that did not reject 50 Hz
+  ([manual](docs/manual/README.md#rate-fast-med-slow)).
+
 - Resistance: AUTO includes the 60 Ω range (milliohm resolution): down from
   600 Ω below about 58.3 Ω, up above about 61.8 Ω. With the 0.28 mA test
   current (ON) AUTO stops at 600 Ω, since 60 Ω always uses 0.90 mA.
