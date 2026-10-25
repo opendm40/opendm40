@@ -7,7 +7,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-## v0.1.0-pre2 (2026-10-25)
+## v0.2.0 (2026-10-25)
 
 ### New
 

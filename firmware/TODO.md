@@ -57,7 +57,7 @@ What waits for the owner; each line links to the material.
       manual says: a fixed range is never kept).
 - [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 1f264d3e (dmm.rs `poll_ohm`,
       `ohm_auto_floor`). The stock autorange never selects r0 (its clamp is r1..r6,
-      [dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 2), so the step uses the stock rule of the other ohm steps:
+      `stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2), so the step uses the stock rule of the other ohm steps:
       600 -> 60 Ω below 0.1 x limit / over = 58.25 Ω, 60 -> 600 Ω above limit x over = 61.8 Ω. With 0.28 mA ON
       AUTO stops at 600 Ω (60 Ω always drives 0.90 mA); a manual 60 Ω still works. emu/hy3131/resautotest.py PASS.
       Device check (calibrator on V-COM, RES AUTO, `RES:RANG?` and the status bar after each step):
@@ -100,7 +100,7 @@ What waits for the owner; each line links to the material.
       `ohm_row_gain`; the stock's r0 row stays in [hy3131_tables.rs](src/hy3131_tables.rs) and nothing selects
       it ([dmm.rs](src/dmm.rs) `OHM_R_MIN`, the ohm notes there). Findings to resume from:
       - the stock V2.6 never selects r0: its range is clamped to 1..6
-        ([dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 2);
+        (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2);
       - r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated default (inferred);
       - on the device r0 read 2.6-2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 Ω; the ratio is
         constant, so a gain error, not a parallel load. Ruled out: the OP1 x10 path (the record's x10 / x1

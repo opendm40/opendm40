@@ -188,6 +188,14 @@ image). Design and rationale: [firmware/docs/native-boot.md](firmware/docs/nativ
 host tools and the index of the firmware docs. The emulator
 ([emu/README.md](emu/README.md)) runs both the stock firmware and opendm40.
 
+## Releases
+
+Releases follow [Semantic Versioning](https://semver.org/) and are published
+on [GitHub Releases](https://github.com/wirenboard/opendm40/releases) with the
+install file `dm40_opendm40_v<version>.bin`; the changes per release are in
+[CHANGELOG.md](CHANGELOG.md), the rules in
+[firmware/README.md, Releasing](firmware/README.md#releasing).
+
 ## Supporting material
 
 | Path | What |
