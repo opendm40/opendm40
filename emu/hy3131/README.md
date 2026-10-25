@@ -70,7 +70,7 @@ stock's nominal constants), the ohm source open-circuit voltage (SFUVR table
 at VDDA 3.6 V: 1.4 V on the normal ohm rows, 0.625 V on the "ON" variant,
 -0.625 V continuity; measured on one unit with DBG:SRC, 600 ohm range:
 about 2.17 V open / 0.90 mA shorted in the default variant, 0.78 V /
-0.28 mA in the "ON" variant, [device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc);
+0.28 mA in the "ON" variant, [device check](../../docs/history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc);
 not modelled) which only the cross cases depend on, and PE2 (DMM rail /
 power hold) which is not modelled as chip power.
 

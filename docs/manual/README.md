@@ -574,7 +574,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   | 0.28 mA ON | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
   Short-circuit currents measured on one unit with `DBG:SRC`, jacks
-  shorted ([device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
+  shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 
@@ -2119,7 +2119,7 @@ drive stay the same. Linux keeps the parts of the file it has read before
 and does not read them again when the meter announces the change, so a
 plain `cp` while the drive stays mounted can return an old copy, or a mix
 of old and new parts (device check
-[2f56ff9](../../firmware/docs/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
+[2f56ff9](../history/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
 files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
 each new or changed file its own new entry. The meter cannot make Linux drop
 the old parts: Linux re-reads the folders, but keeps what it already knows

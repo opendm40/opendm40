@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The first readings after a DMM function / range change (device check of
-v0.1-pre1, 2026-10-24, firmware/docs/device-check-2026-10-21.md): no final
+v0.1-pre1, 2026-10-24, docs/history/device-check-2026-10-21.md): no final
 reading (DBG:READout? kind F, FETCh?) may come from a conversion the
 switch spoiled, and a manual mA range must stay. The model's opt-in knobs
 replay what the device showed (emu/hy3131/HY3131.cs, INFERRED shapes):

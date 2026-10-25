@@ -110,7 +110,7 @@ is within 0.2 A of the calibration's offset and their rms about it is below
 50 mA (no load running); otherwise the calibration's offset stays. The cal
 record has no LPF offset for the AC A rows (`0x10C`.., all 0 on this unit),
 and the 10 A row's AD2 mean read +0.0717 A with the A jack open (device
-[185c066](device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25)
+[185c066](../../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25)
 step 4: rms about the mean 1.72 mA), so the page read "Armed: 0.069 A now"
 with nothing in A before the zero was measured. A hole while the zero is
 measured starts it again; one later keeps it.
@@ -221,7 +221,7 @@ until the device check.
 ## 9. Device check
 
 **Status: not run.** The capture needs a load current through the A jack,
-which no device session had ([device-check-2026-10-21.md](device-check-2026-10-21.md):
+which no device session had ([device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md):
 session 825080c item 7b "Inrush save: Not run", session 33b44bd "Inrush
 page taps while armed: not run"); TODO "Inrush current" still lists the device
 check as open ([`TODO.md`](../TODO.md)). What did run on the device:

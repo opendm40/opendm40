@@ -5,7 +5,7 @@ Telegram owners' chat about the Alientek DM40 (A/B/C,
 [t.me/S2084K](https://t.me/S2084K)), triaged against opendm40
 ([TODO.md](../TODO.md), [parity.md](parity.md),
 [ui-review.md](../../docs/history/ui-review.md),
-[dm40-feature-request.md](../../docs/dm40-feature-request.md)).
+[dm40-feature-request.md](../../docs/history/dm40-feature-request.md)).
 
 New actionable items carry an **UF-nn** id; they are mirrored as one-liners in
 [TODO.md](../TODO.md) ("From user community feedback"), which tracks their
