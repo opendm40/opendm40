@@ -49,7 +49,9 @@ SCENARIOS = [
     ('cont',   'ohm:10',                    0x44, 'CONT',      10.0,    0.02, 0.3, 8, {}),
     ('diode',  'diode:0.65',                0x04, 'DIOD',      0.65,    0.005, 0.002, 8, {}),
     ('cap',    'cap:100e-9',                0x03, 'CAP',       100e-9,  0.03, 1e-9, 12, {}),
-    ('cap-big', 'cap:100e-6',               0x03, 'CAP',       100e-6,  0.03, 1e-6, 18, {}),
+    # stock: 104 uF, its own arithmetic (stock/re/analysis/dmm_v2_6.h section 4, emu/hy3131/README.md under the results table): C = I * dt / median5(dV),
+    # dt = 260 ms (a read 255 ms after the last, on the 10 ms poll), dV = 5 AD1 results of 50 ms = 250 ms of ramp
+    ('cap-big', 'cap:100e-6',               0x03, 'CAP',       100e-6,  0.03, 1e-6, 18, {'stock_want': 100e-6 * 260 / 250}),
     ('hz',     'hz:1000,duty=0.25,amp=1.0', 0x05, 'FREQ',      1000.0,  0.001, 0.1, 9, {'duty': 25.0}),
     ('temp',   'temp:100,cj=25',            0x45, 'TEMP',      100.0,   0.0, 1.5, 12, {'cj': 25.0}),
 ]
@@ -266,6 +268,8 @@ def scenario_script(fw, sc, path):
 
 def run_one(fw, sc, port, fast):
     name, spec, mode_byte, scpi, want, rtol, atol, run_for, extra = sc
+    if fw == 'stock' and 'stock_want' in extra:
+        want = extra['stock_want']
     tag = 'hy-%s-%s-%d' % (fw, name, os.getpid())  # parallel invocations share no file
     script = os.path.join(OUT, tag + '.script')
     scenario_script(fw, sc, script)
@@ -391,9 +395,10 @@ def main():
         for f in futs:
             r = f.result()
             results.append(r)
-            print('%-5s %-30s %-28s want %-10s got %-10s %s  (%d readings, %.0f s wall)%s' % (
+            print('%-5s %-30s %-28s want %-10s got %-10s %s  (%d readings, %.0f s wall)%s%s' % (
                 r['fw'], r['name'], r['input'], fmt_v(r['want']), fmt_v(r['last']), 'ok ' if r['ok'] else 'BAD',
-                len(r['readings']), r['wall'], ' ' + json.dumps({k: v for k, v in r['extra'].items() if k in ('freq', 'duty', 'cj')}) if r['extra'] else ''))
+                len(r['readings']), r['wall'], ' ' + json.dumps({k: v for k, v in r['extra'].items() if k in ('freq', 'duty', 'cj')}) if r['extra'] else '',
+                '' if r['rc'] == 0 else '  run.py rc %s: %s' % (r['rc'], r.get('log', '').strip().splitlines()[-1:])))
             sys.stdout.flush()
     with open(a.json, 'w') as f:
         json.dump(results, f, indent=1)

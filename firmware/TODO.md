@@ -3802,3 +3802,17 @@ Emulator (emu/):
       back in region B, written more compactly (the same results: fatren-test `names`, and the old and the
       new function compared on 3 M random names). Region B free 15 052 -> 14 748 B (the build.sh warning
       stays; the link fails below 8 KiB). wavetest volt fails on f4cd2cd and passes; dcv / current pass.
+- [x] [emu/hy3131/modetest.py](../emu/hy3131/modetest.py) stock cap-big (100 uF) read 104.1 uF against 100 uF +- 3 %;
+      on f4cd2cd it got no readings. The 104 is the stock's own arithmetic, not the HY3131 model or the test setup
+      ([dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 4; FUN_08013734 case 0xd in
+      [app_decompile.c](../stock/re/analysis/app_decompile.c)): C = gain * I * dt / median5(dV); a read is due 255 ms
+      after the previous one (deadline = that read + 0xff) and runs on the DMM screen's 10 ms poll, so dt = 260 ms,
+      while dV spans whole 50 ms AD1 conversions (ramp row OSR 4096, chopper): 5 between most reads, 6 between one
+      in 5, median 250 ms. 260 / 250 = 1.040; the r5..r7 calibration gains are 1.0. With the model's ramp-row AD1
+      period set to 52 ms (an experiment, reverted) the stock read 100.1 uF. modetest now expects 104 uF from the
+      stock (`stock_want`, same 3 % tolerance) and 100 uF from opendm40 (101.9 .. 102.1 uF), and prints run.py's exit code and
+      last line when the emulator does not start. That the real meter also reads +4 % is inferred, not measured. The
+      f4cd2cd "no readings" is inferred to be the setup: a worktree without `dm40_v_2_6.dec.bin` at the top (run.py
+      exits 1 with FileNotFoundError, modetest showed "0 readings") or without `private` (no genuine check pass)
+      gives no readings; the f4cd2cd log is not at hand. Notes in [emu/hy3131/README.md](../emu/hy3131/README.md)
+      under the modetest results table.

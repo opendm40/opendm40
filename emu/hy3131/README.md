@@ -280,19 +280,24 @@ the emulated flash with a recomputed CRC):
 | cont | `ohm:10` | 10 ohm | 10.00 (beeper: CMP pin) | 10.005 |
 | diode | `diode:0.65` | 0.65 V | 0.6501 | 0.650016 |
 | cap | `cap:100e-9` | 100 nF (RC oscillator) | 100.0 nF | 100.002 nF |
-| cap-big | `cap:100e-6` | 100 uF (current ramp) | **104.0 uF** (+4 %) | 102.03 uF (+2 %) |
+| cap-big | `cap:100e-6` | 100 uF (current ramp); stock: 104 uF | 104.0 uF (+4 %, see below) | 102.03 uF (+2 %) |
 | hz | `hz:1000,duty=0.25,amp=1.0` | 1000 Hz, 25 % | 1000.0 Hz, 25.0 % | 1000.02 |
 | temp | `temp:100,cj=25` | 100 C, CJ 25 C | 100.3 C, CJ 25.0 | 100.29 |
 
 (`modetest.py -j 6` at d07fedc.) All within the
-meter's specification except the capacitance ramp ranges: the
-stock computes C = I * dt / dV with dt taken from its own millisecond timer at
-the poll (every 255 ms + 10 ms granularity) while dV spans whole AD1
-conversions (50 ms at the ramp row's OSR 4096 with the chopper), so dt / dV is
-quantised to 250 / 300 ms steps and the trimmed mean lands ~4 % high; the
-factory calibration leaves the r5..r7 gains at 1.0. Whether the real meter
-shows the same bias is unknown. opendm40's +2 % has the same
-origin with its own timing. Run time per scenario: 8..18 virtual seconds,
+meter's specification except the capacitance ramp ranges. The stock's +4 % is its
+own arithmetic ([`dmm_v2_6.h`](../../stock/re/analysis/dmm_v2_6.h) section 4):
+C = gain * I * dt / median5(dV), dt from its millisecond counter between two reads.
+A read waits until 255 ms after the previous one (deadline = that read + 0xff) on the
+DMM screen's 10 ms poll, so dt = 260 ms; dV spans whole AD1 conversions (50 ms at the
+ramp row's OSR 4096 with the chopper), 5 of them between most reads and 6 between one
+read in 5, so the median dV is 250 ms of ramp and C = 260 / 250 x 100 uF = 104.0 uF.
+The factory calibration leaves the r5..r7 gains at 1.0. With the model's AD1 period
+in the ramp row stretched to 52 ms (an experiment, not kept) the stock reads 100.1 uF.
+modetest therefore expects 104 uF from the stock (`stock_want`) and 100 uF from
+opendm40. That the real meter shows the same +4 % is inferred (its 10 ms poll and AD1
+period are taken to match the emulator's); it is not measured. opendm40's +2 % is not
+analysed here. Run time per scenario: 8..18 virtual seconds,
 25..80 s wall at `-j 6`.
 
 
