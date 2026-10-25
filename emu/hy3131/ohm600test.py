@@ -11,12 +11,13 @@ calibrator's switch, a value above the range) ends at the first conversion that 
 Each window: `CONF:RES 600;:SENS:RATE <rate>` at +1 s (fw uptime), the input `a` from the window
 start, the input `b` from `at` s after it (emulator script, virtual time), `RES:RANG?;:DBG:READout?`
 every 0.05 s from +3 s to GUARD s before the window end. Checks:
-  - the range is 600 ohm on every poll (manual: nothing moves it);
-  - the last LAST polls are final (F) readouts of `want` ohm within 0.2 %, or OL if `want` is None;
+  - manual: the range is 600 ohm on every poll (nothing moves it); AUTO: on the last LAST polls;
+  - the last LAST polls are final (F) readouts of `want` ohm within 0.2 % (`tol`), or OL if `want` is None;
   - `rec`: a final in-range readout of `b` within `rec` s of the first poll that shows `b` (or OL)
     after the step, i.e. no OL hold beyond the conversions the step itself spans.
 Rows: 200 -> open (0.3 s) -> 500 ohm (the calibrator's switch), 700 (OL) -> 500, open -> 500 at SLOW /
-MED / FAST; 590 / 610 ohm in range, 620 ohm OL (the limit 618 ohm = 600 x 1.03, dmm.rs OVER).
+MED / FAST; 590 / 610 ohm in range, 620 ohm OL (the limit 618 ohm = 600 x 1.03, dmm.rs OVER) at each
+rate; AUTO 200 -> open -> 500 and open -> 500 ohm land on 600 ohm, also with the node lag `ohmtau:1000`.
 
   emu/hy3131/ohm600test.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 64210
 """
@@ -37,7 +38,11 @@ GUARD = 4.0  # s: polling ends this long before the next window (the script runs
 LAST = 5
 STEP = 6.0  # s after the window start: the step to `b`
 
-# name, rate, a, [(s after STEP, input)], want (ohm; None = OL), rec (s; None = no check)
+# name, rate, a, [(s after STEP, input)], want (ohm; None = OL), rec (s; None = no check)[, opts]
+# opts: auto = the AUTO command instead of the manual range; range = the range of the last polls
+# (default 600, and 600 on every poll in manual); tol = the last polls' tolerance (default 0.002;
+# 0.01 in the node-lag row, whose tail is still in MED's 6.4 s average).
+AUTO = 'CONF:RES;:RES:RANG:AUTO ON'
 SCEN = []
 for rate in ('SLOW', 'MED', 'FAST'):
     SCEN += [
@@ -45,12 +50,19 @@ for rate in ('SLOW', 'MED', 'FAST'):
         ('700-500-' + rate, rate, 'ohm:700', [(0.0, 'ohm:500')], 500.0, 3.0),
         ('open-500-' + rate, rate, 'open', [(0.0, 'ohm:500')], 500.0, 3.0),
     ]
+for rate in ('SLOW', 'MED', 'FAST'):
+    SCEN += [
+        ('590-' + rate, rate, 'ohm:590', [], 590.0, None),
+        ('610-' + rate, rate, 'ohm:610', [], 610.0, None),
+        ('620-' + rate, rate, 'ohm:620', [], None, None),
+    ]
 SCEN += [
-    ('590-MED', 'MED', 'ohm:590', [], 590.0, None),
-    ('610-MED', 'MED', 'ohm:610', [], 610.0, None),
-    ('620-MED', 'MED', 'ohm:620', [], None, None),
-    ('610-FAST', 'FAST', 'ohm:610', [], 610.0, None),
-    ('620-FAST', 'FAST', 'ohm:620', [], None, None),
+    # AUTO: 500 ohm lands on 600 ohm (the comparison for the device's AUTO run).
+    ('auto-200-open-500-MED', 'MED', 'ohm:200', [(0.0, 'open'), (0.3, 'ohm:500')], 500.0, None, {'auto': True}),
+    ('auto-open-500-MED', 'MED', 'open', [(0.0, 'ohm:500')], 500.0, None, {'auto': True}),
+    # The emulator's model of a slow node / a simulator catching up after every ohm row change
+    # (`ohmtau:ms`, emu/hy3131/README.md), last: the knob stays on for the rest of the run.
+    ('auto-open-500-tau1000-MED', 'MED', 'open;ohmtau:1000', [(0.0, 'ohm:500;ohmtau:1000')], 500.0, None, {'auto': True, 'tol': 0.01}),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -110,10 +122,11 @@ try:
             time.sleep(0.05)
 
     for k, sc in enumerate(scen):
-        name, rate, _, steps, want, rec = sc
+        name, rate, _, steps, want, rec = sc[:6]
+        o = sc[6] if len(sc) > 6 else {}
         w0 = starts[k]
         wait_until(w0 + 1)
-        q('CONF:RES 600;:SENS:RATE %s;:SYST:ERR?' % rate)
+        q('%s;:SENS:RATE %s;:SYST:ERR?' % (AUTO if o.get('auto') else 'CONF:RES 600', rate))
         wait_until(w0 + 3)
         rows = []  # (uptime s, range, readout fields)
         while True:
@@ -130,7 +143,7 @@ try:
         why = []
         if not err.startswith('0') and not err.startswith('+0'):
             why.append('SYST:ERR? %s' % err)
-        off = [r for r in rows if r[1] != 600]
+        off = [r for r in (rows[-LAST:] if o.get('auto') else rows) if r[1] != o.get('range', 600)]
         if off:
             why.append('range %g at +%.2f s' % (off[0][1], off[0][0] - w0))
 
@@ -138,7 +151,7 @@ try:
             if r[2][0] != 'F':
                 return False
             v = num(r[2][2])
-            return v > 1e37 if want is None else abs(v - want) <= want * 0.002
+            return v > 1e37 if want is None else abs(v - want) <= want * o.get('tol', 0.002)
 
         tail = rows[-LAST:]
         if not all(ok(r, want) for r in tail):
