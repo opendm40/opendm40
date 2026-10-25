@@ -26,6 +26,10 @@ section named after the tag as the release notes; how to cut a release:
 - The version comes from one place, `firmware/Cargo.toml`: `*IDN?`,
   Settings > Device, the USB disk texts, the CSV headers and the install
   file `dm40_opendm40_v<version>.bin` show the same string.
+- Settings > More > More > Touch test: a page that shows every touch the
+  controller reports, the points after the debounce and the touch keys,
+  against crosshair targets, to check the touch calibration
+  ([manual](docs/manual/README.md#touch-test)).
 
 ### Changed
 
