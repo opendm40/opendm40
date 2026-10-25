@@ -130,7 +130,7 @@ every command: [SCPI reference](docs/manual/scpi-reference.md).
 - [User manual](docs/manual/README.md)
 - [SCPI reference](docs/manual/scpi-reference.md)
 - Developer documentation, hardware, the emulator and archived documents:
-  [firmware/README.md, Documentation](firmware/README.md#documentation)
+  [docs/README.md](docs/README.md)
 
 ## Build and develop
 
@@ -139,6 +139,7 @@ debug link, tests and releases: [firmware/README.md](firmware/README.md). The
 [emulator](emu/README.md) runs opendm40 and the stock firmware without a
 meter. The hardware as far as it is known: [hw/README.md](hw/README.md).
 Tools for the stock update file: [stock/README.md](stock/README.md).
+Bug reports and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Releases
 

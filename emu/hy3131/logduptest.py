@@ -2,7 +2,7 @@
 """AD1 stream logger: no conversion recorded twice (device check of
 ea73ea5, AD1 OSR characterization: right after a 640/s session an OSR 8192
 chopped session held each conversion twice, identical codes ~52 ms apart,
-121 of 294 records; firmware/docs/device-check-2026-10-21.md). The main-loop
+121 of 294 records; docs/history/device-check-2026-10-21.md). The main-loop
 sampler (firmware/src/logger.rs `sample`) took the session's first interval
 - from a flag raised before the start to the first conversion, half a
 period after the restart with the chopper on (the model's opt-in

@@ -12,14 +12,14 @@ Additional requirements:
 - Both analog rails on by default.
 - USB composite = USBTMC + mass-storage disk, always present (like the stock disk mode).
 - Debug commands live in USBTMC as `DBG:*` SCPI commands (no CDC).
-- Data-logger mode (see FR-38 in `../docs/dm40-feature-request.md`).
+- Data-logger mode (see FR-38 in `../docs/history/dm40-feature-request.md`).
 
 ## Owner decisions pending (2026-10-25)
 
 What waits for the owner; each line links to the material.
 
 - [x] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
-      device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
+      device numbers in [device-check-2026-10-21.md](../docs/history/device-check-2026-10-21.md) "Option E"). Recommendation: B.
       **Owner 2026-10-25: FAST unchopped with a firmware offset, MED / SLOW chopped, all three rejecting 50 / 60 Hz**
       (the "bug fixes only" rule does not apply to this one). Done on branch feat/rate-unchopped-fast:
       [fastvos.rs](src/fastvos.rs), dmm.rs FR-05 (the rate's R22 in the row), survey §8.4, the manual;
@@ -3853,7 +3853,7 @@ Emulator (emu/):
       the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
       aca-auto-dn / acv-entry: FAIL on 7ab5c0e, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
       VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
-      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
+      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
       reading at the 60 -> 6 V step (the first final +7 %: the coupling step); the entry fails differently (next item).
 - [x] Plain AC V entry: the first final reads 1/√2 of the input (device 185c066, DC V -> AC V on the square at 20 / 50 /
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
@@ -3867,7 +3867,7 @@ Emulator (emu/):
       the entry, was 0.30 s; an autorange step: 0.65-0.71 s between readings, was 0.46-0.54 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
       entry, INFERRED; the block over it reads 0.706 of the input); firstrdtest acv-entry-sq (the device's square) /
       acv-entry-arr (1 V sine): FAIL on 5a4dbce (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
-      aca-auto-dn (8ed9499's) pass. Device check (5 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
+      aca-auto-dn (8ed9499's) pass. Device check (5 min): as [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
       the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
       `DBG:ACDC?` does not list the two dropped results (the drop comes before its entry): the first one logged is
@@ -3885,7 +3885,7 @@ Emulator (emu/):
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
-      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) note 2.
+      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) note 2.
       Fixed (9e49722): a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
       AC phase's V_GATE results say driven until the next DC result, so the "free" AC result (|LPF| + 1.41 x RMS under
       1.5 x the range) no longer asserts A-JACK while the input reads OL
@@ -3894,7 +3894,7 @@ Emulator (emu/):
       `mvholdrows:1`: only the DC mV row sees it); senttest acdcmv-sq600-off / acdcmv-dc5-off / acdcmv-off-dcrow: FAIL on
       5a4dbce (A-JACK ~1 s after the off), pass; their last phase (a current in A) and acdcmv-sq600 / acdcmv-dc5 /
       acmv-* still A-JACK. Not covered: an open input that reads within the range while PB1 still hits (no device
-      trace of it). Device check (10 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
+      trace of it). Device check (10 min): as [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
       off, 6 runs each, `SYST:ALER?` + `DBG:SENT:LOG?` every 0.1 s for 6 s after the off): no A-JACK; then a current in
       A (V-COM open): A-JACK.
       **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
@@ -3919,7 +3919,7 @@ Emulator (emu/):
       square from CONF:VOLT:AC 0.6 -> CONF:VOLT:AC with VOLT:AC:RANG? every 50 ms. A first final above ~0.1 V
       at 0 V or a 60 V visit = real: then hold plain AC V results after a row write until two agree
       (as ACA_VET) and let held results move no range; else lower the model's level.
-      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
+      [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
       Done (fix/regressions-1025): `Op1OffLevel` -0.6 -> -0.005 V. The model now reads 0.027, 0.018, 0.012, 0.008
       ... 0.003 V by 1 s at 0 V (the device 0.018-0.036, 15-17, 9-10, 5-6, 3 mV), and under the square 6 V only
@@ -3933,7 +3933,7 @@ Emulator (emu/):
       open, `dm40scpi.py log out.csv --source ad2 --rate 9600 -d 1`: the mean of the samples (A) against the cal
       0x10C offset, and their rms about the mean. Mean off = arm with a measured zero; noise = the plan's
       ~20 mA figure is what changes.
-      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
+      [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
       Fixed (18532a6): the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
       (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the zero

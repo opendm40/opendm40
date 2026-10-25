@@ -315,7 +315,7 @@ intended symbols moved). To C:
 - vwrite's temp purge and post-write steps (`purge_tmp`, `park`, `check`,
   `finalize`, `commit`: after a host write session; MSC writes are refused
   while a logger session runs).
-To B (the device check of d8e249d, [device-check-2026-10-21.md](device-check-2026-10-21.md) 6a / 6c):
+To B (the device check of d8e249d, [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) 6a / 6c):
 - the DMM-log and scope CSV generators of the USB volume (`Gen::open` /
   `advance`, `RowDec::*`, `SDec::*`, `chunk_at`, `parse_file`,
   `from_scale`, `s_pred`, `dlog::open` / `find` / `geometry` / `dir_start`
@@ -1913,4 +1913,4 @@ it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`]
 
 ## Developer workflow
 
-Build, reload (`tools/reload.sh`), first install and the way back: [dev-notes.md, Developer workflow](dev-notes.md#developer-workflow).
+Build, reload (`tools/reload.sh`), first install and the way back: [firmware/README.md, Developer workflow](../README.md#developer-workflow).

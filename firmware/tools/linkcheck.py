@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Check every relative Markdown link and #anchor in the tracked *.md files,
-and that firmware/README.md links every firmware/docs/*.md.
+and that docs/README.md links every firmware/docs/*.md and docs/*.md.
 Usage: firmware/tools/linkcheck.py [REPO_ROOT]  (default: the current directory)."""
 import os, re, subprocess, sys, urllib.parse
 root = sys.argv[1] if len(sys.argv) > 1 else '.'
@@ -49,11 +49,12 @@ for f in files:
         if frag and tgt.endswith('.md') and os.path.isfile(tgt):
             if frag not in get_anchors(tgt):
                 print('%s: missing anchor %s' % (f, t)); bad += 1
-# docs index
-idx = open('firmware/README.md', encoding='utf-8').read()
-linked = {os.path.normpath(os.path.join('firmware', (m.group(1) or '').partition('#')[0])) for m in LINK.finditer(idx) if m.group(1)}
-for d in sorted(x for x in files if re.match(r'firmware/docs/[^/]+\.md$', x)):
+# docs index: docs/README.md links every doc in firmware/docs/ and docs/ (not in subfolders)
+IDX = 'docs/README.md'
+idx = open(IDX, encoding='utf-8').read()
+linked = {os.path.normpath(os.path.join('docs', (m.group(1) or '').partition('#')[0])) for m in LINK.finditer(idx) if m.group(1)}
+for d in sorted(x for x in files if re.match(r'(firmware/)?docs/[^/]+\.md$', x) and x != IDX):
     if d not in linked:
-        print('firmware/README.md: does not link %s' % d); bad += 1
+        print('%s: does not link %s' % (IDX, d)); bad += 1
 print('%d problems in %d files' % (bad, len(files)))
 sys.exit(1 if bad else 0)

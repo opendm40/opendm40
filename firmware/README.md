@@ -1,8 +1,9 @@
 # opendm40 firmware: developer README
 
 Sources, tools and docs of opendm40. Features, install, backup and recovery
-are in the [root README](../README.md). Paths below are relative to
-`firmware/`.
+are in the [user manual](../docs/manual/README.md); all documents are listed
+in the [documentation index](../docs/README.md). Paths below are relative to
+`firmware/`, and the commands run there.
 
 ## Build
 
@@ -22,12 +23,11 @@ the flash / SRAM budgets, and packs the body into the stock update format with
 ([emu/README.md](../emu/README.md)) needs a flash dump of your own meter (not
 in the repo).
 
-The version is the package version in [`Cargo.toml`](Cargo.toml) without a
-`.0` patch (0.1.0 -> `0.1`, [`src/ident.rs`](src/ident.rs),
+The version is the package version in [`Cargo.toml`](Cargo.toml) as it is
+(`0.2.0`, `0.2.1-rc1`; [`src/ident.rs`](src/ident.rs),
 [`tools/fw-version.sh`](tools/fw-version.sh)): `*IDN?`, Settings > Device,
 the USB disk texts, the CSV headers and the install file name
-`dm40_opendm40_v<version>.bin` take it (a release asset:
-`dm40_opendm40_v<version>[-preN].bin`, from a version such as 0.1.0-pre1). Any `dm40*.bin` name installs: the
+`dm40_opendm40_v<version>.bin` take it. Any `dm40*.bin` name installs: the
 FS-loader takes the first `dm40*.bin` in the root, and a long name's 8.3
 alias (`DM40_O~1.BIN`) starts with `DM40` too.
 
@@ -54,6 +54,101 @@ path (checkout, rustup, cargo registry) and nothing in the image is
 time-stamped, so rustc 1.99.0 gives the same `opendm40.bin` in any
 directory and with a fresh `CARGO_HOME`. CI pins 1.99.0; that its image
 matches a local build is inferred (compare the artifact's `SHA256SUMS`).
+
+## USB debug link
+
+opendm40 enumerates as a composite USBTMC + mass-storage device (`1209:D040`; builds before 0.1.0: `1209:0001`)
+on USBFS. Debug commands are SCPI `DBG:...` over USBTMC
+([`src/scpi.rs`](src/scpi.rs)), refused over Bluetooth. The host tool
+[`tools/dm40dbg.py`](tools/dm40dbg.py) (PIL for screenshots) needs
+read/write access to `/dev/usbtmc*`: the udev rule in the
+[user manual](../docs/manual/README.md#access-without-root).
+[`tools/dm40scpi.py`](tools/dm40scpi.py) is the SCPI client for readings,
+CSV logs and the fast logger (USB or Bluetooth).
+
+The USB disk is a read-only volume generated on the fly; how it is built and
+what a PC may write: [native-boot.md, Unit data](docs/native-boot.md#unit-data-the-usb-volume-srcvdiskrs-the-spi-disk-srcfatdirrs-and-the-calibration-safety-copy-srccalbackuprs).
+
+```
+python3 tools/dm40dbg.py ping
+python3 tools/dm40dbg.py shot out.png        # full screen in ~0.8 s
+python3 tools/dm40dbg.py tap X Y             # touch tap; also left / right (view swipe)
+python3 tools/dm40dbg.py drag X0 Y0 X1 Y1 [--ms N] [--hold MS]
+python3 tools/dm40dbg.py key 0..3 [--hold MS]  # side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF
+python3 tools/dm40dbg.py diag                # DBG:DIAG? block (hex)
+python3 tools/dm40dbg.py boot                # DBG:BOOT? decoded: reset cause, marker, crash counter...
+python3 tools/dm40dbg.py scpi 'DBG:FLASH?'   # any SCPI; this one: SPI flash JEDEC id, blocks, write error
+python3 tools/dm40dbg.py upload FILE         # update file -> DM40FW.BIN in the SPI root (DBG:UPLOAD)
+python3 tools/dm40dbg.py update [--wait S] [--expect FILE]   # DBG:UPDATE: the loader installs it
+python3 tools/dm40dbg.py image FILE          # offline: is FILE a valid dm40*.bin update file?
+python3 tools/dm40dbg.py reset               # reboot opendm40
+python3 tools/dm40dbg.py release             # stop feeding the watchdog (counts as a crash)
+python3 tools/dm40dbg.py recover             # DESTRUCTIVE: into the vendor update screen (recover -h)
+```
+
+`python3 tools/dm40dbg.py -h` lists the rest (`hold`, `lcdread`).
+
+**Watchdog.** The main loop feeds it while it runs. A hang, a panic (magenta
+bar at the bottom) or `DBG:RELEASE` resets the meter after ~20 s and opendm40
+reboots once; a second one within 60 s enters recovery (the loader update
+screen). Details: [native-boot.md, Normal native mode](docs/native-boot.md#normal-native-mode).
+
+**Bring-up failures** show as red squares at the top left (`fail` in
+[`src/main.rs`](src/main.rs)): slot 0 = PLLSAI (the 48 MHz USB clock) not
+locked, slot 1 = USBFS core not answering (GRSTCTL.AHBIDL; GSNPSID reads 0 on
+this GD32).
+
+**USB re-attach.** Resetting USBFS does not make the host see a disconnect
+(the D+ pull-up stays), so `usb::init_hw` drives PA11 / PA12 low for 100 ms
+first ([`src/usb.rs`](src/usb.rs)).
+
+**Screenshots** read the LCD's GRAM back (0x2E): one dummy word, then RGB666
+as 3 bytes per pixel packed big-endian into the 16-bit words
+([`src/lcd.rs`](src/lcd.rs)).
+
+## Developer workflow
+
+**Reload while opendm40 runs** (the normal loop):
+
+```
+tools/reload.sh [cargo args]     # e.g. --features keep-screen
+```
+
+1. `./build.sh [cargo args]`; `dm40dbg.py image` checks the file (vendor
+   header CRC, body CRC, size, reset vector) before anything is staged.
+2. A running opendm40 that does not answer `DBG:BOOT?` is refused; so is the
+   stock "USB Connect" disk or the loader update screen (`28e9:028f`) unless
+   `--from-stock`.
+3. `dm40dbg.py upload`: `DBG:UPLOAD` writes the file as `DM40FW.BIN` into the
+   SPI flash's root (every other `dm40*.bin` there removed first), the meter
+   re-reads it and checks the CRC-32 ([`src/upload.rs`](src/upload.rs));
+   then `DBG:FLASH?` must report no SPI write error.
+4. `dm40dbg.py update --wait 90 --expect FILE`: `DBG:UPDATE` zeroes the loader
+   marker and resets; the vendor loader installs the file and deletes it. If
+   the device is still on USB after 5 s, `SYST:ERR?` is reported ("Flash
+   error" = marker not zeroed, nothing changed). The first boot after an
+   install is dark for several seconds: do not power-cycle. If `28e9:028f`
+   stays up for 20 s instead, the install failed (loader screen). Then
+   `DBG:BOOT?` is printed and the loader marker compared with the file's
+   12-byte update header: "installed OK" (~1 min in all).
+
+Options (`tools/reload.sh --help`): `--no-build`, `--image FILE`, `--wait S`,
+`--stock FILE`, `--from-stock`.
+
+**First install** (the meter runs stock): `tools/reload.sh --from-stock`
+stages the file on the stock "USB Connect" disk and tells you to press
+"update" or power-cycle, then waits up to 300 s for opendm40. By hand:
+[the manual, Install](../docs/manual/README.md#install).
+
+**Back to stock** from a running opendm40: `tools/reload.sh --stock FILE`
+with the official [`../stock/vendor/dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin)
+or `../stock/patch/build-memrw/dm40_patched.bin` (patched stock with
+Bluetooth memrw, built by [`../stock/patch/kit/mkkit.sh`](../stock/patch/kit/mkkit.sh)).
+Same flow, no wait (stock does not enumerate `1209:D040`).
+
+**Recovery** (opendm40 hangs or does not start):
+[the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader). `INFO/FIRMWARE.BIN` on the
+USB volume (the running image) or `opendm40.bin` both work as the image.
 
 ## CI and releases
 
@@ -120,73 +215,21 @@ release version in the same commit.
 
 ## Documentation
 
-User documentation: the [user manual](../docs/manual/README.md) and the
-[SCPI reference](../docs/manual/scpi-reference.md). Developer documents,
-one line each:
+Every document, grouped by reader (reference, design notes, planning, test
+records, hardware, history): [docs/README.md](../docs/README.md).
 
-### Reference: protocols, formats, SCPI
-
-- [scpi-reference.md](../docs/manual/scpi-reference.md): every SCPI command (checked against the parser by `tools/scpi-doc-check`)
-- [bt-scpi.md](docs/bt-scpi.md): SCPI over Bluetooth next to the stock app protocol; USBTMC on Windows
-- [bt-protocol.md](../docs/bt-protocol.md): the stock Bluetooth phone-app protocol
-- [compact-log-format.md](docs/compact-log-format.md): the DLG log format on the disk, CSV on read
-- [native-boot.md](docs/native-boot.md): flash and memory map, update format, shim, recovery, the USB disk, memory budget
-- [model-variants.md](docs/model-variants.md): how the firmware tells DM40A / B / C apart
-- [parity.md](docs/parity.md): item-by-item parity with the stock firmware V2.6
-- [stock/README.md](../stock/README.md): stock update-file tools
+Host tests: `tools/*/run.sh`, one suite per directory in [`tools/`](tools)
+(for example [`fatren-test`](tools/fatren-test), [`scpi-test`](tools/scpi-test),
+[`touch-test`](tools/touch-test), [`ui-render`](tools/ui-render)), and
+[`tools/linkcheck.py`](tools/linkcheck.py) and
+[`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh) for the docs. The
+emulator tests: [emu/README.md](../emu/README.md).
 
 ### Stock-firmware analysis (private)
 
-The reverse-engineering material on the stock firmware lives in the private
-repo `wirenboard/alientek-dm40-fw-analysis`; those with access clone it into
-`stock/re/` (ignored by git), so the `stock/re/...` paths in the code and the
-docs resolve. The emulator needs the developer's own flash and SPI flash
-dumps in `stock/re/dumps/` ([emu/README.md](../emu/README.md)). The build and
-the CI suites do not need the clone. In it:
-
-- `stock/re/docs/fsloader-install-trigger.md`: how the stock FS-loader installs a `dm40*.bin`, its USB and error paths
-- `stock/re/docs/genuine-check.md`: the stock genuine-device check (UID-bound loader data); opendm40 has no implementation of it (the former `DBG:GENUINE?` and its host test are in the private repo, `opendm40-private/`)
-- `stock/re/docs/stock-scope-ui.md`: pixel and interaction spec of the stock scope UI ([renderer](tools/stock-ui/README.md))
-- `stock/re/ANALYSIS.md`: reverse-engineering notes on the stock firmware and flash
-- `stock/re/docs/history/native-boot-plan.md`: the 2026-10-13 native-image plan and its T1 / T2 / T3 tests
-- `stock/re/docs/history/acdc-stock-vs-opendm40.md`: AC+DC and AUTO coupling of the stock, measured live
-
-### Design
-
-- [dev-notes.md](docs/dev-notes.md): the USB debug link and the developer workflow
-- [ram-budget.md](docs/ram-budget.md): RAM users and when each is live
-- [fonts.md](docs/fonts.md): the stock fonts, their cost and storage
-- [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md): power meter and wrong-connection alerts
-- [inrush-current.md](docs/inrush-current.md): inrush current capture
-- [dmm-input-scope-feasibility.md](docs/dmm-input-scope-feasibility.md): the HY3131 AD2 stream: wave view, fast logger
-- [acdc-approaches.md](docs/acdc-approaches.md): AC+DC in other meters and DMM chips, what fits the HY3131
-- [dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md): DMM reading rate, integration time and filtering
-- [dac-adc-paths.md](docs/dac-adc-paths.md): DAC to ADC paths for self-test
-- [combined-view-design.md](docs/combined-view-design.md): the DMM + scope combined view
-- [scope-scale-ux.md](docs/scope-scale-ux.md): scope scale and position by touch
-- [user-feedback.md](docs/user-feedback.md): DM40 owners' feedback triaged into UF-nn items
-- [dm40-feature-request.md](../docs/dm40-feature-request.md): the FR-nn feature list (Russian)
-
-### Hardware
-
-- [hw/README.md](../hw/README.md): the board: block diagram, parts, pins, DMM front end, scope, power; the only place for hardware facts
-- [HY3131 model](../emu/hy3131/README.md), [HY3131 research notes](../emu/hy3131/RESEARCH.md), [HY3131 registers](../emu/hy3131/ref/registers.md)
-
-### Testing
-
-- [emu/README.md](../emu/README.md): the emulator (Renode): run, screenshots, scenarios
-- Host tests: `tools/*/run.sh` (one suite per directory in [`tools/`](tools), e.g. [`fatren-test`](tools/fatren-test), [`scpi-test`](tools/scpi-test), [`touch-test`](tools/touch-test), [`ui-render`](tools/ui-render)); `tools/linkcheck.py` and `tools/scpi-doc-check` for the docs
-- [device-check-2026-10-21.md](docs/device-check-2026-10-21.md): device test log, appended per build
-
-### History
-
-Finished plans, reviews, investigations and decision logs; not maintained.
-The full list is [docs/history/README.md](../docs/history/README.md). Archived from `docs/`:
-
-- [stage0-test.md](../docs/history/stage0-test.md): Stage 0, the FS-loader re-installs a staged file
-- [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md): nine product / engineering decisions, cited by the code as `#N`
-- [switch-latency.md](../docs/history/switch-latency.md): DMM switch latency and the proposals cited by the code
-- [log-format-standards.md](../docs/history/log-format-standards.md): standard log formats against DLG
-- [ui-review.md](../docs/history/ui-review.md): UI/UX review
-- [hwtrig-integration.md](../docs/history/hwtrig-integration.md): the hooks that wired the comparator trigger
-- [integration-queue.md](../docs/history/integration-queue.md): the queue of hooks into shared files (empty)
+The reverse-engineering material on the stock firmware is not public. Those
+with access clone it into `stock/re/` (ignored by git), so that the
+`stock/re/...` paths named in the code and the docs resolve. The emulator
+needs the developer's own flash and SPI flash dumps in `stock/re/dumps/`
+([emu/README.md](../emu/README.md)). The build and the CI suites do not need
+it.

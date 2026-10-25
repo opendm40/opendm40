@@ -18,7 +18,7 @@ the GD32F4xx User Manual, or a device measurement with its commit. Short
 names: "acdc" = `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo),
 "power doc" = [power-meter-and-misconnect.md](power-meter-and-misconnect.md)
 (sections 1-3: the AD2 / AD3 mux, OP1 / OP2 routing, the row facts),
-"device check" = [device-check-2026-10-21.md](device-check-2026-10-21.md).
+"device check" = [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md).
 The board (pins, isolator, input network, shunt nodes):
 [hw/README.md "DMM front end (HY3131)"](../../hw/README.md#dmm-front-end-hy3131).
 
