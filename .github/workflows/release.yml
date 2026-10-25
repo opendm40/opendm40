@@ -49,7 +49,7 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
               -f tag_name="$TAG" --jq .body > auto-notes.md
-          firmware/tools/release-notes.sh "$TAG" "$GITHUB_SHA" auto-notes.md > notes.md
+          firmware/tools/release-notes.sh "$TAG" "$(git rev-parse HEAD)" auto-notes.md > notes.md
           cat notes.md
       - name: Create the release
         run: |
