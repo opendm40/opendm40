@@ -23,6 +23,12 @@
 //!     draw of the new state).
 //! over a matrix of worst cases, and writes PNG renders of named scenes.
 //!   main <out dir>      prints "cases N, violations M", exit 1 if M > 0
+//! Two loops reuse a page many cases share instead of drawing it again per
+//! case (the combined page under the meter strip, 0b; the fresh DMM page
+//! with B in the update pairs, 5c). UIR_VERIFY=1 draws it per case as
+//! before and counts any difference from the reused one as a violation;
+//! compare the two runs' UIR_HASH files (they hash every checked screen and
+//! every A-then-B screen of the update checks).
 #![allow(dead_code, unused, static_mut_refs)]
 
 mod host;
@@ -265,6 +271,22 @@ impl Checker {
             use std::io::Write;
             let mut h: u64 = 0xcbf2_9ce4_8422_2325;
             for &v in emu().fb.iter() {
+                for b in v.to_le_bytes() {
+                    h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+                }
+            }
+            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p).unwrap();
+            writeln!(f, "{} {} {:016x}", self.cases, scene, h).unwrap();
+        }
+    }
+
+    /// UIR_HASH: also "<case> <scene> <hash>" of a screen kept for a
+    /// comparison (the update checks' A-then-B screens).
+    fn hash_buf(&self, scene: &str, buf: &[u16]) {
+        if let Ok(p) = std::env::var("UIR_HASH") {
+            use std::io::Write;
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for &v in buf.iter() {
                 for b in v.to_le_bytes() {
                     h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
                 }
@@ -1354,12 +1376,34 @@ fn main() {
         m.combined = true;
         let strip_area = Bx::new(13, 20, 401, 56);
         let strip_regions = [("screen", Bx::new(0, 0, 480, 320))];
-        let page = |m: &scope_ui::Model| {
+        let full_page = |m: &scope_ui::Model| {
             host::reset(0);
             scope_ui::invalidate();
             scope_ui::strip_invalidate();
             scope_ui::graph().clear();
             scope_ui::update(m);
+        };
+        // `m` is the same for every case: the page under the strip is drawn
+        // once and restored per case (with the clip hits its draw reports),
+        // then the strip is drawn from scratch over it. meter_strip touches
+        // no scope_ui state but its own (strip_invalidate). UIR_VERIFY=1:
+        // draw the full page every time, as before, and check it equals the
+        // restored one (screen, pixel owners, probed calls).
+        let pre = unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) };
+        full_page(&m);
+        let base_clips = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(CLIPS), pre) };
+        let base = host::snapshot();
+        let verify = std::env::var_os("UIR_VERIFY").is_some();
+        let mut page_diff = 0usize;
+        let mut page = |m: &scope_ui::Model| {
+            if verify {
+                full_page(m);
+                page_diff += !host::same(&base) as usize;
+            } else {
+                host::restore(&base);
+                scope_ui::strip_invalidate();
+                unsafe { (*core::ptr::addr_of_mut!(CLIPS)).extend(base_clips.iter().cloned()) };
+            }
         };
         let mut datas = vec![];
         for (name, r, label) in &cases {
@@ -1399,6 +1443,7 @@ fn main() {
                 scope_ui::meter_strip(a);
                 scope_ui::meter_strip(b);
                 let got = emu().fb.clone();
+                ck.hash_buf(&format!("strip-update/{na}->{nb}"), &got);
                 page(&m);
                 scope_ui::meter_strip(b);
                 ck.cases += 1;
@@ -1406,6 +1451,13 @@ fn main() {
                 if bad > 0 {
                     ck.fail(&format!("strip update {na} -> {nb}"), format!("{bad} stale pixels"));
                 }
+            }
+        }
+        drop(page);
+        if verify {
+            println!("UIR_VERIFY: strip page drawn again per case: {page_diff} differ from the restored one");
+            if page_diff > 0 {
+                ck.fail("strip/verify", format!("{page_diff} full page draws differ from the restored page"));
             }
         }
     }
@@ -1642,8 +1694,14 @@ fn main() {
 
     // 5c. DMM page updates: reading A then B (format / +1 digit / unit /
     //     aux / verdict changes) equals a fresh page with B.
+    // The fresh page with B depends on B and (xa, xb) only: drawn once per
+    // (B, xa, xb) and kept (UIR_VERIFY=1: drawn for every pair, as before,
+    // and checked equal to the kept one).
+    let verify = std::env::var_os("UIR_VERIFY").is_some();
+    let mut fresh_b: std::collections::HashMap<(usize, bool, bool), Vec<u16>> = Default::default();
+    let mut fresh_diff = 0usize;
     for (na, a, la) in &cases {
-        for (nb, b, lb) in &cases {
+        for (ib, (nb, b, lb)) in cases.iter().enumerate() {
             for (xa, xb) in [(false, true), (true, false), (true, true)] {
                 let (mut a, mut b) = (*a, *b);
                 a.main.ext = xa && !a.main.ol;
@@ -1664,10 +1722,20 @@ fn main() {
                 let mut dv = ui::DmmView::new();
                 page(&mut dv, &[(a, *la, meter::V_HI), (b, *lb, meter::V_NONE)]);
                 let got = emu().fb.clone();
-                let mut dv = ui::DmmView::new();
-                page(&mut dv, &[(b, *lb, meter::V_NONE)]);
+                let key = (ib, xa, xb);
+                if verify || !fresh_b.contains_key(&key) {
+                    let mut dv = ui::DmmView::new();
+                    page(&mut dv, &[(b, *lb, meter::V_NONE)]);
+                    let f = emu().fb[..W * 152].to_vec();
+                    match fresh_b.get(&key) {
+                        Some(k) => fresh_diff += (*k != f) as usize,
+                        None => drop(fresh_b.insert(key, f)),
+                    }
+                }
+                let want = &fresh_b[&key];
+                ck.hash_buf(&format!("dmm-update/{na}->{nb}/{}{}", xa as u8, xb as u8), &got);
                 ck.cases += 1;
-                let diff: Vec<usize> = (0..W * 152).filter(|&i| got[i] != emu().fb[i]).collect();
+                let diff: Vec<usize> = (0..W * 152).filter(|&i| got[i] != want[i]).collect();
                 if !diff.is_empty() {
                     let mut bx = EMPTY;
                     for &i in &diff {
@@ -1676,6 +1744,12 @@ fn main() {
                     ck.fail(&format!("dmm update {na} -> {nb} ext {xa}->{xb}"), format!("{} stale pixels at {:?}", diff.len(), bx));
                 }
             }
+        }
+    }
+    if verify {
+        println!("UIR_VERIFY: fresh DMM page per update pair: {fresh_diff} differ from the kept one");
+        if fresh_diff > 0 {
+            ck.fail("dmm-update/verify", format!("{fresh_diff} fresh pages differ from the kept one"));
         }
     }
 
