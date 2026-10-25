@@ -47,8 +47,9 @@ section named after the tag as the release notes; how to cut a release:
 - Bluetooth: the module's start-up banner and its own text no longer reach
   the SCPI parser as commands; a host's first command right after the
   module starts is answered.
-- No false A-JACK warning from a voltage on V-COM in ohm, continuity and AC
-  mV, nor from a source on V-COM in resistance.
+- No false A-JACK warning from a voltage on V-COM in ohm, continuity, AC mV
+  and AC+DC mV (also after the source is switched off with the input left
+  open), nor from a source on V-COM in resistance.
 - RES AUTO: no endless range hunt; `FETCh?` answers `+9.91E37` right after an
   autorange step.
 - SCPI numbers: `nr3` and powers of ten print exact values
@@ -56,6 +57,11 @@ section named after the tag as the release notes; how to cut a release:
 - `MMEM`: a directory prefix must be the file's own directory; a host's
   `MMEM:DATA?` no longer stalls the Wave view's stream.
 - First readings after a function change: every entry is checked; AC A too.
+  AC V / mV: the first reading after the entry no longer comes from a
+  conversion that began before the AC input was there (DC V -> AC V read
+  1/√2 of a square), nor 0 or 1 % low after an autorange step.
+- Inrush page: the zero is measured at the arm ("Armed: 0.069 A now" with
+  nothing in A; the idle and the results were 0.07 A off).
 - Logger: one 76.8 kS/s nominal rate; no hole in the panel at the 76.8 kS/s
   start.
 - The 6 M ohm test-current label is cleared on 60 M.

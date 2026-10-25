@@ -988,6 +988,15 @@ pub struct Dmm {
     /// used result seeds them (`f_ac`, `f_lpf`) instead of the EMA's 0.99
     /// step from 0, which read 1 % low and took ~1 s to close.
     ac_seed: bool,
+    /// Plain AC V / mV after that reset: the results to drop before the seed. 2 =
+    /// the first poll past the settle: its INTF read clears the flags of a
+    /// block the chip latched during the settle (device 489f956: DC V -> AC
+    /// V read 0.707 x the input, half the window before the AC reached the
+    /// node); 1 = the next result, whose window began before that read.
+    ac_lead: u8,
+    /// AC+DC mV: the last DC phase result's magnitude was over the range
+    /// (`mv_vside`).
+    mv_dc_drv: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1571,6 +1580,8 @@ impl Dmm {
             ohm_blk_k: 0.0,
             ohm_t0: 0,
             ac_seed: true,
+            ac_lead: 2,
+            mv_dc_drv: false,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -2064,6 +2075,7 @@ impl Dmm {
             self.f_lpf = 0.0;
             self.ac_raw = 0.0;
             self.ac_seed = true;
+            self.ac_lead = if mode > 2 { 0 } else { 2 };
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -2299,6 +2311,9 @@ impl Dmm {
         self.f_ac = 0.0;
         self.f_lpf = 0.0;
         self.ac_seed = true;
+        // (AC+DC: its own settle, `ac_settle_step`; set_sub sets `acdc` first.
+        // AC A: its vet. `set` resets again once `mode` is the new one.)
+        self.ac_lead = if self.acdc || self.mode > 2 { 0 } else { 2 };
         self.f_dc = 0.0;
         self.f_diode = 0.0;
         self.f_cap = 0.0;
@@ -3736,6 +3751,10 @@ impl Dmm {
         // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         let now = clk.now_ms();
+        if m == 3 && acdc {
+            // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
+            self.mv_dc_drv = mag > ov * lim;
+        }
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
         let up = self.over_ok(mag > ov * lim, vet);
@@ -4058,6 +4077,14 @@ impl Dmm {
         let m = self.mode;
         let need = if m <= 2 { hy::INTF_RMS | hy::INTF_LPF } else { hy::INTF_RMS };
         let intf = hy::read1(hy::R_INTF);
+        // Plain AC V / mV after a reset (`ac_lead`): no result latched during
+        // the settle, nor the one integrated across its end; the next seeds.
+        // (AC A: its own vet, ACA_VET_*: two results in a row must agree.)
+        let lead = self.ac_lead;
+        if lead == 2 || (lead == 1 && intf & need == need) {
+            self.ac_lead = lead - 1;
+            return None;
+        }
         if intf & need != need {
             return None;
         }
@@ -4750,10 +4777,14 @@ impl Dmm {
     /// V_GATE (AC mV), per result: `pk` = the node's peak estimate (mV,
     /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
     /// the open V jack of an A-jack current (sentinel MV_DRV_K).
+    /// AC+DC mV: also driven while its DC phase's last result was over the
+    /// range (`mv_dc_drv`; device 489f956: after a source went off the open
+    /// input read OL and the AC phase's results "free" while PB1 hit, a
+    /// false A-JACK).
     #[inline(never)]
     fn mv_vside(&mut self, now: u64, pk: f32) {
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
-        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim);
+        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv));
     }
 
     /// The probe's row is the jack check's (sentinel `jack_row`): ohm and

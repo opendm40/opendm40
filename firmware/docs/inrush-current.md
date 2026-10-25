@@ -27,8 +27,9 @@ scenario).
   range**: OP1 x1 across the 10 mohm shunt, DC-coupled, +-125 A at the AD2
   rails ([dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md)
   section 1.3). The same row as the wave view's A trace. The RMS of the raw
-  samples covers AC and DC loads alike; the zero and scale are the DMM's AD2
-  calibration of the row (`dmm::ad2_scale`).
+  samples covers AC and DC loads alike; the scale is the DMM's AD2
+  calibration of the row (`dmm::ad2_scale`), the zero is measured at the
+  arm (section 4).
 - **Stream**: a wave-style logger session (`Logger::start_wave(4, 1,
   inrush::RATE_HZ)`), i.e. the phase-locked stream ISR of
   [dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md) section
@@ -71,8 +72,9 @@ of 10 ms; the trigger compares against completed blocks only.
   trigger code (0.24 A per code in this row) is too coarse for sub-ampere
   steps. The detector runs in the main loop on every drained sample, in
   order, so it has no dead time.
-- **Armed** once 200 ms + 1 ms of history are in (`Phase::Arming` until
-  then: ~0.2 s after the arm or after a hole).
+- **Armed** once the zero is measured (110 ms, section 4) and 200 ms + 1 ms
+  of history are in (`Phase::Arming` until then: ~0.3 s after the arm,
+  ~0.2 s after a hole).
 - **t = 0** is the first sample of the ~1 ms window that crossed: at most
   ~1 ms before the step reached the threshold. The 100 ms window starts
   there and can hold up to ~1 ms of the idle level (host test: within 0.3 %
@@ -101,8 +103,17 @@ stream has stopped):
 | Idle | rms of the pre-trigger part (200 ms - 1 ms) |
 | Lost | samples lost after the trigger (section 3) |
 
-The zero is the DMM's AD2 calibration offset of the row (exact in the
-results, rounded to a code in the detector).
+The zero (exact in the results, rounded to a code in the detector) is
+measured at every arm (`Cap::arm`, `inrush::ZERO_*`): the first 10 ms of the
+stream are skipped, the next 100 ms averaged. Their mean is the zero when it
+is within 0.2 A of the calibration's offset and their rms about it is below
+50 mA (no load running); otherwise the calibration's offset stays. The cal
+record has no LPF offset for the AC A rows (`0x10C`.., all 0 on this unit),
+and the 10 A row's AD2 mean read +0.0717 A with the A jack open (device
+[489f956](device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25)
+step 4: rms about the mean 1.72 mA), so the page read "Armed: 0.069 A now"
+with nothing in A before the zero was measured. A hole while the zero is
+measured starts it again; one later keeps it.
 
 ## 5. The saved file
 
@@ -193,7 +204,7 @@ disk copy and its own log per process): MF -> Inrush from DC A, then
 
 | case | input | result |
 |---|---|---|
-| DC "lamp" | 0.05 A, then 12 A for 20 ms, 6 A for 80 ms, 3 A | Irms(100 ms) 7.567 A (exact window 7.589; t = 0 up to 1 ms early), peak 12.016 A, idle 0.0506 A, lost 0; LOGS/FAST000.DLG: 19 200 rows, t0 at 0.200000 s, raw = `INR:DATA?` |
+| DC "lamp" | nothing in A with the model's AD2 offset (`acaoff:0.717`, +0.0717 A), then 12 A for 20 ms, 6 A for 80 ms, 3 A | the measured zero (`INR:PRE?` a = -0.0717 A); Irms(100 ms) ~7.57 A (exact window 7.589; t = 0 up to 1 ms early), peak ~12.01 A, idle below 20 mA, lost 0; LOGS/FAST000.DLG: 19 200 rows, t0 at 0.200000 s, raw = `INR:DATA?` |
 | AC "motor" | 2 A rms 50 Hz running, then 5 A rms | no trigger by the running load; Irms 5.105 A, abs(peak) 7.229 A, idle 2.047 A |
 | host `CONF:VOLT:DC` while armed | | capture stopped ("Stopped: DMM changed"), stream off, DC V reads |
 
@@ -233,7 +244,7 @@ section 5); its time-current behaviour is unknown: keep a motor's start
 
 | step | how | pass |
 |---|---|---|
-| entry | A function, MF -> Inrush | AC A 10 A, "Armed: 0.000 A now" after ~0.2 s; `INR:COND?` ARMED; `DBG:ISR?` late / slips 0 |
+| entry | A function, MF -> Inrush | AC A 10 A, "Armed: 0.000 A now" after ~0.3 s; `INR:COND?` ARMED; `DBG:ISR?` late / slips 0 |
 | lamp (12 V car bulb on a bench supply, or 230 V 40-100 W with care) | switch it on | "Triggered", 2 s later the result + "Saved LOGS/FASTnnn.DLG"; peak ~5-10x the run current; Irms 100 ms between the peak and the run current; the trace a decay over ~50-200 ms |
 | second meter | an inrush clamp (Fluke 376 / 323 / UT21x) or the scope + shunt on the same wire | Irms 100 ms within ~5 % of the clamp's inrush value (clamps differ in their window start); peak vs the scope's |
 | motor (drill, fan, small pump) | switch it on | trigger; the start-up band; `INR:FETC?` lost 0 |
@@ -251,7 +262,9 @@ or redraw while armed caused a hole (`lost`).
 
 The capture adds ~5.4 KB to region B (the drain, the detector, the live
 state line, the state queries), no SRAM (the trace lives in BUF) and ~200 B
-of stack (the session state is a TCM static); measured on 6dfffec. Region C
+of stack (the session state is a TCM static); measured on 6dfffec. The
+zero's measurement (`Cap::zero_in`, run with the stream) added ~0.2 KB to
+region B (09dc594). Region C
 holds app_inrush.rs, the page and trace drawing, `Cap::results` /
 `linearize` / `records`, the SCPI fetch / data / setters. Current numbers:
 [native-boot.md](native-boot.md) "Memory budget".
@@ -266,3 +279,8 @@ holds app_inrush.rs, the page and trace drawing, `Cap::results` /
 - The 6 A range (x10, +-12.5 A) is not offered: an inrush past 12.5 A would
   clip.
 - The trace is not zoomable; the CSV has every sample.
+- The zero is measured at the arm: a DC current below 0.2 A that already
+  flows then (with less than 50 mA rms on it) is taken for the zero, and
+  the results read relative to it. With a larger or AC load running at the
+  arm the calibration's offset stays (0 on the AC A rows), i.e. the AD2
+  offset (~0.07 A on the unit checked) is not taken out.

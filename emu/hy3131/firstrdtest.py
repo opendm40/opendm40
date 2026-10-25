@@ -39,6 +39,12 @@ the switch meets the old conversion at other phases):
                (device 489f956: 0.018-0.036 V first)
   acmv-acv-sq  the 0 / 9.5 V square, mvclamp: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC (AUTO):
                CONF? never on 60 V (device 489f956: 6 V only)
+  acv-entry-sq the same on the device's 0 / 9.5 V 50 Hz square (AC part 4.776 V) with
+               the model's acarrive 160 ms (the last RMS block before the 300 ms
+               settle half over the AC's arrival): every F 4.776 V +-0.5 % (f4cd2cd:
+               the block latched during the settle seeded the filter, 0.707 x; device
+               489f956 3.39-3.41 V for 4.81 V)
+  acv-entry-arr  the same on 1 V 50 Hz (sine)
 
 dcv-acv-med, dcv-res-slow and res-med also check the time between two new
 readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
@@ -64,7 +70,7 @@ BOOT_OFS = 0.906
 T0 = 8.0
 REPS = 4
 W = 44.0
-OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0'
+OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0;acarrive:0'
 R22 = 'r22part:0.4;r22off:2400000;r22n:1;r22win:1000'
 
 # name, input, rate, (pre command, s)..., switch command, check (kind, limit), conf prefix that must stay
@@ -103,6 +109,12 @@ SCEN = [
      ('abs', 0.05), 'VOLT:AC +6.000000E+00'),
     ('acmv-acv-sq', 'open;vsrc:4.75,ac=4.75,f=40,shape=square;mvclamp:1.212', 'MED', [('CONF:VOLT:AC 0.6', 3.0)],
      'CONF:VOLT:AC', ('any',), '!VOLT:AC +6.000000E+01'),
+    # Plain AC entry: the RMS block the chip latched during the settle (its window partly before
+    # the AC reached the node, the model's acarrive) must not be a reading (device 489f956).
+    ('acv-entry-sq', 'open;acarrive:160;vsrc:4.776,ac=4.776,f=50,shape=square', 'MED', [('CONF:VOLT:DC 6', 3.0)],
+     'CONF:VOLT:AC', ('rel', 4.776, 0.005), 'VOLT:AC'),
+    ('acv-entry-arr', 'open;acarrive:160;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
+     ('rel', 1.0, 0.005), 'VOLT:AC'),
 ]
 
 # Longest wait between two new readings (grey or final) after the first one,

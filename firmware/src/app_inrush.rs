@@ -34,6 +34,16 @@ fn a_item(mode: u8, range: i8) -> Option<u8> {
     Some((2 - m) * 2 + (range.max(0) % 2) as u8)
 }
 
+/// The zero code an arm starts from: the last measured (the one just
+/// taken, kept for later arms: a load running at an arm keeps it), else the
+/// calibration's (`inrush::ZERO_*`).
+fn inr_zero(s: &mut inr::Session) -> f32 {
+    if s.cap.zok {
+        s.zm = s.cap.zf;
+    }
+    if s.zm.is_nan() { s.zf } else { s.zm }
+}
+
 impl App {
     /// Open the page (MF "Inrush", INR:STAT ON / INR:ARM): refused (toast,
     /// or the SCPI error `Err`) where it cannot run.
@@ -109,7 +119,8 @@ impl App {
         };
         s.b = a.per_code * 8.0;
         s.zf = a.offset / s.b;
-        s.cap.arm(inr::round_i(s.zf), inr::step_codes(s.thr, s.b));
+        let (z, k) = (inr_zero(s), inr::step_codes(s.thr, s.b));
+        s.cap.arm(z, s.b, k);
         s.res = None;
         s.stop = Stop::None;
         s.traced = false;
@@ -188,7 +199,7 @@ impl App {
             enabled,
         });
         let trace = if r.is_some() { self.scope.lent_buf().map(|b| &b[..]) } else { None };
-        ui::inr::trace(trace, s.zf, s.b);
+        ui::inr::trace(trace, s.cap.zf, s.b);
         s.shown = self.inrush_key();
     }
 
@@ -280,7 +291,7 @@ impl App {
         if s.cap.phase == Phase::Done {
             if let Some(buf) = self.scope.lent_buf() {
                 s.cap.linearize(buf);
-                s.res = Some(s.cap.results(buf, s.b, s.zf));
+                s.res = Some(s.cap.results(buf, s.b));
                 s.traced = false;
                 s.save = Save::Pending;
                 self.fast_req = Some(FastReq::Inrush);
@@ -369,7 +380,7 @@ impl App {
     #[inline(never)]
     pub fn inrush_head(&mut self, out: &mut [u8; 512]) -> (usize, crate::dlog::FPar) {
         let s = inr::ses();
-        let off = s.zf * s.b;
+        let off = s.cap.zf * s.b;
         let par = crate::dlog::FPar {
             a: -off,
             b: s.b,
@@ -524,7 +535,7 @@ impl App {
                 out.put_bytes(b",");
                 out.put_u32(inr::PRE as u32);
                 out.put_bytes(b",");
-                out.put_f32(-s.zf * s.b);
+                out.put_f32(-s.cap.zf * s.b);
                 out.put_bytes(b",");
                 out.put_f32(s.b);
                 true
@@ -598,9 +609,8 @@ impl App {
                 }
                 if s.streaming {
                     // A capture runs: start over (the stream goes on).
-                    let z = inr::round_i(s.zf);
-                    let k = inr::step_codes(s.thr, s.b);
-                    s.cap.arm(z, k);
+                    let (z, k) = (inr_zero(s), inr::step_codes(s.thr, s.b));
+                    s.cap.arm(z, s.b, k);
                     s.res = None;
                     s.save = Save::None;
                     s.stop = Stop::None;
