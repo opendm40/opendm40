@@ -4063,7 +4063,7 @@ Emulator (emu/):
       edge, the minimum, the closing edge): over 350 ms below about 6.7 Hz, so such gates were cut off (no result,
       or a partial count past the overflow). Fixed: `gate_check` reads the counter from 350 ms after the restart,
       then every 20 ms, and takes the counts once CTA stands still past the overflow (the counter stopped); it gives
-      up after 2.2 s without counts (no signal: `Freq::take` `quiet`), 4.4 s with counts, or 3.5 periods of the
+      up after 2.2 s without counts (no signal at once: `Freq::take` `quiet`), 4.4 s with counts, or 3.5 periods of the
       shown value + 150 ms (at least 350 ms). Hz and the AC V / AC A secondary readout (`freq_secondary`; AC+DC keeps
       the stock's blind read: its phases change the source). Hz shows the small extra digit when one SYSCLK tick
       over the gate is at most one count of it (`freq_ext`). Tests: [tools/meter-test](tools/meter-test/main.rs)

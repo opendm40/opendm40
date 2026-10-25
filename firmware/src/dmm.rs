@@ -830,14 +830,19 @@ impl Freq {
     /// (once each after a value was shown: the signal went away).
     /// `n`: the gate's SYSCLK ticks; `quiet`: a gate that counted nothing
     /// for FREQ_NOEDGE_MS (`Gate::Timeout`) counts as NO_SIGNAL_N empty
-    /// gates (no signal after one such gate per source, ~4.4 s from an
-    /// entry, not four).
+    /// gates of both sources (they count the same node; a source with a
+    /// clean value still shows it): no signal after one such gate, ~2.9 s
+    /// from an entry (four 2.2 s gates would be ~9 s).
     fn take(&mut self, i: usize, f: f32, d: f32, ok: bool, n: u32, quiet: bool) -> FreqPick {
         const NO_SIGNAL_N: u8 = 2;
         let glitch = freq_glitch(f, d);
         if !ok || f <= 0.0 {
             self.seen[i] = false;
-            self.zc[i] = if quiet { self.zc[i].max(NO_SIGNAL_N) } else { self.zc[i].saturating_add(1) };
+            if quiet {
+                self.zc = [self.zc[0].max(NO_SIGNAL_N), self.zc[1].max(NO_SIGNAL_N)];
+            } else {
+                self.zc[i] = self.zc[i].saturating_add(1);
+            }
             self.change[i] = 1e6;
         } else if glitch {
             // Edges missed: neither a value nor "no signal"; the last clean
@@ -5764,11 +5769,13 @@ mod tests {
 
     #[test]
     fn freq_take_quiet_gate() {
-        // One quiet gate per source (2.2 s each without counts) is no
-        // signal at once after an entry.
+        // One quiet gate (2.2 s without counts) is no signal at once after
+        // an entry; a source with a clean value keeps showing it.
         let mut q = freq0();
-        assert_eq!(q.take(1, 0.0, 0.0, false, 0, true), FreqPick::None);
-        assert_eq!(q.take(0, 0.0, 0.0, false, 0, true), FreqPick::NoSignal);
+        assert_eq!(q.take(1, 0.0, 0.0, false, 0, true), FreqPick::NoSignal);
+        let mut q = freq0();
+        assert_eq!(q.take(1, 0.04, 50.0, true, 300_000, false), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, false, 0, true), FreqPick::Src(1));
         let mut q = freq0();
         q.take(1, 0.002, 50.0, true, 2_457_640, false);
         assert_eq!(q.lastn[1], 2_457_640);

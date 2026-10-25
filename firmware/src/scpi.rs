@@ -46,7 +46,9 @@
 //!     function change itself.
 //!   - +9.91E37 (SCPI NaN, "no reading"; +9.9E37 stays the overload) and
 //!     "Data stale" in SYST:ERR? only if the current function has no
-//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline. READ? /
+//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline (frequency:
+//!     until AUTO_WAIT_MS after the entry at least: no signal reads 0 Hz
+//!     ~3.3 s after it; a first gate below ~1 Hz can take longer). READ? /
 //!     MEAS:RES? follow the ohm range hunt (each step moves the deadline,
 //!     at most 8 s); FETCh? does not: at most SCPI_WAIT_MS after the
 //!     deadline it was asked at, and +9.91E37 at once (no error) once an

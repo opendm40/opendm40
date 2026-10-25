@@ -641,7 +641,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   53.3 ms and ends on the next edge, so a gate takes up to two input
   periods plus 53.3 ms (about 1 s at 2 Hz, up to about 4 s at 0.5 Hz).
 - **--** until the first clean result (up to about 5 s at 0.5 Hz).
-  **0.000 Hz** (no signal) after about 4.5 s without an input edge from the
+  **0.000 Hz** (no signal) after about 3 s without an input edge from the
   start; once a value was shown, after about 7 of its periods plus
   0.3 s (at least 0.7 s) without an edge.
 - The last digit, drawn small, is shown when the counter resolves it. The
