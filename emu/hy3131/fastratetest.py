@@ -3,10 +3,11 @@
 16384 unchopped (R22 0x06, 100 ms) with the converter offset taken out in
 firmware, MED = 0x16 (200 ms), SLOW = 0x17 (400 ms). The model's opt-in
 knobs (emu/hy3131/HY3131.cs `UnchopTerm`): ad1vos (VOS in codes by
-AD1CHOP, here 15 000, not fastvos VOS_DEFAULT 13 270, so the readings
-before the first refresh are ~2.9 mV off and the refresh has to measure
-it), ad1ug (the unchopped gain, +95 ppm), the polarity switch inside the
-running window (ad1chopjit, default +-5 ms).
+AD1CHOP, here 15 000 on every path, not fastvos VOS_DEFAULT (~13 235 on
+6 V, ~12 600 on 60 V), so the readings before a path's first refresh are
+off and the refresh has to measure it), the polarity switch inside the
+running window (ad1chopjit, default +-5 ms); no unchopped gain (ad1ug 0,
+as the device).
 
 Checks, DC V 6 V manual, 1 V on V-COM:
   * MED: a reading every ~200 ms, the reference value (mean);
@@ -20,8 +21,8 @@ Checks, DC V 6 V manual, 1 V on V-COM:
     refresh;
   * FAST again after MED (the path's VOS is known): every reading from the
     third one on within 3 counts;
-  * AUTO with 10 V on the input: the 60 V range (its path not measured
-    yet: the last VOS), every reading within 3 counts (3 mV; the model's
+  * AUTO with 10 V on the input: the 60 V range (its path measured by its
+    first refresh before the readings start), every reading within 3 counts (3 mV; the model's
     noise there is ~0.6 count sd) and the mean within 0.5 count of 10 V x
     the reference's scale.
 
@@ -48,7 +49,7 @@ sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
 import emusync  # noqa: E402
 
-MODEL = 'ad1vos:15000;ad1ug:95'
+MODEL = 'ad1vos:15000'
 T_10V = 120.0  # model time of the 10 V step (after the 1 V part)
 os.makedirs(OUT, exist_ok=True)
 tag = 'fastrate-%d-%d' % (A.port, os.getpid())
