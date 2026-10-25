@@ -804,15 +804,24 @@ estimate moved by ~350 mV: the offset update must be gated on a steady
 input. Two isolated wild reads (+-X pairs) appeared per 300 s in sessions
 with polarity writes; whether they also occur at fixed R22 was not checked.
 
+**Gain, corrected (device 1184b096, 2026-10-25).** FAST against MED in
+alternating 8 s blocks (the calibrator drifts by up to ~350 ppm per minute
+after a level change, so single blocks in a row are not comparable): +8 ppm
+at 5 V on 6 V, +5 ppm at 24 V on 60 V without a gain correction (measured
+as -87 / -90 ppm with the -95 ppm one). The +95 ppm above was one 1 V point
+between two 0x16 blocks: not a gain. VOS per path at 0 V: DC V 6 V 13 220..
+13 250 codes (OP1O - RLU), 60 / 600 / 1000 V 12 573..12 607 (SENSE - PB5),
+600 mV 13 252, A 12 867 (6 A) / 12 607 (10 A), mA and uA 12 592..12 612.
+
 **What opendm40 does with it (FAST, 2026-10-25):** DC V / mV / A FAST runs
 0x06 and takes VOS out in firmware
 ([`src/fastvos.rs`](../src/fastvos.rs)): a VOS per range for the session,
 measured 2 s after the row write and every 30 s with two 01 conversions
-between 00 ones (2 conversions dropped each time), gated on a steady input,
-and the -95 ppm gain. MED = 0x16, SLOW = 0x17, all three in the row
-([`src/dmm.rs`](../src/dmm.rs) FR-05). Not measured: VOS on the other paths
-(60 V+, mV, A), its temperature coefficient, the gain on other levels and
-ranges ([TODO](../TODO.md)).
+between 00 ones (2 conversions dropped each time), gated on a steady input
+(the shift of the 00 means against the groups' own scatter), no gain
+correction, a VOS default per path. MED = 0x16, SLOW = 0x17, all three in the row
+([`src/dmm.rs`](../src/dmm.rs) FR-05). Not measured: VOS's temperature
+coefficient, 60 mV ([TODO](../TODO.md)).
 
 ## 9. Sources
 

@@ -24,15 +24,21 @@ What waits for the owner; each line links to the material.
       (the "bug fixes only" rule does not apply to this one). Done on branch feat/rate-unchopped-fast:
       [fastvos.rs](src/fastvos.rs), dmm.rs FR-05 (the rate's R22 in the row), survey §8.4, the manual;
       emu/hy3131/fastratetest.py.
-      - [ ] Device: DBG:FAST? and DC V 6 V FAST / MED / SLOW at 0 V and 1 V against each other (FAST within
-            2 counts of MED after its first refresh), the reading rate (SENS:RATE:PER? 0.1 / 0.2 / 0.4 s).
-      - [ ] Device: VOS (DBG:FAST? third field) on DC V 60 / 600 / 1000 V, DC mV 60 / 600 mV, DC A / mA / uA:
-            near 13 270 codes as assumed (fastvos VOS_DEFAULT)? If not, a per-path default.
-      - [ ] Device: the unchopped gain (-95 ppm, fastvos GAIN, one point) at 0.5 / 1 / 5 V on 6 V and on 60 V:
-            FAST vs MED.
+      - [x] Device 1184b096: SENS:RATE:PER? 0.10 / 0.20 / 0.40 s (FAST / MED / SLOW), ohm 0.2 / 0.4 / 0.4 s;
+            0 V on 6 V FAST - MED +24 uV; ohm 300 ohm FAST = MED within 0.6 mohm.
+      - [x] Device 1184b096: VOS per path differs (6 V 13 235, 60 V+ ~12 600, A 6 A 12 865: survey §8.4):
+            per-path defaults in fastvos VOS_DEFAULT (60 mV not measured).
+      - [x] Device 1184b096: the -95 ppm gain was wrong (FAST - MED -87 / -90 ppm with it, alternating blocks):
+            GAIN = 1. The refresh gate rejected 20 of 45 on the calibrator's noisy 1 V..24 V output: now the
+            00-mean shift against the groups' scatter.
+      - [ ] Device: the gate change and the defaults (a build after 1184b096): DBG:FAST? used >> rejected on the
+            calibrator's DC output; FAST - MED within 2 counts on 6 V / 60 V right after a range change.
       - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
       - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
       - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
+      - [ ] Emulator resautotest r30-300-30 fails 4 of 5 on this branch (6 of 6 pass on 0b3b73c1): after the OL
+            jump to 60 Mohm the first conversion there reads high, 60M -> 6k -> 600 instead of 60M -> 600. Not
+            explained yet (the ohm code paths are unchanged at MED).
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
