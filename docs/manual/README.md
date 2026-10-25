@@ -43,7 +43,7 @@ limitations](#known-limitations).
 9. [Inrush current](#inrush-current)
 10. [Recording](#recording): the Record page and the fast recorder.
 11. [USB disk, screenshots and the gallery](#usb-disk-screenshots-and-the-gallery)
-12. [Settings](#settings): every settings item, and the Device page.
+12. [Settings](#settings): every settings item, the Device page and the touch test.
 13. [Remote control and connecting from a computer](#remote-control-and-connecting-from-a-computer):
     the phone app, USB and Bluetooth on Linux, Windows and macOS, sigrok.
 14. [Backup, recovery and back to stock](#backup-recovery-and-back-to-stock)
