@@ -210,14 +210,14 @@ pub struct DmmView {
     last_ext: u8,
     last_unit: &'static str,
     last_mode: u8,
-    last_top: Option<(bool, u8, bool, crate::sentinel::Alert, bool)>,
+    last_top: Option<(u8, u8, bool, crate::sentinel::Alert, bool)>,
     last_aux: [bool; 2],
     /// Alternation phase (the app's 1 s `strip_alt`): with HOLD / A-HOLD
     /// and an A-JACK / LIVE? alert the status slot shows the alert while it
     /// is true, the hold state while false (`slot_alert`). Set by the app
     /// before `reading`.
     pub alt: bool,
-    /// Temperature sensor name shown instead of AUTO / MANU (set by the app,
+    /// Temperature sensor name shown instead of the range (set by the app,
     /// `None` outside the temperature function).
     pub label: Option<&'static str>,
     last_label: Option<&'static str>,
@@ -872,25 +872,26 @@ impl DmmView {
         }
         // The phase is part of the key only while it alternates: no
         // repaint every second otherwise.
-        // The key holds `r.auto` itself: AUTO+ and MANU both have auto_plus
-        // set (v_auto stays 1 under a manual range), so the old key
-        // (auto && !auto_plus, .., auto_plus) was the same for both and a
-        // range released by a reading (REL ended by an AUTO coupling switch)
-        // left "MANU" on screen (device check 5e52761).
-        let top = (r.auto, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
-        // Temperature: the status-bar slot shows AUTO / MANU like the other
-        // functions (the sensor name is the chip above; the deg F second
+        // The key holds the auto state itself: AUTO+ and a manual range
+        // both have auto_plus set (v_auto stays 1 under a manual range), so
+        // the old key (auto && !auto_plus, .., auto_plus) was the same for
+        // both and a range released by a reading (REL ended by an AUTO
+        // coupling switch) left the manual label on screen (device check
+        // 5e52761). Manual: the range itself (mode * 8 + range), as the
+        // label shows it ("6V" -> "60V" repaints).
+        let rk = if r.auto { 255 } else { r.mode.wrapping_mul(8).wrapping_add(r.range as u8) };
+        let top = (rk, hold, r.auto_plus, r.alert, self.alt && alert_alternates(hold, r.alert));
+        // Temperature: the status-bar slot shows the range state like the
+        // other functions (the sensor name is the chip above; the deg F second
         // readout that used to sit here is gone: one global unit, owner).
         if self.last_top != Some(top) || self.last_label != self.label {
             self.last_top = Some(top);
             self.last_label = self.label;
-            let s = if !r.auto { "MANU" } else if r.auto_plus { "AUTO+" } else { "AUTO" };
-            if temp {
-                sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
-            } else if let Some(l) = self.label {
+            let s = range_text(r);
+            if let (Some(l), false) = (self.label, temp) {
                 sf::label(sf::F14, rect(BAR_X, 1, 90, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
-                sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, 0);
+                range_status(s);
             }
             hold_label(hold, r.alert, self.alt);
         }
@@ -984,7 +985,7 @@ fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
 /// badge by priority A-JACK / LIVE? alternating with HOLD / A-HOLD (`alt`,
 /// `slot_alert`) > HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
 /// HV (>= 30 V) > REC > REL / limit
-/// verdict (alternating with `alt`) > range (AUTO / AUTO+ / MANU).
+/// verdict (alternating with `alt`) > range (`range_text`).
 pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
     use crate::scope_ui::{StripData, Txt};
     let mut d = StripData::EMPTY;
@@ -1062,9 +1063,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         _ if rel && (verdict.is_none() || alt) => ("REL", 0xb833),
         _ if verdict.is_some() => verdict.unwrap_or(("", 0)),
         _ if temp => ("", 0x5acb),
-        _ if !r.auto => ("MANU", 0x5acb),
-        _ if r.auto_plus => ("AUTO+", 0x5acb),
-        _ => ("AUTO", 0x5acb),
+        _ => (range_text(r), 0x5acb),
     };
     d.badge = b;
     d.badge_col = c;
@@ -1172,6 +1171,61 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         ],
         _ => &[("AUTO", None)],
     }
+}
+
+/// The MF page item (`range_items`, `Dmm::set_range` code) of HY3131
+/// `mode` / `range`: V r + 1, mV 5 (60 mV) / 0 (600 mV), A 600 uA .. 10 A
+/// = 0..5, ohm r.
+pub fn range_code(mode: u8, range: u8) -> u8 {
+    match mode {
+        2 | 3 if range == 0 => 5,
+        2 | 3 => 0,
+        0 | 1 => range + 1,
+        4..=9 => (2 - (mode - 4) % 3) * 2 + range,
+        _ => range,
+    }
+}
+
+/// The status bar's label of a manual range, as the stock writes it there
+/// ("%d" + unit of the range's full scale, FUN_0803d0xx; checked on stock
+/// V2.6 in the emulator): the MF page's item text, "6V", "600mV",
+/// "6000uA", "6K\u{3a9}" .. None: a function with no range list
+/// (continuity, diode, capacitance, frequency, temperature), where the
+/// stock always shows "AUTO".
+pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
+    let r = range.max(0) as u8;
+    match mode {
+        0..=10 => {
+            let code = Some(range_code(mode, r));
+            range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
+        }
+        _ => None,
+    }
+}
+
+/// Status-bar range text (stock): "AUTO" / "AUTO+" in auto, the range
+/// ("6V", "600mV", "60K\u{3a9}" ..) in manual. The power meter (two
+/// channels, their ranges in its side column) and a range held in a
+/// function with no range list (REL in frequency, SCPI RANG:AUTO OFF) keep
+/// "MANU": "600KHz" does not fit the slot.
+pub fn range_text(r: &Reading) -> &'static str {
+    if r.auto {
+        if r.auto_plus { "AUTO+" } else { "AUTO" }
+    } else if r.power.is_some() {
+        "MANU"
+    } else {
+        range_label(r.mode, r.range).unwrap_or("MANU")
+    }
+}
+
+/// The status bar's range text in the stock F21, left in the 90 px slot
+/// before the HOLD / alert slot (x 119). The stock letter-spaces it -1 in
+/// a 105 px box; ours starts after the logo, so the longest ranges close
+/// up: "600mV" -1, "6000uA" -2 (ink <= 89 px, 3 px before 119).
+#[inline(never)] // .cold (link-native.x): drawn on a change only
+fn range_status(s: &str) {
+    let sp = if sf::text_width(sf::F21, s, 0) <= 89 { 0 } else if sf::text_width(sf::F21, s, -1) <= 89 { -1 } else { -2 };
+    sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, sp);
 }
 
 fn range_rect(i: usize) -> sf::Rect {

@@ -53,8 +53,8 @@ when it changes (`STRIP_SHOWN`; `strip_invalidate` forces a full draw).
 State badge priority (`ui::strip_data`): HOLD / A-HOLD; a wrong-connection
 alert (A-JACK / V-JACK? / LIVE?, [`src/sentinel.rs`](../src/sentinel.rs))
 alternating with HOLD / A-HOLD at the 1 s cadence; HV (>= 30 V); REC; REL or
-the limit verdict (PASS / HI / LO, alternating); the range mode (AUTO / AUTO+
-/ MANU).
+the limit verdict (PASS / HI / LO, alternating); the range (AUTO / AUTO+ / the
+fixed range, `ui::range_text`).
 
 The strip passes the layout rules that the stock page does not: every ink
 box >= 3 px from the others and inside its container

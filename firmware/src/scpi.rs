@@ -517,7 +517,8 @@ pub enum Log {
 ///                           kind,unit,value_si,hold,range (kind P placeholder, G
 ///                           grey provisional, F final, N none; value NAN for
 ///                           dashes, +9.9E37 OL; hold Meter::hold_state; range
-///                           the status bar's AUTO / AUTO+ / MANU)
+///                           AUTO / AUTO+ / MANU; in manual the status bar
+///                           shows the range, ui::range_text)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
 ///                           of finger span, 1 one step per 1.25x (default), 2 live
