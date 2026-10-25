@@ -4061,3 +4061,57 @@ Emulator (emu/):
 - [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
+
+## 500 ohm from the MMB3.0 reads OL on 600 ohm (owner 2026-10-25, v0.2.0, branch fix/ohm500-ol)
+
+- [ ] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
+      [docs/data/res-steps-2026-10-25.csv](docs/data/res-steps-2026-10-25.csv). 0.01 .. 200 ohm read right on
+      600 ohm; the step 200 -> 500 ohm at 99.8 s gave one mixed reading (231 ohm), then OL at every conversion
+      for 32 s (rows 25 ms apart: R22 0x13, [src/dmm.rs](src/dmm.rs) `poll_ohm` on OL). Every later block of
+      0.1 s rows after a 0.45 .. 1.1 s gap is a row write (OSR_EARLY for 2 s after it, R22_LATE); there are six
+      between 132 and 140 s: the range was changed on the meter (inferred: the AUTO key's short press, the next
+      higher range). After them 500 ohm reads 499.8 .. 500.2 ohm. 1697 / 2064 ohm at 137.1 s and 736 ohm at
+      148.5 s (no row write from 140.2 s on) are not OL, so those blocks are on 6 kohm or higher; the range of the
+      block at 132.5 .. 134.1 s (499.6 .. 500.0 ohm) is unknown (a long AUTO press there would land on 600 ohm).
+      The ranges after 134.1 s are inferred from the values only.
+      Cause, two hypotheses (inferred, neither confirmed; the calibrator's resistance output is an active
+      simulator, inferred):
+      1. Current limit: the calibrator does not give 500 ohm at the 600 ohm range's test current, 0.90 mA
+         (`OHM_ISC` r1, Rref 1 k); it gives 200 ohm on the same current and 500 ohm .. 4 kohm on 6 kohm
+         (0.20 mA). Its readings get worse as the current falls (60 kohm range: 460 .. 547 ohm; 600 kohm:
+         1.2 .. 2.1 kohm; 60 Mohm: OL), as a simulator's would. The MMB3.0's resistance specification (the
+         test current per range) is unknown here.
+      2. Transient lock: the calibrator's switch (an open moment: the node goes to the open-circuit 2.17 V)
+         leaves its output failed while the current runs, and a row write (relays, a current interruption)
+         clears it. Fits the 132.0 s row write if that block is on 600 ohm.
+      The device check below tells them apart: a static 500 ohm on 600 ohm reads OL -> 1; it reads but the
+      200 -> 500 ohm step stays OL -> 2.
+      Ruled out in the firmware:
+      - The limit: `COUNTS_MODEL` is pinned to 2 for every model byte (DM40A too), so the 600 ohm range's OL
+        limit is 6 x 0.1 kohm x 1.03 = 618 ohm (`FACTOR` / `OVER`), not the stock DM40A's 4 x 1.05 = 420 ohm.
+      - The range: `Dmm::set_range` / `scpi::range_item_code` map the first ohm item and `CONF:RES 600` to r1
+        (Rref 1 k, the stock f10 row); 0.01 .. 200 ohm read right on it in the same record.
+      - A latch: `poll_ohm` takes OL afresh from every conversion (the average restarts on any R22 but the
+        steady one, the vet accepts two OL in a row, no hold), and the 25 ms rows show one OL decision per
+        conversion for the 32 s. Emulator ([emu/hy3131/ohm600test.py](../emu/hy3131/ohm600test.py)): manual
+        600 ohm at SLOW / MED / FAST, 200 -> open -> 500, 700 -> 500 and open -> 500 ohm read 500 ohm from the
+        first conversion after the step; 590 / 610 ohm in range, 620 ohm OL; AUTO lands a passive 500 ohm on
+        600 ohm, also with the emulator's node lag after each range step (`ohmtau:1000`).
+      - The UI: "0L" with "Overload" next to it is the plain OL readout (`ui.rs` `ol_word`), not the sentinel's
+        OVERLOAD alert (that one is the uA / mA shunt, DC / AC A only).
+      Not changed: the firmware.
+- [ ] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
+      if the owner is asleep). Each step: `CONF:RES 600;:SENS:RATE MED`, then 20 x
+      `RES:RANG?;:DBG:READout?;:DBG:SENTinel?` 0.5 s apart.
+      (1) A passive 470 .. 560 ohm resistor: in range, the control.
+      (2) MMB3.0 500 ohm, set before entering 600 ohm (no step on the range): OL = hypothesis 1. Note the DBG:SENTinel? `jack` field (1 / 2 = the node is driven, as by a
+      source) and the alert.
+      (3) The nodes with the simulator on: `firmware/tools/srcmap.py --vrefs VDS15 --paths R1K,R10K --load 500`
+      (the stock r1 / r2 rows): I and V_jack on 600 ohm and on 6 kohm. A simulator that cannot follow shows
+      V_jack near the open-circuit 2.17 V or I far from 0.90 mA; a passive 500 ohm gives V_jack = I x 500.
+      (4) MMB3.0 300 / 400 / 450 ohm on 600 ohm: where OL starts (the simulator's current limit, inferred).
+      (5) MMB3.0 500 ohm on 600 ohm with the low-current variant ON (MF page, ON button: 0.28 mA, `OHM_ISC` r1
+      ON): in range = the current limit confirmed, and the way to check the 600 ohm range with this calibrator.
+      (6) If (2) reads 500 ohm: the 200 -> 500 ohm step on 600 ohm; OL until a range change = hypothesis 2.
+      (7) MMB3.0 500 ohm on AUTO (long AUTO press): `RES:RANG?`. A passive 500 ohm lands on 600 ohm (emulator);
+      6 kohm means AUTO tried 600 ohm, read OL and went back (OHM_BAND hold).
