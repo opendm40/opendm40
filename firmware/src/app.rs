@@ -1076,13 +1076,20 @@ impl App {
 
     /// Owner: a tap on the main value switches the resolution, fewer digits
     /// = faster. The steps are the FR-05 rates, in resolution order
-    /// FAST -> MED -> SLOW -> FAST, with what they really give here (HY3131
-    /// AD1 at 163.84 kHz / OSR, chopped; dmm.rs tables): FAST = one OSR-8192
-    /// conversion per reading, 60000 counts at 10/s; MED / SLOW = steady
-    /// OSR-32768 conversions (2.5/s) averaged over 8 / 16 (ohm 16 / 32) of
-    /// them where the range has the +1 digit (600000 counts, the last digit
-    /// small). A toast says which (1.5 s). No rate choice (AC, Hz, cap,
-    /// temperature, AC+DC): low beep + toast.
+    /// FAST -> MED -> SLOW -> FAST, with what they really give here (dmm.rs
+    /// FR-05 tables, `rate_period` / `rate_window`): one reading per AD1
+    /// conversion; FAST 60000 counts (DC 10/s); MED / SLOW the steady
+    /// conversions averaged where the range has the +1 digit (600000
+    /// counts, the last digit small). A toast says which (1.5 s;
+    /// ui::rate_toast: the readings/s as the rate chip shows them and the
+    /// averaging window). No rate choice (AC, Hz, cap, temperature, AC+DC):
+    /// low beep + toast.
+    /// The page under a toast is not drawn until it goes (`tick`), so the
+    /// rate chip (the new name, "--/s" until readings at the new rate are
+    /// measured: Dmm::set_rate) and the readout without the old rate's
+    /// extra digit are drawn here, before the toast (device check of
+    /// 0.2.1: the chip said the old rate while the toast said the new one).
+    #[inline(never)] // .cold (link-native.x): a tap
     fn resolution_cycle(&mut self, now: u64) {
         if !self.dmm.rate_applies() {
             self.beep(now, 300);
@@ -1092,31 +1099,19 @@ impl App {
         let r = next_rate(self.dmm.rate());
         self.dmm.set_rate(r);
         self.chart_dirty = true;
+        if self.view == View::Dmm {
+            // The averaging window restarts (no extra digit in FAST, nor
+            // before AVG_FULL conversions at MED / SLOW); a HOLD / AutoHold
+            // capture keeps its value as it is.
+            if let Some(mut rd) = self.shown_reading().filter(|_| matches!(self.meter.hold_state(), 0 | 2)) {
+                rd.main.ext = false;
+                self.dmm_view.reading(&rd, self.meter.hold_state(), self.meter.verdict());
+            }
+            ui::rate_chip(&mut self.chart_cache, ui::RateChip { rate: r as u8, period_ms: 0, applies: true });
+        }
         let (n, ext) = self.dmm.rate_info(r);
         let mut b = [0u8; 40];
-        let mut k = 0;
-        let mut put = |t: &str| {
-            let m = t.len().min(40 - k);
-            b[k..k + m].copy_from_slice(&t.as_bytes()[..m]);
-            k += m;
-        };
-        put(dmm::RATE_NAMES[r as usize]);
-        put(if ext { " 600000 counts" } else { " 60000 counts" });
-        let mut t = [0u8; 16];
-        let p = self.dmm.rate_period_ms(r);
-        if n > 1 {
-            // Averaging window (s).
-            put(" / ");
-            put(dmm::format(&mut t, (n as u32 * p) as f32 / 1000.0, 1));
-            put(" s");
-        } else {
-            put(match p {
-                100 => " / 10/s",
-                200 => " / 5/s",
-                _ => " / 2.5/s",
-            });
-        }
-        let s = core::str::from_utf8(&b[..k]).unwrap_or("");
+        let s = ui::rate_toast(&mut b, r as u8, self.dmm.rate_period_ms(r), n, ext);
         self.toast(now, s, true);
     }
 

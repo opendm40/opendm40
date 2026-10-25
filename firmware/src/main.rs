@@ -740,7 +740,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                     }
                     scpi::Dbg::Fast => {
-                        let (used, rej, vos) = app.dmm.fast_info();
+                        let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;
                         put_u32(&mut scpi, used);
                         scpi.put_bytes(b",");
@@ -750,6 +750,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             scpi.put_bytes(b"-");
                         }
                         put_u32(&mut scpi, (vos.abs() + 0.5) as u32);
+                        scpi.put_bytes(b",");
+                        put_u32(&mut scpi, (conv + 0.5) as u32);
                         true
                     }
                     scpi::Dbg::Idle(set) => {
