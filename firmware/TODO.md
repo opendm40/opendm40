@@ -2421,6 +2421,8 @@ Firmware:
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
             `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device a2e9766: `"SHOTS/` / `"SCOPE/FAST000.DLG"`
             -256 for DATA? and DEL, the file still listed; `LOGS/` and no prefix read it (device-check doc "a2e9766: bug-fix recheck" 5).
+            `parse_path` was in .cold (7b43034), so MMEM:DATA? during an AD2 stream ran region C (wavetest
+            "a host reading SCOPE/SCOP000.CSV"); back in region B since fix/regressions-1025 (item below).
       - [x] Windows Eject does not keep the volume ejected (device b6909d6): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
@@ -3711,7 +3713,7 @@ Emulator (emu/):
       `DBG:LCD?` chunk holds drawing for 300 ms (main.rs `draw_hold_until`, a consistent frame across the
       chunks of one grab), so grabs less than 300 ms apart never let a frame through. Not the screenshot
       (`screenshot::frozen`, the item "Device: screenshot preparation"). Space grabs >= 0.4 s apart.
-- [ ] AC V entry from AC mV in the emulator: READ? 2.78-3.9 V at 0 V right after 600 mV -> 6 V (mvautotest,
+- [x] AC V entry from AC mV in the emulator: READ? 2.78-3.9 V at 0 V right after 600 mV -> 6 V (mvautotest,
       firstrdtest-style probe), and under the 0 / 9.5 V square a 6 -> 60 -> 6 V excursion (mvautotest "ranges
       [... 6.0, 60.0, 6.0]") with a 4.90 V tail. Cause in the model: the AC node's coupling capacitor sits at
       `Op1OffLevel` (-0.6 V, INFERRED) while OP1 is off (AC mV) and recharges on the AC V row. The device does
@@ -3724,6 +3726,11 @@ Emulator (emu/):
       (as ACA_VET) and let held results move no range; else lower the model's level.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
+      Done (fix/regressions-1025): `Op1OffLevel` -0.6 -> -0.005 V. The model now reads 0.027, 0.018, 0.012, 0.008
+      ... 0.003 V by 1 s at 0 V (the device 0.018-0.036, 15-17, 9-10, 5-6, 3 mV), and under the square 6 V only
+      with a first final of 5.42 V (device 5.03-5.39 V). The device's +20-23 % overshoot 0.3 s later is not
+      modelled (the model decays from the first final). Tests: firstrdtest acmv-acv-zero / acmv-acv-sq and
+      mvautotest "no 60 V range on the way up" fail with -0.6 and pass with -0.005.
 - [ ] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
       live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
       (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
@@ -3733,3 +3740,32 @@ Emulator (emu/):
       ~20 mA figure is what changes.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
+
+## Failing / flaky tests 2026-10-25 (branch fix/regressions-1025, from f4cd2cd)
+
+- [x] emu/hy3131/btwaketest.py failed (on 7dd18ab and on f4cd2cd): the BT host's first line got no reply, so
+      the test waited until the emulator ended. Firmware: `Bt::init_module` reads the AT+SLED0 answer, which
+      sets `quiet_until` 500 ms ahead (AT_QUIET_MS), then sends AT+RESET. A host links 0.32 s after a module
+      start (device), inside that window, so its first line was taken as a late module answer and dropped.
+      Fixed: a module start (AT+RESET, a power-up, cmd 07's restart pulse) ends the quiet window; `StartText`
+      already takes everything up to the end of the start-up text. btwaketest fails on f4cd2cd and passes with the fix. Device: not checked.
+- [x] emu/wavedroptest.py --host-read failed with "IMPORT refused, status 1" (also on the base build): a test
+      harness bug. It imported the USB/IP device a second time for the MSC reads while the USBTMC import was
+      open, which the server refuses. Fixed: the MSC reads use the same import (`uc.Msc(t.d)`, as
+      wavetest.py does). It passes now: 1.17 MB of INFO/LOADER.BIN read in 10 s at 1 ms/div, 0 dropped.
+- [x] emu/logfmttest.py --bt-port ended once with -113. Cause in the BT model (emu/peripherals/BtModule.cs): its AT
+      parser ran on every firmware byte, also while a host was linked, so an "A" "T" pair inside a reply
+      (LOG:DATA? PACKed / DLG blocks, a stock cmd 09 frame) started an "AT line" and the model sent "OK" into
+      the firmware's UART, which ran it as a host line (-113 Undefined header). Fixed in the model: while a
+      host is linked an AT line has to start a line of the firmware's output (after CR / LF or 2 ms of quiet)
+      and be one the firmware sends linked (AT+SBN / AT+CBN for cmd 07 / 08; also AT+SLED / AT+RESET). What
+      the real module does with AT text while linked is not known. emu/btchattertest.py case C (the DMM at
+      2.1569 V: each cmd 09 reply ends in "AT"): 5 x -113 with the old model, 0 with the new one.
+- [x] emu/hy3131/wavetest.py (volt) failed "a host reading SCOPE/SCOP000.CSV: no region C code while the stream
+      ISR owns the bus" (also on 3ad2e87): `csvlog::parse_path`, the MMEM name argument, sat in .cold
+      (link-native.x, 7b43034 / d3a9761), and the test's MMEM:DATA? of the DLG runs it while the Wave view
+      streams (on the device a region C fetch stalls the ISR entry ~20 us). There is no cold half to split
+      off (MMEM:DATA? and MMEM:DELete both need the prefix check, `fatdir::dir_of` is already in B), so it is
+      back in region B, written more compactly (the same results: fatren-test `names`, and the old and the
+      new function compared on 3 M random names). Region B free 15 052 -> 14 748 B (the build.sh warning
+      stays; the link fails below 8 KiB). wavetest volt fails on f4cd2cd and passes; dcv / current pass.

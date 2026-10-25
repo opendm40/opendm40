@@ -182,7 +182,7 @@ run-time R22 / R32 / R33 writes still match) and gives the analog path:
 |---|---|---|
 | DC V 1 (r0..r3) | AD1, ref 1.25 V | `code = V / (k[r] * 1.25/0.9 / 2^23)`, k = 10 .. 10000; negative-side gains and the r0 correction of the stock inverted |
 | DC mV 3, DC A 7..9 | AD1 through OP1 (x10 / x1) | stock constants: mv_div, shunt * opgain * 0.9 |
-| AC V 0 | AD2 + AD3 on PB4 (AC coupled, tau 0.3 s), RMS + LPF | `Vnode = V / (k[r] * AD2IG)`; LPF = remaining DC step on the coupling capacitor (charges to the OP1O level, -0.6 V while OP1 is off: the stock's entry transient and the AC+DC behaviour), RMS = AC + 1.5 x that step |
+| AC V 0 | AD2 + AD3 on PB4 (AC coupled, tau 0.3 s), RMS + LPF | `Vnode = V / (k[r] * AD2IG)`; LPF = remaining DC step on the coupling capacitor (charges to the OP1O level, -5 mV while OP1 is off: fitted to the AC mV -> AC V entry of device 489f956, `Op1OffLevel`), RMS = AC + 1.5 x that step |
 | AC mV 2, AC A 4..6 | AD2 through OP1, DC coupled | LPF sees the full DC |
 | ohm 10 (r0..r6), continuity 11 | AD1 ratiometric to Rref[r] (0.1 k .. 63 M, 1 k) | `code = 0.9 * Rx / Rref * 2^23` (negative in continuity: reference order), clipped (open = OL); comparator window 41.7 mV / 0.625 mA = 67 ohm -> CMP pin |
 | diode 12 | AD1 on the /10 divider (SDIO) | `code = Vf / 10 / 1.389 * 2^23`, open = 3.3 V (OL) |
