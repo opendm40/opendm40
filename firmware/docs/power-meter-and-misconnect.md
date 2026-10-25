@@ -1339,12 +1339,13 @@ continuity) or nothing (AC mV, AC+DC mV). The diode row is unchanged
 (badge only).
 
 **AC+DC V on 600 / 60 mV.** Its AC phase is the AC mV row with the same AD1
-peak sentinel; until 5fdd812 it had no gate (`vgate` was plain AC mV only),
+peak sentinel; it had no gate up to 5fdd812 (`vgate` was plain AC mV only),
 so the square or 5 V DC on V-COM with manual 600 mV raised A-JACK in the
 emulator (`mvclamp` / `mvpb1`; not seen on the device: AUTO lands on 6 V
 with these inputs). Both phases now set `vgate` and share the run, so the
-AC phase's result is the verdict for the DC phase's hits too; a real
-current in A asserts after the next "free" AC result. Emulator senttest
+AC phase's result is the verdict for the DC phase's hits too (0bcc40c); a
+real current in A asserts after the next "free" AC result (~2.2 s after
+the onset in the emulator). Emulator senttest
 `acdcmv-sq600` / `acdcmv-dc5`: FAIL on 5fdd812 (A-JACK from ~1.5 s after
 the voltage on), pass with the gate.
 
