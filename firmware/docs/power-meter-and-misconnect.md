@@ -1258,7 +1258,10 @@ last, note 7; no A-PROT there). In continuity AD2 is the sentinel itself, so
 100 ms window, back, settle 30 ms), every 300 ms while the hits last. A-JACK
 needs a "free" verdict since the hit run began; "driven" drops an A-JACK in
 force and counts as a live result, so LIVE? shows. `DBG:SENT?` fields 14 /
-15: the verdict (-1 / 0 / 1) and its peak (mV). `cont_jack` and
+15: the verdict (-1 / 0 / 1) and its peak (mV), of the present hit run or of
+an A-JACK in force; -1 / 0 once the run is over and after a range or
+function change (`Sentinel::new_run`). Up to c5ac0c5 they kept the last
+verdict until the next run (check list item 2). `cont_jack` and
 `jack_result` are in `.cold`: they run only while PB1 hits and talk to the
 HY3131 themselves, so never with the bus handed to a stream (not checked
 with the region C hooks).
@@ -1371,10 +1374,11 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    DC and the 0 / 9.5 V square, 10 s each. Expect no A-JACK; LIVE? from 5 V
    (RES) / 1 V (continuity). Note fields 14 / 15 wherever field 8 (hits)
    grows: they settle the OP1O point above.
-2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0. Device
-   c5ac0c5: -1 under RES AUTO; after a switch from another ohm-network row
-   they keep the verdict of the switch's hits (0 / 2150 mV in 600 Ω), no
-   alert (device-check note 3).
+2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0, also after
+   a switch from another ohm-network row (RES AUTO -> 600 Ω, RES ->
+   continuity) once field 8 (hits) stops growing. Device c5ac0c5 (before
+   the fix): -1 under RES AUTO; after such a switch they kept the verdict of
+   the switch's hits (0 / 2150 mV in 600 Ω), no alert (device-check note 3).
 3. AC V AUTO (mV-first) and manual 60 / 600 mV with the square: no A-JACK in
    the log.
 4. With a current in A (not wired yet), V-COM open: RES, continuity, AC mV:

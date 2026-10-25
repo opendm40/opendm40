@@ -534,7 +534,9 @@ pub enum Log {
 ///                           A-JACK here is badge only, no danger alarm, doc
 ///                           4.10; ctsta -1 in kinds without the comparator),
 ///                           jack (the jack check, sentinel.rs JACK CHECK: -1
-///                           none, 0 free, 1 driven), jack_mV (its peak)
+///                           none, 0 free, 1 driven, 2 driven by the
+///                           comparator's both-bit reads), jack_mV (its peak;
+///                           the present hit run's, else -1 / 0)
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)

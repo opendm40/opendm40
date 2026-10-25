@@ -1093,9 +1093,15 @@ impl Sentinel {
     /// starts over (two windows of the new row before A-JACK / V-JACK?);
     /// an alert in force keeps its own clear rule. Not for the A-jack
     /// probe's row rewrites or the AC+DC phase switches (`write_config`
-    /// alone): those keep the run.
+    /// alone): those keep the run. The jack check's verdict was the old
+    /// row's (DBG:SENT? fields 14 / 15 kept it after a switch between
+    /// ohm-network rows, device c5ac0c5 note 3); a new run needs its own
+    /// anyway (`decide`: `jack_t >= run_t0`).
     pub fn new_run(&mut self) {
         self.streak = 0;
+        self.jack_t = 0;
+        self.jack_drv = false;
+        self.jack_mv = 0;
     }
 
     /// OVERLOAD latch on / off (`dmm.rs`; not maskable: it reports a
@@ -1458,7 +1464,11 @@ impl Sentinel {
     /// DBG:SENT? text: kind,alert,mask,ctsta,pkmin,pkmax,streak,hits,samples,
     /// probe mA, A-PROT ms, V side (V_GATE), soft (badge-only A-JACK), jack
     /// check (-1 none, 0 free, 1 driven by OP1O, 2 driven by the comparator's
-    /// both-bit reads, BOTH), the OP1O peak (mV).
+    /// both-bit reads, BOTH), the OP1O peak (mV). The OP1O verdict and its
+    /// peak are those of the present hit run (or of an A-JACK in force):
+    /// -1 / 0 once the run is over, as after a range switch (a few hits at
+    /// a switch between ohm-network rows left 0 / 2150 mV on an open
+    /// input, device c5ac0c5 note 3).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -1480,16 +1490,18 @@ impl Sentinel {
         // the last comparator row's, stale: the f0d21eb check's "AC V reads
         // 0x70 after TEMP" was TEMP's last read).
         let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
+        let run = self.jack_t != 0 && self.jack_t >= self.run_t0 && (self.streak > 0 || self.alert == Alert::AJack);
         let jd = if !self.jchk {
             -1
         } else if self.both_drv {
             2
-        } else if self.jack_t != 0 {
+        } else if run {
             self.jack_drv as i32
         } else {
             -1
         };
-        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32, jd, self.jack_mv] {
+        let jmv = if self.jchk && run { self.jack_mv } else { 0 };
+        for v in [self.mask as i32, ct, self.pk.0, self.pk.1, self.streak as i32, self.hits as i32, self.samples as i32, pa, self.aprot_ms as i32, vd, self.soft as i32, jd, jmv] {
             put(b",");
             put(itoa(&mut nb, v));
         }
@@ -2707,5 +2719,61 @@ mod tests {
         assert_eq!((s.alert, s.ajack_alarm()), (Alert::AJack, false));
         s.soft = false;
         assert!(s.ajack_alarm());
+    }
+
+    #[test]
+    fn jack_fields_reset_at_a_row_switch() {
+        // Device c5ac0c5 note 3: RES AUTO -> 600 ohm with V-COM open, 3 PB1 hits at the
+        // switch and their jack check (0 / 2150 mV, the 600 ohm row's own level), then no
+        // hits: DBG:SENT? fields 14 / 15 kept 0 / 2150 for the whole open level (doc 4.13 check
+        // list item 2 expects -1 / 0). RES -> continuity: 0 / -4 mV for ~3 s.
+        let v = |x: f32| (x * JACK_CODES_PER_V) as i32;
+        let jack = |s: &Sentinel| {
+            let mut b = [0u8; 120];
+            let n = s.diag_text(&mut b);
+            let d = core::str::from_utf8(&b[..n]).unwrap().to_owned();
+            let f: Vec<&str> = d.rsplitn(3, ',').collect();
+            (f[1].parse::<i32>().unwrap(), f[0].parse::<i32>().unwrap())
+        };
+        // Ohm: a verdict while the hits last, then a range switch (`Dmm::set`: new_run).
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        s.jchk = true;
+        for t in (0..300).step_by(10) {
+            s.sample_cmp(t, 0x20);
+        }
+        s.jack_result(300, true, v(2.14), v(2.15));
+        let mv = s.jack_mv;
+        assert!((2140..=2150).contains(&mv), "{}", mv);
+        assert_eq!(jack(&s), (0, mv));
+        s.configured(Kind::CmpA, 310, false);
+        s.new_run();
+        assert_eq!(jack(&s), (-1, 0), "after the switch");
+        // The switch's own hits in the new row, their verdict, then the open input: no hits.
+        for t in (330..630).step_by(10) {
+            s.sample_cmp(t, 0x20);
+        }
+        s.jack_result(630, true, v(2.14), v(2.15));
+        assert_eq!(jack(&s), (0, mv), "while the run lasts");
+        for t in (640..900).step_by(10) {
+            s.sample_cmp(t, 0);
+        }
+        assert_eq!(s.alert, Alert::None);
+        assert_eq!(jack(&s), (-1, 0), "the run is over");
+        // Continuity (AD2 peak): a verdict after the run's last hit window.
+        let mut s = Sentinel::new();
+        s.configured(Kind::Ad2A, 0, true);
+        s.jchk = true;
+        s.sample_peak(100, 0, 20_000);
+        s.sample_peak(200, 0, 0);
+        s.jack_result(260, false, v(-0.005), v(-0.003));
+        assert_eq!(jack(&s), (-1, 0));
+        // An A-JACK in force keeps its verdict on show.
+        s.sample_peak(300, 0, 20_000);
+        s.sample_peak(400, 0, 20_000);
+        s.jack_result(410, false, v(-0.49), v(-0.47));
+        assert_eq!((s.alert, jack(&s)), (Alert::AJack, (0, s.jack_mv)));
+        assert!(s.jack_mv < -400);
     }
 }
