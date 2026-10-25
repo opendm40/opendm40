@@ -46,7 +46,12 @@
 //!     function change itself.
 //!   - +9.91E37 (SCPI NaN, "no reading"; +9.9E37 stays the overload) and
 //!     "Data stale" in SYST:ERR? only if the current function has no
-//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline.
+//!     reading at all SCPI_WAIT_MS (1.9 s) after that deadline. READ? /
+//!     MEAS:RES? follow the ohm range hunt (each step moves the deadline,
+//!     at most 8 s); FETCh? does not: at most SCPI_WAIT_MS after the
+//!     deadline it was asked at, and +9.91E37 at once (no error) once an
+//!     autorange step came since the entry (the range-change rule below;
+//!     device a2e9766: a hunt kept FETCh? silent for the driver's 5 s).
 //!   - AUTO coupling before its first decision (its values are provisional,
 //!     ../docs/history/switch-latency.md 6): FETCh? answers +9.91E37 at once (no wait,
 //!     no error); READ? / MEAS? wait for the decision until AUTO_WAIT_MS
@@ -983,8 +988,17 @@ pub fn step_exp(v: f32, cap: bool) -> i32 {
     e
 }
 
-/// 10^e.
+/// 10^e, the f32 nearest it for e in -16..=8 (a table: VOLT:RES? prints
+/// it as nr3, and an f32 divided by 10 five times gave +9.999999E-06,
+/// device a2e9766). Outside the table: repeated steps (not used).
 pub fn pow10f(e: i32) -> f32 {
+    const T: [f32; 25] = [
+        1e-16, 1e-15, 1e-14, 1e-13, 1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0,
+        1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8,
+    ];
+    if let Some(&v) = usize::try_from(e + 16).ok().and_then(|i| T.get(i)) {
+        return v;
+    }
     let mut v = 1.0f32;
     for _ in 0..e.unsigned_abs() {
         v = if e < 0 { v / 10.0 } else { v * 10.0 };

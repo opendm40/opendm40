@@ -973,6 +973,15 @@ pub struct Dmm {
     ohm_agreed: bool,
     /// Time of this row's write (ms; OHM_VET_MAX_MS).
     ohm_t0: u64,
+    /// Ohm autorange (`poll_ohm`, OHM_BAND): this row was reached by a step
+    /// down from range `ohm_down_r` (-1: not, or an in-range conversion
+    /// came since), which read `ohm_down_k` kohm; and range `ohm_blk_r`
+    /// (-1: none) is held against a step down while it reads within
+    /// OHM_BAND of `ohm_blk_k` kohm. Both end at the next row write (`set`).
+    ohm_down_r: i8,
+    ohm_down_k: f32,
+    ohm_blk_r: i8,
+    ohm_blk_k: f32,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1384,6 +1393,21 @@ const OHM_VET_CNT: f32 = 8.0;
 /// settle: 1.5 s is 15 / 4 conversions).
 const OHM_VET_MAX_MS: u64 = 1500;
 
+/// Ohm ranges that disagree (device a2e9766, the calibrator's disabled
+/// output: 6 Mohm read 0.104 Mohm, 600 kohm OL, and AUTO stepped between
+/// them for good). A step down puts the input on a range with ten times
+/// the test current (docs/data/short.csv: 0.215 uA on 6 Mohm, 2.17 uA on
+/// 600 kohm); an input that is not a resistor (INFERRED here: a path that
+/// takes at most ~0.2 uA, e.g. a leakage / bias current of a source's
+/// output stage; emulator `isink:`) reads in range at the small current
+/// and OL at the larger one. So: an OL on a row reached by a step down,
+/// before any in-range conversion of it, that the next conversion confirms
+/// (the vet: two OL agree), steps back to the range it came from, and that
+/// range then stays (no step down) while it reads within OHM_BAND of the
+/// value it stepped down on. A real change of the input (outside the band,
+/// OL) and any other row write (function, manual range, AUTO key) end it.
+const OHM_BAND: f32 = 2.0;
+
 // AUTO coupling (sub-mode 3, TODO "Auto AC/DC"; ../docs/history/acdc-stock-vs-opendm40.md
 // section 11). The AC+DC alternation measures both parts; AUTO shows one of
 // them: the AC part's RMS when it dominates the DC part, else the DC part.
@@ -1535,6 +1559,10 @@ impl Dmm {
             ohm_prev: f32::NAN,
             ohm_ok: false,
             ohm_agreed: false,
+            ohm_down_r: -1,
+            ohm_down_k: 0.0,
+            ohm_blk_r: -1,
+            ohm_blk_k: 0.0,
             ohm_t0: 0,
             f_ac: 0.0,
             f_lpf: 0.0,
@@ -2038,6 +2066,8 @@ impl Dmm {
         self.ohm_ok = false;
         self.ohm_agreed = false;
         self.ohm_t0 = now;
+        self.ohm_down_r = -1;
+        self.ohm_blk_r = -1;
         self.down_t = 0;
         self.tr_ev(now, tr::K_SET, (old.0 as i32) << 8 | old.1 as u8 as i32, settle as f32, 0);
     }
@@ -2137,6 +2167,14 @@ impl Dmm {
     /// transient of 3.39 V for 5 s through an AC+DC range step).
     pub fn reading_pending(&self) -> bool {
         self.rd_pending
+    }
+
+    /// `reading_pending` after a range step since the function entry (an
+    /// autorange step, a manual range), not the entry itself: FETCh? then
+    /// answers +9.91E37 at once also before the function's first reading
+    /// (main.rs).
+    pub fn range_moving(&self) -> bool {
+        self.rd_pending && self.row_t > self.entry
     }
 
     /// `r` was measured on the row the chip runs now (mode, AC+DC: either
@@ -4378,14 +4416,27 @@ impl Dmm {
         }
         if !self.manual {
             let q = ov * lim / (kohm + 1e-5);
+            // OL on a row a step down reached (OHM_BAND): the next
+            // conversion confirms it (until then it is grey, as any first
+            // one), then back to the range it came from, held there.
+            let back = (self.ohm_down_r > r as i8).then_some((self.ohm_down_r, self.ohm_down_k));
+            let held = self.ohm_blk_r == r as i8 && kohm * OHM_BAND >= self.ohm_blk_k && kohm <= self.ohm_blk_k * OHM_BAND;
             if q < 1.0 {
-                if r < 6 {
+                if let Some((to, k)) = back {
+                    if self.ohm_ok {
+                        self.ohm_settled = false;
+                        self.set(clk, 10, to, 150);
+                        self.ohm_blk_r = to;
+                        self.ohm_blk_k = k;
+                        return None;
+                    }
+                } else if r < 6 {
                     let to = if self.ohm_settled { 6 } else { r as i8 + 1 };
                     self.ohm_settled = false;
                     self.set(clk, 10, to, 150);
                     return None;
                 }
-            } else if q > 10.0 * ov * ov && r > 1 {
+            } else if q > 10.0 * ov * ov && r > 1 && !held {
                 // Down below 0.1 * lim / over, as V / A. The stock tests
                 // q > 10 (R < over * lim / 10), which is exactly the next lower
                 // range's up threshold: no hysteresis band at all.
@@ -4404,12 +4455,15 @@ impl Dmm {
                 };
                 self.ohm_settled = false;
                 self.set(clk, 10, (r as i8 - step).max(1), 150);
+                self.ohm_down_r = r as i8;
+                self.ohm_down_k = kohm;
                 return None;
             } else {
-                // In range. The first such conversion is the vet's
-                // reference (grey), no longer a 150 ms wait (the vet
-                // needs the next conversion anyway).
+                // In range (or held, OHM_BAND). The first such conversion
+                // is the vet's reference (grey), no longer a 150 ms wait
+                // (the vet needs the next conversion anyway).
                 self.ohm_settled = true;
+                self.ohm_down_r = -1;
             }
         }
         // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
