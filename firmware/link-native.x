@@ -139,6 +139,12 @@ SECTIONS
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
         *(.text.*8opendm403app10app_inrush*);
+        /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
+         * never open while the AD2 stream or a logger session runs (the page
+         * refuses to open then, closes when one starts; main.rs calls
+         * tt_poll only without a session). */
+        *(.text.*8opendm403app13app_touchtest*);
+        *(.text.*8opendm402ui9touchtest*);
         *(.text.*8opendm402ui3inr4page*);
         *(.text.*8opendm402ui3inr5trace*);
         *(.text.*8opendm406inrush*3Cap7results*);
@@ -207,6 +213,8 @@ SECTIONS
         *(.rodata.*8opendm404boot*);
         *(.rodata.*8opendm403app9app_press*);
         *(.rodata.*8opendm407fastlog4prep*);
+        *(.rodata.*8opendm403app13app_touchtest*);
+        *(.rodata.*8opendm402ui9touchtest*);
         /* Single functions (and their closures) that run only at start-up or
          * on a user's settings / page action, never per pass nor in the ISR:
          * the App construction (main.rs new_app, App::new and the sub-struct
