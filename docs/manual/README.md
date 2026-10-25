@@ -635,26 +635,12 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle above it. From 0.5 Hz up.
-- A new value every 0.35 s from about 7 Hz up. Below that, one value per
-  counter gate: the counter waits for an input edge, counts at least
-  53.3 ms and ends on the next edge, so a gate takes up to two input
-  periods plus 53.3 ms (about 1 s at 2 Hz, up to about 4 s at 0.5 Hz).
-- **--** until the first clean result (up to about 5 s at 0.5 Hz).
-  **0.000 Hz** (no signal) after about 3 s without an input edge from the
-  start; once a value was shown, after about 7 of its periods plus
-  0.3 s (at least 0.7 s) without an edge.
-- The last digit, drawn small, is shown when the counter resolves it. The
-  counter times whole input periods with its 4.9152 MHz clock (one tick =
-  0.2 µs); the frequency it resolves is the reading divided by the gate's
-  length in ticks. The small digit is shown when that is at most one count
-  of it: for example 10.0000 Hz (one 100 ms period), but 50.000 Hz (three
-  periods, 60 ms: 0.00017 Hz per tick). With the 53.3 ms gate this is the
-  lower part of each decade: 0.5 to about 35 Hz, 62 to about 280 Hz,
-  0.62 to about 2.8 kHz, and so on. The readings also move with the noise on
-  the input: against the MMB3.0 calibrator they spread over 1 to 5 counts of
-  the small digit ([recording](../../firmware/docs/data/freq-steps-2026-10-25.md),
-  10 Hz to 10 kHz).
+- The frequency, with the duty cycle above it, from 0.5 Hz.
+- A new value every 0.35 s; below about 7 Hz, one per one or two periods
+  (about 1 s at 2 Hz).
+- **--** until the first result; **0.000 Hz** when the signal stops.
+- A small last digit where the counter resolves it: 10.0000 Hz, but
+  50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
 
 
