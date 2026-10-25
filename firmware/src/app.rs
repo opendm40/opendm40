@@ -2412,7 +2412,7 @@ impl App {
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
-                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                let sum: u32 = (a..b).map(|i| f.data.at(i) as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
             }
             if self.sp.autoset.is_some() {
@@ -2426,7 +2426,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);

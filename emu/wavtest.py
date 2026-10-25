@@ -18,6 +18,10 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     the preamble it is the input sine (frequency, Vpp, mean), the trigger
     point (t = 0) on the level with the right slope, x increment = 1 /
     ACQ:SRAT?; reading it twice gives the same bytes;
+  * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
+    43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
+    the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
+    trigger at the centre; a roll record (200 ms/div) the full 65 520;
   * CHAN1:OFFSet moves the trace (pos) but not the volts the preamble
     gives;
   * the main loop keeps running during a streamed read (DBG:DIAG? loop
@@ -167,6 +171,51 @@ def connect():
         except Exception:
             time.sleep(2)
     sys.exit('wavtest: no USB/IP device on port %d' % A.port)
+
+
+def long_checks(t):
+    """Slow timebases: the packed 65 520-sample ring. DIGitize at 100 ms/div
+    (25 kS/s): the record is the whole ring less the margins (64 656 ..
+    65 520 samples), the trigger at its centre, the input sine in it; a
+    roll record (200 ms/div, STOP after the ring filled) is the full
+    65 520; back to 1 ms/div after."""
+    t.w('WAV:FORM WORD')
+    t.w('WAV:POIN MAX')
+    t.w('TIM:SCAL 0.1')
+    t.w('DIG')
+    check(t.wait_stop(s=30, wall=600), 'DIGitize at 100 ms/div ends in STOP')
+    p = pre(t)
+    sr = float(t.q('ACQ:SRAT?'))
+    w = block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60))
+    v, codes = volts(p, w)
+    n = len(codes)
+    check(sr == 25000 and 64600 <= n <= 65520 and p['n'] == n, '100 ms/div record: %d samples at %g S/s' % (n, sr))
+    f, vpp, _ = sine_fit(v, p['xinc'])
+    check(abs(f - A.hz) < A.hz * 0.02 and abs(vpp - A.vpp) < A.vpp * 0.2, '100 ms/div record: %.2f Hz, %.3f Vpp' % (f, vpp))
+    i0 = round(-p['xorig'] / p['xinc'])
+    ok = 2 <= i0 < n - 2
+    check(ok and abs(i0 - n / 2) < 0.03 * n and abs(v[i0]) < 0.1 * A.vpp and v[i0 + 1] > v[i0 - 1],
+          '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
+    # A smooth sine end to end: no seam from the ring / staging (25 samples
+    # per period: neighbours differ by at most ~0.13 Vpp).
+    jump = max(abs(v[i + 1] - v[i]) for i in range(n - 1))
+    check(jump < 0.25 * A.vpp, '100 ms/div record: no seam (largest step %.3f V)' % jump)
+    t.w('TIM:SCAL 0.2')
+    t.w('RUN')
+    v0 = t.vtime()
+    while t.vtime() - v0 < 6.5:
+        time.sleep(1)
+    t.w('STOP')
+    time.sleep(0.5)
+    p = pre(t)
+    w = block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60))
+    v, codes = volts(p, w)
+    f, vpp, _ = sine_fit(v, p['xinc'])
+    jump = max(abs(v[i + 1] - v[i]) for i in range(len(v) - 1))
+    check(len(codes) == 65520 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
+          'roll record (200 ms/div): %d samples, %.2f Hz, largest step %.3f V' % (len(codes), f, jump))
+    t.w('TIM:SCAL 1e-3')
+    t.w('WAV:FORM BYTE')
 
 
 def bt_checks(t):
@@ -344,6 +393,7 @@ try:
     if 2 <= i0 < len(v) - 2:
         slope = v[i0 + 2] - v[i0 - 2]
         check(abs(v[i0]) < 0.08 * A.vpp and slope > 0, 'trigger point (t = 0, sample %d of %d): %.3f V, rising' % (i0, len(v), v[i0]))
+        check(abs(i0 - n / 2) < 0.03 * n, 'DIGitize: the trigger at the record centre (trigger position 50 %%: %d of %d)' % (i0, n))
     else:
         check(False, 'trigger point inside the record (sample %d of %d)' % (i0, len(v)))
     wcodes = codes
@@ -383,6 +433,9 @@ try:
     check(abs(f2 - A.hz) < A.hz * 0.02 and 2 <= i0 < len(v2) - 2 and abs(v2[i0]) < 0.08 * A.vpp,
           'SINGle record: %.2f Hz, %.3f Vpp, trigger sample %d' % (f2, vpp2, i0))
     t.w('TRIG:SWE AUTO')
+
+    # --- the long record (scope.rs: the packed ring at fs <= 25 kS/s)
+    long_checks(t)
 
     # --- CHAN1:OFFSet: the position (the offset PWM shifts the ADC codes on
     # the device; the emulator's scope feeder does not model that shift, so

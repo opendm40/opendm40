@@ -15,6 +15,7 @@
 
 use crate::hwtrig::{self, HwTrig, Status};
 use crate::mmio::{modify32, r32, w32};
+use crate::pack10::{self, Codes};
 
 const RCU_AHB1EN: u32 = 0x4002_3830;
 const RCU_APB1EN: u32 = 0x4002_3840;
@@ -56,10 +57,22 @@ const WIN: usize = 800;
 const STREAM_FS: u32 = 1_250_000;
 /// Longest busy-wait inside a poll for the post-trigger samples (us).
 const STREAM_SPIN_US: u64 = 1000;
-/// Record buffer (samples) in SRAM0: the raw u16 ring every acquisition
-/// mode writes (86 KB, the SRAM budget: docs/native-boot.md "Memory
-/// budget").
+/// Record buffer in SRAM0 (86 KB, the SRAM budget: docs/native-boot.md
+/// "Memory budget"), as CAP u16: the raw ring of the fast acquisitions
+/// (fs > PK_FS), packed in place (pack10.rs) when it stops. Slow ones
+/// (fs <= PK_FS) and the wave view keep a packed ring of PCAP samples in
+/// its first 81 900 bytes, filled each poll from a DMA staging ring of STG
+/// raw samples at its top (`pk_drain`). Every stored record is packed.
 pub const CAP: usize = 42 * 1024;
+/// Packed ring (samples): the stock's 65 520-sample record.
+pub const PCAP: usize = 65_520;
+/// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
+/// main-loop gap it covers; a longer one restarts the acquisition.
+const STG: usize = 2048;
+const STG0: usize = CAP - STG;
+/// Highest sample rate with the packed ring (from 100 ms/div).
+const PK_FS: u32 = 25_000;
+const _: () = assert!(PCAP * 10 / 8 + 4 <= STG0 * 2 && CAP % 4 == 0);
 /// The part of BUF lent to the inrush capture (its ring length, as before
 /// the record grew).
 pub const INRUSH_LEN: usize = 26 * 1024;
@@ -73,6 +86,39 @@ fn lin_len(fs: u32) -> usize {
 
 #[link_section = ".dmabuf"]
 static mut BUF: [u16; CAP] = [0; CAP];
+fn base() -> *mut u8 {
+    core::ptr::addr_of_mut!(BUF) as *mut u8
+}
+
+/// Ring state (SRAM, not the TCM `Scope`: the stack is at its budget).
+struct Ring {
+    /// The acquisition in flight / the wave view uses the packed ring.
+    pk: bool,
+    /// BUF holds raw DMA samples not yet packed (fast acquisitions).
+    raw: bool,
+    /// Packed ring: next slot, staging read index, time of the last drain.
+    slot: usize,
+    rd: usize,
+    t: u64,
+    /// The stored record's first slot and its ring's size.
+    off: usize,
+    cap: usize,
+}
+
+#[link_section = ".sram_bss"]
+static mut RING: Ring = Ring { pk: false, raw: false, slot: 0, rd: 0, t: 0, off: 0, cap: 0 };
+
+fn rg() -> &'static mut Ring {
+    // SAFETY: main loop only, no reference kept across calls.
+    unsafe { &mut *core::ptr::addr_of_mut!(RING) }
+}
+
+/// Code at ring slot `i` of the record in flight (raw or packed).
+#[inline(always)]
+fn ring_at(i: usize) -> u16 {
+    if rg().raw { unsafe { (*core::ptr::addr_of!(BUF))[i] & 0x3FF } } else { pack10::get(base(), i) }
+}
+
 #[link_section = ".dmabuf"]
 static mut LATCH: [u32; 2] = [0; 2];
 
@@ -230,7 +276,7 @@ impl Settings {
 /// A finished frame: the visible window of the record, or (roll mode, empty
 /// `data`) per-column min/max codes in `cols` (u16::MAX = no data yet).
 pub struct Frame<'a> {
-    pub data: &'a [u16],
+    pub data: Codes,
     pub cols: Option<&'a [(u16, u16); COLS]>,
     pub trig: Option<usize>,
     pub fs: u32,
@@ -528,7 +574,7 @@ struct Wave {
     restart: bool,
     live: bool,
     /// Samples drained this stream (= the ring / ISR sample index, u64),
-    /// the index stored at BUF[0] (slot of n = (n - slot0) % CAP), the
+    /// the index stored at packed slot 0 (slot of n = (n - slot0) % PCAP), the
     /// first index of the current record (after a resync), the ring's drop
     /// count seen.
     tot: u64,
@@ -889,12 +935,12 @@ impl Scope {
 
     /// Software trigger of a pulse / runt type in a linear record: the
     /// trigger point in [lo, hi), or None (trigsoft.rs).
-    fn find_soft(&self, d: &[u16], lo: usize, hi: usize) -> Option<usize> {
+    fn find_soft(&self, d: Codes, lo: usize, hi: usize) -> Option<usize> {
         let l = self.trig_code();
         let w = self.s.pwidth * self.sample_rate() as f32;
         match self.s.ttype {
-            crate::trigsoft::PULSE => crate::trigsoft::pulse(d, lo, hi, l, self.s.rising, self.s.pcond, w),
-            _ => crate::trigsoft::runt(d, lo, hi, l, self.runt_code(), self.s.rising),
+            crate::trigsoft::PULSE => crate::trigsoft::pulse(&d, lo, hi, l, self.s.rising, self.s.pcond, w),
+            _ => crate::trigsoft::runt(&d, lo, hi, l, self.runt_code(), self.s.rising),
         }
     }
 
@@ -983,8 +1029,8 @@ impl Scope {
                 wv().restart = true;
                 wv().live = false;
             }
-            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, CAP - 2600);
-            self.rec = CAP;
+            self.screen = ((25_000u64 * fs as u64 / TB[s.tb].0.max(1) as u64) as usize).clamp(2, PCAP - 2600);
+            self.rec = PCAP;
             self.deadline = 0;
             return;
         }
@@ -1012,8 +1058,8 @@ impl Scope {
         // Every linear record is the full CAP: the trigger is searched over all
         // positions that keep a full screen around it (finish), CAP - screen
         // of them instead of the 800-sample refinement window, and Single keeps
-        // the full record for the stored-record zoom (stock Single = 65520).
-        self.rec = lin_len(TB[s.tb].0);
+        // the full record for the stored-record zoom (stock Single = 65520;
+        // `start` sets the length).
         self.deadline = 0;
     }
 
@@ -1067,42 +1113,41 @@ impl Scope {
         // Read after the stop: the DMA was still running before it.
         let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
-        let len = if was_rolling {
-            self.snapshot_roll();
-            return true;
-        } else if was_stream {
-            let wr = self.stream_wr();
-            if wr > CAP as u64 {
-                unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
-            }
-            wr.min(CAP as u64) as usize
-        } else if was_hw {
-            let wr = CAP - ndtr.min(CAP);
-            // HISR TCIF4: the ring has wrapped at least once.
-            let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
-            self.hw_linearise(wr, wrapped)
-        } else if ndtr == 0 {
+        let pk = rg().pk;
+        let Some((wr, wrapped)) = self.pos(now) else { return true };
+        let (off, len) = if was_rolling || was_stream || was_hw {
+            self.span(wrapped, wr)
+        } else if if pk { self.roll_written >= self.rec as u64 } else { ndtr == 0 } {
             if self.finish(now).is_some() {
                 return true;
             }
-            self.rec
+            (0, self.rec)
+        } else if pk {
+            (0, self.roll_written as usize)
         } else {
-            self.rec - ndtr.min(self.rec)
+            (0, self.rec - ndtr.min(self.rec))
         };
-        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false);
+        if was_rolling {
+            self.snapshot_mark(off, len, len.saturating_sub(1), None, true);
+            return true;
+        }
+        self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false);
         false
     }
 
-    /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
-    /// with the current settings (fs, range).
-    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+    /// Pack a raw record (once), then mark ring slots off .. off + len as
+    /// the stored record, captured with the current settings (fs, range).
+    fn snapshot_mark(&mut self, off: usize, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+        let r = rg();
+        if r.raw {
+            r.raw = false;
+            pack10::pack_in_place(base(), ((off + len).min(CAP) + 3) & !3);
+        }
+        r.off = off;
+        r.cap = self.cap();
         if len < 2 {
             self.stored_valid = false;
             return;
-        }
-        let buf = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..len] };
-        for v in buf.iter_mut() {
-            *v &= 0x3FF;
         }
         self.stored_len = len;
         self.stored_fs = self.sample_rate();
@@ -1113,6 +1158,67 @@ impl Scope {
         self.stored_trig = trig;
         self.stored_ab = (wv().sc.a, wv().sc.b);
         self.stored_valid = true;
+    }
+
+    /// Size of the ring in flight (samples).
+    fn cap(&self) -> usize {
+        if rg().pk { PCAP } else { CAP }
+    }
+
+    /// The ring's samples oldest first, (first slot, count), from the next
+    /// slot `wr` and whether it has wrapped.
+    fn span(&self, wrapped: bool, wr: usize) -> (usize, usize) {
+        if wrapped { (wr % self.cap(), self.cap()) } else { (0, wr) }
+    }
+
+    /// Packed ring: the staging samples the DMA wrote since the last call
+    /// into it (absolute count in roll_written). False when the gap since
+    /// then overran the staging ring (samples lost: the caller stops; the
+    /// next poll starts a new acquisition).
+    fn pk_drain(&mut self, now: u64) -> bool {
+        let r = rg();
+        let wr = (STG - unsafe { r32(S4 + 0x04) } as usize % (STG + 1)) % STG;
+        let lost = now.saturating_sub(r.t) * self.sample_rate() as u64 / 1000 + 64 >= STG as u64;
+        r.t = now;
+        let stg = unsafe { &(&*core::ptr::addr_of!(BUF))[STG0..] };
+        let (mut rd, mut slot, mut n) = (r.rd, r.slot, self.roll_written);
+        while rd != wr {
+            pack10::set(base(), slot, stg[rd]);
+            rd = if rd + 1 == STG { 0 } else { rd + 1 };
+            slot = if slot + 1 == PCAP { 0 } else { slot + 1 };
+            n += 1;
+        }
+        (r.rd, r.slot) = (rd, slot);
+        self.roll_written = n;
+        !lost
+    }
+
+    /// The circular ring in flight: (next slot, wrapped at least once);
+    /// None when the packed staging ring overran (pk_drain).
+    fn pos(&mut self, now: u64) -> Option<(usize, bool)> {
+        if rg().pk {
+            return self.pk_drain(now).then(|| (rg().slot, self.roll_written >= PCAP as u64));
+        }
+        // HISR TCIF4: the ring has wrapped at least once.
+        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
+        Some((wr, unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0))
+    }
+
+    /// The stored record's ring view (valid or not).
+    fn rec_view(&self) -> Codes {
+        Codes::new(base(), rg().off, self.stored_len, rg().cap)
+    }
+
+    /// A frame of the stored record: the screen from `start`.
+    fn frame(&mut self, start: usize, trig: Option<usize>) -> Option<Frame<'static>> {
+        self.seq = self.seq.wrapping_add(1);
+        Some(Frame { data: self.rec_view().sub(start, start + self.screen), cols: None, trig, fs: self.sample_rate(), seq: self.seq })
+    }
+
+    /// A min / max column frame (ROLL_COLS).
+    fn cols_frame(&mut self, fs: u32) -> Option<Frame<'static>> {
+        self.seq = self.seq.wrapping_add(1);
+        Some(Frame { data: Codes::EMPTY, cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs, seq: self.seq })
     }
 
     /// A complete linear record (NDTR = 0, hardware halted): trigger search and
@@ -1130,10 +1236,13 @@ impl Scope {
         // start + screen <= pre + win + screen = n.
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let win = n - self.screen;
-        // Mask once here (snapshot_mark), then search in the masked record.
-        self.snapshot_mark(n, 0, None, false);
-        let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let trig = if self.s.ttype != 0 { self.find_soft(data, pre, pre + win) } else { self.find_trigger(&data[pre..pre + win]).map(|i| i + pre) };
+        // Single / DIGitize: the trigger point at the trigger position of
+        // the whole record (rec_split), not of its first screen.
+        let lo = self.rec_split().0.min(pre + win);
+        // Pack once here (snapshot_mark), then search in the packed record.
+        self.snapshot_mark(0, n, 0, None, false);
+        let data = self.rec_view();
+        let trig = if self.s.ttype != 0 { self.find_soft(data, lo, pre + win) } else { self.find_trigger(data.sub(lo, pre + win)).map(|i| i + lo) };
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
             (None, TrigMode::Auto) => now >= self.deadline,
@@ -1151,28 +1260,16 @@ impl Scope {
         Some((start, trig))
     }
 
-    /// Roll record: linearise the circular buffer so the stored record runs
-    /// oldest -> newest, anchored at the newest sample (the right edge the user
-    /// was watching). Matches the stock 65520-sample roll record (§3), capped at
-    /// the opendm40 26 K capacity.
-    fn snapshot_roll(&mut self) {
-        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
-        self.roll_written += d as u64;
-        self.roll_last_wr = wr;
-        let len = if self.roll_written >= CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
-            CAP
-        } else {
-            wr.min(CAP)
-        };
-        self.snapshot_mark(len, len.saturating_sub(1), None, true);
-    }
-
     fn start(&mut self) {
         let fs = TB[self.s.tb].0;
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
-        let buf = core::ptr::addr_of!(BUF) as u32;
+        // Slow rates: the DMA fills the staging ring, the polls pack it.
+        let pk = fs <= PK_FS;
+        *rg() = Ring { pk, raw: !pk, slot: 0, rd: 0, t: 0, off: 0, cap: 0 };
+        // Linear: Single / DIGitize take the record rec_split waits for.
+        let (p, q) = self.rec_split();
+        self.rec = lin_len(fs).max(p + q);
+        let buf = core::ptr::addr_of!(BUF) as u32 + if pk { 2 * STG0 as u32 } else { 0 };
         unsafe {
             w32(LIFCR, 0x3D << 22);
             w32(HIFCR, 0x3D);
@@ -1221,7 +1318,13 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
-            let (len, circ) = if self.rolling || hw || stream { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
+            let (len, circ) = if pk {
+                (STG as u32, 1 << 8)
+            } else if self.rolling || hw || stream {
+                (CAP as u32, 1 << 8)
+            } else {
+                (self.rec as u32, 0)
+            };
             self.roll_written = 0;
             self.roll_last_wr = 0;
             self.stream = stream;
@@ -1232,9 +1335,9 @@ impl Scope {
             w32(S4 + 0x04, len);
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | circ | 1);
             if hw {
-                let (pre, _) = self.hw_split();
+                let (_, post) = self.rec_split();
                 let code = self.trig_code() as f32;
-                self.hw.prepare(psc, arr, hwtrig::post_for(self.screen - pre, WIN), code, self.s.rising);
+                self.hw.prepare(psc, arr, hwtrig::post_for(post, WIN), code, self.s.rising);
             }
             self.hw_mode = hw;
             w32(TIM8, 1);
@@ -1243,30 +1346,32 @@ impl Scope {
         self.busy = true;
     }
 
+    /// Samples before / after the trigger point an acquisition waits for:
+    /// the screen's (hw_split), or in Single / DIGitize the record's: the
+    /// ring (at most 10 s) split at the trigger position.
+    fn rec_split(&self) -> (usize, usize) {
+        let (pre, post) = self.hw_split();
+        if self.s.mode != TrigMode::Single && !self.one_shot {
+            return (pre, post);
+        }
+        let n = (self.sample_rate() as usize * 10).min(self.cap() - 64 - WIN).max(self.screen);
+        let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
+        (p.max(pre), (n - p).max(post))
+    }
+
     /// Screen samples left / right of the trigger point (hpos column).
     fn hw_split(&self) -> (usize, usize) {
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         (pre, self.screen - pre)
     }
 
-    /// Linearise the circular record after a hardware stop: with the ring
-    /// wrapped (TCIF4) every sample is valid, rotate so it runs oldest ->
-    /// newest; otherwise samples 0..wr are the record. Returns its length.
-    fn hw_linearise(&mut self, wr: usize, wrapped: bool) -> usize {
-        if wrapped {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
-            CAP
-        } else {
-            wr
-        }
-    }
-
     /// Hardware-trigger acquisition in flight: arm after the pre-trigger part,
     /// then wait for TIM2 to gate TIM1 off (Done) or for the Auto timeout.
     fn hw_poll(&mut self, now: u64) -> Option<Frame<'static>> {
-        let wr = CAP - (unsafe { r32(S4 + 0x04) } as usize).min(CAP);
-        // HISR TCIF4: the ring has wrapped at least once.
-        let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
+        let Some((wr, wrapped)) = self.pos(now) else {
+            self.halt();
+            return None;
+        };
         let st = self.hw.status();
         // Health: nothing written 100 ms after the start means the TIM1 gate
         // is stuck: give up on the comparator for good (a hardware fault, not
@@ -1281,7 +1386,7 @@ impl Scope {
         match st {
             Status::Off => None,
             Status::Prepared => {
-                if wrapped || wr >= hwtrig::pre_for(pre, WIN) {
+                if wrapped || wr >= hwtrig::pre_for(self.rec_split().0, WIN) {
                     self.hw.arm();
                 }
                 None
@@ -1298,16 +1403,17 @@ impl Scope {
                 }
                 self.halt();
                 // Re-read after the stop: the DMA was still running above.
-                let wr = CAP - (unsafe { r32(S4 + 0x04) } as usize).min(CAP);
-                let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
-                let len = self.hw_linearise(wr, wrapped);
+                let (off, len) = match self.pos(now) {
+                    Some((wr, wrapped)) => self.span(wrapped, wr),
+                    None => (0, 0),
+                };
                 if len < self.screen {
                     self.stored_valid = false;
                     return None;
                 }
-                self.snapshot_mark(len, len - self.screen / 2, None, false);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
-                let found = if len - post > pre { self.find_trigger(&data[pre..len - post]).map(|i| i + pre) } else { None };
+                self.snapshot_mark(off, len, len - self.screen / 2, None, false);
+                let data = self.rec_view();
+                let found = if len - post > pre { self.find_trigger(data.sub(pre, len - post)).map(|i| i + pre) } else { None };
                 if found.is_some() {
                     self.hw.note_miss();
                 }
@@ -1327,17 +1433,19 @@ impl Scope {
                 if found.is_some() && self.s.mode == TrigMode::Single {
                     self.s.run = false;
                 }
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
-                self.seq = self.seq.wrapping_add(1);
-                Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
+                self.frame(start, found)
             }
             Status::Done => {
                 self.halt();
-                let len = self.hw_linearise(wr, wrapped);
-                let post_n = hwtrig::post_for(post, WIN) as usize;
+                let (off, len) = match self.pos(now) {
+                    Some((wr, wrapped)) => self.span(wrapped, wr),
+                    None => (0, 0),
+                };
+                let post_n = hwtrig::post_for(self.rec_split().1, WIN) as usize;
                 if len < self.screen + WIN || len < post_n + pre {
                     // Cannot happen after `arm` (pre + post samples written),
-                    // kept as a guard against a stale TCIF.
+                    // kept as a guard against a stale TCIF (and a packed
+                    // staging overrun).
                     self.stored_valid = false;
                     return None;
                 }
@@ -1346,12 +1454,12 @@ impl Scope {
                 let th = len - post_n;
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
-                self.snapshot_mark(len, th, None, false);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
+                self.snapshot_mark(off, len, th, None, false);
+                let data = self.rec_view();
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
                 // period early (device: delta -250 samples at 100 ms/div).
-                let found = if lo < hi { self.find_trigger_near(&data[lo..hi], th - lo).map(|i| i + lo) } else { None };
+                let found = if lo < hi { self.find_trigger_near(data.sub(lo, hi), th - lo).map(|i| i + lo) } else { None };
                 let t = match found {
                     Some(t) => {
                         self.hw.note_hit(t as i32 - th as i32);
@@ -1375,10 +1483,7 @@ impl Scope {
                 if found.is_some() && self.s.mode == TrigMode::Single {
                     self.s.run = false;
                 }
-                let start = t - pre;
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
-                self.seq = self.seq.wrapping_add(1);
-                Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
+                self.frame(t - pre, found)
             }
         }
     }
@@ -1440,11 +1545,11 @@ impl Scope {
     /// Every frame `poll` returns is a window of it (or, zoomed out past
     /// it, the whole of it), valid until the next acquisition starts (the
     /// next `poll` while running).
-    pub fn record(&self) -> &'static [u16] {
+    pub fn record(&self) -> Codes {
         if !self.stored_valid || self.stored_len < 2 {
-            return &[];
+            return Codes::EMPTY;
         }
-        unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
+        self.rec_view()
     }
 
     /// Stopped: centre the stored record on its trigger point (UF-09
@@ -1543,7 +1648,7 @@ impl Scope {
         let f = self.poll_frame(now, src);
         // DIGitize: the first record frame ends the run (as Single does on
         // its trigger; the frame is the stored record, the DMA is idle).
-        if live && self.one_shot && f.as_ref().is_some_and(|fr| fr.cols.is_none() && !fr.data.is_empty()) {
+        if live && self.one_shot && f.as_ref().is_some_and(|fr| fr.cols.is_none() && fr.data.len() > 0) {
             self.one_shot = false;
             self.s.run = false;
         }
@@ -1589,6 +1694,7 @@ impl Scope {
         }
         if !self.busy {
             self.start();
+            rg().t = now;
             self.hw_t0 = now;
             self.st_poll = now;
             if self.deadline == 0 {
@@ -1606,7 +1712,15 @@ impl Scope {
         if self.stream {
             return self.stream_poll(now);
         }
-        if unsafe { r32(S4 + 0x04) } != 0 {
+        if rg().pk {
+            if !self.pk_drain(now) {
+                self.halt();
+                return None;
+            }
+            if self.roll_written < self.rec as u64 {
+                return None;
+            }
+        } else if unsafe { r32(S4 + 0x04) } != 0 {
             return None;
         }
         self.halt();
@@ -1617,19 +1731,21 @@ impl Scope {
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
-        self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
+        self.frame(start, trig)
     }
 
     /// Absolute number of samples written since start() into the circular
     /// record (as roll_poll: the ring position advanced since the last call).
-    fn stream_wr(&mut self) -> u64 {
+    /// None: the packed staging ring overran (pk_drain).
+    fn stream_wr(&mut self, now: u64) -> Option<u64> {
+        if rg().pk {
+            return self.pk_drain(now).then_some(self.roll_written);
+        }
         let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
         let d = (wr + CAP - self.roll_last_wr) % CAP;
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
-        self.roll_written
+        Some(self.roll_written)
     }
 
     /// Continuous software trigger (fs <= STREAM_FS; the stock's comparator
@@ -1644,31 +1760,34 @@ impl Scope {
         // A gap between two polls longer than the ring: the modulo count in
         // stream_wr cannot see it, and the samples are gone anyway. Restart
         // the search at the write position.
-        let lost = now.saturating_sub(self.st_poll) * fs / 1000 + 64 >= CAP as u64;
+        let cap = self.cap();
+        let lost = now.saturating_sub(self.st_poll) * fs / 1000 + 64 >= cap as u64;
         self.st_poll = now;
-        let wr = self.stream_wr();
+        let Some(wr) = self.stream_wr(now) else {
+            self.halt();
+            return None;
+        };
         if lost {
             self.st_found = None;
             self.st_armed = false;
             self.st_scan = wr;
-            self.st_idx = (wr % CAP as u64) as usize;
+            self.st_idx = (wr % cap as u64) as usize;
         }
-        let (pre, post) = self.hw_split();
+        let (pre, _) = self.hw_split();
         if self.st_found.is_none() {
             // Oldest crossing whose pre-trigger part survives until the stop
             // (64 samples of margin for the stop itself).
-            let floor = (wr + pre as u64 + 64).saturating_sub(CAP as u64).max(pre as u64);
+            let floor = (wr + pre as u64 + 64).saturating_sub(cap as u64).max(self.rec_split().0 as u64);
             if self.st_scan < floor {
                 self.st_scan = floor;
-                self.st_idx = (floor % CAP as u64) as usize;
+                self.st_idx = (floor % cap as u64) as usize;
                 self.st_armed = false;
             }
             let l = self.trig_code();
             let rising = self.s.rising;
-            let buf = unsafe { &*core::ptr::addr_of!(BUF) };
             let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, self.st_scan);
             while n < wr {
-                let v = (buf[i] & 0x3FF) as i32;
+                let v = ring_at(i) as i32;
                 let hit = if rising {
                     if v < l - 2 {
                         armed = true;
@@ -1687,7 +1806,7 @@ impl Scope {
                 }
                 n += 1;
                 i += 1;
-                if i == CAP {
+                if i == cap {
                     i = 0;
                 }
                 if hit {
@@ -1698,11 +1817,11 @@ impl Scope {
         }
         let Some(t) = self.st_found else {
             if self.s.mode == TrigMode::Auto && now >= self.deadline && wr >= self.screen as u64 {
-                return self.stream_emit(None);
+                return self.stream_emit(now, None);
             }
             return None;
         };
-        let need = t + post as u64;
+        let need = t + self.rec_split().1 as u64;
         if wr < need {
             if (need - wr) * 1_000_000 / fs > STREAM_SPIN_US {
                 return None;
@@ -1710,28 +1829,35 @@ impl Scope {
             // Bounded (a stalled DMA must not hang the loop): ~10 cycles per
             // pass, 200 MHz -> far beyond STREAM_SPIN_US.
             let mut k = 0u32;
-            while self.stream_wr() < need {
+            loop {
+                match self.stream_wr(now) {
+                    Some(w) if w >= need => break,
+                    None => {
+                        self.halt();
+                        return None;
+                    }
+                    _ => {}
+                }
                 k += 1;
                 if k > 400_000 {
                     return None;
                 }
             }
         }
-        self.stream_emit(Some(t))
+        self.stream_emit(now, Some(t))
     }
 
     /// Stop the stream, linearise the ring (oldest sample first) and emit the
     /// screen around absolute crossing `t` (None: the newest screen).
-    fn stream_emit(&mut self, t: Option<u64>) -> Option<Frame<'static>> {
+    fn stream_emit(&mut self, now: u64, t: Option<u64>) -> Option<Frame<'static>> {
         self.halt();
-        let wr = self.stream_wr();
-        let len = wr.min(CAP as u64) as usize;
+        let Some(wr) = self.stream_wr(now) else { return None };
+        let cap = self.cap();
+        let slot = if rg().pk { rg().slot } else { self.roll_last_wr };
+        let (off, len) = self.span(wr >= cap as u64, slot);
         if len < self.screen {
             self.stored_valid = false;
             return None;
-        }
-        if wr > CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
         }
         let base = wr - len as u64;
         let (pre, post) = self.hw_split();
@@ -1745,48 +1871,38 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(off, len, start + self.screen / 2, trig, false);
         self.deadline = 0;
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
-        self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data, cols: None, trig, fs: self.sample_rate(), seq: self.seq })
+        self.frame(start, trig)
     }
 
-    /// Roll: every 100 ms, min/max of 400 columns over the latest screen.
+    /// Roll (packed ring: TB_ROLL's rate is below PK_FS): every 100 ms,
+    /// min/max of 400 columns over the latest screen.
     fn roll_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        if !self.pk_drain(now) {
+            self.halt();
+            return None;
+        }
         if now < self.roll_next {
             return None;
         }
         self.roll_next = now + 100;
-        let wr = CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1);
-        let wr = wr % CAP;
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
-        self.roll_written += d as u64;
-        self.roll_last_wr = wr;
+        let wr = rg().slot;
         let per = (self.screen / COLS).max(1);
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for i in 0..COLS {
             // Column i ends (COLS - 1 - i) columns before the write position.
             let back = (COLS - i) * per;
-            if back as u64 > self.roll_written {
-                cols[i] = (u16::MAX, u16::MAX);
-                continue;
-            }
-            let start = (wr + CAP - back) % CAP;
-            let (mut lo, mut hi) = (u16::MAX, 0u16);
-            for k in 0..per {
-                let v = buf[(start + k) % CAP] & 0x3FF;
-                lo = lo.min(v);
-                hi = hi.max(v);
-            }
-            cols[i] = (lo, hi);
+            cols[i] = if back as u64 > self.roll_written {
+                (u16::MAX, u16::MAX)
+            } else {
+                Codes::new(base(), (wr + PCAP - back) % PCAP, per, PCAP).min_max(0, per)
+            };
         }
-        self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.sample_rate(), seq: self.seq })
+        self.cols_frame(self.sample_rate())
     }
 
     /// Samples of the stored record that fill the 400 px screen at timebase
@@ -1810,7 +1926,6 @@ impl Scope {
         }
         let len = self.stored_len;
         let want = self.zoom_screen(self.s.tb);
-        self.seq = self.seq.wrapping_add(1);
         if want <= len as u64 {
             let want = want as usize;
             let start = if self.stored_roll {
@@ -1818,9 +1933,9 @@ impl Scope {
             } else {
                 self.stored_anchor.saturating_sub(want / 2).min(len - want)
             };
-            let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + want] };
             let trig = self.stored_trig.and_then(|t| t.checked_sub(start).filter(|_| t < start + want));
-            return Some(Frame { data, cols: None, trig, fs: self.stored_fs, seq: self.seq });
+            self.seq = self.seq.wrapping_add(1);
+            return Some(Frame { data: self.rec_view().sub(start, start + want), cols: None, trig, fs: self.stored_fs, seq: self.seq });
         }
         // The screen spans more time than was captured: draw the record at its
         // true scale as per-column min/max (the roll-frame format) with empty
@@ -1829,7 +1944,7 @@ impl Scope {
         // spans >= 40 K samples (> the whole record), so rounding is invisible.
         let step = want as f32 / COLS as f32;
         let w0 = if self.stored_roll { len as f32 - want as f32 } else { self.stored_anchor as f32 - (want / 2) as f32 };
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let rec = self.rec_view();
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for (i, c) in cols.iter_mut().enumerate() {
             let af = w0 + i as f32 * step;
@@ -1841,23 +1956,18 @@ impl Scope {
             // A negative left edge saturates to 0 in the cast.
             let a = af as usize;
             let b = (bf as usize).max(a + 1).min(len);
-            let (mut lo, mut hi) = (u16::MAX, 0u16);
-            for &v in &buf[a..b] {
-                lo = lo.min(v);
-                hi = hi.max(v);
-            }
-            *c = (lo, hi);
+            *c = rec.min_max(a, b);
         }
-        Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: self.stored_fs, seq: self.seq })
+        self.cols_frame(self.stored_fs)
     }
 
     /// As find_trigger, but the crossing closest to index `near` (the
     /// comparator's estimate) instead of the first one.
-    fn find_trigger_near(&self, d: &[u16], near: usize) -> Option<usize> {
+    fn find_trigger_near(&self, d: Codes, near: usize) -> Option<usize> {
         let mut best: Option<usize> = None;
         let mut from = 0;
         while from < d.len() {
-            let Some(i) = self.find_trigger(&d[from..]).map(|i| i + from) else { break };
+            let Some(i) = self.find_trigger(d.sub(from, d.len())).map(|i| i + from) else { break };
             if best.is_some_and(|b| b.abs_diff(near) <= i.abs_diff(near)) {
                 break; // crossings only get farther from here on
             }
@@ -1869,11 +1979,11 @@ impl Scope {
 
     /// Stock software trigger: beyond the hysteresis band (code -+ 2) on the
     /// far side, then the first sample across the level.
-    fn find_trigger(&self, d: &[u16]) -> Option<usize> {
+    fn find_trigger(&self, d: Codes) -> Option<usize> {
         let l = self.trig_code();
         let mut armed = false;
-        for (i, &v) in d.iter().enumerate() {
-            let v = v as i32;
+        for i in 0..d.len() {
+            let v = d.at(i) as i32;
             if self.s.rising {
                 if v < l - 2 {
                     armed = true;
@@ -2056,6 +2166,8 @@ impl Scope {
             w.shown = None;
             self.stored_valid = false;
         }
+        // The wave record is the packed ring, written by wave_drain.
+        (rg().pk, rg().raw) = (true, false);
         self.rolling = self.roll_ok();
         let (pre, _) = self.hw_split();
         let w = wv();
@@ -2110,17 +2222,18 @@ impl Scope {
         }
     }
 
-    /// Ring -> BUF (and the roll columns).
+    /// Ring -> BUF (packed, and the roll columns).
     fn wave_drain(&mut self, src: &mut dyn WaveSource) {
-        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         let w = wv();
-        let (slot0, mut tot) = (w.slot0, w.tot);
+        let mut tot = w.tot;
+        let mut slot = (tot.wrapping_sub(w.slot0) % PCAP as u64) as usize;
         let roll = self.rolling;
         let (per, mut acc, mut rn) = (w.per, w.racc, w.rn);
         src.drain(&mut |raw| {
             let c = crate::trigsoft::ad2_code10(raw) as u16;
-            buf[(tot.wrapping_sub(slot0) % CAP as u64) as usize] = c;
+            pack10::set(base(), slot, c);
+            slot = if slot + 1 == PCAP { 0 } else { slot + 1 };
             tot += 1;
             if roll {
                 acc = (acc.0.min(c), acc.1.max(c));
@@ -2138,25 +2251,20 @@ impl Scope {
 
     /// Oldest index in BUF.
     fn wave_oldest(&self) -> u64 {
-        wv().first.max(wv().tot.saturating_sub(CAP as u64))
+        wv().first.max(wv().tot.saturating_sub(PCAP as u64))
     }
 
-    /// Rotate BUF so the record runs oldest -> newest from 0; its length.
-    fn wave_linear(&mut self) -> usize {
+    /// The record oldest -> newest: (its first slot, length, the stream
+    /// index of its first sample).
+    fn wave_linear(&self) -> (usize, usize, u64) {
         let oldest = self.wave_oldest();
-        let r = (oldest.wrapping_sub(wv().slot0) % CAP as u64) as usize;
-        if r != 0 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(r) };
-        }
-        wv().slot0 = oldest;
-        (wv().tot - oldest) as usize
+        ((oldest.wrapping_sub(wv().slot0) % PCAP as u64) as usize, (wv().tot - oldest) as usize, oldest)
     }
 
     /// Show the screen around trigger index `t` (None: the newest screen,
     /// untriggered) as the stored record's window.
     fn wave_emit(&mut self, now: u64, t: Option<u64>) -> Option<Frame<'static>> {
-        let len = self.wave_linear();
-        let base = wv().slot0;
+        let (off, len, base) = self.wave_linear();
         let (pre, _) = self.hw_split();
         if len < self.screen {
             return None;
@@ -2166,7 +2274,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(off, len, start + self.screen / 2, trig, false);
         wv().shown = Some((base + (start + self.screen / 2) as u64, t));
         wv().last_emit = now;
         self.deadline = now + self.auto_timeout();
@@ -2178,9 +2286,7 @@ impl Scope {
                 wv().stale = true;
             }
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
-        self.seq = self.seq.wrapping_add(1);
-        Some(Frame { data, cols: None, trig, fs: wave_real_fs(wv().fs), seq: self.seq })
+        self.frame(start, trig)
     }
 
     fn wave_frame(&mut self, now: u64, src: &mut dyn WaveSource) -> Option<Frame<'static>> {
@@ -2214,8 +2320,7 @@ impl Scope {
                 return None;
             }
             self.roll_next = now + 100;
-            self.seq = self.seq.wrapping_add(1);
-            return Some(Frame { data: &[], cols: Some(unsafe { &*core::ptr::addr_of!(ROLL_COLS) }), trig: None, fs: wave_real_fs(wv().fs), seq: self.seq });
+            return self.cols_frame(wave_real_fs(wv().fs));
         }
         let (pre, post) = self.hw_split();
         let (tot, oldest) = (wv().tot, self.wave_oldest());
@@ -2286,18 +2391,17 @@ impl Scope {
         if !was_busy || !wv().live {
             return true;
         }
-        let len = self.wave_linear();
-        let base = wv().slot0;
+        let (off, len, base) = self.wave_linear();
         if was_rolling {
-            self.snapshot_mark(len, len.saturating_sub(1), None, true);
+            self.snapshot_mark(off, len, len.saturating_sub(1), None, true);
             return true;
         }
         match wv().shown {
             Some((c, t)) if c >= base && c < base + len as u64 => {
                 let trig = t.filter(|&t| t >= base && t < base + len as u64).map(|t| (t - base) as usize);
-                self.snapshot_mark(len, (c - base) as usize, trig, false);
+                self.snapshot_mark(off, len, (c - base) as usize, trig, false);
             }
-            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false),
+            _ => self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false),
         }
         true
     }
