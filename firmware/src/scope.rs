@@ -1985,9 +1985,9 @@ impl Scope {
     }
 
     /// A screen-only V/div step (`wave_steps`, the same DMM row): the codes
-    /// keep their scale; the acquisition in flight restarts (the trigger
-    /// level's code follows the V/div: the level is a row), a stopped
-    /// record is drawn again at the new V/div.
+    /// keep their scale; the acquisition in flight restarts (`apply`: the
+    /// trigger levels keep their SI value, their rows and codes follow), a
+    /// stopped record is drawn again at the new V/div.
     pub fn wave_vdiv_set(&mut self, vdiv: f32, now: u64) {
         wv().sc.vdiv = vdiv;
         let s = self.s;
