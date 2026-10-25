@@ -389,8 +389,8 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   on one unit with `DBG:SRC`, jacks shorted / open
   ([`device-check-2026-10-21.md`](../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc),
   `dmm::OHM_ISC` in [`firmware/src/dmm.rs`](../firmware/src/dmm.rs)).
-  60 Ω and 60 MΩ (the current-source row) not measured; the firmware shows
-  the 600 Ω default value on 60 Ω (*inferred*). *Inferred* from the drops:
+  60 Ω (the stock's r0 row, not used by the stock nor by opendm40) and 60 MΩ
+  (the current-source row) not measured. *Inferred* from the drops:
   only 600 Ω is limited by OP3; above it the ~2 V source behind Rref sets
   the current. Diode test 0.756 mA, open-circuit 3.23 V (measured on one unit, the RLD current-source path; device check).
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.

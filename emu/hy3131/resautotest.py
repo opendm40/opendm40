@@ -15,7 +15,8 @@ The `dcv` row is the reference (from DC V, no manual range); `key` holds the AUT
 `sink` is ohmsinktest.py's input (6 Mohm ~0.10 Mohm, 600 kohm OL), `open` an open input (OL).
 Before the fix (3f84f81) every row but `dcv` showed MANU and the manual final for 0.25-1.1 s.
 
-The 60 ohm range in AUTO (owner 2026-10-25; dmm.rs `ohm_auto_floor`): a row's optional dict
+Ohm rows (the 60 ohm range is removed, 2026-10-25: AUTO's lowest ohm range is 600 ohm, and
+`CONF:RES 60` selects 600 ohm; the 60 ohm rows are on branch feat/ohm60). A row's optional dict
   range   the range (RES:RANG?, ohm) every poll from the first final AUTO readout on must show
           (no hunt: no range change after it), unless `later` changes the input;
   later   [(s, input)]: the input changes s seconds after the AUTO command (the emulator
@@ -24,20 +25,14 @@ The 60 ohm range in AUTO (owner 2026-10-25; dmm.rs `ohm_auto_floor`): a row's op
           last poll must show `range`, and the range seen after the first final readout
           changes at most `steps` times in all (no hunt);
   on      the 0.28 mA "ON" ohm variant is chosen first (the MF page's ON button, DBG:KEY 3 /
-          DBG:TAP): AUTO then never goes below 600 ohm;
+          DBG:TAP);
   ol      one of the last five polls shows a final OL;
-  on_at   the same, s seconds after the AUTO command (AUTO already on 60 ohm: to 600 ohm);
-  steps   with `later` / `on_at`: the most range changes after the first final readout;
-  tol     the first final AUTO readout's tolerance (default 0.01; 0.003 on the 60 ohm range:
-          its gain is dmm.rs OHM_R0_K, the emulator models the device's r0 the same way, before
-          the fix 60 ohm read 2.6 % low);
+  steps   with `later`: the most range changes after the first final readout;
   late    the AUTO command takes this long (s; a held AUTO key, `DBG:KEY 2,1200`): the AUTO
           status bar is checked from then on.
-Rows: 30 ohm from DC V / manual 600 / manual 60 lands on 60 ohm; 300 ohm from manual 60 on
-600 ohm; 59.5 ohm (inside the 58.25..61.8 ohm band) stays on the range it starts on; 30 -> 300 ->
-30 ohm steps 60 -> 600 -> 60 (60 -> 600 by way of 60 Mohm: an over-range on a settled range
-jumps to the top, as the stock's probe-opened rule); an open input from manual 60 ends on 60 Mohm, OL; 30 ohm with ON
-stays on 600 ohm, and ON chosen while AUTO is on 60 ohm moves it to 600 ohm.
+Rows: 30 ohm from DC V / manual 600 / `CONF:RES 60` (= 600) lands on 600 ohm; 300 ohm and 59.5
+ohm stay on 600 ohm; 30 -> 300 -> 30 ohm stays on 600 ohm (no range change); an open input ends
+on 60 Mohm, OL; 30 ohm with ON on 600 ohm.
 
   emu/hy3131/resautotest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 64731
 """
@@ -67,16 +62,13 @@ SCEN = [
     ('sink-600', SINK, 'CONF:RES 600', AUTO, None, 6.0),
     ('sink-dcv', SINK, None, AUTO, None, 6.0),
     ('open-600', 'open', 'CONF:RES 600', AUTO, None, 6.0),
-    ('r30-dcv', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 60, 'tol': 0.003}),
-    ('r30-600', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 60, 'tol': 0.003}),
-    ('r30-60', 'ohm:30', 'CONF:RES 60', AUTO, 30.0, 3.0, {'range': 60, 'tol': 0.003}),
-    ('r30-60-key', 'ohm:30', 'CONF:RES 60', 'DBG:KEY 2,1200', 30.0, 4.0, {'range': 60, 'late': 1.5}),
+    ('r30-dcv', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 600}),
+    ('r30-600', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 600}),
+    ('r30-60', 'ohm:30', 'CONF:RES 60', AUTO, 30.0, 3.0, {'range': 600}),
     ('r300-60', 'ohm:300', 'CONF:RES 60', AUTO, 300.0, 3.0, {'range': 600}),
     ('r59-600', 'ohm:59.5', 'CONF:RES 600', AUTO, 59.5, 3.0, {'range': 600}),
-    ('r59-60', 'ohm:59.5', 'CONF:RES 60', AUTO, 59.5, 3.0, {'range': 60, 'tol': 0.003}),
-    ('r30-300-30', 'ohm:30', None, AUTO, None, 4.0, {'range': 60, 'later': [(5.0, 'ohm:300'), (10.0, 'ohm:30')], 'steps': 3, 'hold': 15.0}),
+    ('r30-300-30', 'ohm:30', None, AUTO, None, 4.0, {'range': 600, 'later': [(5.0, 'ohm:300'), (10.0, 'ohm:30')], 'steps': 0, 'hold': 15.0}),
     ('open-60', 'open', 'CONF:RES 60', AUTO, None, 6.0, {'range': 6e7, 'ol': True}),
-    ('r30-on-late', 'ohm:30', None, AUTO, 30.0, 4.0, {'range': 600, 'on_at': 5.0, 'steps': 1, 'hold': 10.0}),
     ('r30-on', 'ohm:30', 'CONF:RES 600', AUTO, 30.0, 3.0, {'range': 600, 'on': True}),
 ]
 
@@ -169,13 +161,9 @@ try:
         t1 = up()
         first = q(auto + ';:DBG:READ?').split(',')
         rows = [(0.0, float('nan'), first)]  # (s, range, readout fields)
-        on_at = o.get('on_at')
         while True:
             rng, ro = q('RES:RANG?;:DBG:READ?').split(';', 1)
             s = up() - t1
-            if on_at is not None and s >= on_at:
-                on_at = None
-                ohm_on()
             rows.append((s, num(rng), ro.split(',')))
             if s > o.get('hold', HOLD):
                 break
@@ -201,8 +189,8 @@ try:
             v = num(ro[2])
             if s > final_max:
                 why.append('first final AUTO readout at +%.2f s (max %g)' % (s, final_max))
-            if want is not None and abs(v - want) > want * o.get('tol', 0.01):
-                why.append('first final AUTO readout %g (want %g +- %g %%)' % (v, want, 100 * o.get('tol', 0.01)))
+            if want is not None and abs(v - want) > want * 0.01:
+                why.append('first final AUTO readout %g (want %g +- 1 %%)' % (v, want))
             if 'range' in o:
                 after = [r for r in rows if r[0] >= s]
                 seen = [r[1] for r in after]
