@@ -514,9 +514,10 @@ pub enum Log {
 ///                           DMM view = AutoHold on/off); max 60000
 ///   DBG:SWIPE D,n           synthetic n-finger swipe down (3 = screenshot, 2 = power off)
 ///   DBG:READout?            the DMM readout as drawn (App::shown_reading):
-///                           kind,unit,value_si,hold (kind P placeholder, G
+///                           kind,unit,value_si,hold,range (kind P placeholder, G
 ///                           grey provisional, F final, N none; value NAN for
-///                           dashes, +9.9E37 OL; hold Meter::hold_state)
+///                           dashes, +9.9E37 OL; hold Meter::hold_state; range
+///                           the status bar's AUTO / AUTO+ / MANU)
 ///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
 ///                           of finger span, 1 one step per 1.25x (default), 2 live
@@ -534,7 +535,9 @@ pub enum Log {
 ///                           A-JACK here is badge only, no danger alarm, doc
 ///                           4.10; ctsta -1 in kinds without the comparator),
 ///                           jack (the jack check, sentinel.rs JACK CHECK: -1
-///                           none, 0 free, 1 driven), jack_mV (its peak)
+///                           none, 0 free, 1 driven, 2 driven by the
+///                           comparator's both-bit reads), jack_mV (its peak;
+///                           the present hit run's, else -1 / 0)
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)

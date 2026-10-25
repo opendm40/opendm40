@@ -72,6 +72,16 @@ section named after the tag as the release notes; how to cut a release:
 - Scope: the trigger-level marker follows a drag more closely (each step
   repaints its guide line as whole rows, the marker before the trigger
   badge).
+- AUTO from a manual range (the AUTO key, the range page, SCPI
+  `<f>:RANG:AUTO ON` / `CONF:<f>`): the status bar shows AUTO at once and the
+  readout dimmed dashes until AUTO's first reading, as after a function
+  change. Before, the manual range's last value stayed with MANU until then
+  (RES: through the whole autorange). Where AUTO stays on the manual range,
+  the dashes now show until the next conversion.
+- `DBG:SENT?` fields 14 / 15 (jack check verdict, OP1O peak): -1 / 0 after a
+  range or function change and once the hit run is over (they kept the last
+  verdict; after a source on V-COM goes off field 14 now goes to -1, not 1).
+  `DBG:READout?` has a fifth field, the status bar's AUTO / AUTO+ / MANU.
 
 ### Docs
 
