@@ -392,7 +392,7 @@ Functions:
   logger session runs or the Wave view is open; `CONFigure` then only
   selects the function.
 - **Rate:** `FAST` 10 readings/s with 60000 counts (resistance: 5/s);
-  `MEDium` 5 readings/s and `SLOW` 2.5 readings/s, with one more digit
+  `MEDium` 5 readings/s (resistance: 2.5/s) and `SLOW` 2.5 readings/s, with one more digit
   (in DC V 600 mV .. 600 V and resistance 600 ohm .. 60 kohm); `SLOW` also
   averages 16 conversions. Every rate rejects 50 and 60 Hz. In DC V, mV
   and A, `FAST` runs the converter unchopped and measures its offset

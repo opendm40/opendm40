@@ -180,12 +180,14 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   rate    DC V / mV / A AD1 R22          ohm in range   code window (step reset ~2 counts)    readings
 //   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
 //           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
-//   MEDIUM  0x16 OSR 16384 chopped          0x16           V r0..r2 / mV r1: 8 (1.6 s),          5/s
-//   (dflt)                                                 ohm r0..r3: 16 (3.2 s), others none
+//   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1: 8 (1.6 s),          5/s DC, ohm 2.5/s
+//   (dflt)                                                 ohm r0..r3: 16 (6.4 s), others none
 //   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
 //                                                          32, 12.8 s)
 // Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
-// R22_DROP_WIN_MS of the row write. FAST in ohm is MED without the window
+// R22_DROP_WIN_MS of the row write. Ohm MEDIUM / SLOW keep the stock's
+// in-range 0x17 (emulator resautotest r30-300-30: at 0x16 the OL jump to
+// 60 Mohm stepped down in 4 rows, not 3); FAST is 0x16 without the window
 // (an unchopped ohm would need an offset per range of the autorange: not
 // done). Before 2026-10-25 FAST was 0x15 and MEDIUM / SLOW ran the stock's
 // 0x15 while moving / 0x17 once stable (10/s -> 2.5/s), which left 50 Hz
@@ -225,7 +227,7 @@ impl Rate {
 
 /// R22 of SLOW (OSR 32768 chopped, 400 ms) and of MEDIUM (OSR 16384
 /// chopped, 200 ms) in DC V / mV / A (FAST: fastvos::R22_FAST); ohm's
-/// in-range OSR at SLOW / at MEDIUM and FAST (`steady_osr`).
+/// in-range OSR at MEDIUM and SLOW / at FAST (`steady_osr`).
 const OSR_SLOW: u8 = 0x17;
 const R22_MED: u8 = 0x16;
 /// DMM rail (PE2) up -> the row is written this much later (`set_suspended`).
@@ -1819,14 +1821,15 @@ impl Dmm {
     }
 
     /// AD1 conversion period of `rate` in the current function, ms (FR-05
-    /// table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm FAST and MED
-    /// 200, SLOW 400).
+    /// table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm FAST 200, MED
+    /// and SLOW 400).
     pub fn rate_period_ms(&self, rate: Rate) -> u32 {
         let dc = matches!(self.mode, 1 | 3 | 7..=9);
         match rate {
             Rate::Fast if dc => 100,
-            Rate::Slow => 400,
-            _ => 200,
+            Rate::Fast => 200,
+            Rate::Medium if dc => 200,
+            _ => 400,
         }
     }
 
@@ -1847,10 +1850,10 @@ impl Dmm {
     fn steady_osr(&self) -> u8 {
         if self.dc_rated() {
             self.dc_r22()
-        } else if self.rate == Rate::Slow {
-            OSR_SLOW
-        } else {
+        } else if self.rate == Rate::Fast {
             R22_MED
+        } else {
+            OSR_SLOW
         }
     }
 
@@ -2015,13 +2018,21 @@ impl Dmm {
         } else {
             sentinel::probe_row(&row)
         };
-        // FR-05: DC V / mV / A at the rate's R22 from the row on.
+        // FR-05: DC V / mV / A at the rate's R22 from the row on. A row at
+        // the R22 the chip runs does not restart AD1, and its decimation
+        // filter keeps samples of the old divider tap (the VET_* device
+        // case: two quick autorange steps at one OSR read 0.77 V for 1 V);
+        // with every DC row at one R22 that is every range step, so such a
+        // row enables AD1 last: ENAD1 0 -> 1 restarts it (emulator
+        // autorangetest from 1000 V: 0.84 V without).
         let mut row = row;
-        if self.dc_rated() && !am && src_row.is_none() {
+        let dc_rows = self.dc_rated() && !am && src_row.is_none();
+        if dc_rows {
             row[2] = self.dc_r22();
         }
+        let restart = dc_rows && row[2] == self.r22 && row[3] & 0x80 != 0;
         self.jwin = 0;
-        if sentinel::ad1_last(kind, &row) || ((self.probe || am) && row[3] & 0x80 != 0) {
+        if sentinel::ad1_last(kind, &row) || ((self.probe || am || restart) && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
             hy::configure(&c);
@@ -5696,11 +5707,11 @@ mod tests {
         assert_eq!(hy::ad1_period_us_r22(R22_MED), 200_000);
         assert_eq!(hy::ad1_period_us_r22(OSR_SLOW), 400_000);
         // Window spans (one reading per conversion in every rate): MEDIUM
-        // V r0 8 (1.6 s), ohm r1 16 (3.2 s); SLOW 16 (6.4 s), SLOW ohm r0..r3
-        // 32 (12.8 s).
+        // V r0 8 (1.6 s), ohm r1 16 (6.4 s at 0x17); SLOW 16 (6.4 s), SLOW
+        // ohm r0..r3 32 (12.8 s).
         let span = |r, m, g, r22| avg_cfg(r, false, m, g).unwrap().0 as u32 * hy::ad1_period_us_r22(r22);
         assert_eq!(span(Rate::Medium, 1, 0, R22_MED), 1_600_000);
-        assert_eq!(span(Rate::Medium, 10, 1, R22_MED), 3_200_000);
+        assert_eq!(span(Rate::Medium, 10, 1, OSR_SLOW), 6_400_000);
         assert_eq!(span(Rate::Slow, 1, 0, OSR_SLOW), 6_400_000);
         assert_eq!(span(Rate::Slow, 10, 3, OSR_SLOW), 12_800_000);
     }

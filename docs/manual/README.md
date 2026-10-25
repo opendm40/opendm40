@@ -759,7 +759,7 @@ The rate sets the speed and the resolution in DC V, DC mV, DC A and Ω:
 | Rate | What you get |
 |---|---|
 | **FAST** | 10 readings/s, 60000 counts. In Ω: 5 readings/s. |
-| **MED** (default) | 5 readings/s. On suitable ranges, an average over 1.6 s gives an extra digit (600000 counts). |
+| **MED** (default) | 5 readings/s (Ω: 2.5/s). On suitable ranges, an average over 1.6 s gives an extra digit (600000 counts). |
 | **SLOW** | 2.5 readings/s, with a 6.4 s average on every DC V, DC A and Ω range (the extra digit only on the ranges listed below). |
 
 Every rate rejects 50 Hz and 60 Hz mains hum on a DC reading: each
@@ -777,7 +777,7 @@ last offset it measured on another range, so a reading in those first 2 s
 can be a little off. A FAST reading is a little noisier than a MED one
 (more low-frequency noise); for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are twice as long (MED 3.2 s, SLOW
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 12.8 s). After a step of the input or a range change the average restarts,
 so a change shows at once.
 
@@ -797,7 +797,7 @@ so a change shows at once.
 
 The extra digit appears smaller, after the main digits, on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
-1.6 s (MED; Ω 3.2 s) after the input settles, a little later after a
+1.6 s (MED; Ω 6.4 s) after the input settles, a little later after a
 function change.
 
 #### Smoothing

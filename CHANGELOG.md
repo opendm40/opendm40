@@ -42,7 +42,8 @@ section named after the tag as the release notes; how to cut a release:
   60 Hz hum. FAST: 10 readings/s (Ω 5/s); in DC V / mV / A the converter
   runs without its chopper and the meter measures its offset itself (2 s
   after a change, then every 30 s; two readings skipped each time). MED: 5
-  readings/s, the extra digit after 1.6 s. SLOW: 2.5 readings/s. Before,
+  readings/s (Ω 2.5/s as before), the extra digit after 1.6 s. SLOW: 2.5
+  readings/s. Before,
   FAST and MED ran a 50 ms conversion that did not reject 50 Hz
   ([manual](docs/manual/README.md#rate-fast-med-slow)).
 
