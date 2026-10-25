@@ -115,7 +115,7 @@ What waits for the owner; each line links to the material.
       remaining offsets are the panel or the aim is unknown: the touch test screen (owner request) shows it.
       AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
       held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
-- [ ] USB PID (owner 2026-10-25): request 1209:D040 from pid.codes right after the repo is public (their rule:
+- [ ] USB PID (owner 2026-10-25; repo public 2026-10-26, request open: https://github.com/pidcodes/pidcodes.github.com/pull/1331; firmware already uses D040): request 1209:D040 from pid.codes right after the repo is public (their rule:
       a public source repo with a LICENSE). The PR is prepared locally (org/WirenBoard + 1209/D040, MIT, site and
       source = github.com/wirenboard/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
       merge: the PID constant in usb descriptors (now the test PID 1209:0001), udev rules / docs, a release.
