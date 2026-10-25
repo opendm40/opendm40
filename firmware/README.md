@@ -63,7 +63,7 @@ and pull request to `main`; a push that changes only documentation (Markdown, `d
 | Job | What |
 |---|---|
 | Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
-| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script; `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
+| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script, `JOBS` at a time (default: the CPU count; each suite's log printed whole after all finish); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
 | Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh) |
 | Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not |
 
