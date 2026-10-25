@@ -662,6 +662,8 @@ pub enum Dbg {
     Input(u8, u16, u16),
     /// x0, y0, x1, y1, ms, hold ms, jitter px.
     Drag([u16; 7]),
+    /// DBG:HY:CAP? (hyexp.rs): kind, n lo / hi, npre, 6 (byte, value) pairs.
+    HyCap([u8; 16]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
@@ -2286,6 +2288,21 @@ impl Scpi {
                         Some(d) => out = Out::Dbg(d),
                         None => self.err_arg(no_arg, "Undefined header"),
                     }
+                }
+                // HY3131 front-end experiments (src/hyexp.rs, main.rs).
+                _ if p0 == b"DBG" && query && parts.len() == 3 && parts[1] == b"HY" && parts[2] == b"CAP" => {
+                    let v = nums::<15>(trim(arg));
+                    let mut a = [255u8; 16];
+                    a[0] = v[0].min(2) as u8;
+                    a[1] = v[1] as u8;
+                    a[2] = (v[1] >> 8) as u8;
+                    a[3] = v[2].min(255) as u8;
+                    let k = trim(arg).split(|&b| b == b',').count().saturating_sub(3) / 2;
+                    for j in 0..k.min(6) {
+                        a[4 + 2 * j] = v[3 + 2 * j].min(255) as u8;
+                        a[5 + 2 * j] = v[4 + 2 * j].min(255) as u8;
+                    }
+                    out = Out::Dbg(Dbg::HyCap(a));
                 }
                 // AD2 device experiments (src/ad2exp.rs, main.rs).
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"AD2"[..]) => {

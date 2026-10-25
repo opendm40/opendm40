@@ -356,9 +356,10 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
 AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../docs/history/device-check-2026-10-21.md#ad1-osr-characterization-ea73ea5-2026-10-24-1433---1545).
-AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
-[#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), `stock/re/docs/history/acdc-stock-vs-opendm40.md`).
+AC bandwidth is about 20 kHz (-3 dB, one rough chat measurement, [#16732](https://t.me/S2084K/16732)).
+The AC V path has a coupling network into PB4 with τ = 0.34 s (one unit; R · C only) and the
+FTP-FTN pre-filter capacitor is ~26 nF; the stock AC V rows' FS9 switch shapes the HF response, the ACC
+array does nothing measurable ([`firmware/docs/hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
 `stock/re/analysis/hy3131_v2_6.h` lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
@@ -398,7 +399,8 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   switched on HY3131 PA4..PA7.
 - mV / thermocouple: HY3131 PB0 through OP1 x10. Cold junction = the HY3131
   die sensor.
-- AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2.
+- AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2 (the capacitor is *inferred* from the
+  exponential decay at PB4 and the Hycon demo board's C16 / R2, APD-DMM001 p.22).
 
 ![DMM input area: relay, varistors, R500 shunt, wire shunt, fuse, COM and A jacks](photos/input-jacks-shunts-fuse-relay.jpg)
 
