@@ -2563,7 +2563,7 @@ Firmware:
             Cause: the frequency row leaves its divider open, PB1 - PB3 stands at ~54 mV (+41 100 codes) with
             0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V. Fixed: no sentinel in Hz (doc 4.7 gap;
             senttest freq-gap). Open: the AC hint in DC V on 5 V DC.
-      - [ ] **False alerts after DMM function switches (owner, device ad74e93, device-check "ad74e93" E; raw log
+      - [x] **False alerts after DMM function switches (owner, device ad74e93, device-check "ad74e93" E; raw log
             in that check's scratchpad `chk/out/E_all_sent.txt`).** 397 switches (42-pair matrix, chain, AUTO, UI
             taps, scope / Wave view -> DMM) with V-COM open, 1 V and 5 V DC; A jack open; A-PROT never.
             (E1) **V-JACK? after RES -> A or RES -> mA**, 11 / 11 with V-COM open or 1 V (0 / 4 at 5 V): CMP_SENSE
@@ -3294,7 +3294,8 @@ Emulator (emu/):
       powtest, acdcmethtest, flowtest, meter-test (switch_blank_rules), the model's unit tests.
       Not changed (owner decision pending): RES with 5 V on V-COM reads OL, not negative, so V_GATE says
       "free" and A-JACK shows (35fce2a item 5). That is a steady state, and the blanks do not touch it.
-- [ ] Device retest (falsehint image), alerts ON, A jack open unless stated:
+- [x] Device retest (falsehint image), alerts ON, A jack open unless stated (run on f0d21eb; its leftovers
+      went to sentinel2 / sentinel3, both run on the device, closed 2026-10-25):
       1. Nothing connected, then the calibrator at 1 V and 5 V DC on V-COM: 20+ switches through DC V,
          AC V, AC+DC, AUTO, A / mA / uA, ohm, diode, continuity, cap, Hz, temp, W, and MF -> Wave -> MENU,
          with RES -> A / mA / AUTO A several times. Expect no A-JACK / A-PROT, no V-JACK? after RES, and
@@ -3325,6 +3326,9 @@ Emulator (emu/):
       false OVERLOAD in AC A at 1 / 5 V on V-COM, `CONF:CURR:AC 0.06` after 10 A falls back to 10 A at 0.5 s
       (AD1PK_SENSE pk ~-210 000, the 2a drift); (d) [ ] new: A-JACK in continuity at 5 V DC (AD2PK_PB1, 0.41 s,
       stays; LIVE at 1 V), likely the RES 5 V V_GATE item. **(d) fixed by the jack check (doc 4.13): LIVE?.**
+      Closed 2026-10-25 (triage): (a) the 24 V misses -> DBG:SENT:PREC default 100 ms (sentinel3, device
+      10242c3 item 1 PASS); (b) / (c) -> sentinel2 (device 10242c3 item 3 PASS); (d) -> the jack check. What is
+      left is the doc 4.13 device check list (item below).
 - [x] f0d21eb follow-up, emulator (branch sentinel2; doc power-meter-and-misconnect.md 4.11):
       (b) V-JACK? in AC A: FIXED. AD1 was on SENSE - PB5, and PB5 is defined only by the DC V
       60 V+ rows: in the A rows it drifted to the rail at any V. Now SENSE - AGND, and AC A counts
@@ -3345,7 +3349,8 @@ Emulator (emu/):
       Emulator knobs pb5drift / acastep / vjblind replay 2a, the OVERLOAD and the 24 V table;
       switchtest aca-drift / aca-ovl / real-vjack-blind FAIL on 3eebbb4, aca-drift / aca-ovl pass
       now, real-vjack-blind still FAILs (by design: the open item), real-vjack-blind-prec passes.
-- [ ] Device retest (sentinel2 image), A jack open, calibrator on V-COM:
+- [x] Device retest (sentinel2 image), A jack open, calibrator on V-COM (run on 0774e70; its new bug and the
+      PREC default went to sentinel3, closed 2026-10-25):
       1. AC A, V-COM open / 1 V / 24 V DC: CONF:CURR:AC 10 / 0.06 / 0.0006, 30 s each: no
          V-JACK?; DBG:SENT? pkmin / pkmax stay near a constant (no ramp to -262 144). Then
          DBG:SENT:VAR 32 (the old row): the ramp is back (confirms PB5). VAR 0 after.
@@ -3380,7 +3385,8 @@ Emulator (emu/):
       and RES; off and 5 V stay quiet with PREC. -> Next fix: make the precondition the default (100 ms).
       6 continuity 5 V pk -99 100 / +124 800. 7 soft 1 in RES / CONT, DBG:ALARm? events 0 (Off). 8 PASS
       (V-JACK? from 8.3 / 8.8 s, held across phases).
-- [ ] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open:
+- [x] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open (run on 10242c3;
+      item 5 fixed in e1cec01, device PASS; closed 2026-10-25):
       (list from the sentinel3 branch, 10242c3; copied here with the device result)
       1. 24 V DC on V-COM, no DBG:SENT:PREC command (the default 100 ms): DC A / mA after DC V 60 V,
          RES, AC V, DC V auto (60 V) and Scope -> back: V-JACK? within ~2.5 s (Scope -> back: the
@@ -3525,6 +3531,9 @@ Emulator (emu/):
       sq-pickup / real-ajack-pickup, loudtest ajack-res / ajack-cont-v5 / ajack-acmv / ajack-acv-auto. Model:
       OhmRevOl (default: OL above the OCV, the device), Pb1VjackMv in continuity, AD2 on OP1O.
       Open (doc 4.13 gaps): AC+DC V on manual 600 mV has the same AD1 peak sentinel without the gate.
+      **Fixed (0bcc40c, branch bugtriage-5fdd812):** both phases of AC+DC mV set `vgate`; the AC phase's
+      result is the verdict. senttest acdcmv-sq600 / acdcmv-dc5, loudtest ajack-acdcmv: FAIL on 5fdd812, pass.
+      Cost: a real current in A asserts ~2.2 s after the onset there (the next "free" AC-phase result).
 - [ ] Device: doc 4.13 "Device check list (jack check)". **Device a2e9766 (device-check doc "a2e9766: bug-fix recheck" 1): RES still
       raises A-JACK** (badge only, no sound) with 5 V, 10 V DC and the square on V-COM: the jack check reads
       OP1O peaks of 2139-2140 mV (5 V, AUTO on 60 MΩ), 2249-2251 mV (5 V, 600 Ω), 2019-2030 mV (10 V),
@@ -3587,3 +3596,40 @@ Emulator (emu/):
       window, INFERRED). New with the fix: a line sent before the meter sees PC14 high is dropped without
       a reply or an error (first query 0-0.3 s after the connect: no reply in 14 of 17 connects; at
       0.5 s 6 of 6 answered), so a client that sends at once loses its first query.
+
+## Bug triage 2026-10-25 (branch bugtriage-5fdd812)
+
+- [x] Plain AC (V / mV / A) autorange step published a 0 reading: the result that stepped the range went on to
+      publish `f_ac`, which `set` had just reset (the 0774e70 fix), as a final reading on the new range (FETCh?,
+      READ?, the screen); then the EMA's 0.99 step from 0 read 1 % low and closed over ~1 s, also at every plain
+      AC entry (DC V -> AC V on 1 V AC: 0.990 V first). Fixed (049bb65): no reading from the stepping result;
+      the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
+      aca-auto-dn / acv-entry: FAIL on 5fdd812, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
+      VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
+      for CONF:VOLT:DC 6 -> CONF:VOLT:AC.
+- [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device cd1ec9a note 5): as decided on
+      2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
+      dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
+      after a switch, so MEAS? answers with the OSR 8192 reading at the limit. Comments fixed (a03da1d).
+- [x] Back-to-back full-frame `DBG:LCD?` grabs freeze the panel (device cd1ec9a note 3): by design. Every
+      `DBG:LCD?` chunk holds drawing for 300 ms (main.rs `draw_hold_until`, a consistent frame across the
+      chunks of one grab), so grabs less than 300 ms apart never let a frame through. Not the screenshot
+      (`screenshot::frozen`, the item "Device: screenshot preparation"). Space grabs >= 0.4 s apart.
+- [ ] AC V entry from AC mV in the emulator: READ? 2.78-3.9 V at 0 V right after 600 mV -> 6 V (mvautotest,
+      firstrdtest-style probe), and under the 0 / 9.5 V square a 6 -> 60 -> 6 V excursion (mvautotest "ranges
+      [... 6.0, 60.0, 6.0]") with a 4.90 V tail. Cause in the model: the AC node's coupling capacitor sits at
+      `Op1OffLevel` (-0.6 V, INFERRED) while OP1 is off (AC mV) and recharges on the AC V row. The device does
+      not show it where it was looked at: 2da1011 2a went 60 mV -> 600 mV -> 6 V (no 60 V) and read 4.835 V
+      (the Wave view's 4.84 V); DC V -> AC V gives a small tail (33 mV from 0.5 V DC). No firmware change
+      (a vet would cost ~0.1 s per AC entry for a step the device may not have). Device check (2 min): 0 V on
+      V-COM, CONF:VOLT:AC 0.6, 3 s, CONF:VOLT:AC 6 (and VOLT:AC:RANG 6), DBG:READout? every 50 ms for 3 s; the
+      square from CONF:VOLT:AC 0.6 -> CONF:VOLT:AC with VOLT:AC:RANG? every 50 ms. A first final above ~0.1 V
+      at 0 V or a 60 V visit = real: then hold plain AC V results after a row write until two agree
+      (as ACA_VET) and let held results move no range; else lower the model's level.
+- [ ] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
+      live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
+      (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
+      not known (the emulator has no offset there). Device check (2 min): AC A 10 A (CONF:CURR:AC 10), A jack
+      open, `dm40scpi.py log out.csv --source ad2 --rate 9600 -d 1`: the mean of the samples (A) against the cal
+      0x10C offset, and their rms about the mean. Mean off = arm with a measured zero; noise = the plan's
+      ~20 mA figure is what changes.
