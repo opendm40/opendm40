@@ -657,9 +657,11 @@ impl App {
         crate::persist::init();
         // The backup SRAM record, or the newer / only copy in the settings
         // file on the SPI disk (setfile.rs; after a power-off the backup
-        // SRAM holds none).
+        // SRAM holds none). A power-off starts in DC V as the stock (owner
+        // 2026-10-25): the function is continued only from the backup SRAM.
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
-            a.restore(&rec, crate::persist::same_session(), clk);
+            let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
+            a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
         }
         backlight(a.backlight);
         let g = a.gen.s;
@@ -2034,9 +2036,10 @@ impl App {
     }
 
     /// Backup SRAM words -> settings. `same_session`: the DMM function is
-    /// continued only after a normal opendm40 boot (persist::same_session);
-    /// otherwise, and for any code this build does not know, DC V as the
-    /// stock's power-on default.
+    /// continued only after a normal opendm40 boot (persist::same_session)
+    /// that kept the backup SRAM (a reset, not a power-off); otherwise, and
+    /// for any code this build does not know, DC V as the stock's power-on
+    /// default.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.dim_idx = (p[0] & 3) as usize;

@@ -20,7 +20,9 @@ What waits for the owner; each line links to the material.
 
 - [ ] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
       device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
-- [ ] DMM function after a power-off: the last one (settings file) or DC V as the stock.
+- [x] DMM function after a power-off: DC V as the stock (owner 2026-10-25). Done: app.rs continues the function only
+      from the backup SRAM (a reset); from `_SETTING.BIN` (a power-off) it starts in DC V. Device check: AC V, power
+      off with the key, power on: DC V; AC V, `DBG:RESET` or a firmware update: as before.
 - [ ] RES AUTO: include the 60 Ω range or not.
 - [ ] Repository split: confirm the list of paths moved to the private wirenboard/alientek-dm40-fw-analysis repo and
       purged from history (stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger, stock-scope-ui,

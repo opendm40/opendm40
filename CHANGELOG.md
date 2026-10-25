@@ -29,6 +29,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- A power-off starts the DMM in DC V, as the stock; a reset or a firmware
+  update still continues the last function.
+- The version is shown with three parts (`0.1.0`, `dm40_opendm40_v0.1.0.bin`,
+  tag `v0.1.0`).
 - The firmware is named opendm40 everywhere (device strings, image name).
 - The "Leads in A jack? Move to V" reminder is removed.
 - AUTO+ chosen on a mV range leaves mV at once for the 6 V range; AC mV steps
