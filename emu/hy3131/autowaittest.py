@@ -40,17 +40,17 @@ SCEN = [
     ('ac-sigrok', 'acv:1.0@50,dc=0.2', 'CONF:VOLT:AUTO|3|READ?', 1.0, 0.02, 0.95),
     ('tie-sigrok', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO|3|READ?', 4.776, 0.01, 0.95),
     ('tie-sigrok2', 'acv:4.776@40,dc=4.776,shape=square', 'CONF:VOLT:AUTO|5|READ?', 4.776, 0.01, 0.95),
-    # FETCh? while AUTO decides (device ab7184c new bug 2): +9.91E37 at once, every time
+    # FETCh? while AUTO decides (device 0760432 new bug 2): +9.91E37 at once, every time
     # (FETCHPOLL:<s,..>: CONF:VOLT:AUTO, FETC? at those times after it, each within 0.25 s;
     # FETC? at +7 s is the decided value)
     # (dc-fetch: the DC decision comes at ~1.3 s, so only the polls before it)
     ('ac-fetch', 'acv:1.0@50,dc=0.2', 'FETCHPOLL:0.3,0.8,1.5,2.5', 1.0, 0.02, 0.25),
     ('dc-fetch', 'dcv:5.0', 'FETCHPOLL:0.3,0.8', 5.0, 0.01, 0.25),
-    # RUN (HOLD) while AUTO decides (device ab7184c new bug 3): HOLD shown from the press,
+    # RUN (HOLD) while AUTO decides (device 0760432 new bug 3): HOLD shown from the press,
     # the first decided value held when it comes (HOLDPOLL: CONF:VOLT:AUTO, DBG:KEY 1 at +1 s,
     # DBG:READout? to +8 s)
     ('ac-hold', 'acv:1.0@50,dc=0.2', 'HOLDPOLL', 1.0, 0.02, 8.0),
-    # The placeholder after a host's CONF with a range (device ab7184c new bug 5: CONF:CURR:DC 10
+    # The placeholder after a host's CONF with a range (device 0760432 new bug 5: CONF:CURR:DC 10
     # showed the mA unit for 0.8 s): DBG:READout? in the same message and for 1.2 s after it
     # names the target unit (UNIT:<command>:<unit>; want / rel unused)
     ('a10-unit', 'dcv:1.0', 'UNIT:CONF:CURR:DC 10:A', 0, 0, 1.2),

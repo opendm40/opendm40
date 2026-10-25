@@ -318,7 +318,7 @@ where
         // interrupt in between widens it: the AD2 stream ISR), EPENA is
         // written back as 1 and re-arms the endpoint with XFRSIZ 0, a
         // spurious zero-length packet in front of the next command's data
-        // (the host's transfer then breaks: device f3aea2f's hang; the
+        // (the host's transfer then breaks: device 7534701's hang; the
         // emulator: a ZLP as the CSW / first data). The only stall of ours
         // is Command Transfer Invalid's (`stalled`); the host's CLEAR_FEATURE
         // (HALT) unstalls through usb-device itself.

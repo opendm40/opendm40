@@ -59,7 +59,7 @@ pub const THR_MAX: f32 = 50.0;
 /// the stream are skipped, the next ZERO_N (100 ms) averaged; their mean is
 /// the zero when it lies within ZERO_MAX_A of the zero given (the last one
 /// measured, else the calibration's: app_inrush.rs) and their rms about it
-/// is below ZERO_RMS_A (no load running), else the zero given stays. Device 489f956: the AC A 10 A row's AD2 mean
+/// is below ZERO_RMS_A (no load running), else the zero given stays. Device 8e04b1c: the AC A 10 A row's AD2 mean
 /// read +0.0717 A with the A jack open (rms about it 1.7 mA) and the cal
 /// record has no LPF offset for the AC A rows (0x10C.., all 0): the page
 /// read "Armed: 0.069 A now". A DC load below ZERO_MAX_A already flowing
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn measured_zero_takes_the_ad2_offset() {
-        // Device 489f956: +0.0717 A of AD2 offset (18.8 codes), the cal's 0;
+        // Device 8e04b1c: +0.0717 A of AD2 offset (18.8 codes), the cal's 0;
         // nothing in A, then 8 A at sample 5000.
         let z = 0.0717 / B;
         let (mut cap, mut buf, done) = run_mz(&mut |k| if k >= 5000 { 8.0 } else { 0.0 } + noise(k), 0.0, z);

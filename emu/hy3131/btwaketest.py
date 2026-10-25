@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40 DMM rail wake (PE2) in the emulator: device check 2026-10-21,
-"Bluetooth (0667175)" 1g / 1h. Needs the HY3131 model's PE2 power gate
+"Bluetooth (3d19ea1)" 1g / 1h. Needs the HY3131 model's PE2 power gate
 (HY3131.RailModel, on by default: with PE2 low the chip is unpowered, a PE2
 rise is a power-on reset and the chip ignores the bus for PowerUpMs).
 

@@ -323,9 +323,9 @@ status line).
 
 | test | what | status |
 |---|---|---|
-| T1 OP2 on SENSE | V channel vs AC V / DC V, noise floor | **done, 7dce69f**: GO; table below |
+| T1 OP2 on SENSE | V channel vs AC V / DC V, noise floor | **done, 8104cbd**: GO; table below |
 | T2 two nodes | resistive load: PF 1.000 +- 0.005, P = V I; reversed current: P < 0; reactive load: PF ~0, `POW:PHAS:CAL` | not run (needs current through A) |
-| T3 switch cost | results per R34 switch that deviate | zero current only (7dce69f): YY clean, XX needs 2; with a current not run |
+| T3 switch cost | results per R34 switch that deviate | zero current only (8104cbd): YY clean, XX needs 2; with a current not run |
 | T4 DC | PSU + resistor: V_dc I_dc vs DC V and DC A | not run |
 | T5 ranges | every V range x the I ranges | not run |
 | T6 burden | 5 V / 0.4 A on the mA range, R_path from a second meter | not run |
@@ -335,14 +335,14 @@ The test hooks: `DBG:POWer:ROW?` (the row bytes R20..R35 + R36), `:RAW?`
 overrides, `CLEar`), `:STAT XY|XX|YY|AUTO` (freeze R34), `:DISC <n>`. Each
 rewrites the row (550 ms settle).
 
-**T1 results** (7dce69f; `DBG:POW:STAT YY`): GO. The V channel (tap + OP2
+**T1 results** (8104cbd; `DBG:POW:STAT YY`): GO. The V channel (tap + OP2
 x1 + AD3) has a constant per-range gain error (-2 % on 6 V, -1.6 % on 60 V,
 -0.3 % on 600 V) and an LPF zero on each channel, not a wrong node (the
 numbers: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). The gain is fixed by the factory-derived V gain (3.12),
 the zeros by `POW:ZERO` (3.12). Overrides: the I row's R2E / R2F kill the
 signal; AD3IN = RLU or PB5 is no better: the default row stays.
 
-Re-checks without current (5f14d38, f3aea2f): `POW:ZERO` Y 1072, X ~890 /
+Re-checks without current (381ea07, 7534701): `POW:ZERO` Y 1072, X ~890 /
 ~160; V vs DC V within 0.063 % on 6 / 60 V in DC and AC+DC after the
 factory gain; f 40.0018 Hz on the square (R21 0xBF); `POW:VOLT:CAL` with a
 DC reference: 1.020998 on 6 V (factory 1.0209), 1.016612 on 60 V (factory
@@ -536,7 +536,7 @@ rejected. cmd 09's main value = `pw::bt_main` (P, S in the fallback; mW ->
 0xFFFF), value 2 / 3 = 0xFFFF as in a stock DC V frame; the value follows
 HOLD and stays P while the readout shows Wh / VAh. cmd 06 with that same
 byte keeps the power meter (`apply_mode_byte`); any other byte leaves it.
-BT SCPI runs the power commands as USB does. Device 0667175 (no current):
+BT SCPI runs the power commands as USB does. Device 3d19ea1 (no current):
 cmd 09 = 0x28, value 2 / 3 FFFF, cmd 06 0x28 keeps POW, BT `FETC:POW:ALL?`
 and `CALC:LIM` work; the phone app itself is untested.
 
@@ -610,7 +610,7 @@ Reset Wh, Wiring, Limits, OK; a help line (y 302) explains the selected
 coupling or "At load"; the status line shows the V gain in force and the
 zero state. `sf::label` lays out at most 48 glyphs: the help lines are <= 47
 (ui-render guard). Help 7/7 "Power meter" summarises the page. Device
-f3aea2f: the coupling cycle and the Power Settings dialogs; the steps that
+7534701: the coupling cycle and the Power Settings dialogs; the steps that
 need current are open.
 
 ### 3.15 Burden voltage in the A functions
@@ -651,7 +651,7 @@ Code: `Dmm::burden_val`, `Reading::burden`, `ui::aux_shown` /
 `Dmm::burden_of`. Emulator:
 [`emu/hy3131/burdentest.py`](../../emu/hy3131/burdentest.py)
 (`FETC:BURD?` = `READ?` x R_path within 0.2 % in every phase, both
-couplings). Device a0985e4 (no current): the setting and its reboot; the
+couplings). Device 1e39149 (no current): the setting and its reboot; the
 values with a current are untested.
 
 ### 3.16 "At load", the entry coupling, AC floors, coupling hints
@@ -705,7 +705,7 @@ assert after 2 s, clear 1 s after; `SYST:ALER?` DC / AC):
 * A row write resets the hint timers. The toasts are `pw::HINT_TOASTS`; the
   badges and `SYST:ALER?` names are the DC V / AC V hints'.
 
-Device 5e52761 (no current): "At load" off after the update, the toggle and
+Device 94de654 (no current): "At load" off after the update, the toggle and
 marks, entry in DC, the AC floors on 1 V DC, the DC? and AC? hints. The
 steps with a current (V at 1 / 2 A, the residues against the floors, mains
 PF) are open.
@@ -743,7 +743,7 @@ repaint of an aux box invalidates its sub-line (`PwCache::sub_invalidate`).
 The HV lightning's box can overlap the moved "@load" mark: its toggle
 invalidates the mark. Code: `ui::set_pw_parts` / `main_dy` / `chart_geom`
 / `chart_rows`, `ui::pw::sublines` / `side_geom` / `row_hit`,
-`App::pw_parts_want`. Device 46370df / 5e52761 (no current): the layout,
+`App::pw_parts_want`. Device 940e8aa / 94de654 (no current): the layout,
 the Wh / VAh tap, back to DC with no leftover pixels; a coupling switch
 keeps the old layout for up to ~4 s (until the first reading of the new
 coupling).
@@ -786,7 +786,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
 | DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm |
-| DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device 9dd1222; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
+| DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device f48db7d; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
 | AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
 | continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
 | DC A / mA / uA (7..9) | V-JACK?: comparator on SENSE via the /1000 tap (`CmpV`; SS5 only: the A rows run the power bus as SGND, PS5 would ground the tap) | R20 0x10, R2C \|= 0x10 | ~21 V on V/ohm |
@@ -799,7 +799,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 Gaps (no fake coverage):
 
-* **Frequency**: PB1 - PB3 follows the input path there (device f3aea2f,
+* **Frequency**: PB1 - PB3 follows the input path there (device 7534701,
   [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): no fixed threshold tells a current from it.
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
@@ -886,12 +886,12 @@ beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
   threshold of 4.2.
 * **A-JACK in ohm / temperature (`V_GATE`)**: with the A jack open, 5 / 10
   V DC or the 0..9.6 V square on V-COM raised A-JACK in ohm and temperature
-  (devices 1eb4d7e, 973df07; 1 V did not): PB1 picks up the V input in
+  (devices 9944169, 2ba1a1b; 1 V did not): PB1 picks up the V input in
   those rows, and no threshold separates that from a current. These rows
   measure the V jack themselves, so A-JACK asserts only when a V-side
   result since the hit run began said V-COM is free: ohm: no negative AD1
   code (a negative source gives the negative code LIVE? uses; a positive one
-  above the open-circuit voltage reads OL on the device, 35fce2a 7b, so ohm
+  above the open-circuit voltage reads OL on the device, 2d33d3a 7b, so ohm
   also needs the jack check of 4.13); thermocouple: |V| <=
   80 mV (`T_VDRV_MV`; type E is 76.4 mV at 1000 C; an open TC read ~7.6 mV
   on the device); the resistive sensors use the ohm sign. An asserted
@@ -904,7 +904,7 @@ beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
   clears 0.5 s after the last hit or when current flows. Entering DC A after
   a row that leaves SENSE "blind" runs the temperature row first (4.12).
   After leaving ohm or a chip restart the comparator reads 0x70, then 0x50,
-  for seconds (device ad74e93, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): within 7 s of the exit a both-bit read is no
+  for seconds (device 0256df2, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): within 7 s of the exit a both-bit read is no
   hit, nor CMPLO alone within 2.5 s of the exit / the last 0x70 read
   (`OHM_EXIT_*`); CMPHO alone counts at once.
 * **V-JACK? in AC A**: 4.11 / 4.12.
@@ -912,19 +912,19 @@ beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
   -20 000 (`LIVE_CODE`; the formula would otherwise drop the sign), a
   continuity result below -2 ohm before the clamp, a diode voltage below
   -0.05 V. A positive source in ohm never shows LIVE? (by design). Device
-  5f14d38: LIVE? / HOLD alternate ~1 s in continuity with 1 V.
+  381ea07: LIVE? / HOLD alternate ~1 s in continuity with 1 V.
 * `DBG:SENTinel?` (kind, alert, mask, ctsta, pkhmin, pkhmax, streak,
   hit_windows, samples, probe_mA, aprot_ms, vside, soft);
   `DBG:SENTinel:LOG?` (the last 8 alerts); `DBG:SENTinel:VARiant <bits>`
   restores earlier rows for a device comparison (1 the AC V row's OP1 chopper, 2
   no AC V sentinel, 4 the DC V 60 V+ comparator, 8 the stock rows for every
-  sentinel added after 9dd1222, 16 no hint alternations, 32 the AC A
+  sentinel added after f48db7d, 16 no hint alternations, 32 the AC A
   SENSE - PB5 row, 64 AC A AD1 at IG 0.9).
 
 Device results (A jack open): T7 (the readings with Jack alerts ON vs OFF:
-DC V, DC mV, ohm, AC mV, Hz equal within noise; 9dd1222), AC V ON vs OFF
+DC V, DC mV, ohm, AC mV, Hz equal within noise; f48db7d), AC V ON vs OFF
 within 0.04 mV after the chopper fix, DC V 1 <-> 10 V soak 5 min without a
-hit (5f14d38); no A-PROT / false A-JACK over 168 function switches with
+hit (381ea07); no A-PROT / false A-JACK over 168 function switches with
 V-COM open (device-check "E6"). Emulator: the HY3131 model's sentinel nodes
 and [`emu/hy3131/senttest.py`](../../emu/hy3131/senttest.py) (A-JACK,
 V-JACK?, LIVE?, OVERLOAD, hints, fuse check, A-PROT scenarios).
@@ -994,7 +994,7 @@ may read it so); `[:EVENt]?` latches since the last read / `*CLS`. No
 enable / transition registers; `*STB?` stays 0.
 
 Device: the OVERLOAD, fuse check and FUSE? steps need the A jack wired and
-are untested; DC? / AC? ran on 5f14d38 and later (no false AC? after
+are untested; DC? / AC? ran on 381ea07 and later (no false AC? after
 switches since the 2026-10-23 rules).
 
 ### 4.8 A-jack protection (A-PROT)
@@ -1023,13 +1023,13 @@ rewrite, AD1 last: note 7; the DC V reading skips ~120 ms) and leaves when
 the run of hits ended and nothing is latched. After every row write with
 the probe in, the peak hold is cleared 30 ms later (`PROBE_SETTLE_MS`) and
 the first window counts from there: AD2 restarts with the row and its first
-results are not the input (device f3aea2f: a false A-PROT on the first
+results are not the input (device 7534701: a false A-PROT on the first
 window). Without an A-jack current AD2 is never on: the stock DC V
 calibration conditions stay untouched.
 
 **Only DC V and DC mV.** In ohm and temperature the probe reads the V input
 (~0.34 A per volt on V-COM with the A jack open: 5 V read 1.7 A; device
-1eb4d7e), so those keep the comparator's A-JACK with its V gate (4.6).
+9944169), so those keep the comparator's A-JACK with its V gate (4.6).
 
 **The rule** (`sentinel::aprot_trips`), only while the comparator run is
 still going: >= 300 mA (`APROT_NOW_A`, 4.3 W) at the first probe window
@@ -1069,7 +1069,7 @@ window): 5 V across A-COM in DC V A-JACK only; 12 V A-PROT after 409 ms; 24 V
 after 154 ms; an AD2 start-up glitch of 0.72 A at 1 V: A-JACK only; ohm /
 temperature at 12 V: A-JACK only; the user acting before the source is gone:
 latched until 1 s after it went; `CONF:CURR:DC` ends the latch. Device: no
-false A-PROT with the A jack open since the f3aea2f fixes; the trips with a
+false A-PROT with the A jack open since the 7534701 fixes; the trips with a
 real source are untested (never above 30 V across A-COM).
 
 ### 4.9 "Leads in A?" reminder (removed 2026-10-24)
@@ -1143,9 +1143,9 @@ itself, whether the buzzer current moves a DC V reading, whether the 2.86
 kHz tone is as loud as the 3.57 kHz one (if not, the pair moves to 3.57 /
 4.17 kHz via `BUZZER_ARR_LO`).
 
-### 4.11 AC A and DC A V-JACK?, AC A over range (device f0d21eb)
+### 4.11 AC A and DC A V-JACK?, AC A over range (device 3e41549)
 
-From the device check "f0d21eb"
+From the device check "3e41549"
 ([device-check-2026-10-21.md](device-check-2026-10-21.md); the A jack not
 wired, the calibrator on V-COM only).
 
@@ -1169,10 +1169,10 @@ swing-less windows carry the DC phase's comparator run instead of ending it
 OP1's input and gain at once, and the first block(s) carry that step: a
 false OVERLOAD. Plain AC A holds over-range results back for 500 ms after
 the first result of a row (`AC_OVER_HOLD_MS`); a real over range acts
-after the hold. Device 0774e70: 10 of 10 switches stay on 60 mA.
+after the hold. Device a3b6d0a: 10 of 10 switches stay on 60 mA.
 
 **DC A after DC V 60 V+, ohm or a chip restart: 24 V missed** (device
-0774e70, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). No register carries this history: `write_config`
+a3b6d0a, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). No register carries this history: `write_config`
 writes all 22 bytes R20..R35 from the row every time and zeroes R26 / R34 /
 R36 before (`quiesce`), and `DBG:SENTinel:REG?` read the same R20..R37 in
 every entry. Only a temperature row before DC A made the comparator see
@@ -1185,9 +1185,9 @@ Emulator knobs ([`emu/hy3131/README.md`](../../emu/hy3131/README.md)):
 `pb5drift`, `acastep`, `vjblind`; switchtest `aca-drift`, `aca-ovl`,
 `real-vjack-ac`, `real-vjack-blind`, `real-vjack-blind-prec`.
 
-### 4.12 DC A precondition, AC A swing reversal, stale readings (device 0774e70)
+### 4.12 DC A precondition, AC A swing reversal, stale readings (device a3b6d0a)
 
-From the device check "0774e70"
+From the device check "a3b6d0a"
 ([device-check-2026-10-21.md](device-check-2026-10-21.md)).
 
 **The DC A precondition (100 ms by default).** 100 / 300 / 1000 ms of the
@@ -1200,11 +1200,11 @@ temperature row or the precondition itself), with V-JACK? enabled and no
 fuse check. `DBG:SENTinel:PRECond 0` turns it off. Cost: the blocking
 100 ms, the relay pulse there and back (2 x 10 ms) and the AD1 grid; the
 emulator's first fresh DC A reading after ohm went from 0.34 to 0.55 s.
-Device 10242c3: 24 V V-JACK? in every entry within 1.4..2.8 s (8 s within
+Device 2232996: 24 V V-JACK? in every entry within 1.4..2.8 s (8 s within
 the restart mask after Scope -> back), 5 V and off quiet in all 14 entries;
 blind DC A +94 ms, blind mA +192 ms, non-blind entries unchanged.
 
-**AC A: SENSE itself is the drifting node** (device 0774e70,
+**AC A: SENSE itself is the drifting node** (device a3b6d0a,
 [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): with AD1 on SENSE - AGND the hold still ran to the negative
 rail, and a ramp gave more codes per hold than the swing threshold: a false
 V-JACK?. **The swing rule needs a
@@ -1216,7 +1216,7 @@ AD1 at IG 0.9 to see where SENSE sits.
 
 **No reading crosses a range change.** For ~0.9 s after `CONF:CURR:AC 10`
 -> `0.06`, `FETC?` answered the 10 A row's value, then the AC EMA's step
-from it (device 0774e70). `FETC?` now answers +9.91E37 while the shown
+from it (device a3b6d0a). `FETC?` now answers +9.91E37 while the shown
 reading is not from the row the chip runs (`Dmm::reading_current`: mode,
 AC+DC either phase, and range; not in Hz, whose readings carry the
 counter's range, nor in the power meter, nor under HOLD / AutoHold). The AC
@@ -1228,13 +1228,13 @@ Emulator: `senseneg`, `sensetau`; switchtest `aca-ramp`.
 ### 4.13 A voltage on V-COM: the jack check, the AC mV gate (2026-10-24)
 
 With the A jack empty, 5 / 10 V DC or the 0 / 9.5 V square on V/Ω-COM
-raised A-JACK in RES and continuity (35fce2a 7b / E4, f0d21eb item 4,
-0774e70 S6: the AD2 peak on PB1 -99 100 / +124 800 at 5 V) and in AC mV
-(46370df new bug 1: `AJACK,AD1PK_PB1` and the loud alarm, AC V AUTO on
+raised A-JACK in RES and continuity (2d33d3a 7b / E4, 3e41549 item 4,
+a3b6d0a S6: the AD2 peak on PB1 -99 100 / +124 800 at 5 V) and in AC mV
+(940e8aa new bug 1: `AJACK,AD1PK_PB1` and the loud alarm, AC V AUTO on
 60 mV). In each case PB1 picks up a level from the V side (*inferred*: the
 source against OP3's forced VREF through the ~1.4 kΩ input protection in
 the ohm-network rows; the input clamp's current in AC mV, emulator `mvpb1`).
-The device shows only that PB1 trips from 3-5 V in RES (35fce2a 7c), not at
+The device shows only that PB1 trips from 3-5 V in RES (2d33d3a 7c), not at
 1 V.
 
 **Ohm, continuity, the resistive temperature sensors (`Sentinel::jchk`).**
@@ -1260,20 +1260,20 @@ needs a "free" verdict since the hit run began; "driven" drops an A-JACK in
 force and counts as a live result, so LIVE? shows. `DBG:SENT?` fields 14 /
 15: the verdict (-1 / 0 / 1) and its peak (mV), of the present hit run or of
 an A-JACK in force; -1 / 0 once the run is over and after a range or
-function change (`Sentinel::new_run`). Up to c5ac0c5 they kept the last
+function change (`Sentinel::new_run`). Up to 41a33a1 they kept the last
 verdict until the next run (check list item 2). `cont_jack` and
 `jack_result` are in `.cold`: they run only while PB1 hits and talk to the
 HY3131 themselves, so never with the bus handed to a stream (not checked
 with the region C hooks).
 
-Device a2e9766 ([device check, "a2e9766: bug-fix recheck"](device-check-2026-10-21.md))
+Device 7c04b03 ([device check, "7c04b03: bug-fix recheck"](device-check-2026-10-21.md))
 showed that OP1O does not follow a source above the open-circuit voltage
 (2.02-2.25 V with 5 / 10 V on the jack, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): all "free", so RES still
 raised A-JACK there. Only the square on 600 Ω read 2.38 V (driven); the same
 2.38-2.45 V showed in the first windows after the source was switched off.
 On 600 Ω no fixed OP1O line separates these values from the row's own 2.17 V.
 
-**The comparator's both-bit reads (`v_both`, since the a2e9766 check).** In
+**The comparator's both-bit reads (`v_both`, since the 7c04b03 check).** In
 those RES runs the comparator on PB1 read CTSTA 0x70, CMPHO and CMPLO in one
 read: an overdriven comparator, as on DC V's V tap at 5 V and in DC A at 24 V
 ([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). *Inferred* (the A jack has not been wired): a
@@ -1291,18 +1291,18 @@ input range (tens of mA, PB1 above ~2.4 V) may also read 0x70. It would then
 show LIVE? instead of the A-JACK badge. This is not checked: the A jack has
 not been wired.
 
-Device c5ac0c5 ([device check, "c5ac0c5: the RES jack fix"](device-check-2026-10-21.md#c5ac0c5-the-res-jack-fix-eef96f7-both-bit-reads-live-after-the-source-2026-10-25)),
+Device 41a33a1 ([device check, "41a33a1: the RES jack fix"](device-check-2026-10-21.md#41a33a1-the-res-jack-fix-c033bea-both-bit-reads-live-after-the-source-2026-10-25)),
 A jack empty: in RES AUTO and 600 Ω, 5 V and 10 V read CTSTA 112 on all but
 the first poll, field 14 = 2, LIVE?, no A-JACK; the square read 112 on about
 half of the polls (0 on the rest), field 14 = 2, LIVE?, no A-JACK. 1 V and
-3 V: no hits. The OP1O peaks (field 15) were those of a2e9766. The current-in-A
+3 V: no hits. The OP1O peaks (field 15) were those of 7c04b03. The current-in-A
 side (check list item 4) is not run.
 
-**LIVE? after the source goes off.** Device a2e9766 note 3: in RES 600 Ω,
+**LIVE? after the source goes off.** Device 7c04b03 note 3: in RES 600 Ω,
 LIVE? came on again at every poll (5-10 ms apart) once it had cleared, until
 the next ohm reading reset its run (+24 `DBG:SENT:LOG?` entries). A run of
 live results whose last one is `LIVE_CLEAR_MS` old no longer asserts.
-Device c5ac0c5: after the off, LIVE? stayed ~1.0-1.25 s and did not return;
+Device 41a33a1: after the off, LIVE? stayed ~1.0-1.25 s and did not return;
 `DBG:SENT:LOG?` +0 entries in 5 of 5 (5 V x 3, 10 V, the square).
 
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
@@ -1319,18 +1319,18 @@ continuity) or nothing (AC mV, AC+DC mV). The diode row is unchanged
 (badge only).
 
 **AC+DC V on 600 / 60 mV.** Its AC phase is the AC mV row with the same AD1
-peak sentinel; it had no gate up to 5fdd812 (`vgate` was plain AC mV only),
+peak sentinel; it had no gate up to 80ebb10 (`vgate` was plain AC mV only),
 so the square or 5 V DC on V-COM with manual 600 mV raised A-JACK in the
 emulator (`mvclamp` / `mvpb1`; not seen on the device: AUTO lands on 6 V
 with these inputs). Both phases now set `vgate` and share the run, so the
-AC phase's result is the verdict for the DC phase's hits too (0bcc40c); a
+AC phase's result is the verdict for the DC phase's hits too (8d4ae7f); a
 real current in A asserts after the next "free" AC result (~2.2 s after
 the onset in the emulator). Emulator senttest
-`acdcmv-sq600` / `acdcmv-dc5`: FAIL on 5fdd812 (A-JACK from ~1.5 s after
+`acdcmv-sq600` / `acdcmv-dc5`: FAIL on 80ebb10 (A-JACK from ~1.5 s after
 the voltage on), pass with the gate.
 
 **AC+DC mV after the source goes off.** Device
-[489f956](device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25)
+[8e04b1c](device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25)
 (manual 600 mV): A-JACK 0.45-0.9 s after the square or 5 V was switched
 off in 8 of 13 runs, held while the input was open, the readout OL; plain
 AC mV 0 of 6. How the input holds a charge there and why PB1 hits are
@@ -1341,15 +1341,15 @@ driven until the next DC result. Emulator: the model's `mvhold` (the open
 input keeps 0.75 V and PB1 picks up 40 mV after the source goes off, seen
 by both mV rows or, `mvholdrows:1`, by the DC mV row only); senttest
 `acdcmv-sq600-off` / `acdcmv-dc5-off` / `acdcmv-off-dcrow`: FAIL on
-f4cd2cd (A-JACK ~1 s after the off), pass now; a current in A with a
+ab7f748 (A-JACK ~1 s after the off), pass now; a current in A with a
 source back on V-COM still asserts A-JACK there.
 
-**Emulator.** Since the a2e9766 check the model reproduces the device's
+**Emulator.** Since the 7c04b03 check the model reproduces the device's
 RES numbers: OP1O in the ohm rows stops at 2.47 - 0.044 x V for a source of
 V volts (`ohmop1k`, 2.25 V at 5 V, 2.03 V at 10 V; the line is *inferred*
 from those points), and a source at or above 4 V on the jack sets CMPHO and
 CMPLO together on PB1 (`ohmboth`, *inferred* between the device's 3 V and
-5 V). Failing on cd1ec9a (A-JACK at 5 V, verdict 0, field 15 2250 / 2030 mV,
+5 V). Failing on d188760 (A-JACK at 5 V, verdict 0, field 15 2250 / 2030 mV,
 as the device), passing on the fix: senttest `ohm-v5`, `ohm-v5-600`,
 switchtest `dc5-pickup`, `sq-pickup`, loudtest `ajack-res`; a real current
 in A still asserts (their last phases, switchtest `real-ajack-pickup`).
@@ -1357,14 +1357,14 @@ Before that, the model read OL for a positive source above the ohm OCV
 (`OhmRevOl`, default, as the device; `ohmrevol:0` = the old negative code),
 adds `Pb1VjackMv` to PB1 in the continuity row, and gives AD2 = OP1O - PB3
 (the node across Rx within -1.18 .. +2.55 V, *inferred* swing) in the ohm /
-continuity rows. Failing on 6dddfdf, passing now: senttest `ohm-v5` (now
+continuity rows. Failing on 90934ca, passing now: senttest `ohm-v5` (now
 LIVE? at 5 / 10 V and the square), `ohm-v5-600`, `cont-v5`, `acmv-sq60`,
 `acmv-sq600`, `acmv-dc5` (no A-JACK in `DBG:SENT:LOG?` from the voltage on;
 A-JACK with a current in A afterwards); switchtest `dc5-pickup`,
 `sq-pickup`; loudtest `ajack-res`, `ajack-cont-v5`, `ajack-acmv` (quiet
 with the square, loud with a current). Passing on both (regression checks):
 switchtest `real-ajack-pickup`, loudtest `ajack-acv-auto` (AUTO mV-first:
-the clip step of 46370df's fix already leaves mV in the model).
+the clip step of 940e8aa's fix already leaves mV in the model).
 
 #### Device check list (jack check)
 
@@ -1376,7 +1376,7 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    grows: they settle the OP1O point above.
 2. RES and continuity, V-COM open: fields 14 / 15 stay -1 / 0, also after
    a switch from another ohm-network row (RES AUTO -> 600 Ω, RES ->
-   continuity) once field 8 (hits) stops growing. Device c5ac0c5 (before
+   continuity) once field 8 (hits) stops growing. Device 41a33a1 (before
    the fix): -1 under RES AUTO; after such a switch they kept the verdict of
    the switch's hits (0 / 2150 mV in 600 Ω), no alert (device-check note 3).
 3. AC V AUTO (mV-first) and manual 60 / 600 mV with the square: no A-JACK in
@@ -1387,7 +1387,7 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    112.
 5. RES (AUTO and 600 Ω) with 5 V, 10 V and the square: field 4 reads 112
    (0x70) while field 8 grows, field 14 = 2, LIVE?, no A-JACK. Then switch the
-   source off: `DBG:SENT:LOG?` grows by at most one entry. Device c5ac0c5:
+   source off: `DBG:SENT:LOG?` grows by at most one entry. Device 41a33a1:
    **PASS** (and items 1 and 3 with manual 60 / 600 mV; the mV-first AUTO,
    item 4 and RTD / NTC not run).
 
@@ -1409,7 +1409,7 @@ From the DM40 user manual (EN v1.x, section 2.4 and Table 2.3.1):
   rule of 4.7 (a uA / mA overload heats the 47 ohm resistor long before the
   fuse opens).
 
-### HPF bypass probe (device 7889e6c, 2026-10-22)
+### HPF bypass probe (device 0bf4847, 2026-10-22)
 
 No reserved bit of R26 / R34 / R35 bypasses the RMS block's high-pass
 filter (the probe: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): DC power stays a software product (the LPF

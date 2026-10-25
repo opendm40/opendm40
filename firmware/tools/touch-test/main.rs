@@ -411,7 +411,7 @@ fn pinch_tests(ck: &mut Ck) {
     ck.t("2-finger swipe down: MultiSwipeDown(2)", v.last() == Some(&G::MultiSwipeDown(2)));
 }
 
-/// Pre-flash review 7dc32ac B1: a pinch whose end was lost (MF / AUTO /
+/// Pre-flash review a71920d B1: a pinch whose end was lost (MF / AUTO /
 /// overlay mid-pinch) must not carry its index into the other axis. The
 /// review's sequence: CH1 at 10 V/div (range 9), vertical pinch, (MF,
 /// release, MF), horizontal pinch closing to ~0.68 -> the index must be a
@@ -1235,7 +1235,7 @@ fn tap_step_tests(ck: &mut Ck) {
         acc = r;
     }
     ck.t(&format!("tb scroll: drag 138 px up = 4 rows slower, one redraw per row ({shown:?})"), cur == 17 && shown == vec![14, 15, 16, 17]);
-    // List pick (review a2f4b01 L8): a roll-only row turns Roll on except in
+    // List pick (review 401ae67 L8): a roll-only row turns Roll on except in
     // Single, which takes the YT maximum and leaves Roll alone.
     let yt = scope::TB_YT_MAX as u8;
     ck.t("tb pick: YT row as is, Roll untouched", su::tb_pick(13, false, false) == (13, false) && su::tb_pick(13, false, true) == (13, false));

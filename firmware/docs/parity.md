@@ -64,7 +64,7 @@ Stock: `scope_gen_v2_6.h`, `scope_gen_ui_v2_6.h`. opendm40: [`scope.rs`](../src/
 | 20 measurement items, 4 shown, defaults | MATCH | `ITEMS` + `DEFAULT_SEL`; Freq/Vpp/Cycl/Vrms default. |
 | Measurement formulas (Vpp/rms/top/base, pulse) | MATCH | `compute()`; histogram top/base 30 % band, 10/50/90 % edge machine. |
 | Cursors X2-1 / Xf / Y2-1 | MATCH | Items 7/8/17; formulas in `app.rs` / `scope_meas.rs`. |
-| Persistence | MATCH | Trace persistence in `app.rs` (commit fb8f7db). |
+| Persistence | MATCH | Trace persistence in `app.rs` (commit 01972ab). |
 | Settings window (MF) | MATCH | Scope settings window tabs (`scope_page.rs`). |
 | AUTO-set | PARTIAL | Two-phase state machine (`autoset_start` / `autoset_step` in `scope_page.rs`; the last run's decisions via `autoset_log`). Untested whether it reproduces the stock period→timebase table (`FUN_08033388`) exactly. |
 | Zoom in STOP | PARTIAL (shorter record) | While stopped, a timebase or V/div change re-renders the stored record and a drag pans it (`scope.rs` "Stop-and-zoom"). The record is `CAP` = 26 624 samples; the stock keeps 65 520. |
@@ -87,7 +87,7 @@ Stock: `scope_gen_v2_6.h` §GENERATOR, `scope_gen_ui_v2_6.h` §5. opendm40: [`ge
 | Default wave/freq | MATCH | Square, 2 MHz, 3 Vpp, output off (`Settings::DEFAULT`), as the stock. |
 | Freq snap 50k..100k | DEVIATION | The stock snaps a square of 50k–100k down to 50 kHz. opendm40 runs it on the PWM path at the nearest frequency 200 MHz / D can make (`plan_pwm`) and shows that real frequency. |
 | Non-square >50 kHz | DEVIATION | The stock sets the frequency to 0 Hz (silent, on-flag kept). opendm40 runs at 50 kHz and shows "max 50 kHz"; the set value is kept (`target_hz`, `max_note`). |
-| Keypads (freq H/K/M, numeric Vpp/duty) | MATCH | `View::Keypad`, stock layouts (commit 2464fca). |
+| Keypads (freq H/K/M, numeric Vpp/duty) | MATCH | `View::Keypad`, stock layouts (commit 9ca1c9c). |
 | RUN toggles output | MATCH | RUN handling in `app.rs`. |
 
 ---
@@ -182,7 +182,7 @@ only switches the view. Constraints and how opendm40 handles them:
   the stock powers one side per page. opendm40's policy is `SYST:RAIL AUTO|BOTH`
   (default AUTO, persisted): AUTO powers the side the view needs (both in the
   combined view and with a host scope command), BOTH keeps both up. Measured with
-  both rails on (device check f3aea2f, [device-check-2026-10-21.md](device-check-2026-10-21.md)):
+  both rails on (device check 7534701, [device-check-2026-10-21.md](device-check-2026-10-21.md)):
   DC within 0.04 %; a 40 Hz 0..9.6 V square reads +0.19 % more in V (edge-rate
   dependent coupling of the powered scope front end), which is why AUTO keeps the
   scope rail off on the DMM page.

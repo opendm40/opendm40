@@ -4,7 +4,7 @@ The combined view (`View::DmmScope`) is the stock-replica scope page with a
 56 px meter strip between the top bar and a shorter graph. This document
 describes its layout, the strip, touch and keys, the scope gestures it
 shares with the Scope page, and the renderer choice. §8 lists what became of
-the 2026-10-13 redesign proposal (8714bdd) that led here. The user-facing
+the 2026-10-13 redesign proposal (ab4dca7) that led here. The user-facing
 description is in the [manual](../../docs/manual/README.md#combined-view).
 
 Code: [`src/scope_ui.rs`](../src/scope_ui.rs) (page widgets, meter strip
@@ -94,7 +94,7 @@ closes 4 s after the last tap (`BAND_MS`), on a tap elsewhere or on MENU;
 
 While the scope runs (not Single, not roll, not the wave view), the combined
 view paints at most one frame per 40 ms (`COMBO_FRAME_MS`, 25 fps,
-`App::sp_throttled`), so the DMM side keeps its share of the loop (c864f65).
+`App::sp_throttled`), so the DMM side keeps its share of the loop (b74ce25).
 
 ## 6. Scope gestures (Scope page and the combined graph)
 
@@ -171,12 +171,12 @@ clumsy.
 
 ## 8. The 2026-10-13 proposal and what became of it
 
-The proposal (8714bdd) answered the owner's feedback on the first combined
+The proposal (ab4dca7) answered the owner's feedback on the first combined
 view ("fonts of different sizes, everything overlaps; maybe embed the DMM
 data into the oscilloscope interface in this mode?"). Option A was
-implemented in aa51ae5 on the pre-stock scope UI, then replaced by the
-stock-replica page with a meter strip (d323565); the old scope UI was
-removed in 29ba03c. It amended
+implemented in 7748600 on the pre-stock scope UI, then replaced by the
+stock-replica page with a meter strip (bb298d2); the old scope UI was
+removed in a2ac91b. It amended
 [scope-ui-plan.md](../../docs/history/scope-ui-plan.md) and built on
 [ui-review.md](../../docs/history/ui-review.md).
 
@@ -213,8 +213,8 @@ look; the current look is in the manual
 
 | File | Shows |
 |---|---|
-| [`cur-combined.png`](mockups/cur-combined.png), [`cur-combined-pwm-acv.png`](mockups/cur-combined-pwm-acv.png), [`cur-combined-pwm-freq.png`](mockups/cur-combined-pwm-freq.png) | device screenshots of the first combined view, build db679a3 |
-| [`cur-combined-acdc-head.png`](mockups/cur-combined-acdc-head.png) | the 40d9a76 AC+DC compact layout rendered over a screenshot |
+| [`cur-combined.png`](mockups/cur-combined.png), [`cur-combined-pwm-acv.png`](mockups/cur-combined-pwm-acv.png), [`cur-combined-pwm-freq.png`](mockups/cur-combined-pwm-freq.png) | device screenshots of the first combined view, build a910941 |
+| [`cur-combined-acdc-head.png`](mockups/cur-combined-acdc-head.png) | the cabebcd AC+DC compact layout rendered over a screenshot |
 | [`a1-dcv.png`](mockups/a1-dcv.png) … [`a5-temp.png`](mockups/a5-temp.png) | Option A states: DC V; AC+DC with HOLD + REL; Hz with duty; 230 V AC with HV; thermocouple with OL |
 | [`a6-function-picker.png`](mockups/a6-function-picker.png) | strip tap -> function row |
 | [`a7-trigger-drag.png`](mockups/a7-trigger-drag.png) | trigger-level drag: dashed line, readout, marker |
@@ -222,7 +222,7 @@ look; the current look is in the manual
 | [`b1-floating-tile.png`](mockups/b1-floating-tile.png) | Option B |
 | [`fonts-hierarchy.png`](mockups/fonts-hierarchy.png) | the proposed type tiers |
 
-| Before (db679a3) | Option A proposal |
+| Before (a910941) | Option A proposal |
 |---|---|
 | ![](mockups/cur-combined-pwm-acv.png) | ![](mockups/a1-dcv.png) |
 | ![](mockups/cur-combined-acdc-head.png) | ![](mockups/a2-acdc-hold-rel.png) |

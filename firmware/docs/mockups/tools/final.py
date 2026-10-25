@@ -25,7 +25,7 @@ def bubble(l, cx, cy, t, fg=FG):
 if os.path.exists(os.path.join(SHOTS, '16-combined.png')):
     for n in ['16-combined.png', '32-combined-pwm-acv.png', '33-combined-pwm-freq.png']:
         Image.open(os.path.join(SHOTS, n)).save(P('cur-' + n.split('-', 1)[1]))
-    # HEAD (40d9a76) AC+DC compact layout over the 16-combined shot
+    # HEAD (cabebcd) AC+DC compact layout over the 16-combined shot
     l = load_png(os.path.join(SHOTS, '16-combined.png'))
     l.fill(40, 22, 440, 34, BG)
     scene.compact(l, True, '\x06', 'mV', ' 504.53', [('53.63', 'mV'), ('501.67', 'mV')])

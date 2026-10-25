@@ -21,7 +21,7 @@ scope view, scope STOPped):
     reference;
   * the first shot's name with another directory's prefix (LOGS/Snnn.BMP):
     MMEM:DATA? and MMEM:DELete answer -256 "File name not found" and the
-    shot stays listed (device 46370df: the prefix was dropped, not checked);
+    shot stays listed (device 940e8aa: the prefix was dropped, not checked);
   * --out: the BMPs and the reference frames are kept there (<name>.bmp,
     <name>.lcd565), so two builds can be compared byte for byte
     (cmp DIR1/x.bmp DIR2/x.bmp).

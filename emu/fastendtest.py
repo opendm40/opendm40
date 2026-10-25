@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """opendm40: the end of a fast-logger disk session (fastlog.rs, LOG:DEST DISK)
 while a host reads the USB volume, then MMEM:DATA? of the new file
-(device check f3aea2f 6b: the meter hung there and the watchdog reset it).
+(device check 7534701 6b: the meter hung there and the watchdog reset it).
 
   cd firmware && ./build.sh
   emu/fastendtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40

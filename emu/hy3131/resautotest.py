@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""RES AUTO set from a manual RES range (device c5ac0c5, firmware/docs/device-check-2026-10-21.md
-"c5ac0c5: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
+"""RES AUTO set from a manual RES range (device 41a33a1, firmware/docs/device-check-2026-10-21.md
+"41a33a1: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
 status bar on MANU and the readout on the manual range's final value (DBG:READout? `F`) while AUTO
 stepped; from DC V the same commands showed AUTO and dashes.
 
@@ -11,7 +11,7 @@ Each window: input at its start, CONF:VOLT:DC at +3 s, the manual range (`CONF:R
   - a final AUTO readout within FINAL_MAX s, its value within 1 % of `want` (resistor rows).
 The `dcv` row is the reference (from DC V, no manual range); `key` uses the AUTO key (DBG:KEY 2);
 `sink` is ohmsinktest.py's input (6 Mohm ~0.10 Mohm, 600 kohm OL), `open` an open input (OL).
-Before the fix (3c7c876) every row but `dcv` showed MANU and the manual final for 0.25-1.1 s.
+Before the fix (3f84f81) every row but `dcv` showed MANU and the manual final for 0.25-1.1 s.
 
   emu/hy3131/resautotest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 64731
 """

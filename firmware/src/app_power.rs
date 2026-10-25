@@ -166,7 +166,7 @@ impl App {
         // A coupling change (the W button, Power Settings, SCPI POW:COUP):
         // the last reading is of the old coupling. Drop it (as a function
         // change does: `func_changed`) and show the new coupling's page
-        // with "--" until its first reading (device check 5e52761: the old
+        // with "--" until its first reading (device check 94de654: the old
         // layout and values stayed up to ~4 s).
         let coup = self.dmm.pw.coup;
         if self.pw_coup_seen != coup {

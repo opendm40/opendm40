@@ -2104,7 +2104,7 @@ drive stay the same. Linux keeps the parts of the file it has read before
 and does not read them again when the meter announces the change, so a
 plain `cp` while the drive stays mounted can return an old copy, or a mix
 of old and new parts (device check
-[46370df](../../firmware/docs/device-check-2026-10-21.md#46370df-screenshot-preparation-the-768-kss-nominal-ee28b71-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
+[940e8aa](../../firmware/docs/device-check-2026-10-21.md#940e8aa-screenshot-preparation-the-768-kss-nominal-0d3024e-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
 files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
 each new or changed file its own new entry. The meter cannot make Linux drop
 the old parts: Linux re-reads the folders, but keeps what it already knows

@@ -200,12 +200,12 @@ pub const R24_PB1_PB3: u8 = 0x95;
 /// AD1 on SENSE - PB5 (0000 / 111): the AC V rows' V-tap window (DC?).
 pub const R24_SENSE_PB5: u8 = 0x07;
 /// AD1 V-JACK? input (AC A): SAD1FP = SENSE (0000), SAD1FN = AGND (011).
-/// Was SENSE - PB5 (f0d21eb and before): PB5 is a reference only the DC V
+/// Was SENSE - PB5 (3e41549 and before): PB5 is a reference only the DC V
 /// 60 V+ rows define (their power bus / OP3, SMODE 0100); the A rows run the
 /// bus as SGND and leave PB5 to itself, and the device's AD1 peak there ran
 /// from ~-117 000 at 0.7 s to the negative rail (-262 144) by ~2 s with
 /// V-COM open, 1, 5, 10 or 24 V alike: a false V-JACK? in every AC A range
-/// (device-check f0d21eb 2a). AGND is what the DC A comparator's thresholds
+/// (device-check 3e41549 2a). AGND is what the DC A comparator's thresholds
 /// hang on (R21 AGNDP / AGNDN<1>).
 pub const R24_SENSE_AGND: u8 = 0x03;
 /// R25 AD2IG = 11 (2.0).
@@ -234,23 +234,23 @@ pub const R33_OP1CHOP: u8 = 0xC0;
 
 /// Device-check variants (DBG:SENTinel:VARiant, RAM only, 0 = the build's
 /// choice): bit 0 keeps the row's OP1 chopper in the AC V sentinel row (the
-/// 9dd1222 row), bit 1 drops the AC V sentinel (stock AC V row), bit 2 puts
-/// the comparator sentinel back on DC V 60 / 600 / 1000 V (the 9dd1222 rows).
+/// f48db7d row), bit 1 drops the AC V sentinel (stock AC V row), bit 2 puts
+/// the comparator sentinel back on DC V 60 / 600 / 1000 V (the f48db7d rows).
 pub const VAR_ACV_CHOP: u8 = 1;
 pub const VAR_ACV_OFF: u8 = 2;
 pub const VAR_DCV_HI: u8 = 4;
-/// bit 3: none of the sentinels added after 9dd1222's device check (AC+DC,
+/// bit 3: none of the sentinels added after f48db7d's device check (AC+DC,
 /// AC A, continuity, diode, capacitance r0..4, frequency: their stock rows).
 pub const VAR_NEW_OFF: u8 = 8;
 /// bit 4: no input alternation for the DC? / AC? hints (AC V's AD1 stays on
 /// PB1 - PB3, DC V r0's comparator on PB1).
 pub const VAR_HINTS_OFF: u8 = 16;
-/// bit 5: AC A's V-JACK? AD1 back on SENSE - PB5 (the f0d21eb row, device
+/// bit 5: AC A's V-JACK? AD1 back on SENSE - PB5 (the 3e41549 row, device
 /// comparison of the 2a drift).
 pub const VAR_ACA_PB5: u8 = 32;
 /// bit 6: AC A's V-JACK? AD1 at IG 0.9 instead of 3.6 (device diagnostic:
 /// where SENSE sits in the A rows; at IG 3.6 the hold is at the rail,
-/// below -347 mV, with V-COM at 1 V or the source off: device 0774e70).
+/// below -347 mV, with V-COM at 1 V or the source off: device a3b6d0a).
 /// The swing threshold is not rescaled (4x fewer codes per volt).
 pub const VAR_ACA_IG09: u8 = 64;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
@@ -267,7 +267,7 @@ pub fn variant() -> u8 {
 /// table) when the alert that uses it is enabled in `mask`, and the
 /// sentinel kind.
 ///
-/// Device check of 9dd1222 (docs/device-check-2026-10-21.md):
+/// Device check of f48db7d (docs/device-check-2026-10-21.md):
 /// * DC V 60 / 600 / 1000 V (r1..r3) carry no comparator sentinel: there
 ///   the comparator on PB1 tripped for as long as 10 V was on V-COM with
 ///   the A jack open (r0 at 1 V: never). Those rows drive the power bus
@@ -325,12 +325,12 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         // rows' settings) read a standing +41 100 codes (~54 mV, the A-JACK
         // threshold is 17 900) with the A jack open and 0..2 V or the
         // calibrator off on V-COM, ~3 100 at 5 V, -850 at 10 V (device
-        // f3aea2f): the frequency row leaves its input divider open (R2C /
+        // 7534701): the frequency row leaves its input divider open (R2C /
         // R2D 0) and PB1 follows the input path, so no fixed threshold or
         // offset tells a current from it. A gap as DC V 60 V+.
         // AC A: AD1 (off in the row) on SENSE - PB5 with the /1000 tap
         // (SS5 only, as DC A), IG 3.6, the peak hold; OP1's chopper held off
-        // as in the AC V sentinel row (AD1 on would start it: 9dd1222).
+        // as in the AC V sentinel row (AD1 on would start it: f48db7d).
         4..=6 if mask & M_VJACK != 0 => {
             c[2] = 0x00;
             c[3] |= 0x80;
@@ -373,8 +373,8 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
     kind == Kind::Ad2A && row[3] & 0x80 != 0
 }
 
-// V_GATE (TODO "False A-JACK in ohm / temperature", devices 1eb4d7e /
-// 973df07): in the ohm and temperature rows PB1 follows a voltage on V-COM
+// V_GATE (TODO "False A-JACK in ohm / temperature", devices 9944169 /
+// 2ba1a1b): in the ohm and temperature rows PB1 follows a voltage on V-COM
 // (5 / 10 V DC and the 0..9.6 V square tripped the comparator with the A
 // jack open; 1 V did not; the A-PROT probe on PB2 read ~0.34 A per volt
 // there). The comparator gives two bits per window, above VRH / below VRL,
@@ -382,7 +382,7 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // same: no threshold or offset tells them apart (as in Hz, which has no
 // sentinel). The rows' own V side can in part: ohm's AD1 code goes negative
 // for a negative source (LIVE?, `dmm.rs` LIVE_CODE; a positive one above the
-// open-circuit voltage reads OL on the device, 35fce2a 7b: the JACK CHECK
+// open-circuit voltage reads OL on the device, 2d33d3a 7b: the JACK CHECK
 // below covers that), and the thermocouple input reads far beyond any
 // thermocouple (T_VDRV_MV). The case A-JACK is for there - the leads in A / COM, V-COM
 // open - shows neither, so the gate keeps it: A-JACK asserts only after a
@@ -390,7 +390,7 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // conversion; temperature: up to one ~2.2 s CJ / TC cycle later), and an
 // asserted one drops when V-COM turns out driven (ohm: then LIVE?).
 
-// JACK CHECK (device 35fce2a 7b / E4, f0d21eb item 4, 0774e70 S6, 46370df
+// JACK CHECK (device 2d33d3a 7b / E4, 3e41549 item 4, a3b6d0a S6, 940e8aa
 // new bug 1; TODO "False A-JACK in ohm"). V_GATE's ohm premise fails on the
 // device: a positive source above the ohm source's open-circuit voltage
 // reads OL there (5 / 10 V on every range 600 ohm .. 60 Mohm), as open leads
@@ -402,7 +402,7 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // on the 60 Mohm current-source row, device source map
 // docs/device-check-2026-10-21.md "Ohm test current map"; continuity: its
 // ~-0.48 V source), with a source on V-COM it follows the source. The PB1
-// pickup started between 3 and 5 V in RES (35fce2a 7c: no hits up to
+// pickup started between 3 and 5 V in RES (2d33d3a 7c: no hits up to
 // 3.0 V). So when PB1 hits in those rows, AD2 reads OP1O - PB3 (OP1 is the
 // row's own x1 buffer of the input, the numerator of the stock ratio) at
 // IG 0.5 (+-2.5 V), and the peak pair says driven / free (`jack_driven`).
@@ -416,11 +416,11 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // node itself up to 2.47 V with AD1 in the source map, not OP1O); if OP1
 // clipped lower, a source would read "free" and the A-JACK would stay as
 // on the old code (the check never turns an open jack into "driven").
-// Device a2e9766 showed exactly that: OP1O peaked at 2.25 V (5 V DC, 600 ohm),
+// Device 7c04b03 showed exactly that: OP1O peaked at 2.25 V (5 V DC, 600 ohm),
 // 2.14 V (5 V, 60 Mohm), 2.02-2.03 V (10 V), inside the band of the rows' own
 // sources, so RES kept its false A-JACK at 5 / 10 V and the square.
 //
-// BOTH (device a2e9766, 2da1011 E4): in those RES runs the comparator on PB1
+// BOTH (device 7c04b03, 0bf7db1 E4): in those RES runs the comparator on PB1
 // read CMPHO and CMPLO in one CTSTA read (0x70), the sign of an overdriven
 // comparator (`sample_cmp`; the same 0x70 as DC V's V tap on a steady 5 V,
 // E3, and DC A at 24 V on V-COM), while 1 V and 3 V gave no hit. INFERRED:
@@ -477,7 +477,7 @@ pub fn jack_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
 
 /// AC mV (V_GATE): the result's node peak estimate |LPF| + sqrt(2) x RMS
 /// above this many times the range = the V side is driven far beyond the
-/// range (device 46370df: the 0 / 9.5 V square, clipped by the mV input,
+/// range (device 940e8aa: the 0 / 9.5 V square, clipped by the mV input,
 /// read 0.606 V RMS on 600 mV: ~2.4 x; a full-scale sine is 1.41 x). The
 /// PB1 pickup there comes with the input clamp's current (emulator
 /// `mvpb1`, INFERRED), i.e. only with the input beyond the clamp.
@@ -511,7 +511,7 @@ pub const PKV_THR: i32 = 1_510;
 /// comparator's (and AC+DC / AUTO A's DC phase). A hold pinned at a rail
 /// with no swing is the drift of 2a, no hit either way.
 ///
-/// Device 0774e70: the A rows' SENSE (the /1000 tap through SS5) is no
+/// Device a3b6d0a: the A rows' SENSE (the /1000 tap through SS5) is no
 /// defined node either; SENSE - AGND sat at the negative rail (< -347 mV)
 /// from ~0.9 s with V-COM at 1 V / the source off, and with 24 V DC it
 /// RAMPED to the rail over ~3 s: 9 000-12 000 codes per hold, a false
@@ -538,7 +538,7 @@ pub const WIN_MS: u64 = 100;
 pub const BLANK_ROW_MS: u64 = 150;
 /// The A rows' comparator on SENSE after leaving the ohm network (relay PA
 /// back to the V/A path) or after a chip restart (`dmm.rs` `start`: the
-/// Scope page / Wave view / logger back to the DMM). Device ad74e93 check E
+/// Scope page / Wave view / logger back to the DMM). Device 0256df2 check E
 /// (397 switches): RES -> A / mA with V-COM open or at 1 V, CTSTA reads 0
 /// for ~0.5-0.7 s, then 0x70 (CMPHO + CMPLO) in every window to ~4.3 s,
 /// 0x50 to ~4.5 s, then 0 -> V-JACK? from 1.5-1.97 s to ~5 s; A at 5 V DC,
@@ -554,8 +554,8 @@ pub const BLANK_ROW_MS: u64 = 150;
 /// Check E: the last 0x70 read at 4.2-4.4 s (RES -> A, 6 runs) and 5.24 s
 /// (A at 5 V, Scope page, back), the last CMPLO-only one 0.1-0.2 s later.
 ///
-/// The cap slides (device ab7184c new bug 4: A / mA -> Scope -> DMM at 5 V,
-/// 0x70 to 7.75 s, 0x50 to 8.01 s, then 0; 612c45c: 0x70 to 6.34 s; the
+/// The cap slides (device 0760432 new bug 4: A / mA -> Scope -> DMM at 5 V,
+/// 0x70 to 7.75 s, 0x50 to 8.01 s, then 0; bb15d39: 0x70 to 6.34 s; the
 /// fixed 7 s cap let the tail's last 0.75 s count: V-JACK? for 0.5 s at
 /// 8.06 s): a 0x70 read inside the window moves its end to OHM_EXIT_QUIET_MS
 /// after it, at most OHM_EXIT_MAX_MS after the event. So the mask ends when
@@ -627,7 +627,7 @@ pub const APROT_NOW_A: f32 = 0.3;
 /// After a row write with the probe (its entry, a range / function change
 /// while it stays): the AD2 peak hold is cleared this long after it (AD2
 /// restarted: its first results are not the input), and the first window
-/// counts from there (ms). Device f3aea2f: A-PROT latched on the first
+/// counts from there (ms). Device 7534701: A-PROT latched on the first
 /// window with the A jack open (the probe read 15 mA afterwards).
 pub const PROBE_SETTLE_MS: u64 = 30;
 /// Latched: the current counts as gone below this (on the 10 mohm path;
@@ -898,8 +898,8 @@ pub struct Sentinel {
     /// The row's A-JACK evidence can be faked by a voltage on V-COM (set by
     /// `dmm.rs` with the row: ohm, continuity, diode, capacitance, the
     /// resistive temperature sensors). PB1 (comparator / AD2 peak) follows
-    /// a driven V-COM in those rows (device 1eb4d7e / 973df07 / 35fce2a 7b
-    /// / f0d21eb: A-JACK in RES and continuity at 5 V, V-COM's source
+    /// a driven V-COM in those rows (device 9944169 / 2ba1a1b / 2d33d3a 7b
+    /// / 3e41549: A-JACK in RES and continuity at 5 V, V-COM's source
     /// reading OL, so V_GATE cannot tell), and the probe on PB2 does too
     /// (~0.34 A per volt, doc 4.8: it is off there). Such an A-JACK keeps
     /// its badge, toast and log entry but is not alarm-worthy
@@ -1095,7 +1095,7 @@ impl Sentinel {
     /// probe's row rewrites or the AC+DC phase switches (`write_config`
     /// alone): those keep the run. The jack check's verdict was the old
     /// row's (DBG:SENT? fields 14 / 15 kept it after a switch between
-    /// ohm-network rows, device c5ac0c5 note 3); a new run needs its own
+    /// ohm-network rows, device 41a33a1 note 3); a new run needs its own
     /// anyway (`decide`: `jack_t >= run_t0`).
     pub fn new_run(&mut self) {
         self.streak = 0;
@@ -1162,7 +1162,7 @@ impl Sentinel {
         let both_now = ctsta & CTSTA_CMP == CTSTA_CMP;
         let mut bits = ctsta & CTSTA_CMP;
         if self.kind == Kind::CmpV && now < self.ohm_exit_cap {
-            // Leaving ohm (device ad74e93, OHM_EXIT_*): the decay reads 0x70,
+            // Leaving ohm (device 0256df2, OHM_EXIT_*): the decay reads 0x70,
             // then CMPLO alone. Neither counts; CMPHO (a source above +21 V on
             // V, or an AC one's positive half) counts at once.
             if both_now {
@@ -1418,7 +1418,7 @@ impl Sentinel {
             let on = matches!(self.alert, Alert::Live);
             // (a run of live results LIVE_CLEAR_MS old asserts no more: a
             // poll between its clearing and the next reading, which drops
-            // `live_t0`, re-asserted it; device a2e9766 note 3, LIVE
+            // `live_t0`, re-asserted it; device 7c04b03 note 3, LIVE
             // flapping every poll after the source went off)
             let fresh = now.saturating_sub(self.live_last) < LIVE_CLEAR_MS;
             match self.live_t0 {
@@ -1468,7 +1468,7 @@ impl Sentinel {
     /// peak are those of the present hit run (or of an A-JACK in force):
     /// -1 / 0 once the run is over, as after a range switch (a few hits at
     /// a switch between ohm-network rows left 0 / 2150 mV on an open
-    /// input, device c5ac0c5 note 3).
+    /// input, device 41a33a1 note 3).
     #[inline(never)] // .cold (link-native.x): DBG reply
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
@@ -1487,7 +1487,7 @@ impl Sentinel {
         let pa = (self.probe_a * 1000.0) as i32;
         let vd = if self.vgate && self.vside_t.is_some() { self.vdrv as i32 } else { -1 };
         // ctsta: -1 when the kind samples no comparator (the field would be
-        // the last comparator row's, stale: the f0d21eb check's "AC V reads
+        // the last comparator row's, stale: the 3e41549 check's "AC V reads
         // 0x70 after TEMP" was TEMP's last read).
         let ct = if matches!(self.kind, Kind::CmpA | Kind::CmpV) { self.ctsta as i32 } else { -1 };
         let run = self.jack_t != 0 && self.jack_t >= self.run_t0 && (self.streak > 0 || self.alert == Alert::AJack);
@@ -1568,7 +1568,7 @@ mod tests {
 
     #[test]
     fn dcv_high_ranges_have_no_comparator() {
-        // 9dd1222: A-JACK for as long as 10 V sat on the 60 V range (open A
+        // f48db7d: A-JACK for as long as 10 V sat on the 60 V range (open A
         // jack). DC V r1..r3 keep the stock row; r0 keeps the sentinel.
         for (i, r) in CFG_F1.iter().enumerate() {
             let (c, k) = row_for(1, i as u8, false, M_ALL, 0, r);
@@ -1592,7 +1592,7 @@ mod tests {
                 let d = diff(r, &c);
                 let idx: Vec<usize> = d.iter().map(|x| x.0).collect();
                 // R22 OSR, R23 ENAD1, R24 inputs, R25 AD1IG, R29 PKH; AC V
-                // also R33 OP1CHOP held off (the 9dd1222 37 mV floor).
+                // also R33 OP1CHOP held off (the f48db7d 37 mV floor).
                 if m == 0 {
                     assert_eq!(idx, vec![2, 3, 4, 5, 9, 19], "mode {m}");
                     assert_eq!(c[19], r[19] & 0x3F);
@@ -1650,7 +1650,7 @@ mod tests {
             assert_eq!(row_for(m, 0, false, M_VJACK | M_LIVE, 0, r), (*r, Kind::Off), "mode {m}");
         }
         // VAR_NEW_OFF: the later sentinels (and AC+DC) back to the stock rows;
-        // the 9dd1222 ones stay.
+        // the f48db7d ones stay.
         for (m, r) in [(4u8, &CFG_F4[0]), (5, &CFG_F5_6[1]), (11, &CFG_F11[0]), (12, &CFG_F12[0]), (13, &CFG_F13[0]), (14, &CFG_F14[0])] {
             assert_eq!(row_for(m, 0, false, M_ALL, VAR_NEW_OFF, r), (*r, Kind::Off), "mode {m}");
         }
@@ -1706,7 +1706,7 @@ mod tests {
             }
             assert_eq!(s.alert, Alert::None, "dc_ok {dc_ok} one {one}");
         }
-        // Leaving ohm into DC A (device ad74e93): CMP_SENSE 0x70 for 3.5 s, 0x50 to 5 s,
+        // Leaving ohm into DC A (device 0256df2): CMP_SENSE 0x70 for 3.5 s, 0x50 to 5 s,
         // nothing connected: no V-JACK?.
         let mut s = Sentinel::new();
         s.configured(Kind::CmpV, 0, true);
@@ -1719,7 +1719,7 @@ mod tests {
             s.sample_cmp(t, c);
             assert_eq!(s.alert, Alert::None, "t {t}");
         }
-        // device ab7184c (A -> Scope -> DMM at 5 V): 0x70 to 7.75 s, 0x50 to 8.01 s, row
+        // device 0760432 (A -> Scope -> DMM at 5 V): 0x70 to 7.75 s, 0x50 to 8.01 s, row
         // rewrites on the way (each re-reports the same event): no V-JACK?; a 0x70 that
         // never stops counts from OHM_EXIT_MAX_MS
         for (end, steady) in [(7750u64, false), (u64::MAX, true)] {
@@ -1932,7 +1932,7 @@ mod tests {
 
     #[test]
     fn freq_row_has_no_sentinel() {
-        // Device f3aea2f: PB1 - PB3 stands at ~54 mV in the frequency row
+        // Device 7534701: PB1 - PB3 stands at ~54 mV in the frequency row
         // (input divider open: R2C / R2D 0) -> false A-JACK; the stock row.
         let r = &CFG_F14[0];
         assert_eq!((r[12], r[13]), (0, 0));
@@ -1994,7 +1994,7 @@ mod tests {
         // 230 V and 12 mA flowing: none.
         s.current_small(t, false);
         assert_eq!(s.alert, Alert::None);
-        // Device f0d21eb 2a: the hold drifting to the negative rail (no
+        // Device 3e41549 2a: the hold drifting to the negative rail (no
         // swing) is no hit; nor is a steady DC level of any size.
         let mut s = Sentinel::new();
         s.configured(Kind::PeakV, 0, true);
@@ -2029,7 +2029,7 @@ mod tests {
         b.configured(Kind::PeakV, tb, true);
         b.sample_peak(tb + 107, 18_090, 18_150);
         assert_eq!(b.streak, 0);
-        // Device 0774e70: 24 V DC, SENSE - AGND ramps to the rail, 9 000 -
+        // Device a3b6d0a: 24 V DC, SENSE - AGND ramps to the rail, 9 000 -
         // 12 000 codes per hold, contiguous holds: no hit (was V-JACK? at
         // 1.5-3.5 s). Then mains clipped at the rail on one side: hits.
         let mut r = Sentinel::new();
@@ -2327,7 +2327,7 @@ mod tests {
 
     #[test]
     fn ajack_gated_by_the_jack_check() {
-        // Ohm with 5 V on V-COM (device 35fce2a 7b): the reading is OL, V_GATE says free; the
+        // Ohm with 5 V on V-COM (device 2d33d3a 7b): the reading is OL, V_GATE says free; the
         // jack check (OP1O at the comparator's run) says driven -> LIVE?, never A-JACK.
         let v = |x: f32| (x * JACK_CODES_PER_V) as i32;
         let hits = |s: &mut Sentinel, t0: u64, t1: u64| {
@@ -2389,7 +2389,7 @@ mod tests {
 
     #[test]
     fn ajack_gated_by_both_bit_reads() {
-        // Device a2e9766 (RES, A jack empty, 5 / 10 V DC or the square on V-COM): CTSTA 0x70
+        // Device 7c04b03 (RES, A jack empty, 5 / 10 V DC or the square on V-COM): CTSTA 0x70
         // in the hit windows and OP1O at 2.0-2.25 V, the jack check's "free" band: BOTH says
         // driven -> LIVE?, never A-JACK.
         let v = |x: f32| (x * JACK_CODES_PER_V) as i32;
@@ -2473,7 +2473,7 @@ mod tests {
 
     #[test]
     fn live_does_not_flap_after_the_source() {
-        // Device a2e9766 note 3: RES 600 ohm, the 5 V switched off: LIVE? came on again every
+        // Device 7c04b03 note 3: RES 600 ohm, the 5 V switched off: LIVE? came on again every
         // poll (5-10 ms) once it had cleared, until the next reading. Polls here every 5 ms
         // (the comparator samples), the readings ~400 ms apart.
         let mut s = Sentinel::new();
@@ -2723,7 +2723,7 @@ mod tests {
 
     #[test]
     fn jack_fields_reset_at_a_row_switch() {
-        // Device c5ac0c5 note 3: RES AUTO -> 600 ohm with V-COM open, 3 PB1 hits at the
+        // Device 41a33a1 note 3: RES AUTO -> 600 ohm with V-COM open, 3 PB1 hits at the
         // switch and their jack check (0 / 2150 mV, the 600 ohm row's own level), then no
         // hits: DBG:SENT? fields 14 / 15 kept 0 / 2150 for the whole open level (doc 4.13 check
         // list item 2 expects -1 / 0). RES -> continuity: 0 / -4 mV for ~3 s.

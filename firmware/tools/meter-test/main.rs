@@ -56,7 +56,7 @@ mod scope {
 }
 
 // Frequency / period from whole cycles (scope_meas::compute_codes). Device
-// f3aea2f: the DMM wave view at 5 ms/div (480 samples at 9600 S/s) showed
+// 7534701: the DMM wave view at 5 ms/div (480 samples at 9600 S/s) showed
 // "Freq: --" for a 40 Hz square: two periods, triggered on a rising edge
 // at the centre, leave one whole rise inside the frame.
 #[cfg(test)]

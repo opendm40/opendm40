@@ -291,7 +291,7 @@ impl App {
                 // A full repaint only for what it shows (V/div, the unit,
                 // the coupling): it runs with the stream on, and at 38400
                 // S/s the ring holds ~50 ms. A DC V start's self-cal moves
-                // only a / b (device 5e52761: `overwritten` +7087 at every
+                // only a / b (device 94de654: `overwritten` +7087 at every
                 // DC V entry, the repaint after the new cal).
                 if (s.vdiv, s.amps, s.ac) != (now.vdiv, now.amps, now.ac) {
                     self.redraw = self.redraw || self.view == View::Scope;

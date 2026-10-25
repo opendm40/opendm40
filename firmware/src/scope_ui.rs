@@ -1431,13 +1431,13 @@ pub struct Graph {
 /// check 2026-10-21). 4 ms was too long for USB: a noise-triggered trace
 /// at ~50 fps (every column changes, ~10 ms of paint per frame) kept the
 /// loop in 2-10 ms passes back to back, DBG:PING? p50 11.8 ms (device check
-/// of 9dd1222, combined view). Host: no limit, every flush completes.
+/// of f48db7d, combined view). Host: no limit, every flush completes.
 #[cfg(target_os = "none")]
 const FLUSH_BUDGET: u32 = 300_000;
 /// The combined view's slice (0.8 ms, `set_flush_short`): its frames are
 /// capped (app.rs COMBO_FRAME_MS), so the extra passes cost no frame rate,
 /// and the meter's USB / SCPI wait less behind a slice (device check
-/// 5f14d38: DBG:PING? p50 3.3 ms there).
+/// 381ea07: DBG:PING? p50 3.3 ms there).
 #[cfg(target_os = "none")]
 const FLUSH_BUDGET_SHORT: u32 = 160_000;
 #[cfg(target_os = "none")]
@@ -1457,7 +1457,7 @@ fn cycles() -> u32 {
 }
 
 // In SRAM (.dmabuf, NOLOAD) on the device: 9.7 KB that TCM .data / the
-// stack margin need more (pre-flash review 7dc32ac); `init` sets it up.
+// stack margin need more (pre-flash review a71920d); `init` sets it up.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut GRAPH: Graph = Graph {
     tr: [EMPTY; 399],
@@ -2180,7 +2180,7 @@ pub fn tb_top(roll: bool, single: bool) -> u8 {
 /// mode Single `single`: (the timebase to apply, turn the saved Roll setting
 /// on). A roll-only row (beyond 1 s/div, orange) turns Roll on, except in
 /// Single: it never rolls, so the scope takes the YT maximum and the saved
-/// Roll setting is left alone (pre-flash review a2f4b01 L8).
+/// Roll setting is left alone (pre-flash review 401ae67 L8).
 pub fn tb_pick(i: u8, roll: bool, single: bool) -> (u8, bool) {
     let roll_on = i as usize > crate::scope::TB_YT_MAX && !roll && !single;
     (i.min(tb_top(roll || roll_on, single)), roll_on)
@@ -3070,7 +3070,7 @@ const ST_BADGE: Rect = rect(19, 46, 62, 17);
 const ST_VALUE: Rect = rect(84, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
 /// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
-/// buttons' 20 px face (device check 5e52761: a 40 px box cut "mW" to "mV";
+/// buttons' 20 px face (device check 94de654: a 40 px box cut "mW" to "mV";
 /// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
 const ST_UNIT_X: i16 = 196;
 const ST_UNIT_W: i16 = 59;
@@ -3263,7 +3263,7 @@ pub const RANGE_MAX: usize = 9;
 /// step per x2.15 of the separation; spreading zooms in (smaller s/div or
 /// V/div). A stored state of the other direction is dropped (a pinch whose
 /// end was lost must never carry its index into the other axis' table:
-/// pre-flash review 7dc32ac B1). The result is always inside the table of
+/// pre-flash review a71920d B1). The result is always inside the table of
 /// its own axis: tb `tb_min..=tb_max`, range `0..=RANGE_MAX`.
 /// Pinch modes (DBG:PINCH, owner 2026-10-24 "pinch needs a big stretch
 /// before anything changes"): PINCH_STOCK the first opendm40 rule (one

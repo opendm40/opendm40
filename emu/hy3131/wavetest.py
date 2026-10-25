@@ -33,7 +33,7 @@ path is AC-coupled in AC V like the meter). Checks:
     bus: a Renode hook on every function of C logs the first call made
     while hy3131::HANDED is set. STOP + MF Settings "Save CSV" in the wave
     view (the DLG write pauses the stream, the USB volume refresh waits
-    until the stream stops; device f3aea2f: max_lat 21.7 us in vdisk::ours),
+    until the stream stops; device 7534701: max_lat 21.7 us in vdisk::ours),
     then a host reading SCOPE/SCOPnnn.CSV and LOGS/LOGnnn.CSV off the USB
     volume and MMEM:DATA? of their DLGs while the wave view streams: no C
     function but the Save CSV tap's own handler; the stream runs again
@@ -43,7 +43,7 @@ path is AC-coupled in AC V like the meter). Checks:
     the end the whole run (emu/regionc.py). --no-region-c: without the hooks.
   * LOG:CSV ON in the wave view: refused ("Settings conflict: Wave view").
   * per step at 2 and 1 ms/div (region C hooks + the ring / late / overrun
-    counters of DBG:ISR?): MMEM:CAT? x3 (device b6909d6: dropped +6813 per
+    counters of DBG:ISR?): MMEM:CAT? x3 (device 246afc7: dropped +6813 per
     query at 76800; csvlog.rs catalog cache), V/div + + - - (a screen-only
     step with the stream on, then a range step: its full repaint before
     the stream restarts, app_wave.rs wave_rescale); the source badge exit DMM -> MCX at 2 ms/div (the close
@@ -329,7 +329,7 @@ try:
         conf = q('CONF?')
         print('  after: READ? %.4f CONF? %s' % (v, conf))
         check(abs(v - 0.2) < 0.01, 'DMM resumed in DC V: READ? %.4f' % v)
-        # Entry again from DC V at 2 ms/div (device 5e52761: `overwritten`
+        # Entry again from DC V at 2 ms/div (device 94de654: `overwritten`
         # +7087, ~185 ms, at a DC V entry; 0 from AC V): MENU steps back to
         # the MCX scope page, its source badge opens the Wave view.
         q('DBG:KEY 0')
@@ -449,7 +449,7 @@ try:
 
     POLL = ['ACQ:SRAT?', 'SCOP:MEAS:FREQ?', 'SCOP:MEAS:VPP?', 'TRIG:STAT?', 'WAV:POIN?', 'WAV:FORM?',
             'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?',
-            # fast_scpi (device b6909d6: region C, late 1 at 76800), and the
+            # fast_scpi (device 246afc7: region C, late 1 at 76800), and the
             # model / identity (calibration record 0x080C0168, slow bank:
             # cached at boot).
             'LOG:DEST?', 'LOG:DURation?', '*IDN?', 'SYST:MOD?']
@@ -460,7 +460,7 @@ try:
         c_reset()
         i0 = ints(q('DBG:ISR?'))
         # A host polling the scope / acquisition state and the profiler
-        # while the stream runs (device e7ec2cc: ACQ:SRAT? / SCOP:MEAS:*?
+        # while the stream runs (device 8ce42e2: ACQ:SRAT? / SCOP:MEAS:*?
         # every 5 s, max_lat 6.16 us at scope_wav::query, region C).
         t0 = up()
         polls = 0
@@ -477,7 +477,7 @@ try:
         print('  %s/div: FREQ %.3f Hz, VRMS %.4f V, VPP %.4f V; DBG:ISR? %s' % (name, fr, rms, vpp, i1))
         check(abs(f('TIM:SCAL?') - tb) < tb * 0.01, 'TIM:SCAL? %s' % name)
         # The datasheet's rate at every rung (the model's default
-        # Ad2Osr32Ppm 0, opendm40 hy3131.rs AD2_OSR32_REAL_MHZ, device e7ec2cc).
+        # Ad2Osr32Ppm 0, opendm40 hy3131.rs AD2_OSR32_REAL_MHZ, device 8ce42e2).
         real = rate
         check(i1[1] == 1 and i1[14] == 1 and abs(i1[12] / 1000 - real) < 5 and i1[19] == (1008 if rate > 38400 else 16) and i1[22] == 1,
               '%s/div: the stream at %d S/s, locked, div %d (DMA %d)' % (name, rate, i1[19], i1[22]))
@@ -491,7 +491,7 @@ try:
         else:
             check(0.5 < vpp < 2.95, '%s/div: half a period on screen, VPP %.3f V <= 2.83' % (name, vpp))
         shot('w03-wave-%s' % name)
-        # MMEM:CAT? while the stream runs (device b6909d6: 123 ms in one
+        # MMEM:CAT? while the stream runs (device 246afc7: 123 ms in one
         # pass at 76800, the view's ring dropped +6813 per query).
         c_reset()
         ia = ints(q('DBG:ISR?'))
@@ -603,7 +603,7 @@ try:
         fr, rms, vpp = meas()
         print('  %s: %g V/div, CONF? %s, FREQ %.3f VRMS %.4f' % ('+' if tap == '447,122' else '-', vd, c, fr, rms))
         # CONF? = the streamed row's range, not the reading from before the
-        # view (device f3aea2f: "VOLT:AC +6" on 200 mV/div).
+        # view (device 7534701: "VOLT:AC +6" on 200 mV/div).
         check(vd == want and c == conf, 'V/div %s -> %g V/div, CONF? %s (%g, %s)'
               % ('+' if tap == '447,122' else '-', want, conf, vd, c))
         if want in (2.0, 5.0, 1.0):
@@ -703,7 +703,7 @@ try:
         check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs during the read')
         c_check('a host reading %s/%s.CSV' % (dirname, stem))
     # INFO/ off the USB volume while the view streams: the bytes from the
-    # slow flash bank (>= 0x08080000; device b6909d6: 21.8 us ISR stall per
+    # slow flash bank (>= 0x08080000; device 246afc7: 21.8 us ISR stall per
     # load) come from the mirror on the SPI disk (opendm40 vdisk.rs
     # mirror_boot), every file reads whole; without a mirror they answer NOT
     # READY 02/04/01 (read_busy). The data watch (emu/regionc.py) sees no

@@ -11,7 +11,7 @@ USB/IP connection.
 Timeline (virtual seconds; the scheduled input changes; the client waits on
 their fw uptimes, the input markers of emu/emusync.py, README "Input markers"):
   0      nothing in A, with the model's AD2 offset of the AC A rows (acaoff 0.717 mV:
-         +0.0717 A, device 489f956)
+         +0.0717 A, device 8e04b1c)
   T1     a lamp-like DC step: 12 A for 20 ms, 6 A for 80 ms, then 3 A:
          Irms(100 ms) = sqrt((144 * 20 + 36 * 80) / 100) = 7.59 A, peak 12 A
   T2     2 A rms 50 Hz running (an AC load already on)
@@ -20,7 +20,7 @@ Checks:
   * MF in DC A -> "Inrush" (Current Settings): the AC A row of the 10 A
     range, the stream ISR runs (DBG:ISR? active), INR:COND? ARMED before T1;
   * armed: INR:PREamble? a = -0.0717 A (+-5 mA): the zero measured at the arm, not the
-    calibration's 0 (device 489f956: "Armed: 0.069 A now" with nothing in A);
+    calibration's 0 (device 8e04b1c: "Armed: 0.069 A now" with nothing in A);
   * T1: INR:FETCh? Irms 7.59 A (+-2 %), peak 12 A (+-1 %), idle below 20 mA;
     INR:FILE? LOGS/FASTnnn.DLG; its CSV (MMEM:DATA?, tools/dlog.py) has
     inrush::LEN rows, 0 lost, the step at t_s ~0.200 s, values = INR:DATA?;

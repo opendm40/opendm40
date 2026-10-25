@@ -212,7 +212,7 @@ fn dispatcher() {
     assert_eq!(run(&mut rx, &[(b"READ?\n".to_vec(), 1)]), vec![l("READ?")], "reset");
     println!("ok  timeouts / reset");
 
-    // 7b. Rx has no link gate (device cd1ec9a: a host's first line came
+    // 7b. Rx has no link gate (device d188760: a host's first line came
     // ~0.34 s before PC14 rose and was dropped): every line is reported,
     // the module's start text is consumed by bt.rs before Rx sees it.
     let mut rx = Rx::new();

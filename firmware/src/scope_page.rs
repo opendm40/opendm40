@@ -74,7 +74,7 @@ pub const DRAG_STOCK: u8 = 0;
 pub const DRAG_AXIS: u8 = 1;
 /// Names of the drag modes without hold-to-grab (Settings "Scope drag";
 /// Hold is gesture::grab_ms != 0 with the Stock model, shown as "Hold
-/// <ms> ms"; review 7dc32ac L4: a stored mode 2 showed as "Axis lock").
+/// <ms> ms"; review a71920d L4: a stored mode 2 showed as "Axis lock").
 pub const DRAG_NAMES: [&str; 2] = ["Stock", "Axis lock"];
 /// Persistence (Display tab: OFF, MIN, 1S, INF): layer period (ms).
 const PERSIST_MS: [u64; 4] = [0, 40, 500, u64::MAX];
@@ -592,7 +592,7 @@ impl App {
             let s = self.scope.s;
             self.scope.apply(s, now);
         }
-        // A running AUTO-set ends with the page (review 7dc32ac L2: it went
+        // A running AUTO-set ends with the page (review a71920d L2: it went
         // on off-page and applied its result / toast on another view).
         if let Some(a) = self.sp.autoset.take() {
             self.sp.sampling = false;
@@ -1208,7 +1208,7 @@ impl App {
                     self.sp.touch = Some(t);
                     // The repeated step is kept: a later drag + second
                     // finger (Cancel) undoes only what the drag moved
-                    // (pre-flash review a2f4b01 L9). Still = nothing
+                    // (pre-flash review 401ae67 L9). Still = nothing
                     // dragged yet, so the whole snapshot is rebased.
                     if self.sp_tb_step(slower, now) {
                         if let Some(t) = self.sp.touch.as_mut() {
@@ -1896,7 +1896,7 @@ impl App {
     /// End a held drag / pinch whose end may never arrive (a popup, AUTO,
     /// an overlay or a key took over): a pinch is dropped (nothing applied),
     /// a drag applies what it moved so far; the acquisition runs again
-    /// (pre-flash review 7dc32ac B1: a stale pinch kept it held and carried
+    /// (pre-flash review a71920d B1: a stale pinch kept it held and carried
     /// its index into the other axis).
     pub(super) fn sp_end_hold(&mut self, now: u64) {
         if self.sp.pinch.is_some() {

@@ -47,7 +47,7 @@ on the first byte of each request:
   Settings Bluetooth on, `AT+RESET`) it prints a 0x00, then, 145-195 ms
   later, 7 lines: `BLE03:VER2.1-20240615`, `CBN:<BLE name>`, `CBMAC:<mac>`,
   `CSN:<SPP name>`, `CSMAC:<mac>`, `CBSW:1`, `CSSW:1` (device trace, image
-  7b1b6d1, [device check "cd1ec9a"](device-check-2026-10-21.md)). Parsed,
+  7b1b6d1, [device check "d188760"](device-check-2026-10-21.md)). Parsed,
   they gave the next client -102 / -113 / -113 / -102 / -113 / -113 / -113.
   `bt.rs` `StartText` takes all input from the start up to the `CSSW:` line
   (or 1 s, if it never comes), before the parser sees any of it. Bytes
@@ -237,7 +237,7 @@ print(dmm.query('*IDN?'))
 ```
 
 Both ways are untested with the meter: only the code 28 state was seen (Windows 11,
-[device-check-2026-10-21.md](device-check-2026-10-21.md) "b6909d6: ... Windows 11", item 6).
+[device-check-2026-10-21.md](device-check-2026-10-21.md) "246afc7: ... Windows 11", item 6).
 
 ### sigrok
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """RES AUTO on an input the 6 Mohm and 600 kohm ranges disagree on (device
-a2e9766, firmware/docs/device-check-2026-10-21.md "a2e9766: bug-fix recheck"
+7c04b03, firmware/docs/device-check-2026-10-21.md "7c04b03: bug-fix recheck"
 note 1: the calibrator's disabled output read 0.104 Mohm on 6 Mohm and OL on
 600 kohm, AUTO stepped between them for good, DBG:READout? `P,MΩ,NAN,0`, and
 8 of 8 FETCh? got no reply within the driver's 5 s).

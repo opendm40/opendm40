@@ -243,7 +243,7 @@ const VCAL_MAX_DC: f32 = 1.0;
 /// POW:VOLT:CAL peak guard (fraction of the V range), whatever the kind:
 /// |DC| + sqrt(2) x the AC RMS (>= the peak of a sine or a square) must not
 /// pass it, or the V channel clipped and the ratio is wrong (device
-/// f3aea2f: a 0..9.6 V square on 6 V, DC kind by its 4.8 V DC part, was
+/// 7534701: a 0..9.6 V square on 6 V, DC kind by its 4.8 V DC part, was
 /// accepted, gain 1.021410).
 const VCAL_PEAK_MAX: f32 = 1.0;
 /// V cal, AC reference: the stock AC V node is AC-coupled (tau ~0.3 s) and
@@ -1269,7 +1269,7 @@ impl Dmm {
     }
 
     /// What the DMM page shows after a coupling change until the new
-    /// coupling's first reading (device check 5e52761: the old layout and
+    /// coupling's first reading (device check 94de654: the old layout and
     /// values stayed up to ~4 s): the new coupling's layout and units,
     /// every measured value NaN ("--"); the energy, the time and the
     /// settings as they are.
@@ -2129,7 +2129,7 @@ pub fn bt_main(pv: &PowerVals) -> Val {
 /// AC A format (A / mA / uA) of its range, and the main value in SI.
 /// `x` as shown with `dec` decimals: a value that rounds to zero is +0, so
 /// the readouts never show a negative zero ("-0.0000 mWh" / "-0.000 mW"
-/// with no current, device check 5f14d38).
+/// with no current, device check 381ea07).
 pub fn no_neg_zero(x: f32, dec: u8) -> f32 {
     let mut s = 1.0f32;
     for _ in 0..dec {
@@ -2386,7 +2386,7 @@ mod tests {
         assert_eq!(energy_format(0.0, false), (0.0, 4, "mWh"));
     }
 
-    /// No negative zero on the readouts (device check 5f14d38).
+    /// No negative zero on the readouts (device check 381ea07).
     #[test]
     fn no_negative_zero() {
         let mut b = [0u8; 16];

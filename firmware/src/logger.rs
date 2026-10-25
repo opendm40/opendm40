@@ -75,7 +75,7 @@
 //! pass may take several samples: `poll` keeps sampling for up to
 //! `AD2_BURST_US` while the next result is due within that budget. Without the
 //! `ad2-isr` feature every main-loop stall longer than a period drops samples
-//! (device 7889e6c, SPI2: 8 % lost at 4800, 11 % at 9600), which the
+//! (device 0bf4847, SPI2: 8 % lost at 4800, 11 % at 9600), which the
 //! timestamps, `missed`, the span-based `lost()` and the gap histogram
 //! (`gaps()`, LOG:GAPs?) report. With it, the timer ISR (`isr`) takes every
 //! sample while the main loop redraws; the same counters report what it
@@ -377,7 +377,7 @@ struct Producer {
     /// RESCUE_MAX).
     rescued: u8,
     /// AD1: the last flag-to-flag interval (us, 0 = none yet): the chip's
-    /// real period (device 5394b21: 26.3 ms at the 25 ms OSR 2048 chopped
+    /// real period (device d284dff: 26.3 ms at the 25 ms OSR 2048 chopped
     /// setting), for a rescued sample's stamp and window.
     p_meas: u32,
     /// AD1: sum (us) and count of those intervals: their mean is the
@@ -429,7 +429,7 @@ impl Producer {
     }
 
     /// The period `lost` divides the span by (ns): AD1 the measured mean
-    /// once there are a few intervals (device 046e4b9: 26.3 ms at the
+    /// once there are a few intervals (device 41f3f87: 26.3 ms at the
     /// nominal 25 ms OSR 2048 chopped setting, 73 "lost" of a 60 s session
     /// against the nominal, none really), else the nominal.
     fn span_period_ns(&self, ad1: bool) -> u32 {
@@ -697,7 +697,7 @@ impl Logger {
     /// Nominal (chip) rate of the session in mHz: the chip's conversion
     /// rate from its clock (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`,
     /// the rate the stream ISR runs at and ACQ:SRATe? reports), not
-    /// 1e12 / the period rounded to 1 ns (device 46370df: 76 799 016 for
+    /// 1e12 / the period rounded to 1 ns (device 940e8aa: 76 799 016 for
     /// the 76.8 kS/s rung's 13 021 ns, against ACQ:SRAT? 76 800).
     pub fn nominal_mhz(&self) -> u32 {
         self.nom_mhz
@@ -805,11 +805,11 @@ impl Logger {
     /// The next AD1 session runs on the stream ISR (feature `ad2-isr`): the
     /// fast unchopped AD1 settings (160 .. 640 S/s, period <= AD1_ISR_MAX_US), where a
     /// main-loop pass (a panel redraw, a page program, USB) can outlast the
-    /// period (device 036cc55: 1.8 % lost at 640 S/s with the main-loop
+    /// period (device 085f8dc: 1.8 % lost at 640 S/s with the main-loop
     /// sampler). The slower ones keep the main-loop sampler (a period of
     /// 12.5 ms or more; no lock-in time before the first sample).
     /// Unchopped only: the chopped settings run ~5 % slower than their
-    /// nominal (device 5394b21: 26.3 ms at OSR 2048 chopped, nominal 25),
+    /// nominal (device d284dff: 26.3 ms at OSR 2048 chopped, nominal 25),
     /// beyond the Pll's +-5000 ppm (ad2pll.rs MAX_PPM), which locks to the nominal rate.
     pub fn ad1_on_isr(&self) -> bool {
         cfg!(feature = "ad2-isr") && !self.ad2 && !self.chop() && hy::ad1_period_us(self.osr, false) <= AD1_ISR_MAX_US
@@ -957,7 +957,7 @@ impl Logger {
     /// takes no sample until its Pll locks; one that has not locked
     /// LOCK_WAIT_MS after its start is acquired again (the edge search, a
     /// fresh Pll; nothing was captured, so the time base may restart), and
-    /// once more not locked ends the session (true). (Emulator 5394b21: an
+    /// once more not locked ends the session (true). (Emulator d284dff: an
     /// AD2 19200 DMA stream never locked and the disk session never ended.)
     #[cfg(feature = "ad2-isr")]
     fn lock_watch(&mut self) -> bool {
@@ -1036,7 +1036,7 @@ impl Logger {
                 // The same code as the last sample: R00..R02 still hold that
                 // conversion, so no flag was lost, the next one is late (the
                 // main loop's observation of a flag jitters by up to ~50 ms:
-                // device e1cec01, OSR 8192 chopped after a 640/s session,
+                // device 4284642, OSR 8192 chopped after a 640/s session,
                 // flags seen 73-79 / 123-128 ms apart, a copy before every
                 // other one); keep waiting. A swallowed flag whose code
                 // repeats the last one (~1-2 % at these noise levels) is lost.
@@ -1051,7 +1051,7 @@ impl Logger {
                 self.prod.tick(); // the flag-observed moment
                 // AD1's period: flag to flag, not from a rescue's stamp, and not
                 // from the session's first flag (it can be one raised before the
-                // start: device 10242c3, after a 640/s session, a first interval
+                // start: device 2232996, after a 640/s session, a first interval
                 // of 52 ms at OSR 8192 chopped (100.8 ms) became p_meas, and with
                 // `rescued != 0` before every later flag it was never measured
                 // again: each conversion was rescued once more, a copy 52 ms
@@ -1374,7 +1374,7 @@ impl Logger {
 /// the edge should be: one INTF read (clears AD2F); the next A reads INTF
 /// once more after its data frame, and AD2F there says on which side of B the
 /// edge came (`Pll::result`). Reading INTF clears AD2F and loses a
-/// conversion that completes during the frame (device 5f14d38: the old 4 x
+/// conversion that completes during the frame (device 381ea07: the old 4 x
 /// tick lost ~1.4 % in bursts while its read phase sat on the edge): here
 /// that race can only blur a probe, never cost a sample.
 ///
@@ -1610,7 +1610,7 @@ pub mod isr {
             }
             prev = t;
             // 3 periods (AD2); AD1: 8 (its first result after the R22
-            // write may take longer: device 5394b21 found no edge in 3).
+            // write may take longer: device d284dff found no edge in 3).
             if t.wrapping_sub(t_begin) > if ad1 { 8 } else { 3 } * pc * cyc_per_count {
                 break;
             }
@@ -1766,7 +1766,7 @@ pub mod isr {
                 // Acquiring (DMA frames, or AD1 without an edge from the
                 // search: until locked): no sample. A CPU-frame probe still
                 // completes here (else a gated CPU stream never locks:
-                // device 5394b21, AD1 640 S/s, probes 0 for 700 s).
+                // device d284dff, AD1 640 S/s, probes 0 for 700 s).
                 if probe && !d.on {
                     let mut f = [0u8];
                     if hy::isr_read(hy::R_INTF, &mut f) {
@@ -1996,7 +1996,7 @@ mod tests {
         }
         assert_eq!((l.lost(), l.missed(), l.gaps()), (0, 0, [0; GAP_BUCKETS]));
         // AD1 at a chip period of 26.3 ms against the nominal 25 ms (device
-        // 046e4b9, OSR 2048 chopped): nothing lost by the measured mean
+        // 41f3f87, OSR 2048 chopped): nothing lost by the measured mean
         // (the nominal would say ~5 of 100), one real hole still counts.
         let mut l = session(false, 25_000_000);
         for i in 0..100u64 {
@@ -2474,7 +2474,7 @@ mod tests {
         assert_eq!(hy::ad2_rate_mhz(l.r26()), 1_200_000);
     }
 
-    /// One nominal per rung (device 46370df): LOG:PREamble? / the CSV and
+    /// One nominal per rung (device 940e8aa): LOG:PREamble? / the CSV and
     /// DLG headers (`nominal_mhz`) equal the stream ISR's rate and
     /// ACQ:SRATe? (`scope::wave_real_fs` from `hy::ad2_real_rate_mhz`), not
     /// 1e12 / the rounded period (76 799 016 at 76.8 kS/s).
@@ -2532,7 +2532,7 @@ pub mod wave {
 
     /// Holes in the stream so far: samples dropped because the ring was
     /// full, plus conversions the ISR missed (`missed`, from the stamps: a
-    /// gap > 1.5 periods; the device check of 5f14d38 found ~11.5 ms bursts
+    /// gap > 1.5 periods; the device check of 381ea07 found ~11.5 ms bursts
     /// every ~3950 conversions). The wave record restarts after a hole
     /// instead of splicing across it.
     pub fn dropped() -> u32 {

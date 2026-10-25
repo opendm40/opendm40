@@ -52,7 +52,7 @@
 //! kicked in spiflash.rs `wait_ready`), never with `write_step`: a FAT or
 //! root block must not be left erased or half programmed across a main-loop
 //! pass, where a power-off, a reset (DBG:RESET / UPDATE / RECOVER) or a host
-//! READ could see it (review 258c833 H1). Only the data blocks, which no FAT
+//! READ could see it (review 530c2e1 H1). Only the data blocks, which no FAT
 //! entry references until the Fat phase, are written in slices. Between two
 //! `poll` slices the disk is therefore always consistent apart from lost
 //! clusters (FAT 1 written, FAT 2 or the entry not yet), and
@@ -267,7 +267,7 @@ const JOB0: Job = Job {
     retried: false,
 };
 
-/// In .dmabuf, not TCM .bss (review 258c833 B1: 1.7 KB of stack margin, and
+/// In .dmabuf, not TCM .bss (review 530c2e1 B1: 1.7 KB of stack margin, and
 /// the target LBAs / cluster list out of the stack-overflow path). .dmabuf is
 /// NOLOAD (not zeroed at reset): `init` must run before anything reads it
 /// (`busy`, `frozen`, `poll`, msc.rs).

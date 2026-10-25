@@ -24,7 +24,7 @@
 //!
 //! Region B (zero-wait flash), with its parser scpi::wav_cmd: a host polls
 //! these while the Wave view's stream ISR runs, and a fetch from region C
-//! then stalls the ISR's entry (device e7ec2cc: max_lat 6.16 us at
+//! then stalls the ISR's entry (device 8ce42e2: max_lat 6.16 us at
 //! `query`). `fill` runs per USB packet of a streamed reply.
 
 use crate::app::App;

@@ -1,9 +1,9 @@
 # DMM switch latency: opendm40 vs stock (2026-10-23)
 
 Owner: "Why is there a several-second stall on every mode switch now? The
-stock seemed to switch instantly." Analysis of rust-fw-poc 69cacb9, the
+stock seemed to switch instantly." Analysis of rust-fw-poc 5308613, the
 emulator measurement `emu/hy3131/switchlat.py`, and the coordinator's device
-check on ad74e93 (rate FAST, 1 V / 5 V). No firmware was changed for this.
+check on 0256df2 (rate FAST, 1 V / 5 V). No firmware was changed for this.
 
 ## 1. Short answer
 
@@ -51,16 +51,16 @@ input step in AC+DC / AUTO, not on a plain function switch.
 | # | gate (where) | applies to | waits for | worst case | why (origin) |
 |---|---|---|---|---|---|
 | G1 | settle deadline `set(.., settle)` (`press`, `select`, `set_sub`, `set_range`, autorange) | every row write | time | entry: V / AC V 450, A 650, **Ω 2500**, cap 200, diode 100, cont 200, Hz 1000, temp 500; manual V range 450, manual A 650, Ω range 150; autorange DC 250 (V<->mV 350/450), AC 450, ACA 550/650 | Copied from the stock's S+0x40 table (dmm_v2_6.h "SETTLE DEADLINES"). The table mixes the in-function row writes with entry times: the stock's button entry has **no** deadline (only the 300 ms screen poll gap), Ω entry has none (2500 = S+0x70 single-step window), a manual range change is 250 (S+7 != m+1 path, 0xfa) |
-| G2 | `vet_ad1` (VET_N 2, AC+DC VET_N_ACDC 8, VET_HELD_MAX 4, VET_DIV 0.5 %, VET_FLOOR 4000) | DC V / mV / A and the AC+DC DC phase, after any change of (DC mode, range): range steps **and** function changes such as Ω -> V, A -> V | the first conversion is always held; then one that agrees with the one before | +1 conversion (100 ms at OSR 8192) normally; a moving input: up to 5 conversions (~0.5 s); AC+DC: 8 vetted results across two DC phases | f4925f5 (2026-10-23). Device bab5dd4: after a 2-step autorange (600 -> 60 -> 6 V, the second row at the same R22) AD1's filter still held the 60 V tap: 0.767-0.790 V for 1 V in 5 of 35 (the "0.78 V" bug); an R22 write in the middle of a conversion gave 25-51 % (8087c7d); the AC+DC DC part at 53 % ("0.52 V", root cause fixed separately in c8c2f02, ACDC_STOCK_OSR) |
+| G2 | `vet_ad1` (VET_N 2, AC+DC VET_N_ACDC 8, VET_HELD_MAX 4, VET_DIV 0.5 %, VET_FLOOR 4000) | DC V / mV / A and the AC+DC DC phase, after any change of (DC mode, range): range steps **and** function changes such as Ω -> V, A -> V | the first conversion is always held; then one that agrees with the one before | +1 conversion (100 ms at OSR 8192) normally; a moving input: up to 5 conversions (~0.5 s); AC+DC: 8 vetted results across two DC phases | b3a0ca3 (2026-10-23). Device 9292ec2: after a 2-step autorange (600 -> 60 -> 6 V, the second row at the same R22) AD1's filter still held the 60 V tap: 0.767-0.790 V for 1 V in 5 of 35 (the "0.78 V" bug); an R22 write in the middle of a conversion gave 25-51 % (b7d9017); the AC+DC DC part at 53 % ("0.52 V", root cause fixed separately in c8c2f02, ACDC_STOCK_OSR) |
 | G3 | readout blank (`Meter::reset`, `shown = None`) | every function / coupling change | the first reading | = G1 + G2 + the first conversion | opendm40 design: no value from the old function under the new unit. The stock shows its cleared values (0 / 0L) with the new unit at once |
 | G4 | AC+DC first reading needs both parts (`acdc_seen == 3`) | AC+DC entry | DC phase (450 + 2 vetted DC results), switch to AC (800), first RMS result | 1.3 s (emulator and device 1.32-1.37 s) | opendm40: never show \|DC\| or \|AC\| alone (the stock shows hypot(0, DC) first). The stock emulator showed 1.1179 V (= hypot(1.0, 0.5), correct) at 0.15 s: its AC+DC went to the DC phase at 0.1 s and back to AC at 0.2 s, apparently on a result already pending from the AC row and the leftover phase state (S+10); not analysed further |
-| G5 | AC-part settle `ac_settle_start` / `ac_settle_step` (ACS_STEP 0.1 %, ACS_REM, ACS_FLAT_N 2, ACS_FLOOR, ACS_MAX_MS 5000) | AC+DC and AUTO, after a range or unit change of the same quantity, and after an input step (ACS_DC_STEP 0.5 %, ACS_JUMP 1.5x) | 2 "flat" AC results in a row | 5 s + one DC phase (< 6 s); 10 s when the limit runs out on a jump (ACS_JUMP restarts it, f42a09e) | c4a0b09 / f4925f5 / c8c2f02 / f42a09e (2026-10-23). The AC-coupled AD2 node recharges to the new tap's DC level, and the step reads as AC: device 8087c7d 0.35 V AC part for 2-4 s, READ? +6 %; AUTO switched to AC on it; an input step moved AC+DC autorange 6 -> 60 V and back after 6 s (bab5dd4) |
-| G6 | `acdc_down` ACDC_DOWN_MS 400 | AC+DC / AUTO step down | DC results asking for it for 400 ms, i.e. the next DC phase | +~1 s; together with G5 the legitimate 60 -> 6 V step-down took 4-5.5 s on the device | c08b0d5: the calibrator's level-change dip 7.0 -> 6.3 V stepped 60 -> 6 -> 60 V, ~4 s without a reading |
-| G7 | AUTO coupling's first decision (AUTO_SETTLE_K 4, AUTO_TIE 1 %, AUTO_TIE_MS 4000; AUTO_VOTES 2 later) | AUTO coupling entry | AC part settled on one side of \|DC\| | shows the DC part until then, up to 4 s (emulator: 0.5 V DC part at 1.3 s, the 1.0 V AC part at 3.4 s); a later change of the part needs 2 cycles (2-4 s) | 2481c4d: the first AC part overshoots (+3..7 %, 2563fe1 / a0985e4) and decided a 40 Hz square's tie |
-| G8 | `reading_pending` (READ? / FETCh? +9.91E37) | SCPI only | first reading of the new range | not on the screen | f4925f5: READ? held a 3.39 V transient for 5 s (bab5dd4) |
+| G5 | AC-part settle `ac_settle_start` / `ac_settle_step` (ACS_STEP 0.1 %, ACS_REM, ACS_FLAT_N 2, ACS_FLOOR, ACS_MAX_MS 5000) | AC+DC and AUTO, after a range or unit change of the same quantity, and after an input step (ACS_DC_STEP 0.5 %, ACS_JUMP 1.5x) | 2 "flat" AC results in a row | 5 s + one DC phase (< 6 s); 10 s when the limit runs out on a jump (ACS_JUMP restarts it, afcf151) | 8524157 / b3a0ca3 / c8c2f02 / afcf151 (2026-10-23). The AC-coupled AD2 node recharges to the new tap's DC level, and the step reads as AC: device b7d9017 0.35 V AC part for 2-4 s, READ? +6 %; AUTO switched to AC on it; an input step moved AC+DC autorange 6 -> 60 V and back after 6 s (9292ec2) |
+| G6 | `acdc_down` ACDC_DOWN_MS 400 | AC+DC / AUTO step down | DC results asking for it for 400 ms, i.e. the next DC phase | +~1 s; together with G5 the legitimate 60 -> 6 V step-down took 4-5.5 s on the device | 7496c8c: the calibrator's level-change dip 7.0 -> 6.3 V stepped 60 -> 6 -> 60 V, ~4 s without a reading |
+| G7 | AUTO coupling's first decision (AUTO_SETTLE_K 4, AUTO_TIE 1 %, AUTO_TIE_MS 4000; AUTO_VOTES 2 later) | AUTO coupling entry | AC part settled on one side of \|DC\| | shows the DC part until then, up to 4 s (emulator: 0.5 V DC part at 1.3 s, the 1.0 V AC part at 3.4 s); a later change of the part needs 2 cycles (2-4 s) | d5fff7a: the first AC part overshoots (+3..7 %, 2cc47ef / 1e39149) and decided a 40 Hz square's tie |
+| G8 | `reading_pending` (READ? / FETCh? +9.91E37) | SCPI only | first reading of the new range | not on the screen | b3a0ca3: READ? held a 3.39 V transient for 5 s (9292ec2) |
 | G9 | AD1 code window (FR-05 `Avg`) and OSR switch | DC V / mV / A, Ω at MED / SLOW | nothing (a partial mean is shown at once); +1 digit after AVG_FULL = 8 slow conversions (3.2 s) | none for the first number | FR-05 |
 | G10 | display smoothing (`Smooth`) | if enabled (off by default) | restarts on a step | none | FR-05 / P3 |
-| G11 | rail wake RAIL_SETTLE_MS 50 + `wake_settle` (DC 450, AC / AC+DC / power 2000) | coming back to the DMM page from Scope / Gen (DMM rail off) | time | 2.05 s for AC | 036cc55 / ea29bc4: a row written into a chip still powering up; the AC node starting from a powered-down front end (+8 % first AC reading) |
+| G11 | rail wake RAIL_SETTLE_MS 50 + `wake_settle` (DC 450, AC / AC+DC / power 2000) | coming back to the DMM page from Scope / Gen (DMM rail off) | time | 2.05 s for AC | 085f8dc / 79e22a0: a row written into a chip still powering up; the AC node starting from a powered-down front end (+8 % first AC reading) |
 | G12 | AC EMA (FUN_080160c6 port: thr window, a 0.25) | AC V / A | the first result jumps 99 %, then a = 0.25 | ~0.5 s more to 0.1 % in the emulator; device DC -> AC 2.5-2.9 s (the RMS of the DC input's step decays from 15-38 mV) | stock-identical |
 
 Not gates: the settings save (backup SRAM, no flash erase); the SCPI MEAS?
@@ -103,7 +103,7 @@ AC+DC 60>6 show no switch), so those stock cells are missing.
 old range (the model has no AD1 filter memory by default, see 3.3); the
 range step after it is hidden behind that reading.
 
-### 3.2 Device (coordinator, ad74e93, FAST, 1 V / 5 V)
+### 3.2 Device (coordinator, 0256df2, FAST, 1 V / 5 V)
 
 DC V -> AC V first 458-463 ms, within 0.1 % at 2.46-2.89 s, screen 0.5-0.8 s;
 AC V -> DC V 457-462 ms; **DC V -> Ω 2.67-2.68 s, screen blank until
@@ -147,8 +147,8 @@ emulator / device paths above.
 | 2 | **Ω entry: drop the 2500 ms deadline**. Enter with the stock's timing (no deadline, or 150 ms like a range write) and keep `entry + 2500` as the stock's one-range-per-step window, which then starts to work | 3.1 -> ~1.2 s (device 2.7 -> ~1.2 s) | stock 1.15 s | low: this is the stock's own behaviour; the single-step window still guards against the probe-capacitance / open-lead transient the stock disables fast down-ranging for | the stock range-hunt logic |
 | 3 | **Function entry settles to the stock's effective ~300 ms**: V / AC V 450 -> 300, A 650 -> 300 (keep the in-function values: unit changes, AC+DC phases, autorange) | DC V -0.15 s, A -0.35 s | DC V ~0.35-0.4 s, A ~0.4-0.45 s (stock 0.35) | low-medium: the stock does it on the same hardware (relay pulse 10 ms inside write_config); check the A-jack relays (PE0 / PE1 shunt switch) on the device: first A reading against a calibrator | everything else |
 | 4 | **Manual V range 450 -> 250** (`set_range`, the stock's range-write deadline 0xfa) | -0.2 s on MF / SCPI range changes | ~0.3 s | low | G2 still vets the first conversion |
-| 5 | **Vet only where a stale tap is possible**: no held first conversion when the row write changed the R22 that was running, so AD1 restarts. The quiesce in write_config does not restart it, or bab5dd4 would not have happened. Row R22 (hy3131_tables.rs): the DC V / mV / A rows are all 0x15, the Ω row 0x14 (run at 0x13 / 0x17), the AC rows 0x16, and a DC row in steady MED / SLOW runs at 0x17. So Ω -> V / A, AC -> DC, and V <-> A at MED / SLOW (0x17 -> 0x15) restart AD1. **V <-> A at FAST (0x15 -> 0x15) does not, and keeps the vet.** Keep VET_N for range steps within the same DC mode and in AC+DC | -1 conversion (0.1 s) where R22 changes | Ω -> V ~0.45 s; V -> A at MED ~0.6 s, with 3 ~0.35 s | low-medium: device bab5dd4 had 0 of 10 bad readings after a single step that changed R22; all of the 0.78 V cases were a second row at the same R22. The rule must compare the R22 actually running (`self.r22`), not the mode | the 0.78 V and 25-51 % protections |
-| 6 | **Provisional readings** while G2 / G4 / G5 / G7 hold: show the held value dimmed and without the last digit (or two), then turn it normal when the gate releases. Autorange, limits, statistics, CSV, REL and SCPI keep using only settled readings (`reading_pending` unchanged) | AC+DC range change: no number for 1.8 s (emulator) / 2-5.5 s (device) -> a dimmed number at the first result (~0.6-1 s); AC+DC entry 1.3 -> ~0.6 s (dimmed hypot(0, DC) or the DC part alone, labelled); AUTO coupling: a dimmed "deciding" state instead of showing DC as if settled | first number ~0.5-1 s everywhere | medium: a dimmed 0.35 V transient (+6 %) is visible for a moment; the owner must accept dimmed digits as "not final". It must never feed autorange (the excursion bugs) or READ? (bab5dd4) | all gates keep their protective role, only the display changes |
+| 5 | **Vet only where a stale tap is possible**: no held first conversion when the row write changed the R22 that was running, so AD1 restarts. The quiesce in write_config does not restart it, or 9292ec2 would not have happened. Row R22 (hy3131_tables.rs): the DC V / mV / A rows are all 0x15, the Ω row 0x14 (run at 0x13 / 0x17), the AC rows 0x16, and a DC row in steady MED / SLOW runs at 0x17. So Ω -> V / A, AC -> DC, and V <-> A at MED / SLOW (0x17 -> 0x15) restart AD1. **V <-> A at FAST (0x15 -> 0x15) does not, and keeps the vet.** Keep VET_N for range steps within the same DC mode and in AC+DC | -1 conversion (0.1 s) where R22 changes | Ω -> V ~0.45 s; V -> A at MED ~0.6 s, with 3 ~0.35 s | low-medium: device 9292ec2 had 0 of 10 bad readings after a single step that changed R22; all of the 0.78 V cases were a second row at the same R22. The rule must compare the R22 actually running (`self.r22`), not the mode | the 0.78 V and 25-51 % protections |
+| 6 | **Provisional readings** while G2 / G4 / G5 / G7 hold: show the held value dimmed and without the last digit (or two), then turn it normal when the gate releases. Autorange, limits, statistics, CSV, REL and SCPI keep using only settled readings (`reading_pending` unchanged) | AC+DC range change: no number for 1.8 s (emulator) / 2-5.5 s (device) -> a dimmed number at the first result (~0.6-1 s); AC+DC entry 1.3 -> ~0.6 s (dimmed hypot(0, DC) or the DC part alone, labelled); AUTO coupling: a dimmed "deciding" state instead of showing DC as if settled | first number ~0.5-1 s everywhere | medium: a dimmed 0.35 V transient (+6 %) is visible for a moment; the owner must accept dimmed digits as "not final". It must never feed autorange (the excursion bugs) or READ? (9292ec2) | all gates keep their protective role, only the display changes |
 | 7 | **Shorter AC settle limits where the device allows**: ACS_MAX_MS 5000 -> ~3000 and an AC+DC step-down in the same DC phase when the vet passed (instead of the next DC phase) | AC+DC 60 -> 6 V 4-5.5 s -> ~3 s | ~3 s | medium-high: these limits came from device transients (2-4 s node recharge, the 7.0 -> 6.3 V dip); only with a device sweep (calibrator steps, DBG:ACDC:TRACE) | needs device data first |
 | 8 | AUTO_TIE_MS 4000 -> 2500 | the AUTO coupling's first decision up to 1.5 s sooner | ~2.5 s | low-medium (a tie is shown as DC sooner) | the overshoot rule (AUTO_SETTLE_K) |
 
@@ -237,7 +237,7 @@ violations.
 ### 6.1 Emulator, first settled FETCh? (s; first / within 0.1 %)
 
 switchlat.py, model C; before = falsehint 93d8033 (the same DMM code as
-rust-fw-poc f0d21eb), after = fastswitch on f0d21eb.
+rust-fw-poc 3e41549), after = fastswitch on 3e41549.
 
 | switch | MED before | MED after | SLOW before | SLOW after | FAST before | FAST after |
 |---|---|---|---|---|---|---|
@@ -269,17 +269,17 @@ conversions) shows no such shift. The same 0.59 / 0.20 appear with
 proposals 1-4 alone (bisect build).
 
 Device: the fastswitch build is not measured yet. Baseline (settle.py at
-1 V, RATE FAST, f0d21eb; device-check-2026-10-21.md "f0d21eb" item 5, the
-same as ad74e93): DC V -> AC V 460-462 ms, AC V -> DC V 457-460 ms, DC V ->
+1 V, RATE FAST, 3e41549; device-check-2026-10-21.md "3e41549" item 5, the
+same as 0256df2): DC V -> AC V 460-462 ms, AC V -> DC V 457-460 ms, DC V ->
 RES 2672 ms, RES -> DC V 554-558 ms, DC V -> A 758 ms, DC V -> mA 557-559
 ms, AC V -> AC+DC 1372-1377 ms, DC V 6 -> 60 V 509-557 ms. Retest steps:
 TODO.md "Switch latency".
 
-### 6.2 Device ab7184c follow-up (branch fastswitch2, 2026-10-24)
+### 6.2 Device 0760432 follow-up (branch fastswitch2, 2026-10-24)
 
-The device check of ab7184c (device-check-2026-10-21.md "ab7184c: switch
+The device check of 0760432 (device-check-2026-10-21.md "0760432: switch
 latency on the device") found five bugs. Each has an emulator / host test
-that fails on the ab7184c code (rust-fw-poc 7bd7f6f, plus only the
+that fails on the 0760432 code (rust-fw-poc 190d7d5, plus only the
 DBG:READout? query where the test needs it) and passes after the fix.
 
 1. **Ohm hunt values shown / sent as final** (dmm.rs `poll_ohm`, OHM_VET_*).
@@ -302,29 +302,29 @@ DBG:READout? query where the test needs it) and passes after the fix.
    follows the hunt's deadlines (main.rs, as the power meter's), at most
    8 s. Emulator: knob `ohmtau:ms` (the ohm node relaxes to its value after
    each ohm row change; 150 ms chosen, not measured) reproduces the device
-   shape: ab7184c answers FETC? / READ? 302 ohm for 390, 81 for 100, 4541
+   shape: 0760432 answers FETC? / READ? 302 ohm for 390, 81 for 100, 4541
    for 4.7 k, 9.71 M for 10 M. `emu/hy3131/ohmhunt.py`: every FETCh?, READ?
    and amber readout value within 0.5 % of the final one. fastswitch2, first
-   final FETCh? with `ohmtau:150` (the vet waits out the lag; ab7184c
+   final FETCh? with `ohmtau:150` (the vet waits out the lag; 0760432
    answered the wrong value at 1.05 / 1.30 s): 390 ohm FAST 1.82 / MED
    2.52 s, 100 ohm 1.72 / 2.12 s, 4.7 kohm MED 2.37 s, 10 Mohm MED 1.75 s,
    `CONF:RES;:READ?` 390 ohm 1.84 / 2.55 s, the grey values sampled before;
-   without the lag 4.7 kohm MED 1.17 s (ab7184c 1.15 s): the vet costs
+   without the lag 4.7 kohm MED 1.17 s (0760432 1.15 s): the vet costs
    nothing when consecutive conversions already agree.
 2. **FETCh? while AUTO decides** (main.rs `Out::Fetch`): +9.91E37 at once
    (no wait, no error) while nothing settled is shown in AUTO; READ? /
-   MEAS? keep AUTO_WAIT_MS. autowaittest ac-fetch / dc-fetch: ab7184c
+   MEAS? keep AUTO_WAIT_MS. autowaittest ac-fetch / dc-fetch: 0760432
    blocked 0.9-2.0 s and answered the DC part (0.1999 V) of a 1 V AC +
    0.2 V DC input; now +9.91E37 in < 0.25 s at every poll, the decided
    value afterwards.
 3. **RUN (HOLD) while AUTO decides** (meter.rs `update`, app.rs
    `shown_reading`). The decision never stalled (VOLT:COUP? AUTO,AC on
-   ab7184c in the emulator); the readout did: HOLD with nothing shown froze
+   0760432 in the emulator); the readout did: HOLD with nothing shown froze
    the draw, so neither the HOLD label nor the decided value appeared. Now
    HOLD pressed before the function's first settled reading is armed: the
    grey provisional value / placeholder stays live under the HOLD label,
    and the first settled reading is shown and held (no statistics).
-   autowaittest ac-hold (DBG:READout? kind and hold state, FETC?; ab7184c:
+   autowaittest ac-hold (DBG:READout? kind and hold state, FETC?; 0760432:
    "N" with hold 1 for 8 s), meter-test
    `hold_before_the_first_reading_holds_it`, ui-render sw15.
 4. **V-JACK? flicker at 8.06 s after A / mA -> Scope -> DMM** (sentinel.rs
@@ -332,12 +332,12 @@ DBG:READout? query where the test needs it) and passes after the fix.
    its end to 1 s after it (OHM_EXIT_QUIET_MS), at most 12 s after the
    event (OHM_EXIT_MAX_MS); row writes after the same event keep the slid
    end. Why the tail is longer since the fast-switch builds (7.75 s vs
-   6.34 s on 612c45c) is not known: the emulator can only replay it. Cost:
+   6.34 s on bb15d39) is not known: the emulator can only replay it. Cost:
    a source that reads 0x70 steadily gets V-JACK? ~13 s after the switch
    (was ~8 s); CMPHO alone keeps ~2 s. Emulator: `ohmexitrst:1` starts the
    ohmexit trace at a chip reset too; switchtest `ohmexit-long`
    (`ohmexit:7.75;ohmexitlo:0.26`, 5 V on V, a new SCOPE step: MENU ->
-   Oscilloscope -> MENU -> Multimeter): ab7184c logs V-JACK? at +7.90-8.05 s
+   Oscilloscope -> MENU -> Multimeter): 0760432 logs V-JACK? at +7.90-8.05 s
    in all four A entries (two after the Scope page, two after RES), as the
    device. The model's ohmexit trace had stopped firing on RES -> A (opendm40
    quiesces before the relay pulse, so the row role was None at the pulse;
@@ -347,7 +347,7 @@ DBG:READout? query where the test needs it) and passes after the fix.
 5. **Placeholder unit after `CONF:CURR:DC 10`** (app.rs `prov_follow`): the
    placeholder follows a range / unit change made before the first reading
    (at the end of CONF and on every tick). autowaittest a10-unit / ma-unit
-   (DBG:READout? in the CONF's own message and for 1.2 s; ab7184c: "mA"
+   (DBG:READout? in the CONF's own message and for 1.2 s; 0760432: "mA"
    in the first three reads).
 
 `DBG:READout?` (new): kind,unit,value,hold of what the DMM readout draws

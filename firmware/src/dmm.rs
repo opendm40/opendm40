@@ -61,7 +61,7 @@ const CAL: u32 = SETTINGS + 0x168;
 /// A RAM copy of the record's first REC_LEN bytes (the stock record is 800),
 /// made once at start-up (`load_record`, main.rs, before the App): the
 /// record is in the slow flash bank (not zero-wait: a load stalls the AD2
-/// stream ISR ~21.8 us, device b6909d6), and its readers run while a stream
+/// stream ISR ~21.8 us, device 246afc7), and its readers run while a stream
 /// may (`ad2_scale` per Wave view frame / LOG:SCALe?, the scope's gain /
 /// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
 /// opendm40 never writes the record. Before the copy (and in the host tests)
@@ -623,7 +623,7 @@ const AC_OVER_HOLD_MS: u64 = 500;
 /// Plain AC mV: the node's peak estimate |LPF| + sqrt(2) x RMS above this
 /// many times the range steps up (as an over-range result), the input
 /// clipped. The row is DC-coupled (the LPF is the input's DC) and AD2 spans
-/// +-1.25 V there (2.08 x 600 mV; x10 on 60 mV). Device 46370df: the 40 Hz
+/// +-1.25 V there (2.08 x 600 mV; x10 on 60 mV). Device 940e8aa: the 40 Hz
 /// 0 / 9.5 V square on V-COM read 0.606 V on 600 mV for 12 s (AC V AUTO,
 /// mV-first), under the 1.03 x 600 mV up threshold: the mV input clamps it
 /// to a ~0 .. 1.21 V swing, so its RMS cannot reach the threshold; LPF ~0.6
@@ -635,7 +635,7 @@ const MV_CLIP_K: f32 = 2.2;
 /// this long after its row write (the AC-coupled row settles first).
 const MV_CLIP_SETTLE_MS: u64 = 1500;
 
-/// `Dmm::precond_ms` default (device 0774e70: 100 ms was enough).
+/// `Dmm::precond_ms` default (device a3b6d0a: 100 ms was enough).
 const PRECOND_MS: u16 = 100;
 
 fn relay_pa(clk: &mut Clock, arg: u8) {
@@ -715,7 +715,7 @@ impl Freq {
     }
 
     /// One gate's result of source `i` (`f` kHz, duty `d` %, `ok`: a whole
-    /// gate with counted edges, `ctr_valid`). Device 0774e70 (2026-10-24):
+    /// gate with counted edges, `ctr_valid`). Device a3b6d0a (2026-10-24):
     /// after every Hz entry source 0 (0xf0) read 0 Hz / 0 % in its first
     /// gates and was shown (0.000 Hz in amber, into READ? and MIN / AVG)
     /// until source 1 won at 2.42 s. So a gate without edges is no result:
@@ -990,7 +990,7 @@ pub struct Dmm {
     ac_seed: bool,
     /// Plain AC V / mV after that reset: the results to drop before the seed. 2 =
     /// the first poll past the settle: its INTF read clears the flags of a
-    /// block the chip latched during the settle (device 489f956: DC V -> AC
+    /// block the chip latched during the settle (device 8e04b1c: DC V -> AC
     /// V read 0.707 x the input, half the window before the AC reached the
     /// node); 1 = the next result, whose window began before that read.
     ac_lead: u8,
@@ -1091,9 +1091,9 @@ pub struct Dmm {
     /// Before a DC A family row is entered while `a_blind` (and V-JACK?
     /// is enabled), the temperature row runs for this long (ms; default
     /// PRECOND_MS; DBG:SENTinel:PRECond <ms>, RAM only, 0 = off). Device
-    /// f0d21eb: a real 24 V on V-COM read CTSTA 0x70 / 0x50 in DC A only
+    /// 3e41549: a real 24 V on V-COM read CTSTA 0x70 / 0x50 in DC A only
     /// when TEMP came before (DC V 60 V+, the ohm rows and a chip restart
-    /// left the A row reading 0). Device 0774e70: 100 / 300 / 1000 ms of
+    /// left the A row reading 0). Device a3b6d0a: 100 / 300 / 1000 ms of
     /// it brought V-JACK? back at 1.9 / 2.1 / 2.8 s after DC V 60 V and
     /// after RES, with no false hit at 5 V or with the source off. Cost:
     /// the relay pulse there and back (2 x 10 ms) and the blocked loop.
@@ -1148,8 +1148,8 @@ struct FuseJob {
 /// time limit. Only a final reading of the 600 ohm row whose vet saw two
 /// conversions agree counts (OHM_VET_*), never the n-th raw conversion:
 /// designed when the ohm entry waited 2.5 s, the third conversion after the
-/// fast entry (150 ms, ab7184c) could still be charging the node (owner on
-/// 10242c3: 18 ohm instead of 48, "Check leads").
+/// fast entry (150 ms, 0760432) could still be charging the node (owner on
+/// 2232996: 18 ohm instead of 48, "Check leads").
 const FUSE_READINGS: u8 = 1;
 const FUSE_TIMEOUT_MS: u64 = 8000;
 
@@ -1190,7 +1190,7 @@ fn ema_ms(acc: &mut f32, last: &mut Option<u64>, now: u64) {
 
 // AC+DC: what reaches the HY3131 and the board, as the stock does it
 // (stock/re/docs/history/acdc-stock-vs-opendm40.md sections 7 and 8.1), one switch per difference
-// so they can be bisected on the device (false = the opendm40 9421fd5 way).
+// so they can be bisected on the device (false = the opendm40 2cd6dd7 way).
 //
 /// DC phase at the config row's OSR 8192 (R22 = 0x15), and no R22 write
 /// while it runs. The stock's 0x17 write is gated by a once-flag that stays
@@ -1233,7 +1233,7 @@ const ACDC_DIAG_N: usize = 4;
 // AC+DC (method A) and AUTO coupling after a range or unit change (manual or
 // autorange): the AC-coupled AD2 node has to recharge to the new divider
 // tap's DC level, and while it does its step reads as AC. Device check
-// 8087c7d (1 V DC): 6 -> 60 V gave an AC part of 0.35 V (1.06 V from the
+// b7d9017 (1 V DC): 6 -> 60 V gave an AC part of 0.35 V (1.06 V from the
 // range page) for ~2-4 s, then a tail 18 -> 1 mV over ~10 s, READ? up to
 // +6 %; 60 -> 6 V 0.15 V for ~2 s. The emulator's node (tau 0.3 s, charged
 // in the AC phases only) shows 5.3 V for the first AC phase. The stock does
@@ -1248,7 +1248,7 @@ const ACDC_DIAG_N: usize = 4;
 // parts are measured); AUTO keeps showing its part with the AC part held
 // and does not re-decide.
 //
-// "Flat" (device bab5dd4: a 1 % step let the 600 -> 60 V tail of a 40 Hz
+// "Flat" (device 9292ec2: a 1 % step let the 600 -> 60 V tail of a 40 Hz
 // square through, +0.55 / +0.24 % for 1.7 s): a result that fell by at
 // most ACS_STEP (0.1 %) of itself since the previous one (or rose by at most
 // that: `acs_flat`),
@@ -1261,7 +1261,7 @@ const ACDC_DIAG_N: usize = 4;
 // (`ac_settle_cap`: the last result held is the AC part), so the gap to
 // the first reading stays below 6 s.
 //
-// The same settle after an input step (device bab5dd4: a 0.5-0.8 V DC step
+// The same settle after an input step (device 9292ec2: a 0.5-0.8 V DC step
 // made the AC part read up to 3.4 V for ~1 s, AC+DC autorange went 6 -> 60
 // V and back after 6 s): a DC part that moved by more than ACS_DC_STEP of
 // the range between two DC results, or an AC result above ACS_JUMP x the
@@ -1281,7 +1281,7 @@ const ACS_JUMP_FLOOR: f32 = 0.005;
 // AC+DC (method A) / AUTO step down: only in the DC phase, once its results
 // asked for it for ACDC_DOWN_MS in a row (`acdc_down`; the AC phase's
 // magnitude uses the last DC part, which may be one result of a transient).
-// Device check ceb5ca5 / ad97fd7: the calibrator's level change dips to
+// Device check 28ace43 / ad97fd7: the calibrator's level change dips to
 // 2-4 V for ~0.2 s, and one DC result in the dip stepped 60 -> 6 V on a
 // 7.0 -> 6.3 V change (then back: 6.3 V is over range on 6 V, no reading
 // for ~4 s). A step down now waits for the next DC phase (~1 s later);
@@ -1289,14 +1289,14 @@ const ACS_JUMP_FLOOR: f32 = 0.005;
 const ACDC_DOWN_MS: u64 = 400;
 
 // DC conversions after a range change (DC V / mV / A, the DC phase of
-// AC+DC method A; `vet_ad1`). Device bab5dd4: VOLT:RANG:AUTO ON from 600 V
+// AC+DC method A; `vet_ad1`). Device 9292ec2: VOLT:RANG:AUTO ON from 600 V
 // steps down twice; the second row (6 V) goes out at the same R22 (OSR
 // 8192) as the first, so AD1 is not restarted and its decimation filter
 // still holds samples of the 60 V tap: one reading of 0.767-0.790 V for
 // 1 V in 5 of 35 tries (one step from 60 V: the row changes R22 from 0x17,
 // AD1 restarts, 0 of 10). An R22 change in the middle of a conversion
-// (the same range set again, device 8087c7d: 25-51 %) and the AC+DC DC
-// part of 53 % after a range-page change (bab5dd4) look the same. So the
+// (the same range set again, device b7d9017: 25-51 %) and the AC+DC DC
+// part of 53 % after a range-page change (9292ec2) look the same. So the
 // first VET_N (AC+DC: VET_N_ACDC, through the second DC phase: the first one
 // after a set keeps the AC phase's count, up to 4) conversions on a new range
 // count only when each agrees with the one before it within VET_DIV (0.5 %)
@@ -1342,7 +1342,7 @@ const VET_FLOOR: i32 = 4000;
 //   count).
 // - R22_LATE (`r22_early`): the step to the slow OSR (0x17) of MED / SLOW
 //   waits until R22_DROP_WIN_MS after the row write, so it no longer drops two
-//   400 ms conversions (CONF -> READ? DC V at MED: 1.5-1.8 s on e1cec01). Until
+//   400 ms conversions (CONF -> READ? DC V at MED: 1.5-1.8 s on 4284642). Until
 //   then the readings come at OSR_FAST (100 ms, unaveraged); ohm's in-range
 //   OSR is OSR_FAST in the window (two 100 ms conversions dropped), the steady
 //   one after it. That a step after the window is clean is INFERRED from the
@@ -1389,7 +1389,7 @@ const ENTRY_MS: u64 = 300;
 const RANGE_MS: u64 = 250;
 const OHM_SINGLE_MS: u64 = 2500;
 
-/// Ohm vet (device ab7184c new bug 1): after every ohm row write (the
+/// Ohm vet (device 0760432 new bug 1): after every ohm row write (the
 /// entry, each autorange step, a manual range) a conversion is final only
 /// when the one before it on the same row agrees with it within
 /// OHM_VET_REL plus OHM_VET_CNT counts of the range (60 000 counts; two OL
@@ -1408,7 +1408,7 @@ const OHM_VET_CNT: f32 = 8.0;
 /// settle: 1.5 s is 15 / 4 conversions).
 const OHM_VET_MAX_MS: u64 = 1500;
 
-/// Ohm ranges that disagree (device a2e9766, the calibrator's disabled
+/// Ohm ranges that disagree (device 7c04b03, the calibrator's disabled
 /// output: 6 Mohm read 0.104 Mohm, 600 kohm OL, and AUTO stepped between
 /// them for good). A step down puts the input on a range with ten times
 /// the test current (docs/data/short.csv: 0.215 uA on 6 Mohm, 2.17 uA on
@@ -1439,8 +1439,8 @@ const OHM_BAND: f32 = 2.0;
 // the signal changed). The first cycle after a reset decides at once (no
 // votes): the larger part. It is not taken on a transient, because the
 // hysteresis keeps it: the first AC parts after an entry overshoot (A's AC
-// phase: +3 % on the 40 Hz square, device 2563fe1, which then showed AC
-// while C showed DC; +7 % on a0985e4; up to +52 % in the emulator after the
+// phase: +3 % on the 40 Hz square, device 2cc47ef, which then showed AC
+// while C showed DC; +7 % on 1e39149; up to +52 % in the emulator after the
 // up-range; C's ~0.5 % high), and on a tie (that square: AC 4.760, DC
 // 4.764 V) the overshoot alone decided. So the first decision waits until
 // the AC part has settled on one side: its change since the evaluation
@@ -2069,7 +2069,7 @@ impl Dmm {
             }
         } else if old != (mode, range) && !self.acdc && !self.cpl_auto {
             // A plain range step: the AC filters must not carry the other
-            // range's value (device 0774e70: AC A 10 A -> 60 mA read 1 %
+            // range's value (device a3b6d0a: AC A 10 A -> 60 mA read 1 %
             // of the 10 A value first, the EMA's 0.99 step).
             self.f_ac = 0.0;
             self.f_lpf = 0.0;
@@ -2185,7 +2185,7 @@ impl Dmm {
 
     /// A range or function change happened and no reading of it came yet:
     /// READ? / FETCh? answer +9.91E37 ("no reading") rather than the last
-    /// reading from before it (main.rs; device bab5dd4: READ? held a
+    /// reading from before it (main.rs; device 9292ec2: READ? held a
     /// transient of 3.39 V for 5 s through an AC+DC range step).
     pub fn reading_pending(&self) -> bool {
         self.rd_pending
@@ -2201,7 +2201,7 @@ impl Dmm {
 
     /// `r` was measured on the row the chip runs now (mode, AC+DC: either
     /// phase, and range): FETCh? never answers a reading from another
-    /// range or function (device 0774e70: FETC? gave the 10 A value for
+    /// range or function (device a3b6d0a: FETC? gave the 10 A value for
     /// 0.9 s after CONF:CURR:AC 0.06). The power meter and frequency (its
     /// readings carry the counter's range, not the row's): always.
     pub fn reading_current(&self, r: &Reading) -> bool {
@@ -2244,7 +2244,7 @@ impl Dmm {
     /// part that moved by more than ACS_DC_STEP of the range is an input
     /// step (the AC part's settle starts). True while such a settle runs:
     /// no step down then (the magnitude would use the stale AC part; device
-    /// bab5dd4 / emulator: a DC -> AC current step walked uA -> 10 A -> mA).
+    /// 9292ec2 / emulator: a DC -> AC current step walked uA -> 10 A -> mA).
     fn acs_dc_step(&mut self, now: u64, x: f32, lim: f32) -> bool {
         if !self.acdc || self.am_on() {
             return false;
@@ -2652,7 +2652,7 @@ impl Dmm {
     }
 
     /// Settle after a rail wake: the AC node (the AC rows, AC+DC, the power
-    /// meter) starts over from a powered-down front end; device 036cc55, AC V
+    /// meter) starts over from a powered-down front end; device 085f8dc, AC V
     /// on a 4.77 V rms square: the first reading +8 %, +0.4 % after 1.1 s.
     /// A host READ? waits for this.
     fn wake_settle(&self) -> u64 {
@@ -3015,7 +3015,7 @@ impl Dmm {
                 self.manual = false;
                 self.v_auto = 1;
                 // AUTO+ never steps to mV: leave it at once for the V
-                // autorange's 6 V (device check 46370df: AUTO -> AUTO+ on
+                // autorange's 6 V (device check 940e8aa: AUTO -> AUTO+ on
                 // 60 mV stayed there until the function was entered again).
                 // AC+DC: into its DC phase, as poll_ac's mV -> V step.
                 if matches!(self.mode, 2 | 3) {
@@ -3076,7 +3076,7 @@ impl Dmm {
     /// AUTO -> manual on the range AUTO is on) only makes the range manual.
     /// Rewriting the row then restarted the conversion behind a 450 ms (then)
     /// settle that reset nothing (`set` with the mode unchanged): 1-2
-    /// readings of 25-51 % of the input on DC V (device check 8087c7d).
+    /// readings of 25-51 % of the input on DC V (device check b7d9017).
     fn same_row(&self, m: u8, r: i8) -> bool {
         let other = match m {
             1 | 3 => m - 1,
@@ -3329,7 +3329,7 @@ impl Dmm {
         self.sent_mode = 255;
         self.a_blind = true;
         // ... and the A rows' SENSE comparator reads 0x70 for seconds after
-        // a restart too (device ad74e93 E2: A, Scope page, back).
+        // a restart too (device 0256df2 E2: A, Scope page, back).
         self.ohm_exit_t = Some(clk.now_ms());
         self.set(clk, m, r, 450);
     }
@@ -4162,7 +4162,7 @@ impl Dmm {
         };
         // Plain AC A: over-range results within AC_OVER_HOLD_MS of the
         // first result after a row write are held back (no reading, no range
-        // move, no OVERLOAD / AUTO hop): device f0d21eb, CONF:CURR:AC 10 then
+        // move, no OVERLOAD / AUTO hop): device 3e41549, CONF:CURR:AC 10 then
         // 0.06 with the A jack empty read OL on the first 60 mA result(s)
         // (the 10 mohm -> 0.5 ohm shunt, PB2 -> PB1 and x1 -> x10 step
         // through the RMS / LPF blocks) and the OVERLOAD rule fell back to
@@ -4696,7 +4696,7 @@ impl Dmm {
         }
         // The row was just written: AD2 restarts (its first results, and a
         // hold the rewrite did not clear, are not the A-jack current: device
-        // f3aea2f latched A-PROT with the A jack open, 15 mA after it, on
+        // 7534701 latched A-PROT with the A jack open, 15 mA after it, on
         // the first window's peak). Clear the hold once it settled; the
         // first window counts from there.
         if self.probe_settle {
@@ -4764,7 +4764,7 @@ impl Dmm {
 
     /// The function can carry the A-jack probe: DC V / mV, not AC+DC (its
     /// phases rewrite the row), not during the fuse check. Not ohm /
-    /// temperature (device 1eb4d7e, A jack open): there the probe follows
+    /// temperature (device 9944169, A jack open): there the probe follows
     /// the V input, ~0.34 A per volt on V-COM (5 V DC read 1.7 A, 10 V 3.1 A,
     /// the 0..9.6 V square up to 37 A) and latched A-PROT; those rows keep
     /// the comparator's A-JACK only (doc 4.8).
@@ -4778,7 +4778,7 @@ impl Dmm {
     /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
     /// the open V jack of an A-jack current (sentinel MV_DRV_K).
     /// AC+DC mV: also driven while its DC phase's last result was over the
-    /// range (`mv_dc_drv`; device 489f956: after a source went off the open
+    /// range (`mv_dc_drv`; device 8e04b1c: after a source went off the open
     /// input read OL and the AC phase's results "free" while PB1 hit, a
     /// false A-JACK).
     #[inline(never)]
@@ -4870,7 +4870,7 @@ impl Dmm {
         if self.freq_restart_fresh(now, 0x08) {
             // The first gate is source 1's (0x08): source 0 (0xf0) counted
             // nothing in its first gates after every Hz entry on the device
-            // (0774e70; f0d21eb's clean first readings at 1.37 s were source
+            // (a3b6d0a; 3e41549's clean first readings at 1.37 s were source
             // 1's too). The sources start over.
             self.freq.src_alt = true;
             self.freq.restart_sources();
@@ -5262,7 +5262,7 @@ pub fn dcv_volts(code: f32, k: usize) -> f32 {
 
 /// AD2 gain of the DC-coupled V row per DC V range (ad2exp.rs `dcv_row`,
 /// feasibility E7) relative to the nominal K * 1.25 / 2^18: device test 6.5
-/// (4ff95f7, the fit of the READ? reference against the AD2 mean, AGND,
+/// (6353627, the fit of the READ? reference against the AD2 mean, AGND,
 /// OP1's chopper held): r0 +0.84 % (the /100 tap with OP1 x10), r1 +1.79 %,
 /// r2 +0.53 %, r3 +0.27 % (r2 / r3 up to 24 V only: +-0.2 / 0.5 %). The
 /// fallback of the self-cal's gain (an input below ~5 % of AD2's span).
@@ -5403,7 +5403,7 @@ mod tests {
     #[test]
     fn freq_take_zero_is_no_result() {
         let f = 0.0400017f32;
-        // Device 0774e70: source 0 reads 0 Hz / 0 % in its first gates,
+        // Device a3b6d0a: source 0 reads 0 Hz / 0 % in its first gates,
         // source 1 the signal. Entry order as poll_freq_mode: 1, 0, 1, 0.
         let mut q = freq0();
         assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
@@ -5562,7 +5562,7 @@ mod tests {
         assert_eq!(RATE_NAMES[Rate::Medium as usize], "MED");
     }
 
-    /// The AC settle's flat test on the device's 40 Hz square tail (bab5dd4,
+    /// The AC settle's flat test on the device's 40 Hz square tail (9292ec2,
     /// 600 -> 60 V: 4.821 / 4.790 V shown for 4.768 V; the 1 % step took
     /// them) and on a steady AC part.
     #[test]

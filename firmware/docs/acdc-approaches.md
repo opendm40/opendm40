@@ -135,7 +135,7 @@ Reading of the table:
 
 | chip | AC method | AC+DC | source |
 |---|---|---|---|
-| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (7889e6c, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; HYCON's "DemoCode" zips contain only a "website under construction" readme. HYCON's ENOB tool (`HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
+| HYCON HY3131 / HY3130 | digital: AD2 (19-bit, 76.8 kS/s) -> **HPF** -> RMS = sum(X^2)/N (or sum(X*Y)/N with AD3, HY3131 only), LPF = DC mean of the same stream; AD1 24-bit for DC | **none**. X and Y are "the data that passed High Pass Filter" (DS 13.2 RMS Converter (3)); no control bit for the HPF in the register map; the reserved bits of R26 / R34 / R35 were poked on the device and none bypasses it (0bf4847, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). APD-DMM003 has separate DCV (sec. 3) and ACV (sec. 4) configurations and nothing combined; APN-HY3131001 is about SPI timing only; HYCON's "DemoCode" zips contain only a "website under construction" readme. HYCON's ENOB tool (`HY3131-ENOB.zip`, `Config/ACV/HYCONFIG-0.txt`) sets R23 = 0x03 (**ENAD1 = 0**), R26 = 0x80, R29 = 0xF8 for ACV, R22 = 0x14 / R23 = 0x8B / R26 = 0x00 for DCV: HYCON's own reference rows run one converter family at a time | DS-HY3131 p. 29-34; APD-DMM003 p. 11-17 |
 | HYCON HY3132 | nothing found on the web (no datasheet, no mention) | UNKNOWN | - |
 | Dream Tech DTM0660 | "built-in DSP, it can measure true RMS up to 1 kHz without any additional components", "AC Rectification: built-in true RMS processor ... 1 kHz bandwidth, error < 0.5 %", 14-bit sigma-delta, 3 readings/s | not in the feature list; function table has DC/AC only | DTM0660 datasheet p. 1-2 (shaddack mirror) |
 | Fortune FS9922-DMM4 | "AC rectifier OPAMP" (average responding, no RMS) | none (DC/AC mode bit per function) | FS9922-DMM4 DS rev 1.3, sec. 12.10, function table |
@@ -731,7 +731,7 @@ ripple, or a sample of the phase before inside the window). Note 7 on (the
 device's offsets); B~ = B with `n7g:0.002` (a random draw per AD1 enable:
 its errors are the draw's). The last V phase returns to the 6 V range
 after the 60 V one (a range visited again: C re-runs its self-cal there,
-E7's cal has one slot). Run of the commit after d6f5e96:
+E7's cal has one slot). Run of the commit after 4d74bfb:
 
 | phase | A err % / p-p % / rd/s / settle s | B | C | B~ |
 |---|---|---|---|---|
@@ -746,7 +746,7 @@ E7's cal has one slot). Run of the commit after d6f5e96:
 | A AC 0.2 + DC 0.2 @50 | -0.002 / 0.009 / 2.7 / - | +0.001 / 0.009 / 9.3 / - | -0.000 / 0.324 / 9.3 / - | +0.005 / 0.006 / 9.6 / - |
 | A DC 0.3 + 0.05 @45 | +0.010 / 0.323 / 2.7 / 0.9 | -0.007 / 0.334 / 9.6 / 9.4 | +0.001 / 0.065 / 9.6 / 0.0 | +0.004 / 0.142 / 9.3 / 0.0 |
 
-Earlier runs of the same code (4539aea / 17dcff2, before the 166237c
+Earlier runs of the same code (51e8cad / efb8cb1, before the e9a89bf
 GD32_SPI timing) gave the same picture within 0.05 %; one of them drew a
 B~ gain of -0.12 % at 12 V.
 
@@ -782,9 +782,9 @@ candidates, `e2` the 40 Hz square on 6 / 60 V (C's AC part against A's),
 Decision rule: C becomes the AC+DC default when e2 shows its AC part
 within the AC V spec of A's (0.5 % class) and e5 its DC part within
 0.05 % + 5 digits over the warm-up; B is dropped if e1's zero spread or the
-level dependence exceeds 2 digits on any range. Run on 7409b92: 10.5.
+level dependence exceeds 2 digits on any range. Run on e8cc4e9: 10.5.
 
-### 10.5 Device results (7409b92, 2026-10-23 01:06-01:56, docs/device-check-2026-10-21.md "7409b92" 3)
+### 10.5 Device results (e8cc4e9, 2026-10-23 01:06-01:56, docs/device-check-2026-10-21.md "e8cc4e9" 3)
 
 `DM40_USBTMC=real tools/acdcmeth.py e6 e1 e7 e2 e5`, calibrator on V/COM. The calibrator's "30 V" is
 **23.99 V** (DC V READ? 23.986): every 30 V point below is ~24 V.
@@ -858,7 +858,7 @@ the jsonl): AUTO entered at 5 V: 6 V AC 2.114 / 2.109 / 2.108 / 2.117 / 2.115 V,
 2^18); 5.5 V: 6 V AC 0.635 V, 60 V AC 4.19 V; 4.0 / 4.5 V: AC 1.0..1.6 mV, 9 readings / s. The 6 V value repeats
 to 0.3 % over visits: a deterministic transient after the row write, not noise.
 
-### 10.6 Method C after the 7409b92 check (2026-10-23, branch acdc-c-fix; on the device in 10.8)
+### 10.6 Method C after the e8cc4e9 check (2026-10-23, branch acdc-c-fix; on the device in 10.8)
 
 Method A stays the default until the retest (10.7) passes.
 
@@ -919,13 +919,13 @@ capacitor between (unity at 40 Hz), so it is the right one for the RMS: the resi
 garbage RMS blocks with probability 0.85 above 102.5 k codes of DC on the X x Y node ("rmsbig:", "rmsbigp:";
 phenomenological); AD2's peak hold over the whole gap between two accesses (it saw the last 256 samples
 only; the spread samples draw their noise from their own generator, so the main noise sequence
-is the one of before: powtest `ereset` failed with it shared, also on 8087c7d); the LPF's window exactly for a sine (sinc^2) and a square (piece by piece): the sampled window aliased a
+is the one of before: powtest `ereset` failed with it shared, also on b7d9017); the LPF's window exactly for a sine (sinc^2) and a square (piece by piece): the sampled window aliased a
 40 Hz square into a -6 % DC bias of the LPF. Host tests 491.
 
 Reproduction (emulator, the final model; acdcmethtest with method C held to the device's rules, couptest
 `sq5` = AUTO on the square, then 5 / 5.5 / 4.5 V DC):
 
-| phase | 8087c7d (as on the device) | the fix |
+| phase | b7d9017 (as on the device) | the fix |
 |---|---|---|
 | V DC 5 (6 V) | hunting 6 <-> 60 V, 0 readings / s, AC part 6.1 V (max 12.0) | 6 V only, 9.3 / s, DC part -0.0000 V, AC part 4.8 mV (max 7.3, the peak bound) |
 | V AC 2 @50 | AC part 2.0023 V (+0.115 %) | 2.0000 V |
@@ -940,7 +940,7 @@ a 40 Hz square on the DC part (the C square phase's 0.39 % p-p); the device's
 C DC part on the square had an sd of 0.10 / 0.29 mV (6 / 60 V, e2): its LPF
 rejects 40 Hz far better than the model.
 
-### 10.7 Device retest of method C (`tools/acdcmeth.py`; run on 2563fe1: 10.8)
+### 10.7 Device retest of method C (`tools/acdcmeth.py`; run on 2cc47ef: 10.8)
 
 Calibrator on V / COM (DC <= 24 V and the 40 Hz square), `DM40_USBTMC=real`,
 `tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5 --minutes 3`. New experiments:
@@ -953,7 +953,7 @@ peak hold (ENPKH off / on) does not restart the RMS / LPF block (the stock
 AC rows' sentinel does the same in `poll_ac`). Decision rule unchanged
 (10.4), plus e8 within 0.05 % + 5 digits and e9 / e10 passing.
 
-### 10.8 Device results of the retest (2563fe1, 2026-10-23 04:57-05:22, docs/device-check-2026-10-21.md "2563fe1")
+### 10.8 Device results of the retest (2cc47ef, 2026-10-23 04:57-05:22, docs/device-check-2026-10-21.md "2cc47ef")
 
 `DM40_USBTMC=real tools/acdcmeth.py e8 e9 e10 e2 e6`, then `e5 --minutes 3`; calibrator on V / COM. Two extra
 scripts: `z60.py` (C vs READ? at the same moment, 0 / 1 V on 60 V) and `par.py` (AUTO on the square, A vs C).
@@ -972,7 +972,7 @@ calibrator's 1 V").
 | e6 | ~2.5 s, ~9 rd/s | entry 1.71 s, 9.3 rd/s; 3 -> 24 V 0.59 s, back 1.01 s (A 1.27 s, 3.7 rd/s, 3.41 / 2.47 s) |
 | e5 24 V / 60 V, 3 entries | 17 mV | +0.53 / -1.29 / +0.53 mV (was +20.9..+24.9): PASS |
 | e5 3 V / 6 V, 3 entries | 2.0 mV | -0.04 / +0.37 / -0.09 mV: PASS |
-| by hand: AUTO, square -> 5 V | the 7409b92 case | AUTO DC 4.9981 V, 6 V range, AC 0.2 mV, 9.4 rd/s: PASS |
+| by hand: AUTO, square -> 5 V | the e8cc4e9 case | AUTO DC 4.9981 V, 6 V range, AC 0.2 mV, 9.4 rd/s: PASS |
 
 **The R29 assumption holds.** Restarting AD2's peak hold (ENPKH off / on) leaves the RMS / LPF running: e9 / e10
 kept ~9.2 readings / s and the RMS usable in every sample (`acsrc` 0). At 5 / 5.5 V on 6 V no garbage RMS block
@@ -994,14 +994,14 @@ from two READ? anchors when a session sees two levels, or a device-measured tabl
 **AUTO on the square changed to DC.** On the 40 Hz square (AC 4.760, DC 4.764 V) C's AUTO stays on DC and A's
 goes to AC after ~3.5 s, deterministic over two entries each. dmm.rs's first evaluation shows AC only when
 AC > |DC|, and a later switch to AC needs AC > 1.5 x |DC|, so the first evaluation decides. A's first AC part
-overshoots (4.91 V); C's first AC part is taken as it is. On 7409b92 C's AC part was 0.13 % high and it picked
+overshoots (4.91 V); C's first AC part is taken as it is. On e8cc4e9 C's AC part was 0.13 % high and it picked
 AC. This is a tie of the rule, not an error of C. **Rule changed in 10.9** (a tie is DC, the decision waits for a
 settled AC part).
 
-**Decision rule: not met** (e8 60 V at 0 / 1 V). Everything else passes, and e5's 60 V failure of 7409b92 is
+**Decision rule: not met** (e8 60 V at 0 / 1 V). Everything else passes, and e5's 60 V failure of e8cc4e9 is
 gone. The default stays A.
 
-### 10.9 After the 2563fe1 retest: C's 60 V gain and the AUTO tie (2026-10-23, branch acdc-c-fix; device: 10.10)
+### 10.9 After the 2cc47ef retest: C's 60 V gain and the AUTO tie (2026-10-23, branch acdc-c-fix; device: 10.10)
 
 Method A stays the default.
 
@@ -1033,21 +1033,21 @@ the DC part against the source in the device script's window, 1..4 s after the s
 
 | e8 (emulator), DC part - source, mV | 24 | 12 | 5 | 1 | 0 V (60 V) | rule |
 |---|---|---|---|---|---|---|
-| 7fffcdf, down (as the device: -0.5 / -4.3 / -6.1 / **-7.2 / -8.0**) | -0.44 | -3.62 | -6.00 | **-6.74** | **-7.29** | 17 / 11 / 7.5 / 5.5 / 5.0 |
+| f724c28, down (as the device: -0.5 / -4.3 / -6.1 / **-7.2 / -8.0**) | -0.44 | -3.62 | -6.00 | **-6.74** | **-7.29** | 17 / 11 / 7.5 / 5.5 / 5.0 |
 | the fix, down (late window; device window the same except 12 V: -0.81) | -0.39 | +0.14 | -0.08 | +0.42 | +0.18 | |
-| 7fffcdf, up (entered at 0 V: the table's gain) | **-20.5** | -9.73 | -3.94 | -0.02 | +0.80 | |
+| f724c28, up (entered at 0 V: the table's gain) | **-20.5** | -9.73 | -3.94 | -0.02 | +0.80 | |
 | the fix, up | +0.41 | +0.06 | -0.64 | -1.33 | -0.71 | |
 
-6 V in the same runs: within 0.25 mV (rule 0.5..3 mV) before and after in `down`; in `up` 7fffcdf read -6.0 / -3.6 /
+6 V in the same runs: within 0.25 mV (rule 0.5..3 mV) before and after in `down`; in `up` f724c28 read -6.0 / -3.6 /
 -1.3 mV at 5 / 3 / 1 V (anchored at 0 V in AUTO with the table's gain, which the model puts 0.12 % off), the fix
 -0.02 / -0.04 / -0.05 mV after the first step. "up" is the case the device has not run: a C session entered at 0 V on
 60 V with the table gain (0.043 % high on the device) would read ~+10 mV at 24 V (rule 17 mV).
 
 **2. AUTO on a tie (the 40 Hz square).** The first evaluation decided at once, and the 1.5 x / 0.75 x hysteresis
 kept it, so the first AC part's transient decided a tie: A's first AC part overshoots (+3 % on the device's square,
-+7 % on a0985e4, up to +52 % in the emulator after the 6 -> 60 V up-range), C's is ~0.5 % high in the emulator.
++7 % on 1e39149, up to +52 % in the emulator after the 6 -> 60 V up-range), C's is ~0.5 % high in the emulator.
 Reproduced: couptest `sqtie` (three fresh AUTO entries on the square, the part shown from the first AUTO reading on)
-on 7fffcdf: A and C both DC -> AC within the first 1..2 s, then AC (the emulator's square is an exact tie, so the side
+on f724c28: A and C both DC -> AC within the first 1..2 s, then AC (the emulator's square is an exact tie, so the side
 is noise; on the device the 0.08 % margin went to C's DC and A's overshoot). New rule (`dmm.rs` auto_eval /
 auto_shows_ac, AUTO_SETTLE_K / AUTO_TIE / AUTO_TIE_MS):
 * before the first decision the reading shows DC; AC only when there is no DC part (|DC| below the off floor);
@@ -1061,7 +1061,7 @@ Either part is fair at a tie; DC is the stock's default coupling and needs no fu
 1.2 / 0.8 / 1.05 / 0.95: outside the 1 % tie). Cost: a mixed signal entering AUTO shows DC ~2 s (A) / ~0.2 s (C)
 before it shows AC.
 
-**3. dcvtest** (`LOG:SCALe?` 1 % off since 70c33ad): the model is right, the test was not: 70c33ad gave the
+**3. dcvtest** (`LOG:SCALe?` 1 % off since 8bb87e9): the model is right, the test was not: 8bb87e9 gave the
 DC-coupled row the device's per-range per_code factor (`Ad2DcGainR`, 6 V 1.0096, 60 V 1.0188, from test 6.5 / e5)
 and dcvtest still expected nominal / ad2dcg. Now it expects nominal x that factor / ad2dcg (6 V and the 25 V session
 on 60 V): PASS.
@@ -1070,19 +1070,19 @@ Emulator: acdcmethtest A / B / C / B~ and `--e8 down` / `up` pass (down: 60 V
 within -1.3..+1.4 mV over four runs at every level, 6 V within 0.1 mV; up:
 within 1.9 mV after the first step); couptest `sqtie` as above.
 
-### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`; run on c6f9670: 10.11)
+### 10.10 Device retest of 10.9 (`tools/acdcmeth.py`, calibrator on V / COM, `DM40_USBTMC=real`; run on 2fbc5e7: 10.11)
 
 The two-point gain is kept per range until power-off, so `e8up` runs first
 after a power-on: `e8up`, then `e8s e8 e11 e10 e9`, then `e5 --minutes 3`.
 New experiments: `e8up` (60 V manual, entered at 0 V on the table's gain,
 then 1 / 5 / 12 / 24 V, 4 s per level + a 3 s mean: the two-point gain from
-the 5 V step on), `e8s` (2563fe1's e8 with 4 s per level), `e11` (AUTO on the
+the 5 V step on), `e8s` (2cc47ef's e8 with 4 s per level), `e11` (AUTO on the
 40 Hz square, A and C, 3 entries each: DC from the first AUTO reading, at
 most one change). Pass: every level within 0.05 % + 5 digits of READ? (5.0 /
 5.5 / 7.5 / 11 / 17 mV on 60 V at 0 / 1 / 5 / 12 / 24 V). Decision rule
 unchanged (10.4 / 10.7).
 
-### 10.11 Device results of the 10.10 retest (c6f9670, 2026-10-23 08:59-09:40, docs/device-check-2026-10-21.md "c6f9670")
+### 10.11 Device results of the 10.10 retest (2fbc5e7, 2026-10-23 08:59-09:40, docs/device-check-2026-10-21.md "2fbc5e7")
 
 Run as 10.10, with e8up first after the install's boot and a `dm40dbg.py reset` before e8s. Errors are C's DC part
 minus the meter's DC V READ? on the same manual range, taken before the C session and again right after it (they
@@ -1091,8 +1091,8 @@ agree within 0.05-0.33 mV).
 | test | pass | result |
 |---|---|---|
 | e8up 60 V, 0 / 1 / 5 / 12 / 24 V | 5.0 / 5.5 / 7.5 / 11 / 17 mV | -2.2 / -1.3 / -0.1 / -2.8 / +1.2 mV, gspan 0 -> 10.3 k -> 39.1 k: PASS |
-| e8s 60 V, 24 / 12 / 5 / 1 / 0 V | 17 / 11 / 7.5 / 5.5 / 5.0 | +2.5 / +1.5 / +1.6 / **+1.8 / +1.9** (2563fe1 -7.2 / -8.0 at 1 / 0 V): PASS |
-| e8s 6 V, 5 / 3 / 1 / 0 V | 3.0 / 2.0 / 1.0 / 0.5 | -0.14 / -0.21 / -0.55 / **-0.86 mV: FAIL at 0 V** (2563fe1 +0.07..+0.44) |
+| e8s 60 V, 24 / 12 / 5 / 1 / 0 V | 17 / 11 / 7.5 / 5.5 / 5.0 | +2.5 / +1.5 / +1.6 / **+1.8 / +1.9** (2cc47ef -7.2 / -8.0 at 1 / 0 V): PASS |
+| e8s 6 V, 5 / 3 / 1 / 0 V | 3.0 / 2.0 / 1.0 / 0.5 | -0.14 / -0.21 / -0.55 / **-0.86 mV: FAIL at 0 V** (2cc47ef +0.07..+0.44) |
 | tc6 (the e8s 6 V step, 3 power cycles) | 0 V 0.5 | 0 V -0.92 / -0.25 / -0.63: 2 of 3 FAIL; two-point pc +143..+195 ppm over the internal zero's |
 | e8 (1 s per level, gains kept) | as e8s | 60 V -0.8..+3.6, 6 V -0.02..+0.31 mV: PASS |
 | e11 AUTO on the square, A / C x 3 | DC, <= 1 change | DC in all 6, 0 changes; by hand (taps, screenshots) AUTO DC with A and C: PASS |
@@ -1100,7 +1100,7 @@ agree within 0.05-0.33 mV).
 | e5 24 V / 60 V; 3 V / 6 V | 17 / 2.0 mV | -1.9..+1.5; -0.24..+0.02 mV: PASS |
 
 **60 V: fixed.** The two-point gain (4.8515-4.8523e-4 over 24.7-39.1 k codes) replaces the internal zero's
-+0.025 % (4.85281e-4; 2563fe1 +0.030 %). The table start of e8up also lands within the rule.
++0.025 % (4.85281e-4; 2cc47ef +0.030 %). The table start of e8up also lands within the rule.
 
 **6 V: a regression of 10.9.** On 6 V the internal zero's gain was right (104 k codes). The first two-point attempt
 of >= 10 k codes replaces it, and over the 5 -> 3 V step (41.6 k codes) that gain came out 143-195 ppm high in all four
@@ -1116,18 +1116,18 @@ both signs match. The 60 V anchor errors of 1-4 mV (inside the rule) are probabl
     ~8 s more on the first level change of a range);
 (c) a larger CAL_GAIN_CODES on 6 V.
 
-**Decision rule: not met** (e8s 6 V at 0 V; tc6 2 of 3). Everything else passes, including the 2563fe1 failure
+**Decision rule: not met** (e8s 6 V at 0 V; tc6 2 of 3). Everything else passes, including the 2cc47ef failure
 case. The default stays A.
 
 Also seen: with C, the first V tap after `CONF:VOLT:DC` on the square was lost in 5 of 6 tries, and with A in 1 of 3.
-It did not happen at 1 V DC. It is not specific to C (device-check doc, "c6f9670" 3).
+It did not happen at 1 V DC. It is not specific to C (device-check doc, "2fbc5e7" 3).
 
 
-### 10.12 After the c6f9670 retest: the second reference waits for the LPF (2026-10-23, branch acdc-c-lpfwait; device: 10.13)
+### 10.12 After the 2fbc5e7 retest: the second reference waits for the LPF (2026-10-23, branch acdc-c-lpfwait; device: 10.13)
 
-Method A stays the default. Commits 9425ae5 (emulator), a7d233c + e905ef5 (opendm40).
+Method A stays the default. Commits f09c753 (emulator), 4d15452 + 71d95ad (opendm40).
 
-**1. Emulator: the LPF's creep (HY3131.cs, both copies; INFERRED, phenomenological).** The c6f9670 `tc6` trace
+**1. Emulator: the LPF's creep (HY3131.cs, both copies; INFERRED, phenomenological).** The 2fbc5e7 `tc6` trace
 (3 power cycles, 5 -> 3 V on 6 V, 10 Hz STAT?) relative to the value ~10 s after the step: +5 codes at 0.7-1.6 s,
 +8..+10 right after the second reference's row write (3.6-4.3 s), +4 at 5-6 s, +3 at 8 s, 0 at 10-12 s; noise
 ~1.7 codes rms. Not a first-order tail (that would fall fastest at the start). Model: the LPF of the DC-coupled
@@ -1148,8 +1148,8 @@ and 0 V in the model lands just outside it and takes a new reference). DC part -
 
 | | 5 V | 3 V | 1 V | 0.1 V (rule 0.55) | the 6 V gain |
 |---|---|---|---|---|---|
-| 27b1a68 (as c6f9670) | -0.12 | -0.27 | -0.56 | **-0.75** | two-point over 5 -> 3 V (41.5 k), **+177 ppm** over the internal zero's (device +143..+195) |
-| e905ef5 | -0.12 | +0.05 | +0.07 | +0.07 | the internal zero's (104 k) kept: the 3 V two-point differs by +4.0 codes at 3 V, inside the noise rule |
+| e158550 (as 2fbc5e7) | -0.12 | -0.27 | -0.56 | **-0.75** | two-point over 5 -> 3 V (41.5 k), **+177 ppm** over the internal zero's (device +143..+195) |
+| 71d95ad | -0.12 | +0.05 | +0.07 | +0.07 | the internal zero's (104 k) kept: the 3 V two-point differs by +4.0 codes at 3 V, inside the noise rule |
 
 **3. The fix (`acdcm.rs`).**
 * `am_refine`: a sliding window of the last 28 LPF results (~3 s) within the spread rule. The second reference
@@ -1186,11 +1186,11 @@ Cost: a first level change on a range costs ~5-8 s before the second
 reference (it was ~1.5 s); the reference itself is unchanged (~1 s of DC V
 readings, the AC part held).
 
-**4. Emulator runs of e905ef5** (the image of the commit; `--e8` DC part - source, mV, windows 1..4 / 4..8.5 s):
+**4. Emulator runs of 71d95ad** (the image of the commit; `--e8` DC part - source, mV, windows 1..4 / 4..8.5 s):
 
 | e8 down | 24 | 12 | 5 | 1 | 0 V (60 V) | 5 | 3 | 1 | 0 V (6 V) |
 |---|---|---|---|---|---|---|---|---|---|
-| e905ef5 | - / -1.16 | -1.21 / -1.15 | -0.99 / -0.53 | +0.49 / +0.17 | -0.00 / -0.13 | +0.05 / +0.04 | +0.41 / +0.10 | +0.23 / -0.01 | +0.21 / +0.08 |
+| 71d95ad | - / -1.16 | -1.21 / -1.15 | -0.99 / -0.53 | +0.49 / +0.17 | -0.00 / -0.13 | +0.05 / +0.04 | +0.41 / +0.10 | +0.23 / -0.01 | +0.21 / +0.08 |
 | gain | iz 49.4 k | iz (dis -3.9) | **two-point 39.1 k over the biased zero** (dis -8.3) | | | iz 104 k | iz (dis +4.5) | iz (dis +2.2) | iz |
 
 `up`: within the rule everywhere (60 V 5 V -5.7 mV in the first window, the table gain until the first second
@@ -1200,8 +1200,8 @@ within 0.4 mV).
 The 6 V 3 V level's first window shows the creep itself (+0.41 mV = 8.5 codes, rule 2.0); the device's DC part
 creeps the same way, only the gain no longer takes it in.
 
-On a7d233c (before the AC gate) acdcmethtest failed C's square: the AC part
-4.811 V (max) after the reference's row rewrite; e905ef5 passes acdcmethtest
+On 4d15452 (before the AC gate) acdcmethtest failed C's square: the AC part
+4.811 V (max) after the reference's row rewrite; 71d95ad passes acdcmethtest
 A / B / C / B~, `--e8 down` / `up` / `tc6` and couptest with all three
 methods.
 
@@ -1211,24 +1211,24 @@ Order (gains are kept per range until power-off; `tools/dm40dbg.py reset`
 stands in for a power cycle): `e8up` first after the install's boot, then 4 x
 (reset, `e8s`), `e8`, `e5 --minutes 3`; optionally `tc6` (the 6 V time course
 after a reset) and `e8l` (e8s with 10 s per level), and `e11 e10 e9` as a
-regression. Pass: 6 V 0 V within 0.5 mV in all four e8s (c6f9670: -0.86 mV);
+regression. Pass: 6 V 0 V within 0.5 mV in all four e8s (2fbc5e7: -0.86 mV);
 6 V gsrc 1 (the internal zero's gain kept) at every level; 60 V 1 / 0 V within
 5.5 / 5.0 mV, gsrc 3 from the 5 V level on (the AGND zero judged biased, gdis
 ~-8 codes). Decision rule (10.4 / 10.7) unchanged.
 
-Run on f42a09e (device check "ad97fd7 / c8c2f02 / f42a09e" 5): e8s 6 V at 0 V
+Run on afcf151 (device check "ad97fd7 / c8c2f02 / afcf151" 5): e8s 6 V at 0 V
 -0.25 / +0.18 / -0.59 / +0.21 mV, 3 of 4 within 0.5 mV; the miss took a
 second reference at 3 V judged biased (gsrc 3, gdis +8.95), then a two-point
 gain at 1 V. e8up, e8 and e5 pass. Analysis: 10.14.
 
-### 10.14 After the f42a09e retest: the bias test and the LPF creep's lag (2026-10-23, branch acdc-bias; device: 10.15)
+### 10.14 After the afcf151 retest: the bias test and the LPF creep's lag (2026-10-23, branch acdc-bias; device: 10.15)
 
-Method A stays the default. Commits d0baca5, b94bfb8 (opendm40), 7c0de2d (emulator).
+Method A stays the default. Commits 85f3362, f6858b2 (opendm40), dd95769 (emulator).
 
-**1. The data (device f42a09e; `tools/acdcmeth.py --trace`: STAT? at ~10 Hz per level).** The 10.13 miss was
+**1. The data (device afcf151; `tools/acdcmeth.py --trace`: STAT? at ~10 Hz per level).** The 10.13 miss was
 a 6 V internal zero judged biased (gsrc 3, gdis +8.95 codes at 3 V). gdis is the two-point gain against the
 internal zero's, in codes at the new point. Collected: e8up and 6 x (`dm40dbg.py reset`, e8s) on 2026-10-23
-12:35-12:53, plus the four e8s of 10.13 (the log of device-check "ad97fd7 / c8c2f02 / f42a09e" 5):
+12:35-12:53, plus the four e8s of 10.13 (the log of device-check "ad97fd7 / c8c2f02 / afcf151" 5):
 
 | gdis against the internal zero's gain | n | values (codes) | sign |
 |---|---|---|---|
@@ -1260,7 +1260,7 @@ opposite sign on this unit, so its gdis is negative (the lag only makes it small
 
 **2. The rule taken: a creep allowance on the lag side only (`acdcm.rs` am_cal_step, CREEP_K).**
 * The LPF level before the input step is `prevl`. It is the newest result of a window that was steady for
-  >= PREV_N = 10 results when the jump restarted it, or the new point of a second reference (b94bfb8). It is
+  >= PREV_N = 10 results when the jump restarted it, or the new point of a second reference (f6858b2). It is
   invalid after a range change or an AC+DC entry.
 * At the reference, `pstep` = new point - prevl.
 * The lag side is where gdis x pstep x (new point - p) > 0, p being the paired reference point. There the
@@ -1282,12 +1282,12 @@ opposite sign on this unit, so its gdis is negative (the lag only makes it small
 * STAT? appends four fields: psig (the window's residual rms), bthr (the threshold gdis was held to), pslope,
   pstep. They describe the last attempt. `acdcmeth.py --trace` logs STAT? per level.
 
-**3. Emulator (HY3131.cs, both copies; 7c0de2d).** The creep is now three cascaded 2.5 s lags (`creepord:3`,
+**3. Emulator (HY3131.cs, both copies; dd95769).** The creep is now three cascaded 2.5 s lags (`creepord:3`,
 the default). Two lags left only ~3 codes at the ~5.6 s reference with the slope below 1 code / s; three are
 flat for the first seconds and leave ~6 codes (+10 / +9.2 / +6.1 / +3.8 / +1.4 codes at 0 / 2.5 / 5.6 / 8 / 12 s
 after the 41.6 k step). The LPF noise is per range: 6 V 1.7, 60 V 1.0 codes rms (`LpfDcNoiseR`; "lpfn:" scales
 the 6 V value). The host test of the creep expects the order-3 value (7.8 codes; got 8). Reproduction on the
-new model, 6d488dc (= f42a09e's firmware):
+new model, 7a1d661 (= afcf151's firmware):
 * `--e8 down`: 6 V 3 V gsrc 3 (gdis +6.1), then a 5 -> 1 V gain (gsrc 2, -7.8).
 * `--e8 tc6`: gsrc 3 at +8.2 (`creepord:3`) and +9.9 (`creeptau:3`) in the trial runs; +8.0 not taken in a later run.
 
@@ -1296,25 +1296,25 @@ magnitude, only the false judgement.
 
 | emulator, C DC part - source (mV, late window) | 60 V 12 / 5 / 1 / 0 V | 6 V 3 / 1 / 0 V | 6 V gain |
 |---|---|---|---|
-| 6d488dc `down` | -0.71 / -1.22 / -1.73 / -2.44 | +0.04 / -0.17 / -0.13 | **gsrc 3 at 3 V** (+6.1), gsrc 2 at 1 V |
-| b94bfb8 `down` | -0.86 / -0.45 / +0.09 / -0.69 | +0.13 / -0.08 / -0.21 | iz kept (gdis +7.2, +6.8) |
-| b94bfb8 `tc6` | | +0.01 / +0.04 / -0.02 (0.1 V) | iz kept (+7.2) |
-| b94bfb8 `up` | +0.55 / -1.71 (5 V) / ... / +0.39 (24 V) | 6 V 0 V +0.31 | |
+| 7a1d661 `down` | -0.71 / -1.22 / -1.73 / -2.44 | +0.04 / -0.17 / -0.13 | **gsrc 3 at 3 V** (+6.1), gsrc 2 at 1 V |
+| f6858b2 `down` | -0.86 / -0.45 / +0.09 / -0.69 | +0.13 / -0.08 / -0.21 | iz kept (gdis +7.2, +6.8) |
+| f6858b2 `tc6` | | +0.01 / +0.04 / -0.02 (0.1 V) | iz kept (+7.2) |
+| f6858b2 `up` | +0.55 / -1.71 (5 V) / ... / +0.39 (24 V) | 6 V 0 V +0.31 | |
 
-60 V in `down` on b94bfb8: gsrc 3 at 5 V (gdis -7.4, the non-lag side), 0 V -0.69 mV. With the
+60 V in `down` on f6858b2: gsrc 3 at 5 V (gdis -7.4, the non-lag side), 0 V -0.69 mV. With the
 larger creep, the 12 V level's gdis is only -2.2..-4.4 in the model (device -5..-12), so the model often catches
 the bias one level later.
 
-Emulator on b94bfb8 with the 7c0de2d model: acdcmethtest A / B / C / B~,
+Emulator on f6858b2 with the dd95769 model: acdcmethtest A / B / C / B~,
 `--e8 down` / `up` / `tc6` and couptest pass.
 
-### 10.15 Device results of 10.14 (d0baca5 full set, b94bfb8 confirmation; 2026-10-23 13:05-13:50, device-check doc "acdc-bias")
+### 10.15 Device results of 10.14 (85f3362 full set, f6858b2 confirmation; 2026-10-23 13:05-13:50, device-check doc "acdc-bias")
 
 Run in the 10.13 order: reset, e8up; 6 x (reset, e8s), all with `--trace`; e8; e5 `--minutes 3`; e11 e10 e9. The
-b94bfb8 confirmation was reset, e8up, then 3 x (reset, e8s). Errors are C's DC part minus READ? of the DC V
+f6858b2 confirmation was reset, e8up, then 3 x (reset, e8s). Errors are C's DC part minus READ? of the DC V
 function on the same manual range. Rule: 0.05 % + 5 digits.
 
-| test | rule (mV) | d0baca5 | b94bfb8 |
+| test | rule (mV) | 85f3362 | f6858b2 |
 |---|---|---|---|
 | e8up 60 V 0 / 1 / 5 / 12 / 24 V | 5.0 / 5.5 / 7.5 / 11 / 17 | -0.63 / +1.83 / +2.95 / -1.13 / +1.35 | +0.90 / +1.66 / +0.55 / +0.02 / +1.19 |
 | e8s 60 V 1 / 0 V (x6; x3) | 5.5 / 5.0 | -0.25..+0.80 / +0.03..+1.78 | -0.29..+1.06 / +0.46..+1.00 |
@@ -1329,10 +1329,10 @@ function on the same manual range. Rule: 0.05 % + 5 digits.
 | e9 4.0 / 4.5 / 5.0 / 5.5 V | | +0.11 / +0.25 / -0.10 / -0.06 mV, one range, 9.3 rd/s, acsrc 0 | not run |
 
 * The 6 V internal zero's gain was kept in all 9 e8s sessions.
-* The largest lag-side gdis is now +16.2 codes (b94bfb8 run 2, 3 V), against bthr 24.6. CREEP_K x step alone is
+* The largest lag-side gdis is now +16.2 codes (f6858b2 run 2, 3 V), against bthr 24.6. CREEP_K x step alone is
   16.6, so the margin over the largest value seen is ~8 codes, i.e. 3 sigma at 6 V. If later data shows lag-side
   values above ~20, raise CREEP_K, not the noise term.
-* d0baca5's 83 k pstep (e8s run 2, 1 V: bthr 40.3) is the late-reference case that b94bfb8 fixes. In b94bfb8's
+* 85f3362's 83 k pstep (e8s run 2, 1 V: bthr 40.3) is the late-reference case that f6858b2 fixes. In f6858b2's
   runs every 1 V pstep is 41.2-41.6 k.
 
 **Verdict: method C meets the decision rule (10.4 / 10.7 / 10.13) on this unit.**

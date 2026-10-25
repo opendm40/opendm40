@@ -201,10 +201,10 @@ RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
 ### Memory budget (2026-10-22 rework)
 
 Numbers from `build.sh` (stackdepth.py and the link map) on the ad2-isr
-build (default since b81abf2) / without the feature
+build (default since 8701d51) / without the feature
 (`--no-default-features --features vdisk`):
 
-| | before (f5f8e96) | after |
+| | before (95bc43a) | after |
 |---|---|---|
 | static worst stack path | 31 040 / 30 676 B | 21 760 / 21 396 B |
 | TCM stack (64 KiB - .data/.bss) | 47 860 / 47 912 B | 46 620 / 46 688 B |
@@ -283,10 +283,10 @@ idle, swipe-down CSV recording, combined view, an AD2 stream at 38400 S/s
 (DMA frames, DRAW 1, ad2streamtest) and fast-logger disk sessions
 (fastlogtest typ): C ran only at a recording / session start or stop and
 for the DBG:HYSPI self-test after the stream, except LOG:DISK? (`fast_scpi`,
-`.cold` since 5d5dba0), which a host polls while a disk session streams:
+`.cold` since 793d4b6), which a host polls while a disk session streams:
 its reply (`fast_status`) is in region B again.
 
-**Region B audit #3 (2026-10-22, on c58ae48)**: 11 928 / 20 672 B free
+**Region B audit #3 (2026-10-22, on e7658e5)**: 11 928 / 20 672 B free
 (ad2-isr / without) -> 26 160 / 32 808 B; region C (`.cold`) 25 328 /
 25 768 -> 10 256 / 12 352 B left below 0x080A0000 (C is now the tighter
 one: the next reclaim from B needs room there or a cut). Stack / SRAM
@@ -316,13 +316,13 @@ intended symbols moved). To C:
 - vwrite's temp purge and post-write steps (`purge_tmp`, `park`, `check`,
   `finalize`, `commit`: after a host write session; MSC writes are refused
   while a logger session runs).
-To B (the device check of f3aea2f, [device-check-2026-10-21.md](device-check-2026-10-21.md) 6a / 6c):
+To B (the device check of 7534701, [device-check-2026-10-21.md](device-check-2026-10-21.md) 6a / 6c):
 - the DMM-log and scope CSV generators of the USB volume (`Gen::open` /
   `advance`, `RowDec::*`, `SDec::*`, `chunk_at`, `parse_file`,
   `from_scale`, `s_pred`, `dlog::open` / `find` / `geometry` / `dir_start`
   / `dir_of` / `dlg_prefix`) in `.text.vdisk_rd`; `each_entry` is generic
   and inline(always), so no caller's closure gets a symbol of its own in C
-  (the `near` bug of 0ec2093); `dlog::data` (MMEM:DATA?),
+  (the `near` bug of cde0e01); `dlog::data` (MMEM:DATA?),
   `vdisk::readme` with its text writer `W` (sized on every root directory
   read), `vdisk::geo`, `vdisk::mem_read`,
   `calbackup::crc32_upd` (LTO merged dlog's identical CRC-32 into it) and
@@ -331,7 +331,7 @@ To B (the device check of f3aea2f, [device-check-2026-10-21.md](device-check-202
   `scope_order`, `SEnc`; `scope_block` generic and inline(always)) in
   `.text.scope_plan`: it codes every block once (~1 ms each) in the tap,
   before the job starts and the stream pauses (wavetest with the emulator's
-  SPI byte timing of c2709aa caught `scope_block` in C there).
+  SPI byte timing of a80b6db caught `scope_block` in C there).
 Two Wave view changes (main.rs): the volume refresh waits while the stream
 ISR owns the bus (`hy3131::streaming`; a host sees a save made in the Wave
 view once the view closes), and the Wave view's stream pauses while a disk
@@ -363,7 +363,7 @@ one entered while `hy3131::HANDED` is set (first call logged, then the hook
 removed: a Python hook per call slows a busy function to a crawl): STOP +
 Save CSV in the Wave view, then a host reading SCOPE/SCOP000.CSV and
 LOGS/LOG000.CSV off the volume plus MMEM:DATA? of their DLGs while it
-streams. a60f8ce and 4692aa9 fail it (`Gen::open`, `vdisk::refresh`, `scan_spi`'s
+streams. 9495d28 and 046754e fail it (`Gen::open`, `vdisk::refresh`, `scan_spi`'s
 closure at the save; `SDec::get`, `dlog::data`, `vdisk::readme` at the
 read); now only the Save CSV tap's own `sp_save_csv` runs. The same hooks
 (a scratch script, `--extra-script`) in ad2streamtest (4800 DRAW 2, 9600
@@ -407,9 +407,9 @@ above the warning, so HIST stays in B to leave the shim room to grow.
 (5.8 KB), `App::key`, `App::show` (their audit #3 patterns removed: taps
 meet a stream on the inrush page, the slowest event code to have in C)
 and `vdisk::describe` (`.text.vdisk_rd`). An nm diff of C against
-e5dd09b: only these four symbols left it.
+9361bc7: only these four symbols left it.
 
-| (ad2-isr / without) | before (e5dd09b) | after |
+| (ad2-isr / without) | before (9361bc7) | after |
 |---|---|---|
 | region A2 free | 14 836 B (unused) | 2 652 / 2 652 B |
 | region B free | 26 136 / 33 320 B | 30 572 / 37 836 B |
@@ -417,8 +417,8 @@ e5dd09b: only these four symbols left it.
 | stack headroom (static worst path) | 21 436 / 21 888 B | unchanged |
 | SRAM free | 10 856 / 11 080 B | unchanged |
 
-Rebased onto 98bb57f (the power meter's AC+DC parts and region C audit
-#1 (1/3) landed meanwhile), the landed tree 737cdcf: A2 2 652 B, B 21 996
+Rebased onto 7704e01 (the power meter's AC+DC parts and region C audit
+#1 (1/3) landed meanwhile), the landed tree 97913f4: A2 2 652 B, B 21 996
 / 28 660 -> 26 360 / 33 112 B, C 10 436 / 12 572 -> 18 220 / 20 276 B,
 stack headroom 21 236 / 21 672 B and SRAM free 10 848 / 11 072 B
 unchanged.
@@ -464,28 +464,28 @@ What the image does NOT have (the usual suspects):
 - **one monomorphization**: `App::with_temp_page(impl FnOnce)`, four
   copies of ~330 B (fixed below).
 
-Done (e054fc8 9 936 B free; ec22925 7 984 B after E7 grew C):
+Done (d8a0ac0 9 936 B free; 7008add 7 984 B after E7 grew C):
 | change | region C | commit |
 |---|---|---|
-| `gallery::G` (672 B .data image) -> `.bss`, set on the first `get` | +592 | 53f7be2 |
-| `scope_csv::SNAP` (548 B): `rec: Option<&[u16]>`, all zero -> `.bss` | +580 | 53f7be2 |
-| `csvlog::JOB` (512 B): zero sentinels until `start` sets JOB0, `dlog::ENC_ZERO` -> `.bss` | +512 | 53f7be2 |
-| `App::with_temp_page`: a key argument instead of a closure (4 copies -> 1) | +944 | 53f7be2 |
-| `gallery::Tb::c` `#[inline(never)]` (9 inlined copies next to its symbol) | +76 | 36e038a |
-| 23 of 24 dead-code warnings (LTO had dropped it all) | 0 (noise) | c663746 |
-| the `.data` load image (1 056 B) -> region B after `.text` | +1 056 | d8eaa7e |
-| relocation: `ad2exp` (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's `dc_enter`) and `dbg_dcv` -> region B | +5 208 | 263fcab |
+| `gallery::G` (672 B .data image) -> `.bss`, set on the first `get` | +592 | 101372f |
+| `scope_csv::SNAP` (548 B): `rec: Option<&[u16]>`, all zero -> `.bss` | +580 | 101372f |
+| `csvlog::JOB` (512 B): zero sentinels until `start` sets JOB0, `dlog::ENC_ZERO` -> `.bss` | +512 | 101372f |
+| `App::with_temp_page`: a key argument instead of a closure (4 copies -> 1) | +944 | 101372f |
+| `gallery::Tb::c` `#[inline(never)]` (9 inlined copies next to its symbol) | +76 | 1fbabb2 |
+| 23 of 24 dead-code warnings (LTO had dropped it all) | 0 (noise) | f1a0cc5 |
+| the `.data` load image (1 056 B) -> region B after `.text` | +1 056 | bfe6f44 |
+| relocation: `ad2exp` (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's `dc_enter`) and `dbg_dcv` -> region B | +5 208 | 568c57a |
 
 Meanwhile upstream: region A2 / `App::tap` / `key` / `show` /
-`vdisk::describe` back to B (6a0eb31, +7.7 KB of C) and the font rework
-(d0ed7e4: B 26.4 -> 82.2 KB free). On 0fd0379 (ad2-isr / without):
+`vdisk::describe` back to B (ac84bb3, +7.7 KB of C) and the font rework
+(c734027: B 26.4 -> 82.2 KB free). On 83c28a0 (ad2-isr / without):
 region C 17 420 / 19 484 -> 23 804 / 25 800 B free, B 78 192 / 85 016 ->
 71 980 / 78 900 B, A2 7 920 B, stack headroom 21 228 / 21 656 -> 21 236 /
-21 664 B, SRAM unchanged. From the task's start (e054fc8, 9 936 B): +13.9
-KB, of which this audit's shrinking 2.7 KB (53f7be2 + Tb::c), its
+21 664 B, SRAM unchanged. From the task's start (d8a0ac0, 9 936 B): +13.9
+KB, of which this audit's shrinking 2.7 KB (101372f + Tb::c), its
 relocation (the .data image and the DBG experiments, B had room) 6.3 KB,
 the rest upstream (A2 move +7.7 KB, net of E7 and later growth). The relocated code is on-demand DBG / experiment
-code (zero-wait flash only makes it cheaper); `git revert 263fcab` puts
+code (zero-wait flash only makes it cheaper); `git revert 568c57a` puts
 it back in C if B gets tight.
 
 Checks: ui-render and gallery-test renders pixel-identical to the base, 0
@@ -507,14 +507,14 @@ Candidates left (measured or estimated, not done):
   checks), `touch_diag` (DBG:DIAG?, 0.9 KB), `Dmm::acdc_diag_text`
   (DBG:ACDC?, 0.7 KB), `HwTrig::calibrate` (0.7 KB): ~6.8 KB by relocation.
 - Gating the AD2 experiments behind a non-default feature: 2 580 B on
-  ec22925 (trial build), but the open TODO (B) device session still uses
+  7008add (trial build), but the open TODO (B) device session still uses
   `ad2 noise` (DBG:AD2:NOISE?), so not done.
 - One `fatren::fat_get` for fatdir / fastlog prep / csvlog / gallery
   (four inlined one-block-cache copies, ~0.2 KB; csvlog's runs during a
   recording, so the shared one must live in B); screenshot.rs and
   calbackup.rs have two more (the RAM-overlay change owns those files).
 - `.data` statics of hot modules (scope_ui SHOWN 308 B, scope WAVE 224 B,
-  inrush SES 200 B, STRIP_SHOWN 128 B): now B, not C, since d8eaa7e.
+  inrush SES 200 B, STRIP_SHOWN 128 B): now B, not C, since bfe6f44.
 - The four text builders (`gallery::Tb`, `dlog::Txt`, `csvlog::W`,
   `vdisk::W`): different rules (Tb maps non-ASCII to '?', Txt has u64 /
   ms / Val), ~0.3 KB at most; panic sites in C (64 calls, ~0.5 KB with their checks).
@@ -1055,7 +1055,7 @@ wait for an eject. (It replaced a two-LUN layout that exported the SPI disk.)
 The **calibration safety copy** stays: ONE write-once copy of `CALIB.BIN`,
 `BOOTDATA.BIN` and `UID.BIN` in the SPI disk's root (below).
 
-Earlier builds (up to d341570) wrote nine files to the SPI disk at every
+Earlier builds (up to 47d637d) wrote nine files to the SPI disk at every
 boot; **files those builds left are not touched** (they stay in the SPI root
 and show only in `DEBUG/SPIFLASH.BIN`). fatren still renames an installed
 `dm40*.bin` to `_DM40PRV.BIN` (loader re-install protection).
@@ -1218,7 +1218,7 @@ remove") ejects the LUN: every command but INQUIRY, REQUEST SENSE, START
 STOP UNIT and PREVENT ALLOW then fails NOT READY, MEDIUM NOT PRESENT
 (02/3A/00) until a bus reset / unconfigure (a re-plug) or a host load (LoEj
 = 1, Start = 1, e.g. `eject -t`), which raises the one-shot UNIT ATTENTION
-06/28/00. Before this (up to b6909d6) the medium stayed present and Windows
+06/28/00. Before this (up to 246afc7) the medium stayed present and Windows
 mounted E: again at the next access. A plain STOP / START (LoEj = 0: Linux
 sd around a suspend, `udisksctl power-off` before it removes the USB
 device) and a power-condition request change nothing. Pending media-change
@@ -1290,7 +1290,7 @@ Internal flash from `0x08080000` to the end of the 1 MiB is not zero-wait
 (region C, the FS-loader, its UID data, the settings / calibration record).
 One CPU load from it stalls the bus ~21.8 us, and the stream ISR's entry
 with it, whether the load is an instruction fetch (region C code, the old
-rule) or a DATA read. Device b6909d6 (device-check-2026-10-21.md "b6909d6"
+rule) or a DATA read. Device 246afc7 (device-check-2026-10-21.md "246afc7"
 item 3): a host copying INFO/CALIB.BIN, BOOTDATA.BIN, LOADER.BIN or the
 FIRMWARE.BIN tail during a disk session lost 10 k samples at 38400 S/s and
 289 k at 76800 (ROMBOOT.BIN and the FIRMWARE.BIN head, zero-wait: 280 ns).
@@ -1341,7 +1341,7 @@ the AD1 stream ISR).
   - Privacy: CALIB / BOOTDATA bytes were already on the SPI disk (the
     write-once safety copy, calbackup.rs) and leave the meter only through
     the USB volume as before (INFO/, DEBUG/SPIFLASH.BIN). Nothing logs them.
-  - Pacing (2026-10-24, branch mirror-bw; device 612c45c M2: a 76800 disk
+  - Pacing (2026-10-24, branch mirror-bw; device bb15d39 M2: a 76800 disk
     session lost ~21 700 samples per host copy of LOADER.BIN). A mirror
     sector costs the main loop its whole SPI read (512 polled bytes, ~0.97
     us each, plus a wait for a page program in the chip): ~1.1 ms of wall
@@ -1416,10 +1416,10 @@ Why NOT READY (decision 2026-10-23, of three):
 
 Tested over the real Linux path (emu/kvmtest/run.sh: a KVM guest with the
 Ubuntu 7.0.0-38 kernel attaching the emulator over vhci-hcd, usb-storage,
-sd, vfat; the NOT READY change, then the final image cafab0a):
+sd, vfat; the NOT READY change, then the final image 70d69f7):
 - 6 s session (52-67 s of wall time in the loaded emulator): `cat` of the
   four files waited until the session ended, exit 0, byte-identical to
-  copies made before, no kernel message (cafab0a: 51.7 s).
+  copies made before, no kernel message (70d69f7: 51.7 s).
 - 20-25 s sessions (> 180 s wall): the kernel logs "timing out command,
   waited 180s", "Not Ready / Logical unit is in process of becoming ready",
   "I/O error, dev sda, sector 925" (CALIB.BIN); an O_DIRECT read (`dd
@@ -1433,7 +1433,7 @@ sd, vfat; the NOT READY change, then the final image cafab0a):
 
 Pacing (branch mirror-bw, emulator --mips 110 --isr-stall-ns 700 with the
 device's polled SPI byte, 24547cf): a host reading LOADER.BIN back to back
-from 3 s into a 76800 run lost 119 853 of 768 000 samples on e3e81d4, 0
+from 3 s into a 76800 run lost 119 853 of 768 000 samples on c0ab070, 0
 with the pacing (rung kept; a copy inside the writer trial no longer
 makes it fall back); every INFO/ file + DBG:PROF? polls at 38400 / 76800
 `--region-c`: lost 0, no region C, no NOT READY. Device: retest (TODO
@@ -1458,11 +1458,11 @@ memory-access hook): every CPU data load from 0x08080000..0x08100000 while
 `hy3131::HANDED` is set, and every slow-bank PC the stream ISR interrupts,
 is reported next to the region C function hooks; fastlogtest
 `--region-c --host-read` (and wavetest, which reads INFO/ in the Wave view)
-fail on any. Before the fix (4a734d1): memcpy from 0x08080000.. (the
+fail on any. Before the fix (fbcd502): memcpy from 0x08080000.. (the
 FIRMWARE.BIN tail), `vdisk::mem_read` from 0x080C0000, `Logger::start`'s
 literal pool, `dmm::cal` (Wave view), `scope::cal_pair` /
 `hwtrig::rec_pair` (`--poll "SCOP:MEAS:VPP?;DBG:HWTRIG?"` in a disk
-session), `main.rs log_scale` (LOG:SCALe?, region C code). On cafab0a:
+session), `main.rs log_scale` (LOG:SCALe?, region C code). On 70d69f7:
 fastlogtest `--region-c --host-read` at 640 (AD1) / 4800 / 38400 / 76800,
 the same at 9600 with `--poll` of SCOP:MEAS:VPP? / DBG:HWTRIG? / WAV:PRE?
 / CHAN1:SCAL? / SYST:MOD? / *IDN? / LOG:SCALe? / LOG:SRATe? / LOG:SOURce? /
@@ -1823,7 +1823,7 @@ read differed), `NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED`
 
 What the shim does, checked in the emulator with the real ROM and FS-loader
 ([`emu/recoverytest.py`](../../emu/recoverytest.py), all PASS on image sha256 `1372e957…`, built from
-fb6be06):
+ed78395):
 
 - **Key:** opendm40 is entered ~0.7 s after power-on (emulator; ROM + loader).
   The shim lights the backlight at once, waits up to 4 s with the key held,

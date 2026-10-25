@@ -15,7 +15,7 @@ Method C is held to the device's rules on top (C_CHECK, acdc-approaches.md
 of a DC input below 0.5 % of the range and of a sine within 0.05 %, >= 6
 readings / s, no range change in the window. The 60 V phases (DC 24 V, the
 40 Hz square of the device check) and the 5 V DC ones (6 V range, after the
-square) are the device check of 7409b92's failures.
+square) are the device check of e8cc4e9's failures.
 
 The HY3131 model's note 7 (AD1 shifted while AD2 / AD3 convert, the device's
 per-range offsets, feasibility 13.2) is on in every run; `B~` adds a
@@ -26,11 +26,11 @@ non-repeating AD1 gain shift of +-0.2 % per AD1 enable (n7g, the device's
   emu/hy3131/acdcmethtest.py --app X --meths C --port 18120
   emu/hy3131/acdcmethtest.py --app X --meths C --e8 down --port 29100   # device test e8
 
-`--e8 down` / `--e8 up` is the device's e8 (2563fe1: C's 60 V gain from the
+`--e8 down` / `--e8 up` is the device's e8 (2cc47ef: C's 60 V gain from the
 internal zero 0.030 % high): AC+DC entered on the manual 60 V range at 24 V
 (down: 24 / 12 / 5 / 1 / 0 V) or at 0 V (up: 0 / 1 / 5 / 12 / 24 V) and
 stepped without leaving, then the manual 6 V range (5 / 3 / 1 / 0 V; `tc6`:
-this part alone, entered at 5 V, the last level 0.1 V: the c6f9670 6 V
+this part alone, entered at 5 V, the last level 0.1 V: the 2fbc5e7 6 V
 failure, its 0 V level the device's reading without a new reference); the
 DC part against the source with the device's rule (0.05 % + 5 digits) in
 two windows: the device script's (1..4 s after the step) and the late one

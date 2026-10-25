@@ -23,7 +23,7 @@ Firmware use:
 | DAC channel / pin | opendm40 | Code |
 |---|---|---|
 | ch1 = PA4 | generator waveform (TIM6 TRGO, DMA0 stream 5) | [`src/gen.rs`](../src/gen.rs) `Gen::dac` |
-| ch2 = PA5 | scope hardware trigger level, on by default since 49ec62e | [`src/hwtrig.rs`](../src/hwtrig.rs) `set_level`, `set_dac` (bits 16..31 of the DAC registers; `gen.rs` owns bits 0..15) |
+| ch2 = PA5 | scope hardware trigger level, on by default since ef43768 | [`src/hwtrig.rs`](../src/hwtrig.rs) `set_level`, `set_dac` (bits 16..31 of the DAC registers; `gen.rs` owns bits 0..15) |
 
 No external DAC: the SPI peripherals are the W25Q128 flash and the HY3131
 ([hw/README.md Main parts](../../hw/README.md#main-parts)).
@@ -39,7 +39,7 @@ Only ADC0 is used ([`src/power.rs`](../src/power.rs)):
 | ch4 = PA4 | the generator DAC pin read back | `DIAG?` / `DIAG:DAC?`: `Power::sample`, 512 samples in ~21 ms, min / max / mid-crossings |
 
 `DIAG?` on the device: the levels and frequencies of all 4 waveforms matched
-the settings (commit `0e930c9`).
+the settings (commit `2bbcaf5`).
 
 Nothing from the scope front end reaches an MCU ADC pin: the scope ADC is the
 external 3PA1030 on the PB0..PB9 bus

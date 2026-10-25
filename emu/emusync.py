@@ -28,8 +28,8 @@ input was there before the firmware's clock started); a phase without one
 starts its script distance after the previous phase's start. Actions and
 check windows are placed relative to those starts.
 
-BOOT_S: the boot's virtual length on a fresh disk with run.py --fast (3.56 s on 7bd7f6f, 2.85 s
-on ab7184c before mirror-bw's device-like SPI byte time; 1.90 s there at --mips 200). Scripts written in "fw uptime" terms put
+BOOT_S: the boot's virtual length on a fresh disk with run.py --fast (3.56 s on 190d7d5, 2.85 s
+on 0760432 before mirror-bw's device-like SPI byte time; 1.90 s there at --mips 200). Scripts written in "fw uptime" terms put
 their input changes BOOT_S later in virtual time (and run BOOT_S longer), so
 the phases keep the lengths they were written with; no check depends on it
 (a longer boot only shortens the phases, the markers keep every window on

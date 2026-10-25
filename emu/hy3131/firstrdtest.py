@@ -30,24 +30,24 @@ the switch meets the old conversion at other phases):
   aca-step     FAST, open jack, 1 V on V: CONF:CURR:AC 10, 2 s, CONF:CURR:AC
                0.06: every F below 0.1 mA, CONF? stays CURR:AC 0.06
   acv-auto-dn  MED, 1 V AC: CONF:VOLT:AC 60, VOLT:AC:RANG:AUTO ON (-> 6 V): every
-               F 1 V +-0.5 % (5fdd812: a 0 V F from the stepping result, then
+               F 1 V +-0.5 % (80ebb10: a 0 V F from the stepping result, then
                0.99 V from the EMA's step from 0)
   acv-auto-up  the same up: 8 V AC on CONF:VOLT:AC 6 -> 60 V
   aca-auto-dn  0.8 A AC: CONF:CURR:AC 10, CURR:AC:RANG:AUTO ON (-> 6 A)
   acv-entry    1 V AC: CONF:VOLT:DC 6 -> CONF:VOLT:AC: every F 1 V +-0.5 %
   acmv-acv-zero  0 V: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6: every F below 0.05 V
-               (device 489f956: 0.018-0.036 V first)
+               (device 8e04b1c: 0.018-0.036 V first)
   acmv-acv-sq  the 0 / 9.5 V square, mvclamp: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC (AUTO):
-               CONF? never on 60 V (device 489f956: 6 V only)
+               CONF? never on 60 V (device 8e04b1c: 6 V only)
   acv-entry-sq the same on the device's 0 / 9.5 V 50 Hz square (AC part 4.776 V) with
                the model's acarrive 160 ms (the last RMS block before the 300 ms
-               settle half over the AC's arrival): every F 4.776 V +-0.5 % (f4cd2cd:
+               settle half over the AC's arrival): every F 4.776 V +-0.5 % (ab7f748:
                the block latched during the settle seeded the filter, 0.707 x; device
-               489f956 3.39-3.41 V for 4.81 V)
+               8e04b1c 3.39-3.41 V for 4.81 V)
   acv-entry-arr  the same on 1 V 50 Hz (sine)
 
 dcv-acv-med, dcv-res-slow and res-med also check the time between two new
-readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
+readings after the first one (GAP: at most 0.6 s; 4284642 dropped two 400 ms
 conversions after the early OSR step, 0.85-0.9 s). The model's r22win 1000
 gives partials only for an R22 change within 1 s of the row write (INFERRED:
 the device showed none for the same OSR steps later in a function), so these
@@ -101,7 +101,7 @@ SCEN = [
      ('rel', 0.8, 0.005), 'CURR:AC +'),
     ('acv-entry', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
      ('rel', 1.0, 0.005), 'VOLT:AC'),
-    # AC mV -> AC V (device 489f956 step 3): at 0 V the first finals read 0.018-0.036 V, then
+    # AC mV -> AC V (device 8e04b1c step 3): at 0 V the first finals read 0.018-0.036 V, then
     # 3 mV at 1 s; under the 0 / 9.5 V square (608 mV clipped on 600 mV) AUTO goes to 6 V
     # only. The model once read 2.78-3.9 V at 0 V and visited 60 V (its coupling capacitor's
     # level while OP1 is off, HY3131.cs Op1OffLevel).
@@ -110,7 +110,7 @@ SCEN = [
     ('acmv-acv-sq', 'open;vsrc:4.75,ac=4.75,f=40,shape=square;mvclamp:1.212', 'MED', [('CONF:VOLT:AC 0.6', 3.0)],
      'CONF:VOLT:AC', ('any',), '!VOLT:AC +6.000000E+01'),
     # Plain AC entry: the RMS block the chip latched during the settle (its window partly before
-    # the AC reached the node, the model's acarrive) must not be a reading (device 489f956).
+    # the AC reached the node, the model's acarrive) must not be a reading (device 8e04b1c).
     ('acv-entry-sq', 'open;acarrive:160;vsrc:4.776,ac=4.776,f=50,shape=square', 'MED', [('CONF:VOLT:DC 6', 3.0)],
      'CONF:VOLT:AC', ('rel', 4.776, 0.005), 'VOLT:AC'),
     ('acv-entry-arr', 'open;acarrive:160;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
@@ -119,7 +119,7 @@ SCEN = [
 
 # Longest wait between two new readings (grey or final) after the first one,
 # s (R22_LATE: no 400 ms conversions dropped after an early R22 change at
-# MED / SLOW; e1cec01: 1.2 s on DC V, 0.85 s on RES).
+# MED / SLOW; 4284642: 1.2 s on DC V, 0.85 s on RES).
 # Counted for waits that begin within GAP_UNTIL s of the switch: the step to
 # the slow OSR ~2 s after the row write restarts the converter (one 400 ms
 # conversion), by design.
