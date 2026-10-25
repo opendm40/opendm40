@@ -68,6 +68,62 @@ pub fn reset(bg: u16) {
     e.kinds.clear();
 }
 
+/// The emulator state a page draw leaves (screen, pixel owners, probed
+/// calls, bus position; not the write counters): `snapshot` after drawing
+/// a page that many cases share, `restore` per case instead of drawing it
+/// again.
+pub struct Snap {
+    fb: Vec<u16>,
+    owner: Vec<u32>,
+    kinds: Vec<u8>,
+    win: (usize, usize, usize, usize),
+    cur: (usize, usize),
+    cmd: u16,
+    args: Vec<u16>,
+    writing: bool,
+    call: Option<(u32, u16, u8)>,
+    group: Option<(u32, u8)>,
+    grouping: bool,
+}
+
+pub fn snapshot() -> Snap {
+    let e = emu();
+    Snap {
+        fb: e.fb.clone(),
+        owner: e.owner.clone(),
+        kinds: e.kinds.clone(),
+        win: e.win,
+        cur: e.cur,
+        cmd: e.cmd,
+        args: e.args.clone(),
+        writing: e.writing,
+        call: e.call,
+        group: e.group,
+        grouping: e.grouping,
+    }
+}
+
+pub fn restore(s: &Snap) {
+    let e = emu();
+    e.fb.copy_from_slice(&s.fb);
+    e.owner.copy_from_slice(&s.owner);
+    e.kinds.clone_from(&s.kinds);
+    e.win = s.win;
+    e.cur = s.cur;
+    e.cmd = s.cmd;
+    e.args.clone_from(&s.args);
+    e.writing = s.writing;
+    e.call = s.call;
+    e.group = s.group;
+    e.grouping = s.grouping;
+}
+
+/// Same screen, owners and probed calls as `s` (UIR_VERIFY runs).
+pub fn same(s: &Snap) -> bool {
+    let e = emu();
+    e.fb == s.fb && e.owner == s.owner && e.kinds == s.kinds
+}
+
 /// Probe hooks (stockfont / ui under cfg(test)): a draw call starts / ends,
 /// and the glyph it is drawing (255 = none).
 pub fn begin(kind: u8, bg: u16) {
