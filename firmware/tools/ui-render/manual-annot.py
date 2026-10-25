@@ -772,7 +772,7 @@ def pair(name, a, ca, b, cb, crop=None, scale=0.5):
     else:
         sa, sb = src_shot(a, scale), src_shot(b, scale)
     w, h = sa.size
-    im, d = canvas(2 * w + 100, h + 80)
+    im, d = canvas(2 * w + 100, h + 60)
     paste(im, d, sa, 20, 40)
     paste(im, d, sb, w + 80, 40)
     fb = font(15, bold=True)
@@ -915,6 +915,30 @@ def meter(width, screen='dmm-bar'):
     return dev
 
 
+def tap_pair(name, a, tap, ca, b, cb, scale=0.5):
+    """Two screens side by side, a finger on the first at `tap` (screen
+    px), an arrow to the second."""
+    sa, sb = src_shot(a, scale), src_shot(b, scale)
+    w, h = sa.size
+    im, d = canvas(2 * w + 100, h + 60)
+    im.paste(sa, (20, 40))
+    finger(im, 20 + tap[0] * scale, 40 + tap[1] * scale, r=13)
+    d = ImageDraw.Draw(im)
+    d.rectangle((19, 39, 20 + w, 40 + h), outline=GREY)
+    paste(im, d, sb, w + 80, 40)
+    f = font(14)
+    text_c(d, 20 + w / 2, 12, ca, f)
+    text_c(d, w + 80 + w / 2, 12, cb, f)
+    arrow(d, (w + 32, 40 + h / 2), (w + 70, 40 + h / 2), w=3, head=10)
+    save(im, name)
+
+
+def usb_steps():
+    sd = os.path.join(HERE, 'stock-shots')
+    tap_pair('install-stock-usb', (sd, 'stock-usb-menu'), (445, 60), 'Stock: Settings > 5. Other Settings', (sd, 'stock-usb-screen'), 'USB Connect: the USB disk is on')
+    tap_pair('update-steps', (RENDERS, 'settings3-edit'), (445, 119), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
+
+
 def main():
     global RENDERS, STOCK
     if len(sys.argv) not in (2, 3):
@@ -956,6 +980,7 @@ def main():
     scope_topbar()
     stock_dmm_pairs()
     power_screen()
+    usb_steps()
     if STOCK:
         stock_pairs()
 
