@@ -1834,8 +1834,8 @@ impl Dmm {
     }
 
     /// Measured mean interval between readings (ms, EMA over the last few;
-    /// intervals across a function / range change are not counted). 0 until
-    /// two readings were seen. Use for "x readings/s" in the UI and SCPI.
+    /// intervals across a function / range / rate change or a dropped
+    /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
         self.period_ms as u32
     }
@@ -1894,15 +1894,24 @@ impl Dmm {
             hy::write(0x22, &[r]);
         }
         match o {
-            fastvos::Out::Drop => None,
+            // Not a reading: the interval across it is not counted either,
+            // so the readings/s (`reading_period_ms`, the rate chip) stays
+            // the conversion rate (with the gap, one dropped conversion
+            // read 125 ms and the chip "8.0/s" .. "8.8/s" for ~1 s after
+            // each refresh: device check of 0.2.1, emulator rateprobe).
+            fastvos::Out::Drop => {
+                self.t_rd = None;
+                None
+            }
             fastvos::Out::Code(c) => Some((c + if c < 0.0 { -0.5 } else { 0.5 }) as i32),
         }
     }
 
     /// FAST's offset refreshes this session: (used, rejected, VOS in codes
-    /// on the current path) (DBG:DMM:FAST?).
-    pub fn fast_info(&self) -> (u32, u32, f32) {
-        (self.fast.used, self.fast.rejected, self.fast.vos())
+    /// on the current path, AD1 conversion period in ms: EMA over every
+    /// conversion, dropped ones included) (DBG:FAST?).
+    pub fn fast_info(&self) -> (u32, u32, f32, f32) {
+        (self.fast.used, self.fast.rejected, self.fast.vos(), self.conv_ms)
     }
     fn factor(&self) -> f32 {
         FACTOR[COUNTS_MODEL as usize]
@@ -3768,6 +3777,8 @@ impl Dmm {
             return false;
         }
         self.r22_drop -= 1;
+        // (as a FAST refresh's drop, `fast_code`: no interval across it)
+        self.t_rd = None;
         true
     }
 

@@ -777,7 +777,9 @@ In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
-  measured readings per second. Tap it: FAST → MED → SLOW → FAST.
+  measured readings per second: **--/s** right after a change, until two
+  readings at the new rate are in; the skipped FAST readings above are not
+  counted. Tap it: FAST → MED → SLOW → FAST.
 - **Tap the reading** to step the rate the same way; a message says what you
   get: the rate, its readings per second as the chip shows them, and on the
   ranges with the extra digit the time until it shows, for example

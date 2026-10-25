@@ -16,6 +16,11 @@ section named after the tag as the release notes; how to cut a release:
   ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
   6.4 s for the extra digit in Ω; it shows after 3.2 s
   ([manual](docs/manual/README.md#rate-fast-med-slow)).
+- Multimeter: after a tap on the reading the rate chip names the new rate at
+  once, with "--/s" until its readings/s is measured (it kept the old rate's
+  name and number while the message was up), and the extra digit goes at
+  once when the new rate has none. In FAST the chip showed down to 8.0/s for
+  about a second after each offset measurement; it shows 10/s.
 
 ## v0.2.0 (2026-10-25)
 
