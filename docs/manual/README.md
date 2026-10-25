@@ -2440,14 +2440,15 @@ the firmware and its version.
 
 | | |
 |---|---|
-| USB ID | `1209:0001` |
+| USB ID | `1209:D040` |
 | Product | `DM40 multimeter (opendm40)` |
 | Serial number | 24 hex digits, the chip's unique ID (also on the USB disk as `INFO/UID.BIN`). Two meters show up as two drives and two instruments. |
 | Interface 0 | USBTMC / USB488 (class FE, subclass 03, protocol 01) |
 | Interface 1 | USB mass storage, the disk **DM40** |
 
-`1209:0001` is a test ID of the pid.codes project. The rules and driver
-bindings below use it.
+`1209:D040` is opendm40's ID under the pid.codes vendor ID 1209. Builds
+before 0.1.0 used the pid.codes test ID `1209:0001`; the rules and the
+driver bindings below match the new one.
 
 Every reply ends with a newline. Allow **5 s** for a reply: a reading takes
 up to about 0.85 s. The first reading after a function change comes after
@@ -2460,8 +2461,8 @@ another function up to 15 s).
 #### Check the connection
 
 ```
-$ lsusb -d 1209:0001
-Bus 003 Device 012: ID 1209:0001 ... 
+$ lsusb -d 1209:d040
+Bus 003 Device 012: ID 1209:d040 ... 
 $ ls /dev/usbtmc*
 /dev/usbtmc0
 ```
@@ -2475,8 +2476,8 @@ Create `/etc/udev/rules.d/70-dm40.rules`:
 
 ```
 # Alientek DM40 with opendm40: USBTMC node and libusb access
-SUBSYSTEM=="usbmisc", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", TAG+="uaccess"
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", TAG+="uaccess"
+SUBSYSTEM=="usbmisc", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="d040", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="d040", TAG+="uaccess"
 ```
 
 Then `sudo udevadm control --reload` and re-plug the meter. The first line
@@ -2558,8 +2559,8 @@ pip install pyvisa pyvisa-py pyusb
 ```python
 import pyvisa
 rm = pyvisa.ResourceManager('@py')
-# pyvisa-py lists the IDs in decimal (4617::1), NI-VISA in hex (0x1209::0x0001)
-names = [r for r in rm.list_resources() if '::4617::1::' in r or '::0x1209::0x0001::' in r]
+# pyvisa-py lists the IDs in decimal (4617::53312), NI-VISA in hex (0x1209::0xD040)
+names = [r for r in rm.list_resources() if '::4617::53312::' in r or '::0x1209::0xD040::' in r]
 dmm = rm.open_resource(names[0], read_termination='\n', write_termination='\n',
                        timeout=5000)
 print(dmm.query('*IDN?'))
@@ -2568,7 +2569,7 @@ print(float(dmm.query('READ?')))
 ```
 
 pyvisa-py names the meter `USB0::4617::1::<serial>::0::INSTR`; NI-VISA
-`USB0::0x1209::0x0001::<serial>::INSTR`. pyvisa-py talks to the meter
+`USB0::0x1209::0xD040::<serial>::INSTR`. pyvisa-py talks to the meter
 through libusb and takes the interface away from the kernel driver:
 `/dev/usbtmcN` disappears until you re-plug the meter. Use either PyVISA or
 the `/dev/usbtmcN` tools, not both at the same time.

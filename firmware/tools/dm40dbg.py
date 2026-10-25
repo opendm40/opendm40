@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host side of the opendm40 debug commands (USBTMC, VID:PID 1209:0001).
+"""Host side of the opendm40 debug commands (USBTMC, VID:PID 1209:D040; 1209:0001 before 0.1.0).
 
     dm40dbg.py ping
     dm40dbg.py hold [seconds]            keep the watchdog fed while running
@@ -57,7 +57,9 @@ import sys
 import time
 import zlib
 
-VID, PID = 0x1209, 0x0001
+VID, PID = 0x1209, 0xD040
+# Builds before 1209:D040 enumerated as the pid.codes test PID 0001.
+PIDS = (0xD040, 0x0001)
 STOCK_VID, STOCK_PID = 0x28e9, 0x028f   # stock "USB Connect" disk = loader update disk
 W, H = 480, 320
 FIRMWARE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -90,13 +92,13 @@ def usb_present(vid, pid):
             p = int(open(os.path.join(base, 'idProduct')).read(), 16)
         except (OSError, ValueError):
             continue
-        if (v, p) == (vid, pid):
+        if v == vid and (p == pid or (vid, pid) == (VID, PID) and p in PIDS):
             return True
     return False
 
 
 def find_dev(required=True):
-    """/dev/usbtmcN of the first 1209:0001. DM40_USBTMC=/dev/usbtmcN picks
+    """/dev/usbtmcN of the first opendm40 (1209:D040, or 1209:0001 of older builds). DM40_USBTMC=/dev/usbtmcN picks
     one; DM40_USBTMC=emu the emulator's (attached with `usbip attach`, under
     vhci_hcd), DM40_USBTMC=real the one that is not."""
     sel = os.environ.get('DM40_USBTMC', '')
@@ -111,7 +113,7 @@ def find_dev(required=True):
             p = int(open(os.path.join(usb, 'idProduct')).read(), 16)
         except OSError:
             continue
-        if (v, p) == (VID, PID):
+        if v == VID and p in PIDS:
             return '/dev/' + os.path.basename(d)
     if not required:
         return None
@@ -555,7 +557,7 @@ def cmd_update(ln, wait, expect):
         pass  # usbtmc's flush on close fails with ENODEV once the device is gone
     print('DBG:UPDATE: marker zeroed, device reset; the vendor loader installs the dm40*.bin.')
     if not wait:
-        print('Wait for opendm40 to re-enumerate (1209:0001), then: dm40dbg.py boot --expect FILE')
+        print('Wait for opendm40 to re-enumerate (1209:D040), then: dm40dbg.py boot --expect FILE')
         return 0
     print('waiting up to %d s for opendm40 (first boot after an install is slow and dark: '
           'do not power-cycle) ...' % wait)

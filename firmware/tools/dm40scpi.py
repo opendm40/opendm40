@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """DM40 (opendm40) SCPI host client: readings, CSV logging, function switching
 (UF-38, docs/user-feedback.md section 10). Over USBTMC (default; the
-transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:0001) or Bluetooth
+transport of dm40dbg.py, /dev/usbtmcN of VID:PID 1209:D040) or Bluetooth
 (--bt; the transport of dm40bt_scpi.py: RFCOMM channel 1, or --dev
 /dev/rfcomm0; needs /usr/bin/python3 for socket.AF_BLUETOOTH).
 
