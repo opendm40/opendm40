@@ -4048,3 +4048,56 @@ Field numbers of `DBG:SENT?` count from 1: 4 CTSTA, 8 hits, 14 jack verdict, 15 
   `DBG:VDISK:RO?` 1,1 as found. Crash count 0, HEALTHY, marker VALID, stack high water 21 696 / 45 132.
 - **Files:** none made; `MMEM:CAT?` equals the start listing.
 - **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled.
+
+## 82c8aca: pow10f (9d8cba6), FETCh? during an autorange step (444de62), the RES AUTO hold (f464ade) (2026-10-25)
+
+Image 82c8aca, flashed by the owner just before. `DBG:BOOT?` NORMAL / HEALTHY, crash count 0, marker VALID,
+`FATDIR,7,0,0` at the start and the end. The A jack, the MCX probe and the generator output were not wired; `OUTP?`
+0 throughout. The calibrator (`/dev/ttyACM1`) was on V/Ω–COM: 1 V read 1.0005 V in DC V before the runs. Danger
+alarm LOUD except for step 6 (`SYST:ALER:ALARm OFF`, LOUD again right after); `DBG:ALARm?` events stayed 0. Scripts
+and logs are in the session scratchpad `ck/82c8aca/` (not in git): `s1.py` (RES AUTO, `RES:RANG?;:DBG:READout?`
+every 0.1 s for 20 s), `s2.py` (FETC? every 0.2 s for 21 s, each reply timed), `s4.py` (resistance swaps, polls
+every 0.05 s), `s6.py` (step 6), `s1-*.log`, `s2*.log`, `s4.log`.
+
+### Summary
+
+| step | result |
+|---|---|
+| 1. RES AUTO on the calibrator's disabled output: settles on 6 MΩ at ~0.10 MΩ, `RES:RANG?` steady | **Not run as specified: the hunt's input was not there.** The disabled output did not give "6 MΩ ~0.10 MΩ, 600 kΩ OL" (a2e9766, c5ac0c5) in any of 7 calibrator states (note 1). AUTO settled in each: 60 M -> 6 M -> 600 kΩ in 0.5 s and **0 range changes in the next 19.5 s** at 417-421 kΩ (voltage, resistance, mV, current and frequency 90 Hz disabled; from DC V, RES 6 MΩ and RES 600 Ω), or down to 600 Ω at 23.5 Ω (frequency 40 Hz disabled, twice). So the f464ade hold was **not exercised**; the absence of the hunt today does not come from the fix |
+| 2. FETC? every 0.2 s for 20 s | **PASS** (4 runs of 101 replies, 0 timeouts, no USBTMC clear, `SYST:ERR?` 0 after each). The first FETC?, sent at the `CONF:RES`, answered in **0.99-1.05 s** with a reading (the entry wait, at the 1 s bound: the wait plus the round trip; the steps 60 M -> 6 M -> 600 kΩ came during it); every later one in ≤ 1 ms. With range steps forced mid-run (calibrator 100 Ω on at 7 s, off at 14 s): +9.91E37 on **3 polls (0.6 s)** after 600 kΩ -> 600 Ω and **4 polls (0.8 s)** after 600 Ω -> 60 MΩ -> 600 kΩ, then the new value (100.04 Ω, 421 kΩ); never OL, never -410 |
+| 3. `CONF:RES;:READ?` from DC V | **PASS**: 0.99 / 1.08 / 1.08 s, 423 kΩ on 600 kΩ, no error |
+| 4. Resistor swaps (calibrator resistance output) | **PASS** from the 600 kΩ settle (not from a 6 MΩ hold: step 1). 100 Ω on: 600 k -> 60 k -> 600 Ω, first final 100.04 Ω **1.94 s** after the enable write (twice: 1.73 s; the calibrator's own switch shows 0.4-0.8 s as 415 / 205-220 kΩ conversions). 100 -> 390 Ω (`set_value`, no open between): no range change, 392.65 Ω final at 1.22 s (the calibrator ramps through 181 and 327 Ω); whether the +0.7 % is the calibrator near its ~399 Ω cap or the meter: not known (100 Ω read 100.04 Ω). Off: 600 Ω -> 60 MΩ -> 600 kΩ, final 423.5 kΩ at 1.62 / 1.97 s. **4.7 kΩ and 100 kΩ: untested** (no such part on the bench) |
+| 5. `VOLT:RES?` DC V 6 V MED | **PASS: +1.000000E-05** (a2e9766: +9.999999E-06). MED / SLOW: 60 mV 1E-06, 600 mV 1E-06, 60 V 1E-04, 600 V 1E-03; FAST one digit coarser except 60 mV. `RES:RES?` 600 Ω .. 60 MΩ: 1E-03, 1E-02 (6 kΩ), 1E+01 (600 kΩ), 1E+02, 1E+03; `CURR:RES?` 600 uA 1E-08, 60 mA 1E-06, 6 A 1E-04. All printed as exact powers of ten. CONF? differs for 3.0-3.5 s after a range set (note 2) |
+| 6. RES with 5 V on V-COM: LIVE?, no A-JACK | **PASS**. AUTO (on 60 MΩ): `SYST:ALER?` LIVE on 63 of 67 polls, NONE on the first 4; 600 Ω: LIVE on 64, NONE on 3; never AJACK; `DBG:SENT?` field 14 = 2 on 66 polls; NONE 3 s after the off; `DBG:SENT:LOG?` +2 `LIVE,CMP_PB1` (one per source), as c5ac0c5 |
+
+### Notes
+
+1. **The calibrator's disabled output today.** Manual ranges on frequency-40 Hz-disabled, read 3 s after each set:
+   first 6 MΩ 3.9 kΩ, 600 kΩ 407 Ω, 60 kΩ 61 Ω, 6 kΩ and 600 Ω OL; a minute later 6 MΩ 92 kΩ, 600 kΩ 417 kΩ,
+   60 kΩ / 6 kΩ / 600 Ω OL. On frequency-90-Hz-disabled (as found): 600 kΩ manual for 60 s read 420.8-421.0 kΩ,
+   **0 OL of 76**; 6 MΩ 93.5 kΩ, 60 kΩ OL. So the input is no resistor (6 MΩ and 600 kΩ disagree) and changes with
+   the calibrator's state and history, but 600 kΩ read in range, and only an OL there starts the hunt. Whether the
+   owner's re-plugging of the leads (they had been on the scope) or the calibrator state made the difference: not
+   known.
+2. **CONF? and VOLT:RES? disagree for a few seconds after a range set.** `VOLT:RANG 6` at MED: `VOLT:RES?`
+   +1.000000E-05 at once; CONF? "VOLT +6,+1.000000E-04" up to 3.0 s, +1.000000E-05 from 3.5 s on. CONF? takes the digits of the
+   live readout (app.rs `put_conf`: reading unit / decimals); RES? takes the rate setting. That the readout has one
+   digit fewer because MED runs at 10/s for a while after a change (scpi.rs `RATE` notes) is INFERRED. This explains the +1E-04 / +1E-05 CONF? replies of the a2e9766
+   and c5ac0c5 sessions. Cosmetic; not changed.
+3. **RES AUTO from a manual range** (open item from c5ac0c5 note 2): `CONF:RES 6E6` / `CONF:RES 600`, then
+   `CONF:RES` + `RES:RANG:AUTO ON`: `DBG:READout?` kept the manual value (`F`) for 0.5 s, then `G` / `F` at the
+   600 kΩ values, changing with each conversion. The status bar was not looked at, and the hunt (the condition of
+   that note) was not there.
+4. After a range step `DBG:READout?` keeps `F` with the previous range's value and unit (e.g. `F,kΩ,+2.2E+05` on
+   600 Ω) until the first conversion on the new range (0.2-0.5 s), while FETC? answers +9.91E37. Whether the screen
+   shows that value or dashes: not looked at.
+5. Not run: the 6 MΩ hold and its exits (step 1), the 4.7 kΩ / 100 kΩ swaps.
+
+### State at the end
+
+- **Device:** DMM page, DC V, `VOLT:RANG:AUTO?` 1, `RATE?` MED, CONF? "VOLT +6,+1E-04" (just after the switch;
+  +1E-05 at the start), volume 50, danger alarm LOUD (`DBG:ALARm?` 0,0,0,0; `SAVE,OK`), `SYST:ALER:ENAB?` 7,
+  `SYST:ALER?` NONE, `DBG:IDLE?` Shutdown 1 800 000 ms, `SYST:ERR?` empty, `OUTP?` 0, `DBG:VDISK:RO?` 1,1 as found.
+  Crash count 0, HEALTHY, marker VALID, stack high water 21 696 / 45 124.
+- **Files:** none made; `MMEM:CAT?` equals the start listing.
+- **Calibrator:** frequency 90 Hz (90 000 mHz), output disabled, as found.
