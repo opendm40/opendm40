@@ -26,6 +26,11 @@ def get_anchors(p):
             for x in re.findall(r'<a\s+(?:name|id)="([^"]+)"', l): a.add(x)
         anchors[p] = a
     return anchors[p]
+tracked = set(subprocess.check_output(['git', 'ls-files'], text=True).split('\n'))
+tracked_dirs = {os.path.dirname(x) for x in tracked for _ in [0]}
+for x in list(tracked_dirs):
+    while x:
+        x = os.path.dirname(x); tracked_dirs.add(x)
 bad = 0
 for f in files:
     text = open(f, encoding='utf-8').read()
@@ -37,7 +42,9 @@ for f in files:
         path, _, frag = t.partition('#')
         path = urllib.parse.unquote(path)
         tgt = os.path.normpath(os.path.join(os.path.dirname(f), path)) if path else f
-        if not os.path.exists(tgt):
+        # Untracked targets (stock/re/ is a private clone, gitignored) are
+        # missing for every other reader, CI included.
+        if not os.path.exists(tgt) or (tgt not in tracked and tgt not in tracked_dirs):
             print('%s: missing %s' % (f, t)); bad += 1; continue
         if frag and tgt.endswith('.md') and os.path.isfile(tgt):
             if frag not in get_anchors(tgt):

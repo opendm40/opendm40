@@ -72,14 +72,18 @@ need a flash dump of a meter.
 
 ### Releasing
 
-Versions are `0.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown as they
-are; the tag is `v` + the version:
+Releases follow [Semantic Versioning](https://semver.org/): the version is
+`MAJOR.MINOR.PATCH` in [`Cargo.toml`](Cargo.toml), shown as it is, and the tag
+is `v` + the version. While MAJOR is 0:
 
-| Cargo.toml = shown | Tag | When |
+| Change | Bump | Example |
 |---|---|---|
-| `0.1.0-pre2` | `v0.1.0-pre2` | a pre-release on the way to 0.1.0 (also `-rcN`) |
-| `0.1.0` | `v0.1.0` | MINOR: new features or changed behaviour |
-| `0.1.1` | `v0.1.1` | PATCH: fixes only |
+| New features, changed behaviour, or anything incompatible (SCPI, settings file, USB ID) | MINOR | `0.2.0` -> `0.3.0` |
+| Fixes only | PATCH | `0.2.0` -> `0.2.1` |
+
+MAJOR becomes 1 when the SCPI command set and the settings file are declared
+stable; after that an incompatible change bumps MAJOR. Pre-release suffixes
+(`-rc1`) are allowed but not used so far.
 
 1. Set `version` in [`Cargo.toml`](Cargo.toml) and run `./build.sh` once, so
    that `Cargo.lock` follows (CI builds with `--locked` and fails on a stale
