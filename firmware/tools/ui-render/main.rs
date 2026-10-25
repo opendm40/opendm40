@@ -1384,6 +1384,55 @@ fn main() {
         }
     }
 
+    // 5a. Status-bar range label (stock: "AUTO" / "AUTO+", a manual range
+    //     as "6V" / "600mV" / "6000uA" / "600K ohm" ..): every function in
+    //     auto, AUTO+ for V / A, every manual range, with HOLD, A-HOLD and
+    //     the alert slot states, lock + CSV on. 1x renders in
+    //     <out>/rangebar/ (the status-bar contact sheet).
+    {
+        let dir = format!("{out}/rangebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut states: Vec<(u8, i8, bool, bool)> = vec![];
+        for mode in 0..=15u8 {
+            states.push((mode, 0, true, false));
+            if mode <= 9 {
+                states.push((mode, 0, true, true));
+            }
+            for range in 0..8i8 {
+                if ui::range_label(mode, range).is_some() || (range == 0 && mode > 10) {
+                    states.push((mode, range, false, false));
+                }
+            }
+        }
+        for (mode, range, auto, plus) in states {
+            for (hold, alert) in [(0u8, sentinel::Alert::None), (1, sentinel::Alert::None), (3, sentinel::Alert::None), (0, sentinel::Alert::AJack), (0, sentinel::Alert::VJack)] {
+                host::reset(0);
+                let mut r = cases[0].1;
+                r.mode = mode;
+                r.range = range;
+                r.auto = auto;
+                r.auto_plus = plus;
+                r.alert = alert;
+                dv.label = if mode == 15 { Some(ui::T_LABELS[0]) } else { None };
+                dv.draw_static(dmm::button_of(mode), mode, false, false);
+                dv.reading(&r, hold, 0);
+                let mut s = status(0);
+                s.locked = true;
+                s.csv = true;
+                ui::status_right(&s);
+                let keep = ui::BAR_H as usize * W;
+                for p in emu().owner[keep..].iter_mut() {
+                    *p = 0;
+                }
+                let name = format!("m{mode:02}r{range}{}h{hold}{:?}", if !auto { "M" } else if plus { "P" } else { "A" }, alert);
+                ck.check(&format!("rangebar/{name}"), &dmm_regions);
+                if hold == 0 && alert == sentinel::Alert::None {
+                    host::save_ppm(&format!("{dir}/{name}.ppm"), 1);
+                }
+            }
+        }
+    }
+
     // 5b. Full DMM page: readout (+1 digit), aux rows, limit badge, HV,
     //     history row, trend chart (axis labels, timebase chip) and the
     //     MAX / AVG / MIN / REL / time column, every case.

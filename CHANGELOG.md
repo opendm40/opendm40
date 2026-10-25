@@ -29,6 +29,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- Multimeter: with a fixed range the status bar shows the range (e.g.
+  **6V**, **600mV**, **6000uA**, **6KΩ**) instead of **MANU**, as the stock
+  firmware does; the meter strip's badge too.
 - A power-off starts a new measurement: DC V, and the measurement settings
   (ranges, AutoHold, limits, rate, the scope's acquisition and trigger, the
   power meter, the Record page) at their defaults; the preferences are kept.

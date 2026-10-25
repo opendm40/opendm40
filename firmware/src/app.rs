@@ -2189,14 +2189,7 @@ impl App {
                 _ => None,
             }
         } else {
-            let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
-            Some(match m {
-                2 | 3 if r == 0 => 5,
-                2 | 3 => 0,
-                0 | 1 => r + 1,
-                4..=9 => (2 - (m - 4) % 3) * 2 + r,
-                _ => r,
-            })
+            Some(ui::range_code(self.dmm.hy_mode(), self.dmm.range() as u8))
         };
         items.iter().position(|it| it.1 == want)
     }
