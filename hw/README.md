@@ -36,7 +36,7 @@ the community BOM of board V1.1 ("BOM" below: posted by jebem in the
 [EEVblog DM40C thread](https://www.eevblog.com/forum/testgear/alientek-dm40c-multimeter-%28dm40a-dm40b-dm40c%29/),
 retold from the [mydigit.cn teardown](https://www.mydigit.cn/thread-486604-1-1.html),
 registration needed; first collected in this repo in
-[docs/dm40-feature-request.md](../docs/dm40-feature-request.md)), the DM40
+[docs/dm40-feature-request.md](../docs/history/dm40-feature-request.md)), the DM40
 manual V1.5 ([ManualsLib](https://www.manualslib.com/manual/3720530/Alientek-Dm40.html)),
 [`firmware/docs/user-feedback.md`](../firmware/docs/user-feedback.md) (reports from the DM40 owners' Telegram chat [@S2084K](https://t.me/S2084K),
 cited by message number).
@@ -355,7 +355,7 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Counter | CTA / CTB / CTC, gate preset 0xFC0000 = 0x40000 SYSCLK = 53.3 ms | frequency (reciprocal), capacitance (RC oscillator) |
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
-AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../firmware/docs/device-check-2026-10-21.md#ad1-osr-characterization-ea73ea5-2026-10-24-1433---1545).
+AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../docs/history/device-check-2026-10-21.md#ad1-osr-characterization-ea73ea5-2026-10-24-1433---1545).
 AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
 [#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
 of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), `stock/re/docs/history/acdc-stock-vs-opendm40.md`).
@@ -387,7 +387,7 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
   variant (AGNDP7; AGNDP8 on 6 MΩ). Open-circuit voltage at the jack (the
   MR9270S+ calibrator's voltage input): 2.12 V (default), 0.67 V (ON). Measured
   on one unit with `DBG:SRC`, jacks shorted / open
-  ([`device-check-2026-10-21.md`](../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc),
+  ([`device-check-2026-10-21.md`](../docs/history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc),
   `dmm::OHM_ISC` in [`firmware/src/dmm.rs`](../firmware/src/dmm.rs)).
   60 Ω (the stock's r0 row, not used by the stock nor by opendm40) and 60 MΩ
   (the current-source row) not measured. *Inferred* from the drops:
@@ -524,7 +524,7 @@ section 4 (sentinels) and 3 (power meter).
     brought the trip back at 1.9 / 2.1 / 2.8 s (d2aff22). *Inferred*: board
     state (the divider and its capacitors, the power bus / PA8 node, the relay).
 
-Sources: [device-check-2026-10-21.md](../firmware/docs/device-check-2026-10-21.md)
+Sources: [device-check-2026-10-21.md](../docs/history/device-check-2026-10-21.md)
 sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
 "40728b8", "d2aff22", "1a11eda: bug-fix recheck"); e606771 (T1) and d150919
 (HPF) are recorded here only.

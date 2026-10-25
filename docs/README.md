@@ -66,13 +66,13 @@ All documentation of opendm40, by reader. Start at the
 - [firmware/TODO.md](../firmware/TODO.md): the developers' working list.
 - [user-feedback.md](../firmware/docs/user-feedback.md): DM40 owners'
   feedback, triaged into UF-nn items.
-- [dm40-feature-request.md](dm40-feature-request.md): the FR-nn feature list
-  (Russian).
+- [dm40-feature-request.md](history/dm40-feature-request.md): the FR-nn feature list
+  (Russian, archived).
 
 ### Test records
 
-- [device-check-2026-10-21.md](../firmware/docs/device-check-2026-10-21.md):
-  the device test log, per build.
+- [device-check-2026-10-21.md](history/device-check-2026-10-21.md):
+  the device test log, per build (archived).
 - Measurements against a calibrator, with the CSV files:
   [DC V](../firmware/docs/data/dcv-steps-2026-10-25.md),
   [DC A](../firmware/docs/data/dca-steps-2026-10-25.md),

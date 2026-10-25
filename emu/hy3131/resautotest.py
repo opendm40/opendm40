@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RES AUTO set from a manual RES range (device c6a3ac3, firmware/docs/device-check-2026-10-21.md
+"""RES AUTO set from a manual RES range (device c6a3ac3, docs/history/device-check-2026-10-21.md
 "c6a3ac3: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
 status bar on MANU and the readout on the manual range's final value (DBG:READout? `F`) while AUTO
 stepped; from DC V the same commands showed AUTO and dashes.

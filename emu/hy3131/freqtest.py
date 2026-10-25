@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40 DMM frequency: the first readings after an entry (device check
-2026-10-24, firmware/docs/device-check-2026-10-21.md "Crosstalk and cold-junction
+2026-10-24, docs/history/device-check-2026-10-21.md "Crosstalk and cold-junction
 self-heating (40728b8)": on a steady 40 Hz square the first 1-2 READ? after
 DC V -> CONF:FREQ read 19.94 / 0.00 / 0.99 / 0.94 / 17.04 Hz, then 40.0018).
 

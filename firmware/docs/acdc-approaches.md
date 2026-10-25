@@ -15,7 +15,7 @@ Short names: "acdc" = `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the 
 (the stock's AC+DC measured live), "feasibility" =
 [dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md), "power" =
 [power-meter-and-misconnect.md](power-meter-and-misconnect.md), "device check" =
-[device-check-2026-10-21.md](device-check-2026-10-21.md). Sources: section 9.
+[device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md). Sources: section 9.
 
 ## 0. Summary
 
