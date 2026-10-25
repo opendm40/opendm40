@@ -3522,7 +3522,7 @@ Emulator (emu/):
       (device-check doc "a2e9766: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
       alarm. AUTO -> AUTO+ on 60 mV: 6 V within 0.9-1.0 s (AC and DC).
 - [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (**RES: failed on the device
-      a2e9766; the both-bit rule fixes it in the emulator, device check open: the jack-check item below**; A jack empty; 35fce2a 7b / E4,
+      a2e9766; the both-bit rule fixes it, PASS on the device c5ac0c5: the jack-check item below**; A jack empty; 35fce2a 7b / E4,
       f0d21eb item 4, 46370df new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
       the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
       (continuity) or below -0.9 V = driven -> LIVE?, no A-JACK; at its own source (ohm 0.78-2.17 V open,
@@ -3550,17 +3550,34 @@ Emulator (emu/):
       `ohmboth`): senttest ohm-v5 / ohm-v5-600, switchtest dc5-pickup / sq-pickup, loudtest ajack-res fail
       on cd1ec9a and pass. INFERRED gap: a current in A large enough to push PB1 out of the comparator's
       range may read 0x70 too (LIVE? then, not the badge). Device: doc 4.13 check list items 4-5.
+      **Device c5ac0c5 (device-check doc "c5ac0c5: the RES jack fix"): PASS** for item 5 and the
+      regression items: RES AUTO / 600 Ω with 5 V and 10 V field 4 = 112 on all but the first poll, field
+      14 = 2, LIVE?, never A-JACK, alarm events 0; the square 112 on about half the polls, field 14 = 2, LIVE?;
+      1 / 3 V no hits; continuity LIVE? from 1 V, no A-JACK; AC V manual 60 / 600 mV with the square: no
+      A-JACK. Still open here: item 4 (a current in A: the A jack is not wired), the mV-first AC AUTO
+      (the meter is on AUTO+), RTD / NTC.
 - [ ] FETCh? does not answer within 5 s while RES AUTO hunts (device a2e9766, device-check doc "a2e9766:
       bug-fix recheck" note 1): on the calibrator's disabled output, RES AUTO stepped 6 MΩ <-> 600 kΩ (6 MΩ
       reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
       driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
       once after a range change. The hunt itself (a source that is not a resistor) not investigated.
+      Device c5ac0c5 (its fix not in that image): the hunt is still there, 6 MΩ <-> 600 kΩ every
+      0.20-0.26 s, 30-34 changes in 8-10 s, from DC V and from each manual RES range. FETCh? not retried.
+- [ ] RES AUTO set over SCPI from a manual RES range leaves the screen on the manual reading (device
+      c5ac0c5, device-check doc "c5ac0c5: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` +
+      `RES:RANG:AUTO ON` on the calibrator's disabled output: RES:RANG:AUTO? 1, RES:RANG? hunting, but the
+      status bar MANU and a frozen 0.1043 MΩ (DBG:READout? `F`) for 8 s; from DC V the same commands show
+      AUTO and dashes. Not tested on a resistor; cause not looked into.
+- [ ] DBG:SENT? fields 14 / 15 keep the verdict of the PB1 hits at a switch between ohm-network rows
+      (device c5ac0c5 note 3: RES AUTO -> 600 Ω, 0 / 2150 mV for the whole open level; RES -> continuity
+      0 / -4 mV for ~3 s). No alert; doc 4.13 check list item 2 expects -1 / 0. Diagnostics only.
 - [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device a2e9766, same doc note 3):
       DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
       Cause: once LIVE? cleared (the last live result 1 s old), the next poll re-asserted it from the old
       run (`live_t0` stays until the next ohm reading). Fixed: a run whose last live result is
       LIVE_CLEAR_MS old asserts no more (sentinel test live_does_not_flap_after_the_source). Device: doc
-      4.13 check list item 5.
+      4.13 check list item 5. **Device c5ac0c5: PASS**, DBG:SENT:LOG? +0 after the off in 5 of 5 (5 V x 3,
+      10 V, the square); LIVE? clears 1.0-1.25 s after the off and stays off.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 46370df new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack

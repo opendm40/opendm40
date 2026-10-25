@@ -4000,3 +4000,51 @@ and inside the PC14 pulse.
 
 One BT OFF tap with a 4 s connect attempt timed out (the toggles do switch the module). State at the end: DMM
 page, BT ON, `SYST:ERR?` empty over USB, `SYST:ALER?` NONE. No files made.
+
+## c5ac0c5: the RES jack fix (eef96f7, both-bit reads; LIVE? after the source) (2026-10-25)
+
+Image c5ac0c5 (5fdd812 plus the Bluetooth fix; `src/sentinel.rs` and `src/dmm.rs` equal to 5fdd812). `DBG:BOOT?`
+NORMAL / HEALTHY, crash count 0, marker VALID, `FATDIR,7,0,0` at the start and the end. The A jack, the MCX probe
+and the generator output were not wired; `OUTP?` 0 throughout. The calibrator (`/dev/ttyACM1`) was on V/Ω–COM
+(1 V read 1.0013 V in DC V before the runs); "open" below is its **disabled output**, not an open input. Danger
+alarm Off for the runs (`SYST:ALER:ALARm OFF`), LOUD again at the end. `DBG:ALARm?` events stayed 0. Scripts and
+logs are in the session scratchpad `chk12/` (not in git): `jk.py` (per mode and level, 10 s: `SYST:ALER?`,
+`DBG:ALARm?`, `DBG:SENT?`, `DBG:SENT:LOG?`, `DBG:READout?`, one round every ~0.15 s, ~66 rounds per level),
+`flap.py`, `hunt.py`, `hunt2.py`, `j-res.log`, `j-cont.log`, `j-ac.log`, `flap.log`, `hunt*.log`, the screenshots.
+Field numbers of `DBG:SENT?` count from 1: 4 CTSTA, 8 hits, 14 jack verdict, 15 OP1O peak (mV).
+
+### Summary
+
+| step | result |
+|---|---|
+| 1-2. RES AUTO and manual 600 Ω: open, 1, 3, 5, 10 V DC, the 40 Hz 0 / 9.5 V square, 10 s each | **PASS**. Open, 1 V, 3 V: no PB1 hits, field 4 = 0 on every poll, `SYST:ALER?` NONE. 5 V / 10 V: field 4 = **112** on 66 / 65 of 67 polls (AUTO), 65 / 66 (600 Ω), the rest 0 (the first poll); field 14 = **2** on 64 / 62 (AUTO) and 65 / 66 (600 Ω) polls; `SYST:ALER?` **LIVE** on 60-64 polls, NONE on the first 3-6; never AJACK. The square: field 4 112 on 38 (AUTO) / 33 (600 Ω) polls and 0 on the rest; field 14 = 2 on 65 / 64 polls; LIVE on 59 / 61 polls; never AJACK. Each source added one `LIVE,CMP_PB1` entry to `DBG:SENT:LOG?`. Alarm events 0. Field 15 while the source is on: 2139-2140 mV (5 V, AUTO), 2249-2250 (5 V, 600 Ω), 2019-2029 (10 V), 2006 (square, AUTO), 2243 (square, 600 Ω), as a2e9766 |
+| 3. LIVE? after the source goes off, RES 600 Ω (5 V three times, then 10 V and the square; 6 s on, then 3 s off) | **PASS**: `DBG:SENT:LOG?` grew by **0** entries after the off in 5 of 5 (a2e9766: +24). `SYST:ALER?` LIVE for 1.0 s after the off, NONE from 1.25 s on, no return. In those 3 s field 14 went 2 -> 1 at ~1.25 s, field 15 2380-2382 mV (the "driven" level of a2e9766 after the off) |
+| 4a. Continuity: open, 1, 3, 5, 10 V, the square (a2e9766 item 1c) | **PASS**: no AJACK, LIVE from 1 V (60-63 polls of 66 per level), field 14 = 1, field 15 970 mV (1 V), 1686-1693 (3 V, 5 V), 1759 (10 V), 1687-1759 (square), as a2e9766. Open: NONE |
+| 4b. AC V manual 60 mV and 600 mV with the square (a2e9766 item 1d) | **PASS**: 92 / 93 PB1 hits in 10 s, field 12 (V_GATE) 1, `SYST:ALER?` NONE on every poll, `DBG:SENT:LOG?` unchanged, alarm events 0. AC V AUTO ran on 6 V (the meter's V AUTO is AUTO+), so the mV-first AUTO was **not run** |
+| 5. RES AUTO on the calibrator's disabled output | **Hunt still there**: 6 MΩ <-> 600 kΩ every 0.20-0.26 s, 30-34 range changes in 8-10 s, from DC V, RES 60 kΩ, 6 MΩ and 600 Ω alike (`hunt2.log`); never a settled range. New: entered from a manual RES range, the screen shows a frozen final value (note 2) |
+
+### Notes
+
+1. Not run: doc 4.13 check list item 4 (a current in A: the A jack is not wired) and the RTD / NTC rows.
+2. **RES AUTO set from a manual RES range: the screen keeps the manual value.** `CONF:RES 6E6`, 3 s, then
+   `CONF:RES` + `RES:RANG:AUTO ON`: `RES:RANG:AUTO?` 1 and `RES:RANG?` alternating 600 kΩ / 6 MΩ, while the
+   status bar reads **MANU**, the readout a steady **0.1043 MΩ** (the 6 MΩ manual value; "I 0.22 uA") and
+   `DBG:READout?` `F,MΩ,+1.04E+05` for the whole 8 s (`hunt-sheet.png`, 2 grabs 1 s apart, clock running).
+   The same from RES 60 kΩ / 600 Ω (`F`, OL). From DC V the same commands give AUTO in the status bar, dashes
+   and `P` (`hunt-c1.png`). Whether this needs the hunt (a source that is no resistor) or shows on a resistor
+   too: not tested.
+3. **Check list item 2 (open: fields 14 / 15 stay -1 / 0) is not met after a switch.** RES 600 Ω entered
+   from RES AUTO: 3 PB1 hits at the switch (field 8 283 -> 286 before the open level began), then field 14 /
+   15 read 0 / 2150 mV on all 67 polls of the open level and through 1 V and 3 V (no new hits there).
+   Continuity entered from RES: 1 hit, 0 / -4 mV on 19 of 66 polls, then -1. No alert in either. Under RES
+   AUTO from DC V the open level read -1. So the fields keep the verdict of the switch's hits until the next
+   run; whether the hits come from the switch itself: inferred from the counts.
+
+### State at the end
+
+- **Device:** DMM page, DC V, AUTO+, `CONF?` "VOLT +6,+1E-04" (just after the switch; +1E-05 at the start),
+  volume 50, danger alarm LOUD (`SYST:ALER:ALARm?` LOUD, `DBG:ALARm?` 0,0,0,0; `SAVE,OK`), `DBG:IDLE?`
+  Shutdown 1 800 000 ms, `SYST:ALER?` NONE, `SYST:ALER:ENAB?` 7, `SYST:ERR?` empty, `OUTP?` 0,
+  `DBG:VDISK:RO?` 1,1 as found. Crash count 0, HEALTHY, marker VALID, stack high water 21 696 / 45 132.
+- **Files:** none made; `MMEM:CAT?` equals the start listing.
+- **Calibrator:** frequency 40 Hz (40 000 mHz), output disabled.
