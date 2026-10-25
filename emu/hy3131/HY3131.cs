@@ -70,7 +70,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             Array.Clear(regs, 0, regs.Length);
             intf = 0; ctbov = false; acpo = false;
             ad1Start = now; ad1Done = 0; ad1Code = 0; ad1Last = now; ad1MixT = double.NegativeInfinity;
-            r22PartT = double.NaN; r22PartLeft = 0;
+            r22PartT = double.NaN; r22PartLeft = 0; chopSwT = double.NegativeInfinity; chopSwOld = 1;
             ad2Start = now; ad2Done = 0; lpfStart = now; lpfDone = 0;
             ad2LastT = double.NegativeInfinity;
             lpfCode = 0; rmsVal = 0; ad2Code = 0;
@@ -228,6 +228,16 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     r22PartT = t0 + (Math.Floor((now - t0) / pOld) + 1) * pOld;
                     r22PartSign = -r22PartSign;
                     r22PartLeft = (int)R22PartN - 1;
+                }
+                if(old != masked && ChopOnlySwitch(old, masked))
+                {
+                    // AD1CHOP 00 <-> 01 alone (same OSR, AD1OS): no restart, the conversion grid
+                    // goes on and the polarity switches inside the running window (device
+                    // exp/ad1-chopseq 5fabb66d: the next result reads ~50 % of each, the one after
+                    // it clean; the switch lands with a ~+-5 ms spread, Ad1ChopJitMs)
+                    chopSwT = now + Ad1ChopJitMs * 1e-3 * (2 * rng.NextDouble() - 1);
+                    chopSwOld = (old & 0x08) != 0 ? -1 : 1;
+                    break;
                 }
                 if(old != masked) RestartAd1(now);
                 break;
@@ -582,6 +592,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// apart in turn, 100.8 ms on average). Off (0) by default.
         public double ChopSkewMs;
         private double r22PartT = double.NaN;
+        /// The last AD1CHOP 00 <-> 01 switch (UnchopTerm): when it took effect, the old sign.
+        private double chopSwT = double.NegativeInfinity;
+        private double chopSwOld = 1;
+        public double Ad1VosCodes = 0;
+        public double Ad1UnchopGainPpm = 0;
+        public double Ad1ChopJitMs = 5;
         private int r22PartSign = 1;
         private double acaStepT = double.NegativeInfinity;
         private Role lastRole = Role.None;
@@ -835,6 +851,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "acastep": AcaStepCodes = o.Value; break;
                 case "acastepms": AcaStepMs = o.Value; break;
                 case "acasteptau": AcaStepTauMs = o.Value; break;
+                case "ad1vos": Ad1VosCodes = o.Value; break;
+                case "ad1ug": Ad1UnchopGainPpm = o.Value; break;
+                case "ad1chopjit": Ad1ChopJitMs = o.Value; break;
                 case "r22part": R22PartFrac = o.Value; break;
                 case "r22off": R22OffCodes = o.Value; break;
                 case "r22n": R22PartN = o.Value; break;
@@ -893,6 +912,31 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             return 1 - u * u * u / 6;
         }
 
+        /// An R22 change of AD1CHOP between 00 and 01 only.
+        private static bool ChopOnlySwitch(byte a, byte b)
+        {
+            return (a & ~0x18 & 0xFF) == (b & ~0x18 & 0xFF) && (a & 0x10) == 0 && (b & 0x10) == 0;
+        }
+
+        /// Unchopped AD1 (AD1CHOP 00 / 01): + / - Ad1VosCodes (the converter offset the chopper
+        /// cancels; device 6 V row ~13 270 codes = 22.24 mV), weighted by the sinc^2 window
+        /// (a 2-period triangle) across a polarity switch, and the unchopped gain
+        /// (Ad1UnchopGainPpm, device +95 ppm vs chopped at 1 V on 6 V). Opt-in, both 0 by default.
+        private double UnchopTerm(double code, double tEnd, double p)
+        {
+            if(Ad1Chop || (Ad1VosCodes == 0 && Ad1UnchopGainPpm == 0)) return code;
+            var sNow = (regs[0x22] & 0x08) != 0 ? -1.0 : 1.0;
+            var s = sNow;
+            if(chopSwT > tEnd - 2 * p && chopSwT < tEnd)
+            {
+                var x = (tEnd - chopSwT) / p; // the window part after the switch, in periods (0..2)
+                var fNew = x <= 1 ? x * x / 2 : 1 - (2 - x) * (2 - x) / 2;
+                s = chopSwOld * (1 - fNew) + sNow * fNew;
+            }
+            else if(chopSwT >= tEnd) s = chopSwOld;
+            return code * (1 + Ad1UnchopGainPpm * 1e-6) + s * Ad1VosCodes;
+        }
+
         private void RestartLpf(double now)
         {
             lpfStart = now; lpfDone = 0;
@@ -925,7 +969,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ad1Done = n;
             ad1Last = ad1Start + n * p - ((n & 1) == 1 ? skew : 0);
             UpdateRamp(ad1Last); // the ramp node as it was when the conversion ended
-            ad1Code = Clamp24(ForcedAd1 != int.MinValue ? ForcedAd1 : ComputeAd1(ad1Last));
+            ad1Code = Clamp24(ForcedAd1 != int.MinValue ? ForcedAd1 : (int)Math.Round(UnchopTerm(ComputeAd1(ad1Last), ad1Last, p)));
             var partNow = r22PartLeft > 0 && double.IsNaN(r22PartT) && newConv <= r22PartLeft;
             if(r22PartLeft > 0) r22PartLeft = Math.Max(0, r22PartLeft - newConv);
             if(partNow && ForcedAd1 == int.MinValue)

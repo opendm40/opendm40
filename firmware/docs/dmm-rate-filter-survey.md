@@ -640,7 +640,8 @@ nulled: handle it with a periodic chopped reference (`[SENSe:]ZERO:AUTO ONCE`
 semantics, 34401A / Truevolt; Keithley `SYSTem:AZERo`) or with firmware
 alternation of AD1CHOP 00 / 01. Effort M; risk medium (offset drift with
 temperature, calibration done chopped). It is worth a test because it removes
-FAST's 50 Hz hole.
+FAST's 50 Hz hole. Tested and implemented as FAST with a firmware offset
+(section 8.4).
 
 ### Summary of options
 
@@ -751,6 +752,76 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
   conversions to settle). **E** is feasible as FAST (0x15's noise, mains
   rejected), but only with a per-range offset subtraction, best a periodic
   0x16 zero.
+
+### 8.4 Manual AD1CHOP and option E as FAST (device, 2026-10-25)
+
+Test firmware: branch `exp/ad1-chopseq` (`DBG:AD2:CHOPSEQ mode,param,delay`,
+[tools/experiments/chopseq](https://github.com/wirenboard/opendm40/tree/exp/ad1-chopseq/firmware/tools/experiments/chopseq)):
+in an unchopped AD1 logger session (LOG:OSR 6, LOG:CHOP OFF) the logger
+rewrites R22's AD1CHOP 00 / 01 by a pattern after each read and tags each
+record with the polarity. DC V 6 V manual, the calibrator's output off
+unless stated.
+
+**A polarity write.** AD1 is not restarted: the 100 ms grid goes on. The
+next conversion reads a mix of both polarities, the one after it is clean
+(fraction of the new level 0.9999):
+
+| write after the flag | next conversion: fraction new (model: sinc^2 triangle) | the one after |
+|---|---|---|
+| 0 ms | 0.507, sd 0.025 (0.5) | 0.9999 |
+| 25 ms | 0.290, sd 0.019 (0.281) | 0.970 (0.969) |
+| 50 ms | ~0.2, outliers (0.125) | ~0.83 (0.875) |
+
+The spread of the mixed fraction (0.445..0.542 at 0 ms) is continuous and
+does not correlate with the write's latency (<= 0.08 ms from the flag): the
+switch takes effect inside the chip with a ~+-5 ms spread, mechanism
+unknown. So a mixed conversion carries ~2.5 % of 2 VOS (sd ~1.1 mV) and
+must be dropped; a switch after every conversion (ABAB, PRBS, the
+"sliding pair") gives only mixed conversions (sd ~1.2 mV). The hardware
+chopper (0x16) does not show this: its kernel (section 1.3: two sinc^2
+conversions one 200 ms period apart) suggests non-overlapping windows with
+the switch at their boundary (INFERRED).
+
+**Offset and gain.** VOS = (00 - 01) / 2 = 22.24 mV (13 270 codes), within
++-25 uV over 30 min, 22.22 mV on 2026-10-24 (section 8.3, option E); the
+manual pair's zero equals 0x16's within 1..4 uV. Gain: 00 and 01 read
++76 / +115 ppm (mean +95 ppm) above 0x16 at 1 V (one level, one range).
+
+**Noise (Allan deviation, uV; output off):**
+
+| | readings/s | one reading | 1 s | 10 s | 40 s |
+|---|---|---|---|---|---|
+| 0x16 | 5 | 21.9 | 12.5 | 4.2 | 1.8 |
+| 0x06 | 10 | 35.4 | 13.5 | 14.7 | 10.5 |
+| blocks of 8 (00 x 8, 01 x 8, first after each switch dropped) | ~8.5 | 32-34 | 13.7 | 3.5 | 1.9 |
+| rare 01 (2 conversions every ~2 s) | ~8.7 | 34.7 | 14.9 | 9.1 | 6.1 |
+
+0x06 levels off at ~13 uV from ~1 s on (1/f); frequent polarity blocks
+remove it as the chopper does; rare inserts are limited by the few 01
+points. On a 5 Hz square (0 / 9.6 V) both 0x16 and the manual scheme beat
+at full amplitude (the model of section 1.3), and an ungated offset
+estimate moved by ~350 mV: the offset update must be gated on a steady
+input. Two isolated wild reads (+-X pairs) appeared per 300 s in sessions
+with polarity writes; whether they also occur at fixed R22 was not checked.
+
+**Gain, corrected (device 1184b096, 2026-10-25).** FAST against MED in
+alternating 8 s blocks (the calibrator drifts by up to ~350 ppm per minute
+after a level change, so single blocks in a row are not comparable): +8 ppm
+at 5 V on 6 V, +5 ppm at 24 V on 60 V without a gain correction (measured
+as -87 / -90 ppm with the -95 ppm one). The +95 ppm above was one 1 V point
+between two 0x16 blocks: not a gain. VOS per path at 0 V: DC V 6 V 13 220..
+13 250 codes (OP1O - RLU), 60 / 600 / 1000 V 12 573..12 607 (SENSE - PB5),
+600 mV 13 252, A 12 867 (6 A) / 12 607 (10 A), mA and uA 12 592..12 612.
+
+**What opendm40 does with it (FAST, 2026-10-25):** DC V / mV / A FAST runs
+0x06 and takes VOS out in firmware
+([`src/fastvos.rs`](../src/fastvos.rs)): a VOS per range for the session,
+measured 2 s after the row write and every 30 s with two 01 conversions
+between 00 ones (2 conversions dropped each time), gated on a steady input
+(the shift of the 00 means against the groups' own scatter), no gain
+correction, a VOS default per path. MED = 0x16, SLOW = 0x17, all three in the row
+([`src/dmm.rs`](../src/dmm.rs) FR-05). Not measured: VOS's temperature
+coefficient, 60 mV ([TODO](../TODO.md)).
 
 ## 9. Sources
 

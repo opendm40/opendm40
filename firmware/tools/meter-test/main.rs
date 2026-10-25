@@ -15,6 +15,9 @@ mod sentinel;
 // The danger alarm's pattern / event rules (pure).
 #[path = "../../src/danger.rs"]
 mod danger;
+// FR-05 FAST: the unchopped AD1 offset (pure).
+#[path = "../../src/fastvos.rs"]
+mod fastvos;
 #[path = "../../src/dmm.rs"]
 mod dmm;
 #[path = "../../src/meter.rs"]
