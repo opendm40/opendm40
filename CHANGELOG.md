@@ -9,6 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- Touch calibration: **Calibrate** on the touch test page (Settings > More
+  > More > Touch test) fits a correction to taps on its nine targets,
+  shows the remaining error and applies it on Save; kept in the settings.
+  Without one the touch points are used unchanged, as the stock does
+  ([manual](docs/manual/README.md#touch-calibration); `DBG:TOUCH:CAL`).
 - Multimeter: a 60 mV range (on the range page, and first in the mV AUTO).
 - Ohm and diode: the test current is shown next to the reading, from
   currents measured on the meter (e.g. 0.756 mA for the diode test).

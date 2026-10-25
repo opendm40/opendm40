@@ -233,6 +233,14 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/touch-test", &[("screen", Bx::new(0, 0, 480, 320))], false);
     save1(out, "touch-test");
 
+    // Touch calibration: the walk, the result of a good fit.
+    for (k, name) in [(0u8, "touch-cal"), (1, "touch-cal-result")] {
+        host::reset(0);
+        super::touchcal_scene(k, false);
+        ck.check_opts(&format!("manual/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+        save1(out, name);
+    }
+
     // On-screen help, page 1 (gestures).
     host::reset(0);
     ui::help_page(0);
