@@ -130,7 +130,7 @@ every command: [SCPI reference](docs/manual/scpi-reference.md).
 - [User manual](docs/manual/README.md)
 - [SCPI reference](docs/manual/scpi-reference.md)
 - Developer documentation, hardware, the emulator and archived documents:
-  [firmware/README.md, Documentation](firmware/README.md#documentation)
+  [docs/README.md](docs/README.md)
 
 ## Build and develop
 

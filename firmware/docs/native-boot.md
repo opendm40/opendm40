@@ -1913,4 +1913,4 @@ it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`]
 
 ## Developer workflow
 
-Build, reload (`tools/reload.sh`), first install and the way back: [dev-notes.md, Developer workflow](dev-notes.md#developer-workflow).
+Build, reload (`tools/reload.sh`), first install and the way back: [firmware/README.md, Developer workflow](../README.md#developer-workflow).
