@@ -160,9 +160,8 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // dmm_v2_6.h section 2). Here it is in the autorange too (owner 2026-10-25,
 // `ohm_auto_floor`: not with the "ON" variant) and a manual range, always with
 // the default ohm variant (SFUVR = 2, the 0.90 mA one; the "ON" variant gives
-// 0.28 mA on r1, OHM_ISC). Calibration slot 0x124[0] is the
-// factory default 1.005 on the dumped unit (r1..r6 are calibrated), and the
-// single offset 0x144 is the r1..r6 one: use REL, check the gain on hardware.
+// 0.28 mA on r1, OHM_ISC). Its gain is `ohm_row_gain` (OHM_R0_K); the
+// single offset 0x144 is the r1..r6 one: use REL.
 
 // ------------------------------------------------- FR-05 conversion rate
 //
@@ -344,6 +343,30 @@ impl Avg {
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
 // Test sources shown on the DMM page (`test_current`).
+/// Ohm r0 (60 ohm) gain relative to r1's calibration gain, MEASURED on one
+/// unit (device 2026-10-25, the MR9270 calibrator on V-COM, manual ranges,
+/// mean of 5 READ?): 10 / 20 / 50 ohm read 0.9739 x the 600 ohm range
+/// (least squares over 0..50 ohm, offset -0.008 ohm) with the stock formula
+/// (Rref 0.1 k, slot 0x124[0] = 1.005), so K = 1.005 / 1.002732 / 0.9739.
+/// The cause of the 2.9 % is UNKNOWN: the x10 / x1 pairs of the record (DC mV,
+/// A, mA, uA) say the OP1 x10 stage reads 1 .. 2.6 % high, not low, and the
+/// Digilent DMM Shield's x10 ohm row (dmm.cpp, the r1 row with OPS1 = 1)
+/// scales by exactly Rref / 10; the DM40 r0 row also closes PA2 DF (R2B 0x46,
+/// r1 0x40), whose board connection is not known. Whether other units need
+/// the same K is unknown.
+const OHM_R0_K: f32 = 1.0291;
+
+/// Calibration gain of ohm row `r` from its own slot `cal_r` (0x124 + 4r)
+/// and r1's `cal_r1` (0x128). r0: r1's gain x OHM_R0_K, the slot ignored:
+/// the stock never selects r0 (dmm_v2_6.h section 2), so inferred, its slot
+/// is never calibrated (1.005 on the dumped unit, a round value like the
+/// other unused slots 0x54 1.005, 0x64..0x70 1.01). r1's gain carries the
+/// 1 kohm reference r0 shares with it (PA4 DF in both rows); without a
+/// record (`cal`'s default 1.0) K still applies, it models the hardware.
+fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32) -> f32 {
+    if r == 0 { cal_r1 * OHM_R0_K } else { cal_r }
+}
+
 /// Ohm short-circuit test current (A) per range, [default variant, "ON"
 /// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
 /// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
@@ -4432,7 +4455,7 @@ impl Dmm {
         // LIVE?: a passive Rx never gives a negative code; a source of the
         // other polarity does (0.24 % of full scale: far above the noise).
         self.live = ad1 < -LIVE_CODE;
-        let g = cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV;
+        let g = ohm_row_gain(r, cal(0x124 + 4 * r as u32, 1.0), cal(0x128, 1.0)) * OHM_RREF[r] / 0.9 / AD1_DIV;
         let k0 = cal(0x144, 0.0);
         let lim = self.factor() * OHM_DEC[r];
         let ov = self.over();
@@ -5392,6 +5415,27 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ohm_r0_gain_from_r1() {
+        // This unit's record: r0 slot 1.005 (never calibrated), r1 1.002732.
+        let (g0, g1) = (1.005f32, 1.002_732f32);
+        assert_eq!(ohm_row_gain(1, g1, g1), g1);
+        assert_eq!(ohm_row_gain(3, 0.993751, g1), 0.993751);
+        // Scale of one ohm per code: r0 / r1 = Rref ratio x K, the slot unused.
+        let s = |r: usize, c: f32| ohm_row_gain(r, c, g1) * OHM_RREF[r];
+        assert!((s(0, g0) / s(1, g1) - 0.1 * OHM_R0_K).abs() < 1e-6);
+        assert_eq!(s(0, g0), s(0, 1.0));
+        // The device's 60 / 600 ohm readings (10 / 20 / 50 ohm, stock scale)
+        // agree within 0.15 % with the new r0 scale.
+        let old = g0 * OHM_RREF[0];
+        for (r600, r60) in [(9.1165f32, 8.8708f32), (19.0947, 18.5877), (49.4268, 48.1297)] {
+            let fixed = r60 * s(0, g0) / old;
+            assert!((fixed / r600 - 1.0).abs() < 0.0015, "{fixed} vs {r600}");
+        }
+        // No record: K still applies on r1's default 1.0.
+        assert_eq!(ohm_row_gain(0, 1.0, 1.0), OHM_R0_K);
+    }
 
     #[test]
     fn freq_glitch_source_loses() {
