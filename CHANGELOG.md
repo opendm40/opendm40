@@ -7,6 +7,21 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Multimeter: the message after a tap on the reading gives the readings per
+  second as the rate chip shows them and the averaging time of the extra
+  digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
+  1.6 s"). The manual's pictures showed an outdated message and rate chip
+  ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
+  6.4 s for the extra digit in Ω; it shows after 3.2 s
+  ([manual](docs/manual/README.md#rate-fast-med-slow)).
+- Multimeter: after a tap on the reading the rate chip names the new rate at
+  once, with "--/s" until its readings/s is measured (it kept the old rate's
+  name and number while the message was up), and the extra digit goes at
+  once when the new rate has none. In FAST the chip showed down to 8.0/s for
+  about a second after each offset measurement; it shows 10/s.
+
 ### Docs
 
 - Ohm: 500 Ω from an MMB3.0 calibrator read OL on the 600 Ω range. The

@@ -80,7 +80,7 @@ fn dmm_page(p: &Dp) {
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
     let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
-    let rc = if p.rate { ui::RateChip { rate: 1, period_ms: 106, applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
+    let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
 
@@ -368,7 +368,11 @@ pub fn run(out: &str) -> usize {
 
     // Messages over the multimeter page: the rate step, the start of a
     // recording, the power-off question, the firmware install question.
-    for (name, msg, ok) in [("dmm-rate", "MED 600000 counts / 3.2 s", true), ("rec-start", "Recording CSV", true)] {
+    // The rate toast is the firmware's text for a step to MED on this range.
+    let mut tb = [0u8; 40];
+    let (n, ext) = dmm::rate_window(dmm::Rate::Medium, false, dcv.mode, dcv.range);
+    let rate_msg = ui::rate_toast(&mut tb, dmm::Rate::Medium as u8, dmm::rate_period(dmm::Rate::Medium, dcv.mode), n, ext);
+    for (name, msg, ok) in [("dmm-rate", rate_msg, true), ("rec-start", "Recording CSV", true)] {
         dmm_page(&Dp { csv: name == "rec-start", ..dp(dcv) });
         dialog::toast(msg, ok);
         ck.check(&format!("manual/{name}"), &DMM_REGIONS);
