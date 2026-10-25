@@ -3,10 +3,10 @@
 Sources found for the Hycon HY3131 (50,000-count DMM analog front end: AD1 24-bit
 sigma-delta, AD2/AD3 19-bit fast sigma-delta, digital LPF / true-RMS / peak hold,
 frequency counter, switch network, 2 op amps, OP3 source, comparators, temperature
-sensor, SPI). Status 2026-10-14. Nothing from Hycon is redistributed here: the
-datasheet and the application note carry "reproduction or copying without the
-permission of HYCON Technology Corp. is strictly prohibited" (datasheet p.4 item 8),
-so `ref/` holds only our own transcriptions.
+sensor, SPI). `ref/` holds only transcriptions made for this repository. Copies of
+the Hycon documents are in [hw/datasheets/](../../hw/datasheets/README.md), under
+Hycon's copyright (the datasheet says "reproduction or copying without the
+permission of HYCON Technology Corp. is strictly prohibited", p.4 item 8).
 
 ## 1. Documents
 
