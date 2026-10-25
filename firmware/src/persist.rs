@@ -13,8 +13,8 @@
 //! either copy. `seq` (two words below the boot shim's) is the file
 //! sequence number the backup SRAM copy continues: at boot a file slot with
 //! a higher one is newer than the backup SRAM. The boot shim's words at the
-//! end of the 4 KiB (boot.rs, 0x40024FF0..) are outside the record (v10:
-//! 0x40024000..0x4002410B).
+//! end of the 4 KiB (boot.rs, 0x40024FF0..) are outside the record (v11:
+//! 0x40024000..0x40024123).
 
 #[cfg_attr(not(target_os = "none"), allow(unused_imports))]
 use crate::mmio::{modify32, r32, w32};
@@ -43,8 +43,14 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v10: 64 words; p[62..64] W_LIM_W, the power meter's W limits (lower /
 /// upper, f32 bits; their on / set bits are bit 17 of p[18] and bits 9 / 25
 /// of p[19], 0 in older records = off / unset).
-pub const VERSION: u32 = 10;
-pub const WORDS: usize = 64;
+/// v11: 70 words; p[64..70] W_TOUCH_CAL, the touch calibration
+/// (touchcal.rs Cal: Q16 deltas from the identity; 0 = none, so v10 loads
+/// zero-extended as the identity).
+pub const VERSION: u32 = 11;
+pub const WORDS: usize = 70;
+const V10_WORDS: usize = 64;
+/// The touch calibration (6 words, touchcal::Cal; a preference).
+pub const W_TOUCH_CAL: usize = 64;
 const V9_WORDS: usize = 62;
 /// The power meter's limit slot (meter::LIM_POWER): lower, upper (2 words).
 pub const W_LIM_W: usize = 62;
@@ -85,6 +91,7 @@ const V2_WORDS: usize = 16;
 pub fn words_of(version: u32) -> Option<usize> {
     Some(match version {
         VERSION => WORDS,
+        10 => V10_WORDS,
         9 => V9_WORDS,
         8 => V8_WORDS,
         7 => V7_WORDS,

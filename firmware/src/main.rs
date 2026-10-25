@@ -56,6 +56,7 @@ mod sentinel;
 mod dbgsrc;
 mod stockfont;
 mod touch;
+mod touchcal;
 mod ui;
 mod usb;
 mod usbtmc;

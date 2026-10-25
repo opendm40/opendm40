@@ -77,6 +77,8 @@ mod stock;
 mod stockfont;
 #[path = "../../src/touch.rs"]
 mod touch;
+#[path = "../../src/touchcal.rs"]
+mod touchcal;
 #[path = "../../src/ui.rs"]
 mod ui;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
@@ -927,6 +929,78 @@ pub fn touchtest_scene(k: u8, long: bool) {
     if long {
         for c in 0..4 {
             tt::key(c, c % 2 == 0, Some(65535));
+        }
+    }
+    // The calibration in use: none; the widest coefficients (long).
+    tt::cal_status(if long { Some([1.15, -0.15, -159.9, -0.15, 0.85, 159.9]) } else { None });
+}
+
+/// This unit's map raw -> screen (a fit of 44 DBG:TOUCH? taps) and taps of
+/// it: per target two raw points (the inverse map, +-5 px of scatter).
+const TC_UNIT: [f64; 6] = [0.9961, 0.0101, -5.65, 0.0061, 0.9523, 0.70];
+
+fn tc_taps(wild: bool) -> (Vec<(i16, i16)>, Vec<(i16, i16)>) {
+    use ui::touchtest as tt;
+    let k = TC_UNIT;
+    let det = k[0] * k[4] - k[1] * k[3];
+    let (mut raw, mut tgt) = (vec![], vec![]);
+    for (i, &(tx, ty)) in tt::TARGETS.iter().enumerate() {
+        for j in 0..2i32 {
+            let (u, v) = (tx as f64 - k[2], ty as f64 - k[5]);
+            let x = (k[4] * u - k[1] * v) / det + ((i as i32 * 7 + j * 3) % 11 - 5) as f64;
+            let y = (-k[3] * u + k[0] * v) / det + ((i as i32 * 5 + j * 4) % 11 - 5) as f64;
+            raw.push((x.round() as i16, y.round() as i16));
+            tgt.push((tx as i16, ty as i16));
+        }
+    }
+    if wild {
+        raw[9].0 += 38;
+        raw[9].1 -= 30;
+    }
+    (raw, tgt)
+}
+
+/// The touch test page's calibration screens (app_touchtest.rs): `k` 0 the
+/// walk at point 5, tap 2, after a refused tap (its raw dots); 1 the result
+/// of a good fit with the taps' raw / corrected dots; 2 a refused fit; 3
+/// the page after Save (the coefficients in the F14 lines). `long`: the
+/// widest texts.
+pub fn touchcal_scene(k: u8, long: bool) {
+    use touch::Point;
+    use ui::touchtest as tt;
+    match k {
+        0 => {
+            tt::cal_page();
+            tt::cal_target(4, true);
+            tt::cal_step(if long { 8 } else { 4 }, if long { 1 } else { 0 }, 2);
+            tt::cal_msg(if long { "Too far from the cross" } else { "Taps differ: tap again" }, true);
+            let (raw, _) = tc_taps(false);
+            for &(x, y) in raw[..9].iter() {
+                tt::dot(Point { x: x.clamp(0, 479) as u16, y: y.clamp(0, 319) as u16 }, tt::DOT_RAW, tt::C_RAW);
+            }
+        }
+        1 | 2 => {
+            let (raw, tgt) = tc_taps(k == 2);
+            let f = touchcal::fit(&raw, &tgt, &tt::TARGETS).expect("fit");
+            if long {
+                let bad = if k == 2 { Some(touchcal::Bad::Resid.text()) } else { None };
+                tt::result_page(250, 250, 999, &[1.15, -0.15, -159.9, -0.15, 0.85, 159.9], bad);
+            } else {
+                tt::result_page(f.mean, f.max, f.before, &touchcal::to_f32(&f.cal), f.bad.map(|b| b.text()));
+            }
+            for &(x, y) in raw.iter() {
+                tt::dot(Point { x: x.clamp(0, 479) as u16, y: y.clamp(0, 319) as u16 }, tt::DOT_RAW, tt::C_RAW);
+                let (cx, cy) = touchcal::apply16(&f.cal, x as i32, y as i32);
+                tt::dot(Point { x: ((cx + 8) >> 4).clamp(0, 479) as u16, y: ((cy + 8) >> 4).clamp(0, 319) as u16 }, tt::DOT_DEB, tt::C_DEB);
+            }
+        }
+        _ => {
+            touchtest_scene(0, long);
+            let (raw, tgt) = tc_taps(false);
+            let f = touchcal::fit(&raw, &tgt, &tt::TARGETS).expect("fit");
+            if !long {
+                tt::cal_status(Some(touchcal::to_f32(&f.cal)));
+            }
         }
     }
 }
@@ -2124,6 +2198,23 @@ fn main() {
     for (k, long, name) in [(0u8, false, "t01-touchtest"), (1, false, "t02-touchtest-dots"), (2, false, "t03-touchtest-keys"), (0, true, "t04-touchtest-long")] {
         host::reset(0);
         touchtest_scene(k, long);
+        ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+        save(&out, name);
+    }
+    // The calibration (app_touchtest.rs, touchcal.rs): the walk, a good fit,
+    // a refused fit, the page after Save; and their widest texts. The dots
+    // are data (not layout items).
+    for (k, long, name) in [
+        (0u8, false, "t05-touchcal-walk"),
+        (1, false, "t06-touchcal-result"),
+        (2, false, "t07-touchcal-refused"),
+        (3, false, "t08-touchcal-saved"),
+        (0, true, "t09-touchcal-walk-long"),
+        (1, true, "t10-touchcal-result-long"),
+        (2, true, "t11-touchcal-refused-long"),
+    ] {
+        host::reset(0);
+        touchcal_scene(k, long);
         ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
         save(&out, name);
     }
