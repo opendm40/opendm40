@@ -1602,7 +1602,10 @@ pub fn parse_name(s: &[u8]) -> Option<[u8; 11]> {
 /// False for a prefix of another directory, or for a file that is in none
 /// (device 46370df: "SHOTS/LOG005.DLG" found LOGS/LOG005.DLG): MMEM:DATA? /
 /// MMEM:DELete then answer "File name not found". True without a prefix.
-#[inline(never)] // .cold (link-native.x): one MMEM:DATA? / MMEM:DELete argument
+// Not .cold: MMEM:DATA? runs it during an AD2 stream (a host reading a
+// file while the Wave view streams; emu/hy3131/wavetest.py). inline(never):
+// one copy for both MMEM callers.
+#[inline(never)]
 pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
     let s = match s {
         [b'"', m @ .., b'"'] => m,
@@ -1612,29 +1615,34 @@ pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
         [b'/' | b'\\', m @ ..] => m,
         _ => s,
     };
+    // Upper-cased into a blank 8.3 field: the directory, the base, the extension.
+    let put = |out: &mut [u8], src: &[u8]| -> Option<()> {
+        if src.len() > out.len() {
+            return None;
+        }
+        for (o, &c) in out.iter_mut().zip(src) {
+            *o = c.to_ascii_uppercase();
+        }
+        Some(())
+    };
     let mut dir = None;
     let s = match s.iter().position(|&c| c == b'/' || c == b'\\') {
-        Some(i) => match fatdir::DIRS.iter().find(|d| d.len() >= i && d[..i].eq_ignore_ascii_case(&s[..i]) && d[i..].iter().all(|&c| c == b' ')) {
-            Some(d) => {
-                dir = Some(d);
-                &s[i + 1..]
-            }
-            None => return None,
-        },
+        Some(i) => {
+            let mut d = [b' '; 11];
+            put(&mut d, &s[..i])?;
+            dir = Some(fatdir::DIRS.iter().find(|x| **x == d)?);
+            &s[i + 1..]
+        }
         None => s,
     };
     let dot = s.iter().position(|&c| c == b'.').unwrap_or(s.len());
-    let (base, ext) = (&s[..dot], if dot < s.len() { &s[dot + 1..] } else { &[][..] });
-    if base.is_empty() || base.len() > 8 || ext.len() > 3 {
+    let (base, ext) = (&s[..dot], s.get(dot + 1..).unwrap_or(&[]));
+    let mut n = [b' '; 11];
+    if base.is_empty() {
         return None;
     }
-    let mut n = [b' '; 11];
-    for (i, &c) in base.iter().enumerate() {
-        n[i] = c.to_ascii_uppercase();
-    }
-    for (i, &c) in ext.iter().enumerate() {
-        n[8 + i] = c.to_ascii_uppercase();
-    }
+    put(&mut n[..8], base)?;
+    put(&mut n[8..], ext)?;
     if !n.iter().all(|&c| c.is_ascii_graphic() || c == b' ') {
         return None;
     }

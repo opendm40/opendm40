@@ -21,7 +21,8 @@ Checks (VOLT:RANG? / READ? over USBTMC, fw uptime from DBG:PING?):
     (RANG:AUTO? 1) and no mV for the 5 s after; AUTO again -> 60 mV;
   * AC, AUTO: 0 V -> 60 mV; AUTO+ -> 6 V within 3 s, no mV for 5 s;
     AUTO again -> 60 mV;
-  * the square: AC 60 mV -> 6 V, READ? 4.75 V within 3 %, within 12 s
+  * the square: AC 60 mV -> 6 V, READ? 4.75 V within 3 %, within 12 s, no
+    60 V range on the way (device 489f956: 6 V only)
     (whether A-JACK asserted on the way is printed: the range must not
     depend on it);
   * the 400 mV sine right after it: back to 600 mV (0.4 V within 3 %)
@@ -176,6 +177,9 @@ try:
             break
         time.sleep(0.3)
     check(ok, 'square 0 / 9.5 V: AC AUTO -> 6 V, READ? 4.75 V within 3 %% by %.0f s (ranges %s, last READ? %s)' % (t_end / 1000, seen, v))
+    # Device 489f956: AC mV -> AC V under this square goes to 6 V only (the model's coupling
+    # capacitor level while OP1 is off, HY3131.cs Op1OffLevel, once made a 6 -> 60 -> 6 V step).
+    check(all(r_ != 60.0 for _, r_ in seen), 'square: no 60 V range on the way up (ranges %s)' % seen)
     print('  info: SYST:ALER? seen during the square: %s; DBG:SENT:LOG? %s' % (sorted(alerts), q('DBG:SENT:LOG?')), flush=True)
     wait_until_up(SQ_ON + 15000)
     r = rng()
