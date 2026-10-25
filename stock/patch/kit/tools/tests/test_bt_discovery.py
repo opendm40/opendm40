@@ -19,8 +19,8 @@ spec = importlib.util.spec_from_file_location('dm40_memrw', TOOL)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
-CLASSIC = 'XX:XX:XX:XX:XX:XX'
-BLE = 'XX:XX:XX:XX:XX:XX'
+CLASSIC = 'AB:00:00:00:00:01'
+BLE = 'AA:00:00:00:00:01'
 SPP = m.SPP_UUID
 
 # --- realistic bluetoothctl output (BlueZ 5.x), with colour codes ----------
@@ -146,7 +146,7 @@ def test_parse_robust():
     assert m.parse_info(not_available(CLASSIC)) is None
     assert m.parse_info('') is None
     assert m.parse_info('\x00\xff random text without structure') is None
-    assert m.derived_classic_mac('XX:XX:XX:XX:XX:XX') == CLASSIC
+    assert m.derived_classic_mac('AA:00:00:00:00:01') == CLASSIC
     assert m.derived_classic_mac('ff:00:00:00:00:01') == '00:00:00:00:00:01'
     print('ok  bluetoothctl output parsing (ANSI, [NEW]/[CHG]/[DEL], junk)')
 
@@ -412,7 +412,7 @@ def test_default_scan_popen_stops_scan():
         def communicate(self, timeout=None):
             if timeout is not None:
                 raise subprocess.TimeoutExpired('bluetoothctl', timeout)
-            return b'[NEW] Device XX:XX:XX:XX:XX:XX C-1-ATK-DM40-CALI\n', b''
+            return b'[NEW] Device AB:00:00:00:00:01 C-1-ATK-DM40-CALI\n', b''
 
     orig = m.subprocess.Popen
     try:

@@ -105,8 +105,8 @@ sha256sum -c firmware/SHA256SUMS
    сервис **Serial Port** (`00001101-…`, RFCOMM). Прибор виден в списке **дважды**:
    - классическое устройство, например `XX:XX:XX:XX:XX:XX`
      «C-1-ATK-DM40-CALI» с Serial Port — **это нужный адрес**;
-   - BLE-устройство для телефонного приложения, например `XX:XX:XX:XX:XX:XX`
-     «DM40A» (первый байт на 1 меньше) — для утилиты **не подходит**.
+   - BLE-устройство для телефонного приложения, например `YY:XX:XX:XX:XX:XX`
+     «DM40A» (первый байт YY на 1 меньше) — для утилиты **не подходит**.
 3. Если прибор ещё неизвестен системе — 10-секундный поиск
    (`bluetoothctl --timeout 10 scan on`) и повтор шагов 1–2.
 4. Найден один прибор — утилита пишет `Found DM40: <имя> <адрес>` и работает с
@@ -450,7 +450,7 @@ commands — no `--mac` needed. The tool asks `bluetoothctl devices` for names
 containing `DM40` and keeps the one whose `bluetoothctl info` lists the **Serial
 Port** UUID (`00001101-…`). The meter appears twice: the classic SPP device
 (e.g. `XX:XX:XX:XX:XX:XX` "C-1-ATK-DM40-CALI") is the right one; the BLE entry
-for the phone app (e.g. `XX:XX:XX:XX:XX:XX` "DM40A", first byte one lower) is
+for the phone app (e.g. `YY:XX:XX:XX:XX:XX` "DM40A", its first byte YY one lower) is
 not usable. If nothing is known yet it runs a 10 s `bluetoothctl --timeout 10
 scan on` and retries. One meter → `Found DM40: <name> <addr>`; several → you
 pick (or, without a terminal, pass `--mac`); none → a hint what to check. The
