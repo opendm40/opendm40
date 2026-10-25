@@ -52,7 +52,8 @@ install that `RUSTUP_HOME` / `CARGO_HOME` name (default `~/.rustup`,
 only on the commit and the rustc version: `build.sh` remaps every absolute
 path (checkout, rustup, cargo registry) and nothing in the image is
 time-stamped, so rustc 1.99.0 gives the same `opendm40.bin` in any
-directory and in CI.
+directory and with a fresh `CARGO_HOME`. CI pins 1.99.0; that its image
+matches a local build is inferred (compare the artifact's `SHA256SUMS`).
 
 ## CI and releases
 
