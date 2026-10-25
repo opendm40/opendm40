@@ -2403,7 +2403,10 @@ Firmware:
             `+9.999999E-06` (device a2e9766; the exact nr3 now prints the f32 it gets; CONF? on the same
             range says +1.000000E-05). Fixed: a table of the nearest f32 for 10^-16 .. 10^8 (its other user,
             the RES set threshold, gets the same values). scpi-test `pow10f_exact` (fails before: 57 checks,
-            e.g. RES of 6 V fine +9.999999E-06). (verify on device: VOLT:RES? on DC V 6 V MED +1.000000E-05)
+            e.g. RES of 6 V fine +9.999999E-06). Device 82c8aca: VOLT:RES? on DC V 6 V MED +1.000000E-05, the other
+            V / RES / CURR ranges exact powers of ten too (device-check doc "82c8aca" 5).
+            CONF? on that range answers +1.000000E-04 for 3.0-3.5 s after a range set, then +1.000000E-05: it
+            takes the live readout's digits, RES? the rate (doc "82c8aca" note 2). Cosmetic; left as is.
       - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
             returned LOGS/LOG005.DLG; device 46370df). Fixed: `csvlog::parse_path`; a prefix of another directory
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
@@ -3589,11 +3592,21 @@ Emulator (emu/):
       -410); `CONF:RES;:READ?` < 5 s; then a 4.7 kΩ / 100 kΩ resistor: AUTO leaves 6 MΩ at once)
       Device c5ac0c5 (its fix not in that image): the hunt is still there, 6 MΩ <-> 600 kΩ every
       0.20-0.26 s, 30-34 changes in 8-10 s, from DC V and from each manual RES range. FETCh? not retried.
+      Device 82c8aca (device-check doc "82c8aca"): the hunt's input was not there (the disabled output read
+      in range on 600 kΩ, 417-421 kΩ, in 7 calibrator states; AUTO settled, 0 range changes in 19.5 s), so the
+      6 MΩ hold and its exits are **untested** on the device. FETC? every 0.2 s: the first (the entry wait)
+      0.99-1.05 s with a reading, later ones ≤ 1 ms; forced range steps (calibrator 100 Ω on / off) gave
+      +9.91E37 for 0.6-0.8 s, then the value; no -410, no timeout. `CONF:RES;:READ?` 0.99-1.08 s. Swaps from the
+      600 kΩ settle: 100 Ω final in 1.7-1.9 s, 390 Ω (no open between) 1.2 s, back to the open 1.6-2.0 s.
+      Still to check: the 6 MΩ hold with an input that reads OL on 600 kΩ; 4.7 kΩ / 100 kΩ after it.
 - [ ] RES AUTO set over SCPI from a manual RES range leaves the screen on the manual reading (device
       c5ac0c5, device-check doc "c5ac0c5: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` +
       `RES:RANG:AUTO ON` on the calibrator's disabled output: RES:RANG:AUTO? 1, RES:RANG? hunting, but the
       status bar MANU and a frozen 0.1043 MΩ (DBG:READout? `F`) for 8 s; from DC V the same commands show
       AUTO and dashes. Not tested on a resistor; cause not looked into.
+      Device 82c8aca (no hunt that day): from `CONF:RES 6E6` / `CONF:RES 600` the same commands gave
+      `DBG:READout?` the manual value for 0.5 s, then the 600 kΩ readings, changing per conversion; the status
+      bar not looked at. So it may need the hunt (INFERRED); still open.
 - [ ] DBG:SENT? fields 14 / 15 keep the verdict of the PB1 hits at a switch between ohm-network rows
       (device c5ac0c5 note 3: RES AUTO -> 600 Ω, 0 / 2150 mV for the whole open level; RES -> continuity
       0 / -4 mV for ~3 s). No alert; doc 4.13 check list item 2 expects -1 / 0. Diagnostics only.
