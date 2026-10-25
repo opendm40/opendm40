@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Safety or security problem
+    url: https://github.com/wirenboard/opendm40/security/policy
+    about: A bug that can make a reading or an alert unsafe. Report it privately.
+  - name: User manual
+    url: https://github.com/wirenboard/opendm40/blob/main/docs/manual/README.md
+    about: How every feature works, and the known limitations.
