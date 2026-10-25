@@ -376,7 +376,7 @@ impl Source for FwFile<'_> {
     /// The USB volume's per-sector read of INFO/FIRMWARE.BIN (vdisk.rs):
     /// region B with the rest of that path (`.text.vdisk_rd`), as a host
     /// may read it during a fast-log session or the Wave view (device
-    /// bfb6a19: max_lat 4.66 us here while it was region C).
+    /// 825080c: max_lat 4.66 us here while it was region C).
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     fn fill(&self, off: u32, buf: &mut [u8]) {
         self.fill_with(off, buf, body_copy);

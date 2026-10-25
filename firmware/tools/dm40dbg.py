@@ -133,7 +133,7 @@ class Link:
     driver drops it ("wrong MsgID" / "wrong bTag" in dmesg) and returns 0
     bytes, and the meter's reply to it is read by the next query: each reply
     one query late, also for new processes, until a USBTMC device clear
-    (TODO "dm40scpi.py log stopped by SIGINT", device 8ce42e2). So `read`
+    (TODO "dm40scpi.py log stopped by SIGINT", device c830e09). So `read`
     holds SIGINT for the duration of the read (Ctrl-C acts once the reply is
     in), and `query` takes an empty reply (opendm40 never sends one: every reply
     ends with '\\n'; a missing reply times out instead) as that state: it

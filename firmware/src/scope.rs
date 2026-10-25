@@ -371,7 +371,7 @@ pub const WAVE_TB_MIN: usize = 15;
 /// frames, feasibility 11.12 / 11.11), 9600 S/s at 5 ms/div. The chip's
 /// sinc^3 decimator band-limits each rung (~0.25 x the rate): the RMS of a
 /// square's samples reads 0.5 / 1 / 1.9 / 3.8 % low at 9600 / 4800 / 2400 /
-/// 1200 S/s (device 7534701: Vrms -1.6 % from 50 ms/div;
+/// 1200 S/s (device d8e249d: Vrms -1.6 % from 50 ms/div;
 /// docs/dmm-input-scope-feasibility.md 3.2).
 pub const fn wave_fs_for(tb: usize) -> u32 {
     match tb {
@@ -386,7 +386,7 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
 
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
 /// stream rung `fs` (`wave_fs_for`): the chip's real rate (hy3131.rs
-/// AD2_OSR32_REAL_MHZ, the datasheet's since device 8ce42e2: its 76 575 made
+/// AD2_OSR32_REAL_MHZ, the datasheet's since device c830e09: its 76 575 made
 /// the Wave view's 1 ms/div read a 40 Hz square as 39.88 Hz).
 pub const fn wave_real_fs(fs: u32) -> u32 {
     if fs == 76_800 { (crate::hy3131::ad2_real_rate_mhz(0) + 500) / 1000 } else { fs }
@@ -2053,7 +2053,7 @@ impl Scope {
         if self.rolling {
             // Samples per column from the timebase, not `screen`: that is
             // clamped to the record (CAP), so from 5 s/div (1200 S/s) every
-            // slower timebase rolled at the 2 s/div speed (device 7534701:
+            // slower timebase rolled at the 2 s/div speed (device d8e249d:
             // ~20 px/s at 2, 20 and 50 s/div). Roll keeps no record.
             let full = 25_000u64 * w.fs as u64 / TB[self.s.tb].0.max(1) as u64;
             w.per = (full / COLS as u64).clamp(1, u32::MAX as u64) as u32;
@@ -2091,7 +2091,7 @@ impl Scope {
     /// status change (status badge ~6 ms + record bar ~7.6 ms) plus a cell
     /// (~10 ms) after the acquisition (~6 ms) took ~30 ms (emulator --mips
     /// 110, a 10 Hz square at 1 ms/div): the ring overflowed, `dropped` grew
-    /// (device bb15d39 M3: ~50/s) and every overflow restarted the record.
+    /// (device c785807 M3: ~50/s) and every overflow restarted the record.
     pub fn wave_keep(&mut self, src: &mut dyn WaveSource) {
         if self.wave && wv().live && self.busy {
             self.wave_drain(src);

@@ -10,7 +10,7 @@
 // realizes a SkipTime at the next time sync, the handler's last CYCCNT read):
 // inside the busy window opendm40 measures (logger.rs BUSY16, DBG:ISR?
 // cpu_permille), after the sample's stamp. 0 = off (the default).
-// It stands for ISR work the model does not produce (device e8cc4e9 at
+// It stands for ISR work the model does not produce (device 20a91d0 at
 // 76 800 S/s: 1.48 handlers per sample against 1.13 here, cpu_permille 544
 // against 461 at --mips 110); it lengthens every handler, so a large n
 // also makes overruns the device does not have.

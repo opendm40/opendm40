@@ -115,11 +115,11 @@ SC = {
         (0, 'open;vsrc:10;isrc:1', lambda d: d['secs'] > 5 and near(d['Wh'] * 3600 / d['secs'], 10, 0.05) and near(d['VAh'] * 3600 / d['secs'], 10, 0.05), 'energy: 10 W x t'),
     ]),
     # The reset confirm answered 13 s after the long press on the energy box
-    # (device check 381ea07: the 10 s auto-cancel ate that Yes). AC+DC: the
+    # (device check c50425f: the 10 s auto-cancel ate that Yes). AC+DC: the
     # parts layout's lower row (170..188, doc 3.17): the long press at y 179.
     # Pure DC on AC+DC raises the DC? hint ~2 s after the first reading (5..9 s,
     # with the emulator's speed): its toast (40,132 400x56) covers the long
-    # press point for 1.5 s and takes that touch (2437e6e, a toast is not
+    # press point for 1.5 s and takes that touch (e206875, a toast is not
     # modal but a touch on its box is the toast's). So the long press waits
     # for the hint + 2 s (GATE; at 8 s at the earliest, 14 s at the latest)
     # and Yes follows 13 s after it.
@@ -191,7 +191,7 @@ SC.update({
         (36, None, lambda d: near(d['Vdc'], 20, 0.002) and d['X']['POW:VOLT:CAL?'].startswith('OK'), 'after POW:VOLT:CAL (DC V reference): 20.00 V'),
         (50, 'open;vsrc:0.2', lambda d: d['X']['POW:VOLT:CAL?'].startswith('SMALL'), 'refused: 0.2 V on 60 V'),
     ]),
-    # Device 7534701: a 0..9.6 V 40 Hz square on 6 V was calibrated by its 4.8 V DC part (DC kind)
+    # Device d8e249d: a 0..9.6 V 40 Hz square on 6 V was calibrated by its 4.8 V DC part (DC kind)
     # though its peak clips the range; the peak guard refuses it (BIG), the gain stays.
     'vcal-clip': (['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF', 'POW:VOLT:RANG 6'], 30, [
         (0, 'open;vsrc:4.8,ac=4.8,f=40,shape=square', lambda d: True, 'square 0..9.6 V on 6 V'),

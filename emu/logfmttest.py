@@ -20,7 +20,7 @@ rows/s its 12 B records are past what the drain carries). At 76 800 the
 compact formats are lossless with the logger panel on (the default
 --draw): a panel part is drawn only while the ring has room for it
 (dialog.rs `log_panel_room`; before it, the panel's first draw overwrote a
-block after the first 2048 samples, device 940e8aa).
+block after the first 2048 samples, device 2f56ff9).
 
 The device's speed: --mips 110 --isr-stall-ns 700 (the defaults here; as
 emu/fastlogtest.py: peripherals/CpuCost.cs). The emulator's USB/IP link is

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40: the Bluetooth module's start-up text is not SCPI, and a host's
-first command is answered (device-check doc "d188760" item 6 and note 4).
+first command is answered (device-check doc "f59bac2" item 6 and note 4).
 
   emu/btchattertest.py --app firmware/opendm40.bin --port 64530
 
@@ -8,12 +8,12 @@ The BT model (emu/peripherals/BtModule.cs) does what the device's module
 does: on every start (power-up, AT+RESET) PC14 is high for 650 ms with no
 host, and at 150 ms it prints its 7-line banner (BLE03:VER.., CBN:.., CBMAC:..,
 CSN:.., CSMAC:.., CBSW:1, CSSW:1 = -102 -113 -113 -102 -113 -113 -113 for
-the next client, device d188760); a host links no sooner than 320 ms after
+the next client, device f59bac2); a host links no sooner than 320 ms after
 a start, and its bytes pass 400 ms before PC14 rises.
 
   A. boot (start at power-up, again after the AT init's AT+RESET): a host
      links at 10 s and sends SYST:ERR:COUN? at once: the reply must come
-     (device d188760: dropped while PC14 was low) and be 0; *IDN? works and
+     (device f59bac2: dropped while PC14 was low) and be 0; *IDN? works and
      a bad command of its own is queued (-113), so the queue is live.
   B. Settings: Bluetooth OFF, a host waits, ON: it links inside the start's
      PC14 pulse, right after the banner; its SYST:ERR:COUN? sent at once must

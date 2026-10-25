@@ -23,7 +23,7 @@ Firmware use:
 | DAC channel / pin | opendm40 | Code |
 |---|---|---|
 | ch1 = PA4 | generator waveform (TIM6 TRGO, DMA0 stream 5) | [`src/gen.rs`](../src/gen.rs) `Gen::dac` |
-| ch2 = PA5 | scope hardware trigger level, on by default since ef43768 | [`src/hwtrig.rs`](../src/hwtrig.rs) `set_level`, `set_dac` (bits 16..31 of the DAC registers; `gen.rs` owns bits 0..15) |
+| ch2 = PA5 | scope hardware trigger level, on by default since 4f876cf | [`src/hwtrig.rs`](../src/hwtrig.rs) `set_level`, `set_dac` (bits 16..31 of the DAC registers; `gen.rs` owns bits 0..15) |
 
 No external DAC: the SPI peripherals are the W25Q128 flash and the HY3131
 ([hw/README.md Main parts](../../hw/README.md#main-parts)).

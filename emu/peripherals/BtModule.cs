@@ -68,7 +68,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
 
         /// Model the module start (power-up, AT+RESET): PC14 high for
         /// BootPinMs and the start-up banner at BootTextMs (device 7b1b6d1
-        /// trace, device-check doc "d188760"): "\0", then at ~150 ms
+        /// trace, device-check doc "f59bac2"): "\0", then at ~150 ms
         /// "BLE03:VER2.1-20240615\0", "CBN:<name>", "CBMAC:<12 hex>",
         /// "CSN:<classic name>", "CSMAC:<12 hex>", "CBSW:1", "CSSW:1" (CR LF
         /// each), PC14 low again at ~650 ms. The MAC digits are placeholders.
@@ -83,8 +83,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public ulong Boots { get; private set; }
 
         /// Virtual ms from a host connection to PC14 high. The host's bytes
-        /// pass from the connection on: device d188760 (device-check doc
-        /// "d188760" note 4) dropped a line sent up to 0.3 s after the
+        /// pass from the connection on: device f59bac2 (device-check doc
+        /// "f59bac2" note 4) dropped a line sent up to 0.3 s after the
         /// RFCOMM connect returned while firmware gated lines on PC14, and
         /// answered one sent at 0.5 s. 400 ms models that; 0 = PC14 at once.
         public int LinkDelayMs { get; set; } = 400;

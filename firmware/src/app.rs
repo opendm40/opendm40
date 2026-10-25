@@ -125,7 +125,7 @@ fn usb_ro() -> (bool, bool) {
 /// on the value, Settings 2/3 "Rate"): resolution order FAST -> MED -> SLOW
 /// -> FAST, from the stock's own behaviour (FAST: its 10/s moving reading,
 /// 60000 counts, no extra digit) to the most digits. The chip and Settings
-/// used to go FAST -> SLOW -> MED (the enum order; device check b7d9017).
+/// used to go FAST -> SLOW -> MED (the enum order; device check 540e056).
 fn next_rate(r: dmm::Rate) -> dmm::Rate {
     use dmm::Rate;
     match r {
@@ -703,7 +703,7 @@ impl App {
             // WaveReq::Stop, then `wave_exit_done` shows `v`). Until then
             // the view stays, so no page code (the menu's pressed feedback,
             // region C) runs while the stream ISR owns the bus (device
-            // 94de654: 1 late / overrun at 38400 at a MENU exit).
+            // 92fb8fa: 1 late / overrun at 38400 at a MENU exit).
             self.wave_req = Some(WaveReq::Stop);
             self.wave_exit_to = Some(v);
             return;
@@ -1750,7 +1750,7 @@ impl App {
                 // An empty chart takes the unit / digits of the reading
                 // even while it reads OL: the axis labels name the
                 // function shown, not the previous one (device check
-                // 94de654: cap "0.050MOhm", diode "MOhm", temperature "Hz").
+                // 92fb8fa: cap "0.050MOhm", diode "MOhm", temperature "Hz").
                 if self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec) {
                     self.chart_unit = r.main.unit;
                     self.chart_dec = r.main.dec;
@@ -2192,7 +2192,7 @@ impl App {
         self.scope.apply(sc, 0);
         let n = (p[10] as usize).min(4);
         // Only valid measurement ids (0..19, index into meas_res.v), no
-        // duplicates (review a71920d L1).
+        // duplicates (review 7389e8a L1).
         let mut k = 0;
         for i in 0..n {
             let id = (p[9] >> (8 * i)) as u8;
@@ -2292,7 +2292,7 @@ impl App {
         if rel_was && !self.meter.rel_active() {
             // REL ended by the reading (an AUTO coupling switch): release
             // the range hold it took, as rel_toggle does (device check
-            // 1e39149: the range stayed MANU after the switch).
+            // 33b44bd: the range stayed MANU after the switch).
             self.dmm.hold_range(false);
         }
         // CSV recording: the unsmoothed reading (REL applied; csvlog.rs
@@ -2463,7 +2463,7 @@ impl App {
                 // The screen update (the graph diff) waits for the next
                 // pass's sp_tick (below): no pass does maths or frame +
                 // paint (device check 2026-10-21), and USB is served
-                // between the frame and its paint (f48db7d: a frame pass
+                // between the frame and its paint (f80524f: a frame pass
                 // with paint was ~6 ms at ~50 fps, ping p50 11.8 ms). Frames
                 // in back-to-back passes (roll, fast timebases) paint here,
                 // as before, so the screen keeps up.
@@ -2509,7 +2509,7 @@ impl App {
     }
 
     /// Combined view: a new frame within COMBO_FRAME_MS of the last painted
-    /// one is not drawn (true). Device check 381ea07, open input, 1 ms/div:
+    /// one is not drawn (true). Device check c50425f, open input, 1 ms/div:
     /// a noise-triggered trace at 56.6 fps kept the loop painting in
     /// ~1.3 ms slices on almost every pass (s.paint 63 % CPU, ~11 ms of paint
     /// per frame), DBG:PING? p50 3.3 ms against the <= 2 ms target. The meter
@@ -2570,7 +2570,7 @@ impl App {
         }
         // A scope-page drag / pinch whose end would be swallowed below (a
         // screenshot, the lock, an overlay): end it now, so the acquisition
-        // is not left held and no stale pinch survives (review a71920d B1).
+        // is not left held and no stale pinch survives (review 7389e8a B1).
         let blocked = crate::screenshot::frozen() || self.locked || self.overlay.is_some();
         if blocked && matches!(g, Gesture::PinchEnd(_) | Gesture::Up(_) | Gesture::Cancel | Gesture::KeyDown(_)) {
             self.sp_end_hold(now);
@@ -2605,7 +2605,7 @@ impl App {
             }
             self.wake_gate = None;
         }
-        // A toast is not modal (owner's decision after device check 28ace43:
+        // A toast is not modal (owner's decision after device check f6c6e05:
         // the "AC voltage here: use AC V?" hint took the first V tap): a touch
         // on its box is for the toast (a tap there dismisses it); any other
         // touch, swipe or side key dismisses it and goes on to the page.
@@ -3109,7 +3109,7 @@ impl App {
     /// Why a CSV recording cannot start now (SCPI LOG:CSV ON; the pages
     /// that start one are not reachable then): the Wave view and the inrush
     /// page stream AD2 and pause the DMM poll, so it would record no rows
-    /// (device 485d472: accepted, READ? 9.9E37; docs/ram-budget.md, the
+    /// (device 9d56ca6: accepted, READ? 9.9E37; docs/ram-budget.md, the
     /// logger::RING row). Their own entries refuse a running recording.
     pub fn rec_conflict(&self) -> Option<&'static str> {
         if self.scope.wave_on() {
@@ -3191,7 +3191,7 @@ impl App {
                 // The old code sent every menu page to back_view, so the back
                 // key in Settings skipped their parent. Device -> the main
                 // menu: on the stock, Device is a section of the one Settings
-                // screen, and MENU there leaves Settings (device check 2d33d3a:
+                // screen, and MENU there leaves Settings (device check 519fb8a:
                 // MENU on Device returned to Settings 3/3, where the next
                 // "menu" tap changed the USB disk row). Range / Keypad still
                 // pop to the view they were opened from.
@@ -3860,7 +3860,7 @@ impl App {
 
     /// The placeholder (`prov` with no value) follows a range / unit change
     /// made before the function's first reading: `CONF:CURR:DC 10` enters
-    /// mA (`select`), then the 10 A row (device 0760432: "mA" for 0.8 s).
+    /// mA (`select`), then the 10 A row (device 6bc494a: "mA" for 0.8 s).
     fn prov_follow(&mut self) {
         let Some(p) = self.prov.filter(|p| p.main.v.is_nan() && !p.main.ol) else { return };
         let Some(n) = self.dmm.placeholder() else { return };
@@ -3878,7 +3878,7 @@ impl App {
     /// placeholder (AUTO, dimmed dashes) until AUTO's first one, as after a
     /// function change. Before, the last manual reading stayed with MANU in
     /// the status bar (the label is the reading's) until AUTO's first
-    /// reading: through a whole ohm autorange hunt on the device (41a33a1
+    /// reading: through a whole ohm autorange hunt on the device (c6a3ac3
     /// note 2: 0.1043 Mohm for 8 s).
     fn auto_entered(&mut self, was_auto: bool) {
         if !was_auto && self.dmm.is_auto() && !self.dmm.pw.on {
@@ -4318,12 +4318,12 @@ impl App {
             }
             C::ConfQuery if self.scope.wave_on() => {
                 // The Wave view pauses the DMM poll: `meter.live()` is the
-                // reading from before it (device 7534701: "VOLT:AC +6" on
+                // reading from before it (device d8e249d: "VOLT:AC +6" on
                 // 200 mV/div = AC mV 600 mV). The streamed row's format
                 // instead (dmm.rs poll_ac's unit / decimals).
                 let r = self.dmm.range().max(0) as u8;
                 // DC V / DC mV (1 / 3) stream since E7: their DC rows' format
-                // (dmm.rs poll_dcv; 1e39149 answered "VOLT +6E-04" = uA).
+                // (dmm.rs poll_dcv; 33b44bd answered "VOLT +6E-04" = uA).
                 let (unit, dec) = match self.dmm.hy_mode() {
                     0 | 1 => ("V", 4 - r.min(3)),
                     2 | 3 => ("mV", 3 - r.min(1)),
@@ -5056,7 +5056,7 @@ impl App {
         } else if !scope_cmd && reply.is_none() {
             // Settings only: a query (OUTP?, SOUR:FREQ? ...) re-applied the
             // generator (stop_outputs + restart: a glitch on a running output)
-            // and ran Gen::apply, region C code: device 2d33d3a, OUTP? polled
+            // and ran Gen::apply, region C code: device 519fb8a, OUTP? polled
             // during a 38400 S/s disk session = late 25, max_lat 21.1 us at
             // lat_pc Gen::apply, 29 samples lost in 10 s.
             self.gen_set(g);

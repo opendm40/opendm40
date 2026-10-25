@@ -31,7 +31,7 @@ What waits for the owner; each line links to the material.
       - [x] Device 1184b096: the -95 ppm gain was wrong (FAST - MED -87 / -90 ppm with it, alternating blocks):
             GAIN = 1. The refresh gate rejected 20 of 45 on the calibrator's noisy 1 V..24 V output: now the
             00-mean shift against the groups' scatter.
-      - [x] Device c8ce8def (rebased): the gate change and the defaults: 1 V calibrator output, 65 s FAST: 2 used,
+      - [x] Device 4d8ea4e6 (rebased): the gate change and the defaults: 1 V calibrator output, 65 s FAST: 2 used,
             0 rejected; 10 V on 60 / 600 V, FAST in the first 2 s after the range change +0.3 / +0.4 counts from MED,
             after the refresh -0.3 / +0.1.
       - [ ] 60 mV: the refresh is still rejected on an open input (the default VOS of 600 mV stays in use):
@@ -46,11 +46,11 @@ What waits for the owner; each line links to the material.
       Done: app.rs `restore` (`same_session` = from the backup SRAM after a normal boot); emu/settingstest.py PASS.
       Device check: AC V, AutoHold on, a limit set, 10 ms/div on the scope; power off with the key and on: DC V,
       AutoHold off, no limit, the scope's defaults, the brightness kept; the same after `DBG:RESET`: all kept.
-      **Device 839bdab (2026-10-25): PASS.** AC V 60 V manual, AutoHold, upper limit 5 V, 10 ms/div; power key off /
+      **Device 705d2e9 (2026-10-25): PASS.** AC V 60 V manual, AutoHold, upper limit 5 V, 10 ms/div; power key off /
       on: SETTINGS,FILE, DC V, AUTO, AutoHold 0, limits off, 200 us/div, the alarm LOUD kept. The same set, then
       `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
       manual says: a fixed range is never kept).
-- [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 4f52089d (dmm.rs `poll_ohm`,
+- [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 1f264d3e (dmm.rs `poll_ohm`,
       `ohm_auto_floor`). The stock autorange never selects r0 (its clamp is r1..r6,
       [dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 2), so the step uses the stock rule of the other ohm steps:
       600 -> 60 Ω below 0.1 x limit / over = 58.25 Ω, 60 -> 600 Ω above limit x over = 61.8 Ω. With 0.28 mA ON
@@ -63,7 +63,7 @@ What waits for the owner; each line links to the material.
       5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
          there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
-- [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 49d7c10c (2026-10-25, host load ~5-6):
+- [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
       in whole runs `r30-300-30` failed 4 of 5 (ranges 60, 60 M, 6000, 600, 60: the first step down from 60 MΩ is
       4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
       failed 1 of 4. The cause is unknown (inferred: the scenario is the run's last, where its scheduled input
@@ -75,7 +75,7 @@ What waits for the owner; each line links to the material.
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
       history was rewritten (git-filter-repo: those paths removed; the UID, its derived block and two BT MACs
       replaced); a rescan in every text form and in the blobs finds none. Doc hashes mapped to the new history.
-- [x] RES AUTO with 60 Ω (device 7175fc6c, 2026-10-25): the calibrator's resistance output on V-COM, AUTO:
+- [x] RES AUTO with 60 Ω (device 59bffd8a, 2026-10-25): the calibrator's resistance output on V-COM, AUTO:
       10 / 50 Ω -> 60 Ω range, 100 / 300 Ω -> 600 Ω, back to 50 / 10 Ω -> 60 Ω; the output off -> 60 MΩ (the
       calibrator's off state reads ~50 MΩ, not open). PASS. Open: on 60 Ω the readings were 8.88 Ω for 10 Ω and
       48.13 Ω for 50 Ω (100 Ω read 100.13, 300 Ω 302.25); whether that is the 60 Ω row's zero / the leads or the
@@ -89,7 +89,7 @@ What waits for the owner; each line links to the material.
       ([HY3131.cs](../emu/hy3131/HY3131.cs) `OhmR0K`), [resautotest.py](../emu/hy3131/resautotest.py) checks
       30 / 59.5 Ω on 60 Ω within 0.3 %. Device check: the calibrator's resistance output on V-COM, 10 / 20 / 50 Ω,
       manual 60 Ω and manual 600 Ω, mean of 5 READ? each: the ratio 60 / 600 within 1 +- 0.003 for each value.
-- [ ] 60 Ω range: removed 2026-10-25 (owner), work on branch feat/ohm60 (6ef35456: the range page item, RES
+- [ ] 60 Ω range: removed 2026-10-25 (owner), work on branch feat/ohm60 (2bc5cc92: the range page item, RES
       AUTO down to 60 Ω, the r1-gain x 1.0291 fix, the emulator and resautotest rows). Removed here: the range
       page item, AUTO (floor 600 Ω again), the AUTO key cycle, `RES:RANG` 60 / MIN (now 600 Ω), `OHM_R0_K` /
       `ohm_row_gain`; the stock's r0 row stays in [hy3131_tables.rs](src/hy3131_tables.rs) and nothing selects
@@ -103,7 +103,7 @@ What waits for the owner; each line links to the material.
         [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library) x10 ohm row);
       - the r0 row differs from r1 in R25 0x01 (x10) and R2B 0x46 vs 0x40: PA2 DF closed, which the stock uses
         only on the high ohm ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the calibrator.
-- [x] Touch (device 4ea9518 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
+- [x] Touch (device eea7cd6 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
       mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
       -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),
       -1,+9 (centre). The stock applies no scale or offset either (stock/re/analysis/touch_v2_6.h); whether the
@@ -116,7 +116,7 @@ What waits for the owner; each line links to the material.
       merge: the PID constant in usb descriptors (now the test PID 1209:0001), udev rules / docs, a release.
       Their howto: a software-only project "may" be asked for justification (the hardware is the vendor's).
 - [ ] Public release (owner 2026-10-25): the one blocker was the touch fix (screen and the four touch keys).
-      **Done (device 0b3b73c1, 2026-10-25):** the stale 0xAB reads fixed (taps no longer lost, no phantom MENU),
+      **Done (device b98717b7, 2026-10-25):** the stale 0xAB reads fixed (taps no longer lost, no phantom MENU),
       the key lag / AUTO-RUN mix-up fixed, a per-device touch calibration on the touch test page. The owner
       calibrated this unit: x = 0.9887x - 0.0076y + 0.08, y = 0.0057x + 0.9555y - 2.77 (DBG:TOUCH:CAL?), "the
       calibration helps". The four touch keys are reported by the controller as fixed points (x 372 / 627 / 883
@@ -133,9 +133,9 @@ Device needed (in this order):
    ("Device retest of mirror-bw" below).
 1. UF-01 continuity CMPO beeper + diode beep, latency < 10 ms.
 2. Both-rails crosstalk: DMM accuracy with the scope running; combined-view FREQ (13.3 Hz on 40 Hz);
-   AC V of a 0.5 V DC source decaying. Device 7534701 (docs/device-check-2026-10-21.md "7534701" 7): DC 1 / 5 / 10 V within 0.04 %, FREQ
+   AC V of a 0.5 V DC source decaying. Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 7): DC 1 / 5 / 10 V within 0.04 %, FREQ
    40.0017 Hz, AC V of 0.5 V DC 0.3-0.5 mV; **the 40 Hz 0..9.6 V square reads +0.19 % with the scope rail on**
-   (DC V / AC V / AC+DC, reproducible). Explained (device-check doc "7534701 follow-up"): analog. The DMM page,
+   (DC V / AC V / AC+DC, reproducible). Explained (device-check doc "d8e249d follow-up"): analog. The DMM page,
    same row, only SYST:RAIL AUTO <-> BOTH: +9.3 mV (+0.195 %) at 40 Hz, +14.1 mV at 400 Hz, DC 0 / 5 V +-0.03 mV;
    needs edges, grows with the edge rate: the powered scope front end loads / couples into V / COM. No firmware
    fix; AUTO (default) keeps the scope rail off on the DMM page.
@@ -165,7 +165,7 @@ Code work (in this order):
 - [x] Device: screenshot with the scope FFT on (40 KiB CAP while the FFT holds the tail): a239aa6
       SHOTS/S007.BMP 307 266 B holds the spectrum, the FFT keeps updating after the shot (11.11).
 - [x] Device: a shot of a big screen (AC+DC / power view) then the FFT: the spectrum resumes after the shot.
-      7534701 (docs/device-check-2026-10-21.md "7534701" 4): W page AC+DC shot as SHOTS/S009.BMP, back on the Scope page s.fft 5012 -> 5866 in 3 s.
+      d8e249d (docs/device-check-2026-10-21.md "d8e249d" 4): W page AC+DC shot as SHOTS/S009.BMP, back on the Scope page s.fft 5012 -> 5866 in 3 s.
 - [x] `.cold` (region C, not zero-wait) audit 2026-10-22, emulator hooks on every function of C (a Renode
       AddHook per symbol from t = 6 s, hit counts logged at powers of 2; DMM idle, swipe-down CSV recording
       16 s, combined view, settings pages, generator page): vwrite::poll (B) called upload::disk,
@@ -177,10 +177,10 @@ Code work (in this order):
       wrong): stays in C. After: no C function runs in idle / combined view / while recording; C runs at a
       recording start / stop (fatdir, the vdisk refresh), on taps and boot. Not covered by the run: MSC reads
       by a host (vdisk read_block in C per sector: host-driven I/O, fine) and the scope FFT / AD2 stream
-      (the budget run of 8cc14d8: none in C). Region B: -3 KB for decision #6 + the audit (20.0 KB free on 7103d3f).
+      (the budget run of 1de50a5: none in C). Region B: -3 KB for decision #6 + the audit (20.0 KB free on 0eefdf1).
 - [x] Device: DBG:PROF? / lat_pc while recording a CSV and with the USB volume mounted (Files live: a
       vdisk refresh per commit, ~60 s) to confirm no stall from region C.
-      7534701 (docs/device-check-2026-10-21.md "7534701" 5): no region C stall; loop max1s 1-2.5 ms, one 74 ms pass per commit (84 ms at the
+      d8e249d (docs/device-check-2026-10-21.md "d8e249d" 5): no region C stall; loop max1s 1-2.5 ms, one 74 ms pass per commit (84 ms at the
       start) in `csv` = the blocking FAT / dir write_block erase (by design); a recording appears on the
       volume at its stop, not per commit (finish -> set_stale). Region C found elsewhere (6a / 6c):
       vdisk::file_read's closure (host volume reads during a stream, max_lat 9 us: fixed) and the volume
@@ -192,7 +192,7 @@ Code work (in this order):
       catalog_scpi_on) -> `#[inline(never)]` / patterns; poll_cap's f32 quicksort -> insertion sort. Region C
       31.7 KB left. Hooks on every C function (per-second counts): idle, CSV recording, combined view, AD2
       stream 38400 (DMA), fastlogtest typ: C only at a start / stop, but LOG:DISK? (polled during a disk session) ran
-      fast_scpi in C (793d4b6) -> its reply fast_status in B. `Logger::drain` has one copy (no
+      fast_scpi in C (f5eae17) -> its reply fast_status in B. `Logger::drain` has one copy (no
       duplicate to drop). build.sh: a banner at the end below 16 KiB. emu/hy3131/ad2streamtest.py and
       emu/fastlogtest.py take `--extra-script FILE` (e.g. the hook lines).
 ## Remaining work
@@ -201,13 +201,13 @@ Code work (in this order):
       wrong while the trigger-level marker T was on the left edge; the marker moved to the graph's
       right edge (scope_ui.rs `strip_items`), so the help text is now correct.
 - [x] `tools/dm40dbg.py` ported from CDC/pyserial to `/dev/usbtmc` + `DBG:` commands (d158db9).
-      `tools/reload.sh` is the native reload flow (d8472fd); no serial/ttyACM references remain.
+      `tools/reload.sh` is the native reload flow (3c20dc1); no serial/ttyACM references remain.
 - [x] On-device test of USBTMC (`*IDN?`, `DBG:PING?`/`DIAG?`/`LCD?` screenshot, `DBG:TAP`/`SWIPE`) and
       the mass-storage disk (W25Q128, db29835).  (device-verified: used in every device run since;
       CALBK files written, dm40_patched.bin copied onto the disk for DBG:UPDATE)
 - [x] Faster redraw of the main DMM value and trend chart (target ~6 ms like stock: render to RAM,
-      single window flush, chart column ring). 95e4808 sped it up; measure with DBG:PROF? (4c94b43).
-      Done: c79cc1c (d.read / d.chart prof sections), 64080ca (chart column-span cache, aux rows repainted
+      single window flush, chart column ring). 95e4808 sped it up; measure with DBG:PROF? (c85afc1).
+      Done: dbf0278 (d.read / d.chart prof sections), 83c2b05 (chart column-span cache, aux rows repainted
       only on change, faster stockfont::label; pixel-identical). (verify on device: DBG:PROF? d.read / d.chart)
 - [x] Item-by-item parity check vs stock -> `docs/parity.md`. DMM/scope/gen/BT/GUI/touch/USB
   tabulated; punch-list extracted. Deliberate deviations recorded (red value, no logo,
@@ -224,13 +224,13 @@ Code work (in this order):
         stop-and-zoom re-renders the stored 26 K record at the selected timebase. Horizontal
         position = the stock T marker drag (stock scope port). Not done: full 65 K record (DMARAM budget).
   - [x] Scope hardware (comparator) trigger, src/hwtrig.rs (H0..H8 of ../docs/history/hwtrig-integration.md),
-        DBG:HWTRIG[?|:ENABLE|:CAL?|:STAT?|:STAT:RESET]. On by default since ef43768 (enabled in
+        DBG:HWTRIG[?|:ENABLE|:CAL?|:STAT?|:STAT:RESET]. On by default since 4f876cf (enabled in
         Scope::new; hwtrig::DEFAULT_ENABLED stays the module default). (device-verified: Auto/Normal/
         Single, 100 us..100 ms/div all T'D, 0 misses)
   - [ ] Confirm simultaneous DMM+scope accuracy (both-rails crosstalk). Fold in: combined-view FREQ
         read 13.3 Hz on a 40 Hz input (= 40/3; with/without the scope probe on the node), and AC V
         of a 0.5 V DC source reading 23-56 mV and decaying slowly (compare with stock first).
-        Device 3e41549 (device-check doc "Crosstalk and cold-junction self-heating (3e41549)"): DC V reads
+        Device 40728b8 (device-check doc "Crosstalk and cold-junction self-heating (40728b8)"): DC V reads
         -0.05 / -0.24 / -0.39 mV at 0 / 1 / 5 V in the combined view vs the DMM page (pairwise, sem 0.06 mV,
         noise unchanged 0.12-0.14 mV). Mostly the scope rail: RAIL BOTH on the DMM page gives -0.24 mV at 5 V.
         Analog, < 0.01 %. AC V of 0.5 V DC: 33 mV first reading, < 1 mV by 1.4 s, floor 0.34 mV, the same in
@@ -247,7 +247,7 @@ Code work (in this order):
         2/3 of the other loses; NaN ("--") before the first result. Not done: the proposed "two results agree"
         (+0.35..0.7 s to the first reading). AC+DC / AUTO left alone (they show no frequency). The model now
         keeps CTA<23:8> over ENCTR = 0 (datasheet) and has ctsettle: (every other edge missed after a row
-        change); `emu/hy3131/freqtest.py`: e0813f2 first READ? 34-45 Hz (19.9-30.2 Hz with ctsettle:400) at
+        change); `emu/hy3131/freqtest.py`: 69f3dfe first READ? 34-45 Hz (19.9-30.2 Hz with ctsettle:400) at
         +1.05 s, freqfirst 40.0007 Hz at +1.40 s (the device's clean first readings: 1.37-1.41 s).
         **Device retest** (40 Hz square, calibrator; DMM page and combined view, as `chk4/fentry.py` / `f40dc`):
         (1) 10x: CONF:VOLT:DC, 3 s, CONF:FREQ, 4 READ? with times: every value 40.00 Hz (no 0 / 0.99 / 17 /
@@ -257,9 +257,9 @@ Code work (in this order):
         Hz, never a wrong value. (5) CONF:POW on 230 V / 50 Hz (or the 40 Hz square): F "--" then 50.00, after
         an entry and after a range change. (6) Capacitance 1 uF / 100 nF entries (the gate now preset at the
         row write): readings as before.
-        **Device a3b6d0a (device-check-2026-10-21.md "a3b6d0a"): (1)-(3) FAIL, (4)-(5) PASS, (6) not run.**
+        **Device d2aff22 (device-check-2026-10-21.md "d2aff22"): (1)-(3) FAIL, (4)-(5) PASS, (6) not run.**
         Every Hz entry (DC V / AC V / AC+DC -> Hz, Scope -> back, both pages, 26 of 26) reads **0.000 Hz / 0.0 %
-        three times** (1.37 / 1.71 / 2.06 s, amber, READ?, MIN / AVG), 40.0017 from 2.42 s (3e41549: 40.00 at 1.37
+        three times** (1.37 / 1.71 / 2.06 s, amber, READ?, MIN / AVG), 40.0017 from 2.42 s (40728b8: 40.00 at 1.37
         s). Fits: source 0 (0xF0) reads f = 0 in its first gates; f = 0 is not a glitch, so it sets seen / last = 0
         and wins alone, then the 1e6 tie with source 1's first result. Fix: f == 0 is no result for `seen`, and a
         1e6 tie goes to the non-zero source. AC V secondary line "--" then 40.00 from 0.7 s; power meter F
@@ -268,9 +268,9 @@ Code work (in this order):
         inside its 53.3 ms (CTA >= 0xfc0000, `ctr_valid`), f = 0 or a glitch is no result (the source drops
         out, the other shows); nothing valid = no reading (the placeholder "--" stays, READ? and the
         statistics wait); 0.000 Hz only when both sources counted nothing twice in a row (once each after a
-        value was shown). The first gate after the settle is source 1's (0x08), as 3e41549's clean 1.37 s
+        value was shown). The first gate after the settle is source 1's (0x08), as 40728b8's clean 1.37 s
         readings were. Model: `ct0dead:MS` (the Hz row's comparator source counts nothing for MS after the row
-        change); freqtest `entry-dead` / `wake` / `acv` (ct0dead:2500) fail on 190d7d5 with 0.000 Hz first
+        change); freqtest `entry-dead` / `wake` / `acv` (ct0dead:2500) fail on f6ec475 with 0.000 Hz first
         readings, `nosig` checks 0.000 Hz with nothing connected.
         **Device retest (freqfirst2):** as 1-3 above (10x DC V -> Hz with 5 READ?, Scope -> back 3x per page,
         AC V / AC+DC -> Hz 5x): every READ? 40.00 Hz, the first at ~1.4 s (Scope -> back ~0.9 s), the screen
@@ -278,7 +278,7 @@ Code work (in this order):
         (calibrator off), CONF:FREQ: READ? 0.000 Hz within ~3 s, no hang. (8) Calibrator 40 Hz -> off while in
         Hz: 0.000 Hz within ~1 s. (9) Optional, if a DBG counter readout is added: does source 0 (0xf0) ever
         read the signal on the Hz row?
-        **Device c151d2b (device-check-2026-10-21.md "c151d2b"): (1)-(4) and (7)-(8) PASS.** 165 of 165 READ?
+        **Device bb39569 (device-check-2026-10-21.md "bb39569"): (1)-(4) and (7)-(8) PASS.** 165 of 165 READ?
         40.00 Hz (DC V / AC V / AC+DC -> Hz, Scope -> back, both pages, half after a view change), the first at
         1.37-1.40 s (Scope -> back 0.86 s DMM / 1.04 s combined); screen "- -" at 0.5 / 1.0 s, 40.002 Hz with
         MIN / MAX / AVG 40.002 at 1.5 s, never 0.000. No signal: 0.000 Hz at 2.42 s. 40 Hz -> off: 0.000 after
@@ -352,32 +352,32 @@ Code work (in this order):
         B1 (native stack overflow: fatren buffers live during main) and B2 (shim reads PD6 without
         pull-down; stock = input + pull-down, pressed = 1) are fixed; H1 fatren renames only the file whose
         header == marker; H2 key-hold trap (light backlight at once, cue before zeroing); H3 stale flags;
-        crash counter so one panic doesn't force a reinstall. (fixed in 6fc95be before T3)
+        crash counter so one panic doesn't force a reinstall. (fixed in 9575616 before T3)
   - [x] T1 on device (test-initcore over stock): init_core HXTAL OK, LCD/USB/disk/DMM/BT OK, FSMC live
         BCR1 0x5091 BTR1 0x0F04 BWTR1 0x0FF00201 (board.rs aligned), panel 0x9488, marker VALID.
   - [x] T2 on device (test-recovery): marker zeroed + WARM reset -> loader 'open file error' + working
         USB disk. Restored dm40_patched.bin through it.
-  - [x] T3 / Stage 1 on device (2026-10-13 17:28): native dm40_fwrs.bin (commit 6fc95be) installed via
+  - [x] T3 / Stage 1 on device (2026-10-13 17:28): native dm40_fwrs.bin (commit 9575616) installed via
         the loader screen; DBG:BOOT? NORMAL/HXTAL/VALID marker, CALBK WRITTEN (8 backup files on the disk),
         STACK 30760/39000, PD6 pull-down, DMM reading OK. Way back proven: dm40_patched.bin on the opendm40
         disk + DBG:UPDATE -> loader installed patched stock (marker = its header, memrw answers).
         The loader (not the stock app) deletes the installed dm40*.bin (340faca) -> the running
-        firmware's update file is regenerated from flash as a backup on the disk (a910941).
+        firmware's update file is regenerated from flash as a backup on the disk (439b251).
   - [x] T3 recovery triggers in the emulator (emu/recoverytest.py, ROM -> FS-loader -> opendm40 with the real
         loader; FWDGT + sticky RCU_RSTSCK flags modelled in emu/peripherals/FWDGT.cs): normal boot, short
         power-on press, key held to the beep and released in the 0.5 s window (normal), key held from off
         7 s (marker zeroed -> loader "open file error / Update" screen at shim + 4.8 s), one hang (reboot,
         crash word 0x43520001), a second hang 10 s / 50 s of main loop after the reboot (recovery, the
         second one = resets 70 s apart), a second hang after > 60 s of main loop (reboot only), and
-        DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= ed78395's image); no
+        DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= 37d3252's image); no
         shim bug found. The 60 s window is 60 s of RUNNING main loop since the last boot, not 60 s between
         resets (README wording fixed).
   - [ ] T3 remaining on the device: the same triggers by hand (owner steps in docs/native-boot.md
         "T3 recovery triggers: owner steps"); scope view stack high-water; first-boot timing.
   - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
-        (602af9f; verify on device)
-  - [x] Stage 2: retire stub/, flash.py, BT loader path; update README/tools. (d8472fd; verify on device)
+        (c44ca81; verify on device)
+  - [x] Stage 2: retire stub/, flash.py, BT loader path; update README/tools. (3c20dc1; verify on device)
   - [x] RAM build removed (owner 2026-10-22; it no longer linked, ~200 KB over): build.sh builds
         only the native image (`native` kept as a no-op argument), link.x / link-test.x /
         startup.rs, the test-initcore / test-recovery (T1/T2) images, stub/, tools/legacy/
@@ -394,12 +394,12 @@ Code work (in this order):
       (gesture.rs: a drag never swipes), #2 unified status block with lock/BT/battery on every bar,
       #5 page dots, #4/#8 superseded by the stock scope port (stock right panel, markers, T/trigger
       handles). Done 2026-10-21 (verify on device):
-      - #3 wake gate (a9bed19): after an idle dim the first touch / side key only wakes; input is
+      - #3 wake gate (c41d960): after an idle dim the first touch / side key only wakes; input is
         ignored for 500 ms (stock FUN_08020248) and the rest of the waking touch is dropped.
-      - #10 generator keypad prefill (5e9a79c): current value + unit, drawn selected; the first
+      - #10 generator keypad prefill (24023c7): current value + unit, drawn selected; the first
         digit / '.' / backspace replaces it; OK on an untouched prefill keeps the setting.
-      - #9 generator bar status + tappable RUN/STOP (4ed5c86).
-      - #11 pressed-key feedback on the keypads (5f9e9b1); since 2026-10-22 also the menu tiles /
+      - #9 generator bar status + tappable RUN/STOP (98e3b7d).
+      - #11 pressed-key feedback on the keypads (f5f9a8b); since 2026-10-22 also the menu tiles /
         rows (stock tile style's pressed 0x4419, an RE guess), the list-page rows of Settings 1-3,
         Hold & Limits, Record (0x04FC, value white), their -/+ stepper keys and the Start / Stop row
         (0x7BEF, the stock popups' pressed colour) and the generator boxes + wave drop-down (0x04FC):
@@ -421,7 +421,7 @@ Code work (in this order):
         the tap, its own feedback; the fuse / job labels vary per stage), the Inrush page (its keys run
         while AD2 streams: a .cold redraw per touch there needs a device timing check first), Gallery /
         Help navigation; #7's remainder (scope controls in the combined view) is the combined-view design's.
-      - #12 backlight / volume -/+ steppers, clamped (64080ca drawing, e646a89 logic).
+      - #12 backlight / volume -/+ steppers, clamped (83c2b05 drawing, 3f4b609 logic).
       - #13 already in: DMM lightning >= 100 V (stock), combined strip HV badge >= 30 V and red
         ring >= 100 V. DMM page >= 30 V: done 2026-10-21 as the stock cue itself (value 0xC9A0 red in V
         functions from 30 V, gui_v2_6.h:175; the value is orange otherwise).
@@ -430,16 +430,16 @@ Code work (in this order):
       - #15 the duplicate Keypad/ScopeMenu arms are gone (ScopeMenu removed by the scope port).
         Dead code removed (2026-10-21): ui::bar / button_row / DMM_BUTTONS / sub_label / val_line,
         src/fonts.rs + src/text.rs (only those used them), tools/mkfont.py + fonts/Roboto-*.
-      Remainder (83664d9):
+      Remainder (c13d61a):
       - [x] UF-08 cursor tab "CUR" at the graph bottom (108,280): off -> X -> Y -> off, as the
         stock cursor measurements (X2-1 + Xf / Y2-1) in the measurement row; "off" restores the
-        selection. (83664d9; verify on device)
+        selection. (c13d61a; verify on device)
       - [x] UF-10 CH1 V/div buttons drawn as magnifiers: top = zoom in (smaller V/div), bottom =
-        zoom out (83664d9; stock-diff: btn_vdiv_up/down ~9 % by design; verify on device)
+        zoom out (c13d61a; stock-diff: btn_vdiv_up/down ~9 % by design; verify on device)
       - [x] UF-09 double tap = CH1 position 0 + trigger at 50 % (stopped: centred on the trigger
         point); only where a single tap does nothing (Corners: the graph middle; Off: anywhere;
-        never in Halves, every tap steps there). (83664d9; verify on device)
-- [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (4b33f20; verify on device)
+        never in Halves, every tap steps there). (c13d61a; verify on device)
+- [x] CSV-to-disk recording on the DMM screen, swipe-triggered (user). (7b1e0c0; verify on device)
       decided: see ../docs/history/decisions-2026-10-22.md #1 (Record page: intervals, mean per row, duration, estimate)
   - [x] Record page (decision #1): "Record" row on Hold & Limits -> View::Record: Interval (every reading /
         1 s / 10 s / 1 min, -/+ stepper), Duration (until stopped / 10 min / 1 h / 8 h / 24 h), "Free: about
@@ -454,7 +454,7 @@ Code work (in this order):
         fatren-test md5). SCPI LOG:CSV:INTerval / DURation (discrete values; Settings conflict while
         recording) / FREE?. Persist v8 word W_REC. The idle auto power-off is held while recording (it was not). Swipe REC uses the same settings. Help page 5.
         fatren-test "interval recording". (verify on device: checklist in the decisions doc #1)
-        Device 381ea07 (docs/device-check-2026-10-21.md "381ea07" 3): Hold & Limits 9th row, Record page, 1 s via
+        Device c50425f (docs/device-check-2026-10-21.md "c50425f" 3): Hold & Limits 9th row, Record page, 1 s via
         the page 131 s -> LOG000.CSV 132 rows t = 1..132 on the USB volume == MMEM:DATA?; 10 s / 10 min stopped
         itself, 60 rows t = 10..600; INT / DUR / FREE? and Settings conflict OK; settings survive DBG:RESET.
         Not verified: swipe REC with the interval, the estimate within 2x, the power-off hold (no DBG field,
@@ -492,20 +492,20 @@ Code work (in this order):
             spreadsheet; scope Save CSV -> SCOPE/SCOP000.CSV; gallery tile of a .DLG; DBG:PROF? csv lap
             during a refresh with a large new log (~0.1 s per 100 KB expected); DBG:DIAG? STACK
             high-water after a refresh with several logs.
-            (Device f48db7d, the old LUN-1 layout: scope Save CSV -> no SCOP*.CSV on DM40-INFO after
+            (Device f80524f, the old LUN-1 layout: scope Save CSV -> no SCOP*.CSV on DM40-INFO after
             unmount/mount; the Save CSV job never called dlog::set_stale. Re-check on the new layout.)
-            Emulator on 6b530ee (new layout): scope STOP -> MF -> Settings -> Save CSV -> SCOPE/SCOP000.CSV on
+            Emulator on c9f6951 (new layout): scope STOP -> MF -> Settings -> Save CSV -> SCOPE/SCOP000.CSV on
             LUN 0 at the next read (UNIT ATTENTION 06/28 first, then the listing has it; screenshot.rs finish()
-            calls set_stale since 5990c5c); LOG:CSV ON/OFF -> LOGS/LOG000.CSV likewise. Device re-check pending.
-            Device 381ea07 (Linux): SCOPE/SCOP000-002.CSV and LOGS/LOG000-001.CSV on the mounted volume right after
+            calls set_stale since 80c07f3); LOG:CSV ON/OFF -> LOGS/LOG000.CSV likewise. Device re-check pending.
+            Device c50425f (Linux): SCOPE/SCOP000-002.CSV and LOGS/LOG000-001.CSV on the mounted volume right after
             the recordings, no remount, == MMEM:DATA?. Open: Windows, gallery .DLG tile, PROF csv lap, STACK.
-            Device 246afc7, Windows 11 VM (device-check-2026-10-21.md "246afc7: ... Windows 11"): LOGS/LOG000-004.CSV
+            Device c92b605, Windows 11 VM (device-check-2026-10-21.md "c92b605: ... Windows 11"): LOGS/LOG000-004.CSV
             and SCOPE/SCOP000-009.CSV are listed and open in Notepad / PowerShell; the copied SCOP000.CSV is complete
             (26 624 rows). Open: on Windows, a recording made while mounted (+ F5); spreadsheet; gallery .DLG tile;
             PROF csv lap; STACK.
       - [x] Owner 2026-10-21: drop legacy text LOG*.CSV / SCOP*.CSV support on the SPI disk (gallery parser,
             numbering, list/delete): only .DLG is written and read; CSV exists only as the generated export.
-            (1118793)
+            (4be89c1)
       - [x] FR-38 logger to disk: src/fastlog.rs + src/fastenc.rs, DLG kind 3 (docs/compact-log-format.md
             "Fast stream (kind 3)"): LOGS/FASTnnn.DLG pre-allocated (duration x rate x 3 B, bounded by the free
             space) and pre-erased (blank sectors skipped, BE64 where a 64 KiB block is all ours) before the
@@ -520,56 +520,56 @@ Code work (in this order):
 
 ## Feature requests to add (from ../docs/dm40-feature-request.md; user: add autohold + useful ones)
 - [x] **FR-01 AutoHold (P0, critical).** Auto-freeze the reading when it stabilises, re-arm on a new
-      signal, beep on capture (Fluke/Keysight style). (ce7fd9b; verify on device) (708c74d re-capture: verified on
-      device f48db7d: 1.10 -> 1.20 -> 1.10 -> 1.12 V captured, 1.11 V not, as meter-test)
-- [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (ce7fd9b; verify on device)
-- [x] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.  (bb4f293, c67deb3; verify on device)
+      signal, beep on capture (Fluke/Keysight style). (8f98171; verify on device) (f44e63d re-capture: verified on
+      device f80524f: 1.10 -> 1.20 -> 1.10 -> 1.12 V captured, 1.11 V not, as meter-test)
+- [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (8f98171; verify on device)
+- [x] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.  (4c157a8, c7ec2c1; verify on device)
       Rate chip under the DMM chart timebase (tap = SLOW/MED/FAST, grey "n/a" where the
       rate does not apply), Settings 2/2 "DMM rate" / "Smoothing", SENS:RATE[:PER?], CALC:SMO[:STAT|:RESP],
       persisted in p[38]. CSV log and MIN/MAX/AVG stay unsmoothed. Rates: see "Measure the real DMM
       conversion period" below.
-- [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (ce7fd9b; verify on device)
-- [x] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.  (e61acee, 16b6089; verify on device)
+- [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (8f98171; verify on device)
+- [x] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.  (f02ce6e, 18ae461; verify on device)
       Backend + SCPI (csvlog list/delete, MMEM:CAT? / MMEM:DEL, USB only for DEL); on-screen gallery
       src/gallery.rs, opened from the main menu's top row "Gallery: screenshots and logs".
-- [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (aa42ea9, 780a3fb; verify on device)
+- [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (ae3e655, 38d9983; verify on device)
       Offset box on the generator page (keypad; OK on an empty field = auto), SOUR:VOLT:OFFS <V>|AUTO, persisted p[39].
 - [x] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.  (verify on device)
 - [x] FR-09 REL, FR-10 idle auto-off (+ countdown warning), FR-12 screen dim, FR-18 touch/key lock,
       FR-27 generator keeps running in DMM: present in code (cf1978b, 98c00f7, concurrent instruments).
       FR-33 is USBTMC+MSC (we chose DBG over CDC). (verify on device)
-- [x] Repo tidy-up (user request): ../TIDY-PLAN.md executed 2026-10-13 (02dd822..a38f022); the repo is
+- [x] Repo tidy-up (user request): ../TIDY-PLAN.md executed 2026-10-13 (b06da47..369cad7); the repo is
       now private (wirenboard/opendm40). Left to the user: whether vendor-derived material
       (stock/re/analysis/app_decompile.c) and BT MACs stay tracked if it ever goes public again.
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
-- [x] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1  (d5ee2eb; verify on device)
+- [x] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1  (81e02a7; verify on device)
       AC search first; nothing in AC -> the same search in DC, kept with the toast "AUTO: DC (no AC signal)".
-- [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (aa42ea9; verify on device)
-- [x] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7  (aa42ea9; verify on device)
+- [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (ae3e655; verify on device)
+- [x] UF-15 (P1) Generator: show the actual quantised output frequency (and in SOUR:FREQ?); later a DDS for finer steps. §7  (ae3e655; verify on device)
 - [x] UF-03 (P1) AC+DC sub-mode on DM40A (owners proved the A hardware does it when the app commands it). §10  (verify on device)
 - [ ] UF-02 (P1) Cold-junction self-heating with both rails/concurrent instruments: measure vs stock, correct or power down. §3
-      Device 3e41549 (device-check doc "Crosstalk and cold-junction self-heating (3e41549)"): CJ 25.62 °C on the
+      Device 40728b8 (device-check doc "Crosstalk and cold-junction self-heating (40728b8)"): CJ 25.62 °C on the
       DMM page (25 min), 25.58 °C in the combined view (25 min, no step, +-0.1 °C), 25.43 °C back on the DMM page
       (10.5 min). The MCU die meanwhile +1.0..1.6 °C with the scope on (tau ~2 min). No CJ self-heating from the
       scope rail: below the 0.5 °C threshold, no correction needed. Stock not measured (no stock number in
       user-feedback §3, only "~1 h idle"). Open: a stock run for the comparison, and the CJ vs a room thermometer
       (FR-26).
 - [ ] UF-19 (P1) Measure opendm40 battery draw vs stock (10-15 h baseline); decide on a scope-on-demand power policy. §8
-- [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in opendm40; shares the FAT writer). §2, §10  (c25749e; verify on device)
-- [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (c25749e; verify on device)
+- [x] UF-17 (P1) 3-finger swipe-down screenshot to the USB disk (stock gesture, missing in opendm40; shares the FAT writer). §2, §10  (67fa077; verify on device)
+- [x] UF-18 (P1) 2-finger swipe-down power-off (stock gesture; touch point count is available). §8  (67fa077; verify on device)
 - [x] UF-20 (P1) On first boot write CALBAK.BIN (cal record + boot data + UID, CRC) to the USB disk, written when missing or changed (compare-first). §4  (device-verified: CALBK WRITTEN in T3)
-- [x] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1  (bb4f293; verify on device: an upgraded unit boots in AUTO+; Range page warning)
+- [x] UF-21 (P1) Make AUTO+ (V-first, already ported: v_auto=1) the default V autorange; warn when mV-first AUTO is chosen. §5.1  (4c157a8; verify on device: an upgraded unit boots in AUTO+; Range page warning)
 - [x] UF-05 (P1) Scope drag axis lock (user: horizontal drags knock the vertical): dominant axis decided at
       the slop and locked until release; relative trigger drag; drag mode Stock / Axis lock with the
-      hold-to-grab time in Settings. §6.1  (532e70b, stock port 4f407d6, 9904902; verify on device)
-- [x] UF-09 (P1) Scope horizontal trigger position: the stock T marker drag (stock port 4f407d6). §6.1
+      hold-to-grab time in Settings. §6.1  (d154f60, stock port 100eb48, 74b5c16; verify on device)
+- [x] UF-09 (P1) Scope horizontal trigger position: the stock T marker drag (stock port 100eb48). §6.1
       Double-tap to centre: see the UI punch-list remainder.  (verify on device)
 - [x] UF-32 (P1) CSV files: '.' decimals, ISO-8601 timestamps, header (model/fw/function/range). §10  (verify on device. No RTC: time_s since the start + the start uptime, no ISO dates)
 - [x] UF-37 (P1) Native shim keeps the short-press power-on (stock V2.1 behaviour). §8  (verify on device)
-- [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (aa42ea9: ramp rises; verify on device)
-- [x] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2  (9ef1479, 6037a45; verify on device)
+- [x] UF-16 (P2) Generator ramp direction: gen.rs falls, preview rises; verify on scope and align. §7  (ae3e655: ramp rises; verify on device)
+- [x] UF-11 (P2) Scope FFT with labelled axes + automatic peak (f, dBV) readout. §6.2  (386f1ed, 0f4dffb; verify on device)
       src/fft.rs: 2048-pt real FFT (1024-pt complex radix-2, f32), 6 windows (stock 5 + flat-top),
       dBV / Vrms, sliced: load on the frame's pass, 3 butterfly stages per pass, split + dB in one
       pass. Source: the record around the frame (decimated by the mean of k samples when the screen
@@ -579,13 +579,13 @@ Code work (in this order):
       readout "f dBV" + white peak marker. ABS math too. Emulator (1 IPC, so ~1.5x on the device):
       FFT section avg 0.54 ms, max 1.3 ms per pass; frame 6 ms avg. Persist v5 (48 words).
       Not in roll (no linear record).
-- [x] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2  (10f41bc, d016270; verify on device)
+- [x] UF-12 (P2) Full probe attenuation list x0.1..x1000 (stock scope_probe[13]). §6.2  (2124249, 7b1b83c; verify on device)
       Scope MF -> Settings tab, 13 buttons; persisted. No SCPI probe command exists (none added); TRIG:LEV <V>
       now takes probe-tip volts like TRIG:LEV? answers.
 - [x] UF-07 (P2) Scope corner-tap timebase + list picker: Corners (default) / Halves / Off, preview tabs,
-      timebase list popup. §6.1  (831678f, docs/scope-scale-ux.md; verify on device)
-      UF-08 (one-tap cursors) and UF-10 (V/div +/- as zoom): done in 83664d9 (the UI punch-list remainder).
-- [x] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2  (6e39d5a, 5b5c4f9; verify on device)
+      timebase list popup. §6.1  (ff29cd3, docs/scope-scale-ux.md; verify on device)
+      UF-08 (one-tap cursors) and UF-10 (V/div +/- as zoom): done in c13d61a (the UI punch-list remainder).
+- [x] UF-13 (P2) Save scope record as CSV to disk; software pulse-width/runt trigger. §6.2  (4146aae, 20fc636; verify on device)
       MF Settings "Save CSV": stopped scope only (stock "Please stop sample"); the whole stored record
       (<= 26624 rows, ~690 KB, ~10 s) as SCOPnnn.CSV through the screenshot writer (fixed 26-byte rows,
       header timebase / V/div / probe / coupling / trigger / sample rate); the scope is held stopped
@@ -595,33 +595,33 @@ Code work (in this order):
       between records misses events, width resolution 1 sample, slow timebases wait for a full
       26624-sample record (10.6 s at 1 s/div).
 - [x] UF-23 (P2) PT100/PT1000/NTC temperature via the ohm path. §3  (device-verified on the calibrator, 19:10 run)
-- [x] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5  (9622648; verify on device)
+- [x] UF-25/26/27/28/35 (P2) DMM small fixes: extra-digit option, 4-20mA% label, store-while-HOLD, volume semantics, MIN/MAX reset. §4-§5  (8d75505; verify on device)
       UF-25: no option (owner: the extra digit is always on). UF-26: DC mA loop % captioned "4-20mA", hidden
-      outside -25..125 % (OL); 6ff0b42 hides it below 3.6 mA (device 94de654: DC mA 60 mA range, A jack open,
+      outside -25..125 % (OL); 11c4f9b hides it below 3.6 mA (device 92fb8fa: DC mA 60 mA range, A jack open,
       0.001 mA: no %, PASS; the % above 3.6 mA needs current through A). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
       renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
       volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
       UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
-- [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (cc90ff1; verify on device)
+- [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (7b58f84; verify on device)
       Settings 2/2 -> Help: 4 list pages (gestures, side keys, multimeter taps, limits; ui::HELP); tap = next page,
       title bar / MENU = back. No input voltage ratings (none sourced in the repo).
 - [ ] UF-24/30/31/36/38/41 (P2) §3-§10, worked 2026-10-21 (decisions in docs/user-feedback.md):
   - [ ] UF-24 tempco compensation: parked, documented (needs FR-36 + a per-unit two-temperature
         characterisation; the only always-on sensor is the MCU die, biased by the rails, UF-02).
-  - [x] UF-30 fast bargraph: widget src/bargraph.rs + tools/bargraph-test (dea1a41); wired 2026-10-21
+  - [x] UF-30 fast bargraph: widget src/bargraph.rs + tools/bargraph-test (b6a4d10); wired 2026-10-21
         (see the DMM batch below). Rate = the AD1 conversion rate (10/s FAST /
         moving, 2.5/s steady); >= 40/s needs OSR 0x13 + a firmware average for the readout.
   - [x] UF-31 stylus: no sensitivity register (stock writes only D1 01 / D2 04 / D1 09); documented.
         Possible firmware cause found: touch.rs Debounce drops a touch whose only pressed frame is
         followed by a release frame. Device check first: DBG:TOUCH? log of stylus taps.
   - [x] UF-36 BT on every view: by design (bt.poll every 5 ms in all views, DMM rail kept on while
-        linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (b1f1847). Not during an FR-38
-        logger session (BT frames are not served then, by design).  Device 3d19ea1 (docs/device-check-2026-10-21.md "Bluetooth (3d19ea1)"): 400 / 400
+        linked); check tool `tools/dm40scpi.py --bt btpoll -p 50` (a907213). Not during an FR-38
+        logger session (BT frames are not served then, by design).  Device 8b9cf79 (docs/device-check-2026-10-21.md "Bluetooth (8b9cf79)"): 400 / 400
         replies at 50 ms on DMM, DMM+Scope, Scope, Gen (median 37 ms). Caveat: a link opened while on Scope /
         Gen does not wake the DMM (stale value; see the open item below).
-  - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (b1f1847).
-        Device 3d19ea1: --bt info / read -n 20 / btpoll OK.
-  - [x] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (1b17aee), wired (75bb2c7): the
+  - [x] UF-38 tools/dm40scpi.py: info / conf / read / log CSV / scpi / btpoll, USBTMC or --bt (a907213).
+        Device 8b9cf79: --bt info / read -n 20 / btpoll OK.
+  - [x] UF-41 sin(x)/x: src/sinc.rs (Lanczos-3) + tools/sinc-test (e433aad), wired (086f734): the
         "fewer samples than columns" branch (100..500 ns/div). Emulator: frame ~5.2 ms avg at 100 ns/div
         vs ~3.3 ms at 1 us/div (linear path). (verify on device)
 - Community-confirmed existing items (priority signal only): native boot/recovery; FR-26 temperature offset (raise to P1);
@@ -631,32 +631,32 @@ Code work (in this order):
 ## User decisions 2026-10-13 (on community feedback)
 - [x] Temperature: user offset (cold-junction / reading), plus sensors PT100, PT1000 and common NTCs
       (10k B3950, 10k B3435, 100k, ...). (device-verified on the calibrator, 19:10 run)
-- [x] Gestures: 3-finger swipe = screenshot to the SPI disk, 2-finger swipe = power off (as stock).  (c25749e; verify on device)
+- [x] Gestures: 3-finger swipe = screenshot to the SPI disk, 2-finger swipe = power off (as stock).  (67fa077; verify on device)
 - [x] AC+DC on ALL models (DM40A hardware supports it).  (verify on device)
 - [x] Always 60000 counts (DM40C behaviour) regardless of the model byte; IDN/Device keep real model,
       + physical power-key short/long/double press as in stock; PD6 pressed level.  (verify on device)
 - [x] Scope UI redesign (docs/scope-ui-plan.md): superseded by the stock scope port
-      (docs/stock-scope-port-plan.md, de2ef9d..a2ac91b, S1-S9) + opendm40 extras (c89ad92, 831678f).
+      (docs/stock-scope-port-plan.md, 6be1399..29555fe, S1-S9) + opendm40 extras (3d094a4, ff29cd3).
 - [x] Calibration (0x080C0000) + boot data (0x080A4000) + UID copied to the SPI disk at every boot
       (only when missing/changed) so they're reachable over USB.  (device-verified: CALBK WRITTEN in T3)
 - [x] Analog rails: default OFF (stock-like alternation per page); both on automatically in the
       DMM+Scope combined view; SCPI command to force both on (e.g. SYST:RAIL BOTH|AUTO). Consumption/
       heating vs stock: UF-02 / UF-19.  (verify on device)
-- [x] +1 display digit (at least DC voltage), smaller font after the main digits, always on.  (83d6781; verify on device)
-- [x] Milliohm resolution on the lowest resistance range (units of mΩ).  (83d6781; device-verified: 10.117 Ohm, 19:10 run)
+- [x] +1 display digit (at least DC voltage), smaller font after the main digits, always on.  (cfeac1f; verify on device)
+- [x] Milliohm resolution on the lowest resistance range (units of mΩ).  (cfeac1f; device-verified: 10.117 Ohm, 19:10 run)
 
 - [x] AutoHold idle threshold absolute on small ranges (meter.rs ah_cfg): DC V/mV idle below max(300 counts,
       5 mV) (60 mV range: 300 counts = 0.3 mV < the 0.487 mV open-lead residual, stock/re/docs/history/acdc-stock-vs-opendm40.md 6c),
-      DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.  (be3e041; verify on device)
+      DC A below max(300 counts, 1 uA). Device: open leads on DC mV manual 60 mV / uA never capture.  (2fcf286; verify on device)
 
 - [x] BT phone-app function change (cmd 06) goes through the app's function-change path (App::host_func_changed
-      = func_changed: meter reset, chart restart, function bar / static view redrawn), like touch and SCPI.  (aebcb83; verify on device)
+      = func_changed: meter reset, chart restart, function bar / static view redrawn), like touch and SCPI.  (ce2f422; verify on device)
 
 - [x] Temperature sensor type shown large (owner): TEXT22 chip with the full sensor name in the DMM page's aux2
-      slot and as the meter strip's second sub row.  (edee333; verify on device)
+      slot and as the meter strip's second sub row.  (671006d; verify on device)
 
 - [x] Temperature offset slider (owner: +/- buttons "absolutely unintuitive"): ui::Slider, -20..+20 C in 0.1
-      steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (80efc84; verify on device)
+      steps, drag / touch-down sets, -/+ end buttons step 0.1, "Offset 0" resets.  (3287199; verify on device)
 
 ## Backlog (user ideas)
 - [ ] Inductance (owner 2026-10-24). Options, none started:
@@ -677,7 +677,7 @@ Code work (in this order):
       refilled every 3 min, deferred while the disk is held / an AD1 session / the AD2 stream; flushed in
       power_off. Boot: backup SRAM unless the file is newer by seq (persist::seq), else the newest valid
       slot, else defaults. DBG:BOOT? SETTINGS / SETFILE / SAVE. fatren-test "setfile", emu/settingstest.py
-      (power cycle = two runs, the disk carried over). Device 4284642 (2026-10-24): first boot SETFILE CREATED seeded
+      (power cycle = two runs, the disk carried over). Device 25b6ec3 (2026-10-24): first boot SETFILE CREATED seeded
       from BKP; SYST:BEEP:VOL 40 -> SAVE OK seq 2; key power-off + on: POR+BOR, SETTINGS,FILE,1,2, volume 40. Open: after a power-off the
       DMM function starts on DC V (persist::same_session needs BKP_LAST, which is gone).
 - [ ] Longer scope record (owner 2026-10-24: "worth doing, not now"): 26 624 samples today vs the stock
@@ -696,8 +696,8 @@ Code work (in this order):
       opendm40 drops a Bulk-OUT message left incomplete for 1 s (usbtmc::expire_partial, checked every
       main-loop pass and when the next packet arrives).
       emu/usbtmc_stress.py cases `session` (dm40dbg.py's own cmd_upload over USB/IP after a stale error
-      and a cut message; failed with the -113 before) and `partial` (hung before). Device 940e8aa
-      (device-check doc "940e8aa" 4): a real cut message (raw USBTMC_IOCTL_WRITE, 52 of 150 bytes) then a
+      and a cut message; failed with the -113 before) and `partial` (hung before). Device 2f56ff9
+      (device-check doc "2f56ff9" 4): a real cut message (raw USBTMC_IOCTL_WRITE, 52 of 150 bytes) then a
       new client 1.5 s later 10 / 10 clean; 0.3 s later the query is eaten (5 s timeout, recovers alone, as
       designed); Link.fresh() reports the stale -113 6 / 6. The upload / reload.sh retry not run on the device.
 - [x] Auto power-off during a remote session (device 2026-10-24: the meter switched off during a firmware
@@ -705,8 +705,8 @@ Code work (in this order):
       now USB disk READ / WRITE commands (msc::HOST_IO) as activity; the idle dim counts touches and keys
       only (a dimmed screen costs a remote session nothing). DBG:IDLE <ms> / DBG:IDLE? (test power-off
       time, idle times); emu/idletest.py (usb, bt, msc keep it on for 40 s past a 20 s power-off time,
-      off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Device 940e8aa
-      (device-check doc "940e8aa" 3): DBG:IDLE 20000 + a disk read every 4 s, no USBTMC: on 68 s past the
+      off with no traffic; msc failed without the hook). Manual "Power, battery and sleep". Device 2f56ff9
+      (device-check doc "2f56ff9" 3): DBG:IDLE 20000 + a disk read every 4 s, no USBTMC: on 68 s past the
       limit; with no traffic off 20.5 s after DBG:IDLE 20000.
       After the power-on: DBG:IDLE? 1800000, settings from the file (seq 71), volume 50, alarm LOUD.
 - [x] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24, 2026-10-25: the range's
@@ -721,12 +721,12 @@ Code work (in this order):
       +-96.7 % of 6 V / 60 mA inside the drawn rows). docs/dmm-input-scope-feasibility.md 10.1.
       Open: 0..range (a unipolar signal over the 8 divisions) is a position drag, not a step; the trace rows
       clamp at 0..278 (stock), so the outer ~1-2 % of +-full sits on the frame edge.
-      **Device 3e6abe7 (2026-10-25): PASS.** DC V 6 V range, 1.0 V from the calibrator, MF -> Wave: 1.5 V/div;
+      **Device 98116d2 (2026-10-25): PASS.** DC V 6 V range, 1.0 V from the calibrator, MF -> Wave: 1.5 V/div;
       + 2, + 5 (the 60 V range), - 2, 1.5, 1, 0.5 (6 V), - 0.2 (the 600 mV range), + 0.5 (6 V); AUTO key 1.5 V/div
       on 6 V. The trace at 1.0 V (2/3 div above the centre at 1.5 V/div), Vrms 1.00 V (screenshot).
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
-      tools/dm40bt_scpi.py.  (4f59485, eb3439b; device 3d19ea1: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
+      tools/dm40bt_scpi.py.  (74ed868, d06b423; device 8b9cf79: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
       LOG:DATA? drains ~918 records/s = ~11 KB/s; WAV:DATA? throughput not measured)
 - [x] Compound SCPI messages (`POW:PHAS:CAL RES;:SYST:ERR?` hung the USBTMC read): Scpi::handle kept only
       the last command the main loop runs (Instr / POW / LOG / MMEM / DBG / READ?) and main.rs cleared the
@@ -738,7 +738,7 @@ Code work (in this order):
       others); joined reply <= 512 B ("Out of memory"). tools/scpi-msg-test, usbtmc_stress.py compound.
       Open (pre-existing): headers after ';' are absolute (no IEEE 488.2 relative-path rule); a ';' inside
       a quoted argument splits; a BT line refused as DBG:* that holds a query gets no response.
-      Device 3d19ea1 over BT and USB: `POW:PHAS:CAL RES;:SYST:ERR?;*OPC?` -> `-100,"Settings conflict; RES:
+      Device 8b9cf79 over BT and USB: `POW:PHAS:CAL RES;:SYST:ERR?;*OPC?` -> `-100,"Settings conflict; RES:
       ..."; 1` in one line, `*IDN?;SYST:ERR?` -> `...;0,"No error"`.
 - [x] Auto AC/DC for V and I (as UNI-T UT197 "Auto AC/DC Voltage"): an AUTO coupling next to DC / AC /
       AC+DC that picks DC or AC by itself from the signal and shows which one it chose. Decisions
@@ -751,7 +751,7 @@ Code work (in this order):
       - switch time: 2 evaluations in a row (a probe moved between two DC-dominant sources must not flash
         AC for the one cycle that mixes old and new parts): the switch shows 2..6 s after the change
         (emulator: 2.2..4.5 s); the first evaluation after entry decides at once (~2 s, as AC+DC's first
-        reading). Changed after the device check of 2cc47ef (acdc-approaches.md 10.9 item 2): DC until the
+        reading). Changed after the device check of ac1e852 (acdc-approaches.md 10.9 item 2): DC until the
         first decision (AC only with no DC part), which waits for a settled AC part; a tie within 1 % is DC.
       - display: the V / A button = the setting: the AC/DC mark `~/⎓` (our BTN_GLYPH 0x09; with the
         part's glyph a tap into AUTO looked like no switch, owner 2026-10-22); the glyph above the unit =
@@ -764,11 +764,11 @@ Code work (in this order):
         AUTO,DC / AUTO,AC; CONF / MEAS / FUNC VOLT:AUTO / CURR:AUTO, FUNC? "VOLT:AUTO" (codes 19 / 20).
         BT: the mode byte reports the part shown (the app echoing it keeps AUTO). LOG / wave view refuse it
         as AC+DC.
-      Device 1e39149 (V side; device-check doc): taps, glyph, range row, DC 5 V, SCPI, reboot PASS; square
+      Device 33b44bd (V side; device-check doc): taps, glyph, range row, DC 5 V, SCPI, reboot PASS; square
       (AC 0.999 x DC) -> 1 V DC switched in 5.1 / 5.4 s. Fixed: REL dropped by a switch kept the range hold
       (MANU). Open: entering AUTO on a near tie picks AC (first AC results +7 % high on the device, the doc
       says -1 %); HOLD across a switch redraws the bargraph scale under the held value.
-      Device 94de654: the range is released (60 V -> 6 V, 4 decimals) but the status bar still said MANU
+      Device 92fb8fa: the range is released (60 V -> 6 V, 4 decimals) but the status bar still said MANU
       until the next static redraw: the status-bar cache key could not tell MANU from AUTO+ (both have
       auto_plus). Fixed (ui.rs DmmView: the key holds r.auto).
       - persistence: the function code (19 / 20) in p[2], no layout change; V / A keep no coupling of
@@ -784,25 +784,25 @@ Code work (in this order):
         what drops across the shunt), OL by the total; the aux burden readout is not shown in AUTO (aux
         rows = the parts, as AC+DC). burdentest AC+DC / AUTO phases (200 mA DC + 100 mA AC).
 
-## Found in the screenshot session 2026-10-13 (native a910941)
+## Found in the screenshot session 2026-10-13 (native 439b251)
 - [x] READ?/MEAS? take ~8 s (wait for a full averaging window that never fills -> 20 conversions).
-      (cbeda34; device-verified: READ? ~0.5 s, 19:10 run)
+      (de57d3d; device-verified: READ? ~0.5 s, 19:10 run)
 - [x] USBTMC wedges after a timed-out query (pending waits expire, new commands cancel them, class
-      CLEAR/ABORT resync).  (cbeda34; device-verified: survives a libusb timeout, 19:10 run)
-- [x] SCPI function change (CONF/MEAS) does not redraw like a touch.  (cbeda34; device-verified, 19:10 run)
-- [x] AC+DC sub-readings line: AC tilde / DC sign placement.  (cabebcd; device-verified, 19:10 run)
-- [x] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names.  (cabebcd; device-verified, 19:10 run)
+      CLEAR/ABORT resync).  (de57d3d; device-verified: survives a libusb timeout, 19:10 run)
+- [x] SCPI function change (CONF/MEAS) does not redraw like a touch.  (de57d3d; device-verified, 19:10 run)
+- [x] AC+DC sub-readings line: AC tilde / DC sign placement.  (90b615d; device-verified, 19:10 run)
+- [x] Temperature sensor label in the status bar: glyphs overlap for PT100/PT1000/NTC names.  (90b615d; device-verified, 19:10 run)
 - [x] AC+DC current reads ~150 uA AC with nothing connected: stock overload guard ported, reads 0 on
       device (per owner; commit not identified). The AC V decay half moved to the crosstalk item.
 - [x] 3-finger screenshot blocks the main loop ~8 s (BMP write to SPI flash); USB and DMM stall.
       Now incremental (screenshot.rs state machine, <= ~3 ms per main-loop pass; frame captured
       run-length coded into 96 KiB SRAM, screen frozen only while captured); SPI1 /16 -> /4 (12.5 MHz).
-      (532e70b, e8a6a49; verify: loop max in DBG:DIAG? during a shot, SCPI READ? keeps answering, S00x.BMP correct)
-- [x] Screen frozen ~4-5 s on every shot since the shot streams from the panel (CAP dropped, 45faceb):
+      (d154f60, f6e30e9; verify: loop max in DBG:DIAG? during a shot, SCPI READ? keeps answering, S00x.BMP correct)
+- [x] Screen frozen ~4-5 s on every shot since the shot streams from the panel (CAP dropped, 9890cd0):
       the next shot's first-fit free clusters erased in idle time, nothing reserved / linked
       (screenshot.rs "idle-time preparation", docs/ram-budget.md). Emulator (W25Q128 timing):
-      frozen 5.0 s -> 1.4 s, 0 data blocks erased. (1f42f09; device check below)
-- [x] Device: screenshot preparation (1f42f09). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
+      frozen 5.0 s -> 1.4 s, 0 data blocks erased. (8d1d8d4; device check below)
+- [x] Device: screenshot preparation (8d1d8d4). DBG:FLASH? fields 4.. = frozen_ms, total_ms,
       slices_frozen, blocks_erased, prep state (2 ready), clusters ready, prep erases.
       1. Boot, wait ~15 s: prep state 2, 76 ready. A shot of the DMM page and of AC+DC: frozen_ms
          (expect ~1.1-1.6 s), blocks_erased 0; BMP equals `dm40dbg.py shot`; ~5-10 s later state 2 again.
@@ -813,13 +813,13 @@ Code work (in this order):
       5. CSV recording on: after each 60 s commit prep goes 1 -> 2; fast-log session: prep stays put
          during it; "PC can edit" + a DM40*.BIN copied: prep pauses, the file installs.
       6. DBG:DIAG? loop max while prep works (state 1): no worse than idle + ~1 ms.
-      Device b7d9017 (2026-10-23, device-check doc "b7d9017"): 1 PASS (frozen_ms 1357 DC V / 1362-1383 AC+DC,
+      Device 540e056 (2026-10-23, device-check doc "540e056"): 1 PASS (frozen_ms 1357 DC V / 1362-1383 AC+DC,
       0 erased, BMP = the panel at the gesture 0 px, touch back by 1.54 s, prep 2 / 76 again ~8 s later);
       2 PASS (back-to-back on blank flash 2332 ms, 0 erased; onto dirty clusters 1954 ms with 14 erased, ~42 ms
       each); 4 PASS (free 0: state 2 / 0 ready, "Disk full", no BMP); 5 CSV commits PASS (0 -> 1 -> 2 in
       2.3-2.8 s), fast-log PASS (state 0 all session, resumes 2 s after); 6 PASS (state 1 with 76 erases: loop
-      max 13.9 ms vs idle 12.0 on the AC+DC page). Step 3 (battery pull) PASS on 940e8aa (device-check "Screenshot preparation: power cut"). 5's "PC can edit" + DM40*.BIN install PASS on 7c04b03 (2026-10-24: file copied after a hub-port re-plug, OK on the meter, back in 62 s with a SW reset, the file deleted by the loader, settings kept, MMEM prefix check live).
-      Device 940e8aa (2026-10-24, docs/device-check-2026-10-21.md "940e8aa: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
+      max 13.9 ms vs idle 12.0 on the AC+DC page). Step 3 (battery pull) PASS on 2f56ff9 (device-check "Screenshot preparation: power cut"). 5's "PC can edit" + DM40*.BIN install PASS on 1a11eda (2026-10-24: file copied after a hub-port re-plug, OK on the meter, back in 62 s with a SW reset, the file deleted by the loader, settings kept, MMEM prefix check live).
+      Device 2f56ff9 (2026-10-24, docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal"): 1 PASS (frozen_ms 1304 DC V /
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
       shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
@@ -833,7 +833,7 @@ Code work (in this order):
       3. The scope FFT through a whole fast-log session (Record page fast logger or LOG:DEST DISK): the
          spectrum holds, then resumes after the session; no garbage spectrum.
 - [x] Data logger (LOG:STAT ON) has no on-screen indicator: "DATA LOGGING" panel (dialog::log_panel,
-      rate + sample count, 1 s refresh), view repainted on stop.  (532e70b; verify on device)
+      rate + sample count, 1 s refresh), view repainted on stop.  (d154f60; verify on device)
 - [ ] Browser client (owner 2026-10-22: later, not now; 2026-10-24: the old stock-protocol web/ client was
       removed, the new one replaces it). One local HTML page (firmware/tools/web/dm40.html) that talks SCPI to
       opendm40 over BOTH links and covers ALL functions: big DMM reading with every function / range /
@@ -851,7 +851,7 @@ Code work (in this order):
 - [ ] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
       'Loading'"). Today the screen stays dark or frozen while pre_main does the SPI-disk work before
       main's LCD init: the FAT dir check, calbackup, `vdisk::mirror_boot` (+0.22 s every boot, +1..9 s on
-      the first boot after a new image or calibration change; device bb15d39 MIR? 5.16-5.3 s) and the
+      the first boot after a new image or calibration change; device c785807 MIR? 5.16-5.3 s) and the
       boot refresh. In the emulator main's clock starts 3.56 s after reset (harness-sync).
       Plan:
       - Bring up the LCD and backlight at the very start of pre_main.
@@ -898,7 +898,7 @@ Code work (in this order):
       ../../ngscopeclient-dm40 (scopehal-apps/lib branch alientek-dm40, README.md there); ngscopeclient
       showed the emulator's 1 kHz sine for 10 min (2557 records), test/dm40cli passes over lan and uart.
       Emulator finding: with the comparator trigger on, the scope sometimes never completes a frame after a
-      start / restart (TRIG:STAT? WAIT for good; also on 83c28a0); wavtest and run-emulator.sh use
+      start / restart (TRIG:STAT? WAIT for good; also on 5af9a5c); wavtest and run-emulator.sh use
       DBG:HWTRIG:ENABLE 0. Model or firmware? Check on the device (retest 3).
       Device retest: (1) wavtest's sequence by hand with tools/dm40scpi.py or pyvisa: WAV:POIN MAX + WAV:FORM
       WORD after DIG -> 53 256-byte block, Linux usbtmc read in one call, time it; DBG:DIAG? loop max during the
@@ -913,7 +913,7 @@ Code work (in this order):
       DMM, e.g. DC V on a 50 Hz signal): STOP, WAV:POIN MAX -> the record in V at the jacks (yinc / yorig
       from the DMM scale), compare with the screen; (9) the 50 MS/s rates (100 ns .. 50 us/div share the
       50 MS/s record) on the generator's 1 MHz square.
-      Device b7d9017 (2026-10-23, device-check doc "b7d9017"): (1) PASS: #553248 + 53 248 B in one read() call,
+      Device 540e056 (2026-10-23, device-check doc "540e056"): (1) PASS: #553248 + 53 248 B in one read() call,
       66 ms, DIG -> STOP 0.21 s; (2) PASS "#10" + Settings conflict; RUN during a read not isolated (needs a
       hand on the key: DBG:KEY is a new command and ends the stream); (3) blocked, no loopback; (4) PASS
       (codes +59 / -64 per 0.5 V, volts unchanged within the open input's drift); (5) **FAIL, host side**: the
@@ -923,7 +923,7 @@ Code work (in this order):
       (7) PASS partly: after a killed mid-read the next command answers at once, no USBTMC clear; the 2 s
       stall timeout itself not isolated; (8) PASS on 1 V DC only (record 1.0007 V = screen; AC not run: the
       calibrator could not be driven); (9) blocked.
-- [x] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device b7d9017: opendm40 ends USBTMC
+- [x] ngscopeclient-dm40 over USBTMC hangs on any 1-byte reply (OUTP? "0"), device 540e056: opendm40 ends USBTMC
       replies without '\n' (Bluetooth adds one); scopehal's SCPITMCTransport::ReadReply reads 1 byte at a time
       until '\n' and ReadRawData's inner loop reads again when it got exactly len bytes. Done (tmcnl-fix,
       "opendm40 USBTMC: every reply ends with '\n'"): usbtmc.rs `terminate` ends every reply with '\n' (text,
@@ -931,18 +931,18 @@ Code work (in this order):
       already ends in '\n' keeps one). The scopehal loop is left as is (with the newline no reply has
       exactly the asked length). Emulator on vhci_hcd (the real Linux usbtmc driver): OUTP? -> "0\n", a
       52 000-byte WAV:DATA? in one read() ending in '\n'; ngscopeclient-dm40 test/dm40cli usbtmc PASS (3
-      records, 1 kHz, 0.90 Vpp) and the GUI shows the sine (TRIGGERED); the b7d9017 image there hangs as on
+      records, 1 kHz, 0.90 Vpp) and the GUI shows the sine (TRIGGERED); the 540e056 image there hangs as on
       the device (STOPPED, generator 0 mHz). dm40scpi info / read / get (307 kB BMP over MMEM:DATA?) / log
       (AD1, AD2 4800: 0 lost), dm40dbg ping / boot / genuine / shot, sigrok over tcp-raw and usbtmc, and
       DM40_USBTMC=emu all fine; emu scpi-tcp sends a block's own '\n' (no second one), wavtest checks it.
-      Emulator only, also with b7d9017: DBG:UPLOAD:END? takes ~7 s there (usbip_client upload: 45 s, OK),
+      Emulator only, also with 540e056: DBG:UPLOAD:END? takes ~7 s there (usbip_client upload: 45 s, OK),
       over the kernel driver it hits the 5 s usbtmc timeout and the link then reads empty until re-attach.
       Device retest: ngscopeclient-dm40 /dev/usbtmc2 Run (trace, generator fields), test/dm40cli usbtmc
       /dev/usbtmc2; reload.sh --image (DBG:UPLOAD / BOOT? / UPDATE); dm40scpi read / get / log; sigrok
       --show / -c range=; pyvisa USB query('OUTP?'). Also open: the driver's two threads interleave
       queries on one transport; the -L log is empty when ngscopeclient is killed; DM40Oscilloscope.cpp's
       comment "nothing follows it on usbtmc" is now stale (the read takes the '\n' either way).
-      Device 9292ec2 (2026-10-23, device-check doc "9292ec2" B1 / B2): PASS. ngscopeclient-dm40 --headless
+      Device decaf60 (2026-10-23, device-check doc "decaf60" B1 / B2): PASS. ngscopeclient-dm40 --headless
       on /dev/usbtmc2: TRIGGERED, flat trace (open input), generator fields filled (Square 2 MHz 50 % 3 V
       1.5 V, GEN OFF); test/dm40cli usbtmc: all protocol checks ok, 5 records in 0.84 s, the 3 signal
       checks FAIL as expected (no loopback: flat 0.8577 V); dm40cli sets the generator to sine 1 kHz 1 Vpp
@@ -952,16 +952,16 @@ Code work (in this order):
 - [ ] sigrok/SmuView (merged from three items): libsigrok scpi-dmm DM40 profile exists as
       ../libsigrok-dm40/0001-scpi-dmm-add-support-for-Alientek-DM40A-B-C-dm40-fw-.patch (command set
       like the 34401A: CONF:<f>, READ?, FUNC?; 3 s delay after RES/CAP/TEMP/FREQ/CONT/DIOD). DC V works
-      on the device via usbtmc/1209.0001; RES was blocked by H1 (fixed in 530c2e1). 2026-10-21: every
+      on the device via usbtmc/1209.0001; RES was blocked by H1 (fixed in 60605d2). 2026-10-21: every
       function passes with sigrok-cli in the emulator (emu/usbip_client.py scpi-tcp, tcp-raw; replies
       <= 0.86 s), AC+DC now also waits 3 s (first reading 1.4-1.6 s); patch regenerated as one squashed
-      commit (branch alientek-dm40-upstream). Done in opendm40 (233b8bb): CONF? (Agilent-style reply),
+      commit (branch alientek-dm40-upstream). Done in opendm40 (19c3592): CONF? (Agilent-style reply),
       INIT/ABORT no-ops, SYST:IDN:EMUL OFF|34401A (persisted, default OFF) for unpatched
       libsigrok >= 0.5.2 / SmuView (verified with the distro libsigrok 0.5.2 in the emulator).
       Remaining: SmuView on the device (needs a SmuView built against libsigrok-dm40/install; the
       stock AppImage only with SYST:IDN:EMUL 34401A), send upstream (owner's approval).
       2026-10-22 function change on the meter mid-acquisition (was open): the 1 s stop itself was
-      already gone with 00207eb (READ? capped at 0.85 s after a change not made by this host); left
+      already gone with 6c80e06 (READ? capped at 0.85 s after a change not made by this host); left
       were the samples around it. Chosen fix = both sides, since libsigrok's USBTMC Bulk-IN timeout
       is a hard 1000 ms in the transport (no profile setting reaches it) and only the meter knows a
       reading is missing: opendm40 answers "no reading" with +9.91E37 (SCPI NaN) instead of the overload
@@ -983,7 +983,7 @@ Code work (in this order):
       wiring dialog, V) ran 1583 samples with no stop and no sample under the wrong function (29 NaN
       skipped, max READ? 0.851 s); a change injected between FUNC? and READ? (DC V -> AC V, Ohm -> DC
       V, DC V -> temp) gives NaN, then the new function.
-      Device (1e39149 = 7e059f2 + later commits, USBTMC usbtmc/3.29, libsigrok 48aecd35, 2026-10-22;
+      Device (33b44bd = eb39672 + later commits, USBTMC usbtmc/3.29, libsigrok 48aecd35, 2026-10-22;
       calibrator 1 V DC on V/COM, A jack open): --show lists voltage / current without coupling flag
       (AUTO) and no power; each of the 14 selectable functions --samples 10 exit 0, no "Timed out" /
       "transfer error" (READ? max 0.40 s DC V / ohm, 0.85 s cap / temp in OL); AUTO flagged DC on
@@ -1009,7 +1009,7 @@ Code work (in this order):
       the rate chip FAST / MED and the +1 digit; SmuView Range / Digits combos follow; AC+DC / AUTO
       coupling with a manual V range (emulator: an AC-part transient of ~2-5 s after the change, the
       MF page path too); CONF? on 1000 V / 10 A.
-      Device b7d9017 (2026-10-23, device-check doc "b7d9017"): --show PASS (V / A / ohm lists, cap / freq Auto,
+      Device 540e056 (2026-10-23, device-check doc "540e056"): --show PASS (V / A / ohm lists, cap / freq Auto,
       cont / temp none); range= each in DC V / A / ohm PASS (6V 999.1 mV, 60V 998 mV, 600V 1.00 V, 1000V
       1.0 V, 600mV OL); range page highlight + MANU PASS; Auto keeps AUTO+ PASS; digits 5 / 6 -> FAST 10/s /
       MED 2.5/s + extra digit PASS (SLOW reads as 6); CONF? 1000 V / 10 A PASS; the AC+DC transient is real
@@ -1021,9 +1021,9 @@ Code work (in this order):
       so --show / --get / --set never closed the device (the transport's close re-attaches usbtmc).
       Emulator on vhci: /dev/usbtmcN stays after --show / --get / --samples / --set (gone with the old
       build). Device retest: the node stays after each sigrok-cli run (no reattach.py).
-      Device 9292ec2 (device-check doc "9292ec2" B3): PASS. --show and six -c range= runs (6V x3, 60V x2,
+      Device decaf60 (device-check doc "decaf60" B3): PASS. --show and six -c range= runs (6V x3, 60V x2,
       Auto) with -d scpi-dmm:conn=usbtmc/3.71: rc 0, /dev/usbtmc2 still there after every run.
-- [x] AC+DC (and AUTO) with a manual V range, device b7d9017 (1 V DC, method A): the AC part reads 0.35 V
+- [x] AC+DC (and AUTO) with a manual V range, device 540e056 (1 V DC, method A): the AC part reads 0.35 V
       (1.06 V via the MF page) for ~2-4 s after 6 -> 60 V, then a tail 18 -> 1 mV over ~10 s; 0.15 V for ~2 s
       after 60 -> 6 V. AC+DC READ? +6 % at 2.2 s, +0.9 % to 3.3 s. AUTO stays DC. Done (tmcnl-fix, dmm.rs
       ACS_*): a range / unit change in AC+DC / AUTO (manual, MF page, SCPI, autorange; not the entry or a
@@ -1033,12 +1033,12 @@ Code work (in this order):
       shows its part with the AC part held and does not re-decide. Emulator (1 V DC; its node gave a 5.3 V
       AC part, readings up to 5.36 V, AUTO even flipped to AC): readings resume ~4 s after 6 -> 60 V and ~2 s
       after 60 -> 6 V, all within 0.1 %, AUTO stays DC; acdcmethtest A: DC 12 V + 0.5 V (6 -> 60 V
-      autorange) settles in 4.2 s (b7d9017: 4.7 s). Device retest (1 V DC, method A): VOLT:ACDC:RANG 60 / 6 and the MF
+      autorange) settles in 4.2 s (540e056: 4.7 s). Device retest (1 V DC, method A): VOLT:ACDC:RANG 60 / 6 and the MF
       page items 6 <-> 60 V: no READ? off by > 0.1 %, the gap until the first reading (expect ~4-6 s,
       capped at 6 s), the AC part in DBG:ACDC:STAT? after it (the 60 V tail: ACS_STEP / ACS_FLOOR may need
       tuning; a device transient falling < 1 % per result would be let through early); AUTO coupling the same with the DC part shown throughout; a 40 Hz square on AC+DC: a range
       change gives the right AC part after the gap; autorange in AC+DC across 6 V (no hunting).
-      Device 9292ec2 (device-check doc "9292ec2" B5): 1 V DC, 30 AC+DC changes with READ? polling (SCPI /
+      Device decaf60 (device-check doc "decaf60" B5): 1 V DC, 30 AC+DC changes with READ? polling (SCPI /
       MF page, 6 <-> 60 V) + 16 with DBG:ACDC:STAT? polling: no fresh reading off by > 0.1 %, except 1 (MF 6 -> 60 V: DC part 0.526 V, item below); gap to the
       first fresh reading 3.0-4.3 s (5.7 s once); AC part 15-27 mV at the first 60 V reading, 1-2.5 mV
       after 9-12 s; 2-7 mV on 6 V. AUTO coupling (8 changes): AUTO,DC throughout, readings on at once,
@@ -1049,7 +1049,7 @@ Code work (in this order):
       READ? returns the pre-change reading, not NaN (item below).
 - [x] DC V: setting the present range again (SCPI <f>:RANG <same>, sigrok range=, or the MF page tap on the
       highlighted item) gives 1-2 readings at 25-51 % of the input at 0.46 / 0.66 s, on about every other
-      repeat (device b7d9017, 1 V DC: 0.257, 0.509, 0.375, 0.403 V); a real range change does not. The chart and
+      repeat (device 540e056, 1 V DC: 0.257, 0.509, 0.375, 0.403 V); a real range change does not. The chart and
       MIN record it. Dmm::set rewrites the config with a 450 ms deadline but resets nothing when the mode is
       unchanged. Done (tmcnl-fix): set_range skips the rewrite when the chip already runs that mode (AC+DC:
       either phase) on that range (Dmm::same_row), it only makes the range manual; also V / A / ohm. The
@@ -1057,23 +1057,23 @@ Code work (in this order):
       VOLT:RANG 6 / 60 x10 each (manual and from AUTO+), sigrok range= the present one, the highlighted MF
       item tapped: no READ? / chart MIN below 0.99 V; a real change 6 <-> 60 <-> 600 still fine; the one
       0.781 V after VOLT:RANG:AUTO ON from 600 V (real change) not addressed: watch for it.
-      Device 9292ec2 (device-check doc "9292ec2" B4): PASS for the same-range fix. VOLT:RANG 6 / 60 x10 each
+      Device decaf60 (device-check doc "decaf60" B4): PASS for the same-range fix. VOLT:RANG 6 / 60 x10 each
       from manual and from AUTO+ (40 sets), 13 MF taps on the highlighted item, sigrok range= the
       present range: lowest READ? / CALC:AVER:MIN? 0.99869 V on 6 V, 0.99853 V on 60 V
       (0.99789 V in the real 6 -> 60 V changes). The 0.781 V case is
       real and reproducible: item below.
 - [x] Scope touch: pinch = scale (timebase / V/div, 1-2-5 snap, value bubble), one-finger drag =
-      offset, draggable trigger level, no clash with view swipes.  (b34ffbc, 4f407d6, 317b4df, 380771c;
+      offset, draggable trigger level, no clash with view swipes.  (320bc81, 100eb48, 6c0a484, b34f89a;
       verify on device, two-finger report rate first)
 - [x] Combined DMM+scope view design: meter strip inside the scope page, 3-size type hierarchy, gesture
-      map, renderer choice (own layered compositor, no GUI library) -> docs/combined-view-design.md (ab4dca7).
-- [x] Combined view C1-C5 (7748600), later the stock page + meter strip (bb298d2); G1 drag/grab switch
-      (9904902), G3 pinch (above), R1 redraw profiling (d26b91a).  (verify on device; G4 A/B on device)
+      map, renderer choice (own layered compositor, no GUI library) -> docs/combined-view-design.md (35703a5).
+- [x] Combined view C1-C5 (abb5d5e), later the stock page + meter strip (d16a9c4); G1 drag/grab switch
+      (74b5c16), G3 pinch (above), R1 redraw profiling (5c16fa5).  (verify on device; G4 A/B on device)
 - [x] AC+DC: the AC part read ~5% low and wandered phase to phase (4.5..5.3 V on a 40 Hz 0..9.6 V
-      square): AD3 enabled before AD2 (02746fc). (device-verified: AC+DC 6.8000..6.8004 V, sd 0.3 mV;
+      square): AD3 enabled before AD2 (bfc92cc). (device-verified: AC+DC 6.8000..6.8004 V, sd 0.3 mV;
       stock/re/docs/history/acdc-stock-vs-opendm40.md §10.) FREQ 13.3 Hz in the combined view: moved to the crosstalk item.
 
-## Device run 2026-10-13 19:10, native cbeda34 (+docs) installed OK
+## Device run 2026-10-13 19:10, native de57d3d (+docs) installed OK
 - Verified: READ? ~0.5 s, MEAS:VOLT:AC? 0.5 s, MEAS:FREQ? 1.0 s; USBTMC survives a libusb timeout
   (sigrok) and answers afterwards; SCPI mode change highlights the right function button and clears
   the chart; AC+DC sub-reading signs next to their values; PT100/NTC labels legible; mOhm resolution
@@ -1086,13 +1086,13 @@ Code work (in this order):
   NTCs at room temperature need 1-100 kOhm).
 - [x] H1: MEAS:RES? (and CONF:RES + READ?) answered 9.9E37 "Data stale" (ohm settle 2.5 s, wait expired
       at 1.9 s): wait from max(now, dmm.deadline()), single READ? capped at 850 ms for sigrok.
-      (530c2e1; verify on device)
+      (60605d2; verify on device)
 - [x] Review M1 (CHECK_CLEAR_STATUS pending only while a reply is in flight), L1 (ABORT_BULK_IN marks
       cleared), L2 (Bulk-OUT left while a command is pending), L3 (toggle reset never writes EPENA/EPDIS)
-      from stock/re/docs/history/native-review-2026-10-13.md "Pre-flash review cbeda34".  (530c2e1, 5779fee; verify on device)
-- [x] AC agent questions (a) 40 Hz PWM AC part low, (b) AC+DC AC part = plain AC V, (cbeda34 wander):
-      answered by 02746fc (above). (c) A input open: the 150 uA item. (d) FREQ: the crosstalk item.
-- [x] stock/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (dda2e92)
+      from stock/re/docs/history/native-review-2026-10-13.md "Pre-flash review de57d3d".  (60605d2, 571534c; verify on device)
+- [x] AC agent questions (a) 40 Hz PWM AC part low, (b) AC+DC AC part = plain AC V, (de57d3d wander):
+      answered by bfc92cc (above). (c) A input open: the 150 uA item. (d) FREQ: the crosstalk item.
+- [x] stock/dm40fw.py is untracked but build.sh needs it (packs the native image): commit it. (544dd40)
 
 ## UI toolkit decision (user, 2026-10-13)
 - Keep our own renderer + layer compositor (docs/combined-view-design.md §7) for now. Considered:
@@ -1121,35 +1121,35 @@ Code work (in this order):
       LOG:COUNt? (missed) and the noise / offset (counts) per setting on a steady 0.5 V and a
       shorted input, to fix the real rate / noise / offset table.
 
-## Owner hands-on feedback 2026-10-13 night (build 0978e56 / experiment 1a543bd)
+## Owner hands-on feedback 2026-10-13 night (build 97fb89a / experiment e73fa96)
 - [x] Scope drag lags: while a drag is in progress freeze acquisition/redraw of new frames and only
       re-render the shift of the frame already shown (column diff); resume on release.
-      (4f407d6, c2f05ad, d26b91a; verify on device with DBG:PROF?)
+      (100eb48, b1b4cea, 5c16fa5; verify on device with DBG:PROF?)
 - [x] Scope trigger mode Auto and scope AUTO (autoset) "strange": trigger position counted twice +
-      blind 800-sample window (c4ac10a), stock AUTO-set (4f407d6), comparator trigger on by default
-      (ef43768, device-verified), AUTO period search / clip checks / mid-swing trigger (24ed1c9,
-      6f0d8bd, 5f8e67e; verify on device).
-- [x] Temperature PT100/PT1000/NTC: show the sensor type much larger.  (edee333; verify on device)
-- [x] Thermocouple/temperature offset setting: slider instead of +/- buttons.  (80efc84; verify on device)
-- [x] Buttons feel imprecise to press: touch-down confirmed on any two pressed frames (6831045), hit
-      slop on lists/keypad/menu/range + tap after an uncaptured long press (e9a14ff, d7e31bf),
+      blind 800-sample window (9e83d8a), stock AUTO-set (100eb48), comparator trigger on by default
+      (4f876cf, device-verified), AUTO period search / clip checks / mid-swing trigger (2ec4247,
+      c16b37b, 89a42d6; verify on device).
+- [x] Temperature PT100/PT1000/NTC: show the sensor type much larger.  (671006d; verify on device)
+- [x] Thermocouple/temperature offset setting: slider instead of +/- buttons.  (3287199; verify on device)
+- [x] Buttons feel imprecise to press: touch-down confirmed on any two pressed frames (7eb7365), hit
+      slop on lists/keypad/menu/range + tap after an uncaptured long press (87b6936, d7e31bf),
       DBG:TOUCH? log + tools/touch-log.py.  (verify with the owner's finger)
-- [x] DMM frequency: ~700 Hz shown as "1 kHz": Hz readout decimals.  (a94ea05; verify on device)
-- [x] Pinch-to-zoom on the scope: see "Scope touch" above (b34ffbc, 4f407d6).
+- [x] DMM frequency: ~700 Hz shown as "1 kHz": Hz readout decimals.  (af9c931; verify on device)
+- [x] Pinch-to-zoom on the scope: see "Scope touch" above (320bc81, 100eb48).
 
 ## Owner notes 2026-10-14 (../замечания.txt)
 Firmware:
 - [x] °F shown in the top-left status slot is odd; move the °C/°F choice to a global Settings option and show only the chosen unit.
-      (e732a37: Settings 2/2 Temp unit, UNIT:TEMP; verified on device f48db7d: UNIT:TEMP F/C, reading, CJ, SYST:TEMP?)
+      (26d64d4: Settings 2/2 Temp unit, UNIT:TEMP; verified on device f80524f: UNIT:TEMP F/C, reading, CJ, SYST:TEMP?)
 - [x] Temperature settings: remove the unclear "Offset 0" button (reset via the slider/long-press instead).
-      (0d13025: offset stepper + keypad, no Offset 0; verify on device)
+      (68dfc42: offset stepper + keypad, no Offset 0; verify on device)
 - [x] "NTC user" is unclear: make its R25/Beta editable right there (or remove); explain on screen.
-      (0d13025: R25 / Beta fields on the temperature page; verify on device)
+      (68dfc42: R25 / Beta fields on the temperature page; verify on device)
 - [x] Second resistance mode present in the stock is missing in opendm40 — check stock parity (dmm_v2_6.h) and add it.
-      (9931be8: stock "ON" low-current variant made visible; verify on device)
+      (5cd0d5b: stock "ON" low-current variant made visible; verify on device)
 - [x] Tap on the DMM value cycles averaging/resolution: fewer digits = faster readings; compute digits vs OSR/noise from the
       HY3131 timing + measured noise (not ad hoc); the +1 digit always drawn small at the end.
-      (d4bec3d: FAST/MED/SLOW with a counts / rate toast; verified on device f48db7d)
+      (1710c38: FAST/MED/SLOW with a counts / rate toast; verified on device f80524f)
 - [x] Power-meter mode: HY3131 can measure V and I at once (AD2/AD3 + MUL → active power in RMSDATA); Vrms, Irms, P (and
       decided: see ../docs/history/decisions-2026-10-22.md #4 (energy counter resets on boot)
       energy) by switching internal modes — check feasibility with the DM40 front-end wiring first.
@@ -1161,7 +1161,7 @@ Firmware:
       behind POW:METH / the page; long press on A or "Power W" on the Current page → wiring dialog; Power Settings
       page; SCPI CONF:POW / FETC:POW:ALL? / [SENS:]POW:…; DBG:POW:ROW?/POKE/STAT/RAW?/DISC. Emulator Power role
       + emu/hy3131/powtest.py (11 scenarios OK). (verify on device: T1, T2, T3 of doc §3.11, then T5/T6)
-      Device 2026-10-22 (8104cbd, calibrator on V-COM, A not wired; doc §3.11 "Device results"): T1 GO -
+      Device 2026-10-22 (e606771, calibrator on V-COM, A not wired; doc §3.11 "Device results"): T1 GO -
       OP2 on SENSE linear, default row best (POKE 14/15 kills the signal, R35 0x44/0x74 no better), but raw
       gain -2.05 % / -1.63 % / -0.33 % (6 / 60 / 600 V) -> 0.5 % only after a per-range gain; T3 at zero
       current: YY clean from the 1st result, XX needs the 2 discards (keep DISC 2); UI dialog / settings OK.
@@ -1187,7 +1187,7 @@ Firmware:
         deprecated; persist value 3 = AC, the former AUTO loads as AC+DC); stock DC / AC / AC+DC glyphs; Power
         Settings readable ("At load" with its help line, Zero / V cal dialogs, coupling meaning, status text);
         Help 7/7 "Power meter". powtest istep / istep-ua / iman-ovl / ac, senttest ovl-pow-auto-*.
-        (verify on device: the check list of doc §3.14) Device 7534701: items 3 and 5 PASS (docs/device-check-2026-10-21.md "7534701" 1);
+        (verify on device: the check list of doc §3.14) Device d8e249d: items 3 and 5 PASS (docs/device-check-2026-10-21.md "d8e249d" 1);
         1, 2, 4 need current through A; 6 not run.
   - [x] Owner round 5 (doc §3.16): "At load" OFF by default (persist bit 10 = ON opt-in; every older record
         loads OFF: an old explicit ON is indistinguishable from the old default), "@load" marks after the V unit
@@ -1199,7 +1199,7 @@ Firmware:
         risk; I_ac not available without an R34 switch). powtest entry / ac-floor / acdc-floor.
         - [ ] Verify on device: the check list of doc §3.16 (the pure-DC residues of V_ac / I_ac against the
               floors and NOISE_V / NOISE_I).
-              Device 94de654 (device-check doc "94de654" 3), no current through A: "At load" off after the
+              Device 92fb8fa (device-check doc "92fb8fa" 3), no current through A: "At load" off after the
               update (POW:BURD:STAT? 0), the toggle, help lines, "@load" marks, kept by a reboot; W entry in DC,
               the tap cycle, a reboot in AC+DC keeps AC+DC; AC on 1 V DC: V / I / P 0, PF / S / Q / f "--" and
               9.91E37; AC+DC: Q 0, "DC?" + toast "No AC: DC is more precise"; DC on the 40 Hz square: "AC?" +
@@ -1209,18 +1209,18 @@ Firmware:
         AC y W" under P, from the measured LPF / RMS / X*Y parts with the AC floors and "@load" per part; main
         readout +7 px, lower row +17, chart 81 px from 192, side column without VAh, in AC+DC only (every other
         page pixel-identical). ui-render p26..p29, touch-test both layouts.
-        Device 940e8aa (device-check doc "940e8aa" 7b, open jacks): steps 1 / 3 layout PASS; steps 2 / 4 need current.
+        Device 2f56ff9 (device-check doc "2f56ff9" 7b, open jacks): steps 1 / 3 layout PASS; steps 2 / 4 need current.
         - [ ] Verify on device: the check list of doc §3.17.
-              Device 94de654 (no current): sub-lines under V / I / P, tap to Wh / VAh empties the P line, back
+              Device 92fb8fa (no current): sub-lines under V / I / P, tap to Wh / VAh empties the P line, back
               to DC with no leftover pixels: PASS. Cosmetic: a coupling switch keeps the old layout / values for
               up to ~4 s (until the first reading of the new coupling). Left: steps 2 and 4 (current).
   - [ ] Verify on device: the re-check list of doc §3.12 (zero, V cal, f on the square, W entry, DC method /
         AUTO, then T2 / T3 / T4 with current through A).
-        Device 381ea07 (device-check "381ea07" 5): PASS for W entry (dialog once, then direct), tap-W coupling
+        Device c50425f (device-check "c50425f" 5): PASS for W entry (dialog once, then direct), tap-W coupling
         cycle + glyphs, POW:ZERO (Y 1072, X ~890 / ~160), V vs DC V <= 0.063 % on 6 / 60 V in DC and AC+DC, f 40.0018
         Hz on the square (R21 0xBF), P / Wh / VAh tap, "Reset energy?" (1st Yes did not reset, 2nd did), reboot in W.
         Open: POW:VOLT:CAL, T2-T4 with current through A.
-        Device 7534701 (docs/device-check-2026-10-21.md "7534701" 1): PASS for the coupling tap cycle DC -> AC -> AC+DC (round 4), Power Settings
+        Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 1): PASS for the coupling tap cycle DC -> AC -> AC+DC (round 4), Power Settings
         dialogs (At load, Zero -> Start, V cal -> Cancel, Wiring, Limits), POW:ZERO, f 40.0018 Hz, energy
         reset with Yes 13 s after the long press, no "-0"; POW:VOLT:CAL DC reference 6 V: 1.020998 (doc
         1.0209), 60 V with 10 V: 1.016612 (doc 1.0170; over-corrects 0.06 %); 60 V with 5 V = SMALL (the list
@@ -1229,10 +1229,10 @@ Firmware:
         - [x] V cal on 6 V AC-coupled with the 0..9.6 V square returned OK (1.021410) although the peak clips
               the 6 V range: the DC-kind path has no clipping guard. Fixed: BIG when |DC| + sqrt(2) x AC RMS
               exceeds the range, either kind (powtest vcal-clip). (The dialog's "10-70 %" vs DC's 100 %: open.)
-        Fixed after 381ea07: the 1st Yes came ~13 s after the long press (screenshot 38 -> 39: 12.9 s; the
+        Fixed after c50425f: the 1st Yes came ~13 s after the long press (screenshot 38 -> 39: 12.9 s; the
         2nd try 2.4 s) and the confirm auto-cancelled at 10 s, so the tap hit the bare page: now 60 s
         (dialog::ENERGY_MS, as the wiring / firmware questions). Emulator: powtest.py ereset (Yes 13 s
-        after the long press resets; FAILs on e8e5284). Negative zero: every power readout (main, E box,
+        after the long press resets; FAILs on 3c5f891). Negative zero: every power readout (main, E box,
         PF / S / Q, AVG, V / I) shows +0 for a value that rounds to zero (pw::no_neg_zero; ui-render
         p15 / p16, meter-test). Generic DMM readouts unchanged (dmm::format). Unit case: the E box already
         says "kWh" (F14 has k); the main readout / aux row now too: our LETTERS 'k' (tools/mkwglyph.py,
@@ -1250,7 +1250,7 @@ Firmware:
         POW:PHAS:CAL? = outcome,SPHACAL; "tap cycles P / S / PF / E" superseded by the owner's P / Wh / VAh.
         powtest limits / phasecal-ref / bt (all 21 OK); ui-render badge matrix + p17 / p18 (0 violations).
         (verify on device: the check list of doc §3.13 - phone app, W limits + beep, cal refusals, BT SCPI)
-        Device 3d19ea1 without current (docs/device-check-2026-10-21.md "Bluetooth (3d19ea1)"): cmd 09 = 0x28, "0.0000 mV" for 0 mW, value 2 / 3
+        Device 8b9cf79 without current (docs/device-check-2026-10-21.md "Bluetooth (8b9cf79)"): cmd 09 = 0x28, "0.0000 mV" for 0 mW, value 2 / 3
         FFFF; cmd 06 0x28 keeps POW; BT CONF:POW / FETC:POW:ALL? / CALC:LIM:UPP 100 (FAIL? 0) / UPP -1 (FAIL?
         1, HI badge) OK; RES refusal text OK. Left: the phone app itself, limits / beep with a real load,
         persist v10 over a reboot, REAC cal on a capacitor.
@@ -1261,7 +1261,7 @@ Firmware:
       and an alert change under HOLD repaints at once (shown_state); strip_data the same rule. ui-render:
       both phases over the DMM page / strip matrices + a phase-flip stale-pixel check (0 violations).
       (verify on device: HOLD then current into A in DC V -> HOLD / A-JACK alternate 1 s each)
-      Device 381ea07: LIVE? / HOLD alternate ~1 s in continuity with 1 V, slot clean (A-JACK needs the A jack
+      Device c50425f: LIVE? / HOLD alternate ~1 s in continuity with 1 V, slot clean (A-JACK needs the A jack
       wired; Ω with a positive source never shows LIVE?: by design, needs a negative result).
       Researched: GO for current-in-A-jack in non-current modes (idle comparator on PB1, 47.5 Ω shunt, trips ~0.44 mA),
       partial for "V leads while in A mode"; blown fuse not detectable (fuse-check dialog instead). Doc §4, ~4-5 days.
@@ -1270,16 +1270,16 @@ Firmware:
       ohm / continuity / diode results; status-slot / strip badge, toast, 3x50 ms beep every 2 s; Settings 3/3
       "Jack alerts"; SYST:ALER? / :ENAB, DBG:SENT?. Emulator model + 18 USB/IP scenarios; cross table unchanged.
       (verify on device: T7, T9, T10 of the doc; T9 decides PKH_RESTART)
-      Device f48db7d FAILS (docs/device-check-2026-10-21.md "f48db7d" 4): AC V 6 V range reads a ~37.2 mV floor
+      Device f80524f FAILS (docs/device-check-2026-10-21.md "f80524f" 4): AC V 6 V range reads a ~37.2 mV floor
       with alerts ON (0.15-0.35 mV OFF, any DC input) -> PKH_RESTART / AD1 in AC V moves the RMS; A-JACK false
       trip in DC V with 10 V on V-COM, A jack open (calibrator 1 <-> 10 V autorange soak: streak 96, AJACK).
       T7 equal within noise for DC V / DC mV / ohm / AC mV / Hz. T9 / T10 not run (A jack not wired).
-      Fixed (doc device-check "Fixes after f48db7d"): AC V sentinel row holds OP1CHOP = 00 (OP1's 2 kHz chopper
+      Fixed (doc device-check "Fixes after f80524f"): AC V sentinel row holds OP1CHOP = 00 (OP1's 2 kHz chopper
       starts with AD1: offset square x10 -> 37 mV RMS floor; AC mV reads OP2, clean); DC V 60 / 600 / 1000 V
       carry no comparator sentinel (those rows drive the power bus from OP3; r0 keeps it, and leads in A/COM
-      leave V-COM open = r0). DBG:SENTinel:VARiant 0..7 restores the f48db7d rows per bit for the re-check.
+      leave V-COM open = r0). DBG:SENTinel:VARiant 0..7 restores the f80524f rows per bit for the re-check.
       Host tests + senttest dcv-step. (verify on device: re-check list of that section)
-      Verified on device 381ea07: AC V ON == OFF within 0.04 mV (VAR 1 brings back 37.15 mV: the chopper was the
+      Verified on device c50425f: AC V ON == OFF within 0.04 mV (VAR 1 brings back 37.15 mV: the chopper was the
       cause); DC V 1 <-> 10 V soak 5 min +0 hits, kind OFF at 10 V; VAR 4 on 60 V trips again; 10 V on manual 6 V
       no trip.
   - [x] The rest of §4 (doc §4.7, 2026-10-22): OVERLOAD shunt rule (uA / mA over range -> 10 A at once,
@@ -1292,7 +1292,7 @@ Firmware:
         new rows / the alternation if a reading moves)
   - [x] BUG (owner 2026-10-22): A AUTO coupling (and AC+DC A, plain AC / DC A AUTO), AC 1 A applied ->
         OVERLOAD at once, though an AUTO up-range is normal operation. Emulator: couptest `iac` (enter
-        CURR:COUP AUTO with aca:1@60) has SYST:ALER? OVERLOAD from fw uptime 2 s on HEAD 6ff0b42. Cause: A
+        CURR:COUP AUTO with aca:1@60) has SYST:ALER? OVERLOAD from fw uptime 2 s on HEAD 11c4f9b. Cause: A
         enters on DC mA r0 (stock, `select`: FUNC_A_AUTO -> 8); `overload_trips` treats the mA / uA shunt's
         top range in AUTO like a manual range (red latch, beep, toast), only the power meter got the quiet
         rule (doc 3.14). Proposed: in AUTO a quiet one-hop up-range to the A shunt's 6 A range (DC 7 r0, AC 4
@@ -1300,9 +1300,9 @@ Firmware:
         `ovl-dcma` / `ovl-acma` / `ovl-acdc` (they expect OVERLOAD in AUTO), doc 4.7 table. Open: enter A on
         the A shunt instead (user-feedback §5.4 note), so 1 A never flows through 0.5 ohm for the ~1-2 s of
         the walk up.
-        **Fixed (3542ddb):** the proposal as written (`dmm.rs` ovl_trip): AUTO / AUTO+ over range on the
+        **Fixed (073b309):** the proposal as written (`dmm.rs` ovl_trip): AUTO / AUTO+ over range on the
         shunt's top range = one hop to 6 A (DC 7 r0, AC 4 r0, AC+DC / AUTO the DC phase), no latch / alert /
-        beep / toast; OVERLOAD only for a manual range (doc 4.7 table). Emulator on ce3b592 vs fix:
+        beep / toast; OVERLOAD only for a manual range (doc 4.7 table). Emulator on 4ed771d vs fix:
         couptest `iac` (enter AUTO, AC 1 A; every sample checked) OVERLOAD from fw 2.0-5.4 s in methods A / B
         / C -> NONE in all three; new `idc` (DC 1 A) the same; senttest `ovl-dcma` / `ovl-acma` / `ovl-acdc`
         OVERLOAD -> NONE with the reading in its window, new `ovl-dcma-man` / `ovl-acma-man` keep OVERLOAD
@@ -1316,7 +1316,7 @@ Firmware:
         since the reset (`acdc_seen` bit: DC phase needs AC, AC phase needs DC); up-ranges never wait. The
         stock's S+0x60 hypot likely has the same gap (INFERRED). Test: couptest `iac` phase 2 (AC 300 mA ->
         mA shunt, NONE) and a V scenario entering AUTO on AC 230 V (range stays >= 600 V, no mV).
-        **Fixed (3542ddb):** `acdc_down_ok`: a step down needs the other part measured since the last reset
+        **Fixed (073b309):** `acdc_down_ok`: a step down needs the other part measured since the last reset
         (`Dmm::acdc_known`, bit 0 AC / bit 1 DC: `acdc_seen` without its range-change clear); method A's DC
         phase (`acdc_down`) waits for the AC part, B / C's AC result for the DC part; ups never wait.
         Reproduced only with the model's new `rmsfill:` (the stock AC rows' RMS window filling, INFERRED
@@ -1335,22 +1335,22 @@ Firmware:
         a few s), then a grey / amber "10A^" info badge (tap = back); return when the reading fits the old
         range with margin (~0.8-0.9 x FS; re-trip is at 1.03 x, the 30 s sticky rule covers flapping).
         Mostly moot in AUTO if the quiet hop above lands.
-        **Fixed (3542ddb):** AUTO has no latch any more (above). Manual: red OVLD with the beep and toast for
+        **Fixed (073b309):** AUTO has no latch any more (above). Manual: red OVLD with the beep and toast for
         `OVL_RED_MS` = 3 s, then an amber "10A" badge / strip (`Alert::Ovl10A`, display only via
         `Sentinel::shown`; SYST:ALER? and STAT:QUES keep OVERLOAD for the whole latch, no new toast / beep);
         release below 0.85 x the scale it returns to (`OVL_RELEASE_FRAC`, was 0.5) for 5 s, the 30 s sticky
         rule unchanged. senttest `ovl-dcma-man` (manual 60 mA, 2 A then 40 mA: back on manual 60 mA with
         40 mA; at 0.5 x it never returned), host tests `overload_badge_red_then_amber`, ui-render d25 / c22
         (amber, 0 violations). "Tap = back" not done (the user's range keys do it already).
-  - [x] 4-20 mA % hidden below 3.6 mA (NAMUR NE 43; 0 mA read -25 %): 6ff0b42.
+  - [x] 4-20 mA % hidden below 3.6 mA (NAMUR NE 43; 0 mA read -25 %): 11c4f9b.
   Compared with UNI-T UT197 (2026-10-22, its manual §16.2 + the A / mA fuse notes): the UT197 senses a PLUG in
   the mA/uA or A jack (no signal needed) and flashes "InErr" + beeps in any non-current position, i.e. before
   the probe touches a circuit; the sense path runs through the fuse, so "InErr shows" doubles as the fuse
   check. Ours sees only a current already flowing (mains on A-COM in V mode blows the fuse first, §4.3), and an
   unconnected plug is electrically invisible. Follow-ups, in order:
-  - [ ] Device T9 / T10 with the A jack wired (never run), plus the f48db7d re-check list (AC V floor with
+  - [ ] Device T9 / T10 with the A jack wired (never run), plus the f80524f re-check list (AC V floor with
         alerts ON, DC V 1 <-> 10 V soak without A-JACK). Gate for everything below.
-        (re-check list PASS on 381ea07; T9 / T10, AC mV / TC soaks still open)
+        (re-check list PASS on c50425f; T9 / T10, AC mV / TC soaks still open)
   - [x] "Leads in A?" reminder (closest firmware stand-in for InErr): on a change from a current function to
         a non-current one, toast "Leads in the A jack? Move to V" + a beep, at the moment the UT197 would warn.
         Fires also when the lead was already moved: own option in Settings 3/3 "Jack alerts" (and in the
@@ -1361,7 +1361,7 @@ Firmware:
         A-JACK takes over when a current flows); no alert state, so decision #5's HOLD alternation is
         untouched. Fuse check exempt. Settings 3/3 row "A-lead reminder" ON / OFF (default ON, p[38] bit 15),
         SYST:ALER:ENAB bit 3 (ON = 15), DBG:LEADs?. Host test leads_reminder, emu/hy3131/leadstest.py, ui-render.
-        (verify on device: doc 4.9 device check list) Device 1e39149: steps 1, 2, 4 (volume 0: toast, no
+        (verify on device: doc 4.9 device check list) Device 33b44bd: steps 1, 2, 4 (volume 0: toast, no
         beep), 5 (OFF / ENAB 7 / Jack alerts cycle / reboot) PASS; 3, 6, 7 not run. Open (cosmetic): the
         toast comes at the first reading, before the page's chart / stats repaint: ~1.5 s of the old A
         page's chart labels / REL unit under it.
@@ -1373,7 +1373,7 @@ Firmware:
         (it tests the MOSFET, not the fuse). FUSE? hint: 60 s below 0.1 % of the range (AC 5 %). Doc §4.7.
         (verify on device: T14, T15)
   - [x] Sentinel coverage: AC+DC, AC A, Hz, continuity, diode, cap r0..4 done (doc §4.7); open: cap r5..7
-        (both op amps and AD1 busy: no path) and DC V 60 V+ (the f48db7d false trip). T8 gates the AD2 rows.
+        (both op amps and AD1 busy: no path) and DC V 60 V+ (the f80524f false trip). T8 gates the AD2 rows.
   - [x] OVERLOAD shunt rule (§4.3 / §4.7). (verify on device: T11, with a current-limited supply first)
   - [ ] Hardware note (HW-1, for a board revision / mod): a sense contact in the A jack wired to a spare
         HY3131 input through a high-value resistor would give a real InErr and the fuse check with it.
@@ -1387,7 +1387,7 @@ Firmware:
 - [ ] (B) device session (30 min, feasibility doc 7.3): torn reads per OSR, loss per rate with / without redraw,
       decided: see ../docs/history/decisions-2026-10-22.md #3 (one TIMER ISR, exclusive bus hand-off, gated on SPI2)
       shorted-input ENOB, a waveform; then decide the rate cap and the ISR (E2-E4).
-      Partly done on device f48db7d (docs/device-check-2026-10-21.md "f48db7d" 1): torn reads none at any rung;
+      Partly done on device f80524f (docs/device-check-2026-10-21.md "f80524f" 1): torn reads none at any rung;
       waveforms AC V / AC mV ok; converter floor ENOB 16-17.6 (AC A open). FOUND: the chop-ON rungs give AD2F
       ~2x faster than ad2_r26_for's nominal (600 -> 1128/s, 2400 -> 3832/s measured; 0x24 = 0x04 readout), so
       LOG:COUNt? lost clamps at 0 below 9600; link ceiling ~6.5 kS/s; DRAW 2 = 26 ms gap per 100 ms. Open: the
@@ -1396,7 +1396,7 @@ Firmware:
       1200 / 2400 / 4800 / 9600 S/s with or without chop (600 does not exist: /4 OSR 1024 = 1200), so nominal /
       lost are right; the bit-banged link topped out at ~6.5 kS/s (9600 showed ~32 % lost; SPI2 (E2) should lift that). Emulator model
       and tests follow. (verify on device: log 1200 / 2400 / 4800 measured == nominal, lost 0; 9600 lost vs the bus build)
-      Device 381ea07 (ad2-isr): ladder right, captured + lost = nominal at 1200 / 2400 / 4800 / 9600, chop on / off.
+      Device c50425f (ad2-isr): ladder right, captured + lost = nominal at 1200 / 2400 / 4800 / 9600, chop on / off.
 - [x] (E2) HY3131 on the hardware SPI2 (src/hy3131.rs; feasibility doc 8): SPI2 @ 0x4000_3C00, PC10/11/12 AF6
       (VERIFIED: GD32F450xx DS table 5, UM V2.2), mode 0, /16 = 3.125 MHz, CS PD2 GPIO, the read-period clock as
       one GPIO pulse on PC10 between SPI bytes (exact datasheet frame). It is THE bus (no runtime switch); the old
@@ -1406,19 +1406,19 @@ Firmware:
 - [x] (E2) device check (10 min, feasibility doc 8.4): SPI2 build, SELF? at 16 / 32 / 8, readings vs the
       bit-bang fallback build, AD2 logger loss; on failure flash the `hyspi-bitbang` build. Then drop the
       fallback feature and the bit-bang code.
-      a241bf9 on the device FAILED (doc 8.5): DC V wrong, w1 write/read-back ~25 % bad at /16 and /32, reads
+      0d0fd76 on the device FAILED (doc 8.5): DC V wrong, w1 write/read-back ~25 % bad at /16 and /32, reads
       fine -> frame-boundary timing (CS hold / idle vs the HY3131's 4.9 MHz SYSCLK), not the bit clock.
-      DIAG image 1826204 on the device (doc 8.6): SPI2-written data bytes with bit 7 = 1 and bit 0 = 0 arrive
+      DIAG image 6d35c53 on the device (doc 8.6): SPI2-written data bytes with bit 7 = 1 and bit 0 = 0 arrive
       with bit 0 = 1 (64 / 256 values, every divider / CS timing / pin speed); SPI2 reads clean at /8 /16 /32.
       Fixed: reads on SPI2 /16, writes bit-banged (pins switched per write frame); DIAG / RAW removed.
-- [x] (E2) device check of the read-SPI2 / write-bit-bang image 0bf4847: PASS 2026-10-22. DC V 0.99979..0.99990 V
+- [x] (E2) device check of the read-SPI2 / write-bit-bang image d150919: PASS 2026-10-22. DC V 0.99979..0.99990 V
       (1 V cal), SELF? 2000 at /16 and /32: all error counts 0, 23 stable bytes, 7.65 us 1-byte / 21.4 us AD1+AD2
       read; AD2 logger 9600 S/s -> 8534 S/s measured, 11.1 % lost, 0 bad, max gap 2.05 ms (bit-bang ceiling was
       ~6.5 kS/s); 4800 S/s -> 8.0 % lost (main-loop gaps: the ISR decision).
-- [x] Drop the `hyspi-bitbang` feature (bit-banged reads) now that 0bf4847 passed: done (bit-banged WRITES stay,
+- [x] Drop the `hyspi-bitbang` feature (bit-banged reads) now that d150919 passed: done (bit-banged WRITES stay,
       DBG:HYSPI:SELF? stays).
-- [x] Pure-SPI2 writes (feasibility 11.6 / 11.7): device 035fc32 DBG:HYSPI:WR?: the chip takes each byte's LSB
-      late (the next MOSI level); 8701d51 writes one frame per register with a CS-cut dummy whose MSB = the LSB:
+- [x] Pure-SPI2 writes (feasibility 11.6 / 11.7): device b48048e DBG:HYSPI:WR?: the chip takes each byte's LSB
+      late (the next MOSI level); 42cbf35 writes one frame per register with a CS-cut dummy whose MSB = the LSB:
       0 bad in 8 x 512 writes at /8, /16, /32, DC V 0.9997 V on 1 V, SELF? w1 9.9 us (bit-bang 57 us). The
       bit-banged write is removed.
 - [x] (E3/E4) AD2 stream on ONE timer ISR, decision #3 (docs/dmm-input-scope-feasibility.md 9): Cargo feature
@@ -1432,19 +1432,19 @@ Firmware:
       sees IT-block `bl` now: main path +336 B, headroom 17456). Emulator (200 MIPS, DRAW 2): 4800 / 9600
       / 1200 S/s lost 0, no stamp gap (main-loop sampler: 23 % lost at 4800 DRAW 2);
       emu/hy3131/ad2streamtest.py PASS.
-- [x] (E3/E4) device acceptance of the `ad2-isr` image. 381ea07 FAILED (1.4 % / 2.6 % lost in bursts: the INTF
-      read-clears race at a +63 ppm tick; max_lat ~20 us). Fixed in 035fc32 (feasibility 11): the ISR is
+- [x] (E3/E4) device acceptance of the `ad2-isr` image. c50425f FAILED (1.4 % / 2.6 % lost in bursts: the INTF
+      read-clears race at a +63 ppm tick; max_lat ~20 us). Fixed in b48048e (feasibility 11): the ISR is
       phase-locked to the conversion grid (src/ad2pll.rs: blind R03..R05 read half way between edges, INTF
       probe every 4th period), hot code / data below 0x08080000 (link-native.x region B / .cold; the fonts had
-      grown into the non-zero-wait flash). Device 035fc32, 60 s each: lost 0 of 288 197 at 4800 DRAW 2, 0 of
+      grown into the non-zero-wait flash). Device b48048e, 60 s each: lost 0 of 288 197 at 4800 DRAW 2, 0 of
       576 092 at 9600, 0 of 1 153 647 at 19200 (/16, DRAW 2, CPU 35.6 %); max_lat 4.7 us (was 21.8); chip
       crystal -1 ppm; *IDN? max 0.73 ms; READ? / SELF? clean after. /8 reads NOT clean (61 / 100 sign errors in
-      1.15 M / 2.36 M): stream stays /16. `ad2-isr` is DEFAULT since 8701d51.
-- [x] (E3/E4) device check of 8701d51 (feasibility 11.9): critical-section without masking -> max_lat 0.24 us;
+      1.15 M / 2.36 M): stream stays /16. `ad2-isr` is DEFAULT since 42cbf35.
+- [x] (E3/E4) device check of 42cbf35 (feasibility 11.9): critical-section without masking -> max_lat 0.24 us;
       CPU /16 4800 DRAW 2 / 9600 / 19200 DRAW 2 lost 0; DMA frames 9600 lost 0 at 5 % CPU; /8 + CKPH = 1 data phase
       clean (SELF?, 19200 lost 0, 38400 35.8 M samples 0 bad at 14 % CPU) -> the stream default (CPU frames).
-      DMA at 38400 lost the lock (CPU probe frames overran): probes as DMA frames since cb5f12b.
-- [x] Device 9ccae5d (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
+      DMA at 38400 lost the lock (CPU probe frames overran): probes as DMA frames since 7ed5b31.
+- [x] Device 0471860 (feasibility 11.10): DMA /16 38400 lost 0 of 2.3 M at 17.5 % CPU, 19200 DRAW 2 lost 0 at
       7.8 %; CPU /8 + CKPH 38400 lost 0 at 51 %, 4800 DRAW 2 / 9600 lost 0. Host: a raw drain tops out at ~37 kS/s.
 - [x] Decide: DMA frames as the stream default; the wave view gains the most.
       decided: see ../docs/history/decisions-2026-10-22.md #7 (DMA frames default, gated on one device run with the
@@ -1457,10 +1457,10 @@ Firmware:
 - [x] Device: decision #7 sharing matrix, BT part: 38400 for 15 min with BT connected (phone or host SPP),
       lost / bad 0, BT answers after the stream. Not run on a239aa6: the host got "Host is down" from the
       meter's SPP address for the whole session (11.11). Cause: the next item.
-      Done on 3d19ea1 (docs/device-check-2026-10-21.md "Bluetooth (3d19ea1)"): 900 s 38400 DMA frames with a host btpoll (50 ms) linked the whole time:
+      Done on 8b9cf79 (docs/device-check-2026-10-21.md "Bluetooth (8b9cf79)"): 900 s 38400 DMA frames with a host btpoll (50 ms) linked the whole time:
       34 560 269 records, lost 0, bad 0, seq / stamp gaps 0, max gap 27 us, CPU 17.5 %; BT cmd 09 replies
       during the stream 0 (by design, UF-36), BT answered right after.
-- [x] BT module power (PC0): native opendm40 (since f4c6579) left PC0 high from board::init, the stock boot
+- [x] BT module power (PC0): native opendm40 (since cdd2fc3) left PC0 high from board::init, the stock boot
       level = module off, and never lowered it (the stock does at its BT UART init); the RAM-loaded builds
       had inherited a powered module from the stock app. bt.rs `Bt::power` now follows the Bluetooth setting
       (low = on, high = off), waits 1 s after power-on before the AT init, pulses PC0 high
@@ -1470,7 +1470,7 @@ Firmware:
       OK (the stock's PC0 handling passes the model). (verify on device: BT glyph off with no host; the
       classic XX:XX:XX:XX:XX:XX answers `dm40scpi.py --bt info`; then the pending BT checks: doc 3.13 power
       meter list, decision #7 BT part, phone app (BLE "DM40A"))
-      Device 3d19ea1 (docs/device-check-2026-10-21.md "Bluetooth (3d19ea1)"): glyph off with no host, on while linked, off after; --bt info OK;
+      Device 8b9cf79 (docs/device-check-2026-10-21.md "Bluetooth (8b9cf79)"): glyph off with no host, on while linked, off after; --bt info OK;
       reconnect 0.7-1.3 s; Settings Bluetooth OFF -> not discoverable, connect times out; ON -> discoverable,
       answers. Phone app (BLE) not run.
 - [x] BT link opened while the DMM rail is off (Scope / Gen page) does not wake the DMM: cmd 09, BT FETC? /
@@ -1478,7 +1478,7 @@ Firmware:
       After >= 3 such connect / disconnect cycles the DMM stays frozen even back on the DMM page (> 9 min,
       PROF d.read 0, "AC?" hint; 2/2), until `DBG:HYSPI:SELF?` (its `app.dmm.start`). A link held while
       leaving the DMM keeps it live. Suspect: `Dmm::start` from `set_suspended(false)` right after PE2 goes on.
-      Repro: docs/device-check-2026-10-21.md "Bluetooth (3d19ea1)" §1.
+      Repro: docs/device-check-2026-10-21.md "Bluetooth (8b9cf79)" §1.
       Cause (emulator, PE2 now power-gates the HY3131 model): a wake that leaves PC4 on (BT link / host query
       on Scope / Gen) wrote the row in the same pass as the PE2 rise (the page switch has the 10 ms
       make-before-break pause, the wake had none): the chip powered up with its POR row, nothing ever
@@ -1490,19 +1490,19 @@ Firmware:
       silent). emu/hy3131/btwaketest.py: 3bae462 fails 1g / 1h / a chip POR, the fix passes. The device 1h
       (no READ?, the rail toggling, the page switch's 10 ms pause) is not fully explained by the model: the
       counters on the device re-check discriminate (wakes per link cycle; lost / silent).
-      Device 085f8dc (device-check-2026-10-21.md "DMM rail wake and fast logger"): 1g / 1h PASS, wakes +1 per
+      Device e656df3 (device-check-2026-10-21.md "DMM rail wake and fast logger"): 1g / 1h PASS, wakes +1 per
       link (the rail follows PC14), lost / silent 0 everywhere incl. 35 s idle in Hz / temp / ohm / power /
-      diode / cap. AC V: the first reading after a wake was +8 % -> 79e22a0: 2 s settle after a wake in the AC
+      diode / cap. AC V: the first reading after a wake was +8 % -> e6980ac: 2 s settle after a wake in the AC
       functions, and leaving the Wave view no longer drops the DMM rail (wavetest "DMM resumed" regression).
-      Device 79e22a0: AC V wake READ? -0.8 % (first answer after 2 s), Wave view MENU -> READ? correct with no
+      Device e6980ac: AC V wake READ? -0.8 % (first answer after 2 s), Wave view MENU -> READ? correct with no
       rail drop, 1g / 1h PASS again.
 - [ ] DMM reads at /8 + CKPH = 1 too (2.6x faster bus); needs its own device check of every function.
       decided: see ../docs/history/decisions-2026-10-22.md #8 (DMM stays at /16 mode 0; acceptance check defined for the
       revisit with decision #3's request queue)
-- [x] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at cb5f12b; the cold modules' named
+- [x] B (zero-wait flash) is FULL: the branch overflowed by 4 bytes at 7ed5b31; the cold modules' named
       .rodata moved to `.cold` (28 bytes left), the bit-banged write removed. A real reclaim is needed; never put
       per-pass code in `.cold` (feasibility 11.4 rule).
-      Region B audit #3 2026-10-22 (on e7658e5: 11.9 KB free): 26.2 KB free (ad2-isr; 32.8 KB without), no
+      Region B audit #3 2026-10-22 (on 1ad38aa: 11.9 KB free): 26.2 KB free (ad2-isr; 32.8 KB without), no
       change in function but the Wave view items below (docs/native-boot.md "Region B audit #3"):
       App::tap / key / show / wave_open, rec_start, Logger::start, page / dialog / menu / keypad / generator
       page draws, DBG / calibration replies, start-up constructors, vwrite's post-write steps -> `.cold`; the
@@ -1514,14 +1514,14 @@ Firmware:
       (tools/mkstockfont.py A2_FONTS, `.rodata.a2.*`; 2.65 KB left, build.sh warns below 2 KiB, the link fails
       at the marker); App::tap / key / show and vdisk::describe back from C to B. B 26.1 -> 30.6 KB free
       (33.3 -> 37.8 without ad2-isr), C 10.1 -> 17.8 KB (12.2 -> 19.9).
-- [x] Device check of region A2 (device 94de654: marker VALID = the image header, INFO/FIRMWARE.BIN = the
+- [x] Device check of region A2 (device 92fb8fa: marker VALID = the image header, INFO/FIRMWARE.BIN = the
       installed file byte for byte, logger panel text correct, max_lat 0.28 / 0.30 us at AD2 38400 with the
-      panel, 0 lost; the inrush taps while armed: device 940e8aa, threshold +/- taps and Cancel while ARMED work, late 0 / dropped 0, max_lat 14-16 us while armed, not chased): install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
+      panel, 0 lost; the inrush taps while armed: device 2f56ff9, threshold +/- taps and Cancel while ARMED work, late 0 / dropped 0, max_lat 14-16 us while armed, not chased): install with reload.sh (the marker valid after the install, FIRMWARE.BIN on
       the volume = the installed file), then the logger panel / DMM view / Wave view text (ASCII26 / F14 from
       A2) drawn correctly and DBG:ISR? max_lat at AD2 38400 with the logger panel no worse than before; taps on
       the inrush page while armed (App::tap now in B).
-- [x] Region C audit #1 2026-10-22 (docs/native-boot.md "Region C audit #1"): on 83c28a0 region C 17.4 ->
-      23.8 KB free (from 9.9 KB on d8a0ac0: +13.9 KB with upstream's A2 move). Shrunk 2.7 KB: three statics
+- [x] Region C audit #1 2026-10-22 (docs/native-boot.md "Region C audit #1"): on 5af9a5c region C 17.4 ->
+      23.8 KB free (from 9.9 KB on 36b6aae: +13.9 KB with upstream's A2 move). Shrunk 2.7 KB: three statics
       .data -> .bss (gallery G, scope_csv SNAP, csvlog JOB), App::with_temp_page without a closure parameter
       (4 copies -> 1), gallery Tb::c out of line; moved: the .data load image (1 KB) and ad2exp + dbg_dcv
       (5.2 KB, DBG:AD2:*) to region B (B 78.2 -> 72.0 KB free). No core::fmt in the image, no duplicated
@@ -1529,7 +1529,7 @@ Firmware:
       New emu/gallerytest.py (open / swipe pages / viewer = BMP bytes / Delete Cancel + Delete / back).
       Left as candidates there (more DBG-only code to B ~6.8 KB, gating the AD2 experiments 2.6 KB, one
       shared fat_get ~0.2 KB).
-- [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 49d7c10c
+- [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 058a1d36
       region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
       SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
 - [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
@@ -1541,41 +1541,41 @@ Firmware:
 - [x] Font storage 2026-10-22 (docs/fonts.md): the stock fonts were 104 KB of data in region B (90.9 KB
       bitmaps + 13.2 KB tables). CJK / full-width glyphs dropped (232, never drawn), 4 bpp glyphs as row-major
       nibble runs (RLE4, decoded straight into the LCD writes), 1 bpp glyphs cropped to their ink rows,
-      10-byte entries, named sections `.rodata.fonts.*` (region B; ASCII26 / F14 stay in A2): 41.1 KB. On a45c996:
+      10-byte entries, named sections `.rodata.fonts.*` (region B; ASCII26 / F14 stay in A2): 41.1 KB. On af4be54:
       region B free 26.4 -> 82.2 KB, A2 free 2.7 -> 7.9 KB (+61.1 KB together).
       Pixel-identical (tools/font-matrix 178k glyph cases, ui-render per-case screen hashes UIR_HASH, stock-diff);
       emulator draw time down (DMM page 17.1 -> 15.7 ms, power page 11.3 -> 10.5 ms, d.read avg 646 -> 484 us).
       Lossy / vector-font options evaluated (doc sec. 4): <= 6 KB more for a visible change, not done.
-- [x] Device check of the font storage (device 94de654, device-check doc "94de654" 1-2: menu, Settings
-      1-3, Hold & Limits, keypad, Record, Power Settings pixel-identical to the 1e39149 device shots, Help
+- [x] Device check of the font storage (device 92fb8fa, device-check doc "92fb8fa" 1-2: menu, Settings
+      1-3, Hold & Limits, keypad, Record, Power Settings pixel-identical to the 33b44bd device shots, Help
       1-7 pixel-identical to ui-render, every other page looked at: no glyph damage; tap -> draw loop max1s
-      18-29 ms vs 23-51 ms on 1e39149; DMM page full draw 21.0 ms, power page 14.2 ms): DBG:PROF? d.read / d.chart and a page switch's draw time vs the
+      18-29 ms vs 23-51 ms on 33b44bd; DMM page full draw 21.0 ms, power page 14.2 ms): DBG:PROF? d.read / d.chart and a page switch's draw time vs the
       previous image; DBG:ISR? max_lat with the logger panel drawing while AD2 streams (unchanged expected).
 - [ ] Device check of audit #3: DBG:PROF? lat_pc / DBG:ISR? max_lat at AD2 38400 to disk with the volume
       mounted and read; Wave view: STOP + Save CSV and a screenshot (max_lat, overruns 0, the trace and the
       stream back after), a host copying SCOPnnn.CSV / LOGnnn.CSV during the Wave view; taps on the inrush
       page while armed; tap latency on the range / power settings / keypad / menu / generator pages.
-      Device 1e39149 (device-check doc "1e39149"): AD2 38400 to disk + volume reader 0 lost, max_lat 0.28 us
+      Device 33b44bd (device-check doc "33b44bd"): AD2 38400 to disk + volume reader 0 lost, max_lat 0.28 us
       (not C); Wave view 4800 / 38400 STOP + Save CSV, screenshot: overruns 0, max_lat <= 0.3 us, stream back,
       SCOPnnn.CSV after leaving; tap latency 23..51 ms (loop max1s) on every page. Found: a host copying CSVs
       during the Wave view ran `dlog::FPar::parse` in C (21.4 us, fixed: region B); DBG:PROF? is in C (12 us,
       1 sample lost at 38400: debug only, open); App::show at the Wave view exit (11..18 us, 1 overrun or
       2 late, open). Left: inrush taps while armed; re-check of the FPar fix.
-      Device 94de654: the FPar fix holds: a host copying 17 CSVs (12 MB, 95 KB/s) during the Wave view at
+      Device 92fb8fa: the FPar fix holds: a host copying 17 CSVs (12 MB, 95 KB/s) during the Wave view at
       38400: max_lat 0.30 us, overruns 0 (was 21.4 us); `dropped` +831 once, near the end of the copy (the
       view's ring, not the ISR). Exit: 4.0 / 5.8 us, late 1 (the open item below).
       - [x] DBG:PROF? (`prof::report`, C) during a fast session loses samples: region B (~1 KB) or a note.
-            **Fixed (0f6d934):** prof::report is region B. Emulator: emu/fastlogtest.py --region-c --host-read
+            **Fixed (dda802c):** prof::report is region B. Emulator: emu/fastlogtest.py --region-c --host-read
             (DBG:PROF? between the LOG:DISK? polls of every session) and wavetest's host polling at 2 / 1 ms/div:
-            no region C call (the old build: prof::report in both). Device 246afc7: PASS (38400, 39 polls,
+            no region C call (the old build: prof::report in both). Device c92b605: PASS (38400, 39 polls,
             280 ns, late 0, lost 0).
       - [x] Wave view exit: App::key / App::show (C) run before the stream stops (1 overrun at 38400).
-            **Fixed (0f6d934):** App::key / show are region B since region A2, but the exit still ran the
+            **Fixed (dda802c):** App::key / show are region B since region A2, but the exit still ran the
             menu's pressed feedback (`App::press_track`, app_press.rs, C) with the stream on (the emulator's
             region C hooks, MENU at 2 ms/div). Now `show` leaving the live Wave view only asks for the stop
             (WaveReq::Stop) and holds the view change; main.rs shows it right after the stream stopped
             (`App::wave_exit_done`, before the DMM row is restored). wavetest: MENU exit at 38400, no region C
-            call, late / overruns / timeouts unchanged. Device 246afc7: PASS (2 ms/div x3: 300 ns, late 0, overruns 0;
+            call, late / overruns / timeouts unchanged. Device c92b605: PASS (2 ms/div x3: 300 ns, late 0, overruns 0;
             1 ms/div: late / overruns unchanged; the menu, then the DMM).
       - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
@@ -1591,7 +1591,7 @@ Firmware:
       timeouts / bad / torn 0, locked to the chip within 0.1 ppm; ISR CPU 29.5 % in the emulator, **~43 %
       estimated on the device** (40..46 %); DRAW 2 (full DMM repaint) overflows the 26.7 ms ring (7.8-9.3 %
       overwritten, lost 0); Wave view 1 ms/div: no overflow; disk typ flash keeps up to 196 KB/s (767 pages/s,
-      FIFO high water 460 B), max flash (tPP 3 ms) lost 28-54 % ungated -> the probe gate; gated (e7658e5): typ
+      FIFO high water 460 B), max flash (tPP 3 ms) lost 28-54 % ungated -> the probe gate; gated (1ad38aa): typ
       probe 400 / 400 us -> 76800, 153 601 rows lost 0; max probe 3000 / 3000 us -> 38400, lost 0, FIFO 468 B
       (`emu/fastlogtest.py --app <elf> --sessions ad2:38400,ad2:76800`, ~15 min wall with the max profile).
       Forced hybrid (`DBG:AD2:DIV 8,1`, ad2streamtest session field 5) at 4800 / 38400: lost 0, div 1008.
@@ -1609,11 +1609,11 @@ Firmware:
       5. Wave view 1 ms/div and 2 ms/div on the square: the trace, Vpp, no "Wave stopped", DBG:ISR? lost 0,
          overwritten (ring) 0 for 30 s; 5 ms/div and slower as before.
       6. After the streams: DC V 1 V within 0.05 %, `DBG:HYSPI:SELF? 2000` all 0.
-      Device e8cc4e9 (2026-10-23, docs/device-check-2026-10-21.md "e8cc4e9" 2): 1-3, 5, 6 PASS (div 1008, dma 1,
+      Device 20a91d0 (2026-10-23, docs/device-check-2026-10-21.md "20a91d0" 2): 1-3, 5, 6 PASS (div 1008, dma 1,
       lost / late / slips / overruns / timeouts / bad 0, locked, max_lat 300 ns; codes in range CHOP ON / OFF;
       DIV 8,1 at 4800 / 38400 lost 0; Wave view 1 / 2 ms/div overwritten 0 in 30 s; DC V 1 V -0.005 %, SELF? 0).
       **4 FAIL**: disk at 76800 kept 2 095 713 of 4 599 040 conversions (lost_before 2 505 919), see below.
-- [x] 76800 to the disk loses 54 % (device e8cc4e9): rung 76800 chosen (tpp 382 / 389 us), fifo_hw 525 B,
+- [x] 76800 to the disk loses 54 % (device 20a91d0): rung 76800 chosen (tpp 382 / 389 us), fifo_hw 525 B,
       336 pages/s, a hole of ~27-38 conversions after every 32 rows: one BATCH per Run pass, RUN_BUDGET_CYC
       (300 us of cycles, the ISR's share counted) used up by it with the ISR at cpu_permille 544 (estimate
       ~430, emulator 295). Main loop 1272 passes/s, `usb` (Run) avg 718 us. The host drain also tops out
@@ -1649,10 +1649,10 @@ Firmware:
          restart runs the AD2 self-cal (`dc_prepare`) again: the 38400 file starts later.
       5b. A 76800 session started 11-21 s after power-on (CYCCNT's upper half; the emulator's bug of
          130d2e8's parent: the trial saw a busy chip there and fell back): gate 1.
-      6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in e8cc4e9 2.1 / 2.5 (unchanged
+      6. The Wave view 1 / 2 ms/div and a host LOG:DATA? session at 76800 as in 20a91d0 2.1 / 2.5 (unchanged
          paths; the ring drain for the disk only is new).
       7. The record page's fast-logger start (tap) at 76800, the inrush save: as before.
-      **Device bfb6a19 (device-check doc "bfb6a19"): fixed.** 76800 AC V 40 Hz square: gate 1 (kept),
+      **Device 825080c (device-check doc "825080c"): fixed.** 76800 AC V 40 Hz square: gate 1 (kept),
       4 331 399 rows, lost_before 0 (ended Full at 56.6 s: the 5.9 MB free disk), ring high water 1017-1170 of
       2048 in every kept 76800 session (never near ~1900), ISR permille 546 / 548, 1.478 entries per sample,
       436 pages/s; DBG:PROF? 8987 passes/s, `usb` avg 83 us (was 1272 / 718). Stop in the trial, 38400 /
@@ -1661,13 +1661,13 @@ Firmware:
       range_cmd, next item). Not done: a noisy input (no sine / noise
       source without the generator; the 100 Hz square instead: 0 lost), a DC V fallback (gate 2) restart,
       the Record stop by a finger (DBG:TAP does not reach `fast_touch`), the inrush save (no A-COM load).
-- [x] SCPI range_cmd in region C ran for every SCPI command (bc57343; found on device bfb6a19): max_lat
+- [x] SCPI range_cmd in region C ran for every SCPI command (379e49c; found on device 825080c): max_lat
       1.6-20 us at range_cmd's entry with late / overruns 1-3 / slips 1 during 76800 streams (host drain,
       Wave view, disk polling), and a 20 Hz LOG:DISK? poll made one writer trial fall back to 38400 (ring
-      2048). Fixed in 9292ec2 (branch fastlog-768-retest): the dispatcher calls it only for RANGe /
-      RESolution headers. Device check: as in the device-check doc's "Re-check on 9292ec2" (max_lat < 1 us,
+      2048). Fixed in decaf60 (branch fastlog-768-retest): the dispatcher calls it only for RANGe /
+      RESolution headers. Device check: as in the device-check doc's "Re-check on decaf60" (max_lat < 1 us,
       late / overruns / slips 0 at 76800 with the polls, the range commands still answer).
-      Device 9292ec2 (2026-10-23, device-check doc "9292ec2" A): fixed. 76800 AC V 40 Hz square to the disk
+      Device decaf60 (2026-10-23, device-check doc "decaf60" A): fixed. 76800 AC V 40 Hz square to the disk
       (60 s, ended Full at 56.5 s): 4 329 787 rows, lost_before 0, max_lat 320 ns (spiflash::xfer), late /
       overruns / slips 0; lat.py 76800 10 poll x3 (327-335 LOG:DISK? polls): gate 1, max_lat 320 ns
       (spiflash::xfer), 0 / 0 / 0 each; p2.py host drain 30 s: 38.3 k rows/s, max_lat 280 ns, seq gaps 0;
@@ -1687,10 +1687,10 @@ Firmware:
       2.5 B per sample, 1891 / 1412 replies/s of device time). So in the emulator the logger panel's draws
       stall the main loop longer than the ring's 26 ms at 76.8 kS/s (max LOG:DATA? round trip 343-419 ms of
       host time with the panel, 43-66 ms without); not measured on the device (its disk sessions at 76800,
-      same panel: ring high water 1017-1170 of 2048, device bfb6a19). Over Bluetooth (emulator): AD1 640 S/s
+      same panel: ring high water 1017-1170 of 2048, device 825080c). Over Bluetooth (emulator): AD1 640 S/s
       lossless in all three formats, AD2 still refused.
       Reply size kept at 6144 (usbtmc::RSP_MAX): the device's drain ran at ~79 replies/s with 511 ROWS records
-      (40.5 k rows/s, bfb6a19); a PACKed reply holds 2034 samples (6138 B), a DLG one ~2-4 k (4 KiB of chunks
+      (40.5 k rows/s, 825080c); a PACKed reply holds 2034 samples (6138 B), a DLG one ~2-4 k (4 KiB of chunks
       at ~1-2 B per sample), so 76 800 S/s needs ~38 PACKed replies/s or fewer DLG ones: 2x margin if the
       round-trip rate stays the device's (unmeasured with these formats). A larger reply would grow
       usbtmc's `rsp`, Bt::respond_with's 6 KiB stack frame and csvlog::CAT_MAX (main.rs assert) together,
@@ -1698,17 +1698,17 @@ Firmware:
       Device check (untested on the meter): AC V 40 Hz square, LOG:SRAT 76800, `dm40scpi.py log --source ad2
       --rate 76800 --format packed -d 30` and `--format dlg`: lost 0 / overwritten 0 in the summary, the
       replies/s; the first blocks' lost_before (the panel); the same over Bluetooth at AD1 640 S/s.
-      **Device 940e8aa (device-check doc "940e8aa" 1, open input instead of the square):** PACKed / DLG
+      **Device 2f56ff9 (device-check doc "2f56ff9" 1, open input instead of the square):** PACKed / DLG
       30 s lost 0, 978 / 802 replies/s (round trip p50 0.9 / 1.0 ms, max 28 ms), host CPU 3.5 / 6.8 s per
       30 s; the only hole is one block of 113-275 samples overwritten right after the first 2048 (t 29-31
       ms, the logger panel's first draw; none with DBG:AD2:DRAW 0). Bluetooth AD1 640 S/s ROWS / PACKed /
       DLG lost 0, 15 / 33 / 31 replies/s.
 - [x] 76.8 kS/s host stream: the logger panel's first draw overwrote 113-275 samples once at the start of
-      every session (device 940e8aa). Fixed: a panel part is drawn only while the ring holds < 512 records
+      every session (device 2f56ff9). Fixed: a panel part is drawn only while the ring holds < 512 records
       (a quarter of logger::CAP) or nothing drained it for 200 ms (dialog.rs `log_panel_room`). Emulator
       (--mips 110 --isr-stall-ns 700, panel on): emu/logfmttest.py 76800 PACKed / DLG 10 s overwritten 0
       (two runs; 455 in 3 s before), 38400 all formats lossless; emu/fastlogtest.py disk 38400 / 76800 lost 0.
-      Device 7c04b03 (device-check doc "7c04b03: bug-fix recheck" 4): PACKed 76 800 x 30 s twice, lost 0, overwritten 0; the panel draws
+      Device 1a11eda (device-check doc "1a11eda: bug-fix recheck" 4): PACKed 76 800 x 30 s twice, lost 0, overwritten 0; the panel draws
       during a session (screenshot). DLG format not rerun.
 - [x] `VOLT:RANG:AUTO?` in AC V and `CURR:RANG:AUTO?` in AC A answered +9.91E37 (device d330877, device-check
       "d330877" new bug 4): a bare VOLT / CURR header meant the DC function. Branch smallbugs: a bare VOLTage /
@@ -1717,17 +1717,17 @@ Firmware:
       channel (as POW:VOLT:RANG?; sets there stay "Settings conflict"). A query never raises "Settings
       conflict" now (coordinator 2026-10-24): another function's / coupling's RANG:AUTO? = 1 (selecting it
       starts in autorange), its RANG? / RES? = +9.91E37 with no error; sets naming it stay "Settings conflict"
-      (CONF:VOLT stays DC, 34401A). The 9292ec2 note above ("CURR:DC:RANG? = +9.91E37 + Settings conflict in V")
+      (CONF:VOLT stays DC, 34401A). The decaf60 note above ("CURR:DC:RANG? = +9.91E37 + Settings conflict in V")
       is superseded: +9.91E37, no error. Swept every function x the range / function queries in the emulator:
       no other +9.91E37 outside those. emu/hy3131/autorangetest.py --queries-only (every function and coupling, the power meter, TEMP).
       Device retest: CONF:VOLT:AC / :ACDC / :AUTO and CONF:CURR:AC / :ACDC / :AUTO: VOLT:RANG:AUTO? /
       CURR:RANG:AUTO? = 1 (0 after <q>:RANG:AUTO OFF), VOLT:RANG? / CURR:RANG? the range, SYST:ERR? 0; in
       CONF:POW VOLT:RANG? = POW:VOLT:RANG?'s value.
-      **Device bb15d39: PASS** (doc "bb15d39" R1; every row SYST:ERR? 0).
+      **Device c785807: PASS** (doc "c785807" R1; every row SYST:ERR? 0).
 - [x] DC V AUTO+ from 600 V or 1000 V (VOLT:RANG:AUTO ON = two steps down to 6 V), 1 V in: one reading of
       0.767-0.790 V (77-79 %) in 5 of 35 tries (600 V: 3 of 20 + 1 of 5, 1000 V: 1 of 10; from 60 V, one
       step: 0 of 10). It is the second reading on 6 V, ~0.8 s after the command; the chart MIN records it
-      (device 9292ec2, device-check doc "9292ec2" B4). Not from the averaging window as such (write_config
+      (device decaf60, device-check doc "decaf60" B4). Not from the averaging window as such (write_config
       resets it on every step). Suspects, unchecked: a conversion that straddles a register write (the OSR
       write in `osr()` after the first 6 V conversion) or the 250 ms autorange settle being shorter than a
       SLOW conversion. Not fixed; needs a raw AD1 code trace around the second step.
@@ -1744,19 +1744,19 @@ Firmware:
       sinc^3 over 3 periods; model unit test Ad1Mix) and emu/hy3131/autorangetest.py: the base build gives
       0.55-0.85 V readings from 600 / 1000 V (two 1 ms apart, the device signature), the fix none. Device check: dc781.py (600 V x20, 1000 V x10,
       60 V x10): no READ? / CALC:AVER:MIN? below 0.99 V on 6 V; time to the first 6 V reading +0.1-0.3 s.
-      Device 28ace43 (device-check doc "28ace43" 1): PASS. No READ? below 0.99 V on 6 V in 40 tries (216 readings,
+      Device f6c6e05 (device-check doc "f6c6e05" 1): PASS. No READ? below 0.99 V on 6 V in 40 tries (216 readings,
       lowest 0.99890 V); CALC:AVER:MIN? >= 0.99670 V except 1000 V #0: 0.98396 V, the 1000 V range's own
-      conversion at 0.31 s (that range read 0.984-1.021 V, as on 9292ec2); 600 V's read 0.9967-0.9997 V. First 6 V conversion read: from
-      600 V 0.88-0.92 s (9292ec2 0.81 s: +0.1 s), from 60 V 0.61 s (0.56-0.60 s), from 1000 V 1.22 s (1.06 s:
+      conversion at 0.31 s (that range read 0.984-1.021 V, as on decaf60); 600 V's read 0.9967-0.9997 V. First 6 V conversion read: from
+      600 V 0.88-0.92 s (decaf60 0.81 s: +0.1 s), from 60 V 0.61 s (0.56-0.60 s), from 1000 V 1.22 s (1.06 s:
       +0.16 s); +0.05-0.16 s, inside the expected +0.1-0.3 s except from 60 V.
-      Recheck 2026-10-24 (emulator, autorangetest with ad1mix:1): PASS on 90934ca and with R22_LATE. The
-      cover is `vet_ad1` (b3a0ca3), not R22_DROP (d8cdb27): the 6 V row goes out at the R22 the 60 V row
+      Recheck 2026-10-24 (emulator, autorangetest with ad1mix:1): PASS on ad10749 and with R22_LATE. The
+      cover is `vet_ad1` (0ddfacf), not R22_DROP (2bc61aa): the 6 V row goes out at the R22 the 60 V row
       already had, so no R22 changes there.
 - [x] AC+DC / AUTO coupling, 1 V DC, a range change by the MF page 6 -> 60 V: the DC part read 0.526 /
       0.528 V (53 %) for one DC phase (~1 s, READ? 0.526 V; in AUTO shown as AUTO,DC 0.528 V) in 2 of 4
       such changes in the first run (one AC+DC, one AUTO), then 0 of 9 in two AC+DC repeats (READ? or
-      DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the b7d9017 same-range item.
-      Rare, cause open (device 9292ec2, device-check doc "9292ec2" B5).
+      DBG:ACDC:STAT? polling); 0 of 30 SCPI changes and 0 of 13 MF 60 -> 6 V. Same signature as the 25-51 % partial conversions of the 540e056 same-range item.
+      Rare, cause open (device decaf60, device-check doc "decaf60" B5).
       Branch settle-fix: the MF and SCPI paths both call Dmm::set_range; the difference is timing (the
       tap and the range page's redraw delay the DMM poll, so the writes after a result, a phase switch or
       acdc_osr's one R22 = 0x17 in the first DC phases on a new range, land mid-conversion). Not proven.
@@ -1765,7 +1765,7 @@ Firmware:
       part stays the previous one, the phase count goes on; a phase with no DC part yet gets one more
       result, and the AC phase does not step down before the DC part is known). Device check: dc5.py MF 6 -> 60 V x10 in
       AC+DC and AUTO with DBG:ACDC:STAT? at 25 Hz: no DC part below 0.99 V.
-      **Device 28ace43: FAIL, reopened** (device-check doc "28ace43" 2). The DC part (STAT dc = dc_val, set
+      **Device f6c6e05: FAIL, reopened** (device-check doc "f6c6e05" 2). The DC part (STAT dc = dc_val, set
       only by a vetted result) read 0.5212 / 0.5224 V and READ? published **0.5244 / 0.5243 / 0.5240 V** as
       the first fresh readings after the NaN gap: 3 of 116 AC+DC changes 6 <-> 60 V, all 3 on 6 -> 60 V (MF
       1 of 44, SCPI 2 of 24; 0 of 48 with the change put 0-0.6 s into a DC phase, dcph.py), 0 of 20 in AUTO. So the SCPI path has it too, and the NaN rule makes the bad value the
@@ -1775,22 +1775,22 @@ Firmware:
       result (0.999 V) and ~0.3 s later the 0.52 V one, accepted, at the switch to AC; the DC part stays
       0.52 V for that AC phase (~1.7 s, 4-5 readings). The vet passes a result that agrees with the
       conversion before it, or any after VET_HELD_MAX holds, so a bad state lasting 2+ conversions or 5
-      holds gets through; 0.521-0.528 V in all 5 hits since 9292ec2 (not the 25-51 % scatter of a single
+      holds gets through; 0.521-0.528 V in all 5 hits since decaf60 (not the 25-51 % scatter of a single
       straddled write). Not fixed (cause unknown): needs vet_left / vet_held / the raw AD1 codes of the DC
       phase (a DBG ring; LOG:SOUR AD1 reprograms the converter and cannot watch the DMM's own conversions).
-      **Cause found and fixed (device-check doc "ad97fd7 / c8c2f02 / afcf151"):** DBG:ACDC:TRACE (ad97fd7) caught 5
+      **Cause found and fixed (device-check doc "ad97fd7 / c8c2f02 / a8048ba"):** DBG:ACDC:TRACE (ad97fd7) caught 5
       of 5 hits (40 SCPI changes aimed into DC phases; 4 of 7 at 0.75 s after the AC -> DC switch). The stock's
       once-flag OSR rule (`acdc_osr`) wrote R22 = 0x17 after the first result of the DC phase after the change;
       that result is read at the settle deadline, up to a conversion late, so the write landed mid-conversion:
       the next result came ~155 ms later at 52 % (60 V; 40 % on 6 V), the rule's 0x15 write gave another at the
       same 52 % 100 ms later, the two agreed and `vet_ad1` took it. Fix: no R22 write in the AC+DC DC phase
-      (7496c8c). Device: 0 of 110 on c8c2f02 and 0 of 110 on afcf151 (80 SCPI + 30 MF each, aimed 0.55-1.05 s
+      (8c086fa). Device: 0 of 110 on c8c2f02 and 0 of 110 on a8048ba (80 SCPI + 30 MF each, aimed 0.55-1.05 s
       into a DC phase, most at 0.75 s).
 - [x] AC+DC: READ? during the AC settle after a range change answers the reading from before the change
       (3-6 times, 0.85 s apart, until the first fresh one 3-6 s later), not +9.91E37 as the tmcnl-fix item
       expected ("READ? NaN after 0.85 s, as at entry"; scpi.rs: "the latest one if none comes within
       SCPI_QUICK_MS"). Harmless on a steady input; after an autorange step it held a transient value:
-      AC+DC autorange, calibrator 5.8 -> 6.3 V, READ? 3.3885 V for 5 s (device 9292ec2, B5). Decide: drop the
+      AC+DC autorange, calibrator 5.8 -> 6.3 V, READ? 3.3885 V for 5 s (device decaf60, B5). Decide: drop the
       latest reading on a range change in AC+DC (NaN until the first fresh one) or keep the doc's rule.
       Decided (owner): NaN. Branch settle-fix: Dmm::reading_pending from any range / function change
       (manual, SCPI, range page, autorange step) to the first reading of the new range; READ? that
@@ -1799,14 +1799,14 @@ Firmware:
       Device check: tl.py after VOLT:ACDC:RANG 60 / 6 and the MF page: READ? +9.91E37 until the first
       fresh reading, SYST:ERR? "Data stale"; FETCh? +9.91E37 in the gap; libsigrok `-c range=60V
       --samples 5` in AC+DC still gets readings (it skips the NaN).
-      Device 28ace43 (device-check doc "28ace43" 3): PASS. nan3.py, SCPI and MF 6 <-> 60 V x2: FETCh?
+      Device f6c6e05 (device-check doc "f6c6e05" 3): PASS. nan3.py, SCPI and MF 6 <-> 60 V x2: FETCh?
       +9.91E37 and READ? +9.91E37 + -100,"Data stale" every 0.85 s until the first fresh reading (3.3-5.0 s
       after SCPI, 3.4-4.2 s after the tap); none of the old reading. sigrok range=60V / 6V / 60V --samples
       5: rc 0, 999.7-1000 mV, CONF? follows, /dev/usbtmc2 stays; it leaves -100,"Data stale" in the queue.
 - [x] AC+DC method A settle (ACS_STEP 1 %): on the 40 Hz square 600 -> 60 V the AC part came back as
       4.821 / 4.790 V (true 4.768) and READ? 6.783 / 6.762 V (+0.55 / +0.24 %) for 1.7 s: the HPF tail falls
       < 1 % per result and passes the "flat" test, as the TODO feared. 60 -> 600 and 6 -> 60 V were right
-      (device 9292ec2, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
+      (device decaf60, B5). Options: a stricter step (0.2 %) or a minimum time after the change.
       Branch settle-fix (`acs_flat`, stock/re/docs/history/acdc-stock-vs-opendm40.md 12): flat = fell by <= 0.1 % (ACS_STEP)
       and, with two falls in a row in one AC phase, the rest of the decay d q / (1 - q) <= 0.05 %
       (ACS_REM); ACS_MAX_MS 6 -> 5 s, and the cap also ends the settle in a DC phase with the last AC
@@ -1814,64 +1814,64 @@ Firmware:
       phase's 4.7678 V is (host test meter-test acs_flat_tail_and_steady). Device check: sq5.py (40 Hz
       square, AC+DC, 60 <-> 600, 6 -> 60 V): every fresh READ? within 0.1 % of 6.746 V, gap <= 6 s; the
       1 V DC changes of dc5.py: gap 3-5 s (was 3.0-4.3 s).
-      Device 28ace43 (device-check doc "28ace43" 4): PASS. Square 6.7328 V on 60 V (4.759 V AC; the
-      calibrator gave 6.746 V on 9292ec2): every fresh READ? within 0.012 % of the run's level after 600 ->
+      Device f6c6e05 (device-check doc "f6c6e05" 4): PASS. Square 6.7328 V on 60 V (4.759 V AC; the
+      calibrator gave 6.746 V on decaf60): every fresh READ? within 0.012 % of the run's level after 600 ->
       60 and 6 -> 60 V, 0.075 % on 600 V; gaps 4.2 / 4.3 / 5.4 s (600 -> 60, 6 -> 60, 60 -> 600). 1 V DC
       (nan3.py, dcmf.py): gap 3.3-5.0 s.
 - [x] AC+DC autorange: a DC step of 0.5-0.8 V gives an AC part of up to 3.4 V for ~1 s (the AC path's HPF
       on the step; the calibrator's own step is clean within 0.3 s), hypot > 6 V, one up-range and back
       after the 6 s settle (5.8 -> 5.0 V: on 60 V from 0.25 to 5.98 s). One excursion, no hunting (device
-      9292ec2, B5). Could hold the up-range while the AC part falls fast.
+      decaf60, B5). Could hold the up-range while the AC part falls fast.
       Branch settle-fix: the same settle on an input step: a DC part that moved by > 0.5 % of the range
       between two DC results (ACS_DC_STEP), or an AC result > 1.5 x the AC part + 0.5 % of the range
       (ACS_JUMP, a step seen in the AC phase first). Its AC results are discarded and move no range; AC+DC
       keeps reading with the AC part held, and its DC phase steps no range down meanwhile (the
       magnitude would use the stale AC part). Emulator: couptest `i --meth A` (0.3 A DC -> 0.2 A AC,
-      AUTO coupling; failed since 422ed3e: ~10 s with no reading while the DC phase walked mA -> uA ->
-      10 A -> mA on the stale AC part) passes again on 1e5e271, as the full couptest. Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
+      AUTO coupling; failed since b3cbfbf: ~10 s with no reading while the DC phase walked mA -> uA ->
+      10 A -> mA on the stale AC part) passes again on 28f3029, as the full couptest. Device check: ar6.py / ar6b.py (DC 4..7 V, AC+DC AUTO range):
       no 6 -> 60 -> 6 V excursion on the 5.8 -> 5.0 V or 6.3 -> 5.8 V steps, a step across 6.0 V still
       moves the range once; READ? follows the DC step within ~1 s with the AC part held.
-      Device 28ace43 (device-check doc "28ace43" 5): PASS on its checks. 6.3 -> 5.8 V: one range step (ar6,
+      Device f6c6e05 (device-check doc "f6c6e05" 5): PASS on its checks. 6.3 -> 5.8 V: one range step (ar6,
       ar6b); 5.8 -> 5.0 V: none (ar6b); every step across 6.0 V moved the range once (5.8 -> 6.3, 4.0 -> 6.5,
       6.5 -> 5.0, 6.3 -> 5.8); READ? on the new level at 0.83 s on the same-range steps down (6.3 -> 5.8,
-      5.5 -> 4.0, 6.5 -> 5.0; 9292ec2: 6.737 / 5.679 / 5.957 V there for 2-5 s). The calibrator dips to
+      5.5 -> 4.0, 6.5 -> 5.0; decaf60: 6.737 / 5.679 / 5.957 V there for 2-5 s). The calibrator dips to
       2.2-3.9 V for ~0.2 s on every level change (calstep2.py, DC V FAST; the SLOW calstep.py missed it):
       the 2.3-5.3 V READ?s right after a step are that dip. Residual: next item.
 - [x] AC+DC autorange on the calibrator's level change (a ~0.2 s dip to 2-4 V, then the new level): 4.0 ->
       5.8 V took AC results of 2.42 / 2.53 V as the AC part (STAT ac, readings published; ACS_JUMP did
       not hold them) and went 6 -> 60 -> 6 V (1.0 -> 6.4 s); 7.0 -> 6.3 V went 60 -> 6 -> 60 V (the dip's
-      DC result stepped down). One excursion each, no hunting (device 28ace43, device-check doc "28ace43" 5).
+      DC result stepped down). One excursion each, no hunting (device f6c6e05, device-check doc "f6c6e05" 5).
       Decide whether a dip shorter than one DC phase should move the range.
-      **Fixed (device-check doc "ad97fd7 / c8c2f02 / afcf151" 3):** traced causes: the step's AC results rise
+      **Fixed (device-check doc "ad97fd7 / c8c2f02 / a8048ba" 3):** traced causes: the step's AC results rise
       as the RMS window fills (0.08 -> 1.17 -> 2.38 V) and "rose: flat" ended the settle (now a rise is flat
       only within ACS_STEP); a step ~4.6 s after an autorange step met the settle's 5 s limit, which took the
       jump (now a jump at the limit restarts an input-step settle); a DC result in the dip stepped down (AC+DC
       now steps down only in the DC phase after ACDC_DOWN_MS = 400 ms of results asking for it). Cost: an
-      AC+DC step down comes one DC phase later (60 -> 6 V 4.0-5.5 s after a 6.3 -> 4.0 / 5.8 V step on afcf151,
-      was 1.8-3.7 s). Steps up unchanged. Device afcf151: 27 steps, no excursion.
+      AC+DC step down comes one DC phase later (60 -> 6 V 4.0-5.5 s after a 6.3 -> 4.0 / 5.8 V step on a8048ba,
+      was 1.8-3.7 s). Steps up unchanged. Device a8048ba: 27 steps, no excursion.
 
-- [x] Fast logger cosmetics (device bfb6a19): LOG:DISK? keeps naming the file of a session stopped in its
+- [x] Fast logger cosmetics (device 825080c): LOG:DISK? keeps naming the file of a session stopped in its
       trial (the file is removed); its tpp fields keep the last probe's 381 / 387 in a 38400 / 4800 / AD1
       session (documented as 0 = none); the Record page's Fast estimate says "0 min left" under a minute
       (76800 on 5.9 MB = ~25 s at its 3 B/sample; the real 1.36 B/sample gave 56 s).
-      **Fixed (0f6d934):** the trial's unlink clears the file (LOG:DISK? file -1); `fastlog::begin` zeroes the
+      **Fixed (dda802c):** the trial's unlink clears the file (LOG:DISK? file -1); `fastlog::begin` zeroes the
       probe's numbers (a session without a probe reports 0 / 0); the Record page says "25 s left" under 2 min
       (seconds; still the 3 B/sample worst case, so the real time is longer). fastlogtest checks the first
-      two (--stop-in-trial: file -1; tpp 0 / 0 in every session below 76800). Device 246afc7: PASS (file -1;
+      two (--stop-in-trial: file -1; tpp 0 / 0 in every session below 76800). Device c92b605: PASS (file -1;
       tpp 0,0 in 4800 / AD1 / 38400 after 76800; "76800/s, 57 s left" in AC V).
-- [x] 4800 disk session on device bfb6a19: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
+- [x] 4800 disk session on device 825080c: max_lat 4.66 us at calbackup::FwFile::fill (region C: the info
       volume's FIRMWARE.BIN read by a host during the session). No sample lost at
       4800; at 76800 a host reading INFO/FIRMWARE.BIN would likely stall the ISR as range_cmd did.
-      **Fixed (0f6d934):** FwFile::fill / plain are `.text.vdisk_rd` (region B, with the rest of the volume's
+      **Fixed (dda802c):** FwFile::fill / plain are `.text.vdisk_rd` (region B, with the rest of the volume's
       read path). Emulator: fastlogtest --region-c --host-read reads every INFO/ file (FIRMWARE.BIN first)
       during 4800 / 38400 / 76800 sessions: no region C call (the old build: FwFile::fill). Device retest:
       copy INFO/FIRMWARE.BIN during a 76800 disk session, DBG:ISR? max_lat / late.
-      **Device 246afc7 (device-check-2026-10-21.md "246afc7"): FAIL.** The code is fine; the DATA is the problem:
+      **Device c92b605 (device-check-2026-10-21.md "c92b605"): FAIL.** The code is fine; the DATA is the problem:
       any INFO/ file read from internal flash >= 0x08080000 (the FIRMWARE.BIN tail from offset ~0x7C000, LOADER,
       BOOTDATA, CALIB) stalls the AD2 ISR 21.8 us per read (lat_pc memcpy / vdisk::mem_read). At 38400: late
       ~3.7 k, 10 k samples lost; at 76800: 289 k lost. FIRMWARE.BIN 0..0x7C000 and ROMBOOT.BIN: 280 ns. The
       emulator's region C hook sees fetches only.
-- [x] Region C DATA reads during a stream (above). **Fixed (cad487f, 7c76672, 70d69f7; docs/native-boot.md "The
+- [x] Region C DATA reads during a stream (above). **Fixed (a60525d, f0d0e0a, b727863; docs/native-boot.md "The
       slow flash bank while an AD2 stream runs"):** nothing reads flash >= 0x08080000 while `hy3131::streaming()`.
       The USB volume answers a READ(10) of a slow-bank sector (CALIB / BOOTDATA / LOADER whole, FIRMWARE.BIN
       from offset 0x7C000) NOT READY 02/04/01, the host retries (option a; b cannot hold LOADER / the
@@ -1882,35 +1882,35 @@ Firmware:
       region B (their tails ran after stream::start), so is LOG:SCALe? (main.rs log_scale, region C code read
       while streaming). Emulator: peripherals/FlashWatch.cs + regionc.py watch
       DATA loads from 0x08080000..0x08100000 (and slow-bank PCs the ISR interrupts) while HANDED; fastlogtest
-      `--region-c --host-read` FAILs on fbcd502 (memcpy <- 0x08080000, vdisk::mem_read <- 0x080C0000,
-      Logger::start) and PASSes on 70d69f7 at 640 (AD1) / 4800 / 38400 / 76800, NOT READY exactly on those
+      `--region-c --host-read` FAILs on 2f5d3b8 (memcpy <- 0x08080000, vdisk::mem_read <- 0x080C0000,
+      Logger::start) and PASSes on b727863 at 640 (AD1) / 4800 / 38400 / 76800, NOT READY exactly on those
       sectors, the same bytes after the session; `--poll` with the scope / LOG / identity queries at 9600:
       PASS; wavetest (INFO/ in the Wave view), ad2streamtest, inrushtest, fatren-test, tools/*/run.sh,
       emu/hy3131/tests: PASS. Linux over the real usb-storage
       path (emu/kvmtest/run.sh, KVM guest, vhci-hcd): a 6 s session = the copy waits ~65 s, exit 0, bytes
       equal, no kernel message; past 180 s (6 x the 30 s sd timeout, scsi_cmd_runtime_exceeced) the kernel
       logs an I/O error, O_DIRECT reads fail EIO (buffered cat survived via the page-cache re-read).
-      **Device retest** (246afc7 item 3 again, on the image from 70d69f7 or later): (1) 38400 and 76800 disk sessions,
+      **Device retest** (c92b605 item 3 again, on the image from b727863 or later): (1) 38400 and 76800 disk sessions,
       host `cp INFO/*.BIN` (FIRMWARE.BIN first) during state 3: DBG:ISR? max_lat <= ~300 ns, late 0, overruns 0,
       the file lost_before 0; the cp finishes after the session ends, files byte-equal to copies made
       before (dmesg: no I/O error when the session is < 3 min). (2) The same in the Wave view at 1 ms/div
-      (76800): cp blocks while the view is open, completes after MENU. (3) O_DIRECT split test of the 246afc7
+      (76800): cp blocks while the view is open, completes after MENU. (3) O_DIRECT split test of the c92b605
       run (`fwdirect.py` 0x7C000..0x82000 and CALIB / LOADER / BOOTDATA) during 38400: each read waits, no
       max_lat jump; `fwdirect.py` 0..0x70000 still reads at once (280 ns). A buffered `cp` of the FIRMWARE.BIN
       head may also wait: a READ(10) is refused whole when any of its sectors is slow, and the kernel's
       readahead near offset 0x7C000 spans the boundary. (4) UID / OTP / OPTBYTES.BIN (system memory 0x1FFF7xxx / 0x1FFFC000, not refused: assumed
-      fast, not measured on 246afc7) read during a 76800 session: max_lat. (5) SCOP:MEAS:VPP? / WAV:PRE? /
+      fast, not measured on c92b605) read during a 76800 session: max_lat. (5) SCOP:MEAS:VPP? / WAV:PRE? /
       DBG:HWTRIG? / LOG:SCALe? / LOG:DEST? / LOG:DURation? polled during a 38400 disk session, and BT
       command 02 in the Wave view: late 0. (6) Device page / *IDN? / SYST:MOD? / BT 00 / 02 values unchanged (copies). (7) Windows: copy
       INFO/CALIB.BIN during a 60 s session: does Explorer wait or fail, and after how long? (The read-only
-      volume itself passed on Windows 11, 246afc7, above.)
-      **Device 2d33d3a (device-check-2026-10-21.md "2d33d3a"): 1-4, 6 PASS, 5 PASS for the listed queries;
+      volume itself passed on Windows 11, c92b605, above.)
+      **Device 519fb8a (device-check-2026-10-21.md "519fb8a"): 1-4, 6 PASS, 5 PASS for the listed queries;
       (7) Windows not run.** 38400 / 76800 disk sessions with `cp INFO/*.BIN` (FIRMWARE.BIN first): max_lat
       280 ns, late / overruns / lost_before 0, the cp returns as the session ends, the copies are byte-equal, no
       sda dmesg line. Wave view 1 ms/div: cp blocked 40 s, returned at MENU, late 0. O_DIRECT splits: slow ranges
       wait the whole session, the head reads at once, 280 ns. UID / OTP / OPTBYTES at 76800: 867 reads, 280 ns.
       BT 00 / 02 in the Wave view: late 0, but not answered (stock frames wait for the stream's end, UF-36).
-- [ ] **Generator queries re-apply the generator, in region C (device 2d33d3a).** `OUTP?` polled during a 38400
+- [ ] **Generator queries re-apply the generator, in region C (device 519fb8a).** `OUTP?` polled during a 38400
       disk session: late 25, max_lat 21.1 us at lat_pc `Gen::apply`, 29 samples lost in 10 s (an ngscopeclient
       polling `OUTP?` did the same to three of the retest runs). `App::scpi` called `gen_set` after every
       generator command, queries included (also a stop_outputs + restart glitch on a running output, any time).
@@ -1920,7 +1920,7 @@ Firmware:
       PASS (also SOUR:VOLT:OFFS? / DCYC?), the 640 / 4800 / 38400 / 76800 region C run PASS. Device retest: OUTP? / SOUR:*? polled in a 38400 disk session: late 0; with
       the generator ON (owner only), OUTP? no longer glitches the output. Left: a generator SETTING during a
       stream still runs Gen::apply in region C.
-      **Device 0256df2 (device-check-2026-10-21.md "0256df2"): PASS.** OUTP?, SOUR:FREQ?, SOUR:FUNC?, SOUR:VOLT?,
+      **Device 469f354 (device-check-2026-10-21.md "469f354"): PASS.** OUTP?, SOUR:FREQ?, SOUR:FUNC?, SOUR:VOLT?,
       SOUR:VOLT:OFFS?, SOUR:FUNC:SQU:DCYC? every 0.25 s in AD2 disk sessions: 38400 (360 queries) and 76800
       (384): late 0, overruns 0, max_lat 280 ns, lost_before 0; OUTP? 0 throughout (OFF stays OFF). Open: the
       generator-ON glitch check (owner only) and the SETTING-during-a-stream remainder.
@@ -1934,7 +1934,7 @@ Firmware:
       rates (Gen::apply, Settings::with_amp), after PASS (the 76800 session ran at the 38400 rung after its writer
       trial in both runs, typ profile, lost 0). Device retest: the same settings with the output OFF
       (no OUTP ON on the device): late 0 at 38400 / 76800.
-      **Device 3e41549: PASS** (doc "3e41549" 4a / 4b): SOUR:FREQ 1000; SOUR:FUNC SQU; SOUR:VOLT 1.5; SOUR:FREQ 2345
+      **Device 40728b8: PASS** (doc "40728b8" 4a / 4b): SOUR:FREQ 1000; SOUR:FUNC SQU; SOUR:VOLT 1.5; SOUR:FREQ 2345
       during AD2 disk sessions with the 6 queries polled: late 0, overruns 0, max_lat 280 ns, 576 002 / 1 152 003
       rows, lost 0; OUTP? 0 throughout. Open: the generator-ON check (owner only).
 - [x] A copy of a slow-bank INFO/ file while the meter streams for more than ~3 min (an open Wave view, a long
@@ -1968,7 +1968,7 @@ Firmware:
       before, DBG:ISR? max_lat 280 ns / late 0, LOG:COUNt? lost 0, LOG:DISK? fields unchanged vs a session
       without the copy (the SPI reads share the chip with the logger's page programs). (3) The same in the
       Wave view at 1 ms/div for > 3 min. (4) Windows Explorer copy of INFO/ during a session.
-      **Device bb15d39 (device-check-2026-10-21.md "bb15d39" M1-M5): (1) PASS** (first boot `1,4,1,5164`,
+      **Device c785807 (device-check-2026-10-21.md "c785807" M1-M5): (1) PASS** (first boot `1,4,1,5164`,
       after DBG:RESET `1,3,0,302`). **(2) 38400 PASS, 76800 FAIL**: 38400, 286 s until the disk was full, 5 cp
       rounds of the 8 files: each returns in ~1.1 s, byte-equal, lost 0, late 0, max_lat 280 ns. 76800: every
       cp of a mirrored file after the writer trial drops samples (LOADER.BIN alone: 21 745; the 8 files: ~46 000
@@ -1976,7 +1976,7 @@ Firmware:
       (gate 2). >= 5 min was not possible: the free 12.9 MB hold ~286 s at 38400 and ~130 s at 76800.
       (3) Wave view 200 s, 5 rounds: copies fast and byte-equal, late 0 / overruns 0; ring `dropped` grows
       ~50/s with or without a copy (open, below). (4) not run.
-- [x] **76800 disk session + cp of a mirrored INFO/ file loses samples** (device bb15d39, doc "bb15d39" M2).
+- [x] **76800 disk session + cp of a mirrored INFO/ file loses samples** (device c785807, doc "c785807" M2).
       **Fixed on branch mirror-bw (emulator; device retest pending).** Cause: not the chip's busy time but the
       main loop's CPU. A mirror sector is a polled 512-byte SPI read (~0.97 us per byte on the device, plus a
       wait for a page program in the chip), ~1.1 ms of wall time with the stream ISR at ~54 % of the CPU; a
@@ -1994,19 +1994,19 @@ Firmware:
       Emulator model (24547cf): GD32_SPI IdleStartNs 330 (run.py --spi-disk-gap-ns) gives the device's 0.97 us
       polled byte; W25Q128 StrictBusy ignores a READ / program during BUSY. Results (--mips 110
       --isr-stall-ns 700, typ chip, LOG:DUR 10, `fastlogtest --host-read --host-files LOADER.BIN --host-only
-      --host-delay 3`): c0ab070 lost 6 428 with the old model, **119 853 of 768 000** with the new one (~10 000
+      --host-delay 3`): 9cfa6a6 lost 6 428 with the old model, **119 853 of 768 000** with the new one (~10 000
       per LOADER.BIN copy; device ~21 700); a copy inside the trial: fell back to 38400 (as on the device).
       This branch: **lost 0**, rung kept, 2 279 mirror sectors read in the run, longest hold 39 ms; copy in
       the trial: kept 76800, lost 0; every INFO/ file + DBG:PROF? polls at 38400 / 76800 with `--region-c`:
       lost 0, no region C code / slow-bank load, no NOT READY; --noise 1000 (2.43 B/sample, 730 pages/s) +
       LOADER.BIN: lost 0. Linux usb-storage (emu/kvmtest, KVM_MIPS=110 KVM_ISR_STALL_NS=700, dm40rate=76800):
       `cat` of CALIB / BOOTDATA / LOADER / FIRMWARE.BIN with drop_caches, byte-identical, no kernel sense /
-      reset lines; started 40 s into the run, 2 rounds: lost 0; started inside the writer trial: c0ab070 fell
+      reset lines; started 40 s into the run, 2 rounds: lost 0; started inside the writer trial: 9cfa6a6 fell
       back to 38400, this branch kept 76800 with lost 0 in one run and 20 (0.26 ms, cause not isolated) in
       another. The copy is slower than before (4 files: ~27-35 s of guest time vs ~11 s; the emulator runs
       ~10x slower than real time). Headroom (LOG:DISK? field 14, no copy): the writer takes 589 permille of the main
       loop at 76800 / 1.21 B/sample, 702 at 2.43 B/sample, 300 at 38400. Device retest: below.
-- [x] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on bb15d39. **Fixed on branch
+- [x] Wave view at 1 ms/div: DBG:ISR? `dropped` (ring full) grows ~50/s on c785807. **Fixed on branch
       mirror-bw (emulator).** `dropped` (field 6) = logger ring overflows: the stream ISR found the 2048-record
       ring (26.7 ms at 76800) full and dropped the newest samples; each one also restarts the wave record (no
       triggered frame across a hole), so it was a real loss of displayed frames, not decimation. Cause: a
@@ -2026,7 +2026,7 @@ Firmware:
       as M2a (~1.1 s per round of LOADER.BIN). (5) Wave view at 1 ms/div with the 10 Hz square (wv.py 200 s,
       cp rounds every 40 s): DBG:ISR? dropped +0, DBG:PROF? loop max < 26 ms. (6) dmesg on the host: no
       usb-storage reset / timeout during the copies.
-      **Device a3b6d0a (device-check-2026-10-21.md "a3b6d0a"): PASS 1-6.** (1) 76800 until full, 5 rounds: 9 820 200
+      **Device d2aff22 (device-check-2026-10-21.md "d2aff22"): PASS 1-6.** (1) 76800 until full, 5 rounds: 9 820 200
       rows, lost 0, gate 1, copies byte-equal (FIRMWARE.BIN 1.7 s, LOADER.BIN 0.7 s), longest hold 11 ms; LOADER.BIN
       at state 3 + 6 s: lost 0 (was 21 745). (2) in the trial x3: gate 1, lost 0, copy 1.65 s, holds up to 50 ms.
       (3) field 14 ~508 (headroom ~492; emulator 411). (4) 38400 240 s: lost 0, FIRMWARE.BIN 0.87 s. (5) Wave view
@@ -2084,20 +2084,20 @@ Firmware:
       either session, rows 307 201 / 614 401, lost 0.
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
-      **Device bb15d39: PASS** (doc "bb15d39" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
+      **Device c785807: PASS** (doc "c785807" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
 - [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
-      Device 940e8aa (docs/device-check-2026-10-21.md "940e8aa: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
+      Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
       the slow-bank mirror is off (MIR_OK false after a failed SPI read); `DBG:VDISK:MIR?` 1 (OK), so a healthy
       meter cannot reach the path from the host. It needs a debug switch that turns the mirror off (none exists).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
-- [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device 246afc7: LOG:DEST? / DUR? in the Wave view,
-      late 1, 2.8 / 5.8 us). Fixed in bb0bd79 (out of .cold; on rust-fw-poc). Emulator: fastlogtest
+- [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device c92b605: LOG:DEST? / DUR? in the Wave view,
+      late 1, 2.8 / 5.8 us). Fixed in 8c5ac07 (out of .cold; on rust-fw-poc). Emulator: fastlogtest
       `--host-read` and wavetest's 2 / 1 ms/div polls now send LOG:DEST? / LOG:DURation? while streaming
       (region C hooks: none). Device retest: LOG:DEST? / DUR? in the Wave view at 1 ms/div, late 0.
 - [x] MMEM:CAT? in the Wave view at 76800: 123 ms in one pass, `dropped` +6813 per query (the view's ring; ISR
-      late 0). Device 246afc7 `wdrop.py`. **Fixed in 3f32bc3:** the reply is cached (csvlog.rs `Cat`, 6 KiB
+      late 0). Device c92b605 `wdrop.py`. **Fixed in 3f32bc3:** the reply is cached (csvlog.rs `Cat`, 6 KiB
       SRAM) and valid while `msc::FLASH_WRITES` (every program / erase) is unchanged; `catalog_warm` builds
       it before the Wave view's / the inrush capture's stream starts (also after a Save CSV / screenshot
       pause); "Mass storage busy" as before while a writer holds the disk. Emulator wavetest 1 ms/div,
@@ -2106,28 +2106,28 @@ Firmware:
       shows in MMEM:CAT?.
       **Device d330877 (device-check-2026-10-21.md "d330877" 1b): PASS**: MMEM:CAT? 7-20 ms, dropped +0, late +0 (x3); Save CSV not
       repeated.
-- [x] 76800 stream / rate (loop fix PASSED on device 8ce42e2; its nominal was wrong, fixed in 0d3024e, device
-      check PASSED on 940e8aa). **Device 8ce42e2 (device-check-2026-10-21.md "8ce42e2: the 76.8 kS/s PLL retest"):** the
+- [x] 76800 stream / rate (loop fix PASSED on device c830e09; its nominal was wrong, fixed in 69abac4, device
+      check PASSED on 2f56ff9). **Device c830e09 (device-check-2026-10-21.md "c830e09: the 76.8 kS/s PLL retest"):** the
       loop locks from a cold start within 5 s at rate_mhz 76 800 0xx = ppm_x10 -29 35x (-2935 ppm) against the 76 574.6
       nominal, 1.125 ISR entries per sample (was 1.478), cpu 455-457 permille, probes / captured 0.063,
       edges_after_b / probes 0.50, late / bad / overruns / slips 0, the transition-sample scatter 0.41-0.62 us
       rms (was 3.0-3.45), disk 76800 lost_before 0 with ring high water 52 (was ~1050). The rate is the
-      datasheet's: gap-free disk data 1919.95 samples per 40 Hz calibrator period (9292ec2: 1914.27), the
+      datasheet's: gap-free disk data 1919.95 samples per 40 Hz calibrator period (decaf60: 1914.27), the
       Wave view's record 960 per half period. **So the "real rate 76 574.6" below was the old loop's doing,
       not the chip's** (a slower chip under that read pattern or skipped conversions: not separated), and
-      8ce42e2's nominal made LOG:PRE? / the DLG and CSV headers / the Wave view 0.29 % off (39.88 Hz for the
-      40 Hz square). 0d3024e: AD2_OSR32_REAL_MHZ = ad2_rate_mhz(0), emulator Ad2Osr32Ppm default 0; the loop
-      and MAX_PPM 5000 stay (owner: keep 5000?). Device check of 0d3024e: a fresh-boot 76800 host drain locks
+      c830e09's nominal made LOG:PRE? / the DLG and CSV headers / the Wave view 0.29 % off (39.88 Hz for the
+      40 Hz square). 69abac4: AD2_OSR32_REAL_MHZ = ad2_rate_mhz(0), emulator Ad2Osr32Ppm default 0; the loop
+      and MAX_PPM 5000 stay (owner: keep 5000?). Device check of 69abac4: a fresh-boot 76800 host drain locks
       near ppm_x10 0 (as 38400: -2..-16), entries ~1.125; LOG:PRE? nominal_mhz 76 799 016; ACQ:SRAT? 76799 and
       the 1 ms/div record's 40 Hz square at 40.00 Hz from WAV:PRE? xinc; the DLG header nominal 76 799.016.
-      **Device 940e8aa (docs/device-check-2026-10-21.md "940e8aa: screenshot preparation, the 76.8 kS/s nominal") item 2: PASS**: first AD2 session after boot,
+      **Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal") item 2: PASS**: first AD2 session after boot,
       ppm_x10 -2..-4 from 5 s, entries 1.1252, cpu 461, error counters 0; LOG:PRE? 76 799 016; CSV / DLG headers
       76799.016; record xinc 13.02084 us -> 40.0011 Hz; 1919.948 samples per calibrator period. ACQ:SRAT? is
       76 800, not 76 799: `wave_real_fs` uses ad2_rate_mhz(0) = exactly 76 800 000 mHz, the logger's 76 799.016 is
       1e12 / the rounded 13 021 ns period (12.8 ppm apart; the prediction above was wrong, not the firmware).
       Open: owner's call on MAX_PPM 5000.
       The history as investigated before the retest (its premise is wrong, see above):
-      Device e8cc4e9 / bfb6a19: rate_mhz 76 723.4-.8 =
+      Device 20a91d0 / 825080c: rate_mhz 76 723.4-.8 =
       the Pll's +1000 ppm clamp in every 76800 session, 1.476 / 1.478 ISR entries per sample, cpu_permille
       544-548; the record stamps 76 574.5 / 76 574.4-.9 S/s, LOG:PRE? measured_hz 76 574. Investigated
       2026-10-23 (docs/dmm-input-scope-feasibility.md 11.12 "The 76.8 kS/s rung's rate and the lopsided
@@ -2147,7 +2147,7 @@ Firmware:
         read-back C after the NEXT edge and reads "edge after B", so the kicks walk the phase forward a whole
         period to that next edge (one conversion slips, frames tear on the way), and the old loop stepped
         the word on every result of the walk, all "lengthen". With the chip 2935 ppm off the clamp's 1000,
-        the phase was held by kicks with such walks over and over: in the e8cc4e9 square dumps a transition
+        the phase was held by kicks with such walks over and over: in the 20a91d0 square dumps a transition
         sample's value against its stamp's phase scatters over the whole edge ramp (~+-6 us, 3 us rms; 0.5
         us at 38400): conversions doubled / skipped / torn unseen (bad / lost / slips 0: nothing counts a
         slip, the sign-copy check cannot see a torn frame). The emulator at the device's rate and the old
@@ -2164,23 +2164,23 @@ Firmware:
       - Emulator (--mips 110 --isr-stall-ns 700): see the feasibility doc's table; start-of-session walks
         (the edge search's error, max run ~45, a slip or two) remain as in the old build but no longer
         drag the word.
-      Device retest: done on 8ce42e2 (above).
-- [x] Wave view at 76800, 1 ms/div (device 8ce42e2): late 1, DBG:ISR? max_lat 6.16 us at lat_pc
-      `scope_wav::query` (region C), with ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? polled every 5 s (9292ec2's
+      Device retest: done on c830e09 (above).
+- [x] Wave view at 76800, 1 ms/div (device c830e09): late 1, DBG:ISR? max_lat 6.16 us at lat_pc
+      `scope_wav::query` (region C), with ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? polled every 5 s (decaf60's
       p5.py polled only DBG:ISR? / LOG:COUNt?: 280 ns). The range_cmd pattern: the SCOPe / ACQuire query path
       fetches from C while the stream runs.
-      **Fixed (0f6d934):** scope_wav.rs and its parser scpi::wav_cmd are region B (~2 KB). wavetest polls
+      **Fixed (dda802c):** scope_wav.rs and its parser scpi::wav_cmd are region B (~2 KB). wavetest polls
       ACQ:SRAT? / SCOP:MEAS:FREQ? / VPP? / TRIG:STAT? / WAV:POIN? / FORM? / PRE? / DATA? / CHAN1:OFFS? /
       SCAL? / TIM:SCAL? / DBG:PROF? at 2 and 1 ms/div for 4 s each under the region C hooks: none (the old
-      build: scope_wav::query, prof::report). Device 246afc7: PASS (1 ms/div, 61 s, the 8ce42e2 polling + CONF? /
+      build: scope_wav::query, prof::report). Device c92b605: PASS (1 ms/div, 61 s, the c830e09 polling + CONF? /
       MMEM:CAT?: 260 ns, late 0). Its new whole-run check found three more of the kind, now
       region B too: CONF? (App::range_si) and MMEM:CAT? (csvlog::catalog_scpi with fatdir's for_each / open /
       find_root / chain / fat_get / dir_of and fatren's le16 / le32 / sfn_is / parse_bpb / Vol helpers,
-      `.text.fat_rd`) in the Wave view. Region B 57.7 -> 51.5 KB free, C 16.9 -> 22.8 KB. Device retest: the 8ce42e2 polling
+      `.text.fat_rd`) in the Wave view. Region B 57.7 -> 51.5 KB free, C 16.9 -> 22.8 KB. Device retest: the c830e09 polling
       at 1 ms/div, max_lat / late. The FREQ? item below stays open. Also: SCOP:MEAS:FREQ? answers 0 (screen "Freq: --") at 1 and
       2 ms/div on a 40 Hz signal (less than one period on the 10 / 20 ms screen), so the Wave view cannot
       show a 76800 frequency below ~100 Hz; the record (WAV:POIN MAX, 348 ms) would have the periods.
-- [x] dm40scpi.py `log` stopped by SIGINT mid-drain (device 8ce42e2): afterwards every USBTMC query read
+- [x] dm40scpi.py `log` stopped by SIGINT mid-drain (device c830e09): afterwards every USBTMC query read
       returned empty (new processes too) until a USBTMC INITIATE_CLEAR (ioctl USBTMC_IOCTL_CLEAR); the
       logger itself had stopped (LOG:STAT? 0). A pending bulk-IN reply left half read; the tool could catch
       SIGINT and clear, and dm40dbg.Link could clear on an empty read.
@@ -2212,21 +2212,21 @@ Firmware:
       Device retest (host only, any opendm40 image): `dm40scpi.py log x.csv --source ad2 --rate 38400 -d 60`,
       Ctrl-C after ~5 s, several times: clean end with the trailer, `dm40scpi.py info` answers at once, no
       "empty USBTMC reply" note; then make the desync on purpose (kill -INT while `cat /proc/PID/wchan` reads
-      usbtmc_generic_read, with the old tool from 3473fdf) and check that `dm40scpi.py info` repairs it.
-      **Device retest done (f6858b2, 2026-10-23, device-check doc "bbc87a3 host tools"):** 5 / 5 SIGINT runs clean
+      usbtmc_generic_read, with the old tool from 9f4edb3) and check that `dm40scpi.py info` repairs it.
+      **Device retest done (9f36bbe, 2026-10-23, device-check doc "d34413c host tools"):** 5 / 5 SIGINT runs clean
       with the trailer, `info` at once, no note. The recipe's wchan does not happen on the real meter during
       `log` (it sends the rest of the 6006 B block before the read waits; 15.7 M polls, no usbtmc_generic_read),
       so the desync was made with the old Link reading 6136 B DBG:LCD? blocks (`lcdread(0,0,320,48,15361)` in a
       loop, SIGINT at wchan = usbtmc_generic_read): *IDN? empty; the new `info` printed the note and repaired it.
       The same cut against the new Link: 3 / 3 in step.
-- [x] emu/hy3131/dcvtest.py fails on bfb6a19 and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
+- [x] emu/hy3131/dcvtest.py fails on 825080c and later (found 2026-10-23, not caused by the 76.8 kS/s Pll
       change: the same with the old model): LOG:SCALe? per-code 4.767e-05 / 4.812e-04 against the model's
       4.721e-05 / 4.721e-04 (+0.97 / +1.9 %, the check allows 0.3 %). modetest's stock cap-big (100 uF reads
       104 uF) fails the same way with either model.
       The test, not the firmware or the model: +0.97 / +1.9 % are exactly the model's per-range per_code factor
-      of the DC-coupled row (HY3131.cs Ad2DcGainR 1.0096 / 1.0188, the device's, since 8bb87e9, not fd3555d),
+      of the DC-coupled row (HY3131.cs Ad2DcGainR 1.0096 / 1.0188, the device's, since fb96992, not 7ee7c09),
       which dcvtest did not expect. dcvtest now expects nominal x that factor / ad2dcg: PASS (acdc-approaches.md
-      10.9 item 3). The stock cap-big case is unrelated (it fails on a45c996 already).
+      10.9 item 3). The stock cap-big case is unrelated (it fails on af4be54 already).
 - [ ] 76800 CHOP ON: one isolated mid-level glitch per ~2 M samples (seq 752877: -65616 between -98272s;
       seq 133301: 82960 between ~98300s), bad 0; none in 2.1 M with CHOP OFF or at 4800 / 38400.
 - [x] dm40scpi.py `log --source ad2 -d N`: drain() returns only on a block < 500 records, so above the
@@ -2236,9 +2236,9 @@ Firmware:
       the trailer says `# stopped_by,duration|count|ctrl-c (after S s)`. Emulator over vhci (the emulator
       drains slower than 38400 S/s, so it hung like the device): -d 5 at 38400 ran until killed before, ends
       after 4.3 s now; -n 1234 = 1234 rows. Device retest: `-d 10` at 38400 ends after ~10 s.
-      **Device retest done (f6858b2, 2026-10-23):** `-d 10` at 38400: `stopped_by,duration (after 10.028 s)`,
+      **Device retest done (9f36bbe, 2026-10-23):** `-d 10` at 38400: `stopped_by,duration (after 10.028 s)`,
       360 637 rows; `-n 5000`: exactly 5000 rows, `stopped_by,count`.
-- [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (6353627,
+- [x] (B) DC-coupled V on AD2 (E7, feasibility 1.3 last row / section 13): device test 6.5 (f4c792e,
       DBG:AD2:DCV?, tools/ad2dcv.py): the AC V row with SAD2IP = OP1O is linear to 0.003 % of the
       range, 3..10 codes sd, gain +0.84 / +1.79 / +0.53 / +0.27 % vs nominal; AD1 reads 0.3..0.9 k
       counts low while AD2 converts. Implemented (1ad2943): LOG:SOURce AD2 / the fast logger / the
@@ -2249,14 +2249,14 @@ Firmware:
       Note 7 in the stock DC rows (DBG:AD2:N7?, tools/ad2n7.py, section 13.2): AD2 + AD3 + RMS left
       on shift AD1 by 0.03..0.16 % of the range: no AD2-based "AC?" hint in DC V without its own cal.
   - [ ] E7 open: 600 / 1000 V gain table from >= 100 V (the calibrator stops at 24 V); offset drift over
-        long sessions (no re-cal). The clip autorange: device 1e39149, 15 V on 2 V/div -> 20 V/div (PASS);
-        Wave view CONF? in DC V / DC mV answered the uA format (fixed; device 94de654: "VOLT +6,+1E-04", PASS).
+        long sessions (no re-cal). The clip autorange: device 33b44bd, 15 V on 2 V/div -> 20 V/div (PASS);
+        Wave view CONF? in DC V / DC mV answered the uA format (fixed; device 92fb8fa: "VOLT +6,+1E-04", PASS).
 - [x] (B) AD2 samples to the SPI disk (.DLG): the fast logger (LOG:DEST DISK, above / docs/compact-log-format.md
       "Fast stream"). Over BT: the ~870 records/s link ceiling (docs/bt-scpi.md) is below AD2's slowest rung
       (1200 S/s): LOG:STATe ON from BT is refused for AD2 / > 800 S/s ("Rate too high for Bluetooth"), AD1
       (<= 640 S/s) streams over BT LOG:DATA?; BT LOG:DATA? of a faster USB session: empty block + the error.
-      Device 3d19ea1 (before this refusal existed): AD2 1200 S/s started and drained over BT gave 918 records/s,
-      lost 0, 6 593 of 36 418 overwritten (ring full): confirms the ceiling (device-check "Bluetooth (3d19ea1)").
+      Device 8b9cf79 (before this refusal existed): AD2 1200 S/s started and drained over BT gave 918 records/s,
+      lost 0, 6 593 of 36 418 overwritten (ring full): confirms the ceiling (device-check "Bluetooth (8b9cf79)").
 - [ ] Fast logger device check (fastlog.rs; ~30 min; emulator results in docs/compact-log-format.md):
       1. DC V, LOG:SOUR AD1, LOG:OSR 0, LOG:CHOP OFF, LOG:DEST DISK, LOG:DUR 60, LOG:STAT ON: LOG:DISK? goes
          1 (prep, note the seconds) -> 3 -> 5; LOGS/FAST000.CSV on the USB volume == dlog.py of MMEM:DATA?
@@ -2274,7 +2274,7 @@ Firmware:
          dm40scpi.py --bt log --source ad1 --osr 0 --chop off for 60 s, LOG:COUNt? overwritten 0 (the
          870/s ceiling: 640/s should hold), then OSR 0 chop on (320/s).
       7. Prep time on the real chip for LOG:DUR 60 at 38400 (~7 MB): erase time vs the emulator's model.
-      Device 085f8dc (device-check-2026-10-21.md "DMM rail wake and fast logger"): (1) AD1 640/s: 1 122 of
+      Device e656df3 (device-check-2026-10-21.md "DMM rail wake and fast logger"): (1) AD1 640/s: 1 122 of
       ~38 400 lost (1.8 %, g2 gaps, max 4.7 ms) - FAIL, to investigate; CSV on the volume == the tool's.
       (2) AD2 4800 / 19200: 0 lost; 38400: 1 lost; max_lat 1.6-12 us (not ~0.24). Host stop mid-run: clean
       (done, decodes to the last row). 3-7 not run.
@@ -2285,7 +2285,7 @@ Firmware:
         The slower AD1 settings keep the main-loop sampler, which now reads R00..R02 blind once when
         AD1F does not come 1.25 periods after the last sample (the read-clear race; DBG:ISR? `late`).
         Emulator (AD1F race on, `IntfRaceAd1`): AD1 640 / 160 to disk 0 lost.
-        Device d284dff (2026-10-22): AD1 640 to disk FAILED: no AD1 edge in the 3-period search, the
+        Device 7674c85 (2026-10-22): AD1 640 to disk FAILED: no AD1 edge in the 3-period search, the
         gated CPU stream then never probed (probes 0, captured 0 for 700 s) -> probes while gated, an
         8-period AD1 search. AD1 40 (OSR 3 chopped, main loop) host session 60 s: 2320 samples, LOG:GAPs?
         all 0, 83 blind rescues (`late`; 3 / 91 equal to the previous value, as elsewhere): the device
@@ -2296,7 +2296,7 @@ Firmware:
         6.1 us, lat_pc VDisk::block_size (region C: the desktop polls the mounted volume) -> every
         VDisk BlockDevice method and the directory sectors in region B. Volume read of FAST006.CSV
         (53 MB): ~39 KB/s, the main loop's USB section ~15 ms per pass -> DBG:VDISK:RD? to see where.
-        Device 41f3f87: AD1 640 / 320 / 160 (chop off) to disk 60 s: 38402 / 19201 / 9602 samples,
+        Device c28c91c: AD1 640 / 320 / 160 (chop off) to disk 60 s: 38402 / 19201 / 9602 samples,
         0 lost, gaps 0, locked, -0.9 ppm, max_lat 0.24 us. AD1 40 host 60 s: gaps 0, 76 rescues,
         stamps 26 ms apart (LOG:COUNt? still says 73 lost: the span vs the nominal 25 ms -> fixed: the
         main-loop AD1 sampler's `lost` divides the span by the mean of the measured flag-to-flag
@@ -2309,20 +2309,20 @@ Firmware:
         two CSV cursors + seek checkpoints (a head-reading indexer no longer drags one cursor), a
         lock timeout (re-acquire after 2 s unlocked with nothing captured, then end the session),
         DBG:VDISK:RD? also counts non-cursor seeks, headers read, rows decoded: to be measured.
-        Device 7534701: FAST003.CSV sequential 64 KiB reads 571 KB/s (was ~40), RD? delta per sector
+        Device d8e249d: FAST003.CSV sequential 64 KiB reads 571 KB/s (was ~40), RD? delta per sector
         0.21 ms, 0.1 SPI reads, 200 non-cursor seeks / 842 headers in 68 k sectors; `dd bs=1M` of
-        FAST002.CSV (26 MB) 1.4 MB/s. The 41f3f87 slowness (one cursor walked headers per sector)
+        FAST002.CSV (26 MB) 1.4 MB/s. The c28c91c slowness (one cursor walked headers per sector)
         matches the indexer interleave the second cursor + checkpoints address; not proven which.
         Sanity: AD1 640 and AD2 19200 to disk 30 s, 0 lost, locked, max_lat 0.24 / 0.28 us.
-      - Emulator: the AD2 19200 DMA lock never converged in 3 of 9 sessions (d284dff; 0 of 9 on
-        b21b77c): a coin-toss probe around the edge geared kp up before it reached kp_min ->
+      - Emulator: the AD2 19200 DMA lock never converged in 3 of 9 sessions (7674c85; 0 of 9 on
+        eb85190): a coin-toss probe around the edge geared kp up before it reached kp_min ->
         ad2pll `result`: locked also at kp <= kp_max / 4 after 64 probes (9 of 9 pass).
       - (2) max_lat 12 us at the disk session's start / stop: region C code ran while the ISR streamed
         (`fast_events` / `fast_start` (.cold) started the logger and went on in C: `fast_head`,
         `prep::run_begin`; at the end `fast_events` ran before it stopped the logger). Now
         `Logger::plan` + the header first (C), `logger.start` / `logger.stop` in main.rs (B). Emulator
         hooks on every region C function, flagged when entered with the bus handed to the ISR (the
-        hy3131 HANDED byte): b21b77c `fast_events` at the stop of an AD2 38400 disk session; now none
+        hy3131 HANDED byte): eb85190 `fast_events` at the stop of an AD2 38400 disk session; now none
         in disk sessions AD1 640 / 160 / 40, AD2 38400 (fastlog::prep / fatren / fatdir left unhooked:
         per-pass Prep code, too slow under hooks). Also the USB volume's read path is in B now
         (a host reading the volume while a stream runs no longer stalls the ISR).
@@ -2336,7 +2336,7 @@ Firmware:
       Open (emulator, once in 4 runs of the max-flash profile, 25f3879, 4 emulators sharing the CPU):
       an AD2 19200 disk session's DMA-frame lock never converged (DBG:ISR? locked 0, probes alternating,
       max_run 7: the phase step geared up and down), so the gated stream took no sample and the session
-      never ended; two reruns of the same sequence passed, as did b21b77c's once. AD2 path untouched by
+      never ended; two reruns of the same sequence passed, as did eb85190's once. AD2 path untouched by
       this change. Wants: a lock timeout (restart / error after N s unlocked) and a repro with --ppm.
       8. Device: AD1 640 S/s to disk 60 s (as 1): LOG:COUNt? lost 0, LOG:GAPs? all 0; DBG:ISR? active 1
          during it, rate_mhz ~640 000, locked 1, late 0, max_lat < 2 us; also 320 / 160 (OSR 1 / 2, chop
@@ -2348,7 +2348,7 @@ Firmware:
           and LOG000.CSV; `cmp` with `dm40scpi.py get` / dlog.py of the DLG. The volume refresh after a
           large session: no visible stall (was ~1.5 s per 2 MB of DLG).
       11. Device: DMM page while a host copies: the reading keeps updating (2 ms of USB per pass).
-      Device 7534701 (docs/device-check-2026-10-21.md "7534701" 5 / 6): 11 PASS (READ? every 0.40 s through a 45 s copy at 584 KB/s). 9 with a
+      Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 5 / 6): 11 PASS (READ? every 0.40 s through a 45 s copy at 584 KB/s). 9 with a
       host reading the volume: AD2 19200 10 s to disk 0 lost but **max_lat 8.98 us, lat_pc
       vdisk::file_read::{closure#0} in region C** (the `near` closure got its own symbol, matched by the
       `*7dm40_fw5vdisk*` .cold rule) -> a fn in .text.vdisk_rd (fixed, to re-check). Still in region C on
@@ -2358,7 +2358,7 @@ Firmware:
       inline(always): no closure symbol in C) / parse_file / from_scale / s_pred, dlog::data (MMEM:DATA?),
       vdisk::readme (root directory reads) and calbackup::crc32_upd (LTO merged dlog's identical CRC into it).
       wavetest: a host reading SCOPE/SCOP000.CSV and LOGS/LOG000.CSV off the volume, and MMEM:DATA? of
-      their DLGs, during the Wave view's stream: no region C call (9495d28: SDec::get, dlog::data,
+      their DLGs, during the Wave view's stream: no region C call (76b79e0: SDec::get, dlog::data,
       vdisk::readme).
       - [x] **Device hang + watchdog reset (once)**: `dm40scpi.py fast --source ad2 --rate 19200 --dur 30`
             with a host reading FAST003.CSV over the volume: the session completed (FAST005.DLG intact),
@@ -2368,13 +2368,13 @@ Firmware:
             end with a volume read but no MMEM:DATA?. Suspect the overlap of the session end, the volume
             refresh, the host's revalidation reads and Gen::open of the new FAST file over USBTMC; repro in
             the emulator (fastlogtest --vol-read + MMEM:DATA? right after done).
-            Root cause (device-check doc "7534701 follow-up" 6b): the USB disk. usbd-storage's unstall after
+            Root cause (device-check doc "d8e249d follow-up" 6b): the USB disk. usbd-storage's unstall after
             every CSW (a DIEPCTL read-modify-write, the stream ISR widening it) re-armed the IN endpoint with
             XFRSIZ 0: a spurious ZLP broke the host's next command; Linux's reset recovery then gave usbd-storage
             an invalid CBW, it called our callback with the old command and `set_status` panicked -> FWDGT.
             Fixed: usbd-storage vendored with fixes (firmware/vendor, "dm40 patch"), msc.rs / usb::abort_in.
-            Emulator: emu/fastendtest.py (9495d28 2 of 6 pass, fix 3 of 3), emu/mscresettest.py.
-            Device 9944169: the 6b repro PASS (0 lost, the reader went on after the UNIT ATTENTION, MMEM:DATA?
+            Emulator: emu/fastendtest.py (76b79e0 2 of 6 pass, fix 3 of 3), emu/mscresettest.py.
+            Device 22c85ba: the 6b repro PASS (0 lost, the reader went on after the UNIT ATTENTION, MMEM:DATA?
             of the new 26.5 MB CSV complete, no usb-storage reset), a port reset during a volume read PASS.
 - [x] (A) DMM-input "slow floating scope" via AD2 = the Wave view (E5/E6; docs/dmm-input-scope-feasibility.md 10,
       src/app_wave.rs; feature `ad2-isr` only, hidden without it): MF range page "Wave" (V / A) and the scope page's
@@ -2386,7 +2386,7 @@ Firmware:
       amended: config words + event ring), HY3131 comparator evaluated, not used (10.2). DMM paused while open,
       row rewritten on exit; a host CONF closes it. Emulator: emu/hy3131/wavetest.py (sine V, square A, trigger,
       roll, range steps, exit, conflicts) PASS; ui-render wave scenes 0 violations; stock pixel diff unchanged.
-- [x] Device 7534701 (docs/device-check-2026-10-21.md "7534701" 8): Wave view 10.6 on the 40 Hz square: entry, Freq / Vrms (-0.6 %), trigger
+- [x] Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 8): Wave view 10.6 on the 40 Hz square: entry, Freq / Vrms (-0.6 %), trigger
       Normal / Single, range 2 / 20 V/div / 200 mV/div, STOP + Save CSV, MENU exit, conflicts PASS. Fixed:
       roll at 5..50 s/div moved at the 2 s/div speed (w.per from the clamped `screen`), the DC V entry toast
       and two more toasts were wider than the box. Current steps blocked (A not wired).
@@ -2406,7 +2406,7 @@ Firmware:
             a host sees a Wave-view save once the view closes), and the Wave view's stream pauses while a disk
             job (Save CSV, a screenshot: screenshot.rs, region C every pass) runs: the emulator showed the DLG
             write itself in C under the stream too. emu/hy3131/wavetest.py checks it (hooks on every C function
-            flagged when entered with hy3131::HANDED set): 9495d28 ran Gen::open, vdisk::refresh / scan_spi
+            flagged when entered with hy3131::HANDED set): 76b79e0 ran Gen::open, vdisk::refresh / scan_spi
             under the stream at the save; now only the tap's sp_save_csv. Device re-check: below.
       - [x] CONF? in the wave view on 200 mV/div (AC mV) still answers VOLT:AC +6: it built the range
             from `meter.live()`, the last reading before the view (the DMM poll is paused). Now from the
@@ -2416,16 +2416,16 @@ Firmware:
       its holes restart the wave record, 10.4). Follow-ups: 16-bit record, DMM reading alongside (request
       queue), DC-coupled V row (E7). Done: the timebase list starts at 1 ms/div in the wave view (WAVE_TB_MIN)
       (scope_ui::set_tb_lo from app_wave; touch-test + ui-render s01-tb-list-wave).
-- [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 85bc703.
-      f25d25a: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
+- [x] Device 2026-10-21 (docs/device-check-2026-10-21.md "Fixes"): stack 37468/46048 B (81 %) on 5c6b565.
+      9ce523d: no USBTMC tx copy, 8-byte logger records, .sram_bss (EP_MEMORY, MSC_IO, MSC block, touch
       log, dlog TAB); build.sh native checks the static worst path (tools/stack-depth) >= 16 KiB headroom,
       link-native.x stack >= 28 KiB + 16 KiB. Emulator walk 38580/43448 -> 28532/48344 B.
       (verify on device: DBG:BOOT? STACK after the scope walk, expect ~28.5 K used of ~48.3 K)
       device a239aa6 (after the 2026-10-22 rework): 21.6 K used of 46.6 K (feasibility 11.11)
-- [x] Scope 32 ms loop passes ~3/s (meas 11.4 + frame 5 + cells 12.3 ms in one pass): e39fe63 integer
-      measurement maths, graph paint and cells on later passes (one changed cell per pass); 94fd4f2 a
+- [x] Scope 32 ms loop passes ~3/s (meas 11.4 + frame 5 + cells 12.3 ms in one pass): b155172 integer
+      measurement maths, graph paint and cells on later passes (one changed cell per pass); 1849cc4 a
       trace-only graph flush stops after 4 ms. Emulator 1 ms/div loop max: noise 10.9 -> 5.7 ms, 40 Hz
-      square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99) Device f48db7d: no 20-50 ms passes any more;
+      square 21.5 -> 8-10.5 ms. (verify on device: DBG:PROF? loop max <= 12 ms, 400 DBG:PING? p99) Device f80524f: no 20-50 ms passes any more;
       scope page open input loop max 12.38 ms (marginal), ping p99 0.7 ms; square after AUTO 10.65 ms. Combined
       view: loop max 11.4 ms but ping p50 11.8 / p99 16.5 ms.
       Cause (device profile): not the view but a noise-triggered trace at 49.8 fps: every column changes, the
@@ -2434,9 +2434,9 @@ Firmware:
       Fix: flush slice 1.5 ms, the paint starts on the pass after the frame (frames in back-to-back passes still
       paint at once), DBG:PROF? "s.paint" (was x1) times it. Not measurable in the emulator (it does not reach
       that frame rate at 1 ms/div). (verify on device: combined view, open input, 1 ms/div: ping p50 <= 2 ms)
-      Device 381ea07: 56.6 fps, s.paint max 1.68 ms, loop max 12.3 ms, ping p50 3.3 / p99 18.1 ms (was 11.8 /
+      Device c50425f: 56.6 fps, s.paint max 1.68 ms, loop max 12.3 ms, ping p50 3.3 / p99 18.1 ms (was 11.8 /
       16.5): better, p50 still above 2 ms.
-      Fix after 381ea07: the combined view paints at most 25 fps (app.rs COMBO_FRAME_MS 40; Auto / Normal
+      Fix after c50425f: the combined view paints at most 25 fps (app.rs COMBO_FRAME_MS 40; Auto / Normal
       running records; Single, STOP, roll, the wave view and the Scope page uncapped; a frame not drawn
       still measures and its paint pass goes on) and its flush slice is 0.8 ms (scope_ui
       set_flush_short; Scope page 1.5 ms as before). Expected: paint ~11 ms x 25 = ~28 % CPU instead of
@@ -2444,14 +2444,14 @@ Firmware:
       combined view drops to 4.7 fps and the Scope page stays at 9.5. (verify on device: combined view,
       open input, 1 ms/div, 400 x DBG:PING? p50 <= 2 ms, DBG:PROF? ~25 fps, s.paint max <= 0.9 ms)
 - [x] Scope ~9 fps at 1 ms/div after AUTO: three comparator misses (AUTO's fast-timebase sweep) disabled
-      the hardware trigger for good; 82cf49d suspends it until the next range / timebase / coupling /
+      the hardware trigger for good; 93d688b suspends it until the next range / timebase / coupling /
       edge / mode / type change. The emulator's comparator model barely fires (ScopeFeeder TIM2 gate
-      timing; separate), so the fps itself is unverified. (verified on device f48db7d: AUTO on the 40 Hz square,
+      timing; separate), so the fps itself is unverified. (verified on device f80524f: AUTO on the 40 Hz square,
       then 1 ms/div: 40.0 fps, DBG:HWTRIG? fields 5/6 = 1,1, 38 fps during level drags)
-- [x] STOP then Save CSV gave "No record to save" (Auto untriggered / STOP mid-acquisition): 8eec289 the
-      samples captured so far become an untriggered stored record on STOP. (verified on device f48db7d: Auto open
+- [x] STOP then Save CSV gave "No record to save" (Auto untriggered / STOP mid-acquisition): b1ddcb9 the
+      samples captured so far become an untriggered stored record on STOP. (verified on device f80524f: Auto open
       input, Auto square mid-acquisition, Normal WAIT -> SCOP000..002.DLG, "untriggered" headers, dlog.py == MMEM)
-- [x] Experiment 2026-10-21 (d103d75 on the device, Linux 7.0, GNOME/udisks): a UNIT ATTENTION 06/28/00 on the
+- [x] Experiment 2026-10-21 (5947de9 on the device, Linux 7.0, GNOME/udisks): a UNIT ATTENTION 06/28/00 on the
       MOUNTED read-only LUN 1 (DBG:VDISK:FORCE? 1 + ADD?) -> kernel rescans sdb, udev change DISK_MEDIA_CHANGE=1,
       the mounted vfat lists the new files at once with correct content, no I/O errors, no unmount. Held UA (the
       default) shows nothing until unmount. Simulated eject (EJECT? 3: NOT READY x3): capacity 0 -> back, stays
@@ -2494,22 +2494,22 @@ Firmware:
             directories (dm40scpi.py get LOGS/LOG000.CSV).
             If Explorer does not show new files after the UA: try a volume serial that changes with every
             refresh (Windows may key "same medium" on it).
-            Device 7534701 (docs/device-check-2026-10-21.md "7534701" 3a, Linux): PASS: udisks ro mount, a device screenshot listed ~9 s after the
+            Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 3a, Linux): PASS: udisks ro mount, a device screenshot listed ~9 s after the
             gesture, a recording at its stop (== MMEM:DATA?); fsck of SPIFLASH.BIN clean (dirty bit only).
             A host read in flight at the UA gets EIO (reopen works). Windows / macOS, reload.sh not run.
-            Device 246afc7, Windows 11 VM (device-check-2026-10-21.md "246afc7: ... Windows 11", read-only checks):
+            Device c92b605, Windows 11 VM (device-check-2026-10-21.md "c92b605: ... Windows 11", read-only checks):
             PASS: AutoPlay -> E: "DM40", FAT16 (Get-Partition), 2 129 920 000 B, read-only, 41 files; CSV / INFO
             open; copies exact (SPIFLASH.BIN ~348 KB/s, SCOP000.CSV ~78 KB/s, FIRMWARE.BIN ~834 KB/s); Eject ->
             "Safe To Remove" (then remounted, item below). Still open: the UA while mounted on Windows (a new file
             + F5), macOS, reload.sh.
-            Device 940e8aa (docs/device-check-2026-10-21.md "940e8aa: screenshot preparation, the 76.8 kS/s nominal" item 3, Linux): PASS: kernel attach (1.98 GiB, Write
+            Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" item 3, Linux): PASS: kernel attach (1.98 GiB, Write
             Protect on), udisks ro mount, a screenshot listed 3.3-5.9 s after the gesture and a recording 2.8 s after
             its stop (both == MMEM:DATA?), FATDIR 7,0,0, MMEM:CAT? / DATA? / DEL with LOGS/ SHOTS/ prefixes. fsck of
             SPIFLASH.BIN: clean when read with the page cache dropped; a plain `cp` returned stale FAT pages (Linux
             keeps the unchanged-size file's cache across the UA; new item below). Not run: FATDIR first boot
             (created 0x7) and boot_refresh time (need an install), reload.sh, Windows UA + F5, macOS (untested).
-      - [x] Linux: DEBUG/SPIFLASH.BIN read through the page cache can be stale after a refresh (device 940e8aa,
-            docs/device-check-2026-10-21.md "940e8aa: screenshot preparation, the 76.8 kS/s nominal" note 2): its size and entry never change, so the kernel keeps
+      - [x] Linux: DEBUG/SPIFLASH.BIN read through the page cache can be stale after a refresh (device 2f56ff9,
+            docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" note 2): its size and entry never change, so the kernel keeps
             its cached pages across the UNIT ATTENTION; a copy after a shot had the new BMP's directory entry but
             not its FAT chain. No firmware change: by the kernel sources (master, 2026-10-24; inferred, not tested)
             `disk_check_media_change` only marks a partition rescan, a positive vfat dentry is always valid
@@ -2517,47 +2517,47 @@ Firmware:
             date, size or slot of the entry does not drop the pages while mounted. Workaround (fadvise DONTNEED,
             drop_caches, remount; `dd iflag=direct` untested) in docs/manual/README.md "Copying
             DEBUG/SPIFLASH.BIN on Linux". Device: not rechecked.
-      - [x] 76.8 kS/s: two nominals for one rung (device 940e8aa): LOG:PRE? / the CSV and DLG headers said
+      - [x] 76.8 kS/s: two nominals for one rung (device 2f56ff9): LOG:PRE? / the CSV and DLG headers said
             76 799.016 (`Logger::nominal_mhz` = 1e12 / the rounded 13 021 ns period), ACQ:SRAT? / the Wave view
             76 800 (`ad2_rate_mhz(0)`), 12.8 ppm apart. Fixed: `Logger::plan` keeps the chip rate
             (`hy::ad2_real_rate_mhz` / `hy::ad1_rate_mhz`, the stream ISR's), so LOG:PRE? nominal_mhz is
             76 800 000, which the CSV / DLG headers print (no header generated in a test; dlog-test /
             logfmt-test fixtures keep their own period-derived rates). AD1 rungs likewise (640.000, not
-            639.795 from 1563 us). meter-test `nominal_is_the_chip_rate`. Device 7c04b03: LOG:PRE? nominal_mhz 76 800 000, CSV
-            `# nominal_sps,76800.000` (device-check doc "7c04b03: bug-fix recheck" 4). The DLG header on the disk not rechecked.
+            639.795 from 1563 us). meter-test `nominal_is_the_chip_rate`. Device 1a11eda: LOG:PRE? nominal_mhz 76 800 000, CSV
+            `# nominal_sps,76800.000` (device-check doc "1a11eda: bug-fix recheck" 4). The DLG header on the disk not rechecked.
       - [x] `nr3` (scpi.rs) printed 76 800 as `+7.680001E+04` (repeated f32 division by 10). Fixed: one
             scaling in f64; scpi-test `nr3_exact` (exact values, a 200 000-value sweep vs `{:.6E}`).
-            Device 7c04b03: ACQ:SRAT? in the Wave view +7.680000E+04 / +3.840000E+04 / +4.800000E+03, scope
-            +1.250000E+07 (device-check doc "7c04b03: bug-fix recheck" 5).
+            Device 1a11eda: ACQ:SRAT? in the Wave view +7.680000E+04 / +3.840000E+04 / +4.800000E+03, scope
+            +1.250000E+07 (device-check doc "1a11eda: bug-fix recheck" 5).
       - [x] `pow10f` (scpi.rs) divides an f32 by 10 once per step, so VOLT:RES? on DC V 6 V MED answers
-            `+9.999999E-06` (device 7c04b03; the exact nr3 now prints the f32 it gets; CONF? on the same
+            `+9.999999E-06` (device 1a11eda; the exact nr3 now prints the f32 it gets; CONF? on the same
             range says +1.000000E-05). Fixed: a table of the nearest f32 for 10^-16 .. 10^8 (its other user,
             the RES set threshold, gets the same values). scpi-test `pow10f_exact` (fails before: 57 checks,
-            e.g. RES of 6 V fine +9.999999E-06). Device 3402420: VOLT:RES? on DC V 6 V MED +1.000000E-05, the other
-            V / RES / CURR ranges exact powers of ten too (device-check doc "3402420" 5).
+            e.g. RES of 6 V fine +9.999999E-06). Device 0278d6e: VOLT:RES? on DC V 6 V MED +1.000000E-05, the other
+            V / RES / CURR ranges exact powers of ten too (device-check doc "0278d6e" 5).
             CONF? on that range answers +1.000000E-04 for 3.0-3.5 s after a range set, then +1.000000E-05: it
-            takes the live readout's digits, RES? the rate (doc "3402420" note 2). Cosmetic; left as is.
+            takes the live readout's digits, RES? the rate (doc "0278d6e" note 2). Cosmetic; left as is.
       - [x] MMEM names: the LOGS/ SHOTS/ SCOPE/ prefix was dropped, not checked (`MMEM:DATA? "SHOTS/LOG005.DLG"`
-            returned LOGS/LOG005.DLG; device 940e8aa). Fixed: `csvlog::parse_path`; a prefix of another directory
+            returned LOGS/LOG005.DLG; device 2f56ff9). Fixed: `csvlog::parse_path`; a prefix of another directory
             is -256 for MMEM:DATA? and MMEM:DELete (nothing deleted). fatren-test `names`, scpi-test
-            `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device 7c04b03: `"SHOTS/` / `"SCOPE/FAST000.DLG"`
-            -256 for DATA? and DEL, the file still listed; `LOGS/` and no prefix read it (device-check doc "7c04b03: bug-fix recheck" 5).
-            `parse_path` was in .cold (98fcfce), so MMEM:DATA? during an AD2 stream ran region C (wavetest
+            `mmem_dirs`, emu/shottest.py (LOGS/Snnn.BMP). Device 1a11eda: `"SHOTS/` / `"SCOPE/FAST000.DLG"`
+            -256 for DATA? and DEL, the file still listed; `LOGS/` and no prefix read it (device-check doc "1a11eda: bug-fix recheck" 5).
+            `parse_path` was in .cold (0b9d580), so MMEM:DATA? during an AD2 stream ran region C (wavetest
             "a host reading SCOPE/SCOP000.CSV"); back in region B since fix/regressions-1025 (item below).
-      - [x] Windows Eject does not keep the volume ejected (device 246afc7): the shell's Eject sends START STOP
+      - [x] Windows Eject does not keep the volume ejected (device c92b605): the shell's Eject sends START STOP
             UNIT, and Windows shows "Safe To Remove". msc.rs then only records it (STOP_UNIT, msc.rs:585, used by
             recovery), so the medium is still present and E: is mounted again at the next access. Harmless on the
             read-only volume. Option: report NOT READY / 3A (as DBG:VDISK:EJECT does) until the next bus reset or
             a new medium (refresh), so the drive stays ejected. Check first that a Linux `eject` / udisks
             power-off and the "PC can edit" commit at the eject still work.
-            Done (98cfb3c; native-boot.md "SCSI" Eject): LoEj=1 Start=0 -> 02/3A/00 for everything but INQUIRY /
+            Done (d64e1f9; native-boot.md "SCSI" Eject): LoEj=1 Start=0 -> 02/3A/00 for everything but INQUIRY /
             REQUEST SENSE / START STOP / PREVENT until a bus reset / unconfigure or a host load (LoEj=1 Start=1:
             one UA 06/28/00); plain STOP / START and power conditions ignored; any 0x1B still sets STOP_UNIT
             (recovery-usb unchanged). DBG:VDISK:EJECT? = ejected, 0x1B count, last CB[4]. Found on the way and
             fixed: `cp dm40fw.bin` + eject at once on Linux lost the install (the Allow's `release` dropped the
             staged file before its SETTLE_MS check; emulator kernel path, WR? fw_ok 0); the session end now waits
             for the check (END_WAIT_MS 1.5 s, frozen meanwhile; fatren-test vwrite "Allow at once").
-            Emulator (98cfb3c): mscresettest 9/9 cases PASS (stop-start, eject-load: TUR / READ / READ CAPACITY /
+            Emulator (d64e1f9): mscresettest 9/9 cases PASS (stop-start, eject-load: TUR / READ / READ CAPACITY /
             READ FORMAT CAPACITIES 02/3A/00, INQUIRY answers, kept over a Bulk-Only reset, load -> one UA;
             eject-port: back after a port reset); emu/ejecttest.py PASS (Linux usb-storage + udisks over vhci_hcd:
             `gio mount -e` -> ejected, size 0, MediaAvailable false, no re-mount, `udisksctl mount` fails;
@@ -2571,7 +2571,7 @@ Firmware:
             Device retest pending: Linux (gio / Nautilus Eject -> stays ejected, re-plug -> back; PC can edit +
             cp + Eject at once -> Install? dialog); Windows 11 VM (Explorer Eject -> E: stays without medium,
             re-plug -> back).
-            **Device 0256df2 (Linux, device-check "0256df2" C):** udisks Drive.Eject (D-Bus) -> 02/3A/00:
+            **Device 469f354 (Linux, device-check "469f354" C):** udisks Drive.Eject (D-Bus) -> 02/3A/00:
             EJECT? 1,2,2, size 0, MediaAvailable false, mount refused, still ejected after 60 s, USBTMC fine; a port
             reset (USBDEVFS_RESET, the re-plug stand-in) -> back, auto-mounted ro, README equal. **`gio mount -e`
             (= Files / Nautilus Eject) does NOT eject on this host:** it unmounts, then gvfs runs util-linux
@@ -2580,9 +2580,9 @@ Firmware:
             Not run: PC can edit + cp + Eject (owner setting + disk write), host load (eject -t needs /dev/sda),
             Windows.
       - [x] Windows: the USBTMC interface (MI_00, class FE/03/01) has no in-box driver. It shows as "DM40
-            multimeter (opendm40)" under Other devices with code 28 (device 246afc7). The MSC interface works
+            multimeter (opendm40)" under Other devices with code 28 (device c92b605). The MSC interface works
             regardless. Document it in README / Help: for SCPI on Windows, use NI-VISA / Keysight IO Libraries
-            (USBTMC), or WinUSB via Zadig + pyvisa-py. Done (98cfb3c): README "USB on a PC", docs/bt-scpi.md
+            (USBTMC), or WinUSB via Zadig + pyvisa-py. Done (d64e1f9): README "USB on a PC", docs/bt-scpi.md
             "USBTMC on Windows" (not tried on Windows yet; Help text not changed).
       - [x] Per-unit serial number (2026-10-23; src/uid.rs, docs/native-boot.md "USB serial number"): the
             GD32 96-bit UID (0x1FFF7A10) as 24 uppercase hex digits in memory order (= `xxd -p -u
@@ -2598,7 +2598,7 @@ Firmware:
             rewrites the serial, its safety check requires the emulator's serial (not the unit's) in the
             udisks drive and no other disk on it; mscresettest.py case `serial`; usbtmc_stress.py takes the
             serial from the first *IDN?.
-            Emulator (e09ddda): mscresettest 10/10 cases PASS (serial: iSerial == VPD 0x80 == *IDN? field ==
+            Emulator (24d49d7): mscresettest 10/10 cases PASS (serial: iSerial == VPD 0x80 == *IDN? field ==
             emu_uid hex, VPD 0x00 = 00 80, VPD 0x83 -> 05/24/00); ejecttest PASS next to the real meter (meter
             still "0001": udisks drives ALIENTEK_DM40_files_0001 = sda and ALIENTEK_DM40_files_<emu hex> = sdb,
             /dev/disk/by-id/usb-ALIENTEK_DM40_files_<hex>-0:0; the meter's sda untouched and mounted); sigrok-cli
@@ -2608,7 +2608,7 @@ Firmware:
             (-148), stack headroom 21 344 (-24).
             Device retest pending: `lsusb -v -d 1209:0001` iSerial == `xxd -p -u INFO/UID.BIN` == *IDN? field
             (USBTMC and BT); udisks drive / by-id name carries it, Eject / Power Off still act on the meter;
-            [device 0256df2: iSerial = UID.BIN = *IDN? field 3 over USBTMC and BT, udisks drive / by-id
+            [device 469f354: iSerial = UID.BIN = *IDN? field 3 over USBTMC and BT, udisks drive / by-id
             ALIENTEK_DM40_files_<UID>, Drive.Eject acts on the meter, sigrok-cli -d scpi-dmm:conn=usbtmc/3.10
             --scan "[S/N: <UID>]", DBG:FLASH? OK: PASS. Power Off, ngscopeclient, Windows, ejecttest: not run]
             `sigrok-cli -d scpi-dmm:conn=usbtmc/...  --scan` [S/N: ..]; ngscopeclient connects; recovery-usb is
@@ -2622,7 +2622,7 @@ Firmware:
             LUN). tools/build-variants/run.sh builds recovery-usb, recovery-file, no-ad2-isr, spi-disk (no
             vdisk), fatren-dry-run and keep-screen with all build.sh checks into target/variants/ (build.sh
             DM40_TDIR / DM40_OUT; opendm40.bin untouched), ~2 min; part of the tools/*/run.sh suite.
-            (e09ddda: all six ok; recovery-usb stack headroom 21 856, B 46 780, C 23 004 free.)
+            (24d49d7: all six ok; recovery-usb stack headroom 21 856, B 46 780, C 23 004 free.)
       - [x] Follow-ups (2026-10-22, src/vwrite.rs; docs/native-boot.md "Host writes"): the volume is
             writable (no WP bit; DBG:VDISK:RO 1 = the read-only volume as before). Every 512-byte WRITE is
             diffed against the generated sector: a LOGS / SCOPE / SHOTS delete (entry 0xE5 + chain freed ->
@@ -2649,7 +2649,7 @@ Firmware:
             and a CSV recording during a cp (staging waits / busy retries); Windows Explorer (System
             Volume Information, delete, copy) and macOS Finder (.fseventsd, .Trashes, ._ files): untested,
             expected per docs/native-boot.md "Host OS notes".
-            Device 7534701 (docs/device-check-2026-10-21.md "7534701" 3b, Linux): PASS for rm (deleted at once), gio trash (deleted at the
+            Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" 3b, Linux): PASS for rm (deleted at once), gio trash (deleted at the
             eject), cp dm40fw.bin (601 KB in 29.8 s) -> dialog -> No -> no dm40*.bin on the SPI disk, WR?
             refused 0, stack 23 376 B, fsck clean, Files live restored. Re-plug without the cable: `usbreset
             1209:0001` (the bus reset applies the mode) + DBG:VDISK:EJECT 3 (the kernel re-reads WP only at a
@@ -2671,21 +2671,21 @@ Firmware:
       AC V / Hz / cont / diode / cap (no free pair). Emulator: PB2 node + AD2 probe; senttest aprot-* (12 V:
       409 ms, 24 V: 105 ms, ohm / temp ~0.41 s, 5 V: A-JACK only).
       (verify on device: the A-jack protection check list of doc §4.8)
-      - [x] Device 7534701 (docs/device-check-2026-10-21.md "7534701" alerts): **A-PROT found latched with the
+      - [x] Device d8e249d (docs/device-check-2026-10-21.md "d8e249d" alerts): **A-PROT found latched with the
             A jack open** at the end of the run (DBG:SENT? field 11 = 105 ms: the ">= 300 mA at once" rule
             in the first probe window; probe 15 mA afterwards; CONF:VOLT:DC over SCPI did not release it,
             DC A did). When / which function is unknown (DC V 1 / 5 / 10 V and the square on the DMM page,
             combined view and Scope page did not trip it again). Log the trip (function, probe mA, time).
             Fixed: the peak hold caught AD2's start-up after the probe's row write; now cleared 30 ms after
             every probe row write, the first window from there, and a trip needs the comparator run going
-            (senttest aprot-glitch with the model's Ad2StartGlitch: 9495d28 A-PROT, fix A-JACK only).
+            (senttest aprot-glitch with the model's Ad2StartGlitch: 76b79e0 A-PROT, fix A-JACK only).
             Still open: log the trip's function / time.
-            Device 9944169: A-PROT again in TEMP with the square on V-COM: in ohm / temperature the probe
+            Device 22c85ba: A-PROT again in TEMP with the square on V-COM: in ohm / temperature the probe
             follows the V input (~0.34 A per volt; 5 V DC read 1.7 A). Fixed: the probe in DC V / mV only,
             ohm / temperature A-JACK only (doc 4.8).
       - [x] False A-JACK in ohm / temperature with a voltage on V-COM (5 / 10 V DC, the square; A jack open):
-            the comparator on PB1 hits there; LIVE? is the right alert (device 9944169).
-            **Fixed by detection, not documented as a gap (3542ddb, doc 4.8 "V_GATE").** Why not a gap as in
+            the comparator on PB1 hits there; LIVE? is the right alert (device 22c85ba).
+            **Fixed by detection, not documented as a gap (073b309, doc 4.8 "V_GATE").** Why not a gap as in
             Hz: the comparator alone cannot tell (two bits per window; the pickup grows with the voltage, so
             no threshold separates it from a current), but unlike Hz these rows measure V-COM themselves:
             ohm's AD1 code goes negative for any source above the ohm source's ~1.4 V or below COM (LIVE?'s
@@ -2696,7 +2696,7 @@ Firmware:
             when it says "driven"; ohm then shows LIVE?. DBG:SENT? field 12: -1 / 0 free / 1 driven.
             Emulator: the model's `Pb1VjackMv` (PB1 picks up the V jack in those rows, 10 mV / V INFERRED:
             1 V under and 5 V over the 23.75 mV threshold, as the device); senttest `ohm-v5` / `temp-v5`
-            (5 V, 10 V, the square, then 2 / 5 mA in A with V-COM open): ce3b592 A-JACK from fw 10 s, fix
+            (5 V, 10 V, the square, then 2 / 5 mA in A with V-COM open): 4ed771d A-JACK from fw 10 s, fix
             NONE / LIVE? and A-JACK in the last phase. Residual gaps (doc): a source between the pickup
             threshold and ~1.4 V in ohm if the real k is > ~17 mV / V; a current in A together with a source
             on V-COM (LIVE? is shown, not A-JACK); an open TC input reading > 80 mV would hide A-JACK in TC.
@@ -2707,7 +2707,7 @@ Firmware:
             Cause: the frequency row leaves its divider open, PB1 - PB3 stands at ~54 mV (+41 100 codes) with
             0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V. Fixed: no sentinel in Hz (doc 4.7 gap;
             senttest freq-gap). Open: the AC hint in DC V on 5 V DC.
-      - [x] **False alerts after DMM function switches (owner, device 0256df2, device-check "0256df2" E; raw log
+      - [x] **False alerts after DMM function switches (owner, device 469f354, device-check "469f354" E; raw log
             in that check's scratchpad `chk/out/E_all_sent.txt`).** 397 switches (42-pair matrix, chain, AUTO, UI
             taps, scope / Wave view -> DMM) with V-COM open, 1 V and 5 V DC; A jack open; A-PROT never.
             (E1) **V-JACK? after RES -> A or RES -> mA**, 11 / 11 with V-COM open or 1 V (0 / 4 at 5 V): CMP_SENSE
@@ -2717,7 +2717,7 @@ Firmware:
             0.51 s); direct TEMP -> A at 5 V: none. (E3) **AC? in DC V on 5 V DC** (the item above), 26 / 26 entries,
             on at 2.6 s, stays on: the V-tap window's CTSTA is 0x70 = CMPHO and CMPLO both set on a steady +5 V
             (1 V: 0x10), and sample_cmp reads both bits as "swings both ways". (E4) A-JACK in RES at 5 V, 12 / 12,
-            vside 0: the known 2d33d3a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. **Fixed by the
+            vside 0: the known 519fb8a 7b, owner decision. DC? in AC V on 1 / 5 V DC is right. **Fixed by the
             jack check (doc 4.13, branch fix/ajack-false): LIVE? instead; device retest pending.**
             **Device d330877 (device-check-2026-10-21.md "d330877" section 4, raw `chk2/out/E_e1_*`, `E_e4_*`, `ctsta_summary.txt`):** E1 still
             there (RES -> A / mA: 0x70 0.47-0.67 -> 4.6 s open, -> 5.1 s at 1 V; V-JACK 1.5-1.8 -> 5.2-5.9 s).
@@ -2727,13 +2727,13 @@ Firmware:
             TEMP): the misconnect hint depends on the previous function. Never 0x20 / 0x10 in DC A.
             **New: V-JACK? in every AC A range with V-COM open** (AD1PK_SENSE, pk -262144, from 1.66 s, still on
             at 30 s). At 24 V DC in AC V a short A-JACK (3.1-4.1 s).
-            **Device 3e41549 (doc "3e41549"):** E1 / E2 / E3 gone. 2a V-JACK? in AC A unchanged (every range, all
+            **Device 40728b8 (doc "40728b8"):** E1 / E2 / E3 gone. 2a V-JACK? in AC A unchanged (every range, all
             levels, from 1.68-1.84 s; AD1 pk ramps -117 000 -> -262 144 over 0.7-2.0 s). DC A from DC V at 24 V:
             still ctsta 0 (also through AC V; also after RES and after the Scope round trip). The short A-JACK in
             AC V at 24 V did not come back (5 entries). VOLT:RANG:AUTO? in AC V / CURR:RANG:AUTO? in AC A: still
             +9.91E37 + "Settings conflict"; VOLT:AC:RANG:AUTO? / CURR:AC:RANG:AUTO? answer (owner: is the DC-only
             plain form wanted?).
-      - [x] Switch latency (owner: "several seconds, stock was instant"; device 0256df2, settle.py at 1 / 5 V,
+      - [x] Switch latency (owner: "several seconds, stock was instant"; device 469f354, settle.py at 1 / 5 V,
             RATE FAST): first valid FETCh? DC V <-> AC V 0.46 s, RES -> DC V 0.52-0.56 s, DC V -> mA 0.56 s,
             DC V -> A 0.75-0.76 s, 6 V -> 60 V 0.55-0.56 s, AC V -> AC+DC 1.32-1.37 s, **DC V -> RES 2.67 s**; the
             screen is blank until then. AC V of a DC input settles into 0.1 % in 2.5-2.9 s. Stock not measured.
@@ -2760,7 +2760,7 @@ Firmware:
             **Harness timing under host load (not this branch):** the fw uptime's offset from the virtual
             time is bimodal under load (couptest idc: the 0.3 A input at fw 13.2 or 14.8 s for the same
             virtual 16 s), so a phase's check window can see the next phase's input: couptest idc / band /
-            iac / sq5 and powtest bt phase 1 fail that way on base e2a0e85 and on fastswitch alike (idc:
+            iac / sq5 and powtest bt phase 1 fail that way on base 6e9962f and on fastswitch alike (idc:
             base 1 of 2, fastswitch 2 of 2 at 13.2 s; band fails on base too); they passed on fastswitch at
             lower load. The tests' windows should key on an input marker, not on uptime: follow-up.
             **Done (branch harness-sync, emulator only):** the offset is not bimodal. It is a fixed 2.85 s
@@ -2778,9 +2778,9 @@ Firmware:
             phase is 16 s now: AUTO walks 6 A -> 60 mA -> 600 mA there and settles 8.5-10.6 s after the
             change (watch on the device: a 0.3 A AC step down from 1 A in A AUTO).
             `fastlogtest --ui-nav --region-c` "MENU on Device -> main menu": not timing, not a firmware
-            regression (e2a0e85's build fails the same): d6a9702 put "Danger alarm" into Settings 3/3, Device
+            regression (6e9962f's build fails the same): be01de5 put "Danger alarm" into Settings 3/3, Device
             moved to row 5 and the tap at y 177 toggled Burden voltage. NAV taps y 207 now: PASS.
-            **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in 0256df2, settle.py):
+            **Device retest** (RATE FAST and MED, 1 V / 4.7 kohm / 50 mA as in 469f354, settle.py):
             1. DC V -> RES on 4.7 kohm: screen shows "- - Mohm" within ~0.2 s, the number by ~1.0-1.3 s (was
                3.0 s), no range stuck on 60 Mohm; an open input reads 0L, a 10 Mohm / 100 ohm resistor settles
                on its range (single steps for 2.5 s, then the stock's multi-range steps).
@@ -2789,7 +2789,7 @@ Firmware:
                650: watch the first reading after DC V -> A for a relay transient).
             3. MF / SCPI VOLT:RANG 6 <-> 60 at 1 V: first FETCh? ~0.3 s; no 25-51 % or 0.78 V reading in 30
                switches (the vet still holds a disagreeing first conversion).
-            4. VOLT:RANG:AUTO ON from 600 V and the 600 -> 60 -> 6 V two-step autorange (9292ec2): never
+            4. VOLT:RANG:AUTO ON from 600 V and the 600 -> 60 -> 6 V two-step autorange (decaf60): never
                0.767-0.790 V (vet unchanged on autorange steps).
             5. AC+DC entry (1 V AC + 0.5 V DC): grey |DC| with "AC --" first, then 1.118 V orange; an AC+DC
                range step 60 -> 6 V: grey values while the AC part settles, READ? +9.91E37 until settled.
@@ -2797,14 +2797,14 @@ Firmware:
                READ? +9.91E37 until then. HOLD / REL during these: the frozen value stays, no grey over it.
             7. No false V-JACK? / A-JACK / AC? after RES -> A / mA and scope -> DMM (device check E): the
                sentinel blanks count from the switch, the readings now come ~0.2 s earlier.
-            **Device 0760432 (2026-10-24, device-check-2026-10-21.md "0760432: switch latency on the device";
+            **Device 6bc494a (2026-10-24, device-check-2026-10-21.md "6bc494a: switch latency on the device";
             calibrator 1 / 5 V, 390 / 100 ohm, 10 / 40 Hz square; no 4.7 kohm, no current, no open input):**
             1. frame PASS (dashes <= 0.06 s), time PASS (V source 2672 -> 319 ms; 390 ohm right at 1.16-1.38 s
                FAST, 1.91 s MED), **values FAIL**: the ohm hunt shows / answers wrong values first (8.8 / 7.1 /
                12 Mohm, then 219 / 126 / 57 / 30 ohm, amber, FETC? / READ?; MED holds one ~0.8 s). Needs a real
                resistor to split meter vs simulator; fix idea: vet the first in-range conversion after an ohm
                range step.
-            2. PASS: 0.31-0.40 s (3e41549 0.46-0.76 s); `CONF:CURR:DC 10` stays 0.76 s (manual 10 A row, 650 ms,
+            2. PASS: 0.31-0.40 s (40728b8 0.46-0.76 s); `CONF:CURR:DC 10` stays 0.76 s (manual 10 A row, 650 ms,
                by design; its placeholder shows "mA" for 0.8 s: cosmetic). A reads 0.000, no OVERLOAD.
             3. PASS (30 switches FAST and MED, 0.31-0.51 s, no 25-51 % / 0.767-0.790 V).
             4. PASS (8 x FAST and MED).
@@ -2818,21 +2818,21 @@ Firmware:
                engage before the decision (no last_raw), by design.
             7. PASS for RES -> A / mA (70 switches, 1 / 5 V). A-JACK in RES at 5 V (known) now from 0.46 s.
                **New: 0.5 s V-JACK? at 8.06 s after A / mA -> Scope -> DMM at 5 V** (ctsta 0x70 tail to 7.75 s,
-               past the 7 s cap; bb15d39 6.34 s).
-            **Fixed on branch fastswitch2 (../docs/history/switch-latency.md 6.2; each with a test that fails on 0760432):**
+               past the 7 s cap; c785807 6.34 s).
+            **Fixed on branch fastswitch2 (../docs/history/switch-latency.md 6.2; each with a test that fails on 6bc494a):**
             ohm hunt vet (a conversion is final only when the one before it on the same ohm row agrees within
             0.1 % + 8 counts; grey before; ohmhunt.py with the model's `ohmtau`), FETCh? +9.91E37 at once while
             AUTO decides (autowaittest ac-fetch / dc-fetch), HOLD before the first settled reading armed: HOLD
             label at once, holds the first decided value (ac-hold, meter-test), the RES / restart V-JACK? mask
             ends 1 s after the last 0x70 (max 12 s; switchtest ohmexit-long with a SCOPE step), the
             placeholder follows CONF's range (a10-unit / ma-unit). New `DBG:READout?`.
-            Fuse check (owner on 2232996: 18 ohm instead of 48, "Check leads"): it now decides on the first
+            Fuse check (owner on ea73ea5: 18 ohm instead of 48, "Check leads"): it now decides on the first
             final reading whose ohm vet saw two conversions agree on the 600 ohm row (8 s timeout kept);
             senttest fuse-ok-lag (ohmtau 800 ms): old FAIL,38.92, new OK,47.34.
-            Suites on fastswitch2 rebased on b9be675 (sentinel3 + tidy): ohmhunt (10), autowaittest (13),
+            Suites on fastswitch2 rebased on 6bbff98 (sentinel3 + tidy): ohmhunt (10), autowaittest (13),
             switchtest all 22 OK (real-vjack-blind now passes with the PRECOND default; ohmexit-long OK),
             senttest 63 OK (incl. fuse-ok-lag), loudtest 7, freqtest 6, meter-test 102, ui-render 0
-            violations, couptest 10 / 10 and powtest 30 / 30 on both base b9be675 and fastswitch2 side by side
+            violations, couptest 10 / 10 and powtest 30 / 30 on both base 6bbff98 and fastswitch2 side by side
             (powtest acdc-floor failed once under load on fastswitch2, OK alone; known flaky), fastlogtest
             --region-c --host-read ad2:38400: no region C code or slow-bank read while streaming. couptest
             sqtie / band tie checks accept +9.91E37 while a tie is undecided (the FETCh? rule).
@@ -2840,9 +2840,9 @@ Firmware:
             **Device retest of fastswitch2** (calibrator 390 / 100 ohm and, if at hand, real 100 ohm / 4.7 kohm /
             10 Mohm resistors; RATE FAST and MED; settle.py / shots2.py / extra.py of chk6):
             1. DC V -> RES on each resistor: no amber value and no FETC? / READ? answer off the final one by more
-               than 0.1 % (the 8.8 / 7.1 / 12 Mohm and 219 / 126 / 57 / 30 ohm of 0760432 may still appear, but
+               than 0.1 % (the 8.8 / 7.1 / 12 Mohm and 219 / 126 / 57 / 30 ohm of 6bc494a may still appear, but
                grey); `CONF:RES;:READ?` answers the right value (MED: ~2-2.5 s, never "Data stale"); first right
-               value expected ~0.1-0.4 s later than 0760432's (one vet conversion). Real resistors vs the
+               value expected ~0.1-0.4 s later than 6bc494a's (one vet conversion). Real resistors vs the
                calibrator: whether the wrong values come from the meter or from the simulator's lag (log
                DBG:READout? every 20 ms: grey values and their times).
                10 Mohm (or open) at FAST: the 60 Mohm range's value turns amber at most ~1.5 s after the
@@ -2852,8 +2852,8 @@ Firmware:
             3. RUN at 1 s after `VOLT:COUP AUTO` (10 Hz square): "HOLD" in the status bar at once, the grey value
                keeps moving, the decided value (amber) appears and then stays frozen; RUN again releases it.
                DBG:READout? shows G,..,1 then F,..,1.
-            4. A / mA -> Scope -> DMM with 5 V on V-COM, 10 times (seqE): no V-JACK? (0760432: 0.5 s at 8.06 s);
-               DBG:SENT? ctsta: note the end of the 0x70 tail (7.75 s on 0760432). A real V-JACK? source (24 V on
+            4. A / mA -> Scope -> DMM with 5 V on V-COM, 10 times (seqE): no V-JACK? (6bc494a: 0.5 s at 8.06 s);
+               DBG:SENT? ctsta: note the end of the 0x70 tail (7.75 s on 6bc494a). A real V-JACK? source (24 V on
                V in DC A after RES): V-JACK? within ~2 s if it reads CMPHO alone, else by ~13 s.
             5. `CONF:CURR:DC 10` from DC V: the placeholder shows "A" from the first frame (shots2.py).
             **Device v0.1-pre1 / grab-power, 2026-10-24 (device-check-2026-10-21.md "v0.1-pre1"):** 1 **FAIL**
@@ -2869,7 +2869,7 @@ Firmware:
       the shunt of the DMM A function in use. Settings 3/3 "Burden voltage" (persisted p[38] bit 14,
       default OFF = stock look), DISPlay:BURDen ON|OFF / ?, FETCh:BURDen? (V, pre-REL, works with the
       readout off). Not sent over BT. Emulator emu/hy3131/burdentest.py, ui-render d21..d24 / c16..c18
-      (docs/power-meter-and-misconnect.md 3.15). Device 1e39149 (no current): the setting, its reboot
+      (docs/power-meter-and-misconnect.md 3.15). Device 33b44bd (no current): the setting, its reboot
       persistence, DISP:BURD, FETC:BURD? (DC V 9.9E37, uA 47.5 ohm x I), the aux rows PASS.
       Left: the device check (3.15 list: a second meter across
       A-COM per range, then POW:BURD the measured R_path); the guided "measure R_path" step is not built
@@ -2901,13 +2901,13 @@ Firmware:
       window 7.589), peak 12.012 A, idle 0.050 A, CSV 19 200 rows, t0 0.200000 s; 2 A rms AC running 6 s no
       trigger, 5 A rms step -> Irms 5.104 A (the DMM's AC A 5.000 A: the model's raw AD2 sine is 2.2 % above
       its DC scale, an emulator artefact, doc section 8), host CONF stops it. Host tests (tools/meter-test inrush), ui-render i01..i07.
-      Budgets (on 452c048): region B 13.9 KB free (19.4 before: +5.4 KB), SRAM unchanged (10.9 KB free),
+      Budgets (on 32d4d4b): region B 13.9 KB free (19.4 before: +5.4 KB), SRAM unchanged (10.9 KB free),
       stack headroom 21.2 KB (21.4 before).
       (verify on device: docs/inrush-current.md section 9: lamp, motor, a second meter / clamp)
 Emulator (emu/):
 - [x] Front-end schematic: label the jack wires with the HY3131 pins the firmware's register settings actually
       use per function (from the rows / mux selections: e.g. which PA tap, SENSE, PB0..PB7, FB/RLU), not "the
-      datasheet's typical circuit" (owner 2026-10-21). (96a1c8a first cut; 7d3d53e
+      datasheet's typical circuit" (owner 2026-10-21). (4fea6af first cut; db5d93f
       "jack-wire pins from the registers only": no role table left - the pins the enabled blocks
       select (ENCMP alone for the comparator, SAD1I for AD1, SDIO) put on a jack by a per-pin board table,
       PB4 follows OP1's input, RLD on the Ω net, every closed PA switch with its P / D / F / S letters, the
@@ -2926,13 +2926,13 @@ Emulator (emu/):
       ENPKH restarts and AC+DC (the AC V / DC V rows held together). emu/flowtest.py checks it (0 moves).
 - [x] HY3131 model at terminal level: the user sets what is connected to V-Ω/COM/A (sources/loads, incl. voltage AND current
       at the same time); the firmware's mux/relay choices route it through a modelled DM40 front-end (dividers, shunts, relays,
-      switches) — no per-mode magic inputs. (4278116 DM40 front-end model + connection editor, bc3a84e cross table)
+      switches) — no per-mode magic inputs. (e48d384 DM40 front-end model + connection editor, 8bdca47 cross table)
 - [x] Show the firmware's current mux/relay/switch selection as feedback in the GUI (draw the front-end path).
-      (4278116 schematic, 0b7dc9e HY3131 pins + internal switching, fd55af7 Frontend state line)
+      (e48d384 schematic, a4bf604 HY3131 pins + internal switching, cee364b Frontend state line)
 - [x] Cold-junction temperature and the HY3131 die temperature are separate inputs (die temp always set; default equal).
-      (4278116 CJ/die split)
+      (e48d384 CJ/die split)
 - [x] GUI: Apply on Enter in the HY3131 input fields; show only the fields relevant to the chosen source (no freq/DC offset
-      for plain DC etc.). (4278116 GTK connection editor: Enter applies, per-source fields)
+      for plain DC etc.). (e48d384 GTK connection editor: Enter applies, per-source fields)
 - [x] Virtual backup files (owner 2026-10-21): second USB MSC LUN = read-only FAT16 volume DM40-INFO
       generated from the MCU memory (src/vdisk.rs: CALIB / BOOTDATA / UID / OPTBYTES / OTP / ROMBOOT / LOADER .BIN,
       BACKUP.TXT, FIRMWARE.BIN = running firmware as update file); per-LUN SCSI in msc.rs (INQUIRY names, WP bit,
@@ -2951,7 +2951,7 @@ Emulator (emu/):
       layout constants, src/fonts.rs and src/text.rs (the anti-aliased Roboto set; nothing else used them),
       tools/mkfont.py and fonts/Roboto-*; host-test module lists updated (ui::button_hit stays: live).
 - [x] Continuity: a negative result (source / reversed diode / charged capacitor on the jacks) clamps to
-      0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0; verified on device f48db7d: 0.00 ohm + LIVE?)
+      0.00 ohm as the stock (was -666 / -1114 ohm; emulator cross table). (emulator-verified: V 1.234|cont = 0; verified on device f80524f: 0.00 ohm + LIVE?)
 - [x] AC V on a pure DC source reads ~18 mV in the emulator (stock ~0): NOT a firmware bug. The model's
       coupling capacitor charges to the raw jack DC (UpdateAcNode: src = dc * NodeRatioAc) while the
       seen step uses the calibration-folded node DC (NodeDcAc: DcQ(...)), so step = dcNode - vc never
@@ -2959,7 +2959,7 @@ Emulator (emu/):
       settles at 0.64 mV (the model's noise floor). The stock escapes it because its mV-first AUTO steps
       to AC mV (DC coupled in the model, no coupling term); opendm40 stays on the 6 V range (AUTO+, UF-21).
       Fix belongs in emu/hy3131/HY3131.cs (charge vc towards the same DcQ-folded level).
-      Fixed in 757f995 (vc charges to the calibration-adjusted level; test settles to the floor).
+      Fixed in e2c9ab0 (vc charges to the calibration-adjusted level; test settles to the floor).
 - [x] UF-30 bargraph wired: in the history row's place (8,154,464,18; the 7 px strip under the digits
       cannot keep 3 px from the F78 ink and the history boxes), Settings 2/2 "DMM row" Bargraph (default) /
       History (p[38] bit 10). Fed in App::reading with the raw reading (pre-REL, pre-smoothing; keeps
@@ -2979,12 +2979,12 @@ Emulator (emu/):
       found: the page's hit boxes were exactly the drawn boxes (4302 dead px in the 5..6 px gaps, touch-test
       reach L+0 T+0 R+0 B+0) and nothing showed a press: now 3 px slop on every key (dead px 953, all in
       the wide gaps) and pressed feedback from touch-down (ui-review #11 rule). The sensor type stays the large
-      TEXT22 chip on the DMM page (edee333).
+      TEXT22 chip on the DMM page (671006d).
 - [x] NTC user R25 / Beta editable on the temperature page (fields shown with "NTC user" selected; numeric
       keypad, R25 in kohm, limits 100 ohm..10 Mohm / Beta 1000..10000 K as dmm.rs set_ntc_user), persisted
       (p[16] / p[17], existing), SCPI [SENS:]TEMP:NTC <R25>,<Beta> (existing). A change while NTC user is
       active re-enters the sensor (NTC entry range follows R25).
-- [x] Fix of e732a37: Settings 2/2 had the "Temp unit" value but not its row name (rows shifted by one:
+- [x] Fix of 26d64d4: Settings 2/2 had the "Temp unit" value but not its row name (rows shifted by one:
       tapping "Scope swipe" toggled the unit). Row added.
 - [x] Tap on the DMM main value = resolution step FAST -> MED -> SLOW (fewer digits = faster), with a
       1.5 s toast of what the step really gives here: FAST "60000 counts / 10/s" (one OSR-8192 chopped
@@ -2998,13 +2998,13 @@ Emulator (emu/):
       segments orange, all red + a red "OL" marker on overload, F14 scale labels under it: 0 / half / full
       scale with unit (bipolar -FS / 0 / +FS unit), full scale = the range's (1000 V / 10 A where limited).
       Rows 147..172 (3 px from the F78 ink and the chart frame), probed for the ui-render ink check;
-      (verified on device f48db7d: visible, segmented, bipolar; d.bar 1 us)
+      (verified on device f80524f: visible, segmented, bipolar; d.bar 1 us)
       incremental update repaints only the changed segments (98..150 bus words / update; bargraph-test:
       every update equals a fresh draw).
 - [x] ui-review #13 remainder: the DMM page value turns the stock red (0xC9A0) in the V functions from 30 V
       (live reading, also while HOLD; the stock cue, gui_v2_6.h:157/175), lightning still from 100 V. No bar
       tint: the stock has none. (verify on device: 30 V on the calibrator)
-- [x] Device bug (85bc703, 40 Hz square 0..10.4 V): CONF:VOLT:ACDC then CONF:FREQ read 40.002 / 13.334 /
+- [x] Device bug (5c6b565, 40 Hz square 0..10.4 V): CONF:VOLT:ACDC then CONF:FREQ read 40.002 / 13.334 /
       26.668 Hz with duty 100.0 % for ~11 s (MIN / AVG polluted); DC V -> Hz clean. Not reproduced in the
       emulator (its counter model has no settling input path: clean 40.0007 Hz at once). Firmware side:
       the frequency mode's two-source choice kept its history across functions (last / change / source
@@ -3013,20 +3013,20 @@ Emulator (emu/):
       and duty >= 99.95 % neither wins the choice nor reaches the readout / MIN / AVG (no reading that gate).
       Cause of the missed edges (input path settling after the AC+DC relay pulses?) still open: retest on
       the device; if the wrong readings persist, compare the stock's AC+DC -> Hz entry (R20 / relay order).
-      (verified on device f48db7d: AC+DC -> Hz 2 x 43 reads all 40.002 Hz, duty 50 %, MIN/MAX clean)
+      (verified on device f80524f: AC+DC -> Hz 2 x 43 reads all 40.002 Hz, duty 50 %, MIN/MAX clean)
 - [x] DMM batch polish: bargraph full scale in continuity / diode = their OL ceilings 1000 ohm / 3 V
       (bargraph::mode_full_scale; ui-render d18 / d19, bargraph-test); Help 3/5 rows "Tap / hold history:
       Store / clear" + "History row shown: Settings: DMM row"; ui::list_page asserts one value per row on
       the host (ui-render / touch-test; touch-test passed 11 values to the 9-row pages, fixed).
 
-## Device check 94de654 (2026-10-22; docs/device-check-2026-10-21.md "94de654")
+## Device check 92fb8fa (2026-10-22; docs/device-check-2026-10-21.md "92fb8fa")
 
 - [x] Status bar kept "MANU" after a reading released the range hold (REL ended by an AUTO coupling switch):
       DmmView's status key (auto && !auto_plus, .., auto_plus) was equal for MANU (v_auto 1 under a manual
       range) and AUTO+. Key = r.auto now (ui.rs). Verify on device: AUTO + REL on the square -> 1 V DC: AUTO+.
 - [x] Combined view strip: the unit box (ST_UNIT, 40 px, SC_DIGITS) clipped power units ("-0.0001 mW"
       read "mV" plus a sliver; device g7-combined.png, ui-render c12-strip-power). Fixed (scope_ui.rs,
-      ui-fix-94de654): value box 84..191 (108 px: "-444.44" / "1562.00" ink), the unit from 196 as wide as
+      ui-fix-92fb8fa): value box 84..191 (108 px: "-444.44" / "1562.00" ink), the unit from 196 as wide as
       its text, SC_DIGITS up to 59 px ("mW", "MHz", "VAh" stay large), else SC_F20 on the digits'
       baseline ("mWh", "kWh", "mVA", "kVAh"); the sub rows start 4 px after the unit, with GEN 15 px before
       its column (64 px now: "10.00MHz" was cut too), too wide -> no spaces -> spacing 0. Renders
@@ -3045,7 +3045,7 @@ Emulator (emu/):
       the new coupling's layout and shows "--" for every measured value (energy, time, settings kept)
       until the new coupling's first reading. Emulator: DC -> AC, AC -> AC+DC, AC+DC -> DC (W taps) and
       POW:COUP AC all show the pending page at once (scratchpad uifix/emu-pow). Verify on device.
-      Device b7d9017: PASS (W taps DC -> AC -> AC+DC -> DC: "--" page in the new layout in the first read,
+      Device 540e056: PASS (W taps DC -> AC -> AC+DC -> DC: "--" page in the new layout in the first read,
       0.05 s). Cosmetic: on AC -> AC+DC bits of the AC layout's right column ("VAh" / "AVG" rows) stay ~2.5 s;
       the pending page's chart labels have no unit.
 - [x] Help 5/7 title ran into "< Back"; Help 2/7 "Power key held 1.5 s" touched its value column (and
@@ -3061,44 +3061,44 @@ Emulator (emu/):
       "0.050MOhm", diode "MOhm", temperature "Hz"). Fixed (app.rs): a function change clears the chart
       unit; an empty chart takes the reading's unit / digits even while it reads OL. Emulator: FREQ ->
       DIOD (OL) labels "0.0050V" (uifix/emu-chart). Verify on device.
-      Device b7d9017: PASS (Hz, diode OL, cap OL, ohm, temperature OL each with its own unit). Strip units
+      Device 540e056: PASS (Hz, diode OL, cap OL, ohm, temperature OL each with its own unit). Strip units
       "mW" / "mWh" PASS on the device ("MHz" not reachable there); Help 2/7 and 5/7 PASS (title 14 px after
       "< Back", topic -> value >= 21 px on all pages).
 - [x] Wave view entry from DC V: DBG:ISR? `dropped` +7087 (~185 ms, the DC V self-cal at entry) before
       the view drains; AC V entry 0. Harmless (the view starts after), note in feasibility 13 or skip the count.
-      **Fixed (0f6d934):** not the self-cal (it runs before the ISR starts) but the full scope repaint after
+      **Fixed (dda802c):** not the self-cal (it runs before the ISR starts) but the full scope repaint after
       it: the new cal moves the wave scale's a / b, `wave_live` took any scale change for a repaint, and the
       repaint ran with the stream on (the ring holds ~50 ms at 38400). Now only a V/div / unit / coupling
       change repaints. Emulator (wavetest --case dcv, a DC V entry at 2 ms/div): overwritten 3555 -> 0.
-      Device 246afc7: PASS (3 entries, field 6 = 0 throughout).
+      Device c92b605: PASS (3 entries, field 6 = 0 throughout).
       (A V/div step still repaints with the stream on: the record restarts after it anyway.) Device retest:
       DC V entry at 2 ms/div, DBG:ISR? field 6.
 
 
-## Device check 485d472, the RAM round (2026-10-23; docs/device-check-2026-10-21.md "485d472")
+## Device check 9d56ca6, the RAM round (2026-10-23; docs/device-check-2026-10-21.md "9d56ca6")
 
 - [x] Screenshot streamed from the panel: BMP = the frozen panel, 0 px, on a menu, AC+DC, a running
       Wave-view trace and the CHA colour picker (exact PALETTE values; GRAM R/B low bits 0, so 666 -> 565
       is lossless; no dummy-word slip). READ? and the DMM run through a shot (a 1 -> 2 -> 1 V step
       followed); data-phase passes <= 4.5 ms; 3 passes of 50-78 ms = the FAT x2 + dir block writes (since
-      6cb9c7e). FFT in the arena: stops for a shot, resumes with the same peak; CSV commits pause it
+      048f425). FFT in the arena: stops for a shot, resumes with the same peak; CSV commits pause it
       < 0.2 s; MMEM:CAT? bursts barely. calbackup SAFECOPY_PRESENT, CALIB / BOOTDATA / UID unchanged.
 - [x] Freeze is ~5.4 s (touch back) and the toast ~6.1 s, not 4-5 s; with steady DBG:LCD? traffic the
       same job ends in 2.3-4 s (why?). Pre-erasing the next shot's clusters in idle (ram-budget.md
-      follow-up) would cut it to the page programs. Done (3f04515); device b7d9017: frozen 1.36-1.38 s,
+      follow-up) would cut it to the page programs. Done (d222516); device 540e056: frozen 1.36-1.38 s,
       touch back by 1.54 s, toast ~2.4 s.
 - [x] A shot during a fast-log session wrote nothing at once but ran after the session, on a half-repainted
-      page (S023); the same after a host LOG:STAT session (S027). Fixed in e8cc4e9 (App::shot_request:
+      page (S023); the same after a host LOG:STAT session (S027). Fixed in 20a91d0 (App::shot_request:
       "Disk busy" at the gesture; a shot waits 1 s after a full repaint). Verify on device: the swipe
       during `LOG:DEST DISK` + `LOG:STAT ON` shows "Disk busy" at once and no S*.BMP appears after; during
       a host LOG:STAT session, the shot after LOG:STAT OFF holds the reading and the chart.
-      Device e8cc4e9 (2026-10-23): PASS. "Disk busy" in the first panel read (0-0.14 s), no BMP; after a
+      Device 20a91d0 (2026-10-23): PASS. "Disk busy" in the first panel read (0-0.14 s), no BMP; after a
       host session S012 / S013 hold the reading and the chart, the shot 1.07 s after LOG:STAT OFF.
 - [x] Wave view: `LOG:CSV ON` is accepted but records no rows (READ? 9.9E37); ram-budget.md says csvlog is
       refused there. Refuse it (Settings conflict) or fix the doc.
-      **Fixed (0f6d934):** refused: SYST:ERR? -100,"Settings conflict: Wave view" (and ": inrush page" on the
+      **Fixed (dda802c):** refused: SYST:ERR? -100,"Settings conflict: Wave view" (and ": inrush page" on the
       inrush page, the same paused DMM), LOG:CSV? stays off (App::rec_conflict). wavetest checks it.
-      Device 246afc7: PASS (the Wave view and the inrush page: the error, LOG:CSV? off, no new file).
+      Device c92b605: PASS (the Wave view and the inrush page: the error, LOG:CSV? off, no new file).
 - [x] Wave view, not under wavetest's per-step region C / ring checks yet (the whole-run check covers what
       the test does): the source badge exit (DMM -> MCX: `wave_close` without `show`, so the MCX page runs one
       pass with the stream on), a V/div step at 2 / 1 ms/div (a full repaint with the stream on: the ring
@@ -3112,25 +3112,25 @@ Emulator (emu/):
       `wdrop.py` dropped +0, the trace back within ~1 s; the badge out at 2 ms/div: late 0, overruns 0.
       **Device d330877 (device-check-2026-10-21.md "d330877" 1b): PASS**: V/div + / - at 1 ms/div dropped 0, late 0, overruns 0; badge exit
       at 2 ms/div late 0, overruns 0, MCX page drawn.
-- [x] MENU on the Device page returned to Settings 3/3 (device 2d33d3a, the "State at the end" note).
+- [x] MENU on the Device page returned to Settings 3/3 (device 519fb8a, the "State at the end" note).
       Stock: Device is a section of the one Settings screen; what MENU does there is not traced, the main
       menu is the likely answer. **3f32bc3:** MENU on Device -> the main menu; a tap on Device still goes
       to Settings 3/3; MENU on Settings 3/3 / 2/3 still steps back a page (opendm40's own paging; Help -> Settings
       unchanged). Emulator: fastlogtest --ui-nav page tree. Device retest: Settings > More > More > Device,
       MENU: the main menu.
       **Device d330877 (device-check-2026-10-21.md "d330877" 1c): PASS.**
-- [x] AUTO OVERLOAD on AC 1 A (794a656, couptest iac repro): blocked, the A jack is not wired.
-      Fixed in 3542ddb with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
-- [x] powtest `ereset` FAILs on 3473fdf, ce3b592, fbcd502 + dmm-bugs alike, also run alone (the Yes tap
+- [x] AUTO OVERLOAD on AC 1 A (50b9a16, couptest iac repro): blocked, the A jack is not wired.
+      Fixed in 073b309 with the 2026-10-22 BUG (quiet hop in AUTO); the device check is in the list below.
+- [x] powtest `ereset` FAILs on 9f4edb3, 4ed771d, 2f5d3b8 + dmm-bugs alike, also run alone (the Yes tap
       at 310,204 at 21 s, 13 s after the long press, does not reset the energy: Wh keeps counting; it passed
-      at afcf151 per the device-check doc). (`acdc-floor` failed once in the 20-emulator parallel run and
-      passes alone, as noted at afcf151.)
-      Done (5301fb7): no regression to bisect. afcf151..3473fdf changes only acdcm.rs (method C) in opendm40 and
-      the emulator's LPF creep (dd95769); afcf151 itself FAILs on its own emulator and 2710d53 passes there,
+      at a8048ba per the device-check doc). (`acdc-floor` failed once in the 20-emulator parallel run and
+      passes alone, as noted at a8048ba.)
+      Done (5301fb7): no regression to bisect. a8048ba..9f4edb3 changes only acdcm.rs (method C) in opendm40 and
+      the emulator's LPF creep (38a63eb); a8048ba itself FAILs on its own emulator and f7c99e8 passes there,
       run to run. A race with two sides:
       1. Test: pure DC on AC+DC raises the DC? hint ~2 s after the first reading (5..9 s in the emulator);
          its toast (40,132 400x56, 1.5 s) covers the long press point 58,179, and a touch on a toast's box
-         is the toast's (2437e6e), so the long press at 8 s never opened the confirm (failing run: SYST:ALER?
+         is the toast's (e206875), so the long press at 8 s never opened the confirm (failing run: SYST:ALER?
          DC from 6.99 s). The long press now waits for the hint + 2 s (powtest GATE: 8..14 s), Yes 13 s
          after it.
       2. Firmware: `App::toast` and the auto power-off warning took the overlay slot unconditionally, so a
@@ -3139,21 +3139,21 @@ Emulator (emu/):
          comes while a modal overlay is up (`Overlay::modal`) is kept (one slot, the latest wins) and shown
          once the confirm has gone and the page is drawn again.
       Emulator: new `ereset-hint` (AC part on V, long press at 8 s, pure DC from 12 s = the hint under the
-      confirm, Yes at 21 s): FAIL on 2710d53, OK on 5301fb7; `ereset` OK 2 of 2 alone (gate 6.85 / 7.07 s).
+      confirm, Yes at 21 s): FAIL on f7c99e8, OK on 5301fb7; `ereset` OK 2 of 2 alone (gate 6.85 / 7.07 s).
       Full powtest on 935acd6 (one emulator): 29 of 30 OK incl. ereset / ereset-hint / entry; `zero` failed
       once (one DC-row AD1 zero 158 vs 300 +- 130: the noise tolerance) and passes 2 of 2 alone on 935acd6
-      and on 2710d53 (flaky, not from this change). leadstest OK. ejecttest (the firmware question) could
+      and on f7c99e8 (flaky, not from this change). leadstest OK. ejecttest (the firmware question) could
       not run here: usbip attach needs vhci_hcd (not loaded on this host).
       Device retest (power meter, AC+DC, V-COM on a DC source, nothing in A): (a) right after entering the
       meter, wait for the "No AC: DC is more precise" toast, then long press E: the reset confirm; Yes resets
       Wh and the time. (b) Long press E within 2 s of entering (before the hint): the confirm stays up when
       the hint comes (DC? badge), Yes still resets, and the hint toast shows after the confirm closes.
-      Owner question (not changed): a long press on a toast's box does nothing (only a tap there acts, 2437e6e),
+      Owner question (not changed): a long press on a toast's box does nothing (only a tap there acts, e206875),
       so a long press on E while a hint toast covers it is lost; should a long press go through to the page?
       **Device d330877 (device-check-2026-10-21.md "d330877" item 3): PASS** (a) and (b): the confirm survives the DC hint, Yes resets Wh / time,
       the hint toast shows 0.15 s after the confirm closes. In AC+DC the E row is at y 170..192 (the parts row).
       Under the confirm the page is not redrawn (no DC? badge until it closes).
-- [ ] Device retest "dmm-bugs" (3542ddb; most need a current in the A jack: a current-limited bench
+- [ ] Device retest "dmm-bugs" (073b309; most need a current in the A jack: a current-limited bench
       supply + load or the calibrator's current output; the meter here has the A jack open):
       1. A AUTO coupling (CURR:COUP AUTO), AC 1 A @ 50 Hz: SYST:ALER? NONE throughout, CONF? 6 A range
          within ~2 s, the reading 1 A; then 300 mA: back on the mA shunt (CONF? 0.6), NONE. Same for CURR:AC,
@@ -3171,14 +3171,14 @@ Emulator (emu/):
          (replaces the inferred 10 mV / V of the model; k > ~17 mV / V would leave the 1.4 V gap of doc 4.8).
       6. Leads in A / COM, V-COM open, a few mA (2-5 mA) through A in RES and TEMP (K TC and an NTC type):
          A-JACK within ~1 s (RES) / ~2.5 s (TC), field 12 = 0.
-      **Device 2d33d3a (device-check-2026-10-21.md "2d33d3a" 7a-7d):** 5 TEMP PASS (NONE, field 12 = 1 at
+      **Device 519fb8a (device-check-2026-10-21.md "519fb8a" 7a-7d):** 5 TEMP PASS (NONE, field 12 = 1 at
       5 / 10 V). **5 RES FAIL:** A-JACK at 1 / 5 / 10 V and the square, never LIVE?, field 12 = 0 (free); FETC?
       is OL (positive), not negative, on every range 600 ohm..60 Mohm at 5 V: the ohm AD1 code does not go
       negative for a positive source, so V_GATE's premise fails on the device (owner: what tells a driven V-COM
       in RES then? a negative source not tried). Comparator hits: none at 1.0-3.0 V DC, hits at 5 V: the
       pickup k ~5-8 mV / V. 1-4, 6 blocked (no current in A).
 
-## Device check e8cc4e9: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "e8cc4e9")
+## Device check 20a91d0: shot fix, 76.8 kS/s, AC+DC methods (2026-10-23; docs/device-check-2026-10-21.md "20a91d0")
 
 - [x] Shot fix re-check: PASS (items above). 76.8 kS/s: host / Wave view / DIV 8,1 PASS, the disk FAIL (items
       under "76.8 kS/s").
@@ -3195,16 +3195,16 @@ Emulator (emu/):
       row write plus garbage RMS blocks above ~100 k codes of DC. The AC part is used only when sqrt(RMS) <=
       half of AD2's peak-hold p-p (else the last RMS value / the bound on a steady node; no usable RMS with AC
       for 2.5 s: up a range, remembered); up-range on the peak hold at 90 %; no self-cal per range visit.
-      Emulator: reproduced on b7d9017 (model "hpftau:" / "rmsbig:"), fixed (couptest sq5). **Device retest: §10.7
+      Emulator: reproduced on 540e056 (model "hpftau:" / "rmsbig:"), fixed (couptest sq5). **Device retest: §10.7
       e9 / e10.**
 - [x] C's 60 V DC part: +11 mV offset / +0.05 % gain against DC V (above): check the self-cal's 60 V path
       (AD1 on SENSE - PB5 vs the AD2 node) before C can be the default.
       Fixed in the emulator (§10.6 item 1): the anchor is now the DC V row's READ? against the run row's own LPF
-      (AD3 + RMS on), per range and session; the gain from the internal zero, kept per range. Emulator: b7d9017
+      (AD3 + RMS on), per range and session; the gain from the internal zero, kept per range. Emulator: 540e056
       ~+16 mV at 12 V reproduced, the fix within 1.3 mV. **Device retest: §10.7 e8.**
 - [x] C's AC part +0.13 / +0.23 % against A (e2): through the factory AC V gain / offset now (§10.6 item 3;
       e2 recomputed: +0.014 / -0.003 %). **Device retest: §10.7 e2.**
-- [x] Device retest of method C (acdc-approaches.md §10.7, results §10.8, device-check doc "2cc47ef"): e9 / e10 /
+- [x] Device retest of method C (acdc-approaches.md §10.7, results §10.8, device-check doc "ac1e852"): e9 / e10 /
       e2 / e6 / e5 and the by-hand AUTO 5 V case PASS (5 V: AUTO DC 4.9981 V on 6 V, 9.4 rd/s; AC part vs A
       +0.012 / -0.004 %; e5 60 V +0.5 / -1.3 / +0.5 mV, was +21..25); the R29 peak-hold restart leaves the RMS /
       LPF alone (9.2 rd/s, acsrc 0 throughout). **Decision rule not met**: e8 60 V at 1 / 0 V -7.2 / -8.0 mV
@@ -3216,20 +3216,20 @@ Emulator (emu/):
       Fixed in the emulator (acdc-approaches.md §10.9 item 1): once the input settles >= 10 k codes from the
       anchor C takes the stock DC V reading again and the gain between the two references (kept per range until
       power-off, replaces the internal zero's); no hardware constant. Model "agndz:" (15 codes on 60 V);
-      acdcmethtest --e8 down: f724c28 -6.7 / -7.3 mV at 1 / 0 V, the fix +0.4 / +0.2 mV; --e8 up (entered at 0 V,
-      the table's gain): f724c28 -20.5 mV at 24 V, the fix +0.4. **Device retest: §10.10 (e8s / e8up).**
-      Device 2fbc5e7 (§10.11): 60 V PASS (e8s 1 / 0 V +1.8 / +1.9 mV, was -7.2 / -8.0; e8up 24 V +1.2 mV).
+      acdcmethtest --e8 down: ad0587c -6.7 / -7.3 mV at 1 / 0 V, the fix +0.4 / +0.2 mV; --e8 up (entered at 0 V,
+      the table's gain): ad0587c -20.5 mV at 24 V, the fix +0.4. **Device retest: §10.10 (e8s / e8up).**
+      Device 80d5b01 (§10.11): 60 V PASS (e8s 1 / 0 V +1.8 / +1.9 mV, was -7.2 / -8.0; e8up 24 V +1.2 mV).
 - [x] AUTO coupling on a signal with AC ~= DC (the 40 Hz square): C stays DC, A goes AC (its first AC part
       overshoots); the first evaluation (AC > |DC|) decides and the 1.5 x hysteresis keeps it. Decide whether
       that tie needs a rule (e.g. prefer AC within a few % of DC) before C's default.
       Rule (§10.9 item 2, dmm.rs AUTO_TIE): DC until the first decision (AC only with no DC part); the first
       decision waits until the AC part has settled on one side (4 x its last change < its distance to |DC|),
       then the larger part; a tie within 1 % or no settling in 4 s: DC. couptest sqtie (three entries on the
-      square): f724c28 DC -> AC with A and C, the fix DC throughout with both. **Device retest: §10.10 e11.**
-      Device 2fbc5e7 (§10.11): e11 DC in all 6 entries, 0 changes; by hand AUTO DC with A and C: PASS.
-- [x] dcvtest LOG:SCALe? 1 % off (since 8bb87e9): the test did not expect the model's per-range per_code factor
+      square): ad0587c DC -> AC with A and C, the fix DC throughout with both. **Device retest: §10.10 e11.**
+      Device 80d5b01 (§10.11): e11 DC in all 6 entries, 0 changes; by hand AUTO DC with A and C: PASS.
+- [x] dcvtest LOG:SCALe? 1 % off (since fb96992): the test did not expect the model's per-range per_code factor
       (Ad2DcGainR, the device's); fixed in the test (§10.9 item 3).
-- [x] Device retest of §10.9 (§10.10, results §10.11, device-check doc "2fbc5e7"): e8up, e8s 60 V, e8, e11, e10,
+- [x] Device retest of §10.9 (§10.10, results §10.11, device-check doc "80d5b01"): e8up, e8s 60 V, e8, e11, e10,
       e9, e5 PASS. **Decision rule not met**: e8s 6 V at 0 V -0.86 mV (limit 0.5), tc6 2 of 3 power cycles. A stays
       the default (owner's decision).
 - [x] C's 6 V two-point gain over a short span (5 -> 3 V, 41.6 k codes) is +143..+195 ppm against the internal zero's
@@ -3237,23 +3237,23 @@ Emulator (emu/):
       still creeps 5-12 codes for ~8 s (DC V settles in ~1 s). Fix candidates in §10.11: (b) take m2 only once the
       LPF stops drifting (removes the cause); (a) keep the larger-span gain (brings back 60 V's AGND bias);
       (c) a larger CAL_GAIN_CODES on 6 V. Then device: e8s 6 V and tc6 (rt29/tc6.py) over 3 power cycles.
-      Device afcf151 (contains 9343020; device-check doc "ad97fd7 / c8c2f02 / afcf151" 5, 10.13's list): e8s 6 V at
+      Device a8048ba (contains adcb15f; device-check doc "ad97fd7 / c8c2f02 / a8048ba" 5, 10.13's list): e8s 6 V at
       0 V -0.25 / +0.18 / -0.59 / +0.21 mV (3 of 4 within 0.5 mV; the miss took a biased-judged second reference
       at 3 V, gsrc 3 gdis +8.95, then gsrc 2 at 1 V); e8up, e8, e5 pass.
-      Fixed in the emulator (§10.12, 71d95ad): (b) as a ~3 s slope window (< 1 code / s, >= 5 s after the step,
+      Fixed in the emulator (§10.12, 4e71686): (b) as a ~3 s slope window (< 1 code / s, >= 5 s after the step,
       timeout ~13 s), the new point taken before the reference row write; a shorter-span two-point gain replaces
       an internal zero's only when it shows that zero biased beyond the noise (60 V yes, 6 V no); pairing with the
       session's farthest reference point. Model "lpfcreep:" (two 2.5 s lags, 2.4e-4 of a step) + LPF noise;
-      acdcmethtest --e8 tc6: e158550 -0.75 mV at 0.1 V (+177 ppm), 71d95ad +0.07 mV. **Device retest: §10.13.**
+      acdcmethtest --e8 tc6: af7d2e4 -0.75 mV at 0.1 V (+177 ppm), 4e71686 +0.07 mV. **Device retest: §10.13.**
 - [x] Device retest of §10.12 (§10.13): e8up first after the install, e8s x 4 after `dm40dbg.py reset` (6 V 0 V
       within 0.5 mV in all four; gsrc 1 on 6 V), e8, e5; optionally tc6 (is the device's tail the model's?), e8l,
       e11 / e10 / e9. Then the owner decides on C as the default.
-      afcf151: 3 of 4 (one false "biased" judgement of 6 V's internal zero). Data (§10.14, device-check doc
+      a8048ba: 3 of 4 (one false "biased" judgement of 6 V's internal zero). Data (§10.14, device-check doc
       "acdc-bias"): every 6 V gdis beyond 1 code positive (the LPF creep's lag; 3 V level +3.9..+13.0, 10 of 10),
       every 60 V one negative (12 of 12). The suggested options (same sign over 2 references, repeat, noise
-      scaling) fail on that data. Fixed (85f3362, f6858b2): a creep allowance of 4e-4 x the step on the
-      lag side only. Emulator: three cascaded lags reproduce the false judgement on 7a1d661 (dd95769).
-      **Device 85f3362 full set + f6858b2 confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
+      scaling) fail on that data. Fixed (8e5ca2d, 9f36bbe): a creep allowance of 4e-4 x the step on the
+      lag side only. Emulator: three cascaded lags reproduce the false judgement on 219817c (38a63eb).
+      **Device 8e5ca2d full set + 9f36bbe confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
       e8s, gsrc 1 throughout on 6 V, 60 V gsrc 3 every session; e8up, e8, e5, e11, e10, e9 pass. C meets the
       decision rule; A stays the default (owner, next item).
 - [ ] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
@@ -3261,49 +3261,49 @@ Emulator (emu/):
       AC, iauto CURR:COUP AUTO, ie5 drift; bench supply + load, a second meter in series as the reference; an
       acdcmeth.py variant driving the supply and the second meter).
 - [ ] C's lag-side creep allowance (CREEP_K 4e-4): the largest lag-side gdis on the device is +16.2 codes
-      against a threshold of 24.6 (f6858b2). Watch it in later e8s logs (STAT? gdis / bthr); and why the 1 V
+      against a threshold of 24.6 (9f36bbe). Watch it in later e8s logs (STAT? gdis / bthr); and why the 1 V
       level's lag is ~1/3 of the 3 V level's at the same step is open (§10.14).
 - [ ] C's second reference now comes ~5-8 s after a level change (was ~1.5 s): e8s's 4 s levels may end before
       it. If the device tail is shorter than the model's, lower SLOPE_MIN (48 results) after the tc6 trace.
 - [x] The first V tap after `CONF:VOLT:DC` on the 40 Hz square is sometimes lost (C 5 of 6, A 1 of 3; not at 1 V
-      DC): device-check doc "2fbc5e7" 3. Not chased.
-      **Cause found (device 28ace43, device-check doc "28ace43" 6):** the tap lands on the grey hint toast "AC
+      DC): device-check doc "80d5b01" 3. Not chased.
+      **Cause found (device f6c6e05, device-check doc "f6c6e05" 6):** the tap lands on the grey hint toast "AC
       voltage here: use AC V?" (sentinel AC?, HINT_ASSERT_MS 2 s; shown from ~2.6 s after the CONF for
       TOAST_MS 1.5 s), and a toast takes the gesture (app.rs: "a toast just goes"). Method A: lost 14 of 30
       with the tap 2.8-4.1 s after the CONF, 0 of 30 at 0.5-2.75 s, 0 of 6 at 5 s; the range stayed 6 V
-      throughout (not an autorange). 2fbc5e7's tap29.py tapped at 3 s, in the window. Decide: let a tap
+      throughout (not an autorange). 80d5b01's tap29.py tapped at 3 s, in the window. Decide: let a tap
       outside the toast's box reach the page (and dismiss the toast), or keep the stock-like swallow.
-      **Decided (owner): pass through.** 2437e6e: a toast is not modal; a tap on its box dismisses it, any other
+      **Decided (owner): pass through.** e206875: a toast is not modal; a tap on its box dismisses it, any other
       touch, swipe or side key dismisses it and goes on to the page; the confirmations stay modal. Device
-      c8c2f02 (device-check doc "ad97fd7 / c8c2f02 / afcf151" 4): toast up, V tap outside it 10 of 10 advanced
+      c8c2f02 (device-check doc "ad97fd7 / c8c2f02 / a8048ba" 4): toast up, V tap outside it 10 of 10 advanced
       the coupling (and the toast went); a tap on the toast 10 of 10 dismissed it, coupling unchanged.
-- [ ] Method C's internal zero on 60 V (the ~15 codes of 2cc47ef): repeatability over entries / power cycles,
+- [ ] Method C's internal zero on 60 V (the ~15 codes of ac1e852): repeatability over entries / power cycles,
       and 600 / 1000 V (needs > 30 V), if C's first-entry gain is ever to be corrected by a constant.
 - [x] DC V at the calibrator's 1 V read 0.99897..0.99949 V after the AC+DC session (0.999951 before it; the
       3 V reference moved -160 ppm during e5). **Calibrator, not the meter** (device-check doc "DC V at the
       calibrator's 1 V: meter or calibrator?"): no opendm40 state in the DC V path, the factory record unchanged,
       the 6 V and 60 V ranges agree, a level pattern (1 / 2 / 3 / 5 / 10 / 20 V: -0.9 / -1.4 / -2.5 / -2.0 /
-      -3.0 / -1.3 mV) that is neither gain nor offset, the same pattern on 2026-10-22 20:24 before e8cc4e9.
+      -3.0 / -1.3 mV) that is neither gain nor offset, the same pattern on 2026-10-22 20:24 before 20a91d0.
 - [x] acdcmeth.py: the calibrator's "30 V" is 23.99 V (MR9270 limit?): the e1 / e5 / e6 30 V points are 24 V.
       Fixed (tools): mr9270.VOLTAGE_MAX = 24.0, set_value caps a larger voltage request with a warning on
       stderr (the value register reads back the setpoint, so the tool cannot see the real output);
       acdcmeth.py's levels, labels and docstring say 24 V (VMAX 24: e1's top level, e5 on 60 V, e6's step
       "to 24V"), ad2dcv.py's 30 V points are 24 V (ad2n7.py already used 24). Older logs' "30 V" rows = 24 V.
       Also: acdcmeth settle_time returned 3 NaNs where e6 unpacks 4 (a level without readings crashed e6).
-      Device (f6858b2, 2026-10-23): a 30 V request printed the warning, wrote 24000 and the meter read 23.985 V.
+      Device (9f36bbe, 2026-10-23): a 30 V request printed the warning, wrote 24000 and the meter read 23.985 V.
       Device e6 not run (permission denied in that session); settle_time's NaN path checked offline (4 NaNs; the
-      3473fdf version 3, ValueError).
+      9f4edb3 version 3, ValueError).
 
 ## USBTMC stress / ports / build warning (branch tmcstress, 2026-10-23)
 
 - [x] emu/usbtmc_stress.py big / compound failed on WAV:DATA? sizes: the test was wrong (every USBTMC reply ends with
-      '\n' since 422ed3e, a block too); it now strips and requires the terminator (9d405d6).
+      '\n' since b3cbfbf, a block too); it now strips and requires the terminator (9d405d6).
 - [x] USBTMC: a 64-byte transfer's ZLP left in the endpoint after an abort (`*IDN?` is exactly 64 bytes since the
       24-digit serial): Usbtmc::poll could write the ZLP before the data packet's XFRC came in, and that XFRC
       ended the transfer; INITIATE_ABORT_BULK_IN / CHECK_*_STATUS then said done and the next query read the ZLP.
       pump_in ends a transfer only once EPENA is clear (9d405d6). Emulator: usbtmc_stress 3000 iterations, all
       cases, PASS. Device retest: tools/dm40scpi.py `*IDN?` x many + a Linux usbtmc clear / abort (ioctl) mid-read.
-      **Device 3e41549: PASS** (doc "3e41549" 3a-3c): pyusb with exact 64-byte IN URBs (usbtmc detached from
+      **Device 40728b8: PASS** (doc "40728b8" 3a-3c): pyusb with exact 64-byte IN URBs (usbtmc detached from
       interface 0 only, re-attached), c_abortin / stale / clear incl. the abort after `*IDN?`'s 64-byte packet
       with its ZLP pending: 2000 / 2000 (SUCCESS, PENDING, the drain gets the ZLP, next `*IDN?` exact); through
       the Linux usbtmc generic API 500 / 500; 2000 plain `*IDN?` / READ? / WAV:PRE? with no repair: 0 empty, 0 stale.
@@ -3311,7 +3311,7 @@ Emulator (emu/):
       DM40_EMU_PORTS=lo-hi; emu/README.md) (0a0c77c). mscresettest PASS; ejecttest not run (needs sudo usbip).
 - [x] Build warning `csv_busy is never used`: removed (never called on rust-fw-poc or stream-ui) (cdd3367).
 
-## Device check b7d9017: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "b7d9017")
+## Device check 540e056: shot pre-erase, SCPI Range / Digits + sigrok, scope full record, UI fixes (2026-10-23; docs/device-check-2026-10-21.md "540e056")
 
 - [x] Screenshot preparation: items 1, 2, 4, 5 (CSV, fast-log), 6 PASS (item above). Owner: the battery pull
       during prep and the "PC can edit" + DM40*.BIN half.
@@ -3320,22 +3320,22 @@ Emulator (emu/):
 - [ ] Scope full record: (5) ngscopeclient over USBTMC FAIL (item above); (3) / (9) blocked until the
       generator is looped back to the scope input; (2) RUN during a long read and (7)'s 2 s stall timeout
       need a hand on the RUN key; (8) on an AC signal and (6) the driver over rfcomm not run.
-- [x] UI fixes 7d602f8: strip units, Help 2/7 + 5/7, power pending page, chart axis PASS (cosmetic notes in the
-      94de654 items).
+- [x] UI fixes 9861a29: strip units, Help 2/7 + 5/7, power pending page, chart axis PASS (cosmetic notes in the
+      92fb8fa items).
 - [x] DC V at the calibrator's 1 V read 0.9987-0.9993 V all session (sigrok 998.9-999.6 mV) with the calibrator
-      at 1 V for hours: the e8cc4e9 "warm after 24 V" idea does not explain it. Closed: the calibrator's
+      at 1 V for hours: the 20a91d0 "warm after 24 V" idea does not explain it. Closed: the calibrator's
       setpoint error + its +-0.4 mV wander over minutes (item above); not a regression.
 - [ ] Owner: confirm the DM40's DC V against a third reference (a 6.5-digit DMM or a 2.5 / 5 V reference IC
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
 - [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
-      Not run on 3e41549 (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
+      Not run on 40728b8 (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
       the calibrator wanders by the same 0.2-0.5 mV over minutes.
 - [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
       its 10/s reading). Device retest: chip and value tap from each rate.
-      Device 9292ec2 (device-check doc "9292ec2" B6): PASS. Chip SLOW -> FAST -> MED -> SLOW and
+      Device decaf60 (device-check doc "decaf60" B6): PASS. Chip SLOW -> FAST -> MED -> SLOW and
       FAST -> MED -> SLOW -> FAST -> MED; value tap (2.5 s apart) MED -> SLOW -> FAST -> MED -> SLOW and
       SLOW -> FAST -> MED -> SLOW -> FAST (RATE?). A second value tap 1 s after the first did nothing
       (SLOW -> FAST -> FAST -> MED); the chip at 1 s did not skip. Cosmetic, not chased.
@@ -3352,12 +3352,12 @@ Emulator (emu/):
       (run.py --buzzer-log: TIM14 ARR / CCR1 writes).
 - [ ] Device: doc 4.10 "Device check list (danger alarm)" (needs a current in the A jack); the measurement
       coupling check (item 4) and the low tone's loudness (item 5).
-      Device bb15d39 (doc "bb15d39" D1-D4), no current: Settings row and SYST:ALER:ALARm? read, V-JACK? and
+      Device c785807 (doc "c785807" D1-D4), no current: Settings row and SYST:ALER:ALARm? read, V-JACK? and
       OVERLOAD leave DBG:ALARm? idle. Not run: the coupling check (no debug command makes it sound; and the
-      owner asked for no sound at night). **New: the known false A-JACK in RES with 5 V on V-COM (2d33d3a 7b)
-      now sounds the loud alarm** (badge only since 8d37999; LIVE? instead since the jack check, doc 4.13) (6 events during the E1 subset). The setting is OFF for the night (owner).
+      owner asked for no sound at night). **New: the known false A-JACK in RES with 5 V on V-COM (519fb8a 7b)
+      now sounds the loud alarm** (badge only since cdc008a; LIVE? instead since the jack check, doc 4.13) (6 events during the E1 subset). The setting is OFF for the night (owner).
 
-## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on 0256df2 / 2d33d3a)
+## False AC? / A-JACK / A-PROT / V-JACK? after switches (owner 2026-10-23, on 469f354 / 519fb8a)
 
 - [x] Emulator, branch falsehint (0e8085c, bd6824a, 807ed14). Tool: emu/hy3131/switchtest.py (~60
       switches per connection over SCPI and the MF -> Wave view; every assertion is checked through the new
@@ -3366,7 +3366,7 @@ Emulator (emu/):
       Two opt-in model knobs reproduce the failures: `ohmexit:3.5;ohmexitlo:1.2`, which replays the
       device trace below, and `swtr:300;swtau:50`, a HYPOTHETICAL ring of PB1 / the V taps after each row
       change (shape not from the device).
-      **Device 0256df2, check E (397 switches: V-COM open, 1 V, 5 V; the A jack open; raw log
+      **Device 469f354, check E (397 switches: V-COM open, 1 V, 5 V; the A jack open; raw log
       chk/out/E_all_sent.txt in the session scratchpad):** no A-PROT, no false A-JACK after a switch.
       - E1: RES -> A / mA, V-COM open or at 1 V, 11 of 11 (0 of 4 at 5 V): V-JACK? from 1.47-1.97 s to
         ~5 s. CMP_SENSE CTSTA reads 0 for 0.5-0.7 s, then 0x70 (CMPHO + CMPLO in one read) in every
@@ -3408,7 +3408,7 @@ Emulator (emu/):
         The A-jack probe's in / out rewrites skip the blank.
       - The DMM hints AC? and DC? need the condition in every window for the 2 s. The power meter's
         hints keep the old rule (no report against them; scope kept narrow). powtest `ereset` is the
-        known flake (item above): 1 of 2 runs FAIL on 0256df2 and on this branch alike. AC? counts
+        known flake (item above): 1 of 2 runs FAIL on 469f354 and on this branch alike. AC? counts
         a V-tap window only with |DC V| < 2 V (AC_HINT_DC_MAX), after the row's first reading, and never
         a read with both bits.
       A-PROT's rule (aprot_trips, the probe, the latch) is unchanged.
@@ -3437,8 +3437,8 @@ Emulator (emu/):
       Tests on the final tree: switchtest (all scenarios), senttest 61/61, autorangetest, couptest,
       powtest, acdcmethtest, flowtest, meter-test (switch_blank_rules), the model's unit tests.
       Not changed (owner decision pending): RES with 5 V on V-COM reads OL, not negative, so V_GATE says
-      "free" and A-JACK shows (2d33d3a item 5). That is a steady state, and the blanks do not touch it.
-- [x] Device retest (falsehint image), alerts ON, A jack open unless stated (run on 3e41549; its leftovers
+      "free" and A-JACK shows (519fb8a item 5). That is a steady state, and the blanks do not touch it.
+- [x] Device retest (falsehint image), alerts ON, A jack open unless stated (run on 40728b8; its leftovers
       went to sentinel2 / sentinel3, both run on the device, closed 2026-10-25):
       1. Nothing connected, then the calibrator at 1 V and 5 V DC on V-COM: 20+ switches through DC V,
          AC V, AC+DC, AUTO, A / mA / uA, ohm, diode, continuity, cap, Hz, temp, W, and MF -> Wave -> MENU,
@@ -3458,7 +3458,7 @@ Emulator (emu/):
          replace the tail.
       6. Any remaining false alert: DBG:SENT? for the 2 s after that switch (kind, ctsta, pkmin / pkmax,
          streak, hits) and DBG:SENT:LOG?. These size BLANK_* / OHM_EXIT_*.
-      **Device 3e41549 (device-check-2026-10-21.md "3e41549", raw `chk3/out/E_*_raw.json`,
+      **Device 40728b8 (device-check-2026-10-21.md "40728b8", raw `chk3/out/E_*_raw.json`,
       `ctsta_summary.txt` in the session scratchpad), 302 switches:** 1 PASS: no V-JACK? after RES (0 of 21
       RES -> A / mA / AUTO A / A-tap entries, open, 1 V, 5 V, 8-10 s watches; ctsta still 0x70 to ~4.9 s,
       masked), no AC? in DC V at 5 V (0 of 20), no V-JACK? after A / mA -> Scope -> back (0 of 8), no A-PROT.
@@ -3471,9 +3471,9 @@ Emulator (emu/):
       (AD1PK_SENSE pk ~-210 000, the 2a drift); (d) [ ] new: A-JACK in continuity at 5 V DC (AD2PK_PB1, 0.41 s,
       stays; LIVE at 1 V), likely the RES 5 V V_GATE item. **(d) fixed by the jack check (doc 4.13): LIVE?.**
       Closed 2026-10-25 (triage): (a) the 24 V misses -> DBG:SENT:PREC default 100 ms (sentinel3, device
-      2232996 item 1 PASS); (b) / (c) -> sentinel2 (device 2232996 item 3 PASS); (d) -> the jack check. What is
+      ea73ea5 item 1 PASS); (b) / (c) -> sentinel2 (device ea73ea5 item 3 PASS); (d) -> the jack check. What is
       left is the doc 4.13 device check list (item below).
-- [x] 3e41549 follow-up, emulator (branch sentinel2; doc power-meter-and-misconnect.md 4.11):
+- [x] 40728b8 follow-up, emulator (branch sentinel2; doc power-meter-and-misconnect.md 4.11):
       (b) V-JACK? in AC A: FIXED. AD1 was on SENSE - PB5, and PB5 is defined only by the DC V
       60 V+ rows: in the A rows it drifted to the rail at any V. Now SENSE - AGND, and AC A counts
       the hold's swing only (2 V rms AC on V); DC on V in plain AC A is no longer flagged (DC A's
@@ -3491,9 +3491,9 @@ Emulator (emu/):
       with V-COM, as the RES 5 V owner item). DBG:SENT? ctsta = -1 in non-comparator kinds (was
       stale: "AC V 0x70 after TEMP" was TEMP's read).
       Emulator knobs pb5drift / acastep / vjblind replay 2a, the OVERLOAD and the 24 V table;
-      switchtest aca-drift / aca-ovl / real-vjack-blind FAIL on f72f775, aca-drift / aca-ovl pass
+      switchtest aca-drift / aca-ovl / real-vjack-blind FAIL on 9fde7f1, aca-drift / aca-ovl pass
       now, real-vjack-blind still FAILs (by design: the open item), real-vjack-blind-prec passes.
-- [x] Device retest (sentinel2 image), A jack open, calibrator on V-COM (run on a3b6d0a; its new bug and the
+- [x] Device retest (sentinel2 image), A jack open, calibrator on V-COM (run on d2aff22; its new bug and the
       PREC default went to sentinel3, closed 2026-10-25):
       1. AC A, V-COM open / 1 V / 24 V DC: CONF:CURR:AC 10 / 0.06 / 0.0006, 30 s each: no
          V-JACK?; DBG:SENT? pkmin / pkmax stay near a constant (no ramp to -262 144). Then
@@ -3519,7 +3519,7 @@ Emulator (emu/):
          CONF:VOLT:DC -> the loud alarm within ~1 s.
       8. AC+DC A / AUTO A with 24 V DC on V-COM after TEMP (the seeing state): V-JACK? holds
          across the phases (no flapping each AC phase).
-      **Device a3b6d0a (device-check-2026-10-21.md "a3b6d0a"; alarm Off, no sound):** 1 no false
+      **Device d2aff22 (device-check-2026-10-21.md "d2aff22"; alarm Off, no sound):** 1 no false
       V-JACK? at 1 V / off, but the AD1 peak sits at the rail (-262 144) from ~0.9 s, and at 24 V it
       still ramps to the rail with a swing that gives a 2 s V-JACK? in 60 mA / 600 uA (new bug); VAR 32
       no longer separates (the swing rule). 2 PASS (V-JACK? at 1.9-2.1 s on the 10 / 40 Hz square). 3
@@ -3529,9 +3529,9 @@ Emulator (emu/):
       and RES; off and 5 V stay quiet with PREC. -> Next fix: make the precondition the default (100 ms).
       6 continuity 5 V pk -99 100 / +124 800. 7 soft 1 in RES / CONT, DBG:ALARm? events 0 (Off). 8 PASS
       (V-JACK? from 8.3 / 8.8 s, held across phases).
-- [x] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open (run on 2232996;
-      item 5 fixed in 4284642, device PASS; closed 2026-10-25):
-      (list from the sentinel3 branch, 2232996; copied here with the device result)
+- [x] Device retest (sentinel3 image; doc power-meter-and-misconnect.md 4.12), A jack open (run on ea73ea5;
+      item 5 fixed in 25b6ec3, device PASS; closed 2026-10-25):
+      (list from the sentinel3 branch, ea73ea5; copied here with the device result)
       1. 24 V DC on V-COM, no DBG:SENT:PREC command (the default 100 ms): DC A / mA after DC V 60 V,
          RES, AC V, DC V auto (60 V) and Scope -> back: V-JACK? within ~2.5 s (Scope -> back: the
          restart mask, ~8 s). DBG:SENT:PREC? answers 100. Source off and 5 V: same entries, no alert.
@@ -3544,7 +3544,7 @@ Emulator (emu/):
          SENSE level in the A rows). VAR 0 after.
       5. CONF:CURR:AC 10, 2 s, CONF:CURR:AC 0.06, FETC? every 50 ms: +9.91E37 until the first 60 mA
          reading, which is not 1 % of the 10 A value.
-      **Device 2232996 (device-check-2026-10-21.md "2232996"; RATE FAST, alarm Off, no sound):** 1 PASS:
+      **Device ea73ea5 (device-check-2026-10-21.md "ea73ea5"; RATE FAST, alarm Off, no sound):** 1 PASS:
       PREC? 100; 24 V V-JACK? in every entry: DC A after DC V 60 V 2.76 / 1.88 s, RES 2.16 / 2.16, AC V
       1.76 / 1.85, DC V auto 2.78 / 2.80, AC V -> Scope -> back -> DC A 1.88 / 1.88 s (9 s after the
       back; 3 s after it: 4.98 s = the restart mask), back into DC A 8.03 s (mask); mA 1.41-1.53 s
@@ -3558,16 +3558,16 @@ Emulator (emu/):
       of +-33..56 mA (ma1st 3 of 24 MED / SLOW, settle SLOW 2 of 2 from DC V 6 V; none at FAST),
       and `CONF:CURR:DC 0.06` ended on the 10 A row 4 of 11 times at MED / SLOW (OVERLOAD in
       DBG:SENT:LOG?; 0 of 5 at FAST).
-      **Fixed in 4284642 (devchk-pre1r2, "DMM first readings after a switch"); emulator only, device check
+      **Fixed in 25b6ec3 (devchk-pre1r2, "DMM first readings after a switch"); emulator only, device check
       below ("First readings after a switch").** v0.1-pre1 reproduced both: AC A 10 A -> 60 mA 28.7-59.5 mA
       first (6 of 6), CONF:CURR:DC 0.06 at MED / SLOW on the 10 A range 5 of 10.
-- [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device bb15d39: the RES
+- [x] Danger alarm only for confirmed A-JACK (coordinator 2026-10-24, device c785807: the RES
       5 V false A-JACK sounded the loud alarm at night): ohm / continuity / diode / cap / the
       resistive temperature sensors set Sentinel::soft; danger keys on ajack_alarm() (doc 4.10
-      row). loudtest ajack-res / ajack-cont FAIL on c0ab070, pass on sentinel2.
+      row). loudtest ajack-res / ajack-cont FAIL on 9cfa6a6, pass on sentinel2.
 
 - [x] First readings after a switch (device v0.1-pre1, 2026-10-24, device-check-2026-10-21.md "v0.1-pre1";
-      4284642): the entry's first conversion is vetted at every rate (the switch-latency.md proposal 5
+      25b6ec3): the entry's first conversion is vetted at every rate (the switch-latency.md proposal 5
       shortcut, which took it unvetted after an R22 change, is gone: DC A -> DC V read 0.90-2.13 V for 1 V,
       DC mA +-44..56 mA / OL, OVERLOAD to 10 A); a held conversion steps up / trips OVERLOAD only as the
       second over-range one in a row (OVER_TWICE); an R22 change within 2 s of the row write, or by the row
@@ -3578,7 +3578,7 @@ Emulator (emu/):
       aca-step: all fail on v0.1-pre1, pass on the fix), model knobs r22part / r22off / r22n / acasteptau
       (shapes INFERRED from the device numbers). Cost: one to two conversions more after a switch at MED /
       SLOW, one AC A result after a row write.
-      Device 4284642 (device-check-2026-10-21.md "v0.1-pre1", "Fix on the device"): PASS. AC A 10 A ->
+      Device 25b6ec3 (device-check-2026-10-21.md "v0.1-pre1", "Fix on the device"): PASS. AC A 10 A ->
       60 mA first final 1.05 s, max 1.1e-6 A (6 of 6); DC mA entries 0 of 20 on 10 A, max 1.2e-6 A; DC V
       entries 0 wrong of 24; RES 0 wrong of 12; fuse check open OPEN 10 of 10, calibrator 48 ohm OK,47.04-
       47.06 10 of 10. Costs: first value DC V from RES 1.65 s, RES FAST 1.72 s / MED 2.6 s, CONF -> READ?
@@ -3592,13 +3592,13 @@ Emulator (emu/):
         dropped), the steady one after it. No drop at the late step: that it is clean is INFERRED from
         the device's later in-function steps (osrstep.py), not measured at 2 s. Emulator (firstrdtest
         with the model's new `r22win:1000`, partials only within 1 s of a row write, INFERRED): no wrong
-        value; DC V from AC V at MED first final 0.4-0.5 s and the next 0.1 s later (4284642: the next
+        value; DC V from AC V at MED first final 0.4-0.5 s and the next 0.1 s later (25b6ec3: the next
         0.9 s later), from RES at SLOW first final 0.5 s (1.3 s), RES at MED 1.8-1.9 s (2.3-2.6 s), DC mA
         gap 0.4 s (0.9 s). Device check: t1rt.py MED (CONF -> READ? DC V / A, expect ~0.5-0.8 s with its
         0.4 s of polling), dcv1st.py (DC V 6 V from AC V / DC A / RES at MED / SLOW: no value off
         > 0.1 %, also around 2 s, where the slow step now lands), t1ohm.py (RES MED first final, no
         wrong value), osrstep.py (unchanged).
-        Device d188760 (device-check doc "d188760: the old DMM bugs"): PASS. CONF -> READ? at MED DC V
+        Device f59bac2 (device-check doc "f59bac2: the old DMM bugs"): PASS. CONF -> READ? at MED DC V
         0.36-0.62 s, DC A 0.51-0.60 s (t1rt.py 0.40-0.71 s); DC V 6 V entries 24, largest deviation from the
         settled value 0.048 %, first final 0.33-0.50 s, 0.1 s cadence to 2.0-2.1 s then 0.4 s with no gap;
         RES on 100 / 390 ohm no wrong final, first final MED 1.72-1.83 s, FAST 1.67-2.03 s (open jacks not
@@ -3614,16 +3614,16 @@ Emulator (emu/):
         period boundary), not two at ~32-40 %, so no "drop exactly N" follows from it; R22_DROP_N stays
         2 (the device count). (The model's `ad1mix` memory is a sinc^3 shape, also INFERRED.)
   - [ ] AUTO coupling decided at 5.76-5.85 s on the 10 Hz square (3 of 4; one not within 6 s), grab-power
-        image; 0760432's MEAS:VOLT:AUTO? took 1.28-3.91 s. Not looked into.
-- [x] AD1 logger copies (device 2232996, AD1 OSR check: right after a 640/s session each conversion
+        image; 6bc494a's MEAS:VOLT:AUTO? took 1.28-3.91 s. Not looked into.
+- [x] AD1 logger copies (device ea73ea5, AD1 OSR check: right after a 640/s session each conversion
       recorded twice, 52 ms apart, 121 of 294 at 0x15, 149 of 289 at 0x16): logger.rs `sample` took the
       session's first flag-to-flag interval (a stale flag to the first conversion, half a period) as p_meas
       and, with `rescued != 0` at every later flag, never measured it again. Now the period is measured
-      between two real flags from the session's second on (4284642). Device 4284642: still 16 copies in
-      232 records in 1 of 3 sessions: the flags came 78.4 / 123.2 ms apart in turn. Then (d7ba8c0): a
+      between two real flags from the session's second on (25b6ec3). Device 25b6ec3: still 16 copies in
+      232 records in 1 of 3 sessions: the flags came 78.4 / 123.2 ms apart in turn. Then (dae568d): a
       rescue that reads the last code again pushes nothing, and a flag right after a rescue that took
       its conversion is not pushed again. Emulator logduptest (model knobs chophalf, chopskew): v0.1-pre1
-      28-33 copies per session, 4284642 7-17, d7ba8c0 0. Device d7ba8c0: 0 copies in 6 sessions (998
+      28-33 copies per session, 25b6ec3 7-17, dae568d 0. Device dae568d: 0 copies in 6 sessions (998
       records; 640/s, then OSR 8192 / 16384 chopped, 20 s each).
 
 ## Owner decisions 2026-10-24 (batch, delegated)
@@ -3649,11 +3649,11 @@ Emulator (emu/):
 - [x] 7. 60 mV (DC / AC mV r0): on the range page ("60mV"), SCPI (VOLT:RANG 0.06 / MIN), and the
       mV-first AUTO steps 600 mV -> 60 mV below 58.3 mV, back above 61.8 mV (the stock factors;
       the stock has the row, no item and only up-steps in mV). emu/hy3131/mvrangetest.py.
-      AUTO+ never enters mV (unchanged). Device 940e8aa (device-check doc "940e8aa" 2): range page item,
+      AUTO+ never enters mV (unchanged). Device 2f56ff9 (device-check doc "2f56ff9" 2): range page item,
       VOLT:RANG 0.05 / MIN, AC 60 mV, DC AUTO 58.0 mV down, 60.4 / 59.0 mV stay, 62.1 mV up, AC AUTO down on
       the hum and up on a square: PASS. Untested: the Wave view opened on 60 mV (its V/div steps start at
       600 mV).
-- [x] 60 mV follow-ups (device 940e8aa, device-check doc "940e8aa" new bugs 2, 4):
+- [x] 60 mV follow-ups (device 2f56ff9, device-check doc "2f56ff9" new bugs 2, 4):
       AUTO -> AUTO+ on the range page while on 60 mV stayed on 60 mV until the function was entered again:
       `set_range` AUTO+ now leaves mV for 6 V at once (also the Wave view / inrush restore of AUTO+).
       AC V AUTO (mV-first) stayed on 600 mV reading 0.606 V for 12 s under a 40 Hz 0 / 9.5 V square: the mV
@@ -3661,24 +3661,24 @@ Emulator (emu/):
       now steps up when |LPF| + 1.414 x RMS > 2.2 x the range (MV_CLIP_K; the row is DC-coupled), and AC V
       6 V then holds off the step back into mV until its AC part changes (`mv_clip`). The A-JACK alert does
       not hold the range (the range code does not read it). emu/hy3131/mvautotest.py with the model's
-      `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device 7c04b03
-      (device-check doc "7c04b03: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
+      `mvclamp:1.212;mvpb1:10` (without the fix it reproduces 0.606 V and AJACK,AD1PK_PB1). Device 1a11eda
+      (device-check doc "1a11eda: bug-fix recheck" 1, 2): the square from 60 mV: 600 mV at 0.3 s, 6 V at 0.76 s, 4.835 V; no A-JACK, no
       alarm. AUTO -> AUTO+ on 60 mV: 6 V within 0.9-1.0 s (AC and DC).
 - [x] **False A-JACK with a voltage on V-COM in RES / continuity / AC mV** (**RES: failed on the device
-      7c04b03; the both-bit rule fixes it, PASS on the device 41a33a1: the jack-check item below**; A jack empty; 2d33d3a 7b / E4,
-      3e41549 item 4, 940e8aa new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
+      1a11eda; the both-bit rule fixes it, PASS on the device c6a3ac3: the jack-check item below**; A jack empty; 519fb8a 7b / E4,
+      40728b8 item 4, 2f56ff9 new bug 1; doc power-meter-and-misconnect.md 4.13). RES / RTD and continuity:
       the jack check (AD2 on OP1O - PB3, IG 0.5, while PB1 hits): the input above 2.35 V (ohm) / +0.3 V
       (continuity) or below -0.9 V = driven -> LIVE?, no A-JACK; at its own source (ohm 0.78-2.17 V open,
       continuity -0.48 V) = free -> A-JACK as before. AC mV: V_GATE on the AC result (above). INFERRED: OP1O
-      above ~2.4 V on the device (DBG:SENT? fields 14 / 15 show it). Emulator (fail on 90934ca, pass now):
+      above ~2.4 V on the device (DBG:SENT? fields 14 / 15 show it). Emulator (fail on ad10749, pass now):
       senttest ohm-v5 / ohm-v5-600 / cont-v5 / acmv-sq60 / acmv-sq600 / acmv-dc5, switchtest dc5-pickup /
       sq-pickup / real-ajack-pickup, loudtest ajack-res / ajack-cont-v5 / ajack-acmv / ajack-acv-auto. Model:
       OhmRevOl (default: OL above the OCV, the device), Pb1VjackMv in continuity, AD2 on OP1O.
       Open (doc 4.13 gaps): AC+DC V on manual 600 mV has the same AD1 peak sentinel without the gate.
-      **Fixed (8d4ae7f, branch bugtriage-80ebb10):** both phases of AC+DC mV set `vgate`; the AC phase's
-      result is the verdict. senttest acdcmv-sq600 / acdcmv-dc5, loudtest ajack-acdcmv: FAIL on 80ebb10, pass.
+      **Fixed (9a191ea, branch bugtriage-7ab5c0e):** both phases of AC+DC mV set `vgate`; the AC phase's
+      result is the verdict. senttest acdcmv-sq600 / acdcmv-dc5, loudtest ajack-acdcmv: FAIL on 7ab5c0e, pass.
       Cost: a real current in A asserts ~2.2 s after the onset there (the next "free" AC-phase result).
-- [ ] Device: doc 4.13 "Device check list (jack check)". **Device 7c04b03 (device-check doc "7c04b03: bug-fix recheck" 1): RES still
+- [ ] Device: doc 4.13 "Device check list (jack check)". **Device 1a11eda (device-check doc "1a11eda: bug-fix recheck" 1): RES still
       raises A-JACK** (badge only, no sound) with 5 V, 10 V DC and the square on V-COM: the jack check reads
       OP1O peaks of 2139-2140 mV (5 V, AUTO on 60 MΩ), 2249-2251 mV (5 V, 600 Ω), 2019-2030 mV (10 V),
       2132-2133 mV (square, AUTO), all under the 2.35 V "driven" line, so the verdict is "free" and A-JACK
@@ -3694,15 +3694,15 @@ Emulator (emu/):
       driven: LIVE?, no A-JACK; DBG:SENT? field 14 = 2. The OP1O check stays. Emulator model
       corrected first (OP1O stops at 2.47 - 0.044 x V, `ohmop1k`; >= 4 V on the jack sets both bits,
       `ohmboth`): senttest ohm-v5 / ohm-v5-600, switchtest dc5-pickup / sq-pickup, loudtest ajack-res fail
-      on d188760 and pass. INFERRED gap: a current in A large enough to push PB1 out of the comparator's
+      on f59bac2 and pass. INFERRED gap: a current in A large enough to push PB1 out of the comparator's
       range may read 0x70 too (LIVE? then, not the badge). Device: doc 4.13 check list items 4-5.
-      **Device 41a33a1 (device-check doc "41a33a1: the RES jack fix"): PASS** for item 5 and the
+      **Device c6a3ac3 (device-check doc "c6a3ac3: the RES jack fix"): PASS** for item 5 and the
       regression items: RES AUTO / 600 Ω with 5 V and 10 V field 4 = 112 on all but the first poll, field
       14 = 2, LIVE?, never A-JACK, alarm events 0; the square 112 on about half the polls, field 14 = 2, LIVE?;
       1 / 3 V no hits; continuity LIVE? from 1 V, no A-JACK; AC V manual 60 / 600 mV with the square: no
       A-JACK. Still open here: item 4 (a current in A: the A jack is not wired), the mV-first AC AUTO
       (the meter is on AUTO+), RTD / NTC.
-- [x] FETCh? does not answer within 5 s while RES AUTO hunts (device 7c04b03, device-check doc "7c04b03:
+- [x] FETCh? does not answer within 5 s while RES AUTO hunts (device 1a11eda, device-check doc "1a11eda:
       bug-fix recheck" note 1): on the calibrator's disabled output, RES AUTO stepped 6 MΩ <-> 600 kΩ (6 MΩ
       reads 0.104 MΩ, 600 kΩ reads OL), DBG:READout? `P,MΩ,NAN`, and 8 of 8 FETC? timed out at the
       driver's 5 s (then -410 Query INTERRUPTED). The scpi.rs timing notes say FETCh? answers +9.91E37 at
@@ -3731,9 +3731,9 @@ Emulator (emu/):
       (verify on device: the calibrator's disabled output, RES AUTO: settles on 6 MΩ at ~0.10 MΩ, `RES:RANG?`
       steady; FETC? every 0.2 s for 20 s answers within 1 s each (+9.91E37 at most for the first ~2 s, no
       -410); `CONF:RES;:READ?` < 5 s; then a 4.7 kΩ / 100 kΩ resistor: AUTO leaves 6 MΩ at once)
-      Device 41a33a1 (its fix not in that image): the hunt is still there, 6 MΩ <-> 600 kΩ every
+      Device c6a3ac3 (its fix not in that image): the hunt is still there, 6 MΩ <-> 600 kΩ every
       0.20-0.26 s, 30-34 changes in 8-10 s, from DC V and from each manual RES range. FETCh? not retried.
-      Device 3402420 (device-check doc "3402420"): the hunt's input was not there (the disabled output read
+      Device 0278d6e (device-check doc "0278d6e"): the hunt's input was not there (the disabled output read
       in range on 600 kΩ, 417-421 kΩ, in 7 calibrator states; AUTO settled, 0 range changes in 19.5 s), so the
       6 MΩ hold and its exits are **untested** on the device. FETC? every 0.2 s: the first (the entry wait)
       0.99-1.05 s with a reading, later ones ≤ 1 ms; forced range steps (calibrator 100 Ω on / off) gave
@@ -3741,51 +3741,51 @@ Emulator (emu/):
       600 kΩ settle: 100 Ω final in 1.7-1.9 s, 390 Ω (no open between) 1.2 s, back to the open 1.6-2.0 s.
       Still to check: the 6 MΩ hold with an input that reads OL on 600 kΩ; 4.7 kΩ / 100 kΩ after it.
 - [x] RES AUTO set over SCPI from a manual RES range leaves the screen on the manual reading (device
-      41a33a1, device-check doc "41a33a1: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` +
+      c6a3ac3, device-check doc "c6a3ac3: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` +
       `RES:RANG:AUTO ON` on the calibrator's disabled output: RES:RANG:AUTO? 1, RES:RANG? hunting, but the
       status bar MANU and a frozen 0.1043 MΩ (DBG:READout? `F`) for 8 s; from DC V the same commands show
       AUTO and dashes. Not tested on a resistor; cause not looked into.
-      Device 3402420 (no hunt that day): from `CONF:RES 6E6` / `CONF:RES 600` the same commands gave
+      Device 0278d6e (no hunt that day): from `CONF:RES 6E6` / `CONF:RES 600` the same commands gave
       `DBG:READout?` the manual value for 0.5 s, then the 600 kΩ readings, changing per conversion; the status
       bar not looked at.
       Cause: the status bar's AUTO / MANU is the shown reading's flag (ui.rs), and `Dmm::auto_key` /
       `set_range(None)` only clear `manual`: the manual range's last reading stayed on screen, with MANU,
       until AUTO's first reading. That takes one conversion (or a range step) on a resistor, and the whole
-      autorange on the hunt's input (41a33a1 had no hunt fix: 8 s; 3402420, no hunt: 0.5 s). The AUTO key
-      and the range page did the same. Fixed (8f40bc5, app.rs `auto_entered`): manual -> AUTO puts the
+      autorange on the hunt's input (c6a3ac3 had no hunt fix: 8 s; 0278d6e, no hunt: 0.5 s). The AUTO key
+      and the range page did the same. Fixed (20e0af9, app.rs `auto_entered`): manual -> AUTO puts the
       placeholder up (AUTO, dimmed dashes), as a function change does. Where AUTO stays on the manual
       range, the dashes now show until the next conversion. `DBG:READout?` field 5 = the status bar's
       AUTO / AUTO+ / MANU. Emulator emu/hy3131/resautotest.py (100 kΩ from 6 MΩ / 600 Ω and by the AUTO key,
       the `isink` input of ohmsinktest from 6 MΩ / 600 Ω, the same from DC V, an open input from 600 Ω):
-      on 3f84f81 5 of 6 rows FAIL (MANU and the manual final for 0.25-1.1 s after the command), PASS now.
+      on 57e1241 5 of 6 rows FAIL (MANU and the manual final for 0.25-1.1 s after the command), PASS now.
       (verify on device: `CONF:RES 6E6`, 3 s, then `CONF:RES;:RES:RANG:AUTO ON;:DBG:READout?` -> `P,..,AUTO`
       in the same reply; screen AUTO and dashes, never `F,..,MANU` after the command (`DBG:READout?` every
       0.1 s for 8 s); the same from `CONF:RES 600`, from the range page's AUTO item and with the AUTO key;
       a 4.7 kΩ / 100 kΩ resistor: its value within ~1 s; ideally on the calibrator's disabled output while
       it gives the hunt's input)
 - [x] DBG:SENT? fields 14 / 15 keep the verdict of the PB1 hits at a switch between ohm-network rows
-      (device 41a33a1 note 3: RES AUTO -> 600 Ω, 0 / 2150 mV for the whole open level; RES -> continuity
+      (device c6a3ac3 note 3: RES AUTO -> 600 Ω, 0 / 2150 mV for the whole open level; RES -> continuity
       0 / -4 mV for ~3 s). No alert; doc 4.13 check list item 2 expects -1 / 0. Diagnostics only.
       Cause: `jack_t` / `jack_drv` / `jack_mv` were cleared only at a function / family change
       (`Sentinel::configured`), and `diag_text` showed the last verdict whatever run it came from. The
       600 Ω peak (2150 mV, that row's own open level) says the verdict came from hits after the switch
-      (INFERRED), so a reset at the switch alone would not do. Fixed (965e76d): `new_run` (a range /
+      (INFERRED), so a reset at the switch alone would not do. Fixed (238adb6): `new_run` (a range /
       function change) drops the verdict, and fields 14 / 15 show it only for the present hit run or an
       A-JACK in force, else -1 / 0. Alert decisions unchanged (they took only the present run's verdict).
-      After a source on V-COM goes off field 14 now goes to -1 once the hits stop (41a33a1 step 3 logged
+      After a source on V-COM goes off field 14 now goes to -1 once the hits stop (c6a3ac3 step 3 logged
       2 -> 1). Host test jack_fields_reset_at_a_row_switch (fails without the fix). The model gives no
       hits at a switch, so no emulator case reproduces the device's.
       (verify on device: doc 4.13 check list item 2: RES AUTO -> `CONF:RES 600` and RES -> `CONF:CONT`,
       V-COM open: fields 14 / 15 -1 / 0 once field 8 stops growing; item 5: with 5 V field 14 = 2 while
       field 8 grows, -1 within ~1 s after the off)
-- [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device 7c04b03, same doc note 3):
+- [x] LIVE flaps in RES 600 Ω after a 5 V source on V-COM is switched off (device 1a11eda, same doc note 3):
       DBG:SENT:LOG? +24 entries, the last 8 `LIVE,CMP_PB1` 5-10 ms apart. Which step made them is inferred.
       Cause: once LIVE? cleared (the last live result 1 s old), the next poll re-asserted it from the old
       run (`live_t0` stays until the next ohm reading). Fixed: a run whose last live result is
       LIVE_CLEAR_MS old asserts no more (sentinel test live_does_not_flap_after_the_source). Device: doc
-      4.13 check list item 5. **Device 41a33a1: PASS**, DBG:SENT:LOG? +0 after the off in 5 of 5 (5 V x 3,
+      4.13 check list item 5. **Device c6a3ac3: PASS**, DBG:SENT:LOG? +0 after the off in 5 of 5 (5 V x 3,
       10 V, the square); LIVE? clears 1.0-1.25 s after the off and stays off.
-- [x] False A-JACK from a large AC signal on V-COM in AC mV (device 940e8aa new bug 1: AJACK,AD1PK_PB1 and
+- [x] False A-JACK from a large AC signal on V-COM in AC mV (device 2f56ff9 new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
       shunt (INFERRED: the emulator's `mvpb1` models it, ratio unknown). With the clip step (above) AC mV is
@@ -3795,11 +3795,11 @@ Emulator (emu/):
       a "free" result >= 250 ms into the hit run needed). With the false A-JACKs in RES / continuity below
       (the jack check). Device: doc 4.13 check list.
 - [x] Ohm test-current label stays on 60 M after 6 M -> 60 M (test_current_label returns without clearing
-      its box; device 940e8aa, both variants). Fixed: the box is cleared when the range has no value;
-      tools/ui-render range pairs ending on 60 M against a fresh draw. Device 7c04b03: 6 M -> 60 M clears
-      the label in both variants (device-check doc "7c04b03: bug-fix recheck" 3). The labels on the other ranges, diode 0.75 mA and "Overload"
+      its box; device 2f56ff9, both variants). Fixed: the box is cleared when the range has no value;
+      tools/ui-render range pairs ending on 60 M against a fresh draw. Device 1a11eda: 6 M -> 60 M clears
+      the label in both variants (device-check doc "1a11eda: bug-fix recheck" 3). The labels on the other ranges, diode 0.75 mA and "Overload"
       next to 0L: PASS on the device.
-- [x] Bluetooth: stale errors on the first connection (device 940e8aa, device-check doc "940e8aa" new bug 5:
+- [x] Bluetooth: stale errors on the first connection (device 2f56ff9, device-check doc "2f56ff9" new bug 5:
       the first `--bt` client found -113, -102, -113 queued; later connections none). USB and BT already had
       separate queues. Cause (INFERRED, no device trace): the module's own text reaches the SCPI parser while
       no host is linked: an `OK` = -113, an echoed `AT+SBNDM40A` = -102 ('+' in a header), `OK` = -113, e.g.
@@ -3810,7 +3810,7 @@ Emulator (emu/):
       -113 / -102 / -113 / -363, fix 0). Device check: power the meter on, wait 10 s, connect
       `dm40scpi.py --bt` and send SYST:ERR:COUN? first: 0; repeat after a Settings BT off / on. A connect
       banner printed after PC14 rises would still be parsed (would show as -113 there).
-      Device d188760 (device-check doc "d188760: the old DMM bugs" item 6, note 4): **FAIL**. After every
+      Device f59bac2 (device-check doc "f59bac2: the old DMM bugs" item 6, note 4): **FAIL**. After every
       module power-up (first connection of the session, Settings BT off / on with 10 s and 30 s waits: 5 of
       5) the first client finds 7 errors, always -102 / -113 / -113 / -102 / -113 / -113 / -113; reconnects
       without a power-up 0. The status-bar BT glyph (PC14) never showed with no host (sampled 2-30 s after
@@ -3832,67 +3832,67 @@ Emulator (emu/):
       boot and after 3 BT off / on cycles; *IDN? 0-0.3 s after a connect answered 15 / 15; a link 0.4 s
       after BT on answered; stock btpoll 200 / 200.
 
-## Bug triage 2026-10-25 (branch bugtriage-80ebb10)
+## Bug triage 2026-10-25 (branch bugtriage-7ab5c0e)
 
 - [x] Plain AC (V / mV / A) autorange step published a 0 reading: the result that stepped the range went on to
-      publish `f_ac`, which `set` had just reset (the reset added after device a3b6d0a), as a final reading on the new range (FETCh?,
+      publish `f_ac`, which `set` had just reset (the reset added after device d2aff22), as a final reading on the new range (FETCh?,
       READ?, the screen); then the EMA's 0.99 step from 0 read 1 % low and closed over ~1 s, also at every plain
-      AC entry (DC V -> AC V on 1 V AC: 0.990 V first). Fixed (65728ee): no reading from the stepping result;
+      AC entry (DC V -> AC V on 1 V AC: 0.990 V first). Fixed (8ed9499): no reading from the stepping result;
       the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
-      aca-auto-dn / acv-entry: FAIL on 80ebb10, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
+      aca-auto-dn / acv-entry: FAIL on 7ab5c0e, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
       VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
-      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
+      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
       reading at the 60 -> 6 V step (the first final +7 %: the coupling step); the entry fails differently (next item).
-- [x] Plain AC V entry: the first final reads 1/√2 of the input (device 8e04b1c, DC V -> AC V on the square at 20 / 50 /
+- [x] Plain AC V entry: the first final reads 1/√2 of the input (device 185c066, DC V -> AC V on the square at 20 / 50 /
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
       the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
-      (INFERRED: half its window before the AC row carried the input). 65728ee seeds `f_ac` with it, so it shows as
-      final. Fixed (f1bc258; AC V / mV only since 2ee5edf: AC A's own vet, ACA_VET_*, already holds results
+      (INFERRED: half its window before the AC row carried the input). 8ed9499 seeds `f_ac` with it, so it shows as
+      final. Fixed (3c8d3fe; AC V / mV only since 5aafba5: AC A's own vet, ACA_VET_*, already holds results
       until two agree, and the drop there put switchtest real-vjack-ac's V-JACK? at 3.42 s, over its 3 s, base 2.89 s):
       after a plain AC V / mV reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
       what INTF latched (its read clears it) and the next result too (its window began before that read, the device's
       2 % low one); the result after seeds the filters. The first final comes ~0.1 s later (emulator: 0.43 s after
       the entry, was 0.30 s; an autorange step: 0.65-0.71 s between readings, was 0.46-0.54 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
       entry, INFERRED; the block over it reads 0.706 of the input); firstrdtest acv-entry-sq (the device's square) /
-      acv-entry-arr (1 V sine): FAIL on ab7f748 (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
-      aca-auto-dn (65728ee's) pass. Device check (5 min): as [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
+      acv-entry-arr (1 V sine): FAIL on 5a4dbce (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
+      aca-auto-dn (8ed9499's) pass. Device check (5 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
       the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
       `DBG:ACDC?` does not list the two dropped results (the drop comes before its entry): the first one logged is
       ~0.13 s past the deadline. Not changed: AC+DC's phase switches (its own settle, `ac_settle_step`).
-      **Device 3f84f81 (2026-10-25): PASS.** DC V 6 -> AC V on the calibrator's 0 / 9.5 V square, 2 runs each at 20 / 50 /
+      **Device 57e1241 (2026-10-25): PASS.** DC V 6 -> AC V on the calibrator's 0 / 9.5 V square, 2 runs each at 20 / 50 /
       90 Hz: the first final (0.47-0.48 s) within 0.19 % of the steady value (4.796 / 4.810 / 4.826 V). CONF:VOLT:AC 60 ->
       VOLT:AC:RANG:AUTO ON on the 50 Hz square, 4 runs: lands on 6 V, no 0 and no reading 1 % low; but the first finals
       on 6 V read high, +3.6..+4.0 % (5.00 / 4.93 / 4.89 V for 4.81 V), settling within 1 % ~0.35 s after the step
       (item below).
-- [ ] AC V autorange step 60 -> 6 V overshoot (device 3f84f81, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
+- [ ] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
       finals on 6 V read +3.6..+4.0 % high (5.00, 4.93, 4.89 V for 4.81 V) and settle within 1 % ~0.35 s after the
       step; the cause is unknown (the AC filter seeded from a block that spans the range switch is one candidate,
       INFERRED). Script: scratchpad acauto.py pattern (CONF:VOLT:AC 60, 3 s, VOLT:AC:RANG:AUTO ON, DBG:READout?
       every 50 ms for 4 s).
-- [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 8e04b1c): none while the square or 5 V is on
+- [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
-      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25) note 2.
-      Fixed (2882d36): a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
+      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) note 2.
+      Fixed (9e49722): a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
       AC phase's V_GATE results say driven until the next DC result, so the "free" AC result (|LPF| + 1.41 x RMS under
       1.5 x the range) no longer asserts A-JACK while the input reads OL
       ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
       Emulator: the model's `mvhold` (INFERRED: the open input keeps 0.75 V, PB1 picks up 40 mV, until the next source;
       `mvholdrows:1`: only the DC mV row sees it); senttest acdcmv-sq600-off / acdcmv-dc5-off / acdcmv-off-dcrow: FAIL on
-      ab7f748 (A-JACK ~1 s after the off), pass; their last phase (a current in A) and acdcmv-sq600 / acdcmv-dc5 /
+      5a4dbce (A-JACK ~1 s after the off), pass; their last phase (a current in A) and acdcmv-sq600 / acdcmv-dc5 /
       acmv-* still A-JACK. Not covered: an open input that reads within the range while PB1 still hits (no device
-      trace of it). Device check (10 min): as [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
+      trace of it). Device check (10 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
       off, 6 runs each, `SYST:ALER?` + `DBG:SENT:LOG?` every 0.1 s for 6 s after the off): no A-JACK; then a current in
       A (V-COM open): A-JACK.
-      **Device 3f84f81 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
+      **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
       6 runs each: SYST:ALER? / DBG:SENT:LOG? every 0.1 s for 6 s after the off, no A-JACK in 12 of 12. Not done: a
       current into A with V-COM open (needs a current source on A).
-- [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device d188760 note 5): as decided on
+- [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device f59bac2 note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
-      after a switch, so MEAS? answers with the OSR 8192 reading at the limit. Comments fixed (7ebf6fe).
-- [x] Back-to-back full-frame `DBG:LCD?` grabs freeze the panel (device d188760 note 3): by design. Every
+      after a switch, so MEAS? answers with the OSR 8192 reading at the limit. Comments fixed (5afb143).
+- [x] Back-to-back full-frame `DBG:LCD?` grabs freeze the panel (device f59bac2 note 3): by design. Every
       `DBG:LCD?` chunk holds drawing for 300 ms (main.rs `draw_hold_until`, a consistent frame across the
       chunks of one grab), so grabs less than 300 ms apart never let a frame through. Not the screenshot
       (`screenshot::frozen`, the item "Device: screenshot preparation"). Space grabs >= 0.4 s apart.
@@ -3900,51 +3900,51 @@ Emulator (emu/):
       firstrdtest-style probe), and under the 0 / 9.5 V square a 6 -> 60 -> 6 V excursion (mvautotest "ranges
       [... 6.0, 60.0, 6.0]") with a 4.90 V tail. Cause in the model: the AC node's coupling capacitor sits at
       `Op1OffLevel` (-0.6 V, INFERRED) while OP1 is off (AC mV) and recharges on the AC V row. The device does
-      not show it where it was looked at: 0bf7db1 2a went 60 mV -> 600 mV -> 6 V (no 60 V) and read 4.835 V
+      not show it where it was looked at: f540f0d 2a went 60 mV -> 600 mV -> 6 V (no 60 V) and read 4.835 V
       (the Wave view's 4.84 V); DC V -> AC V gives a small tail (33 mV from 0.5 V DC). No firmware change
       (a vet would cost ~0.1 s per AC entry for a step the device may not have). Device check (2 min): 0 V on
       V-COM, CONF:VOLT:AC 0.6, 3 s, CONF:VOLT:AC 6 (and VOLT:AC:RANG 6), DBG:READout? every 50 ms for 3 s; the
       square from CONF:VOLT:AC 0.6 -> CONF:VOLT:AC with VOLT:AC:RANG? every 50 ms. A first final above ~0.1 V
       at 0 V or a 60 V visit = real: then hold plain AC V results after a row write until two agree
       (as ACA_VET) and let held results move no range; else lower the model's level.
-      [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
+      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
       Done (fix/regressions-1025): `Op1OffLevel` -0.6 -> -0.005 V. The model now reads 0.027, 0.018, 0.012, 0.008
       ... 0.003 V by 1 s at 0 V (the device 0.018-0.036, 15-17, 9-10, 5-6, 3 mV), and under the square 6 V only
       with a first final of 5.42 V (device 5.03-5.39 V). The device's +20-23 % overshoot 0.3 s later is not
       modelled (the model decays from the first final). Tests: firstrdtest acmv-acv-zero / acmv-acv-sq and
       mvautotest "no 60 V range on the way up" fail with -0.6 and pass with -0.005.
-- [x] Inrush page "Armed: 0.069 A now" with nothing in A (device 940e8aa 7d; docs/inrush-current.md 9): the
+- [x] Inrush page "Armed: 0.069 A now" with nothing in A (device 2f56ff9 7d; docs/inrush-current.md 9): the
       live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
       (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
       not known (the emulator has no offset there). Device check (2 min): AC A 10 A (CONF:CURR:AC 10), A jack
       open, `dm40scpi.py log out.csv --source ad2 --rate 9600 -d 1`: the mean of the samples (A) against the cal
       0x10C offset, and their rms about the mean. Mean off = arm with a measured zero; noise = the plan's
       ~20 mA figure is what changes.
-      [device-check 8e04b1c](docs/device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
+      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
-      Fixed (20064e7): the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
+      Fixed (18532a6): the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
       (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the zero
       given and its rms below 50 mA, else the zero given; that is the last one measured since boot, else the cal's:
       app_inrush.rs `inr_zero`; it survives a page close because nothing resets `Session::cap` there);
       `INR:PREamble?` a = minus that zero. Limit: a DC load under 0.2 A
       already flowing at the arm is taken for the zero
       ([inrush-current.md 11](docs/inrush-current.md#11-limits)). Emulator: the model's `acaoff:0.717` (+0.0717 A in
-      the AC A rows' AD2, INFERRED where it arises); inrushtest (now nothing in A before the lamp step): FAIL on ab7f748
+      the AC A rows' AD2, INFERRED where it arises); inrushtest (now nothing in A before the lamp step): FAIL on 5a4dbce
       (`INR:PRE?` a 0), pass (a -0.0717 A, idle below 20 mA); host tests inrush::measured_zero_*. Device check (2 min):
       A jack open, MF -> Inrush: "Armed: 0.00x A now", `INR:PREamble?` a ~ -0.07 A; a lamp capture's idle below
       ~20 mA.
-      **Device 3f84f81 (2026-10-25): PASS.** A jack open, INR:STAT ON: ARMED, `INR:PREamble?` a -0.0757 A. The lamp
+      **Device 57e1241 (2026-10-25): PASS.** A jack open, INR:STAT ON: ARMED, `INR:PREamble?` a -0.0757 A. The lamp
       capture's idle not checked.
 
-## Failing / flaky tests 2026-10-25 (branch fix/regressions-1025, from ab7f748)
+## Failing / flaky tests 2026-10-25 (branch fix/regressions-1025, from 5a4dbce)
 
-- [x] emu/hy3131/btwaketest.py failed (on 30967e6 and on ab7f748): the BT host's first line got no reply, so
+- [x] emu/hy3131/btwaketest.py failed (on 9fbfc29 and on 5a4dbce): the BT host's first line got no reply, so
       the test waited until the emulator ended. Firmware: `Bt::init_module` reads the AT+SLED0 answer, which
       sets `quiet_until` 500 ms ahead (AT_QUIET_MS), then sends AT+RESET. A host links 0.32 s after a module
       start (device), inside that window, so its first line was taken as a late module answer and dropped.
       Fixed: a module start (AT+RESET, a power-up, cmd 07's restart pulse) ends the quiet window; `StartText`
-      already takes everything up to the end of the start-up text. btwaketest fails on ab7f748 and passes with the fix. Device: not checked.
+      already takes everything up to the end of the start-up text. btwaketest fails on 5a4dbce and passes with the fix. Device: not checked.
 - [x] emu/wavedroptest.py --host-read failed with "IMPORT refused, status 1" (also on the base build): a test
       harness bug. It imported the USB/IP device a second time for the MSC reads while the USBTMC import was
       open, which the server refuses. Fixed: the MSC reads use the same import (`uc.Msc(t.d)`, as
@@ -3958,15 +3958,15 @@ Emulator (emu/):
       the real module does with AT text while linked is not known. emu/btchattertest.py case C (the DMM at
       2.1569 V: each cmd 09 reply ends in "AT"): 5 x -113 with the old model, 0 with the new one.
 - [x] emu/hy3131/wavetest.py (volt) failed "a host reading SCOPE/SCOP000.CSV: no region C code while the stream
-      ISR owns the bus" (also on 910b6a9): `csvlog::parse_path`, the MMEM name argument, sat in .cold
-      (link-native.x, 98fcfce / 24d804c), and the test's MMEM:DATA? of the DLG runs it while the Wave view
+      ISR owns the bus" (also on 0655312): `csvlog::parse_path`, the MMEM name argument, sat in .cold
+      (link-native.x, 0b9d580 / 3da128a), and the test's MMEM:DATA? of the DLG runs it while the Wave view
       streams (on the device a region C fetch stalls the ISR entry ~20 us). There is no cold half to split
       off (MMEM:DATA? and MMEM:DELete both need the prefix check, `fatdir::dir_of` is already in B), so it is
       back in region B, written more compactly (the same results: fatren-test `names`, and the old and the
       new function compared on 3 M random names). Region B free 15 052 -> 14 748 B (the build.sh warning
-      stays; the link fails below 8 KiB). wavetest volt fails on ab7f748 and passes; dcv / current pass.
+      stays; the link fails below 8 KiB). wavetest volt fails on 5a4dbce and passes; dcv / current pass.
 - [x] [emu/hy3131/modetest.py](../emu/hy3131/modetest.py) stock cap-big (100 uF) read 104.1 uF against 100 uF +- 3 %;
-      on ab7f748 it got no readings. The 104 is the stock's own arithmetic, not the HY3131 model or the test setup
+      on 5a4dbce it got no readings. The 104 is the stock's own arithmetic, not the HY3131 model or the test setup
       (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 4; FUN_08013734 case 0xd in
       `stock/re/analysis/app_decompile.c` (in the private analysis repo)): C = gain * I * dt / median5(dV); a read is due 255 ms
       after the previous one (deadline = that read + 0xff) and runs on the DMM screen's 10 ms poll, so dt = 260 ms,
@@ -3975,9 +3975,9 @@ Emulator (emu/):
       period set to 52 ms (an experiment, reverted) the stock read 100.1 uF. modetest now expects 104 uF from the
       stock (`stock_want`, same 3 % tolerance) and 100 uF from opendm40 (101.9 .. 102.1 uF), and prints run.py's exit code and
       last line when the emulator does not start. That the real meter also reads +4 % is inferred, not measured. The
-      ab7f748 "no readings" is inferred to be the setup: a worktree without `dm40_v_2_6.dec.bin` at the top (run.py
+      5a4dbce "no readings" is inferred to be the setup: a worktree without `dm40_v_2_6.dec.bin` at the top (run.py
       exits 1 with FileNotFoundError, modetest showed "0 readings") or without `private` (no genuine check pass)
-      gives no readings; the ab7f748 log is not at hand. Notes in [emu/hy3131/README.md](../emu/hy3131/README.md)
+      gives no readings; the 5a4dbce log is not at hand. Notes in [emu/hy3131/README.md](../emu/hy3131/README.md)
       under the modetest results table.
 
 ## Scope trigger-level drag lag (owner 2026-10-25, branch fix/scope-drag-lag)
@@ -4011,7 +4011,7 @@ Emulator (emu/):
 - Not changed: the touch-down debounce ([src/touch.rs](src/touch.rs) `Debounce`) reports the second pressed
       frame's point as the down point, so a finger that already moves in its first report loses that
       report's travel (5 px in `emu/draglat.py --still 0`); a landing finger (one still report) loses none.
-- [x] Side keys "lag", "AUTO mixed with RUN", "as if related to AutoHold" (owner, build 3f84f81 and later). Cause:
+- [x] Side keys "lag", "AUTO mixed with RUN", "as if related to AutoHold" (owner, build 57e1241 and later). Cause:
       [src/gesture.rs](src/gesture.rs) `Tracker::step` turned a change of the debounced key mask into one gesture,
       with the code of the lowest changed bit and "down" if any key was down in the new mask. The debounce
       ([src/touch.rs](src/touch.rs) `Debounce`) goes from one key straight to another when the release frame is

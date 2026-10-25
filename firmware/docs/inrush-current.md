@@ -110,7 +110,7 @@ is within 0.2 A of the calibration's offset and their rms about it is below
 50 mA (no load running); otherwise the calibration's offset stays. The cal
 record has no LPF offset for the AC A rows (`0x10C`.., all 0 on this unit),
 and the 10 A row's AD2 mean read +0.0717 A with the A jack open (device
-[8e04b1c](device-check-2026-10-21.md#8e04b1c-plain-ac-first-readings-65728ee-acdc-mv-a-jack-8d4ae7f-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-2b254cf-410d370-2026-10-25)
+[185c066](device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25)
 step 4: rms about the mean 1.72 mA), so the page read "Armed: 0.069 A now"
 with nothing in A before the zero was measured. A hole while the zero is
 measured starts it again; one later keeps it.
@@ -222,17 +222,17 @@ until the device check.
 
 **Status: not run.** The capture needs a load current through the A jack,
 which no device session had ([device-check-2026-10-21.md](device-check-2026-10-21.md):
-session bfb6a19 item 7b "Inrush save: Not run", session 1e39149 "Inrush
+session 825080c item 7b "Inrush save: Not run", session 33b44bd "Inrush
 page taps while armed: not run"); TODO "Inrush current" still lists the device
 check as open ([`TODO.md`](../TODO.md)). What did run on the device:
 
 - the page opens and arms (`INR ON` -> ARMED); the threshold taps (2 / 5 /
   2 / 1 A) keep it ARMED; Cancel -> IDLE, Back -> DC V; `DBG:ISR?` while
-  armed: late 0, dropped 0, max_lat 14.4 / 16.2 us (device check 940e8aa,
+  armed: late 0, dropped 0, max_lat 14.4 / 16.2 us (device check 2f56ff9,
   item 7d). The page read "Armed: 0.069 A now" with nothing in A (the
   100 ms rms of the stream; the plan below expects an idle below ~20 mA);
 - `LOG:CSV ON` on the armed page is refused with "Settings conflict: inrush
-  page" (device check 246afc7, item 6).
+  page" (device check c92b605, item 6).
 
 The plan (about 25 minutes): meter on USB
 ([`tools/dm40scpi.py`](../tools/dm40scpi.py)), the load on A-COM, a second
@@ -262,9 +262,9 @@ or redraw while armed caused a hole (`lost`).
 
 The capture adds ~5.4 KB to region B (the drain, the detector, the live
 state line, the state queries), no SRAM (the trace lives in BUF) and ~200 B
-of stack (the session state is a TCM static); measured on 452c048. The
+of stack (the session state is a TCM static); measured on 32d4d4b. The
 zero's measurement (`Cap::zero_in`, run with the stream) added ~0.2 KB to
-region B (20064e7). Region C
+region B (18532a6). Region C
 holds app_inrush.rs, the page and trace drawing, `Cap::results` /
 `linearize` / `records`, the SCPI fetch / data / setters. Current numbers:
 [native-boot.md](native-boot.md) "Memory budget".

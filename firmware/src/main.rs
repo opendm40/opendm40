@@ -26,7 +26,7 @@ mod ad2pll;
 /// opendm40 runs with interrupts masked except while the AD2 stream ISR runs
 /// (decision #3), and that ISR touches nothing a `critical_section::with`
 /// protects (synopsys-usb-otg's endpoint buffers and register RMWs, the
-/// only users): masking it there only delayed it (device 035fc32: max_lat
+/// only users): masking it there only delayed it (device b48048e: max_lat
 /// 4.7 us, every worst case inside Endpoint<Out>::read). Main-loop code
 /// shares state with the ISR through atomics only (logger.rs RING).
 struct NoMask;
@@ -464,7 +464,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // in one cold call.
             if ev != fastlog::Ev::None || fa != fast_prev || app.fast_req_pending() {
                 // No region C code while the stream ISR runs (a C fetch stalls
-                // its entry; device 085f8dc: max_lat 12 us, 1 late sample at
+                // its entry; device e656df3: max_lat 12 us, 1 late sample at
                 // 38 400 S/s): the session's logger stops here, in B, before
                 // the cold call, and starts after it (`fast_events` prepares).
                 if matches!(ev, fastlog::Ev::Stop | fastlog::Ev::Restart) && logger.host_active() {
@@ -687,11 +687,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             // AUTO coupling before its first decision (its
                             // values are provisional, switch-latency.md 6):
                             // +9.91E37 at once, not a wait that ends in the
-                            // provisional part (device 0760432: 1-3 s blocks).
+                            // provisional part (device 6bc494a: 1-3 s blocks).
                             // The same after a range step since the entry with
                             // no reading of the new range yet (READ?'s rule, as
                             // the Some arm), not a wait that a range hunt keeps
-                            // moving (device 7c04b03: RES AUTO stepping 6 M <->
+                            // moving (device 1a11eda: RES AUTO stepping 6 M <->
                             // 600 k, 8 of 8 FETCh? silent for the driver's 5 s).
                             scpi.len = 0;
                             scpi.put_bytes(scpi::NAN);
@@ -1083,7 +1083,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
                 // Starting a CSV recording over an open radio link: USB only
                 // (it blocks host writes, e.g. staging an update, until
-                // stopped; review 4ab408d L5). LOG:CSV OFF / LOG:CSV? stay.
+                // stopped; review 6595d46 L5). LOG:CSV OFF / LOG:CSV? stay.
                 scpi::Out::Log(scpi::Log::Csv(Some(true))) if !port.trusted() => {
                     scpi.set_err(bt::proto::REFUSED);
                     false
@@ -1373,7 +1373,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // A disk job (Save CSV, a screenshot: screenshot.rs, region C) in the
         // Wave view pauses its stream until the job is done: the job runs
         // region C code every pass (~20 us ISR entry stalls each; device
-        // 7534701: Save CSV in the Wave view, max_lat 21.7 us, 15 overruns).
+        // d8e249d: Save CSV in the Wave view, max_lat 21.7 us, 15 overruns).
         // The screen is STOPped (Save CSV) or frozen (a shot) meanwhile.
         if app.scope.wave_on() && (logger.wave() || wave_paused) {
             if logger.active() && screenshot::busy() {
@@ -1419,7 +1419,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if r != app::WaveReq::Stop {
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
                         // MMEM:CAT? while the view streams: from the cache
-                        // (device 246afc7: a scan in one pass at 76800
+                        // (device c92b605: a scan in one pass at 76800
                         // dropped ~90 ms of the view's ring).
                         csvlog::catalog_warm();
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
@@ -1523,7 +1523,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             app.invalidate(); // drawn by app.tick below; the panel after it
         }
         // A panel part only while the ring has room for it (dialog.rs
-        // `log_panel_room`: device 940e8aa, the first draw's hole at 76.8k).
+        // `log_panel_room`: device 2f56ff9, the first draw's hole at 76.8k).
         let panel_room = dialog::log_panel_room(now, logging.then(|| logger.waiting()));
         if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() && panel_room && !dialog::log_panel_idle(now) {
             // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
@@ -1582,7 +1582,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 // Not while the AD2 stream ISR owns the bus (the Wave view,
                 // an armed inrush capture): the refresh is region C code
                 // (vdisk refresh / ours / scan_spi, dlog's directory scan),
-                // ~20 us ISR entry stalls (device 7534701: Save CSV in the
+                // ~20 us ISR entry stalls (device d8e249d: Save CSV in the
                 // Wave view, max_lat 21.7 us, 15 overruns). It runs once the
                 // stream stops; only a host sees the volume.
                 && !hy3131::streaming()
@@ -2110,7 +2110,7 @@ const FAST_DISK_SAFE_HZ: u32 = 38_400;
 
 /// LOG:DEST / LOG:DURation / LOG:DISK? (true: a reply).
 /// Region B (not .cold): a host may send these while the AD2 stream runs
-/// (device 246afc7: LOG:DEST? / LOG:DUR? in the Wave view, late 1).
+/// (device c92b605: LOG:DEST? / LOG:DUR? in the Wave view, late 1).
 #[inline(never)]
 fn fast_scpi(scpi: &mut scpi::Scpi, l: scpi::Log, disk: &mut bool, dur: &mut u32, host_session: bool) -> bool {
     scpi.len = 0;

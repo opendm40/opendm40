@@ -38,7 +38,7 @@ A = ap.parse_args()
 NOM = 10 * 1.25 / 262144.0
 DCG = 1.01
 # The model's per-range per_code factor of this row (HY3131.cs Ad2DcGainR, 6 V / 60 V: the device's
-# self-cal per_code against nominal, test 6.5 / acdcmeth e5; 8bb87e9): the node reads 1 / GR, on top
+# self-cal per_code against nominal, test 6.5 / acdcmeth e5; fb96992): the node reads 1 / GR, on top
 # of DCG. Without it LOG:SCALe? reads ~1 % (6 V) / ~1.9 % (60 V) off the expectation.
 GR = (1.0096, 1.0188)
 T25 = 150  # virtual s: the input becomes 25 V DC

@@ -1,8 +1,8 @@
 # Plan: replace the fw-rs scope UI with a replica of the stock V2.6 scope page
 
-**Status 2026-10-14:** S1..S8 implemented (commits de2ef9d S1, 726c0a5
-S2+S3, 4f407d6 S4+S5, 36646ab S6, bb298d2 S7, c89ad92 S8; trigger fixes
-c4ac10a; tracker b34ffbc). Code: `src/scope_ui.rs` (page, markers, graph,
+**Status 2026-10-14:** S1..S8 implemented (commits 6be1399 S1, ab45666
+S2+S3, 100eb48 S4+S5, 917b347 S6, d16a9c4 S7, 3d094a4 S8; trigger fixes
+9e83d8a; tracker 320bc81). Code: `src/scope_ui.rs` (page, markers, graph,
 popups, meter strip), `src/scope_page.rs` (interaction, drag freeze, pinch,
 AUTO-set, popups), host checks `tools/ui-render/stock.rs` +
 `stock-diff.sh` (every reference scene st01..st32 0.00 %; st40..st43 differ
@@ -22,7 +22,7 @@ our functional improvements inside its visual language.
 ## 0. What changes, in one picture
 
 ```
-                 today (7748600)                          target
+                 today (abb5d5e)                          target
 top bar          28 px, our chips + logo + lock/BT/batt   20 px stock bar: 5 badges + battery (sec. 2 of the spec)
 graph            401x273 at y 28, pitch 34, our grid      401x281 at y 20, stock grid rule (7/8 px dots, ticked cross)
 markers          6-col orange tick, dashed level line     stock 12x12 glyph markers (A, T, 1, 2, M), guide lines for 2 s

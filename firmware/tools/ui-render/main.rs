@@ -15,9 +15,9 @@
 //!   * inside one text, consecutive glyphs do not touch;
 //!   * every text's ink lies inside the box it was laid out in (stockfont
 //!     probe_fit: `label` / `paint` cut the rest silently, `glyphs` spills
-//!     over; device check 94de654: "mW" cut to "mV");
+//!     over; device check 92fb8fa: "mW" cut to "mV");
 //!   * two texts of one size on one line are >= 1.5 word spaces apart,
-//!     unless both are single words (`line_gap`; device check 94de654:
+//!     unless both are single words (`line_gap`; device check 92fb8fa:
 //!     "< Back Help 5/7..." and a help row passed the 3 px rule);
 //!   * an update of the meter strip leaves no stale pixels (equal to a fresh
 //!     draw of the new state).
@@ -183,7 +183,7 @@ fn word_gap(i: &Item) -> Option<i32> {
 
 /// Two texts of one size side by side on one line closer than 1.5 word
 /// spaces read as one phrase ("< Back Help 5/7: ...", "Power key held
-/// 1.5 s Power off": device check 94de654; the >= 3 px gap rule passed
+/// 1.5 s Power off": device check 92fb8fa; the >= 3 px gap rule passed
 /// both). One line: their ink rows overlap by half the lower one; one
 /// size: ink heights within 1.5x (a small sub row next to a large unit
 /// reads as its own column). The space is the narrowest word gap of
@@ -275,7 +275,7 @@ impl Checker {
     }
 
     /// Texts clipped by (or spilling out of) their layout box since the
-    /// last check: one violation each (device check 94de654: the strip's
+    /// last check: one violation each (device check 92fb8fa: the strip's
     /// unit box cut "mW" to "mV" and no rule saw it).
     fn clips(&mut self, scene: &str) {
         let v: Vec<String> = unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) };
@@ -778,7 +778,7 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         // 0, PF / S / Q / f "--" (NaN).
         ("ac-floor", P { p: 0.0, s: f32::NAN, q: f32::NAN, pf: f32::NAN, v: 0.0, i: 0.0, vdc: f32::NAN, idc: f32::NAN, f_hz: f32::NAN, vr: 0, ik: 5, coup: dmm::pw::COUP_AC, comp: false, ..z }),
         // After a coupling change, before the new coupling's first reading
-        // (Dmm::pw_pending, device check 94de654): every measured value
+        // (Dmm::pw_pending, device check 92fb8fa): every measured value
         // NaN ("--"), the energy / time / settings kept.
         ("pending-dc", pending(P { coup: dmm::pw::COUP_DC, dc: true, ..base })),
         ("pending-ac", pending(P { coup: dmm::pw::COUP_AC, ..base })),
@@ -2773,7 +2773,7 @@ fn main() {
                 ck.check(&format!("dmm-ohm-i/{}/r{rg}", on as u8), &dmm_page_regions);
             }
             // A range change 6 M -> 60 M (no test current): the label goes
-            // (device check 940e8aa: "I 0.22 uA" stayed on 60 M). Each range
+            // (device check 2f56ff9: "I 0.22 uA" stayed on 60 M). Each range
             // pair against the screen drawn fresh on the second range.
             for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6)] {
                 let (r, _) = find("ohm_k");
@@ -2970,7 +2970,7 @@ fn main() {
         save(&out, "p08-range-a-power");
         combined(&pw_rd(pcs[0].1), None, 0, 0, false, false, false, "");
         save(&out, "c12-strip-power");
-        // The strip's wide units (device check 94de654: "mW" read as "mV"),
+        // The strip's wide units (device check 92fb8fa: "mW" read as "mV"),
         // the narrow sub rows next to the GEN column.
         let by = |n: &str| cases.iter().find(|c| c.0 == n).unwrap().clone();
         for (n, scene, gen) in [("mw", "c12b-strip-mw", ""), ("main-mwh", "c12c-strip-mwh", ""), ("hz_mhz", "c12d-strip-mhz", ""), ("acdc_mv", "c12e-strip-acdc-gen", "10.00MHz")] {

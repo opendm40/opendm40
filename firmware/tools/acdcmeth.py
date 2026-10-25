@@ -31,7 +31,7 @@ calibrator gives: DC up to 24 V (mr9270.VOLTAGE_MAX: a 30 V request puts out
       vs 2 (OP1O - RLU after x10) at 1 / 3 / 5 V: B's DC part (zero applied)
       vs the DC V function; the gain of (ii) from the slope; the 40 Hz square
       with each to see the AC part unchanged.
-  e8  C's DC part away from its anchor (the e8cc4e9 fix: the anchor is the
+  e8  C's DC part away from its anchor (the 20a91d0 fix: the anchor is the
       DC V row's READ?, the gain from the internal zero): DC V READ? at each
       level first (manual range), then C entered once at the top level and
       the calibrator stepped down without leaving: 60 V at 24 / 12 / 5 / 1 /
@@ -48,19 +48,19 @@ calibrator gives: DC up to 24 V (mr9270.VOLTAGE_MAX: a 30 V request puts out
       step, so e8s's 4 s may end a level before it). STAT? gsrc (0 table, 1
       internal zero, 2 two refs, 3 two refs over a biased zero), gdis (the
       last two-ref gain vs the one in use over its span, codes), slope.
-  tc6 the 2fbc5e7 6 V failure as a time course: entered at 5 V on 6 V, step
+  tc6 the 80d5b01 6 V failure as a time course: entered at 5 V on 6 V, step
       to 3 V, STAT? at ~10 Hz for 15 s, then C vs READ? at 3 / 1 / 0 V (10 s
       per level). Run after a power cycle or `dm40dbg.py reset`.
-  e9  the >= 5 V DC fault of e8cc4e9 (6 V range, AUTO range): C in AC+DC at
+  e9  the >= 5 V DC fault of 20a91d0 (6 V range, AUTO range): C in AC+DC at
       4.0 / 4.5 / 5.0 / 5.5 V for 12 s each: range changes, readings / s,
       the AC part (max) and its source (STAT? acsrc: 0 RMS, 1 the peak
       bound, 2 none), the DC part vs READ?. Pass: no range change after the
       entry, >= 6 readings / s, AC part < 30 mV, DC within 0.05 % + 5 dig.
-  e10 AUTO after the square (e8cc4e9: C stayed on AC ~4.056 V): VOLT:COUP
+  e10 AUTO after the square (20a91d0: C stayed on AC ~4.056 V): VOLT:COUP
       AUTO with C on the 40 Hz square (12 s), then 5.0 / 5.5 / 4.5 V DC (15
       s each): VOLT:COUP?, FETCh?, range; pass: AUTO,DC within 0.05 % +
       5 digits of READ? and one range over each level's last 8 s.
-  e11 AUTO on the 40 Hz square (2cc47ef: A went to AC on its first AC
+  e11 AUTO on the 40 Hz square (ac1e852: A went to AC on its first AC
       part's overshoot, C stayed DC), A and C entered 3 times each,
       VOLT:COUP? for 15 s: pass = DC, then at most one change, the same part
       in every entry (dmm.rs AUTO_TIE: a tie within 1 % is DC).
@@ -255,7 +255,7 @@ def e5(R):
             R.enter('C', item)
             p = R.mean_parts(3.0)
             first = first or p['pc']
-            # (since the e8cc4e9 fix the gain is kept per range, so pc_ppm stays 0 after the
+            # (since the 20a91d0 fix the gain is kept per range, so pc_ppm stays 0 after the
             # first entry; the anchor's offset is measured at every entry)
             R.log(exp='e5', item=item, level=v, ref=ref, c_dc=p['dc'], err=p['dc'] - ref, pc=p['pc'], off=p['off'],
                   pc_ppm=(p['pc'] / first - 1) * 1e6 if first else 0.0, gspan=R.stat().get('gspan', 0))
@@ -385,7 +385,7 @@ def e8(R, order='down', settle=1.0):
 
 
 def tc6(R, lo=3.0, secs=15.0):
-    """2fbc5e7's 6 V failure as a time course: C entered on manual 6 V at
+    """80d5b01's 6 V failure as a time course: C entered on manual 6 V at
     5 V, stepped to `lo`, STAT? at ~10 Hz for `secs` (step, LPF, gain, its
     source, the window's slope), then C vs READ? at lo / 1 / 0 V (READ?
     right after each C mean). Run after a power cycle / `dm40dbg.py reset`."""

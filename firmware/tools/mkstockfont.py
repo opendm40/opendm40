@@ -66,7 +66,7 @@ FONTS = [
 # docs/native-boot.md "Region A2"). The other blobs are named statics in
 # `.rodata.fonts.<NAME>_B`, region B. A2 holds ~14.8 KB; build.sh warns below 2 KiB free. ASCII26 is
 # the logger panel's font (read per draw while the AD2 stream runs; device
-# 381ea07 showed it in slow flash stalling the ISR), F14 the small texts;
+# c50425f showed it in slow flash stalling the ISR), F14 the small texts;
 # LETTERS and UNIT since region B audit #4 (2026-10-25: B at 15 KB free, A2
 # at 7.9 KB after the font rework; A2 keeps ~4 KB for the shim); SC_PROBE
 # since region C audit #2 (2026-10-25, docs/native-boot.md: B's room for

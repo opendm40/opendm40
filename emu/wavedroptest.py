@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40: the DMM Wave view's ring drops (DBG:ISR? field 6 `dropped`: the
-logger ring was full, the newest stream samples dropped; device bb15d39 M3:
+logger ring was full, the newest stream samples dropped; device c785807 M3:
 ~50/s at 1 ms/div). The view is entered as on the device (DC V, MF > Wave:
 DBG:KEY 3, DBG:TAP 237,259), set to --tb s/div, then watched for --dur s
 of device time: DBG:ISR? (dropped, late, overruns, max_lat) and DBG:PROF?

@@ -5,7 +5,7 @@
 > and the RAM / T1 / T2 modes of `build.sh` / `reload.sh` no longer exist. The
 > rows below that mention them are historical.
 
-**Executed on 2026-10-13** (commits `02dd822`..`HEAD` on `rust-fw-poc`), after
+**Executed on 2026-10-13** (commits `b06da47`..`HEAD` on `rust-fw-poc`), after
 the repo moved to the private `wirenboard/opendm40`. Done: protocol rewrite in
 `docs/bt-protocol.md`, BT clients in `tools/`, new front-page `README.md`,
 `DM40C_feature_request.md` -> `docs/dm40-feature-request.md`, handover ->
@@ -22,10 +22,10 @@ the owners of those files: the stale names in `fw-rs/TODO.md`,
 `fw-rs/src/meter.rs`, `genuine.rs`, `screenshot.rs` (prose only). The text
 below is the original plan.
 
-State as of 2026-10-13 (branch `rust-fw-poc`, after commit `8d4082b`). Nothing
+State as of 2026-10-13 (branch `rust-fw-poc`, after commit `d411fe5`). Nothing
 has been moved or deleted yet. Already done: `.gitignore` for personal dumps,
-SPI disk backups and the Ghidra database (`b6816c4`), and stale README
-statements (`8d4082b`). `firmware/re/history/` was not opened (off-limits); it
+SPI disk backups and the Ghidra database (`a363bcb`), and stale README
+statements (`d411fe5`). `firmware/re/history/` was not opened (off-limits); it
 is only listed here by name.
 
 ## 1. Inventory
@@ -151,7 +151,7 @@ dist/                     ignored as a whole: built kits and zips
 
 ## 4. .gitignore
 
-Done (`b6816c4`): `firmware/re/dumps/`, `firmware/re/history/`,
+Done (`a363bcb`): `firmware/re/dumps/`, `firmware/re/history/`,
 `firmware/spi-disk-backup/`, `dist/*/tools/quick.img/`, `dist/*/tools/full/`,
 `firmware/re/ghidra/gproj/`, `l2bittest/`. Verified: no tracked file is
 ignored (`git ls-files -ci --exclude-standard` is empty), and only the dump,
@@ -208,7 +208,7 @@ Top level (`README.md`), short:
    recovery via the vendor FS-loader.
 4. Toolchain note: `toolchain/` is local and ignored; how to create it.
 
-Done now (`8d4082b`): a short pointer list to fw-rs, `dm40fw.py` and the RE
+Done now (`d411fe5`): a short pointer list to fw-rs, `dm40fw.py` and the RE
 notes in the intro (links only to tracked paths), and the stale "Not
 implemented: screenshots ..., AC+DC (DM40B/C only)" line in `fw-rs/README.md`.
 In the working tree only (inside uncommitted text of others): the update file

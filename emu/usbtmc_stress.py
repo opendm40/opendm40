@@ -257,7 +257,7 @@ class DbgLink(dm40dbg.Link):
 
 def nl(got, what):
     """The reply without its '\\n' terminator: every opendm40 USBTMC reply ends
-    with one since 422ed3e (scpi.rs header), a block reply too (after the
+    with one since b3cbfbf (scpi.rs header), a block reply too (after the
     block, as the last byte of the EOM transfer: docs/bt-scpi.md "Scope
     waveform readout"). An empty reply (a failed block query) has none."""
     if not got:
