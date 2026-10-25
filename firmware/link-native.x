@@ -235,7 +235,6 @@ SECTIONS
         *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
-        *(.text.*8opendm402ui12range_status*);
         /* The ohm / diode test-current label: drawn on a function / range /
          * variant change only (no AD2 stream runs in ohm / diode). */
         *(.text.*8opendm402ui18test_current_label*);
