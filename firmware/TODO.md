@@ -3697,7 +3697,7 @@ Emulator (emu/):
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
       the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
       (INFERRED: half its window before the AC row carried the input). 049bb65 seeds `f_ac` with it, so it shows as
-      final. Fixed: after a plain AC reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
+      final. Fixed (69df26b): after a plain AC reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
       what INTF latched (its read clears it) and the next result too (its window began before that read, the device's
       2 % low one); the result after seeds the filters. The first final comes ~0.1 s later (emulator: 0.43 s after
       the entry, was 0.30 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
@@ -3706,11 +3706,13 @@ Emulator (emu/):
       aca-auto-dn (049bb65's) pass. Device check (5 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
       the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
+      `DBG:ACDC?` does not list the two dropped results (the drop comes before its entry): the first one logged is
+      ~0.13 s past the deadline. Not changed: AC+DC's phase switches (its own settle, `ac_settle_step`).
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 489f956): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
       How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) note 2.
-      Fixed: a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
+      Fixed (d46d834): a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
       AC phase's V_GATE results say driven until the next DC result, so the "free" AC result (|LPF| + 1.41 x RMS under
       1.5 x the range) no longer asserts A-JACK while the input reads OL
       ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
@@ -3751,9 +3753,11 @@ Emulator (emu/):
       ~20 mA figure is what changes.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
-      Fixed: the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
-      (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the cal's
-      and its rms below 50 mA, else the cal's); `INR:PREamble?` a = minus that zero. Limit: a DC load under 0.2 A
+      Fixed (09dc594): the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
+      (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the zero
+      given and its rms below 50 mA, else the zero given; that is the last one measured since boot, else the cal's:
+      app_inrush.rs `inr_zero`; it survives a page close because nothing resets `Session::cap` there);
+      `INR:PREamble?` a = minus that zero. Limit: a DC load under 0.2 A
       already flowing at the arm is taken for the zero
       ([inrush-current.md 11](docs/inrush-current.md#11-limits)). Emulator: the model's `acaoff:0.717` (+0.0717 A in
       the AC A rows' AD2, INFERRED where it arises); inrushtest (now nothing in A before the lamp step): FAIL on f4cd2cd
