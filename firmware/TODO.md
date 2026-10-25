@@ -130,6 +130,13 @@ What waits for the owner; each line links to the material.
       delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
 - [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
       (AC+DC mV A-JACK); DC V against a third reference.
+- [ ] **Docs, owner decision:** a photo of a real DM40 running opendm40 for the front
+      [README.md](../README.md). For now it shows the rendered multimeter screen (docs/manual/img/dmm.png).
+- [ ] **Docs, owner decision:** the licence wording for the stock V2.6 bitmap fonts that opendm40 copies into
+      its image ([src/stockfont_data.rs](src/stockfont_data.rs), [fonts.md](docs/fonts.md)). README "Licence"
+      now only lists them as not under MIT, with no licence statement.
+- [ ] **Docs, owner decision:** the AI-contribution policy for CONTRIBUTING.md (whether AI-written
+      contributions are accepted, and how they are marked and reviewed).
 
 ## Next up (groomed 2026-10-14)
 

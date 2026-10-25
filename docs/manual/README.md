@@ -20,7 +20,7 @@ opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
 **Status.** opendm40 is experimental. It is developed on a DM40A; DM40B and
-DM40C are untested. What is untested on a real meter is listed in [Known
+DM40C ran only in the emulator. What is untested on a real meter is listed in [Known
 limitations](#known-limitations).
 
 ## Contents
@@ -1992,7 +1992,7 @@ the recording; the header says how long after power-on it started.
 The CSV file looks like this:
 
 ```
-# Alientek DM40A, opendm40 0.0.1, function DC V, range AUTO, started uptime 12.345 s
+# Alientek DM40A, opendm40 0.2.0, function DC V, range AUTO, started uptime 12.345 s
 # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 time_s,value,unit,flags
 0.250,1.23456,V,
@@ -2427,7 +2427,7 @@ The examples send `*IDN?` and read a DC voltage. The `*IDN?` reply looks
 like this:
 
 ```
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 ```
 
 The fields: maker, model (DM40A, DM40B or DM40C), the meter's serial number,
@@ -2487,7 +2487,7 @@ Python 3. It finds the meter's `/dev/usbtmcN` by itself. Keep it next to
 
 ```
 $ python3 firmware/tools/dm40scpi.py scpi '*IDN?'
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 $ python3 firmware/tools/dm40scpi.py scpi 'CONF:VOLT:DC' 'READ?'
 $ python3 firmware/tools/dm40scpi.py read -n 5 --conf dcv
 ```
@@ -2540,7 +2540,7 @@ reply:
 ```
 $ echo '*IDN?' > /dev/usbtmc0
 $ head -1 /dev/usbtmc0
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 ```
 
 Untested in this form; the tools above work this way.
@@ -2607,7 +2607,7 @@ On Linux, the simplest client is
 
 ```
 $ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF scpi '*IDN?'
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 $ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF shell
 ```
 
@@ -2811,7 +2811,8 @@ Untested on a real meter:
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
 - USB disk: macOS; **PC can edit** mode on Windows.
-- Remote control: the Alientek phone app itself with opendm40.
+- Remote control: the Alientek phone app itself with opendm40; the 34401A
+  emulation for sigrok.
 
 Known problems:
 

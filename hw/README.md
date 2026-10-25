@@ -15,7 +15,7 @@ chain: see [firmware/docs/native-boot.md](../firmware/docs/native-boot.md) (and
 `stock/re/docs/fsloader-install-trigger.md`, `stock/re/ANALYSIS.md`). The
 `stock/re/...` paths on this page are in the private stock-firmware analysis
 repo, cloned into `stock/re/` by those with access
-([README.md, Supporting material](../README.md#supporting-material)).
+([firmware/README.md](../firmware/README.md#stock-firmware-analysis-private)).
 
 No schematic of the DM40 is public. Facts without a mark are stated by the
 source after them; the rest are marked *inferred* or listed under
@@ -274,8 +274,8 @@ firmware, `stock/re/ANALYSIS.md` 1) show read protection level 1:
 with it a debugger cannot read or write the flash, and lifting it
 mass-erases the whole MCU flash: the Alientek bootloader, the FS-loader, the
 calibration and the UID-bound boot data. Use SWD only as a last resort, after
-the opendm40 backup (root README, [Back up with opendm40](../README.md#back-up-with-opendm40)),
-and restore in the order given there.
+the opendm40 backup ([the manual, Back up your meter](../docs/manual/README.md#back-up-your-meter)),
+and restore in the order given in its `INFO/BACKUP.TXT`.
 
 PA2's alternate function on the GD32F4 is USART1_TX, so the pad is labelled
 as a UART TX. The stock firmware never enables USART1 (per the RE notes), and
@@ -303,7 +303,7 @@ Untested: the exact timing, i.e. whether the short must be in place at power-on
 it must be held.
 
 Software ways to the same screen while opendm40 runs (`DBG:UPDATE`, the key-hold
-recovery, the double-hang rule) are in [README.md, Recovery](../README.md#recovery).
+recovery, the double-hang rule) are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
 
 ## USB
 
