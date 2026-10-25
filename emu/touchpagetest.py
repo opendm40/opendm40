@@ -364,8 +364,11 @@ def case_cal():
     try:
         ln = Link()
         check(cal_of(ln.q('DBG:TOUCH:CAL?')) == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 'first boot: no calibration (identity)')
-        ln.wait_up(int((t_save - 1.2) * 1000))
-        check(cal_of(ln.q('DBG:TOUCH:CAL?')) == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 'before Save: still none')
+        # (Uptime runs ~1.5 s behind the script's machine time: the boot.)
+        ln.wait_up(int((t_save - 3.5) * 1000))
+        v = cal_of(ln.q('DBG:TOUCH:CAL?'))
+        up = ln.uptime()
+        check(v == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0], 'before Save: still none (%s at uptime %d ms)' % (v, up))
         ln.wait_up(int(t_taps * 1000))
         cal_near(cal_of(ln.q('DBG:TOUCH:CAL?')), want, 'after Save')
         # The settings file: saved within ~7 s of the change (2 s + 5 s).

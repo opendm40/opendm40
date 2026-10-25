@@ -2306,15 +2306,6 @@ page fits a correction for this meter's touch screen. Without a
 calibration the meter uses the touch screen's points unchanged, as the
 stock firmware does.
 
-1. Tap **Calibrate**. One target at a time turns yellow.
-2. Tap the yellow cross twice, with a short still tap each time. The
-   line under the centre says what is wrong with a tap that is not taken:
-   - **Too far from the cross**: the tap was more than 60 px away.
-   - **Taps differ: tap again**: the two taps of one target were more
-     than 30 px apart; both taps of that target are asked again.
-   - **Moved: tap again**: the finger slid during the tap.
-3. After the ninth target the result shows:
-
 ![The touch calibration walk](img/touch-cal.png)
 
 *The walk: the fifth target, after a second tap that was refused.*
@@ -2324,11 +2315,20 @@ stock firmware does.
 *The result: the taps (orange) and where the correction moves them
 (green).*
 
-| Line | What it shows |
-|---|---|
-| **Fit error** | How far the corrected taps are from their targets, mean and largest. What is left is mostly the scatter of the finger. |
-| **Before** | The mean distance of the taps from their targets without a correction. |
-| **x' =**, **y' =** | The correction: the point the meter uses (x', y') from the point the touch screen reports (x, y). |
+1. Tap **Calibrate**. One target at a time turns yellow.
+2. Tap the yellow cross twice, with a short still tap each time. The
+   line under the centre says what is wrong with a tap that is not taken:
+   - **Too far from the cross**: the tap was more than 60 px away.
+   - **Taps differ: tap again**: the two taps of one target were more
+     than 30 px apart; both taps of that target are asked again.
+   - **Moved: tap again**: the finger slid during the tap.
+3. After the ninth target the result shows:
+
+   | Line | What it shows |
+   |---|---|
+   | **Fit error** | How far the corrected taps are from their targets, mean and largest. What is left is mostly the scatter of the finger. |
+   | **Before** | The mean distance of the taps from their targets without a correction. |
+   | **x' =**, **y' =** | The correction: the point the meter uses (x', y') from the point the touch screen reports (x, y). |
 
 4. **Save** applies the correction at once and keeps it in the settings
    (also across a power-off). **Cancel** keeps the calibration as it was.
