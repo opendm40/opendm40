@@ -29,6 +29,12 @@ the switch meets the old conversion at other phases):
                SYST:FUSE? OPEN
   aca-step     FAST, open jack, 1 V on V: CONF:CURR:AC 10, 2 s, CONF:CURR:AC
                0.06: every F below 0.1 mA, CONF? stays CURR:AC 0.06
+  acv-auto-dn  MED, 1 V AC: CONF:VOLT:AC 60, VOLT:AC:RANG:AUTO ON (-> 6 V): every
+               F 1 V +-0.5 % (5fdd812: a 0 V F from the stepping result, then
+               0.99 V from the EMA's step from 0)
+  acv-auto-up  the same up: 8 V AC on CONF:VOLT:AC 6 -> 60 V
+  aca-auto-dn  0.8 A AC: CONF:CURR:AC 10, CURR:AC:RANG:AUTO ON (-> 6 A)
+  acv-entry    1 V AC: CONF:VOLT:DC 6 -> CONF:VOLT:AC: every F 1 V +-0.5 %
 
 dcv-acv-med, dcv-res-slow and res-med also check the time between two new
 readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
@@ -73,6 +79,17 @@ SCEN = [
      ('fuse', 'OPEN'), ''),
     ('aca-step', 'open;vsrc:1;acastep:200000;acastepms:600;acasteptau:25', 'FAST', [('CONF:CURR:AC 10', 2.0)],
      'CONF:CURR:AC 0.06', ('abs', 1e-4), 'CURR:AC +6.0'),
+    # Plain AC: an autorange step (no input change) and the entry. The result that steps the
+    # range must not publish the filter the step reset (0) as a final reading, and the first
+    # result after the reset seeds the filter (the EMA's 0.99 step from 0 read 1 % low).
+    ('acv-auto-dn', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:AC 60', 3.0)], 'VOLT:AC:RANG:AUTO ON',
+     ('rel', 1.0, 0.005), 'VOLT:AC +6.0'),
+    ('acv-auto-up', 'open;vsrc:0,ac=8,f=50', 'MED', [('CONF:VOLT:AC 6', 3.0)], 'VOLT:AC:RANG:AUTO ON',
+     ('rel', 8.0, 0.005), 'VOLT:AC +6.0'),
+    ('aca-auto-dn', 'open;isrc:0,ac=0.8,f=50', 'MED', [('CONF:CURR:AC 10', 3.0)], 'CURR:AC:RANG:AUTO ON',
+     ('rel', 0.8, 0.005), 'CURR:AC +'),
+    ('acv-entry', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
+     ('rel', 1.0, 0.005), 'VOLT:AC'),
 ]
 
 # Longest wait between two new readings (grey or final) after the first one,
