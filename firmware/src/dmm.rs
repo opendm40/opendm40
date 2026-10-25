@@ -988,7 +988,7 @@ pub struct Dmm {
     /// used result seeds them (`f_ac`, `f_lpf`) instead of the EMA's 0.99
     /// step from 0, which read 1 % low and took ~1 s to close.
     ac_seed: bool,
-    /// Plain AC after that reset: the results to drop before the seed. 2 =
+    /// Plain AC V / mV after that reset: the results to drop before the seed. 2 =
     /// the first poll past the settle: its INTF read clears the flags of a
     /// block the chip latched during the settle (device 489f956: DC V -> AC
     /// V read 0.707 x the input, half the window before the AC reached the
@@ -2075,7 +2075,7 @@ impl Dmm {
             self.f_lpf = 0.0;
             self.ac_raw = 0.0;
             self.ac_seed = true;
-            self.ac_lead = 2;
+            self.ac_lead = if mode > 2 { 0 } else { 2 };
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -2311,8 +2311,9 @@ impl Dmm {
         self.f_ac = 0.0;
         self.f_lpf = 0.0;
         self.ac_seed = true;
-        // (AC+DC: its own settle, `ac_settle_step`; set_sub sets `acdc` first)
-        self.ac_lead = if self.acdc { 0 } else { 2 };
+        // (AC+DC: its own settle, `ac_settle_step`; set_sub sets `acdc` first.
+        // AC A: its vet. `set` resets again once `mode` is the new one.)
+        self.ac_lead = if self.acdc || self.mode > 2 { 0 } else { 2 };
         self.f_dc = 0.0;
         self.f_diode = 0.0;
         self.f_cap = 0.0;
@@ -4076,8 +4077,9 @@ impl Dmm {
         let m = self.mode;
         let need = if m <= 2 { hy::INTF_RMS | hy::INTF_LPF } else { hy::INTF_RMS };
         let intf = hy::read1(hy::R_INTF);
-        // Plain AC after a reset (`ac_lead`): no result latched during the
-        // settle, nor the one integrated across its end; the next seeds.
+        // Plain AC V / mV after a reset (`ac_lead`): no result latched during
+        // the settle, nor the one integrated across its end; the next seeds.
+        // (AC A: its own vet, ACA_VET_*: two results in a row must agree.)
         let lead = self.ac_lead;
         if lead == 2 || (lead == 1 && intf & need == need) {
             self.ac_lead = lead - 1;

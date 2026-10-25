@@ -3697,10 +3697,12 @@ Emulator (emu/):
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
       the settle deadline with INTF 0x1f, the next one only 18 ms later, so the chip latched it during the settle
       (INFERRED: half its window before the AC row carried the input). 049bb65 seeds `f_ac` with it, so it shows as
-      final. Fixed (69df26b): after a plain AC reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
+      final. Fixed (69df26b; AC V / mV only since the next commit: AC A's own vet, ACA_VET_*, already holds results
+      until two agree, and the drop there put switchtest real-vjack-ac's V-JACK? at 3.42 s, over its 3 s, base 2.89 s):
+      after a plain AC V / mV reset (entry, range step; dmm.rs `ac_lead`) the first poll past the settle drops
       what INTF latched (its read clears it) and the next result too (its window began before that read, the device's
       2 % low one); the result after seeds the filters. The first final comes ~0.1 s later (emulator: 0.43 s after
-      the entry, was 0.30 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
+      the entry, was 0.30 s; an autorange step: 0.65-0.71 s between readings, was 0.46-0.54 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
       entry, INFERRED; the block over it reads 0.706 of the input); firstrdtest acv-entry-sq (the device's square) /
       acv-entry-arr (1 V sine): FAIL on f4cd2cd (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
       aca-auto-dn (049bb65's) pass. Device check (5 min): as [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
