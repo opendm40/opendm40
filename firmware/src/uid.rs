@@ -1,7 +1,6 @@
 //! The unit's serial number: the GD32F427's 96-bit unique ID (0x1FFF7A10,
 //! 12 bytes) as 24 uppercase hex digits, bytes in memory order (word 0 low
-//! byte first): the same digits as `xxd -p -u INFO/UID.BIN` on the USB volume
-//! and the UID field of DBG:GENUINE?.
+//! byte first): the same digits as `xxd -p -u INFO/UID.BIN` on the USB volume.
 //!
 //! Used for the USB iSerial (normal and recovery-usb), the SCSI unit serial
 //! number (INQUIRY VPD page 0x80, msc.rs) and the serial field of *IDN?

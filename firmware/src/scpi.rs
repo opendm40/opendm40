@@ -614,9 +614,6 @@ pub enum Log {
 ///   DBG:HWTRIG:STAT?        hits,misses,delta_last,delta_min,delta_max,mean
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
-///   DBG:GENUINE?            device check (src/genuine.rs, stock/re/docs/genuine-check.md):
-///                           uid_hex,stored_hex,expected_hex,GENUINE|MISMATCH (12 bytes
-///                           each, memory order); read-only
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
@@ -2376,21 +2373,6 @@ impl Scpi {
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
-                        // Stock device-authenticity check, read-only (stock/re/docs/genuine-check.md).
-                        b"GENUINE" => {
-                            let i = crate::genuine::inspect();
-                            self.len = 0;
-                            for v in [i.uid, i.stored, i.expected] {
-                                for b in v {
-                                    let h = b"0123456789ABCDEF";
-                                    self.put(&[h[(b >> 4) as usize], h[(b & 15) as usize]]);
-                                }
-                                self.put(b",");
-                            }
-                            let ok = i.result == crate::genuine::GenuineResult::Genuine;
-                            self.put(if ok { b"GENUINE" } else { b"MISMATCH" });
-                            continue;
-                        }
                         b"BOOT" => {
                             crate::boot::put_info(self);
                             continue;

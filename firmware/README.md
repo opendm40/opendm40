@@ -63,7 +63,7 @@ and pull request to `main` and `rust-fw-poc`:
 | Job | What |
 |---|---|
 | Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
-| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): every `tools/*/run.sh` suite that needs no personal dumps (all but `genuine-test`); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
+| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): every `tools/*/run.sh` suite; `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
 | Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh) |
 | Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not |
 
@@ -141,7 +141,7 @@ dumps in `stock/re/dumps/` ([emu/README.md](../emu/README.md)). The build and
 the CI suites do not need the clone. In it:
 
 - `stock/re/docs/fsloader-install-trigger.md`: how the stock FS-loader installs a `dm40*.bin`, its USB and error paths
-- `stock/re/docs/genuine-check.md`: the stock genuine-device check (UID-bound loader data)
+- `stock/re/docs/genuine-check.md`: the stock genuine-device check (UID-bound loader data); opendm40 has no implementation of it (the former `DBG:GENUINE?` and its host test are in the private repo, `opendm40-private/`)
 - `stock/re/docs/stock-scope-ui.md`: pixel and interaction spec of the stock scope UI ([renderer](tools/stock-ui/README.md))
 - `stock/re/ANALYSIS.md`: reverse-engineering notes on the stock firmware and flash
 - `stock/re/docs/history/native-boot-plan.md`: the 2026-10-13 native-image plan and its T1 / T2 / T3 tests

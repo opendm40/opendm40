@@ -2348,10 +2348,5 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-// Stock device-authenticity check, informational only: DBG:GENUINE? reports
-// it; nothing changes device behaviour on its result (user decision).
-// (`check` / `verify` are for other callers / the host tests.)
-#[allow(dead_code)]
-mod genuine;
 mod recovery;
 mod shim;

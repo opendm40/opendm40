@@ -756,7 +756,6 @@ unless shown otherwise.
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
-| `DBG:GENUINE?` | | `<uid hex>,<stored hex>,<expected hex>,GENUINE\|MISMATCH` | USB |
 | `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>` | USB |
 | `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |

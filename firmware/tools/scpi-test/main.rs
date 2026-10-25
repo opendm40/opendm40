@@ -65,21 +65,6 @@ mod dmm {
         pub const COUP_AC: u8 = 3;
     }
 }
-mod genuine {
-    #[derive(PartialEq)]
-    pub enum GenuineResult {
-        Genuine,
-    }
-    pub struct Inspection {
-        pub uid: [u8; 12],
-        pub stored: [u8; 12],
-        pub expected: [u8; 12],
-        pub result: GenuineResult,
-    }
-    pub fn inspect() -> Inspection {
-        Inspection { uid: [0; 12], stored: [0; 12], expected: [0; 12], result: GenuineResult::Genuine }
-    }
-}
 mod logger {
     pub const FMT_ROWS: u8 = 0;
     pub const FMT_PACKED: u8 = 1;

@@ -109,7 +109,6 @@ SECTIONS
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
         *(.text.*8opendm408recovery*);
-        *(.text.*8opendm407genuine*);
         *(.text.*8opendm407gallery*);
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);
@@ -204,7 +203,6 @@ SECTIONS
         *(.rodata.*8opendm406fatren*);
         *(.rodata.*8opendm406native*);
         *(.rodata.*8opendm408recovery*);
-        *(.rodata.*8opendm407genuine*);
         *(.rodata.*8opendm407gallery*);
         *(.rodata.*8opendm4010screenshot*);
         *(.rodata.*8opendm404dlog*);
@@ -257,7 +255,7 @@ SECTIONS
         *(.text.*8opendm402ui2pw14settings_press*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
-         * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?, DBG:GENUINE?).
+         * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?).
          * Not DBG:PROF? (prof::report, ~1 KB) nor MMEM:CAT? (csvlog::
          * catalog_scpi with fatren's / fatdir's `.text.fat_rd` helpers)
          * nor CONF?'s
