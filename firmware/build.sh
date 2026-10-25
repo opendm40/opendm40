@@ -14,8 +14,21 @@
 # build never replaces the image reload.sh installs).
 set -e
 cd "$(dirname "$0")"
-RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/cargo && pwd)"; export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
-OBJCOPY=$(find ../toolchain/rustup -name llvm-objcopy | head -1)
+# Toolchain: the repo's pinned one in ../toolchain (README "Toolchain") when
+# it is there; else (CI, a checkout without it) the rustup install that
+# RUSTUP_HOME / CARGO_HOME name (default ~/.rustup, ~/.cargo) with cargo on
+# PATH. Either needs the thumbv7em-none-eabihf target and llvm-tools.
+if [ -d ../toolchain/rustup ] && [ -d ../toolchain/cargo ]; then
+    RUSTUP_HOME="$(cd ../toolchain/rustup && pwd)"; CARGO_HOME="$(cd ../toolchain/cargo && pwd)"
+else
+    RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+fi
+export RUSTUP_HOME CARGO_HOME; PATH="$CARGO_HOME/bin:$PATH"
+# llvm-objcopy / llvm-nm of the active toolchain (component llvm-tools).
+LLVMBIN=$(echo "$(rustc --print sysroot)"/lib/rustlib/*/bin)
+OBJCOPY=$LLVMBIN/llvm-objcopy
+[ -x "$OBJCOPY" ] || { echo "build.sh: no llvm-objcopy in $LLVMBIN (rustup component add llvm-tools)" >&2; exit 1; }
+export DM40_LLVMBIN="$LLVMBIN"
 
 if [ "$1" = native ]; then shift; fi
 SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-opendm40.bin}
@@ -57,13 +70,12 @@ rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../stock/dm40fw.py pack --pad "$BODY" "$OUT"
 python3 - "$BODY" "$ELF" "$TDIR" <<'PY'
-import struct, subprocess, sys
+import os, struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
 BASE, MARK, END = 0x08004000, 0x08008000, 0x080A0000
 end = BASE + len(body)
 sp, entry = struct.unpack_from('<II', body)
-nm = subprocess.run(['sh', '-c', 'find ../toolchain/rustup -name llvm-nm | head -1'],
-                    capture_output=True, text=True).stdout.strip()
+nm = os.environ['DM40_LLVMBIN'] + '/llvm-nm'
 syms = {}
 for line in subprocess.run([nm, sys.argv[2]], capture_output=True, text=True).stdout.split('\n'):
     p = line.split()
