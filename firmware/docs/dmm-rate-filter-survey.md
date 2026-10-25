@@ -134,8 +134,9 @@ The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
   pins), which "will help to filter noise and stabilize signal" (DS §12.4,
   p.27). APD-DMM003 §1 (p.6) advises "When OPA measures DC, it is advised to
   open ADC1 Pre-Filter" and suggests a 10 MΩ input load on mV against 50/60 Hz
-  pickup. Whether the DM40 board fits an FTP-FTN capacitor, and what SFT1 the
-  stock DC rows set, is not known (a hardware check, §8.3).
+  pickup. The DM40 fits an FTP-FTN capacitor of ~26 nF (τ = 2.56 ms with
+  SFT1 = 100 k, [`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) 1);
+  the stock V rows set SFT1 = open.
 - **Display averaging.** HYCON's EVA tool (APD-DMM001 §1, p.3; §4 item 12,
   p.17) computes RMS noise and ENOB from at least 1024 conversions and offers
   a software "Avr. Times" averaging of the displayed value. That is a test
@@ -721,6 +722,8 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
    0.2 Hz) and after a range change at each code.
 5. **AD1 pre-filter.** Read the stock DC rows' R33 (SFT1) and check the board
    for an FTP-FTN capacitor (a possible Fluke-style analog filter, DS §12.4).
+   Result: ~26 nF fitted, the stock DC V rows set SFT1 = open
+   ([`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) 1).
 
 **Results, tests 1-4 and option E (device, ea73ea5, 2026-10-24;**
 [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) "AD1 OSR characterization (ea73ea5)"**).** AD1
