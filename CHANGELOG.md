@@ -7,6 +7,23 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Docs
+
+- Ohm: 500 Ω from an MMB3.0 calibrator read OL on the 600 Ω range. The
+  firmware's OL limit there (618 Ω on every model) and its OL decision are
+  not the cause: a resistor of 500 Ω reads from the first conversion after an
+  overload (emulator). The suspected cause is the calibrator's resistance output at the
+  range's 0.90 mA test current, or a lock of it after its switch (both
+  inferred); the low-current ON variant
+  (0.28 mA) may read it. Device check in
+  [firmware/TODO.md](firmware/TODO.md) ("500 ohm from the MMB3.0 reads OL on 600 ohm").
+
+### Tools
+
+- [emu/hy3131/ohm600test.py](emu/hy3131/ohm600test.py): manual 600 Ω at
+  each rate, steps into 500 Ω from 200 Ω / open / OL, the 618 Ω limit, and
+  AUTO landing 500 Ω on 600 Ω.
+
 ## v0.2.0 (2026-10-25)
 
 ### New
