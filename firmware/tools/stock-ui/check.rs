@@ -1,6 +1,6 @@
 //! Layout-rule check of a rendered scene (ported from tools/ui-render/main.rs:
 //! the owner's >= 3 px gap / margin rules). The stock layout is NOT expected
-//! to pass; the violations are reported as a finding (docs/stock-scope-ui.md).
+//! to pass; the violations are reported as a finding (stock/re/docs/stock-scope-ui.md).
 #![allow(dead_code)]
 use crate::host::{emu, H, W};
 pub mod probe {

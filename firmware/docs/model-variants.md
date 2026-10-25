@@ -31,7 +31,7 @@ Not involved:
 * **OTP** (`0x1FFF7800`, `otp_1FFF7800.bin`): all 0xFF.
 * **Option bytes**: no model use found (the RE headers trace none; the model
   byte alone explains the observed A / B / C behaviour, section 5).
-* **UID-bound loader block** `0x080A4000` ([genuine-check.md](genuine-check.md)): the genuine
+* **UID-bound loader block** `0x080A4000` (`stock/re/docs/genuine-check.md`, in the private analysis repo): the genuine
   check, a serial-like word, HW version 4 and bootloader version 1.1. No model.
 * **FS-loader** string `"ATK-DM-40"` and the update file: one image for all
   three models. The loader does not check a model.

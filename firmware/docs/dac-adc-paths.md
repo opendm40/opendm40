@@ -64,7 +64,7 @@ means:
 - No jack is shared between the meter and the scope / generator.
 
 The HY3131 can check its own chain without the MCU DAC, using rows the stock
-already has ([`hy3131_v2_6.h`](../../stock/re/analysis/hy3131_v2_6.h)): AD1
+already has (`stock/re/analysis/hy3131_v2_6.h`, in the private analysis repo): AD1
 inputs shorted (PB3-PB3, PB5-PB5) for the zero, VDDA-VSSA, the die sensor
 TS1N/TS2P (the temperature mode), and the AD1 reference switched between PB6
 (the MAX6190) and the internal REFO. opendm40 does not run these as a

@@ -24,3 +24,8 @@ private/
 
 # Ghidra project database (contains the vendor image; rebuilt by Setup.java)
 stock/re/ghidra/gproj/
+
+# Stock-firmware analysis: a clone of the private repo
+# wirenboard/alientek-dm40-fw-analysis, for those with access (README.md,
+# "Supporting material"); the dumps above live inside it, untracked there too
+stock/re/

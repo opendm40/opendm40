@@ -127,12 +127,25 @@ one line each:
 - [bt-protocol.md](../docs/bt-protocol.md): the stock Bluetooth phone-app protocol
 - [compact-log-format.md](docs/compact-log-format.md): the DLG log format on the disk, CSV on read
 - [native-boot.md](docs/native-boot.md): flash and memory map, update format, shim, recovery, the USB disk, memory budget
-- [fsloader-install-trigger.md](docs/fsloader-install-trigger.md): how the stock FS-loader installs a `dm40*.bin`, its USB and error paths
-- [genuine-check.md](docs/genuine-check.md): the stock genuine-device check (UID-bound loader data)
 - [model-variants.md](docs/model-variants.md): how the firmware tells DM40A / B / C apart
 - [parity.md](docs/parity.md): item-by-item parity with the stock firmware V2.6
-- [stock-scope-ui.md](docs/stock-scope-ui.md): pixel and interaction spec of the stock scope UI ([renderer](tools/stock-ui/README.md))
-- [ANALYSIS.md](../stock/re/ANALYSIS.md): reverse-engineering notes on the stock firmware and flash; [stock/README.md](../stock/README.md): stock update-file tools
+- [stock/README.md](../stock/README.md): stock update-file tools
+
+### Stock-firmware analysis (private)
+
+The reverse-engineering material on the stock firmware lives in the private
+repo `wirenboard/alientek-dm40-fw-analysis`; those with access clone it into
+`stock/re/` (ignored by git), so the `stock/re/...` paths in the code and the
+docs resolve. The emulator needs the developer's own flash and SPI flash
+dumps in `stock/re/dumps/` ([emu/README.md](../emu/README.md)). The build and
+the CI suites do not need the clone. In it:
+
+- `stock/re/docs/fsloader-install-trigger.md`: how the stock FS-loader installs a `dm40*.bin`, its USB and error paths
+- `stock/re/docs/genuine-check.md`: the stock genuine-device check (UID-bound loader data)
+- `stock/re/docs/stock-scope-ui.md`: pixel and interaction spec of the stock scope UI ([renderer](tools/stock-ui/README.md))
+- `stock/re/ANALYSIS.md`: reverse-engineering notes on the stock firmware and flash
+- `stock/re/docs/history/native-boot-plan.md`: the 2026-10-13 native-image plan and its T1 / T2 / T3 tests
+- `stock/re/docs/history/acdc-stock-vs-opendm40.md`: AC+DC and AUTO coupling of the stock, measured live
 
 ### Design
 
@@ -166,11 +179,9 @@ one line each:
 Finished plans, reviews, investigations and decision logs; not maintained.
 The full list is [docs/history/README.md](../docs/history/README.md). Archived from `docs/`:
 
-- [native-boot-plan.md](../docs/history/native-boot-plan.md): the 2026-10-13 native-image plan and its T1 / T2 / T3 tests
 - [stage0-test.md](../docs/history/stage0-test.md): Stage 0, the FS-loader re-installs a staged file
 - [decisions-2026-10-22.md](../docs/history/decisions-2026-10-22.md): nine product / engineering decisions, cited by the code as `#N`
 - [switch-latency.md](../docs/history/switch-latency.md): DMM switch latency and the proposals cited by the code
-- [acdc-stock-vs-opendm40.md](../docs/history/acdc-stock-vs-opendm40.md): AC+DC and AUTO coupling of the stock, measured live
 - [log-format-standards.md](../docs/history/log-format-standards.md): standard log formats against DLG
 - [ui-review.md](../docs/history/ui-review.md): UI/UX review
 - [hwtrig-integration.md](../docs/history/hwtrig-integration.md): the hooks that wired the comparator trigger

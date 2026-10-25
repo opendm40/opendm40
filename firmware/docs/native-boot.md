@@ -7,11 +7,25 @@ the boot chain, the update file, the flash layout and memory budget, the
 shim, recovery, the boot-time disk work and the USB volume.
 
 The design plan of 2026-10-13 and the T1-T3 device test plans are archived in
-[docs/history/native-boot-plan.md](../../docs/history/native-boot-plan.md).
+`stock/re/docs/history/native-boot-plan.md`. The `stock/re/...` paths in this
+document are in the private stock-firmware analysis repo, cloned into
+`stock/re/` by those with access ([README.md, Supporting material](../../README.md#supporting-material)).
 
 ## Boot chain
 
-Stock flash layout ([`stock/re/ANALYSIS.md`](../../stock/re/ANALYSIS.md) §1):
+In short:
+- **ROM** (sector 0) launches the application when PA2 is high and the
+  application's marker and CRCs are valid; otherwise it starts the FS-loader.
+- **FS-loader** (`0x080a0000`) makes the same test; failing it, it installs the
+  first `dm40*.bin` from the SPI-flash FAT, deletes the file and resets, or
+  shows its update screen with a USB disk.
+- **Update file:** a 12-byte header (the marker) plus the body flashed at
+  `0x08004000` ("Update file format" below).
+- **opendm40's shim** at the image's reset vector picks a normal boot or
+  recovery; recovery zeroes the marker and resets into the FS-loader
+  ("Shim (reset path)", "Recovery mode" below).
+
+Stock flash layout (`stock/re/ANALYSIS.md` §1):
 
 ```
 0x08000000  ROM (primary bootloader)  16 KB  sector 0      never touched by updates
@@ -25,7 +39,7 @@ Stock flash layout ([`stock/re/ANALYSIS.md`](../../stock/re/ANALYSIS.md) §1):
 Each stage starts the next with `msr msp` + a jump through its vector
 table; there is no A/B slot and no jump to the GD32 system bootloader. SWD is
 read-locked. The boot gate and install in detail, with addresses:
-[fsloader-install-trigger.md](fsloader-install-trigger.md).
+`stock/re/docs/fsloader-install-trigger.md`.
 
 - **ROM:** polls PA2 (the debug header's TX pad, pull-up) ~1000 times. PA2
   high at any poll and a valid application (the 12-byte marker at
@@ -59,7 +73,7 @@ short) in [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery
 Decoded file = 12-byte LE header `word0 word1 word2` + body (flashed at
 `0x08004000`). [`stock/dm40fw.py`](../../stock/dm40fw.py) implements it and
 reproduces all 11 official files byte for byte
-([`stock/re/ANALYSIS.md`](../../stock/re/ANALYSIS.md) §2):
+(`stock/re/ANALYSIS.md` §2):
 
 - `word1` = body length (`dm40fw.py` `build`).
 - `word0` = `(~X<<16)|X`, `X` = CRC-16 (poly `0x8005`, init `0xFFFF`,
@@ -106,7 +120,7 @@ any body byte):
 | Power loss while the loader flashes | marker zeroed, application partly written | the next boot enters the install state again and re-installs the file (deleted only after success) |
 | opendm40 hangs before or after the shim decision | FWDGT reset (~20 s); the first one reboots normally, a second within 60 s of main loop takes recovery | "Shim (reset path)" below; the shim itself only reads and programs the 12 marker bytes |
 | opendm40 too broken for any software path | – | TX (PA2) to GND at power-on enters the install state ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)) |
-| SPI-flash FAT unreadable | the loader fast-formats it on `FR_NO_FILESYSTEM` (fsloader-install-trigger.md, "Install state, call order") | an empty FAT on the loader's disk takes a new file |
+| SPI-flash FAT unreadable | the loader fast-formats it on `FR_NO_FILESYSTEM` (`stock/re/docs/fsloader-install-trigger.md`, "Install state, call order") | an empty FAT on the loader's disk takes a new file |
 | Wrong-model update file | installs; the model comes from the calibration record (`0x080C0000` +0x168, [model-variants.md](model-variants.md)) | labels / ranges only |
 
 Still open: whether the SWD pads allow a reflash after a mass erase (it would
@@ -124,7 +138,7 @@ is exposed.
   ("fatren" below); the running firmware's update file is
   `INFO/FIRMWARE.BIN` on the USB volume ("Unit data").
 - **Device-authenticity check** ([`src/genuine.rs`](../src/genuine.rs),
-  [genuine-check.md](genuine-check.md)): informational only (`DBG:GENUINE?`),
+  `stock/re/docs/genuine-check.md`): informational only (`DBG:GENUINE?`),
   not in the boot path.
 
 ## Files
@@ -543,7 +557,7 @@ or a compressed copy in the body), not by the update file.
 | `0x0800460c..0x08008000` | 1 (region A tail) | 14.8 KB | inside the image, zero-wait: used since 2026-10-22 as region A2 (the `.a2` output section, "Region A2" above) |
 | `0x080AE700..0x080C0000` | 9 (FS-loader + boot data at `0x080A4000`) | ~70 KB | write-once: it can be programmed but never erased (the erase takes the FS-loader and the UID-bound data with it), so never updated |
 | `0x080C0400..0x080E0000` | 10 (calibration / settings) | ~127 KB | write-once likewise (an erase loses the calibration); whether the stock app rewrites this sector on a settings save is not known: a return to stock could wipe it |
-| `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install ([fsloader-install-trigger.md](fsloader-install-trigger.md#install-state-call-order)): opendm40 would re-program it after each update |
+| `0x080E0000..0x080FF000` | 11 (`0x080FF000` boot word) | ~124 KB | erasable, but the FS-loader erases sector 11 at the start of every install (`stock/re/docs/fsloader-install-trigger.md`): opendm40 would re-program it after each update |
 
 Sector 11 is the only candidate. Its risks: a version mismatch between the
 image and the overlay (needs a CRC / version check and a "not available"
@@ -576,16 +590,16 @@ the 0xFF padding (< 128 bytes). `build.sh` fails if the packed file is not a
 multiple of 128 bytes or the padded body reaches `0x080A0000`.
 
 **Word0 is the stock app's own initial SP** (`0x2002F7F8`). The FS-loader
-launches the app with `msr msp, [0x08004000]; ldr r0, [0x08004004]; bx r0`
-(`0x080a18f4`). The launch tests of the ROM and the loader check the marker
-and the body CRC ([fsloader-install-trigger.md, Boot decision chain](fsloader-install-trigger.md#boot-decision-chain));
+loads MSP from word 0 of the vector table at `0x08004000` and jumps to the
+reset vector in word 1. The launch tests of the ROM and the loader check the marker
+and the body CRC ("Boot chain" above; `stock/re/docs/fsloader-install-trigger.md`, "Boot decision chain");
 no SP check is known, and with the stock value any would pass as for stock.
 `reset` moves SP to the TCM top before anything uses the stack.
 
 ## Shim (reset path)
 
 The letter-number tags (B2, H2, ...) are items of the safety review
-[native-review-2026-10-13.md](../../docs/history/native-review-2026-10-13.md).
+`stock/re/docs/history/native-review-2026-10-13.md`.
 
 `reset` (asm):
 1. `cpsid i`.
@@ -619,7 +633,7 @@ The letter-number tags (B2, H2, ...) are items of the safety review
    - The stock never clears these flags; a running stock showed `0x3E000002`.
 4. **PD6 input with pull-down** (B2; the key:
    [hw/README.md, Power key, PA2, buzzer](../../hw/README.md#power-key-pa2-buzzer)), as the stock key init does
-   (`FUN_0800b7e0` in [`app_decompile.c`](../../stock/re/analysis/app_decompile.c):
+   (`FUN_0800b7e0` in `stock/re/analysis/app_decompile.c`:
    input, PUPD = 2). Then about 10 µs for the pull to settle.
    - The ROM and loader leave PD6 floating, so without this a floating 1
      would read as a held key.
@@ -743,8 +757,8 @@ keeps the settings record from `0x40024000` and two sequence words at
 ## Recovery mode (`src/recovery.rs`)
 
 Recovery uses the loader's own update screen and disk, reached by zeroing the
-marker ("Boot chain" above;
-[fsloader-install-trigger.md, "Update-loader install & error paths"](fsloader-install-trigger.md#update-loader-install--error-paths-full-dump)).
+marker ("Boot chain" above; `stock/re/docs/fsloader-install-trigger.md`,
+"Update-loader install & error paths").
 
 **Why the `DM40RCVR.BIN` + power-off variant is fragile.** If the user releases
 the power key quickly at the next power-on, PA2 reads high and the ROM launches
@@ -854,7 +868,7 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
   - BTR1 = `0x00000F04` (read: ADDSET 4, DATAST 15).
   - BWTR1 = `0x00000201` (write: ADDSET 1, DATAST 2).
   - Decoded from the stock `FUN_0800506c` call in
-    [`app_decompile.c`](../../stock/re/analysis/app_decompile.c) and its mask
+    `stock/re/analysis/app_decompile.c` and its mask
     literal `0xFFF70081`. The live stock values read on the device
     (2026-10-13): BCR1 `0x5091`, BTR1 `0x0F04`, BWTR1 `0x0FF00201`.
 - **ILI9488:**
@@ -923,7 +937,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
 ## fatren (`src/fatren.rs`)
 
 The FS-loader deletes the file it installed, after a successful install
-([fsloader-install-trigger.md, "Who deletes the installed dm40*.bin"](fsloader-install-trigger.md#who-deletes-the-installed-dm40bin)),
+("Boot chain" above; `stock/re/docs/fsloader-install-trigger.md`, "Who deletes the
+installed dm40*.bin"),
 so normally fatren finds nothing to rename. The delete's result is ignored
 by the loader; a file it could not delete (inferred: a read-only one) would
 be installed again on every entry into the install state. fatren renames such
@@ -1258,7 +1273,7 @@ that may send SCPI reads it with `*IDN?`. It was already readable over USB:
 `INFO/UID.BIN` on the volume and the FAT volume ID (CRC-32 of the UID). A
 hash of the UID would be just as stable a tracking identifier, so it would
 not hide more; the only thing the raw UID adds is the input of the stock
-genuine check ([genuine-check.md](genuine-check.md)), whose stored block is on the volume
+genuine check (`stock/re/docs/genuine-check.md`), whose stored block is on the volume
 too (`INFO/BOOTDATA.BIN`). There is no setting to hide it.
 
 Emulator: `emu/run.py --uid` (default `emu_uid`: this unit's UID with bytes
@@ -1793,7 +1808,7 @@ read differed), `NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED`
 
 - **RCU_RSTSCK clearing:** the shim clears the reset flags, which the stock
   firmware never does. Neither the ROM nor the loader reads them
-  ([fsloader-install-trigger.md, Reset cause](fsloader-install-trigger.md#reset-cause)).
+  (`stock/re/docs/fsloader-install-trigger.md`, "Reset cause").
 - **Review L2** (FWDGT: wait for PUD / RUD *after* the PSC / RLD writes, in
   [`src/wdt.rs`](../src/wdt.rs)) is not done; `start::fwdgt` waits only
   before them. Effect: the first period may be up to ~32 s.
