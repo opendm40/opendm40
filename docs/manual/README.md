@@ -189,7 +189,9 @@ The top line of the multimeter page shows, from left to right:
 
 *The status bar.*
 
-1. the range mode: **AUTO**, **AUTO+** or **MANU** (a fixed range);
+1. the range: **AUTO** or **AUTO+** while the meter picks the range, or
+   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6KΩ**
+   (as the stock firmware shows it);
 2. **RUN**, **HOLD** or **A-HOLD**, or in that place a wrong-connection
    [alert](#safety-and-alerts);
 3. the time since the meter was switched on (hours:minutes:seconds);
@@ -691,7 +693,7 @@ Limits](#limits-and-autohold)).
 |---|---|
 | The voltage range page | The current range page |
 
-- Tap a range to fix it (the status bar shows **MANU**). Tap **AUTO** or
+- Tap a range to fix it (the status bar shows the range, e.g. **60V**). Tap **AUTO** or
   **AUTO+** to return to autorange, or hold the **AUTO** key for 1 s.
 - A short press of the **AUTO** key fixes the present range, or steps to
   the next higher one; after the highest comes the lowest (the
@@ -1534,8 +1536,8 @@ From the left:
   **DC A**, **FREQ**, **TEMP**, **POWER** ...);
 - one state badge, the most important of: **HOLD** / **A-HOLD**, an
   [alert](#the-alerts), **HV** (30 V and more), **REC**, **REL**, the
-  limit verdict (**PASS**, **HI**, **LO**), the range mode (**MANU**,
-  **AUTO+**, **AUTO**). An alert alternates with HOLD every second;
+  limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
+  **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
 - the reading and its unit;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,

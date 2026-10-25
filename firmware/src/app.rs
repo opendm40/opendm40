@@ -2206,14 +2206,7 @@ impl App {
     /// Index in the MF page list of the manual item for the range the DMM
     /// is in now (also while it autoranges).
     fn range_sel_manual(&self) -> Option<usize> {
-        let (m, r) = (self.dmm.hy_mode(), self.dmm.range() as u8);
-        let want = Some(match m {
-            2 | 3 if r == 0 => 5,
-            2 | 3 => 0,
-            0 | 1 => r + 1,
-            4..=9 => (2 - (m - 4) % 3) * 2 + r,
-            _ => r,
-        });
+        let want = Some(ui::range_code(self.dmm.hy_mode(), self.dmm.range() as u8));
         ui::range_items(self.dmm.button()).iter().position(|it| it.1 == want)
     }
 
