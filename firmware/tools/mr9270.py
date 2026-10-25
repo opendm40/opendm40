@@ -51,6 +51,11 @@ SCALE = {
     "current_passive":(0,  0,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "current_active": (0,  1,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "resistance":     (3,  1,    10.0,  "ohm"),  # i32 = deci-ohms, max 4000 (CONFIRMED 2026-10-13 vs DM40)
+    # The frequency range (0-99.99 Hz / 0-999.9 Hz / 0-9.999 kHz / up to 100 kHz)
+    # is set on the front panel only: hold OUT 2 s -> HZ-SET -> Scope, or O-TY
+    # (manual for units after Oct 2021, 4.4.2-4.4.3; the Modbus map 10.2-10.3
+    # has no range register). The scale is the Hz range's; in the 100 kHz range
+    # the value is in 0.1 kHz units (1000 = 100.0 kHz).
     "frequency":      (2,  0,  1000.0,  "Hz"),   # i32 = millihertz  (CONFIRMED 2026-10-22: 40000 = 40.0017 Hz on
                                                  # the DM40 FREQ; 50 = a 0.05 Hz 0 / 9.52 V square, ~10 s low:
                                                  # the "1.0 = hertz" scale gave 50 Hz requests that, device-check doc)
