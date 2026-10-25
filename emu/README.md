@@ -46,8 +46,8 @@ and take screenshots. Nothing here talks to a real meter.
 | SPI flash dump, 16 MiB | `stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin` | Required unless `--disk`. Copied once to `emu/out/disk.bin`, the working copy |
 | Stock application | `dm40_v_2_6.dec.bin` (repo root) | Only for `stock` and `chain` without `--app`: `python3 stock/dm40fw.py decode stock/vendor/dm40_v_2_6.bin dm40_v_2_6.dec.bin` ([stock/README.md](../stock/README.md)) |
 
-The dumps come from your own meter and are not in the repository. They live
-in the private clone in `stock/re/` ([firmware/README.md](../firmware/README.md#stock-firmware-analysis-private)).
+The dumps and the UID file come from your own meter and are not in the
+repository. The dumps live in the private clone in `stock/re/` ([firmware/README.md](../firmware/README.md#stock-firmware-analysis-private)).
 The emulator only reads them: images are composed in `emu/out/` (git-ignored).
 
 Each instance gets a chip UID of its own: by default bytes 4 and 9 of the
@@ -99,7 +99,7 @@ seconds.
 | `--shot PNG[@T]`, `--autoshot N` | screenshot at T (default: at the end); a PNG every N frames |
 | `--tap X,Y[@T]`, `--drag X0,Y0,X1,Y1[@T]` | touch; a drag takes 0.3 s |
 | `--key NAME[@T]` | `menu`, `run`, `auto`, `mf`, `power`, `power-hold`, `pa2` |
-| `--dmm SPEC[@T]` | what is connected to the DMM jacks, several specs with `;`, e.g. `dcv:1.234`, `acv:1.0@50`, `ohm:4700`, `open`. Syntax: [emu/hy3131/README.md](hy3131/README.md) |
+| `--dmm SPEC[@T]` | what is connected to the DMM jacks, several specs with `;`: elements such as `vsrc:1.234`, `isrc:0.0123`, `r:4700`, `c:100e-9`, `open`, or the older keys `dcv:1.234`, `acv:1.0@50`, `ohm:4700`. Syntax: [emu/hy3131/README.md](hy3131/README.md) |
 | `--vin V[@T]` | DC volts on V-COM (older form of `--dmm`) |
 | `--scope SHAPE,HZ,VPP[,OFFSET][@T]` | scope input: `sine`, `square`, `triangle`, `ramp`, `dc`, `noise` |
 | `--script FILE` | timed events, one per line: `T tap X Y`, `drag`, `key K`, `shot PNG`, `dmm SPEC`, `vin V`, `scope SPEC`, `monitor <Renode command>` |
@@ -318,9 +318,9 @@ Models are C# files compiled by Renode at start-up; the platform is
 | RCC, PWR | Renode STM32F4 models | ready bits follow the enables; every timer clock is 200 MHz |
 | LCD (FSMC bank 1) | [`ILI9488.cs`](peripherals/ILI9488.cs) | RGB666 read-back as the panel; `Screenshot`, `AutoShot` |
 | GPIO | [`GD32_GPIO.cs`](peripherals/GD32_GPIO.cs) | pull-ups give the level of undriven inputs |
-| TIM1, 2, 5, 8 | [`GD32_Timer.cs`](peripherals/GD32_Timer.cs) | slave modes, one-pulse, capture, PWM, TRGO; events at their exact virtual time |
+| TIM1, 2, 5, 7, 8 | [`GD32_Timer.cs`](peripherals/GD32_Timer.cs) | slave modes, one-pulse, capture, PWM, TRGO; events at their exact virtual time. TIM7 is opendm40's AD2 stream tick |
 | TIM3, 6, 12-14 | [`PwmTimer.cs`](peripherals/PwmTimer.cs) | registers and counter only, no events |
-| TIM4, 7, 9-11 | Renode `STM32_Timer` | tick interrupts |
+| TIM4, 9-11 | Renode `STM32_Timer` | tick interrupts |
 | DMA | [`GD32_DMA.cs`](peripherals/GD32_DMA.cs) | circular, double buffer, M2M |
 | SPI flash (W25Q128) | [`GD32_SPI.cs`](peripherals/GD32_SPI.cs), [`W25Q128.cs`](peripherals/W25Q128.cs) | file-backed 16 MiB; program / erase busy times; byte timing as the device (`--spi-disk-gap-ns`) |
 | Touch (I2C) | [`GD32_I2C.cs`](peripherals/GD32_I2C.cs), [`CST_Touch.cs`](peripherals/CST_Touch.cs) | `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
