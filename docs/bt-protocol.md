@@ -92,7 +92,7 @@ Bits 6-7   Sub-mode (e.g. DC / AC / AC+DC)
 ```
 
 The exact meaning of groups 3-5 (continuity, diode, capacitance, frequency)
-and of the range values was not verified on a device.
+and of the range values is *inferred*: not checked on a device.
 
 The protocol has no unit field (the unit follows from the group and the
 format byte's prefix) and no group for a power function. opendm40's power meter

@@ -1,5 +1,7 @@
 # Alientek DM40C — Feature Request / UX Gap Analysis для альтернативной прошивки
 
+*Archived (Russian): the feature request and UX gap analysis of 2026-10-13 that opendm40 was planned from. The FR-nn ids are still cited by the code and [TODO.md](../../firmware/TODO.md). Not maintained.*
+
 **Версия:** 1.0, 2026-10-13
 **Статус:** черновик для разработки собственной прошивки
 **Базовая прошивка для сравнения:** стоковая V2.x (мануал V1.5, changelog до V2.1)
@@ -23,11 +25,11 @@
 
 ### 1.1 Где описано железо
 
-Состав платы, пины, фронтенды, питание и источники (BOM платы V1.1 от jebem в ветке EEVblog по разбору на mydigit.cn, фото, код стока и opendm40) собраны в одном месте: [hw/README.md](../hw/README.md). Основное: [перечень компонентов](../hw/README.md#main-parts), [блок-схема](../hw/README.md#block-diagram), [таблица пинов](../hw/README.md#pin-table), [открытые вопросы и противоречия](../hw/README.md#unknowns). Здесь остаются только выводы для функций и UX.
+Состав платы, пины, фронтенды, питание и источники (BOM платы V1.1 от jebem в ветке EEVblog по разбору на mydigit.cn, фото, код стока и opendm40) собраны в одном месте: [hw/README.md](../../hw/README.md). Основное: [перечень компонентов](../../hw/README.md#main-parts), [блок-схема](../../hw/README.md#block-diagram), [таблица пинов](../../hw/README.md#pin-table), [открытые вопросы и противоречия](../../hw/README.md#unknowns). Здесь остаются только выводы для функций и UX.
 
 ### 1.2 Гальваническая развязка [Факт, владелец 2026-10-24]
 
-Мультиметр (HY3131, опорник, делитель, реле, шунты, banana-гнёзда) гальванически развязан от MCU; MCU, USB, осциллограф и генератор, по выводу, сидят на одной земле с батареей и USB. Схема развязки и аргументы: [hw/README.md, Block diagram](../hw/README.md#block-diagram) и [Isolation boundary](../hw/README.md#isolation-boundary).
+Мультиметр (HY3131, опорник, делитель, реле, шунты, banana-гнёзда) гальванически развязан от MCU; MCU, USB, осциллограф и генератор, по выводу, сидят на одной земле с батареей и USB. Схема развязки и аргументы: [hw/README.md, Block diagram](../../hw/README.md#block-diagram) и [Isolation boundary](../../hw/README.md#isolation-boundary).
 
 **Что это значит для прошивки:**
 - DMM можно безопасно использовать во время зарядки — стоковый запрет избыточен. Реальная опасность только для осциллографа/генератора (их земля = USB GND = земля ПК/зарядки).
@@ -37,13 +39,13 @@
 
 | Ресурс | Есть | Сток использует | Можно использовать для |
 |---|---|---|---|
-| RTC в GD32F427 ([MCU](../hw/README.md#mcu-and-clocks)) | да; питается ли от батареи в выключенном состоянии — [?] | [?] таймер в статус-баре, но не часы | временны́е метки логов, имена файлов |
-| W25Q128, 16 МБ ([SPI flash](../hw/README.md#spi-flash-usb-disk)) | да | прошивка, лого, скриншоты | логирование: при записи 16 байт → ~500k записей на 8 МБ |
-| Быстрые 19-bit АЦП HY3131 ([DMM front end](../hw/README.md#dmm-front-end-hy3131)) | да | [?] AC-RMS, частота | Peak-детект, MIN/MAX на полной скорости, быстрая прозвонка |
-| 2 канала DAC ([Generator](../hw/README.md#generator), [Oscilloscope](../hw/README.md#oscilloscope)) | да | канал 1 — генератор, канал 2 — порог аппаратного триггера осциллографа | в opendm40 триггер программный, канал 2 свободен: DC-источник, offset |
-| USB OTG FS ([USB](../hw/README.md#usb)) | да | только MSC | composite MSC + CDC (SCPI/поток данных) |
+| RTC в GD32F427 ([MCU](../../hw/README.md#mcu-and-clocks)) | да; питается ли от батареи в выключенном состоянии — [?] | [?] таймер в статус-баре, но не часы | временны́е метки логов, имена файлов |
+| W25Q128, 16 МБ ([SPI flash](../../hw/README.md#spi-flash-usb-disk)) | да | прошивка, лого, скриншоты | логирование: при записи 16 байт → ~500k записей на 8 МБ |
+| Быстрые 19-bit АЦП HY3131 ([DMM front end](../../hw/README.md#dmm-front-end-hy3131)) | да | [?] AC-RMS, частота | Peak-детект, MIN/MAX на полной скорости, быстрая прозвонка |
+| 2 канала DAC ([Generator](../../hw/README.md#generator), [Oscilloscope](../../hw/README.md#oscilloscope)) | да | канал 1 — генератор, канал 2 — порог аппаратного триггера осциллографа | в opendm40 триггер программный, канал 2 свободен: DC-источник, offset |
+| USB OTG FS ([USB](../../hw/README.md#usb)) | да | только MSC | composite MSC + CDC (SCPI/поток данных) |
 | Датчик температуры «machine temperature» | да | Aux в режиме T | холодный спай термопары, температурная коррекция |
-| BT BP2A838 ([Bluetooth](../hw/README.md#bluetooth)) | да | зеркало экрана | протокол реверснут (DM40GUI, Maj113) — можно расширить |
+| BT BP2A838 ([Bluetooth](../../hw/README.md#bluetooth)) | да | зеркало экрана | протокол реверснут (DM40GUI, Maj113) — можно расширить |
 
 ---
 
@@ -303,7 +305,7 @@
 5. **Тач-контроллер.** Маркировка на шлейфе или I²C-адрес логическим анализатором: `0x5D/0x14` → Goodix GT9xx, `0x38` → FocalTech FT6x36/FT5x06, `0x15` → CST816, `0x1A` → CST3xx.
 6. **LCD-драйвер.** ID по команде `RDDID (0x04)` / `RDID4 (0xD3)`; интерфейс (FSMC 16-bit или SPI).
 7. **BT.** Интерфейс к BP2A838 (UART?), скорость, протокол — взять за основу реверс из DM40GUI.
-8. **Изоляция.** Развязка DMM подтверждена владельцем 2026-10-24; прозвонка USB GND ↔ MCX GND ↔ COM — в [hw/README.md, Isolation boundary](../hw/README.md#isolation-boundary).
+8. **Изоляция.** Развязка DMM подтверждена владельцем 2026-10-24; прозвонка USB GND ↔ MCX GND ↔ COM — в [hw/README.md, Isolation boundary](../../hw/README.md#isolation-boundary).
 9. **Генератор.** Какой DAC-канал и таймер; почему выключается в DMM.
 10. **3PA1030.** Куда идёт параллельная шина (GPIO + DMA по таймеру или FSMC), какой клок.
 11. **Peak.** Реальная скорость быстрых АЦП HY3131 в конфигурации платы.

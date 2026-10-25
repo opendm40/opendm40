@@ -1,7 +1,7 @@
 # DM40 emulator (Renode)
 
 A full-system emulator of the Alientek DM40 ([GD32F427VGT6](../hw/datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf), Cortex-M4F at
-200 MHz) that runs the **stock firmware**, our **opendm40 native image** and the
+200 MHz) that runs the **stock firmware**, **opendm40** and the
 complete **ROM -> FS-loader -> app boot chain** from the flash dump, renders the
 [ILI9488](https://www.crystalfontz.com/controllers/uploaded/ILI9488%20Data%20Sheet_100.pdf) LCD to PNG, accepts injected touches / side keys / the power key,
 feeds scripted DMM and scope inputs, answers the Bluetooth module's AT setup,
@@ -412,14 +412,14 @@ arm-none-eabi-gdb emu/out/fwrs-worktree/firmware/target/native/thumbv7em-none-ea
 Memory, registers, breakpoints and single-stepping work as usual; `monitor`
 commands go to the Renode monitor (`monitor sysbus.lcd Screenshot @/tmp/x.png`).
 
-## Milestones (status 2026-10-13)
+## What runs
 
-| | milestone | status |
+| | what | how |
 |---|---|---|
-| a | stock app boots to its main UI -> PNG | **reached**: DMM page at ~1 s virtual, 3 s run takes ~30 s wall |
-| b | stock DMM and scope pages via injected taps -> PNG | **reached**: MENU key -> main menu -> Oscilloscope tile; scope page acquires and measures the fed waveform (`emu/out/stock-scope.png`) |
-| c | opendm40 native image boots through the shim -> PNG | **reached**: DMM page with the scripted input, BT module set-up, menu, scope page (`emu/out/fwrs-scope.png`); USBTMC `*IDN?` and MSC over USB/IP |
-| d | full chain ROM -> FS-loader -> app from the dump | **reached** (`--trace-boot`): ROM at 0, FS-loader at 0.50 s, app at 0.64 s; with PA2 held the loader shows its "open file error / Update" screen; with `--zero-marker --disk-add <update>` the loader installs the file into flash (byte-for-byte equal to the opendm40 body) and resets into it |
+| a | The stock firmware boots to its main UI | DMM page at about 1 s virtual time; a 3 s run takes about 30 s wall time |
+| b | The stock DMM and scope pages, by injected taps | MENU key -> main menu -> Oscilloscope tile; the scope page acquires and measures the fed waveform (`emu/out/stock-scope.png`) |
+| c | opendm40 boots through the shim | DMM page with the scripted input, Bluetooth module set-up, menu, scope page (`emu/out/fwrs-scope.png`); USBTMC `*IDN?` and the USB disk over USB/IP |
+| d | The full chain ROM -> FS-loader -> application, from the dump | `--trace-boot`: ROM at 0, FS-loader at 0.50 s, application at 0.64 s; with PA2 held the loader shows its "open file error / Update" screen; with `--zero-marker --disk-add <update>` the loader installs the file into flash (byte for byte equal to the opendm40 body) and resets into it |
 
 ## What is modelled, what is stubbed
 
