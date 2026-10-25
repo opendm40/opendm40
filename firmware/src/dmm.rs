@@ -279,7 +279,9 @@ struct Avg {
 
 const AVG_MAX: usize = 32;
 /// Readings with at least this many slow conversions averaged have the full
-/// +1 digit resolution (`Val::ext`); also what SCPI MEAS? waits for.
+/// +1 digit resolution (`Val::ext`). SCPI MEAS? after a function change
+/// prefers such a reading but waits for it only SCPI_SETTLE_MS (main.rs),
+/// which a full window never meets (~5.3 s after the switch, R22_LATE).
 pub const AVG_FULL: u8 = 8;
 
 impl Avg {
@@ -982,6 +984,10 @@ pub struct Dmm {
     ohm_down_k: f32,
     ohm_blk_r: i8,
     ohm_blk_k: f32,
+    /// Plain AC: the AC filters were reset (entry, range step); the next
+    /// used result seeds them (`f_ac`, `f_lpf`) instead of the EMA's 0.99
+    /// step from 0, which read 1 % low and took ~1 s to close.
+    ac_seed: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1564,6 +1570,7 @@ impl Dmm {
             ohm_blk_r: -1,
             ohm_blk_k: 0.0,
             ohm_t0: 0,
+            ac_seed: true,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -1917,9 +1924,11 @@ impl Dmm {
         let now = clk.now_ms();
         self.sent.ohm_exit(self.ohm_exit_t.filter(|&t| kind == Kind::CmpV && now < t + sentinel::OHM_EXIT_MAX_MS));
         // Ohm / temperature: A-JACK needs the V side's word (sentinel V_GATE).
-        // AC mV (plain): its own result says how far beyond the range the
-        // input is (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS).
-        let mv = self.mode == 2 && !self.acdc;
+        // AC mV: its own result says how far beyond the range the input is
+        // (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS). AC+DC mV: the
+        // AC phase is that row and its sentinel; both phases share the run
+        // and the AC phase's verdict (doc 4.13).
+        let mv = self.mode == 2 || (self.acdc && self.mode == 3);
         self.sent.vgate = matches!(self.mode, 10 | 15) || mv;
         self.sent.vlag = if mv { sentinel::MV_VGATE_LAG_MS } else { 0 };
         // The jack check (sentinel JACK CHECK): ohm, continuity, the
@@ -2054,6 +2063,7 @@ impl Dmm {
             self.f_ac = 0.0;
             self.f_lpf = 0.0;
             self.ac_raw = 0.0;
+            self.ac_seed = true;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -2288,6 +2298,7 @@ impl Dmm {
         self.ac_raw = 0.0;
         self.f_ac = 0.0;
         self.f_lpf = 0.0;
+        self.ac_seed = true;
         self.f_dc = 0.0;
         self.f_diode = 0.0;
         self.f_cap = 0.0;
@@ -4141,7 +4152,11 @@ impl Dmm {
         // Plain AC A after a row write: held (provisional) until two results
         // in a row agree (ACA_VET_*).
         let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
-        if !held {
+        // Plain AC after a reset: the first used result seeds the filters.
+        let first = !self.acdc && !held && core::mem::take(&mut self.ac_seed);
+        if first {
+            self.f_lpf = dcp;
+        } else if !held {
             ema(thr, a_lpf, dcp, &mut self.f_lpf);
         }
         let (unit, dec, si_k) = match m {
@@ -4164,7 +4179,7 @@ impl Dmm {
         if self.tr.on != 0 {
             self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
         }
-        let seed = acdc && was && !settling;
+        let seed = (acdc && was && !settling) || first;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
         // as the stock (../docs/history/acdc-stock-vs-opendm40.md 8.2).
@@ -4245,6 +4260,12 @@ impl Dmm {
                     }
                 }
             }
+        }
+        // A plain autorange step: `set` reset the AC filters (a range step,
+        // or `reset_values` for a unit change), so `f_ac` below would be 0 on
+        // the new range; no reading until the new row's first result.
+        if !acdc && (self.mode, self.range) != before {
+            return None;
         }
         if acdc {
             // AC phase of AC+DC (FUN_08013734 cases 0, 2, 4..6): shown =

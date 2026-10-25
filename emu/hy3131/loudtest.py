@@ -154,6 +154,15 @@ SC = {
                        checks=[('quiet', 6, 18), ('starts', 18, 20.5, LOUD), ('loud', 19, 25.5, LOUD), ('stops', 26, 27.8),
                                ('quiet', 27.8, 30)],
                        seen=[('AJACK', '1,0,1,0')], never=[('AJACK', 6, 18)]),
+    # The same in AC+DC V on manual 600 mV (doc 4.13: V_GATE in both phases): quiet with the
+    # square; the real AC current asserts at the next "free" AC-phase result (~2.2 s).
+    'ajack-acdcmv': dict(func='VOLT:ACDC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],
+                         script=[(0, 'dmm open;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50'),
+                                 (8, 'dmm vsrc:4.776,ac=4.776,f=40,shape=square'),
+                                 (18, 'dmm vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60'), (26, 'dmm isrc:none')],
+                         checks=[('quiet', 6, 18), ('starts', 18, 21.5, LOUD), ('loud', 21.5, 25.5, LOUD),
+                                 ('stops', 26, 28.0), ('quiet', 28.0, 30)],
+                         never=[('AJACK', 6, 18)]),
     # The same square in AC V AUTO (mV-first, the device's case): the range walks up out of mV
     # (~2 s); quiet and no A-JACK through it.
     'ajack-acv-auto': dict(func='VOLT:AC', run_for=26, setup=['SYST:BEEP:VOL 0'],
