@@ -1614,21 +1614,59 @@ impl Graph {
         for (i, mk) in d.marks.iter().enumerate() {
             minks[i] = MarkInk::of(mk);
         }
-        // Rows of changed horizontal lines (repainted in every column).
+        // Rows of changed horizontal lines (guide / cursor lines): repainted
+        // across the graph as row runs after the columns, one LCD window per
+        // run, instead of one window per row in each of the 399 columns.
+        // A trigger-level drag step moves its guide line: report -> marker
+        // 15 ms before, 7 ms with this and the trigger badge after the graph
+        // (emu/draglat.py, emu --mips 110 = the device model).
         let mut hrows = [0i16; 2 * NL];
         let mut nh = 0;
         if !full {
             for k in 0..NL {
                 if d.h[k] != o.h[k] {
                     for l in [d.h[k], o.h[k]].into_iter().flatten() {
-                        hrows[nh] = l.fy;
-                        nh += 1;
+                        if l.fy >= 1 && l.fy <= h - 2 && !hrows[..nh].contains(&l.fy) {
+                            hrows[nh] = l.fy;
+                            nh += 1;
+                        }
                     }
                 }
             }
         }
         let marks_changed = d.marks != o.marks;
         let vl = |dd: &Deco, fx: i16| dd.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col);
+        // Colour of graph pixel (fx, fy): markers over the column (`mcol`,
+        // the topmost last), math, trace, persistence, the vertical line of
+        // the column (`vcol`), horizontal lines, grid.
+        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize]| -> Color {
+            let (sx, sy) = (13 + fx, d.top + fy);
+            for &mi in mcol.iter().rev() {
+                if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
+                    return c;
+                }
+            }
+            if fy >= ma.0 && fy <= ma.1 {
+                return d.math;
+            }
+            if fy >= tr.0 && fy <= tr.1 {
+                return d.trace;
+            }
+            if fy >= ps.0 && fy <= ps.1 {
+                return d.half;
+            }
+            if let Some(c) = vcol {
+                if (fy - 1) % 2 == 0 && fy <= h - 4 {
+                    return c;
+                }
+            }
+            for l in d.h.iter().flatten() {
+                if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
+                    return l.col;
+                }
+            }
+            if grid_on(fx, fy, cy, dh) { d.grid } else { C_FILL }
+        };
         self.px = 0;
         // Trace-only: per-column bookkeeping, from the resume column, under
         // the device's time budget (`FLUSH_BUDGET`).
@@ -1663,9 +1701,6 @@ impl Graph {
                             sp.add((mk.y - d.top, mk.y - d.top + 11));
                         }
                     }
-                }
-                for &r in &hrows[..nh] {
-                    sp.add((r, r));
                 }
                 // A hole that went away / moved: its rows come back.
                 for k in 0..NH {
@@ -1734,36 +1769,56 @@ impl Graph {
                 self.px += (b - a + 1) as u32;
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
-                    let sy = d.top + fy;
-                    let c = 'px: {
-                        for &mi in mcol[..nm].iter().rev() {
-                            if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
-                                break 'px c;
-                            }
-                        }
-                        if fy >= ma.0 && fy <= ma.1 {
-                            break 'px d.math;
-                        }
-                        if fy >= tr.0 && fy <= tr.1 {
-                            break 'px d.trace;
-                        }
-                        if fy >= ps.0 && fy <= ps.1 {
-                            break 'px d.half;
-                        }
-                        if let Some(c) = vcol {
-                            if (fy - 1) % 2 == 0 && fy <= h - 4 {
-                                break 'px c;
-                            }
-                        }
-                        for l in d.h.iter().flatten() {
-                            if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
-                                break 'px l.col;
-                            }
-                        }
-                        if grid_on(fx, fy, cy, dh) { d.grid } else { C_FILL }
-                    };
-                    lcd::data(c);
+                    lcd::data(pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm]));
                 }
+            }
+        }
+        // The changed line rows (`hrows`), left to right in runs between
+        // the holes over that row; per row, only the holes and markers
+        // that reach it are checked per pixel.
+        for &r in &hrows[..nh] {
+            let sy = d.top + r;
+            let mut cuts = [(0i16, 0i16); NH];
+            let mut ncut = 0;
+            for o in self.holes.iter().flatten().filter(|o| sy >= o.y && sy < o.y + o.h) {
+                cuts[ncut] = (o.x - 13, o.x + o.w - 14);
+                ncut += 1;
+            }
+            let mut mrow = [0usize; NGRAPH];
+            let mut nmr = 0;
+            for (k, mk) in d.marks.iter().enumerate() {
+                if mk.some() && sy >= mk.y && sy < mk.y + 12 {
+                    mrow[nmr] = k;
+                    nmr += 1;
+                }
+            }
+            let in_hole = |fx: i16| cuts[..ncut].iter().any(|&(a, b)| fx >= a && fx <= b);
+            let mut fx = 1i16;
+            while fx <= 399 {
+                if in_hole(fx) {
+                    fx += 1;
+                    continue;
+                }
+                let mut e = fx;
+                while e < 399 && !in_hole(e + 1) {
+                    e += 1;
+                }
+                self.px += (e - fx + 1) as u32;
+                lcd::set_window((13 + fx) as u16, sy as u16, (13 + e) as u16, sy as u16);
+                for x in fx..=e {
+                    let i = (x - 1) as usize;
+                    let sx = 13 + x;
+                    let mut mcol = [0usize; NGRAPH];
+                    let mut nm = 0;
+                    for &k in &mrow[..nmr] {
+                        if sx >= d.marks[k].x && sx < d.marks[k].x + 12 {
+                            mcol[nm] = k;
+                            nm += 1;
+                        }
+                    }
+                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm]));
+                }
+                fx = e + 1;
             }
         }
         self.next = 0;
@@ -1858,9 +1913,6 @@ pub fn update(m: &Model) {
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
         vdiv_badge(m);
     }
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
-        trig_badge(m);
-    }
     if d(ol.battery != m.battery || ol.charging != m.charging) {
         battery(m);
     }
@@ -1919,6 +1971,12 @@ pub fn update(m: &Model) {
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
+    // The trigger badge after the graph: a level drag step repaints both
+    // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
+    // under the finger first.
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
+        trig_badge(m);
+    }
     if m.cur_tab != 0 && d(ol.cur_tab != m.cur_tab) {
         cur_tab(m.cur_tab);
     }

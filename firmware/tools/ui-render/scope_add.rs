@@ -319,5 +319,52 @@ pub fn run(ck: &mut Checker, out: &str) {
             nw += 1;
         }
     }
-    println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes");
+    // Trigger-level drag steps (src/scope_ui.rs Graph::flush repaints the
+    // changed guide rows as row runs between the holes; the trigger badge
+    // after the graph): each step equals its fresh draw, plain and with the
+    // corner tabs, the X / Y cursor lines and the cursor tab, the FFT boxes
+    // over the guide rows, both views; rows across the holes and off screen.
+    let mut nd = 0;
+    for combined in [false, true] {
+        for v in 0..4 {
+            let step = |row: i16| {
+                let mut m = base.m;
+                m.combined = combined;
+                m.sel_v = 1;
+                m.guide = true;
+                m.trig_row = row;
+                m.trig_v = (140 - row) as f32 * 4.0 / 141.0;
+                match v {
+                    1 => m.tabs = 3,
+                    2 => {
+                        m.xcur = Some([60, 300]);
+                        m.ycur = Some([40, 200]);
+                        m.cur_tab = 1;
+                    }
+                    3 => {
+                        m.math_on = true;
+                        m.math_mode = 5;
+                        m.fft_hz = scope_ui::Txt::new("250kHz");
+                        m.fft = Some(fft_add(Some((200, 100)), 0));
+                        m.tabs = 3;
+                    }
+                    _ => {}
+                }
+                stock::Scene { name: "drag", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() }
+            };
+            let rows = [105i16, 110, 3, 15, 140, 250, 266, 272, 278, -10, 290, 40];
+            for w in rows.windows(2) {
+                let (a, b) = (step(w[0]), step(w[1]));
+                stock::draw(&b);
+                let want = emu().fb.clone();
+                stock::draw(&a);
+                stock::load(&b);
+                scope_ui::update(&b.m);
+                scope_ui::cells(&b.m, &b.cells);
+                ck.same_as(&format!("drag/{}/{v}/{}->{}", combined as u8, w[0], w[1]), &want);
+                nd += 1;
+            }
+        }
+    }
+    println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes, {nd} trigger-level drag steps");
 }
