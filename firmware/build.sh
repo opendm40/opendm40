@@ -50,6 +50,12 @@ remap() { # remap FROM-dir TO
 remap .. dm40
 remap "$RUSTUP_HOME" rustup
 remap "$CARGO_HOME" cargo
+# The registry sources must be unpacked before the remap list is made (a
+# fresh CARGO_HOME, e.g. in CI, has none yet): cargo fetch, with the
+# lock-file flags of this build so a stale Cargo.lock still fails --locked.
+FETCH=
+for a in "$@"; do case $a in --locked|--frozen|--offline) FETCH="$FETCH $a" ;; esac; done
+cargo fetch -q $FETCH
 for d in "$CARGO_HOME"/registry/src/*/; do
     [ -d "$d" ] && remap "$d" crates
 done

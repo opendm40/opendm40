@@ -50,9 +50,8 @@ section named after the tag as the release notes; how to cut a release:
 - `MMEM`: a directory prefix must be the file's own directory.
 - First readings after a function change: every entry is checked; AC A too.
 - Logger: one 76.8 kS/s nominal rate; no hole in the panel at the 76.8 kS/s
-  start; AD1 period measured flag to flag.
+  start.
 - The 6 M ohm test-current label is cleared on 60 M.
-- The slow-OSR step waits 2 s after the row write.
 
 ### Docs
 
