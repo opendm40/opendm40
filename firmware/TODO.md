@@ -32,10 +32,11 @@ What waits for the owner; each line links to the material.
       `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
       manual says: a fixed range is never kept).
 - [ ] RES AUTO: include the 60 Ω range or not.
-- [ ] Repository split: confirm the list of paths moved to the private wirenboard/alientek-dm40-fw-analysis repo and
-      purged from history (stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger, stock-scope-ui,
-      native-review / native-boot-plan / native-boot-review, acdc-stock-vs-opendm40, with their old fw-rs/ names;
-      two BT MACs masked). A dry run of the rewrite is done; nothing pushed.
+- [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
+      stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
+      old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
+      history was rewritten (git-filter-repo: those paths removed; the UID, its derived block and two BT MACs
+      replaced); a rescan in every text form and in the blobs finds none. Doc hashes mapped to the new history.
 - [ ] Public release (owner 2026-10-25): the one blocker is the touch fix (screen and the four touch keys). Still
       to do at that time, not blockers: the licence of stock/patch, the vendor .bin and the datasheets in docs/;
       delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
