@@ -1872,6 +1872,26 @@ impl ChartCache {
     }
 }
 
+/// The rate chip (`chart` draws it with every chart point; App::
+/// resolution_cycle at once, before its toast: the page under a toast is
+/// not drawn until the toast goes, and the chip is outside the toast).
+/// Repainted only when what it shows changes (`RateChip::shown`).
+pub fn rate_chip(c: &mut ChartCache, rc: RateChip) {
+    if c.rchip == Some(rc.shown()) {
+        return;
+    }
+    c.rchip = Some(rc.shown());
+    // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
+    // where the rate setting changes nothing (AC, Hz, cap, temperature..).
+    let mut rb = [0u8; 16];
+    let mut b = [0u8; 24];
+    let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
+    let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
+    let r = rect(4, chart_geom().rate, 73, RATE_CHIP_H);
+    sf::rbox(r, 4, BTN, BG);
+    sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
+}
+
 /// `side` None: the right column is not touched (the power meter draws its
 /// own, `pw::side`).
 pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&Side>, unit: &'static str, rc: RateChip) {
@@ -1985,18 +2005,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         sf::rbox(r, 4, BTN, BG);
         sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
-    if c.rchip != Some(rc.shown()) {
-        c.rchip = Some(rc.shown());
-        // "MED 9.4/s" (<= 62 px of F14: "SLOW 2.3/s"); grey "n/a 2.5/s"
-        // where the rate setting changes nothing (AC, Hz, cap, temperature..).
-        let mut rb = [0u8; 16];
-        let mut b = [0u8; 24];
-        let name = if rc.applies { crate::dmm::RATE_NAMES[rc.rate as usize % 3] } else { "n/a" };
-        let txt = join(&mut b, &[name, " ", rps_text(&mut rb, rc.period_ms)]);
-        let r = rect(4, g.rate, 73, RATE_CHIP_H);
-        sf::rbox(r, 4, BTN, BG);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
-    }
+    rate_chip(c, rc);
     let Some(side) = side else { return };
     // Right column (x 405..475, the stock REL box rows 205..242 kept as the
     // tap target): MAX and AVG above the REL box, MIN and the session time
