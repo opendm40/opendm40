@@ -50,9 +50,11 @@ section named after the tag as the release notes; how to cut a release:
   FAST and MED ran a 50 ms conversion that did not reject 50 Hz
   ([manual](docs/manual/README.md#rate-fast-med-slow)).
 
-- Resistance: AUTO includes the 60 Ω range (milliohm resolution): down from
-  600 Ω below about 58.3 Ω, up above about 61.8 Ω. With the 0.28 mA test
-  current (ON) AUTO stops at 600 Ω, since 60 Ω always uses 0.90 mA.
+- Resistance: the 60 Ω range is removed (the range page, the AUTO key cycle;
+  `RES:RANG 60` and `RES:RANG MIN` select 600 Ω). It read about 2.7 % low
+  against the 600 Ω range for a reason not known, and its entry in the
+  calibration record is not a calibration. The lowest range is 600 Ω, as on
+  the stock firmware.
 - Multimeter AUTO key (voltage, current, resistance): a short press fixes
   the present range, then steps to the next higher range, wrapping from the
   highest to the lowest; held 1 s it returns to the default autorange
@@ -81,11 +83,6 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- Ohm: the 60 Ω range read ~2.7 % low (against the 600 Ω range). Its gain
-  is now the 600 Ω range's calibration times a factor measured on one meter
-  (1.0291); the 60 Ω entry of the calibration record is not a calibration
-  (the stock never uses that range). Whether other meters need the same
-  factor is unknown.
 - Touch: a read of the touch controller while its INT line is still low
   returned the cleared buffer (status 0xAB), which was taken for a press of
   the MENU key between the real frames; taps were lost and keys mixed up.

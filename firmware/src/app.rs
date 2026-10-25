@@ -3271,8 +3271,8 @@ impl App {
 
     /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
-    /// manual range the next higher one (the MF page's order, 60 mV and
-    /// 60 ohm included), the highest wrapping to the lowest. Long: the
+    /// manual range the next higher one (the MF page's order, 60 mV
+    /// included), the highest wrapping to the lowest. Long: the
     /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
     /// REL as before; AutoHold stays as it is.
     #[inline(never)]

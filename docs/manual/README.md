@@ -123,7 +123,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -287,7 +287,6 @@ scope.
 | Temperature offset | — | An offset per sensor |
 | °F | Multiplies by 1.82 instead of 1.8: at 100.3 °C it shows 214.5 °F | °F computed correctly (212.5 °F), on the screen and over Bluetooth |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
-| 60 Ω range | Not on the range page, never chosen by AUTO | Milliohm resolution; on the range page; AUTO steps into it (not with 0.28 mA ON) |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
@@ -557,26 +556,20 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
-- The 60 Ω range has milliohm resolution. AUTO steps from 600 Ω down to
-  60 Ω below about 58.3 Ω and back up above about 61.8 Ω (the stock
-  autorange factors applied to one more range; the stock firmware never
-  selects this range). With 0.28 mA ON, AUTO stops at
-  600 Ω, because 60 Ω always uses 0.90 mA; choose 60 Ω on the range page
-  to use it anyway.
+- Ranges: 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ, as the stock firmware.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
-  tag. The 60 Ω range always uses 0.90 mA.
+  tag.
 - Top left, small: the test current of the selected range, for example
   **I 197 uA** on 6 kΩ. It is the short-circuit current, the most the range
   drives through the leads; with a resistor between them it is less. On
   60 MΩ nothing is shown (not measured yet).
 
-  | Range | 60 Ω | 600 Ω | 6 kΩ | 60 kΩ | 600 kΩ | 6 MΩ | 60 MΩ |
-  |---|---|---|---|---|---|---|---|
-  | 0.90 mA | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
-  | 0.28 mA ON | 0.90 mA | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
+  | Range | 600 Ω | 6 kΩ | 60 kΩ | 600 kΩ | 6 MΩ | 60 MΩ |
+  |---|---|---|---|---|---|---|
+  | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
+  | 0.28 mA ON | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
   Short-circuit currents measured on one unit with `DBG:SRC`, jacks
   shorted ([device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
@@ -777,7 +770,7 @@ last offset it measured on another range, so a reading in those first 2 s
 can be a little off. A FAST reading is a little noisier than a MED one
 (more low-frequency noise); for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
+In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 12.8 s). After a step of the input or a range change the average restarts,
 so a change shows at once.
 

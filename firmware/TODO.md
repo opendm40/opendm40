@@ -68,6 +68,8 @@ What waits for the owner; each line links to the material.
       4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
       failed 1 of 4. The cause is unknown (inferred: the scenario is the run's last, where its scheduled input
       changes drift against the firmware's uptime, the file's own note on `later`).
+      With the 60 Ω range removed, `r30-300-30` stays on 600 Ω (no range change) and passed in a whole run;
+      `r100k-key` failed that run (MANU on 3 polls after AUTO) and passed alone.
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
@@ -78,7 +80,7 @@ What waits for the owner; each line links to the material.
       calibrator's off state reads ~50 MΩ, not open). PASS. Open: on 60 Ω the readings were 8.88 Ω for 10 Ω and
       48.13 Ω for 50 Ω (100 Ω read 100.13, 300 Ω 302.25); whether that is the 60 Ω row's zero / the leads or the
       calibrator's low-resistance accuracy is unknown (a 4-wire reference or REL on shorted leads decides).
-- [ ] 60 Ω range gain (fix/ohm60-gain): device 2026-10-25, manual ranges, mean of 5 READ?: 10 / 20 / 50 Ω read
+- [x] Superseded by the removal of the 60 Ω range (next item). 60 Ω range gain (fix/ohm60-gain): device 2026-10-25, manual ranges, mean of 5 READ?: 10 / 20 / 50 Ω read
       0.9730 / 0.9734 / 0.9738 x the 600 Ω range. Cause: r0's calibration slot 0x124[0] is the unused 1.005 and
       the row reads 2.9 % below the stock scale (Rref 0.1 k) for a reason not known (the OP1 x10 pairs of the
       record point the other way; [dmm.rs](src/dmm.rs) `OHM_R0_K`). Fix: r0 gain = r1's calibration gain x 1.0291
@@ -87,6 +89,20 @@ What waits for the owner; each line links to the material.
       ([HY3131.cs](../emu/hy3131/HY3131.cs) `OhmR0K`), [resautotest.py](../emu/hy3131/resautotest.py) checks
       30 / 59.5 Ω on 60 Ω within 0.3 %. Device check: the calibrator's resistance output on V-COM, 10 / 20 / 50 Ω,
       manual 60 Ω and manual 600 Ω, mean of 5 READ? each: the ratio 60 / 600 within 1 +- 0.003 for each value.
+- [ ] 60 Ω range: removed 2026-10-25 (owner), work on branch feat/ohm60 (6ef35456: the range page item, RES
+      AUTO down to 60 Ω, the r1-gain x 1.0291 fix, the emulator and resautotest rows). Removed here: the range
+      page item, AUTO (floor 600 Ω again), the AUTO key cycle, `RES:RANG` 60 / MIN (now 600 Ω), `OHM_R0_K` /
+      `ohm_row_gain`; the stock's r0 row stays in [hy3131_tables.rs](src/hy3131_tables.rs) and nothing selects
+      it ([dmm.rs](src/dmm.rs) `OHM_R_MIN`, the ohm notes there). Findings to resume from:
+      - the stock V2.6 never selects r0: its range is clamped to 1..6
+        ([dmm_v2_6.h](../stock/re/analysis/dmm_v2_6.h) section 2);
+      - r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated default (inferred);
+      - on the device r0 read 2.6-2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 Ω; the ratio is
+        constant, so a gain error, not a parallel load. Ruled out: the OP1 x10 path (the record's x10 / x1
+        pairs read high, not low) and the nominal Rref / 10 (the
+        [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library) x10 ohm row);
+      - the r0 row differs from r1 in R25 0x01 (x10) and R2B 0x46 vs 0x40: PA2 DF closed, which the stock uses
+        only on the high ohm ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the calibrator.
 - [x] Touch (device 4ea9518 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
       mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
       -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),

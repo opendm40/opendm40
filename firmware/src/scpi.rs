@@ -1007,7 +1007,7 @@ pub fn range_si(mode: u8, r: i8) -> Option<f32> {
 
 /// Decimal exponent of the 60000-count step of range `v` (the 6000-count
 /// step for capacitance, `cap`): floor(log10 v) - 4 (6 V -> -4, 1000 V ->
-/// -1, 10 A -> -3, 60 ohm -> -3, 6 nF -> -12), as the readout's decimals.
+/// -1, 10 A -> -3, 600 ohm -> -2, 6 nF -> -12), as the readout's decimals.
 pub fn step_exp(v: f32, cap: bool) -> i32 {
     let mut e = -4 + cap as i32;
     let mut x = v * 1.0001;
@@ -1042,23 +1042,26 @@ pub fn pow10f(e: i32) -> f32 {
 
 /// The settable ranges, ascending (the MF page's items, Dmm::set_range
 /// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
-/// 60 ohm .. 60 Mohm.
+/// 600 ohm .. 60 Mohm (no 60 ohm: dmm.rs ohm notes; RES:RANG 60 or MIN
+/// is 600 ohm, the smallest item that holds it).
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
-        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
+        10 => &[600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
         _ => &[],
     }
 }
 
 /// The Dmm::set_range item of `range_items(func)[i]`: V 60 mV is item 5
-/// (after 600 mV .. 1000 V = 0..4); the other lists are the items in order.
+/// (after 600 mV .. 1000 V = 0..4); ohm 600 ohm is item 1 (the range
+/// index); A: the items in order.
 pub fn range_item_code(func: u8, i: usize) -> u8 {
-    if quantity(func & !ANY_CPL) == 1 {
-        if i == 0 { 5 } else { i as u8 - 1 }
-    } else {
-        i as u8
+    match quantity(func & !ANY_CPL) {
+        1 if i == 0 => 5,
+        1 => i as u8 - 1,
+        10 => i as u8 + 1,
+        _ => i as u8,
     }
 }
 

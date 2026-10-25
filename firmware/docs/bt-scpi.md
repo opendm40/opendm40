@@ -265,7 +265,7 @@ sigrok-cli -d scpi-dmm:conn=... -c digits=5 --samples 10     # RATE FAST
 |---|---|---|
 | voltage DC / AC / AC+DC / AUTO | 600mV, 6V, 60V, 600V, 1000V | 60mV (mV-first autorange) |
 | current DC / AC / AC+DC / AUTO | 600uA, 6000uA, 60mA, 600mA, 6A, 10A | |
-| resistance | 60R, 600R, 6kR, 60kR, 600kR, 6MR, 60MR | |
+| resistance | 600R, 6kR, 60kR, 600kR, 6MR, 60MR | |
 | capacitance, frequency | Auto only | 6nF .. 60mF, 60Hz .. 60MHz (when REL holds one) |
 | continuity, diode, temperature, power | none | |
 

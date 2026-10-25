@@ -1964,9 +1964,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Ohm)
             {
                 vs = OhmSourceVolts();
-                // r0 (60 ohm, never selected by the stock): its slot is not a calibration; the
-                // device reads like Rref 0.1 k x r1's gain x 1.0291 (firmware dmm.rs OHM_R0_K,
-                // measured on one unit, cause unknown).
+                // r0 (60 ohm, never selected by the stock nor by opendm40 since 2026-10-25): its
+                // slot is not a calibration; the device read like Rref 0.1 k x r1's gain x 1.0291
+                // (measured on one unit, cause unknown; firmware dmm.rs ohm notes, branch feat/ohm60).
                 rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * OhmR0K
                     : OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
                 Fe.LeadOhm = CalOffs(0x144) * 1000.0;
