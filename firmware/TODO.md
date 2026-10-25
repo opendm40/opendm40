@@ -27,6 +27,10 @@ What waits for the owner; each line links to the material.
       Done: app.rs `restore` (`same_session` = from the backup SRAM after a normal boot); emu/settingstest.py PASS.
       Device check: AC V, AutoHold on, a limit set, 10 ms/div on the scope; power off with the key and on: DC V,
       AutoHold off, no limit, the scope's defaults, the brightness kept; the same after `DBG:RESET`: all kept.
+      **Device 302b389 (2026-10-25): PASS.** AC V 60 V manual, AutoHold, upper limit 5 V, 10 ms/div; power key off /
+      on: SETTINGS,FILE, DC V, AUTO, AutoHold 0, limits off, 200 us/div, the alarm LOUD kept. The same set, then
+      `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
+      manual says: a fixed range is never kept).
 - [ ] RES AUTO: include the 60 Ω range or not.
 - [ ] Repository split: confirm the list of paths moved to the private wirenboard/alientek-dm40-fw-analysis repo and
       purged from history (stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger, stock-scope-ui,
