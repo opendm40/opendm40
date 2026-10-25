@@ -3,9 +3,9 @@ name: CI
 
 on:
   push:
-    branches: [main, rust-fw-poc]
+    branches: [main]
   pull_request:
-    branches: [main, rust-fw-poc]
+    branches: [main]
   workflow_call: # release.yml runs the same jobs before it publishes
 
 permissions:
@@ -21,8 +21,41 @@ env:
   RUST_VERSION: 1.99.0
 
 jobs:
+  # Docs-only changes (Markdown, docs/, firmware/docs/, hw/, images, data)
+  # skip the image build and the host suites; the doc and version checks
+  # always run. A release (workflow_call) always runs everything.
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case "$EVENT" in
+            push) from=$BEFORE ;;
+            pull_request) from=$BASE ;;
+            *) from= ;;
+          esac
+          if [ -z "$from" ] || ! git cat-file -e "$from^{commit}" 2>/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          other=$(git diff --name-only "$from" "$GITHUB_SHA" \
+            | grep -vE '\.(md|png|jpg|jpeg|svg|pdf|csv|txt)$|^docs/|^firmware/docs/|^hw/' || true)
+          echo "changed outside the docs: ${other:-none}"
+          if [ -n "$other" ]; then echo "code=true"; else echo "code=false"; fi >> "$GITHUB_OUTPUT"
+
   build:
     name: Build image + budget checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +93,8 @@ jobs:
 
   host-tests:
     name: Host test suites
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
