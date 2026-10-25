@@ -34,10 +34,15 @@ What waits for the owner; each line links to the material.
       - [x] Device 4d8ea4e6 (rebased): the gate change and the defaults: 1 V calibrator output, 65 s FAST: 2 used,
             0 rejected; 10 V on 60 / 600 V, FAST in the first 2 s after the range change +0.3 / +0.4 counts from MED,
             after the refresh -0.3 / +0.1.
-      - [ ] 60 mV: the refresh is still rejected on an open input (the default VOS of 600 mV stays in use):
-            why (its noise in codes, ~0.017 uV per code)?
-      - [ ] Device: VOS over a warm-up (cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
-      - [ ] Device: the wild +-X read pairs seen with polarity writes (survey §8.4): also at a fixed R22?
+      - [x] 60 mV (device 71a85c8d, open input): 2 refreshes used, 2 rejected in 60 s; the rejected ones fell on
+            the open input's wander (10 s spans of 5..76 uV), so the gate works there. On the calibrator's 0 V
+            output (~120 uV sd at that scale) no refresh starts (SIG_MAX), as intended; that VOS stays the default.
+      - [x] Device 71a85c8d, room temperature: FAST on 6 V, output off, 25 min: 53 refreshes used, 0 rejected;
+            VOS 13 239..13 257 codes (+-15 uV), per-minute reading means 108..144 uV, no wild reading.
+      - [ ] Device: VOS over a warm-up (a cold meter, ~1 h, FAST on 6 V, DBG:FAST? every minute).
+      - [x] Device 71a85c8d: the wild +-X read pairs (survey §8.4) do not occur at a fixed R22: AD1 logger 300 s
+            at 0x06 (2990 records) and at 0x16 (1493), none beyond 3000 codes but the session's first record.
+            With FAST's polarity writes (2 per 30 s) none in the 25 min run above.
       - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
