@@ -2468,8 +2468,8 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 /// three pages of at most SET_ROWS rows. Page 1: the last row "More" opens
 /// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
 /// bargraph / history row (UF-30), Help; its "More" opens page 3
-/// (SETTINGS3): the wrong-connection alerts and "Device", the stock §6
-/// Device/About page. "Back" is the tappable title bar (stock settings have
+/// (SETTINGS3): the wrong-connection alerts, "Device" (the stock §6
+/// Device/About page) and "Touch test". "Back" is the tappable title bar (stock settings have
 /// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
 /// page 2 -> page 1 -> menu), so the lists hold only settings.
 pub const SETTINGS: [&str; 9] = [
