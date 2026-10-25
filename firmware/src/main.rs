@@ -7,6 +7,7 @@ mod bt;
 mod clock;
 mod danger;
 mod dmm;
+mod fastvos;
 mod gen;
 mod gesture;
 mod msc;
@@ -735,6 +736,19 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                                 false
                             }
                         }
+                    }
+                    scpi::Dbg::Fast => {
+                        let (used, rej, vos) = app.dmm.fast_info();
+                        scpi.len = 0;
+                        put_u32(&mut scpi, used);
+                        scpi.put_bytes(b",");
+                        put_u32(&mut scpi, rej);
+                        scpi.put_bytes(b",");
+                        if vos < 0.0 {
+                            scpi.put_bytes(b"-");
+                        }
+                        put_u32(&mut scpi, (vos.abs() + 0.5) as u32);
+                        true
                     }
                     scpi::Dbg::Idle(set) => {
                         app.dbg_idle(set, now, scpi);

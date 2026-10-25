@@ -16,6 +16,7 @@
 use core::ptr::read_volatile;
 
 use crate::clock::Clock;
+use crate::fastvos::{self, Fast};
 use crate::hy3131 as hy;
 use crate::hy3131_tables::*;
 use crate::mmio::{modify32, w32};
@@ -145,15 +146,15 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         no (hum / leakage)
 //   continuity 75.5, diode 60.4, AC (AD2/RMS), cap, Hz, temp: no.
 // A single conversion has only 6..7.5 codes per extra-digit step, so the
-// extra digit comes from a moving average of the raw codes at the slow OSR
-// (R22 = 0x17, OSR 32768, the stock's steady-state setting and already the
-// slowest AD1OSR code): the mean of N codes has 1/N code granularity (N = 8:
-// 48 levels per step, N = 16: 120) and the noise drops by sqrt(N). The window
-// slides, so the reading rate stays the stock one (one reading per 400 ms
-// conversion at OSR 32768 chopped, hy3131::ad1_period_us; a window of 8 spans
-// 3.2 s, of 16 6.4 s); it restarts on a step of more than ~2 counts of the
-// 60000-count format, on any OSR / range / mode change, and is not used in
-// AC+DC. Noise floor: not measured yet.
+// extra digit comes from a moving average of the raw codes at the chopped
+// R22 of MEDIUM / SLOW (0x16 / 0x17, the FR-05 table): the mean of N codes
+// has 1/N code granularity (N = 8: 48 levels per step, N = 16: 120) and the
+// noise drops by sqrt(N) (device 2232996, 6 V row: one 0x16 conversion 20 uV
+// sd, 0x17 17 uV, still falling with averaging over 10..40 s). The window
+// slides, so there is one reading per conversion (a window of 8 spans 1.6 s
+// at 0x16, of 16 6.4 s at 0x17); it restarts on a step of more than ~2
+// counts of the 60000-count format, on any OSR / range / mode change, and is
+// not used in AC+DC.
 // Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
 // used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
 // reference / 10) that the stock never selects (its autorange clamps to r1..r6,
@@ -167,30 +168,35 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //
 // `Rate` sets how much converter time goes into one reading of the AD1 (DC)
 // functions; the display smoothing on top of the readings is meter.rs
-// (`Smooth`). Conversion periods from the datasheet formula
-// (hy3131::ad1_period_us, OSR * 30 / SYSCLK, x2 with the chopper the stock
-// rows always set; emu/hy3131/RESEARCH.md 3): OSR 8192 (0x15) 100 ms, OSR
-// 32768 (0x17) 400 ms. The emulator models the same; on the device only the
-// logger's 38/s at 0x13 (40/s by the formula) was measured so far, so `reading_period_ms` MEASURES
-// the period (SENS:RATE:PER?, the rate chip). Before 2026-10-14 this table
-// assumed ~107 ms at OSR 32768 ("~9.4/s"): every time below was 4x too short.
-//   rate    AD1 OSR (in range)        code window (step reset ~2 counts)   readings
-//   FAST    8192 (0x15) always         none                                 10/s (one per conversion)
-//   MEDIUM  stock: 0x15 while moving,  V r0..r2 / mV r1: 8 (3.2 s),         10/s moving, 2.5/s steady
-//   (dflt)  0x17 (32768) once stable   ohm r0..r3: 16 (6.4 s), others none  (stock)
-//   SLOW    as MEDIUM                  16 every range (6.4 s; ohm r0..r3:    as MEDIUM (one per conversion):
-//                                      32, 12.8 s)                          10/s moving, 2.5/s steady
-// SLOW differs from MEDIUM only by the longer window (lower noise, slower to
-// settle); it reports every conversion like MEDIUM, so READ? (SCPI_QUICK_MS
-// 850 ms) always gets a fresh reading. (Until 2026-10-14 SLOW reported one
-// reading per 4 conversions, sized for the old ~107 ms guess: 0.625/s at the
-// real 400 ms.)
+// (`Smooth`). Conversion periods: OSR * 30 / SYSCLK, x2 with the chopper
+// (hy3131::ad1_period_us; device 2232996: 100.0 / 200.8 / 400.8 ms for
+// 0x06 / 0x16 / 0x17, firmware/docs/device-check-2026-10-21.md "AD1 OSR
+// characterization"). Each code's sinc^2 window is a whole number of 50 and
+// 60 Hz periods (100 ms, 200 ms at 0x17), so every rate nulls both mains
+// frequencies; the stock's moving-input OSR 8192 (0x15, a 50 ms window) did
+// not null 50 Hz and is gone from the DC rows (dmm-rate-filter-survey.md
+// sections 0, 8). DC V / mV / A run at the rate's R22 from the row on (`write_config`:
+// written in the row, no R22 write after it, so R22_DROP does not apply).
+//   rate    DC V / mV / A AD1 R22          ohm in range   code window (step reset ~2 counts)    readings
+//   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
+//           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
+//   MEDIUM  0x16 OSR 16384 chopped          0x16           V r0..r2 / mV r1: 8 (1.6 s),          5/s
+//   (dflt)                                                 ohm r0..r3: 16 (3.2 s), others none
+//   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
+//                                                          32, 12.8 s)
+// Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
+// R22_DROP_WIN_MS of the row write. FAST in ohm is MED without the window
+// (an unchopped ohm would need an offset per range of the autorange: not
+// done). Before 2026-10-25 FAST was 0x15 and MEDIUM / SLOW ran the stock's
+// 0x15 while moving / 0x17 once stable (10/s -> 2.5/s), which left 50 Hz
+// unrejected exactly on inputs with AC content.
 // The +1 digit (`Val::ext`, ext-capable ranges of the table above) is shown
-// only while the window holds at least AVG_FULL slow (OSR 32768) conversions:
-// never in FAST (one OSR-8192 conversion has ~2x the noise of one at 32768),
-// in MEDIUM / SLOW from the 8th conversion after a step / range change, i.e.
-// ~3.2 s at 400 ms plus the moving-OSR conversions before the switch (before
-// opendm40 2026-10-13 the digit was drawn from the first conversion on).
+// only while the window holds at least AVG_FULL conversions at the rate's
+// R22: never in FAST (one unchopped conversion has ~1.6x the noise of one at
+// 0x16, and its low-frequency noise does not average down), in MEDIUM /
+// SLOW from the 8th conversion after a step / range change (1.6 s at MED,
+// 3.2 s at SLOW; before opendm40 2026-10-13 the digit was drawn from the
+// first conversion on).
 // Applies to DC V, DC mV, DC A / mA / uA and ohm, not in AC+DC (the DC phase
 // stays at the row's OSR 8192, ACDC_STOCK_OSR; its own phase logic). Not applicable (stock timing in every rate):
 // AC (AD2 / RMS converter, its filter is the RMS EMA), capacitance and
@@ -217,8 +223,11 @@ impl Rate {
     }
 }
 
-/// AD1OSR codes: the stock steady (32768) and moving (8192) settings.
+/// R22 of SLOW (OSR 32768 chopped, 400 ms) and of MEDIUM (OSR 16384
+/// chopped, 200 ms) in DC V / mV / A (FAST: fastvos::R22_FAST); ohm's
+/// in-range OSR at SLOW / at MEDIUM and FAST (`steady_osr`).
 const OSR_SLOW: u8 = 0x17;
+const R22_MED: u8 = 0x16;
 /// DMM rail (PE2) up -> the row is written this much later (`set_suspended`).
 /// The stock waits 10 ms after raising PE2 before it drops PC4 and sets the
 /// DMM up (FUN_0800b384); a wake that left PC4 on wrote the row at once,
@@ -230,7 +239,9 @@ const WD_CHECK_MS: u64 = 2_000;
 const WD_IDLE_MS: u64 = 10_000;
 /// Row index of R2A (the first of the 8 read-back bytes R2A..R31).
 const CHK_AT: usize = 10;
-const OSR_FAST: u8 = 0x15;
+/// Ohm's in-range OSR within R22_DROP_WIN_MS of the row write (R22_LATE:
+/// OSR 8192 chopped, 100 ms), the row's own R22.
+const OSR_EARLY: u8 = 0x15;
 
 /// UF-21: text for the UI when the mV-first AUTO is selected for V
 /// (`Dmm::mv_auto_warn`).
@@ -1085,6 +1096,9 @@ pub struct Dmm {
     diag_ctr: u8,
     /// FR-05 conversion rate (persisted).
     rate: Rate,
+    /// FAST in DC V / mV / A: the unchopped AD1's offset (fastvos.rs; in
+    /// SRAM, `fast_static`).
+    fast: &'static mut Fast,
     /// Time of `poll` (ms), for the interval measurements below.
     t_poll: u64,
     /// Last reading / last AD1 conversion (ms; None: the next interval spans
@@ -1368,8 +1382,8 @@ const VET_FLOOR: i32 = 4000;
 // - R22_LATE (`r22_early`): the step to the slow OSR (0x17) of MED / SLOW
 //   waits until R22_DROP_WIN_MS after the row write, so it no longer drops two
 //   400 ms conversions (CONF -> READ? DC V at MED: 1.5-1.8 s on 4284642). Until
-//   then the readings come at OSR_FAST (100 ms, unaveraged); ohm's in-range
-//   OSR is OSR_FAST in the window (two 100 ms conversions dropped), the steady
+//   then the readings come at OSR_EARLY (100 ms, unaveraged); ohm's in-range
+//   OSR is OSR_EARLY in the window (two 100 ms conversions dropped), the steady
 //   one after it. That a step after the window is clean is INFERRED from the
 //   device's input steps later in a function (osrstep.py, v0.1-pre1).
 const OVER_TWICE: bool = true;
@@ -1662,6 +1676,7 @@ impl Dmm {
             diag_t: 0,
             diag_ctr: 0,
             rate: Rate::Medium,
+            fast: fastvos::fast_static(),
             t_poll: 0,
             t_rd: None,
             period_ms: 0.0,
@@ -1803,6 +1818,18 @@ impl Dmm {
         avg_cfg(rate, self.acdc, self.mode, self.range).map_or((1, false), |(n, _, ext)| (n, ext))
     }
 
+    /// AD1 conversion period of `rate` in the current function, ms (FR-05
+    /// table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm FAST and MED
+    /// 200, SLOW 400).
+    pub fn rate_period_ms(&self, rate: Rate) -> u32 {
+        let dc = matches!(self.mode, 1 | 3 | 7..=9);
+        match rate {
+            Rate::Fast if dc => 100,
+            Rate::Slow => 400,
+            _ => 200,
+        }
+    }
+
     /// The rate setting changes something in the current function (DC V /
     /// mV / A, ohm; not AC+DC): the UI can grey the row out otherwise.
     pub fn rate_applies(&self) -> bool {
@@ -1816,9 +1843,69 @@ impl Dmm {
         self.period_ms as u32
     }
 
-    /// Steady AD1OSR of the rate (in range, not moving).
+    /// The AD1 R22 of the rate: DC V / mV / A (`dc_r22`), ohm in range.
     fn steady_osr(&self) -> u8 {
-        if self.rate == Rate::Fast { OSR_FAST } else { OSR_SLOW }
+        if self.dc_rated() {
+            self.dc_r22()
+        } else if self.rate == Rate::Slow {
+            OSR_SLOW
+        } else {
+            R22_MED
+        }
+    }
+
+    /// DC V / mV / A outside AC+DC: the rate's R22 goes out in the row
+    /// (`write_config`), so no R22 write follows a row write (R22_DROP).
+    fn dc_rated(&self) -> bool {
+        !self.acdc && matches!(self.mode, 1 | 3 | 7..=9)
+    }
+
+    /// The rate's R22 in DC V / mV / A (the FR-05 table).
+    fn dc_r22(&self) -> u8 {
+        match self.rate {
+            Rate::Fast => fastvos::R22_FAST,
+            Rate::Medium => R22_MED,
+            Rate::Slow => OSR_SLOW,
+        }
+    }
+
+    /// DC V / mV / A: a rate changed since the row (`set_rate`) is written
+    /// after the next conversion (an OSR change restarts AD1).
+    fn dc_rate_osr(&mut self) {
+        let want = self.dc_r22();
+        if self.r22 != want {
+            hy::write(0x22, &[want]);
+            self.r22 = want;
+            self.avg_skip = true;
+            self.r22_dropping();
+            if let (fastvos::R22_FAST, Some(k)) = (want, Fast::path(self.mode, self.range)) {
+                self.fast.start(k, self.t_poll);
+            }
+        }
+    }
+
+    /// FAST (R22_FAST) in DC V / mV / A: the conversion with the converter
+    /// offset and the unchopped gain taken out (fastvos.rs), and the
+    /// refresh's AD1CHOP switches; None: a conversion mixed by one. Else
+    /// the code as it is.
+    fn fast_code(&mut self, ad1: i32) -> Option<i32> {
+        if self.r22 != fastvos::R22_FAST || !self.dc_rated() {
+            return Some(ad1);
+        }
+        let (o, w) = self.fast.conv(ad1, self.t_poll, fastvos::THR);
+        if let Some(r) = w {
+            hy::write(0x22, &[r]);
+        }
+        match o {
+            fastvos::Out::Drop => None,
+            fastvos::Out::Code(c) => Some((c + if c < 0.0 { -0.5 } else { 0.5 }) as i32),
+        }
+    }
+
+    /// FAST's offset refreshes this session: (used, rejected, VOS in codes
+    /// on the current path) (DBG:DMM:FAST?).
+    pub fn fast_info(&self) -> (u32, u32, f32) {
+        (self.fast.used, self.fast.rejected, self.fast.vos())
     }
     fn factor(&self) -> f32 {
         FACTOR[COUNTS_MODEL as usize]
@@ -1928,6 +2015,11 @@ impl Dmm {
         } else {
             sentinel::probe_row(&row)
         };
+        // FR-05: DC V / mV / A at the rate's R22 from the row on.
+        let mut row = row;
+        if self.dc_rated() && !am && src_row.is_none() {
+            row[2] = self.dc_r22();
+        }
         self.jwin = 0;
         if sentinel::ad1_last(kind, &row) || ((self.probe || am) && row[3] & 0x80 != 0) {
             let mut c = row;
@@ -1947,6 +2039,9 @@ impl Dmm {
         }
         self.freq.fresh = ctr;
         self.r22 = row[2];
+        if let (true, Some(k)) = (self.r22 == fastvos::R22_FAST && self.dc_rated(), Fast::path(m, self.range)) {
+            self.fast.start(k, clk.now_ms());
+        }
         self.r29 = row[9];
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
         if self.tr.on != 0 {
@@ -3627,17 +3722,11 @@ impl Dmm {
         Some(hy::s24(&b))
     }
 
-    /// AD1 OSR switching: stable -> 0x17 (32768, written once), else `fast`.
-    /// `rated` (DC V / A): the FR-05 rate applies; FAST then keeps OSR 8192.
-    fn osr(&mut self, ad1: i32, thr: i32, fast: u8, rated: bool) {
+    /// AD1 OSR switching of continuity: stable -> 0x17 (32768, written
+    /// once), else `fast`.
+    fn osr(&mut self, ad1: i32, thr: i32, fast: u8) {
         let was = self.r22;
-        if rated && self.rate == Rate::Fast {
-            if self.r22 != OSR_FAST {
-                hy::write(0x22, &[OSR_FAST]);
-                self.r22 = OSR_FAST;
-                self.avg_skip = true;
-            }
-        } else if (ad1 - self.prev_ad1).abs() <= thr {
+        if (ad1 - self.prev_ad1).abs() <= thr {
             // Not within R22_DROP_WIN_MS of the row write (R22_LATE): the
             // fast OSR goes on until then, no conversions dropped.
             if self.r22 != OSR_SLOW && !self.r22_early() {
@@ -3748,6 +3837,7 @@ impl Dmm {
         if self.r22_drop_one() {
             return None;
         }
+        let ad1 = self.fast_code(ad1)?;
         // This conversion ran at the steady OSR of the rate (and not the first
         // one after the switch, which `osr` flags for the next reading).
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
@@ -3759,8 +3849,7 @@ impl Dmm {
         // AC+DC: the OSR stays as write_config left it (ACDC_STOCK_OSR).
         let acdc = self.acdc;
         if !acdc {
-            let thr = if m == 1 { 0x206 } else { 0xE22 - 0x960 * r as i32 };
-            self.osr(ad1, thr, 0x15, true);
+            self.dc_rate_osr();
         }
         // After a range change: a conversion that does not agree with the
         // one before is held (VET_*; AC+DC: dc_out keeps the phase count).
@@ -3929,11 +4018,12 @@ impl Dmm {
         if self.r22_drop_one() {
             return None;
         }
+        let ad1 = self.fast_code(ad1)?;
         // As in poll_dcv: a conversion at the steady OSR may join the window.
         let slow = self.r22 == self.steady_osr() && !self.avg_skip;
         self.avg_skip = false;
         if !self.acdc {
-            self.osr(ad1, 0x168, 0x15, true);
+            self.dc_rate_osr();
         }
         // After a range change (VET_*); the OVERLOAD check below still sees
         // every conversion.
@@ -4488,11 +4578,11 @@ impl Dmm {
                 hy::write(0x22, &[0x13]);
                 self.r22_dropping();
             }
-        } else if r22 != steady && !(r22 == OSR_FAST && self.r22_early()) {
+        } else if r22 != steady && !(r22 == OSR_EARLY && self.r22_early()) {
             // Within R22_DROP_WIN_MS of the row write the in-range OSR is
-            // OSR_FAST (two dropped conversions of 100 ms, not of 400 ms at
+            // OSR_EARLY (two dropped conversions of 100 ms, not of 400 ms at
             // MED / SLOW); the steady one after it (R22_LATE).
-            let steady = if self.r22_early() { OSR_FAST } else { steady };
+            let steady = if self.r22_early() { OSR_EARLY } else { steady };
             hy::write(0x22, &[steady]);
             self.deadline = now + 150;
             self.avg_skip = true;
@@ -4569,7 +4659,7 @@ impl Dmm {
 
     fn poll_cont(&mut self) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        self.osr(ad1, 0x206, 0x14, false);
+        self.osr(ad1, 0x206, 0x14);
         // Negative results (a source, a diode the wrong way or a charged
         // capacitor on the jacks) clamp to 0 as the stock (dmm_v2_6.h m+0x18:
         // only its raw mode skips the clamp); emulator cross table.
@@ -5600,15 +5690,19 @@ mod tests {
     #[test]
     fn fr05_conversion_periods() {
         // The FR-05 table's times (datasheet: OSR * 30 / SYSCLK, x2 chopped).
-        assert_eq!(hy::ad1_period_us_r22(OSR_FAST), 100_000);
+        assert_eq!(hy::ad1_period_us_r22(OSR_EARLY), 100_000);
+        assert_eq!(hy::ad1_period_us_r22(crate::fastvos::R22_FAST), 100_000);
+        assert_eq!(hy::ad1_period_us_r22(crate::fastvos::R22_FAST_B), 100_000);
+        assert_eq!(hy::ad1_period_us_r22(R22_MED), 200_000);
         assert_eq!(hy::ad1_period_us_r22(OSR_SLOW), 400_000);
-        assert_eq!(AVG_FULL as u32 * hy::ad1_period_us_r22(OSR_SLOW), 3_200_000);
         // Window spans (one reading per conversion in every rate): MEDIUM
-        // V r0 8 (3.2 s), SLOW 16 (6.4 s), SLOW ohm r0..r3 32 (12.8 s).
-        let span = |r, m, g| avg_cfg(r, false, m, g).unwrap().0 as u32 * hy::ad1_period_us_r22(OSR_SLOW);
-        assert_eq!(span(Rate::Medium, 1, 0), 3_200_000);
-        assert_eq!(span(Rate::Slow, 1, 0), 6_400_000);
-        assert_eq!(span(Rate::Slow, 10, 3), 12_800_000);
+        // V r0 8 (1.6 s), ohm r1 16 (3.2 s); SLOW 16 (6.4 s), SLOW ohm r0..r3
+        // 32 (12.8 s).
+        let span = |r, m, g, r22| avg_cfg(r, false, m, g).unwrap().0 as u32 * hy::ad1_period_us_r22(r22);
+        assert_eq!(span(Rate::Medium, 1, 0, R22_MED), 1_600_000);
+        assert_eq!(span(Rate::Medium, 10, 1, R22_MED), 3_200_000);
+        assert_eq!(span(Rate::Slow, 1, 0, OSR_SLOW), 6_400_000);
+        assert_eq!(span(Rate::Slow, 10, 3, OSR_SLOW), 12_800_000);
     }
 
     #[test]

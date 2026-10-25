@@ -1103,15 +1103,18 @@ impl App {
         put(dmm::RATE_NAMES[r as usize]);
         put(if ext { " 600000 counts" } else { " 60000 counts" });
         let mut t = [0u8; 16];
-        if r == dmm::Rate::Fast {
-            put(" / 10/s");
-        } else if n > 1 {
+        let p = self.dmm.rate_period_ms(r);
+        if n > 1 {
             // Averaging window (s).
             put(" / ");
-            put(dmm::format(&mut t, n as f32 * 0.4, 1));
+            put(dmm::format(&mut t, (n as u32 * p) as f32 / 1000.0, 1));
             put(" s");
         } else {
-            put(" / 2.5/s");
+            put(match p {
+                100 => " / 10/s",
+                200 => " / 5/s",
+                _ => " / 2.5/s",
+            });
         }
         let s = core::str::from_utf8(&b[..k]).unwrap_or("");
         self.toast(now, s, true);
