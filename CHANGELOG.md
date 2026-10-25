@@ -48,6 +48,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Side keys: a key pressed right after another one (within ~40 ms of its
+  release, or with the release report lost) acted as the earlier key, and
+  RUN's release was then never seen, so AutoHold turned on by itself 1 s
+  later (AUTO after RUN gave HOLD and A-HOLD). Each key now reports its own
+  release and press.
 - Bluetooth: the module's start-up banner and its own text no longer reach
   the SCPI parser as commands; a host's first command right after the
   module starts is answered.
