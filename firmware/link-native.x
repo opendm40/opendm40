@@ -119,9 +119,13 @@ SECTIONS
         *(.text.*8opendm405vdisk*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
-        /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV?) and main.rs dbg_dcv: in
-         * region B since region C audit #1 (relocated, 3.8 KB, while B had
-         * ~80 KB free; on-demand DBG replies, zero-wait is no cost). */
+        /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter and
+         * dcv_row) and main.rs dbg_dcv (below): back in C since region B
+         * audit #4 (2026-10-25, B at 15 KB free; they were in B from region
+         * C audit #1, 263fcab, while B had ~80 KB free). DBG replies, and
+         * dc_enter runs in Logger::start before the stream ISR takes the
+         * bus (wavetest / dcvtest's region C hooks and data watch). */
+        *(.text.*8opendm406ad2exp*);
         *(.text.*8opendm409scope_csv*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
@@ -196,6 +200,7 @@ SECTIONS
         *(.rodata.*8opendm405vdisk*);
         *(.rodata.*8opendm406upload*);
         *(.rodata.*8opendm405hyspi*);
+        *(.rodata.*8opendm406ad2exp*);
         *(.rodata.*8opendm409scope_csv*);
         *(.rodata.*8opendm404boot*);
         *(.rodata.*8opendm403app9app_press*);
@@ -260,6 +265,7 @@ SECTIONS
         *(.text.*8opendm404scpi6pow10f*);
         *(.text.*8opendm404scpi6n7_arg*);
         *(.text.*8opendm406dbg_n7*);
+        *(.text.*8opendm407dbg_dcv*);
         *(.text.*8opendm405touch8log_text*);
         *(.text.*8opendm4010touch_diag*);
         *(.text.*8opendm406csvlog6delete*);
