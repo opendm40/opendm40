@@ -94,7 +94,7 @@ Options (`tools/reload.sh --help`): `--no-build`, `--image FILE`, `--wait S`,
 **First install** (the meter runs stock): `tools/reload.sh --from-stock`
 stages the file on the stock "USB Connect" disk and tells you to press
 "update" or power-cycle, then waits up to 300 s for opendm40. By hand:
-[README.md, Install](../../README.md#install).
+[the manual, Install](../../docs/manual/README.md#install).
 
 **Back to stock** from a running opendm40: `tools/reload.sh --stock FILE`
 with the official [`../stock/vendor/dm40_v_2_6.bin`](../../stock/vendor/dm40_v_2_6.bin)
@@ -103,7 +103,7 @@ Bluetooth memrw, built by [`../stock/patch/kit/mkkit.sh`](../../stock/patch/kit/
 Same flow, no wait (stock does not enumerate `1209:D040`).
 
 **Recovery** (opendm40 hangs or does not start):
-[README.md, Recovery](../../README.md#recovery). `INFO/FIRMWARE.BIN` on the
+[the manual, Reach the update loader](../../docs/manual/README.md#reach-the-update-loader). `INFO/FIRMWARE.BIN` on the
 USB volume (the running image) or `opendm40.bin` both work as the image.
 
 **Tests**: host suites `tools/*/run.sh`, the emulator
