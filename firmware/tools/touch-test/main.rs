@@ -1206,6 +1206,71 @@ fn hwtrig_tests(ck: &mut Ck) {
     ck.t("hwtrig: resume does not enable a disabled engine", !h.enabled());
 }
 
+/// The wave view's V/div steps (scope::WAVE_STEPS_V / _A, the pinch on
+/// them): against dmm::ad2_scale_of's ranges (nominal, no calibration).
+fn wave_step_tests(ck: &mut Ck) {
+    // (DMM mode, range) of each MF item: V 600 mV (AC mV r1), 6..1000 V
+    // (AC V r0..3), 60 mV (AC mV r0); A 600 / 6000 uA, 60 / 600 mA, 6 / 10 A.
+    let row = |amps: bool, item: u8| -> (u8, i8) {
+        if amps {
+            [(6, 0), (6, 1), (5, 0), (5, 1), (4, 0), (4, 1)][item as usize]
+        } else {
+            [(2, 1), (0, 0), (0, 1), (0, 2), (0, 3), (2, 0)][item as usize]
+        }
+    };
+    for amps in [false, true] {
+        let st = scope::wave_steps(amps);
+        let u = if amps { "A" } else { "V" };
+        let asc = st.windows(2).all(|w| w[0].0 < w[1].0);
+        ck.t(&format!("wave steps {u}: ascending"), asc);
+        // Every range of the function has exactly one full-scale step:
+        // V/div = full / 4 (+-full on the 8 divisions), its own item.
+        let items: &[u8] = if amps { &[0, 1, 2, 3, 4, 5] } else { &[5, 0, 1, 2, 3, 4] };
+        for &it in items {
+            let (m, r) = row(amps, it);
+            let a = dmm::ad2_scale_of(m, r).unwrap();
+            ck.t(&format!("wave {u} item {it}: ad2_scale_of item"), a.item == it);
+            let f = st.iter().filter(|s| s.1 == it && s.2).count();
+            let ok = f == 1 && scope::wave_full_step(amps, it).is_some_and(|i| (st[i].0 * 4.0 - a.full).abs() < a.full * 1e-4);
+            ck.t(&format!("wave {u} item {it}: one full-scale step = full / 4 ({})", a.full), ok);
+        }
+        // Each other step on the lowest range whose AD2 window holds its
+        // +-4 div with 20 % to spare.
+        for s in st.iter().filter(|s| !s.2) {
+            let win = |it: u8| {
+                let (m, r) = row(amps, it);
+                let a = dmm::ad2_scale_of(m, r).unwrap();
+                a.per_code * 262_144.0
+            };
+            let fits = |it: u8| 4.0 * s.0 <= 0.8 * win(it);
+            let lowest = items.iter().copied().find(|&it| fits(it));
+            ck.t(&format!("wave {u} step {}: on the lowest range that holds it (item {}, want {:?})", s.0, s.1, lowest), lowest == Some(s.1));
+        }
+        // The pinch: no move at r 1, one way only, a step once reached.
+        let n = st.len();
+        let mut ok = true;
+        for i0 in 0..n {
+            ok &= scope::wave_pinch_step(amps, i0, 1.0) == i0;
+            for k in 1..40 {
+                let r = 1.0 + k as f32 * 0.1;
+                let zi = scope::wave_pinch_step(amps, i0, r);
+                let zo = scope::wave_pinch_step(amps, i0, 1.0 / r);
+                ok &= zi <= i0 && zo >= i0 && st[zi].0 >= st[i0].0 / r * 0.999 && st[zo].0 <= st[i0].0 * r * 1.001;
+                // the next step past it was not yet reached
+                ok &= zi == 0 || st[zi - 1].0 < st[i0].0 / r * 0.999;
+                ok &= zo + 1 == n || st[zo + 1].0 > st[i0].0 * r * 1.001;
+            }
+        }
+        ck.t(&format!("wave {u}: pinch steps"), ok);
+    }
+    // The fractional labels.
+    for (v, a, want) in [(1.5f32, false, "1.5V"), (0.15, false, "150mV"), (2.5, true, "2.5A"), (1.5e-3, true, "1.5mA"), (250.0, false, "250V"), (0.015, false, "15mV"), (2.0, false, "2V"), (150e-6, true, "150uA")] {
+        let mut b = scope_ui::Buf::new();
+        scope_ui::fmt_div(&mut b, v, if a { "A" } else { "V" });
+        ck.t(&format!("fmt_div {v} = {want} ({})", b.as_str()), b.as_str() == want);
+    }
+}
+
 fn main() {
     let verbose = std::env::args().any(|a| a == "-v");
     let mut ck = Ck { cases: 0, fails: 0, verbose };
@@ -1216,6 +1281,7 @@ fn main() {
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
+    wave_step_tests(&mut ck);
     println!("cases {}, failures {}", ck.cases, ck.fails);
     std::process::exit(if ck.fails == 0 { 0 } else { 1 });
 }

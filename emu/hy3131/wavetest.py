@@ -9,7 +9,8 @@ DBG:TAP) and checked over SCPI on one USB/IP connection.
 Input: --dmm (default a 1 V rms 50 Hz sine on V/COM; the DMM model's AD2
 path is AC-coupled in AC V like the meter). Checks:
   * MF -> "Wave" from AC V: the AC V row, the stream ISR runs (DBG:ISR?
-    active), CHAN1:SCAL? = the DMM range's V/div;
+    active), CHAN1:SCAL? = the DMM range's full-scale step (1.5 V/div on
+    6 V: +-6 V on the 8 divisions, scope::WAVE_STEPS_V);
   * per timebase 5 ms .. 100 ms/div (4 rate bands: 9600 / 4800 / 2400 S/s):
     SCOP:MEAS:FREQ? 50 Hz, VRMS? 1.0 V, VPP? 2.83 V (+-3 %), the rate
     restarts on a band change;
@@ -20,7 +21,10 @@ path is AC-coupled in AC V like the meter). Checks:
   * trigger: NORM at +0.5 V rising: WAV:DATA? frames cross the level at the
     trigger column (200) rising, the same on two frames; falling too;
   * roll 500 ms/div (WAV:DATA? fills from the right), 5 s/div;
-  * V/div + (panel B3): the next DMM range, the trace the same in volts;
+  * V/div + / - (panel B3 / B1) through the step list: 1.5 -> 2 V/div
+    on the 6 V range (screen only: CONF? the same), 5 V/div on 60 V, the
+    trace the same in volts, down to 200 mV/div on 600 mV; AUTO: back to
+    the range's full-scale step;
   * MENU: the view closes, the ISR stops, READ? = 1.0 V AC again (DMM
     resumed), no SYST:ERR?;
   * a host CONF mid-wave: the view closes (forced stop), DC V then reads ~0;
@@ -40,9 +44,9 @@ path is AC-coupled in AC V like the meter). Checks:
   * LOG:CSV ON in the wave view: refused ("Settings conflict: Wave view").
   * per step at 2 and 1 ms/div (region C hooks + the ring / late / overrun
     counters of DBG:ISR?): MMEM:CAT? x3 (device b6909d6: dropped +6813 per
-    query at 76800; csvlog.rs catalog cache), V/div + and - (the range
-    step's full repaint before the stream restarts, app_wave.rs
-    wave_rescale); the source badge exit DMM -> MCX at 2 ms/div (the close
+    query at 76800; csvlog.rs catalog cache), V/div + + - - (a screen-only
+    step with the stream on, then a range step: its full repaint before
+    the stream restarts, app_wave.rs wave_rescale); the source badge exit DMM -> MCX at 2 ms/div (the close
     held for the stream's stop, wave_badge_close; DBG:VIEW?).
 --shots DIR: PNG screenshots (DBG:LCD?) of each stage for a look.
 Exit status 0 = all passed.
@@ -63,18 +67,25 @@ ap.add_argument('--dmm', default='vsrc:0,ac=1.0,f=50', help='DMM jack input (emu
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')
 ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
-ap.add_argument('--case', choices=['volt', 'current', 'dcv'], default='volt',
+ap.add_argument('--case', choices=['volt', 'current', 'dcv', 'fullv', 'fulla'], default='volt',
                 help='current: --dmm defaults to a 10 mA DC + 40 Hz square on A-COM; the AC A row is '
                      'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A. dcv: 0.2 V DC + 1 V rms '
                      '50 Hz; MF -> Wave from DC V AUTO (DC mV, the AC mV row) clips and autoranges to 6 V '
                      '(the DC-coupled V row, feasibility E7): VAVG? = the DC part; the coupling key '
                      'switches to AC V (VAVG? ~0) and back; MENU: DC V AUTO again; the source badge enters '
-                     'again at 2 ms/div: the ring never overflows at a DC V entry')
+                     'again at 2 ms/div: the ring never overflows at a DC V entry. fullv / fulla: a sine of '
+                     '+-96.7 %% of the range (5.8 V peak on AC V 6 V, 58 mA peak on AC mA 60 mA) at the '
+                     'full-scale step (1.5 V/div, 15 mA/div) fits the 8 divisions: WAV:DATA? in volts / amps '
+                     'inside the grid and across >= 90 %% of it, VPP; a screen-only V/div - and AUTO back')
 A = ap.parse_args()
 if A.case == 'current' and A.dmm == ap.get_default('dmm'):
     A.dmm = 'isrc:0.010,ac=0.02,f=40,shape=square'
 if A.case == 'dcv' and A.dmm == ap.get_default('dmm'):
     A.dmm = 'vsrc:0.2,ac=1.0,f=50'
+if A.case == 'fullv' and A.dmm == ap.get_default('dmm'):
+    A.dmm = 'vsrc:0,ac=4.1,f=50'
+if A.case == 'fulla' and A.dmm == ap.get_default('dmm'):
+    A.dmm = 'isrc:0,ac=0.041,f=50'
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
@@ -289,7 +300,7 @@ try:
         check(e[6] == 0, 'DC V entry: the view drained the ring from the start (overwritten %d)' % e[6])
         check(q('FUNC?').strip('"').upper() == 'VOLT', 'the DMM stays in DC V (%s)' % q('FUNC?'))
         vd = f('CHAN1:SCAL?')
-        check(vd == 2.0, 'autorange on the clip: the 6 V range, 2 V/div (%g)' % vd)
+        check(vd == 1.5, 'autorange on the clip: the 6 V range, 1.5 V/div (%g)' % vd)
         q('TIM:SCAL 0.02')
         wait_ms(2500)
         fr, avg, rms = f('SCOP:MEAS:FREQ?'), f('SCOP:MEAS:VAVG?'), f('SCOP:MEAS:VRMS?')
@@ -303,7 +314,7 @@ try:
         avg = f('SCOP:MEAS:VAVG?')
         check(q('FUNC?').strip('"').upper() == 'VOLT:AC' and abs(avg) < 0.05,
               'coupling key: AC V, the mean ~0 (%s, %.4f)' % (q('FUNC?'), avg))
-        check(f('CHAN1:SCAL?') == 2.0, 'AC at the same range (%g V/div)' % f('CHAN1:SCAL?'))
+        check(f('CHAN1:SCAL?') == 1.5, 'AC at the same range (%g V/div)' % f('CHAN1:SCAL?'))
         q('DBG:TAP 447,81')  # back to DC
         wait_ms(4000)
         avg = f('SCOP:MEAS:VAVG?')
@@ -333,6 +344,62 @@ try:
         wait_ms(3000)
         check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
 
+    def full_case(amps):
+        # A fixed range: AC V 6 V / AC mA 60 mA (the AC A row, DC-coupled).
+        conf, full, u = ('CONF:CURR:AC 0.06', 0.06, 'A') if amps else ('CONF:VOLT:AC 6', 6.0, 'V')
+        q(conf)
+        wait_ms(4500)
+        print('  %s: CONF? %s READ? %s' % (conf, q('CONF?'), q('READ?')))
+        q('DBG:KEY 3')
+        wait_ms(600)
+        q('DBG:TAP 237,259')
+        wait_ms(3000)
+        check(ints(q('DBG:ISR?'))[1] == 1, 'the stream runs')
+        q('TIM:SCAL 0.01')
+        wait_ms(2500)
+        c0 = q('CONF?')
+
+        def frame():
+            pre = [float(x) for x in q('WAV:PRE?').split(',')]
+            k, z, r0 = pre[7], pre[8], pre[9]
+            v = [(c - r0) * k + z for c in wave()]
+            vd, offs = f('CHAN1:SCAL?'), f('CHAN1:OFFS?')
+            # Scope::row_of_volts: 140 + pos - 141 v / (4 V/div); the trace
+            # rows the frame draws: 0..278 (scope_ui::trace_fy).
+            rows = [140 - 141 * (x + offs) / (4 * vd) for x in v]
+            return v, rows, vd
+
+        v, rows, vd = frame()
+        peak = 4.1 * 2 ** 0.5 if not amps else 0.041 * 2 ** 0.5
+        print('  CHAN1:SCAL? %g %s/div, CONF? %s; WAV:DATA? %.4f .. %.4f %s, rows %.1f .. %.1f'
+              % (vd, u, c0, min(v), max(v), u, min(rows), max(rows)))
+        check(vd == full / 4, 'entry: the full-scale step, %g %s/div (+-%g %s on the 8 divisions)' % (full / 4, u, full, u))
+        check(near(max(v), peak, 0.03) and near(-min(v), peak, 0.03),
+              'WAV:DATA? peaks +-%.4f %s (%.4f, %.4f)' % (peak, u, max(v), min(v)))
+        check(min(rows) > 0 and max(rows) < 278, 'the +-%.1f %% sine inside the drawn rows 0..278 (%.1f .. %.1f)'
+              % (100 * peak / full, min(rows), max(rows)))
+        check(max(rows) - min(rows) > 0.9 * 278, 'and across >= 90 %% of them (%.1f rows)' % (max(rows) - min(rows)))
+        vpp = f('SCOP:MEAS:VPP?')
+        check(near(vpp, 2 * peak, 0.03), 'VPP %.4f %s = 2 x peak' % (vpp, u))
+        shot('f01-full-%s' % u)
+        # V/div - (zoom in): a screen-only step on the same range, then AUTO.
+        q('DBG:TAP 447,40')
+        wait_ms(2500)
+        v2, rows2, vd2 = frame()
+        print('  V/div -: %g %s/div, CONF? %s, rows %.1f .. %.1f' % (vd2, u, q('CONF?'), min(rows2), max(rows2)))
+        check(vd2 == (0.01 if amps else 1.0) and q('CONF?') == c0, 'V/div -: %g %s/div on the same range' % (vd2, u))
+        check(near(max(v2), peak, 0.03), 'the same signal (%.4f)' % max(v2))
+        shot('f02-step-%s' % u)
+        q('DBG:KEY 2')  # AUTO
+        wait_ms(2500)
+        print('  AUTO: %g %s/div, CONF? %s' % (f('CHAN1:SCAL?'), u, q('CONF?')))
+        check(f('CHAN1:SCAL?') == full / 4 and q('CONF?') == c0, 'AUTO: the full-scale step again')
+        isr = ints(q('DBG:ISR?'))
+        check(isr[1] == 1, 'the stream runs')
+        q('DBG:KEY 0')
+        wait_ms(2500)
+        check(ints(q('DBG:ISR?'))[1] == 0, 'MENU: the stream stopped')
+
     print('*IDN?', q('*IDN?'))
     isr0 = ints(q('DBG:ISR?'))
     check(isr0[0] == 1, 'DBG:ISR? feature = 1 (an ad2-isr build)')
@@ -341,6 +408,9 @@ try:
         raise Done
     if A.case == 'dcv':
         dcv_case()
+        raise Done
+    if A.case in ('fullv', 'fulla'):
+        full_case(A.case == 'fulla')
         raise Done
     q('CONF:VOLT:AC')
     wait_ms(4500)
@@ -363,7 +433,7 @@ try:
     check(isr[1] == 1, 'the stream ISR runs in the wave view (DBG:ISR? %s)' % isr[:4])
     check(q('FUNC?').strip('"').upper().startswith('VOLT:AC'), 'the DMM is in AC V (%s)' % q('FUNC?'))
     vd = f('CHAN1:SCAL?')
-    check(vd in (2.0, 20.0, 200.0, 500.0), 'CHAN1:SCAL? = the DMM range V/div (%g)' % vd)
+    check(vd in (0.015, 0.15, 1.5, 15.0, 150.0, 250.0), 'CHAN1:SCAL? = the DMM range full-scale step (%g)' % vd)
     print('  WAV:PRE?', q('WAV:PRE?'))
 
     for tb, name in [(0.005, '5ms'), (0.01, '10ms'), (0.02, '20ms'), (0.05, '50ms'), (0.1, '100ms')]:
@@ -435,10 +505,12 @@ try:
               '%s/div: MMEM:CAT? x3 while streaming: the view drained the ring in time (overwritten %d -> %d)'
               % (name, ia[6], ib[6]))
         c_check('%s/div: MMEM:CAT?' % name)
-        # A V/div step with the stream on (the next DMM range: the stream
-        # stops, the range changes, it starts again; the scale's full
-        # repaint must not overflow the ring of the new stream).
-        for tap, what in (('447,122', 'V/div +'), ('447,40', 'V/div -')):
+        # V/div steps with the stream on: 1.5 -> 2 V/div only rescales the
+        # screen; 2 -> 5 V/div is the next DMM range (the stream stops, the
+        # range changes, it starts again; the scale's full repaint must not
+        # overflow the ring of the new stream), and back.
+        for tap, what in (('447,122', 'V/div + (screen)'), ('447,122', 'V/div + (range)'),
+                          ('447,40', 'V/div - (range)'), ('447,40', 'V/div - (screen)')):
             c_reset()
             ia = ints(q('DBG:ISR?'))
             q('DBG:TAP %s' % tap)
@@ -516,33 +588,32 @@ try:
     q('TIM:SCAL 0.01')
     wait_ms(1500)
 
-    print('V/div + (the next DMM range)')
+    print('V/div steps (scope::WAVE_STEPS_V)')
+    V6 = '"VOLT:AC +6.000000E+00,+1.000000E-04"'
     vd0 = f('CHAN1:SCAL?')
-    q('DBG:TAP 447,122')
+    check(vd0 == 1.5 and q('CONF?') == V6, 'the 6 V range at its full-scale step, 1.5 V/div (%g)' % vd0)
+    # (tap, V/div, CONF? after it): screen-only steps keep the range.
+    seq = [('447,122', 2.0, V6), ('447,122', 5.0, '"VOLT:AC +6.000000E+01,+1.000000E-03"'),
+           ('447,40', 2.0, V6), ('447,40', 1.5, V6), ('447,40', 1.0, V6), ('447,40', 0.5, V6),
+           ('447,40', 0.2, '"VOLT:AC +6.000000E-01,+1.000000E-05"'), ('447,122', 0.5, V6)]
+    for tap, want, conf in seq:
+        q('DBG:TAP %s' % tap)
+        wait_ms(2500)
+        vd, c = f('CHAN1:SCAL?'), q('CONF?')
+        fr, rms, vpp = meas()
+        print('  %s: %g V/div, CONF? %s, FREQ %.3f VRMS %.4f' % ('+' if tap == '447,122' else '-', vd, c, fr, rms))
+        # CONF? = the streamed row's range, not the reading from before the
+        # view (device f3aea2f: "VOLT:AC +6" on 200 mV/div).
+        check(vd == want and c == conf, 'V/div %s -> %g V/div, CONF? %s (%g, %s)'
+              % ('+' if tap == '447,122' else '-', want, conf, vd, c))
+        if want in (2.0, 5.0, 1.0):
+            check(near(rms, 1.0, 0.05) and near(fr, 50.0, 0.03), 'the same signal in volts at %g V/div' % want)
+        if want == 5.0:
+            shot('w07-range-up')
+    q('DBG:KEY 2')  # AUTO: the range's full-scale step
     wait_ms(2500)
-    vd1 = f('CHAN1:SCAL?')
-    fr, rms, vpp = meas()
-    print('  V/div %g -> %g, FREQ %.3f VRMS %.4f VPP %.4f' % (vd0, vd1, fr, rms, vpp))
-    check(vd1 > vd0, 'V/div + steps the DMM range up (%g -> %g)' % (vd0, vd1))
-    check(near(rms, 1.0, 0.05) and near(fr, 50.0, 0.03), 'the same signal in volts on the next range')
-    # CONF? = the streamed row's range, not the reading from before the view
-    # (device f3aea2f: "VOLT:AC +6" on 200 mV/div).
-    c = q('CONF?')
-    check(c == '"VOLT:AC +6.000000E+01,+1.000000E-03"', 'CONF? on 20 V/div = AC V 60 V (%s)' % c)
-    shot('w07-range-up')
-    q('DBG:TAP 447,40')
-    wait_ms(2500)
-    check(f('CHAN1:SCAL?') == vd0, 'V/div - back (%g)' % f('CHAN1:SCAL?'))
-    q('DBG:TAP 447,40')
-    wait_ms(2500)
-    c = q('CONF?')
-    check(f('CHAN1:SCAL?') == 0.2 and c == '"VOLT:AC +6.000000E-01,+1.000000E-05"',
-          'V/div - again: 200 mV/div, CONF? = AC mV 600 mV (%s)' % c)
-    q('DBG:TAP 447,122')
-    wait_ms(2500)
-    c = q('CONF?')
-    check(f('CHAN1:SCAL?') == vd0 and c == '"VOLT:AC +6.000000E+00,+1.000000E-04"',
-          'V/div + back: CONF? = AC V 6 V (%s)' % c)
+    check(f('CHAN1:SCAL?') == 1.5 and q('CONF?') == V6, 'AUTO: 1.5 V/div on the 6 V range (%g)' % f('CHAN1:SCAL?'))
+    shot('w07b-auto')
 
     print('STOP / RUN')
     q('STOP')

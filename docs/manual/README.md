@@ -1468,11 +1468,21 @@ To open it:
 
 - The badge shows **DMM** highlighted; the channel button names the
   function, for example **AC V**.
-- V/div follows the multimeter range: the range fills half the screen
-  (6 V → 2 V/div, 600 mV → 200 mV/div, 10 A → 5 A/div). **Magnifier +** /
-  **−** step the range.
-- If the multimeter was in autorange, the Wave view steps up a range when
-  the signal nears the top.
+- V/div: the view opens at the multimeter range's **full-scale step**:
+  ± the range fills the 8 divisions (6 V → 1.5 V/div, 60 V → 15 V/div,
+  600 mV → 150 mV/div, 10 A → 2.5 A/div, 60 mA → 15 mA/div). Between these
+  steps are the 1-2-5 steps; together they run from 15 mV/div (60 mV
+  range) to 250 V/div (1000 V) and from 150 µA/div to 2.5 A/div.
+- **Magnifier +** / **−** and the pinch go one step at a time. A step
+  that the current range can show only rescales the screen; the range
+  changes only when the step needs another one (for example 2 V/div →
+  5 V/div moves from the 6 V range to 60 V, a short gap in the trace). On
+  the A function, 500 mA/div → 1 A/div moves from the mA jack to the A
+  jack.
+- **AUTO** goes back to the full-scale step of the current range and
+  centres the trace.
+- If the multimeter was in autorange, the Wave view steps up a range (to
+  its full-scale step) when the signal nears the top.
 - Timebase: 1 ms/div to 50 s/div. Sample rate: 76 800/s at 1 ms/div, down
   to 1200/s from 200 ms/div. Opens at 10 ms/div the first time, then at the
   timebase you last used in it (until you switch the meter off).
@@ -1482,14 +1492,13 @@ To open it:
 - Triggers (edge, pulse, runt), measurements (in amps on the current
   paths), cursors, FFT and Save CSV work. Every sample is checked for the
   trigger, so nothing is missed between frames.
-- Auto-set is not available (**AUTO: MCX scope only**).
 - The multimeter reading is not shown while the Wave view runs; the
   multimeter's alerts and the Bluetooth phone protocol pause.
 
 
-| ![2 ms/div: one period](img/wave-2ms.png) | ![A 1.5 A current, 2 A/div](img/wave-amps.png) |
+| ![2 ms/div: one period](img/wave-2ms.png) | ![A 1.5 A current, 1.5 A/div](img/wave-amps.png) |
 |---|---|
-| 2 ms/div: one period | A 1.5 A current, 2 A/div |
+| 2 ms/div: one period | A 1.5 A current on the 6 A range, 1.5 A/div |
 
 To leave: tap the badge (back to the CHA input), press **MENU** or change
 the view.
