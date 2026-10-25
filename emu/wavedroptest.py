@@ -99,7 +99,9 @@ try:
     q('TIM:SCAL %s' % A.tb)
     wait_dev(A.settle)
     print('TIM:SCAL?', q('TIM:SCAL?'), 'ACQ:SRAT?', q('ACQ:SRAT?'), flush=True)
-    m = uc.Msc(uc.Dev('1-0')) if A.host_read else None
+    # The MSC interface of the same import (a second IMPORT of the busid is
+    # refused while this one is open: "IMPORT refused, status 1").
+    m = uc.Msc(t.d) if A.host_read else None
     lba = size = 0
     if m:
         lba, size = infovol.vol_dir(m, 'INFO')['LOADER.BIN']

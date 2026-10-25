@@ -3742,3 +3742,7 @@ Emulator (emu/):
       start (device), inside that window, so its first line was taken as a late module answer and dropped.
       Fixed: a module start (AT+RESET, a power-up, cmd 07's restart pulse) ends the quiet window; `StartText`
       already takes everything up to the end of the start-up text. btwaketest fails on f4cd2cd and passes with the fix. Device: not checked.
+- [x] emu/wavedroptest.py --host-read failed with "IMPORT refused, status 1" (also on the base build): a test
+      harness bug. It imported the USB/IP device a second time for the MSC reads while the USBTMC import was
+      open, which the server refuses. Fixed: the MSC reads use the same import (`uc.Msc(t.d)`, as
+      wavetest.py does). It passes now: 1.17 MB of INFO/LOADER.BIN read in 10 s at 1 ms/div, 0 dropped.
