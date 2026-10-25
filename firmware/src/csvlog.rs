@@ -10,7 +10,7 @@
 //! (virtual LOGS/LOG%03u.CSV on the read-only USB volume, SCPI MMEM:DATA?,
 //! tools/dlog.py) and is byte for byte what this module wrote before DLG:
 //! CRLF line ends, '.' decimal point, ASCII only:
-//!   # Alientek DM40A, opendm40 0.1, function DC V, range AUTO, started uptime 12.345 s
+//!   # Alientek DM40A, opendm40 0.1.0, function DC V, range AUTO, started uptime 12.345 s
 //!   # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 //!   time_s,value,unit,flags
 //!   0.250,1.23456,V,

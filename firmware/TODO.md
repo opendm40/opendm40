@@ -27,7 +27,7 @@ What waits for the owner; each line links to the material.
       native-review / native-boot-plan / native-boot-review, acdc-stock-vs-opendm40, with their old fw-rs/ names;
       two BT MACs masked). A dry run of the rewrite is done; nothing pushed.
 - [ ] Before the public release: the licence of stock/patch, the vendor .bin and the datasheets in docs/; delete the
-      rust-fw-poc and bt-protocol branches; cut v0.1-pre2 through CI and drop v0.1-pre1; README known issues.
+      rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1; README known issues.
 - [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
       (AC+DC mV A-JACK); DC V against a third reference.
 

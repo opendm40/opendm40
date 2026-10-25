@@ -1235,7 +1235,7 @@ INFO/UID.BIN` and of the UID field of `DBG:GENUINE?`. The same string is:
 
 - the USB iSerial (normal mode and `recovery-usb`);
 - the SCSI unit serial number, INQUIRY VPD page 0x80 (msc.rs);
-- the third field of `*IDN?`: `Alientek,DM40A,<serial>,opendm40 0.1`.
+- the third field of `*IDN?`: `Alientek,DM40A,<serial>,opendm40 0.1.0`.
   libsigrok's scpi-dmm DM40 profile (`sr_scpi_get_hw_id`: four
   comma-separated fields, the serial is only stored) shows it as
   `[S/N: ...]`; ngscopeclient (`SCPIDevice`: `%127[^,]`) as the serial.

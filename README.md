@@ -73,7 +73,7 @@ Back up first: see [Back up with opendm40](#back-up-with-opendm40). Charge the
 battery.
 
 1. Build the image ([firmware/README.md, Build](firmware/README.md#build)):
-   `firmware/dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.1.bin`
+   `firmware/dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.1.0.bin`
    (a release asset: `dm40_opendm40_v<version>[-preN].bin`).
 2. On the stock meter: Settings > Other Settings > USB Connect.
 3. Copy the file onto that USB disk, as the only `dm40*.bin` there

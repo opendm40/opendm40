@@ -70,7 +70,7 @@ alias of DBG:UPDATE and is DESTRUCTIVE (a one-way door into the vendor
 updater). It programs the 12-byte app marker at 0x08008000 to zero and resets.
 The ROM and the FS-loader then refuse to launch the app on every boot and show
 the loader's update screen with its own USB disk (28e9:028f) until a valid
-dm40*.bin is installed through it: copy one (e.g. dm40_opendm40_v0.1.bin or
+dm40*.bin is installed through it: copy one (e.g. dm40_opendm40_v0.1.0.bin or
 dm40_v_2_6.bin) onto that disk, press "update" (or power-cycle). If a
 dm40*.bin was already on the disk (copied, synced and ejected before the
 command), the loader installs it straight away. "Flash error" = the marker did
