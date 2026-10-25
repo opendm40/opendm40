@@ -975,6 +975,10 @@ pub struct Dmm {
     ohm_agreed: bool,
     /// Time of this row's write (ms; OHM_VET_MAX_MS).
     ohm_t0: u64,
+    /// Plain AC: the AC filters were reset (entry, range step); the next
+    /// used result seeds them (`f_ac`, `f_lpf`) instead of the EMA's 0.99
+    /// step from 0, which read 1 % low and took ~1 s to close.
+    ac_seed: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
@@ -1538,6 +1542,7 @@ impl Dmm {
             ohm_ok: false,
             ohm_agreed: false,
             ohm_t0: 0,
+            ac_seed: true,
             f_ac: 0.0,
             f_lpf: 0.0,
             f_dc: 0.0,
@@ -2030,6 +2035,7 @@ impl Dmm {
             self.f_ac = 0.0;
             self.f_lpf = 0.0;
             self.ac_raw = 0.0;
+            self.ac_seed = true;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -2254,6 +2260,7 @@ impl Dmm {
         self.ac_raw = 0.0;
         self.f_ac = 0.0;
         self.f_lpf = 0.0;
+        self.ac_seed = true;
         self.f_dc = 0.0;
         self.f_diode = 0.0;
         self.f_cap = 0.0;
@@ -4107,7 +4114,11 @@ impl Dmm {
         // Plain AC A after a row write: held (provisional) until two results
         // in a row agree (ACA_VET_*).
         let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
-        if !held {
+        // Plain AC after a reset: the first used result seeds the filters.
+        let first = !self.acdc && !held && core::mem::take(&mut self.ac_seed);
+        if first {
+            self.f_lpf = dcp;
+        } else if !held {
             ema(thr, a_lpf, dcp, &mut self.f_lpf);
         }
         let (unit, dec, si_k) = match m {
@@ -4130,7 +4141,7 @@ impl Dmm {
         if self.tr.on != 0 {
             self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
         }
-        let seed = acdc && was && !settling;
+        let seed = (acdc && was && !settling) || first;
         // AC+DC: every other result after the settle deadline goes through
         // the EMA (thr = the plain-AC window, a 0.25 V / 0.35 mV / 0.15 A),
         // as the stock (../docs/history/acdc-stock-vs-opendm40.md 8.2).
@@ -4211,6 +4222,12 @@ impl Dmm {
                     }
                 }
             }
+        }
+        // A plain autorange step: `set` reset the AC filters (a range step,
+        // or `reset_values` for a unit change), so `f_ac` below would be 0 on
+        // the new range; no reading until the new row's first result.
+        if !acdc && (self.mode, self.range) != before {
+            return None;
         }
         if acdc {
             // AC phase of AC+DC (FUN_08013734 cases 0, 2, 4..6): shown =
