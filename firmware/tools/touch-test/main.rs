@@ -562,11 +562,75 @@ fn raw_tests(ck: &mut Ck) {
     ck.t("plain capture: Drag, no Move", v.iter().any(|g| matches!(g, G::Drag(..))) && !v.iter().any(|g| matches!(g, G::Move(..))));
 }
 
+/// Side keys from frames through the debounce and the tracker (main.rs
+/// order: an event, else a tick, every 10 ms poll); returns the key gestures.
+fn key_run(seq: &[(u64, Option<Frame>)]) -> Vec<G> {
+    let mut d = Debounce::new();
+    let mut tr = Tracker::new();
+    let mut out = vec![];
+    for (t, f) in seq {
+        let e = match f {
+            Some(f) => d.frame(f, *t),
+            None => d.idle(*t),
+        };
+        let g = match e {
+            Some(e) => tr.event(&e, *t),
+            None => tr.tick(*t),
+        };
+        if let Some(g) = g.filter(|g| matches!(g, G::KeyDown(_) | G::KeyUp(_))) {
+            out.push(g);
+        }
+    }
+    out
+}
+
+fn key_tests(ck: &mut Ck) {
+    use G::{KeyDown as D, KeyUp as U};
+    // RUN released, AUTO pressed 20 ms later (inside the 40 ms debounce):
+    // the debounce goes from RUN straight to AUTO. Was KeyDown(1) twice and
+    // no KeyUp(1) (AUTO acted as RUN, RUN's hold timer then toggled AutoHold).
+    let mut s = vec![(1000, Some(key(1)))];
+    s.extend(idle(1010, 1150));
+    s.push((1150, Some(released())));
+    s.push((1160, None));
+    s.push((1170, Some(key(2))));
+    s.extend(idle(1180, 1300));
+    s.push((1300, Some(released())));
+    s.extend(idle(1310, 1400));
+    ck.t("keys: RUN then AUTO 20 ms after its release", key_run(&s) == [D(1), U(1), D(2), U(2)]);
+    // MENU -> MF with no release frame between (a frame lost, or a main-loop
+    // stall that read only the newer one): the lower code must not repeat.
+    let mut s = vec![(1000, Some(key(0)))];
+    s.extend(idle(1010, 1150));
+    s.push((1150, Some(key(3))));
+    s.extend(idle(1160, 1300));
+    s.push((1300, Some(released())));
+    s.extend(idle(1310, 1400));
+    ck.t("keys: MENU -> MF without a release", key_run(&s) == [D(0), U(0), D(3), U(3)]);
+    // The catch-up half comes at the next tick (<= 10 ms in main.rs).
+    let mut tr = Tracker::new();
+    let ev = |k: u8| Event { keys: k, ..Event::default() };
+    let a = tr.event(&ev(2), 0);
+    let b = tr.event(&ev(4), 100);
+    let c = tr.tick(110);
+    let d = tr.tick(120);
+    ck.t("keys: up first, down at the next tick", a == Some(D(1)) && b == Some(U(1)) && c == Some(D(2)) && d.is_none());
+    // A plain press still gives one down and one up.
+    // (Times from 1000: a key report in the first 300 ms counts as after a
+    // touch, Debounce::frame.)
+    let mut s = vec![(1000, Some(key(2))), (1010, Some(key(2)))];
+    s.extend(idle(1020, 1100));
+    s.push((1100, Some(released())));
+    s.extend(idle(1110, 1200));
+    ck.t("keys: plain AUTO press", key_run(&s) == [D(2), U(2)]);
+}
+
 fn gesture_tests(ck: &mut Ck) {
     pinch_tests(ck);
     pinch_lift_tests(ck);
     pinch_state_tests(ck);
     raw_tests(ck);
+    key_tests(ck);
     let tap = |v: &[G]| v.iter().any(|g| matches!(g, G::Tap(_)));
     ck.t("still tap", tap(&touch(&[(100, 100), (100, 101), (101, 100)], false, 0)));
     ck.t("tap point = down point", touch(&[(100, 100), (110, 104)], false, 0).last() == Some(&G::Tap(Point { x: 100, y: 100 })));
