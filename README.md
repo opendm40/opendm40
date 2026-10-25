@@ -72,9 +72,12 @@ Item by item: [firmware/docs/parity.md](firmware/docs/parity.md).
 Back up first: see [Back up with opendm40](#back-up-with-opendm40). Charge the
 battery.
 
-1. Build the image ([firmware/README.md, Build](firmware/README.md#build)):
-   `firmware/dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.1.0.bin`
-   (a release asset: `dm40_opendm40_v<version>[-preN].bin`).
+1. Download the install file from the latest
+   [release](https://github.com/wirenboard/opendm40/releases/latest):
+   `dm40_opendm40_v<version>.bin`, e.g. `dm40_opendm40_v0.2.0.bin`. Check it
+   against the release's `SHA256SUMS` if you like (`sha256sum -c SHA256SUMS`).
+   To build it yourself instead: [firmware/README.md, Build](firmware/README.md#build)
+   (the same name, in `firmware/`).
 2. On the stock meter: Settings > Other Settings > USB Connect.
 3. Copy the file onto that USB disk, as the only `dm40*.bin` there
    ([why](#recovery)). Any `dm40*.bin` name installs. Eject.
