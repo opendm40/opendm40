@@ -312,7 +312,7 @@ has no stock calibration: it is self-calibrated against AD1 at every start
   sequence (quiesce, 10 ms relay pulse, 22-byte row, settle 300-900 ms;
   [`dmm.rs`](../src/dmm.rs) `write_config`), a gap of ~0.5-1 s in the waveform.
   The DMM autorange does not run while streaming; the wave view's V/div
-  buttons step the DMM range (10.1).
+  steps change the DMM range only where a step needs another range (10.1).
 * Functions with no waveform: ohm, continuity, diode, capacitance, frequency,
   temperature. The wave view is offered for V, mV and A.
 * AC V row: the AC coupling means the trace has no DC and a 0.3 s settling
@@ -369,7 +369,8 @@ logger ring (2048 x 8 B, SPSC) --+--> LOG:DATA? (host)
    u16 = 19 bit >> 3 (10.1, deviation note), so the renderer, measurements,
    cursors, STOP / zoom, CSV and FFT run unchanged.
 4. **UI**: "Wave" on the MF range page of V / A and the source badge
-   "MCX | DMM" on the scope page open the same view; V/div steps the DMM range;
+   "MCX | DMM" on the scope page open the same view; V/div steps a list of
+   screen-only and range steps (10.1);
    the coupling key switches V between the DC and the AC row (10.1, 13.3).
 5. **Logger**: `LOG:SOURce AD1|AD2`, `LOG:SRATe`, `LOG:SCALe?`; scaling on
    the host from `LOG:PREamble?` / `LOG:SCALe?` (`tools/dm40scpi.py`).
@@ -682,17 +683,19 @@ behaviour: [docs/manual/README.md](../../docs/manual/README.md).
 | record | `scope.rs` `WaveSource` | every poll drains the ring (`logger::wave::drain`) into BUF as a continuous circular record of 10-bit codes (`trigsoft::ad2_code10`: the full AD2 window +-1.25 V / IG over 0..1023); frames are linear windows (BUF rotated so the oldest sample is at 0), so the renderer, measurements, cursors, STOP / zoom / pan, Save CSV and FFT work unchanged: the MCX record buffer and roll columns are reused (the MCX acquisition is idle). The ring is drained again between the slow parts of a scope pass (1a6c65b: 0 drops at 1 ms/div) |
 | holes | `logger::wave::dropped` = ring full + ISR misses | a hole restarts the record at the newest sample (no triggered frame spans it); roll goes on with a short gap |
 | timebases | `scope::WAVE_TB_MIN` = 15, `wave_fs_for` | 1 ms/div .. 50 s/div, the bands of 3.1; a band change restarts the stream (~1 pass). Roll from 200 ms/div as the MCX scope (per-column min / max accumulated while draining, so 50 s/div = 600 k samples needs no buffer); YT up to 1 s/div (12 000 samples at 1200 S/s). The 76 800 band needs DMA frames: with CPU frames (`DBG:AD2:DMA 0`) the view closes ("Wave: rate needs DMA frames") |
-| vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `wave_vdiv` | SI = the DMM's own LPF formula with its calibration gain / offset (3.3), the E7 self-cal for DC V; V/div = the smallest 1-2-5 step with 4 div >= the range (6 V -> 2 V/div, 600 mV -> 200 mV, 1000 V -> 500 V, 10 A -> 5 A, 60 mA -> 20 mA, 600 uA -> 200 uA). V/div + / - (panel magnifiers) step the DMM range (the MF list: V 600 mV .. 1000 V, A 600 uA .. 10 A; 600 mV is the AC mV row, DC-coupled). Pinch V off, AUTO refused (toast) |
+| vertical | `dmm::ad2_scale_of`, `scope::WaveScale`, `scope::WAVE_STEPS_V` / `_A` | SI = the DMM's own LPF formula with its calibration gain / offset (3.3), the E7 self-cal for DC V; the V/div is screen only (`WaveScale::vdiv`; the codes do not depend on it). Step list per function: one full-scale step per range, +-range on the 8 divisions = range / 4 (60 mV -> 15 mV/div, 600 mV -> 150 mV, 6 V -> 1.5 V, 60 V -> 15 V, 600 V -> 150 V, 1000 V -> 250 V; 600 uA -> 150 uA, 6 mA -> 1.5 mA, 60 mA -> 15 mA, 600 mA -> 150 mA, 6 A -> 1.5 A, 10 A -> 2.5 A) and the 1-2-5 steps between, each on the lowest range whose AD2 window (3.3) holds its +-4 div with 20 % to spare (2 V/div on 6 V, 200 mV/div on 600 mV, 20 mV/div on 60 mV); 10 A has its full-scale step only (2 A/div runs on 6 A). A step on the current range only rescales the screen (`Scope::wave_vdiv_set`: the acquisition re-arms, the trigger level stays a row); another range's step is a `WaveReq::Range` and `wave_rescale` keeps the step's V/div. V/div + / - (panel magnifiers) and the pinch (`scope::wave_pinch_step`) step the list; the entry, AUTO (centred) and the clip autorange take the range's full-scale step. 60 mV (AC / DC mV r0) is MF item 5 (`ad2_scale_of` item). The step index is derived from the V/div shown, not persisted. Edge: the trace rows are clamped to 0..278 of the 280-row model (`scope_ui::trace_fy`, stock), +-4 div are rows -1 / 281, so the outer ~1 % (top) / ~2 % (bottom) of +-full is drawn on the frame edge (the MCX page the same) |
 | coupling | the V/div badge glyph, the CH1 button / V/div badge tap | V: the coupling key switches DC (the E7 row) <-> AC (the stock AC V row, AC-coupled, ~0.5 Hz) at the same range (`WaveReq::Coupling`); A: a note that the AC A row is DC-coupled |
-| labels | `Model::{src, amps, wvdiv, ch1_txt}` | CH1 button "AC V" / "AC mA", V/div "2V" / "200uA", trigger badge and cells in A for the current rows ("Ip-p", "Irms": `scope_meas::format_unit`), CSV header "source DMM AC mA (AD2, isolated jacks)" and the value column's unit |
-| SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL?, CONF? (from the streamed row) act on the wave view (V/div = the DMM range's); the MCX-only setters close it ([docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md)) |
+| labels | `Model::{src, amps, wvdiv, ch1_txt}` | CH1 button "AC V" / "AC mA", V/div "1.5V" / "200uA" (`fmt_div`: one decimal for 1.5 / 2.5), trigger badge and cells in A for the current rows ("Ip-p", "Irms": `scope_meas::format_unit`), CSV header "source DMM AC mA (AD2, isolated jacks)" and the value column's unit |
+| SCPI | `App::scpi` | TIM:SCAL, TRIG:LEV / SLOP / SWE, RUN / STOP / SING, SCOP:MEAS:*?, WAV:DATA? / PRE?, CHAN1:SCAL?, CONF? (from the streamed row) act on the wave view (CHAN1:SCAL? = the step shown); the MCX-only setters close it ([docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md)) |
 
 Deviation from 5.2 point 3 of the study ("19 bit -> u16 >> 3"): the record
 holds 10-bit codes, as the MCX record, because the whole display /
 measurement / trigger stack is 10-bit (histogram of 1024 codes, the +-2 code
-hysteresis, `& 0x3FF` masks) and the V/div is a DMM range step, not a digital
-zoom. Cost: 1 code = 512 AD2 codes = 0.2 % of the AD2 window (e.g. 24.4 mV in
-the 6 V range, whose screen is +-8 V = 656 codes over 280 rows), so Vrms /
+hysteresis, `& 0x3FF` masks), and the V/div steps that need finer codes run
+on a lower range (`WAVE_STEPS_V` / `_A`: the screen spans >= ~1/6 of the
+range's AD2 window). Cost: 1 code = 512 AD2 codes = 0.2 % of the AD2 window
+(e.g. 24.4 mV in the 6 V range, whose full-scale step shows +-6 V = 492 codes
+over 280 rows), so Vrms /
 Vpp of a full-scale signal are good to ~0.1-0.3 % (noise dithers the mean),
 small signals (< 10 % of the range) are coarse. A 16-bit record is a
 follow-up that parametrises the code width.
@@ -1559,7 +1562,7 @@ the meter has no readout of it.
 | sources | logger.rs `mode_ok`, `ad1_first` | LOG:SOURce AD2 accepts DC V / mV (and the fast logger with it); the Record page's implicit source stays AD1 there (24 bit); a host LOG:STATe ON is refused in AC+DC / AUTO coupling / the power meter (alternating rows; before, only the disk path checked it) |
 | fast logger | logger.rs `dc_prepare`, main.rs `fast_start` | the cal before the file header (its a / b), the DMM row back for the disk preparation, the session's `start` rewrites the row and keeps the cal |
 | LOG:SCALe? | scpi.rs, main.rs `log_scale` | a,b of the AD2 session (value = a + b raw); dm40scpi.py `log --source ad2` writes calibrated values with it |
-| wave view | app_wave.rs | DC V / mV enter their DC rows (no switch to AC V); the coupling key (CH1 / the V/div badge) switches V DC <-> AC at the same range item (`WaveReq::Coupling`); autorange: entered in AUTO and no range picked since, a clip (\|code\| > 257 000) steps the range up (the DMM's autorange chose by DC; AC on top clips); V/div - from 6 V DC goes to 600 mV (DC mV, the AC mV row); leaving the view restores AUTO when it was AUTO at the entry, the coupling the key chose stays |
+| wave view | app_wave.rs | DC V / mV enter their DC rows (no switch to AC V); the coupling key (CH1 / the V/div badge) switches V DC <-> AC at the same range item (`WaveReq::Coupling`); autorange: entered in AUTO and no range picked since, a clip (\|code\| > 257 000) steps the range up (the DMM's autorange chose by DC; AC on top clips); V/div - from 6 V DC at 500 mV/div goes to 200 mV/div on 600 mV (DC mV, the AC mV row); leaving the view restores AUTO when it was AUTO at the entry, the coupling the key chose stays |
 | tests | emu/hy3131/dcvtest.py, wavetest.py `--case dcv`, the model (HY3131.cs: OP1O = g (SENSE + Vos), the chopper, `op1vos:`, `ad2dcg:`) | |
 
 ### 13.4 Device check of 1ad2943 (E7)

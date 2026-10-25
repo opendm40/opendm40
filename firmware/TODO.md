@@ -597,9 +597,18 @@ Code work (in this order):
       (device-check doc "46370df" 3): DBG:IDLE 20000 + a disk read every 4 s, no USBTMC: on 68 s past the
       limit; with no traffic off 20.5 s after DBG:IDLE 20000.
       After the power-on: DBG:IDLE? 1800000, settings from the file (seq 71), volume 50, alarm LOUD.
-- [ ] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24). Today every V/div step
-      is a range / divider change. Add intermediate steps that only rescale the screen (e.g. 1-2-5 within one
-      range), switching the range / divider only where the next step needs it.
+- [x] Wave view (scope on the DMM inputs): finer V/div steps (owner 2026-10-24, 2026-10-25: the range's
+      full scale did not fit any 1-2-5 step). `scope::WAVE_STEPS_V` / `_A`: per DMM range a full-scale step
+      (+-range on the 8 divisions: 15 mV / 150 mV / 1.5 V / 15 V / 150 V / 250 V per div for 60 mV .. 1000 V;
+      150 uA / 1.5 mA / 15 mA / 150 mA / 1.5 A / 2.5 A for 600 uA .. 10 A) and the 1-2-5 steps between, each
+      on the lowest range whose AD2 window holds it; a step on the current range only rescales the screen.
+      V/div + / -, the pinch and AUTO (the full-scale step, centred) use it; entry and the clip autorange take
+      the full-scale step; labels "1.5V" / "2.5A"; 60 mV joins the list (MF item 5). Not persisted (the
+      settings file is unchanged). touch-test (tables vs dmm::ad2_scale_of, pinch, labels), ui-render
+      (every range, full-scale + one intermediate step), wavetest (steps, AUTO; `--case fullv / fulla`:
+      +-96.7 % of 6 V / 60 mA inside the drawn rows). docs/dmm-input-scope-feasibility.md 10.1.
+      Open: 0..range (a unipolar signal over the 8 divisions) is a position drag, not a step; the trace rows
+      clamp at 0..278 (stock), so the outer ~1-2 % of +-full sits on the frame edge; device check pending.
 - [x] SCPI over Bluetooth serial: the same parser as USBTMC (session per transport, DBG:* refused on BT),
       stock binary frames (0xAF) dispatched alongside, DMA TX ring. docs/bt-scpi.md,
       tools/dm40bt_scpi.py.  (74b8890, 4c2f0a6; device 0667175: SCPI, POW / CALC:LIM, LOG:DATA? over BT OK;
