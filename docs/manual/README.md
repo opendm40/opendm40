@@ -43,7 +43,7 @@ limitations](#known-limitations).
 9. [Inrush current](#inrush-current)
 10. [Recording](#recording): the Record page and the fast recorder.
 11. [USB disk, screenshots and the gallery](#usb-disk-screenshots-and-the-gallery)
-12. [Settings](#settings): every settings item, and the Device page.
+12. [Settings](#settings): every settings item, the Device page and the touch test.
 13. [Remote control and connecting from a computer](#remote-control-and-connecting-from-a-computer):
     the phone app, USB and Bluetooth on Linux, Windows and macOS, sigrok.
 14. [Backup, recovery and back to stock](#backup-recovery-and-back-to-stock)
@@ -2245,6 +2245,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
 | **Device** | | | The [Device page](#the-device-page). |
+| **Touch test** | | | The [touch test page](#touch-test). |
 
 ### The Device page
 
@@ -2264,6 +2265,38 @@ step to its next value; rows with **-** / **+** change in steps.
 | Board temp | The temperature of the main chip, as a rough indication |
 
 Tap anywhere to go back to Settings; **MENU** goes to the main menu.
+
+### Touch test
+
+**Settings > More > More > Touch test** shows what the touch screen
+reports, to check where a tap lands:
+
+![The touch test page](img/touch-test.png)
+
+*The touch test page: taps on the targets, MENU held.*
+
+| On the page | What it shows |
+|---|---|
+| Crosses (grey) | Nine targets: the corners 20 px in, the middle of each edge, the centre. |
+| Orange dots | Every point the touch screen reports. |
+| Green dots | The points the meter accepts as a touch (after filtering out short contacts and bounce). |
+| Red cross | Where a touch started: where a tap lands. |
+| **Raw** | The last reported point and how many fingers it had. |
+| **Tap**, **Off** | Where the last touch started, and how far that is from the nearest target (`+` = right of / below it). |
+| **Frames**, **max** | Reports read since the page opened; the most fingers in one report. |
+| **Stale**, **Bad** | Reads that found no new report, and reads that failed. |
+| MENU, RUN, AUTO, MF | The four touch keys: a box lights up while the touch screen reports its key; `x` is the reported position along the key strip. |
+
+Touch every target and compare the red crosses with them. The touch keys
+do nothing on this page.
+
+- **Clear**: tap it to clear the dots.
+- To leave the page, press the power key, or hold one finger still
+  anywhere for 2 s. Both go back to Settings page 3.
+
+The page does not open during a [fast recording](#fast-recording) or while
+the `LOG:` commands stream readings to a computer
+([other ways to log](#other-ways-to-log)), and closes when one starts.
 
 ## Remote control and connecting from a computer
 

@@ -14,6 +14,9 @@ pub mod pw;
 /// The Inrush Current page (View::Inrush, app_inrush.rs).
 #[path = "ui_inrush.rs"]
 pub mod inr;
+/// The touch test page (View::TouchTest, app_touchtest.rs).
+#[path = "ui_touchtest.rs"]
+pub mod touchtest;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
@@ -73,6 +76,8 @@ pub enum View {
     Help,
     /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
     Inrush,
+    /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
+    TouchTest,
 }
 
 impl View {
@@ -2463,8 +2468,8 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 /// three pages of at most SET_ROWS rows. Page 1: the last row "More" opens
 /// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
 /// bargraph / history row (UF-30), Help; its "More" opens page 3
-/// (SETTINGS3): the wrong-connection alerts and "Device", the stock §6
-/// Device/About page. "Back" is the tappable title bar (stock settings have
+/// (SETTINGS3): the wrong-connection alerts, "Device" (the stock §6
+/// Device/About page) and "Touch test". "Back" is the tappable title bar (stock settings have
 /// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
 /// page 2 -> page 1 -> menu), so the lists hold only settings.
 pub const SETTINGS: [&str; 9] = [
@@ -2476,9 +2481,9 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// OFF), the danger alarm (danger.rs, doc
 /// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
 /// applies at the next USB plug), the burden voltage readout of the A
-/// functions (doc 3.15; persisted, default OFF = the stock aux row) and the
-/// Device / About page.
-pub const SETTINGS3: [&str; 5] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device"];
+/// functions (doc 3.15; persisted, default OFF = the stock aux row), the
+/// Device / About page and the touch test page (app_touchtest.rs).
+pub const SETTINGS3: [&str; 6] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
@@ -2741,6 +2746,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Gallery => "Gallery",
         View::Help => "Help",
         View::Inrush => "Inrush",
+        View::TouchTest => "Touch test",
     }
 }
 
