@@ -27,8 +27,8 @@ from PIL import Image, ImageDraw
 BASE = 0x08000000
 VT_A, VT_B, VT_BPLUS = 0x08023509, 0x080236F5, 0x08023425
 
-# Fonts the scope page and its popups draw with (notes/layout.md,
-# notes/graph.md, notes/popups.md); name -> font object address.
+# Fonts the scope page and its popups draw with (stock/re/stock-ui-notes/layout.md,
+# graph.md, popups.md); name -> font object address.
 SCOPE_FONTS = {
     0x0805B138: 'F14 small ASCII 1 bpp (labels)',
     0x080592F0: 'ASCII 26 px 4 bpp (scope/generator)',

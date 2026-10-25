@@ -10,7 +10,8 @@ Requirements: Python 3, `gcc-arm-none-eabi`, `make`.
 The latest official update file is in [vendor/](vendor/README.md)
 ([`dm40_v_2_6.bin`](vendor/dm40_v_2_6.bin), Alientek's, not under the MIT licence); older versions are
 kept in `wirenboard/alientek-dm40-tools` (`vendor/`). Reverse-engineering notes on the stock firmware, bootloader and
-update format: [re/README.md](re/README.md), [re/ANALYSIS.md](re/ANALYSIS.md).
+update format: the private repo `wirenboard/alientek-dm40-fw-analysis`, cloned
+into `stock/re/` by those with access (`stock/re/README.md`, `stock/re/ANALYSIS.md`).
 
 ## dm40fw.py
 
@@ -41,7 +42,7 @@ position 8). opendm40 [`build.sh`](../firmware/build.sh) and [`patch/patcher.py`
 CRC-16 of words 1 and 2 with its complement in the high half, word 2 is
 `0x00010000` | CRC-16 of the body with its 12 bytes at offset `0x4000` (the
 bootloader's marker at flash `0x08008000`) left out. The bootloader checks
-both. `--like` is no longer needed. Details: [re/README.md](re/README.md).
+both. `--like` is no longer needed. Details: `stock/re/README.md` (in the private analysis repo).
 
 ## Patches (`patch/`)
 
@@ -100,4 +101,4 @@ python3 -I patch/kit/tools/tests/test_bt_discovery.py
 ## merge_boot.py
 
 Merges bootloader dump pieces into one 16 KB image, see
-[re/README.md](re/README.md).
+`stock/re/README.md` (in the private analysis repo).

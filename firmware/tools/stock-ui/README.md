@@ -1,7 +1,7 @@
 # tools/stock-ui: reference renderer of the STOCK DM40 V2.6 scope UI
 
-Spec: `firmware/docs/stock-scope-ui.md`; plan: `docs/history/stock-scope-port-plan.md`;
-per-function RE notes: `notes/`.
+Spec: `stock/re/docs/stock-scope-ui.md`; plan: `docs/history/stock-scope-port-plan.md`;
+per-function RE notes: `stock/re/stock-ui-notes/` (spec and notes in the private analysis repo).
 
 * `run.sh [out] [scene..]` builds `main.rs` (+ `gfx.rs`, `scope.rs`, `check.rs`,
   `../ui-render/host.rs`) for the host, maps `dm40_v_2_6.dec.bin` at 0x08004000

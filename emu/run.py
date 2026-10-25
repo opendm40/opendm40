@@ -94,7 +94,7 @@ def emu_uid(port, base=UID):
     port `port`: this unit's UID file (a fixed pattern without it) with bytes
     4 and 9 = the port, big-endian. The stock genuine check (UID against the
     dump's 0x080A4000 block) never reads bytes 4 and 9
-    (firmware/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
+    (stock/re/docs/genuine-check.md), so the stock still gets its 200 MHz PLL
     and DBG:GENUINE? stays GENUINE, while opendm40's USB / SCSI / *IDN? serial
     number (the UID as hex, firmware/src/uid.rs) differs from the real meter's
     and between instances on different ports: udisks merges disks with the

@@ -48,7 +48,7 @@ const DIM_MS: [u64; 4] = [300_000, 600_000, 1_800_000, 0];
 const OFF_MS: [u64; 4] = [600_000, 1_800_000, 3_600_000, 0];
 const DIM_TXT: [&str; 4] = ["5 min", "10 min", "30 min", "Never"];
 const OFF_TXT: [&str; 4] = ["10 min", "30 min", "1 hour", "Never"];
-/// Wake gate (stock FUN_08020248, tools/stock-ui/notes/interaction.md D.3):
+/// Wake gate (stock FUN_08020248, stock/re/stock-ui-notes/interaction.md D.3):
 /// after an idle dim the first touch / side key only restores the backlight,
 /// and input is ignored for this long from it. opendm40 also drops the rest of
 /// that waking touch or key press (its release would otherwise still tap):

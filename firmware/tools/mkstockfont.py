@@ -277,7 +277,7 @@ def main():
     summary = []
     fonts = [(name, a, (lambda a=a: load(a))) for name, a in FONTS]
     fonts += [(name, key, src) for name, key, src in [
-        # Stock scope page fonts (docs/stock-scope-ui.md sec. 0.1), keyed by
+        # Stock scope page fonts (stock/re/docs/stock-scope-ui.md sec. 0.1), keyed by
         # the font-object address the stock page uses.
         ('SC_C', 0x08054828, load_class_c),                                  # status letters, "H"
         ('SC_F12', 0x0804F24C, lambda: load_merged(0x0805471C, 0x0804F24C)),  # 12 px texts
