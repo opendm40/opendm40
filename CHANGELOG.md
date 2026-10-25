@@ -13,6 +13,35 @@ section named after the tag as the release notes; how to cut a release:
   generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
   and DC mV with the A jack empty, nor the "DC?" hint in AC V. A-PROT in DC
   mV now comes after the next DC mV reading (~0.45 s).
+- Multimeter: the message after a tap on the reading gives the readings per
+  second as the rate chip shows them and the averaging time of the extra
+  digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
+  1.6 s"). The manual's pictures showed an outdated message and rate chip
+  ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
+  6.4 s for the extra digit in Ω; it shows after 3.2 s
+  ([manual](docs/manual/README.md#rate-fast-med-slow)).
+- Multimeter: after a tap on the reading the rate chip names the new rate at
+  once, with "--/s" until its readings/s is measured (it kept the old rate's
+  name and number while the message was up), and the extra digit goes at
+  once when the new rate has none. In FAST the chip showed down to 8.0/s for
+  about a second after each offset measurement; it shows 10/s.
+
+### Docs
+
+- Ohm: 500 Ω from an MMB3.0 calibrator read OL on the 600 Ω range. The
+  firmware's OL limit there (618 Ω on every model) and its OL decision are
+  not the cause: a resistor of 500 Ω reads from the first conversion after an
+  overload (emulator). The suspected cause is the calibrator's resistance output at the
+  range's 0.90 mA test current, or a lock of it after its switch (both
+  inferred); the low-current ON variant
+  (0.28 mA) may read it. Device check in
+  [firmware/TODO.md](firmware/TODO.md) ("500 ohm from the MMB3.0 reads OL on 600 ohm").
+
+### Tools
+
+- [emu/hy3131/ohm600test.py](emu/hy3131/ohm600test.py): manual 600 Ω at
+  each rate, steps into 500 Ω from 200 Ω / open / OL, the 618 Ω limit, and
+  AUTO landing 500 Ω on 600 Ω.
 
 ## v0.2.0 (2026-10-25)
 

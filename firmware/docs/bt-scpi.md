@@ -275,8 +275,9 @@ that is not selected, the power meter's channels):
 The same ranges on DM40A / B / C (opendm40 uses the 60000-count limits on
 all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
-600000 counts once the moving average is full (~3.2 s after a change) in DC
-V 600 mV .. 600 V and ohm 600 ohm .. 60 kohm; elsewhere it stays 60000
+600000 counts once the moving average holds 8 conversions (~1.6 s after a
+change in DC V, ~3.2 s in ohm) in DC V 600 mV .. 600 V and ohm 600 ohm ..
+60 kohm; elsewhere it stays 60000
 counts. The setting is the meter's global rate; each sample's digits come
 from `CONF?` (the readout's resolution), which the profile asks instead of
 `FUNC?` before each `READ?`. Ranges and the rate are safe over Bluetooth

@@ -777,9 +777,10 @@ In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
-  measured readings per second. Tap it: FAST → MED → SLOW → FAST.
+  measured readings per second (**--/s** just after a change). Tap it:
+  FAST → MED → SLOW → FAST.
 - **Tap the reading** to step the rate the same way; a message says what you
-  get, for example **MED 600000 counts / 1.6 s**.
+  get, for example **MED 5.0/s, +1 digit in 1.6 s**.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
@@ -791,9 +792,8 @@ so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears smaller, after the main digits, on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
-1.6 s (MED; Ω 6.4 s) after the input settles, a little later after a
-function change.
+DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ, about 1.6 s (MED in
+DC) or 3.2 s (SLOW, and in Ω) after the input settles.
 
 #### Smoothing
 

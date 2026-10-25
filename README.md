@@ -24,6 +24,8 @@ Experimental. Developed and tested on one DM40A. DM40B and DM40C ran only in
 the emulator. Everything that has not run on a real meter yet, chiefly
 everything with a current through the A jack, is listed in the manual under
 [Known limitations](docs/manual/README.md#known-limitations).
+Measured accuracy against calibrators (DC V, DC A, frequency, resistance):
+[firmware/docs/data](firmware/docs/data/README.md).
 
 Downloads: [Releases](https://github.com/wirenboard/opendm40/releases).
 Changes per release: [CHANGELOG.md](CHANGELOG.md).

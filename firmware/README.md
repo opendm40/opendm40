@@ -158,9 +158,9 @@ and pull request to `main`; a push that changes only documentation (Markdown, `d
 | Job | What |
 |---|---|
 | Build | `build.sh --locked` (stack, region and update-file checks fail it), [`tools/build-variants`](tools/build-variants/run.sh); the image and `SHA256SUMS` as a workflow artifact |
-| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script; `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
+| Host tests | [`tools/ci-tests.sh`](tools/ci-tests.sh): the host suites listed in the script, `JOBS` at a time (default: the CPU count; each suite's log printed whole after all finish); `stock-ui` decodes [`dm40_v_2_6.bin`](../stock/vendor/dm40_v_2_6.bin) first |
 | Doc checks | [`tools/linkcheck.py`](tools/linkcheck.py), [`tools/scpi-doc-check`](tools/scpi-doc-check/run.sh) |
-| Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not |
+| Version | [`tools/version-check.sh`](tools/version-check.sh): fails when the firmware changed since the last `v*` tag but the version did not; on a pull request [`tools/pr-version-check.sh`](tools/pr-version-check.sh) also fails when the PR changes the firmware without raising the version above `main`'s |
 
 The emulator tests ([emu/README.md](../emu/README.md)) are not in CI: they
 need a flash dump of a meter.
@@ -198,8 +198,8 @@ are the install, backup and recovery steps, then the tag's
 `CHANGELOG.md` section, or GitHub's generated notes when there is none.
 
 After a release, the next firmware change needs a new version before it is
-pushed (the Version job fails otherwise): bump to the next `-preN` or
-release version in the same commit.
+pushed (the Version job fails otherwise): raise PATCH for a fix or MINOR for a
+feature, in the same commit.
 
 ## Layout
 
