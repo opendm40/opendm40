@@ -51,7 +51,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public const double Vref = 1.25;    // PB<6> external reference, buffered by REFO (SREFO = 1)
         public const double Vdda = 3.6;     // VDSC taps are fractions of this
         public const double AcNodeTau = 0.3;        // AC coupling time constant of the AC V node (acdc doc 6a)
-        public const double Op1OffLevel = -0.6;     // OP1O level while OP1 is off, relative to AGND (empirical: entry transient)
+        // OP1O level while OP1 is off (AC mV), relative to AGND: the coupling capacitor's start on the next
+        // AC V row (INFERRED as a level). Fitted to device 489f956 (0 V, CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6:
+        // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
+        // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
+        public const double Op1OffLevel = -0.005;
         public const double HpfTransientGain = 1.5; // RMS seen while the node DC slews, per volt of remaining step
         public const double LpfRateDivisor = 0.5;   // measured LPF period = datasheet OSR4 * this (RESEARCH.md 3)
 

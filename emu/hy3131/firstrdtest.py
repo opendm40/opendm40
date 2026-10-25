@@ -35,6 +35,10 @@ the switch meets the old conversion at other phases):
   acv-auto-up  the same up: 8 V AC on CONF:VOLT:AC 6 -> 60 V
   aca-auto-dn  0.8 A AC: CONF:CURR:AC 10, CURR:AC:RANG:AUTO ON (-> 6 A)
   acv-entry    1 V AC: CONF:VOLT:DC 6 -> CONF:VOLT:AC: every F 1 V +-0.5 %
+  acmv-acv-zero  0 V: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6: every F below 0.05 V
+               (device 489f956: 0.018-0.036 V first)
+  acmv-acv-sq  the 0 / 9.5 V square, mvclamp: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC (AUTO):
+               CONF? never on 60 V (device 489f956: 6 V only)
 
 dcv-acv-med, dcv-res-slow and res-med also check the time between two new
 readings after the first one (GAP: at most 0.6 s; e1cec01 dropped two 400 ms
@@ -64,6 +68,7 @@ OFF = 'r22part:-1;r22off:0;r22n:1;r22win:0;acastep:0;acasteptau:0'
 R22 = 'r22part:0.4;r22off:2400000;r22n:1;r22win:1000'
 
 # name, input, rate, (pre command, s)..., switch command, check (kind, limit), conf prefix that must stay
+# ('!prefix': a CONF? prefix that must never show)
 SCEN = [
     ('dcma-med', 'open;vsrc:1;' + R22, 'MED', [('CONF:VOLT:AC', 1.5), ('CONF:VOLT:DC 6', 3.0)], 'CONF:CURR:DC 0.06',
      ('abs', 1e-3), 'CURR +6.0'),
@@ -90,6 +95,14 @@ SCEN = [
      ('rel', 0.8, 0.005), 'CURR:AC +'),
     ('acv-entry', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',
      ('rel', 1.0, 0.005), 'VOLT:AC'),
+    # AC mV -> AC V (device 489f956 step 3): at 0 V the first finals read 0.018-0.036 V, then
+    # 3 mV at 1 s; under the 0 / 9.5 V square (608 mV clipped on 600 mV) AUTO goes to 6 V
+    # only. The model once read 2.78-3.9 V at 0 V and visited 60 V (its coupling capacitor's
+    # level while OP1 is off, HY3131.cs Op1OffLevel).
+    ('acmv-acv-zero', 'open;vsrc:0', 'MED', [('CONF:VOLT:AC 0.6', 3.0)], 'CONF:VOLT:AC 6',
+     ('abs', 0.05), 'VOLT:AC +6.000000E+00'),
+    ('acmv-acv-sq', 'open;vsrc:4.75,ac=4.75,f=40,shape=square;mvclamp:1.212', 'MED', [('CONF:VOLT:AC 0.6', 3.0)],
+     'CONF:VOLT:AC', ('any',), '!VOLT:AC +6.000000E+01'),
 ]
 
 # Longest wait between two new readings (grey or final) after the first one,
@@ -158,7 +171,7 @@ try:
     def wrong(v, chk):
         if abs(v) >= 9e37 or v != v:
             return False  # +9.91E37 / dashes: no reading, not a wrong one
-        if chk[0] in ('final', 'fuse'):
+        if chk[0] in ('final', 'fuse', 'any'):
             return False  # checked at the end against the settled reading
         if chk[0] == 'abs':
             return abs(v) > chk[1]
@@ -203,7 +216,7 @@ try:
                         first = (round(up() - t0, 2), ro[2])
                     if wrong(v, chk):
                         why.append('rep %d: F %s at +%.2f s' % (rep, ro[2], up() - t0))
-                if not cf.strip('"').startswith(conf):
+                if (cf.strip('"').startswith(conf[1:]) if conf.startswith('!') else not cf.strip('"').startswith(conf)):
                     why.append('rep %d: CONF? %s at +%.2f s' % (rep, cf, up() - t0))
                     break
             gap = max([b[0] - a[0] for a, b in zip(seen, seen[1:]) if a[0] < GAP_UNTIL] or [0.0])

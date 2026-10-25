@@ -3713,7 +3713,7 @@ Emulator (emu/):
       `DBG:LCD?` chunk holds drawing for 300 ms (main.rs `draw_hold_until`, a consistent frame across the
       chunks of one grab), so grabs less than 300 ms apart never let a frame through. Not the screenshot
       (`screenshot::frozen`, the item "Device: screenshot preparation"). Space grabs >= 0.4 s apart.
-- [ ] AC V entry from AC mV in the emulator: READ? 2.78-3.9 V at 0 V right after 600 mV -> 6 V (mvautotest,
+- [x] AC V entry from AC mV in the emulator: READ? 2.78-3.9 V at 0 V right after 600 mV -> 6 V (mvautotest,
       firstrdtest-style probe), and under the 0 / 9.5 V square a 6 -> 60 -> 6 V excursion (mvautotest "ranges
       [... 6.0, 60.0, 6.0]") with a 4.90 V tail. Cause in the model: the AC node's coupling capacitor sits at
       `Op1OffLevel` (-0.6 V, INFERRED) while OP1 is off (AC mV) and recharges on the AC V row. The device does
@@ -3726,6 +3726,11 @@ Emulator (emu/):
       (as ACA_VET) and let held results move no range; else lower the model's level.
       [device-check 489f956](docs/device-check-2026-10-21.md#489f956-plain-ac-first-readings-049bb65-acdc-mv-a-jack-0bcc40c-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f593d45-41a9704-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
+      Done (fix/regressions-1025): `Op1OffLevel` -0.6 -> -0.005 V. The model now reads 0.027, 0.018, 0.012, 0.008
+      ... 0.003 V by 1 s at 0 V (the device 0.018-0.036, 15-17, 9-10, 5-6, 3 mV), and under the square 6 V only
+      with a first final of 5.42 V (device 5.03-5.39 V). The device's +20-23 % overshoot 0.3 s later is not
+      modelled (the model decays from the first final). Tests: firstrdtest acmv-acv-zero / acmv-acv-sq and
+      mvautotest "no 60 V range on the way up" fail with -0.6 and pass with -0.005.
 - [ ] Inrush page "Armed: 0.069 A now" with nothing in A (device 46370df 7d; docs/inrush-current.md 9): the
       live value is the rms about the zero code from the AC A 10 A row's LPF calibration offset
       (`ad2_scale`, cal 0x10C), so a DC offset of the AD2 stream against it, or noise, both show; which one is
