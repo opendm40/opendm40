@@ -401,6 +401,25 @@ array does nothing measurable ([`firmware/docs/hy3131-frontend-2026-10-26.md`](.
   die sensor.
 - AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2 (the capacitor is *inferred* from the
   exponential decay at PB4 and the Hycon demo board's C16 / R2, APD-DMM001 p.22).
+  The coupling network's time constant is 0.34 s (one unit, a DC step at PB4); R and C separately are
+  not known (the demo board: 1 µF and 1 MΩ to ground, 1 s).
+- AD1 pre-filter: an external capacitor between HY3131 FTP and FTN, ~26 nF (one unit: τ = 2.56 ms
+  with the on-chip 100 k, SFT1 = 00; the demo board fits 27 nF). The stock rows set SFT1 = open in
+  V / A / Hz and most capacitance rows, 10 k in the first DC mA / µA row (CFG_F8_9 r0), 0 Ω in ohm
+  60 Ω..600 kΩ, continuity, diode and the two last capacitance rows, 100 k in ohm 6 MΩ / 60 MΩ.
+- Divider switches in the stock V rows (R2A..R2E, `hy3131_tables.rs` CFG_F0 / CFG_F1):
+
+  | row | r0 | r1 | r2 | r3 |
+  |---|---|---|---|---|
+  | AC V | FS1, PS6 SS6, FS9 PS8 | as r0 | FS1, PS5 SS5, FS9 PS8 | FS1, PS5 SS5 PS4 SS4, FS9 PS8 |
+  | DC V | DS0 FS0, PS7 SS7, FS9 PS8 | DS0 FS0, PS6 SS6, DS9 FS9 PS8 | DS0 FS0, PS5 SS5, DS9 FS9 PS8 | DS0 FS0, PS5 SS5 PS4 SS4, DS9 FS9 PS8 |
+
+  AC V r0 and r1 share the tap and differ in the OP1 gain (R25). What the PA9 network is on the
+  DM40 is not known (APD-DMM003 §4 shows 30 k + 5 pF on PA9 for the AC V compensation). Clearing
+  FS9 in the AC V rows raises the HF response by the same amount on the 6 V and 600 V taps
+  (+3.5 % RMS of a square at 5 kHz, +17 % at 20 kHz), so its element does not load the tap
+  (*inferred*); the ACC array (R30, SMODE5 set in the AC V rows) changes nothing measurable
+  ([`hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)).
 
 ![DMM input area: relay, varistors, R500 shunt, wire shunt, fuse, COM and A jacks](photos/input-jacks-shunts-fuse-relay.jpg)
 
