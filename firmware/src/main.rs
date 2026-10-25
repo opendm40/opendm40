@@ -980,6 +980,20 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    scpi::Dbg::Ad2(7, mode, param, delay) => {
+                        logger.set_chopseq(mode, param, delay);
+                        false
+                    }
+                    scpi::Dbg::Ad2(8, ..) => {
+                        scpi.len = 0;
+                        for (k, v) in logger.chopseq_stats().iter().enumerate() {
+                            if k > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            put_u32(&mut scpi, *v);
+                        }
+                        true
+                    }
                     scpi::Dbg::Ad2(6, state, n, item) => {
                         dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
                         false

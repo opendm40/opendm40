@@ -2269,6 +2269,12 @@ impl Scpi {
                         (Some(b"DCV"), true) => Some(dcv_arg(a)),
                         // N7? item,state,n: (6, state, n, item).
                         (Some(b"N7"), true) => Some(n7_arg(a)),
+                        // CHOPSEQ mode,param,delay_ms: (7, mode, param, delay); ? = 8.
+                        (Some(b"CHOPSEQ"), false) => {
+                            let w = nums::<3>(a);
+                            Some(Dbg::Ad2(7, w[0].min(3) as u8, w[1].min(65535) as u16, w[2].min(255) as u8))
+                        }
+                        (Some(b"CHOPSEQ"), true) => Some(Dbg::Ad2(8, 0, 0, 0)),
                         _ => None,
                     };
                     match d {

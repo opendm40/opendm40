@@ -546,6 +546,102 @@ pub struct Logger {
     /// there is one (`lost_before` of the next reply's first block).
     drained_ts: u32,
     drained: bool,
+    /// DBG:AD2:CHOPSEQ (experiment, docs/dmm-rate-filter-survey.md: manual
+    /// AD1CHOP 00 / 01 polarity sequences in an unchopped AD1 session).
+    cs: ChopSeq,
+}
+
+/// Manual AD1 polarity sequence (DBG:AD2:CHOPSEQ mode,param,delay_ms):
+/// in an unchopped AD1 main-loop session (LOG:CHOP OFF), R22's AD1CHOP is
+/// rewritten 00 (VX + VOS) / 01 (VX - VOS) after conversions. Modes: 0 off,
+/// 1 blocks (the polarity flips every `param` conversions; 1 = ABAB), 2
+/// PRBS (a xorshift bit per conversion), 3 rare (00, one 01 conversion
+/// after a random gap of param/2 .. 3 param/2). The write goes `delay_ms`
+/// after the flag was seen (0 = right after the data read). Every record's
+/// raw is tagged: bits 23:0 the code, bit 28 the polarity in R22 when the
+/// conversion was read, bit 29 a write follows this read, bit 30 set (a
+/// tagged record); host: tools/experiments/chopseq.py. The rescue read is
+/// off in such a session. All zero = off (`Logger::new`).
+#[derive(Clone, Copy)]
+struct ChopSeq {
+    mode: u8,
+    param: u16,
+    delay_ms: u8,
+    /// Active in the running session.
+    on: bool,
+    /// Polarity now in R22 (0 = 00, 1 = 01) and the one written next.
+    pol: u8,
+    next: u8,
+    /// A write is pending at `due_us` (`Producer::now_us`).
+    pending: bool,
+    due_us: u64,
+    /// Conversions read this session; mode 3: conversions to the next 01.
+    k: u32,
+    gap: u32,
+    lfsr: u32,
+    /// Writes done, writes later than 2 ms past their due time, the largest
+    /// gap between two INTF checks of the session (us: the bound on how late
+    /// a flag was seen) and its check stamp.
+    writes: u32,
+    late: u32,
+    max_poll_gap: u32,
+    last_poll_us: u64,
+}
+
+impl ChopSeq {
+    const fn new() -> Self {
+        ChopSeq {
+            mode: 0,
+            param: 0,
+            delay_ms: 0,
+            on: false,
+            pol: 0,
+            next: 0,
+            pending: false,
+            due_us: 0,
+            k: 0,
+            gap: 0,
+            lfsr: 0,
+            writes: 0,
+            late: 0,
+            max_poll_gap: 0,
+            last_poll_us: 0,
+        }
+    }
+
+    fn rand(&mut self) -> u32 {
+        let mut x = self.lfsr;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.lfsr = x;
+        x
+    }
+
+    fn rare_gap(&mut self) -> u32 {
+        let p = (self.param as u32).max(2);
+        p / 2 + self.rand() % (p + 1)
+    }
+
+    /// The polarity for the conversion after the `k`-th read one.
+    fn want(&mut self) -> u8 {
+        match self.mode {
+            1 => ((self.k / (self.param as u32).max(1)) & 1) as u8,
+            2 => (self.rand() >> 7 & 1) as u8,
+            3 => {
+                if self.pol == 1 {
+                    self.gap = self.rare_gap();
+                    0
+                } else if self.gap <= 1 {
+                    1
+                } else {
+                    self.gap -= 1;
+                    0
+                }
+            }
+            _ => 0,
+        }
+    }
 }
 
 /// Gap bucket of a gap of `k` periods (k >= 2).
@@ -599,7 +695,33 @@ impl Logger {
             fmt: FMT_ROWS,
             drained_ts: 0,
             drained: false,
+            cs: ChopSeq::new(),
         }
+    }
+
+    /// DBG:AD2:CHOPSEQ mode,param,delay_ms (`ChopSeq`); next session.
+    pub fn set_chopseq(&mut self, mode: u8, param: u16, delay_ms: u8) {
+        self.cs.mode = mode.min(3);
+        self.cs.param = param;
+        self.cs.delay_ms = delay_ms;
+    }
+
+    /// DBG:AD2:CHOPSEQ?: mode, param, delay_ms, on, writes, late, the
+    /// largest INTF check gap (us).
+    pub fn chopseq_stats(&self) -> [u32; 7] {
+        let c = &self.cs;
+        [c.mode as u32, c.param as u32, c.delay_ms as u32, c.on as u32, c.writes, c.late, c.max_poll_gap]
+    }
+
+    fn cs_write(&mut self) {
+        let c = &mut self.cs;
+        hy::write(0x22, &[(self.osr & 7) | if c.next != 0 { 0x08 } else { 0 }]);
+        if self.prod.now_us > c.due_us + 2000 {
+            c.late += 1;
+        }
+        c.pol = c.next;
+        c.pending = false;
+        c.writes += 1;
     }
 
     fn ring(&self) -> &Ring {
@@ -845,6 +967,13 @@ impl Logger {
         } else {
             hy::set_ad1_osr(self.osr, self.chop());
         }
+        let seed = self.cs.lfsr;
+        self.cs = ChopSeq { mode: self.cs.mode, param: self.cs.param, delay_ms: self.cs.delay_ms, ..ChopSeq::new() };
+        self.cs.on = self.cs.mode != 0 && !self.ad2 && !self.chop() && !on_isr;
+        self.cs.lfsr = if seed == 0 { 0x2545_F491 } else { seed };
+        if self.cs.mode == 3 {
+            self.cs.gap = self.cs.rare_gap();
+        }
         self.prod.begin(period_ns);
         self.active = true;
         self.isr_sess = false;
@@ -1005,6 +1134,9 @@ impl Logger {
     fn sample(&mut self) {
         let ring: &Ring = unsafe { &*self.ring };
         self.prod.tick();
+        if self.cs.on && self.cs.pending && self.prod.now_us >= self.cs.due_us {
+            self.cs_write();
+        }
         let end = self.prod.now_us + if self.ad2 { AD2_BURST_US } else { 0 };
         let half = self.prod.gate_us as u64;
         loop {
@@ -1019,9 +1151,16 @@ impl Logger {
                 }
             }
             let ready = if self.ad2 { hy::ad2_ready() } else { hy::ad1_ready() };
+            if self.cs.on {
+                let c = &mut self.cs;
+                if c.last_poll_us != 0 {
+                    c.max_poll_gap = c.max_poll_gap.max((self.prod.now_us - c.last_poll_us).min(u32::MAX as u64) as u32);
+                }
+                c.last_poll_us = self.prod.now_us;
+            }
             let p = if self.prod.p_meas != 0 { self.prod.p_meas } else { self.prod.nominal_us } as u64;
             let since = self.prod.now_us.wrapping_sub(self.prod.last_sample_us);
-            if !ready && !self.ad2 && self.prod.have_last && self.prod.rescued < RESCUE_MAX && since >= p + p / 4 && since < p + 3 * p / 4 {
+            if !ready && !self.ad2 && !self.cs.on && self.prod.have_last && self.prod.rescued < RESCUE_MAX && since >= p + p / 4 && since < p + 3 * p / 4 {
                 // No AD1F a quarter period past the conversion's due time:
                 // an INTF read raced the conversion and cleared its flag
                 // unreported (the register clears on read, as for AD2F,
@@ -1079,9 +1218,24 @@ impl Logger {
                     // A rescue that read this conversion before its flag
                     // came (the conversion ended between the flag check and
                     // the read): the same code again, not a new sample.
-                    let raw = hy::read_ad1();
+                    let mut raw = hy::read_ad1();
+                    if self.cs.on {
+                        let c = &mut self.cs;
+                        c.k += 1;
+                        c.next = c.want();
+                        let flip = c.next != c.pol;
+                        raw = (raw & 0xFF_FFFF) | (c.pol as i32) << 28 | (flip as i32) << 29 | 1 << 30;
+                        if flip {
+                            c.pending = true;
+                            c.due_us = self.prod.now_us + c.delay_ms as u64 * 1000;
+                        }
+                    }
                     if !(after_rescue && raw == self.prod.last_raw) {
                         let _ = self.prod.push(ring, ts, raw);
+                    }
+                    if self.cs.on && self.cs.pending && self.cs.delay_ms == 0 {
+                        self.prod.tick();
+                        self.cs_write();
                     }
                 }
             }
