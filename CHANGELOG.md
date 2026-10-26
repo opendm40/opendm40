@@ -9,6 +9,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Multimeter, continuity / diode: touching the probes together no longer
+  shows A-JACK ("Current in A jack: check leads") for a second or two. There
+  A-JACK now comes only while the reading is OL (nothing on V/Ω-COM, as
+  with the leads in A and COM).
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or

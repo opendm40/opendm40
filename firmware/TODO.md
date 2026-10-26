@@ -3914,6 +3914,17 @@ Emulator (emu/):
       **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
       6 runs each: SYST:ALER? / DBG:SENT:LOG? every 0.1 s for 6 s after the off, no A-JACK in 12 of 12. Not done: a
       current into A with V-COM open (needs a current source on A).
+- [x] **False A-JACK in continuity when the probes touch** (owner video 2026-10-26, leads in V / COM, A jack empty):
+      A-JACK for ~1.5 s while the readout went OL -> 814 -> 277 -> 28.85 -> 0.67 ohm. The jack check calls a shorted
+      input (~0 V) "free" as it does the open one (~-0.48 V), so PB1 hits during the contact asserted A-JACK; what
+      moves PB1 then is unknown (not recorded on the device). Fixed (branch fix/cont-false-ajack, 0.2.7): continuity
+      and diode gate A-JACK on their reading (V_GATE): under OL within 1.5 s = V-COM closed, no A-JACK; an OL reading
+      counts from 450 ms into the hit run ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
+      Cost (emulator): A-JACK 0.6-0.9 s after the onset (was 0.16-0.36 s), up to ~1.5 s right after a part left
+      V-COM; none with a part on V-COM and a current in A. Emulator: model `contbump`,
+      senttest cont-bounce / diode-bounce (FAIL on 6c686ce8, pass), cont-a / diode-a now open V-COM in their current
+      phase, cont-closed-a.
+      Device: owner taps with the V-COM jumper out (see the device check below).
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device f59bac2 note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
