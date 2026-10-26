@@ -217,6 +217,7 @@ recorded.
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
+| [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
 | [`fastratetest.py`](hy3131/fastratetest.py) | FAST / MED / SLOW rates in DC V | | 47740 |
 | [`dcvtest.py`](hy3131/dcvtest.py) | the DC-coupled V row on AD2 | | 3611 |

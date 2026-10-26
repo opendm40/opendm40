@@ -635,8 +635,12 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle above it.
-- A new value every 0.35 s. **--** until the first clean result.
+- The frequency, with the duty cycle above it, from 0.5 Hz.
+- A new value every 0.35 s; below about 7 Hz, one per one or two periods
+  (about 1 s at 2 Hz).
+- **--** until the first result; **0.000 Hz** when the signal stops.
+- A small last digit where the counter resolves it: 10.0000 Hz, but
+  50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
 
 

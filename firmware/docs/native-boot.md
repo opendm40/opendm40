@@ -587,6 +587,26 @@ A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
 16 KiB warning. The next relief for C needs a real cut (the candidates of
 audit #1 above) or a larger blob moved out of B.
 
+### Region B audit #5 (2026-10-26, fix/low-freq)
+
+The low-frequency Hz counter (`Dmm::freq_gate`, the gate checks, the
+provisional pick of `Freq::take`) is per-pass code: region B. It took B from
+16 500 B (main) to 15 532 B. Relief:
+- the USB endpoint allocation of usb-device / synopsys-usb-otg
+  (`UsbBus::alloc_ep`, `EndpointAllocator::alloc`, `UsbBusAllocator::alloc`
+  / `bulk`; 756 B) to `.cold`: only `run` building the USBTMC / MSC classes
+  calls it, before its loop;
+- `Gate` without fields (no out-of-line `PartialEq`) and `gate_limit_ms`
+  shorter (144 B).
+
+| | before | after |
+|---|---|---|
+| region B free | 15 532 B | 16 468 B |
+| region C free | 7 820 B | 7 064 B |
+| stack headroom (static worst path) | 20 508 B | unchanged |
+
+C is now below 7 KiB by ~100 B; the next relief for B needs a cut.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as

@@ -354,6 +354,14 @@ SECTIONS
         *(.text.*8opendm402bt*2Bt3new*);
         *(.text.*8opendm408spiflash*8SpiFlash3new*);
         *(.text.*8opendm403usb7init_hw*);
+        /* USB endpoint allocation (usb-device / synopsys-usb-otg): only
+         * when main.rs `run` builds the USBTMC / MSC classes, before its
+         * loop; enumeration and resets do not allocate. Region B audit #5
+         * (2026-10-26, fix/low-freq). */
+        *(.text.*16synopsys_usb_otg3bus*8alloc_ep*);
+        *(.text.*16synopsys_usb_otg3bus*17EndpointAllocator*5alloc*);
+        *(.text.*10usb_device3bus*15UsbBusAllocator*5alloc*);
+        *(.text.*10usb_device3bus*15UsbBusAllocator*4bulk*);
         /* Menu / list / keypad page helpers (already their own symbols):
          * drawn or hit-tested only on the Menu, Settings, Record, Limits,
          * Keypad, Help and Device pages, where no stream runs (leaving the
