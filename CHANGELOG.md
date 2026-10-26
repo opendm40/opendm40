@@ -39,6 +39,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- **Scope did not turn on** (a flat trace at the bottom) after power-on with
+  Analog power set to Both always or a start page other than Multimeter: the
+  analog supply was switched wrongly. Switching to Auto or opening the scope
+  then could turn the meter off.
 - **Frequency:** 2 Hz and 5 Hz gave no reading; it now reads down to 0.5 Hz,
   with one more (small) digit where the counter allows it
   ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
@@ -49,8 +53,6 @@ section named after the tag as the release notes; how to cut a release:
   until a restart.
 - **Continuity / diode:** touching the probes together no longer shows
   A-JACK.
-- **Scope:** after some start-ups the scope's supply stayed off (a flat
-  trace), and the meter could then switch itself off.
 - **Scope:** closing a popup is about 4x faster; the tap's beep is short
   again.
 - **AC V:** the first readings after a range step on a signal with a DC part
