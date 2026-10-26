@@ -43,7 +43,7 @@ pub const VALUE_HV: Color = 0xC9A0;
 pub const VALUE_PROV: Color = DIM;
 /// The main readout's digits below the reading's uncertainty (the accuracy
 /// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
-pub const VALUE_LOW: Color = 0x6B4D; // (104, 104, 104)
+pub const VALUE_LOW: Color = 0xA342; // (165, 104, 16): VALUE dimmed
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
@@ -322,11 +322,15 @@ pub fn acc_ulps(r: &Reading, a: Acc) -> Option<u32> {
     // besides capacitance.
     let f = v.unit.as_bytes().last() == Some(&b'F');
     let sp = acc::spec(r.mode, r.range, r.acdc, a.tc, f)?;
-    Some(acc::err_ulps(sp, v.v, v.dec, a.model))
+    Some(acc::round_sig(acc::err_ulps(sp, v.v, v.dec, a.model)))
 }
 
-/// `ulps` x 10^-`dec` with `dec` decimals ("0.0020").
-fn acc_fmt(b: &mut [u8; 16], ulps: u32, dec: u8) -> &str {
+/// `ulps` x 10^-`dec` without trailing zeros ("0.002", "0.0015").
+fn acc_fmt(b: &mut [u8; 16], mut ulps: u32, mut dec: u8) -> &str {
+    while dec > 0 && ulps % 10 == 0 && ulps > 0 {
+        ulps /= 10;
+        dec -= 1;
+    }
     let mut x = ulps as f32;
     for _ in 0..dec {
         x *= 0.1;

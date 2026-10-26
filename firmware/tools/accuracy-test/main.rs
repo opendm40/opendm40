@@ -143,7 +143,8 @@ fn main() {
         // +-0.0018 kohm
         ("ohm 1.2345 k", 10, 2, 1.2345, 4, 2, " 1.234", "5"),
         ("ohm 444.44 k", 10, 4, 444.44, 2, 2, " 444.4", "4"),
-        ("ohm 44.444 M", 10, 6, 44.444, 3, 2, " 44.44", "4"),
+        // +-0.099 M rounds to +-0.1 M: the hundredths go grey too
+        ("ohm 44.444 M", 10, 6, 44.444, 3, 2, " 44.4", "44"),
         // +-1.49 uF: p = 10^0, the point goes grey with the digit after it
         ("cap 47.30 uF", 13, 4, 47.3, 2, 2, "  47", ".30"),
         // +-0.155 nF
@@ -161,7 +162,7 @@ fn main() {
     ];
     for &(name, mode, r, v, dec, model, a, b) in grey {
         let f = name.ends_with(" F");
-        let u = acc::err_ulps(sp(mode, r, f), v, dec, model);
+        let u = acc::round_sig(acc::err_ulps(sp(mode, r, f), v, dec, model));
         let s = format!("{:>7.*}", dec as usize, v);
         let i = acc::grey_from(s.as_bytes(), Some(u)).min(7);
         let (ga, gb) = s.split_at(i);
@@ -170,6 +171,9 @@ fn main() {
         let t = s.trim_start();
         let j = acc::grey_from(t.as_bytes(), Some(u)).min(t.len());
         check(name, &t[j..] == b, format!("strip {t:?}: grey {:?}, want {b:?}", &t[j..]));
+    }
+    for (u, want) in [(201, 200), (20, 20), (15, 15), (149, 150), (96, 100), (25, 30), (3, 3), (1999, 2000), (0, 0)] {
+        check("round_sig", acc::round_sig(u) == want, format!("{u} -> {}, want {want}", acc::round_sig(u)));
     }
     check("no accuracy: none grey", acc::grey_from(b" 4.8176", None) == 7, String::new());
 

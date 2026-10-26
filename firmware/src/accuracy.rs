@@ -104,6 +104,19 @@ pub fn err_ulps(sp: Spec, v: f32, dec: u8, model: u8) -> u32 {
     if e - k as f32 > 1e-3 { k + 1 } else { k }
 }
 
+/// `ulps` rounded to one significant digit, two when the first is 1
+/// (owner 2026-10-26: "±0.2", not "±0.201"; "±0.0015", "±0.03"); half
+/// up: 201 -> 200, 25 -> 30, 149 -> 150, 96 -> 100.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn round_sig(u: u32) -> u32 {
+    let mut p = 1;
+    while u / p >= 100 || (u / p >= 10 && u / p / 10 != 1) {
+        p *= 10;
+    }
+    (u + p / 2) / p * p
+}
+
 /// The digits of readout `s` (the main readout's 7 cells, or the strip's
 /// trimmed value: digits, '-', '.', spaces) that are below the
 /// uncertainty `ulps` (`err_ulps`, units of the last digit; None = no

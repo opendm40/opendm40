@@ -62,7 +62,9 @@ resolution: it does not change d.
 ## 3. The label
 
 - **Value:** (x % x |reading| + N d), rounded up to the readout's last
-  digit and written with its decimals and unit: "±0.0020V" under 4.8176 V.
+  digit, then to one significant digit (two when the first is 1), half
+  up, and written without trailing zeros, with the unit: "±0.002V" under
+  4.8176 V, "±0.0015V", "±0.2V" for 0.201 V.
   Temperature: x % of the reading in its unit (°C or °F) + 5 °C / 5 °F. The
   spec form "±(0.03%+5d)" is not shown: the absolute value says what the
   digits are worth without arithmetic.
@@ -73,8 +75,9 @@ resolution: it does not change d.
   the meter strip (the lower one first), grey; none when it does not fit
   beside the GEN column. AC V / A there have both sub rows taken (Hz,
   duty): no label in the strip.
-- **Rounding:** up to the last digit, so a bound: 0.0003 V AC reads
-  ±0.0016 V (15.009 digits).
+- **Rounding:** the significant-digit step rounds to nearest, so the
+  label is not a strict bound (0.201 V reads ±0.2 V); the grey digits
+  (section 5) follow the rounded value.
 - **None:** with the History row instead of the bargraph (Settings 2/3 "DMM
   row"), in the power meter, for OL, dashes and provisional (grey) values,
   under REL (the manual specifies a reading, not the difference of two), and
