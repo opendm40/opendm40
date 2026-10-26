@@ -576,7 +576,10 @@ Without `ad2-isr` (`--no-default-features --features vdisk`): A2 2 948 B,
 B 27 480 B, C 9 680 B, stack headroom 21 008 B.
 
 A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
-16 KiB warning. The next relief for C needs a real cut (the candidates of
+16 KiB warning. Since 0.6.0 (the DMM accuracy label,
+[dmm-accuracy.md](dmm-accuracy.md#4-memory)): the label's code in A2 (A2
+1 844 B free, below its warning), `ui::help_page` back in `.cold` (B
+16 484 B, C 7 152 B). The next relief for C needs a real cut (the candidates of
 audit #1 above) or a larger blob moved out of B.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)

@@ -40,6 +40,8 @@ All documentation of opendm40, by reader. Start at the
   opendm40 keeps it.
 - [model-variants.md](../firmware/docs/model-variants.md): how the firmware
   tells DM40A / B / C apart, and what changes.
+- [dmm-accuracy.md](../firmware/docs/dmm-accuracy.md): the manual's accuracy
+  table and the DMM page's accuracy label.
 - [parity.md](../firmware/docs/parity.md): item by item against the stock
   firmware V2.6.
 - [fonts.md](../firmware/docs/fonts.md): the stock bitmap fonts, their storage

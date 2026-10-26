@@ -17,6 +17,9 @@ pub mod inr;
 /// The touch test page (View::TouchTest, app_touchtest.rs).
 #[path = "ui_touchtest.rs"]
 pub mod touchtest;
+/// The specified accuracy of a reading (../docs/dmm-accuracy.md).
+#[path = "accuracy.rs"]
+pub mod acc;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
@@ -261,6 +264,18 @@ pub struct DmmView {
     last_iohm: u8,
     /// The "Overload" word is drawn next to the main readout's "0L".
     ol_word: bool,
+    /// The accuracy label's context (set by the app before `reading`; None
+    /// = no label). The label is in the bargraph's label row, so the
+    /// history row (Settings 2/3 "DMM row": History) and the power meter
+    /// have none.
+    pub acc: Option<Acc>,
+    /// Settings 3/3 "Accuracy" (persisted, default ON; the app turns it
+    /// into `acc`).
+    pub acc_on: bool,
+    /// The label as last drawn (`acc_ulps`, the decimals, the unit; None =
+    /// empty) and whether ACC_RECT holds it (false: to draw).
+    acc_k: Option<(u32, u8, &'static str)>,
+    acc_drawn: bool,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -273,6 +288,65 @@ pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
 const BAR_LBL_Y: i16 = 161;
 const BAR_LBL_H: i16 = 12;
 const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
+/// The accuracy label (../docs/dmm-accuracy.md): F14 grey in the label row,
+/// right-aligned under the unit, 5 px after the full-scale label (which
+/// ends at the bar's end, 410); `pm` draws the "+-" sign before the text.
+const ACC_RECT: sf::Rect = rect(415, BAR_LBL_Y, 61, BAR_LBL_H);
+
+/// What the accuracy label needs besides the reading (set by the app; None
+/// = no label: Settings 3/3 "Accuracy" OFF, or REL in force).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Acc {
+    /// Dmm::model: 0 DM40A, 1 DM40B, 2 DM40C (the stock digit, acc::err_ulps).
+    pub model: u8,
+    /// The temperature sensor is the K thermocouple (the only one the
+    /// manual specifies).
+    pub tc: bool,
+}
+
+/// The absolute uncertainty of `r` per the manual (acc.rs) in units of its
+/// last digit (`r.main.dec`, rounded up); None = no label (no row in the
+/// manual, OL, dashes, a provisional value, the power meter).
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn acc_ulps(r: &Reading, a: Acc) -> Option<u32> {
+    let v = &r.main;
+    if r.prov || v.ol || v.v.is_nan() || r.power.is_some() {
+        return None;
+    }
+    // deg F: temperature is the only function with a unit ending in F
+    // besides capacitance.
+    let f = v.unit.as_bytes().last() == Some(&b'F');
+    let sp = acc::spec(r.mode, r.range, r.acdc, a.tc, f)?;
+    Some(acc::err_ulps(sp, v.v, v.dec, a.model))
+}
+
+/// `ulps` x 10^-`dec` with `dec` decimals ("0.0020").
+fn acc_fmt(b: &mut [u8; 16], ulps: u32, dec: u8) -> &str {
+    let mut x = ulps as f32;
+    for _ in 0..dec {
+        x *= 0.1;
+    }
+    crate::dmm::format(b, x, dec)
+}
+
+use crate::scope_ui::{pm, PM_W};
+
+/// The combined view's strip: the accuracy label (`acc_ulps`, ASCII unit,
+/// no space, as the sub readings) in the lower sub row when it is free,
+/// else in the upper one; none when both hold a sub reading (AC V / A: Hz
+/// and duty) or "Overload".
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn strip_acc(d: &mut crate::scope_ui::StripData, r: &Reading, acc: Option<Acc>) {
+    let Some(i) = [1, 0].into_iter().find(|&i| d.sub[i].as_str().is_empty()) else { return };
+    let Some(u) = acc.and_then(|a| acc_ulps(r, a)) else { return };
+    let mut b = [0u8; 16];
+    let mut t = crate::scope_ui::Txt::new(acc_fmt(&mut b, u, r.main.dec));
+    ascii_unit(r.main.unit, &mut t);
+    d.sub[i] = t;
+    d.acc = i as u8 + 1;
+}
 
 /// The DMM function row: 7 buttons (the stock six + the power meter, owner
 /// 2026-10-22) of BTN_W px at a BTN_PITCH pitch from x 4: 4 px gaps, 4 px to
@@ -483,13 +557,58 @@ impl DmmView {
             ohm_on: false,
             last_iohm: 254,
             ol_word: false,
+            acc: Some(Acc { model: 2, tc: true }),
+            acc_on: true,
+            acc_k: None,
+            acc_drawn: false,
         }
+    }
+
+    /// The accuracy label of `r` (the end of `reading`): drawn on a change.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+    fn acc_update(&mut self, r: &Reading) {
+        if !self.bar_on || self.power {
+            return;
+        }
+        let k = self.acc.and_then(|a| acc_ulps(r, a)).map(|u| (u, r.main.dec, r.main.unit));
+        if self.acc_drawn && self.acc_k == k {
+            return;
+        }
+        self.acc_k = k;
+        self.acc_drawn = true;
+        self.acc_draw();
+    }
+
+    /// Paint ACC_RECT with the label as kept: "+-0.0020V" right-aligned,
+    /// grey F14 as the scale labels; the number alone when that is too wide
+    /// ("0.0060MHz": the unit is the readout's, right above).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+    fn acc_draw(&self) {
+        let b = ACC_RECT;
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        let Some((u, dec, unit)) = self.acc_k else { return };
+        let mut nb = [0u8; 16];
+        let mut ub = [0u8; 16];
+        let num = acc_fmt(&mut nb, u, dec);
+        let mut t = crate::scope_ui::Txt::new(num);
+        t.push(sf::unit_text(unit, &mut ub));
+        let t = if sf::text_width(sf::F14, t.as_str(), 1) <= b.w - PM_W { t } else { crate::scope_ui::Txt::new(num) };
+        let w = sf::text_width(sf::F14, t.as_str(), 1);
+        let x = b.x + b.w - w;
+        sf::label(sf::F14, rect(x, b.y, w, b.h), t.as_str(), DIM, BG, 4, 1);
+        pm(x - PM_W, b.y + 1, DIM);
     }
 
     /// Bargraph scale labels for full scale `fs` in `unit` (empty = none,
     /// temperature).
     fn bar_labels(&self, fs: f32, unit: &str) {
         lcd::fill_rect(8, BAR_LBL_Y as u16, 468, BAR_LBL_H as u16, BG);
+        // The row clear took the accuracy label too.
+        if self.acc_drawn {
+            self.acc_draw();
+        }
         if unit.is_empty() {
             return;
         }
@@ -598,6 +717,7 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.pwc = pw::PwCache::new();
         self.last_iohm = 254;
+        self.acc_drawn = false;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -920,6 +1040,7 @@ impl DmmView {
         if let Some(pv) = pwr {
             self.power_row(&pv, lim);
         }
+        self.acc_update(r);
     }
 
 }
@@ -2527,8 +2648,10 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
 /// applies at the next USB plug), the burden voltage readout of the A
 /// functions (doc 3.15; persisted, default OFF = the stock aux row), the
-/// Device / About page and the touch test page (app_touchtest.rs).
-pub const SETTINGS3: [&str; 6] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test"];
+/// Device / About page, the touch test page (app_touchtest.rs) and the
+/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON; last, so
+/// the rows above keep their places).
+pub const SETTINGS3: [&str; 7] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).

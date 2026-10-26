@@ -3043,6 +3043,9 @@ pub struct StripData {
     pub gen: Txt,
     /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
     pub dim: bool,
+    /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
+    /// "+-" sign); 0 = none.
+    pub acc: u8,
 }
 
 impl StripData {
@@ -3057,6 +3060,7 @@ impl StripData {
         hv: false,
         gen: Txt::EMPTY,
         dim: false,
+        acc: 0,
     };
 }
 
@@ -3195,9 +3199,21 @@ pub fn meter_strip(d: &StripData) {
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
     }
     for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim) || moved {
-            let r = st_sub(i, gen_on, sx);
-            let t = d.sub[i].as_str();
+        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim && ol.acc == d.acc) || moved {
+            let mut r = st_sub(i, gen_on, sx);
+            // The accuracy: grey, the text after the "+-" (`pm`); none
+            // when it does not fit even at spacing 0 (the GEN column).
+            let acc = d.acc == i as u8 + 1;
+            let mut t = d.sub[i].as_str();
+            if acc {
+                lcd::fill_rect(r.x as u16, r.y as u16, PM_W as u16, r.h as u16, C_FILL);
+                r = rect(r.x + PM_W, r.y, r.w - PM_W, r.h);
+                if sf::text_width(sf::SC_F12, t, 0) > r.w {
+                    t = "";
+                } else {
+                    pm(r.x - PM_W, r.y + 3, C_DIS);
+                }
+            }
             // Narrow (GEN shown): the text without its spaces if it is too
             // wide, then at the stock spacing 0 (as the scope's cells).
             let mut b = [0u8; 24];
@@ -3215,10 +3231,24 @@ pub fn meter_strip(d: &StripData) {
                 t
             };
             let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
-            st_text(r, sf::SC_F12, t, if d.dim { C_DIS } else { C_WHITE }, 1, sp);
+            st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
     *shown = Some(*d);
+}
+
+/// Width of the "+-" sign (`pm`) and its gap to the text.
+pub const PM_W: i16 = 6;
+
+/// "+-" (no stock font has U+00B1): a 5 x 5 plus over a 5 px bar, 8 px
+/// tall from `y` (the F14 / SC_F12 digits' height); the DMM page's and the
+/// strip's accuracy label.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn pm(x: i16, y: i16, c: Color) {
+    lcd::fill_rect((x + 2) as u16, y as u16, 1, 5, c);
+    lcd::fill_rect(x as u16, (y + 2) as u16, 5, 1, c);
+    lcd::fill_rect(x as u16, (y + 7) as u16, 5, 1, c);
 }
 
 /// Right-panel button under a touch: the stock rects, x from the panel edge

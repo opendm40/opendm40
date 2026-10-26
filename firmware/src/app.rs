@@ -885,6 +885,7 @@ impl App {
                     if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
                     "", // Touch test row: opens the page
+                    if self.dmm_view.acc_on { "ON" } else { "OFF" },
                 ];
                 ui::settings(2, &vals);
             }
@@ -990,6 +991,13 @@ impl App {
         self.draw_reading();
     }
 
+    /// The accuracy label's context (doc dmm-accuracy.md): None with
+    /// Settings 3/3 "Accuracy" OFF or REL in force (the manual specifies a
+    /// reading, not a difference of two).
+    pub(crate) fn acc_ctx(&self) -> Option<ui::Acc> {
+        (self.dmm_view.acc_on && !self.meter.rel_active()).then(|| ui::Acc { model: self.dmm.model(), tc: self.dmm.t_sensor() == 0 })
+    }
+
     /// Repaint the shown DMM reading in the DMM page / the combined view's
     /// meter strip (only what changed is drawn).
     fn draw_reading(&mut self) {
@@ -1000,6 +1008,7 @@ impl App {
                 // DBG:PROF? "d.read" (digits + aux rows + labels).
                 crate::prof::enter(crate::prof::DREAD);
                 self.dmm_view.alt = self.strip_alt;
+                self.dmm_view.acc = self.acc_ctx();
                 self.dmm_view.reading(&r, hold, lim);
                 crate::prof::exit(crate::prof::DREAD);
             }
@@ -2058,6 +2067,7 @@ impl App {
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
             | ((!self.dmm.alert_mask() & crate::sentinel::M_JACK) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
+            | if self.dmm_view.acc_on { 0 } else { crate::meter::EXT_ACC_OFF }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
@@ -2133,6 +2143,7 @@ impl App {
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_JACK;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
+        self.dmm_view.acc_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_ACC_OFF == 0;
         // An unknown value (3) reads as Loud.
         self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
         if same_session {
@@ -3789,6 +3800,11 @@ impl App {
                     Some(5) => {
                         self.tt_open(clk);
                         return;
+                    }
+                    Some(6) => {
+                        // Accuracy label (doc dmm-accuracy.md): from the
+                        // next reading on.
+                        self.dmm_view.acc_on = !self.dmm_view.acc_on;
                     }
                     Some(_) | None => return,
                 }

@@ -291,6 +291,7 @@ scope.
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
+| Accuracy of the reading | — | [Shown](#accuracy) under the unit |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
 
@@ -887,6 +888,19 @@ shows: **Bargraph** (default) or **History**.
 ![The history row: four values stored](img/dmm-history.png)
 
 *The history row: four values stored.*
+
+### Accuracy
+
+Under the unit, in grey: the meter's specified accuracy for this reading
+and model, from the DM40 user manual's table, e.g. ±0.09 mV for 123.45 mV
+on the 600 mV range ([details](../../firmware/docs/dmm-accuracy.md)). Shown
+with the bargraph row; not in AC+DC, the 60 mV ranges, PT / NTC
+temperature, the power meter, or under REL. **Settings > More > More >
+Accuracy** turns it off.
+
+![The accuracy under the unit](img/dmm-acc.png)
+
+*The accuracy under the unit.*
 
 ### The trend chart
 
@@ -2261,6 +2275,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
+| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
 
 ### The Device page
 
