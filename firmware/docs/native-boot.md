@@ -961,7 +961,7 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
     record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
     data" below), then the start-up phase times in ms (`native::put_times`):
-    `BOOTMS,<shim>,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
+    `BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
     (each phase's own time; `board` includes the splash) and
     `MAINMS,<app>,<frame>,<touch>` (main's clock after App::new, the first
     frame and the touch reset). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.

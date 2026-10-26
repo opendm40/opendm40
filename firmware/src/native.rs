@@ -9,9 +9,10 @@ use crate::mmio;
 #[path = "splash.rs"]
 pub mod splash;
 
-/// Boot phase times for DBG:BOOT? `BOOTMS` / `MAINMS`: [0] = DWT cycles from
-/// the shim's counter start to pre_main, [1..=8] = DWT cycles (board::init
-/// restarts the counter) at the end of each pre_main phase, see `phase`;
+/// Boot phase times for DBG:BOOT? `BOOTMS` / `MAINMS`: [1..=8] = DWT cycles
+/// (board::init restarts the counter) at the end of each pre_main phase,
+/// see `phase` ([0] unused: the counter is not cleared by a software reset,
+/// so the shim's own time cannot be told from the loader's before it);
 /// [9..=11] = main's ms (its Clock restarts the counter again) after
 /// App::new, after the first frame, after the touch reset (`main_phase`).
 static PHASE: [AtomicU32; 12] = [const { AtomicU32::new(0) }; 12];
@@ -187,16 +188,15 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
     put_times(s);
 }
 
-/// `,BOOTMS,<shim>,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<frame>,<touch>`:
-/// the boot phases in ms (`PHASE`). BOOTMS: the shim (from its DWT start;
-/// clock and key check), then pre_main's phases, each its own duration
-/// (board = board::init + the splash). MAINMS: main's clock at the end of
+/// `,BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<frame>,<touch>`:
+/// the boot phases in ms (`PHASE`). BOOTMS: pre_main's phases, each its
+/// own duration (board = board::init + the splash). MAINMS: main's clock at the end of
 /// App::new, of the first frame and of the touch reset (0 = not reached).
 /// DWT at 200 MHz: 12.5x low on IRC16M, as CALMS.
 fn put_times(s: &mut crate::scpi::Scpi) {
     s.put_bytes(b",BOOTMS");
     let mut prev = 0u32;
-    for (i, p) in PHASE.iter().enumerate() {
+    for (i, p) in PHASE.iter().enumerate().skip(1) {
         let v = p.load(Ordering::Relaxed);
         if i == 9 {
             s.put_bytes(b",MAINMS");
@@ -205,7 +205,6 @@ fn put_times(s: &mut crate::scpi::Scpi) {
         put_dec(
             s,
             match i {
-                0 => v / 200_000,
                 1..=8 => {
                     let d = v.wrapping_sub(prev) / 200_000;
                     prev = v;
@@ -284,7 +283,6 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 /// pushed (review 2026-10-13 B1).
 #[inline(never)]
 fn pre_main(dry: bool) {
-    PHASE[0].store(unsafe { mmio::r32(DWT_CYCCNT) }, Ordering::Relaxed);
     let before = crate::board::init();
     boot::set_board(before);
     // The splash and the backlight first: the disk phases below take 0.2 s
