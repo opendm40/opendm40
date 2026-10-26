@@ -722,7 +722,11 @@ Code work (in this order):
       5 V, NORM, DIG): 1 ms/div 43 008 samples, 100 ms/div 65 520 samples, the trigger point on the rising edge
       mid-record, 50.001 Hz from the record. Without #30 the scope read code 0 after a boot with Analog power
       Both (nothing triggered).
-- [ ] Long scope record: pan through a stopped record by touch on the device (emulator only so far).
+- [x] Long scope record: pan through a stopped record by touch on the device (796e2970 with #30, 2026-10-26;
+      MR9270 1.6 Hz 0-10 V square, 100 ms/div, NORM, DIG, 65 520 samples): DBG:DRAG by half a screen moves
+      the trace 200 px, both ends stop the pan, a drag back from the start moves at once; 200 / 500 ms/div
+      while stopped show the record (at 500 ms/div ~210 columns). Before 796e2970 a drag right after a
+      screenshot (DBG:LCD? holds drawing 300 ms) left the drag preview on the screen, half of it blank.
 - [ ] Not possible / not done for the long record (docs/ram-budget.md "The scope record"): 65 520 at the
       fast timebases needs a 131 KB raw ring in one piece (BUF + logger::RING + calbackup::SCRATCH + the
       csvlog buffers + gen::WAVE lent for the capture: no logging / screenshot / CSV / FFT / generator
