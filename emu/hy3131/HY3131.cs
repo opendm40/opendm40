@@ -502,6 +502,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// beyond the clamp; device 2f56ff9: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
         public double MvPb1Mv;
+        /// Continuity contact transient (opt-in, "contbump:mV", "contbumptau:ms"; owner 2026-10-26:
+        /// the probes touched together in continuity raised A-JACK for ~1.5 s, A jack empty): every
+        /// change of the V-COM resistor while the continuity / diode row runs puts contbump mV x
+        /// exp(-dt / contbumptau) x cos(2 pi 25 Hz dt) on PB1 (a bouncing contact = a burst). The
+        /// shape and size are INFERRED (phenomenological; the device's PB1 during a contact was not
+        /// recorded). Default off, 40 ms.
+        public double ContBumpMv, ContBumpTau = 40;
+        private double contBumpT0 = double.NegativeInfinity;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device decaf60, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -825,7 +833,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// are aliases for the equivalent connection.
         public void SetInput(string spec)
         {
-            foreach(var o in Fe.Apply(spec))
+            var r0 = Fe.R;
+            var opts = Fe.Apply(spec);
+            if(Fe.R != r0 && !(double.IsInfinity(Fe.R) && double.IsInfinity(r0))) contBumpT0 = lastUpdate;
+            foreach(var o in opts)
             {
                 switch(o.Key)
                 {
@@ -837,6 +848,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "mvclamp": MvClampV = o.Value; break;
                 case "mvpb1": MvPb1Mv = o.Value; break;
+                case "contbump": ContBumpMv = o.Value; break;
+                case "contbumptau": ContBumpTau = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmop1k": OhmOp1K = o.Value; break;
                 case "ohmboth": OhmBothV = o.Value; break;
@@ -2190,6 +2203,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // d2aff22: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
+            }
+            if(ContBumpMv != 0 && (role == Role.Cont || role == Role.Diode) && t >= contBumpT0 && t - contBumpT0 < 10 * ContBumpTau * 1e-3)
+            {
+                // the contact transient (ContBumpMv)
+                var dt = t - contBumpT0;
+                v += ContBumpMv * 1e-3 * Math.Exp(-dt / (ContBumpTau * 1e-3)) * Math.Cos(2 * Math.PI * 25 * dt);
             }
             if(MvPb1Mv != 0 && MvClampV > 0 && role == Role.AcMv)
             {
