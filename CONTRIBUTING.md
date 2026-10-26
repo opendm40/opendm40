@@ -1,6 +1,6 @@
 # Contributing
 
-**Bugs:** open an [issue](https://github.com/wirenboard/opendm40/issues/new/choose).
+**Bugs:** open an [issue](https://github.com/opendm40/opendm40/issues/new/choose).
 Give the model and the opendm40 version (`*IDN?`), and for a hang or a restart
 also the output of `python3 firmware/tools/dm40dbg.py boot`.
 

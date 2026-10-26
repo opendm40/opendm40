@@ -62,7 +62,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
-- No Wiren Board logo in the status and title bars.
+- No logo in the status and title bars.
 
 ## v0.2.0 (2026-10-25)
 
@@ -210,7 +210,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## v0.1-pre1 (2026-10-24)
 
-First pre-release ([release page](https://github.com/wirenboard/opendm40/releases/tag/v0.1-pre1)),
+First pre-release ([release page](https://github.com/opendm40/opendm40/releases/tag/v0.1-pre1)),
 published by hand. Its `*IDN?` and Device page show `0.0.1` (the crate
 version then). The version scheme of
 [Releasing](firmware/README.md#releasing) starts with the next release.

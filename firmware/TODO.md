@@ -113,7 +113,7 @@ What waits for the owner; each line links to the material.
       AUTO and dashes at the beep, never the 6 MΩ reading with MANU after it.)
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
-      old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
+      old fw-rs/ names) are in a private repository, cloned into stock/re/. The public
       history was rewritten (git-filter-repo: those paths removed; the UID, its derived block and two BT MACs
       replaced); a rescan in every text form and in the blobs finds none. Doc hashes mapped to the new history.
 - [x] RES AUTO with 60 Ω (device 59bffd8a, 2026-10-25): the calibrator's resistance output on V-COM, AUTO:
@@ -168,8 +168,8 @@ What waits for the owner; each line links to the material.
       AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
       held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
 - [ ] USB PID (owner 2026-10-25; repo public 2026-10-26, request open: https://github.com/pidcodes/pidcodes.github.com/pull/1331; firmware already uses D040): request 1209:D040 from pid.codes right after the repo is public (their rule:
-      a public source repo with a LICENSE). The PR is prepared locally (org/WirenBoard + 1209/D040, MIT, site and
-      source = github.com/wirenboard/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
+      a public source repo with a LICENSE). The PR is prepared locally (an org entry + 1209/D040, MIT, site and
+      source = github.com/opendm40/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
       merge: the PID constant in usb descriptors (now the test PID 1209:0001), udev rules / docs, a release.
       Their howto: a software-only project "may" be asked for justification (the hardware is the vendor's).
 - [ ] Public release (owner 2026-10-25): the one blocker was the touch fix (screen and the four touch keys).
@@ -603,7 +603,7 @@ Code work (in this order):
       FR-27 generator keeps running in DMM: present in code (cf1978b, 98c00f7, concurrent instruments).
       FR-33 is USBTMC+MSC (we chose DBG over CDC). (verify on device)
 - [x] Repo tidy-up (user request): ../TIDY-PLAN.md executed 2026-10-13 (b06da47..369cad7); the repo is
-      now private (wirenboard/opendm40). Left to the user: whether vendor-derived material
+      now private. Left to the user: whether vendor-derived material
       (stock/re/analysis/app_decompile.c) and BT MACs stay tracked if it ever goes public again.
 
 ## From user community feedback (docs/user-feedback.md)
