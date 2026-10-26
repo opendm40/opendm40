@@ -1320,7 +1320,10 @@ everywhere. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
 Emulator: the model reads PB1 above the window as 0x70 (`pb1cmp70`, default);
 senttest `ohm-acur` (RES AUTO, V open, 20 mA in A) FAILs before (LIVE?) and
 passes with the rule (the model's `aiohm`: the open input reads 31 MΩ while
-the current flows, *inferred*); switchtest `real-vjack` (24 V, OL, the
+the current flows, *inferred*; also in the other RES scenarios with a
+current in A and V-COM open: senttest `ohm-v5`'s last phase, switchtest
+`real-ajack*` / `real-aprot`, loudtest `ajack-res`; without it they read OL
+and show LIVE?); switchtest `real-vjack` (24 V, OL, the
 model's OP1O 1.41 V) stays LIVE?; `ohm` now runs on the 6 MΩ row (4.7 MΩ on V-COM);
 `ohm-v5-600`'s last phase (manual 600 Ω) shows the gap.
 

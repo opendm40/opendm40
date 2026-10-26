@@ -81,7 +81,7 @@ SC = {
     # (sentinel.rs JACK CHECK: AD2 on OP1O while PB1 hits) tells it: LIVE?, never A-JACK. A current
     # in A with V-COM open (the last phase) is A-JACK as before. ohm-v5-600: manual 600 ohm.
     'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
-                             (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                             (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002;aiohm:31e6', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
     # (ohm-v5-600's last phase: on 600 ohm the open input's own source, 2.17 V, is in the band of a
     # source on V-COM, and the reading is OL either way: a DC current in A with V-COM open reads

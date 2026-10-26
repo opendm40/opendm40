@@ -123,7 +123,7 @@ SC = {
     # evidence a driven V-COM cannot give -> loud; off at 30 -> stops.
     'ajack-res': dict(func='RES', run_for=34, setup=['SYST:BEEP:VOL 0'],
                       script=[(0, 'monitor sysbus.hy3131 Pb1VjackMv 10'), (0, 'dmm open;r:4700'), (8, 'dmm vsrc:5'),
-                              (14, 'dmm open;isrc:0.002'), (30, 'dmm isrc:none')],
+                              (14, 'dmm open;isrc:0.002;aiohm:31e6'), (30, 'dmm isrc:none')],
                       acts={24.0: ['CONF:VOLT:DC']},  # virtual s (it was fw uptime 21.0, ~3 s behind)
                       checks=[('quiet', 6, 24), ('starts', 24, 25.6, LOUD), ('loud', 24.5, 29.5, LOUD), ('stops', 30, 31.8),
                               ('quiet', 31.8, 34)],
