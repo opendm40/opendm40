@@ -22,9 +22,11 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
     the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
     trigger at the centre; a roll record (200 ms/div) the full 65 520;
-  * STOP of a running raw ring (5 / 2 ms/div, Auto at several moments,
-    Normal without a trigger: the ring wrapped): the record is the sine
-    everywhere, no garbage or seam (the stop's own TCIF4 is not a wrap);
+  * STOP while running (5 / 2 ms/div the raw ring, 100 ms/div the packed
+    one; Auto at several moments, Normal without a trigger) ends on one
+    more complete capture: the DIGitize length, the sine everywhere (no
+    garbage or seam), in Auto the trigger point on the level;
+    --only-stop runs only these;
   * CHAN1:OFFSet moves the trace (pos) but not the volts the preamble
     gives;
   * the main loop keeps running during a streamed read (DBG:DIAG? loop

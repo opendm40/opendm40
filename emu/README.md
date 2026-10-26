@@ -356,7 +356,10 @@ Models are C# files compiled by Renode at start-up; the platform is
 - **Boot timing.** The ROM's and FS-loader's power-key (PA2) timing is set
   empirically: a release at 0.55 s gives the three-stage chain.
 - **Scope trigger.** opendm40's comparator path sometimes never completes a
-  frame after a restart; [`wavtest.py`](wavtest.py) turns it off.
+  frame after a restart; [`wavtest.py`](wavtest.py) turns it off. Its
+  STOP checks with `--hwtrig` end in `WAIT` for that reason; the device
+  check of the comparator path is
+  [`firmware/tools/scope-stop-check.py`](../firmware/tools/scope-stop-check.py).
 - **Gestures.** Horizontal swipes from the touch model were not recognised
   by opendm40's gesture engine; not investigated. The tests swipe with
   `DBG:SWIPE` over USB.

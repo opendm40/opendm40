@@ -55,8 +55,10 @@ section named after the tag as the release notes; how to cut a release:
   complete capture of the full length (as **Single** / `DIGitize`: the
   trigger point at the trigger position; untriggered once the record is
   full when nothing triggers): up to about 0.1 s at 5 ms/div, 2.6 s at
-  100 ms/div, plus the trigger wait. A second STOP meanwhile stops at
-  once ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+  100 ms/div, up to 10 s at 200 ms .. 1 s/div without roll, plus the
+  trigger wait. A second STOP meanwhile stops at once. Over SCPI wait for
+  `TRIG:STAT?` = `STOP` before `WAV:DATA?`
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - Scope, stopped: a pan, zoom or V/div change made while the screen was held
   (right after a screenshot over USB, a message box on the scope page) is
   drawn when the hold ends; before, the screen kept the drag preview with
