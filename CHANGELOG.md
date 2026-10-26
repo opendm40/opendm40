@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Changed
+
+- No Wiren Board logo at the left of the status and title bars; the range
+  label and "< Back" sit where the stock firmware has them.
+
 ### Fixed
 
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
