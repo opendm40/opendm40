@@ -3694,6 +3694,87 @@ impl Dmm {
         n
     }
 
+    /// DBG:SENTinel:PB1? [n]: the A-jack node PB1 in uV, blocking (~0.2 s +
+    /// n x 0.2 s). The row the chip runs with AD1 on PB1 - PB3, then on PB1 -
+    /// AGND (IG 0.9, REFO / AGND refs, OSR 256 unchopped, the peak hold on
+    /// AD1), n windows of 100 ms each; then the row is written again
+    /// (`write_config`). Reply: "mean,min,max,conv;mean,min,max,conv" (uV;
+    /// min / max from the peak hold). Not in the power meter.
+    #[inline(never)] // .cold (link-native.x): DBG reply
+    pub fn pb1_dbg(&mut self, clk: &mut Clock, n: u8, buf: &mut [u8; 96]) -> usize {
+        if self.pw.on {
+            return 0;
+        }
+        let mut row = [0u8; hy::CFG_LEN];
+        hy::read(0x20, &mut row);
+        let mut k = 0;
+        for (i, fnn) in [0x95u8, 0x93].into_iter().enumerate() {
+            let mut c = row;
+            c[2] = 0x00;
+            c[4] = fnn;
+            c[5] &= !sentinel::R25_AD1IG_36;
+            c[8] = (c[8] & 0x88) | 0x11;
+            c[9] = (c[9] & 0xF8) | sentinel::R29_PKH_AD1;
+            let r23 = c[3] | 0x80;
+            c[3] &= !0x80;
+            hy::quiesce();
+            hy::configure(&c);
+            hy::write(0x23, &[r23]);
+            clk.delay_ms(60);
+            let (mut lo, mut hi, mut sum, mut cnt) = (i32::MAX, i32::MIN, 0i64, 0u32);
+            for _ in 0..n {
+                hy::write(0x29, &[c[9] & !sentinel::R29_ENPKH]);
+                hy::write(0x29, &[c[9]]);
+                let t = clk.now_ms() + 100;
+                while clk.now_ms() < t {
+                    if hy::ad1_ready() {
+                        sum += hy::read_ad1() as i64;
+                        cnt += 1;
+                    }
+                }
+                let mut b = [0u8; 6];
+                hy::read(0x0E, &mut b);
+                lo = lo.min(hy::s24(&b[0..3]));
+                hi = hi.max(hy::s24(&b[3..6]));
+            }
+            // uV: AD1 2^23 = 1.25 V / 0.9; the hold is AD1 >> 5.
+            let mean = if cnt > 0 { (sum as f32 / cnt as f32) * (1.25e6 / 0.9 / 8_388_608.0) } else { 0.0 };
+            let f = 1.25e6 / 0.9 / 262_144.0;
+            if i > 0 {
+                buf[k] = b';';
+                k += 1;
+            }
+            for (j, v) in [mean as i32, (lo as f32 * f) as i32, (hi as f32 * f) as i32, cnt as i32].into_iter().enumerate() {
+                if j > 0 {
+                    buf[k] = b',';
+                    k += 1;
+                }
+                if v < 0 {
+                    buf[k] = b'-';
+                    k += 1;
+                }
+                let mut d = [0u8; 10];
+                let mut m = 0;
+                let mut x = v.unsigned_abs();
+                loop {
+                    d[m] = b'0' + (x % 10) as u8;
+                    m += 1;
+                    x /= 10;
+                    if x == 0 {
+                        break;
+                    }
+                }
+                while m > 0 {
+                    m -= 1;
+                    buf[k] = d[m];
+                    k += 1;
+                }
+            }
+        }
+        self.write_config(clk);
+        k
+    }
+
     /// (Re)start measuring in the current mode.
     pub fn start(&mut self, clk: &mut Clock) {
         if self.wake_at != 0 && !self.suspended {

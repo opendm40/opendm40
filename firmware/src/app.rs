@@ -4694,6 +4694,12 @@ impl App {
                 self.dmm.src_text(out);
                 true
             }
+            C::DbgSentPb1(n) => {
+                let mut b = [0u8; 96];
+                let k = self.dmm.pb1_dbg(clk, n, &mut b);
+                out.put_bytes(&b[..k]);
+                true
+            }
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);
