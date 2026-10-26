@@ -1298,7 +1298,9 @@ comparator rows (ohm, the resistive temperature sensors), within the last
   (`Sentinel::own`): on the 6 MΩ / 60 MΩ rows (open 1.62 / 1.38 V) the jack
   check's OP1O peak stays below 1.8 V (`JACK_OWN_V`, *inferred* between
   those values and the 2.02-2.45 V a source on V-COM holds it at, 1a11eda)
-  **and** a reading within the range came at least 450 ms after the hit run
+  in 3 checks in a row (`JACK_OWN_N`; one low check right after a range
+  step gave an 80 ms A-JACK with a source reading 28.6 MΩ, this branch's
+  device run) **and** a reading within the range came at least 450 ms after the hit run
   began (`OHM_VIN_LAG_MS`). Neither alone: a source on V-COM read 47 MΩ in
   range with 0x70 on PB1 and OP1O at 2.14 V (this branch's first device run,
   2026-10-26: A-JACK and LIVE? in turn with the reading alone), and OP1O

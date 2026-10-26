@@ -465,6 +465,12 @@ pub const JACK_LO: f32 = -0.9;
 /// 5 V on the 60 Mohm row, 2.02-2.25 V at 5 / 10 V, device 1a11eda). The
 /// line between is INFERRED. The lower rows (2.08-2.17 V open) have none.
 pub const JACK_OWN_V: f32 = 1.8;
+/// ... in this many jack checks in a row (one window each, ~0.1 s apart in
+/// ohm): this branch's device run (~5-15 V with a resistance on V-COM, RES
+/// AUTO reading 28.6 Mohm in range, OP1O 2.14 V) showed A-JACK for 80 ms
+/// once with a single low verdict counting (INFERRED: a check right after
+/// a range step, the node not settled).
+pub const JACK_OWN_N: u8 = 3;
 /// Ohm: an in-range reading counts for `own` only from this long after the
 /// hit run began (a conversion that started before a source came on still
 /// reads in range; the slowest ohm conversion is 400 ms).
@@ -1014,7 +1020,7 @@ pub struct Sentinel {
     pub vin_t: u64,
     /// The jack check's OP1O stayed below the row's line (`jack_result`:
     /// its peak max under JACK_OWN_V on the 6 / 60 Mohm rows; none elsewhere): `own`.
-    jack_low: bool,
+    jack_low: u8,
     /// Frequency (set by `dmm.rs` with the row): an AD1 peak window hits
     /// only on a one-sided level above PK_DC_THR (`pk_level`).
     pub pk_dc: bool,
@@ -1083,7 +1089,7 @@ impl Sentinel {
             mix_t: 0,
             both_drv: false,
             vin_t: 0,
-            jack_low: false,
+            jack_low: 0,
             pk_dc: false,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
             log_n: 0,
@@ -1212,6 +1218,7 @@ impl Sentinel {
     pub fn new_run(&mut self) {
         self.streak = 0;
         self.jack_t = 0;
+        self.jack_low = 0;
         self.jack_drv = false;
         self.jack_mv = 0;
     }
@@ -1371,7 +1378,7 @@ impl Sentinel {
                 // (a 0x70 run counts as driven once the jack check of the run
                 // has said whether the input sits at the row's own source)
                 let mixed = self.mix_t != 0 && now.saturating_sub(self.mix_t) < AJACK_CLEAR_MS;
-                self.both_drv = self.jchk && (mixed || (self.v_both(now) && self.jack_in_run() && (self.vin_t == 0 || !self.jack_low)));
+                self.both_drv = self.jchk && (mixed || (self.v_both(now) && self.jack_in_run() && (self.vin_t == 0 || self.jack_low == 0)));
                 if hit && self.both_drv {
                     // driven (BOTH): LIVE? instead of A-JACK
                     self.live_reading(now, true);
@@ -1523,7 +1530,7 @@ impl Sentinel {
     #[inline(never)] // .cold (link-native.x): only while PB1 hits
     pub fn jack_result(&mut self, now: u64, ohm: bool, pkmin: i32, pkmax: i32, line: f32) {
         let Some(d) = jack_driven(ohm, pkmin, pkmax) else { return };
-        self.jack_low = (pkmax as f32) < line * JACK_CODES_PER_V;
+        self.jack_low = if (pkmax as f32) < line * JACK_CODES_PER_V { self.jack_low.saturating_add(1) } else { 0 };
         let m = if pkmax.unsigned_abs() >= pkmin.unsigned_abs() { pkmax } else { pkmin };
         self.jack_mv = (m as f32 * 1000.0 / JACK_CODES_PER_V) as i32;
         self.jack_t = now.max(1);
@@ -1560,7 +1567,7 @@ impl Sentinel {
     /// volts (2.25 V at 5 V, 2.03 V at 10 V, 1a11eda; 24 V not measured, the
     /// emulator's line gives 1.41 V) while such a source reads OL.
     fn own(&self) -> bool {
-        self.vin_t != 0 && self.vin_t >= self.run_t0 + OHM_VIN_LAG_MS && self.jack_low && self.jack_in_run()
+        self.vin_t != 0 && self.vin_t >= self.run_t0 + OHM_VIN_LAG_MS && self.jack_low >= JACK_OWN_N && self.jack_in_run()
     }
 
     /// Current-mode reading: the current is below 0.5 % of the range (the
