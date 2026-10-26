@@ -110,8 +110,19 @@ fn popvals(m: &scope_ui::Model) -> scope_ui::PopVals {
     scope_ui::PopVals { pressed_cell: None, fft_win: 2, roll: true, ..stock::popvals(m) }
 }
 
-/// Draw a scope scene (with its popup values) and check it.
+/// Draw a scope scene (with its popup values) and check it; the record
+/// bar's sample rate as the firmware sets it (scope_page.rs sp_model:
+/// running only; the Wave view's AD2 rate).
 fn scope_shot(ck: &mut Checker, out: &str, name: &str, sc: &stock::Scene, pv: &scope_ui::PopVals) {
+    let m = &sc.m;
+    let fs = if m.status == scope_ui::ST_STOP {
+        0
+    } else if m.src == scope_ui::SRC_DMM {
+        scope::wave_real_fs(scope::wave_fs_for(m.tb as usize))
+    } else {
+        scope::tb_fs(m.tb as usize)
+    };
+    let sc = &stock::Scene { m: scope_ui::Model { srate: fs, ..sc.m }, name: sc.name, popup: sc.popup, trace: sc.trace.clone(), persist: sc.persist.clone(), cols: sc.cols, cells: sc.cells.clone() };
     host::reset(0);
     stock::draw_with(sc, pv);
     ck.check_replica(&format!("manual/{name}"));

@@ -238,6 +238,7 @@ recorded.
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
+| [`sratetest.py`](sratetest.py) | the scope's sample-rate label: the record bar = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll, the Wave view and the combined view (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
 

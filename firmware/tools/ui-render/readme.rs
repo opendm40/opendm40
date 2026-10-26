@@ -92,6 +92,7 @@ pub fn run(out: &str) -> usize {
         let base = &stock::scenes()[0];
         let mut m = base.m;
         m.combined = true;
+        m.srate = scope::tb_fs(m.tb as usize);
         let sc = stock::Scene { name: "readme-combined", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
         host::reset(0);
         scope_ui::invalidate();
@@ -116,6 +117,8 @@ pub fn run(out: &str) -> usize {
         m.math_mode = 5;
         m.math_colour = 1;
         m.math_off = -70;
+        m.srate = scope::tb_fs(m.tb as usize);
+        m.src = scope_ui::SRC_MCX;
         m.math_scale = scope_ui::Txt::new("20dB");
         m.fft_hz = scope_ui::Txt::new("5.00kHz");
         let peak_row = 70 + 3 * 35 / 20;
