@@ -713,13 +713,16 @@ Code work (in this order):
       Single / DIGitize fill the whole record. Design and costs: docs/ram-budget.md "The scope record".
       Emulator: emu/wavtest.py (lengths at 1 / 100 / 200 ms/div, no seam, the trigger at the centre, Save
       CSV of the long record = WAV:DATA?, stopped zoom).
-- [ ] Device check of the long scope record (a6c177d8, 0.3.0, 2026-10-26). PASS: MCX DIGitize (Auto, nothing
+- [x] Device check of the long scope record (a6c177d8, 0.3.0, 2026-10-26). PASS: MCX DIGitize (Auto, nothing
       on the MCX) at 1 us / 20 us / 1 ms/div: 43 008 samples; 100 ms/div: 49 932 and 500 ms/div: 25 417 (the
       untriggered record ends at the Auto timeout); wave view (DC V, 4800 S/s) on an MR9270 20.001 Hz square:
       STOP after 14 s keeps 65 520 samples, 20.001 Hz, every period 239..240 samples (no seam), AD2 dropped /
-      late / overruns 0; Save CSV of it = WAV:DATA? (65 520 rows); stopped zoom; a screenshot. Open: the
-      MCX record against a known signal (the calibrator is on V-COM, not the MCX), a triggered MCX Single
-      at 100 ms/div (65 520 with the trigger at the centre: emulator only), pan by touch.
+      late / overruns 0; Save CSV of it = WAV:DATA? (65 520 rows); stopped zoom; a screenshot. Triggered
+      MCX on the device (2026-10-26, this branch + #30 rails fix; MR9270 50 Hz 0-10 V square on CH1, EDGE POS
+      5 V, NORM, DIG): 1 ms/div 43 008 samples, 100 ms/div 65 520 samples, the trigger point on the rising edge
+      mid-record, 50.001 Hz from the record. Without #30 the scope read code 0 after a boot with Analog power
+      Both (nothing triggered).
+- [ ] Long scope record: pan through a stopped record by touch on the device (emulator only so far).
 - [ ] Not possible / not done for the long record (docs/ram-budget.md "The scope record"): 65 520 at the
       fast timebases needs a 131 KB raw ring in one piece (BUF + logger::RING + calbackup::SCRATCH + the
       csvlog buffers + gen::WAVE lent for the capture: no logging / screenshot / CSV / FFT / generator
