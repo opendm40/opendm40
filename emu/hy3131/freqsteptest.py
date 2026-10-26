@@ -10,7 +10,8 @@ SignalHzChanged, inferred), and the slower gates after it were given up as
 "no signal" (firmware/src/dmm.rs `Freq::take`, `gate_limit_ms`).
 
 Input: a 1 V square on V/COM, its frequency stepped at fixed virtual times
-(STEPS, each a few gate phases apart). DC V -> CONF:FREQ at the start, then
+(STEPS, each a few gate phases apart; the last three with the input off
+for 4.6 s first). DC V -> CONF:FREQ at the start, then
 DBG:READout? every ~0.2 s to the end. Checks:
   - every final (F) reading is within TOL (1 %) of the frequency before or
     after the latest step (never 0.000 Hz, never a mixed value);
@@ -45,9 +46,15 @@ import emusync  # noqa: E402
 import usbip_client as uc  # noqa: E402
 
 F0 = 1.0
-# (virtual s, Hz): offsets within the gates differ from step to step.
-STEPS = [(20.0, 0.5), (36.0, 1.0), (47.3, 0.5), (63.7, 0.7), (79.1, 1.0), (88.6, 0.7), (101.2, 0.5)]
-END_S = 118.0
+# (virtual s, Hz, gap s): offsets within the gates differ from step to step.
+# gap > 0: the input is off (open) that long first, then the new frequency:
+# on the device (2026-10-26, this branch before 'grey no signal') 1 -> 0.5
+# Hz and 0.5 -> 0.7 Hz read 0.000 Hz final for ~5 s, a quiet gate (2.2 s
+# without an edge) across the step; that the MR9270's output pauses is
+# INFERRED from it.
+STEPS = [(20.0, 0.5, 0), (36.0, 1.0, 0), (47.3, 0.5, 0), (63.7, 0.7, 0), (79.1, 1.0, 0), (88.6, 0.7, 0),
+         (101.2, 0.5, 0), (115.0, 1.0, 0), (125.3, 0.5, 4.6), (142.8, 0.7, 4.6), (158.1, 1.0, 4.6)]
+END_S = 176.0
 SETTLE_S = 14.0
 
 
@@ -60,8 +67,10 @@ def main():
     sp = os.path.join(OUT, name + '.script')
     with open(sp, 'w') as f:
         f.write('0 dmm hz:%g,amp=1\n' % F0)
-        for t, hz in STEPS:
-            f.write('%g dmm hz:%g,amp=1\n' % (t, hz))
+        for t, hz, gap in STEPS:
+            if gap:
+                f.write('%g dmm open\n' % t)
+            f.write('%g dmm hz:%g,amp=1\n' % (t + gap, hz))
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(int(END_S + 10)), '--script', sp, '--name', name] \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
@@ -117,7 +126,7 @@ def main():
     mk.poll()
     # fw uptime of each step (its input marker)
     steps = []
-    for v, hz in STEPS:
+    for v, hz, _ in STEPS:
         tf = mk.input_fw(v)
         if tf is None:
             bad.append('no input marker for the step at %g s' % v)

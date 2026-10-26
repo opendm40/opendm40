@@ -925,9 +925,11 @@ impl Freq {
     /// from ~12 s. So once a value was shown, a clean result is final
     /// (`conf`) only within FREQ_AGREE of the clean result before it (either
     /// source); else the pick is provisional (`prov`: grey, not in READ? /
-    /// statistics) until the next gate agrees. No signal is provisional when
-    /// a frequency was shown and the gate was not quiet (no edge yet within
-    /// 3.5 periods of the old value: the input may only have slowed down).
+    /// statistics) until the next gate agrees. No signal right after a
+    /// frequency is provisional, final from the next empty gate: on the
+    /// device the MR9270's output paused across a step (0.000 Hz final for
+    /// ~6 s after 1 -> 0.5 Hz with a quiet gate final at once; the pause is
+    /// INFERRED from that).
     fn take(&mut self, i: usize, f: f32, d: f32, n: u32, g: Gate) -> FreqPick {
         const NO_SIGNAL_N: u8 = 2;
         let glitch = freq_glitch(f, d);
@@ -979,10 +981,9 @@ impl Freq {
             FreqPick::None => return pick,
             FreqPick::Src(b) => self.prov = !self.conf[b],
             FreqPick::NoSignal => {
-                self.prov = !quiet && self.f_khz > 0.0;
-                if !self.prov {
-                    self.prev = 0.0;
-                }
+                // The next value is final at once (as at an entry).
+                self.prov = self.f_khz > 0.0;
+                self.prev = 0.0;
             }
         }
         self.shown = true;
@@ -5908,8 +5909,8 @@ mod tests {
         // 0.5 Hz: grey until a second gate agrees.
         assert_eq!(show(&mut q, 0, 0.0005, Gate::Done), (FreqPick::Src(0), true));
         assert_eq!(show(&mut q, 1, 0.000500011, Gate::Done).1, false);
-        // A gate without an edge within 3.5 periods of the shown value: no
-        // signal, grey; the next one (quiet, or empty again) is final.
+        // No edge within 3.5 periods of the shown value: no signal, grey;
+        // the next one (quiet, or empty again) is final.
         let mut q = freq0();
         show(&mut q, 1, 0.01, Gate::Done);
         assert_eq!(show(&mut q, 0, 0.0, E), (FreqPick::Src(1), false));
@@ -5917,6 +5918,18 @@ mod tests {
         assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::NoSignal, false));
         // The signal back: its first value is final.
         assert_eq!(show(&mut q, 1, 0.01, Gate::Done), (FreqPick::Src(1), false));
+        // A quiet gate (2.2 s without an edge) right after a value: grey too.
+        let mut q = freq0();
+        show(&mut q, 1, 0.001, Gate::Done);
+        assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::Src(1), false));
+        assert_eq!(show(&mut q, 1, 0.0, Q), (FreqPick::NoSignal, true));
+        assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::NoSignal, false));
+        // After a grey no signal the next value is final at once.
+        let mut q = freq0();
+        show(&mut q, 1, 0.001, Gate::Done);
+        show(&mut q, 0, 0.0, Q);
+        show(&mut q, 1, 0.0, Q);
+        assert_eq!(show(&mut q, 1, 0.0005, Gate::Done), (FreqPick::Src(1), false));
     }
 
     #[test]
