@@ -109,7 +109,10 @@ Chip (datasheet DS-HY3131-V10):
   counts SYSCLK from the preset, after the overflow the count stops on the next
   edge: CTB whole cycles, CTC high time, CTF; no edges -> CTA keeps running,
   CTB = 0, no CTF; CTBOV on CTB overflow. Source ACPO (comparator) or the CNT
-  pin (ENCNTI).
+  pin (ENCNTI). A change of the input frequency (`SetInput`) restarts the
+  waveform with a rising edge at the change (INFERRED from the MR9270 on the
+  device: a gate across a 1 Hz -> 0.5 Hz step read 1.40 Hz); a gate open
+  across it counts the old period up to the change, then the new one.
 * opendm40 misconnect sentinel nodes (firmware/src/sentinel.rs): the comparator on
   SCMPI = PB1 sees the A current times the relay-selected shunt (DC V / mV /
   ohm / temperature roles), on SCMPI = SENSE in DC A the V jack / 1000 when SS5

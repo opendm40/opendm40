@@ -76,8 +76,8 @@ To install opendm40 on a meter that runs the stock firmware:
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
-6. The first start is dark for a few seconds. Do not switch the meter off
-   in the first 10 seconds.
+6. The first start takes a few seconds; opendm40 shows a progress bar. Do
+   not switch the meter off in the first 10 seconds.
 
 ![Install: copy the file onto the stock firmware's USB disk, then restart](img/install.png)
 
@@ -291,6 +291,7 @@ scope.
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
+| Accuracy of the reading | — | [Shown](#accuracy) under the unit |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
 
@@ -635,8 +636,12 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle above it.
-- A new value every 0.35 s. **--** until the first clean result.
+- The frequency, with the duty cycle above it, from 0.5 Hz.
+- A new value every 0.35 s; below about 7 Hz, one per one or two periods
+  (about 1 s at 2 Hz).
+- **--** until the first result; **0.000 Hz** when the signal stops.
+- A small last digit where the counter resolves it: 10.0000 Hz, but
+  50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
 
 
@@ -888,6 +893,20 @@ shows: **Bargraph** (default) or **History**.
 
 *The history row: four values stored.*
 
+### Accuracy
+
+Under the unit, in grey: the meter's specified accuracy for this reading
+and model, from the DM40 user manual's table, e.g. ±0.0020 V for 4.8176 V
+on the 6 V range ([details](../../firmware/docs/dmm-accuracy.md)). Shown
+with the bargraph row; not in AC+DC, the 60 mV ranges, PT / NTC
+temperature, the power meter, or under REL. **Settings > More > More >
+Accuracy** turns it off. The reading's digits below the accuracy are grey
+(here the 6 and the extra digit).
+
+![The accuracy under the unit; the digits below it in grey](img/dmm-acc.png)
+
+*The accuracy under the unit; the digits below it in grey.*
+
 ### The trend chart
 
 The chart plots the reading over time, 321 points wide.
@@ -983,7 +1002,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -2262,6 +2281,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
+| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
 
 ### The Device page
 

@@ -576,8 +576,31 @@ Without `ad2-isr` (`--no-default-features --features vdisk`): A2 2 948 B,
 B 27 480 B, C 9 680 B, stack headroom 21 008 B.
 
 A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
-16 KiB warning. The next relief for C needs a real cut (the candidates of
+16 KiB warning. Since 0.6.0 (the DMM accuracy label,
+[dmm-accuracy.md](dmm-accuracy.md#4-memory)): the label's code in A2 (A2
+1 844 B free, below its warning), `ui::help_page` back in `.cold` (B
+16 484 B, C 7 152 B). The next relief for C needs a real cut (the candidates of
 audit #1 above) or a larger blob moved out of B.
+
+### Region B audit #5 (2026-10-26, fix/low-freq)
+
+The low-frequency Hz counter (`Dmm::freq_gate`, the gate checks, the
+provisional pick of `Freq::take`) is per-pass code: region B. It took B from
+16 500 B (main) to 15 532 B. Relief:
+- the USB endpoint allocation of usb-device / synopsys-usb-otg
+  (`UsbBus::alloc_ep`, `EndpointAllocator::alloc`, `UsbBusAllocator::alloc`
+  / `bulk`; 756 B) to `.cold`: only `run` building the USBTMC / MSC classes
+  calls it, before its loop;
+- `Gate` without fields (no out-of-line `PartialEq`) and `gate_limit_ms`
+  shorter (144 B).
+
+| | before | after |
+|---|---|---|
+| region B free | 15 532 B | 16 468 B |
+| region C free | 7 820 B | 7 064 B |
+| stack headroom (static worst path) | 20 508 B | unchanged |
+
+C is now below 7 KiB by ~100 B; the next relief for B needs a cut.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
@@ -879,7 +902,10 @@ but nothing can make that installed copy bootable again except a vendor install
 ([`src/native.rs`](../src/native.rs)), before USB exists, feeding the FWDGT
 between steps: `board::init` → fatren → `calbackup::boot` (safety copy) →
 `fatdir::boot` (LOGS / SHOTS / SCOPE) → `setfile::boot` (settings copy) →
-`vdisk::mirror_boot` (slow-bank mirror) → `vdisk::init` → `vdisk::boot_refresh`.
+`vdisk::mirror_boot` (slow-bank mirror), with the boot splash
+([`src/splash.rs`](../src/splash.rs)) from `board::init` on. Then `main()`
+draws the first frame, and `native::before_usb` runs `vdisk::init` →
+`vdisk::boot_refresh` before the touch reset and USB.
 
 **Board bring-up** ([`src/board.rs`](../src/board.rs)): what the stock
 firmware initialised before opendm40 ran when it was RAM-loaded, found by an
@@ -960,7 +986,12 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
     `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
     record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
-    data" below). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
+    data" below), then the start-up phase times in ms (`native::put_times`):
+    `BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
+    (each phase's own time; `board` includes the splash; `vdisk` and
+    `refresh` run after the first frame, before USB attaches) and
+    `MAINMS,<app>,<frame>,<touch>` (main's clock after App::new, the first
+    frame and the touch reset). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
@@ -1175,7 +1206,7 @@ INFO sources:
 Layout: clusters 2..6 = `INFO`, `DEBUG`, `LOGS`, `SCOPE`, `SHOTS` (one
 cluster each: 1024 slots), 7 = `README.TXT`, then the INFO files, then
 `SPIFLASH.BIN` (512 clusters), then the dynamic area. The INFO CRC-32s are
-computed once in `pre_main` (`vdisk::init`); the first table of LOGS / SCOPE
+computed once before USB attaches (`vdisk::init`, `native::before_usb`); the first table of LOGS / SCOPE
 / SHOTS too (`vdisk::boot_refresh`: a DLG's CSV size costs ~10 ms per 100 KB
 of logs; no media change for it).
 

@@ -119,7 +119,12 @@ def finger(im, x, y, r=17, n=1, gap=30):
 
 
 def save(im, name):
-    q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    # libimagequant keeps small distinct colours (the green status-bar logo
+    # came out olive with MEDIANCUT); MEDIANCUT where PIL lacks it.
+    try:
+        q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    except (ValueError, OSError):
+        q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     out = os.path.join(DST, name + '.png')
     q.save(out, optimize=True)
     print(f'{name:15s} {os.path.getsize(out):6d}')
@@ -132,7 +137,7 @@ def status_bar():
     bar = render('status-all', scale=sc, crop=(0, 0, 480, 34))
     im, d = canvas(bar.size[0] + 40, bar.size[1] + 110)
     paste(im, d, bar, 20, 20)
-    spans = [(27, 97), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
+    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
     for k, (a, b) in enumerate(spans):
         x = 20 + (a + b) / 2 * sc
         d.line((x, 20 + bar.size[1] + 2, x, 20 + bar.size[1] + 38), fill=BLUE, width=2)

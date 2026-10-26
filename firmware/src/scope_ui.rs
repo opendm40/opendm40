@@ -34,6 +34,9 @@ pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
 pub const C_SEL: Color = 0x059e; // list selection, spinner band, slider fill
 pub const C_YELLOW: Color = 0xffe0;
+/// The strip value's digits below the accuracy (ui::strip_acc): the DMM
+/// page's VALUE_LOW.
+pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
@@ -793,11 +796,16 @@ pub fn panel(m: &Model) {
 /// Page background boxes and the frame border (no graph interior). The
 /// combined view keeps y 20..`top` for the meter strip (drawn by ui.rs).
 pub fn chrome(m: &Model) {
-    let top = m.top() as u16;
     lcd::fill_rect(0, 0, 480, 20, C_BAR);
     lcd::fill_rect(414, 20, 66, 300, C_BAR);
     lcd::fill_rect(0, 301, 414, 19, C_BAR);
     lcd::fill_rect(0, 20, 13, 281, C_BAR);
+    frame(m);
+}
+
+/// The graph's 1 px frame.
+fn frame(m: &Model) {
+    let top = m.top() as u16;
     let h = m.frame_h() as u16;
     lcd::fill_rect(13, top, 401, 1, C_FRAME);
     lcd::fill_rect(13, top + h - 1, 401, 1, C_FRAME);
@@ -1544,16 +1552,82 @@ pub fn graph() -> &'static mut Graph {
     unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) }
 }
 
+/// Row classes of the grid rule (`grid_on`), one byte per frame row
+/// (`ROWS`): centre row, every 7th row, the division rows, the rows
+/// near the centre; R_LINE: a horizontal line (`Deco::h`) on the row.
+const R_CY: u8 = 1;
+const R_7: u8 = 2;
+const R_DH: u8 = 4;
+const R_NEAR: u8 = 8;
+const R_LINE: u8 = 16;
+/// Every row (the centre column fx = 200).
+const R_ALL: u8 = 0x80;
+
+/// `Graph::flush`'s row classes of the frame being painted: the per-row
+/// part of the grid rule, worked out once per flush. Per pixel, its
+/// divisions made the most of a full graph repaint's time (device
+/// DBG:PROF?, 2026-10-26: the scope page's full repaint 262 ms). In SRAM:
+/// the TCM's .bss is taken from the stack.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut ROWS: [u8; 320] = [0; 320];
+
+/// Fill `ROWS` for a frame of `h` rows and its horizontal lines.
+fn row_classes(h: i16, hl: &[Option<HLine>; NL]) -> &'static [u8; 320] {
+    let rows = unsafe { &mut *core::ptr::addr_of_mut!(ROWS) };
+    let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
+    for fy in 0..h.clamp(0, 320) {
+        rows[fy as usize] = row_class(fy, cy, dh);
+    }
+    for l in hl.iter().flatten() {
+        if let Some(r) = rows.get_mut(l.fy as usize) {
+            *r |= R_LINE;
+        }
+    }
+    rows
+}
+
+/// The `grid_on` classes of row `fy` (`cy` the centre row, `dh` the
+/// division height).
+fn row_class(fy: i16, cy: i16, dh: i16) -> u8 {
+    let mut c = 0;
+    if fy == cy {
+        c |= R_CY;
+    }
+    if fy % 7 == 0 {
+        c |= R_7;
+    }
+    if fy % dh == 0 {
+        c |= R_DH;
+    }
+    if (fy - cy).abs() <= 2 {
+        c |= R_NEAR;
+    }
+    c
+}
+
+/// The `grid_on` classes of column `fx` (rows with `ROWS[fy] & mask != 0`
+/// are grid; R_ALL: all of them).
+fn col_classes(fx: i16) -> u8 {
+    if fx == 200 {
+        return R_ALL;
+    }
+    let mut c = R_CY;
+    if fx % 40 == 0 || (fx - 200).abs() <= 2 {
+        c |= R_7;
+    }
+    if fx % 8 == 0 {
+        c |= R_DH | R_NEAR;
+    }
+    c
+}
+
 /// Grid rule of the frame (sec. 4.1) at frame (fx, fy), 1 <= fx <= 399,
 /// 1 <= fy <= h - 2; `cy` the centre row, `dh` the division height.
-#[inline]
+/// That is: the centre column and row; every 7th row in the columns at
+/// every 40th and within 2 of the centre column; the division rows and
+/// the rows within 2 of the centre in every 8th column.
 fn grid_on(fx: i16, fy: i16, cy: i16, dh: i16) -> bool {
-    fx == 200
-        || fy == cy
-        || (fx % 40 == 0 && fy % 7 == 0)
-        || (fy % dh == 0 && fx % 8 == 0)
-        || (fx % 8 == 0 && (fy - cy).abs() <= 2)
-        || (fy % 7 == 0 && (fx - 200).abs() <= 2)
+    (row_class(fy, cy, dh) | R_ALL) & col_classes(fx) != 0
 }
 
 /// Row intervals of one column to repaint.
@@ -1634,7 +1708,6 @@ impl Graph {
         }
         let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
         let h = d.fh;
-        let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
         let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
             minks[i] = MarkInk::of(mk);
@@ -1661,10 +1734,11 @@ impl Graph {
         }
         let marks_changed = d.marks != o.marks;
         let vl = |dd: &Deco, fx: i16| dd.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col);
+        let rows = row_classes(h, &d.h);
         // Colour of graph pixel (fx, fy): markers over the column (`mcol`,
         // the topmost last), math, trace, persistence, the vertical line of
-        // the column (`vcol`), horizontal lines, grid.
-        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize]| -> Color {
+        // the column (`vcol`), horizontal lines, grid (`cm`: col_classes).
+        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
             let (sx, sy) = (13 + fx, d.top + fy);
             for &mi in mcol.iter().rev() {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
@@ -1685,12 +1759,15 @@ impl Graph {
                     return c;
                 }
             }
-            for l in d.h.iter().flatten() {
-                if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
-                    return l.col;
+            let rc = rows[fy as usize];
+            if rc & R_LINE != 0 {
+                for l in d.h.iter().flatten() {
+                    if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
+                        return l.col;
+                    }
                 }
             }
-            if grid_on(fx, fy, cy, dh) { d.grid } else { C_FILL }
+            if (rc | R_ALL) & cm != 0 { d.grid } else { C_FILL }
         };
         self.px = 0;
         // Trace-only: per-column bookkeeping, from the resume column, under
@@ -1790,11 +1867,30 @@ impl Graph {
                     }
                 }
             }
+            let cm = col_classes(fx);
+            // `pix` inline for the rows without a marker or a horizontal
+            // line: a full graph took 108 ms through the closure.
+            let vrow = vcol.map_or(0, |_| h - 4);
             for &(a, b) in &cut[..nc] {
                 self.px += (b - a + 1) as u32;
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
-                    lcd::data(pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm]));
+                    let rc = rows[fy as usize];
+                    lcd::data(if nm > 0 || rc & R_LINE != 0 {
+                        pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm], cm)
+                    } else if fy >= ma.0 && fy <= ma.1 {
+                        d.math
+                    } else if fy >= tr.0 && fy <= tr.1 {
+                        d.trace
+                    } else if fy >= ps.0 && fy <= ps.1 {
+                        d.half
+                    } else if fy & 1 == 1 && fy <= vrow {
+                        vcol.unwrap_or(C_FILL)
+                    } else if (rc | R_ALL) & cm != 0 {
+                        d.grid
+                    } else {
+                        C_FILL
+                    });
                 }
             }
         }
@@ -1841,7 +1937,7 @@ impl Graph {
                             nm += 1;
                         }
                     }
-                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm]));
+                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm], col_classes(x)));
                 }
                 fx = e + 1;
             }
@@ -1893,6 +1989,20 @@ static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [
 
 fn shown() -> &'static mut Shown {
     unsafe { &mut *core::ptr::addr_of_mut!(SHOWN) }
+}
+
+/// A popup over the graph closed: the next `update` repaints the graph
+/// (its overlays too) and the frame, the rest of the page only where the
+/// model changed; `ch1` / `math`: their panel labels were drawn grey
+/// (panel_button outside `update`), so they are drawn again.
+#[inline(never)] // region C (link-native.x)
+pub fn uncover(m: &Model, ch1: bool, math: bool) {
+    if let Some(o) = shown().m.as_mut() {
+        o.ch1_open |= ch1;
+        o.math_open |= math;
+    }
+    graph().invalidate();
+    frame(m);
 }
 
 /// Forget everything drawn (the next `update` draws the whole page).
@@ -2002,11 +2112,13 @@ pub fn update(m: &Model) {
     if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
         trig_badge(m);
     }
-    if m.cur_tab != 0 && d(ol.cur_tab != m.cur_tab) {
+    // A repainted graph (a popup closed: `uncover`) leaves its holes as
+    // they were: the overlays in them are drawn again.
+    if m.cur_tab != 0 && (!valid0 || d(ol.cur_tab != m.cur_tab)) {
         cur_tab(m.cur_tab);
     }
     for (k, &(_, bits)) in tabs.iter().enumerate() {
-        if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb) {
+        if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && (!valid0 || d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb)) {
             tb_tab(m, k == 0);
         }
     }
@@ -3068,6 +3180,12 @@ pub struct StripData {
     pub gen: Txt,
     /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
     pub dim: bool,
+    /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
+    /// "+-" sign); 0 = none.
+    pub acc: u8,
+    /// The value's glyphs from this index on are below the accuracy
+    /// (ui::strip_acc, ../docs/dmm-accuracy.md section 5): C_LOW grey.
+    pub grey: u8,
 }
 
 impl StripData {
@@ -3082,6 +3200,8 @@ impl StripData {
         hv: false,
         gen: Txt::EMPTY,
         dim: false,
+        acc: 0,
+        grey: u8::MAX,
     };
 }
 
@@ -3151,10 +3271,18 @@ pub fn st_sub_x(u: Rect) -> i16 {
     u.x + u.w + 4
 }
 
+#[inline(always)]
 fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
+    st_text_grey(r, font, text, fg, align, sp, u8::MAX);
+}
+
+/// `st_text` with the glyphs from index `grey` on in C_LOW (the value's
+/// digits below the accuracy).
+#[inline(never)]
+fn st_text_grey(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8, grey: u8) {
     let t = Ink::new(font, r, text, align, sp);
     paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
-        Some(g) => (fg, tag(1, g)),
+        Some(g) => (if g >= grey { C_LOW } else { fg }, tag(1, g)),
         None => (C_FILL, 0),
     });
 }
@@ -3199,8 +3327,8 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value && ol.dim == d.dim) {
-        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1);
+    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to
@@ -3220,9 +3348,21 @@ pub fn meter_strip(d: &StripData) {
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
     }
     for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim) || moved {
-            let r = st_sub(i, gen_on, sx);
-            let t = d.sub[i].as_str();
+        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim && ol.acc == d.acc) || moved {
+            let mut r = st_sub(i, gen_on, sx);
+            // The accuracy: grey, the text after the "+-" (`pm`); none
+            // when it does not fit even at spacing 0 (the GEN column).
+            let acc = d.acc == i as u8 + 1;
+            let mut t = d.sub[i].as_str();
+            if acc {
+                lcd::fill_rect(r.x as u16, r.y as u16, PM_W as u16, r.h as u16, C_FILL);
+                r = rect(r.x + PM_W, r.y, r.w - PM_W, r.h);
+                if sf::text_width(sf::SC_F12, t, 0) > r.w {
+                    t = "";
+                } else {
+                    pm(r.x - PM_W, r.y + 3, C_DIS);
+                }
+            }
             // Narrow (GEN shown): the text without its spaces if it is too
             // wide, then at the stock spacing 0 (as the scope's cells).
             let mut b = [0u8; 24];
@@ -3240,10 +3380,24 @@ pub fn meter_strip(d: &StripData) {
                 t
             };
             let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
-            st_text(r, sf::SC_F12, t, if d.dim { C_DIS } else { C_WHITE }, 1, sp);
+            st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
     *shown = Some(*d);
+}
+
+/// Width of the "+-" sign (`pm`) and its gap to the text.
+pub const PM_W: i16 = 6;
+
+/// "+-" (no stock font has U+00B1): a 5 x 5 plus over a 5 px bar, 8 px
+/// tall from `y` (the F14 / SC_F12 digits' height); the DMM page's and the
+/// strip's accuracy label.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn pm(x: i16, y: i16, c: Color) {
+    lcd::fill_rect((x + 2) as u16, y as u16, 1, 5, c);
+    lcd::fill_rect(x as u16, (y + 2) as u16, 5, 1, c);
+    lcd::fill_rect(x as u16, (y + 7) as u16, 5, 1, c);
 }
 
 /// Right-panel button under a touch: the stock rects, x from the panel edge

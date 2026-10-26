@@ -217,6 +217,7 @@ recorded.
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
+| [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
 | [`fastratetest.py`](hy3131/fastratetest.py) | FAST / MED / SLOW rates in DC V | | 47740 |
 | [`dcvtest.py`](hy3131/dcvtest.py) | the DC-coupled V row on AD2 | | 3611 |
@@ -236,10 +237,12 @@ recorded.
 |---|---|---|---|
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
+| [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
 | [`sratetest.py`](sratetest.py) | the scope's sample-rate label: the record bar = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll, the Wave view and the combined view (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
+| [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
 
 ### Logger and the AD2 stream

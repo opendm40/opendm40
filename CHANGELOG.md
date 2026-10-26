@@ -12,9 +12,60 @@ section named after the tag as the release notes; how to cut a release:
 - Scope: the record bar shows the sample rate while running, e.g.
   "12.5MS/s", "1.20kS/s" in the Wave view, "ROLL 500S/s" in the combined
   view ([manual](docs/manual/README.md#the-scope-page)).
+- Multimeter: the specified accuracy of the reading, small and grey under
+  the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
+  user manual's table for the meter's model (DM40A / B / C), as an absolute
+  value with one significant digit (two when the first is 1). Also in the combined view when a sub row is free. Not shown with
+  the History row, in AC+DC, the 60 mV ranges, the power meter, under REL
+  or for PT / NTC sensors. Settings > More > More > Accuracy: ON (default)
+  / OFF ([manual](docs/manual/README.md#accuracy);
+  [firmware/docs/dmm-accuracy.md](firmware/docs/dmm-accuracy.md)).
+- Multimeter: with the accuracy on, the reading's digits below it are warm
+  grey (the "6" of 4.8176 V ±0.002 V, and the extra digit), also in the
+  combined view.
+- Start-up: a splash with "opendm40", the version, "Loading..."
+  and a progress bar from about 0.2 s after power-on until the meter page
+  (on the slow first start after an update it says so, and that later
+  starts are fast);
+  before, the screen stayed dark for about a second (seconds on the first
+  start after an update) and then empty for 3 s more. `DBG:BOOT?` reports each
+  start-up phase's time (`BOOTMS`, `MAINMS`).
+
+### Changed
+
+- No Wiren Board logo at the left of the status and title bars; the range
+  label and "< Back" sit where the stock firmware has them.
 
 ### Fixed
 
+- Start-up: the meter page comes up about 3 s sooner. It waited for the
+  USB host, or 3 s without one, before drawing anything.
+- Frequency: 2 Hz and 5 Hz gave no reading. The counter's gate is now read
+  when it ends on an input edge instead of every 0.35 s, so frequencies down
+  to 0.5 Hz read (one value per gate below about 7 Hz; 0.35 s above, as
+  before). The same for the frequency next to AC V / AC A. The Hz reading
+  shows one more digit (small) where the counter's resolution supports it
+  ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
+  After the input frequency changes, a value is grey until two gates agree:
+  a gate across the change no longer shows a wrong value, and a slower input
+  no longer reads 0.000 Hz in between.
+- Multimeter, continuity / diode: touching the probes together no longer
+  shows A-JACK ("Current in A jack: check leads") for a second or two. There
+  A-JACK now comes only while the reading is OL (nothing on V/Ω-COM, as
+  with the leads in A and COM).
+- Scope / generator: after a start with Analog power set to Both always, or
+  with a start page other than Multimeter, the scope's analog supply stayed
+  off (the trace was flat at the bottom). Switching to Auto, or opening the
+  scope, could then turn both analog supplies off, and the meter switched
+  itself off.
+- Scope: closing a popup (CH1, Math, timebase list, the MF menu) redraws
+  only the graph under it, in about 60 ms instead of 260 ms. The tap's beep
+  lasted until the redraw ended; it is short again.
+- AC V: after a range step on a signal with a DC part (e.g. a 0 / 9.5 V
+  square) the first readings read high while the AC coupling settled: +4 %
+  on 60 V -> 6 V, up to 5x the input on 6 V -> 60 V. They show grey until it
+  has settled (up to 2 s); the first black one was within 0.2 % after
+  60 -> 6 V and 0.7 % after 6 -> 60 V.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
