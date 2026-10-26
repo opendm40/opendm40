@@ -119,7 +119,12 @@ def finger(im, x, y, r=17, n=1, gap=30):
 
 
 def save(im, name):
-    q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    # libimagequant keeps small distinct colours (the green status-bar logo
+    # came out olive with MEDIANCUT); MEDIANCUT where PIL lacks it.
+    try:
+        q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    except (ValueError, OSError):
+        q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     out = os.path.join(DST, name + '.png')
     q.save(out, optimize=True)
     print(f'{name:15s} {os.path.getsize(out):6d}')
