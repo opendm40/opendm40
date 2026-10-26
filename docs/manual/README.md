@@ -1447,9 +1447,9 @@ over the trace; tap the button again while its popup is open to turn it off.
 ### Stop, zoom and pan
 
 Press **RUN** (or tap the run state) to stop. The scope takes one more
-capture of the full record (up to 43 008 samples, 65 520 from 100 ms/div; the
-trigger point at the trigger position, as **Single**), then stops; press
-again to stop at once. The capture stays in memory:
+capture (the trigger point at the trigger position, as **Single**; up to
+the screen's time + 1 s), then stops; press again to stop at once. The
+capture stays in memory:
 
 - change the timebase to zoom in or out of the stored capture;
 - change the V/div to scale it;

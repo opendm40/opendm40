@@ -299,24 +299,29 @@ def stop_checks(t):
     100 ms/div (the packed ring), Auto with STOP at several moments (after
     frames were shown, so BUF holds a packed record and the next capture is
     in flight), and Normal with the level above the sine (no trigger). STOP
-    ends on a complete capture (TRIG:STAT? STOP once it is in): the whole
-    record (the DIGitize length: 43 008 less the margins, 65 520 at
-    100 ms/div), the input sine everywhere (every code inside its range, no
+    ends on a complete capture (TRIG:STAT? STOP once it is in, at most the
+    screen's time + 1 s and a margin later, device time): the DIGitize
+    length capped at the screen + 0.5 s (43 008 less the margins at 5 / 2
+    ms/div, 37 500 at 100 ms/div; untriggered at the deadline, what is
+    in), the input sine everywhere (every code inside its range, no
     step larger than the sine's: no seam), in Auto the trigger point inside
     the record on the level. Before: the samples of the capture in flight
     up to the STOP (device 2026-10-27: 1 753 at 5 ms/div) or, with the
     stop's own TCIF4 read as a wrap, the full ring with a seam."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
-    for tb, nmin, waits in ((5e-3, 42144, (0.6, 0.9, 1.3)), (2e-3, 42144, (0.5, 0.8)), (0.1, 64656, (2.5, 4.0))):
+    for tb, nmin, waits in ((5e-3, 42144, (0.6, 0.9, 1.3)), (2e-3, 42144, (0.5, 0.8)), (0.1, 37000, (2.5, 4.0))):
         for mode, lev, wait in [('AUTO', 0, w) for w in waits] + [('NORM', 2 * A.vpp, 1.0)]:
             for c in ('TIM:SCAL %g' % tb, 'TRIG:SWE %s' % mode, 'TRIG:LEV %g' % lev, 'RUN'):
                 t.w(c)
             v0 = t.vtime()
             while t.vtime() - v0 < wait:
                 time.sleep(0.05)
+            vs = t.vtime()
             t.w('STOP')
             stopped = t.wait_stop(s=15, wall=600)
+            dt = t.vtime() - vs
+            stopped = stopped and dt < tb * 10 + 1.6
             p = pre(t)
             v, codes = volts(p, block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60)))
             n = len(v)
@@ -331,8 +336,8 @@ def stop_checks(t):
                 # period at 100 ms/div), rising.
                 ok = ok and 2 <= i0 < n - 2 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1]
                 trig = ', trigger sample %d (%.3f V)' % (i0, v[i0] if 0 <= i0 < n else float('nan'))
-            check(ok, '%g ms/div, %s, STOP after %.1f s: %s, %d samples (>= %d)%s, %d outside the sine, largest step %.3f V (sine %.3f)'
-                  % (tb * 1e3, mode, wait, 'STOP' if stopped else 'no STOP', n, nmin, trig, out, jump, step))
+            check(ok, '%g ms/div, %s, STOP after %.1f s: %s in %.2f s, %d samples (>= %d)%s, %d outside the sine, largest step %.3f V (sine %.3f)'
+                  % (tb * 1e3, mode, wait, 'STOP' if stopped else 'no STOP', dt, n, nmin, trig, out, jump, step))
     for c in ('TRIG:SWE AUTO', 'TRIG:LEV 0', 'TIM:SCAL 1e-3', 'WAV:FORM BYTE'):
         t.w(c)
 

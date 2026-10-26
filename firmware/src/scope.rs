@@ -396,9 +396,10 @@ pub struct Scope {
     /// the untriggered one), whatever the sweep; no roll meanwhile. Cleared
     /// by any run / stop change (`apply`).
     pub one_shot: bool,
-    /// A STOP waits for the capture `one_shot` restarted (`apply`): no
-    /// trigger in time ends it untriggered once the ring is full, in any
-    /// sweep (`untrig_ok`).
+    /// A STOP waits for the capture `one_shot` restarted (`apply`): a
+    /// record of at most the screen + 1 s (`rec_split`), ended at that
+    /// time with what is in (`deadline`), untriggered in any sweep
+    /// (`untrig_ok`).
     stop_req: bool,
     /// Source DMM (the wave view, `wave_enter`): the record is the HY3131
     /// AD2 stream drained from the logger ring (`WaveSource`), not the MCX
@@ -1461,7 +1462,10 @@ impl Scope {
         if self.s.mode != TrigMode::Single && !self.one_shot {
             return (pre, post);
         }
-        let n = (self.sample_rate() as usize * 10).min(self.cap() - 64 - WIN).max(self.screen);
+        let fs = self.sample_rate() as usize;
+        // A STOP's capture (stop_req): the screen + 0.5 s (its deadline
+        // gives 0.5 s more to the trigger: poll_frame).
+        let n = (fs * 10).min(self.cap() - 64 - WIN).min(if self.stop_req { self.screen + fs / 2 } else { usize::MAX }).max(self.screen);
         let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         (p.max(pre), (n - p).max(post))
     }
@@ -1505,8 +1509,10 @@ impl Scope {
                 // comparator stayed quiet is a miss (no comparator on this
                 // board, or the level map is off); three in a row hand the
                 // scope back to the software trigger (hwtrig::note_miss).
-                // A STOP's capture (stop_req) waits for the full ring.
-                if st != Status::Armed || now < self.deadline || !(wrapped || (wr >= self.screen && !self.stop_req)) {
+                // A STOP's capture (stop_req) at its deadline: also with the
+                // post part still running (Fired), the trigger kept if a
+                // screen around it is in.
+                if (st != Status::Armed && !self.stop_req) || now < self.deadline || !(wrapped || wr >= self.screen) {
                     return None;
                 }
                 // Re-read after the stop: the DMA was still running above.
@@ -1518,7 +1524,7 @@ impl Scope {
                 self.snapshot_mark(off, len, len - self.screen / 2, None, false);
                 let data = self.rec_view();
                 let found = if len - post > pre { self.find_trigger(data.sub(pre, len - post)).map(|i| i + pre) } else { None };
-                if found.is_some() {
+                if found.is_some() && st == Status::Armed {
                     self.hw.note_miss();
                 }
                 let start = match found {
@@ -1795,8 +1801,13 @@ impl Scope {
             self.hw_t0 = now;
             self.st_poll = now;
             if self.deadline == 0 {
-                // Auto: untriggered frame after the stock timeout.
-                self.deadline = now + self.auto_timeout();
+                // Auto: untriggered frame after the stock timeout. A STOP's
+                // capture: the time of its record (rec_split) + 0.5 s, then
+                // it ends with what is in (hw_poll / stream_poll): at most
+                // the screen's time + 1 s after the STOP.
+                let (p, q) = self.rec_split();
+                self.deadline = now
+                    + if self.stop_req { ((p + q) as u32 * 1000 / self.sample_rate().max(1) + 500) as u64 } else { self.auto_timeout() };
             }
             return None;
         }
@@ -1909,13 +1920,13 @@ impl Scope {
             (self.st_idx, self.st_armed, self.st_scan) = (i, armed, n);
         }
         let Some(t) = self.st_found else {
-            // A STOP's capture (stop_req): the full ring.
-            if self.untrig_ok() && now >= self.deadline && wr >= if self.stop_req { cap } else { self.screen } as u64 {
+            if self.untrig_ok() && now >= self.deadline && wr >= self.screen as u64 {
                 return self.stream_emit(now, None);
             }
             return None;
         };
-        let need = t + self.rec_split().1 as u64;
+        // A STOP's capture past its deadline: the screen's post part only.
+        let need = t + if self.stop_req && now >= self.deadline { self.hw_split().1 } else { self.rec_split().1 } as u64;
         if wr < need {
             if (need - wr) * 1_000_000 / fs > STREAM_SPIN_US {
                 return None;

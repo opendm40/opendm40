@@ -536,7 +536,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
 | `RUN` | | Starts acquiring. | both |
-| `STOP` | | Stops after one more complete capture (as `DIGitize`; `TRIGger:STATus?` is `STOP` once it is in); a second `STOP` meanwhile stops at once. | both |
+| `STOP` | | Stops after one more capture (as `DIGitize`, at most the screen's time + 1 s; `TRIGger:STATus?` is `STOP` once it is in); a second `STOP` meanwhile stops at once. | both |
 | `SINGle` | | Sets the sweep to Single and starts. | both |
 | `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
 | `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |
