@@ -384,6 +384,11 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
     }
 }
 
+/// MCX sample rate (S/s) at timebase `tb` (`Scope::sample_rate`).
+pub const fn tb_fs(tb: usize) -> u32 {
+    TB[tb].0
+}
+
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
 /// stream rung `fs` (`wave_fs_for`): the chip's real rate (hy3131.rs
 /// AD2_OSR32_REAL_MHZ, the datasheet's since device c830e09: its 76 575 made
@@ -1392,7 +1397,7 @@ impl Scope {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
+        if self.wave { wave_real_fs(wv().fs) } else { tb_fs(self.s.tb) }
     }
 
     /// Zoom anchor of the stored record (sample index at the screen centre),

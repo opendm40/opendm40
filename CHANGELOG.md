@@ -7,6 +7,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- Scope: the record bar shows the sample rate while running, e.g.
+  "12.5MS/s", "1.20kS/s" in the Wave view, "ROLL 500S/s" in the combined
+  view ([manual](docs/manual/README.md#the-scope-page)).
+
 ### Fixed
 
 - Multimeter / scope: a calibration record with a bad CRC is ignored and

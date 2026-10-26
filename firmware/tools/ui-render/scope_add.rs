@@ -22,7 +22,113 @@ fn rb(r: stockfont::Rect) -> Bx {
     Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)
 }
 
+/// The sample rate in the record bar while running (Model::srate): every
+/// MCX timebase and DMM wave rung in the Scope page's short bar (beside the
+/// source badge) and the combined view's full bar, running / roll / stopped,
+/// under the replica rules; the label fits the bar's inside
+/// with the stock text margin; updates between them equal fresh draws.
+fn srate(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let scene = |src: u8, combined: bool, tb: usize, status: u8, roll: bool| {
+        let mut m = base.m;
+        m.src = src;
+        m.combined = combined;
+        m.tb = tb as u8;
+        m.status = status;
+        m.roll = roll;
+        m.tabs = 3;
+        m.record = if status == scope_ui::ST_STOP { (0.15, 0.85) } else { (0.0, 1.0) };
+        let fs = if src == scope_ui::SRC_DMM { scope::wave_real_fs(scope::wave_fs_for(tb)) } else { scope::tb_fs(tb) };
+        m.srate = if status == scope_ui::ST_STOP { 0 } else { fs };
+        if src == scope_ui::SRC_DMM {
+            m.wvdiv = 250.0;
+            m.ch1_txt = "AC V";
+            m.ac = true;
+        }
+        stock::Scene { name: "srate", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() }
+    };
+    let top = Bx::new(0, 0, 480, 20);
+    let mut n = 0;
+    let mut widest = (0, String::new());
+    let mut one = |ck: &mut Checker, sc: &stock::Scene, name: &str| {
+        stock::draw(sc);
+        ck.check_replica(name);
+        if sc.m.src != scope_ui::SRC_NONE {
+            ck.check_add(name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+        }
+        // The label inside the bar's inner box (record_bar: 1 px ring) with
+        // the 3 px side margin of the stock badge texts.
+        if sc.m.srate > 0 {
+            let mut b = scope_ui::Buf::new();
+            if sc.m.roll && sc.m.src == scope_ui::SRC_NONE {
+                b.push("ROLL ");
+            }
+            scope_ui::fmt_srate(&mut b, sc.m.srate);
+            let w = stockfont::text_width(stockfont::SC_F12, b.as_str(), 0);
+            let lim = scope_ui::record_bar_rect(&sc.m).w - 2 - 6;
+            ck.cases += 1;
+            if w > lim {
+                ck.fail(name, format!("record bar label \"{}\" {w} px > {lim}", b.as_str()));
+            }
+            if w > widest.0 {
+                widest = (w, b.as_str().to_string());
+            }
+        }
+        n += 1;
+    };
+    for (src, combined) in [(scope_ui::SRC_MCX, false), (scope_ui::SRC_DMM, false), (scope_ui::SRC_NONE, true)] {
+        let lo = if src == scope_ui::SRC_DMM { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        for tb in lo..30 {
+            let roll = tb >= scope::TB_ROLL;
+            let sc = scene(src, combined, tb, if roll { scope_ui::ST_RUN } else { scope_ui::ST_TD }, roll);
+            one(ck, &sc, &format!("srate/{src}/{}/tb{tb}", combined as u8));
+        }
+    }
+    // The contact sheet's scenes.
+    let shots: [(&str, u8, bool, usize, u8, bool); 10] = [
+        ("s07-srate-tb3", scope_ui::SRC_MCX, false, 3, scope_ui::ST_TD, false),
+        ("s07-srate-tb13", scope_ui::SRC_MCX, false, 13, scope_ui::ST_TD, false),
+        ("s07-srate-tb16", scope_ui::SRC_MCX, false, 16, scope_ui::ST_AUTO, false),
+        ("s07-srate-tb20", scope_ui::SRC_MCX, false, 20, scope_ui::ST_WAIT, false),
+        ("s07-srate-roll", scope_ui::SRC_MCX, false, 26, scope_ui::ST_RUN, true),
+        ("s07-srate-stopped", scope_ui::SRC_MCX, false, 13, scope_ui::ST_STOP, false),
+        ("s07-srate-wave", scope_ui::SRC_DMM, false, 15, scope_ui::ST_TD, false),
+        ("s07-srate-wave-roll", scope_ui::SRC_DMM, false, 24, scope_ui::ST_RUN, true),
+        ("s07-srate-dmmscope", scope_ui::SRC_NONE, true, 13, scope_ui::ST_TD, false),
+        ("s07-srate-dmmscope-roll", scope_ui::SRC_NONE, true, 26, scope_ui::ST_RUN, true),
+    ];
+    let mut states = vec![];
+    for (name, src, combined, tb, status, roll) in shots {
+        let sc = scene(src, combined, tb, status, roll);
+        one(ck, &sc, &format!("srate/{name}"));
+        save(out, name);
+        if !combined {
+            states.push(sc);
+        }
+    }
+    // Updates (a timebase change, roll, stop, the source)
+    // equal fresh draws.
+    states.push(stock::Scene { name: "srate", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() });
+    for (i, a) in states.iter().enumerate() {
+        for (j, b) in states.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            stock::draw(b);
+            let want = emu().fb.clone();
+            stock::draw(a);
+            stock::load(b);
+            scope_ui::update(&b.m);
+            scope_ui::cells(&b.m, &b.cells);
+            ck.same_as(&format!("srate/update/{i}->{j}"), &want);
+            n += 1;
+        }
+    }
+    println!("scope sample rate: {n} cases, widest label \"{}\" {} px", widest.1, widest.0);
+}
+
 pub fn run(ck: &mut Checker, out: &str) {
+    srate(ck, out);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;

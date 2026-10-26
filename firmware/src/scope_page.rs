@@ -517,6 +517,7 @@ impl App {
             record,
             // Combined view: the strip's GEN badge shows it instead.
             gen_hz: if self.gen.s.on && self.view == View::Scope { self.gen.actual_hz() } else { 0.0 },
+            srate: if s.run { self.scope.sample_rate() } else { 0 },
             ch1_open: matches!(sp.popup, su::Popup::Ch1(_)),
             math_open: matches!(sp.popup, su::Popup::Math(_)),
             pressed: if now < sp.pressed_until { sp.pressed } else { 0 },

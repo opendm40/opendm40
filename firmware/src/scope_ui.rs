@@ -169,6 +169,9 @@ pub struct Model {
     /// Generator output frequency, shown in the record bar while running
     /// (<= 0: off).
     pub gen_hz: f32,
+    /// Sample rate (S/s) of the acquisition, shown in the record bar while
+    /// running (opendm40); 0 while stopped and on the stock page.
+    pub srate: u32,
     /// CH1 / math label grey (their popup is open).
     pub ch1_open: bool,
     pub math_open: bool,
@@ -273,6 +276,7 @@ impl Model {
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
+        srate: 0,
         ch1_open: false,
         math_open: false,
         pressed: 0,
@@ -490,8 +494,8 @@ pub fn tb_badge(m: &Model) {
 }
 
 /// 2.3 record-position bar; while running (record = screen) it shows the
-/// generator frequency instead of the constant full-record line when the
-/// generator is on (opendm40 addition, 12 px grey like "ROLL").
+/// sample rate, or the generator frequency when it is on, instead of the
+/// constant full-record line (opendm40 additions, 12 px grey like "ROLL").
 /// The record bar's box (shorter beside the source badge).
 pub fn record_bar_rect(m: &Model) -> Rect {
     if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
@@ -504,13 +508,25 @@ pub fn record_bar(m: &Model) {
     let (sw, x0s) = (r.w as f32 - 8.0, r.x);
     let running = m.status != ST_STOP;
     let mut b = Buf::new();
-    let (txt, line, lb, rb);
-    if m.roll {
-        txt = Ink::new(sf::SC_F12, inner, "ROLL", 8, 0);
-        (line, lb, rb) = (None, Ink::none(), Ink::none());
-    } else if running && m.gen_hz > 0.0 {
+    // `srate` is 0 while stopped.
+    let rate = m.srate > 0;
+    // Beside the source badge (70 px) the rate replaces "ROLL"; "G 1.00kHz"
+    // replaces the rate.
+    let roll = m.roll && (m.src == SRC_NONE || !rate);
+    if roll {
+        b.push("ROLL");
+    }
+    if running && m.gen_hz > 0.0 && !m.roll {
         b.push("G ");
         fmt_hz(&mut b, m.gen_hz);
+    } else if rate {
+        if roll {
+            b.push(" ");
+        }
+        fmt_srate(&mut b, m.srate);
+    }
+    let (txt, line, lb, rb);
+    if b.n > 0 {
         txt = Ink::new(sf::SC_F12, inner, b.as_str(), 8, 0);
         (line, lb, rb) = (None, Ink::none(), Ink::none());
     } else {
@@ -605,6 +621,15 @@ pub fn fmt_hz(out: &mut Buf, hz: f32) {
     let dec = if x < 9.995 { 2 } else if x < 99.95 { 1 } else { 0 };
     let mut t = [0u8; 16];
     out.push(crate::dmm::format(&mut t, x * 1.000_001, dec)).push(p);
+}
+
+/// Sample rate as `fmt_hz` gives a frequency, "S/s" for "Hz": "50.0MS/s",
+/// "12.5MS/s", "4.80kS/s", "125S/s" (no trailing-zero trim: ~180 B more of
+/// region B).
+pub fn fmt_srate(out: &mut Buf, fs: u32) {
+    fmt_hz(out, fs as f32);
+    out.n -= 2;
+    out.push("S/s");
 }
 
 /// 2.4 CH1 V/div badge.
@@ -1907,7 +1932,7 @@ pub fn update(m: &Model) {
     if d(ol.src != m.src || (m.src != SRC_NONE && pal)) {
         src_badge(m);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src) {
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.srate != m.srate || ol.src != m.src) {
         record_bar(m);
     }
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
