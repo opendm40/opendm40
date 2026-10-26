@@ -1027,7 +1027,10 @@ results are not the input (device d8e249d: a false A-PROT on the first
 window). Without an A-jack current AD2 is never on: the stock DC V
 calibration conditions stay untouched.
 
-**Only DC V and DC mV.** In ohm and temperature the probe reads the V input
+**Only DC V and DC mV.** In DC mV a trip also needs a DC mV result
+within the range since the hit run began (4.13, the 66 kHz signal): with
+a voltage on V-COM that reads OL there, the probe is not trusted.
+In ohm and temperature the probe reads the V input
 (~0.34 A per volt on V-COM with the A jack open: 5 V read 1.7 A; device
 22c85ba), so those keep the comparator's A-JACK with its V gate (4.6).
 
@@ -1365,6 +1368,82 @@ A-JACK with a current in A afterwards); switchtest `dc5-pickup`,
 with the square, loud with a current). Passing on both (regression checks):
 switchtest `real-ajack-pickup`, loudtest `ajack-acv-auto` (AUTO mV-first:
 the clip step of 2f56ff9's fix already leaves mV in the model).
+
+**A signal above the AC bandwidth on V-COM (2026-10-26).** With a 66 kHz
+signal from a generator on V-COM (amplitude unknown) and the A jack empty,
+the device raised A-JACK / A-PROT on the mV ranges and the loud alarm:
+
+| function | reading | `SYST:ALER?` | `DBG:SENT?` kind |
+|---|---|---|---|
+| AC V 6 V | 1.162 mV | DC | AD1PK_PB1 |
+| AC mV 600 mV | 26.57 mV | AJACK | AD1PK_PB1 |
+| DC mV 600 mV | OL | APROT | CMP_PB1 |
+| AC mV 60 mV | 2.16 mV | APROT (the latch from DC mV) | AD1PK_PB1 |
+
+The AC bandwidth is about 20 kHz ([hw/README.md](../../hw/README.md#dmm-front-end-hy3131)),
+so the RMS block shows little of such a signal and AC mV's `V_GATE`
+(|LPF| + 1.414 x RMS) said "free"; plain DC mV had no V gate, and the
+A-PROT probe on PB2 read the pickup as more than 300 mA. How the signal
+reaches PB1 / PB2 and the DC level that makes DC mV read OL are
+*inferred* (pickup, a rectified HF level). A-PROT in AC mV 60 mV was the
+latch from DC mV: AC mV has no probe, so the latch holds there
+(4.8).
+
+The device check of the first fix (0.2.4, the MR9270's 66 kHz output, a
+0 / 9.5 V square, on V-COM; [TODO](../TODO.md) item "66 kHz"): AC mV 600 mV
+still raised A-JACK (~30 mV RMS; the PB1 peak a steady ~-21 000 codes,
+field 12 = 0: the counter did not say driven there), 60 mV and DC mV did
+not; DC V AUTO logged one `AJACK,CMP_PB1` (CTSTA 0x70 and 0 in turn, ~2.4
+hit windows per second). The square has a DC part (4.8 V), so DC mV's OL is
+the input, not a rectified level. Now:
+
+* **AC mV** (`mv_vside`): driven also when |LPF| is above `MV_DC_DRV_MV`
+  (300 mV): the row is DC-coupled, and the mV input clips the square to
+  0 .. ~1.2 V (`mvclamp`, device 2f56ff9): the device's LPF read 0.509 V,
+  under `MV_DRV_K` x 600 mV with the RMS block missing the AC part. Plain AC mV
+  also counts a counter frequency above `V_HF_KHZ` (10 kHz) as driven
+  (*inferred* that the counter sees such a signal; it did not in this case).
+  An input left charged by a source (185c066, OL) is "driven" too, as AC+DC
+  mV's `mv_dc_drv` already treats it.
+* **Plain DC mV**: its own result over the range (the readout's OL) =
+  driven (`V_GATE`, lag `DCMV_VGATE_LAG_MS` 250 ms); "free" needs two
+  results within the range in a row (one stray conversion after the probe's
+  row rewrite read in range in the emulator and let A-PROT trip). A-JACK
+  needs a "free" verdict since the hit run began, and so does the A-PROT
+  trip (`Sentinel::v_free`). Cost: A-PROT in DC mV comes after the next
+  two DC mV results (emulator: 24 V across A-COM 137 -> 441 ms, 12 V 443
+  -> 438 ms). With 5 V DC on V-COM in DC mV the device's probe read
+  10.7 A and the comparator 0x70 in every read (0.2.5 check below): the
+  gate is what keeps A-PROT off there.
+* **DC V 6 V / DC mV comparator (MIXED, `sample_cmp`)**: a window whose
+  reads are CMPHO + CMPLO together (0x70) mixed with empty ones is not a
+  hit: the comparator overdriven by the V side. A window with a one-bit
+  read, or with 0x70 in every read, still is. *Inferred*: a current in A
+  gives one-bit reads (as BOTH in ohm), and one that keeps PB1 beyond the
+  comparator's range reads 0x70 in every read. Not checked: the A jack has
+  not been wired.
+* **AC V, DC?** (4.7): no hint while the counter reads above `V_HF_KHZ`:
+  the AC reading then misses the AC part.
+
+Gaps: a signal on V-COM that the mV rows show as driven together with a
+current in A shows nothing there; an open mV input that reads OL / a DC
+over 300 mV (a charge left after a source, 185c066) hides A-JACK and, in
+DC mV, A-PROT until it reads within the range. Emulator: the model's `hfbw`
+/ `hfdc` / `hfpb1` / `hfpb2` / `hfnocnt` / `hfboth` (*inferred*, chosen to
+replay the device's alerts; [README](../../emu/hy3131/README.md)): senttest
+`acmv-hf600`, `acmv-hf60`, `dcmv-hf600`, `dcmv-hf600-slow`, `acv-hf`,
+`acv-auto-hf`, loudtest `ajack-acmv-hf`, `ajack-dcmv-hf` FAIL on 8a0f59d1;
+`acmv-sq66k-600` (the 0.2.4 device result: A-JACK), `dcv-auto-sq66k`
+(A-JACK), `dcmv-sq66k` FAIL on the first fix; all pass now, and the last
+phase of the mV ones (a current in A) still asserts A-JACK.
+`aprot-dcmv-12` / `-24` time the DC mV trip.
+
+Device 0.2.5 (the second fix, 2026-10-26, the MR9270's 66 kHz square, A
+jack empty): AC V 6 V, AC mV 600 / 60 mV, DC mV 600 mV, DC V AUTO, AC V
+AUTO, then 5 V DC in DC mV and DC V AUTO: no alert and no log entry in
+any; AC mV field 12 = 1 (driven). AC+DC 600 mV `DBG:ACDC?`: the AC
+phase's LPF 0.509 V, the level `MV_DC_DRV_MV` keys on. The current-in-A
+side is not checked (the A jack has not been wired).
 
 #### Device check list (jack check)
 

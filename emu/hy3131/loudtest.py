@@ -154,6 +154,22 @@ SC = {
                        checks=[('quiet', 6, 18), ('starts', 18, 20.5, LOUD), ('loud', 19, 25.5, LOUD), ('stops', 26, 27.8),
                                ('quiet', 27.8, 30)],
                        seen=[('AJACK', '1,0,1,0')], never=[('AJACK', 6, 18)]),
+    # A 66 kHz signal on V-COM (device 2026-10-26: A-JACK / A-PROT and the alarm with the A jack
+    # empty; the model's hf knobs, senttest HF): quiet in AC mV and DC mV, loud with a current in A.
+    'ajack-acmv-hf': dict(func='VOLT:AC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],
+                          script=[(0, 'dmm open;hfbw:6000;hfdc:0.3;hfpb1:10;hfpb2:1;vsrc:0,ac=0.003,f=50'),
+                                  (8, 'dmm vsrc:0,ac=3,f=66000'),
+                                  (18, 'dmm vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60'), (26, 'dmm isrc:none')],
+                          checks=[('quiet', 6, 18), ('starts', 18, 20.5, LOUD), ('loud', 19.5, 25.5, LOUD), ('stops', 26, 27.8),
+                                  ('quiet', 27.8, 30)],
+                          seen=[('AJACK', '1,0,1,0')], never=[('AJACK', 6, 18), ('APROT', 0, 30)]),
+    'ajack-dcmv-hf': dict(func='VOLT:DC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],
+                          script=[(0, 'dmm open;hfbw:6000;hfdc:0.3;hfpb1:10;hfpb2:1;vsrc:0.1'),
+                                  (8, 'dmm vsrc:0,ac=3,f=66000'),
+                                  (18, 'dmm vsrc:none;isrc:0.002'), (26, 'dmm isrc:none')],
+                          checks=[('quiet', 6, 18), ('starts', 18, 20.5, LOUD), ('loud', 19.5, 25.5, LOUD), ('stops', 26, 27.8),
+                                  ('quiet', 27.8, 30)],
+                          seen=[('AJACK', '1,0,1,0')], never=[('AJACK', 6, 18), ('APROT', 0, 30)]),
     # The same in AC+DC V on manual 600 mV (doc 4.13: V_GATE in both phases): quiet with the
     # square; the real AC current asserts at the next "free" AC-phase result (~2.2 s).
     'ajack-acdcmv': dict(func='VOLT:ACDC 0.6', run_for=30, setup=['SYST:BEEP:VOL 0'],
