@@ -17,7 +17,7 @@ import cairo
 W, H = 480, 320
 DEV_W, DEV_H = 140.0, 83.0            # device body, mm
 DISP = (22.5, 15.5, 73.5, 49.0)       # display x, y, w, h (mm)
-GLASS = (8.0, 8.5, 90.0, 66.0)        # black glass (keys + logo + display)
+GLASS = (8.0, 8.5, 90.0, 66.0)        # black glass (keys + display)
 STRIP = (11.0, 15.0, 9.0, 52.0)       # touch key strip, 4 cells
 POWER = (0.0, 30.0, 6.5, 14.0)        # power button on the left edge
 # Top view of the top edge (photo of the edge: USB-C in a black recess with the LED pinhole at
@@ -146,12 +146,10 @@ class PanelArt:
         cr.set_source_rgb(*C_FACE)
         self.rrect(cr, 4.5, 6.0, DEV_W - 9.0, DEV_H - 11.5, 4.5)
         cr.fill()
-        # Glass: logo, model, touch keys, display
+        # Glass: model, touch keys, display (no maker's logo)
         cr.set_source_rgb(*C_GLASS)
         self.rrect(cr, *GLASS, 2.5)
         cr.fill()
-        self.draw_logo(cr, 24.0, 11.6)
-        self.text(cr, 26.3, 12.85, '正点原子', 3.1, C_STRIP_TEXT, bold=True, face='Noto Sans CJK SC')
         self.text(cr, GLASS[0] + GLASS[2] - 2.5, 12.85, 'DM40' + self.model, 2.6, C_STRIP_TEXT, align='right', bold=True)
         cell = STRIP[3] / 4
         for i, name in enumerate(KEY_NAMES):
@@ -176,24 +174,6 @@ class PanelArt:
         cr.line_to(px + pw / 2, py + ph / 2 - 0.4)
         cr.stroke()
         self.draw_jacks(cr)
-
-    def draw_logo(self, cr, cx, cy):
-        """Alientek's round logo (a white disc with a Z swoosh)."""
-        cr.save()
-        cr.new_path()
-        cr.set_source_rgb(*C_STRIP_TEXT)
-        cr.arc(cx, cy, 1.55, 0, 6.2832)
-        cr.fill()
-        cr.set_source_rgb(*C_GLASS)
-        cr.set_line_width(0.42)
-        cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        cr.move_to(cx - 0.85, cy - 0.65)
-        cr.line_to(cx + 0.8, cy - 0.65)
-        cr.line_to(cx - 0.8, cy + 0.65)
-        cr.line_to(cx + 0.85, cy + 0.65)
-        cr.stroke()
-        cr.restore()
-        self.mark(cr, 'logo', cx - 1.55, cy - 1.55, 3.1, 3.1)
 
     # ---- top edge (top view) ----
     def draw_top_view(self, cr):
