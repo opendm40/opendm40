@@ -22,6 +22,9 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
     the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
     trigger at the centre; a roll record (200 ms/div) the full 65 520;
+  * STOP of a running raw ring (5 / 2 ms/div, Auto at several moments,
+    Normal without a trigger: the ring wrapped): the record is the sine
+    everywhere, no garbage or seam (the stop's own TCIF4 is not a wrap);
   * CHAN1:OFFSet moves the trace (pos) but not the volts the preamble
     gives;
   * the main loop keeps running during a streamed read (DBG:DIAG? loop
@@ -286,6 +289,41 @@ def long_checks(t):
     t.w('WAV:FORM BYTE')
 
 
+def stop_checks(t):
+    """STOP of a running raw ring (fs > 25 kS/s), at 5 and 2 ms/div: Auto,
+    STOP at three moments each (after frames were shown, so BUF holds a
+    packed record), and Normal with the level above the sine (no trigger:
+    the ring wraps for good). The stopped record (WAV:DATA? MAX) is the
+    input sine everywhere: every code inside its range, no step larger than
+    the sine's, and a wrapped ring is the full 43 008. Before the fix
+    (scope.rs `halt`: the stop's own TCIF4 read as a wrap) the slots past
+    the write position joined the record and were packed twice: garbage
+    and seams at its start (device 2026-10-26, emulator GD32_DMA.cs)."""
+    t.w('WAV:FORM WORD')
+    t.w('WAV:POIN MAX')
+    for tb, waits in ((5e-3, (0.6, 0.9, 1.3)), (2e-3, (0.5, 0.8))):
+        for mode, lev, wait in [('AUTO', 0, w) for w in waits] + [('NORM', 2 * A.vpp, 1.0)]:
+            for c in ('TIM:SCAL %g' % tb, 'TRIG:SWE %s' % mode, 'TRIG:LEV %g' % lev, 'RUN'):
+                t.w(c)
+            v0 = t.vtime()
+            while t.vtime() - v0 < wait:
+                time.sleep(0.05)
+            t.w('STOP')
+            p = pre(t)
+            v, codes = volts(p, block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60)))
+            n = len(v)
+            out = sum(1 for x in v if abs(x) > 0.6 * A.vpp)
+            step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
+            jump = max(abs(v[i + 1] - v[i]) for i in range(n - 1)) if n > 1 else 0.0
+            ok = n > 1 and out == 0 and jump < step + 0.05 * A.vpp
+            if mode == 'NORM':
+                ok = ok and n == 43008
+            check(ok, '%g ms/div, %s, STOP after %.1f s: %d samples, %d outside the sine, largest step %.3f V (sine %.3f)'
+                  % (tb * 1e3, mode, wait, n, out, jump, step))
+    for c in ('TRIG:SWE AUTO', 'TRIG:LEV 0', 'TIM:SCAL 1e-3', 'WAV:FORM BYTE'):
+        t.w(c)
+
+
 def bt_checks(t):
     try:
         s = socket.create_connection(('127.0.0.1', A.bt_port), timeout=5)
@@ -502,6 +540,9 @@ try:
     check(abs(f2 - A.hz) < A.hz * 0.02 and 2 <= i0 < len(v2) - 2 and abs(v2[i0]) < 0.08 * A.vpp,
           'SINGle record: %.2f Hz, %.3f Vpp, trigger sample %d' % (f2, vpp2, i0))
     t.w('TRIG:SWE AUTO')
+
+    # --- STOP of a running raw ring (the stop's own TCIF4)
+    stop_checks(t)
 
     # --- the long record (scope.rs: the packed ring at fs <= 25 kS/s)
     long_checks(t)

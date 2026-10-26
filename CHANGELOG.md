@@ -17,6 +17,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Scope, STOP at the faster timebases: the stopped record began with
+  samples of an earlier capture (garbage, a step, wrong measurements).
 - Scope, stopped: a pan, zoom or V/div change made while the screen was held
   (right after a screenshot over USB, a message box on the scope page) is
   drawn when the hold ends; before, the screen kept the drag preview with

@@ -108,10 +108,13 @@ struct Ring {
     /// The stored record's first slot and its ring's size.
     off: usize,
     cap: usize,
+    /// The raw ring had wrapped when `halt` stopped it (`pos` after the
+    /// stop: the disable itself sets TCIF4).
+    wrap: bool,
 }
 
 #[link_section = ".sram_bss"]
-static mut RING: Ring = Ring { pk: false, raw: false, slot: 0, rd: 0, t: 0, off: 0, cap: 0 };
+static mut RING: Ring = Ring { pk: false, raw: false, slot: 0, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
 
 fn rg() -> &'static mut Ring {
     // SAFETY: main loop only, no reference kept across calls.
@@ -1084,12 +1087,26 @@ impl Scope {
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
     /// record state alone.
     fn halt(&mut self) {
+        // A running ring: whether it has wrapped, taken before the stop. A
+        // stream disabled by software sets its TCIF (RM0090 "DMA transfer
+        // suspension"; the GD32F4 does too, device 2026-10-26), so after it
+        // every stopped ring read as wrapped: the stale slots past the
+        // write position (the previous record, already packed) joined the
+        // record and were packed again (garbage at its start). NDTR first,
+        // then the flag: a wrap between the two reads sets the flag, one
+        // after them moves the write position back.
+        let live = (unsafe { r32(S4) } & 1) != 0;
+        let wr0 = self.raw_wr();
+        let tc = self.raw_tc();
         unsafe {
             modify32(TIM1, 1, 0);
             modify32(TIM8, 1, 0);
             w32(S4, 0);
             w32(S3, 0);
             while r32(S4) & 1 != 0 || r32(S3) & 1 != 0 {}
+        }
+        if live {
+            rg().wrap = tc || self.raw_wr() < wr0;
         }
         self.hw.disarm();
         self.hw_mode = false;
@@ -1218,9 +1235,20 @@ impl Scope {
         if rg().pk {
             return self.pk_drain(now).then(|| (rg().slot, self.roll_written >= PCAP as u64));
         }
-        // HISR TCIF4: the ring has wrapped at least once.
-        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
-        Some((wr, unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0))
+        // HISR TCIF4 while it runs: the ring has wrapped at least once;
+        // stopped: as `halt` saw it.
+        let wr = self.raw_wr();
+        Some((wr, if (unsafe { r32(S4) } & 1) != 0 { self.raw_tc() } else { rg().wrap }))
+    }
+
+    /// Raw ring: the next slot the DMA writes.
+    fn raw_wr(&self) -> usize {
+        (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP
+    }
+
+    /// HISR TCIF4 (the raw ring has wrapped, while the stream runs).
+    fn raw_tc(&self) -> bool {
+        (unsafe { r32(DMA1 + 0x04) } & (1 << 5)) != 0
     }
 
     /// The stored record's ring view (valid or not).
@@ -1284,7 +1312,7 @@ impl Scope {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         // Slow rates: the DMA fills the staging ring, the polls pack it.
         let pk = fs <= PK_FS;
-        *rg() = Ring { pk, raw: !pk, slot: 0, rd: 0, t: 0, off: 0, cap: 0 };
+        *rg() = Ring { pk, raw: !pk, slot: 0, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
         // Linear: Single / DIGitize take the record rec_split waits for.
         let (p, q) = self.rec_split();
         self.rec = lin_len(fs).max(p + q);
@@ -1764,7 +1792,7 @@ impl Scope {
         if rg().pk {
             return self.pk_drain(now).then_some(self.roll_written);
         }
-        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
+        let wr = self.raw_wr();
         let d = (wr + CAP - self.roll_last_wr) % CAP;
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
