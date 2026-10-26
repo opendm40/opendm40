@@ -1049,6 +1049,9 @@ pub struct Dmm {
     /// Continuity's jack check phase (`cont_jack`: 0 none, 1 settle, 2
     /// window, 3 back) and the row's R25 to restore.
     jwin: u8,
+    /// Continuity / diode: the last reading that was not OL (V-COM closed by
+    /// something; V_GATE, `CLOSED_HOLD_MS`); 0 none.
+    closed_t: u64,
     r25: u8,
     prev_ad1: i32,
     r22: u8,
@@ -1307,6 +1310,20 @@ const PKH_RESTART: bool = true;
 /// LIVE? thresholds: ohm AD1 code (0.24 % of 2^23), continuity ohm, diode V.
 const LIVE_CODE: i32 = 20_000;
 const LIVE_CONT_OHM: f32 = 2.0;
+/// Continuity / diode V_GATE (owner 2026-10-26: A-JACK for ~1.5 s while the
+/// probes were touched together in continuity, A jack empty): a reading
+/// under OL within this long = V-COM closed, no A-JACK (an asserted one
+/// drops). The PB1 hits come with the contact (INFERRED: the source's
+/// current step on the shared COM; not traced). The case A-JACK is for, the
+/// leads in A / COM, leaves V-COM open: OL. The hold covers a contact that
+/// bounces open (an OL reading while PB1 still hits).
+const CLOSED_HOLD_MS: u64 = 1500;
+/// ... and an OL reading counts as "open" only from this long after the hit
+/// run began: a conversion that ends just after the contact (OSR_SLOW: 400
+/// ms long once the reading stood still) still reads OL (emulator senttest
+/// cont-bounce). Cost: A-JACK for a current in A 0.6-0.9 s after its onset
+/// there (was 0.16-0.36 s; emulator).
+const CLOSED_VGATE_LAG_MS: u16 = 450;
 const LIVE_DIODE_V: f32 = 0.05;
 /// FUN_08012c30 pulses the PA latching relay (10 ms) on every call, i.e. on
 /// every phase switch, between the R26/R34/R36 zeroing and the 22-byte row.
@@ -1658,6 +1675,7 @@ impl Dmm {
             entry: 0,
             mv_clip: 0.0,
             jwin: 0,
+            closed_t: 0,
             r25: 0,
             prev_ad1: 0,
             r22: 0,
@@ -2125,11 +2143,15 @@ impl Dmm {
         // (sentinel V_HF_KHZ: a 66 kHz signal on V-COM).
         let mv = self.mode == 2 || (self.acdc && self.mode == 3);
         let dcmv = self.mode == 3 && !self.acdc;
-        self.sent.vgate = matches!(self.mode, 10 | 15) || mv || dcmv;
+        // Continuity / diode: V_GATE on OL (`CLOSED_HOLD_MS`).
+        self.sent.vgate = matches!(self.mode, 10 | 11 | 12 | 15) || mv || dcmv;
+        self.closed_t = 0;
         self.sent.vlag = if mv {
             sentinel::MV_VGATE_LAG_MS
         } else if dcmv {
             sentinel::DCMV_VGATE_LAG_MS
+        } else if matches!(self.mode, 11 | 12) {
+            CLOSED_VGATE_LAG_MS
         } else {
             0
         };
@@ -3697,9 +3719,7 @@ impl Dmm {
                     self.sent.current_small(now, !rd.main.ol && si_abs < k * fs);
                 }
                 10..=12 if !self.acdc && self.fuse_job.is_none() => {
-                    if self.mode == 10 {
-                        self.sent.v_side(now, self.live);
-                    }
+                    self.v_side_ohm(now, rd.main.ol);
                     self.sent.live_reading(now, self.live)
                 }
                 _ => {}
@@ -3749,6 +3769,23 @@ impl Dmm {
         r.acdc = self.acdc && !self.cpl_auto;
         r.alert = self.sent.shown(now);
         r
+    }
+
+    /// V_GATE of the ohm-network rows per reading: ohm by the LIVE? sign;
+    /// continuity / diode: a reading under OL (`ol` false) within
+    /// CLOSED_HOLD_MS = V-COM closed (the probes touch, a part), while
+    /// A-JACK's case (the leads in A / COM) leaves V-COM open: OL.
+    #[inline(never)]
+    fn v_side_ohm(&mut self, now: u64, ol: bool) {
+        let drv = if self.mode == 10 {
+            self.live
+        } else {
+            if !ol {
+                self.closed_t = now.max(1);
+            }
+            self.closed_t != 0 && now.saturating_sub(self.closed_t) < CLOSED_HOLD_MS
+        };
+        self.sent.v_side(now, drv);
     }
 
     fn reading(&self, main: Val, si: f32) -> Reading {

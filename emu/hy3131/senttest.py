@@ -47,6 +47,11 @@ import emusync  # noqa: E402
 VLAG = emusync.BOOT_S - 0.5
 # The 66 kHz model knobs (the hf scenarios below; INFERRED ratios).
 HF = 'hfbw:6000;hfdc:0.3;hfpb1:10;hfpb2:1'
+# A bouncing contact (cont-bounce): (s after the phase's input, V-COM ohm; 1e12 = open), set
+# through SetOption (no input marker); the phase's own input is the open resistor.
+BOUNCE_ON = [(0.05, 814.6), (0.12, 1e12), (0.2, 277), (0.3, 28.85), (0.38, 1e12), (0.45, 28.85), (0.6, 1e12),
+             (0.7, 2.1), (0.8, 0.67)]
+BOUNCE_OFF = [(0.05, 1e12), (0.15, 552), (0.25, 1e12), (0.32, 2.1), (0.4, 1e12)]
 SC = {
     'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'dcv-neg':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'AJACK'})]),
@@ -203,8 +208,23 @@ SC = {
     # Frequency carries no sentinel (device d8e249d: PB1 - PB3 stands at ~54 mV in its row, a
     # false A-JACK; doc 4.7 gaps): a current in A shows nothing there.
     'freq-gap': ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
-    'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
-    'diode-a':  ('DIOD', 24, [(0, 'open;diode:0.65', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    # (continuity / diode: A-JACK only while V-COM reads OL, as with the leads in A / COM; with a
+    # part still on V-COM -closed- a current in A is no A-JACK there: cont-closed-a)
+    'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'open;isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'cont-closed-a': ('CONT', 18, [(0, 'open;r:10', {'NONE'}), (10, 'isrc:0.002', {'NONE'})]),
+    # Owner 2026-10-26 (video): the probes touched together in continuity (leads in V / COM, A jack
+    # empty) raised A-JACK for ~1.5 s while the readout went OL -> 814 -> 277 -> 28.85 -> 0.67 ohm.
+    # The model's contbump (INFERRED shape: a PB1 burst on every V-COM resistor change in the
+    # continuity row) with a bouncing contact (`bounce`: the resistor stepped without markers, s
+    # after the phase's input); the jack check reads ~0 V there ("free"). Two taps, then a current
+    # in A with V-COM open: A-JACK. diode-bounce: the same in diode.
+    'cont-bounce': ('CONT', 40, [(0, 'open;r:1e12;contbump:150', {'NONE'}), (8, 'r:1e12', {'NONE'}), (14, 'r:1e12', {'NONE'}),
+                                 (20, 'r:1e12', {'NONE'}), (26, 'r:1e12', {'NONE'}), (32, 'isrc:0.002', {'AJACK'})],
+                    [], {'never': [('AJACK', 1, 5)], 'bounce': {1: BOUNCE_ON, 2: BOUNCE_OFF, 3: BOUNCE_ON, 4: BOUNCE_OFF}}),
+    'diode-bounce': ('DIOD', 40, [(0, 'open;r:1e12;contbump:150', {'NONE'}), (8, 'r:1e12', {'NONE'}), (14, 'r:1e12', {'NONE'}),
+                                  (20, 'r:1e12', {'NONE'}), (26, 'r:1e12', {'NONE'}), (32, 'isrc:0,ac=0.005,f=50', {'AJACK'})],
+                     [], {'never': [('AJACK', 1, 5)], 'bounce': {1: BOUNCE_ON, 2: BOUNCE_OFF, 3: BOUNCE_ON, 4: BOUNCE_OFF}}),
+    'diode-a':  ('DIOD', 24, [(0, 'open;diode:0.65', {'NONE'}), (10, 'open;isrc:0,ac=0.005,f=50', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
     'cap-a':    ('CAP', 26, [(0, 'open;c:100e-9', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
     'cap-ramp-gap': ('CAP', 30, [(0, 'open;c:100e-6', {'NONE'}), (14, 'isrc:0.002', {'NONE'})]),
     # Hints (doc 4.7): DC? in AC V (AD1 alternates PB1 / the V tap), AC? in DC V 6 V (the
@@ -331,6 +351,9 @@ def run(name):
             f.write('0 monitor %s\n' % m)
         for v, (t, spec) in zip(vt, script):
             f.write('%g dmm %s\n' % (v, spec))
+        for i, steps in xtra.get('bounce', {}).items():
+            for dt, ohm in steps:
+                f.write('%g monitor sysbus.hy3131 SetOption "r" %g\n' % (vt[i] + dt, ohm))
     # USB/IP from 3 s: an attach before opendm40 enumerated can leave the server stuck
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--fast', '--usbip', '3',
            '--usbip-port', str(A.port), '--run-for', str(run_for + VLAG), '--script', sp, '--name', rtag,
