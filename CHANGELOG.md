@@ -47,6 +47,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Generator: after OUTPUT OFF and ON again the DAC waveforms (sine,
+  triangle, ramp, square below the PWM range) stayed flat until a restart.
 - Start-up: the meter page comes up about 3 s sooner. It waited for the
   USB host, or 3 s without one, before drawing anything.
 - Frequency: 2 Hz and 5 Hz gave no reading. The counter's gate is now read
