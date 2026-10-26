@@ -9,19 +9,28 @@ use crate::mmio;
 #[path = "splash.rs"]
 pub mod splash;
 
-/// Boot phase times for DBG:BOOT? `BOOTMS` / `MAINMS`: [1..=8] = DWT cycles
-/// (board::init restarts the counter) at the end of each pre_main phase,
-/// see `phase` ([0] unused: the counter is not cleared by a software reset,
-/// so the shim's own time cannot be told from the loader's before it);
-/// [9..=11] = main's ms (its Clock restarts the counter again) after
-/// App::new, after the first frame, after the touch reset (`main_phase`).
+/// Boot phase times for DBG:BOOT? `BOOTMS` / `MAINMS`: [1..=8] = each
+/// boot phase's DWT cycles (`phase`; [0] unused: the counter is not
+/// cleared by a software reset, so the shim's own time cannot be told from
+/// the loader's before it); [9..=11] = main's ms after App::new, after the
+/// first frame, after the touch reset (`main_phase`).
 static PHASE: [AtomicU32; 12] = [const { AtomicU32::new(0) }; 12];
+/// DWT at the end of the last phase (board::init restarts the counter, so
+/// 0 = its start).
+static T_LAST: AtomicU32 = AtomicU32::new(0);
 const DWT_CYCCNT: u32 = 0xE000_1004;
 
-/// End of pre_main phase `i` (1..=8): its time stamp, the splash bar's next
+/// End of boot phase `i` (1..=8): its time.
+fn stamp(i: usize) {
+    let now = unsafe { mmio::r32(DWT_CYCCNT) };
+    PHASE[i].store(now.wrapping_sub(T_LAST.load(Ordering::Relaxed)), Ordering::Relaxed);
+    T_LAST.store(now, Ordering::Relaxed);
+}
+
+/// End of pre_main phase `i` (1..=6): its time, the splash bar's next
 /// part, the watchdog fed.
 fn phase(i: usize) {
-    PHASE[i].store(unsafe { mmio::r32(DWT_CYCCNT) }, Ordering::Relaxed);
+    stamp(i);
     splash::step();
     boot::feed();
 }
@@ -189,30 +198,20 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
 }
 
 /// `,BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<frame>,<touch>`:
-/// the boot phases in ms (`PHASE`). BOOTMS: pre_main's phases, each its
-/// own duration (board = board::init + the splash). MAINMS: main's clock at the end of
+/// the boot phases in ms (`PHASE`). BOOTMS: each phase's own duration
+/// (board = board::init + the splash; vdisk and refresh run after the
+/// first frame, `before_usb`). MAINMS: main's clock at the end of
 /// App::new, of the first frame and of the touch reset (0 = not reached).
 /// DWT at 200 MHz: 12.5x low on IRC16M, as CALMS.
 fn put_times(s: &mut crate::scpi::Scpi) {
     s.put_bytes(b",BOOTMS");
-    let mut prev = 0u32;
     for (i, p) in PHASE.iter().enumerate().skip(1) {
         let v = p.load(Ordering::Relaxed);
         if i == 9 {
             s.put_bytes(b",MAINMS");
         }
         s.put_bytes(b",");
-        put_dec(
-            s,
-            match i {
-                1..=8 => {
-                    let d = v.wrapping_sub(prev) / 200_000;
-                    prev = v;
-                    d
-                }
-                _ => v,
-            },
-        );
+        put_dec(s, if i <= 8 { v / 200_000 } else { v });
     }
 }
 
@@ -333,18 +332,29 @@ fn pre_main(dry: bool) {
     #[cfg(feature = "vdisk")]
     crate::vdisk::mirror_boot();
     phase(6);
+}
+
+/// main.rs `run`, after the first frame and before USB attaches (moved out
+/// of pre_main 2026-10-26: ~0.47 s on the device that the meter page no
+/// longer waits for). Never inlined: the buffers are popped before the main
+/// loop; region C (no stream runs yet).
+#[inline(never)]
+pub fn before_usb() {
+    T_LAST.store(unsafe { mmio::r32(DWT_CYCCNT) }, Ordering::Relaxed);
     // The generated USB volume (vdisk.rs): built-in tables + CRC-32s of the
     // INFO sources (~0.1 s), before USB.
     #[cfg(feature = "vdisk")]
     crate::vdisk::init(crate::vdisk::mem_read, unsafe {
         core::slice::from_raw_parts(crate::calbackup::FW_BASE as *const u8, crate::calbackup::FW_MAX_BODY)
     });
-    phase(7);
+    stamp(7);
+    crate::wdt::kick();
     // Its LOGS / SCOPE / SHOTS files from the SPI disk, so the host's first
     // look is complete (a DLG's CSV size: ~10 ms per 100 KB of logs).
     #[cfg(feature = "vdisk")]
     crate::vdisk::boot_refresh();
-    phase(8);
+    stamp(8);
+    crate::wdt::kick();
 }
 
 /// Called by the shim (src/shim.rs) with the decision.

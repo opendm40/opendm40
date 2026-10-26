@@ -227,6 +227,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     }
     app.tick(&mut clk, true);
     native::main_phase(1, clk.now_ms());
+    // The generated USB volume's tables and files (vdisk.rs, ~0.47 s on the
+    // device): after the first frame, before USB attaches.
+    native::before_usb();
     let mut tp = touch::Touch::new(&mut clk);
     wdt::kick();
     native::main_phase(2, clk.now_ms());

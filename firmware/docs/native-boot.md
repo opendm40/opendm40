@@ -962,7 +962,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
     data" below), then the start-up phase times in ms (`native::put_times`):
     `BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
-    (each phase's own time; `board` includes the splash) and
+    (each phase's own time; `board` includes the splash; `vdisk` and
+    `refresh` run after the first frame, before USB attaches) and
     `MAINMS,<app>,<frame>,<touch>` (main's clock after App::new, the first
     frame and the touch reset). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
