@@ -76,8 +76,8 @@ To install opendm40 on a meter that runs the stock firmware:
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
-6. The first start is dark for a few seconds. Do not switch the meter off
-   in the first 10 seconds.
+6. The first start takes a few seconds; opendm40 shows its logo and a
+   progress bar. Do not switch the meter off in the first 10 seconds.
 
 ![Install: copy the file onto the stock firmware's USB disk, then restart](img/install.png)
 
