@@ -605,6 +605,88 @@ C is now below 7 KiB by ~100 B; the next relief for B needs a cut.
 The 60 Ω range (feat/ohm60, 0.3.0) costs ~180 B of B; the LOCK font blob
 (255 B) moved from B to A2 for it (A2 2 692 B, B 16 572 B free).
 
+### Region B audit #6 (2026-10-27, chore/region-b-audit-6)
+
+On 0.3.0 (cae46446) region B had 16 388 B free, A2 1 128 B, C 4 736 B
+(recovery-file 4 212 B, 116 B above the link floor). C had no room for a
+move out of B, so this audit only cuts: code that core / libm functions
+pulled into B for one or two callers, one inlined helper, and part of the
+`.data` load image. Nothing moved into region C, so the region C hooks see
+the same set of functions as before.
+
+| change | region B | other |
+|---|---|---|
+| no core string searcher, no Unicode trim (below) | +2 160 | C +36 |
+| `Scpi::put_conf_fmt`: `chars().nth(1)` for `chars().count() > 1` (`do_count_chars`, 320 B) | +304 | |
+| `touch::log` `#[inline(never)]` (five copies; once per touch frame / gesture event) | +456 | |
+| `ui::gen_preview`: the phase fraction as `x - trunc(x)` for f32 `% 1.0` (libm `fmodf` and its reduction helper, ~0.7 KB; exact for x in 0..2) | +672 | C -4 |
+| `scope::WAVE`, `scope_ui::SHOWN`, `STRIP_SHOWN` in SRAM `.dmabuf` (below) | +536 | stack +672, SRAM -664 |
+
+- **String searcher**: `stockfont::unit_text` tested `u.contains('°')`; a
+  non-ASCII `char` pattern searches for its UTF-8 bytes as a `&str`, so the
+  one out-of-line `<str>::contains::<char>` (shared with two ASCII callers)
+  carried core's two-way searcher (`StrSearcher::new`, `TwoWaySearcher::*`,
+  ~1.4 KB). `unit_text` now looks for the two bytes `C2 B0`, the two `'.'`
+  tests (`app::trim_zeros`, `DmmView::bar_labels`) use `as_bytes().contains`,
+  and the generator page's `note.split(": ")` became a `find(':')`.
+  `str::trim` (the DMM value text, `upload::data_inner`'s offset) pulled the
+  Unicode whitespace table and its decoder: `trim_ascii` (the texts are
+  ASCII).
+- **Statics**: their non-zero initialisers were 660 B of the `.data` load
+  image in B. On the device they are now in `.dmabuf` (NOLOAD, as
+  `scope_ui::GRAPH`) and set up in place: `Scope::new` writes `WAVE` (it
+  already reset it), `scope_ui::init` (`init_shown`, `#[inline(never)]` so
+  the code stays in B and not in `new_app` in C) writes the other two. All
+  three are main-loop only (the AD2 ISR never touches them). The host
+  builds keep the initialisers. `inrush::SES` (232 B) was tried the same
+  way and gained nothing: its start-up copy needs `Session::NEW` as a
+  232-byte constant in B.
+
+Tried, not done:
+- `Scpi::put_bytes` `#[inline(never)]` (11 copies): B -16 B.
+- `vdisk::put16` out of line (2 copies, ~400 B): it runs per FAT entry on
+  the USB volume's per-sector read path, which a host may read during a
+  stream.
+- `-Zlocation-detail=none` (nightly only; on the stable toolchain
+  only through `RUSTC_BOOTSTRAP=1`), a trial build on the tree after the
+  first two cuts: B 18 852 -> 50 916 B, C 4 772 -> 7 936 B, static worst
+  path 24 520 -> 24 496 B. The gain is inferred to be the ~1 530 panic
+  `Location` records (16 B each, ~24.5 KB of anonymous rodata: file, line,
+  column per bounds check / unwrap / division) with their literal pool
+  entries and the source path strings; `main.rs` `panic` never reads them.
+  It changes the build (an unstable flag on the pinned stable toolchain and
+  in CI), so it is left to the owner. No stable equivalent is known short of
+  removing panic sites.
+- The font descriptor tables (`*_E`, 10 B per glyph, 869 glyphs, B) keep
+  each glyph's code also in the 455 entries of fonts whose codes run
+  without a gap (ASCII26, SC_F12 / F16 / F20, ...): ~0.9 KB with a
+  `first` code per font and an index lookup (tools/mkstockfont.py and the
+  `Font::glyph` search change).
+- The f64 soft-float routines (~3.5 KB): their callers (`scope_meas`
+  sums, the Wh / VAh accumulators, `nr3_scale`, `gen::plan` timing) need
+  the precision.
+
+| | before (cae46446) | after |
+|---|---|---|
+| region A2 free | 1 128 B | 1 128 B |
+| region B free | 16 388 B | 20 516 B |
+| region C free | 4 736 B | 4 772 B |
+| stack headroom (static worst path) | 20 500 B | 21 172 B |
+| SRAM free | 44 576 B | 43 912 B |
+
+The variants (tools/build-variants/run.sh), B / C free and stack headroom:
+
+| variant | before | after |
+|---|---|---|
+| recovery-usb | 15 044 / 4 800 / 21 012 B | 18 820 / 4 816 / 21 684 B |
+| recovery-file | 16 084 / 4 212 / 20 500 B | 20 212 / 4 248 / 21 172 B |
+| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 30 328 / 5 840 / 21 632 B |
+| spi-disk | 37 064 / 14 904 / 22 012 B | 40 924 / 14 932 / 22 684 B |
+| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 20 588 / 5 192 / 21 172 B |
+| keep-screen | 16 428 / 4 724 / 20 500 B | 20 556 / 4 764 / 21 172 B |
+
+A2 stays below its 2 KiB warning: anything taken out of A2 lands in B.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
