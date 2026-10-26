@@ -338,6 +338,9 @@ SECTIONS
          * with the bus handed to a stream (it talks to the HY3131 itself). */
         *(.text.*8opendm408sentinel*8Sentinel11jack_result*);
         *(.text.*8opendm403dmm*3Dmm9cont_jack*);
+        /* V_GATE of ohm / continuity / diode, once per reading (no HY3131
+         * access; region B at 16 KiB). */
+        *(.text.*8opendm403dmm*3Dmm10v_side_ohm*);
         /* DBG:SRC? and DBG:ACDC:TRACE? reply text (SCPI only; room in region B
          * for the jack check above). */
         *(.text.*8opendm40*8src_text*);
