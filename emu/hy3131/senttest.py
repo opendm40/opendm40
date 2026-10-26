@@ -218,11 +218,12 @@ SC = {
     # COM: AC mV, ohm and Hz showed no A-JACK; DC V / AC V / continuity / diode / capacitance
     # did). Ohm: PB1 above the window reads 0x70 (the model's `pb1cmp70`, default), as a source on
     # V-COM does; RES AUTO sits on the 60 Mohm row, whose jack check reads OP1O at its own source
-    # (1.6 V in the model): A-JACK, never LIVE?. AC mV: the open input carries 0.146 x PB1 as DC
+    # (1.6 V in the model) and the reading is in range (31 Mohm on the device: `aiohm`): A-JACK,
+    # never LIVE?. AC mV: the open input carries 0.146 x PB1 as DC
     # and 1.5 V RMS of 50 kHz (`ailift` / `ainz`, INFERRED: the device read OL and Hz ~50 kHz),
     # which says driven (the counter, the RMS); PB1 pinned above the node's level overrides it.
     # Hz: PB1 - PB3 pinned. Each: the current off again, and (Hz) a signal on V-COM first.
-    'ohm-acur': ('RES', 30, [(0, 'open', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}), (20, 'isrc:none', {'NONE'})], [],
+    'ohm-acur': ('RES', 30, [(0, 'open;aiohm:31e6', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}), (20, 'isrc:none', {'NONE'})], [],
                  {'never': [('LIVE', 1, 3)], 'queries': ['RES:RANG?']}),
     'acmv-acur': ('VOLT:AC 0.6', 30, [(0, 'open;ailift:0.146;ainz:1500', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}),
                                       (20, 'isrc:none', {'NONE'})]),

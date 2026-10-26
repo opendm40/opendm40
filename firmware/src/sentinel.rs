@@ -437,7 +437,8 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // jack-check comparator rows (ohm, the resistive temperature sensors;
 // `v_both`): a MIXED window (0x70 and 0 reads, no one-bit read) = the
 // square, driven; 0x70 reads are driven unless the input shows the row's
-// own source (`own`: on the 6 / 60 Mohm rows OP1O below JACK_OWN_V).
+// own source (`own`: on the 6 / 60 Mohm rows OP1O below JACK_OWN_V and a
+// reading within the range).
 // Driven -> no A-JACK, LIVE? (once the run's jack check is in); DBG:SENT?
 // field 14 reads 2 then. Gaps: on the rows below 6 Mohm, and in the
 // resistive temperature rows, a DC
@@ -464,6 +465,10 @@ pub const JACK_LO: f32 = -0.9;
 /// 5 V on the 60 Mohm row, 2.02-2.25 V at 5 / 10 V, device 1a11eda). The
 /// line between is INFERRED. The lower rows (2.08-2.17 V open) have none.
 pub const JACK_OWN_V: f32 = 1.8;
+/// Ohm: an in-range reading counts for `own` only from this long after the
+/// hit run began (a conversion that started before a source came on still
+/// reads in range; the slowest ohm conversion is 400 ms).
+pub const OHM_VIN_LAG_MS: u64 = 450;
 /// Continuity: the jack check repeats this often while the hit run lasts
 /// (its windows are the sentinel's; ohm reads it every window).
 pub const JACK_RECHECK_MS: u64 = 300;
@@ -1002,6 +1007,9 @@ pub struct Sentinel {
     /// ... and at the last window's close they said driven (DBG:SENT?
     /// field 14 = 2).
     both_drv: bool,
+    /// Ohm (set by `dmm.rs` per reading): the last reading was within the
+    /// range, at this time (0: it read OL); `own`.
+    pub vin_t: u64,
     /// The jack check's OP1O stayed below the row's line (`jack_result`:
     /// its peak max under JACK_OWN_V on the 6 / 60 Mohm rows; none elsewhere): `own`.
     jack_low: bool,
@@ -1071,6 +1079,7 @@ impl Sentinel {
             both_t: 0,
             mix_t: 0,
             both_drv: false,
+            vin_t: 0,
             jack_low: false,
             pk_dc: false,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
@@ -1113,6 +1122,7 @@ impl Sentinel {
             self.both_t = 0;
             self.mix_t = 0;
             self.both_drv = false;
+            self.vin_t = 0;
             if !matches!(self.alert, Alert::None | Alert::Overload | Alert::AProt) {
                 self.alert = Alert::None;
             }
@@ -1348,7 +1358,7 @@ impl Sentinel {
                 // (a 0x70 run counts as driven once the jack check of the run
                 // has said whether the input sits at the row's own source)
                 let mixed = self.mix_t != 0 && now.saturating_sub(self.mix_t) < AJACK_CLEAR_MS;
-                self.both_drv = self.jchk && (mixed || (self.v_both(now) && self.jack_in_run()));
+                self.both_drv = self.jchk && (mixed || (self.v_both(now) && self.jack_in_run() && (self.vin_t == 0 || !self.jack_low)));
                 if hit && self.both_drv {
                     // driven (BOTH): LIVE? instead of A-JACK
                     self.live_reading(now, true);
@@ -1529,13 +1539,15 @@ impl Sentinel {
     }
 
     /// JCHK, ohm: the input shows the row's own source, so 0x70 on PB1 is a
-    /// current in A, not a source on V-COM (which holds OP1O at 2.02-2.45
-    /// V): the run's jack check read OP1O below the row's line. Not the
-    /// reading: a source with a resistance on V-COM read 47 Mohm / 440 ohm
-    /// in range with 0x70 on PB1 (device 2026-10-26, this build's sanity
-    /// run: A-JACK and LIVE? in turn with a rule on in-range readings).
+    /// current in A, not a source on V-COM: the run's jack check read OP1O
+    /// below the row's line AND a reading within the range came since the
+    /// run began (+ OHM_VIN_LAG_MS). Either alone is not enough: a source on
+    /// V-COM read 47 Mohm in range with 0x70 on PB1 (OP1O 2.14 V; device
+    /// 2026-10-26, this branch's first run), and OP1O falls with the source's
+    /// volts (2.25 V at 5 V, 2.03 V at 10 V, 1a11eda; 24 V not measured, the
+    /// emulator's line gives 1.41 V) while such a source reads OL.
     fn own(&self) -> bool {
-        self.jack_low && self.jack_in_run()
+        self.vin_t != 0 && self.vin_t >= self.run_t0 + OHM_VIN_LAG_MS && self.jack_low && self.jack_in_run()
     }
 
     /// Current-mode reading: the current is below 0.5 % of the range (the
@@ -2677,32 +2689,38 @@ mod tests {
             assert!(d.ends_with(",2,2249") || d.ends_with(",2,2250"), "{}", d);
         }
         // A current in A, V-COM open (device 2026-10-26, RES AUTO, 20 mA: LIVE? before the
-        // fix): PB1 above the window reads 0x70 in every read, as a source on V-COM does. The
-        // input at the row's own source tells them apart: OP1O below the 6 / 60 Mohm rows' line
-        // (1.38 V on the 60 Mohm row). Without a line (600 ohm .. 600 kohm): LIVE?, the gap.
-        for line in [JACK_OWN_V, f32::NEG_INFINITY] {
+        // fix, the reading 31 Mohm): PB1 above the window reads 0x70 in every read, as a source
+        // on V-COM does. The input at the row's own source tells them apart: OP1O below the
+        // 6 / 60 Mohm rows' line (1.38 V open on the 60 Mohm row) and a reading within the range.
+        // Cases: (line, OP1O, in range) -> A-JACK; no line (600 ohm .. 600 kohm), OL (a source
+        // on V-COM whose OP1O fell low, 24 V), OP1O high (a source read in range): LIVE?.
+        for (line, op1o, in_range, aj) in [(JACK_OWN_V, 1.38, true, true), (f32::NEG_INFINITY, 1.38, true, false),
+                                           (JACK_OWN_V, 1.41, false, false), (JACK_OWN_V, 2.14, true, false)] {
             let mut s = Sentinel::new();
             s.configured(Kind::CmpA, 0, true);
             s.vgate = true;
             s.jchk = true;
-            let gap = line < 0.0;
-            for t in (0..1000).step_by(10) {
+            for t in (0..1500).step_by(10) {
                 s.sample_cmp(t, 0x70);
                 if t % 100 == 50 {
-                    s.jack_result(t, true, v(1.37), v(1.39), line);
+                    s.jack_result(t, true, v(op1o - 0.01), v(op1o + 0.01), line);
                     s.v_side(t, false);
                 }
-                assert_ne!(s.alert, if gap { Alert::AJack } else { Alert::Live }, "gap {} t {}", gap, t);
+                if t % 200 == 0 {
+                    s.vin_t = if in_range { t.max(1) } else { 0 };
+                }
+                assert_ne!(s.alert, if aj { Alert::Live } else { Alert::AJack }, "{} {} {} t {}", line, op1o, in_range, t);
             }
-            assert_eq!(s.alert, if gap { Alert::Live } else { Alert::AJack });
-            // ... and a source on V-COM coming on drops it (LIVE?): OP1O at 2.14 V
-            for t in (1000..1600).step_by(10) {
+            assert_eq!(s.alert, if aj { Alert::AJack } else { Alert::Live }, "{} {} {}", line, op1o, in_range);
+            // ... and a source on V-COM coming on drops it (LIVE?): OL, OP1O at 2.14 V
+            s.vin_t = 0;
+            for t in (1500..2100).step_by(10) {
                 s.sample_cmp(t, 0x70);
                 if t % 100 == 50 {
                     s.jack_result(t, true, v(2.13), v(2.15), line);
                 }
             }
-            assert_eq!(s.alert, Alert::Live, "gap {}", gap);
+            assert_eq!(s.alert, Alert::Live);
         }
         // The source taken off and a current in A at once (the hit run goes on): A-JACK once
         // the jack check sees the row's own source again.
@@ -2716,6 +2734,9 @@ mod tests {
             s.sample_cmp(t, 0x70);
             if t % 100 == 0 {
                 s.jack_result(t, true, v(1.37), v(1.39), JACK_OWN_V);
+            }
+            if t % 200 == 0 {
+                s.vin_t = t;
             }
         }
         assert_eq!(s.alert, Alert::AJack);

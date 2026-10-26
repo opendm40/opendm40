@@ -1296,11 +1296,15 @@ comparator rows (ohm, the resistive temperature sensors), within the last
 * 0x70 reads = driven unless the input shows the row's own source
   (`Sentinel::own`): on the 6 MΩ / 60 MΩ rows (open 1.62 / 1.38 V) the jack
   check's OP1O peak stays below 1.8 V (`JACK_OWN_V`, *inferred* between
-  those values and the 2.02-2.45 V a source on V-COM holds it at, 1a11eda).
-  The ohm reading does not tell: a source with a resistance on V-COM read
-  47 MΩ (RES AUTO) and 440 Ω (600 Ω) in range with 0x70 on PB1 (this
-  build's first device run, 2026-10-26: A-JACK and LIVE? in turn with a
-  rule on in-range readings).
+  those values and the 2.02-2.45 V a source on V-COM holds it at, 1a11eda)
+  **and** a reading within the range came at least 450 ms after the hit run
+  began (`OHM_VIN_LAG_MS`). Neither alone: a source on V-COM read 47 MΩ in
+  range with 0x70 on PB1 and OP1O at 2.14 V (this branch's first device run,
+  2026-10-26: A-JACK and LIVE? in turn with the reading alone), and OP1O
+  falls with the source's volts (24 V not measured; the emulator's line
+  gives 1.41 V) while such a source reads OL. The 20 mA case read 31 MΩ;
+  whether a smaller current also pulls the reading into range is
+  *unknown* (OL: LIVE?).
 
 Driven means no A-JACK, LIVE? (once the run's jack check is in); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
 leads in A / COM sits on the 60 MΩ row. Gaps: a DC current in A on the
@@ -1309,7 +1313,9 @@ temperature rows still shows LIVE?; an AC current (0x70 and 0 in turn)
 everywhere. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
 Emulator: the model reads PB1 above the window as 0x70 (`pb1cmp70`, default);
 senttest `ohm-acur` (RES AUTO, V open, 20 mA in A) FAILs before (LIVE?) and
-passes with the rule; `ohm` now runs on the 6 MΩ row (4.7 MΩ on V-COM);
+passes with the rule (the model's `aiohm`: the open input reads 31 MΩ while
+the current flows, *inferred*); switchtest `real-vjack` (24 V, OL, the
+model's OP1O 1.41 V) stays LIVE?; `ohm` now runs on the 6 MΩ row (4.7 MΩ on V-COM);
 `ohm-v5-600`'s last phase (manual 600 Ω) shows the gap.
 
 Device c6a3ac3 ([device check, "c6a3ac3: the RES jack fix"](../../docs/history/device-check-2026-10-21.md#c6a3ac3-the-res-jack-fix-428df52-both-bit-reads-live-after-the-source-2026-10-25)),
