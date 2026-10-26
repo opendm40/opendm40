@@ -9,6 +9,15 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Frequency: 2 Hz and 5 Hz gave no reading. The counter's gate is now read
+  when it ends on an input edge instead of every 0.35 s, so frequencies down
+  to 0.5 Hz read (one value per gate below about 7 Hz; 0.35 s above, as
+  before). The same for the frequency next to AC V / AC A. The Hz reading
+  shows one more digit (small) where the counter's resolution supports it
+  ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
+  After the input frequency changes, a value is grey until two gates agree:
+  a gate across the change no longer shows a wrong value, and a slower input
+  no longer reads 0.000 Hz in between.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
