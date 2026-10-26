@@ -633,6 +633,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             now + SCPI_QUICK_MS
                         } else if app.dmm.cpl_auto() {
                             (app.dmm.entry_ms() + AUTO_WAIT_MS).max(now + SCPI_QUICK_MS)
+                        } else if app.dmm.hy_mode() == 14 && !app.dmm.pw.on {
+                            // Hz: the no-signal decision (~3.3 s after the
+                            // entry) or a slow first gate (below ~1 Hz), as
+                            // long as libsigrok allows (AUTO_WAIT_MS).
+                            (app.dmm.entry_ms() + AUTO_WAIT_MS).max(now.max(app.dmm.deadline()) + SCPI_WAIT_MS)
                         } else {
                             now.max(app.dmm.deadline()) + SCPI_WAIT_MS
                         };

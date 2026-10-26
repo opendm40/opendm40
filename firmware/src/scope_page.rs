@@ -317,6 +317,9 @@ pub(super) struct Sp {
     /// Measure cell under the finger, a slider being dragged (0 brightness,
     /// 1 grid), the "Sampling" box shown.
     pub popup: su::Popup,
+    /// A closed popup to repaint over (`sp_uncover`; bit 0: the CH1 label
+    /// was drawn grey, bit 1: the math label, bit 7: pending).
+    pub uncover: u8,
     pressed_cell: Option<u8>,
     slider: Option<u8>,
     sampling: bool,
@@ -392,6 +395,7 @@ impl Sp {
             autoset: None,
             frozen: false,
             popup: su::Popup::None,
+            uncover: 0,
             pressed_cell: None,
             slider: None,
             sampling: false,
@@ -633,7 +637,14 @@ impl App {
 
     /// Full page draw (after `redraw`).
     pub(super) fn sp_draw_static(&mut self) {
+        self.sp.uncover = 0;
         su::invalidate();
+        self.sp_draw_page();
+    }
+
+    /// The page from the cached frame and the model (all of it after
+    /// `su::invalidate`, the graph after `su::uncover`).
+    fn sp_draw_page(&mut self) {
         self.sp.bubble_dirty = self.sp.bubble;
         self.sp_render();
         self.sp_math();
@@ -2125,12 +2136,45 @@ impl App {
         }
     }
 
+    /// Every popup lies inside the graph frame: the scope page repaints
+    /// only that (`sp_uncover`, the next tick); the combined view, whose
+    /// popups also cover the meter strip, repaints the whole page.
+    #[inline(never)] // region C (link-native.x)
     fn sp_popup_close(&mut self) {
+        let grey = match self.sp.popup {
+            su::Popup::Ch1(_) => 1,
+            su::Popup::Math(_) => 2,
+            _ => 0,
+        };
         self.sp.popup = su::Popup::None;
         self.sp.pressed_cell = None;
         self.sp.slider = None;
         self.sp.list = None;
-        self.redraw = true;
+        if self.view == View::Scope {
+            self.sp.uncover |= 0x80 | grey;
+        } else {
+            self.redraw = true;
+        }
+    }
+
+    /// The page after a popup (`sp_popup_close`): the graph and its frame
+    /// repainted, the rest by the page's model diff (a popup only stops
+    /// the page drawing). The whole page took 262 ms on the device
+    /// (DBG:PROF?, 2026-10-26), and the tap's beep lasted as long.
+    #[inline(never)] // region C (link-native.x): `tick` checks the flag
+    pub(super) fn sp_uncover(&mut self) {
+        let u = core::mem::take(&mut self.sp.uncover);
+        if !self.sp_on() || self.sp.covered() {
+            return;
+        }
+        // As `repaint`: a stopped record re-rendered, a screenshot (MF
+        // menu "Screenshot" closes it first) after SHOT_SETTLE_MS.
+        self.scope_invalidate();
+        self.repaint_at = self.now;
+        let m = self.sp_model(self.now);
+        su::uncover(&m, u & 1 != 0, u & 2 != 0);
+        self.sp_draw_page();
+        self.status_next = 0;
     }
 
     /// Every gesture while a popup is open (modal).

@@ -56,7 +56,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
         // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
         public const double Op1OffLevel = -0.005;
-        public const double HpfTransientGain = 1.5; // RMS seen while the node DC slews, per volt of remaining step
+        // RMS seen while the node DC slews, per volt of remaining step: device 0.2.1 (AC V 60 -> 6 V on the
+        // 0 / 9.5 V square, DBG:ACDC?) read RMS = sqrt(AC^2 + LPF^2) within ~0.1 V over the step's tail
+        public const double HpfTransientGain = 1.0;
         public const double LpfRateDivisor = 0.5;   // measured LPF period = datasheet OSR4 * this (RESEARCH.md 3)
 
         public Hy3131Core()
@@ -502,6 +504,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// beyond the clamp; device 2f56ff9: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
         public double MvPb1Mv;
+        /// Continuity contact transient (opt-in, "contbump:mV", "contbumptau:ms"; owner 2026-10-26:
+        /// the probes touched together in continuity raised A-JACK for ~1.5 s, A jack empty): every
+        /// change of the V-COM resistor while the continuity / diode row runs puts contbump mV x
+        /// exp(-dt / contbumptau) x cos(2 pi 25 Hz dt) on PB1 (a bouncing contact = a burst). The
+        /// shape and size are INFERRED (phenomenological; the device's PB1 during a contact was not
+        /// recorded). Default off, 40 ms.
+        public double ContBumpMv, ContBumpTau = 40;
+        private double contBumpT0 = double.NegativeInfinity;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device decaf60, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -825,7 +835,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// are aliases for the equivalent connection.
         public void SetInput(string spec)
         {
-            foreach(var o in Fe.Apply(spec))
+            var r0 = Fe.R;
+            var opts = Fe.Apply(spec);
+            if(Fe.R != r0 && !(double.IsInfinity(Fe.R) && double.IsInfinity(r0))) contBumpT0 = lastUpdate;
+            foreach(var o in opts)
             {
                 switch(o.Key)
                 {
@@ -837,6 +850,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "mvclamp": MvClampV = o.Value; break;
                 case "mvpb1": MvPb1Mv = o.Value; break;
+                case "contbump": ContBumpMv = o.Value; break;
+                case "contbumptau": ContBumpTau = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmop1k": OhmOp1K = o.Value; break;
                 case "ohmboth": OhmBothV = o.Value; break;
@@ -1201,6 +1216,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 ctStartDecided = true;
             }
             if(now < ctStart) return;
+            if(ctStart < ctChgT) { UpdateCounterSpan(now, period, duty); return; }
             var k0 = (long)Math.Round((ctStart - ctPhase) / period);
             var gate = (0x1000000 - ctInit) / SysClk;
             var overflowAt = ctStart + gate;
@@ -1225,6 +1241,65 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
             intf |= 0x01;
         }
+
+        /// A gate opened on the old waveform across a frequency change of the input (SetInput,
+        /// SignalHzChanged): the source restarts its waveform with a rising edge at the change
+        /// (as the MR9270 calibrator's output on a frequency change, inferred from the device's
+        /// 1 Hz -> 0.5 Hz step: a gate read 1.40 Hz, a period cut short). Edges: the old period
+        /// from ctStart up to the change, then the change itself, then the new period. No
+        /// ctsettle hidden edges here.
+        private void UpdateCounterSpan(double now, double period, double duty)
+        {
+            double op = ctChgOldP, tc = ctChgT;
+            long nOld = Math.Max(0, (long)Math.Ceiling((tc - ctStart) / op - 1e-9) - 1);
+            Func<double, long> count = t => t < tc ? (long)Math.Floor((t - ctStart) / op + 1e-9)
+                : nOld + 1 + (long)Math.Floor((t - tc) / period + 1e-9);
+            var overflowAt = ctStart + (0x1000000 - ctInit) / SysClk;
+            double stop;
+            if(overflowAt < tc)
+            {
+                var e = ctStart + Math.Max(1, Math.Ceiling((overflowAt - ctStart) / op - 1e-9)) * op;
+                stop = e < tc ? e : tc;
+            }
+            else stop = tc + Math.Ceiling((overflowAt - tc) / period - 1e-9) * period;
+            if(now < stop)
+            {
+                ctB = (int)Math.Min(0xFFFFFF, count(now));
+                ctC = (int)Math.Min(0xFFFFFF, Math.Round((now - ctStart) * SysClk * CtDuty(duty)));
+                return;
+            }
+            ctStop = stop;
+            var total = (long)Math.Round((stop - ctStart) * SysClk);
+            ctA = (int)((ctInit + total) & 0xFFFFFF);
+            ctB = (int)Math.Min(0xFFFFFF, count(stop));
+            ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
+            intf |= 0x01;
+        }
+
+        /// The counter's input frequency now (0: no edges), for SignalHzChanged.
+        public double CounterInputHz()
+        {
+            double f, duty;
+            ctNow = lastUpdate;
+            CounterSignal(out f, out duty);
+            return f;
+        }
+
+        /// The input's frequency changed at `now` from `oldHz`: its waveform restarts with a
+        /// rising edge then (ctPhase); a gate open across it is UpdateCounterSpan's, one still
+        /// waiting for its opening edge opens on it.
+        public void SignalHzChanged(double now, double oldHz)
+        {
+            ctChgT = now;
+            ctChgOldP = 1.0 / oldHz;
+            ctPhase = now;
+            if(ctEnabled && double.IsNaN(ctStop) && ctStartDecided && ctStart > now)
+            {
+                if(Ct0DeadMs > 0 && role == Role.Freq && !EnCntI && now < Ct0DeadEnd) ctStartDecided = false;
+                else ctStart = now;
+            }
+        }
+        private double ctChgT = double.NaN, ctChgOldP;
 
         /// Counter input settle (opt-in, "ctsettle:ms"; HYPOTHETICAL shape after the device's
         /// sub-harmonic first results, 2026-10-21 / -24: 1/3, 2/3, 1/2 of a 40 Hz square right
@@ -2191,6 +2266,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
             }
+            if(ContBumpMv != 0 && (role == Role.Cont || role == Role.Diode) && t >= contBumpT0 && t - contBumpT0 < 10 * ContBumpTau * 1e-3)
+            {
+                // the contact transient (ContBumpMv)
+                var dt = t - contBumpT0;
+                v += ContBumpMv * 1e-3 * Math.Exp(-dt / (ContBumpTau * 1e-3)) * Math.Cos(2 * Math.PI * 25 * dt);
+            }
             if(MvPb1Mv != 0 && MvClampV > 0 && role == Role.AcMv)
             {
                 // the mV clamp's current (MvPb1Mv): the jack beyond the clamp, scaled
@@ -2783,7 +2864,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void SetInput(string spec)
         {
             Core.ForcedAd1 = int.MinValue;
+            // A frequency change restarts the waveform (Hy3131Core.SignalHzChanged).
+            Core.Update(Now);
+            var f0 = Core.CounterInputHz();
             Core.SetInput(spec);
+            var f1 = Core.CounterInputHz();
+            if(f0 > 0 && f1 > 0 && Math.Abs(f1 - f0) > 1e-9 * f0) Core.SignalHzChanged(Now, f0);
             var dwt = Antmicro.Renode.Peripherals.Miscellaneous.DM40_DWT.Instance;
             var inv = CultureInfo.InvariantCulture;
             this.Log(LogLevel.Info, "input: {0} at {1} fw {2}", spec, MachineTime.ToString("F4", inv),

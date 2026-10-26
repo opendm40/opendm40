@@ -1675,6 +1675,9 @@ impl App {
         if self.redraw {
             self.repaint(now);
         }
+        if self.sp.uncover != 0 {
+            self.sp_uncover();
+        }
         // A toast that came while a confirm was up, over the page again.
         if self.toast_later_n != 0 {
             self.toast_later_show(now);

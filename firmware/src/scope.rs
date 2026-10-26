@@ -300,6 +300,11 @@ fn pin(port: u32, n: u32, high: bool) {
     unsafe { w32(port + 0x18, if high { 1 << n } else { 1 << (n + 16) }) };
 }
 
+/// A rail pin's real level: an output (MODER 01) driven high (OCTL).
+fn rail_on(port: u32, n: u32) -> bool {
+    unsafe { r32(port) >> (2 * n) & 3 == 1 && r32(port + 0x14) >> n & 1 != 0 }
+}
+
 fn out(port: u32, n: u32) {
     unsafe {
         modify32(port + 0x0C, 3 << (2 * n), 0);
@@ -679,13 +684,16 @@ impl Scope {
             seq: 0,
             relay_until: 0,
             last_pc13: 2,
-            // Unknown levels after the stock / boot: claim "scope on, DMM off"
-            // so the first rails() call drives both pins to a known state.
-            powered: true,
+            // The levels board::init left (PE2 = 1, PC4 = 0). This used to
+            // claim "scope on" while PC4 was low: rails() then never raised
+            // PC4 with Both always or a non-DMM start page, and a later
+            // switch to the scope dropped PE2 with PC4 still low, both rails
+            // off = the power hold gone (the meter switched off, 2026-10-26).
+            powered: rail_on(GPIOC, 4),
             screen: 0,
             rec: 0,
             roll: true,
-            dmm_on: false,
+            dmm_on: rail_on(GPIOE, 2),
             rolling: false,
             roll_written: 0,
             roll_last_wr: 0,
@@ -740,30 +748,35 @@ impl Scope {
     /// raises PC4 on its scope / generator pages and PE2 on the DMM page, never
     /// both). A rail that comes up does so 10 ms before one goes down, as the
     /// stock page switch; at least one rail stays on. Cheap when nothing
-    /// changes (called every tick by App::update_rails).
+    /// changes (called every tick by App::update_rails). Decided on the pins' real levels, not on what was last asked: a rail
+    /// can never be believed on while it is off, so one of the two always
+    /// stays on (both off drops the power hold).
     pub fn rails(&mut self, dmm: bool, scope: bool, clk: &mut crate::clock::Clock) {
         let dmm = dmm || !scope;
-        if dmm == self.dmm_on && scope == self.powered {
+        let (pe2, pc4) = (rail_on(GPIOE, 2), rail_on(GPIOC, 4));
+        if dmm == pe2 && scope == pc4 {
+            self.dmm_on = dmm;
+            self.powered = scope;
             return;
         }
-        if scope && !self.powered {
+        if scope && !pc4 {
             pin(GPIOC, 4, true);
             out(GPIOC, 4);
             self.relay_until = clk.now_ms() + 200;
         }
-        if dmm && !self.dmm_on {
+        if dmm && !pe2 {
             pin(GPIOE, 2, true);
             out(GPIOE, 2);
         }
-        if (!scope && self.powered) || (!dmm && self.dmm_on) {
+        if (!scope && pc4) || (!dmm && pe2) {
             clk.delay_ms(10);
         }
-        if !scope && self.powered {
+        if !scope && (pc4 || self.powered) {
             self.halt();
             pin(GPIOC, 4, false);
             out(GPIOC, 4);
         }
-        if !dmm && self.dmm_on {
+        if !dmm && pe2 {
             pin(GPIOE, 2, false);
             out(GPIOE, 2);
         }

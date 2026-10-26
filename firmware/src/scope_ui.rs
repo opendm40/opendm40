@@ -768,11 +768,16 @@ pub fn panel(m: &Model) {
 /// Page background boxes and the frame border (no graph interior). The
 /// combined view keeps y 20..`top` for the meter strip (drawn by ui.rs).
 pub fn chrome(m: &Model) {
-    let top = m.top() as u16;
     lcd::fill_rect(0, 0, 480, 20, C_BAR);
     lcd::fill_rect(414, 20, 66, 300, C_BAR);
     lcd::fill_rect(0, 301, 414, 19, C_BAR);
     lcd::fill_rect(0, 20, 13, 281, C_BAR);
+    frame(m);
+}
+
+/// The graph's 1 px frame.
+fn frame(m: &Model) {
+    let top = m.top() as u16;
     let h = m.frame_h() as u16;
     lcd::fill_rect(13, top, 401, 1, C_FRAME);
     lcd::fill_rect(13, top + h - 1, 401, 1, C_FRAME);
@@ -1519,16 +1524,82 @@ pub fn graph() -> &'static mut Graph {
     unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) }
 }
 
+/// Row classes of the grid rule (`grid_on`), one byte per frame row
+/// (`ROWS`): centre row, every 7th row, the division rows, the rows
+/// near the centre; R_LINE: a horizontal line (`Deco::h`) on the row.
+const R_CY: u8 = 1;
+const R_7: u8 = 2;
+const R_DH: u8 = 4;
+const R_NEAR: u8 = 8;
+const R_LINE: u8 = 16;
+/// Every row (the centre column fx = 200).
+const R_ALL: u8 = 0x80;
+
+/// `Graph::flush`'s row classes of the frame being painted: the per-row
+/// part of the grid rule, worked out once per flush. Per pixel, its
+/// divisions made the most of a full graph repaint's time (device
+/// DBG:PROF?, 2026-10-26: the scope page's full repaint 262 ms). In SRAM:
+/// the TCM's .bss is taken from the stack.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut ROWS: [u8; 320] = [0; 320];
+
+/// Fill `ROWS` for a frame of `h` rows and its horizontal lines.
+fn row_classes(h: i16, hl: &[Option<HLine>; NL]) -> &'static [u8; 320] {
+    let rows = unsafe { &mut *core::ptr::addr_of_mut!(ROWS) };
+    let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
+    for fy in 0..h.clamp(0, 320) {
+        rows[fy as usize] = row_class(fy, cy, dh);
+    }
+    for l in hl.iter().flatten() {
+        if let Some(r) = rows.get_mut(l.fy as usize) {
+            *r |= R_LINE;
+        }
+    }
+    rows
+}
+
+/// The `grid_on` classes of row `fy` (`cy` the centre row, `dh` the
+/// division height).
+fn row_class(fy: i16, cy: i16, dh: i16) -> u8 {
+    let mut c = 0;
+    if fy == cy {
+        c |= R_CY;
+    }
+    if fy % 7 == 0 {
+        c |= R_7;
+    }
+    if fy % dh == 0 {
+        c |= R_DH;
+    }
+    if (fy - cy).abs() <= 2 {
+        c |= R_NEAR;
+    }
+    c
+}
+
+/// The `grid_on` classes of column `fx` (rows with `ROWS[fy] & mask != 0`
+/// are grid; R_ALL: all of them).
+fn col_classes(fx: i16) -> u8 {
+    if fx == 200 {
+        return R_ALL;
+    }
+    let mut c = R_CY;
+    if fx % 40 == 0 || (fx - 200).abs() <= 2 {
+        c |= R_7;
+    }
+    if fx % 8 == 0 {
+        c |= R_DH | R_NEAR;
+    }
+    c
+}
+
 /// Grid rule of the frame (sec. 4.1) at frame (fx, fy), 1 <= fx <= 399,
 /// 1 <= fy <= h - 2; `cy` the centre row, `dh` the division height.
-#[inline]
+/// That is: the centre column and row; every 7th row in the columns at
+/// every 40th and within 2 of the centre column; the division rows and
+/// the rows within 2 of the centre in every 8th column.
 fn grid_on(fx: i16, fy: i16, cy: i16, dh: i16) -> bool {
-    fx == 200
-        || fy == cy
-        || (fx % 40 == 0 && fy % 7 == 0)
-        || (fy % dh == 0 && fx % 8 == 0)
-        || (fx % 8 == 0 && (fy - cy).abs() <= 2)
-        || (fy % 7 == 0 && (fx - 200).abs() <= 2)
+    (row_class(fy, cy, dh) | R_ALL) & col_classes(fx) != 0
 }
 
 /// Row intervals of one column to repaint.
@@ -1609,7 +1680,6 @@ impl Graph {
         }
         let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
         let h = d.fh;
-        let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
         let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
             minks[i] = MarkInk::of(mk);
@@ -1636,10 +1706,11 @@ impl Graph {
         }
         let marks_changed = d.marks != o.marks;
         let vl = |dd: &Deco, fx: i16| dd.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col);
+        let rows = row_classes(h, &d.h);
         // Colour of graph pixel (fx, fy): markers over the column (`mcol`,
         // the topmost last), math, trace, persistence, the vertical line of
-        // the column (`vcol`), horizontal lines, grid.
-        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize]| -> Color {
+        // the column (`vcol`), horizontal lines, grid (`cm`: col_classes).
+        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
             let (sx, sy) = (13 + fx, d.top + fy);
             for &mi in mcol.iter().rev() {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
@@ -1660,12 +1731,15 @@ impl Graph {
                     return c;
                 }
             }
-            for l in d.h.iter().flatten() {
-                if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
-                    return l.col;
+            let rc = rows[fy as usize];
+            if rc & R_LINE != 0 {
+                for l in d.h.iter().flatten() {
+                    if l.fy == fy && fx <= 397 && (l.solid || fx % 2 == 1) {
+                        return l.col;
+                    }
                 }
             }
-            if grid_on(fx, fy, cy, dh) { d.grid } else { C_FILL }
+            if (rc | R_ALL) & cm != 0 { d.grid } else { C_FILL }
         };
         self.px = 0;
         // Trace-only: per-column bookkeeping, from the resume column, under
@@ -1765,11 +1839,30 @@ impl Graph {
                     }
                 }
             }
+            let cm = col_classes(fx);
+            // `pix` inline for the rows without a marker or a horizontal
+            // line: a full graph took 108 ms through the closure.
+            let vrow = vcol.map_or(0, |_| h - 4);
             for &(a, b) in &cut[..nc] {
                 self.px += (b - a + 1) as u32;
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
-                    lcd::data(pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm]));
+                    let rc = rows[fy as usize];
+                    lcd::data(if nm > 0 || rc & R_LINE != 0 {
+                        pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm], cm)
+                    } else if fy >= ma.0 && fy <= ma.1 {
+                        d.math
+                    } else if fy >= tr.0 && fy <= tr.1 {
+                        d.trace
+                    } else if fy >= ps.0 && fy <= ps.1 {
+                        d.half
+                    } else if fy & 1 == 1 && fy <= vrow {
+                        vcol.unwrap_or(C_FILL)
+                    } else if (rc | R_ALL) & cm != 0 {
+                        d.grid
+                    } else {
+                        C_FILL
+                    });
                 }
             }
         }
@@ -1816,7 +1909,7 @@ impl Graph {
                             nm += 1;
                         }
                     }
-                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm]));
+                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm], col_classes(x)));
                 }
                 fx = e + 1;
             }
@@ -1868,6 +1961,20 @@ static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [
 
 fn shown() -> &'static mut Shown {
     unsafe { &mut *core::ptr::addr_of_mut!(SHOWN) }
+}
+
+/// A popup over the graph closed: the next `update` repaints the graph
+/// (its overlays too) and the frame, the rest of the page only where the
+/// model changed; `ch1` / `math`: their panel labels were drawn grey
+/// (panel_button outside `update`), so they are drawn again.
+#[inline(never)] // region C (link-native.x)
+pub fn uncover(m: &Model, ch1: bool, math: bool) {
+    if let Some(o) = shown().m.as_mut() {
+        o.ch1_open |= ch1;
+        o.math_open |= math;
+    }
+    graph().invalidate();
+    frame(m);
 }
 
 /// Forget everything drawn (the next `update` draws the whole page).
@@ -1977,11 +2084,13 @@ pub fn update(m: &Model) {
     if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
         trig_badge(m);
     }
-    if m.cur_tab != 0 && d(ol.cur_tab != m.cur_tab) {
+    // A repainted graph (a popup closed: `uncover`) leaves its holes as
+    // they were: the overlays in them are drawn again.
+    if m.cur_tab != 0 && (!valid0 || d(ol.cur_tab != m.cur_tab)) {
         cur_tab(m.cur_tab);
     }
     for (k, &(_, bits)) in tabs.iter().enumerate() {
-        if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb) {
+        if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && (!valid0 || d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb)) {
             tb_tab(m, k == 0);
         }
     }

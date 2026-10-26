@@ -1305,6 +1305,33 @@ live results whose last one is `LIVE_CLEAR_MS` old no longer asserts.
 Device c6a3ac3: after the off, LIVE? stayed ~1.0-1.25 s and did not return;
 `DBG:SENT:LOG?` +0 entries in 5 of 5 (5 V x 3, 10 V, the square).
 
+**Continuity / diode: the probes touched together (`V_GATE` on OL, 2026-10-26).**
+Owner video, leads in V / COM, A jack empty: touching the probes in
+continuity showed A-JACK for ~1.5 s while the readout went OL -> 814 -> 277
+-> 28.85 -> 0.67 Ω. The jack check calls both the open input (~-0.48 V) and
+a shorted one (~0 V) "free", so PB1 hits during the contact asserted A-JACK.
+What makes PB1 swing then is *unknown* (the device's PB1 during a contact
+was not recorded; *inferred*: the source's current step on the shared COM).
+The case A-JACK is for, the leads in A / COM, leaves V-COM open, so these
+rows read OL. Continuity and diode now take the reading as their V side
+(`Dmm::v_side_ohm`): a reading under OL within the last 1.5 s
+(`CLOSED_HOLD_MS`; a bouncing contact reads OL in between) = closed, no
+A-JACK, and an A-JACK in force drops. An OL reading counts as "open" only
+from 450 ms after the hit run began (`CLOSED_VGATE_LAG_MS`: a 400 ms
+OSR_SLOW conversion that ends just after the contact still reads OL). Cost
+(emulator, 2 mA DC / 5 mA AC in A, V-COM open before): A-JACK 0.6-0.9 s
+after the onset instead of 0.16-0.36 s; up to ~1.5 s when V-COM read a part
+until the onset (the hold). A current in A while a part is on V-COM (a
+third lead) shows no A-JACK there. Emulator:
+the model's `contbump` (a PB1 burst on every V-COM resistor change in
+continuity / diode, shape *inferred*), senttest `cont-bounce` /
+`diode-bounce` (two bouncing taps, then a current in A with V-COM open).
+Device, the calibrator's resistance output on V-COM switched between open and
+0 Ω (its relay) or 0 and 400 Ω: every step put AD2 peaks of 14 000-231 000
+codes on PB1 for 1-2 windows, with the jack check "free"; on 6c686ce8 that
+asserted A-JACK on 3 of 8 closures (shown 0.3-1.5 s after each), with the
+fix on none of 28 steps.
+
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
 1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
 range = driven (`MV_DRV_K`; a full-scale sine is 1.41 x, the device's
