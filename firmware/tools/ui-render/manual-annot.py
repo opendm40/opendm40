@@ -132,7 +132,7 @@ def status_bar():
     bar = render('status-all', scale=sc, crop=(0, 0, 480, 34))
     im, d = canvas(bar.size[0] + 40, bar.size[1] + 110)
     paste(im, d, bar, 20, 20)
-    spans = [(27, 97), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
+    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
     for k, (a, b) in enumerate(spans):
         x = 20 + (a + b) / 2 * sc
         d.line((x, 20 + bar.size[1] + 2, x, 20 + bar.size[1] + 38), fill=BLUE, width=2)
