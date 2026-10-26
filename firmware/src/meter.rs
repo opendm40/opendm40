@@ -379,6 +379,8 @@ const SHOW_MIN_MS: u64 = 80;
 //              Loud, the default), EXT_DANGER_SHIFT
 //   bit 18     the accuracy label switched OFF (0 = on, the default;
 //              ../docs/dmm-accuracy.md), EXT_ACC_OFF
+//   bit 19     ohm readings below 0 shown (0 = clamped at 0, the stock),
+//              EXT_OHM_NEG
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
@@ -395,6 +397,8 @@ pub const EXT_BURDEN: u32 = 1 << 14;
 pub const EXT_DANGER_SHIFT: u32 = 16;
 /// p[38] bit 18: the accuracy label OFF (0 = on: every older record).
 pub const EXT_ACC_OFF: u32 = 1 << 18;
+/// p[38] bit 19: ohm readings below 0 shown (0 = clamped: every older record).
+pub const EXT_OHM_NEG: u32 = 1 << 19;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

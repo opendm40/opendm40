@@ -365,6 +365,7 @@ Functions:
 | `[SENSe:]RESistance:RANGe[?]` | as `VOLTage:RANGe` | as `VOLTage:RANGe?` | both |
 | `[SENSe:]RESistance:RANGe:AUTO[?]` | as `VOLTage:RANGe:AUTO` | as `VOLTage:RANGe:AUTO?` | both |
 | `[SENSe:]RESistance:RESolution[?]` | as `VOLTage:RESolution` | as `VOLTage:RESolution?` | both |
+| `[SENSe:]RESistance:NEGative[?]` | `ON` or `OFF` (default): resistance readings below 0 shown, not 0 | `1` or `0` | both |
 | `[SENSe:]CAPacitance:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E-06` | both |
 | `[SENSe:]CAPacitance:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
 | `[SENSe:]FREQuency:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E+03` | both |
@@ -400,6 +401,7 @@ Functions:
   conversions (0.2 s) give no new reading then (`DBG:FAST?`). It applies to
   DC voltage, DC current and resistance; other functions keep their own
   timing. Stored.
+- `RESistance:NEGative` is Settings 3/3 **Negative ohm**. Stored.
 
 ## Temperature
 

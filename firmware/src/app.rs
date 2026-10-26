@@ -886,6 +886,7 @@ impl App {
                     "", // Device row: opens the About page, no inline value
                     "", // Touch test row: opens the page
                     if self.dmm_view.acc_on { "ON" } else { "OFF" },
+                    if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" },
                 ];
                 ui::settings(2, &vals);
             }
@@ -2071,6 +2072,7 @@ impl App {
             | ((!self.dmm.alert_mask() & crate::sentinel::M_JACK) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
             | if self.dmm_view.acc_on { 0 } else { crate::meter::EXT_ACC_OFF }
+            | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
@@ -2147,6 +2149,7 @@ impl App {
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
         self.dmm_view.acc_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_ACC_OFF == 0;
+        self.dmm.ohm_neg = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_OHM_NEG != 0;
         // An unknown value (3) reads as Loud.
         self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
         if same_session {
@@ -3809,6 +3812,10 @@ impl App {
                         // next reading on.
                         self.dmm_view.acc_on = !self.dmm_view.acc_on;
                     }
+                    Some(7) => {
+                        // Negative ohm: from the next reading on.
+                        self.dmm.ohm_neg = !self.dmm.ohm_neg;
+                    }
                     Some(_) | None => return,
                 }
                 self.redraw = true;
@@ -4216,7 +4223,7 @@ impl App {
     /// Cmd::Temp* / Sys* / Calc*); None for the scope / generator commands
     /// (every DMM-side variant needs an arm here: the scope path would power
     /// the scope rail for it).
-    /// FETC:BURD? / DISP:BURD (doc 3.15); true = a reply was written.
+    /// FETC:BURD? / DISP:BURD (doc 3.15), RES:NEG; true = a reply was written.
     #[inline(never)] // .cold (link-native.x): SCPI only
     fn burden_scpi(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
@@ -4228,6 +4235,15 @@ impl App {
             }
             C::DispBurden(None) => {
                 out.put_bytes(if self.dmm.burden_show { b"1" } else { b"0" });
+                true
+            }
+            C::ResNeg(Some(b)) => {
+                self.dmm.ohm_neg = b;
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::ResNeg(None) => {
+                out.put_bytes(if self.dmm.ohm_neg { b"1" } else { b"0" });
                 true
             }
             _ => {
@@ -4768,7 +4784,7 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
-        if matches!(cmd, C::FetchBurden | C::DispBurden(_)) {
+        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_)) {
             return self.burden_scpi(cmd, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {
