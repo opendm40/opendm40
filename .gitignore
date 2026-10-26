@@ -26,6 +26,6 @@ private/
 stock/re/ghidra/gproj/
 
 # Stock-firmware analysis: a clone of the private repo
-# wirenboard/alientek-dm40-fw-analysis, for those with access (README.md,
+# the private reverse-engineering repository, for those with access (README.md,
 # "Supporting material"); the dumps above live inside it, untracked there too
 stock/re/

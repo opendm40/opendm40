@@ -70,8 +70,8 @@ FONTS = [
 # LETTERS and UNIT since region B audit #4 (2026-10-25: B at 15 KB free, A2
 # at 7.9 KB after the font rework; A2 keeps ~4 KB for the shim); SC_PROBE
 # since region C audit #2 (2026-10-25, docs/native-boot.md: B's room for
-# .cold code moved back from C).
-A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'SC_PROBE')
+# .cold code moved back from C); LOCK (255 B) with the 60 ohm range.
+A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'SC_PROBE', 'LOCK')
 
 
 # Codes from here up (CJK, full-width punctuation) are dropped: opendm40 draws

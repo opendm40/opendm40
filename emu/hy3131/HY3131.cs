@@ -56,7 +56,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
         // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
         public const double Op1OffLevel = -0.005;
-        public const double HpfTransientGain = 1.5; // RMS seen while the node DC slews, per volt of remaining step
+        // RMS seen while the node DC slews, per volt of remaining step: device 0.2.1 (AC V 60 -> 6 V on the
+        // 0 / 9.5 V square, DBG:ACDC?) read RMS = sqrt(AC^2 + LPF^2) within ~0.1 V over the step's tail
+        public const double HpfTransientGain = 1.0;
         public const double LpfRateDivisor = 0.5;   // measured LPF period = datasheet OSR4 * this (RESEARCH.md 3)
 
         public Hy3131Core()
@@ -502,6 +504,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// beyond the clamp; device 2f56ff9: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
         public double MvPb1Mv;
+        /// Continuity contact transient (opt-in, "contbump:mV", "contbumptau:ms"; owner 2026-10-26:
+        /// the probes touched together in continuity raised A-JACK for ~1.5 s, A jack empty): every
+        /// change of the V-COM resistor while the continuity / diode row runs puts contbump mV x
+        /// exp(-dt / contbumptau) x cos(2 pi 25 Hz dt) on PB1 (a bouncing contact = a burst). The
+        /// shape and size are INFERRED (phenomenological; the device's PB1 during a contact was not
+        /// recorded). Default off, 40 ms.
+        public double ContBumpMv, ContBumpTau = 40;
+        private double contBumpT0 = double.NegativeInfinity;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device decaf60, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -825,7 +835,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// are aliases for the equivalent connection.
         public void SetInput(string spec)
         {
-            foreach(var o in Fe.Apply(spec))
+            var r0 = Fe.R;
+            var opts = Fe.Apply(spec);
+            if(Fe.R != r0 && !(double.IsInfinity(Fe.R) && double.IsInfinity(r0))) contBumpT0 = lastUpdate;
+            foreach(var o in opts)
             {
                 switch(o.Key)
                 {
@@ -837,6 +850,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "swtr": SwTrMv = o.Value; break;
                 case "mvclamp": MvClampV = o.Value; break;
                 case "mvpb1": MvPb1Mv = o.Value; break;
+                case "contbump": ContBumpMv = o.Value; break;
+                case "contbumptau": ContBumpTau = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmop1k": OhmOp1K = o.Value; break;
                 case "ohmboth": OhmBothV = o.Value; break;
@@ -2024,10 +2039,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Ohm)
             {
                 vs = OhmSourceVolts();
-                // r0 (60 ohm, never selected by the stock nor by opendm40 since 2026-10-25): its
-                // slot is not a calibration; the device read like Rref 0.1 k x r1's gain x 1.0291
-                // (measured on one unit, cause unknown; firmware dmm.rs ohm notes, branch feat/ohm60).
-                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * OhmR0K
+                // r0 (60 ohm, never selected by the stock): its slot is not a calibration; the
+                // firmware (dmm.rs ohm_row_gain) takes r1's gain x the DC mV x10 / x1 gain ratio
+                // (0x24 / 0x28), the OP1 x10 stage's error. The stock row's PA2 DS2 / FS2 (the
+                // device read 3.8 % lower with them closed) is not modelled.
+                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * CalGain(0x24) / CalGain(0x28)
                     : OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
                 Fe.LeadOhm = CalOffs(0x144) * 1000.0;
             }
@@ -2250,6 +2266,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 // d2aff22: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
+            }
+            if(ContBumpMv != 0 && (role == Role.Cont || role == Role.Diode) && t >= contBumpT0 && t - contBumpT0 < 10 * ContBumpTau * 1e-3)
+            {
+                // the contact transient (ContBumpMv)
+                var dt = t - contBumpT0;
+                v += ContBumpMv * 1e-3 * Math.Exp(-dt / (ContBumpTau * 1e-3)) * Math.Cos(2 * Math.PI * 25 * dt);
             }
             if(MvPb1Mv != 0 && MvClampV > 0 && role == Role.AcMv)
             {
@@ -2554,6 +2576,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
                     // opendm40 DBG:SRC (src/dbgsrc.rs): the ohm / diode rows with AD1 cycled through
                     // other nodes: the AD1 reference buffers, SAD1FP / FN (not SDIO) and R28 are free.
+                    // opendm40 ohm r0 (dmm.rs OHM_R0_ROW): the stock r0 row with PA2's DS2 / FS2 open.
+                    if(row.Role == Role.Ohm && row.Range == 0 && j == 11) mask &= 0xF9;
                     if(row.Role == Role.Ohm || row.Role == Role.Diode)
                     {
                         if(j == 3) mask &= 0xF3;
@@ -2694,7 +2718,6 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] Shunt = { 0.01, 0.0005, 4.75e-5 }; // ohm / kohm / Mohm
         private static readonly double[] AUnit = { 1, 1e3, 1e6 };           // A -> A / mA / uA
         private static readonly double[] OhmRref = { 0.1, 1, 10, 100, 1000, 10000, 63000 };
-        private const double OhmR0K = 1.0291;
         private static readonly double[] CapK = { 1020, 1003, 102.7, 10.68, 1.5, 4.06, 41, 400 };
         private static readonly double[] DcvNegK = { 1.0, 1.00008, 1.00011, 1.0015 };
         private static readonly double[] K1 = { 0, 1 / 36.0, 2 / 36.0, 4 / 36.0, 8 / 36.0, 10 / 36.0, 12 / 36.0, 14 / 36.0, 16 / 36.0, 18 / 36.0,

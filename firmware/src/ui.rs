@@ -17,6 +17,9 @@ pub mod inr;
 /// The touch test page (View::TouchTest, app_touchtest.rs).
 #[path = "ui_touchtest.rs"]
 pub mod touchtest;
+/// The specified accuracy of a reading (../docs/dmm-accuracy.md).
+#[path = "accuracy.rs"]
+pub mod acc;
 
 /// RGB565 of the stock colours (panel reads back RGB666).
 pub const BG: Color = 0x0883; // (8, 16, 24)
@@ -38,10 +41,13 @@ pub const VALUE_HV: Color = 0xC9A0;
 /// value a DMM gate still holds): the digits and aux values in the stock
 /// grid / frame grey instead of VALUE, so they read as "not final".
 pub const VALUE_PROV: Color = DIM;
+/// The main readout's digits below the reading's uncertainty (the accuracy
+/// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
+pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-10-26)
 
 pub const BAR_H: u16 = 34;
-/// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
-const BAR_X: i16 = 4 + sf::LOGO + 3;
+/// Left edge of the DMM status-bar items (the stock's range label box).
+const BAR_X: i16 = 4;
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
 /// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
@@ -208,7 +214,8 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
 
 pub struct DmmView {
     /// Main readout as last drawn (text, cell format) for redrawing only the
-    /// digits that changed.
+    /// digits that changed; [7]: the first grey cell as last drawn
+    /// (`acc::grey_from`; 7 = the extra digit only, 8 = none).
     last_txt: [u8; 8],
     last_fmt: usize,
     /// Extra (small) digit as last drawn, 0 = none.
@@ -261,6 +268,18 @@ pub struct DmmView {
     last_iohm: u8,
     /// The "Overload" word is drawn next to the main readout's "0L".
     ol_word: bool,
+    /// The accuracy label's context (set by the app before `reading`; None
+    /// = no label). The label is in the bargraph's label row, so the
+    /// history row (Settings 2/3 "DMM row": History) and the power meter
+    /// have none.
+    pub acc: Option<Acc>,
+    /// Settings 3/3 "Accuracy" (persisted, default ON; the app turns it
+    /// into `acc`).
+    pub acc_on: bool,
+    /// The label as last drawn (`acc_ulps`, the decimals, the unit; None =
+    /// empty) and whether ACC_RECT holds it (false: to draw).
+    acc_k: Option<(u32, u8, &'static str)>,
+    acc_drawn: bool,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -273,6 +292,73 @@ pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
 const BAR_LBL_Y: i16 = 161;
 const BAR_LBL_H: i16 = 12;
 const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
+/// The accuracy label (../docs/dmm-accuracy.md): F14 grey in the label row,
+/// right-aligned under the unit, 5 px after the full-scale label (which
+/// ends at the bar's end, 410); `pm` draws the "+-" sign before the text.
+const ACC_RECT: sf::Rect = rect(415, BAR_LBL_Y, 61, BAR_LBL_H);
+
+/// What the accuracy label needs besides the reading (set by the app; None
+/// = no label: Settings 3/3 "Accuracy" OFF, or REL in force).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Acc {
+    /// Dmm::model: 0 DM40A, 1 DM40B, 2 DM40C (the stock digit, acc::err_ulps).
+    pub model: u8,
+    /// The temperature sensor is the K thermocouple (the only one the
+    /// manual specifies).
+    pub tc: bool,
+}
+
+/// The absolute uncertainty of `r` per the manual (acc.rs) in units of its
+/// last digit (`r.main.dec`, rounded up); None = no label (no row in the
+/// manual, OL, dashes, a provisional value, the power meter).
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn acc_ulps(r: &Reading, a: Acc) -> Option<u32> {
+    let v = &r.main;
+    if r.prov || v.ol || v.v.is_nan() || r.power.is_some() {
+        return None;
+    }
+    // deg F: temperature is the only function with a unit ending in F
+    // besides capacitance.
+    let f = v.unit.as_bytes().last() == Some(&b'F');
+    let sp = acc::spec(r.mode, r.range, r.acdc, a.tc, f)?;
+    Some(acc::round_sig(acc::err_ulps(sp, v.v, v.dec, a.model)))
+}
+
+/// `ulps` x 10^-`dec` without trailing zeros ("0.002", "0.0015").
+fn acc_fmt(b: &mut [u8; 16], mut ulps: u32, mut dec: u8) -> &str {
+    while dec > 0 && ulps % 10 == 0 && ulps > 0 {
+        ulps /= 10;
+        dec -= 1;
+    }
+    let mut x = ulps as f32;
+    for _ in 0..dec {
+        x *= 0.1;
+    }
+    crate::dmm::format(b, x, dec)
+}
+
+use crate::scope_ui::{pm, PM_W};
+
+/// The combined view's strip: the value's digits below the uncertainty
+/// grey (`StripData::grey`); the accuracy label (`acc_ulps`, ASCII unit,
+/// no space, as the sub readings) in the lower sub row when it is free,
+/// else in the upper one; none when both hold a sub reading (AC V / A: Hz
+/// and duty) or "Overload".
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn strip_acc(d: &mut crate::scope_ui::StripData, r: &Reading, acc: Option<Acc>) {
+    let ulps = acc.and_then(|a| acc_ulps(r, a));
+    // The value's digits below the uncertainty (section 5 of the doc).
+    d.grey = acc::grey_from(d.value.as_str().as_bytes(), ulps) as u8;
+    let Some(u) = ulps else { return };
+    let Some(i) = [1, 0].into_iter().find(|&i| d.sub[i].as_str().is_empty()) else { return };
+    let mut b = [0u8; 16];
+    let mut t = crate::scope_ui::Txt::new(acc_fmt(&mut b, u, r.main.dec));
+    ascii_unit(r.main.unit, &mut t);
+    d.sub[i] = t;
+    d.acc = i as u8 + 1;
+}
 
 /// The DMM function row: 7 buttons (the stock six + the power meter, owner
 /// 2026-10-22) of BTN_W px at a BTN_PITCH pitch from x 4: 4 px gaps, 4 px to
@@ -458,7 +544,7 @@ fn join<'a>(buf: &'a mut [u8; 24], parts: &[&str]) -> &'a str {
 impl DmmView {
     pub const fn new() -> Self {
         DmmView {
-            last_txt: [0; 8],
+            last_txt: [0, 0, 0, 0, 0, 0, 0, 8],
             last_fmt: 255,
             last_ext: 0,
             last_unit: "",
@@ -483,13 +569,59 @@ impl DmmView {
             ohm_on: false,
             last_iohm: 254,
             ol_word: false,
+            acc: Some(Acc { model: 2, tc: true }),
+            acc_on: true,
+            acc_k: None,
+            acc_drawn: false,
         }
+    }
+
+    /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
+    /// of it under `acc`): drawn on a change.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+    fn acc_update(&mut self, r: &Reading, ulps: Option<u32>) {
+        if !self.bar_on || self.power {
+            return;
+        }
+        let k = ulps.map(|u| (u, r.main.dec, r.main.unit));
+        if self.acc_drawn && self.acc_k == k {
+            return;
+        }
+        self.acc_k = k;
+        self.acc_drawn = true;
+        self.acc_draw();
+    }
+
+    /// Paint ACC_RECT with the label as kept: "+-0.0020V" right-aligned,
+    /// grey F14 as the scale labels; the number alone when that is too wide
+    /// ("0.0060MHz": the unit is the readout's, right above).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+    fn acc_draw(&self) {
+        let b = ACC_RECT;
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        let Some((u, dec, unit)) = self.acc_k else { return };
+        let mut nb = [0u8; 16];
+        let mut ub = [0u8; 16];
+        let num = acc_fmt(&mut nb, u, dec);
+        let mut t = crate::scope_ui::Txt::new(num);
+        t.push(sf::unit_text(unit, &mut ub));
+        let t = if sf::text_width(sf::F14, t.as_str(), 1) <= b.w - PM_W { t } else { crate::scope_ui::Txt::new(num) };
+        let w = sf::text_width(sf::F14, t.as_str(), 1);
+        let x = b.x + b.w - w;
+        sf::label(sf::F14, rect(x, b.y, w, b.h), t.as_str(), DIM, BG, 4, 1);
+        pm(x - PM_W, b.y + 1, DIM);
     }
 
     /// Bargraph scale labels for full scale `fs` in `unit` (empty = none,
     /// temperature).
     fn bar_labels(&self, fs: f32, unit: &str) {
         lcd::fill_rect(8, BAR_LBL_Y as u16, 468, BAR_LBL_H as u16, BG);
+        // The row clear took the accuracy label too.
+        if self.acc_drawn {
+            self.acc_draw();
+        }
         if unit.is_empty() {
             return;
         }
@@ -564,8 +696,7 @@ impl DmmView {
     pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-        sf::logo(4, 7, BAR);
-        if self.bar_on && !self.power {
+            if self.bar_on && !self.power {
             self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
             self.bar.draw_static(BG);
             self.bar_scale = None;
@@ -598,6 +729,7 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.pwc = pw::PwCache::new();
         self.last_iohm = 254;
+        self.acc_drawn = false;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -615,6 +747,12 @@ impl DmmView {
         let recolor = self.last_col != color;
         self.last_col = color;
         let vcol = if r.prov { VALUE_PROV } else { VALUE };
+        // The digits below the uncertainty (doc dmm-accuracy.md section 5):
+        // grey from cell `grey` on (7: the extra digit only, 8: none).
+        let ulps = if self.power { None } else { self.acc.and_then(|a| acc_ulps(r, a)) };
+        let grey = if ulps.is_some() { acc::grey_from(s.as_bytes(), ulps).min(7) as u8 } else { 8 };
+        let last_grey = self.last_txt[7];
+        self.last_txt[7] = grey;
         // Only the changed digits are redrawn (cell layout unchanged).
         let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some() && !recolor;
         let prev_txt = self.last_txt;
@@ -653,15 +791,15 @@ impl DmmView {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
             self.ol_word = false;
         }
-        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG);
+        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
         if r.main.ol && (!same_layout || !self.ol_word) {
             ol_word(ow, color);
             self.ol_word = true;
         }
         if let Some(e) = ext {
-            if !same_layout || last_ext != e {
+            if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
                 let r = rect(XT_X as i16, 68 + md, XT_W as i16, 80);
-                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, color, BG);
+                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, if grey < 8 { VALUE_LOW } else { color }, BG);
             }
         } else if last_ext != 0 {
             // The full cells end at 400: the rest of the +1 digit cell.
@@ -733,7 +871,7 @@ impl DmmView {
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
-            10 if aux[0].is_none() && !self.power => r.range.clamp(1, 6) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
             _ => 255,
         };
@@ -894,7 +1032,7 @@ impl DmmView {
             self.last_label = self.label;
             let s = range_text(r);
             if let (Some(l), false) = (self.label, temp) {
-                sf::label(sf::F14, rect(BAR_X, 1, 90, 32), l, STATUS_FG, BAR, 1, 1);
+                sf::label(sf::F14, rect(BAR_X, 1, 105, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
                 range_status(s);
             }
@@ -920,6 +1058,7 @@ impl DmmView {
         if let Some(pv) = pwr {
             self.power_row(&pv, lim);
         }
+        self.acc_update(r, ulps);
     }
 
 }
@@ -1094,7 +1233,7 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 /// "HOLD"; AutoHold is a different face so the two cannot be confused:
 /// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
 /// for a stable value, inverted (dark on orange) while it shows a captured
-/// one. Slot 119..190 (after the logo-shifted range label; uptime from 205).
+/// one. Slot 119..190 (after the range label; uptime from 205).
 ///
 /// With no HOLD / AutoHold the slot carries the wrong-connection alert
 /// (sentinel.rs) instead of "RUN", in the same TEXT22 face: "A-JACK" white
@@ -1168,10 +1307,11 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
-        // The stock's seven items; no 60 ohm (r0, removed: dmm.rs ohm notes).
+        // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
+        // +1 digit notes), also in AUTO unless the 0.28 mA "ON" variant.
         Button::Ohm => &[
-            ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)), ("600K\u{3a9}", Some(4)),
-            ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
+            ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
         ],
         _ => &[("AUTO", None)],
     }
@@ -1222,14 +1362,13 @@ pub fn range_text(r: &Reading) -> &'static str {
     }
 }
 
-/// The status bar's range text in the stock F21, left in the 90 px slot
-/// before the HOLD / alert slot (x 119). The stock letter-spaces it -1 in
-/// a 105 px box; ours starts after the logo, so the longest ranges close
-/// up: "600mV" -1, "6000uA" -2 (ink <= 89 px, 3 px before 119).
+/// The status bar's range text in the stock F21, left in the stock's 105 px
+/// box (x 4..109) before the HOLD / alert slot (x 119). The stock
+/// letter-spaces it -1; ours closes up only the ranges that need it.
 #[inline(never)] // .cold (link-native.x): drawn on a change only
 fn range_status(s: &str) {
-    let sp = if sf::text_width(sf::F21, s, 0) <= 89 { 0 } else if sf::text_width(sf::F21, s, -1) <= 89 { -1 } else { -2 };
-    sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, sp);
+    let sp = if sf::text_width(sf::F21, s, 0) <= 104 { 0 } else if sf::text_width(sf::F21, s, -1) <= 104 { -1 } else { -2 };
+    sf::label(sf::F21, rect(BAR_X, 1, 105, 32), s, STATUS_FG, BAR, 1, sp);
 }
 
 fn range_rect(i: usize) -> sf::Rect {
@@ -1258,7 +1397,6 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     };
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), title, STATUS_FG, 0x2966, 8, 0);
     for (i, (name, _)) in range_items(b).iter().enumerate() {
         let c = if Some(i) == sel { SEL } else { 0x2966 };
@@ -1564,7 +1702,6 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
 pub fn temp_page(p: &TempPage) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Temperature Settings", STATUS_FG, 0x2966, 8, 0);
     sf::glyphs(sf::TEXT22, rect(8, T_ROW_Y, 118, T_ROW_H), "Offset", STATUS_FG, BG, 1, 0);
     for code in T_CODES {
@@ -2189,14 +2326,13 @@ fn gen_wave_box(w: gen::Wave, bg: Color) {
 pub fn gen_static(g: &gen::Gen) {
     lcd::fill_rect(0, 0, lcd::W, 36, G_BAR);
     lcd::fill_rect(0, 36, lcd::W, lcd::H - 36, G_BG);
-    sf::logo(4, 8, G_BAR);
     for k in 0..4 {
         gen_box_frame(k, G_BOX);
     }
     gen_values(g);
 }
 
-/// RUN/STOP label of the generator bar (logo + label, x < GEN_RUN_W): a tap
+/// RUN/STOP label of the generator bar (x < GEN_RUN_W): a tap
 /// toggles the output like the RUN key (ui-review #9).
 const GEN_RUN_W: u16 = BAR_X as u16 + 80;
 
@@ -2274,7 +2410,7 @@ fn libsin(x: f32) -> f32 {
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
     // Top bar: RUN/STOP (output state).
-    sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 8, 0);
+    sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
     gen_wave_box(s.wave, G_BOX);
     gen_preview(s.wave);
     for k in 0..4 {
@@ -2439,8 +2575,8 @@ pub fn keypad_hit(kind: u8, x: u16, y: u16) -> Option<u8> {
 }
 
 // ----------------------------------------------------------------- menu
-// Stock main menu (gui_v2_6.h section 2): logo, four tiles 190x106 with the
-// stock icons; plus a fifth row for the combined views of this firmware.
+// Stock main menu (gui_v2_6.h section 2) without its logo: four tiles
+// 190x106 with the stock icons; plus a fifth row for the combined views of this firmware.
 
 const M_BG: Color = 0x10A3;
 const M_TILE: Color = 0x2146;
@@ -2527,8 +2663,11 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
 /// applies at the next USB plug), the burden voltage readout of the A
 /// functions (doc 3.15; persisted, default OFF = the stock aux row), the
-/// Device / About page and the touch test page (app_touchtest.rs).
-pub const SETTINGS3: [&str; 6] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test"];
+/// Device / About page, the touch test page (app_touchtest.rs) and the
+/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
+/// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
+/// so the rows above keep their places.
+pub const SETTINGS3: [&str; 8] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
@@ -2598,7 +2737,6 @@ fn page_title(title: &str) {
     } else {
         sf::glyphs(sf::TEXT22, rect(back, 0, 476 - back, PAGE_BAR_H), title, STATUS_FG, 0x2966, 1, 0);
     }
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(BAR_X + 3, 0, 110, PAGE_BAR_H), "< Back", STATUS_FG, 0x2966, 1, 0);
 }
 

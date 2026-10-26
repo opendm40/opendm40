@@ -23,6 +23,18 @@ Additional requirements:
       A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
       The cause in AC mV / Ohm / Hz is not traced (sentinel.rs decide / V_GATE per mode).
       Logs: scratchpad acur4.log (test build), acur-main.log.
+- [ ] A-JACK thresholds higher (owner 2026-10-27). The PB1 comparator window is the stock R21 0xdd, ±20.8 mV
+      = 0.44 mA on 47.5 Ω; A-PROT needs only a trigger for the probe (125 mA = 5.9 V at PB1). The taps allow
+      ±62.5 / 104 / 208 / 417 mV (AGNDP3..6 / AGNDN3..6, REFO 1.25 V: 1.3 / 2.2 / 4.4 / 8.8 mA); the AD1 / AD2
+      peak thresholds (`PK_THR`, `PK2_THR`, 0.5 mA) are in software.
+      - First measure PB1 in mV (AD1 PB1 − PB3) where it picks up the V input, V–COM 1 / 5 / 10 V, A open:
+        DC V manual 60 V (and 6 V at 5 V), ohm, continuity (now ~±230 mV at 5 V), Hz (~54 mV); then the same
+        with A shorted to COM (pickup on the node, not a shunt current).
+      - Pick the window above the largest pickup; see whether DC V 60 V+ and Hz can get their sentinel back
+        (no sentinel now: [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md) 4.2). If the
+        pickup grows with the input, 600 / 1000 V can exceed any window.
+      - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
+        = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
 
 ## Owner decisions pending (2026-10-25)
 
@@ -101,7 +113,7 @@ What waits for the owner; each line links to the material.
       AUTO and dashes at the beep, never the 6 MΩ reading with MANU after it.)
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
-      old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
+      old fw-rs/ names) are in a private repository, cloned into stock/re/. The public
       history was rewritten (git-filter-repo: those paths removed; the UID, its derived block and two BT MACs
       replaced); a rescan in every text form and in the blobs finds none. Doc hashes mapped to the new history.
 - [x] RES AUTO with 60 Ω (device 59bffd8a, 2026-10-25): the calibrator's resistance output on V-COM, AUTO:
@@ -118,20 +130,36 @@ What waits for the owner; each line links to the material.
       ([HY3131.cs](../emu/hy3131/HY3131.cs) `OhmR0K`), [resautotest.py](../emu/hy3131/resautotest.py) checks
       30 / 59.5 Ω on 60 Ω within 0.3 %. Device check: the calibrator's resistance output on V-COM, 10 / 20 / 50 Ω,
       manual 60 Ω and manual 600 Ω, mean of 5 READ? each: the ratio 60 / 600 within 1 +- 0.003 for each value.
-- [ ] 60 Ω range: removed 2026-10-25 (owner), work on branch feat/ohm60 (2bc5cc92: the range page item, RES
-      AUTO down to 60 Ω, the r1-gain x 1.0291 fix, the emulator and resautotest rows). Removed here: the range
-      page item, AUTO (floor 600 Ω again), the AUTO key cycle, `RES:RANG` 60 / MIN (now 600 Ω), `OHM_R0_K` /
-      `ohm_row_gain`; the stock's r0 row stays in [hy3131_tables.rs](src/hy3131_tables.rs) and nothing selects
-      it ([dmm.rs](src/dmm.rs) `OHM_R_MIN`, the ohm notes there). Findings to resume from:
-      - the stock V2.6 never selects r0: its range is clamped to 1..6
-        (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2);
-      - r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated default (inferred);
-      - on the device r0 read 2.6-2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 Ω; the ratio is
-        constant, so a gain error, not a parallel load. Ruled out: the OP1 x10 path (the record's x10 / x1
-        pairs read high, not low) and the nominal Rref / 10 (the
-        [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library) x10 ohm row);
-      - the r0 row differs from r1 in R25 0x01 (x10) and R2B 0x46 vs 0x40: PA2 DF closed, which the stock uses
-        only on the high ohm ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the calibrator.
+- [ ] 60 Ω range: removed from main 2026-10-25 (owner); back on branch feat/ohm60 (0.3.0, owner decides on the
+      merge): the range page item, RES AUTO down to 60 Ω, the AUTO key cycle, `RES:RANG 60`. Earlier findings:
+      the stock V2.6 never selects r0 (its range is clamped to 1..6, `stock/re/analysis/dmm_v2_6.h` (in the
+      private analysis repo) section 2); r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated
+      default (inferred); the stock r0 row is the r1 row plus R25 0x01 (OPS1, OP1 x10) and R2B 0x46 vs 0x40
+      (PA2 DS2 + FS2 closed).
+      **PA2 (device 2026-10-26, MR9270 resistance output on V-COM, manual 60 / 600 Ω, 2 alternating blocks of
+      6 READ? (MED) per value, r0 read with r1's gain x 1.0291 in both images):**
+
+      | set Ω | 600 Ω | 60 Ω, R2B 0x46 | 600 Ω | 60 Ω, R2B 0x40 | raw r0 / r1, 0x46 / 0x40 |
+      |---|---|---|---|---|---|
+      | 0 | 0.675 | 0.669 | 0.669 | 0.689 | |
+      | 10 | 9.112 | 9.102 | 9.114 | 9.461 | 0.9707 / 1.0087 |
+      | 20 | 19.079 | 19.077 | 19.085 | 19.829 | 0.9716 / 1.0096 |
+      | 50 | 49.417 | 49.399 | 49.414 | 51.354 | 0.9714 / 1.0099 |
+
+      PA2 DS2 / FS2 closed reads 3.8 % lower; what PA2 is wired to on the board is not known. With it open
+      r0 reads 1.0 % high; the record's DC mV x10 / x1 gains (0x24 / 0x28: a ratio of 0.9895 on the dumped
+      unit, the same OP1 x10 stage) match that. Change: r0 = the stock row with R2B 0x40
+      ([dmm.rs](src/dmm.rs) `OHM_R0_ROW`), gain = r1's x 0x24 / 0x28 (`ohm_row_gain`), no measured factor.
+      Predicted from the table: r0 / r1 = 0.9981 / 0.9990 / 0.9993 at 10 / 20 / 50 Ω. Device 8d1ef2bd
+      (0.3.0), same method: 600 Ω / 60 Ω = 0.669 / 0.666 (0 Ω), 9.102 / 9.090, 19.084 / 19.059, 49.417 /
+      49.375, r0 / r1 = 0.9987 / 0.9987 / 0.9991; 100 and 300 Ω on manual 60 Ω: OL (600 Ω: 100.11, 302.26).
+      RES AUTO: 50 / 10 Ω -> 60 Ω; 100 / 300 Ω -> 600 Ω (from 60 Ω by way of 60 MΩ, the stock over-range
+      rule); calibrator steps 57 .. 63 Ω up: 60 Ω through 62, 600 Ω at 63 (62.82); down: 600 Ω through 59
+      (58.61), 60 Ω at 58 (57.66); no back-and-forth. Output off from 60 Ω: 60 MΩ (the calibrator's off
+      state reads ~96 kΩ there, not open). The 0 Ω row is the
+      calibrator's own residual (~0.67 Ω at "0"; 10 Ω reads 9.11 on 600 Ω), not the meter's zero: whether
+      the MR9270 is accurate at 10 Ω is unknown; a short at the jacks or a 4-wire reference decides. Region B
+      paid with the LOCK font blob moved to A2 ([native-boot.md](docs/native-boot.md)).
 - [x] Touch (device eea7cd6 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
       mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
       -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),
@@ -140,8 +168,8 @@ What waits for the owner; each line links to the material.
       AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
       held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
 - [ ] USB PID (owner 2026-10-25; repo public 2026-10-26, request open: https://github.com/pidcodes/pidcodes.github.com/pull/1331; firmware already uses D040): request 1209:D040 from pid.codes right after the repo is public (their rule:
-      a public source repo with a LICENSE). The PR is prepared locally (org/WirenBoard + 1209/D040, MIT, site and
-      source = github.com/wirenboard/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
+      a public source repo with a LICENSE). The PR is prepared locally (an org entry + 1209/D040, MIT, site and
+      source = github.com/opendm40/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
       merge: the PID constant in usb descriptors (now the test PID 1209:0001), udev rules / docs, a release.
       Their howto: a software-only project "may" be asked for justification (the hardware is the vendor's).
 - [ ] Public release (owner 2026-10-25): the one blocker was the touch fix (screen and the four touch keys).
@@ -575,7 +603,7 @@ Code work (in this order):
       FR-27 generator keeps running in DMM: present in code (cf1978b, 98c00f7, concurrent instruments).
       FR-33 is USBTMC+MSC (we chose DBG over CDC). (verify on device)
 - [x] Repo tidy-up (user request): ../TIDY-PLAN.md executed 2026-10-13 (b06da47..369cad7); the repo is
-      now private (wirenboard/opendm40). Left to the user: whether vendor-derived material
+      now private. Left to the user: whether vendor-derived material
       (stock/re/analysis/app_decompile.c) and BT MACs stay tracked if it ever goes public again.
 
 ## From user community feedback (docs/user-feedback.md)
@@ -884,21 +912,17 @@ Code work (in this order):
         classic SPP/RFCOMM. If it doesn't, the BT path needs a different route, e.g. Web Serial to an OS
         RFCOMM port.
       - A claude.ai artifact sandbox likely blocks WebUSB.
-- [ ] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
-      'Loading'"). Today the screen stays dark or frozen while pre_main does the SPI-disk work before
-      main's LCD init: the FAT dir check, calbackup, `vdisk::mirror_boot` (+0.22 s every boot, +1..9 s on
-      the first boot after a new image or calibration change; device c785807 MIR? 5.16-5.3 s) and the
-      boot refresh. In the emulator main's clock starts 3.56 s after reset (harness-sync).
-      Plan:
-      - Bring up the LCD and backlight at the very start of pre_main.
-      - Draw a minimal splash: product name and "Loading...", in the stock font, region-B safe.
-      - Show a step line or a progress bar per boot phase. On a slow step, say what it is, e.g.
-        "Updating INFO/ copy (first boot after an update)".
-      - Keep it ISR-free and watchdog-fed; no region-C code once streaming exists (it doesn't yet at boot).
-      Also:
-      - Measure each boot phase on the device: DBG timestamps per phase, reported by DBG:BOOT?.
-      - Then cut what can move after the first screen, e.g. run mirror_boot lazily in idle time instead
-        of before USB comes up.
+- [x] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
+      'Loading'"). Done on feat/boot-splash (0.4.0): a splash ("opendm40", version, "Loading...", a bar per
+      phase) right after board::init; the first frame drawn before USB attaches, so the "USB configured
+      or 3 s" draw gate is gone; vdisk::init + boot_refresh after the first frame; DBG:BOOT? BOOTMS /
+      MAINMS. Device 108eb55, normal boot: the meter page about 0.68 s after pre_main starts (before:
+      about 4.1 s, inferred from the phase times plus the 3 s gate, not measured on main).
+  - [ ] Left: `vdisk::mirror_boot` (0.3 s every boot, 5.4 s on the first boot of a new image) still
+        runs in pre_main under the splash. Moving it after the first frame would leave the meter page
+        frozen for those seconds on the first boot; a chunked compare in idle time needs
+        calbackup::write_file split up. A step line ("Updating INFO/ copy") on the slow first boot is
+        not done.
 - [ ] Protocol decoders (owner 2026-10-23): UART, Modbus RTU, etc. The usual problem with scope decoders is that
       they only decode what fits in one short record (here ~53 KB). Make long traffic convenient instead: decode
       **while streaming**, keep only the decoded frames and let the raw samples go.
@@ -3364,9 +3388,16 @@ Emulator (emu/):
 - [ ] Owner: confirm the DM40's DC V against a third reference (a 6.5-digit DMM or a 2.5 / 5 V reference IC
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
-- [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
+- [x] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
       Not run on 40728b8 (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
       the calibrator wanders by the same 0.2-0.5 mV over minutes.
+      Measured (device 0.2.1, 2026-10-26, DC V SLOW, FETC? mean over 3-4 s per block, 6 / 60 / 6 ... V blocks,
+      60 V minus the mean of its neighbours): 0 V -0.24..-0.33 mV (mean -0.29), 1 V -0.15..-0.32 (-0.21, -0.27;
+      two sessions), 3 V -0.35..-0.54 (-0.42), 5 V -0.21..-0.65 (-0.38, -0.62). Same sign in every pair, and as
+      large at 0 V: a zero offset of the 60 V range against the 6 V range (0.3 of the 60 V range's 1 mV digit),
+      i.e. the factory calibration's offsets (cal slots 0x14 / 0x18), not a firmware row or table setting. The
+      only per-range firmware term, the 6 V range's `v += 1e-4 - |v| / 20000` (dmm.rs poll_dcv), would move the
+      difference by -0.05 / +0.05 / +0.15 mV at 1 / 3 / 5 V, not the way the data go. Closed: no firmware cause.
 - [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
@@ -3901,11 +3932,23 @@ Emulator (emu/):
       VOLT:AC:RANG:AUTO ON on the 50 Hz square, 4 runs: lands on 6 V, no 0 and no reading 1 % low; but the first finals
       on 6 V read high, +3.6..+4.0 % (5.00 / 4.93 / 4.89 V for 4.81 V), settling within 1 % ~0.35 s after the step
       (item below).
-- [ ] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
+- [x] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
       finals on 6 V read +3.6..+4.0 % high (5.00, 4.93, 4.89 V for 4.81 V) and settle within 1 % ~0.35 s after the
       step; the cause is unknown (the AC filter seeded from a block that spans the range switch is one candidate,
       INFERRED). Script: scratchpad acauto.py pattern (CONF:VOLT:AC 60, 3 s, VOLT:AC:RANG:AUTO ON, DBG:READout?
       every 50 ms for 4 s).
+      Cause: not the filter (ACV_WIN lets a > 10 mV change through at 0.99). The RMS results themselves are high:
+      6 V and 60 V share a tap, OP1's gain changes, its output's DC steps and the coupling into PB4 (tau 0.34 s,
+      [hy3131-frontend 2](docs/hy3131-frontend-2026-10-26.md)) carries it to AD2. `DBG:ACDC?` 0.2 s after the
+      settle (device 0.2.1): LPF 1.33, 0.99, 0.74, 0.55, 0.41, 0.31 V, and RMS = sqrt(AC^2 + LPF^2) within ~0.1 V
+      throughout. 6 -> 60 V (manual) is far worse: LPF -25 V first, finals 21-26 V for 4.84 V, ~2 s.
+      Fixed (fix/acv-autorange-overshoot, dmm.rs ACV_DC_*): after a plain AC V range step a result is provisional
+      (grey, no step down) while |LPF| > 0.05 x RMS + 0.5 % of the range, at most 2 s after the row write. Emulator
+      (HY3131.cs HpfTransientGain 1.5 -> 1.0, the device's sqrt(AC^2 + LPF^2)): firstrdtest acv-auto-dn-sq (+-0.3 %)
+      and acv-up-sq (+-0.5 %) FAIL on 0.2.1 (4.802 V, 11.3 V for 4.776 V), pass. Device (fix build, the
+      square, 4 runs each): 60 -> 6 V at 50 Hz first final +0.08..+0.20 % at 1.29-1.40 s (base +3.6..+4.5 % at
+      0.68-0.78 s), at 20 Hz -0.15..0.00 % at 1.35-1.40 s (base +4.2..+4.5 %); 6 -> 60 V first final at the
+      2 s limit, +0.30..+0.64 %. A step on a signal without DC is not delayed (emulator 1 V sine: 0.71 s, as base).
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
@@ -3924,6 +3967,20 @@ Emulator (emu/):
       **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
       6 runs each: SYST:ALER? / DBG:SENT:LOG? every 0.1 s for 6 s after the off, no A-JACK in 12 of 12. Not done: a
       current into A with V-COM open (needs a current source on A).
+- [x] **False A-JACK in continuity when the probes touch** (owner video 2026-10-26, leads in V / COM, A jack empty):
+      A-JACK for ~1.5 s while the readout went OL -> 814 -> 277 -> 28.85 -> 0.67 ohm. The jack check calls a shorted
+      input (~0 V) "free" as it does the open one (~-0.48 V), so PB1 hits during the contact asserted A-JACK; what
+      moves PB1 then is unknown (not recorded on the device). Fixed (branch fix/cont-false-ajack, 0.2.8): continuity
+      and diode gate A-JACK on their reading (V_GATE): under OL within 1.5 s = V-COM closed, no A-JACK; an OL reading
+      counts from 450 ms into the hit run ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
+      Cost (emulator): A-JACK 0.6-0.9 s after the onset (was 0.16-0.36 s), up to ~1.5 s right after a part left
+      V-COM; none with a part on V-COM and a current in A. Emulator: model `contbump`,
+      senttest cont-bounce / diode-bounce (FAIL on 6c686ce8, pass), cont-a / diode-a now open V-COM in their current
+      phase, cont-closed-a.
+      Device (the MR9270's resistance output on V-COM, its output relay on / off at 0 ohm x 8, 0 <-> 400 ohm x 12):
+      every step puts AD2 peaks of 14 000-231 000 codes on PB1 (threshold 9 900), streaks of 1-2 windows, the jack
+      check "free" (-435 / -87 / 0 mV). Main 6c686ce8: A-JACK on 3 of the 8 relay closures, shown 0.3-1.5 s after
+      each; the fix: none in 28 steps. Not run: probe taps by hand (owner session pending), a current in A.
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device f59bac2 note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s

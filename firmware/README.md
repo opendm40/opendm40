@@ -185,6 +185,8 @@ stable; after that an incompatible change bumps MAJOR. Pre-release suffixes
    lock).
 2. In [`../CHANGELOG.md`](../CHANGELOG.md), rename `## Unreleased` to
    `## v<version> (<date>)` and start a new empty `## Unreleased` above it.
+   Keep each entry to a line or two; before / after pictures go in
+   `docs/changelog/v<version>/` ([`tools/ui-render/changelog-img.py`](tools/ui-render/changelog-img.py)).
 3. Commit both files, push the branch, wait for CI.
 4. Tag and push the tag: `git tag -a v0.1.0-pre2 -m "opendm40 v0.1.0-pre2"`,
    `git push origin v0.1.0-pre2`.
@@ -208,7 +210,6 @@ feature, in the same commit.
 | [`src/`](src) | The firmware (crate `opendm40`) |
 | [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), font and table generators) and the host test suites (`tools/*/run.sh`) |
 | [`docs/`](docs) | Firmware docs, see [Documentation](#documentation) |
-| [`fonts/`](fonts) | Boot logo source (`wb-logo-round.svg` / `.png`) |
 | [`ref/`](ref) | Reference screenshot of the stock firmware |
 | [`vendor/usbd-storage/`](vendor/usbd-storage) | usbd-storage 3.0.0 with the DM40 patches ([`Cargo.toml`](Cargo.toml)) |
 | [`TODO.md`](TODO.md) | What is done and what is open |

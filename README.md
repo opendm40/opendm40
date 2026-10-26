@@ -27,7 +27,7 @@ everything with a current through the A jack, is listed in the manual under
 Measured accuracy against calibrators (DC V, DC A, frequency, resistance):
 [firmware/docs/data](firmware/docs/data/README.md).
 
-Downloads: [Releases](https://github.com/wirenboard/opendm40/releases).
+Downloads: [Releases](https://github.com/opendm40/opendm40/releases).
 Changes per release: [CHANGELOG.md](CHANGELOG.md).
 
 ## What it does
@@ -66,14 +66,14 @@ Item by item against the stock firmware V2.6: [parity.md](firmware/docs/parity.m
 You need a DM40 with the stock firmware, a USB cable and a charged battery.
 
 1. Download `dm40_opendm40_v<version>.bin` from the latest
-   [release](https://github.com/wirenboard/opendm40/releases/latest)
+   [release](https://github.com/opendm40/opendm40/releases/latest)
    (`SHA256SUMS` next to it), or build it ([firmware/README.md, Build](firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**, and connect the
    cable. A USB disk appears.
 3. Copy the file onto it, as the only `dm40*.bin` file there. Eject the disk.
 4. Switch the meter off and on. The stock update procedure installs the file.
-   The first start is dark for a few seconds: do not switch off in the first
-   10 seconds.
+   The first start takes a few seconds (opendm40 shows a progress bar): do
+   not switch off in the first 10 seconds.
 5. Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
    your computer and keep it ([Back up](#back-up-with-opendm40)).
 
@@ -146,14 +146,14 @@ Bug reports and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Releases
 
 Releases follow [Semantic Versioning](https://semver.org/) and are published
-on [GitHub Releases](https://github.com/wirenboard/opendm40/releases) with the
+on [GitHub Releases](https://github.com/opendm40/opendm40/releases) with the
 install file `dm40_opendm40_v<version>.bin`; the changes per release are in
 [CHANGELOG.md](CHANGELOG.md), the rules in
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
 ## Licence
 
-opendm40 is under the MIT licence ([LICENSE](LICENSE)), © Wiren Board.
+opendm40 is under the MIT licence ([LICENSE](LICENSE)), © the opendm40 contributors.
 
 Not under the MIT licence:
 

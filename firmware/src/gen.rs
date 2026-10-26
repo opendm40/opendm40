@@ -37,6 +37,7 @@ const GPIOB: u32 = 0x4002_0400;
 const DAC: u32 = 0x4000_7400;
 const DAC_CR: u32 = DAC + 0x00;
 const DAC_DHR12R1: u32 = DAC + 0x08;
+const DAC_SR: u32 = DAC + 0x34;
 const TIM6: u32 = 0x4000_1000;
 const TIM12: u32 = 0x4000_1800;
 const DMA0: u32 = 0x4002_6000;
@@ -61,12 +62,16 @@ pub struct Gen {
 
 fn stop_outputs() {
     unsafe {
-        // DMA off, DAC off, timers off.
-        w32(S5, 0);
-        while r32(S5) & 1 != 0 {}
-        w32(DAC_CR, r32(DAC_CR) & !0xFFFF);
+        // Timers off, DAC off, then DMA off: a TIM6 trigger with the DAC's
+        // DMA request on and the stream off sets DMA underrun (DAC_SR
+        // DMAUDR1), which blocks the DAC's DMA requests until cleared (the
+        // output stayed flat after an OFF / ON).
         modify32(TIM6, 1, 0);
         modify32(TIM12, 1, 0);
+        w32(DAC_CR, r32(DAC_CR) & !0xFFFF);
+        w32(S5, 0);
+        while r32(S5) & 1 != 0 {}
+        w32(DAC_SR, 1 << 13);
         // PA4 output low, PB14 / PB12 inputs.
         w32(GPIOA + 0x18, 1 << (4 + 16));
         modify32(GPIOA, 3 << 8, 1 << 8);

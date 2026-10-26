@@ -1,6 +1,7 @@
 //! opendm40 additions on the stock-replica scope page that are not in the
 //! stock (src/scope_ui.rs): the FFT axis-scale boxes, the peak readout and
 //! marker (UF-11), the trigger-type rows of the Trigger tab (UF-13), the
+//! sample rate beside each timebase list entry, the
 //! cursor tab (UF-08) and the zoom buttons (UF-10). Every item under the
 //! full layout rules (`check_add`) against the replica around it, both
 //! views, worst-case texts, and updates equal a fresh draw.
@@ -22,7 +23,69 @@ fn rb(r: stockfont::Rect) -> Bx {
     Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)
 }
 
+/// Each timebase list entry's sample rate (scope_ui::tb_rate_rect, beside
+/// the time; main.rs "Timebase list popup" runs the full layout rules on
+/// every centre index): the widest rate fits its box with the stock 3 px
+/// margin, MCX and the Wave view; the contact sheet's / emu/sratetest.py's
+/// scenes; the record bar while running without a rate.
+fn srate(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let mut widest = (0, String::new());
+    for wave in [false, true] {
+        let lo = if wave { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        for tb in lo..=scope::TB_MAX {
+            let mut b = scope_ui::Buf::new();
+            scope_ui::fmt_srate(&mut b, scope::tb_rate(tb, wave));
+            let w = stockfont::text_width(stockfont::SC_F12, b.as_str(), 1);
+            // >= 3 px from the spinner's right edge.
+            let lim = scope_ui::TB_SPIN.x + scope_ui::TB_SPIN.w - 3 - scope_ui::tb_rate_rect(0).x;
+            ck.cases += 1;
+            if w > lim {
+                ck.fail(&format!("srate/{}/{tb}", wave as u8), format!("rate \"{}\" {w} px > {lim}", b.as_str()));
+            }
+            if w > widest.0 {
+                widest = (w, b.as_str().to_string());
+            }
+        }
+    }
+    let shots: [(&str, bool, u8); 7] = [
+        ("s07-srate-tb5", false, 5),
+        ("s07-srate-tb13", false, 13),
+        ("s07-srate-tb16", false, 16),
+        ("s07-srate-tb20", false, 20),
+        ("s07-srate-roll", false, 26),
+        ("s07-srate-wave", true, 15),
+        ("s07-srate-wave-roll", true, 24),
+    ];
+    for (name, wave, tb) in shots {
+        let mut m = base.m;
+        m.tb = tb;
+        m.src = if wave { scope_ui::SRC_DMM } else { scope_ui::SRC_MCX };
+        if wave {
+            m.wvdiv = 250.0;
+            m.ch1_txt = "AC V";
+            m.ac = true;
+            scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
+        }
+        let sc = stock::Scene { name: "srate", m, popup: scope_ui::Popup::Tb(tb), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        stock::draw(&sc);
+        ck.check_replica(&format!("srate/{name}"));
+        save(out, name);
+        scope_ui::set_tb_lo(scope::TB_MIN);
+    }
+    // The record bar while running: no rate (the stock full-record line).
+    let mut m = base.m;
+    m.src = scope_ui::SRC_MCX;
+    let sc = stock::Scene { name: "srate", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+    stock::draw(&sc);
+    ck.check_replica("srate/recbar");
+    save(out, "s07-srate-recbar");
+    let wt = scope_ui::TB_LABELS.iter().map(|t| stockfont::text_width(stockfont::SC_F16, t, 0)).max().unwrap_or(0);
+    println!("scope sample rate (timebase list): widest rate \"{}\" {} px, widest time {wt} px", widest.1, widest.0);
+}
+
 pub fn run(ck: &mut Checker, out: &str) {
+    srate(ck, out);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;

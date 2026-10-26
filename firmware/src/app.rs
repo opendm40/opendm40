@@ -885,6 +885,8 @@ impl App {
                     if self.dmm.burden_show { "ON (A, mA, uA)" } else { "OFF (stock)" },
                     "", // Device row: opens the About page, no inline value
                     "", // Touch test row: opens the page
+                    if self.dmm_view.acc_on { "ON" } else { "OFF" },
+                    if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" },
                 ];
                 ui::settings(2, &vals);
             }
@@ -990,6 +992,13 @@ impl App {
         self.draw_reading();
     }
 
+    /// The accuracy label's context (doc dmm-accuracy.md): None with
+    /// Settings 3/3 "Accuracy" OFF or REL in force (the manual specifies a
+    /// reading, not a difference of two).
+    pub(crate) fn acc_ctx(&self) -> Option<ui::Acc> {
+        (self.dmm_view.acc_on && !self.meter.rel_active()).then(|| ui::Acc { model: self.dmm.model(), tc: self.dmm.t_sensor() == 0 })
+    }
+
     /// Repaint the shown DMM reading in the DMM page / the combined view's
     /// meter strip (only what changed is drawn).
     fn draw_reading(&mut self) {
@@ -1000,6 +1009,7 @@ impl App {
                 // DBG:PROF? "d.read" (digits + aux rows + labels).
                 crate::prof::enter(crate::prof::DREAD);
                 self.dmm_view.alt = self.strip_alt;
+                self.dmm_view.acc = self.acc_ctx();
                 self.dmm_view.reading(&r, hold, lim);
                 crate::prof::exit(crate::prof::DREAD);
             }
@@ -1675,6 +1685,9 @@ impl App {
         if self.redraw {
             self.repaint(now);
         }
+        if self.sp.uncover != 0 {
+            self.sp_uncover();
+        }
         // A toast that came while a confirm was up, over the page again.
         if self.toast_later_n != 0 {
             self.toast_later_show(now);
@@ -2058,6 +2071,8 @@ impl App {
             | if self.dmm.temp_f() { crate::meter::EXT_TEMP_F } else { 0 }
             | ((!self.dmm.alert_mask() & crate::sentinel::M_JACK) as u32) << crate::meter::EXT_ALERT_OFF_SHIFT
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
+            | if self.dmm_view.acc_on { 0 } else { crate::meter::EXT_ACC_OFF }
+            | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
             | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
@@ -2133,6 +2148,8 @@ impl App {
         let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_JACK;
         self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
         self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
+        self.dmm_view.acc_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_ACC_OFF == 0;
+        self.dmm.ohm_neg = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_OHM_NEG != 0;
         // An unknown value (3) reads as Loud.
         self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
         if same_session {
@@ -3266,8 +3283,8 @@ impl App {
 
     /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
-    /// manual range the next higher one (the MF page's order, 60 mV
-    /// included), the highest wrapping to the lowest. Long: the
+    /// manual range the next higher one (the MF page's order, 60 mV and
+    /// 60 ohm included), the highest wrapping to the lowest. Long: the
     /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
     /// REL as before; AutoHold stays as it is.
     #[inline(never)]
@@ -3790,6 +3807,15 @@ impl App {
                         self.tt_open(clk);
                         return;
                     }
+                    Some(6) => {
+                        // Accuracy label (doc dmm-accuracy.md): from the
+                        // next reading on.
+                        self.dmm_view.acc_on = !self.dmm_view.acc_on;
+                    }
+                    Some(7) => {
+                        // Negative ohm: from the next reading on.
+                        self.dmm.ohm_neg = !self.dmm.ohm_neg;
+                    }
                     Some(_) | None => return,
                 }
                 self.redraw = true;
@@ -4197,7 +4223,7 @@ impl App {
     /// Cmd::Temp* / Sys* / Calc*); None for the scope / generator commands
     /// (every DMM-side variant needs an arm here: the scope path would power
     /// the scope rail for it).
-    /// FETC:BURD? / DISP:BURD (doc 3.15); true = a reply was written.
+    /// FETC:BURD? / DISP:BURD (doc 3.15), RES:NEG; true = a reply was written.
     #[inline(never)] // .cold (link-native.x): SCPI only
     fn burden_scpi(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
@@ -4209,6 +4235,15 @@ impl App {
             }
             C::DispBurden(None) => {
                 out.put_bytes(if self.dmm.burden_show { b"1" } else { b"0" });
+                true
+            }
+            C::ResNeg(Some(b)) => {
+                self.dmm.ohm_neg = b;
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::ResNeg(None) => {
+                out.put_bytes(if self.dmm.ohm_neg { b"1" } else { b"0" });
                 true
             }
             _ => {
@@ -4749,7 +4784,7 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
-        if matches!(cmd, C::FetchBurden | C::DispBurden(_)) {
+        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_)) {
             return self.burden_scpi(cmd, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {

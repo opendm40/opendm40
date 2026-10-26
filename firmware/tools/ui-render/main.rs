@@ -89,6 +89,9 @@ mod touch;
 mod touchcal;
 #[path = "../../src/ui.rs"]
 mod ui;
+// The boot splash (a native.rs submodule in the firmware).
+#[path = "../../src/splash.rs"]
+mod splash;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
@@ -567,9 +570,29 @@ fn prov(mut r: Reading) -> Reading {
     r
 }
 
+/// The HY3131 range a reading of `mode` in `unit` with `dec` decimals is on
+/// (the accuracy label picks its row by it): mV 600 mV (r1), ohm 60 Mohm
+/// (MΩ with 3 decimals, r6), 60 ohm (Ω with 3 decimals, r0, no row) else
+/// 600 ohm .. 6 Mohm (r1..r5 share a row),
+/// capacitance by unit and decimals (dmm.rs cap_val), else r0.
+fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
+    match mode {
+        2 | 3 => 1,
+        10 if unit == "M\u{3a9}" && dec <= 3 => 6,
+        10 if unit == "\u{3a9}" && dec == 3 => 0,
+        10 => 1,
+        13 => match unit {
+            "nF" => 3 - dec.min(3) as i8,
+            "mF" => 9 - dec as i8,
+            _ => 6 - dec as i8,
+        },
+        _ => 0,
+    }
+}
+
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: 0, main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
+    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -623,6 +646,10 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
+        // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
+        // with and without the extra digit.
+        ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
+        ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
@@ -727,6 +754,8 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     scope_ui::update(&m);
     scope_ui::cells(&m, &["Freq:444.4kHz", "Vp-p:-444mV", "Cycl:444.4us", "Vrms:-444mV"]);
     let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label, false);
+    // The accuracy label (none under REL: App::acc_ctx).
+    ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: 2, tc: label == Some("TC K") }));
     d.gen = scope_ui::Txt::new(gen);
     scope_ui::meter_strip(&d);
     if band {
@@ -1072,6 +1101,25 @@ fn main() {
     let mut dv = ui::DmmView::new();
     let cases = strip_cases();
     let st = status(1);
+
+    // Boot splash (splash.rs): the bar empty, half, full; the slow first
+    // start's note with the half bar.
+    for n in [0u8, 3, 5, splash::STEPS] {
+        host::reset(0);
+        splash::draw();
+        for _ in 0..n {
+            splash::step();
+        }
+        if n == 3 {
+            splash::note();
+        }
+        ck.check(&format!("splash/{n}"), &[("screen", Bx::new(0, 0, 480, 320))]);
+        match n {
+            3 => save(&out, "splash-first-start"),
+            5 => save(&out, "splash"),
+            _ => {}
+        }
+    }
 
     // 0. Stock-replica scope page: every reference scene (text collisions),
     // and every scene drawn as an update over every other one equals its
@@ -1424,6 +1472,9 @@ fn main() {
                             }
                             let r = &r;
                             let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label, rec);
+                            // The accuracy label on every model (DM40A: the
+                            // x10 digit), none under REL (App::acc_ctx).
+                            ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: j as u8 % 3, tc: true }));
                             d.gen = scope_ui::Txt::new(gen);
                             page(&m);
                             scope_ui::meter_strip(&d);
@@ -1668,6 +1719,9 @@ fn main() {
                     // UF-30: every other chip variant with the bargraph
                     // instead of the history row.
                     dv.bar_on = k % 2 == 0;
+                    // The accuracy label on every model (DM40A / B: the x10
+                    // digit), and off.
+                    dv.acc = (k != 2).then_some(ui::Acc { model: (k % 3) as u8, tc: true });
                     dv.hv_red = hv_of(&r) >= 1;
                     ui::set_cpl_auto(r.cpl_auto);
                     dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
@@ -2143,10 +2197,10 @@ fn main() {
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
         // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
         // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", ""]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", ""]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", ""]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", ""]),
+        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]),
+        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON"]),
+        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)"]),
+        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON"]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -2635,6 +2689,101 @@ fn main() {
         let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
+        // The accuracy label (docs/dmm-accuracy.md) in every function with a
+        // row in the manual, the bargraph row on (the default); a DM40A
+        // above its stock 4 V range (one d = 1 mV there); a function with
+        // no label (AC+DC).
+        for (file, case, model) in [
+            ("a01-acc-dcv", "dcv", 2u8), ("a02-acc-dcv-dm40a", "dcv", 0), ("a03-acc-dcmv", "dcmv", 2),
+            ("a04-acc-acv", "acv_230", 2), ("a05-acc-acmv", "acmv", 2), ("a06-acc-dca", "dca", 2),
+            ("a07-acc-dcma", "dcma_420mid", 2), ("a08-acc-aca", "aca", 2), ("a09-acc-ohm", "ohm_k", 2),
+            ("a10-acc-ohm-60m", "ohm_mohm", 2), ("a11-acc-cont", "cont", 2), ("a12-acc-diode", "diode", 2),
+            ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-mf", "cap_mf", 2), ("a15-acc-hz", "hz_khz", 2),
+            ("a16-acc-hz-mhz", "hz_mhz", 2), ("a17-acc-temp-tc", "temp_tc", 2), ("a18-acc-temp-tc-f", "temp_tc_f", 2),
+            ("a19-acc-temp-ntc-none", "temp_ntc", 2), ("a20-acc-acdc-none", "acdc_v", 2), ("a21-acc-auto-dc", "auto_dcv", 2),
+            // Settings 3/3 "Negative ohm" ON, shorted leads.
+            ("a22-acc-ohm-neg", "ohm_neg_ext", 2),
+        ] {
+            host::reset(0);
+            let (r, l) = find(case);
+            let mut dv = ui::DmmView::new();
+            dv.label = l;
+            dv.acc = Some(ui::Acc { model, tc: l == Some("TC K") });
+            ui::set_cpl_auto(r.cpl_auto);
+            dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+            ui::set_cpl_auto(false);
+            dv.bar_update(&r);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            let v = if r.main.ol { 1.0 } else { r.main.v };
+            let pts: Vec<f32> = (0..321).map(|i| v + ((i / 40) % 3) as f32 * v.abs() * 1e-4).collect();
+            ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, file);
+        }
+        for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc"), ("a34-acc-strip-ohm-neg", "ohm_neg")] {
+            let (r, l) = find(case);
+            combined(&r, l, 0, 0, false, false, false, "");
+            save(&out, file);
+        }
+        // The digits below the uncertainty in grey (docs/dmm-accuracy.md
+        // section 5), with the extra digit (`x`) and without; HV red; the
+        // leading digit kept; for comparison a provisional reading (all
+        // grey, VALUE_PROV) and REL / Accuracy OFF (no grey digits).
+        let xv = |mode: u8, v: f32, dec: u8, unit: &'static str, x: bool| rd(mode, Val { ext: x, ..val(v, dec, unit) }, None, None, false);
+        for (file, r, hv, acc, pv) in [
+            ("ag01-grey-dcv-ext", xv(1, 4.81763, 4, "V", true), false, true, false),
+            ("ag02-grey-dcv", xv(1, 4.8176, 4, "V", false), false, true, false),
+            ("ag03-grey-acv-ext", xv(0, 4.50012, 4, "V", true), false, true, false),
+            ("ag04-grey-acv-hv", xv(0, 230.12, 2, "V", false), true, true, false),
+            ("ag05-grey-ohm-ext", xv(10, 1.23456, 4, "k\u{3a9}", true), false, true, false),
+            ("ag06-grey-ohm", xv(10, 444.44, 2, "k\u{3a9}", false), false, true, false),
+            ("ag07-grey-cap-uf", xv(13, 47.3, 2, "\u{b5}F", false), false, true, false),
+            ("ag08-grey-cap-nf", xv(13, 5.0, 3, "nF", false), false, true, false),
+            ("ag09-grey-hz-ext", xv(14, 50.0004, 3, "kHz", true), false, true, false),
+            ("ag10-grey-hz", xv(14, 9.999, 3, "MHz", false), false, true, false),
+            ("ag11-grey-acv-lead", xv(0, 0.0009, 4, "V", false), false, true, false),
+            ("ag12-grey-dcv-neg-ext", xv(1, -12.3456, 3, "V", true), false, true, false),
+            ("ag13-prov-dcv-ext", xv(1, 4.81763, 4, "V", true), false, true, true),
+            ("ag14-off-dcv-ext", xv(1, 4.81763, 4, "V", true), false, false, false),
+        ] {
+            host::reset(0);
+            let r = Reading { prov: pv, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.acc = acc.then_some(ui::Acc { model: 2, tc: true });
+            dv.hv_red = hv;
+            dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+            dv.bar_update(&r);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            let pts: Vec<f32> = (0..321).map(|i| r.main.v + ((i / 40) % 3) as f32 * r.main.v.abs() * 1e-4).collect();
+            ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, file);
+        }
+        // A grey split that changes between two readings: only the cells
+        // that change colour are repainted, and the result equals a full
+        // draw (ag15 vs ag16).
+        {
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            let a = xv(0, 1.2345, 4, "V", true);
+            let b = xv(0, 4.5001, 4, "V", true);
+            dv.draw_static(dmm::button_of(0), 0, false, false);
+            dv.bar_update(&a);
+            dv.reading(&a, 0, 0);
+            dv.bar_update(&b);
+            dv.reading(&b, 0, 0);
+            save(&out, "ag15-grey-change");
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            dv.draw_static(dmm::button_of(0), 0, false, false);
+            dv.bar_update(&b);
+            dv.reading(&b, 0, 0);
+            save(&out, "ag16-grey-full");
+        }
+        for (file, r) in [("ag20-grey-strip-acv", xv(0, 1.2345, 4, "V", false)), ("ag21-grey-strip-cap", xv(13, 47.3, 2, "\u{b5}F", false)), ("ag22-grey-strip-ohm", xv(10, 444.44, 2, "k\u{3a9}", false))] {
+            combined(&r, None, 0, 0, false, false, false, "");
+            save(&out, file);
+        }
         host::reset(0);
         let (r, l) = find("acdc_600mv");
         dv.label = l;
@@ -2738,7 +2887,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", ""]);
+        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2754,7 +2903,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", ""]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
@@ -2771,7 +2920,7 @@ fn main() {
                 ui::wave_button();
                 ui::inrush_button();
             };
-            let d_ro = || ui::range_page(Button::Ohm, Some(6), 1, None);
+            let d_ro = || ui::range_page(Button::Ohm, Some(7), 1, None);
             let d_rc = || ui::range_page(Button::Cap, Some(0), 0, None);
             let range_t = |b: Button| -> Vec<u8> {
                 let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
@@ -2812,7 +2961,7 @@ fn main() {
                     ]
                 }))
                 .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
-                .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(6), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
+                .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
                     range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
                 }))
                 .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
@@ -2861,7 +3010,7 @@ fn main() {
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
-        ui::range_page(Button::Ohm, Some(6), 1, None);
+        ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).

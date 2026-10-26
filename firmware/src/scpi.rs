@@ -203,6 +203,10 @@
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
 //!     Settings 3/3 "Burden voltage", persisted, default OFF
+//!   [SENSe:]RESistance:NEGative ON|OFF / ?   ohm readings below 0 shown
+//!     (shorted leads: the internal offset, a few tens of mohm) instead of
+//!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
+//!     default OFF
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
@@ -942,6 +946,9 @@ pub enum Cmd {
     FetchBurden,
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
     DispBurden(Option<bool>),
+    /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
+    /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
+    ResNeg(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
     /// (App::scpi_range).
@@ -1007,7 +1014,7 @@ pub fn range_si(mode: u8, r: i8) -> Option<f32> {
 
 /// Decimal exponent of the 60000-count step of range `v` (the 6000-count
 /// step for capacitance, `cap`): floor(log10 v) - 4 (6 V -> -4, 1000 V ->
-/// -1, 10 A -> -3, 600 ohm -> -2, 6 nF -> -12), as the readout's decimals.
+/// -1, 10 A -> -3, 60 ohm -> -3, 6 nF -> -12), as the readout's decimals.
 pub fn step_exp(v: f32, cap: bool) -> i32 {
     let mut e = -4 + cap as i32;
     let mut x = v * 1.0001;
@@ -1042,26 +1049,23 @@ pub fn pow10f(e: i32) -> f32 {
 
 /// The settable ranges, ascending (the MF page's items, Dmm::set_range
 /// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
-/// 600 ohm .. 60 Mohm (no 60 ohm: dmm.rs ohm notes; RES:RANG 60 or MIN
-/// is 600 ohm, the smallest item that holds it).
+/// 60 ohm .. 60 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
-        10 => &[600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
+        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
         _ => &[],
     }
 }
 
 /// The Dmm::set_range item of `range_items(func)[i]`: V 60 mV is item 5
-/// (after 600 mV .. 1000 V = 0..4); ohm 600 ohm is item 1 (the range
-/// index); A: the items in order.
+/// (after 600 mV .. 1000 V = 0..4); the other lists are the items in order.
 pub fn range_item_code(func: u8, i: usize) -> u8 {
-    match quantity(func & !ANY_CPL) {
-        1 if i == 0 => 5,
-        1 => i as u8 - 1,
-        10 => i as u8 + 1,
-        _ => i as u8,
+    if quantity(func & !ANY_CPL) == 1 {
+        if i == 0 { 5 } else { i as u8 - 1 }
+    } else {
+        i as u8
     }
 }
 
@@ -2629,8 +2633,13 @@ impl Scpi {
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
-                _ if kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen") => {
-                    out = Out::Instr(Cmd::DispBurden(if query {
+                // DISPlay:BURDen, [SENSe:]RESistance:NEGative: ON|OFF / ?.
+                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen")) || {
+                    let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                    r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
+                } =>
+                {
+                    let v = if query {
                         None
                     } else {
                         match on_off(trim(arg)) {
@@ -2640,7 +2649,8 @@ impl Scpi {
                                 continue;
                             }
                         }
-                    }));
+                    };
+                    out = Out::Instr(if kw(p0, "DISPlay") { Cmd::DispBurden(v) } else { Cmd::ResNeg(v) });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 // [SENSe:]VOLTage:COUPling / CURRent:COUPling (opendm40).

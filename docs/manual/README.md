@@ -66,7 +66,7 @@ To install opendm40 on a meter that runs the stock firmware:
 
 1. Download the update file `dm40_opendm40_v<version>.bin`, for example
    `dm40_opendm40_v0.2.0.bin`, from the latest
-   [release](https://github.com/wirenboard/opendm40/releases/latest). You can
+   [release](https://github.com/opendm40/opendm40/releases/latest). You can
    also build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
 2. On the meter: **Settings > Other Settings > USB Connect**. Connect the
@@ -76,8 +76,8 @@ To install opendm40 on a meter that runs the stock firmware:
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
-6. The first start is dark for a few seconds. Do not switch the meter off
-   in the first 10 seconds.
+6. The first start takes a few seconds; opendm40 shows a progress bar. Do
+   not switch the meter off in the first 10 seconds.
 
 ![Install: copy the file onto the stock firmware's USB disk, then restart](img/install.png)
 
@@ -125,7 +125,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -290,7 +290,9 @@ scope.
 | °F | Multiplies by 1.82 instead of 1.8: at 100.3 °C it shows 214.5 °F | °F computed correctly (212.5 °F), on the screen and over Bluetooth |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
+| 60 Ω range | Never chosen | On the range page; AUTO steps into it (0.90 mA only) |
 | Burden voltage | — | Optional |
+| Accuracy of the reading | — | [Shown](#accuracy) under the unit |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
 
@@ -558,7 +560,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ, as the stock firmware.
+- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
+  milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
@@ -776,8 +779,8 @@ last offset it measured on another range, so a reading in those first 2 s
 can be a little off. A FAST reading is a little noisier than a MED one
 (more low-frequency noise); for the extra digit use MED or SLOW.
 
-In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
-12.8 s). After a step of the input or a range change the average restarts,
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
+12.8 s; no extra digit on 60 Ω). After a step of the input or a range change the average restarts,
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -892,6 +895,16 @@ shows: **Bargraph** (default) or **History**.
 
 *The history row: four values stored.*
 
+### Accuracy
+
+![The accuracy of the reading under the unit; the digits below it in grey](img/dmm-acc-anno.png)
+
+Under the unit: the specified accuracy of this reading for the meter's
+model ([details](../../firmware/docs/dmm-accuracy.md)). Digits finer than
+it are grey. Not shown with the History row, in AC+DC, the 60 mV and 60 Ω
+ranges, PT / NTC, the power meter or under REL. **Settings > More > More >
+Accuracy** turns it off.
+
 ### The trend chart
 
 The chart plots the reading over time, 321 points wide.
@@ -987,7 +1000,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -1234,8 +1247,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 - **Tap a corner** of the graph: bottom left = slower, bottom right =
   faster. Keep the finger on the corner to repeat. The timebase in the top
   bar flashes on every change.
-- **Tap the timebase** in the top bar: a list; drag to scroll, tap to
-  choose.
+- **Tap the timebase** in the top bar: a list with each entry's sample
+  rate (e.g. **200us 12.5MS/s**); drag to scroll, tap to choose.
 - **Pinch** horizontally with two fingers: spread = faster, pinch = slower.
   A bubble shows the new value; it applies when you lift the fingers.
 - **Roll mode**: from 200 ms/div the trace scrolls continuously (on by
@@ -2265,6 +2278,8 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
+| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
+| **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
 
 ### The Device page
 
@@ -2792,26 +2807,20 @@ firmware has run, opendm40 starts on DC V.
 
 Untested on a real meter:
 
-- Getting started and recovery: keeping the settings across a full
-  power-off (the copy in `_SETTING.BIN`; tested in the emulator only), and
-  the reset of the measurement settings after it;
-  installing over the stock firmware's
-  **USB Connect** disk; entering
-  the update loader with the power key; the automatic entry after repeated
-  hangs.
-- Multimeter: currents through the A jack (overload handling, AUTO
-  coupling on current, burden with current), the continuity beeper and the
-  diode beeps, PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
+- Getting started and recovery: installing over the stock firmware's
+  **USB Connect** disk; entering the update loader with the power key; the
+  automatic entry after repeated hangs.
+- Multimeter: with a current through the A jack, the overload handling,
+  AUTO coupling and the burden voltage; the diode beeps; PT1000 and the
+  100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
   resistance calibrator only).
-- Alerts: the alerts that need a current through the A jack (A-JACK,
-  A-PROT, OVLD). LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
-  (fixed in the emulator; continuity and AC mV are checked on a meter).
+- Alerts: [A-PROT and OVLD](#the-alerts) with a current through the A jack.
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
   the persistence modes, auto-set keeping AC coupling.
 - Combined view: the long press on the strip.
-- Generator: the signal at the OUT jack (the real amplitude, the output
-  impedance, the quality above 50 kHz).
+- Generator: the amplitude and the output impedance at the OUT jack, the
+  signal quality above 50 kHz.
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
 - USB disk: macOS; **PC can edit** mode on Windows.
@@ -2826,3 +2835,9 @@ Known problems:
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
 - The usable frequency range of the power meter is *unknown*.
+- A current through the A jack gives no [A-JACK](#the-alerts) in AC mV; in
+  Ω it shows LIVE? instead.
+- In DC mV, a current of about 20 mA through the A jack already trips
+  A-PROT.
+- A signal above about 20 kHz on V/Ω–COM can raise a false A-JACK or A-PROT
+  on the mV ranges.

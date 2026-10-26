@@ -119,7 +119,12 @@ def finger(im, x, y, r=17, n=1, gap=30):
 
 
 def save(im, name):
-    q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    # libimagequant keeps small distinct colours (the green status-bar logo
+    # came out olive with MEDIANCUT); MEDIANCUT where PIL lacks it.
+    try:
+        q = im.quantize(colors=256, method=Image.Quantize.LIBIMAGEQUANT, dither=Image.Dither.NONE)
+    except (ValueError, OSError):
+        q = im.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
     out = os.path.join(DST, name + '.png')
     q.save(out, optimize=True)
     print(f'{name:15s} {os.path.getsize(out):6d}')
@@ -132,7 +137,7 @@ def status_bar():
     bar = render('status-all', scale=sc, crop=(0, 0, 480, 34))
     im, d = canvas(bar.size[0] + 40, bar.size[1] + 110)
     paste(im, d, bar, 20, 20)
-    spans = [(27, 97), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
+    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
     for k, (a, b) in enumerate(spans):
         x = 20 + (a + b) / 2 * sc
         d.line((x, 20 + bar.size[1] + 2, x, 20 + bar.size[1] + 38), fill=BLUE, width=2)
@@ -308,14 +313,14 @@ def jacks():
     f, fb = font(15), font(15, bold=True)
     R = x0 + w + 24
     jr = pd.JACK_R
-    for key, title, text in [('v', 'V Ω', 'V, Ω, continuity, diode,\ncapacitance, Hz, °C'), ('com', 'COM', 'common to all'), ('a', 'A mA uA', 'A, mA, µA; the power\nmeter\'s current')]:
+    # The jacks' names are printed on the case: only what each is for.
+    for key, text in [('v', 'V, Ω, continuity, diode,\ncapacitance, Hz, °C'), ('com', 'common to all'), ('a', 'A, mA, µA; the power\nmeter\'s current')]:
         jx, jy = pd.JACKS[key]
         at = G(jx + jr, jy)
         d.line((at[0], at[1], R - 6, at[1]), fill=BLUE, width=2)
         d.ellipse((at[0] - 4, at[1] - 4, at[0] + 4, at[1] + 4), fill=BLUE)
-        d.text((R, at[1] - 22), title, font=fb, fill=DARK)
         for i, l in enumerate(text.split('\n')):
-            d.text((R, at[1] + i * 19), l, font=f, fill=DARK)
+            d.text((R, at[1] - 10 + i * 19), l, font=f, fill=DARK)
     # OSC: a straight leader to the right; OUT: down into the case edge,
     # under OSC, then right.
     sx, sy = pd.MCX['scope']
@@ -323,13 +328,12 @@ def jacks():
     a = G(sx + pd.MCX_R, sy)
     d.line((a[0], a[1], R - 6, a[1]), fill=BLUE, width=2)
     d.ellipse((a[0] - 4, a[1] - 4, a[0] + 4, a[1] + 4), fill=BLUE)
-    d.text((R, a[1] - 10), 'OSC: oscilloscope input', font=fb, fill=DARK)
-    d.text((R, a[1] + 10), '(CHA on the screen)', font=f, fill=DARK)
+    d.text((R, a[1] - 10), 'oscilloscope input (CHA on the screen)', font=f, fill=DARK)
     b = G(gx, gy + pd.MCX_R)
     yb = G(0, gy + pd.MCX_R + 2.0)[1]
     d.line((b[0], b[1], b[0], yb, R - 6, yb), fill=BLUE, width=2)
     d.ellipse((b[0] - 4, b[1] - 4, b[0] + 4, b[1] + 4), fill=BLUE)
-    d.text((R, yb + 2), 'OUT: generator output', font=fb, fill=DARK)
+    d.text((R, yb - 10), 'generator output', font=f, fill=DARK)
     save(im, 'jacks')
 
 
@@ -374,6 +378,28 @@ def scope_page():
     tag(d, 'CUR: cursors', g(135, 281), *g(96, 246), f)
     tag(d, 'faster timebase', g(365, 281), *g(270, 246), f)
     save(im, 'scope-page')
+
+
+def dmm_acc():
+    """The DMM page's top: the accuracy label and the grey digits below it."""
+    sc = 1.25
+    s = render('dmm-acc', scale=sc, crop=(0, 40, 480, 178))
+    w, h = s.size
+    im, d = canvas(w + 300, h + 90)
+    x0, y0 = 20, 70
+    paste(im, d, s, x0, y0)
+    f = font(15)
+    g = lambda x, y: (x0 + x * sc, y0 + (y - 40) * sc)
+    # Grey digits: one label above, leaders down to the 6 and the extra digit.
+    t = 'grey: finer than the accuracy'
+    tx, ty = g(390, 0)[0], 14
+    text_c(d, tx, ty, t, f)
+    for at in (g(352, 68), g(388, 124)):
+        d.line((tx, ty + f.size + 6, at[0], at[1]), fill=BLUE, width=2)
+        d.ellipse((at[0] - 4, at[1] - 4, at[0] + 4, at[1] + 4), fill=BLUE)
+    # Leader from just outside the screen (the label reaches its right edge).
+    side_label(d, 'accuracy of this reading', (x0 + w + 8, g(0, 166)[1]), x0 + w + 30, f)
+    save(im, 'dmm-acc-anno')
 
 
 def scope_drag():
@@ -1012,6 +1038,7 @@ def main():
     meter_strip()
     analog_power()
     gen_offset()
+    dmm_acc()
     csv_flow()
     usb_disk()
     usb_row()
