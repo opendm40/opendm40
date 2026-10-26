@@ -331,7 +331,8 @@ SC = {
     'aprot-dcmv-24': ('VOLT:DC 0.6', 22, [(0, 'open', {'NONE'}), (8, 'avsrc:24', {'APROT'})], [], {'aprot_ms': (100, 800)}),
     # Ohm / temperature carry no probe (device 22c85ba: there it follows the V input, 5 V on V-COM
     # read 1.7 A and latched A-PROT): a source across A-COM is A-JACK only.
-    'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4700', {'NONE'}), (10, 'avsrc:12', {'AJACK'})]),
+    # (4.7 Mohm: the 6 Mohm row, as `ohm`)
+    'aprot-ohm-12': ('RES', 24, [(0, 'open;r:4.7e6', {'NONE'}), (10, 'avsrc:12', {'AJACK'})]),
     'aprot-temp-12': ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'avsrc:12', {'AJACK'})]),
     # The user acts (another function) while the source is still there: the latch stays; the current goes later and
     # the latch ends 1 s after that (the act counts).
