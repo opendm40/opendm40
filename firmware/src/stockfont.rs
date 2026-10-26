@@ -724,19 +724,25 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
 
 /// Fixed-cell label, redrawing only the cells whose character differs from
 /// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
-pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {
+/// `grey` (colour, from, previous from): the cells from index `from` on
+/// are drawn in that colour instead of `fg` (the DMM readout's digits below
+/// the accuracy, ../docs/dmm-accuracy.md section 5); a cell whose colour
+/// changed since `previous from` is redrawn.
+pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color, grey: (Color, u8, u8)) {
     #[cfg(test)]
     crate::probe::group(true);
     let mut x = r.x;
     let mut it = text.chars();
     let mut ip = prev.chars();
     let full = prev.is_empty();
-    for &w in widths {
+    let (gc, gs, pgs) = grey;
+    for (i, &w) in widths.iter().enumerate() {
         let c = it.next().unwrap_or(' ');
         let pc = ip.next();
-        if full || pc != Some(c) {
+        let g = i as u8 >= gs;
+        if full || pc != Some(c) || g != (i as u8 >= pgs) {
             let mut b = [0u8; 4];
-            label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), fg, bg, 8, 0);
+            label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), if g { gc } else { fg }, bg, 8, 0);
         }
         x += w as i16;
     }

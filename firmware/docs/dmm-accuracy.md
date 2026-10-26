@@ -6,6 +6,8 @@ under the unit (owner request 2026-10-26). Code:
 [`src/accuracy.rs`](../src/accuracy.rs) (table and arithmetic),
 [`src/ui.rs`](../src/ui.rs) `acc_ulps` / `DmmView::acc_update` /
 `strip_acc`; host test [`tools/accuracy-test`](../tools/accuracy-test/main.rs).
+The same uncertainty greys the reading's digits that are below it
+(section 5).
 
 ## 1. The manual's table
 
@@ -93,3 +95,38 @@ runs there; [native-boot.md, Region C audit #2](native-boot.md#region-c-audit-2-
 With the label, against its parent (e9bdb80d): A2 free 2 948 -> 1 844 B
 (below the 2 KiB warning), B 16 500 -> 16 484 B, C 7 780 -> 7 152 B; static
 stack worst path unchanged (headroom 20 540 -> 20 524 B).
+
+With the grey digits (section 5), against 2ee15299: A2 free 1 844 ->
+1 720 B, B 16 780 -> 16 596 B, C 5 756 -> 5 720 B; stack headroom
+unchanged, 20 492 B (the DmmView's last split is kept in the spare byte
+of its 8-byte readout text, so the TCM statics do not grow).
+
+## 5. Grey digits
+
+The main readout's digits below the uncertainty are drawn grey, the
+significant ones in the normal colour (orange, the >= 30 V red)
+(owner request 2026-10-26). Code: `acc::grey_from`
+([`src/accuracy.rs`](../src/accuracy.rs)), `DmmView::reading`,
+`stockfont::cells_diff`, `scope_ui::st_text_grey`.
+
+- **p:** the place of the uncertainty's most significant digit; the
+  digits with a place value below p are grey. ±0.0020 V: p = 10^-3,
+  4.817 orange, the 6 grey. ±1.49 µF under 47.30 µF: p = 10^0, "47"
+  orange, ".30" grey.
+- **The point** takes the colour of the digit after it.
+- **The leading digit** (the first non-zero one; for an all-zero value
+  the first digit) is never grey, also where the uncertainty is larger
+  than the reading (0.0009 V AC, ±0.0016 V: all orange).
+- **The extra (averaged) digit** is below p whenever the label applies
+  (the uncertainty is >= 5 d): grey.
+- **When:** whenever the label's value conditions hold (section 3,
+  "None": Accuracy ON, not OL, dashes, provisional, REL, the power meter,
+  or a function without a row), also where the label has no room (the
+  History row; the combined view's strip with both sub rows taken, AC V /
+  A). Accuracy OFF: unchanged.
+- **Colour:** `ui::VALUE_LOW` (104, 104, 104), darker than the
+  provisional grey `VALUE_PROV` (144, 152, 152, the whole reading), so
+  the two stay apart. The combined view's strip greys its value (yellow,
+  no extra digit) the same way in the same colour.
+- **Redraw:** a cell whose colour changes is repainted with the digits
+  that change; the result equals a full draw (ui-render ag15 / ag16).
