@@ -3063,14 +3063,7 @@ pub fn draw_tb(cur: u8) {
             (C_FRAME, 0)
         }
     });
-    // opendm40: each entry's sample rate, small and dim beside its time
-    // (one text at a time: a second Ink array would deepen the stack).
-    for k in 0..5i16 {
-        let idx = cur as i16 - 2 + k;
-        if idx >= lo as i16 && idx <= hi as i16 {
-            tb_rate(r.y + k * 30, crate::scope::tb_rate(idx as usize, lo != crate::scope::TB_MIN), k == 2);
-        }
-    }
+    tb_rates(cur, lo, hi);
 }
 
 /// Timebase list row: the time's column (right-aligned) and the rate's
@@ -3080,18 +3073,26 @@ pub const fn tb_rate_rect(y: i16) -> Rect {
     rect(TB_SPIN.x + TB_TIME_W + 6, y + 7, TB_SPIN.w - TB_TIME_W - 9, 16)
 }
 
-/// A list entry's sample rate `fs` (row top `y`; `band`: the selected
-/// row): what ACQ:SRAT? gives at that timebase.
-// Region A2 (zero-wait, link-native.x): region B is near its 16 KiB
-// warning; the list draws while the Wave view streams, so not .cold.
+/// opendm40: each list entry's sample rate (the list's `cur` centre,
+/// entries `lo..=hi`), small and dim beside its time: what ACQ:SRAT? gives
+/// at that timebase. One text at a time (a second Ink array in `draw_tb`
+/// would make the list the deepest stack path). Region A2 (zero-wait,
+/// link-native.x): region B is near its 16 KiB warning, and the list draws
+/// while the Wave view streams, so not .cold.
 #[inline(never)]
 #[cfg_attr(target_os = "none", link_section = ".text.a2.srate")]
-fn tb_rate(y: i16, fs: u32, band: bool) {
-    let mut b = Buf::new();
-    fmt_srate(&mut b, fs);
-    let (bg, fg) = if band { (C_SEL, C_POP_BG) } else { (C_BAR, C_DIS) };
-    let r = tb_rate_rect(y);
-    fill_text(r, r, bg, sf::SC_F12, r, b.as_str(), fg, 1, 1);
+fn tb_rates(cur: usize, lo: usize, hi: usize) {
+    for k in 0..5 {
+        let Some(idx) = (cur + k).checked_sub(2) else { continue };
+        if idx < lo || idx > hi {
+            continue;
+        }
+        let mut b = Buf::new();
+        fmt_srate(&mut b, crate::scope::tb_rate(idx, lo != crate::scope::TB_MIN));
+        let (bg, fg) = if k == 2 { (C_SEL, C_POP_BG) } else { (C_BAR, C_DIS) };
+        let r = tb_rate_rect(TB_SPIN.y + k as i16 * 30);
+        fill_text_on(r, r, bg, bg, sf::SC_F12, r, b.as_str(), fg, 1, 1);
+    }
 }
 
 /// What a touch on the timebase list hits.

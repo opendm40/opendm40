@@ -81,8 +81,7 @@ fn srate(ck: &mut Checker, out: &str) {
     ck.check_replica("srate/recbar");
     save(out, "s07-srate-recbar");
     let wt = scope_ui::TB_LABELS.iter().map(|t| stockfont::text_width(stockfont::SC_F16, t, 0)).max().unwrap_or(0);
-    let w1 = ["50.0MS/s", "12.5MS/s", "1.25kS/s", "76.8kS/s"].iter().map(|t| stockfont::text_width(stockfont::SC_F12, t, 1)).max().unwrap_or(0);
-    println!("scope sample rate (timebase list): widest rate \"{}\" {} px ({w1} px spaced), widest time {wt} px", widest.1, widest.0);
+    println!("scope sample rate (timebase list): widest rate \"{}\" {} px, widest time {wt} px", widest.1, widest.0);
 }
 
 pub fn run(ck: &mut Checker, out: &str) {
