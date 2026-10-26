@@ -153,7 +153,7 @@ install file `dm40_opendm40_v<version>.bin`; the changes per release are in
 
 ## Licence
 
-opendm40 is under the MIT licence ([LICENSE](LICENSE)), © Wiren Board.
+opendm40 is under the MIT licence ([LICENSE](LICENSE)), © the opendm40 contributors.
 
 Not under the MIT licence:
 
