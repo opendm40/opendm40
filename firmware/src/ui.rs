@@ -2364,7 +2364,10 @@ fn gen_preview(w: gen::Wave) {
         gen::Wave::Square => 3,
     };
     let yv = |i: u16| -> u16 {
-        let ph = (i as f32 * 2.0 / 238.0) % 1.0;
+        // The fraction (x in 0..2: exact, as `% 1.0`; f32 `%` pulls libm's
+        // fmodf, ~0.7 KB, into region B).
+        let x = i as f32 * 2.0 / 238.0;
+        let ph = x - (x as u32) as f32;
         let v = match sel {
             0 => 0.5 + 0.5 * libsin(ph * 2.0 * core::f32::consts::PI),
             1 => ph,
