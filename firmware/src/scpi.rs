@@ -662,8 +662,8 @@ pub enum Dbg {
     Input(u8, u16, u16),
     /// x0, y0, x1, y1, ms, hold ms, jitter px.
     Drag([u16; 7]),
-    /// DBG:HY:CAP? (hyexp.rs): kind, n lo / hi, npre, 6 (byte, value) pairs.
-    HyCap([u8; 16]),
+    /// DBG:HY:CAP? (hyexp.rs): kind, n lo / hi, npre, 12 (byte, value) pairs.
+    HyCap([u8; 28]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
@@ -2292,16 +2292,26 @@ impl Scpi {
                 }
                 // HY3131 front-end experiments (src/hyexp.rs, main.rs).
                 _ if p0 == b"DBG" && query && parts.len() == 3 && parts[1] == b"HY" && parts[2] == b"CAP" => {
-                    let v = nums::<15>(trim(arg));
-                    let mut a = [255u8; 16];
-                    a[0] = v[0].min(2) as u8;
+                    let v = nums::<27>(trim(arg));
+                    let mut a = [255u8; 28];
+                    a[0] = v[0].min(3) as u8;
                     a[1] = v[1] as u8;
                     a[2] = (v[1] >> 8) as u8;
                     a[3] = v[2].min(255) as u8;
-                    let k = trim(arg).split(|&b| b == b',').count().saturating_sub(3) / 2;
-                    for j in 0..k.min(6) {
-                        a[4 + 2 * j] = v[3 + 2 * j].min(255) as u8;
-                        a[5 + 2 * j] = v[4 + 2 * j].min(255) as u8;
+                    // The pairs as numbers, or (a command line holds 64
+                    // characters) as one #H literal: 2 hex digits each.
+                    let hex = trim(arg).split(|&b| b == b',').nth(3).map(trim).filter(|f| f.len() > 2 && f[..2].eq_ignore_ascii_case(b"#H"));
+                    if let Some(h) = hex {
+                        let d = |c: u8| (c as char).to_digit(16).unwrap_or(0) as u8;
+                        for (j, p) in h[2..].chunks_exact(2).take(24).enumerate() {
+                            a[4 + j] = d(p[0]) << 4 | d(p[1]);
+                        }
+                    } else {
+                        let k = trim(arg).split(|&b| b == b',').count().saturating_sub(3) / 2;
+                        for j in 0..k.min(12) {
+                            a[4 + 2 * j] = v[3 + 2 * j].min(255) as u8;
+                            a[5 + 2 * j] = v[4 + 2 * j].min(255) as u8;
+                        }
                     }
                     out = Out::Dbg(Dbg::HyCap(a));
                 }
