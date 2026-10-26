@@ -117,9 +117,9 @@ significant ones in the normal colour (orange, the >= 30 V red)
   4.817 orange, the 6 grey. ±1.49 µF under 47.30 µF: p = 10^0, "47"
   orange, ".30" grey.
 - **The point** takes the colour of the digit after it.
-- **The leading digit** (the first non-zero one; for an all-zero value
-  the first digit) is never grey, also where the uncertainty is larger
-  than the reading (0.0009 V AC, ±0.0016 V: all orange).
+- **No leading-digit exception:** where the uncertainty is larger than
+  the reading, its digits are grey too (0.0009 V AC, ±0.0016 V: "0.000"
+  orange, the 9 grey).
 - **The extra (averaged) digit** is below p whenever the label applies
   (the uncertainty is >= 5 d): grey.
 - **When:** whenever the label's value conditions hold (section 3,

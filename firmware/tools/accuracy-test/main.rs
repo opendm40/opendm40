@@ -136,8 +136,8 @@ fn main() {
         ("AC V 4.5000 V", 0, 0, 4.5, 4, 2, " 4.50", "00"),
         // +-0.85 V: p = 10^-1
         ("AC V 230.12 V", 0, 2, 230.12, 2, 2, " 230.1", "2"),
-        // +-0.0016 V >= the reading: the leading digit stays
-        ("AC V 0.0009 V (leading digit)", 0, 0, 0.0009, 4, 2, " 0.0009", ""),
+        // +-0.0016 V >= the reading: no leading-digit exception
+        ("AC V 0.0009 V (leading digit)", 0, 0, 0.0009, 4, 2, " 0.000", "9"),
         ("AC V 0.0000 V", 0, 0, 0.0, 4, 2, " 0.000", "0"),
         ("AC A 4.4444 A", 4, 0, 4.4444, 4, 2, " 4.44", "44"),
         // +-0.0018 kohm
@@ -149,8 +149,8 @@ fn main() {
         ("cap 47.30 uF", 13, 4, 47.3, 2, 2, "  47", ".30"),
         // +-0.155 nF
         ("cap 5.000 nF", 13, 0, 5.0, 3, 2, "  5.0", "00"),
-        // +-0.031 nF >= the reading: the 5 (leading digit) stays orange
-        ("cap 0.005 nF (leading digit)", 13, 0, 0.005, 3, 2, "  0.005", ""),
+        // +-0.031 nF >= the reading: the 5 goes grey too
+        ("cap 0.005 nF (leading digit)", 13, 0, 0.005, 3, 2, "  0.00", "5"),
         ("cap 0.050 nF", 13, 0, 0.05, 3, 2, "  0.05", "0"),
         ("cap 44.44 mF", 13, 7, 44.44, 2, 2, "  44", ".44"),
         // +-0.006 MHz: every digit

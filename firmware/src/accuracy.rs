@@ -126,8 +126,8 @@ pub fn round_sig(u: u32) -> u32 {
 ///   below p are grey: the last digits(ulps) - 1 digits (ulps 20 at 4
 ///   decimals: +-0.0020, p = 10^-3, one grey digit);
 /// - the point takes the colour of the digit after it;
-/// - the leading digit (the first non-zero one; else the first digit)
-///   is never grey.
+/// - no exception for the leading digit (owner 2026-10-26): 0.0004 at
+///   +-0.0016 has the 4 grey.
 /// The extra (averaged) digit after `s` is below p whenever this is Some
 /// (ulps >= 1): the caller greys it.
 #[inline(never)]
@@ -147,9 +147,5 @@ pub fn grey_from(s: &[u8], ulps: Option<u32>) -> usize {
     if split > 0 && split < n && s[split - 1] == b'.' {
         split -= 1;
     }
-    let lead = s.iter().position(|c| c.is_ascii_digit() && *c != b'0').or_else(|| s.iter().position(u8::is_ascii_digit));
-    match lead {
-        Some(f) => split.max(f + 1),
-        None => n,
-    }
+    split
 }
