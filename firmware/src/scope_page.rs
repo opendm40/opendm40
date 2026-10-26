@@ -2172,6 +2172,10 @@ impl App {
         if !self.sp_on() || self.sp.covered() {
             return;
         }
+        // As `repaint`: a stopped record re-rendered, a screenshot (MF
+        // menu "Screenshot" closes it first) after SHOT_SETTLE_MS.
+        self.scope_invalidate();
+        self.repaint_at = self.now;
         let m = self.sp_model(self.now);
         su::uncover(&m, u & 1 != 0, u & 2 != 0);
         self.sp_draw_page();
