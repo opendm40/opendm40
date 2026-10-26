@@ -686,6 +686,7 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom:
 | spi-disk | 37 064 / 14 904 / 22 012 B | 40 932 / 14 932 / 22 684 B |
 | fatren-dry-run | 16 452 / 5 152 / 20 500 B | 20 580 / 5 192 / 21 172 B |
 | keep-screen | 16 428 / 4 724 / 20 500 B | 20 556 / 4 764 / 21 172 B |
+| mute (`--features mute`, not in build-variants) | | 20 204 / 4 632 / 21 172 B |
 
 A2 stays below its 2 KiB warning: anything taken out of A2 lands in B.
 
