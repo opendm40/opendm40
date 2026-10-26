@@ -884,21 +884,17 @@ Code work (in this order):
         classic SPP/RFCOMM. If it doesn't, the BT path needs a different route, e.g. Web Serial to an OS
         RFCOMM port.
       - A claude.ai artifact sandbox likely blocks WebUSB.
-- [ ] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
-      'Loading'"). Today the screen stays dark or frozen while pre_main does the SPI-disk work before
-      main's LCD init: the FAT dir check, calbackup, `vdisk::mirror_boot` (+0.22 s every boot, +1..9 s on
-      the first boot after a new image or calibration change; device c785807 MIR? 5.16-5.3 s) and the
-      boot refresh. In the emulator main's clock starts 3.56 s after reset (harness-sync).
-      Plan:
-      - Bring up the LCD and backlight at the very start of pre_main.
-      - Draw a minimal splash: product name and "Loading...", in the stock font, region-B safe.
-      - Show a step line or a progress bar per boot phase. On a slow step, say what it is, e.g.
-        "Updating INFO/ copy (first boot after an update)".
-      - Keep it ISR-free and watchdog-fed; no region-C code once streaming exists (it doesn't yet at boot).
-      Also:
-      - Measure each boot phase on the device: DBG timestamps per phase, reported by DBG:BOOT?.
-      - Then cut what can move after the first screen, e.g. run mirror_boot lazily in idle time instead
-        of before USB comes up.
+- [x] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
+      'Loading'"). Done on feat/boot-splash (0.4.0): a splash ("opendm40", version, "Loading...", a bar per
+      phase) right after board::init; the first frame drawn before USB attaches, so the "USB configured
+      or 3 s" draw gate is gone; vdisk::init + boot_refresh after the first frame; DBG:BOOT? BOOTMS /
+      MAINMS. Device 108eb55, normal boot: the meter page about 0.68 s after pre_main starts (before:
+      about 4.1 s, inferred from the phase times plus the 3 s gate, not measured on main).
+  - [ ] Left: `vdisk::mirror_boot` (0.3 s every boot, 5.4 s on the first boot of a new image) still
+        runs in pre_main under the splash. Moving it after the first frame would leave the meter page
+        frozen for those seconds on the first boot; a chunked compare in idle time needs
+        calbackup::write_file split up. A step line ("Updating INFO/ copy") on the slow first boot is
+        not done.
 - [ ] Protocol decoders (owner 2026-10-23): UART, Modbus RTU, etc. The usual problem with scope decoders is that
       they only decode what fits in one short record (here ~53 KB). Make long traffic convenient instead: decode
       **while streaming**, keep only the decoded frames and let the raw samples go.

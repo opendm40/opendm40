@@ -89,6 +89,9 @@ mod touch;
 mod touchcal;
 #[path = "../../src/ui.rs"]
 mod ui;
+// The boot splash (a native.rs submodule in the firmware).
+#[path = "../../src/splash.rs"]
+mod splash;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
@@ -1092,6 +1095,25 @@ fn main() {
     let mut dv = ui::DmmView::new();
     let cases = strip_cases();
     let st = status(1);
+
+    // Boot splash (splash.rs): the bar empty, half, full; the slow first
+    // start's note with the half bar.
+    for n in [0u8, 3, 5, splash::STEPS] {
+        host::reset(0);
+        splash::draw();
+        for _ in 0..n {
+            splash::step();
+        }
+        if n == 3 {
+            splash::note();
+        }
+        ck.check(&format!("splash/{n}"), &[("screen", Bx::new(0, 0, 480, 320))]);
+        match n {
+            3 => save(&out, "splash-first-start"),
+            5 => save(&out, "splash"),
+            _ => {}
+        }
+    }
 
     // 0. Stock-replica scope page: every reference scene (text collisions),
     // and every scene drawn as an update over every other one equals its

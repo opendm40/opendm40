@@ -902,7 +902,10 @@ but nothing can make that installed copy bootable again except a vendor install
 ([`src/native.rs`](../src/native.rs)), before USB exists, feeding the FWDGT
 between steps: `board::init` → fatren → `calbackup::boot` (safety copy) →
 `fatdir::boot` (LOGS / SHOTS / SCOPE) → `setfile::boot` (settings copy) →
-`vdisk::mirror_boot` (slow-bank mirror) → `vdisk::init` → `vdisk::boot_refresh`.
+`vdisk::mirror_boot` (slow-bank mirror), with the boot splash
+([`src/splash.rs`](../src/splash.rs)) from `board::init` on. Then `main()`
+draws the first frame, and `native::before_usb` runs `vdisk::init` →
+`vdisk::boot_refresh` before the touch reset and USB.
 
 **Board bring-up** ([`src/board.rs`](../src/board.rs)): what the stock
 firmware initialised before opendm40 ran when it was RAM-loaded, found by an
@@ -983,7 +986,12 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
     `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
     record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
-    data" below). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
+    data" below), then the start-up phase times in ms (`native::put_times`):
+    `BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
+    (each phase's own time; `board` includes the splash; `vdisk` and
+    `refresh` run after the first frame, before USB attaches) and
+    `MAINMS,<app>,<frame>,<touch>` (main's clock after App::new, the first
+    frame and the touch reset). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
@@ -1198,7 +1206,7 @@ INFO sources:
 Layout: clusters 2..6 = `INFO`, `DEBUG`, `LOGS`, `SCOPE`, `SHOTS` (one
 cluster each: 1024 slots), 7 = `README.TXT`, then the INFO files, then
 `SPIFLASH.BIN` (512 clusters), then the dynamic area. The INFO CRC-32s are
-computed once in `pre_main` (`vdisk::init`); the first table of LOGS / SCOPE
+computed once before USB attaches (`vdisk::init`, `native::before_usb`); the first table of LOGS / SCOPE
 / SHOTS too (`vdisk::boot_refresh`: a DLG's CSV size costs ~10 ms per 100 KB
 of logs; no media change for it).
 

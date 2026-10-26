@@ -18,7 +18,7 @@ opendm40 $TAG, the replacement firmware for the Alientek DM40 (A / B / C), built
 
 **Back up first:** after installing, copy \`INFO/\` and \`DEBUG/SPIFLASH.BIN\` from the meter's USB disk to your PC; the calibration and boot data cannot be rebuilt ([Back up your meter]($BLOB/docs/manual/README.md#back-up-your-meter)).
 
-**Install:** copy \`$NAME\` onto the meter's USB disk as the only \`dm40*.bin\` and power the meter off and on; the first boot is dark for a few seconds ([Install]($BLOB/README.md#install)).
+**Install:** copy \`$NAME\` onto the meter's USB disk as the only \`dm40*.bin\` and power the meter off and on; the first start takes a few seconds ([Install]($BLOB/README.md#install)).
 
 **Recovery and back to stock:** a bad image cannot brick the meter: the vendor loader's update screen takes a good file ([Backup, recovery and back to stock]($BLOB/docs/manual/README.md#backup-recovery-and-back-to-stock)); the official [\`dm40_v_2_6.bin\`]($BLOB/stock/vendor/dm40_v_2_6.bin) restores the stock firmware.
 
