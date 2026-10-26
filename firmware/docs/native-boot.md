@@ -666,10 +666,12 @@ Tried, not done:
   sums, the Wh / VAh accumulators, `nr3_scale`, `gen::plan` timing) need
   the precision.
 
+The rows above add up to 20 516 B; the final tree (version 0.3.1) has:
+
 | | before (cae46446) | after |
 |---|---|---|
 | region A2 free | 1 128 B | 1 128 B |
-| region B free | 16 388 B | 20 516 B |
+| region B free | 16 388 B | 20 532 B |
 | region C free | 4 736 B | 4 772 B |
 | stack headroom (static worst path) | 20 500 B | 21 172 B |
 | SRAM free | 44 576 B | 43 912 B |
@@ -678,11 +680,11 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom:
 
 | variant | before | after |
 |---|---|---|
-| recovery-usb | 15 044 / 4 800 / 21 012 B | 18 820 / 4 816 / 21 684 B |
-| recovery-file | 16 084 / 4 212 / 20 500 B | 20 212 / 4 248 / 21 172 B |
-| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 30 328 / 5 840 / 21 632 B |
-| spi-disk | 37 064 / 14 904 / 22 012 B | 40 924 / 14 932 / 22 684 B |
-| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 20 588 / 5 192 / 21 172 B |
+| recovery-usb | 15 044 / 4 800 / 21 012 B | 18 796 / 4 816 / 21 684 B |
+| recovery-file | 16 084 / 4 212 / 20 500 B | 20 220 / 4 248 / 21 172 B |
+| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 30 320 / 5 840 / 21 632 B |
+| spi-disk | 37 064 / 14 904 / 22 012 B | 40 932 / 14 932 / 22 684 B |
+| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 20 580 / 5 192 / 21 172 B |
 | keep-screen | 16 428 / 4 724 / 20 500 B | 20 556 / 4 764 / 21 172 B |
 
 A2 stays below its 2 KiB warning: anything taken out of A2 lands in B.
