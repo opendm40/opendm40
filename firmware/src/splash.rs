@@ -38,8 +38,11 @@ const GREEN: lcd::Color = 0x5DA0;
 #[cfg(not(test))]
 const TIM13_CCR1: u32 = 0x4000_1C34;
 
+/// SRAM (`.sram_bss`), as native.rs PHASE: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static STEP: AtomicU8 = AtomicU8::new(0);
 /// The splash is up and `note` not drawn yet.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static NOTE_DUE: AtomicBool = AtomicBool::new(false);
 
 /// Draw the splash and light the backlight (at the backup-SRAM record's

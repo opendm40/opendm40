@@ -13,10 +13,13 @@ pub mod splash;
 /// boot phase's DWT cycles (`phase`; [0] unused: the counter is not
 /// cleared by a software reset, so the shim's own time cannot be told from
 /// the loader's before it); [9..=11] = main's ms after App::new, after the
-/// first frame, after the touch reset (`main_phase`).
+/// first frame, after the touch reset (`main_phase`). SRAM
+/// (`.sram_bss`, zeroed in init_ram), not the TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static PHASE: [AtomicU32; 12] = [const { AtomicU32::new(0) }; 12];
 /// DWT at the end of the last phase (board::init restarts the counter, so
-/// 0 = its start).
+/// 0 = its start). SRAM, as PHASE.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static T_LAST: AtomicU32 = AtomicU32::new(0);
 const DWT_CYCCNT: u32 = 0xE000_1004;
 
