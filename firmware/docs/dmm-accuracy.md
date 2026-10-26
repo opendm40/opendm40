@@ -64,11 +64,15 @@ resolution: it does not change d.
   Temperature: x % of the reading in its unit (°C or °F) + 5 °C / 5 °F. The
   spec form "±(0.03%+5d)" is not shown: the absolute value says what the
   digits are worth without arithmetic.
-- **Where:** the DMM page, right end of the bargraph's label row (x 415..475,
+- **Where:** the DMM page, right end of the bargraph's label row (x 415..476,
   y 161..172, F14, the grid grey of the scale labels), under the unit; the
-  "±" is drawn (no stock font has U+00B1). The combined view: a free sub
-  row of the meter strip (the lower one first), grey. AC V / A there have
-  both sub rows taken (Hz, duty): no label in the strip.
+  "±" is drawn (no stock font has U+00B1). Too wide with the unit: the
+  number alone ("±0.0060" under MHz). The combined view: a free sub row of
+  the meter strip (the lower one first), grey; none when it does not fit
+  beside the GEN column. AC V / A there have both sub rows taken (Hz,
+  duty): no label in the strip.
+- **Rounding:** up to the last digit, so a bound: 0.0003 V AC reads
+  ±0.0016 V (15.009 digits).
 - **None:** with the History row instead of the bargraph (Settings 2/3 "DMM
   row"), in the power meter, for OL, dashes and provisional (grey) values,
   under REL (the manual specifies a reading, not the difference of two), and
