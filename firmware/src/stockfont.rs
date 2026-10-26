@@ -844,14 +844,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
     let energy = u.ends_with("Wh") || u.ends_with("VAh");
+    // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
+    // core's two-way string searcher (~1 KB) into region B.
+    let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
             'k' if energy => 'k',
             'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
-            'C' if u.contains('\u{b0}') => '\u{2103}',
-            'F' if u.contains('\u{b0}') => '\u{2109}',
+            'C' if deg => '\u{2103}',
+            'F' if deg => '\u{2109}',
             c => c,
         };
         let mut t = [0u8; 4];

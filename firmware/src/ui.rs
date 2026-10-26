@@ -628,7 +628,7 @@ impl DmmView {
         let num = |b: &mut [u8; 16], v: f32| -> usize {
             let mut t = [0u8; 16];
             let s = crate::dmm::format(&mut t, v, 2);
-            let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
+            let s = if s.as_bytes().contains(&b'.') { s.trim_end_matches('0').trim_end_matches('.') } else { s };
             let n = s.len().min(16);
             b[..n].copy_from_slice(&s.as_bytes()[..n]);
             n
@@ -1154,7 +1154,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     }
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
-    d.value = Txt::new(v.trim());
+    d.value = Txt::new(v.trim_ascii());
     d.dim = r.prov;
     let mut ub = [0u8; 16];
     let unit = sf::unit_text(r.main.unit, &mut ub);
@@ -2439,7 +2439,7 @@ fn gen_box(g: &gen::Gen, k: usize, bg: Color) {
             let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
             gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG }, bg);
             let note = s.wave.max_note();
-            gen_box_note(0, if clamped { note.split(": ").nth(1).unwrap_or(note) } else { "" }, VALUE, bg);
+            gen_box_note(0, if clamped { note.find(':').map_or(note, |i| &note[i + 2..]) } else { "" }, VALUE, bg);
         }
         1 | 2 => {
             match (k, s.offset_v) {

@@ -150,7 +150,7 @@ const KP_NTC_BETA: u8 = 8;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
 fn trim_zeros(s: &str) -> &str {
-    if !s.contains('.') {
+    if !s.as_bytes().contains(&b'.') {
         return s;
     }
     s.trim_end_matches('0').trim_end_matches('.')
