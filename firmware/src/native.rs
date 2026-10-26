@@ -45,6 +45,9 @@ pub fn main_phase(i: usize, ms: u64) {
     if i == 0 {
         splash::step();
     }
+    if i == 1 {
+        splash::done();
+    }
 }
 
 extern "C" {

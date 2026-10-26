@@ -10,7 +10,9 @@ section named after the tag as the release notes; how to cut a release:
 ### New
 
 - Start-up: a splash with the Wiren Board logo, the version, "Loading..."
-  and a progress bar from about 0.2 s after power-on until the meter page;
+  and a progress bar from about 0.2 s after power-on until the meter page
+  (on the slow first start after an update it says so, and that later
+  starts are fast);
   before, the screen stayed dark for about a second (seconds on the first
   start after an update) and then empty for 3 s more. `DBG:BOOT?` reports each
   start-up phase's time (`BOOTMS`, `MAINMS`).

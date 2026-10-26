@@ -199,6 +199,10 @@ RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
 
 ### Memory budget (2026-10-22 rework)
 
+Region A2 also holds one boot-only item, the splash logo's lettering
+(~0.5 KB; "Region A2" below): the first to move out when A2 is needed for
+hot data.
+
 Numbers from `build.sh` (stackdepth.py and the link map) on the ad2-isr
 build (default since 42cbf35) / without the feature
 (`--no-default-features --features vdisk`):
@@ -389,7 +393,11 @@ covers it; nothing in the install path reads that range but the marker
 (`dm40fw.py` MARKER_OFFSET, reload.sh's 12-byte read at `0x08008000`,
 emu/run.py `--zero-marker`, `boot::zero_marker`), which stays 0xFF in
 the image. Only hot, region-B-class content belongs there; nothing the
-shim or recovery needs (they stay in `.vectors` / `.shim`).
+shim or recovery needs (they stay in `.vectors` / `.shim`). One
+exception (owner 2026-10-26, region C being contended by several
+changes): the boot splash's logo lettering (`TEXT_RUNS`,
+`.rodata.a2.splash_text`, ~0.5 KB, [`tools/mklogo.py`](../tools/mklogo.py)),
+boot-only data; move it back to C first if A2 is needed for hot data.
 
 **What is in A2**: the ASCII26 (11 546 B) and F14 (638 B) font blobs,
 named statics `#[link_section = ".rodata.a2.<NAME>"] pub static <NAME>_B:

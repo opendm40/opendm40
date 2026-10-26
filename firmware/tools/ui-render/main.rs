@@ -1072,16 +1072,22 @@ fn main() {
     let cases = strip_cases();
     let st = status(1);
 
-    // Boot splash (splash.rs): the bar empty, half, full.
-    for n in [0u8, 5, splash::STEPS] {
+    // Boot splash (splash.rs): the bar empty, half, full; the slow first
+    // start's note with the half bar.
+    for n in [0u8, 3, 5, splash::STEPS] {
         host::reset(0);
         splash::draw();
         for _ in 0..n {
             splash::step();
         }
+        if n == 3 {
+            splash::note();
+        }
         ck.check(&format!("splash/{n}"), &[("screen", Bx::new(0, 0, 480, 320))]);
-        if n == 5 {
-            save(&out, "splash");
+        match n {
+            3 => save(&out, "splash-first-start"),
+            5 => save(&out, "splash"),
+            _ => {}
         }
     }
 

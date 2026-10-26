@@ -885,6 +885,12 @@ fn run_inner(dev: &mut dyn BlockDevice, files: &[F], missing_only: bool) -> Resu
                     return res;
                 }
                 d.fill(off as u32, &mut buf[..end - off]);
+                // A file's data is being (re)written: at boot only on the
+                // first start after an update or a calibration change (the
+                // INFO/ mirror, the safety copy, the settings file), which is
+                // slow: the splash says so (once; nothing after the splash).
+                #[cfg(target_os = "none")]
+                crate::native::splash::note();
                 if !(dev.write_block(lba, &buf[..]) && verify(dev, lba, buf, tmp)) {
                     return res;
                 }
