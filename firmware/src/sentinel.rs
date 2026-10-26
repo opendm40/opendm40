@@ -1329,12 +1329,11 @@ impl Sentinel {
             // one in every read, an AC one at least while PB1 passes
             // between the window and the comparator's range; one that
             // pushes PB1 out of range all the time reads 0x70 in every read,
-            // which still counts. So does a window of one change between
-            // no bit and both (a DC level above the window coming on or
-            // going off: the device reads 0x70 for any level above it; the
-            // V side's reads alternate, at least twice per window).
-            let flips = self.win_flips;
-            let mix = wb == W_BOTH | W_ZERO && flips >= 2;
+            // which still counts. So does the window in which such a level
+            // comes on: no bit, then 0x70 to its end, one change (the device
+            // reads 0x70 for any level above the window). A run of 0x70 that
+            // ends within the window stays MIXED (the V side's sparse 0x70).
+            let mix = wb == W_BOTH | W_ZERO && !(self.win_flips == 1 && self.win_last == W_BOTH);
             let hit = if self.kind == Kind::CmpA && !self.jchk {
                 wb & W_ONE != 0 || wb & W_BOTH != 0 && !mix
             } else {
@@ -2648,6 +2647,13 @@ mod tests {
         s.configured(Kind::CmpA, 0, true);
         for t in (0..1000).step_by(10) {
             s.sample_cmp(t, if (t / 10) % 2 == 0 { 0 } else { 0x70 });
+        }
+        assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        // sparse 0x70 runs of the V side that end within a window (0x70, then 0): no hit
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..1000).step_by(10) {
+            s.sample_cmp(t, if t % 100 < 40 { 0x70 } else { 0 });
         }
         assert_eq!((s.alert, s.hits), (Alert::None, 0));
     }
