@@ -1293,18 +1293,18 @@ comparator rows (ohm, the resistive temperature sensors), within the last
 
 * a MIXED window (0x70 and 0 reads in turn, at least two changes, no
   one-bit read: the square) = driven;
-* 0x70 reads = driven only while the input does not show the row's own
-  source (`Sentinel::own`). A source on V-COM reads OL on every range and
-  holds OP1O at 2.02-2.45 V (1a11eda). The input shows its own source when
-  an ohm reading within the range came at least 450 ms after the hit run
-  began (`OHM_VIN_LAG_MS`), or, on the 6 MΩ / 60 MΩ rows (open 1.62 /
-  1.38 V), when the jack check's OP1O peak stays below 1.8 V (`JACK_OWN_V`,
-  *inferred* between those values and 2.02 V).
+* 0x70 reads = driven unless the input shows the row's own source
+  (`Sentinel::own`): on the 6 MΩ / 60 MΩ rows (open 1.62 / 1.38 V) the jack
+  check's OP1O peak stays below 1.8 V (`JACK_OWN_V`, *inferred* between
+  those values and the 2.02-2.45 V a source on V-COM holds it at, 1a11eda).
+  The ohm reading does not tell: a source with a resistance on V-COM read
+  47 MΩ (RES AUTO) and 440 Ω (600 Ω) in range with 0x70 on PB1 (this
+  build's first device run, 2026-10-26: A-JACK and LIVE? in turn with a
+  rule on in-range readings).
 
-Driven means no A-JACK, LIVE? (once the run's jack check is in and the last
-reading is OL); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
-leads in A / COM sits on the 60 MΩ row. Gaps: a DC current in A with an OL
-reading on the rows below 6 MΩ (manual 600 Ω .. 600 kΩ) and in the resistive
+Driven means no A-JACK, LIVE? (once the run's jack check is in); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
+leads in A / COM sits on the 60 MΩ row. Gaps: a DC current in A on the
+rows below 6 MΩ (manual 600 Ω .. 600 kΩ) and in the resistive
 temperature rows still shows LIVE?; an AC current (0x70 and 0 in turn)
 everywhere. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
 Emulator: the model reads PB1 above the window as 0x70 (`pb1cmp70`, default);

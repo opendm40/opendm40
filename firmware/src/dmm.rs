@@ -3780,9 +3780,6 @@ impl Dmm {
     #[inline(never)]
     fn v_side_ohm(&mut self, now: u64, ol: bool) {
         let drv = if self.mode == 10 {
-            // (the jack check's BOTH: a reading within the range = the input
-            // at the row's own source, sentinel `own`)
-            self.sent.vin_t = if ol { 0 } else { now.max(1) };
             self.live
         } else {
             if !ol {
