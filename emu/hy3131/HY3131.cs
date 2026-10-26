@@ -1964,10 +1964,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Ohm)
             {
                 vs = OhmSourceVolts();
-                // r0 (60 ohm, never selected by the stock nor by opendm40 since 2026-10-25): its
-                // slot is not a calibration; the device read like Rref 0.1 k x r1's gain x 1.0291
-                // (measured on one unit, cause unknown; firmware dmm.rs ohm notes, branch feat/ohm60).
-                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * OhmR0K
+                // r0 (60 ohm, never selected by the stock): its slot is not a calibration; the
+                // firmware (dmm.rs ohm_row_gain) takes r1's gain x the DC mV x10 / x1 gain ratio
+                // (0x24 / 0x28), the OP1 x10 stage's error. The stock row's PA2 DS2 / FS2 (the
+                // device read 3.8 % lower with them closed) is not modelled.
+                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * CalGain(0x24) / CalGain(0x28)
                     : OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
                 Fe.LeadOhm = CalOffs(0x144) * 1000.0;
             }
@@ -2494,6 +2495,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
                     // opendm40 DBG:SRC (src/dbgsrc.rs): the ohm / diode rows with AD1 cycled through
                     // other nodes: the AD1 reference buffers, SAD1FP / FN (not SDIO) and R28 are free.
+                    // opendm40 ohm r0 (dmm.rs OHM_R0_ROW): the stock r0 row with PA2's DS2 / FS2 open.
+                    if(row.Role == Role.Ohm && row.Range == 0 && j == 11) mask &= 0xF9;
                     if(row.Role == Role.Ohm || row.Role == Role.Diode)
                     {
                         if(j == 3) mask &= 0xF3;
@@ -2634,7 +2637,6 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] Shunt = { 0.01, 0.0005, 4.75e-5 }; // ohm / kohm / Mohm
         private static readonly double[] AUnit = { 1, 1e3, 1e6 };           // A -> A / mA / uA
         private static readonly double[] OhmRref = { 0.1, 1, 10, 100, 1000, 10000, 63000 };
-        private const double OhmR0K = 1.0291;
         private static readonly double[] CapK = { 1020, 1003, 102.7, 10.68, 1.5, 4.06, 41, 400 };
         private static readonly double[] DcvNegK = { 1.0, 1.00008, 1.00011, 1.0015 };
         private static readonly double[] K1 = { 0, 1 / 36.0, 2 / 36.0, 4 / 36.0, 8 / 36.0, 10 / 36.0, 12 / 36.0, 14 / 36.0, 16 / 36.0, 18 / 36.0,

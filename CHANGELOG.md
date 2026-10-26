@@ -7,6 +7,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Added
+
+- Resistance: the 60 Ω range (milliohm digits, 0.90 mA), on the range page
+  and in AUTO (down from 600 Ω below about 58.3 Ω, up above about 61.8 Ω;
+  not with 0.28 mA ON). It uses the stock's 60 Ω setup with one switch
+  open (the stock never selects that range) and the 600 Ω and 60 mV
+  calibrations ([manual](docs/manual/README.md#resistance)).
+
 ### Fixed
 
 - Multimeter, V / A / ohm: holding AUTO to return to the autorange shows

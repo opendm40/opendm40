@@ -108,20 +108,36 @@ What waits for the owner; each line links to the material.
       ([HY3131.cs](../emu/hy3131/HY3131.cs) `OhmR0K`), [resautotest.py](../emu/hy3131/resautotest.py) checks
       30 / 59.5 Ω on 60 Ω within 0.3 %. Device check: the calibrator's resistance output on V-COM, 10 / 20 / 50 Ω,
       manual 60 Ω and manual 600 Ω, mean of 5 READ? each: the ratio 60 / 600 within 1 +- 0.003 for each value.
-- [ ] 60 Ω range: removed 2026-10-25 (owner), work on branch feat/ohm60 (2bc5cc92: the range page item, RES
-      AUTO down to 60 Ω, the r1-gain x 1.0291 fix, the emulator and resautotest rows). Removed here: the range
-      page item, AUTO (floor 600 Ω again), the AUTO key cycle, `RES:RANG` 60 / MIN (now 600 Ω), `OHM_R0_K` /
-      `ohm_row_gain`; the stock's r0 row stays in [hy3131_tables.rs](src/hy3131_tables.rs) and nothing selects
-      it ([dmm.rs](src/dmm.rs) `OHM_R_MIN`, the ohm notes there). Findings to resume from:
-      - the stock V2.6 never selects r0: its range is clamped to 1..6
-        (`stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2);
-      - r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated default (inferred);
-      - on the device r0 read 2.6-2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 Ω; the ratio is
-        constant, so a gain error, not a parallel load. Ruled out: the OP1 x10 path (the record's x10 / x1
-        pairs read high, not low) and the nominal Rref / 10 (the
-        [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library) x10 ohm row);
-      - the r0 row differs from r1 in R25 0x01 (x10) and R2B 0x46 vs 0x40: PA2 DF closed, which the stock uses
-        only on the high ohm ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the calibrator.
+- [ ] 60 Ω range: removed from main 2026-10-25 (owner); back on branch feat/ohm60 (0.3.0, owner decides on the
+      merge): the range page item, RES AUTO down to 60 Ω, the AUTO key cycle, `RES:RANG 60`. Earlier findings:
+      the stock V2.6 never selects r0 (its range is clamped to 1..6, `stock/re/analysis/dmm_v2_6.h` (in the
+      private analysis repo) section 2); r0's calibration slot 0x124[0] holds a round 1.005, an uncalibrated
+      default (inferred); the stock r0 row is the r1 row plus R25 0x01 (OPS1, OP1 x10) and R2B 0x46 vs 0x40
+      (PA2 DS2 + FS2 closed).
+      **PA2 (device 2026-10-26, MR9270 resistance output on V-COM, manual 60 / 600 Ω, 2 alternating blocks of
+      6 READ? (MED) per value, r0 read with r1's gain x 1.0291 in both images):**
+
+      | set Ω | 600 Ω | 60 Ω, R2B 0x46 | 600 Ω | 60 Ω, R2B 0x40 | raw r0 / r1, 0x46 / 0x40 |
+      |---|---|---|---|---|---|
+      | 0 | 0.675 | 0.669 | 0.669 | 0.689 | |
+      | 10 | 9.112 | 9.102 | 9.114 | 9.461 | 0.9707 / 1.0087 |
+      | 20 | 19.079 | 19.077 | 19.085 | 19.829 | 0.9716 / 1.0096 |
+      | 50 | 49.417 | 49.399 | 49.414 | 51.354 | 0.9714 / 1.0099 |
+
+      PA2 DS2 / FS2 closed reads 3.8 % lower; what PA2 is wired to on the board is not known. With it open
+      r0 reads 1.0 % high; the record's DC mV x10 / x1 gains (0x24 / 0x28: a ratio of 0.9895 on the dumped
+      unit, the same OP1 x10 stage) match that. Change: r0 = the stock row with R2B 0x40
+      ([dmm.rs](src/dmm.rs) `OHM_R0_ROW`), gain = r1's x 0x24 / 0x28 (`ohm_row_gain`), no measured factor.
+      Predicted from the table: r0 / r1 = 0.9981 / 0.9990 / 0.9993 at 10 / 20 / 50 Ω. Device 8d1ef2bd
+      (0.3.0), same method: 600 Ω / 60 Ω = 0.669 / 0.666 (0 Ω), 9.102 / 9.090, 19.084 / 19.059, 49.417 /
+      49.375, r0 / r1 = 0.9987 / 0.9987 / 0.9991; 100 and 300 Ω on manual 60 Ω: OL (600 Ω: 100.11, 302.26).
+      RES AUTO: 50 / 10 Ω -> 60 Ω; 100 / 300 Ω -> 600 Ω (from 60 Ω by way of 60 MΩ, the stock over-range
+      rule); calibrator steps 57 .. 63 Ω up: 60 Ω through 62, 600 Ω at 63 (62.82); down: 600 Ω through 59
+      (58.61), 60 Ω at 58 (57.66); no back-and-forth. Output off from 60 Ω: 60 MΩ (the calibrator's off
+      state reads ~96 kΩ there, not open). The 0 Ω row is the
+      calibrator's own residual (~0.67 Ω at "0"; 10 Ω reads 9.11 on 600 Ω), not the meter's zero: whether
+      the MR9270 is accurate at 10 Ω is unknown; a short at the jacks or a 4-wire reference decides. Region B
+      paid with the LOCK font blob moved to A2 ([native-boot.md](docs/native-boot.md)).
 - [x] Touch (device eea7cd6 build, 2026-10-25): the stale 0xAB reads were the cause of the lost taps and the
       mixed-up keys. touch-tap-check before: every still tap LOST; after: every tap D T. Offsets to the aims:
       -2,+2 (top-left), +11,+3 (top-right), +2,+20 (bottom-left, y at the 319 edge), +11,+17 (bottom-right),

@@ -579,6 +579,9 @@ A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
 16 KiB warning. The next relief for C needs a real cut (the candidates of
 audit #1 above) or a larger blob moved out of B.
 
+The 60 Ω range (feat/ohm60, 0.3.0) costs ~180 B of B; the LOCK font blob
+(255 B) moved from B to A2 for it (A2 2 692 B, B 16 572 B free).
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as

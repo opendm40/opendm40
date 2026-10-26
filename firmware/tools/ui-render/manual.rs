@@ -186,7 +186,7 @@ pub fn run(out: &str) -> usize {
 
     // Resistance range page with the 0.28 mA ("ON") variant on.
     host::reset(0);
-    ui::range_page(Button::Ohm, Some(6), 1, None);
+    ui::range_page(Button::Ohm, Some(7), 1, None);
     ck.check_opts("manual/range-ohm", &page, false);
     save1(out, "range-ohm");
 

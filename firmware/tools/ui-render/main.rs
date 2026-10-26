@@ -2767,7 +2767,7 @@ fn main() {
                 ui::wave_button();
                 ui::inrush_button();
             };
-            let d_ro = || ui::range_page(Button::Ohm, Some(6), 1, None);
+            let d_ro = || ui::range_page(Button::Ohm, Some(7), 1, None);
             let d_rc = || ui::range_page(Button::Cap, Some(0), 0, None);
             let range_t = |b: Button| -> Vec<u8> {
                 let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
@@ -2808,7 +2808,7 @@ fn main() {
                     ]
                 }))
                 .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
-                .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(6), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
+                .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
                     range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
                 }))
                 .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
@@ -2857,7 +2857,7 @@ fn main() {
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
         host::reset(0);
-        ui::range_page(Button::Ohm, Some(6), 1, None);
+        ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
