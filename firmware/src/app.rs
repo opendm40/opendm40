@@ -2401,6 +2401,15 @@ impl App {
             }
             return;
         }
+        // Stopped: the one re-render of the stored record that a pan, zoom
+        // or `refresh` asks for waits until it can be drawn. Polled while
+        // drawing is held (a GRAM read-back, a screenshot, a pending view
+        // redraw, an overlay on the scope page), it was dropped, and the
+        // screen kept the drag preview: the record beyond the old screen
+        // stayed blank (device 2026-10-26).
+        if !self.scope.s.run && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
+            return;
+        }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };

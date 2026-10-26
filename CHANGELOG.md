@@ -17,6 +17,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Scope, stopped: a pan, zoom or V/div change made while the screen was held
+  (right after a screenshot over USB, a message box on the scope page) is
+  drawn when the hold ends; before, the screen kept the drag preview with
+  the rest of the record blank. A drag back from either end of the record
+  moves at once.
 - Multimeter, V / A / ohm: holding AUTO to return to the autorange shows
   AUTO and dashes at once; before, the last manual reading stayed on the
   screen with MANU until the next conversion (~0.5 s on ohm).

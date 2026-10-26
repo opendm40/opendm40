@@ -1533,8 +1533,12 @@ impl Scope {
             return;
         }
         let per = self.zoom_screen(self.s.tb) as i64;
+        let len = self.stored_len as i64;
         let a = a0 as i64 - cols as i64 * per / COLS as i64;
-        self.stored_anchor = a.clamp(0, self.stored_len as i64 - 1) as usize;
+        // Clamped where the window stops (zoom_frame: start = anchor -
+        // per / 2, at most len - per), so a pan back from an end moves at once.
+        let (lo, hi) = if per <= len { (per / 2, len - per + per / 2) } else { (0, len - 1) };
+        self.stored_anchor = a.clamp(lo, hi) as usize;
         self.stored_roll = false;
         self.zoom_pending = true;
     }
