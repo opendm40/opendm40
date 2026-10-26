@@ -1523,6 +1523,17 @@ pub fn init() {
     g.d_holes = [None; NH];
     g.px = 0;
     g.next = 0;
+    init_shown();
+}
+
+/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: its code stays in
+/// region B with this module instead of growing `new_app` in region C.
+#[inline(never)]
+fn init_shown() {
+    unsafe {
+        core::ptr::addr_of_mut!(SHOWN).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] });
+        core::ptr::addr_of_mut!(STRIP_SHOWN).write(None);
+    }
 }
 
 /// The graph state, read only (overlays reading its background).
@@ -1968,6 +1979,9 @@ struct Shown {
     cells_n: [u8; 4],
 }
 
+// On the device in SRAM (.dmabuf, NOLOAD, as GRAPH; region B audit #6:
+// no .data load image in region B); `init` sets it up.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] };
 
 fn shown() -> &'static mut Shown {
@@ -3245,6 +3259,8 @@ const ST_GEN_T: Rect = rect(344, 46, 64, 17);
 const C_HV: Color = 0xc9a0;
 const C_GEN: Color = 0x0400;
 
+// On the device in SRAM (.dmabuf, NOLOAD, as GRAPH); `init` sets it up.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut STRIP_SHOWN: Option<StripData> = None;
 
 /// Forget the drawn strip (the next `meter_strip` draws all of it).
