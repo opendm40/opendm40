@@ -106,6 +106,10 @@ SECTIONS
         __cold_start = .;
         *(.text.*8opendm409calbackup*);
         *(.text.*8opendm406fatren*);
+        /* dmm.rs load_record (the record copy and its CRC, once at
+         * start-up, before any stream) and rec_crc_ok. */
+        *(.text.*8opendm403dmm11load_record*);
+        *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
         *(.text.*8opendm408recovery*);

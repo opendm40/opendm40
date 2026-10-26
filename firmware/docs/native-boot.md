@@ -987,7 +987,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     Expected `PD6,0,2,0` with the key released;
   - then `native::put_extra`: `STAGED,<n>`, `CALBK,<status>,<written>,<conflict>,<differs>`,
     `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
-    `FATDIR,<ok>,<created>,<failed>`, `SETTINGS,...` ("Stack depth" and "Unit
+    `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
+    record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
     data" below). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
