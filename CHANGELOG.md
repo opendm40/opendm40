@@ -17,6 +17,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Multimeter, V / A / ohm: holding AUTO to return to the autorange shows
+  AUTO and dashes at once; before, the last manual reading stayed on the
+  screen with MANU until the next conversion (~0.5 s on ohm).
 - Multimeter: the message after a tap on the reading gives the readings per
   second as the rate chip shows them and the averaging time of the extra
   digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
@@ -46,6 +49,7 @@ section named after the tag as the release notes; how to cut a release:
 - [emu/hy3131/ohm600test.py](emu/hy3131/ohm600test.py): manual 600 Ω at
   each rate, steps into 500 Ω from 200 Ω / open / OL, the 618 Ω limit, and
   AUTO landing 500 Ω on 600 Ω.
+
 
 ## v0.2.0 (2026-10-25)
 
