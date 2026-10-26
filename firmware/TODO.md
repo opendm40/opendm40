@@ -3917,14 +3917,17 @@ Emulator (emu/):
 - [x] **False A-JACK in continuity when the probes touch** (owner video 2026-10-26, leads in V / COM, A jack empty):
       A-JACK for ~1.5 s while the readout went OL -> 814 -> 277 -> 28.85 -> 0.67 ohm. The jack check calls a shorted
       input (~0 V) "free" as it does the open one (~-0.48 V), so PB1 hits during the contact asserted A-JACK; what
-      moves PB1 then is unknown (not recorded on the device). Fixed (branch fix/cont-false-ajack, 0.2.7): continuity
+      moves PB1 then is unknown (not recorded on the device). Fixed (branch fix/cont-false-ajack, 0.2.8): continuity
       and diode gate A-JACK on their reading (V_GATE): under OL within 1.5 s = V-COM closed, no A-JACK; an OL reading
       counts from 450 ms into the hit run ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
       Cost (emulator): A-JACK 0.6-0.9 s after the onset (was 0.16-0.36 s), up to ~1.5 s right after a part left
       V-COM; none with a part on V-COM and a current in A. Emulator: model `contbump`,
       senttest cont-bounce / diode-bounce (FAIL on 6c686ce8, pass), cont-a / diode-a now open V-COM in their current
       phase, cont-closed-a.
-      Device: owner taps with the V-COM jumper out (see the device check below).
+      Device (the MR9270's resistance output on V-COM, its output relay on / off at 0 ohm x 8, 0 <-> 400 ohm x 12):
+      every step puts AD2 peaks of 14 000-231 000 codes on PB1 (threshold 9 900), streaks of 1-2 windows, the jack
+      check "free" (-435 / -87 / 0 mV). Main 6c686ce8: A-JACK on 3 of the 8 relay closures, shown 0.3-1.5 s after
+      each; the fix: none in 28 steps. Not run: probe taps by hand (owner session pending), a current in A.
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device f59bac2 note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s

@@ -1326,6 +1326,11 @@ third lead) shows no A-JACK there. Emulator:
 the model's `contbump` (a PB1 burst on every V-COM resistor change in
 continuity / diode, shape *inferred*), senttest `cont-bounce` /
 `diode-bounce` (two bouncing taps, then a current in A with V-COM open).
+Device, the calibrator's resistance output on V-COM switched between open and
+0 Ω (its relay) or 0 and 400 Ω: every step put AD2 peaks of 14 000-231 000
+codes on PB1 for 1-2 windows, with the jack check "free"; on 6c686ce8 that
+asserted A-JACK on 3 of 8 closures (shown 0.3-1.5 s after each), with the
+fix on none of 28 steps.
 
 **AC mV (`V_GATE` on the row's own result).** Plain AC mV takes |LPF| +
 1.414 x RMS of each result (the quantity of `MV_CLIP_K`): above 1.5 x the
