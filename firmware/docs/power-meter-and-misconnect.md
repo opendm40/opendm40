@@ -1291,8 +1291,8 @@ form of this rule ("0x70 = driven") gives LIVE?. Now, in the jack-check
 comparator rows (ohm, the resistive temperature sensors), within the last
 `AJACK_CLEAR_MS` (1 s):
 
-* two windows in a row of 0x70 and 0 reads with no one-bit read (the
-  square; one such window is the onset of any level) = driven;
+* a MIXED window (0x70 and 0 reads in turn, at least two changes, no
+  one-bit read: the square) = driven;
 * 0x70 reads = driven only while the input does not show the row's own
   source (`Sentinel::own`). A source on V-COM reads OL on every range and
   holds OP1O at 2.02-2.45 V (1a11eda). The input shows its own source when
@@ -1488,10 +1488,12 @@ the input, not a rectified level. Now:
 * **DC V 6 V / DC mV comparator (MIXED, `sample_cmp`)**: a window whose
   reads are CMPHO + CMPLO together (0x70) mixed with empty ones is not a
   hit: the comparator overdriven by the V side. A window with a one-bit
-  read, or with 0x70 in every read, still is. *Inferred*: a current in A
-  gives one-bit reads (as BOTH in ohm), and one that keeps PB1 beyond the
-  comparator's range reads 0x70 in every read. Not checked: the A jack has
-  not been wired.
+  read, or with 0x70 in every read, still is: a DC current in A reads 0x70
+  (*inferred* from the device's CTSTA values; with 20 mA in A, DC V and DC mV
+  showed A-JACK, 2026-10-26). MIXED needs at least two changes between an
+  empty read and a 0x70 one in the window, so the window in which such a
+  current starts (0, then 0x70) is a hit (emulator loudtest `ajack`: A-JACK
+  ~0.1 s late without that, with the model's 0x70 reading).
 * **AC V, DC?** (4.7): no hint while the counter reads above `V_HF_KHZ`:
   the AC reading then misses the AC part.
 

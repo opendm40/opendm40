@@ -918,6 +918,10 @@ pub struct Sentinel {
     /// CTSTA bits ORed over the window (AC?); in the DC V / DC mV A-JACK
     /// windows the kinds of reads (W_ONE / W_ZERO / W_BOTH, MIXED).
     win_both: u8,
+    /// ... the changes between a read of no bit and one of both, and the
+    /// last such read (MIXED).
+    win_flips: u8,
+    win_last: u8,
     streak: u8,
     /// Time of the last hit window (comparator / peak) and of its first one
     /// in the current run of hits.
@@ -999,7 +1003,6 @@ pub struct Sentinel {
     /// ... the last of two windows in a row of such reads mixed with empty
     /// ones and no one-bit read (a square on V-COM, `v_both`; 0 none).
     mix_t: u64,
-    mix_prev: bool,
     /// ... and at the last window's close they said driven (DBG:SENT?
     /// field 14 = 2).
     both_drv: bool,
@@ -1037,6 +1040,8 @@ impl Sentinel {
             lo_mask_until: 0,
             win_hit: false,
             win_both: 0,
+            win_flips: 0,
+            win_last: 0,
             streak: 0,
             last_hit: 0,
             run_t0: 0,
@@ -1072,7 +1077,6 @@ impl Sentinel {
             jack_mv: 0,
             both_t: 0,
             mix_t: 0,
-            mix_prev: false,
             both_drv: false,
             vin_t: 0,
             jack_low: false,
@@ -1127,6 +1131,8 @@ impl Sentinel {
         self.win_t0 = now;
         self.win_hit = false;
         self.win_both = 0;
+        self.win_flips = 0;
+        self.win_last = 0;
     }
 
     /// No sample counts for `ms` from `now` (`dmm.rs` after a row write:
@@ -1136,6 +1142,8 @@ impl Sentinel {
         self.win_t0 = self.blank_until;
         self.win_hit = false;
         self.win_both = 0;
+        self.win_flips = 0;
+        self.win_last = 0;
     }
 
     /// The row's settle is over (`dmm.rs` `sent_rearm`): samples count from
@@ -1146,6 +1154,8 @@ impl Sentinel {
         self.win_t0 = self.blank_until;
         self.win_hit = false;
         self.win_both = 0;
+        self.win_flips = 0;
+        self.win_last = 0;
     }
 
     /// End a blank now (`dmm.rs` `probe_rewrite`: a row rewrite that is
@@ -1290,12 +1300,20 @@ impl Sentinel {
         } else {
             self.win_hit |= bits != 0;
             if self.kind == Kind::CmpA {
-                // (MIXED below: the window's kinds of reads)
-                self.win_both |= match bits {
+                // (MIXED below: the window's kinds of reads, and how often a
+                // read of no bit and one of both followed each other)
+                let w = match bits {
                     CTSTA_CMP => W_BOTH,
                     0 => W_ZERO,
                     _ => W_ONE,
                 };
+                if w != W_ONE {
+                    if self.win_last | w == W_BOTH | W_ZERO {
+                        self.win_flips = self.win_flips.saturating_add(1);
+                    }
+                    self.win_last = w;
+                }
+                self.win_both |= w;
             }
         }
         let closed = now.saturating_sub(self.win_t0) >= WIN_MS;
@@ -1310,9 +1328,14 @@ impl Sentinel {
             // one in every read, an AC one at least while PB1 passes
             // between the window and the comparator's range; one that
             // pushes PB1 out of range all the time reads 0x70 in every read,
-            // which still counts.
+            // which still counts. So does a window of one change between
+            // no bit and both (a DC level above the window coming on or
+            // going off: the device reads 0x70 for any level above it; the
+            // V side's reads alternate, at least twice per window).
+            let flips = self.win_flips;
+            let mix = wb == W_BOTH | W_ZERO && flips >= 2;
             let hit = if self.kind == Kind::CmpA && !self.jchk {
-                wb & W_ONE != 0 || wb == W_BOTH
+                wb & W_ONE != 0 || wb & W_BOTH != 0 && !mix
             } else {
                 self.win_hit
             };
@@ -1320,18 +1343,17 @@ impl Sentinel {
             self.win_t0 = now;
             self.win_hit = false;
             self.win_both = 0;
+            self.win_flips = 0;
+            self.win_last = 0;
             if self.alt && self.alt_v {
                 self.ac.feed(now, both && self.ac_dc_ok, HINT_ASSERT_MS, HINT_CLEAR_MS);
             } else {
                 self.window(now, hit);
-                // MIXED in a JCHK row, two windows in a row (one is the onset
-                // of any level): the square on V-COM (device c6a3ac3: 0x70 on
-                // about half of the polls, 0 on the rest)
-                let mix = self.jchk && wb == W_BOTH | W_ZERO;
-                if mix && self.mix_prev {
+                // MIXED in a JCHK row: the square on V-COM (device c6a3ac3:
+                // 0x70 on about half of the polls, 0 on the rest)
+                if self.jchk && mix {
                     self.mix_t = now;
                 }
-                self.mix_prev = mix;
                 // (a 0x70 run counts as driven once the jack check of the run
                 // has said whether the input sits at the row's own source and
                 // the last reading was OL)
@@ -2602,6 +2624,28 @@ mod tests {
         assert_eq!(run(&[0x20]).0, Alert::AJack);
         assert_eq!(run(&[0x70, 0x20, 0x00]).0, Alert::AJack);
         assert_eq!(run(&[0x10, 0x00, 0x20, 0x00]).0, Alert::AJack);
+    }
+
+    #[test]
+    fn onset_window_of_a_level_is_a_hit() {
+        // A DC current coming on in DC V: the window of its onset reads 0, then 0x70 (one
+        // change, the device's 0x70 above the window): a hit, as the whole-0x70 windows after
+        // it; the V side's 0x70 / 0 in turn (MIXED) is not.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..100).step_by(10) {
+            s.sample_cmp(t, if t < 50 { 0 } else { 0x70 });
+        }
+        for t in (100..250).step_by(10) {
+            s.sample_cmp(t, 0x70);
+        }
+        assert_eq!((s.alert, s.hits), (Alert::AJack, 2));
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..1000).step_by(10) {
+            s.sample_cmp(t, if (t / 10) % 2 == 0 { 0 } else { 0x70 });
+        }
+        assert_eq!((s.alert, s.hits), (Alert::None, 0));
     }
 
     #[test]
