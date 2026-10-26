@@ -3354,9 +3354,16 @@ Emulator (emu/):
 - [ ] Owner: confirm the DM40's DC V against a third reference (a 6.5-digit DMM or a 2.5 / 5 V reference IC
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
-- [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
+- [x] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
       Not run on 40728b8 (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
       the calibrator wanders by the same 0.2-0.5 mV over minutes.
+      Measured (device 0.2.1, 2026-10-26, DC V SLOW, FETC? mean over 3-4 s per block, 6 / 60 / 6 ... V blocks,
+      60 V minus the mean of its neighbours): 0 V -0.24..-0.33 mV (mean -0.29), 1 V -0.15..-0.32 (-0.21, -0.27;
+      two sessions), 3 V -0.35..-0.54 (-0.42), 5 V -0.21..-0.65 (-0.38, -0.62). Same sign in every pair, and as
+      large at 0 V: a zero offset of the 60 V range against the 6 V range (0.3 of the 60 V range's 1 mV digit),
+      i.e. the factory calibration's offsets (cal slots 0x14 / 0x18), not a firmware row or table setting. The
+      only per-range firmware term, the 6 V range's `v += 1e-4 - |v| / 20000` (dmm.rs poll_dcv), would move the
+      difference by -0.05 / +0.05 / +0.15 mV at 1 / 3 / 5 V, not the way the data go. Closed: no firmware cause.
 - [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
@@ -3891,11 +3898,23 @@ Emulator (emu/):
       VOLT:AC:RANG:AUTO ON on the 50 Hz square, 4 runs: lands on 6 V, no 0 and no reading 1 % low; but the first finals
       on 6 V read high, +3.6..+4.0 % (5.00 / 4.93 / 4.89 V for 4.81 V), settling within 1 % ~0.35 s after the step
       (item below).
-- [ ] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
+- [x] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
       finals on 6 V read +3.6..+4.0 % high (5.00, 4.93, 4.89 V for 4.81 V) and settle within 1 % ~0.35 s after the
       step; the cause is unknown (the AC filter seeded from a block that spans the range switch is one candidate,
       INFERRED). Script: scratchpad acauto.py pattern (CONF:VOLT:AC 60, 3 s, VOLT:AC:RANG:AUTO ON, DBG:READout?
       every 50 ms for 4 s).
+      Cause: not the filter (ACV_WIN lets a > 10 mV change through at 0.99). The RMS results themselves are high:
+      6 V and 60 V share a tap, OP1's gain changes, its output's DC steps and the coupling into PB4 (tau 0.34 s,
+      [hy3131-frontend 2](docs/hy3131-frontend-2026-10-26.md)) carries it to AD2. `DBG:ACDC?` 0.2 s after the
+      settle (device 0.2.1): LPF 1.33, 0.99, 0.74, 0.55, 0.41, 0.31 V, and RMS = sqrt(AC^2 + LPF^2) within ~0.1 V
+      throughout. 6 -> 60 V (manual) is far worse: LPF -25 V first, finals 21-26 V for 4.84 V, ~2 s.
+      Fixed (fix/acv-autorange-overshoot, dmm.rs ACV_DC_*): after a plain AC V range step a result is provisional
+      (grey, no step down) while |LPF| > 0.05 x RMS + 0.5 % of the range, at most 2 s after the row write. Emulator
+      (HY3131.cs HpfTransientGain 1.5 -> 1.0, the device's sqrt(AC^2 + LPF^2)): firstrdtest acv-auto-dn-sq (+-0.3 %)
+      and acv-up-sq (+-0.5 %) FAIL on 0.2.1 (4.802 V, 11.3 V for 4.776 V), pass. Device (fix build, the
+      square, 4 runs each): 60 -> 6 V at 50 Hz first final +0.08..+0.20 % at 1.29-1.40 s (base +3.6..+4.5 % at
+      0.68-0.78 s), at 20 Hz -0.15..0.00 % at 1.35-1.40 s (base +4.2..+4.5 %); 6 -> 60 V first final at the
+      2 s limit, +0.30..+0.64 %. A step on a signal without DC is not delayed (emulator 1 V sine: 0.71 s, as base).
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.

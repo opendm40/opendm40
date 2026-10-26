@@ -56,7 +56,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
         // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
         public const double Op1OffLevel = -0.005;
-        public const double HpfTransientGain = 1.5; // RMS seen while the node DC slews, per volt of remaining step
+        // RMS seen while the node DC slews, per volt of remaining step: device 0.2.1 (AC V 60 -> 6 V on the
+        // 0 / 9.5 V square, DBG:ACDC?) read RMS = sqrt(AC^2 + LPF^2) within ~0.1 V over the step's tail
+        public const double HpfTransientGain = 1.0;
         public const double LpfRateDivisor = 0.5;   // measured LPF period = datasheet OSR4 * this (RESEARCH.md 3)
 
         public Hy3131Core()
