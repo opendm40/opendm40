@@ -611,7 +611,7 @@ pub fn fmt_hz(out: &mut Buf, hz: f32) {
 }
 
 /// Sample rate as `fmt_hz` gives a frequency, "S/s" for "Hz": "50.0MS/s",
-/// "12.5MS/s", "76.8kS/s", "125S/s".
+/// "12.5MS/s", "76.8kS/s", "500S/s".
 pub fn fmt_srate(out: &mut Buf, fs: u32) {
     fmt_hz(out, fs as f32);
     out.n -= 2;
@@ -2482,9 +2482,6 @@ pub struct PopVals {
     pub pcond: u8,
     pub pwidth: f32,
     pub runt_v: f32,
-    /// Settings tab: the acquisition's sample rate (S/s, ACQ:SRAT?); 0 (the
-    /// stock-replica scenes) leaves the row out.
-    pub srate: u32,
 }
 
 /// Which popup is open (tab).
@@ -2721,25 +2718,8 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
-            if v.srate > 0 {
-                fill_text(SR_LABEL, pc, C_POP_BG, sf::SC_F16, SR_LABEL, "Sample rate:", C_FILL, 1, 0);
-                mf_srate(v.srate);
-            }
         }
     }
-}
-
-// Settings tab: the sample rate (opendm40), read-only, in the column of
-// the other tabs' right-hand rows.
-pub const SR_LABEL: Rect = rect(214, 61, 189, 20);
-pub const SR_VALUE: Rect = rect(214, 81, 189, 24);
-
-/// Settings tab: the sample-rate value (repainted alone while the menu is
-/// open and the rate changes).
-pub fn mf_srate(fs: u32) {
-    let mut b = Buf::new();
-    fmt_srate(&mut b, fs);
-    fill_text(SR_VALUE, SR_VALUE, C_POP_BG, sf::SC_F16, SR_VALUE, b.as_str(), C_FILL, 1, 0);
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).
@@ -3066,7 +3046,7 @@ pub fn draw_tb(cur: u8) {
         } else {
             C_POP_BG
         };
-        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, r.w, 30), TB_LABELS[idx as usize], 8, 0);
+        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, TB_TIME_W, 30), TB_LABELS[idx as usize], 4, 0);
     }
     let layers = [(K_SHAPE, C_FRAME), (K_TEXT, C_BAR), (K_TEXT, C_BAR), (K_TEXT, C_SEL), (K_TEXT, C_BAR), (K_TEXT, C_BAR)];
     paint(isect(r, screen), &layers, |x, y| {
@@ -3083,6 +3063,35 @@ pub fn draw_tb(cur: u8) {
             (C_FRAME, 0)
         }
     });
+    // opendm40: each entry's sample rate, small and dim beside its time
+    // (one text at a time: a second Ink array would deepen the stack).
+    for k in 0..5i16 {
+        let idx = cur as i16 - 2 + k;
+        if idx >= lo as i16 && idx <= hi as i16 {
+            tb_rate(r.y + k * 30, crate::scope::tb_rate(idx as usize, lo != crate::scope::TB_MIN), k == 2);
+        }
+    }
+}
+
+/// Timebase list row: the time's column (right-aligned) and the rate's
+/// box (vertically inside the row, clear of the spinner's corners).
+pub const TB_TIME_W: i16 = 44;
+pub const fn tb_rate_rect(y: i16) -> Rect {
+    rect(TB_SPIN.x + TB_TIME_W + 6, y + 7, TB_SPIN.w - TB_TIME_W - 9, 16)
+}
+
+/// A list entry's sample rate `fs` (row top `y`; `band`: the selected
+/// row): what ACQ:SRAT? gives at that timebase.
+// Region A2 (zero-wait, link-native.x): region B is near its 16 KiB
+// warning; the list draws while the Wave view streams, so not .cold.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.srate")]
+fn tb_rate(y: i16, fs: u32, band: bool) {
+    let mut b = Buf::new();
+    fmt_srate(&mut b, fs);
+    let (bg, fg) = if band { (C_SEL, C_POP_BG) } else { (C_BAR, C_DIS) };
+    let r = tb_rate_rect(y);
+    fill_text(r, r, bg, sf::SC_F12, r, b.as_str(), fg, 1, 1);
 }
 
 /// What a touch on the timebase list hits.

@@ -350,8 +350,6 @@ pub(super) struct Sp {
     /// page (timebase, flash).
     list: Option<ListTouch>,
     tb_drawn: (u8, bool),
-    /// The sample rate the open Settings tab shows.
-    srate_drawn: u32,
     /// UF-08: the press is on the cursor tab; the selection before the
     /// cursor tab turned the cursors on. UF-09: the last plain tap.
     cur_press: bool,
@@ -415,7 +413,6 @@ impl Sp {
             entries: 0,
             list: None,
             tb_drawn: (255, false),
-            srate_drawn: 0,
             cur_press: false,
             presel: false,
             cur_saved: None,
@@ -1241,15 +1238,6 @@ impl App {
                 if self.sp.tb_drawn != (m.tb, m.tb_flash) {
                     self.sp.tb_drawn = (m.tb, m.tb_flash);
                     su::tb_badge(&m);
-                }
-            }
-            // The Settings tab's sample rate follows a timebase / source
-            // change (SCPI) while the menu is open.
-            if self.sp.popup == su::Popup::Mf(3) && !self.redraw {
-                let fs = self.scope.sample_rate();
-                if fs != self.sp.srate_drawn {
-                    self.sp.srate_drawn = fs;
-                    su::mf_srate(fs);
                 }
             }
             return;
@@ -2131,13 +2119,11 @@ impl App {
             pcond: s.pcond,
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
-            srate: self.scope.sample_rate(),
         }
     }
 
     fn sp_popup_draw(&mut self) {
         let v = self.sp_popvals();
-        self.sp.srate_drawn = v.srate;
         su::draw_popup(self.sp.popup, &v);
     }
 

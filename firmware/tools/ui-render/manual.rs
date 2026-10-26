@@ -109,9 +109,7 @@ fn trig_sine(m: &scope_ui::Model, amp: f32, periods: f32) -> stock::Trace {
 }
 
 fn popvals(m: &scope_ui::Model) -> scope_ui::PopVals {
-    // The Settings tab's sample rate as the firmware sets it (Scope::sample_rate).
-    let srate = if m.src == scope_ui::SRC_DMM { scope::wave_real_fs(scope::wave_fs_for(m.tb as usize)) } else { scope::tb_fs(m.tb as usize) };
-    scope_ui::PopVals { pressed_cell: None, fft_win: 2, roll: true, srate, ..stock::popvals(m) }
+    scope_ui::PopVals { pressed_cell: None, fft_win: 2, roll: true, ..stock::popvals(m) }
 }
 
 /// Draw a scope scene (with its popup values) and check it.

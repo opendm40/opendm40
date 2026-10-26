@@ -389,9 +389,10 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
     }
 }
 
-/// MCX sample rate (S/s) at timebase `tb` (`Scope::sample_rate`).
-pub const fn tb_fs(tb: usize) -> u32 {
-    TB[tb].0
+/// The sample rate (S/s) timebase `tb` gives: MCX, or the Wave view's
+/// stream (`wave`); `Scope::sample_rate` (ACQ:SRAT?) at that timebase.
+pub fn tb_rate(tb: usize, wave: bool) -> u32 {
+    if wave { wave_real_fs(wave_fs_for(tb)) } else { TB[tb].0 }
 }
 
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
@@ -1410,7 +1411,7 @@ impl Scope {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        if self.wave { wave_real_fs(wv().fs) } else { tb_fs(self.s.tb) }
+        if self.wave { wave_real_fs(wv().fs) } else { TB[self.s.tb].0 }
     }
 
     /// Zoom anchor of the stored record (sample index at the screen centre),

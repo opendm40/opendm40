@@ -1251,6 +1251,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   bar flashes on every change.
 - **Tap the timebase** in the top bar: a list; drag to scroll, tap to
   choose.
+  Each entry shows its sample rate (as `ACQ:SRAT?`), e.g. 200us 12.5MS/s.
 - **Pinch** horizontally with two fingers: spread = faster, pinch = slower.
   A bubble shows the new value; it applies when you lift the fingers.
 - **Roll mode**: from 200 ms/div the trace scrolls continuously (on by
@@ -1478,8 +1479,6 @@ samples) stays in memory:
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
-- **Sample rate**: the current acquisition rate, e.g. **12.5MS/s** at
-  200 us/div, **76.8kS/s** in the Wave view (the same as `ACQ:SRAT?`).
 
 
 ![The Settings tab](img/scope-settings.png)
