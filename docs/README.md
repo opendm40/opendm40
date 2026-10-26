@@ -57,6 +57,8 @@ All documentation of opendm40, by reader. Start at the
   meters and DMM chips, and what fits the HY3131.
 - [dmm-rate-filter-survey.md](../firmware/docs/dmm-rate-filter-survey.md): the
   DMM reading rate, integration time and filtering (survey).
+- [hy3131-firmware-comparison.md](../firmware/docs/hy3131-firmware-comparison.md):
+  the HY3131 configuration per measuring mode in the stock firmware and six other sources.
 - [hy3131-frontend-2026-10-26.md](../firmware/docs/hy3131-frontend-2026-10-26.md):
   the FTP-FTN pre-filter capacitor, the AC V coupling and compensation switches, measured.
 - [dac-adc-paths.md](../firmware/docs/dac-adc-paths.md): DAC to ADC paths for
