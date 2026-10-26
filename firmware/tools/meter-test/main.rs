@@ -94,6 +94,47 @@ mod meas {
 
 fn main() {}
 
+// Calibration record CRC (dmm.rs `rec_crc_ok`, `load_record`): a record
+// whose CRC fails is treated as erased, as the stock does. Expected CRC from
+// an independent implementation (CRC-16/CMS: poly 0x8005, init 0xFFFF, no
+// reflection, no final XOR; its check value for "123456789" is 0xAEE7).
+#[cfg(test)]
+mod rec_crc {
+    use crate::dmm::{rec_crc_ok, REC_CRC_END};
+
+    /// Bytes 4..0x320 = (i * 7 + 3) & 0xFF; their CRC is 0x6FE8.
+    fn record() -> Vec<u32> {
+        let mut b: Vec<u8> = (0..REC_CRC_END).map(|i| (i * 7 + 3) as u8).collect();
+        b[0..4].copy_from_slice(&(0x6FE8u32 | (!0x6FE8u32 & 0xFFFF) << 16).to_le_bytes());
+        b.chunks(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    }
+
+    #[test]
+    fn good_record_passes() {
+        let r = record();
+        assert!(rec_crc_ok(|i| r[i]));
+    }
+
+    #[test]
+    fn one_flipped_bit_fails() {
+        let mut r = record();
+        r[0x168 / 4] ^= 1 << 3;
+        assert!(!rec_crc_ok(|i| r[i]));
+    }
+
+    #[test]
+    fn wrong_complement_fails() {
+        let mut r = record();
+        r[0] ^= 1 << 16;
+        assert!(!rec_crc_ok(|i| r[i]));
+    }
+
+    #[test]
+    fn erased_flash_fails() {
+        assert!(!rec_crc_ok(|_| u32::MAX));
+    }
+}
+
 // DMM frequency mode (mode 14) end to end from synthetic HY3131 counter
 // values: counters -> kHz -> auto range -> readout text (main and the AC V/A
 // aux strip), plus the SI value SCPI / BT report. Owner report: 700 Hz and
