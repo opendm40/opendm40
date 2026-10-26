@@ -14,6 +14,16 @@ Additional requirements:
 - Debug commands live in USBTMC as `DBG:*` SCPI commands (no CDC).
 - Data-logger mode (see FR-38 in `../docs/history/dm40-feature-request.md`).
 
+- [ ] A current in the A jack is missed or misnamed in some modes (device, 2026-10-26: owner's PSU 20 mA CC
+      into A / COM, V empty; the same on main 0.2.5 and on the #25 + #26 test build).
+      - AC mV: no alert; the readout reads OL.
+      - Ohm: LIVE instead of A-JACK (31 MΩ).
+      - Hz: no alert.
+      DC V / AC V / continuity / diode / capacitance raise A-JACK in 0.9-1.8 s. On main, DC mV also raised a false
+      A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
+      The cause in AC mV / Ohm / Hz is not traced (sentinel.rs decide / V_GATE per mode).
+      Logs: scratchpad acur4.log (test build), acur-main.log.
+
 ## Owner decisions pending (2026-10-25)
 
 What waits for the owner; each line links to the material.
