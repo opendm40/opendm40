@@ -14,6 +14,10 @@ section named after the tag as the release notes; how to cut a release:
   on 60 V -> 6 V, up to 5x the input on 6 V -> 60 V. They show grey until it
   has settled (up to 2 s); the first black one was within 0.2 % after
   60 -> 6 V and 0.7 % after 6 -> 60 V.
+- Multimeter / scope: a calibration record with a bad CRC is ignored and
+  the defaults are used, as the stock does; before, its values were used
+  as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
+  `CALREC,BADCRC`.
 - Multimeter, V / A / ohm: holding AUTO to return to the autorange shows
   AUTO and dashes at once; before, the last manual reading stayed on the
   screen with MANU until the next conversion (~0.5 s on ohm).

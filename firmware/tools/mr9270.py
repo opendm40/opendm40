@@ -47,7 +47,8 @@ REG_MEAS_VALUE = 0x30   # measurement value i32, 0x30 high, 0x31 low
 SCALE = {
     # name            func mode   scale     unit
     "voltage":        (1,  0,  1000.0,  "V"),    # i32 = millivolts  (CONFIRMED)
-    "millivolt":      (1,  2,  1000.0,  "mV"),   # i32 = microvolts  (assumed, untested)
+    "millivolt":      (1,  2,   100.0,  "mV"),   # i32 = 10 uV (CONFIRMED 2026-10-26: 5000 = 50 mV on the DM40;
+                                                 # the output does not go below -10 mV)
     "current_passive":(0,  0,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "current_active": (0,  1,  1000.0,  "mA"),   # i32 = microamps   (assumed, untested)
     "resistance":     (3,  1,    10.0,  "ohm"),  # i32 = deci-ohms, max 4000 (CONFIRMED 2026-10-13 vs DM40)
