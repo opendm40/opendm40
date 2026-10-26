@@ -699,11 +699,13 @@ Code work (in this order):
       Single / DIGitize fill the whole record. Design and costs: docs/ram-budget.md "The scope record".
       Emulator: emu/wavtest.py (lengths at 1 / 100 / 200 ms/div, no seam, the trigger at the centre, Save
       CSV of the long record = WAV:DATA?, stopped zoom).
-- [ ] Device check of the long scope record (feat/scope-long-record): DIGitize at several timebases
-      (50 MS/s .. 25 S/s) against an MR9270 square / frequency: WAV:POIN? / the record length, the
-      frequency and levels in WAV:DATA? WORD, the trigger position; stopped zoom / pan through it; Save CSV;
-      a screenshot of the stopped scope; DBG:DIAG? drop / late counters 0 with the wave view and a fast-log
-      session.
+- [ ] Device check of the long scope record (a6c177d8, 0.3.0, 2026-10-26). PASS: MCX DIGitize (Auto, nothing
+      on the MCX) at 1 us / 20 us / 1 ms/div: 43 008 samples; 100 ms/div: 49 932 and 500 ms/div: 25 417 (the
+      untriggered record ends at the Auto timeout); wave view (DC V, 4800 S/s) on an MR9270 20.001 Hz square:
+      STOP after 14 s keeps 65 520 samples, 20.001 Hz, every period 239..240 samples (no seam), AD2 dropped /
+      late / overruns 0; Save CSV of it = WAV:DATA? (65 520 rows); stopped zoom; a screenshot. Open: the
+      MCX record against a known signal (the calibrator is on V-COM, not the MCX), a triggered MCX Single
+      at 100 ms/div (65 520 with the trigger at the centre: emulator only), pan by touch.
 - [ ] Not possible / not done for the long record (docs/ram-budget.md "The scope record"): 65 520 at the
       fast timebases needs a 131 KB raw ring in one piece (BUF + logger::RING + calbackup::SCRATCH + the
       csvlog buffers + gen::WAVE lent for the capture: no logging / screenshot / CSV / FFT / generator
