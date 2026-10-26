@@ -3364,9 +3364,16 @@ Emulator (emu/):
 - [ ] Owner: confirm the DM40's DC V against a third reference (a 6.5-digit DMM or a 2.5 / 5 V reference IC
       on V/COM); the MR9270's DC V output is only good to ~0.1 % and wanders, so it cannot check DC V to the
       0.05 % class. Until then, 1 V readings of 0.9987..1.0006 V are the calibrator.
-- [ ] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
+- [x] Minor: the 60 V range reads 0.2-0.36 mV below the 6 V range at 1 / 3 / 5 V (within spec; not chased).
       Not run on 40728b8 (meter needed for a flash). Use alternated blocks with pairwise differencing (chk4 xt.py):
       the calibrator wanders by the same 0.2-0.5 mV over minutes.
+      Measured (device 0.2.1, 2026-10-26, DC V SLOW, FETC? mean over 3-4 s per block, 6 / 60 / 6 ... V blocks,
+      60 V minus the mean of its neighbours): 0 V -0.24..-0.33 mV (mean -0.29), 1 V -0.15..-0.32 (-0.21, -0.27;
+      two sessions), 3 V -0.35..-0.54 (-0.42), 5 V -0.21..-0.65 (-0.38, -0.62). Same sign in every pair, and as
+      large at 0 V: a zero offset of the 60 V range against the 6 V range (0.3 of the 60 V range's 1 mV digit),
+      i.e. the factory calibration's offsets (cal slots 0x14 / 0x18), not a firmware row or table setting. The
+      only per-range firmware term, the 6 V range's `v += 1e-4 - |v| / 20000` (dmm.rs poll_dcv), would move the
+      difference by -0.05 / +0.05 / +0.15 mV at 1 / 3 / 5 V, not the way the data go. Closed: no firmware cause.
 - [x] Cosmetic: the rate chip cycles FAST -> SLOW -> MED (rate_cycle, enum order), a tap on the value FAST ->
       MED -> SLOW (resolution_cycle). Done (tmcnl-fix, app::next_rate): the chip, the value tap and Settings
       2/3 "Rate" all go FAST -> MED -> SLOW -> FAST (resolution order; the stock has no rate control, FAST is
@@ -3901,11 +3908,23 @@ Emulator (emu/):
       VOLT:AC:RANG:AUTO ON on the 50 Hz square, 4 runs: lands on 6 V, no 0 and no reading 1 % low; but the first finals
       on 6 V read high, +3.6..+4.0 % (5.00 / 4.93 / 4.89 V for 4.81 V), settling within 1 % ~0.35 s after the step
       (item below).
-- [ ] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
+- [x] AC V autorange step 60 -> 6 V overshoot (device 57e1241, 2026-10-25): on the 0 / 9.5 V 50 Hz square the first
       finals on 6 V read +3.6..+4.0 % high (5.00, 4.93, 4.89 V for 4.81 V) and settle within 1 % ~0.35 s after the
       step; the cause is unknown (the AC filter seeded from a block that spans the range switch is one candidate,
       INFERRED). Script: scratchpad acauto.py pattern (CONF:VOLT:AC 60, 3 s, VOLT:AC:RANG:AUTO ON, DBG:READout?
       every 50 ms for 4 s).
+      Cause: not the filter (ACV_WIN lets a > 10 mV change through at 0.99). The RMS results themselves are high:
+      6 V and 60 V share a tap, OP1's gain changes, its output's DC steps and the coupling into PB4 (tau 0.34 s,
+      [hy3131-frontend 2](docs/hy3131-frontend-2026-10-26.md)) carries it to AD2. `DBG:ACDC?` 0.2 s after the
+      settle (device 0.2.1): LPF 1.33, 0.99, 0.74, 0.55, 0.41, 0.31 V, and RMS = sqrt(AC^2 + LPF^2) within ~0.1 V
+      throughout. 6 -> 60 V (manual) is far worse: LPF -25 V first, finals 21-26 V for 4.84 V, ~2 s.
+      Fixed (fix/acv-autorange-overshoot, dmm.rs ACV_DC_*): after a plain AC V range step a result is provisional
+      (grey, no step down) while |LPF| > 0.05 x RMS + 0.5 % of the range, at most 2 s after the row write. Emulator
+      (HY3131.cs HpfTransientGain 1.5 -> 1.0, the device's sqrt(AC^2 + LPF^2)): firstrdtest acv-auto-dn-sq (+-0.3 %)
+      and acv-up-sq (+-0.5 %) FAIL on 0.2.1 (4.802 V, 11.3 V for 4.776 V), pass. Device (fix build, the
+      square, 4 runs each): 60 -> 6 V at 50 Hz first final +0.08..+0.20 % at 1.29-1.40 s (base +3.6..+4.5 % at
+      0.68-0.78 s), at 20 Hz -0.15..0.00 % at 1.35-1.40 s (base +4.2..+4.5 %); 6 -> 60 V first final at the
+      2 s limit, +0.30..+0.64 %. A step on a signal without DC is not delayed (emulator 1 V sine: 0.71 s, as base).
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
@@ -3924,6 +3943,20 @@ Emulator (emu/):
       **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
       6 runs each: SYST:ALER? / DBG:SENT:LOG? every 0.1 s for 6 s after the off, no A-JACK in 12 of 12. Not done: a
       current into A with V-COM open (needs a current source on A).
+- [x] **False A-JACK in continuity when the probes touch** (owner video 2026-10-26, leads in V / COM, A jack empty):
+      A-JACK for ~1.5 s while the readout went OL -> 814 -> 277 -> 28.85 -> 0.67 ohm. The jack check calls a shorted
+      input (~0 V) "free" as it does the open one (~-0.48 V), so PB1 hits during the contact asserted A-JACK; what
+      moves PB1 then is unknown (not recorded on the device). Fixed (branch fix/cont-false-ajack, 0.2.8): continuity
+      and diode gate A-JACK on their reading (V_GATE): under OL within 1.5 s = V-COM closed, no A-JACK; an OL reading
+      counts from 450 ms into the hit run ([doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)).
+      Cost (emulator): A-JACK 0.6-0.9 s after the onset (was 0.16-0.36 s), up to ~1.5 s right after a part left
+      V-COM; none with a part on V-COM and a current in A. Emulator: model `contbump`,
+      senttest cont-bounce / diode-bounce (FAIL on 6c686ce8, pass), cont-a / diode-a now open V-COM in their current
+      phase, cont-closed-a.
+      Device (the MR9270's resistance output on V-COM, its output relay on / off at 0 ohm x 8, 0 <-> 400 ohm x 12):
+      every step puts AD2 peaks of 14 000-231 000 codes on PB1 (threshold 9 900), streaks of 1-2 windows, the jack
+      check "free" (-435 / -87 / 0 mV). Main 6c686ce8: A-JACK on 3 of the 8 relay closures, shown 0.3-1.5 s after
+      each; the fix: none in 28 steps. Not run: probe taps by hand (owner session pending), a current in A.
 - [x] `MEAS:VOLT:DC?` answers at ~1.5 s, before the full average (device f59bac2 note 5): as decided on
       2026-10-14 (SCPI_SETTLE_MS for the 2 s PyVISA default; TODO "SLOW reports every conversion"). The
       dmm.rs `AVG_FULL` comment said MEAS? waits for the full window; since R22_LATE that window comes ~5.3 s
@@ -4085,6 +4118,36 @@ Emulator (emu/):
 - [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
+
+## Hz below 7 Hz (owner 2026-10-25, v0.2.0 with the MMB3.0: 2 Hz and 5 Hz gave no reading; branch fix/low-freq)
+
+- [x] Cause: the HY3131 counter is reciprocal (DS-HY3131 14: after the 0x40000-tick minimum, 53.3 ms, it counts
+      until a whole number of input cycles, then stops), but [src/dmm.rs](src/dmm.rs) read and restarted it blindly
+      every 350 ms, as the stock does. A gate takes up to two input periods + 53.3 ms (the wait for its opening
+      edge, the minimum, the closing edge): over 350 ms below about 6.7 Hz, so such gates were cut off (no result,
+      or a partial count past the overflow). Fixed: `gate_check` reads the counter from 350 ms after the restart,
+      then every 20 ms, and takes the counts once CTA stands still past the overflow (the counter stopped); it gives
+      up after 2.2 s without counts (no signal at once: `Freq::take` `quiet`), 4.4 s with counts, or 3.5 periods of the
+      shown value + 150 ms (at least 350 ms). Hz and the AC V / AC A secondary readout (`freq_secondary`; AC+DC keeps
+      the stock's blind read: its phases change the source). Hz shows the small extra digit when one SYSCLK tick
+      over the gate is at most one count of it (`freq_ext`). Tests: [tools/meter-test](tools/meter-test/main.rs)
+      `freq_gate_low_frequencies` (a simulated gate, 0.5 Hz .. 1 kHz, every phase), `freq_gate_limits`,
+      `freq_extra_digit`, `freq_take_quiet_gate`; emulator [emu/hy3131/freqtest.py](../emu/hy3131/freqtest.py)
+      `low-0.5` .. `low-50`.
+- [ ] Unknown (device data decides): that CTA stands still after the gate's end on the chip (datasheet: "then it
+      will stop counting"; the emulator models it so). If it does not, every gate times out: Hz reads 0.000 Hz at any
+      frequency (step 1 below shows it at once). Inferred, not measured: the gate opens on an input edge (the 10 Hz
+      readings of the recording are within 27 ppm; a gate from the restart would be off by up to a period); a chip
+      that misses the opening edge needs a period more: covered above ~0.9 Hz (the 2.2 s window without counts).
+- [ ] Device check (5 min, MMB3.0 frequency output on V-COM): (1) Hz function, 10 Hz: a reading within 1 s, new values
+      every ~0.35 s, the reading shows the small digit (10.000x Hz). (2) 50 Hz, 1 kHz, 10 kHz as in
+      [docs/data/freq-steps-2026-10-25.csv](docs/data/freq-steps-2026-10-25.csv): the same values as that recording
+      (50.000 Hz without the small digit, 1.0000x kHz with it). (3) 5 Hz: a reading (~5.0000x Hz) within ~2 s, a new
+      value every ~0.4 s or faster. (4) 2 Hz: a reading within ~3 s, new values about once a second; duty ~50 %.
+      (5) Output off / leads apart while 10 Hz shows: 0.000 Hz within ~1 s; Hz entered with nothing connected: 0.000 Hz
+      after ~3.3 s ("--" before). (6) AC V with 2 Hz on the output (if the MMB3.0 gives an AC
+      level at 2 Hz): the frequency above the reading reads ~2 Hz. (7) Optionally a CSV recording at 2 / 5 / 10 Hz
+      (Log, Hz) for docs/data.
 
 ## 500 ohm from the MMB3.0 reads OL on 600 ohm (owner 2026-10-25, v0.2.0, branch fix/ohm500-ol)
 

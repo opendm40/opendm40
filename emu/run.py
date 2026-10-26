@@ -362,6 +362,9 @@ def main(argv=None):
     ap.add_argument('--log', help='Renode log file (default emu/out/<name>.log)')
     ap.add_argument('--buzzer-log', metavar='FILE',
                     help='log TIM14 ARR / CCR1 changes (the buzzer pitch / duty) as "<virtual ms> <reg> <value>"')
+    ap.add_argument('--rail-log', action='store_true',
+                    help='log every change of the analog rails PE2 / PC4 (the power hold: both low = the meter '
+                         'switches off on the device) as "RAIL PE2 <0|1> PC4 <0|1> t=<virtual time>" warnings')
     ap.add_argument('--name', help='base name of the generated .resc/.log (default: the mode)')
     ap.add_argument('--pa2', type=float, default=None, metavar='T',
                     help='chain: release PA2 (power key) at T seconds; default 0.55 = ROM -> FS-loader -> app; '
@@ -494,6 +497,20 @@ def main(argv=None):
         s.add('sysbus.cpu SetHookAtBlockBegin """\n%s"""' % hook)
     if a.buzzer_log:
         s.add('sysbus.timer14 LogWrites %s' % q(os.path.abspath(a.buzzer_log)))
+    if a.rail_log:
+        # A write to OCTL (0x14) or BOP (0x18) of GPIOE (PE2) or GPIOC (PC4):
+        # the levels after it, logged when one of the two changes.
+        for port, base, n in (('gpioPortE', 0x40021000, 2), ('gpioPortC', 0x40020800, 4)):
+            code = ('e = sysbus.ReadDoubleWord(0x40021014) >> 2 & 1\n'
+                    'c = sysbus.ReadDoubleWord(0x40020814) >> 4 & 1\n'
+                    'old = %s\n'
+                    'new = (value >> %d & 1) if offset == 0x14 else (1 if value & %d else (0 if value & %d else old))\n'
+                    'if new != old:\n'
+                    '    e, c = (new, c) if %d == 2 else (e, new)\n'
+                    '    self.Log(LogLevel.Warning, "RAIL PE2 %%d PC4 %%d t=%%s" %% (e, c, '
+                    'machine.ElapsedVirtualTime.TimeElapsed))'
+                    % ('e' if n == 2 else 'c', n, 1 << n, 1 << (n + 16), n))
+            s.add('sysbus SetHookBeforePeripheralWrite sysbus.%s """\n%s\n""" <0x14 +8>' % (port, code))
     if a.live:
         s.add('sysbus.lcd LiveFile %s 30' % q(a.live))
     if a.autoshot:

@@ -43,8 +43,8 @@ pub const VALUE_HV: Color = 0xC9A0;
 pub const VALUE_PROV: Color = DIM;
 
 pub const BAR_H: u16 = 34;
-/// Left edge of the DMM status-bar items after the logo (4 + LOGO + 3).
-const BAR_X: i16 = 4 + sf::LOGO + 3;
+/// Left edge of the DMM status-bar items (the stock's range label box).
+const BAR_X: i16 = 4;
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
 /// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
@@ -683,8 +683,7 @@ impl DmmView {
     pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-        sf::logo(4, 7, BAR);
-        if self.bar_on && !self.power {
+            if self.bar_on && !self.power {
             self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
             self.bar.draw_static(BG);
             self.bar_scale = None;
@@ -1014,7 +1013,7 @@ impl DmmView {
             self.last_label = self.label;
             let s = range_text(r);
             if let (Some(l), false) = (self.label, temp) {
-                sf::label(sf::F14, rect(BAR_X, 1, 90, 32), l, STATUS_FG, BAR, 1, 1);
+                sf::label(sf::F14, rect(BAR_X, 1, 105, 32), l, STATUS_FG, BAR, 1, 1);
             } else {
                 range_status(s);
             }
@@ -1215,7 +1214,7 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 /// "HOLD"; AutoHold is a different face so the two cannot be confused:
 /// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
 /// for a stable value, inverted (dark on orange) while it shows a captured
-/// one. Slot 119..190 (after the logo-shifted range label; uptime from 205).
+/// one. Slot 119..190 (after the range label; uptime from 205).
 ///
 /// With no HOLD / AutoHold the slot carries the wrong-connection alert
 /// (sentinel.rs) instead of "RUN", in the same TEXT22 face: "A-JACK" white
@@ -1343,14 +1342,13 @@ pub fn range_text(r: &Reading) -> &'static str {
     }
 }
 
-/// The status bar's range text in the stock F21, left in the 90 px slot
-/// before the HOLD / alert slot (x 119). The stock letter-spaces it -1 in
-/// a 105 px box; ours starts after the logo, so the longest ranges close
-/// up: "600mV" -1, "6000uA" -2 (ink <= 89 px, 3 px before 119).
+/// The status bar's range text in the stock F21, left in the stock's 105 px
+/// box (x 4..109) before the HOLD / alert slot (x 119). The stock
+/// letter-spaces it -1; ours closes up only the ranges that need it.
 #[inline(never)] // .cold (link-native.x): drawn on a change only
 fn range_status(s: &str) {
-    let sp = if sf::text_width(sf::F21, s, 0) <= 89 { 0 } else if sf::text_width(sf::F21, s, -1) <= 89 { -1 } else { -2 };
-    sf::label(sf::F21, rect(BAR_X, 1, 90, 32), s, STATUS_FG, BAR, 1, sp);
+    let sp = if sf::text_width(sf::F21, s, 0) <= 104 { 0 } else if sf::text_width(sf::F21, s, -1) <= 104 { -1 } else { -2 };
+    sf::label(sf::F21, rect(BAR_X, 1, 105, 32), s, STATUS_FG, BAR, 1, sp);
 }
 
 fn range_rect(i: usize) -> sf::Rect {
@@ -1379,7 +1377,6 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     };
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), title, STATUS_FG, 0x2966, 8, 0);
     for (i, (name, _)) in range_items(b).iter().enumerate() {
         let c = if Some(i) == sel { SEL } else { 0x2966 };
@@ -1685,7 +1682,6 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
 pub fn temp_page(p: &TempPage) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Temperature Settings", STATUS_FG, 0x2966, 8, 0);
     sf::glyphs(sf::TEXT22, rect(8, T_ROW_Y, 118, T_ROW_H), "Offset", STATUS_FG, BG, 1, 0);
     for code in T_CODES {
@@ -2310,14 +2306,13 @@ fn gen_wave_box(w: gen::Wave, bg: Color) {
 pub fn gen_static(g: &gen::Gen) {
     lcd::fill_rect(0, 0, lcd::W, 36, G_BAR);
     lcd::fill_rect(0, 36, lcd::W, lcd::H - 36, G_BG);
-    sf::logo(4, 8, G_BAR);
     for k in 0..4 {
         gen_box_frame(k, G_BOX);
     }
     gen_values(g);
 }
 
-/// RUN/STOP label of the generator bar (logo + label, x < GEN_RUN_W): a tap
+/// RUN/STOP label of the generator bar (x < GEN_RUN_W): a tap
 /// toggles the output like the RUN key (ui-review #9).
 const GEN_RUN_W: u16 = BAR_X as u16 + 80;
 
@@ -2395,7 +2390,7 @@ fn libsin(x: f32) -> f32 {
 pub fn gen_values(g: &gen::Gen) {
     let s = &g.s;
     // Top bar: RUN/STOP (output state).
-    sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 8, 0);
+    sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
     gen_wave_box(s.wave, G_BOX);
     gen_preview(s.wave);
     for k in 0..4 {
@@ -2560,8 +2555,8 @@ pub fn keypad_hit(kind: u8, x: u16, y: u16) -> Option<u8> {
 }
 
 // ----------------------------------------------------------------- menu
-// Stock main menu (gui_v2_6.h section 2): logo, four tiles 190x106 with the
-// stock icons; plus a fifth row for the combined views of this firmware.
+// Stock main menu (gui_v2_6.h section 2) without its logo: four tiles
+// 190x106 with the stock icons; plus a fifth row for the combined views of this firmware.
 
 const M_BG: Color = 0x10A3;
 const M_TILE: Color = 0x2146;
@@ -2721,7 +2716,6 @@ fn page_title(title: &str) {
     } else {
         sf::glyphs(sf::TEXT22, rect(back, 0, 476 - back, PAGE_BAR_H), title, STATUS_FG, 0x2966, 1, 0);
     }
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(BAR_X + 3, 0, 110, PAGE_BAR_H), "< Back", STATUS_FG, 0x2966, 1, 0);
 }
 

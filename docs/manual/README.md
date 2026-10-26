@@ -636,8 +636,12 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Frequency and duty cycle
 
-- The frequency, with the duty cycle above it.
-- A new value every 0.35 s. **--** until the first clean result.
+- The frequency, with the duty cycle above it, from 0.5 Hz.
+- A new value every 0.35 s; below about 7 Hz, one per one or two periods
+  (about 1 s at 2 Hz).
+- **--** until the first result; **0.000 Hz** when the signal stops.
+- A small last digit where the counter resolves it: 10.0000 Hz, but
+  50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
 
 
@@ -997,7 +1001,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity, diode, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |

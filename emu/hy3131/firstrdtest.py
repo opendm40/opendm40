@@ -32,7 +32,11 @@ the switch meets the old conversion at other phases):
   acv-auto-dn  MED, 1 V AC: CONF:VOLT:AC 60, VOLT:AC:RANG:AUTO ON (-> 6 V): every
                F 1 V +-0.5 % (7ab5c0e: a 0 V F from the stepping result, then
                0.99 V from the EMA's step from 0)
+  acv-auto-dn-sq  the same on the 0 / 9.5 V 50 Hz square: every F 4.776 V +-0.3 % (0.2.1: the node's
+               DC settling to the 6 V tap in the RMS, +0.55 % here, device +3.6..+4.4 %)
   acv-auto-up  the same up: 8 V AC on CONF:VOLT:AC 6 -> 60 V
+  acv-up-sq    the square, CONF:VOLT:AC 6 -> CONF:VOLT:AC 60: every F 4.776 V +-0.5 % (device 0.2.1:
+               21-26 V first, the node's DC at the 6 V tap level)
   aca-auto-dn  0.8 A AC: CONF:CURR:AC 10, CURR:AC:RANG:AUTO ON (-> 6 A)
   acv-entry    1 V AC: CONF:VOLT:DC 6 -> CONF:VOLT:AC: every F 1 V +-0.5 %
   acmv-acv-zero  0 V: CONF:VOLT:AC 0.6 -> CONF:VOLT:AC 6: every F below 0.05 V
@@ -95,8 +99,12 @@ SCEN = [
     # result after the reset seeds the filter (the EMA's 0.99 step from 0 read 1 % low).
     ('acv-auto-dn', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:AC 60', 3.0)], 'VOLT:AC:RANG:AUTO ON',
      ('rel', 1.0, 0.005), 'VOLT:AC +6.0'),
+    ('acv-auto-dn-sq', 'open;vsrc:4.776,ac=4.776,f=50,shape=square', 'MED', [('CONF:VOLT:AC 60', 3.0)],
+     'VOLT:AC:RANG:AUTO ON', ('rel', 4.776, 0.003), 'VOLT:AC +6.0'),
     ('acv-auto-up', 'open;vsrc:0,ac=8,f=50', 'MED', [('CONF:VOLT:AC 6', 3.0)], 'VOLT:AC:RANG:AUTO ON',
      ('rel', 8.0, 0.005), 'VOLT:AC +6.0'),
+    ('acv-up-sq', 'open;vsrc:4.776,ac=4.776,f=50,shape=square', 'MED', [('CONF:VOLT:AC 6', 3.0)],
+     'CONF:VOLT:AC 60', ('rel', 4.776, 0.005), 'VOLT:AC +6.000000E+01'),
     ('aca-auto-dn', 'open;isrc:0,ac=0.8,f=50', 'MED', [('CONF:CURR:AC 10', 3.0)], 'CURR:AC:RANG:AUTO ON',
      ('rel', 0.8, 0.005), 'CURR:AC +'),
     ('acv-entry', 'open;vsrc:0,ac=1,f=50', 'MED', [('CONF:VOLT:DC 6', 3.0)], 'CONF:VOLT:AC',

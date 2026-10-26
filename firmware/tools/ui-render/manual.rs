@@ -322,8 +322,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.
         ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.73, 2, "nF"), None, None, false)) }),
-        // Frequency: 1 kHz, 50 %.
-        ("dmm-hz", Dp { rate: false, ..dp(rd(14, val(1.0000, 4, "kHz"), None, Some(val(50.0, 1, "%")), false)) }),
+        // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).
+        ("dmm-hz", Dp { rate: false, ..dp(rd(14, Val { ext: true, ..val(1.00000, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false)) }),
         // Temperature: thermocouple K.
         ("dmm-temp", Dp { rate: false, label: Some("TC K"), ..dp(rd(15, val(86.4, 1, c), Some(val(24.6, 1, c)), None, false)) }),
         // The bargraph (default DMM row), DC V.
