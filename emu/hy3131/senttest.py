@@ -81,8 +81,11 @@ SC = {
     'ohm-v5':   ('RES', 42, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
                              (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
                  [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
+    # (ohm-v5-600's last phase: on 600 ohm the open input's own source, 2.17 V, is in the band of a
+    # source on V-COM, and the reading is OL either way: a DC current in A with V-COM open reads
+    # 0x70 as a source does and shows LIVE? there, the gap of doc 4.13)
     'ohm-v5-600': ('RES 600', 42, [(0, 'open;r:470', {'NONE'}), (8, 'vsrc:5', {'LIVE'}), (16, 'vsrc:10', {'LIVE'}),
-                                   (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'AJACK'})],
+                                   (24, 'vsrc:4.776,ac=4.776,f=40,shape=square', {'LIVE'}), (32, 'open;isrc:0.002', {'LIVE'})],
                    [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 4)]}),
     # Continuity, the same inputs (device 40728b8 item 4 / d2aff22 S6: A-JACK at 5 V from the AD2
     # peak on PB1; LIVE? at 1 V): the jack check's window says driven -> LIVE?.
@@ -205,9 +208,24 @@ SC = {
     'aca-vdc':  ('CURR:AC', 18, [(0, 'open;vsrc:24', {'NONE'})]),
     'aca-vac':  ('CURR:AC', 20, [(0, 'open', {'NONE'}), (10, 'vsrc:0,ac=230,f=50', {'VJACK'})]),
     'aca-vi':   ('CURR:AC', 18, [(0, 'open;vsrc:24;isrc:0,ac=0.01,f=50', {'NONE'})]),
-    # Frequency carries no sentinel (device d8e249d: PB1 - PB3 stands at ~54 mV in its row, a
-    # false A-JACK; doc 4.7 gaps): a current in A shows nothing there.
-    'freq-gap': ('FREQ', 24, [(0, 'open;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
+    # Frequency: A-JACK on a one-sided PB1 - PB3 level above PK_DC_THR (~109 mV) only, the row's
+    # standing ~54 mV (device d8e249d, the model's `hzpb1`) under it: 1 mA in A (~101 mV with
+    # it) shows nothing there.
+    'freq-gap': ('FREQ', 24, [(0, 'open;hzpb1:54;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'isrc:0.001', {'NONE'})]),
+    # A current in A with the V jack open (device 2026-10-26, the owner's PSU 20 mA CC into A /
+    # COM: AC mV, ohm and Hz showed no A-JACK; DC V / AC V / continuity / diode / capacitance
+    # did). Ohm: PB1 above the window reads 0x70 (the model's `pb1cmp70`, default), as a source on
+    # V-COM does; RES AUTO sits on the 60 Mohm row, whose jack check reads OP1O at its own source
+    # (1.6 V in the model): A-JACK, never LIVE?. AC mV: the open input carries 0.146 x PB1 as DC
+    # and 1.5 V RMS of 50 kHz (`ailift` / `ainz`, INFERRED: the device read OL and Hz ~50 kHz),
+    # which says driven (the counter, the RMS); PB1 pinned above the node's level overrides it.
+    # Hz: PB1 - PB3 pinned. Each: the current off again, and (Hz) a signal on V-COM first.
+    'ohm-acur': ('RES', 30, [(0, 'open', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}), (20, 'isrc:none', {'NONE'})], [],
+                 {'never': [('LIVE', 1, 3)], 'queries': ['RES:RANG?']}),
+    'acmv-acur': ('VOLT:AC 0.6', 30, [(0, 'open;ailift:0.146;ainz:1500', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}),
+                                      (20, 'isrc:none', {'NONE'})]),
+    'freq-acur': ('FREQ', 30, [(0, 'open;hzpb1:54;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'vsrc:none;isrc:0.02', {'AJACK'}),
+                               (20, 'isrc:none', {'NONE'})]),
     # (continuity / diode: A-JACK only while V-COM reads OL, as with the leads in A / COM; with a
     # part still on V-COM -closed- a current in A is no A-JACK there: cont-closed-a)
     'cont-a':   ('CONT', 24, [(0, 'open;r:10', {'NONE'}), (10, 'open;isrc:0.002', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),

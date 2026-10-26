@@ -2161,8 +2161,10 @@ impl Dmm {
         self.sent.bridge = self.acdc;
         // A-JACK evidence a driven V-COM can fake (sentinel `soft`): the
         // ohm-network rows (ohm, continuity, diode, capacitance, the
-        // resistive temperature sensors' ohm rows).
-        self.sent.soft = matches!(self.mode, 10..=13) || (self.mode == 15 && self.t_sensor != 0);
+        // resistive temperature sensors' ohm rows); frequency (its PB1
+        // follows the input path, PK_DC_THR is one unit's margin).
+        self.sent.soft = matches!(self.mode, 10..=14) || (self.mode == 15 && self.t_sensor != 0);
+        self.sent.pk_dc = self.mode == 14;
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
         // and the V tap, DC V 6 V alternates the comparator between PB1 and
         // SENSE, one 100 ms window each (`poll`, `poll_ac`).
@@ -3778,6 +3780,9 @@ impl Dmm {
     #[inline(never)]
     fn v_side_ohm(&mut self, now: u64, ol: bool) {
         let drv = if self.mode == 10 {
+            // (the jack check's BOTH: a reading within the range = the input
+            // at the row's own source, sentinel `own`)
+            self.sent.vin_t = if ol { 0 } else { now.max(1) };
             self.live
         } else {
             if !ol {
@@ -4338,9 +4343,6 @@ impl Dmm {
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24
             | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
-        if sq > 262_144.0 {
-            return None;
-        }
         let lpf = (((b[6] as u32) << 13 | (b[7] as u32) << 21 | (b[8] as u32) << 29) as i32 >> 13) as f32;
         let r = self.range as usize;
         let (f, ov) = (self.factor(), self.over());
@@ -4355,8 +4357,13 @@ impl Dmm {
         let ci = ci as u32;
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
+        let over = sq > 262_144.0;
         if m == 2 && self.sent.vgate {
-            self.mv_vside(now, dcp.abs(), core::f32::consts::SQRT_2 * sq * s);
+            // (over the converter range: NaN, no verdict but the PB1 one)
+            self.mv_vside(now, dcp.abs(), if over { f32::NAN } else { core::f32::consts::SQRT_2 * sq * s });
+        }
+        if over {
+            return None;
         }
         if self.diag_on {
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
@@ -4954,8 +4961,10 @@ impl Dmm {
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
         hy::write(0x29, &[self.r29]);
         if self.jack_mode() {
-            // the jack check's row (ohm / resistive temperature): no A-PROT
-            self.sent.jack_result(now, true, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            // the jack check's row (ohm / resistive temperature): no A-PROT;
+            // the 6 / 60 Mohm rows' line (sentinel JACK_OWN_V)
+            let line = if self.mode == 10 && self.range >= 5 { sentinel::JACK_OWN_V } else { f32::NEG_INFINITY };
+            self.sent.jack_result(now, true, hy::s24(&b[0..3]), hy::s24(&b[3..6]), line);
             return;
         }
         let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
@@ -5027,8 +5036,25 @@ impl Dmm {
     /// - AC+DC mV: its DC phase's last result over the range (`mv_dc_drv`;
     ///   device 185c066: after a source went off the open input read OL and
     ///   the AC phase's results "free" while PB1 hit, a false A-JACK).
-    #[inline(never)]
+    ///
+    /// A one-sided level on PB1 above sentinel::PK_DC_THR and above the
+    /// node's |LPF| (the AD1 hold of this result) = the level sits on PB1,
+    /// not on the V input: a current in A, "free" whatever the above say
+    /// (device 2026-10-26, 20 mA in A, V open: the readout OL, ~50 kHz on
+    /// the open input, no A-JACK; DC mV read +139 mV there). The V-COM
+    /// cases measured put a few % of the node's level on PB1 (66 kHz:
+    /// ~28 mV against an LPF of 0.51 V). `ac` NaN: a result over the
+    /// converter range, which gives only that verdict.
+    #[inline(never)] // .cold (link-native.x): per AC mV result
     fn mv_vside(&mut self, now: u64, dc: f32, ac: f32) {
+        let pb1 = sentinel::pk_level(self.sent.pk.0, self.sent.pk.1);
+        if pb1 > sentinel::PK_DC_THR && pb1 as f32 > dc * sentinel::PK_CODES_PER_MV {
+            self.sent.v_side(now, false);
+            return;
+        }
+        if ac.is_nan() {
+            return;
+        }
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
         let drv = dc + ac > sentinel::MV_DRV_K * lim
             || dc > sentinel::MV_DC_DRV_MV
@@ -5078,7 +5104,7 @@ impl Dmm {
                 hy::read(0x0E, &mut b);
                 hy::write(0x25, &[self.r25]);
                 hy::write(0x27, &[sentinel::R27_OP2O_PB3]);
-                self.sent.jack_result(now, false, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+                self.sent.jack_result(now, false, hy::s24(&b[0..3]), hy::s24(&b[3..6]), f32::NEG_INFINITY);
                 self.pk_t = now;
                 self.jwin = 3;
             }

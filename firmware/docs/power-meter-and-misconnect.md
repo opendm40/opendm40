@@ -793,14 +793,16 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | AC A / mA / uA (4..6) | V-JACK?: AD1 peak hold on SENSE - AGND via the /1000 tap (`PeakV`) | R22 00, R23 \|= ENAD1, R24 0x03, R25 \|= 0x30, R29 PKH AD1, R2C \|= 0x10, R33 OP1CHOP 00 | the swing rule of 4.11 / 4.12: 2 V rms AC on V |
 | AC+DC V / A | the DC and AC phases' own sentinels; the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites R20 every 350 ms (AC+DC shows no frequency) | as the plain functions | as the plain functions; V-JACK?'s "no current" = < 5 % of the range |
 | ohm, continuity, diode | LIVE?: no hardware (4.6) | none | - |
-| frequency (14) | none (below) | stock row | - |
+| frequency (14) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`, `Sentinel::pk_dc`): a hit is a hold on one side of zero beyond the threshold (4.13) | R22 0x00, R24 0x95, R25 AD1IG 3.6, R29 PKH AD1 (AD1 already on, OP1's chopper already off) | `PK_DC_THR` 82 200 codes (~109 mV, 2x the row's standing level) |
 | capacitance r5..7 (ramp) | none (below) | stock row | - |
 | power meter | none (R20 / R21 are the counter's, 3.12) | - | - |
 
 Gaps (no fake coverage):
 
-* **Frequency**: PB1 - PB3 follows the input path there (device d8e249d,
-  [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): no fixed threshold tells a current from it.
+* **Frequency, small currents**: PB1 - PB3 stands at ~54 mV there with the
+  A jack open (device d8e249d, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)),
+  so only a DC current above ~1.2 mA (positive; ~3.4 mA negative) reaches the
+  threshold; an AC current never does (4.13).
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
 * **DC V 60 V+** (above) and so AC+DC V above 6 V in both phases (an
@@ -1154,7 +1156,9 @@ wired, the calibrator on V-COM only).
 
 **CTSTA on the device**: four values only, and CMPHO never without CMPLO
 ([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). The firmware rules do not depend on how the bits are read (any
-bit set is a hit); the emulator keeps the older reading. DC A's V-JACK? has
+bit set is a hit), except the jack check's both-bit rule (4.13). The emulator
+reads PB1 above the window as 0x70 (`pb1cmp70`, 2026-10-26); SENSE and the
+V tap keep the older reading. DC A's V-JACK? has
 a 3 mV margin at 24 V on V/ohm (24 mV at the /1000 tap against 20.8 mV).
 
 **AC A V-JACK?: the swing.** AD1 on SENSE - PB5 drifted to the negative rail
@@ -1277,22 +1281,35 @@ raised A-JACK there. Only the square on 600 Ω read 2.38 V (driven); the same
 On 600 Ω no fixed OP1O line separates these values from the row's own 2.17 V.
 
 **The comparator's both-bit reads (`v_both`, since the 1a11eda check).** In
-those RES runs the comparator on PB1 read CTSTA 0x70, CMPHO and CMPLO in one
-read: an overdriven comparator, as on DC V's V tap at 5 V and in DC A at 24 V
-([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)). *Inferred* (the A jack has not been wired): a
-current in A puts I x 47.5 Ω on PB1 (0.5 mA to tens of mA = 24 mV to ~1 V),
-on one side of the window, so it gives one bit per read; an AC current sets
-CMPHO and CMPLO in different reads. So in the jack-check
-comparator rows (ohm, the resistive temperature sensors) a both-bit read
-within the last `AJACK_CLEAR_MS` (1 s) counts as "driven", as an OP1O peak
-above the line does: no A-JACK, LIVE?. It is not held for the whole hit
-run: a source taken off with a current in A at once keeps the run going, and
-A-JACK then comes ~1 s later. `DBG:SENT?` field 14 then reads
-**2**. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
-*Inferred*: a current in A large enough to push PB1 out of the comparator's
-input range (tens of mA, PB1 above ~2.4 V) may also read 0x70. It would then
-show LIVE? instead of the A-JACK badge. This is not checked: the A jack has
-not been wired.
+those RES runs the comparator on PB1 read CTSTA 0x70 (CMPHO and CMPLO in one
+read) with 5 / 10 V DC on V-COM, and 0x70 and 0 in turn with the square. The
+device never reads CMPHO alone ([hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)):
+0x70 is what any level above the window reads, and a current in A puts one
+on PB1 (I x 47.5 Ω). Device 2026-10-26 (the owner's PSU, 20 mA CC into A /
+COM, V jack empty): RES AUTO showed LIVE? and read 31 MΩ, where the first
+form of this rule ("0x70 = driven") gives LIVE?. Now, in the jack-check
+comparator rows (ohm, the resistive temperature sensors), within the last
+`AJACK_CLEAR_MS` (1 s):
+
+* two windows in a row of 0x70 and 0 reads with no one-bit read (the
+  square; one such window is the onset of any level) = driven;
+* 0x70 reads = driven only while the input does not show the row's own
+  source (`Sentinel::own`). A source on V-COM reads OL on every range and
+  holds OP1O at 2.02-2.45 V (1a11eda). The input shows its own source when
+  an ohm reading within the range came at least 450 ms after the hit run
+  began (`OHM_VIN_LAG_MS`), or, on the 6 MΩ / 60 MΩ rows (open 1.62 /
+  1.38 V), when the jack check's OP1O peak stays below 1.8 V (`JACK_OWN_V`,
+  *inferred* between those values and 2.02 V).
+
+Driven means no A-JACK, LIVE? (once the run's jack check is in and the last
+reading is OL); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
+leads in A / COM sits on the 60 MΩ row. Gaps: a DC current in A with an OL
+reading on the rows below 6 MΩ (manual 600 Ω .. 600 kΩ) and in the resistive
+temperature rows still shows LIVE?; an AC current (0x70 and 0 in turn)
+everywhere. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
+Emulator: the model reads PB1 above the window as 0x70 (`pb1cmp70`, default);
+senttest `ohm-acur` (RES AUTO, V open, 20 mA in A) FAILs before (LIVE?) and
+passes with the rule; `ohm-v5-600`'s last phase (manual 600 Ω) shows the gap.
 
 Device c6a3ac3 ([device check, "c6a3ac3: the RES jack fix"](../../docs/history/device-check-2026-10-21.md#c6a3ac3-the-res-jack-fix-428df52-both-bit-reads-live-after-the-source-2026-10-25)),
 A jack empty: in RES AUTO and 600 Ω, 5 V and 10 V read CTSTA 112 on all but
@@ -1344,8 +1361,34 @@ LPF block lags the peak hold). A result over the converter range gives no
 verdict. No LIVE? here: the reading is over range. Cost: a real current in
 A asserts ~0.25 s later in AC mV.
 
+**AC mV: the level on PB1 (2026-10-26).** With 20 mA CC from the owner's
+PSU in A and the V jack empty, AC mV 600 mV read OL and showed no alert
+(AC V 6 V read 1.5 V, Hz ~50 kHz, DC mV +139 mV: the open input carries
+the supply's noise and part of the A jack's level; the mechanism is
+*unknown*), so the gate said driven. Now a result whose AD1 hold on PB1 -
+PB3 stays on one side of zero beyond `PK_DC_THR` (82 200 codes, ~109 mV,
+~2.3 mA) and above the node's |LPF| is "free" whatever the other tests say,
+also a result over the converter range (`Dmm::mv_vside`): the level sits on
+PB1, not on the input. The V-COM cases measured put a few % of the node's
+level on PB1 (the 66 kHz square: a steady ~28 mV against an LPF of
+0.51 V). That no V-COM source puts more on PB1 than on the input is
+*inferred*. Emulator: the model's `ailift` / `ainz` (the open input at
+0.146 x PB1 plus 1.5 V RMS of 50 kHz while a current flows, *inferred*);
+senttest `acmv-acur` FAILs before (no alert), passes now.
+
+**Frequency (2026-10-26).** The same device run showed no alert in Hz: the
+row had no sentinel since d8e249d (PB1 - PB3 stands at ~+41 100 codes,
+~54 mV, there; 3 100 at 5 V, -850 at 10 V on V-COM). It carries the AD1
+peak on PB1 - PB3 again (4.2), and a hit is a hold on one side of zero
+beyond `PK_DC_THR`, twice the standing level: a DC current from ~1.2 mA
+(positive; ~3.4 mA negative) asserts, an AC one does not. Badge only, no
+danger alarm (`soft`: sources above 10 V on V-COM were not measured there).
+Emulator: `hzpb1` (the standing level); senttest `freq-acur` FAILs before,
+passes now; `freq-gap` (1 mA) stays quiet.
+
 **Gaps.** A current in A together with a voltage on V-COM shows LIVE? (ohm,
-continuity) or nothing (AC mV, AC+DC mV). The diode row is unchanged
+continuity) or nothing (AC mV unless PB1 carries the larger level, AC+DC
+mV). The diode row is unchanged
 (badge only).
 
 **AC+DC V on 600 / 60 mV.** Its AC phase is the AC mV row with the same AD1
@@ -1453,7 +1496,8 @@ the input, not a rectified level. Now:
   the AC reading then misses the AC part.
 
 Gaps: a signal on V-COM that the mV rows show as driven together with a
-current in A shows nothing there; an open mV input that reads OL / a DC
+current in A shows nothing there (AC mV: unless PB1 carries the larger
+level, "AC mV: the level on PB1" above); an open mV input that reads OL / a DC
 over 300 mV (a charge left after a source, 185c066) hides A-JACK and, in
 DC mV, A-PROT until it reads within the range. Emulator: the model's `hfbw`
 / `hfdc` / `hfpb1` / `hfpb2` / `hfnocnt` / `hfboth` (*inferred*, chosen to
@@ -1487,10 +1531,11 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    the switch's hits (0 / 2150 mV in 600 Ω), no alert (device-check note 3).
 3. AC V AUTO (mV-first) and manual 60 / 600 mV with the square: no A-JACK in
    the log.
-4. With a current in A (not wired yet), V-COM open: RES, continuity, AC mV:
-   A-JACK within ~1 s; field 14 = 0, field 15 near 2.17 V (RES 600 Ω) /
-   -0.48 V (continuity); in RES field 4 (CTSTA) 32 / 96 (one bit), never
-   112.
+4. With a current in A, V-COM open (device 2026-10-26, 20 mA: RES LIVE?,
+   AC mV and Hz nothing, before the fix): RES AUTO, continuity, AC mV, Hz:
+   A-JACK within ~1-2 s; in RES field 4 (CTSTA) 112, field 14 = 0, field 15
+   below 1.8 V (the 60 MΩ row) / near -0.48 V (continuity). Script: the
+   device script of the fix (ajcur_dev.py), at 20 mA and ~2 mA.
 5. RES (AUTO and 600 Ω) with 5 V, 10 V and the square: field 4 reads 112
    (0x70) while field 8 grows, field 14 = 2, LIVE?, no A-JACK. Then switch the
    source off: `DBG:SENT:LOG?` grows by at most one entry. Device c6a3ac3:

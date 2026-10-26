@@ -498,6 +498,22 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// 3 and 5 V is INFERRED (4 V). Instantaneous (the square reads it in its high half).
         /// Default 4; "ohmboth:0" = off (PB1 alone, Pb1VjackMv).
         public double OhmBothV = 4.0;
+        /// PB1 above the comparator's window reads CMPHO and CMPLO together (CTSTA 0x70), as the
+        /// device reads every level above it: CTSTA took only 0x00 / 0x10 / 0x50 / 0x70 over ~233 000
+        /// reads, never CMPHO alone (device 40728b8); DC V's V tap read 0x70 at +5 V; RES with 20 mA
+        /// in A (V open) showed LIVE? (2026-10-26), what the jack check's both-bit rule gives for
+        /// 0x70. That a current in A reads 0x70 is INFERRED from those. Default on; "pb1cmp70:0" =
+        /// CMPHO alone (the model before).
+        public bool Pb1Cmp70 = true;
+        /// The frequency row's standing level on PB1 - PB3 (opt-in, "hzpb1:mV"; device d8e249d:
+        /// ~+41 100 AD1 peak codes, ~54 mV, with the A jack open and 0..2 V or nothing on V-COM).
+        public double HzPb1Mv;
+        /// A current in A with the V jack open (opt-in; device 2026-10-26, the owner's PSU 20 mA CC
+        /// into A / COM: AC V 6 V read 1.5 V, AC mV OL, Hz ~50 kHz, DC mV +139 mV). In the AC mV
+        /// role the open input carries "ailift:k" x the A jack's PB1 drop (DC mV: 139 mV / 0.95 V
+        /// = 0.146) and "ainz:mV" RMS at "ainzhz:Hz" (the supply's noise on the open input) while
+        /// the current flows. Both INFERRED (mechanism and shape unknown).
+        public double AiLiftK, AiNzMv, AiNzHz = 50000;
         /// PB1 picking up the mV clamp's current in the AC mV rows (opt-in, "mvpb1:mV per V" of the jack
         /// beyond the clamp; device 2f56ff9: the same square asserted AJACK,AD1PK_PB1 with the A jack
         /// empty; the ratio is INFERRED: 10 mV / V puts 83 mV peaks on PB1, over the 23.75 mV threshold).
@@ -880,6 +896,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hfnocnt": HfNoCnt = o.Value != 0; break;
                 case "hfboth": HfBoth = o.Value; break;
                 case "contbump": ContBumpMv = o.Value; break;
+                case "pb1cmp70": Pb1Cmp70 = o.Value != 0; break;
+                case "hzpb1": HzPb1Mv = o.Value; break;
+                case "ailift": AiLiftK = o.Value; break;
+                case "ainz": AiNzMv = o.Value; break;
+                case "ainzhz": AiNzHz = o.Value; break;
                 case "contbumptau": ContBumpTau = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmop1k": OhmOp1K = o.Value; break;
@@ -1564,6 +1585,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 var r = roleRange;
                 Fe.VJack(1, out jdc, out jac, out hz, out shape, out duty);
+                if((AiLiftK != 0 || AiNzMv != 0) && Fe.VOpen && Fe.RelayPa == 1)
+                {
+                    // a current in A with the V jack open (AiLiftK / AiNzMv)
+                    double idc, iac, ihz, iduty; string ish;
+                    Fe.ACurrent(out idc, out iac, out ihz, out ish, out iduty);
+                    if(idc != 0 || iac != 0)
+                    {
+                        jdc = AiLiftK * idc * Fe.ShuntR;
+                        jac = AiNzMv * 1e-3; hz = AiNzHz; shape = "sine";
+                    }
+                }
                 sigHz = hz; sigShape = shape; sigDuty = duty;
                 if(!double.IsNaN(Fe.MvHoldFor(true))) { jdc = Fe.MvHoldFor(true); jac = 0; }
                 if(MvClampV > 0) MvClamp(jdc, jac, hz, shape, duty, out jdc, out jac);
@@ -2114,6 +2146,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 cmpHigh = node > CmpHighThreshold;
                 cmpLow = node < CmpLowThreshold;
+                if(Pb1Cmp70 && scmpiPb1 && cmpHigh) cmpLow = true;
                 if(role == Role.Ohm && OhmBothV > 0 && scmpiPb1)
                 {
                     // a source on V-COM overdrives the comparator (OhmBothV, device 1a11eda)
@@ -2265,6 +2298,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 v += MvPb1Mv * 1e-3 * (j - Math.Max(-MvClampV, Math.Min(MvClampV, j)));
             }
             if(HfPb1Mv != 0 && (role == Role.AcMv || role == Role.DcMv)) v += HfPickup(t, HfPb1Mv);
+            if(HzPb1Mv != 0 && role == Role.Freq) v += HzPb1Mv * 1e-3;
             // the floating mV input's PB1 pickup after a source went off (Fe.MvHoldPb1Mv)
             if(Fe.MvHeld && Fe.MvHoldPb1Mv != 0 && (role == Role.AcMv || role == Role.DcMv)) v += Fe.MvHoldPb1Mv * 1e-3;
             return v;
