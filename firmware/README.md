@@ -185,6 +185,8 @@ stable; after that an incompatible change bumps MAJOR. Pre-release suffixes
    lock).
 2. In [`../CHANGELOG.md`](../CHANGELOG.md), rename `## Unreleased` to
    `## v<version> (<date>)` and start a new empty `## Unreleased` above it.
+   Keep each entry to a line or two; before / after pictures go in
+   `docs/changelog/v<version>/` ([`tools/ui-render/changelog-img.py`](tools/ui-render/changelog-img.py)).
 3. Commit both files, push the branch, wait for CI.
 4. Tag and push the tag: `git tag -a v0.1.0-pre2 -m "opendm40 v0.1.0-pre2"`,
    `git push origin v0.1.0-pre2`.
