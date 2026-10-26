@@ -63,9 +63,17 @@ const STREAM_SPIN_US: u64 = 1000;
 /// (fs <= PK_FS) and the wave view keep a packed ring of PCAP samples in
 /// its first 81 900 bytes, filled each poll from a DMA staging ring of STG
 /// raw samples at its top (`pk_drain`). Every stored record is packed.
+#[cfg(not(feature = "recovery-usb"))]
 pub const CAP: usize = 42 * 1024;
+/// The `recovery-usb` variant (no LCD, no scope use) needs its own MSC
+/// buffers: a smaller ring keeps its SRAM above the 8 KiB link floor.
+#[cfg(feature = "recovery-usb")]
+pub const CAP: usize = 36 * 1024;
 /// Packed ring (samples): the stock's 65 520-sample record.
+#[cfg(not(feature = "recovery-usb"))]
 pub const PCAP: usize = 65_520;
+#[cfg(feature = "recovery-usb")]
+pub const PCAP: usize = 55_000;
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;
