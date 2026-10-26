@@ -163,7 +163,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/settings1", &page, false);
     save1(out, "settings1");
     host::reset(0);
-    ui::settings(1, &["MED  9.4/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
+    ui::settings(1, &["MED  5.0/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
     ck.check_opts("manual/settings2", &page, false);
     save1(out, "settings2");
     host::reset(0);
@@ -674,7 +674,7 @@ pub fn run(out: &str) -> usize {
         // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked
         // for (re-plug pending).
         host::reset(0);
-        ui::settings(1, &["MED  9.4/s", "LOW", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
+        ui::settings(1, &["MED  5.0/s", "LOW", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);

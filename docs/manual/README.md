@@ -290,6 +290,7 @@ scope.
 | °F | Multiplies by 1.82 instead of 1.8: at 100.3 °C it shows 214.5 °F | °F computed correctly (212.5 °F), on the screen and over Bluetooth |
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
+| 60 Ω range | Never chosen | On the range page; AUTO steps into it (0.90 mA only) |
 | Burden voltage | — | Optional |
 | Accuracy of the reading | — | [Shown](#accuracy) under the unit |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
@@ -559,7 +560,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 60 Ω (milliohm digits, always 0.90 mA; AUTO enters it below ~58 Ω, not with 0.28 mA ON), 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
+- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
+  milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
@@ -777,8 +779,8 @@ last offset it measured on another range, so a reading in those first 2 s
 can be a little off. A FAST reading is a little noisier than a MED one
 (more low-frequency noise); for the extra digit use MED or SLOW.
 
-In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
-12.8 s). After a step of the input or a range change the average restarts,
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
+12.8 s; no extra digit on 60 Ω). After a step of the input or a range change the average restarts,
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
@@ -898,9 +900,10 @@ shows: **Bargraph** (default) or **History**.
 ![The accuracy of the reading under the unit; the digits below it in grey](img/dmm-acc-anno.png)
 
 Under the unit: the specified accuracy of this reading for the meter's
-model ([details](../../firmware/docs/dmm-accuracy.md)); the digits below it
-are grey. Not shown in AC+DC, the 60 mV ranges, PT / NTC, the power meter
-or under REL. **Settings > More > More > Accuracy** turns it off.
+model ([details](../../firmware/docs/dmm-accuracy.md)). Digits finer than
+it are grey. Not shown with the History row, in AC+DC, the 60 mV and 60 Ω
+ranges, PT / NTC, the power meter or under REL. **Settings > More > More >
+Accuracy** turns it off.
 
 ### The trend chart
 
@@ -1244,9 +1247,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 - **Tap a corner** of the graph: bottom left = slower, bottom right =
   faster. Keep the finger on the corner to repeat. The timebase in the top
   bar flashes on every change.
-- **Tap the timebase** in the top bar: a list; drag to scroll, tap to
-  choose.
-  Each entry shows its sample rate (as `ACQ:SRAT?`), e.g. 200us 12.5MS/s.
+- **Tap the timebase** in the top bar: a list with each entry's sample
+  rate (e.g. **200us 12.5MS/s**); drag to scroll, tap to choose.
 - **Pinch** horizontally with two fingers: spread = faster, pinch = slower.
   A bubble shows the new value; it applies when you lift the fingers.
 - **Roll mode**: from 200 ms/div the trace scrolls continuously (on by
@@ -2277,7 +2279,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
-| **Negative ohm** | OFF (stock), ON | OFF | ON: resistance can read below 0 (shorted leads, e.g. -0.028 Ω); OFF: shows 0. |
+| **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
 
 ### The Device page
 
@@ -2809,8 +2811,8 @@ Untested on a real meter:
   **USB Connect** disk; entering the update loader with the power key; the
   automatic entry after repeated hangs.
 - Multimeter: with a current through the A jack, the overload handling,
-  AUTO coupling and the burden voltage; the diode beeps; frequencies below
-  about 7 Hz; PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
+  AUTO coupling and the burden voltage; the diode beeps; PT1000 and the
+  100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
   resistance calibrator only).
 - Alerts: [A-PROT and OVLD](#the-alerts) with a current through the A jack.
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
