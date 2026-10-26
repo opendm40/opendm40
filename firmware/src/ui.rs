@@ -43,7 +43,7 @@ pub const VALUE_HV: Color = 0xC9A0;
 pub const VALUE_PROV: Color = DIM;
 /// The main readout's digits below the reading's uncertainty (the accuracy
 /// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
-pub const VALUE_LOW: Color = 0xA342; // (165, 104, 16): VALUE dimmed
+pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-10-26)
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
