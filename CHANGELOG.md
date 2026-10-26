@@ -9,6 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Scope / generator: after a start with Analog power set to Both always, or
+  with a start page other than Multimeter, the scope's analog supply stayed
+  off (the trace was flat at the bottom). Switching to Auto, or opening the
+  scope, could then turn both analog supplies off, and the meter switched
+  itself off.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
