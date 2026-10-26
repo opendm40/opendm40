@@ -190,8 +190,12 @@ at the ring size), so a full circular ring is never rotated. `Codes`
 also implements `pack10::Src`, the read trait those functions take (the
 host tests pass u16 slices).
 
-Single / DIGitize wait for a whole record (at most 10 s, `rec_split`),
-the trigger point at the trigger position of the record; Normal / Auto
+Single / DIGitize, and a STOP while running (`apply`: the run goes on
+until that capture is in; untriggered once the ring is full when nothing
+triggers), wait for a whole record (at most 10 s, `rec_split`), the
+trigger point at the trigger position of the record. A STOP cannot keep
+the frame shown before: the capture after it has already started
+overwriting it in BUF, the only record buffer. Normal / Auto
 frames wait for a screen around the trigger, as before, so their records
 hold whatever the ring had collected before the trigger. Linear records
 (the pulse / runt triggers, the software edge search above 1.25 MS/s)

@@ -57,6 +57,7 @@ ap.add_argument('--hz', type=float, default=1000.0, help='input sine frequency')
 ap.add_argument('--vpp', type=float, default=1.0, help='input sine Vpp')
 ap.add_argument('--mips', default='200')
 ap.add_argument('--hwtrig', action='store_true', help='keep the comparator trigger on (default: off, see below)')
+ap.add_argument('--only-stop', action='store_true', help='run only the STOP checks (stop_checks)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
 sys.path.insert(0, HERE)
@@ -252,7 +253,9 @@ def long_checks(t):
     check(abs(f - A.hz) < A.hz * 0.02 and abs(vpp - A.vpp) < A.vpp * 0.2, '100 ms/div record: %.2f Hz, %.3f Vpp' % (f, vpp))
     i0 = round(-p['xorig'] / p['xinc'])
     ok = 2 <= i0 < n - 2
-    check(ok and -0.03 * n < i0 - n / 2 < sr / A.hz + 0.03 * n and abs(v[i0]) < 0.1 * A.vpp and v[i0 + 1] > v[i0 - 1],
+    # On the level within one sample's step (25 samples per period).
+    step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
+    check(ok and -0.03 * n < i0 - n / 2 < sr / A.hz + 0.03 * n and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
           '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
     # A smooth sine end to end: no seam from the ring / staging (25 samples
     # per period: neighbours differ by at most ~0.13 Vpp).
@@ -290,18 +293,20 @@ def long_checks(t):
 
 
 def stop_checks(t):
-    """STOP of a running raw ring (fs > 25 kS/s), at 5 and 2 ms/div: Auto,
-    STOP at three moments each (after frames were shown, so BUF holds a
-    packed record), and Normal with the level above the sine (no trigger:
-    the ring wraps for good). The stopped record (WAV:DATA? MAX) is the
-    input sine everywhere: every code inside its range, no step larger than
-    the sine's, and a wrapped ring is the full 43 008. Before the fix
-    (scope.rs `halt`: the stop's own TCIF4 read as a wrap) the slots past
-    the write position joined the record and were packed twice: garbage
-    and seams at its start (device 2026-10-26, emulator GD32_DMA.cs)."""
+    """STOP of a running acquisition: at 5 and 2 ms/div (the raw ring) and
+    100 ms/div (the packed ring), Auto with STOP at several moments (after
+    frames were shown, so BUF holds a packed record and the next capture is
+    in flight), and Normal with the level above the sine (no trigger). STOP
+    ends on a complete capture (TRIG:STAT? STOP once it is in): the whole
+    record (the DIGitize length: 43 008 less the margins, 65 520 at
+    100 ms/div), the input sine everywhere (every code inside its range, no
+    step larger than the sine's: no seam), in Auto the trigger point inside
+    the record on the level. Before: the samples of the capture in flight
+    up to the STOP (device 2026-10-27: 1 753 at 5 ms/div) or, with the
+    stop's own TCIF4 read as a wrap, the full ring with a seam."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
-    for tb, waits in ((5e-3, (0.6, 0.9, 1.3)), (2e-3, (0.5, 0.8))):
+    for tb, nmin, waits in ((5e-3, 42144, (0.6, 0.9, 1.3)), (2e-3, 42144, (0.5, 0.8)), (0.1, 64656, (2.5, 4.0))):
         for mode, lev, wait in [('AUTO', 0, w) for w in waits] + [('NORM', 2 * A.vpp, 1.0)]:
             for c in ('TIM:SCAL %g' % tb, 'TRIG:SWE %s' % mode, 'TRIG:LEV %g' % lev, 'RUN'):
                 t.w(c)
@@ -309,17 +314,23 @@ def stop_checks(t):
             while t.vtime() - v0 < wait:
                 time.sleep(0.05)
             t.w('STOP')
+            stopped = t.wait_stop(s=15, wall=600)
             p = pre(t)
             v, codes = volts(p, block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60)))
             n = len(v)
             out = sum(1 for x in v if abs(x) > 0.6 * A.vpp)
             step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
             jump = max(abs(v[i + 1] - v[i]) for i in range(n - 1)) if n > 1 else 0.0
-            ok = n > 1 and out == 0 and jump < step + 0.05 * A.vpp
-            if mode == 'NORM':
-                ok = ok and n == 43008
-            check(ok, '%g ms/div, %s, STOP after %.1f s: %d samples, %d outside the sine, largest step %.3f V (sine %.3f)'
-                  % (tb * 1e3, mode, wait, n, out, jump, step))
+            i0 = round(-p['xorig'] / p['xinc']) if p['xinc'] else -1
+            ok = stopped and n >= nmin and out == 0 and jump < step + 0.05 * A.vpp
+            trig = ''
+            if mode == 'AUTO':
+                # On the level within one sample's step (25 samples per
+                # period at 100 ms/div), rising.
+                ok = ok and 2 <= i0 < n - 2 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1]
+                trig = ', trigger sample %d (%.3f V)' % (i0, v[i0] if 0 <= i0 < n else float('nan'))
+            check(ok, '%g ms/div, %s, STOP after %.1f s: %s, %d samples (>= %d)%s, %d outside the sine, largest step %.3f V (sine %.3f)'
+                  % (tb * 1e3, mode, wait, 'STOP' if stopped else 'no STOP', n, nmin, trig, out, jump, step))
     for c in ('TRIG:SWE AUTO', 'TRIG:LEV 0', 'TIM:SCAL 1e-3', 'WAV:FORM BYTE'):
         t.w(c)
 
@@ -419,6 +430,10 @@ def bt_checks(t):
         s.close()
 
 
+class OnlyStop(Exception):
+    pass
+
+
 try:
     t = connect()
     print('*IDN?', t.q('*IDN?'), flush=True)
@@ -430,6 +445,9 @@ try:
         t.w(c)
     e = t.err()
     check(e.startswith('0,'), 'set-up accepted (%s)' % e)
+    if A.only_stop:
+        stop_checks(t)
+        raise OnlyStop
 
     # --- the default form, unchanged (after the first frames came)
     t0 = time.time()
@@ -570,6 +588,8 @@ try:
 
     t.w('STOP')
     bt_checks(t)
+except OnlyStop:
+    pass
 finally:
     try:
         os.killpg(emu.pid, 15)

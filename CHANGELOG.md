@@ -49,8 +49,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- Scope, STOP at the faster timebases: the stopped record began with
-  samples of an earlier capture (garbage, a step, wrong measurements).
+- Scope, STOP: the stopped record was the part of the capture in flight
+  up to the STOP (a few ms after the trigger at 5 ms/div), or the whole
+  record with a step where two captures met. STOP now ends on one more
+  complete capture of the full length (as **Single** / `DIGitize`: the
+  trigger point at the trigger position; untriggered once the record is
+  full when nothing triggers): up to about 0.1 s at 5 ms/div, 2.6 s at
+  100 ms/div, plus the trigger wait. A second STOP meanwhile stops at
+  once ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - Scope, stopped: a pan, zoom or V/div change made while the screen was held
   (right after a screenshot over USB, a message box on the scope page) is
   drawn when the hold ends; before, the screen kept the drag preview with

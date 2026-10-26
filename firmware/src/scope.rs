@@ -396,6 +396,10 @@ pub struct Scope {
     /// the untriggered one), whatever the sweep; no roll meanwhile. Cleared
     /// by any run / stop change (`apply`).
     pub one_shot: bool,
+    /// A STOP waits for the capture `one_shot` restarted (`apply`): no
+    /// trigger in time ends it untriggered once the ring is full, in any
+    /// sweep (`untrig_ok`).
+    stop_req: bool,
     /// Source DMM (the wave view, `wave_enter`): the record is the HY3131
     /// AD2 stream drained from the logger ring (`WaveSource`), not the MCX
     /// DMA; `wv` its state, `mcx` the MCX settings to restore on exit.
@@ -726,6 +730,7 @@ impl Scope {
             hold: false,
             host_read: false,
             one_shot: false,
+            stop_req: false,
             wave: false,
             lent: false,
             stored_ab: (0.0, 1.0),
@@ -976,6 +981,19 @@ impl Scope {
         }
     }
 
+    /// SCPI RUN: a pending STOP / DIGitize no longer ends the run (`apply`
+    /// sees no run change while one is pending).
+    pub fn run_on(&mut self) {
+        self.one_shot = false;
+        self.stop_req = false;
+    }
+
+    /// An untriggered frame may end the capture: Auto, or a STOP's capture
+    /// (`stop_req`) in any sweep.
+    fn untrig_ok(&self) -> bool {
+        self.s.mode == TrigMode::Auto || self.stop_req
+    }
+
     fn set_status(&mut self, st: u8) {
         self.status = st;
     }
@@ -987,6 +1005,23 @@ impl Scope {
         }
         if s.run != self.s.run {
             self.one_shot = false;
+            // STOP: the capture in flight has overwritten the frame shown
+            // before in BUF, and a running frame's record is only its
+            // screen and trigger window. The run ends with one more
+            // complete capture of the DIGitize length instead (pre- and
+            // post-trigger parts at the trigger position, no seam): it goes
+            // on with `one_shot` until that frame (poll_src). A second STOP
+            // meanwhile freezes what is in (`freeze`). Roll and the wave
+            // view freeze at once (their rings are linearised).
+            if self.s.run && !s.run && !self.roll_ok() && !self.wave && !self.stop_req {
+                s.run = true;
+                self.one_shot = true;
+                self.stop_req = true;
+                // The run-state chip: WAIT until that capture is in.
+                self.status = 0;
+            } else {
+                self.stop_req = false;
+            }
         }
         // A new trigger mode or a RUN press waits for its first frame (WAIT).
         // So does leaving the roll range: the roll chip (RUN) and the roll
@@ -1115,8 +1150,10 @@ impl Scope {
         self.rolling = false;
     }
 
-    /// User STOP: keep the frame the user is looking at, and always leave a
-    /// stored record for Save CSV / the stopped zoom when samples exist.
+    /// STOP at once (roll, the wave view, a second STOP while the capture
+    /// of the first is pending: `apply`): keep the frame the user is
+    /// looking at, and always leave a stored record for Save CSV / the
+    /// stopped zoom when samples exist.
     ///  * Roll: the roll display is the newest data in BUF, so linearise it.
     ///  * Nothing in flight: the stored record is the last frame poll() showed
     ///    (or nothing, if poll() discarded the last record).
@@ -1229,6 +1266,17 @@ impl Scope {
         !lost
     }
 
+    /// Stop the circular ring in flight: its samples oldest first, (first
+    /// slot, count); (0, 0) when the packed staging ring overran.
+    #[inline(never)]
+    fn halt_span(&mut self, now: u64) -> (usize, usize) {
+        self.halt();
+        match self.pos(now) {
+            Some((wr, wrapped)) => self.span(wrapped, wr),
+            None => (0, 0),
+        }
+    }
+
     /// The circular ring in flight: (next slot, wrapped at least once);
     /// None when the packed staging ring overran (pk_drain).
     fn pos(&mut self, now: u64) -> Option<(usize, bool)> {
@@ -1262,6 +1310,17 @@ impl Scope {
         Some(Frame { data: self.rec_view().sub(start, start + self.screen), cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
 
+    /// A live MCX frame of the stored record (the screen from `start`): the
+    /// Auto timeout starts again; a triggered one ends a Single run.
+    #[inline(never)]
+    fn emit(&mut self, start: usize, trig: Option<usize>) -> Option<Frame<'static>> {
+        self.deadline = 0;
+        if trig.is_some() && self.s.mode == TrigMode::Single {
+            self.s.run = false;
+        }
+        self.frame(start, trig)
+    }
+
     /// A min / max column frame (ROLL_COLS).
     fn cols_frame(&mut self, fs: u32) -> Option<Frame<'static>> {
         self.seq = self.seq.wrapping_add(1);
@@ -1293,7 +1352,8 @@ impl Scope {
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
             (None, TrigMode::Auto) => now >= self.deadline,
-            (None, _) => false,
+            // A STOP's capture (stop_req): this complete record.
+            (None, _) => self.stop_req,
         };
         if !show {
             self.stored_valid = false;
@@ -1445,15 +1505,12 @@ impl Scope {
                 // comparator stayed quiet is a miss (no comparator on this
                 // board, or the level map is off); three in a row hand the
                 // scope back to the software trigger (hwtrig::note_miss).
-                if st != Status::Armed || now < self.deadline || !(wrapped || wr >= self.screen) {
+                // A STOP's capture (stop_req) waits for the full ring.
+                if st != Status::Armed || now < self.deadline || !(wrapped || (wr >= self.screen && !self.stop_req)) {
                     return None;
                 }
-                self.halt();
                 // Re-read after the stop: the DMA was still running above.
-                let (off, len) = match self.pos(now) {
-                    Some((wr, wrapped)) => self.span(wrapped, wr),
-                    None => (0, 0),
-                };
+                let (off, len) = self.halt_span(now);
                 if len < self.screen {
                     self.stored_valid = false;
                     return None;
@@ -1464,30 +1521,22 @@ impl Scope {
                 if found.is_some() {
                     self.hw.note_miss();
                 }
-                let start = match (found, self.s.mode) {
-                    (Some(t), _) => t - pre,
+                let start = match found {
+                    Some(t) => t - pre,
                     // Auto: the newest screen, untriggered (stock TIM5 UIF
                     // "record done without trigger").
-                    (None, TrigMode::Auto) => len - self.screen,
-                    (None, _) => {
+                    None if self.untrig_ok() => len - self.screen,
+                    None => {
                         self.stored_valid = false;
                         return None;
                     }
                 };
                 self.stored_trig = found;
                 self.stored_anchor = start + pre;
-                self.deadline = 0;
-                if found.is_some() && self.s.mode == TrigMode::Single {
-                    self.s.run = false;
-                }
-                self.frame(start, found)
+                self.emit(start, found)
             }
             Status::Done => {
-                self.halt();
-                let (off, len) = match self.pos(now) {
-                    Some((wr, wrapped)) => self.span(wrapped, wr),
-                    None => (0, 0),
-                };
+                let (off, len) = self.halt_span(now);
                 let post_n = hwtrig::post_for(self.rec_split().1, WIN) as usize;
                 if len < self.screen + WIN || len < post_n + pre {
                     // Cannot happen after `arm` (pre + post samples written),
@@ -1517,7 +1566,7 @@ impl Scope {
                         // is off. Auto shows the frame at the estimate;
                         // Normal / Single wait for the next one.
                         self.hw.note_miss();
-                        if self.s.mode != TrigMode::Auto {
+                        if !self.untrig_ok() {
                             self.stored_valid = false;
                             return None;
                         }
@@ -1526,11 +1575,7 @@ impl Scope {
                 };
                 self.stored_trig = found;
                 self.stored_anchor = t;
-                self.deadline = 0;
-                if found.is_some() && self.s.mode == TrigMode::Single {
-                    self.s.run = false;
-                }
-                self.frame(t - pre, found)
+                self.emit(t - pre, found)
             }
         }
     }
@@ -1701,6 +1746,7 @@ impl Scope {
         // its trigger; the frame is the stored record, the DMA is idle).
         if live && self.one_shot && f.as_ref().is_some_and(|fr| fr.cols.is_none() && fr.data.len() > 0) {
             self.one_shot = false;
+            self.stop_req = false;
             self.s.run = false;
         }
         if live {
@@ -1778,11 +1824,7 @@ impl Scope {
         // The shown frame becomes the stored record (trigger + on-screen centre
         // remembered so a later zoom stays on this feature).
         let (start, trig) = self.finish(now)?;
-        self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
-            self.s.run = false;
-        }
-        self.frame(start, trig)
+        self.emit(start, trig)
     }
 
     /// Absolute number of samples written since start() into the circular
@@ -1867,7 +1909,8 @@ impl Scope {
             (self.st_idx, self.st_armed, self.st_scan) = (i, armed, n);
         }
         let Some(t) = self.st_found else {
-            if self.s.mode == TrigMode::Auto && now >= self.deadline && wr >= self.screen as u64 {
+            // A STOP's capture (stop_req): the full ring.
+            if self.untrig_ok() && now >= self.deadline && wr >= if self.stop_req { cap } else { self.screen } as u64 {
                 return self.stream_emit(now, None);
             }
             return None;
@@ -1923,11 +1966,7 @@ impl Scope {
         };
         let trig = t.map(|_| start + pre);
         self.snapshot_mark(off, len, start + self.screen / 2, trig, false);
-        self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
-            self.s.run = false;
-        }
-        self.frame(start, trig)
+        self.emit(start, trig)
     }
 
     /// Roll (packed ring: TB_ROLL's rate is below PK_FS): every 100 ms,

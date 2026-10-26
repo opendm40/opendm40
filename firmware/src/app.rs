@@ -4935,6 +4935,7 @@ impl App {
             }
             C::Run => {
                 sc.run = true;
+                self.scope.run_on();
                 None
             }
             C::Stop => {
