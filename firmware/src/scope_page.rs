@@ -627,6 +627,7 @@ impl App {
         };
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label, crate::csvlog::active());
+        ui::strip_acc(&mut d, &r, self.acc_ctx());
         if self.gen.s.on {
             let mut b = su::Buf::new();
             su::fmt_hz(&mut b, self.gen.actual_hz());

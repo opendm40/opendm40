@@ -714,7 +714,6 @@ fn ps_button(r: sf::Rect, t: &str, sel: bool) {
 pub fn settings_page(pv: &PowerVals) {
     lcd::fill_rect(0, 0, lcd::W, 40, 0x2966);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, 0x2966);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Power Settings", STATUS_FG, 0x2966, 8, 0);
     sf::label(sf::TEXT22, rect(8, 46, 32, 38), "V", STATUS_FG, BG, 8, 0);
     sf::label(sf::TEXT22, rect(8, 90, 32, 38), "A", STATUS_FG, BG, 8, 0);

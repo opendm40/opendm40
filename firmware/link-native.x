@@ -10,7 +10,7 @@
  *                                      sector 1 (FS-loader writes it like any
  *                                      body byte), named hot read-only data
  *                                      (`.rodata.a2.*`: the ASCII26, F14,
- *                                      LETTERS, UNIT and SC_PROBE font blobs,
+ *                                      LETTERS, UNIT, SC_PROBE, LOCK font blobs,
  *                                      tools/mkstockfont.py A2_FONTS).
  *                                      ~14.8 KB; the link fails
  *                                      when it reaches the marker, build.sh
@@ -278,8 +278,11 @@ SECTIONS
         *(.text.*8opendm404scpi7dcv_arg*);
         /* NOT the SCPI range / resolution commands (scpi::range_cmd,
          * conf_cmd, range_arg, res_arg, step_exp, pow10f, App::scpi_range;
-         * ~2 KB) nor ui::help_page: back in region B since region C audit
-         * #2 (2026-10-25, docs/native-boot.md "Region C audit #2"). */
+         * ~2 KB): back in region B since region C audit #2 (2026-10-25,
+         * docs/native-boot.md "Region C audit #2"). ui::help_page went back
+         * with them and returned here with the DMM accuracy label (0.6.0,
+         * the same section): drawn on the Help pages only, where no stream
+         * runs (the list below). */
         *(.text.*8opendm404scpi6n7_arg*);
         *(.text.*8opendm406dbg_n7*);
         *(.text.*8opendm407dbg_dcv*);
@@ -375,6 +378,7 @@ SECTIONS
          * during a fast-log session reached it (fastlogtest --ui-nav;
          * region B since 2026-10-23, ~0.2 KB). */
         *(.text.*8opendm402ui9menu_item*);
+        *(.text.*8opendm402ui9help_page*);
         *(.text.*8opendm402ui9list_page*);
         *(.text.*8opendm402ui10page_title*);
         *(.text.*8opendm402ui11set_stepper*);

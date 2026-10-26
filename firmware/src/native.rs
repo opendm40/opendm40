@@ -1,8 +1,57 @@
 //! Entry after the boot decision: RAM init, then recovery or the normal opendm40
 //! main with the board bring-up the stock firmware used to do.
 
+use core::sync::atomic::{AtomicU32, Ordering};
+
 use crate::boot::{self, BootInfo, Mode};
 use crate::mmio;
+
+#[path = "splash.rs"]
+pub mod splash;
+
+/// Boot phase times for DBG:BOOT? `BOOTMS` / `MAINMS`: [1..=8] = each
+/// boot phase's DWT cycles (`phase`; [0] unused: the counter is not
+/// cleared by a software reset, so the shim's own time cannot be told from
+/// the loader's before it); [9..=11] = main's ms after App::new, after the
+/// first frame, after the touch reset (`main_phase`). SRAM
+/// (`.sram_bss`, zeroed in init_ram), not the TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static PHASE: [AtomicU32; 12] = [const { AtomicU32::new(0) }; 12];
+/// DWT at the end of the last phase (board::init restarts the counter, so
+/// 0 = its start). SRAM, as PHASE.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static T_LAST: AtomicU32 = AtomicU32::new(0);
+const DWT_CYCCNT: u32 = 0xE000_1004;
+
+/// End of boot phase `i` (1..=8): its time.
+fn stamp(i: usize) {
+    let now = unsafe { mmio::r32(DWT_CYCCNT) };
+    PHASE[i].store(now.wrapping_sub(T_LAST.load(Ordering::Relaxed)), Ordering::Relaxed);
+    T_LAST.store(now, Ordering::Relaxed);
+}
+
+/// End of pre_main phase `i` (1..=6): its time, the splash bar's next
+/// part, the watchdog fed.
+fn phase(i: usize) {
+    stamp(i);
+    splash::step();
+    boot::feed();
+}
+
+/// main.rs: `i` 0 = App::new done (the splash bar's last part), 1 = the
+/// first frame drawn (the splash gone), 2 = the touch reset done; `ms` =
+/// main's clock. Never inlined: its code stays in region C, not in main's
+/// (B).
+#[inline(never)]
+pub fn main_phase(i: usize, ms: u64) {
+    PHASE[9 + i].store(ms as u32, Ordering::Relaxed);
+    if i == 0 {
+        splash::step();
+    }
+    if i == 1 {
+        splash::done();
+    }
+}
 
 extern "C" {
     static mut __bss_start: u32;
@@ -89,7 +138,8 @@ pub fn stack_use() -> (u32, u32) {
 /// SPI-flash divider in use (4 / 16) and the boot self-check's verdict
 /// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN);
 /// then FATDIR (fatdir.rs), CALREC (the calibration record's CRC, dmm.rs
-/// `load_record`) and SETTINGS (`put_settings`).
+/// `load_record`), SETTINGS (`put_settings`) and BOOTMS / MAINMS
+/// (`put_times`).
 pub fn put_extra(s: &mut crate::scpi::Scpi) {
     use crate::calbackup::Status as C;
     let r = crate::calbackup::result();
@@ -150,6 +200,25 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
     // (dmm.rs load_record; BADCRC = every calibration value at its default).
     s.put_bytes(if crate::dmm::rec_crc_ok_at_boot() { b",CALREC,OK" } else { b",CALREC,BADCRC" });
     put_settings(s);
+    put_times(s);
+}
+
+/// `,BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<frame>,<touch>`:
+/// the boot phases in ms (`PHASE`). BOOTMS: each phase's own duration
+/// (board = board::init + the splash; vdisk and refresh run after the
+/// first frame, `before_usb`). MAINMS: main's clock at the end of
+/// App::new, of the first frame and of the touch reset (0 = not reached).
+/// DWT at 200 MHz: 12.5x low on IRC16M, as CALMS.
+fn put_times(s: &mut crate::scpi::Scpi) {
+    s.put_bytes(b",BOOTMS");
+    for (i, p) in PHASE.iter().enumerate().skip(1) {
+        let v = p.load(Ordering::Relaxed);
+        if i == 9 {
+            s.put_bytes(b",MAINMS");
+        }
+        s.put_bytes(b",");
+        put_dec(s, if i <= 8 { v / 200_000 } else { v });
+    }
 }
 
 /// `,SETTINGS,<from>,<slot>,<seq>,SETFILE,<state>,SAVE,<status>,<saves>,<seq>`
@@ -221,7 +290,10 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 fn pre_main(dry: bool) {
     let before = crate::board::init();
     boot::set_board(before);
-    boot::feed();
+    // The splash and the backlight first: the disk phases below take 0.2 s
+    // on a normal boot, seconds on the first boot after an update.
+    splash::show();
+    phase(1);
     // fatren (rename the INSTALLED dm40*.bin to _DM40PRV.BIN): only the file
     // whose update header equals the 0x08008000 marker the loader wrote (none
     // if the marker is not valid); any other dm40*.bin is staged and stays.
@@ -239,45 +311,56 @@ fn pre_main(dry: bool) {
         let mut disk = crate::spiflash::SpiFlash::new();
         crate::fatren::run(&mut disk, dry, marker);
     }
-    boot::feed();
+    phase(2);
     // Write-once calibration safety copy (CALIB.BIN, BOOTDATA.BIN, UID.BIN,
     // only the missing ones) on the same volume, after fatren, still before
     // USB. Not affected by fatren-dry-run: it only creates its own files; it never
     // touches dm40*.bin or _DM40PRV.BIN names.
     crate::calbackup::boot();
-    boot::feed();
+    phase(3);
     // LOGS/ SHOTS/ SCOPE/ for our files (fatdir.rs): created on the first
     // boot (~1 s), nothing written afterwards.
     {
         let mut disk = crate::spiflash::SpiFlash::new();
         crate::fatdir::boot(&mut disk);
     }
-    boot::feed();
+    phase(4);
     // The settings' copy (setfile.rs `_SETTING.BIN`): made on the first
     // boot (2 blocks), then only its slots are read here.
     {
         let mut disk = crate::spiflash::SpiFlash::new();
         crate::setfile::boot(&mut disk);
     }
-    boot::feed();
+    phase(5);
     // The INFO/ files' slow-bank bytes mirrored on the SPI disk (vdisk.rs
     // `mirror_boot`: compared every boot, rewritten only when they differ),
     // served from there while an AD2 stream runs.
     #[cfg(feature = "vdisk")]
     crate::vdisk::mirror_boot();
-    boot::feed();
+    phase(6);
+}
+
+/// main.rs `run`, after the first frame and before USB attaches (moved out
+/// of pre_main 2026-10-26: ~0.47 s on the device that the meter page no
+/// longer waits for). Never inlined: the buffers are popped before the main
+/// loop; region C (no stream runs yet).
+#[inline(never)]
+pub fn before_usb() {
+    T_LAST.store(unsafe { mmio::r32(DWT_CYCCNT) }, Ordering::Relaxed);
     // The generated USB volume (vdisk.rs): built-in tables + CRC-32s of the
     // INFO sources (~0.1 s), before USB.
     #[cfg(feature = "vdisk")]
     crate::vdisk::init(crate::vdisk::mem_read, unsafe {
         core::slice::from_raw_parts(crate::calbackup::FW_BASE as *const u8, crate::calbackup::FW_MAX_BODY)
     });
-    boot::feed();
+    stamp(7);
+    crate::wdt::kick();
     // Its LOGS / SCOPE / SHOTS files from the SPI disk, so the host's first
     // look is complete (a DLG's CSV size: ~10 ms per 100 KB of logs).
     #[cfg(feature = "vdisk")]
     crate::vdisk::boot_refresh();
-    boot::feed();
+    stamp(8);
+    crate::wdt::kick();
 }
 
 /// Called by the shim (src/shim.rs) with the decision.

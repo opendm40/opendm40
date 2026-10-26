@@ -178,6 +178,7 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         no (0.1 uV across the shunt)
 //   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         no
 //   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         no
+//   ohm       r0      60 ohm (Rref 0.1k)       75.5 (1 mohm) 7.5        no (already mohm)
 //   ohm       r1..r3  600 ohm .. 60 kohm       75.5         7.5         yes (r1: 600.000 ohm = mohm)
 //   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         no (hum / leakage)
 //   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         no (hum / leakage)
@@ -192,27 +193,14 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // at 0x16, of 16 6.4 s at 0x17); it restarts on a step of more than ~2
 // counts of the 60000-count format, on any OSR / range / mode change, and is
 // not used in AC+DC.
-// Ohm r0, the 60 ohm range: removed 2026-10-25 (owner); the work is on
-// branch feat/ohm60. Nothing selects it: every ohm range here is r1..r6
-// (`set` raises a mode 10 r0 to r1; OHM_R_MIN). Its row stays in the stock
-// table (hy3131_tables.rs CFG_F10_P8CLR[0] / P8SET[0]), as do OHM_RREF[0],
-// OHM_DEC[0] and OHM_ISC[0]. What is known, to resume from:
-// - The stock V2.6 never selects r0: its ohm range is clamped to 1..6
-//   (stock/re/analysis/dmm_v2_6.h section 2).
-// - r0's calibration slot 0x124[0] holds a round 1.005 on the dumped unit,
-//   an uncalibrated default (inferred: r1..r6 hold measured values).
-// - On the device, with the stock scale (Rref 0.1 k x the slot), r0 read
-//   2.6..2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 ohm.
-//   The ratio is the same at all three, so it is a gain error, not a
-//   parallel load. Ruled out as the cause: the OP1 x10 path (the record's
-//   x10 / x1 pairs of DC mV / A / mA / uA say x10 reads high, not low) and
-//   the nominal Rref / 10 (the x10 ohm row, OPS1 = 1, of the
-//   [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library)
-//   `dmm.cpp` scales by exactly Rref / 10).
-// - The r0 row differs from r1 in R25 0x01 (OP1 x10) and R2B 0x46 vs 0x40:
-//   r0 also closes PA2 DF, which the stock rows close only on the high ohm
-//   ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the
-//   calibrator.
+// Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
+// used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
+// reference / 10) that the stock never selects (its autorange clamps to r1..r6,
+// dmm_v2_6.h section 2). Here it is in the autorange too (owner 2026-10-25,
+// `ohm_auto_floor`: not with the "ON" variant) and a manual range, always with
+// the default ohm variant (SFUVR = 2, the 0.90 mA one; the "ON" variant gives
+// 0.28 mA on r1, OHM_ISC), with PA2 open (OHM_R0_ROW). Its gain is `ohm_row_gain`; the
+// single offset 0x144 is the r1..r6 one: use REL.
 
 // ------------------------------------------------- FR-05 conversion rate
 //
@@ -231,8 +219,8 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
 //           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
 //   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1: 8 (1.6 s),          5/s DC, ohm 2.5/s
-//   (dflt)                                                 ohm r1..r3: 16 (6.4 s), others none
-//   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r1..r3:    2.5/s
+//   (dflt)                                                 ohm r0..r3: 16 (6.4 s), others none
+//   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
 //                                                          32, 12.8 s)
 // Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
 // R22_DROP_WIN_MS of the row write. Ohm MEDIUM / SLOW keep the stock's
@@ -427,17 +415,37 @@ impl Avg {
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
 // Test sources shown on the DMM page (`test_current`).
-/// The lowest ohm range: r1 (600 ohm). r0 (60 ohm) is removed (the ohm
-/// notes above, branch feat/ohm60).
-const OHM_R_MIN: i8 = 1;
+/// Ohm r0 (60 ohm) row: the stock f10 row 0 with PA2's DS2 / FS2 open (R2B
+/// 0x46 -> 0x40), i.e. the r1 row with OPS1 = 1 (OP1 x10). Device 2026-10-26
+/// (MR9270 on V-COM, 10 / 20 / 50 ohm, manual 60 / 600 ohm, alternating): with
+/// PA2 closed r0 read 0.971 x r1 (Rref 0.1 k, r1's gain), with it open 1.009.
+/// What PA2 is wired to on the board is not known.
+const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
+    let mut c = CFG_F10_P8CLR[0];
+    c[0x0B] &= !0x06;
+    c
+};
+
+/// Calibration gain of ohm row `r` from its own slot `cal_r` (0x124 + 4r).
+/// r0: the slot is not a calibration (the stock never selects r0,
+/// dmm_v2_6.h section 2; 1.005 on the dumped unit, a round value like the
+/// other unused slots, inferred), so r1's gain `cal_r1` (the shared 1 kohm
+/// reference, PA4 DF) x the record's DC mV x10 / x1 gain ratio `mv10 / mv1`
+/// (0x24 / 0x28, the same OP1 x10 stage; 0.9895 on the dumped unit, the x10
+/// path reads ~1 % high). That leaves r0 / r1 = 0.9991 at 50 ohm (device
+/// 2026-10-26).
+fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
+    if r == 0 { cal_r1 * mv10 / mv1 } else { cal_r }
+}
 
 /// Ohm short-circuit test current (A) per range, [default variant, "ON"
 /// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
 /// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
 /// docs/data/short.csv, the stock row's own tap: VDS15 default, AGNDP7 ON,
-/// AGNDP8 ON on r5). r0 (60 ohm, removed: OHM_R_MIN) = r1's default value,
-/// inferred, not used. r6 (60 M, the current-source row): not measured,
-/// None.
+/// AGNDP8 ON on r5). r0 (60 ohm, always the default variant,
+/// `Dmm::write_config`) = r1's default value, inferred: its own row has the
+/// same tap and Rref switches but was not measured. r6 (60 M, the
+/// current-source row): not measured, None.
 pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
     [Some(8.983e-4), Some(8.983e-4)],
     [Some(8.983e-4), Some(2.795e-4)],
@@ -456,7 +464,7 @@ pub const DIODE_I: f32 = 0.756e-3;
 /// OHM_ISC, the most the range drives through the probes (with R between
 /// them it is less). None where it is not measured (r6).
 pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
-    OHM_ISC[r.clamp(OHM_R_MIN, 6) as usize][(var & 1) as usize]
+    OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
@@ -1369,6 +1377,10 @@ pub struct Dmm {
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
     pub burden_show: bool,
+    /// Ohm readings below 0 shown (Settings 3/3 "Negative ohm", SCPI
+    /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
+    /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
+    pub ohm_neg: bool,
 }
 
 /// Fuse check (`Dmm::fuse_start`): what to go back to, start time, ohm
@@ -1930,6 +1942,7 @@ impl Dmm {
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
+            ohm_neg: false,
         }
     }
 
@@ -1972,18 +1985,28 @@ impl Dmm {
         self.a_auto
     }
     /// Select the ohm variant (stock m+8: 0 normal, 1 "ON" low current,
-    /// the p8set rows) and re-enter ohm in the current range, as the
-    /// stock's second tap on the ohm button.
+    /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
+    /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
         self.ohm_var = v & 1;
         if self.mode == 10 {
-            let r = self.range.clamp(OHM_R_MIN, 6);
+            // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
+            let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
         }
     }
 
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
+    }
+
+    /// The lowest range of the ohm autorange: r0 (60 ohm) with the default
+    /// variant, r1 (600 ohm) with the "ON" one. r0 always drives the default
+    /// variant's 0.90 mA (`write_config`), so the autorange stays out of it
+    /// when the user chose the 0.28 mA test current; a manual 60 ohm still
+    /// works (at 0.90 mA). The stock autorange never goes below r1.
+    fn ohm_auto_floor(&self) -> i8 {
+        if self.ohm_var == 1 { 1 } else { 0 }
     }
     /// Restore m+6 / m+7 / m+8 (settings): only the values the UI / BT can
     /// set (V, A: 1 = AUTO+, 3 = AUTO; ohm variant 0 / 1); anything else
@@ -2154,9 +2177,9 @@ impl Dmm {
             5 | 6 => &CFG_F5_6[r.min(1)],
             7 => &CFG_F7[r.min(1)],
             8 | 9 => &CFG_F8_9[r.min(1)],
+            // r0 (60 ohm) always with the higher-current default variant.
             10 => {
-                let r = r.clamp(OHM_R_MIN as usize, 6);
-                if self.ohm_var == 1 { &CFG_F10_P8SET[r] } else { &CFG_F10_P8CLR[r] }
+                if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
             12 => &CFG_F12[0],
@@ -2416,8 +2439,6 @@ impl Dmm {
         // The R22 (AD1 OSR) the chip runs now (R22_DROP).
         let r22_was = hy::read1(0x22);
         self.pw_leave();
-        // No ohm r0 (60 ohm, removed: the ohm notes at the top).
-        let range = if mode == 10 { range.max(OHM_R_MIN) } else { range };
         self.mode = mode;
         self.range = range;
         self.write_config(clk);
@@ -3344,6 +3365,9 @@ impl Dmm {
         }
         match self.mode {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
+            // A manual 60 ohm with the "ON" variant: AUTO continues from
+            // 600 ohm (`ohm_auto_floor`); with the default one from 60 ohm.
+            10 if self.range < self.ohm_auto_floor() => self.set(clk, 10, 1, 150),
             // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
             4..=9 if self.a_auto == 1 => {
                 if self.sub() == 1 {
@@ -3368,7 +3392,7 @@ impl Dmm {
     /// (0..4), 5 = 60 mV (the DC / AC mV r0 row, OP1 x10; the stock tables
     /// have it, its UI offers no 60 mV item); A items 600 uA, 6000 uA,
     /// 60 mA, 600 mA, 6 A, 10 A; ohm 1..6 (DM40C labels, COUNTS_MODEL),
-    /// ohm 0 = 600 ohm (the 60 ohm range is removed). `None` = AUTO, `Some(255)` =
+    /// ohm 0 = the 60 ohm range (the stock has no item for it). `None` = AUTO, `Some(255)` =
     /// AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         self.ovl_clear(clk.now_ms());
@@ -3422,13 +3446,14 @@ impl Dmm {
             }
             (Button::Ohm, None) => {
                 self.manual = false;
+                if self.mode == 10 && self.range < self.ohm_auto_floor() {
+                    self.set(clk, 10, 1, 150);
+                }
             }
-            // 0 (60 ohm, removed) = 600 ohm.
             (Button::Ohm, Some(i)) if i <= 6 => {
-                let r = (i as i8).max(OHM_R_MIN);
                 self.manual = true;
-                if !self.same_row(10, r) {
-                    self.set(clk, 10, r, 150);
+                if !self.same_row(10, i as i8) {
+                    self.set(clk, 10, i as i8, 150);
                 }
             }
             _ => {}
@@ -3483,8 +3508,8 @@ impl Dmm {
                 sub << 6 | r << 3 | 1
             }
             10 => {
-                // BT range field 0 = 600 ohm (r1).
-                let r = if self.manual { self.range.max(OHM_R_MIN) as u8 - 1 } else { 6 };
+                // BT has no 60 ohm range: report it as 600 ohm.
+                let r = if self.manual { self.range.max(1) as u8 - 1 } else { 6 };
                 self.ohm_var << 6 | r << 3 | 2
             }
             11 => 0x44,
@@ -4791,8 +4816,8 @@ impl Dmm {
         if self.r22_drop_one() {
             return None;
         }
-        // r1..r6 (OHM_R_MIN; the stock autorange clamps the same way).
-        let r = self.range.clamp(OHM_R_MIN, 6) as usize;
+        // Autorange r0..r6, r1..r6 with the "ON" variant (`ohm_auto_floor`).
+        let r = self.range.clamp(0, 6) as usize;
         let r22 = hy::read1(0x22);
         let steady = self.steady_osr();
         let slow = r22 == steady && !self.avg_skip;
@@ -4800,7 +4825,7 @@ impl Dmm {
         // LIVE?: a passive Rx never gives a negative code; a source of the
         // other polarity does (0.24 % of full scale: far above the noise).
         self.live = ad1 < -LIVE_CODE;
-        let g = cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV;
+        let g = ohm_row_gain(r, cal(0x124 + 4 * r as u32, 1.0), cal(0x128, 1.0), cal(0x24, 1.0), cal(0x28, 1.0)) * OHM_RREF[r] / 0.9 / AD1_DIV;
         let k0 = cal(0x144, 0.0);
         let lim = self.factor() * OHM_DEC[r];
         let ov = self.over();
@@ -4823,10 +4848,11 @@ impl Dmm {
         } else {
             self.avg_code(raw, slow)
         };
-        let mut kohm = code * g - k0;
-        if kohm < 0.0 {
-            kohm = 0.0;
-        }
+        // Below 0 only by the offset k0 at most (`raw` is unsigned), a few
+        // tens of mohm: shown with `ohm_neg`, else clamped as the stock.
+        // The range logic below works on the clamped value.
+        let kneg = code * g - k0;
+        let kohm = kneg.max(0.0);
         let ol = kohm / lim > ov;
         if ol {
             if r22 != 0x13 {
@@ -4865,10 +4891,12 @@ impl Dmm {
                     self.set(clk, 10, to, 150);
                     return None;
                 }
-            } else if q > 10.0 * ov * ov && r as i8 > OHM_R_MIN && !held {
+            } else if q > 10.0 * ov * ov && r as i8 > self.ohm_auto_floor() && !held {
                 // Down below 0.1 * lim / over, as V / A. The stock tests
                 // q > 10 (R < over * lim / 10), which is exactly the next lower
-                // range's up threshold: no hysteresis band at all.
+                // range's up threshold: no hysteresis band at all. 600 -> 60
+                // ohm (not in the stock autorange) by the same rule: down
+                // below 58.25 ohm, up above 61.8 ohm (DM40C, over 1.03).
                 let step = if now < self.entry + OHM_SINGLE_MS {
                     1
                 } else if q > 1e5 {
@@ -4883,7 +4911,7 @@ impl Dmm {
                     1
                 };
                 self.ohm_settled = false;
-                self.set(clk, 10, (r as i8 - step).max(OHM_R_MIN), 150);
+                self.set(clk, 10, (r as i8 - step).max(self.ohm_auto_floor()), 150);
                 self.ohm_down_r = r as i8;
                 self.ohm_down_k = kohm;
                 return None;
@@ -4895,7 +4923,8 @@ impl Dmm {
                 self.ohm_down_r = -1;
             }
         }
-        // Stock formats (r1: x1000 ohm, fmt r + 1).
+        let kohm = if self.ohm_neg { kneg } else { kohm };
+        // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
         let (v, dec, unit) = match r {
             0 | 1 => (kohm * 1000.0, 3 - r as u8, "\u{3a9}"),
             2..=4 => (kohm, 6 - r as u8, "k\u{3a9}"),
@@ -5796,6 +5825,29 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ohm_r0_gain_from_r1() {
+        // The dumped unit's record: r0 slot 1.005 (never calibrated), r1
+        // 1.002732, the DC mV x10 / x1 gain ratio 0.9895.
+        let (g0, g1, m10, m1) = (1.005f32, 1.002_732f32, 0.9895f32, 1.0f32);
+        assert_eq!(ohm_row_gain(1, g1, g1, m10, m1), g1);
+        assert_eq!(ohm_row_gain(3, 0.993751, g1, m10, m1), 0.993751);
+        assert_eq!(ohm_row_gain(0, g0, g1, m10, m1), ohm_row_gain(0, 1.0, g1, m10, m1));
+        // Device 2026-10-26, PA2 open: (r1, r0 as read with r1's gain x
+        // 1.0291) at 10 / 20 / 50 ohm. With the record's ratio r0 is within
+        // 0.2 % of r1.
+        for (r600, r60) in [(9.1141f32, 9.4608f32), (19.0848, 19.8285), (49.4137, 51.3537)] {
+            let fixed = r60 / (g1 * 1.0291) * ohm_row_gain(0, g0, g1, m10, m1);
+            assert!((fixed / r600 - 1.0).abs() < 0.002, "{fixed} vs {r600}");
+        }
+        // No record: the plain stock scale.
+        assert_eq!(ohm_row_gain(0, 1.0, 1.0, 1.0, 1.0), 1.0);
+        // The r0 row: the r1 row with OPS1 (R25 bit 0).
+        let mut r1 = CFG_F10_P8CLR[1];
+        r1[5] |= 1;
+        assert_eq!(OHM_R0_ROW, r1);
+    }
 
     #[test]
     fn freq_glitch_source_loses() {

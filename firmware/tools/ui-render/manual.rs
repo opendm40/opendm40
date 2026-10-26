@@ -55,6 +55,8 @@ fn dmm_page(p: &Dp) {
     let mut dv = ui::DmmView::new();
     dv.bar_on = !p.hist;
     dv.label = p.label;
+    // The accuracy label: none under REL (App::acc_ctx).
+    dv.acc = p.rel.is_none().then_some(ui::Acc { model: 2, tc: p.label == Some("TC K") });
     let volts = r.mode <= 3 && !r.main.ol;
     dv.hv_red = volts && r.si.abs() >= 30.0;
     ui::set_cpl_auto(r.cpl_auto);
@@ -165,7 +167,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/settings2", &page, false);
     save1(out, "settings2");
     host::reset(0);
-    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", ""]);
+    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
     ck.check_opts("manual/settings3", &page, false);
     save1(out, "settings3");
 
@@ -186,7 +188,7 @@ pub fn run(out: &str) -> usize {
 
     // Resistance range page with the 0.28 mA ("ON") variant on.
     host::reset(0);
-    ui::range_page(Button::Ohm, Some(6), 1, None);
+    ui::range_page(Button::Ohm, Some(7), 1, None);
     ck.check_opts("manual/range-ohm", &page, false);
     save1(out, "range-ohm");
 
@@ -326,6 +328,9 @@ pub fn run(out: &str) -> usize {
         ("dmm-temp", Dp { rate: false, label: Some("TC K"), ..dp(rd(15, val(86.4, 1, c), Some(val(24.6, 1, c)), None, false)) }),
         // The bargraph (default DMM row), DC V.
         ("dmm-bar", dp(dcv)),
+        // The accuracy label and the digits below it in grey: DC V 6 V
+        // range, the 6 and the extra digit.
+        ("dmm-acc", dp(rd(1, Val { ext: true, ..val(4.81763, 4, "V") }, None, None, false))),
         // HOLD.
         ("dmm-hold", Dp { hold: 1, ..dp(dcv) }),
         // AutoHold with a captured value.
@@ -673,7 +678,7 @@ pub fn run(out: &str) -> usize {
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", ""]);
+        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
         ck.check_opts("manual/settings3-edit", &page, false);
         save1(out, "settings3-edit");
     }

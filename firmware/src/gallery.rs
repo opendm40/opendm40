@@ -104,9 +104,9 @@ const D_BTN: Color = 0x2966;
 const D_RED: Color = 0xB0A2;
 const D_FRAME: Color = 0x94D3;
 
-/// Title bar (ui.rs PAGE_BAR_H) and its "< Back" (x = 4 + LOGO + 3 + 3).
+/// Title bar (ui.rs PAGE_BAR_H) and its "< Back" (x = ui.rs BAR_X + 3).
 const BAR_H: i16 = 40;
-const BACK_X: i16 = 4 + sf::LOGO + 6;
+const BACK_X: i16 = 7;
 /// Tiles: 3 x 2 of TILE_W x TILE_H, thumbnail TH_W x TH_H at +4 / +4.
 const PER_PAGE: usize = 6;
 const TILE_W: i16 = 148;
@@ -1121,10 +1121,9 @@ fn r4(r: (u16, u16, u16, u16)) -> Rect {
     rect(r.0 as i16, r.1 as i16, r.2 as i16, r.3 as i16)
 }
 
-/// ui.rs page_title: bar, logo, "< Back".
+/// ui.rs page_title: bar, "< Back".
 fn title_bar() {
     fill((0, 0, 480, BAR_H), BAR);
-    sf::logo(4, 10, BAR);
     sf::glyphs(sf::TEXT22, rect(BACK_X, 0, 110, BAR_H), "< Back", FG, BAR, 1, 0);
 }
 

@@ -72,8 +72,8 @@ You need a DM40 with the stock firmware, a USB cable and a charged battery.
    cable. A USB disk appears.
 3. Copy the file onto it, as the only `dm40*.bin` file there. Eject the disk.
 4. Switch the meter off and on. The stock update procedure installs the file.
-   The first start is dark for a few seconds: do not switch off in the first
-   10 seconds.
+   The first start takes a few seconds (opendm40 shows a progress bar): do
+   not switch off in the first 10 seconds.
 5. Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
    your computer and keep it ([Back up](#back-up-with-opendm40)).
 

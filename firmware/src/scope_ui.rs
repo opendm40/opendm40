@@ -34,6 +34,9 @@ pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
 pub const C_SEL: Color = 0x059e; // list selection, spinner band, slider fill
 pub const C_YELLOW: Color = 0xffe0;
+/// The strip value's digits below the accuracy (ui::strip_acc): the DMM
+/// page's VALUE_LOW.
+pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
@@ -3152,6 +3155,12 @@ pub struct StripData {
     pub gen: Txt,
     /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
     pub dim: bool,
+    /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
+    /// "+-" sign); 0 = none.
+    pub acc: u8,
+    /// The value's glyphs from this index on are below the accuracy
+    /// (ui::strip_acc, ../docs/dmm-accuracy.md section 5): C_LOW grey.
+    pub grey: u8,
 }
 
 impl StripData {
@@ -3166,6 +3175,8 @@ impl StripData {
         hv: false,
         gen: Txt::EMPTY,
         dim: false,
+        acc: 0,
+        grey: u8::MAX,
     };
 }
 
@@ -3235,10 +3246,18 @@ pub fn st_sub_x(u: Rect) -> i16 {
     u.x + u.w + 4
 }
 
+#[inline(always)]
 fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
+    st_text_grey(r, font, text, fg, align, sp, u8::MAX);
+}
+
+/// `st_text` with the glyphs from index `grey` on in C_LOW (the value's
+/// digits below the accuracy).
+#[inline(never)]
+fn st_text_grey(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8, grey: u8) {
     let t = Ink::new(font, r, text, align, sp);
     paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
-        Some(g) => (fg, tag(1, g)),
+        Some(g) => (if g >= grey { C_LOW } else { fg }, tag(1, g)),
         None => (C_FILL, 0),
     });
 }
@@ -3283,8 +3302,8 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value && ol.dim == d.dim) {
-        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1);
+    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to
@@ -3304,9 +3323,21 @@ pub fn meter_strip(d: &StripData) {
         st_text(ST_GEN_T, sf::SC_F12, d.gen.as_str(), C_GREEN, 8, 1);
     }
     for i in 0..2 {
-        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim) || moved {
-            let r = st_sub(i, gen_on, sx);
-            let t = d.sub[i].as_str();
+        if changed(ol.sub[i] == d.sub[i] && ol.dim == d.dim && ol.acc == d.acc) || moved {
+            let mut r = st_sub(i, gen_on, sx);
+            // The accuracy: grey, the text after the "+-" (`pm`); none
+            // when it does not fit even at spacing 0 (the GEN column).
+            let acc = d.acc == i as u8 + 1;
+            let mut t = d.sub[i].as_str();
+            if acc {
+                lcd::fill_rect(r.x as u16, r.y as u16, PM_W as u16, r.h as u16, C_FILL);
+                r = rect(r.x + PM_W, r.y, r.w - PM_W, r.h);
+                if sf::text_width(sf::SC_F12, t, 0) > r.w {
+                    t = "";
+                } else {
+                    pm(r.x - PM_W, r.y + 3, C_DIS);
+                }
+            }
             // Narrow (GEN shown): the text without its spaces if it is too
             // wide, then at the stock spacing 0 (as the scope's cells).
             let mut b = [0u8; 24];
@@ -3324,10 +3355,24 @@ pub fn meter_strip(d: &StripData) {
                 t
             };
             let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
-            st_text(r, sf::SC_F12, t, if d.dim { C_DIS } else { C_WHITE }, 1, sp);
+            st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
     *shown = Some(*d);
+}
+
+/// Width of the "+-" sign (`pm`) and its gap to the text.
+pub const PM_W: i16 = 6;
+
+/// "+-" (no stock font has U+00B1): a 5 x 5 plus over a 5 px bar, 8 px
+/// tall from `y` (the F14 / SC_F12 digits' height); the DMM page's and the
+/// strip's accuracy label.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn pm(x: i16, y: i16, c: Color) {
+    lcd::fill_rect((x + 2) as u16, y as u16, 1, 5, c);
+    lcd::fill_rect(x as u16, (y + 2) as u16, 5, 1, c);
+    lcd::fill_rect(x as u16, (y + 7) as u16, 5, 1, c);
 }
 
 /// Right-panel button under a touch: the stock rects, x from the panel edge

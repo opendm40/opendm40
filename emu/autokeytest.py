@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """opendm40 AUTO key in the DMM (firmware/src/app.rs auto_key_end): a short
 press in autorange fixes the present range, each further one steps to the
-next higher manual range (the MF page's order, 60 mV included; ohm
-from 600 ohm, no 60 ohm range),
+next higher manual range (the MF page's order, 60 mV / 60 ohm included),
 the highest wrapping to the lowest; held 1 s it goes back to the default
 autorange (V: AUTO+). HOLD is released, AutoHold is kept.
 
@@ -112,8 +111,7 @@ try:
     key()
     h2 = q('DBG:READout?').split(',')[3]
     check(h1 == '1' and h2 == '0', 'HOLD released by AUTO (hold state %s -> %s)' % (h1, h2))
-    # Ohm: the cycle wraps to 600 ohm, no 60 ohm (open input: autorange sits
-    # on 60 Mohm).
+    # Ohm: 60 ohm in the cycle (open input: autorange sits on 60 Mohm).
     q('CONF:RES;*OPC?')
     wait(3000)
     key()
@@ -122,7 +120,7 @@ try:
         key()
         seen.append(rng('RES')[0])
     print('  ohm ranges: %s' % ' '.join('%g' % v for v in seen), flush=True)
-    check(seen[1] == 600 and seen[2] == 6000, 'ohm: the highest wraps to 600 ohm, then 6 kohm')
+    check(seen[1] == 60 and seen[2] == 600, 'ohm: the highest wraps to 60 ohm, then 600 ohm')
 except Exception as e:
     check(False, 'run: %r' % e)
 finally:

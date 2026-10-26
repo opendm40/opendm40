@@ -76,8 +76,8 @@ To install opendm40 on a meter that runs the stock firmware:
 4. Eject the disk on the computer.
 5. Switch the meter off and on again. The stock update procedure installs
    the file.
-6. The first start is dark for a few seconds. Do not switch the meter off
-   in the first 10 seconds.
+6. The first start takes a few seconds; opendm40 shows a progress bar. Do
+   not switch the meter off in the first 10 seconds.
 
 ![Install: copy the file onto the stock firmware's USB disk, then restart](img/install.png)
 
@@ -125,7 +125,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -291,6 +291,7 @@ scope.
 | 4-20 mA % | Always shown, also negative | Labelled, shown only in the useful range |
 | 60 mV range | Not on the range page, never chosen by AUTO | On the range page; AUTO steps into it |
 | Burden voltage | — | Optional |
+| Accuracy of the reading | — | [Shown](#accuracy) under the unit |
 | Function change | The old value or 0.0000 under the new unit | Grey dashes at once, grey until the value is final |
 | History while HOLD | Cannot store the held value | Stores it |
 
@@ -558,7 +559,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ, as the stock firmware.
+- Ranges: 60 Ω (milliohm digits, always 0.90 mA; AUTO enters it below ~58 Ω, not with 0.28 mA ON), 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
@@ -891,6 +892,20 @@ shows: **Bargraph** (default) or **History**.
 ![The history row: four values stored](img/dmm-history.png)
 
 *The history row: four values stored.*
+
+### Accuracy
+
+Under the unit, in grey: the meter's specified accuracy for this reading
+and model, from the DM40 user manual's table, e.g. ±0.0020 V for 4.8176 V
+on the 6 V range ([details](../../firmware/docs/dmm-accuracy.md)). Shown
+with the bargraph row; not in AC+DC, the 60 mV ranges, PT / NTC
+temperature, the power meter, or under REL. **Settings > More > More >
+Accuracy** turns it off. The reading's digits below the accuracy are grey
+(here the 6 and the extra digit).
+
+![The accuracy under the unit; the digits below it in grey](img/dmm-acc.png)
+
+*The accuracy under the unit; the digits below it in grey.*
 
 ### The trend chart
 
@@ -2265,6 +2280,8 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
+| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
+| **Negative ohm** | OFF (stock), ON | OFF | ON: resistance can read below 0 (shorted leads, e.g. -0.028 Ω); OFF: shows 0. |
 
 ### The Device page
 

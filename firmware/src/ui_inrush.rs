@@ -69,7 +69,6 @@ pub struct Vals<'a> {
 pub fn page(v: &Vals) {
     lcd::fill_rect(0, 0, lcd::W, 40, BTN);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
-    sf::logo(4, 10, BTN);
     sf::glyphs(sf::TEXT22, rect(0, 0, 480, 40), "Inrush Current", STATUS_FG, BTN, 8, 0);
     sf::glyphs(sf::TEXT22, THR_LABEL, "Trigger", STATUS_FG, BG, 1, 0);
     for (r, t) in [(THR_MINUS, "-"), (THR_PLUS, "+")] {

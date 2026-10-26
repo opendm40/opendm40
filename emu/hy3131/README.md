@@ -58,8 +58,8 @@ resistor gives `Vx / Vref = Rx / Rref` exactly, the continuity row's swapped
 reference mux gives the negative code), `DiodeNode(0.765 mA, 3.3 V)`,
 `CapOscC(R)` / `CapRampC(I, Vthr)` (0 or NaN when the network cannot
 oscillate / ramp), `TcEmf()`. The calibration record is folded in physically:
-Rref x gain (ohm r0: 0.1 k x r1's gain x 1.0291, measured on one unit; the
-firmware no longer selects r0, its 60 ohm work is on branch feat/ohm60), the ohm offset as lead resistance, the V / A gains on the
+Rref x gain (ohm r0: 0.1 k x r1's gain x the DC mV x10 / x1 gain ratio, as
+the firmware's `ohm_row_gain`), the ohm offset as lead resistance, the V / A gains on the
 source. Cold junction (`cj`, the jacks) and HY3131 die (`die`, what SAD1I 10/11
 report) are separate; the die follows the cold junction unless set
 (`die:35`): a thermocouple at 100 C with cj 25 and die 35 reads ~110 C on both

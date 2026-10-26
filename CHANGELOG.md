@@ -7,13 +7,45 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-### Added
+### New
 
 - Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
   43 008 at the faster timebases (was 26 624), for the stopped zoom / pan,
   Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
   capture (at most 10 s) with the trigger point at the trigger position
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Multimeter: the specified accuracy of the reading, small and grey under
+  the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
+  user manual's table for the meter's model (DM40A / B / C), as an absolute
+  value with one significant digit (two when the first is 1). Also in the combined view when a sub row is free. Not shown with
+  the History row, in AC+DC, the 60 mV ranges, the power meter, under REL
+  or for PT / NTC sensors. Settings > More > More > Accuracy: ON (default)
+  / OFF ([manual](docs/manual/README.md#accuracy);
+  [firmware/docs/dmm-accuracy.md](firmware/docs/dmm-accuracy.md)).
+- Multimeter: with the accuracy on, the reading's digits below it are warm
+  grey (the "6" of 4.8176 V ±0.002 V, and the extra digit), also in the
+  combined view.
+- Start-up: a splash with "opendm40", the version, "Loading..."
+  and a progress bar from about 0.2 s after power-on until the meter page
+  (on the slow first start after an update it says so, and that later
+  starts are fast);
+  before, the screen stayed dark for about a second (seconds on the first
+  start after an update) and then empty for 3 s more. `DBG:BOOT?` reports each
+  start-up phase's time (`BOOTMS`, `MAINMS`).
+- Resistance: the 60 Ω range (milliohm digits, 0.90 mA), on the range page
+  and in AUTO (down from 600 Ω below about 58.3 Ω, up above about 61.8 Ω;
+  not with 0.28 mA ON). It uses the stock's 60 Ω setup with one switch
+  open (the stock never selects that range) and the 600 Ω and 60 mV
+  calibrations ([manual](docs/manual/README.md#resistance)).
+- Resistance: Settings > More > More > Negative ohm: ON shows readings
+  below 0 (shorted leads, e.g. -0.028 Ω) instead of 0.000; OFF (default)
+  as the stock. SCPI `RESistance:NEGative`
+  ([manual](docs/manual/README.md#settings-page-3)).
+
+### Changed
+
+- No Wiren Board logo at the left of the status and title bars; the range
+  label and "< Back" sit where the stock firmware has them.
 
 ### Fixed
 
@@ -24,6 +56,10 @@ section named after the tag as the release notes; how to cut a release:
   drawn when the hold ends; before, the screen kept the drag preview with
   the rest of the record blank. A drag back from either end of the record
   moves at once.
+- Generator: after OUTPUT OFF and ON again the DAC waveforms (sine,
+  triangle, ramp, square below the PWM range) stayed flat until a restart.
+- Start-up: the meter page comes up about 3 s sooner. It waited for the
+  USB host, or 3 s without one, before drawing anything.
 - Frequency: 2 Hz and 5 Hz gave no reading. The counter's gate is now read
   when it ends on an input edge instead of every 0.35 s, so frequencies down
   to 0.5 Hz read (one value per gate below about 7 Hz; 0.35 s above, as
