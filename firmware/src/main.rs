@@ -189,9 +189,8 @@ fn main() -> ! {
     logger::Logger::init_in_place(core::ptr::addr_of_mut!(LOGGER), &logger::RING);
     let mut clk = Clock::new();
     lcd::set_madctl(lcd::MADCTL_LANDSCAPE);
-    if !cfg!(feature = "keep-screen") {
-        lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
-    }
+    // The boot splash (native.rs pre_main) stays up until the first frame
+    // (`run`).
 
     // The settings / calibration record's RAM copy, before anything reads
     // it (dmm.rs REC_COPY: the record is in the slow flash bank).
@@ -200,6 +199,7 @@ fn main() -> ! {
     // host expects answers within milliseconds, and a long pause here made it
     // give up on enumeration.
     let app = new_app(&mut clk);
+    native::main_phase(0, clk.now_ms());
     run(clk, app)
 }
 
@@ -220,6 +220,15 @@ fn new_app(clk: &mut Clock) -> &'static mut app::App {
 fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut tp = touch::Touch::new(&mut clk);
     wdt::kick();
+    native::main_phase(1, clk.now_ms());
+    // The first frame, before USB attaches: a full draw (~20 ms) then cannot
+    // delay the enumeration, so the loop below draws from its first pass
+    // (no wait for the host, nor 3 s without one).
+    if !cfg!(feature = "keep-screen") {
+        lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
+    }
+    app.tick(&mut clk, true);
+    native::main_phase(2, clk.now_ms());
 
     let hw = usb::init_hw(&mut clk);
     wdt::kick();
@@ -1415,8 +1424,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if matches!(r, app::WaveReq::Range(_) | app::WaveReq::Coupling(_)) {
                     // The new scale's full repaint before the stream starts
                     // again (app_wave.rs `wave_rescale`).
-                    let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
-                    app.wave_rescale(usb_up && now >= draw_hold_until && !screenshot::frozen());
+                    app.wave_rescale(now >= draw_hold_until && !screenshot::frozen());
                 }
                 if r != app::WaveReq::Stop {
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
@@ -1510,16 +1518,15 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         logging_prev = busy;
         app.logger_busy = busy;
 
-        // No drawing until USB has enumerated (or 3 s passed): a long first
-        // draw must not starve the enumeration; nor right after a GRAM
-        // read-back, so a multi-request screenshot does not tear.
-        let usb_up = dev.state() == UsbDeviceState::Configured || now > 3000;
+        // No drawing right after a GRAM read-back, so a multi-request
+        // screenshot does not tear (the first frame was drawn before USB
+        // attached, above the loop).
         // A screenshot reading the panel (screenshot.rs) freezes it too.
-        let can_draw = usb_up && now >= draw_hold_until && !logging && !screenshot::frozen();
+        let can_draw = now >= draw_hold_until && !logging && !screenshot::frozen();
         // DBG:AD2:DRAW 2: the DMM page's redraw load during a log session
         // (loss-per-rate experiment): a full view repaint every 100 ms, then
         // the panel again on top.
-        let force_draw = logging && log_draw == 2 && usb_up && now >= log_redraw_at && !screenshot::frozen();
+        let force_draw = logging && log_draw == 2 && now >= log_redraw_at && !screenshot::frozen();
         if force_draw {
             log_redraw_at = now + 100;
             app.invalidate(); // drawn by app.tick below; the panel after it
@@ -1527,7 +1534,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // A panel part only while the ring has room for it (dialog.rs
         // `log_panel_room`: device 2f56ff9, the first draw's hole at 76.8k).
         let panel_room = dialog::log_panel_room(now, logging.then(|| logger.waiting()));
-        if logging && log_draw >= 1 && usb_up && now >= draw_hold_until && !screenshot::frozen() && panel_room && !dialog::log_panel_idle(now) {
+        if logging && log_draw >= 1 && now >= draw_hold_until && !screenshot::frozen() && panel_room && !dialog::log_panel_idle(now) {
             // The logger panel (dialog.rs; one part per pass, ~1 s refresh).
             dialog::log_panel(
                 now,

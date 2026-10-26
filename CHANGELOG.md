@@ -7,8 +7,18 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- Start-up: a splash with the Wiren Board logo, the version, "Loading..."
+  and a progress bar from about 0.2 s after power-on until the meter page;
+  before, the screen stayed dark for 0.7 s (seconds on the first start
+  after an update) and then empty for 3 s more. `DBG:BOOT?` reports each
+  start-up phase's time (`BOOTMS`, `MAINMS`).
+
 ### Fixed
 
+- Start-up: the meter page comes up about 3 s sooner. It waited for the USB
+  host, or 3 s without one, before drawing anything.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or

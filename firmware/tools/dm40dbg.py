@@ -324,7 +324,9 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
                'CALBK': ['status', 'written', 'conflict', 'differs'], 'STACK': ['used', 'size'],
                'CALMS': ['ms'], 'SPICLK': ['div', 'check'], 'FATDIR': ['ok', 'created', 'failed'],
-               'CALREC': ['crc']}
+               'CALREC': ['crc'],
+               'BOOTMS': ['shim', 'board', 'fatren', 'calbk', 'fatdir', 'setfile', 'mirror', 'vdisk', 'refresh'],
+               'MAINMS': ['app', 'touch', 'frame']}
 # spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
 SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
                 'FORCED': 'spiflash::FORCE_SLOW: stock /16',
@@ -413,6 +415,12 @@ def _note(name, v):
         return SPICLK_CHECK.get(v, '?')
     if name == 'CALMS.ms':
         return 'boot safety-copy time (DWT at 200 MHz; 12.5x low on IRC16M)'
+    if name == 'BOOTMS.board':
+        return 'ms: board::init + the splash'
+    if name.startswith('BOOTMS.'):
+        return 'ms'
+    if name.startswith('MAINMS.'):
+        return 'ms after main() started'
     if name == 'PD6.moder':
         return 'input' if v == '0' else 'NOT input'
     if name == 'PD6.pupd':
@@ -440,6 +448,9 @@ BOOT_GROUPS = [
                 'others', 'rcvr_deleted', 'STAGED.n']),
     ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.differs', 'CALMS.ms']),
     ('calibration record', ['CALREC.crc']),
+    ('boot phases', ['BOOTMS.shim', 'BOOTMS.board', 'BOOTMS.fatren', 'BOOTMS.calbk', 'BOOTMS.fatdir',
+                     'BOOTMS.setfile', 'BOOTMS.mirror', 'BOOTMS.vdisk', 'BOOTMS.refresh',
+                     'MAINMS.app', 'MAINMS.touch', 'MAINMS.frame']),
     ('stack', ['STACK.used', 'STACK.size']),
     ('SPI flash clock', ['SPICLK.div', 'SPICLK.check']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),

@@ -960,7 +960,11 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
     `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
     record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
-    data" below). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
+    data" below), then the start-up phase times in ms (`native::put_times`):
+    `BOOTMS,<shim>,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
+    (each phase's own time; `board` includes the splash) and
+    `MAINMS,<app>,<touch>,<frame>` (main's clock after App::new, the touch
+    reset and the first frame). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
