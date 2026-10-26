@@ -722,30 +722,6 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     crate::probe::end();
 }
 
-mod logo_data {
-    include!("stockfont_logo.rs");
-}
-
-/// Side of the round Wiren Board logo (tools/mklogo.py), pixels.
-pub const LOGO: i16 = logo_data::LOGO_N as i16;
-
-/// The round Wiren Board logo at (x, y), anti-aliased against `bg` (the
-/// identity mark of this firmware at the left of every status bar).
-pub fn logo(x: i16, y: i16, bg: Color) {
-    use logo_data::{LOGO_C, LOGO_M, LOGO_N};
-    let green = ramp(0x5DA0, bg); // #5cb400
-    #[cfg(test)]
-    crate::probe::begin(crate::probe::ICON, bg);
-    lcd::set_window(x as u16, y as u16, (x + LOGO - 1) as u16, (y + LOGO - 1) as u16);
-    for p in 0..LOGO_N * LOGO_N {
-        let nib = |t: &[u8]| if p & 1 == 0 { t[p / 2] >> 4 } else { t[p / 2] & 0xF };
-        let c = green[nib(&LOGO_C) as usize];
-        lcd::data(blend(0xFFFF, c, nib(&LOGO_M)));
-    }
-    #[cfg(test)]
-    crate::probe::end();
-}
-
 /// Fixed-cell label, redrawing only the cells whose character differs from
 /// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
 pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {
