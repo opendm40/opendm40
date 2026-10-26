@@ -1144,6 +1144,8 @@ pub struct Dmm {
     /// vetted; `aca_vet`) and the previous result on the row (NaN: none).
     aca_vet_t: u64,
     aca_prev: f32,
+    /// Plain AC V: this row came from a range step (ACV_DC_*).
+    acv_vet: bool,
     /// The reading of this poll is provisional by G7 only (`acdc_reading`).
     prov_side: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
@@ -1612,6 +1614,17 @@ const ACA_VET: bool = true;
 const ACA_VET_REL: f32 = 0.05;
 const ACA_VET_FS: f32 = 0.002;
 const ACA_VET_MAX_MS: u64 = 2000;
+// Plain AC V after a range step: OP1's gain changes (6 / 60 V share a tap),
+// so its output's DC steps and the coupling into PB4 (tau 0.34 s,
+// docs/hy3131-frontend-2026-10-26.md 2) carries the step to AD2, whose RMS
+// block sees it: device 0.2.1, the 0 / 9.5 V 50 / 20 Hz square, LPF 1.33,
+// 0.99, 0.74, 0.55 ... V over the first results after 60 -> 6 V with RMS =
+// sqrt(AC^2 + LPF^2) within ~0.1 V (first finals +3.6..+4.5 %), -25 ... V
+// after 6 -> 60 V (21-26 V for 4.84 V). A result is provisional (grey, no
+// range move down) while |LPF| > ACV_DC_K x the RMS + ACV_DC_FS x the range
+// (its share of the RMS then < 0.15 %), at most ACA_VET_MAX_MS.
+const ACV_DC_K: f32 = 0.05;
+const ACV_DC_FS: f32 = 0.005;
 
 /// Ohm entry (switch-latency.md proposal 2): the stock's button entry writes
 /// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
@@ -1795,6 +1808,7 @@ impl Dmm {
             over_prev: false,
             aca_vet_t: 0,
             aca_prev: f32::NAN,
+            acv_vet: false,
             prov_side: false,
             down_t: 0,
             rd_pending: false,
@@ -2412,6 +2426,7 @@ impl Dmm {
         self.sent.new_run();
         let now = clk.now_ms();
         self.deadline = now + settle;
+        self.acv_vet = false;
         if changed_mode {
             self.entry = now;
             self.reset_values();
@@ -2427,6 +2442,7 @@ impl Dmm {
             self.ac_raw = 0.0;
             self.ac_seed = true;
             self.ac_lead = if mode > 2 { 0 } else { 2 };
+            self.acv_vet = mode == 0;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -4538,8 +4554,12 @@ impl Dmm {
             }
         }
         // Plain AC A after a row write: held (provisional) until two results
-        // in a row agree (ACA_VET_*).
-        let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
+        // in a row agree (ACA_VET_*). Plain AC V after a range step: until
+        // the node's DC has settled (ACV_DC_*).
+        if self.acv_vet && (dcp.abs() <= ACV_DC_K * ac + ACV_DC_FS * lim || now >= self.aca_vet_t + ACA_VET_MAX_MS) {
+            self.acv_vet = false;
+        }
+        let held = !self.acdc && (self.acv_vet || (m >= 4 && !self.aca_vet(now, ac, lim)));
         // Plain AC after a reset: the first used result seeds the filters.
         let first = !self.acdc && !held && core::mem::take(&mut self.ac_seed);
         if first {
