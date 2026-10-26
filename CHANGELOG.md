@@ -17,6 +17,9 @@ section named after the tag as the release notes; how to cut a release:
   or for PT / NTC sensors. Settings > More > More > Accuracy: ON (default)
   / OFF ([manual](docs/manual/README.md#accuracy);
   [firmware/docs/dmm-accuracy.md](firmware/docs/dmm-accuracy.md)).
+- Multimeter: with the accuracy on, the reading's digits below it are grey
+  (the "6" of 4.8176 V ±0.0020 V, and the extra digit), also in the
+  combined view.
 
 ### Changed
 

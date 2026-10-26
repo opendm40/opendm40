@@ -2695,6 +2695,65 @@ fn main() {
             combined(&r, l, 0, 0, false, false, false, "");
             save(&out, file);
         }
+        // The digits below the uncertainty in grey (docs/dmm-accuracy.md
+        // section 5), with the extra digit (`x`) and without; HV red; the
+        // leading digit kept; for comparison a provisional reading (all
+        // grey, VALUE_PROV) and REL / Accuracy OFF (no grey digits).
+        let xv = |mode: u8, v: f32, dec: u8, unit: &'static str, x: bool| rd(mode, Val { ext: x, ..val(v, dec, unit) }, None, None, false);
+        for (file, r, hv, acc, pv) in [
+            ("ag01-grey-dcv-ext", xv(1, 4.81763, 4, "V", true), false, true, false),
+            ("ag02-grey-dcv", xv(1, 4.8176, 4, "V", false), false, true, false),
+            ("ag03-grey-acv-ext", xv(0, 4.50012, 4, "V", true), false, true, false),
+            ("ag04-grey-acv-hv", xv(0, 230.12, 2, "V", false), true, true, false),
+            ("ag05-grey-ohm-ext", xv(10, 1.23456, 4, "k\u{3a9}", true), false, true, false),
+            ("ag06-grey-ohm", xv(10, 444.44, 2, "k\u{3a9}", false), false, true, false),
+            ("ag07-grey-cap-uf", xv(13, 47.3, 2, "\u{b5}F", false), false, true, false),
+            ("ag08-grey-cap-nf", xv(13, 5.0, 3, "nF", false), false, true, false),
+            ("ag09-grey-hz-ext", xv(14, 50.0004, 3, "kHz", true), false, true, false),
+            ("ag10-grey-hz", xv(14, 9.999, 3, "MHz", false), false, true, false),
+            ("ag11-grey-acv-lead", xv(0, 0.0009, 4, "V", false), false, true, false),
+            ("ag12-grey-dcv-neg-ext", xv(1, -12.3456, 3, "V", true), false, true, false),
+            ("ag13-prov-dcv-ext", xv(1, 4.81763, 4, "V", true), false, true, true),
+            ("ag14-off-dcv-ext", xv(1, 4.81763, 4, "V", true), false, false, false),
+        ] {
+            host::reset(0);
+            let r = Reading { prov: pv, ..r };
+            let mut dv = ui::DmmView::new();
+            dv.acc = acc.then_some(ui::Acc { model: 2, tc: true });
+            dv.hv_red = hv;
+            dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+            dv.bar_update(&r);
+            dv.reading(&r, 0, 0);
+            ui::status_right(&status(0));
+            let pts: Vec<f32> = (0..321).map(|i| r.main.v + ((i / 40) % 3) as f32 * r.main.v.abs() * 1e-4).collect();
+            ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, file);
+        }
+        // A grey split that changes between two readings: only the cells
+        // that change colour are repainted, and the result equals a full
+        // draw (ag15 vs ag16).
+        {
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            let a = xv(0, 1.2345, 4, "V", true);
+            let b = xv(0, 4.5001, 4, "V", true);
+            dv.draw_static(dmm::button_of(0), 0, false, false);
+            dv.bar_update(&a);
+            dv.reading(&a, 0, 0);
+            dv.bar_update(&b);
+            dv.reading(&b, 0, 0);
+            save(&out, "ag15-grey-change");
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            dv.draw_static(dmm::button_of(0), 0, false, false);
+            dv.bar_update(&b);
+            dv.reading(&b, 0, 0);
+            save(&out, "ag16-grey-full");
+        }
+        for (file, r) in [("ag20-grey-strip-acv", xv(0, 1.2345, 4, "V", false)), ("ag21-grey-strip-cap", xv(13, 47.3, 2, "\u{b5}F", false)), ("ag22-grey-strip-ohm", xv(10, 444.44, 2, "k\u{3a9}", false))] {
+            combined(&r, None, 0, 0, false, false, false, "");
+            save(&out, file);
+        }
         host::reset(0);
         let (r, l) = find("acdc_600mv");
         dv.label = l;

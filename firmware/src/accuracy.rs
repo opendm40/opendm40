@@ -103,3 +103,49 @@ pub fn err_ulps(sp: Spec, v: f32, dec: u8, model: u8) -> u32 {
     let k = e as u32;
     if e - k as f32 > 1e-3 { k + 1 } else { k }
 }
+
+/// `ulps` rounded to one significant digit, two when the first is 1
+/// (owner 2026-10-26: "±0.2", not "±0.201"; "±0.0015", "±0.03"); half
+/// up: 201 -> 200, 25 -> 30, 149 -> 150, 96 -> 100.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn round_sig(u: u32) -> u32 {
+    let mut p = 1;
+    while u / p >= 100 || (u / p >= 10 && u / p / 10 != 1) {
+        p *= 10;
+    }
+    (u + p / 2) / p * p
+}
+
+/// The digits of readout `s` (the main readout's 7 cells, or the strip's
+/// trimmed value: digits, '-', '.', spaces) that are below the
+/// uncertainty `ulps` (`err_ulps`, units of the last digit; None = no
+/// accuracy): the index from which the cells are drawn grey, `s.len()`
+/// (or more) = none. Doc ../docs/dmm-accuracy.md section 5:
+/// - p = the place of the uncertainty's most significant digit; digits
+///   below p are grey: the last digits(ulps) - 1 digits (ulps 20 at 4
+///   decimals: +-0.0020, p = 10^-3, one grey digit);
+/// - the point takes the colour of the digit after it;
+/// - no exception for the leading digit (owner 2026-10-26): 0.0004 at
+///   +-0.0016 has the 4 grey.
+/// The extra (averaged) digit after `s` is below p whenever this is Some
+/// (ulps >= 1): the caller greys it.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
+pub fn grey_from(s: &[u8], ulps: Option<u32>) -> usize {
+    let n = s.len();
+    let Some(mut u) = ulps else { return n };
+    let mut split = n;
+    let mut i = n;
+    while u >= 10 && i > 0 {
+        i -= 1;
+        if s[i].is_ascii_digit() {
+            u /= 10;
+            split = i;
+        }
+    }
+    if split > 0 && split < n && s[split - 1] == b'.' {
+        split -= 1;
+    }
+    split
+}

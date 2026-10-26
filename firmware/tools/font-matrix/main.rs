@@ -100,7 +100,7 @@ fn main() {
             case(&format!("half b{}", base), &mut out);
         }
         host::reset(0x1234);
-        sf::cells_diff(f, rect(5, 5, 200, lh + 4), &format!("{}{}", s1, s1), "", &[30, 40], fg, bg);
+        sf::cells_diff(f, rect(5, 5, 200, lh + 4), &format!("{}{}", s1, s1), "", &[30, 40], fg, bg, (fg, 8, 8));
         case("cells", &mut out);
     }
     print!("{}", out);

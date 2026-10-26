@@ -117,6 +117,66 @@ fn main() {
         let got = acc::err_ulps(sp(mode, r, f), v, dec, model);
         check(name, got == want, format!("{got}, want {want}"));
     }
+
+    // Grey digits (doc section 5): the main readout's 7 cells ("%7.<dec>f")
+    // from `grey_from` on are grey; (name, mode, range, value, dec, model,
+    // orange part, grey part). The extra digit is grey whenever the label
+    // applies (ulps >= 1), so it is not listed.
+    let grey: &[(&str, u8, i8, f32, u8, u8, &str, &str)] = &[
+        // +-0.0020 V: p = 10^-3, the 10^-4 digit grey
+        ("DC V 4.8176 V, C", 1, 0, 4.8176, 4, 2, " 4.817", "6"),
+        // DM40A: +-0.0065 V, the same split
+        ("DC V 4.8176 V, A", 1, 0, 4.8176, 4, 0, " 4.817", "6"),
+        // +-0.0006 V: every digit significant (only the extra digit grey)
+        ("DC V 1.0000 V", 1, 0, 1.0, 4, 2, " 1.0000", ""),
+        ("DC V -0.0123 V", 1, 0, -0.0123, 4, 2, "-0.0123", ""),
+        // +-0.0053 V
+        ("AC V 1.2345 V", 0, 0, 1.2345, 4, 2, " 1.234", "5"),
+        // +-0.0150 V: p = 10^-2, two digits grey
+        ("AC V 4.5000 V", 0, 0, 4.5, 4, 2, " 4.50", "00"),
+        // +-0.85 V: p = 10^-1
+        ("AC V 230.12 V", 0, 2, 230.12, 2, 2, " 230.1", "2"),
+        // +-0.0016 V >= the reading: no leading-digit exception
+        ("AC V 0.0009 V (leading digit)", 0, 0, 0.0009, 4, 2, " 0.000", "9"),
+        ("AC V 0.0000 V", 0, 0, 0.0, 4, 2, " 0.000", "0"),
+        ("AC A 4.4444 A", 4, 0, 4.4444, 4, 2, " 4.44", "44"),
+        // +-0.0018 kohm
+        ("ohm 1.2345 k", 10, 2, 1.2345, 4, 2, " 1.234", "5"),
+        ("ohm 444.44 k", 10, 4, 444.44, 2, 2, " 444.4", "4"),
+        // +-0.099 M rounds to +-0.1 M: the hundredths go grey too
+        ("ohm 44.444 M", 10, 6, 44.444, 3, 2, " 44.4", "44"),
+        // +-1.49 uF: p = 10^0, the point goes grey with the digit after it
+        ("cap 47.30 uF", 13, 4, 47.3, 2, 2, "  47", ".30"),
+        // +-0.155 nF
+        ("cap 5.000 nF", 13, 0, 5.0, 3, 2, "  5.0", "00"),
+        // +-0.031 nF >= the reading: the 5 goes grey too
+        ("cap 0.005 nF (leading digit)", 13, 0, 0.005, 3, 2, "  0.00", "5"),
+        ("cap 0.050 nF", 13, 0, 0.05, 3, 2, "  0.05", "0"),
+        ("cap 44.44 mF", 13, 7, 44.44, 2, 2, "  44", ".44"),
+        // +-0.006 MHz: every digit
+        ("Hz 9.999 MHz", 14, 6, 9.999, 3, 2, "  9.999", ""),
+        ("Hz 50.000 kHz", 14, 3, 50.0, 3, 2, " 50.00", "0"),
+        // TC K: +-7.0 C
+        ("TC -200.0 C", 15, 0, -200.0, 1, 0, " -200", ".0"),
+        ("TC 1000.0 F", 15, 0, 1000.0, 1, 2, " 100", "0.0"),
+    ];
+    for &(name, mode, r, v, dec, model, a, b) in grey {
+        let f = name.ends_with(" F");
+        let u = acc::round_sig(acc::err_ulps(sp(mode, r, f), v, dec, model));
+        let s = format!("{:>7.*}", dec as usize, v);
+        let i = acc::grey_from(s.as_bytes(), Some(u)).min(7);
+        let (ga, gb) = s.split_at(i);
+        check(name, (ga, gb) == (a, b), format!("{s:?} +-{u}: {ga:?} | {gb:?}, want {a:?} | {b:?}"));
+        // The strip: the same value trimmed (no extra digit).
+        let t = s.trim_start();
+        let j = acc::grey_from(t.as_bytes(), Some(u)).min(t.len());
+        check(name, &t[j..] == b, format!("strip {t:?}: grey {:?}, want {b:?}", &t[j..]));
+    }
+    for (u, want) in [(201, 200), (20, 20), (15, 15), (149, 150), (96, 100), (25, 30), (3, 3), (1999, 2000), (0, 0)] {
+        check("round_sig", acc::round_sig(u) == want, format!("{u} -> {}, want {want}", acc::round_sig(u)));
+    }
+    check("no accuracy: none grey", acc::grey_from(b" 4.8176", None) == 7, String::new());
+
     let (n, f) = unsafe { (CASES, FAILS) };
     println!("accuracy-test: {n} cases, {f} failed");
     std::process::exit(if f == 0 { 0 } else { 1 });

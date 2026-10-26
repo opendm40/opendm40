@@ -34,6 +34,9 @@ pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
 pub const C_SEL: Color = 0x059e; // list selection, spinner band, slider fill
 pub const C_YELLOW: Color = 0xffe0;
+/// The strip value's digits below the accuracy (ui::strip_acc): the DMM
+/// page's VALUE_LOW.
+pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
@@ -3155,6 +3158,9 @@ pub struct StripData {
     /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
     /// "+-" sign); 0 = none.
     pub acc: u8,
+    /// The value's glyphs from this index on are below the accuracy
+    /// (ui::strip_acc, ../docs/dmm-accuracy.md section 5): C_LOW grey.
+    pub grey: u8,
 }
 
 impl StripData {
@@ -3170,6 +3176,7 @@ impl StripData {
         gen: Txt::EMPTY,
         dim: false,
         acc: 0,
+        grey: u8::MAX,
     };
 }
 
@@ -3239,10 +3246,18 @@ pub fn st_sub_x(u: Rect) -> i16 {
     u.x + u.w + 4
 }
 
+#[inline(always)]
 fn st_text(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8) {
+    st_text_grey(r, font, text, fg, align, sp, u8::MAX);
+}
+
+/// `st_text` with the glyphs from index `grey` on in C_LOW (the value's
+/// digits below the accuracy).
+#[inline(never)]
+fn st_text_grey(r: Rect, font: Font, text: &str, fg: Color, align: u8, sp: i8, grey: u8) {
     let t = Ink::new(font, r, text, align, sp);
     paint(r, &[(K_TEXT, C_FILL)], |x, y| match t.at(x, y) {
-        Some(g) => (fg, tag(1, g)),
+        Some(g) => (if g >= grey { C_LOW } else { fg }, tag(1, g)),
         None => (C_FILL, 0),
     });
 }
@@ -3287,8 +3302,8 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value && ol.dim == d.dim) {
-        st_text(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1);
+    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to

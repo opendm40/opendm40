@@ -328,8 +328,9 @@ pub fn run(out: &str) -> usize {
         ("dmm-temp", Dp { rate: false, label: Some("TC K"), ..dp(rd(15, val(86.4, 1, c), Some(val(24.6, 1, c)), None, false)) }),
         // The bargraph (default DMM row), DC V.
         ("dmm-bar", dp(dcv)),
-        // The accuracy label: DC mV, 600 mV range.
-        ("dmm-acc", dp(rd(3, val(123.45, 2, "mV"), None, None, false))),
+        // The accuracy label and the digits below it in grey: DC V 6 V
+        // range, the 6 and the extra digit.
+        ("dmm-acc", dp(rd(1, Val { ext: true, ..val(4.81763, 4, "V") }, None, None, false))),
         // HOLD.
         ("dmm-hold", Dp { hold: 1, ..dp(dcv) }),
         // AutoHold with a captured value.

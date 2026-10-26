@@ -41,6 +41,9 @@ pub const VALUE_HV: Color = 0xC9A0;
 /// value a DMM gate still holds): the digits and aux values in the stock
 /// grid / frame grey instead of VALUE, so they read as "not final".
 pub const VALUE_PROV: Color = DIM;
+/// The main readout's digits below the reading's uncertainty (the accuracy
+/// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
+pub const VALUE_LOW: Color = 0xA342; // (165, 104, 16): VALUE dimmed
 
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
@@ -211,7 +214,8 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
 
 pub struct DmmView {
     /// Main readout as last drawn (text, cell format) for redrawing only the
-    /// digits that changed.
+    /// digits that changed; [7]: the first grey cell as last drawn
+    /// (`acc::grey_from`; 7 = the extra digit only, 8 = none).
     last_txt: [u8; 8],
     last_fmt: usize,
     /// Extra (small) digit as last drawn, 0 = none.
@@ -318,11 +322,15 @@ pub fn acc_ulps(r: &Reading, a: Acc) -> Option<u32> {
     // besides capacitance.
     let f = v.unit.as_bytes().last() == Some(&b'F');
     let sp = acc::spec(r.mode, r.range, r.acdc, a.tc, f)?;
-    Some(acc::err_ulps(sp, v.v, v.dec, a.model))
+    Some(acc::round_sig(acc::err_ulps(sp, v.v, v.dec, a.model)))
 }
 
-/// `ulps` x 10^-`dec` with `dec` decimals ("0.0020").
-fn acc_fmt(b: &mut [u8; 16], ulps: u32, dec: u8) -> &str {
+/// `ulps` x 10^-`dec` without trailing zeros ("0.002", "0.0015").
+fn acc_fmt(b: &mut [u8; 16], mut ulps: u32, mut dec: u8) -> &str {
+    while dec > 0 && ulps % 10 == 0 && ulps > 0 {
+        ulps /= 10;
+        dec -= 1;
+    }
     let mut x = ulps as f32;
     for _ in 0..dec {
         x *= 0.1;
@@ -332,15 +340,19 @@ fn acc_fmt(b: &mut [u8; 16], ulps: u32, dec: u8) -> &str {
 
 use crate::scope_ui::{pm, PM_W};
 
-/// The combined view's strip: the accuracy label (`acc_ulps`, ASCII unit,
+/// The combined view's strip: the value's digits below the uncertainty
+/// grey (`StripData::grey`); the accuracy label (`acc_ulps`, ASCII unit,
 /// no space, as the sub readings) in the lower sub row when it is free,
 /// else in the upper one; none when both hold a sub reading (AC V / A: Hz
 /// and duty) or "Overload".
 #[inline(never)]
 #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
 pub fn strip_acc(d: &mut crate::scope_ui::StripData, r: &Reading, acc: Option<Acc>) {
+    let ulps = acc.and_then(|a| acc_ulps(r, a));
+    // The value's digits below the uncertainty (section 5 of the doc).
+    d.grey = acc::grey_from(d.value.as_str().as_bytes(), ulps) as u8;
+    let Some(u) = ulps else { return };
     let Some(i) = [1, 0].into_iter().find(|&i| d.sub[i].as_str().is_empty()) else { return };
-    let Some(u) = acc.and_then(|a| acc_ulps(r, a)) else { return };
     let mut b = [0u8; 16];
     let mut t = crate::scope_ui::Txt::new(acc_fmt(&mut b, u, r.main.dec));
     ascii_unit(r.main.unit, &mut t);
@@ -532,7 +544,7 @@ fn join<'a>(buf: &'a mut [u8; 24], parts: &[&str]) -> &'a str {
 impl DmmView {
     pub const fn new() -> Self {
         DmmView {
-            last_txt: [0; 8],
+            last_txt: [0, 0, 0, 0, 0, 0, 0, 8],
             last_fmt: 255,
             last_ext: 0,
             last_unit: "",
@@ -564,14 +576,15 @@ impl DmmView {
         }
     }
 
-    /// The accuracy label of `r` (the end of `reading`): drawn on a change.
+    /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
+    /// of it under `acc`): drawn on a change.
     #[inline(never)]
     #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
-    fn acc_update(&mut self, r: &Reading) {
+    fn acc_update(&mut self, r: &Reading, ulps: Option<u32>) {
         if !self.bar_on || self.power {
             return;
         }
-        let k = self.acc.and_then(|a| acc_ulps(r, a)).map(|u| (u, r.main.dec, r.main.unit));
+        let k = ulps.map(|u| (u, r.main.dec, r.main.unit));
         if self.acc_drawn && self.acc_k == k {
             return;
         }
@@ -734,6 +747,12 @@ impl DmmView {
         let recolor = self.last_col != color;
         self.last_col = color;
         let vcol = if r.prov { VALUE_PROV } else { VALUE };
+        // The digits below the uncertainty (doc dmm-accuracy.md section 5):
+        // grey from cell `grey` on (7: the extra digit only, 8: none).
+        let ulps = if self.power { None } else { self.acc.and_then(|a| acc_ulps(r, a)) };
+        let grey = if ulps.is_some() { acc::grey_from(s.as_bytes(), ulps).min(7) as u8 } else { 8 };
+        let last_grey = self.last_txt[7];
+        self.last_txt[7] = grey;
         // Only the changed digits are redrawn (cell layout unchanged).
         let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some() && !recolor;
         let prev_txt = self.last_txt;
@@ -772,15 +791,15 @@ impl DmmView {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
             self.ol_word = false;
         }
-        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG);
+        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
         if r.main.ol && (!same_layout || !self.ol_word) {
             ol_word(ow, color);
             self.ol_word = true;
         }
         if let Some(e) = ext {
-            if !same_layout || last_ext != e {
+            if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
                 let r = rect(XT_X as i16, 68 + md, XT_W as i16, 80);
-                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, color, BG);
+                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, if grey < 8 { VALUE_LOW } else { color }, BG);
             }
         } else if last_ext != 0 {
             // The full cells end at 400: the rest of the +1 digit cell.
@@ -1039,7 +1058,7 @@ impl DmmView {
         if let Some(pv) = pwr {
             self.power_row(&pv, lim);
         }
-        self.acc_update(r);
+        self.acc_update(r, ulps);
     }
 
 }
