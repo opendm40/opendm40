@@ -88,7 +88,8 @@ pub fn stack_use() -> (u32, u32) {
 /// 16 MHz); SPICLK:
 /// SPI-flash divider in use (4 / 16) and the boot self-check's verdict
 /// (spiflash::ClockCheck: OK FORCED NOCHIP NOSIG DIFF1 DIFF2 NOTRUN);
-/// then FATDIR (fatdir.rs) and SETTINGS (`put_settings`).
+/// then FATDIR (fatdir.rs), CALREC (the calibration record's CRC, dmm.rs
+/// `load_record`) and SETTINGS (`put_settings`).
 pub fn put_extra(s: &mut crate::scpi::Scpi) {
     use crate::calbackup::Status as C;
     let r = crate::calbackup::result();
@@ -145,6 +146,9 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
             s.put_bytes(b",");
         }
     }
+    // CALREC,<OK|BADCRC>: the calibration record's CRC at start-up
+    // (dmm.rs load_record; BADCRC = every calibration value at its default).
+    s.put_bytes(if crate::dmm::rec_crc_ok_at_boot() { b",CALREC,OK" } else { b",CALREC,BADCRC" });
     put_settings(s);
 }
 

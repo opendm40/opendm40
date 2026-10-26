@@ -398,8 +398,12 @@ array does nothing measurable ([`firmware/docs/hy3131-frontend-2026-10-26.md`](.
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
-- mV / thermocouple: HY3131 PB0 through OP1 x10. Cold junction = the HY3131
-  die sensor.
+- mV: OP1+ on RLU (the stock DC mV rows), OP1 x10 on 60 mV, x1 on 600 mV,
+  AD1 = OP1O - AGND; RLU as the jack's mV node is *inferred*. Noise and gain
+  options: [`hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)
+  section 4.
+- Thermocouple: OP1+ on HY3131 PB0 (the stock temperature rows, R32 0x3C), OP1
+  x10 on r0. Cold junction = the HY3131 die sensor.
 - AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2 (the capacitor is *inferred* from the
   exponential decay at PB4 and the Hycon demo board's C16 / R2, APD-DMM001 p.22).
   The coupling network's time constant is 0.34 s (one unit, a DC step at PB4); R and C separately are
