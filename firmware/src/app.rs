@@ -455,6 +455,10 @@ fn buzzer_init() {
 /// Buzzer duty (fraction of the period) at `vol` 0..100 % (stock: duty =
 /// min(v/3, 0.99) * 0.5; 100 % = 0.495, the loudest the stock drives).
 fn buzz_k(vol: u8) -> f32 {
+    // `mute` (test builds): every beep and alarm at duty 0.
+    if cfg!(feature = "mute") {
+        return 0.0;
+    }
     let v = vol as f32 / 100.0;
     (if v < 0.9 { v / 3.0 } else { v.min(0.99) }) * 0.5
 }
