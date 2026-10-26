@@ -68,13 +68,27 @@ What waits for the owner; each line links to the material.
       5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
          there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
-- [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
+- [x] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
       in whole runs `r30-300-30` failed 4 of 5 (ranges 60, 60 M, 6000, 600, 60: the first step down from 60 MΩ is
       4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
       failed 1 of 4. The cause is unknown (inferred: the scenario is the run's last, where its scheduled input
       changes drift against the firmware's uptime, the file's own note on `later`).
       With the 60 Ω range removed, `r30-300-30` stays on 600 Ω (no range change) and passed in a whole run;
       `r100k-key` failed that run (MANU on 3 polls after AUTO) and passed alone.
+      Cause (`r100k-key`, firmware): the AUTO key held 1 s ([app.rs](src/app.rs) `auto_key_end`, long press)
+      set the autorange without `auto_entered`, so the last manual reading stayed shown with MANU until the
+      next conversion; on ohm RES:RANG? stepped 6 M -> 600 k at +1.25 s under it and MANU lasted to
+      +1.43 .. 1.48 s after the DBG:KEY, against the row's 1.5 s grace (`late`): pass or fail on the
+      conversion phase. Fix (0.2.1): `auto_key_end` calls `auto_entered`; AUTO and dashes at +1.01 s.
+      The test: the windows sit on each input's logged fw uptime (emu/emusync.py `Markers`), not on
+      BOOT_OFS 0.906 (the boot is ~2.8 s: the inputs, `later` ones too, came ~1.9 s early on the fw clock;
+      now `later` lands at +4.95 / +9.95 s for +5 / +10); the held-key row fails when the range leaves the
+      manual one while the bar reads MANU. Results: new test on the old firmware 3 of 3 FAIL; on 0.2.1
+      `r100k-key` alone 3 of 3 and whole runs 4 of 4 (4 in parallel, host load ~8) PASS; autokeytest.py
+      PASS. The old `r30-300-30` failures were with the 60 Ω range (its own cause not found, branch
+      feat/ohm60) and do not occur on main.
+      (verify on device: RES, `CONF:RES 6E6` on a 100 kΩ resistor, AUTO key held 1 s: the status bar shows
+      AUTO and dashes at the beep, never the 6 MΩ reading with MANU after it.)
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
