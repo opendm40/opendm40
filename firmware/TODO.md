@@ -4098,7 +4098,7 @@ Emulator (emu/):
       that misses the opening edge needs a period more: covered above ~0.9 Hz (the 2.2 s window without counts).
 - [ ] Device check (5 min, MMB3.0 frequency output on V-COM): (1) Hz function, 10 Hz: a reading within 1 s, new values
       every ~0.35 s, the reading shows the small digit (10.000x Hz). (2) 50 Hz, 1 kHz, 10 kHz as in
-      [docs/data/freq-steps-2026-10-25.md](docs/data/freq-steps-2026-10-25.md): the same values as that recording
+      [docs/data/freq-steps-2026-10-25.csv](docs/data/freq-steps-2026-10-25.csv): the same values as that recording
       (50.000 Hz without the small digit, 1.0000x kHz with it). (3) 5 Hz: a reading (~5.0000x Hz) within ~2 s, a new
       value every ~0.4 s or faster. (4) 2 Hz: a reading within ~3 s, new values about once a second; duty ~50 %.
       (5) Output off / leads apart while 10 Hz shows: 0.000 Hz within ~1 s; Hz entered with nothing connected: 0.000 Hz
