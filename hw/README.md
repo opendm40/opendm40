@@ -6,8 +6,9 @@ and the mysku.club review they come from (CTAHOK, 2025-04-25,
 https://mysku.club/blog/aliexpress/103047.html). Datasheets are in
 [datasheets/](datasheets/README.md).
 
-All photos on this page are © CTAHOK (mysku.club review, 2025-04-25), kept
-for reference only and not under this repo's license; sources and details in
+The teardown photos on this page are © CTAHOK (mysku.club review, 2025-04-25), kept
+for reference only and not under this repo's license; the photos taken for this
+repo are under its MIT licence. Sources and details in
 [photos/README.md](photos/README.md).
 
 This page is about hardware only: chips, pins, circuits. Flash layout and boot
@@ -151,7 +152,7 @@ scope, generator) shares one ground.
 | DMM relay | Hongfa [HFD4/3-LS](datasheets/hongfa-hfd4.pdf) (DPDT, 3 V, latching per BOM) | marking in photos [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg), [relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg); review |
 | Input protection | varistors 07D681K (680 V), blue disc parts, 2 W wirewound/film resistors; FMMT619 pair (*inferred*, chat report [#41820](https://t.me/S2084K/41820)) | photos ([relay-hfd4-and-varistor-closeup.jpg](photos/relay-hfd4-and-varistor-closeup.jpg), [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg)); which disc is a PTC and which a MOV is *inferred* from the markings |
 | Current shunts | 10 mohm (wire shunt), 0.5 ohm (SMD 2512 "R500"), 47 ohm (MELF 0207, *inferred*; uA shunt 0.5 + 47 = 47.5 ohm) | 0.5 ohm: marking in [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg); values from the stock scaling and opendm40 checks (below) |
-| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A; switch the current ranges inside the one A jack | BOM only |
+| Current range MOSFETs | RUH30J51M dual N-MOSFET, 30 V / 50 A, and a second MOSFET marked RU30J30M (not in the BOM); switch the current ranges inside the one A jack | BOM for the RUH30J51M; both markings on the board bottom next to the A jack in [bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg](photos/bottom-a-jack-mosfets-ru30j30m-ruh30j51m.jpg); what the RU30J30M switches is *inferred* |
 | Fuse | ceramic cartridge in clips, next to the A jack | photo [input-jacks-shunts-fuse-relay.jpg](photos/input-jacks-shunts-fuse-relay.jpg) and [opened-case-overview.jpg](photos/opened-case-overview.jpg); one 10 A ceramic fuse for all shunts by the Alientek DM40 manual (not in the repo) |
 | Scope ADC | 3PEAK [3PA1030](datasheets/3peak-3pa1030-reva1.pdf), 10 bit, 50 MSPS, parallel | BOM; 10-bit parallel bus on PB0..PB9 in code ([`firmware/src/scope.rs`](../firmware/src/scope.rs)) |
 | Scope gain mux | [HC4051](datasheets/ti-cd74hc4051-schs122o.pdf) (header says "HCF4051") | BOM, `stock/re/analysis/scope_gen_v2_6.h` |
@@ -356,9 +357,10 @@ reverse channel, which fits SCK, MOSI, CS out and MISO back; datasheet
 | Op amps | OP1, OP2 (2 MHz), OP3 (ohm / diode source) | x1 / x10 gain stages on the shunt and mV paths |
 
 AD1 on a periodic input aliases (the "AD1 beat"): the sinc² comb and its blind spots per OSR are in [`firmware/docs/dmm-rate-filter-survey.md`](../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained) 1.3, the measured response in [`device-check-2026-10-21.md`, "AD1 OSR characterization"](../docs/history/device-check-2026-10-21.md#ad1-osr-characterization-ea73ea5-2026-10-24-1433---1545).
-AC bandwidth is about 20 kHz (-3 dB, chat reports [#24765](https://t.me/S2084K/24765),
-[#16732](https://t.me/S2084K/16732)); the AC V path has an external coupling capacitor with a time constant
-of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches.md), `stock/re/docs/history/acdc-stock-vs-opendm40.md`).
+AC bandwidth is about 20 kHz (-3 dB, one rough chat measurement, [#16732](https://t.me/S2084K/16732)).
+The AC V path has a coupling network into PB4 with τ = 0.34 s (one unit; R · C only) and the
+FTP-FTN pre-filter capacitor is ~26 nF; the stock AC V rows' FS9 switch shapes the HF response, the ACC
+array does nothing measurable ([`firmware/docs/hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)).
 
 **MCU GPIOs on the DMM side** (the complete list the stock drives,
 `stock/re/analysis/hy3131_v2_6.h` lines 14-18, [`firmware/src/dmm.rs`](../firmware/src/dmm.rs) `relay_pa` / `relay_pe`):
@@ -396,9 +398,33 @@ of ~0.3 s ([`firmware/docs/acdc-approaches.md`](../firmware/docs/acdc-approaches
 - Diode: OP3 source with the 900 k / 100 k divider on HY3131 PB0 / PB8.
 - Capacitance: RC relaxation (R = 1020 k .. 1.5 k) or constant-current ramp
   switched on HY3131 PA4..PA7.
-- mV / thermocouple: HY3131 PB0 through OP1 x10. Cold junction = the HY3131
-  die sensor.
-- AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2.
+- mV: OP1+ on RLU (the stock DC mV rows), OP1 x10 on 60 mV, x1 on 600 mV,
+  AD1 = OP1O - AGND; RLU as the jack's mV node is *inferred*. Noise and gain
+  options: [`hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)
+  section 4.
+- Thermocouple: OP1+ on HY3131 PB0 (the stock temperature rows, R32 0x3C), OP1
+  x10 on r0. Cold junction = the HY3131 die sensor.
+- AC V: OP1 output -> external coupling capacitor -> HY3131 PB4 -> AD2 (the capacitor is *inferred* from the
+  exponential decay at PB4 and the Hycon demo board's C16 / R2, APD-DMM001 p.22).
+  The coupling network's time constant is 0.34 s (one unit, a DC step at PB4); R and C separately are
+  not known (the demo board: 1 µF and 1 MΩ to ground, 1 s).
+- AD1 pre-filter: an external capacitor between HY3131 FTP and FTN, ~26 nF (one unit: τ = 2.56 ms
+  with the on-chip 100 k, SFT1 = 00; the demo board fits 27 nF). The stock rows set SFT1 = open in
+  V / A / Hz and most capacitance rows, 10 k in the first DC mA / µA row (CFG_F8_9 r0), 0 Ω in ohm
+  60 Ω..600 kΩ, continuity, diode and the two last capacitance rows, 100 k in ohm 6 MΩ / 60 MΩ.
+- Divider switches in the stock V rows (R2A..R2E, `hy3131_tables.rs` CFG_F0 / CFG_F1):
+
+  | row | r0 | r1 | r2 | r3 |
+  |---|---|---|---|---|
+  | AC V | FS1, PS6 SS6, FS9 PS8 | as r0 | FS1, PS5 SS5, FS9 PS8 | FS1, PS5 SS5 PS4 SS4, FS9 PS8 |
+  | DC V | DS0 FS0, PS7 SS7, FS9 PS8 | DS0 FS0, PS6 SS6, DS9 FS9 PS8 | DS0 FS0, PS5 SS5, DS9 FS9 PS8 | DS0 FS0, PS5 SS5 PS4 SS4, DS9 FS9 PS8 |
+
+  AC V r0 and r1 share the tap and differ in the OP1 gain (R25). What the PA9 network is on the
+  DM40 is not known (APD-DMM003 §4 shows 30 k + 5 pF on PA9 for the AC V compensation). Clearing
+  FS9 in the AC V rows raises the HF response by the same amount on the 6 V and 600 V taps
+  (+3.5 % RMS of a square at 5 kHz, +17 % at 20 kHz), so its element does not load the tap
+  (*inferred*); the ACC array (R30, SMODE5 set in the AC V rows) changes nothing measurable
+  ([`hy3131-frontend-2026-10-26.md`](../firmware/docs/hy3131-frontend-2026-10-26.md)).
 
 ![DMM input area: relay, varistors, R500 shunt, wire shunt, fuse, COM and A jacks](photos/input-jacks-shunts-fuse-relay.jpg)
 
@@ -709,8 +735,11 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
 14. [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) placement: the BOM post says the reference sits outside the
     shielded zone; this page's diagram draws it in the (shielded) DMM domain,
-    which is about the isolated side, not the shield can. Not checked on the
-    photos.
+    which is about the isolated side, not the shield can. The photo
+    [dmm-area-max6190-shunt-fuse.jpg](photos/dmm-area-max6190-shunt-fuse.jpg)
+    shows it on the top side in the area under the DMM shield plate, next to the
+    AGND test point, outside the small shield can; whether that plate counts as
+    the BOM's "shielded zone" is unknown.
 15. What the four optocouplers carry: the BOM post guesses the HY3131 INT plus
     the relay and MOSFET drive; the stock firmware does not use the HY3131
     IRQ ([DMM front end](#dmm-front-end-hy3131)), and the MCU drives four

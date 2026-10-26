@@ -323,7 +323,8 @@ BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_m
             'crash_word', 'healthy', 'fmc_last']
 BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
                'CALBK': ['status', 'written', 'conflict', 'differs'], 'STACK': ['used', 'size'],
-               'CALMS': ['ms'], 'SPICLK': ['div', 'check'], 'FATDIR': ['ok', 'created', 'failed']}
+               'CALMS': ['ms'], 'SPICLK': ['div', 'check'], 'FATDIR': ['ok', 'created', 'failed'],
+               'CALREC': ['crc']}
 # spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
 SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
                 'FORCED': 'spiflash::FORCE_SLOW: stock /16',
@@ -438,6 +439,7 @@ BOOT_GROUPS = [
     ('fatren', ['fatren', 'found', 'renamed', 'old_backup', 'old_deleted', 'freed_clusters',
                 'others', 'rcvr_deleted', 'STAGED.n']),
     ('calbackup', ['CALBK.status', 'CALBK.written', 'CALBK.conflict', 'CALBK.differs', 'CALMS.ms']),
+    ('calibration record', ['CALREC.crc']),
     ('stack', ['STACK.used', 'STACK.size']),
     ('SPI flash clock', ['SPICLK.div', 'SPICLK.check']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),
