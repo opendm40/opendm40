@@ -519,6 +519,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public double HfPb1Mv;
         /// "hfpb2:mV per V": PB2 in the DC mV row, the same (the A-PROT probe's 10 mohm node).
         public double HfPb2Mv;
+        /// "hfnocnt:1": the AC mV row's frequency counter reads nothing for a jack above HfBwHz
+        /// (device 2026-10-26: the 66 kHz square on AC mV 600 mV was not "driven" by the counter).
+        public bool HfNoCnt;
+        /// "hfboth:p": in the DC V / DC mV rows a jack above HfBwHz makes each comparator update on
+        /// PB1 read CMPHO + CMPLO with probability p, else nothing (device 2026-10-26: the 66 kHz
+        /// square read CTSTA 0x70 and 0 in turn in DC V AUTO and DC mV; a pickup on PB1 of its own,
+        /// `hfpb1`, is replaced while the jack is above HfBwHz). INFERRED shape.
+        public double HfBoth;
         /// AD1 decimation memory (opt-in, "ad1mix:1"; device decaf60, DC V AUTO from 600 V: one
         /// reading at 77-79 % on 6 V after two range steps). A configuration write that does not
         /// restart AD1 (R22 unchanged, ENAD1 kept: one autorange step right after another, both
@@ -858,6 +866,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hfdc": HfDcK = o.Value; break;
                 case "hfpb1": HfPb1Mv = o.Value; break;
                 case "hfpb2": HfPb2Mv = o.Value; break;
+                case "hfnocnt": HfNoCnt = o.Value != 0; break;
+                case "hfboth": HfBoth = o.Value; break;
                 case "ohmrevol": OhmRevOl = o.Value != 0; break;
                 case "ohmop1k": OhmOp1K = o.Value; break;
                 case "ohmboth": OhmBothV = o.Value; break;
@@ -1327,6 +1337,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 break;
             }
             case Role.AcV: case Role.AcMv: case Role.Freq: case Role.DcV: case Role.DcMv: case Role.AcA: case Role.DcA:
+                // HfNoCnt: the AC mV row's counter does not see a jack above HfBwHz
+                if(HfNoCnt && role == Role.AcMv && HfBwHz > 0 && sigHz > HfBwHz) break;
                 SignalEdges(ac, out f, out duty, CmpHighThreshold, CmpLowThreshold);
                 break;
             }
@@ -2095,6 +2107,17 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     double dc, ac, hz, duty; string shape;
                     Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                     if(Fe.RelayPa == 1 && Math.Abs(Wave(now, dc, ac, hz, shape, duty)) >= OhmBothV) cmpHigh = cmpLow = true;
+                }
+                if(HfBoth > 0 && scmpiPb1 && (role == Role.DcV || role == Role.DcMv) && HfBwHz > 0)
+                {
+                    // a jack above HfBwHz overdrives the comparator on PB1 now and then (HfBoth)
+                    double dc, ac, hz, duty; string shape;
+                    Fe.VJack(role == Role.DcMv ? 1 : 0, out dc, out ac, out hz, out shape, out duty);
+                    if(hz > HfBwHz && ac > 0)
+                    {
+                        var both = faultRng.NextDouble() < HfBoth;
+                        cmpHigh = cmpLow = both;
+                    }
                 }
                 var dx = now - ohmExitT;
                 if(role == Role.DcA && dx >= 0 && dx < OhmExitBoth) cmpHigh = cmpLow = true;

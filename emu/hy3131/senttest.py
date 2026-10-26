@@ -126,6 +126,27 @@ SC = {
                                     (10, 'vsrc:0,ac=3,f=66000', {'NONE'}),
                                     (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
                     {'never': [('AJACK', 1, 2), ('APROT', 0, 3), ('DC', 1, 2)]}),
+    # The device check of 2026-10-26 (0.2.4): the MR9270's 66 kHz output, a 0 / 9.5 V square, on
+    # V-COM. AC mV 600 mV: AJACK,AD1PK_PB1 (~30 mV RMS); the counter did not say driven (the
+    # model's `hfnocnt`); the input clips the square (`mvclamp`, its PB1 pickup `mvpb1`): the LPF's
+    # ~0.6 V says driven (MV_DC_DRV_MV). DC V AUTO: AJACK,CMP_PB1 once in the log.
+    'acmv-sq66k-600': ('VOLT:AC 0.6', 30, [(0, 'open;%s;hfnocnt:1;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50' % HF, {'NONE'}),
+                                           (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
+                                           (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                       {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'acmv-sq66k-60': ('VOLT:AC 0.06', 30, [(0, 'open;%s;hfnocnt:1;mvclamp:1.212;mvpb1:10;vsrc:0,ac=0.003,f=50' % HF, {'NONE'}),
+                                           (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
+                                           (20, 'vsrc:0,ac=0.003,f=50;isrc:0,ac=0.005,f=60', {'AJACK'})], [],
+                      {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    # (`hfboth`: the comparator on PB1 reads 0x70 and 0 in turn, as the device in DC V AUTO / DC mV)
+    'dcv-auto-sq66k': ('VOLT:DC', 30, [(0, 'open;%s;hfnocnt:1;hfboth:0.3;mvclamp:1.212;mvpb1:10;vsrc:1' % HF, {'NONE'}),
+                                       (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
+                                       (20, 'vsrc:none;isrc:0.002', {'AJACK'})], [],
+                       {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
+    'dcmv-sq66k': ('VOLT:DC 0.6', 30, [(0, 'open;%s;hfnocnt:1;hfboth:0.3;mvclamp:1.212;mvpb1:10;vsrc:0.1' % HF, {'NONE'}),
+                                       (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
+                                       (20, 'vsrc:none;isrc:0.002', {'AJACK'})], [],
+                   {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
     'acv-hf':     ('VOLT:AC 6', 24, [(0, 'open;%s;vsrc:0,ac=1,f=50' % HF, {'NONE'}),
                                      (10, 'vsrc:0,ac=3,f=66000', {'NONE'})], [], {'never': [('DC', 1, 2)]}),
     # AC+DC V on manual 600 mV (doc 4.13 gap): its AC phase is the AC mV row with the same AD1

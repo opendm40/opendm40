@@ -1083,7 +1083,7 @@ pub struct Dmm {
     /// node); 1 = the next result, whose window began before that read.
     ac_lead: u8,
     /// AC+DC mV: the last DC phase result's magnitude was over the range
-    /// (`mv_vside`).
+    /// (`mv_vside`); plain DC mV: the last result was (its V_GATE).
     mv_dc_drv: bool,
     f_ac: f32,
     f_lpf: f32,
@@ -3941,8 +3941,14 @@ impl Dmm {
             // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
             self.mv_dc_drv = mag > ov * lim;
         } else if m == 3 {
-            // plain DC mV's V_GATE: over the range (OL) = a source on V-COM
-            self.sent.v_side(now, mag > ov * lim);
+            // plain DC mV's V_GATE: over the range (OL) = a source on V-COM;
+            // "free" needs two results in range in a row (`mv_dc_drv` = the
+            // last one was over): one stray conversion (a row rewrite of the
+            // A-PROT probe) read in range among OL ones in the emulator and
+            // let A-PROT trip (loudtest ajack-dcmv-hf, 1 of 3 runs)
+            let ol = mag > ov * lim;
+            self.sent.v_side(now, ol || self.mv_dc_drv);
+            self.mv_dc_drv = ol;
         }
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
@@ -4313,7 +4319,7 @@ impl Dmm {
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
         if m == 2 && self.sent.vgate {
-            self.mv_vside(now, dcp.abs() + core::f32::consts::SQRT_2 * sq * s);
+            self.mv_vside(now, dcp.abs(), core::f32::consts::SQRT_2 * sq * s);
         }
         if self.diag_on {
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
@@ -4971,27 +4977,28 @@ impl Dmm {
         (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none()
     }
 
-    /// V_GATE (AC mV), per result: `pk` = the node's peak estimate (mV,
-    /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
-    /// the open V jack of an A-jack current (sentinel MV_DRV_K).
-    /// AC+DC mV: also driven while its DC phase's last result was over the
-    /// range (`mv_dc_drv`; device 185c066: after a source went off the open
-    /// input read OL and the AC phase's results "free" while PB1 hit, a
-    /// false A-JACK).
-    /// Plain AC mV: also driven while the frequency counter reads above
-    /// sentinel::V_HF_KHZ (the RMS misses such a signal: 26.6 mV of a 66 kHz
-    /// one on the device); a "free" verdict dates from the start of the
-    /// counter's last gate (none yet in this row: no verdict), so a signal
-    /// that starts within a run is judged by a gate that began after it
-    /// (emulator acmv-hf60: a gate across the onset read the 50 Hz before it).
+    /// V_GATE (AC mV), per result: `dc` = |LPF|, `ac` = sqrt(2) x RMS (mV).
+    /// Driven (a source on V-COM, not the open V jack of an A-jack current):
+    /// - the node's peak estimate dc + ac far beyond the range (MV_DRV_K);
+    /// - a DC level on the node above MV_DC_DRV_MV (the row is DC-coupled;
+    ///   the 0 / 9.5 V square at 66 kHz, clipped by the mV input: 0.51 V,
+    ///   under 1.5 x 600 mV, with an RMS of ~30 mV; device 2026-10-26);
+    /// - plain AC mV: the frequency counter above sentinel::V_HF_KHZ; a
+    ///   "free" verdict then dates from the start of the counter's last gate
+    ///   (none yet in this row: no verdict), so a signal that starts within
+    ///   a run is judged by a gate that began after it (emulator acmv-hf60);
+    /// - AC+DC mV: its DC phase's last result over the range (`mv_dc_drv`;
+    ///   device 185c066: after a source went off the open input read OL and
+    ///   the AC phase's results "free" while PB1 hit, a false A-JACK).
     #[inline(never)]
-    fn mv_vside(&mut self, now: u64, pk: f32) {
+    fn mv_vside(&mut self, now: u64, dc: f32, ac: f32) {
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
-        let drv = pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv);
+        let drv = dc + ac > sentinel::MV_DRV_K * lim
+            || dc > sentinel::MV_DC_DRV_MV
+            || (self.acdc && self.mv_dc_drv)
+            || (!self.acdc && self.freq.f_khz > sentinel::V_HF_KHZ);
         if drv || self.acdc {
             self.sent.v_side(now, drv);
-        } else if self.freq.f_khz > sentinel::V_HF_KHZ {
-            self.sent.v_side(now, true);
         } else if !self.freq.f_khz.is_nan() {
             // (`freq.next` = the last result + 350 ms, freq_secondary; its
             // gate began 350 ms before that result)

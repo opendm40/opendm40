@@ -487,16 +487,23 @@ pub const MV_DRV_K: f32 = 1.5;
 /// a peak hold sees the onset first).
 pub const MV_VGATE_LAG_MS: u16 = 250;
 
-/// Plain AC mV / AC V (V_HF): the row's frequency counter (the secondary
-/// readout, every 350 ms) above this (kHz) = V-COM carries a signal the
-/// RMS / LPF blocks cannot see (the AC bandwidth is about 20 kHz, -3 dB,
-/// hw/README.md "DMM front end"; half of it here). Device (66 kHz from a generator on
-/// V-COM, A jack empty): AC V 6 V read 1.16 mV with a DC? hint, AC mV
-/// 600 mV 26.6 mV with A-JACK (AD1 peak on PB1), DC mV 600 mV OL with
-/// A-JACK / A-PROT. Such a signal is "driven" for V_GATE (no A-JACK) and
-/// no DC? (the AC reading does not show the AC part). That the counter
-/// sees such a signal in these rows is INFERRED (the comparator: 6 MHz).
+/// AC V (DC?) and plain AC mV (V_GATE): the row's frequency counter (the
+/// secondary readout, every 350 ms) above this (kHz) = V-COM carries a
+/// signal the RMS block cannot see (the AC bandwidth is about 20 kHz, -3 dB,
+/// hw/README.md "DMM front end"; half of it here). That the counter sees
+/// such a signal is INFERRED: the device's AC mV 600 mV with a 66 kHz
+/// 0 / 9.5 V square did not say driven by it (2026-10-26; MV_DC_DRV_MV did
+/// it in the emulator).
 pub const V_HF_KHZ: f32 = 10.0;
+/// AC mV (V_GATE): |LPF| above this (mV) = a DC level on the DC-coupled
+/// node that an open V jack does not show. Device 2026-10-26 (A jack empty,
+/// a 66 kHz 0 / 9.5 V square on V-COM): AC mV 600 mV read ~30 mV RMS and
+/// raised A-JACK, DC mV read OL; the mV input clips the square (emulator
+/// `mvclamp`): the device's AC-phase LPF read 0.509 V (AC+DC 600 mV,
+/// 0.2.5), under MV_DRV_K x 600 mV. An input left
+/// charged after a source (185c066, OL) counts as driven too, as AC+DC
+/// mV's `mv_dc_drv` does.
+pub const MV_DC_DRV_MV: f32 = 300.0;
 /// DC mV: a V-side result counts for V_GATE only from this long after the
 /// hit run began (a conversion started before the onset is not the input).
 pub const DCMV_VGATE_LAG_MS: u16 = 250;
@@ -584,6 +591,11 @@ pub const OHM_EXIT_CAP_MS: u64 = 7000;
 pub const OHM_EXIT_QUIET_MS: u64 = 1000;
 pub const OHM_EXIT_MAX_MS: u64 = 12000;
 pub const BLANK_SETTLED_MS: u64 = 100;
+/// `win_both` in the comparator's A-JACK windows (DC V / DC mV, MIXED in
+/// `sample_cmp`): a read with one bit, with none, with both.
+const W_ONE: u8 = 1;
+const W_ZERO: u8 = 2;
+const W_BOTH: u8 = 4;
 /// Hit windows in a row before A-JACK is asserted (2 polls >= 100 ms apart).
 pub const AJACK_WINDOWS: u8 = 2;
 /// A-JACK clears this long after the last hit.
@@ -855,7 +867,8 @@ pub struct Sentinel {
     /// ... and a CMPLO-only read counts only from this time on.
     lo_mask_until: u64,
     win_hit: bool,
-    /// CTSTA bits ORed over the window (AC?).
+    /// CTSTA bits ORed over the window (AC?); in the DC V / DC mV A-JACK
+    /// windows the kinds of reads (W_ONE / W_ZERO / W_BOTH, MIXED).
     win_both: u8,
     streak: u8,
     /// Time of the last hit window (comparator / peak) and of its first one
@@ -1208,11 +1221,34 @@ impl Sentinel {
             }
         } else {
             self.win_hit |= bits != 0;
+            if self.kind == Kind::CmpA && !self.jchk {
+                // (MIXED below: the window's kinds of reads)
+                self.win_both |= match bits {
+                    CTSTA_CMP => W_BOTH,
+                    0 => W_ZERO,
+                    _ => W_ONE,
+                };
+            }
         }
         let closed = now.saturating_sub(self.win_t0) >= WIN_MS;
         if closed {
-            let hit = self.win_hit;
-            let both = self.win_both == CTSTA_CMP;
+            let wb = self.win_both;
+            // MIXED (DC V 6 V / DC mV, device 2026-10-26: the 66 kHz
+            // 0 / 9.5 V square on V-COM, A jack empty, read CTSTA 0x70 and 0
+            // in turn on PB1; in DC V AUTO two such windows in a row logged
+            // AJACK,CMP_PB1): a window of CMPHO + CMPLO reads mixed with
+            // empty ones is the comparator overdriven by the V side, no hit.
+            // A current in A gives one-bit reads (INFERRED, as BOTH): a DC
+            // one in every read, an AC one at least while PB1 passes
+            // between the window and the comparator's range; one that
+            // pushes PB1 out of range all the time reads 0x70 in every read,
+            // which still counts.
+            let hit = if self.kind == Kind::CmpA && !self.jchk {
+                wb & W_ONE != 0 || wb == W_BOTH
+            } else {
+                self.win_hit
+            };
+            let both = wb == CTSTA_CMP;
             self.win_t0 = now;
             self.win_hit = false;
             self.win_both = 0;
@@ -1337,8 +1373,8 @@ impl Sentinel {
         self.v_side_at(now, now, driven);
     }
 
-    /// `v_side` for evidence taken at `t` (<= now): AC mV's "free" needs the
-    /// frequency counter too, whose last result may be older (V_HF_KHZ).
+    /// `v_side` for evidence taken at `t` (<= now): plain AC mV's "free"
+    /// needs the frequency counter too, whose last gate may be older.
     #[inline(never)]
     pub fn v_side_at(&mut self, now: u64, t: u64, driven: bool) {
         self.vside_t = Some(t.min(now));
@@ -2417,6 +2453,26 @@ mod tests {
     }
 
     #[test]
+    fn mixed_overdrive_reads_are_no_hit() {
+        // DC V / DC mV (MIXED): 0x70 and 0 in turn = the V side overdriving the comparator, no
+        // hit; 0x70 in every read or a one-bit read = a current in A.
+        let run = |reads: &[u8]| {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            for (i, t) in (0..1000).step_by(5).enumerate() {
+                s.sample_cmp(t, reads[i % reads.len()]);
+            }
+            (s.alert, s.hits)
+        };
+        assert_eq!(run(&[0x70, 0x00]), (Alert::None, 0));
+        assert_eq!(run(&[0x70, 0x00, 0x00, 0x00]), (Alert::None, 0));
+        assert_eq!(run(&[0x70]).0, Alert::AJack);
+        assert_eq!(run(&[0x20]).0, Alert::AJack);
+        assert_eq!(run(&[0x70, 0x20, 0x00]).0, Alert::AJack);
+        assert_eq!(run(&[0x10, 0x00, 0x20, 0x00]).0, Alert::AJack);
+    }
+
+    #[test]
     fn ajack_gated_by_both_bit_reads() {
         // Device 1a11eda (RES, A jack empty, 5 / 10 V DC or the square on V-COM): CTSTA 0x70
         // in the hit windows and OP1O at 2.0-2.25 V, the jack check's "free" band: BOTH says
@@ -2548,26 +2604,26 @@ mod tests {
     }
 
     #[test]
-    fn hf_vside_counter_time_and_v_free() {
-        // AC mV with a 66 kHz signal (V_HF_KHZ): a "free" verdict dated by the counter's last
-        // result before the run began does not count; a driven one blocks A-JACK and v_free.
+    fn v_free_driven_blocks_ajack() {
+        // DC mV / AC mV (V_GATE): driven results block A-JACK and v_free (the A-PROT trip);
+        // a free one inside the lag does not count, one after it does.
         let mut s = Sentinel::new();
-        s.configured(Kind::PeakA, 0, true);
+        s.configured(Kind::CmpA, 0, true);
         s.vgate = true;
-        s.vlag = MV_VGATE_LAG_MS;
-        for t in (1000..1600).step_by(100) {
-            s.sample_peak(t, 0, 20_000);
-            s.v_side_at(t, 900, false);
+        s.vlag = DCMV_VGATE_LAG_MS;
+        for t in (1000..1600).step_by(10) {
+            s.sample_cmp(t, 0x20);
+            if t % 100 == 0 {
+                s.v_side(t, true);
+            }
         }
         assert_eq!(s.alert, Alert::None);
         assert!(!s.v_free());
-        s.v_side(1600, true);
-        s.sample_peak(1600, 0, 20_000);
-        assert!(!s.v_free());
-        assert_eq!(s.alert, Alert::None);
-        // a counter result after the run's start + lag says free: A-JACK (a current in A)
-        s.sample_peak(1700, 0, 20_000);
-        s.v_side_at(1700, 1350, false);
+        // the source goes, the hits stay (a current in A): free after the lag -> A-JACK
+        for t in (1600..1800).step_by(10) {
+            s.sample_cmp(t, 0x20);
+        }
+        s.v_side(1800, false);
         assert!(s.v_free());
         assert_eq!(s.alert, Alert::AJack);
         // no gate (DC V): v_free always
