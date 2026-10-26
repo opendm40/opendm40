@@ -9,7 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- Start-up: a splash with the Wiren Board logo, the version, "Loading..."
+- Start-up: a splash with "opendm40", the version, "Loading..."
   and a progress bar from about 0.2 s after power-on until the meter page
   (on the slow first start after an update it says so, and that later
   starts are fast);

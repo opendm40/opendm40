@@ -11,13 +11,7 @@
  *                                      body byte), named hot read-only data
  *                                      (`.rodata.a2.*`: the ASCII26, F14,
  *                                      LETTERS, UNIT and SC_PROBE font blobs,
- *                                      tools/mkstockfont.py A2_FONTS). One
- *                                      boot-only exception (owner 2026-10-26,
- *                                      region C being contended): the boot
- *                                      splash's logo lettering,
- *                                      `.rodata.a2.splash_text` (~0.5 KB,
- *                                      tools/mklogo.py); the first thing to
- *                                      move out if A2 is needed for hot data.
+ *                                      tools/mkstockfont.py A2_FONTS).
  *                                      ~14.8 KB; the link fails
  *                                      when it reaches the marker, build.sh
  *                                      warns below 2 KiB free.

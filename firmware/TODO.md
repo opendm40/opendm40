@@ -885,7 +885,7 @@ Code work (in this order):
         RFCOMM port.
       - A claude.ai artifact sandbox likely blocks WebUSB.
 - [x] Boot indication (owner 2026-10-24: "the firmware takes several seconds to boot; at least show
-      'Loading'"). Done on feat/boot-splash (0.4.0): a splash (logo, version, "Loading...", a bar per
+      'Loading'"). Done on feat/boot-splash (0.4.0): a splash ("opendm40", version, "Loading...", a bar per
       phase) right after board::init; the first frame drawn before USB attaches, so the "USB configured
       or 3 s" draw gate is gone; vdisk::init + boot_refresh after the first frame; DBG:BOOT? BOOTMS /
       MAINMS. Device 108eb55, normal boot: the meter page about 0.68 s after pre_main starts (before:
