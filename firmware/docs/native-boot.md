@@ -879,7 +879,10 @@ but nothing can make that installed copy bootable again except a vendor install
 ([`src/native.rs`](../src/native.rs)), before USB exists, feeding the FWDGT
 between steps: `board::init` → fatren → `calbackup::boot` (safety copy) →
 `fatdir::boot` (LOGS / SHOTS / SCOPE) → `setfile::boot` (settings copy) →
-`vdisk::mirror_boot` (slow-bank mirror) → `vdisk::init` → `vdisk::boot_refresh`.
+`vdisk::mirror_boot` (slow-bank mirror), with the boot splash
+([`src/splash.rs`](../src/splash.rs)) from `board::init` on. Then `main()`
+draws the first frame, and `native::before_usb` runs `vdisk::init` →
+`vdisk::boot_refresh` before the touch reset and USB.
 
 **Board bring-up** ([`src/board.rs`](../src/board.rs)): what the stock
 firmware initialised before opendm40 ran when it was RAM-loaded, found by an
@@ -1180,7 +1183,7 @@ INFO sources:
 Layout: clusters 2..6 = `INFO`, `DEBUG`, `LOGS`, `SCOPE`, `SHOTS` (one
 cluster each: 1024 slots), 7 = `README.TXT`, then the INFO files, then
 `SPIFLASH.BIN` (512 clusters), then the dynamic area. The INFO CRC-32s are
-computed once in `pre_main` (`vdisk::init`); the first table of LOGS / SCOPE
+computed once before USB attaches (`vdisk::init`, `native::before_usb`); the first table of LOGS / SCOPE
 / SHOTS too (`vdisk::boot_refresh`: a DLG's CSV size costs ~10 ms per 100 KB
 of logs; no media change for it).
 

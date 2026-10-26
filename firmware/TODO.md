@@ -878,8 +878,8 @@ Code work (in this order):
       'Loading'"). Done on feat/boot-splash (0.4.0): a splash (logo, version, "Loading...", a bar per
       phase) right after board::init; the first frame drawn before USB attaches, so the "USB configured
       or 3 s" draw gate is gone; vdisk::init + boot_refresh after the first frame; DBG:BOOT? BOOTMS /
-      MAINMS. Device 108eb55, normal boot: the meter page about 0.68 s after pre_main starts (was about
-      4.1 s).
+      MAINMS. Device 108eb55, normal boot: the meter page about 0.68 s after pre_main starts (before:
+      about 4.1 s, inferred from the phase times plus the 3 s gate, not measured on main).
   - [ ] Left: `vdisk::mirror_boot` (0.3 s every boot, 5.4 s on the first boot of a new image) still
         runs in pre_main under the splash. Moving it after the first frame would leave the meter page
         frozen for those seconds on the first boot; a chunked compare in idle time needs
