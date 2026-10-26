@@ -314,6 +314,13 @@ SECTIONS
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
         *(.text.*8opendm403app*3App9wave_open*);
+        /* A popup closed on the scope page (event rate): the page under it
+         * is marked for repaint (the repaint itself is in region B). */
+        *(.text.*8opendm403app*3App14sp_popup_close*);
+        *(.text.*8opendm403app*3App10sp_uncover*);
+        *(.text.*8opendm408scope_ui7uncover*);
+        /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
+        *(.text.*8opendm403app*3App8dbg_idle*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);

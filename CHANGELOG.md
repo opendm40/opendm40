@@ -27,6 +27,9 @@ section named after the tag as the release notes; how to cut a release:
   off (the trace was flat at the bottom). Switching to Auto, or opening the
   scope, could then turn both analog supplies off, and the meter switched
   itself off.
+- Scope: closing a popup (CH1, Math, timebase list, the MF menu) redraws
+  only the graph under it, in about 60 ms instead of 260 ms. The tap's beep
+  lasted until the redraw ended; it is short again.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
