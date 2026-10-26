@@ -1377,6 +1377,10 @@ pub struct Dmm {
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
     pub burden_show: bool,
+    /// Ohm readings below 0 shown (Settings 3/3 "Negative ohm", SCPI
+    /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
+    /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
+    pub ohm_neg: bool,
 }
 
 /// Fuse check (`Dmm::fuse_start`): what to go back to, start time, ohm
@@ -1938,6 +1942,7 @@ impl Dmm {
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
+            ohm_neg: false,
         }
     }
 
@@ -4843,10 +4848,11 @@ impl Dmm {
         } else {
             self.avg_code(raw, slow)
         };
-        let mut kohm = code * g - k0;
-        if kohm < 0.0 {
-            kohm = 0.0;
-        }
+        // Below 0 only by the offset k0 at most (`raw` is unsigned), a few
+        // tens of mohm: shown with `ohm_neg`, else clamped as the stock.
+        // The range logic below works on the clamped value.
+        let kneg = code * g - k0;
+        let kohm = kneg.max(0.0);
         let ol = kohm / lim > ov;
         if ol {
             if r22 != 0x13 {
@@ -4917,6 +4923,7 @@ impl Dmm {
                 self.ohm_down_r = -1;
             }
         }
+        let kohm = if self.ohm_neg { kneg } else { kohm };
         // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
         let (v, dec, unit) = match r {
             0 | 1 => (kohm * 1000.0, 3 - r as u8, "\u{3a9}"),

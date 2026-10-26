@@ -644,6 +644,10 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
+        // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
+        // with and without the extra digit.
+        ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
+        ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
@@ -2191,10 +2195,10 @@ fn main() {
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
         // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
         // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON"]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF"]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON"]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON"]),
+        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]),
+        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON"]),
+        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)"]),
+        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON"]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -2695,6 +2699,8 @@ fn main() {
             ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-mf", "cap_mf", 2), ("a15-acc-hz", "hz_khz", 2),
             ("a16-acc-hz-mhz", "hz_mhz", 2), ("a17-acc-temp-tc", "temp_tc", 2), ("a18-acc-temp-tc-f", "temp_tc_f", 2),
             ("a19-acc-temp-ntc-none", "temp_ntc", 2), ("a20-acc-acdc-none", "acdc_v", 2), ("a21-acc-auto-dc", "auto_dcv", 2),
+            // Settings 3/3 "Negative ohm" ON, shorted leads.
+            ("a22-acc-ohm-neg", "ohm_neg_ext", 2),
         ] {
             host::reset(0);
             let (r, l) = find(case);
@@ -2712,7 +2718,7 @@ fn main() {
             ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
             save(&out, file);
         }
-        for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc")] {
+        for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc"), ("a34-acc-strip-ohm-neg", "ohm_neg")] {
             let (r, l) = find(case);
             combined(&r, l, 0, 0, false, false, false, "");
             save(&out, file);
@@ -2879,7 +2885,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON"]);
+        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2895,7 +2901,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF"]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);

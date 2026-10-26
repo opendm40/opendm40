@@ -32,6 +32,10 @@ section named after the tag as the release notes; how to cut a release:
   not with 0.28 mA ON). It uses the stock's 60 Ω setup with one switch
   open (the stock never selects that range) and the 600 Ω and 60 mV
   calibrations ([manual](docs/manual/README.md#resistance)).
+- Resistance: Settings > More > More > Negative ohm: ON shows readings
+  below 0 (shorted leads, e.g. -0.028 Ω) instead of 0.000; OFF (default)
+  as the stock. SCPI `RESistance:NEGative`
+  ([manual](docs/manual/README.md#settings-page-3)).
 
 ### Changed
 

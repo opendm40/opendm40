@@ -2281,6 +2281,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Device** | | | The [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
+| **Negative ohm** | OFF (stock), ON | OFF | ON: resistance can read below 0 (shorted leads, e.g. -0.028 Ω); OFF: shows 0. |
 
 ### The Device page
 

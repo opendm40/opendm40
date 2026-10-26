@@ -2664,9 +2664,10 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// applies at the next USB plug), the burden voltage readout of the A
 /// functions (doc 3.15; persisted, default OFF = the stock aux row), the
 /// Device / About page, the touch test page (app_touchtest.rs) and the
-/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON; last, so
-/// the rows above keep their places).
-pub const SETTINGS3: [&str; 7] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy"];
+/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
+/// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
+/// so the rows above keep their places.
+pub const SETTINGS3: [&str; 8] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm"];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
