@@ -203,6 +203,10 @@
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
 //!     Settings 3/3 "Burden voltage", persisted, default OFF
+//!   [SENSe:]RESistance:NEGative ON|OFF / ?   ohm readings below 0 shown
+//!     (shorted leads: the internal offset, a few tens of mohm) instead of
+//!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
+//!     default OFF
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
@@ -942,6 +946,9 @@ pub enum Cmd {
     FetchBurden,
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
     DispBurden(Option<bool>),
+    /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
+    /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
+    ResNeg(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
     /// (App::scpi_range).
@@ -2626,8 +2633,13 @@ impl Scpi {
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
-                _ if kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen") => {
-                    out = Out::Instr(Cmd::DispBurden(if query {
+                // DISPlay:BURDen, [SENSe:]RESistance:NEGative: ON|OFF / ?.
+                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen")) || {
+                    let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                    r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
+                } =>
+                {
+                    let v = if query {
                         None
                     } else {
                         match on_off(trim(arg)) {
@@ -2637,7 +2649,8 @@ impl Scpi {
                                 continue;
                             }
                         }
-                    }));
+                    };
+                    out = Out::Instr(if kw(p0, "DISPlay") { Cmd::DispBurden(v) } else { Cmd::ResNeg(v) });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 // [SENSe:]VOLTage:COUPling / CURRent:COUPling (opendm40).
