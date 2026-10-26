@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- Scope: the timebase list shows each entry's sample rate, e.g.
+  "200us 12.5MS/s", "1ms 76.8kS/s" in the Wave view, the same as
+  `ACQ:SRAT?` ([manual](docs/manual/README.md#timebase)).
 - Multimeter: the specified accuracy of the reading, small and grey under
   the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
   user manual's table for the meter's model (DM40A / B / C), as an absolute

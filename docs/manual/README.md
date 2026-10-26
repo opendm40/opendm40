@@ -1251,6 +1251,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   bar flashes on every change.
 - **Tap the timebase** in the top bar: a list; drag to scroll, tap to
   choose.
+  Each entry shows its sample rate (as `ACQ:SRAT?`), e.g. 200us 12.5MS/s.
 - **Pinch** horizontally with two fingers: spread = faster, pinch = slower.
   A bubble shows the new value; it applies when you lift the fingers.
 - **Roll mode**: from 200 ms/div the trace scrolls continuously (on by

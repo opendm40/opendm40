@@ -378,6 +378,7 @@ pub const WAVE_TB_MIN: usize = 15;
 /// square's samples reads 0.5 / 1 / 1.9 / 3.8 % low at 9600 / 4800 / 2400 /
 /// 1200 S/s (device d8e249d: Vrms -1.6 % from 50 ms/div;
 /// docs/dmm-input-scope-feasibility.md 3.2).
+#[inline(always)] // (one more caller, tb_rate, must not outline it)
 pub const fn wave_fs_for(tb: usize) -> u32 {
     match tb {
         0..=15 => 76800,
@@ -387,6 +388,12 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
         20 | 21 => 2400,
         _ => 1200,
     }
+}
+
+/// The sample rate (S/s) timebase `tb` gives: MCX, or the Wave view's
+/// stream (`wave`); `Scope::sample_rate` (ACQ:SRAT?) at that timebase.
+pub fn tb_rate(tb: usize, wave: bool) -> u32 {
+    if wave { wave_real_fs(wave_fs_for(tb)) } else { TB[tb].0 }
 }
 
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
