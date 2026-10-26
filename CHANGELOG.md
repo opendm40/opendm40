@@ -7,6 +7,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+## v0.3.0 (2026-10-27)
+
 ### New
 
 - Scope: the timebase list shows each entry's sample rate, e.g.
@@ -16,7 +18,7 @@ section named after the tag as the release notes; how to cut a release:
   the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
   user manual's table for the meter's model (DM40A / B / C), as an absolute
   value with one significant digit (two when the first is 1). Also in the combined view when a sub row is free. Not shown with
-  the History row, in AC+DC, the 60 mV ranges, the power meter, under REL
+  the History row, in AC+DC, the 60 mV and 60 Ω ranges, the power meter, under REL
   or for PT / NTC sensors. Settings > More > More > Accuracy: ON (default)
   / OFF ([manual](docs/manual/README.md#accuracy);
   [firmware/docs/dmm-accuracy.md](firmware/docs/dmm-accuracy.md)).
