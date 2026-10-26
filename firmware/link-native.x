@@ -314,6 +314,13 @@ SECTIONS
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
         *(.text.*8opendm403app*3App9wave_open*);
+        /* A popup closed on the scope page (event rate): the page under it
+         * is marked for repaint (the repaint itself is in region B). */
+        *(.text.*8opendm403app*3App14sp_popup_close*);
+        *(.text.*8opendm403app*3App10sp_uncover*);
+        *(.text.*8opendm408scope_ui7uncover*);
+        /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
+        *(.text.*8opendm403app*3App8dbg_idle*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);
@@ -338,6 +345,9 @@ SECTIONS
          * with the bus handed to a stream (it talks to the HY3131 itself). */
         *(.text.*8opendm408sentinel*8Sentinel11jack_result*);
         *(.text.*8opendm403dmm*3Dmm9cont_jack*);
+        /* V_GATE of ohm / continuity / diode, once per reading (no HY3131
+         * access; region B at 16 KiB). */
+        *(.text.*8opendm403dmm*3Dmm10v_side_ohm*);
         /* DBG:SRC? and DBG:ACDC:TRACE? reply text (SCPI only; room in region B
          * for the jack check above). */
         *(.text.*8opendm40*8src_text*);

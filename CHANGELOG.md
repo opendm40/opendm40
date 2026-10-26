@@ -23,6 +23,23 @@ section named after the tag as the release notes; how to cut a release:
   After the input frequency changes, a value is grey until two gates agree:
   a gate across the change no longer shows a wrong value, and a slower input
   no longer reads 0.000 Hz in between.
+- Multimeter, continuity / diode: touching the probes together no longer
+  shows A-JACK ("Current in A jack: check leads") for a second or two. There
+  A-JACK now comes only while the reading is OL (nothing on V/Ω-COM, as
+  with the leads in A and COM).
+- Scope / generator: after a start with Analog power set to Both always, or
+  with a start page other than Multimeter, the scope's analog supply stayed
+  off (the trace was flat at the bottom). Switching to Auto, or opening the
+  scope, could then turn both analog supplies off, and the meter switched
+  itself off.
+- Scope: closing a popup (CH1, Math, timebase list, the MF menu) redraws
+  only the graph under it, in about 60 ms instead of 260 ms. The tap's beep
+  lasted until the redraw ended; it is short again.
+- AC V: after a range step on a signal with a DC part (e.g. a 0 / 9.5 V
+  square) the first readings read high while the AC coupling settled: +4 %
+  on 60 V -> 6 V, up to 5x the input on 6 V -> 60 V. They show grey until it
+  has settled (up to 2 s); the first black one was within 0.2 % after
+  60 -> 6 V and 0.7 % after 6 -> 60 V.
 - Multimeter / scope: a calibration record with a bad CRC is ignored and
   the defaults are used, as the stock does; before, its values were used
   as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or

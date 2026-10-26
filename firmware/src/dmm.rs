@@ -1144,6 +1144,8 @@ pub struct Dmm {
     /// vetted; `aca_vet`) and the previous result on the row (NaN: none).
     aca_vet_t: u64,
     aca_prev: f32,
+    /// Plain AC V: this row came from a range step (ACV_DC_*).
+    acv_vet: bool,
     /// The reading of this poll is provisional by G7 only (`acdc_reading`).
     prov_side: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
@@ -1190,6 +1192,9 @@ pub struct Dmm {
     /// Continuity's jack check phase (`cont_jack`: 0 none, 1 settle, 2
     /// window, 3 back) and the row's R25 to restore.
     jwin: u8,
+    /// Continuity / diode: the last reading that was not OL (V-COM closed by
+    /// something; V_GATE, `CLOSED_HOLD_MS`); 0 none.
+    closed_t: u64,
     r25: u8,
     prev_ad1: i32,
     r22: u8,
@@ -1448,6 +1453,20 @@ const PKH_RESTART: bool = true;
 /// LIVE? thresholds: ohm AD1 code (0.24 % of 2^23), continuity ohm, diode V.
 const LIVE_CODE: i32 = 20_000;
 const LIVE_CONT_OHM: f32 = 2.0;
+/// Continuity / diode V_GATE (owner 2026-10-26: A-JACK for ~1.5 s while the
+/// probes were touched together in continuity, A jack empty): a reading
+/// under OL within this long = V-COM closed, no A-JACK (an asserted one
+/// drops). The PB1 hits come with the contact (INFERRED: the source's
+/// current step on the shared COM; not traced). The case A-JACK is for, the
+/// leads in A / COM, leaves V-COM open: OL. The hold covers a contact that
+/// bounces open (an OL reading while PB1 still hits).
+const CLOSED_HOLD_MS: u64 = 1500;
+/// ... and an OL reading counts as "open" only from this long after the hit
+/// run began: a conversion that ends just after the contact (OSR_SLOW: 400
+/// ms long once the reading stood still) still reads OL (emulator senttest
+/// cont-bounce). Cost: A-JACK for a current in A 0.6-0.9 s after its onset
+/// there (was 0.16-0.36 s; emulator).
+const CLOSED_VGATE_LAG_MS: u16 = 450;
 const LIVE_DIODE_V: f32 = 0.05;
 /// FUN_08012c30 pulses the PA latching relay (10 ms) on every call, i.e. on
 /// every phase switch, between the R26/R34/R36 zeroing and the 22-byte row.
@@ -1595,6 +1614,17 @@ const ACA_VET: bool = true;
 const ACA_VET_REL: f32 = 0.05;
 const ACA_VET_FS: f32 = 0.002;
 const ACA_VET_MAX_MS: u64 = 2000;
+// Plain AC V after a range step: OP1's gain changes (6 / 60 V share a tap),
+// so its output's DC steps and the coupling into PB4 (tau 0.34 s,
+// docs/hy3131-frontend-2026-10-26.md 2) carries the step to AD2, whose RMS
+// block sees it: device 0.2.1, the 0 / 9.5 V 50 / 20 Hz square, LPF 1.33,
+// 0.99, 0.74, 0.55 ... V over the first results after 60 -> 6 V with RMS =
+// sqrt(AC^2 + LPF^2) within ~0.1 V (first finals +3.6..+4.5 %), -25 ... V
+// after 6 -> 60 V (21-26 V for 4.84 V). A result is provisional (grey, no
+// range move down) while |LPF| > ACV_DC_K x the RMS + ACV_DC_FS x the range
+// (its share of the RMS then < 0.15 %), at most ACA_VET_MAX_MS.
+const ACV_DC_K: f32 = 0.05;
+const ACV_DC_FS: f32 = 0.005;
 
 /// Ohm entry (switch-latency.md proposal 2): the stock's button entry writes
 /// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
@@ -1778,6 +1808,7 @@ impl Dmm {
             over_prev: false,
             aca_vet_t: 0,
             aca_prev: f32::NAN,
+            acv_vet: false,
             prov_side: false,
             down_t: 0,
             rd_pending: false,
@@ -1799,6 +1830,7 @@ impl Dmm {
             entry: 0,
             mv_clip: 0.0,
             jwin: 0,
+            closed_t: 0,
             r25: 0,
             prev_ad1: 0,
             r22: 0,
@@ -2263,8 +2295,16 @@ impl Dmm {
         // AC phase is that row and its sentinel; both phases share the run
         // and the AC phase's verdict (doc 4.13).
         let mv = self.mode == 2 || (self.acdc && self.mode == 3);
-        self.sent.vgate = matches!(self.mode, 10 | 15) || mv;
-        self.sent.vlag = if mv { sentinel::MV_VGATE_LAG_MS } else { 0 };
+        // Continuity / diode: V_GATE on OL (`CLOSED_HOLD_MS`).
+        self.sent.vgate = matches!(self.mode, 10 | 11 | 12 | 15) || mv;
+        self.closed_t = 0;
+        self.sent.vlag = if mv {
+            sentinel::MV_VGATE_LAG_MS
+        } else if matches!(self.mode, 11 | 12) {
+            CLOSED_VGATE_LAG_MS
+        } else {
+            0
+        };
         // The jack check (sentinel JACK CHECK): ohm, continuity, the
         // resistive temperature sensors.
         self.sent.jchk = !self.acdc && (matches!(self.mode, 10 | 11) || (self.mode == 15 && self.t_sensor != 0));
@@ -2386,6 +2426,7 @@ impl Dmm {
         self.sent.new_run();
         let now = clk.now_ms();
         self.deadline = now + settle;
+        self.acv_vet = false;
         if changed_mode {
             self.entry = now;
             self.reset_values();
@@ -2401,6 +2442,7 @@ impl Dmm {
             self.ac_raw = 0.0;
             self.ac_seed = true;
             self.ac_lead = if mode > 2 { 0 } else { 2 };
+            self.acv_vet = mode == 0;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -3830,9 +3872,7 @@ impl Dmm {
                     self.sent.current_small(now, !rd.main.ol && si_abs < k * fs);
                 }
                 10..=12 if !self.acdc && self.fuse_job.is_none() => {
-                    if self.mode == 10 {
-                        self.sent.v_side(now, self.live);
-                    }
+                    self.v_side_ohm(now, rd.main.ol);
                     self.sent.live_reading(now, self.live)
                 }
                 _ => {}
@@ -3882,6 +3922,23 @@ impl Dmm {
         r.acdc = self.acdc && !self.cpl_auto;
         r.alert = self.sent.shown(now);
         r
+    }
+
+    /// V_GATE of the ohm-network rows per reading: ohm by the LIVE? sign;
+    /// continuity / diode: a reading under OL (`ol` false) within
+    /// CLOSED_HOLD_MS = V-COM closed (the probes touch, a part), while
+    /// A-JACK's case (the leads in A / COM) leaves V-COM open: OL.
+    #[inline(never)]
+    fn v_side_ohm(&mut self, now: u64, ol: bool) {
+        let drv = if self.mode == 10 {
+            self.live
+        } else {
+            if !ol {
+                self.closed_t = now.max(1);
+            }
+            self.closed_t != 0 && now.saturating_sub(self.closed_t) < CLOSED_HOLD_MS
+        };
+        self.sent.v_side(now, drv);
     }
 
     fn reading(&self, main: Val, si: f32) -> Reading {
@@ -4497,8 +4554,12 @@ impl Dmm {
             }
         }
         // Plain AC A after a row write: held (provisional) until two results
-        // in a row agree (ACA_VET_*).
-        let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
+        // in a row agree (ACA_VET_*). Plain AC V after a range step: until
+        // the node's DC has settled (ACV_DC_*).
+        if self.acv_vet && (dcp.abs() <= ACV_DC_K * ac + ACV_DC_FS * lim || now >= self.aca_vet_t + ACA_VET_MAX_MS) {
+            self.acv_vet = false;
+        }
+        let held = !self.acdc && (self.acv_vet || (m >= 4 && !self.aca_vet(now, ac, lim)));
         // Plain AC after a reset: the first used result seeds the filters.
         let first = !self.acdc && !held && core::mem::take(&mut self.ac_seed);
         if first {
