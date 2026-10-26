@@ -72,13 +72,51 @@ const REC_LEN: usize = 0x400;
 static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
 static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Start-up: copy the record (see REC_COPY).
+/// Start-up: copy the record (see REC_COPY). A record whose CRC does not
+/// match is copied as erased flash (all 0xFF), as the stock treats it (it
+/// falls back to its calibration defaults, model-variants.md "Bad CRC"):
+/// the version word is then not 1 (`cal_ok`), every float is a NaN, so
+/// every reader (`cal`, the scope's `cal_pair`, hwtrig) takes its default.
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
 pub fn load_record() {
     for (i, w) in REC_COPY.iter().enumerate() {
         w.store(unsafe { read_volatile((SETTINGS + 4 * i as u32) as *const u32) }, core::sync::atomic::Ordering::Relaxed);
     }
+    let ok = rec_crc_ok(|i| REC_COPY[i].load(core::sync::atomic::Ordering::Relaxed));
+    REC_CRC_OK.store(ok, core::sync::atomic::Ordering::Relaxed);
+    if !ok {
+        for w in REC_COPY.iter() {
+            w.store(u32::MAX, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
     REC_LOADED.store(true, core::sync::atomic::Ordering::Release);
+}
+
+/// End of the CRC-covered bytes: the stock record is 800 bytes, the CRC
+/// covers bytes 4..0x320 (model-variants.md, the Record table).
+pub const REC_CRC_END: usize = 0x320;
+static REC_CRC_OK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
+/// Whether the record copied at start-up passed its CRC (true before the copy).
+pub fn rec_crc_ok_at_boot() -> bool {
+    REC_CRC_OK.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// `word(i)` = the record's little-endian word i. Word 0 holds the CRC-16
+/// (poly 0x8005, init 0xFFFF, MSB first, no final XOR) of bytes
+/// 4..REC_CRC_END in its low half and the complement in its high half.
+pub fn rec_crc_ok(word: impl Fn(usize) -> u32) -> bool {
+    let mut c = 0xFFFFu16;
+    for i in 1..REC_CRC_END / 4 {
+        for b in word(i).to_le_bytes() {
+            c ^= (b as u16) << 8;
+            for _ in 0..8 {
+                c = if c & 0x8000 != 0 { (c << 1) ^ 0x8005 } else { c << 1 };
+            }
+        }
+    }
+    let w0 = word(0);
+    w0 & 0xFFFF == c as u32 && w0 >> 16 == (!c) as u32
 }
 
 /// The record's word at byte offset `off` (4-aligned), from the copy.
