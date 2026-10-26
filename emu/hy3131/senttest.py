@@ -63,7 +63,9 @@ SC = {
     'dcv-step': ('VOLT:DC', 36, [(0, 'open;vsrc:1', {'NONE'}), (8, 'vsrc:10', {'NONE'}), (14, 'vsrc:1', {'NONE'}),
                                  (20, 'vsrc:10', {'NONE'}), (26, 'vsrc:1;isrc:0.001', {'AJACK'})]),
     'dcmv':     ('VOLT:DC', 20, [(0, 'open;vsrc:0.1', {'NONE'}), (10, 'isrc:0.002', {'AJACK'})]),
-    'ohm':      ('RES', 26, [(0, 'open;r:4700', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
+    # (ohm: 4.7 Mohm, the 6 Mohm row, whose jack check line tells a current in A from a source;
+    # on the rows below it a current in A shows LIVE?, the gap: ohm-v5-600)
+    'ohm':      ('RES', 26, [(0, 'open;r:4.7e6', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
     'temp':     ('TEMP', 26, [(0, 'open;tc:100;cj:25', {'NONE'}), (12, 'isrc:0.005', {'AJACK'})]),
     'acv':      ('VOLT:AC', 26, [(0, 'open;vsrc:0,ac=1.0,f=50', {'NONE'}), (10, 'isrc:0,ac=0.01,f=50', {'AJACK'}), (18, 'isrc:none', {'NONE'})]),
     'acv-dc':   ('VOLT:AC', 20, [(0, 'open;vsrc:0,ac=1.0,f=50', {'NONE'}), (10, 'isrc:0.001', {'AJACK'})]),

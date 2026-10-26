@@ -1309,7 +1309,8 @@ temperature rows still shows LIVE?; an AC current (0x70 and 0 in turn)
 everywhere. Continuity (an AD2 peak sentinel, no CTSTA) is unchanged.
 Emulator: the model reads PB1 above the window as 0x70 (`pb1cmp70`, default);
 senttest `ohm-acur` (RES AUTO, V open, 20 mA in A) FAILs before (LIVE?) and
-passes with the rule; `ohm-v5-600`'s last phase (manual 600 Ω) shows the gap.
+passes with the rule; `ohm` now runs on the 6 MΩ row (4.7 MΩ on V-COM);
+`ohm-v5-600`'s last phase (manual 600 Ω) shows the gap.
 
 Device c6a3ac3 ([device check, "c6a3ac3: the RES jack fix"](../../docs/history/device-check-2026-10-21.md#c6a3ac3-the-res-jack-fix-428df52-both-bit-reads-live-after-the-source-2026-10-25)),
 A jack empty: in RES AUTO and 600 Ω, 5 V and 10 V read CTSTA 112 on all but
