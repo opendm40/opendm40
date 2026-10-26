@@ -20,7 +20,7 @@ opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
 **Status.** opendm40 is experimental. It is developed on a DM40A; DM40B and
-DM40C are untested. What is untested on a real meter is listed in [Known
+DM40C ran only in the emulator. What is untested on a real meter is listed in [Known
 limitations](#known-limitations).
 
 ## Contents
@@ -574,7 +574,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   | 0.28 mA ON | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
   Short-circuit currents measured on one unit with `DBG:SRC`, jacks
-  shorted ([device check](../../firmware/docs/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
+  shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 
@@ -781,9 +781,10 @@ In Ω from 600 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
 so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
-  measured readings per second. Tap it: FAST → MED → SLOW → FAST.
+  measured readings per second (**--/s** just after a change). Tap it:
+  FAST → MED → SLOW → FAST.
 - **Tap the reading** to step the rate the same way; a message says what you
-  get, for example **MED 600000 counts / 1.6 s**.
+  get, for example **MED 5.0/s, +1 digit in 1.6 s**.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
@@ -795,9 +796,8 @@ so a change shows at once.
 *A tap on the reading steps the rate.*
 
 The extra digit appears smaller, after the main digits, on these ranges:
-DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ. It appears about
-1.6 s (MED; Ω 6.4 s) after the input settles, a little later after a
-function change.
+DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ, about 1.6 s (MED in
+DC) or 3.2 s (SLOW, and in Ω) after the input settles.
 
 #### Smoothing
 
@@ -1996,7 +1996,7 @@ the recording; the header says how long after power-on it started.
 The CSV file looks like this:
 
 ```
-# Alientek DM40A, opendm40 0.0.1, function DC V, range AUTO, started uptime 12.345 s
+# Alientek DM40A, opendm40 0.2.0, function DC V, range AUTO, started uptime 12.345 s
 # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
 time_s,value,unit,flags
 0.250,1.23456,V,
@@ -2123,7 +2123,7 @@ drive stay the same. Linux keeps the parts of the file it has read before
 and does not read them again when the meter announces the change, so a
 plain `cp` while the drive stays mounted can return an old copy, or a mix
 of old and new parts (device check
-[2f56ff9](../../firmware/docs/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
+[2f56ff9](../history/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
 files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
 each new or changed file its own new entry. The meter cannot make Linux drop
 the old parts: Linux re-reads the folders, but keeps what it already knows
@@ -2431,7 +2431,7 @@ The examples send `*IDN?` and read a DC voltage. The `*IDN?` reply looks
 like this:
 
 ```
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 ```
 
 The fields: maker, model (DM40A, DM40B or DM40C), the meter's serial number,
@@ -2491,7 +2491,7 @@ Python 3. It finds the meter's `/dev/usbtmcN` by itself. Keep it next to
 
 ```
 $ python3 firmware/tools/dm40scpi.py scpi '*IDN?'
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 $ python3 firmware/tools/dm40scpi.py scpi 'CONF:VOLT:DC' 'READ?'
 $ python3 firmware/tools/dm40scpi.py read -n 5 --conf dcv
 ```
@@ -2544,7 +2544,7 @@ reply:
 ```
 $ echo '*IDN?' > /dev/usbtmc0
 $ head -1 /dev/usbtmc0
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 ```
 
 Untested in this form; the tools above work this way.
@@ -2611,7 +2611,7 @@ On Linux, the simplest client is
 
 ```
 $ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF scpi '*IDN?'
-Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.1
+Alientek,DM40A,0123456789ABCDEF01234567,opendm40 0.2.0
 $ /usr/bin/python3 firmware/tools/dm40bt_scpi.py --mac AA:BB:CC:DD:EE:FF shell
 ```
 
@@ -2815,7 +2815,8 @@ Untested on a real meter:
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
 - USB disk: macOS; **PC can edit** mode on Windows.
-- Remote control: the Alientek phone app itself with opendm40.
+- Remote control: the Alientek phone app itself with opendm40; the 34401A
+  emulation for sigrok.
 
 Known problems:
 

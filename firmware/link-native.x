@@ -106,6 +106,10 @@ SECTIONS
         __cold_start = .;
         *(.text.*8opendm409calbackup*);
         *(.text.*8opendm406fatren*);
+        /* dmm.rs load_record (the record copy and its CRC, once at
+         * start-up, before any stream) and rec_crc_ok. */
+        *(.text.*8opendm403dmm11load_record*);
+        *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
         *(.text.*8opendm408recovery*);
@@ -184,6 +188,11 @@ SECTIONS
         *(.text.*8opendm402ui11record_page*);
         *(.text.*8opendm403app*3App11record_page*);
         *(.text.*8opendm403app*3App9fast_rate*);
+        /* A tap on the DMM value: the rate step and its toast text (the
+         * rate chip's rate_chip / rps_text stay in B, drawn every chart
+         * pass). */
+        *(.text.*8opendm402ui10rate_toast*);
+        *(.text.*8opendm403app*3App16resolution_cycle*);
         *(.text.*8opendm403app*3App15record_fast_tap*);
         *(.text.*8opendm403app*3App16record_page_fast*);
         *(.text.*8opendm403app*3App10fast_ended*);

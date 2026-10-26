@@ -9,7 +9,7 @@ shim, recovery, the boot-time disk work and the USB volume.
 The design plan of 2026-10-13 and the T1-T3 device test plans are archived in
 `stock/re/docs/history/native-boot-plan.md`. The `stock/re/...` paths in this
 document are in the private stock-firmware analysis repo, cloned into
-`stock/re/` by those with access ([README.md, Supporting material](../../README.md#supporting-material)).
+`stock/re/` by those with access ([firmware/README.md](../README.md#stock-firmware-analysis-private)).
 
 ## Boot chain
 
@@ -65,7 +65,7 @@ read-locked. The boot gate and install in detail, with addresses:
 So the unit cannot be bricked by an update: the ROM and the FS-loader are
 outside the application area, and a failed install always ends on the
 loader's update screen with its disk. The user procedure is in
-[README.md, Recovery](../../README.md#recovery); the hardware entry (TX-GND
+[the manual, Backup, recovery and back to stock](../../docs/manual/README.md#backup-recovery-and-back-to-stock); the hardware entry (TX-GND
 short) in [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery).
 
 ## Update file format
@@ -315,7 +315,7 @@ intended symbols moved). To C:
 - vwrite's temp purge and post-write steps (`purge_tmp`, `park`, `check`,
   `finalize`, `commit`: after a host write session; MSC writes are refused
   while a logger session runs).
-To B (the device check of d8e249d, [device-check-2026-10-21.md](device-check-2026-10-21.md) 6a / 6c):
+To B (the device check of d8e249d, [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) 6a / 6c):
 - the DMM-log and scope CSV generators of the USB volume (`Gen::open` /
   `advance`, `RowDec::*`, `SDec::*`, `chunk_at`, `parse_file`,
   `from_scale`, `s_pred`, `dlog::open` / `find` / `geometry` / `dir_start`
@@ -848,7 +848,7 @@ but nothing can make that installed copy bootable again except a vendor install
 
 **User procedure:** the meter restarts into the loader's update screen
 ("open file error") with its USB disk (28e9:028f); what to copy and press is in
-[README.md, Recovery](../../README.md#recovery).
+[the manual, Install a file from the update loader](../../docs/manual/README.md#install-a-file-from-the-update-loader).
 
 **Other entries** to the same state from a running native opendm40:
 - `DBG:UPDATE`, or its alias `DBG:RECOVER`:
@@ -958,7 +958,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
     Expected `PD6,0,2,0` with the key released;
   - then `native::put_extra`: `STAGED,<n>`, `CALBK,<status>,<written>,<conflict>,<differs>`,
     `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
-    `FATDIR,<ok>,<created>,<failed>`, `SETTINGS,...` ("Stack depth" and "Unit
+    `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
+    record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
     data" below). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
   
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
@@ -1881,7 +1882,7 @@ What the shim does, checked in the emulator with the real ROM and FS-loader
 Before: opendm40 running, USB connected; on the PC a copy of the installed image
 (`firmware/opendm40.bin` of the installed build, or `INFO/FIRMWARE.BIN`
 from the opendm40 USB drive) to reinstall after each recovery. Reinstall: copy
-it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`](../../README.md#recovery)),
+it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`](../../docs/manual/README.md#install-a-file-from-the-update-loader)),
 `sync`, eject, press "Update".
 
 1. **Short press (normal start).** Power off. Press the power key ~0.5 s.
@@ -1913,4 +1914,4 @@ it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`]
 
 ## Developer workflow
 
-Build, reload (`tools/reload.sh`), first install and the way back: [dev-notes.md, Developer workflow](dev-notes.md#developer-workflow).
+Build, reload (`tools/reload.sh`), first install and the way back: [firmware/README.md, Developer workflow](../README.md#developer-workflow).

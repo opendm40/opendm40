@@ -15,6 +15,43 @@ section named after the tag as the release notes; how to cut a release:
   before). The same for the frequency next to AC V / AC A. The Hz reading
   shows one more digit (small) where the counter's resolution supports it
   ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
+- Multimeter / scope: a calibration record with a bad CRC is ignored and
+  the defaults are used, as the stock does; before, its values were used
+  as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
+  `CALREC,BADCRC`.
+- Multimeter, V / A / ohm: holding AUTO to return to the autorange shows
+  AUTO and dashes at once; before, the last manual reading stayed on the
+  screen with MANU until the next conversion (~0.5 s on ohm).
+- Multimeter: the message after a tap on the reading gives the readings per
+  second as the rate chip shows them and the averaging time of the extra
+  digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
+  1.6 s"). The manual's pictures showed an outdated message and rate chip
+  ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
+  6.4 s for the extra digit in Ω; it shows after 3.2 s
+  ([manual](docs/manual/README.md#rate-fast-med-slow)).
+- Multimeter: after a tap on the reading the rate chip names the new rate at
+  once, with "--/s" until its readings/s is measured (it kept the old rate's
+  name and number while the message was up), and the extra digit goes at
+  once when the new rate has none. In FAST the chip showed down to 8.0/s for
+  about a second after each offset measurement; it shows 10/s.
+
+### Docs
+
+- Ohm: 500 Ω from an MMB3.0 calibrator read OL on the 600 Ω range. The
+  firmware's OL limit there (618 Ω on every model) and its OL decision are
+  not the cause: a resistor of 500 Ω reads from the first conversion after an
+  overload (emulator). The suspected cause is the calibrator's resistance output at the
+  range's 0.90 mA test current, or a lock of it after its switch (both
+  inferred); the low-current ON variant
+  (0.28 mA) may read it. Device check in
+  [firmware/TODO.md](firmware/TODO.md) ("500 ohm from the MMB3.0 reads OL on 600 ohm").
+
+### Tools
+
+- [emu/hy3131/ohm600test.py](emu/hy3131/ohm600test.py): manual 600 Ω at
+  each rate, steps into 500 Ω from 200 Ω / open / OL, the 618 Ω limit, and
+  AUTO landing 500 Ω on 600 Ω.
+
 
 ## v0.2.0 (2026-10-25)
 

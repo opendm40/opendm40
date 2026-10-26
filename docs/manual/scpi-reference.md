@@ -135,7 +135,7 @@ change nothing; the touch screen and keys always stay active.
 
 ```
 > *IDN?
-< Alientek,DM40C,0123456789ABCDEF01234567,opendm40 0.1
+< Alientek,DM40C,0123456789ABCDEF01234567,opendm40 0.2.0
 ```
 
 The four fields: maker, model (`DM40A`, `DM40B` or `DM40C`, from the meter's
@@ -192,7 +192,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.1.0` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.1.0` | both |
+| `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.2.0` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.2.0` | both |
 | `*RST` | | Accepted; changes nothing (settings, the error queue and the event bits stay). | both |
 | `*CLS` | | Clears the error queue and the questionable event bits. | both |
 | `*OPC?` | | `1` | both |
@@ -370,7 +370,7 @@ Functions:
 | `[SENSe:]FREQuency:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E+03` | both |
 | `[SENSe:]FREQuency:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
 | `[SENSe:]RATE[?]` | `SLOW`, `MEDium` or `FAST` | `SLOW`, `MED` or `FAST` | both |
-| `[SENSe:]RATE:PERiod?` | | Time between readings in s, measured: `+1.000000E-01` (0 before two readings) | both |
+| `[SENSe:]RATE:PERiod?` | | Time between readings in s, measured over the last few (not across a change or a dropped conversion): `+1.000000E-01` (0 before two readings) | both |
 
 - **Range commands** act on the present function. `VOLTage` and `CURRent`
   without a coupling mean that quantity in whatever coupling is selected;
@@ -771,7 +771,7 @@ unless shown otherwise.
 | `DBG:PROF:RESET` | | Clears the timing table. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
-| `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>` | USB |
+| `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
 | `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
 | `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |

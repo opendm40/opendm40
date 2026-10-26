@@ -47,7 +47,7 @@ on the first byte of each request:
   Settings Bluetooth on, `AT+RESET`) it prints a 0x00, then, 145-195 ms
   later, 7 lines: `BLE03:VER2.1-20240615`, `CBN:<BLE name>`, `CBMAC:<mac>`,
   `CSN:<SPP name>`, `CSMAC:<mac>`, `CBSW:1`, `CSSW:1` (device trace, image
-  7b1b6d1, [device check "f59bac2"](device-check-2026-10-21.md)). Parsed,
+  7b1b6d1, [device check "f59bac2"](../../docs/history/device-check-2026-10-21.md)). Parsed,
   they gave the next client -102 / -113 / -113 / -102 / -113 / -113 / -113.
   `bt.rs` `StartText` takes all input from the start up to the `CSSW:` line
   (or 1 s, if it never comes), before the parser sees any of it. Bytes
@@ -237,7 +237,7 @@ print(dmm.query('*IDN?'))
 ```
 
 Both ways are untested with the meter: only the code 28 state was seen (Windows 11,
-[device-check-2026-10-21.md](device-check-2026-10-21.md) "c92b605: ... Windows 11", item 6).
+[device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) "c92b605: ... Windows 11", item 6).
 
 ### sigrok
 
@@ -275,8 +275,9 @@ that is not selected, the power meter's channels):
 The same ranges on DM40A / B / C (opendm40 uses the 60000-count limits on
 all models, [model-variants.md](model-variants.md)). Digits: `5` = RATE FAST
 (60000 counts, one conversion per reading), `6` = RATE MED (SLOW is kept):
-600000 counts once the moving average is full (~3.2 s after a change) in DC
-V 600 mV .. 600 V and ohm 600 ohm .. 60 kohm; elsewhere it stays 60000
+600000 counts once the moving average holds 8 conversions (~1.6 s after a
+change in DC V, ~3.2 s in ohm) in DC V 600 mV .. 600 V and ohm 600 ohm ..
+60 kohm; elsewhere it stays 60000
 counts. The setting is the meter's global rate; each sample's digits come
 from `CONF?` (the readout's resolution), which the profile asks instead of
 `FUNC?` before each `READ?`. Ranges and the rate are safe over Bluetooth

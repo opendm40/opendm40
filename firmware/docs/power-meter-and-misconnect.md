@@ -23,7 +23,7 @@ transcribed in [`emu/hy3131/ref/registers.md`](../../emu/hy3131/ref/registers.md
 the stock rows (`stock/re/analysis/hy3131_v2_6.h` (in the private analysis repo),
 byte-identical in [`src/hy3131_tables.rs`](../src/hy3131_tables.rs)), the
 code, or a device check with its commit
-([device-check-2026-10-21.md](device-check-2026-10-21.md)).
+([device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md)).
 
 * **INFERRED** = what the row bytes and the stock scaling imply about the
   board wiring (there is no netlist), or chip behaviour the datasheet does
@@ -1146,7 +1146,7 @@ kHz tone is as loud as the 3.57 kHz one (if not, the pair moves to 3.57 /
 ### 4.11 AC A and DC A V-JACK?, AC A over range (device 40728b8)
 
 From the device check "40728b8"
-([device-check-2026-10-21.md](device-check-2026-10-21.md); the A jack not
+([device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md); the A jack not
 wired, the calibrator on V-COM only).
 
 **CTSTA on the device**: four values only, and CMPHO never without CMPLO
@@ -1188,7 +1188,7 @@ Emulator knobs ([`emu/hy3131/README.md`](../../emu/hy3131/README.md)):
 ### 4.12 DC A precondition, AC A swing reversal, stale readings (device d2aff22)
 
 From the device check "d2aff22"
-([device-check-2026-10-21.md](device-check-2026-10-21.md)).
+([device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md)).
 
 **The DC A precondition (100 ms by default).** 100 / 300 / 1000 ms of the
 temperature row before the DC A row brought V-JACK? back at 1.9 / 2.1 /
@@ -1241,7 +1241,7 @@ The device shows only that PB1 trips from 3-5 V in RES (519fb8a 7c), not at
 With the leads in A / COM and V-COM open the input node sits at the row's
 own source: ohm 0.78-2.17 V open on the stock taps, 1.38 V on the 60 MΩ
 current-source row ([device check, "Ohm test current
-map"](device-check-2026-10-21.md)); continuity ~-0.48 V. A source on V-COM
+map"](../../docs/history/device-check-2026-10-21.md)); continuity ~-0.48 V. A source on V-COM
 moves it. While PB1 hits, AD2 reads OP1O - PB3 (OP1 is the row's own x1
 buffer of the input, the numerator of the stock ratio) at IG 0.5 (±2.5 V)
 with the peak hold (`sentinel::jack_row`, `jack_driven`):
@@ -1266,7 +1266,7 @@ verdict until the next run (check list item 2). `cont_jack` and
 HY3131 themselves, so never with the bus handed to a stream (not checked
 with the region C hooks).
 
-Device 1a11eda ([device check, "1a11eda: bug-fix recheck"](device-check-2026-10-21.md))
+Device 1a11eda ([device check, "1a11eda: bug-fix recheck"](../../docs/history/device-check-2026-10-21.md))
 showed that OP1O does not follow a source above the open-circuit voltage
 (2.02-2.25 V with 5 / 10 V on the jack, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): all "free", so RES still
 raised A-JACK there. Only the square on 600 Ω read 2.38 V (driven); the same
@@ -1291,7 +1291,7 @@ input range (tens of mA, PB1 above ~2.4 V) may also read 0x70. It would then
 show LIVE? instead of the A-JACK badge. This is not checked: the A jack has
 not been wired.
 
-Device c6a3ac3 ([device check, "c6a3ac3: the RES jack fix"](device-check-2026-10-21.md#c6a3ac3-the-res-jack-fix-428df52-both-bit-reads-live-after-the-source-2026-10-25)),
+Device c6a3ac3 ([device check, "c6a3ac3: the RES jack fix"](../../docs/history/device-check-2026-10-21.md#c6a3ac3-the-res-jack-fix-428df52-both-bit-reads-live-after-the-source-2026-10-25)),
 A jack empty: in RES AUTO and 600 Ω, 5 V and 10 V read CTSTA 112 on all but
 the first poll, field 14 = 2, LIVE?, no A-JACK; the square read 112 on about
 half of the polls (0 on the rest), field 14 = 2, LIVE?, no A-JACK. 1 V and
@@ -1330,7 +1330,7 @@ the onset in the emulator). Emulator senttest
 the voltage on), pass with the gate.
 
 **AC+DC mV after the source goes off.** Device
-[185c066](device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25)
+[185c066](../../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25)
 (manual 600 mV): A-JACK 0.45-0.9 s after the square or 5 V was switched
 off in 8 of 13 runs, held while the input was open, the readout OL; plain
 AC mV 0 of 6. How the input holds a charge there and why PB1 hits are

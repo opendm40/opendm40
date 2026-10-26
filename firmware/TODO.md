@@ -12,14 +12,14 @@ Additional requirements:
 - Both analog rails on by default.
 - USB composite = USBTMC + mass-storage disk, always present (like the stock disk mode).
 - Debug commands live in USBTMC as `DBG:*` SCPI commands (no CDC).
-- Data-logger mode (see FR-38 in `../docs/dm40-feature-request.md`).
+- Data-logger mode (see FR-38 in `../docs/history/dm40-feature-request.md`).
 
 ## Owner decisions pending (2026-10-25)
 
 What waits for the owner; each line links to the material.
 
 - [x] DC rate / filter: option B or E ([dmm-rate-filter-survey.md](docs/dmm-rate-filter-survey.md) §7-8 and "Option E";
-      device numbers in [device-check-2026-10-21.md](docs/device-check-2026-10-21.md) "Option E"). Recommendation: B.
+      device numbers in [device-check-2026-10-21.md](../docs/history/device-check-2026-10-21.md) "Option E"). Recommendation: B.
       **Owner 2026-10-25: FAST unchopped with a firmware offset, MED / SLOW chopped, all three rejecting 50 / 60 Hz**
       (the "bug fixes only" rule does not apply to this one). Done on branch feat/rate-unchopped-fast:
       [fastvos.rs](src/fastvos.rs), dmm.rs FR-05 (the rate's R22 in the row), survey §8.4, the manual;
@@ -68,13 +68,27 @@ What waits for the owner; each line links to the material.
       5. RES AUTO on 50 Ω (60 Ω range), then 0.28 mA ON on the range page: 600 Ω with I 0.28 mA, and AUTO stays
          there; ON off again: back to 60 Ω. With ON the 60 Ω item still selects 60 Ω (I 0.90 mA).
       6. Manual 60 Ω, AUTO key held 1 s: AUTO, still on 60 Ω; short presses cycle 60 Ω .. 60 MΩ as before.
-- [ ] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
+- [x] [emu/hy3131/resautotest.py](../emu/hy3131/resautotest.py) is not stable on 058a1d36 (2026-10-25, host load ~5-6):
       in whole runs `r30-300-30` failed 4 of 5 (ranges 60, 60 M, 6000, 600, 60: the first step down from 60 MΩ is
       4 rows, not 5, so 4 changes, not 3) and `r100k-key` 1 of 5 (MANU on 4 polls after AUTO); `r30-300-30` alone
       failed 1 of 4. The cause is unknown (inferred: the scenario is the run's last, where its scheduled input
       changes drift against the firmware's uptime, the file's own note on `later`).
       With the 60 Ω range removed, `r30-300-30` stays on 600 Ω (no range change) and passed in a whole run;
       `r100k-key` failed that run (MANU on 3 polls after AUTO) and passed alone.
+      Cause (`r100k-key`, firmware): the AUTO key held 1 s ([app.rs](src/app.rs) `auto_key_end`, long press)
+      set the autorange without `auto_entered`, so the last manual reading stayed shown with MANU until the
+      next conversion; on ohm RES:RANG? stepped 6 M -> 600 k at +1.25 s under it and MANU lasted to
+      +1.43 .. 1.48 s after the DBG:KEY, against the row's 1.5 s grace (`late`): pass or fail on the
+      conversion phase. Fix (0.2.1): `auto_key_end` calls `auto_entered`; AUTO and dashes at +1.01 s.
+      The test: the windows sit on each input's logged fw uptime (emu/emusync.py `Markers`), not on
+      BOOT_OFS 0.906 (the boot is ~2.8 s: the inputs, `later` ones too, came ~1.9 s early on the fw clock;
+      now `later` lands at +4.95 / +9.95 s for +5 / +10); the held-key row fails when the range leaves the
+      manual one while the bar reads MANU. Results: new test on the old firmware 3 of 3 FAIL; on 0.2.1
+      `r100k-key` alone 3 of 3 and whole runs 4 of 4 (4 in parallel, host load ~8) PASS; autokeytest.py
+      PASS. The old `r30-300-30` failures were with the 60 Ω range (its own cause not found, branch
+      feat/ohm60) and do not occur on main.
+      (verify on device: RES, `CONF:RES 6E6` on a 100 kΩ resistor, AUTO key held 1 s: the status bar shows
+      AUTO and dashes at the beep, never the 6 MΩ reading with MANU after it.)
 - [x] Repository split (owner 2026-10-25): stock/re, the stock-UI notes, genuine-check, fsloader-install-trigger,
       stock-scope-ui, native-review / native-boot-plan / native-boot-review and acdc-stock-vs-opendm40 (with their
       old fw-rs/ names) are in the private wirenboard/alientek-dm40-fw-analysis, cloned into stock/re/. The public
@@ -115,7 +129,7 @@ What waits for the owner; each line links to the material.
       remaining offsets are the panel or the aim is unknown: the touch test screen (owner request) shows it.
       AUTO key cycle on the device (DC V, 1 V in): 6 V -> 60 V -> 600 V -> 1000 V -> 60 mV -> 600 mV -> 6 V,
       held 1.2 s -> AUTO+: PASS. The status bar shows "60V" on a fixed 60 V range (screenshot): PASS.
-- [ ] USB PID (owner 2026-10-25): request 1209:D040 from pid.codes right after the repo is public (their rule:
+- [ ] USB PID (owner 2026-10-25; repo public 2026-10-26, request open: https://github.com/pidcodes/pidcodes.github.com/pull/1331; firmware already uses D040): request 1209:D040 from pid.codes right after the repo is public (their rule:
       a public source repo with a LICENSE). The PR is prepared locally (org/WirenBoard + 1209/D040, MIT, site and
       source = github.com/wirenboard/opendm40): fork pidcodes/pidcodes.github.com, push, open the PR. After the
       merge: the PID constant in usb descriptors (now the test PID 1209:0001), udev rules / docs, a release.
@@ -130,6 +144,13 @@ What waits for the owner; each line links to the material.
       delete the rust-fw-poc and bt-protocol branches; cut v0.1.0-pre2 through CI and drop v0.1-pre1.
 - [ ] Owner-only device checks: the generator-ON output glitch with OUTP? polled; a current into A with V-COM open
       (AC+DC mV A-JACK); DC V against a third reference.
+- [ ] **Docs, owner decision:** a photo of a real DM40 running opendm40 for the front
+      [README.md](../README.md). For now it shows the rendered multimeter screen (docs/manual/img/dmm.png).
+- [ ] **Docs, owner decision:** the licence wording for the stock V2.6 bitmap fonts that opendm40 copies into
+      its image ([src/stockfont_data.rs](src/stockfont_data.rs), [fonts.md](docs/fonts.md)). README "Licence"
+      now only lists them as not under MIT, with no licence statement.
+- [ ] **Docs, owner decision:** the AI-contribution policy for CONTRIBUTING.md (whether AI-written
+      contributions are accepted, and how they are marked and reviewed).
 
 ## Next up (groomed 2026-10-14)
 
@@ -3846,7 +3867,7 @@ Emulator (emu/):
       the first used result after a reset seeds `f_ac` / `f_lpf`. Emulator firstrdtest acv-auto-dn / acv-auto-up /
       aca-auto-dn / acv-entry: FAIL on 7ab5c0e, pass. Device check: AC V 1 V 50 Hz, CONF:VOLT:AC 60 then
       VOLT:AC:RANG:AUTO ON, FETC? / DBG:READout? every 50 ms for 2 s: no 0 and no reading 1 % low; the same
-      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
+      for CONF:VOLT:DC 6 -> CONF:VOLT:AC. [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) (the 0 / 9.5 V square, no 1 V sine source): no 0 and no 1 % low
       reading at the 60 -> 6 V step (the first final +7 %: the coupling step); the entry fails differently (next item).
 - [x] Plain AC V entry: the first final reads 1/√2 of the input (device 185c066, DC V -> AC V on the square at 20 / 50 /
       90 Hz: 3.39-3.41 V for 4.81 V; the next result 0.15 s later is right). `DBG:ACDC?`: that result is read 4 ms after
@@ -3860,7 +3881,7 @@ Emulator (emu/):
       the entry, was 0.30 s; an autorange step: 0.65-0.71 s between readings, was 0.46-0.54 s). Emulator: the model's `acarrive` (the AC V node carries the AC from 160 ms after the
       entry, INFERRED; the block over it reads 0.706 of the input); firstrdtest acv-entry-sq (the device's square) /
       acv-entry-arr (1 V sine): FAIL on 5a4dbce (3.378 V for 4.776 V, 0.707 V for 1 V), pass; acv-auto-* /
-      aca-auto-dn (8ed9499's) pass. Device check (5 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
+      aca-auto-dn (8ed9499's) pass. Device check (5 min): as [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 1 (CONF:VOLT:DC 6 -> CONF:VOLT:AC on
       the square at 20 / 50 / 90 Hz, `DBG:READout?` every 50 ms for 2 s, `DBG:ACDC?`): the first final within 1 % of
       the steady value; the 60 -> 6 V autorange step: no 0, no 1 % low reading; also with a sine if one is available.
       `DBG:ACDC?` does not list the two dropped results (the drop comes before its entry): the first one logged is
@@ -3878,7 +3899,7 @@ Emulator (emu/):
 - [x] AC+DC mV (manual 600 mV) A-JACK after the voltage goes off (device 185c066): none while the square or 5 V is on
       (13 runs), but `AJACK,AD1PK_PB1` 0.45-0.9 s after the source is switched off in 8 of 13 runs, held while the
       input is open (the readout OL: a charge left on the floating mV input). Plain AC mV, the same cycles: 0 of 6.
-      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) note 2.
+      How the AC phase's free verdict meets the hit run there is not traced (sentinel.rs `decide`). [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) note 2.
       Fixed (9e49722): a DC phase result whose magnitude is over the range (the readout's OL; dmm.rs `mv_dc_drv`) makes the
       AC phase's V_GATE results say driven until the next DC result, so the "free" AC result (|LPF| + 1.41 x RMS under
       1.5 x the range) no longer asserts A-JACK while the input reads OL
@@ -3887,7 +3908,7 @@ Emulator (emu/):
       `mvholdrows:1`: only the DC mV row sees it); senttest acdcmv-sq600-off / acdcmv-dc5-off / acdcmv-off-dcrow: FAIL on
       5a4dbce (A-JACK ~1 s after the off), pass; their last phase (a current in A) and acdcmv-sq600 / acdcmv-dc5 /
       acmv-* still A-JACK. Not covered: an open input that reads within the range while PB1 still hits (no device
-      trace of it). Device check (10 min): as [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
+      trace of it). Device check (10 min): as [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25) step 2 (alarm OFF, AC+DC manual 600 mV, the square / 5 V on and
       off, 6 runs each, `SYST:ALER?` + `DBG:SENT:LOG?` every 0.1 s for 6 s after the off): no A-JACK; then a current in
       A (V-COM open): A-JACK.
       **Device 57e1241 (2026-10-25): PASS.** Alarm OFF, CONF:VOLT:ACDC 0.6, the calibrator's 50 Hz square and 5 V DC,
@@ -3912,7 +3933,7 @@ Emulator (emu/):
       square from CONF:VOLT:AC 0.6 -> CONF:VOLT:AC with VOLT:AC:RANG? every 50 ms. A first final above ~0.1 V
       at 0 V or a 60 V visit = real: then hold plain AC V results after a row write until two agree
       (as ACA_VET) and let held results move no range; else lower the model's level.
-      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
+      [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): first final 0.018-0.036 V at 0 V (4 runs), `VOLT:AC:RANG?` 6 V only under the square (3 runs; then
       a +20-23 % overshoot 0.3 s after the first final, steady after ~1.3 s). So the model's level is what to lower.
       Done (fix/regressions-1025): `Op1OffLevel` -0.6 -> -0.005 V. The model now reads 0.027, 0.018, 0.012, 0.008
       ... 0.003 V by 1 s at 0 V (the device 0.018-0.036, 15-17, 9-10, 5-6, 3 mV), and under the square 6 V only
@@ -3926,7 +3947,7 @@ Emulator (emu/):
       open, `dm40scpi.py log out.csv --source ad2 --rate 9600 -d 1`: the mean of the samples (A) against the cal
       0x10C offset, and their rms about the mean. Mean off = arm with a measured zero; noise = the plan's
       ~20 mA figure is what changes.
-      [device-check 185c066](docs/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
+      [device-check 185c066](../docs/history/device-check-2026-10-21.md#185c066-plain-ac-first-readings-8ed9499-acdc-mv-a-jack-9a191ea-two-open-triage-items-scope-trigger-level-in-volts--nearest-marker-drag-f6c6ac3-2ad7feb-2026-10-25): mean +150.4 codes = +0.0717 A, rms about the mean 1.72 mA; the scale's offset is 0 A (`LOG:SCALe?`;
       the 10 A row's cal offset 0x110 not set or not used). An offset: arm with a measured zero.
       Fixed (18532a6): the cal record has 0 at 0x10C..0x120 (all AC A LPF offsets; gain 1), so every arm measures the zero
       (inrush.rs `Cap::arm` / `zero_in`: 10 ms skipped, the mean of the next 100 ms when it is within 0.2 A of the zero
@@ -4084,3 +4105,57 @@ Emulator (emu/):
       after ~3.3 s ("--" before). (6) AC V with 2 Hz on the output (if the MMB3.0 gives an AC
       level at 2 Hz): the frequency above the reading reads ~2 Hz. (7) Optionally a CSV recording at 2 / 5 / 10 Hz
       (Log, Hz) for docs/data.
+
+## 500 ohm from the MMB3.0 reads OL on 600 ohm (owner 2026-10-25, v0.2.0, branch fix/ohm500-ol)
+
+- [ ] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
+      [docs/data/res-steps-2026-10-25.csv](docs/data/res-steps-2026-10-25.csv). 0.01 .. 200 ohm read right on
+      600 ohm; the step 200 -> 500 ohm at 99.8 s gave one mixed reading (231 ohm), then OL at every conversion
+      for 32 s (rows 25 ms apart: R22 0x13, [src/dmm.rs](src/dmm.rs) `poll_ohm` on OL). Every later block of
+      0.1 s rows after a 0.45 .. 1.1 s gap is a row write (OSR_EARLY for 2 s after it, R22_LATE); there are six
+      between 132 and 140 s: the range was changed on the meter (inferred: the AUTO key's short press, the next
+      higher range). After them 500 ohm reads 499.8 .. 500.2 ohm. 1697 / 2064 ohm at 137.1 s and 736 ohm at
+      148.5 s (no row write from 140.2 s on) are not OL, so those blocks are on 6 kohm or higher; the range of the
+      block at 132.5 .. 134.1 s (499.6 .. 500.0 ohm) is unknown (a long AUTO press there would land on 600 ohm).
+      The ranges after 134.1 s are inferred from the values only.
+      Cause, two hypotheses (inferred, neither confirmed; the calibrator's resistance output is an active
+      simulator, inferred):
+      1. Current limit: the calibrator does not give 500 ohm at the 600 ohm range's test current, 0.90 mA
+         (`OHM_ISC` r1, Rref 1 k); it gives 200 ohm on the same current and 500 ohm .. 4 kohm on 6 kohm
+         (0.20 mA). Its readings get worse as the current falls (60 kohm range: 460 .. 547 ohm; 600 kohm:
+         1.2 .. 2.1 kohm; 60 Mohm: OL), as a simulator's would. The MMB3.0's resistance specification (the
+         test current per range) is unknown here.
+      2. Transient lock: the calibrator's switch (an open moment: the node goes to the open-circuit 2.17 V)
+         leaves its output failed while the current runs, and a row write (relays, a current interruption)
+         clears it. Fits the 132.0 s row write if that block is on 600 ohm.
+      The device check below tells them apart: a static 500 ohm on 600 ohm reads OL -> 1; it reads but the
+      200 -> 500 ohm step stays OL -> 2.
+      Ruled out in the firmware:
+      - The limit: `COUNTS_MODEL` is pinned to 2 for every model byte (DM40A too), so the 600 ohm range's OL
+        limit is 6 x 0.1 kohm x 1.03 = 618 ohm (`FACTOR` / `OVER`), not the stock DM40A's 4 x 1.05 = 420 ohm.
+      - The range: `Dmm::set_range` / `scpi::range_item_code` map the first ohm item and `CONF:RES 600` to r1
+        (Rref 1 k, the stock f10 row); 0.01 .. 200 ohm read right on it in the same record.
+      - A latch: `poll_ohm` takes OL afresh from every conversion (the average restarts on any R22 but the
+        steady one, the vet accepts two OL in a row, no hold), and the 25 ms rows show one OL decision per
+        conversion for the 32 s. Emulator ([emu/hy3131/ohm600test.py](../emu/hy3131/ohm600test.py)): manual
+        600 ohm at SLOW / MED / FAST, 200 -> open -> 500, 700 -> 500 and open -> 500 ohm read 500 ohm from the
+        first conversion after the step; 590 / 610 ohm in range, 620 ohm OL; AUTO lands a passive 500 ohm on
+        600 ohm, also with the emulator's node lag after each range step (`ohmtau:1000`).
+      - The UI: "0L" with "Overload" next to it is the plain OL readout (`ui.rs` `ol_word`), not the sentinel's
+        OVERLOAD alert (that one is the uA / mA shunt, DC / AC A only).
+      Not changed: the firmware.
+- [ ] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
+      if the owner is asleep). Each step: `CONF:RES 600;:SENS:RATE MED`, then 20 x
+      `RES:RANG?;:DBG:READout?;:DBG:SENTinel?` 0.5 s apart.
+      (1) A passive 470 .. 560 ohm resistor: in range, the control.
+      (2) MMB3.0 500 ohm, set before entering 600 ohm (no step on the range): OL = hypothesis 1. Note the DBG:SENTinel? `jack` field (1 / 2 = the node is driven, as by a
+      source) and the alert.
+      (3) The nodes with the simulator on: `firmware/tools/srcmap.py --vrefs VDS15 --paths R1K,R10K --load 500`
+      (the stock r1 / r2 rows): I and V_jack on 600 ohm and on 6 kohm. A simulator that cannot follow shows
+      V_jack near the open-circuit 2.17 V or I far from 0.90 mA; a passive 500 ohm gives V_jack = I x 500.
+      (4) MMB3.0 300 / 400 / 450 ohm on 600 ohm: where OL starts (the simulator's current limit, inferred).
+      (5) MMB3.0 500 ohm on 600 ohm with the low-current variant ON (MF page, ON button: 0.28 mA, `OHM_ISC` r1
+      ON): in range = the current limit confirmed, and the way to check the 600 ohm range with this calibrator.
+      (6) If (2) reads 500 ohm: the 200 -> 500 ohm step on 600 ohm; OL until a range change = hypothesis 2.
+      (7) MMB3.0 500 ohm on AUTO (long AUTO press): `RES:RANG?`. A passive 500 ohm lands on 600 ohm (emulator);
+      6 kohm means AUTO tried 600 ohm, read OL and went back (OHM_BAND hold).

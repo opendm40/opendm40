@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""RES AUTO set from a manual RES range (device c6a3ac3, firmware/docs/device-check-2026-10-21.md
+"""RES AUTO set from a manual RES range (device c6a3ac3, docs/history/device-check-2026-10-21.md
 "c6a3ac3: the RES jack fix" note 2): `CONF:RES 6E6`, then `CONF:RES` + `RES:RANG:AUTO ON` left the
 status bar on MANU and the readout on the manual range's final value (DBG:READout? `F`) while AUTO
 stepped; from DC V the same commands showed AUTO and dashes.
 
-Each window: input at its start, CONF:VOLT:DC at +3 s, the manual range (`CONF:RES <r>`) at +5 s, at
-+9 s (fw uptime) the AUTO command, then `RES:RANG?;:DBG:READout?` every 0.05 s for HOLD s:
+Each window (fw uptime, from the window input's marker: emu/emusync.py): input at its start, CONF:VOLT:DC at +3 s, the manual range (`CONF:RES <r>`) at +5 s, at
++9 s the AUTO command, then `RES:RANG?;:DBG:READout?` every 0.05 s for HOLD s:
   - the status bar (DBG:READout? field 5) reads AUTO from the reply in the AUTO command's own
     message on; no final (kind F) readout with MANU after it;
   - a final AUTO readout within FINAL_MAX s, its value within 1 % of `want` (resistor rows).
@@ -19,17 +19,20 @@ Ohm rows (the 60 ohm range is removed, 2026-10-25: AUTO's lowest ohm range is 60
 `CONF:RES 60` selects 600 ohm; the 60 ohm rows are on branch feat/ohm60). A row's optional dict
   range   the range (RES:RANG?, ohm) every poll from the first final AUTO readout on must show
           (no hunt: no range change after it), unless `later` changes the input;
-  later   [(s, input)]: the input changes s seconds after the AUTO command (the emulator
-          script, virtual time; by the fw uptime the changes came ~1.6 s early 3 min into a
-          run, so they are far apart and the first final value is not checked); then the
+  later   [(s, input)]: the input changes s seconds after the AUTO's window time +9 s (the
+          emulator script, placed on the fw clock through the window's input marker; the
+          first final value is not checked); then the
           last poll must show `range`, and the range seen after the first final readout
           changes at most `steps` times in all (no hunt);
   on      the 0.28 mA "ON" ohm variant is chosen first (the MF page's ON button, DBG:KEY 3 /
           DBG:TAP);
   ol      one of the last five polls shows a final OL;
   steps   with `later`: the most range changes after the first final readout;
-  late    the AUTO command takes this long (s; a held AUTO key, `DBG:KEY 2,1200`): the AUTO
-          status bar is checked from then on.
+  late    the AUTO command takes up to this long (s; a held AUTO key, `DBG:KEY 2,1200`, is
+          AUTO after app.rs RUN_LONG_MS = 1 s): the status bar must read AUTO by then and on
+          every poll from its first AUTO on, and must not read MANU once RES:RANG? has left
+          the manual range (the autorange stepping under the manual reading: the held key's
+          path missed `auto_entered` before 0.2.1).
 Rows: 30 ohm from DC V / manual 600 / `CONF:RES 60` (= 600) lands on 600 ohm; 300 ohm and 59.5
 ohm stay on 600 ohm; 30 -> 300 -> 30 ohm stays on 600 ohm (no range change); an open input ends
 on 60 Mohm, OL; 30 ohm with ON on 600 ohm.
@@ -46,7 +49,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = os.path.dirname(HERE)
 ROOT = os.path.dirname(EMU)
 OUT = os.path.join(EMU, 'out')
-BOOT_OFS = 0.906  # virtual time - fw uptime (switchlat.py)
+sys.path.insert(0, EMU)
+import emusync  # noqa: E402
+# Virtual time - fw uptime, nominal (the windows are placed on each input's logged fw time,
+# not on this guess: with switchlat.py's 0.906 the inputs came ~1.9 s early on the fw clock).
+BOOT_OFS = emusync.BOOT_S
 T0 = 8.0
 W = 22.0
 HOLD = 8.0
@@ -79,7 +86,6 @@ ap.add_argument('-v', '--verbose', action='store_true', help='print every poll')
 ap.add_argument('names', nargs='*', help='scenarios (default all)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
-sys.path.insert(0, EMU)
 import usbip_client as uc  # noqa: E402
 
 scen = [s for s in SCEN if not A.names or s[0] in A.names]
@@ -124,6 +130,9 @@ try:
             time.sleep(2)
     if t is None:
         sys.exit('resautotest: no USB/IP device on port %d' % A.port)
+    mk = emusync.Markers(emusync.log_path(OUT, tag))
+    if mk.wait_clock() is None:
+        sys.exit('resautotest: no clock marker (dwt: CYCCNT write) in %s' % mk.log)
 
     def q(line, timeout=60):
         t.write(line)
@@ -139,7 +148,7 @@ try:
     for k, sc in enumerate(scen):
         name, _, manual, auto, want, final_max = sc[:6]
         o = opt(sc)
-        w0 = starts[k]
+        w0 = mk.at(starts[k] + BOOT_OFS)  # the window input's fw uptime
         wait_until(w0 + 3)
         q('CONF:VOLT:DC;:SYST:ERR?')
         if manual:
@@ -170,15 +179,28 @@ try:
             time.sleep(0.05)
         err = q('SYST:ERR?')
         if A.verbose:
-            print('       before %s' % before)
+            print('       before %s; window input at fw %.3f; AUTO sent at fw %.3f' % (before, w0, t1))
+            for s_, inp in o.get('later', []):
+                print('       later %s at +%.3f s' % (inp, mk.at(starts[k] + 9 + s_ + BOOT_OFS) - t1))
             for s, rng, ro in rows:
                 print('       %6.2f range %-10g %s' % (s, rng, ','.join(ro)))
         if not err.startswith('0') and not err.startswith('+0'):
             why.append('SYST:ERR? %s' % err)
-        lab = [r for r in rows if (len(r[2]) < 5 or r[2][4] != 'AUTO') and r[0] >= o.get('late', 0)]
+        late = o.get('late', 0)
+        t_auto = 0.0
+        if late:
+            a = [r for r in rows if len(r[2]) > 4 and r[2][4] == 'AUTO']
+            t_auto = a[0][0] if a else float('inf')
+            if t_auto > late:
+                why.append('status bar AUTO first at +%.2f s (max %g)' % (t_auto, late))
+            moved = [r for r in rows[1:] if r[0] < t_auto and r[1] == r[1] and r[1] != rows[1][1]]
+            if moved:
+                why.append('range %g with %s at +%.2f s (the autorange stepped under the manual reading)' % (
+                    moved[0][1], ','.join(moved[0][2]), moved[0][0]))
+        lab = [r for r in rows if (len(r[2]) < 5 or r[2][4] != 'AUTO') and r[0] >= t_auto]
         if lab:
             why.append('status bar not AUTO on %d of %d polls (first +%.2f s: %s)' % (len(lab), len(rows), lab[0][0], ','.join(lab[0][2])))
-        stale = [r for r in rows if r[2][0] == 'F' and len(r[2]) > 4 and r[2][4] == 'MANU' and r[0] >= o.get('late', 0)]
+        stale = [r for r in rows if r[2][0] == 'F' and len(r[2]) > 4 and r[2][4] == 'MANU' and r[0] >= t_auto]
         if stale:
             why.append('%d final readouts with MANU after AUTO (last +%.2f s)' % (len(stale), stale[-1][0]))
         fin = [r for r in rows if r[2][0] == 'F' and len(r[2]) > 4 and r[2][4] == 'AUTO']

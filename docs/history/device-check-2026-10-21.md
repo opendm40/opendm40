@@ -1,5 +1,7 @@
 # Device check 2026-10-21 (621ac3f, then 5c6b565)
 
+*Archived: the device test log, one section per build. Not maintained; current limits are in the manual's [Known limitations](../manual/README.md#known-limitations).*
+
 The checks ran on the DM40 over USBTMC (`tools/dm40dbg.py`). UI input came from DBG:TAP, DBG:DRAG and DBG:KEY.
 Screenshots are DBG:LCD? reads. They are in the session scratchpad (`dev-621ac3f/`, `dev-5c6b565/`) and are not in git.
 
@@ -1441,7 +1443,7 @@ Steps: `LOG:DEST DISK`, `LOG:DUR 20`, `LOG:STAT ON` (AD1, 38 S/s, FAST013). Once
 
 - **`DBG:BOOT?`:** `calbackup: status=SAFECOPY_PRESENT written=0 conflict=0 differs=0 ms=45`; crash count 0, HEALTHY.
 - **Stack:** the high-water mark after the session was 23 120 / 45 512 B (51 %); it was 20 616 at the start.
-- **Hashes:** SHA-256 of INFO/CALIB.BIN 1103b821..., BOOTDATA.BIN b141bc95..., UID.BIN 18b55482... are equal before and after the session. The "after" hash was taken after `udisksctl unmount` + `mount`, so the page cache could not answer.
+- **Hashes:** SHA-256 of INFO/CALIB.BIN, BOOTDATA.BIN and UID.BIN (values not kept here: a per-unit fingerprint) are equal before and after the session. The "after" hash was taken after `udisksctl unmount` + `mount`, so the page cache could not answer.
 - **Copies:** the files were hashed on the mount and not copied anywhere.
 
 ### State at the end
@@ -3243,7 +3245,7 @@ calibrator on V-COM, DC V on the **6 V range, manual** (`VOLT:RANG 6`) for every
 hunting on the 10 Hz square), **RATE MED**, Danger alarm **Loud** and key / alert volume **50 %** (the owner's
 settings: read, never changed; the run stayed in DC V, so no misconnect alarm). `OUTP?` 0 throughout. Files in
 the session scratchpad's `osr/`: `st.py` (stream helper: one session per CSV, the LOG:PREamble?, LOG:COUNt? and
-DBG:ISR? in its header), `model.py` (the AD1 sinc² kernel of [dmm-rate-filter-survey.md §1.3](dmm-rate-filter-survey.md#13-the-owners-observations-explained), as in the table note below), `lvl.py`, `fr.py`, `sqmean.py`, `settle.py`,
+DBG:ISR? in its header), `model.py` (the AD1 sinc² kernel of [dmm-rate-filter-survey.md §1.3](../../firmware/docs/dmm-rate-filter-survey.md#13-the-owners-observations-explained), as in the table note below), `lvl.py`, `fr.py`, `sqmean.py`, `settle.py`,
 `drift.py` (the runs), `an_lvl.py`, `an_fr.py`, `an_fr2.py`, `an_st2.py`, `an_drift.py` (analysis), and `out/`
 (one CSV per stream, logs, the analysis outputs `an_*.txt`, PNGs).
 
@@ -3543,7 +3545,7 @@ above, not measured waveforms.
 `osr/out/fr_40_15.csv` (ea73ea5, the session right after a 640/s one): record 1 at 2.1 ms (a stale
 code), record 2 at 54.0 ms, then a copy of each record stamped exactly 51.87 ms after it, and the real
 records 100.8 ms apart. 51.87 ms is the interval from the session's first flag to the first conversion.
-[logger.rs](../src/logger.rs) `sample` took it as `p_meas`. With p_meas at half the period, the
+[logger.rs](../../firmware/src/logger.rs) `sample` took it as `p_meas`. With p_meas at half the period, the
 rescue (no flag 1.25 p_meas after the last sample) read the old result once more before every
 conversion, and because `rescued != 0` at the next flag, the period was never measured again. The
 same goes for 0x16 (149 of 289): its first interval was ~half of 200.8 ms. Fix: the period is measured
@@ -3590,9 +3592,9 @@ device may not need them (TODO "First readings after a switch").
 
 ## Ohm test current map (DBG:SRC)
 
-Measured on one unit with `DBG:SRC` ([`src/dbgsrc.rs`](../src/dbgsrc.rs)), swept by
-[`tools/srcmap.py`](../tools/srcmap.py) over every OP3 VREF tap x path, sense PB0: once with
-V/Ω - COM shorted ([`data/short.csv`](data/short.csv)), once open ([`data/open2.csv`](data/open2.csv)).
+Measured on one unit with `DBG:SRC` ([`src/dbgsrc.rs`](../../firmware/src/dbgsrc.rs)), swept by
+[`tools/srcmap.py`](../../firmware/tools/srcmap.py) over every OP3 VREF tap x path, sense PB0: once with
+V/Ω - COM shorted ([`data/short.csv`](../../firmware/docs/data/short.csv)), once open ([`data/open2.csv`](../../firmware/docs/data/open2.csv)).
 Each point is the stock `f10_p8clr` row of the range with only R31 SFUVR (the tap) changed, plus the
 AD1 phase bytes; the stock `f10_p8set` ("ON") rows differ from `f10_p8clr` only in that tap, so the
 taps below stand for both variants. Short-circuit current I = V_drop / Rref (the CSV `I` column).
@@ -3629,7 +3631,7 @@ source behind Rref.
 *Inferred*: on R1M / R10M the open reading is pulled by the input network through the large Rref, so
 the R1K values are the source's open-circuit voltage.
 
-The firmware's table is `dmm::OHM_ISC` ([`src/dmm.rs`](../src/dmm.rs)); the diode current (0.75 mA)
+The firmware's table is `dmm::OHM_ISC` ([`src/dmm.rs`](../../firmware/src/dmm.rs)); the diode current (0.75 mA)
 is still from owners' reports.
 
 ### Cross-check with the MR9270S+ calibrator (2026-10-24)
@@ -3665,9 +3667,9 @@ mV, current 0 / 128 in µA, from the vendor manual for units after October
 
 SMODE 0110 (SVDD, SVSO2, SCP): OP3 regulates a MOS current source into RLD;
 no reference resistor on the PA pins is in series. Calibrator mA input on
-V/Ω–COM (data: [diode-force-ma.csv](data/diode-force-ma.csv),
-[cs-ma.csv](data/cs-ma.csv), [cs-force-ma.csv](data/cs-force-ma.csv)), then its
-voltage input with the jacks otherwise open ([cs-diode-v.csv](data/cs-diode-v.csv)).
+V/Ω–COM (data: [diode-force-ma.csv](../../firmware/docs/data/diode-force-ma.csv),
+[cs-ma.csv](../../firmware/docs/data/cs-ma.csv), [cs-force-ma.csv](../../firmware/docs/data/cs-force-ma.csv)), then its
+voltage input with the jacks otherwise open ([cs-diode-v.csv](../../firmware/docs/data/cs-diode-v.csv)).
 
 | Diode row, VREF tap | VDS17 | VDS16 | VDS15 (stock) | AGNDP9 and every lower tap |
 |---|---|---|---|---|

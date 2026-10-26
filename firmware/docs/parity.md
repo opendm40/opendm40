@@ -40,7 +40,7 @@ Stock: `hy3131_v2_6.h`, `dmm_v2_6.h`. opendm40: [`dmm.rs`](../src/dmm.rs),
 | Strip chart 160/320/640 ms/div | MATCH | Chart in [`app.rs`](../src/app.rs), rate in `meter.rs`. |
 | HV warning ≥100 V, main value colour | DEVIATION | Main value drawn red (requirement) instead of the stock orange/red-from-30 V split. |
 | MF manual-range popup, AUTO/AUTO+ | MATCH | `Dmm::set_range`; V/A/ohm items, AUTO+ flags. |
-| Calibration read from 0x080C0000 +0x168 | MATCH | `cal()`, sane only when the record's version word is 1 (`cal_ok`); **read-only**. |
+| Calibration read from 0x080C0000 +0x168 | MATCH | `cal()`, sane only when the record's CRC (checked once at start-up, `load_record`) and version word 1 pass (`cal_ok`); **read-only**. |
 | AC+DC sub-mode | DEVIATION | Every model (stock: DM40B/C only). The total is shown only once both the AC and the DC part are measured; the stock first shows a total computed from the DC part alone. `dmm.rs`, [`acdcm.rs`](../src/acdcm.rs). |
 
 ---
@@ -182,7 +182,7 @@ only switches the view. Constraints and how opendm40 handles them:
   the stock powers one side per page. opendm40's policy is `SYST:RAIL AUTO|BOTH`
   (default AUTO, persisted): AUTO powers the side the view needs (both in the
   combined view and with a host scope command), BOTH keeps both up. Measured with
-  both rails on (device check d8e249d, [device-check-2026-10-21.md](device-check-2026-10-21.md)):
+  both rails on (device check d8e249d, [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md)):
   DC within 0.04 %; a 40 Hz 0..9.6 V square reads +0.19 % more in V (edge-rate
   dependent coupling of the powered scope front end), which is why AUTO keeps the
   scope rail off on the DMM page.

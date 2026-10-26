@@ -72,13 +72,51 @@ const REC_LEN: usize = 0x400;
 static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
 static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Start-up: copy the record (see REC_COPY).
+/// Start-up: copy the record (see REC_COPY). A record whose CRC does not
+/// match is copied as erased flash (all 0xFF), as the stock treats it (it
+/// falls back to its calibration defaults, model-variants.md "Bad CRC"):
+/// the version word is then not 1 (`cal_ok`), every float is a NaN, so
+/// every reader (`cal`, the scope's `cal_pair`, hwtrig) takes its default.
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
 pub fn load_record() {
     for (i, w) in REC_COPY.iter().enumerate() {
         w.store(unsafe { read_volatile((SETTINGS + 4 * i as u32) as *const u32) }, core::sync::atomic::Ordering::Relaxed);
     }
+    let ok = rec_crc_ok(|i| REC_COPY[i].load(core::sync::atomic::Ordering::Relaxed));
+    REC_CRC_OK.store(ok, core::sync::atomic::Ordering::Relaxed);
+    if !ok {
+        for w in REC_COPY.iter() {
+            w.store(u32::MAX, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
     REC_LOADED.store(true, core::sync::atomic::Ordering::Release);
+}
+
+/// End of the CRC-covered bytes: the stock record is 800 bytes, the CRC
+/// covers bytes 4..0x320 (model-variants.md, the Record table).
+pub const REC_CRC_END: usize = 0x320;
+static REC_CRC_OK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(true);
+
+/// Whether the record copied at start-up passed its CRC (true before the copy).
+pub fn rec_crc_ok_at_boot() -> bool {
+    REC_CRC_OK.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// `word(i)` = the record's little-endian word i. Word 0 holds the CRC-16
+/// (poly 0x8005, init 0xFFFF, MSB first, no final XOR) of bytes
+/// 4..REC_CRC_END in its low half and the complement in its high half.
+pub fn rec_crc_ok(word: impl Fn(usize) -> u32) -> bool {
+    let mut c = 0xFFFFu16;
+    for i in 1..REC_CRC_END / 4 {
+        for b in word(i).to_le_bytes() {
+            c ^= (b as u16) << 8;
+            for _ in 0..8 {
+                c = if c & 0x8000 != 0 { (c << 1) ^ 0x8005 } else { c << 1 };
+            }
+        }
+    }
+    let w0 = word(0);
+    w0 & 0xFFFF == c as u32 && w0 >> 16 == (!c) as u32
 }
 
 /// The record's word at byte offset `off` (4-aligned), from the copy.
@@ -286,6 +324,27 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
         _ => medium,
     };
     (n > 1).then_some((n, thr, ext))
+}
+
+/// What `rate` gives in function `mode` / `range`: (code window in
+/// conversions, 1 = none; the +1 digit is shown). See the FR-05 and +1
+/// digit tables: FAST never averages; MEDIUM / SLOW average 8..32 steady
+/// conversions (`rate_period` each) where the table says so.
+pub fn rate_window(rate: Rate, acdc: bool, mode: u8, range: i8) -> (usize, bool) {
+    avg_cfg(rate, acdc, mode, range).map_or((1, false), |(n, _, ext)| (n, ext))
+}
+
+/// AD1 conversion period of `rate` in function `mode`, ms: one reading per
+/// conversion (FR-05 table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm
+/// FAST 200, MED and SLOW 400).
+pub fn rate_period(rate: Rate, mode: u8) -> u32 {
+    let dc = matches!(mode, 1 | 3 | 7..=9);
+    match rate {
+        Rate::Fast if dc => 100,
+        Rate::Fast => 200,
+        Rate::Medium if dc => 200,
+        _ => 400,
+    }
 }
 
 /// The extra digit is real: an ext-capable range with at least AVG_FULL
@@ -1881,23 +1940,15 @@ impl Dmm {
 
     /// What `rate` gives in the current function and range: (code window
     /// in conversions, 1 = none; the +1 digit is shown). See the FR-05 and
-    /// +1 digit tables: FAST never averages; MEDIUM / SLOW average 8..32
-    /// steady OSR-32768 conversions (400 ms each) where the table says so.
+    /// +1 digit tables (`rate_window`).
     pub fn rate_info(&self, rate: Rate) -> (usize, bool) {
-        avg_cfg(rate, self.acdc, self.mode, self.range).map_or((1, false), |(n, _, ext)| (n, ext))
+        rate_window(rate, self.acdc, self.mode, self.range)
     }
 
-    /// AD1 conversion period of `rate` in the current function, ms (FR-05
-    /// table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm FAST 200, MED
-    /// and SLOW 400).
+    /// AD1 conversion period of `rate` in the current function, ms
+    /// (`rate_period`).
     pub fn rate_period_ms(&self, rate: Rate) -> u32 {
-        let dc = matches!(self.mode, 1 | 3 | 7..=9);
-        match rate {
-            Rate::Fast if dc => 100,
-            Rate::Fast => 200,
-            Rate::Medium if dc => 200,
-            _ => 400,
-        }
+        rate_period(rate, self.mode)
     }
 
     /// The rate setting changes something in the current function (DC V /
@@ -1907,8 +1958,8 @@ impl Dmm {
     }
 
     /// Measured mean interval between readings (ms, EMA over the last few;
-    /// intervals across a function / range change are not counted). 0 until
-    /// two readings were seen. Use for "x readings/s" in the UI and SCPI.
+    /// intervals across a function / range / rate change or a dropped
+    /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
         self.period_ms as u32
     }
@@ -1967,15 +2018,24 @@ impl Dmm {
             hy::write(0x22, &[r]);
         }
         match o {
-            fastvos::Out::Drop => None,
+            // Not a reading: the interval across it is not counted either,
+            // so the readings/s (`reading_period_ms`, the rate chip) stays
+            // the conversion rate (with the gap, one dropped conversion
+            // read 125 ms and the chip "8.0/s" .. "8.8/s" for ~1 s after
+            // each refresh: device check of 0.2.1, emulator rateprobe).
+            fastvos::Out::Drop => {
+                self.t_rd = None;
+                None
+            }
             fastvos::Out::Code(c) => Some((c + if c < 0.0 { -0.5 } else { 0.5 }) as i32),
         }
     }
 
     /// FAST's offset refreshes this session: (used, rejected, VOS in codes
-    /// on the current path) (DBG:DMM:FAST?).
-    pub fn fast_info(&self) -> (u32, u32, f32) {
-        (self.fast.used, self.fast.rejected, self.fast.vos())
+    /// on the current path, AD1 conversion period in ms: EMA over every
+    /// conversion, dropped ones included) (DBG:FAST?).
+    pub fn fast_info(&self) -> (u32, u32, f32, f32) {
+        (self.fast.used, self.fast.rejected, self.fast.vos(), self.conv_ms)
     }
     fn factor(&self) -> f32 {
         FACTOR[COUNTS_MODEL as usize]
@@ -3842,6 +3902,8 @@ impl Dmm {
             return false;
         }
         self.r22_drop -= 1;
+        // (as a FAST refresh's drop, `fast_code`: no interval across it)
+        self.t_rd = None;
         true
     }
 

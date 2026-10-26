@@ -70,7 +70,7 @@ This model explains the owner's three observations (§1.3):
 - **A 10 Hz square aliases into a slow ±2.4 V swing.** 10 Hz is not a notch of
   the 50 ms comb, and it equals the 10/s reading rate, so the leak folds to
   near DC and beats. A second-order comb (sinc², what the datasheet block
-  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square (the 0..9.6 V level is inferred: the calibrator level of [device-check-2026-10-21.md](device-check-2026-10-21.md)).
+  diagram seems to show) predicts exactly ±2.4 V for a 0..9.6 V square (the 0..9.6 V level is inferred: the calibrator level of [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md)).
   At 0x16 or 0x17, 10 Hz is a notch.
 - **Small changes take 3.2-6.4 s.** That is the default 8 / 16-conversion
   window of MEDIUM / SLOW. User feedback P3 asks for no smoothing by default.
@@ -134,8 +134,9 @@ The stock DM40 has no user setting. It runs 0x17 when |ΔAD1| <= 518 codes
   pins), which "will help to filter noise and stabilize signal" (DS §12.4,
   p.27). APD-DMM003 §1 (p.6) advises "When OPA measures DC, it is advised to
   open ADC1 Pre-Filter" and suggests a 10 MΩ input load on mV against 50/60 Hz
-  pickup. Whether the DM40 board fits an FTP-FTN capacitor, and what SFT1 the
-  stock DC rows set, is not known (a hardware check, §8.3).
+  pickup. The DM40 fits an FTP-FTN capacitor of ~26 nF (τ = 2.56 ms with
+  SFT1 = 100 k, [`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) 1);
+  the stock V rows set SFT1 = open.
 - **Display averaging.** HYCON's EVA tool (APD-DMM001 §1, p.3; §4 item 12,
   p.17) computes RMS noise and ENOB from at least 1024 conversions and offers
   a software "Avr. Times" averaging of the displayed value. That is a test
@@ -166,7 +167,7 @@ in the time domain: the sinc² kernel is a 100 ms triangle, so the reading is
 whose rate is the frequency mismatch. That is the "slow swing". The chop pair
 evidently does **not** form a contiguous 100 ms boxcar: a boxcar would null
 10 Hz exactly. That is consistent with the earlier 40 Hz test (40 Hz square
-0..9.6 V read 4.77-4.81 V in DC V, [device-check-2026-10-21.md](device-check-2026-10-21.md)): 40 Hz is a
+0..9.6 V read 4.77-4.81 V in DC V, [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md)): 40 Hz is a
 notch of every code from 0x14 up. At **0x16 (notches every 10 Hz) and 0x17
 (every 5 Hz), 10 Hz is nulled.** This is a model fitted to two data points;
 §8.3 test 1 checks it.
@@ -721,9 +722,11 @@ safe AUTO; the stock's 0x15 ↔ 0x17 rule is not.
    0.2 Hz) and after a range change at each code.
 5. **AD1 pre-filter.** Read the stock DC rows' R33 (SFT1) and check the board
    for an FTP-FTN capacitor (a possible Fluke-style analog filter, DS §12.4).
+   Result: ~26 nF fitted, the stock DC V rows set SFT1 = open
+   ([`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) 1).
 
 **Results, tests 1-4 and option E (device, ea73ea5, 2026-10-24;**
-[device-check-2026-10-21.md](device-check-2026-10-21.md) "AD1 OSR characterization (ea73ea5)"**).** AD1
+[device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) "AD1 OSR characterization (ea73ea5)"**).** AD1
 streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 0 / 1 / 5 V DC and its disabled output (no real short on the bench).
 
@@ -839,7 +842,7 @@ The HYCON documents are in [hw/datasheets/](../../hw/datasheets/README.md):
   http://essentialscrap.com/owon_fix/) and §3 (stock R22 codes).
 - `stock/re/docs/history/acdc-stock-vs-opendm40.md` (in the private analysis repo) §4,
   [user-feedback.md](user-feedback.md) (P3, UF-25, UF-30),
-  [device-check-2026-10-21.md](device-check-2026-10-21.md) (40 Hz square in DC V).
+  [device-check-2026-10-21.md](../../docs/history/device-check-2026-10-21.md) (40 Hz square in DC V).
 
 Bench / system:
 
