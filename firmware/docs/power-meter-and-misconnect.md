@@ -793,7 +793,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | AC A / mA / uA (4..6) | V-JACK?: AD1 peak hold on SENSE - AGND via the /1000 tap (`PeakV`) | R22 00, R23 \|= ENAD1, R24 0x03, R25 \|= 0x30, R29 PKH AD1, R2C \|= 0x10, R33 OP1CHOP 00 | the swing rule of 4.11 / 4.12: 2 V rms AC on V |
 | AC+DC V / A | the DC and AC phases' own sentinels; the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites R20 every 350 ms (AC+DC shows no frequency) | as the plain functions | as the plain functions; V-JACK?'s "no current" = < 5 % of the range |
 | ohm, continuity, diode | LIVE?: no hardware (4.6) | none | - |
-| frequency (14) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`, `Sentinel::pk_dc`): a hit is a hold on one side of zero beyond the threshold (4.13) | R22 0x00, R24 0x95, R25 AD1IG 3.6, R29 PKH AD1 (AD1 already on, OP1's chopper already off) | `PK_DC_THR` 82 200 codes (~109 mV, 2x the row's standing level) |
+| frequency (14) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`, `Sentinel::pk_dc`): a hit is a hold on one side of zero beyond the threshold (4.13) | R22 0x00, R24 0x95, R25 AD1IG 3.6, R29 PKH AD1 (AD1 already on, OP1's chopper already off) | `PK_DC_THR` 136 000 codes (~180 mV, 3.3x the row's standing level) |
 | capacitance r5..7 (ramp) | none (below) | stock row | - |
 | power meter | none (R20 / R21 are the counter's, 3.12) | - | - |
 
@@ -801,7 +801,7 @@ Gaps (no fake coverage):
 
 * **Frequency, small currents**: PB1 - PB3 stands at ~54 mV there with the
   A jack open (device d8e249d, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)),
-  so only a DC current above ~1.2 mA (positive; ~3.4 mA negative) reaches the
+  so only a DC current above ~2.7 mA (positive; ~4.9 mA negative) reaches the
   threshold; an AC current never does (4.13).
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
@@ -1366,13 +1366,15 @@ PSU in A and the V jack empty, AC mV 600 mV read OL and showed no alert
 (AC V 6 V read 1.5 V, Hz ~50 kHz, DC mV +139 mV: the open input carries
 the supply's noise and part of the A jack's level; the mechanism is
 *unknown*), so the gate said driven. Now a result whose AD1 hold on PB1 -
-PB3 stays on one side of zero beyond `PK_DC_THR` (82 200 codes, ~109 mV,
-~2.3 mA) and above the node's |LPF| is "free" whatever the other tests say,
+PB3 stays on one side of zero beyond `PK_DC_THR` (136 000 codes, ~180 mV,
+~3.8 mA) and above the node's |LPF| is "free" whatever the other tests say,
 also a result over the converter range (`Dmm::mv_vside`): the level sits on
-PB1, not on the input. The V-COM cases measured put a few % of the node's
-level on PB1 (the 66 kHz square: a steady ~28 mV against an LPF of
-0.51 V). That no V-COM source puts more on PB1 than on the input is
-*inferred*. Emulator: the model's `ailift` / `ainz` (the open input at
+PB1, not on the input. The V-COM cases measured put less on PB1 (the
+66 kHz square: a steady ~28 mV against an LPF of 0.51 V; ~5-15 V DC on
+V-COM: -89 mV one-sided with the input clamped, this branch's first device
+run). That no V-COM source puts more on PB1 than on the input is
+*inferred*, so an A-JACK on this verdict is badge only (`soft`, no danger
+alarm). Emulator: the model's `ailift` / `ainz` (the open input at
 0.146 x PB1 plus 1.5 V RMS of 50 kHz while a current flows, *inferred*);
 senttest `acmv-acur` FAILs before (no alert), passes now.
 
@@ -1380,9 +1382,11 @@ senttest `acmv-acur` FAILs before (no alert), passes now.
 row had no sentinel since d8e249d (PB1 - PB3 stands at ~+41 100 codes,
 ~54 mV, there; 3 100 at 5 V, -850 at 10 V on V-COM). It carries the AD1
 peak on PB1 - PB3 again (4.2), and a hit is a hold on one side of zero
-beyond `PK_DC_THR`, twice the standing level: a DC current from ~1.2 mA
-(positive; ~3.4 mA negative) asserts, an AC one does not. Badge only, no
-danger alarm (`soft`: sources above 10 V on V-COM were not measured there).
+beyond `PK_DC_THR`, 3.3 x the standing level and twice the largest V-side
+level seen (the same run read 41 000 / 3 900 codes in Hz with ~5-15 V on
+V-COM): a DC current from ~2.7 mA (positive; ~4.9 mA negative) asserts, an
+AC one does not. Badge only, no danger alarm (`soft`: sources above ~15 V
+on V-COM were not measured there).
 Emulator: `hzpb1` (the standing level); senttest `freq-acur` FAILs before,
 passes now; `freq-gap` (1 mA) stays quiet.
 

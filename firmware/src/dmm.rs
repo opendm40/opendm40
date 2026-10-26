@@ -5039,13 +5039,17 @@ impl Dmm {
     /// not on the V input: a current in A, "free" whatever the above say
     /// (device 2026-10-26, 20 mA in A, V open: the readout OL, ~50 kHz on
     /// the open input, no A-JACK; DC mV read +139 mV there). The V-COM
-    /// cases measured put a few % of the node's level on PB1 (66 kHz:
-    /// ~28 mV against an LPF of 0.51 V). `ac` NaN: a result over the
+    /// cases measured put less there (66 kHz: ~28 mV against an LPF of
+    /// 0.51 V; ~5-15 V DC: -89 mV, the node clamped). An A-JACK on this
+    /// verdict is badge only (`soft`). `ac` NaN: a result over the
     /// converter range, which gives only that verdict.
     #[inline(never)] // .cold (link-native.x): per AC mV result
     fn mv_vside(&mut self, now: u64, dc: f32, ac: f32) {
         let pb1 = sentinel::pk_level(self.sent.pk.0, self.sent.pk.1);
-        if pb1 > sentinel::PK_DC_THR && pb1 as f32 > dc * sentinel::PK_CODES_PER_MV {
+        let ovr = pb1 > sentinel::PK_DC_THR && pb1 as f32 > dc * sentinel::PK_CODES_PER_MV;
+        // (an A-JACK on this evidence: badge only, no danger alarm: `soft`)
+        self.sent.soft = ovr;
+        if ovr {
             self.sent.v_side(now, false);
             return;
         }

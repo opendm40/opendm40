@@ -535,14 +535,15 @@ pub const PK_THR: i32 = 17_900;
 pub const PK_CODES_PER_MV: f32 = 3.6 / 1250.0 * 262_144.0;
 /// A one-sided level on PB1 - PB3 (`pk_level`) that only a current in A is
 /// known to give: frequency's A-JACK, AC mV's V_GATE override (`dmm.rs`
-/// `mv_vside`). Twice the frequency row's standing ~+41 100 codes with V-COM
-/// open or at 0..2 V (device d8e249d; 3 100 at 5 V, -850 at 10 V): ~109 mV,
-/// a DC current of ~2.3 mA (with the row's standing level: from ~1.2 mA
-/// positive, ~3.4 mA negative in frequency). The V side's pickup on PB1
-/// measured so far: ~28 mV (AC mV, the 66 kHz square on V-COM). INFERRED
-/// that no V-COM source puts more there without the mV node carrying more
-/// (AC mV) or at all (frequency, sources above 10 V not measured).
-pub const PK_DC_THR: i32 = 82_200;
+/// `mv_vside`). ~180 mV: twice the largest one-sided V-side level seen,
+/// -89 mV in AC mV with ~5-15 V on V-COM (device 2026-10-26, this branch's
+/// sanity run; +97 mV in the AC V rows); 3.3 x the frequency row's
+/// standing ~+41 100 codes (~54 mV, device d8e249d; the same run: 41 000 /
+/// 3 900). A DC current from ~3.8 mA (AC mV), ~2.7 mA positive / ~4.9 mA
+/// negative (frequency). INFERRED that no V-COM source puts more there
+/// without the mV node carrying more (AC mV) or at all (frequency: sources
+/// above ~15 V not measured).
+pub const PK_DC_THR: i32 = 136_000;
 
 /// The AD1 peak pair's one-sided level (codes): the smaller magnitude of a
 /// hold that stays on one side of zero (a DC level on PB1), 0 for a hold
