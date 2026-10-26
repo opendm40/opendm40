@@ -27,6 +27,8 @@ beyond the old screen blank).
   * zoom while stopped: 200 ms/div (2 s, inside the record) shows the
     square across the graph; 500 ms/div (5 s, more than the record) the
     record at its true scale, about 210 columns, nothing beyond;
+  * V/div while stopped: 10 V/div shows the trace across the graph, 5 V/div
+    the square again;
   * WAV:PRE? (RAW) points 65 520 throughout.
 
 Exit status 0 = all passed.
@@ -242,6 +244,18 @@ try:
     wait_ms(1000)
     z3 = classify(screen('zoom100ms'))
     full(z3, 'back at 100 ms/div')
+    # V/div while stopped: the trace across the graph at 10 V/div, the
+    # square again at 5 V/div.
+    q('DBG:LCD? 0,0,4,1,7', raw=True)
+    q('CHAN1:SCAL 10')
+    wait_ms(1000)
+    ys = screen('vdiv10')
+    n = [sum(1 for x in ys if a <= x < b) for a, b in ((0, W // 2), (W // 2, W))]
+    check(min(n) >= 190, '10 V/div: the trace across the graph (columns: left %d, right %d)' % tuple(n))
+    q('DBG:LCD? 0,0,4,1,7', raw=True)
+    q('CHAN1:SCAL 5')
+    wait_ms(1000)
+    full(classify(screen('vdiv5')), 'back at 5 V/div')
     check(npts() == 65520, 'the stored record still 65 520 samples')
 finally:
     try:
