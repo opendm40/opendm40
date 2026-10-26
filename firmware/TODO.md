@@ -23,6 +23,18 @@ Additional requirements:
       A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
       The cause in AC mV / Ohm / Hz is not traced (sentinel.rs decide / V_GATE per mode).
       Logs: scratchpad acur4.log (test build), acur-main.log.
+- [ ] A-JACK thresholds higher (owner 2026-10-27). The PB1 comparator window is the stock R21 0xdd, ±20.8 mV
+      = 0.44 mA on 47.5 Ω; A-PROT needs only a trigger for the probe (125 mA = 5.9 V at PB1). The taps allow
+      ±62.5 / 104 / 208 / 417 mV (AGNDP3..6 / AGNDN3..6, REFO 1.25 V: 1.3 / 2.2 / 4.4 / 8.8 mA); the AD1 / AD2
+      peak thresholds (`PK_THR`, `PK2_THR`, 0.5 mA) are in software.
+      - First measure PB1 in mV (AD1 PB1 − PB3) where it picks up the V input, V–COM 1 / 5 / 10 V, A open:
+        DC V manual 60 V (and 6 V at 5 V), ohm, continuity (now ~±230 mV at 5 V), Hz (~54 mV); then the same
+        with A shorted to COM (pickup on the node, not a shunt current).
+      - Pick the window above the largest pickup; see whether DC V 60 V+ and Hz can get their sentinel back
+        (no sentinel now: [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md) 4.2). If the
+        pickup grows with the input, 600 / 1000 V can exceed any window.
+      - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
+        = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
 
 ## Owner decisions pending (2026-10-25)
 
