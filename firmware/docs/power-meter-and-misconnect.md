@@ -1307,7 +1307,10 @@ comparator rows (ohm, the resistive temperature sensors), within the last
   whether a smaller current also pulls the reading into range is
   *unknown* (OL: LIVE?).
 
-Driven means no A-JACK, LIVE? (once the run's jack check is in); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
+A hit window in these rows needs a read with CMPHO (above the window):
+CMPLO alone (0x10 / 0x50) is no hit (this branch's device run, ~4.7 V on
+V-COM in RES AUTO: A-JACK for 5 ms, then LIVE?, when it counted). Driven
+means no A-JACK, LIVE? (once the run's jack check is in); `DBG:SENT?` field 14 reads **2** then. RES AUTO with the
 leads in A / COM sits on the 60 MΩ row. Gaps: a DC current in A on the
 rows below 6 MΩ (manual 600 Ω .. 600 kΩ) and in the resistive
 temperature rows still shows LIVE?; an AC current (0x70 and 0 in turn)

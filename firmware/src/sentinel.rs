@@ -916,6 +916,8 @@ pub struct Sentinel {
     /// ... and a CMPLO-only read counts only from this time on.
     lo_mask_until: u64,
     win_hit: bool,
+    /// ... a read with CMPHO (JCHK hits).
+    win_hi: bool,
     /// CTSTA bits ORed over the window (AC?); in the DC V / DC mV A-JACK
     /// windows the kinds of reads (W_ONE / W_ZERO / W_BOTH, MIXED).
     win_both: u8,
@@ -1040,6 +1042,7 @@ impl Sentinel {
             ohm_exit_max: 0,
             lo_mask_until: 0,
             win_hit: false,
+            win_hi: false,
             win_both: 0,
             win_flips: 0,
             win_last: 0,
@@ -1131,6 +1134,7 @@ impl Sentinel {
         self.blank_until = now;
         self.win_t0 = now;
         self.win_hit = false;
+        self.win_hi = false;
         self.win_both = 0;
         self.win_flips = 0;
         self.win_last = 0;
@@ -1142,6 +1146,7 @@ impl Sentinel {
         self.blank_until = self.blank_until.max(now + ms);
         self.win_t0 = self.blank_until;
         self.win_hit = false;
+        self.win_hi = false;
         self.win_both = 0;
         self.win_flips = 0;
         self.win_last = 0;
@@ -1154,6 +1159,7 @@ impl Sentinel {
         self.blank_until = self.blank_until.max(now + BLANK_SETTLED_MS);
         self.win_t0 = self.blank_until;
         self.win_hit = false;
+        self.win_hi = false;
         self.win_both = 0;
         self.win_flips = 0;
         self.win_last = 0;
@@ -1300,6 +1306,7 @@ impl Sentinel {
             }
         } else {
             self.win_hit |= bits != 0;
+            self.win_hi |= bits & 0x20 != 0;
             if self.kind == Kind::CmpA {
                 // (MIXED below: the window's kinds of reads, and how often a
                 // read of no bit and one of both followed each other)
@@ -1336,12 +1343,19 @@ impl Sentinel {
             let mix = wb == W_BOTH | W_ZERO && !(self.win_flips == 1 && self.win_last == W_BOTH);
             let hit = if self.kind == Kind::CmpA && !self.jchk {
                 wb & W_ONE != 0 || wb & W_BOTH != 0 && !mix
+            } else if self.kind == Kind::CmpA {
+                // JCHK: a hit needs CMPHO (PB1 above the window: the device
+                // reads 0x70 there); CMPLO alone is a source near the pickup's
+                // onset (device 2026-10-26, ~4.7 V on V-COM in RES: A-JACK for
+                // 5 ms before the 0x70 reads made it LIVE?)
+                self.win_hi
             } else {
                 self.win_hit
             };
             let both = wb == CTSTA_CMP;
             self.win_t0 = now;
             self.win_hit = false;
+            self.win_hi = false;
             self.win_both = 0;
             self.win_flips = 0;
             self.win_last = 0;
@@ -2647,6 +2661,14 @@ mod tests {
         s.configured(Kind::CmpA, 0, true);
         for t in (0..1000).step_by(10) {
             s.sample_cmp(t, if (t / 10) % 2 == 0 { 0 } else { 0x70 });
+        }
+        assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        // JCHK (ohm): CMPLO-only reads (0x10 / 0x50) are no hit
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.jchk = true;
+        for t in (0..1000).step_by(10) {
+            s.sample_cmp(t, if (t / 10) % 2 == 0 { 0x10 } else { 0x50 });
         }
         assert_eq!((s.alert, s.hits), (Alert::None, 0));
         // sparse 0x70 runs of the V side that end within a window (0x70, then 0): no hit
