@@ -308,6 +308,7 @@ pub fn popvals(m: &Model) -> su::PopVals {
         pcond: 0,
         pwidth: 1e-3,
         runt_v: 0.0,
+        srate: 0,
     }
 }
 

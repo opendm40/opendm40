@@ -172,9 +172,6 @@ pub struct Model {
     /// Generator output frequency, shown in the record bar while running
     /// (<= 0: off).
     pub gen_hz: f32,
-    /// Sample rate (S/s) of the acquisition, shown in the record bar while
-    /// running (opendm40); 0 while stopped and on the stock page.
-    pub srate: u32,
     /// CH1 / math label grey (their popup is open).
     pub ch1_open: bool,
     pub math_open: bool,
@@ -279,7 +276,6 @@ impl Model {
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
-        srate: 0,
         ch1_open: false,
         math_open: false,
         pressed: 0,
@@ -497,8 +493,8 @@ pub fn tb_badge(m: &Model) {
 }
 
 /// 2.3 record-position bar; while running (record = screen) it shows the
-/// sample rate, or the generator frequency when it is on, instead of the
-/// constant full-record line (opendm40 additions, 12 px grey like "ROLL").
+/// generator frequency instead of the constant full-record line when the
+/// generator is on (opendm40 addition, 12 px grey like "ROLL").
 /// The record bar's box (shorter beside the source badge).
 pub fn record_bar_rect(m: &Model) -> Rect {
     if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
@@ -511,25 +507,13 @@ pub fn record_bar(m: &Model) {
     let (sw, x0s) = (r.w as f32 - 8.0, r.x);
     let running = m.status != ST_STOP;
     let mut b = Buf::new();
-    // `srate` is 0 while stopped.
-    let rate = m.srate > 0;
-    // Beside the source badge (70 px) the rate replaces "ROLL"; "G 1.00kHz"
-    // replaces the rate.
-    let roll = m.roll && (m.src == SRC_NONE || !rate);
-    if roll {
-        b.push("ROLL");
-    }
-    if running && m.gen_hz > 0.0 && !m.roll {
+    let (txt, line, lb, rb);
+    if m.roll {
+        txt = Ink::new(sf::SC_F12, inner, "ROLL", 8, 0);
+        (line, lb, rb) = (None, Ink::none(), Ink::none());
+    } else if running && m.gen_hz > 0.0 {
         b.push("G ");
         fmt_hz(&mut b, m.gen_hz);
-    } else if rate {
-        if roll {
-            b.push(" ");
-        }
-        fmt_srate(&mut b, m.srate);
-    }
-    let (txt, line, lb, rb);
-    if b.n > 0 {
         txt = Ink::new(sf::SC_F12, inner, b.as_str(), 8, 0);
         (line, lb, rb) = (None, Ink::none(), Ink::none());
     } else {
@@ -627,8 +611,7 @@ pub fn fmt_hz(out: &mut Buf, hz: f32) {
 }
 
 /// Sample rate as `fmt_hz` gives a frequency, "S/s" for "Hz": "50.0MS/s",
-/// "12.5MS/s", "4.80kS/s", "125S/s" (no trailing-zero trim: ~180 B more of
-/// region B).
+/// "12.5MS/s", "76.8kS/s", "125S/s".
 pub fn fmt_srate(out: &mut Buf, fs: u32) {
     fmt_hz(out, fs as f32);
     out.n -= 2;
@@ -2042,7 +2025,7 @@ pub fn update(m: &Model) {
     if d(ol.src != m.src || (m.src != SRC_NONE && pal)) {
         src_badge(m);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.srate != m.srate || ol.src != m.src) {
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src) {
         record_bar(m);
     }
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
@@ -2499,6 +2482,9 @@ pub struct PopVals {
     pub pcond: u8,
     pub pwidth: f32,
     pub runt_v: f32,
+    /// Settings tab: the acquisition's sample rate (S/s, ACQ:SRAT?); 0 (the
+    /// stock-replica scenes) leaves the row out.
+    pub srate: u32,
 }
 
 /// Which popup is open (tab).
@@ -2735,8 +2721,25 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+            if v.srate > 0 {
+                fill_text(SR_LABEL, pc, C_POP_BG, sf::SC_F16, SR_LABEL, "Sample rate:", C_FILL, 1, 0);
+                mf_srate(v.srate);
+            }
         }
     }
+}
+
+// Settings tab: the sample rate (opendm40), read-only, in the column of
+// the other tabs' right-hand rows.
+pub const SR_LABEL: Rect = rect(214, 61, 189, 20);
+pub const SR_VALUE: Rect = rect(214, 81, 189, 24);
+
+/// Settings tab: the sample-rate value (repainted alone while the menu is
+/// open and the rate changes).
+pub fn mf_srate(fs: u32) {
+    let mut b = Buf::new();
+    fmt_srate(&mut b, fs);
+    fill_text(SR_VALUE, SR_VALUE, C_POP_BG, sf::SC_F16, SR_VALUE, b.as_str(), C_FILL, 1, 0);
 }
 
 /// Display tab: the two sliders and their values (repainted while dragged).

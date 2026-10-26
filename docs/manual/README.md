@@ -1220,10 +1220,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   and level), the battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
-  - Record bar: while running, the sample rate (**12.5MS/s**; **ROLL 500S/s**
-    in the combined view's roll mode), or **G 1.00kHz** while the
-    [generator](#signal-generator) runs; while stopped, brackets show which
-    part of the stored record is on screen.
+  - Record bar: while stopped, brackets show which part of the stored
+    record is on screen; **ROLL** in roll mode; **G 1.00kHz** while the
+    [generator](#signal-generator) runs.
   - **MCX | DMM**: the input source (MCX is the **OSC** jack); tap to
     switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Graph**: 10 × 8 divisions. On the left edge, the markers **A** (the
@@ -1479,6 +1478,8 @@ samples) stays in memory:
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Sample rate**: the current acquisition rate, e.g. **12.5MS/s** at
+  200 us/div, **76.8kS/s** in the Wave view (the same as `ACQ:SRAT?`).
 
 
 ![The Settings tab](img/scope-settings.png)

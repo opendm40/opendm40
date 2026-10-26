@@ -9,9 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- Scope: the record bar shows the sample rate while running, e.g.
-  "12.5MS/s", "1.20kS/s" in the Wave view, "ROLL 500S/s" in the combined
-  view ([manual](docs/manual/README.md#the-scope-page)).
+- Scope: MF > Settings shows the sample rate, e.g. "12.5MS/s",
+  "76.8kS/s" in the Wave view, the same as `ACQ:SRAT?`
+  ([manual](docs/manual/README.md#save-csv)).
 - Multimeter: the specified accuracy of the reading, small and grey under
   the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
   user manual's table for the meter's model (DM40A / B / C), as an absolute

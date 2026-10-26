@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""opendm40 scope sample-rate label (the record bar while running,
-src/scope_ui.rs record_bar / fmt_srate) in the emulator, against the host
-renders of tools/ui-render (scenes s07-srate-*).
+"""opendm40 scope sample rate on the MF menu's Settings tab
+(src/scope_ui.rs SR_LABEL / SR_VALUE, mf_srate) in the emulator, against the
+host renders of tools/ui-render (scenes s07-srate-*).
 
   cd firmware && ./build.sh && tools/ui-render/run.sh /tmp/ur
   emu/sratetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --refs /tmp/ur [--shots DIR]
 
-The record bar (DBG:LCD?) equals the host render with the same rate, and
-ACQ:SRAT? the rate, after each step:
+The tab's sample-rate rows (DBG:LCD?) equal the host render with the same
+rate, and ACQ:SRAT? the rate, after each step; the menu stays open across
+the TIM:SCAL steps (the value follows):
   * scope page (MCX, 1 kHz sine): TIM:SCAL 100 ns, 200 us, 2 ms, 50 ms;
-    5 s/div (roll); STOP: the label goes (the bar differs from the running
-    one), RUN: back;
+    5 s/div (roll); 200 us again after closing and reopening the menu;
+    STOP: the rate stays;
   * the Wave view (the source badge, DMM V input): 1 ms/div (76.8 kS/s),
     1 s/div (roll, 1.2 kS/s);
-  * the combined view (its main-menu tile): 200 us/div, 5 s/div ("ROLL 500S/s").
+  * the combined view (its main-menu tile): 200 us/div, 5 s/div (500 S/s).
 
 Exit status 0 = all passed.
 """
@@ -50,10 +51,8 @@ def check(ok, what):
         FAIL.append(what)
 
 
-# The record bar's slot (scope_ui.rs REC_BAR, y 1..17) and its part beside
-# the source badge (REC_BAR_SRC).
-WIDE = (145, 1, 137, 17)
-SHORT = (212, 1, 70, 17)
+# The Settings tab's sample-rate rows (scope_ui.rs SR_LABEL + SR_VALUE).
+ROWS = (214, 61, 189, 44)
 
 
 def ref(name, box):
@@ -134,23 +133,33 @@ try:
         im.putdata([((v >> 11) << 3, ((v >> 5) & 63) << 2, (v & 31) << 3) for v in px])
         im.save(os.path.join(A.shots, name + '.png'))
 
-    def bar(box):
-        x0, y0, w, h = box
+    def rows():
+        x0, y0, w, h = ROWS
         return lcd(y0, h, x0, w)
 
-    def step(what, cmd, refname, box, fs):
+    def step(what, cmd, refname, fs):
         if cmd:
             q(cmd)
         wait_ms(1500)
-        got = bar(box)
-        want = ref(refname, box)
+        got = rows()
+        want = ref(refname, ROWS)
         diff = sum(a != b for a, b in zip(got, want))
         sr = float(q('ACQ:SRAT?'))
-        print('  %s: ACQ:SRAT? %g, %d of %d bar pixels differ from %s' % (what, sr, diff, len(want), refname), flush=True)
+        print('  %s: ACQ:SRAT? %g, %d of %d pixels differ from %s' % (what, sr, diff, len(want), refname), flush=True)
         shot(refname.replace('s07-srate', 'emu'))
         check(abs(sr - fs) < 0.5, '%s: ACQ:SRAT? %g (want %g)' % (what, sr, fs))
-        check(diff == 0, '%s: the record bar = the host render %s' % (what, refname))
-        return got
+        check(diff == 0, '%s: the Settings tab = the host render %s' % (what, refname))
+
+    def menu(on):
+        """MF menu, Settings tab: the TRIG panel button opens it (Trigger
+        tab, both views); KEY 3 closes it."""
+        if on:
+            q('DBG:TAP 447,300')  # TRIG
+            wait_ms(800)
+            q('DBG:TAP 365,40')  # the Settings tab
+        else:
+            q('DBG:KEY 3')
+        wait_ms(800)
 
     print('*IDN?', q('*IDN?'), flush=True)
     wait_ms(2500)
@@ -163,27 +172,30 @@ try:
     q('TRIG:SWE AUTO')
 
     print('scope page (MCX):', flush=True)
-    step('100 ns/div', 'TIM:SCAL 1e-7', 's07-srate-tb3', SHORT, 50e6)
-    run13 = step('200 us/div', 'TIM:SCAL 2e-4', 's07-srate-tb13', SHORT, 12.5e6)
-    step('2 ms/div', 'TIM:SCAL 2e-3', 's07-srate-tb16', SHORT, 1.25e6)
-    step('50 ms/div', 'TIM:SCAL 5e-2', 's07-srate-tb20', SHORT, 50e3)
-    step('5 s/div (roll)', 'TIM:SCAL 5', 's07-srate-roll', SHORT, 500)
+    menu(True)
+    step('100 ns/div', 'TIM:SCAL 1e-7', 's07-srate-tb3', 50e6)
+    step('200 us/div', 'TIM:SCAL 2e-4', 's07-srate-tb13', 12.5e6)
+    step('2 ms/div', 'TIM:SCAL 2e-3', 's07-srate-tb16', 1.25e6)
+    step('50 ms/div', 'TIM:SCAL 5e-2', 's07-srate-tb20', 50e3)
+    step('5 s/div (roll)', 'TIM:SCAL 5', 's07-srate-roll', 500)
+    menu(False)
     q('TIM:SCAL 2e-4')
     wait_ms(1500)
-    q('STOP')
-    wait_ms(1500)
-    stopped = bar(SHORT)
-    shot('emu-stopped')
-    check(stopped != run13, 'STOP: the rate label goes (the bar differs from the running 200 us/div one)')
-    step('RUN again', 'RUN', 's07-srate-tb13', SHORT, 12.5e6)
+    menu(True)
+    step('200 us/div, menu reopened', None, 's07-srate-tb13', 12.5e6)
+    step('STOP', 'STOP', 's07-srate-tb13', 12.5e6)
+    q('RUN')
+    menu(False)
 
     print('Wave view (DMM):', flush=True)
     q('DBG:TAP 177,10')  # the source badge: MCX -> DMM
     wait_ms(3000)
     isr = q('DBG:ISR?')
     check(isr.split(',')[1].strip() == '1', 'the Wave view streams (DBG:ISR? %s)' % isr[:40])
-    step('1 ms/div', 'TIM:SCAL 1e-3', 's07-srate-wave', SHORT, 76800)
-    step('1 s/div (roll)', 'TIM:SCAL 1', 's07-srate-wave-roll', SHORT, 1200)
+    menu(True)
+    step('1 ms/div', 'TIM:SCAL 1e-3', 's07-srate-wave', 76800)
+    step('1 s/div (roll)', 'TIM:SCAL 1', 's07-srate-wave-roll', 1200)
+    menu(False)
     q('TIM:SCAL 1e-3')
     wait_ms(1000)
     q('DBG:TAP 177,10')  # back to MCX
@@ -198,8 +210,10 @@ try:
     v = q('DBG:VIEW?')
     print('  DBG:VIEW? %s -> %s' % (v0, v), flush=True)
     check(v.split(',')[0] not in (v0.split(',')[0], 'Oscilloscope'), 'the combined view (%s)' % v)
-    step('200 us/div', 'TIM:SCAL 2e-4', 's07-srate-dmmscope', WIDE, 12.5e6)
-    step('5 s/div (roll)', 'TIM:SCAL 5', 's07-srate-dmmscope-roll', WIDE, 500)
+    menu(True)
+    step('200 us/div', 'TIM:SCAL 2e-4', 's07-srate-dmmscope', 12.5e6)
+    step('5 s/div (roll)', 'TIM:SCAL 5', 's07-srate-dmmscope-roll', 500)
+    menu(False)
     q('TIM:SCAL 2e-4')
 finally:
     try:
