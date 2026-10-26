@@ -1201,6 +1201,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 ctStartDecided = true;
             }
             if(now < ctStart) return;
+            if(ctStart < ctChgT) { UpdateCounterSpan(now, period, duty); return; }
             var k0 = (long)Math.Round((ctStart - ctPhase) / period);
             var gate = (0x1000000 - ctInit) / SysClk;
             var overflowAt = ctStart + gate;
@@ -1225,6 +1226,65 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
             intf |= 0x01;
         }
+
+        /// A gate opened on the old waveform across a frequency change of the input (SetInput,
+        /// SignalHzChanged): the source restarts its waveform with a rising edge at the change
+        /// (as the MR9270 calibrator's output on a frequency change, inferred from the device's
+        /// 1 Hz -> 0.5 Hz step: a gate read 1.40 Hz, a period cut short). Edges: the old period
+        /// from ctStart up to the change, then the change itself, then the new period. No
+        /// ctsettle hidden edges here.
+        private void UpdateCounterSpan(double now, double period, double duty)
+        {
+            double op = ctChgOldP, tc = ctChgT;
+            long nOld = Math.Max(0, (long)Math.Ceiling((tc - ctStart) / op - 1e-9) - 1);
+            Func<double, long> count = t => t < tc ? (long)Math.Floor((t - ctStart) / op + 1e-9)
+                : nOld + 1 + (long)Math.Floor((t - tc) / period + 1e-9);
+            var overflowAt = ctStart + (0x1000000 - ctInit) / SysClk;
+            double stop;
+            if(overflowAt < tc)
+            {
+                var e = ctStart + Math.Max(1, Math.Ceiling((overflowAt - ctStart) / op - 1e-9)) * op;
+                stop = e < tc ? e : tc;
+            }
+            else stop = tc + Math.Ceiling((overflowAt - tc) / period - 1e-9) * period;
+            if(now < stop)
+            {
+                ctB = (int)Math.Min(0xFFFFFF, count(now));
+                ctC = (int)Math.Min(0xFFFFFF, Math.Round((now - ctStart) * SysClk * CtDuty(duty)));
+                return;
+            }
+            ctStop = stop;
+            var total = (long)Math.Round((stop - ctStart) * SysClk);
+            ctA = (int)((ctInit + total) & 0xFFFFFF);
+            ctB = (int)Math.Min(0xFFFFFF, count(stop));
+            ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
+            intf |= 0x01;
+        }
+
+        /// The counter's input frequency now (0: no edges), for SignalHzChanged.
+        public double CounterInputHz()
+        {
+            double f, duty;
+            ctNow = lastUpdate;
+            CounterSignal(out f, out duty);
+            return f;
+        }
+
+        /// The input's frequency changed at `now` from `oldHz`: its waveform restarts with a
+        /// rising edge then (ctPhase); a gate open across it is UpdateCounterSpan's, one still
+        /// waiting for its opening edge opens on it.
+        public void SignalHzChanged(double now, double oldHz)
+        {
+            ctChgT = now;
+            ctChgOldP = 1.0 / oldHz;
+            ctPhase = now;
+            if(ctEnabled && double.IsNaN(ctStop) && ctStartDecided && ctStart > now)
+            {
+                if(Ct0DeadMs > 0 && role == Role.Freq && !EnCntI && now < Ct0DeadEnd) ctStartDecided = false;
+                else ctStart = now;
+            }
+        }
+        private double ctChgT = double.NaN, ctChgOldP;
 
         /// Counter input settle (opt-in, "ctsettle:ms"; HYPOTHETICAL shape after the device's
         /// sub-harmonic first results, 2026-10-21 / -24: 1/3, 2/3, 1/2 of a 40 Hz square right
@@ -2783,7 +2843,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void SetInput(string spec)
         {
             Core.ForcedAd1 = int.MinValue;
+            // A frequency change restarts the waveform (Hy3131Core.SignalHzChanged).
+            Core.Update(Now);
+            var f0 = Core.CounterInputHz();
             Core.SetInput(spec);
+            var f1 = Core.CounterInputHz();
+            if(f0 > 0 && f1 > 0 && Math.Abs(f1 - f0) > 1e-9 * f0) Core.SignalHzChanged(Now, f0);
             var dwt = Antmicro.Renode.Peripherals.Miscellaneous.DM40_DWT.Instance;
             var inv = CultureInfo.InvariantCulture;
             this.Log(LogLevel.Info, "input: {0} at {1} fw {2}", spec, MachineTime.ToString("F4", inv),
