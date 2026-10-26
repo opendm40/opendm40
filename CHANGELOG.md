@@ -7,6 +7,17 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- Multimeter: the specified accuracy of the reading, small and grey under
+  the unit, e.g. "±0.0020V" under 4.8176 V: ±(x % + N digits) from the DM40
+  user manual's table for the meter's model (DM40A / B / C), as an absolute
+  value. Also in the combined view when a sub row is free. Not shown with
+  the History row, in AC+DC, the 60 mV ranges, the power meter, under REL
+  or for PT / NTC sensors. Settings > More > More > Accuracy: ON (default)
+  / OFF ([manual](docs/manual/README.md#accuracy);
+  [firmware/docs/dmm-accuracy.md](firmware/docs/dmm-accuracy.md)).
+
 ### Changed
 
 - No Wiren Board logo at the left of the status and title bars; the range
