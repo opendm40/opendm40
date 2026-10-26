@@ -13,7 +13,7 @@ pub mod splash;
 /// the shim's counter start to pre_main, [1..=8] = DWT cycles (board::init
 /// restarts the counter) at the end of each pre_main phase, see `phase`;
 /// [9..=11] = main's ms (its Clock restarts the counter again) after
-/// App::new, after the touch reset, after the first frame (`main_phase`).
+/// App::new, after the first frame, after the touch reset (`main_phase`).
 static PHASE: [AtomicU32; 12] = [const { AtomicU32::new(0) }; 12];
 const DWT_CYCCNT: u32 = 0xE000_1004;
 
@@ -25,13 +25,14 @@ fn phase(i: usize) {
     boot::feed();
 }
 
-/// main.rs: `i` 0 = App::new done, 1 = touch reset done (both advance the
-/// splash bar), 2 = the first frame drawn; `ms` = main's clock. Never
-/// inlined: its code stays in region C, not in main's (B).
+/// main.rs: `i` 0 = App::new done (the splash bar's last part), 1 = the
+/// first frame drawn (the splash gone), 2 = the touch reset done; `ms` =
+/// main's clock. Never inlined: its code stays in region C, not in main's
+/// (B).
 #[inline(never)]
 pub fn main_phase(i: usize, ms: u64) {
     PHASE[9 + i].store(ms as u32, Ordering::Relaxed);
-    if i < 2 {
+    if i == 0 {
         splash::step();
     }
 }
@@ -186,11 +187,11 @@ pub fn put_extra(s: &mut crate::scpi::Scpi) {
     put_times(s);
 }
 
-/// `,BOOTMS,<shim>,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<touch>,<frame>`:
+/// `,BOOTMS,<shim>,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>,MAINMS,<app>,<frame>,<touch>`:
 /// the boot phases in ms (`PHASE`). BOOTMS: the shim (from its DWT start;
 /// clock and key check), then pre_main's phases, each its own duration
 /// (board = board::init + the splash). MAINMS: main's clock at the end of
-/// App::new, of the touch reset and of the first frame (0 = not reached).
+/// App::new, of the first frame and of the touch reset (0 = not reached).
 /// DWT at 200 MHz: 12.5x low on IRC16M, as CALMS.
 fn put_times(s: &mut crate::scpi::Scpi) {
     s.put_bytes(b",BOOTMS");

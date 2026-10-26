@@ -218,16 +218,17 @@ fn new_app(clk: &mut Clock) -> &'static mut app::App {
 /// The rest of the start-up and the main loop (main's frame stays small).
 #[inline(never)]
 fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
-    let mut tp = touch::Touch::new(&mut clk);
-    wdt::kick();
-    native::main_phase(1, clk.now_ms());
-    // The first frame, before USB attaches: a full draw (~20 ms) then cannot
-    // delay the enumeration, so the loop below draws from its first pass
-    // (no wait for the host, nor 3 s without one).
+    // The first frame, before the touch reset (~0.22 s) and before USB
+    // attaches: a full draw (~20 ms) then cannot delay the enumeration, so
+    // the loop below draws from its first pass (no wait for the host, nor
+    // 3 s without one).
     if !cfg!(feature = "keep-screen") {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
     app.tick(&mut clk, true);
+    native::main_phase(1, clk.now_ms());
+    let mut tp = touch::Touch::new(&mut clk);
+    wdt::kick();
     native::main_phase(2, clk.now_ms());
 
     let hw = usb::init_hw(&mut clk);

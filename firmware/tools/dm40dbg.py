@@ -326,7 +326,7 @@ BOOT_LABELS = {'PD6': ['moder', 'pupd', 'idr'], 'STAGED': ['n'],
                'CALMS': ['ms'], 'SPICLK': ['div', 'check'], 'FATDIR': ['ok', 'created', 'failed'],
                'CALREC': ['crc'],
                'BOOTMS': ['shim', 'board', 'fatren', 'calbk', 'fatdir', 'setfile', 'mirror', 'vdisk', 'refresh'],
-               'MAINMS': ['app', 'touch', 'frame']}
+               'MAINMS': ['app', 'frame', 'touch']}
 # spiflash.rs ClockCheck (DBG:BOOT? SPICLK,<div>,<check>).
 SPICLK_CHECK = {'OK': '/4 (12.5 MHz) read block 0 + FAT block equal to /16 twice',
                 'FORCED': 'spiflash::FORCE_SLOW: stock /16',
@@ -450,7 +450,7 @@ BOOT_GROUPS = [
     ('calibration record', ['CALREC.crc']),
     ('boot phases', ['BOOTMS.shim', 'BOOTMS.board', 'BOOTMS.fatren', 'BOOTMS.calbk', 'BOOTMS.fatdir',
                      'BOOTMS.setfile', 'BOOTMS.mirror', 'BOOTMS.vdisk', 'BOOTMS.refresh',
-                     'MAINMS.app', 'MAINMS.touch', 'MAINMS.frame']),
+                     'MAINMS.app', 'MAINMS.frame', 'MAINMS.touch']),
     ('stack', ['STACK.used', 'STACK.size']),
     ('SPI flash clock', ['SPICLK.div', 'SPICLK.check']),
     ('power key PD6', ['PD6.moder', 'PD6.pupd', 'PD6.idr']),

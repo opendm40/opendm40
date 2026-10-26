@@ -23,8 +23,8 @@ const LOGO_Y: i16 = 56;
 /// Progress bar: outer frame x, y, w, h (1 px DIM frame, 1 px gap).
 const BAR: (i16, i16, i16, i16) = (160, 252, 160, 8);
 /// `step` calls from the splash to the first frame: pre_main's eight
-/// phases, then main's App::new and the touch reset.
-pub const STEPS: u8 = 10;
+/// phases, then main's App::new.
+pub const STEPS: u8 = 9;
 /// The stock logo green (#5cb400), as stockfont::logo.
 const GREEN: lcd::Color = 0x5DA0;
 #[cfg(not(test))]
