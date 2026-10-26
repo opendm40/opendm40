@@ -2805,26 +2805,20 @@ firmware has run, opendm40 starts on DC V.
 
 Untested on a real meter:
 
-- Getting started and recovery: keeping the settings across a full
-  power-off (the copy in `_SETTING.BIN`; tested in the emulator only), and
-  the reset of the measurement settings after it;
-  installing over the stock firmware's
-  **USB Connect** disk; entering
-  the update loader with the power key; the automatic entry after repeated
-  hangs.
-- Multimeter: currents through the A jack (overload handling, AUTO
-  coupling on current, burden with current), the continuity beeper and the
-  diode beeps, PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
+- Getting started and recovery: installing over the stock firmware's
+  **USB Connect** disk; entering the update loader with the power key; the
+  automatic entry after repeated hangs.
+- Multimeter: with a current through the A jack, the overload handling,
+  AUTO coupling and the burden voltage; the diode beeps; frequencies below
+  about 7 Hz; PT1000 and the 100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
   resistance calibrator only).
-- Alerts: the alerts that need a current through the A jack (A-JACK,
-  A-PROT, OVLD). LIVE? instead of a false A-JACK with 5 V or more on V/Ω in Ω
-  (fixed in the emulator; continuity and AC mV are checked on a meter).
+- Alerts: [A-PROT and OVLD](#the-alerts) with a current through the A jack.
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
   long-press centring, holding a corner to repeat, Axis lock and Hold drag,
   the persistence modes, auto-set keeping AC coupling.
 - Combined view: the long press on the strip.
-- Generator: the signal at the OUT jack (the real amplitude, the output
-  impedance, the quality above 50 kHz).
+- Generator: the amplitude and the output impedance at the OUT jack, the
+  signal quality above 50 kHz.
 - Power meter and inrush: everything with a current flowing (the current
   reading, the sign, PF, the current-limit countdown, the inrush capture).
 - USB disk: macOS; **PC can edit** mode on Windows.
@@ -2839,3 +2833,9 @@ Known problems:
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
 - The usable frequency range of the power meter is *unknown*.
+- A current through the A jack gives no [A-JACK](#the-alerts) in AC mV; in
+  Ω it shows LIVE? instead.
+- In DC mV, a current of about 20 mA through the A jack already trips
+  A-PROT.
+- A signal above about 20 kHz on V/Ω–COM can raise a false A-JACK or A-PROT
+  on the mV ranges.
