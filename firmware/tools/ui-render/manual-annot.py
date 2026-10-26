@@ -381,6 +381,27 @@ def scope_page():
     save(im, 'scope-page')
 
 
+def dmm_acc():
+    """The DMM page's top: the accuracy label and the grey digits below it."""
+    sc = 1.25
+    s = render('dmm-acc', scale=sc, crop=(0, 40, 480, 178))
+    w, h = s.size
+    im, d = canvas(w + 300, h + 90)
+    x0, y0 = 20, 70
+    paste(im, d, s, x0, y0)
+    f = font(15)
+    g = lambda x, y: (x0 + x * sc, y0 + (y - 40) * sc)
+    # Grey digits: one label above, leaders down to the 6 and the extra digit.
+    t = 'grey: below the accuracy'
+    tx, ty = g(390, 0)[0], 14
+    text_c(d, tx, ty, t, f)
+    for at in (g(352, 68), g(388, 124)):
+        d.line((tx, ty + f.size + 6, at[0], at[1]), fill=BLUE, width=2)
+        d.ellipse((at[0] - 4, at[1] - 4, at[0] + 4, at[1] + 4), fill=BLUE)
+    side_label(d, 'accuracy of this reading', g(479, 166), x0 + w + 20, f)
+    save(im, 'dmm-acc-anno')
+
+
 def scope_drag():
     sc = 1.25
     s = shot('scope-run', sc)
@@ -1017,6 +1038,7 @@ def main():
     meter_strip()
     analog_power()
     gen_offset()
+    dmm_acc()
     csv_flow()
     usb_disk()
     usb_row()

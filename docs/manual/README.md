@@ -895,17 +895,12 @@ shows: **Bargraph** (default) or **History**.
 
 ### Accuracy
 
-Under the unit, in grey: the meter's specified accuracy for this reading
-and model, from the DM40 user manual's table, e.g. ±0.0020 V for 4.8176 V
-on the 6 V range ([details](../../firmware/docs/dmm-accuracy.md)). Shown
-with the bargraph row; not in AC+DC, the 60 mV ranges, PT / NTC
-temperature, the power meter, or under REL. **Settings > More > More >
-Accuracy** turns it off. The reading's digits below the accuracy are grey
-(here the 6 and the extra digit).
+![The accuracy of the reading under the unit; the digits below it in grey](img/dmm-acc-anno.png)
 
-![The accuracy under the unit; the digits below it in grey](img/dmm-acc.png)
-
-*The accuracy under the unit; the digits below it in grey.*
+Under the unit: the specified accuracy of this reading for the meter's
+model ([details](../../firmware/docs/dmm-accuracy.md)); the digits below it
+are grey. Not shown in AC+DC, the 60 mV ranges, PT / NTC, the power meter
+or under REL. **Settings > More > More > Accuracy** turns it off.
 
 ### The trend chart
 
