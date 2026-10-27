@@ -608,6 +608,13 @@ Code work (in this order):
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
+- [x] UF-28 (P2) Continuity / diode beeper off at Key/alert volume 0 % (owner 2026-10-27: it beeped at volume 0).
+      hy::write clears R20 bit 2 (ENPCMPO) while the volume is 0; Dmm::poll rewrites R20 on a change in
+      continuity. Volume 1..100 cannot scale it (CMP pin, not TIM14; hw/README.md "Buzzer"). Emulator:
+      emu/hy3131/beeptest.py. (0.3.1; verify on device)
+      Device check (2 min, shorted probes): Key/alert volume 0 -> CONT and DIOD silent; 50 -> both beep;
+      in CONT switch 50 -> 0 -> 50 (silent / beeps at once); power off and on into CONT at 0 -> silent.
+      DBG:SENT:REG? first byte: 52 / B0 at 0 %, 56 / B4 at 50 %.
 - [x] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1  (81e02a7; verify on device)
       AC search first; nothing in AC -> the same search in DC, kept with the toast "AUTO: DC (no AC signal)".
 - [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (ae3e655; verify on device)
@@ -664,7 +671,7 @@ Code work (in this order):
       outside -25..125 % (OL); 11c4f9b hides it below 3.6 mA (device 92fb8fa: DC mA 60 mA range, A jack open,
       0.001 mA: no %, PASS; the % above 3.6 mA needs current through A). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
       renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
-      volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
+      volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): off at volume 0 (0.3.1, above).
       UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
 - [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (7b58f84; verify on device)
       Settings 2/2 -> Help: 4 list pages (gestures, side keys, multimeter taps, limits; ui::HELP); tap = next page,

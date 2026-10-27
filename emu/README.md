@@ -214,6 +214,7 @@ recorded.
 | [`ohmhunt.py`](hy3131/ohmhunt.py) | ohm range hunt: no unvetted value shown as final | | 58610 |
 | [`ohmsinktest.py`](hy3131/ohmsinktest.py) | RES AUTO on an input the 6 Mohm and 600 kohm ranges disagree on | | 64810 |
 | [`ohmnegtest.py`](hy3131/ohmnegtest.py) | ohm readings below 0 (RES:NEG ON / OFF) on shorted leads; AUTO stays on 60 ohm | | 64751 |
+| [`beeptest.py`](hy3131/beeptest.py) | continuity / diode beeper (R20 bit 2) off at key/alert volume 0 %, on at 50 %, also after a volume change in continuity | | 64761 |
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |

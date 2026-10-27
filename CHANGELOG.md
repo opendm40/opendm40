@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Key/alert volume 0 %** also silences the continuity and diode beeper
+  ([manual](docs/manual/README.md#settings-page-1)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

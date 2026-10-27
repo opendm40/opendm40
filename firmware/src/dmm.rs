@@ -3780,6 +3780,7 @@ impl Dmm {
         if self.suspended || self.watchdog(clk, now) {
             return None;
         }
+        hy::beeper_sync(); // a volume change while in continuity
         self.diode_beep(now);
         // AC+DC: the stock runs the frequency counter at the top of the ACV /
         // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;

@@ -592,7 +592,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
-  resistance is below about 67 Ω (*inferred* from the chip setting).
+  resistance is below about 67 Ω (*inferred* from the chip setting). Silent
+  at [Key/alert volume](#settings-page-1) 0 %.
 - No test current is shown: continuity uses its own source setting, whose
   current is not known yet.
 - The firmware adds no latch and no minimum beep length: the beep starts and
@@ -618,7 +619,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
-  readings only.
+  readings only. Silent at Key/alert volume 0 %.
 
 
 ![A silicon diode](img/dmm-diode.png)
@@ -2239,7 +2240,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |

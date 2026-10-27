@@ -1513,6 +1513,9 @@ impl App {
             self.beep_until = 0;
         }
         self.alert_beep(now);
+        // The continuity / diode beeper (HY3131 CMP pin) has no loudness:
+        // off at volume 0 % (Dmm::poll applies a change).
+        crate::hy3131::set_beeper(self.volume > 0);
         if !can_draw {
             self.note_host_activity(now);
         }
@@ -2106,6 +2109,7 @@ impl App {
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
+        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
         self.roll = p[1] >> 16 & 1 != 0;
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;

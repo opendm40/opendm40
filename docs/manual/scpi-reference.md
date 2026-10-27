@@ -215,7 +215,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 | `SYSTem:ALERt?` | | `NONE`, `OVERLOAD`, `AJACK`, `APROT`, `VJACK`, `LIVE`, `DC`, `AC` or `FUSE` | both |
 | `SYSTem:ALERt:ENABle[?]` | `0`..`15` (8 is ignored), `ON` (= 7, default) or `OFF` (= 0) | the mask, `7` | both |
 | `SYSTem:ALERt:ALARm[?]` | `LOUD` (default), `VOLume` or `OFF` | `LOUD`, `VOLUME` or `OFF` | both |
-| `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the volume, `0`..`100` | both |
+| `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the key/alert volume, `0`..`100`; `0` also silences the continuity / diode beeper | both |
 | `SYSTem:FUSE:TEST` | | Starts the fuse check; returns at once. | both |
 | `SYSTem:FUSE?` | | `IDLE`, `BUSY`, `OK,<ohm>`, `OPEN`, `FAIL,<ohm>` or `FAIL,NONE` | both |
 | `STATus:QUEStionable:CONDition?` | | Bits now: bit 9 (512) a red alert (AJACK, APROT, OVERLOAD), bit 1 (2) OVERLOAD | both |
