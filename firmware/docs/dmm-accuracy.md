@@ -81,7 +81,7 @@ resolution: it does not change d.
 - **None:** with the History row instead of the bargraph (Settings 2/3 "DMM
   row"), in the power meter, for OL, dashes and provisional (grey) values,
   under REL (the manual specifies a reading, not the difference of two), and
-  where the manual has no row: AC+DC, the 60 mV ranges, temperature with
+  where the manual has no row: AC+DC, the 60 mV ranges, 60 Ω, temperature with
   PT100 / PT1000 / NTC sensors (the manual's row is for the K thermocouple
   probe). The AUTO coupling's shown part takes the row of its DC or AC
   function.

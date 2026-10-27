@@ -113,7 +113,12 @@ pub fn set_div(div: u8) {
 pub fn write(reg: u8, data: &[u8]) {
     guard();
     for (i, &d) in data.iter().enumerate() {
-        let _ = spi::write_cont(reg.wrapping_add(i as u8), &[d], true);
+        let r = reg.wrapping_add(i as u8);
+        // `mute` (test builds): R20 bit 2 drives the CMP pin buffer, the
+        // continuity / diode beeper in hardware (CFG_F11 0x56, diode_beep
+        // 0xb4 / 0xb0); off, so no beep whatever the volume.
+        let d = if cfg!(feature = "mute") && r == 0x20 { d & !0x04 } else { d };
+        let _ = spi::write_cont(r, &[d], true);
     }
 }
 

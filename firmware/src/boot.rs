@@ -201,7 +201,7 @@ fn cue(cyc_per_ms: u32) {
         while cyccnt().wrapping_sub(t) < half && n < cap {
             n += 1;
         }
-        level = !level;
+        level = !level && !cfg!(feature = "mute");
         unsafe { w32(GPIOA + 0x18, if level { 1 << 7 } else { 1 << (7 + 16) }) };
         feed();
     }

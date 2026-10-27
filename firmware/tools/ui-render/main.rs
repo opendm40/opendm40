@@ -578,12 +578,14 @@ fn prov(mut r: Reading) -> Reading {
 
 /// The HY3131 range a reading of `mode` in `unit` with `dec` decimals is on
 /// (the accuracy label picks its row by it): mV 600 mV (r1), ohm 60 Mohm
-/// (MΩ with 3 decimals, r6) else 600 ohm .. 6 Mohm (r1..r5 share a row),
+/// (MΩ with 3 decimals, r6), 60 ohm (Ω with 3 decimals, r0, no row) else
+/// 600 ohm .. 6 Mohm (r1..r5 share a row),
 /// capacitance by unit and decimals (dmm.rs cap_val), else r0.
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
+        10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
         13 => match unit {
             "nF" => 3 - dec.min(3) as i8,

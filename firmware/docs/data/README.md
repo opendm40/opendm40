@@ -250,7 +250,7 @@ level of the shown resolution (6 significant digits).
 The calibrator's resistance output stepped from 0.01 Ω to 4 kΩ (4 kΩ instead of 5 kΩ at the end), the meter (opendm40
 0.1.0, Resistance, manual range, changed by the owner during the run) recording to CSV. The calibrator's resistance
 specification is not known here. Readings 0 Ω are the meter's clamp of negative results (R < 0 shows 0). The 500 Ω
-step read OL for 32 s on the 600 Ω range; that is analysed in [PR #7](https://github.com/wirenboard/opendm40/pull/7)
+step read OL for 32 s on the 600 Ω range; that is analysed in [PR #7](https://github.com/opendm40/opendm40/pull/7)
 (the firmware holds no OL; the calibrator at 500 Ω and 0.90 mA is the likely cause, inferred), so it is left out.
 
 | Calibrator set | Meter reading (median) | Delta |

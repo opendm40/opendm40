@@ -14,7 +14,7 @@ Alientek.
 | V2.6 | [`dm40_v_2_6.bin`](dm40_v_2_6.bin) | 495140 | `5c2efe345369238604b8001af99ab089f82ff405fa91d5b8368c0086484038ac` |
 
 Retrieved on 2026-10-13. Older versions (V1.6 .. V2.5) are kept in
-`wirenboard/alientek-dm40-tools` (`vendor/`).
+a separate tools repository (`vendor/`).
 
 - **Back to stock:** copy this file onto the FS-loader's USB disk as the only
   `dm40*.bin` and press "update" (see [the manual, Install a file from the update loader](../../docs/manual/README.md#install-a-file-from-the-update-loader)).

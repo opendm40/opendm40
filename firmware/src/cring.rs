@@ -89,7 +89,8 @@ struct Ring {
     p_d2: i32,
 }
 
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+/// All zero (.bss): `init` / `reset` set what needs a value. TCM, not
+/// SRAM: SRAM is at its 8 KiB floor, the stack has room (~0.5 KB).
 static mut R: Ring = Ring {
     base: core::ptr::null_mut(),
     rb: 0,
@@ -112,13 +113,13 @@ static mut R: Ring = Ring {
     c_nb: 0,
     c_mode: 0,
     c_h: [0; 3],
-    c_ad: Ad::new(dlog::AS0),
+    c_ad: Ad { a: 0, n: 0 },
     la: [0; LA as usize],
-    p_o: 1,
+    p_o: 0,
     p_sum: [0; 4],
-    p_bits: 3,
-    p_ad: Ad::new(dlog::AS0),
-    p_ok: true,
+    p_bits: 0,
+    p_ad: Ad { a: 0, n: 0 },
+    p_ok: false,
     p_x: 0,
     p_d1: 0,
     p_d2: 0,

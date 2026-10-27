@@ -242,6 +242,7 @@ recorded.
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
 | [`pantest.py`](pantest.py) | stopped long record: pan by touch to both ends and back, zoom across it; each change right after a `DBG:LCD?` read (drawing held) | ~5 min | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
+| [`sratetest.py`](sratetest.py) | the timebase list's per-entry sample rates = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll and the Wave view; picks in the open list (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
