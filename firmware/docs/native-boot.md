@@ -705,6 +705,29 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 | keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
 | mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
 
+### Protocol decoder (2026-10-27, feat/decoder-uart)
+
+The decoder (src/decode.rs, app_decode.rs, ui_decode.rs, scope.rs `dec_*`)
+runs while the scope streams, so all of it is region B (emu/decodetest.py:
+no region C function while `scope::DEC_LIVE` is set, except the test's own
+DBG:DIAG? and READ?). Its state (the 256-frame store and its 4 KiB of
+bytes, the view) is one `.sram_bss` static; the App grew by nothing.
+
+| | before (cb683fde) | after |
+|---|---|---|
+| region B free | 50 892 B | 32 236 B |
+| region C free | 7 852 B | 7 696 B |
+| stack headroom (static worst path) | 21 196 B | 21 180 B |
+| SRAM free | 43 912 B | 32 512 B |
+
+B: ~15 KB of decoder code (`dec_poll` with the decoder's scan inlined
+3.3 KB, `dec_tick` 2.9 KB), the rest SCPI parsing and the view.
+Variants (B / C free, headroom): recovery-usb 31 028 / 7 736 / 21 684 B,
+recovery-file 32 300 / 7 204 / 21 180 B, no-ad2-isr 41 616 / 8 772 /
+21 624 B, spi-disk 50 404 / 17 736 / 22 708 B, fatren-dry-run 32 260 /
+8 140 / 21 180 B, keep-screen 32 308 / 7 688 / 21 180 B, mute 31 860 /
+7 564 / 21 180 B.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
