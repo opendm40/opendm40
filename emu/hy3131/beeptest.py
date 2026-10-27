@@ -113,6 +113,7 @@ def main():
                     r20 = int(reg[:2], 16)
                     rows.append({'ph': ph, 't': t, 'REG?': reg})
                     print('%-6s %6.2f R20 %02X' % (ph, t, r20), flush=True)
+                    time.sleep(0.1)  # a few samples per virtual s, not thousands
                     if t - t0 < SETTLE:
                         continue
                     seen += 1
