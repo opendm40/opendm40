@@ -40,8 +40,8 @@ Additional requirements:
 
 ## Open, by kind (2026-10-27)
 
-One line per group of open items; quoted words are the start of an item. Open PRs (#35, #41, #44, #55, #56, #57)
-are marked at their items.
+One line per group of open items; quoted words are the start of an item. Open PRs (#35, #41, #44, #55, #56, #57,
+#60, #61) are marked at their items.
 
 **(a) Needs the owner on the device**
 - A current through the A jack: the two A-jack items above (#44; #35's 66 kHz V-COM case too), "Device T9 / T10",
@@ -54,6 +54,7 @@ are marked at their items.
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
+- Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first.
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).
@@ -62,8 +63,9 @@ are marked at their items.
   #6)" items; stock comparisons UF-02, UF-19.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
-- Code: "Unchopped FAST in ohm", "Left: `vdisk::mirror_boot`", "Not exercised: a stream starting inside a
-  multi-block READ(10)" (needs a debug switch), "SCOP006.CSV once saved".
+- Code: none open. "Not exercised: a stream starting inside a multi-block READ(10)" (#60, test only) and
+  "SCOP006.CSV once saved" (#61) are in PRs; "Unchopped FAST in ohm" is under (a), "Left: `vdisk::mirror_boot`"
+  under (c).
 - Unknowns to trace: "Why the two conversions after an early R22 change", "AUTO coupling decided at 5.76-5.85 s",
   "76800 CHOP ON", "C's lag-side creep allowance", "C's second reference".
 - Device runs: "Fast logger device check" (open steps), "(B) device session", "Device check (AUTO coupling)",
@@ -72,9 +74,10 @@ are marked at their items.
 **(c) Owner decisions**
 - [Owner decisions pending](#owner-decisions-pending-2026-10-25): the three "Docs, owner decision" items (front photo,
   font licence, AI policy), "Delete the bt-protocol branch", USB PID (waits for pid.codes PR 1331).
-- Merges: open PRs #41, #55, #56, #57; drafts #35, #44 (device check first) and #47 (`DBG:HY:CAP?`).
+- Merges: open PRs #41, #55, #56, #57, #60, #61; drafts #35, #44 (device check first) and #47 (`DBG:HY:CAP?`).
 - Defaults and rules: "Make method C the AC+DC default", "DMM reads at /8" (decision #8), the crosstalk item's
   partial-gate value at signal off, the long press on a toast ("Owner question (not changed)").
+- Boot time (bug-fix-only rule): "Left: `vdisk::mirror_boot`" (0.3 s per boot).
 - New features (bug-fix-only rule): "UF-24 tempco", [Backlog](#backlog-user-ideas) "Inductance", "Browser client",
   "Protocol decoders", "Hardware note (HW-1", "sigrok/SmuView" (SmuView on the device, upstream).
 
@@ -108,6 +111,9 @@ What waits for the owner; each line links to the material.
             at 0x06 (2990 records) and at 0x16 (1493), none beyond 3000 codes but the session's first record.
             With FAST's polarity writes (2 per 30 s) none in the 25 min run above.
       - [ ] Unchopped FAST in ohm (an offset per range of the autorange): not done, ohm FAST = 0x16 for now.
+            Needs the device first: VOS per ohm range (R22 0x06 against 0x16, leads shorted and a known R) for
+            fastvos VOS_DEFAULT, which covers the first 2 s after every autorange step; whether ohm's unchopped
+            conversion reads VX +- VOS as DC V does is not known. The emulator's one `ad1vos` supplies neither.
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
@@ -962,8 +968,9 @@ the scope full record.
   - [ ] Left: `vdisk::mirror_boot` (0.3 s every boot, 5.4 s on the first boot of a new image) still
         runs in pre_main under the splash. Moving it after the first frame would leave the meter page
         frozen for those seconds on the first boot; a chunked compare in idle time needs
-        calbackup::write_file split up. A step line ("Updating INFO/ copy") on the slow first boot is
-        not done.
+        calbackup::write_file split up, and the mirror served only once compared (before any stream).
+        The step line on the slow first boot is done (splash.rs `note`, drawn when calbackup rewrites a
+        file). The rest saves 0.3 s per boot: not a bug, so an owner decision (bug-fix-only rule).
 - [ ] Protocol decoders (owner 2026-10-23): UART, Modbus RTU, etc. The usual problem with scope decoders is that
       they only decode what fits in one short record (here ~53 KB). Make long traffic convenient instead: decode
       **while streaming**, keep only the decoded frames and let the raw samples go.
