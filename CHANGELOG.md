@@ -14,6 +14,13 @@ section named after the tag as the release notes; how to cut a release:
   Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
   capture (at most 10 s) with the trigger point at the trigger position
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
+  Wave view at 9600 S/s and slower) keep the capture compressed with the
+  DLG scope coder as it comes in: at least 65 520 samples (white noise),
+  more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
+  for up to 10 s; the part after the trigger point is at most 52 156
+  samples, the part before it what the memory keeps
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - Multimeter: the specified accuracy of the reading, small and grey under
   the unit, e.g. "±0.002V" under 4.8176 V: ±(x % + N digits) from the DM40
   user manual's table for the meter's model (DM40A / B / C), as an absolute

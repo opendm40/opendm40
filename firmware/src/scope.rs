@@ -80,7 +80,12 @@ const STG: usize = 2048;
 const STG0: usize = CAP - STG;
 /// Highest sample rate with the packed ring (from 100 ms/div).
 const PK_FS: u32 = 25_000;
-const _: () = assert!(PCAP * 10 / 8 + 4 <= STG0 * 2 && CAP % 4 == 0);
+/// The coded ring's bytes (cring.rs; 4 more mirror its start): all of BUF
+/// below the staging ring, a multiple of 5 (whole groups of 4 packed
+/// codes). Packed (white noise) it holds RB * 8 / 10 samples, at least
+/// PCAP.
+const RB: usize = (STG0 * 2 - 4) / 5 * 5;
+const _: () = assert!(PCAP * 10 / 8 <= RB && CAP % 4 == 0);
 /// Linear record length at sample rate `fs`: the whole CAP, but no longer
 /// in time than max(26 K samples, 0.1 s), so a slow timebase's pulse / runt
 /// frame (one complete linear record each) does not wait longer than
@@ -101,8 +106,7 @@ struct Ring {
     pk: bool,
     /// BUF holds raw DMA samples not yet packed (fast acquisitions).
     raw: bool,
-    /// Packed ring: next slot, staging read index, time of the last drain.
-    slot: usize,
+    /// Coded ring: staging read index, time of the last drain.
     rd: usize,
     t: u64,
     /// The stored record's first slot and its ring's size.
@@ -114,17 +118,18 @@ struct Ring {
 }
 
 #[link_section = ".sram_bss"]
-static mut RING: Ring = Ring { pk: false, raw: false, slot: 0, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
+static mut RING: Ring = Ring { pk: false, raw: false, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
 
 fn rg() -> &'static mut Ring {
     // SAFETY: main loop only, no reference kept across calls.
     unsafe { &mut *core::ptr::addr_of_mut!(RING) }
 }
 
-/// Code at ring slot `i` of the record in flight (raw or packed).
+/// Code at ring slot `i` (raw ring) / sample `n` (coded ring) of the
+/// record in flight.
 #[inline(always)]
-fn ring_at(i: usize) -> u16 {
-    if rg().raw { unsafe { (*core::ptr::addr_of!(BUF))[i] & 0x3FF } } else { pack10::get(base(), i) }
+fn ring_at(i: usize, n: u64) -> u16 {
+    if rg().raw { unsafe { (*core::ptr::addr_of!(BUF))[i] & 0x3FF } } else { crate::cring::at(n as u32) }
 }
 
 #[link_section = ".dmabuf"]
@@ -737,6 +742,7 @@ impl Scope {
             stored_ab: (0.0, 1.0),
         };
         *wv() = Wave::NEW;
+        crate::cring::init(base(), RB as u32);
         sc.hw.init();
         // Comparator trigger on by default (the stock always uses it): the
         // software search of a linear record only covered CAP - screen = 1624
@@ -982,6 +988,13 @@ impl Scope {
         }
     }
 
+    /// The acquisition about to start keeps a long record (the coded
+    /// ring's coding on): Single, DIGitize (not a STOP's capture: the
+    /// screen + 0.5 s), roll.
+    fn long_rec(&self) -> bool {
+        self.s.mode == TrigMode::Single || (self.one_shot && !self.stop_req) || self.roll_ok()
+    }
+
     /// SCPI RUN: a pending STOP / DIGitize no longer ends the run (`apply`
     /// sees no run change while one is pending).
     pub fn run_on(&mut self) {
@@ -1196,7 +1209,7 @@ impl Scope {
             }
             (0, self.rec)
         } else if pk {
-            (0, self.roll_written as usize)
+            self.span(wrapped, wr)
         } else {
             (0, self.rec - ndtr.min(self.rec))
         };
@@ -1217,7 +1230,8 @@ impl Scope {
             pack10::pack_in_place(base(), ((off + len).min(CAP) + 3) & !3);
         }
         r.off = off;
-        r.cap = self.cap();
+        // The coded ring's views: cap 0 (pack10::Codes).
+        r.cap = if r.pk { 0 } else { self.cap() };
         if len < 2 {
             self.stored_valid = false;
             return;
@@ -1240,12 +1254,16 @@ impl Scope {
 
     /// The ring's samples oldest first, (first slot, count), from the next
     /// slot `wr` and whether it has wrapped.
+    /// The coded ring (pk): its live samples.
     fn span(&self, wrapped: bool, wr: usize) -> (usize, usize) {
+        if rg().pk {
+            return (crate::cring::first() as usize, crate::cring::live() as usize);
+        }
         if wrapped { (wr % self.cap(), self.cap()) } else { (0, wr) }
     }
 
-    /// Packed ring: the staging samples the DMA wrote since the last call
-    /// into it (absolute count in roll_written). False when the gap since
+    /// Coded ring: the staging samples the DMA wrote since the last call
+    /// into it (cring.rs; absolute count in roll_written). False when the gap since
     /// then overran the staging ring (samples lost: the caller stops; the
     /// next poll starts a new acquisition).
     fn pk_drain(&mut self, now: u64) -> bool {
@@ -1255,14 +1273,31 @@ impl Scope {
         let lost = (now.saturating_sub(r.t).min(100_000) as u32) * self.sample_rate() + 64_000 >= STG as u32 * 1000;
         r.t = now;
         let stg = unsafe { &(&*core::ptr::addr_of!(BUF))[STG0..] };
-        let (mut rd, mut slot, mut n) = (r.rd, r.slot, self.roll_written);
+        let (mut rd, mut n) = (r.rd, self.roll_written);
+        // Roll: the columns' min / max as the samples come (as wave_drain;
+        // roll_poll draws them without reading the ring).
+        let roll = self.rolling;
+        let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
+        let w = wv();
+        let (per, mut acc, mut rn) = (w.per, w.racc, w.rn);
         while rd != wr {
-            pack10::set(base(), slot, stg[rd]);
+            let c = stg[rd] & 0x3FF;
+            crate::cring::push(c);
+            if roll {
+                acc = (acc.0.min(c), acc.1.max(c));
+                rn += 1;
+                if rn >= per {
+                    cols.copy_within(1.., 0);
+                    cols[COLS - 1] = acc;
+                    acc = (u16::MAX, 0);
+                    rn = 0;
+                }
+            }
             rd = if rd + 1 == STG { 0 } else { rd + 1 };
-            slot = if slot + 1 == PCAP { 0 } else { slot + 1 };
             n += 1;
         }
-        (r.rd, r.slot) = (rd, slot);
+        r.rd = rd;
+        (w.racc, w.rn) = (acc, rn);
         self.roll_written = n;
         !lost
     }
@@ -1282,7 +1317,8 @@ impl Scope {
     /// None when the packed staging ring overran (pk_drain).
     fn pos(&mut self, now: u64) -> Option<(usize, bool)> {
         if rg().pk {
-            return self.pk_drain(now).then(|| (rg().slot, self.roll_written >= PCAP as u64));
+            // The written count; "wrapped": the oldest samples are gone.
+            return self.pk_drain(now).then(|| (self.roll_written as usize, crate::cring::first() != 0));
         }
         // HISR TCIF4 while it runs: the ring has wrapped at least once;
         // stopped: as `halt` saw it.
@@ -1302,6 +1338,9 @@ impl Scope {
 
     /// The stored record's ring view (valid or not).
     fn rec_view(&self) -> Codes {
+        if rg().pk {
+            return crate::cring::view(rg().off as u32, self.stored_len);
+        }
         Codes::new(base(), rg().off, self.stored_len, rg().cap)
     }
 
@@ -1373,7 +1412,13 @@ impl Scope {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         // Slow rates: the DMA fills the staging ring, the polls pack it.
         let pk = fs <= PK_FS;
-        *rg() = Ring { pk, raw: !pk, slot: 0, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
+        *rg() = Ring { pk, raw: !pk, rd: 0, t: 0, off: 0, cap: 0, wrap: false };
+        if pk {
+            // Coded blocks for the long captures only (Single / DIGitize,
+            // roll): the running frames' records fit the packed ring, and
+            // its plain views cost no decoding (cring.rs).
+            crate::cring::reset(self.long_rec());
+        }
         // Linear: Single / DIGitize take the record rec_split waits for.
         let (p, q) = self.rec_split();
         self.rec = lin_len(fs).max(p + q);
@@ -1414,6 +1459,12 @@ impl Scope {
             // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
             // which captures a full linear record like the stock Single mode.
             self.rolling = self.roll_ok();
+            if self.rolling {
+                // The roll columns (pk_drain): a screen's samples each.
+                let w = wv();
+                (w.per, w.racc, w.rn) = (((self.screen / COLS).max(1)) as u32, (u16::MAX, 0), 0);
+                (*core::ptr::addr_of_mut!(ROLL_COLS)).fill((u16::MAX, u16::MAX));
+            }
             // BUF is about to be overwritten: the previous stored record is gone
             // until this acquisition completes (or is snapshotted in stop()).
             self.stored_valid = false;
@@ -1463,11 +1514,18 @@ impl Scope {
             return (pre, post);
         }
         let fs = self.sample_rate() as usize;
+        // The coded ring (edge trigger: a circular record) holds up to
+        // cring::NB blocks of a compressible signal, PCAP samples of any:
+        // the post part fits in PCAP with the screen's pre part, so the
+        // trigger point stays in; the pre part is what the ring keeps.
+        let ring = rg().pk && self.s.ttype == 0;
+        let top = if ring { (crate::cring::NB - 2) * crate::cring::BLK as usize } else { self.cap() - 64 - WIN };
         // A STOP's capture (stop_req): the screen + 0.5 s (its deadline
         // gives 0.5 s more to the trigger: poll_frame).
-        let n = (fs * 10).min(self.cap() - 64 - WIN).min(if self.stop_req { self.screen + fs / 2 } else { usize::MAX }).max(self.screen);
+        let n = (fs * 10).min(top).min(if self.stop_req { self.screen + fs / 2 } else { usize::MAX }).max(self.screen);
         let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
-        (p.max(pre), (n - p).max(post))
+        let q = if ring { (n - p).min(PCAP - 64 - WIN - pre) } else { n - p };
+        (p.max(pre), q.max(post))
     }
 
     /// Screen samples left / right of the trigger point (hpos column).
@@ -1805,9 +1863,18 @@ impl Scope {
                 // capture: the time of its record (rec_split) + 0.5 s, then
                 // it ends with what is in (hw_poll / stream_poll): at most
                 // the screen's time + 1 s after the STOP.
+                // Single / DIGitize: the timeout counts from the end of
+                // the pre-trigger part (up to 5 s at 100 ms/div).
                 let (p, q) = self.rec_split();
+                let ms = |n: usize| (n as u32 * 1000 / self.sample_rate().max(1)) as u64;
                 self.deadline = now
-                    + if self.stop_req { ((p + q) as u32 * 1000 / self.sample_rate().max(1) + 500) as u64 } else { self.auto_timeout() };
+                    + if self.stop_req {
+                        ms(p + q) + 500
+                    } else if self.one_shot || self.s.mode == TrigMode::Single {
+                        ms(p) + self.auto_timeout()
+                    } else {
+                        self.auto_timeout()
+                    };
             }
             return None;
         }
@@ -1891,7 +1958,7 @@ impl Scope {
             let rising = self.s.rising;
             let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, self.st_scan);
             while n < wr {
-                let v = ring_at(i) as i32;
+                let v = ring_at(i, n) as i32;
                 let hit = if rising {
                     if v < l - 2 {
                         armed = true;
@@ -1958,8 +2025,7 @@ impl Scope {
         self.halt();
         let Some(wr) = self.stream_wr(now) else { return None };
         let cap = self.cap();
-        let slot = if rg().pk { rg().slot } else { self.roll_last_wr };
-        let (off, len) = self.span(wr >= cap as u64, slot);
+        let (off, len) = self.span(wr >= cap as u64, self.roll_last_wr);
         if len < self.screen {
             self.stored_valid = false;
             return None;
@@ -1991,18 +2057,7 @@ impl Scope {
             return None;
         }
         self.roll_next = now + 100;
-        let wr = rg().slot;
-        let per = (self.screen / COLS).max(1);
-        let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
-        for i in 0..COLS {
-            // Column i ends (COLS - 1 - i) columns before the write position.
-            let back = (COLS - i) * per;
-            cols[i] = if back as u64 > self.roll_written {
-                (u16::MAX, u16::MAX)
-            } else {
-                Codes::new(base(), (wr + PCAP - back) % PCAP, per, PCAP).min_max(0, per)
-            };
-        }
+        // The columns pk_drain keeps.
         self.cols_frame(self.sample_rate())
     }
 
@@ -2237,6 +2292,8 @@ impl Scope {
         let w = wv();
         // A new ring: every index (record, trigger) starts again at 0.
         (w.tot, w.slot0, w.first, w.dropped, w.seen, w.next_min) = (0, 0, 0, 0, 0, 0);
+        let long = self.long_rec();
+        crate::cring::reset(wv().fs <= PK_FS && long);
         (w.pend, w.ready, w.gen) = (None, None, 0);
         w.stale = false;
         w.live = true;
@@ -2262,6 +2319,7 @@ impl Scope {
             w.tot += n as u64;
             w.slot0 = w.tot;
             w.first = w.tot;
+            crate::cring::reset(w.fs <= PK_FS && self.long_rec());
             w.dropped = src.dropped();
             w.stale = false;
             w.shown = None;
@@ -2328,13 +2386,11 @@ impl Scope {
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         let w = wv();
         let mut tot = w.tot;
-        let mut slot = (tot.wrapping_sub(w.slot0) % PCAP as u64) as usize;
         let roll = self.rolling;
         let (per, mut acc, mut rn) = (w.per, w.racc, w.rn);
         src.drain(&mut |raw| {
             let c = crate::trigsoft::ad2_code10(raw) as u16;
-            pack10::set(base(), slot, c);
-            slot = if slot + 1 == PCAP { 0 } else { slot + 1 };
+            crate::cring::push(c);
             tot += 1;
             if roll {
                 acc = (acc.0.min(c), acc.1.max(c));
@@ -2352,14 +2408,14 @@ impl Scope {
 
     /// Oldest index in BUF.
     fn wave_oldest(&self) -> u64 {
-        wv().first.max(wv().tot.saturating_sub(PCAP as u64))
+        wv().first.max(wv().slot0 + crate::cring::first() as u64)
     }
 
     /// The record oldest -> newest: (its first slot, length, the stream
     /// index of its first sample).
     fn wave_linear(&self) -> (usize, usize, u64) {
         let oldest = self.wave_oldest();
-        ((oldest.wrapping_sub(wv().slot0) % PCAP as u64) as usize, (wv().tot - oldest) as usize, oldest)
+        (oldest.wrapping_sub(wv().slot0) as u32 as usize, (wv().tot - oldest) as usize, oldest)
     }
 
     /// Show the screen around trigger index `t` (None: the newest screen,

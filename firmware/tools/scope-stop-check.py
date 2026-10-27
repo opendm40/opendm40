@@ -123,6 +123,8 @@ def main():
     tbs = [float(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '0.001,0.005,0.05,0.1').split(',')]
     reps = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     d = Dev()
+    d.w('SYST:BEEP:VOL 0')
+    d.w('SYST:ALER:ALARm OFF')
     fails = 0
     try:
         print(d.q('*IDN?'), flush=True)
@@ -165,6 +167,8 @@ def main():
     finally:
         d.w('OUTP OFF')
         d.w('RUN')
+        d.w('SYST:BEEP:VOL 0')
+        d.w('SYST:ALER:ALARm OFF')
     print('fails', fails)
     sys.exit(1 if fails else 0)
 

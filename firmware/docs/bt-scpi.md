@@ -141,7 +141,7 @@ The commands (`WAV:POIN`, `WAV:FORM`, `WAV:PRE?`, `WAV:DATA?`, `DIG`,
 Bluetooth ([`src/scope_wav.rs`](../src/scope_wav.rs); the scope settings are
 the meter's, shared by both transports and the screen):
 [scpi-reference.md, Scope](../../docs/manual/scpi-reference.md#scope). The
-record is up to 65 520 samples (43 008 above 25 kS/s; [ram-budget.md, The scope record](ram-budget.md#the-scope-record-raw-ring-and-packed-ring)). What differs per transport:
+record is up to 65 520 samples (43 008 above 25 kS/s; [ram-budget.md, The scope record](ram-budget.md#the-scope-record-raw-ring-and-coded-ring)). What differs per transport:
 
 Reading a record: `STOP` (or `SINGle` / `DIGitize` and poll `TRIG:STAT?`
 for `STOP`), `WAV:POIN MAX`, `WAV:FORM WORD`, `WAV:PRE?`, `WAV:DATA?`.

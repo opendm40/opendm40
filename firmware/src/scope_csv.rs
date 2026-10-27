@@ -33,7 +33,7 @@
 pub const ROW: usize = crate::dlog::SCOPE_ROW;
 const HDR_MAX: usize = 512;
 /// Largest record (scope::CAP, asserted in scope_page.rs) and file.
-pub const REC_MAX: usize = 64 * 1024;
+pub const REC_MAX: usize = crate::dlog::SBLK * crate::dlog::SBLK_MAX;
 pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4
     + REC_MAX.div_ceil(crate::dlog::SBLK) * crate::dlog::SBLK_RAW) as u32;
 const _: () = assert!(REC_MAX <= crate::dlog::SBLK * crate::dlog::SBLK_MAX);
@@ -53,9 +53,11 @@ struct Snap {
     nb: usize,
     /// PLAN's fill cursor is valid.
     cur_ok: bool,
+    /// CRC-32 of the block table.
+    tcrc: u32,
 }
 
-static mut SNAP: Snap = Snap { rec: crate::pack10::Codes::EMPTY, a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false };
+static mut SNAP: Snap = Snap { rec: crate::pack10::Codes::EMPTY, a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false, tcrc: 0 };
 
 /// Per block: mode (fixed predictor order / raw), coded bytes, CRC-32.
 /// Written by `set` before any use: SRAM (.dmabuf, not zeroed at reset),
@@ -142,10 +144,14 @@ pub fn set(rec: crate::pack10::Codes, a: f32, b: f32, fs: f32, t0: usize, h: &Hd
     let p = plan();
     s.cur_ok = false;
     s.nb = rec.len().div_ceil(crate::dlog::SBLK).min(crate::dlog::SBLK_MAX);
+    let mut tc = !0u32;
     for b in 0..s.nb {
         let c = rec.sub(b * crate::dlog::SBLK, (b + 1) * crate::dlog::SBLK);
         (p.mode[b], p.len[b], p.crc[b]) = crate::dlog::scope_plan(&c);
+        tc = crate::dlog::crc32_upd(tc, &p.len[b].to_le_bytes());
+        tc = crate::dlog::crc32_upd(tc, &p.crc[b].to_le_bytes());
     }
+    s.tcrc = !tc;
 }
 
 /// Bytes before the first coded block: DLG header, parameters, table.
@@ -172,11 +178,27 @@ pub fn fill(off: u32, buf: &mut [u8]) {
     let rec = s.rec;
     let mut i = 0;
     if off < head {
-        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4];
+        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR];
         let k = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, rec.len() as u32, &mut h);
-        crate::dlog::scope_table(&p.len[..s.nb], &p.crc[..s.nb], &mut h[k..]);
-        i = (head - off).min(buf.len());
-        buf[..i].copy_from_slice(&h[off..off + i]);
+        // Then the block table (dlog::scope_table's bytes), made here: no
+        // copy of it on the stack.
+        while i < buf.len() && off + i < head {
+            let o = off + i;
+            buf[i] = if o < k {
+                h[o]
+            } else {
+                let t = o - k;
+                let v = if t >= 8 * s.nb {
+                    s.tcrc
+                } else if t % 8 < 4 {
+                    p.len[t / 8]
+                } else {
+                    p.crc[t / 8]
+                };
+                (v >> (8 * (t % 4))) as u8
+            };
+            i += 1;
+        }
     }
     let codes = |b: usize| rec.sub(b * crate::dlog::SBLK, (b + 1) * crate::dlog::SBLK);
     while i < buf.len() {

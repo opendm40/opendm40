@@ -581,7 +581,7 @@ and `MEASure:POWer?` then give the real power P in W.
 - `WAVeform:DATA?` for the record (any POINts other than SCReen) needs the
   scope stopped (`STOP`, `SINGle` or `DIGitize`, then `TRIGger:STATus?` =
   `STOP`); while it runs the reply is `#10` with `Settings conflict`. Over
-  USB a reply of any length is sent (the full WORD record is about 53 kB);
+  USB a reply of any length is sent (a full WORD record is up to 512 KiB);
   over Bluetooth at most 6 kB.
 - Only the SCReen + BYTE reply may be combined with other queries in one
   message.
