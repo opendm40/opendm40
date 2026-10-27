@@ -2894,7 +2894,7 @@ impl Scpi {
                     Some('M') => 6,
                     _ => 0,
                 };
-                let pfx = if unit.chars().count() > 1 { pfx } else { 0 };
+                let pfx = if unit.chars().nth(1).is_some() { pfx } else { 0 };
                 (pfx - dec as i32, ext as i32)
             }
             None => (range.map_or(-4, |v| step_exp(v, mode == 13)), 0),

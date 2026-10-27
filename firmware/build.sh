@@ -59,7 +59,13 @@ cargo fetch -q $FETCH
 for d in "$CARGO_HOME"/registry/src/*/; do
     [ -d "$d" ] && remap "$d" crates
 done
-RUSTFLAGS="-C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
+# -Zlocation-detail=none: panic sites carry no file / line / column (the
+# panic handler, main.rs `panic`, never reads them; ~32 KB of region B,
+# docs/native-boot.md "Region B audit #6"). A nightly flag: RUSTC_BOOTSTRAP=1
+# lets the pinned stable rustc take it, for this firmware build only (the
+# host test builds do not use build.sh and keep their panic locations).
+RUSTC_BOOTSTRAP=1 \
+RUSTFLAGS="-Zlocation-detail=none -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 

@@ -558,9 +558,11 @@ struct Wave {
     mcx: Settings,
 }
 
-/// The wave state: a static (TCM .bss: it shortens the stack by its size,
-/// as a field of `Scope` in the App on the main stack would; SRAM has less
-/// room left). `Scope::new` initialises it.
+/// The wave state: a static, not a field of `Scope` in the App on the main
+/// stack. On the device in SRAM (.dmabuf, NOLOAD: no 224-byte .data load
+/// image in region B; region B audit #6), set up by `Scope::new` before any
+/// other use. Main loop only.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut WAVE: Wave = Wave::NEW;
 
 fn wv() -> &'static mut Wave {
@@ -671,7 +673,8 @@ impl Scope {
             lent: false,
             stored_ab: (0.0, 1.0),
         };
-        *wv() = Wave::NEW;
+        // WAVE is not loaded on the device (.dmabuf): set up in place.
+        unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
         sc.hw.init();
         // Comparator trigger on by default (the stock always uses it): the
         // software search of a linear record only covers CAP - screen = 1624

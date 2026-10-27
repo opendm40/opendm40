@@ -605,6 +605,106 @@ C is now below 7 KiB by ~100 B; the next relief for B needs a cut.
 The 60 Ω range (feat/ohm60, 0.3.0) costs ~180 B of B; the LOCK font blob
 (255 B) moved from B to A2 for it (A2 2 692 B, B 16 572 B free).
 
+### Region B audit #6 (2026-10-27, chore/region-b-audit-6)
+
+On 0.3.0 (cae46446) region B had 16 388 B free, A2 1 128 B, C 4 736 B
+(recovery-file 4 212 B, 116 B above the link floor). C had no room for a
+move out of B, so this audit only cuts: code that core / libm functions
+pulled into B for one or two callers, one inlined helper, and part of the
+`.data` load image; then (owner's decision, 2026-10-27) panic sites without
+their source location, and with that room one A2 font blob back to B.
+Nothing moved into region C, so the region C hooks
+see the same set of functions as before.
+
+| change | region B | other |
+|---|---|---|
+| no core string searcher, no Unicode trim (below) | +2 160 | C +36 |
+| `Scpi::put_conf_fmt`: `chars().nth(1)` for `chars().count() > 1` (`do_count_chars`, 320 B) | +304 | |
+| `touch::log` `#[inline(never)]` (five copies; once per touch frame / gesture event) | +456 | |
+| `ui::gen_preview`: the phase fraction as `x - trunc(x)` for f32 `% 1.0` (libm `fmodf` and its reduction helper, ~0.7 KB; exact for x in 0..2) | +672 | C -4 |
+| `scope::WAVE`, `scope_ui::SHOWN`, `STRIP_SHOWN` in SRAM `.dmabuf` (below) | +536 | stack +672, SRAM -664 |
+| `-Zlocation-detail=none` (build.sh, below) | +31 600 | C +3 168, stack +24 |
+| the SC_PROBE font blob (1 242 B) from A2 back to B (below) | -1 240 | A2 +1 244 |
+
+- **String searcher**: `stockfont::unit_text` tested `u.contains('°')`; a
+  non-ASCII `char` pattern searches for its UTF-8 bytes as a `&str`, so the
+  one out-of-line `<str>::contains::<char>` (shared with two ASCII callers)
+  carried core's two-way searcher (`StrSearcher::new`, `TwoWaySearcher::*`,
+  ~1.4 KB). `unit_text` now looks for the two bytes `C2 B0`, the two `'.'`
+  tests (`app::trim_zeros`, `DmmView::bar_labels`) use `as_bytes().contains`,
+  and the generator page's `note.split(": ")` became a `find(':')`.
+  `str::trim` (the DMM value text, `upload::data_inner`'s offset) pulled the
+  Unicode whitespace table and its decoder: `trim_ascii` (the texts are
+  ASCII).
+- **Statics**: their non-zero initialisers were 660 B of the `.data` load
+  image in B. On the device they are now in `.dmabuf` (NOLOAD, as
+  `scope_ui::GRAPH`) and set up in place: `Scope::new` writes `WAVE` (it
+  already reset it), `scope_ui::init` (`init_shown`, `#[inline(never)]` so
+  the code stays in B and not in `new_app` in C) writes the other two. All
+  three are main-loop only (the AD2 ISR never touches them). The host
+  builds keep the initialisers. `inrush::SES` (232 B) was tried the same
+  way and gained nothing: its start-up copy needs `Session::NEW` as a
+  232-byte constant in B.
+- **Panic locations**: every bounds check, `unwrap`, slice copy and
+  division hands the panic path a `core::panic::Location` (file, line,
+  column: 16 B of anonymous rodata per site, plus a literal pool entry and
+  the source path strings). A scan of the image for path / length pairs
+  finds ~1 530 of them (inferred to be these records). `main.rs` `panic`
+  never reads them: it paints the magenta bar and waits for the watchdog
+  (the shim counts the reset in `BKP_CRASH`; no record holds a file or
+  line). `build.sh` compiles with `-Zlocation-detail=none`, so every
+  location is the same redacted record. The flag is a nightly one:
+  `build.sh` sets `RUSTC_BOOTSTRAP=1` for its own `cargo build` only (the
+  pinned stable rustc then accepts it; CI and release.yml build through
+  `build.sh --locked`). A plain `cargo build` (`.cargo/config.toml`) and
+  the host test builds (`tools/*/run.sh`, their own rustc calls) are
+  unchanged and keep their locations: a failing host test still names its
+  line. The panic path in the image: `panic_bounds_check` -> `panic_fmt` ->
+  `rust_begin_unwind` (the bar, `wait_for_watchdog`); none of them loads
+  the location.
+- **A2**: with B at 52 KB free the SC_PROBE blob left `A2_FONTS`
+  ([`tools/mkstockfont.py`](../tools/mkstockfont.py); the regenerated
+  [`stockfont_data.rs`](../src/stockfont_data.rs) differs only in its
+  `link_section` line; both regions are zero-wait): A2 is above its 2 KiB
+  warning again.
+
+Tried, not done:
+- `Scpi::put_bytes` `#[inline(never)]` (11 copies): B -16 B.
+- `vdisk::put16` out of line (2 copies, ~400 B): it runs per FAT entry on
+  the USB volume's per-sector read path, which a host may read during a
+  stream.
+- The font descriptor tables (`*_E`, 10 B per glyph, 869 glyphs, B) keep
+  each glyph's code also in the 455 entries of fonts whose codes run
+  without a gap (ASCII26, SC_F12 / F16 / F20, ...): ~0.9 KB with a
+  `first` code per font and an index lookup (tools/mkstockfont.py and the
+  `Font::glyph` search change).
+- The f64 soft-float routines (~3.5 KB): their callers (`scope_meas`
+  sums, the Wh / VAh accumulators, `nr3_scale`, `gen::plan` timing) need
+  the precision.
+
+The rows above add up to 50 876 B; the final tree (version 0.3.1) has:
+
+| | before (cae46446) | after |
+|---|---|---|
+| region A2 free | 1 128 B | 2 372 B |
+| region B free | 16 388 B | 50 892 B |
+| region C free | 4 736 B | 7 940 B |
+| stack headroom (static worst path) | 20 500 B | 21 196 B |
+| SRAM free | 44 576 B | 43 912 B |
+
+The variants (tools/build-variants/run.sh), B / C free and stack headroom
+(A2 after: 2 372 B; no-ad2-isr 2 456 B, mute 2 396 B):
+
+| variant | before | after |
+|---|---|---|
+| recovery-usb | 15 044 / 4 800 / 21 012 B | 49 940 / 7 984 / 21 708 B |
+| recovery-file | 16 084 / 4 212 / 20 500 B | 50 748 / 7 452 / 21 196 B |
+| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 60 384 / 9 016 / 21 640 B |
+| spi-disk | 37 064 / 14 904 / 22 012 B | 68 692 / 17 924 / 22 692 B |
+| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 50 876 / 8 380 / 21 196 B |
+| keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
+| mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
