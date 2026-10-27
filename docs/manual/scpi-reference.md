@@ -543,6 +543,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
+| `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1` or `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) | `CHAN1` or `GEN` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07` | both |
 | `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
 | `SCOPe:MEASure:VAVG?` | | Mean, V | both |
@@ -797,6 +798,7 @@ unless shown otherwise.
 | `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |
 | `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
 | `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
+| `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+0.000000E+00` | USB |
 | `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report | USB |
 | `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report | USB |
 | `DBG:AD2:TORN?` | `<r26>,<n>[,SYNChronous]` | Converter read test report (AC rows) | USB |

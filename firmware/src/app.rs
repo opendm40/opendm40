@@ -4712,6 +4712,16 @@ impl App {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            C::DbgGenLag(Some(ns)) => {
+                // ns -> ticks of the 200 MHz timer clock (5 ns).
+                crate::scope::set_gen_lag((ns / 5.0) as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgGenLag(None) => {
+                out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
+                true
+            }
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -4926,6 +4936,14 @@ impl App {
                     scope::TrigMode::Normal => b"NORM",
                     scope::TrigMode::Single => b"SING",
                 });
+                Some(())
+            }
+            C::TrigSource(Some(t)) => {
+                sc.tsrc = t.min(scope::TSRC_GEN);
+                None
+            }
+            C::TrigSource(None) => {
+                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
                 Some(())
             }
             C::Run => {

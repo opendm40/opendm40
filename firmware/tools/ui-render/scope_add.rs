@@ -430,4 +430,63 @@ pub fn run(ck: &mut Checker, out: &str) {
         }
     }
     println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes, {nd} trigger-level drag steps");
+    gen_channel(ck, out);
+}
+
+/// The GEN channel (docs/scope-gen-channel.md): the computed trace under
+/// CH1, the trigger badge in its colour, the Source row of the Trigger
+/// tab and the GEN trace row of the Display tab; an update equals a fresh
+/// draw.
+fn gen_channel(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let shape = gen::Shape { wave: gen::Wave::Sine, lo_v: 0.0, hi_v: 3.0, duty: 0.5 };
+    for combined in [false, true] {
+        let mut m = base.m;
+        m.combined = combined;
+        m.tsrc = scope::TSRC_GEN;
+        let h = m.frame_h();
+        let draw = |m: &scope_ui::Model, popup: scope_ui::Popup, pv: &scope_ui::PopVals, gen_on: bool| {
+            let sc = stock::Scene { name: "gen", m: *m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw_with(&sc, pv);
+            if gen_on {
+                let g = scope_ui::graph();
+                for i in 0..399 {
+                    // 2.5 periods on the screen, 1 V/div, 0 V on the centre row.
+                    let (lo, hi) = shape.span(i as f32 * 2.5 / 399.0, 2.5 / 399.0);
+                    let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
+                    g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+                }
+                scope_ui::update(m);
+            }
+            scope_ui::draw_popup(popup, pv);
+        };
+        let mut pv = stock::popvals(&m);
+        pv.tsrc = scope::TSRC_GEN;
+        pv.gen_trace = true;
+        draw(&m, scope_ui::Popup::None, &pv, true);
+        ck.check_replica(&format!("gen/{}/trace", combined as u8));
+        let want = emu().fb.clone();
+        if !combined {
+            save(out, "s08-gen-trace");
+        }
+        // Off -> on as an update.
+        draw(&m, scope_ui::Popup::None, &pv, false);
+        let g = scope_ui::graph();
+        for i in 0..399 {
+            let (lo, hi) = shape.span(i as f32 * 2.5 / 399.0, 2.5 / 399.0);
+            let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
+            g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+        }
+        scope_ui::update(&m);
+        ck.same_as(&format!("gen/{}/update", combined as u8), &want);
+        for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
+            draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
+            let add = if tab == 1 { vec![rb(scope_ui::GT_LABEL)] } else { vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)] };
+            let area = if tab == 1 { Bx::new(14, 161, 399, 50) } else { Bx::new(14, 186, 399, 50) };
+            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 191 } else { 216 }));
+            if !combined {
+                save(out, name);
+            }
+        }
+    }
 }

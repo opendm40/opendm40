@@ -69,6 +69,8 @@ All documentation of opendm40, by reader. Start at the
   multimeter and scope combined view.
 - [scope-scale-ux.md](../firmware/docs/scope-scale-ux.md): the scope timebase
   and V/div by touch.
+- [scope-gen-channel.md](../firmware/docs/scope-gen-channel.md): the
+  generator as a computed scope channel (trigger source, trace) and the DMM as CH2.
 
 ### Planning
 

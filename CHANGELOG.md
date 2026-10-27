@@ -7,6 +7,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
+  the trigger is computed from the generator's timers, no wire needed;
+  and a **GEN trace** (MF > Display) showing the generator's output under
+  CH1 ([manual](docs/manual/README.md#trigger)). SCPI `TRIGger:SOURce`.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
