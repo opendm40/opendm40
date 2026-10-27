@@ -1194,7 +1194,11 @@ fn tap_step_tests(ck: &mut Ck) {
         }
         let lo = (cur as i32 - 2).max(scope::TB_MIN as i32);
         let hi = (cur as i32 + 2).min(scope::TB_MAX as i32);
+        // Each row: its time label and, right of it, its sample rate.
+        let rate_x = su::tb_rate_rect(0).x as i32;
+        let (rates, rows): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(_, b)| b.0 >= rate_x);
         ck.t(&format!("tb list {cur}: {} rows drawn", hi - lo + 1), rows.len() as i32 == hi - lo + 1);
+        ck.t(&format!("tb list {cur}: a rate beside each row"), rates.len() == rows.len() && rates.iter().all(|(_, r)| rows.iter().any(|(_, b)| (r.1 - sp.y as i32) / 30 == (b.1 - sp.y as i32) / 30)));
         let mut ok = true;
         for (_, b) in &rows {
             let (cx, cy) = ((b.0 + b.2) / 2, (b.1 + b.3) / 2);

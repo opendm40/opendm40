@@ -10,8 +10,9 @@ TAG=$1; COMMIT=$2; AUTO=$3
 [ -n "$TAG" ] && [ -n "$COMMIT" ] || { echo "usage: release-notes.sh TAG COMMIT [AUTO]" >&2; exit 2; }
 [ -z "$AUTO" ] || AUTO=$(cd "$(dirname "$AUTO")" && pwd)/$(basename "$AUTO")
 cd "$(dirname "$0")/.."
-REPO=${GITHUB_REPOSITORY:-wirenboard/opendm40}
+REPO=${GITHUB_REPOSITORY:-opendm40/opendm40}
 BLOB=https://github.com/$REPO/blob/$TAG
+RAW=https://raw.githubusercontent.com/$REPO/$TAG
 NAME=dm40_opendm40_$TAG.bin
 cat <<EOF
 opendm40 $TAG, the replacement firmware for the Alientek DM40 (A / B / C), built from commit $(echo "$COMMIT" | cut -c1-7) by CI.
@@ -30,8 +31,10 @@ SECTION=$(awk -v t="$TAG" '
     on' ../CHANGELOG.md 2>/dev/null)
 if [ -n "$(echo "$SECTION" | tr -d '[:space:]')" ]; then
     echo "## Changes"
-    # Relative links (repo root) -> links at the tag.
-    echo "$SECTION" | sed -E "s#\]\(([^):\#][^):]*)\)#](${BLOB}/\1)#g"
+    # Relative images -> the raw file at the tag (a blob page does not
+    # render as an image); other relative links (repo root) -> links at the tag.
+    echo "$SECTION" | sed -E -e "s#!\[([^]]*)\]\(([^):\#][^):]*)\)#![\1](${RAW}/\2)#g" \
+        -e "s#([^!]|^)\[([^]]*)\]\(([^):\#][^):]*)\)#\1[\2](${BLOB}/\3)#g"
     PREV=$(git describe --tags --match 'v*' --abbrev=0 "$COMMIT^" 2>/dev/null) &&
         printf '\n**Full changelog:** https://github.com/%s/compare/%s...%s\n' "$REPO" "$PREV" "$TAG" || true
 elif [ -n "$AUTO" ] && [ -s "$AUTO" ]; then

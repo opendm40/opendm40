@@ -9,8 +9,8 @@ Requirements: Python 3, `gcc-arm-none-eabi`, `make`.
 
 The latest official update file is in [vendor/](vendor/README.md)
 ([`dm40_v_2_6.bin`](vendor/dm40_v_2_6.bin), Alientek's, not under the MIT licence); older versions are
-kept in `wirenboard/alientek-dm40-tools` (`vendor/`). Reverse-engineering notes on the stock firmware, bootloader and
-update format: the private repo `wirenboard/alientek-dm40-fw-analysis`, cloned
+kept in a separate tools repository (`vendor/`). Reverse-engineering notes on the stock firmware, bootloader and
+update format: a private repository, cloned
 into `stock/re/` by those with access (`stock/re/README.md`, `stock/re/ANALYSIS.md`).
 
 ## dm40fw.py

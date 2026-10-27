@@ -43,14 +43,14 @@ const ROWS: [(u16, u8, u8); 13] = [
 ];
 /// Per HY3131 mode 0..14 (dmm.rs: AC V, DC V, AC mV, DC mV, AC A / mA /
 /// uA, DC A / mA / uA, ohm, continuity, diode, capacitance, Hz): the row;
-/// +0x40: none on r0 (the 60 mV ranges); +0x80: the next row from range
+/// +0x40: none on r0 (the 60 mV and 60 ohm ranges, opendm40 only); +0x80: the next row from range
 /// SPLIT on (ohm r6 = 60 Mohm, capacitance r5 = 600 uF).
-const MODE_ROW: [u8; 15] = [0, 1, 0x40, 0x41, 2, 3, 3, 4, 5, 5, 0x86, 8, 9, 0x8A, 12];
+const MODE_ROW: [u8; 15] = [0, 1, 0x40, 0x41, 2, 3, 3, 4, 5, 5, 0xC6, 8, 9, 0x8A, 12];
 const SPLIT: [i8; 2] = [6, 5];
 
 /// The manual's row for HY3131 `mode` / `range` (dmm.rs numbering), or
 /// None where the manual gives none: AC+DC (`acdc`), the 60 mV ranges
-/// (DC / AC mV r0, opendm40 only), temperature with any sensor but the
+/// (DC / AC mV r0) and 60 ohm (ohm r0), opendm40 only, temperature with any sensor but the
 /// K thermocouple (`tc` false: PT100 / PT1000 / NTC are opendm40 only),
 /// the power meter (not a mode here) and unknown modes. `f`: the reading
 /// is in deg F (temperature only).

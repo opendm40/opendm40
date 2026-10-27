@@ -759,7 +759,7 @@ streams on DC V 6 V; the calibrator's 0 / 9.59 V square (no sine available),
 ### 8.4 Manual AD1CHOP and option E as FAST (device, 2026-10-25)
 
 Test firmware: branch `exp/ad1-chopseq` (`DBG:AD2:CHOPSEQ mode,param,delay`,
-[tools/experiments/chopseq](https://github.com/wirenboard/opendm40/tree/exp/ad1-chopseq/firmware/tools/experiments/chopseq)):
+[tools/experiments/chopseq](https://github.com/opendm40/opendm40/tree/exp/ad1-chopseq/firmware/tools/experiments/chopseq)):
 in an unchopped AD1 logger session (LOG:OSR 6, LOG:CHOP OFF) the logger
 rewrites R22's AD1CHOP 00 / 01 by a pattern after each read and tags each
 record with the polarity. DC V 6 V manual, the calibrator's output off

@@ -610,6 +610,14 @@ pub fn fmt_hz(out: &mut Buf, hz: f32) {
     out.push(crate::dmm::format(&mut t, x * 1.000_001, dec)).push(p);
 }
 
+/// Sample rate as `fmt_hz` gives a frequency, "S/s" for "Hz": "50.0MS/s",
+/// "12.5MS/s", "76.8kS/s", "500S/s".
+pub fn fmt_srate(out: &mut Buf, fs: u32) {
+    fmt_hz(out, fs as f32);
+    out.n -= 2;
+    out.push("S/s");
+}
+
 /// 2.4 CH1 V/div badge.
 pub fn vdiv_badge(m: &Model) {
     let mut b = Buf::new();
@@ -1515,6 +1523,17 @@ pub fn init() {
     g.d_holes = [None; NH];
     g.px = 0;
     g.next = 0;
+    init_shown();
+}
+
+/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: its code stays in
+/// region B with this module instead of growing `new_app` in region C.
+#[inline(never)]
+fn init_shown() {
+    unsafe {
+        core::ptr::addr_of_mut!(SHOWN).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] });
+        core::ptr::addr_of_mut!(STRIP_SHOWN).write(None);
+    }
 }
 
 /// The graph state, read only (overlays reading its background).
@@ -1960,6 +1979,9 @@ struct Shown {
     cells_n: [u8; 4],
 }
 
+// On the device in SRAM (.dmabuf, NOLOAD, as GRAPH; region B audit #6:
+// no .data load image in region B); `init` sets it up.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] };
 
 fn shown() -> &'static mut Shown {
@@ -3038,7 +3060,7 @@ pub fn draw_tb(cur: u8) {
         } else {
             C_POP_BG
         };
-        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, r.w, 30), TB_LABELS[idx as usize], 8, 0);
+        ink[k as usize] = Ink::new(sf::SC_F16, rect(r.x, y, TB_TIME_W, 30), TB_LABELS[idx as usize], 4, 0);
     }
     let layers = [(K_SHAPE, C_FRAME), (K_TEXT, C_BAR), (K_TEXT, C_BAR), (K_TEXT, C_SEL), (K_TEXT, C_BAR), (K_TEXT, C_BAR)];
     paint(isect(r, screen), &layers, |x, y| {
@@ -3055,6 +3077,36 @@ pub fn draw_tb(cur: u8) {
             (C_FRAME, 0)
         }
     });
+    tb_rates(cur, lo, hi);
+}
+
+/// Timebase list row: the time's column (right-aligned) and the rate's
+/// box (vertically inside the row, clear of the spinner's corners).
+pub const TB_TIME_W: i16 = 44;
+pub const fn tb_rate_rect(y: i16) -> Rect {
+    rect(TB_SPIN.x + TB_TIME_W + 6, y + 7, TB_SPIN.w - TB_TIME_W - 9, 16)
+}
+
+/// opendm40: each list entry's sample rate (the list's `cur` centre,
+/// entries `lo..=hi`), small and dim beside its time: what ACQ:SRAT? gives
+/// at that timebase. One text at a time (a second Ink array in `draw_tb`
+/// would make the list the deepest stack path). Region A2 (zero-wait,
+/// link-native.x): region B is near its 16 KiB warning, and the list draws
+/// while the Wave view streams, so not .cold.
+#[inline(never)]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.srate")]
+fn tb_rates(cur: usize, lo: usize, hi: usize) {
+    for k in 0..5 {
+        let Some(idx) = (cur + k).checked_sub(2) else { continue };
+        if idx < lo || idx > hi {
+            continue;
+        }
+        let mut b = Buf::new();
+        fmt_srate(&mut b, crate::scope::tb_rate(idx, lo != crate::scope::TB_MIN));
+        let (bg, fg) = if k == 2 { (C_SEL, C_POP_BG) } else { (C_BAR, C_DIS) };
+        let r = tb_rate_rect(TB_SPIN.y + k as i16 * 30);
+        fill_text_on(r, r, bg, bg, sf::SC_F12, r, b.as_str(), fg, 1, 1);
+    }
 }
 
 /// What a touch on the timebase list hits.
@@ -3207,6 +3259,8 @@ const ST_GEN_T: Rect = rect(344, 46, 64, 17);
 const C_HV: Color = 0xc9a0;
 const C_GEN: Color = 0x0400;
 
+// On the device in SRAM (.dmabuf, NOLOAD, as GRAPH); `init` sets it up.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut STRIP_SHOWN: Option<StripData> = None;
 
 /// Forget the drawn strip (the next `meter_strip` draws all of it).
