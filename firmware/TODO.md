@@ -63,7 +63,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
   #6)" items; stock comparisons UF-02, UF-19.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
-- Code: none open. "Not exercised: a stream starting inside a multi-block READ(10)" (#60, test only) and
+- Code: none open. "A stream starting inside a multi-block READ(10)" (#60, test only) and
   "SCOP006.CSV once saved" (#61) are in PRs; "Unchopped FAST in ohm" is under (a), "Left: `vdisk::mirror_boot`"
   under (c).
 - Unknowns to trace: "Why the two conversions after an early R22 change", "AUTO coupling decided at 5.76-5.85 s",
