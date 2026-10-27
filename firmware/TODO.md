@@ -66,7 +66,8 @@ are marked at their items.
   multi-block READ(10)" (needs a debug switch), "SCOP006.CSV once saved".
 - Unknowns to trace: "Why the two conversions after an early R22 change", "AUTO coupling decided at 5.76-5.85 s",
   "76800 CHOP ON", "C's lag-side creep allowance", "C's second reference".
-- Device runs: "Fast logger device check" (open steps), "(B) device session", "Device check (AUTO coupling)".
+- Device runs: "Fast logger device check" (open steps), "(B) device session", "Device check (AUTO coupling)",
+  "Device: doc 4.13" (the mV-first AC AUTO, RTD / NTC).
 
 **(c) Owner decisions**
 - [Owner decisions pending](#owner-decisions-pending-2026-10-25): the three "Docs, owner decision" items (front photo,
