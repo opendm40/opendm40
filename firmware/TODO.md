@@ -38,6 +38,15 @@ Additional requirements:
         = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
       Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
 
+- [ ] Scope extra channels (owner 2026-10-27: "dmm (wave) as a second channel of the scope, optional; the generator
+      as a channel too, as a trigger source, computed, not captured"): built on branch claude/friendly-gauss-8m2e3g,
+      design and device checks in [docs/scope-gen-channel.md](docs/scope-gen-channel.md).
+      - GEN: MF > Trigger > Source GEN (computed from TIM6 / DMA or TIM12 against TIM1), MF > Display > GEN trace,
+        `TRIG:SOUR GEN`. Device check 1.5 (the generator looped back to CH1); `DBG:GENTRIG:LAG` to measure.
+      - CH2: MF > Display > CH2 (DMM), the AD2 stream time-aligned by its DWT stamps; the DMM reading pauses.
+        Device check 2.4; `DBG:CH2:LAG` to measure. Not yet: a CH2 position (0 is the centre row), CH2 in roll
+        beyond 3.4 s of screen, CH2 in the CSV / WAV:DATA?, CH2 measurements, CH2 as a trigger source.
+
 ## Open, by kind (2026-10-27)
 
 One line per group of open items; quoted words are the start of an item. Open PRs (#35, #41, #44, #55, #56, #57,

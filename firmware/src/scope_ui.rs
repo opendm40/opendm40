@@ -227,6 +227,9 @@ pub struct Model {
     /// Trigger source (scope::TSRC_*): the trigger badge in the GEN
     /// colour for the generator.
     pub tsrc: u8,
+    /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
+    /// none (`CH2_LABEL`, a graph hole).
+    pub ch2_txt: Txt,
 }
 
 /// `Model::src` values.
@@ -303,6 +306,7 @@ impl Model {
         wvdiv: 0.0,
         ch1_txt: "",
         tsrc: 0,
+        ch2_txt: Txt::EMPTY,
     };
 
     pub fn pal(&self) -> Color {
@@ -2139,6 +2143,8 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
+    let ch2 = !m.ch2_txt.as_str().is_empty();
+    g.set_hole_at(H_SPARE, ch2.then_some(ch2_label_rect(m)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2163,6 +2169,9 @@ pub fn update(m: &Model) {
     let was_fft = ol.math_on && ol.math_mode == 5;
     if fft_on && (bg_changed || d(!was_fft || ol.fft_hz != m.fft_hz || ol.math_colour != m.math_colour)) {
         fft_label(m);
+    }
+    if ch2 && (bg_changed || d(ol.ch2_txt != m.ch2_txt)) {
+        fft_box(ch2_label_rect(m), m.ch2_txt.as_str(), C_CH2);
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
@@ -2539,6 +2548,10 @@ pub struct PopVals {
     /// docs/scope-gen-channel.md).
     pub tsrc: u8,
     pub gen_trace: bool,
+    /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
+    /// first start).
+    pub ch2_on: bool,
+    pub ch2_vdiv: Txt,
 }
 
 /// Which popup is open (tab).
@@ -2691,7 +2704,7 @@ pub fn slider_value(x: i16) -> f32 {
 
 /// MF popup page height per tab (box h = 40 + page).
 /// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13.)
-const MF_PAGE_H: [i16; 4] = [150, 150, 175, 55];
+const MF_PAGE_H: [i16; 4] = [150, 200, 175, 55];
 
 /// MF settings popup (FUN_08037574), tab 0..3.
 pub fn draw_mf(tab: u8, v: &PopVals) {
@@ -2744,6 +2757,15 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 161, 399, 50), pc, C_POP_BG);
             fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
             option_list(GT_LIST, pc, &["On", "Off"], 44, if v.gen_trace { 0 } else { 1 });
+            // opendm40: the DMM as CH2 and its V/div.
+            fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
+            fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
+            option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            if v.ch2_on {
+                rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
+                rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
+                fill_text(C2_VALUE, pc, C_POP_BG, sf::SC_F16, C2_VALUE, v.ch2_vdiv.as_str(), C_FILL, 8, 0);
+            }
         }
         2 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
@@ -2806,6 +2828,15 @@ pub const TS_LIST: Rect = rect(24, 208, 120, 24);
 pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
+pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
+pub const C2_LIST: Rect = rect(24, 233, 88, 24);
+pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
+pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
+pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
+/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box).
+pub fn ch2_label_rect(m: &Model) -> Rect {
+    rect(18, m.top() + 34, 92, 17)
+}
 
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
@@ -2855,6 +2886,9 @@ pub enum MfHit {
     /// Trigger source, GEN trace on (opendm40).
     TSrc(u8),
     GenTrace(bool),
+    /// The DMM CH2 on, its V/div step (true = up).
+    Ch2(bool),
+    Ch2Step(bool),
     PriScr,
     SaveCsv,
     /// Inside the box, nothing there.
@@ -2903,6 +2937,12 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Grid
             } else if let Some(i) = option_hit(GT_LIST, 2, 44, x, y) {
                 MfHit::GenTrace(i == 0)
+            } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
+                MfHit::Ch2(i == 0)
+            } else if v.ch2_on && near(C2_MINUS) {
+                MfHit::Ch2Step(false)
+            } else if v.ch2_on && near(C2_PLUS) {
+                MfHit::Ch2Step(true)
             } else {
                 MfHit::Inside
             }

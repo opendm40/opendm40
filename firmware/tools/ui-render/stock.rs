@@ -310,6 +310,8 @@ pub fn popvals(m: &Model) -> su::PopVals {
         runt_v: 0.0,
         tsrc: 0,
         gen_trace: false,
+        ch2_on: false,
+        ch2_vdiv: su::Txt::EMPTY,
     }
 }
 

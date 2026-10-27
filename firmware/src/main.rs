@@ -48,6 +48,7 @@ mod scope;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
+mod scope_ch2;
 mod fft;
 mod sinc;
 mod trigsoft;
@@ -1381,6 +1382,44 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             port.respond(r);
         }
 
+        // The DMM CH2 of the MCX scope page (app_ch2.rs): its stream starts,
+        // restarts at a timebase in another rate band and stops here, before
+        // the wave view's / inrush page's requests (their streams take the
+        // logger over: CH2's is stopped first, `ch2_want` is None in their
+        // views). A disk job stops it (region C code every pass, as the
+        // wave view's pause); it starts again after. A stream it did not
+        // start (a host session, the wave view, inrush) is left alone.
+        {
+            let want = app.ch2_want().filter(|_| !screenshot::busy() && !logger.host_active() && !fastlog::active());
+            let mine = app.ch2_live() && logger.active() && logger.wave();
+            if app.ch2_live() && !mine {
+                app.ch2_lost(now); // a DMM change, or taken over
+            }
+            match want {
+                Some(fs) if (!mine || app.ch2_fs() != fs) && (mine || !logger.active()) => {
+                    let fresh = !logger.active();
+                    if mine {
+                        logger.stop();
+                    }
+                    if fresh {
+                        // The full row first, as the wave view's entry.
+                        app.dmm.start(&mut clk);
+                    }
+                    if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        csvlog::catalog_warm(); // MMEM:CAT? while CH2 streams: from the cache
+                        logger.start_wave(app.dmm.mode(), app.dmm.range(), fs);
+                        app.ch2_started(fs, logger.nominal_mhz(), logger.begin_cyc());
+                    } else {
+                        app.ch2_stopped();
+                    }
+                }
+                None if mine => {
+                    logger.stop();
+                    app.ch2_stopped();
+                }
+                _ => {}
+            }
+        }
         // Any path that reconfigures the DMM (a host CONFigure, a touch/key
         // FUNC/RANGE change, a BT mode-byte) rewrites the 22-byte HY3131 config
         // and R22 behind the logger's back. Detect that and auto-stop so the

@@ -381,6 +381,15 @@ pub struct Scope {
     /// The GEN trace is shown: every MCX record needs the generator's
     /// phase, so the comparator (whose stop time is not known) is off.
     pub gen_trace: bool,
+    /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
+    /// record needs its time (`rec_time`), the comparator is off.
+    pub ch2_on: bool,
+    /// The acquisition in flight: DWT count of its sample 0 (None: a
+    /// comparator record, the wave view) and DWT cycles per sample; the
+    /// stored record's (BUF[0]).
+    t_s0: Option<u32>,
+    t_step: f32,
+    stored_t0: Option<u32>,
 }
 
 /// The DMM-input source of the scope page (docs/dmm-input-scope-
@@ -717,6 +726,10 @@ impl Scope {
             rec_base: 0,
             stored_gen: None,
             gen_trace: false,
+            ch2_on: false,
+            t_s0: None,
+            t_step: 1.0,
+            stored_t0: None,
         };
         // WAVE is not loaded on the device (.dmabuf): set up in place.
         unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
@@ -1175,6 +1188,7 @@ impl Scope {
             g.t0 = crate::gen::wrap(g.t0, g.q);
             g
         });
+        self.stored_t0 = self.t_s0.map(|t| t.wrapping_add((self.rec_base as f64 * self.t_step as f64) as u64 as u32));
         self.stored_valid = true;
     }
 
@@ -1290,7 +1304,7 @@ impl Scope {
             // every record's phase, which a comparator stop does not give.
             let gen = self.gen_src() || self.gen_trace;
             let soft = self.s.ttype != 0 && !self.gen_src();
-            let hw = self.hw.available() && !self.rolling && !soft && !gen;
+            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
@@ -1319,6 +1333,8 @@ impl Scope {
             let g = if gen && !self.wave { crate::gen::now() } else { None };
             w32(TIM1, 1);
             let d_en = r32(DWT_CYCCNT);
+            self.t_step = ((psc + 1) * (arr + 1)) as f32;
+            self.t_s0 = (!hw).then(|| d_en.wrapping_add(ccr4 * (psc + 1)));
             self.gsync = g.and_then(|(gt, d)| {
                 let dt = d_en.wrapping_sub(d);
                 let (t, shape) = crate::gen::running()?;
@@ -1330,6 +1346,24 @@ impl Scope {
             });
         }
         self.busy = true;
+    }
+
+    /// DWT count of the stored record's BUF[0] and DWT cycles per sample
+    /// (the DMM CH2's alignment); None without a stored record, or for a
+    /// comparator record (its stop instant is not known) or the wave view.
+    pub fn rec_time(&self) -> Option<(u32, f32)> {
+        if self.stored_valid && !self.wave { self.stored_t0.map(|t| (t, self.t_step)) } else { None }
+    }
+
+    /// Roll (live): DWT count at the end of the newest column and DWT
+    /// cycles per column of the last roll frame.
+    pub fn roll_time(&self) -> Option<(u32, f32)> {
+        if !self.rolling || self.wave {
+            return None;
+        }
+        let t = self.t_s0?;
+        let per = (self.screen / COLS).max(1) as f32;
+        Some((t.wrapping_add((self.roll_written as f64 * self.t_step as f64) as u64 as u32), per * self.t_step))
     }
 
     /// The trigger source is the generator (MCX records only).

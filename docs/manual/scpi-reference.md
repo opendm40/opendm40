@@ -799,6 +799,7 @@ unless shown otherwise.
 | `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
 | `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
 | `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+0.000000E+00` | USB |
+| `DBG:CH2:LAG[?]` | us the DMM CH2's conversion is older than its stamp (CH2 against CH1; not kept) | `+0.000000E+00` | USB |
 | `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report | USB |
 | `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report | USB |
 | `DBG:AD2:TORN?` | `<r26>,<n>[,SYNChronous]` | Converter read test report (AC rows) | USB |

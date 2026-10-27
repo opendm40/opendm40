@@ -839,6 +839,8 @@ pub enum Cmd {
     TrigSource(Option<u8>),
     /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
     DbgGenLag(Option<f32>),
+    /// DBG:CH2:LAG <us>: the DMM CH2's conversion lag (scope_ch2).
+    DbgCh2Lag(Option<f32>),
     Run,
     Stop,
     Single,
@@ -2267,6 +2269,13 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgCh2Lag(None)),
+                        Some(v) if v.abs() <= 1e5 => out = Out::Instr(Cmd::DbgCh2Lag(Some(v))),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgGenLag(None)),

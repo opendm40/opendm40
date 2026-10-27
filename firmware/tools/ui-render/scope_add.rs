@@ -455,6 +455,8 @@ fn gen_channel(ck: &mut Checker, out: &str) {
                     let (lo, hi) = shape.span(i as f32 * 2.5 / 399.0, 2.5 / 399.0);
                     let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
                     g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+                    let c = (200.0 + 60.0 * shape.unit(i as f32 * 1.5 / 399.0 + 0.1)) as i32;
+                    g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
                 }
                 scope_ui::update(m);
             }
@@ -463,6 +465,10 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         let mut pv = stock::popvals(&m);
         pv.tsrc = scope::TSRC_GEN;
         pv.gen_trace = true;
+        pv.ch2_on = true;
+        pv.ch2_vdiv = scope_ui::Txt::new("250mA");
+        // The DMM CH2 too: its label (a graph hole) and a trace.
+        m.ch2_txt = scope_ui::Txt::new("CH2 250mA");
         draw(&m, scope_ui::Popup::None, &pv, true);
         ck.check_replica(&format!("gen/{}/trace", combined as u8));
         let want = emu().fb.clone();
@@ -476,14 +482,20 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             let (lo, hi) = shape.span(i as f32 * 2.5 / 399.0, 2.5 / 399.0);
             let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
             g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+            let c = (200.0 + 60.0 * shape.unit(i as f32 * 1.5 / 399.0 + 0.1)) as i32;
+            g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
         }
         scope_ui::update(&m);
         ck.same_as(&format!("gen/{}/update", combined as u8), &want);
         for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
             draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
-            let add = if tab == 1 { vec![rb(scope_ui::GT_LABEL)] } else { vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)] };
-            let area = if tab == 1 { Bx::new(14, 161, 399, 50) } else { Bx::new(14, 186, 399, 50) };
-            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 191 } else { 216 }));
+            let add = if tab == 1 {
+                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)]
+            } else {
+                vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
+            };
+            let area = if tab == 1 { Bx::new(14, 161, 399, 99) } else { Bx::new(14, 186, 399, 50) };
+            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 241 } else { 216 }));
             if !combined {
                 save(out, name);
             }

@@ -103,39 +103,83 @@ timebases only (40 px per division: a 100 ns lag is 40 px at 100 ns/div,
 
 The wave view's stream ([dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md)
 sections 9-11: the HY3131 AD2 at 1.2 .. 76.8 kS/s in one timer ISR) drawn
-as a second trace (magenta) over the MCX record, time-aligned, from
-1 ms/div. The DMM reading pauses while it runs, as in the wave view
-(decision #3: the stream owns the HY3131 bus).
+as a second trace (magenta) over the MCX record, time-aligned. MF > Display
+**CH2 (DMM): On | Off** and its V/div **- / +** (the wave view's steps,
+screen only: the DMM range stays); the graph shows "CH2 1.5V" (a hole
+below the FFT's box). 0 A / 0 V of CH2 is on the centre row (no CH2
+position yet). The rate follows the timebase as in the wave view
+(`scope::wave_fs_for`: 76.8 kS/s up to 1 ms/div, 1200 S/s from
+200 ms/div); faster timebases show CH2 as steps (fewer samples than
+columns).
 
-### 2.2 Time alignment
+The DMM reading pauses while CH2 streams (decision #3: the stream owns
+the HY3131 bus; the sentinel and BT serve pause with it, as in the wave
+view); it comes back when CH2 is turned off or the page is left. CH2 runs
+on V (DC / AC V, DC / AC mV) and AC A / mA / uA (DC-coupled rows); not in
+DC A (no AD2 path: "CH2: DMM in AC A"), AC+DC / AUTO coupling, the power
+meter, the other functions, or while a CSV recording runs.
+
+### 2.2 Time alignment ([scope_ch2.rs](../src/scope_ch2.rs))
 
 * The stream's samples carry the producer's microsecond stamp (`ts_us`,
-  logger.rs: the DWT time of the ISR's read since the session began). The
-  logger keeps the DWT count of the session's begin, so a stamp maps to the
-  DWT clock: DWT = c0 + 200 ts_us (+-1 us).
-* The MCX record's sample 0 is at the TIM1 enable (DWT, 1.2); sample n is
-  n / fs later. So each MCX column has a DWT interval, and the CH2 samples
-  stamped inside it give the column's CH2 min / max.
+  logger.rs: the DWT time of the ISR's read since the session began).
+  `Logger::begin_cyc` is the DWT count of that begin (the ISR producer's
+  `isr::begin_cyc`), so a stamp maps to the DWT clock: c0 + 200 ts_us.
+* The store keeps the last 4096 samples (raw >> 3, 16 bit, 8 KB) and an
+  anchor (sample index, DWT) every 128 samples; between anchors the index
+  is linear in time (the stream is regular between holes). A hole (ring
+  overflow, missed conversions), a STOP / RUN, a restart empties it.
+* The MCX record's sample 0 is at DWT_enable + ccr4 (PSC+1) (TIM1 CC4, as
+  for the GEN channel, `Scope::rec_time`); a linearised ring's BUF[0] is
+  `rec_base` samples later. Each frame column is a DWT interval, and the
+  CH2 samples in it give the column's min / max (`Store::span`). Roll:
+  `Scope::roll_time` (the newest column's end and the column length).
+* The comparator is off while CH2 is on (its records' stop instant is not
+  known), as for the GEN trace.
 * The stamp is the read, not the conversion: a conversion integrates over
-  the period before it, and the AD2 filter delays it further (a constant
-  per rate). That offset is to be measured on the device (a step on both
-  inputs) and taken off the stamps; until then CH2 may lag CH1 by about a
-  conversion period (13 us at 76.8 kS/s = 0.5 px at 1 ms/div).
-* DWT wraps every 21.5 s: the CH2 ring keeps 32-bit DWT stamps, and a
-  record spans at most 10 s/div x 10 = 100 s only in roll (column frames),
-  where CH2 uses its own roll columns instead.
+  the period before it, and the AD2 filter delays it further.
+  `DBG:CH2:LAG <us>` (0 until measured) takes that off; until then CH2 may
+  lag CH1 by about a conversion period (13 us at 76.8 kS/s = 0.5 px at
+  1 ms/div; 0.8 ms at 1200 S/s = 0.2 px at 200 ms/div).
+* DWT wraps every 21.5 s: anchors and the record's time are compared as
+  wrapping i32 differences, which holds while they are within ~10 s of
+  each other (the store spans at most 3.4 s).
 
-### 2.3 Plan (not built yet)
+### 2.3 Ownership ([app_ch2.rs](../src/app_ch2.rs), main.rs)
 
-1. logger.rs: `begin_cyc` (DWT at the session's begin) and a drain with
-   the stamps.
-2. A CH2 ring (4096 x (u16 code, u32 DWT), 24 KB? no: codes 8 KB plus a
-   stamp per 64 samples, the stream is regular between holes) filled every
-   main-loop pass and at the scope pass's slow parts (`wave_keep`).
-3. main.rs: the stream started / restarted (rate per timebase,
-   `wave_fs_for`) / stopped for CH2 as for the wave view; paused for a disk
-   job; restarted on a DMM range / function change (V / A only).
-4. The page: CH2 rows per column from the record's DWT span; its V/div
-   (the wave view's steps) and position; Display tab "CH2 (DMM): On | Off";
-   the strip marker.
-5. Roll: CH2 roll columns on the MCX roll's column grid.
+* main.rs, before the wave view's and the inrush page's requests: CH2's
+  stream starts when `App::ch2_want` gives a rate (CH2 on, the Scope view
+  with source MCX, a function with an AD2 row) and the logger is idle
+  (`dmm.start` first, as the wave view's entry), restarts at a rate band
+  change, stops when CH2 is not wanted (the DMM restarts on the logger's
+  ON -> OFF edge as after the wave view). A stream it did not start (a
+  host LOG session, the wave view, inrush) is left alone; entering the
+  wave view stops CH2's stream first.
+* A disk job (screenshot, Save CSV) stops it (region C code every pass,
+  as the wave view's pause); it starts again after.
+* A lost stream (a DMM change: CONF, the power key's sub-mode cycle, the
+  bus guard) is retried after 2 s (`ch2_lost`), so a stream that cannot
+  run does not rewrite the DMM row every pass.
+* The DMM rail stays on in the Scope view while CH2 is wanted
+  (`update_rails`).
+* The store is drained every scope pass (also during a drag) and between
+  the pass's slow parts (`wave_keep`); a stopped scope throws the stream
+  away and keeps the store as it was (the stored record's CH2, zoom / pan).
+* Kept: CH2 on / off (W_SCOPE_EXT word 3 bit 6); its V/div goes back to
+  the range's full scale at each start.
+
+### 2.4 Device check
+
+1. A 50 Hz 1 V rms sine on V-COM (DMM AC V) and the same signal (or the
+   generator, 50 Hz) on CH1: CH2 On: the magenta trace at 2 / 5 / 20 ms/div
+   in phase with CH1 (read the offset; `DBG:CH2:LAG` to cancel it), no
+   jumps between frames; `DBG:ISR?` lost 0, max_lat as in the wave view.
+2. Timebase 1 ms -> 200 ms/div (roll) -> 1 ms: CH2 at every step; STOP,
+   zoom, pan: CH2 follows the stored record.
+3. DC V 6 V range with a DC step source: CH2 DC level right; CH2 V/div
+   - / +.
+4. CH2 On in DC A: the toast; AC A with 0.5 A DC: CH2 at the DMM's DC A.
+5. Leave the page (MENU, the DMM page): the DMM reading back in ~1 s;
+   back on the scope: CH2 again. Screenshot with CH2 on: CH2 back after.
+6. A host `CONF:VOLT:DC` while CH2 runs: the DMM changes, CH2 back on the
+   new row after ~2 s.

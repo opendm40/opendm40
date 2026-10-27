@@ -347,6 +347,7 @@ lightning from 100 V). opendm40 adds:
 | V/div buttons | The top "+" made the trace smaller | Magnifier icons: the top one zooms in |
 | Trigger position | Always the centre | Drag it |
 | Triggers | Edge | Edge, pulse width, runt; the generator as a trigger source |
+| Channels | CH1 | CH1, the multimeter input as CH2, the generator's output (computed) |
 | Auto-set | Switches AC coupling to DC | Keeps AC coupling |
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
@@ -1479,6 +1480,17 @@ measured (the trace is the ideal waveform; a probe on the output shows the
 real one). It is not drawn in roll mode, zoomed out past the record, or
 while a drag or pinch is in progress. While it is on, the edge trigger does
 not use the trigger hardware.
+
+**CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
+over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
+signal, alongside the scope. **-** / **+** set its V/div (A/div), shown in
+the graph as "CH2 1.5V"; 0 is the centre line. It works in V, mV and
+AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
+multimeter's reading pauses while CH2 is on (the multimeter chip streams
+the waveform instead), and with it the misconnection alerts and the
+Bluetooth link; they return when CH2 is off or you leave the page.
+CH2 has at most 76.8 k samples/s: below 1 ms/div it shows steps. While it
+is on, the edge trigger does not use the trigger hardware.
 
 
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |

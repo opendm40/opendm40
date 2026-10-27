@@ -34,6 +34,9 @@ mod app_power;
 mod app_wave;
 #[path = "app_press.rs"]
 mod app_press;
+/// The DMM as CH2 of the MCX scope page (the AD2 stream alongside).
+#[path = "app_ch2.rs"]
+mod app_ch2;
 /// Inrush current: open / arm / close / results / save (region C) and the
 /// part that runs while the AD2 stream does (region B).
 #[path = "app_inrush.rs"]
@@ -271,6 +274,8 @@ pub struct App {
     /// A view change out of the live wave view, held until main.rs has
     /// stopped the stream (`show`, app_wave.rs `wave_exit_done`).
     wave_exit_to: Option<View>,
+    /// The DMM CH2 on the MCX scope page (app_ch2.rs).
+    ch2: app_ch2::Ch2,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -601,6 +606,7 @@ impl App {
             wave_req: None,
             wave_auto: None,
             wave_exit_to: None,
+            ch2: app_ch2::Ch2::NEW,
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -769,6 +775,8 @@ impl App {
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
         // So does the power meter (energy, the shunt state): every view.
         d |= self.host_dmm || self.logger_busy || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
+        // The DMM CH2 on the scope page streams from the DMM side.
+        d |= self.ch2_want().is_some();
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
@@ -2409,6 +2417,8 @@ impl App {
         let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
         let covered = self.sp.covered();
         crate::scope_ui::set_flush_short(self.view == View::DmmScope);
+        // The DMM CH2's stream into its store (also during a drag).
+        self.ch2_drain();
         if self.sp.frozen_or_pinch() {
             if page {
                 // The drag redraw (DBG:PROF? "s.frame"; touch->frame latency
@@ -4720,6 +4730,15 @@ impl App {
             }
             C::DbgGenLag(None) => {
                 out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
+                true
+            }
+            C::DbgCh2Lag(Some(us)) => {
+                crate::scope_ch2::set_lag_us(us as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgCh2Lag(None) => {
+                out.put_f32(crate::scope_ch2::lag_us() as f32);
                 true
             }
             C::DbgSentLog => {

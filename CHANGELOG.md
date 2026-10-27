@@ -13,6 +13,10 @@ section named after the tag as the release notes; how to cut a release:
   the trigger is computed from the generator's timers, no wire needed;
   and a **GEN trace** (MF > Display) showing the generator's output under
   CH1 ([manual](docs/manual/README.md#trigger)). SCPI `TRIGger:SOURce`.
+- **Scope: the multimeter as CH2** (MF > Display > CH2 (DMM)): the
+  multimeter's input drawn over CH1 on the same time axis, in V, mV and
+  AC A ([manual](docs/manual/README.md#display-settings)). The multimeter
+  reading pauses while it is on.
 
 ## v0.3.0 (2026-10-27)
 
