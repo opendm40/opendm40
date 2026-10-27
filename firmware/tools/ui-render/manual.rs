@@ -619,6 +619,13 @@ pub fn run(out: &str) -> usize {
         save1(out, "screenshot");
     }
 
+    // The protocol decoder view: UART text lines, Modbus RTU traffic.
+    for (name, v) in [("scope-decode", decode_ui::uart_view()), ("scope-decode-modbus", decode_ui::modbus_view())] {
+        decode_ui::draw(&v);
+        ck.check_replica(&format!("manual/{name}"));
+        save1(out, name);
+    }
+
     // Combined view with the function band open (AC V on the mains).
     {
         let mut m = sb.m;

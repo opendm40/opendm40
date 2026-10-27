@@ -31,6 +31,8 @@ const DMA1: u32 = 0x4002_6400;
 const S3: u32 = DMA1 + 0x10 + 0x18 * 3;
 const S4: u32 = DMA1 + 0x10 + 0x18 * 4;
 const LIFCR: u32 = DMA1 + 0x08;
+/// DWT cycle counter (the decoder stream's lap estimate).
+const DWT_CYCCNT: u32 = 0xE000_1004;
 const HIFCR: u32 = DMA1 + 0x0C;
 
 /// Settings record (0x080C0000, read only): the scope calibration pairs at
@@ -349,6 +351,7 @@ pub struct Scope {
     dec_fs: u32,
     dec_gen: u32,
     dec_ms: u64,
+    dec_cyc: u32,
 }
 
 /// The decoder's front end: 2 V/div (about +-8 V at the codes' ends),
@@ -695,6 +698,7 @@ impl Scope {
             dec_fs: 0,
             dec_gen: 0,
             dec_ms: 0,
+            dec_cyc: 0,
         };
         // WAVE is not loaded on the device (.dmabuf): set up in place.
         unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
@@ -1119,17 +1123,26 @@ impl Scope {
             self.roll_last_wr = 0;
             self.dec_gen = self.dec_gen.wrapping_add(1);
             self.dec_ms = now;
+            self.dec_cyc = unsafe { r32(DWT_CYCCNT) };
             return Some((0, self.dec_gen, 0));
         }
+        let cyc = unsafe { r32(DWT_CYCCNT) };
         let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
         let d = ((wr + CAP - self.roll_last_wr) % CAP) as u64;
         // The ring position only shows the advance modulo CAP: whole laps
-        // from the time since the last poll (ms clock, << CAP samples).
-        let exp = now.saturating_sub(self.dec_ms) * self.dec_fs as u64 / 1000;
+        // from the time since the last poll, on the cycle counter (polls in
+        // the middle of a pass share its `now`; CYCCNT wraps after 21 s,
+        // beyond 10 s the ms clock).
+        let exp = if now.saturating_sub(self.dec_ms) < 10_000 {
+            cyc.wrapping_sub(self.dec_cyc) as u64 * self.dec_fs as u64 / crate::clock::HCLK_HZ as u64
+        } else {
+            now.saturating_sub(self.dec_ms) * self.dec_fs as u64 / 1000
+        };
         let laps = if exp > d + CAP as u64 / 2 { (exp - d + CAP as u64 / 2) / CAP as u64 } else { 0 };
         self.roll_written += d + laps * CAP as u64;
         self.roll_last_wr = wr;
         self.dec_ms = now;
+        self.dec_cyc = cyc;
         Some((self.roll_written, self.dec_gen, laps as u32))
     }
 

@@ -1572,7 +1572,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // "idle-time preparation"): not while a disk job keeps data in free
         // clusters (csvlog commit, fast-log session, upload / staging; a
         // shot is checked inside), a logger session runs (constant interval;
-        // the AD2 stream ISR: the step is region C), or the host used the
+        // the AD2 stream ISR: the step is region C), the protocol decoder
+        // streams (an erase would lap its ring), or the host used the
         // disk in the last 0.5 s. Only with the generated volume: a host
         // that writes the SPI disk itself (no `vdisk`) could be filling a
         // free cluster.
@@ -1584,6 +1585,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 && !upload::busy()
                 && !logger.disk_writes_blocked()
                 && !hy3131::streaming()
+                && !scope::DEC_LIVE.load(core::sync::atomic::Ordering::Relaxed)
                 && now.saturating_sub(host_io_t) >= 500,
         );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
@@ -1610,6 +1612,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 // Wave view, max_lat 21.7 us, 15 overruns). It runs once the
                 // stream stops; only a host sees the volume.
                 && !hy3131::streaming()
+                // Nor while the protocol decoder streams (a long pass laps
+                // its ring; scope.rs DEC_LIVE).
+                && !scope::DEC_LIVE.load(core::sync::atomic::Ordering::Relaxed)
             {
                 vdisk::refresh(csvlog::recording_name());
             }

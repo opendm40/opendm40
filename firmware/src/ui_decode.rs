@@ -62,7 +62,9 @@ const THR_BADGE: Rect = rect(269, 1, 79, 17);
 const INV_BADGE: Rect = rect(352, 1, 62, 17);
 
 /// Page background: bars, panel, the list frame and an empty list.
-pub fn chrome() {
+/// `between`: called between the parts (the decoder keeps up with the
+/// stream: a full page is several passes' worth of drawing).
+pub fn chrome(between: &mut dyn FnMut()) {
     lcd::fill_rect(0, 0, 480, 20, C_BAR);
     lcd::fill_rect(414, 20, 66, 300, C_BAR);
     lcd::fill_rect(0, 301, 414, 19, C_BAR);
@@ -71,7 +73,11 @@ pub fn chrome() {
     lcd::fill_rect(13, 300, 401, 1, C_FRAME);
     lcd::fill_rect(13, 20, 1, 281, C_FRAME);
     lcd::fill_rect(413, 20, 1, 281, C_FRAME);
-    lcd::fill_rect(14, 21, 399, 279, C_FILL);
+    between();
+    for k in 0..4u16 {
+        lcd::fill_rect(14, 21 + 70 * k, 399, if k == 3 { 69 } else { 70 }, C_FILL);
+        between();
+    }
 }
 
 pub fn top(t: &Top) {
@@ -175,9 +181,10 @@ fn tri(r: Rect, up: bool, x: i16, y: i16) -> bool {
     (0..9).contains(&dy) && (x - cx).abs() <= dy
 }
 
-pub fn panel(live: bool, paused: bool) {
+pub fn panel(live: bool, paused: bool, between: &mut dyn FnMut()) {
     for k in 0..7 {
         panel_button(k, live, paused, false);
+        between();
     }
 }
 
@@ -224,20 +231,20 @@ pub fn row(i: usize, r: Option<&Row>) {
     }
 }
 
-/// Fit `s` into the content column (`note`: the full width): the longest
+/// Fit `s` (12 px font, `sp` spacing) into a box `w` px wide: the longest
 /// prefix that fits, with ">" at its end when cut. Returns its length.
-pub fn fit(s: &str, note: bool, out: &mut [u8; 64]) -> usize {
-    let w = if note { 413 - COL_C.0 - 4 } else { COL_C.1 - 2 };
+pub fn fit(s: &str, w: i16, sp: i8, out: &mut [u8; 64]) -> usize {
+    let w = w - 2;
     let b = s.as_bytes();
     let mut n = b.len().min(out.len());
     out[..n].copy_from_slice(&b[..n]);
-    if sf::text_width(sf::SC_F12, txt(&out[..n]), 0) <= w {
+    if sf::text_width(sf::SC_F12, txt(&out[..n]), sp) <= w {
         return n;
     }
     while n > 1 {
         n -= 1;
         out[n] = b'>';
-        if sf::text_width(sf::SC_F12, txt(&out[..n + 1]), 0) <= w {
+        if sf::text_width(sf::SC_F12, txt(&out[..n + 1]), sp) <= w {
             return n + 1;
         }
     }
@@ -304,7 +311,8 @@ pub fn frame_row(i: usize, st: &dc::Store, seq: u32, base_us: u64) {
     }
     let cn = c.n;
     let mut fb = [0u8; 64];
-    let fnn = fit(txt(&cb[..cn]), false, &mut fb);
+    let uart = h.kind == dc::K_UART;
+    let fnn = fit(txt(&cb[..cn]), if uart { COL_A.0 - COL_C.0 } else { COL_C.1 }, if uart { 0 } else { 1 }, &mut fb);
     let fg = if h.kind == dc::K_EXC { C_ORANGE } else { C_WHITE };
     let an = if h.kind == dc::K_UART { n.min(ab.len()) } else { 0 };
     row(i, Some(&Row { time: txt(&tb[..tn]), text: txt(&fb[..fnn]), ascii: txt(&ab[..an]), status: dc::status(&h), fg }));
@@ -401,38 +409,59 @@ pub const SU_TPLUS: Rect = rect(362, 169, 36, 24);
 /// The setup page's labels.
 pub const SU_LABELS: [Rect; 5] = [rect(24, 61, 189, 20), rect(214, 61, 189, 20), rect(24, 105, 189, 20), rect(214, 105, 189, 20), rect(24, 149, 189, 20)];
 
-pub fn setup(v: &SetupVals) {
+pub fn setup(v: &SetupVals, between: &mut dyn FnMut()) {
     let screen = rect(0, 0, 480, 320);
     fill_c(rect(13, 20, 401, SU_H + 1), screen, C_FRAME);
+    // The header as the MF popup's selected tab; the per-pixel paint only
+    // over the title's ink (a full-width paint is ~15 ms on the device
+    // model, longer than a pass may take while the decoder streams).
     let r = rect(14, 21, 399, 40);
+    fill_c(rect(14, 21, 399, 38), screen, C_POP_BG);
+    fill_c(rect(14, 59, 399, 2), screen, C_POP_TAB);
     let t = Ink::new(sf::SC_F22, r, "Decoder", 8, 0);
-    let ul = rect(14, 59, 399, 2);
-    paint(r, &[(K_TEXT, C_POP_BG), (K_SHAPE, C_FRAME)], |x, y| {
-        if let Some(g) = t.at(x, y) {
-            return (C_FILL, tag(1, g));
-        }
-        (if ul.has(x, y) { C_POP_TAB } else { C_POP_BG }, tag(2, 0))
+    paint(isect(t.bx, r), &[(K_TEXT, C_POP_BG)], |x, y| match t.at(x, y) {
+        Some(g) => (C_FILL, tag(1, g)),
+        None => (C_POP_BG, 0),
     });
+    between();
     let pc = rect(14, 61, 399, SU_H - 41);
     fill_c(pc, pc, C_POP_BG);
+    between();
     for (r, t) in SU_LABELS.iter().zip(["Protocol:", "Format:", "Baud:", "Polarity:", "Threshold:"]) {
-        let r = *r;
-        fill_text(r, pc, C_POP_BG, sf::SC_F16, r, t, C_FILL, 1, 0);
+        ink_text(*r, pc, sf::SC_F16, t, C_FILL, 1);
+        between();
     }
     option_list(SU_PROTO, pc, &["UART", "Modbus"], 60, v.modbus as usize);
+    between();
     option_list(SU_FMT, pc, &crate::decode::FMT_NAMES, 44, v.fmt as usize);
+    between();
     option_list(SU_POL, pc, &["Normal", "Inverted"], 88, v.inv as usize);
+    between();
     option_list(SU_TAUTO, pc, &["Auto", "Manual"], 60, !v.thr_auto as usize);
-    setup_values(v);
+    between();
+    setup_values(v, between);
+}
+
+/// A text on the popup page (already filled with C_POP_BG): painted over
+/// its ink box only.
+fn ink_text(r: Rect, clip: Rect, font: Font, text: &str, fg: Color, align: u8) {
+    let t = Ink::new(font, r, text, align, 0);
+    paint(isect(isect(t.bx, r), clip), &[(K_TEXT, C_POP_BG)], |x, y| match t.at(x, y) {
+        Some(g) => (fg, tag(1, g)),
+        None => (C_POP_BG, 0),
+    });
 }
 
 /// The two steppers (repainted on a step).
-pub fn setup_values(v: &SetupVals) {
+pub fn setup_values(v: &SetupVals, between: &mut dyn FnMut()) {
     let pc = rect(14, 61, 399, SU_H - 41);
     for (m, val, p, txt) in [(SU_BMINUS, SU_BVAL, SU_BPLUS, v.baud), (SU_TMINUS, SU_TVAL, SU_TPLUS, v.thr)] {
         rbox_text(m, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
         rbox_text(p, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
-        fill_text(val, pc, C_POP_BG, sf::SC_F16, val, txt, C_FILL, 8, 0);
+        between();
+        fill_c(val, pc, C_POP_BG);
+        ink_text(val, pc, sf::SC_F16, txt, C_FILL, 8);
+        between();
     }
 }
 

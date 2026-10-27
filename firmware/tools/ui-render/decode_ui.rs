@@ -100,13 +100,15 @@ pub struct View {
 /// The whole view as the app draws it (dec_page + a full dec_tick).
 pub fn draw(v: &View) {
     host::reset(0);
-    ud::chrome();
+    ud::chrome(&mut || {});
     let live = v.first.is_none();
-    ud::panel(live, v.paused);
+    ud::panel(live, v.paused, &mut || {});
     let (state, proto, rate, thr, inv) = &v.top;
     ud::top(&ud::Top { state: *state, proto, rate, thr, inv: *inv, battery: 4, charging: false });
     let st = &v.d.st;
-    if let Some(n) = v.note {
+    // The setup popup open: the app draws no rows under it.
+    if v.setup.is_some() {
+    } else if let Some(n) = v.note {
         ud::row(0, Some(&ud::Row { time: "", text: n, ascii: "", status: "", fg: 0 }));
     } else {
         let top = v.first.unwrap_or(st.next.saturating_sub(ud::ROWS as u32).max(st.first));
@@ -120,7 +122,7 @@ pub fn draw(v: &View) {
     }
     ud::cells(&v.cells);
     if let Some((mb, fmt, inv, baud, auto, thr)) = &v.setup {
-        ud::setup(&ud::SetupVals { modbus: *mb, fmt: *fmt, inv: *inv, baud, thr_auto: *auto, thr });
+        ud::setup(&ud::SetupVals { modbus: *mb, fmt: *fmt, inv: *inv, baud, thr_auto: *auto, thr }, &mut || {});
     }
 }
 

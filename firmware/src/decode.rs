@@ -34,6 +34,9 @@
 //! decoder view (ui_decode.rs) and the host (DECode:FRAMes?, its own cursor).
 //! Pure: no hardware access, host-tested by tools/decode-test.
 
+// `Dec::new`, `Store::len`, `W::as_str`, ...: the host tests and ui-render.
+#![cfg_attr(target_os = "none", allow(dead_code))]
+
 /// Standard bit rates (auto-baud snaps to these).
 pub const STD_BAUD: [u32; 13] = [300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 76800, 115_200];
 /// Highest bit rate (1.25 MS/s: 10.9 samples per bit).

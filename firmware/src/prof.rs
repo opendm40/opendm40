@@ -67,7 +67,9 @@ pub const LABEL: usize = 14;
 /// Scope graph paint in a pass without a new frame (App::sp_tick: the
 /// budgeted trace flush continuing, badges).
 pub const PAINT: usize = 15;
-/// Spare id for ad-hoc experiments.
+/// Spare id for ad-hoc experiments. The protocol decoder view
+/// (app_decode.rs) uses X2 for a list row, STAT for a top-bar item or
+/// counter cell and ACQ for the decoder's pass over the stream.
 pub const X2: usize = 16;
 // DMM page sections (hooks in app.rs; nested inside DMM / TICK).
 /// DmmView::reading (main digits, +1 digit, aux rows, labels).

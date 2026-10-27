@@ -199,12 +199,17 @@ try:
         b = block(q('DBG:DIAG?', raw=True))
         return b[97] | b[98] << 8
 
+    # The test's own queries: DBG:DIAG? (touch_diag) and the DMM READ?
+    # (stale_read, once per READ?) are region C by design.
+    ALLOWED = ('touch_diag', 'stale_read')
+
     def c_check(what, every=False):
         if not RC:
             return
         got = RC.calls(every)
+        bad = sorted(k for k in got if not any(a in k for a in ALLOWED))
         print('  region C functions called while decoding: %s' % (', '.join(sorted(got)) or 'none'))
-        check(not got, '%s: no region C code while the decoder stream runs' % what)
+        check(not bad, '%s: no region C code while the decoder stream runs%s' % (what, '' if not bad else ' (%s)' % ', '.join(bad)))
 
     print('decodetest: %s' % q('*IDN?'), flush=True)
     wait_ms(1500)
@@ -258,17 +263,24 @@ try:
     check(c[5] == 0, 'no lap during the DMM read (Lost %d)' % c[5])
 
     # ---- the view busy: page / scroll / setup while frames arrive ----
-    q('DBG:TAP 447,40')    # page up (older frames)
-    wait_ms(300)
-    q('DBG:TAP 447,121')   # page down
-    wait_ms(300)
-    q('DBG:TAP 447,81')    # LIVE
-    wait_ms(300)
-    q('DBG:TAP 447,170')   # SETUP
-    wait_ms(500)
-    shot('decode-setup')
-    q('DBG:KEY 0')         # closes the popup
-    wait_ms(500)
+    steps = [('DBG:TAP 447,40', 'page up'), ('DBG:TAP 447,121', 'page down'), ('DBG:TAP 447,81', 'LIVE'),
+             ('DBG:TAP 447,170', 'SETUP'), (None, 'screenshot'), ('DBG:KEY 0', 'MENU closes the popup'),
+             ('DBG:TAP 447,252', 'STOP'), ('DBG:TAP 447,252', 'RUN')]
+    def prof_max():
+        """(main-loop pass max, tick max) since DBG:PROF:RESET, us."""
+        t = q('DBG:PROF?', raw=True).decode(errors='replace')
+        lm = next((l for l in t.splitlines() if l.startswith('loop us:')), '')
+        tk = next((l for l in t.splitlines() if l.startswith('tick ')), '')
+        return (int(lm.split('max')[1].split()[0]) if 'max' in lm else -1, int(tk.split()[4]) if tk else -1)
+
+    for cmd, what in steps:
+        q('DBG:PROF:RESET')
+        if cmd:
+            q(cmd)
+        else:
+            shot('decode-setup')
+        wait_ms(400)
+        print('    %-22s Lost %d, pass max %d us, tick max %d us' % ((what, count()[5]) + prof_max()), flush=True)
     c = count()
     check(c[5] == 0, 'taps / popup while decoding: no lap (Lost %d)' % c[5])
     c_check('the view in use')

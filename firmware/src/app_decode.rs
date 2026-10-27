@@ -162,9 +162,11 @@ impl App {
     /// The whole view (draw_static).
     #[inline(never)]
     pub(super) fn dec_page(&mut self) {
+        let now = self.now;
+        ud::chrome(&mut || self.dec_poll(now));
         let s = ds();
-        ud::chrome();
-        ud::panel(s.live, s.paused);
+        ud::panel(s.live, s.paused, &mut || self.dec_poll(now));
+        let s = ds();
         s.shown = [u32::MAX; ud::ROWS];
         s.note = u8::MAX;
         s.top_key = [u32::MAX; ud::TOP_ITEMS];
@@ -208,10 +210,14 @@ impl App {
             }
         }
         let n = ud::ROWS as u32;
-        let top = if s.live { st.next.saturating_sub(n).max(st.first) } else { s.top.clamp(st.first, st.next.saturating_sub(1).max(st.first)) };
-        if !s.live {
-            s.top = top;
+        // LIVE: the list moves by half a page when the newest frame passes
+        // its end (a burst: to the newest page), so a new frame costs one
+        // row, not a redraw of every row.
+        if s.live && st.next > s.top + n {
+            s.top = (s.top + n / 2).max(st.next.saturating_sub(n));
         }
+        let top = s.top.clamp(st.first, st.next.saturating_sub(1).max(st.first));
+        s.top = top;
         // An empty list: one note.
         if st.next == st.first {
             let k = if s.paused {
@@ -341,7 +347,7 @@ impl App {
 
     // ---- setup popup ----
 
-    fn dec_setup_draw(&self) {
+    fn dec_setup_draw(&mut self) {
         let s = ds();
         let mut bb = [0u8; 16];
         let mut b = dc::W { b: &mut bb, n: 0 };
@@ -361,7 +367,8 @@ impl App {
             thr_auto: !s.thr_v.is_finite(),
             thr: core::str::from_utf8(&hb[..hn]).unwrap_or(""),
         };
-        ud::setup(&v);
+        let now = self.now;
+        ud::setup(&v, &mut || self.dec_poll(now));
     }
 
     fn dec_setup_tap(&mut self, h: ud::SetupHit, now: u64) {
@@ -443,7 +450,7 @@ impl App {
                     s.pressed = k as u8 + 1;
                     ud::panel_button(k, s.live, s.paused, true);
                 } else if ud::LIST.has(p.x as i16, p.y as i16) {
-                    s.drag = Some((p.y as i16, if s.live { s.d.st.next.saturating_sub(ud::ROWS as u32).max(s.d.st.first) } else { s.top }));
+                    s.drag = Some((p.y as i16, s.top));
                 }
                 Some(false)
             }
@@ -515,7 +522,7 @@ impl App {
     fn dec_page_step(&mut self, down: bool) {
         let s = ds();
         let n = ud::ROWS as u32;
-        let cur = if s.live { s.d.st.next.saturating_sub(n).max(s.d.st.first) } else { s.top };
+        let cur = s.top;
         let t = if down { cur + n - 1 } else { cur.saturating_sub(n - 1).max(s.d.st.first) };
         let live = down && t + n >= s.d.st.next;
         self.dec_scroll(t.min(s.d.st.next.saturating_sub(1).max(s.d.st.first)), live);

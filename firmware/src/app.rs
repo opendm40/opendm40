@@ -1566,8 +1566,10 @@ impl App {
         // started explicitly, see Stats::rec). Dimming still applies.
         // Nor while the power meter integrates energy with a current flowing.
         // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1).
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        // decisions-2026-10-22.md #1). Nor while the protocol decoder runs
+        // (a bus watched for hours).
+        let decoding = app_decode::ds().on && !app_decode::ds().paused;
+        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() && !decoding {
             self.persist_now();
             power_off();
         }
