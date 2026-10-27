@@ -932,6 +932,8 @@ pub enum Cmd {
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:PB1? [windows]: AD1 on PB1 - PB3 / PB1 - AGND (Dmm::pb1_dbg).
     DbgSentPb1(u8),
+    /// DBG:SENTinel:R21 <v>: sentinel::R21_OVR.
+    DbgSentR21(u8),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
     DbgSentReg,
     /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
@@ -2243,6 +2245,9 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                _ if p0 == b"DBG" && !query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2) == Some(&&b"R21"[..]) => {
+                    out = Out::Instr(Cmd::DbgSentR21(parse_num(arg).map_or(0, |v| v.clamp(0.0, 255.0) as u8)))
+                }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2) == Some(&&b"PB1"[..]) => {
                     out = Out::Instr(Cmd::DbgSentPb1(parse_num(arg).map_or(10, |v| v.clamp(1.0, 30.0) as u8)))
                 }

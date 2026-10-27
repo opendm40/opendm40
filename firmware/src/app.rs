@@ -4698,6 +4698,11 @@ impl App {
                 self.dmm.src_text(out);
                 true
             }
+            C::DbgSentR21(v) => {
+                crate::sentinel::R21_OVR.store(v, core::sync::atomic::Ordering::Relaxed);
+                self.dmm.set_sent_variant(clk, crate::sentinel::variant());
+                false
+            }
             C::DbgSentPb1(n) => {
                 let mut b = [0u8; 96];
                 let k = self.dmm.pb1_dbg(clk, n, &mut b);

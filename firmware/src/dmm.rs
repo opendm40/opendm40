@@ -3715,6 +3715,7 @@ impl Dmm {
             c[5] &= !sentinel::R25_AD1IG_36;
             c[8] = (c[8] & 0x88) | 0x11;
             c[9] = (c[9] & 0xF8) | sentinel::R29_PKH_AD1;
+            c[19] &= !0x03; // SAD1I = the FP / FN filter path (temperature, Hz: TS inputs)
             let r23 = c[3] | 0x80;
             c[3] &= !0x80;
             hy::quiesce();

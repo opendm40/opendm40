@@ -255,6 +255,9 @@ pub const VAR_ACA_PB5: u8 = 32;
 pub const VAR_ACA_IG09: u8 = 64;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
+/// DBG:SENTinel:R21 (experimental): R21 of the comparator A-JACK rows, 0 = the row's.
+pub static R21_OVR: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
 pub fn set_variant(v: u8) {
     VARIANT.store(v & 127, core::sync::atomic::Ordering::Relaxed);
 }
@@ -302,6 +305,10 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         0 if acdc && range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
         1 | 3 | 10 | 15 if mask & M_AJACK != 0 => {
             c[0] = R20_PB1;
+            let o = R21_OVR.load(core::sync::atomic::Ordering::Relaxed);
+            if o != 0 {
+                c[1] = o;
+            }
             Kind::CmpA
         }
         0 if var & VAR_ACV_OFF != 0 => Kind::Off,
