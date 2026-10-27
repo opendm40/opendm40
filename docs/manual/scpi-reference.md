@@ -602,7 +602,8 @@ UART and Modbus RTU on the scope input ([the decoder view](README.md#protocol-de
 
 - `DECode ON` opens the decoder view and decodes the scope input; `OFF`
   goes back to the scope page. The settings apply at once (the decoder
-  restarts).
+  restarts). Scope commands meanwhile change the scope settings it gets
+  back when the decoder closes.
 - `DECode:FRAMes?` answers a `#4nnnn` block of text lines, one per frame:
   `seq,time_s,proto,status,hex,info`. `seq` counts up from 0; a gap means
   frames were dropped before the host read them (the meter keeps the last

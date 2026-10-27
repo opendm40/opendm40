@@ -22,6 +22,9 @@ let it run, read the frames):
   * DMM alongside: READ? answers while the decoder runs;
   * region C (emu/regionc.py, gated on scope::DEC_LIVE): no .cold function
     runs while the decoder stream does.
+DEC:LEV? reads ~1.44 V for 3.3 V logic here, not 1.65 V: the feeder's
+counts per volt and the dump's scope calibration differ (the scope page's
+volts differ the same way), hence the wide window.
 --shots DIR: emulator screenshots of the decoder view (DBG:LCD?).
 --mips: CPU speed (default 110 = the device's speed per instruction).
 Exit status 0 = all passed.
@@ -369,6 +372,13 @@ try:
     st = q('TRIG:STAT?')
     check(st in ('AUTO', 'TD', 'WAIT', 'RUN'), 'the scope runs again (%s)' % st)
     check(err().startswith('0,'), 'no SCPI error left')
+    # The stack high-water of the whole run (the decoder view's deep draw
+    # paths with the decoder polled inside) against build.sh's static path.
+    b = q('DBG:BOOT?')
+    f = b.split(',')
+    if 'STACK' in f:
+        i = f.index('STACK')
+        print('    stack high-water %s of %s bytes' % (f[i + 1], f[i + 2]), flush=True)
 finally:
     if RC:
         try:

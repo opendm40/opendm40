@@ -722,11 +722,13 @@ bytes, the view) is one `.sram_bss` static; the App grew by nothing.
 
 B: ~15 KB of decoder code (`dec_poll` with the decoder's scan inlined
 3.3 KB, `dec_tick` 2.9 KB), the rest SCPI parsing and the view.
-Variants (B / C free, headroom): recovery-usb 31 028 / 7 736 / 21 684 B,
-recovery-file 32 300 / 7 204 / 21 180 B, no-ad2-isr 41 616 / 8 772 /
-21 624 B, spi-disk 50 404 / 17 736 / 22 708 B, fatren-dry-run 32 260 /
-8 140 / 21 180 B, keep-screen 32 308 / 7 688 / 21 180 B, mute 31 860 /
-7 564 / 21 180 B.
+Variants (B / C free, headroom): recovery-usb 30 812 / 7 740 / 21 684 B,
+recovery-file 32 076 / 7 208 / 21 180 B, no-ad2-isr 41 592 / 8 772 /
+21 624 B, spi-disk 50 372 / 17 736 / 22 708 B, fatren-dry-run 32 220 /
+8 140 / 21 180 B, keep-screen 32 268 / 7 688 / 21 180 B, mute 31 860 /
+7 564 / 21 180 B. Emulator stack high-water after emu/decodetest.py (the
+view's taps, setup popup and redraws with the decoder polled inside):
+23 724 B, under the static worst path (24 496 B).
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
