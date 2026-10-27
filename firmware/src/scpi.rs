@@ -311,6 +311,38 @@ pub enum Out {
     Mmem(Mmem),
     /// Inrush current (INRush:...), handled by the main loop with the app.
     Inr(Inr),
+    /// Protocol decoder (DECode:...), handled by the main loop with the app.
+    Dcd(Dcd),
+}
+
+/// Protocol decoder (src/decode.rs, src/app_decode.rs); `None` = query:
+///   DECode[:STATe] ON|OFF / ?        open the decoder view and decode / close
+///   DECode:PROTocol UART|MODBus / ?  UART / MODB
+///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
+///   DECode:RATE?                     the bit rate in use (0: none yet)
+///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
+///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
+///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
+///   DECode:LEVel?                    the level in use, V (+9.91E37: none yet)
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc,overruns
+///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines, oldest
+///                                    unread first, at most n
+///   DECode:CLEar                     drop the frames, zero the counters
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dcd {
+    State(Option<bool>),
+    Modbus(Option<bool>),
+    /// Some(0) = AUTO.
+    Baud(Option<u32>),
+    Rate,
+    Fmt(Option<u8>),
+    Inv(Option<bool>),
+    /// Some(NaN) = AUTO.
+    Thr(Option<f32>),
+    Level,
+    Count,
+    Frames(u32),
+    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -2440,6 +2472,72 @@ impl Scpi {
                         Some(c) => out = Out::Inr(c),
                         None => {
                             self.err_arg(no_arg, if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
+                }
+                _ if kw(p0, "DECode") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    let auto = kw(a, "AUTO");
+                    let c = if sub.is_empty() || kw(sub, "STATe") {
+                        if query { Some(Dcd::State(None)) } else { on_off(a).map(|b| Dcd::State(Some(b))) }
+                    } else if kw(sub, "PROTocol") {
+                        if query {
+                            Some(Dcd::Modbus(None))
+                        } else if kw(a, "UART") {
+                            Some(Dcd::Modbus(Some(false)))
+                        } else if kw(a, "MODBus") {
+                            Some(Dcd::Modbus(Some(true)))
+                        } else {
+                            None
+                        }
+                    } else if sub == b"BAUD" {
+                        if query {
+                            Some(Dcd::Baud(None))
+                        } else if auto {
+                            Some(Dcd::Baud(Some(0)))
+                        } else {
+                            parse_num(a).filter(|v| (crate::decode::MIN_BAUD as f32..=crate::decode::MAX_BAUD as f32).contains(v)).map(|v| Dcd::Baud(Some(v as u32)))
+                        }
+                    } else if kw(sub, "RATE") && query {
+                        Some(Dcd::Rate)
+                    } else if kw(sub, "FORMat") {
+                        if query { Some(Dcd::Fmt(None)) } else { crate::decode::FMT_NAMES.iter().position(|n| a.eq_ignore_ascii_case(n.as_bytes())).map(|i| Dcd::Fmt(Some(i as u8))) }
+                    } else if kw(sub, "POLarity") {
+                        if query {
+                            Some(Dcd::Inv(None))
+                        } else if kw(a, "NORMal") {
+                            Some(Dcd::Inv(Some(false)))
+                        } else if kw(a, "INVerted") {
+                            Some(Dcd::Inv(Some(true)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "THReshold") {
+                        if query {
+                            Some(Dcd::Thr(None))
+                        } else if auto {
+                            Some(Dcd::Thr(Some(f32::NAN)))
+                        } else {
+                            parse_num_u(a, b"V").filter(|v| v.abs() <= 100.0).map(|v| Dcd::Thr(Some(v)))
+                        }
+                    } else if kw(sub, "LEVel") && query {
+                        Some(Dcd::Level)
+                    } else if kw(sub, "COUNt") && query {
+                        Some(Dcd::Count)
+                    } else if kw(sub, "FRAMes") && query {
+                        Some(Dcd::Frames(if a.is_empty() { u32::MAX } else { parse_num(a).map_or(u32::MAX, |v| v.max(1.0) as u32) }))
+                    } else if kw(sub, "CLEar") && !query {
+                        Some(Dcd::Clear)
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Dcd(c),
+                        None => {
+                            let known = sub.is_empty() || ["STATe", "PROTocol", "FORMat", "POLarity", "THReshold"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+                            self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }
                     }

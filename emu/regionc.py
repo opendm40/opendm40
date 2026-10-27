@@ -51,7 +51,7 @@ SLOW_LO, SLOW_HI = 0x08080000, 0x08100000
 
 
 class Hooks:
-    def __init__(self, app, out_dir, tag, exclude=(), data=True):
+    def __init__(self, app, out_dir, tag, exclude=(), data=True, gate='opendm40::hy3131::HANDED'):
         self.syms = {}
         self.funcs = []  # (address, name) of every function, sorted: data-read PCs
         self.hits = os.path.join(out_dir, tag + '.chits')
@@ -73,7 +73,7 @@ class Hooks:
                 self.funcs.append((a & ~1, p[2]))
             if p[1] in 'tT' and C_LO <= a < C_HI and not any(x in p[2] for x in exclude):
                 self.syms[a & ~1] = p[2]
-            elif p[2].startswith('opendm40::hy3131::HANDED'):
+            elif p[2].startswith(gate):
                 handed = a
         if handed is None or not self.syms:
             return

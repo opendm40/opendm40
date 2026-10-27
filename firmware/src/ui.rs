@@ -84,6 +84,8 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// Protocol decoder (scope MF > Settings > Decode; app_decode.rs).
+    Decode,
 }
 
 impl View {
@@ -2932,6 +2934,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Gallery => "Gallery",
         View::Help => "Help",
         View::Inrush => "Inrush",
+        View::Decode => "Decode",
         View::TouchTest => "Touch test",
     }
 }

@@ -415,7 +415,7 @@ fn main() {
         f.feed(&mut d, &c, &mut rng, 3000);
         let (_, fr) = frames(&d);
         let lens: Vec<usize> = fr.iter().map(|f| f.1.len()).collect();
-        t(&format!("UART grouping: abcdef | ghi | 16+16+8 x ({lens:?})"), lens == vec![6, 3, 16, 16, 8] && fr[0].1 == b"abcdef");
+        t(&format!("UART grouping: abcdef | ghi | 5 x 8 x ({lens:?})"), lens == vec![6, 3, 8, 8, 8, 8, 8] && fr[0].1 == b"abcdef");
         // Times: frame 1 starts 2 ms in, frame 2 9.5 chars later.
         let t1 = fr[0].0.t_us as f64 * 1e-6;
         let t2 = fr[1].0.t_us as f64 * 1e-6;

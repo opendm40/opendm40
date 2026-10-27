@@ -2431,6 +2431,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::Decode => {
+                self.sp_popup_close();
+                let _ = self.dec_open(clk);
+                return;
+            }
         }
         let _ = clk;
         self.sp_popup_draw();

@@ -20,6 +20,10 @@
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rect};
 
+/// The protocol decoder view (View::Decode, app_decode.rs).
+#[path = "ui_decode.rs"]
+pub mod dec;
+
 // ---- colours (RGB565, spec sec. 0) ----
 pub const C_BAR: Color = 0x4208; // top bar, strip, panel, measurement bar
 pub const C_FILL: Color = 0x2124; // graph fill, record-bar inner, dark text on yellow
@@ -644,11 +648,16 @@ pub fn trig_badge(m: &Model) {
 
 /// 2.6 battery (outline + level clipped to (437,3,33,12)).
 pub fn battery(m: &Model) {
+    battery_lv(m.battery, m.charging);
+}
+
+/// The battery of level 0..5.
+pub fn battery_lv(level: u8, charging: bool) {
     let r = rect(435, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
-    let l = if m.battery > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + m.battery.min(5) as u32, 0) } else { Ink::none() };
+    let l = if level > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + level.min(5) as u32, 0) } else { Ink::none() };
     let clip = rect(437, 3, 33, 12);
-    let lc = if m.charging { C_GREEN } else { C_WHITE };
+    let lc = if charging { C_GREEN } else { C_WHITE };
     paint(r, &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
@@ -2732,9 +2741,13 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
+            rbox_text(MF_DECODE, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Decode", C_WHITE);
         }
     }
 }
+
+/// Settings tab: the protocol decoder (opendm40, ui_decode.rs).
+pub const MF_DECODE: Rect = rect(204, 78, 80, 30);
 
 /// Display tab: the two sliders and their values (repainted while dragged).
 // Trigger tab rows (opendm40, UF-13).
@@ -2794,6 +2807,7 @@ pub enum MfHit {
     Width(bool),
     PriScr,
     SaveCsv,
+    Decode,
     /// Inside the box, nothing there.
     Inside,
     /// Below the box: closes (stock: x >= 10).
@@ -2868,6 +2882,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::PriScr
             } else if near(rect(114, 78, 80, 30)) {
                 MfHit::SaveCsv
+            } else if near(MF_DECODE) {
+                MfHit::Decode
             } else {
                 MfHit::Inside
             }

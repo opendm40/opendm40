@@ -45,6 +45,7 @@ mod persist;
 mod power;
 mod prof;
 mod scope;
+mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
@@ -1052,6 +1053,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     false
                 }
                 scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
+                scpi::Out::Dcd(scpi::Dcd::Frames(n)) => {
+                    port.respond_with(&mut |b| Some(app.dec_frames(n, b)));
+                    false
+                }
+                scpi::Out::Dcd(c) => app.dec_scpi(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1801,6 +1807,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
+            | Out::Dcd(scpi::Dcd::Frames(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )

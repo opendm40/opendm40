@@ -43,6 +43,9 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+/// The protocol decoder view (region B: it runs while the scope streams).
+#[path = "app_decode.rs"]
+mod app_decode;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -138,7 +141,18 @@ fn next_rate(r: dmm::Rate) -> dmm::Rate {
 fn is_page(v: View) -> bool {
     matches!(
         v,
-        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+        View::Menu
+            | View::Settings
+            | View::Range
+            | View::Keypad
+            | View::Device
+            | View::Limits
+            | View::Record
+            | View::Gallery
+            | View::Help
+            | View::Inrush
+            | View::TouchTest
+            | View::Decode
     )
 }
 
@@ -548,6 +562,7 @@ fn restore_func(version: u32, code: u8) -> u8 {
 impl App {
     pub fn new(clk: &mut Clock) -> Self {
         scope_page::sp_init();
+        app_decode::init();
         let mut dmm = Dmm::new();
         crate::ident::set_model(dmm.model(), Dmm::model_raw());
         dmm.select(clk, 1);
@@ -725,6 +740,10 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
+            if self.view == View::Decode {
+                // Leaving the decoder view: the scope gets its input back.
+                self.dec_leave(clk.now_ms());
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -763,6 +782,8 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
+            // The decoder view: the scope input; the DMM as it was.
+            View::Decode => (self.scope.dmm_rail(), true),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -831,6 +852,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
+            View::Decode => self.dec_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(None),
             View::Range if self.dmm.pw.on => {
@@ -1724,6 +1746,11 @@ impl App {
             self.inrush_tick(now);
             return;
         }
+        // The decoder view: changed rows and counters (app_decode.rs).
+        if self.view == View::Decode {
+            self.dec_tick(now);
+            return;
+        }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
         // (meter.update returns None), so repaint the frozen value and the
@@ -2400,6 +2427,11 @@ impl App {
 
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
+        // The decoder owns the input (app_decode.rs): no scope frames.
+        if self.scope.dec_on() {
+            self.dec_poll(now);
+            return;
+        }
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
         // A scope CSV that finished (UF-13): release the record, toast.
         self.sp_csv_poll(now);
@@ -2725,6 +2757,11 @@ impl App {
         // them (app_touchtest.rs).
         if self.view == View::TouchTest {
             return self.tt_gesture(g);
+        }
+        if self.view == View::Decode {
+            if let Some(c) = self.dec_gesture(clk, g) {
+                return c;
+            }
         }
         // The stock-replica scope page owns its touches and keys.
         if self.sp_on() {
@@ -3364,6 +3401,8 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            // (The decoder view handles its own taps: app_decode.rs.)
+            View::Decode => {}
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).

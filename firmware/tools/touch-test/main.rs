@@ -63,6 +63,10 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+// scope_ui.rs draws the decoder view (ui_decode.rs) with decode.rs.
+#[allow(dead_code)]
+#[path = "../../src/decode.rs"]
+mod decode;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 #[path = "../../src/stockfont.rs"]

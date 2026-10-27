@@ -340,7 +340,26 @@ pub struct Scope {
     /// Code -> SI of the stored record (wave: `stored_ab`, the scale it
     /// was captured with).
     stored_ab: (f32, f32),
+    /// Protocol decoder stream (decode.rs, app_decode.rs): a circular DMA
+    /// record over BUF at `dec_fs`, never stopped, no trigger, no frames
+    /// from poll(); the front end at DEC_RANGE, DC (`s` stays the scope's
+    /// settings: scope commands meanwhile change only them, dec_end applies
+    /// them); `dec_gen` counts the stream starts, `dec_ms` the last poll.
+    dec: bool,
+    dec_fs: u32,
+    dec_gen: u32,
+    dec_ms: u64,
 }
+
+/// The decoder's front end: 2 V/div (about +-8 V at the codes' ends),
+/// enough swing for 1.8 .. 5 V logic, RS-232 and RS-485 clipped.
+pub const DEC_RANGE: usize = 7;
+
+/// The decoder stream runs (emu/decodetest.py's region C hooks gate on it,
+/// as emu/regionc.py on hy3131::HANDED for the AD2 stream). Nothing in the
+/// firmware reads it: `used` keeps it and its stores.
+#[used]
+pub static DEC_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// The DMM-input source of the scope page (docs/dmm-input-scope-
 /// feasibility.md 5.2 point 3): what the record needs from the AD2 stream.
@@ -672,6 +691,10 @@ impl Scope {
             wave: false,
             lent: false,
             stored_ab: (0.0, 1.0),
+            dec: false,
+            dec_fs: 0,
+            dec_gen: 0,
+            dec_ms: 0,
         };
         // WAVE is not loaded on the device (.dmabuf): set up in place.
         unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
@@ -925,6 +948,12 @@ impl Scope {
     }
 
     pub fn apply(&mut self, s: Settings, now: u64) {
+        if self.dec {
+            // The decoder owns the input: taken into the hardware at its
+            // end (dec_end).
+            self.s = s;
+            return;
+        }
         let mut s = s;
         if self.held() && !self.s.run {
             s.run = false;
@@ -1000,24 +1029,7 @@ impl Scope {
             return;
         }
         self.s = s;
-        let g = GPIO_ROW[s.range];
-        if g[0] != self.last_pc13 {
-            self.last_pc13 = g[0];
-            self.relay_until = now + 200;
-        }
-        pin(GPIOC, 13, g[0] != 0);
-        pin(GPIOB, 15, g[1] != 0);
-        pin(GPIOD, 12, g[2] != 0);
-        pin(GPIOD, 13, g[3] != 0);
-        pin(GPIOE, 3, !s.ac);
-        // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
-        let r = s.range;
-        let (g0, g1) = self.gain(r);
-        let code_t = g1 - s.pos as f32 * (4.0 * VDIV[r] / XR[r]) * (g0 - g1) / 141.0;
-        let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
-        let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
-        let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
-        unsafe { w32(TIM3 + 0x3C, ccr) };
+        self.front_end(s.range, s.ac, s.pos, now);
         let (_, num, den, ppp) = TB[s.tb];
         self.screen = ((num * COLS as u32 / den / ppp) as usize).max(2);
         // Every linear record is the full CAP: the trigger is searched over all
@@ -1026,6 +1038,117 @@ impl Scope {
         // the full record for the stored-record zoom (stock Single = 65520).
         self.rec = CAP;
         self.deadline = 0;
+    }
+
+    /// Front-end range row, coupling and the offset PWM for `pos`.
+    fn front_end(&mut self, r: usize, ac: bool, pos: i32, now: u64) {
+        let g = GPIO_ROW[r];
+        if g[0] != self.last_pc13 {
+            self.last_pc13 = g[0];
+            self.relay_until = now + 200;
+        }
+        pin(GPIOC, 13, g[0] != 0);
+        pin(GPIOB, 15, g[1] != 0);
+        pin(GPIOD, 12, g[2] != 0);
+        pin(GPIOD, 13, g[3] != 0);
+        pin(GPIOE, 3, !ac);
+        // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
+        let (g0, g1) = self.gain(r);
+        let code_t = g1 - pos as f32 * (4.0 * VDIV[r] / XR[r]) * (g0 - g1) / 141.0;
+        let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
+        let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
+        let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
+        unsafe { w32(TIM3 + 0x3C, ccr) };
+    }
+
+    /// Start the decoder stream at `fs` (decode::fs_for): the acquisition
+    /// in flight stops, the stored record is gone, the front end goes to
+    /// DEC_RANGE / DC / centre; the stream itself starts in `dec_poll` once
+    /// the rail is on and the relays settled. Again while on: a new rate.
+    pub fn dec_begin(&mut self, fs: u32, now: u64) {
+        self.halt();
+        self.stored_valid = false;
+        self.one_shot = false;
+        self.dec = true;
+        self.dec_fs = fs;
+        self.front_end(DEC_RANGE, false, 0, now);
+    }
+
+    /// End the decoder stream: the scope settings back into the hardware.
+    pub fn dec_end(&mut self, now: u64) {
+        if !self.dec {
+            return;
+        }
+        self.halt();
+        self.dec = false;
+        self.deadline = 0;
+        let s = self.s;
+        self.apply(s, now);
+    }
+
+    pub fn dec_on(&self) -> bool {
+        self.dec
+    }
+
+    /// Pause the decoder stream (the front end stays): `dec_begin` again
+    /// to go on.
+    pub fn dec_halt(&mut self) {
+        if self.dec {
+            self.halt();
+        }
+    }
+
+    /// The decoder stream: (absolute samples written, stream generation,
+    /// whole ring laps the main loop missed), None while it cannot run (no
+    /// scope rail, relays settling). A new generation starts at sample 0.
+    pub fn dec_poll(&mut self, now: u64) -> Option<(u64, u32, u32)> {
+        if !self.dec || !self.powered || now < self.relay_until {
+            return None;
+        }
+        if !self.busy {
+            self.dma_setup(self.dec_fs);
+            unsafe {
+                w32(S4 + 0x04, CAP as u32);
+                w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | (1 << 8) | 1);
+                w32(TIM8, 1);
+                w32(TIM1, 1);
+            }
+            self.busy = true;
+            DEC_LIVE.store(true, core::sync::atomic::Ordering::Relaxed);
+            self.roll_written = 0;
+            self.roll_last_wr = 0;
+            self.dec_gen = self.dec_gen.wrapping_add(1);
+            self.dec_ms = now;
+            return Some((0, self.dec_gen, 0));
+        }
+        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
+        let d = ((wr + CAP - self.roll_last_wr) % CAP) as u64;
+        // The ring position only shows the advance modulo CAP: whole laps
+        // from the time since the last poll (ms clock, << CAP samples).
+        let exp = now.saturating_sub(self.dec_ms) * self.dec_fs as u64 / 1000;
+        let laps = if exp > d + CAP as u64 / 2 { (exp - d + CAP as u64 / 2) / CAP as u64 } else { 0 };
+        self.roll_written += d + laps * CAP as u64;
+        self.roll_last_wr = wr;
+        self.dec_ms = now;
+        Some((self.roll_written, self.dec_gen, laps as u32))
+    }
+
+    /// The decoder's sample ring (BUF, sample n at n % CAP).
+    pub fn dec_ring(&self) -> &'static [u16] {
+        unsafe { &*core::ptr::addr_of!(BUF) }
+    }
+
+    /// ADC code of `v` volts at the probe tip on the decoder's front end.
+    pub fn dec_code_of(&self, v: f32) -> u16 {
+        let (g0, g1) = self.gain(DEC_RANGE);
+        let c = g1 + v / (XR[DEC_RANGE] * self.s.probe) * (g0 - g1);
+        if c.is_finite() { c.clamp(0.0, 1023.0) as u16 } else { 512 }
+    }
+
+    /// Volts at the probe tip of a decoder code.
+    pub fn dec_volts(&self, code: u16) -> f32 {
+        let (g0, g1) = self.gain(DEC_RANGE);
+        (code as f32 - g1) * XR[DEC_RANGE] / (g0 - g1) * self.s.probe
     }
 
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
@@ -1043,6 +1166,7 @@ impl Scope {
         self.stream = false;
         self.busy = false;
         self.rolling = false;
+        DEC_LIVE.store(false, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// User STOP: keep the frame the user is looking at, and always leave a
@@ -1180,8 +1304,9 @@ impl Scope {
         self.snapshot_mark(len, len.saturating_sub(1), None, true);
     }
 
-    fn start(&mut self) {
-        let fs = TB[self.s.tb].0;
+    /// The timers and the DMA source / destination for sample rate `fs`
+    /// (nothing started): the TIM1 prescaler and reload.
+    fn dma_setup(&mut self, fs: u32) -> (u32, u32) {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
         let buf = core::ptr::addr_of!(BUF) as u32;
         unsafe {
@@ -1217,6 +1342,14 @@ impl Scope {
             };
             w32(S4 + 0x08, src);
             w32(S4 + 0x0C, buf);
+        }
+        (psc, arr)
+    }
+
+    fn start(&mut self) {
+        let fs = TB[self.s.tb].0;
+        let (psc, arr) = self.dma_setup(fs);
+        unsafe {
             // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
             // which captures a full linear record like the stock Single mode.
             self.rolling = self.roll_ok();
@@ -1578,7 +1711,7 @@ impl Scope {
     }
 
     fn poll_frame(&mut self, now: u64, src: Option<&mut dyn WaveSource>) -> Option<Frame<'static>> {
-        if self.lent {
+        if self.lent || self.dec {
             return None;
         }
         if !self.s.run {

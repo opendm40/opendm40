@@ -62,7 +62,7 @@ const RUN_LOCK: u32 = 16;
 const MARGIN: u64 = 256;
 
 /// UART frame: at most this many bytes (the list shows one frame per row).
-pub const UART_MAX: usize = 16;
+pub const UART_MAX: usize = 8;
 /// Modbus RTU frame: at most 256 bytes.
 pub const MB_MAX: usize = 256;
 
@@ -463,6 +463,17 @@ impl Dec {
         Dec { cfg: Cfg::DEFAULT, u: Uart::new(), t0_us: 0, buf: [0; MB_MAX], n: 0, f_t: 0, f_end: 0, f_flags: 0, pend: None, st: Store::new() }
     }
 
+    /// A zero-filled Dec (a static in a zeroed section): everything but the
+    /// store (all zero in `new` too) set as `new` does.
+    pub fn init(&mut self) {
+        self.cfg = Cfg::DEFAULT;
+        self.u = Uart::new();
+        self.t0_us = 0;
+        self.n = 0;
+        self.f_flags = 0;
+        self.pend = None;
+    }
+
     /// A new stream from sample 0 at `fs` (started at `t0_us`): positions
     /// reset; a lock, the thresholds and the stored frames are kept unless
     /// the settings changed (then everything but the store restarts).
@@ -591,11 +602,16 @@ impl Dec {
             c += 4;
             if c >= WIN {
                 if hi >= lo + MIN_SWING {
+                    // Kept unless it moved by more than 1/16 of the swing
+                    // (a steady level for the decoder and the display).
                     let s = hi - lo;
-                    u.mid = lo + s / 2;
-                    u.lo = u.mid - s / 6;
-                    u.hi = u.mid + s / 6;
-                    u.thr_ok = true;
+                    let mid = lo + s / 2;
+                    if !u.thr_ok || mid.abs_diff(u.mid) > s / 16 {
+                        u.mid = mid;
+                        u.lo = mid - s / 6;
+                        u.hi = mid + s / 6;
+                        u.thr_ok = true;
+                    }
                 }
                 lo = u16::MAX;
                 hi = 0;
