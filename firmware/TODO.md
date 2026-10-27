@@ -1684,7 +1684,10 @@ Firmware:
             (`App::wave_exit_done`, before the DMM row is restored). wavetest: MENU exit at 38400, no region C
             call, late / overruns / timeouts unchanged. Device c92b605: PASS (2 ms/div x3: 300 ns, late 0, overruns 0;
             1 ms/div: late / overruns unchanged; the menu, then the DMM).
-      - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
+      - [x] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header. Reproduced in the emulator:
+            STOP at 20 ms/div, 2 ms/div while stopped (the stopped zoom), Save CSV: the stored record (4800 S/s, its
+            rate right) under the timebase shown. Fixed: the header's timebase is the record's (scope.rs
+            `record_tb`); emu/hy3131/wavetest.py `--case csvtb`.
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
       sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
       probe frames 2-byte DMA at /8 mode 0 (a marginal bit only blurs a probe), every 16th period; the probe

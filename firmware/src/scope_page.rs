@@ -883,7 +883,7 @@ impl App {
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[s.tb.min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        h.s("# timebase ").s(su::TB_LABELS[self.scope.record_tb().min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
         if wave {
             // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
             h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");

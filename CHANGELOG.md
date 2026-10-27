@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
+  taken at, not the one shown.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
