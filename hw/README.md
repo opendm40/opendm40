@@ -540,24 +540,26 @@ section 4 (sentinels) and 3 (power meter).
 - **PB1 with AD1** (2026-10-27, A jack open, manual ranges; AD1 on PB1 -
   PB3, then PB1 - AGND, IG 0.9, REFO / AGND, SAD1I = 00, in the row the
   function runs; branch `exp/pb1-meas`, `DBG:SENT:PB1?`). mV, PB1 - PB3 /
-  PB1 - AGND, by the V-COM DC level (the setup gave at most 3.8 V):
+  PB1 - AGND, by the V-COM DC level (>1389 = AD1 at its limit):
 
-  | row | V–COM off | 1 V | 3 V | 3.7 V |
-  |---|---|---|---|---|
-  | DC V 6 V | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 |
-  | DC V 60 / 600 / 1000 V | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 |
-  | DC mV 600 / 60 mV | 2.2 / 2.2 | 2.2 / 2.2 | 4.1 / 11.7 | 67 / 240 (A-JACK, then A-PROT) |
-  | AC V 6 / 60 V | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 |
-  | AC mV 600 mV | 1.5 / 1.7 | 1.4 / 2.6 | -48 / 109 | -74 / 170 |
-  | ohm 600 Ω | 2.2 / 2.2 | 2.2 / 2.2 | 2.5 / 2.4 | 4.1 / 4.0 |
-  | ohm 6 kΩ | 2.2 / 2.2 | 2.2 / 2.2 | 2.3 / 2.8 | -23 / 155 (LIVE?) |
-  | ohm 60 MΩ | 2.2 / 2.2 | 2.2 / 2.2 | 4.6 / 12.7 | 62 / 264 (LIVE?) |
-  | temperature (TC) | 2.2 / 2.2 | 2.2 / 2.2 | -0.7 / 6.2 | 48 / 174 |
-  | Hz | 2.5 / 1.8 | 1.8 / 1.8 | -59 / 64 | -89 / 108 |
-  | capacitance (AUTO) | 2.1 / 2.0 | 2.1 / 2.0 | -42 / 5.0 | 3.8 / 4.5 |
+  | row | V-COM off | 1 V | 3 V | 3.7 V | 5 V | 10 V |
+  |---|---|---|---|---|---|---|
+  | DC V 6 V | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 |
+  | DC V 60 / 600 / 1000 V | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 |
+  | DC mV 600 / 60 mV | 2.2 / 2.2 | 2.2 / 2.2 | 4.1 / 11.7 | 67 / 240 | 350 / 652 | 1015 / >1389 |
+  | AC V 6 / 60 V | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..2.7 | 1.4..1.5 |
+  | AC mV 600 mV | 1.5 / 1.7 | 1.4 / 2.6 | -48 / 109 | -74 / 170 | -94 / 235 | -112 / 358 |
+  | ohm 600 Ω | 2.2 / 2.2 | 2.2 / 2.2 | 2.5 / 2.4 | 4.1 / 4.0 | 238 / 353 | 961 / 1289 |
+  | ohm 6 kΩ | 2.2 / 2.2 | 2.2 / 2.2 | 2.3 / 2.8 | -23 / 155 | 191 / 538 | 818 / 1332 |
+  | ohm 60 MΩ | 2.2 / 2.2 | 2.2 / 2.2 | 4.6 / 12.7 | 62 / 264 | 357 / 698 | 1000 / >1389 |
+  | temperature (TC) | 2.2 / 2.2 | 2.2 / 2.2 | -0.7 / 6.2 | 48 / 174 | 319 / 550 | 999 / 1340 |
+  | Hz | 2.5 / 1.8 | 1.8 / 1.8 | -59 / 64 | -89 / 108 | -116 / 164 | -140 / 291 |
+  | capacitance (AUTO) | 2.1 / 2.0 | 2.1 / 2.0 | -42 / 5.0 | 3.8 / 4.5 | -148 / 11 | -242 / 22 |
 
   The difference of the two is PB3 - AGND: it follows the input too (Hz at
-  3.7 V: +197 mV, DC mV +173 mV).
+  10 V: +431 mV, DC mV at 5 V: +302 mV). The ohm, DC mV and temperature
+  rows read 0x70 on the PB1 comparator at 5 and 10 V with R21 0xdd, 0xcc,
+  0xbb and 0x8b alike; DC V 6 V reads 0x00 at 10 V.
 - **OP1's chopper** (OP1CHOP = 10, 2 kHz in the stock AC V row, with AD1 off)
   starts when AD1 is turned on in that row: a 2 kHz square of OP1's offset
   (x10 in 6 V) at OP1O -> PB4 put a constant ~37 mV RMS floor on AC V 6 V

@@ -31,28 +31,31 @@ Additional requirements:
         ranges, V–COM from the calibrator). `DBG:SENT:PB1?` writes the running row with AD1 on PB1 − PB3, then
         on PB1 − AGND (IG 0.9, REFO / AGND, SAD1I = 00), and writes the row back. Table:
         [hw/README.md, Measured node behaviour](../hw/README.md#measured-node-behaviour) ("PB1 with AD1").
-        Up to 3 V the comparator rows (DC V, DC mV, ohm, temperature) keep PB1 within 13 mV of AGND; at
-        3.7 V DC mV, ohm 6 kΩ / 60 MΩ and temperature reach 155..264 mV. Not measured: 5 / 10 V (the calibrator's output stayed at 3.80 V for any setting above that, in every
-        function, also with the scope input off the line; cause *unknown*), continuity and diode (their
-        comparator drives the buzzer at any volume), A shorted to COM.
+        Up to 3 V the comparator rows (DC V, DC mV, ohm, temperature) keep PB1 within 13 mV of AGND; DC mV,
+        ohm and temperature reach 155..264 mV at 3.7 V, 353..698 mV at 5 V and 1.29..>1.39 V at 10 V. DC V
+        (every range) stays at 2.2 mV up to 10 V. Not measured: continuity and diode (their comparator drives
+        the buzzer at any volume), A shorted to COM.
       - [x] Comparator window per R21 (`DBG:SENT:R21`; 10 CTSTA reads per point; DC V 6 V, DC mV, ohm 600 Ω /
         60 MΩ, temperature, DC V 60 / 600 V with variant 4):
-        - 0xdd, 0xcc, 0xbb and AGNDP4..6 over AGNDN3 (0xab, 0x9b, 0x8b): CTSTA 0 from V–COM off to 3 V.
+        - 0xdd, 0xcc, 0xbb and AGNDP4..6 over AGNDN3 (0xab, 0x9b, 0x8b): CTSTA 0 from V–COM off to 3 V; DC V
+          6 V (0xdd .. 0x8b) also at 5 / 10 V.
         - AGNDN4..6 as the low threshold (0xaa, 0x99, 0x88, 0xba): CTSTA 0x10 with nothing connected, A-JACK in
           every row. These windows cannot be used.
         - 3.7 V: ohm 60 MΩ, DC mV and temperature trip at every window (0x70; 0x50 at 0x9b / 0x8b), ohm 600 Ω
-          at none.
+          at none. 5 / 10 V: ohm 600 Ω / 60 MΩ, DC mV and temperature trip at 0xdd, 0xcc, 0xbb and 0x8b.
         - DC V 60 / 600 V: CTSTA 0x50 and A-JACK at every R21, also with V–COM off, while AD1 reads PB1 at
           ~2 mV. That is no pickup: in these rows the comparator does not compare PB1 with the AGND taps
           (cause *unknown*). No window brings that sentinel back.
       - Result: no window change. No measured pickup lies between ±20.8 mV and the usable maximum (+417 /
-        -62.5 mV): up to 3 V every row stays inside 0xdd, and every row that trips at 3.7 V also trips at
-        0xbb / 0x8b. The firmware keeps 0xdd (0.44 mA). Owner decision: keep it, or 0xbb (1.3 mA; nothing
-        measured gets fixed).
+        -62.5 mV): up to 3 V every row stays inside 0xdd, and from 3.7 V every row that trips also trips at
+        0xbb / 0x8b (at 5 V PB1 − AGND is 353..698 mV there, at 10 V 1.29 V or more). The pickup rows
+        keep their V gates (ohm / temperature: V_GATE and the jack check; DC mV: #35). The firmware keeps
+        0xdd (0.44 mA). Owner decision: keep it, or 0xbb (1.3 mA; nothing measured gets fixed).
       - Hz: the standing ~54 mV (device d8e249d) came with the row's R33 SAD1I = 11, the AD1 temperature
         sensor inputs (*inferred*). With SAD1I = 00, PB1 is 2.5 mV at rest and follows the input from 3 V on.
-        An AD1 sentinel in Hz (#44) needs SAD1I = 00. PB3 moves too (Hz 3.7 V: PB3 − AGND +197 mV).
-      - Left (owner): 5 / 10 V and the same with A shorted to COM; continuity / diode; a real current in A
+        An AD1 sentinel in Hz (#44) needs SAD1I = 00; PB1 − PB3 there reaches -116 / -140 mV at 5 / 10 V
+        (#44's `PK_DC_THR` is ~180 mV, one-sided). PB3 moves too (Hz 10 V: PB3 − AGND +431 mV).
+      - Left (owner): the rows with A shorted to COM; continuity / diode; a real current in A
         (20 mA and ~1 mA) per row. Tool: branch `exp/pb1-meas` (`DBG:SENT:PB1? [n]`, `DBG:SENT:R21 <v>`;
         build with `--features mute`; not for merging, region B -1.5 KB).
 
