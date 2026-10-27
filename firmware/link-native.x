@@ -10,7 +10,7 @@
  *                                      sector 1 (FS-loader writes it like any
  *                                      body byte), named hot read-only data
  *                                      (`.rodata.a2.*`: the ASCII26, F14,
- *                                      LETTERS, UNIT, SC_PROBE, LOCK font blobs,
+ *                                      LETTERS, UNIT, LOCK font blobs,
  *                                      tools/mkstockfont.py A2_FONTS).
  *                                      ~14.8 KB; the link fails
  *                                      when it reaches the marker, build.sh

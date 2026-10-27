@@ -697,8 +697,11 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom:
 | keep-screen | 16 428 / 4 724 / 20 500 B | 52 164 / 7 932 / 21 196 B |
 | mute (`--features mute`, not in build-variants) | | 51 812 / 7 808 / 21 196 B |
 
-A2 stays below its 2 KiB warning (1 128 B): B now has the room for an A2
-font blob to move back, if the shim needs it.
+Then the SC_PROBE font blob (1 242 B) from A2 back to B (`A2_FONTS` in
+[`tools/mkstockfont.py`](../tools/mkstockfont.py); the regenerated
+[`stockfont_data.rs`](../src/stockfont_data.rs) differs only in its
+`link_section` line; both regions zero-wait): A2 1 128 -> 2 372 B (above
+its 2 KiB warning again), B 52 132 -> 50 892 B.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
