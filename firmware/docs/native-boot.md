@@ -611,8 +611,9 @@ On 0.3.0 (cae46446) region B had 16 388 B free, A2 1 128 B, C 4 736 B
 (recovery-file 4 212 B, 116 B above the link floor). C had no room for a
 move out of B, so this audit only cuts: code that core / libm functions
 pulled into B for one or two callers, one inlined helper, and part of the
-`.data` load image. Nothing moved into region C, so the region C hooks see
-the same set of functions as before.
+`.data` load image; then (owner's decision, 2026-10-27) panic sites without
+their source location. Nothing moved into region C, so the region C hooks
+see the same set of functions as before.
 
 | change | region B | other |
 |---|---|---|
@@ -621,6 +622,7 @@ the same set of functions as before.
 | `touch::log` `#[inline(never)]` (five copies; once per touch frame / gesture event) | +456 | |
 | `ui::gen_preview`: the phase fraction as `x - trunc(x)` for f32 `% 1.0` (libm `fmodf` and its reduction helper, ~0.7 KB; exact for x in 0..2) | +672 | C -4 |
 | `scope::WAVE`, `scope_ui::SHOWN`, `STRIP_SHOWN` in SRAM `.dmabuf` (below) | +536 | stack +672, SRAM -664 |
+| `-Zlocation-detail=none` (build.sh, below) | +31 600 | C +3 168, stack +24 |
 
 - **String searcher**: `stockfont::unit_text` tested `u.contains('°')`; a
   non-ASCII `char` pattern searches for its UTF-8 bytes as a `&str`, so the
@@ -641,22 +643,29 @@ the same set of functions as before.
   builds keep the initialisers. `inrush::SES` (232 B) was tried the same
   way and gained nothing: its start-up copy needs `Session::NEW` as a
   232-byte constant in B.
+- **Panic locations**: every bounds check, `unwrap`, slice copy and
+  division hands the panic path a `core::panic::Location` (file, line,
+  column: 16 B of anonymous rodata per site, plus a literal pool entry and
+  the source path strings). A scan of the image for path / length pairs
+  finds ~1 530 of them (inferred to be these records). `main.rs` `panic`
+  never reads them: it paints the magenta bar and waits for the watchdog
+  (the shim counts the reset in `BKP_CRASH`; no record holds a file or
+  line). `build.sh` compiles with `-Zlocation-detail=none`, so every
+  location is the same redacted record. The flag is a nightly one:
+  `build.sh` sets `RUSTC_BOOTSTRAP=1` for its own `cargo build` only (the
+  pinned stable rustc then accepts it; CI and release.yml build through
+  `build.sh --locked`). A plain `cargo build` (`.cargo/config.toml`) and
+  the host test builds (`tools/*/run.sh`, their own rustc calls) are
+  unchanged and keep their locations: a failing host test still names its
+  line. The panic path in the image: `panic_bounds_check` -> `panic_fmt` ->
+  `rust_begin_unwind` (the bar, `wait_for_watchdog`); none of them loads
+  the location.
 
 Tried, not done:
 - `Scpi::put_bytes` `#[inline(never)]` (11 copies): B -16 B.
 - `vdisk::put16` out of line (2 copies, ~400 B): it runs per FAT entry on
   the USB volume's per-sector read path, which a host may read during a
   stream.
-- `-Zlocation-detail=none` (nightly only; on the stable toolchain
-  only through `RUSTC_BOOTSTRAP=1`), a trial build on the tree after the
-  first two cuts: B 18 852 -> 50 916 B, C 4 772 -> 7 936 B, static worst
-  path 24 520 -> 24 496 B. The gain is inferred to be the ~1 530 panic
-  `Location` records (16 B each, ~24.5 KB of anonymous rodata: file, line,
-  column per bounds check / unwrap / division) with their literal pool
-  entries and the source path strings; `main.rs` `panic` never reads them.
-  It changes the build (an unstable flag on the pinned stable toolchain and
-  in CI), so it is left to the owner. No stable equivalent is known short of
-  removing panic sites.
 - The font descriptor tables (`*_E`, 10 B per glyph, 869 glyphs, B) keep
   each glyph's code also in the 455 entries of fonts whose codes run
   without a gap (ASCII26, SC_F12 / F16 / F20, ...): ~0.9 KB with a
@@ -666,29 +675,30 @@ Tried, not done:
   sums, the Wh / VAh accumulators, `nr3_scale`, `gen::plan` timing) need
   the precision.
 
-The rows above add up to 20 516 B; the final tree (version 0.3.1) has:
+The rows above add up to 52 116 B; the final tree (version 0.3.1) has:
 
 | | before (cae46446) | after |
 |---|---|---|
 | region A2 free | 1 128 B | 1 128 B |
-| region B free | 16 388 B | 20 532 B |
-| region C free | 4 736 B | 4 772 B |
-| stack headroom (static worst path) | 20 500 B | 21 172 B |
+| region B free | 16 388 B | 52 132 B |
+| region C free | 4 736 B | 7 940 B |
+| stack headroom (static worst path) | 20 500 B | 21 196 B |
 | SRAM free | 44 576 B | 43 912 B |
 
 The variants (tools/build-variants/run.sh), B / C free and stack headroom:
 
 | variant | before | after |
 |---|---|---|
-| recovery-usb | 15 044 / 4 800 / 21 012 B | 18 796 / 4 816 / 21 684 B |
-| recovery-file | 16 084 / 4 212 / 20 500 B | 20 220 / 4 248 / 21 172 B |
-| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 30 320 / 5 840 / 21 632 B |
-| spi-disk | 37 064 / 14 904 / 22 012 B | 40 932 / 14 932 / 22 684 B |
-| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 20 580 / 5 192 / 21 172 B |
-| keep-screen | 16 428 / 4 724 / 20 500 B | 20 556 / 4 764 / 21 172 B |
-| mute (`--features mute`, not in build-variants) | | 20 204 / 4 632 / 21 172 B |
+| recovery-usb | 15 044 / 4 800 / 21 012 B | 51 180 / 7 984 / 21 708 B |
+| recovery-file | 16 084 / 4 212 / 20 500 B | 51 988 / 7 452 / 21 196 B |
+| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 61 624 / 9 016 / 21 640 B |
+| spi-disk | 37 064 / 14 904 / 22 012 B | 69 932 / 17 924 / 22 692 B |
+| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 52 116 / 8 380 / 21 196 B |
+| keep-screen | 16 428 / 4 724 / 20 500 B | 52 164 / 7 932 / 21 196 B |
+| mute (`--features mute`, not in build-variants) | | 51 812 / 7 808 / 21 196 B |
 
-A2 stays below its 2 KiB warning: anything taken out of A2 lands in B.
+A2 stays below its 2 KiB warning (1 128 B): B now has the room for an A2
+font blob to move back, if the shim needs it.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

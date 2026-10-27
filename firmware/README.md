@@ -55,6 +55,12 @@ time-stamped, so rustc 1.99.0 gives the same `opendm40.bin` in any
 directory and with a fresh `CARGO_HOME`. CI pins 1.99.0; that its image
 matches a local build is inferred (compare the artifact's `SHA256SUMS`).
 
+`build.sh` compiles with `-Zlocation-detail=none` (panic sites without
+file / line; ~31 KB of zero-wait flash) and sets `RUSTC_BOOTSTRAP=1` for
+that one `cargo build`, so the stable toolchain takes the nightly flag
+([docs/native-boot.md](docs/native-boot.md), "Region B audit #6"). A plain
+`cargo build` and the host tests do not use it.
+
 ## USB debug link
 
 opendm40 enumerates as a composite USBTMC + mass-storage device (`1209:D040`; builds before 0.1.0: `1209:0001`)
