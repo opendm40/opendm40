@@ -62,7 +62,8 @@ are marked at their items.
   #6)" items; stock comparisons UF-02, UF-19.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
-- Code: "Unchopped FAST in ohm", "Left: `vdisk::mirror_boot`", "SCOP006.CSV once saved".
+- Code: "Unchopped FAST in ohm", "Left: `vdisk::mirror_boot`", "Not exercised: a stream starting inside a
+  multi-block READ(10)" (needs a debug switch), "SCOP006.CSV once saved".
 - Unknowns to trace: "Why the two conversions after an early R22 change", "AUTO coupling decided at 5.76-5.85 s",
   "76800 CHOP ON", "C's lag-side creep allowance", "C's second reference".
 - Device runs: "Fast logger device check" (open steps), "(B) device session", "Device check (AUTO coupling)",
