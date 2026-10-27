@@ -1592,12 +1592,21 @@ Firmware:
 - [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 058a1d36
       region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
       SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
-- [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
+- [x] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
       before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
       pages open.
-- [ ] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
+      **Device 0.3.0 mute (2026-10-27): PASS.** The probe glyph (DC x1, AC x1) equals
+      [scope.png](../docs/manual/img/scope.png) / [scope-ch1.png](../docs/manual/img/scope-ch1.png) at RGB565.
+      `VOLT:RANG?` 60 -> 6, `RES:RANG:AUTO?` 1, no error; a bare `RANG?` is -113 (the syntax needs `<f>:`).
+      Help 1/7 .. 7/7 open, the tap wraps to 1/7; 1/7 equals [help.png](../docs/manual/img/help.png).
+- [x] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
       (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
       scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.
+      **Device 0.3.0 mute (2026-10-27): PASS.** `DBG:RESET` with AC V, AutoHold on, 10 ms/div: all three back.
+      Gallery: page 2 and back, the viewer equals the file (a fresh screenshot), Delete -> dialog -> Delete removes
+      it. `LOG:CSV ON` / `OFF`: LOG022 (45 rows, header right); scope STOP + Save CSV: SCOP011, header and rows right.
+      Temperature page: sensor keys and offset +/- work. `DBG:AD2:NOISE?` (AC V) and `DBG:AD2:DCV?` (DC V) answer.
+      The power-key off / on restore was not repeated (device 705d2e9 above).
 - [x] Font storage 2026-10-22 (docs/fonts.md): the stock fonts were 104 KB of data in region B (90.9 KB
       bitmaps + 13.2 KB tables). CJK / full-width glyphs dropped (232, never drawn), 4 bpp glyphs as row-major
       nibble runs (RLE4, decoded straight into the LCD writes), 1 bpp glyphs cropped to their ink rows,
@@ -4125,6 +4134,9 @@ Emulator (emu/):
       10 times: no A-HOLD label appears, HOLD is off after each AUTO, `CALC:AHOL?` 0. (3) Press MENU then MF quickly:
       the range page opens (not the menu twice). (4) `firmware/tools/touch-log.py --raw`: every key shows
       `G,K,<code>` and `G,k,<code>` in pairs with its own code. (5) Hold RUN 1 s: A-HOLD on, again: off (unchanged).
+      - Device 0.3.0 mute (2026-10-27): (1) `CALC:AHOL?` 0. (5) by `DBG:KEY 1,1200` in the DMM view: A-HOLD on
+        (`CALC:AHOL?` 1), again: off. Left for the owner: (2)-(4) with the physical keys (`DBG:KEY` goes to the app
+        directly, past the touch debounce and `gesture::Tracker`).
 - [ ] Unknown (device data decides): whether the 0x5A controller repeats the key report while a key is held, and
       whether it ever drops the release report. The (4) log above shows it (frames `F,e,k<code>` per press). If
       releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
@@ -4139,9 +4151,15 @@ Emulator (emu/):
       long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
       The test's two DBG:READout? checks were stale (4 fields, HOLD read from the last one) after the range field was
       added: now 5 fields, HOLD from the fourth; the firmware releases HOLD on a short press (PASS).
-- [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
+- [x] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
+      **Device 0.3.0 mute (2026-10-27), keys by `DBG:KEY`, MR9270 1 V on V-COM: PASS.** AUTO -> MANU 6 V, then 60, 600,
+      1000 V, 60 mV (OL), 600 mV (OL), 6 V; AUTO 1.2 s -> AUTO+. RUN: HOLD 1; AUTO: HOLD 0, 6 -> 60 V. RUN 1.2 s:
+      A-HOLD (`CALC:AHOL?` 1); AUTO: A-HOLD stays, 60 -> 600 V. Under A-HOLD the status bar keeps the held reading's
+      range ("60V") while the bargraph scale shows the new range (+-600). Ohm (the calibrator's output off, not an
+      open input: 484 kohm): AUTO -> MANU 600 kohm; manual 60 Mohm, AUTO -> 60 ohm. Scope page AUTO (input open):
+      20 ms/div, 1 V/div, level 0 V. The beep is not checked (mute build).
 
 ## Hz below 7 Hz (owner 2026-10-25, v0.2.0 with the MMB3.0: 2 Hz and 5 Hz gave no reading; branch fix/low-freq)
 
@@ -4226,3 +4244,11 @@ Emulator (emu/):
       (6) If (2) reads 500 ohm: the 200 -> 500 ohm step on 600 ohm; OL until a range change = hypothesis 2.
       (7) MMB3.0 500 ohm on AUTO (long AUTO press): `RES:RANG?`. A passive 500 ohm lands on 600 ohm (emulator);
       6 kohm means AUTO tried 600 ohm, read OL and went back (OHM_BAND hold).
+      - Device 0.3.0 mute (2026-10-27), the MR9270S+ resistance output instead of the MMB3.0: the MR9270 gives at
+        most 400 ohm (a 500 ohm write reads back 4000 = 400.0 ohm once the output is on), so 500 ohm was not
+        tested. Same recipe (MED, 0.5 s polls), every row CMP_PB1 / NONE, `jack` 0: 300 ohm 301.71; 400 ohm
+        set on 6 kohm (396.45), then `CONF:RES 600`: 398.30 ohm, 20 of 20, no OL; 200 -> 400 ohm on 600 ohm:
+        one mixed reading (281.06 at the 200 step), then 398.30, no OL; 0.28 mA ON on 600 ohm: 396.78; AUTO:
+        600 ohm, 398.30. Step (3), 400 ohm: R1K I 0.868 mA, V_jack 0.493 V; R10K I 0.189 mA, V_jack 0.305 V.
+        V_jack / I is not 400 ohm on either row (568 / 1615 ohm); why is unknown (no passive reference was run).
+        Left for the owner: steps (1), (2), (4) .. (7) with the MMB3.0 at 500 ohm and a passive resistor.
