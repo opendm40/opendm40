@@ -4,9 +4,9 @@ into CH1 (a BNC lead from the generator output to CH1), per timebase RUN,
 wait, STOP, wait for TRIG:STAT? STOP, read the whole record (WAV:POIN MAX,
 WORD) and check it:
 
-  * length: the DIGitize record (scope.rs `rec_split`): 42 144 .. 43 008
-    samples on the raw ring (fs > 25 kS/s), 64 656 .. 65 520 on the packed
-    ring (fs <= 25 kS/s);
+  * length: the STOP's capture (scope.rs `rec_split`, `stop_req`): the
+    screen + 0.5 s, at most 42 144 .. 43 008 samples (37 500 at 100 ms/div,
+    untriggered up to ~50 000); STOP done within the screen's time + 1 s;
   * the trigger point (WAV:PRE? x origin) inside the record, on the level
     (the generator's offset: the sine's mid code) and rising;
   * no seam: the record folded on its fitted period, each sample against
@@ -70,7 +70,11 @@ class Dev:
 
 
 def expected(fs):
-    return (64656, 65520) if fs <= 25000 else (42144, 43008)
+    # The STOP's capture (scope.rs rec_split, stop_req): the screen (25 000
+    # samples) + 0.5 s, at most the raw ring less the margins (42 144);
+    # at the deadline (untriggered) what is in, up to the ring.
+    lo = min(42144, 25000 + int(fs) // 2 - 500)
+    return (lo, 65520 if fs <= 25000 else 43008)
 
 
 def check_record(y, pre, fs):
@@ -161,6 +165,11 @@ def main():
                 y = np.array(struct.unpack('<%dH' % (len(b) // 2), b), dtype=float)
                 np.save('%s/tb%g_%d.npy' % (out, tb, k), y)
                 ok, txt = check_record(y, pre, fs) if st == 'STOP' else (False, 'no STOP (%s)' % st)
+                # STOP -> TRIG:STAT? STOP within the screen's time + 1 s
+                # (+ 0.5 s for the polling and USB).
+                wait_ok = dt <= 10 * tb + 1.5
+                ok = ok and wait_ok
+                txt += ', wait %s' % ('ok' if wait_ok else 'TOO LONG')
                 fails += not ok
                 print('tb %g rep %d: fs %g, STOP after %.1f s, %s %s' % (tb, k, fs, dt, txt, 'OK' if ok else 'FAIL'),
                       flush=True)
