@@ -62,8 +62,7 @@ are marked at their items.
   #6)" items; stock comparisons UF-02, UF-19.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
-- Code: "Unchopped FAST in ohm", "Left: `vdisk::mirror_boot`", "Not exercised: a stream starting inside a
-  multi-block READ(10)" (needs a debug switch), "SCOP006.CSV once saved".
+- Code: "Unchopped FAST in ohm", "Left: `vdisk::mirror_boot`", "SCOP006.CSV once saved".
 - Unknowns to trace: "Why the two conversions after an early R22 change", "AUTO coupling decided at 5.76-5.85 s",
   "76800 CHOP ON", "C's lag-side creep allowance", "C's second reference".
 - Device runs: "Fast logger device check" (open steps), "(B) device session", "Device check (AUTO coupling)",
@@ -2192,11 +2191,16 @@ Firmware:
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
       **Device c785807: PASS** (doc "c785807" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
-- [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
+- [x] A stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
       with the residue, sense 02/04/01; the host retries the whole command).
       Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
       the slow-bank mirror is off (MIR_OK false after a failed SPI read); `DBG:VDISK:MIR?` 1 (OK), so a healthy
-      meter cannot reach the path from the host. It needs a debug switch that turns the mirror off (none exists).
+      meter cannot reach the path from the host; the device has no switch that turns the mirror off.
+      Emulator (a blank SPI disk: no mirror): emu/mirrortest.py `--fallback-only` boot 6, a READ(10) of 128
+      sectors across FIRMWARE.BIN's slow-bank start, the AD2 stream started after 32: CSW status 1, residue =
+      the 64 slow sectors, sense 02/04/01, the 64 sectors before them correct; the retry during the stream fails
+      before its data; after the stream it reads the same bytes. With msc.rs's mid-transfer check removed the
+      result is the same (vdisk `read_block` refuses the sector, msc.rs takes the sense from `read_busy`).
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device c92b605: LOG:DEST? / DUR? in the Wave view,
