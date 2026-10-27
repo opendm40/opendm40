@@ -992,6 +992,35 @@ the scope full record.
         fast logger. SCPI: DEC:UART:... config and a frame-FIFO read, so a host can tail the bus live.
       - Constraints: the decoder runs per DMA half-buffer in the main loop, so it must keep up at 1.25 MS/s and stay
         in region B (no region-C code while streaming). DMM / generator keep running alongside.
+      - [x] Phase 1 (PR feat/decoder-uart, draft): UART and Modbus RTU while streaming. src/decode.rs (the
+            decoder: auto threshold, auto-baud with the standard rates, 8N1 / 8E1 / 8O1 / 7E1, inverted
+            polarity, framing / parity errors; Modbus 3.5-character gap, CRC-16, request / reply pairing; a
+            store of 256 frames / 4 KiB of bytes with a host FIFO cursor), scope.rs `dec_*` (the circular DMA
+            at the baud's rate, 1.25 MS/s for auto, front end 2 V/div DC; whole ring laps estimated on the
+            cycle counter and counted as Lost), app_decode.rs / ui_decode.rs (View::Decode from MF > Settings >
+            Decode: list, counters, setup popup; a row or a top-bar item per main-loop pass with the decoder
+            polled between them), SCPI DECode:... (docs/manual/scpi-reference.md). While it streams the
+            settings save, the screenshot pre-erase and the USB volume refresh wait (they stalled the loop for
+            45..65 ms). Tests: tools/decode-test (host), ui-render `--decode` + the matrix, scpi-test,
+            emu/decodetest.py (ScopeFeeder SetBitsFile; region C hooks gated on scope::DEC_LIVE).
+      - [ ] Phase 2: tap a frame to show its waveform (while still in the ring); trigger / filter on a decoded
+            value (address, function, a byte pattern); disk logging (LOGS/UARTnnn.CSV + a raw .BIN, unlimited
+            like the fast logger); Modbus ASCII; the other protocols of the list above; the decoder in the
+            background of other views (now it runs only while its view is open). Known limits of phase 1:
+            auto-baud at 1.25 MS/s keeps 21 ms of samples, so below ~4800 baud the bytes before the lock
+            are lost (a set rate samples at 12x the baud); the front end is fixed at 2 V/div (+-8 V,
+            larger signals clip); the list redraws one row per pass (a fast bus scrolls behind, the decoder
+            does not); a CSV recording's disk commits run while decoding (a long commit may cost Lost);
+            region B grew 18.4 KB (decoder ~15 KB, dec_poll / dec_tick inlined).
+      - [ ] Device check (needs a USB-UART adapter or a Modbus device: the generator cannot make UART):
+            (1) 3.3 V USB-UART TX -> OSC, `tools/dm40scpi.py`-style host script sending text at 9600 / 115200 8N1:
+            DEC:RATE? and the list match, DEC:COUN? fe/pe/lost 0 over 10 min, DEC:LEV? ~1.65 V; (2) 8E1 / 7E1
+            and a wrong parity setting -> PE; (3) RS-232 levels (a MAX232 or a PC COM port) with Inverted;
+            (4) a Modbus RTU master + slave (e.g. a USB-RS485 adapter + a Modbus slave) probe across A-B at
+            9600 / 19200 8E1: REQ / RSP pairs, reply time vs the master's log, CRC on a corrupted frame;
+            (5) loop timing on the device while decoding 115200 with the list scrolling: DBG:PROF? pass max
+            < 21 ms, Lost 0; with the DMM view's CSV recording on: Lost?; (6) DEC:FRAM? polling from a host for
+            10 min: no gaps in seq; (7) screenshots, taps, the setup popup while decoding: Lost 0.
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
       Done in the emulator (branch scope-full-record): opendm40 WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,

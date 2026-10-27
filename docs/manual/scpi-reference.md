@@ -582,6 +582,42 @@ and `MEASure:POWer?` then give the real power P in W.
 - Only the SCReen + BYTE reply may be combined with other queries in one
   message.
 
+## Protocol decoder
+
+UART and Modbus RTU on the scope input ([the decoder view](README.md#protocol-decoder)).
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `DECode[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
+| `DECode:PROTocol[?]` | `UART` or `MODBus` | `UART` or `MODB` | both |
+| `DECode:BAUD[?]` | bit rate, 300 .. 115200, or `AUTO` (default) | `AUTO` or `9600` | both |
+| `DECode:RATE?` | | the bit rate in use: `115200` (`0` before auto-baud found one) | both |
+| `DECode:FORMat[?]` | `8N1` (default), `8E1`, `8O1` or `7E1` | `8N1` | both |
+| `DECode:POLarity[?]` | `NORMal` (default) or `INVerted` (RS-232 levels) | `NORM` or `INV` | both |
+| `DECode:THReshold[?]` | level, V at the probe tip, or `AUTO` (default) | `AUTO` or `+1.500000E+00` | both |
+| `DECode:LEVel?` | | the level in use, V (`+9.91E37` before one is known) | both |
+| `DECode:COUNt?` | | `frames,bytes,framing,parity,crc,lost` since `DECode:CLEar` | both |
+| `DECode:FRAMes?` | `[<n>]`: at most n frames | block of frame lines, oldest unread first | both |
+| `DECode:CLEar` | | Clears the frames and the counters. | both |
+
+- `DECode ON` opens the decoder view and decodes the scope input; `OFF`
+  goes back to the scope page. The settings apply at once (the decoder
+  restarts).
+- `DECode:FRAMes?` answers a `#4nnnn` block of text lines, one per frame:
+  `seq,time_s,proto,status,hex,info`. `seq` counts up from 0; a gap means
+  frames were dropped before the host read them (the meter keeps the last
+  256). `time_s` is the frame start in seconds since power-on, `proto`
+  `UART` or `MB`, `status` `OK`, `FE` (framing error), `PE` (parity), `CRC`
+  or `OVR` (samples lost), `hex` the bytes. Modbus `info`: the fields, for
+  example `REQ 01 03 @0000 n=10`, `RSP 01 03 20B req=12 dt=3125us` (the
+  request's `seq` and the time from its end), `EXC 01 83 E02`; `?` for a
+  frame with a bad CRC. Read it repeatedly to follow the bus; an empty block
+  is `#40000`.
+- UART frames: bytes separated by an idle gap of 2 characters, at most 8
+  bytes. Modbus frames end at a 3.5-character gap (1.75 ms above 19200).
+- `lost` in `DECode:COUNt?`: times samples were lost before they were
+  decoded (a busy meter).
+
 ## Generator (SOURce)
 
 | Command | Parameters | Reply | Link |

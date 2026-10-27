@@ -34,8 +34,9 @@ limitations](#known-limitations).
 4. [Safety and alerts](#safety-and-alerts): wrong-connection alerts, the
    danger alarm, the fuse check.
 5. [Oscilloscope](#oscilloscope): timebase, V/div, triggers, cursors,
-   measurements, FFT, Save CSV, and the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
-   on the multimeter inputs.
+   measurements, FFT, Save CSV, the [protocol decoder](#protocol-decoder) and
+   the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs) on the
+   multimeter inputs.
 6. [Combined view](#combined-view): the multimeter and the scope on one
    screen; analog power.
 7. [Signal generator](#signal-generator)
@@ -232,8 +233,9 @@ the combined view switches to the next sub-mode of the current function
   do not count for **Dim screen**: during a long remote session the screen
   still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
-  MIN/MAX/AVG session runs, or while the power meter counts energy with a
-  current flowing. The screen still dims.
+  MIN/MAX/AVG session runs, while the power meter counts energy with a
+  current flowing, or while the [protocol decoder](#protocol-decoder)
+  runs. The screen still dims.
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
@@ -352,6 +354,7 @@ lightning from 100 V). opendm40 adds:
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
 | Capture length | 65 520 samples | 26 624 samples |
+| Serial decoding | — | [UART and Modbus RTU](#protocol-decoder), decoded while streaming |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -1476,6 +1479,7 @@ samples) stays in memory:
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Decode**: the [protocol decoder](#protocol-decoder).
 
 
 ![The Settings tab](img/scope-settings.png)
@@ -1487,6 +1491,26 @@ sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
 the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
+
+### Protocol decoder
+
+**MF > Settings > Decode** decodes UART (also RS-232, and RS-485 with the
+probe across A-B) or Modbus RTU on the **OSC** input. It decodes while the
+input streams and keeps only the frames, so a long session fits.
+
+| ![UART: time, hex, ASCII, status](img/scope-decode.png) | ![Modbus RTU: requests, replies and the reply time](img/scope-decode-modbus.png) |
+|---|---|
+| UART: time, hex, ASCII, status | Modbus RTU: requests, replies and the reply time |
+
+- **SETUP** (or **MF**): protocol, baud (**Auto** or 300 to 115200), format,
+  polarity (**Inverted** for RS-232 levels), threshold (**Auto** or a level).
+- Status: **OK**, **FE** framing error, **PE** parity error, **CRC** (Modbus),
+  **OVR** samples lost. **CLEAR** clears the list and the counters.
+- Drag the list or use the arrows; **LIVE** follows the newest frame. **STOP**
+  (or **RUN**) pauses; **SCOPE** or **MENU** returns to the scope.
+- The input range is ±8 V; larger signals are clipped and still decode. The
+  list keeps the last 256 frames.
+- Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs
 

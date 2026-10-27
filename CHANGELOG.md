@@ -7,6 +7,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **Protocol decoder:** UART (RS-232, RS-485) and Modbus RTU on the scope
+  input, decoded while it streams, so only the frames are kept. Scope MF >
+  Settings > Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
+
+  ![The decoder view: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
+
 ## v0.3.0 (2026-10-27)
 
 ### New
