@@ -59,7 +59,9 @@ matches a local build is inferred (compare the artifact's `SHA256SUMS`).
 file / line; ~31 KB of zero-wait flash) and sets `RUSTC_BOOTSTRAP=1` for
 that one `cargo build`, so the stable toolchain takes the nightly flag
 ([docs/native-boot.md](docs/native-boot.md), "Region B audit #6"). A plain
-`cargo build` and the host tests do not use it.
+`cargo build` and the host tests do not use it. `RUSTC_BOOTSTRAP` also puts
+the dependencies' build scripts on their nightly paths (proc-macro2): recheck
+the build after a toolchain or dependency update.
 
 ## USB debug link
 
