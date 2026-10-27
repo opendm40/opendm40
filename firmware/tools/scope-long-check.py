@@ -70,6 +70,47 @@ def quiet(d):
     d.w('SYST:ALER:ALARm OFF')
 
 
+def coded_bytes(y):
+    """Bytes of the record coded as the ring codes it (4096-sample blocks,
+    dlog's scope block: the fixed order with the least sum of |residual|,
+    adaptive Rice; a block that would not be smaller stays packed, 5120
+    bytes). The ring picks the order from the block before and keeps a
+    block packed also when in-place coding is unsafe: this is the bound."""
+    c = [int(v) & 0x3FF for v in y]
+    total = 0
+    for b0 in range(0, len(c), 4096):
+        blk = c[b0:b0 + 4096]
+        best = None
+        for o in range(4):
+            h = [0, 0, 0]
+            a, n, bits = 16, 1, 3
+            for j, x in enumerate(blk):
+                oo = min(o, j)
+                p = (512, h[0], 2 * h[0] - h[1], 3 * h[0] - 3 * h[1] + h[2])[oo]
+                r = x - p
+                u = (r << 1) ^ (r >> 31) if r < 0 else r << 1
+                k = 0
+                while k < 30 and (n << k) < a:
+                    k += 1
+                q = u >> k
+                bits += q + 1 + k if q < 24 else 56
+                a = min(a + min(u, 1 << 24), 0xFFFFFFFF)
+                n += 1
+                if n >= 32:
+                    a = (a + 1) >> 1
+                    n >>= 1
+                h = [x, h[0], h[1]]
+            best = bits if best is None else min(best, bits)
+        total += min((best + 7) // 8, (len(blk) * 10 + 7) // 8)
+    return total
+
+
+def shot(path):
+    import subprocess
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dm40dbg.py'), 'shot', path],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def check(y, pre, fs, f_gen, func):
     n = len(y)
     xinc, xorig = float(pre[4]), float(pre[5])
@@ -127,7 +168,12 @@ def main():
                 np.save('%s/%s_tb%g.npy' % (out, func, tb), y)
                 fa = float(d.q('SOUR:FREQ?'))
                 ok, txt = check(y, pre, fs, fa, func) if st == 'STOP' and len(y) > 1000 else (False, 'no record (%s)' % st)
+                if len(y) > 0:
+                    txt += ', ~%.2f B/sample coded' % (coded_bytes(y) / len(y))
                 fails += not ok
+                os.close(d.fd)
+                shot('%s/%s_tb%g.png' % (out, func, tb))
+                d = Dev()
                 print('%s tb %g: fs %g, %g Hz, DIG in %.1f s, %s %s' % (func, tb, fs, fa, dt, txt, 'OK' if ok else 'FAIL'), flush=True)
                 quiet(d)
     finally:
