@@ -881,7 +881,9 @@ since they were last reset, and a timer **T hh:mm:ss**.
 ### The bargraph and the history row
 
 **Settings > More > DMM row** chooses what the row under the reading
-shows: **Bargraph** (default) or **History**.
+shows: **Bargraph** (default) or **History**. A double tap on the row
+switches between the two without the trip to Settings (the choice is kept
+as the setting).
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
   DC A (25 segments per side, 4 % each), from zero elsewhere, empty in

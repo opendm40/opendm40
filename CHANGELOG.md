@@ -7,6 +7,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Changed
+
+- **Bargraph / history row:** a double tap on the row switches between the
+  bargraph and the history boxes (before: Settings > More > DMM row only).
+- **Combined view:** the meter strip's reading is in the multimeter's orange
+  instead of yellow.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

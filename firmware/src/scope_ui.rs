@@ -3357,7 +3357,7 @@ pub fn meter_strip(d: &StripData) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
     if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
-        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { crate::ui::VALUE }, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to
@@ -3370,7 +3370,7 @@ pub fn meter_strip(d: &StripData) {
         if o.is_some() {
             lcd::fill_rect(ST_UNIT_X as u16, ST_UNIT_Y as u16, (ST_SUB_END + 1 - ST_UNIT_X) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_UNIT_Y) as u16, C_FILL);
         }
-        st_text(ur, uf, d.unit.as_str(), C_YELLOW, ua, 1);
+        st_text(ur, uf, d.unit.as_str(), crate::ui::VALUE, ua, 1);
     }
     if changed(ol.gen == d.gen) || moved {
         st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);

@@ -289,6 +289,12 @@ pub struct DmmView {
 ///             (bipolar: -FS / 0 / +FS), the full scale with its unit
 ///   OL marker 418..472 x 147..160 (red "OL" on overload)
 pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
+/// The whole row (bargraph, its labels and OL marker / the history boxes),
+/// between the main value's hit box (ends at 151) and the chart frame.
+pub const ROW_Y: core::ops::Range<u16> = 147..175;
+/// Its touch rows (tap: store / double tap: Bargraph <-> History / hold:
+/// clear): from under `value_hit` (151 with the power parts layout off).
+pub const ROW_HIT: core::ops::Range<u16> = 152..175;
 const BAR_LBL_Y: i16 = 161;
 const BAR_LBL_H: i16 = 12;
 const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
@@ -696,17 +702,7 @@ impl DmmView {
     pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-            if self.bar_on && !self.power {
-            self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
-            self.bar.draw_static(BG);
-            self.bar_scale = None;
-            self.bar_ol = None;
-        } else if !self.power {
-            // (The power meter draws its own boxes: ui::pw power_row.)
-            for i in 0..5i16 {
-                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
-            }
-        }
+        self.row_static(mode, acdc);
         self.ohm_on = ohm_on;
         let sel = button_index(button);
         let mode = if button == Button::Power { 255 } else { mode };
@@ -715,6 +711,30 @@ impl DmmView {
             dmm_button(i, btn_x(i), BTN_Y as i16, 36, BG, i == sel, mode, acdc, ohm_on);
         }
         self.invalidate();
+    }
+
+    /// The bargraph / history row's static part (as `bar_on`; nothing
+    /// with the power meter, which draws its own boxes: ui::pw power_row).
+    fn row_static(&mut self, mode: u8, acdc: bool) {
+        if self.bar_on && !self.power {
+            self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
+            self.bar.draw_static(BG);
+            self.bar_scale = None;
+            self.bar_ol = None;
+            self.acc_drawn = false;
+        } else if !self.power {
+            for i in 0..5i16 {
+                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+            }
+        }
+    }
+
+    /// Double tap on the row: Bargraph <-> History in place (the row is
+    /// cleared and drawn again; the bar fills from the next reading).
+    pub fn row_toggle(&mut self, mode: u8, acdc: bool) {
+        self.bar_on = !self.bar_on;
+        lcd::fill_rect(0, ROW_Y.start, lcd::W, ROW_Y.end - ROW_Y.start, BG);
+        self.row_static(mode, acdc);
     }
 
     pub fn invalidate(&mut self) {
@@ -2973,7 +2993,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
         "Multimeter",
         [
             ("Tap / hold history", "Store / clear"),
-            ("History row shown", "Settings: DMM row"),
+            ("Double-tap bar row", "Bargraph / history"),
             ("Tap MIN/MAX column", "Session on / off"),
             ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
             ("Tap REL", "Zero on / off"),
