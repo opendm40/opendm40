@@ -612,7 +612,8 @@ On 0.3.0 (cae46446) region B had 16 388 B free, A2 1 128 B, C 4 736 B
 move out of B, so this audit only cuts: code that core / libm functions
 pulled into B for one or two callers, one inlined helper, and part of the
 `.data` load image; then (owner's decision, 2026-10-27) panic sites without
-their source location. Nothing moved into region C, so the region C hooks
+their source location, and with that room one A2 font blob back to B.
+Nothing moved into region C, so the region C hooks
 see the same set of functions as before.
 
 | change | region B | other |
@@ -623,6 +624,7 @@ see the same set of functions as before.
 | `ui::gen_preview`: the phase fraction as `x - trunc(x)` for f32 `% 1.0` (libm `fmodf` and its reduction helper, ~0.7 KB; exact for x in 0..2) | +672 | C -4 |
 | `scope::WAVE`, `scope_ui::SHOWN`, `STRIP_SHOWN` in SRAM `.dmabuf` (below) | +536 | stack +672, SRAM -664 |
 | `-Zlocation-detail=none` (build.sh, below) | +31 600 | C +3 168, stack +24 |
+| the SC_PROBE font blob (1 242 B) from A2 back to B (below) | -1 240 | A2 +1 244 |
 
 - **String searcher**: `stockfont::unit_text` tested `u.contains('°')`; a
   non-ASCII `char` pattern searches for its UTF-8 bytes as a `&str`, so the
@@ -660,6 +662,11 @@ see the same set of functions as before.
   line. The panic path in the image: `panic_bounds_check` -> `panic_fmt` ->
   `rust_begin_unwind` (the bar, `wait_for_watchdog`); none of them loads
   the location.
+- **A2**: with B at 52 KB free the SC_PROBE blob left `A2_FONTS`
+  ([`tools/mkstockfont.py`](../tools/mkstockfont.py); the regenerated
+  [`stockfont_data.rs`](../src/stockfont_data.rs) differs only in its
+  `link_section` line; both regions are zero-wait): A2 is above its 2 KiB
+  warning again.
 
 Tried, not done:
 - `Scpi::put_bytes` `#[inline(never)]` (11 copies): B -16 B.
@@ -675,33 +682,28 @@ Tried, not done:
   sums, the Wh / VAh accumulators, `nr3_scale`, `gen::plan` timing) need
   the precision.
 
-The rows above add up to 52 116 B; the final tree (version 0.3.1) has:
+The rows above add up to 50 876 B; the final tree (version 0.3.1) has:
 
 | | before (cae46446) | after |
 |---|---|---|
-| region A2 free | 1 128 B | 1 128 B |
-| region B free | 16 388 B | 52 132 B |
+| region A2 free | 1 128 B | 2 372 B |
+| region B free | 16 388 B | 50 892 B |
 | region C free | 4 736 B | 7 940 B |
 | stack headroom (static worst path) | 20 500 B | 21 196 B |
 | SRAM free | 44 576 B | 43 912 B |
 
-The variants (tools/build-variants/run.sh), B / C free and stack headroom:
+The variants (tools/build-variants/run.sh), B / C free and stack headroom
+(A2 after: 2 372 B; no-ad2-isr 2 456 B, mute 2 396 B):
 
 | variant | before | after |
 |---|---|---|
-| recovery-usb | 15 044 / 4 800 / 21 012 B | 51 180 / 7 984 / 21 708 B |
-| recovery-file | 16 084 / 4 212 / 20 500 B | 51 988 / 7 452 / 21 196 B |
-| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 61 624 / 9 016 / 21 640 B |
-| spi-disk | 37 064 / 14 904 / 22 012 B | 69 932 / 17 924 / 22 692 B |
-| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 52 116 / 8 380 / 21 196 B |
-| keep-screen | 16 428 / 4 724 / 20 500 B | 52 164 / 7 932 / 21 196 B |
-| mute (`--features mute`, not in build-variants) | | 51 812 / 7 808 / 21 196 B |
-
-Then the SC_PROBE font blob (1 242 B) from A2 back to B (`A2_FONTS` in
-[`tools/mkstockfont.py`](../tools/mkstockfont.py); the regenerated
-[`stockfont_data.rs`](../src/stockfont_data.rs) differs only in its
-`link_section` line; both regions zero-wait): A2 1 128 -> 2 372 B (above
-its 2 KiB warning again), B 52 132 -> 50 892 B.
+| recovery-usb | 15 044 / 4 800 / 21 012 B | 49 940 / 7 984 / 21 708 B |
+| recovery-file | 16 084 / 4 212 / 20 500 B | 50 748 / 7 452 / 21 196 B |
+| no-ad2-isr | 26 264 / 5 816 / 20 968 B | 60 384 / 9 016 / 21 640 B |
+| spi-disk | 37 064 / 14 904 / 22 012 B | 68 692 / 17 924 / 22 692 B |
+| fatren-dry-run | 16 452 / 5 152 / 20 500 B | 50 876 / 8 380 / 21 196 B |
+| keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
+| mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
