@@ -737,33 +737,45 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 ### Protocol decoder (2026-10-28, feat/decoder-uart)
 
 The decoder band (src/decode.rs, app_decode.rs, ui_decode.rs) decodes each
-frame the scope page draws; no state but its settings (`DS`, a few bytes)
-and one screen's annotations (`ui_decode::ANN`, ~0.8 KB), both in TCM:
-SRAM is untouched (the scope ring of feat/scope-dlg-ring leaves 8.5 KB).
-All of it is region B (emu/decodetest.py: no region C function while the
-Wave view's AD2 stream ISR owns the bus).
+stored record once (running: one that triggered; stopped: on STOP), in
+the main loop (`dec_step`, up to 3 ms a pass) while the next acquisition
+waits (`Scope::hold_restart`), and keeps its bytes and frames
+(`ui_decode::ANN`: 80 bytes, 16 frames, ~1.3 KB) in TCM; every redraw
+draws from them. SRAM is untouched (the scope ring of feat/scope-dlg-ring
+leaves 8.5 KB). All of it is region B (emu/decodetest.py: no region C
+function while the Wave view's AD2 stream ISR owns the bus).
 
 | | feat/scope-dlg-ring (4f4294eb) | with the decoder |
 |---|---|---|
-| region B free | 46 300 B | 32 732 B |
-| region C free | 8 196 B | 8 252 B |
-| stack headroom (static worst path) | 22 220 B | 21 300 B |
+| region B free | 46 300 B | 29 940 B |
+| region C free | 8 196 B | 8 240 B |
+| stack headroom (static worst path) | 22 220 B | 20 656 B |
 | SRAM free | 8 524 B | 8 524 B |
 
-Variants (B / C free, headroom): recovery-usb 30 980 / 8 284 / 21 812 B,
-recovery-file 32 244 / 7 764 / 21 300 B, no-ad2-isr 41 464 / 9 256 /
-21 764 B, spi-disk 50 484 / 18 220 / 22 880 B, fatren-dry-run 32 380 /
-8 680 / 21 300 B, keep-screen 32 428 / 8 244 / 21 300 B, mute 32 108 /
-8 132 / 21 300 B. Emulator stack high-water after emu/decodetest.py:
-23 596 B (static worst path 24 720 B).
+Variants (B / C free, headroom): recovery-usb 28 532 / 8 276 / 21 168 B,
+recovery-file 29 780 / 7 752 / 20 656 B, no-ad2-isr 39 000 / 9 244 /
+21 128 B, spi-disk 48 064 / 18 216 / 22 244 B, fatren-dry-run 29 924 /
+8 664 / 20 656 B, keep-screen 29 972 / 8 232 / 20 656 B, mute 29 620 /
+8 120 / 20 656 B.
 
-Cost (emulator at --mips 110, DBG:PROF? `x2` = the decode, inside
-`s.frame`; UART traffic on MCX, running): 1 ms/div 9600 baud avg 3.0 ms,
-max 8.2 ms (a screen that measures the bit rate again: every 9th, or
-after a framing error); 100 us/div avg 2.9 / max 8.8 ms; 1 ms/div 115200
-avg 0.45 / max 1.5 ms; 100 ms/div (too few samples per bit, the note)
-0.1-0.2 ms. The frame without the decode: ~7 ms. Stopped, one pan step:
-0.3-6.2 ms.
+Cost (emulator at --mips 110, DBG:PROF?: `dec.job` one record's decode,
+`x2` a pass's part of it, `s.frame` the frame; UART traffic on MCX, Normal
+trigger, 3 s running):
+
+| s/div | baud | frames off / on | frame avg, us (off / on) | decode per record avg / max, us |
+|---|---|---|---|---|
+| 1 ms | 9600 | 80 / 66 | 6 887 / 6 978 | 3 561 / 8 124 |
+| 10 ms | 9600 | 25 / 25 | 6 887 / 7 249 | 2 344 / 2 950 |
+| 100 ms | 9600 | 3 / 3 | 6 887 / 6 978 | 113 / 168 (the note) |
+| 1 ms | 115200 | 88 / 69 | 6 887 / 7 252 | 4 555 / 5 236 |
+| 10 ms | 115200 | 25 / 25 | 6 887 / 6 976 | 129 / 186 (the note) |
+| 100 ms | 115200 | 3 / 3 | 6 887 / 6 978 | 121 / 126 (the note) |
+
+STOP: one decode of the stored record (1 ms/div 2.7-4.1 ms); a pan or zoom
+inside what is kept: none; outside it (a record with more than the lists
+hold): the window, ~2 ms. The decode's passes hold the next acquisition:
+at 1 ms/div 66 / 69 frames in 3 s instead of 80 / 88.
+
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

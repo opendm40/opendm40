@@ -1497,10 +1497,13 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
 
-**MF > Settings > Decode**: UART (also RS-232, and RS-485 with the probe
-across A-B) or Modbus RTU, drawn under the trace: a box per byte, Modbus
-frames above them, errors in red. It decodes what is on the screen, running
-or stopped, and follows zoom and pan.
+**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
+or Modbus RTU, drawn under the trace: a box per byte, Modbus frames above
+them, errors in red. Each capture is decoded once: running, one that
+triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
+Zoom and pan show the decoded capture.
+
+![The Decode tab](img/scope-decode-tab.png)
 
 | ![UART: hex and the character in each box](img/scope-decode.png) | ![Modbus RTU stopped: request, reply, a CRC error](img/scope-decode-modbus.png) |
 |---|---|
@@ -1513,7 +1516,8 @@ or stopped, and follows zoom and pan.
   low for N baud**: use a faster timebase.
 - In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
   between A and B on the floating multimeter input, up to 4800 baud (9600
-  at 1 ms/div), e.g. a slow Modbus bus.
+  at 1 ms/div), e.g. a slow Modbus bus; decoded on STOP.
+
 - Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs

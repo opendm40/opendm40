@@ -209,6 +209,39 @@ fn main() {
         }
     }
 
+    // ---- chars_step in slices (the firmware's decode over main-loop
+    // passes) gives what one chars call gives ----
+    for &(baud, fs, slice) in &[(9600u32, 125_000u32, 7usize), (9600, 125_000, 100), (115_200, 1_250_000, 33), (115_200, 1_250_000, 8192), (2400, 38_400, 1)] {
+        let mut s = Sig::new();
+        s.idle(12.0 / baud as f64).bytes(baud as f64, text, 0).idle(3.0 / baud as f64).bytes(baud as f64, text, 0).idle(30.0 / baud as f64);
+        let c = s.codes(fs as f64, 300.0, 700.0, false, 4.0, 0.3, 0, 0, &mut rng);
+        let (lo, mid, hi) = levels(300, 700, None).unwrap();
+        let l = Line { lo, mid, hi, inv: false, spb: (fs as u64 * 256 / baud as u64) as u32, bits: 8, parity: 0 };
+        let (a, b) = (5, c.len() - 3);
+        let mut one = vec![];
+        decode::chars(&c, a, b, &l, &mut |ch| one.push((ch.start, ch.end, ch.v, ch.err)));
+        let mut many = vec![];
+        let mut cur = decode::Cursor::at(a);
+        let mut passes = 0;
+        while !cur.done && passes < 1_000_000 {
+            let lim = cur.n + slice;
+            decode::chars_step(&c, a, b, lim, &l, &mut cur, &mut |ch| {
+                many.push((ch.start, ch.end, ch.v, ch.err));
+                true
+            });
+            passes += 1;
+        }
+        t(&format!("chars_step slices of {slice} at {baud} / {fs}: {} chars in {passes} passes, as one chars call", many.len()), one == many && one.len() == 2 * text.len());
+        // Stopping (f returns false) ends the scan at that character.
+        let mut cur = decode::Cursor::at(a);
+        let mut got = 0;
+        decode::chars_step(&c, a, b, b, &l, &mut cur, &mut |_| {
+            got += 1;
+            got < 5
+        });
+        t(&format!("chars_step stop after 5 at {baud}"), got == 5 && cur.done);
+    }
+
     // ---- filtered edges (the Wave view's AD2 stream) ----
     for &(baud, fs, filt) in &[(4800u32, 38_400u32, 3usize), (2400, 38_400, 3), (9600, 76_800, 3), (4800, 38_400, 1)] {
         let mut s = Sig::new();

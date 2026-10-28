@@ -551,6 +551,12 @@ pub fn run(out: &str) -> usize {
         add("scope-measure", &|s, _| s.popup = scope_ui::Popup::Mf(0));
         add("scope-display", &|s, _| s.popup = scope_ui::Popup::Mf(1));
         add("scope-settings", &|s, _| s.popup = scope_ui::Popup::Mf(3));
+        add("scope-decode-tab", &|s, p| {
+            s.popup = scope_ui::Popup::Mf(4);
+            p.dec.proto = 1;
+            p.dec.level = 1.65;
+        });
+
         // Math popup over the FFT: Other (window, unit).
         add("scope-math", &|s, p| {
             s.m.math_open = true;

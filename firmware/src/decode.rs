@@ -163,63 +163,97 @@ pub enum NoRate {
 /// Auto-baud over `s[a..b]` at `fs`: the bit rate (snapped to a standard
 /// one within 8 %).
 pub fn auto_baud<S: Src + ?Sized>(s: &S, a: usize, b: usize, lo: u16, hi: u16, fs: u32) -> Result<u32, NoRate> {
-    let l = Line { lo, mid: 0, hi, inv: false, spb: 0, bits: 8, parity: 0 };
-    let mut runs = [u32::MAX; KRUN];
-    let mut mark = s.at(a) & 0x3FF > hi;
-    let mut edge: Option<usize> = None;
-    let mut nrun = 0u32;
-    let mut nshort = 0u32;
-    for i in a..b {
-        let m = l.level(s.at(i) & 0x3FF, mark);
-        if m != mark {
-            mark = m;
-            if let Some(e) = edge {
-                let r = (i - e) as u32;
-                if r < RUN_MIN {
-                    nshort += 1;
-                } else {
-                    nrun += 1;
-                    // Keep the KRUN shortest (insertion into a sorted list).
-                    if r < runs[KRUN - 1] {
-                        let mut k = KRUN - 1;
-                        while k > 0 && runs[k - 1] > r {
-                            runs[k] = runs[k - 1];
-                            k -= 1;
+    let mut m = Baud::new(s, a, lo, hi);
+    m.step(s, b);
+    m.result(fs)
+}
+
+/// Auto-baud in slices (`step` up to a sample, then `result`): the bit-
+/// length runs between edges, the KRUN shortest kept.
+#[derive(Clone, Copy)]
+pub struct Baud {
+    l: Line,
+    runs: [u32; KRUN],
+    mark: bool,
+    edge: Option<usize>,
+    nrun: u32,
+    nshort: u32,
+    /// The next sample.
+    pub n: usize,
+}
+
+impl Baud {
+    pub fn new<S: Src + ?Sized>(s: &S, a: usize, lo: u16, hi: u16) -> Baud {
+        let l = Line { lo, mid: 0, hi, inv: false, spb: 0, bits: 8, parity: 0 };
+        Baud { l, runs: [u32::MAX; KRUN], mark: s.at(a) & 0x3FF > hi, edge: None, nrun: 0, nshort: 0, n: a }
+    }
+
+    /// Enough runs seen: `result` needs no more samples.
+    pub fn enough(&self) -> bool {
+        self.nrun >= 32
+    }
+
+    /// The samples up to `b` (stops early once `enough`).
+    pub fn step<S: Src + ?Sized>(&mut self, s: &S, b: usize) {
+        let mut i = self.n;
+        while i < b && !self.enough() {
+            let m = self.l.level(s.at(i) & 0x3FF, self.mark);
+            if m != self.mark {
+                self.mark = m;
+                if let Some(e) = self.edge {
+                    let r = (i - e) as u32;
+                    if r < RUN_MIN {
+                        self.nshort += 1;
+                    } else {
+                        self.nrun += 1;
+                        // Keep the KRUN shortest (insertion into a sorted list).
+                        let runs = &mut self.runs;
+                        if r < runs[KRUN - 1] {
+                            let mut k = KRUN - 1;
+                            while k > 0 && runs[k - 1] > r {
+                                runs[k] = runs[k - 1];
+                                k -= 1;
+                            }
+                            runs[k] = r;
                         }
-                        runs[k] = r;
                     }
                 }
+                self.edge = Some(i);
             }
-            edge = Some(i);
-            if nrun >= 32 {
-                break; // enough runs: the rest of the window is not needed
-            }
+            i += 1;
         }
+        self.n = i;
     }
-    if nshort >= 4 && nshort * 2 > nrun {
-        return Err(NoRate::TooFast);
+
+    /// The rate from the runs seen so far.
+    pub fn result(&self, fs: u32) -> Result<u32, NoRate> {
+        let (nrun, nshort, runs) = (self.nrun, self.nshort, &self.runs);
+        if nshort >= 4 && nshort * 2 > nrun {
+            return Err(NoRate::TooFast);
+        }
+        if nrun < 4 {
+            return Err(NoRate::Few);
+        }
+        let min = runs[0];
+        let (mut sum, mut cnt) = (0u64, 0u64);
+        for &r in runs.iter().filter(|&&r| r != u32::MAX && r * 10 <= min * 13) {
+            sum += r as u64;
+            cnt += 1;
+        }
+        if cnt < 2 {
+            return Err(NoRate::Few);
+        }
+        if sum < MIN_SPB as u64 * cnt {
+            return Err(NoRate::TooFast);
+        }
+        let baud = (fs as u64 * cnt / sum.max(1)) as u32;
+        if !(MIN_BAUD * 9 / 10..=MAX_BAUD * 11 / 10).contains(&baud) {
+            return Err(if baud > MAX_BAUD { NoRate::TooFast } else { NoRate::Few });
+        }
+        Ok(STD_BAUD.iter().copied().find(|&s| baud.abs_diff(s) * 100 <= s * 8).unwrap_or(baud))
     }
-    if nrun < 4 {
-        return Err(NoRate::Few);
-    }
-    let min = runs[0];
-    let (mut sum, mut cnt) = (0u64, 0u64);
-    for &r in runs.iter().filter(|&&r| r != u32::MAX && r * 10 <= min * 13) {
-        sum += r as u64;
-        cnt += 1;
-    }
-    if cnt < 2 {
-        return Err(NoRate::Few);
-    }
-    if sum < MIN_SPB as u64 * cnt {
-        return Err(NoRate::TooFast);
-    }
-    let baud = (fs as u64 * cnt / sum.max(1)) as u32;
-    if !(MIN_BAUD * 9 / 10..=MAX_BAUD * 11 / 10).contains(&baud) {
-        return Err(if baud > MAX_BAUD { NoRate::TooFast } else { NoRate::Few });
-    }
-    Ok(STD_BAUD.iter().copied().find(|&s| baud.abs_diff(s) * 100 <= s * 8).unwrap_or(baud))
 }
+
 
 /// A decoded character: start edge and end (the stop bit's end), sample
 /// indices of the source; the data; F_FE / F_PE.
@@ -231,9 +265,40 @@ pub struct Ch {
     pub err: u8,
 }
 
+/// Where a character scan stands (`chars_step`): the next sample, whether
+/// a mark level was seen, the scan ended (the window's end or stopped).
+#[derive(Clone, Copy)]
+pub struct Cursor {
+    pub n: usize,
+    pub mark: bool,
+    pub done: bool,
+}
+
+impl Cursor {
+    pub const fn at(n: usize) -> Cursor {
+        Cursor { n, mark: false, done: false }
+    }
+}
+
 /// The characters of `s[a..b]`, in order.
 pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn FnMut(Ch)) {
+    let mut c = Cursor::at(a);
+    chars_step(s, a, b, b, l, &mut c, &mut |ch| {
+        f(ch);
+        true
+    });
+}
+
+/// `chars` in slices: from `c.n` until the scan between characters passes
+/// `lim` (a character begun before it is finished, up to `b`), then
+/// returns with `c` where to go on. `f` returns false to stop the scan
+/// (`c.done`). A character that runs past `b` is not reported.
+pub fn chars_step<S: Src + ?Sized>(s: &S, a: usize, b: usize, lim: usize, l: &Line, c: &mut Cursor, f: &mut dyn FnMut(Ch) -> bool) {
+    if c.done {
+        return;
+    }
     if b < a + 2 || l.spb < MIN_SPB << 8 {
+        c.done = true;
         return;
     }
     let nbits = 1 + l.bits + (l.parity != 0) as u8 + 1;
@@ -242,15 +307,22 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
     // is never stepped over), then back to the edge's first sample.
     let step = ((l.spb >> 8) as usize / 4).max(1);
     // A start edge counts only after a mark level was seen.
-    let mut mark = false;
-    let mut n = a;
+    let mut mark = c.mark;
+    let mut n = c.n;
     'idle: while n < b {
+        if n >= lim {
+            c.n = n;
+            c.mark = mark;
+            return;
+        }
         let v = at(n);
         if !mark {
             mark = l.level(v, false);
             n += step;
             continue;
         }
+
+
         if l.level(v, true) {
             n += step;
             continue;
@@ -263,16 +335,16 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
         let t0 = ((n as u64) << 8).saturating_sub(128);
         let (mut acc, mut ones, mut err) = (0u16, 0u8, 0u8);
         for k in 0..nbits {
-            let c = ((t0 + ((2 * k as u64 + 1) * l.spb as u64) / 2 + 128) >> 8) as usize;
-            if c + 1 >= b {
-                return; // runs past the window
+            let ci = ((t0 + ((2 * k as u64 + 1) * l.spb as u64) / 2 + 128) >> 8) as usize;
+            if ci + 1 >= b {
+                break 'idle; // runs past the window
             }
             let hv = |i: usize| (at(i) >= l.mid) as u8;
-            let bit = (hv(c - 1) + hv(c) + hv(c + 1) >= 2) != l.inv;
+            let bit = (hv(ci - 1) + hv(ci) + hv(ci + 1) >= 2) != l.inv;
             if k == 0 {
                 if bit {
                     // A glitch, no start bit.
-                    n = c + 1;
+                    n = ci + 1;
                     continue 'idle;
                 }
             } else if k <= l.bits {
@@ -287,13 +359,18 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
                     err |= F_FE;
                 }
                 mark = bit;
-                n = c + 1;
-                let end = c as u32 + (l.spb >> 9);
-                f(Ch { start: (t0 >> 8) as u32, end, v: acc, err });
+                n = ci + 1;
+                let end = ci as u32 + (l.spb >> 9);
+                if !f(Ch { start: (t0 >> 8) as u32, end, v: acc, err }) {
+                    break 'idle;
+                }
                 continue 'idle;
             }
         }
     }
+    c.n = n;
+    c.mark = mark;
+    c.done = true;
 }
 
 /// Modbus CRC-16 (poly 0xA001, init 0xFFFF), one byte.
@@ -405,6 +482,8 @@ impl Framer {
     }
 
     /// The window ended: the last frame (partial when it may go on).
+
+
     pub fn finish(&mut self, out: &mut dyn FnMut(&Fr, u32)) {
         if self.cur.len > 0 {
             let open = self.hi.saturating_sub(self.cur.end) <= self.gap;

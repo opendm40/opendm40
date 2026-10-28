@@ -594,19 +594,22 @@ UART and Modbus RTU on the scope page ([the decoder](README.md#protocol-decoder)
 |---|---|---|---|
 | `DECode:PROTocol[?]` | `OFF` (default), `UART` or `MODBus` | `OFF`, `UART` or `MODB` | both |
 | `DECode:BAUD[?]` | bit rate, 300 .. 115200, or `AUTO` (default) | `AUTO` or `9600` | both |
-| `DECode:RATE?` | | the bit rate of the last decoded screen: `9600` (`0`: none) | both |
+| `DECode:RATE?` | | the bit rate of the decoded record: `9600` (`0`: none) | both |
 | `DECode:FORMat[?]` | `8N1` (default), `8E1`, `8O1` or `7E1` | `8N1` | both |
 | `DECode:POLarity[?]` | `NORMal` (default) or `INVerted` (RS-232 levels) | `NORM` or `INV` | both |
 | `DECode:THReshold[?]` | level, V at the probe tip, or `AUTO` (default) | `AUTO` or `+1.500000E+00` | both |
-| `DECode:LEVel?` | | the level of the last decoded screen, V (`+9.91E37`: none) | both |
+| `DECode:LEVel?` | | the level of the decoded record, V (`+9.91E37`: none) | both |
 | `DECode:COUNt?` | | `frames,bytes,framing,parity,crc` of what `DECode:FRAMes?` reports | both |
 | `DECode:FRAMes?` | `[<first>]`: from frame number `first` (default 0) | block of frame lines | both |
 
 - `DECode:FRAMes?` answers a `#4nnnn` block of text lines, one per frame:
-  `seq,time_s,proto,hex,status,info`. Stopped (`TRIGger:STATus?` = `STOP`):
-  the whole stored record decoded; running: the frames on the screen. `seq`
+  `seq,time_s,proto,hex,status,info`, of the decoded record: running, the
+  last record that triggered; stopped, the stored record (decoded on the
+  query if the scope page has not shown it). It holds up to 80 bytes and
+  16 Modbus frames; a record with more: those around the screen. `seq`
   counts from 0; a reply holds as many whole lines as fit (about 6 kB), so
   read on from the last `seq` + 1 until the block is empty (`#40000`).
+
   `time_s` is the frame start in seconds from the trigger point (as Save
   CSV), `proto` `UART` or `MB`, `hex` the bytes, `status` `OK`, `FE`
   (framing error), `PE` (parity), `CRC` or `PART` (the frame runs past the

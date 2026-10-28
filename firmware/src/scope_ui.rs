@@ -2486,7 +2486,10 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 /// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
 /// order as fft::WIN_NAMES).
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
-pub const MF_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
+/// The MF popup's tabs (stock four, opendm40 Decode).
+pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+/// Tab pitch (stock four tabs: 101 px; five: 80).
+const MF_TAB_W: i16 = 80;
 
 /// Values the popups show.
 #[derive(Clone, Copy)]
@@ -2533,8 +2536,6 @@ pub enum Popup {
     /// opendm40 timebase list (tap on the timebase badge): the timebase index
     /// in the list's centre band.
     Tb(u8),
-    /// The protocol decoder's setup (MF > Settings > Decode).
-    Dec,
 }
 
 /// Intersection of two rects (w / h 0 when disjoint).
@@ -2674,23 +2675,27 @@ pub fn slider_value(x: i16) -> f32 {
 }
 
 /// MF popup page height per tab (box h = 40 + page).
-/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13.)
-const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
+/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13;
+/// Decode: ui_decode.rs.)
+const MF_PAGE_H: [i16; 5] = [150, 100, 125, 55, dec::PAGE_H];
 
-/// MF settings popup (FUN_08037574), tab 0..3.
+/// MF settings popup (FUN_08037574), tab 0..4.
 pub fn draw_mf(tab: u8, v: &PopVals) {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let page_h = MF_PAGE_H[tab as usize];
     let hh = 40 + page_h;
     let screen = rect(0, 0, 480, 320);
     fill_c(rect(13, 20, 401, hh), screen, C_FRAME);
     let tclip = rect(14, 21, 399, hh - 1);
-    for i in 0..4i16 {
-        let x = 14 + 101 * i;
-        let r = rect(x, 21, 100, 40);
+    // The stock tab font when every label fits the narrower tabs.
+    let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W - 1) { sf::SC_F22 } else { sf::SC_F16 };
+    for i in 0..5i16 {
+        let x = 14 + MF_TAB_W * i;
+        let r = rect(x, 21, MF_TAB_W - 1, 40);
         let sel = i == tab as i16;
-        let ul = rect(x, 59, 100, 2);
-        let t = Ink::new(sf::SC_F22, r, MF_TABS[i as usize], 8, 0);
+        let ul = rect(x, 59, MF_TAB_W - 1, 2);
+        let t = Ink::new(font, r, MF_TABS[i as usize], 8, 0);
+
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
         paint(isect(r, tclip), &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = t.at(x, y) {
@@ -2755,17 +2760,15 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 _ => {}
             }
         }
-        _ => {
+        3 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
-            rbox_text(MF_DECODE, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Decode", C_WHITE);
         }
+        // opendm40: the protocol decoder (ui_decode.rs).
+        _ => dec::page(&v.dec, pc),
     }
 }
-
-/// Settings tab: the protocol decoder (opendm40, ui_decode.rs).
-pub const MF_DECODE: Rect = rect(204, 78, 80, 30);
 
 /// Display tab: the two sliders and their values (repainted while dragged).
 // Trigger tab rows (opendm40, UF-13).
@@ -2825,7 +2828,8 @@ pub enum MfHit {
     Width(bool),
     PriScr,
     SaveCsv,
-    Decode,
+    /// The Decode tab's page.
+    Dec(dec::SetupHit),
     /// Inside the box, nothing there.
     Inside,
     /// Below the box: closes (stock: x >= 10).
@@ -2835,13 +2839,13 @@ pub enum MfHit {
 }
 
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];
     if !rect(13, 20, 401, hh).has(x, y) {
         return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
     }
     if y < 61 {
-        return MfHit::Tab(((x - 14) / 101).clamp(0, 3) as u8);
+        return MfHit::Tab(((x - 14) / MF_TAB_W).clamp(0, 4) as u8);
     }
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
@@ -2895,17 +2899,16 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Inside
             }
         }
-        _ => {
+        3 => {
             if near(rect(24, 78, 80, 30)) {
                 MfHit::PriScr
             } else if near(rect(114, 78, 80, 30)) {
                 MfHit::SaveCsv
-            } else if near(MF_DECODE) {
-                MfHit::Decode
             } else {
                 MfHit::Inside
             }
         }
+        _ => MfHit::Dec(dec::page_hit(x, y)),
     }
 }
 
@@ -3034,7 +3037,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
         Popup::Ch1(t) => draw_ch1(t, v),
         Popup::Math(t) => draw_math(t, v),
         Popup::Tb(i) => draw_tb(i),
-        Popup::Dec => dec::setup(&v.dec),
+
     }
 }
 

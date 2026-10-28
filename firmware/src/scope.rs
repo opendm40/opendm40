@@ -348,6 +348,12 @@ pub struct Scope {
     // Stop-and-zoom: the last captured record, kept in BUF while stopped so a
     // timebase change re-renders it at the new s/div (stock §3 "Zoom", state 6).
     stored_valid: bool,
+    /// Counts the stored records (`snapshot_mark`): the protocol decoder
+    /// (app_decode.rs) decodes a record once.
+    pub rec_gen: u32,
+    /// The protocol decoder still reads the record: the next acquisition
+    /// waits (a running scope's record is overwritten by the next one).
+    pub hold_restart: bool,
     stored_len: usize,
     stored_trig: Option<usize>,
     stored_anchor: usize,
@@ -721,6 +727,8 @@ impl Scope {
             roll_last_wr: 0,
             roll_next: 0,
             stored_valid: false,
+            rec_gen: 0,
+            hold_restart: false,
             stored_len: 0,
             stored_trig: None,
             stored_anchor: 0,
@@ -1255,6 +1263,7 @@ impl Scope {
         self.stored_trig = trig;
         self.stored_ab = (wv().sc.a, wv().sc.b);
         self.stored_valid = true;
+        self.rec_gen = self.rec_gen.wrapping_add(1);
     }
 
     /// Size of the ring in flight (samples).
@@ -1864,6 +1873,9 @@ impl Scope {
             return None;
         }
         if !self.busy {
+            if self.hold_restart {
+                return None;
+            }
             self.start();
             rg().t = now;
             self.hw_t0 = now;

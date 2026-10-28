@@ -2417,6 +2417,8 @@ impl App {
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
         // A scope CSV that finished (UF-13): release the record, toast.
         self.sp_csv_poll(now);
+        // The protocol decoder: a slice of a record decode (app_decode.rs).
+        self.dec_step();
         // Drag / pinch on the scope page: no new frames and no acquisition
         // restart while the finger moves the shown frame (scope_page.rs);
         // only the page diff repaint.

@@ -13,17 +13,20 @@ SetBitsFile: the AD2 samples through a sinc^2-like filter, INFERRED).
 Cases (DECode:FRAMes? checked against the bytes sent; the screenshot's
 band against FRAMes? of the screen: one box per byte / frame at the time
 each starts, red boxes for errors):
-  * MCX UART 9600 8N1 (auto-baud) at 1 ms/div running and stopped, 200
-    us/div (two characters on the screen), 5 ms/div (the bar), 100 ms/div
-    (the sample rate too low: the note, no frames);
+  * MCX UART 9600 8N1 (auto-baud): Auto untriggered running (no decode),
+    STOP (decoded); Auto triggered at 1 ms/div running (a decode per record) and
+    stopped, 200 us/div (two characters on the screen), 5 ms/div (the
+    bar), 100 ms/div (roll; STOP: the sample rate too low, the note);
   * a framing error (a byte with a low stop bit) drawn red;
   * MCX Modbus RTU 19200 8E1: request / reply / exception / bad CRC, the
     pairing, at 2 and 5 ms/div, stopped;
   * the Wave view (DC V, 5 V TTL on V-COM): UART at 2400 and 4800 baud,
-    Modbus at 2400 8E1, at 2 ms/div (38.4 kS/s), running and stopped;
+    Modbus at 2400 8E1, at 2 ms/div (38.4 kS/s), decoded on STOP;
     19200 baud there: the note;
-  * frame cost: DBG:PROF? (x2 = the decode, s.frame = the frame) at 100 us,
-    1 ms and 100 ms/div with 9600 and 115200 baud traffic, printed;
+  * cost: DBG:PROF? (dec.job = one record's decode, x2 = its slices,
+    s.frame = the frame) at 1, 10 and 100 ms/div with 9600 and 115200 baud
+    traffic, the decoder off and on, running, STOP and a pan; a table;
+
   * region C (emu/regionc.py, gated on hy3131::HANDED: the Wave view's
     AD2 stream): no .cold code while the stream ISR owns the bus.
 --mips: CPU speed (default 110 = the device's speed per instruction).
@@ -55,6 +58,8 @@ import usbip_client as uc  # noqa: E402
 import regionc  # noqa: E402
 
 FAIL = []
+COST = []
+
 
 
 def check(ok, what):
@@ -242,12 +247,13 @@ try:
 
     def prof(what):
         txt = q('DBG:PROF?', raw=True).decode(errors='replace')
-        lines = {l.split()[0]: l.split() for l in txt.splitlines() if l and l.split()[0] in ('x2', 's.frame', 'scope', 'tick')}
-        lm = next((l for l in txt.splitlines() if l.startswith('loop us:')), '')
-        x2 = lines.get('x2', ['x2', '0', '0', '0', '0'])
-        fr = lines.get('s.frame', ['s.frame', '0', '0', '0', '0'])
-        print('    cost %-28s decode n %s avg %s max %s us; frame avg %s max %s us; %s' % (what, x2[1], x2[3], x2[4], fr[3], fr[4], lm), flush=True)
-        return int(x2[4]), int(fr[4])
+        lines = {l.split()[0]: l.split() for l in txt.splitlines() if l and l.split()[0] in ('x2', 's.frame', 'dec.job', 'scope', 'tick')}
+        z = ['', '0', '0', '0', '0', '0', '0']
+        x2 = lines.get('x2', z)
+        fr = lines.get('s.frame', z)
+        jb = lines.get('dec.job', z)
+        print('    %-34s records decoded %3s (avg %6s max %6s us, slices %4s max %5s us); frames %4s avg %5s max %5s us' % (what, jb[1], jb[3], jb[4], x2[1], x2[4], fr[1], fr[3], fr[4]), flush=True)
+        return {'jobs': int(jb[1]), 'job_avg': int(jb[3]), 'job_max': int(jb[4]), 'slices': int(x2[1]), 'slice_max': int(x2[4]), 'frames': int(fr[1]), 'frame_avg': int(fr[3]), 'frame_max': int(fr[4])}
 
     def c_check(what, every=False):
         if not RC:
@@ -272,26 +278,47 @@ try:
     # ---- MCX UART 9600 auto ----
     put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, 9600, 0.0, 3.3, 0.004)
     q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1;DEC:POL NORM;DEC:THR AUTO')
-    q('CHAN1:SCAL 1;CHAN1:COUP DC;TRIG:SWE AUTO;TIM:SCAL 1E-3')
+    # Auto, the trigger level above the signal: free-running, untriggered
+    # records are not decoded while running; STOP decodes the last one.
+    q('CHAN1:SCAL 1;CHAN1:COUP DC;TRIG:SWE AUTO;TRIG:SLOP NEG;TRIG:LEV 8;TIM:SCAL 1E-3')
     run()
+    wait_ms(800)
     q('DBG:PROF:RESET')
     wait_ms(1500)
-    prof('1 ms/div 9600 running')
+    p = prof('1 ms/div Auto untriggered running')
+    check(p['jobs'] == 0 and p['slices'] == 0 and p['frames'] > 3, 'Auto, untriggered, running: no decode (%d records, %d frames)' % (p['jobs'], p['frames']))
+    check(stop(), 'STOP (untriggered)')
+    wait_ms(800)
+    fr = frames()
+    check(has_text(b''.join(bytes.fromhex(f[3]) for f in fr), 5), 'STOP: the untriggered record decoded (%d frames)' % len(fr))
+    # Auto, triggered on the start bits (the level in the swing): each
+    # triggered record decoded once.
+    q('TRIG:LEV 1.6')
+    run()
+    wait_ms(800)
+    q('DBG:PROF:RESET')
+    wait_ms(1500)
+    p = prof('1 ms/div 9600 Auto running')
+    check(p['jobs'] >= 1 and p['jobs'] <= p['frames'] + 1, 'Auto, triggered, running: a decode per triggered record (%d records, %d frames)' % (p['jobs'], p['frames']))
     check(q('DEC:PROT?') == 'UART', 'DEC:PROT? UART')
     check(q('DEC:RATE?') == '9600', 'auto-baud: DEC:RATE? 9600 (%s)' % q('DEC:RATE?'))
     fr = frames()
     data = b''.join(bytes.fromhex(f[3]) for f in fr)
-    check(has_text(data, 5), 'running, 1 ms/div: the screen\'s frames are pieces of the text (%r)' % data[:40])
+    check(has_text(data, 5), 'running, 1 ms/div: the last record\'s frames are pieces of the text (%r, rate %s, COUN? %s)' % (data[:40], q('DEC:RATE?'), q('DEC:COUN?')))
     nbytes = len(data)
     img = shot('m01-uart-1ms-run')
     e = edges(img, BYTE_Y + 8, C_EDGE)
-    # Adjacent boxes share an edge run: bytes + 1 .. 2 x bytes runs.
-    check(nbytes - 1 <= len(e) <= 2 * nbytes + 2, 'band: %d box edge runs for %d bytes on the screen' % (len(e), nbytes))
+    # FRAMes? lists the record's bytes (the screen shows a part): adjacent
+    # boxes share an edge run, at most 2 x bytes runs.
+    check(2 <= len(e) <= 2 * nbytes + 2, 'band: %d box edge runs for %d bytes in the record' % (len(e), nbytes))
     check(stop(), 'STOP')
     fr = frames()
     data = b''.join(bytes.fromhex(f[3]) for f in fr)
     c = q('DEC:COUN?')
-    check(has_text(data) and all(f[4] in ('OK', 'PART') for f in fr[1:]), 'stopped, 1 ms/div: the record (17 ms) decodes to the text (%d frames, COUN? %s)' % (len(fr), c))
+    # The record starts where the trigger caught the text (17 ms:
+    # up to 16 characters).
+    check(has_text(data, 4) and all(f[4] in ('OK', 'PART') for f in fr[1:]), 'stopped, 1 ms/div: the record (17 ms) decodes to pieces of the text (%d frames, COUN? %s)' % (len(fr), c))
+
     img = shot('m02-uart-1ms-stop')
     e = edges(img, BYTE_Y + 8, C_EDGE)
     print('    stopped band: %d box edge runs' % len(e), flush=True)
@@ -319,29 +346,45 @@ try:
     img = shot('m05-uart-5ms-bar')
     bar = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), C_EDGE))
     check(bar > 60 and len(edges(img, BYTE_Y + 8, C_EDGE)) < 12, '5 ms/div: the bar (%d px, %d runs)' % (bar, len(edges(img, BYTE_Y + 8, C_EDGE))))
-    # 100 ms/div (25 kS/s, 2.6 samples per bit): the note, no frames.
+    # 100 ms/div (25 kS/s, 2.6 samples per bit; roll: decoded on STOP):
+    # the note, no frames.
     q('TIM:SCAL 100E-3')
     run()
     wait_ms(2000)
+    check(stop(), 'STOP at 100 ms/div')
+    wait_ms(1500)
     img = shot('m06-uart-100ms-note')
     grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
     check(grey > 10, '100 ms/div: the note "Sample rate too low" (%d px)' % grey)
-    check(stop(), 'STOP at 100 ms/div')
     check(frames() == [], '100 ms/div: no frames (too few samples per bit)')
-    # Frame cost at 100 us / 1 ms / 100 ms with 9600 and 115200.
+    # Cost at 1 / 10 / 100 ms/div with 9600 and 115200 traffic, Auto
+    # trigger: the decoder off, then on (running: per triggered record and
+    # per frame; then STOP: the stored record's decode, and a pan).
+    COST.append('| s/div | baud | decoder | records decoded | decode per record avg / max, us | slices max, us | frames | frame avg / max, us |')
+    COST.append('|---|---|---|---|---|---|---|---|')
     for baud in (9600, 115200):
         put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, baud, 0.0, 3.3, 20.0 / baud)
-        for sc in ('100E-6', '1E-3', '100E-3'):
+        for sc in ('1E-3', '10E-3', '100E-3'):
             q('TIM:SCAL ' + sc)
-            run()
+            for proto in ('OFF', 'UART'):
+                q('DEC:PROT ' + proto)
+                run()
+                wait_ms(1000)
+                q('DBG:PROF:RESET')
+                wait_ms(3000)
+                p = prof('%s s/div %d %s running' % (sc, baud, proto))
+                COST.append('| %s | %d | %s running | %d | %d / %d | %d | %d | %d / %d |' % (sc, baud, proto, p['jobs'], p['job_avg'], p['job_max'], p['slice_max'], p['frames'], p['frame_avg'], p['frame_max']))
             q('DBG:PROF:RESET')
-            wait_ms(1500)
-            prof('%s s/div %d running' % (sc, baud))
             stop()
+            wait_ms(1500)
+            p = prof('%s s/div %d STOP' % (sc, baud))
+            COST.append('| %s | %d | UART STOP | %d | %d / %d | %d | %d | %d / %d |' % (sc, baud, p['jobs'], p['job_avg'], p['job_max'], p['slice_max'], p['frames'], p['frame_avg'], p['frame_max']))
             q('DBG:PROF:RESET')
             q('DBG:DRAG 300,150,200,150,300')
             wait_ms(1500)
-            prof('%s s/div %d stopped, pan' % (sc, baud))
+            p = prof('%s s/div %d stopped, pan' % (sc, baud))
+            COST.append('| %s | %d | UART pan | %d | %d / %d | %d | %d | %d / %d |' % (sc, baud, p['jobs'], p['job_avg'], p['job_max'], p['slice_max'], p['frames'], p['frame_avg'], p['frame_max']))
+    q('TRIG:SWE AUTO')
 
     # ---- framing errors (every stop bit low), drawn red ----
     put(BITS, '1' * 40 + uart_bits(text, err='all') + '1' * 40, 9600, 0.0, 3.3, 0.004)
@@ -376,8 +419,12 @@ try:
             print('    ' + ','.join(f), flush=True)
         by = {f[0]: f for f in fr}
         pairs = [f for f in fr if f[5].startswith('RSP 01 03 4B req=') and by.get(f[5].split('req=')[1], [''] * 6)[5] == 'REQ 01 03 @0000 n=2']
-        check(len(pairs) >= 1, '%s s/div: a 03 reply paired with its request' % sc)
+        if sc == '2E-3':
+            # 34 ms of the ~60 ms cycle: where the trigger caught it.
+            check(any(f[5].startswith(('REQ', 'RSP', 'EXC')) for f in fr), '2 ms/div: Modbus frames decoded (%d)' % len(fr))
         if sc == '5E-3':
+            check(len(pairs) >= 1, '%s s/div: a 03 reply paired with its request' % sc)
+
             # The 86 ms record holds a whole cycle.
             check(any(f[5].startswith('EXC 01 84 E02 req=') for f in fr), '5 ms/div: the exception, paired')
             check(any(f[4] == 'CRC' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad CRC')
@@ -415,11 +462,13 @@ try:
                 put(DBITS, '1' * 40 + uart_bits(text, fmt) + '1' * 40, baud, 0.0, 5.0, 0.01)
             q('DEC:PROT %s;DEC:FORM %s' % (proto, fmt))
             run()
-            wait_ms(3000)
+            wait_ms(7000)  # the stored record reaches back seconds (coded ring)
+            # The Wave view decodes on STOP (its record changes while running).
+            stop()
+            wait_ms(1500)
             rate = q('DEC:RATE?')
             img = shot('w01-wave-%s-%d' % (proto.lower(), baud))
             check(rate == str(baud), 'Wave view %s %d: DEC:RATE? %s' % (proto, baud, rate))
-            stop()
             fr = frames()
             data = b''.join(bytes.fromhex(f[3]) for f in fr)
             if proto == 'UART':
@@ -432,7 +481,9 @@ try:
         put(DBITS, '1' * 40 + uart_bits(text) + '1' * 40, 19200, 0.0, 5.0, 0.01)
         q('DEC:PROT UART;DEC:BAUD AUTO')
         run()
-        wait_ms(3000)
+        wait_ms(7000)
+        stop()
+        wait_ms(1500)
         img = shot('w02-wave-19200-note')
         grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
         check(grey > 10, 'Wave view 19200 at 38.4 kS/s: the note (%d px)' % grey)
@@ -460,5 +511,6 @@ finally:
         if os.path.exists(p):
             os.remove(p)
 
+print('\n'.join(COST))
 print('decodetest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)

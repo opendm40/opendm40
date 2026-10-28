@@ -2265,7 +2265,7 @@ impl App {
                         su::TbHit::Row(r) => self.sp_tb_pick(r, now),
                         su::TbHit::Inside => {}
                     },
-                    su::Popup::Dec => self.dec_setup_tap(su::dec::setup_hit(x, y), now),
+
                     su::Popup::None => {}
                 }
                 if had_press && self.sp.popup != su::Popup::None && !self.redraw {
@@ -2437,9 +2437,8 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
-            su::MfHit::Decode => {
-                // The decoder popup covers the Settings tab's box.
-                self.sp_popup_open(su::Popup::Dec);
+            su::MfHit::Dec(h) => {
+                self.dec_setup_tap(h, now);
                 return;
             }
         }

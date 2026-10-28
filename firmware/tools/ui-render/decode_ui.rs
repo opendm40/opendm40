@@ -70,8 +70,14 @@ fn trace(c: &[u16], off: usize, n: usize) -> stock::Trace {
 
 /// The host copy of app_decode.rs `dec_frame` / `dec_boxes` / `dec_bar`.
 fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trace) {
+    // The firmware's job over the window (app_decode.rs: the window decode
+    // a stopped record gets when it holds more than the lists).
     let a = ud::ann();
-    a.clear();
+    a.reset(1, ud::C_DONE);
+    a.baud = 0;
+    a.mode = ud::M_NONE;
+    a.bar = [0; 50];
+    a.off = off as u32;
     a.n = n as u32;
     a.fs = fs;
     let (mn, mx) = dc::min_max(c, off, off + n);
@@ -133,18 +139,19 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
         let k = a.nf as usize;
         let r = fno[..k].iter().position(|&x| x == req).map_or(0xFF, |p| p as u8);
         fno[k] = nf;
-        a.f[k] = ud::FAnn { s0: (f.start as i64 - v0) as i32, s1: (f.end as i64 - v0) as i32, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
+        a.f[k] = ud::FAnn { s0: f.start, s1: f.end, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
         a.nf += 1;
     };
     dc::chars(c, lo_s, hi_s, &l, &mut |ch| {
         let a = ud::ann();
         if (ch.end as i64) >= v0 && (ch.start as i64) < v1 {
             if (a.nb as usize) < ud::NB {
-                a.b[a.nb as usize] = ud::BAnn { s0: (ch.start as i64 - v0) as i32, s1: (ch.end as i64 - v0) as i32, v: ch.v as u8, fl: ch.err };
+                a.b[a.nb as usize] = ud::BAnn { s0: ch.start, s1: ch.end, v: ch.v as u8, fl: ch.err };
                 a.nb += 1;
             } else {
-                a.more = true;
+                a.full = true;
             }
+
         }
         if modbus {
             let nf = fr.nframes;
@@ -273,10 +280,10 @@ pub fn run(ck: &mut Checker, out: &str) {
     // labels and steppers (the option lists are the MF popup's widgets).
     let base = &stock::scenes()[0];
     for (k, v) in [
-        ud::SetupVals { proto: 1, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 1.65 },
-        ud::SetupVals { proto: 2, fmt: 1, inv: true, baud: 115_200, thr: -99.99, level: f32::NAN },
-        ud::SetupVals { proto: 0, fmt: 3, inv: false, baud: 300, thr: f32::NAN, level: f32::NAN },
-        ud::SetupVals { proto: 2, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
+        ud::SetupVals { proto: 1, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 1.65 },
+        ud::SetupVals { proto: 2, mode: 1, fmt: 1, inv: true, baud: 115_200, thr: -99.99, level: f32::NAN },
+        ud::SetupVals { proto: 0, mode: 0, fmt: 3, inv: false, baud: 300, thr: f32::NAN, level: f32::NAN },
+        ud::SetupVals { proto: 2, mode: 1, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
     ]
     .iter()
     .enumerate()
@@ -284,36 +291,38 @@ pub fn run(ck: &mut Checker, out: &str) {
         for combined in [false, true] {
             let mut m = base.m;
             m.combined = combined;
-            let sc = stock::Scene { name: "dec-setup", m, popup: scope_ui::Popup::Dec, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            let sc = stock::Scene { name: "dec-setup", m, popup: scope_ui::Popup::Mf(4), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
             let pv = scope_ui::PopVals { dec: *v, ..stock::popvals(&m) };
             stock::draw_with(&sc, &pv);
             let name = format!("decode/setup/{k}/{}", combined as u8);
             ck.check_replica(&name);
-            let page = Bx::new(14, 61, 399, 140);
+            let page = Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1);
             let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
             for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
                 add.push(rb(r));
             }
-            ck.check_add(&name, &[("page", page)], &add, Bx::new(13, 20, 401, 181));
+            ck.check_add(&name, &[("page", page)], &add, Bx::new(13, 20, 401, 40 + ud::PAGE_H as i32));
             if k == 0 && !combined {
-                save(out, "d06-decode-setup");
+                save(out, "d06-decode-tab");
             }
+            if k == 1 && !combined {
+                save(out, "d07-decode-tab-log");
+            }
+            if k == 0 && combined {
+                save(out, "d07-decode-tab-combined");
+            }
+
         }
     }
-    // MF > Settings with its Decode button.
-    for combined in [false, true] {
-        let mut m = base.m;
-        m.combined = combined;
-        let sc = stock::Scene { name: "mf-settings", m, popup: scope_ui::Popup::Mf(3), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+    // The five tabs on the other pages (Settings: the shortest page).
+    for tab in [0u8, 3] {
+        let m = base.m;
+        let sc = stock::Scene { name: "mf-tabs", m, popup: scope_ui::Popup::Mf(tab), trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
         stock::draw(&sc);
-        let r = scope_ui::MF_DECODE;
-        let page = Bx::new(14, 61, 399, 54);
-        ck.check_add(&format!("decode/mf-settings/{}", combined as u8), &[("page", page)], &[rb(r)], Bx::new(13, 20, 401, 96));
-        if !combined {
-            save(out, "d07-mf-settings-decode");
-        }
+        save(out, &format!("d08-mf-tab{tab}"));
     }
 }
+
 
 /// The manual's pictures (manual.rs): UART, Modbus, the Wave view.
 pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {

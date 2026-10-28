@@ -1015,24 +1015,31 @@ the scope full record.
         in region B (no region-C code while streaming). DMM / generator keep running alongside.
       - [x] Phase 1 (PR #63, draft, on feat/scope-dlg-ring): UART and Modbus RTU as a band on the scope page
             (owner 2026-10-28: an overlay on the scope page, not a separate view; the first streaming view of
-            the PR was dropped). Each frame the page draws (running, a stopped record's zoom / pan, Single,
-            the Wave view) is decoded over the screen's window of the record (pack10::Codes) plus 2
-            characters (UART) / 6 (Modbus) either side: src/decode.rs (levels auto / manual, auto-baud from
+            the PR was dropped). Owner 2026-10-28 (2): not in real time: each record is decoded once, a
+            running one that triggered (Normal / Single, Auto when it fired; not roll, not the Wave view while
+            running) and the stored one on STOP; the bytes / frames kept in TCM (80 / 16, positions in the
+            record) and every redraw, zoom and pan draws from them; a record with more: the screen's window
+            again when stopped. The decode runs in the main loop (`dec_step`, 3 ms a pass), never in the frame
+            draw; the next acquisition waits for it (Scope::hold_restart). Settings: an MF tab (Decode, the
+            fifth). src/decode.rs (levels auto / manual, auto-baud from
             the shortest runs with a TooFast cap, 8N1 / 8E1 / 8O1 / 7E1, inverted polarity, characters with a
             quarter-bit idle step, a Modbus framer with a running CRC and request / reply pairing),
             app_decode.rs (the decode per frame; DECode:...), ui_decode.rs (the band: byte boxes with hex and
             the character, Modbus frame boxes with the fields and the reply time, errors red, a bar zoomed
-            out, "Rate too low for N baud" under 4 samples per bit; the setup popup, MF > Settings >
-            Decode). DECode:FRAMes? decodes the stopped record (running: the screen). One screen's
-            annotations (`ANN`, ~0.8 KB) in TCM; no SRAM used. Tests: tools/decode-test (incl. filtered edges
+            out, "Rate too low for N baud" under 4 samples per bit; the MF Decode tab). DECode:FRAMes?: the
+            kept frames (stopped with more than the lists hold: the record decoded again on the query). The
+            cache (`ANN`, ~1.3 KB) in TCM; no SRAM used. Tests: tools/decode-test (incl. filtered edges
             at 8 samples per bit), ui-render `--decode` (24 zooms x 3 pans x both views, 0 violations),
             scpi-test, emu/decodetest.py (MCX and the Wave view: ScopeFeeder / HY3131 SetBitsFile).
       - [ ] Phase 2: tap a frame to centre the record on it; trigger / filter on a decoded value (address,
             function, a byte pattern); disk logging (LOGS/UARTnnn.CSV); Modbus ASCII; the other protocols of
             the list above. A "tail the bus" stream (the first PR draft decoded the circular DMA stream while
             a view was open: 11 KB of RAM, its own view) could come back as an option of DECode:FRAMes?.
-            Known limits: the decode adds ~3 ms a frame (8 ms when it measures the rate again; emulator,
-            native-boot.md "Protocol decoder"); the band covers the graph's bottom 35 px (the trace is not drawn there); a long
+            Known limits: the frame costs ~0.1 ms more with the decoder on (s.frame 6.98 against 6.89 ms at
+            1 ms/div); a record's decode is 2-5 ms at 1 ms/div (9600 / 115200, up to 13 ms when it measures the
+            rate), and the next acquisition waits for it (52 against 80 frames in 3 s at 1 ms/div, 9600;
+            emulator, native-boot.md "Protocol decoder"); the band covers the graph's bottom 35 px (the trace is not drawn there); a long
+
             coded record (Single at 100 ms/div and slower) decodes at ~1.3 us a sample; at 1 ms/div a 9600
             baud screen holds 9 characters, the first may be misread when the screen starts inside a run of
             back-to-back characters (they realign at an idle gap); the AD2 filter's edge shape in the

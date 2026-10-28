@@ -10,16 +10,19 @@
 //! the frame with its fields (decode::mb_text, shortened to fit) and, for
 //! a reply whose request is on the screen, the reply time. Errors
 //! (framing, parity, CRC) in red. Zoomed out (a character narrower than
-//! `MIN_BOX` px, or too few samples per bit) the row is a bar over the
-//! columns where the line toggles. What the band shows is `ANN`, filled by
-//! app_decode.rs from each decoded screen; `Model::dec_gen` changes with it.
+//! `MIN_BOX` px) the row is a bar over the columns where the line toggles.
+//!
+//! What the band shows: `ANN`, the decode of the whole stored record (the
+//! cache, filled once per record by app_decode.rs, positions in record
+//! samples) and the screen's window of it (`off`, `n`, set with every
+//! frame); `Model::dec_gen` changes with either.
 
 use super::*;
 use crate::decode as dc;
 
-/// Byte boxes / frame boxes kept for one screen.
-pub const NB: usize = 44;
-pub const NF: usize = 12;
+/// Byte boxes / frame boxes kept for one record.
+pub const NB: usize = 80;
+pub const NF: usize = 16;
 /// A character narrower than this (px) gives the bar instead of boxes.
 pub const MIN_BOX: i32 = 10;
 /// Row height and the rows' y (both views share the frame's bottom).
@@ -27,57 +30,76 @@ pub const ROW_H: i16 = 17;
 pub const BYTE_Y: i16 = 259;
 pub const FRAME_Y: i16 = 241;
 
-/// A byte box: start / end sample relative to the window start, the value,
-/// F_FE / F_PE.
+/// A byte: start / end sample of the record, the value, F_FE / F_PE.
+#[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct BAnn {
-    pub s0: i32,
-    pub s1: i32,
+    pub s0: u32,
+    pub s1: u32,
     pub v: u8,
     pub fl: u8,
 }
 
-/// A frame box: start / end sample, kind, flags, length, first bytes, the
-/// request's index in `f` (0xFF none).
+/// A frame: start / end sample, kind, flags, the request's index in `f`
+/// (0xFF none), length, first bytes.
+#[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct FAnn {
-    pub s0: i32,
-    pub s1: i32,
+    pub s0: u32,
+    pub s1: u32,
     pub kind: u8,
     pub fl: u8,
+    pub req: u8,
     pub len: u16,
     pub head: [u8; 8],
-    pub req: u8,
 }
 
-/// Band modes.
+/// The cache's states.
+pub const C_NONE: u8 = 0;
+/// A decode in progress (app_decode.rs `Job`).
+pub const C_BUSY: u8 = 1;
+pub const C_DONE: u8 = 2;
+/// No signal (no swing) / no bit rate found.
+pub const C_NOSIG: u8 = 3;
+/// Too few samples per bit (`note_baud`; 0: the rate is not known).
+pub const C_SLOW: u8 = 4;
+
+/// The screen's band modes.
 pub const M_NONE: u8 = 0;
 pub const M_BOXES: u8 = 1;
 pub const M_BAR: u8 = 2;
-/// The sample rate is too low for the bit rate (`Ann::note_baud`; 0: the
-/// rate is not known, auto-baud saw bits too short).
 pub const M_NOTE: u8 = 3;
 
-/// One decoded screen. All zero = empty (a zeroed static is valid).
+/// The cache (one record's decode) and the screen's view of it. All zero =
+/// empty (a zeroed static is valid).
 pub struct Ann {
-    pub mode: u8,
-    /// Window length (samples, the screen), sample rate, the window's first
-    /// sample from the time zero (trigger point) in samples.
-    pub n: u32,
-    pub fs: u32,
-    pub t0: i64,
+    /// The record (Scope::rec_gen + 1; 0 none), the cache state.
+    pub gen: u32,
+    pub state: u8,
+    /// The samples decoded; `full`: the lists ran out before the end.
+    pub c0: u32,
+    pub c1: u32,
+    pub full: bool,
     pub nb: u8,
     pub b: [BAnn; NB],
     pub nf: u8,
     pub f: [FAnn; NF],
-    /// More bytes than NB on the screen.
-    pub more: bool,
-    /// Bar mode: one bit per graph column (the line toggles there).
-    pub bar: [u8; 50],
-    /// The bit rate and the middle level (code) used.
+    /// The record's sample rate and its time zero (trigger point) sample;
+    /// the bit rate and the middle level (code) used; the note's rate.
+    pub fs: u32,
+    pub t0: u32,
     pub baud: u32,
-    pub note_baud: u32,
     pub mid: u16,
+    pub lo: u16,
+    pub hi: u16,
+
+    pub note_baud: u32,
+    /// The screen: its first sample in the record and its length; the mode
+    /// and, zoomed out, one bit per graph column where the line toggles.
+    pub off: u32,
+    pub n: u32,
+    pub mode: u8,
+    pub bar: [u8; 50],
 }
 
 static mut ANN: Ann = unsafe { core::mem::zeroed() };
@@ -87,18 +109,25 @@ pub fn ann() -> &'static mut Ann {
 }
 
 impl Ann {
-    pub fn clear(&mut self) {
-        self.mode = M_NONE;
+    /// Forget the decode (a new record; `baud`, the rate found last, stays).
+
+    pub fn reset(&mut self, gen: u32, state: u8) {
+        self.gen = gen;
+        self.state = state;
+        self.c0 = 0;
+        self.c1 = 0;
+        self.full = false;
         self.nb = 0;
         self.nf = 0;
-        self.more = false;
-        self.bar = [0; 50];
-        self.baud = 0;
         self.note_baud = 0;
     }
-    /// Graph x of a window sample (may lie off the graph).
-    pub fn x_of(&self, s: i32) -> i32 {
-        14 + (s as i64 * 399 / self.n.max(1) as i64) as i32
+    /// Graph x of a record sample (may lie off the graph).
+    pub fn x_of(&self, s: u32) -> i32 {
+        14 + ((s as i64 - self.off as i64) * 399 / self.n.max(1) as i64).clamp(-100_000, 100_000) as i32
+    }
+    /// The window `off .. off + n` lies in the decoded samples.
+    pub fn covers(&self, off: u32, n: u32) -> bool {
+        self.state == C_DONE && off >= self.c0 && off + n <= self.c1
     }
 }
 
@@ -203,18 +232,22 @@ pub fn band(dec: u8, blank: bool) {
     for k in 0..a.nb as usize {
         let b = a.b[k];
         let (x0, x1) = (a.x_of(b.s0), a.x_of(b.s1));
+        if x1 < 14 || x0 > 412 {
+            continue;
+        }
         let w = (x1.min(412) - x0.max(14) + 1) as i16;
+        let (v, fl) = (b.v, b.fl);
         let mut h = dc::W { b: &mut tb, n: 0 };
-        h.hex(b.v);
+        h.hex(v);
         let hn = h.n;
-        if (0x21..0x7F).contains(&b.v) {
-            h.c(b' ').c(b.v);
+        if (0x21..0x7F).contains(&v) {
+            h.c(b' ').c(v);
         }
         let fn_ = h.n;
         let full = txt(&tb[..fn_]);
         let hex = txt(&tb[..hn]);
         let t = pick(&[full, hex, ".."], w);
-        let (edge, fg) = if b.fl != 0 { (C_ERR, C_ERR) } else { (C_BOX, C_WHITE) };
+        let (edge, fg) = if fl != 0 { (C_ERR, C_ERR) } else { (C_BOX, C_WHITE) };
         draw_box(BYTE_Y, x0, x1, edge, t, fg);
     }
     if dec != 2 {
@@ -223,35 +256,42 @@ pub fn band(dec: u8, blank: bool) {
     for k in 0..a.nf as usize {
         let f = a.f[k];
         let (x0, x1) = (a.x_of(f.s0), a.x_of(f.s1));
+        if x1 < 14 || x0 > 412 {
+            continue;
+        }
         let w = (x1.min(412) - x0.max(14) + 1) as i16;
-        let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
+        let (kind, fl, req, head, len) = (f.kind, f.fl, f.req, f.head, f.len);
+        let fr = dc::Fr { start: 0, end: 0, len, head, flags: fl, kind };
         let mut lb = [0u8; 40];
         let mut l = dc::W { b: &mut lb, n: 0 };
         let mut sb = [0u8; 12];
         let mut s = dc::W { b: &mut sb, n: 0 };
-        let (edge, fg) = if f.fl & (dc::F_CRC | dc::F_FE | dc::F_PE) != 0 {
-            l.s("CRC ").hex(f.head[0]).c(b' ').hex(f.head[1]);
+        let (edge, fg) = if fl & (dc::F_CRC | dc::F_FE | dc::F_PE) != 0 {
+            l.s("CRC ").hex(head[0]).c(b' ').hex(head[1]);
             s.s("CRC");
             (C_ERR, C_ERR)
-        } else if f.fl & dc::F_PART != 0 {
+        } else if fl & dc::F_PART != 0 {
             l.s("..");
             (C_BOX, C_DIS)
         } else {
             dc::mb_text(&mut l, &fr);
             // A reply whose request is on the screen: the reply time.
-            if f.req != 0xFF && (f.req as usize) < a.nf as usize {
-                let q = a.f[f.req as usize];
-                let us = (f.s0 - q.s1).max(0) as u64 * 1_000_000 / a.fs.max(1) as u64;
-                l.c(b' ').u((us / 1000) as u32).c(b'.').u((us / 100 % 10) as u32).s("ms");
+            if req != 0xFF && (req as usize) < a.nf as usize {
+                let q = a.f[req as usize];
+                let (qs1, fs0) = (q.s1, f.s0);
+                if a.x_of(qs1) >= 14 {
+                    let us = fs0.saturating_sub(qs1) as u64 * 1_000_000 / a.fs.max(1) as u64;
+                    l.c(b' ').u((us / 1000) as u32).c(b'.').u((us / 100 % 10) as u32).s("ms");
+                }
             }
-            s.s(match f.kind {
+            s.s(match kind {
                 dc::K_REQ => "REQ",
                 dc::K_RSP => "RSP",
                 dc::K_EXC => "EXC",
                 _ => "?",
             });
-            s.c(b' ').hex(f.head[0]);
-            (C_FBOX, if f.kind == dc::K_EXC { C_ORANGE } else { C_YELLOW })
+            s.c(b' ').hex(head[0]);
+            (C_FBOX, if kind == dc::K_EXC { C_ORANGE } else { C_YELLOW })
         };
         let (ln, sn) = (l.n, s.n);
         let short = txt(&sb[..sn]);
@@ -260,14 +300,19 @@ pub fn band(dec: u8, blank: bool) {
     }
 }
 
-// ---- setup popup ----
+// ---- the MF popup's Decode tab ----
 
 /// Baud choices (0 = Auto) of the stepper.
 pub const BAUDS: [u32; 14] = [0, 300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 76800, 115_200];
 
+/// Mode: the band over the trace, or the frame log.
+pub const MODE_BAND: u8 = 0;
+pub const MODE_LOG: u8 = 1;
+
 #[derive(Clone, Copy, PartialEq)]
 pub struct SetupVals {
     pub proto: u8,
+    pub mode: u8,
     pub fmt: u8,
     pub inv: bool,
     pub baud: u32,
@@ -277,22 +322,25 @@ pub struct SetupVals {
 }
 
 impl SetupVals {
-    pub const DEFAULT: SetupVals = SetupVals { proto: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: f32::NAN };
+    pub const DEFAULT: SetupVals = SetupVals { proto: 0, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: f32::NAN };
 }
 
-pub const SU_H: i16 = 180;
+/// The tab's page height (MF_PAGE_H).
+pub const PAGE_H: i16 = 162;
 pub const SU_PROTO: Rect = rect(24, 81, 180, 24);
-pub const SU_FMT: Rect = rect(214, 81, 176, 24);
-pub const SU_BMINUS: Rect = rect(24, 125, 36, 24);
-pub const SU_BVAL: Rect = rect(64, 125, 104, 24);
-pub const SU_BPLUS: Rect = rect(172, 125, 36, 24);
+pub const SU_MODE: Rect = rect(214, 81, 120, 24);
+pub const SU_FMT: Rect = rect(24, 125, 176, 24);
 pub const SU_POL: Rect = rect(214, 125, 176, 24);
-pub const SU_TAUTO: Rect = rect(24, 169, 120, 24);
-pub const SU_TMINUS: Rect = rect(214, 169, 36, 24);
-pub const SU_TVAL: Rect = rect(254, 169, 104, 24);
-pub const SU_TPLUS: Rect = rect(362, 169, 36, 24);
-/// The setup page's labels.
-pub const SU_LABELS: [Rect; 5] = [rect(24, 61, 189, 20), rect(214, 61, 189, 20), rect(24, 105, 189, 20), rect(214, 105, 189, 20), rect(24, 149, 189, 20)];
+pub const SU_BMINUS: Rect = rect(24, 169, 36, 24);
+pub const SU_BVAL: Rect = rect(64, 169, 104, 24);
+pub const SU_BPLUS: Rect = rect(172, 169, 36, 24);
+pub const SU_TAUTO: Rect = rect(214, 169, 120, 24);
+pub const SU_TMINUS: Rect = rect(214, 197, 36, 20);
+pub const SU_TVAL: Rect = rect(254, 197, 104, 20);
+pub const SU_TPLUS: Rect = rect(362, 197, 36, 20);
+/// The page's labels.
+pub const SU_LABELS: [Rect; 6] = [rect(24, 61, 180, 20), rect(214, 61, 189, 20), rect(24, 105, 180, 20), rect(214, 105, 189, 20), rect(24, 149, 180, 20), rect(214, 149, 189, 20)];
+const SU_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Format:", "Polarity:", "Baud:", "Threshold:"];
 
 fn volts_text(w: &mut dc::W, v: f32) {
     let mut t = [0u8; 16];
@@ -303,21 +351,10 @@ fn volts_text(w: &mut dc::W, v: f32) {
     }
 }
 
-pub fn setup(v: &SetupVals) {
-    let screen = rect(0, 0, 480, 320);
-    fill_c(rect(13, 20, 401, SU_H + 1), screen, C_FRAME);
-    // The header as the MF popup's selected tab.
-    let r = rect(14, 21, 399, 40);
-    fill_c(rect(14, 21, 399, 38), screen, C_POP_BG);
-    fill_c(rect(14, 59, 399, 2), screen, C_POP_TAB);
-    let t = Ink::new(sf::SC_F22, r, "Decoder", 8, 0);
-    paint(isect(t.bx, r), &[(K_TEXT, C_POP_BG)], |x, y| match t.at(x, y) {
-        Some(g) => (C_FILL, tag(1, g)),
-        None => (C_POP_BG, 0),
-    });
-    let pc = rect(14, 61, 399, SU_H - 41);
+/// The Decode tab's page (in `pc`, the MF popup's page area).
+pub fn page(v: &SetupVals, pc: Rect) {
     fill_c(pc, pc, C_POP_BG);
-    for (r, t) in SU_LABELS.iter().zip(["Protocol:", "Format:", "Baud:", "Polarity:", "Threshold:"]) {
+    for (r, t) in SU_LABELS.iter().zip(SU_TEXTS) {
         let k = Ink::new(sf::SC_F16, *r, t, 1, 0);
         paint(isect(isect(k.bx, *r), pc), &[(K_TEXT, C_POP_BG)], |x, y| match k.at(x, y) {
             Some(g) => (C_FILL, tag(1, g)),
@@ -325,6 +362,7 @@ pub fn setup(v: &SetupVals) {
         });
     }
     option_list(SU_PROTO, pc, &["Off", "UART", "Modbus"], 60, v.proto.min(2) as usize);
+    option_list(SU_MODE, pc, &["Band", "Log"], 60, v.mode.min(1) as usize);
     option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
     option_list(SU_POL, pc, &["Normal", "Inverted"], 88, v.inv as usize);
     option_list(SU_TAUTO, pc, &["Auto", "Manual"], 60, v.thr.is_finite() as usize);
@@ -350,24 +388,22 @@ pub fn setup(v: &SetupVals) {
 #[derive(Clone, Copy, PartialEq)]
 pub enum SetupHit {
     Proto(u8),
+    Mode(u8),
     Fmt(u8),
     Baud(bool),
     Inv(bool),
     ThrAuto(bool),
     Thr(bool),
     Inside,
-    /// Below the box: closes.
-    Close,
-    Outside,
 }
 
-pub fn setup_hit(x: i16, y: i16) -> SetupHit {
-    if !rect(13, 20, 401, SU_H + 1).has(x, y) {
-        return if y > 20 + SU_H && x < 414 { SetupHit::Close } else { SetupHit::Outside };
-    }
+/// What a touch on the Decode tab's page hits.
+pub fn page_hit(x: i16, y: i16) -> SetupHit {
     let near = |r: Rect| rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y);
     if let Some(i) = option_hit(SU_PROTO, 3, 60, x, y) {
         SetupHit::Proto(i)
+    } else if let Some(i) = option_hit(SU_MODE, 2, 60, x, y) {
+        SetupHit::Mode(i)
     } else if let Some(i) = option_hit(SU_FMT, 4, 44, x, y) {
         SetupHit::Fmt(i)
     } else if let Some(i) = option_hit(SU_POL, 2, 88, x, y) {
