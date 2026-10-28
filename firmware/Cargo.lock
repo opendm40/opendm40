@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "opendm40"
-version = "0.2.10"
+version = "0.3.2"
 dependencies = [
  "cortex-m",
  "critical-section",

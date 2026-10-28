@@ -1015,7 +1015,9 @@ fn log_ref() -> &'static mut Log {
     unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
 }
 
-/// Append to the DBG:TOUCH? log (see `LogEntry` for the fields).
+/// Append to the DBG:TOUCH? log (see `LogEntry` for the fields). Not
+/// inlined (five callers, once per touch frame / gesture event).
+#[inline(never)]
 pub fn log(kind: u8, now: u64, a: u8, b: u8, c: u8, p: Point) {
     let l = log_ref();
     l.e[l.n as usize % LOG_N] = LogEntry { t: now as u32, kind, a, b, c, x: p.x, y: p.y };

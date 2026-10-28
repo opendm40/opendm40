@@ -6,7 +6,7 @@
 > rows below that mention them are historical.
 
 **Executed on 2026-10-13** (commits `b06da47`..`HEAD` on `rust-fw-poc`), after
-the repo moved to the private `wirenboard/opendm40`. Done: protocol rewrite in
+the repo moved to a private repository. Done: protocol rewrite in
 `docs/bt-protocol.md`, BT clients in `tools/`, new front-page `README.md`,
 `DM40C_feature_request.md` -> `docs/dm40-feature-request.md`, handover ->
 `docs/history/`, `flash.py` + `dm40_loader.py` -> `fw-rs/tools/legacy/`, kit
@@ -89,7 +89,7 @@ T = tracked, U = untracked, I = ignored.
 | `tools/ui-render/` | U (new) | active? | Being added by another agent |
 | `docs/*.md` | T | docs | Design docs, reviews (`*review*.md`), user feedback |
 | `docs/mockups/*.png`, `docs/mockups/tools/` | T | docs + generators | |
-| `fonts/` (Roboto + OFL), `fonts/wb-logo-round.*` (U, new) | T | vendor asset | |
+| `fonts/` (Roboto + OFL), the round logo font asset (U, new; removed in 0.3.0) | T | vendor asset | |
 | `ref/stock_dcmv.png` | T | docs | Stock screenshot |
 | `dm40-fw.bin`, `dm40-fw-native.bin`, `stub/dm40-stub.bin`, `target/`, `stub/target/` | I | generated | |
 

@@ -722,45 +722,27 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     crate::probe::end();
 }
 
-mod logo_data {
-    include!("stockfont_logo.rs");
-}
-
-/// Side of the round Wiren Board logo (tools/mklogo.py), pixels.
-pub const LOGO: i16 = logo_data::LOGO_N as i16;
-
-/// The round Wiren Board logo at (x, y), anti-aliased against `bg` (the
-/// identity mark of this firmware at the left of every status bar).
-pub fn logo(x: i16, y: i16, bg: Color) {
-    use logo_data::{LOGO_C, LOGO_M, LOGO_N};
-    let green = ramp(0x5DA0, bg); // #5cb400
-    #[cfg(test)]
-    crate::probe::begin(crate::probe::ICON, bg);
-    lcd::set_window(x as u16, y as u16, (x + LOGO - 1) as u16, (y + LOGO - 1) as u16);
-    for p in 0..LOGO_N * LOGO_N {
-        let nib = |t: &[u8]| if p & 1 == 0 { t[p / 2] >> 4 } else { t[p / 2] & 0xF };
-        let c = green[nib(&LOGO_C) as usize];
-        lcd::data(blend(0xFFFF, c, nib(&LOGO_M)));
-    }
-    #[cfg(test)]
-    crate::probe::end();
-}
-
 /// Fixed-cell label, redrawing only the cells whose character differs from
 /// `prev` (same cell layout assumed; pass an empty `prev` for a full draw).
-pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color) {
+/// `grey` (colour, from, previous from): the cells from index `from` on
+/// are drawn in that colour instead of `fg` (the DMM readout's digits below
+/// the accuracy, ../docs/dmm-accuracy.md section 5); a cell whose colour
+/// changed since `previous from` is redrawn.
+pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg: Color, bg: Color, grey: (Color, u8, u8)) {
     #[cfg(test)]
     crate::probe::group(true);
     let mut x = r.x;
     let mut it = text.chars();
     let mut ip = prev.chars();
     let full = prev.is_empty();
-    for &w in widths {
+    let (gc, gs, pgs) = grey;
+    for (i, &w) in widths.iter().enumerate() {
         let c = it.next().unwrap_or(' ');
         let pc = ip.next();
-        if full || pc != Some(c) {
+        let g = i as u8 >= gs;
+        if full || pc != Some(c) || g != (i as u8 >= pgs) {
             let mut b = [0u8; 4];
-            label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), fg, bg, 8, 0);
+            label(font, rect(x, r.y, w as i16, r.h), c.encode_utf8(&mut b), if g { gc } else { fg }, bg, 8, 0);
         }
         x += w as i16;
     }
@@ -862,14 +844,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
     let energy = u.ends_with("Wh") || u.ends_with("VAh");
+    // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
+    // core's two-way string searcher (~1 KB) into region B.
+    let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
             'k' if energy => 'k',
             'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
-            'C' if u.contains('\u{b0}') => '\u{2103}',
-            'F' if u.contains('\u{b0}') => '\u{2109}',
+            'C' if deg => '\u{2103}',
+            'F' if deg => '\u{2109}',
             c => c,
         };
         let mut t = [0u8; 4];

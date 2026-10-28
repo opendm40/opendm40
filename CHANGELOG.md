@@ -18,47 +18,65 @@ section named after the tag as the release notes; how to cut a release:
   and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
   hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
   (~0.45 s).
-- Multimeter, continuity / diode: touching the probes together no longer
-  shows A-JACK ("Current in A jack: check leads") for a second or two. There
-  A-JACK now comes only while the reading is OL (nothing on V/Ω-COM, as
-  with the leads in A and COM).
-- Multimeter / scope: a calibration record with a bad CRC is ignored and
-  the defaults are used, as the stock does; before, its values were used
-  as long as the version word was 1. `DBG:BOOT?` shows `CALREC,OK` or
-  `CALREC,BADCRC`.
-- Multimeter, V / A / ohm: holding AUTO to return to the autorange shows
-  AUTO and dashes at once; before, the last manual reading stayed on the
-  screen with MANU until the next conversion (~0.5 s on ohm).
-- Multimeter: the message after a tap on the reading gives the readings per
-  second as the rate chip shows them and the averaging time of the extra
-  digit, e.g. "MED 5.0/s, +1 digit in 1.6 s" (it read "MED 600000 counts /
-  1.6 s"). The manual's pictures showed an outdated message and rate chip
-  ("/ 3.2 s", "MED 9.4/s"); they show the current ones. The manual gave
-  6.4 s for the extra digit in Ω; it shows after 3.2 s
-  ([manual](docs/manual/README.md#rate-fast-med-slow)).
-- Multimeter: after a tap on the reading the rate chip names the new rate at
-  once, with "--/s" until its readings/s is measured (it kept the old rate's
-  name and number while the message was up), and the extra digit goes at
-  once when the new rate has none. In FAST the chip showed down to 8.0/s for
-  about a second after each offset measurement; it shows 10/s.
 
-### Docs
+## v0.3.0 (2026-10-27)
 
-- Ohm: 500 Ω from an MMB3.0 calibrator read OL on the 600 Ω range. The
-  firmware's OL limit there (618 Ω on every model) and its OL decision are
-  not the cause: a resistor of 500 Ω reads from the first conversion after an
-  overload (emulator). The suspected cause is the calibrator's resistance output at the
-  range's 0.90 mA test current, or a lock of it after its switch (both
-  inferred); the low-current ON variant
-  (0.28 mA) may read it. Device check in
-  [firmware/TODO.md](firmware/TODO.md) ("500 ohm from the MMB3.0 reads OL on 600 ohm").
+### New
 
-### Tools
+- **Accuracy of the reading** under the unit, from the DM40 manual for your
+  model; digits finer than it are grey. Settings > More > More > Accuracy
+  ([manual](docs/manual/README.md#accuracy)).
 
-- [emu/hy3131/ohm600test.py](emu/hy3131/ohm600test.py): manual 600 Ω at
-  each rate, steps into 500 Ω from 200 Ω / open / OL, the 618 Ω limit, and
-  AUTO landing 500 Ω on 600 Ω.
+  ![Before and after: the accuracy label and the grey digits](docs/changelog/v0.3.0/accuracy.png)
 
+- **60 Ω range** with milliohm digits, on the range page and in AUTO
+  ([manual](docs/manual/README.md#resistance)).
+
+  ![Before and after: the resistance range page](docs/changelog/v0.3.0/ohm-60.png)
+
+- **Negative ohm** (Settings > More > More): shorted leads read below zero
+  instead of 0.000. SCPI `RESistance:NEGative`.
+
+  ![Shorted leads with Negative ohm ON](docs/changelog/v0.3.0/negative-ohm.png)
+
+- **Scope:** the timebase list shows each entry's sample rate
+  ([manual](docs/manual/README.md#timebase)).
+
+  ![Before and after: the timebase list](docs/changelog/v0.3.0/tb-list.png)
+
+- **Start-up:** a splash with the version and a progress bar; the meter page
+  comes up in about 0.7 s instead of 4 s.
+
+  ![The start-up splash](docs/changelog/v0.3.0/splash.png)
+
+### Fixed
+
+- **Scope did not turn on** (a flat trace at the bottom) after power-on with
+  Analog power set to Both always or a start page other than Multimeter: the
+  analog supply was switched wrongly. Switching to Auto or opening the scope
+  then could turn the meter off.
+- **Frequency:** 2 Hz and 5 Hz gave no reading; it now reads down to 0.5 Hz,
+  with one more (small) digit where the counter allows it
+  ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
+
+  ![Before and after: the frequency reading](docs/changelog/v0.3.0/hz.png)
+
+- **Generator:** after OFF and ON the sine, triangle and ramp stayed flat
+  until a restart.
+- **Continuity / diode:** touching the probes together no longer shows
+  A-JACK.
+- **Scope:** closing a popup is about 4x faster; the tap's beep is short
+  again.
+- **AC V:** the first readings after a range step on a signal with a DC part
+  read high; they are grey until settled.
+- A calibration record with a bad CRC is ignored, as the stock firmware does.
+- Holding AUTO shows AUTO at once, not the last manual reading.
+- The rate chip and the message after a tap on the reading show the new rate
+  at once.
+
+### Changed
+
+- No logo in the status and title bars.
 
 ## v0.2.0 (2026-10-25)
 
@@ -206,7 +224,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ## v0.1-pre1 (2026-10-24)
 
-First pre-release ([release page](https://github.com/wirenboard/opendm40/releases/tag/v0.1-pre1)),
+First pre-release ([release page](https://github.com/opendm40/opendm40/releases/tag/v0.1-pre1)),
 published by hand. Its `*IDN?` and Device page show `0.0.1` (the crate
 version then). The version scheme of
 [Releasing](firmware/README.md#releasing) starts with the next release.

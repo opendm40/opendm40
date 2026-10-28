@@ -237,6 +237,11 @@ fn pin(port: u32, n: u32, high: bool) {
     unsafe { w32(port + 0x18, if high { 1 << n } else { 1 << (n + 16) }) };
 }
 
+/// A rail pin's real level: an output (MODER 01) driven high (OCTL).
+fn rail_on(port: u32, n: u32) -> bool {
+    unsafe { r32(port) >> (2 * n) & 3 == 1 && r32(port + 0x14) >> n & 1 != 0 }
+}
+
 fn out(port: u32, n: u32) {
     unsafe {
         modify32(port + 0x0C, 3 << (2 * n), 0);
@@ -373,6 +378,7 @@ pub const WAVE_TB_MIN: usize = 15;
 /// square's samples reads 0.5 / 1 / 1.9 / 3.8 % low at 9600 / 4800 / 2400 /
 /// 1200 S/s (device d8e249d: Vrms -1.6 % from 50 ms/div;
 /// docs/dmm-input-scope-feasibility.md 3.2).
+#[inline(always)] // (one more caller, tb_rate, must not outline it)
 pub const fn wave_fs_for(tb: usize) -> u32 {
     match tb {
         0..=15 => 76800,
@@ -382,6 +388,12 @@ pub const fn wave_fs_for(tb: usize) -> u32 {
         20 | 21 => 2400,
         _ => 1200,
     }
+}
+
+/// The sample rate (S/s) timebase `tb` gives: MCX, or the Wave view's
+/// stream (`wave`); `Scope::sample_rate` (ACQ:SRAT?) at that timebase.
+pub fn tb_rate(tb: usize, wave: bool) -> u32 {
+    if wave { wave_real_fs(wave_fs_for(tb)) } else { TB[tb].0 }
 }
 
 /// The sample rate a wave frame's measurements, FFT and CSV use for the
@@ -546,9 +558,11 @@ struct Wave {
     mcx: Settings,
 }
 
-/// The wave state: a static (TCM .bss: it shortens the stack by its size,
-/// as a field of `Scope` in the App on the main stack would; SRAM has less
-/// room left). `Scope::new` initialises it.
+/// The wave state: a static, not a field of `Scope` in the App on the main
+/// stack. On the device in SRAM (.dmabuf, NOLOAD: no 224-byte .data load
+/// image in region B; region B audit #6), set up by `Scope::new` before any
+/// other use. Main loop only.
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut WAVE: Wave = Wave::NEW;
 
 fn wv() -> &'static mut Wave {
@@ -616,13 +630,16 @@ impl Scope {
             seq: 0,
             relay_until: 0,
             last_pc13: 2,
-            // Unknown levels after the stock / boot: claim "scope on, DMM off"
-            // so the first rails() call drives both pins to a known state.
-            powered: true,
+            // The levels board::init left (PE2 = 1, PC4 = 0). This used to
+            // claim "scope on" while PC4 was low: rails() then never raised
+            // PC4 with Both always or a non-DMM start page, and a later
+            // switch to the scope dropped PE2 with PC4 still low, both rails
+            // off = the power hold gone (the meter switched off, 2026-10-26).
+            powered: rail_on(GPIOC, 4),
             screen: 0,
             rec: 0,
             roll: true,
-            dmm_on: false,
+            dmm_on: rail_on(GPIOE, 2),
             rolling: false,
             roll_written: 0,
             roll_last_wr: 0,
@@ -656,7 +673,8 @@ impl Scope {
             lent: false,
             stored_ab: (0.0, 1.0),
         };
-        *wv() = Wave::NEW;
+        // WAVE is not loaded on the device (.dmabuf): set up in place.
+        unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
         sc.hw.init();
         // Comparator trigger on by default (the stock always uses it): the
         // software search of a linear record only covers CAP - screen = 1624
@@ -677,30 +695,35 @@ impl Scope {
     /// raises PC4 on its scope / generator pages and PE2 on the DMM page, never
     /// both). A rail that comes up does so 10 ms before one goes down, as the
     /// stock page switch; at least one rail stays on. Cheap when nothing
-    /// changes (called every tick by App::update_rails).
+    /// changes (called every tick by App::update_rails). Decided on the pins' real levels, not on what was last asked: a rail
+    /// can never be believed on while it is off, so one of the two always
+    /// stays on (both off drops the power hold).
     pub fn rails(&mut self, dmm: bool, scope: bool, clk: &mut crate::clock::Clock) {
         let dmm = dmm || !scope;
-        if dmm == self.dmm_on && scope == self.powered {
+        let (pe2, pc4) = (rail_on(GPIOE, 2), rail_on(GPIOC, 4));
+        if dmm == pe2 && scope == pc4 {
+            self.dmm_on = dmm;
+            self.powered = scope;
             return;
         }
-        if scope && !self.powered {
+        if scope && !pc4 {
             pin(GPIOC, 4, true);
             out(GPIOC, 4);
             self.relay_until = clk.now_ms() + 200;
         }
-        if dmm && !self.dmm_on {
+        if dmm && !pe2 {
             pin(GPIOE, 2, true);
             out(GPIOE, 2);
         }
-        if (!scope && self.powered) || (!dmm && self.dmm_on) {
+        if (!scope && pc4) || (!dmm && pe2) {
             clk.delay_ms(10);
         }
-        if !scope && self.powered {
+        if !scope && (pc4 || self.powered) {
             self.halt();
             pin(GPIOC, 4, false);
             out(GPIOC, 4);
         }
-        if !dmm && self.dmm_on {
+        if !dmm && pe2 {
             pin(GPIOE, 2, false);
             out(GPIOE, 2);
         }

@@ -10,7 +10,7 @@
  *                                      sector 1 (FS-loader writes it like any
  *                                      body byte), named hot read-only data
  *                                      (`.rodata.a2.*`: the ASCII26, F14,
- *                                      LETTERS, UNIT and SC_PROBE font blobs,
+ *                                      LETTERS, UNIT, LOCK font blobs,
  *                                      tools/mkstockfont.py A2_FONTS).
  *                                      ~14.8 KB; the link fails
  *                                      when it reaches the marker, build.sh
@@ -112,7 +112,11 @@ SECTIONS
         *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
-        *(.text.*8opendm408recovery*);
+        /* recovery::run only: the rest of recovery.rs (the recovery-usb /
+         * recovery-file variants' own code, ~1 KB) goes to region B, which
+         * those variants have room in, and keeps their region C above its
+         * 4 KiB floor; the default image has only `run`. */
+        *(.text.*8opendm408recovery3run*);
         *(.text.*8opendm407gallery*);
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);
@@ -278,8 +282,11 @@ SECTIONS
         *(.text.*8opendm404scpi7dcv_arg*);
         /* NOT the SCPI range / resolution commands (scpi::range_cmd,
          * conf_cmd, range_arg, res_arg, step_exp, pow10f, App::scpi_range;
-         * ~2 KB) nor ui::help_page: back in region B since region C audit
-         * #2 (2026-10-25, docs/native-boot.md "Region C audit #2"). */
+         * ~2 KB): back in region B since region C audit #2 (2026-10-25,
+         * docs/native-boot.md "Region C audit #2"). ui::help_page went back
+         * with them and returned here with the DMM accuracy label (0.6.0,
+         * the same section): drawn on the Help pages only, where no stream
+         * runs (the list below). */
         *(.text.*8opendm404scpi6n7_arg*);
         *(.text.*8opendm406dbg_n7*);
         *(.text.*8opendm407dbg_dcv*);
@@ -314,6 +321,13 @@ SECTIONS
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
         *(.text.*8opendm403app*3App9wave_open*);
+        /* A popup closed on the scope page (event rate): the page under it
+         * is marked for repaint (the repaint itself is in region B). */
+        *(.text.*8opendm403app*3App14sp_popup_close*);
+        *(.text.*8opendm403app*3App10sp_uncover*);
+        *(.text.*8opendm408scope_ui7uncover*);
+        /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
+        *(.text.*8opendm403app*3App8dbg_idle*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);
@@ -356,6 +370,14 @@ SECTIONS
         *(.text.*8opendm402bt*2Bt3new*);
         *(.text.*8opendm408spiflash*8SpiFlash3new*);
         *(.text.*8opendm403usb7init_hw*);
+        /* USB endpoint allocation (usb-device / synopsys-usb-otg): only
+         * when main.rs `run` builds the USBTMC / MSC classes, before its
+         * loop; enumeration and resets do not allocate. Region B audit #5
+         * (2026-10-26, fix/low-freq). */
+        *(.text.*16synopsys_usb_otg3bus*8alloc_ep*);
+        *(.text.*16synopsys_usb_otg3bus*17EndpointAllocator*5alloc*);
+        *(.text.*10usb_device3bus*15UsbBusAllocator*5alloc*);
+        *(.text.*10usb_device3bus*15UsbBusAllocator*4bulk*);
         /* Menu / list / keypad page helpers (already their own symbols):
          * drawn or hit-tested only on the Menu, Settings, Record, Limits,
          * Keypad, Help and Device pages, where no stream runs (leaving the
@@ -364,6 +386,7 @@ SECTIONS
          * during a fast-log session reached it (fastlogtest --ui-nav;
          * region B since 2026-10-23, ~0.2 KB). */
         *(.text.*8opendm402ui9menu_item*);
+        *(.text.*8opendm402ui9help_page*);
         *(.text.*8opendm402ui9list_page*);
         *(.text.*8opendm402ui10page_title*);
         *(.text.*8opendm402ui11set_stepper*);

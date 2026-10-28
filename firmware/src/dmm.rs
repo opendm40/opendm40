@@ -178,6 +178,7 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   DC A      r0, r1  6 A / 10 A (10 mohm)     60.4         6.0         no (0.1 uV across the shunt)
 //   DC mA     r0, r1  60 / 600 mA (0.5 ohm)    30.2         3.0         no
 //   DC uA     r0, r1  600 / 6000 uA (47.5 ohm) 28.7         2.9         no
+//   ohm       r0      60 ohm (Rref 0.1k)       75.5 (1 mohm) 7.5        no (already mohm)
 //   ohm       r1..r3  600 ohm .. 60 kohm       75.5         7.5         yes (r1: 600.000 ohm = mohm)
 //   ohm       r4, r5  600 kohm, 6 Mohm         75.5         7.5         no (hum / leakage)
 //   ohm       r6      60 Mohm (Rref 63 M)     119.8        12.0         no (hum / leakage)
@@ -192,27 +193,14 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 // at 0x16, of 16 6.4 s at 0x17); it restarts on a step of more than ~2
 // counts of the 60000-count format, on any OSR / range / mode change, and is
 // not used in AC+DC.
-// Ohm r0, the 60 ohm range: removed 2026-10-25 (owner); the work is on
-// branch feat/ohm60. Nothing selects it: every ohm range here is r1..r6
-// (`set` raises a mode 10 r0 to r1; OHM_R_MIN). Its row stays in the stock
-// table (hy3131_tables.rs CFG_F10_P8CLR[0] / P8SET[0]), as do OHM_RREF[0],
-// OHM_DEC[0] and OHM_ISC[0]. What is known, to resume from:
-// - The stock V2.6 never selects r0: its ohm range is clamped to 1..6
-//   (stock/re/analysis/dmm_v2_6.h section 2).
-// - r0's calibration slot 0x124[0] holds a round 1.005 on the dumped unit,
-//   an uncalibrated default (inferred: r1..r6 hold measured values).
-// - On the device, with the stock scale (Rref 0.1 k x the slot), r0 read
-//   2.6..2.7 % low against r1 on the MR9270 calibrator at 10 / 20 / 50 ohm.
-//   The ratio is the same at all three, so it is a gain error, not a
-//   parallel load. Ruled out as the cause: the OP1 x10 path (the record's
-//   x10 / x1 pairs of DC mV / A / mA / uA say x10 reads high, not low) and
-//   the nominal Rref / 10 (the x10 ohm row, OPS1 = 1, of the
-//   [Digilent DMM Shield library](https://github.com/Digilent/Arduino-DMMShield-Library)
-//   `dmm.cpp` scales by exactly Rref / 10).
-// - The r0 row differs from r1 in R25 0x01 (OP1 x10) and R2B 0x46 vs 0x40:
-//   r0 also closes PA2 DF, which the stock rows close only on the high ohm
-//   ranges. Next experiment: r0 with R2B = 0x40, compared with r1 on the
-//   calibrator.
+// Ohm r0 is the stock 60 ohm row (f10 row 0: OPS1 = 1, the OP1 x10 gain also
+// used by DC mV / A r0; the stock Rref constant 0.1 kohm = the 1 kohm r1
+// reference / 10) that the stock never selects (its autorange clamps to r1..r6,
+// dmm_v2_6.h section 2). Here it is in the autorange too (owner 2026-10-25,
+// `ohm_auto_floor`: not with the "ON" variant) and a manual range, always with
+// the default ohm variant (SFUVR = 2, the 0.90 mA one; the "ON" variant gives
+// 0.28 mA on r1, OHM_ISC), with PA2 open (OHM_R0_ROW). Its gain is `ohm_row_gain`; the
+// single offset 0x144 is the r1..r6 one: use REL.
 
 // ------------------------------------------------- FR-05 conversion rate
 //
@@ -231,8 +219,8 @@ const CFG_F13_DISCHARGE: [u8; hy::CFG_LEN] = [
 //   FAST    0x06 OSR 16384 unchopped,       0x16           none                                  10/s DC (2 dropped per offset
 //           offset in firmware (fastvos.rs)                                                       refresh, every 30 s); ohm 5/s
 //   MEDIUM  0x16 OSR 16384 chopped          0x17           V r0..r2 / mV r1: 8 (1.6 s),          5/s DC, ohm 2.5/s
-//   (dflt)                                                 ohm r1..r3: 16 (6.4 s), others none
-//   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r1..r3:    2.5/s
+//   (dflt)                                                 ohm r0..r3: 16 (6.4 s), others none
+//   SLOW    0x17 OSR 32768 chopped          0x17           16 every range (6.4 s; ohm r0..r3:    2.5/s
 //                                                          32, 12.8 s)
 // Ohm keeps its own OSR steps (`poll_ohm`): 0x13 on OL, OSR_EARLY within
 // R22_DROP_WIN_MS of the row write. Ohm MEDIUM / SLOW keep the stock's
@@ -427,17 +415,37 @@ impl Avg {
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
 // Test sources shown on the DMM page (`test_current`).
-/// The lowest ohm range: r1 (600 ohm). r0 (60 ohm) is removed (the ohm
-/// notes above, branch feat/ohm60).
-const OHM_R_MIN: i8 = 1;
+/// Ohm r0 (60 ohm) row: the stock f10 row 0 with PA2's DS2 / FS2 open (R2B
+/// 0x46 -> 0x40), i.e. the r1 row with OPS1 = 1 (OP1 x10). Device 2026-10-26
+/// (MR9270 on V-COM, 10 / 20 / 50 ohm, manual 60 / 600 ohm, alternating): with
+/// PA2 closed r0 read 0.971 x r1 (Rref 0.1 k, r1's gain), with it open 1.009.
+/// What PA2 is wired to on the board is not known.
+const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
+    let mut c = CFG_F10_P8CLR[0];
+    c[0x0B] &= !0x06;
+    c
+};
+
+/// Calibration gain of ohm row `r` from its own slot `cal_r` (0x124 + 4r).
+/// r0: the slot is not a calibration (the stock never selects r0,
+/// dmm_v2_6.h section 2; 1.005 on the dumped unit, a round value like the
+/// other unused slots, inferred), so r1's gain `cal_r1` (the shared 1 kohm
+/// reference, PA4 DF) x the record's DC mV x10 / x1 gain ratio `mv10 / mv1`
+/// (0x24 / 0x28, the same OP1 x10 stage; 0.9895 on the dumped unit, the x10
+/// path reads ~1 % high). That leaves r0 / r1 = 0.9991 at 50 ohm (device
+/// 2026-10-26).
+fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
+    if r == 0 { cal_r1 * mv10 / mv1 } else { cal_r }
+}
 
 /// Ohm short-circuit test current (A) per range, [default variant, "ON"
 /// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
 /// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
 /// docs/data/short.csv, the stock row's own tap: VDS15 default, AGNDP7 ON,
-/// AGNDP8 ON on r5). r0 (60 ohm, removed: OHM_R_MIN) = r1's default value,
-/// inferred, not used. r6 (60 M, the current-source row): not measured,
-/// None.
+/// AGNDP8 ON on r5). r0 (60 ohm, always the default variant,
+/// `Dmm::write_config`) = r1's default value, inferred: its own row has the
+/// same tap and Rref switches but was not measured. r6 (60 M, the
+/// current-source row): not measured, None.
 pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
     [Some(8.983e-4), Some(8.983e-4)],
     [Some(8.983e-4), Some(2.795e-4)],
@@ -456,7 +464,7 @@ pub const DIODE_I: f32 = 0.756e-3;
 /// OHM_ISC, the most the range drives through the probes (with R between
 /// them it is less). None where it is not measured (r6).
 pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
-    OHM_ISC[r.clamp(OHM_R_MIN, 6) as usize][(var & 1) as usize]
+    OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
@@ -780,6 +788,106 @@ struct Freq {
     f_khz: f32,
     duty: f32,
     range: u8,
+    /// The running gate's start (a restart), ms (low 32 bits of `now`).
+    t0: u32,
+    /// SYSCLK ticks of each source's `last` gate (`counter_vals` n).
+    lastn: [u32; 2],
+    /// Ticks of the shown value's gate (0: none / no signal): `freq_ext`.
+    n: u32,
+    /// The latest clean result of either source, kHz (NaN after a restart,
+    /// 0 after no signal): `Freq::take`'s agreement check.
+    prev: f32,
+    /// Each source's `last` agreed with the clean result before it.
+    conf: [bool; 2],
+    /// The pick of the latest `take` is provisional (`Reading::prov`).
+    prov: bool,
+}
+
+/// Two clean gates in a row agree within this (relative): `Freq::take`.
+const FREQ_AGREE: f32 = 0.01;
+
+/// The first counter check after a restart (the stock's 350 ms period:
+/// above ~6.7 Hz the gate is over by then, so the update rate is the
+/// stock's), ms.
+const FREQ_CHECK_MS: u64 = 350;
+/// Later checks while the gate still runs, ms.
+const FREQ_RECHECK_MS: u64 = 20;
+/// A gate that counted nothing (CTB = CTC = 0) this long gives up: no edge
+/// in 2.2 s is no signal (a 0.5 Hz input has an edge every 2 s), ms.
+const FREQ_NOEDGE_MS: u32 = 2200;
+/// A gate with counts but no end gives up after this, ms. A gate takes up
+/// to two input periods plus 53.3 ms (the wait for the opening edge, then
+/// the 0x40000-tick minimum, then the next edge): 4.05 s at 0.5 Hz; this
+/// limit measures down to ~0.45 Hz.
+const FREQ_GATE_MAX_MS: u32 = 4400;
+
+/// The longest a gate may run (`gate_check`). With counts (`edges`) the
+/// gate opened: the input is there, maybe slower than the value shown (a
+/// frequency step down), so FREQ_GATE_MAX_MS. Without counts, with a value
+/// shown (`f_khz` > 0) 3.5 of its periods + 150 ms (a gate takes up to two
+/// periods + 53.3 ms; the margin covers a missed opening edge, unknown on
+/// the chip; a signal gone then reads as no signal about as fast as
+/// before), at least FREQ_CHECK_MS, at most FREQ_NOEDGE_MS.
+pub(crate) fn gate_limit_ms(f_khz: f32, edges: bool) -> u32 {
+    if edges {
+        return FREQ_GATE_MAX_MS;
+    }
+    let p = if f_khz > 0.0 { 3.5 / f_khz + 150.0 } else { FREQ_NOEDGE_MS as f32 };
+    (p.min(FREQ_NOEDGE_MS as f32) as u32).max(FREQ_CHECK_MS as u32)
+}
+
+/// A counter check (`Dmm::freq_gate`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(u8)]
+pub(crate) enum Gate {
+    /// Still counting: check again later.
+    Wait,
+    /// A whole gate: the counts are a result.
+    Done,
+    /// Given up without counts within `gate_limit_ms` (`Freq::take`).
+    Empty,
+    /// Given up: nothing counted for the whole FREQ_NOEDGE_MS (no signal).
+    Quiet,
+    /// Given up with counts: the gate opened but did not end in
+    /// FREQ_GATE_MAX_MS (an input below the range, or gone mid-gate).
+    Late,
+}
+
+/// The HY3131 counter is a reciprocal one (DS-HY3131 14): after the
+/// 0x40000-tick minimum (CTA overflow) it counts on until CTB holds a whole
+/// number of input cycles, then stops (CTF). So a gate is over when CTA is
+/// past the overflow and stands still between two reads (`cta`, `cta2`)
+/// with cycles counted; its length then follows the input, not a fixed
+/// window. Else it waits up to `gate_limit_ms` (`el_ms` since the restart).
+pub(crate) fn gate_check(ctc: u32, ctb: u32, cta: u32, cta2: u32, el_ms: u32, f_khz: f32) -> Gate {
+    if ctr_valid(ctb, cta) && cta == cta2 {
+        return Gate::Done;
+    }
+    let edges = ctb > 0 || ctc > 0;
+    if el_ms < gate_limit_ms(f_khz, edges) {
+        return Gate::Wait;
+    }
+    if edges {
+        Gate::Late
+    } else if el_ms >= FREQ_NOEDGE_MS {
+        Gate::Quiet
+    } else {
+        Gate::Empty
+    }
+}
+
+/// The extra (small) digit of a frequency readout `v` (display units, `dec`
+/// decimals) from a gate of `n` SYSCLK ticks: the reciprocal count resolves
+/// v / n (one tick of the gate), shown when that is at most one count of the
+/// extra digit, 10^-(dec+1). E.g. 10 Hz (one 100 ms period, n = 491520):
+/// 0.00002 Hz <= 0.0001 Hz, 10.0000 Hz; 50 Hz (three periods, 60 ms):
+/// 0.00017 Hz > 0.0001 Hz, 50.000 Hz.
+pub(crate) fn freq_ext(v: f32, dec: u8, n: u32) -> bool {
+    let mut w = 1.0f32;
+    for _ in 0..=dec {
+        w *= 0.1;
+    }
+    n > 0 && v >= 0.0 && v / n as f32 <= w
 }
 
 /// `Freq::take`: what this gate's result lets the frequency mode show.
@@ -800,6 +908,8 @@ impl Freq {
         self.zc = [0; 2];
         self.shown = false;
         self.change = [1e6; 2];
+        self.prev = f32::NAN;
+        self.prov = false;
     }
 
     /// One gate's result of source `i` (`f` kHz, duty `d` %, `ok`: a whole
@@ -811,12 +921,34 @@ impl Freq {
     /// glitch (`freq_glitch`) is no result either. 0.000 Hz (no signal)
     /// only once both sources counted nothing NO_SIGNAL_N times in a row
     /// (once each after a value was shown: the signal went away).
-    fn take(&mut self, i: usize, f: f32, d: f32, ok: bool) -> FreqPick {
+    /// `n`: the gate's SYSCLK ticks; `quiet`: a gate that counted nothing
+    /// for FREQ_NOEDGE_MS (`Gate::Quiet`) counts as NO_SIGNAL_N empty
+    /// gates of both sources (they count the same node; a source with a
+    /// clean value still shows it): no signal after one such gate, ~2.9 s
+    /// from an entry (four 2.2 s gates would be ~9 s). A gate given up with
+    /// counts (`edges`) is no result and no "no signal" either.
+    ///
+    /// Device 2026-10-26 (MR9270 square 1 Hz -> 0.5 Hz): a gate across the
+    /// step read 1.402781 Hz (final) for ~8 s, then 0.000 Hz, 0.500022 Hz
+    /// from ~12 s. So once a value was shown, a clean result is final
+    /// (`conf`) only within FREQ_AGREE of the clean result before it (either
+    /// source); else the pick is provisional (`prov`: grey, not in READ? /
+    /// statistics) until the next gate agrees. No signal right after a
+    /// frequency is provisional, final from the next empty gate: on the
+    /// device the MR9270's output paused across a step (0.000 Hz final for
+    /// ~6 s after 1 -> 0.5 Hz with a quiet gate final at once; the pause is
+    /// INFERRED from that).
+    fn take(&mut self, i: usize, f: f32, d: f32, n: u32, g: Gate) -> FreqPick {
         const NO_SIGNAL_N: u8 = 2;
         let glitch = freq_glitch(f, d);
-        if !ok || f <= 0.0 {
+        let quiet = g == Gate::Quiet;
+        if g != Gate::Done || f <= 0.0 {
             self.seen[i] = false;
-            self.zc[i] = self.zc[i].saturating_add(1);
+            if quiet {
+                self.zc = [self.zc[0].max(NO_SIGNAL_N), self.zc[1].max(NO_SIGNAL_N)];
+            } else if g != Gate::Late {
+                self.zc[i] = self.zc[i].saturating_add(1);
+            }
             self.change[i] = 1e6;
         } else if glitch {
             // Edges missed: neither a value nor "no signal"; the last clean
@@ -831,8 +963,18 @@ impl Freq {
             // A source's first clean result has no change to rank it by
             // (1e6: shown only while it is the one source with a result).
             self.change[i] = if self.seen[i] { freq_change(f, d, self.last[i]) } else { 1e6 };
+            // Agreeing with the other source's latest result confirms that
+            // one too (two gates in a row).
+            let p = self.prev;
+            let ok = !(p > 0.0) || (f - p).abs() <= FREQ_AGREE * p;
+            self.conf[i] = ok;
+            if ok && self.last[1 - i] == p {
+                self.conf[1 - i] = true;
+            }
+            self.prev = f;
             self.last[i] = f;
             self.lastd[i] = d;
+            self.lastn[i] = n;
             self.seen[i] = true;
             self.zc[i] = 0;
         }
@@ -843,9 +985,16 @@ impl Freq {
                 if self.zc[0] >= n && self.zc[1] >= n { FreqPick::NoSignal } else { FreqPick::None }
             }
         };
-        if pick != FreqPick::None {
-            self.shown = true;
+        match pick {
+            FreqPick::None => return pick,
+            FreqPick::Src(b) => self.prov = !self.conf[b],
+            FreqPick::NoSignal => {
+                // The next value is final at once (as at an entry).
+                self.prov = self.f_khz > 0.0;
+                self.prev = 0.0;
+            }
         }
+        self.shown = true;
         pick
     }
 }
@@ -1003,6 +1152,8 @@ pub struct Dmm {
     /// vetted; `aca_vet`) and the previous result on the row (NaN: none).
     aca_vet_t: u64,
     aca_prev: f32,
+    /// Plain AC V: this row came from a range step (ACV_DC_*).
+    acv_vet: bool,
     /// The reading of this poll is provisional by G7 only (`acdc_reading`).
     prov_side: bool,
     /// AC+DC: the first DC result of the run asking for a step down (ms, 0
@@ -1226,6 +1377,10 @@ pub struct Dmm {
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
     pub burden_show: bool,
+    /// Ohm readings below 0 shown (Settings 3/3 "Negative ohm", SCPI
+    /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
+    /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
+    pub ohm_neg: bool,
 }
 
 /// Fuse check (`Dmm::fuse_start`): what to go back to, start time, ohm
@@ -1471,6 +1626,17 @@ const ACA_VET: bool = true;
 const ACA_VET_REL: f32 = 0.05;
 const ACA_VET_FS: f32 = 0.002;
 const ACA_VET_MAX_MS: u64 = 2000;
+// Plain AC V after a range step: OP1's gain changes (6 / 60 V share a tap),
+// so its output's DC steps and the coupling into PB4 (tau 0.34 s,
+// docs/hy3131-frontend-2026-10-26.md 2) carries the step to AD2, whose RMS
+// block sees it: device 0.2.1, the 0 / 9.5 V 50 / 20 Hz square, LPF 1.33,
+// 0.99, 0.74, 0.55 ... V over the first results after 60 -> 6 V with RMS =
+// sqrt(AC^2 + LPF^2) within ~0.1 V (first finals +3.6..+4.5 %), -25 ... V
+// after 6 -> 60 V (21-26 V for 4.84 V). A result is provisional (grey, no
+// range move down) while |LPF| > ACV_DC_K x the RMS + ACV_DC_FS x the range
+// (its share of the RMS then < 0.15 %), at most ACA_VET_MAX_MS.
+const ACV_DC_K: f32 = 0.05;
+const ACV_DC_FS: f32 = 0.005;
 
 /// Ohm entry (switch-latency.md proposal 2): the stock's button entry writes
 /// no settle deadline; its `now + 2500` at case 10 (app_decompile.c:16135)
@@ -1654,6 +1820,7 @@ impl Dmm {
             over_prev: false,
             aca_vet_t: 0,
             aca_prev: f32::NAN,
+            acv_vet: false,
             prov_side: false,
             down_t: 0,
             rd_pending: false,
@@ -1719,7 +1886,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0 },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -1775,6 +1942,7 @@ impl Dmm {
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
+            ohm_neg: false,
         }
     }
 
@@ -1817,18 +1985,28 @@ impl Dmm {
         self.a_auto
     }
     /// Select the ohm variant (stock m+8: 0 normal, 1 "ON" low current,
-    /// the p8set rows) and re-enter ohm in the current range, as the
-    /// stock's second tap on the ohm button.
+    /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
+    /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
         self.ohm_var = v & 1;
         if self.mode == 10 {
-            let r = self.range.clamp(OHM_R_MIN, 6);
+            // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
+            let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
         }
     }
 
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
+    }
+
+    /// The lowest range of the ohm autorange: r0 (60 ohm) with the default
+    /// variant, r1 (600 ohm) with the "ON" one. r0 always drives the default
+    /// variant's 0.90 mA (`write_config`), so the autorange stays out of it
+    /// when the user chose the 0.28 mA test current; a manual 60 ohm still
+    /// works (at 0.90 mA). The stock autorange never goes below r1.
+    fn ohm_auto_floor(&self) -> i8 {
+        if self.ohm_var == 1 { 1 } else { 0 }
     }
     /// Restore m+6 / m+7 / m+8 (settings): only the values the UI / BT can
     /// set (V, A: 1 = AUTO+, 3 = AUTO; ohm variant 0 / 1); anything else
@@ -1999,9 +2177,9 @@ impl Dmm {
             5 | 6 => &CFG_F5_6[r.min(1)],
             7 => &CFG_F7[r.min(1)],
             8 | 9 => &CFG_F8_9[r.min(1)],
+            // r0 (60 ohm) always with the higher-current default variant.
             10 => {
-                let r = r.clamp(OHM_R_MIN as usize, 6);
-                if self.ohm_var == 1 { &CFG_F10_P8SET[r] } else { &CFG_F10_P8CLR[r] }
+                if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
             11 => &CFG_F11[0],
             12 => &CFG_F12[0],
@@ -2268,8 +2446,6 @@ impl Dmm {
         // The R22 (AD1 OSR) the chip runs now (R22_DROP).
         let r22_was = hy::read1(0x22);
         self.pw_leave();
-        // No ohm r0 (60 ohm, removed: the ohm notes at the top).
-        let range = if mode == 10 { range.max(OHM_R_MIN) } else { range };
         self.mode = mode;
         self.range = range;
         self.write_config(clk);
@@ -2278,6 +2454,7 @@ impl Dmm {
         self.sent.new_run();
         let now = clk.now_ms();
         self.deadline = now + settle;
+        self.acv_vet = false;
         if changed_mode {
             self.entry = now;
             self.reset_values();
@@ -2293,6 +2470,7 @@ impl Dmm {
             self.ac_raw = 0.0;
             self.ac_seed = true;
             self.ac_lead = if mode > 2 { 0 } else { 2 };
+            self.acv_vet = mode == 0;
         }
         self.ac_settle_start(now, old);
         self.vet_start(old);
@@ -2544,6 +2722,7 @@ impl Dmm {
         self.freq.f_khz = f32::NAN;
         self.freq.duty = f32::NAN;
         self.freq.range = 0;
+        self.freq.n = 0;
         // No source history from another function (AC+DC's secondary
         // counter, an earlier frequency session): the first two results
         // of each source decide afresh.
@@ -3193,6 +3372,9 @@ impl Dmm {
         }
         match self.mode {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
+            // A manual 60 ohm with the "ON" variant: AUTO continues from
+            // 600 ohm (`ohm_auto_floor`); with the default one from 60 ohm.
+            10 if self.range < self.ohm_auto_floor() => self.set(clk, 10, 1, 150),
             // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
             4..=9 if self.a_auto == 1 => {
                 if self.sub() == 1 {
@@ -3217,7 +3399,7 @@ impl Dmm {
     /// (0..4), 5 = 60 mV (the DC / AC mV r0 row, OP1 x10; the stock tables
     /// have it, its UI offers no 60 mV item); A items 600 uA, 6000 uA,
     /// 60 mA, 600 mA, 6 A, 10 A; ohm 1..6 (DM40C labels, COUNTS_MODEL),
-    /// ohm 0 = 600 ohm (the 60 ohm range is removed). `None` = AUTO, `Some(255)` =
+    /// ohm 0 = the 60 ohm range (the stock has no item for it). `None` = AUTO, `Some(255)` =
     /// AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         self.ovl_clear(clk.now_ms());
@@ -3271,13 +3453,14 @@ impl Dmm {
             }
             (Button::Ohm, None) => {
                 self.manual = false;
+                if self.mode == 10 && self.range < self.ohm_auto_floor() {
+                    self.set(clk, 10, 1, 150);
+                }
             }
-            // 0 (60 ohm, removed) = 600 ohm.
             (Button::Ohm, Some(i)) if i <= 6 => {
-                let r = (i as i8).max(OHM_R_MIN);
                 self.manual = true;
-                if !self.same_row(10, r) {
-                    self.set(clk, 10, r, 150);
+                if !self.same_row(10, i as i8) {
+                    self.set(clk, 10, i as i8, 150);
                 }
             }
             _ => {}
@@ -3332,8 +3515,8 @@ impl Dmm {
                 sub << 6 | r << 3 | 1
             }
             10 => {
-                // BT range field 0 = 600 ohm (r1).
-                let r = if self.manual { self.range.max(OHM_R_MIN) as u8 - 1 } else { 6 };
+                // BT has no 60 ohm range: report it as 600 ohm.
+                let r = if self.manual { self.range.max(1) as u8 - 1 } else { 6 };
                 self.ohm_var << 6 | r << 3 | 2
             }
             11 => 0x44,
@@ -4416,8 +4599,12 @@ impl Dmm {
             }
         }
         // Plain AC A after a row write: held (provisional) until two results
-        // in a row agree (ACA_VET_*).
-        let held = m >= 4 && !self.acdc && !self.aca_vet(now, ac, lim);
+        // in a row agree (ACA_VET_*). Plain AC V after a range step: until
+        // the node's DC has settled (ACV_DC_*).
+        if self.acv_vet && (dcp.abs() <= ACV_DC_K * ac + ACV_DC_FS * lim || now >= self.aca_vet_t + ACA_VET_MAX_MS) {
+            self.acv_vet = false;
+        }
+        let held = !self.acdc && (self.acv_vet || (m >= 4 && !self.aca_vet(now, ac, lim)));
         // Plain AC after a reset: the first used result seeds the filters.
         let first = !self.acdc && !held && core::mem::take(&mut self.ac_seed);
         if first {
@@ -4649,8 +4836,8 @@ impl Dmm {
         if self.r22_drop_one() {
             return None;
         }
-        // r1..r6 (OHM_R_MIN; the stock autorange clamps the same way).
-        let r = self.range.clamp(OHM_R_MIN, 6) as usize;
+        // Autorange r0..r6, r1..r6 with the "ON" variant (`ohm_auto_floor`).
+        let r = self.range.clamp(0, 6) as usize;
         let r22 = hy::read1(0x22);
         let steady = self.steady_osr();
         let slow = r22 == steady && !self.avg_skip;
@@ -4658,7 +4845,7 @@ impl Dmm {
         // LIVE?: a passive Rx never gives a negative code; a source of the
         // other polarity does (0.24 % of full scale: far above the noise).
         self.live = ad1 < -LIVE_CODE;
-        let g = cal(0x124 + 4 * r as u32, 1.0) * OHM_RREF[r] / 0.9 / AD1_DIV;
+        let g = ohm_row_gain(r, cal(0x124 + 4 * r as u32, 1.0), cal(0x128, 1.0), cal(0x24, 1.0), cal(0x28, 1.0)) * OHM_RREF[r] / 0.9 / AD1_DIV;
         let k0 = cal(0x144, 0.0);
         let lim = self.factor() * OHM_DEC[r];
         let ov = self.over();
@@ -4681,10 +4868,11 @@ impl Dmm {
         } else {
             self.avg_code(raw, slow)
         };
-        let mut kohm = code * g - k0;
-        if kohm < 0.0 {
-            kohm = 0.0;
-        }
+        // Below 0 only by the offset k0 at most (`raw` is unsigned), a few
+        // tens of mohm: shown with `ohm_neg`, else clamped as the stock.
+        // The range logic below works on the clamped value.
+        let kneg = code * g - k0;
+        let kohm = kneg.max(0.0);
         let ol = kohm / lim > ov;
         if ol {
             if r22 != 0x13 {
@@ -4723,10 +4911,12 @@ impl Dmm {
                     self.set(clk, 10, to, 150);
                     return None;
                 }
-            } else if q > 10.0 * ov * ov && r as i8 > OHM_R_MIN && !held {
+            } else if q > 10.0 * ov * ov && r as i8 > self.ohm_auto_floor() && !held {
                 // Down below 0.1 * lim / over, as V / A. The stock tests
                 // q > 10 (R < over * lim / 10), which is exactly the next lower
-                // range's up threshold: no hysteresis band at all.
+                // range's up threshold: no hysteresis band at all. 600 -> 60
+                // ohm (not in the stock autorange) by the same rule: down
+                // below 58.25 ohm, up above 61.8 ohm (DM40C, over 1.03).
                 let step = if now < self.entry + OHM_SINGLE_MS {
                     1
                 } else if q > 1e5 {
@@ -4741,7 +4931,7 @@ impl Dmm {
                     1
                 };
                 self.ohm_settled = false;
-                self.set(clk, 10, (r as i8 - step).max(OHM_R_MIN), 150);
+                self.set(clk, 10, (r as i8 - step).max(self.ohm_auto_floor()), 150);
                 self.ohm_down_r = r as i8;
                 self.ohm_down_k = kohm;
                 return None;
@@ -4753,7 +4943,8 @@ impl Dmm {
                 self.ohm_down_r = -1;
             }
         }
-        // Stock formats (r1: x1000 ohm, fmt r + 1).
+        let kohm = if self.ohm_neg { kneg } else { kohm };
+        // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
         let (v, dec, unit) = match r {
             0 | 1 => (kohm * 1000.0, 3 - r as u8, "\u{3a9}"),
             2..=4 => (kohm, 6 - r as u8, "k\u{3a9}"),
@@ -4837,20 +5028,44 @@ impl Dmm {
         self.beep_next = now + step;
     }
 
+    /// Read the counter and restart it with `src` (the stock's blind read:
+    /// capacitance, AC+DC).
     fn read_counters(&mut self, src: u8) -> (f32, f32) {
-        let (f, d, _) = self.read_counters_ok(src);
-        (f, d)
-    }
-
-    /// `read_counters` plus whether the gate is a result (`ctr_valid`).
-    fn read_counters_ok(&mut self, src: u8) -> (f32, f32, bool) {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         ctr_restart(src);
+        counter_vals(u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]))
+    }
+
+    /// A counter check (`gate_check`) at most every FREQ_RECHECK_MS from
+    /// FREQ_CHECK_MS after the restart: None while the gate runs; at its end
+    /// or timeout the counts (f kHz, duty %, its SYSCLK ticks, the check:
+    /// `Gate::Done` = a whole gate) and a restart with `src`.
+    #[inline(never)]
+    fn freq_gate(&mut self, now: u64, src: u8) -> Option<(f32, f32, u32, Gate)> {
+        if now < self.freq.next {
+            return None;
+        }
+        let mut b = [0u8; 9];
+        hy::read(0x15, &mut b);
         let (ctc, ctb, cta) = (u24(&b[0..3]), u24(&b[3..6]), u24(&b[6..9]));
+        // CTA again: standing still = the counter stopped (a running CTA
+        // moves every 0.2 us; this read takes tens of us).
+        let mut a = [0u8; 3];
+        hy::read(0x1B, &mut a);
+        let el = (now as u32).wrapping_sub(self.freq.t0);
+        let g = gate_check(ctc, ctb, cta, u24(&a), el, self.freq.f_khz);
+        if g == Gate::Wait {
+            self.freq.next = now + FREQ_RECHECK_MS;
+            return None;
+        }
+        self.diag_ctr = self.diag_ctr.saturating_add(1);
+        ctr_restart(src);
+        self.freq.t0 = now as u32;
+        self.freq.next = now + FREQ_CHECK_MS;
         let (f, d) = counter_vals(ctc, ctb, cta);
-        (f, d, ctr_valid(ctb, cta))
+        Some((f, d, cta.wrapping_add(0x40000) & 0xFF_FFFF, g))
     }
 
     /// The first counter access after a row write (`Freq::fresh`): the gate
@@ -4863,7 +5078,8 @@ impl Dmm {
         }
         self.freq.fresh = false;
         ctr_restart(src);
-        self.freq.next = now + 350;
+        self.freq.t0 = now as u32;
+        self.freq.next = now + FREQ_CHECK_MS;
         true
     }
 
@@ -5135,12 +5351,24 @@ impl Dmm {
     }
 
     /// FUN_08013450 as the secondary readout in V/A modes, every 350 ms.
+    /// Outside AC+DC it waits for the gate's end as the Hz function
+    /// (`freq_gate`): low frequencies read too; a gate given up reads 0 Hz.
+    /// AC+DC keeps the stock's blind 350 ms read and restart (its phases
+    /// change the counter's source).
     fn freq_secondary(&mut self, now: u64, src: u8) {
         if self.freq_restart_fresh(now, src) || now < self.freq.next {
             return;
         }
-        self.freq.next = now + 350;
-        let (f, d) = self.read_counters(src);
+        let (f, d) = if self.acdc {
+            self.freq.next = now + FREQ_CHECK_MS;
+            self.read_counters(src)
+        } else {
+            match self.freq_gate(now, src) {
+                None => return,
+                Some((f, d, _, Gate::Done)) => (f, d),
+                Some(_) => (0.0, 0.0),
+            }
+        };
         self.freq.f_khz = f;
         self.freq.duty = d;
         self.freq_range();
@@ -5161,27 +5389,26 @@ impl Dmm {
             self.freq.restart_sources();
             return None;
         }
-        if now < self.freq.next {
-            return None;
-        }
-        self.freq.next = now + 350;
-        // The counter just read was gated with the source selected last time;
-        // restart it with the other one (0xf0 comparator / 0x08 ENCNTI).
+        // The counter's gate ran with the source selected last time; at its
+        // end (or timeout) restart it with the other one (0xf0 comparator /
+        // 0x08 ENCNTI).
         let i = self.freq.src_alt as usize;
         let next_src = if self.freq.src_alt { 0xF0 } else { 0x08 };
-        let (f, d, ok) = self.read_counters_ok(next_src);
+        let (f, d, n, g) = self.freq_gate(now, next_src)?;
         self.freq.src_alt = !self.freq.src_alt;
-        match self.freq.take(i, f, d, ok) {
+        match self.freq.take(i, f, d, n, g) {
             // Nothing valid yet: no reading (the display keeps "--", READ?
             // and the statistics wait).
             FreqPick::None => return None,
             FreqPick::NoSignal => {
                 self.freq.f_khz = 0.0;
                 self.freq.duty = 0.0;
+                self.freq.n = 0;
             }
             FreqPick::Src(best) => {
                 self.freq.f_khz = self.freq.last[best];
                 self.freq.duty = self.freq.lastd[best];
+                self.freq.n = self.freq.lastn[best];
             }
         }
         if !self.manual {
@@ -5191,9 +5418,11 @@ impl Dmm {
         let fs = FREQ_DEC[r] * self.factor();
         let ol = self.freq.f_khz / fs > self.over();
         let (fv, dv) = self.freq_vals(false);
+        let fv = fv.with_ext(freq_ext(fv.v, fv.dec, self.freq.n));
         let mut rd = self.reading(if ol { Val::ol(fv.dec, fv.unit) } else { fv }, self.freq.f_khz * 1e3);
         rd.range = r as i8;
         rd.aux2 = Some(dv);
+        rd.prov = self.freq.prov;
         Some(rd)
     }
 
@@ -5664,6 +5893,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ohm_r0_gain_from_r1() {
+        // The dumped unit's record: r0 slot 1.005 (never calibrated), r1
+        // 1.002732, the DC mV x10 / x1 gain ratio 0.9895.
+        let (g0, g1, m10, m1) = (1.005f32, 1.002_732f32, 0.9895f32, 1.0f32);
+        assert_eq!(ohm_row_gain(1, g1, g1, m10, m1), g1);
+        assert_eq!(ohm_row_gain(3, 0.993751, g1, m10, m1), 0.993751);
+        assert_eq!(ohm_row_gain(0, g0, g1, m10, m1), ohm_row_gain(0, 1.0, g1, m10, m1));
+        // Device 2026-10-26, PA2 open: (r1, r0 as read with r1's gain x
+        // 1.0291) at 10 / 20 / 50 ohm. With the record's ratio r0 is within
+        // 0.2 % of r1.
+        for (r600, r60) in [(9.1141f32, 9.4608f32), (19.0848, 19.8285), (49.4137, 51.3537)] {
+            let fixed = r60 / (g1 * 1.0291) * ohm_row_gain(0, g0, g1, m10, m1);
+            assert!((fixed / r600 - 1.0).abs() < 0.002, "{fixed} vs {r600}");
+        }
+        // No record: the plain stock scale.
+        assert_eq!(ohm_row_gain(0, 1.0, 1.0, 1.0, 1.0), 1.0);
+        // The r0 row: the r1 row with OPS1 (R25 bit 0).
+        let mut r1 = CFG_F10_P8CLR[1];
+        r1[5] |= 1;
+        assert_eq!(OHM_R0_ROW, r1);
+    }
+
+    #[test]
     fn freq_glitch_source_loses() {
         // Clean 40 Hz on one source, 13.334 / 26.668 Hz at 100 % duty on the
         // other (device, AC+DC -> Hz): the clean source wins every time.
@@ -5681,8 +5933,14 @@ mod tests {
         assert!(freq_change(f, 50.0, 0.0) < freq_change(0.013334, 100.0, 0.013334));
     }
 
+    /// `Freq::take`'s gate kinds besides Gate::Done: quiet (no edge for
+    /// FREQ_NOEDGE_MS), empty (no edge within the limit), late (counts, no end).
+    const Q: Gate = Gate::Quiet;
+    const E: Gate = Gate::Empty;
+    const L: Gate = Gate::Late;
+
     fn freq0() -> Freq {
-        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0 }
+        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false }
     }
 
     #[test]
@@ -5691,35 +5949,191 @@ mod tests {
         // Device d2aff22: source 0 reads 0 Hz / 0 % in its first gates,
         // source 1 the signal. Entry order as poll_freq_mode: 1, 0, 1, 0.
         let mut q = freq0();
-        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::Src(1));
-        assert_eq!(q.take(1, f, 50.0, true), FreqPick::Src(1));
-        assert_eq!(q.take(0, 0.0, 0.0, true), FreqPick::Src(1)); // f 0: no result even when "whole"
+        assert_eq!(q.take(1, f, 50.0, 1, Gate::Done), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, 1, E), FreqPick::Src(1));
+        assert_eq!(q.take(1, f, 50.0, 1, Gate::Done), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, 1, Gate::Done), FreqPick::Src(1)); // f 0: no result even when "whole"
         assert_eq!(q.lastd[1], 50.0);
         // Source 0 first with 0, then source 1 with 0 too: nothing (not 0.000 Hz).
         let mut q = freq0();
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, 1, E), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, 1, E), FreqPick::None);
+        assert_eq!(q.take(0, 0.0, 0.0, 1, E), FreqPick::None);
         // ... no signal: both counted nothing twice -> 0.000 Hz.
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::NoSignal);
+        assert_eq!(q.take(1, 0.0, 0.0, 1, E), FreqPick::NoSignal);
         // A signal comes: shown at once.
-        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+        assert_eq!(q.take(0, f, 50.0, 1, Gate::Done), FreqPick::Src(0));
         // It goes away: one empty gate each is enough now.
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::Src(0));
-        assert_eq!(q.take(0, 0.0, 0.0, false), FreqPick::NoSignal);
+        assert_eq!(q.take(1, 0.0, 0.0, 1, E), FreqPick::Src(0));
+        assert_eq!(q.take(0, 0.0, 0.0, 1, E), FreqPick::NoSignal);
         // An incomplete gate (`ok` false) with a value is no result either.
         let mut q = freq0();
-        assert_eq!(q.take(1, 0.013, 30.0, false), FreqPick::None);
+        assert_eq!(q.take(1, 0.013, 30.0, 1, E), FreqPick::None);
         // A glitch is no result, and does not count as "no signal".
-        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
-        assert_eq!(q.take(0, 0.013334, 100.0, true), FreqPick::None);
-        assert_eq!(q.take(1, 0.0, 0.0, false), FreqPick::None);
+        assert_eq!(q.take(0, 0.013334, 100.0, 1, Gate::Done), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, 1, E), FreqPick::None);
+        assert_eq!(q.take(0, 0.013334, 100.0, 1, Gate::Done), FreqPick::None);
+        assert_eq!(q.take(1, 0.0, 0.0, 1, E), FreqPick::None);
         // Both clean and equal: the tie stays with one of them (source 0).
         let mut q = freq0();
-        q.take(1, f, 50.0, true);
-        assert_eq!(q.take(0, f, 50.0, true), FreqPick::Src(0));
+        q.take(1, f, 50.0, 1, Gate::Done);
+        assert_eq!(q.take(0, f, 50.0, 1, Gate::Done), FreqPick::Src(0));
+    }
+
+    /// A simulated reciprocal gate (DS-HY3131 14, the emulator's model): the
+    /// restart at t = 0, the gate opens on the first rising edge at `ph` s,
+    /// CTA counts SYSCLK from 0xfc0000 and stops on the first edge after the
+    /// overflow. Checks as `Dmm::freq_gate` (350 ms, then every 20 ms) until
+    /// a result or a timeout: (time ms, Gate, f kHz).
+    fn sim_gate(hz: f32, ph: f32, shown_khz: f32) -> (u32, Gate, f32) {
+        const CLK: f64 = 4_915_280.0;
+        let (hz, ph) = (hz as f64, ph as f64);
+        let periods = if hz > 0.0 { (0.0533333 * hz).ceil().max(1.0) } else { 0.0 };
+        let stop = ph + periods / hz.max(1e-9);
+        let mut t = FREQ_CHECK_MS as u32;
+        loop {
+            let ts = t as f64 / 1000.0;
+            let (ctb, ctc, cta) = if hz <= 0.0 || ts < ph {
+                (0, 0, 0xFC_0000)
+            } else {
+                let te = ts.min(stop);
+                let ticks = ((te - ph) * CLK) as u32;
+                let cyc = if ts >= stop { periods } else { ((ts - ph) * hz).floor() };
+                (cyc as u32, ticks / 2, (0xFC_0000 + ticks) & 0xFF_FFFF)
+            };
+            // The second CTA read, 50 us later.
+            let cta2 = if hz <= 0.0 || ts < ph || ts >= stop { cta } else { cta + 245 };
+            let g = gate_check(ctc, ctb, cta, cta2, t, shown_khz);
+            if g != Gate::Wait {
+                let (f, _) = counter_vals(ctc, ctb, cta);
+                return (t, g, f);
+            }
+            t += FREQ_RECHECK_MS as u32;
+        }
+    }
+
+    #[test]
+    fn freq_gate_low_frequencies() {
+        // 0.5 .. 50 Hz, the opening edge anywhere in the first period: a
+        // whole gate, within two periods + 53.3 ms (+ a recheck), at most
+        // 350 ms above ~6.7 Hz; f to 10 ppm.
+        for hz in [0.5f32, 1.0, 2.0, 5.0, 10.0, 50.0, 1000.0] {
+            for k in 0..8 {
+                let ph = k as f32 / 8.0 / hz;
+                for shown in [f32::NAN, 0.0, hz / 1000.0] {
+                    let (t, g, f) = sim_gate(hz, ph, shown);
+                    assert_eq!(g, Gate::Done, "{hz} Hz ph {ph} shown {shown}");
+                    assert!((f * 1000.0 - hz).abs() <= hz * 1e-5, "{hz} Hz: {f} kHz");
+                    let worst = (2000.0 / hz + 53.4).max(FREQ_CHECK_MS as f32) + FREQ_RECHECK_MS as f32;
+                    assert!(t as f32 <= worst, "{hz} Hz: {t} ms > {worst}");
+                    if hz > 6.8 {
+                        assert_eq!(t, FREQ_CHECK_MS as u32, "{hz} Hz");
+                    }
+                }
+            }
+        }
+        // No signal: given up after FREQ_NOEDGE_MS, quiet (no signal at
+        // once); with a 1 kHz value shown, at the first check (as before).
+        assert_eq!(sim_gate(0.0, 0.0, f32::NAN).1, Gate::Quiet);
+        assert!((FREQ_NOEDGE_MS..FREQ_NOEDGE_MS + FREQ_RECHECK_MS as u32).contains(&sim_gate(0.0, 0.0, f32::NAN).0));
+        assert_eq!(sim_gate(0.0, 0.0, 1.0), (FREQ_CHECK_MS as u32, Gate::Empty, 0.0));
+        // Below the range (0.2 Hz): no whole gate, given up.
+        assert!(matches!(sim_gate(0.2, 1.0, f32::NAN).1, Gate::Empty | Gate::Quiet | Gate::Late));
+    }
+
+    #[test]
+    fn freq_gate_limits() {
+        assert_eq!(gate_limit_ms(f32::NAN, false), FREQ_NOEDGE_MS);
+        assert_eq!(gate_limit_ms(f32::NAN, true), FREQ_GATE_MAX_MS);
+        assert_eq!(gate_limit_ms(0.0, true), FREQ_GATE_MAX_MS);
+        // With counts the gate opened: the input may have slowed down.
+        assert_eq!(gate_limit_ms(1.0, true), FREQ_GATE_MAX_MS);
+        assert_eq!(gate_limit_ms(1.0, false), FREQ_CHECK_MS as u32); // 1 kHz
+        assert!((1899..=1900).contains(&gate_limit_ms(0.002, false))); // 2 Hz: 3.5 x 500 + 150
+        assert_eq!(gate_limit_ms(0.0005, true), FREQ_GATE_MAX_MS); // 0.5 Hz: 7.15 s capped
+        assert_eq!(gate_limit_ms(0.0005, false), FREQ_NOEDGE_MS);
+        // A gate still counting below the limit waits; past the overflow
+        // but CTA moving is not over.
+        assert_eq!(gate_check(5, 1, 0x00_1000, 0x00_1100, 400, f32::NAN), Gate::Wait);
+        assert_eq!(gate_check(5, 1, 0x00_1000, 0x00_1000, 400, f32::NAN), Gate::Done);
+        assert_eq!(gate_check(5, 1, 0xFD_0000, 0xFD_0000, 400, f32::NAN), Gate::Wait);
+        assert_eq!(gate_check(5, 0, 0x00_1000, 0x00_1100, 4400, f32::NAN), Gate::Late);
+    }
+
+    #[test]
+    fn freq_take_step() {
+        // Device 2026-10-26, 1 Hz -> 0.5 Hz: a gate across the step read
+        // 1.402781 Hz (an input period cut short), then the slower gates
+        // were given up. Poll order as poll_freq_mode (sources 1, 0, ...);
+        // `f_khz` as poll_freq_mode sets it.
+        let mut q = freq0();
+        let mut show = |q: &mut Freq, i: usize, f: f32, g: Gate| -> (FreqPick, bool) {
+            let p = q.take(i, f, 50.0, 1, g);
+            match p {
+                FreqPick::Src(b) => q.f_khz = q.last[b],
+                FreqPick::NoSignal => q.f_khz = 0.0,
+                FreqPick::None => {}
+            }
+            (p, q.prov)
+        };
+        // Entry: the first value is final at once.
+        assert_eq!(show(&mut q, 1, 0.001, Gate::Done), (FreqPick::Src(1), false));
+        assert_eq!(show(&mut q, 0, 0.001, Gate::Done), (FreqPick::Src(0), false));
+        // The step: 1.4 Hz wins on change (source 0 had no earlier value),
+        // grey.
+        assert_eq!(show(&mut q, 1, 0.0014028, Gate::Done), (FreqPick::Src(1), true));
+        assert_eq!(show(&mut q, 0, 0.0, L), (FreqPick::Src(1), true));
+        // A late gate (counts, no end) is not "no signal".
+        assert_eq!(show(&mut q, 1, 0.0, L), (FreqPick::None, true));
+        // 0.5 Hz: grey until a second gate agrees.
+        assert_eq!(show(&mut q, 0, 0.0005, Gate::Done), (FreqPick::Src(0), true));
+        assert_eq!(show(&mut q, 1, 0.000500011, Gate::Done).1, false);
+        // No edge within 3.5 periods of the shown value: no signal, grey;
+        // the next one (quiet, or empty again) is final.
+        let mut q = freq0();
+        show(&mut q, 1, 0.01, Gate::Done);
+        assert_eq!(show(&mut q, 0, 0.0, E), (FreqPick::Src(1), false));
+        assert_eq!(show(&mut q, 1, 0.0, E), (FreqPick::NoSignal, true));
+        assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::NoSignal, false));
+        // The signal back: its first value is final.
+        assert_eq!(show(&mut q, 1, 0.01, Gate::Done), (FreqPick::Src(1), false));
+        // A quiet gate (2.2 s without an edge) right after a value: grey too.
+        let mut q = freq0();
+        show(&mut q, 1, 0.001, Gate::Done);
+        assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::Src(1), false));
+        assert_eq!(show(&mut q, 1, 0.0, Q), (FreqPick::NoSignal, true));
+        assert_eq!(show(&mut q, 0, 0.0, Q), (FreqPick::NoSignal, false));
+        // After a grey no signal the next value is final at once.
+        let mut q = freq0();
+        show(&mut q, 1, 0.001, Gate::Done);
+        show(&mut q, 0, 0.0, Q);
+        show(&mut q, 1, 0.0, Q);
+        assert_eq!(show(&mut q, 1, 0.0005, Gate::Done), (FreqPick::Src(1), false));
+    }
+
+    #[test]
+    fn freq_extra_digit() {
+        // One tick of the gate against one count of the extra digit.
+        assert!(freq_ext(10.0, 3, 491_520)); // 10 Hz, 100 ms: 0.00002 Hz
+        assert!(!freq_ext(50.0, 3, 294_912)); // 50 Hz, 60 ms: 0.00017 Hz
+        assert!(freq_ext(2.0, 3, 2_457_640)); // 2 Hz, 500 ms
+        assert!(freq_ext(1.0, 4, 262_400)); // 1 kHz (kHz, 4 decimals): 0.0000038 kHz
+        assert!(!freq_ext(5.0, 4, 262_400)); // 5 kHz: 0.000019 kHz
+        assert!(!freq_ext(10.0, 3, 0)); // no gate
+    }
+
+    #[test]
+    fn freq_take_quiet_gate() {
+        // One quiet gate (2.2 s without counts) is no signal at once after
+        // an entry; a source with a clean value keeps showing it.
+        let mut q = freq0();
+        assert_eq!(q.take(1, 0.0, 0.0, 0, Q), FreqPick::NoSignal);
+        let mut q = freq0();
+        assert_eq!(q.take(1, 0.04, 50.0, 300_000, Gate::Done), FreqPick::Src(1));
+        assert_eq!(q.take(0, 0.0, 0.0, 0, Q), FreqPick::Src(1));
+        let mut q = freq0();
+        q.take(1, 0.002, 50.0, 2_457_640, Gate::Done);
+        assert_eq!(q.lastn[1], 2_457_640);
     }
 
     #[test]

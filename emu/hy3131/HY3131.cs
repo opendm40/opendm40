@@ -56,7 +56,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         // first finals 0.018-0.036 V, 3 mV at 1 s; the 0 / 9.5 V square: 6 V only, no 60 V visit); -0.6 V
         // before read 2.78-3.9 V there and stepped 6 -> 60 -> 6 V.
         public const double Op1OffLevel = -0.005;
-        public const double HpfTransientGain = 1.5; // RMS seen while the node DC slews, per volt of remaining step
+        // RMS seen while the node DC slews, per volt of remaining step: device 0.2.1 (AC V 60 -> 6 V on the
+        // 0 / 9.5 V square, DBG:ACDC?) read RMS = sqrt(AC^2 + LPF^2) within ~0.1 V over the step's tail
+        public const double HpfTransientGain = 1.0;
         public const double LpfRateDivisor = 0.5;   // measured LPF period = datasheet OSR4 * this (RESEARCH.md 3)
 
         public Hy3131Core()
@@ -1266,6 +1268,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 ctStartDecided = true;
             }
             if(now < ctStart) return;
+            if(ctStart < ctChgT) { UpdateCounterSpan(now, period, duty); return; }
             var k0 = (long)Math.Round((ctStart - ctPhase) / period);
             var gate = (0x1000000 - ctInit) / SysClk;
             var overflowAt = ctStart + gate;
@@ -1290,6 +1293,65 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
             intf |= 0x01;
         }
+
+        /// A gate opened on the old waveform across a frequency change of the input (SetInput,
+        /// SignalHzChanged): the source restarts its waveform with a rising edge at the change
+        /// (as the MR9270 calibrator's output on a frequency change, inferred from the device's
+        /// 1 Hz -> 0.5 Hz step: a gate read 1.40 Hz, a period cut short). Edges: the old period
+        /// from ctStart up to the change, then the change itself, then the new period. No
+        /// ctsettle hidden edges here.
+        private void UpdateCounterSpan(double now, double period, double duty)
+        {
+            double op = ctChgOldP, tc = ctChgT;
+            long nOld = Math.Max(0, (long)Math.Ceiling((tc - ctStart) / op - 1e-9) - 1);
+            Func<double, long> count = t => t < tc ? (long)Math.Floor((t - ctStart) / op + 1e-9)
+                : nOld + 1 + (long)Math.Floor((t - tc) / period + 1e-9);
+            var overflowAt = ctStart + (0x1000000 - ctInit) / SysClk;
+            double stop;
+            if(overflowAt < tc)
+            {
+                var e = ctStart + Math.Max(1, Math.Ceiling((overflowAt - ctStart) / op - 1e-9)) * op;
+                stop = e < tc ? e : tc;
+            }
+            else stop = tc + Math.Ceiling((overflowAt - tc) / period - 1e-9) * period;
+            if(now < stop)
+            {
+                ctB = (int)Math.Min(0xFFFFFF, count(now));
+                ctC = (int)Math.Min(0xFFFFFF, Math.Round((now - ctStart) * SysClk * CtDuty(duty)));
+                return;
+            }
+            ctStop = stop;
+            var total = (long)Math.Round((stop - ctStart) * SysClk);
+            ctA = (int)((ctInit + total) & 0xFFFFFF);
+            ctB = (int)Math.Min(0xFFFFFF, count(stop));
+            ctC = (int)Math.Min(0xFFFFFF, Math.Round(total * CtDuty(duty)));
+            intf |= 0x01;
+        }
+
+        /// The counter's input frequency now (0: no edges), for SignalHzChanged.
+        public double CounterInputHz()
+        {
+            double f, duty;
+            ctNow = lastUpdate;
+            CounterSignal(out f, out duty);
+            return f;
+        }
+
+        /// The input's frequency changed at `now` from `oldHz`: its waveform restarts with a
+        /// rising edge then (ctPhase); a gate open across it is UpdateCounterSpan's, one still
+        /// waiting for its opening edge opens on it.
+        public void SignalHzChanged(double now, double oldHz)
+        {
+            ctChgT = now;
+            ctChgOldP = 1.0 / oldHz;
+            ctPhase = now;
+            if(ctEnabled && double.IsNaN(ctStop) && ctStartDecided && ctStart > now)
+            {
+                if(Ct0DeadMs > 0 && role == Role.Freq && !EnCntI && now < Ct0DeadEnd) ctStartDecided = false;
+                else ctStart = now;
+            }
+        }
+        private double ctChgT = double.NaN, ctChgOldP;
 
         /// Counter input settle (opt-in, "ctsettle:ms"; HYPOTHETICAL shape after the device's
         /// sub-harmonic first results, 2026-10-21 / -24: 1/3, 2/3, 1/2 of a 40 Hz square right
@@ -2045,10 +2107,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(role == Role.Ohm)
             {
                 vs = OhmSourceVolts();
-                // r0 (60 ohm, never selected by the stock nor by opendm40 since 2026-10-25): its
-                // slot is not a calibration; the device read like Rref 0.1 k x r1's gain x 1.0291
-                // (measured on one unit, cause unknown; firmware dmm.rs ohm notes, branch feat/ohm60).
-                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * OhmR0K
+                // r0 (60 ohm, never selected by the stock): its slot is not a calibration; the
+                // firmware (dmm.rs ohm_row_gain) takes r1's gain x the DC mV x10 / x1 gain ratio
+                // (0x24 / 0x28), the OP1 x10 stage's error. The stock row's PA2 DS2 / FS2 (the
+                // device read 3.8 % lower with them closed) is not modelled.
+                rref = roleRange == 0 ? OhmRref[0] * 1000.0 * CalGain(0x128) * CalGain(0x24) / CalGain(0x28)
                     : OhmRref[roleRange] * 1000.0 * CalGain(0x124 + 4 * roleRange);
                 Fe.LeadOhm = CalOffs(0x144) * 1000.0;
             }
@@ -2615,6 +2678,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     if(ad2Stream && (j == 9 || j == 20)) mask = 0;
                     // opendm40 DBG:SRC (src/dbgsrc.rs): the ohm / diode rows with AD1 cycled through
                     // other nodes: the AD1 reference buffers, SAD1FP / FN (not SDIO) and R28 are free.
+                    // opendm40 ohm r0 (dmm.rs OHM_R0_ROW): the stock r0 row with PA2's DS2 / FS2 open.
+                    if(row.Role == Role.Ohm && row.Range == 0 && j == 11) mask &= 0xF9;
                     if(row.Role == Role.Ohm || row.Role == Role.Diode)
                     {
                         if(j == 3) mask &= 0xF3;
@@ -2755,7 +2820,6 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private static readonly double[] Shunt = { 0.01, 0.0005, 4.75e-5 }; // ohm / kohm / Mohm
         private static readonly double[] AUnit = { 1, 1e3, 1e6 };           // A -> A / mA / uA
         private static readonly double[] OhmRref = { 0.1, 1, 10, 100, 1000, 10000, 63000 };
-        private const double OhmR0K = 1.0291;
         private static readonly double[] CapK = { 1020, 1003, 102.7, 10.68, 1.5, 4.06, 41, 400 };
         private static readonly double[] DcvNegK = { 1.0, 1.00008, 1.00011, 1.0015 };
         private static readonly double[] K1 = { 0, 1 / 36.0, 2 / 36.0, 4 / 36.0, 8 / 36.0, 10 / 36.0, 12 / 36.0, 14 / 36.0, 16 / 36.0, 18 / 36.0,
@@ -2904,7 +2968,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void SetInput(string spec)
         {
             Core.ForcedAd1 = int.MinValue;
+            // A frequency change restarts the waveform (Hy3131Core.SignalHzChanged).
+            Core.Update(Now);
+            var f0 = Core.CounterInputHz();
             Core.SetInput(spec);
+            var f1 = Core.CounterInputHz();
+            if(f0 > 0 && f1 > 0 && Math.Abs(f1 - f0) > 1e-9 * f0) Core.SignalHzChanged(Now, f0);
             var dwt = Antmicro.Renode.Peripherals.Miscellaneous.DM40_DWT.Instance;
             var inv = CultureInfo.InvariantCulture;
             this.Log(LogLevel.Info, "input: {0} at {1} fw {2}", spec, MachineTime.ToString("F4", inv),
