@@ -4258,3 +4258,4 @@ Emulator (emu/):
         0.28 mA ON (499.53 .. 499.59 ohm over SCPI). Hypothesis 1: the MMB3.0's resistance output cannot carry
         the 0.90 mA test current at 500 ohm; not a firmware fault. With this calibrator the 600 ohm range is
         checked with 0.28 mA ON.
+        A passive 500 ohm resistor reads in range with both 0.90 mA and 0.28 mA ON (step 1, the control).
