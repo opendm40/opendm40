@@ -69,7 +69,7 @@ impl App {
                 } else if app_wave::WAVE_BUILD && b == Button::Amp && ui::inrush_hit(x, y) {
                     r(ui::RP_INRUSH as usize, 0)
                 } else {
-                    match ui::range_hit(b, x, y)? {
+                    match ui::range_hit(b, self.range_sel(), x, y)? {
                         Ok(i) => r(i, 0),
                         Err(k) => r((ui::RP_ERR + k) as usize, 0),
                     }

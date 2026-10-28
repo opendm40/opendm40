@@ -677,7 +677,7 @@ impl DmmView {
             return;
         }
         let temp = r.mode == 15;
-        let fs = crate::bargraph::mode_full_scale(r.mode, r.main.dec, r.main.unit);
+        let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
         let key = if temp { (0, "", false) } else { (fs.to_bits(), r.main.unit, self.bar.bipolar) };
         if self.bar_scale != Some(key) {
             self.bar_scale = Some(key);
@@ -1101,7 +1101,7 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     };
     let mut b = [0u8; 16];
     // The experimental 600 Mohm says so, in the reading's colour.
-    let exp = mode == 10 && range == crate::dmm::OHM600;
+    let exp = crate::dmm::is_ohm600(mode, range);
     let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
     t.push(u);
@@ -1153,6 +1153,10 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // AUTO coupling: the part it shows, marked Auto (6 characters fit
         // the 62 px badge; V / A is the unit's, as for "AC+DC").
         d.func = if r.is_ac() { "AutoAC" } else { "AutoDC" };
+    }
+    if crate::dmm::is_ohm600(r.mode, r.range) {
+        // The experimental 600 Mohm says so here too (the DMM page: EXP).
+        d.func = "OhmEXP";
     }
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
@@ -1386,8 +1390,18 @@ fn range_rect(i: usize) -> sf::Rect {
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
 }
 
-/// The 600 Mohm item of the Resistor Settings page (dmm::OHM600).
+/// The 600 Mohm item of the Resistor Settings page (dmm::OHM600), its index
+/// in `range_items(Button::Ohm)`, and the line in place of the test-current
+/// buttons while it is chosen (its source is fixed: `ohm_vars_shown`).
 pub const OHM600_ITEM: &str = "600M\u{3a9} experimental";
+const OHM600_IDX: usize = 8;
+pub const OHM600_NOTE: &str = "100 nA";
+
+/// The Resistor Settings page shows the 0.90 / 0.28 mA buttons: not with
+/// 600 Mohm chosen (`sel`: the page's selected item).
+pub fn ohm_vars_shown(sel: Option<usize>) -> bool {
+    sel != Some(OHM600_IDX)
+}
 
 /// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub
 /// 0..3).
@@ -1420,7 +1434,11 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     if let Some((t, warn)) = note {
         range_note(t, warn);
     }
-    if b == Button::Ohm {
+    if b == Button::Ohm && !ohm_vars_shown(sel) {
+        // 600 Mohm runs its own source: the variant buttons would do nothing,
+        // so its test current under its item instead.
+        sf::glyphs(sf::TEXT22, rect(8, 182, 228, 38), OHM600_NOTE, DIM, BG, 8, 1);
+    } else if b == Button::Ohm {
         // The stock's second ohm mode (m+8, toggled by a second tap on the
         // ohm button; "ON" tag on the button): the p8set rows, a lower test
         // current for in-circuit measurements. `sub` = Dmm::ohm_var here.
@@ -1579,8 +1597,8 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons.
-pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
+/// buttons, while `ohm_vars_shown(sel)`.
+pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
         let r = range_rect(i);
@@ -1589,7 +1607,7 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
             return Some(Ok(i));
         }
     }
-    if (179..223).contains(&y) && b == Button::Ohm {
+    if (179..223).contains(&y) && b == Button::Ohm && ohm_vars_shown(sel) {
         return Some(Err(if x < 240 { 0 } else { 1 }));
     }
     if (179..223).contains(&y) && matches!(b, Button::Volt | Button::Amp) {

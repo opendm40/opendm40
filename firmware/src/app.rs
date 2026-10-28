@@ -3508,7 +3508,7 @@ impl App {
                     let _ = self.inrush_open(clk);
                     return;
                 }
-                match ui::range_hit(b, x, y) {
+                match ui::range_hit(b, self.range_sel(), x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
                         let was = self.dmm.is_auto();
@@ -4101,6 +4101,9 @@ impl App {
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
+            // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
+            // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
             Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),

@@ -303,6 +303,7 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
         (10, 0) => (16, 150, false),
         (10, 1..=3) => (16, 150, true),
         (10, 6) => (1, 240, false),
+        (10, OHM600) => return None,
         (10, _) => (1, 150, false),
         _ => return None,
     };
@@ -437,6 +438,16 @@ const OHM_R0_ROW: [u8; hy::CFG_LEN] = {
 // 2026-10-28: FB via OP1 vs FB on AD1 directly 5.7 uV apart).
 // R = Rref * Vx / (Vfb - Vx); a ratio of two conversions on one reference.
 pub const OHM600: i8 = 7;
+/// Whether HY3131 `mode` / `range` is the experimental 600 Mohm.
+pub fn is_ohm600(mode: u8, range: i8) -> bool {
+    mode == 10 && range == OHM600
+}
+/// Open leads (`Ohm600::learn`): the drop across Rref below this (an Rx
+/// above ~7 Gohm) with the jack within 10 % of FB.
+const OHM600_OPEN_DROP: f32 = 1.5e-3;
+/// From a row write to its first reading (2 x (skip + keep) results of
+/// 200 ms and the settle), for a host's READ? / MEAS? wait (`deadline`).
+const OHM600_FIRST_MS: u64 = 2_500;
 const OHM600_ROW: [u8; hy::CFG_LEN] = {
     let mut c = CFG_F10_P8CLR[5];
     c[0x02] = 0x16; // R22: OSR 16384, 200 ms (10 mains periods)
@@ -456,6 +467,11 @@ const OHM600_V: f32 = 1.25 / 0.9 / AD1_DIV;
 /// OHM600_STEP or an OL).
 const OHM600_AVG: usize = 4;
 const OHM600_STEP: f32 = 0.02;
+/// One range over three decades: the digits of the 6000-count range of the
+/// value's decade (5.570 / 55.70 / 557.0 Mohm; a decade change needs 3 %
+/// past the 6 / 60 Mohm boundary), plus the small extra digit where the
+/// mean's own spread allows it (`Ohm600::ext`).
+const OHM600_DEC_HYST: f32 = 0.03;
 /// Short-circuit current (A) of the r7 source: AGNDP9 through 10 Mohm, jacks
 /// shorted (docs/data/short.csv AGNDP9,R10M).
 pub const OHM600_ISC: f32 = 1.047e-7;
@@ -467,6 +483,14 @@ pub struct Ohm600 {
     pub gain: f32,
     /// Subtracted from Vfb - Vx, V.
     pub off: f32,
+    /// The V/ohm node's leak as a conductance across the jacks, S, learned
+    /// on open leads (`learn`; RAM only, 0 until then). Device 2026-10-28:
+    /// 48.5 pA at 1.047 V, ~21.6 Gohm.
+    pub leak: f32,
+    leak_n: u8,
+    /// Open pairs in a row (`learn` skips the first: the node still
+    /// settling after the leads came off).
+    open_run: u8,
     /// Conversions dropped after a phase switch / kept (their median).
     pub skip: u8,
     pub keep: u8,
@@ -478,10 +502,12 @@ pub struct Ohm600 {
     pub last: (i32, i32),
     hist: [f32; OHM600_AVG],
     hn: u8,
+    /// Decimals shown (Mohm), `decimals`.
+    dec: u8,
 }
 
 impl Ohm600 {
-    pub const NEW: Ohm600 = Ohm600 { gain: 1.0, off: 0.0, skip: 2, keep: 3, ph: 0, n: 0, buf: [0; 8], a: 0, last: (0, 0), hist: [0.0; OHM600_AVG], hn: 0 };
+    pub const NEW: Ohm600 = Ohm600 { gain: 1.0, off: 0.0, skip: 2, keep: 3, ph: 0, n: 0, buf: [0; 8], a: 0, last: (0, 0), hist: [0.0; OHM600_AVG], hn: 0, dec: 1, leak: 0.0, leak_n: 0, open_run: 0 };
 
     /// A row write: phase A (the row's R32), no samples, no average.
     fn restart(&mut self) {
@@ -518,9 +544,31 @@ impl Ohm600 {
     /// kohm from the phase codes, None = OL (no drop across Rref, or above
     /// the range).
     fn kohm(&self, a: i32, b: i32, ov: f32) -> Option<f32> {
-        let drop = (b - a) as f32 * OHM600_V - self.off;
-        let k = OHM600_RREF * self.gain * a as f32 * OHM600_V / drop;
+        let vx = a as f32 * OHM600_V;
+        // The current through Rref less the leak's share at this Vx.
+        let drop = (b - a) as f32 * OHM600_V - self.off - self.leak * vx * OHM600_RREF * 1e3;
+        let k = OHM600_RREF * self.gain * vx / drop;
         (drop > 0.0 && k >= 0.0 && k <= ov * OHM600_FS).then_some(k)
+    }
+
+    /// Open leads (the drop under OHM600_OPEN_DROP, the jack near FB): all
+    /// the current through Rref is the node's leak; its conductance (as a
+    /// resistor across the jacks, the simplest model; whether it is one is
+    /// *unknown*) into a mean over the last ~4.
+    fn learn(&mut self, a: i32, b: i32) {
+        let (vx, vf) = (a as f32 * OHM600_V, b as f32 * OHM600_V);
+        let drop = vf - vx - self.off;
+        if drop >= OHM600_OPEN_DROP || vx < 0.9 * vf || vx <= 0.0 {
+            self.open_run = 0;
+            return;
+        }
+        self.open_run = self.open_run.saturating_add(1);
+        if self.open_run < 2 {
+            return;
+        }
+        let g = drop / (OHM600_RREF * 1e3 * self.gain) / vx;
+        self.leak = if self.leak_n == 0 { g } else { self.leak + (g - self.leak) * 0.25 };
+        self.leak_n = self.leak_n.saturating_add(1);
     }
 
     /// The sliding mean with `k` added (restarted on a step).
@@ -542,6 +590,38 @@ impl Ohm600 {
         }
         let n = self.hn as usize;
         self.hist[..n].iter().sum::<f32>() / n as f32
+    }
+}
+
+impl Ohm600 {
+    /// Decimals for `mohm` (the decade's 6000-count format, with
+    /// hysteresis around 6 / 60 Mohm).
+    fn decimals(&mut self, mohm: f32) -> u8 {
+        let want = if mohm < 6.0 { 3 } else if mohm < 60.0 { 2 } else { 1 };
+        if want != self.dec {
+            // The boundary between the shown and the wanted decade.
+            let b = if want.max(self.dec) == 3 { 6.0 } else { 60.0 };
+            if (mohm - b).abs() > OHM600_DEC_HYST * b || self.hn < 2 {
+                self.dec = want;
+            }
+        }
+        self.dec
+    }
+
+    /// The extra digit: a full window whose mean's spread (sd / sqrt n of
+    /// the readings in it, kohm) is at most one such digit (as the other
+    /// ranges' extra digits: DC V 6 V shows its 10 uV at a ~7 uV mean sd).
+    fn ext(&self, dec: u8) -> bool {
+        let n = self.hn as usize;
+        if n < OHM600_AVG {
+            return false;
+        }
+        let h = &self.hist[..n];
+        let m = h.iter().sum::<f32>() / n as f32;
+        let var = h.iter().map(|x| (x - m) * (x - m)).sum::<f32>() / (n - 1) as f32;
+        // kohm of one extra digit: 1000 / 10^(dec + 1).
+        let digit = 1000.0 / [10.0, 100.0, 1000.0, 10000.0][(dec as usize).min(3)];
+        var / n as f32 <= digit * digit
     }
 }
 
@@ -2119,10 +2199,11 @@ impl Dmm {
     /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
         self.ohm_var = v & 1;
-        if self.mode == 10 {
+        // 600 Mohm has its own source: the variant waits for the next range
+        // (no row rewrite, no restart of its phases).
+        if self.mode == 10 && self.range != OHM600 {
             // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
-            // 600 Mohm (always its own tap) stays.
-            let r = if self.range == OHM600 { OHM600 } else { self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6) };
+            let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
         }
     }
@@ -2195,7 +2276,8 @@ impl Dmm {
     /// The rate setting changes something in the current function (DC V /
     /// mV / A, ohm; not AC+DC): the UI can grey the row out otherwise.
     pub fn rate_applies(&self) -> bool {
-        !self.acdc && matches!(self.mode, 1 | 3 | 7..=10)
+        // 600 Mohm runs its own fixed 200 ms conversions.
+        !self.acdc && matches!(self.mode, 1 | 3 | 7..=10) && !is_ohm600(self.mode, self.range)
     }
 
     /// Measured mean interval between readings (ms, EMA over the last few;
@@ -2922,6 +3004,7 @@ impl Dmm {
             4 | 7 => (4 - r.min(1), "A"),
             5 | 8 => (3 - r.min(1), "mA"),
             6 | 9 => (2 - r.min(1), "\u{b5}A"),
+            10 if r == OHM600 as u8 => (1, "M\u{3a9}"),
             10 => match r {
                 0 | 1 => (3 - r, "\u{3a9}"),
                 2..=4 => (6 - r, "k\u{3a9}"),
@@ -3673,6 +3756,11 @@ impl Dmm {
         if self.cpl_auto && b == self.mode_byte() {
             return false;
         }
+        // The ohm ranges BT has no code for (60 ohm, 600 Mohm: reported as
+        // 600 ohm / 60 Mohm, `mode_byte`): that byte echoed back keeps them.
+        if self.mode == 10 && self.manual && matches!(self.range, 0 | OHM600) && b == self.mode_byte() {
+            return false;
+        }
         self.ovl_clear(clk.now_ms());
         let (g, r, s) = (b & 7, (b >> 3) & 7, b >> 6);
         let before = (self.button(), self.mode_byte() & 0xC0);
@@ -4000,7 +4088,7 @@ impl Dmm {
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
             7..=9 => self.poll_dca(clk),
-            10 if self.range == OHM600 => self.poll_ohm600(clk),
+            10 if is_ohm600(self.mode, self.range) => self.poll_ohm600(clk),
             10 => self.poll_ohm(clk, now),
             11 => self.poll_cont(),
             12 => self.poll_diode(now),
@@ -5098,13 +5186,20 @@ impl Dmm {
             hy::write(0x23, &[r23]);
         }
         let (a, b) = done?;
+        self.o6.learn(a, b);
         // LIVE?: the jack below COM, or driven above OP3's side of Rref.
         self.live = a < -LIVE_CODE || b - a < -LIVE_CODE;
-        // The first reading after a row write or a step is provisional.
+        // Final from the first reading on: each one is already the median of
+        // 3 results per phase after the switch transient (device 2026-10-28:
+        // the first 5.568 Mohm, then 5.569 .. 5.571), and a provisional one
+        // never reaches SCPI (a mains-noisy input restarting the average
+        // would have kept it so).
         let (val, si, prov) = match self.o6.kohm(a, b, self.over()) {
             Some(k) => {
                 let v = self.o6.average(k);
-                (Val::new(v * 1e-3, 1, "M\u{3a9}"), v * 1e3, self.o6.hn < 2)
+                let dec = self.o6.decimals(v * 1e-3);
+                let ext = self.o6.ext(dec);
+                (Val::new(v * 1e-3, dec, "M\u{3a9}").with_ext(ext), v * 1e3, false)
             }
             None => {
                 self.o6.hn = 0;
@@ -5118,7 +5213,7 @@ impl Dmm {
     /// Firmware only (the host tests that include dmm.rs have no scpi).
     #[cfg(target_os = "none")]
     #[inline(never)] // .cold (link-native.x): one SCPI command
-    pub fn ohm600_dbg(&mut self, set: Option<[f32; 4]>, out: &mut crate::scpi::Scpi) {
+    pub fn ohm600_dbg(&mut self, set: Option<[f32; 5]>, out: &mut crate::scpi::Scpi) {
         let o = &mut self.o6;
         if let Some(v) = set {
             if v[0] > 0.5 && v[0] < 2.0 {
@@ -5133,6 +5228,10 @@ impl Dmm {
             if v[3] >= 1.0 && v[3] <= 8.0 {
                 o.keep = v[3] as u8;
             }
+            if v[4].is_finite() {
+                o.leak = v[4] * 1e-9;
+                o.leak_n = 1;
+            }
             // The phase under way starts over (OP1's input stays), the
             // average too.
             o.n = 0;
@@ -5140,7 +5239,7 @@ impl Dmm {
             return;
         }
         let (a, b) = o.last;
-        for (i, x) in [o.gain, o.off * 1e6, o.skip as f32, o.keep as f32, a as f32 * OHM600_V, b as f32 * OHM600_V].into_iter().enumerate() {
+        for (i, x) in [o.gain, o.off * 1e6, o.skip as f32, o.keep as f32, o.leak * 1e9, a as f32 * OHM600_V, b as f32 * OHM600_V].into_iter().enumerate() {
             if i > 0 {
                 out.put_bytes(b",");
             }
@@ -5857,7 +5956,14 @@ impl Dmm {
     pub fn deadline(&self) -> u64 {
         // Power meter: the first full P / V / I set takes one phase cycle
         // after the settle.
-        if self.pw.on { self.deadline + self.pw_cycle().2 as u64 } else { self.deadline }
+        // 600 Mohm: its first reading takes two phases (`OHM600_FIRST_MS`).
+        if self.pw.on {
+            self.deadline + self.pw_cycle().2 as u64
+        } else if is_ohm600(self.mode, self.range) {
+            self.deadline + OHM600_FIRST_MS
+        } else {
+            self.deadline
+        }
     }
 }
 
@@ -6126,6 +6232,75 @@ mod tests {
         // The last OHM600_AVG (4) only.
         assert_eq!(o.hn as usize, OHM600_AVG);
         assert!((o.average(110_500.0) - 110_350.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn ohm600_digits() {
+        // The decade's 6000-count format; 3 % hysteresis at 6 / 60 Mohm once
+        // two readings are in.
+        let mut o = Ohm600 { hn: 2, ..Ohm600::NEW };
+        assert_eq!(o.decimals(5.57), 3);
+        assert_eq!(o.decimals(6.1), 3);
+        assert_eq!(o.decimals(6.2), 2);
+        assert_eq!(o.decimals(5.9), 2);
+        assert_eq!(o.decimals(5.8), 3);
+        assert_eq!(o.decimals(412.3), 1);
+        assert_eq!(o.decimals(59.0), 1);
+        assert_eq!(o.decimals(58.0), 2);
+        // The first reading of a window takes its decade at once.
+        let mut o = Ohm600 { dec: 1, hn: 1, ..Ohm600::NEW };
+        assert_eq!(o.decimals(5.9), 3);
+        // The extra digit at 3 decimals is 0.0001 Mohm = 0.1 kohm. Device
+        // 2026-10-28: 5.5705 Mohm with a reading sd of 0.0002 Mohm, so a
+        // mean of 4 at 0.1 kohm: shown.
+        let mut o = Ohm600::NEW;
+        for k in [5570.5, 5570.7, 5570.4, 5570.6] {
+            o.average(k);
+        }
+        assert!(o.ext(3));
+        // Twice that spread: not at 3 decimals, at 2 (1 kohm).
+        let mut o = Ohm600::NEW;
+        for k in [5570.0, 5570.6, 5569.8, 5570.9] {
+            o.average(k);
+        }
+        assert!(!o.ext(3));
+        assert!(o.ext(2));
+        // Not before the window is full.
+        let mut o = Ohm600::NEW;
+        o.average(5570.0);
+        assert!(!o.ext(1));
+    }
+
+    #[test]
+    fn ohm600_leak() {
+        let code = |v: f32| (v / OHM600_V) as i32;
+        let vf = 1.0479f32;
+        // Device 2026-10-28, open leads: Vfb - Vx = 485 uV (48.5 pA at
+        // 1.0474 V). The first open pair is skipped, then it is learned.
+        let mut o = Ohm600::NEW;
+        let (a, b) = (code(vf - 485e-6), code(vf));
+        o.learn(a, b);
+        assert_eq!(o.leak, 0.0);
+        o.learn(a, b);
+        let r_leak = 1.0 / o.leak;
+        assert!((r_leak / 21.6e9 - 1.0).abs() < 0.01, "{r_leak}");
+        // 600 Mohm in parallel with that leak: the drop carries both
+        // currents; the reading is the 600 Mohm.
+        let rx = 600e6f32;
+        let rp = rx * r_leak / (rx + r_leak);
+        let a = code(vf * rp / (rp + 1e7));
+        let k = o.kohm(a, code(vf), 1.03).unwrap();
+        assert!((k / 600_000.0 - 1.0).abs() < 1e-3, "{k}");
+        // Without the leak it reads ~2.7 % low.
+        let k0 = Ohm600::NEW.kohm(a, code(vf), 1.03).unwrap();
+        assert!((k0 / 600_000.0 - 0.973).abs() < 0.003, "{k0}");
+        // A resistor on the jacks (a drop far above the threshold) leaves it
+        // and restarts the open run.
+        let l = o.leak;
+        o.learn(code(0.3749), code(vf));
+        assert_eq!(o.leak, l);
+        o.learn(a, b);
+        assert_eq!(o.leak, l);
     }
 
     #[test]

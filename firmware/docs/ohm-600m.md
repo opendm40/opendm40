@@ -29,17 +29,23 @@ AD1 runs OP1O − PB3 throughout. Two phases switch only R32, OP1's input:
 | A | 0x3C | PB0 (the jack through 900 k) | Vx, the jack against COM |
 | B | 0x39 | FB (OP3's side of Rref) | Vfb |
 
-R = 10 MΩ · gain · Vx / (Vfb − Vx − off). Both phases go through the same
-OP1, AD1 input and reference, so the reference's value and OP1's offset
-cancel. Per phase `skip` (2) results are dropped after the switch and the
-median of `keep` (3) is taken: one reading per ~2 s. The display averages the
-last 4 readings and starts over on a step above 2 %. The first reading after
-a row write or a step is grey. OL: Vfb − Vx − off ≤ 0, or R above 618 MΩ.
-LIVE?: the jack below COM, or above FB.
+R = 10 MΩ · gain · Vx / (Vfb − Vx − off − leak · Vx · 10 MΩ), the leak
+learned on open leads (below). Both phases go through the same OP1, AD1
+input and reference, so the reference's value and OP1's offset cancel. Per
+phase `skip` (2) results are dropped after the switch and the median of
+`keep` (3) is taken: one reading per ~2 s, final from the first one (`READ?`
+waits for it: the deadline is 2.5 s later than other rows'). The display
+averages the last 4 readings and starts over on a step above 2 %. OL: no
+drop left, or R above 618 MΩ. LIVE?: the jack below COM, or above FB.
 
-Format 600.0 MΩ (6000 counts). Test current label: **EXP I 105 nA**, the
-AGNDP9 short-circuit current through 10 MΩ
-([short.csv](data/short.csv), `AGNDP9,R10M`).
+Digits: one range over three decades, so the 6000-count format of the
+value's decade (5.570 / 55.70 / 557.0 MΩ; a decade change needs 3 % past
+6 / 60 MΩ), plus the small extra digit once 4 readings are in and their
+mean's spread (sd / √4) is at most one such digit. The bargraph's scale stays
+0 … 600 MΩ. Test current: **EXP I 105 nA** on the DMM page, the AGNDP9
+short-circuit current through 10 MΩ ([short.csv](data/short.csv),
+`AGNDP9,R10M`). The range page hides the 0.90 / 0.28 mA buttons while
+600 MΩ is chosen (its source is fixed) and shows "100 nA" there.
 
 ## Why AGNDP9
 
@@ -53,48 +59,71 @@ V/Ω open, R10M path, `DBG:SRC` with the jack read through OP1O, current =
 | VDS1 | −0.97378 | −0.95787 | −1.59 nA |
 | VDS15 | 2.198 | 2.483 | – (OP1O clips at ~2.48 V) |
 
-*Inferred* from these points: about 1.3–1.9 GΩ from the jack to a node at
-≈1.05 V. With OP3 at that level, the leak is a constant share of the current,
-Rref / R_leak ≈ 0.7 %, a gain error. With the stock VDS15 (2.1 V) it would
-be ~20 % at 600 MΩ and depend on Rx.
+These `DBG:SRC` points (50 ms conversions, one row write per tap) suggested
+a few GΩ from the jack to a node near 1.05 V, and so OP3 at AGNDP9 to keep the
+leak small. With VDS15 (2.1 V) the jack sits 1 V away from that node.
 
-Read through PB0 directly (no OP1), the jack seems to sit at 1.05–1.2 V
-whatever the source ([leak-open-pb0.csv](data/ohm600m-2026-10-28/leak-open-pb0.csv)):
+Read through PB0 directly (no OP1), the jack reads 0.87 … 1.61 V for sources
+from −0.97 to +2.2 V ([leak-open-pb0.csv](data/ohm600m-2026-10-28/leak-open-pb0.csv)):
 PB0 itself is loaded when AD1 reads it without OP1.
 
-## Why OP1 on FB
+## The leak on open leads, and its correction
 
-The first version read Vfb on AD1 directly (R24 FB − PB3). On the open jacks
-Vfb − Vx was then +0.45 … +0.49 mV, 2.8 % of the 17 mV drop at 600 MΩ. On
-5.57 MΩ, FB through OP1 and FB on AD1 directly differ by 5.7 µV
-([phases-5m57.csv](data/ohm600m-2026-10-28/phases-5m57.csv), configs B2 and
-B1), so the 0.47 mV was not OP1's offset. What it was is *unknown*: a leak of
-~47 pA or the jack node not settled after the row write (10 MΩ behind it).
+With the r7 row itself (the 0.4.0 build, 200 ms, both phases through OP1),
+open jacks give Vfb − Vx = +485 µV (sd 29 µV per pair, 60 s, falling slowly
+from ~540 to ~470 µV): 48.5 pA through Rref with the jack at 1.047 V, as if
+~21.6 GΩ were across the jacks ([build-0.4.0-open.txt](data/ohm600m-2026-10-28/build-0.4.0-open.txt)).
+It is not OP1's offset: on 5.57 MΩ, FB through OP1 and FB on AD1 directly
+differ by about 6 µV ([phases-5m57.csv](data/ohm600m-2026-10-28/phases-5m57.csv),
+configs B2 and B1). The `DBG:SRC` figure at AGNDP9 (−8 pA) used another row
+setup; why the two differ is *unknown*.
+
+Uncorrected, 48.5 pA is 2.8 % of the 1.7 nA test current at 600 MΩ (the
+reading low). The firmware learns it: while the drop is below 1.5 mV (an Rx
+above ~7 GΩ) with the jack within 10 % of FB, from the second such reading
+on, it takes leak = drop / Rref / Vx as a conductance (a mean over ~4) and
+subtracts leak · Vx from the current. That treats the leak as a resistor
+across the jacks; whether it is one is *unknown*. At 600 MΩ the jack is at
+nearly the open voltage, so the correction holds there whatever the model;
+at 5.57 MΩ it is 0.03 %. It lives in RAM: until the leads have been open
+once after power-up, 600 MΩ reads up to ~3 % low.
 
 ## Device checks (2026-10-28, one unit)
 
-Prototype with `DBG:HY:CAP?` on the 6 MΩ row (the r7 bytes, the two phases),
-nominal Rref, gain 1, no offset
-([cap-blocks.txt](data/ohm600m-2026-10-28/cap-blocks.txt),
-[phases-5m57.csv](data/ohm600m-2026-10-28/phases-5m57.csv)):
+Resistors read by another meter: 0.9925 MΩ and 5.5693 MΩ. Stock rows
+([stock-readings.txt](data/ohm600m-2026-10-28/stock-readings.txt)), the
+prototype with `DBG:HY:CAP?` on the 6 MΩ row with the r7 bytes and Vfb on
+AD1 directly ([cap-blocks.txt](data/ohm600m-2026-10-28/cap-blocks.txt);
+5.57 MΩ also with Vfb through OP1, [phases-5m57.csv](data/ohm600m-2026-10-28/phases-5m57.csv)),
+and the 0.4.0 build's r7 ([build-0.4.0-5m57.txt](data/ohm600m-2026-10-28/build-0.4.0-5m57.txt),
+no leak correction; [build-0.4.0-two.txt](data/ohm600m-2026-10-28/build-0.4.0-two.txt)
+and [build-0.4.0-5m57-leak.txt](data/ohm600m-2026-10-28/build-0.4.0-5m57-leak.txt),
+leak learned, 0.041 / 0.059 nS):
 
-| resistor (another meter) | stock 6 MΩ | stock 60 MΩ | r7 method |
-|---|---|---|---|
-| 0.9925 MΩ | 0.9938 MΩ | – | 0.9945 MΩ |
-| 5.5693 MΩ | 5.5756 MΩ | 5.5721 MΩ | 5.5701 MΩ |
+| resistor | stock 6 MΩ | stock 60 MΩ | prototype | 0.4.0, no leak | 0.4.0, leak learned |
+|---|---|---|---|---|---|
+| 0.9925 MΩ | 0.9938 | – | 0.9945 | – | 0.9921 … 0.9970 (drifting after the resistor was handled) |
+| 5.5693 MΩ | 5.5756 | 5.5721 | 5.5701 | 5.5705 | 5.5705 … 5.5713 |
 
-Per conversion (200 ms): Vfb sd 1–7 µV, Vx 6–35 µV. The first result after
-a switch can be off by up to 4 mV (the step from 0.37 V to 1.05 V on OP1's
-input); later results drift by ~20 µV over 2 s.
+![The 0.4.0 build on 5.5693 MΩ](img/ohm600m-device-5m57.png)
 
-Not checked: any resistor above 6 MΩ, the noise and settling at hundreds of
-MΩ, the leak's stability (humidity, temperature).
+*The device's screenshot (MAX 6.876 MΩ: the resistor change).*
+
+Per conversion (200 ms) in the prototype: Vfb sd 1–7 µV, Vx 6–35 µV in most
+blocks; a block holding a switch transient 80 … 2700 µV. The first result
+after a switch can be off by up to 4 mV (OP1's input stepping from 0.37 V to
+1.05 V); later results drift by ~20 µV over 2 s. On 5.57 MΩ the 0.4.0
+build's readings have an sd of 0.0002 MΩ.
+
+Not checked: any resistor above 5.57 MΩ, the noise and settling at hundreds
+of MΩ, the leak's stability (humidity, temperature) and its dependence on
+the jack voltage.
 
 ## Tuning without a reflash
 
-`DBG:OHM6 gain,off_uV,skip,keep` sets the RAM values (an empty field keeps
-its value); `DBG:OHM6?` answers `gain,off_uV,skip,keep,Vx,Vfb` (V, the last
-phase medians). Defaults 1, 0, 2, 3.
+`DBG:OHM6 gain,off_uV,skip,keep,leak_nS` sets the RAM values (an empty
+field keeps its value); `DBG:OHM6?` answers `gain,off_uV,skip,keep,leak_nS,Vx,Vfb`
+(V, the last phase medians). Defaults 1, 0, 2, 3, 0 (the leak until learned).
 
 ## Emulator
 

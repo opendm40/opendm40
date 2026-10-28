@@ -39,8 +39,7 @@ const MINOR_DY: u16 = 3;
 
 /// Full scale of the range a value with `dec` decimals in `unit` belongs
 /// to: 60000 counts, except the 1000 V (DC V r3, 1 decimal) and 10 A
-/// (DC / AC A r1, 3 decimals) ranges the front end limits and the
-/// experimental 600 Mohm (6000 counts, 1 decimal).
+/// (DC / AC A r1, 3 decimals) ranges the front end limits.
 pub fn full_scale(dec: u8, unit: &str) -> f32 {
     let mut s = 60000.0f32;
     for _ in 0..dec {
@@ -49,7 +48,6 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
     match (unit, dec) {
         ("V", 1) => 1000.0,
         ("A", 3) => 10.0,
-        ("M\u{3a9}", 1) => 600.0,
         _ => s,
     }
 }
@@ -57,11 +55,13 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
 /// Full scale of DMM `mode`: continuity (11) and diode (12) read up to
 /// their OL ceilings (dmm.rs poll_cont: > 1000 ohm; poll_diode: > 3.12 V,
 /// the 3 V scale), not the 60000-count scale of their format (600 ohm /
-/// 6 V); else `full_scale`.
-pub fn mode_full_scale(mode: u8, dec: u8, unit: &str) -> f32 {
+/// 6 V); the experimental 600 Mohm (ohm r7, dmm::OHM600) its range, whatever
+/// its decimals; else `full_scale`.
+pub fn mode_full_scale(mode: u8, range: i8, dec: u8, unit: &str) -> f32 {
     match mode {
         11 => 1000.0,
         12 => 3.0,
+        10 if range == 7 => 600.0,
         _ => full_scale(dec, unit),
     }
 }

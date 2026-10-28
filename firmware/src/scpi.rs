@@ -509,10 +509,11 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
-///   DBG:OHM6 g,off,skip,keep | DBG:OHM6?  600 Mohm range tuning (RAM only,
-///                           dmm::Ohm600): Rref gain, offset uV subtracted from
-///                           Vfb - Vx, conversions dropped / kept per phase |
-///                           g,off,skip,keep,Vx,Vfb (V, the last phase medians)
+///   DBG:OHM6 g,off,skip,keep,leak | DBG:OHM6?  600 Mohm range tuning (RAM
+///                           only, dmm::Ohm600): Rref gain, offset uV subtracted
+///                           from Vfb - Vx, conversions dropped / kept per phase,
+///                           the learned leak nS | g,off,skip,keep,leak,Vx,Vfb
+///                           (V, the last phase medians)
 ///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
 ///                           Shutdown setting (0 = the setting; RAM only, for
 ///                           tests) | ms since the last touch / key, ms since
@@ -707,10 +708,10 @@ pub enum Dbg {
     /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
     /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
     Idle(Option<u32>),
-    /// DBG:OHM6 gain,off_uV,skip,keep (Some; a missing field = NaN, kept) /
+    /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
     /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
     /// (dmm::Ohm600, Dmm::ohm600_dbg).
-    Ohm6(Option<[f32; 4]>),
+    Ohm6(Option<[f32; 5]>),
 }
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
@@ -2380,7 +2381,7 @@ impl Scpi {
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
                         b"OHM6" => Dbg::Ohm6((!query).then(|| {
-                            let mut v = [f32::NAN; 4];
+                            let mut v = [f32::NAN; 5];
                             for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {
                                 *x = parse_num(trim(f)).unwrap_or(f32::NAN);
                             }

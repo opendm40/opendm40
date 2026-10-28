@@ -582,8 +582,10 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** on the range page (or `RES:RANG 600E6`): up to
-  600 MΩ, one reading in about 2 s, accuracy not specified. AUTO and the
-  AUTO key never select it; **EXP** shows top left.
+  600 MΩ, one reading in about 2 s, accuracy not specified, its own test
+  current (100 nA). AUTO and the AUTO key never select it; **EXP** shows top
+  left. Leave the leads open once first: the meter learns its own leakage
+  (without that, readings near 600 MΩ are up to 3 % low).
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |

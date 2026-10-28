@@ -6,6 +6,9 @@ SOP1P masked), so the r7 value is not checked here (the device is); the range
 rules are:
 
   explicit  CONF:RES 600E6: RES:RANG? 6E8, RES:RANG:AUTO? 0;
+  read      CONF:RES 600E6;:READ? and MEAS:RES? 600E6: a reading (the
+            model's OL, +9.9E37), not SCPI NaN (+9.91E37: no reading in
+            time; the first r7 reading takes ~2.2 s);
   max       CONF:RES MAX: 6E7 (MAX is the top stock range);
   value     RES:RANG 100E6 (a value above 60 Mohm): 6E8;
   auto      RES:RANG:AUTO ON from 600 Mohm: AUTO 1 and RES:RANG? at most 6E7
@@ -90,6 +93,10 @@ def main():
             wait(1.0)
             r, a = rng()
             check('explicit', abs(r - 6e8) < 1 and a == '0', 'RANG %g AUTO %s' % (r, a))
+            for c in ['CONF:RES 600E6;:READ?', 'MEAS:RES? 600E6']:
+                t1 = time.time()
+                v = q(c)
+                check('read', abs(float(v) - 9.9e37) < 1e35, '%s -> %s in %.1f s' % (c, v, time.time() - t1))
             tm.write('CONF:RES MAX')
             wait(1.0)
             r, a = rng()
