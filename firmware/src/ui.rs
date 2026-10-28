@@ -871,7 +871,7 @@ impl DmmView {
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
             _ => 255,
         };
@@ -1100,10 +1100,12 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
         (i * 1e9, " nA")
     };
     let mut b = [0u8; 16];
-    let mut t = crate::scope_ui::Txt::new("I ");
+    // The experimental 600 Mohm says so, in the reading's colour.
+    let exp = mode == 10 && range == crate::dmm::OHM600;
+    let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
     t.push(u);
-    sf::label(sf::F14, OHM_I_RECT, t.as_str(), DIM, BG, 1, 1);
+    sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
 /// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
@@ -1309,9 +1311,12 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         ],
         // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
         // +1 digit notes), also in AUTO unless the 0.28 mA "ON" variant.
+        // 600 Mohm (dmm::OHM600): after AUTO, so the AUTO key's range steps
+        // (the items before AUTO) never reach it; its own row on the page.
         Button::Ohm => &[
             ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            (OHM600_ITEM, Some(7)),
         ],
         _ => &[("AUTO", None)],
     }
@@ -1339,6 +1344,7 @@ pub fn range_code(mode: u8, range: u8) -> u8 {
 pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
+        10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
         0..=10 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
@@ -1372,8 +1378,16 @@ fn range_status(s: &str) {
 }
 
 fn range_rect(i: usize) -> sf::Rect {
+    if i >= 8 {
+        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
+        // page), two columns wide for its label.
+        return rect(8, 141, 228, 36);
+    }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
 }
+
+/// The 600 Mohm item of the Resistor Settings page (dmm::OHM600).
+pub const OHM600_ITEM: &str = "600M\u{3a9} experimental";
 
 /// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub
 /// 0..3).

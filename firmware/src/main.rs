@@ -776,6 +776,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dbg_idle(set, now, scpi);
                         set.is_none()
                     }
+                    scpi::Dbg::Ohm6(set) => {
+                        app.dmm.ohm600_dbg(set, scpi);
+                        set.is_none()
+                    }
                     scpi::Dbg::Ping(ms) => {
                         if ms > 0 {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));

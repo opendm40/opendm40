@@ -385,6 +385,8 @@ Functions:
   AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
   off.
 - `:RANGe?` also reports the range while autoranging.
+- `RESistance:RANGe` above 60 MΩ selects the experimental 600 MΩ
+  (`+6.000000E+08`); `MAX` is 60 MΩ. `:RANGe:AUTO ON` leaves it.
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
@@ -785,6 +787,8 @@ unless shown otherwise.
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
+| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>` (an empty field keeps its value): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
+| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<Vx>,<Vfb>` (V, the last phase medians) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |

@@ -509,6 +509,10 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:OHM6 g,off,skip,keep | DBG:OHM6?  600 Mohm range tuning (RAM only,
+///                           dmm::Ohm600): Rref gain, offset uV subtracted from
+///                           Vfb - Vx, conversions dropped / kept per phase |
+///                           g,off,skip,keep,Vx,Vfb (V, the last phase medians)
 ///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
 ///                           Shutdown setting (0 = the setting; RAM only, for
 ///                           tests) | ms since the last touch / key, ms since
@@ -703,6 +707,10 @@ pub enum Dbg {
     /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
     /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
     Idle(Option<u32>),
+    /// DBG:OHM6 gain,off_uV,skip,keep (Some; a missing field = NaN, kept) /
+    /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
+    /// (dmm::Ohm600, Dmm::ohm600_dbg).
+    Ohm6(Option<[f32; 4]>),
 }
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
@@ -1049,12 +1057,13 @@ pub fn pow10f(e: i32) -> f32 {
 
 /// The settable ranges, ascending (the MF page's items, Dmm::set_range
 /// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
-/// 60 ohm .. 60 Mohm.
+/// 60 ohm .. 60 Mohm and the experimental 600 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
-        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
+        // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
+        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
     }
 }
@@ -2370,6 +2379,13 @@ impl Scpi {
                             }
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
+                        b"OHM6" => Dbg::Ohm6((!query).then(|| {
+                            let mut v = [f32::NAN; 4];
+                            for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {
+                                *x = parse_num(trim(f)).unwrap_or(f32::NAN);
+                            }
+                            v
+                        })),
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,

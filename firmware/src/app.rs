@@ -3309,8 +3309,10 @@ impl App {
             let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
             let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
             let cur = self.range_sel_manual();
+            // The items before AUTO, in a ring; from one after it (ohm
+            // 600 Mohm, experimental) back to the first.
             let i = match cur {
-                Some(i) if !self.dmm.is_auto() => (i + 1) % n.max(1),
+                Some(i) if !self.dmm.is_auto() => if i + 1 < n { i + 1 } else { 0 },
                 Some(i) => i,
                 None => 0,
             };
@@ -4111,7 +4113,10 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                // Ohm MAX: 60 Mohm; 600 Mohm (experimental) only by a value
+                // above it.
+                let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
+                let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {

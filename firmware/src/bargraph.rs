@@ -39,7 +39,8 @@ const MINOR_DY: u16 = 3;
 
 /// Full scale of the range a value with `dec` decimals in `unit` belongs
 /// to: 60000 counts, except the 1000 V (DC V r3, 1 decimal) and 10 A
-/// (DC / AC A r1, 3 decimals) ranges the front end limits.
+/// (DC / AC A r1, 3 decimals) ranges the front end limits and the
+/// experimental 600 Mohm (6000 counts, 1 decimal).
 pub fn full_scale(dec: u8, unit: &str) -> f32 {
     let mut s = 60000.0f32;
     for _ in 0..dec {
@@ -48,6 +49,7 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
     match (unit, dec) {
         ("V", 1) => 1000.0,
         ("A", 3) => 10.0,
+        ("M\u{3a9}", 1) => 600.0,
         _ => s,
     }
 }
