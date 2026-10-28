@@ -41,7 +41,7 @@ drop left, or R above 618 MΩ. LIVE?: the jack below COM, or above FB.
 Digits: one range over three decades, so the 6000-count format of the
 value's decade (5.570 / 55.70 / 557.0 MΩ; a decade change needs 3 % past
 6 / 60 MΩ), plus the small extra digit once 4 readings are in and their
-mean's spread (sd / √4) is at most one such digit. The bargraph's scale stays
+mean's spread (sd / √4) is under 0.7 of that digit (off again above 1.3). The bargraph's scale stays
 0 … 600 MΩ. Test current: **EXP I 105 nA** on the DMM page, the AGNDP9
 short-circuit current through 10 MΩ ([short.csv](data/short.csv),
 `AGNDP9,R10M`). The range page hides the 0.90 / 0.28 mA buttons while
@@ -82,7 +82,9 @@ Uncorrected, 48.5 pA is 2.8 % of the 1.7 nA test current at 600 MΩ (the
 reading low). The firmware learns it: while the drop is below 1.5 mV (an Rx
 above ~7 GΩ) with the jack within 10 % of FB, from the second such reading
 on, it takes leak = drop / Rref / Vx as a conductance (a mean over ~4) and
-subtracts leak · Vx from the current. That treats the leak as a resistor
+subtracts leak · Vx from the current. A drop of zero or below (the jack at
+or above FB: a charged capacitor, a source) is never learned, and an Rx above
+~7 GΩ counts as open (its conductance joins the leak). That treats the leak as a resistor
 across the jacks; whether it is one is *unknown*. At 600 MΩ the jack is at
 nearly the open voltage, so the correction holds there whatever the model;
 at 5.57 MΩ it is 0.03 %. It lives in RAM: until the leads have been open
@@ -102,8 +104,8 @@ leak learned, 0.041 / 0.059 nS):
 
 | resistor | stock 6 MΩ | stock 60 MΩ | prototype | 0.4.0, no leak | 0.4.0, leak learned |
 |---|---|---|---|---|---|
-| 0.9925 MΩ | 0.9938 | – | 0.9945 | – | 0.9921 … 0.9970 (drifting after the resistor was handled) |
-| 5.5693 MΩ | 5.5756 | 5.5721 | 5.5701 | 5.5705 | 5.5705 … 5.5713 |
+| 0.9925 MΩ | 0.9938 | – | 0.9945 | – | 0.9921 … 0.9970 (drifting; after the resistor was handled, *inferred*) |
+| 5.5693 MΩ | 5.5756 | 5.5721 | 5.5701 | 5.5705 | 5.5705 … 5.5713 (the first two, 5.5638 and 5.5647, settling after the swap) |
 
 ![The 0.4.0 build on 5.5693 MΩ](img/ohm600m-device-5m57.png)
 
@@ -122,8 +124,11 @@ the jack voltage.
 ## Tuning without a reflash
 
 `DBG:OHM6 gain,off_uV,skip,keep,leak_nS` sets the RAM values (an empty
-field keeps its value); `DBG:OHM6?` answers `gain,off_uV,skip,keep,leak_nS,Vx,Vfb`
+field keeps its value; a leak value freezes the learning, a negative one
+restarts it); `DBG:OHM6?` answers `gain,off_uV,skip,keep,leak_nS,Vx,Vfb`
 (V, the last phase medians). Defaults 1, 0, 2, 3, 0 (the leak until learned).
+With the display smoothing on (Settings), its mean stacks on the range's own
+4-reading mean: at High (16 readings) a step takes ~40 s to settle.
 
 ## Emulator
 

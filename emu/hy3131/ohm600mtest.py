@@ -96,7 +96,7 @@ def main():
             for c in ['CONF:RES 600E6;:READ?', 'MEAS:RES? 600E6']:
                 t1 = time.time()
                 v = q(c)
-                check('read', abs(float(v) - 9.9e37) < 1e35, '%s -> %s in %.1f s' % (c, v, time.time() - t1))
+                check('read', v.startswith('+9.90000000E+37'), '%s -> %s in %.1f s' % (c, v, time.time() - t1))
             tm.write('CONF:RES MAX')
             wait(1.0)
             r, a = rng()
