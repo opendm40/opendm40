@@ -420,7 +420,9 @@ def case_release():
             'after DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520001 (%s)' % b2[:60])
     c.check(',NORMAL,WDT_RETRY,' in b3 and '0x43520002' in b3.split(','),
             'after the 2nd DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520002 (%s)' % b3[:60])
-    c.expect_normal(3, (CRASH2,))
+    # The end read comes > 60 s after the last reboot: mark_healthy has
+    # cleared the count (the 0x43520002 is checked in DBG:BOOT? above).
+    c.expect_normal(3, (CRASH0,))
     return c
 
 
