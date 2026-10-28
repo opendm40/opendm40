@@ -1,60 +1,34 @@
-//! The protocol decoder view (TODO "Protocol decoders", phase 1; View::Decode):
-//! opened from the scope page (MF > Settings > Decode) or DECode:STATe ON,
-//! closed by MENU / SCOPE or DECode:STATe OFF. While it is open the scope's
-//! input streams into the decoder (scope.rs `dec_*`, decode.rs); the frames
-//! stay in memory after it closes (CLEAR / DECode:CLEar drop them).
+//! The protocol decoder on the scope page (TODO "Protocol decoders"): each
+//! frame the page draws (a running frame, a stopped record's zoom / pan) is
+//! decoded over the screen's window of the record plus a character (UART)
+//! or a frame (Modbus) on either side, and the result (ui_decode.rs `ANN`)
+//! drawn as the bus band. Settings: MF > Settings > Decode (`Popup::Dec`)
+//! or DECode:...; DECode:FRAMes? decodes the stopped record (running: the
+//! screen's frames).
 //!
-//! Main loop: `dec_poll` every pass (App::scope_poll) and between the list
-//! rows a pass draws (`dec_tick`, at most ROWS_PER_PASS), so the ring
-//! (CAP samples: 21 ms at 1.25 MS/s) is read well within its time. All of
-//! it is region B (no .cold: it runs while the stream does).
+//! No state but the settings and the bit rate found last (`DS`, a few
+//! bytes) and one screen's annotations (`ANN`, < 1 KB, `.sram_bss`).
 
 use super::*;
-use crate::decode::{self as dc, Cfg, Dec};
+use crate::decode as dc;
 use crate::scope_ui::dec as ud;
 
-/// Rows drawn per main-loop pass (the decoder runs between them).
-const ROWS_PER_PASS: usize = 1;
-/// Counter cells / top bar refresh, ms.
-const STAT_MS: u64 = 250;
 /// Threshold stepper, V.
 const THR_STEP: f32 = 0.1;
+/// Auto-baud looks at most this many samples.
+const AUTO_MAX: usize = 65_536;
 
-/// Decoder and view state, in SRAM (`.sram_bss`, zeroed at reset; `init`
-/// sets the non-zero fields), not in the App: TCM .bss shortens the stack.
 pub(super) struct DecState {
-    pub d: Dec,
-    /// Settings (DECode:..., the setup popup); manual threshold in V (NaN:
-    /// auto).
-    pub cfg: Cfg,
+    pub cfg: dc::Cfg,
+    /// Manual threshold, V at the probe tip (NaN: auto).
     pub thr_v: f32,
-    /// Decoding (the view is open), paused (STOP).
-    pub on: bool,
-    pub paused: bool,
-    /// The stream generation the decoder was restarted for.
-    gen: u32,
-    /// The list: the top row's sequence number (when not following), LIVE.
-    top: u32,
-    live: bool,
-    /// What each row shows: frame sequence + 1 (0: empty / a note).
-    shown: [u32; ud::ROWS],
-    /// The note shown (empty list), the counters' and top bar's state.
-    note: u8,
-    stat_at: u64,
-    cnt: [u32; 4],
-    top_key: [u32; ud::TOP_ITEMS],
-    /// Time zero of the list: the first frame since the last clear.
-    base_seq: u32,
-    base_us: u64,
-    /// Setup popup open; a press on a panel button (feedback), a drag.
-    pub popup: bool,
-    pressed: u8,
-    drag: Option<(i16, u32)>,
-    /// The whole view needs drawing.
-    full: bool,
+    /// The bit rate auto-baud found last (kept when a screen has too few
+    /// edges to measure it).
+    last_baud: u32,
+    /// Changes with every decoded screen (Model::dec_gen; 0 = blank).
+    gen: u16,
 }
 
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut DS: DecState = unsafe { core::mem::zeroed() };
 
 pub(super) fn ds() -> &'static mut DecState {
@@ -64,322 +38,241 @@ pub(super) fn ds() -> &'static mut DecState {
 /// Boot: the non-zero defaults.
 pub(super) fn init() {
     let s = ds();
-    s.d.init();
-    s.cfg = Cfg::DEFAULT;
+    s.cfg = dc::Cfg::DEFAULT;
     s.thr_v = f32::NAN;
-    s.live = true;
-    s.gen = u32::MAX;
+    s.gen = 1;
+}
+
+/// Lines of DECode:FRAMes?: the reply buffer, frames before `first` and
+/// those that do not fit left out.
+struct Out<'a> {
+    b: &'a mut [u8],
+    n: usize,
+    first: u32,
+    full: bool,
+    /// The line being built starts here (None: none open / skipped).
+    open: Option<usize>,
+    lines: u32,
+}
+
+impl Out<'_> {
+    fn put(&mut self, s: &[u8]) {
+        if self.full || self.open.is_none() {
+            return;
+        }
+        if self.n + s.len() > self.b.len() {
+            // The line does not fit: dropped, the reply ends before it.
+            self.n = self.open.take().unwrap_or(self.n);
+            self.full = true;
+            return;
+        }
+        self.b[self.n..self.n + s.len()].copy_from_slice(s);
+        self.n += s.len();
+    }
+    fn w(&mut self, f: impl FnOnce(&mut dc::W)) {
+        let mut t = [0u8; 64];
+        let mut w = dc::W { b: &mut t, n: 0 };
+        f(&mut w);
+        let n = w.n;
+        self.put(&t[..n]);
+    }
 }
 
 impl App {
-    /// Open the decoder view and start decoding. Err: the SCPI error (and
-    /// a toast).
-    pub(super) fn dec_open(&mut self, clk: &mut Clock) -> Result<(), &'static str> {
-        let now = clk.now_ms();
-        let why = if self.scope.wave_on() {
-            Some("Decode: MCX input only")
-        } else if self.scope.held() {
-            Some("Decode: scope record in use")
-        } else if self.view == View::Inrush {
-            Some("Decode: inrush page open")
-        } else {
-            None
-        };
-        if let Some(t) = why {
-            self.toast(now, t, false);
-            return Err("Settings conflict");
+    /// The band shown: 0 none, 1 UART, 2 Modbus.
+    pub(super) fn dec_band(&self) -> u8 {
+        match ds().cfg.proto {
+            dc::P_UART => 1,
+            dc::P_MODBUS => 2,
+            _ => 0,
         }
-        if self.view != View::Decode {
-            self.show(View::Decode, clk);
-        }
-        let s = ds();
-        s.paused = false;
-        s.popup = false;
-        self.dec_start(now);
-        Ok(())
     }
 
-    /// (Re)start the stream at the settings' rate.
-    fn dec_start(&mut self, now: u64) {
-        let s = ds();
-        s.on = true;
-        if !s.paused {
-            self.scope.dec_begin(dc::fs_for(s.cfg.baud), now);
-        }
-        s.gen = u32::MAX;
-        s.full = true;
+    /// Model::dec_gen: blank while a drag / pinch moves the trace.
+    pub(super) fn dec_gen_shown(&self) -> u16 {
+        if self.sp.frozen_or_pinch() { 0 } else { ds().gen }
     }
 
-    /// Leaving the view (App::show): the scope gets its input back.
-    pub(super) fn dec_leave(&mut self, now: u64) {
-        let s = ds();
-        s.on = false;
-        s.popup = false;
-        s.drag = None;
-        self.scope.dec_end(now);
-    }
-
-    /// Settings changed: restart with them (thresholds only: in place).
-    fn dec_changed(&mut self, now: u64) {
-        let s = ds();
-        if s.on {
-            self.dec_start(now);
-        }
-        s.full = true;
-        self.redraw |= self.view == View::Decode && !s.popup;
-    }
-
+    /// Manual threshold as a code (the scope's code -> row map inverted).
     fn dec_thr_code(&self) -> Option<u16> {
         let v = ds().thr_v;
-        v.is_finite().then(|| self.scope.dec_code_of(v))
+        if !v.is_finite() {
+            return None;
+        }
+        let r0 = self.scope.row_of_code(0.0);
+        let slope = (self.scope.row_of_code(1000.0) - r0) / 1000.0;
+        let c = (self.scope.row_of_volts(v) - r0) / slope;
+        Some(if c.is_finite() { c.clamp(0.0, 1023.0) as u16 } else { 512 })
     }
 
-    /// Decode what the stream wrote (every main-loop pass; cheap without a
-    /// decoder session).
-    #[inline(never)]
-    pub fn dec_poll(&mut self, now: u64) {
-        let s = ds();
-        if !s.on || s.paused {
-            return;
-        }
-        let Some((wr, gen, laps)) = self.scope.dec_poll(now) else { return };
-        if gen != s.gen {
-            s.gen = gen;
-            let code = self.dec_thr_code();
-            s.d.restart(s.cfg, dc::fs_for(s.cfg.baud), now * 1000, code);
-            return;
-        }
-        if laps > 0 {
-            s.d.lost();
-        }
-        crate::prof::enter(crate::prof::ACQ);
-        s.d.poll(self.scope.dec_ring(), wr);
-        crate::prof::exit(crate::prof::ACQ);
+    /// The level in use, V (NaN: none).
+    fn dec_level(&self) -> f32 {
+        let a = ud::ann();
+        if a.mid == 0 { f32::NAN } else { self.scope.volts(a.mid as f32) }
     }
 
-    // ---- drawing ----
-
-    /// The whole view (draw_static).
-    #[inline(never)]
-    pub(super) fn dec_page(&mut self) {
-        let now = self.now;
-        ud::chrome(&mut || self.dec_poll(now));
+    pub(super) fn dec_setup_vals(&self) -> ud::SetupVals {
         let s = ds();
-        ud::panel(s.live, s.paused, &mut || self.dec_poll(now));
-        let s = ds();
-        s.shown = [u32::MAX; ud::ROWS];
-        s.note = u8::MAX;
-        s.top_key = [u32::MAX; ud::TOP_ITEMS];
-        s.cnt = [u32::MAX; 4];
-        s.stat_at = 0;
-        s.full = false;
-        if s.popup {
-            self.dec_setup_draw();
-        }
+        ud::SetupVals { proto: s.cfg.proto, fmt: s.cfg.fmt, inv: s.cfg.inverted, baud: s.cfg.baud, thr: s.thr_v, level: self.dec_level() }
     }
 
-    /// One pass of the view: the top bar / counters when they changed (at
-    /// most every STAT_MS), then up to ROWS_PER_PASS changed rows.
-    #[inline(never)]
-    pub(super) fn dec_tick(&mut self, now: u64) {
+    /// The line parameters for `fs` over the window `a..b` (levels from its
+    /// min / max) of `src`; Err: 0 no signal, 1 no bit rate, 2 bits too
+    /// short for the sample rate.
+    fn dec_line<S: crate::pack10::Src + ?Sized>(&self, src: &S, a: usize, b: usize, mm: (u16, u16), fs: u32) -> Result<(dc::Line, u32), u8> {
         let s = ds();
-        if s.full {
-            self.redraw = true;
-            return;
-        }
-        if s.popup {
-            return;
-        }
-        // A top-bar item or a counter cell, or else the rows.
-        if now >= s.stat_at {
-            crate::prof::enter(crate::prof::STAT);
-            let drew = self.dec_stats();
-            crate::prof::exit(crate::prof::STAT);
-            if drew {
-                self.dec_poll(now);
-                return;
+        let Some((lo, mid, hi)) = dc::levels(mm.0, mm.1, self.dec_thr_code()) else { return Err(0) };
+        let baud = if s.cfg.baud != 0 {
+            s.cfg.baud
+        } else {
+            match dc::auto_baud(src, a, b.min(a + AUTO_MAX), lo, hi, fs) {
+                Ok(x) => {
+                    s.last_baud = x;
+                    x
+                }
+                Err(dc::NoRate::TooFast) => return Err(2),
+                Err(_) if s.last_baud != 0 => s.last_baud,
+                Err(_) => return Err(1),
             }
-            ds().stat_at = now + STAT_MS;
+        };
+        let (bits, parity) = s.cfg.bits();
+        let spb = (fs as u64 * 256 / baud.max(1) as u64) as u32;
+        Ok((dc::Line { lo, mid, hi, inv: s.cfg.inverted, spb, bits, parity }, baud))
+    }
+
+    /// The bar (zoomed out, too few samples per bit): the columns where the
+    /// trace spans more than half the screen's swing.
+    fn dec_bar(&mut self) {
+        let a = ud::ann();
+        a.mode = ud::M_BAR;
+        let seg = &scope_page::cache_seg();
+        let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        for &(p, q) in seg.iter().filter(|s| s.0 <= s.1) {
+            lo = lo.min(p);
+            hi = hi.max(q);
         }
-        let s = ds();
-        let st = &s.d.st;
-        // Time zero: the first frame since the clear.
-        if s.base_us == 0 && st.next > s.base_seq {
-            if let Some(h) = st.get(s.base_seq.max(st.first)) {
-                s.base_us = h.t_us;
+        let need = ((hi as i32 - lo as i32) / 2).max(3);
+        for (i, &(p, q)) in seg.iter().enumerate() {
+            if p <= q && (q as i32 - p as i32) >= need {
+                a.bar[i / 8] |= 1 << (i % 8);
             }
         }
-        let n = ud::ROWS as u32;
-        // LIVE: the list moves by half a page when the newest frame passes
-        // its end (a burst: to the newest page), so a new frame costs one
-        // row, not a redraw of every row.
-        if s.live && st.next > s.top + n {
-            s.top = (s.top + n / 2).max(st.next.saturating_sub(n));
+    }
+
+    /// Decode the frame the page just built (scope_page `sp_frame`).
+    #[inline(never)]
+    pub(super) fn dec_frame(&mut self, f: &scope::Frame) {
+        let s = ds();
+        let a = ud::ann();
+        if s.cfg.proto == dc::P_OFF {
+            if a.mode != ud::M_NONE {
+                a.clear();
+            }
+            return;
         }
-        let top = s.top.clamp(st.first, st.next.saturating_sub(1).max(st.first));
-        s.top = top;
-        // An empty list: one note.
-        if st.next == st.first {
-            let k = if s.paused {
-                1
-            } else if s.d.threshold().is_none() {
-                2
-            } else if s.d.baud() == 0 {
-                3
-            } else {
-                4
-            };
-            if s.note != k {
-                s.note = k;
-                let t = ["", "Stopped", "Waiting for a signal (no swing)", "Measuring the bit rate", "No frames yet"][k as usize];
-                ud::row(0, Some(&ud::Row { time: "", text: t, ascii: "", status: "", fg: 0 }));
-                s.shown[0] = 0;
-                for i in 1..ud::ROWS {
-                    if s.shown[i] != 0 {
-                        ud::row(i, None);
-                        s.shown[i] = 0;
-                    }
+        crate::prof::enter(crate::prof::X2);
+        a.clear();
+        s.gen = s.gen.wrapping_add(1).max(1);
+        let n = f.data.len();
+        a.n = n.max(1) as u32;
+        a.fs = f.fs;
+        if f.cols.is_some() || n < 2 {
+            self.dec_bar();
+            crate::prof::exit(crate::prof::X2);
+            return;
+        }
+        let rec = self.scope.record();
+        let (src, off) = match rec.offset_of(&f.data) {
+            Some(o) => (rec, o),
+            None => (f.data, 0),
+        };
+        let (_, t0, _) = self.scope.record_info();
+        a.t0 = off as i64 - t0 as i64;
+        let mm = f.data.min_max(0, n);
+        match self.dec_line(&src, off, off + n, mm, f.fs) {
+            Ok((l, baud)) => {
+                a.mid = l.mid;
+                a.baud = baud;
+                let cs = l.char_samples();
+                if l.spb < dc::MIN_SPB << 8 {
+                    a.mode = ud::M_NOTE;
+                    a.note_baud = baud;
+                } else if (cs as i64 * 399 / n as i64) < ud::MIN_BOX as i64 {
+                    self.dec_bar();
+                } else {
+                    self.dec_boxes(&src, off, n, &l, baud, f.fs);
                 }
             }
-            return;
-        }
-        s.note = 0;
-        let mut drawn = 0;
-        for i in 0..ud::ROWS {
-            let seq = top + i as u32;
-            let want = if seq < st.next { seq + 1 } else { 0 };
-            if s.shown[i] == want {
-                continue;
+            Err(2) => {
+                a.mode = ud::M_NOTE;
+                a.note_baud = 0;
             }
-            s.shown[i] = want;
-            if want == 0 {
-                ud::row(i, None);
-            } else {
-                crate::prof::enter(crate::prof::X2);
-                ud::frame_row(i, st, seq, s.base_us);
-                crate::prof::exit(crate::prof::X2);
-            }
-            drawn += 1;
-            self.dec_poll(now);
-            if drawn >= ROWS_PER_PASS {
-                break;
+            Err(_) => {
+                a.mid = 0;
+                a.mode = ud::M_NONE;
             }
         }
+        crate::prof::exit(crate::prof::X2);
     }
 
-    /// The first top-bar item or counter cell that changed, drawn (one
-    /// paint per pass: a badge is a few ms); false when none changed.
-    fn dec_stats(&mut self) -> bool {
+    fn dec_boxes(&mut self, src: &crate::pack10::Codes, off: usize, n: usize, l: &dc::Line, baud: u32, fs: u32) {
         let s = ds();
-        let c = s.d.st.cnt;
-        let mb = s.cfg.modbus;
-        let lock = s.d.baud();
-        let state = if s.paused {
-            2
-        } else if s.d.threshold().is_none() || lock == 0 {
-            0
-        } else {
-            1
+        let a = ud::ann();
+        a.mode = ud::M_BOXES;
+        let modbus = s.cfg.proto == dc::P_MODBUS;
+        let cs = l.char_samples() as usize;
+        // 16 characters (UART: back-to-back characters realign at an idle
+        // gap) or 6 (Modbus: the gap before a frame) either side.
+        let margin = cs * if modbus { 6 } else { 16 } + (l.spb >> 8) as usize * 2;
+        let lo = off.saturating_sub(margin);
+        let hi = (off + n + margin).min(src.len());
+        let mut fr = dc::Framer::new(modbus, cs as u32, fs, baud, lo as u32, hi as u32);
+        // The frame number of each frame box (the reply -> request link).
+        let mut fno = [u32::MAX; ud::NF];
+        let (vis0, vis1) = (off as i64, (off + n) as i64);
+        let mut on_frame = |f: &dc::Fr, req: u32, nframes: u32| {
+            let a = ud::ann();
+            if (f.end as i64) < vis0 || f.start as i64 >= vis1 || a.nf as usize >= ud::NF {
+                return;
+            }
+            let k = a.nf as usize;
+            let r = fno[..k].iter().position(|&x| x == req).map_or(0xFF, |p| p as u8);
+            fno[k] = nframes;
+            a.f[k] = ud::FAnn { s0: (f.start as i64 - vis0) as i32, s1: (f.end as i64 - vis0) as i32, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
+            a.nf += 1;
         };
-        let mut rb = [0u8; 24];
-        let mut r = dc::W { b: &mut rb, n: 0 };
-        if s.cfg.baud == 0 {
-            r.s("Auto ");
-        }
-        if lock != 0 {
-            r.u(lock).c(b' ');
-        } else if s.cfg.baud != 0 {
-            r.u(s.cfg.baud).c(b' ');
-        }
-        r.s(dc::FMT_NAMES[s.cfg.fmt as usize % 4]);
-        let rn = r.n;
-        let mut hb = [0u8; 16];
-        let hn = self.dec_thr_text(&mut hb, true);
-        let t = ud::Top {
-            state,
-            proto: if mb { "MODBUS" } else { "UART" },
-            rate: core::str::from_utf8(&rb[..rn]).unwrap_or(""),
-            thr: core::str::from_utf8(&hb[..hn]).unwrap_or(""),
-            inv: s.cfg.inverted,
-            battery: self.power.bars.min(5),
-            charging: self.power.charging(),
-        };
-        for k in 0..ud::TOP_ITEMS {
-            let key = ud::top_key(k, &t);
-            if s.top_key[k] != key {
-                s.top_key[k] = key;
-                ud::top_item(k, &t);
-                return true;
+        dc::chars(src, lo, hi, l, &mut |c| {
+            let a = ud::ann();
+            if (c.end as i64) >= vis0 && (c.start as i64) < vis1 {
+                if (a.nb as usize) < ud::NB {
+                    a.b[a.nb as usize] = ud::BAnn { s0: (c.start as i64 - vis0) as i32, s1: (c.end as i64 - vis0) as i32, v: c.v as u8, fl: c.err };
+                    a.nb += 1;
+                } else {
+                    a.more = true;
+                }
             }
-        }
-        let v = [c.frames, c.fe, c.pe, c.crc, c.ovr, mb as u32];
-        for i in 0..4 {
-            let key = ud::cell_key(i, &v);
-            if s.cnt[i] != key {
-                s.cnt[i] = key;
-                ud::cell_draw(i, &v);
-                return true;
+            if modbus {
+                let nf = fr.nframes;
+                fr.push(c, &mut |f, req| on_frame(f, req, nf));
             }
+        });
+        if modbus {
+            let nf = fr.nframes;
+            fr.finish(&mut |f, req| on_frame(f, req, nf));
         }
-        false
-    }
-
-    /// The threshold text: "1.65V", auto with the level in use "A 1.65V"
-    /// (`top`) / "Auto", or "A --" before one is known.
-    fn dec_thr_text(&self, b: &mut [u8; 16], top: bool) -> usize {
-        let s = ds();
-        let v = if s.thr_v.is_finite() { Some(s.thr_v) } else { s.d.threshold().map(|t| self.scope.dec_volts(t.0)) };
-        let mut w = dc::W { b, n: 0 };
-        if !s.thr_v.is_finite() && top {
-            w.s("A ");
-        }
-        match v {
-            Some(v) => {
-                let mut t = [0u8; 16];
-                w.s(crate::dmm::format(&mut t, v, 2)).s("V");
-            }
-            None => {
-                w.s("--");
-            }
-        }
-        w.n
     }
 
     // ---- setup popup ----
 
-    fn dec_setup_draw(&mut self) {
+    pub(super) fn dec_setup_tap(&mut self, h: ud::SetupHit, now: u64) {
         let s = ds();
-        let mut bb = [0u8; 16];
-        let mut b = dc::W { b: &mut bb, n: 0 };
-        if s.cfg.baud == 0 {
-            b.s("Auto");
-        } else {
-            b.u(s.cfg.baud);
-        }
-        let bn = b.n;
-        let mut hb = [0u8; 16];
-        let hn = self.dec_thr_text(&mut hb, false);
-        let v = ud::SetupVals {
-            modbus: s.cfg.modbus,
-            fmt: s.cfg.fmt,
-            inv: s.cfg.inverted,
-            baud: core::str::from_utf8(&bb[..bn]).unwrap_or(""),
-            thr_auto: !s.thr_v.is_finite(),
-            thr: core::str::from_utf8(&hb[..hn]).unwrap_or(""),
-        };
-        let now = self.now;
-        ud::setup(&v, &mut || self.dec_poll(now));
-    }
-
-    fn dec_setup_tap(&mut self, h: ud::SetupHit, now: u64) {
-        let s = ds();
+        let old = s.cfg;
         match h {
             ud::SetupHit::Close => {
-                s.popup = false;
-                self.redraw = true;
+                self.sp_popup_close();
                 return;
             }
-            ud::SetupHit::Modbus(m) => s.cfg.modbus = m,
+            ud::SetupHit::Proto(p) => s.cfg.proto = p,
             ud::SetupHit::Fmt(f) => s.cfg.fmt = f,
             ud::SetupHit::Inv(i) => s.cfg.inverted = i,
             ud::SetupHit::Baud(up) => {
@@ -388,206 +281,57 @@ impl App {
                 s.cfg.baud = ud::BAUDS[j];
             }
             ud::SetupHit::ThrAuto(auto) => {
-                s.thr_v = if auto { f32::NAN } else { self.dec_level().unwrap_or(1.5) };
-                self.dec_set_thr();
-                self.dec_setup_draw();
-                return;
+                s.thr_v = if auto { f32::NAN } else { self.dec_manual_start() };
             }
             ud::SetupHit::Thr(up) => {
-                let v = if s.thr_v.is_finite() { s.thr_v } else { self.dec_level().unwrap_or(1.5) };
+                let v = if s.thr_v.is_finite() { s.thr_v } else { self.dec_manual_start() };
                 let q = v / THR_STEP;
                 let q = if q >= 0.0 { (q + 0.5) as i32 } else { (q - 0.5) as i32 };
-                let v = (q + if up { 1 } else { -1 }) as f32 * THR_STEP;
-                s.thr_v = v.clamp(-8.0 * self.scope.s.probe, 8.0 * self.scope.s.probe);
-                self.dec_set_thr();
-                self.dec_setup_draw();
-                return;
+                s.thr_v = ((q + if up { 1 } else { -1 }) as f32 * THR_STEP).clamp(-100.0, 100.0);
             }
             _ => return,
         }
-        self.dec_changed(now);
-        self.dec_setup_draw();
-    }
-
-    /// The level in use, V.
-    fn dec_level(&self) -> Option<f32> {
-        ds().d.threshold().map(|t| self.scope.dec_volts(t.0))
-    }
-
-    fn dec_set_thr(&mut self) {
-        let code = self.dec_thr_code();
-        let s = ds();
-        s.d.set_threshold(code);
-        s.top_key = [u32::MAX; ud::TOP_ITEMS];
-    }
-
-    // ---- input ----
-
-    /// Touches and keys of the view: Some(captured) when handled.
-    pub(super) fn dec_gesture(&mut self, clk: &mut Clock, g: Gesture) -> Option<bool> {
-        let now = clk.now_ms();
-        let s = ds();
-        match g {
-            Gesture::KeyDown(k) => {
-                self.beep(now, 50);
-                match k {
-                    0 if s.popup => {
-                        s.popup = false;
-                        self.redraw = true;
-                    }
-                    0 => self.show(View::Scope, clk),
-                    1 => self.dec_pause(now),
-                    3 => {
-                        s.popup = !s.popup;
-                        self.redraw = true;
-                    }
-                    _ => {}
-                }
-                Some(false)
-            }
-            Gesture::Down(p) if !s.popup => {
-                if let Some(k) = ud::panel_hit(p.x, p.y) {
-                    s.pressed = k as u8 + 1;
-                    ud::panel_button(k, s.live, s.paused, true);
-                } else if ud::LIST.has(p.x as i16, p.y as i16) {
-                    s.drag = Some((p.y as i16, s.top));
-                }
-                Some(false)
-            }
-            Gesture::Drag(_, p, _) | Gesture::Move(_, p) if !s.popup => {
-                if let Some((y0, t0)) = s.drag {
-                    let rows = (y0 - p.y as i16) / ud::ROW_H;
-                    let t = (t0 as i64 + rows as i64).clamp(s.d.st.first as i64, s.d.st.next.saturating_sub(1).max(s.d.st.first) as i64) as u32;
-                    if rows != 0 || !s.live {
-                        let live = t + ud::ROWS as u32 >= s.d.st.next && rows > 0;
-                        self.dec_scroll(t, live);
-                    }
-                }
-                Some(true)
-            }
-            Gesture::Up(_) | Gesture::Cancel => {
-                s.drag = None;
-                self.dec_unpress();
-                Some(false)
-            }
-            Gesture::Tap(p) => {
-                self.beep(now, 30);
-                self.dec_unpress();
-                let s = ds();
-                if s.popup {
-                    let h = ud::setup_hit(p.x as i16, p.y as i16);
-                    self.dec_setup_tap(h, now);
-                    return Some(false);
-                }
-                match ud::panel_hit(p.x, p.y) {
-                    Some(0) => self.dec_page_step(false),
-                    Some(1) => self.dec_scroll(0, true),
-                    Some(2) => self.dec_page_step(true),
-                    Some(3) => {
-                        s.popup = true;
-                        self.redraw = true;
-                    }
-                    Some(4) => self.dec_clear(),
-                    Some(5) => self.dec_pause(now),
-                    Some(6) => self.show(View::Scope, clk),
-                    _ => {}
-                }
-                Some(false)
-            }
-            Gesture::MultiSwipeDown(_) => None,
-            _ => Some(false),
+        if s.cfg.baud != old.baud || s.cfg.proto != old.proto {
+            s.last_baud = 0;
         }
+        self.dec_changed();
+        self.sp_popup_draw();
+        let _ = now;
     }
 
-    fn dec_unpress(&mut self) {
-        let s = ds();
-        if s.pressed != 0 {
-            let k = s.pressed as usize - 1;
-            s.pressed = 0;
-            if !s.popup {
-                ud::panel_button(k, s.live, s.paused, false);
-            }
+    /// A manual threshold starts at the level in use (1.5 V without one).
+    fn dec_manual_start(&self) -> f32 {
+        let v = self.dec_level();
+        if v.is_finite() { v } else { 1.5 }
+    }
+
+    /// Settings changed: the band follows (stopped: the record is decoded
+    /// again at once; running: with the next frame).
+    fn dec_changed(&mut self) {
+        let a = ud::ann();
+        if self.dec_band() == 0 {
+            a.clear();
         }
-    }
-
-    fn dec_scroll(&mut self, top: u32, live: bool) {
-        let s = ds();
-        if live != s.live {
-            s.live = live;
-            ud::panel_button(1, live, s.paused, false);
-        }
-        s.top = top;
-    }
-
-    fn dec_page_step(&mut self, down: bool) {
-        let s = ds();
-        let n = ud::ROWS as u32;
-        let cur = s.top;
-        let t = if down { cur + n - 1 } else { cur.saturating_sub(n - 1).max(s.d.st.first) };
-        let live = down && t + n >= s.d.st.next;
-        self.dec_scroll(t.min(s.d.st.next.saturating_sub(1).max(s.d.st.first)), live);
-    }
-
-    fn dec_clear(&mut self) {
-        let s = ds();
-        s.d.clear();
-        s.base_seq = s.d.st.next;
-        s.base_us = 0;
-        s.top = s.d.st.next;
-        s.shown = [u32::MAX; ud::ROWS];
-        s.note = u8::MAX;
-        if !s.live {
-            self.dec_scroll(s.d.st.next, true);
-        }
-    }
-
-    fn dec_pause(&mut self, now: u64) {
-        let s = ds();
-        s.paused = !s.paused;
-        if s.paused {
-            self.scope.dec_halt();
-        } else {
-            self.dec_start(now);
-        }
-        ud::panel_button(5, s.live, s.paused, false);
-        s.top_key = [u32::MAX; ud::TOP_ITEMS];
-        s.note = u8::MAX;
+        ds().gen = ds().gen.wrapping_add(1).max(1);
+        self.scope.refresh();
     }
 
     // ---- SCPI ----
 
     /// DECode:... except FRAMes?: true when a reply text is in `out`.
     #[inline(never)]
-    pub fn dec_scpi(&mut self, clk: &mut Clock, c: crate::scpi::Dcd, out: &mut crate::scpi::Scpi) -> bool {
+    pub fn dec_scpi(&mut self, _clk: &mut Clock, c: crate::scpi::Dcd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Dcd as D;
-        let now = clk.now_ms();
         let s = ds();
         out.len = 0;
-        let mut changed = false;
+        let old = s.cfg;
         match c {
-            D::State(None) => out.put_bytes(if s.on { b"1" } else { b"0" }),
-            D::State(Some(true)) => {
-                if !s.on || s.paused {
-                    s.paused = false;
-                    if let Err(e) = self.dec_open(clk) {
-                        out.set_err(e);
-                    }
-                }
-                return false;
-            }
-            D::State(Some(false)) => {
-                if self.view == View::Decode {
-                    self.show(View::Scope, clk);
-                } else if s.on {
-                    self.dec_leave(now);
-                }
-                return false;
-            }
-            D::Modbus(None) => out.put_bytes(if s.cfg.modbus { b"MODB" } else { b"UART" }),
-            D::Modbus(Some(m)) => {
-                changed = s.cfg.modbus != m;
-                s.cfg.modbus = m;
-            }
+            D::Proto(None) => out.put_bytes(match s.cfg.proto {
+                dc::P_UART => b"UART",
+                dc::P_MODBUS => b"MODB",
+                _ => b"OFF",
+            }),
+            D::Proto(Some(p)) => s.cfg.proto = p,
             D::Baud(None) => {
                 if s.cfg.baud == 0 {
                     out.put_bytes(b"AUTO");
@@ -595,21 +339,12 @@ impl App {
                     out.put_u32(s.cfg.baud);
                 }
             }
-            D::Baud(Some(b)) => {
-                changed = s.cfg.baud != b;
-                s.cfg.baud = b;
-            }
-            D::Rate => out.put_u32(s.d.baud()),
+            D::Baud(Some(b)) => s.cfg.baud = b,
+            D::Rate => out.put_u32(if self.dec_band() != 0 { ud::ann().baud } else { 0 }),
             D::Fmt(None) => out.put_bytes(dc::FMT_NAMES[s.cfg.fmt as usize % 4].as_bytes()),
-            D::Fmt(Some(f)) => {
-                changed = s.cfg.fmt != f;
-                s.cfg.fmt = f;
-            }
+            D::Fmt(Some(f)) => s.cfg.fmt = f,
             D::Inv(None) => out.put_bytes(if s.cfg.inverted { b"INV" } else { b"NORM" }),
-            D::Inv(Some(i)) => {
-                changed = s.cfg.inverted != i;
-                s.cfg.inverted = i;
-            }
+            D::Inv(Some(i)) => s.cfg.inverted = i,
             D::Thr(None) => {
                 if s.thr_v.is_finite() {
                     out.put_f32(s.thr_v);
@@ -617,63 +352,199 @@ impl App {
                     out.put_bytes(b"AUTO");
                 }
             }
-            D::Thr(Some(v)) => {
-                s.thr_v = v;
-                self.dec_set_thr();
-                return false;
+            D::Thr(Some(v)) => s.thr_v = v,
+            D::Level => {
+                let v = self.dec_level();
+                if v.is_finite() {
+                    out.put_f32(v)
+                } else {
+                    out.put_bytes(crate::scpi::NAN)
+                }
             }
-            D::Level => match self.dec_level() {
-                Some(v) => out.put_f32(v),
-                None => out.put_bytes(crate::scpi::NAN),
-            },
             D::Count => {
-                let c = s.d.st.cnt;
-                for (i, v) in [c.frames, c.bytes, c.fe, c.pe, c.crc, c.ovr].iter().enumerate() {
+                let c = self.dec_count();
+                for (i, v) in c.iter().enumerate() {
                     if i > 0 {
                         out.put_bytes(b",");
                     }
                     out.put_u32(*v);
                 }
             }
-            D::Clear => {
-                self.dec_clear();
-                return false;
-            }
             D::Frames(_) => return false,
         }
-        if changed {
-            self.dec_changed(now);
+        if out.len == 0 {
+            if s.cfg.baud != old.baud || s.cfg.proto != old.proto {
+                s.last_baud = 0;
+            }
+            self.dec_changed();
+            if self.sp.popup == crate::scope_ui::Popup::Dec && !self.redraw {
+                self.sp_popup_draw();
+            }
         }
         out.len > 0
     }
 
-    /// DECode:FRAMes? [<n>]: a #4nnnn block of frame lines (decode.rs
-    /// `scpi_line`), the host's unread frames oldest first, at most `max`
-    /// and as many whole lines as fit; the host cursor moves past them.
+    /// DECode:COUNt?: frames, bytes, framing, parity, CRC errors of what
+    /// FRAMes? reports.
+    fn dec_count(&mut self) -> [u32; 5] {
+        let mut c = [0u32; 5];
+        let mut buf = [0u8; 0];
+        self.dec_lines(0, &mut buf, &mut c);
+        c
+    }
+
+    /// DECode:FRAMes? [<first>]: a #4nnnn block of frame lines (see
+    /// `dec_lines`).
     #[inline(never)]
-    pub fn dec_frames(&mut self, max: u32, buf: &mut [u8]) -> usize {
-        let s = ds();
-        let st = &mut s.d.st;
+    pub fn dec_frames(&mut self, first: u32, buf: &mut [u8]) -> usize {
         let lim = buf.len().min(10_000);
-        let mut w = dc::W { b: &mut buf[6..lim], n: 0 };
-        let mut k = 0;
-        while st.host < st.next && k < max {
-            let n0 = w.n;
-            dc::scpi_line(&mut w, st, st.host);
-            if w.n == w.b.len() {
-                // Did not fit: the next reply.
-                w.n = n0;
-                break;
-            }
-            st.host += 1;
-            k += 1;
-        }
-        let n = w.n;
+        let mut c = [0u32; 5];
+        let n = self.dec_lines(first, &mut buf[6..lim], &mut c);
         buf[0] = b'#';
         buf[1] = b'4';
         for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
             buf[2 + i] = b'0' + ((n / d) % 10) as u8;
         }
         6 + n
+    }
+
+    /// The frame lines "seq,time_s,proto,hex,status,info\n" from frame
+    /// `first` on, as many as fit `b` (its length used); `cnt` counts all
+    /// of them (frames, bytes, FE, PE, CRC). Stopped: the whole record
+    /// decoded; running: the screen's bytes / frames (`ANN`).
+    fn dec_lines(&mut self, first: u32, b: &mut [u8], cnt: &mut [u32; 5]) -> usize {
+        let s = ds();
+        if s.cfg.proto == dc::P_OFF {
+            return 0;
+        }
+        let modbus = s.cfg.proto == dc::P_MODBUS;
+        let mut o = Out { b, n: 0, first, full: false, open: None, lines: 0 };
+        let rec = self.scope.record();
+        if self.scope.s.run || rec.len() < 2 {
+            self.dec_lines_screen(&mut o, cnt, modbus);
+            return o.n;
+        }
+        let (fs, t0, _) = self.scope.record_info();
+        let len = rec.len();
+        let mm = rec.min_max(0, len);
+        let Ok((l, baud)) = self.dec_line(&rec, 0, len, mm, fs) else { return 0 };
+        if l.spb < dc::MIN_SPB << 8 {
+            return 0;
+        }
+        let cs = l.char_samples();
+        let mut fr = dc::Framer::new(modbus, cs, fs, baud, 0, len as u32);
+        let proto: &[u8] = if modbus { b",MB," } else { b",UART," };
+        let close = |o: &mut Out, f: &dc::Fr, req: u32, cnt: &mut [u32; 5]| {
+            cnt[0] += 1;
+            cnt[4] += (f.flags & dc::F_CRC != 0) as u32;
+            if o.open.is_some() {
+                o.w(|w| {
+                    w.c(b',').s(dc::status(f.flags)).c(b',');
+                    if modbus {
+                        dc::mb_text(w, f);
+                        if req != u32::MAX {
+                            w.s(" req=").u(req);
+                        }
+                    }
+                    w.c(b'\n');
+                });
+                if o.open.take().is_some() {
+                    o.lines += 1;
+                }
+            }
+        };
+        dc::chars(&rec, 0, len, &l, &mut |c| {
+            cnt[1] += 1;
+            cnt[2] += (c.err & dc::F_FE != 0) as u32;
+            cnt[3] += (c.err & dc::F_PE != 0) as u32;
+            fr.push(c, &mut |f, req| close(&mut o, f, req, cnt));
+            if fr.open_len() == 1 && !o.full && fr.nframes >= o.first {
+                // A new frame: its line.
+                o.open = Some(o.n);
+                let ns = (c.start as i64 - t0 as i64) * 1_000_000_000 / fs.max(1) as i64;
+                let seq = fr.nframes;
+                o.w(|w| {
+                    w.u(seq).c(b',').secs_ns(ns);
+                });
+                o.put(proto);
+            }
+            let v = c.v as u8;
+            o.w(|w| {
+                w.hex(v);
+            });
+        });
+        fr.finish(&mut |f, req| close(&mut o, f, req, cnt));
+        o.n
+    }
+
+    /// Running: the screen's frames from `ANN` (Modbus: the frame boxes
+    /// with the bytes on the screen; UART: the bytes, grouped by a gap of
+    /// two characters).
+    fn dec_lines_screen(&self, o: &mut Out, cnt: &mut [u32; 5], modbus: bool) {
+        let a = ud::ann();
+        if a.mode != ud::M_BOXES {
+            return;
+        }
+        let fs = a.fs.max(1) as i64;
+        let cs = if a.baud != 0 { (a.fs as u64 * ds().cfg.char_bits() as u64 / a.baud as u64) as i32 } else { 0 };
+        let time = |s0: i32| (a.t0 + s0 as i64) * 1_000_000_000 / fs;
+        let line = |o: &mut Out, seq: u32, s0: i32, s1: i32, fl: u8, f: Option<&ud::FAnn>, cnt: &mut [u32; 5]| {
+            cnt[0] += 1;
+            if seq < o.first || o.full {
+                return;
+            }
+            o.open = Some(o.n);
+            let ns = time(s0);
+            o.w(|w| {
+                w.u(seq).c(b',').secs_ns(ns);
+            });
+            o.put(if modbus { b",MB," } else { b",UART," });
+            for b in a.b[..a.nb as usize].iter().filter(|b| b.s0 >= s0 && b.s1 <= s1) {
+                let v = b.v;
+                o.w(|w| {
+                    w.hex(v);
+                });
+            }
+            o.w(|w| {
+                w.c(b',').s(dc::status(fl)).c(b',');
+                if let Some(f) = f {
+                    let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
+                    dc::mb_text(w, &fr);
+                    if f.req != 0xFF {
+                        w.s(" req=").u(f.req as u32);
+                    }
+                }
+                w.c(b'\n');
+            });
+            if o.open.take().is_some() {
+                o.lines += 1;
+            }
+        };
+        for b in &a.b[..a.nb as usize] {
+            cnt[1] += 1;
+            cnt[2] += (b.fl & dc::F_FE != 0) as u32;
+            cnt[3] += (b.fl & dc::F_PE != 0) as u32;
+        }
+        if modbus {
+            for (k, f) in a.f[..a.nf as usize].iter().enumerate() {
+                cnt[4] += (f.fl & dc::F_CRC != 0) as u32;
+                line(o, k as u32, f.s0, f.s1, f.fl, Some(f), cnt);
+            }
+            return;
+        }
+        let mut k = 0;
+        let mut seq = 0;
+        while k < a.nb as usize {
+            let (s0, mut s1, mut fl) = (a.b[k].s0, a.b[k].s1, a.b[k].fl);
+            let mut j = k + 1;
+            while j < a.nb as usize && j - k < 16 && a.b[j].s0 - s1 <= 2 * cs {
+                s1 = a.b[j].s1;
+                fl |= a.b[j].fl;
+                j += 1;
+            }
+            line(o, seq, s0, s1, fl, None, cnt);
+            seq += 1;
+            k = j;
+        }
     }
 }

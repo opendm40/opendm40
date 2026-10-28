@@ -1006,7 +1006,10 @@ struct Log {
     n: u32,
 }
 
-// TCM .bss (was .sram_bss; 2026-10-22 memory budget: SRAM is the tighter).
+// Was TCM .bss from 2026-10-22 (SRAM was the tighter); back in SRAM 2026-10-26 for the stack headroom.
+/// In SRAM, not the TCM: the TCM holds the stack, and this debug log is
+/// main-loop only (never DMA).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
 
 fn log_ref() -> &'static mut Log {

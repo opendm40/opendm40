@@ -152,7 +152,6 @@ fn is_page(v: View) -> bool {
             | View::Help
             | View::Inrush
             | View::TouchTest
-            | View::Decode
     )
 }
 
@@ -740,10 +739,6 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
-            if self.view == View::Decode {
-                // Leaving the decoder view: the scope gets its input back.
-                self.dec_leave(clk.now_ms());
-            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -782,8 +777,6 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
-            // The decoder view: the scope input; the DMM as it was.
-            View::Decode => (self.scope.dmm_rail(), true),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -852,7 +845,6 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
-            View::Decode => self.dec_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(None),
             View::Range if self.dmm.pw.on => {
@@ -1566,10 +1558,8 @@ impl App {
         // started explicitly, see Stats::rec). Dimming still applies.
         // Nor while the power meter integrates energy with a current flowing.
         // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1). Nor while the protocol decoder runs
-        // (a bus watched for hours).
-        let decoding = app_decode::ds().on && !app_decode::ds().paused;
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() && !decoding {
+        // decisions-2026-10-22.md #1).
+        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
             self.persist_now();
             power_off();
         }
@@ -1746,11 +1736,6 @@ impl App {
         // The inrush page: its state line / button (app_inrush_live.rs).
         if self.view == View::Inrush {
             self.inrush_tick(now);
-            return;
-        }
-        // The decoder view: changed rows and counters (app_decode.rs).
-        if self.view == View::Decode {
-            self.dec_tick(now);
             return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
@@ -2429,11 +2414,6 @@ impl App {
 
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
-        // The decoder owns the input (app_decode.rs): no scope frames.
-        if self.scope.dec_on() {
-            self.dec_poll(now);
-            return;
-        }
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
         // A scope CSV that finished (UF-13): release the record, toast.
         self.sp_csv_poll(now);
@@ -2456,6 +2436,15 @@ impl App {
             }
             return;
         }
+        // Stopped: the one re-render of the stored record that a pan, zoom
+        // or `refresh` asks for waits until it can be drawn. Polled while
+        // drawing is held (a GRAM read-back, a screenshot, a pending view
+        // redraw, an overlay on the scope page), it was dropped, and the
+        // screen kept the drag preview: the record beyond the old screen
+        // stayed blank (device 2026-10-26).
+        if !self.scope.s.run && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
+            return;
+        }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
@@ -2467,7 +2456,7 @@ impl App {
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
-                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                let sum: u32 = (a..b).map(|i| f.data.at(i) as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
             }
             if self.sp.autoset.is_some() {
@@ -2481,7 +2470,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
@@ -2759,11 +2748,6 @@ impl App {
         // them (app_touchtest.rs).
         if self.view == View::TouchTest {
             return self.tt_gesture(g);
-        }
-        if self.view == View::Decode {
-            if let Some(c) = self.dec_gesture(clk, g) {
-                return c;
-            }
         }
         // The stock-replica scope page owns its touches and keys.
         if self.sp_on() {
@@ -3403,8 +3387,6 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
-            // (The decoder view handles its own taps: app_decode.rs.)
-            View::Decode => {}
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
@@ -4971,6 +4953,7 @@ impl App {
             }
             C::Run => {
                 sc.run = true;
+                self.scope.run_on();
                 None
             }
             C::Stop => {

@@ -1,81 +1,151 @@
-//! The protocol decoder view (src/ui_decode.rs, View::Decode): frames from
-//! the real decoder (src/decode.rs fed with synthetic UART / Modbus sample
-//! streams), drawn by the firmware's drawing code. The view is opendm40's
-//! own: the full layout rules in the list, the top bar, the counter row and
-//! the setup popup's page; the panel buttons keep the scope page's stock
-//! geometry (text collisions checked). Worst cases: the widest rows (8 x
-//! 0xFF, a long Modbus field line, a cut line), the widest top-bar and
-//! counter texts, every setup state; the MF Settings tab with its Decode
-//! button.
+//! The protocol decoder's bus band on the scope page (src/ui_decode.rs) and
+//! its setup popup: synthetic UART / Modbus signals decoded by src/decode.rs
+//! the way app_decode.rs does it (a host copy of `dec_frame`), the trace and
+//! the band drawn by the firmware's code. The band lives on the stock-replica
+//! graph: texts must not collide or spill out of their box (the replica
+//! rules); every label is picked only when it fits its box with 3 px either
+//! side (ui_decode `pick`). Matrix: UART and Modbus at 24 zoom levels (from
+//! 2 to 600 characters on the screen) x 3 pan offsets, both views, errors,
+//! the bar, the "rate too low" note, the Wave view; the setup popup under
+//! the full rules.
 use super::*;
 use decode as dc;
 use scope_ui::dec as ud;
 
-/// Codes of `bytes` (UART, `fmt` 0 8N1 / 1 8E1 / 3 7E1) at `baud`, sampled
-/// at `fs`, with `idle_bits` of idle before and `gap_bits` after each frame
-/// given as a list of frames; 3.3 V logic at the decoder's 2 V/div
-/// (codes ~512 .. ~690).
-fn stream(frames: &[&[u8]], baud: f64, fs: f64, fmt: u8, gap_bits: f64) -> Vec<u16> {
+/// 3.3 V logic at the decoder's codes (512 = 0 V, 53.75 codes / V).
+const LO: f64 = 512.0;
+const HI: f64 = 689.0;
+
+/// Bits of `frames` (UART, `fmt`), with `gap` idle bits after each and
+/// `err` = index of a byte sent with a low stop bit.
+fn bits(frames: &[Vec<u8>], fmt: u8, gap: u32, err: Option<usize>) -> Vec<bool> {
     let (nb, par) = [(8, 0), (8, 1), (8, 2), (7, 1)][fmt as usize];
-    let mut bits: Vec<(f64, bool)> = vec![(20.0, true)];
+    let mut v = vec![true; 20];
+    let mut k = 0;
     for f in frames {
-        for &b in f.iter() {
-            bits.push((1.0, false));
+        for &b in f {
+            v.push(false);
             let mut ones = 0;
             for i in 0..nb {
-                let bit = b >> i & 1 == 1;
-                ones += bit as u32;
-                bits.push((1.0, bit));
+                let x = b >> i & 1 == 1;
+                ones += x as u32;
+                v.push(x);
             }
             match par {
-                1 => bits.push((1.0, ones % 2 == 1)),
-                2 => bits.push((1.0, ones % 2 == 0)),
+                1 => v.push(ones % 2 == 1),
+                2 => v.push(ones % 2 == 0),
                 _ => {}
             }
-            bits.push((1.0, true));
-        }
-        bits.push((gap_bits, true));
-    }
-    let total: f64 = bits.iter().map(|b| b.0).sum::<f64>() / baud;
-    let n = (total * fs) as usize;
-    let mut out = Vec::with_capacity(n);
-    let (mut k, mut end) = (0usize, bits[0].0 / baud);
-    for i in 0..n {
-        let t = i as f64 / fs;
-        while t >= end && k + 1 < bits.len() {
+            v.push(err != Some(k));
             k += 1;
-            end += bits[k].0 / baud;
         }
-        out.push(if bits[k].1 { 690 } else { 512 } + (i % 3) as u16);
+        v.extend(std::iter::repeat(true).take(gap as usize));
     }
-    out
+    v.extend(std::iter::repeat(true).take(60));
+    v
 }
 
-/// A decoder fed with `codes` (as the firmware: the ring, absolute counts).
-fn decoded(cfg: dc::Cfg, codes: &[u16], t0_us: u64) -> Box<dc::Dec> {
-    let mut d: Box<dc::Dec> = Box::new(dc::Dec::new());
-    let fs = dc::fs_for(cfg.baud);
-    d.restart(cfg, fs, t0_us, None);
-    let cap = scope::CAP;
-    let mut ring = vec![0u16; cap];
-    let mut wr = 0u64;
-    for ch in codes.chunks(4000) {
-        for &c in ch {
-            ring[(wr % cap as u64) as usize] = c;
-            wr += 1;
-        }
-        d.poll(&ring, wr);
+/// Codes at `spb` samples per bit (a little ripple, no noise).
+fn codes(b: &[bool], spb: f64) -> Vec<u16> {
+    let n = (b.len() as f64 * spb) as usize;
+    (0..n).map(|i| {
+        let k = ((i as f64 + 0.37) / spb) as usize;
+        (if b[k.min(b.len() - 1)] { HI } else { LO } + (i % 3) as f64) as u16
+    }).collect()
+}
+
+/// The trace columns of `c[off..off + n]` (rows of the 280-row model).
+fn trace(c: &[u16], off: usize, n: usize) -> stock::Trace {
+    let row = |v: u16| (140.0 - (v as f64 - 512.0) * 17.5 / 53.75).round() as i32;
+    let (mut a, mut b) = (vec![], vec![]);
+    for i in 0..400 {
+        let s = off + i * n / 400;
+        let e = (off + (i + 1) * n / 400).max(s + 1).min(c.len());
+        let (lo, hi) = c[s.min(c.len() - 1)..e.max(s.min(c.len() - 1) + 1)].iter().fold((u16::MAX, 0), |m, &v| (m.0.min(v), m.1.max(v)));
+        a.push(row(hi));
+        b.push(row(lo));
     }
-    // The idle tail ends the last frame.
-    for _ in 0..(fs as usize / 20) {
-        ring[(wr % cap as u64) as usize] = 690;
-        wr += 1;
-        if wr % 4000 == 0 {
-            d.poll(&ring, wr);
+    stock::Trace { a, b }
+}
+
+/// The host copy of app_decode.rs `dec_frame` / `dec_boxes` / `dec_bar`.
+fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trace) {
+    let a = ud::ann();
+    a.clear();
+    a.n = n as u32;
+    a.fs = fs;
+    let (mn, mx) = dc::min_max(c, off, off + n);
+    let Some((lo, mid, hi)) = dc::levels(mn, mx, None) else { return };
+    a.mid = mid;
+    let baud = if cfg.baud != 0 { Ok(cfg.baud) } else { dc::auto_baud(c, off, off + n, lo, hi, fs) };
+    let baud = match baud {
+        Ok(b) => b,
+        Err(dc::NoRate::TooFast) => {
+            a.mode = ud::M_NOTE;
+            return;
         }
+        Err(_) => return,
+    };
+    a.baud = baud;
+    let (bits, parity) = cfg.bits();
+    let l = dc::Line { lo, mid, hi, inv: cfg.inverted, spb: (fs as u64 * 256 / baud as u64) as u32, bits, parity };
+    let cs = l.char_samples() as usize;
+    if l.spb < dc::MIN_SPB << 8 {
+        a.mode = ud::M_NOTE;
+        a.note_baud = baud;
+        return;
     }
-    d.poll(&ring, wr);
-    d
+    if (cs as i64 * 399 / n as i64) < ud::MIN_BOX as i64 {
+        a.mode = ud::M_BAR;
+        let (mut glo, mut ghi) = (i32::MAX, i32::MIN);
+        for i in 0..399 {
+            glo = glo.min(tr.a[i]);
+            ghi = ghi.max(tr.b[i]);
+        }
+        for i in 0..399 {
+            if tr.b[i] - tr.a[i] >= ((ghi - glo) / 2).max(3) {
+                a.bar[i / 8] |= 1 << (i % 8);
+            }
+        }
+        return;
+    }
+    a.mode = ud::M_BOXES;
+    let modbus = cfg.proto == dc::P_MODBUS;
+    let margin = cs * if modbus { 6 } else { 16 } + (l.spb >> 8) as usize * 2;
+    let (lo_s, hi_s) = (off.saturating_sub(margin), (off + n + margin).min(c.len()));
+    let mut fr = dc::Framer::new(modbus, cs as u32, fs, baud, lo_s as u32, hi_s as u32);
+    let mut fno = [u32::MAX; ud::NF];
+    let (v0, v1) = (off as i64, (off + n) as i64);
+    let mut on_frame = |f: &dc::Fr, req: u32, nf: u32| {
+        let a = ud::ann();
+        if (f.end as i64) < v0 || f.start as i64 >= v1 || a.nf as usize >= ud::NF {
+            return;
+        }
+        let k = a.nf as usize;
+        let r = fno[..k].iter().position(|&x| x == req).map_or(0xFF, |p| p as u8);
+        fno[k] = nf;
+        a.f[k] = ud::FAnn { s0: (f.start as i64 - v0) as i32, s1: (f.end as i64 - v0) as i32, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
+        a.nf += 1;
+    };
+    dc::chars(c, lo_s, hi_s, &l, &mut |ch| {
+        let a = ud::ann();
+        if (ch.end as i64) >= v0 && (ch.start as i64) < v1 {
+            if (a.nb as usize) < ud::NB {
+                a.b[a.nb as usize] = ud::BAnn { s0: (ch.start as i64 - v0) as i32, s1: (ch.end as i64 - v0) as i32, v: ch.v as u8, fl: ch.err };
+                a.nb += 1;
+            } else {
+                a.more = true;
+            }
+        }
+        if modbus {
+            let nf = fr.nframes;
+            fr.push(ch, &mut |f, r| on_frame(f, r, nf));
+        }
+    });
+    if modbus {
+        let nf = fr.nframes;
+        fr.finish(&mut |f, r| on_frame(f, r, nf));
+    }
 }
 
 fn crc(d: &[u8]) -> Vec<u8> {
@@ -86,196 +156,142 @@ fn crc(d: &[u8]) -> Vec<u8> {
     v
 }
 
-pub struct View {
-    pub top: (u8, &'static str, String, String, bool),
-    pub d: Box<dc::Dec>,
-    /// The first row's sequence number; None: the newest rows (LIVE).
-    pub first: Option<u32>,
-    pub note: Option<&'static str>,
-    pub paused: bool,
-    pub cells: [u32; 6],
-    pub setup: Option<(bool, u8, bool, String, bool, String)>,
-}
-
-/// The whole view as the app draws it (dec_page + a full dec_tick).
-pub fn draw(v: &View) {
-    host::reset(0);
-    ud::chrome(&mut || {});
-    let live = v.first.is_none();
-    ud::panel(live, v.paused, &mut || {});
-    let (state, proto, rate, thr, inv) = &v.top;
-    ud::top(&ud::Top { state: *state, proto, rate, thr, inv: *inv, battery: 4, charging: false });
-    let st = &v.d.st;
-    // The setup popup open: the app draws no rows under it.
-    if v.setup.is_some() {
-    } else if let Some(n) = v.note {
-        ud::row(0, Some(&ud::Row { time: "", text: n, ascii: "", status: "", fg: 0 }));
-    } else {
-        let top = v.first.unwrap_or(st.next.saturating_sub(ud::ROWS as u32).max(st.first));
-        let base = st.get(st.first).map_or(0, |h| h.t_us);
-        for i in 0..ud::ROWS {
-            let s = top + i as u32;
-            if s < st.next {
-                ud::frame_row(i, st, s, base);
-            }
-        }
+fn uart_frames() -> Vec<Vec<u8>> {
+    let mut v = vec![];
+    for _ in 0..12 {
+        v.push(b"Hello, opendm40!\r\n".to_vec());
+        v.push(b"T=23.5C\r\n".to_vec());
+        v.push(vec![0x02, 0x10, 0xFF, 0x00, b'A', b'C', b'K', 0x03]);
     }
-    ud::cells(&v.cells);
-    if let Some((mb, fmt, inv, baud, auto, thr)) = &v.setup {
-        ud::setup(&ud::SetupVals { modbus: *mb, fmt: *fmt, inv: *inv, baud, thr_auto: *auto, thr }, &mut || {});
-    }
+    v
 }
 
-fn cnt(d: &dc::Dec, mb: bool) -> [u32; 6] {
-    let c = d.st.cnt;
-    [c.frames, c.fe, c.pe, c.crc, c.ovr, mb as u32]
-}
-
-/// The views of the manual / the contact sheet.
-pub fn uart_view() -> View {
-    let cfg = dc::Cfg { modbus: false, baud: 0, fmt: 0, inverted: false };
-    let lines: [&[u8]; 4] = [b"Hello, opendm40!\r\n", b"T=23.5C H=41%\r\n", b"\x02\x10\xff\x00ACK\x03", b"OK\r\n"];
-    let mut fr: Vec<&[u8]> = Vec::new();
-    for _ in 0..3 {
-        fr.extend_from_slice(&lines);
-    }
-    let d = decoded(cfg, &stream(&fr, 115_200.0, 1.25e6, 0, 300.0), 0);
-    let c = cnt(&d, false);
-    View { top: (1, "UART", "Auto 115200 8N1".into(), "A 1.42V".into(), false), d, first: None, note: None, paused: false, cells: c, setup: None }
-}
-
-pub fn modbus_view() -> View {
-    let cfg = dc::Cfg { modbus: true, baud: 19200, fmt: 1, inverted: false };
+fn modbus_frames(bad: bool) -> Vec<Vec<u8>> {
     let req = crc(&[0x01, 0x03, 0x00, 0x00, 0x00, 0x02]);
     let rsp = crc(&[0x01, 0x03, 0x04, 0x00, 0xEB, 0x01, 0x9A]);
     let w6 = crc(&[0x11, 0x06, 0x00, 0x05, 0x04, 0xD2]);
-    let w16 = crc(&[0x11, 0x10, 0x00, 0x10, 0x00, 0x02, 0x04, 0x00, 0x0A, 0x01, 0x02]);
-    let w16r = crc(&[0x11, 0x10, 0x00, 0x10, 0x00, 0x02]);
     let exr = crc(&[0x01, 0x04, 0x00, 0x10, 0x00, 0x01]);
     let exc = crc(&[0x01, 0x84, 0x02]);
-    let mut bad = req.clone();
-    bad[6] ^= 0x5A;
-    let fr: Vec<&[u8]> = vec![&req, &rsp, &w6, &w6, &w16, &w16r, &exr, &exc, &bad, &req, &rsp, &req, &rsp, &w6, &w6, &req];
-    let d = decoded(cfg, &stream(&fr, 19200.0, dc::fs_for(19200) as f64, 1, 120.0), 0);
-    let c = cnt(&d, true);
-    View { top: (1, "MODBUS", "19200 8E1".into(), "A 1.42V".into(), false), d, first: None, note: None, paused: false, cells: c, setup: None }
+    let mut b = req.clone();
+    b[6] ^= 0x5A;
+    let mut v = vec![];
+    for k in 0..6 {
+        v.extend([req.clone(), rsp.clone(), w6.clone(), w6.clone(), exr.clone(), exc.clone()]);
+        if bad && k == 1 {
+            v.push(b.clone());
+        }
+    }
+    v
 }
 
-fn empty_view(note: &'static str, state: u8) -> View {
-    let d = Box::new(dc::Dec::new());
-    View { top: (state, "UART", "Auto 8N1".into(), "A --".into(), false), d, first: None, note: Some(note), paused: state == 2, cells: [0; 6], setup: None }
+/// One scene: the signal `b` at `spb`, `chars` characters on the screen
+/// from `pos` (0..1 of the record), the band of `cfg`.
+#[allow(clippy::too_many_arguments)]
+fn scene(ck: &mut Checker, name: &str, b: &[bool], spb: f64, cfg: dc::Cfg, chars: f64, pos: f64, combined: bool, stop: bool, wave: bool) {
+    let c = codes(b, spb);
+    let cb = cfg.char_bits() as f64;
+    let n = ((chars * cb * spb) as usize).clamp(40, c.len());
+    let off = ((c.len() - n) as f64 * pos) as usize;
+    let fs = (spb * if cfg.baud != 0 { cfg.baud as f64 } else { 9600.0 }) as u32;
+    let cfg_fill = dc::Cfg { baud: if cfg.baud != 0 { cfg.baud } else { 0 }, ..cfg };
+    let tr = trace(&c, off, n);
+    fill(&c, off, n, fs, cfg_fill, &tr);
+    let base = &stock::scenes()[0];
+    let mut m = base.m;
+    m.combined = combined;
+    m.dec = if cfg.proto == dc::P_MODBUS { 2 } else { 1 };
+    m.dec_gen = 1;
+    m.pos = 0;
+    m.trig_row = 110;
+    m.vdiv = 10; // 2 V/div
+    if stop {
+        m.status = scope_ui::ST_STOP;
+        m.record = (pos as f32 * 0.8, pos as f32 * 0.8 + 0.2);
+    }
+    if wave {
+        m.src = scope_ui::SRC_DMM;
+        m.wvdiv = 2.0;
+        m.ch1_txt = "DC V";
+    }
+    let sc = stock::Scene { name: "decode", m, popup: scope_ui::Popup::None, trace: Some(tr), persist: None, cols: 400, cells: base.cells.clone() };
+    stock::draw(&sc);
+    ck.check_replica(name);
 }
 
-/// Worst cases: the widest row contents and texts.
-fn worst_views() -> Vec<(String, View)> {
-    let mut out = Vec::new();
-    // UART: 8 x 0xFF / 8 x 'W' (the widest ASCII), times > 27 h (6 digits).
-    let cfg = dc::Cfg { modbus: false, baud: 115_200, fmt: 0, inverted: true };
-    let fr: Vec<&[u8]> = vec![&[0xFF; 8], b"WWWWWWWW", b"MMMMMMMM", &[0x00; 8], b"@@@@@@@@", &[0xFF; 8], b"WWWWWWWW", b"MMMMMMMM"];
-    let mut codes = stream(&fr, 115_200.0, 1.25e6, 0, 30.0);
-    for c in codes.iter_mut() {
-        *c = 1202 - *c; // inverted (RS-232 polarity)
+pub fn run(ck: &mut Checker, out: &str) {
+    let ub = bits(&uart_frames(), 0, 3, None);
+    let mb = bits(&modbus_frames(true), 1, 50, None);
+    let uart = dc::Cfg { proto: dc::P_UART, baud: 115_200, fmt: 0, inverted: false };
+    let modbus = dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false };
+    // The matrix: 24 zoom levels x 3 pan offsets x both views.
+    for (proto, b, cfg) in [("uart", &ub, uart), ("modbus", &mb, modbus)] {
+        for z in 0..24 {
+            let chars = 2.0 * 1.28f64.powi(z);
+            for (k, pos) in [0.0, 0.37, 1.0].iter().enumerate() {
+                for combined in [false, true] {
+                    scene(ck, &format!("decode/{proto}/z{z}/p{k}/{}", combined as u8), b, 20.0, cfg, chars, *pos, combined, k == 1, false);
+                }
+            }
+        }
     }
-    for (k, t0) in [(0, 0u64), (1, 99_000_000), (2, 9_999_000_000), (3, 999_999_000_000)] {
-        let d = decoded(cfg, &codes, t0);
-        let c = [4_294_967_295, 99_999, 4_000_000, 123_456_789, 99_999, 0];
-        let thr = ["A -99.99V", "-99.99V", "A --", "12.34V"][k];
-        out.push((format!("uart/{k}"), View { top: ([1, 0, 2, 1][k], "UART", "Auto 115200 7E1".into(), thr.into(), true), d, first: Some(0), note: None, paused: k == 2, cells: c, setup: None }));
-    }
-    // Modbus: the longest field lines, a cut, a 256-byte frame, an
-    // exception, a slow reply.
-    let cfg = dc::Cfg { modbus: true, baud: 9600, fmt: 0, inverted: false };
-    let r1 = crc(&[0xFF, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 0x00, 0x00]);
-    let r1r = crc(&[0xFF, 0x10, 0xFF, 0xFF, 0xFF, 0xFF]);
-    let r3 = crc(&[0xFF, 0x03, 0xFF, 0xFF, 0x00, 0x7D]);
-    let mut big = vec![0xFF, 0x03, 0xFA];
-    big.extend(std::iter::repeat(0x88).take(250));
-    let big = crc(&big);
-    let ex = crc(&[0xFF, 0x83, 0xFF]);
-    let r6 = crc(&[0xFF, 0x06, 0xFF, 0xFF, 0xFF, 0xFF]);
-    let noise: Vec<u8> = (0..255u8).collect();
-    let fr: Vec<&[u8]> = vec![&r1, &r1r, &r3, &big, &r3, &ex, &r6, &r6, &noise, &r1, &r1r];
-    let d = decoded(cfg, &stream(&fr, 9600.0, dc::fs_for(9600) as f64, 0, 9000.0), 9_000_000_000);
-    let c = [99_999, 99_999, 99_999, 99_999, 99_999, 1];
-    out.push(("modbus/0".into(), View { top: (1, "MODBUS", "115200 8O1".into(), "A -99.99V".into(), true), d, first: Some(0), note: None, paused: false, cells: c, setup: None }));
-    // Notes.
-    for (k, (n, s)) in [("Waiting for a signal (no swing)", 0u8), ("Measuring the bit rate", 0), ("No frames yet", 1), ("Stopped", 2)].iter().enumerate() {
-        out.push((format!("note/{k}"), empty_view(n, *s)));
-    }
-    // Setup popup, every state.
-    for (k, s) in [
-        (false, 0u8, false, "Auto", true, "1.42V"),
-        (true, 1, true, "115200", false, "-99.99V"),
-        (false, 2, false, "300", false, "-99.99V"),
-        (true, 3, true, "76800", true, "--"),
+    // Pictures (and the manual's, manual.rs).
+    scene(ck, "decode/pic/uart-near", &ub, 20.0, uart, 6.0, 0.30, false, false, false);
+    save(out, "d01-decode-uart-near");
+    scene(ck, "decode/pic/uart-far", &ub, 20.0, uart, 30.0, 0.30, false, false, false);
+    save(out, "d01-decode-uart-far");
+    scene(ck, "decode/pic/uart-bar", &ub, 20.0, uart, 300.0, 0.30, false, false, false);
+    save(out, "d01-decode-uart-bar");
+    scene(ck, "decode/pic/modbus", &mb, 20.0, modbus, 34.0, 0.0, false, false, false);
+    save(out, "d02-decode-modbus");
+    scene(ck, "decode/pic/modbus-crc", &mb, 20.0, modbus, 30.0, 0.17, false, true, false);
+    save(out, "d02-decode-modbus-crc");
+    let eb = bits(&uart_frames(), 0, 3, Some(20));
+    scene(ck, "decode/pic/uart-fe", &eb, 20.0, uart, 6.0, 0.054, false, false, false);
+    save(out, "d03-decode-uart-error");
+    scene(ck, "decode/pic/stop-pan", &ub, 20.0, uart, 12.0, 0.62, false, true, false);
+    save(out, "d04-decode-stop-pan");
+    scene(ck, "decode/pic/combined", &ub, 20.0, uart, 8.0, 0.3, true, false, false);
+    save(out, "d04-decode-combined");
+    // The Wave view: 4800 baud at 38.4 kS/s (8 samples per bit), and 19200
+    // there (the note).
+    let wv = dc::Cfg { proto: dc::P_UART, baud: 4800, fmt: 0, inverted: false };
+    scene(ck, "decode/pic/wave", &ub, 8.0, wv, 8.0, 0.3, false, false, true);
+    save(out, "d05-decode-wave");
+    let wf = dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 0, inverted: false };
+    scene(ck, "decode/pic/wave-note", &ub, 2.0, wf, 8.0, 0.3, false, false, true);
+    save(out, "d05-decode-wave-note");
+    // The setup popup over the page: every state, the full rules on its
+    // labels and steppers (the option lists are the MF popup's widgets).
+    let base = &stock::scenes()[0];
+    for (k, v) in [
+        ud::SetupVals { proto: 1, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 1.65 },
+        ud::SetupVals { proto: 2, fmt: 1, inv: true, baud: 115_200, thr: -99.99, level: f32::NAN },
+        ud::SetupVals { proto: 0, fmt: 3, inv: false, baud: 300, thr: f32::NAN, level: f32::NAN },
+        ud::SetupVals { proto: 2, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
     ]
     .iter()
     .enumerate()
     {
-        let mut v = uart_view();
-        v.setup = Some((s.0, s.1, s.2, s.3.into(), s.4, s.5.into()));
-        out.push((format!("setup/{k}"), v));
-    }
-    out
-}
-
-/// The checks of one drawn view.
-fn check_view(ck: &mut Checker, name: &str, popup: bool) {
-    let screen = Bx::new(0, 0, 480, 320);
-    ck.check_replica(name);
-    let list = Bx::new(14, 21, 399, 279);
-    if popup {
-        // The option lists are the MF popup's (stock) widgets: their items
-        // touch by design; the labels and the steppers get the full rules
-        // against everything on the page.
-        let page = Bx::new(14, 61, 399, 140);
-        let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
-        for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
-            add.push(rb(r));
-        }
-        ck.check_add(&format!("{name}/setup"), &[("page", page)], &add, Bx::new(13, 20, 401, 181));
-    } else {
-        ck.check_add(&format!("{name}/list"), &[("list", list)], &[list], list);
-    }
-    // The top bar and the counter cells use the scope page's (stock)
-    // badges and cells: the replica rules above (texts do not collide or
-    // spill out of their box).
-    let _ = screen;
-}
-
-fn rb(r: stockfont::Rect) -> Bx {
-    Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)
-}
-
-pub fn run(ck: &mut Checker, out: &str) {
-    for (name, v) in [("uart", uart_view()), ("modbus", modbus_view())] {
-        draw(&v);
-        check_view(ck, &format!("decode/{name}"), false);
-        save(out, &format!("d01-decode-{name}"));
-    }
-    for (name, v) in worst_views() {
-        draw(&v);
-        check_view(ck, &format!("decode/{name}"), v.setup.is_some());
-        if name == "setup/1" {
-            save(out, "d02-decode-setup");
-        }
-        if name == "modbus/0" {
-            save(out, "d03-decode-worst-modbus");
-        }
-        if name == "uart/3" {
-            save(out, "d03-decode-worst-uart");
+        for combined in [false, true] {
+            let mut m = base.m;
+            m.combined = combined;
+            let sc = stock::Scene { name: "dec-setup", m, popup: scope_ui::Popup::Dec, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            let pv = scope_ui::PopVals { dec: *v, ..stock::popvals(&m) };
+            stock::draw_with(&sc, &pv);
+            let name = format!("decode/setup/{k}/{}", combined as u8);
+            ck.check_replica(&name);
+            let page = Bx::new(14, 61, 399, 140);
+            let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
+            for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
+                add.push(rb(r));
+            }
+            ck.check_add(&name, &[("page", page)], &add, Bx::new(13, 20, 401, 181));
+            if k == 0 && !combined {
+                save(out, "d06-decode-setup");
+            }
         }
     }
-    // Panel: pressed states, RUN when paused (the stock geometry).
-    for k in 0..7 {
-        let mut v = uart_view();
-        v.paused = k == 5;
-        draw(&v);
-        ud::panel_button(k, k != 1, v.paused, true);
-        ck.check_replica(&format!("decode/pressed/{k}"));
-    }
-    // The MF Settings tab with the Decode button (MF_DECODE).
-    let base = &stock::scenes()[0];
+    // MF > Settings with its Decode button.
     for combined in [false, true] {
         let mut m = base.m;
         m.combined = combined;
@@ -283,9 +299,25 @@ pub fn run(ck: &mut Checker, out: &str) {
         stock::draw(&sc);
         let r = scope_ui::MF_DECODE;
         let page = Bx::new(14, 61, 399, 54);
-        ck.check_add(&format!("decode/mf-settings/{}", combined as u8), &[("page", page)], &[Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)], Bx::new(13, 20, 401, 96));
+        ck.check_add(&format!("decode/mf-settings/{}", combined as u8), &[("page", page)], &[rb(r)], Bx::new(13, 20, 401, 96));
         if !combined {
-            save(out, "d04-mf-settings-decode");
+            save(out, "d07-mf-settings-decode");
         }
     }
+}
+
+/// The manual's pictures (manual.rs): UART, Modbus, the Wave view.
+pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
+    let ub = bits(&uart_frames(), 0, 3, None);
+    let mb = bits(&modbus_frames(true), 1, 50, None);
+    let uart = dc::Cfg { proto: dc::P_UART, baud: 115_200, fmt: 0, inverted: false };
+    let modbus = dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false };
+    scene(ck, "manual/scope-decode", &ub, 20.0, uart, 6.0, 0.30, false, false, false);
+    save1(out, "scope-decode");
+    scene(ck, "manual/scope-decode-modbus", &mb, 20.0, modbus, 30.0, 0.17, false, true, false);
+    save1(out, "scope-decode-modbus");
+}
+
+fn rb(r: stockfont::Rect) -> Bx {
+    Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)
 }

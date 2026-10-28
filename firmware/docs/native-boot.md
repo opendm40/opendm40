@@ -582,6 +582,35 @@ A2 keeps ~0.9 KB above its 2 KiB warning for the shim; B ~1 KB above its
 16 484 B, C 7 152 B). The next relief for C needs a real cut (the candidates of
 audit #1 above) or a larger blob moved out of B.
 
+### The long scope record (2026-10-26)
+
+The scope record buffer `scope::BUF` grew from 53 248 B to 86 016 B (the
+design: [ram-budget.md, The scope record](ram-budget.md#the-scope-record-raw-ring-and-coded-ring)).
+Flash for the new code (the packed ring, the `pack10` reads in every
+record user) came from `stockfont::paint`: it was one copy per closure
+type (23 copies, 4.0 KB in region B); it is now a thin generic wrapper
+around one `paint_dyn` that takes the closure as `&mut dyn FnMut` (region
+B +1.3 KB). Emulator (emu/dragperf.py, the scope page with trigger-level
+drags): `s.paint` maximum 4 790 -> 4 960 us per pass, the average
+unchanged. With that room, `scope_ui::drag_target` and
+`Scope::hw_calibrate` (378 B) moved from region C back to B.
+
+| | before (d0436633) | after |
+|---|---|---|
+| scope::BUF | 53 248 B | 86 016 B |
+| SRAM free | 44 944 B | 12 136 B |
+| region B free | 16 500 B | 16 716 B |
+| region C free | 8 024 B | 8 316 B |
+| stack headroom (static worst path) | 20 548 B | 20 516 B |
+
+Without `ad2-isr` (`--no-default-features --features vdisk`): B 26 320 ->
+26 328 B, C 9 064 -> 9 392 B, stack headroom 21 008 -> 20 984 B, SRAM
+free 45 204 -> 12 396 B.
+
+The new ring state (`scope::RING`) is in `.sram_bss`, not in the TCM
+`Scope`, so the stack keeps its headroom. The per-poll code (the staging
+drain, the packed reads) is in region B.
+
 ### Region B audit #5 (2026-10-26, fix/low-freq)
 
 The low-frequency Hz counter (`Dmm::freq_gate`, the gate checks, the

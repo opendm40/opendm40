@@ -5,6 +5,10 @@
 #[path = "../../src/ident.rs"]
 mod ident;
 #[allow(dead_code)]
+#[path = "../../src/pack10.rs"]
+#[allow(dead_code)]
+mod pack10;
+#[allow(dead_code)]
 #[path = "../../src/decode.rs"]
 mod decode;
 #[path = "../../src/scpi.rs"]
@@ -454,12 +458,10 @@ fn decode_cmds() {
     use scpi::Dcd as D;
     let mut s = Scpi::new();
     let ok: &[(&str, D)] = &[
-        ("DEC ON", D::State(Some(true))),
-        ("DECODE:STATE OFF", D::State(Some(false))),
-        ("DEC?", D::State(None)),
-        ("DEC:PROT MODB", D::Modbus(Some(true))),
-        ("DEC:PROTOCOL UART", D::Modbus(Some(false))),
-        ("DEC:PROT?", D::Modbus(None)),
+        ("DEC:PROT MODB", D::Proto(Some(2))),
+        ("DECODE:PROTOCOL UART", D::Proto(Some(1))),
+        ("DEC:PROT OFF", D::Proto(Some(0))),
+        ("DEC:PROT?", D::Proto(None)),
         ("DEC:BAUD 9600", D::Baud(Some(9600))),
         ("DEC:BAUD AUTO", D::Baud(Some(0))),
         ("DEC:BAUD 115.2k", D::Baud(Some(115_200))),
@@ -474,9 +476,8 @@ fn decode_cmds() {
         ("DEC:THR?", D::Thr(None)),
         ("DEC:LEV?", D::Level),
         ("DEC:COUN?", D::Count),
-        ("DEC:FRAM?", D::Frames(u32::MAX)),
+        ("DEC:FRAM?", D::Frames(0)),
         ("DEC:FRAM? 10", D::Frames(10)),
-        ("DEC:CLE", D::Clear),
     ];
     for (cmd, want) in ok {
         let got = s.handle(cmd.as_bytes(), 1);
@@ -487,12 +488,14 @@ fn decode_cmds() {
         _ => check(false, "DEC:THR AUTO: parsed"),
     }
     check(err(&mut s) == "0,\"No error\"", "DECode: no error");
-    for bad in ["DEC:BAUD 100", "DEC:BAUD 1E6", "DEC:FORM 8N2", "DEC:POL UP", "DEC:PROT CAN", "DEC:THR 1A", "DEC FOO"] {
+    for bad in ["DEC:BAUD 100", "DEC:BAUD 1E6", "DEC:FORM 8N2", "DEC:POL UP", "DEC:PROT CAN", "DEC:THR 1A", "DEC:FRAM? -1"] {
         check(!matches!(s.handle(bad.as_bytes(), 1), Out::Dcd(_)), &format!("{bad}: refused"));
         check(err(&mut s).contains("Illegal parameter value"), &format!("{bad}: Illegal parameter value"));
     }
-    check(!matches!(s.handle(b"DEC:WHAT?", 1), Out::Dcd(_)), "DEC:WHAT?: refused");
-    check(err(&mut s).contains("Undefined header"), "DEC:WHAT?: Undefined header");
+    for undef in ["DEC:WHAT?", "DEC ON", "DEC:CLE"] {
+        check(!matches!(s.handle(undef.as_bytes(), 1), Out::Dcd(_)), &format!("{undef}: refused"));
+        check(err(&mut s).contains("Undefined header"), &format!("{undef}: Undefined header"));
+    }
 }
 
 fn main() {

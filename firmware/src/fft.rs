@@ -201,7 +201,7 @@ impl Fft {
     /// mean of `src[j k .. j k + k]` as volts `a + b * code` (the scope's
     /// affine code -> volts map), sample rate `fs` of `src`, window `win`.
     /// False (nothing done): busy, or `src` too short / `len` invalid.
-    pub fn load(&mut self, work: &mut Work, src: &[u16], k: usize, len: usize, a: f32, b: f32, fs: f32, win: u8) -> bool {
+    pub fn load<S: crate::pack10::Src + ?Sized>(&mut self, work: &mut Work, src: &S, k: usize, len: usize, a: f32, b: f32, fs: f32, win: u8) -> bool {
         if self.busy() || !len.is_power_of_two() || !(N_MIN..=N).contains(&len) || k == 0 || src.len() < len * k || !(fs > 0.0) {
             return false;
         }
@@ -212,8 +212,8 @@ impl Fft {
         let mut p = 0usize;
         for n in 0..len {
             let mut sum = 0u32;
-            for &c in &src[p..p + k] {
-                sum += c as u32;
+            for i in p..p + k {
+                sum += src.at(i) as u32;
             }
             p += k;
             let w = window(win, n, len);

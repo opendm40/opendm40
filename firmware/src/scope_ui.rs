@@ -20,7 +20,7 @@
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rect};
 
-/// The protocol decoder view (View::Decode, app_decode.rs).
+/// The protocol decoder's bus band and its setup popup (app_decode.rs).
 #[path = "ui_decode.rs"]
 pub mod dec;
 
@@ -224,6 +224,11 @@ pub struct Model {
     /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
+    /// Protocol decoder band (ui_decode.rs): 0 none, 1 UART (the byte
+    /// row), 2 Modbus (frame and byte rows); `dec_gen` changes with what
+    /// it shows (`dec::ann`), 0 = blank (a drag moves the trace).
+    pub dec: u8,
+    pub dec_gen: u16,
 }
 
 /// `Model::src` values.
@@ -299,6 +304,8 @@ impl Model {
         amps: false,
         wvdiv: 0.0,
         ch1_txt: "",
+        dec: 0,
+        dec_gen: 0,
     };
 
     pub fn pal(&self) -> Color {
@@ -1224,7 +1231,7 @@ pub fn drag_delta(horizontal: bool, dx: i32, dy: i32) -> (i32, i32) {
 /// math offset when on, runt level when shown, Y cursors when shown; an
 /// off-screen level at its edge marker). No distance limit; a tie goes to
 /// the one drawn later (on top). (level group, item id).
-#[inline(never)] // .cold (link-native.x): once per drag
+#[inline(never)] // once per drag (region B: link-native.x)
 pub fn drag_target(m: &Model, horizontal: bool, x0: i16, y0: i16) -> Option<(bool, u8)> {
     let mut best: Option<(u8, i16)> = None;
     let mut take = |id: u8, d: i16| {
@@ -1511,7 +1518,8 @@ pub const H_FFT_Y: usize = 4;
 pub const H_FFT_X: usize = 5;
 pub const H_FFT_PK: usize = 6;
 pub const H_CUR: usize = 7;
-pub const H_SPARE: usize = 8;
+/// The protocol decoder's band (ui_decode.rs).
+pub const H_DEC: usize = 8;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -2109,6 +2117,7 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
+    g.set_hole_at(H_DEC, (m.dec != 0).then(|| dec::band_rect(m.dec)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2127,6 +2136,11 @@ pub fn update(m: &Model) {
         if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && (!valid0 || d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb)) {
             tb_tab(m, k == 0);
         }
+    }
+    // The decoder band: when what it shows changed, or the graph was
+    // repainted under it.
+    if m.dec != 0 && (!valid0 || d(ol.dec != m.dec || ol.dec_gen != m.dec_gen)) {
+        dec::band(m.dec, m.dec_gen == 0);
     }
     // The label shows the graph background through it: repainted with it.
     let bg_changed = !valid0 || deco0 != g.d_deco;
@@ -2505,6 +2519,8 @@ pub struct PopVals {
     pub pcond: u8,
     pub pwidth: f32,
     pub runt_v: f32,
+    /// The decoder setup popup's values.
+    pub dec: dec::SetupVals,
 }
 
 /// Which popup is open (tab).
@@ -2517,6 +2533,8 @@ pub enum Popup {
     /// opendm40 timebase list (tap on the timebase badge): the timebase index
     /// in the list's centre band.
     Tb(u8),
+    /// The protocol decoder's setup (MF > Settings > Decode).
+    Dec,
 }
 
 /// Intersection of two rects (w / h 0 when disjoint).
@@ -3016,6 +3034,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
         Popup::Ch1(t) => draw_ch1(t, v),
         Popup::Math(t) => draw_math(t, v),
         Popup::Tb(i) => draw_tb(i),
+        Popup::Dec => dec::setup(&v.dec),
     }
 }
 

@@ -315,23 +315,23 @@ pub enum Out {
     Dcd(Dcd),
 }
 
-/// Protocol decoder (src/decode.rs, src/app_decode.rs); `None` = query:
-///   DECode[:STATe] ON|OFF / ?        open the decoder view and decode / close
-///   DECode:PROTocol UART|MODBus / ?  UART / MODB
+/// Protocol decoder on the scope page (src/decode.rs, src/app_decode.rs);
+/// `None` = query:
+///   DECode:PROTocol OFF|UART|MODBus / ?  OFF / UART / MODB (the band)
 ///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
-///   DECode:RATE?                     the bit rate in use (0: none yet)
+///   DECode:RATE?                     the bit rate of the last decode (0: none)
 ///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
 ///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
 ///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
-///   DECode:LEVel?                    the level in use, V (+9.91E37: none yet)
-///   DECode:COUNt?                    frames,bytes,framing,parity,crc,overruns
-///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines, oldest
-///                                    unread first, at most n
-///   DECode:CLEar                     drop the frames, zero the counters
+///   DECode:LEVel?                    the level of the last decode, V
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc
+///   DECode:FRAMes? [<first>]         #4nnnn block of frame lines from frame
+///                                    `first`: the stopped record (running:
+///                                    the screen)
 #[derive(Clone, Copy, PartialEq)]
 pub enum Dcd {
-    State(Option<bool>),
-    Modbus(Option<bool>),
+    /// decode::P_OFF / P_UART / P_MODBUS.
+    Proto(Option<u8>),
     /// Some(0) = AUTO.
     Baud(Option<u32>),
     Rate,
@@ -342,7 +342,6 @@ pub enum Dcd {
     Level,
     Count,
     Frames(u32),
-    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -2480,15 +2479,15 @@ impl Scpi {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
                     let auto = kw(a, "AUTO");
-                    let c = if sub.is_empty() || kw(sub, "STATe") {
-                        if query { Some(Dcd::State(None)) } else { on_off(a).map(|b| Dcd::State(Some(b))) }
-                    } else if kw(sub, "PROTocol") {
+                    let c = if kw(sub, "PROTocol") {
                         if query {
-                            Some(Dcd::Modbus(None))
+                            Some(Dcd::Proto(None))
+                        } else if kw(a, "OFF") {
+                            Some(Dcd::Proto(Some(crate::decode::P_OFF)))
                         } else if kw(a, "UART") {
-                            Some(Dcd::Modbus(Some(false)))
+                            Some(Dcd::Proto(Some(crate::decode::P_UART)))
                         } else if kw(a, "MODBus") {
-                            Some(Dcd::Modbus(Some(true)))
+                            Some(Dcd::Proto(Some(crate::decode::P_MODBUS)))
                         } else {
                             None
                         }
@@ -2527,16 +2526,14 @@ impl Scpi {
                     } else if kw(sub, "COUNt") && query {
                         Some(Dcd::Count)
                     } else if kw(sub, "FRAMes") && query {
-                        Some(Dcd::Frames(if a.is_empty() { u32::MAX } else { parse_num(a).map_or(u32::MAX, |v| v.max(1.0) as u32) }))
-                    } else if kw(sub, "CLEar") && !query {
-                        Some(Dcd::Clear)
+                        if a.is_empty() { Some(Dcd::Frames(0)) } else { parse_num(a).filter(|v| *v >= 0.0).map(|v| Dcd::Frames(v as u32)) }
                     } else {
                         None
                     };
                     match c {
                         Some(c) => out = Out::Dcd(c),
                         None => {
-                            let known = sub.is_empty() || ["STATe", "PROTocol", "FORMat", "POLarity", "THReshold"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
                             self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }

@@ -32,9 +32,7 @@
 //! a user changing settings never meets the limit). Deferred while the disk is held
 //! (a screenshot, a CSV commit, a fast-log session, an update upload, a host
 //! WRITE), during an AD1 logger session (main.rs: a 45..400 ms stall drops
-//! rows), while the AD2 stream ISR runs (the writer is region C code) and
-//! while the protocol decoder streams (scope::DEC_LIVE: the stall would lap
-//! its ring).
+//! rows) and while the AD2 stream ISR runs (the writer is region C code).
 //! `flush` before every power-off (app.rs power_off: the key, the idle
 //! auto-off, the 2-finger "Power off?" confirm) writes at once, gates off.
 //! A record equal to the newest slot (version and CRC) is not written.
@@ -487,12 +485,10 @@ fn disk_busy() -> bool {
     HOST_BUSY.load(core::sync::atomic::Ordering::Relaxed)
 }
 
-/// The AD2 stream ISR runs, or the protocol decoder's stream (a 45..400 ms
-/// erase + program stall would lap its ring: scope.rs DEC_LIVE).
 #[cfg(target_os = "none")]
 #[inline(always)]
 fn streaming() -> bool {
-    crate::hy3131::streaming() || crate::scope::DEC_LIVE.load(core::sync::atomic::Ordering::Relaxed)
+    crate::hy3131::streaming()
 }
 
 #[cfg(not(target_os = "none"))]

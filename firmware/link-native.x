@@ -301,8 +301,10 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*8opendm403app*3App14with_temp_page*);
         *(.text.*8opendm403app*3App11sp_save_csv*);
-        /* Once per scope drag, at its axis decision (scope_ui::drag_target). */
-        *(.text.*8opendm408scope_ui11drag_target*);
+        /* scope_ui::drag_target (once per scope drag) and
+         * Scope::hw_calibrate are back in region B (2026-10-26, the long
+         * scope record: region C had < 8 KiB, B had room after
+         * stockfont::paint stopped being one copy per closure). */
         /* Region B audit #3 (2026-10-22, 11.9 KB free on 1ad38aa):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
          * callers. App::wave_open runs at event rate. (App::tap with
@@ -359,7 +361,6 @@ SECTIONS
          * for the jack check above). */
         *(.text.*8opendm40*8src_text*);
         *(.text.*6acdctr*5Trace4text*);
-        *(.text.*8opendm405scope*5Scope12hw_calibrate*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
         *(.text.*8opendm405touch*5Touch3new*);
         *(.text.*8opendm402bt*2Bt3new*);
