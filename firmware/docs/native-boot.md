@@ -114,10 +114,19 @@ into an input with pull-up, and the first read is high. What survives is a
 The ROM then sets its clock and FWDGT up again, reads PA2 low 1000 times and
 starts the loader, which reads it low 1000 times and enters its install state:
 a `dm40*.bin` in the SPI-flash root is installed, otherwise the update screen
-with its USB disk. The loader's install ends in a system reset and its
-power-off ends in a power cycle (or, on USB power, the FWDGT reset ~20 s
-later); both clear the lock, PA2 reads high, and the valid marker boots
-opendm40.
+with its USB disk. Ways out, each a reset that clears the lock (PA2 reads
+high, the valid marker boots opendm40):
+- an install: the loader resets itself;
+- the power key held on the update screen (a 3 s hold in the emulator; a
+  0.2 s press did nothing): the loader's tick `0x080a1cf4` returns exit code
+  1, `0x080a5134` drops PE2 / PC4 (power off on battery), and its main
+  returns into the stack the ROM left. In the emulator the CPU then jumps to
+  a garbage address (the emulation aborts). Inferred for the device on USB
+  power: a fault, nothing feeds the FWDGT any more, reset within ~20 s;
+- switching the meter off and on.
+
+The loader has no timeout (its event loop feeds the FWDGT), and a USB VBUS
+cycle does not reset the meter while the battery holds it up (inferred).
 
 It runs as the first step of the shim, after a SYSRESETREQ with
 `BKP_REQ` = `0x4C324150` ("PA2L"): the CPU is then in the state the ROM
