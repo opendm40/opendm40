@@ -201,7 +201,7 @@ The top line of the multimeter page shows, from left to right:
 5. **REC** in red while a recording to the disk runs;
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
-7. **USB** while a computer has the meter connected (not with a charger);
+7. the USB symbol while a computer has the meter connected (not with a charger);
 8. the battery level; green with the top bar blinking while the battery charges.
 
 ### Touch lock
