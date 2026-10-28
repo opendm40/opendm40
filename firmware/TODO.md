@@ -96,7 +96,7 @@ code), "USB" while a host has the meter configured. `dm40dbg.py diag` prints PB1
   4. Charged (the charger LED or ~4.2 V): note PB10 / PB11; record whether the blink stops (opendm40 has no
      "full" state; which TP4056 pin PB10 / PB11 reach is unknown).
   5. Eject / sleep the PC: "USB" goes within ~1 s (bus suspend).
-- [ ] Unknown: the stock drives PB10 low (push-pull) while on USB below 85 % / 80 % (FUN_08023b04 / 0800b6aa);
+- [ ] Unknown: the stock drives PB10 low (push-pull) while PB10 reads 1 and the battery is below 85 % / 80 % (FUN_08023b04 / 0800b6aa);
       opendm40 does not. Does opendm40 charge as fast and as far (charge time vs the stock's ~2 h 35 min)?
 
 ## Owner decisions pending (2026-10-25)

@@ -650,7 +650,7 @@ opendm40 or stock code that drives the pin.
 | PA13 / PA14 | SWD (pads "D" / "C") | io | debug header |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PB0..PB9 | [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) data D0..D9 | in | [`scope.rs`](../firmware/src/scope.rs) |
-| PB10 | charge status (stock: open drain released, read; driven low on USB below 85 %); meaning unknown | in / od | stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
+| PB10 | charge status (stock: open drain released, read; driven low while it reads 1 and the battery is below 85 %); meaning unknown | in / od | stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
 | PB11 | charge status; meaning unknown | in, pull-up | stock code (`FUN_0800b5f6`), [`power.rs`](../firmware/src/power.rs) |
 | PB12 | generator path select, 1 = PWM, 0 = DAC | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB14 | TIM12_CH1 (AF9) generator square | out | [`gen.rs`](../firmware/src/gen.rs) |
@@ -720,7 +720,7 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 5. Charge status pins: the stock blinks the battery's top bar (charging) when PB10 = 1 and
    PB11 = 1 (code: `FUN_0800b776`, `FUN_08023840`; `stock/re/analysis/dmm_v2_6.h`'s "PB11 = 0" is
    wrong), PB11 with the MCU pull-up. Which TP4056 pins (CHRG, STDBY) or VBUS they reach, and what
-   the stock's PB10 low (on USB below 85 %) does, is unknown. No "charged" state in the stock.
+   the stock's PB10 low (while PB10 reads 1, battery below 85 %) does, is unknown. No "charged" state in the stock.
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

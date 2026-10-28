@@ -1673,7 +1673,7 @@ fn main() {
     }
 
     // 5c. Status block states (BT, USB host, REC, lock, battery level,
-    //     charging blink phases): DMM bar and generator bar, 1x renders in
+    //     charging blink phases): DMM bar and generator bar, 2x renders in
     //     <out>/statusbar/ (the contact sheet of the states).
     {
         let dir = format!("{out}/statusbar");

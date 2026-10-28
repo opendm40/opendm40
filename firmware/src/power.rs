@@ -5,8 +5,8 @@
 //! high. The stock sets PB11 input with pull-up and PB10 open-drain released
 //! (no pull); which TP4056 pins they reach (CHRG / STDBY / VBUS) is unknown.
 //! Without the pull-up PB11 floats (opendm40 before 0.3.2: no charging icon,
-//! probable cause). Not copied: the stock drives PB10 low below 85 % on USB
-//! (FUN_0800b6aa); its effect on the charger is unknown.
+//! probable cause). Not copied: the stock drives PB10 low while it reads 1
+//! below 85 % (FUN_08023b04 / 0800b6aa); its effect on the charger is unknown.
 //! Bluetooth link: PC14 high = connected.
 //! MCU temperature: the GD32 internal sensor on ADC0 channel 16 (TSVREN, bit 23
 //! of ADC_SYNCCTL at ADC0 + 0x304), read right after the battery every 2 s,
