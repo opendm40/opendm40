@@ -387,7 +387,8 @@ Functions:
 - `:RANGe?` also reports the range while autoranging.
 - `RESistance:RANGe` above 60 MΩ selects the experimental 600 MΩ
   (`+6.000000E+08`); `MAX` is 60 MΩ. `:RANGe:AUTO ON` leaves it. It reads
-  once per ~2 s, so `READ?` may answer with a reading up to 2 s old.
+  once per ~2 s, so `READ?` may answer with a reading up to 2 s old;
+  `:RESolution` sets nothing there (its digits follow the value).
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.

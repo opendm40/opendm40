@@ -3551,11 +3551,13 @@ impl Dmm {
                 }
             }
             Button::Ohm => {
-                if same {
-                    self.set_ohm_var(clk, self.ohm_var ^ 1);
-                } else {
+                // A second tap toggles the test current ("ON"); 600 Mohm has
+                // its own source (its range page hides the buttons too).
+                if !same {
                     self.manual = false;
                     self.set(clk, 10, 6, OHM_ENTRY_MS);
+                } else if !is_ohm600(self.mode, self.range) {
+                    self.set_ohm_var(clk, self.ohm_var ^ 1);
                 }
             }
             Button::Cap => {

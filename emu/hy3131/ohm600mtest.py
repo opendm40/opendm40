@@ -9,6 +9,9 @@ rules are:
   read      CONF:RES 600E6;:READ? and MEAS:RES? 600E6: a reading (the
             model's OL, +9.9E37), not SCPI NaN (+9.91E37: no reading in
             time; the first r7 reading takes ~2.2 s);
+  res       RES:RES 1E6 / 1E3 on 600 Mohm: SENS:RATE? unchanged, still 6E8;
+  tap       a tap on the Ohm function button on 600 Mohm (a second tap:
+            the test-current variant elsewhere): still 6E8, manual;
   max       CONF:RES MAX: 6E7 (MAX is the top stock range);
   value     RES:RANG 100E6 (a value above 60 Mohm): 6E8;
   auto      RES:RANG:AUTO ON from 600 Mohm: AUTO 1 and RES:RANG? at most 6E7
@@ -97,6 +100,17 @@ def main():
                 t1 = time.time()
                 v = q(c)
                 check('read', v.startswith('+9.90000000E+37'), '%s -> %s in %.1f s' % (c, v, time.time() - t1))
+            rate = q('SENS:RATE?')
+            for c in ['RES:RES 1E6', 'RES:RES 1E3']:
+                tm.write(c)
+                wait(0.5)
+                r, a = rng()
+                rt = q('SENS:RATE?')
+                check('res', rt == rate and abs(r - 6e8) < 1, '%s: RATE %s (was %s), RANG %g' % (c, rt, rate, r))
+            tm.write('DBG:TAP 172,298')
+            wait(1.5)
+            r, a = rng()
+            check('tap', abs(r - 6e8) < 1 and a == '0', 'RANG %g AUTO %s' % (r, a))
             tm.write('CONF:RES MAX')
             wait(1.0)
             r, a = rng()

@@ -4129,6 +4129,9 @@ impl App {
                     None => out.set_err("Data out of range"),
                 }
             }
+            // 600 Mohm: its digits follow the value and its conversions are
+            // fixed (dmm.rs Ohm600): a resolution sets nothing.
+            Rng::Res(_) if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => {}
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.
