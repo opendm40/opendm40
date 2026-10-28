@@ -1758,6 +1758,7 @@ pub struct Status {
     /// A USB host configured the meter (USBTMC + USB disk usable): USB symbol.
     pub usb: bool,
     /// Battery level as shown (`Power::shown_bars`: blinks while charging).
+    /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
     pub locked: bool,

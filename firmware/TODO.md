@@ -85,19 +85,20 @@ One line per group of open items; quoted words are the start of an item. Open PR
 
 ## Battery charging indicator and USB badge (user report 2026-10-28, branch fix/battery-charging-indicator)
 
-User: the battery icon does not show charging; ideally show the PC connection. Fix (0.3.2, emulator only):
-PB11 gets the stock pull-up (it floated; probable cause), the top bar blinks green while PB10 = PB11 = 1 (stock
-code), "USB" while a host has the meter configured. `dm40dbg.py diag` prints PB10 / PB11 / usb_configured.
-- [ ] Device check (needs a USB cable, a USB charger, a battery below ~80 %; `--features mute` build is fine):
-  1. On battery, no cable: `diag` after plugging into the PC: note PB10 / PB11; the icon is white, no "USB"
-     before the cable.
-  2. PC cable, battery below 80 %: the top bar blinks green every second, "USB" shown; note PB10 / PB11.
-  3. Charger only (no data): blinking green, no "USB"; note the pins on a second cable to the PC afterwards.
-  4. Charged (the charger LED or ~4.2 V): note PB10 / PB11; record whether the blink stops (opendm40 has no
-     "full" state; which TP4056 pin PB10 / PB11 reach is unknown).
-  5. Eject / sleep the PC: "USB" goes within ~1 s (bus suspend).
-- [ ] Unknown: the stock drives PB10 low (push-pull) while PB10 reads 1 and the battery is below 85 % / 80 % (FUN_08023b04 / 0800b6aa);
-      opendm40 does not. Does opendm40 charge as fast and as far (charge time vs the stock's ~2 h 35 min)?
+User: the battery icon does not show charging; ideally show the PC connection. Fix (#68): PB11 with the stock
+pull-up; green on the charger (PB10 = 1), the top bar blinking while charging (PB11 = 1), steady when charged
+(PB11 = STDBY low); a USB symbol while a host has the meter configured. Pin findings: hw/README.md pin table.
+Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4.5 s, then charged), PB10 low
+/ released checked with `DBG:CHG?` / `DBG:CHG:LOG?`.
+- [ ] Device check with a battery below 80 % (needs hours on battery first): the top bar blinks while charging;
+      the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
+- [ ] The stock drives PB10 low while PB10 reads 1 below 85 % (FUN_08023b04 / 0800b6aa); low PB10 releases
+      STDBY. opendm40 does not drive it. Does opendm40 charge a battery below 85 % at full current? Needs the
+      charge current: the Alientek C2 meter answers discovery (00) and version (02) in the DM40 framing; its
+      measurement command is unknown.
+- [ ] (c) Owner decision after the check above: copy the stock's PB10 drive or not.
+- [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
+      keeps the charged state.
 
 ## Owner decisions pending (2026-10-25)
 

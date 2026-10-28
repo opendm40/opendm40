@@ -162,7 +162,7 @@ pub struct Model {
     /// X cursor columns (1..399) / Y cursor rows (1..279) when shown.
     pub xcur: Option<[i16; 2]>,
     pub ycur: Option<[i16; 2]>,
-    /// Battery level 0..5, charging.
+    /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
     /// Roll mode (record bar "ROLL").

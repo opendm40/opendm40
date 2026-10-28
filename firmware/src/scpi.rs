@@ -623,6 +623,7 @@ pub enum Log {
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
 ///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
+///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
 ///   DBG:DIAG?               diagnostic block (#3); byte 61: bit 0 PB10, bit 1
 ///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
@@ -2377,7 +2378,19 @@ impl Scpi {
                         b"CHG" => {
                             self.len = 0;
                             let op = parts.get(2).copied().unwrap_or(b"");
-                            if op.is_empty() && query {
+                            if kw(op, "LOG") && query {
+                                // n, then the last <= 8 changes oldest first:
+                                // ms:pins (bit 0 PB10, 1 PB11, 2 USB).
+                                let l = unsafe { &*core::ptr::addr_of!(crate::power::CHG_LOG) };
+                                self.put_u32(l.n);
+                                for k in l.n.saturating_sub(8)..l.n {
+                                    let e = l.ev[k as usize % 8];
+                                    self.put(b",");
+                                    self.put_u32(e >> 4);
+                                    self.put(b":");
+                                    self.put_u32(e & 15);
+                                }
+                            } else if op.is_empty() && query {
                                 for (i, v) in crate::power::dbg_state().iter().enumerate() {
                                     if i > 0 {
                                         self.put(b",");

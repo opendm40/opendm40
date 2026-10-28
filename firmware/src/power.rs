@@ -1,12 +1,17 @@
 //! Battery and power status (dmm_v2_6.h section 9).
 //! Battery: ADC0 channel 15 on PC5, Vbat = raw * 3.0 / 4096 * 2, read every 2 s;
 //! pct = (Vbat - 3.3) / 0.9; bars 0..5 at 85/70/50/25/0 % with 5 % hysteresis.
-//! Charging (stock code, FUN_0800b776 / FUN_08023840): PB10 high and PB11
-//! high. The stock sets PB11 input with pull-up and PB10 open-drain released
-//! (no pull); which TP4056 pins they reach (CHRG / STDBY / VBUS) is unknown.
-//! Without the pull-up PB11 floats (opendm40 before 0.3.2: no charging icon,
-//! probable cause). Not copied: the stock drives PB10 low while it reads 1
-//! below 85 % (FUN_08023b04 / 0800b6aa); its effect on the charger is unknown.
+//! Charger (TP4056, hw/README.md "Charge status pins"; device 2026-10-29,
+//! DBG:CHG:LOG? across a USB power cut): PB10 = 1 while the charger has
+//! input power (0 within ms of the cut; stays 1 against the pull-down);
+//! PB11 = the charger's STDBY (open drain, PB11 pull-up as the stock: low
+//! = charge terminated, high while charging or without input). So: PB10 0 =
+//! no charger, PB10 1 + PB11 1 = charging (the stock's condition,
+//! FUN_0800b776 / FUN_08023840), PB10 1 + PB11 0 = charged. The charger's
+//! CHRG pin is not on an MCU pin found. Not copied: the stock drives PB10 low
+//! while it reads 1 below 85 % (FUN_08023b04 / 0800b6aa); driven low, STDBY
+//! releases at once and returns at once on release (device); what it does to
+//! the charge current is not measured.
 //! Bluetooth link: PC14 high = connected.
 //! MCU temperature: the GD32 internal sensor on ADC0 channel 16 (TSVREN, bit 23
 //! of ADC_SYNCCTL at ADC0 + 0x304), read right after the battery every 2 s,
@@ -24,6 +29,15 @@ const GPIOC: u32 = 0x4002_0800;
 
 /// A USB host has the meter configured (main.rs, every pass; DBG:CHG?).
 pub static USB_CONF: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The last 8 charge pin changes (DBG:CHG:LOG?): ms << 4 | USB << 2 |
+/// PB11 << 1 | PB10; `last` starts at 0xFF so the boot state is logged.
+pub struct ChgLog {
+    pub n: u32,
+    last: u8,
+    pub ev: [u32; 8],
+}
+pub static mut CHG_LOG: ChgLog = ChgLog { n: 0, last: 0xFF, ev: [0; 8] };
 
 /// DBG:CHG:PIN n,<mode>: set PB10 / PB11 for a charger experiment.
 /// mode 0 input no pull, 1 input pull-up, 2 input pull-down, 3 push-pull
@@ -130,6 +144,16 @@ impl Power {
     }
 
     pub fn poll(&mut self, now: u64) -> bool {
+        // Charge pin changes for DBG:CHG:LOG? (every pass: one IDR read).
+        let p = self.pins();
+        unsafe {
+            let l = &mut *core::ptr::addr_of_mut!(CHG_LOG);
+            if p != l.last {
+                l.last = p;
+                l.ev[l.n as usize % 8] = (now as u32) << 4 | p as u32 | (USB_CONF.load(core::sync::atomic::Ordering::Relaxed) as u32) << 2;
+                l.n = l.n.wrapping_add(1);
+            }
+        }
         if now < self.next {
             return false;
         }
@@ -196,8 +220,14 @@ impl Power {
         (lo, hi, cross, dt)
     }
 
+    /// Charging: input power and STDBY not active (PB10 = PB11 = 1).
     pub fn charging(&self) -> bool {
         self.pins() == 3
+    }
+
+    /// On a charger (USB power present, PB10 = 1): charging or charged.
+    pub fn on_charger(&self) -> bool {
+        self.pins() & 1 != 0
     }
 
     /// Charge status pins: bit 0 PB10, bit 1 PB11 (DBG:DIAG? byte 61).

@@ -516,7 +516,7 @@ impl App {
             xcur: if self.cur.x_on { Some([self.cur.x[0] as i16, self.cur.x[1] as i16]) } else { None },
             ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
             battery: self.power.shown_bars(now / 1000 & 1 == 1),
-            charging: self.power.charging(),
+            charging: self.power.on_charger(),
             roll: self.scope.rolling(),
             record,
             // Combined view: the strip's GEN badge shows it instead.

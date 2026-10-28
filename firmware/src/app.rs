@@ -1036,7 +1036,7 @@ impl App {
             bt: self.bt_on && self.power.bt_connected(),
             usb: self.usb_host,
             bars: self.power.shown_bars(self.strip_alt),
-            charging: self.power.charging(),
+            charging: self.power.on_charger(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),

@@ -768,6 +768,7 @@ unless shown otherwise.
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
 | `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
 | `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
 | `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |

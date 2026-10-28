@@ -1609,8 +1609,8 @@ fn main() {
                     let mut s = status(0);
                     s.locked = locked;
                     s.csv = csv;
-                    // Battery: full, charging (both blink phases), empty.
-                    (s.bars, s.charging) = [(5, false), (4, true), (3, true), (0, true)][k];
+                    // Battery: charged (steady green), charging (both blink phases), empty.
+                    (s.bars, s.charging) = [(5, true), (4, true), (3, true), (0, true)][k];
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
@@ -1679,8 +1679,10 @@ fn main() {
         let dir = format!("{out}/statusbar");
         std::fs::create_dir_all(&dir).unwrap();
         // (name, bt, usb, csv, locked, bars, charging)
-        let states: [(&str, bool, bool, bool, bool, u8, bool); 9] = [
+        // `charging` = on a charger (green); the blink is the caller's level.
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
             ("plain", false, false, false, false, 4, false),
+            ("charged", false, true, false, false, 5, true),
             ("usb", false, true, false, false, 4, false),
             ("bt-usb", true, true, false, false, 5, false),
             ("all", true, true, true, true, 5, false),
