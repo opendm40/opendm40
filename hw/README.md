@@ -723,8 +723,11 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    not hold 1 against the pull-down in standby), the CHRG pin on no MCU pin. The stock shows charging
    when PB10 = PB11 = 1 (`FUN_0800b776`, `FUN_08023840`). It drives PB10 low below 85 % (a signed
    integer compare of the float fraction, `0x08023b36`..`0x08023b3c`); low PB10 releases STDBY on the
-   device, but its effect on the charge current is not measured (a charge below 85 % on opendm40,
-   which never drives PB10, is not checked).
+   device. USB current through an Alientek C2 ([`c2meter.py`](../firmware/tools/c2meter.py)), battery
+   full (4.23 V), 5 blocks of 25 s each: 0.1966 A with PB10 low, 0.1963 A released (block noise
+   ~1 mA): no difference at a full battery; at 4.92 V the meter draws ~0.2 A from USB with the charger
+   in standby, so the system runs from USB power through a path besides the charger (*inferred*).
+   The effect of PB10 low on a battery below 85 % is not measured (opendm40 never drives PB10).
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

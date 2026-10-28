@@ -93,9 +93,9 @@ Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4
 - [ ] Device check with a battery below 80 % (needs hours on battery first): the top bar blinks while charging;
       the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
 - [ ] The stock drives PB10 low while PB10 reads 1 below 85 % (FUN_08023b04 / 0800b6aa); low PB10 releases
-      STDBY. opendm40 does not drive it. Does opendm40 charge a battery below 85 % at full current? Needs the
-      charge current: the Alientek C2 meter answers discovery (00) and version (02) in the DM40 framing; its
-      measurement command is unknown.
+      STDBY. opendm40 does not drive it. Battery full: no difference in the USB current (C2, 0.1966 vs
+      0.1963 A). Does opendm40 charge a battery below 85 % at full current? Repeat with a part-empty battery:
+      `tools/c2meter.py --csv` and `DBG:CHG:OUT LOW` / `DEF` in alternating blocks of >= 20 s.
 - [ ] (c) Owner decision after the check above: copy the stock's PB10 drive or not.
 - [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
       keeps the charged state.

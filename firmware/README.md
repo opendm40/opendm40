@@ -216,7 +216,7 @@ feature, in the same commit.
 | Path | What |
 |---|---|
 | [`src/`](src) | The firmware (crate `opendm40`) |
-| [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), font and table generators) and the host test suites (`tools/*/run.sh`) |
+| [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), [`c2meter.py`](tools/c2meter.py) (Alientek C2 USB tester over BLE), font and table generators) and the host test suites (`tools/*/run.sh`) |
 | [`docs/`](docs) | Firmware docs, see [Documentation](#documentation) |
 | [`ref/`](ref) | Reference screenshot of the stock firmware |
 | [`vendor/usbd-storage/`](vendor/usbd-storage) | usbd-storage 3.0.0 with the DM40 patches ([`Cargo.toml`](Cargo.toml)) |
