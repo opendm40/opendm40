@@ -54,7 +54,8 @@ One line per group of open items; quoted words are the start of an item. Open PR
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
-- Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first.
+- Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
+  offset"; "Ohm OL above 60 000 counts" (calibrator).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).
@@ -114,6 +115,20 @@ What waits for the owner; each line links to the material.
             Needs the device first: VOS per ohm range (R22 0x06 against 0x16, leads shorted and a known R) for
             fastvos VOS_DEFAULT, which covers the first 2 s after every autorange step; whether ohm's unchopped
             conversion reads VX +- VOS as DC V does is not known. The emulator's one `ad1vos` supplies neither.
+      - [ ] Ohm OL above 60 000 counts (owner 2026-10-29). Ohm is ratiometric (AD1 = 0.9 · Rx / Rref), so at
+            60 000 counts AD1 is at 0.54 FS on r0..r5; AD1 saturates at 1.11 · Rref = 1.85 × the range (r6, Rref
+            63 M: 70 MΩ, 1.17 ×). OL is set by `poll_ohm` (`kraw / lim > over()`), not by the converter. Gain:
+            10 × the resolution for 1.0..1.85 × the range (700 Ω on 600 Ω as 700.00 instead of 0.7000 k on 6 k).
+            Needs: linearity above 60 000 counts against the calibrator; a 6-digit format in the readout,
+            history, chart, BT and CSV.
+      - [ ] Ohm gain with a DC offset (inferred, owner 2026-10-29). AD1OS (R22 7:5, DCOS ±0.25..0.75 FS) is
+            derived from the AD1 reference, so in ohm it scales with the Rref drop and keeps the ratio. AD1IG 2.7
+            + DCOS -0.75 would fit 0..648 Ω on the 600 Ω range at 226 codes per count (75.5 now). It helps only
+            if AD1 is the noise source (~54 codes now). Device, FAST (unchopped): noise on 600 Ω at IG 2.7 +
+            DCOS -0.75 against IG 0.9. Also find out whether AD1CHOP 01 inverts DCOS (in DC V FAST at 0 V with
+            AD1OS 101: does the fastvos VOS estimate move by -0.25 FS?). With chopping (MED / SLOW) DCOS may
+            cancel. The Hycon reference app and Temco use DCOS -0.25 only unchopped (capacitance charge,
+            [hy3131-firmware-comparison.md](docs/hy3131-firmware-comparison.md#capacitance)).
 - [x] After a power-off (owner 2026-10-25): a new measurement. DC V as the stock, and the measurement settings
       at their defaults: ranges / AUTO flags, AutoHold, limits, rate, smoothing, the scope's acquisition, trigger,
       math and measurements, the power meter, the Record page. Preferences are kept (display, sound, power, BT,
