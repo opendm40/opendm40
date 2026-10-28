@@ -136,9 +136,12 @@ cold boot. A jump straight from the running firmware would have to undo
 opendm40's USB, DMA, timers and clock first. The key hold therefore also
 sets the word and resets.
 
-Inferred, not tried on the device: that GD32F427's GPIOx_LOCK behaves as
-the manual describes for this sequence. If the lock does not hold, the
-result is a normal reboot with `last_trigger` `0x54520013` in `DBG:BOOT?`.
+Device, 2026-10-29: with the running image staged as `DM40FW.BIN`,
+`DBG:LOADER` ended in the loader's install and its reset (`last_trigger`
+`0x54520012`, reset flag SW, the file deleted, marker = the image header).
+Not yet tried there: the update screen without a file, the key hold. If the
+lock did not hold, the result would be a normal reboot with `last_trigger`
+`0x54520013` in `DBG:BOOT?`.
 
 **PA2 low across a reset instead (not used).** Drive PA2 low, then
 SYSRESETREQ, and rely on the pin's capacitance: the reset returns GPIOA to
@@ -2049,8 +2052,8 @@ read differed), `NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED`
   only where a staged image must be installed: `DBG:UPDATE`, the on-meter
   update, or the request word (set by nobody now). `DBG:LOADER` and the key
   hold use the PA2 entry instead.
-- **The PA2 entry depends on the GPIO lock** (inferred from the GD32F4xx
-  manual, not yet tried on the device); without it the meter reboots into
+- **The PA2 entry depends on the GPIO lock** (device: the staged-file
+  install through it, "PA2 entry"); without it the meter reboots into
   opendm40 (`last_trigger` `0x54520013`).
 - **A hang inside the shim on every boot** has no software way out: the
   TX-GND short (case open) is the only one.
