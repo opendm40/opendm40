@@ -4129,7 +4129,7 @@ Emulator (emu/):
       made a 370 ms pass (`DBG:PROF?` tick max); keys pressed during such a pass were not exercised (the
       timed saves under test wrote blank slots, no erase). One EXTI edge is latched for the whole pass, so a
       release and the next press inside it read as one key-to-key change: the case fixed above (inferred).
-- [ ] Device check (3 min): (1) `CALC:AHOL?`; if 1, `CALC:AHOL OFF` (or hold RUN 1 s): AutoHold may be on from this
+- [x] Device check (3 min): (1) `CALC:AHOL?`; if 1, `CALC:AHOL OFF` (or hold RUN 1 s): AutoHold may be on from this
       bug. (2) DMM page, `DBG:TOUCH 0`; press RUN, release, and press AUTO at once (roll the thumb down the strip),
       10 times: no A-HOLD label appears, HOLD is off after each AUTO, `CALC:AHOL?` 0. (3) Press MENU then MF quickly:
       the range page opens (not the menu twice). (4) `firmware/tools/touch-log.py --raw`: every key shows
@@ -4137,6 +4137,8 @@ Emulator (emu/):
       - Device 0.3.0 mute (2026-10-27): (1) `CALC:AHOL?` 0. (5) by `DBG:KEY 1,1200` in the DMM view: A-HOLD on
         (`CALC:AHOL?` 1), again: off. Left for the owner: (2)-(4) with the physical keys (`DBG:KEY` goes to the app
         directly, past the touch debounce and `gesture::Tracker`).
+      - Owner, test build 0.3.1 (all open PRs, 2026-10-29): (2) and (3) with the physical keys as expected. (4)
+        not logged: the key-report question below stays open.
 - [ ] Unknown (device data decides): whether the 0x5A controller repeats the key report while a key is held, and
       whether it ever drops the release report. The (4) log above shows it (frames `F,e,k<code>` per press). If
       releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
