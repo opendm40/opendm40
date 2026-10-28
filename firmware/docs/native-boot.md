@@ -734,30 +734,36 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 | keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
 | mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
 
-### Protocol decoder (2026-10-27, feat/decoder-uart)
+### Protocol decoder (2026-10-28, feat/decoder-uart)
 
-The decoder (src/decode.rs, app_decode.rs, ui_decode.rs, scope.rs `dec_*`)
-runs while the scope streams, so all of it is region B (emu/decodetest.py:
-no region C function while `scope::DEC_LIVE` is set, except the test's own
-DBG:DIAG? and READ?). Its state (the 256-frame store and its 4 KiB of
-bytes, the view) is one `.sram_bss` static; the App grew by nothing.
+The decoder band (src/decode.rs, app_decode.rs, ui_decode.rs) decodes each
+frame the scope page draws; no state but its settings (`DS`, a few bytes)
+and one screen's annotations (`ui_decode::ANN`, ~0.8 KB), both in TCM:
+SRAM is untouched (the scope ring of feat/scope-dlg-ring leaves 8.5 KB).
+All of it is region B (emu/decodetest.py: no region C function while the
+Wave view's AD2 stream ISR owns the bus).
 
-| | before (cb683fde) | after |
+| | feat/scope-dlg-ring (4f4294eb) | with the decoder |
 |---|---|---|
-| region B free | 50 892 B | 32 236 B |
-| region C free | 7 852 B | 7 696 B |
-| stack headroom (static worst path) | 21 196 B | 21 180 B |
-| SRAM free | 43 912 B | 32 512 B |
+| region B free | 46 300 B | 32 732 B |
+| region C free | 8 196 B | 8 252 B |
+| stack headroom (static worst path) | 22 220 B | 21 300 B |
+| SRAM free | 8 524 B | 8 524 B |
 
-B: ~15 KB of decoder code (`dec_poll` with the decoder's scan inlined
-3.3 KB, `dec_tick` 2.9 KB), the rest SCPI parsing and the view.
-Variants (B / C free, headroom): recovery-usb 30 812 / 7 740 / 21 684 B,
-recovery-file 32 076 / 7 208 / 21 180 B, no-ad2-isr 41 592 / 8 772 /
-21 624 B, spi-disk 50 372 / 17 736 / 22 708 B, fatren-dry-run 32 220 /
-8 140 / 21 180 B, keep-screen 32 268 / 7 688 / 21 180 B, mute 31 860 /
-7 564 / 21 180 B. Emulator stack high-water after emu/decodetest.py (the
-view's taps, setup popup and redraws with the decoder polled inside):
-23 724 B, under the static worst path (24 496 B).
+Variants (B / C free, headroom): recovery-usb 30 980 / 8 284 / 21 812 B,
+recovery-file 32 244 / 7 764 / 21 300 B, no-ad2-isr 41 464 / 9 256 /
+21 764 B, spi-disk 50 484 / 18 220 / 22 880 B, fatren-dry-run 32 380 /
+8 680 / 21 300 B, keep-screen 32 428 / 8 244 / 21 300 B, mute 32 108 /
+8 132 / 21 300 B. Emulator stack high-water after emu/decodetest.py:
+23 596 B (static worst path 24 720 B).
+
+Cost (emulator at --mips 110, DBG:PROF? `x2` = the decode, inside
+`s.frame`; UART traffic on MCX, running): 1 ms/div 9600 baud avg 3.0 ms,
+max 8.2 ms (a screen that measures the bit rate again: every 9th, or
+after a framing error); 100 us/div avg 2.9 / max 8.8 ms; 1 ms/div 115200
+avg 0.45 / max 1.5 ms; 100 ms/div (too few samples per bit, the note)
+0.1-0.2 ms. The frame without the decode: ~7 ms. Stopped, one pan step:
+0.3-6.2 ms.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

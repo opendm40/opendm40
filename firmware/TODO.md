@@ -1031,7 +1031,8 @@ the scope full record.
             function, a byte pattern); disk logging (LOGS/UARTnnn.CSV); Modbus ASCII; the other protocols of
             the list above. A "tail the bus" stream (the first PR draft decoded the circular DMA stream while
             a view was open: 11 KB of RAM, its own view) could come back as an option of DECode:FRAMes?.
-            Known limits: the band covers the graph's bottom 35 px (the trace is not drawn there); a long
+            Known limits: the decode adds ~3 ms a frame (8 ms when it measures the rate again; emulator,
+            native-boot.md "Protocol decoder"); the band covers the graph's bottom 35 px (the trace is not drawn there); a long
             coded record (Single at 100 ms/div and slower) decodes at ~1.3 us a sample; at 1 ms/div a 9600
             baud screen holds 9 characters, the first may be misread when the screen starts inside a run of
             back-to-back characters (they realign at an idle gap); the AD2 filter's edge shape in the
