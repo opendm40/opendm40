@@ -9,8 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
-- **The update loader no longer opens by itself:** not on a long power-key
-  hold at power-on, not after repeated hangs (a hang restarts the meter).
+- **The update loader no longer opens by itself** after repeated hangs (a
+  hang restarts the meter).
+- **Leaving the update loader:** opened with the power-key hold or
+  `DBG:LOADER`, the loader now lets the installed firmware start again when
+  you switch the meter off and on; no reinstall is needed.
   [How to reach it](docs/manual/README.md#reach-the-update-loader).
 
 ## v0.3.0 (2026-10-27)

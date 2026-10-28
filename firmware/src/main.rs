@@ -2341,10 +2341,12 @@ fn panic(_info: &PanicInfo) -> ! {
 // counts it as a crash (DBG:BOOT?; cleared after 60 s of main loop,
 // boot::mark_healthy) and reboots opendm40 normally (WDT_RETRY), every time:
 // no hang count leads to the loader. DBG:RESET = SYSRESETREQ ->
-// normal reboot of opendm40. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
-// marker (boot::enter_loader_update) and reset -> the vendor loader's update
-// screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
-// request word is set by any command now.)
+// normal reboot of opendm40. DBG:UPDATE zeroes the 12-byte loader marker
+// (boot::enter_loader_update) and resets -> the vendor loader's update screen
+// with its own USB disk until a dm40*.bin is installed. DBG:LOADER /
+// DBG:RECOVER set the backup-SRAM request word LOADER_MAGIC and reset; the
+// shim then drives PA2 low and jumps to the ROM (boot::loader_pa2): the same
+// screen, the marker untouched.
 mod board;
 mod boot;
 mod fatren;

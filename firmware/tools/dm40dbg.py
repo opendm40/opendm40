@@ -40,8 +40,11 @@
                                          reset (~20 s) counts a crash and
                                          reboots opendm40
     dm40dbg.py reset                     reboot opendm40
-    dm40dbg.py recover                   DESTRUCTIVE, = DBG:UPDATE without the
-                                         checks/wait of `update` (`recover -h`)
+    dm40dbg.py loader                    NATIVE: DBG:LOADER = reset into the
+                                         vendor update screen through PA2; the
+                                         marker is kept, a power cycle boots
+                                         opendm40 again (`loader -h`)
+    dm40dbg.py recover                   = loader (DBG:RECOVER)
 
 Debug commands are SCPI DBG:... (see firmware/src/scpi.rs); needs read/write
 access to /dev/usbtmcN (udev rule). Native boot: firmware/docs/native-boot.md.
@@ -65,16 +68,16 @@ FIRMWARE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
 APP_BASE, APP_END = 0x08004000, 0x080A0000
 
 RECOVER_HELP = """\
-opendm40 (native image at 0x08004000, docs/native-boot.md): DBG:RECOVER is an
-alias of DBG:UPDATE and is DESTRUCTIVE (a one-way door into the vendor
-updater). It programs the 12-byte app marker at 0x08008000 to zero and resets.
-The ROM and the FS-loader then refuse to launch the app on every boot and show
-the loader's update screen with its own USB disk (28e9:028f) until a valid
-dm40*.bin is installed through it: copy one (e.g. dm40_opendm40_v0.1.0.bin or
-dm40_v_2_6.bin) onto that disk, press "update" (or power-cycle). If a
-dm40*.bin was already on the disk (copied, synced and ejected before the
-command), the loader installs it straight away. "Flash error" = the marker did
-not read back as zero; no reset was done.
+opendm40 (native image at 0x08004000, docs/native-boot.md "PA2 entry"):
+DBG:LOADER (alias DBG:RECOVER) resets; the shim then drives PA2 (the debug
+header's TX pad) low, locks it and jumps to the Alientek ROM, which with the
+FS-loader sees PA2 low as with a TX-GND short and shows the loader's update
+screen with its own USB disk (28e9:028f). The 12-byte app marker is not
+touched: copy a dm40*.bin (e.g. dm40_v_2_6.bin) onto that disk and press
+"update", or power-cycle the meter (the loader's key switches it off) to boot
+opendm40 again. A dm40*.bin already in the SPI disk's root is installed
+straight away. DBG:UPDATE (`update`) instead zeroes the marker: the loader
+then stays until a good install.
 
 Back to opendm40 from stock: firmware/tools/reload.sh --from-stock (stages the image
 on the stock disk).
@@ -347,6 +350,7 @@ CALBK_STATUS = {'SAFECOPY_PRESENT': 'safety copy on the SPI disk, nothing writte
                 'NOMEDIUM': 'no SPI flash', 'ERROR': 'SPI disk read/write/verify failed',
                 'NOTRUN': 'not run'}
 TRIGGERS = {0x54520010: 'marker zeroed by recovery/update', 0x54520011: 'marker zeroing FAILED',
+            0x54520012: 'PA2 entry into the loader', 0x54520013: 'PA2 entry, GPIO lock NOT confirmed',
             0x54520000: 'rcvr file created', 0x54520001: 'rcvr file already there',
             0x54520002: 'rcvr: no medium', 0x54520003: 'rcvr: bad BPB',
             0x54520004: 'rcvr: no space', 0x54520005: 'rcvr: error'}
@@ -661,10 +665,10 @@ def main():
     p.add_argument('file')
     sub.add_parser('release')
     sub.add_parser('reset')
-    sub.add_parser('recover', description=RECOVER_HELP,
-                   formatter_class=argparse.RawDescriptionHelpFormatter,
-                   help='zero the app marker + reset '
-                        '-> vendor update screen (DESTRUCTIVE)')
+    for n in ('loader', 'recover'):
+        sub.add_parser(n, description=RECOVER_HELP, formatter_class=argparse.RawDescriptionHelpFormatter,
+                       help='NATIVE: DBG:LOADER, reset into the vendor update screen through PA2 '
+                            '(marker kept)')
     a = ap.parse_args()
 
     if a.cmd == 'image':
@@ -736,11 +740,11 @@ def main():
         ln.write('DBG:RELEASE')
     elif a.cmd == 'reset':
         ln.write('DBG:RESET')
-    elif a.cmd == 'recover':
-        ln.write('DBG:RECOVER')
-        print('DBG:RECOVER sent. The app marker was zeroed; the device comes up\n'
-              'in the vendor update screen with its USB disk -- copy a dm40*.bin\n'
-              'there and press "update". See `dm40dbg.py recover -h`.')
+    elif a.cmd in ('loader', 'recover'):
+        ln.write('DBG:LOADER')
+        print('DBG:LOADER sent. The meter restarts into the vendor update screen with\n'
+              'its USB disk (28e9:028f): copy a dm40*.bin there and press "update", or\n'
+              'power-cycle it to boot opendm40 again. See `dm40dbg.py loader -h`.')
 
 
 if __name__ == '__main__':

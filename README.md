@@ -100,8 +100,9 @@ and its own USB disk until a good file is installed.
 - **Back to stock:** install the official
   [`dm40_v_2_6.bin`](stock/vendor/dm40_v_2_6.bin) the same way. Your
   calibration was never changed.
-- **If opendm40 does not start:** open the case and use the debug header to
-  reach the update loader, then install a file from there
+- **If opendm40 does not start:** from off, hold the power key until the
+  meter beeps, then half a second more, and install a file from the update
+  loader; or open the case and use the debug header
   ([Reach the update loader](docs/manual/README.md#reach-the-update-loader)).
 
 Step by step: [the manual, Backup, recovery and back to

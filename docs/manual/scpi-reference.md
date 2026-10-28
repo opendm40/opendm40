@@ -823,7 +823,8 @@ unless shown otherwise.
 | `DBG:UPLoad:ABORt` | | Cancels the upload. | USB |
 | `DBG:UPLoad?` | | `<active 1/0>,<received>,<size>` | USB |
 | `DBG:UPDATE` | | Makes the vendor loader install the uploaded file: the meter restarts. | USB |
-| `DBG:RECOVER` | | Same as `DBG:UPDATE`. | USB |
+| `DBG:LOADER` | | Restarts into the vendor loader's update screen; the installed firmware stays. | USB |
+| `DBG:RECOVER` | | Same as `DBG:LOADER`. | USB |
 | `DBG:RESET` | | Restarts the meter. | USB |
 | `DBG:RELEASE` | | Stops feeding the watchdog: the meter resets in about 20 s and counts a crash. | USB |
 
@@ -831,6 +832,8 @@ unless shown otherwise.
   space; the bytes after the comma are binary and run to the end of the USB
   message. The offset is the number of bytes sent so far.
   `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
-- `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
-  file; without one it stays on its update screen with its own USB disk
-  until a firmware file is copied there.
+- `DBG:UPDATE`: the vendor loader installs the staged file; without one it
+  stays on its update screen with its own USB disk until a firmware file is
+  copied there.
+- `DBG:LOADER`: a staged file is installed; switching the meter off and on
+  leaves the loader and starts opendm40.

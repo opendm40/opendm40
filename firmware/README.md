@@ -99,7 +99,8 @@ python3 tools/dm40dbg.py recover             # DESTRUCTIVE: into the vendor upda
 **Watchdog.** The main loop feeds it while it runs. A hang, a panic (magenta
 bar at the bottom) or `DBG:RELEASE` resets the meter after ~20 s and opendm40
 reboots, every time (no automatic entry into the loader; the crash count is in
-`DBG:BOOT?`). Details: [native-boot.md, Normal native mode](docs/native-boot.md#normal-native-mode).
+`DBG:BOOT?`). `dm40dbg.py loader` (`DBG:LOADER`) opens the vendor loader with
+the marker kept: a power cycle boots opendm40 again. Details: [native-boot.md, Normal native mode](docs/native-boot.md#normal-native-mode).
 
 **Bring-up failures** show as red squares at the top left (`fail` in
 [`src/main.rs`](src/main.rs)): slot 0 = PLLSAI (the 48 MHz USB clock) not

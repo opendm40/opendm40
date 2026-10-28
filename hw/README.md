@@ -299,14 +299,15 @@ bootloader and the FS-loader before the application runs.
    then press "update" on the screen.
 5. Remove the short.
 
-Untested: the exact timing, i.e. whether the short must be in place at power-on
-(as written above) or also works when applied during a reset, and how long
-it must be held.
+Untested: whether the short also works when applied during a reset. It must
+hold through both polls: the ROM's 1000 reads, then the FS-loader's
+(about 0.5 s each in the emulator; any high read launches the application).
 
-This is the only way into the loader for an opendm40 image that hangs before
-its USB disk is up: opendm40 has no key-hold or hang-count entry (removed in
-0.4.0). The software ways while opendm40 runs (`DBG:UPDATE`, the on-meter
-update) are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
+opendm40 does the same in software: `DBG:LOADER` and the power-key hold at
+power-on drive PA2 low and lock the pin before jumping to the bootloader
+([native-boot.md, PA2 entry](../firmware/docs/native-boot.md#pa2-entry-bootloader_pa2)).
+The short is needed only when opendm40 hangs before its shim reads the key;
+the user steps are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
 
 ## USB
 
