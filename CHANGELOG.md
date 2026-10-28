@@ -14,6 +14,10 @@ section named after the tag as the release notes; how to cut a release:
   never select it, and the screen shows **EXP** while it is on
   ([manual](docs/manual/README.md#resistance)).
 
+  ![Before and after: the resistance range page](docs/changelog/v0.4.0/ohm-600m-range.png)
+
+  ![600 MΩ: EXP beside the test current](docs/changelog/v0.4.0/ohm-600m.png)
+
 ## v0.3.0 (2026-10-27)
 
 ### New
