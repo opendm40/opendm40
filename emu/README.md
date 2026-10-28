@@ -269,7 +269,7 @@ recorded.
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
 | [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
-| [`recoverytest.py`](recoverytest.py) | recovery triggers through the whole boot chain: power-key hold, watchdog crash counter, DBG:RELEASE | ~6 min (8 cases, `--jobs 8`) | free |
+| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: a power-key hold and repeated hangs boot opendm40 again, the request word enters the loader; `release` (DBG:RELEASE) on request | ~6 min (8 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
 

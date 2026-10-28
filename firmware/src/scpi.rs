@@ -654,8 +654,7 @@ pub enum Log {
 ///                           waiting, 1 working, 2 ready, 3 off),
 ///                           clusters_ready,erases_since_boot
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
-///                           as a crash (1st: opendm40 reboots; 2nd without 60 s
-///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
+///                           as a crash (DBG:BOOT? crash word); opendm40 reboots
 ///   DBG:RESET               reboot opendm40 (SW reset)
 ///   DBG:RECOVER, DBG:UPDATE DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
 ///                           marker, reset -> vendor update screen + its USB disk until

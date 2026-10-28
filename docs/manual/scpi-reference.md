@@ -833,5 +833,4 @@ unless shown otherwise.
   `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
 - `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
   file; without one it stays on its update screen with its own USB disk
-  until a firmware file is copied there. `DBG:RELEASE`: a second crash in a
-  row leads to the same screen.
+  until a firmware file is copied there.

@@ -78,7 +78,8 @@ const SCB_AIRCR: u32 = 0xE000_ED0C;
 /// Watchdog policy (see the end of this file): the main loop feeds the FWDGT
 /// until a deadline, INITIAL_HOLD_MS after start (in effect: for as long as
 /// the loop runs), pushed forward by host requests. After DBG:RELEASE, a panic
-/// or a hang the watchdog (~20 s) resets and the shim counts a crash.
+/// or a hang the watchdog (~20 s) resets, the shim counts a crash and boots
+/// opendm40 again.
 const INITIAL_HOLD_MS: u64 = u64::MAX / 4;
 const KEEPALIVE_MS: u64 = 15_000;
 /// SCPI session / transport index (scpis, scpi_wait).
@@ -2317,7 +2318,7 @@ fn touch_diag(
 }
 
 /// Stop feeding the watchdog and wait for the FWDGT reset (the shim counts it
-/// as a crash).
+/// as a crash and boots opendm40 again).
 fn wait_for_watchdog() -> ! {
     loop {
         mmio::spin(1_000_000);
@@ -2327,7 +2328,7 @@ fn wait_for_watchdog() -> ! {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
-    // the shim counts a crash (WDT_RETRY, then recovery).
+    // the shim counts a crash and boots opendm40 again (WDT_RETRY).
     lcd::fill_rect(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
     wait_for_watchdog()
 }
@@ -2337,9 +2338,9 @@ fn panic(_info: &PanicInfo) -> ! {
 // (src/boot.rs): INITIAL_HOLD_MS above makes the main loop feed the FWDGT for
 // as long as it runs.
 // DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
-// counts it as a crash: the 1st reboots opendm40 normally (WDT_RETRY), a 2nd one
-// without 60 s of healthy main loop in between (boot::mark_healthy) enters
-// recovery (marker zeroed -> vendor update screen). DBG:RESET = SYSRESETREQ ->
+// counts it as a crash (DBG:BOOT?; cleared after 60 s of main loop,
+// boot::mark_healthy) and reboots opendm40 normally (WDT_RETRY), every time:
+// no hang count leads to the loader. DBG:RESET = SYSRESETREQ ->
 // normal reboot of opendm40. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
 // marker (boot::enter_loader_update) and reset -> the vendor loader's update
 // screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM

@@ -37,8 +37,8 @@
     dm40dbg.py image FILE                offline: validate a dm40*.bin update
                                          file (header CRC, body CRC, size)
     dm40dbg.py release                   stop feeding the watchdog: the WDT
-                                         reset (~20 s) = crash (2nd in a row ->
-                                         recovery, which ZEROES the app marker)
+                                         reset (~20 s) counts a crash and
+                                         reboots opendm40
     dm40dbg.py reset                     reboot opendm40
     dm40dbg.py recover                   DESTRUCTIVE, = DBG:UPDATE without the
                                          checks/wait of `update` (`recover -h`)
@@ -315,7 +315,7 @@ def print_image(path):
 
 # Field order of boot::put_info + native::put_extra (docs/native-boot.md
 # "Normal native mode"). PD6 / STAGED / CALBK / STACK are in-band labels.
-BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last', 'hold_ms',
+BOOT_POS = ['rstsck', 'rstsck_after', 'mode', 'reason', 'clock', 'last',
             'bcr1', 'btr1', 'bwtr1', 'lcd_id',
             'fatren', 'found', 'renamed', 'old_backup', 'old_deleted', 'freed_clusters',
             'others', 'rcvr_deleted', 'last_trigger',
@@ -429,8 +429,6 @@ def _note(name, v):
         return 'pressed' if v == '1' else 'released'
     if name == 'STACK.size' and _int(v) and _int(_note.used):
         return '%.0f %% used' % (100.0 * _int(_note.used) / _int(v))
-    if name == 'hold_ms':
-        return 'power-key hold at power-on'
     if name == 'renamed':
         return ''
     return ''
@@ -439,7 +437,7 @@ def _note(name, v):
 _note.used = None
 
 BOOT_GROUPS = [
-    ('boot', ['mode', 'reason', 'clock', 'hold_ms']),
+    ('boot', ['mode', 'reason', 'clock']),
     ('reset flags', ['rstsck', 'rstsck_after']),
     ('previous boot', ['last', 'last_trigger']),
     ('crash', ['crash_word', 'healthy', 'fmc_last']),

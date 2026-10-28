@@ -7,6 +7,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Changed
+
+- **The update loader no longer opens by itself:** not on a long power-key
+  hold at power-on, not after repeated hangs (a hang restarts the meter).
+  [How to reach it](docs/manual/README.md#reach-the-update-loader).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

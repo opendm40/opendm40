@@ -303,8 +303,10 @@ Untested: the exact timing, i.e. whether the short must be in place at power-on
 (as written above) or also works when applied during a reset, and how long
 it must be held.
 
-Software ways to the same screen while opendm40 runs (`DBG:UPDATE`, the key-hold
-recovery, the double-hang rule) are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
+This is the only way into the loader for an opendm40 image that hangs before
+its USB disk is up: opendm40 has no key-hold or hang-count entry (removed in
+0.4.0). The software ways while opendm40 runs (`DBG:UPDATE`, the on-meter
+update) are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
 
 ## USB
 

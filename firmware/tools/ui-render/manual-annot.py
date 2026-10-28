@@ -599,27 +599,6 @@ def backup():
     save(im, 'backup')
 
 
-def loader_key():
-    im, d = canvas(880, 250)
-    x0, x1, y = 40, 840, 130
-    d.line((x0, y, x1, y), fill=MID, width=3)
-    tt = lambda s: x0 + s / 5.5 * (x1 - x0)
-    d.rectangle((tt(0), y - 34, tt(4.0), y - 14), fill=BLUE)
-    d.rectangle((tt(4.0), y - 34, tt(4.5), y - 14), fill=(120, 190, 240))
-    text_c(d, (tt(0) + tt(4.0)) / 2, y - 62, 'hold the power key', font(14, bold=True), BLUE)
-    text_c(d, tt(4.25), y - 56, '+0.5 s', font(13), BLUE)
-    f = font(13)
-    for s in (0, 4.0, 4.5):
-        d.line((tt(s), y - 8, tt(s), y + 8), fill=DARK, width=2)
-    text_c(d, tt(0) + 40, y + 16, 'press:\nthe screen lights up', f)
-    text_c(d, tt(3.6), y + 16, 'backlight\nblinks, beep', f)
-    text_c(d, tt(5.0), y + 16, 'let go:\nupdate loader', f)
-    for s in range(0, 6):
-        text_c(d, tt(s), y + 70, f'{s} s', font(12), MID)
-    text_c(d, 440, 225, 'Letting go less than 0.5 s after the beep cancels: the meter starts normally.', font(12), MID)
-    save(im, 'loader-key')
-
-
 def loader_install():
     im, d = canvas(860, 230)
     box(d, 20, 50, 250, 120, 'Computer', ['dm40_opendm40_v0.1.bin', 'or dm40_v_2_6.bin'])
@@ -1048,7 +1027,6 @@ def main():
     bt_names()
     bt_symbol()
     backup()
-    loader_key()
     loader_install()
     cannot_detect()
     power_wiring_dev()

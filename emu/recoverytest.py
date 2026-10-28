@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""opendm40 recovery triggers on the native image (src/boot.rs shim, src/recovery.rs)
+"""opendm40 boot decisions on the native image (src/boot.rs shim, src/recovery.rs)
 through the whole boot chain: ROM -> FS-loader -> opendm40, the real vendor
 FS-loader included (run.py chain mode).
 
@@ -16,21 +16,26 @@ setting the PC to opendm40's `wait_for_watchdog` (what a panic or DBG:RELEASE
 leaves: nothing feeds the watchdog any more; the shim sees the same FWDGT
 reset). Case `release` sends the real DBG:RELEASE over USBTMC (USB/IP).
 
+Neither a key hold nor repeated hangs enter the loader (owner 2026-10-29);
+the shim's only recovery trigger left is the backup-SRAM request word.
+
 Cases (virtual times; opendm40 is entered ~0.69 s after power-on):
   normal      no key: one boot, no recovery, marker valid
   key-short   key pressed at power-on, released at 0.9 s (a normal power-on)
-  key-abort   key held to the beep (shim + 4 s), released in the 0.5 s
-              confirm window: normal boot
-  key-hold    key held from off for 7 s: recovery = loader marker zeroed,
-              SYSRESETREQ, ROM -> FS-loader update screen, opendm40 not entered
+  key-long    key held from off for 7 s: normal boot, the shim does not wait
+              for the key (native::start within 0.5 s of the reset handler)
   wdt-one     one hang: watchdog reset, opendm40 boots again (crash count 1)
-  wdt-two     a second hang ~10 s after the first watchdog reboot: recovery
-  wdt-two-70  the second watchdog reset 70 s after the first, but opendm40 ran
-              only ~50 s in between: still recovery (the rule is 60 s of
-              running main loop, not 60 s between the resets)
+  wdt-two     a second hang ~10 s after the first watchdog reboot: a reboot
+              again (crash count 2), no recovery
+  wdt-three   three hangs ~10 s after each reboot: opendm40 keeps restarting
+              (crash count 3), no recovery
   wdt-healthy the second hang after > 60 s of main loop: the crash counter
-              was cleared at 60 s, so only a reboot (crash count 1 again)
-  release     DBG:RELEASE over USB twice in a row: WDT_RETRY, then recovery
+              was cleared at 60 s (crash count 1 again)
+  request     the backup-SRAM request word (0x52454356) set, then a hang:
+              recovery = loader marker zeroed, SYSRESETREQ, ROM -> FS-loader
+              update screen, opendm40 not entered
+  release     DBG:RELEASE over USB twice in a row: WDT_RETRY twice (crash
+              count 1, then 2), no recovery
 
 Checks per case: entries of the ROM / FS-loader / opendm40 reset handlers and of
 recovery::run (cheap per-address hooks), then at the end the loader marker
@@ -56,7 +61,7 @@ OUT = os.path.join(HERE, 'out')
 sys.path.insert(0, HERE)
 import run  # noqa: E402
 
-CASES = ['normal', 'key-short', 'key-abort', 'key-hold', 'wdt-one', 'wdt-two', 'wdt-two-70', 'wdt-healthy']
+CASES = ['normal', 'key-short', 'key-long', 'wdt-one', 'wdt-two', 'wdt-three', 'wdt-healthy', 'request']
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native ELF (symbols needed)')
@@ -65,9 +70,10 @@ ap.add_argument('--cases', default=','.join(CASES), help='comma list (default: a
 ap.add_argument('--jobs', type=int, default=3, help='emulators at the same time (default 3)')
 A = ap.parse_args()
 
-BKP_CRASH, BKP_TRIG, BKP_LAST = 0x40024FF0, 0x40024FF4, 0x40024FFC
+BKP_CRASH, BKP_TRIG, BKP_REQ, BKP_LAST = 0x40024FF0, 0x40024FF4, 0x40024FF8, 0x40024FFC
 NRML, RCVR = 0x4C4D524E, 0x52564352
-CRASH0, CRASH1 = 0x43520000, 0x43520001
+REQ_MAGIC = 0x52454356
+CRASH0, CRASH1, CRASH2, CRASH3 = 0x43520000, 0x43520001, 0x43520002, 0x43520003
 TRIG_ZEROED = 0x54520010
 MARKER = run.MARKER
 LOADER_LO, LOADER_HI = 0x080A0000, 0x080C0000
@@ -97,12 +103,12 @@ def word(path, off):
 SYMS = nm(A.app)
 HANG = SYMS['opendm40::wait_for_watchdog']
 RECOVERY = SYMS['opendm40::recovery::run']
-HELD_FOR = SYMS['opendm40::boot::held_for']  # the shim's key-hold windows (4 s, then 0.5 s)
+START = SYMS['opendm40::native::start']  # after the shim's decision
 with open(A.app, 'rb') as f:
     ELF_ENTRY = struct.unpack_from('<I', f.read(0x40), 0x18)[0] & ~1
 ROM_RESET = word(run.DUMP, 4) & ~1
 LOADER_RESET = word(run.DUMP, 0xA0004) & ~1
-HOOKS = [('rom', ROM_RESET), ('loader', LOADER_RESET), ('app', ELF_ENTRY), ('recovery', RECOVERY), ('held_for', HELD_FOR)]
+HOOKS = [('rom', ROM_RESET), ('loader', LOADER_RESET), ('app', ELF_ENTRY), ('recovery', RECOVERY), ('start', START)]
 PRINT_LOCK = threading.Lock()
 
 
@@ -266,35 +272,19 @@ def case_key_short():
     c.end_reads(6.0)
     c.run(6.2)
     c.expect_normal(1, (0, CRASH0))
-    c.check(len(c.times('held_for')) == 1, 'released before 4 s: the shim never reached the cue')
     return c
 
 
-def case_key_abort():
-    # opendm40 at ~0.69 s; the shim's 4 s window ends ~4.7 s, the beep ~5.0 s,
-    # the confirm window ~5.0..5.5 s: release at 5.2.
-    c = Case('key-abort')
-    c.key(0.0, True)
-    c.key(5.2, False)
-    c.end_reads(9.0)
-    c.run(9.2)
-    c.expect_normal(1, (0, CRASH0))
-    h = c.times('held_for')
-    c.check(len(h) == 2 and h[1] < 5.2, 'held to the cue, released in the 0.5 s confirm window (key windows at %s)'
-            % ['%.2f' % t for t in h])
-    return c
-
-
-def case_key_hold():
-    c = Case('key-hold')
+def case_key_long():
+    c = Case('key-long')
     c.key(0.0, True)
     c.key(7.0, False)
     c.end_reads(9.0)
     c.run(9.2)
-    a = app_time(c, 0) or 0.69
-    # 4 s hold + ~0.3 s beep + 0.5 s confirm after the shim started.
-    c.expect_recovery(a + 4.7, a + 5.2)
-    c.check(len(c.times('held_for')) == 2, 'both key windows (4 s, then the 0.5 s confirm) ran')
+    c.expect_normal(1, (0, CRASH0))
+    a, st = app_time(c, 0), c.times('start')
+    c.check(a is not None and len(st) == 1 and st[0] - a < 0.5,
+            'key held: the shim decides at once (reset %s, native::start %s)' % (a, st))
     return c
 
 
@@ -316,20 +306,30 @@ def case_wdt_two():
     c.hang(36.0)         # ~10 s after the reboot -> reset ~56 s
     c.end_reads(62.0)
     c.run(62.2)
-    c.expect_recovery(55.5, 57.5)
+    c.expect_normal(3, (CRASH2,))
     return c
 
 
-def case_wdt_two_70():
-    c = Case('wdt-two-70')
+def case_wdt_three():
+    c = Case('wdt-three')
     c.hang(6.0)          # reset ~26 s
-    c.read(75.5, 'crash_before', BKP_CRASH)
-    c.hang(76.0)         # reset ~96 s: 70 s after the first, ~50 s of main loop
-    c.end_reads(102.0)
-    c.run(102.2)
+    c.hang(36.0)         # reset ~56 s
+    c.hang(66.0)         # reset ~86 s
+    c.end_reads(92.0)
+    c.run(92.2)
+    c.expect_normal(4, (CRASH3,))
+    return c
+
+
+def case_request():
+    c = Case('request')
+    c.at(6.0, 'sysbus WriteDoubleWord 0x%08X 0x%08X' % (BKP_REQ, REQ_MAGIC))
+    c.hang(6.1)          # reset ~26 s: the shim consumes the request word
+    c.end_reads(32.0)
+    c.run(32.2)
+    c.expect_recovery(25.5, 27.5)
     if c.v:
-        c.check(c.v['crash_before'] == CRASH1, 'crash count still 1 before the 2nd hang (0x%08X)' % c.v['crash_before'])
-    c.expect_recovery(95.5, 97.5)
+        c.check(c.v['crash'] == CRASH0, 'request: crash counter not counted (0x%08X)' % c.v['crash'])
     return c
 
 
@@ -349,13 +349,13 @@ def case_wdt_healthy():
 
 def case_release():
     """DBG:RELEASE over USBTMC (USB/IP), twice: 1st -> WDT_RETRY, crash 1;
-    2nd (within 60 s of main loop) -> recovery, FS-loader."""
+    2nd (within 60 s of main loop) -> WDT_RETRY again, crash 2, no recovery."""
     import usbip_client as uc
     c = Case('release')
     port = run.free_port()
     os.environ['USBIP_PORT'] = str(port)
     uc.PORT = port
-    end = 150.0
+    end = 180.0
     c.end_reads(end - 0.1)
     res = {}
 
@@ -372,6 +372,24 @@ def case_release():
         t.write(s)
         return t.read(timeout=60).decode(errors='replace').strip()
 
+    def after_reset(key, crash):
+        """Re-import after the watchdog reboot: DBG:BOOT? must say WDT_RETRY
+        with crash word `crash`."""
+        for _ in range(120):
+            d, t = link()
+            try:
+                b = q(t, 'DBG:BOOT?')
+            except Exception:
+                d.close()
+                time.sleep(2)
+                continue
+            if 'WDT_RETRY' in b and crash in b.split(','):
+                res[key] = b
+                return d, t
+            d.close()
+            time.sleep(2)
+        return None, None
+
     def host():
         try:
             d, t = link()
@@ -379,23 +397,14 @@ def case_release():
             t.write('DBG:RELEASE')
             d.close()
             time.sleep(5)
-            # Re-import after the watchdog reboot: DBG:BOOT? must say WDT_RETRY.
-            for _ in range(120):
-                d, t = link()
-                try:
-                    b = q(t, 'DBG:BOOT?')
-                except Exception:
-                    d.close()
-                    time.sleep(2)
-                    continue
-                if 'WDT_RETRY' in b:
-                    res['boot2'] = b
-                    break
-                d.close()
-                time.sleep(2)
-            if 'boot2' in res:
+            d, t = after_reset('boot2', '0x43520001')
+            if d:
                 t.write('DBG:RELEASE')
                 d.close()
+                time.sleep(5)
+                d, t = after_reset('boot3', '0x43520002')
+                if d:
+                    d.close()
         except Exception as e:
             res['err'] = repr(e)
 
@@ -405,19 +414,19 @@ def case_release():
     th.join(5)
     if 'err' in res:
         c.fail('USB host: %s' % res['err'])
-    b1, b2 = res.get('boot1', ''), res.get('boot2', '')
+    b1, b2, b3 = res.get('boot1', ''), res.get('boot2', ''), res.get('boot3', '')
     c.check(',NORMAL,NONE,' in b1, 'first boot NORMAL, NONE (%s)' % b1[:60])
-    f2 = b2.split(',')
-    c.check(',NORMAL,WDT_RETRY,' in b2 and '0x43520001' in f2, 'after DBG:RELEASE: NORMAL, WDT_RETRY, crash word '
-                                                               '0x43520001 (%s)' % b2[:60])
-    r = c.times('recovery')
-    c.expect_recovery(r[0] if r else 0, r[0] if r else 0)
+    c.check(',NORMAL,WDT_RETRY,' in b2 and '0x43520001' in b2.split(','),
+            'after DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520001 (%s)' % b2[:60])
+    c.check(',NORMAL,WDT_RETRY,' in b3 and '0x43520002' in b3.split(','),
+            'after the 2nd DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520002 (%s)' % b3[:60])
+    c.expect_normal(3, (CRASH2,))
     return c
 
 
-FUNCS = {'normal': case_normal, 'key-short': case_key_short, 'key-abort': case_key_abort, 'key-hold': case_key_hold,
-         'wdt-one': case_wdt_one, 'wdt-two': case_wdt_two, 'wdt-two-70': case_wdt_two_70,
-         'wdt-healthy': case_wdt_healthy, 'release': case_release}
+FUNCS = {'normal': case_normal, 'key-short': case_key_short, 'key-long': case_key_long,
+         'wdt-one': case_wdt_one, 'wdt-two': case_wdt_two, 'wdt-three': case_wdt_three,
+         'wdt-healthy': case_wdt_healthy, 'request': case_request, 'release': case_release}
 
 
 def one(name):

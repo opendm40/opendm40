@@ -3,21 +3,20 @@
 //!
 //! Runs before .data/.bss exist: no statics are touched until `native::start`
 //! has initialised RAM (only `set_info`/`info` below use one, afterwards).
-//! Every wait is bounded and feeds the FWDGT. Every cap fails toward a
-//! normal boot: a key-gesture pass cap counts as a RELEASE, never as a held
-//! key (review N1), so a stopped cycle counter cannot reach recovery.
+//! Every wait is bounded and feeds the FWDGT.
 //!
 //! Recovery zeroes the loader marker (src/recovery.rs): a one-way door into
-//! the vendor updater. So every trigger is deliberate or repeated.
+//! the vendor updater. The shim takes it only on the backup-SRAM request
+//! word, which nothing sets now: no key hold and no hang count lead there
+//! (owner 2026-10-29). The ways into the loader are DBG:UPDATE / DBG:RECOVER,
+//! the on-meter update and the TX-GND short (docs/native-boot.md).
 //!
-//! Decision, in this order (docs/native-boot.md "Implementation"):
+//! Decision, in this order (docs/native-boot.md "Shim (reset path)"):
 //!   backup-SRAM request word == REQ_MAGIC     -> recovery (Requested; consumed)
-//!   key gesture confirmed (below)             -> recovery (KeyHold)
-//!   key held to the cue, released in time     -> normal   (KeyHoldAborted)
 //!   clock init failed (HXTAL and IRC16M), or a GENUINE watchdog reset after
-//!     our own normal boot: crash counter += 1;
-//!       counter >= CRASH_MAX                  -> recovery (ClockFail / Watchdog)
-//!       else clock failed                     -> SYSRESETREQ, retry (ClockFail)
+//!     our own normal boot: crash counter += 1 (shown by DBG:BOOT?);
+//!       clock failed, counter < CLOCK_RETRIES -> SYSRESETREQ, retry (ClockFail)
+//!       clock failed                          -> normal   (ClockFail)
 //!       else                                  -> normal   (WdtRetry)
 //!   FWDGTRSTF, previous boot was recovery     -> normal   (WdtAfterRecovery)
 //!   FWDGTRSTF otherwise                       -> normal   (WdtStale)
@@ -29,11 +28,7 @@
 //! counter is cleared by `mark_healthy` after 60 s of main loop and on entry
 //! to recovery.
 //!
-//! Key gesture: the backlight comes on at once (instant feedback, so a normal
-//! power-on press is released early). Holding the power key HOLD_MS (4 s)
-//! after the shim started gives a cue (beep + backlight blink); the key must
-//! then STILL be held CONFIRM_MS (0.5 s) to enter recovery. Releasing during
-//! that window aborts to a normal boot.
+//! The backlight comes on at once: feedback for the power-on press.
 
 use crate::clock::{self, Src};
 use crate::mmio::{modify32, r32, w32};
@@ -60,9 +55,6 @@ const GPIOA: u32 = 0x4002_0000;
 const GPIOD: u32 = 0x4002_0C00;
 const GPIOE: u32 = 0x4002_1000;
 const SCB_AIRCR: u32 = 0xE000_ED0C;
-const DEMCR: u32 = 0xE000_EDFC;
-const DWT_CTRL: u32 = 0xE000_1000;
-const DWT_CYCCNT: u32 = 0xE000_1004;
 
 /// PD6 (power key) level when pressed: 1. Confirmed in the stock V2.6 code:
 /// FUN_0800b7e0 sets PD6 input with pull-down (gpio_mode_set(GPIOD 0x40020C00,
@@ -70,18 +62,12 @@ const DWT_CYCCNT: u32 = 0xE000_1004;
 /// (FUN_08006000) and raises the key-down event (state 0 -> 1 -> 2, flag bit 0)
 /// only while the bit reads 1 (app_decompile.c:6524-6556). Idle measured 0.
 pub const PD6_PRESSED_HIGH: bool = true;
-/// Hold the power key this long after the shim started -> cue.
-pub const HOLD_MS: u32 = 4000;
-/// ... and still this long after the cue -> recovery.
-pub const CONFIRM_MS: u32 = 500;
-/// Crash counter value that takes the recovery path (2 = the second watchdog
-/// reset / clock failure without 60 s of healthy main loop in between).
-pub const CRASH_MAX: u32 = 2;
+/// A clock failure retries the boot (SYSRESETREQ) while the crash counter is
+/// below this; then opendm40 runs on the clock it has (never recovery).
+pub const CLOCK_RETRIES: u32 = 2;
 /// Main-loop time after which `mark_healthy` clears the crash counter.
 // (60 s of RUNNING main loop since this boot, not 60 s between two resets)
 pub const HEALTHY_MS: u64 = 60_000;
-/// A release shorter than this is contact bounce, not a release.
-const RELEASE_DEBOUNCE_MS: u32 = 30;
 
 /// Backup SRAM (0x40024000, 4 KiB). persist.rs uses the start: record v4 =
 /// magic, version, 40 words, CRC = 43 words, 0x40024000..0x400240AB; these
@@ -108,12 +94,9 @@ pub enum Mode {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
     None,
-    Watchdog,
     WdtAfterRecovery,
     WdtStale,
     WdtRetry,
-    KeyHold,
-    KeyHoldAborted,
     Requested,
     ClockFail,
 }
@@ -135,8 +118,6 @@ pub struct BootInfo {
     pub clock: ClockState,
     /// Previous boot's mode word (BKP_LAST) as found.
     pub last: u32,
-    /// How long PD6 was held after the shim started (capped at HOLD_MS).
-    pub hold_ms: u32,
 }
 
 #[inline(always)]
@@ -153,7 +134,8 @@ pub fn pd6_pressed() -> bool {
 /// PD6 input WITH pull-down, as the stock key init does
 /// (app_decompile.c:6482, gpio_mode_set(GPIOD, input, PUPD 2, 0x40)). After a
 /// reset the ROM/loader leave PD6 floating (PUPD 00); without the pull a
-/// floating 1 would read as a held key. Then let the pull settle.
+/// floating 1 would read as a held key (recovery-usb reads the key without
+/// board::init). Then let the pull settle.
 fn pd6_input() {
     unsafe {
         modify32(RCU_AHB1EN, 0, 1 << 3); // GPIOD
@@ -174,39 +156,6 @@ fn backlight(on: bool) {
         modify32(GPIOA + 0x04, 1 << 6, 0);
         modify32(GPIOA, 3 << 12, 1 << 12);
     }
-}
-
-/// Cue before the destructive key-hold action: backlight off and a ~0.3 s
-/// beep (buzzer PA7 toggled as plain GPIO at ~2.7 kHz, the stock drives the
-/// same pin with TIM14 PWM at 3.57 kHz), then backlight on again.
-fn cue(cyc_per_ms: u32) {
-    backlight(false);
-    unsafe {
-        modify32(GPIOA + 0x04, 1 << 7, 0);
-        w32(GPIOA + 0x18, 1 << (7 + 16));
-        modify32(GPIOA, 3 << 14, 1 << 14);
-    }
-    let half = cyc_per_ms * 10 / 54; // ~185 us
-    // Pass cap per half period (review N1): a pass is >= 4 cycles (two DWT
-    // reads, compare, count; ~8 in the native build), so with a running
-    // counter the time ends it first; with a stopped counter the whole cue
-    // still ends after 1620 x half/2 passes (~1 s), not tens of seconds. Only
-    // the tone is affected: the cue decides nothing.
-    let cap = half / 2;
-    let mut level = false;
-    for _ in 0..1620 {
-        // 1620 half periods = ~0.3 s
-        let t = cyccnt();
-        let mut n = 0u32;
-        while cyccnt().wrapping_sub(t) < half && n < cap {
-            n += 1;
-        }
-        level = !level && !cfg!(feature = "mute");
-        unsafe { w32(GPIOA + 0x18, if level { 1 << 7 } else { 1 << (7 + 16) }) };
-        feed();
-    }
-    unsafe { w32(GPIOA + 0x18, 1 << (7 + 16)) };
-    backlight(true);
 }
 
 /// Power hold: PE2 = 1. The ROM already raises PE2 and PC4 first thing on
@@ -397,70 +346,6 @@ pub fn sysreset() -> ! {
     }
 }
 
-#[inline(always)]
-fn cyccnt() -> u32 {
-    unsafe { r32(DWT_CYCCNT) }
-}
-
-/// Wait while PD6 stays pressed for up to `limit_ms` from `t0`. Returns the
-/// time of a release (that lasted RELEASE_DEBOUNCE_MS), or None if the key was
-/// held throughout.
-///
-/// Fail-safe cap (review N1): the loop is also bounded by a pass count (each
-/// pass is >= 8 cycles: an FWDGT write, a GPIO read, a DWT read, so with a
-/// running counter the time limit always comes first). Reaching the cap means
-/// the cycle counter is not advancing, so neither "held for limit_ms" nor a
-/// debounced release can be measured; it returns `Some(limit_ms)`, i.e. it is
-/// treated as a RELEASE: never as "held", so a stopped counter can never
-/// confirm the gesture (recovery = zeroed marker). The cap is checked before
-/// the time limit. Effect in `key_gesture`: first window -> (HOLD_MS, false)
-/// -> KEY_HOLD_ABORTED, normal boot, no cue; confirm window -> abort, normal.
-fn held_for(t0: u32, limit_ms: u32, cyc_per_ms: u32) -> Option<u32> {
-    // (4000 + 100) x 25_000 = 1.03e8 at 200 MHz: no u32 overflow.
-    let cap = (limit_ms + 100) * (cyc_per_ms / 8);
-    let mut released_at: Option<u32> = None;
-    let mut n = 0u32;
-    loop {
-        feed();
-        n += 1;
-        if n >= cap {
-            return Some(limit_ms); // counter stuck: release / abort
-        }
-        let now = cyccnt();
-        if now.wrapping_sub(t0) / cyc_per_ms >= limit_ms {
-            return None;
-        }
-        if pd6_pressed() {
-            released_at = None;
-        } else {
-            match released_at {
-                None => released_at = Some(now),
-                Some(r) if now.wrapping_sub(r) / cyc_per_ms >= RELEASE_DEBOUNCE_MS => {
-                    return Some(r.wrapping_sub(t0) / cyc_per_ms);
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// The recovery key gesture: (held ms, confirmed). Not pressed -> (0, false);
-/// released before HOLD_MS -> (ms, false); held to HOLD_MS -> cue, then
-/// released within CONFIRM_MS -> (ms, false) = abort; still held -> confirmed.
-fn key_gesture(cyc_per_ms: u32) -> (u32, bool) {
-    if !pd6_pressed() {
-        return (0, false);
-    }
-    if let Some(ms) = held_for(cyccnt(), HOLD_MS, cyc_per_ms) {
-        return (ms, false);
-    }
-    cue(cyc_per_ms);
-    match held_for(cyccnt(), CONFIRM_MS, cyc_per_ms) {
-        Some(ms) => (HOLD_MS + ms, false),
-        None => (HOLD_MS + CONFIRM_MS, true),
-    }
-}
-
 /// The whole shim sequence.
 #[link_section = ".shim"]
 #[inline(never)]
@@ -486,12 +371,7 @@ pub fn shim() -> BootInfo {
         ClockState::Failed
     };
     feed();
-    let cyc_per_ms = if clock == ClockState::Failed { 16_000 } else { clock::HCLK_HZ / 1000 };
-    unsafe {
-        modify32(DEMCR, 0, 1 << 24); // TRCENA
-        modify32(DWT_CTRL, 0, 1); // CYCCNTENA
-    }
-    // (e) request word (consumed), previous mode, key hold.
+    // (e) request word (consumed), previous mode, crash counter.
     bkp_enable();
     let req = unsafe { r32(BKP_REQ) } == REQ_MAGIC;
     if req {
@@ -500,7 +380,6 @@ pub fn shim() -> BootInfo {
     let last = unsafe { r32(BKP_LAST) };
     let crash = unsafe { r32(BKP_CRASH) };
     let crash = if crash & 0xFFFF_0000 == CRASH_TAG { crash & 0xFF } else { 0 };
-    let (hold_ms, confirmed) = key_gesture(cyc_per_ms);
 
     let wdt = rstsck & FWDGTRSTF != 0;
     // Genuine = our own hang: FWDGT alone (no SW reset, no power-on) after a
@@ -509,24 +388,17 @@ pub fn shim() -> BootInfo {
     let failed = clock == ClockState::Failed;
     let (mode, reason) = if req {
         (Mode::Recovery, Reason::Requested)
-    } else if confirmed {
-        (Mode::Recovery, Reason::KeyHold)
-    } else if hold_ms >= HOLD_MS {
-        (Mode::Normal, Reason::KeyHoldAborted)
     } else if failed || genuine {
+        // Counted for DBG:BOOT? only: a hang reboots opendm40, every time.
         let n = (crash + 1).min(0xFF);
         unsafe { w32(BKP_CRASH, CRASH_TAG | n) };
-        let why = if failed { Reason::ClockFail } else { Reason::Watchdog };
-        if n >= CRASH_MAX {
-            (Mode::Recovery, why)
-        } else if failed {
+        if failed && n < CLOCK_RETRIES {
             // Transient clock failure: retry the whole boot (the ROM sets the
             // clock up again) instead of running opendm40 at 16 MHz.
             unsafe { w32(BKP_LAST, LAST_NORMAL) };
             sysreset()
-        } else {
-            (Mode::Normal, if failed { Reason::ClockFail } else { Reason::WdtRetry })
         }
+        (Mode::Normal, if failed { Reason::ClockFail } else { Reason::WdtRetry })
     } else if wdt && last == LAST_RECOVERY {
         (Mode::Normal, Reason::WdtAfterRecovery)
     } else if wdt {
@@ -541,7 +413,7 @@ pub fn shim() -> BootInfo {
         w32(BKP_LAST, if mode == Mode::Recovery { LAST_RECOVERY } else { LAST_NORMAL });
     }
     feed();
-    BootInfo { rstsck, rstsck_after, mode, reason, clock, last, hold_ms }
+    BootInfo { rstsck, rstsck_after, mode, reason, clock, last }
 }
 
 // --- After RAM init: boot info for DBG:BOOT? --------------------------------
@@ -565,8 +437,8 @@ pub fn info() -> Option<BootInfo> {
 static mut HEALTHY: bool = false;
 
 /// Call from the main loop every iteration with the uptime in ms: after
-/// HEALTHY_MS of running it clears the crash counter once, so a later single
-/// hang counts as a first crash again (one reboot, not recovery).
+/// HEALTHY_MS of running it clears the crash counter once, so the counter
+/// shows the hangs in a row (DBG:BOOT?).
 // Call site: main.rs main loop (`now` = ms since main started, after pre_main).
 pub fn mark_healthy(now_ms: u64) {
     if now_ms >= HEALTHY_MS && !unsafe { HEALTHY } {
@@ -600,10 +472,9 @@ fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
     s.put_bytes(&t[i..]);
 }
 
-/// DBG:BOOT? reply (reason: NONE WATCHDOG WDT_AFTER_RECOVERY WDT_STALE
-/// WDT_RETRY KEY_HOLD KEY_HOLD_ABORTED REQUESTED CLOCK_FAIL; clock: HXTAL
-/// IRC16M FAILED):
-/// `rstsck,rstsck_after,mode,reason,clock,last,hold_ms,bcr1,btr1,bwtr1,lcd_id,
+/// DBG:BOOT? reply (reason: NONE WDT_AFTER_RECOVERY WDT_STALE WDT_RETRY
+/// REQUESTED CLOCK_FAIL; clock: HXTAL IRC16M FAILED):
+/// `rstsck,rstsck_after,mode,reason,clock,last,bcr1,btr1,bwtr1,lcd_id,
 /// fatren_status,found,renamed_8.3_name(11 chars),old_backup,old_deleted,
 /// freed_clusters,others,rcvr_deleted,last_trigger` (others > 0: more
 /// dm40*.bin left untouched = warning; rcvr_deleted: a leftover DM40RCVR.BIN
@@ -625,12 +496,9 @@ pub fn put_info(s: &mut crate::scpi::Scpi) {
     s.put_bytes(if i.mode == Mode::Normal { b",NORMAL," } else { b",RECOVERY," });
     s.put_bytes(match i.reason {
         Reason::None => b"NONE" as &[u8],
-        Reason::Watchdog => b"WATCHDOG",
         Reason::WdtAfterRecovery => b"WDT_AFTER_RECOVERY",
         Reason::WdtStale => b"WDT_STALE",
         Reason::WdtRetry => b"WDT_RETRY",
-        Reason::KeyHoldAborted => b"KEY_HOLD_ABORTED",
-        Reason::KeyHold => b"KEY_HOLD",
         Reason::Requested => b"REQUESTED",
         Reason::ClockFail => b"CLOCK_FAIL",
     });
@@ -640,8 +508,6 @@ pub fn put_info(s: &mut crate::scpi::Scpi) {
         ClockState::Failed => b",FAILED,",
     });
     hex(s, i.last);
-    s.put_bytes(b",");
-    dec(s, i.hold_ms);
     let b = unsafe { BOARD }.unwrap_or_default();
     for v in [b.bcr1, b.btr1, b.bwtr1, b.lcd_id] {
         s.put_bytes(b",");
