@@ -100,7 +100,8 @@ AD1 directly ([cap-blocks.txt](data/ohm600m-2026-10-28/cap-blocks.txt);
 and the 0.4.0 build's r7 ([build-0.4.0-5m57.txt](data/ohm600m-2026-10-28/build-0.4.0-5m57.txt),
 no leak correction; [build-0.4.0-two.txt](data/ohm600m-2026-10-28/build-0.4.0-two.txt)
 and [build-0.4.0-5m57-leak.txt](data/ohm600m-2026-10-28/build-0.4.0-5m57-leak.txt),
-leak learned, 0.041 / 0.059 nS):
+leak learned, 0.041 / 0.059 nS; the final build, [build-35a47b9e-final.txt](data/ohm600m-2026-10-28/build-35a47b9e-final.txt):
+5.5691 … 5.5694 MΩ on 5.5693 MΩ, no leak learned yet after power-up):
 
 | resistor | stock 6 MΩ | stock 60 MΩ | prototype | 0.4.0, no leak | 0.4.0, leak learned |
 |---|---|---|---|---|---|
