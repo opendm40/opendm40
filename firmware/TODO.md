@@ -53,7 +53,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Physical keys, touch, sound: "Device check (3 min): (1) `CALC:AHOL?`" (side keys, #57 partial), the
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
-- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
+- Power cycles, a cold meter: "Mode Remember" (3 min), "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first.
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
@@ -125,6 +125,26 @@ What waits for the owner; each line links to the material.
       on: SETTINGS,FILE, DC V, AUTO, AutoHold 0, limits off, 200 us/div, the alarm LOUD kept. The same set, then
       `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
       manual says: a fixed range is never kept).
+- [ ] Mode Remember (user report 2026-10-28: "ohm on the low range, trend 640 ms/div; off / on -> DC V and
+      320"; asked for a user choice and slower trend steps). The stock has the switch: Settings > Other
+      Settings > Mode Remember, default OFF (config.bin 0x1ab; its record: function, V / A coupling, V / A
+      autorange flags, ohm variant, chart rate; no fixed range). Done (branch fix/power-on-state, 0.4.0):
+      Settings 3/3 row 9 "Mode Remember" OFF / ON, SCPI `MEMory:STATe:RECall:AUTO`; ON restores after a
+      power-off the function + coupling, AUTO / AUTO+, the ohm test current, a fixed V / A / ohm range (not
+      under REL / in AUTO coupling), rate + smoothing, the trend timebase (app.rs `restore`, W_DMM_EXT bits
+      20..27, no record version change; 0 = the old behaviour). Not AutoHold, limits, REL, HOLD, the scope,
+      the power meter's settings, the Record page. The trend timebase is now persisted (a reset kept it
+      neither before) and has 1.28 / 2.56 s/div (ui::TREND_RATES; the 321-point ring is unchanged).
+      emu/settingstest.py cases `remember` / `default` PASS.
+      Device check (3 min, any input, the mute build is fine):
+      1. Settings > More > More: the last row reads **Mode Remember OFF**; tap: ON.
+      2. Multimeter: Ω, range page 600 Ω; rate chip to FAST; tap the trend's timebase label through 640 ms,
+         1.28 s, 2.56 s, 160 ms, 320 ms and 640 ms to 1.28 s/div (the label fits its chip, the chart runs).
+      3. Wait 10 s, power off with the key, power on: Ω, **600Ω** (not AUTO) in the status bar, FAST,
+         1.28 s/div. `MEM:STAT:REC:AUTO?` 1.
+      4. Mode Remember OFF, wait 10 s, power off / on: DC V, AUTO+, MED, 320 ms/div.
+      5. `DBG:RESET` with Mode Remember OFF in Ω 600 Ω: Ω in AUTO (a reset continues the function, a
+         fixed range only with Mode Remember ON), the timebase kept.
 - [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 1f264d3e (dmm.rs `poll_ohm`,
       `ohm_auto_floor`). The stock autorange never selects r0 (its clamp is r1..r6,
       `stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2), so the step uses the stock rule of the other ohm steps:

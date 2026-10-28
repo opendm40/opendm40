@@ -207,6 +207,10 @@
 //!     (shorted leads: the internal offset, a few tens of mohm) instead of
 //!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
 //!     default OFF
+//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings 3/3 "Mode Remember"
+//!     (the stock's switch; the header is the Keysight 34461A's "recall the
+//!     power-down state at power-on"): ON = a power-on continues the
+//!     multimeter as it was (app.rs `restore`); persisted, default OFF
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
@@ -949,6 +953,8 @@ pub enum Cmd {
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
     /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
     ResNeg(Option<bool>),
+    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings 3/3 "Mode Remember".
+    ModeRemember(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
     /// (App::scpi_range).
@@ -2633,11 +2639,14 @@ impl Scpi {
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
-                // DISPlay:BURDen, [SENSe:]RESistance:NEGative: ON|OFF / ?.
-                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen")) || {
-                    let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
-                    r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
-                } =>
+                // DISPlay:BURDen, [SENSe:]RESistance:NEGative,
+                // MEMory:STATe:RECall:AUTO: ON|OFF / ?.
+                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen"))
+                    || (kw(p0, "MEMory") && parts.len() == 4 && kw(parts[1], "STATe") && kw(parts[2], "RECall") && kw(parts[3], "AUTO"))
+                    || {
+                        let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                        r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
+                    } =>
                 {
                     let v = if query {
                         None
@@ -2650,7 +2659,13 @@ impl Scpi {
                             }
                         }
                     };
-                    out = Out::Instr(if kw(p0, "DISPlay") { Cmd::DispBurden(v) } else { Cmd::ResNeg(v) });
+                    out = Out::Instr(if kw(p0, "DISPlay") {
+                        Cmd::DispBurden(v)
+                    } else if kw(p0, "MEMory") {
+                        Cmd::ModeRemember(v)
+                    } else {
+                        Cmd::ResNeg(v)
+                    });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 // [SENSe:]VOLTage:COUPling / CURRent:COUPling (opendm40).

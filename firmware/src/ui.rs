@@ -1805,6 +1805,30 @@ pub fn status_right(st: &Status) {
 /// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
 /// MAX / REL / MIN. `pts` are display values, oldest first.
 pub const CHART_X: u16 = 80;
+/// Trend chart timebases: one point per `rate` x 10 ms, 16 points (px) a
+/// division, so `rate` x 160 ms/div. The stock has 1 / 2 / 4 (160 / 320 /
+/// 640 ms/div, default 320); 8 and 16 (1.28 / 2.56 s/div) are opendm40's.
+/// The point ring (App::chart, CHART_W points) is the same at every rate.
+pub const TREND_RATES: [u8; 5] = [1, 2, 4, 8, 16];
+pub const TREND_DEFAULT: u8 = 2;
+
+/// The timebase after `rate` (a tap on the chart's left column).
+pub fn trend_next(rate: u8) -> u8 {
+    let i = TREND_RATES.iter().position(|&r| r == rate).map_or(0, |i| (i + 1) % TREND_RATES.len());
+    TREND_RATES[i]
+}
+
+/// Settings code of a timebase (0 = the default, older records), and back.
+pub fn trend_code(rate: u8) -> u32 {
+    if rate == TREND_DEFAULT { 0 } else { TREND_RATES.iter().position(|&r| r == rate).map_or(0, |i| i as u32 + 1) }
+}
+
+pub fn trend_of_code(c: u32) -> u8 {
+    match c {
+        1..=5 => TREND_RATES[c as usize - 1],
+        _ => TREND_DEFAULT,
+    }
+}
 pub const CHART_W: u16 = 321;
 const CHART_Y: u16 = 176;
 const CHART_H: u16 = 97;
@@ -2132,15 +2156,18 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     if c.rate != rate {
         c.rate = rate;
         let mut t = [0u8; 16];
-        let s = crate::dmm::format(&mut t, rate as f32 * 160.0, 0);
+        // "640ms/div", from 1280 ms "1.28s/div" (the chip holds 9 glyphs).
+        let ms = rate as u32 * 160;
+        let (s, u): (&str, &[u8]) =
+            if ms < 1000 { (crate::dmm::format(&mut t, ms as f32, 0), b"ms/div") } else { (crate::dmm::format(&mut t, ms as f32 / 1000.0, 2), b"s/div") };
         let mut l = [0u8; 16];
-        let k = s.len();
-        l[..k].copy_from_slice(s.as_bytes());
-        l[k..k + 6].copy_from_slice(b"ms/div");
+        let k = s.len().min(10);
+        l[..k].copy_from_slice(&s.as_bytes()[..k]);
+        l[k..k + u.len()].copy_from_slice(u);
         // Timebase chip (tap: next rate), between the top and middle labels.
         let r = rect(4, g.tb, 73, 17);
         sf::rbox(r, 4, BTN, BG);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
+        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + u.len()]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
     rate_chip(c, rc);
     let Some(side) = side else { return };
@@ -2670,7 +2697,12 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
 /// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
 /// so the rows above keep their places.
-pub const SETTINGS3: [&str; 8] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm"];
+/// Row 9, "Mode Remember" (the stock's name and place, Other Settings;
+/// default OFF as the stock): ON restarts the multimeter after a power-off
+/// as it was (app.rs `restore`).
+pub const SETTINGS3: [&str; 9] = [
+    "Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm", "Mode Remember",
+];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).

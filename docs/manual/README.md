@@ -910,7 +910,7 @@ Accuracy** turns it off.
 The chart plots the reading over time, 321 points wide.
 
 - Tap the left column of the chart (the timebase label) to switch
-  160 → 320 → 640 ms/div; the chart restarts.
+  160 → 320 → 640 ms/div → 1.28 → 2.56 s/div; the chart restarts.
 - The scale follows the data.
 - It stops during HOLD and keeps running during AutoHold.
 - It restarts when you change the function.
@@ -2280,6 +2280,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Touch test** | | | The [touch test page](#touch-test). |
 | **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
 | **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
+| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter continues as you left it ([What is kept](#what-is-kept-when-you-switch-off)). |
 
 ### The Device page
 
@@ -2786,10 +2787,15 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
+
+**Mode Remember** ON (Settings 3/3, as the stock's) also keeps after
+switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
+or a fixed V, A or Ω range, the Ω test current, the rate and smoothing and
+the trend timebase. AutoHold and the limits still start afresh.
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
@@ -2801,7 +2807,8 @@ everything, also without the file.
 
 The stock firmware keeps its own settings separately, in `config.bin`;
 switching between the two firmwares does not mix them. After the stock
-firmware has run, opendm40 starts on DC V.
+firmware has run, opendm40 starts on DC V, or with **Mode Remember** ON in
+the function last used in opendm40.
 
 ## Known limitations
 

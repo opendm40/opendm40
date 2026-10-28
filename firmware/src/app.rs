@@ -184,6 +184,9 @@ pub struct App {
     off_idx: usize,
     volume: u8,
     start_page: usize,
+    /// Settings 3/3 "Mode Remember" (stock Other Settings, default OFF):
+    /// a power-on continues the multimeter as it was (`restore`).
+    mode_remember: bool,
     combo: View,
     /// Last touch / side key: the idle dim and the idle shutdown.
     last_input: u64,
@@ -328,7 +331,8 @@ pub struct App {
     meas_next: u64,
     pub power: Power,
     status_next: u64,
-    /// Strip chart: one point per `chart_rate` x 10 ms (1/2/4 = 160/320/640 ms/div).
+    /// Strip chart: one point per `chart_rate` x 10 ms (ui::TREND_RATES:
+    /// 1/2/4/8/16 = 160/320/640 ms/div, 1.28/2.56 s/div).
     chart: [f32; ui::CHART_W as usize],
     chart_n: usize,
     chart_rate: u8,
@@ -567,6 +571,7 @@ impl App {
             off_idx: 1,
             volume: 50,
             start_page: 0,
+            mode_remember: false,
             combo: View::DmmScope,
             last_input: 0,
             last_host: 0,
@@ -640,7 +645,7 @@ impl App {
             status_next: 0,
             chart: [0.0; ui::CHART_W as usize],
             chart_n: 0,
-            chart_rate: 2,
+            chart_rate: ui::TREND_DEFAULT,
             chart_next: 0,
             chart_unit: "",
             chart_dec: 0,
@@ -891,6 +896,7 @@ impl App {
                     "", // Touch test row: opens the page
                     if self.dmm_view.acc_on { "ON" } else { "OFF" },
                     if self.dmm.ohm_neg { "ON" } else { "OFF (stock)" },
+                    if self.mode_remember { "ON" } else { "OFF" },
                 ];
                 ui::settings(2, &vals);
             }
@@ -2077,7 +2083,10 @@ impl App {
             | if self.dmm.burden_show { crate::meter::EXT_BURDEN } else { 0 }
             | if self.dmm_view.acc_on { 0 } else { crate::meter::EXT_ACC_OFF }
             | if self.dmm.ohm_neg { crate::meter::EXT_OHM_NEG } else { 0 }
-            | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT;
+            | (self.alarm_mode.min(2) as u32) << crate::meter::EXT_DANGER_SHIFT
+            | if self.mode_remember { crate::meter::EXT_MODE_REMEMBER } else { 0 }
+            | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
+            | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
         p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
         // v11: the touch calibration (touchcal.rs; 0 = none).
@@ -2085,6 +2094,22 @@ impl App {
             *w = c as u32;
         }
         p
+    }
+
+    /// The range page item of a range the user fixed in V, A or ohm (the
+    /// settings: Mode Remember restores it). None in autorange, under REL
+    /// (its range hold ends with REL), in the AUTO coupling and the power
+    /// meter.
+    fn fixed_range_item(&self) -> Option<u8> {
+        if self.dmm.is_auto() || self.meter.rel_active() || self.dmm.cpl_auto() || self.dmm.pw.on {
+            return None;
+        }
+        let b = self.dmm.button();
+        if !matches!(b, Button::Volt | Button::Amp | Button::Ohm) {
+            return None;
+        }
+        let code = ui::range_code(self.dmm.hy_mode(), self.dmm.range().max(0) as u8);
+        ui::range_items(b).iter().any(|it| it.1 == Some(code)).then_some(code)
     }
 
     /// Backup SRAM words -> settings. `same_session`: after a normal
@@ -2096,9 +2121,18 @@ impl App {
     /// only the preferences are restored (display, sound, power, BT, alerts,
     /// units, sensor, scope look and touch, the touch calibration, the
     /// generator's setup) and the rest keeps its defaults, as the stock
-    /// after a power-on.
+    /// after a power-on. Mode Remember ON (the stock's Other Settings
+    /// switch; its record: function, coupling, autorange flags, ohm variant,
+    /// chart rate) continues the multimeter after a power-off too: the
+    /// function and coupling, the AUTO / AUTO+ choices and the ohm test
+    /// current, a fixed V / A / ohm range, rate and smoothing, the trend
+    /// timebase. Not AutoHold, the limits, REL or HOLD (as the stock: they
+    /// change what the readout shows, unnoticed after a power-on), nor the
+    /// scope, the power meter's settings or the Record page.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
+        self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
+        let cont = same_session || self.mode_remember;
         self.dim_idx = (p[0] & 3) as usize;
         self.off_idx = (p[0] >> 4 & 3) as usize;
         self.start_page = (p[0] >> 8 & 3) as usize;
@@ -2141,9 +2175,12 @@ impl App {
         // FR-05 rate / smoothing; UF-21: a V autorange stored before the
         // AUTO+ default (no "trusted" bit in W_DMM_EXT) restores as AUTO+.
         let ext = crate::meter::ext_settings(p[crate::persist::W_DMM_EXT]);
-        if same_session {
+        if cont {
             self.dmm.set_rate(ext.rate);
             self.meter.set_smoothing(ext.smooth);
+            self.chart_rate = ui::trend_of_code(p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_TREND_SHIFT & 7);
+            let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
+            self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         }
         self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
         self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
@@ -2162,16 +2199,23 @@ impl App {
             // v8: Record page interval / duration (0 = the defaults; csvlog
             // maps an unknown index to the default).
             crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
-            let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
-            self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         }
-        let mode = if same_session { restore_func(rec.version, p[2] as u8) } else { 1 };
+        let mode = if cont { restore_func(rec.version, p[2] as u8) } else { 1 };
         // Entering the power meter starts in DC (as V / A); a restart in it
         // keeps its coupling, as V / A keep theirs in the function code.
         let coup = self.dmm.pw.coup;
         self.dmm.select(clk, mode);
         if self.dmm.pw.on {
             self.dmm.pw_set_coupling(clk, coup);
+        }
+        // Mode Remember: the fixed range of that function (a reset without
+        // it starts in autorange, as before).
+        let item = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_RANGE_SHIFT & 0xF) as u8;
+        if self.mode_remember && item != 0 && !self.dmm.cpl_auto() && !self.dmm.pw.on {
+            let b = self.dmm.button();
+            if matches!(b, Button::Volt | Button::Amp | Button::Ohm) && ui::range_items(b).iter().any(|it| it.1 == Some(item - 1)) {
+                self.dmm.set_range(clk, Some(item - 1));
+            }
         }
         let mut g = self.gen.s;
         g.wave = Wave::ALL[(p[3] & 3) as usize];
@@ -3551,11 +3595,7 @@ impl App {
                 } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);
                 } else if x < ui::CHART_X && ui::chart_rows().contains(&y) {
-                    self.chart_rate = match self.chart_rate {
-                        1 => 2,
-                        2 => 4,
-                        _ => 1,
-                    };
+                    self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;
                     self.chart_dirty = true;
                 } else if let Some(i) = ui::button_hit(x, y) {
@@ -3819,6 +3859,10 @@ impl App {
                     Some(7) => {
                         // Negative ohm: from the next reading on.
                         self.dmm.ohm_neg = !self.dmm.ohm_neg;
+                    }
+                    Some(8) => {
+                        // Mode Remember: applies at the next power-on.
+                        self.mode_remember = !self.mode_remember;
                     }
                     Some(_) | None => return,
                 }
@@ -4250,6 +4294,15 @@ impl App {
                 out.put_bytes(if self.dmm.ohm_neg { b"1" } else { b"0" });
                 true
             }
+            C::ModeRemember(Some(b)) => {
+                self.mode_remember = b;
+                self.redraw |= self.view == View::Settings;
+                false
+            }
+            C::ModeRemember(None) => {
+                out.put_bytes(if self.mode_remember { b"1" } else { b"0" });
+                true
+            }
             _ => {
                 // The latest pre-REL reading of a current function.
                 match self.last_raw.as_ref().filter(|r| crate::sentinel::shunt_of(r.mode).is_some() && r.power.is_none()) {
@@ -4575,12 +4628,14 @@ impl App {
                 app_touchtest::tc_scpi(op, out)
             }
             C::DbgView => {
-                // <view>,<settings page 1..3>,<wave view on> (emulator
-                // tests: where a DBG:KEY / DBG:TAP landed).
+                // <view>,<settings page 1..3>,<wave view on>,<trend chart
+                // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;
+                // settingstest.py).
                 out.put_bytes(ui::view_name(self.view).as_bytes());
                 out.put_bytes(b",");
                 crate::put_u32(out, self.set_page as u32 + 1);
-                out.put_bytes(if self.scope.wave_on() { b",1" } else { b",0" });
+                out.put_bytes(if self.scope.wave_on() { b",1," } else { b",0," });
+                crate::put_u32(out, self.chart_rate as u32 * 160);
                 true
             }
             C::DbgGest => {
@@ -4788,7 +4843,7 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
-        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_)) {
+        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
             return self.burden_scpi(cmd, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {
