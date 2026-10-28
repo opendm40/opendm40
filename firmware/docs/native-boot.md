@@ -782,9 +782,10 @@ The frame log (Mode Log, app_log.rs, ui_log.rs) lends BUF from the scope
 `app_log::Log` (the decoder and the view, under 1 KB), a snippet's
 decoded samples (8 KB), then the frame store (~44 KB with CAP 42 K; 32 KB
 in recovery-usb's 36 K, which has no scope). TCM: a pointer; SRAM:
-nothing. Region B 18 868 B free, region C 5 660 B (the waveform view and
-the log's top bar / counters, `.text.log_cold`; variants: B 16 988 ..
-36 656 B, C 5 172 .. 15 680 B, mute 17 868 / 5 556 B). While the log
+nothing. Region B 18 780 B free, region C 5 668 B (the waveform view and
+the log's top bar / counters, `.text.log_cold`; variants: B 16 900 ..
+36 576 B, C 5 180 .. 15 684 B, mute 17 804 / 5 564 B). No idle power-off
+while the log runs. While the log
 streams, the settings save and the screenshot clusters' erase wait (an
 SPI erase outlasts the 13 ms ring at 1.25 MS/s). The static worst path is 24 728 B (headroom 20 600 B).
 Emulator (--mips 110): a pass decodes for at most 3 ms (`x2` max 1.6 ms

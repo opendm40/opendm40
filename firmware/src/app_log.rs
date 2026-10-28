@@ -481,6 +481,8 @@ impl App {
         }
         ds().mode = ud::MODE_LOG;
         if !self.scope.log_on() {
+            // A band decode in flight: its record goes with BUF.
+            self.dec_abort();
             let fs = self.scope.log_begin(fs_for(ds().cfg.baud), now);
             let (p, n) = self.scope.log_mem();
             let a = p.align_offset(8);
@@ -562,6 +564,9 @@ impl App {
             l.fs = fs;
             l.base = 0;
             l.t0_us = now.saturating_sub(l.start_ms) * 1000;
+            // The levels again: a restart may follow a V/div change.
+            l.lvl = None;
+
             l.mm_a = 0;
             l.phase = if l.lvl.is_none() { P_LEVEL } else { P_BAUD };
             self.log_restart_at(0);

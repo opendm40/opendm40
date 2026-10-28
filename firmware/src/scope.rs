@@ -378,6 +378,7 @@ pub struct Scope {
     log_last: usize,
     log_ms: u64,
     log_cyc: u32,
+    log_settle: bool,
     stored_len: usize,
     stored_trig: Option<usize>,
     stored_anchor: usize,
@@ -761,6 +762,8 @@ impl Scope {
             log_last: 0,
             log_ms: 0,
             log_cyc: 0,
+            log_settle: false,
+
             stored_len: 0,
             stored_trig: None,
             stored_anchor: 0,
@@ -2376,6 +2379,17 @@ impl Scope {
         if !self.log_live {
             return None;
         }
+        if !self.powered || now < self.relay_until {
+            // The rail / relays settle (the log started from another
+            // view, a V/div change): the stream starts again after.
+            self.log_settle = true;
+            return None;
+        }
+        if self.log_settle {
+            self.log_settle = false;
+            self.log_run(now);
+            return None;
+        }
         let cyc = unsafe { r32(0xE000_1004) };
         let r = LOG_RING;
         let wr = (r - unsafe { r32(S4 + 0x04) } as usize % (r + 1)) % r;
@@ -2415,6 +2429,8 @@ impl Scope {
         self.halt();
         self.stored_valid = false;
         self.lent = true;
+        // A decode of the record in flight is gone with it.
+        self.hold_restart = false;
     }
 
     /// BUF while lent (the inrush ring / trace), else None.
@@ -2430,6 +2446,7 @@ impl Scope {
         if self.lent {
             self.lent = false;
             self.busy = false;
+            self.hold_restart = false;
         }
     }
 

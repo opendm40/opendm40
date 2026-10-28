@@ -1063,8 +1063,12 @@ the scope full record.
             (3) RS-232 levels with Inverted; (4) Modbus RTU master + slave on RS-485, probe across A-B, 9600 /
             19200 8E1: REQ / RSP boxes, the reply time vs the master's log, a corrupted frame red; (5) the Wave
             view, DC V, RS-485 A-B on V-COM at 2400 / 4800 (and 9600 at 1 ms/div): the AD2 filter's real edge
-            shape, DEC:RATE?; (6) DBG:PROF? x2 (the decode) and s.frame at 100 us / 1 ms / 100 ms/div with
-            9600 and 115200 traffic, against the emulator's numbers in the PR.
+            shape, DEC:RATE? after STOP; (6) DBG:PROF? dec.job (a record's decode), x2 and s.frame at 1 / 10 /
+            100 ms/div with 9600 and 115200 traffic, frames off / on, against the emulator's numbers
+            (native-boot.md "Protocol decoder"); (7) Mode Log: 115200 text for 60 s, DEC:COUN? lost 0 and
+            the FIFO complete; a tapped row's waveform matches the scope's look of the same bytes; Modbus
+            pairing and the reply time; leaving Log, the scope captures again; Log in the Wave view refused.
+
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
       Done in the emulator (branch scope-full-record): opendm40 WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,

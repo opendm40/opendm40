@@ -639,6 +639,23 @@ try:
         wait_ms(1000)
         fr = frames()
         check(has_text(b''.join(bytes.fromhex(f[3]) for f in fr), 4), 'after the log: the band decodes a new record (%d frames)' % len(fr))
+        # Log / Band in and out while band decodes are in flight (1 ms/div,
+        # 115200): the scope captures again each time.
+        put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, 115200, 0.0, 3.3, 20.0 / 115200)
+        q('TIM:SCAL 1E-3')
+        run()
+        for k in range(5):
+            wait_ms(300 + 70 * k)
+            q('DEC:MODE LOG')
+            wait_ms(400)
+            q('DEC:MODE BAND')
+        wait_ms(1500)
+        st = q('TRIG:STAT?')
+        check(stop(), 'Log / Band 5 times: STOP completes (status was %s)' % st)
+        wait_ms(800)
+        fr = frames()
+        check(st not in ('STOP', 'WAIT') and fr, 'Log / Band 5 times: the scope captures and decodes again (%s, %d frames)' % (st, len(fr)))
+
 
     q('DEC:PROT OFF')
     check(err().startswith('0,'), 'no SCPI error left (%s)' % err())

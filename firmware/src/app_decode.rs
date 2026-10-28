@@ -387,7 +387,7 @@ impl App {
     }
 
     /// Drop a decode in progress (the record goes away, settings change).
-    fn dec_abort(&mut self) {
+    pub(super) fn dec_abort(&mut self) {
         if job().take().is_some() {
             self.scope.hold_restart = false;
         }

@@ -1570,8 +1570,9 @@ impl App {
         // started explicitly, see Stats::rec). Dimming still applies.
         // Nor while the power meter integrates energy with a current flowing.
         // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1).
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        // decisions-2026-10-22.md #1). Nor while the decoder's frame log
+        // runs (app_log.rs: a session left to watch a bus).
+        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() && !self.scope.log_on() {
             self.persist_now();
             power_off();
         }
@@ -2959,7 +2960,8 @@ impl App {
     /// goes on unless the user touches the screen or a key.
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = self.off_ms();
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
+        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || self.scope.log_on() || idle + OFF_WARN_MS <= off {
+
             self.off_warned = 0;
             return;
         }
