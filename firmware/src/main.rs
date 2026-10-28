@@ -386,6 +386,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
         app.usb_host = dev.state() == UsbDeviceState::Configured;
+        power::USB_CONF.store(app.usb_host, core::sync::atomic::Ordering::Relaxed);
         // The INFO/ mirror's sectors while the stream runs: at most one per
         // pass, paced against the fast logger (vdisk.rs `mirror_pass`).
         #[cfg(feature = "vdisk")]

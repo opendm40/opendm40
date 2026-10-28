@@ -22,6 +22,68 @@ const ADC0: u32 = 0x4001_2000;
 const GPIOB: u32 = 0x4002_0400;
 const GPIOC: u32 = 0x4002_0800;
 
+/// A USB host has the meter configured (main.rs, every pass; DBG:CHG?).
+pub static USB_CONF: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// DBG:CHG:PIN n,<mode>: set PB10 / PB11 for a charger experiment.
+/// mode 0 input no pull, 1 input pull-up, 2 input pull-down, 3 push-pull
+/// low, 4 push-pull high, 5 open drain released, 6 the default (`pins_init`).
+pub fn dbg_pin(pin: u32, mode: u32) -> bool {
+    if !(pin == 10 || pin == 11) || mode > 6 {
+        return false;
+    }
+    if mode == 6 {
+        pins_init();
+        return true;
+    }
+    let (m2, sh) = (3u32 << (2 * pin), 2 * pin);
+    unsafe {
+        let pupd = match mode { 1 => 1, 2 => 2, _ => 0 };
+        modify32(GPIOB + 0x0C, m2, pupd << sh);
+        modify32(GPIOB + 0x04, 1 << pin, if mode == 5 { 1 << pin } else { 0 }); // OD
+        match mode {
+            3 => w32(GPIOB + 0x28, 1 << pin), // BC: low
+            4 | 5 => w32(GPIOB + 0x18, 1 << pin), // BOP: high / released
+            _ => {}
+        }
+        modify32(GPIOB, m2, if mode >= 3 { 1 << sh } else { 0 });
+    }
+    true
+}
+
+/// DBG:CHG?: PB10 level, PB11 level, GPIOB MODE / PUD / OMODE / OCTL bits
+/// of PB10..11 (hex digits: bits 20..23 >> 20 etc.), USB configured, battery
+/// ADC (sum of 16 raw conversions; Vbat = sum / 16 * 3 / 4096 * 2).
+pub fn dbg_state() -> [u32; 8] {
+    let mut sum = 0;
+    for _ in 0..16 {
+        sum += convert(15);
+    }
+    unsafe {
+        let idr = r32(GPIOB + 0x10);
+        [
+            idr >> 10 & 1,
+            idr >> 11 & 1,
+            r32(GPIOB) >> 20 & 0xF,
+            r32(GPIOB + 0x0C) >> 20 & 0xF,
+            r32(GPIOB + 0x04) >> 10 & 3,
+            r32(GPIOB + 0x14) >> 10 & 3,
+            USB_CONF.load(core::sync::atomic::Ordering::Relaxed) as u32,
+            sum,
+        ]
+    }
+}
+
+/// PB10, PB11 as the stock sets them up (FUN_0800b5f6): PB11 input with
+/// pull-up; PB10 open drain, released (no pull), read as an input.
+fn pins_init() {
+    unsafe {
+        modify32(GPIOB + 0x0C, 0xF << 20, 1 << 22);
+        modify32(GPIOB + 0x04, 3 << 10, 0);
+        modify32(GPIOB, 0xF << 20, 0);
+    }
+}
+
 /// Typical GD32 temperature sensor constants (unverified for the F427).
 const TS_V25: f32 = 1.43;
 const TS_SLOPE: f32 = 0.0043;
@@ -55,8 +117,6 @@ impl Power {
             modify32(GPIOC, 3 << 10, 3 << 10); // PC5 analog
             modify32(GPIOC, 3 << 28, 0); // PC14 input
             modify32(GPIOC + 0x0C, 3 << 28, 2 << 28); // pull-down
-            modify32(GPIOB, 0xF << 20, 0); // PB10, PB11 input
-            modify32(GPIOB + 0x0C, 0xF << 20, 1 << 22); // PB11 pull-up, PB10 none (stock)
             modify32(ADC0 + 0x304, 3 << 16, 1 << 16); // ADC clock PCLK2 / 4
             modify32(ADC0 + 0x304, 0, 1 << 23); // TSVREN: temperature sensor on
             w32(ADC0 + 0x08, 0); // CR2 off
@@ -65,6 +125,7 @@ impl Power {
             w32(ADC0 + 0x34, 15); // SQR3: ch15
             w32(ADC0 + 0x08, 1); // ADON
         }
+        pins_init();
         Power { next: 0, vbat: 4.2, bars: 5, mcu_t: f32::NAN }
     }
 

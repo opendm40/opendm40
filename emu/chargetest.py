@@ -14,7 +14,7 @@ the stock "charging" condition PB10 = PB11 = 1), PB10 low from --t-off s
   * the battery (DBG:LCD? of 435..474 x 9..24) is green while charging and
     its bar count alternates (two different frames of 5 reads 1.3 s apart), not
     green after --t-off;
-  * "USB" (DBG:LCD? of 409..431 x 10..24) has ink while the host is
+  * the USB symbol (DBG:LCD? of 412..425 x 4..27) has ink while the host is
     attached.
 Which TP4056 pins PB10 / PB11 really are is unknown (hw/README.md);
 this checks the firmware's handling of the stock condition only.
@@ -111,8 +111,8 @@ try:
     wait_until(4000)
     d = diag61()
     check(d & 7 == 7, 'charging: DIAG byte 61 = %#x (PB10, PB11, USB configured all 1)' % d)
-    usb = lcd(409, 10, 23, 15)
-    check(white(usb) >= 20, '"USB" shown while the host is attached (%d white px)' % white(usb))
+    usb = lcd(412, 4, 14, 24)
+    check(white(usb) >= 20, 'USB symbol shown while the host is attached (%d white px)' % white(usb))
     # A DBG:LCD? holds the drawing for 300 ms (main.rs draw_hold_until):
     # one read per 1.3 s of virtual time, so the 1 s status redraw runs.
     frames = set()
