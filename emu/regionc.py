@@ -14,8 +14,8 @@ fastlogtest.py:
     rc.calls()                                  # {function: 1} hit since
     rc.calls(every=True)                        # ... over the whole run
 
-`gate`: the flag symbol the hooks test (default hy3131::HANDED; the protocol
-decoder's stream: opendm40::scope::DEC_LIVE, emu/decodetest.py).
+`gate`: the flag symbol the hooks test (default hy3131::HANDED, the AD2
+stream ISR owns the bus).
 
 `exclude`: name parts of functions left without a hook. Every call of a
 hooked function runs a Python hook, handed or not: code that is hot outside

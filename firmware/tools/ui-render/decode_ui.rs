@@ -102,16 +102,25 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
             glo = glo.min(tr.a[i]);
             ghi = ghi.max(tr.b[i]);
         }
+        let gap = (cs as i64 * 399 / n as i64 + 1) as usize;
+        let mut last: Option<usize> = None;
         for i in 0..399 {
             if tr.b[i] - tr.a[i] >= ((ghi - glo) / 2).max(3) {
-                a.bar[i / 8] |= 1 << (i % 8);
+                let from = match last {
+                    Some(l) if i - l <= gap.max(3) => l + 1,
+                    _ => i,
+                };
+                for k in from..=i {
+                    a.bar[k / 8] |= 1 << (k % 8);
+                }
+                last = Some(i);
             }
         }
         return;
     }
     a.mode = ud::M_BOXES;
     let modbus = cfg.proto == dc::P_MODBUS;
-    let margin = cs * if modbus { 6 } else { 16 } + (l.spb >> 8) as usize * 2;
+    let margin = cs * if modbus { 6 } else { 2 } + (l.spb >> 8) as usize * 2;
     let (lo_s, hi_s) = (off.saturating_sub(margin), (off + n + margin).min(c.len()));
     let mut fr = dc::Framer::new(modbus, cs as u32, fs, baud, lo_s as u32, hi_s as u32);
     let mut fno = [u32::MAX; ud::NF];

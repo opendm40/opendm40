@@ -25,6 +25,9 @@ pub(super) struct DecState {
     /// The bit rate auto-baud found last (kept when a screen has too few
     /// edges to measure it).
     last_baud: u32,
+    /// Screens left that reuse `last_baud` without measuring (a screen with
+    /// framing errors measures again).
+    reuse: u8,
     /// Changes with every decoded screen (Model::dec_gen; 0 = blank).
     gen: u16,
 }
@@ -124,10 +127,14 @@ impl App {
         let Some((lo, mid, hi)) = dc::levels(mm.0, mm.1, self.dec_thr_code()) else { return Err(0) };
         let baud = if s.cfg.baud != 0 {
             s.cfg.baud
+        } else if s.last_baud != 0 && s.reuse > 0 {
+            s.reuse -= 1;
+            s.last_baud
         } else {
             match dc::auto_baud(src, a, b.min(a + AUTO_MAX), lo, hi, fs) {
                 Ok(x) => {
                     s.last_baud = x;
+                    s.reuse = 8;
                     x
                 }
                 Err(dc::NoRate::TooFast) => return Err(2),
@@ -140,9 +147,9 @@ impl App {
         Ok((dc::Line { lo, mid, hi, inv: s.cfg.inverted, spb, bits, parity }, baud))
     }
 
-    /// The bar (zoomed out, too few samples per bit): the columns where the
-    /// trace spans more than half the screen's swing.
-    fn dec_bar(&mut self) {
+    /// The bar (zoomed out): the columns where the trace spans more than
+    /// half the screen's swing, gaps up to `gap` px (a character) closed.
+    fn dec_bar(&mut self, gap: usize) {
         let a = ud::ann();
         a.mode = ud::M_BAR;
         let seg = &scope_page::cache_seg();
@@ -152,11 +159,39 @@ impl App {
             hi = hi.max(q);
         }
         let need = ((hi as i32 - lo as i32) / 2).max(3);
-        for (i, &(p, q)) in seg.iter().enumerate() {
+        let mut last: Option<usize> = None;
+        for (i, &(p, q)) in seg.iter().enumerate().take(399) {
             if p <= q && (q as i32 - p as i32) >= need {
-                a.bar[i / 8] |= 1 << (i % 8);
+                let from = match last {
+                    Some(l) if i - l <= gap.max(3) => l + 1,
+                    _ => i,
+                };
+                for k in from..=i {
+                    a.bar[k / 8] |= 1 << (k % 8);
+                }
+                last = Some(i);
             }
         }
+    }
+
+    /// The screen's smallest and largest code from the frame's column rows
+    /// (sp_frame already took every column's min / max; a scan of the
+    /// window again was ~9 ms at 1 ms/div on the device model). A row is
+    /// ~1.5 codes at 2 V/div: plenty for the levels.
+    fn dec_min_max(&self) -> (u16, u16) {
+        let r0 = self.scope.row_of_code(0.0);
+        let slope = (self.scope.row_of_code(1000.0) - r0) / 1000.0;
+        let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        for &(p, q) in scope_page::cache_seg().iter().take(399).filter(|s| s.0 <= s.1) {
+            lo = lo.min(p);
+            hi = hi.max(q);
+        }
+        if lo > hi || slope == 0.0 {
+            return (u16::MAX, 0);
+        }
+        let code = |r: i16| ((r as f32 - r0) / slope).clamp(0.0, 1023.0) as u16;
+        let (a, b) = (code(lo), code(hi));
+        (a.min(b), a.max(b))
     }
 
     /// Decode the frame the page just built (scope_page `sp_frame`).
@@ -177,7 +212,7 @@ impl App {
         a.n = n.max(1) as u32;
         a.fs = f.fs;
         if f.cols.is_some() || n < 2 {
-            self.dec_bar();
+            self.dec_bar(0);
             crate::prof::exit(crate::prof::X2);
             return;
         }
@@ -188,7 +223,7 @@ impl App {
         };
         let (_, t0, _) = self.scope.record_info();
         a.t0 = off as i64 - t0 as i64;
-        let mm = f.data.min_max(0, n);
+        let mm = self.dec_min_max();
         match self.dec_line(&src, off, off + n, mm, f.fs) {
             Ok((l, baud)) => {
                 a.mid = l.mid;
@@ -198,7 +233,7 @@ impl App {
                     a.mode = ud::M_NOTE;
                     a.note_baud = baud;
                 } else if (cs as i64 * 399 / n as i64) < ud::MIN_BOX as i64 {
-                    self.dec_bar();
+                    self.dec_bar((cs as i64 * 399 / n as i64 + 1) as usize);
                 } else {
                     self.dec_boxes(&src, off, n, &l, baud, f.fs);
                 }
@@ -221,9 +256,9 @@ impl App {
         a.mode = ud::M_BOXES;
         let modbus = s.cfg.proto == dc::P_MODBUS;
         let cs = l.char_samples() as usize;
-        // 16 characters (UART: back-to-back characters realign at an idle
-        // gap) or 6 (Modbus: the gap before a frame) either side.
-        let margin = cs * if modbus { 6 } else { 16 } + (l.spb >> 8) as usize * 2;
+        // 2 characters (UART) or 6 (Modbus: the gap before a frame) either
+        // side.
+        let margin = cs * if modbus { 6 } else { 2 } + (l.spb >> 8) as usize * 2;
         let lo = off.saturating_sub(margin);
         let hi = (off + n + margin).min(src.len());
         let mut fr = dc::Framer::new(modbus, cs as u32, fs, baud, lo as u32, hi as u32);
@@ -241,7 +276,9 @@ impl App {
             a.f[k] = ud::FAnn { s0: (f.start as i64 - vis0) as i32, s1: (f.end as i64 - vis0) as i32, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
             a.nf += 1;
         };
+        let mut fe = false;
         dc::chars(src, lo, hi, l, &mut |c| {
+            fe |= c.err & dc::F_FE != 0;
             let a = ud::ann();
             if (c.end as i64) >= vis0 && (c.start as i64) < vis1 {
                 if (a.nb as usize) < ud::NB {
@@ -259,6 +296,10 @@ impl App {
         if modbus {
             let nf = fr.nframes;
             fr.finish(&mut |f, req| on_frame(f, req, nf));
+        }
+        if fe {
+            // Measure the rate again on the next screen.
+            s.reuse = 0;
         }
     }
 

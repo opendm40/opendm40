@@ -93,6 +93,8 @@ impl Ann {
         self.nf = 0;
         self.more = false;
         self.bar = [0; 50];
+        self.baud = 0;
+        self.note_baud = 0;
     }
     /// Graph x of a window sample (may lie off the graph).
     pub fn x_of(&self, s: i32) -> i32 {

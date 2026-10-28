@@ -1013,35 +1013,37 @@ the scope full record.
         fast logger. SCPI: DEC:UART:... config and a frame-FIFO read, so a host can tail the bus live.
       - Constraints: the decoder runs per DMA half-buffer in the main loop, so it must keep up at 1.25 MS/s and stay
         in region B (no region-C code while streaming). DMM / generator keep running alongside.
-      - [x] Phase 1 (PR feat/decoder-uart, draft): UART and Modbus RTU while streaming. src/decode.rs (the
-            decoder: auto threshold, auto-baud with the standard rates, 8N1 / 8E1 / 8O1 / 7E1, inverted
-            polarity, framing / parity errors; Modbus 3.5-character gap, CRC-16, request / reply pairing; a
-            store of 256 frames / 4 KiB of bytes with a host FIFO cursor), scope.rs `dec_*` (the circular DMA
-            at the baud's rate, 1.25 MS/s for auto, front end 2 V/div DC; whole ring laps estimated on the
-            cycle counter and counted as Lost), app_decode.rs / ui_decode.rs (View::Decode from MF > Settings >
-            Decode: list, counters, setup popup; a row or a top-bar item per main-loop pass with the decoder
-            polled between them), SCPI DECode:... (docs/manual/scpi-reference.md). While it streams the
-            settings save, the screenshot pre-erase and the USB volume refresh wait (they stalled the loop for
-            45..65 ms). Tests: tools/decode-test (host), ui-render `--decode` + the matrix, scpi-test,
-            emu/decodetest.py (ScopeFeeder SetBitsFile; region C hooks gated on scope::DEC_LIVE).
-      - [ ] Phase 2: tap a frame to show its waveform (while still in the ring); trigger / filter on a decoded
-            value (address, function, a byte pattern); disk logging (LOGS/UARTnnn.CSV + a raw .BIN, unlimited
-            like the fast logger); Modbus ASCII; the other protocols of the list above; the decoder in the
-            background of other views (now it runs only while its view is open). Known limits of phase 1:
-            auto-baud at 1.25 MS/s keeps 21 ms of samples, so below ~4800 baud the bytes before the lock
-            are lost (a set rate samples at 12x the baud); the front end is fixed at 2 V/div (+-8 V,
-            larger signals clip); the list redraws one row per pass (a fast bus scrolls behind, the decoder
-            does not); a CSV recording's disk commits run while decoding (a long commit may cost Lost);
-            region B grew 18.4 KB (decoder ~15 KB, dec_poll / dec_tick inlined).
-      - [ ] Device check (needs a USB-UART adapter or a Modbus device: the generator cannot make UART):
-            (1) 3.3 V USB-UART TX -> OSC, `tools/dm40scpi.py`-style host script sending text at 9600 / 115200 8N1:
-            DEC:RATE? and the list match, DEC:COUN? fe/pe/lost 0 over 10 min, DEC:LEV? ~1.65 V; (2) 8E1 / 7E1
-            and a wrong parity setting -> PE; (3) RS-232 levels (a MAX232 or a PC COM port) with Inverted;
-            (4) a Modbus RTU master + slave (e.g. a USB-RS485 adapter + a Modbus slave) probe across A-B at
-            9600 / 19200 8E1: REQ / RSP pairs, reply time vs the master's log, CRC on a corrupted frame;
-            (5) loop timing on the device while decoding 115200 with the list scrolling: DBG:PROF? pass max
-            < 21 ms, Lost 0; with the DMM view's CSV recording on: Lost?; (6) DEC:FRAM? polling from a host for
-            10 min: no gaps in seq; (7) screenshots, taps, the setup popup while decoding: Lost 0.
+      - [x] Phase 1 (PR #63, draft, on feat/scope-dlg-ring): UART and Modbus RTU as a band on the scope page
+            (owner 2026-10-28: an overlay on the scope page, not a separate view; the first streaming view of
+            the PR was dropped). Each frame the page draws (running, a stopped record's zoom / pan, Single,
+            the Wave view) is decoded over the screen's window of the record (pack10::Codes) plus 2
+            characters (UART) / 6 (Modbus) either side: src/decode.rs (levels auto / manual, auto-baud from
+            the shortest runs with a TooFast cap, 8N1 / 8E1 / 8O1 / 7E1, inverted polarity, characters with a
+            quarter-bit idle step, a Modbus framer with a running CRC and request / reply pairing),
+            app_decode.rs (the decode per frame; DECode:...), ui_decode.rs (the band: byte boxes with hex and
+            the character, Modbus frame boxes with the fields and the reply time, errors red, a bar zoomed
+            out, "Rate too low for N baud" under 4 samples per bit; the setup popup, MF > Settings >
+            Decode). DECode:FRAMes? decodes the stopped record (running: the screen). One screen's
+            annotations (`ANN`, ~0.8 KB) in TCM; no SRAM used. Tests: tools/decode-test (incl. filtered edges
+            at 8 samples per bit), ui-render `--decode` (24 zooms x 3 pans x both views, 0 violations),
+            scpi-test, emu/decodetest.py (MCX and the Wave view: ScopeFeeder / HY3131 SetBitsFile).
+      - [ ] Phase 2: tap a frame to centre the record on it; trigger / filter on a decoded value (address,
+            function, a byte pattern); disk logging (LOGS/UARTnnn.CSV); Modbus ASCII; the other protocols of
+            the list above. A "tail the bus" stream (the first PR draft decoded the circular DMA stream while
+            a view was open: 11 KB of RAM, its own view) could come back as an option of DECode:FRAMes?.
+            Known limits: the band covers the graph's bottom 35 px (the trace is not drawn there); a long
+            coded record (Single at 100 ms/div and slower) decodes at ~1.3 us a sample; at 1 ms/div a 9600
+            baud screen holds 9 characters, the first may be misread when the screen starts inside a run of
+            back-to-back characters (they realign at an idle gap); the AD2 filter's edge shape in the
+            emulator is INFERRED (a sinc^2-like mean over 2 periods).
+      - [ ] Device check (a USB-UART adapter or a Modbus device: the generator cannot make UART): (1) 3.3 V
+            USB-UART TX -> OSC, text at 9600 / 115200 8N1: the band at 200 us .. 5 ms/div, DEC:RATE?,
+            DEC:FRAM? after STOP matches what was sent; (2) 8E1 / 7E1 and a wrong parity -> red boxes, PE;
+            (3) RS-232 levels with Inverted; (4) Modbus RTU master + slave on RS-485, probe across A-B, 9600 /
+            19200 8E1: REQ / RSP boxes, the reply time vs the master's log, a corrupted frame red; (5) the Wave
+            view, DC V, RS-485 A-B on V-COM at 2400 / 4800 (and 9600 at 1 ms/div): the AD2 filter's real edge
+            shape, DEC:RATE?; (6) DBG:PROF? x2 (the decode) and s.frame at 100 us / 1 ms / 100 ms/div with
+            9600 and 115200 traffic, against the emulator's numbers in the PR.
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
       Done in the emulator (branch scope-full-record): opendm40 WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,

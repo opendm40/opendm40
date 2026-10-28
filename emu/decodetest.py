@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
-"""opendm40 protocol decoder (src/decode.rs, src/app_decode.rs; DECode:...) in
-the emulator: UART and Modbus RTU bit patterns on the scope input
-(peripherals/ScopeFeeder.cs SetBitsFile, a watched file the test rewrites),
-decoded while the scope streams, read back over USBTMC with DECode:FRAMes?.
+"""opendm40 protocol decoder band on the scope page (src/decode.rs,
+src/app_decode.rs, src/ui_decode.rs; DECode:...) in the emulator.
 
   cd firmware && ./build.sh
-  emu/decodetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
+  emu/decodetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--shots DIR]
 
-Cases (each: write the pattern, set the decoder over SCPI, DECode:CLEar,
-let it run, read the frames):
-  * UART 115200 8N1, 3.3 V logic, auto-baud and auto threshold: DECode:RATE?
-    115200, the text intact in every frame, no framing / parity error, no
-    stream lap (Lost), DECode:LEVel? near 1.65 V;
-  * the same with the main loop busy: the decoder view drawn (rows) while a
-    host reads frames, DBG:DIAG? loop maximum, no lap;
-  * RS-232 levels (+-6 V, inverted) at 9600 7E1, the rate set: text intact;
-  * baud mismatch (signal 9600, decoder 19200): framing errors, no text;
-  * Modbus RTU 19200 8E1 (auto-baud): 03 request / reply, 06 write / echo,
-    an exception and a frame with a bad CRC: kinds, pairing (req=), CRC
-    counter, the reply time;
-  * DMM alongside: READ? answers while the decoder runs;
-  * region C (emu/regionc.py, gated on scope::DEC_LIVE): no .cold function
-    runs while the decoder stream does.
-DEC:LEV? reads ~1.44 V for 3.3 V logic here, not 1.65 V: the feeder's
-counts per volt and the dump's scope calibration differ (the scope page's
-volts differ the same way), hence the wide window.
---shots DIR: emulator screenshots of the decoder view (DBG:LCD?).
+Signals: bit patterns from watched files the test rewrites while the
+emulator runs: the scope input (peripherals/ScopeFeeder.cs SetBitsFile)
+and the V-COM input of the HY3131 model for the Wave view (hy3131/HY3131.cs
+SetBitsFile: the AD2 samples through a sinc^2-like filter, INFERRED).
+
+Cases (DECode:FRAMes? checked against the bytes sent; the screenshot's
+band against FRAMes? of the screen: one box per byte / frame at the time
+each starts, red boxes for errors):
+  * MCX UART 9600 8N1 (auto-baud) at 1 ms/div running and stopped, 200
+    us/div (two characters on the screen), 5 ms/div (the bar), 100 ms/div
+    (the sample rate too low: the note, no frames);
+  * a framing error (a byte with a low stop bit) drawn red;
+  * MCX Modbus RTU 19200 8E1: request / reply / exception / bad CRC, the
+    pairing, at 2 and 5 ms/div, stopped;
+  * the Wave view (DC V, 5 V TTL on V-COM): UART at 2400 and 4800 baud,
+    Modbus at 2400 8E1, at 2 ms/div (38.4 kS/s), running and stopped;
+    19200 baud there: the note;
+  * frame cost: DBG:PROF? (x2 = the decode, s.frame = the frame) at 100 us,
+    1 ms and 100 ms/div with 9600 and 115200 baud traffic, printed;
+  * region C (emu/regionc.py, gated on hy3131::HANDED: the Wave view's
+    AD2 stream): no .cold code while the stream ISR owns the bus.
 --mips: CPU speed (default 110 = the device's speed per instruction).
 Exit status 0 = all passed.
 """
@@ -44,8 +44,9 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=0, help='USB/IP port (default: a free one)')
 ap.add_argument('--mips', default='110')
-ap.add_argument('--shots', help='save screenshots of the decoder view here')
+ap.add_argument('--shots', help='save screenshots here')
 ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
+ap.add_argument('--no-wave', action='store_true', help='skip the Wave view cases')
 A = ap.parse_args()
 if not A.port:
     A.port = emurun.free_port()
@@ -66,26 +67,24 @@ OUT = os.path.join(HERE, 'out')
 os.makedirs(OUT, exist_ok=True)
 TAG = 'decode-%d-%d' % (A.port, os.getpid())
 BITS = os.path.join(OUT, TAG + '.bits')
+DBITS = os.path.join(OUT, TAG + '.dbits')
 
 
-# ---- bit patterns ----
-
-def uart_bits(data, fmt='8N1'):
+def uart_bits(data, fmt='8N1', err=None):
     nb = 7 if fmt[0] == '7' else 8
-    par = fmt[1]
     s = ''
-    for b in data:
+    for k, b in enumerate(data):
         s += '0'
         ones = 0
         for i in range(nb):
             bit = b >> i & 1
             ones += bit
             s += str(bit)
-        if par == 'E':
+        if fmt[1] == 'E':
             s += str(ones & 1)
-        elif par == 'O':
+        elif fmt[1] == 'O':
             s += str(1 - (ones & 1))
-        s += '1'
+        s += '0' if err == 'all' or k == err else '1'
     return s
 
 
@@ -103,29 +102,31 @@ def mb(d):
     return bytes(d) + bytes([c & 0xFF, c >> 8])
 
 
-def put_bits(bits, baud, vlo, vhi, repeat):
-    """Write the pattern (the feeder reloads it within 50 ms of virtual time)."""
-    tmp = BITS + '.tmp'
+def put(path, bits, baud, vlo, vhi, idle):
+    """The pattern, then `idle` s of idle line, repeated."""
+    tmp = path + '.tmp'
+    repeat = len(bits) / baud + idle if idle else 0
     with open(tmp, 'w') as f:
         f.write('%.12g %g %g %g\n' % (1.0 / baud, vlo, vhi, repeat))
         f.write(bits)
-    os.replace(tmp, BITS)
+    os.replace(tmp, path)
 
 
-put_bits('1' * 10, 9600, 0.0, 3.3, 0)
-RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, TAG, gate='opendm40::scope::DEC_LIVE')
+put(BITS, '1' * 10, 9600, 0.0, 3.3, 0)
+put(DBITS, '1' * 10, 2400, 0.0, 5.0, 0)
+RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, TAG)
 SCRIPT = os.path.join(OUT, TAG + '.script')
 with open(SCRIPT, 'w') as f:
     f.write('0.2 monitor sysbus.scopefeed SetBitsFile "%s"\n' % BITS)
+    f.write('0.2 monitor sysbus.hy3131 SetBitsFile "%s"\n' % DBITS)
     if RC and RC.script:
         f.write(RC.lines())
 if RC and not RC.script:
     print('(no llvm-nm / symbols: the region C checks are skipped)')
     RC = None
-
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG,
-       '--log', os.path.join(OUT, TAG + '.log'), '--script', SCRIPT]
+       '--log', os.path.join(OUT, TAG + '.log'), '--script', SCRIPT, '--dmm', 'vsrc:5']
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -134,6 +135,21 @@ def block(b):
     d = int(b[1:2])
     n = int(b[2:2 + d]) if d else 0
     return b[2 + d:2 + d + n]
+
+
+# Band geometry (ui_decode.rs) and colours (RGB565 -> the screenshot's RGB).
+BYTE_Y, FRAME_Y = 259, 241
+
+
+def rgb(c):
+    return ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+
+
+C_EDGE, C_FEDGE, C_ERR = rgb(0xad55), rgb(0x059e), rgb(0xf800)
+
+
+def near(p, c, tol=24):
+    return all(abs(a - b) <= tol for a, b in zip(p, c))
 
 
 try:
@@ -165,24 +181,33 @@ try:
     def err():
         return q('SYST:ERR?')
 
-    def frames():
-        """Every unread frame line (DECode:FRAMes? until empty)."""
+    def frames(first=0):
         out = []
-        for _ in range(12):
-            d = block(q('DEC:FRAM?', raw=True)).decode()
+        for _ in range(40):
+            d = block(q('DEC:FRAM? %d' % first, raw=True)).decode()
             if not d:
                 break
-            out += [l.split(',') for l in d.splitlines()]
+            ls = [l.split(',') for l in d.splitlines()]
+            out += ls
+            first = int(ls[-1][0]) + 1
         return out
 
-    def count():
-        return [int(x) for x in q('DEC:COUN?').split(',')]
+    def stop():
+        q('STOP')
+        for _ in range(100):
+            if q('TRIG:STAT?') == 'STOP':
+                return True
+            wait_ms(100)
+        return False
+
+    def run():
+        q('RUN')
+        wait_ms(1200)
+
+    shot_n = [0]
 
     def shot(name):
-        if not A.shots:
-            return
-        from PIL import Image
-        os.makedirs(A.shots, exist_ok=True)
+        """The screen as rows of RGB tuples (saved as PNG with --shots)."""
         rows = 4
         px = bytearray()
         for y in range(0, 320, rows):
@@ -195,131 +220,142 @@ try:
             for v in w:
                 bs += bytes([v >> 8, v & 0xFF])
             px += bs[:480 * rows * 3]
-        Image.frombytes('RGB', (480, 320), bytes(px)).save(os.path.join(A.shots, name + '.png'))
+        if A.shots:
+            from PIL import Image
+            os.makedirs(A.shots, exist_ok=True)
+            Image.frombytes('RGB', (480, 320), bytes(px)).save(os.path.join(A.shots, name + '.png'))
         wait_ms(400)
+        return lambda x, y: tuple(px[(y * 480 + x) * 3:(y * 480 + x) * 3 + 3])
 
-    def loop_max():
-        b = block(q('DBG:DIAG?', raw=True))
-        return b[97] | b[98] << 8
+    def edges(img, y, col):
+        """x of every run of `col` on row y inside the graph (14..412)."""
+        xs, prev = [], False
+        for x in range(14, 413):
+            on = near(img(x, y), col)
+            if on and not prev:
+                xs.append(x)
+            prev = on
+        return xs
 
-    # The test's own queries: DBG:DIAG? (touch_diag) and the DMM READ?
-    # (stale_read, once per READ?) are region C by design.
-    ALLOWED = ('touch_diag', 'stale_read')
+    def red(img, y):
+        return sum(1 for x in range(14, 413) if near(img(x, y), C_ERR))
+
+    def prof(what):
+        txt = q('DBG:PROF?', raw=True).decode(errors='replace')
+        lines = {l.split()[0]: l.split() for l in txt.splitlines() if l and l.split()[0] in ('x2', 's.frame', 'scope', 'tick')}
+        lm = next((l for l in txt.splitlines() if l.startswith('loop us:')), '')
+        x2 = lines.get('x2', ['x2', '0', '0', '0', '0'])
+        fr = lines.get('s.frame', ['s.frame', '0', '0', '0', '0'])
+        print('    cost %-28s decode n %s avg %s max %s us; frame avg %s max %s us; %s' % (what, x2[1], x2[3], x2[4], fr[3], fr[4], lm), flush=True)
+        return int(x2[4]), int(fr[4])
 
     def c_check(what, every=False):
         if not RC:
             return
         got = RC.calls(every)
-        bad = sorted(k for k in got if not any(a in k for a in ALLOWED))
-        print('  region C functions called while decoding: %s' % (', '.join(sorted(got)) or 'none'))
-        check(not bad, '%s: no region C code while the decoder stream runs%s' % (what, '' if not bad else ' (%s)' % ', '.join(bad)))
+        print('  region C functions called while the AD2 stream ran: %s' % (', '.join(sorted(got)) or 'none'))
+        check(not got, '%s: no region C code while the stream ISR owns the bus' % what)
 
     print('decodetest: %s' % q('*IDN?'), flush=True)
     wait_ms(1500)
-    q('DBG:KEY 0')  # main menu -> the decoder opens over whatever view
-    wait_ms(500)
-
-    # ---- UART 115200 8N1, auto ----
+    q('DBG:HWTRIG:ENABLE 0')
+    q('DBG:KEY 0')  # main menu
+    wait_ms(600)
+    q('DBG:TAP 339,105')  # Oscilloscope
+    wait_ms(1500)
     text = b'The quick brown fox 0123456789\r\n'
-    put_bits('1' * 20 + uart_bits(text), 115200, 0.0, 3.3, 0.05)
+    sent = text * 4
+
+    def has_text(data, k=8):
+        return any(text[i:i + k] in data for i in range(0, len(text) - k))
+
+    # ---- MCX UART 9600 auto ----
+    put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, 9600, 0.0, 3.3, 0.004)
     q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1;DEC:POL NORM;DEC:THR AUTO')
-    q('DEC:STAT ON')
-    check(err().startswith('0,'), 'DEC:STAT ON accepted')
-    wait_ms(400)
-    check(q('DEC:STAT?') == '1', 'DEC:STAT? 1')
-    check(q('DEC:RATE?') == '115200', 'auto-baud: DEC:RATE? 115200 (%s)' % q('DEC:RATE?'))
-    lev = float(q('DEC:LEV?'))
-    check(1.2 < lev < 2.1, 'auto threshold: DEC:LEV? %.3f V (3.3 V logic)' % lev)
-    q('DEC:CLE')
-    frames()
-    if RC:
-        RC.reset()
+    q('CHAN1:SCAL 1;CHAN1:COUP DC;TRIG:SWE AUTO;TIM:SCAL 1E-3')
+    run()
     q('DBG:PROF:RESET')
-    wait_ms(1000)
-    print(q('DBG:PROF?', raw=True).decode(errors='replace'), flush=True)
+    wait_ms(1500)
+    prof('1 ms/div 9600 running')
+    check(q('DEC:PROT?') == 'UART', 'DEC:PROT? UART')
+    check(q('DEC:RATE?') == '9600', 'auto-baud: DEC:RATE? 9600 (%s)' % q('DEC:RATE?'))
     fr = frames()
-    data = b''.join(bytes.fromhex(f[4]) for f in fr)
-    n = data.count(text)
-    c = count()
-    print('    %d frames, %d bytes, %d lines; counters %s' % (len(fr), len(data), n, c), flush=True)
-    check(n >= 15, 'UART 115200: >= 15 intact lines (%d; 20 per s sent)' % n)
-    check(c[2] == 0 and c[3] == 0, 'UART 115200: no framing / parity error (%d / %d)' % (c[2], c[3]))
-    check(c[5] == 0, 'UART 115200: no stream lap (Lost %d)' % c[5])
-    check(all(f[2] == 'UART' and f[3] == 'OK' for f in fr), 'UART frames: all UART,OK')
-    ts = [float(f[1]) for f in fr]
-    check(all(b > a for a, b in zip(ts, ts[1:])), 'frame times increase')
-    seqs = [int(f[0]) for f in fr]
-    check(seqs == list(range(seqs[0], seqs[0] + len(seqs))) if seqs else False, 'FIFO: consecutive sequence numbers, none lost')
-    lm = loop_max()
-    print('    main-loop pass max %d us' % lm, flush=True)
-    c_check('UART 115200')
-    shot('decode-uart')
-
-    # ---- DMM alongside ----
-    v = q('READ?', timeout=20)
-    try:
-        ok = abs(float(v)) < 1e30
-    except ValueError:
-        ok = False
-    check(ok, 'DMM READ? answers while decoding (%s)' % v)
-    c = count()
-    check(c[5] == 0, 'no lap during the DMM read (Lost %d)' % c[5])
-
-    # ---- the view busy: page / scroll / setup while frames arrive ----
-    steps = [('DBG:TAP 447,40', 'page up'), ('DBG:TAP 447,121', 'page down'), ('DBG:TAP 447,81', 'LIVE'),
-             ('DBG:TAP 447,170', 'SETUP'), (None, 'screenshot'), ('DBG:KEY 0', 'MENU closes the popup'),
-             ('DBG:TAP 447,252', 'STOP'), ('DBG:TAP 447,252', 'RUN')]
-    def prof_max():
-        """(main-loop pass max, tick max) since DBG:PROF:RESET, us."""
-        t = q('DBG:PROF?', raw=True).decode(errors='replace')
-        lm = next((l for l in t.splitlines() if l.startswith('loop us:')), '')
-        tk = next((l for l in t.splitlines() if l.startswith('tick ')), '')
-        return (int(lm.split('max')[1].split()[0]) if 'max' in lm else -1, int(tk.split()[4]) if tk else -1)
-
-    for cmd, what in steps:
-        q('DBG:PROF:RESET')
-        if cmd:
-            q(cmd)
-        else:
-            shot('decode-setup')
-        wait_ms(400)
-        print('    %-22s Lost %d, pass max %d us, tick max %d us' % ((what, count()[5]) + prof_max()), flush=True)
-    c = count()
-    check(c[5] == 0, 'taps / popup while decoding: no lap (Lost %d)' % c[5])
-    c_check('the view in use')
-
-    # ---- RS-232: +-6 V inverted, 9600 7E1, rate set ----
-    line = b'RS-232 line 7E1\r\n'
-    put_bits('1' * 30 + uart_bits(line, '7E1'), 9600, 6.0, -6.0, 0.05)
-    q('DEC:BAUD 9600;DEC:FORM 7E1;DEC:POL INV')
-    wait_ms(300)
-    q('DEC:CLE')
-    frames()
-    wait_ms(1200)
+    data = b''.join(bytes.fromhex(f[3]) for f in fr)
+    check(has_text(data, 5), 'running, 1 ms/div: the screen\'s frames are pieces of the text (%r)' % data[:40])
+    nbytes = len(data)
+    img = shot('m01-uart-1ms-run')
+    e = edges(img, BYTE_Y + 8, C_EDGE)
+    # Adjacent boxes share an edge run: bytes + 1 .. 2 x bytes runs.
+    check(nbytes - 1 <= len(e) <= 2 * nbytes + 2, 'band: %d box edge runs for %d bytes on the screen' % (len(e), nbytes))
+    check(stop(), 'STOP')
     fr = frames()
-    data = b''.join(bytes.fromhex(f[4]) for f in fr)
-    c = count()
-    n = data.count(line)
-    check(n >= 18, 'RS-232 inverted 9600 7E1: >= 18 intact lines in 1.2 s (%d; 24 sent)' % n)
-    check(c[2] == 0 and c[3] == 0, 'RS-232: no framing / parity error (%d / %d)' % (c[2], c[3]))
-    check(q('DEC:POL?') == 'INV' and q('DEC:FORM?') == '7E1' and q('DEC:BAUD?') == '9600', 'DEC:POL? / FORM? / BAUD? read back')
-    shot('decode-rs232')
-
-    # ---- baud mismatch ----
-    put_bits('1' * 30 + uart_bits(text), 9600, 0.0, 5.0, 0.05)
-    q('DEC:BAUD 19200;DEC:FORM 8N1;DEC:POL NORM')
-    wait_ms(300)
-    q('DEC:CLE')
-    frames()
-    wait_ms(1000)
+    data = b''.join(bytes.fromhex(f[3]) for f in fr)
+    c = q('DEC:COUN?')
+    check(has_text(data) and all(f[4] in ('OK', 'PART') for f in fr[1:]), 'stopped, 1 ms/div: the record (17 ms) decodes to the text (%d frames, COUN? %s)' % (len(fr), c))
+    img = shot('m02-uart-1ms-stop')
+    e = edges(img, BYTE_Y + 8, C_EDGE)
+    print('    stopped band: %d box edge runs' % len(e), flush=True)
+    # Pan: the stored record moved by a quarter screen (drag on the graph).
+    q('DBG:DRAG 300,150,200,150,300')
+    wait_ms(1500)
+    img2 = shot('m03-uart-pan')
+    e2 = edges(img2, BYTE_Y + 8, C_EDGE)
+    check(e2 != e, 'pan: the band follows (%d -> %d edge runs)' % (len(e), len(e2)))
+    # Zoom in: 200 us/div (2 characters on the screen).
+    q('TIM:SCAL 200E-6')
+    wait_ms(1500)
+    img = shot('m04-uart-200us-stop')
+    e = edges(img, BYTE_Y + 8, C_EDGE)
+    check(len(e) <= 8, 'zoomed in, 200 us/div: %d box edge runs (wide boxes)' % len(e))
+    fr2 = frames()
+    check(len(fr2) == len(fr), 'FRAMes? of the stopped record does not depend on the zoom (%d / %d)' % (len(fr2), len(fr)))
+    # 5 ms/div: the bar; stopped, the record (86 ms) holds whole lines.
+    q('TIM:SCAL 5E-3')
+    run()
+    check(stop(), 'STOP at 5 ms/div')
     fr = frames()
-    data = b''.join(bytes.fromhex(f[4]) for f in fr)
-    c = count()
-    check(c[2] > 50 and text not in data, 'signal 9600, decoder 19200: framing errors (%d), no text' % c[2])
+    data = b''.join(bytes.fromhex(f[3]) for f in fr)
+    check(text in data, 'stopped, 5 ms/div: the whole text in the record (%d frames)' % len(fr))
+    img = shot('m05-uart-5ms-bar')
+    bar = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), C_EDGE))
+    check(bar > 60 and len(edges(img, BYTE_Y + 8, C_EDGE)) < 12, '5 ms/div: the bar (%d px, %d runs)' % (bar, len(edges(img, BYTE_Y + 8, C_EDGE))))
+    # 100 ms/div (25 kS/s, 2.6 samples per bit): the note, no frames.
+    q('TIM:SCAL 100E-3')
+    run()
+    wait_ms(2000)
+    img = shot('m06-uart-100ms-note')
+    grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
+    check(grey > 10, '100 ms/div: the note "Sample rate too low" (%d px)' % grey)
+    check(stop(), 'STOP at 100 ms/div')
+    check(frames() == [], '100 ms/div: no frames (too few samples per bit)')
+    # Frame cost at 100 us / 1 ms / 100 ms with 9600 and 115200.
+    for baud in (9600, 115200):
+        put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, baud, 0.0, 3.3, 20.0 / baud)
+        for sc in ('100E-6', '1E-3', '100E-3'):
+            q('TIM:SCAL ' + sc)
+            run()
+            q('DBG:PROF:RESET')
+            wait_ms(1500)
+            prof('%s s/div %d running' % (sc, baud))
+            stop()
+            q('DBG:PROF:RESET')
+            q('DBG:DRAG 300,150,200,150,300')
+            wait_ms(1500)
+            prof('%s s/div %d stopped, pan' % (sc, baud))
 
-    # ---- Modbus RTU 19200 8E1, auto ----
+    # ---- framing errors (every stop bit low), drawn red ----
+    put(BITS, '1' * 40 + uart_bits(text, err='all') + '1' * 40, 9600, 0.0, 3.3, 0.004)
+    q('TIM:SCAL 1E-3')
+    run()
+    stop()
+    fr = frames()
+    check(any(f[4] == 'FE' for f in fr), 'framing error: a frame with status FE')
+    img = shot('m07-uart-fe')
+    check(red(img, BYTE_Y + 8) > 3 or red(img, BYTE_Y) > 3, 'framing error: a red box in the band')
+
+    # ---- MCX Modbus RTU 19200 8E1 ----
     baud = 19200
-    gap = '1' * 60   # > 3.5 characters (38.5 bits)
+    gap = '1' * 60
     req = mb([0x01, 0x03, 0x00, 0x00, 0x00, 0x02])
     rsp = mb([0x01, 0x03, 0x04, 0x12, 0x34, 0x56, 0x78])
     w6 = mb([0x11, 0x06, 0x00, 0x05, 0xAB, 0xCD])
@@ -328,57 +364,88 @@ try:
     bad = bytearray(req)
     bad[6] ^= 0xFF
     seq = [req, rsp, w6, w6, exr, exc, bytes(bad)]
-    bits = '1' * 40
-    for fr_ in seq:
-        bits += uart_bits(fr_, '8E1') + gap
-    put_bits(bits, baud, 0.0, 3.3, 0.2)
+    bits = '1' * 80 + ''.join(uart_bits(f, '8E1') + gap for f in seq)
+    put(BITS, bits, baud, 0.0, 3.3, 0.003)
     q('DEC:PROT MODB;DEC:BAUD AUTO;DEC:FORM 8E1')
-    wait_ms(500)
-    check(q('DEC:RATE?') == '19200', 'Modbus: auto-baud 19200 (%s)' % q('DEC:RATE?'))
-    q('DEC:CLE')
-    frames()
-    wait_ms(1000)
-    fr = frames()
-    c = count()
-    print('    %d frames; counters %s' % (len(fr), c), flush=True)
-    for f in fr[:7]:
-        print('    ' + ','.join(f), flush=True)
-    # Align on the first request of a cycle.
-    k = next((i for i, f in enumerate(fr) if f[4] == req.hex().upper()), None)
-    cyc = fr[k:k + 7] if k is not None else []
-    ok = len(cyc) == 7
-    check(ok, 'Modbus: a full cycle of 7 frames found')
-    if ok:
-        check(cyc[0][5] == 'REQ 01 03 @0000 n=2', 'Modbus: request fields (%s)' % cyc[0][5])
-        check(cyc[1][5].startswith('RSP 01 03 4B req=%s ' % cyc[0][0]), 'Modbus: reply paired (%s)' % cyc[1][5])
-        dt = int(cyc[1][5].split('dt=')[1].rstrip('us'))
-        want = 60 / baud * 1e6
-        check(abs(dt - want) < 3 * 11 / baud * 1e6, 'Modbus: reply time %d us (gap %.0f us)' % (dt, want))
-        check(cyc[2][5] == 'REQ 11 06 @0005 =ABCD' and cyc[3][5].startswith('RSP 11 06 @0005 =ABCD req='), 'Modbus: 06 write / echo')
-        check(cyc[5][5].startswith('EXC 01 84 E02 req='), 'Modbus: exception paired (%s)' % cyc[5][5])
-        check(cyc[6][3] == 'CRC' and all(f[3] == 'OK' for f in cyc[:6]), 'Modbus: CRC bad on the bad frame only')
-    ncyc = c[0] / 7
-    check(abs(c[4] - ncyc) <= 1.5, 'Modbus: CRC counter %d = frames / 7 (%.1f)' % (c[4], ncyc))
-    check(c[2] == 0 and c[3] == 0 and c[5] == 0, 'Modbus: no framing / parity error, no lap %s' % c)
-    shot('decode-modbus')
-    c_check('Modbus')
+    for sc in ('2E-3', '5E-3'):
+        q('TIM:SCAL ' + sc)
+        run()
+        stop()
+        fr = frames()
+        for f in fr[:9]:
+            print('    ' + ','.join(f), flush=True)
+        by = {f[0]: f for f in fr}
+        pairs = [f for f in fr if f[5].startswith('RSP 01 03 4B req=') and by.get(f[5].split('req=')[1], [''] * 6)[5] == 'REQ 01 03 @0000 n=2']
+        check(len(pairs) >= 1, '%s s/div: a 03 reply paired with its request' % sc)
+        if sc == '5E-3':
+            # The 86 ms record holds a whole cycle.
+            check(any(f[5].startswith('EXC 01 84 E02 req=') for f in fr), '5 ms/div: the exception, paired')
+            check(any(f[4] == 'CRC' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad CRC')
+        img = shot('m08-modbus-%s' % sc)
+        if sc == '2E-3':
+            fe = edges(img, FRAME_Y + 8, C_FEDGE)
+            check(len(fe) >= 2, '2 ms/div: frame boxes in the band (%d edges)' % len(fe))
+        else:
+            # 19200 at 5 ms/div: a character is 4.6 px, the bar.
+            bar = sum(1 for x in range(14, 413) if near(img(x, FRAME_Y + 8), C_EDGE))
+            check(bar > 60, '5 ms/div: the bar (%d px)' % bar)
 
-    # ---- close ----
-    q('DEC:STAT OFF')
-    wait_ms(300)
-    check(q('DEC:STAT?') == '0', 'DEC:STAT OFF closes the decoder')
-    q('RUN')
-    wait_ms(1500)
-    st = q('TRIG:STAT?')
-    check(st in ('AUTO', 'TD', 'WAIT', 'RUN'), 'the scope runs again (%s)' % st)
-    check(err().startswith('0,'), 'no SCPI error left')
-    # The stack high-water of the whole run (the decoder view's deep draw
-    # paths with the decoder polled inside) against build.sh's static path.
-    b = q('DBG:BOOT?')
-    f = b.split(',')
-    if 'STACK' in f:
-        i = f.index('STACK')
-        print('    stack high-water %s of %s bytes' % (f[i + 1], f[i + 2]), flush=True)
+    # ---- the Wave view (DC V, 5 V TTL on V-COM) ----
+    if not A.no_wave:
+        q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1')
+        put(DBITS, '1' * 40 + uart_bits(text) + '1' * 40, 2400, 0.0, 5.0, 0.01)
+        q('CONF:VOLT:DC 6')
+        q('DBG:KEY 0')  # main menu
+        wait_ms(600)
+        q('DBG:TAP 145,105')  # Multimeter
+        wait_ms(4500)
+        q('DBG:KEY 3')
+        wait_ms(600)
+        q('DBG:TAP 237,259')  # Wave
+        wait_ms(6000)
+        q('TIM:SCAL 2E-3')  # 38.4 kS/s
+        wait_ms(2000)
+        if RC:
+            RC.reset()
+        for baud, fmt, proto in ((2400, '8N1', 'UART'), (4800, '8N1', 'UART'), (2400, '8E1', 'MODB')):
+            if proto == 'MODB':
+                bits = '1' * 60 + ''.join(uart_bits(f, fmt) + '1' * 60 for f in seq)
+                put(DBITS, bits, baud, 0.0, 5.0, 0.01)
+            else:
+                put(DBITS, '1' * 40 + uart_bits(text, fmt) + '1' * 40, baud, 0.0, 5.0, 0.01)
+            q('DEC:PROT %s;DEC:FORM %s' % (proto, fmt))
+            run()
+            wait_ms(3000)
+            rate = q('DEC:RATE?')
+            img = shot('w01-wave-%s-%d' % (proto.lower(), baud))
+            check(rate == str(baud), 'Wave view %s %d: DEC:RATE? %s' % (proto, baud, rate))
+            stop()
+            fr = frames()
+            data = b''.join(bytes.fromhex(f[3]) for f in fr)
+            if proto == 'UART':
+                bad = [f for f in fr[1:] if f[4] not in ('OK', 'PART')]
+                check(has_text(data) and not bad, 'Wave view UART %d: the text from the record (%d frames, %s)' % (baud, len(fr), bad[:2]))
+            else:
+                kinds = [f[5].split()[0] for f in fr if f[5]]
+                check('REQ' in kinds and 'RSP' in kinds and 'CRC' in [f[4] for f in fr], 'Wave view Modbus %d: REQ, RSP, a CRC error (%s)' % (baud, kinds[:8]))
+        # 19200 at 38.4 kS/s: the note.
+        put(DBITS, '1' * 40 + uart_bits(text) + '1' * 40, 19200, 0.0, 5.0, 0.01)
+        q('DEC:PROT UART;DEC:BAUD AUTO')
+        run()
+        wait_ms(3000)
+        img = shot('w02-wave-19200-note')
+        grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
+        check(grey > 10, 'Wave view 19200 at 38.4 kS/s: the note (%d px)' % grey)
+        c_check('the Wave view with the decoder')
+        q('DBG:KEY 0')
+        wait_ms(2500)
+
+    q('DEC:PROT OFF')
+    check(err().startswith('0,'), 'no SCPI error left (%s)' % err())
+    b = q('DBG:BOOT?').split(',')
+    if 'STACK' in b:
+        i = b.index('STACK')
+        print('    stack high-water %s of %s bytes' % (b[i + 1], b[i + 2]), flush=True)
 finally:
     if RC:
         try:
@@ -389,7 +456,7 @@ finally:
     emu.wait()
     if RC:
         RC.cleanup()
-    for p in (BITS, SCRIPT):
+    for p in (BITS, DBITS, SCRIPT, os.path.join(OUT, TAG + '.log'), os.path.join(OUT, TAG + '.resc'), os.path.join(OUT, 'flash-' + TAG + '.bin')):
         if os.path.exists(p):
             os.remove(p)
 

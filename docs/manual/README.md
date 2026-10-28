@@ -233,9 +233,8 @@ the combined view switches to the next sub-mode of the current function
   do not count for **Dim screen**: during a long remote session the screen
   still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
-  MIN/MAX/AVG session runs, while the power meter counts energy with a
-  current flowing, or while the [protocol decoder](#protocol-decoder)
-  runs. The screen still dims.
+  MIN/MAX/AVG session runs, or while the power meter counts energy with a
+  current flowing. The screen still dims.
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
@@ -354,7 +353,7 @@ lightning from 100 V). opendm40 adds:
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
 | Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 43 008 faster |
-| Serial decoding | — | [UART and Modbus RTU](#protocol-decoder), decoded while streaming |
+| Serial decoding | — | [UART and Modbus RTU](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -1498,22 +1497,23 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
 
-**MF > Settings > Decode** decodes UART (also RS-232, and RS-485 with the
-probe across A-B) or Modbus RTU on the **OSC** input. It decodes while the
-input streams and keeps only the frames, so a long session fits.
+**MF > Settings > Decode**: UART (also RS-232, and RS-485 with the probe
+across A-B) or Modbus RTU, drawn under the trace: a box per byte, Modbus
+frames above them, errors in red. It decodes what is on the screen, running
+or stopped, and follows zoom and pan.
 
-| ![UART: time, hex, ASCII, status](img/scope-decode.png) | ![Modbus RTU: requests, replies and the reply time](img/scope-decode-modbus.png) |
+| ![UART: hex and the character in each box](img/scope-decode.png) | ![Modbus RTU stopped: request, reply, a CRC error](img/scope-decode-modbus.png) |
 |---|---|
-| UART: time, hex, ASCII, status | Modbus RTU: requests, replies and the reply time |
+| UART: hex and the character in each box | Modbus RTU, stopped: frames and a CRC error |
 
-- **SETUP** (or **MF**): protocol, baud (**Auto** or 300 to 115200), format,
-  polarity (**Inverted** for RS-232 levels), threshold (**Auto** or a level).
-- Status: **OK**, **FE** framing error, **PE** parity error, **CRC** (Modbus),
-  **OVR** samples lost. **CLEAR** clears the list and the counters.
-- Drag the list or use the arrows; **LIVE** follows the newest frame. **STOP**
-  (or **RUN**) pauses; **SCOPE** or **MENU** returns to the scope.
-- The input range is ±8 V; larger signals are clipped and still decode. The
-  list keeps the last 256 frames.
+- Settings: protocol (**Off**, **UART**, **Modbus**), baud (**Auto** or 300
+  to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
+  (**Auto** or a level).
+- Zoomed out, the bytes become a bar. Too few samples per bit: **Rate too
+  low for N baud**: use a faster timebase.
+- In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
+  between A and B on the floating multimeter input, up to 4800 baud (9600
+  at 1 ms/div), e.g. a slow Modbus bus.
 - Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs

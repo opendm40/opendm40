@@ -191,6 +191,9 @@ pub fn auto_baud<S: Src + ?Sized>(s: &S, a: usize, b: usize, lo: u16, hi: u16, f
                 }
             }
             edge = Some(i);
+            if nrun >= 32 {
+                break; // enough runs: the rest of the window is not needed
+            }
         }
     }
     if nshort >= 4 && nshort * 2 > nrun {
@@ -235,6 +238,9 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
     }
     let nbits = 1 + l.bits + (l.parity != 0) as u8 + 1;
     let at = |i: usize| s.at(i) & 0x3FF;
+    // Between characters every `step`-th sample (a quarter bit: a start bit
+    // is never stepped over), then back to the edge's first sample.
+    let step = ((l.spb >> 8) as usize / 4).max(1);
     // A start edge counts only after a mark level was seen.
     let mut mark = false;
     let mut n = a;
@@ -242,12 +248,16 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
         let v = at(n);
         if !mark {
             mark = l.level(v, false);
-            n += 1;
+            n += step;
             continue;
         }
         if l.level(v, true) {
-            n += 1;
+            n += step;
             continue;
+        }
+        let lo = (n + 1).saturating_sub(step).max(a);
+        if let Some(e) = (lo..n).find(|&i| !l.level(at(i), true)) {
+            n = e;
         }
         // The edge lies between n - 1 and n.
         let t0 = ((n as u64) << 8).saturating_sub(128);
