@@ -302,7 +302,7 @@ Functions:
 | Voltage, AC or DC chosen by the meter | `VOLTage:AUTO` | as DC voltage |
 | DC current | `CURRent[:DC]` | 0.0006, 0.006, 0.06, 0.6, 6, 10 A |
 | AC current, AC+DC current, AUTO | `CURRent:AC`, `CURRent:ACDC`, `CURRent:AUTO` | as DC current |
-| Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm |
+| Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm; 600M ohm, experimental: a value above 60M selects it, `MAX` and `AUTO` never do |
 | Continuity | `CONTinuity` | none |
 | Diode | `DIODe` | none |
 | Capacitance | `CAPacitance` | autorange only (6 nF .. 60 mF) |
@@ -784,6 +784,7 @@ unless shown otherwise.
 | `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
+| `DBG:OHMX[?]` | `DEF`, `<knob>,<value>` (`TAP`, `PLAN`, `SKIP`, `OSR`, `NAVG`, `SETTLE`, `VET`, `GAIN`, `OFFS`, `RREF`), `ROW,<reg>,<value>` or `ROW,CLR`: the experimental 600 MΩ range's method, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md#tuning-on-the-device-dbgohmx)) | `<knobs>;<on>,<cycles>,<ok>,<V_x>,<V_fb>,<V_com>,<V_drop>,<V_d>,<R_cycle>,<R_window>;<5 AD1 codes>;<registers hex>;<overrides>` | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |

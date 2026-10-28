@@ -7,6 +7,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **600 MΩ range, experimental** (not calibrated yet): **600MΩ EXP** on the
+  resistance range page or SCPI `RES:RANG 600E6`; AUTO and the AUTO key
+  never select it, and the screen shows **EXP** while it is on
+  ([manual](docs/manual/README.md#resistance)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New
