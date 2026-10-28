@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Battery charging** is shown: the battery's top bar blinks green while it charges; **USB** in the status
+  bar while a computer has the meter connected ([manual](docs/manual/README.md#the-status-bar)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

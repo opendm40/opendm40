@@ -61,6 +61,8 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Generator on / looped back to CH1: "Scope in ngscopeclient" (3), (9); RUN key: its (2), (7).
 - Host systems and the stock: Windows / macOS in "Verify on device: swipe REC" and the two "Device: (... decision
   #6)" items; stock comparisons UF-02, UF-19.
+- USB cable and charger: the [charging indicator](#battery-charging-indicator-and-usb-badge-user-report-2026-10-28-branch-fixbattery-charging-indicator)
+  checks.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
 - Code: none open. "A stream starting inside a multi-block READ(10)" (#60, test only) and
@@ -80,6 +82,22 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Boot time (bug-fix-only rule): "Left: `vdisk::mirror_boot`" (0.3 s per boot).
 - New features (bug-fix-only rule): "UF-24 tempco", [Backlog](#backlog-user-ideas) "Inductance", "Browser client",
   "Protocol decoders", "Hardware note (HW-1", "sigrok/SmuView" (SmuView on the device, upstream).
+
+## Battery charging indicator and USB badge (user report 2026-10-28, branch fix/battery-charging-indicator)
+
+User: the battery icon does not show charging; ideally show the PC connection. Fix (0.3.2, emulator only):
+PB11 gets the stock pull-up (it floated; probable cause), the top bar blinks green while PB10 = PB11 = 1 (stock
+code), "USB" while a host has the meter configured. `dm40dbg.py diag` prints PB10 / PB11 / usb_configured.
+- [ ] Device check (needs a USB cable, a USB charger, a battery below ~80 %; `--features mute` build is fine):
+  1. On battery, no cable: `diag` after plugging into the PC: note PB10 / PB11; the icon is white, no "USB"
+     before the cable.
+  2. PC cable, battery below 80 %: the top bar blinks green every second, "USB" shown; note PB10 / PB11.
+  3. Charger only (no data): blinking green, no "USB"; note the pins on a second cable to the PC afterwards.
+  4. Charged (the charger LED or ~4.2 V): note PB10 / PB11; record whether the blink stops (opendm40 has no
+     "full" state; which TP4056 pin PB10 / PB11 reach is unknown).
+  5. Eject / sleep the PC: "USB" goes within ~1 s (bus suspend).
+- [ ] Unknown: the stock drives PB10 low (push-pull) while on USB below 85 % / 80 % (FUN_08023b04 / 0800b6aa);
+      opendm40 does not. Does opendm40 charge as fast and as far (charge time vs the stock's ~2 h 35 min)?
 
 ## Owner decisions pending (2026-10-25)
 

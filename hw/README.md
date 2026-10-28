@@ -609,8 +609,8 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
   2-pin connector "VBAT" (photo). Runtime 10..15 h (chat reports; review:
   12 h DMM / 10 h scope).
 - Charger: [TP4056](datasheets/toppower-tp4056-cn.pdf), linear, from USB VBUS. Charging takes ~2 h 35 min (chat
-  report [#16625](https://t.me/S2084K/16625)). Status: PB10 / PB11 inputs (meaning guessed; the two RE
-  headers disagree, see [Unknowns](#unknowns)).
+  report [#16625](https://t.me/S2084K/16625)). Status: PB10 / PB11; the stock shows "charging" when both
+  read 1 (which charger pins they reach: [Unknowns](#unknowns) 5).
 - Battery voltage: PC5 = ADC0 channel 15, 1:2 divider, 3.0 V reference
   assumed: Vbat = raw * 3.0 / 4096 * 2. Firmware powers off below ~3.31 V.
   ([`firmware/src/power.rs`](../firmware/src/power.rs), `stock/re/analysis/dmm_v2_6.h`); the divider ratio is
@@ -650,8 +650,8 @@ opendm40 or stock code that drives the pin.
 | PA13 / PA14 | SWD (pads "D" / "C") | io | debug header |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PB0..PB9 | [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) data D0..D9 | in | [`scope.rs`](../firmware/src/scope.rs) |
-| PB10 | charge status / control (meaning *inferred*) | in / od | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
-| PB11 | charge status (meaning *inferred*) | in, pull-up | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
+| PB10 | charge status (stock: open drain released, read; driven low on USB below 85 %); meaning unknown | in / od | stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
+| PB11 | charge status; meaning unknown | in, pull-up | stock code (`FUN_0800b5f6`), [`power.rs`](../firmware/src/power.rs) |
 | PB12 | generator path select, 1 = PWM, 0 = DAC | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB14 | TIM12_CH1 (AF9) generator square | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB15 | scope 4051 select bit | out | [`scope.rs`](../firmware/src/scope.rs) |
@@ -717,9 +717,10 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
    is the one the running firmware depends on.
-5. Charge status pins: `stock/re/analysis/dmm_v2_6.h` says the stock shows the charging icon
-   when PB10 = 1 and PB11 = 0; `stock/re/analysis/bt_meas_v2_6.h` and [`firmware/src/power.rs`](../firmware/src/power.rs) use
-   PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
+5. Charge status pins: the stock blinks the battery's top bar (charging) when PB10 = 1 and
+   PB11 = 1 (code: `FUN_0800b776`, `FUN_08023840`; `stock/re/analysis/dmm_v2_6.h`'s "PB11 = 0" is
+   wrong), PB11 with the MCU pull-up. Which TP4056 pins (CHRG, STDBY) or VBUS they reach, and what
+   the stock's PB10 low (on USB below 85 %) does, is unknown. No "charged" state in the stock.
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

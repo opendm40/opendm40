@@ -1,7 +1,12 @@
 //! Battery and power status (dmm_v2_6.h section 9).
 //! Battery: ADC0 channel 15 on PC5, Vbat = raw * 3.0 / 4096 * 2, read every 2 s;
 //! pct = (Vbat - 3.3) / 0.9; bars 0..5 at 85/70/50/25/0 % with 5 % hysteresis.
-//! Charging (bt_meas_v2_6.h flags bit 3): PB10 high and PB11 high.
+//! Charging (stock code, FUN_0800b776 / FUN_08023840): PB10 high and PB11
+//! high. The stock sets PB11 input with pull-up and PB10 open-drain released
+//! (no pull); which TP4056 pins they reach (CHRG / STDBY / VBUS) is unknown.
+//! Without the pull-up PB11 floats (opendm40 before 0.3.2: no charging icon,
+//! probable cause). Not copied: the stock drives PB10 low below 85 % on USB
+//! (FUN_0800b6aa); its effect on the charger is unknown.
 //! Bluetooth link: PC14 high = connected.
 //! MCU temperature: the GD32 internal sensor on ADC0 channel 16 (TSVREN, bit 23
 //! of ADC_SYNCCTL at ADC0 + 0x304), read right after the battery every 2 s,
@@ -50,6 +55,8 @@ impl Power {
             modify32(GPIOC, 3 << 10, 3 << 10); // PC5 analog
             modify32(GPIOC, 3 << 28, 0); // PC14 input
             modify32(GPIOC + 0x0C, 3 << 28, 2 << 28); // pull-down
+            modify32(GPIOB, 0xF << 20, 0); // PB10, PB11 input
+            modify32(GPIOB + 0x0C, 0xF << 20, 1 << 22); // PB11 pull-up, PB10 none (stock)
             modify32(ADC0 + 0x304, 3 << 16, 1 << 16); // ADC clock PCLK2 / 4
             modify32(ADC0 + 0x304, 0, 1 << 23); // TSVREN: temperature sensor on
             w32(ADC0 + 0x08, 0); // CR2 off
@@ -129,8 +136,25 @@ impl Power {
     }
 
     pub fn charging(&self) -> bool {
+        self.pins() == 3
+    }
+
+    /// Charge status pins: bit 0 PB10, bit 1 PB11 (DBG:DIAG? byte 61).
+    pub fn pins(&self) -> u8 {
         let b = unsafe { r32(GPIOB + 0x10) };
-        b & (1 << 10) != 0 && b & (1 << 11) != 0
+        (b >> 10 & 3) as u8
+    }
+
+    /// Battery level as shown: while charging, the top bar blinks (stock:
+    /// level and level - 1, 1 -> 0 bars at 0, alternating every 1 s;
+    /// FUN_08023840 and its timer 0x08023e88). `phase`: the 1 s alternation.
+    pub fn shown_bars(&self, phase: bool) -> u8 {
+        let b = self.bars.min(5);
+        match (self.charging() && phase, b) {
+            (false, _) => b,
+            (true, 0) => 1,
+            (true, _) => b - 1,
+        }
     }
 
     pub fn bt_connected(&self) -> bool {
