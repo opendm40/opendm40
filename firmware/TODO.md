@@ -4195,7 +4195,7 @@ Emulator (emu/):
 
 ## 500 ohm from the MMB3.0 reads OL on 600 ohm (owner 2026-10-25, v0.2.0, branch fix/ohm500-ol)
 
-- [ ] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
+- [x] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
       [docs/data/res-steps-2026-10-25.csv](docs/data/res-steps-2026-10-25.csv). 0.01 .. 200 ohm read right on
       600 ohm; the step 200 -> 500 ohm at 99.8 s gave one mixed reading (231 ohm), then OL at every conversion
       for 32 s (rows 25 ms apart: R22 0x13, [src/dmm.rs](src/dmm.rs) `poll_ohm` on OL). Every later block of
@@ -4231,7 +4231,7 @@ Emulator (emu/):
       - The UI: "0L" with "Overload" next to it is the plain OL readout (`ui.rs` `ol_word`), not the sentinel's
         OVERLOAD alert (that one is the uA / mA shunt, DC / AC A only).
       Not changed: the firmware.
-- [ ] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
+- [x] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
       if the owner is asleep). Each step: `CONF:RES 600;:SENS:RATE MED`, then 20 x
       `RES:RANG?;:DBG:READout?;:DBG:SENTinel?` 0.5 s apart.
       (1) A passive 470 .. 560 ohm resistor: in range, the control.
@@ -4254,3 +4254,7 @@ Emulator (emu/):
         600 ohm, 398.30. Step (3), 400 ohm: R1K I 0.868 mA, V_jack 0.493 V; R10K I 0.189 mA, V_jack 0.305 V.
         V_jack / I is not 400 ohm on either row (568 / 1615 ohm); why is unknown (no passive reference was run).
         Left for the owner: steps (1), (2), (4) .. (7) with the MMB3.0 at 500 ohm and a passive resistor.
+      - Owner, MMB3.0, test build 0.3.1 (2026-10-29): 500 ohm on 600 ohm reads OL with 0.90 mA and in range with
+        0.28 mA ON (499.53 .. 499.59 ohm over SCPI). Hypothesis 1: the MMB3.0's resistance output cannot carry
+        the 0.90 mA test current at 500 ohm; not a firmware fault. With this calibrator the 600 ohm range is
+        checked with 0.28 mA ON.
