@@ -507,8 +507,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// 0x70. That a current in A reads 0x70 is INFERRED from those. Default on; "pb1cmp70:0" =
         /// CMPHO alone (the model before).
         public bool Pb1Cmp70 = true;
-        /// The frequency row's standing level on PB1 - PB3 (opt-in, "hzpb1:mV"; device d8e249d:
-        /// ~+41 100 AD1 peak codes, ~54 mV, with the A jack open and 0..2 V or nothing on V-COM).
+        /// The frequency row's standing level on PB1 - PB3 (opt-in, "hzpb1:mV"; PR #55, SAD1I 00:
+        /// +2.5 mV with V-COM open, -140 mV at 10 V DC; device d8e249d's ~54 mV came with SAD1I 11).
         public double HzPb1Mv;
         /// A current in A with the V jack open (opt-in; device 2026-10-26, the owner's PSU 20 mA CC
         /// into A / COM: AC V 6 V read 1.5 V, AC mV OL, Hz ~50 kHz, DC mV +139 mV). In the AC mV

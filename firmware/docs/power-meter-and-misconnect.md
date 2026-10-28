@@ -793,16 +793,16 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | AC A / mA / uA (4..6) | V-JACK?: AD1 peak hold on SENSE - AGND via the /1000 tap (`PeakV`) | R22 00, R23 \|= ENAD1, R24 0x03, R25 \|= 0x30, R29 PKH AD1, R2C \|= 0x10, R33 OP1CHOP 00 | the swing rule of 4.11 / 4.12: 2 V rms AC on V |
 | AC+DC V / A | the DC and AC phases' own sentinels; the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites R20 every 350 ms (AC+DC shows no frequency) | as the plain functions | as the plain functions; V-JACK?'s "no current" = < 5 % of the range |
 | ohm, continuity, diode | LIVE?: no hardware (4.6) | none | - |
-| frequency (14) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`, `Sentinel::pk_dc`): a hit is a hold on one side of zero beyond the threshold (4.13) | R22 0x00, R24 0x95, R25 AD1IG 3.6, R29 PKH AD1 (AD1 already on, OP1's chopper already off) | `PK_DC_THR` 136 000 codes (~180 mV, 3.3x the row's standing level) |
+| frequency (14) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`, `Sentinel::pk_dc`): a hit is a hold on one side of zero beyond the threshold (4.13) | R22 0x00, R24 0x95, R25 AD1IG 3.6, R29 PKH AD1, R33 SAD1I 00 (AD1 already on, OP1's chopper already off) | positive: `PK_DC_THR` 136 000 codes (~180 mV); negative: `PK_DC_NEG_THR` 211 400 (~280 mV, twice the V-side level at 10 V) |
 | capacitance r5..7 (ramp) | none (below) | stock row | - |
 | power meter | none (R20 / R21 are the counter's, 3.12) | - | - |
 
 Gaps (no fake coverage):
 
-* **Frequency, small currents**: PB1 - PB3 stands at ~54 mV there with the
-  A jack open (device d8e249d, [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)),
-  so only a DC current above ~2.7 mA (positive; ~4.9 mA negative) reaches the
-  threshold; an AC current never does (4.13).
+* **Frequency, small currents**: a DC voltage on V-COM puts down to
+  -140 mV on PB1 - PB3 there (10 V, PR #55), so only a DC current above
+  ~3.8 mA (positive; ~5.9 mA negative) reaches the threshold; an AC current
+  never does (4.13).
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
 * **DC V 60 V+** (above) and so AC+DC V above 6 V in both phases (an
@@ -1395,16 +1395,23 @@ alarm). Emulator: the model's `ailift` / `ainz` (the open input at
 senttest `acmv-acur` FAILs before (no alert), passes now.
 
 **Frequency (2026-10-26).** The same device run showed no alert in Hz: the
-row had no sentinel since d8e249d (PB1 - PB3 stands at ~+41 100 codes,
-~54 mV, there; 3 100 at 5 V, -850 at 10 V on V-COM). It carries the AD1
-peak on PB1 - PB3 again (4.2), and a hit is a hold on one side of zero
-beyond `PK_DC_THR`, 3.3 x the standing level and twice the largest V-side
-level seen (the same run read 41 000 / 3 900 codes in Hz with ~5-15 V on
-V-COM): a DC current from ~2.7 mA (positive; ~4.9 mA negative) asserts, an
-AC one does not. Badge only, no danger alarm (`soft`: sources above ~15 V
-on V-COM were not measured there).
-Emulator: `hzpb1` (the standing level); senttest `freq-acur` FAILs before,
-passes now; `freq-gap` (1 mA) stays quiet.
+row had no sentinel since d8e249d (PB1 - PB3 stood at ~+41 100 codes,
+~54 mV, there). It carries the AD1 peak on PB1 - PB3 again (4.2), and a
+hit is a hold on one side of zero beyond a threshold. Badge only, no
+danger alarm (`soft`).
+
+The row's R33 has SAD1I = 11 (AD1 on the temperature sensor); the sentinel
+row sets 00, so AD1 reads PB1 - PB3. The ~54 mV of d8e249d came with 11
+(*inferred*). With 00 (PR #55, device 2026-10-27) PB1 - PB3 in Hz is
++2.5 mV with V-COM open and -59 / -89 / -116 / -140 mV at 3 / 3.7 / 5 /
+10 V DC. The positive threshold stays `PK_DC_THR` (~180 mV, a DC current
+from ~3.8 mA); the negative one is `PK_DC_NEG_THR` (~280 mV, twice the
+10 V level, a current from ~5.9 mA). DC above 10 V and AC on V-COM were
+not measured in Hz.
+Emulator: `hzpb1` (a fixed level on PB1 - PB3 in the frequency row; the
+model's AD1 peak reads PB1 there whatever SAD1I is); senttest `freq-acur`
+FAILs before, passes now; `freq-gap` (1 mA) and `freq-v10` (-140 mV) stay
+quiet.
 
 **Gaps.** A current in A together with a voltage on V-COM shows LIVE? (ohm,
 continuity) or nothing (AC mV unless PB1 carries the larger level, AC+DC

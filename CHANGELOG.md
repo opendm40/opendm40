@@ -11,7 +11,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - Multimeter: a current in the A jack (the leads in A / COM while measuring
   something else) now shows A-JACK in AC mV and Hz too (a DC current from
-  ~3-4 mA; there the badge only), and in Ω AUTO A-JACK instead of LIVE?.
+  ~4 mA, in Hz ~6 mA negative; there the badge only), and in Ω AUTO
+  A-JACK instead of LIVE?.
   Manual Ω ranges below 6 MΩ may still show LIVE? for it.
 - Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
   generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV

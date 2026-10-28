@@ -231,6 +231,9 @@ pub const CTSTA_CMPLO: u8 = 0x10;
 
 /// R33 bits 7:6: OP1CHOP (00 = CHOP_CLK held at 0).
 pub const R33_OP1CHOP: u8 = 0xC0;
+/// R33 bits 1:0: SAD1I, AD1's input path (00 = the R24 pair through the
+/// FP / FN filter; 10 / 11 = the temperature sensor).
+pub const R33_SAD1I: u8 = 0x03;
 
 /// Device-check variants (DBG:SENTinel:VARiant, RAM only, 0 = the build's
 /// choice): bit 0 keeps the row's OP1 chopper in the AC V sentinel row (the
@@ -323,16 +326,19 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         }
         // Frequency (14): AD1 runs a zero reading (PB5 - PB5) nobody reads;
         // it takes PB1 - PB3 with the AC rows' peak-hold settings instead
-        // (AD1 already on, OP1's chopper already off in the row). PB1 - PB3
-        // stands at ~+41 100 codes (~54 mV) there with the A jack open and
-        // 0..2 V or nothing on V-COM, ~3 100 at 5 V, -850 at 10 V (device
-        // d8e249d: the row leaves its input divider open, R2C / R2D 0), so
-        // a hit is a one-sided level above PK_DC_THR (`Sentinel::pk_dc`).
+        // (AD1 already on, OP1's chopper already off in the row). The row's
+        // R33 has SAD1I = 11 (the temperature sensor), so SAD1I goes to 00:
+        // the standing ~54 mV of d8e249d came with 11 (INFERRED). With 00
+        // (device 2026-10-27, PR #55, IG 0.9) PB1 - PB3 is +2.5 mV with
+        // V-COM open, -59 / -89 / -116 / -140 mV at 3 / 3.7 / 5 / 10 V DC on
+        // V-COM (the row leaves its input divider open, R2C / R2D 0), so a
+        // hit is a one-sided level (`Sentinel::pk_dc`, `pk_dc_hit`).
         14 if mask & M_AJACK != 0 => {
             c[2] = 0x00;
             c[4] = R24_PB1_PB3;
             c[5] |= R25_AD1IG_36;
             c[9] = (c[9] & 0xF8) | R29_PKH_AD1;
+            c[19] &= !R33_SAD1I;
             Kind::PeakA
         }
         // AC A: AD1 (off in the row) on SENSE - PB5 with the /1000 tap
@@ -545,16 +551,27 @@ pub const PK_THR: i32 = 17_900;
 /// AD1 peak codes per mV on PB1 - PB3 (IG 3.6; PK_THR / 23.75 mV).
 pub const PK_CODES_PER_MV: f32 = 3.6 / 1250.0 * 262_144.0;
 /// A one-sided level on PB1 - PB3 (`pk_level`) that only a current in A is
-/// known to give: frequency's A-JACK, AC mV's V_GATE override (`dmm.rs`
-/// `mv_vside`). ~180 mV: twice the largest one-sided V-side level seen,
-/// -89 mV in AC mV with ~5-15 V on V-COM (device 2026-10-26, this branch's
-/// sanity run; +97 mV in the AC V rows); 3.3 x the frequency row's
-/// standing ~+41 100 codes (~54 mV, device d8e249d; the same run: 41 000 /
-/// 3 900). A DC current from ~3.8 mA (AC mV), ~2.7 mA positive / ~4.9 mA
-/// negative (frequency). INFERRED that no V-COM source puts more there
-/// without the mV node carrying more (AC mV) or at all (frequency: sources
-/// above ~15 V not measured).
+/// known to give: AC mV's V_GATE override (`dmm.rs` `mv_vside`), frequency's
+/// A-JACK on a positive level (`pk_dc_hit`). ~180 mV, a DC current from
+/// ~3.8 mA on 47.5 ohm. AC mV: twice -89 mV, the largest one-sided V-side
+/// level seen with ~5-15 V on V-COM (device 2026-10-26; +97 mV in the AC V
+/// rows); PR #55 read -112 mV at 10 V DC (IG 0.9), and AC mV also needs the
+/// level above the node's |LPF|. Frequency (SAD1I 00, PR #55): +2.5 mV at
+/// most on the positive side (V-COM open up to 10 V DC). INFERRED that no
+/// V-COM source puts more there (AC sources on V-COM, and DC above 10 V,
+/// not measured in Hz).
 pub const PK_DC_THR: i32 = 136_000;
+/// Frequency's A-JACK on a negative one-sided level (`pk_dc_hit`): ~280 mV,
+/// twice -140 mV, PB1 - PB3 with 10 V DC on V-COM (PR #55: -59 / -89 /
+/// -116 / -140 mV at 3 / 3.7 / 5 / 10 V; PK_DC_THR would leave a 1.29 x
+/// margin). A negative DC current from ~5.9 mA.
+pub const PK_DC_NEG_THR: i32 = 211_400;
+
+/// Frequency's AD1 peak window hit: a one-sided level above PK_DC_THR
+/// (positive) or PK_DC_NEG_THR (negative), 0 for a hold across zero.
+pub fn pk_dc_hit(pkmin: i32, pkmax: i32) -> bool {
+    pkmax >= pkmin && (pkmin > PK_DC_THR || pkmax < -PK_DC_NEG_THR)
+}
 
 /// The AD1 peak pair's one-sided level (codes): the smaller magnitude of a
 /// hold that stays on one side of zero (a DC level on PB1), 0 for a hold
@@ -1022,7 +1039,7 @@ pub struct Sentinel {
     /// its peak max under JACK_OWN_V on the 6 / 60 Mohm rows; none elsewhere): `own`.
     jack_low: u8,
     /// Frequency (set by `dmm.rs` with the row): an AD1 peak window hits
-    /// only on a one-sided level above PK_DC_THR (`pk_level`).
+    /// only on a one-sided level (`pk_dc_hit`).
     pub pk_dc: bool,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
     /// emu/hy3131/switchtest.py): the last LOG_N alerts that came on, as
@@ -1414,7 +1431,7 @@ impl Sentinel {
             pkmax - pkmin > PKV_SWING_THR
                 && prev.is_some_and(|(a, b)| pkmax.min(b) - pkmin.max(a) > PKV_SWING_THR)
         } else if self.pk_dc {
-            pk_level(pkmin, pkmax) > PK_DC_THR
+            pk_dc_hit(pkmin, pkmax)
         } else {
             pkmax >= pkmin && (pkmax > thr || pkmin < -thr)
         };
@@ -2147,9 +2164,11 @@ mod tests {
         assert_eq!(k, Kind::PeakA);
         let idx: Vec<usize> = diff(r, &c).iter().map(|x| x.0).collect();
         // R22 OSR 256 unchopped, R24 PB1 - PB3 (was PB5 - PB5), R25 AD1IG,
-        // R29 PKH; AD1 already on, OP1's chopper already off.
-        assert_eq!(idx, vec![2, 4, 5, 9]);
-        assert_eq!((r[3] & 0x80, r[4], r[19] & 0xC0), (0x80, 0xDF, 0));
+        // R29 PKH, R33 SAD1I 11 -> 00 (PR #55); AD1 already on, OP1's
+        // chopper already off.
+        assert_eq!(idx, vec![2, 4, 5, 9, 19]);
+        assert_eq!((r[3] & 0x80, r[4], r[19] & 0xC0, r[19] & 3), (0x80, 0xDF, 0, 3));
+        assert_eq!(c[19], r[19] & !R33_SAD1I);
         assert_eq!((c[2], c[4], c[5] & 0x30, c[9] & 7), (0, 0x95, 0x30, 5));
         assert_eq!(c[9] & 0xF8, r[9] & 0xF8, "RMS / LPF kept");
         assert_eq!(row_for(14, 0, false, M_VJACK, 0, r), (*r, Kind::Off));
@@ -2157,17 +2176,23 @@ mod tests {
 
     #[test]
     fn freq_hits_on_a_one_sided_level_only() {
-        // Device d8e249d: PB1 - PB3 stands at ~+41 100 codes with the A jack
-        // open; a current in A pins the hold (20 mA: 0.95 V on 47.5 ohm).
+        // PR #55 (SAD1I 00): PB1 - PB3 +2.5 mV with V-COM open, -140 mV at
+        // 10 V on V-COM; a current in A pins the hold (20 mA: 0.95 V on
+        // 47.5 ohm).
+        let mv = |v: f32| (v * PK_CODES_PER_MV) as i32;
         let mut s = Sentinel::new();
         s.configured(Kind::PeakA, 0, true);
         s.pk_dc = true;
         let mut t = 300;
-        for _ in 0..10 {
-            s.sample_peak(t, 40_000, 42_500);
-            t += 110;
+        for lv in [2.5, -140.0, -250.0, 170.0] {
+            for _ in 0..10 {
+                s.sample_peak(t, mv(lv) - 1_000, mv(lv) + 1_000);
+                t += 110;
+            }
         }
         assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        assert!(pk_dc_hit(mv(190.0), mv(192.0)) && pk_dc_hit(mv(-300.0), mv(-290.0)));
+        assert!(!pk_dc_hit(mv(-190.0), mv(-185.0)) && !pk_dc_hit(mv(-300.0), mv(300.0)));
         // a swing across zero (an AC current, a V-side pickup): no hit
         for _ in 0..10 {
             s.sample_peak(t, -200_000, 200_000);

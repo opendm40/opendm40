@@ -801,6 +801,11 @@ struct Freq {
     conf: [bool; 2],
     /// The pick of the latest `take` is provisional (`Reading::prov`).
     prov: bool,
+    /// The counter shows no input above its latest result (`f_khz`; NaN:
+    /// none yet) up to `hf_t` (ms, low 32 bits): AC mV's V_GATE
+    /// (`mv_vside`). False until the first check of a row's gate.
+    hf_ok: bool,
+    hf_t: u32,
 }
 
 /// Two clean gates in a row agree within this (relative): `Freq::take`.
@@ -1886,7 +1891,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false, hf_ok: false, hf_t: 0 },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -2286,6 +2291,7 @@ impl Dmm {
             ctr_restart(row[0]);
         }
         self.freq.fresh = ctr;
+        self.freq.hf_ok = false;
         self.r22 = row[2];
         if let (true, Some(k)) = (self.r22 == fastvos::R22_FAST && self.dc_rated(), Fast::path(m, self.range)) {
             self.fast.start(k, clk.now_ms());
@@ -2340,7 +2346,8 @@ impl Dmm {
         // A-JACK evidence a driven V-COM can fake (sentinel `soft`): the
         // ohm-network rows (ohm, continuity, diode, capacitance, the
         // resistive temperature sensors' ohm rows); frequency (its PB1
-        // follows the input path, PK_DC_THR is one unit's margin).
+        // follows the input path; its thresholds sit 1.3-2 x over the V-side
+        // levels measured, PK_DC_THR / PK_DC_NEG_THR).
         self.sent.soft = matches!(self.mode, 10..=14) || (self.mode == 15 && self.t_sensor != 0);
         self.sent.pk_dc = self.mode == 14;
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
@@ -5042,6 +5049,12 @@ impl Dmm {
     /// FREQ_CHECK_MS after the restart: None while the gate runs; at its end
     /// or timeout the counts (f kHz, duty %, its SYSCLK ticks, the check:
     /// `Gate::Done` = a whole gate) and a restart with `src`.
+    ///
+    /// `hf_t`: a gate still open at a check had no input edges since its
+    /// first 53.3 ms (any edge after the CTA overflow ends it), so nothing
+    /// above the AC bandwidth up to the check; a gate given up the same up
+    /// to its end. A whole gate's result holds from the gate's start only
+    /// (it may have ended long before the check).
     #[inline(never)]
     fn freq_gate(&mut self, now: u64, src: u8) -> Option<(f32, f32, u32, Gate)> {
         if now < self.freq.next {
@@ -5056,10 +5069,13 @@ impl Dmm {
         hy::read(0x1B, &mut a);
         let el = (now as u32).wrapping_sub(self.freq.t0);
         let g = gate_check(ctc, ctb, cta, u24(&a), el, self.freq.f_khz);
+        self.freq.hf_ok = true;
         if g == Gate::Wait {
+            self.freq.hf_t = now as u32;
             self.freq.next = now + FREQ_RECHECK_MS;
             return None;
         }
+        self.freq.hf_t = if g == Gate::Done { self.freq.t0 } else { now as u32 };
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         ctr_restart(src);
         self.freq.t0 = now as u32;
@@ -5245,9 +5261,13 @@ impl Dmm {
     ///   the 0 / 9.5 V square at 66 kHz, clipped by the mV input: 0.51 V,
     ///   under 1.5 x 600 mV, with an RMS of ~30 mV; device 2026-10-26);
     /// - plain AC mV: the frequency counter above sentinel::V_HF_KHZ; a
-    ///   "free" verdict then dates from the start of the counter's last gate
-    ///   (none yet in this row: no verdict), so a signal that starts within
-    ///   a run is judged by a gate that began after it (emulator acmv-hf60);
+    ///   "free" verdict is dated where the counter's evidence ends
+    ///   (`Freq::hf_t`: a whole gate's start, or the last check that found
+    ///   the gate open; none yet in this row: no verdict), so a signal that
+    ///   starts within a run is judged by counts taken after it (emulator
+    ///   acmv-hf60). Since the reciprocal gate (#43) an open input's gate
+    ///   runs 2.2 s; its result alone put A-JACK at ~2.8 s after DC V ->
+    ///   AC mV (switchtest real-ajack-pickup);
     /// - AC+DC mV: its DC phase's last result over the range (`mv_dc_drv`;
     ///   device 185c066: after a source went off the open input read OL and
     ///   the AC phase's results "free" while PB1 hit, a false A-JACK).
@@ -5281,10 +5301,10 @@ impl Dmm {
             || (!self.acdc && self.freq.f_khz > sentinel::V_HF_KHZ);
         if drv || self.acdc {
             self.sent.v_side(now, drv);
-        } else if !self.freq.f_khz.is_nan() {
-            // (`freq.next` = the last result + 350 ms, freq_secondary; its
-            // gate began 350 ms before that result)
-            self.sent.v_side_at(now, self.freq.next.saturating_sub(700), false);
+        } else if self.freq.hf_ok {
+            // (dated where the counter's evidence ends: `Freq::hf_t`)
+            let t = now.saturating_sub((now as u32).wrapping_sub(self.freq.hf_t) as u64);
+            self.sent.v_side_at(now, t, false);
         }
     }
 
@@ -5940,7 +5960,7 @@ mod tests {
     const L: Gate = Gate::Late;
 
     fn freq0() -> Freq {
-        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false }
+        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false, hf_ok: false, hf_t: 0 }
     }
 
     #[test]
