@@ -1586,7 +1586,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 && !upload::busy()
                 && !logger.disk_writes_blocked()
                 && !hy3131::streaming()
+                // The decoder's frame log streams (its 13 ms ring at
+                // 1.25 MS/s outlasts no erase).
+                && !scope::LOG_LIVE.load(core::sync::atomic::Ordering::Relaxed)
                 && now.saturating_sub(host_io_t) >= 500,
+
         );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
         // changed (a recording ended, a screenshot / scope record, a delete),

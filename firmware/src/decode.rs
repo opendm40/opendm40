@@ -254,7 +254,6 @@ impl Baud {
     }
 }
 
-
 /// A decoded character: start edge and end (the stop bit's end), sample
 /// indices of the source; the data; F_FE / F_PE.
 #[derive(Clone, Copy)]
@@ -281,7 +280,7 @@ impl Cursor {
 }
 
 /// The characters of `s[a..b]`, in order.
-pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn FnMut(Ch)) {
+pub fn chars(s: &dyn Src, a: usize, b: usize, l: &Line, f: &mut dyn FnMut(Ch)) {
     let mut c = Cursor::at(a);
     chars_step(s, a, b, b, l, &mut c, &mut |ch| {
         f(ch);
@@ -293,7 +292,12 @@ pub fn chars<S: Src + ?Sized>(s: &S, a: usize, b: usize, l: &Line, f: &mut dyn F
 /// `lim` (a character begun before it is finished, up to `b`), then
 /// returns with `c` where to go on. `f` returns false to stop the scan
 /// (`c.done`). A character that runs past `b` is not reported.
-pub fn chars_step<S: Src + ?Sized>(s: &S, a: usize, b: usize, lim: usize, l: &Line, c: &mut Cursor, f: &mut dyn FnMut(Ch) -> bool) {
+///
+/// One copy for every source (`dyn`): the band's record, the log's ring,
+/// a snippet; it reads ~3 samples a bit.
+#[inline(never)]
+pub fn chars_step(s: &dyn Src, a: usize, b: usize, lim: usize, l: &Line, c: &mut Cursor, f: &mut dyn FnMut(Ch) -> bool) {
+
     if c.done {
         return;
     }
@@ -321,7 +325,6 @@ pub fn chars_step<S: Src + ?Sized>(s: &S, a: usize, b: usize, lim: usize, l: &Li
             n += step;
             continue;
         }
-
 
         if l.level(v, true) {
             n += step;
@@ -500,8 +503,6 @@ impl Framer {
     }
 
     /// The window ended: the last frame (partial when it may go on).
-
-
 
     pub fn finish(&mut self, out: &mut dyn FnMut(&Fr, u32)) {
         if self.cur.len > 0 {

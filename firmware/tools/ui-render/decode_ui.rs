@@ -142,7 +142,7 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
         a.f[k] = ud::FAnn { s0: f.start, s1: f.end, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: r };
         a.nf += 1;
     };
-    dc::chars(c, lo_s, hi_s, &l, &mut |ch| {
+    dc::chars(&c, lo_s, hi_s, &l, &mut |ch| {
         let a = ud::ann();
         if (ch.end as i64) >= v0 && (ch.start as i64) < v1 {
             if (a.nb as usize) < ud::NB {
@@ -346,6 +346,58 @@ pub fn log_view(ck: &mut Checker, out: &str) {
     let b = ul::SU_BOX;
     ck.check_add("decode/log/setup", &[("page", Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1))], &add, Bx::new(b.x as i32, b.y as i32, b.w as i32, b.h as i32));
     save(out, "d11-log-setup");
+    log_snippet(ck, "d12-log-wave-uart", false);
+    save(out, "d12-log-wave-uart");
+    log_snippet(ck, "d12-log-wave-modbus", true);
+    save(out, "d12-log-wave-modbus");
+}
+
+/// A frame's waveform in the log (app_log.rs `log_snip_show`): its row,
+/// the snippet (8 samples a bit, 2 bits around the frame), the band.
+fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
+    use scope_ui::log as ul;
+    let (frame, cfg, fmt): (Vec<u8>, dc::Cfg, u8) = if modbus {
+        (modbus_frames(false)[1].clone(), dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false }, 1)
+    } else {
+        (b"Hello, opendm40!".to_vec(), dc::Cfg { proto: dc::P_UART, baud: 9600, fmt: 0, inverted: false }, 0)
+    };
+    let b = bits(&[frame.clone()], fmt, 2, None);
+    // From 2 bits before the start bit to 2 after the last stop bit.
+    let b = b[18..b.len() - 58].to_vec();
+    let c = codes(&b, 8.0);
+    let n = c.len();
+    host::reset(0);
+    ul::chrome(&mut || {});
+    ul::panel(false, true, &mut || {});
+    let t = ul::Top { state: 2, proto: if modbus { "MODBUS" } else { "UART" }, rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+    for k in 0..ul::TOP_ITEMS {
+        ul::top_item(k, &t);
+    }
+    let hex: Vec<String> = frame.iter().map(|x| format!("{x:02X}")).collect();
+    let mut tb = [0u8; 64];
+    let tn = ul::fit(&hex.join(" "), ul::text_w(!modbus), 0, &mut tb);
+    let mut ab = [0u8; 64];
+    let an = ul::fit_ascii(&String::from_utf8_lossy(&frame), &mut ab);
+    let text = if modbus { "RSP 01 03 4B 3.1ms 1234 5678" } else { ul::txt(&tb[..tn]) };
+    ul::row(0, Some(&ul::Row { time: "1.2346", text, ascii: if modbus { "" } else { ul::txt(&ab[..an]) }, status: "OK", fg: scope_ui::C_WHITE }));
+    ul::snippet(&c);
+    let tr = trace(&c, 0, n);
+    fill(&c, 0, n, cfg.baud * 8, cfg, &tr);
+    if modbus {
+        // As app_log.rs: the frame box from the log's frame.
+        let a = ud::ann();
+        let mut head = [0u8; 8];
+        head.copy_from_slice(&frame[..8]);
+        a.f[0] = ud::FAnn { s0: 16, s1: (n - 16) as u32, kind: dc::K_RSP, fl: 0, len: frame.len() as u16, head, req: 0xFF };
+        a.nf = 1;
+    }
+
+    ud::band(if modbus { 2 } else { 1 }, false);
+    let v = [123, 0, 0, 0, 0, modbus as u32];
+    for i in 0..4 {
+        ul::cell_draw(i, &v);
+    }
+    ck.check_replica(&format!("decode/log/{name}"));
 }
 
 /// One frame-log screen (UART or Modbus rows), checked.
@@ -410,6 +462,9 @@ pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
     save1(out, "scope-decode-modbus");
     log_screen(ck, "manual/scope-decode-log", true);
     save1(out, "scope-decode-log");
+    log_snippet(ck, "manual/scope-decode-log-wave", false);
+    save1(out, "scope-decode-log-wave");
+
 }
 
 

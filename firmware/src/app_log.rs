@@ -28,10 +28,10 @@ use crate::scope_ui::{C_ORANGE, C_WHITE};
 const ROWS_PER_PASS: usize = 1;
 /// Counter cells / top bar refresh, ms.
 const STAT_MS: u64 = 250;
-/// A pass decodes for up to this long (cycles: 4 ms).
-const PASS_CYC: u32 = 4 * crate::clock::HCLK_HZ / 1000;
+/// A pass decodes for up to this long (cycles: 3 ms).
+const PASS_CYC: u32 = 3 * crate::clock::HCLK_HZ / 1000;
 /// Samples a slice of the decode looks at.
-const SLICE: usize = 8192;
+const SLICE: usize = 4096;
 /// Auto-baud: characters between the checks for framing errors.
 const RECHECK: u16 = 32;
 /// Samples for the levels (min / max).
@@ -46,8 +46,22 @@ const BEHIND_MAX: usize = RING - RING / 8;
 /// unused, the next record is at 0), size u16 (all of it, a multiple of
 /// 4), len u16 (data bytes), t_us u64 (the start, from the log's start),
 /// req u32 (the request's seq, u32::MAX none), dur_us u32, flags u8, kind
-/// u8, then 6 bytes reserved; the data bytes follow.
-const HDR: usize = 28;
+/// u8, the waveform snippet: samples u16 (0: none), its rate u32, the
+/// frame's start in it u16, its bytes u16. The data bytes follow, then the
+/// snippet (`snip_write`).
+const HDR: usize = 36;
+/// A snippet: at most this many samples (~8 a bit, 2 bits before and
+/// after the frame; longer frames: their start).
+const SNIP_MAX: usize = 4096;
+/// A snippet's bytes at most (its samples stop there).
+const SNIP_BYTES: usize = 2048;
+/// A snippet is coded only in the first part of a pass (cycles: 0.5 ms):
+/// about one a pass.
+const SNIP_CYC: u32 = CYC_MS / 2;
+const CYC_MS: u32 = crate::clock::HCLK_HZ / 1000;
+/// Snippet codes: the 10-bit code / 4 (the waveform's look keeps; the
+/// coder sees less of the noise: ~1-2 bits a sample).
+const SNIP_SH: u32 = 2;
 const WRAP: u32 = u32::MAX;
 /// Data bytes kept a frame (Modbus RTU: 256).
 const FMAX: usize = 256;
@@ -85,6 +99,15 @@ pub(super) struct Log {
     /// The bytes of the frame being collected.
     fb: [u8; FMAX],
     fbn: u16,
+    /// The ring and the samples written (decode positions), for snippets.
+    ring: *const u16,
+    avail: usize,
+    /// The pass's start (cycles; the snippet budget).
+    t_pass: u32,
+    /// The frame whose snippet is shown (seq + 1; 0: the list), and the
+    /// snippet's decoded samples (SNIP_MAX, in BUF).
+    snip: u32,
+    scr: *mut u16,
     // ---- the store ----
     sbase: *mut u8,
     cap: u32,
@@ -255,8 +278,17 @@ impl Log {
 fn store_frame(f: &dc::Fr, req: u32) {
     let l = lg();
     let n = (l.fbn as usize).min(f.len as usize).min(FMAX);
-    let size = ((HDR + n + 3) & !3) as u32;
+    // Room for SNIP_BYTES of snippet; the record shrinks to what it took
+    // (it is the newest: the tail moves back). A
+    // snippet only while the pass has time for it (SNIP_CYC): frames that
+    // come faster are kept without.
+    let snip = crate::prof::cyc().wrapping_sub(l.t_pass) < SNIP_CYC;
+    let raw = if snip { SNIP_BYTES } else { 0 };
+    let size = ((HDR + n + raw + 3) & !3) as u32;
     let Some(off) = l.alloc(size) else { return };
+    let (sn, sfs, sfirst, sbytes) = if snip { snip_write(f, l.p(off + (HDR + n) as u32), raw) } else { (0, 0, 0, 0) };
+    let size = ((HDR + n + sbytes as usize + 3) & !3) as u32;
+    l.tail = off + size;
     let fs = l.fs.max(1) as u64;
     let t = l.t0_us + (l.base + f.start as u64) * 1_000_000 / fs;
     let dur = ((f.end.saturating_sub(f.start)) as u64 * 1_000_000 / fs) as u32;
@@ -266,6 +298,10 @@ fn store_frame(f: &dc::Fr, req: u32) {
     l.w64(off + 8, t);
     l.w32(off + 16, if req == u32::MAX { u32::MAX } else { l.fseq0.wrapping_add(req) });
     l.w32(off + 20, dur);
+    l.w16(off + 26, sn);
+    l.w32(off + 28, sfs);
+    l.w16(off + 32, sfirst);
+    l.w16(off + 34, sbytes);
     unsafe {
         *l.p(off + 24) = f.flags;
         *l.p(off + 25) = f.kind;
@@ -275,6 +311,125 @@ fn store_frame(f: &dc::Fr, req: u32) {
     l.cnt[0] += 1;
     l.cnt[4] += (f.flags & dc::F_CRC != 0) as u32;
     l.fbn = 0;
+}
+
+/// The ring, decimated: snippet sample j = the mean of `d` ring samples
+/// from decode position `a + j d`, >> SNIP_SH.
+struct DecSrc {
+    p: *const u16,
+    off: usize,
+    a: usize,
+    d: usize,
+    n: usize,
+}
+
+impl crate::pack10::Src for DecSrc {
+    fn len(&self) -> usize {
+        self.n
+    }
+    fn at(&self, j: usize) -> u16 {
+        let s = self.a + j * self.d;
+        let mut sum = 0u32;
+        for k in 0..self.d {
+            // SAFETY: masked into the ring.
+            sum += (unsafe { *self.p.add((self.off.wrapping_add(s + k)) & (RING - 1)) } & 0x3FF) as u32;
+        }
+        (sum / self.d as u32 >> SNIP_SH) as u16
+    }
+}
+
+/// Write the snippet of frame `f` (decode positions) after the record's
+/// data at `at` (at most `room` bytes): (samples, rate, the frame's start
+/// in it, bytes); samples 0 when the ring no longer holds the frame. A
+/// snippet that would take more than `room` stops there (fewer samples).
+///
+/// The code, for logic-like waveforms (DLG's adaptive Rice spends ~6 bits
+/// a sample on a square wave): the 8-bit samples' differences, a byte
+/// each: 0x00..0x7F a run of 1..128 zero differences, 0x80..0xFE one
+/// difference of -64..62, 0xFF then a sample's value (the first, a jump).
+fn snip_write(f: &dc::Fr, at: *mut u8, room: usize) -> (u16, u32, u16, u16) {
+    let l = lg();
+    let spb = (l.line.spb >> 8) as usize;
+    let d = ((spb + 4) / 8).max(1);
+    let m = 2 * spb;
+    let a = (f.start as usize).saturating_sub(m);
+    let b = ((f.end as usize) + m).min(l.avail);
+    if l.ring.is_null() || b <= a || l.avail - a > RING - RING / 16 {
+        return (0, 0, 0, 0);
+    }
+    let n = ((b - a) / d).min(SNIP_MAX);
+    let src = DecSrc { p: l.ring, off: (l.base as usize) & (RING - 1), a, d, n };
+    let mut k = 0usize;
+    let put = |k: &mut usize, x: u8| {
+        // SAFETY: k < room (checked below), inside the record.
+        unsafe { *at.add(*k) = x };
+        *k += 1;
+    };
+    let (mut prev, mut run, mut j) = (-1i32, 0u8, 0usize);
+    while j < n {
+        let v = crate::pack10::Src::at(&src, j) as i32;
+        let dv = v - prev;
+        // At most 3 bytes for this sample (a run, then a jump).
+        if k + 3 > room {
+            break;
+        }
+        if prev >= 0 && dv == 0 {
+            run += 1;
+            if run == 128 {
+                put(&mut k, 127);
+                run = 0;
+            }
+        } else {
+            if run > 0 {
+                put(&mut k, run - 1);
+                run = 0;
+            }
+            if prev >= 0 && (-64..=62).contains(&dv) {
+                put(&mut k, 0x80 | (dv + 64) as u8);
+            } else {
+                put(&mut k, 0xFF);
+                put(&mut k, v as u8);
+            }
+        }
+        prev = v;
+        j += 1;
+    }
+    if run > 0 {
+        put(&mut k, run - 1);
+    }
+    (j as u16, l.fs / d as u32, ((f.start as usize - a) / d) as u16, k as u16)
+}
+
+/// Decode a snippet (`nb` bytes, `n` samples; `snip_write`) into `out`.
+fn snip_read(bytes: *const u8, nb: usize, n: usize, out: *mut u16) {
+    let (mut v, mut j, mut i) = (0i32, 0usize, 0usize);
+    // SAFETY: i < nb inside the record; out holds SNIP_MAX >= n.
+    let emit = |v: i32, j: &mut usize| {
+        if *j < n {
+            unsafe { *out.add(*j) = (((v.clamp(0, 255) as u16) << SNIP_SH) | (1 << (SNIP_SH - 1))) & 0x3FF };
+            *j += 1;
+        }
+    };
+    while i < nb && j < n {
+        let x = unsafe { *bytes.add(i) };
+        i += 1;
+        match x {
+            0x00..=0x7F => {
+                for _ in 0..=x {
+                    emit(v, &mut j);
+                }
+            }
+            0xFF => {
+                v = if i < nb { (unsafe { *bytes.add(i) }) as i32 } else { v };
+                i += 1;
+                emit(v, &mut j);
+            }
+            _ => {
+                v += (x & 0x7F) as i32 - 64;
+                emit(v, &mut j);
+            }
+        }
+    }
 }
 
 /// A character decoded: the counters, the frame's bytes, the framer.
@@ -337,6 +492,8 @@ impl App {
             }
             let used = (a + core::mem::size_of::<Log>() + 3) & !3;
             let l = lg();
+            l.scr = unsafe { p.add(used) as *mut u16 };
+            let used = used + SNIP_MAX * 2;
             l.sbase = unsafe { p.add(used) };
             l.cap = ((n - used) & !3) as u32;
             l.lk = (u32::MAX, 0);
@@ -426,6 +583,11 @@ impl App {
             self.log_restart_at(p);
         }
         let src = RingSrc { p: ring.as_ptr(), off: (lg().base as usize) & (RING - 1) };
+        let l = lg();
+        l.ring = ring.as_ptr();
+        l.avail = avail;
+        l.t_pass = crate::prof::cyc();
+
         let t0 = crate::prof::cyc();
         crate::prof::enter(crate::prof::X2);
         while crate::prof::cyc().wrapping_sub(t0) < PASS_CYC {
@@ -509,7 +671,6 @@ impl App {
                         break;
                     }
                     self.log_rebase();
-
                     if lg().cur.n + 2 >= avail || lim >= avail {
                         break;
                     }
@@ -588,6 +749,11 @@ impl App {
         l.full = false;
         if l.popup {
             self.log_setup_draw();
+        } else if l.snip != 0 {
+            let s = l.snip - 1;
+            if !self.log_snip_show(s) {
+                lg().snip = 0;
+            }
         }
     }
 
@@ -604,6 +770,15 @@ impl App {
             return;
         }
         if l.popup {
+            return;
+        }
+        if l.snip != 0 {
+            // A frame's waveform: the counters only.
+            if now >= l.stat_at {
+                if !self.log_stats() {
+                    lg().stat_at = now + STAT_MS;
+                }
+            }
             return;
         }
         if now >= l.stat_at {
@@ -754,7 +929,12 @@ impl App {
 
     /// The first top-bar item or counter cell that changed, drawn (one
     /// paint per pass: a badge is a few ms); false when none changed.
+    /// Region C (link-native.x): at most every STAT_MS, while only the
+    /// log's DMA streams.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_stats(&mut self) -> bool {
+
         let l = lg();
         let s = ds();
         let mb = s.cfg.proto == dc::P_MODBUS;
@@ -837,7 +1017,81 @@ impl App {
         lg().lvl.map(|t| self.scope.volts(t.1 as f32))
     }
 
+    /// Show frame `seq`'s waveform in the list area: its row on top, the
+    /// trace, the bus band under it (ui_decode's band, from the snippet
+    /// decoded again). False: no snippet (the ring had moved on). Region C
+    /// (link-native.x): a tap's one-off drawing.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
+    fn log_snip_show(&mut self, seq: u32) -> bool {
+
+        let l = lg();
+        let Some(off) = l.find(seq) else { return false };
+        let n = l.r16(off + 26) as usize;
+        if n < 2 || l.lvl.is_none() {
+            return false;
+        }
+        let len = l.r16(off + 6) as usize;
+        let fs = l.r32(off + 28);
+        let first = l.r16(off + 32) as u32;
+        let nb = l.r16(off + 34) as usize;
+        snip_read(l.p(off + (HDR + len) as u32), nb, n, l.scr);
+        // SAFETY: scr holds SNIP_MAX samples; n <= SNIP_MAX.
+        let s: &[u16] = unsafe { core::slice::from_raw_parts(l.scr, n) };
+        // The frame's row on top, the trace, then the band.
+        let i0 = l.shown;
+        self.log_row(0, seq);
+        let l = lg();
+        l.shown = i0;
+        l.shown[0] = u32::MAX;
+        ul::snippet(s);
+        let a = ud::ann();
+        a.reset(0, ud::C_DONE);
+        a.mode = ud::M_BOXES;
+        a.off = 0;
+        a.n = n as u32;
+        a.fs = fs;
+        a.t0 = first;
+        let st = ds();
+        let (lo, mid, hi) = l.lvl.unwrap_or((0, 512, 1023));
+        let (bits, parity) = st.cfg.bits();
+        let line = dc::Line { lo, mid, hi, inv: st.cfg.inverted, spb: (fs as u64 * 256 / l.rate.max(1) as u64) as u32, bits, parity };
+        dc::chars(&s, 0, n, &line, &mut |c| {
+            let a = ud::ann();
+            if (a.nb as usize) < ud::NB {
+                a.b[a.nb as usize] = ud::BAnn { s0: c.start, s1: c.end, v: c.v as u8, fl: c.err };
+                a.nb += 1;
+            }
+        });
+        if st.cfg.proto == dc::P_MODBUS {
+            // The frame box: the frame as the log decoded it (the snippet
+            // alone shows no gap before it).
+            let l = lg();
+            if let Some((f, _, _, dur, _)) = l.get(seq, &mut []) {
+                let s1 = first + (dur as u64 * fs as u64 / 1_000_000) as u32;
+                let a = ud::ann();
+                a.f[0] = ud::FAnn { s0: first, s1, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: 0xFF };
+                a.nf = 1;
+            }
+        }
+        ud::band(self.dec_band(), false);
+
+        // Not a scope record's: the band's cache is for no record.
+        ud::ann().gen = 0;
+        true
+    }
+
+    /// Back from a waveform to the list.
+    fn log_snip_hide(&mut self) {
+        let l = lg();
+        l.snip = 0;
+        l.shown = [u32::MAX; ul::ROWS];
+        l.note = u8::MAX;
+        crate::lcd::fill_rect(14, 21, 399, 279, crate::scope_ui::C_FILL);
+    }
+
     /// The bit rate in use (0: none yet).
+
     pub(super) fn log_rate(&self) -> u32 {
         if self.scope.log_on() { lg().rate } else { 0 }
     }
@@ -912,6 +1166,18 @@ impl App {
                             self.redraw = true;
                         }
                         Some(h) => self.dec_setup_tap(clk, h, now),
+                    }
+                    return Some(false);
+                }
+                if ul::LIST.has(p.x as i16, p.y as i16) {
+                    // A row: its waveform; the waveform: back to the list.
+                    if l.snip != 0 {
+                        self.log_snip_hide();
+                    } else if let Some(i) = ul::row_at(p.y as i16) {
+                        let seq = l.top + i as u32;
+                        if seq < l.next && self.log_snip_show(seq) {
+                            lg().snip = seq + 1;
+                        }
                     }
                     return Some(false);
                 }

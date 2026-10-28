@@ -1036,20 +1036,23 @@ the scope full record.
             16 K-sample circular DMA ring at the start of BUF, 1.25 MS/s for auto-baud, ~16 samples a bit
             for a set rate), app_log.rs (levels, auto-baud again after framing errors in a quarter of 32
             characters, decode.rs chars_step / Framer over the ring in up to 4 ms a pass; a circular byte
-            store of the frames in the rest of BUF, ~52 KB: ~1 400 Modbus frames of 8 bytes, ~1 200 UART
-            lines of 16; the oldest dropped), ui_log.rs (the list, counters, LIVE / page / CLEAR / STOP /
-            SCOPE, the Decode page as SETUP). DECode:FRAMes? reads it as a FIFO, DECode:CLEar. Leaving the
-            view ends it (BUF back to the scope, a new record). The Wave view refuses it. Emulator: 9600 and
-            115200 (4 212 frames in 3 s, none lost), Modbus 19200 8E1 pairing.
+            store of the frames in the rest of BUF, ~44 KB, the oldest dropped), ui_log.rs (the list,
+            counters, LIVE / page / CLEAR / STOP / SCOPE, the Decode page as SETUP). Each frame keeps its
+            waveform: ~8 samples a bit from 2 bits before to 2 after (`snip_write`: 8-bit means, a byte-wise
+            run / difference code, ~150 B for an 8-byte Modbus frame; dlog's DLG coder took 6-8 bits a
+            sample on a square wave), coded when the pass has time (about one a pass: at 115200 not every
+            frame has one); tap a row to see it with the band (region C, `log_cold`). Emulator: 267 Modbus
+            19200 frames with waveforms kept; 9600 and 115200 (4 588 frames in 3 s, none lost), pairing.
+            DECode:FRAMes? reads it as a FIFO, DECode:CLEar. Leaving the view ends it (BUF back to the
+            scope, a new record). The Wave view refuses it.
+
       - [ ] Phase 2: tap a frame to centre the record on it; trigger / filter on a decoded value (address,
             function, a byte pattern); disk logging (LOGS/UARTnnn.CSV); Modbus ASCII; the other protocols of
             the list above.
             Known limits: the frame costs ~0.1 ms more with the decoder on (s.frame 6.98 against 6.89 ms at
             1 ms/div); a record's decode is 2-5 ms at 1 ms/div (9600 / 115200, up to 8 ms when it measures the
-            rate), and the next acquisition waits for it (66 against 80 frames in 3 s at 1 ms/div, 9600;
-
+            rate), and the next acquisition waits for it (70 against 79 frames in 3 s at 1 ms/div, 9600;
             emulator, native-boot.md "Protocol decoder"); the band covers the graph's bottom 35 px (the trace is not drawn there); a long
-
             coded record (Single at 100 ms/div and slower) decodes at ~1.3 us a sample; at 1 ms/div a 9600
             baud screen holds 9 characters, the first may be misread when the screen starts inside a run of
             back-to-back characters (they realign at an idle gap); the AD2 filter's edge shape in the

@@ -759,33 +759,37 @@ recovery-file 29 780 / 7 752 / 20 656 B, no-ad2-isr 39 000 / 9 244 /
 8 120 / 20 656 B.
 
 Cost (emulator at --mips 110, DBG:PROF?: `dec.job` one record's decode,
-`x2` a pass's part of it, `s.frame` the frame; UART traffic on MCX, Normal
-trigger, 3 s running):
+`x2` a pass's part of it, `s.frame` the frame; UART traffic on MCX, Auto
+sweep with the trigger level in the swing, 3 s running; emu/decodetest.py):
 
 | s/div | baud | frames off / on | frame avg, us (off / on) | decode per record avg / max, us |
 |---|---|---|---|---|
-| 1 ms | 9600 | 80 / 66 | 6 887 / 6 978 | 3 561 / 8 124 |
-| 10 ms | 9600 | 25 / 25 | 6 887 / 7 249 | 2 344 / 2 950 |
-| 100 ms | 9600 | 3 / 3 | 6 887 / 6 978 | 113 / 168 (the note) |
-| 1 ms | 115200 | 88 / 69 | 6 887 / 7 252 | 4 555 / 5 236 |
-| 10 ms | 115200 | 25 / 25 | 6 887 / 6 976 | 129 / 186 (the note) |
-| 100 ms | 115200 | 3 / 3 | 6 887 / 6 978 | 121 / 126 (the note) |
+| 1 ms | 9600 | 79 / 70 | 6 887 / 6 978 | 3 049 / 8 328 |
+| 10 ms | 9600 | 24 / 24 | 6 887 / 7 247 | 2 296 / 2 797 |
+| 100 ms | 9600 | 3 / 3 | 6 887 / 6 978 | 115 / 169 (the note) |
+| 1 ms | 115200 | 89 / 69 | 6 887 / 7 253 | 4 098 / 4 904 |
+| 10 ms | 115200 | 25 / 25 | 6 887 / 6 978 | 133 / 178 (the note) |
+| 100 ms | 115200 | 3 / 3 | 6 887 / 6 978 | 123 / 140 (the note) |
 
-STOP: one decode of the stored record (1 ms/div 2.7-4.1 ms); a pan or zoom
+STOP: one decode of the stored record (1 ms/div 3.9-4.3 ms); a pan or zoom
 inside what is kept: none; outside it (a record with more than the lists
-hold): the window, ~2 ms. The decode's passes hold the next acquisition:
-at 1 ms/div 66 / 69 frames in 3 s instead of 80 / 88.
+hold): the window, ~2 ms. A pass decodes for up to 3 ms (`x2` max
+3.3 ms); the next acquisition waits for the decode: at 1 ms/div 70 / 69
+frames in 3 s instead of 79 / 89.
 
 The frame log (Mode Log, app_log.rs, ui_log.rs) lends BUF from the scope
 (`Scope::log_begin`): its first 16 K samples a circular DMA ring, then
-`app_log::Log` (the decoder and the view, under 1 KB), then the frame
-store (~52 KB with CAP 42 K; 40 KB in recovery-usb's 36 K, which has no
-scope). TCM: a pointer; SRAM: nothing. With it the static worst path is
-24 728 B (headroom 20 600 B). Emulator (--mips 110): a pass decodes for at
-most 4 ms (`x2` max 710 us at 115200 with traffic), 4 212 frames in 3 s
-at 115200 without a lost sample.
-
-
+`app_log::Log` (the decoder and the view, under 1 KB), a snippet's
+decoded samples (8 KB), then the frame store (~44 KB with CAP 42 K; 32 KB
+in recovery-usb's 36 K, which has no scope). TCM: a pointer; SRAM:
+nothing. Region B 18 868 B free, region C 5 660 B (the waveform view and
+the log's top bar / counters, `.text.log_cold`; variants: B 16 988 ..
+36 656 B, C 5 172 .. 15 680 B, mute 17 868 / 5 556 B). While the log
+streams, the settings save and the screenshot clusters' erase wait (an
+SPI erase outlasts the 13 ms ring at 1.25 MS/s). The static worst path is 24 728 B (headroom 20 600 B).
+Emulator (--mips 110): a pass decodes for at most 3 ms (`x2` max 1.6 ms
+at 115200 with traffic), 4 588 frames in 3 s at 115200 without a lost
+sample; 267 Modbus 19200 frames with their waveforms fill the store.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

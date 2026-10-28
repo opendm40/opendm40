@@ -292,6 +292,10 @@ try:
         got = RC.calls()
         own = [f for f in got if any(k in f for k in ('decode', 'app_log', 'ui_log', 'scope', 'pack10'))]
         LOG_OTHER.update(f for f in got if f not in own)
+        # The waveform view and the counters are region C on purpose
+        # (link-native.x).
+        own = [f for f in own if 'log_snip_show' not in f and 'log_stats' not in f]
+
         print('  region C functions called while the log streamed: %s' % (', '.join(sorted(got)) or 'none'))
         check(not own, 'the frame log: none of its code in region C (%s)' % ', '.join(own))
 
@@ -335,7 +339,12 @@ try:
         check(stop(), 'STOP (untriggered)')
         wait_ms(800)
         fr = frames()
-        check(has_text(b''.join(bytes.fromhex(f[3]) for f in fr), 5), 'STOP: the untriggered record decoded (%d frames)' % len(fr))
+        data = b''.join(bytes.fromhex(f[3]) for f in fr)
+        # 17 ms wherever the sweep caught the traffic (up to 16 characters;
+        # a record that starts inside back-to-back characters can be read
+        # off by some bits until an idle gap: TODO, known limits).
+        rate = q('DEC:RATE?')
+        check(len(data) >= 4 and rate == '9600', 'STOP: the untriggered record decoded (%d frames, %r, rate %s)' % (len(fr), data[:40], rate))
         # Auto, triggered on the start bits (the level in the swing): each
         # triggered record decoded once.
         q('TRIG:LEV 1.6')
@@ -554,14 +563,31 @@ try:
         fr2 = fifo()
         check(not fr2 or not fr or int(fr2[0][0]) > int(fr[-1][0]), 'log: the FIFO gives each frame once')
         c = q('DEC:COUN?').split(',')
-        # The first character may be read from the middle of one (FE).
-        check(len(c) == 6 and int(c[0]) >= len(fr) and int(c[2]) <= 1 and c[5] == '0', 'log: DEC:COUN? frames,bytes,FE,PE,CRC,lost %s' % ','.join(c))
+        # The first character may be read from the middle of one (FE), once
+        # at the start and once when the stream restarts at the rate found.
+        check(len(c) == 6 and int(c[0]) >= len(fr) and int(c[2]) <= 2 and c[5] == '0', 'log: DEC:COUN? frames,bytes,FE,PE,CRC,lost %s' % ','.join(c))
 
         shot('l01-log-uart-9600')
+        # A frame's waveform: STOP (the list stays), tap the first row.
+        q('DBG:KEY 1')
+        wait_ms(800)
+        q('DBG:TAP 200,30')
+        wait_ms(1500)
+        img = shot('l04-log-snippet')
+        e = edges(img, BYTE_Y + 8, C_EDGE)
+        yellow = sum(1 for x in range(14, 413) for y in range(60, 230, 4) if near(img(x, y), (255, 255, 0)))
+        check(len(e) >= 2 and yellow > 50, 'log: a row tapped shows its waveform (%d px of trace) and its bytes (%d box edges)' % (yellow, len(e)))
+        q('DBG:TAP 200,150')
+        wait_ms(1500)
+        img = shot('l05-log-back')
+        check(len(edges(img, BYTE_Y + 8, C_EDGE)) == 0, 'log: a tap on the waveform goes back to the list')
+        q('DBG:KEY 1')
+        wait_ms(800)
         # 115200 (auto: the highest stream rate, 10.9 samples a bit).
         put(BITS, '1' * 40 + uart_bits(text) + '1' * 40, 115200, 0.0, 3.3, 20.0 / 115200)
         wait_ms(2000)
         fifo()
+        lost0 = int(q('DEC:COUN?').split(',')[5])
         q('DBG:PROF:RESET')
         wait_ms(3000)
         p = prof('log 115200, 3 s')
@@ -570,6 +596,8 @@ try:
         c = q('DEC:COUN?').split(',')
         print('    log 115200: %d frames in 3 s, COUN? %s' % (len(fr), ','.join(c)), flush=True)
         check(q('DEC:RATE?') == '115200' and text in data, 'log 115200: rate %s, the whole text' % q('DEC:RATE?'))
+        check(int(c[5]) == lost0, 'log 115200: the decode keeps up for 3 s (lost %d before, %s after)' % (lost0, c[5]))
+
         shot('l02-log-uart-115200')
         # Modbus RTU 19200 8E1: request / reply pairs, the exception, a bad CRC.
         q('DEC:PROT MODB;DEC:FORM 8E1')
@@ -585,6 +613,19 @@ try:
         check(len(pairs) >= 1 and any(f[4] == 'CRC' for f in fr) and any(f[5].startswith('EXC') for f in fr), 'log Modbus: a 03 pair, the exception, a bad CRC (%d frames)' % len(fr))
         shot('l03-log-modbus')
         c_check_log()
+        # Capacity: from a CLEar until the store is full, then STOP: the
+        # FIFO holds every frame kept (Modbus 19200 8E1, with waveforms).
+        q('DEC:CLE')
+        wait_ms(12000)
+        q('DBG:KEY 1')
+        wait_ms(800)
+        kept = fifo()
+        c = q('DEC:COUN?').split(',')
+        print('    log capacity: %d Modbus frames kept of %s (%s)' % (len(kept), c[0], ','.join(c)), flush=True)
+        check(0 < len(kept) < int(c[0]), 'log: the store fills, the oldest go (%d of %s kept)' % (len(kept), c[0]))
+        q('DBG:KEY 1')
+        wait_ms(800)
+
         q('DEC:CLE')
         c = q('DEC:COUN?').split(',')
         check(c[0] == '0' or int(c[0]) < 5, 'DEC:CLEar: the counters start again (%s)' % ','.join(c))

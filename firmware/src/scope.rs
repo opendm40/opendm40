@@ -1187,7 +1187,6 @@ impl Scope {
         }
     }
 
-
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
     /// record state alone.
     fn halt(&mut self) {

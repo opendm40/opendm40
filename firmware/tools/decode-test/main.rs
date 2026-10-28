@@ -161,7 +161,7 @@ fn decode(c: &[u16], a: usize, b: usize, fs: u32, cfg: Cfg, manual: Option<u16>)
     let mut chars = vec![];
     let mut frames = vec![];
     let mut fr = Framer::new(cfg.proto == P_MODBUS, l.char_samples(), fs, bd, a as u32, b as u32);
-    decode::chars(c, a, b, &l, &mut |ch| {
+    decode::chars(&c, a, b, &l, &mut |ch| {
         chars.push(ch);
         fr.push(ch, &mut |f, r| frames.push((*f, r)));
     });

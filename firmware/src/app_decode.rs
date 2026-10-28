@@ -342,7 +342,6 @@ impl App {
         self.scope.hold_restart = self.scope.s.run && job().is_some();
     }
 
-
     /// `x` moved out by the margin a window decode needs (a frame's gap,
     /// Modbus, or two characters, plus two bits).
     fn dec_margin(&self, x: usize, up: bool, baud: u32, fs: u32) -> usize {
@@ -443,7 +442,6 @@ impl App {
             *c = 0;
         }
     }
-
 
     /// `n` samples of the decode.
     fn dec_slice(&mut self, n: usize) {

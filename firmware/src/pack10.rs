@@ -24,7 +24,17 @@ impl Src for [u16] {
     }
 }
 
+impl Src for &[u16] {
+    fn len(&self) -> usize {
+        <[u16]>::len(self)
+    }
+    fn at(&self, i: usize) -> u16 {
+        self[i]
+    }
+}
+
 impl<const N: usize> Src for [u16; N] {
+
     fn len(&self) -> usize {
         N
     }

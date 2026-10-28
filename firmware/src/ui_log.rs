@@ -32,8 +32,8 @@ pub const LIST: Rect = rect(14, 21, 399, 279);
 const C_OK: Color = 0x07e0;
 const C_BAD: Color = 0xf800;
 const C_GREY: Color = 0x9cd3;
-
-
+/// The snippet's grid dots (the scope graph's).
+const C_GRID: Color = 0x7bef;
 
 /// One list row (texts formatted by the app).
 pub struct Row<'a> {
@@ -268,7 +268,6 @@ pub fn txt(b: &[u8]) -> &str {
     core::str::from_utf8(b).unwrap_or("")
 }
 
-
 /// `v` with at most 5 characters: 12345, 123k, 12M.
 fn short(w: &mut dc::W, v: u32) {
     if v < 100_000 {
@@ -319,6 +318,58 @@ pub fn cell(i: usize, text: &str) {
         }
         if sf::on_ring(r, 5, 0x0f, x, y) { (C_FRAME, tag(1, 0)) } else { (C_BAR, 0) }
     });
+}
+
+// ---- a frame's waveform (tap a row) ----
+
+/// The snippet's trace area (under the frame's row, above the band).
+const SN_TOP: i16 = 44;
+const SN_BOT: i16 = 236;
+
+/// The waveform of a frame in the list area: the graph's dotted grid,
+/// the samples `s` over the 399 columns (min / max per column, joined),
+/// scaled to their own swing. The frame's row (row 0) and the bus band
+/// (ui_decode `band`) are drawn by the caller.
+pub fn snippet(s: &[u16]) {
+    lcd::fill_rect(14, ROW_Y0 as u16 + ROW_H as u16, 399, (300 - ROW_Y0 - ROW_H) as u16, C_FILL);
+    for k in 1..8i16 {
+        let x = 14 + k * 50;
+        let mut y = SN_TOP;
+        while y < SN_BOT {
+            lcd::fill_rect(x as u16, y as u16, 1, 1, C_GRID);
+            y += 5;
+        }
+    }
+    for k in 0..4i16 {
+        let y = SN_TOP + k * (SN_BOT - SN_TOP) / 3;
+        let mut x = 14;
+        while x < 413 {
+            lcd::fill_rect(x as u16, y as u16, 1, 1, C_GRID);
+            x += 5;
+        }
+    }
+    let n = s.len();
+    if n < 2 {
+        return;
+    }
+    let (mn, mx) = s.iter().fold((u16::MAX, 0u16), |(a, b), &v| (a.min(v & 0x3FF), b.max(v & 0x3FF)));
+    let span = (mx - mn).max(8) as i32;
+    let h = (SN_BOT - SN_TOP - 24) as i32;
+    let y_of = |c: u16| (SN_BOT as i32 - 12 - ((c & 0x3FF) as i32 - mn as i32) * h / span) as i16;
+    let mut prev: Option<(i16, i16)> = None;
+    for x in 0..399usize {
+        let a = x * n / 399;
+        let b = ((x + 1) * n / 399).max(a + 1).min(n);
+        let (lo, hi) = s[a..b].iter().fold((u16::MAX, 0u16), |(l, h), &v| (l.min(v & 0x3FF), h.max(v & 0x3FF)));
+        let (mut y0, mut y1) = (y_of(hi), y_of(lo));
+        if let Some((p0, p1)) = prev {
+            // Joined to the previous column (an edge is a vertical line).
+            y0 = y0.min(p1);
+            y1 = y1.max(p0);
+        }
+        prev = Some((y_of(hi), y_of(lo)));
+        lcd::fill_rect(14 + x as u16, y0 as u16, 1, (y1 - y0 + 1) as u16, C_YELLOW);
+    }
 }
 
 // ---- setup popup: the Decode tab's page under a "Decode" header ----
