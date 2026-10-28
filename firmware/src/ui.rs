@@ -84,6 +84,9 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// The protocol decoder's frame log (scope MF > Decode, Mode Log;
+    /// app_log.rs).
+    Decode,
 }
 
 impl View {
@@ -2933,7 +2936,9 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::TouchTest => "Touch test",
+        View::Decode => "Decode log",
     }
+
 }
 
 /// On-device help (UF-29: owners have no manual; gestures, resets and limits

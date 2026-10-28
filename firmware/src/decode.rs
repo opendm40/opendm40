@@ -481,7 +481,26 @@ impl Framer {
         self.cur.len
     }
 
+    /// A stream: the line is idle up to sample `now`; a frame whose gap
+    /// has passed ends (complete).
+    pub fn idle(&mut self, now: u32, out: &mut dyn FnMut(&Fr, u32)) {
+        if self.cur.len > 0 && now.saturating_sub(self.cur.end) > self.gap {
+            self.end(out, false);
+        }
+    }
+
+    /// A stream: positions move down by `d` (the caller's sample numbering
+    /// was rebased).
+    pub fn shift(&mut self, d: u32) {
+        self.lo = self.lo.saturating_sub(d);
+        self.hi = self.hi.saturating_sub(d);
+        self.prev_end = self.prev_end.saturating_sub(d);
+        self.cur.start = self.cur.start.saturating_sub(d);
+        self.cur.end = self.cur.end.saturating_sub(d);
+    }
+
     /// The window ended: the last frame (partial when it may go on).
+
 
 
     pub fn finish(&mut self, out: &mut dyn FnMut(&Fr, u32)) {

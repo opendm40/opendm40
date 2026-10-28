@@ -276,6 +276,7 @@ pub fn run(ck: &mut Checker, out: &str) {
     let wf = dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 0, inverted: false };
     scene(ck, "decode/pic/wave-note", &ub, 2.0, wf, 8.0, 0.3, false, false, true);
     save(out, "d05-decode-wave-note");
+    log_view(ck, out);
     // The setup popup over the page: every state, the full rules on its
     // labels and steppers (the option lists are the MF popup's widgets).
     let base = &stock::scenes()[0];
@@ -324,7 +325,80 @@ pub fn run(ck: &mut Checker, out: &str) {
 }
 
 
+/// The frame log (View::Decode, src/ui_log.rs): the list (UART and Modbus
+/// rows as app_log.rs formats them, long ones cut with ">"), the top bar,
+/// the counters, the panel; its setup popup. Texts must not collide.
+pub fn log_view(ck: &mut Checker, out: &str) {
+    use scope_ui::log as ul;
+    for (name, modbus) in [("d09-log-uart", false), ("d10-log-modbus", true)] {
+        log_screen(ck, name, modbus);
+        save(out, name);
+    }
+    // The setup popup (SETUP): the Decode tab's page under a header.
+    host::reset(0);
+    ul::chrome(&mut || {});
+    let v = ud::SetupVals { proto: 2, mode: 1, fmt: 1, inv: false, baud: 19200, thr: f32::NAN, level: 1.65 };
+    ul::setup(&v);
+    let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
+    for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
+        add.push(rb(r));
+    }
+    let b = ul::SU_BOX;
+    ck.check_add("decode/log/setup", &[("page", Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1))], &add, Bx::new(b.x as i32, b.y as i32, b.w as i32, b.h as i32));
+    save(out, "d11-log-setup");
+}
+
+/// One frame-log screen (UART or Modbus rows), checked.
+fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
+    use scope_ui::log as ul;
+    let fit = |s: &str, uart: bool| -> String {
+        let mut b = [0u8; 64];
+        let n = ul::fit(s, ul::text_w(uart), if uart { 0 } else { 1 }, &mut b);
+        String::from_utf8_lossy(&b[..n]).into_owned()
+    };
+    {
+        host::reset(0);
+        ul::chrome(&mut || {});
+        ul::panel(true, false, &mut || {});
+        let t = ul::Top { state: 1, proto: if modbus { "MODBUS" } else { "UART" }, rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+        for k in 0..ul::TOP_ITEMS {
+            ul::top_item(k, &t);
+        }
+        let rows: Vec<(String, String, String, &str, u16)> = if modbus {
+            vec![
+                ("0.0000".into(), fit("REQ 01 03 @0000 n=10", false), String::new(), "OK", scope_ui::C_WHITE),
+                ("0.0121".into(), fit("RSP 01 03 20B 3.2ms 1234 5678 9ABC DEF0 0011 2233 4455 6677 8899 AABB", false), String::new(), "OK", scope_ui::C_WHITE),
+                ("0.0503".into(), fit("REQ 11 06 @0005 =ABCD", false), String::new(), "OK", scope_ui::C_WHITE),
+                ("0.0611".into(), fit("EXC 01 84 E02 2.9ms", false), String::new(), "OK", scope_ui::C_ORANGE),
+                ("0.0712".into(), fit("01 03 00 00 00 02 3B 0B", false), String::new(), "CRC", scope_ui::C_WHITE),
+            ]
+        } else {
+            vec![
+                ("0.0000".into(), fit("48 65 6C 6C 6F 2C 20 6F 70 65 6E 64 6D 34 30 21", true), "Hello, opendm40!".into(), "OK", scope_ui::C_WHITE),
+                ("0.0013".into(), fit("30 31 32 33 34 35 36 37 38 39 0D 0A", true), "0123456789..".into(), "OK", scope_ui::C_WHITE),
+                ("1.2500".into(), fit("FF 00", true), "..".into(), "FE", scope_ui::C_WHITE),
+                ("12.5000".into(), fit("41", true), "A".into(), "PE", scope_ui::C_WHITE),
+                ("12345.67".into(), fit("4D 57 4D 57 4D 57", true), "MWMWMW".into(), "OK", scope_ui::C_WHITE),
+            ]
+        };
+        for (i, r) in rows.iter().enumerate() {
+            let mut a = [0u8; 64];
+            let n = ul::fit_ascii(&r.2, &mut a);
+            ul::row(i, Some(&ul::Row { time: &r.0, text: &r.1, ascii: ul::txt(&a[..n]), status: r.3, fg: r.4 }));
+        }
+        let v = [123_456, 2, 1, 3, 0, modbus as u32];
+        for i in 0..4 {
+            ul::cell_draw(i, &v);
+        }
+        if !modbus {
+            ul::row(rows.len(), Some(&ul::Row { time: "", text: "Waiting for a signal (no swing)", ascii: "", status: "", fg: 0 }));
+        }
+        ck.check_replica(&format!("decode/log/{name}"));
+    }
+}
+
 /// The manual's pictures (manual.rs): UART, Modbus, the Wave view.
+
 pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
     let ub = bits(&uart_frames(), 0, 3, None);
     let mb = bits(&modbus_frames(true), 1, 50, None);
@@ -334,7 +408,10 @@ pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
     save1(out, "scope-decode");
     scene(ck, "manual/scope-decode-modbus", &mb, 20.0, modbus, 30.0, 0.17, false, true, false);
     save1(out, "scope-decode-modbus");
+    log_screen(ck, "manual/scope-decode-log", true);
+    save1(out, "scope-decode-log");
 }
+
 
 fn rb(r: stockfont::Rect) -> Bx {
     Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32)

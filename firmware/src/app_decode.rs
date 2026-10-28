@@ -138,7 +138,7 @@ impl App {
     }
 
     /// Manual threshold as a code (the scope's code -> row map inverted).
-    fn dec_thr_code(&self) -> Option<u16> {
+    pub(super) fn dec_thr_code(&self) -> Option<u16> {
         let v = ds().thr_v;
         if !v.is_finite() {
             return None;
@@ -151,6 +151,9 @@ impl App {
 
     /// The level in use, V (NaN: none).
     fn dec_level(&self) -> f32 {
+        if self.scope.log_on() {
+            return self.log_level().unwrap_or(f32::NAN);
+        }
         let a = ud::ann();
         if a.mid == 0 { f32::NAN } else { self.scope.volts(a.mid as f32) }
     }
@@ -543,7 +546,7 @@ impl App {
 
     // ---- setup popup ----
 
-    pub(super) fn dec_setup_tap(&mut self, h: ud::SetupHit, now: u64) {
+    pub(super) fn dec_setup_tap(&mut self, clk: &mut Clock, h: ud::SetupHit, now: u64) {
         let s = ds();
         let old = s.cfg;
         let old_thr = s.thr_v;
@@ -551,9 +554,11 @@ impl App {
             ud::SetupHit::Proto(p) => s.cfg.proto = p,
             ud::SetupHit::Mode(m) => {
                 if m != s.mode {
-                    self.dec_mode(m);
+                    self.dec_mode(clk, m);
                 }
-                self.sp_popup_draw();
+                if self.sp_on() && !self.redraw {
+                    self.sp_popup_draw();
+                }
                 return;
             }
             ud::SetupHit::Fmt(f) => s.cfg.fmt = f,
@@ -577,28 +582,41 @@ impl App {
         if s.cfg != old || s.thr_v.to_bits() != old_thr.to_bits() {
             self.dec_changed(old);
         }
-        self.sp_popup_draw();
+        if self.view == View::Decode {
+            self.log_setup_changed();
+        } else {
+            self.sp_popup_draw();
+        }
         let _ = now;
     }
 
-    /// Band / Log (ud::MODE_*).
-    fn dec_mode(&mut self, m: u8) {
-        ds().mode = m;
-        let c = ds().cfg;
-        self.dec_changed(c);
+    /// Band / Log (ud::MODE_*): Log opens the frame log (app_log.rs), Band
+    /// leaves it for the scope page.
+    fn dec_mode(&mut self, clk: &mut Clock, m: u8) -> bool {
+        if m == ud::MODE_LOG {
+            self.log_open(clk).is_ok()
+        } else {
+            if self.view == View::Decode {
+                self.show(View::Scope, clk);
+            }
+            self.log_close();
+            true
+        }
     }
 
     /// A manual threshold starts at the level in use (1.5 V without one).
-
     fn dec_manual_start(&self) -> f32 {
         let v = self.dec_level();
         if v.is_finite() { v } else { 1.5 }
     }
 
     /// Settings changed (`old`: before): the kept decode is dropped, the
-    /// record decoded again (stopped: at once; running: the next record).
+    /// record decoded again (stopped: at once; running: the next record);
+    /// the frame log decodes on with them.
     fn dec_changed(&mut self, old: dc::Cfg) {
+        self.log_reset_decode();
         self.dec_abort();
+
         let a = ud::ann();
         let s = ds();
         if s.cfg.baud != old.baud || s.cfg.proto != old.proto {
@@ -614,7 +632,7 @@ impl App {
 
     /// DECode:... except FRAMes?: true when a reply text is in `out`.
     #[inline(never)]
-    pub fn dec_scpi(&mut self, _clk: &mut Clock, c: crate::scpi::Dcd, out: &mut crate::scpi::Scpi) -> bool {
+    pub fn dec_scpi(&mut self, clk: &mut Clock, c: crate::scpi::Dcd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Dcd as D;
         let s = ds();
         out.len = 0;
@@ -635,6 +653,7 @@ impl App {
                 }
             }
             D::Baud(Some(b)) => s.cfg.baud = b,
+            D::Rate if self.scope.log_on() => out.put_u32(self.log_rate()),
             D::Rate => {
                 self.dec_ensure();
                 let a = ud::ann();
@@ -653,7 +672,9 @@ impl App {
             }
             D::Thr(Some(v)) => s.thr_v = v,
             D::Level => {
-                self.dec_ensure();
+                if !self.scope.log_on() {
+                    self.dec_ensure();
+                }
                 let v = self.dec_level();
                 if v.is_finite() {
                     out.put_f32(v)
@@ -669,6 +690,17 @@ impl App {
                     }
                     out.put_u32(*v);
                 }
+            }
+            D::Mode(None) => out.put_bytes(if self.scope.log_on() { b"LOG" } else { b"BAND" }),
+            D::Mode(Some(m)) => {
+                if !self.dec_mode(clk, m) {
+                    out.set_err("Settings conflict");
+                }
+                return false;
+            }
+            D::Clear => {
+                self.log_clear();
+                return false;
             }
             D::Frames(_) => return false,
         }
@@ -699,11 +731,14 @@ impl App {
 
     /// DECode:COUNt?: frames, bytes, framing, parity, CRC errors of what
     /// FRAMes? reports.
-    fn dec_count(&mut self) -> [u32; 5] {
+    fn dec_count(&mut self) -> [u32; 6] {
+        if self.scope.log_on() {
+            return self.log_count();
+        }
         let mut c = [0u32; 5];
         let mut buf = [0u8; 0];
         self.dec_lines(0, &mut buf, &mut c);
-        c
+        [c[0], c[1], c[2], c[3], c[4], 0]
     }
 
     /// DECode:FRAMes? [<first>]: a #4nnnn block of frame lines (see
@@ -712,7 +747,12 @@ impl App {
     pub fn dec_frames(&mut self, first: u32, buf: &mut [u8]) -> usize {
         let lim = buf.len().min(10_000);
         let mut c = [0u32; 5];
-        let n = self.dec_lines(first, &mut buf[6..lim], &mut c);
+        let n = if self.scope.log_on() {
+            // The frame log: the host's unread frames (at most `first`).
+            self.log_lines(if first == 0 { u32::MAX } else { first }, &mut buf[6..lim])
+        } else {
+            self.dec_lines(first, &mut buf[6..lim], &mut c)
+        };
         buf[0] = b'#';
         buf[1] = b'4';
         for (i, d) in [1000usize, 100, 10, 1].iter().enumerate() {
@@ -794,9 +834,12 @@ impl App {
         self.dec_ensure();
         let a = ud::ann();
         let mut o = Out { b, n: 0, first, full: false };
-        if a.gen != self.dec_rec() || a.state != ud::C_DONE {
+        // Running: the last decoded record (a newer one may wait for its
+        // trigger or its decode); stopped: the stored one.
+        if a.state != ud::C_DONE || (!self.scope.s.run && a.gen != self.dec_rec()) {
             return 0;
         }
+
         let modbus = s.cfg.proto == dc::P_MODBUS;
         if !self.scope.s.run && (a.c0 > 0 || (a.c1 as usize) < self.scope.record().len()) {
             // Stopped, more than the lists hold: the whole record again,

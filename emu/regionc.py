@@ -15,7 +15,8 @@ fastlogtest.py:
     rc.calls(every=True)                        # ... over the whole run
 
 `gate`: the flag symbol the hooks test (default hy3131::HANDED, the AD2
-stream ISR owns the bus).
+stream ISR owns the bus), or a tuple of them (any set; the data watch
+below takes the first).
 
 `exclude`: name parts of functions left without a hook. Every call of a
 hooked function runs a Python hook, handed or not: code that is hot outside
@@ -66,7 +67,8 @@ class Hooks:
         if not nm:
             return
         r = subprocess.run([nm[0], '-C', app], capture_output=True, text=True)
-        handed = None
+        gates = (gate,) if isinstance(gate, str) else tuple(gate)
+        flags = {}
         for l in r.stdout.splitlines():
             p = l.split(None, 2)
             if len(p) < 3:
@@ -76,12 +78,17 @@ class Hooks:
                 self.funcs.append((a & ~1, p[2]))
             if p[1] in 'tT' and C_LO <= a < C_HI and not any(x in p[2] for x in exclude):
                 self.syms[a & ~1] = p[2]
-            elif p[2].startswith(gate):
-                handed = a
-        if handed is None or not self.syms:
+            else:
+                for g in gates:
+                    if p[2].startswith(g):
+                        flags[g] = a
+        if len(flags) != len(gates) or not self.syms:
             return
-        code = ("(machine.SystemBus.ReadByte(0x%x)!=0) and (open('%s','a').write('%%x 1'%%pc+chr(10)), self.RemoveHooksAt(pc))"
-                % (handed, self.hits))
+        handed = flags[gates[0]]
+        cond = ' or '.join('(machine.SystemBus.ReadByte(0x%x)!=0)' % flags[g] for g in gates)
+        code = ("(%s) and (open('%s','a').write('%%x 1'%%pc+chr(10)), self.RemoveHooksAt(pc))"
+                % (cond, self.hits))
+
         self.script = os.path.join(out_dir, tag + '.cscript')
         self.funcs.sort()
         with open(self.script, 'w') as f:

@@ -776,6 +776,16 @@ inside what is kept: none; outside it (a record with more than the lists
 hold): the window, ~2 ms. The decode's passes hold the next acquisition:
 at 1 ms/div 66 / 69 frames in 3 s instead of 80 / 88.
 
+The frame log (Mode Log, app_log.rs, ui_log.rs) lends BUF from the scope
+(`Scope::log_begin`): its first 16 K samples a circular DMA ring, then
+`app_log::Log` (the decoder and the view, under 1 KB), then the frame
+store (~52 KB with CAP 42 K; 40 KB in recovery-usb's 36 K, which has no
+scope). TCM: a pointer; SRAM: nothing. With it the static worst path is
+24 728 B (headroom 20 600 B). Emulator (--mips 110): a pass decodes for at
+most 4 ms (`x2` max 710 us at 115200 with traffic), 4 212 frames in 3 s
+at 115200 without a lost sample.
+
+
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

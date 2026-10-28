@@ -324,10 +324,13 @@ pub enum Out {
 ///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
 ///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
 ///   DECode:LEVel?                    the level of the last decode, V
-///   DECode:COUNt?                    frames,bytes,framing,parity,crc
-///   DECode:FRAMes? [<first>]         #4nnnn block of frame lines from frame
-///                                    `first`: the stopped record (running:
-///                                    the screen)
+///   DECode:MODE BAND|LOG / ?         the band on the scope page, or the
+///                                    frame log (View::Decode, app_log.rs)
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc,lost
+///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines. Band: from
+///                                    frame `n` of the decoded record; Log:
+///                                    the unread frames (at most n; 0 all)
+///   DECode:CLEar                     Log: the list and counters start again
 #[derive(Clone, Copy, PartialEq)]
 pub enum Dcd {
     /// decode::P_OFF / P_UART / P_MODBUS.
@@ -340,8 +343,11 @@ pub enum Dcd {
     /// Some(NaN) = AUTO.
     Thr(Option<f32>),
     Level,
+    /// ui_decode MODE_BAND / MODE_LOG.
+    Mode(Option<u8>),
     Count,
     Frames(u32),
+    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -2523,6 +2529,18 @@ impl Scpi {
                         }
                     } else if kw(sub, "LEVel") && query {
                         Some(Dcd::Level)
+                    } else if kw(sub, "MODE") {
+                        if query {
+                            Some(Dcd::Mode(None))
+                        } else if kw(a, "BAND") {
+                            Some(Dcd::Mode(Some(0)))
+                        } else if kw(a, "LOG") {
+                            Some(Dcd::Mode(Some(1)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "CLEar") && !query {
+                        Some(Dcd::Clear)
                     } else if kw(sub, "COUNt") && query {
                         Some(Dcd::Count)
                     } else if kw(sub, "FRAMes") && query {
@@ -2533,7 +2551,8 @@ impl Scpi {
                     match c {
                         Some(c) => out = Out::Dcd(c),
                         None => {
-                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes", "MODE"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+
                             self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }

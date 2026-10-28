@@ -65,6 +65,17 @@ const STREAM_SPIN_US: u64 = 1000;
 /// raw samples at its top (`pk_drain`). Every stored record is packed.
 #[cfg(not(feature = "recovery-usb"))]
 pub const CAP: usize = 42 * 1024;
+/// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
+/// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
+pub const LOG_RING: usize = 16 * 1024;
+/// The log stream's highest rate (10.9 samples a bit at 115200 baud).
+pub const LOG_FS_MAX: u32 = 1_250_000;
+/// The decoder's log stream runs (emu/decodetest.py's region C hooks gate
+/// on it, as emu/regionc.py on hy3131::HANDED for the AD2 stream). Nothing
+/// in the firmware reads it: `used` keeps it and its stores.
+#[used]
+pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// The `recovery-usb` variant (no LCD, no scope use) needs its own MSC
 /// buffers: a smaller ring keeps its SRAM above the 8 KiB link floor.
 #[cfg(feature = "recovery-usb")]
@@ -354,6 +365,19 @@ pub struct Scope {
     /// The protocol decoder still reads the record: the next acquisition
     /// waits (a running scope's record is overwritten by the next one).
     pub hold_restart: bool,
+    /// Protocol decoder frame log (app_log.rs, `log_begin`): BUF lent, the
+    /// DMA fills a circular raw ring of LOG_RING samples at its start at
+    /// `log_fs`, never stopped (no trigger, no frames); `log_live` while it
+    /// runs, `log_gen` counts its starts, `log_wr` the samples written
+    /// (`log_poll`), `log_ms` / `log_cyc` the last poll.
+    log: bool,
+    log_live: bool,
+    log_fs: u32,
+    log_gen: u32,
+    log_wr: u64,
+    log_last: usize,
+    log_ms: u64,
+    log_cyc: u32,
     stored_len: usize,
     stored_trig: Option<usize>,
     stored_anchor: usize,
@@ -729,6 +753,14 @@ impl Scope {
             stored_valid: false,
             rec_gen: 0,
             hold_restart: false,
+            log: false,
+            log_live: false,
+            log_fs: 0,
+            log_gen: 0,
+            log_wr: 0,
+            log_last: 0,
+            log_ms: 0,
+            log_cyc: 0,
             stored_len: 0,
             stored_trig: None,
             stored_anchor: 0,
@@ -1149,7 +1181,12 @@ impl Scope {
         // the full record for the stored-record zoom (stock Single = 65520;
         // `start` sets the length).
         self.deadline = 0;
+        // The decoder's log stream was stopped with the acquisition: on.
+        if self.log_live {
+            self.log_run(now);
+        }
     }
+
 
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
     /// record state alone.
@@ -2233,6 +2270,143 @@ impl Scope {
 
     pub fn wave_on(&self) -> bool {
         self.wave
+    }
+
+    /// Start (or restart at another rate) the decoder's frame log stream
+    /// (app_log.rs): BUF is lent (the stored record is gone), the DMA
+    /// fills its first LOG_RING samples circularly at the table rate at or
+    /// above `fs` (at most LOG_FS_MAX). The front end stays as the scope
+    /// set it. Returns the rate.
+    pub fn log_begin(&mut self, fs: u32, now: u64) -> u32 {
+        if !self.log {
+            self.lend_buf();
+            self.log = true;
+        } else {
+            self.halt();
+        }
+        let fs = fs.min(LOG_FS_MAX);
+        self.log_fs = HW.iter().rev().find(|h| h.0 >= fs).map_or(LOG_FS_MAX, |h| h.0);
+        self.log_run(now);
+        self.log_fs
+    }
+
+    /// The log's DMA (again: after a halt, a settings change).
+    fn log_run(&mut self, now: u64) {
+        let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == self.log_fs).unwrap_or(&HW[0]);
+        unsafe {
+            w32(LIFCR, 0x3D << 22);
+            w32(HIFCR, 0x3D);
+            w32(TIM8, 0);
+            w32(TIM8 + 0x28, 0);
+            w32(TIM8 + 0x2C, 3);
+            w32(TIM8 + 0x34, 2);
+            w32(TIM8 + 0x38, 0);
+            w32(TIM8 + 0x18, 6 << 4);
+            w32(TIM8 + 0x20, 1);
+            w32(TIM8 + 0x44, 1 << 15);
+            w32(TIM1, 0);
+            w32(TIM1 + 0x28, psc);
+            w32(TIM1 + 0x2C, arr);
+            w32(TIM1 + 0x40, ccr4);
+            w32(TIM1 + 0x1C, 6 << 12);
+            w32(TIM1 + 0x20, 1 << 12);
+            w32(TIM1 + 0x44, 1 << 15);
+            w32(TIM1 + 0x0C, 1 << 12);
+            w32(TIM1 + 0x14, 1);
+            w32(TIM8 + 0x0C, 1 << 10);
+            w32(S3 + 0x08, GPIOB_IDR);
+            w32(S3 + 0x0C, core::ptr::addr_of!(LATCH) as u32);
+            w32(S3 + 0x04, 2);
+            w32(S3, (7 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 8) | 1);
+            w32(S4 + 0x08, core::ptr::addr_of!(LATCH) as u32);
+            w32(S4 + 0x0C, core::ptr::addr_of!(BUF) as u32);
+            w32(S4 + 0x04, LOG_RING as u32);
+            w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | (1 << 8) | 1);
+            w32(TIM8, 1);
+            w32(TIM1, 1);
+        }
+        self.log_live = true;
+        LOG_LIVE.store(true, core::sync::atomic::Ordering::Relaxed);
+        self.log_gen = self.log_gen.wrapping_add(1);
+        self.log_wr = 0;
+        self.log_last = 0;
+        self.log_ms = now;
+        self.log_cyc = unsafe { r32(0xE000_1004) };
+    }
+
+    /// Pause the log stream (the log's memory stays); `log_resume` goes on.
+    pub fn log_halt(&mut self) {
+        if self.log_live {
+            self.halt();
+            self.log_live = false;
+            LOG_LIVE.store(false, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    pub fn log_resume(&mut self, now: u64) {
+        if self.log && !self.log_live {
+            self.log_run(now);
+        }
+    }
+
+    /// End the log: BUF back to the scope (the next poll starts an
+    /// acquisition; no stored record, `rec_gen` moves on so nothing kept
+    /// for the old one shows).
+    pub fn log_end(&mut self) {
+        if !self.log {
+            return;
+        }
+        self.halt();
+        self.log = false;
+        self.log_live = false;
+        LOG_LIVE.store(false, core::sync::atomic::Ordering::Relaxed);
+        self.stored_valid = false;
+        self.rec_gen = self.rec_gen.wrapping_add(1);
+        crate::cring::reset(false);
+        self.return_buf();
+    }
+
+    pub fn log_on(&self) -> bool {
+        self.log
+    }
+
+    /// The log stream: (samples written since its start, its generation,
+    /// whole ring laps missed), None while paused. A new generation starts
+    /// at sample 0.
+    pub fn log_poll(&mut self, now: u64) -> Option<(u64, u32, u32)> {
+        if !self.log_live {
+            return None;
+        }
+        let cyc = unsafe { r32(0xE000_1004) };
+        let r = LOG_RING;
+        let wr = (r - unsafe { r32(S4 + 0x04) } as usize % (r + 1)) % r;
+        let d = ((wr + r - self.log_last) % r) as u64;
+        // The ring position shows the advance modulo the ring: whole laps
+        // from the time since the last poll, on the cycle counter (it wraps
+        // after 21 s; beyond 10 s the ms clock).
+        let exp = if now.saturating_sub(self.log_ms) < 10_000 {
+            cyc.wrapping_sub(self.log_cyc) as u64 * self.log_fs as u64 / crate::clock::HCLK_HZ as u64
+        } else {
+            now.saturating_sub(self.log_ms) * self.log_fs as u64 / 1000
+        };
+        let laps = if exp > d + r as u64 / 2 { (exp - d + r as u64 / 2) / r as u64 } else { 0 };
+        self.log_wr += d + laps * r as u64;
+        self.log_last = wr;
+        self.log_ms = now;
+        self.log_cyc = cyc;
+        Some((self.log_wr, self.log_gen, laps as u32))
+    }
+
+    /// The log's sample ring (sample n at n % LOG_RING) and its rate.
+    pub fn log_ring(&self) -> (&'static [u16], u32) {
+        // SAFETY: main loop only; the DMA writes the ring, readers take
+        // samples well behind its position (app_log.rs).
+        (unsafe { &(&*core::ptr::addr_of!(BUF))[..LOG_RING] }, self.log_fs)
+    }
+
+    /// The log's memory: BUF above the ring (bytes).
+    pub fn log_mem(&self) -> (*mut u8, usize) {
+        (unsafe { (core::ptr::addr_of_mut!(BUF) as *mut u8).add(LOG_RING * 2) }, (CAP - LOG_RING) * 2)
     }
 
     /// Lend BUF to the inrush capture (src/app_inrush.rs): the MCX

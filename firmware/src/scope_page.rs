@@ -2438,9 +2438,10 @@ impl App {
                 return;
             }
             su::MfHit::Dec(h) => {
-                self.dec_setup_tap(h, now);
+                self.dec_setup_tap(clk, h, now);
                 return;
             }
+
         }
         let _ = clk;
         self.sp_popup_draw();

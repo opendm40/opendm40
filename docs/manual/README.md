@@ -1509,7 +1509,15 @@ Zoom and pan show the decoded capture.
 |---|---|
 | UART: hex and the character in each box | Modbus RTU, stopped: frames and a CRC error |
 
+- **Mode**: **Band** (under the trace) or **Log**: a list of every frame
+  while the input streams, for as long as it runs (up to 115200 baud). It
+  fills the scope's record memory: about 1 400 Modbus frames or 1 200
+  UART lines, the oldest go first. **SCOPE** goes back: the list is gone,
+  the scope starts a new capture.
+
+  ![The frame log: Modbus RTU](img/scope-decode-log.png)
 - Settings: protocol (**Off**, **UART**, **Modbus**), baud (**Auto** or 300
+
   to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
   (**Auto** or a level).
 - Zoomed out, the bytes become a bar. Too few samples per bit: **Rate too

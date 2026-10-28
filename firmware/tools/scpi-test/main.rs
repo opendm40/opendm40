@@ -478,6 +478,11 @@ fn decode_cmds() {
         ("DEC:COUN?", D::Count),
         ("DEC:FRAM?", D::Frames(0)),
         ("DEC:FRAM? 10", D::Frames(10)),
+        ("DEC:MODE LOG", D::Mode(Some(1))),
+        ("DECODE:MODE BAND", D::Mode(Some(0))),
+        ("DEC:MODE?", D::Mode(None)),
+        ("DEC:CLE", D::Clear),
+        ("DECODE:CLEAR", D::Clear),
     ];
     for (cmd, want) in ok {
         let got = s.handle(cmd.as_bytes(), 1);
@@ -488,11 +493,12 @@ fn decode_cmds() {
         _ => check(false, "DEC:THR AUTO: parsed"),
     }
     check(err(&mut s) == "0,\"No error\"", "DECode: no error");
-    for bad in ["DEC:BAUD 100", "DEC:BAUD 1E6", "DEC:FORM 8N2", "DEC:POL UP", "DEC:PROT CAN", "DEC:THR 1A", "DEC:FRAM? -1"] {
+    for bad in ["DEC:BAUD 100", "DEC:BAUD 1E6", "DEC:FORM 8N2", "DEC:POL UP", "DEC:PROT CAN", "DEC:THR 1A", "DEC:FRAM? -1", "DEC:MODE LIST"] {
         check(!matches!(s.handle(bad.as_bytes(), 1), Out::Dcd(_)), &format!("{bad}: refused"));
         check(err(&mut s).contains("Illegal parameter value"), &format!("{bad}: Illegal parameter value"));
     }
-    for undef in ["DEC:WHAT?", "DEC ON", "DEC:CLE"] {
+    for undef in ["DEC:WHAT?", "DEC ON", "DEC:CLE?"] {
+
         check(!matches!(s.handle(undef.as_bytes(), 1), Out::Dcd(_)), &format!("{undef}: refused"));
         check(err(&mut s).contains("Undefined header"), &format!("{undef}: Undefined header"));
     }

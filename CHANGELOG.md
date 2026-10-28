@@ -22,8 +22,10 @@ section named after the tag as the release notes; how to cut a release:
   samples, the part before it what the memory keeps
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - **Protocol decoder:** UART (RS-232, RS-485) and Modbus RTU drawn under
-  the trace, each triggered capture and on STOP, also in the Wave view.
-  Scope MF > Decode; SCPI `DECode`
+  the trace, each triggered capture and on STOP, also in the Wave view;
+  or a frame log (Mode Log) decoded while the input streams, read over
+  SCPI as a FIFO. Scope MF > Decode; SCPI `DECode`
+
   ([manual](docs/manual/README.md#protocol-decoder)).
 
 

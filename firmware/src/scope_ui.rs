@@ -23,6 +23,10 @@ use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rec
 /// The protocol decoder's bus band and its setup popup (app_decode.rs).
 #[path = "ui_decode.rs"]
 pub mod dec;
+/// The protocol decoder's frame log view (app_log.rs).
+#[path = "ui_log.rs"]
+pub mod log;
+
 
 // ---- colours (RGB565, spec sec. 0) ----
 pub const C_BAR: Color = 0x4208; // top bar, strip, panel, measurement bar
