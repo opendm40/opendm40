@@ -25,6 +25,19 @@ mod boot {
 mod clock {
     pub const HCLK_HZ: u32 = 200_000_000;
 }
+mod power {
+    pub struct ChgLog {
+        pub n: u32,
+        pub ev: [u32; 8],
+    }
+    pub static mut CHG_LOG: ChgLog = ChgLog { n: 0, ev: [0; 8] };
+    pub fn dbg_state() -> [u32; 8] {
+        [0; 8]
+    }
+    pub fn dbg_pin(_pin: u32, _mode: u32) -> bool {
+        true
+    }
+}
 mod csvlog {
     pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
     pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
