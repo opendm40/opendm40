@@ -129,6 +129,34 @@ mod meas {
         }
     }
 
+    // Review of #131: small squares (a 30 % band of 9..18 bins, under
+    // ~half a division) keep their plateau too: from code 500 to 500 + amp,
+    // noise 0..2 codes, a +5 / -5 code spike at the rising / falling edge.
+    // A triangle of the same small size still takes the extremes.
+    #[test]
+    fn small_square_keeps_the_plateau() {
+        let noise = |i: usize| ((i * 7919) % 3) as i32;
+        for amp in [30i32, 36, 40, 60, 100] {
+            for duty in [0.5f32, 0.1] {
+                let d: Vec<u16> = (0..20_000)
+                    .map(|i| {
+                        let p = (i as f32 / 1e6 * 1000.0) % 1.0;
+                        let base = if p < duty { 500 + amp } else { 500 };
+                        let spike = if p < 0.002 { 5 } else if (p - duty).abs() < 0.002 { -5 } else { 0 };
+                        (base + spike + noise(i)) as u16
+                    })
+                    .collect();
+                let r = compute_codes(&d, 1e6, 0.0, 0.01);
+                let (top, bas) = ((r.v[14] * 100.0).round() as i32, (r.v[15] * 100.0).round() as i32);
+                assert!((500 + amp..=502 + amp).contains(&top) && (500..=502).contains(&bas),
+                    "amp {amp} duty {duty}: Vtop code {top} Vbas code {bas} (Vmax {} Vmin {})", r.v[12] * 100.0, r.v[13] * 100.0);
+            }
+        }
+        let d = tri(25_000, 12.5e6, 2000.0, 500.0, 540.0, false);
+        let r = compute_codes(&d, 12.5e6, 0.0, 0.01);
+        assert!(r.v[14] == r.v[12] && r.v[15] == r.v[13], "triangle 40 codes: Vtop {} Vbas {}", r.v[14], r.v[15]);
+    }
+
     #[test]
     fn rises_preferred_and_one_edge_is_none() {
         let d = square(4800, 9600.0, 40.0, 0.25);

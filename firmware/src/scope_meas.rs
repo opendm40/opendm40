@@ -111,8 +111,10 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     let clipped = lo == 0 || hi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };
     // Top / base: most populated bin in the upper / lower 30 % band, when
-    // it is a plateau: the bin and its two neighbours hold at least 4x the
-    // band's mean for three bins. Else (a triangle or ramp fills the band
+    // it is a plateau: the band's best three-bin window holds at least 4x
+    // the band's mean for three bins (a wide band), or at least half of the
+    // band's samples (a narrow band: a small square, where 4x the mean is
+    // more than the whole band). Else (a triangle or ramp fills the band
     // evenly, so its "mode" is any bin of the band) the extreme, Vmax /
     // Vmin (#129).
     let pp_c = (hi - lo) as f32;
@@ -120,15 +122,16 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     let base_to = (lo as f32 + 0.3 * pp_c) as usize;
     let mode_in = |a: usize, b: usize, ext: usize| -> usize {
         let b = b.min(1023);
-        let (mut best, mut sum) = (a, 0usize);
+        let (mut best, mut sum, mut win) = (a, 0usize, 0usize);
         for i in a..=b {
             sum += hist[i] as usize;
             if hist[i] > hist[best] {
                 best = i;
             }
+            let w: usize = hist[i.saturating_sub(1).max(a)..=(i + 1).min(b)].iter().map(|&h| h as usize).sum();
+            win = win.max(w);
         }
-        let near: usize = hist[best.saturating_sub(1)..=(best + 1).min(1023)].iter().map(|&h| h as usize).sum();
-        if near * (b + 1 - a) >= 12 * sum { best } else { ext }
+        if win * (b + 1 - a) >= 12 * sum || 2 * win >= sum { best } else { ext }
     };
     let tb = mode_in(top_from, hi as usize, hi as usize);
     let bb = mode_in(lo as usize, base_to, lo as usize);
