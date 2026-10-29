@@ -394,6 +394,9 @@ pub struct App {
     /// Record page: free bytes on the disk as scanned on page entry
     /// (csvlog::free_bytes; Err = busy / no disk), for the estimate.
     rec_free: Result<u32, crate::csvlog::GErr>,
+    /// Where MENU / Back on the Record page return to: the page it was
+    /// opened from (the range page's Record button, or Hold & Limits).
+    rec_back: View,
     /// Record page interval "Fast" (the fast logger, fastlog.rs; volatile:
     /// not persisted) and the session request for main.rs, which owns the
     /// logger (`take_fast_req`).
@@ -674,6 +677,7 @@ impl App {
             rec_func: 255,
             rec_shown: false,
             rec_free: Err(crate::csvlog::GErr::NoDisk),
+            rec_back: View::Limits,
             rec_fast: false,
             fast_req: None,
         };
@@ -797,6 +801,8 @@ impl App {
         ui::set_cpl_auto(self.dmm.cpl_auto());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
         ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
+        // The range pages' Record button: red while recording.
+        ui::set_rec_on(crate::csvlog::active() || crate::fastlog::active());
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
@@ -1431,7 +1437,7 @@ impl App {
         matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA)
     }
 
-    /// The function has a range page (MF opens it; its Hold/Limits button
+    /// The function has a range page (MF opens it; its Limits button
     /// opens Hold & Limits). Without one MF opens Hold & Limits directly.
     fn has_range_page(&self) -> bool {
         matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power) || self.dmm.hy_mode() == 15
@@ -1441,6 +1447,16 @@ impl App {
     /// page it was opened from (#111), else the instrument.
     fn limits_back(&self) -> View {
         if self.has_range_page() { View::Range } else { self.back_view }
+    }
+
+    /// Open the Record page from the current page (range page, Power
+    /// Settings, temperature page, Hold & Limits), which MENU / Back on it
+    /// return to. The estimate's disk scan: on entry only, never while a
+    /// commit holds the disk (Busy then).
+    fn record_open(&mut self, clk: &mut Clock) {
+        self.rec_back = self.view;
+        self.rec_free = crate::csvlog::free_bytes();
+        self.show(View::Record, clk);
     }
 
     /// Where OK / cancel / MENU on the keypad return to.
@@ -3288,7 +3304,7 @@ impl App {
                     }
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
-                    View::Record => View::Limits,
+                    View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
                     View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
@@ -3530,6 +3546,10 @@ impl App {
                         self.show(View::Limits, clk);
                         return;
                     }
+                    Some(ui::TK_RECORD) => {
+                        self.record_open(clk);
+                        return;
+                    }
                     Some(i @ 0..=6) => {
                         if i != k {
                             self.dmm.set_t_sensor(clk, i);
@@ -3586,6 +3606,7 @@ impl App {
                         self.show(v, clk);
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
+                    Some(Err(7)) => self.record_open(clk),
                     Some(Err(5)) if b == Button::Amp => self.fuse_dialog(now, 0),
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
@@ -3727,10 +3748,7 @@ impl App {
                     }
                     Some(7) => self.meter.lim_beep = !self.meter.lim_beep,
                     Some(8) => {
-                        // The estimate's disk scan: on entry only, never
-                        // while a commit holds the disk (Busy then).
-                        self.rec_free = crate::csvlog::free_bytes();
-                        self.show(View::Record, clk);
+                        self.record_open(clk);
                         return;
                     }
                     _ => return,
@@ -3740,7 +3758,8 @@ impl App {
             }
             View::Record => {
                 if ui::title_back_hit(y) {
-                    self.show(View::Limits, clk);
+                    let v = self.rec_back;
+                    self.show(v, clk);
                     return;
                 }
                 let now = clk.now_ms();

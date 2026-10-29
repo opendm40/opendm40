@@ -1523,20 +1523,66 @@ pub fn range_note(t: &str, warn: bool) {
     sf::glyphs(sf::TEXT22, rect(8, 142, 464, 36), t, if warn { VALUE } else { DIM }, BG, 8, 1);
 }
 
-/// The "Hold/Limits" (opens View::Limits) and OK buttons at the bottom of
-/// the MF range / temperature pages.
+/// The bottom row of the MF range / temperature pages (owner 2026-10-30:
+/// Record one tap from MF, not under Hold & Limits): four buttons on the
+/// range grid's columns, `bottom_rect(0..3)` = Limits (View::Limits),
+/// Record (View::Record), Wave (V / A in ad2-isr builds, else empty), OK.
+/// "Limits", as on Power Settings: "Hold/Limits" (120 px) is wider than a
+/// column (112).
+pub fn bottom_rect(col: usize) -> sf::Rect {
+    rect(8 + col as i16 * 117, 240, 112, 38)
+}
+
+/// Bottom-row column under x (the 5 px gaps split between the buttons), or
+/// None off the row (y 240..278).
+fn bottom_col(x: u16, y: u16) -> Option<usize> {
+    let (x, y) = (x as i16, y as i16);
+    if !(240..278).contains(&y) {
+        return None;
+    }
+    Some(((x.max(8) - 8 + 2) / 117).min(3) as usize)
+}
+
+/// Limits, Record and OK of the bottom row (`bottom_rect`); region B, as
+/// `record_button`.
+#[inline(never)]
 fn ok_and_limits_buttons() {
-    for (x, t) in [(8i16, "Hold/Limits"), (319, "OK")] {
-        let r = rect(x, 240, 150, 38);
+    for (c, t) in [(0, "Limits"), (3, "OK")] {
+        let r = bottom_rect(c);
         sf::rbox(r, 6, 0x2966, BG);
         sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
     }
+    record_button(bottom_rect(1), false);
+}
+
+/// A CSV recording or a fast-log session runs (`record_button` red, as the
+/// Record page's Stop). Set by the app with the page draw (`set_rec_on`).
+static REC_ON: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn set_rec_on(on: bool) {
+    REC_ON.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// "Record" (opens View::Record) on the range, temperature and Power
+/// Settings pages: red while recording (`set_rec_on`), `pressed` the
+/// pressed colour. Region B (not inlined into the .cold page draws).
+#[inline(never)]
+pub fn record_button(r: sf::Rect, pressed: bool) {
+    let c = if pressed {
+        K_SEL
+    } else if REC_ON.load(core::sync::atomic::Ordering::Relaxed) {
+        REC_CSV
+    } else {
+        0x2966
+    };
+    sf::rbox(r, 6, c, BG);
+    sf::glyphs(sf::TEXT22, r, "Record", STATUS_FG, c, 8, 0);
 }
 
 /// "Wave" on the V / A range pages (the DMM wave view, app_wave.rs; builds
-/// with the AD2 stream ISR only): between Hold/Limits and OK, in the
-/// stock DC / AC / AC+DC column grid (x 162, the AC button's column).
-pub const WAVE_BTN: sf::Rect = rect(162, 240, 150, 38);
+/// with the AD2 stream ISR only): the bottom row's third column, between
+/// Record and OK.
+pub const WAVE_BTN: sf::Rect = rect(242, 240, 112, 38);
 
 /// "Fuse check" on the Current Settings page (`range_page`): rows 141..177
 /// between the range buttons (to 136) and DC / AC / AC+DC (from 182).
@@ -1549,8 +1595,7 @@ pub fn wave_button() {
 
 /// The Wave button was hit (the gaps to its neighbours split as theirs).
 pub fn wave_hit(x: u16, y: u16) -> bool {
-    let (x, y) = (x as i16, y as i16);
-    (240..278).contains(&y) && (160..316).contains(&x)
+    bottom_col(x, y) == Some(2)
 }
 
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
@@ -1584,8 +1629,9 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
                 };
                 (cpl_rect(i as usize), CPL_NAMES[i as usize], i == sub)
             }
-            (2, _) => (rect(319, 240, 150, 38), "OK", false),
-            (4, _) => (rect(8, 240, 150, 38), "Hold/Limits", false),
+            (2, _) => (bottom_rect(3), "OK", false),
+            (4, _) => (bottom_rect(0), "Limits", false),
+            (7, _) => return record_button(bottom_rect(1), on),
             (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
             _ => return,
         },
@@ -1597,7 +1643,7 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
 }
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
-/// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
+/// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
 /// buttons, while `ohm_vars_shown(sel)`.
 pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
@@ -1617,11 +1663,11 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         let i = ((x.max(8) - 8 + 2) / 117).min(3);
         return Some(Err([0, 1, 3, 6][i as usize]));
     }
-    if (240..278).contains(&y) && x >= 319 {
-        return Some(Err(2));
-    }
-    if (240..278).contains(&y) && (8..158).contains(&x) {
-        return Some(Err(4));
+    match bottom_col(x as u16, y as u16) {
+        Some(0) => return Some(Err(4)),
+        Some(1) => return Some(Err(7)),
+        Some(3) => return Some(Err(2)),
+        _ => {}
     }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
@@ -1643,7 +1689,8 @@ const T_KEYS: [&str; 7] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "1
 ///   row 144..180   "Offset"  [ - ]  value  [ + ]  (settings-stepper look;
 ///                  0.1 C steps; a tap on the value opens the signed keypad)
 ///   row 186..222   NTC user only: R25 and Beta fields (tap = keypad)
-///   row 240..278   Hold/Limits, OK;  282..316 the info line.
+///   row 240..278   Limits, Record, OK (`bottom_rect`);  282..316 the
+///                  info line.
 /// Every hit box reaches 3 px into the gaps around its button.
 #[derive(Clone, Copy)]
 pub struct TempPage<'a> {
@@ -1664,6 +1711,7 @@ pub const TK_PLUS: u8 = 9;
 pub const TK_OFFS: u8 = 10;
 pub const TK_R25: u8 = 11;
 pub const TK_BETA: u8 = 12;
+pub const TK_RECORD: u8 = 253;
 pub const TK_LIMITS: u8 = 254;
 pub const TK_OK: u8 = 255;
 
@@ -1680,13 +1728,14 @@ fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
         TK_PLUS => rect(402, T_ROW_Y, 70, T_ROW_H),
         TK_R25 if sensor == 6 => rect(8, T_NTC_Y, 228, T_ROW_H),
         TK_BETA if sensor == 6 => rect(244, T_NTC_Y, 228, T_ROW_H),
-        TK_LIMITS => rect(8, 240, 150, 38),
-        TK_OK => rect(319, 240, 150, 38),
+        TK_LIMITS => bottom_rect(0),
+        TK_RECORD => bottom_rect(1),
+        TK_OK => bottom_rect(3),
         _ => return None,
     })
 }
 
-const T_CODES: [u8; 15] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_OK];
+const T_CODES: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_RECORD, TK_OK];
 
 /// Offset text "+7.3 C" (TEXT22 has no degree sign).
 fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
@@ -1699,6 +1748,9 @@ fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
 /// ui-review #11: feedback from touch-down).
 pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
     let Some(r) = temp_rect(p.sensor, code) else { return };
+    if code == TK_RECORD {
+        return record_button(r, pressed);
+    }
     let sel = code < 7 && code == p.sensor;
     let c = if pressed { K_SEL } else if sel { SEL } else { 0x2966 };
     let mut b = [0u8; 24];
@@ -1718,7 +1770,7 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
             let v = crate::dmm::format(&mut t, p.beta, 0);
             join(&mut b, &["Beta  ", v, " K"])
         }
-        TK_LIMITS => "Hold/Limits",
+        TK_LIMITS => "Limits",
         _ => "OK",
     };
     if code == TK_OFFS {
@@ -2930,7 +2982,8 @@ pub fn list_hit(y: u16, n: usize) -> Option<usize> {
 
 /// Rows of the DMM Hold & Limits page (View::Limits). The ninth, "Record",
 /// opens the Record page (View::Record; 9 rows at the settings pitch fit:
-/// 44 + 8 x 30 + 27 = 311).
+/// 44 + 8 x 30 + 27 = 311): the way there for continuity, diode and
+/// frequency, which have no range page and so no Record button.
 pub const LIMIT_ROWS: [&str; 9] = [
     "Auto Hold", "Limits", "Upper limit", "Lower limit", "Upper = reading", "Lower = reading", "Clear limits",
     "Fail beep", "Record",
@@ -3054,7 +3107,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
     (
         "Record + alerts",
         [
-            ("Record page", "MF > Hold & Limits"),
+            ("Record page", "MF > Record"),
             ("Interval rows", "Mean of the readings"),
             ("Swipe down (DMM)", "Same settings"),
             ("While recording", "No auto power-off"),

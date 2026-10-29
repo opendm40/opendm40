@@ -130,6 +130,10 @@ impl App {
                         self.show(View::Limits, clk);
                         return true;
                     }
+                    Some(ui::pw::PS_RECORD) => {
+                        self.record_open(clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
