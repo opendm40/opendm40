@@ -1492,8 +1492,9 @@ static mut GRAPH: Graph = Graph {
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
-/// tabs, the FFT label and boxes, the cursor tab.
-const NH: usize = 9;
+/// tabs, the FFT label and boxes, the cursor tab, an open popup's box, the
+/// rows `regraph_rows` leaves alone.
+const NH: usize = 10;
 pub const H_BUBBLE: usize = 0;
 pub const H_TAB_L: usize = 1;
 pub const H_TAB_R: usize = 2;
@@ -1502,7 +1503,8 @@ pub const H_FFT_Y: usize = 4;
 pub const H_FFT_X: usize = 5;
 pub const H_FFT_PK: usize = 6;
 pub const H_CUR: usize = 7;
-pub const H_SPARE: usize = 8;
+pub const H_POPUP: usize = 8;
+const H_REST: usize = 9;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -2000,6 +2002,27 @@ pub fn uncover(m: &Model, ch1: bool, math: bool) {
     }
     graph().invalidate();
     frame(m);
+}
+
+/// Rows y0..y1 (screen, exclusive) of the graph and its side frame lines
+/// again, the rest of the graph left alone: what a shrinking popup box
+/// (`keep`: the new box, drawn) uncovers. Only the graph lies there (the
+/// overlays sit at the graph's top rows and its bottom row).
+pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
+    if y1 <= y0 {
+        return;
+    }
+    lcd::fill_rect(13, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(413, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    let g = graph();
+    g.holes[H_POPUP] = Some(keep);
+    g.holes[H_REST] = Some(rect(13, y1, 401, 320 - y1));
+    g.invalidate();
+    g.flush(m);
+    // The rows under the hole still show the graph as it is (nothing
+    // renders while the popup covers the page): not repainted later.
+    g.holes[H_REST] = None;
+    g.d_holes[H_REST] = None;
 }
 
 /// Forget everything drawn (the next `update` draws the whole page).
@@ -2651,6 +2674,17 @@ pub fn slider_value(x: i16) -> f32 {
 const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
 
 /// MF settings popup (FUN_08037574), tab 0..3.
+/// The box a popup paints whole: a graph hole while it is open (a full
+/// repaint under an open popup does not draw the graph there first).
+/// None: no hole (the timebase list).
+pub fn popup_box(p: Popup) -> Option<Rect> {
+    match p {
+        Popup::Mf(t) => Some(rect(13, 20, 401, 40 + MF_PAGE_H[t.min(3) as usize])),
+        Popup::Ch1(_) | Popup::Math(_) => Some(rect(214, 20, 200, 281)),
+        _ => None,
+    }
+}
+
 pub fn draw_mf(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
     let page_h = MF_PAGE_H[tab as usize];

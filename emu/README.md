@@ -278,6 +278,7 @@ recorded.
 | [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered | ~4 min | BT 4834 |
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
+| [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
 | [`flowtest.py`](flowtest.py) | the live window's signal-flow diagram does not move; no emulator | | - |
 
 ### Helpers
@@ -286,6 +287,7 @@ recorded.
 |---|---|
 | [`emusync.py`](emusync.py) | reads the [input markers](#input-markers) from the Renode log |
 | [`regionc.py`](regionc.py) | Renode hooks: which region C functions run while the AD2 stream ISR owns the bus |
+| [`lcdtrace.py`](lcdtrace.py) | replays an LCD write trace (`sysbus.lcd Trace PATH`) at the panel's refresh rate: redraw time, transient pixels, filmstrips |
 | [`infovol.py`](infovol.py) | reads the USB volume's INFO/ files during an AD2 stream |
 | [`hy3131/runemu.py`](hy3131/runemu.py) | `run.py` with a separate HY3131 compile unit |
 | [`usbip_client.py`](usbip_client.py), [`usbip_proxy.py`](usbip_proxy.py) | USB/IP client and logging proxy ([USB over USB/IP](#usb-over-usbip)) |
@@ -321,7 +323,7 @@ Models are C# files compiled by Renode at start-up; the platform is
 | Flash, SRAM, TCM, backup SRAM, OTP / UID | memory | |
 | FMC flash controller | Renode `STM32F4_FlashController` | erase and program as plain writes; BUSY never set |
 | RCC, PWR | Renode STM32F4 models | ready bits follow the enables; every timer clock is 200 MHz |
-| LCD (FSMC bank 1) | [`ILI9488.cs`](peripherals/ILI9488.cs) | RGB666 read-back as the panel; `Screenshot`, `AutoShot` |
+| LCD (FSMC bank 1) | [`ILI9488.cs`](peripherals/ILI9488.cs) | RGB666 read-back as the panel; `Screenshot`, `AutoShot`, `Trace` (every RAM write burst with its time) |
 | GPIO | [`GD32_GPIO.cs`](peripherals/GD32_GPIO.cs) | pull-ups give the level of undriven inputs |
 | TIM1, 2, 5, 7, 8 | [`GD32_Timer.cs`](peripherals/GD32_Timer.cs) | slave modes, one-pulse, capture, PWM, TRGO; events at their exact virtual time. TIM7 is opendm40's AD2 stream tick |
 | TIM3, 6, 12-14 | [`PwmTimer.cs`](peripherals/PwmTimer.cs) | registers and counter only, no events |

@@ -4296,3 +4296,12 @@ Emulator (emu/):
       6 kohm means AUTO tried 600 ohm, read OL and went back (OHM_BAND hold).
       Open PR #57: the MR9270 only (it stops at 400 Ω): at 400 Ω no OL static, after 200 -> 400 Ω, with 0.28 mA
       ON or on AUTO (lands on 600 Ω); the MMB3.0 500 Ω steps and the passive resistor stay open.
+
+## Jerky screen changes (owner 2026-10-29, branch fix/smooth-redraw)
+
+Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoothtest.py](../emu/smoothtest.py).
+- [ ] Device check (2 min, the `--features mute` build): menu > each tile and back, DMM V -> Ω -> A, MF range page
+      open / close, scope MF menu open, its tabs, close. Expected: no blank screen between pages; the old page
+      stays until the new one covers it.
+- [ ] Scope page entry: the full graph takes ~126 ms in the emulator (`--mips 110`), now a left-to-right wipe;
+      its speed is not changed. The device time is unknown.

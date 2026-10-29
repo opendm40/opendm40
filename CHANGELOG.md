@@ -7,6 +7,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- Smoother screen changes: pages, popups and DMM functions draw over the old
+  screen, not over a blank one; an MF menu tab redraws only the menu.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
