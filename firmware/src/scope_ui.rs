@@ -219,8 +219,9 @@ pub struct Model {
     pub src: u8,
     /// Source DMM: the unit of the vertical values is A (current rows).
     pub amps: bool,
-    /// Source DMM: the V/div value (SI, `fmt_div`: "1.5V", "200uA") and the
-    /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
+    /// The V/div value (SI, `fmt_div`: "1.5V", "200uA", "2.5V" with a x5
+    /// probe) and, source DMM, the CH1 label ("AC mA"); 0 / "" = the stock
+    /// texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
 }

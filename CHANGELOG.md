@@ -54,6 +54,8 @@ section named after the tag as the release notes; how to cut a release:
   row lower (0.1 V became 0.113 V at 500 mV/div).
 - SCPI: `WAVeform:DATA?` in BYTE format is no longer 1.5 codes low on
   average (the preamble's `yorig` is the middle of a byte's four codes).
+- Scope: the V/div label is right with x2, x5 and the other non-decade
+  probes (x5 at 2.5 V/div showed 2V).
 
 ## v0.3.0 (2026-10-27)
 

@@ -547,7 +547,9 @@ impl App {
                 su::SRC_MCX
             },
             amps,
-            wvdiv: if wave { self.scope.vdiv() } else { 0.0 },
+            // The V/div text from the value (fmt_div) also off the Wave
+            // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
+            wvdiv: self.scope.vdiv(),
             ch1_txt: if wave { self.wave_func_label() } else { "" },
         }
     }
@@ -878,11 +880,9 @@ impl App {
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
-        if wave {
-            su::fmt_div(&mut v, self.scope.vdiv(), unit);
-        } else {
-            su::vdiv_text(&mut v, vdiv_idx(s.range, s.probe));
-        }
+        // From the value: the label table index (vdiv_idx) is wrong with
+        // a x2 / x5 ... probe (#133).
+        su::fmt_div(&mut v, self.scope.vdiv(), unit);
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
@@ -2000,7 +2000,7 @@ impl App {
             su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
             b.push("/div");
         } else {
-            su::vdiv_text(&mut b, vdiv_idx(p.i, self.scope.s.probe));
+            su::fmt_div(&mut b, scope::VDIV[p.i.min(9)] * self.scope.s.probe, "V");
             b.push("/div");
         }
         let t = sf::Ink::new(sf::SC_F16, BUBBLE, b.as_str(), 8, 0);
