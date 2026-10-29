@@ -6056,6 +6056,12 @@ impl Dmm {
     }
 
     fn cap_ramp_val(&self, c_uf: f32, ol: bool) -> Reading {
+        // An over-range in AUTO below 60 mF is a range step on its way
+        // (device 37304252: a final "OL" after the grey 505 uF on 600 uF):
+        // dashes; a final OL only on 60 mF or a manual range.
+        if ol && !self.manual && self.range < 7 {
+            return self.cap_dash();
+        }
         let mut rd = self.cap_val(c_uf, ol);
         rd.prov = self.ramp.first && !ol;
         rd
