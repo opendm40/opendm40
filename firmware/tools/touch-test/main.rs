@@ -814,19 +814,40 @@ fn hit_tests(ck: &mut Ck) {
     page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3]);
     ck.t("record stepper: '-' key and label step down", ui::record_step(177) == -1 && ui::record_step(20) == -1);
     ck.t("record stepper: '+' key steps up", ui::record_step(437) == 1 && ui::record_step(463) == 1);
-    // Range pages and the temperature page.
+    // Range pages and the temperature page. V / A with the ad2-isr builds'
+    // Wave button (200) and the A page's Inrush (201), in App::tap's order
+    // (Wave, Inrush, then range_hit).
     for b in [dmm::Button::Volt, dmm::Button::Amp, dmm::Button::Ohm, dmm::Button::Cap] {
         host::reset(0);
         let n = ui::range_items(b).len();
         ui::range_page(b, Some(0), 0, None);
+        let va = matches!(b, dmm::Button::Volt | dmm::Button::Amp);
+        if va {
+            ui::wave_button();
+        }
+        if b == dmm::Button::Amp {
+            ui::inrush_button();
+        }
         let hit = move |x, y| {
+            if va && ui::wave_hit(x, y) {
+                return Some(200);
+            }
+            if b == dmm::Button::Amp && ui::inrush_hit(x, y) {
+                return Some(201);
+            }
             ui::range_hit(b, None, x, y).map(|r| match r {
                 Ok(i) => i as u32,
                 Err(k) => 100 + k as u32,
             })
         };
         let mut want: Vec<u32> = (0..n as u32).collect();
-        want.extend([102, 104]);
+        want.extend([102, 104, 107]); // OK, Limits, Record
+        if va {
+            want.push(200);
+        }
+        if b == dmm::Button::Amp {
+            want.extend([105, 201]); // Fuse check, Inrush
+        }
         if matches!(b, dmm::Button::Volt | dmm::Button::Amp) {
             want.extend([100, 101, 103, 106]); // DC / AC / AC+DC / AUTO (AC/DC)
         }
@@ -847,8 +868,14 @@ fn hit_tests(ck: &mut Ck) {
         })
     };
     let mut want: Vec<u32> = (0..n as u32).collect();
-    want.extend([102, 104]);
+    want.extend([102, 104, 107]);
     page(ck, "range ohm 600M", &hit, &|b| b.y0 >= 40, &want);
+    // Power Settings: every button, the bottom row's five included.
+    host::reset(0);
+    let pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..dmm::pw::PowerVals::ZERO };
+    ui::pw::settings_page(&pv);
+    let want: Vec<u32> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
+    page(ck, "power settings", &|x, y| ui::pw::settings_hit(x, y).map(|c| c as u32), &|b| b.y0 >= 40, &want);
     ck.t("range ohm 600M: the test-current row is dead", (12..470).step_by(20).all(|x| hit(x, 200).is_none()));
     host::reset(0);
     // Temperature page: every key of both layouts (NTC user adds R25 / Beta).
@@ -859,7 +886,7 @@ fn hit_tests(ck: &mut Ck) {
         if k == 6 {
             want.extend([11, 12]);
         }
-        want.extend([254, 255]);
+        want.extend([253, 254, 255]);
         page(ck, &format!("temperature {k}"), &move |x, y| ui::temp_hit(k, x, y).map(|v| v as u32), &|b| b.y0 >= 40 && b.y1 < 280, &want);
     }
     // Keypads.

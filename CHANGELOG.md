@@ -18,6 +18,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Record button on the range pages:** MF, then **Record** opens the Record
+  page (red while recording); **Hold/Limits** is now **Limits**
+  ([manual](docs/manual/README.md#the-record-page)).
+
+  ![Before and after: the current range page](docs/changelog/v0.4.0/record-button.png)
 - **The update loader no longer opens by itself** after repeated hangs (a
   hang restarts the meter).
 - **Leaving the update loader:** opened with the power-key hold or
@@ -26,6 +31,8 @@ section named after the tag as the release notes; how to cut a release:
   [How to reach it](docs/manual/README.md#reach-the-update-loader).
 - Smoother screen changes: pages, popups and DMM functions draw over the old
   screen, not over a blank one; an MF menu tab redraws only the menu.
+- The menu, settings, range, help, generator and oscilloscope pages appear
+  top to bottom in one pass, with no half-drawn widgets.
 
 ### Fixed
 

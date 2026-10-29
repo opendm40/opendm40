@@ -1097,6 +1097,37 @@ fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     }
 }
 
+/// lcd.rs strip rendering (App::repaint): the page drawn in strips over one
+/// previous screen ends pixel-identical to the page drawn directly over
+/// another (a page must cover every pixel: nothing of the old screen may
+/// show through), every pixel is written once, and the strips do not cost
+/// much more than the direct draw (host CPU time, printed).
+fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    let t = std::time::Instant::now();
+    draw();
+    let td = t.elapsed();
+    let a = host::emu().fb.clone();
+    unsafe { host::PATTERN = false };
+    host::reset(0x1234);
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    let t = std::time::Instant::now();
+    lcd::strips(&mut buf, || draw());
+    let ts = t.elapsed();
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("strips: {n} px differ from the direct draw"));
+    }
+    if writes != (W * H) as u64 {
+        ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
+    }
+    println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
 /// The bargraph's full-scale label ends with the unit as the readout and
 /// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
 /// kOhm"): the label's last columns (right-aligned at the bar's end, row
@@ -2480,7 +2511,7 @@ fn main() {
         ui::temp_page(&tp);
         ck.check_opts(&format!("temp/{k}/{offs}/{r25}"), &page_regions, false);
         let before: Vec<u16> = emu().fb.clone();
-        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_OK] {
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
             ui::temp_key(&tp, code, true);
             ui::temp_key(&tp, code, false);
         }
@@ -2571,6 +2602,43 @@ fn main() {
         defer_check(&mut ck, &format!("defer/scope/{}", sc.name), || {
             unsafe { host::PATTERN = true };
             stock::draw(sc);
+        });
+    }
+
+    // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
+    strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
+    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    strip_check(&mut ck, "strip/help", || ui::help_page(0));
+    strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
+    // The generator page's first strip draw after a boot (#153), each wave
+    // as the boot default: the preview's strip cache as the device has it
+    // then (`.sram_bss`, zeroed by the startup code).
+    for wave in gen::Wave::ALL {
+        unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
+        w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    w.gen.apply(gen::Settings::DEFAULT);
+    strip_check(&mut ck, "strip/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    dv.bar_on = true;
+    strip_check(&mut ck, "strip/dmm-bar", || dv.draw_static(Button::Amp, 3, false, false));
+    dv.bar_on = false;
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()) {
+        // stock::draw without its screen reset (App::repaint: the scope
+        // page from scope_ui::invalidate).
+        let pv = stock::popvals(&sc.m);
+        strip_check(&mut ck, &format!("strip/scope/{}", sc.name), || {
+            scope_ui::invalidate();
+            stock::load(sc);
+            scope_ui::update(&sc.m);
+            scope_ui::cells(&sc.m, &sc.cells);
+            scope_ui::draw_popup(sc.popup, &pv);
         });
     }
 
@@ -3138,10 +3206,10 @@ fn main() {
             let range_t = |b: Button| -> Vec<u8> {
                 let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
                 let errs: &[u8] = match b {
-                    Button::Volt => &[0, 1, 3, 6, 2, 4],
-                    Button::Amp => &[0, 1, 3, 6, 2, 4, 5],
-                    Button::Ohm => &[0, 1, 2, 4],
-                    _ => &[2, 4],
+                    Button::Volt => &[0, 1, 3, 6, 2, 4, 7],
+                    Button::Amp => &[0, 1, 3, 6, 2, 4, 7, 5],
+                    Button::Ohm => &[0, 1, 2, 4, 7],
+                    _ => &[2, 4, 7],
                 };
                 t.extend(errs.iter().map(|k| ui::RP_ERR + k));
                 if matches!(b, Button::Volt | Button::Amp) {
@@ -3154,7 +3222,7 @@ fn main() {
             };
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
-            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=31).filter(|&c| c != 21).collect();
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
@@ -3196,6 +3264,8 @@ fn main() {
                     "range0-103" => "m03e-range-v-cpl-pressed",
                     "range1-105" => "m03f-range-a-fuse-pressed",
                     "range1-102" => "m03g-range-a-ok-pressed",
+                    "range0-107" => "m03h-range-v-record-pressed",
+                    "pwset32" => "p31c-power-settings-record-pressed",
                     "pwset2" => "p31-power-settings-pressed",
                     "pwset28" => "p31b-power-settings-cpl-pressed",
                     _ => "",
@@ -3225,6 +3295,22 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
+        host::reset(0);
+        ui::range_page(Button::Cap, Some(7), 0, None);
+        save(&out, "m07b-range-cap");
+        // While recording: the Record button red (V, power, temperature).
+        ui::set_rec_on(true);
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+        ui::wave_button();
+        save(&out, "m03i-range-v-recording");
+        host::reset(0);
+        ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: true, i_auto: true, ..pw_cases()[0].1 });
+        save(&out, "p07b-power-settings-recording");
+        host::reset(0);
+        ui::temp_page(&ui::TempPage { sensor: 0, offs: 0.0, unit_f: false, r25: 10_000.0, beta: 3950.0, info: "Cold junction 24.6 C" });
+        save(&out, "m06b-temp-recording");
+        ui::set_rec_on(false);
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
