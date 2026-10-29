@@ -382,6 +382,56 @@ pub fn run(ck: &mut Checker, out: &str) {
             nw += 1;
         }
     }
+    // A CSV recording on the Scope page (Model::rec, issue #101): red "REC"
+    // in the source badge's slot, the record bar beside it (also on the
+    // stock page of builds without the stream ISR, SRC_NONE): running,
+    // stopped with its brackets, roll, the generator frequency; updates
+    // between them and to / from no recording equal fresh draws.
+    let rec_scene = |src: u8, status: u8, roll: bool, gen: bool| {
+        let mut sc = wave_scene(src, 0, status, roll, 3);
+        sc.name = "rec";
+        sc.m.rec = true;
+        sc.m.gen_hz = if gen { 1000.0 } else { 0.0 };
+        sc
+    };
+    for src in [scope_ui::SRC_NONE, scope_ui::SRC_MCX] {
+        for (status, roll, gen) in [(scope_ui::ST_TD, false, false), (scope_ui::ST_STOP, false, false), (scope_ui::ST_RUN, true, false), (scope_ui::ST_TD, false, true)] {
+            let sc = rec_scene(src, status, roll, gen);
+            stock::draw(&sc);
+            let name = format!("rec/{src}/{status}/{}/{}", roll as u8, gen as u8);
+            ck.check_replica(&name);
+            ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+            nw += 1;
+            if src == scope_ui::SRC_MCX && status == scope_ui::ST_STOP {
+                save(out, "s05-rec-badge");
+            }
+            if src == scope_ui::SRC_NONE && gen {
+                save(out, "s05-rec-badge-stock-gen");
+            }
+        }
+    }
+    let states = [
+        stock::Scene { name: "rec", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
+        wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false),
+        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false),
+        rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true),
+    ];
+    for (i, a) in states.iter().enumerate() {
+        for (j, b) in states.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            stock::draw(b);
+            let want = emu().fb.clone();
+            stock::draw(a);
+            stock::load(b);
+            scope_ui::update(&b.m);
+            scope_ui::cells(&b.m, &b.cells);
+            ck.same_as(&format!("rec/update/{i}->{j}"), &want);
+            nw += 1;
+        }
+    }
     // Trigger-level drag steps (src/scope_ui.rs Graph::flush repaints the
     // changed guide rows as row runs between the holes; the trigger badge
     // after the graph): each step equals its fresh draw, plain and with the

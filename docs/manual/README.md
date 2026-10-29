@@ -1954,7 +1954,7 @@ There are two recorders:
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
 meter beeps and shows **Recording CSV**; **REC** appears in red in the
-status bar. Swipe down again to stop. When the last rows are on the disk,
+status bar (on the scope page in place of **MCX | DMM**). Swipe down again to stop. When the last rows are on the disk,
 the meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.

@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Scope page: **REC** in red in the top bar while a recording runs, in place
+  of MCX | DMM ([#101](https://github.com/opendm40/opendm40/issues/101)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

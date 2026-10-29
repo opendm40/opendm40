@@ -1785,7 +1785,7 @@ fn battery_glyph(b: &mut [u8; 4], bars: u8) -> &str {
 /// CSV recording badge colour (status blocks): red. The MIN/MAX session
 /// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
 /// column).
-const REC_CSV: Color = 0xF800;
+pub const REC_CSV: Color = 0xF800;
 
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart

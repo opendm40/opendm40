@@ -548,6 +548,8 @@ impl App {
             amps,
             wvdiv: if wave { self.scope.vdiv() } else { 0.0 },
             ch1_txt: if wave { self.wave_func_label() } else { "" },
+            // The combined view shows REC in the strip badge.
+            rec: self.view == View::Scope && crate::csvlog::active(),
         }
     }
 
