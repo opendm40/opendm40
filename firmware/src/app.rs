@@ -959,13 +959,8 @@ impl App {
                 let mut blb = [0u8; 16];
                 let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
                 // opendm40 firmware version (NOT the stock "Software V2.6").
-                let mut fwb = [0u8; 32];
-                let pre = b"opendm40 ";
-                fwb[..pre.len()].copy_from_slice(pre);
-                let v = ui::FW_VERSION.as_bytes();
-                let k = v.len().min(32 - pre.len());
-                fwb[pre.len()..pre.len() + k].copy_from_slice(&v[..k]);
-                let fw = core::str::from_utf8(&fwb[..pre.len() + k]).unwrap_or("opendm40");
+                let mut fwb = [0u8; 48];
+                let fw = ui::device_software(&mut fwb);
                 // Order and labels follow the stock §6 line order
                 // (gui_v2_6.h:99: Bootloader / Software / Hardware); "Software"
                 // carries the opendm40 version instead of the stock "V2.6".

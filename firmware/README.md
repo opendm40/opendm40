@@ -173,6 +173,22 @@ and pull request to `main`; a push that changes only documentation (Markdown, `d
 The emulator tests ([emu/README.md](../emu/README.md)) are not in CI: they
 need a flash dump of a meter.
 
+### PR builds
+
+On a pull request the Build job sets `DM40_VERSION_SUFFIX=-pr<N>.<head commit>`
+([`build.rs`](build.rs), [`tools/fw-version.sh`](tools/fw-version.sh)): the
+version becomes e.g. `0.3.2-pr148.1a2b3c4`, the file
+`dm40_opendm40_v0.3.2-pr148.1a2b3c4.bin`, the artifact the same name without
+`.bin`. Pushes, releases and local builds keep the plain version. After CI,
+[`pr-build.yml`](../.github/workflows/pr-build.yml) (`workflow_run`, with
+write permission, never runs PR code) runs
+[`tools/pr-build-comment.sh`](tools/pr-build-comment.sh): one comment per PR,
+updated per push, with a no-login download link
+([nightly.link](https://nightly.link)), the SHA-256 of the `.bin` and the
+commits. It runs from `main` only; by hand:
+`gh workflow run pr-build.yml -f run_id=<CI run id>`. A pull request build
+is a CI artifact: it expires (the comment gives the date).
+
 ### Releasing
 
 Releases follow [Semantic Versioning](https://semver.org/): the version is

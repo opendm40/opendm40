@@ -7,6 +7,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+- **Test builds of pull requests:** each pull request gets a comment with
+  its update file to try (version `0.3.2-pr<N>.<commit>`)
+  ([manual](docs/manual/README.md#install)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

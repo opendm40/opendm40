@@ -216,13 +216,14 @@ pub fn run(out: &str) -> usize {
 
     // Device page (no serial number on it).
     host::reset(0);
-    let ver = format!("opendm40 {}", ui::FW_VERSION);
+    let mut fwb = [0u8; 48];
+    let ver = ui::device_software(&mut fwb);
     ui::device_page(&[
         ("Vendor", "Alientek"),
         ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
         ("Bootloader", "V1.1"),
-        ("Software", &ver),
+        ("Software", ver),
         ("Hardware", "V4"),
         ("Board temp", "31.5 C (MCU)"),
     ]);

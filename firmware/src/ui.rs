@@ -3085,6 +3085,24 @@ pub fn help_page(page: usize) {
 /// replacement firmware's own version, NOT the stock "Software V2.6".
 pub const FW_VERSION: &str = crate::ident::VERSION;
 
+/// Width of the Device page's value column (`device_page`).
+const DEVICE_VALUE_W: i16 = 260;
+
+/// The Device page's "Software" value: "opendm40 <version>", or the version
+/// alone when that is wider than the value column (a CI pull request build,
+/// e.g. 0.3.2-pr148.1a2b3c4).
+pub fn device_software(buf: &mut [u8; 48]) -> &str {
+    let pre = b"opendm40 ";
+    let v = FW_VERSION.as_bytes();
+    let n = (pre.len() + v.len()).min(buf.len());
+    buf[..pre.len()].copy_from_slice(pre);
+    buf[pre.len()..n].copy_from_slice(&v[..n - pre.len()]);
+    match core::str::from_utf8(&buf[..n]) {
+        Ok(s) if sf::text_width(sf::TEXT22, s, 0) <= DEVICE_VALUE_W - 8 => s,
+        _ => FW_VERSION,
+    }
+}
+
 /// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
 /// in the opendm40 settings style (title bar + rows) so it matches the other
@@ -3097,6 +3115,6 @@ pub fn device_page(lines: &[(&str, &str)]) {
         let y = 48 + i as i16 * 36;
         sf::rbox(rect(8, y, 464, 33), 6, M_TILE, M_BG);
         sf::glyphs(sf::TEXT22, rect(20, y, 180, 33), label, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(200, y, 260, 33), value, M_ACCENT, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(200, y, DEVICE_VALUE_W, 33), value, M_ACCENT, M_TILE, 1, 0);
     }
 }
