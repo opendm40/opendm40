@@ -182,12 +182,13 @@ version becomes e.g. `0.3.2-pr148.1a2b3c4`, the file
 `.bin`. Pushes, releases and local builds keep the plain version. After CI,
 [`pr-build.yml`](../.github/workflows/pr-build.yml) (`workflow_run`, with
 write permission, never runs PR code) runs
-[`tools/pr-build-comment.sh`](tools/pr-build-comment.sh): one comment per PR,
-updated per push, with a no-login download link
-([nightly.link](https://nightly.link)), the SHA-256 of the `.bin` and the
-commits. It runs from `main` only; by hand:
-`gh workflow run pr-build.yml -f run_id=<CI run id>`. A pull request build
-is a CI artifact: it expires (the comment gives the date).
+[`tools/pr-build.sh`](tools/pr-build.sh) `publish`: the `.bin` goes to the
+prerelease [`pr-builds`](https://github.com/opendm40/opendm40/releases/tag/pr-builds)
+(one file per PR, the previous one deleted), and one comment per PR links it
+with its SHA-256 and commits. On close (`pull_request_target`, no checkout of
+the PR) `remove` deletes the PR's file. The `pr-builds` tag is not a `v*` tag:
+the release workflow and the version checks skip it. These jobs run from
+`main` only; by hand: `gh workflow run pr-build.yml -f run_id=<CI run id>`.
 
 ### Releasing
 
