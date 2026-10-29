@@ -321,7 +321,7 @@ pub fn run(out: &str) -> usize {
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.
-        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.73, 2, "nF"), None, None, false)) }),
+        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.7, 1, "nF"), None, None, false)) }),
         // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).
         ("dmm-hz", Dp { rate: false, ..dp(rd(14, Val { ext: true, ..val(1.00000, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false)) }),
         // Temperature: thermocouple K.
