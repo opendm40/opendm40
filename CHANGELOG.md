@@ -63,6 +63,8 @@ section named after the tag as the release notes; how to cut a release:
 - A function change over USB / Bluetooth closes the power meter's wiring
   and "Reset energy?" dialogs and the fuse check dialog (they stayed over a
   page no longer updated).
+- Hold & Limits: MENU and Back return to the range page (Power Settings)
+  it was opened from, not to the multimeter page.
 
 ## v0.3.0 (2026-10-27)
 
