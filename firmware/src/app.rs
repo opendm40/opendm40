@@ -2464,6 +2464,12 @@ impl App {
                 self.meas = [r[10], r[19], r[11], r[0]];
             }
             if !can_draw || self.redraw {
+                // A one-shot capture (SINGle, DIGitize) that ended with this
+                // frame stopped the scope: render its stored record on the
+                // first pass that may draw, as a stopped zoom (above).
+                if !self.scope.s.run {
+                    self.scope.refresh();
+                }
                 return;
             }
             if page && covered {

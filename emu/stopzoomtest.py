@@ -8,7 +8,8 @@ an on-device screenshot holds the panel the same way).
 Scope page, a 1 kHz sine, 5 ms/div, STOP. Then TIM:SCAL 2 ms, 1 ms, 500 us,
 2 ms/div, each right after a read-back of the graph: the graph must change
 with each step (before the fix the re-render frame was dropped while the
-panel was held, and the old trace stayed).
+panel was held, and the old trace stayed). Then DIGitize right after a
+read-back, the input meanwhile a square: the one-shot capture is drawn.
 
 Exit status 0 = all passed.
 """
@@ -35,6 +36,8 @@ os.environ['USBIP_PORT'] = str(A.port)
 import usbip_client as uc  # noqa: E402
 
 FAIL = []
+# Virtual second at which the input becomes a square (the DIGitize case).
+SWITCH_S = 40
 
 
 def check(ok, what):
@@ -51,7 +54,7 @@ disk = os.path.join(OUT, tag + '.disk.bin')
 shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), disk)
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', tag, '--log', log,
-       '--disk', disk, '--scope', 'sine,1000,2.0']
+       '--disk', disk, '--scope', 'sine,1000,2.0', '--scope', 'square,1000,2.0@%d' % SWITCH_S]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 
 try:
@@ -144,6 +147,20 @@ try:
         check(diff > 50, 'TIM:SCAL %s while stopped: the graph re-rendered (%d pixels changed)' % (tb, diff))
         shot('stopzoom-%d' % (i + 1))
         prev = cur
+    # A one-shot capture that completes within the hold (PR #78 review):
+    # the input turns into a square at SWITCH_S (run.py --scope ...@T) while
+    # the stopped sine is shown; read back the graph, DIGitize at once.
+    q('DBG:HWTRIG:ENABLE 0')  # the software trigger: a frame within the hold
+    while up() < SWITCH_S * 1000 + 1000:
+        time.sleep(0.2)
+    prev = graph()
+    q('DIGitize')
+    wait_ms(1500)
+    check(q('TRIG:STAT?') == 'STOP', 'DIGitize ended in STOP')
+    cur = graph()
+    diff = sum(a != b for a, b in zip(prev, cur))
+    check(diff > 50, 'DIGitize right after a read-back: the new capture drawn (%d pixels changed)' % diff)
+    shot('stopzoom-digitize')
 finally:
     try:
         os.killpg(emu.pid, 15)

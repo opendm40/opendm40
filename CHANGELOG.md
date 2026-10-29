@@ -9,8 +9,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- **Scope, stopped:** a zoom right after a screenshot kept the old trace on the
-  screen.
+- **Scope, stopped:** a zoom, or a Single capture that ended, right after a
+  screenshot kept the old trace on the screen.
 
 ## v0.3.0 (2026-10-27)
 
