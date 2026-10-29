@@ -40,6 +40,21 @@ pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
+/// Text on a CH1-coloured fill (zoom buttons, CHA, V/div badge, the source
+/// badge's selected half), per PALETTE entry: the stock dark text, white
+/// where dark reads worse than the stock default math panel (white on
+/// orange, contrast 1.97:1): blue 1.83, purple 1.72.
+pub const CH1_INK: [Color; 9] = [C_FILL, C_FILL, C_FILL, C_FILL, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL];
+/// Text on a math-coloured panel button (math on), per PALETTE entry: the
+/// stock white, dark where white reads worse than on the default orange:
+/// yellow 1.07, pink 1.52, gold 1.41.
+pub const MATH_INK: [Color; 9] = [C_WHITE, C_WHITE, C_FILL, C_WHITE, C_WHITE, C_WHITE, C_WHITE, C_FILL, C_FILL];
+/// Text in the channel colour on the dark bar / graph (trigger badge,
+/// measurement strip, FFT labels), per PALETTE entry: the palette colour,
+/// or halfway to white where it reads worse on C_BAR than the stock
+/// default math panel (1.97:1): blue 1.20, purple 1.13, brown 1.43 ->
+/// 3.22, 3.60, 4.08.
+pub const PAL_TEXT: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x841f, 0xc418, 0xd492, 0xfe19, 0xfea0];
 
 pub const TB_LABELS: [&str; 30] = [
     "10ns", "20ns", "50ns", "100ns", "200ns", "500ns", "1us", "2us", "5us", "10us", "20us", "50us", "100us", "200us", "500us", "1ms", "2ms",
@@ -324,6 +339,22 @@ impl Model {
     pub fn math_pal(&self) -> Color {
         PALETTE[self.math_colour as usize % 9]
     }
+    /// Text colour on `pal()` (CH1_INK).
+    pub fn pal_ink(&self) -> Color {
+        CH1_INK[self.colour as usize % 9]
+    }
+    /// Text colour on `math_pal()` (MATH_INK).
+    pub fn math_ink(&self) -> Color {
+        MATH_INK[self.math_colour as usize % 9]
+    }
+    /// CH1-coloured text on the dark bar / graph (PAL_TEXT).
+    pub fn pal_text(&self) -> Color {
+        PAL_TEXT[self.colour as usize % 9]
+    }
+    /// Math-coloured text on the graph (PAL_TEXT).
+    pub fn math_text(&self) -> Color {
+        PAL_TEXT[self.math_colour as usize % 9]
+    }
     pub fn grid_colour(&self) -> Color {
         blend565(0xffff, C_FILL, (self.grid.min(100) as u32 * 255 / 100) as u8)
     }
@@ -592,7 +623,7 @@ pub fn src_badge(m: &Model) {
     let dmm = m.src == SRC_DMM;
     let on = m.pal();
     let (fa, fb) = if dmm { (C_FILL, on) } else { (on, C_FILL) };
-    let (ta, tb) = if dmm { (C_FRAME, C_FILL) } else { (C_FILL, C_FRAME) };
+    let (ta, tb) = if dmm { (C_FRAME, m.pal_ink()) } else { (m.pal_ink(), C_FRAME) };
     paint(r, &[(K_SHAPE, C_BAR), (K_SHAPE, fa), (K_SHAPE, fb), (K_TEXT, fa), (K_TEXT, fb)], |x, y| {
         let left = x < r.x + half;
         if let Some(g) = a.at(x, y) {
@@ -645,7 +676,7 @@ pub fn vdiv_badge(m: &Model) {
     m.vdiv_str(&mut b);
     let p = Ink::icon(sf::SC_PROBE, rect(286, 1, 18, 17), m.probe_glyph(), 4);
     let t = Ink::new(sf::SC_F12, rect(304, 1, 44, 17), b.as_str(), 8, 0);
-    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, C_FILL), (&t, C_FILL)]);
+    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, m.pal_ink()), (&t, m.pal_ink())]);
 }
 
 /// 2.5 trigger badge: edge glyph and level.
@@ -660,7 +691,7 @@ pub fn trig_badge(m: &Model) {
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal()), (&t, m.pal())]);
+    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal_text()), (&t, m.pal_text())]);
 }
 
 /// 2.6 battery (outline + level clipped to (437,3,33,12)).
@@ -701,16 +732,17 @@ pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
     let pal = m.pal();
     let mc = if m.math_on { m.math_pal() } else { C_FRAME };
+    let (ink, math_ink) = (m.pal_ink(), if m.math_on { m.math_ink() } else { C_WHITE });
     let mut b = Buf::new();
     m.vdiv_str(&mut b);
     let pressed = m.pressed as usize == k + 1;
     let (fill, radius, mask, fg) = match k {
-        0 => (pal, 8, 0x3, C_FILL),
-        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, C_FILL),
-        2 => (pal, 8, 0xc, C_FILL),
-        3 => (mc, 8, 0x3, C_WHITE),
-        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, C_WHITE),
-        5 => (mc, 8, 0xc, C_WHITE),
+        0 => (pal, 8, 0x3, ink),
+        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, if m.ch1_open { C_FILL } else { ink }),
+        2 => (pal, 8, 0xc, ink),
+        3 => (mc, 8, 0x3, math_ink),
+        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, if m.math_open { C_WHITE } else { math_ink }),
+        5 => (mc, 8, 0xc, math_ink),
         _ => (C_ORANGE, 8, 0xf, C_WHITE),
     };
     let fill = if pressed { C_DIS } else { fill };
@@ -780,7 +812,7 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
     let r = rect(13 + 100 * i as i16, 302, 98, 17);
     let t = Ink::new(sf::SC_F12, r, text, 8, 0);
-    let pal = m.pal();
+    let pal = m.pal_text();
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -2188,7 +2220,7 @@ pub fn update(m: &Model) {
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
-        let mc = m.math_pal();
+        let mc = m.math_text();
         let col = d(old.is_none() || ol.math_colour != m.math_colour) || bg_changed;
         if col || old.map_or(true, |o| o.ydiv != a.ydiv) {
             fft_box(fft_ydiv_rect(m), a.ydiv.as_str(), mc);
@@ -2229,7 +2261,7 @@ pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
 /// both in the math colour.
 pub fn fft_label(m: &Model) {
     let r = fft_label_rect(m);
-    let mc = m.math_pal();
+    let mc = m.math_text();
     let t = Ink::new(sf::SC_F12, r, m.fft_hz.as_str(), 8, 0);
     let g = graph_ref();
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
