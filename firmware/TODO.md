@@ -17,7 +17,8 @@ Additional requirements:
 - [ ] A current in the A jack is missed or misnamed in some modes (device, 2026-10-26: owner's PSU 20 mA CC
       into A / COM, V empty; the same on main 0.2.5 and on the #25 + #26 test build).
       - AC mV: no alert; the readout reads OL.
-      - Ohm: LIVE instead of A-JACK (31 MΩ).
+      - Ohm: LIVE instead of A-JACK (31 MΩ). Device 2026-10-29 (600 MΩ branch): the same on 600 Ω, 60 MΩ,
+        AUTO and 600 MΩ; the ~31 MΩ comes with the PSU's COM lead alone (a ground loop, inferred), not the A current.
       - Hz: no alert.
       DC V / AC V / continuity / diode / capacitance raise A-JACK in 0.9-1.8 s. On main, DC mV also raised a false
       A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
@@ -42,7 +43,8 @@ Additional requirements:
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
       far up to 5.57 MΩ only. The leak is steady over 13 min (±1.5 %), 0.041 .. 0.059 nS over an evening. Also: whether the leak (learned on open leads, ~21 GΩ on one unit) is a
       resistor across the jacks or depends otherwise on the jack voltage; the jack check (AD2 = OP1O) reads
-      FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ is untested.
+      FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ gives LIVE, as
+      every ohm range does (the A-jack item above).
 
 ## Open, by kind (2026-10-27)
 

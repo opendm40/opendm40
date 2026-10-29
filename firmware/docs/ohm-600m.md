@@ -125,6 +125,14 @@ after a switch can be off by up to 4 mV (OP1's input stepping from 0.37 V to
 1.05 V); later results drift by ~20 µV over 2 s. On 5.57 MΩ the 0.4.0
 build's readings have an sd of 0.0002 MΩ.
 
+A current in the A jack (the owner's PSU, ~20 mA, on A / COM, V/Ω open;
+[build-b64b287c-a-current.txt](data/ohm600m-2026-10-28/build-b64b287c-a-current.txt),
+[build-b64b287c-a-current-ranges.txt](data/ohm600m-2026-10-28/build-b64b287c-a-current-ranges.txt)):
+600 MΩ raises LIVE, not A-JACK, as 600 Ω, 60 MΩ and AUTO do on the same
+input (the open TODO item on A-jack currents in ohm). The PSU's COM lead
+alone already makes the open input read ~30 MΩ: a ground loop through the
+PSU (*inferred*), not the A current.
+
 Not checked: any resistor above 5.57 MΩ, the noise and settling at hundreds
 of MΩ, the leak over hours (humidity, temperature) and its dependence on
 the jack voltage.

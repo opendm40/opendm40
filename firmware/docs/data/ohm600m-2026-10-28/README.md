@@ -18,3 +18,5 @@ See [ohm-600m.md](../../ohm-600m.md).
   readings, AUTO ON (to 6 MΩ), MAX (60 MΩ).
 - [build-b64b287c-open-13min.csv](build-b64b287c-open-13min.csv): r7 on open jacks for 13 min: the readout, the learned
   leak (nS), Vx, Vfb and their difference per reading.
+- [build-b64b287c-a-current.txt](build-b64b287c-a-current.txt), [build-b64b287c-a-current-ranges.txt](build-b64b287c-a-current-ranges.txt):
+  a PSU on A / COM: the alerts and readouts on 600 MΩ over time, then 600 MΩ / 60 MΩ / 600 Ω / AUTO with the current on.
