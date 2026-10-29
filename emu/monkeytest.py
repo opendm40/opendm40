@@ -53,7 +53,8 @@ ap.add_argument('--home', type=int, default=60, help='MENU / main menu check eve
 ap.add_argument('--timeout', type=float, default=15, help='a reply later than this (wall s) = a hang (default 15)')
 ap.add_argument('--scpi', type=float, default=0.25, help='share of SCPI commands among the inputs (default 0.25)')
 ap.add_argument('--no-mips', action='store_true', help='default CPU speed instead of --fast')
-ap.add_argument('--disk', help='SPI disk image to use (copied first; default: the MSC dump)')
+ap.add_argument('--disk', help='SPI disk image (copied first; default: a copy of emu/out/disk.bin, the working copy '
+                'run.py makes from the MSC dump)')
 ap.add_argument('--keep-going', action='store_true', help='log a failure and go on')
 ap.add_argument('--tail', type=int, default=25, help='inputs printed before a failure (default 25)')
 A = ap.parse_args()
@@ -289,9 +290,12 @@ def main():
             '--run-for', str(run_for)]
     if not A.no_mips:
         args.append('--fast')
-    if A.disk:
+    # The monkey takes screenshots and recordings: never on the shared
+    # working copy of the disk.
+    src = A.disk or os.path.join(OUT, 'disk.bin')
+    if os.path.exists(src):
         disk = os.path.join(OUT, name + '-disk.bin')
-        subprocess.run(['cp', A.disk, disk], check=True)
+        subprocess.run(['cp', src, disk], check=True)
         args += ['--disk', disk]
     emu = subprocess.Popen(args, cwd=ROOT, stdout=open(os.path.join(OUT, name + '-emu.out'), 'w'),
                            stderr=subprocess.STDOUT, start_new_session=True)
