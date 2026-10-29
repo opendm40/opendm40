@@ -8,8 +8,8 @@
 The scope page at --tb s/div (default 5 ms/div) on a 90 Hz square. One
 real touch-controller drag (emu/peripherals/CST_Touch.cs Press / Move /
 Release in emulator time, a report every 20 ms): the press on the level
-marker (--item trig: the trigger level, x 406 at the right edge; ch1: mid
-plot on CH1's row, the nearest level marker), --still reports at the press
+marker (--item trig: the trigger level, x 406 at the right edge; ch1: 20
+px right of CH1's marker on its row, in its grab zone), --still reports at the press
 point (a landing finger), then --steps reports 5 px down each, release.
 Screenshots in emulator time (every --dt ms from 49 ms before the press to
 --after s past the release, 10 ms apart before that) give the marker's row
@@ -77,9 +77,9 @@ tag = 'draglat-%d-%d' % (A.port, os.getpid())
 shots = os.path.join(OUT, tag)
 os.makedirs(shots, exist_ok=True)
 script = os.path.join(OUT, '%s.script' % tag)
-# Trigger level: press on its marker (x 406, row 105 -> y 125); CH1: mid-plot
-# at its row (pos 0 -> y 160), the nearest level marker to the press.
-X, Y0, STEP = (406, 125, 5) if A.item == 'trig' else (300, 160, 5)
+# Trigger level: press on its marker (x 406, row 105 -> y 125); CH1: 20 px
+# right of its marker at its row (pos 0 -> y 160), in its grab zone.
+X, Y0, STEP = (406, 125, 5) if A.item == 'trig' else (26, 160, 5)
 # The marker glyph: the column with its full height, its tip's columns.
 RUN_X, TIP_X = (412, range(400, 403)) if A.item == 'trig' else (1, range(11, 13))
 T1 = A.t0 + 0.020 * A.still  # the first move report; still ones before it

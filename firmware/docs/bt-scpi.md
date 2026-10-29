@@ -83,7 +83,7 @@ covers `DBG:UPDATE` / `DBG:RECOVER` (they zero the loader marker inside
 `Scpi::handle` on native builds), `DBG:RESET`, `DBG:RELEASE`, input injection
 (`DBG:KEY`, `DBG:SWIPE D,2` = power off), the debug reads, and any `DBG:*`
 added later, including the ones the parser routes as `Out::Instr`
-(`DBG:GRAB`, `DBG:GEST?`). `DIAG?` / `DIAG:DAC?` / `DIAG:PWM?` (bench
+(`DBG:PINCH`, `DBG:GEST?`). `DIAG?` / `DIAG:DAC?` / `DIAG:PWM?` (bench
 diagnostics: the generator DAC sampled, a 2 ms busy loop on PB14) are
 refused the same way (`UNTRUSTED_DENY` = DBG, DIAG). No part of the message
 runs and no reply is sent; `SYST:ERR?` then reports

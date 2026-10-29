@@ -1333,7 +1333,8 @@ fn main() {
         };
         t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
         t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, 406, 125) == Some((true, 1)));
-        t("T marker zone (incl. 10 px of the top bar)", pick(&d, 0, 0, false, 214, 12) == Some((false, 0)));
+        t("T marker zone (from INNER's top, y 16)", pick(&d, 0, 0, false, 214, 16) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 15).is_none());
+        t("grab zones reach 30 px past the glyph into the graph", pick(&d, 0, 0, false, 42, 160) == Some((true, 0)) && pick(&d, 0, 0, false, 44, 160).is_none() && pick(&d, 0, 0, false, 371, 125) == Some((true, 1)) && pick(&d, 0, 0, false, 369, 125).is_none() && pick(&d, 0, 0, false, 214, 62) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 64).is_none());
         t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
         let mut m = d;
         m.trig_row = 140;
@@ -1354,10 +1355,7 @@ fn main() {
         let mut m = d;
         m.xcur = Some([100, 300]);
         m.ycur = Some([60, 220]);
-        let mut lz = [scope_ui::Zone::NONE; 4];
-        let n = scope_ui::line_zones(&m, &mut lz);
-        let lp = |x: i16, y: i16| scope_ui::pick_zone(&lz[..n], 0, 0, false, x, y).map(|k| (lz[k].level, lz[k].id));
-        t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
+        t("cursor lines are not zones (owner 2026-10-30: markers only)", pick(&m, 0, 0, false, 124, 200).is_none() && pick(&m, 0, 0, false, 200, 230).is_none());
     }
 
     // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1): the
@@ -2436,7 +2434,7 @@ fn main() {
     //     note: whole page.
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     for (page, vals) in [
-        (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
+        (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", ""]),
         (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
         (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
@@ -2619,7 +2617,7 @@ fn main() {
 
     // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
     defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", ""]));
     defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
     defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     defer_check(&mut ck, "defer/help", || ui::help_page(0));
@@ -2638,7 +2636,7 @@ fn main() {
 
     // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", ""]));
     strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
     strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
@@ -2913,7 +2911,7 @@ fn main() {
         }
     }
 
-    // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
+    // 7. Gestures: zone table, axis lock, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).
     {
         use gesture::{Axis, Gesture as G};
@@ -2923,8 +2921,7 @@ fn main() {
                 ck.fail(&format!("gesture/{name}"), "unexpected result".into());
             }
         };
-        let run = |grab: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
-            gesture::set_grab_ms(grab);
+        let run = |_: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
             let mut tr = gesture::Tracker::new();
             let mut v = vec![];
             let pt = |p: (u16, u16)| touch::Point { x: p.0, y: p.1 };
@@ -2932,7 +2929,6 @@ fn main() {
                 v.push(g);
                 matches!(g, G::Down(_) | G::Drag(..))
             });
-            gesture::set_grab_ms(0);
             v
         };
         let drags = |v: &[G], a: Axis| v.iter().filter(|g| matches!(g, G::Drag(_, _, x) if *x == a)).count();
@@ -2941,10 +2937,8 @@ fn main() {
         t("direct: captured touch ends with Up", matches!(v.last(), Some(G::Up(_))));
         let v = run(0, (100, 150), (300, 160), 0);
         t("direct horizontal: H drags only", drags(&v, Axis::H) > 0 && drags(&v, Axis::V) == 0);
-        let v = run(300, (200, 150), (210, 250), 0);
-        t("hold 300, no hold: no drag, no grab", drags(&v, Axis::V) == 0 && !v.iter().any(|g| matches!(g, G::Grab(_))));
-        let v = run(300, (200, 150), (210, 250), 350);
-        t("hold 300, held 350: grab then V drags", v.iter().any(|g| matches!(g, G::Grab(_))) && drags(&v, Axis::V) > 0);
+        let v = run(0, (200, 150), (210, 250), 350);
+        t("held 350 ms first: V drags", drags(&v, Axis::V) > 0);
         let v = run(0, (200, 150), (200, 150), 0);
         t("captured tap: Up, no Tap", matches!(v.last(), Some(G::Up(_))) && !v.iter().any(|g| matches!(g, G::Tap(_))));
     }
@@ -3193,7 +3187,7 @@ fn main() {
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");
         host::reset(0);
-        ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
+        ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", ""]);
         save(&out, "m01-settings");
         host::reset(0);
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
@@ -3205,7 +3199,7 @@ fn main() {
         // touch-down (one item redrawn), then released = the page as drawn.
         {
             let combo = ui::view_name(ui::View::DmmScope);
-            let s0 = ["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""];
+            let s0 = ["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", ""];
             let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
             let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
                 ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
@@ -3256,7 +3250,7 @@ fn main() {
             let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
-                .chain((0..9u8).map(|r| {
+                .chain((0..ui::SETTINGS.len() as u8).map(|r| {
                     let part = if ui::SET_STEP_ROWS.contains(&(r as usize)) { 1 } else { 0 };
                     (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
                 }))
