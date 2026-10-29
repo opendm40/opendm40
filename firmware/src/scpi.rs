@@ -1420,7 +1420,8 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
             None if query => Ok(Pow::Phase(None)),
             None => match parse_num(a) {
                 Some(v) if (-127.0..=127.0).contains(&v) => Ok(Pow::Phase(Some(v as i8))),
-                _ => Err(BAD),
+                Some(_) => Err(RANGE),
+                None => Err(BAD),
             },
             _ => Err(HDR),
         };
