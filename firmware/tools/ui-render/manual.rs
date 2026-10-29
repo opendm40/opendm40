@@ -198,6 +198,12 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm-600m", &page, false);
     save1(out, "range-ohm-600m");
 
+    // Capacitance range page: 600 uF fixed.
+    host::reset(0);
+    ui::range_page(Button::Cap, Some(5), 0, None);
+    ck.check_opts("manual/range-cap", &page, false);
+    save1(out, "range-cap");
+
     // Hold & Limits of DC V: limits 4.8 .. 5.2 V on.
     host::reset(0);
     ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &["OFF", "ON", "5.2000 V", "4.8000 V", "", "", "", "ON", "Every reading"]);

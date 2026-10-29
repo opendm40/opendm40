@@ -3265,7 +3265,7 @@ impl App {
             2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
             // V / A / ohm: the range step on release, the autorange when held
             // (auto_key_end).
-            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm) => {
+            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
                 self.run_down = Some(now);
                 self.run_key = 2;
             }
@@ -3297,7 +3297,7 @@ impl App {
         }
     }
 
-    /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
+    /// AUTO in V / A / ohm / capacitance, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
     /// 60 ohm included), the highest wrapping to the lowest. Long: the
@@ -3308,7 +3308,7 @@ impl App {
         let now = clk.now_ms();
         let b = self.dmm.button();
         // The function changed while the key was held: nothing.
-        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm) {
+        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm | Button::Cap) {
             return;
         }
         self.meter.rel_off();

@@ -1487,6 +1487,11 @@ pub struct Dmm {
     cap_cnt_small: u8,
     /// Ramp ranges: polls in a row without a ramp (`CAP_DV_MIN`).
     cap_idle: u8,
+    /// Ramp ranges: the interval between new results (ms, EMA; 0 = none
+    /// yet) and the last one's time: the readings/s there (a poll every
+    /// 255 ms repeats the value; `reading_period_ms`).
+    cap_res_ms: f32,
+    cap_res_t: Option<u64>,
     /// DBG:CAP? (`cap_info`): the last poll's V (mV), dV (mV), dt (ms),
     /// median dV, per-poll C (uF), oscillator C (uF).
     cap_dbg: [f32; 6],
@@ -2112,6 +2117,8 @@ impl Dmm {
             cap_cnt_dn: 0,
             cap_cnt_small: 0,
             cap_idle: 0,
+            cap_res_ms: 0.0,
+            cap_res_t: None,
             cap_dbg: [0.0; 6],
             ramp: CapRamp {
                 discharging: false,
@@ -2321,6 +2328,12 @@ impl Dmm {
     /// intervals across a function / range / rate change or a dropped
     /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
+        // Capacitance ramp ranges (600 uF up): a new value per ramp result
+        // (device: 347 uF on 600 uF changed every ~4.1 s while the chip
+        // said 3.9/s, the 255 ms poll).
+        if self.mode == 13 && self.range >= 5 && !self.pw.on {
+            return self.cap_res_ms as u32;
+        }
         self.period_ms as u32
     }
 
@@ -5871,6 +5884,15 @@ impl Dmm {
         self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, c_uf * 1e-6)
     }
 
+    /// A ramp range's reading: provisional (grey, no statistics) until the
+    /// range's first ramp result; before it `cap_c` is the last range's
+    /// (or 0: MIN 0.0 after every step onto 600 uF, emulator).
+    fn cap_ramp_val(&self, c_uf: f32, ol: bool) -> Reading {
+        let mut rd = self.cap_val(c_uf, ol);
+        rd.prov = self.ramp.first && !ol;
+        rd
+    }
+
     fn cap_set_range(&mut self, clk: &mut Clock, r: i8) {
         let now = clk.now_ms();
         self.range = r;
@@ -5893,6 +5915,8 @@ impl Dmm {
         self.cap_cnt_dn = 0;
         self.cap_cnt_small = 0;
         self.cap_idle = 0;
+        self.cap_res_ms = 0.0;
+        self.cap_res_t = None;
     }
 
     fn poll_cap(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
@@ -5959,7 +5983,7 @@ impl Dmm {
         if dv < CAP_DV_MIN {
             self.cap_idle = self.cap_idle.saturating_add(1);
             if self.cap_idle < CAP_IDLE_N || self.manual {
-                return Some(self.cap_val(self.cap_c, self.cap_idle >= CAP_IDLE_N));
+                return Some(self.cap_ramp_val(self.cap_c, self.cap_idle >= CAP_IDLE_N));
             }
             self.cap_c = 0.0;
             if v_mv.abs() < CAP_SHORT_MV {
@@ -6015,6 +6039,7 @@ impl Dmm {
         self.ramp.cmp = Some(cmp);
         let fresh = flip || self.ramp.n == 35;
         if fresh {
+            ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
             let n = self.ramp.n;
             let mean = if n == 35 {
                 self.ramp.buf[33]
@@ -6064,7 +6089,7 @@ impl Dmm {
                 self.cap_cnt_dn = 0;
             }
         }
-        Some(self.cap_val(cc, ol))
+        Some(self.cap_ramp_val(cc, ol))
     }
 
     /// Time (ms) before which `poll` gives no reading: the settle after a

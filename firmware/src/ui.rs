@@ -1326,6 +1326,13 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
         ],
+        // Capacitance (owner 2026-10-30): dmm.rs ranges r0..r7, the mF
+        // ranges in uF as the readout (cap_val); AUTO in the note row
+        // (`range_rect` 8), the page has no other buttons there.
+        Button::Cap => &[
+            ("6nF", Some(0)), ("60nF", Some(1)), ("600nF", Some(2)), ("6uF", Some(3)),
+            ("60uF", Some(4)), ("600uF", Some(5)), ("6000uF", Some(6)), ("60000uF", Some(7)), ("AUTO", None),
+        ],
         _ => &[("AUTO", None)],
     }
 }
@@ -1353,7 +1360,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
         10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
-        0..=10 => {
+        0..=10 | 13 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
         }
@@ -1387,8 +1394,8 @@ fn range_status(s: &str) {
 
 fn range_rect(i: usize) -> sf::Rect {
     if i >= 8 {
-        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
-        // page), two columns wide for its label.
+        // The Ohm page's 600 Mohm item, the Capacitance page's AUTO: the
+        // note row (141..177, free on those pages), two columns wide.
         return rect(8, 141, 228, 36);
     }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
