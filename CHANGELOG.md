@@ -56,6 +56,8 @@ section named after the tag as the release notes; how to cut a release:
   average (the preamble's `yorig` is the middle of a byte's four codes).
 - Scope: the V/div label is right with x2, x5 and the other non-decade
   probes (x5 at 2.5 V/div showed 2V).
+- Scope page: **REC** in red in the top bar while a recording runs, in place
+  of MCX | DMM ([#101](https://github.com/opendm40/opendm40/issues/101)).
 
 ## v0.3.0 (2026-10-27)
 

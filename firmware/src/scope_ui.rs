@@ -224,14 +224,19 @@ pub struct Model {
     /// texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
+    /// A CSV recording runs (csvlog.rs; the Scope page only, the combined
+    /// view has it in the strip badge): red "REC" in the source badge's
+    /// slot, the record bar beside it. The Wave view (SRC_DMM) and a
+    /// recording exclude each other (App::wave_open, App::rec_conflict).
+    pub rec: bool,
 }
 
 /// `Model::src` values.
 pub const SRC_NONE: u8 = 0;
 pub const SRC_MCX: u8 = 1;
 pub const SRC_DMM: u8 = 2;
-/// The source badge (left part of the record-bar slot when shown) and the
-/// record bar then (opendm40: the stock bar is 145..282).
+/// The source badge or REC (left part of the record-bar slot when shown) and
+/// the record bar then (opendm40: the stock bar is 145..282).
 pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
 const REC_BAR: Rect = rect(145, 1, 137, 17);
 const REC_BAR_SRC: Rect = rect(212, 1, 70, 17);
@@ -300,6 +305,7 @@ impl Model {
         amps: false,
         wvdiv: 0.0,
         ch1_txt: "",
+        rec: false,
     };
 
     pub fn pal(&self) -> Color {
@@ -500,9 +506,9 @@ pub fn tb_badge(m: &Model) {
 /// 2.3 record-position bar; while running (record = screen) it shows the
 /// generator frequency instead of the constant full-record line when the
 /// generator is on (opendm40 addition, 12 px grey like "ROLL").
-/// The record bar's box (shorter beside the source badge).
+/// The record bar's box (shorter beside the source badge or REC).
 pub fn record_bar_rect(m: &Model) -> Rect {
-    if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
+    if m.src == SRC_NONE && !m.rec { REC_BAR } else { REC_BAR_SRC }
 }
 
 pub fn record_bar(m: &Model) {
@@ -564,12 +570,22 @@ pub fn record_bar(m: &Model) {
 }
 
 /// Source badge (`Model::src` != SRC_NONE): "MCX | DMM", the active half
-/// in the CH1 colour with dark text, the other dark with grey text.
+/// in the CH1 colour with dark text, the other dark with grey text. While a
+/// CSV recording runs (`Model::rec`) the slot shows "REC" in red instead,
+/// as the DMM status bar does (the DMM source is refused then).
 pub fn src_badge(m: &Model) {
+    let r = SRC_BADGE;
+    if m.rec {
+        let t = Ink::new(sf::SC_F12, r, "REC", 8, 0);
+        paint(r, &[(K_TEXT, C_BAR)], |x, y| match t.at(x, y) {
+            Some(g) => (crate::ui::REC_CSV, tag(1, g)),
+            None => (C_BAR, 0),
+        });
+        return;
+    }
     if m.src == SRC_NONE {
         return;
     }
-    let r = SRC_BADGE;
     let half = r.w / 2;
     let a = Ink::new(sf::SC_F12, rect(r.x, 1, half, 17), "MCX", 8, 0);
     let b = Ink::new(sf::SC_F12, rect(r.x + half, 1, r.w - half, 17), "DMM", 8, 0);
@@ -2074,14 +2090,14 @@ pub fn update(m: &Model) {
         tb_badge(m);
     }
     let pal = ol.colour != m.colour;
-    if o.is_some_and(|o| o.src != m.src) {
-        // The record bar moves (beside the badge or not): clear the slot.
+    if o.is_some_and(|o| o.src != m.src || o.rec != m.rec) {
+        // The record bar moves (beside the badge / REC or not): clear the slot.
         lcd::fill_rect(REC_BAR.x as u16, 0, REC_BAR.w as u16, 20, C_BAR);
     }
-    if d(ol.src != m.src || (m.src != SRC_NONE && pal)) {
+    if d(ol.src != m.src || ol.rec != m.rec || (m.src != SRC_NONE && pal)) {
         src_badge(m);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src) {
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src || ol.rec != m.rec) {
         record_bar(m);
     }
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {

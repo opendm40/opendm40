@@ -551,6 +551,8 @@ impl App {
             // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
             wvdiv: self.scope.vdiv(),
             ch1_txt: if wave { self.wave_func_label() } else { "" },
+            // The combined view shows REC in the strip badge.
+            rec: self.view == View::Scope && crate::csvlog::active(),
         }
     }
 
