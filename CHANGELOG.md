@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **SCPI:** `TRIGger:LEVel` keeps the level as given; it was up to one screen
+  row lower (0.1 V became 0.113 V at 500 mV/div).
+
 ## v0.3.0 (2026-10-27)
 
 ### New
