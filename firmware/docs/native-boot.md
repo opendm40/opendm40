@@ -1161,8 +1161,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
   2 NoMedium, 3 BadBpb, 4 NoSpace, 5 Error.
-- **`DBG:PING?`:** its `keepalive_left` field means nothing (it is a
-  truncated `u64::MAX/4`).
+- **`DBG:PING?`:** its `keepalive_left` field saturates at `4294967295`
+  (`u32::MAX`): the boot hold (`u64::MAX/4`) reads as no limit.
 - **Power-off** (key held 1.5 s, or idle timeout): if the unit stays
   powered (USB), `wdt::powered_off()` turns the backlight off and keeps
   feeding. The next key press after a release reboots normally. Without this,

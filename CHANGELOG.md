@@ -44,6 +44,8 @@ section named after the tag as the release notes; how to cut a release:
   `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
 - SCPI: `INRush:THReshold` and `POWer:PHASe` with a number out of range queue
   `-222 Data out of range`, not `-224 Illegal parameter value`.
+- `DBG:PING?`: the keepalive field reads `4294967295` (no limit) after boot
+  instead of a wrapped number ([#97](https://github.com/opendm40/opendm40/issues/97)).
 
 ## v0.3.0 (2026-10-27)
 

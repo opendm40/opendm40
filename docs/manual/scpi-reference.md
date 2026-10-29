@@ -758,7 +758,7 @@ unless shown otherwise.
 |---|---|---|---|
 | `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
-| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>` | USB |
+| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
