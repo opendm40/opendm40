@@ -2449,6 +2449,15 @@ impl App {
             }
             return;
         }
+        // A stopped scope renders its stored record once per change (a zoom,
+        // a pan, a V/div step). While nothing may be drawn (a GRAM read-back
+        // or an on-device screenshot holds the panel, a host log stream)
+        // leave that render pending: polled now, the frame would be dropped
+        // below and the screen would keep the old trace until the next
+        // change.
+        if !can_draw && !self.scope.s.run {
+            return;
+        }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
@@ -2482,6 +2491,12 @@ impl App {
                 self.meas = [r[10], r[19], r[11], r[0]];
             }
             if !can_draw || self.redraw {
+                // A one-shot capture (SINGle, DIGitize) that ended with this
+                // frame stopped the scope: render its stored record on the
+                // first pass that may draw, as a stopped zoom (above).
+                if !self.scope.s.run {
+                    self.scope.refresh();
+                }
                 return;
             }
             if page && covered {
