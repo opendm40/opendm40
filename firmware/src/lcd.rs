@@ -150,10 +150,11 @@ pub fn fill_rect_raw(x: u16, y: u16, w: u16, h: u16, color: Color) {
     fill_n(w as u32 * h as u32, color);
 }
 
+/// Panel only (a strip pass fills through `strip_fill`).
 fn fill_n(count: u32, color: Color) {
     let mut i = 0u32;
     while i < count {
-        data(color);
+        unsafe { w16(LCD_DATA, color) };
         i += 1;
     }
 }

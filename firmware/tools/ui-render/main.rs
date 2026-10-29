@@ -2463,6 +2463,13 @@ fn main() {
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
+    strip_check(&mut ck, "strip/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    dv.bar_on = true;
+    strip_check(&mut ck, "strip/dmm-bar", || dv.draw_static(Button::Amp, 3, false, false));
+    dv.bar_on = false;
     for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()).take(8) {
         // stock::draw without its screen reset (App::repaint: the scope
         // page from scope_ui::invalidate).
