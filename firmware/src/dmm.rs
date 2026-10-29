@@ -5998,14 +5998,18 @@ impl Dmm {
     }
 }
 
-/// Format `v` with `dec` decimals into `buf`; returns the text.
+/// Format `v` with `dec` decimals into `buf`; returns the text. A value too
+/// long for the 16 bytes (sign, 14 digits and the point; e.g. a limit of
+/// 1E20 set over SCPI, or infinity) shows as all nines instead of running
+/// past the buffer (a panic).
 pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     let mut scale = 1.0f32;
     for _ in 0..dec {
         scale *= 10.0;
     }
     let neg = v < 0.0;
-    let mut n = ((if neg { -v } else { v }) * scale + 0.5) as u64;
+    let max = 10u64.pow(15 - (dec > 0) as u32) - 1;
+    let mut n = (((if neg { -v } else { v }) * scale + 0.5) as u64).min(max);
     let mut tmp = [0u8; 16];
     let mut i = 0;
     loop {
@@ -6178,6 +6182,21 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_never_overruns() {
+        let mut b = [0u8; 16];
+        assert_eq!(format(&mut b, 1.5, 3), "1.500");
+        assert_eq!(format(&mut b, -0.25, 2), "-0.25");
+        assert_eq!(format(&mut b, 12345.0, 0), "12345");
+        // Too long for 16 bytes (a limit of 1E20 set over SCPI): all nines.
+        assert_eq!(format(&mut b, 1e20, 3), "99999999999.999");
+        assert_eq!(format(&mut b, -1e20, 3), "-99999999999.999");
+        assert_eq!(format(&mut b, 9.9e37, 0), "999999999999999");
+        assert_eq!(format(&mut b, f32::INFINITY, 1), "9999999999999.9");
+        assert_eq!(format(&mut b, f32::NEG_INFINITY, 0), "-999999999999999");
+        assert_eq!(format(&mut b, f32::NAN, 2), "0.00");
+    }
 
     #[test]
     fn ohm_r0_gain_from_r1() {
