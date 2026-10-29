@@ -98,7 +98,39 @@ fn main() {
                     let r = &refv[f as usize + 500..f as usize + 9000];
                     (lo, hi) == (*r.iter().min().unwrap(), *r.iter().max().unwrap())
                 };
-                t(ok_seq && ok_back && ok_rand && ok_view && ok_mm, &format!("{kind}: {} live samples read back at {} pushed (sequential, backwards, random, view, min/max)", e - f, i + 1));
+                // Short steps back (the cursor's history): sinc taps
+                // k-2 .. k+3 per column, and up to 17 back from a code
+                // read, at and across block starts.
+                let mut ok_hist = true;
+                let mut k = f + 3;
+                while k + 4 < e.min(f + 20_000) {
+                    let w: f32 = (0..6).map(|d| cring::at(k + d - 2) as f32).sum();
+                    ok_hist &= w == (0..6).map(|d| refv[(k + d - 2) as usize] as f32).sum::<f32>();
+                    k += 1 + (k % 3 == 0) as u32;
+                }
+                let b0 = f / cring::BLK + 2;
+                for b in b0..b0 + 4 {
+                    for o in [0u32, 1, 5, 15, 16, 17, 18, 100, cring::BLK - 1] {
+                        let p = b * cring::BLK + o;
+                        if p >= e || p < f + 20 {
+                            continue;
+                        }
+                        ok_hist &= cring::at(p) == refv[p as usize];
+                        for d in 1..=18 {
+                            ok_hist &= cring::at(p - d) == refv[(p - d) as usize];
+                        }
+                        ok_hist &= cring::at(p + 1) == refv[p as usize + 1];
+                    }
+                }
+                let ok_mm2 = {
+                    // min_max right after a history hit (the cursor stays).
+                    let p = f + 3 * cring::BLK + 50;
+                    let _ = (cring::at(p), cring::at(p - 3));
+                    let (lo, hi) = v.min_max((p - f - 3) as usize, (p - f + 3000) as usize);
+                    let r = &refv[p as usize - 3..p as usize + 3000];
+                    (lo, hi) == (*r.iter().min().unwrap(), *r.iter().max().unwrap())
+                };
+                t(ok_seq && ok_back && ok_rand && ok_view && ok_mm && ok_hist && ok_mm2, &format!("{kind}: {} live samples read back at {} pushed (sequential, backwards, random, view, min/max, short steps back)", e - f, i + 1));
             }
         }
         t(min_live >= PCAP, &format!("{kind}: at least {PCAP} live samples after every push (least {min_live})"));

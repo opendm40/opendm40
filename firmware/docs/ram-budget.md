@@ -201,8 +201,9 @@ sets two modes:
 
   Reads go through `pack10::Codes` views with `cap` 0 (`pack10::CODED` =
   `cring::at`): packed blocks directly, coded ones through one decoder
-  cursor (forward reads one code each, a read behind it decodes its
-  block again from the start).
+  cursor (forward reads one code each; the last 16 codes it decoded are
+  kept, so the sin(x)/x taps step back for free; a read further behind
+  decodes its block again from the start).
 
 Every stored record (STOP, a shown frame, Single) is packed or coded; its users
 (the render, zoom / pan, measurements, FFT, autoset, Save CSV,
