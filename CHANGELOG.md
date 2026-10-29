@@ -58,6 +58,8 @@ section named after the tag as the release notes; how to cut a release:
   probes (x5 at 2.5 V/div showed 2V).
 - Scope page: **REC** in red in the top bar while a recording runs, in place
   of MCX | DMM ([#101](https://github.com/opendm40/opendm40/issues/101)).
+- **Gallery:** the recording in progress reads **Recording** instead of **No data**, and its
+  **Delete** says **Stop the recording** instead of **Disk busy, try again**.
 
 ## v0.3.0 (2026-10-27)
 
