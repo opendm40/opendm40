@@ -781,7 +781,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
                         }
                         let flags = hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1;
-                        let left = if feeding { deadline.saturating_sub(now) as u32 } else { 0 };
+                        let left = if feeding { scpi::keepalive_left(deadline, now) } else { 0 };
                         scpi.len = 0;
                         for (i, v) in [now as u32, flags, left].iter().enumerate() {
                             if i > 0 {

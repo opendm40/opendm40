@@ -446,6 +446,18 @@ fn touch_cal() {
     }
 }
 
+/// DBG:PING? field 3 (issue #97): the boot hold reads u32::MAX, not a
+/// wrapped u64; a host keepalive reads the ms left; past the deadline 0.
+fn ping_keepalive() {
+    let hold = u64::MAX / 4; // main.rs INITIAL_HOLD_MS
+    for now in [0u64, 7750, 1 << 40] {
+        let l = scpi::keepalive_left(hold, now);
+        check(l == u32::MAX, &format!("keepalive_left(hold, {now}) = {l}"));
+    }
+    check(scpi::keepalive_left(20_000, 5_000) == 15_000, "keepalive_left 15 s");
+    check(scpi::keepalive_left(5_000, 20_000) == 0, "keepalive_left past the deadline");
+}
+
 fn main() {
     suffixes();
     set_commands();
@@ -455,6 +467,7 @@ fn main() {
     pow10f_exact();
     mmem_dirs();
     touch_cal();
+    ping_keepalive();
     let f = unsafe { FAILS };
     if f > 0 {
         println!("{f} FAILED");

@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- `DBG:PING?`: the keepalive field reads `4294967295` (no limit) after boot
+  instead of a wrapped number ([#97](https://github.com/opendm40/opendm40/issues/97)).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

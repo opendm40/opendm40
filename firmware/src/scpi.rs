@@ -507,8 +507,17 @@ pub enum Log {
     Disk,
 }
 
+/// DBG:PING? field 3: ms until the watchdog feeding stops, saturated at
+/// u32::MAX. The boot hold (main.rs INITIAL_HOLD_MS, u64::MAX / 4) has no
+/// limit and reads u32::MAX; a plain `as u32` wrapped it (issue #97).
+pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
+    deadline.saturating_sub(now).min(u32::MAX as u64) as u32
+}
+
 /// Debug commands over USBTMC (development aids, not SCPI standard):
-///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive;
+///                           keepalive_left 4294967295 = no limit, see
+///                           keepalive_left)
 ///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
 ///                           Shutdown setting (0 = the setting; RAM only, for
 ///                           tests) | ms since the last touch / key, ms since
