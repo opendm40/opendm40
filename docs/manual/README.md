@@ -897,7 +897,8 @@ switches between the two and changes the setting with it.
   temperature. It updates with every measurement, without smoothing or REL,
   and keeps moving during HOLD.
 - **History**: five boxes. Tap the row to store the shown value (also a held
-  value); the newest is orange. Long press the row to clear it.
+  value); the newest is orange. Long press the row to clear it. A double
+  tap stores nothing.
 
 
 ![The history row: four values stored](img/dmm-history.png)
