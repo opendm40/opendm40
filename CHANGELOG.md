@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Scope, stopped:** a zoom right after a screenshot kept the old trace on the
+  screen.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

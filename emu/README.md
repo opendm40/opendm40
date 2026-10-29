@@ -245,6 +245,7 @@ recorded.
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
+| [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |
 
 ### Logger and the AD2 stream
 
