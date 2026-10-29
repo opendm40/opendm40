@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Power meter: a function change over USB / Bluetooth closes the wiring and
+  "Reset energy?" dialogs (they stayed over a page no longer updated).
+
 ## v0.3.0 (2026-10-27)
 
 ### New
