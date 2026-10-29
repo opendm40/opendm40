@@ -6428,14 +6428,27 @@ impl Dmm {
                 // value; once CAP_AGREE_N final values in a row agree within
                 // 2 % (the same capacitor), class 2 for accuracy. The value
                 // stays final; the directions' ratio is learned again.
+                if !self.ramp.first && !self.manual && (v - self.cap_c).abs() > CAP_SWAP * self.cap_c {
+                    // Another capacitor on the same range (a 470 uF after a
+                    // 100 uF on 600 uF showed 290 .. 480 uF as final values,
+                    // emulator): the range again from the start, class 1.
+                    self.cap_set_range(clk, r as i8);
+                    return Some(self.cap_dash());
+                }
                 if !self.ramp.first && (v - self.cap_c).abs() <= 0.02 * v {
                     self.cap_agree = self.cap_agree.saturating_add(1);
                 } else {
                     self.cap_agree = 0;
                 }
                 if cap_class() == 0 && !self.cap_cls2 && self.cap_agree >= CAP_AGREE_N {
+                    // The new threshold makes the polls around it partial
+                    // ones: the ring starts over (the value stays as it is
+                    // until 3 class-2 polls are in), the ratio is learned
+                    // again (the old one is used meanwhile).
                     self.cap_cls2 = true;
                     self.cap_pair = [None; 2];
+                    self.cap_ring_n = 0;
+                    return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
                 }
                 self.cap_c = v;
                 self.cap_hops = 0;
