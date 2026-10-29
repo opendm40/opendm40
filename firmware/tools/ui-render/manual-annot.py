@@ -402,7 +402,15 @@ def dmm_acc():
     save(im, 'dmm-acc-anno')
 
 
+# Marker grab zones of the default scope page (scope_ui::grab_rect, GRAB_H
+# 48, GRAB_IN 30) on scope-run: CH1 glyph x 1..12 y 154..165, trigger level
+# x 401..412 y 119..130, T x 208..219 y 21..32. (x, y, w, h).
+GRAB_ZONES = {'ch1': (0, 136, 43, 48), 'level': (371, 101, 43, 48), 'tpos': (190, 16, 48, 47)}
+
+
 def scope_drag():
+    """The marker grab zones (shaded) and what a drag from each moves; the
+    rest of the graph does not drag."""
     sc = 1.25
     s = shot('scope-run', sc)
     w, h = s.size
@@ -410,21 +418,26 @@ def scope_drag():
     x0, y0 = 20, 20
     im.paste(s, (x0, y0))
     g = lambda x, y: (x0 + x * sc, y0 + y * sc)
-    tl = g(398, 125)
-    tp = g(213, 40)
-    tr = g(100, trace_y('scope-run', 100))
-    for (x, y), vert in [(tl, True), (tp, False), (tr, True)]:
+    o = Image.new('RGBA', im.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(o)
+    for x, y, zw, zh in GRAB_ZONES.values():
+        od.rectangle((*g(x, y), *g(x + zw, y + zh)), fill=(10, 123, 214, 90), outline=(255, 255, 255, 255), width=2)
+    im.paste(Image.alpha_composite(im.convert('RGBA'), o).convert('RGB'))
+    d = ImageDraw.Draw(im)
+    # A finger 20 px from each marker, the drag direction through it.
+    ch1, lev, tp = g(26, 160), g(386, 125), g(214, 46)
+    for (x, y), vert in [(ch1, True), (lev, True), (tp, False)]:
         if vert:
-            arrow2(d, (x, y - 60), (x, y + 60), w=5, head=14)
+            arrow2(d, (x, y - 55), (x, y + 55), w=5, head=14)
         else:
-            arrow2(d, (x - 70, y), (x + 70, y), w=5, head=14)
+            arrow2(d, (x - 65, y), (x + 65, y), w=5, head=14)
         finger(im, x, y)
         d = ImageDraw.Draw(im)
     d.rectangle((x0 - 1, y0 - 1, x0 + w, y0 + h), outline=GREY)
     f = font(15)
-    tag(d, 'trigger level:\nT on the right edge', None, *g(262, 150), f)
-    tag(d, 'trigger position:\nT on the top edge', None, *g(262, 34), f)
-    tag(d, 'the trace', None, *g(124, trace_y('scope-run', 100) + 26), f)
+    tag(d, 'trigger position', g(238, 40), *g(262, 34), f)
+    tag(d, 'trigger level', g(371, 140), *g(262, 186), f)
+    tag(d, 'the trace (CH1)', g(30, 184), *g(52, 210), f)
     save(im, 'scope-drag')
 
 

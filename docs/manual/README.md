@@ -174,8 +174,8 @@ The four instrument views follow each other in this order:
 
 On the multimeter, the generator and the combined view (start on the meter
 strip there), swipe left for the next view and right for the previous one.
-On the oscilloscope page a drag moves the trace, so a swipe does not change
-the view: leave it with **MENU**, or switch on **Settings > More > Scope
+On the oscilloscope page a swipe does not change the view: leave it with
+**MENU**, or switch on **Settings > More > Scope
 swipe**, which lets a swipe that starts on the top bar or the side panel
 change the view.
 
@@ -1278,7 +1278,7 @@ in the left or right half of the graph steps), **Off**.
 - V/div: 10 mV to 10 V per division (times the probe factor).
 - Tap the **magnifier +** to zoom in (smaller V/div), **magnifier −** to
   zoom out. Or pinch vertically.
-- **Drag up or down** in the graph to move the trace.
+- **Drag** the **A** marker on the left edge up or down to move the trace.
 - Tap **CHA** (or the V/div in the top bar) for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
@@ -1298,8 +1298,8 @@ in the left or right half of the graph steps), **Off**.
 - The trigger level is kept in volts: changing the V/div, the probe or the
   position moves its marker, not the level. A level off screen shows its
   marker on the edge.
-- **Drag sideways** to move the trigger position (the **T** on the top
-  edge).
+- **Drag** the **T** on the top edge sideways to move the trigger
+  position.
 - **Long press** a marker to centre it: the trigger level goes to the middle
   of the signal, the trigger position to the centre, the trace to 0 V in the
   centre.
@@ -1341,32 +1341,19 @@ edges between captures.
 
 ### Moving things with a finger
 
-![Drags: the trigger level, the trigger position, the trace](img/scope-drag.png)
+![Grab zones: the trace, the trigger level, the trigger position](img/scope-drag.png)
 
-*Drags: the trigger level, the trigger position, the trace.*
+*Grab zones (shaded): a drag that starts in one moves its marker.*
 
-A drag moves one thing along one axis until you lift the finger. The first
-movement (about 8 pixels) decides the axis, and the axis decides what moves:
-
-- **Up or down**: the level marker nearest to where the finger went down
-  (the trace, the trigger level, the runt level, a Y cursor, the math / FFT
-  offset), however far it is. A level off screen counts at its marker on the
-  edge.
-- **Sideways**: the time marker nearest to where the finger went down (the
-  trigger position, an X cursor, the FFT centre). On a stopped scope, moving
-  the trigger position pans the stored record.
-- What is selected does not matter; the moved marker becomes the selection.
-  When two markers are equally near, the one drawn on top moves.
+Only the markers drag: put the finger on a marker or near it (the shaded
+zone) and move it. **A** on the left edge moves the trace, **T** on the
+right edge the trigger level, **T** on the top edge the trigger position (on
+a stopped scope: pans the stored record). The other markers (cursors, math
+offset, runt level) drag the same way. A drag that starts anywhere else on
+the graph moves nothing.
 
 A tap on a marker selects it; a tap on the selected marker selects the next
 one under the finger.
-
-**Settings > Scope drag** sets how a drag starts:
-
-- **Stock** (default) and **Axis lock**: the drag moves as soon as the
-  finger moves.
-- **Hold 300 ms**: hold the finger still first; the meter beeps, then the
-  drag moves.
 
 A second finger during a drag undoes it.
 
@@ -1424,7 +1411,7 @@ record zoomed out beyond its length, they show **--**.
 
 Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
-Y2-1. Drag the **1** / **2** markers or the cursor lines.
+Y2-1. Drag the **1** / **2** markers.
 
 
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
@@ -1439,8 +1426,8 @@ over the trace; tap the button again while its popup is open to turn it off.
 - The boxes show the dB/div, the centre frequency, the Hz/div and the
   strongest peak, for example **1.00kHz -3.0dBV**.
 - **Math scale +** / **−**: dB per division.
-- Drag the **M** marker up or down to move the spectrum; drag sideways to
-  move the centre frequency.
+- Drag the **M** on the left edge up or down to move the spectrum, the **M**
+  on the top edge sideways to move the centre frequency.
 - The math popup: **Mode** FFT or ABS (the absolute value of the trace),
   **Color**, **Hz/Div**, and under **Other** the **Window** (Rectangular,
   Blackman, Hanning (default), Hamming, Triangular, Flat-top) and the
@@ -1459,7 +1446,7 @@ samples) stays in memory:
 
 - change the timebase to zoom in or out of the stored capture;
 - change the V/div to scale it;
-- drag sideways to pan through it;
+- drag the **T** on the top edge sideways to pan through it;
 - double tap to centre it on the trigger point.
 
 
@@ -2253,7 +2240,6 @@ step to its next value; rows with **-** / **+** change in steps.
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
-| **Scope drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
 | **More** | | | Page 2. |
 
 ### Settings page 2
@@ -2797,7 +2783,7 @@ measurement as it was.
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
-| Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
+| Scope: the display and touch settings (colours, brightness, grid, persistence, tap mode) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 The meter saves the settings to its internal disk, in the file
@@ -2824,7 +2810,7 @@ Untested on a real meter:
   resistance calibrator only).
 - Alerts: [A-PROT and OVLD](#the-alerts) with a current through the A jack.
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
-  long-press centring, holding a corner to repeat, Axis lock and Hold drag,
+  long-press centring, holding a corner to repeat, the marker grab zones,
   the persistence modes, auto-set keeping AC coupling.
 - Combined view: the long press on the strip.
 - Generator: the amplitude and the output impedance at the OUT jack, the

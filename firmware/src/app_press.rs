@@ -36,7 +36,7 @@ impl App {
             }
             Gesture::Drag(_, p, _) | Gesture::Move(_, p) if self.pressed.map(|q| q.1) == self.press_hit(p.x, p.y) => {}
             // A long press with no action of its own still taps on release.
-            Gesture::Grab(_) | Gesture::LongPress(_) => {}
+            Gesture::LongPress(_) => {}
             // The tap's action first (`press_after_tap`): a tap that opens
             // another page does not draw the item released before it.
             Gesture::Tap(p) if self.pressed.map(|q| q.1) == self.press_hit(p.x, p.y) => {}

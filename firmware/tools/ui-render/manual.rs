@@ -159,7 +159,7 @@ pub fn run(out: &str) -> usize {
 
     // Settings pages with the defaults of a new meter.
     host::reset(0);
-    ui::settings(0, &["5 min", "30 min", "55%", "50%", "ON", "Multimeter", "Auto (per view)", "Stock", ""]);
+    ui::settings(0, &["5 min", "30 min", "55%", "50%", "ON", "Multimeter", "Auto (per view)", ""]);
     ck.check_opts("manual/settings1", &page, false);
     save1(out, "settings1");
     host::reset(0);

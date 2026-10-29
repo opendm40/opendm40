@@ -930,19 +930,7 @@ impl App {
                 let [b0, b1] = &mut b;
                 let n0 = pct(b0, self.backlight);
                 let n1 = pct(b1, self.volume);
-                let grab = gesture::grab_ms();
-                let mut gb = [0u8; 16];
-                let grab_txt = if grab == 0 {
-                    scope_page::DRAG_NAMES[self.sp.drag_mode.min(1) as usize]
-                } else {
-                    let mut t = [0u8; 16];
-                    let s = crate::dmm::format(&mut t, grab as f32, 0);
-                    gb[..5].copy_from_slice(b"Hold ");
-                    gb[5..5 + s.len()].copy_from_slice(s.as_bytes());
-                    gb[5 + s.len()..8 + s.len()].copy_from_slice(b" ms");
-                    core::str::from_utf8(&gb[..8 + s.len()]).unwrap_or("Hold")
-                };
-                let vals: [&str; 9] = [
+                let vals: [&str; 8] = [
                     DIM_TXT[self.dim_idx],
                     OFF_TXT[self.off_idx],
                     core::str::from_utf8(&b0[..n0]).unwrap_or(""),
@@ -950,7 +938,6 @@ impl App {
                     if self.bt_on { "ON" } else { "OFF" },
                     ui::view_name(START[self.start_page]),
                     if self.rails_both { "Both always" } else { "Auto (per view)" },
-                    grab_txt,
                     "", // More row: opens page 2, no inline value
                 ];
                 ui::settings(0, &vals);
@@ -2151,7 +2138,7 @@ impl App {
         // bits 8..11 temperature sensor; p[12..15] per-sensor temperature
         // offsets (i16, 0.1 C, two per word); p[16]/p[17] user NTC R25 (ohm) /
         // Beta as f32 bits.
-        p[11] = self.rails_both as u32 | (self.dmm.t_sensor() as u32) << 8 | (gesture::grab_ms() as u32) << 16;
+        p[11] = self.rails_both as u32 | (self.dmm.t_sensor() as u32) << 8;
         let o = self.dmm.t_offs_raw();
         for (i, v) in o.iter().enumerate() {
             p[12 + i / 2] |= (*v as u16 as u32) << (16 * (i % 2));
@@ -2166,7 +2153,8 @@ impl App {
         // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39]
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
-        // records); p[11] bits 16..31: scope drag hold-to-grab ms (0 = direct).
+        // records); p[11] bits 16..31: the removed scope drag hold-to-grab
+        // ms (written 0, ignored on load).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2235,7 +2223,6 @@ impl App {
         if same_session {
             self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
         }
-        gesture::set_grab_ms((p[11] >> 16) as u16);
         let mut o = [0i16; 7];
         for (i, v) in o.iter_mut().enumerate() {
             *v = (p[12 + i / 2] >> (16 * (i % 2))) as u16 as i16;
@@ -2782,7 +2769,7 @@ impl App {
         // touch, swipe or side key dismisses it and goes on to the page.
         if matches!(self.overlay, Some(crate::dialog::Overlay::Toast { .. })) {
             let at = match g {
-                Gesture::Down(p) | Gesture::Tap(p) | Gesture::LongPress(p) | Gesture::Grab(p) | Gesture::Up(p) => Some(p),
+                Gesture::Down(p) | Gesture::Tap(p) | Gesture::LongPress(p) | Gesture::Up(p) => Some(p),
                 Gesture::Drag(s, _, _) | Gesture::Move(s, _) => Some(s),
                 _ => None,
             };
@@ -2902,7 +2889,6 @@ impl App {
                     }
                 }
                 Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::temp_hit(k, p.x, p.y) == self.tp_pressed => {}
-                Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.tp_pressed.take() {
                         self.with_temp_page(Some((c, false)));
@@ -2926,7 +2912,6 @@ impl App {
                 // A finger rolled off the key (its release may emit
                 // nothing): unpress; still on it: keep.
                 Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::keypad_hit(self.kp_kind(), p.x, p.y) == self.kp_pressed => {}
-                Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.kp_pressed.take() {
                         ui::keypad_key(self.kp_kind(), c, false);
@@ -4010,19 +3995,6 @@ impl App {
                         self.set_rails_both(b, clk);
                     }
                     Some(7) => {
-                        // Scope drag: Stock (per-event) -> Axis lock -> Hold
-                        // 300 ms (hold-to-grab, doc §6.2) -> Stock.
-                        if gesture::grab_ms() != 0 {
-                            gesture::set_grab_ms(0);
-                            self.sp.drag_mode = scope_page::DRAG_STOCK;
-                        } else if self.sp.drag_mode == scope_page::DRAG_STOCK {
-                            self.sp.drag_mode = scope_page::DRAG_AXIS;
-                        } else {
-                            self.sp.drag_mode = scope_page::DRAG_STOCK;
-                            gesture::set_grab_ms(gesture::GRAB_DEFAULT_MS);
-                        }
-                    }
-                    Some(8) => {
                         // Last row: page 2 (DMM rate, smoothing, Device).
                         self.set_page = 1;
                     }
@@ -4106,7 +4078,7 @@ impl App {
     }
 
     /// A slider owns the current touch (main.rs: capture it with
-    /// gesture::Tracker::capture_direct, no hold-to-grab). No DMM page has
+    /// gesture::Tracker::capture_direct, no raw moves). No DMM page has
     /// a slider since the temperature offset became a stepper.
     pub fn slider_active(&self) -> bool {
         false
@@ -4730,21 +4702,12 @@ impl App {
                 out.put_bytes(if self.meter.smoothing() == Smooth::High { b"SLOW" } else { b"FAST" });
                 true
             }
-            C::DbgGrab(Some(ms)) => {
-                gesture::set_grab_ms(ms);
-                self.redraw |= self.view == View::Settings;
-                false
-            }
             C::DbgPinch(Some(m)) => {
                 scope_page::set_pinch_mode(m);
                 false
             }
             C::DbgPinch(None) => {
                 crate::put_u32(out, scope_page::pinch_mode() as u32);
-                true
-            }
-            C::DbgGrab(None) => {
-                crate::put_u32(out, gesture::grab_ms() as u32);
                 true
             }
             C::DbgReadout => {

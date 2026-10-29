@@ -103,27 +103,25 @@ view paints at most one frame per 40 ms (`COMBO_FRAME_MS`, 25 fps,
 The stock model (`stock/re/docs/stock-scope-ui.md` (in the private analysis repo) §10): a press
 selects the marker under the finger (32x32 zones, the stock search order),
 then each move event moves the selected level item by dy if |dx| <= |dy|,
-else the selected time item by dx. opendm40 locks a drag that starts on a
-marker zone to that marker's axis. While a drag is active, the acquisition is
+else the selected time item by dx. opendm40 (owner 2026-10-30): only a drag
+that starts in a marker's grab zone moves anything, and only that marker
+along its own axis (`scope_ui::grab_rect`: 48 px along the edge, from the
+screen edge 30 px past the glyph into the graph; overlaps go to the nearest
+glyph). A drag from anywhere else on the graph moves nothing; taps, double
+tap, long press and pinch are unchanged. While a drag is active, the acquisition is
 not polled and each event re-renders the shown frame from its cached column
 rows; the settings reach the hardware on release. The tap step, the tap
 zones and the badge popups are in [scope-scale-ux.md](scope-scale-ux.md).
 Double tap where a tap does nothing: CH1 to the centre, trigger at 50 %
 (UF-09).
 
-Settings "Scope drag" cycles Stock (per event) -> Axis lock (the first 15 px
-decide the axis) -> Hold (§6.2).
+### 6.2 Hold-to-grab (removed)
 
-### 6.2 Hold-to-grab (A/B experiment)
-
-`gesture::GRAB_MS` (0 = direct drag, the default; Settings "Scope drag: Hold"
-sets `GRAB_DEFAULT_MS` 300; `DBG:GRAB <ms>` / `DBG:GRAB?`). In hold mode the
-finger must stay within 8 px (`GRAB_SLOP`) until the grab; the long press
-moves to 1200 ms (`LONG_HOLD_MS`). `DBG:GEST?` returns the last 32 drags for
-comparing the modes. The A/B session on the device (five tasks, five runs
-per mode: set a trigger level, move the trace one division, shift time two
-divisions, place a cursor, a mixed sequence; compare wrong-object drags and
-total time) has not run (TODO.md "G4 A/B on device").
+The Settings "Scope drag" modes (Stock, Axis lock, Hold 300 ms) and
+`DBG:GRAB` were removed with the marker-only drag (2026-10-30): a drag can
+no longer grab the wrong object by starting on the empty graph, which is
+what the hold delay guarded against. Their settings bits are written 0 and
+ignored on load.
 
 ### 6.3 Two fingers
 

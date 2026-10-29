@@ -18,6 +18,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Scope: only the markers drag.** Drag **A** (left edge), **T** (right
+  edge) or **T** (top edge) from anywhere in the shaded zone around it; a
+  drag that starts elsewhere on the graph moves nothing. **Settings > Scope
+  drag** is gone ([manual](docs/manual/README.md#moving-things-with-a-finger)).
+
+  ![The grab zones](docs/manual/img/scope-drag.png)
 - **Record button on the range pages:** MF, then **Record** opens the Record
   page (red while recording); **Hold/Limits** is now **Limits**
   ([manual](docs/manual/README.md#the-record-page)).

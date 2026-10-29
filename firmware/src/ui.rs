@@ -2841,10 +2841,7 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
 /// Device/About page) and "Touch test". "Back" is the tappable title bar (stock settings have
 /// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
 /// page 2 -> page 1 -> menu), so the lists hold only settings.
-pub const SETTINGS: [&str; 9] = [
-    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
-    "Scope drag", "More",
-];
+pub const SETTINGS: [&str; 8] = ["Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power", "More"];
 pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
 /// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
 /// OFF), the danger alarm (danger.rs, doc
@@ -3136,10 +3133,10 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("Swipe down (DMM)", "Record on / off"),
             ("3 fingers down", "Screenshot to disk"),
             ("2 fingers down", "Power off (confirm)"),
-            ("Scope: drag up/down", "Move the trace"),
-            ("Scope: right edge", "Drag trigger level"),
-            ("Scope: side drag", "Trigger position"),
-            ("Scope drag setting", "Direct or hold first"),
+            ("Scope: drag left A", "Move the trace"),
+            ("Scope: drag right T", "Trigger level"),
+            ("Scope: drag top T", "Trigger position"),
+            ("Scope: other drags", "Move nothing"),
         ],
     ),
     (
