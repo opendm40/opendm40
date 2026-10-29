@@ -353,6 +353,10 @@ try:
     b = block(t.qraw('WAV:DATA?'))
     check(len(b) == n and list(b) == [c >> 2 for c in wcodes], 'BYTE record = WORD >> 2 (%d bytes)' % len(b))
     check(abs(pb['yinc'] - 4 * p['yinc']) < 1e-5 * abs(p['yinc']), 'BYTE y increment = 4 x WORD (%g, %g)' % (pb['yinc'], p['yinc']))
+    # #130: a byte's volts are the middle of its four codes, not the lowest.
+    vb, _ = volts(pb, b)
+    bias = (sum(vb) - sum(v)) / len(v) / p['yinc']
+    check(abs(bias) < 0.5, 'BYTE mean = WORD mean (%+.2f codes; 1.5 codes low before #130)' % bias)
 
     t.w('WAV:POIN 1000')
     t.w('WAV:FORM WORD')

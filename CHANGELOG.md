@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- SCPI: `WAVeform:DATA?` in BYTE format is no longer 1.5 codes low on
+  average (the preamble's `yorig` is the middle of a byte's four codes).
+
 ## v0.3.0 (2026-10-27)
 
 ### New
