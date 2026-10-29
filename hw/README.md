@@ -299,12 +299,15 @@ bootloader and the FS-loader before the application runs.
    then press "update" on the screen.
 5. Remove the short.
 
-Untested: the exact timing, i.e. whether the short must be in place at power-on
-(as written above) or also works when applied during a reset, and how long
-it must be held.
+Untested: whether the short also works when applied during a reset. It must
+hold through both polls: the ROM's 1000 reads, then the FS-loader's
+(about 0.5 s each in the emulator; any high read launches the application).
 
-Software ways to the same screen while opendm40 runs (`DBG:UPDATE`, the key-hold
-recovery, the double-hang rule) are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
+opendm40 does the same in software: `DBG:LOADER` and the power-key hold at
+power-on drive PA2 low and lock the pin before jumping to the bootloader
+([native-boot.md, PA2 entry](../firmware/docs/native-boot.md#pa2-entry-bootloader_pa2)).
+The short is needed only when opendm40 hangs before its shim reads the key;
+the user steps are in [the manual, Reach the update loader](../docs/manual/README.md#reach-the-update-loader).
 
 ## USB
 
@@ -609,8 +612,8 @@ sections by commit ("f80524f", "d8e249d", "519fb8a", "469f354", "6bc494a",
   2-pin connector "VBAT" (photo). Runtime 10..15 h (chat reports; review:
   12 h DMM / 10 h scope).
 - Charger: [TP4056](datasheets/toppower-tp4056-cn.pdf), linear, from USB VBUS. Charging takes ~2 h 35 min (chat
-  report [#16625](https://t.me/S2084K/16625)). Status: PB10 / PB11 inputs (meaning guessed; the two RE
-  headers disagree, see [Unknowns](#unknowns)).
+  report [#16625](https://t.me/S2084K/16625)). Status: PB10 = input power present, PB11 = STDBY
+  (*inferred*, see the pin table and [Unknowns](#unknowns) 5).
 - Battery voltage: PC5 = ADC0 channel 15, 1:2 divider, 3.0 V reference
   assumed: Vbat = raw * 3.0 / 4096 * 2. Firmware powers off below ~3.31 V.
   ([`firmware/src/power.rs`](../firmware/src/power.rs), `stock/re/analysis/dmm_v2_6.h`); the divider ratio is
@@ -650,8 +653,8 @@ opendm40 or stock code that drives the pin.
 | PA13 / PA14 | SWD (pads "D" / "C") | io | debug header |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PB0..PB9 | [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) data D0..D9 | in | [`scope.rs`](../firmware/src/scope.rs) |
-| PB10 | charge status / control (meaning *inferred*) | in / od | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
-| PB11 | charge status (meaning *inferred*) | in, pull-up | stock code, `stock/re/analysis/dmm_v2_6.h`, [`power.rs`](../firmware/src/power.rs) |
+| PB10 | charger input power present: 1 against the MCU pull-down with USB power, 0 within ~8 ms of a USB power cut. Driven low, the charge stops; released, the charger goes to standby until the next replug (above ~4.1 V); a charger input (CE or TEMP, *inferred*). The stock pulses it low ~10 ms per 2 s on USB power below 80..85 % for its battery reading (Unknowns 5) | in (stock: od, released) | device 2026-10-29 (`DBG:CHG?`, `DBG:CHG:LOG?`), stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
+| PB11 | TP4056 STDBY (*inferred*): 0 against the pull-up when charged on USB power, 1 without input power and for 3.5..4.5 s after USB power returns (a new cycle on a full battery) | in, pull-up | device 2026-10-29, stock code (`FUN_0800b5f6`), [`power.rs`](../firmware/src/power.rs) |
 | PB12 | generator path select, 1 = PWM, 0 = DAC | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB14 | TIM12_CH1 (AF9) generator square | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB15 | scope 4051 select bit | out | [`scope.rs`](../firmware/src/scope.rs) |
@@ -717,9 +720,34 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 4. The MCU crystal: 25 MHz by the PLL read-back and the photo, 26 MHz in the
    community BOM (jebem, EEVblog thread, after mydigit.cn). The 25 MHz value
    is the one the running firmware depends on.
-5. Charge status pins: `stock/re/analysis/dmm_v2_6.h` says the stock shows the charging icon
-   when PB10 = 1 and PB11 = 0; `stock/re/analysis/bt_meas_v2_6.h` and [`firmware/src/power.rs`](../firmware/src/power.rs) use
-   PB10 = 1 and PB11 = 1 for "charging". Both are guesses about the meaning.
+5. Charge status pins. Measured (2026-10-29, battery 4.23 V): PB10 follows USB power; PB11 is low
+   when charged, high without input power and during a charge cycle. *Inferred*: PB11 = STDBY (the
+   only TP4056 pin that fits all states), PB10 = a charger input tied to VIN (CE or TEMP; PROG would
+   not hold 1 against the pull-down in standby), the CHRG pin on no MCU pin. The stock shows charging
+   when PB10 = PB11 = 1 (`FUN_0800b776`, `FUN_08023840`). It drives PB10 low below 85 % (a signed
+   integer compare of the float fraction, `0x08023b36`..`0x08023b3c`); low PB10 releases STDBY on the
+   device.
+   Measured while charging (2026-10-29, after ~2 h on battery; battery ADC while charging ~4.20 V):
+   PB10 low stops the charge at once (battery 4.205 -> 4.14 V, PB11 stays 1; USB current 0.166 A,
+   the meter's own load); released, the charger goes to standby (PB11 = 0) and does not charge again
+   until the next USB replug (battery 4.11..4.13 V, above its recharge threshold). Twice, same result.
+   At a full battery (C2, [`c2meter.py`](../firmware/tools/c2meter.py)) PB10 low or released makes no
+   difference to the USB current (0.1966 / 0.1963 A). USB current right after a replug, as the battery
+   drained (15 min blocks on battery): 0.36, 0.48, 0.56, 0.67, 0.70 A, the meter's own ~0.17..0.20 A
+   included. *Inferred*: PB10 is the charger's CE (or TEMP) line; a low pulse ends a charge cycle
+   above the recharge threshold.
+   Stock code (disassembly; the only PB10 users are the init `0x0800af60` and the battery task): two
+   timers alternate, `0x08023bae` (pins) and `0x08023aac` (battery). Every 2 s the pins task reads
+   PB10 / PB11 (PB10 released) and drives PB10 low (push-pull, BC) when PB10 reads 1 and the battery
+   fraction (Vbat - 3.3) / 0.9 from the last battery read is below 0.85 on a 0 -> 1 edge of PB10
+   (plug-in), or below 0.80 otherwise (`cmp` of the float bits as signed integers + `bge` = skip at
+   >= 0.85 / 0.80, `0x08023b36`, `0x08023b62`). 10 ms later the battery task reads the ADC and then
+   releases PB10 (open drain high). So PB10 is low for ~10 ms per 2 s, only on USB power below 80..85 %,
+   and the battery is read during that pulse. *Inferred* purpose: a battery reading without the charge
+   current, below the level (~4.06 V) where the charger restarts after the pulse; above it a pulse would
+   end the charge (measured above). opendm40 never drives PB10: its charger runs the plain TP4056 cycle
+   (charges to termination after a replug, measured); its battery reading on USB power includes the
+   charge current's rise.
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

@@ -78,7 +78,8 @@ const SCB_AIRCR: u32 = 0xE000_ED0C;
 /// Watchdog policy (see the end of this file): the main loop feeds the FWDGT
 /// until a deadline, INITIAL_HOLD_MS after start (in effect: for as long as
 /// the loop runs), pushed forward by host requests. After DBG:RELEASE, a panic
-/// or a hang the watchdog (~20 s) resets and the shim counts a crash.
+/// or a hang the watchdog (~20 s) resets, the shim counts a crash and boots
+/// opendm40 again.
 const INITIAL_HOLD_MS: u64 = u64::MAX / 4;
 const KEEPALIVE_MS: u64 = 15_000;
 /// SCPI session / transport index (scpis, scpi_wait).
@@ -226,6 +227,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
     app.tick(&mut clk, true);
+    lcd::defer_flush();
     native::main_phase(1, clk.now_ms());
     // The generated USB volume's tables and files (vdisk.rs, ~0.47 s on the
     // device): after the first frame, before USB attaches.
@@ -385,6 +387,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
+        app.usb_host = dev.state() == UsbDeviceState::Configured;
+        power::USB_CONF.store(app.usb_host, core::sync::atomic::Ordering::Relaxed);
         // The INFO/ mirror's sectors while the stream runs: at most one per
         // pass, paced against the fast logger (vdisk.rs `mirror_pass`).
         #[cfg(feature = "vdisk")]
@@ -776,6 +780,10 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dbg_idle(set, now, scpi);
                         set.is_none()
                     }
+                    scpi::Dbg::Ohm6(set) => {
+                        app.dmm.ohm600_dbg(set, scpi);
+                        set.is_none()
+                    }
                     scpi::Dbg::Ping(ms) => {
                         if ms > 0 {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
@@ -869,7 +877,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         false
                     }
                     scpi::Dbg::Diag => {
-                        let d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        let mut d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        // 61: charge pins (bit 0 PB10, 1 PB11), bit 2 USB configured.
+                        d[61] = app.power.pins() | (app.usb_host as u8) << 2;
                         scpi.len = 0;
                         scpi.put_bytes(b"#3");
                         let n = d.len();
@@ -1610,6 +1620,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw || force_draw);
+        lcd::defer_flush(); // a repaint's batch (App::repaint)
         // The settings' copy on the SPI disk (setfile.rs): a few seconds
         // after a change, never during an AD1 logger session.
         setfile::poll(now, logger.disk_writes_blocked());
@@ -1712,6 +1723,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if app.gesture(&mut clk, g) {
                     if app.slider_active() { gestures.capture_direct() } else { gestures.capture() }
                 }
+                lcd::defer_flush();
                 prof::exit(prof::GEST);
             }
         }
@@ -1719,6 +1731,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if !logging {
             prof::enter(prof::SCOPE);
             app.scope_poll(now, can_draw);
+            lcd::defer_flush();
             prof::exit(prof::SCOPE);
         }
         mark(3, &mut ts);
@@ -2317,7 +2330,7 @@ fn touch_diag(
 }
 
 /// Stop feeding the watchdog and wait for the FWDGT reset (the shim counts it
-/// as a crash).
+/// as a crash and boots opendm40 again).
 fn wait_for_watchdog() -> ! {
     loop {
         mmio::spin(1_000_000);
@@ -2327,8 +2340,8 @@ fn wait_for_watchdog() -> ! {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
-    // the shim counts a crash (WDT_RETRY, then recovery).
-    lcd::fill_rect(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
+    // the shim counts a crash and boots opendm40 again (WDT_RETRY).
+    lcd::fill_rect_raw(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
     wait_for_watchdog()
 }
 
@@ -2337,13 +2350,15 @@ fn panic(_info: &PanicInfo) -> ! {
 // (src/boot.rs): INITIAL_HOLD_MS above makes the main loop feed the FWDGT for
 // as long as it runs.
 // DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
-// counts it as a crash: the 1st reboots opendm40 normally (WDT_RETRY), a 2nd one
-// without 60 s of healthy main loop in between (boot::mark_healthy) enters
-// recovery (marker zeroed -> vendor update screen). DBG:RESET = SYSRESETREQ ->
-// normal reboot of opendm40. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
-// marker (boot::enter_loader_update) and reset -> the vendor loader's update
-// screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
-// request word is set by any command now.)
+// counts it as a crash (DBG:BOOT?; cleared after 60 s of main loop,
+// boot::mark_healthy) and reboots opendm40 normally (WDT_RETRY), every time:
+// no hang count leads to the loader. DBG:RESET = SYSRESETREQ ->
+// normal reboot of opendm40. DBG:UPDATE zeroes the 12-byte loader marker
+// (boot::enter_loader_update) and resets -> the vendor loader's update screen
+// with its own USB disk until a dm40*.bin is installed. DBG:LOADER /
+// DBG:RECOVER set the backup-SRAM request word LOADER_MAGIC and reset; the
+// shim then drives PA2 low and jumps to the ROM (boot::loader_pa2): the same
+// screen, the marker untouched.
 mod board;
 mod boot;
 mod fatren;

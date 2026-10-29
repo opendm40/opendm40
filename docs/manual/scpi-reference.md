@@ -385,6 +385,10 @@ Functions:
   AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
   off.
 - `:RANGe?` also reports the range while autoranging.
+- `RESistance:RANGe` above 60 MΩ selects the experimental 600 MΩ
+  (`+6.000000E+08`); `MAX` is 60 MΩ. `:RANGe:AUTO ON` leaves it. It reads
+  once per ~2 s, so `READ?` may answer with a reading up to 2 s old;
+  `:RESolution` sets nothing there (its digits follow the value).
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
@@ -766,6 +770,10 @@ unless shown otherwise.
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
+| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
+| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
@@ -785,6 +793,8 @@ unless shown otherwise.
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
+| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
+| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
@@ -823,7 +833,8 @@ unless shown otherwise.
 | `DBG:UPLoad:ABORt` | | Cancels the upload. | USB |
 | `DBG:UPLoad?` | | `<active 1/0>,<received>,<size>` | USB |
 | `DBG:UPDATE` | | Makes the vendor loader install the uploaded file: the meter restarts. | USB |
-| `DBG:RECOVER` | | Same as `DBG:UPDATE`. | USB |
+| `DBG:LOADER` | | Restarts into the vendor loader's update screen; the installed firmware stays. | USB |
+| `DBG:RECOVER` | | Same as `DBG:LOADER`. | USB |
 | `DBG:RESET` | | Restarts the meter. | USB |
 | `DBG:RELEASE` | | Stops feeding the watchdog: the meter resets in about 20 s and counts a crash. | USB |
 
@@ -831,7 +842,8 @@ unless shown otherwise.
   space; the bytes after the comma are binary and run to the end of the USB
   message. The offset is the number of bytes sent so far.
   `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
-- `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
-  file; without one it stays on its update screen with its own USB disk
-  until a firmware file is copied there. `DBG:RELEASE`: a second crash in a
-  row leads to the same screen.
+- `DBG:UPDATE`: the vendor loader installs the staged file; without one it
+  stays on its update screen with its own USB disk until a firmware file is
+  copied there.
+- `DBG:LOADER`: a staged file is installed; switching the meter off and on
+  leaves the loader and starts opendm40.
