@@ -16,3 +16,5 @@ See [ohm-600m.md](../../ohm-600m.md).
   leak learned, 0.9925 MΩ (twice) and 5.5693 MΩ; the 5th `DBG:OHM6?` field is the leak (nS).
 - [build-35a47b9e-final.txt](build-35a47b9e-final.txt): the final build on 5.5693 MΩ: `CONF:RES 600E6;:READ?`, the
   readings, AUTO ON (to 6 MΩ), MAX (60 MΩ).
+- [build-b64b287c-open-13min.csv](build-b64b287c-open-13min.csv): r7 on open jacks for 13 min: the readout, the learned
+  leak (nS), Vx, Vfb and their difference per reading.

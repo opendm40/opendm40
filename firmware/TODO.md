@@ -40,7 +40,7 @@ Additional requirements:
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
-      far up to 5.57 MΩ only. Also: whether the leak (learned on open leads, ~21 GΩ on one unit) is a
+      far up to 5.57 MΩ only. The leak is steady over 13 min (±1.5 %), 0.041 .. 0.059 nS over an evening. Also: whether the leak (learned on open leads, ~21 GΩ on one unit) is a
       resistor across the jacks or depends otherwise on the jack voltage; the jack check (AD2 = OP1O) reads
       FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ is untested.
 

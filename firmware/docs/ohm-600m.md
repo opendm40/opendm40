@@ -85,7 +85,14 @@ on, it takes leak = drop / Rref / Vx as a conductance (a mean over ~4) and
 subtracts leak · Vx from the current. A drop of zero or below (the jack at
 or above FB: a charged capacitor, a source) is never learned, and an Rx above
 ~7 GΩ counts as open (its conductance joins the leak). That treats the leak as a resistor
-across the jacks; whether it is one is *unknown*. At 600 MΩ the jack is at
+across the jacks; whether it is one is *unknown*.
+
+Over 13 min on open leads (b64b287c, [build-b64b287c-open-13min.csv](data/ohm600m-2026-10-28/build-b64b287c-open-13min.csv)):
+after the first minute the learned leak stays at 0.0423 … 0.0436 nS (±1.5 %,
+Vfb − Vx 444 … 456 µV per minute), every reading OL; at 600 MΩ that is
+±0.04 % of the reading. Across the evening it was 0.041 … 0.059 nS
+(several power-ups and resistor swaps), so one learned an hour earlier can
+be off by up to ~0.5 % at 600 MΩ. At 600 MΩ the jack is at
 nearly the open voltage, so the correction holds there whatever the model;
 at 5.57 MΩ it is 0.03 %. It lives in RAM: until the leads have been open
 once after power-up, 600 MΩ reads up to ~3 % low.
@@ -119,7 +126,7 @@ after a switch can be off by up to 4 mV (OP1's input stepping from 0.37 V to
 build's readings have an sd of 0.0002 MΩ.
 
 Not checked: any resistor above 5.57 MΩ, the noise and settling at hundreds
-of MΩ, the leak's stability (humidity, temperature) and its dependence on
+of MΩ, the leak over hours (humidity, temperature) and its dependence on
 the jack voltage.
 
 ## Tuning without a reflash
