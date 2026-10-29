@@ -1479,6 +1479,9 @@ impl App {
     #[inline(never)] // its draw frames stay out of the callers' frames (run's)
     fn repaint(&mut self, now: u64) {
         self.redraw = false;
+        // The page's background fills wait for the widgets (lcd.rs
+        // "deferred fills"); main.rs flushes after the tick.
+        crate::lcd::defer_start();
         // The full repaint drew any pressed item released.
         self.pressed = None;
         self.scope_invalidate();
@@ -2817,6 +2820,10 @@ impl App {
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+                // Pressed feedback kept through the tap (app_press.rs).
+                if self.pressed.is_some() {
+                    self.press_after_tap();
+                }
             }
             // Long press on the A button: the power meter's wiring dialog.
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {

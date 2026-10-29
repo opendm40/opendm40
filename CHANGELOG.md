@@ -18,6 +18,11 @@ section named after the tag as the release notes; how to cut a release:
 
   ![600 MΩ: EXP beside the test current](docs/changelog/v0.4.0/ohm-600m.png)
 
+### Changed
+
+- Smoother screen changes: pages, popups and DMM functions draw over the old
+  screen, not over a blank one; an MF menu tab redraws only the menu.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

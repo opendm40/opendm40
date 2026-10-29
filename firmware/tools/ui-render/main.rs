@@ -1076,6 +1076,26 @@ pub fn touchcal_scene(k: u8, long: bool) {
     }
 }
 
+/// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
+/// in a batch over an arbitrary previous screen ends pixel-identical to the
+/// page drawn directly.
+fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    draw();
+    let a = host::emu().fb.clone();
+    host::reset(0);
+    lcd::defer_start();
+    draw();
+    lcd::defer_flush();
+    unsafe { host::PATTERN = false };
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("deferred fills: {n} px differ from the direct draw"));
+    }
+}
+
 fn save(out: &str, name: &str) {
     host::save_ppm(&format!("{out}/{name}.ppm"), 2);
 }
@@ -2384,6 +2404,25 @@ fn main() {
         if k == "fw-install" {
             save(&out, "t04-confirm-fw-install");
         }
+    }
+
+    // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
+    defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    defer_check(&mut ck, "defer/help", || ui::help_page(0));
+    defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
+    defer_check(&mut ck, "defer/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()).filter(|sc| sc.popup != scope_ui::Popup::None).take(6) {
+        // stock::draw resets the screen itself: the pattern stays on.
+        defer_check(&mut ck, &format!("defer/scope/{}", sc.name), || {
+            unsafe { host::PATTERN = true };
+            stock::draw(sc);
+        });
     }
 
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
