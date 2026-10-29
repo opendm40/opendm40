@@ -4,7 +4,7 @@
   * glyph 0x22 of the status-bar icon font SAVE_BT (0x0805B2E8, 0x21 =
     Bluetooth, 16 x 20 4 bpp): 14 x 20, 4 bpp (ui.rs status_right);
   * glyph 0x30 of the scope battery font SC_BATT (0x0806BD44, 1 bpp, 16 px
-    line): 9 x 12, 1 bpp (scope_ui.rs usb_icon, the scope top bar).
+    line): 11 x 16, 1 bpp (scope_ui.rs usb_icon, the scope top bar).
 
 The large one is drawn at 8x with PIL (stem with an arrow head, a round foot,
 a branch with a circle on the left and one with a square on the right) and
@@ -51,21 +51,28 @@ def draw(W, H, stroke=2.0):
     return [[min(15, (r.getpixel((x, y)) + 8) // 17) for x in range(W)] for y in range(H)]
 
 
-# The small one by hand (an area-averaged 9 x 12 comes out lopsided): 1 px
-# strokes, the centre column 4.
+# The small one by hand (an area-averaged one comes out lopsided): 11 x 16,
+# the battery body's height (top bar y 1..16) and its 1 px outline weight;
+# odd width so the stem (column 5), the arrow head and the foot centre on
+# one column. Square higher on the right, circle lower on the left, as the
+# large one.
 SMALL = [
-    '....@....',
-    '...@@@...',
-    '..@@@@@..',
-    '....@..@@',
-    '....@..@@',
-    '.@@.@..@.',
-    '.@@.@.@..',
-    '.@..@@...',
-    '..@.@....',
-    '...@@....',
-    '...@@@...',
-    '...@@@...',
+    '.....@.....',
+    '....@@@....',
+    '...@@@@@...',
+    '..@@@@@@@..',
+    '.....@..@@@',
+    '.....@..@@@',
+    '.@...@..@@@',
+    '@@@..@...@.',
+    '.@...@...@.',
+    '.@...@..@..',
+    '..@..@.@...',
+    '...@.@@....',
+    '....@@.....',
+    '....@@@....',
+    '...@@@@@...',
+    '....@@@....',
 ]
 
 

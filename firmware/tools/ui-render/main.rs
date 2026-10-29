@@ -1679,6 +1679,30 @@ fn main() {
             scope_ui::graph().clear();
             scope_ui::update(&m);
             ck.check_replica(&format!("scopebar/{name}"));
+            // The USB symbol as tall as the battery body (same top and
+            // bottom row) and centred in the gap 414..434 between the
+            // trigger badge and the battery.
+            if m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let ink = |x0: usize, x1: usize| {
+                    let (mut b, mut n) = ((usize::MAX, usize::MAX, 0, 0), 0);
+                    for y in 0..20 {
+                        for x in x0..=x1 {
+                            if fb[y * 480 + x] != bar {
+                                b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+                                n += 1;
+                            }
+                        }
+                    }
+                    (b, n)
+                };
+                let ((ux0, uy0, ux1, uy1), n) = ink(414, 434);
+                let ((_, by0, _, by1), _) = ink(435, 479);
+                if n == 0 || uy0 != by0 || uy1 != by1 || ux0 - 414 != 434 - ux1 {
+                    ck.fail(&format!("scopebar/{name}/usb"), format!("USB symbol x {ux0}..{ux1} y {uy0}..{uy1}, battery y {by0}..{by1}"));
+                }
+            }
             host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }

@@ -714,9 +714,10 @@ pub fn battery(m: &Model) {
     });
 }
 
-/// The USB host symbol (SC_BATT 0x30, 9 x 12 1 bpp, tools/mkusbglyph.py) in
-/// the gap between the trigger badge (..413) and the battery (435..).
-pub const USB_ICON: Rect = rect(417, 1, 13, 17);
+/// The USB host symbol (SC_BATT 0x30, 11 x 16 1 bpp, tools/mkusbglyph.py)
+/// centred in the gap between the trigger badge (..413) and the battery
+/// (435..): ink x 419..429, y 1..16 as the battery body.
+pub const USB_ICON: Rect = rect(414, 1, 21, 17);
 
 pub fn usb_icon(m: &Model) {
     let r = USB_ICON;
