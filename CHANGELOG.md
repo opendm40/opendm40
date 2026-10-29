@@ -26,7 +26,6 @@ section named after the tag as the release notes; how to cut a release:
   `DBG:LOADER`, the loader now lets the installed firmware start again when
   you switch the meter off and on; no reinstall is needed.
   [How to reach it](docs/manual/README.md#reach-the-update-loader).
-
 - Smoother screen changes: pages, popups and DMM functions draw over the old
   screen, not over a blank one; an MF menu tab redraws only the menu.
 
