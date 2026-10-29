@@ -1763,16 +1763,18 @@ impl App {
                 // even while it reads OL: the axis labels name the
                 // function shown, not the previous one (device check
                 // 92fb8fa: cap "0.050MOhm", diode "MOhm", temperature "Hz").
-                if self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec) {
+                // A range change to another unit starts the chart over in
+                // the new unit, also when the new range reads OL (#93: 3.3 V
+                // on 6 V -> 600 mV kept the V trace and labels). Not under
+                // HOLD: the readout keeps the held unit too.
+                let unit_new = r.main.unit != self.chart_unit && !self.meter.hold;
+                if unit_new || (self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec)) {
                     self.chart_unit = r.main.unit;
                     self.chart_dec = r.main.dec;
+                    self.chart_n = 0;
                     self.chart_dirty = true;
                 }
                 if !self.meter.hold && !r.main.ol {
-                    if r.main.unit != self.chart_unit {
-                        self.chart_unit = r.main.unit;
-                        self.chart_n = 0;
-                    }
                     self.chart_dec = r.main.dec;
                     let n = self.chart.len();
                     if self.chart_n == n {

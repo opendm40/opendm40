@@ -277,6 +277,7 @@ recorded.
 |---|---|---|---|
 | [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered | ~4 min | BT 4834 |
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
+| [`chartunittest.py`](chartunittest.py) | DMM trend chart after a range change to another unit that reads OL (#93) | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
 | [`flowtest.py`](flowtest.py) | the live window's signal-flow diagram does not move; no emulator | | - |
 

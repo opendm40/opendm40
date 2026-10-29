@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- DMM trend chart: a range change to another unit that reads OL (6 V to
+  600 mV on 3.3 V) starts the chart over in the new unit.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

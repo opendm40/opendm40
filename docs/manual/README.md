@@ -913,7 +913,8 @@ The chart plots the reading over time, 321 points wide.
   160 → 320 → 640 ms/div; the chart restarts.
 - The scale follows the data.
 - It stops during HOLD and keeps running during AutoHold.
-- It restarts when you change the function.
+- It restarts when you change the function or switch to a range with
+  another unit (6 V to 600 mV).
 
 ![The trend chart](img/trend-chart.png)
 
