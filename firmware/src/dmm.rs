@@ -160,10 +160,18 @@ const CAP_DV_MIN: f32 = 0.05;
 const CAP_IDLE_N: u8 = 5;
 /// No ramp with the node below this (mV, after the discharge): a short.
 const CAP_SHORT_MV: f32 = 30.0;
-/// Ramp ranges: polls of a range before its slope picks the range up
+/// Ramp ranges: slope samples over the range in a row before one range up
 /// (`poll_cap`), and before its first value.
 const CAP_EARLY_N: usize = 2;
-const CAP_FIRST_N: usize = 4;
+const CAP_FIRST_N: usize = 3;
+/// The first value on a ramp range: two candidates in a row this close.
+const CAP_AGREE: f32 = 0.005;
+/// A slope sample counts towards a step up only within this share of the
+/// one before (the absorption's falling early slope does not).
+const CAP_STEADY: f32 = 0.02;
+/// Polls over the range (running median) after which one step up comes
+/// regardless of the slope's steadiness (~2 s).
+const CAP_OVER_MAX: u8 = 8;
 /// 6 / 60 mF: a ramp result this far (share) from the shown value starts
 /// the range choice again from 600 uF (another capacitor on the leads).
 const CAP_SWAP: f32 = 0.3;
@@ -1502,6 +1510,20 @@ pub struct Dmm {
     cap_cnt_small: u8,
     /// Ramp ranges: polls in a row without a ramp (`CAP_DV_MIN`).
     cap_idle: u8,
+    /// Ramp ranges, before a range's first value: slope samples over the
+    /// range in a row, and the last candidate value (uF; `poll_cap`).
+    cap_over: u8,
+    cap_cand: f32,
+    cap_prev_raw: f32,
+    cap_over_n: u8,
+    cap_under: u8,
+    /// The last 3 polls' own slope C (uF) and the polls of this range.
+    cap_inst: [f32; 3],
+    cap_inst_n: u8,
+    /// The range of the last capacitance value: AUTO starts there when it
+    /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
+    /// steps before 600 uF).
+    cap_last: i8,
     /// Ramp ranges: the interval between new results (ms, EMA; 0 = none
     /// yet) and the last one's time: the readings/s there (a poll every
     /// 255 ms repeats the value; `reading_period_ms`).
@@ -2132,6 +2154,14 @@ impl Dmm {
             cap_cnt_dn: 0,
             cap_cnt_small: 0,
             cap_idle: 0,
+            cap_over: 0,
+            cap_cand: 0.0,
+            cap_prev_raw: 0.0,
+            cap_over_n: 0,
+            cap_under: 0,
+            cap_inst: [0.0; 3],
+            cap_inst_n: 0,
+            cap_last: CAP_R_MIN,
             cap_res_ms: 0.0,
             cap_res_t: None,
             cap_dbg: [0.0; 6],
@@ -3210,12 +3240,18 @@ impl Dmm {
             10 => (6, OHM_ENTRY_MS),
             11 => (0, 200),
             12 => (0, 100),
-            13 => (CAP_R_MIN, 200),
+            13 => (if self.cap_last >= 5 { self.cap_last } else { CAP_R_MIN }, 200),
             14 => (0, 1000),
             15 => (self.t_range0(), 500),
             _ => (0, ENTRY_MS),
         };
         self.set(clk, mode.min(15), r, settle);
+        if mode == 13 && r >= 5 {
+            // Back to the last value's ramp range: discharge first, as a
+            // step up from 60 uF does.
+            self.ramp.discharging = true;
+            self.cap_set_range(clk, r);
+        }
     }
 
     // ------------------------------------------------------ temperature API
@@ -5948,6 +5984,12 @@ impl Dmm {
         self.cap_cnt_dn = 0;
         self.cap_cnt_small = 0;
         self.cap_idle = 0;
+        self.cap_over = 0;
+        self.cap_cand = 0.0;
+        self.cap_prev_raw = 0.0;
+        self.cap_over_n = 0;
+        self.cap_under = 0;
+        self.cap_inst_n = 0;
         self.cap_res_ms = 0.0;
         self.cap_res_t = None;
     }
@@ -5982,6 +6024,7 @@ impl Dmm {
             }
             if !ol {
                 self.cap_c = c;
+                self.cap_last = r as i8;
             }
             return Some(self.cap_val(self.cap_c, ol));
         }
@@ -6053,14 +6096,14 @@ impl Dmm {
             3
         };
         if class != self.ramp.class {
+            // The comparator threshold changes, the current does not: this
+            // poll's dV is still a slope sample (it was thrown away, one
+            // 255 ms poll per ramp range).
             self.ramp.class = class;
-            self.ramp.med_i = 0;
             // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
             // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
             let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
             hy::write(0x21, &[v]);
-            self.deadline = now + 255;
-            return Some(self.cap_val(0.0, true));
         }
         let craw = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm;
         let c = craw.clamp(0.0, 1.06 * lim);
@@ -6070,29 +6113,62 @@ impl Dmm {
             self.ramp.buf[self.ramp.n] = c;
             self.ramp.n += 1;
         }
+        // This poll's own slope (not the running median of 5 dV, which
+        // repeats the range's first sample for its first polls: a falling
+        // slope looked steady, and an odd first sample after a range change
+        // gave 3 "agreeing" first values 8 % high, emulator).
+        let craw_i = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dv;
+        let cinst = craw_i.clamp(0.0, 1.06 * lim);
+        self.cap_inst[self.cap_inst_n as usize % 3] = cinst;
+        self.cap_inst_n = self.cap_inst_n.saturating_add(1);
         // The range from the slope (device: 1 mF took 7.5 s on 600 uF,
-        // waiting for 5 over-range results of the full ramp): after
-        // CAP_EARLY_N polls of this range, straight to the ramp range that
-        // holds the slope's C.
-        if self.ramp.first && !self.manual && r < 7 && self.ramp.n >= CAP_EARLY_N && craw > ov * lim {
-            let mut t = r + 1;
-            while t < 7 && craw > f_dec * CAP_DEC[t] {
-                t += 1;
+        // waiting for 5 over-range results of the full ramp): CAP_EARLY_N
+        // slope samples in a row over the range: one range up. One step at
+        // a time: right after the discharge an electrolytic's slope reads
+        // it high (dielectric absorption; device 832f89a4: ~1 mF went to 60
+        // mF and read 1.52 mF there), the next range's current re-checks.
+        if self.ramp.first && !self.manual {
+            // Counted only while the slope holds still (CAP_STEADY from the
+            // poll before): the absorption's early slope falls for ~1 s.
+            // Falling (the absorption) blocks; noise up or down by less
+            // does not. Over the range for CAP_OVER_MAX polls steps anyway.
+            let steady = self.cap_prev_raw > 0.0 && craw_i >= (1.0 - CAP_STEADY) * self.cap_prev_raw;
+            self.cap_prev_raw = craw_i;
+            self.cap_over = if craw_i > ov * lim && craw > ov * lim && steady { self.cap_over.saturating_add(1) } else { 0 };
+            self.cap_over_n = if craw > ov * lim { self.cap_over_n.saturating_add(1) } else { 0 };
+            if r < 7 && (self.cap_over as usize >= CAP_EARLY_N || self.cap_over_n >= CAP_OVER_MAX) {
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_val(0.0, true));
             }
-            self.cap_set_range(clk, t as i8);
-            return Some(self.cap_val(0.0, true));
+            // Under the range (AUTO started on the last value's range, a
+            // smaller capacitor now: 470 uF after 47 mF stayed grey on 60
+            // mF): one range down. The absorption reads high, not low.
+            let dn = if r == 5 { CAP_R5_DOWN * lim } else { 0.1 * lim / ov };
+            self.cap_under = if craw < dn { self.cap_under.saturating_add(1) } else { 0 };
+            if self.cap_under as usize >= CAP_EARLY_N {
+                self.cap_set_range(clk, r as i8 - 1);
+                return Some(self.cap_val(0.0, true));
+            }
         }
-        // The first value from the slope (median of the polls so far)
-        // after CAP_FIRST_N polls, not at the first comparator flip / 35
-        // polls (3.3 s for 1 mF on 6 mF on the device); grey until then.
-        let early = self.ramp.first && self.ramp.n >= CAP_FIRST_N && c <= ov * lim;
-        if early {
-            let n = self.ramp.n;
-            let mut b = self.ramp.buf;
-            sort_f32(&mut b[..n]);
-            self.cap_c = b[n / 2];
-            self.ramp.first = false;
-            ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
+        // The first value: when the slope stopped moving, the median of the
+        // last 3 polls' own slopes within CAP_AGREE of the poll before's
+        // (device: 943, 951 uF first, 1001.6 uF from 9 s: the electrolytic
+        // settling); the range's first sample left out (a range change's
+        // step); grey until then (`cap_ramp_val`), not at the first
+        // comparator flip / 35 polls (3.3 s for 1 mF on 6 mF on the device).
+        let mut early = false;
+        if self.ramp.first && self.cap_inst_n as usize > CAP_FIRST_N && c <= ov * lim {
+            let mut b = self.cap_inst;
+            sort_f32(&mut b);
+            let cand = b[1];
+            if (cand - self.cap_cand).abs() <= CAP_AGREE * cand {
+                self.cap_c = cand;
+                self.ramp.first = false;
+                self.cap_last = r as i8;
+                early = true;
+                ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
+            }
+            self.cap_cand = cand;
         }
         let cmp = hy::read1(0x14) & 0x40 != 0;
         let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
@@ -6119,8 +6195,7 @@ impl Dmm {
                 return Some(self.cap_val(0.0, true));
             }
             if self.ramp.first {
-                self.cap_c = c;
-                self.ramp.first = false;
+                // (No value yet: the slope agreement above gives the first.)
             } else if !early {
                 ema(CAP_WIN[r], 0.25, mean, &mut self.cap_c);
             }
@@ -6158,7 +6233,8 @@ impl Dmm {
         }
         // Before the range's first value: the slope's C, grey.
         if self.ramp.first {
-            return Some(self.cap_ramp_val(c, c / lim > ov));
+            let g = if self.cap_cand > 0.0 { self.cap_cand } else { c };
+            return Some(self.cap_ramp_val(g, g / lim > ov));
         }
         Some(self.cap_ramp_val(cc, ol))
     }

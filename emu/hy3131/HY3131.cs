@@ -859,6 +859,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "ohmexitrst": OhmExitRst = o.Value != 0; break;
                 case "ohmtau": OhmTauMs = o.Value; break;
+                case "capda": CapDaK = o.Value; break;
+                case "capdatau": CapDaTau = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
                 case "senseneg": SenseNegV = o.Value; break;
@@ -2101,6 +2103,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var c = cf * 1e6; // uF
             if(c <= 0) c = 1e-4;   // open: ramps instantly to the threshold
             var slope = CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / c; // V/s at the AD1 node
+            // Dielectric absorption (opt-in "capda:k;capdatau:s", CHOSEN, not measured): after
+            // the discharge the slope is (1 - k e^(-t / tau)) of I / C, t from the ramp's start
+            // (device 832f89a4, ~1 mF electrolytic: the early slope read the capacitor 50 % high
+            // and more on 600 uF and 60 mF).
+            if(CapDaK > 0 && CapDaTau > 0)
+                slope *= Math.Max(0.05, 1 - CapDaK * Math.Exp(-(now - capDaT0) / CapDaTau));
             var remaining = dt;
             while(remaining > 0)
             {
@@ -2619,7 +2627,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(newRole == Role.Temp && Sad1I == 1) newRole = Role.None;
             if(newRole != role || newMode != roleMode || newRange != roleRange)
             {
-                if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
+                if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; if(role == Role.CapDischarge || lastRole == Role.CapDischarge) capDaT0 = now; }
                 // (the quiesce writes pass through no-role states: the last real role counts)
                 if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
                 if(newRole == Role.AcV && lastRole != Role.AcV) acvT0 = now;
@@ -2746,6 +2754,9 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private double ctEnableTime, ctStart, ctStop, ctPhase;
         private int ctInit, ctA, ctB, ctC;
         private double rampV, rampLast;
+        /// Dielectric absorption of the capacitor on the ramp rows ("capda:k;capdatau:s").
+        public double CapDaK, CapDaTau = 1.0;
+        private double capDaT0;
         private bool rampUp;
         private double vc, vcLast;
         private Role role;

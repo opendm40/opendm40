@@ -11,7 +11,7 @@ each phase connects its input at its start (CONF:CAP at +1 s of the first one), 
 `CONF?;:FETC?` every 0.2 s. At the phase's end the last LAST polls must show the phase's range
 and value: a number (within TOL), `ol` (+9.9E37), `small` (below 0.2 nF: the open leads'
 stray, 0.04 nF in the emulator), `zero` (0); `stable` s: no range change in the phase's last
-`stable` s.
+`stable` s; an optional 6th item: a range the phase must never show (overshoot).
 
   emu/hy3131/capdowntest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 47750
 """
@@ -49,6 +49,10 @@ SCEN = [
     ('100uF', [(25, 'c:100e-6', 6e-4, 100e-6, 12)]),
     ('470uF', [(25, 'c:470e-6', 6e-4, 470e-6, 12)]),
     ('1mF', [(30, 'c:1000e-6', 6e-3, 1e-3, 15)]),
+    # An electrolytic's dielectric absorption (capda: the slope 60 % low right after the
+    # discharge, tau 1 s; device 832f89a4 went to 60 mF on ~1 mF): no overshoot past 6 mF.
+    ('1mF-da', [(30, 'c:1000e-6;capda:0.6;capdatau:1', 6e-3, 1e-3, 15, 6e-2)]),
+    ('4.7mF-da', [(30, 'c:4.7e-3;capda:0.6;capdatau:1', 6e-3, 4.7e-3, 15, 6e-2)]),
     # The device's open / short on a ramp range (#74): the node at its clamp / at 0 V, no
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
@@ -139,7 +143,7 @@ try:
 
     for k, (name, phases) in enumerate(scen):
         why = []
-        for j, (dur, inp, rng, want, stable) in enumerate(phases):
+        for j, (dur, inp, rng, want, stable, *never) in enumerate(phases):
             w0 = mk.at(starts[k, j] + BOOT_OFS)
             if j == 0:
                 wait_until(w0 + 1)
@@ -162,6 +166,9 @@ try:
                 why.append('%s: range %s at the end (want %g)' % (inp, ' '.join('%g' % r for _, r, _ in tail), rng))
             if any(not value_ok(v, want) for _, _, v in tail):
                 why.append('%s: values %s at the end (want %s)' % (inp, ' '.join('%g' % v for _, _, v in tail), want))
+            for nr in never:
+                if any(abs(r - nr) <= nr * 1e-3 for _, r, _ in rows):
+                    why.append('%s: on the %g range at some point (overshoot)' % (inp, nr))
             if stable:
                 seen = [r for s, r, _ in rows if s >= dur - stable]
                 if len(set(seen)) > 1:
