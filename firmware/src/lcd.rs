@@ -660,3 +660,51 @@ fn push(px: &[Color]) {
         unsafe { w16(LCD_DATA, c) };
     }
 }
+
+// ------------------------------------------------------------ TE probe
+//
+// Whether the ILI9488's tearing-effect output (TE) reaches the MCU is
+// unknown (../../hw/README.md "LCD"). DBG:TE? watches the four pins no
+// firmware is known to use (PA3, PB13, PC1, PC15) while TE is off, on in
+// mode 0 (V-blank) and on in mode 1 (V- and H-blank), then switches it
+// off. It only reads the GPIOs (their reset input state is kept).
+
+/// Candidate pins: (GPIO IDR address, bit).
+#[cfg(target_os = "none")]
+const TE_PINS: [(u32, u32); 4] = [(0x4002_0010, 3), (0x4002_0410, 13), (0x4002_0810, 1), (0x4002_0810, 15)];
+/// Sampling time per phase (ms).
+#[cfg(target_os = "none")]
+const TE_MS: u32 = 100;
+
+/// Per phase (TE off, mode 0, mode 1): the samples, then per candidate
+/// pin the level changes and the samples high.
+#[cfg(target_os = "none")]
+#[inline(never)]
+pub fn te_probe() -> [(u32, [(u32, u32); 4]); 3] {
+    use core::ptr::read_volatile;
+    let cyc = || unsafe { read_volatile(0xE000_1004 as *const u32) };
+    let mut out = [(0u32, [(0u32, 0u32); 4]); 3];
+    for (ph, (n, o)) in out.iter_mut().enumerate() {
+        if ph == 0 {
+            cmd(0x34); // TEOFF
+        } else {
+            cmd(0x35); // TEON, mode 0 / 1
+            data(ph as u16 - 1);
+        }
+        let t0 = cyc();
+        let mut last = [0u32; 4];
+        while cyc().wrapping_sub(t0) < TE_MS * (crate::clock::HCLK_HZ / 1000) {
+            for (i, &(idr, bit)) in TE_PINS.iter().enumerate() {
+                let v = unsafe { read_volatile(idr as *const u32) } >> bit & 1;
+                if *n > 0 && v != last[i] {
+                    o[i].0 += 1;
+                }
+                o[i].1 += v;
+                last[i] = v;
+            }
+            *n += 1;
+        }
+    }
+    cmd(0x34);
+    out
+}

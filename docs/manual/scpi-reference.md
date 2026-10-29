@@ -765,6 +765,7 @@ unless shown otherwise.
 | `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>[,<jitter px>]]` | One-finger drag; the jitter wobbles the path sideways. | USB |
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
+| `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |

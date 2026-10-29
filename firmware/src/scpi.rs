@@ -627,6 +627,7 @@ pub enum Log {
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
+///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
 ///   DBG:DIAG?               diagnostic block (#3)
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
@@ -2414,6 +2415,27 @@ impl Scpi {
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
+                        // DBG:TE? = the panel TE probe (lcd.rs te_probe,
+                        // ~0.3 s): per phase (TE off; on, mode 0; on, mode
+                        // 1), ";" between: <samples>, then per pin PA3,
+                        // PB13, PC1, PC15 <level changes>,<samples high>.
+                        #[cfg(target_os = "none")]
+                        b"TE" if query => {
+                            self.len = 0;
+                            for (k, (n, o)) in crate::lcd::te_probe().iter().enumerate() {
+                                if k > 0 {
+                                    self.put_bytes(b";");
+                                }
+                                self.put_u32(*n);
+                                for &(e, h) in o {
+                                    self.put_bytes(b",");
+                                    self.put_u32(e);
+                                    self.put_bytes(b",");
+                                    self.put_u32(h);
+                                }
+                            }
+                            continue;
+                        }
                         b"BOOT" => {
                             crate::boot::put_info(self);
                             continue;

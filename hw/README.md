@@ -211,6 +211,25 @@ updates.
   ([`lcd.rs`](../firmware/src/lcd.rs)). The ID register 0xD3 reads `00 94 88` on this unit.
 - Backlight: PA6 AF9 = TIM13_CH1, 20 kHz PWM ([`board.rs`](../firmware/src/board.rs)).
 - Panel: 3.5" IPS 480 x 320 (review). The panel's FPC pinout is unknown.
+- Tearing-effect output (TE): whether it reaches an MCU pin is unknown;
+  *inferred* not wired. The stock init sequence has no TEON (0x35) and the
+  stock drawing has no tearing control (`stock/re/analysis/lcd_buzzer_v2_6.h`,
+  `gui_render_v2_6.h`); neither firmware configures a pin for it. The only
+  candidates are the pins no code is known to use: PA3, PB13, PC1, PC15
+  ([Pin table](#pin-table)). `DBG:TE?` ([`lcd.rs`](../firmware/src/lcd.rs)
+  `te_probe`) counts the level changes of those four pins for 100 ms each
+  with TE off, on in mode 0 (V-blank) and on in mode 1 (V- and H-blank),
+  then sends TEOFF; it only reads the pins. A pin that changes only while
+  TE is on (~60 Hz in mode 0, much faster in mode 1) is TE; floating pins
+  can change in all three phases. Not run on a device yet.
+- If TE is wired: with opendm40's MADCTL (MV = 1) the panel scans along
+  our x axis (*inferred*; the scan direction is not checked), so writes
+  synced to TE would have to go in vertical bands (columns of the
+  landscape screen), not in the full-width strips of
+  [`lcd.rs`](../firmware/src/lcd.rs) "strip rendering". Those strips
+  write every pixel once in its final colour, so without TE a refresh
+  during a page change shows the new page above a seam and the
+  old page below it.
 
 ## Touch panel and touch keys
 
@@ -730,7 +749,7 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 10. The regulators and the power path parts in [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg).
 11. The debug headers' VCC pads: ~3.1 V while on, not the MCU supply
     directly; what sits between them is not traced.
-12. LCD panel FPC pinout; touch panel vendor beyond the controller ID.
+12. LCD panel FPC pinout (whether the ILI9488 TE output reaches an MCU pin: [LCD](#lcd)); touch panel vendor beyond the controller ID.
 13. Exact HY3131 wiring (ohm reference resistors, divider taps, shunt nodes):
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
 14. [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) placement: the BOM post says the reference sits outside the
