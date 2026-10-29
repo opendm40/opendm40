@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Scope: the panel and badge text stays readable in every channel colour
+  (dark on a yellow, gold or pink math panel; white on a blue or purple CH1).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

@@ -84,8 +84,77 @@ fn srate(ck: &mut Checker, out: &str) {
     println!("scope sample rate (timebase list): widest rate \"{}\" {} px, widest time {wt} px", widest.1, widest.0);
 }
 
+/// WCAG contrast ratio of two RGB565 colours.
+fn contrast(a: u16, b: u16) -> f32 {
+    let lum = |c: u16| {
+        let ch = |v: u32, max: u32| {
+            let v = (v * 255 / max) as f32 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * ch((c >> 11) as u32 & 31, 31) + 0.7152 * ch((c >> 5) as u32 & 63, 63) + 0.0722 * ch(c as u32 & 31, 31)
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// Panel and badge text on the user's channel colours (CH1_INK, MATH_INK):
+/// every palette entry reads at least as well as the stock default math
+/// panel (white on orange); the defaults keep the stock text colours; the
+/// drawn CHA / math label buttons and the V/div badge use them.
+fn ink_contrast(ck: &mut Checker) {
+    use scope_ui::{CH1_INK, C_FILL, C_WHITE, MATH_INK, PALETTE};
+    let floor = contrast(PALETTE[1], C_WHITE) - 0.01;
+    let base = &stock::scenes()[0];
+    ck.cases += 1;
+    if CH1_INK[base.m.colour as usize] != C_FILL || MATH_INK[base.m.math_colour as usize] != C_WHITE {
+        ck.fail("ink/default", "default CH1 / math text colour differs from the stock".into());
+    }
+    for i in 0..9usize {
+        for (what, ink) in [("CH1", CH1_INK[i]), ("math", MATH_INK[i])] {
+            ck.cases += 1;
+            let c = contrast(PALETTE[i], ink);
+            if c < floor {
+                ck.fail(&format!("ink/{what}/{i}"), format!("{what} text on {} {c:.2}:1 < {floor:.2}:1", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+        let mut m = base.m;
+        m.colour = i as u8;
+        m.math_colour = i as u8;
+        m.math_on = true;
+        host::reset(0);
+        scope_ui::invalidate();
+        scope_ui::update(&m);
+        // CHA button (B_RECT[1]), math label button (B_RECT[4]), V/div badge.
+        for (what, r, fill, ink) in [
+            ("CHA", scope_ui::B_RECT[1], PALETTE[i], CH1_INK[i]),
+            ("math", scope_ui::B_RECT[4], PALETTE[i], MATH_INK[i]),
+            ("V/div badge", stockfont::rect(304, 1, 44, 17), PALETTE[i], CH1_INK[i]),
+        ] {
+            let e = emu();
+            let (mut n_fill, mut n_ink, mut other) = (0, 0, 0);
+            for y in r.y..r.y + r.h {
+                for x in r.x..r.x + r.w {
+                    let c = e.fb[y as usize * W + x as usize];
+                    if c == fill {
+                        n_fill += 1;
+                    } else if c == ink {
+                        n_ink += 1;
+                    } else if c == if ink == C_FILL { C_WHITE } else { C_FILL } {
+                        other += 1;
+                    }
+                }
+            }
+            ck.cases += 1;
+            if n_fill == 0 || n_ink == 0 || other > 0 {
+                ck.fail(&format!("ink/draw/{what}/{i}"), format!("{what} on {}: fill {n_fill} px, ink {n_ink} px, the other text colour {other} px", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+    }
+}
+
 pub fn run(ck: &mut Checker, out: &str) {
     srate(ck, out);
+    ink_contrast(ck);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;

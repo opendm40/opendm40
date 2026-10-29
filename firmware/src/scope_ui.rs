@@ -40,6 +40,15 @@ pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
+/// Text on a CH1-coloured fill (zoom buttons, CHA, V/div badge, the source
+/// badge's selected half), per PALETTE entry: the stock dark text, white
+/// where dark reads worse than the stock default math panel (white on
+/// orange, contrast 1.97:1): blue 1.83, purple 1.72.
+pub const CH1_INK: [Color; 9] = [C_FILL, C_FILL, C_FILL, C_FILL, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL];
+/// Text on a math-coloured panel button (math on), per PALETTE entry: the
+/// stock white, dark where white reads worse than on the default orange:
+/// yellow 1.07, pink 1.52, gold 1.41.
+pub const MATH_INK: [Color; 9] = [C_WHITE, C_WHITE, C_FILL, C_WHITE, C_WHITE, C_WHITE, C_WHITE, C_FILL, C_FILL];
 
 pub const TB_LABELS: [&str; 30] = [
     "10ns", "20ns", "50ns", "100ns", "200ns", "500ns", "1us", "2us", "5us", "10us", "20us", "50us", "100us", "200us", "500us", "1ms", "2ms",
@@ -313,6 +322,14 @@ impl Model {
     pub fn math_pal(&self) -> Color {
         PALETTE[self.math_colour as usize % 9]
     }
+    /// Text colour on `pal()` (CH1_INK).
+    pub fn pal_ink(&self) -> Color {
+        CH1_INK[self.colour as usize % 9]
+    }
+    /// Text colour on `math_pal()` (MATH_INK).
+    pub fn math_ink(&self) -> Color {
+        MATH_INK[self.math_colour as usize % 9]
+    }
     pub fn grid_colour(&self) -> Color {
         blend565(0xffff, C_FILL, (self.grid.min(100) as u32 * 255 / 100) as u8)
     }
@@ -571,7 +588,7 @@ pub fn src_badge(m: &Model) {
     let dmm = m.src == SRC_DMM;
     let on = m.pal();
     let (fa, fb) = if dmm { (C_FILL, on) } else { (on, C_FILL) };
-    let (ta, tb) = if dmm { (C_FRAME, C_FILL) } else { (C_FILL, C_FRAME) };
+    let (ta, tb) = if dmm { (C_FRAME, m.pal_ink()) } else { (m.pal_ink(), C_FRAME) };
     paint(r, &[(K_SHAPE, C_BAR), (K_SHAPE, fa), (K_SHAPE, fb), (K_TEXT, fa), (K_TEXT, fb)], |x, y| {
         let left = x < r.x + half;
         if let Some(g) = a.at(x, y) {
@@ -624,7 +641,7 @@ pub fn vdiv_badge(m: &Model) {
     m.vdiv_str(&mut b);
     let p = Ink::icon(sf::SC_PROBE, rect(286, 1, 18, 17), m.probe_glyph(), 4);
     let t = Ink::new(sf::SC_F12, rect(304, 1, 44, 17), b.as_str(), 8, 0);
-    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, C_FILL), (&t, C_FILL)]);
+    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, m.pal_ink()), (&t, m.pal_ink())]);
 }
 
 /// 2.5 trigger badge: edge glyph and level.
@@ -667,16 +684,17 @@ pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
     let pal = m.pal();
     let mc = if m.math_on { m.math_pal() } else { C_FRAME };
+    let (ink, math_ink) = (m.pal_ink(), if m.math_on { m.math_ink() } else { C_WHITE });
     let mut b = Buf::new();
     m.vdiv_str(&mut b);
     let pressed = m.pressed as usize == k + 1;
     let (fill, radius, mask, fg) = match k {
-        0 => (pal, 8, 0x3, C_FILL),
-        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, C_FILL),
-        2 => (pal, 8, 0xc, C_FILL),
-        3 => (mc, 8, 0x3, C_WHITE),
-        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, C_WHITE),
-        5 => (mc, 8, 0xc, C_WHITE),
+        0 => (pal, 8, 0x3, ink),
+        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, if m.ch1_open { C_FILL } else { ink }),
+        2 => (pal, 8, 0xc, ink),
+        3 => (mc, 8, 0x3, math_ink),
+        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, if m.math_open { C_WHITE } else { math_ink }),
+        5 => (mc, 8, 0xc, math_ink),
         _ => (C_ORANGE, 8, 0xf, C_WHITE),
     };
     let fill = if pressed { C_DIS } else { fill };
