@@ -292,11 +292,14 @@ def main():
         args.append('--fast')
     # The monkey takes screenshots and recordings: never on the shared
     # working copy of the disk.
+    # No working copy yet (a fresh checkout): copy the MSC dump run.py
+    # would copy, not let run.py create the shared one.
     src = A.disk or os.path.join(OUT, 'disk.bin')
-    if os.path.exists(src):
-        disk = os.path.join(OUT, name + '-disk.bin')
-        subprocess.run(['cp', src, disk], check=True)
-        args += ['--disk', disk]
+    if not os.path.exists(src):
+        src = run.DISK_SRC
+    disk = os.path.join(OUT, name + '-disk.bin')
+    subprocess.run(['cp', src, disk], check=True)
+    args += ['--disk', disk]
     emu = subprocess.Popen(args, cwd=ROOT, stdout=open(os.path.join(OUT, name + '-emu.out'), 'w'),
                            stderr=subprocess.STDOUT, start_new_session=True)
     if not L.connect(300):
