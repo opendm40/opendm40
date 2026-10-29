@@ -97,12 +97,15 @@ fn contrast(a: u16, b: u16) -> f32 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
-/// Panel and badge text on the user's channel colours (CH1_INK, MATH_INK):
-/// every palette entry reads at least as well as the stock default math
-/// panel (white on orange); the defaults keep the stock text colours; the
-/// drawn CHA / math label buttons and the V/div badge use them.
-fn ink_contrast(ck: &mut Checker) {
-    use scope_ui::{CH1_INK, C_FILL, C_WHITE, MATH_INK, PALETTE};
+/// Panel and badge text on the user's channel colours (CH1_INK, MATH_INK)
+/// and channel-coloured text on the dark bar (PAL_TEXT: trigger badge,
+/// measurement strip, FFT labels): every palette entry reads at least as
+/// well as the stock default math panel (white on orange); the defaults
+/// keep the stock text colours; PAL_TEXT is the palette colour wherever
+/// that already reads so; the drawn CHA / math label buttons, the V/div
+/// badge, the trigger badge and a measurement cell use them.
+fn ink_contrast(ck: &mut Checker, out: &str) {
+    use scope_ui::{CH1_INK, C_BAR, C_FILL, C_WHITE, MATH_INK, PALETTE, PAL_TEXT};
     let floor = contrast(PALETTE[1], C_WHITE) - 0.01;
     let base = &stock::scenes()[0];
     ck.cases += 1;
@@ -117,6 +120,12 @@ fn ink_contrast(ck: &mut Checker) {
                 ck.fail(&format!("ink/{what}/{i}"), format!("{what} text on {} {c:.2}:1 < {floor:.2}:1", scope_ui::COLOUR_NAMES[i]));
             }
         }
+        ck.cases += 1;
+        let c = contrast(PAL_TEXT[i], C_BAR);
+        let keep = contrast(PALETTE[i], C_BAR) >= floor;
+        if c < floor || (keep && PAL_TEXT[i] != PALETTE[i]) {
+            ck.fail(&format!("ink/text/{i}"), format!("{} text on the bar {c:.2}:1 (floor {floor:.2}:1), palette kept: {keep}", scope_ui::COLOUR_NAMES[i]));
+        }
         let mut m = base.m;
         m.colour = i as u8;
         m.math_colour = i as u8;
@@ -124,11 +133,18 @@ fn ink_contrast(ck: &mut Checker) {
         host::reset(0);
         scope_ui::invalidate();
         scope_ui::update(&m);
+        scope_ui::meas_cell(&m, 0, "Freq:1.00kHz");
+        if i == 4 {
+            save(out, "s08-ink-ch1-blue");
+        }
         // CHA button (B_RECT[1]), math label button (B_RECT[4]), V/div badge.
         for (what, r, fill, ink) in [
             ("CHA", scope_ui::B_RECT[1], PALETTE[i], CH1_INK[i]),
             ("math", scope_ui::B_RECT[4], PALETTE[i], MATH_INK[i]),
             ("V/div badge", stockfont::rect(304, 1, 44, 17), PALETTE[i], CH1_INK[i]),
+            // Text in the channel colour on the bar: fill = the bar.
+            ("trigger badge", stockfont::rect(364, 2, 49, 15), C_BAR, PAL_TEXT[i]),
+            ("measurement cell", stockfont::rect(14, 303, 96, 15), C_BAR, PAL_TEXT[i]),
         ] {
             let e = emu();
             let (mut n_fill, mut n_ink, mut other) = (0, 0, 0);
@@ -139,7 +155,7 @@ fn ink_contrast(ck: &mut Checker) {
                         n_fill += 1;
                     } else if c == ink {
                         n_ink += 1;
-                    } else if c == if ink == C_FILL { C_WHITE } else { C_FILL } {
+                    } else if c == if fill == C_BAR { if PALETTE[i] != ink { PALETTE[i] } else { 0x0001 } } else if ink == C_FILL { C_WHITE } else { C_FILL } {
                         other += 1;
                     }
                 }
@@ -154,7 +170,7 @@ fn ink_contrast(ck: &mut Checker) {
 
 pub fn run(ck: &mut Checker, out: &str) {
     srate(ck, out);
-    ink_contrast(ck);
+    ink_contrast(ck, out);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;

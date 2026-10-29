@@ -9,8 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- Scope: the panel and badge text stays readable in every channel colour
-  (dark on a yellow, gold or pink math panel; white on a blue or purple CH1).
+- Scope: text stays readable in every channel colour (dark on a yellow, gold
+  or pink math panel; white on a blue or purple CH1; a lighter blue, purple or
+  brown for the trigger level, measurements and FFT labels).
 
 ## v0.3.0 (2026-10-27)
 
