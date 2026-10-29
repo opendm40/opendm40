@@ -73,6 +73,8 @@ section named after the tag as the release notes; how to cut a release:
   600 kOhm).
 - **Scope, stopped:** a zoom, or a Single capture that ended, right after a
   screenshot kept the old trace on the screen.
+- Scope: Duty, Wid, Vtop, Vbas and Vamp are right on triangle and ramp
+  signals (they jumped, e.g. 65 % duty on a triangle).
 
 ## v0.3.0 (2026-10-27)
 
