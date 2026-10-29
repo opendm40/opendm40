@@ -55,6 +55,7 @@ mod scpi;
 mod scpi_msg;
 mod sentinel;
 mod dbgsrc;
+mod ohm600m;
 mod stockfont;
 mod touch;
 mod touchcal;
@@ -226,6 +227,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
     app.tick(&mut clk, true);
+    lcd::defer_flush();
     native::main_phase(1, clk.now_ms());
     // The generated USB volume's tables and files (vdisk.rs, ~0.47 s on the
     // device): after the first frame, before USB attaches.
@@ -666,7 +668,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     app.select_func(&mut clk, f);
                     false
                 }
-                scpi::Out::Instr(scpi::Cmd::DbgSrc(Some(_))) if logger.active() => {
+                scpi::Out::Instr(scpi::Cmd::DbgSrc(Some(_)) | scpi::Cmd::DbgOhmx(Some(_))) if logger.active() => {
                     scpi.set_err("Settings conflict");
                     false
                 }
@@ -1614,6 +1616,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw || force_draw);
+        lcd::defer_flush(); // a repaint's batch (App::repaint)
         // The settings' copy on the SPI disk (setfile.rs): a few seconds
         // after a change, never during an AD1 logger session.
         setfile::poll(now, logger.disk_writes_blocked());
@@ -1716,6 +1719,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if app.gesture(&mut clk, g) {
                     if app.slider_active() { gestures.capture_direct() } else { gestures.capture() }
                 }
+                lcd::defer_flush();
                 prof::exit(prof::GEST);
             }
         }
@@ -1723,6 +1727,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if !logging {
             prof::enter(prof::SCOPE);
             app.scope_poll(now, can_draw);
+            lcd::defer_flush();
             prof::exit(prof::SCOPE);
         }
         mark(3, &mut ts);
@@ -2332,7 +2337,7 @@ fn wait_for_watchdog() -> ! {
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
     // the shim counts a crash (WDT_RETRY, then recovery).
-    lcd::fill_rect(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
+    lcd::fill_rect_raw(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
     wait_for_watchdog()
 }
 

@@ -563,6 +563,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 - Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
+- **600 MΩ** (experimental, not calibrated yet): only **600MΩ EXP** on the
+  range page or SCPI selects it, never AUTO; **EXP** shows while it is on.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**

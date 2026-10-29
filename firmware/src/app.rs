@@ -1484,6 +1484,9 @@ impl App {
     #[inline(never)] // its draw frames stay out of the callers' frames (run's)
     fn repaint(&mut self, now: u64) {
         self.redraw = false;
+        // The page's background fills wait for the widgets (lcd.rs
+        // "deferred fills"); main.rs flushes after the tick.
+        crate::lcd::defer_start();
         // The full repaint drew any pressed item released.
         self.pressed = None;
         self.scope_invalidate();
@@ -2822,6 +2825,10 @@ impl App {
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+                // Pressed feedback kept through the tap (app_press.rs).
+                if self.pressed.is_some() {
+                    self.press_after_tap();
+                }
             }
             // Long press on the A button: the power meter's wiring dialog.
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
@@ -3293,7 +3300,8 @@ impl App {
     /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
-    /// 60 ohm included), the highest wrapping to the lowest. Long: the
+    /// 60 ohm included, the experimental 600 Mohm never), the highest
+    /// wrapping to the lowest (`ui::range_key_next`). Long: the
     /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
     /// REL as before; AutoHold stays as it is.
     #[inline(never)]
@@ -3310,16 +3318,7 @@ impl App {
             self.beep(now, 200);
             if b == Button::Volt { Some(255) } else { None }
         } else {
-            let items = ui::range_items(b);
-            let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
-            let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
-            let cur = self.range_sel_manual();
-            let i = match cur {
-                Some(i) if !self.dmm.is_auto() => (i + 1) % n.max(1),
-                Some(i) => i,
-                None => 0,
-            };
-            manual(i)
+            ui::range_key_next(b, self.range_sel_manual(), self.dmm.is_auto())
         };
         // Held into AUTO: the placeholder (AUTO, dashes) at once, as the
         // range page's AUTO item and RES:RANG:AUTO do; before, the last
@@ -4099,12 +4098,11 @@ impl App {
             }
             return query;
         };
-        let cap = cur == 13;
         let fine = self.dmm.rate() != dmm::Rate::Fast && self.dmm.rate_info(self.dmm.rate()).1;
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
-            Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
+            Rng::ResQuery => out.put_f32(s::pow10f(s::range_step_exp(cur, v) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
             Rng::Auto => {
@@ -4116,7 +4114,7 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                let i = if x.is_infinite() { s::range_max_item(cur) } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
@@ -4129,7 +4127,7 @@ impl App {
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.
-                let coarse = x >= s::pow10f(s::step_exp(v, cap)) * 0.999;
+                let coarse = x >= s::pow10f(s::range_step_exp(cur, v)) * 0.999;
                 let r = if coarse {
                     dmm::Rate::Fast
                 } else if self.dmm.rate() == dmm::Rate::Fast {
@@ -4701,6 +4699,16 @@ impl App {
             }
             C::DbgSrc(None) => {
                 self.dmm.src_text(out);
+                true
+            }
+            C::DbgOhmx(Some(r)) => {
+                if let Err(e) = self.dmm.ohmx_req(clk, r) {
+                    out.set_err(e);
+                }
+                false
+            }
+            C::DbgOhmx(None) => {
+                self.dmm.ohmx_text(out);
                 true
             }
             C::DbgSentReg => {
