@@ -388,6 +388,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
+        app.usb_host = dev.state() == UsbDeviceState::Configured;
+        power::USB_CONF.store(app.usb_host, core::sync::atomic::Ordering::Relaxed);
         // The INFO/ mirror's sectors while the stream runs: at most one per
         // pass, paced against the fast logger (vdisk.rs `mirror_pass`).
         #[cfg(feature = "vdisk")]
@@ -872,7 +874,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         false
                     }
                     scpi::Dbg::Diag => {
-                        let d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        let mut d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        // 61: charge pins (bit 0 PB10, 1 PB11), bit 2 USB configured.
+                        d[61] = app.power.pins() | (app.usb_host as u8) << 2;
                         scpi.len = 0;
                         scpi.put_bytes(b"#3");
                         let n = d.len();

@@ -68,6 +68,8 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Generator on / looped back to CH1: "Scope in ngscopeclient" (3), (9); RUN key: its (2), (7).
 - Host systems and the stock: Windows / macOS in "Verify on device: swipe REC" and the two "Device: (... decision
   #6)" items; stock comparisons UF-02, UF-19.
+- USB cable and charger: the [charging indicator](#battery-charging-indicator-and-usb-badge-user-report-2026-10-28-branch-fixbattery-charging-indicator)
+  checks.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
 - Code: none open. "A stream starting inside a multi-block READ(10)" (#60, test only) and
@@ -87,6 +89,24 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Boot time (bug-fix-only rule): "Left: `vdisk::mirror_boot`" (0.3 s per boot).
 - New features (bug-fix-only rule): "UF-24 tempco", [Backlog](#backlog-user-ideas) "Inductance", "Browser client",
   "Protocol decoders", "Hardware note (HW-1", "sigrok/SmuView" (SmuView on the device, upstream).
+
+## Battery charging indicator and USB badge (user report 2026-10-28, branch fix/battery-charging-indicator)
+
+User: the battery icon does not show charging; ideally show the PC connection. Fix (#68): PB11 with the stock
+pull-up; green on the charger (PB10 = 1), the top bar blinking while charging (PB11 = 1), steady when charged
+(PB11 = STDBY low); a USB symbol while a host has the meter configured. Pin findings: hw/README.md pin table.
+Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4.5 s, then charged), PB10 low
+/ released checked with `DBG:CHG?` / `DBG:CHG:LOG?`.
+- [ ] Device check with a battery below 80 % (needs hours on battery first): the top bar blinks while charging;
+      the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
+- [x] The stock's PB10 drive measured on opendm40 (2026-10-29, hw/README.md Unknowns 5): PB10 low stops the
+      charge, released the charger goes to standby until the next replug. opendm40 does not drive PB10 and
+      charges to termination. The stock pulses PB10 low ~10 ms per 2 s below 80..85 % and reads the battery
+      during the pulse (disassembly; purpose *inferred*: a reading without the charge current).
+- [ ] (c) Owner decision: copy the stock's 10 ms PB10 pulse for the battery reading on USB power (the bars
+      read high while charging without it), or keep PB10 undriven.
+- [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
+      keeps the charged state.
 
 ## Owner decisions pending (2026-10-25)
 

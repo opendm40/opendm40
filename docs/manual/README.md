@@ -201,7 +201,8 @@ The top line of the multimeter page shows, from left to right:
 5. **REC** in red while a recording to the disk runs;
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
-7. the battery level; the symbol turns green while the battery charges.
+7. the USB symbol while a computer has the meter connected (not with a charger);
+8. the battery level; green on the charger: the top bar blinks while the battery charges and stays when it is full.
 
 ### Touch lock
 
@@ -1217,7 +1218,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
   the record bar, the V/div with the probe and coupling, the trigger (edge
-  and level), the battery.
+  and level), the USB symbol while a computer has the meter connected, the
+  battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored

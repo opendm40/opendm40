@@ -766,6 +766,10 @@ unless shown otherwise.
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
+| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
+| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |

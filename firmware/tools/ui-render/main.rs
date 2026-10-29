@@ -738,7 +738,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -762,6 +762,7 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     host::reset(0);
     let mut m = scope_ui::Model::DEFAULT;
     m.combined = true;
+    m.usb = true;
     scope_ui::invalidate();
     scope_ui::strip_invalidate();
     scope_ui::graph().clear();
@@ -1603,12 +1604,51 @@ fn main() {
                 m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
                 m.battery = vdiv % 6;
                 m.charging = k == 0;
+                m.usb = true;
                 host::reset(0);
                 scope_ui::invalidate();
                 scope_ui::graph().clear();
                 scope_ui::update(&m);
                 ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
+        }
+    }
+    // 3a. Scope top bar with the USB symbol: states for the contact sheet
+    //     (<out>/scopebar/, 2x): plain, USB, USB + charging, roll + long
+    //     trigger text + generator, STOP, the wave view's amps, combined.
+    {
+        let dir = format!("{out}/scopebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = scope_ui::Model::DEFAULT;
+        let mut v: Vec<(&str, scope_ui::Model)> = vec![("plain", base)];
+        let mut m = base;
+        m.usb = true;
+        v.push(("usb", m));
+        m.charging = true;
+        m.battery = 5;
+        v.push(("usb-charged", m));
+        let mut r = m;
+        r.roll = true;
+        r.tb = 29;
+        r.trig_v = -444.4e-3;
+        r.rising = false;
+        r.gen_hz = 10.0e6;
+        r.battery = 0;
+        v.push(("usb-roll-long", r));
+        let mut st = m;
+        st.status = 3;
+        st.trig_v = 9.876e3;
+        v.push(("usb-stop", st));
+        let mut c = m;
+        c.combined = true;
+        v.push(("usb-combined", c));
+        for (name, m) in v {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("scopebar/{name}"));
+            host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
     // Every measurement item, worst values, in every cell.
@@ -1632,7 +1672,7 @@ fn main() {
     for l in &labels {
         for hold in 0..4u8 {
             for (auto, plus) in [(true, false), (true, true), (false, false)] {
-                for (locked, csv) in [(false, false), (true, true), (false, true), (true, false)] {
+                for (k, (locked, csv)) in [(false, false), (true, true), (false, true), (true, false)].into_iter().enumerate() {
                     host::reset(0);
                     let mut r = cases[0].1;
                     r.auto = auto;
@@ -1643,6 +1683,8 @@ fn main() {
                     let mut s = status(0);
                     s.locked = locked;
                     s.csv = csv;
+                    // Battery: charged (steady green), charging (both blink phases), empty.
+                    (s.bars, s.charging) = [(5, true), (4, true), (3, true), (0, true)][k];
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
@@ -1700,6 +1742,57 @@ fn main() {
                 if hold == 0 && alert == sentinel::Alert::None {
                     host::save_ppm(&format!("{dir}/{name}.ppm"), 1);
                 }
+            }
+        }
+    }
+
+    // 5c. Status block states (BT, USB host, REC, lock, battery level,
+    //     charging blink phases): DMM bar and generator bar, 2x renders in
+    //     <out>/statusbar/ (the contact sheet of the states).
+    {
+        let dir = format!("{out}/statusbar");
+        std::fs::create_dir_all(&dir).unwrap();
+        // (name, bt, usb, csv, locked, bars, charging)
+        // `charging` = on a charger (green); the blink is the caller's level.
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+            ("plain", false, false, false, false, 4, false),
+            ("charged", false, true, false, false, 5, true),
+            ("usb", false, true, false, false, 4, false),
+            ("bt-usb", true, true, false, false, 5, false),
+            ("all", true, true, true, true, 5, false),
+            ("chg-a", false, true, false, false, 3, true),
+            ("chg-b", false, true, false, false, 2, true),
+            ("chg-empty-a", true, true, true, true, 0, true),
+            ("chg-empty-b", true, true, true, true, 1, true),
+            ("bt-nousb", true, false, true, false, 1, false),
+        ];
+        for (name, bt, usb, csv, locked, bars, charging) in states {
+            for gen in [false, true] {
+                host::reset(0);
+                let mut r = cases[0].1;
+                r.auto = true;
+                if gen {
+                    ui::gen_static(&w.gen);
+                } else {
+                    dv.label = None;
+                    dv.draw_static(Button::Volt, 1, false, false);
+                    dv.reading(&r, 0, 0);
+                }
+                let mut st = status(0);
+                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging) = (bt, usb, csv, locked, bars, charging);
+                let h = if gen { 36 } else { ui::BAR_H as usize };
+                if gen {
+                    ui::gen_status(&st);
+                } else {
+                    ui::status_right(&st);
+                }
+                let keep = h * W;
+                for p in emu().owner[keep..].iter_mut() {
+                    *p = 0;
+                }
+                let tag = if gen { "gen" } else { "dmm" };
+                ck.check(&format!("statusbar/{tag}-{name}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, h as i32))]);
+                host::save_ppm(&format!("{dir}/{tag}-{name}.ppm"), 2);
             }
         }
     }

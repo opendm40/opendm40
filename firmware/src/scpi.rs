@@ -627,7 +627,11 @@ pub enum Log {
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
-///   DBG:DIAG?               diagnostic block (#3)
+///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
+///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
+///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
+///   DBG:DIAG?               diagnostic block (#3); byte 61: bit 0 PB10, bit 1
+///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
 ///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
@@ -2404,6 +2408,42 @@ impl Scpi {
                                 self.err_arg(no_arg, "Undefined header");
                                 continue;
                             }
+                        }
+                        // DBG:CHG? / DBG:CHG:PIN n,<mode> / DBG:CHG:OUT <mode> (PB10):
+                        // the charger status pins (power.rs dbg_state / dbg_pin).
+                        b"CHG" => {
+                            self.len = 0;
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            if kw(op, "LOG") && query {
+                                // n, then the last <= 8 changes oldest first:
+                                // ms:pins (bit 0 PB10, 1 PB11, 2 USB).
+                                let l = unsafe { &*core::ptr::addr_of!(crate::power::CHG_LOG) };
+                                self.put_u32(l.n);
+                                for k in l.n.saturating_sub(8)..l.n {
+                                    let e = l.ev[k as usize % 8];
+                                    self.put(b",");
+                                    self.put_u32(e >> 4);
+                                    self.put(b":");
+                                    self.put_u32(e & 15);
+                                }
+                            } else if op.is_empty() && query {
+                                for (i, v) in crate::power::dbg_state().iter().enumerate() {
+                                    if i > 0 {
+                                        self.put(b",");
+                                    }
+                                    self.put_u32(*v);
+                                }
+                            } else {
+                                let mut it = a.split(|&b| b == b',');
+                                let pin = if kw(op, "OUT") { Some(10) } else if kw(op, "PIN") { core::str::from_utf8(trim(it.next().unwrap_or(b""))).ok().and_then(|t| t.parse().ok()) } else { None };
+                                let m = trim(it.next().unwrap_or(b""));
+                                let mode = [&b"IN"[..], b"UP", b"DOWN", b"LOW", b"HIGH", b"OD", b"DEF"].iter().position(|k| m.eq_ignore_ascii_case(k));
+                                match (pin, mode) {
+                                    (Some(p), Some(md)) if crate::power::dbg_pin(p, md as u32) => {}
+                                    _ => self.err_arg(no_arg, "Illegal parameter value"),
+                                }
+                            }
+                            continue;
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),

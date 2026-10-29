@@ -714,7 +714,10 @@ def main():
         img.save(a.out)
         print('saved %s in %.1f s' % (a.out, time.time() - t0))
     elif a.cmd == 'diag':
-        print(ln.block('DBG:DIAG?').hex(' '))
+        d = ln.block('DBG:DIAG?')
+        print(d.hex(' '))
+        if len(d) > 61:  # power.rs pins(): the charge status pins, USB state
+            print('PB10=%d PB11=%d usb_configured=%d' % (d[61] & 1, d[61] >> 1 & 1, d[61] >> 2 & 1))
     elif a.cmd == 'tap':
         ln.write('DBG:TAP %d,%d' % (a.x, a.y))
     elif a.cmd == 'drag':

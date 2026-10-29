@@ -1799,6 +1799,10 @@ pub fn hv_warning(on: bool) {
 pub struct Status {
     pub uptime_s: u32,
     pub bt: bool,
+    /// A USB host configured the meter (USBTMC + USB disk usable): USB symbol.
+    pub usb: bool,
+    /// Battery level as shown (`Power::shown_bars`: blinks while charging).
+    /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
     pub locked: bool,
@@ -1826,6 +1830,13 @@ fn battery_glyph(b: &mut [u8; 4], bars: u8) -> &str {
     char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"').encode_utf8(b)
 }
 
+/// The USB symbol (SAVE_BT 0x22, tools/mkusbglyph.py) between the BT
+/// symbol and the battery while a USB host has the meter configured (not
+/// for a charger: no enumeration).
+fn usb_glyph(st: &Status) -> &'static str {
+    if st.usb { "\u{22}" } else { "" }
+}
+
 /// CSV recording badge colour (status blocks): red. The MIN/MAX session
 /// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
 /// column).
@@ -1833,7 +1844,7 @@ const REC_CSV: Color = 0xF800;
 
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
-/// column), lock, BT link, battery.
+/// column), lock, BT link, USB host, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
@@ -1843,6 +1854,7 @@ pub fn status_right(st: &Status) {
     sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
@@ -2385,7 +2397,7 @@ pub fn gen_run_hit(x: u16, y: u16) -> bool {
 }
 
 /// Generator bar status (ui-review #9; stock: uptime (186,0,120,36), battery
-/// (430,8,40,18)): uptime, REC, lock, BT link, battery, at the DMM bar's x
+/// (430,8,40,18)): uptime, REC, lock, BT link, USB, battery, at the DMM bar's x
 /// positions (`status_right`), centred in the 36 px bar.
 pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
@@ -2395,6 +2407,7 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 

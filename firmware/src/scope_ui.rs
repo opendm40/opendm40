@@ -162,9 +162,12 @@ pub struct Model {
     /// X cursor columns (1..399) / Y cursor rows (1..279) when shown.
     pub xcur: Option<[i16; 2]>,
     pub ycur: Option<[i16; 2]>,
-    /// Battery level 0..5, charging.
+    /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
+    /// A USB host has the meter configured: the small USB symbol between
+    /// the trigger badge and the battery (`usb_icon`).
+    pub usb: bool,
     /// Roll mode (record bar "ROLL").
     pub roll: bool,
     /// Record bar window (start, end) as fractions of the record.
@@ -273,6 +276,7 @@ impl Model {
         ycur: None,
         battery: 4,
         charging: false,
+        usb: false,
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
@@ -662,6 +666,19 @@ pub fn battery(m: &Model) {
     });
 }
 
+/// The USB host symbol (SC_BATT 0x30, 9 x 12 1 bpp, tools/mkusbglyph.py) in
+/// the gap between the trigger badge (..413) and the battery (435..).
+pub const USB_ICON: Rect = rect(417, 1, 13, 17);
+
+pub fn usb_icon(m: &Model) {
+    let r = USB_ICON;
+    let u = if m.usb { Ink::icon(sf::SC_BATT, r, 0x30, 8) } else { Ink::none() };
+    paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
+        Some(g) => (C_WHITE, tag(1, g)),
+        None => (C_BAR, 0),
+    });
+}
+
 /// Right-panel button k (0..6) as the stock draws it (sec. 5).
 pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
@@ -768,6 +785,7 @@ pub fn top_bar(m: &Model) {
     vdiv_badge(m);
     trig_badge(m);
     battery(m);
+    usb_icon(m);
 }
 
 pub fn panel(m: &Model) {
@@ -2070,6 +2088,9 @@ pub fn update(m: &Model) {
     }
     if d(ol.battery != m.battery || ol.charging != m.charging) {
         battery(m);
+    }
+    if d(ol.usb != m.usb) {
+        usb_icon(m);
     }
     for k in 0..7 {
         let was = |mm: &Model| mm.pressed as usize == k + 1;

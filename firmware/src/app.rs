@@ -253,6 +253,9 @@ pub struct App {
     /// the DMM rail stays on whatever view is shown (fastlogtest --ui-nav:
     /// the Oscilloscope tile during a disk session dropped it, 0 rows).
     pub logger_busy: bool,
+    /// A USB host has the meter configured (main.rs, every pass): "USB" in
+    /// the status bar.
+    pub usb_host: bool,
     host_scope: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -589,6 +592,7 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
+            usb_host: false,
             logger_busy: false,
             host_scope: false,
             anti_drop: true,
@@ -1030,8 +1034,9 @@ impl App {
         ui::Status {
             uptime_s: (now / 1000) as u32,
             bt: self.bt_on && self.power.bt_connected(),
-            bars: self.power.bars,
-            charging: self.power.charging(),
+            usb: self.usb_host,
+            bars: self.power.shown_bars(self.strip_alt),
+            charging: self.power.on_charger(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
