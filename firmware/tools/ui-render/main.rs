@@ -1710,6 +1710,31 @@ fn main() {
             scope_ui::graph().clear();
             scope_ui::update(&m);
             ck.check_replica(&format!("scopebar/{name}"));
+            // The USB symbol on y 1..18 of the bar (0..19: top on the
+            // battery's top row, a free row above and below; y 20 is the
+            // graph frame / meter strip) and centred in the gap 414..434
+            // between the trigger badge and the battery.
+            if m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let ink = |x0: usize, x1: usize| {
+                    let (mut b, mut n) = ((usize::MAX, usize::MAX, 0, 0), 0);
+                    for y in 0..20 {
+                        for x in x0..=x1 {
+                            if fb[y * 480 + x] != bar {
+                                b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+                                n += 1;
+                            }
+                        }
+                    }
+                    (b, n)
+                };
+                let ((ux0, uy0, ux1, uy1), n) = ink(414, 434);
+                let ((_, by0, _, _), _) = ink(435, 479);
+                if n == 0 || uy0 != 1 || uy1 != 18 || uy0 != by0 || ux0 - 414 != 434 - ux1 {
+                    ck.fail(&format!("scopebar/{name}/usb"), format!("USB symbol x {ux0}..{ux1} y {uy0}..{uy1} (want y 1..18), battery top y {by0}"));
+                }
+            }
             host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
