@@ -1744,7 +1744,17 @@ pub fn temp_page(p: &TempPage) {
         let hint = if p.sensor == 0 { "Tap the value to type it (TC: on the CJ)" } else { "Tap the value to type it" };
         sf::glyphs(sf::TEXT22, rect(8, T_NTC_Y, 464, T_ROW_H), hint, DIM, BG, 8, 0);
     }
-    sf::glyphs(sf::TEXT22, rect(8, 282, 464, 34), p.info, STATUS_FG, BG, 1, 0);
+    sf::glyphs(sf::TEXT22, T_INFO, p.info, STATUS_FG, BG, 1, 0);
+}
+
+/// The temperature page's info line (cold junction / sensor current).
+const T_INFO: sf::Rect = rect(8, 282, 464, 34);
+
+/// The info line again, while the page is shown (App::temp_info_tick: the
+/// cold junction changes with each thermocouple reading and the offset).
+pub fn temp_info(info: &str) {
+    lcd::fill_rect(T_INFO.x as u16, T_INFO.y as u16, T_INFO.w as u16, T_INFO.h as u16, BG);
+    sf::glyphs(sf::TEXT22, T_INFO, info, STATUS_FG, BG, 1, 0);
 }
 
 /// Temperature page touch: a T_CODES code (3 px of slop into the gaps:

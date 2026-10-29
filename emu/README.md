@@ -284,6 +284,7 @@ recorded.
 | [`limitsbacktest.py`](limitsbacktest.py) | MENU / Back on Hold & Limits: one page up (the range page or the multimeter) | ~2 min | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
+| [`tempinfotest.py`](tempinfotest.py) | the temperature page's cold junction line follows an offset step (#142) | | free |
 | [`flowtest.py`](flowtest.py) | the live window's signal-flow diagram does not move; no emulator | | - |
 
 ### Helpers

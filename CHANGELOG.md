@@ -65,6 +65,8 @@ section named after the tag as the release notes; how to cut a release:
   page no longer updated).
 - Hold & Limits: MENU and Back return to the range page (Power Settings)
   it was opened from, not to the multimeter page.
+- Temperature page: the cold junction line follows the readings and the
+  offset while the page is open.
 
 ## v0.3.0 (2026-10-27)
 
