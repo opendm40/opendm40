@@ -264,7 +264,23 @@ fn set_commands() {
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),
         ("LOG:STAT MAYBE", "-224"),
-        ("LOG:OSR 9", "-224"),
+        ("LOG:OSR 9", "-222"),
+        ("LOG:OSR 2.5", "-224"),
+        ("LOG:OSR x", "-224"),
+        ("LOG:DUR -5", "-222"),
+        ("LOG:DUR x", "-224"),
+        ("LOG:SRAT 0", "-222"),
+        ("LOG:CSV:INT 5", "-222"),
+        ("LOG:CSV:INT x", "-224"),
+        ("LOG:CSV:DUR 7", "-222"),
+        ("LOG:SOUR AD3", "-224"),
+        ("SYST:BEEP:VOL 101", "-222"),
+        ("SYST:BEEP:VOL -1", "-222"),
+        ("SYST:BEEP:VOL x", "-224"),
+        ("SYST:BEEP:VOL", "-109"),
+        ("SYST:ALER:ENAB 16", "-222"),
+        ("SYST:ALER:ENAB 2.5", "-224"),
+        ("MMEM:DATA?", "-109"),
         ("LOG:CHOP 2", "-224"),
         ("LOG:CSV x", "-224"),
         ("VOLT:RANG x", "-224"),
@@ -290,6 +306,8 @@ fn set_commands() {
     let o = s.handle(b"SOUR:FREQ x;SOUR:FREQ?", 1);
     check(matches!(o, Out::Instr(Cmd::GenFreq(None))) && err(&mut s).starts_with("-224,"), "SOUR:FREQ x;SOUR:FREQ?: the query runs, -224 queued");
     check(matches!(s.handle(b"LOG:STAT ON", 1), Out::Log(Log::State(Some(true)))), "LOG:STAT ON");
+    check(matches!(s.handle(b"LOG:SOUR ad2", 1), Out::Log(Log::Source(Some(true)))), "LOG:SOUR ad2: parameters are not case-sensitive");
+    check(matches!(s.handle(b"log:sour Ad1", 1), Out::Log(Log::Source(Some(false)))), "log:sour Ad1");
 }
 
 fn error_queue() {

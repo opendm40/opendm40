@@ -39,6 +39,9 @@ section named after the tag as the release notes; how to cut a release:
   (-363) instead of running cut commands.
 - **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
   value), not `+0.000000E-03`.
+- **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
+  (`SYST:BEEP:VOL`, `SYST:ALER:ENAB`, `LOG:OSR`, `LOG:DUR`, `LOG:SRAT`, `LOG:CSV:INT` / `DUR`);
+  `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
 
 ## v0.3.0 (2026-10-27)
 
