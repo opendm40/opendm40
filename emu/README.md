@@ -227,6 +227,7 @@ recorded.
 | [`switchtest.py`](hy3131/switchtest.py) | misconnect sentinel through function / range / coupling switches | | 44100 |
 | [`loudtest.py`](hy3131/loudtest.py) | danger alarm (buzzer register log) | | 53101 |
 | [`powtest.py`](hy3131/powtest.py) | power meter | | 3381 |
+| [`pwrangingtest.py`](pwrangingtest.py) | power meter before its first reading: no DMM column beside "I ranging..." (#96) | | free |
 | [`burdentest.py`](hy3131/burdentest.py) | burden voltage readout | | 3378 |
 | [`inrushtest.py`](hy3131/inrushtest.py) | inrush current capture | | 3597 |
 | [`btwaketest.py`](hy3131/btwaketest.py) | DMM rail (PE2) wake with a Bluetooth link | | 4833 |

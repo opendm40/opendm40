@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Power meter: no multimeter MAX / AVG / REL / MIN column while the page
+  shows "I ranging...".
+
 ## v0.3.0 (2026-10-27)
 
 ### New

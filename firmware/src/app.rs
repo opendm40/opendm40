@@ -1802,7 +1802,9 @@ impl App {
             // DBG:PROF? "d.chart" (one trend point: columns + labels + side).
             crate::prof::enter(crate::prof::DCHART);
             let pv = self.meter.live().and_then(|r| r.power).filter(|_| self.dmm.pw.on);
-            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if pv.is_some() { None } else { Some(&side) }, self.chart_unit, rc);
+            // The power meter never shows the DMM column (MAX / AVG / REL /
+            // MIN), also not before its first reading ("I ranging...", #96).
+            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if self.dmm.pw.on { None } else { Some(&side) }, self.chart_unit, rc);
             if let Some(pv) = pv {
                 ui::pw::side(&mut self.dmm_view.pwc, &pv);
             }
