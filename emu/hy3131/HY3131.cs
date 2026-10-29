@@ -829,6 +829,91 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private float CalGain(int off) => CalConsistent ? Cal[off / 4] : 1f;
         private float CalOffs(int off) => CalConsistent ? Cal[off / 4] : 0f;
 
+        // ------------------------------------------------------------ bit pattern
+        /// A bit pattern on V-COM for the AD2 stream (serial decoding in the Wave
+        /// view, emu/decodetest.py): a watched file, first line "<bit s> <V low>
+        /// <V high> <repeat s>", then '0' / '1' per bit (others ignored); after the
+        /// last bit the line keeps its level, repeat > 0 starts it again. The AD2
+        /// sample is the source's DC node scaled by the bit's volts / max(|V low|,
+        /// |V high|) (set `vsrc:` to that maximum), averaged over the two AD2
+        /// periods before the sample with triangle weights: a sinc^2-like
+        /// decimation filter (the HY3131's AD2 filter shape is INFERRED, not
+        /// measured). AD1 and the other paths keep the plain source. Rewriting the
+        /// file (new mtime, checked every 50 ms of the model's time) loads the new
+        /// pattern from that moment.
+        public void SetBitsFile(string path)
+        {
+            bitPath = path;
+            bitMtime = DateTime.MinValue;
+            bitCheckT = double.NegativeInfinity;
+            LoadBits(lastUpdate);
+        }
+
+        private void LoadBits(double now)
+        {
+            bitCheckT = now;
+            DateTime m;
+            string txt;
+            try
+            {
+                m = System.IO.File.GetLastWriteTimeUtc(bitPath);
+                if(m == bitMtime) return;
+                txt = System.IO.File.ReadAllText(bitPath);
+            }
+            catch(Exception)
+            {
+                return;
+            }
+            var nl = txt.IndexOf('\n');
+            if(nl < 0) return;
+            var h = txt.Substring(0, nl).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if(h.Length < 4) return;
+            var b = new List<bool>(txt.Length);
+            for(var i = nl + 1; i < txt.Length; i++)
+            {
+                if(txt[i] == '0' || txt[i] == '1') b.Add(txt[i] == '1');
+            }
+            bitMtime = m;
+            bits = b.ToArray();
+            bitSec = double.Parse(h[0], CultureInfo.InvariantCulture);
+            bitLo = double.Parse(h[1], CultureInfo.InvariantCulture);
+            bitHi = double.Parse(h[2], CultureInfo.InvariantCulture);
+            bitRepeat = double.Parse(h[3], CultureInfo.InvariantCulture);
+            bitT0 = now;
+        }
+
+        private double BitVolts(double t)
+        {
+            if(bits.Length == 0) return bitHi;
+            var dt = t - bitT0;
+            if(dt < 0) return bits[0] ? bitHi : bitLo;
+            if(bitRepeat > 0) dt %= bitRepeat;
+            var i = (long)(dt / bitSec);
+            return (i < bits.Length ? bits[i] : bits[bits.Length - 1]) ? bitHi : bitLo;
+        }
+
+        /// The pattern's share of the source node at an AD2 sample (filtered).
+        private double BitShare(double t)
+        {
+            if(t - bitCheckT > 0.05) LoadBits(t);
+            var p = Ad2Period;
+            double s = 0, w = 0;
+            for(var k = 0; k < 16; k++)
+            {
+                var x = (k + 0.5) / 16.0; // 0..1 over two periods
+                var wt = 1.0 - Math.Abs(x - 0.5) * 2.0;
+                s += wt * BitVolts(t - x * 2 * p);
+                w += wt;
+            }
+            var full = Math.Max(Math.Abs(bitLo), Math.Abs(bitHi));
+            return full > 0 ? s / w / full : 0;
+        }
+
+        private string bitPath;
+        private DateTime bitMtime;
+        private double bitCheckT = double.NegativeInfinity, bitSec = 1e-3, bitLo, bitHi = 1, bitRepeat, bitT0;
+        private bool[] bits = new bool[0];
+
         // ------------------------------------------------------------ input spec
         /// Connection spec (Dm40Frontend.Apply): what is on the jacks, plus the model options
         /// noise:, cal:, beat:. The old per-function keys (dcv:, acv:, dca:, ohm:, cap:, temp: ...)
@@ -1478,6 +1563,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             double dc, ac;
             NodeDcAc(t, out dc, out ac);
+            if(bitPath != null) return (int)Math.Round(dc * BitShare(t) * Ad2Scale());
             var w = 2 * Math.PI * sigHz * t;
             var pk = Peak(ac, sigShape);
             double s;
@@ -2858,6 +2944,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         public void SetAd1(int raw) { Core.ForcedAd1 = raw; }
         public void ClearAd1() { Core.ForcedAd1 = int.MinValue; }
         public void SetAd2(int raw) { Core.ForcedAd2 = raw; }
+        /// A bit pattern on V-COM for the AD2 stream (Hy3131Core.SetBitsFile).
+        public void SetBitsFile(string path) { Core.SetBitsFile(path); }
         /// DC voltage on the V / COM input (kept for the older scripts).
         public void SetVin(double volts) { Core.ForcedAd1 = int.MinValue; Core.SetInput("vsrc:" + volts.ToString(CultureInfo.InvariantCulture)); }
         /// Input spec, see Hy3131Core.SetInput.

@@ -1013,6 +1013,62 @@ the scope full record.
         fast logger. SCPI: DEC:UART:... config and a frame-FIFO read, so a host can tail the bus live.
       - Constraints: the decoder runs per DMA half-buffer in the main loop, so it must keep up at 1.25 MS/s and stay
         in region B (no region-C code while streaming). DMM / generator keep running alongside.
+      - [x] Phase 1 (PR #63, draft, on feat/scope-dlg-ring): UART and Modbus RTU as a band on the scope page
+            (owner 2026-10-28: an overlay on the scope page, not a separate view; the first streaming view of
+            the PR was dropped). Owner 2026-10-28 (2): not in real time: each record is decoded once, a
+            running one that triggered (Normal / Single, Auto when it fired; not roll, not the Wave view while
+            running) and the stored one on STOP; the bytes / frames kept in TCM (80 / 16, positions in the
+            record) and every redraw, zoom and pan draws from them; a record with more: the screen's window
+            again when stopped. The decode runs in the main loop (`dec_step`, 3 ms a pass), never in the frame
+            draw; the next acquisition waits for it (Scope::hold_restart). Settings: an MF tab (Decode, the
+            fifth). src/decode.rs (levels auto / manual, auto-baud from
+            the shortest runs with a TooFast cap, 8N1 / 8E1 / 8O1 / 7E1, inverted polarity, characters with a
+            quarter-bit idle step, a Modbus framer with a running CRC and request / reply pairing),
+            app_decode.rs (the decode per frame; DECode:...), ui_decode.rs (the band: byte boxes with hex and
+            the character, Modbus frame boxes with the fields and the reply time, errors red, a bar zoomed
+            out, "Rate too low for N baud" under 4 samples per bit; the MF Decode tab). DECode:FRAMes?: the
+            kept frames (stopped with more than the lists hold: the record decoded again on the query). The
+            cache (`ANN`, ~1.3 KB) in TCM; no SRAM used. Tests: tools/decode-test (incl. filtered edges
+            at 8 samples per bit), ui-render `--decode` (24 zooms x 3 pans x both views, 0 violations),
+            scpi-test, emu/decodetest.py (MCX and the Wave view: ScopeFeeder / HY3131 SetBitsFile).
+      - [x] Frame log (owner 2026-10-28, Mode Log of the Decode tab, DECode:MODE LOG): the first draft's
+            streaming list back, in the scope's record memory instead of a static: scope.rs `log_*` (a
+            16 K-sample circular DMA ring at the start of BUF, 1.25 MS/s for auto-baud, ~16 samples a bit
+            for a set rate), app_log.rs (levels, auto-baud again after framing errors in a quarter of 32
+            characters, decode.rs chars_step / Framer over the ring in up to 4 ms a pass; a circular byte
+            store of the frames in the rest of BUF, ~44 KB, the oldest dropped), ui_log.rs (the list,
+            counters, LIVE / page / CLEAR / STOP / SCOPE, the Decode page as SETUP). Each frame keeps its
+            waveform: ~8 samples a bit from 2 bits before to 2 after (`snip_write`: 8-bit means, a byte-wise
+            run / difference code, ~150 B for an 8-byte Modbus frame; dlog's DLG coder took 6-8 bits a
+            sample on a square wave), coded when the pass has time (about one a pass: at 115200 not every
+            frame has one); tap a row to see it with the band (region C, `log_cold`). Emulator: 267 Modbus
+            19200 frames with waveforms kept; 9600 and 115200 (4 588 frames in 3 s, none lost), pairing.
+            DECode:FRAMes? reads it as a FIFO, DECode:CLEar. Leaving the view ends it (BUF back to the
+            scope, a new record). The Wave view refuses it.
+
+      - [ ] Phase 2: tap a frame to centre the record on it; trigger / filter on a decoded value (address,
+            function, a byte pattern); disk logging (LOGS/UARTnnn.CSV); Modbus ASCII; the other protocols of
+            the list above.
+            Known limits: the frame costs ~0.1 ms more with the decoder on (s.frame 6.98 against 6.89 ms at
+            1 ms/div); a record's decode is 2-5 ms at 1 ms/div (9600 / 115200, up to 8 ms when it measures the
+            rate), and the next acquisition waits for it (70 against 79 frames in 3 s at 1 ms/div, 9600;
+            emulator, native-boot.md "Protocol decoder"); the band covers the graph's bottom 35 px (the trace is not drawn there); a long
+            coded record (Single at 100 ms/div and slower) decodes at ~1.3 us a sample; at 1 ms/div a 9600
+            baud screen holds 9 characters, the first may be misread when the screen starts inside a run of
+            back-to-back characters (they realign at an idle gap); the AD2 filter's edge shape in the
+            emulator is INFERRED (a sinc^2-like mean over 2 periods).
+      - [ ] Device check (a USB-UART adapter or a Modbus device: the generator cannot make UART): (1) 3.3 V
+            USB-UART TX -> OSC, text at 9600 / 115200 8N1: the band at 200 us .. 5 ms/div, DEC:RATE?,
+            DEC:FRAM? after STOP matches what was sent; (2) 8E1 / 7E1 and a wrong parity -> red boxes, PE;
+            (3) RS-232 levels with Inverted; (4) Modbus RTU master + slave on RS-485, probe across A-B, 9600 /
+            19200 8E1: REQ / RSP boxes, the reply time vs the master's log, a corrupted frame red; (5) the Wave
+            view, DC V, RS-485 A-B on V-COM at 2400 / 4800 (and 9600 at 1 ms/div): the AD2 filter's real edge
+            shape, DEC:RATE? after STOP; (6) DBG:PROF? dec.job (a record's decode), x2 and s.frame at 1 / 10 /
+            100 ms/div with 9600 and 115200 traffic, frames off / on, against the emulator's numbers
+            (native-boot.md "Protocol decoder"); (7) Mode Log: 115200 text for 60 s, DEC:COUN? lost 0 and
+            the FIFO complete; a tapped row's waveform matches the scope's look of the same bytes; Modbus
+            pairing and the reply time; leaving Log, the scope captures again; Log in the Wave view refused.
+
 - [ ] Scope in ngscopeclient (owner-approved 2026-10-22: a libscopehal driver + a full-record readout).
       Done in the emulator (branch scope-full-record): opendm40 WAV:POINts SCReen|MAXimum|<n>, WAV:FORMat BYTE|WORD,
       WAV:SOURce CHAN1, 10-field Keysight/Rigol WAV:PREamble? (was 4 fields), DIGitize, TRIGger:STATus?,

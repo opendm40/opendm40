@@ -47,6 +47,7 @@ mod prof;
 mod pack10;
 mod cring;
 mod scope;
+mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
@@ -1054,6 +1055,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     false
                 }
                 scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
+                scpi::Out::Dcd(scpi::Dcd::Frames(n)) => {
+                    port.respond_with(&mut |b| Some(app.dec_frames(n, b)));
+                    false
+                }
+                scpi::Out::Dcd(c) => app.dec_scpi(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1580,7 +1586,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 && !upload::busy()
                 && !logger.disk_writes_blocked()
                 && !hy3131::streaming()
+                // The decoder's frame log streams (its 13 ms ring at
+                // 1.25 MS/s outlasts no erase).
+                && !scope::LOG_LIVE.load(core::sync::atomic::Ordering::Relaxed)
                 && now.saturating_sub(host_io_t) >= 500,
+
         );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
         // changed (a recording ended, a screenshot / scope record, a delete),
@@ -1803,6 +1813,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
+            | Out::Dcd(scpi::Dcd::Frames(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )

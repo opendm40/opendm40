@@ -20,6 +20,14 @@
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rect};
 
+/// The protocol decoder's bus band and its setup popup (app_decode.rs).
+#[path = "ui_decode.rs"]
+pub mod dec;
+/// The protocol decoder's frame log view (app_log.rs).
+#[path = "ui_log.rs"]
+pub mod log;
+
+
 // ---- colours (RGB565, spec sec. 0) ----
 pub const C_BAR: Color = 0x4208; // top bar, strip, panel, measurement bar
 pub const C_FILL: Color = 0x2124; // graph fill, record-bar inner, dark text on yellow
@@ -220,6 +228,11 @@ pub struct Model {
     /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
+    /// Protocol decoder band (ui_decode.rs): 0 none, 1 UART (the byte
+    /// row), 2 Modbus (frame and byte rows); `dec_gen` changes with what
+    /// it shows (`dec::ann`), 0 = blank (a drag moves the trace).
+    pub dec: u8,
+    pub dec_gen: u16,
 }
 
 /// `Model::src` values.
@@ -295,6 +308,8 @@ impl Model {
         amps: false,
         wvdiv: 0.0,
         ch1_txt: "",
+        dec: 0,
+        dec_gen: 0,
     };
 
     pub fn pal(&self) -> Color {
@@ -644,11 +659,16 @@ pub fn trig_badge(m: &Model) {
 
 /// 2.6 battery (outline + level clipped to (437,3,33,12)).
 pub fn battery(m: &Model) {
+    battery_lv(m.battery, m.charging);
+}
+
+/// The battery of level 0..5.
+pub fn battery_lv(level: u8, charging: bool) {
     let r = rect(435, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
-    let l = if m.battery > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + m.battery.min(5) as u32, 0) } else { Ink::none() };
+    let l = if level > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + level.min(5) as u32, 0) } else { Ink::none() };
     let clip = rect(437, 3, 33, 12);
-    let lc = if m.charging { C_GREEN } else { C_WHITE };
+    let lc = if charging { C_GREEN } else { C_WHITE };
     paint(r, &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
@@ -1502,7 +1522,8 @@ pub const H_FFT_Y: usize = 4;
 pub const H_FFT_X: usize = 5;
 pub const H_FFT_PK: usize = 6;
 pub const H_CUR: usize = 7;
-pub const H_SPARE: usize = 8;
+/// The protocol decoder's band (ui_decode.rs).
+pub const H_DEC: usize = 8;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -2100,6 +2121,7 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
+    g.set_hole_at(H_DEC, (m.dec != 0).then(|| dec::band_rect(m.dec)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2118,6 +2140,11 @@ pub fn update(m: &Model) {
         if m.tabs & bits & (TAB_SHOW_L | TAB_SHOW_R) != 0 && (!valid0 || d((ol.tabs ^ m.tabs) & bits != 0 || ol.tb != m.tb)) {
             tb_tab(m, k == 0);
         }
+    }
+    // The decoder band: when what it shows changed, or the graph was
+    // repainted under it.
+    if m.dec != 0 && (!valid0 || d(ol.dec != m.dec || ol.dec_gen != m.dec_gen)) {
+        dec::band(m.dec, m.dec_gen == 0);
     }
     // The label shows the graph background through it: repainted with it.
     let bg_changed = !valid0 || deco0 != g.d_deco;
@@ -2463,7 +2490,10 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 /// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
 /// order as fft::WIN_NAMES).
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
-pub const MF_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
+/// The MF popup's tabs (stock four, opendm40 Decode).
+pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+/// Tab pitch (stock four tabs: 101 px; five: 80).
+const MF_TAB_W: i16 = 80;
 
 /// Values the popups show.
 #[derive(Clone, Copy)]
@@ -2496,6 +2526,8 @@ pub struct PopVals {
     pub pcond: u8,
     pub pwidth: f32,
     pub runt_v: f32,
+    /// The decoder setup popup's values.
+    pub dec: dec::SetupVals,
 }
 
 /// Which popup is open (tab).
@@ -2647,23 +2679,27 @@ pub fn slider_value(x: i16) -> f32 {
 }
 
 /// MF popup page height per tab (box h = 40 + page).
-/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13.)
-const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
+/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13;
+/// Decode: ui_decode.rs.)
+const MF_PAGE_H: [i16; 5] = [150, 100, 125, 55, dec::PAGE_H];
 
-/// MF settings popup (FUN_08037574), tab 0..3.
+/// MF settings popup (FUN_08037574), tab 0..4.
 pub fn draw_mf(tab: u8, v: &PopVals) {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let page_h = MF_PAGE_H[tab as usize];
     let hh = 40 + page_h;
     let screen = rect(0, 0, 480, 320);
     fill_c(rect(13, 20, 401, hh), screen, C_FRAME);
     let tclip = rect(14, 21, 399, hh - 1);
-    for i in 0..4i16 {
-        let x = 14 + 101 * i;
-        let r = rect(x, 21, 100, 40);
+    // The stock tab font when every label fits the narrower tabs.
+    let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W - 1) { sf::SC_F22 } else { sf::SC_F16 };
+    for i in 0..5i16 {
+        let x = 14 + MF_TAB_W * i;
+        let r = rect(x, 21, MF_TAB_W - 1, 40);
         let sel = i == tab as i16;
-        let ul = rect(x, 59, 100, 2);
-        let t = Ink::new(sf::SC_F22, r, MF_TABS[i as usize], 8, 0);
+        let ul = rect(x, 59, MF_TAB_W - 1, 2);
+        let t = Ink::new(font, r, MF_TABS[i as usize], 8, 0);
+
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
         paint(isect(r, tclip), &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = t.at(x, y) {
@@ -2728,11 +2764,13 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 _ => {}
             }
         }
-        _ => {
+        3 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
         }
+        // opendm40: the protocol decoder (ui_decode.rs).
+        _ => dec::page(&v.dec, pc),
     }
 }
 
@@ -2794,6 +2832,8 @@ pub enum MfHit {
     Width(bool),
     PriScr,
     SaveCsv,
+    /// The Decode tab's page.
+    Dec(dec::SetupHit),
     /// Inside the box, nothing there.
     Inside,
     /// Below the box: closes (stock: x >= 10).
@@ -2803,13 +2843,13 @@ pub enum MfHit {
 }
 
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];
     if !rect(13, 20, 401, hh).has(x, y) {
         return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
     }
     if y < 61 {
-        return MfHit::Tab(((x - 14) / 101).clamp(0, 3) as u8);
+        return MfHit::Tab(((x - 14) / MF_TAB_W).clamp(0, 4) as u8);
     }
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
@@ -2863,7 +2903,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Inside
             }
         }
-        _ => {
+        3 => {
             if near(rect(24, 78, 80, 30)) {
                 MfHit::PriScr
             } else if near(rect(114, 78, 80, 30)) {
@@ -2872,6 +2912,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Inside
             }
         }
+        _ => MfHit::Dec(dec::page_hit(x, y)),
     }
 }
 
@@ -3000,6 +3041,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
         Popup::Ch1(t) => draw_ch1(t, v),
         Popup::Math(t) => draw_math(t, v),
         Popup::Tb(i) => draw_tb(i),
+
     }
 }
 
