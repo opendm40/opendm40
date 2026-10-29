@@ -14,8 +14,12 @@ section named after the tag as the release notes; how to cut a release:
   short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
   screen.
 - Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
-- Capacitance ranges on the meter: MF chooses 6 nF .. 60000 µF or AUTO; the
-  AUTO key steps and resets them as in V / A / Ω.
+- Capacitance ranges on the meter: MF chooses 60 nF .. 60000 µF or AUTO; the
+  AUTO key steps and resets them as in V / A / Ω. The 6 nF and 60 nF ranges
+  are one (below 6 nF with 3 decimals).
+- Capacitance: 1 .. 47 mF show their first value in about 3 to 4.5 s (was
+  9 to 20 s; 47 mF did not settle); another capacitor on 6 / 60 mF starts
+  the range choice again.
 - Capacitance: the rate chip shows the real update rate on 600 µF and up (a
   value every few seconds, not 3.9/s); values before a range's first result
   are grey.

@@ -305,7 +305,7 @@ Functions:
 | Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm |
 | Continuity | `CONTinuity` | none |
 | Diode | `DIODe` | none |
-| Capacitance | `CAPacitance` | 6e-9, 6e-8 .. 6e-2 F (6 nF .. 60 mF) |
+| Capacitance | `CAPacitance` | 6e-8 .. 6e-2 F (60 nF .. 60 mF; 6e-9 selects 60 nF) |
 | Frequency | `FREQuency` | autorange only (60 Hz .. 60 MHz) |
 | Temperature | `TEMPerature` | none |
 | Power meter | `POWer` | see [Power meter](#power-meter) |

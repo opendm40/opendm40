@@ -99,7 +99,7 @@
 //!     the function, then the range (none / AUTO / DEF = autorange, also on
 //!     the function already selected), then the resolution if given
 //!     (CONT / DIOD: no argument; FREQ: AUTO / DEF only; CAP: a range,
-//!     6 nF .. 60 mF)
+//!     60 nF .. 60 mF; 6 nF = the 60 nF range)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
 //!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
@@ -1074,7 +1074,8 @@ pub fn range_items(func: u8) -> &'static [f32] {
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
         // Capacitance: CONF:CAP <F>, CAP:RANG, the MF page (ui::range_items),
         // for comparing a fixed range with AUTO (#74).
-        13 => &[6e-9, 6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3, 6e-2],
+        // 6 nF is the 60 nF range (dmm::CAP_R_MIN): CONF:CAP 6E-9 picks it.
+        13 => &[6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3, 6e-2],
         // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
@@ -1086,6 +1087,9 @@ pub fn range_items(func: u8) -> &'static [f32] {
 pub fn range_item_code(func: u8, i: usize) -> u8 {
     if quantity(func & !ANY_CPL) == 1 {
         if i == 0 { 5 } else { i as u8 - 1 }
+    } else if func == 13 {
+        // Capacitance: the list starts at the 60 nF range, dmm r1.
+        i as u8 + 1
     } else {
         i as u8
     }

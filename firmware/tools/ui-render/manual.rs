@@ -200,7 +200,7 @@ pub fn run(out: &str) -> usize {
 
     // Capacitance range page: 600 uF fixed.
     host::reset(0);
-    ui::range_page(Button::Cap, Some(5), 0, None);
+    ui::range_page(Button::Cap, Some(4), 0, None);
     ck.check_opts("manual/range-cap", &page, false);
     save1(out, "range-cap");
 

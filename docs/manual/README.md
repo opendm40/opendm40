@@ -633,10 +633,10 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Capacitance
 
-- Ranges: 6 nF to 60 mF; **MF** chooses one or AUTO. From 6 mF the value
-  is in µF (4700 µF).
+- Ranges: 60 nF to 60 mF; **MF** chooses one or AUTO. Below 6 nF the value
+  has 3 decimals; from 6 mF it is in µF (4700 µF).
 - From 600 µF a new value comes every few seconds; the rate chip shows it.
-- Open leads end on the 6 nF range; a short shows **0L**.
+- Open leads end on the 60 nF range; a short shows **0L**.
 - Large capacitors take longer: from the 600 µF range up the meter first
   discharges, then measures.
 

@@ -2,8 +2,8 @@
 """Capacitance AUTO (dmm.rs poll_cap, issue #74): the range a reading ends on does not depend
 on what was on the leads before. A small capacitor after a large one ends on its own range with
 its value (before: 100 nF after 1 mF stayed on 600 uF, 3 .. 44 uF as final values); open leads
-end on the 6 nF range whatever came before (before: after a short, or after 4.7 mF, the meter
-stayed on "0L mF"); a short reads 0 on the 6 nF range; a large capacitor measures and keeps its
+end on the 60 nF range (the lowest) whatever came before (before: after a short, or after 4.7 mF, the meter
+stayed on "0L mF"); a short (the emulator's: the oscillator runs) reads ~0 on the 60 nF range; a large capacitor measures and keeps its
 range (no hunt).
 
 A scenario is a list of phases (fw uptime, from each phase input's marker: emu/emusync.py):
@@ -36,14 +36,14 @@ TOL = 0.03
 # emu/hy3131/README.md: the stock's 100 uF reads +4 %).
 TOL_RAMP = 0.05
 LAST = 5
-NF6 = 6e-9
+NF6 = 6e-8  # the lowest range: 60 nF (dmm::CAP_R_MIN)
 # name, [(phase s, input, range F, value, stable s)]
 SCEN = [
     ('1mF-100nF', [(14, 'c:1000e-6', None, None, 0), (20, 'c:100e-9', 6e-7, 100e-9, 0)]),
     ('470uF-22uF', [(14, 'c:470e-6', None, None, 0), (20, 'c:22e-6', 6e-5, 22e-6, 0)]),
     ('4.7mF-330uF', [(14, 'c:4.7e-3', None, None, 0), (20, 'c:330e-6', 6e-4, 330e-6, 0)]),
     ('open', [(20, 'open', NF6, 'small', 4)]),
-    ('short-open', [(16, 'short', NF6, 'zero', 8), (20, 'open', NF6, 'small', 8)]),
+    ('short-open', [(16, 'short', NF6, 'small', 8), (20, 'open', NF6, 'small', 8)]),
     ('4.7mF-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 10), (25, 'open', NF6, 'small', 8)]),
     ('10uF', [(20, 'c:10e-6', 6e-5, 10e-6, 10)]),
     ('100uF', [(25, 'c:100e-6', 6e-4, 100e-6, 12)]),
@@ -53,9 +53,10 @@ SCEN = [
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
     ('4.7mF-clamp', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
-    ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', 6e-4, 'ol', 5),
+    ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', 6e-2, 'ol', 4),
                           (30, 'open', NF6, 'small', 5)]),
     ('10mF', [(40, 'c:10e-3', 6e-2, 10e-3, 15)]),
+    ('47mF', [(40, 'c:47e-3', 6e-2, 47e-3, 15)]),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
