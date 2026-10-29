@@ -2459,7 +2459,8 @@ fn main() {
     // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
     strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
-    strip_check(&mut ck, "strip/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
+    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
