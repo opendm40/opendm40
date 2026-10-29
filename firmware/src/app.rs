@@ -313,6 +313,8 @@ pub struct App {
     i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
     fuse_busy: bool,
+    /// Hash of the temperature page's info line on screen (`temp_info_tick`).
+    temp_info_h: u32,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -621,6 +623,7 @@ impl App {
             danger_rd: false,
             i10_since: None,
             fuse_busy: false,
+            temp_info_h: 0,
             meas: [0.0; 4],
             pd6_armed: false,
             pd6_off: false,
@@ -832,7 +835,10 @@ impl App {
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
-            View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(None),
+            View::Range if self.dmm.hy_mode() == 15 => {
+                self.with_temp_page(None);
+                self.temp_info_tick(true);
+            }
             View::Range if self.dmm.pw.on => {
                 ui::pw::settings_page(&self.dmm.pw_state());
                 self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0, self.pw_help);
@@ -1749,6 +1755,7 @@ impl App {
                 View::Gen => ui::gen_status(&st),
                 View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
                 View::DmmScope => self.draw_reading(),
+                View::Range if self.temp_page_on() => self.temp_info_tick(false),
                 _ => {}
             }
         }
@@ -3944,6 +3951,25 @@ impl App {
     fn with_temp_page(&self, key: Option<(u8, bool)>) {
         let k = self.dmm.t_sensor();
         let mut b = [0u8; 64];
+        let n = self.temp_info_text(&mut b);
+        let (r25, beta) = self.dmm.ntc_user();
+        let p = ui::TempPage {
+            sensor: k,
+            offs: self.dmm.t_offs(k),
+            unit_f: self.dmm.temp_f(),
+            r25,
+            beta,
+            info: core::str::from_utf8(&b[..n]).unwrap_or(""),
+        };
+        match key {
+            None => ui::temp_page(&p),
+            Some((c, pressed)) => ui::temp_key(&p, c, pressed),
+        }
+    }
+
+    /// The temperature page's info line into `b` (its length): the sensor
+    /// current of a resistive sensor, else the cold junction.
+    fn temp_info_text(&self, b: &mut [u8; 64]) -> usize {
         let mut n = 0;
         let mut put = |t: &[u8]| {
             let m = t.len().min(64 - n);
@@ -3962,18 +3988,23 @@ impl App {
             put(dmm::format(&mut t, v, 1).as_bytes());
             put(if u == "\u{b0}F" { b" F" } else { b" C" });
         }
-        let (r25, beta) = self.dmm.ntc_user();
-        let p = ui::TempPage {
-            sensor: k,
-            offs: self.dmm.t_offs(k),
-            unit_f: self.dmm.temp_f(),
-            r25,
-            beta,
-            info: core::str::from_utf8(&b[..n]).unwrap_or(""),
-        };
-        match key {
-            None => ui::temp_page(&p),
-            Some((c, pressed)) => ui::temp_key(&p, c, pressed),
+        n
+    }
+
+    /// Temperature page, once a second: the info line again when its text
+    /// changed (the cold junction follows each thermocouple reading and an
+    /// offset step; it stayed as drawn when the page opened). `drawn`: the
+    /// whole page was just drawn, only note its text.
+    fn temp_info_tick(&mut self, drawn: bool) {
+        let mut b = [0u8; 64];
+        let n = self.temp_info_text(&mut b);
+        // FNV-1a of the text.
+        let h = b[..n].iter().fold(0x811c_9dc5u32, |h, &c| (h ^ c as u32).wrapping_mul(0x0100_0193));
+        if h != self.temp_info_h {
+            self.temp_info_h = h;
+            if !drawn {
+                ui::temp_info(core::str::from_utf8(&b[..n]).unwrap_or(""));
+            }
         }
     }
 

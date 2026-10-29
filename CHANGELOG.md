@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Temperature page: the cold junction line follows the readings and the
+  offset while the page is open.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
