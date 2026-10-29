@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixes
+
+- **Gallery:** the recording in progress reads **Recording** instead of **No data**, and its
+  **Delete** says **Stop the recording** instead of **Disk busy, try again**.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
