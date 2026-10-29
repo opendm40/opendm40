@@ -61,7 +61,12 @@ PHASES = [
     ('cont0', ['SYST:BEEP:VOL 0'], 'cont'),
     ('diod50', ['SYST:BEEP:VOL 50', 'CONF:DIOD'], 'diod'),
     ('diod0', ['SYST:BEEP:VOL 0'], 'diod'),
+    ('dcv', ['CONF:VOLT:DC'], 'none'),
+    ('entry', ['CONF:CONT'], 'entry'),
 ]
+# Entering CONT with the probes already together: the indicator from the
+# row write on (the beeper sounds at once), not after the entry settle.
+ENTRY_MAX_MS = 200
 CHAT_T, CHAT_N, CHAT_MS = 3.5, 15, 20
 # An input event the model logs with the virtual time and the firmware's
 # clock ("input: open at 6.0000 fw 3.28"): the firmware clock's offset, so
@@ -75,6 +80,17 @@ def schedule():
     exp = []
     for i, (ph, _, kind) in enumerate(PHASES):
         s = T0 + i * L
+        if kind == 'none':
+            # DC V: shorted from 4.5 s on, no indicator; still shorted
+            # when the next phase enters CONT.
+            ev.append((s + 4.5, SHORT))
+            exp.append((ph, 'none', s + 4.5, s + L - LEAD - 0.05))
+            continue
+        if kind == 'entry':
+            # ta: when CONF:CONT landed (`main` sets it from the firmware clock).
+            ev.append((s + 2.0, OPEN))
+            exp.append((ph, 'entry', s - LEAD, s + 2.0))
+            continue
         ev += [(s + 2.0, SHORT), (s + 3.0, OPEN)]
         exp.append((ph, 'short', s + 2.0, s + 3.0))
         if kind == 'cont':
@@ -125,6 +141,11 @@ def check(tl, exp, bad):
 
     for ph, what, ta, tb in exp:
         seg = [x for x in tl if ta - 0.5 <= x[0] <= tb + 1.0]
+        if what == 'none':
+            if any(anyon(x) for x in tl if ta <= x[0] <= tb) or any(state_at(tl, ta)):
+                bad.append('%s: an indicator outside continuity / diode' % ph)
+            print('%-6s %-7s %s' % (ph, what, 'off' if not bad or not bad[-1].startswith(ph) else 'ON'), flush=True)
+            continue
         if A.dump:
             for x in seg:
                 print('   %9.4f band %d digits %d' % x)
@@ -154,6 +175,12 @@ def check(tl, exp, bad):
         row['rises'] = rises
         rows.append(row)
         print('%-6s %-7s on %+7.1f ms  off %s  indications %d' % (ph, what, on_ms, '%+7.1f ms' % row['off_ms'] if t_off else '-', rises), flush=True)
+        if what == 'entry':
+            if on_ms > ENTRY_MAX_MS:
+                bad.append('%s: on %.1f ms after CONF:CONT on shorted probes (> %d)' % (ph, on_ms, ENTRY_MAX_MS))
+            if t_off is None:
+                bad.append('%s: indicator never off' % ph)
+            continue
         if what == 'diode':
             if t_off is None:
                 bad.append('%s diode: the BEEP band stayed on (the pattern plays for the first readings only)' % ph)
@@ -246,6 +273,7 @@ def main():
                     tm.write(c)
                 t = int(q('DBG:PING?').split(',')[0]) / 1000.0
                 sent.append((ph, t))
+                exp = [(e[0], e[1], t + off, e[3]) if e[0] == ph and e[1] == 'entry' else e for e in exp]
                 print('%-6s sent at fw %.2f s (phase from %.2f)' % (ph, t, T0 + i * L), flush=True)
                 if t + off > T0 + i * L:
                     bad.append('%s: commands late (virtual %.2f s)' % (ph, t + off))
@@ -269,7 +297,7 @@ def main():
     with open(os.path.join(OUT, 'contvis%s.json' % A.tag), 'w') as f:
         json.dump(res, f, indent=1)
     if ok:
-        for x in (trace, script, runlog.name):
+        for x in (trace, script, runlog.name, os.path.join(OUT, '%s.log' % name), os.path.join(OUT, '%s.resc' % name), os.path.join(OUT, 'flash-%s.bin' % name)):
             try:
                 os.remove(x)
             except OSError:

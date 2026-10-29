@@ -4058,6 +4058,15 @@ impl Dmm {
         if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {
             self.aprot_poll(clk, now);
         }
+        if self.mode == 11 && self.jwin == 0 && !self.pw.on && !hy::streaming() && !self.sent.blanked(now) {
+            // The continuity beeper's comparator: CTSTA bit 6 (ACPO) is
+            // the latch whose buffered copy CMPO drives the CMP pin
+            // (datasheet, comparator section), also while ENPCMPO is off
+            // (volume 0 %, `mute`). Every poll (5 ms), also through the
+            // entry settle (the beeper sounds from the row write on; not
+            // in the relay pulse's blank): `beeping`.
+            self.beep_on = hy::read1(0x14) & 0x40 != 0;
+        }
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
             // (600..900 ms each; A-JACK clears 1 s after the last hit).
@@ -4077,13 +4086,6 @@ impl Dmm {
         }
         self.t_poll = now;
         self.avg_n = 0;
-        if self.mode == 11 && self.jwin == 0 && !self.pw.on && !hy::streaming() {
-            // The continuity beeper's comparator: CTSTA bit 6 (ACPO) is
-            // the latch whose buffered copy CMPO drives the CMP pin
-            // (datasheet, comparator section), also while ENPCMPO is off
-            // (volume 0 %, `mute`). Every poll (5 ms): `beeping`.
-            self.beep_on = hy::read1(0x14) & 0x40 != 0;
-        }
         if cmp {
             // One byte (CTSTA): CMPHO / CMPLO of the comparator on PB1 /
             // the V tap, on every poll so an AC current is caught whatever
