@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Combined view: the meter strip shows **POWER**, the range and dashes while
+  the power meter ranges, not an empty strip.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

@@ -709,6 +709,16 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
     v.extend(extra);
     // Power meter readings (strip: "POWER", aux V / I; DMM page).
     v.extend(pw_cases().into_iter().map(|(n, p)| (n, pw_rd(p), None)));
+    // The combined view before the first power reading (App::pw_strip_wait,
+    // #108): dimmed dashes, the V once measured (worst: 1000 V range), no I.
+    for (n, a1) in [("pw_wait", None), ("pw_wait_v", Some(val(-1049.9, 1, "V")))] {
+        let p = pw_cases().into_iter().find(|c| c.0 == "pending-acdc").map(|c| c.1).unwrap();
+        let mut r = pw_rd(p);
+        r.prov = true;
+        r.aux1 = a1;
+        r.aux2 = None;
+        v.push((n, r, None));
+    }
     v
 }
 
@@ -2650,7 +2660,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 16] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -2667,6 +2677,7 @@ fn main() {
         ("c19-auto-dcv", "auto_dcv", 0, 0, false, false),
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
+        ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
