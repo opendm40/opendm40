@@ -5645,14 +5645,15 @@ impl Dmm {
     }
 }
 
-/// Format `v` with `dec` decimals into `buf`; returns the text.
+/// Format `v` with `dec` decimals into `buf`; returns the text. A value
+/// that rounds to zero has no sign (no "-0.0000", #113).
 pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     let mut scale = 1.0f32;
     for _ in 0..dec {
         scale *= 10.0;
     }
-    let neg = v < 0.0;
-    let mut n = ((if neg { -v } else { v }) * scale + 0.5) as u64;
+    let mut n = (v.abs() * scale + 0.5) as u64;
+    let neg = v < 0.0 && n != 0;
     let mut tmp = [0u8; 16];
     let mut i = 0;
     loop {
@@ -5825,6 +5826,19 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_no_negative_zero() {
+        let mut b = [0u8; 16];
+        // #113: open DC V leads, a few uV below 0 at 4 decimals.
+        assert_eq!(format(&mut b, -0.000_04, 4), "0.0000");
+        assert_eq!(format(&mut b, -0.000_06, 4), "-0.0001");
+        // The extra digit (dec + 1): -10 uV keeps its sign.
+        assert_eq!(format(&mut b, -0.000_01, 5), "-0.00001");
+        assert_eq!(format(&mut b, -0.4, 0), "0");
+        assert_eq!(format(&mut b, -1.25, 1), "-1.3");
+        assert_eq!(format(&mut b, 0.0, 3), "0.000");
+    }
 
     #[test]
     fn ohm_r0_gain_from_r1() {

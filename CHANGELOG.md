@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Multimeter: a value that rounds to zero shows no minus sign (open DC V
+  leads showed "-0.0000").
+
 ## v0.3.0 (2026-10-27)
 
 ### New
