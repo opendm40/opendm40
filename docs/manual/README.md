@@ -600,6 +600,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   between (the same chip setting as the stock firmware). It sounds while the
   resistance is below about 67 Ω (*inferred* from the chip setting). Silent
   at [Key/alert volume](#settings-page-1) 0 %.
+- While it sounds (also at volume 0 %) a green **SHORT** band shows above the
+  reading and the digits turn green, for at least 0.15 s.
 - No test current is shown: continuity uses its own source setting, whose
   current is not known yet.
 - The firmware adds no latch and no minimum beep length: the beep starts and
@@ -615,7 +617,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 ![Continuity: a short](img/dmm-cont.png)
 
-*Continuity: a short.*
+*Continuity: a short, the beeper sounds.*
 
 #### Diode
 
@@ -626,6 +628,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
   readings only. Silent at Key/alert volume 0 %.
+- The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
+  pattern.
 
 
 ![A silicon diode](img/dmm-diode.png)

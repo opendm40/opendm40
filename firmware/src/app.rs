@@ -85,6 +85,10 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// The beeper indicator stays this long after the beeper's condition last
+/// held (`App::beep_ind`): its shortest on-time, and a contact that
+/// chatters faster reads as one indication.
+const BEEP_HOLD_MS: u64 = 150;
 /// Combined view: the scope band paints at most one frame per this many ms
 /// (25 fps; `App::sp_throttled`).
 const COMBO_FRAME_MS: u64 = 40;
@@ -283,6 +287,10 @@ pub struct App {
     hist_n: usize,
     hist_new: usize,
     hv_shown: bool,
+    /// The beeper indicator (`beep_ind`): the last time the beeper's
+    /// condition held, and the indicator as last drawn on the readout.
+    beep_seen: u64,
+    beep_drawn: u8,
     /// HOLD state (Meter::hold_state) | limit verdict << 8 as last painted
     /// to the DMM status label / limit badge; a mismatch means the label (and
     /// the frozen value) need a repaint. Compared in tick() so a toggle from
@@ -618,6 +626,8 @@ impl App {
             hist_n: 0,
             hist_new: 0,
             hv_shown: false,
+            beep_seen: 0,
+            beep_drawn: 0,
             hold_shown: 0,
             now: 0,
             run_down: None,
@@ -2396,6 +2406,42 @@ impl App {
     /// (main.rs). None for the placeholder and outside AUTO.
     pub fn auto_prov(&self) -> Option<Reading> {
         self.prov.filter(|p| p.cpl_auto && self.dmm.cpl_auto() && !p.main.v.is_nan())
+    }
+
+    /// The continuity / diode beeper indicator (ui::SHORT_STYLE: a green
+    /// SHORT / BEEP band over the aux row, the digits green), after every
+    /// DMM poll (5 ms; `polled` false while the logger owns the HY3131: no
+    /// condition, off). On at once with the condition (`Dmm::beeping`:
+    /// continuity's comparator, the diode pattern), off BEEP_HOLD_MS after
+    /// it last held: a chattering contact reads as one indication.
+    pub fn beep_ind(&mut self, now: u64, can_draw: bool, polled: bool) {
+        let k = if polled { self.dmm.beeping() } else { 0 };
+        let want = if k != 0 {
+            self.beep_seen = now;
+            k
+        } else if self.dmm_view.short != 0 && polled && now < self.beep_seen + BEEP_HOLD_MS {
+            self.dmm_view.short
+        } else {
+            0
+        };
+        self.dmm_view.short = want;
+        if !can_draw || self.redraw {
+            return;
+        }
+        match self.view {
+            View::Dmm => {
+                self.dmm_view.short_sync();
+                if self.beep_drawn != want {
+                    self.beep_drawn = want;
+                    self.draw_reading();
+                }
+            }
+            View::DmmScope if self.beep_drawn != want => {
+                self.beep_drawn = want;
+                self.sp_strip();
+            }
+            _ => self.beep_drawn = want,
+        }
     }
 
     /// A provisional DMM reading (`Reading::prov`, switch-latency.md

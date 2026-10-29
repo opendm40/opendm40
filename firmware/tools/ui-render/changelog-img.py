@@ -100,3 +100,4 @@ elif tag == 'v0.4.0':
     side('ohm-600m', [(now('range-ohm-600m'), (0, 40, 480, 182), 'Range page'),
                       (now('dmm-ohm-600m'), (0, 0, 480, 172), 'Reading')])
     pair('record-button', at(prev, 'range-a'), now('range-a'), (0, 0, 480, 290))
+    pair('cont-short', at(prev, 'dmm-cont'), now('dmm-cont'), BODY)

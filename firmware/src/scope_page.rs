@@ -645,6 +645,12 @@ impl App {
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label);
         ui::strip_acc(&mut d, &r, self.acc_ctx());
+        if self.dmm_view.short != 0 && r.alert == crate::sentinel::Alert::None {
+            // The beeper indicator (`beep_ind`): the badge and the value green.
+            d.badge = if self.dmm_view.short == 1 { "SHORT" } else { "BEEP" };
+            d.badge_col = ui::SHORT_BG;
+            d.short = true;
+        }
         if self.gen.s.on {
             let mut b = su::Buf::new();
             su::fmt_hz(&mut b, self.gen.actual_hz());

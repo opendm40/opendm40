@@ -1802,6 +1802,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                 }
             }
+            // The beeper indicator follows the comparator read just now.
+            app.beep_ind(now, can_draw, !busy);
             prof::exit(prof::DMM);
             mark(5, &mut ts);
         }

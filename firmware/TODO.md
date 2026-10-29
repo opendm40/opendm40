@@ -708,6 +708,13 @@ the scope full record.
       Device check (2 min, shorted probes): Key/alert volume 0 -> CONT and DIOD silent; 50 -> both beep;
       in CONT switch 50 -> 0 -> 50 (silent / beeps at once); power off and on into CONT at 0 -> silent.
       DBG:SENT:REG? first byte: 52 / B0 at 0 %, 56 / B4 at 50 %.
+- [x] UF-28b Visual beeper indicator (owner 2026-10-30, testing #56: "a visual indicator of a short").
+      Green SHORT / BEEP band over the aux row + green digits (strip: badge + value) while the beeper's
+      condition holds, held 150 ms (App::beep_ind); continuity reads CTSTA bit 6 (ACPO, the CMP pin's
+      source per the datasheet) every 5 ms DMM poll, diode follows `diode_beep`. Emulator:
+      emu/hy3131/contvistest.py (on 2-4 ms after the input). Device check: shorted probes in CONT at
+      volume 0 and 50 -> band + green digits at once, off ~0.15 s after release; DIOD short -> SHORT,
+      a silicon diode -> BEEP briefly. If CONT never shows it: CTSTA bit 6 does not follow CMPO there.
 - [x] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1  (81e02a7; verify on device)
       AC search first; nothing in AC -> the same search in DC, kept with the toast "AUTO: DC (no AC signal)".
 - [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (ae3e655; verify on device)
