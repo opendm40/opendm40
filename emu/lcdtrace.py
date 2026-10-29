@@ -206,6 +206,7 @@ def analyse(recs, events, hz=60.0, gap=0.025, window=0.6, out=None, quiet=False)
             'peak': round(peak * 100, 2),
             'overdraw': round(written / changed, 2) if changed else 0.0,
             'px': changed,
+            'written': int(written),
         }
         results.append(r)
         if not quiet:

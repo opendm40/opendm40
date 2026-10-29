@@ -656,11 +656,22 @@ impl App {
     /// The page from the cached frame and the model (all of it after
     /// `su::invalidate`, the graph after `su::uncover`).
     fn sp_draw_page(&mut self) {
+        self.sp_prepare();
+        self.sp_draw_widgets();
+    }
+
+    /// The page's graph rows from the cached frame (no drawing).
+    pub(super) fn sp_prepare(&mut self) {
         // An open popup's box is drawn last: the graph leaves it alone.
         su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
-        self.sp.bubble_dirty = self.sp.bubble;
         self.sp_render();
         self.sp_math();
+    }
+
+    /// The page from the graph rows and the model: the same pixels on
+    /// every call after `su::invalidate` (App::repaint_strips).
+    pub(super) fn sp_draw_widgets(&mut self) {
+        self.sp.bubble_dirty = self.sp.bubble;
         self.sp_update(self.now);
         self.sp_cells();
         if self.view == View::DmmScope {

@@ -1097,6 +1097,37 @@ fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     }
 }
 
+/// lcd.rs strip rendering (App::repaint): the page drawn in strips over one
+/// previous screen ends pixel-identical to the page drawn directly over
+/// another (a page must cover every pixel: nothing of the old screen may
+/// show through), every pixel is written once, and the strips do not cost
+/// much more than the direct draw (host CPU time, printed).
+fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    let t = std::time::Instant::now();
+    draw();
+    let td = t.elapsed();
+    let a = host::emu().fb.clone();
+    unsafe { host::PATTERN = false };
+    host::reset(0x1234);
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    let t = std::time::Instant::now();
+    lcd::strips(&mut buf, || draw());
+    let ts = t.elapsed();
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("strips: {n} px differ from the direct draw"));
+    }
+    if writes != (W * H) as u64 {
+        ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
+    }
+    println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
 /// The bargraph's full-scale label ends with the unit as the readout and
 /// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
 /// kOhm"): the label's last columns (right-aligned at the bar's end, row
@@ -2546,6 +2577,43 @@ fn main() {
         defer_check(&mut ck, &format!("defer/scope/{}", sc.name), || {
             unsafe { host::PATTERN = true };
             stock::draw(sc);
+        });
+    }
+
+    // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
+    strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
+    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    strip_check(&mut ck, "strip/help", || ui::help_page(0));
+    strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
+    // The generator page's first strip draw after a boot (#153), each wave
+    // as the boot default: the preview's strip cache as the device has it
+    // then (`.sram_bss`, zeroed by the startup code).
+    for wave in gen::Wave::ALL {
+        unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
+        w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    w.gen.apply(gen::Settings::DEFAULT);
+    strip_check(&mut ck, "strip/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    dv.bar_on = true;
+    strip_check(&mut ck, "strip/dmm-bar", || dv.draw_static(Button::Amp, 3, false, false));
+    dv.bar_on = false;
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()) {
+        // stock::draw without its screen reset (App::repaint: the scope
+        // page from scope_ui::invalidate).
+        let pv = stock::popvals(&sc.m);
+        strip_check(&mut ck, &format!("strip/scope/{}", sc.name), || {
+            scope_ui::invalidate();
+            stock::load(sc);
+            scope_ui::update(&sc.m);
+            scope_ui::cells(&sc.m, &sc.cells);
+            scope_ui::draw_popup(sc.popup, &pv);
         });
     }
 

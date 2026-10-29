@@ -62,7 +62,8 @@ One line per group of open items; quoted words are the start of an item. Open PR
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
 - Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
-  check (2 min" (PR fix/smooth-redraw).
+  check (2 min" (PR fix/smooth-redraw); the [strip rendering](#strip-rendering-owner-2026-10-30-branch-featstrip-render)
+  "Device check (3 min" and `DBG:TE?`.
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
   offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
@@ -4364,5 +4365,27 @@ Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoot
 - [ ] Device check (2 min, the `--features mute` build): menu > each tile and back, DMM V -> Ω -> A, MF range page
       open / close, scope MF menu open, its tabs, close. Expected: no blank screen between pages; the old page
       stays until the new one covers it.
-- [ ] Scope page entry: the full graph takes ~126 ms in the emulator (`--mips 110`), now a left-to-right wipe;
-      its speed is not changed. The device time is unknown.
+- [x] Scope page entry: a top-to-bottom wipe in strips since branch feat/strip-render (below); ~130 ms in the
+      emulator, as before; the device time is unknown.
+
+### Strip rendering (owner 2026-10-30, branch feat/strip-render)
+
+A full page repaint is drawn in 12-row strips into `calbackup::SCRATCH` and each strip sent once
+([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-scratch-arena-calbackupscratch-12-kib)):
+menu, settings, range page (not power / temperature), help, generator, scope page.
+- [ ] Device check (3 min, `--features mute`): menu > each tile and back, Settings pages, MF range page, the scope
+      page entry. Expected: each page appears top to bottom in one pass, no widget half drawn. `DBG:PROF?` after a
+      few Settings / Generator / Scope entries: their draw code in region C runs once per strip (27 times), the
+      emulator has no flash wait states.
+- [ ] `DBG:TE?` once ([hw/README.md, LCD](../hw/README.md#lcd)): a pin that changes only with TE on is the TE line.
+      If there is one: strips in the panel's scan direction synced to TE.
+- [ ] Still drawn directly (deferred fills): the DMM page (its chart, reading and status are drawn after the page,
+      outside `draw_static`), the combined view, popups (open / uncover), keypad, limits, record, inrush,
+      gallery, touch test, device page, the power pages.
+- [ ] The scope page in strips takes as long as before (~130 ms emulator): the side buttons' `paint` closures
+      (~300 instructions per pixel) and the graph (~20 per pixel) are the CPU cost; the strip passes add ~4 ms.
+- [ ] Push a strip by DMA (DMA1 memory-to-memory to 0x60020000) while the next one is drawn: two half-size
+      strips, at most the bus time (~20 ns per pixel, ~3 ms per screen; inferred from BWTR1) saved per repaint.
+      The emulator completes a memory-to-memory DMA at once: measure on the device.
+- [ ] 32-bit stores to the data register in `push` (two bus writes each, RS stays high; to be checked on the
+      GD32).

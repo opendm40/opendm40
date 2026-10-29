@@ -2169,19 +2169,20 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         };
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
+        // (Never in a strip pass: the DMM page is drawn directly.)
         lcd::set_window(CHART_X + x, cy + y0, CHART_X + x, cy + y1);
         // Template above the trace, trace, template below (NO_SPAN: the
         // first loop covers the column).
         let (a, b2) = (span.0 as u16, span.1 as u16);
         let a_end = a.min(y1 + 1);
         for y in y0..a_end {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
         for _ in a.max(y0)..=b2.min(y1) {
-            lcd::data(0xFC40);
+            lcd::data_panel(0xFC40);
         }
         for y in (b2 + 1).max(y0).max(a_end)..=y1 {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
     }
     if c.rate != rate {
@@ -2410,6 +2411,16 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
+/// `gen_preview` in strips: the wave the table holds (its `sel` + 1; 0 =
+/// none) and each column's trace rows (from the preview's top). All zero
+/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
+/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
+/// table, so the boot-time Sine drew no trace).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+pub(crate) static mut GEN_SP: (u8, [(u8, u8); 239]) = (0, [(0, 0); 239]);
+
+// Region B (not inlined into the region C callers): drawn per strip.
+#[inline(never)]
 fn gen_preview(w: gen::Wave) {
     // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
     let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);
@@ -2432,13 +2443,53 @@ fn gen_preview(w: gen::Wave) {
         };
         y0 + hh * 3 / 4 - (v * (hh / 2) as f32) as u16
     };
+    // A strip pass (lcd.rs "strip rendering"): the strip's rows.
+    let Some((ya, yb)) = lcd::clip_rows(y0 as i16, (y0 + hh - 1) as i16) else {
+        return;
+    };
+    let (ya, yb) = (ya as u16, yb as u16);
+    if lcd::in_strip() {
+        // Row by row into the strip from the columns' trace rows,
+        // worked out once per wave (not once per strip).
+        let sp = unsafe { &mut *core::ptr::addr_of_mut!(GEN_SP) };
+        if sp.0 != sel + 1 {
+            let mut prev = yv(0);
+            for i in 0..ww {
+                let y = yv(i.min(237));
+                let (a, b) = if y < prev { (y, prev) } else { (prev, y) };
+                prev = y;
+                sp.1[i as usize] = ((a - y0) as u8, (b - y0) as u8);
+            }
+            sp.0 = sel + 1;
+        }
+        for y in ya..=yb {
+            let yy = y - y0;
+            let Some(row) = lcd::strip_span(y as i16, x0 as i16, (x0 + ww - 1) as i16) else {
+                continue;
+            };
+            let (edge, grid) = (yy == 0 || yy == hh - 1, yy % 46 == 0 && yy > 0);
+            for (i, (p, &(a, b))) in row.iter_mut().zip(sp.1.iter()).enumerate() {
+                let i = i as u16;
+                *p = if yy >= a as u16 && yy <= b as u16 {
+                    G_TRACE
+                } else if edge || i == 0 || i == ww - 1 {
+                    0x73CF
+                } else if grid || (i % 48 == 0 && i > 0) {
+                    G_BOX
+                } else {
+                    G_BG
+                };
+            }
+        }
+        return;
+    }
     let mut prev = yv(0);
     for i in 0..ww {
         let y = yv(i.min(237));
         let (a, b) = if y < prev { (y, prev) } else { (prev, y) };
         prev = y;
-        lcd::set_window(x0 + i, y0, x0 + i, y0 + hh - 1);
-        for yy in 0..hh {
+        lcd::set_window(x0 + i, ya, x0 + i, yb);
+        for yy in ya - y0..=yb - y0 {
             let edge = i == 0 || i == ww - 1 || yy == 0 || yy == hh - 1;
             let grid = (i % 48 == 0 && i > 0) || (yy % 46 == 0 && yy > 0);
             let c = if y0 + yy >= a && y0 + yy <= b {

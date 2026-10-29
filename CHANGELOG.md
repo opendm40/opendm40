@@ -26,6 +26,8 @@ section named after the tag as the release notes; how to cut a release:
   [How to reach it](docs/manual/README.md#reach-the-update-loader).
 - Smoother screen changes: pages, popups and DMM functions draw over the old
   screen, not over a blank one; an MF menu tab redraws only the menu.
+- The menu, settings, range, help, generator and oscilloscope pages appear
+  top to bottom in one pass, with no half-drawn widgets.
 
 ### Fixed
 

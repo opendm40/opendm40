@@ -208,7 +208,7 @@ fn disk_job() -> bool {
 /// `load`). Main loop only; the caller keeps no reference across passes.
 #[inline(always)]
 pub fn fft_work(fresh: bool) -> Option<&'static mut [f32; FFT_WORK]> {
-    if disk_job() {
+    if disk_job() || STRIP_HELD.load(Ordering::Relaxed) {
         return None;
     }
     let g = GEN.load(Ordering::Relaxed);
@@ -219,6 +219,38 @@ pub fn fft_work(fresh: bool) -> Option<&'static mut [f32; FFT_WORK]> {
     }
     let p = core::ptr::addr_of_mut!(SCRATCH).cast::<[f32; FFT_WORK]>();
     Some(unsafe { &mut *p })
+}
+
+/// Third tenant: the strip renderer's buffer (lcd::strips from
+/// App::repaint), inside one call. Taken as a disk user takes it (`GEN`:
+/// an FFT job in flight is redone) and refused while a disk job holds the
+/// arena; the FFT gets nothing while it is held (a page draw can step the
+/// FFT). A single-pass disk user that took the arena meanwhile (no drawing
+/// code does; not ruled out by construction) moved `GEN`: `strip_give`
+/// returns false and the caller draws the page again directly.
+static STRIP_HELD: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+static STRIP_GEN: AtomicU32 = AtomicU32::new(0);
+
+/// The arena as `3 * BLK / 2` RGB565 pixels for the strip renderer, or
+/// None (a disk job holds it). Give it back with `strip_give`.
+#[inline(always)]
+pub(crate) fn strip_take() -> Option<&'static mut [u16; 3 * BLK / 2]> {
+    if disk_job() {
+        return None;
+    }
+    let _ = scratch();
+    STRIP_GEN.store(GEN.load(Ordering::Relaxed), Ordering::Relaxed);
+    STRIP_HELD.store(true, Ordering::Relaxed);
+    let p = core::ptr::addr_of_mut!(SCRATCH).cast::<[u16; 3 * BLK / 2]>();
+    Some(unsafe { &mut *p })
+}
+
+/// End of the strip renderer's use; false: a disk user took the arena in
+/// between (the strips sent may be wrong).
+#[inline(always)]
+pub(crate) fn strip_give() -> bool {
+    STRIP_HELD.store(false, Ordering::Relaxed);
+    STRIP_GEN.load(Ordering::Relaxed) == GEN.load(Ordering::Relaxed)
 }
 
 /// No disk job holds the arena (the FFT may load a new job).
