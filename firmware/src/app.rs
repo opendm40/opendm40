@@ -85,8 +85,12 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
-/// Two taps on the DMM bargraph / history row within this: a double tap.
-const ROW_DOUBLE_MS: u64 = 400;
+/// Two taps on the DMM bargraph / history row within this time and this
+/// distance (each axis): a double tap. Short and near, so two separate taps
+/// (storing history values) do not switch the row (owner, device, 2026-10-30:
+/// 400 ms and any x switched by accident).
+const ROW_DOUBLE_MS: u64 = 250;
+const ROW_DOUBLE_PX: u16 = 30;
 /// Combined view: the scope band paints at most one frame per this many ms
 /// (25 fps; `App::sp_throttled`).
 const COMBO_FRAME_MS: u64 = 40;
@@ -284,9 +288,10 @@ pub struct App {
     hist: [(f32, u8, &'static str); 5],
     hist_n: usize,
     hist_new: usize,
-    /// Last tap on the bargraph / history row (double tap: ROW_DOUBLE_MS)
-    /// and the history before the value that tap stored.
-    row_tap: Option<u64>,
+    /// Last tap on the bargraph / history row: (time, x, y) (double tap:
+    /// ROW_DOUBLE_MS, ROW_DOUBLE_PX) and the history before the value that
+    /// tap stored.
+    row_tap: Option<(u64, u16, u16)>,
     row_undo: Option<([(f32, u8, &'static str); 5], usize, usize)>,
     hv_shown: bool,
     /// HOLD state (Meter::hold_state) | limit verdict << 8 as last painted
@@ -3370,7 +3375,8 @@ impl App {
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
             }
-            View::Dmm if !self.dmm.pw.on && ui::ROW_HIT.contains(&y) && self.row_tap.is_some_and(|t| now < t + ROW_DOUBLE_MS) => {
+            View::Dmm if !self.dmm.pw.on && ui::ROW_HIT.contains(&y)
+                && self.row_tap.is_some_and(|(t, tx, ty)| now < t + ROW_DOUBLE_MS && x.abs_diff(tx) <= ROW_DOUBLE_PX && y.abs_diff(ty) <= ROW_DOUBLE_PX) => {
                 // Double tap on the row: Bargraph <-> History (Settings 2/2
                 // "DMM row" without the trip to Settings). A value the first
                 // tap stored is taken back.
@@ -3386,14 +3392,14 @@ impl App {
                 self.beep(now, 100);
             }
             View::Dmm if self.dmm_view.bar_on && ui::ROW_HIT.contains(&y) => {
-                self.row_tap = Some(now);
+                self.row_tap = Some((now, x, y));
                 self.row_undo = None;
             }
             View::Dmm if !self.dmm_view.bar_on && ui::ROW_HIT.contains(&y) => {
                 // History row: record the shown value (not OL). While HOLD
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).
-                self.row_tap = Some(now);
+                self.row_tap = Some((now, x, y));
                 self.row_undo = None;
                 if let Some(r) = self.meter.shown().copied() {
                     if !r.main.ol {
