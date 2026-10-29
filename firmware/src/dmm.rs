@@ -188,8 +188,6 @@ pub const CAP_CLASS_AUTO: u8 = 2;
 /// agreeing final values.
 pub const CAP_CLASS_FAST: u8 = 1;
 const CAP_AGREE_N: u8 = 4;
-/// The first final value: two up + down pairs in a row within this.
-const CAP_SETTLE: f32 = 0.01;
 /// The direction ratios stay within 1 +- this.
 const CAP_RATIO_MAX: f32 = 0.03;
 pub const CAP_CLASS_STOCK: u8 = 4;
@@ -1589,9 +1587,6 @@ pub struct Dmm {
     cap_cls2: bool,
     /// Comparator turns seen during the polls without a ramp.
     cap_idle_flips: u8,
-    /// The last up + down pair, and two of them in a row agreeing.
-    cap_pair_prev: Option<f32>,
-    cap_settled: bool,
     /// Same-range restarts for another capacitor (DBG:CAP? field 17).
     cap_swaps: u8,
     /// The discharge's first sample above CAP_DIS_MIN_MV (mV, 0 = none) and
@@ -2250,8 +2245,6 @@ impl Dmm {
             cap_agree: 0,
             cap_cls2: false,
             cap_idle_flips: 0,
-            cap_pair_prev: None,
-            cap_settled: false,
             cap_swaps: 0,
             cap_dis_v0: 0.0,
             cap_dis_t0: 0,
@@ -6121,8 +6114,6 @@ impl Dmm {
         self.cap_agree = 0;
         self.cap_cls2 = false;
         self.cap_idle_flips = 0;
-        self.cap_pair_prev = None;
-        self.cap_settled = false;
         self.cap_res_ms = 0.0;
         self.cap_res_t = None;
     }
@@ -6171,7 +6162,7 @@ impl Dmm {
                     let est = if f > 0.0 { cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * f) - cal(0x190, 0.0) } else { f32::INFINITY };
                     let t = if est.is_finite() { fit(est) } else { 4 };
                     self.cap_set_range(clk, t.max(r as i8 + 1));
-                    return Some(self.cap_val(0.0, true));
+                    return Some(self.cap_dash());
                 }
             }
             if !ol {
@@ -6255,13 +6246,13 @@ impl Dmm {
                 if r < 7 {
                     self.cap_set_range(clk, r as i8 + 1);
                 }
-                return Some(self.cap_val(0.0, true));
+                return Some(if r < 7 { self.cap_dash() } else { self.cap_val(0.0, true) });
             }
             // Open leads, or a capacitor far below the range (the
             // comparator turning): the oscillator's smallest range, which
             // steps up by itself.
             self.cap_set_range(clk, CAP_R_MIN);
-            return Some(self.cap_val(0.0, true));
+            return Some(self.cap_dash());
         }
         self.cap_idle = 0;
         self.cap_idle_flips = 0;
@@ -6338,12 +6329,12 @@ impl Dmm {
             if self.cap_hops >= CAP_HOPS_MAX || (r == 7 && self.cap_over_n >= CAP_OVER_MAX) {
                 self.cap_hops = 0;
                 self.cap_set_range(clk, CAP_R_MIN);
-                return Some(self.cap_val(0.0, true));
+                return Some(self.cap_dash());
             }
             if r < 7 && (self.cap_over as usize >= CAP_EARLY_N || self.cap_over_n >= CAP_OVER_MAX) {
                 self.cap_hops += 1;
                 self.cap_set_range(clk, r as i8 + 1);
-                return Some(self.cap_val(0.0, true));
+                return Some(self.cap_dash());
             }
             // Under the range (AUTO started on the last value's range, a
             // smaller capacitor now: 470 uF after 47 mF stayed grey on 60
@@ -6353,7 +6344,7 @@ impl Dmm {
             if self.cap_under as usize >= CAP_EARLY_N {
                 self.cap_hops += 1;
                 self.cap_set_range(clk, r as i8 - 1);
-                return Some(self.cap_val(0.0, true));
+                return Some(self.cap_dash());
             }
         }
         // Before the first value: the grey candidate, the median of the
@@ -6392,7 +6383,7 @@ impl Dmm {
                 // 470 uF after 47 mF read 23 mF on 60 mF for good). From
                 // 600 uF again: the slope picks the range (`CAP_EARLY_N`).
                 self.cap_set_range(clk, 5);
-                return Some(self.cap_val(0.0, true));
+                return Some(self.cap_dash());
             }
             // The ramp runs up and down between the comparator thresholds,
             // and the two directions read differently (device 40c25e2b, ~1
@@ -6424,13 +6415,6 @@ impl Dmm {
                     self.cap_ratio = [(p / d).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX), (p / u).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX)];
                     self.cap_ratio_ok = true;
                 }
-                // Settled: two pairs in a row within CAP_SETTLE (device
-                // cfe50b24, ~1 mF: 978 .. 1004 uF for ~4 s after the first
-                // value, the electrolytic settling): final only then.
-                if self.cap_pair_prev.is_some_and(|q| (p - q).abs() <= CAP_SETTLE * p) {
-                    self.cap_settled = true;
-                }
-                self.cap_pair_prev = Some(p);
             }
             self.ramp.n = 0;
         }
@@ -6448,7 +6432,7 @@ impl Dmm {
             }
             sort_f32(&mut b[..n]);
             let v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
-            if (self.cap_ratio_ok && (self.cap_settled || !self.ramp.first)) || self.cap_ring_n as usize >= CAP_NORATIO_N {
+            if self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N {
                 // Adaptive class (owner 2026-10-30): class 1 for a fast first
                 // value; once CAP_AGREE_N final values in a row agree within
                 // 2 % (the same capacitor), class 2 for accuracy. The value
