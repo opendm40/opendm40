@@ -509,6 +509,9 @@ impl Checker {
                 let g = its[a].b.gap(&its[b].b);
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(&its[a]), desc(&its[b]), if g < 0 { "overlap" } else { "too close" }, g));
+                } else if matches!((parent[a], parent[b]), (Some(pa), Some(pb)) if pa != pb) {
+                    // Texts in two different boxes (e.g. the REC mark and the
+                    // record bar): the boxes' rings part them, not a word gap.
                 } else if let Some(m) = line_gap(&its[a], &its[b]) {
                     self.fail(scene, m);
                 }

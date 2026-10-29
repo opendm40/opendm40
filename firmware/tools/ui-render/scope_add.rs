@@ -472,9 +472,9 @@ pub fn run(ck: &mut Checker, out: &str) {
     // it (also on the stock page of builds without the stream ISR,
     // SRC_NONE, and in the combined view): running, stopped with its
     // brackets, roll, the generator frequency; both blink phases; each of
-    // the three looks (RecStyle, the default DotText last so the rest of
-    // the run draws it). Updates between them, to / from no recording and
-    // the blink step (the dot's box alone) equal fresh draws.
+    // the texts (RecStyle; the default Dmm last so the rest of the run
+    // draws it; RecFunc with every unit). Updates between them, to / from
+    // no recording and the blink step (the dot's box alone) equal fresh draws.
     let rec_scene = |src: u8, status: u8, roll: bool, gen: bool, dim: bool| {
         let mut sc = wave_scene(src, 0, status, roll, 3);
         sc.name = "rec";
@@ -483,7 +483,7 @@ pub fn run(ck: &mut Checker, out: &str) {
         sc.m.gen_hz = if gen { 1000.0 } else { 0.0 };
         sc
     };
-    let styles = [(scope_ui::RecStyle::Badge, "a"), (scope_ui::RecStyle::Dot, "c"), (scope_ui::RecStyle::DotText, "b")];
+    let styles = [(scope_ui::RecStyle::Rec, "rec"), (scope_ui::RecStyle::RecDmm, "b"), (scope_ui::RecStyle::RecFunc, "c"), (scope_ui::RecStyle::DmmRec, "d"), (scope_ui::RecStyle::Dmm, "a")];
     for (style, sn) in styles {
         scope_ui::set_rec_style(style);
         for dim in [false, true] {
@@ -513,8 +513,19 @@ pub fn run(ck: &mut Checker, out: &str) {
             let name = format!("rec/{sn}/{}/combined", dim as u8);
             ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
             nw += 1;
-            if style == scope_ui::RecStyle::DotText {
-                save(out, &format!("s05-rec-b-combined-{}", if dim { "off" } else { "on" }));
+            save(out, &format!("s05-rec-{sn}-combined-{}", if dim { "off" } else { "on" }));
+        }
+        // RecFunc: every recorded function's unit (the widest decides).
+        if style == scope_ui::RecStyle::RecFunc {
+            for (k, f) in [1u8, 7, 10, 13, 14, 18, 15].into_iter().enumerate() {
+                let mut sc = rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false, false);
+                sc.m.rec_unit = scope_ui::rec_unit(f);
+                stock::draw(&sc);
+                let name = format!("rec/{sn}/unit/{f}");
+                ck.check_replica(&name);
+                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                nw += 1;
+                save(out, &format!("s05-rec-c-unit{k}"));
             }
         }
         let states = [
@@ -527,6 +538,11 @@ pub fn run(ck: &mut Checker, out: &str) {
             rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true, false),
             rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true, true),
             rec_scene(scope_ui::SRC_NONE, scope_ui::ST_RUN, true, false, true),
+            {
+                let mut s = rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false, false);
+                s.m.rec_unit = scope_ui::rec_unit(14);
+                s
+            },
         ];
         for (i, a) in states.iter().enumerate() {
             for (j, b) in states.iter().enumerate() {
@@ -550,7 +566,7 @@ pub fn run(ck: &mut Checker, out: &str) {
             let want = emu().fb.clone();
             b.m.rec_dim = !dim;
             stock::draw(&b);
-            scope_ui::rec_mark_blink(scope_ui::SRC_BADGE, scope_ui::C_BAR, !dim);
+            scope_ui::rec_mark_blink(scope_ui::SRC_BADGE, scope_ui::C_BAR, !dim, b.m.rec_unit);
             ck.same_as(&format!("rec/{sn}/blink/{}", dim as u8), &want);
             nw += 1;
         }

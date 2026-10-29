@@ -63,8 +63,9 @@ section named after the tag as the release notes; how to cut a release:
   average (the preamble's `yorig` is the middle of a byte's four codes).
 - Scope: the V/div label is right with x2, x5 and the other non-decade
   probes (x5 at 2.5 V/div showed 2V).
-- Recording: a blinking red dot and **REC** on every page; on the scope page
-  and the combined view in the top bar, in place of MCX | DMM
+- Recording: a red dot blinking every second and **REC** in the status bar;
+  on the scope page and the combined view a red dot and **DMM** in the top
+  bar, in place of MCX | DMM
   ([#101](https://github.com/opendm40/opendm40/issues/101)).
 - **Gallery:** the recording in progress reads **Recording** instead of **No data**, and its
   **Delete** says **Stop the recording** instead of **Disk busy, try again**.

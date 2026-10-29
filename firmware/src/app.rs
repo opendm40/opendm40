@@ -1858,7 +1858,7 @@ impl App {
                 _ => {}
             }
         }
-        // The REC dot's blink (0.5 s phases): the dot's box alone.
+        // The REC dot's blink (1 s phases): the dot's box alone.
         let dim = crate::scope_ui::rec_blink(now);
         if self.rec_shown && dim != self.rec_dim_shown {
             self.rec_dim_shown = dim;

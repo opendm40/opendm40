@@ -559,6 +559,7 @@ impl App {
             // shows REC: one look everywhere).
             rec: crate::csvlog::active(),
             rec_dim: su::rec_blink(now),
+            rec_unit: su::rec_unit(self.rec_func),
         }
     }
 
@@ -1272,7 +1273,7 @@ impl App {
                 let dim = su::rec_blink(now);
                 if self.sp.rec_drawn != Some(dim) {
                     self.sp.rec_drawn = Some(dim);
-                    su::rec_mark_blink(su::SRC_BADGE, su::C_BAR, !dim);
+                    su::rec_mark_blink(su::SRC_BADGE, su::C_BAR, !dim, su::rec_unit(self.rec_func));
                 }
             }
             return;
