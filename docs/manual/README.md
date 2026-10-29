@@ -1586,7 +1586,7 @@ From 100 V the strip gets a red frame.
 | Tap elsewhere on the strip | Opens the function band: the seven function buttons of the multimeter over the bottom of the graph. Tap a function as on the multimeter page. The band closes 4 s after the last tap, or with a tap elsewhere or MENU. |
 | Long press the strip | The full multimeter page. |
 | **RUN** | Multimeter HOLD; hold 1 s for AutoHold. |
-| **AUTO** | Multimeter autorange. |
+| **AUTO** | As on the multimeter page ([Keys](#keys)): fixes or steps the range; hold 1 s for autorange. |
 | **MF** | The multimeter's range page (or Hold & Limits). |
 | Tap the run state in the top bar | Scope run / stop. |
 | **TRIG** or the trigger in the top bar | The scope menu. |

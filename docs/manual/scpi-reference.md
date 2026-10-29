@@ -491,7 +491,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:BURDen[?]` | `<ohm>` (0 .. 1000) or `DEFault` | `+1.000000E-02` | both |
 | `[SENSe:]POWer:BURDen:STATe[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
 | `[SENSe:]POWer:METHod[?]` | `SIMultaneous` or `ALTernate` | `SIM` or `ALT` | both |
-| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0.1 .. 10 A (smaller values are set to 0.1), 0 .. 3600 s (default 30) | `+1.000000E+01,30` | both |
+| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0.1 .. 10 A (default 6; smaller values are set to 0.1), 0 .. 3600 s (default 30) | `+6.000000E+00,30` | both |
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
