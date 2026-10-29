@@ -269,7 +269,7 @@ recorded.
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
 | [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
-| [`recoverytest.py`](recoverytest.py) | recovery triggers through the whole boot chain: power-key hold, watchdog crash counter, DBG:RELEASE | ~6 min (8 cases, `--jobs 8`) | free |
+| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
 
@@ -355,8 +355,8 @@ Models are C# files compiled by Renode at start-up; the platform is
 - **HY3131.** The front end's per-row scale factors are the stock's nominal
   constants (the netlist is unknown); see the open points in
   [emu/hy3131/README.md](hy3131/README.md#open-points).
-- **Boot timing.** The ROM's and FS-loader's power-key (PA2) timing is set
-  empirically: a release at 0.55 s gives the three-stage chain.
+- **Boot timing.** The ROM's and FS-loader's PA2 (debug header TX) poll
+  timing is set empirically: a release at 0.55 s gives the three-stage chain.
 - **Scope trigger.** opendm40's comparator path sometimes never completes a
   frame after a restart; [`wavtest.py`](wavtest.py) turns it off.
 - **Gestures.** Horizontal swipes from the touch model were not recognised

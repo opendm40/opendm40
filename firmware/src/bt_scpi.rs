@@ -240,10 +240,10 @@ enum Step {
 
 /// Header roots never executed for an untrusted transport (Bluetooth: an
 /// unauthenticated radio link anyone in range can open). DBG covers
-/// DBG:UPDATE / DBG:RECOVER (zero the loader marker -> vendor update screen;
-/// executed INSIDE Scpi::handle on native, so the check must run before the
-/// parser sees the message), DBG:RESET, DBG:RELEASE (watchdog -> crash count
-/// -> recovery), the input injection (DBG:KEY / SWIPE D,2 = power off) and
+/// DBG:UPDATE (zero the loader marker -> vendor update screen) and
+/// DBG:LOADER / DBG:RECOVER (vendor update screen through PA2), executed
+/// INSIDE Scpi::handle on native, so the check must run before the parser
+/// sees the message, DBG:RESET, DBG:RELEASE (watchdog reset), the input injection (DBG:KEY / SWIPE D,2 = power off) and
 /// the debug reads. Any future DBG:* command is refused by default. DIAG
 /// (DIAG? / DIAG:DAC?: the generator DAC sampled through the ADC; DIAG:PWM?:
 /// a 2 ms busy loop on PB14) is a bench diagnostic of the same kind.

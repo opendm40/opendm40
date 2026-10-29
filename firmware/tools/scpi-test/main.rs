@@ -23,6 +23,7 @@ mod boot {
     pub fn enter_loader_update() -> bool {
         false
     }
+    pub fn request_loader() {}
 }
 mod clock {
     pub const HCLK_HZ: u32 = 200_000_000;

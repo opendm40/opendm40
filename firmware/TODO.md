@@ -502,8 +502,10 @@ the scope full record.
         DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= 37d3252's image); no
         shim bug found. The 60 s window is 60 s of RUNNING main loop since the last boot, not 60 s between
         resets (README wording fixed).
-  - [ ] T3 remaining on the device: the same triggers by hand (owner steps in docs/native-boot.md
-        "T3 recovery triggers: owner steps"); scope view stack high-water; first-boot timing.
+  - [ ] T3 remaining on the device: the boot and watchdog steps by hand (docs/native-boot.md
+        "Boot and watchdog: owner steps"; the hang-count entry into the loader was removed in 0.4.0,
+        owner 2026-10-29; the key hold and DBG:LOADER enter it through PA2, marker kept: "PA2 entry");
+        scope view stack high-water; first-boot timing.
   - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
         (c44ca81; verify on device)

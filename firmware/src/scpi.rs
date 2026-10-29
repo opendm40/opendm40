@@ -660,13 +660,15 @@ pub enum Log {
 ///                           waiting, 1 working, 2 ready, 3 off),
 ///                           clusters_ready,erases_since_boot
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
-///                           as a crash (1st: opendm40 reboots; 2nd without 60 s
-///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
+///                           as a crash (DBG:BOOT? crash word); opendm40 reboots
 ///   DBG:RESET               reboot opendm40 (SW reset)
-///   DBG:RECOVER, DBG:UPDATE DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
+///   DBG:UPDATE              DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
 ///                           marker, reset -> vendor update screen + its USB disk until
 ///                           a dm40*.bin is installed. "Flash error" = marker did not
 ///                           read back as zero (no reset). Sync + eject a copied file first.
+///   DBG:LOADER, DBG:RECOVER reset into the vendor update screen through PA2 (boot.rs
+///                           loader_pa2): marker untouched; a staged dm40*.bin is
+///                           installed; a power cycle boots opendm40 again
 ///   DBG:BOOT?               boot info (src/boot.rs put_info)
 #[derive(Clone, Copy)]
 pub enum Dbg {
@@ -2431,7 +2433,8 @@ impl Scpi {
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
                         b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
-                        b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
+                        b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
+                        b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
                         _ => {
                             self.err_arg(no_arg, "Undefined header");
                             continue;
