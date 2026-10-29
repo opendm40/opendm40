@@ -5596,7 +5596,8 @@ impl Dmm {
         let cmp = hy::read1(0x14) & 0x40 != 0;
         let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
         self.ramp.cmp = Some(cmp);
-        if flip || self.ramp.n == 35 {
+        let fresh = flip || self.ramp.n == 35;
+        if fresh {
             let n = self.ramp.n;
             let mean = if n == 35 {
                 self.ramp.buf[33]
@@ -5623,8 +5624,18 @@ impl Dmm {
                 if self.cap_cnt_up >= 5 {
                     self.cap_set_range(clk, r as i8 + 1);
                 }
-            } else if cc < 0.1 * lim / ov && r >= 6 {
-                self.cap_cnt_dn += 1;
+            } else if cc < 0.1 * lim / ov && r >= 5 {
+                // r5 steps down too, to the oscillator's 60 uF range (r4,
+                // which falls to r0 on a small C): without it a small
+                // capacitor after a large one stayed on 600 uF, read from
+                // the ramp (emulator: 100 nF read 3 .. 44 uF, final).
+                // On r5 counted on a new ramp result only: `cap_c` is the
+                // last range's until the first one (a 330 uF after 4.7 mF
+                // hunted 600 uF <-> 60 uF on it, emulator). r6 / r7 count
+                // every poll as before (a small C on 6 mF gives no result).
+                if fresh || r >= 6 {
+                    self.cap_cnt_dn += 1;
+                }
                 if self.cap_cnt_dn >= 3 {
                     self.cap_set_range(clk, r as i8 - 1);
                 }

@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Capacitance AUTO: a small capacitor measured after a large one (600 µF and
+  up) gets its own range again instead of a wrong µF value.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
