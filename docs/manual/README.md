@@ -1782,7 +1782,8 @@ ranging...** (a few seconds).
 2. The current.
 3. The power P and the coupling symbol. Tap to step **P → Wh → VAh → P**.
 4. Energy **E** (or **P** while the main value shows energy), **PF**,
-   **S** (VA), **Q** (var), **f**; **--** where there is no value (PF in DC).
+   **S** (VA), **Q** (var), **f**; **--** where there is no value (PF in DC
+   or with no current).
 5. **Vb** (the voltage drop in the meter itself), **VAh**, the energy timer
    (**RUN** / **PAUSE** and the time), **AVG** (the mean power), the ranges.
 6. The trend chart of the main value.

@@ -7,6 +7,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

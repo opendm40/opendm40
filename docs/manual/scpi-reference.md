@@ -507,8 +507,9 @@ and `MEASure:POWer?` then give the real power P in W.
   15 s.
 - `FETCh:POWer:ALL?` and `MEASure:POWer:<x>?` answer only in the power
   meter (else no reply, `Settings conflict`). A part with no value is
-  `+9.91E37` (PF, S, Q and F below their AC thresholds; F when no frequency
-  is measured).
+  `+9.91E37` (PF, S, Q and F below their AC thresholds; PF also with no
+  current or voltage, S at the noise level; F when no frequency is
+  measured).
 - `BURDen`: the resistance of the current path, used for the burden voltage
   and for "At load" (`BURDen:STATe ON`: V and P corrected for the drop in
   the meter). `DEFault` restores the shunt's value.
