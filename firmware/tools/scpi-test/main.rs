@@ -213,6 +213,8 @@ fn set_commands() {
         ("SOUR:VOLT -1", "-222"),
         ("SOUR:VOLT:OFFS x", "-224"),
         ("SOUR:FUNC:SQU:DCYC 150", "-222"),
+        ("POW:PHAS 200", "-222"),
+        ("POW:PHAS x", "-224"),
         ("SOUR:FUNC NOISE", "-224"),
         ("SOUR:FUNC", "-109"),
         ("OUTP MAYBE", "-224"),

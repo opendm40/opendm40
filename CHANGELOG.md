@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- SCPI: `INRush:THReshold` and `POWer:PHASe` with a number out of range queue
+  `-222 Data out of range`, not `-224 Illegal parameter value`.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
