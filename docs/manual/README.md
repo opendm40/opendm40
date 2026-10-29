@@ -711,7 +711,8 @@ Limits](#limits-and-autohold)).
   the next higher one; after the highest comes the lowest (the
   [key table](#keys) has the details).
 - The coupling row: **DC**, **AC**, **AC+DC**, **AC/DC** (AUTO coupling).
-- **Hold/Limits** opens the [Hold & Limits page](#limits-and-autohold).
+- **Limits** opens the [Hold & Limits page](#limits-and-autohold), **Record**
+  the [Record page](#the-record-page) (red while recording).
 - **OK** or **MF** goes back.
 - Current page only: [**Fuse check**](#fuse-check) and
   [**Inrush**](#inrush-current).
@@ -928,7 +929,7 @@ The chart plots the reading over time, 321 points wide.
 
 ### Limits and AutoHold
 
-To open: **MF**, then **Hold/Limits** (for continuity, diode and frequency,
+To open: **MF**, then **Limits** (for continuity, diode and frequency,
 MF opens it directly). The title names the quantity, for example **Hold &
 Limits: DC V**.
 
@@ -1887,7 +1888,8 @@ voltage: small voltages read on the 6 V range.
 | **DC / AC / AC+DC** | The coupling; the help line explains the chosen one. |
 | **Reset Wh** | Resets Wh, VAh and the time at once. |
 | **Wiring** | Shows the wiring picture. |
-| **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep, Record. |
+| **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep. |
+| **Record** | Opens the [Record page](#the-record-page). |
 | **OK** | Back. |
 
 The status line shows the running job or its result, or the voltage gain
@@ -1981,9 +1983,8 @@ with the last other interval.
 
 *The Record page.*
 
-To open it: on the multimeter page press **MF**, tap **Hold/Limits**, then
-tap **Record** at the bottom (for continuity, diode and frequency, MF opens
-the Hold & Limits page directly).
+To open it: press **MF**, then tap **Record**. For continuity, diode and
+frequency: **MF**, then **Record** at the bottom of Hold & Limits.
 
 | Row | What it does |
 |---|---|

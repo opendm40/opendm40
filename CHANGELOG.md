@@ -18,6 +18,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Record button on the range pages:** MF, then **Record** opens the Record
+  page (red while recording); **Hold/Limits** is now **Limits**
+  ([manual](docs/manual/README.md#the-record-page)).
+
+  ![Before and after: the current range page](docs/changelog/v0.4.0/record-button.png)
 - **The update loader no longer opens by itself** after repeated hangs (a
   hang restarts the meter).
 - **Leaving the update loader:** opened with the power-key hold or

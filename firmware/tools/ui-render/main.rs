@@ -2486,7 +2486,7 @@ fn main() {
         ui::temp_page(&tp);
         ck.check_opts(&format!("temp/{k}/{offs}/{r25}"), &page_regions, false);
         let before: Vec<u16> = emu().fb.clone();
-        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_OK] {
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
             ui::temp_key(&tp, code, true);
             ui::temp_key(&tp, code, false);
         }
@@ -3181,10 +3181,10 @@ fn main() {
             let range_t = |b: Button| -> Vec<u8> {
                 let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
                 let errs: &[u8] = match b {
-                    Button::Volt => &[0, 1, 3, 6, 2, 4],
-                    Button::Amp => &[0, 1, 3, 6, 2, 4, 5],
-                    Button::Ohm => &[0, 1, 2, 4],
-                    _ => &[2, 4],
+                    Button::Volt => &[0, 1, 3, 6, 2, 4, 7],
+                    Button::Amp => &[0, 1, 3, 6, 2, 4, 7, 5],
+                    Button::Ohm => &[0, 1, 2, 4, 7],
+                    _ => &[2, 4, 7],
                 };
                 t.extend(errs.iter().map(|k| ui::RP_ERR + k));
                 if matches!(b, Button::Volt | Button::Amp) {
@@ -3197,7 +3197,7 @@ fn main() {
             };
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
-            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=31).filter(|&c| c != 21).collect();
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
@@ -3239,6 +3239,8 @@ fn main() {
                     "range0-103" => "m03e-range-v-cpl-pressed",
                     "range1-105" => "m03f-range-a-fuse-pressed",
                     "range1-102" => "m03g-range-a-ok-pressed",
+                    "range0-107" => "m03h-range-v-record-pressed",
+                    "pwset32" => "p31c-power-settings-record-pressed",
                     "pwset2" => "p31-power-settings-pressed",
                     "pwset28" => "p31b-power-settings-cpl-pressed",
                     _ => "",
@@ -3268,6 +3270,22 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
+        host::reset(0);
+        ui::range_page(Button::Cap, Some(7), 0, None);
+        save(&out, "m07b-range-cap");
+        // While recording: the Record button red (V, power, temperature).
+        ui::set_rec_on(true);
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+        ui::wave_button();
+        save(&out, "m03i-range-v-recording");
+        host::reset(0);
+        ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: true, i_auto: true, ..pw_cases()[0].1 });
+        save(&out, "p07b-power-settings-recording");
+        host::reset(0);
+        ui::temp_page(&ui::TempPage { sensor: 0, offs: 0.0, unit_f: false, r25: 10_000.0, beta: 3950.0, info: "Cold junction 24.6 C" });
+        save(&out, "m06b-temp-recording");
+        ui::set_rec_on(false);
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
