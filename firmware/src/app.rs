@@ -2387,10 +2387,13 @@ impl App {
         // DMM page: the stock >= 30 V red value (ui-review #13).
         self.dmm_view.hv_red = hv_level >= 1;
         if dmm_view && (u.show.is_some() || hv_changed || had_prov) {
-            if self.pw_rng_key != 0 && self.view == View::Dmm {
-                // The first power reading after the "I ranging" texts.
-                ui::pw::ranging_clear();
-                self.dmm_view.invalidate();
+            if self.pw_rng_key != 0 {
+                // The first power reading after the "I ranging" texts (the
+                // combined view: after its strip placeholder, #108).
+                if self.view == View::Dmm {
+                    ui::pw::ranging_clear();
+                    self.dmm_view.invalidate();
+                }
                 self.pw_rng_key = 0;
             }
             self.draw_reading();

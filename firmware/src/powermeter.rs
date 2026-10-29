@@ -1273,7 +1273,9 @@ impl Dmm {
     /// values stayed up to ~4 s): the new coupling's layout and units,
     /// every measured value NaN ("--"); the energy, the time and the
     /// settings as they are.
-    #[inline(never)] // .cold (link-native.x): once per coupling change
+    /// Also the combined view's strip before the first reading
+    /// (`App::pw_strip_wait`, #108): region B.
+    #[inline(never)]
     pub fn pw_pending(&self) -> (Reading, PowerVals) {
         let n = f32::NAN;
         let pv = PowerVals {

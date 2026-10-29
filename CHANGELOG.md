@@ -84,6 +84,8 @@ section named after the tag as the release notes; how to cut a release:
   600 mV on 3.3 V) starts the chart over in the new unit.
 - Power meter: no multimeter MAX / AVG / REL / MIN column while the page
   shows "I ranging...".
+- Combined view: the meter strip shows **POWER**, the range and dashes while
+  the power meter ranges, not an empty strip.
 
 ## v0.3.0 (2026-10-27)
 
