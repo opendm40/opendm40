@@ -822,6 +822,9 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         // No current: values that round to zero (never "-0.0000").
         ("zero", P { p: -2.0e-8, s: 1.0e-8, q: -1.0e-8, pf: -0.0001, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.66e-9, vah: 1.0e-9, secs: 55, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("main-zero", P { main: dmm::pw::MAIN_WH, p: -2.0e-8, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.27e-10, secs: 70, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
+        // Leads open after a load (#107): V 0, a few uV of burden (noise on
+        // the uA shunt) that shows as Vb 0.000: not in the warning colour.
+        ("open-vb", P { p: 0.0, s: 0.0, q: 0.0, pf: f32::NAN, v: 0.0, i: 9.9e-9, vdc: 0.0, idc: 9.9e-9, f_hz: f32::NAN, burden_v: 4.7e-7, vr: 0, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
         ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
         // AC+DC parts layout (doc 3.17): 12 V + 1 V ripple, 2 A + 0.3 A in
         // phase (the owner's mock); pure DC (no AC part: the DC? hint);
@@ -2035,6 +2038,18 @@ fn main() {
                     power_page(*pv, hold, a, rc);
                     ck.check(&format!("power/{name}/h{hold}/a{}", a.name()), &pw_regions(pv));
                 }
+            }
+        }
+        // Vb in the warning colour (ui::VALUE) only for a drop it shows
+        // (#107): not for "open-vb" (0.000), but for 0.2 V at 5 V.
+        let ov = pcs.iter().find(|c| c.0 == "open-vb").map(|c| c.1).unwrap();
+        for (name, pv, want) in [("open-vb", ov, false), ("open-vb-5v", dmm::pw::PowerVals { v: 5.0, vdc: 5.0, burden_v: 0.2, ..ov }, true)] {
+            host::reset(0);
+            power_page(pv, 0, sentinel::Alert::None, rc);
+            ck.cases += 1;
+            let n = (176..190).flat_map(|y| (431..476).map(move |x| y * W + x)).filter(|&i| emu().fb[i] == ui::VALUE).count();
+            if (n > 0) != want {
+                ck.fail(&format!("power/{name}/vb-colour"), format!("Vb warning colour: {n} px, want {}", if want { "some" } else { "none" }));
             }
         }
         for (name, pv) in pcs.iter().filter(|c| c.0.starts_with("pending")) {

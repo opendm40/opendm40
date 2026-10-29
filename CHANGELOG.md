@@ -7,6 +7,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Power meter: **Vb 0.000** no longer in the warning colour with open leads.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
