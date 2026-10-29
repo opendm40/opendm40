@@ -171,6 +171,8 @@ const CAP_STEADY: f32 = 0.02;
 const CAP_OVER_MAX: u8 = 8;
 /// Ramp range steps without a value after which AUTO goes to 60 nF.
 const CAP_HOPS_MAX: u8 = 4;
+/// Ramp ranges: the most polls kept for the first value (two half ramps).
+const CAP_HALF_MAX: usize = 32;
 /// Ramp ranges: the polls whose median is the value (`poll_cap`).
 const CAP_RING: usize = 6;
 /// Ramp ranges: polls of one long ramp after which the value is final
@@ -1587,6 +1589,14 @@ pub struct Dmm {
     cap_cls2: bool,
     /// Comparator turns seen during the polls without a ramp.
     cap_idle_flips: u8,
+    /// The polls (own slope C) of the last two half ramps, their
+    /// directions (bit i = up), how many, how many of them the earlier
+    /// half's; the first value from them (`poll_cap`, 0 = none yet).
+    cap_half: [f32; CAP_HALF_MAX],
+    cap_half_up: u32,
+    cap_half_n: u8,
+    cap_half_prev: u8,
+    cap_first_v: f32,
     /// Same-range restarts for another capacitor (DBG:CAP? field 17).
     cap_swaps: u8,
     /// The discharge's first sample above CAP_DIS_MIN_MV (mV, 0 = none) and
@@ -2246,6 +2256,11 @@ impl Dmm {
             cap_cls2: false,
             cap_idle_flips: 0,
             cap_swaps: 0,
+            cap_half: [0.0; CAP_HALF_MAX],
+            cap_half_up: 0,
+            cap_half_n: 0,
+            cap_half_prev: 0,
+            cap_first_v: 0.0,
             cap_dis_v0: 0.0,
             cap_dis_t0: 0,
             cap_last: CAP_R_MIN,
@@ -6112,6 +6127,9 @@ impl Dmm {
         self.cap_inst_n = 0;
         self.cap_pair = [None; 2];
         self.cap_ring_n = 0;
+        self.cap_half_n = 0;
+        self.cap_half_prev = 0;
+        self.cap_first_v = 0.0;
         self.cap_ratio = [1.0; 2];
         self.cap_ratio_ok = false;
         self.cap_dis_t = now;
@@ -6368,6 +6386,13 @@ impl Dmm {
             self.cap_ring[i] = cinst;
             if cmp { self.cap_ring_up |= 1 << i } else { self.cap_ring_up &= !(1 << i) }
             self.cap_ring_n = self.cap_ring_n.saturating_add(1);
+            // The last two half ramps' polls, for the first value.
+            let k = self.cap_half_n as usize;
+            if k < CAP_HALF_MAX {
+                self.cap_half[k] = cinst;
+                if cmp { self.cap_half_up |= 1 << k } else { self.cap_half_up &= !(1 << k) }
+                self.cap_half_n += 1;
+            }
         }
         // A result per half ramp (a comparator flip), or after CAP_LONG_N
         // polls of one long ramp (was 35, a single sample: 4.7 mF on 6 mF
@@ -6419,9 +6444,34 @@ impl Dmm {
                     // a pair across a drift (an electrolytic's absorption, emulator:
                     // 5.31 then 4.36 mF for 4.7 mF) is not that.
                     self.cap_ratio = [(p / d).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX), (p / u).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX)];
+                    if !self.cap_ratio_ok && self.ramp.first {
+                        // The first value: the median of every poll of the
+                        // two half ramps just finished (one up, one down),
+                        // each corrected for its direction, not the last 6
+                        // (device 37304252: first values 1007.5 / 966.3 uF
+                        // for ~1 mF in two runs).
+                        let n = self.cap_half_n as usize;
+                        let mut b = [0.0f32; CAP_HALF_MAX];
+                        for i in 0..n {
+                            b[i] = self.cap_half[i] * self.cap_ratio[(self.cap_half_up >> i & 1) as usize];
+                        }
+                        if n >= 3 {
+                            sort_f32(&mut b[..n]);
+                            self.cap_first_v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+                        }
+                    }
                     self.cap_ratio_ok = true;
                 }
             }
+            // Keep only the half ramp just finished.
+            let n = self.cap_half_n as usize;
+            let keep = n.saturating_sub(self.cap_half_prev as usize);
+            for i in 0..keep {
+                self.cap_half[i] = self.cap_half[n - keep + i];
+            }
+            self.cap_half_up >>= n - keep;
+            self.cap_half_n = keep as u8;
+            self.cap_half_prev = keep as u8;
             self.ramp.n = 0;
         }
         // The value every poll (owner 2026-10-30: a new value per ramp
@@ -6437,7 +6487,10 @@ impl Dmm {
                 b[i] = self.cap_ring[i] * k;
             }
             sort_f32(&mut b[..n]);
-            let v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+            let mut v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+            if self.ramp.first && self.cap_first_v > 0.0 {
+                v = self.cap_first_v;
+            }
             if self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N {
                 // Adaptive class (owner 2026-10-30): class 1 for a fast first
                 // value; once CAP_AGREE_N final values in a row agree within
