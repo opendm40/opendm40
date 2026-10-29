@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Bargraph scale: the unit spelled as the reading beside it (600 KΩ, not
+  600 kOhm).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

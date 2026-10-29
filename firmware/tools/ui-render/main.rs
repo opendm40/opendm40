@@ -1062,6 +1062,37 @@ pub fn touchcal_scene(k: u8, long: bool) {
     }
 }
 
+/// The bargraph's full-scale label ends with the unit as the readout and
+/// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
+/// kOhm"): the label's last columns (right-aligned at the bar's end, row
+/// 161..172) hold exactly the ink of `unit_text` drawn alone there.
+fn bar_unit_check(ck: &mut Checker, scene: &str, r: &Reading) {
+    use stockfont as sf;
+    if r.mode == 15 {
+        return; // temperature: no scale labels
+    }
+    let mut ub = [0u8; 16];
+    let u = sf::unit_text(r.main.unit, &mut ub).to_string();
+    let b = &ui::BAR_RECT;
+    let end = bargraph::Bar::new(b.0, b.1, b.2, b.3, false).end_x() as i32;
+    let w = sf::text_width(sf::F14, &u, 1) as i32;
+    let bg = ui::BG;
+    let mask = |x0: i32| -> Vec<bool> {
+        let e = emu();
+        (161..173).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
+    };
+    let got = mask(end - w - 2);
+    let snap = host::snapshot();
+    lcd::fill_rect((end - 120) as u16, 161, 120, 12, bg);
+    sf::label(sf::F14, sf::rect((end - 120) as i16, 161, 120, 12), &u, ui::DIM, bg, 4, 1);
+    let want = mask(end - w - 2);
+    host::restore(&snap);
+    ck.cases += 1;
+    if got != want {
+        ck.fail(&format!("bar-unit/{scene}"), format!("bargraph full-scale label does not end with {u:?}"));
+    }
+}
+
 fn save(out: &str, name: &str) {
     host::save_ppm(&format!("{out}/{name}.ppm"), 2);
 }
@@ -2681,6 +2712,9 @@ fn main() {
         host::reset(0);
         let (r, _) = find("dcv");
         dv.label = None;
+        // The history row (Settings 2/3 "DMM row": History): the app turns
+        // the bargraph row off first, so no accuracy label clears a box.
+        dv.bar_on = false;
         dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(4.8170, 4, "V"); 5], 3, 2);
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
@@ -2718,6 +2752,7 @@ fn main() {
             let v = if r.main.ol { 1.0 } else { r.main.v };
             let pts: Vec<f32> = (0..321).map(|i| v + ((i / 40) % 3) as f32 * v.abs() * 1e-4).collect();
             ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            bar_unit_check(&mut ck, file, &r);
             save(&out, file);
         }
         for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc"), ("a34-acc-strip-ohm-neg", "ohm_neg")] {
@@ -2810,6 +2845,7 @@ fn main() {
             ui::status_right(&status(0));
             save(&out, file);
         }
+        dv.bar_on = true;
         // A function switch (switch-latency.md proposals 1 / 6): the page
         // as it was before (blank readout until the first reading), the
         // placeholder, provisional values, and the settled value after.
