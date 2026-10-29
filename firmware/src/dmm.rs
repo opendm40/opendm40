@@ -201,9 +201,10 @@ pub fn set_cap_class(k: u8) {
     CAP_CLASS.store(k.min(4), core::sync::atomic::Ordering::Relaxed);
 }
 /// The discharge current (uA) for the estimate from the discharge slope:
-/// INFERRED from one capacitor (device c4aea8d0: 0.381 .. 0.386 V/s on
-/// ~0.996 mF); DBG:CAP:IDIS sets it (RAM only).
-static CAP_IDIS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(380);
+/// INFERRED from one capacitor (device c4aea8d0 / 1cba8507, ~0.996 mF:
+/// 0.376 V/s over 240 points at 25 ms, 0.381 .. 0.386 at 255 ms);
+/// DBG:CAP:IDIS sets it (RAM only).
+static CAP_IDIS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(375);
 pub fn cap_idis() -> u32 {
     CAP_IDIS.load(core::sync::atomic::Ordering::Relaxed)
 }
@@ -211,9 +212,9 @@ pub fn set_cap_idis(ua: u32) {
     CAP_IDIS.store(ua.clamp(1, 100_000), core::sync::atomic::Ordering::Relaxed);
 }
 /// The discharge's poll period (ms; the row's AD1 converts every 25 ms,
-/// R22 0x13) and the node voltage that ends it (mV): DBG:CAP:DISMS /
-/// DBG:CAP:DISEND (RAM only, for device experiments).
-static CAP_DIS_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(255);
+/// R22 0x13; 50 for an earlier grey value than 255) and the node voltage
+/// that ends it (mV): DBG:CAP:DISMS / DBG:CAP:DISEND (RAM only).
+static CAP_DIS_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(50);
 static CAP_DIS_END: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(30);
 pub fn cap_dis_ms() -> u32 {
     CAP_DIS_MS.load(core::sync::atomic::Ordering::Relaxed)
@@ -6129,7 +6130,10 @@ impl Dmm {
             self.ramp.class = 0;
             self.ramp.cmp = None;
             self.ramp.first = true;
-            self.deadline = now + cap_dis_ms() as u64;
+            // The first sample 255 ms after the row write, then every
+            // `cap_dis_ms` (a first sample at 50 ms ended the discharge at
+            // once: 1 mF with absorption hunted 600 uF <-> 6 mF, emulator).
+            self.deadline = now + 255;
         } else {
             self.write_config(clk);
             self.deadline = now + if r < 4 { 120 } else { 320 };
