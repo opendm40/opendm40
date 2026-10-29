@@ -705,6 +705,44 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 | keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
 | mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
 
+### Region C audit #3 (2026-10-29, chore/region-c-headroom)
+
+On 3b142426 (0.3.1, `--features mute`) region C had 7 720 B free (below
+the 8 KiB warning), region B 50 572 B. The AD2 experiment DBG code goes
+back to region B, where region C audit #1 had put it (133f81e) and region
+B audit #4 took it out of (B at 15 KB then): `ad2exp` (DBG:AD2:TORN? /
+NOISE? / DCV? / N7?, E7's `dc_enter` / `dcv_row`), `main.rs` `dbg_dcv` /
+`dbg_n7`, `scpi::dcv_arg` / `n7_arg` (C +5 632 B, B -5 648 B). Their patterns are gone
+from [`link-native.x`](../link-native.x); no source changed. An nm diff
+of the two images: only these 21 symbols changed region (the
+`OUTLINED_FUNCTION_*` are renumbered, 8 B smaller in all). Code moved into
+B cannot stall the AD2 stream ISR (B is zero-wait), so the region C rule
+is not touched; `dc_enter` (in `Logger::start`, before the stream takes
+the bus) now runs from zero-wait flash.
+
+| | before (3b142426) | after |
+|---|---|---|
+| region A2 free | 2 396 B | 2 396 B |
+| region B free | 50 572 B | 44 924 B |
+| region C free | 7 720 B | 13 352 B |
+| stack headroom (static worst path) | 21 196 B | 21 196 B |
+| SRAM free | 43 912 B | 43 912 B |
+
+The variants (tools/build-variants/run.sh) after the move, B / C free and
+stack headroom (each gains the same ~5.6 KB of C):
+
+| variant | after |
+|---|---|
+| recovery-usb | 44 284 / 13 544 / 21 708 B |
+| recovery-file | 45 092 / 13 004 / 21 196 B |
+| no-ad2-isr | 54 736 / 14 568 / 21 640 B |
+| spi-disk | 63 028 / 23 480 / 22 692 B |
+| fatren-dry-run | 45 228 / 13 932 / 21 196 B |
+| keep-screen | 45 292 / 13 484 / 21 196 B |
+
+Next candidates if C gets tight again (DBG-only, still in C): `hyspi`
+(DBG:HYSPI:SELF? / WR?, 2.3 KB), `boot::put_info` (DBG:BOOT?, 1.6 KB).
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as

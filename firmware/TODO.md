@@ -1658,6 +1658,9 @@ Firmware:
 - [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 058a1d36
       region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
       SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
+- [x] Region C audit #3 2026-10-29 ([docs/native-boot.md](docs/native-boot.md#region-c-audit-3-2026-10-29-choreregion-c-headroom)): on 3b142426
+      (mute) region C 7 720 -> 13 352 B free, B 50 572 -> 44 924 B: ad2exp, dbg_dcv / dbg_n7 and
+      scpi::dcv_arg / n7_arg (DBG:AD2:*, E7's dc_enter) C -> B. No code changed.
 - [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
       before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
       pages open.
