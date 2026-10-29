@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
+  that reply for the next host to connect.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

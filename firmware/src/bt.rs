@@ -258,6 +258,8 @@ pub struct Bt {
     /// Error for the BT SCPI session (input overrun, output overflow).
     err: Option<&'static str>,
     link: bool,
+    /// The host left (PC14 fell) since main.rs last asked (`take_left`).
+    left: bool,
     quiet_until: u64,
     /// Own millisecond count from DWT_CYCCNT (Clock is not passed to poll).
     t_last: u32,
@@ -339,6 +341,7 @@ impl Bt {
             lines_on: false,
             err: None,
             link: false,
+            left: false,
             quiet_until: 0,
             t_last: unsafe { r32(DWT_CYCCNT) },
             t_acc: 0,
@@ -499,9 +502,10 @@ impl Bt {
             self.link = up;
             if !up {
                 // The host left: no partial request or untaken line of it
-                // is run later.
+                // is run later, and main.rs drops its pending query.
                 self.rx.reset();
                 self.line_ready = false;
+                self.left = true;
             }
         }
         {
@@ -555,6 +559,13 @@ impl Bt {
             return Some(Err(e));
         }
         Some(Ok(l))
+    }
+
+    /// True once after the host left (PC14 fell): main.rs then drops the BT
+    /// session's pending READ? / MEAS? and the rest of its message, so the
+    /// next host's first reply is its own (#122).
+    pub fn take_left(&mut self) -> bool {
+        core::mem::take(&mut self.left)
     }
 
     /// Send a response frame (queued; ~(6 + len) * 87 us on the wire).
