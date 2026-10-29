@@ -94,9 +94,10 @@ Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4
       the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
 - [x] The stock's PB10 drive measured on opendm40 (2026-10-29, hw/README.md Unknowns 5): PB10 low stops the
       charge, released the charger goes to standby until the next replug. opendm40 does not drive PB10 and
-      charges to termination. The stock's purpose of the drive (below 85 %) is unknown.
-- [ ] (c) Owner decision: keep PB10 undriven (plain TP4056 cycle) or copy the stock's drive (it ends a charge
-      cycle when released, measured).
+      charges to termination. The stock pulses PB10 low ~10 ms per 2 s below 80..85 % and reads the battery
+      during the pulse (disassembly; purpose *inferred*: a reading without the charge current).
+- [ ] (c) Owner decision: copy the stock's 10 ms PB10 pulse for the battery reading on USB power (the bars
+      read high while charging without it), or keep PB10 undriven.
 - [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
       keeps the charged state.
 

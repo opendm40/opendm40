@@ -8,10 +8,9 @@
 //! = charge terminated, high while charging or without input). So: PB10 0 =
 //! no charger, PB10 1 + PB11 1 = charging (the stock's condition,
 //! FUN_0800b776 / FUN_08023840), PB10 1 + PB11 0 = charged. The charger's
-//! CHRG pin is not on an MCU pin found. Not copied: the stock drives PB10 low
-//! while it reads 1 below 85 % (FUN_08023b04 / 0800b6aa); driven low, STDBY
-//! releases at once and returns at once on release (device); what it does to
-//! the charge current is not measured.
+//! CHRG pin is not on an MCU pin found. Not copied: the stock pulses PB10 low
+//! for ~10 ms per 2 s on USB power below 80..85 % and reads the battery during
+//! the pulse (hw/README.md Unknowns 5); PB10 low stops the charge (device).
 //! Bluetooth link: PC14 high = connected.
 //! MCU temperature: the GD32 internal sensor on ADC0 channel 16 (TSVREN, bit 23
 //! of ADC_SYNCCTL at ADC0 + 0x304), read right after the battery every 2 s,

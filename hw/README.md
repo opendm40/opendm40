@@ -650,7 +650,7 @@ opendm40 or stock code that drives the pin.
 | PA13 / PA14 | SWD (pads "D" / "C") | io | debug header |
 | PA15 | TIM2_CH1 (AF1): scope trigger comparator (stock) | in | stock, [`hwtrig.rs`](../firmware/src/hwtrig.rs) |
 | PB0..PB9 | [3PA1030](datasheets/3peak-3pa1030-reva1.pdf) data D0..D9 | in | [`scope.rs`](../firmware/src/scope.rs) |
-| PB10 | charger input power present: 1 against the MCU pull-down with USB power, 0 within ~8 ms of a USB power cut. Driven low, the charger's STDBY releases at once and returns at once on release; also a charger input (CE or TEMP, *inferred*). The stock drives it low while it reads 1 below 85 % | in (stock: od, released) | device 2026-10-29 (`DBG:CHG?`, `DBG:CHG:LOG?`), stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
+| PB10 | charger input power present: 1 against the MCU pull-down with USB power, 0 within ~8 ms of a USB power cut. Driven low, the charge stops; released, the charger goes to standby until the next replug (above ~4.1 V); a charger input (CE or TEMP, *inferred*). The stock pulses it low ~10 ms per 2 s on USB power below 80..85 % for its battery reading (Unknowns 5) | in (stock: od, released) | device 2026-10-29 (`DBG:CHG?`, `DBG:CHG:LOG?`), stock code (`FUN_0800b5f6`, `FUN_08023b04`), [`power.rs`](../firmware/src/power.rs) |
 | PB11 | TP4056 STDBY (*inferred*): 0 against the pull-up when charged on USB power, 1 without input power and for 3.5..4.5 s after USB power returns (a new cycle on a full battery) | in, pull-up | device 2026-10-29, stock code (`FUN_0800b5f6`), [`power.rs`](../firmware/src/power.rs) |
 | PB12 | generator path select, 1 = PWM, 0 = DAC | out | [`gen.rs`](../firmware/src/gen.rs) |
 | PB14 | TIM12_CH1 (AF9) generator square | out | [`gen.rs`](../firmware/src/gen.rs) |
@@ -731,9 +731,20 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    At a full battery (C2, [`c2meter.py`](../firmware/tools/c2meter.py)) PB10 low or released makes no
    difference to the USB current (0.1966 / 0.1963 A). USB current right after a replug, as the battery
    drained (15 min blocks on battery): 0.36, 0.48, 0.56, 0.67, 0.70 A, the meter's own ~0.17..0.20 A
-   included. *Inferred*: PB10 is the charger's CE (or TEMP) line; a low pulse ends a charge cycle.
-   What the stock's PB10 drive below 85 % is for is unknown; opendm40 never drives PB10, so its charger
-   runs the plain TP4056 cycle (charges to termination after a replug, as measured).
+   included. *Inferred*: PB10 is the charger's CE (or TEMP) line; a low pulse ends a charge cycle
+   above the recharge threshold.
+   Stock code (disassembly; the only PB10 users are the init `0x0800af60` and the battery task): two
+   timers alternate, `0x08023bae` (pins) and `0x08023aac` (battery). Every 2 s the pins task reads
+   PB10 / PB11 (PB10 released) and drives PB10 low (push-pull, BC) when PB10 reads 1 and the battery
+   fraction (Vbat - 3.3) / 0.9 from the last battery read is below 0.85 on a 0 -> 1 edge of PB10
+   (plug-in), or below 0.80 otherwise (`cmp` of the float bits as signed integers + `bge` = skip at
+   >= 0.85 / 0.80, `0x08023b36`, `0x08023b62`). 10 ms later the battery task reads the ADC and then
+   releases PB10 (open drain high). So PB10 is low for ~10 ms per 2 s, only on USB power below 80..85 %,
+   and the battery is read during that pulse. *Inferred* purpose: a battery reading without the charge
+   current, below the level (~4.06 V) where the charger restarts after the pulse; above it a pulse would
+   end the charge (measured above). opendm40 never drives PB10: its charger runs the plain TP4056 cycle
+   (charges to termination after a replug, measured); its battery reading on USB power includes the
+   charge current's rise.
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the
