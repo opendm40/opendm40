@@ -45,6 +45,11 @@ fn main() {
     check("fs continuity 1000 ohm", mode_full_scale(11, 2, "\u{3a9}") == 1000.0, String::new());
     check("fs diode 3 V", mode_full_scale(12, 4, "V") == 3.0, String::new());
     check("fs DC V by mode", mode_full_scale(1, 4, "V") == 6.0, String::new());
+    // Capacitance: 6000 counts (dmm.rs cap_val): 100.0 nF on 600 nF,
+    // 6.000 nF, 60.00 mF.
+    check("fs cap 600 nF", (mode_full_scale(13, 1, "nF") - 600.0).abs() < 1e-3, String::new());
+    check("fs cap 6 nF", (mode_full_scale(13, 3, "nF") - 6.0).abs() < 1e-5, String::new());
+    check("fs cap 60 mF", (mode_full_scale(13, 2, "mF") - 60.0).abs() < 1e-4, String::new());
     // frac: fraction of the full scale.
     check("frac 4.8176 V", (frac(4.8176, 6.0, false).unwrap() - 4.8176 / 6.0).abs() < 1e-6, String::new());
     check("frac -600 mV", (frac(-600.0, 600.0, false).unwrap() + 1.0).abs() < 1e-6, String::new());
