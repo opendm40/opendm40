@@ -6,8 +6,11 @@ record, in the emulator.
   emu/pantest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
 
 A 1.6 Hz 2-12 V square on the MCX (period 250 px at 100 ms/div; the low
-level off the CH1 zero line), 5 V/div, EDGE 7 V, NORM, DIGitize at 100 ms/div: the stopped record is 65 520
-samples (2.62 s, the trigger mid-record). The graph is read back over
+level off the CH1 zero line), 5 V/div, EDGE 7 V, NORM, DIGitize at 100 ms/div. The
+stopped record's length, sample rate and trigger point come from WAV:PRE?
+(RAW): 65 520 samples (2.62 s, the trigger mid-record) from the packed
+ring, more from the coded ring (src/cring.rs); the drags to the record's
+ends and the true-scale zoom are sized from them. The graph is read back over
 DBG:LCD? and each column classed as high / low (yellow at the square's top /
 bottom row, learnt from the first screen).
 
@@ -25,15 +28,18 @@ beyond the old screen blank).
   * drags past the record's start stop there (the screen is unchanged by
     the next one), and the first drag back moves at once;
   * zoom while stopped: 200 ms/div (2 s, inside the record) shows the
-    square across the graph; 500 ms/div (5 s, more than the record) the
-    record at its true scale, about 210 columns, nothing beyond;
+    square across the graph; 500 ms/div, or 1 / 2 s/div for a longer
+    record (a window longer than the record, centred where the pan to the
+    end left it), the record at its true scale (2.62 s at 500 ms/div:
+    about 210 columns), nothing beyond;
   * V/div while stopped: 10 V/div shows the trace across the graph, 5 V/div
     the square again;
-  * WAV:PRE? (RAW) points 65 520 throughout.
+  * WAV:PRE? (RAW) points at least 65 520, the same throughout.
 
 Exit status 0 = all passed.
 """
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -162,11 +168,12 @@ try:
         wait_ms(2500)  # the guide lines gone (GUIDE_MS)
         return classify(screen(name))
 
-    def npts():
+    def pre():
+        """WAV:PRE? (RAW): (points, x increment, x origin)."""
         q('WAV:POIN:MODE RAW')
-        p = q('WAV:PRE?')
+        p = q('WAV:PRE?').split(',')
         q('WAV:POIN:MODE NORM')
-        return int(p.split(',')[2])
+        return int(p[2]), float(p[4]), float(p[5])
 
     print('*IDN?', q('*IDN?'), flush=True)
     wait_ms(2500)
@@ -186,7 +193,16 @@ try:
         if q('TRIG:STAT?').startswith('STOP'):
             break
     check(q('TRIG:STAT?').startswith('STOP'), 'DIGitize stopped')
-    check(npts() == 65520, 'the stored record: 65 520 samples')
+    N, XINC, XORG = pre()
+    T = N * XINC  # the record's length (s)
+    PRE_S = -XORG  # its part before the trigger (s)
+    print('  record: %d samples, %.0f S/s, %.2f s (%.2f s before the trigger)' % (N, 1 / XINC, T, PRE_S), flush=True)
+    check(N >= 65520 and 0.5 < PRE_S < T - 0.5, 'the stored record: >= 65 520 samples, the trigger inside')
+    # The screen is 1 s (100 ms/div) centred on the trigger, a drag of 200 px
+    # moves it 0.5 s: half-screen drags until its left edge passes the
+    # record's start, and from there (after one drag back) to its end.
+    to_start = max(2, math.ceil((PRE_S - 0.5) / 0.5))
+    to_end = math.ceil((T - 1.5) / 0.5) + 1
     wait_ms(500)
     ys = screen('pan0')
     # The square's top / bottom rows: the most common highest / lowest
@@ -211,7 +227,8 @@ try:
     full(s3, 'half a screen right (earlier samples)')
     m = same(s3[200:390], s2[:190])
     check(m >= 0.95, 'the trace moved 200 px right (%.2f)' % m)
-    s4 = drag(100, 300, 'pan4')  # 1.0 s before the centre: the record start (1.31 s before the trigger)
+    for _ in range(to_start - 1):
+        s4 = drag(100, 300, 'pan4')  # the screen's left edge at the record start
     full(s4, 'at the record start')
     s5 = drag(100, 300, 'pan5')
     m = same(s5, s4)
@@ -220,7 +237,7 @@ try:
     full(s6, 'the first drag back from the start')
     m = same(s6[:190], s5[200:390])
     check(m >= 0.95, 'it moves 200 px at once (%.2f)' % m)
-    for _ in range(4):
+    for _ in range(to_end):
         s7 = drag(300, 100, 'pan7')
     full(s7, 'at the record end')
     s8 = drag(300, 100, 'pan8')
@@ -232,13 +249,21 @@ try:
     q('TIM:SCAL 0.2')
     wait_ms(1000)
     z1 = classify(screen('zoom200ms'))
-    full(z1, '200 ms/div (2 s of the 2.62 s record)')
+    full(z1, '200 ms/div (2 s of the %.2f s record)' % T)
+    # A window longer than the record: 500 ms/div, 1 or 2 s/div for longer
+    # ones. The screen stays centred on the anchor the pan left (Scope::
+    # pan_from: half a screen before the record end, c = T - 0.5 s), not
+    # clamped once the window is longer (zoom_frame): the record is drawn
+    # where the window overlaps it, nothing beyond.
+    tb = next(x for x in (0.5, 1.0, 2.0) if 10 * x > T + 0.5)
+    c = T - 0.5
+    want = round((min(T, c + 5 * tb) - max(0.0, c - 5 * tb)) / (10 * tb) * 400)
     q('DBG:LCD? 0,0,4,1,7', raw=True)
-    q('TIM:SCAL 0.5')
+    q('TIM:SCAL %g' % tb)
     wait_ms(1000)
-    z2 = classify(screen('zoom500ms'))
+    z2 = classify(screen('zoom%gs' % tb))
     n = sum(c != '.' for c in z2)
-    check(195 <= n <= 225, '500 ms/div: the record at its true scale (%d columns of 2.62 s / 5 s = 210)' % n)
+    check(abs(n - want) <= 15, '%g s/div: the record at its true scale (%d columns, %d expected)' % (tb, n, want))
     q('DBG:LCD? 0,0,4,1,7', raw=True)
     q('TIM:SCAL 0.1')
     wait_ms(1000)
@@ -256,7 +281,7 @@ try:
     q('CHAN1:SCAL 5')
     wait_ms(1000)
     full(classify(screen('vdiv5')), 'back at 5 V/div')
-    check(npts() == 65520, 'the stored record still 65 520 samples')
+    check(pre()[0] == N, 'the stored record still %d samples' % N)
 finally:
     try:
         os.killpg(emu.pid, 15)
