@@ -188,6 +188,8 @@ pub const CAP_CLASS_AUTO: u8 = 2;
 /// agreeing final values.
 pub const CAP_CLASS_FAST: u8 = 1;
 const CAP_AGREE_N: u8 = 4;
+/// The direction ratios stay within 1 +- this.
+const CAP_RATIO_MAX: f32 = 0.03;
 pub const CAP_CLASS_STOCK: u8 = 4;
 static CAP_CLASS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 pub fn cap_class() -> u8 {
@@ -6403,7 +6405,10 @@ impl Dmm {
                 // values below are corrected with it (device 2b46e895, ~1
                 // mF: up 1008 .. 1016, down 991 .. 1007 uF per poll).
                 if d > 0.0 && u > 0.0 {
-                    self.cap_ratio = [p / d, p / u];
+                    // Within CAP_RATIO_MAX: the device's two directions differ by ~1 %;
+                    // a pair across a drift (an electrolytic's absorption, emulator:
+                    // 5.31 then 4.36 mF for 4.7 mF) is not that.
+                    self.cap_ratio = [(p / d).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX), (p / u).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX)];
                     self.cap_ratio_ok = true;
                 }
             }
@@ -6444,10 +6449,11 @@ impl Dmm {
                     // The new threshold makes the polls around it partial
                     // ones: the ring starts over (the value stays as it is
                     // until 3 class-2 polls are in), the ratio is learned
-                    // again (the old one is used meanwhile).
+                    // again (1 meanwhile: the class-1 ratio is not class 2's).
                     self.cap_cls2 = true;
                     self.cap_pair = [None; 2];
                     self.cap_ring_n = 0;
+                    self.cap_ratio = [1.0; 2];
                     return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
                 }
                 self.cap_c = v;

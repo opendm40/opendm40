@@ -53,10 +53,11 @@ SCEN = [
     # discharge, tau 1 s; device 832f89a4 went to 60 mF on ~1 mF): no overshoot past 6 mF.
     ('1mF-da', [(30, 'c:1000e-6;capda:0.6;capdatau:1', 6e-3, 1e-3, 15, 6e-2)]),
     ('4.7mF-da', [(30, 'c:4.7e-3;capda:0.6;capdatau:1', 6e-3, 4.7e-3, 15, 6e-2)]),
-    # Up and down ramps reading differently (capasym: +-12 %; device 40c25e2b alternated
+    # Up and down ramps reading differently (capasym: +-2 %, the device's per-poll split;
+    # device 40c25e2b's results alternated
     # 1227 / 974 uF): the shown value does not swing (2 % over the last 15 s).
-    ('1mF-asym', [(35, 'c:1000e-6;capda:0;capasym:0.12', 6e-3, 1e-3, 15, 6e-2)]),
-    ('4.7mF-asym', [(35, 'c:4.7e-3;capda:0;capasym:0.12', 6e-3, 4.7e-3, 15, 6e-2)]),
+    ('1mF-asym', [(35, 'c:1000e-6;capda:0;capasym:0.02', 6e-3, 1e-3, 15, 6e-2)]),
+    ('4.7mF-asym', [(35, 'c:4.7e-3;capda:0;capasym:0.02', 6e-3, 4.7e-3, 15, 6e-2)]),
     # The device's open / short on a ramp range (#74): the node at its clamp / at 0 V, no
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
