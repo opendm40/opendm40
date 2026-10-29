@@ -253,6 +253,9 @@ pub struct App {
     /// the DMM rail stays on whatever view is shown (fastlogtest --ui-nav:
     /// the Oscilloscope tile during a disk session dropped it, 0 rows).
     pub logger_busy: bool,
+    /// A USB host has the meter configured (main.rs, every pass): "USB" in
+    /// the status bar.
+    pub usb_host: bool,
     host_scope: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -313,6 +316,8 @@ pub struct App {
     i10_since: Option<u64>,
     /// A fuse check was running at the last tick (`fuse_tick`).
     fuse_busy: bool,
+    /// Hash of the temperature page's info line on screen (`temp_info_tick`).
+    temp_info_h: u32,
     pub meas: [f32; 4],
     beep_until: u64,
     pub last_raw: Option<Reading>,
@@ -589,6 +594,7 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
+            usb_host: false,
             logger_busy: false,
             host_scope: false,
             anti_drop: true,
@@ -621,6 +627,7 @@ impl App {
             danger_rd: false,
             i10_since: None,
             fuse_busy: false,
+            temp_info_h: 0,
             meas: [0.0; 4],
             pd6_armed: false,
             pd6_off: false,
@@ -837,7 +844,10 @@ impl App {
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
-            View::Range if self.dmm.hy_mode() == 15 => self.with_temp_page(None),
+            View::Range if self.dmm.hy_mode() == 15 => {
+                self.with_temp_page(None);
+                self.temp_info_tick(true);
+            }
             View::Range if self.dmm.pw.on => {
                 ui::pw::settings_page(&self.dmm.pw_state());
                 self.pw_status_key = ui::pw::settings_status(&self.dmm.pw, 0, self.pw_help);
@@ -1035,8 +1045,9 @@ impl App {
         ui::Status {
             uptime_s: (now / 1000) as u32,
             bt: self.bt_on && self.power.bt_connected(),
-            bars: self.power.bars,
-            charging: self.power.charging(),
+            usb: self.usb_host,
+            bars: self.power.shown_bars(self.strip_alt),
+            charging: self.power.on_charger(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1425,6 +1436,18 @@ impl App {
         matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA)
     }
 
+    /// The function has a range page (MF opens it; its Hold/Limits button
+    /// opens Hold & Limits). Without one MF opens Hold & Limits directly.
+    fn has_range_page(&self) -> bool {
+        matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power) || self.dmm.hy_mode() == 15
+    }
+
+    /// Where MENU / Back on Hold & Limits return to: one page up, the range
+    /// page it was opened from (#111), else the instrument.
+    fn limits_back(&self) -> View {
+        if self.has_range_page() { View::Range } else { self.back_view }
+    }
+
     /// Where OK / cancel / MENU on the keypad return to.
     fn kp_back(&self) -> View {
         match self.kp_target {
@@ -1811,6 +1834,7 @@ impl App {
                 View::Gen => ui::gen_status(&st),
                 View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
                 View::DmmScope => self.draw_reading(),
+                View::Range if self.temp_page_on() => self.temp_info_tick(false),
                 _ => {}
             }
         }
@@ -1825,16 +1849,18 @@ impl App {
                 // even while it reads OL: the axis labels name the
                 // function shown, not the previous one (device check
                 // 92fb8fa: cap "0.050MOhm", diode "MOhm", temperature "Hz").
-                if self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec) {
+                // A range change to another unit starts the chart over in
+                // the new unit, also when the new range reads OL (#93: 3.3 V
+                // on 6 V -> 600 mV kept the V trace and labels). Not under
+                // HOLD: the readout keeps the held unit too.
+                let unit_new = r.main.unit != self.chart_unit && !self.meter.hold;
+                if unit_new || (self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec)) {
                     self.chart_unit = r.main.unit;
                     self.chart_dec = r.main.dec;
+                    self.chart_n = 0;
                     self.chart_dirty = true;
                 }
                 if !self.meter.hold && !r.main.ol {
-                    if r.main.unit != self.chart_unit {
-                        self.chart_unit = r.main.unit;
-                        self.chart_n = 0;
-                    }
                     self.chart_dec = r.main.dec;
                     let n = self.chart.len();
                     if self.chart_n == n {
@@ -1864,7 +1890,9 @@ impl App {
             // DBG:PROF? "d.chart" (one trend point: columns + labels + side).
             crate::prof::enter(crate::prof::DCHART);
             let pv = self.meter.live().and_then(|r| r.power).filter(|_| self.dmm.pw.on);
-            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if pv.is_some() { None } else { Some(&side) }, self.chart_unit, rc);
+            // The power meter never shows the DMM column (MAX / AVG / REL /
+            // MIN), also not before its first reading ("I ranging...", #96).
+            ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if self.dmm.pw.on { None } else { Some(&side) }, self.chart_unit, rc);
             if let Some(pv) = pv {
                 ui::pw::side(&mut self.dmm_view.pwc, &pv);
             }
@@ -2418,10 +2446,13 @@ impl App {
         // DMM page: the stock >= 30 V red value (ui-review #13).
         self.dmm_view.hv_red = hv_level >= 1;
         if dmm_view && (u.show.is_some() || hv_changed || had_prov) {
-            if self.pw_rng_key != 0 && self.view == View::Dmm {
-                // The first power reading after the "I ranging" texts.
-                ui::pw::ranging_clear();
-                self.dmm_view.invalidate();
+            if self.pw_rng_key != 0 {
+                // The first power reading after the "I ranging" texts (the
+                // combined view: after its strip placeholder, #108).
+                if self.view == View::Dmm {
+                    ui::pw::ranging_clear();
+                    self.dmm_view.invalidate();
+                }
                 self.pw_rng_key = 0;
             }
             self.draw_reading();
@@ -2484,6 +2515,15 @@ impl App {
             }
             return;
         }
+        // A stopped scope renders its stored record once per change (a zoom,
+        // a pan, a V/div step). While nothing may be drawn (a GRAM read-back
+        // or an on-device screenshot holds the panel, a host log stream)
+        // leave that render pending: polled now, the frame would be dropped
+        // below and the screen would keep the old trace until the next
+        // change.
+        if !can_draw && !self.scope.s.run {
+            return;
+        }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
@@ -2491,12 +2531,27 @@ impl App {
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
         if let Some(f) = polled {
             let n = f.data.len();
-            // The screen columns for WAV:DATA? (scope_wav.rs, SRAM).
+            // The screen columns for WAV:DATA? (scope_wav.rs, SRAM); roll
+            // (#128): the middle of each column's min / max, 0 where the
+            // roll has no data yet.
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
                 let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
+            }
+            if let (0, Some(cols)) = (n, f.cols) {
+                for (w, &(lo, hi)) in crate::scope_wav::screen().iter_mut().zip(cols.iter()) {
+                    *w = if lo == u16::MAX { 0 } else { (lo + hi) / 2 };
+                }
+                // No linear record (rolling; a stopped record zoomed out beyond
+                // its length): no measurements, not the last frame's (#128).
+                if !self.meas_res.v[19].is_nan() {
+                    self.meas_res = crate::scope_meas::Results { v: [f32::NAN; 20] };
+                    self.cursor_values();
+                    self.meas = [f32::NAN; 4];
+                    self.sp.cells_due = true;
+                }
             }
             if self.sp.autoset.is_some() {
                 self.autoset_step(&f, now);
@@ -2517,6 +2572,12 @@ impl App {
                 self.meas = [r[10], r[19], r[11], r[0]];
             }
             if !can_draw || self.redraw {
+                // A one-shot capture (SINGle, DIGitize) that ended with this
+                // frame stopped the scope: render its stored record on the
+                // first pass that may draw, as a stopped zoom (above).
+                if !self.scope.s.run {
+                    self.scope.refresh();
+                }
                 return;
             }
             if page && covered {
@@ -3287,7 +3348,8 @@ impl App {
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => View::Limits,
-                    View::Menu | View::Range | View::Keypad | View::Limits | View::Inrush => self.back_view,
+                    View::Limits => self.limits_back(),
+                    View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -3332,13 +3394,8 @@ impl App {
                 self.dmm_view.invalidate();
             }
             _ => match self.view {
-                View::Dmm | View::DmmScope
-                    // Power meter: its Power Settings page (View::Range).
-                    if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power)
-                        || self.dmm.hy_mode() == 15 =>
-                {
-                    self.show(View::Range, clk)
-                }
+                // Power meter: its Power Settings page (View::Range).
+                View::Dmm | View::DmmScope if self.has_range_page() => self.show(View::Range, clk),
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
@@ -3354,8 +3411,7 @@ impl App {
     /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
-    /// 60 ohm included, the experimental 600 Mohm never), the highest
-    /// wrapping to the lowest (`ui::range_key_next`). Long: the
+    /// 60 ohm included), the highest wrapping to the lowest. Long: the
     /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
     /// REL as before; AutoHold stays as it is.
     #[inline(never)]
@@ -3372,7 +3428,18 @@ impl App {
             self.beep(now, 200);
             if b == Button::Volt { Some(255) } else { None }
         } else {
-            ui::range_key_next(b, self.range_sel_manual(), self.dmm.is_auto())
+            let items = ui::range_items(b);
+            let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
+            let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
+            let cur = self.range_sel_manual();
+            // The items before AUTO, in a ring; from one after it (ohm
+            // 600 Mohm, experimental) back to the first.
+            let i = match cur {
+                Some(i) if !self.dmm.is_auto() => if i + 1 < n { i + 1 } else { 0 },
+                Some(i) => i,
+                None => 0,
+            };
+            manual(i)
         };
         // Held into AUTO: the placeholder (AUTO, dashes) at once, as the
         // range page's AUTO item and RES:RANG:AUTO do; before, the last
@@ -3564,7 +3631,7 @@ impl App {
                     let _ = self.inrush_open(clk);
                     return;
                 }
-                match ui::range_hit(b, x, y) {
+                match ui::range_hit(b, self.range_sel(), x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
                         let was = self.dmm.is_auto();
@@ -3682,7 +3749,7 @@ impl App {
             },
             View::Limits => {
                 if ui::title_back_hit(y) {
-                    let v = self.back_view;
+                    let v = self.limits_back();
                     self.show(v, clk);
                     return;
                 }
@@ -3975,6 +4042,22 @@ impl App {
     }
 
     fn func_changed(&mut self) {
+        // A power meter dialog (wiring, Reset energy?, Zero / V cal) or the
+        // fuse check's start / result dialog belongs to the page it was
+        // opened on: a function change from SCPI / BT closes it (#104, #143;
+        // it stayed over a page no longer redrawn). The fuse check's
+        // measuring stage (1) has its own end path (`fuse_tick`).
+        if matches!(
+            self.overlay,
+            Some(
+                crate::dialog::Overlay::PowerEntry { .. }
+                    | crate::dialog::Overlay::EnergyReset { .. }
+                    | crate::dialog::Overlay::PowJob { .. }
+                    | crate::dialog::Overlay::FuseCheck { stage: 0 | 2, .. }
+            )
+        ) {
+            self.overlay_close();
+        }
         self.meter.reset();
         // The new function's frame at once (switch-latency.md proposal 1):
         // its unit and dimmed dashes until the first reading.
@@ -4002,6 +4085,25 @@ impl App {
     fn with_temp_page(&self, key: Option<(u8, bool)>) {
         let k = self.dmm.t_sensor();
         let mut b = [0u8; 64];
+        let n = self.temp_info_text(&mut b);
+        let (r25, beta) = self.dmm.ntc_user();
+        let p = ui::TempPage {
+            sensor: k,
+            offs: self.dmm.t_offs(k),
+            unit_f: self.dmm.temp_f(),
+            r25,
+            beta,
+            info: core::str::from_utf8(&b[..n]).unwrap_or(""),
+        };
+        match key {
+            None => ui::temp_page(&p),
+            Some((c, pressed)) => ui::temp_key(&p, c, pressed),
+        }
+    }
+
+    /// The temperature page's info line into `b` (its length): the sensor
+    /// current of a resistive sensor, else the cold junction.
+    fn temp_info_text(&self, b: &mut [u8; 64]) -> usize {
         let mut n = 0;
         let mut put = |t: &[u8]| {
             let m = t.len().min(64 - n);
@@ -4020,18 +4122,23 @@ impl App {
             put(dmm::format(&mut t, v, 1).as_bytes());
             put(if u == "\u{b0}F" { b" F" } else { b" C" });
         }
-        let (r25, beta) = self.dmm.ntc_user();
-        let p = ui::TempPage {
-            sensor: k,
-            offs: self.dmm.t_offs(k),
-            unit_f: self.dmm.temp_f(),
-            r25,
-            beta,
-            info: core::str::from_utf8(&b[..n]).unwrap_or(""),
-        };
-        match key {
-            None => ui::temp_page(&p),
-            Some((c, pressed)) => ui::temp_key(&p, c, pressed),
+        n
+    }
+
+    /// Temperature page, once a second: the info line again when its text
+    /// changed (the cold junction follows each thermocouple reading and an
+    /// offset step; it stayed as drawn when the page opened). `drawn`: the
+    /// whole page was just drawn, only note its text.
+    fn temp_info_tick(&mut self, drawn: bool) {
+        let mut b = [0u8; 64];
+        let n = self.temp_info_text(&mut b);
+        // FNV-1a of the text.
+        let h = b[..n].iter().fold(0x811c_9dc5u32, |h, &c| (h ^ c as u32).wrapping_mul(0x0100_0193));
+        if h != self.temp_info_h {
+            self.temp_info_h = h;
+            if !drawn {
+                ui::temp_info(core::str::from_utf8(&b[..n]).unwrap_or(""));
+            }
         }
     }
 
@@ -4152,11 +4259,15 @@ impl App {
             }
             return query;
         };
+        let cap = cur == 13;
         let fine = self.dmm.rate() != dmm::Rate::Fast && self.dmm.rate_info(self.dmm.rate()).1;
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
-            Rng::ResQuery => out.put_f32(s::pow10f(s::range_step_exp(cur, v) - fine as i32)),
+            // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
+            // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
+            Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
             Rng::Auto => {
@@ -4168,7 +4279,10 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { s::range_max_item(cur) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                // Ohm MAX: 60 Mohm; 600 Mohm (experimental) only by a value
+                // above it.
+                let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
+                let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
@@ -4178,10 +4292,13 @@ impl App {
                     None => out.set_err("Data out of range"),
                 }
             }
+            // 600 Mohm: its digits follow the value and its conversions are
+            // fixed (dmm.rs Ohm600): a resolution sets nothing.
+            Rng::Res(_) if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => {}
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.
-                let coarse = x >= s::pow10f(s::range_step_exp(cur, v)) * 0.999;
+                let coarse = x >= s::pow10f(s::step_exp(v, cap)) * 0.999;
                 let r = if coarse {
                     dmm::Rate::Fast
                 } else if self.dmm.rate() == dmm::Rate::Fast {
@@ -4755,16 +4872,6 @@ impl App {
                 self.dmm.src_text(out);
                 true
             }
-            C::DbgOhmx(Some(r)) => {
-                if let Err(e) = self.dmm.ohmx_req(clk, r) {
-                    out.set_err(e);
-                }
-                false
-            }
-            C::DbgOhmx(None) => {
-                self.dmm.ohmx_text(out);
-                true
-            }
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);
@@ -4966,9 +5073,11 @@ impl App {
                 Some(())
             }
             C::TrigLevel(Some(v)) => {
-                // Volts at the probe tip, as TRIG:LEV? answers (probe applied).
-                let r = self.scope.vdiv();
-                sc.trig_row = (140.0 + sc.pos as f32 - v * 141.0 / (4.0 * r)) as i32;
+                // Volts at the probe tip, as TRIG:LEV? answers (probe
+                // applied), kept as given: the row was the one below the
+                // value (truncated), up to a row off, and an off-screen
+                // level became the edge row's volts (#80).
+                sc.trig_row = self.scope.set_trig_volts(v);
                 None
             }
             C::TrigLevel(None) => {

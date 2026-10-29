@@ -251,7 +251,6 @@ SECTIONS
         /* The power page after a coupling change (once per change). */
         *(.text.*8opendm403app9app_power*3App15pw_coup_changed*);
         *(.text.*8opendm403app9app_power*3App15pw_pending_draw*);
-        *(.text.*8opendm403dmm2pw*3Dmm10pw_pending);
         *(.text.*8opendm402ui8settings*);
         *(.text.*8opendm402ui9temp_page*);
         *(.text.*8opendm402ui8temp_key*);
@@ -327,6 +326,8 @@ SECTIONS
         *(.text.*8opendm408scope_ui7uncover*);
         /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
         *(.text.*8opendm403app*3App8dbg_idle*);
+        /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
+        *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);

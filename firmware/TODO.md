@@ -17,7 +17,8 @@ Additional requirements:
 - [ ] A current in the A jack is missed or misnamed in some modes (device, 2026-10-26: owner's PSU 20 mA CC
       into A / COM, V empty; the same on main 0.2.5 and on the #25 + #26 test build).
       - AC mV: no alert; the readout reads OL.
-      - Ohm: LIVE instead of A-JACK (31 MΩ).
+      - Ohm: LIVE instead of A-JACK (31 MΩ). Device 2026-10-29 (600 MΩ branch): the same on 600 Ω, 60 MΩ,
+        AUTO and 600 MΩ; the ~31 MΩ comes with the PSU's COM lead alone (a ground loop, inferred), not the A current.
       - Hz: no alert.
       DC V / AC V / continuity / diode / capacitance raise A-JACK in 0.9-1.8 s. On main, DC mV also raised a false
       A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
@@ -37,10 +38,13 @@ Additional requirements:
       - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
         = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
       Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
-- [ ] 600 MΩ range (experimental, ohm r7): calibrate on the device. The gain is the 6 MΩ calibration slot x 1.0
-      and the X-to-F offset 0; nothing on it is measured yet (settling, offset, scatter, the Q plan). Steps and the
-      `DBG:OHMX` knobs: [ohm-600m.md](docs/ohm-600m.md#device-calibration-plan); needs 100 MΩ .. 1 GΩ resistors
-      checked on another meter. Then: the found `GAIN` / `OFFS` into `Knobs::DEF`, a per-unit place for the gain.
+- [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
+      100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
+      the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
+      far up to 5.57 MΩ only. The leak is steady over 13 min (±1.5 %), 0.041 .. 0.059 nS over an evening. Also: whether the leak (learned on open leads, ~21 GΩ on one unit) is a
+      resistor across the jacks or depends otherwise on the jack voltage; the jack check (AD2 = OP1O) reads
+      FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ gives LIVE, as
+      every ohm range does (the A-jack item above).
 
 ## Open, by kind (2026-10-27)
 
@@ -62,13 +66,15 @@ One line per group of open items; quoted words are the start of an item. Open PR
   "Device check (3 min" and `DBG:TE?`.
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
-  offset"; "Ohm OL above 60 000 counts" (calibrator); "600 MΩ range (experimental)" (100 MΩ .. 1 GΩ resistors).
+  offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).
 - Generator on / looped back to CH1: "Scope in ngscopeclient" (3), (9); RUN key: its (2), (7).
 - Host systems and the stock: Windows / macOS in "Verify on device: swipe REC" and the two "Device: (... decision
   #6)" items; stock comparisons UF-02, UF-19.
+- USB cable and charger: the [charging indicator](#battery-charging-indicator-and-usb-badge-user-report-2026-10-28-branch-fixbattery-charging-indicator)
+  checks.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
 - Code: none open. "A stream starting inside a multi-block READ(10)" (#60, test only) and
@@ -88,6 +94,24 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Boot time (bug-fix-only rule): "Left: `vdisk::mirror_boot`" (0.3 s per boot).
 - New features (bug-fix-only rule): "UF-24 tempco", [Backlog](#backlog-user-ideas) "Inductance", "Browser client",
   "Protocol decoders", "Hardware note (HW-1", "sigrok/SmuView" (SmuView on the device, upstream).
+
+## Battery charging indicator and USB badge (user report 2026-10-28, branch fix/battery-charging-indicator)
+
+User: the battery icon does not show charging; ideally show the PC connection. Fix (#68): PB11 with the stock
+pull-up; green on the charger (PB10 = 1), the top bar blinking while charging (PB11 = 1), steady when charged
+(PB11 = STDBY low); a USB symbol while a host has the meter configured. Pin findings: hw/README.md pin table.
+Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4.5 s, then charged), PB10 low
+/ released checked with `DBG:CHG?` / `DBG:CHG:LOG?`.
+- [ ] Device check with a battery below 80 % (needs hours on battery first): the top bar blinks while charging;
+      the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
+- [x] The stock's PB10 drive measured on opendm40 (2026-10-29, hw/README.md Unknowns 5): PB10 low stops the
+      charge, released the charger goes to standby until the next replug. opendm40 does not drive PB10 and
+      charges to termination. The stock pulses PB10 low ~10 ms per 2 s below 80..85 % and reads the battery
+      during the pulse (disassembly; purpose *inferred*: a reading without the charge current).
+- [ ] (c) Owner decision: copy the stock's 10 ms PB10 pulse for the battery reading on USB power (the bars
+      read high while charging without it), or keep PB10 undriven.
+- [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
+      keeps the charged state.
 
 ## Owner decisions pending (2026-10-25)
 
@@ -503,8 +527,10 @@ the scope full record.
         DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= 37d3252's image); no
         shim bug found. The 60 s window is 60 s of RUNNING main loop since the last boot, not 60 s between
         resets (README wording fixed).
-  - [ ] T3 remaining on the device: the same triggers by hand (owner steps in docs/native-boot.md
-        "T3 recovery triggers: owner steps"); scope view stack high-water; first-boot timing.
+  - [ ] T3 remaining on the device: the boot and watchdog steps by hand (docs/native-boot.md
+        "Boot and watchdog: owner steps"; the hang-count entry into the loader was removed in 0.4.0,
+        owner 2026-10-29; the key hold and DBG:LOADER enter it through PA2, marker kept: "PA2 entry");
+        scope view stack high-water; first-boot timing.
   - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
         (c44ca81; verify on device)

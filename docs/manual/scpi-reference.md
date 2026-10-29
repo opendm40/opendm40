@@ -302,7 +302,7 @@ Functions:
 | Voltage, AC or DC chosen by the meter | `VOLTage:AUTO` | as DC voltage |
 | DC current | `CURRent[:DC]` | 0.0006, 0.006, 0.06, 0.6, 6, 10 A |
 | AC current, AC+DC current, AUTO | `CURRent:AC`, `CURRent:ACDC`, `CURRent:AUTO` | as DC current |
-| Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm; 600M ohm, experimental: a value above 60M selects it, `MAX` and `AUTO` never do |
+| Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm |
 | Continuity | `CONTinuity` | none |
 | Diode | `DIODe` | none |
 | Capacitance | `CAPacitance` | autorange only (6 nF .. 60 mF) |
@@ -385,6 +385,10 @@ Functions:
   AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
   off.
 - `:RANGe?` also reports the range while autoranging.
+- `RESistance:RANGe` above 60 MΩ selects the experimental 600 MΩ
+  (`+6.000000E+08`); `MAX` is 60 MΩ. `:RANGe:AUTO ON` leaves it. It reads
+  once per ~2 s, so `READ?` may answer with a reading up to 2 s old;
+  `:RESolution` sets nothing there (its digits follow the value).
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
@@ -565,7 +569,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
   multimeter-input scope); timebase, trigger, the queries and the waveform
   commands work on it.
-- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each),
+- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each; in
+  roll mode the middle of each column's min and max, 0 before data),
   `MAXimum` the whole acquisition record, `<n>` the record thinned to at
   most n points.
 - `WAVeform:FORMat`: `BYTE` one byte per point (the 10-bit code divided by
@@ -573,7 +578,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - `WAVeform:PREamble?`: format 0 BYTE / 1 WORD; type 0 screen columns, 2
   record; count 1. Point i is at time `(i - xref) * xinc + xorig` seconds
   from the trigger point (screen centre when untriggered) and has
-  `(data - yref) * yinc + yorig` volts.
+  `(data - yref) * yinc + yorig` volts (BYTE: the middle of the four codes
+  a byte stands for).
 - `WAVeform:DATA?` for the record (any POINts other than SCReen) needs the
   scope stopped (`STOP`, `SINGle` or `DIGitize`, then `TRIGger:STATus?` =
   `STOP`); while it runs the reply is `#10` with `Settings conflict`. Over
@@ -754,7 +760,7 @@ unless shown otherwise.
 |---|---|---|---|
 | `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
-| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>` | USB |
+| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
@@ -767,6 +773,10 @@ unless shown otherwise.
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
+| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
+| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
@@ -785,8 +795,9 @@ unless shown otherwise.
 | `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
-| `DBG:OHMX[?]` | `DEF`, `<knob>,<value>` (`TAP`, `PLAN`, `SKIP`, `OSR`, `NAVG`, `SETTLE`, `VET`, `GAIN`, `OFFS`, `RREF`), `ROW,<reg>,<value>` or `ROW,CLR`: the experimental 600 MΩ range's method, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md#tuning-on-the-device-dbgohmx)) | `<knobs>;<on>,<cycles>,<ok>,<V_x>,<V_fb>,<V_com>,<V_drop>,<V_d>,<R_cycle>,<R_window>;<5 AD1 codes>;<registers hex>;<overrides>` | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
+| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
+| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
@@ -825,7 +836,8 @@ unless shown otherwise.
 | `DBG:UPLoad:ABORt` | | Cancels the upload. | USB |
 | `DBG:UPLoad?` | | `<active 1/0>,<received>,<size>` | USB |
 | `DBG:UPDATE` | | Makes the vendor loader install the uploaded file: the meter restarts. | USB |
-| `DBG:RECOVER` | | Same as `DBG:UPDATE`. | USB |
+| `DBG:LOADER` | | Restarts into the vendor loader's update screen; the installed firmware stays. | USB |
+| `DBG:RECOVER` | | Same as `DBG:LOADER`. | USB |
 | `DBG:RESET` | | Restarts the meter. | USB |
 | `DBG:RELEASE` | | Stops feeding the watchdog: the meter resets in about 20 s and counts a crash. | USB |
 
@@ -833,7 +845,8 @@ unless shown otherwise.
   space; the bytes after the comma are binary and run to the end of the USB
   message. The offset is the number of bytes sent so far.
   `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
-- `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
-  file; without one it stays on its update screen with its own USB disk
-  until a firmware file is copied there. `DBG:RELEASE`: a second crash in a
-  row leads to the same screen.
+- `DBG:UPDATE`: the vendor loader installs the staged file; without one it
+  stays on its update screen with its own USB disk until a firmware file is
+  copied there.
+- `DBG:LOADER`: a staged file is installed; switching the meter off and on
+  leaves the loader and starts opendm40.

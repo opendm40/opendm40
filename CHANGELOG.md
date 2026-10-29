@@ -9,21 +9,85 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- **600 MΩ range, experimental** (not calibrated yet): **600MΩ EXP** on the
-  resistance range page or SCPI `RES:RANG 600E6`; AUTO and the AUTO key
-  never select it, and the screen shows **EXP** while it is on
+- **600 MΩ range, experimental:** on the range page or SCPI
+  `RES:RANG 600E6` only, never in AUTO; accuracy not specified. Leave the
+  leads open once: it learns the meter's own leakage
   ([manual](docs/manual/README.md#resistance)).
 
-  ![Before and after: the resistance range page](docs/changelog/v0.4.0/ohm-600m-range.png)
-
-  ![600 MΩ: EXP beside the test current](docs/changelog/v0.4.0/ohm-600m.png)
+  ![The 600 MΩ range page and reading](docs/changelog/v0.4.0/ohm-600m.png)
 
 ### Changed
 
+- **The update loader no longer opens by itself** after repeated hangs (a
+  hang restarts the meter).
+- **Leaving the update loader:** opened with the power-key hold or
+  `DBG:LOADER`, the loader now lets the installed firmware start again when
+  you switch the meter off and on; no reinstall is needed.
+  [How to reach it](docs/manual/README.md#reach-the-update-loader).
 - Smoother screen changes: pages, popups and DMM functions draw over the old
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
+
+### Fixed
+
+- **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
+  and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
+  ([manual](docs/manual/README.md#the-status-bar)).
+- **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
+  that reply for the next host to connect.
+- **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
+  longer lose the last reply; input lost to a full receive buffer is reported
+  (-363) instead of running cut commands.
+- **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
+  value), not `+0.000000E-03`.
+- **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
+  (`SYST:BEEP:VOL`, `SYST:ALER:ENAB`, `LOG:OSR`, `LOG:DUR`, `LOG:SRAT`, `LOG:CSV:INT` / `DUR`);
+  `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
+- SCPI: `INRush:THReshold` and `POWer:PHASe` with a number out of range queue
+  `-222 Data out of range`, not `-224 Illegal parameter value`.
+- `DBG:PING?`: the keepalive field reads `4294967295` (no limit) after boot
+  instead of a wrapped number ([#97](https://github.com/opendm40/opendm40/issues/97)).
+- **Limits:** a huge limit set over SCPI (`CALC:LIM:UPP 1E20`) no longer restarts
+  the meter when the Hold/Limits page opens.
+- Multimeter: a value that rounds to zero shows no minus sign (open DC V
+  leads showed "-0.0000").
+- **SCPI:** `TRIGger:LEVel` keeps the level as given; it was up to one screen
+  row lower (0.1 V became 0.113 V at 500 mV/div).
+- SCPI: `WAVeform:DATA?` in BYTE format is no longer 1.5 codes low on
+  average (the preamble's `yorig` is the middle of a byte's four codes).
+- Scope: the V/div label is right with x2, x5 and the other non-decade
+  probes (x5 at 2.5 V/div showed 2V).
+- Scope page: **REC** in red in the top bar while a recording runs, in place
+  of MCX | DMM ([#101](https://github.com/opendm40/opendm40/issues/101)).
+- **Gallery:** the recording in progress reads **Recording** instead of **No data**, and its
+  **Delete** says **Stop the recording** instead of **Disk busy, try again**.
+- A function change over USB / Bluetooth closes the power meter's wiring
+  and "Reset energy?" dialogs and the fuse check dialog (they stayed over a
+  page no longer updated).
+- Hold & Limits: MENU and Back return to the range page (Power Settings)
+  it was opened from, not to the multimeter page.
+- Temperature page: the cold junction line follows the readings and the
+  offset while the page is open.
+- Inrush: the Trigger - / + no longer step the wrong way from a threshold
+  set over SCPI below 0.2 A or above 10 A.
+- Bargraph scale: the unit spelled as the reading beside it (600 KΩ, not
+  600 kOhm).
+- **Scope, stopped:** a zoom, or a Single capture that ended, right after a
+  screenshot kept the old trace on the screen.
+- Scope: Duty, Wid, Vtop, Vbas and Vamp are right on triangle and ramp
+  signals (they jumped, e.g. 65 % duty on a triangle).
+- Scope roll mode: the measurements show -- instead of the values from
+  before roll started; `WAV:DATA?` follows the rolling trace.
+- Scope: text stays readable in every channel colour (dark on a yellow, gold
+  or pink math panel; white on a blue or purple CH1; a lighter blue, purple or
+  brown for the trigger level, measurements and FFT labels).
+- DMM trend chart: a range change to another unit that reads OL (6 V to
+  600 mV on 3.3 V) starts the chart over in the new unit.
+- Power meter: no multimeter MAX / AVG / REL / MIN column while the page
+  shows "I ranging...".
+- Combined view: the meter strip shows **POWER**, the range and dashes while
+  the power meter ranges, not an empty strip.
 
 ## v0.3.0 (2026-10-27)
 

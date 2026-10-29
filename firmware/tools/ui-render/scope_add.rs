@@ -84,8 +84,93 @@ fn srate(ck: &mut Checker, out: &str) {
     println!("scope sample rate (timebase list): widest rate \"{}\" {} px, widest time {wt} px", widest.1, widest.0);
 }
 
+/// WCAG contrast ratio of two RGB565 colours.
+fn contrast(a: u16, b: u16) -> f32 {
+    let lum = |c: u16| {
+        let ch = |v: u32, max: u32| {
+            let v = (v * 255 / max) as f32 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * ch((c >> 11) as u32 & 31, 31) + 0.7152 * ch((c >> 5) as u32 & 63, 63) + 0.0722 * ch(c as u32 & 31, 31)
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// Panel and badge text on the user's channel colours (CH1_INK, MATH_INK)
+/// and channel-coloured text on the dark bar (PAL_TEXT: trigger badge,
+/// measurement strip, FFT labels): every palette entry reads at least as
+/// well as the stock default math panel (white on orange); the defaults
+/// keep the stock text colours; PAL_TEXT is the palette colour wherever
+/// that already reads so; the drawn CHA / math label buttons, the V/div
+/// badge, the trigger badge and a measurement cell use them.
+fn ink_contrast(ck: &mut Checker, out: &str) {
+    use scope_ui::{CH1_INK, C_BAR, C_FILL, C_WHITE, MATH_INK, PALETTE, PAL_TEXT};
+    let floor = contrast(PALETTE[1], C_WHITE) - 0.01;
+    let base = &stock::scenes()[0];
+    ck.cases += 1;
+    if CH1_INK[base.m.colour as usize] != C_FILL || MATH_INK[base.m.math_colour as usize] != C_WHITE {
+        ck.fail("ink/default", "default CH1 / math text colour differs from the stock".into());
+    }
+    for i in 0..9usize {
+        for (what, ink) in [("CH1", CH1_INK[i]), ("math", MATH_INK[i])] {
+            ck.cases += 1;
+            let c = contrast(PALETTE[i], ink);
+            if c < floor {
+                ck.fail(&format!("ink/{what}/{i}"), format!("{what} text on {} {c:.2}:1 < {floor:.2}:1", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+        ck.cases += 1;
+        let c = contrast(PAL_TEXT[i], C_BAR);
+        let keep = contrast(PALETTE[i], C_BAR) >= floor;
+        if c < floor || (keep && PAL_TEXT[i] != PALETTE[i]) {
+            ck.fail(&format!("ink/text/{i}"), format!("{} text on the bar {c:.2}:1 (floor {floor:.2}:1), palette kept: {keep}", scope_ui::COLOUR_NAMES[i]));
+        }
+        let mut m = base.m;
+        m.colour = i as u8;
+        m.math_colour = i as u8;
+        m.math_on = true;
+        host::reset(0);
+        scope_ui::invalidate();
+        scope_ui::update(&m);
+        scope_ui::meas_cell(&m, 0, "Freq:1.00kHz");
+        if i == 4 {
+            save(out, "s08-ink-ch1-blue");
+        }
+        // CHA button (B_RECT[1]), math label button (B_RECT[4]), V/div badge.
+        for (what, r, fill, ink) in [
+            ("CHA", scope_ui::B_RECT[1], PALETTE[i], CH1_INK[i]),
+            ("math", scope_ui::B_RECT[4], PALETTE[i], MATH_INK[i]),
+            ("V/div badge", stockfont::rect(304, 1, 44, 17), PALETTE[i], CH1_INK[i]),
+            // Text in the channel colour on the bar: fill = the bar.
+            ("trigger badge", stockfont::rect(364, 2, 49, 15), C_BAR, PAL_TEXT[i]),
+            ("measurement cell", stockfont::rect(14, 303, 96, 15), C_BAR, PAL_TEXT[i]),
+        ] {
+            let e = emu();
+            let (mut n_fill, mut n_ink, mut other) = (0, 0, 0);
+            for y in r.y..r.y + r.h {
+                for x in r.x..r.x + r.w {
+                    let c = e.fb[y as usize * W + x as usize];
+                    if c == fill {
+                        n_fill += 1;
+                    } else if c == ink {
+                        n_ink += 1;
+                    } else if c == if fill == C_BAR { if PALETTE[i] != ink { PALETTE[i] } else { 0x0001 } } else if ink == C_FILL { C_WHITE } else { C_FILL } {
+                        other += 1;
+                    }
+                }
+            }
+            ck.cases += 1;
+            if n_fill == 0 || n_ink == 0 || other > 0 {
+                ck.fail(&format!("ink/draw/{what}/{i}"), format!("{what} on {}: fill {n_fill} px, ink {n_ink} px, the other text colour {other} px", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+    }
+}
+
 pub fn run(ck: &mut Checker, out: &str) {
     srate(ck, out);
+    ink_contrast(ck, out);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;
@@ -379,6 +464,56 @@ pub fn run(ck: &mut Checker, out: &str) {
             scope_ui::update(&b.m);
             scope_ui::cells(&b.m, &b.cells);
             ck.same_as(&format!("wave/update/{i}->{j}"), &want);
+            nw += 1;
+        }
+    }
+    // A CSV recording on the Scope page (Model::rec, issue #101): red "REC"
+    // in the source badge's slot, the record bar beside it (also on the
+    // stock page of builds without the stream ISR, SRC_NONE): running,
+    // stopped with its brackets, roll, the generator frequency; updates
+    // between them and to / from no recording equal fresh draws.
+    let rec_scene = |src: u8, status: u8, roll: bool, gen: bool| {
+        let mut sc = wave_scene(src, 0, status, roll, 3);
+        sc.name = "rec";
+        sc.m.rec = true;
+        sc.m.gen_hz = if gen { 1000.0 } else { 0.0 };
+        sc
+    };
+    for src in [scope_ui::SRC_NONE, scope_ui::SRC_MCX] {
+        for (status, roll, gen) in [(scope_ui::ST_TD, false, false), (scope_ui::ST_STOP, false, false), (scope_ui::ST_RUN, true, false), (scope_ui::ST_TD, false, true)] {
+            let sc = rec_scene(src, status, roll, gen);
+            stock::draw(&sc);
+            let name = format!("rec/{src}/{status}/{}/{}", roll as u8, gen as u8);
+            ck.check_replica(&name);
+            ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+            nw += 1;
+            if src == scope_ui::SRC_MCX && status == scope_ui::ST_STOP {
+                save(out, "s05-rec-badge");
+            }
+            if src == scope_ui::SRC_NONE && gen {
+                save(out, "s05-rec-badge-stock-gen");
+            }
+        }
+    }
+    let states = [
+        stock::Scene { name: "rec", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
+        wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false),
+        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false),
+        rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true),
+    ];
+    for (i, a) in states.iter().enumerate() {
+        for (j, b) in states.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            stock::draw(b);
+            let want = emu().fb.clone();
+            stock::draw(a);
+            stock::load(b);
+            scope_ui::update(&b.m);
+            scope_ui::cells(&b.m, &b.cells);
+            ck.same_as(&format!("rec/update/{i}->{j}"), &want);
             nw += 1;
         }
     }

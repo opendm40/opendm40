@@ -564,12 +564,6 @@ fn nan(dec: u8, unit: &'static str) -> Val {
     Val { v: f32::NAN, dec, unit, ol: false, ext: false }
 }
 
-/// A manual-range reading (MANU / the range in the status bar).
-fn manu(mut r: Reading) -> Reading {
-    r.auto = false;
-    r
-}
-
 /// A provisional reading (dimmed: the placeholder, a value a gate holds).
 fn prov(mut r: Reading) -> Reading {
     r.prov = true;
@@ -578,14 +572,13 @@ fn prov(mut r: Reading) -> Reading {
 
 /// The HY3131 range a reading of `mode` in `unit` with `dec` decimals is on
 /// (the accuracy label picks its row by it): mV 600 mV (r1), ohm 60 Mohm
-/// (MΩ with 3 decimals, r6), 600 Mohm (MΩ with 1 decimal, r7, the
-/// experimental range, no row), 60 ohm (Ω with 3 decimals, r0, no row) else
+/// (MΩ with 3 decimals, r6), 60 ohm (Ω with 3 decimals, r0, no row) else
 /// 600 ohm .. 6 Mohm (r1..r5 share a row),
 /// capacitance by unit and decimals (dmm.rs cap_val), else r0.
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
-        10 if unit == "M\u{3a9}" && dec == 1 => 7,
+        10 if unit == "M\u{3a9}" && dec == 1 => dmm::OHM600,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
         10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
@@ -653,6 +646,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acma_bd_ol", rd(5, ol(3, "mA"), Some(val(50.000, 3, "Hz")), Some(ol(2, "mV")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
+        // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
+        ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
+        ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.
@@ -703,12 +699,6 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // An ohm conversion before the vet (dmm.rs OHM_VET_*: the range hunt).
         ("pv_ohm", prov(rd(10, val(219.40, 2, "\u{3a9}"), None, None, false)), None),
         ("pv_ohm_m", prov(rd(10, val(8.7800, 4, "M\u{3a9}"), None, None, false)), None),
-        // The experimental 600 Mohm range (dmm.rs OHM_EXP): manual only,
-        // 600.0 Mohm, the "EXP" mark beside the test current; OL; settling.
-        ("ohm_600m", manu(rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false)), None),
-        ("ohm_600m_neg", manu(rd(10, val(-0.4, 1, "M\u{3a9}"), None, None, false)), None),
-        ("ohm_600m_ol", manu(rd(10, ol(1, "M\u{3a9}"), None, None, false)), None),
-        ("pv_ohm_600m", prov(manu(rd(10, val(612.3, 1, "M\u{3a9}"), None, None, false))), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -723,6 +713,16 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
     v.extend(extra);
     // Power meter readings (strip: "POWER", aux V / I; DMM page).
     v.extend(pw_cases().into_iter().map(|(n, p)| (n, pw_rd(p), None)));
+    // The combined view before the first power reading (App::pw_strip_wait,
+    // #108): dimmed dashes, the V once measured (worst: 1000 V range), no I.
+    for (n, a1) in [("pw_wait", None), ("pw_wait_v", Some(val(-1049.9, 1, "V")))] {
+        let p = pw_cases().into_iter().find(|c| c.0 == "pending-acdc").map(|c| c.1).unwrap();
+        let mut r = pw_rd(p);
+        r.prov = true;
+        r.aux1 = a1;
+        r.aux2 = None;
+        v.push((n, r, None));
+    }
     v
 }
 
@@ -738,7 +738,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -762,6 +762,7 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     host::reset(0);
     let mut m = scope_ui::Model::DEFAULT;
     m.combined = true;
+    m.usb = true;
     scope_ui::invalidate();
     scope_ui::strip_invalidate();
     scope_ui::graph().clear();
@@ -1125,6 +1126,37 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
         ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
     }
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
+/// The bargraph's full-scale label ends with the unit as the readout and
+/// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
+/// kOhm"): the label's last columns (right-aligned at the bar's end, row
+/// 161..172) hold exactly the ink of `unit_text` drawn alone there.
+fn bar_unit_check(ck: &mut Checker, scene: &str, r: &Reading) {
+    use stockfont as sf;
+    if r.mode == 15 {
+        return; // temperature: no scale labels
+    }
+    let mut ub = [0u8; 16];
+    let u = sf::unit_text(r.main.unit, &mut ub).to_string();
+    let b = &ui::BAR_RECT;
+    let end = bargraph::Bar::new(b.0, b.1, b.2, b.3, false).end_x() as i32;
+    let w = sf::text_width(sf::F14, &u, 1) as i32;
+    let bg = ui::BG;
+    let mask = |x0: i32| -> Vec<bool> {
+        let e = emu();
+        (161..173).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
+    };
+    let got = mask(end - w - 2);
+    let snap = host::snapshot();
+    lcd::fill_rect((end - 120) as u16, 161, 120, 12, bg);
+    sf::label(sf::F14, sf::rect((end - 120) as i16, 161, 120, 12), &u, ui::DIM, bg, 4, 1);
+    let want = mask(end - w - 2);
+    host::restore(&snap);
+    ck.cases += 1;
+    if got != want {
+        ck.fail(&format!("bar-unit/{scene}"), format!("bargraph full-scale label does not end with {u:?}"));
+    }
 }
 
 fn save(out: &str, name: &str) {
@@ -1634,12 +1666,51 @@ fn main() {
                 m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
                 m.battery = vdiv % 6;
                 m.charging = k == 0;
+                m.usb = true;
                 host::reset(0);
                 scope_ui::invalidate();
                 scope_ui::graph().clear();
                 scope_ui::update(&m);
                 ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
+        }
+    }
+    // 3a. Scope top bar with the USB symbol: states for the contact sheet
+    //     (<out>/scopebar/, 2x): plain, USB, USB + charging, roll + long
+    //     trigger text + generator, STOP, the wave view's amps, combined.
+    {
+        let dir = format!("{out}/scopebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = scope_ui::Model::DEFAULT;
+        let mut v: Vec<(&str, scope_ui::Model)> = vec![("plain", base)];
+        let mut m = base;
+        m.usb = true;
+        v.push(("usb", m));
+        m.charging = true;
+        m.battery = 5;
+        v.push(("usb-charged", m));
+        let mut r = m;
+        r.roll = true;
+        r.tb = 29;
+        r.trig_v = -444.4e-3;
+        r.rising = false;
+        r.gen_hz = 10.0e6;
+        r.battery = 0;
+        v.push(("usb-roll-long", r));
+        let mut st = m;
+        st.status = 3;
+        st.trig_v = 9.876e3;
+        v.push(("usb-stop", st));
+        let mut c = m;
+        c.combined = true;
+        v.push(("usb-combined", c));
+        for (name, m) in v {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("scopebar/{name}"));
+            host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
     // Every measurement item, worst values, in every cell.
@@ -1663,7 +1734,7 @@ fn main() {
     for l in &labels {
         for hold in 0..4u8 {
             for (auto, plus) in [(true, false), (true, true), (false, false)] {
-                for (locked, csv) in [(false, false), (true, true), (false, true), (true, false)] {
+                for (k, (locked, csv)) in [(false, false), (true, true), (false, true), (true, false)].into_iter().enumerate() {
                     host::reset(0);
                     let mut r = cases[0].1;
                     r.auto = auto;
@@ -1674,6 +1745,8 @@ fn main() {
                     let mut s = status(0);
                     s.locked = locked;
                     s.csv = csv;
+                    // Battery: charged (steady green), charging (both blink phases), empty.
+                    (s.bars, s.charging) = [(5, true), (4, true), (3, true), (0, true)][k];
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
@@ -1731,6 +1804,57 @@ fn main() {
                 if hold == 0 && alert == sentinel::Alert::None {
                     host::save_ppm(&format!("{dir}/{name}.ppm"), 1);
                 }
+            }
+        }
+    }
+
+    // 5c. Status block states (BT, USB host, REC, lock, battery level,
+    //     charging blink phases): DMM bar and generator bar, 2x renders in
+    //     <out>/statusbar/ (the contact sheet of the states).
+    {
+        let dir = format!("{out}/statusbar");
+        std::fs::create_dir_all(&dir).unwrap();
+        // (name, bt, usb, csv, locked, bars, charging)
+        // `charging` = on a charger (green); the blink is the caller's level.
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+            ("plain", false, false, false, false, 4, false),
+            ("charged", false, true, false, false, 5, true),
+            ("usb", false, true, false, false, 4, false),
+            ("bt-usb", true, true, false, false, 5, false),
+            ("all", true, true, true, true, 5, false),
+            ("chg-a", false, true, false, false, 3, true),
+            ("chg-b", false, true, false, false, 2, true),
+            ("chg-empty-a", true, true, true, true, 0, true),
+            ("chg-empty-b", true, true, true, true, 1, true),
+            ("bt-nousb", true, false, true, false, 1, false),
+        ];
+        for (name, bt, usb, csv, locked, bars, charging) in states {
+            for gen in [false, true] {
+                host::reset(0);
+                let mut r = cases[0].1;
+                r.auto = true;
+                if gen {
+                    ui::gen_static(&w.gen);
+                } else {
+                    dv.label = None;
+                    dv.draw_static(Button::Volt, 1, false, false);
+                    dv.reading(&r, 0, 0);
+                }
+                let mut st = status(0);
+                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging) = (bt, usb, csv, locked, bars, charging);
+                let h = if gen { 36 } else { ui::BAR_H as usize };
+                if gen {
+                    ui::gen_status(&st);
+                } else {
+                    ui::status_right(&st);
+                }
+                let keep = h * W;
+                for p in emu().owner[keep..].iter_mut() {
+                    *p = 0;
+                }
+                let tag = if gen { "gen" } else { "dmm" };
+                ck.check(&format!("statusbar/{tag}-{name}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, h as i32))]);
+                host::save_ppm(&format!("{dir}/{tag}-{name}.ppm"), 2);
             }
         }
     }
@@ -2314,8 +2438,8 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
-            // The ohm page has no note (app.rs: the Voltage page only): its
-            // note row holds the 600 Mohm item.
+            // The app draws a note on the Voltage page only; the Resistor
+            // page's note row holds its 600 Mohm item.
             if b == Button::Ohm && note.is_some() {
                 continue;
             }
@@ -2767,7 +2891,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 16] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -2784,6 +2908,7 @@ fn main() {
         ("c19-auto-dcv", "auto_dcv", 0, 0, false, false),
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
+        ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -2798,6 +2923,9 @@ fn main() {
         host::reset(0);
         let (r, _) = find("dcv");
         dv.label = None;
+        // The history row (Settings 2/3 "DMM row": History): the app turns
+        // the bargraph row off first, so no accuracy label clears a box.
+        dv.bar_on = false;
         dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(4.8170, 4, "V"); 5], 3, 2);
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
@@ -2835,6 +2963,7 @@ fn main() {
             let v = if r.main.ol { 1.0 } else { r.main.v };
             let pts: Vec<f32> = (0..321).map(|i| v + ((i / 40) % 3) as f32 * v.abs() * 1e-4).collect();
             ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            bar_unit_check(&mut ck, file, &r);
             save(&out, file);
         }
         for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc"), ("a34-acc-strip-ohm-neg", "ohm_neg")] {
@@ -2927,6 +3056,7 @@ fn main() {
             ui::status_right(&status(0));
             save(&out, file);
         }
+        dv.bar_on = true;
         // A function switch (switch-latency.md proposals 1 / 6): the page
         // as it was before (blank readout until the first reading), the
         // placeholder, provisional values, and the settled value after.
@@ -3145,8 +3275,7 @@ fn main() {
             // A range change 6 M -> 60 M (no test current): the label goes
             // (device check 2f56ff9: "I 0.22 uA" stayed on 60 M). Each range
             // pair against the screen drawn fresh on the second range.
-            // 600 Mohm (r7) in and out: its "EXP" goes with it.
-            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6), (7, 6), (6, 7), (7, 5), (5, 7)] {
+            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6)] {
                 let (r, _) = find("ohm_k");
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
@@ -3171,21 +3300,6 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
-        // The experimental 600 Mohm range: "600MΩ" in the status bar, "EXP"
-        // beside the test current; its item on the range page.
-        host::reset(0);
-        let (r, _) = find("ohm_600m");
-        let mut dv7 = ui::DmmView::new();
-        dv7.label = None;
-        dv7.draw_static(Button::Ohm, r.mode, false, false);
-        dv7.bar_update(&r);
-        dv7.reading(&r, 0, 0);
-        ui::status_right(&status(0));
-        ck.check("dmm-ohm-600m", &dmm_page_regions);
-        save(&out, "d07-dmm-ohm-600m");
-        host::reset(0);
-        ui::range_page(Button::Ohm, Some(8), 0, None);
-        save(&out, "m07b-range-ohm-600m");
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");
