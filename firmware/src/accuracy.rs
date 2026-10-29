@@ -50,7 +50,7 @@ const SPLIT: [i8; 2] = [6, 5];
 
 /// The manual's row for HY3131 `mode` / `range` (dmm.rs numbering), or
 /// None where the manual gives none: AC+DC (`acdc`), the 60 mV ranges
-/// (DC / AC mV r0) and 60 ohm (ohm r0), opendm40 only, temperature with any sensor but the
+/// (DC / AC mV r0), 60 ohm (ohm r0) and 600 Mohm (ohm r7), opendm40 only, temperature with any sensor but the
 /// K thermocouple (`tc` false: PT100 / PT1000 / NTC are opendm40 only),
 /// the power meter (not a mode here) and unknown modes. `f`: the reading
 /// is in deg F (temperature only).
@@ -63,6 +63,10 @@ pub fn spec(mode: u8, range: i8, acdc: bool, tc: bool, f: bool) -> Option<Spec> 
     }
     let m = *MODE_ROW.get(mode as usize)?;
     if m & 0x40 != 0 && range < 1 {
+        return None;
+    }
+    // Ohm r7, the experimental 600 Mohm (opendm40 only).
+    if mode == 10 && range > 6 {
         return None;
     }
     let mut row = (m & 0x3F) as usize;

@@ -11,7 +11,7 @@ fn save1(out: &str, name: &str) {
 
 /// An ordinary status bar: 00:12:34 since power-on, no REC, no BT host.
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
 }
 
 const DMM_REGIONS: [(&str, Bx); 7] = [
@@ -647,6 +647,11 @@ pub fn run(out: &str) -> usize {
         ui::status_right(&ui::Status { bt: true, csv: true, ..status_real() });
         ck.check("manual/status-all", &DMM_REGIONS);
         save1(out, "status-all");
+        // The status-bar picture: the same with a USB host attached.
+        dmm_page(&Dp { csv: true, ..dp(dcv) });
+        ui::status_right(&ui::Status { bt: true, csv: true, usb: true, ..status_real() });
+        ck.check("manual/status-usb", &DMM_REGIONS);
+        save1(out, "status-usb");
         dmm_page(&dp(dcv));
         ui::status_right(&ui::Status { locked: true, bt: true, ..status_real() });
         ck.check("manual/status-locked", &DMM_REGIONS);

@@ -7,12 +7,38 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **600 MΩ range, experimental** (not calibrated yet): **600MΩ EXP** on the
+  resistance range page or SCPI `RES:RANG 600E6`; AUTO and the AUTO key
+  never select it, and the screen shows **EXP** while it is on
+  ([manual](docs/manual/README.md#resistance)).
+
+  ![Before and after: the resistance range page](docs/changelog/v0.4.0/ohm-600m-range.png)
+
+  ![600 MΩ: EXP beside the test current](docs/changelog/v0.4.0/ohm-600m.png)
+
 ### Changed
+
+- **The update loader no longer opens by itself** after repeated hangs (a
+  hang restarts the meter).
+- **Leaving the update loader:** opened with the power-key hold or
+  `DBG:LOADER`, the loader now lets the installed firmware start again when
+  you switch the meter off and on; no reinstall is needed.
+  [How to reach it](docs/manual/README.md#reach-the-update-loader).
+- Smoother screen changes: pages, popups and DMM functions draw over the old
+  screen, not over a blank one; an MF menu tab redraws only the menu.
 
 - **Bargraph / history row:** a double tap on the row switches between the
   bargraph and the history boxes (before: Settings > More > DMM row only).
 - **Combined view:** the meter strip's reading is in the multimeter's orange
   instead of yellow.
+
+### Fixed
+
+- **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
+  and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
+  ([manual](docs/manual/README.md#the-status-bar)).
 
 ## v0.3.0 (2026-10-27)
 

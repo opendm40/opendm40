@@ -835,6 +835,41 @@ fn hit_tests(ck: &mut Ck) {
         }
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }
+    // The AUTO key's short press (ui::range_key_next, app.rs auto_key_end):
+    // the ohm cycle 60 ohm .. 60 Mohm never reaches the experimental 600
+    // Mohm (item 8, code 7), from autorange nor from any manual range; from
+    // 600 Mohm it goes to the first item.
+    {
+        let b = dmm::Button::Ohm;
+        let items = ui::range_items(b);
+        let exp = items.iter().position(|it| it.1 == Some(7));
+        let auto = items.iter().position(|it| it.1.is_none());
+        ck.t("ohm items: 600M after AUTO", matches!((exp, auto), (Some(e), Some(a)) if e > a));
+        let mut seen = std::collections::BTreeSet::new();
+        for cur in 0..items.len() {
+            for a in [false, true] {
+                if let Some(c) = ui::range_key_next(b, Some(cur), a) {
+                    seen.insert(c);
+                }
+            }
+        }
+        ck.t("AUTO key: never 600M (code 7)", !seen.contains(&7) && seen == (0..=6).collect());
+        let mut c = ui::range_key_next(b, None, true);
+        let mut cycle = vec![];
+        for _ in 0..9 {
+            let i = items.iter().position(|it| it.1 == c).unwrap();
+            c = ui::range_key_next(b, Some(i), false);
+            cycle.push(c.unwrap());
+        }
+        ck.t(&format!("AUTO key cycle {cycle:?}"), cycle == [1, 2, 3, 4, 5, 6, 0, 1, 2]);
+        ck.t("AUTO key from 600M: 60 ohm", ui::range_key_next(b, exp, false) == Some(0) && ui::range_key_next(b, exp, true) == Some(0));
+        ck.t("AUTO key in autorange on 60M: 60M manual", ui::range_key_next(b, Some(6), true) == Some(6));
+        // V / A unchanged: 60 mV .. 1000 V, wrapping.
+        let v = dmm::Button::Volt;
+        ck.t("AUTO key V 1000 V -> 60 mV", ui::range_key_next(v, Some(5), false) == Some(5) && ui::range_key_next(v, Some(4), false) == Some(4));
+        // The status bar's range text: "600MΩ" (EXP is on the DMM page).
+        ck.t("range label 600M", ui::range_label(10, 7) == Some("600M\u{3a9}") && ui::range_label(10, 6) == Some("60M\u{3a9}"));
+    }
     host::reset(0);
     // Temperature page: every key of both layouts (NTC user adds R25 / Beta).
     for k in [0u8, 6] {

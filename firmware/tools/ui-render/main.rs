@@ -564,6 +564,12 @@ fn nan(dec: u8, unit: &'static str) -> Val {
     Val { v: f32::NAN, dec, unit, ol: false, ext: false }
 }
 
+/// A manual-range reading (MANU / the range in the status bar).
+fn manu(mut r: Reading) -> Reading {
+    r.auto = false;
+    r
+}
+
 /// A provisional reading (dimmed: the placeholder, a value a gate holds).
 fn prov(mut r: Reading) -> Reading {
     r.prov = true;
@@ -572,12 +578,14 @@ fn prov(mut r: Reading) -> Reading {
 
 /// The HY3131 range a reading of `mode` in `unit` with `dec` decimals is on
 /// (the accuracy label picks its row by it): mV 600 mV (r1), ohm 60 Mohm
-/// (MΩ with 3 decimals, r6), 60 ohm (Ω with 3 decimals, r0, no row) else
+/// (MΩ with 3 decimals, r6), 600 Mohm (MΩ with 1 decimal, r7, the
+/// experimental range, no row), 60 ohm (Ω with 3 decimals, r0, no row) else
 /// 600 ohm .. 6 Mohm (r1..r5 share a row),
 /// capacitance by unit and decimals (dmm.rs cap_val), else r0.
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
+        10 if unit == "M\u{3a9}" && dec == 1 => 7,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
         10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
@@ -695,6 +703,12 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // An ohm conversion before the vet (dmm.rs OHM_VET_*: the range hunt).
         ("pv_ohm", prov(rd(10, val(219.40, 2, "\u{3a9}"), None, None, false)), None),
         ("pv_ohm_m", prov(rd(10, val(8.7800, 4, "M\u{3a9}"), None, None, false)), None),
+        // The experimental 600 Mohm range (dmm.rs OHM_EXP): manual only,
+        // 600.0 Mohm, the "EXP" mark beside the test current; OL; settling.
+        ("ohm_600m", manu(rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false)), None),
+        ("ohm_600m_neg", manu(rd(10, val(-0.4, 1, "M\u{3a9}"), None, None, false)), None),
+        ("ohm_600m_ol", manu(rd(10, ol(1, "M\u{3a9}"), None, None, false)), None),
+        ("pv_ohm_600m", prov(manu(rd(10, val(612.3, 1, "M\u{3a9}"), None, None, false))), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -724,7 +738,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -748,6 +762,7 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     host::reset(0);
     let mut m = scope_ui::Model::DEFAULT;
     m.combined = true;
+    m.usb = true;
     scope_ui::invalidate();
     scope_ui::strip_invalidate();
     scope_ui::graph().clear();
@@ -1059,6 +1074,26 @@ pub fn touchcal_scene(k: u8, long: bool) {
                 tt::cal_status(Some(touchcal::to_f32(&f.cal)));
             }
         }
+    }
+}
+
+/// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
+/// in a batch over an arbitrary previous screen ends pixel-identical to the
+/// page drawn directly.
+fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    draw();
+    let a = host::emu().fb.clone();
+    host::reset(0);
+    lcd::defer_start();
+    draw();
+    lcd::defer_flush();
+    unsafe { host::PATTERN = false };
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("deferred fills: {n} px differ from the direct draw"));
     }
 }
 
@@ -1569,12 +1604,51 @@ fn main() {
                 m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
                 m.battery = vdiv % 6;
                 m.charging = k == 0;
+                m.usb = true;
                 host::reset(0);
                 scope_ui::invalidate();
                 scope_ui::graph().clear();
                 scope_ui::update(&m);
                 ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
+        }
+    }
+    // 3a. Scope top bar with the USB symbol: states for the contact sheet
+    //     (<out>/scopebar/, 2x): plain, USB, USB + charging, roll + long
+    //     trigger text + generator, STOP, the wave view's amps, combined.
+    {
+        let dir = format!("{out}/scopebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = scope_ui::Model::DEFAULT;
+        let mut v: Vec<(&str, scope_ui::Model)> = vec![("plain", base)];
+        let mut m = base;
+        m.usb = true;
+        v.push(("usb", m));
+        m.charging = true;
+        m.battery = 5;
+        v.push(("usb-charged", m));
+        let mut r = m;
+        r.roll = true;
+        r.tb = 29;
+        r.trig_v = -444.4e-3;
+        r.rising = false;
+        r.gen_hz = 10.0e6;
+        r.battery = 0;
+        v.push(("usb-roll-long", r));
+        let mut st = m;
+        st.status = 3;
+        st.trig_v = 9.876e3;
+        v.push(("usb-stop", st));
+        let mut c = m;
+        c.combined = true;
+        v.push(("usb-combined", c));
+        for (name, m) in v {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("scopebar/{name}"));
+            host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
     // Every measurement item, worst values, in every cell.
@@ -1598,7 +1672,7 @@ fn main() {
     for l in &labels {
         for hold in 0..4u8 {
             for (auto, plus) in [(true, false), (true, true), (false, false)] {
-                for (locked, csv) in [(false, false), (true, true), (false, true), (true, false)] {
+                for (k, (locked, csv)) in [(false, false), (true, true), (false, true), (true, false)].into_iter().enumerate() {
                     host::reset(0);
                     let mut r = cases[0].1;
                     r.auto = auto;
@@ -1609,6 +1683,8 @@ fn main() {
                     let mut s = status(0);
                     s.locked = locked;
                     s.csv = csv;
+                    // Battery: charged (steady green), charging (both blink phases), empty.
+                    (s.bars, s.charging) = [(5, true), (4, true), (3, true), (0, true)][k];
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
@@ -1666,6 +1742,57 @@ fn main() {
                 if hold == 0 && alert == sentinel::Alert::None {
                     host::save_ppm(&format!("{dir}/{name}.ppm"), 1);
                 }
+            }
+        }
+    }
+
+    // 5c. Status block states (BT, USB host, REC, lock, battery level,
+    //     charging blink phases): DMM bar and generator bar, 2x renders in
+    //     <out>/statusbar/ (the contact sheet of the states).
+    {
+        let dir = format!("{out}/statusbar");
+        std::fs::create_dir_all(&dir).unwrap();
+        // (name, bt, usb, csv, locked, bars, charging)
+        // `charging` = on a charger (green); the blink is the caller's level.
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+            ("plain", false, false, false, false, 4, false),
+            ("charged", false, true, false, false, 5, true),
+            ("usb", false, true, false, false, 4, false),
+            ("bt-usb", true, true, false, false, 5, false),
+            ("all", true, true, true, true, 5, false),
+            ("chg-a", false, true, false, false, 3, true),
+            ("chg-b", false, true, false, false, 2, true),
+            ("chg-empty-a", true, true, true, true, 0, true),
+            ("chg-empty-b", true, true, true, true, 1, true),
+            ("bt-nousb", true, false, true, false, 1, false),
+        ];
+        for (name, bt, usb, csv, locked, bars, charging) in states {
+            for gen in [false, true] {
+                host::reset(0);
+                let mut r = cases[0].1;
+                r.auto = true;
+                if gen {
+                    ui::gen_static(&w.gen);
+                } else {
+                    dv.label = None;
+                    dv.draw_static(Button::Volt, 1, false, false);
+                    dv.reading(&r, 0, 0);
+                }
+                let mut st = status(0);
+                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging) = (bt, usb, csv, locked, bars, charging);
+                let h = if gen { 36 } else { ui::BAR_H as usize };
+                if gen {
+                    ui::gen_status(&st);
+                } else {
+                    ui::status_right(&st);
+                }
+                let keep = h * W;
+                for p in emu().owner[keep..].iter_mut() {
+                    *p = 0;
+                }
+                let tag = if gen { "gen" } else { "dmm" };
+                ck.check(&format!("statusbar/{tag}-{name}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, h as i32))]);
+                host::save_ppm(&format!("{dir}/{tag}-{name}.ppm"), 2);
             }
         }
     }
@@ -2249,6 +2376,11 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
+            // The ohm page has no note (app.rs: the Voltage page only): its
+            // note row holds the 600 Mohm item.
+            if b == Button::Ohm && note.is_some() {
+                continue;
+            }
             for sub in 0..4u8 {
                 host::reset(0);
                 let n = ui::range_items(b).len();
@@ -2365,6 +2497,25 @@ fn main() {
         if k == "fw-install" {
             save(&out, "t04-confirm-fw-install");
         }
+    }
+
+    // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
+    defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    defer_check(&mut ck, "defer/help", || ui::help_page(0));
+    defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
+    defer_check(&mut ck, "defer/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()).filter(|sc| sc.popup != scope_ui::Popup::None).take(6) {
+        // stock::draw resets the screen itself: the pattern stays on.
+        defer_check(&mut ck, &format!("defer/scope/{}", sc.name), || {
+            unsafe { host::PATTERN = true };
+            stock::draw(sc);
+        });
     }
 
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
@@ -3015,7 +3166,7 @@ fn main() {
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
-            for rg in 0..7i8 {
+            for rg in 0..8i8 {
                 host::reset(0);
                 let (r, _) = find("ohm_k");
                 let r = Reading { range: rg, ..r };
@@ -3028,7 +3179,8 @@ fn main() {
             // A range change 6 M -> 60 M (no test current): the label goes
             // (device check 2f56ff9: "I 0.22 uA" stayed on 60 M). Each range
             // pair against the screen drawn fresh on the second range.
-            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6)] {
+            // 600 Mohm (r7) in and out: its "EXP" goes with it.
+            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6), (7, 6), (6, 7), (7, 5), (5, 7)] {
                 let (r, _) = find("ohm_k");
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
@@ -3053,6 +3205,21 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
+        // The experimental 600 Mohm range: "600MΩ" in the status bar, "EXP"
+        // beside the test current; its item on the range page.
+        host::reset(0);
+        let (r, _) = find("ohm_600m");
+        let mut dv7 = ui::DmmView::new();
+        dv7.label = None;
+        dv7.draw_static(Button::Ohm, r.mode, false, false);
+        dv7.bar_update(&r);
+        dv7.reading(&r, 0, 0);
+        ui::status_right(&status(0));
+        ck.check("dmm-ohm-600m", &dmm_page_regions);
+        save(&out, "d07-dmm-ohm-600m");
+        host::reset(0);
+        ui::range_page(Button::Ohm, Some(8), 0, None);
+        save(&out, "m07b-range-ohm-600m");
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");
