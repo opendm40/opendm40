@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Scope: the V/div label is right with x2, x5 and the other non-decade
+  probes (x5 at 2.5 V/div showed 2V).
+
 ## v0.3.0 (2026-10-27)
 
 ### New

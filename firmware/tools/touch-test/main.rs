@@ -1344,6 +1344,31 @@ fn wave_step_tests(ck: &mut Ck) {
         scope_ui::fmt_div(&mut b, v, if a { "A" } else { "V" });
         ck.t(&format!("fmt_div {v} = {want} ({})", b.as_str()), b.as_str() == want);
     }
+    // #133: the CH1 V/div text is fmt_div(VDIV[range] * probe) (the label
+    // table index range + probe index read "2V" for 2.5 V/div at x5): every
+    // range x probe reads back as its value; a decade probe gives the
+    // stock label.
+    let mut bad = vec![];
+    for (pi, &p) in scope::PROBES.iter().enumerate() {
+        for (r, &d) in scope::VDIV.iter().enumerate() {
+            let v = d * p;
+            let mut b = scope_ui::Buf::new();
+            scope_ui::fmt_div(&mut b, v, "V");
+            let s = b.as_str().strip_suffix('V').unwrap_or("?").to_string();
+            let (num, k) = match s.chars().last() {
+                Some('u') => (&s[..s.len() - 1], 1e-6),
+                Some('m') => (&s[..s.len() - 1], 1e-3),
+                Some('k') => (&s[..s.len() - 1], 1e3),
+                _ => (&s[..], 1.0),
+            };
+            let back = num.parse::<f32>().map(|x| x * k).unwrap_or(f32::NAN);
+            let stock = format!("{}V", scope_ui::VDIV_LABELS[r + pi]);
+            if !((back - v).abs() <= v * 1e-3) || (pi % 3 == 0 && b.as_str() != stock) {
+                bad.push(format!("x{p} {d}: {}", b.as_str()));
+            }
+        }
+    }
+    ck.t(&format!("CH1 V/div text = the value for every range x probe ({bad:?})"), bad.is_empty());
 }
 
 // ------------------------------------------------------- 5. calibration
