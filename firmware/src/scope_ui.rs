@@ -1683,6 +1683,26 @@ impl Spans {
     }
 }
 
+/// Graph row `r` (row classes `rc`) over a run of columns without markers,
+/// line or vertical line, into the strip's pixels `sp` (`Graph::flush` in
+/// a strip pass): the column loop's inline rule.
+#[inline(never)]
+fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, i16)], cols: &[u8], r: i16, rc: u8, d: &Deco) {
+    for (p, (((tr, ps), ma), &cc)) in sp.iter_mut().zip(tr.iter().zip(ps).zip(ma).zip(cols)) {
+        *p = if r >= ma.0 && r <= ma.1 {
+            d.math
+        } else if r >= tr.0 && r <= tr.1 {
+            d.trace
+        } else if r >= ps.0 && r <= ps.1 {
+            d.half
+        } else if (rc | R_ALL) & cc != 0 {
+            d.grid
+        } else {
+            C_FILL
+        };
+    }
+}
+
 impl Graph {
     /// Forget what is on the panel: the next flush repaints the whole graph.
     pub fn invalidate(&mut self) {
@@ -1892,15 +1912,13 @@ impl Graph {
             // line: a full graph took 108 ms through the closure.
             let vrow = vcol.map_or(0, |_| h - 4);
             for &(a, b) in &cut[..nc] {
-                // A strip pass (lcd.rs "strip rendering"): the strip's rows.
-                let Some((a, b)) = lcd::clip_rows(d.top + a, d.top + b).map(|(a, b)| (a - d.top, b - d.top)) else {
-                    continue;
-                };
                 self.px += (b - a + 1) as u32;
+                // Never in a strip pass (a full graph there goes by rows,
+                // below; this loop has no columns then).
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
                     let rc = rows[fy as usize];
-                    lcd::data(if nm > 0 || rc & R_LINE != 0 {
+                    lcd::data_panel(if nm > 0 || rc & R_LINE != 0 {
                         pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm], cm)
                     } else if fy >= ma.0 && fy <= ma.1 {
                         d.math
@@ -1970,25 +1988,12 @@ impl Graph {
                 self.px += (e - fx + 1) as u32;
                 // A strip pass: straight into the strip's row.
                 let mut span = lcd::strip_span(sy, 13 + fx, 13 + e);
+                let mut out = lcd::Out::panel();
                 if let Some(sp) = span.as_deref_mut() {
                     if !line && !vrow && (13 + e < mlo || 13 + fx > mhi) {
                         // No marker, line or vertical line in the run: the
                         // inline rule over the columns, no index checks.
-                        let (a, b) = ((fx - 1) as usize, e as usize);
-                        let cols = self.tr[a..b].iter().zip(&self.ps[a..b]).zip(&self.ma[a..b]).zip(&COLC[a + 1..=b]);
-                        for (p, (((tr, ps), ma), &cc)) in sp.iter_mut().zip(cols) {
-                            *p = if r >= ma.0 && r <= ma.1 {
-                                d.math
-                            } else if r >= tr.0 && r <= tr.1 {
-                                d.trace
-                            } else if r >= ps.0 && r <= ps.1 {
-                                d.half
-                            } else if (rc | R_ALL) & cc != 0 {
-                                d.grid
-                            } else {
-                                C_FILL
-                            };
-                        }
+                        band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], &COLC[fx as usize..=e as usize], r, rc, &d);
                         fx = e + 1;
                         continue;
                     }
@@ -2027,7 +2032,7 @@ impl Graph {
                     };
                     match span.as_deref_mut() {
                         Some(sp) => sp[(x - fx) as usize] = c,
-                        None => lcd::data(c),
+                        None => out.px(c),
                     }
                 }
                 fx = e + 1;

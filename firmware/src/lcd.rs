@@ -39,6 +39,14 @@ pub fn data(d: u16) {
     }
 }
 
+/// `data` for code that never runs in a strip pass (`strips`): the panel
+/// directly, without the strip check per pixel.
+#[inline(always)]
+pub fn data_panel(d: u16) {
+    debug_assert!(!strip_on());
+    unsafe { w16(LCD_DATA, d) };
+}
+
 /// One read cycle on the data register (RS=1). Used for register reads and the
 /// GRAM read-back (0x2E) behind screenshots; the stock FSMC read timing applies.
 #[inline(always)]

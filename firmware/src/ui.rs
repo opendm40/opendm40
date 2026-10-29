@@ -2158,19 +2158,20 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         };
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
+        // (Never in a strip pass: the DMM page is drawn directly.)
         lcd::set_window(CHART_X + x, cy + y0, CHART_X + x, cy + y1);
         // Template above the trace, trace, template below (NO_SPAN: the
         // first loop covers the column).
         let (a, b2) = (span.0 as u16, span.1 as u16);
         let a_end = a.min(y1 + 1);
         for y in y0..a_end {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
         for _ in a.max(y0)..=b2.min(y1) {
-            lcd::data(0xFC40);
+            lcd::data_panel(0xFC40);
         }
         for y in (b2 + 1).max(y0).max(a_end)..=y1 {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
     }
     if c.rate != rate {
