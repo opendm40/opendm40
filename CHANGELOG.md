@@ -23,7 +23,7 @@ section named after the tag as the release notes; how to cut a release:
   drag that starts elsewhere on the graph moves nothing. **Settings > Scope
   drag** is gone ([manual](docs/manual/README.md#moving-things-with-a-finger)).
 
-  ![The grab zones](docs/manual/img/scope-drag.png)
+  ![The grab zones](docs/changelog/v0.4.0/scope-marker-drag.png)
 - **Record button on the range pages:** MF, then **Record** opens the Record
   page (red while recording); **Hold/Limits** is now **Limits**
   ([manual](docs/manual/README.md#the-record-page)).

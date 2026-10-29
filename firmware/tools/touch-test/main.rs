@@ -1109,6 +1109,13 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("grab zone trigger level: x 371..413, y 101..148", gp(&d, off, 371, 125) == lev && gp(&d, off, 370, 125) == Press::None && gp(&d, off, 413, 125) == lev && gp(&d, off, 406, 101) == lev && gp(&d, off, 406, 100) == Press::None && gp(&d, off, 406, 148) == lev && gp(&d, off, 406, 149) == Press::None);
     ck.t("grab zone T: x 190..237, y 16..62", gp(&d, off, 190, 40) == tpos && gp(&d, off, 189, 40) == Press::None && gp(&d, off, 237, 40) == tpos && gp(&d, off, 238, 40) == Press::None && gp(&d, off, 214, 16) == tpos && gp(&d, off, 214, 62) == tpos && gp(&d, off, 214, 63) == Press::None);
     ck.t("20 px from a marker's centre grabs it", gp(&d, off, 26, 160) == ch1 && gp(&d, off, 6, 140) == ch1 && gp(&d, off, 6, 180) == ch1 && gp(&d, off, 386, 125) == lev && gp(&d, off, 406, 145) == lev && gp(&d, off, 214, 46) == tpos && gp(&d, off, 194, 26) == tpos);
+    let mut m = d;
+    m.trig_px = 400; // T glyph x 401..412 (pointing right), the top edge
+    m.trig_row = 200; // the trigger level far below
+    ck.t("T at the last column: a top zone (x 383..430, y 16..62), not the right edge's", gp(&m, off, 390, 50) == tpos && gp(&m, off, 375, 30) == Press::None && gp(&m, off, 406, 30) == tpos);
+    let mut m = d;
+    m.trig_px = 0; // T glyph x 14..25 (pointing left)
+    ck.t("T at column 0: a top zone (x -4..43)", gp(&m, off, 16, 50) == tpos && gp(&m, off, 43, 30) == tpos && gp(&m, off, 44, 30) == Press::None);
     ck.t("the empty graph is no zone", [(60, 160), (200, 160), (340, 125), (214, 80), (100, 290)].iter().all(|&(x, y)| gp(&d, off, x, y) == Press::None));
     // Overlaps: the nearest glyph (Chebyshev); a tie: the selection.
     let mut m = d;

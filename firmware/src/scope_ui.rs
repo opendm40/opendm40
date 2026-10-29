@@ -1273,17 +1273,21 @@ impl Zone {
 pub const GRAB_H: i16 = 48;
 pub const GRAB_IN: i16 = 30;
 
-/// Grab zone of a 12 x 12 marker glyph `g`: a left-strip marker (x < 14)
+/// Grab-zone edges (`grab_rect`).
+pub const EDGE_LEFT: u8 = 0;
+pub const EDGE_RIGHT: u8 = 1;
+pub const EDGE_TOP: u8 = 2;
+
+/// Grab zone of a 12 x 12 marker glyph `g` on `edge`: a left-strip marker
 /// from x 0, the right-edge trigger level to the frame (x 413), a top
 /// marker from 5 rows above it (INNER's top; the top-bar badges win there).
-pub fn grab_rect(g: Rect) -> Rect {
+/// By edge, not by x: a top marker at the last columns sits at x 401 too.
+pub fn grab_rect(g: Rect, edge: u8) -> Rect {
     let along = (GRAB_H - 12) / 2;
-    if g.x < 14 {
-        rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H)
-    } else if g.x >= RIGHT_X {
-        rect(g.x - GRAB_IN, g.y - along, 414 - (g.x - GRAB_IN), GRAB_H)
-    } else {
-        rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN)
+    match edge {
+        EDGE_LEFT => rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H),
+        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, 414 - (g.x - GRAB_IN), GRAB_H),
+        _ => rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN),
     }
 }
 
@@ -1303,14 +1307,15 @@ pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let k = strip_items(m, &mut items);
     for &(id, mk) in &items[..k] {
-        out[n] = Zone { level: true, id, r: grab_rect(mk.rect()), o: mk.rect() };
+        let edge = if id == TRIG_LEVEL { EDGE_RIGHT } else { EDGE_LEFT };
+        out[n] = Zone { level: true, id, r: grab_rect(mk.rect(), edge), o: mk.rect() };
         n += 1;
     }
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
     for (k, mk) in g.iter().enumerate() {
         if mk.some() && GRAPH_IDS[k] != 255 {
-            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grab_rect(mk.rect()), o: mk.rect() };
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grab_rect(mk.rect(), EDGE_TOP), o: mk.rect() };
             n += 1;
         }
     }
