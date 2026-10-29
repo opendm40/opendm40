@@ -4922,9 +4922,11 @@ impl App {
                 Some(())
             }
             C::TrigLevel(Some(v)) => {
-                // Volts at the probe tip, as TRIG:LEV? answers (probe applied).
-                let r = self.scope.vdiv();
-                sc.trig_row = (140.0 + sc.pos as f32 - v * 141.0 / (4.0 * r)) as i32;
+                // Volts at the probe tip, as TRIG:LEV? answers (probe
+                // applied), kept as given: the row was the one below the
+                // value (truncated), up to a row off, and an off-screen
+                // level became the edge row's volts (#80).
+                sc.trig_row = self.scope.set_trig_volts(v);
                 None
             }
             C::TrigLevel(None) => {

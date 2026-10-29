@@ -50,6 +50,8 @@ section named after the tag as the release notes; how to cut a release:
   the meter when the Hold/Limits page opens.
 - Multimeter: a value that rounds to zero shows no minus sign (open DC V
   leads showed "-0.0000").
+- **SCPI:** `TRIGger:LEVel` keeps the level as given; it was up to one screen
+  row lower (0.1 V became 0.113 V at 500 mV/div).
 
 ## v0.3.0 (2026-10-27)
 

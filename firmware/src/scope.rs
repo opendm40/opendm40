@@ -793,6 +793,18 @@ impl Scope {
         self.row_of_volts(self.volts(code))
     }
 
+    /// TRIG:LEV: the level in volts as given, also off screen (its marker
+    /// on the nearest edge row, as a level kept across a zoom). Returns the
+    /// marker row for the settings the caller applies next (`apply` keeps
+    /// the volts: the row does not move on its own).
+    pub fn set_trig_volts(&mut self, v: f32) -> i32 {
+        let r = self.row_of_volts(v);
+        let row = if r.is_finite() { (if r >= 0.0 { r + 0.5 } else { r - 0.5 }).clamp(-10.0, 290.0) as i32 } else { self.s.trig_row };
+        self.trig_v = v;
+        self.s.trig_row = row;
+        row
+    }
+
     pub fn trig_volts(&self) -> f32 {
         if self.trig_v.is_finite() { self.trig_v } else { self.row_volts(self.s.trig_row) }
     }
