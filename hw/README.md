@@ -723,11 +723,17 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
    not hold 1 against the pull-down in standby), the CHRG pin on no MCU pin. The stock shows charging
    when PB10 = PB11 = 1 (`FUN_0800b776`, `FUN_08023840`). It drives PB10 low below 85 % (a signed
    integer compare of the float fraction, `0x08023b36`..`0x08023b3c`); low PB10 releases STDBY on the
-   device. USB current through an Alientek C2 ([`c2meter.py`](../firmware/tools/c2meter.py)), battery
-   full (4.23 V), 5 blocks of 25 s each: 0.1966 A with PB10 low, 0.1963 A released (block noise
-   ~1 mA): no difference at a full battery; at 4.92 V the meter draws ~0.2 A from USB with the charger
-   in standby, so the system runs from USB power through a path besides the charger (*inferred*).
-   The effect of PB10 low on a battery below 85 % is not measured (opendm40 never drives PB10).
+   device.
+   Measured while charging (2026-10-29, after ~2 h on battery; battery ADC while charging ~4.20 V):
+   PB10 low stops the charge at once (battery 4.205 -> 4.14 V, PB11 stays 1; USB current 0.166 A,
+   the meter's own load); released, the charger goes to standby (PB11 = 0) and does not charge again
+   until the next USB replug (battery 4.11..4.13 V, above its recharge threshold). Twice, same result.
+   At a full battery (C2, [`c2meter.py`](../firmware/tools/c2meter.py)) PB10 low or released makes no
+   difference to the USB current (0.1966 / 0.1963 A). USB current right after a replug, as the battery
+   drained (15 min blocks on battery): 0.36, 0.48, 0.56, 0.67, 0.70 A, the meter's own ~0.17..0.20 A
+   included. *Inferred*: PB10 is the charger's CE (or TEMP) line; a low pulse ends a charge cycle.
+   What the stock's PB10 drive below 85 % is for is unknown; opendm40 never drives PB10, so its charger
+   runs the plain TP4056 cycle (charges to termination after a replug, as measured).
 6. The fuse's breaking capacity and time curve (the manual gives 10 A, ceramic, one fuse).
    The 47 ohm resistor's exact power rating (MELF 0207 by size, series unknown).
 7. PC7's function in the frequency mode; the [HY3131](datasheets/hycon-hy3131-datasheet-v10.pdf) CNT pin source; how the

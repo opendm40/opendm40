@@ -95,10 +95,23 @@ async def main():
     ap.add_argument('--secs', type=float, default=0, help='stop after N s (0 = until Ctrl-C)')
     ap.add_argument('--csv', help='also append "time,V,A,Amin,Amax" lines here')
     a = ap.parse_args()
-    dev = await BleakScanner.find_device_by_name(a.name, timeout=30)
-    if dev is None:
-        sys.exit('c2meter: %s not found' % a.name)
-    async with BleakClient(dev) as cl:
+    # The C2 refuses a connection for a while after the previous one ended
+    # (a TimeoutError from bleak): retry.
+    for k in range(6):
+        dev = await BleakScanner.find_device_by_name(a.name, timeout=30)
+        if dev is None:
+            sys.exit('c2meter: %s not found' % a.name)
+        try:
+            await run(a, dev)
+            return
+        except asyncio.TimeoutError:
+            print('c2meter: connect timed out, retry %d' % (k + 1), file=sys.stderr, flush=True)
+            await asyncio.sleep(5)
+    sys.exit('c2meter: no connection')
+
+
+async def run(a, dev):
+    async with BleakClient(dev, timeout=20) as cl:
         ln = Link(cl)
         await cl.start_notify(U % 'fff2', ln.rx)
         r = await ln.ask(0, dev=0xFFFF)
