@@ -1218,7 +1218,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
   the record bar, the V/div with the probe and coupling, the trigger (edge
-  and level), the battery.
+  and level), the USB symbol while a computer has the meter connected, the
+  battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored

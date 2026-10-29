@@ -412,7 +412,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().chain(core::iter::once(&USB_GLYPH)).find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,

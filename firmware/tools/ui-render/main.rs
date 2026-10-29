@@ -762,6 +762,7 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     host::reset(0);
     let mut m = scope_ui::Model::DEFAULT;
     m.combined = true;
+    m.usb = true;
     scope_ui::invalidate();
     scope_ui::strip_invalidate();
     scope_ui::graph().clear();
@@ -1603,12 +1604,51 @@ fn main() {
                 m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
                 m.battery = vdiv % 6;
                 m.charging = k == 0;
+                m.usb = true;
                 host::reset(0);
                 scope_ui::invalidate();
                 scope_ui::graph().clear();
                 scope_ui::update(&m);
                 ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
+        }
+    }
+    // 3a. Scope top bar with the USB symbol: states for the contact sheet
+    //     (<out>/scopebar/, 2x): plain, USB, USB + charging, roll + long
+    //     trigger text + generator, STOP, the wave view's amps, combined.
+    {
+        let dir = format!("{out}/scopebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = scope_ui::Model::DEFAULT;
+        let mut v: Vec<(&str, scope_ui::Model)> = vec![("plain", base)];
+        let mut m = base;
+        m.usb = true;
+        v.push(("usb", m));
+        m.charging = true;
+        m.battery = 5;
+        v.push(("usb-charged", m));
+        let mut r = m;
+        r.roll = true;
+        r.tb = 29;
+        r.trig_v = -444.4e-3;
+        r.rising = false;
+        r.gen_hz = 10.0e6;
+        r.battery = 0;
+        v.push(("usb-roll-long", r));
+        let mut st = m;
+        st.status = 3;
+        st.trig_v = 9.876e3;
+        v.push(("usb-stop", st));
+        let mut c = m;
+        c.combined = true;
+        v.push(("usb-combined", c));
+        for (name, m) in v {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("scopebar/{name}"));
+            host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
     // Every measurement item, worst values, in every cell.
