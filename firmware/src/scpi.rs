@@ -714,9 +714,15 @@ pub enum Dbg {
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
     /// (dmm::set_cap_class; RAM only).
     CapClass(Option<u8>),
-    /// DBG:CAP:RDIS <ohm> / ?: the discharge path's resistance for the
-    /// decay estimate (dmm::set_cap_rdis; RAM only).
-    CapRdis(Option<u32>),
+    /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
+    /// the discharge slope (dmm::set_cap_idis; RAM only).
+    CapIdis(Option<u32>),
+    /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
+    /// (dmm::set_cap_dis_ms; RAM only).
+    CapDisMs(Option<u32>),
+    /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
+    /// (dmm::set_cap_dis_end; RAM only).
+    CapDisEnd(Option<u32>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -2449,8 +2455,14 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
                         b"FAST" if query => Dbg::Fast,
-                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "RDIS")) => {
-                            Dbg::CapRdis(if query { None } else { Some(nums::<1>(a)[0]) })
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
+                            Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
+                            Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
+                            Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
                             Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })

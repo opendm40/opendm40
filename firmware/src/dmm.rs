@@ -200,18 +200,37 @@ pub fn cap_class() -> u8 {
 pub fn set_cap_class(k: u8) {
     CAP_CLASS.store(k.min(4), core::sync::atomic::Ordering::Relaxed);
 }
-/// The discharge path's resistance (ohm) for the decay estimate:
-/// INFERRED, an upper bound from the device (2b46e895: ~1 mF from -62.6 to
-/// < 30 mV within 0.29 s, tau <= 0.4 s); DBG:CAP:RDIS sets it (RAM only).
-static CAP_RDIS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(400);
-pub fn cap_rdis() -> u32 {
-    CAP_RDIS.load(core::sync::atomic::Ordering::Relaxed)
+/// The discharge current (uA) for the estimate from the discharge slope:
+/// INFERRED from one capacitor (device c4aea8d0: 0.381 .. 0.386 V/s on
+/// ~0.996 mF); DBG:CAP:IDIS sets it (RAM only).
+static CAP_IDIS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(380);
+pub fn cap_idis() -> u32 {
+    CAP_IDIS.load(core::sync::atomic::Ordering::Relaxed)
 }
-pub fn set_cap_rdis(ohm: u32) {
-    CAP_RDIS.store(ohm.clamp(1, 1_000_000), core::sync::atomic::Ordering::Relaxed);
+pub fn set_cap_idis(ua: u32) {
+    CAP_IDIS.store(ua.clamp(1, 100_000), core::sync::atomic::Ordering::Relaxed);
 }
-/// The decay estimate needs the discharge to start above this (mV).
-const CAP_DIS_MIN_MV: f32 = 100.0;
+/// The discharge's poll period (ms; the row's AD1 converts every 25 ms,
+/// R22 0x13) and the node voltage that ends it (mV): DBG:CAP:DISMS /
+/// DBG:CAP:DISEND (RAM only, for device experiments).
+static CAP_DIS_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(255);
+static CAP_DIS_END: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(30);
+pub fn cap_dis_ms() -> u32 {
+    CAP_DIS_MS.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_dis_ms(ms: u32) {
+    CAP_DIS_MS.store(ms.clamp(25, 1000), core::sync::atomic::Ordering::Relaxed);
+}
+pub fn cap_dis_end() -> u32 {
+    CAP_DIS_END.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_dis_end(mv: u32) {
+    CAP_DIS_END.store(mv.clamp(1, 1300), core::sync::atomic::Ordering::Relaxed);
+}
+/// The discharge samples used for the slope: below the AD1 clamp (1.2 V at
+/// the node) and above the end of the discharge.
+const CAP_DIS_HI_MV: f32 = 1150.0;
+const CAP_DIS_LO_MV: f32 = 60.0;
 /// The discharge's aux units (ui.rs draws them as a line, not a value).
 pub const CAP_DIS_UNIT: &str = "Vdis";
 pub const CAP_CHG_UNIT: &str = "Vchg";
@@ -1599,10 +1618,10 @@ pub struct Dmm {
     cap_first_v: f32,
     /// Same-range restarts for another capacitor (DBG:CAP? field 17).
     cap_swaps: u8,
-    /// The discharge's first sample above CAP_DIS_MIN_MV (mV, 0 = none) and
+    /// The discharge's first sample in the slope window (mV, 0 = none) and
     /// its time (ms).
-    cap_dis_v0: f32,
-    cap_dis_t0: u64,
+    cap_dis_pv: f32,
+    cap_dis_pt: u64,
     /// The range of the last capacitance value: AUTO starts there when it
     /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
     /// steps before 600 uF).
@@ -2256,13 +2275,13 @@ impl Dmm {
             cap_cls2: false,
             cap_idle_flips: 0,
             cap_swaps: 0,
+            cap_dis_pv: 0.0,
+            cap_dis_pt: 0,
             cap_half: [0.0; CAP_HALF_MAX],
             cap_half_up: 0,
             cap_half_n: 0,
             cap_half_prev: 0,
             cap_first_v: 0.0,
-            cap_dis_v0: 0.0,
-            cap_dis_t0: 0,
             cap_last: CAP_R_MIN,
             cap_res_ms: 0.0,
             cap_res_t: None,
@@ -6110,7 +6129,7 @@ impl Dmm {
             self.ramp.class = 0;
             self.ramp.cmp = None;
             self.ramp.first = true;
-            self.deadline = now + 255;
+            self.deadline = now + cap_dis_ms() as u64;
         } else {
             self.write_config(clk);
             self.deadline = now + if r < 4 { 120 } else { 320 };
@@ -6133,7 +6152,7 @@ impl Dmm {
         self.cap_ratio = [1.0; 2];
         self.cap_ratio_ok = false;
         self.cap_dis_t = now;
-        self.cap_dis_v0 = 0.0;
+        self.cap_dis_pv = 0.0;
         self.cap_cand = 0.0;
         self.cap_agree = 0;
         self.cap_cls2 = false;
@@ -6201,24 +6220,28 @@ impl Dmm {
         let v_mv = ad1 as f32 * 1000.0 * 1.25 / 0.9 / AD1_DIV;
         if self.ramp.discharging {
             self.cap_dbg[0] = v_mv;
-            // A rough C from the discharge's decay (owner 2026-10-30): tau =
-            // dt / ln(V0 / V) through the discharge path's resistance
-            // (DBG:CAP:RDIS, INFERRED), when the node starts well above the
-            // end of the discharge; grey only.
+            // A rough C from the discharge (owner 2026-10-30): it runs at a
+            // constant current (device c4aea8d0, ~0.996 mF pre-charged:
+            // -98.4 mV per 255 ms poll from 1185 to 42 mV, a straight line;
+            // an RC fit read it 2 .. 5x off; c4aea8d0 from ~3 V: 0.381 V/s,
+            // the clamped part at the same rate), so C = I / (dV / dt) from
+            // the first sample below the AD1 clamp to this one (a longer
+            // baseline with each sample), above CAP_DIS_LO_MV; grey only.
+            // I: DBG:CAP:IDIS (INFERRED, one capacitor).
             let a = v_mv.abs();
-            if self.cap_dis_v0 == 0.0 {
-                if a > CAP_DIS_MIN_MV {
-                    self.cap_dis_v0 = a;
-                    self.cap_dis_t0 = now;
-                }
-            } else if a > 30.0 && a < 0.8 * self.cap_dis_v0 && now > self.cap_dis_t0 {
-                let tau = (now - self.cap_dis_t0) as f32 * 1e-3 / ln(self.cap_dis_v0 / a);
-                let cest = tau / cap_rdis() as f32 * 1e6;
-                if cest.is_finite() && cest > 0.0 {
-                    self.cap_cand = cest;
+            if a > CAP_DIS_LO_MV && a < CAP_DIS_HI_MV {
+                if self.cap_dis_pv == 0.0 {
+                    self.cap_dis_pv = a;
+                    self.cap_dis_pt = now;
+                } else if self.cap_dis_pv > a && now > self.cap_dis_pt {
+                    let slope = (self.cap_dis_pv - a) / (now - self.cap_dis_pt) as f32; // mV / ms = V / s
+                    let cest = cap_idis() as f32 / slope; // uA / (V / s) = uF
+                    if cest.is_finite() && cest > 0.0 {
+                        self.cap_cand = cest;
+                    }
                 }
             }
-            if v_mv.abs() < 30.0 {
+            if v_mv.abs() < cap_dis_end() as f32 {
                 self.ramp.discharging = false;
                 self.write_config(clk);
                 if cap_class() != CAP_CLASS_STOCK {
@@ -6228,7 +6251,7 @@ impl Dmm {
                 self.ramp.prev_t = now;
                 self.ramp.prev_v = v_mv;
             }
-            self.deadline = now + 255;
+            self.deadline = now + if self.ramp.discharging { cap_dis_ms() as u64 } else { 255 };
             return Some(self.cap_discharge_val(v_mv, now));
         }
         let _ = self.read_counters(0x50);

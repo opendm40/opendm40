@@ -761,13 +761,33 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
-                    scpi::Dbg::CapRdis(k) => {
+                    scpi::Dbg::CapDisMs(k) => {
                         if let Some(k) = k {
-                            crate::dmm::set_cap_rdis(k);
+                            crate::dmm::set_cap_dis_ms(k);
                             false
                         } else {
                             scpi.len = 0;
-                            put_u32(&mut scpi, crate::dmm::cap_rdis());
+                            put_u32(&mut scpi, crate::dmm::cap_dis_ms());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisEnd(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_end(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_end());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapIdis(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_idis(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_idis());
                             true
                         }
                     }
