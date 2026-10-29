@@ -150,7 +150,7 @@ const KP_NTC_BETA: u8 = 8;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
 fn trim_zeros(s: &str) -> &str {
-    if !s.contains('.') {
+    if !s.as_bytes().contains(&b'.') {
         return s;
     }
     s.trim_end_matches('0').trim_end_matches('.')
@@ -253,6 +253,9 @@ pub struct App {
     /// the DMM rail stays on whatever view is shown (fastlogtest --ui-nav:
     /// the Oscilloscope tile during a disk session dropped it, 0 rows).
     pub logger_busy: bool,
+    /// A USB host has the meter configured (main.rs, every pass): "USB" in
+    /// the status bar.
+    pub usb_host: bool,
     host_scope: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -455,6 +458,10 @@ fn buzzer_init() {
 /// Buzzer duty (fraction of the period) at `vol` 0..100 % (stock: duty =
 /// min(v/3, 0.99) * 0.5; 100 % = 0.495, the loudest the stock drives).
 fn buzz_k(vol: u8) -> f32 {
+    // `mute` (test builds): every beep and alarm at duty 0.
+    if cfg!(feature = "mute") {
+        return 0.0;
+    }
     let v = vol as f32 / 100.0;
     (if v < 0.9 { v / 3.0 } else { v.min(0.99) }) * 0.5
 }
@@ -585,6 +592,7 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
+            usb_host: false,
             logger_busy: false,
             host_scope: false,
             anti_drop: true,
@@ -1026,8 +1034,9 @@ impl App {
         ui::Status {
             uptime_s: (now / 1000) as u32,
             bt: self.bt_on && self.power.bt_connected(),
-            bars: self.power.bars,
-            charging: self.power.charging(),
+            usb: self.usb_host,
+            bars: self.power.shown_bars(self.strip_alt),
+            charging: self.power.on_charger(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1475,6 +1484,9 @@ impl App {
     #[inline(never)] // its draw frames stay out of the callers' frames (run's)
     fn repaint(&mut self, now: u64) {
         self.redraw = false;
+        // The page's background fills wait for the widgets (lcd.rs
+        // "deferred fills"); main.rs flushes after the tick.
+        crate::lcd::defer_start();
         // The full repaint drew any pressed item released.
         self.pressed = None;
         self.scope_invalidate();
@@ -2813,6 +2825,10 @@ impl App {
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+                // Pressed feedback kept through the tap (app_press.rs).
+                if self.pressed.is_some() {
+                    self.press_after_tap();
+                }
             }
             // Long press on the A button: the power meter's wiring dialog.
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
@@ -3305,8 +3321,10 @@ impl App {
             let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
             let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
             let cur = self.range_sel_manual();
+            // The items before AUTO, in a ring; from one after it (ohm
+            // 600 Mohm, experimental) back to the first.
             let i = match cur {
-                Some(i) if !self.dmm.is_auto() => (i + 1) % n.max(1),
+                Some(i) if !self.dmm.is_auto() => if i + 1 < n { i + 1 } else { 0 },
                 Some(i) => i,
                 None => 0,
             };
@@ -3502,7 +3520,7 @@ impl App {
                     let _ = self.inrush_open(clk);
                     return;
                 }
-                match ui::range_hit(b, x, y) {
+                match ui::range_hit(b, self.range_sel(), x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
                         let was = self.dmm.is_auto();
@@ -4095,6 +4113,9 @@ impl App {
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
+            // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
+            // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
             Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
@@ -4107,7 +4128,10 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                // Ohm MAX: 60 Mohm; 600 Mohm (experimental) only by a value
+                // above it.
+                let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
+                let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
@@ -4117,6 +4141,9 @@ impl App {
                     None => out.set_err("Data out of range"),
                 }
             }
+            // 600 Mohm: its digits follow the value and its conversions are
+            // fixed (dmm.rs Ohm600): a resolution sets nothing.
+            Rng::Res(_) if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => {}
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.

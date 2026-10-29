@@ -201,7 +201,8 @@ The top line of the multimeter page shows, from left to right:
 5. **REC** in red while a recording to the disk runs;
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
-7. the battery level; the symbol turns green while the battery charges.
+7. the USB symbol while a computer has the meter connected (not with a charger);
+8. the battery level; green on the charger: the top bar blinks while the battery charges and stays when it is full.
 
 ### Touch lock
 
@@ -560,7 +561,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
+- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ (and an
+  experimental 600 MΩ, below). 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
@@ -580,11 +582,15 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
+- **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
+  no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
 |---|---|
 | 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
+| ![412.3 MΩ on 600 MΩ](img/dmm-ohm-600m.png) | ![The range page with 600 MΩ chosen](img/range-ohm-600m.png) |
+| The experimental 600 MΩ: test current 105 nA | The range page with 600 MΩ chosen |
 
 #### Continuity
 
@@ -1000,7 +1006,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -1119,8 +1125,8 @@ circuit:
 
 - **A-JACK** in the functions where a current really flows through the A
   jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In Ω, continuity,
-  diode, capacitance and the resistive temperature sensors, A-JACK shows
-  silently.)
+  diode, capacitance, frequency and the resistive temperature sensors, A-JACK
+  shows silently.)
 - **A-PROT** while the current still flows.
 - **A current above 10 A** for 1 s on the 10 A range (also in the power
   meter).
@@ -1182,13 +1188,16 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   alternating voltage there, or (Ω) about 3-5 V and more.
 - A current in the A jack while a voltage is also on the V/Ω jack: Ω and
   continuity show LIVE?, AC mV shows nothing (the reading is over range).
-  A-JACK shows only with the V/Ω jack free.
+  A-JACK shows only with the V/Ω jack free. Manual Ω ranges below 6 MΩ may
+  show LIVE? for a current in A even with V/Ω free. The same with a signal above
+  the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
 *Two cases no alert can see.*
 - No A-JACK in DC V above the 6 V range (60 V, 600 V, 1000 V), in AC+DC V
-  above 6 V, in frequency, and in the higher capacitance ranges. The power
+  above 6 V, in frequency below about 3 mA or for an AC current, and in
+  the higher capacitance ranges. The power
   meter has no jack alerts.
 
 ## Oscilloscope
@@ -1215,7 +1224,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
   the record bar, the V/div with the probe and coupling, the trigger (edge
-  and level), the battery.
+  and level), the USB symbol while a computer has the meter connected, the
+  battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored
@@ -2727,21 +2737,20 @@ gets you there:
 *The power key way into the update loader.*
 
 - **From the power key.** With the meter off, press and hold the power key.
-  The screen lights up. About 4 s later the backlight blinks and the meter
-  beeps. Keep holding at least 0.5 s more, then let go. Letting go during
-  that half second cancels: the meter starts normally.
+  About 4 s later the backlight blinks and the meter beeps; keep holding
+  0.5 s more, then let go. Letting go earlier starts the meter normally.
 - **From a computer.** While opendm40 runs and is connected over USB:
-  `python3 firmware/tools/dm40dbg.py update`
-  (the SCPI command `DBG:UPDATE`, see [SCPI reference](scpi-reference.md)).
-- **By itself after repeated hangs.** If the firmware hangs, it restarts
-  after about 20 s. If it hangs again within its first 60 s of running, the
-  next start opens the update loader.
-- **Through the board.** If nothing else works: open the case, connect
-  the debug header's TX pad to ground while switching on, and keep it until
-  the update screen appears; remove it after the update. See
+  `python3 firmware/tools/dm40dbg.py loader`
+  (the SCPI command `DBG:LOADER`, see [SCPI reference](scpi-reference.md)).
+- **By itself.** A firmware file that does not pass the loader's check
+  leaves the meter in the update loader.
+- **Through the board.** If nothing else works: open the case, connect the
+  debug header's TX pad to ground while switching on, and keep it until the
+  update screen appears; remove it after the update. See
   [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery).
 
-Once there, the loader shows its update screen on every start until a valid
+To leave the loader without installing, switch the meter off and on again:
+opendm40 starts. After a failed install the loader stays until a valid
 update file has been installed.
 
 ### Install a file from the update loader
@@ -2807,9 +2816,8 @@ firmware has run, opendm40 starts on DC V.
 
 Untested on a real meter:
 
-- Getting started and recovery: installing over the stock firmware's
-  **USB Connect** disk; entering the update loader with the power key; the
-  automatic entry after repeated hangs.
+- Getting started: installing over the stock firmware's **USB Connect**
+  disk.
 - Multimeter: with a current through the A jack, the overload handling,
   AUTO coupling and the burden voltage; the diode beeps; PT1000 and the
   100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a

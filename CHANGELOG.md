@@ -7,6 +7,45 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **600 MΩ range, experimental:** on the range page or SCPI
+  `RES:RANG 600E6` only, never in AUTO; accuracy not specified. Leave the
+  leads open once: it learns the meter's own leakage
+  ([manual](docs/manual/README.md#resistance)).
+
+  ![The 600 MΩ range page and reading](docs/changelog/v0.4.0/ohm-600m.png)
+
+### Changed
+
+- **The update loader no longer opens by itself** after repeated hangs (a
+  hang restarts the meter).
+- **Leaving the update loader:** opened with the power-key hold or
+  `DBG:LOADER`, the loader now lets the installed firmware start again when
+  you switch the meter off and on; no reinstall is needed.
+  [How to reach it](docs/manual/README.md#reach-the-update-loader).
+- Smoother screen changes: pages, popups and DMM functions draw over the old
+  screen, not over a blank one; an MF menu tab redraws only the menu.
+
+### Fixed
+
+- **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
+  and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
+  ([manual](docs/manual/README.md#the-status-bar)).
+
+### Fixed
+
+- Multimeter: a current in the A jack (the leads in A / COM while measuring
+  something else) now shows A-JACK in AC mV and Hz too (a DC current from
+  ~4 mA, in Hz ~6 mA negative; there the badge only), and in Ω AUTO
+  A-JACK instead of LIVE?.
+  Manual Ω ranges below 6 MΩ may still show LIVE? for it.
+- Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
+  generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
+  and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
+  hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
+  (~0.45 s).
+
 ## v0.3.0 (2026-10-27)
 
 ### New
@@ -39,6 +78,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- **Scope did not turn on** (a flat trace at the bottom) after power-on with
+  Analog power set to Both always or a start page other than Multimeter: the
+  analog supply was switched wrongly. Switching to Auto or opening the scope
+  then could turn the meter off.
 - **Frequency:** 2 Hz and 5 Hz gave no reading; it now reads down to 0.5 Hz,
   with one more (small) digit where the counter allows it
   ([manual](docs/manual/README.md#frequency-and-duty-cycle)).
@@ -49,8 +92,6 @@ section named after the tag as the release notes; how to cut a release:
   until a restart.
 - **Continuity / diode:** touching the probes together no longer shows
   A-JACK.
-- **Scope:** after some start-ups the scope's supply stayed off (a flat
-  trace), and the meter could then switch itself off.
 - **Scope:** closing a popup is about 4x faster; the tap's beep is short
   again.
 - **AC V:** the first readings after a range step on a signal with a DC part

@@ -361,7 +361,7 @@ pub const MODE: Font = Font(0x0805_9D00); // 0x04 DC .. 0x08 diode, 32 px
 pub const BTN_GLYPH: Font = Font(0x0805_A9FC); // 04..08, 0x10 Hz, 0x11 cap, ohm, C
 pub const BATTERY: Font = Font(0x0804_FA4C); // 0x22..0x27
 pub const LOCK: Font = Font(0x0806_BF24); // 0x20 closed, 0x21 open
-pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth
+pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth, 0x22 USB (ours)
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
 pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
@@ -400,6 +400,8 @@ pub fn has_all(font: Font, s: &str) -> bool {
 
 // Glyphs of our own for the stock DMM fonts without them (tools/mkwglyph.py).
 include!("stockfont_w.rs");
+// The USB symbol for the status bar (tools/mkusbglyph.py).
+include!("stockfont_usb.rs");
 
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
 /// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw), no k in LETTERS
@@ -410,7 +412,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
@@ -844,14 +846,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
     let energy = u.ends_with("Wh") || u.ends_with("VAh");
+    // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
+    // core's two-way string searcher (~1 KB) into region B.
+    let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
             'k' if energy => 'k',
             'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
-            'C' if u.contains('\u{b0}') => '\u{2103}',
-            'F' if u.contains('\u{b0}') => '\u{2109}',
+            'C' if deg => '\u{2103}',
+            'F' if deg => '\u{2109}',
             c => c,
         };
         let mut t = [0u8; 4];
