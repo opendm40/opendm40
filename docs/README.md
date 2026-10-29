@@ -7,7 +7,7 @@ All documentation of opendm40, by reader. Start at the
 
 - [User manual](manual/README.md): install and update, every feature, safety
   and alerts, connecting from a computer, backup, recovery and back to stock,
-  known limitations.
+  known limitations. In Russian: [manual/README.ru.md](manual/README.ru.md).
 - [SCPI reference](manual/scpi-reference.md): every SCPI command, over USB
   and Bluetooth.
 - [CHANGELOG.md](../CHANGELOG.md): the changes per release.

@@ -1,3 +1,5 @@
+**English** | [Русский](README.ru.md)
+
 # opendm40 user manual
 
 opendm40 is an open replacement firmware for the Alientek DM40 multimeter,

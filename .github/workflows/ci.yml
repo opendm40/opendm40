@@ -119,10 +119,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # doc-lang-check diffs against the PR's merge base
       - name: Relative links and anchors (tools/linkcheck.py)
         run: python3 firmware/tools/linkcheck.py .
       - name: SCPI reference vs parser (tools/scpi-doc-check)
         run: firmware/tools/scpi-doc-check/run.sh
+      - name: English and Russian docs in step (tools/doc-lang-check.sh)
+        env:
+          # Through env, not inline: the PR description is untrusted text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: firmware/tools/doc-lang-check.sh $BASE $HEAD_SHA
 
   version:
     name: Version bumped since the last tag

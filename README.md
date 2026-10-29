@@ -1,3 +1,5 @@
+**English** | [Русский](README.ru.md)
+
 # opendm40
 
 Open-source replacement firmware for the Alientek DM40 multimeter,
