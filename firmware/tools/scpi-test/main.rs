@@ -345,6 +345,9 @@ fn nr3_exact() {
         let r = nr3(v);
         check(r == want, &format!("nr3 {v} = {r} (want {want})"));
     }
+    // No value (a scope measurement without a result, #79): SCPI NaN.
+    let r = nr3(f32::NAN);
+    check(r == "+9.91000000E+37", &format!("nr3 NaN = {r} (want +9.91000000E+37)"));
     // A sweep against Rust's correctly rounded {:.6E}.
     let mut bad = 0;
     let mut seed: u32 = 12345;

@@ -2852,6 +2852,12 @@ impl Scpi {
 
     /// Append a number in NR3.
     pub fn put_f32(&mut self, v: f32) {
+        // No value (a scope measurement without a result): SCPI NaN, the
+        // reference's "no value" (nr3 printed the NaN as +0.000000E-03).
+        if v.is_nan() {
+            self.put(NAN);
+            return;
+        }
         let mut b = [0u8; 20];
         let n = nr3(&mut b, v);
         self.put(&b[..n]);
