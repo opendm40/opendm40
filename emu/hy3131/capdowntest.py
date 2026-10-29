@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Capacitance AUTO steps down from the ramp ranges (dmm.rs poll_cap, issue #74): a small
-capacitor after a large one ends on its own range with its value. Before the fix the 600 uF
-range (r5, the lowest ramp range) had no step down: 100 nF after 1 mF stayed on 600 uF and
-read 3 .. 44 uF as final values.
+"""Capacitance AUTO (dmm.rs poll_cap, issue #74): the range a reading ends on does not depend
+on what was on the leads before. A small capacitor after a large one ends on its own range with
+its value (before: 100 nF after 1 mF stayed on 600 uF, 3 .. 44 uF as final values); open leads
+end on the 6 nF range whatever came before (before: after a short, or after 4.7 mF, the meter
+stayed on "0L mF"); a short reads 0 on the 6 nF range; a large capacitor measures and keeps its
+range (no hunt).
 
-Each window (fw uptime, from the window input's marker: emu/emusync.py): the large capacitor
-at its start, CONF:CAP at +1 s, the small one at +SWAP s; from the swap `CONF?;:FETC?` every
-0.2 s for HOLD s. PASS when the last polls show the small capacitor's range and a value
-within TOL of it.
+A scenario is a list of phases (fw uptime, from each phase input's marker: emu/emusync.py):
+each phase connects its input at its start (CONF:CAP at +1 s of the first one), then
+`CONF?;:FETC?` every 0.2 s. At the phase's end the last LAST polls must show the phase's range
+and value: a number (within TOL), `ol` (+9.9E37), `small` (below 0.2 nF: the open leads'
+stray, 0.04 nF in the emulator), `zero` (0); `stable` s: no range change in the phase's last
+`stable` s.
 
   emu/hy3131/capdowntest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 --port 47750
 """
@@ -26,21 +30,38 @@ import emusync  # noqa: E402
 
 BOOT_OFS = emusync.BOOT_S
 T0 = 8.0
-SWAP = 14.0
-HOLD = 20.0
-W = SWAP + HOLD + 3.0
+GAP = 2.0
 TOL = 0.03
-# name, large, small, the small one's range (F), its value (F)
+# The ramp ranges (600 uF up): the emulator's 470 uF reads +3.1 % (its ramp arithmetic,
+# emu/hy3131/README.md: the stock's 100 uF reads +4 %).
+TOL_RAMP = 0.05
+LAST = 5
+NF6 = 6e-9
+# name, [(phase s, input, range F, value, stable s)]
 SCEN = [
-    ('1mF-100nF', 'c:1000e-6', 'c:100e-9', 6e-7, 100e-9),
-    ('470uF-22uF', 'c:470e-6', 'c:22e-6', 6e-5, 22e-6),
-    ('4.7mF-330uF', 'c:4.7e-3', 'c:330e-6', 6e-4, 330e-6),
+    ('1mF-100nF', [(14, 'c:1000e-6', None, None, 0), (20, 'c:100e-9', 6e-7, 100e-9, 0)]),
+    ('470uF-22uF', [(14, 'c:470e-6', None, None, 0), (20, 'c:22e-6', 6e-5, 22e-6, 0)]),
+    ('4.7mF-330uF', [(14, 'c:4.7e-3', None, None, 0), (20, 'c:330e-6', 6e-4, 330e-6, 0)]),
+    ('open', [(20, 'open', NF6, 'small', 4)]),
+    ('short-open', [(16, 'short', NF6, 'zero', 8), (20, 'open', NF6, 'small', 8)]),
+    ('4.7mF-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 10), (25, 'open', NF6, 'small', 8)]),
+    ('10uF', [(20, 'c:10e-6', 6e-5, 10e-6, 10)]),
+    ('100uF', [(25, 'c:100e-6', 6e-4, 100e-6, 12)]),
+    ('470uF', [(25, 'c:470e-6', 6e-4, 470e-6, 12)]),
+    ('1mF', [(30, 'c:1000e-6', 6e-3, 1e-3, 15)]),
+    # The device's open / short on a ramp range (#74): the node at its clamp / at 0 V, no
+    # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
+    # 0 V) for these phases; the oscillator ranges do not read AD1.
+    ('4.7mF-clamp', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
+    ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', 6e-4, 'ol', 5),
+                          (30, 'open', NF6, 'small', 5)]),
+    ('10mF', [(40, 'c:10e-3', 6e-2, 10e-3, 15)]),
 ]
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=47750, help='USB/IP port')
-ap.add_argument('-v', '--verbose', action='store_true', help='print every poll')
+ap.add_argument('-v', '--verbose', action='store_true', help='print every range / value change')
 ap.add_argument('names', nargs='*', help='scenarios (default all)')
 A = ap.parse_args()
 os.environ['USBIP_PORT'] = str(A.port)
@@ -50,12 +71,21 @@ scen = [s for s in SCEN if not A.names or s[0] in A.names]
 os.makedirs(OUT, exist_ok=True)
 tag = 'capdown-%d-%d' % (A.port, os.getpid())
 script = os.path.join(OUT, tag + '.script')
-starts = [T0 + W * k for k in range(len(scen))]
+# Virtual start of every phase: (scenario, phase) -> s.
+starts = {}
+t = T0
+for k, (_, phases) in enumerate(scen):
+    for j, ph in enumerate(phases):
+        starts[k, j] = t
+        t += ph[0]
+    t += GAP
+end = t + 2 + BOOT_OFS
 with open(script, 'w') as f:
-    for k, sc in enumerate(scen):
-        f.write('%.3f dmm open;%s\n' % (starts[k] + BOOT_OFS, sc[1]))
-        f.write('%.3f dmm open;%s\n' % (starts[k] + SWAP + BOOT_OFS, sc[2]))
-end = starts[-1] + W + 2 + BOOT_OFS
+    for (k, j), s in sorted(starts.items(), key=lambda kv: kv[1]):
+        spec, *mon = scen[k][1][j][1].split('|')
+        f.write('%.3f dmm open;%s\n' % (s + BOOT_OFS, spec))
+        for m in mon:
+            f.write('%.3f monitor sysbus.hy3131 %s\n' % (s + BOOT_OFS + 0.001, m))
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01', '--usbip-port', str(A.port),
        '--run-for', '%.1f' % end, '--name', tag, '--script', script]
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
@@ -67,6 +97,18 @@ def num(r):
         return float(r)
     except ValueError:
         return float('nan')
+
+
+def value_ok(v, want):
+    if want is None:
+        return True
+    if want == 'ol':
+        return v > 1e37
+    if want == 'small':
+        return 0 <= v < 0.2e-9
+    if want == 'zero':
+        return v == 0
+    return abs(v - want) <= want * (TOL_RAMP if want > 60e-6 else TOL)
 
 
 try:
@@ -94,33 +136,37 @@ try:
         while up() < s:
             time.sleep(0.2)
 
-    for k, (name, big, small, rng, want) in enumerate(scen):
-        w0 = mk.at(starts[k] + BOOT_OFS)
-        wait_until(w0 + 1)
-        q('CONF:CAP;*OPC?')
-        ws = mk.at(starts[k] + SWAP + BOOT_OFS)
-        wait_until(ws)
-        rows = []
-        while True:
-            conf, v = q('CONF?;:FETC?').split(';', 1)
-            s = up() - ws
-            r = num(conf.strip('"').split()[1].split(',')[0]) if ' ' in conf else float('nan')
-            rows.append((s, r, num(v)))
-            if A.verbose:
-                print('       %6.2f range %-10g %s' % (s, r, v))
-            if s > HOLD:
-                break
-            time.sleep(0.2)
-        last = rows[-5:]
+    for k, (name, phases) in enumerate(scen):
         why = []
-        if any(abs(r - rng) > rng * 1e-3 for _, r, _ in last):
-            why.append('range %s at the end (want %g)' % (' '.join('%g' % r for _, r, _ in last), rng))
-        if any(not abs(v - want) <= want * TOL for _, _, v in last):
-            why.append('values %s at the end (want %g +- %g %%)' % (' '.join('%g' % v for _, _, v in last), want, 100 * TOL))
-        done = [s for s, r, _ in rows if abs(r - rng) <= rng * 1e-3]
-        print('%s %s: %s -> %s, on its range from +%s s%s' % (
-            'ok  ' if not why else 'FAIL', name, big, small, '%.1f' % done[0] if done else '-',
-            '' if not why else ': ' + '; '.join(why)), flush=True)
+        for j, (dur, inp, rng, want, stable) in enumerate(phases):
+            w0 = mk.at(starts[k, j] + BOOT_OFS)
+            if j == 0:
+                wait_until(w0 + 1)
+                q('CONF:CAP;*OPC?')
+            rows = []
+            last = None
+            while True:
+                conf, v = q('CONF?;:FETC?').split(';', 1)
+                s = up() - w0
+                r = num(conf.strip('"').split()[1].split(',')[0]) if ' ' in conf else float('nan')
+                rows.append((s, r, num(v)))
+                if A.verbose and (r, v) != last:
+                    print('       %s %-6s %6.2f range %-10g %s' % (name, inp, s, r, v), flush=True)
+                last = (r, v)
+                if s > dur - 0.3:
+                    break
+                time.sleep(0.2)
+            tail = rows[-LAST:]
+            if rng is not None and any(abs(r - rng) > rng * 1e-3 for _, r, _ in tail):
+                why.append('%s: range %s at the end (want %g)' % (inp, ' '.join('%g' % r for _, r, _ in tail), rng))
+            if any(not value_ok(v, want) for _, _, v in tail):
+                why.append('%s: values %s at the end (want %s)' % (inp, ' '.join('%g' % v for _, _, v in tail), want))
+            if stable:
+                seen = [r for s, r, _ in rows if s >= dur - stable]
+                if len(set(seen)) > 1:
+                    why.append('%s: range changes in the last %g s: %s' % (inp, stable, ' '.join('%g' % r for r in seen)))
+        print('%s %s: %s%s' % ('ok  ' if not why else 'FAIL', name, ' -> '.join(p[1].split('|')[0] for p in phases),
+                               '' if not why else ': ' + '; '.join(why)), flush=True)
         if why:
             bad.append(name)
 finally:

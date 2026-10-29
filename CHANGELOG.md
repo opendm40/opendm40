@@ -10,7 +10,10 @@ section named after the tag as the release notes; how to cut a release:
 ### Fixed
 
 - Capacitance AUTO: a small capacitor measured after a large one (600 µF and
-  up) gets its own range again instead of a wrong µF value.
+  up) gets its own range again instead of a wrong µF value; open leads or a
+  short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
+  screen.
+- Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
 - Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
   ten times it.
 

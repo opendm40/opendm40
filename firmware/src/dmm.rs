@@ -146,6 +146,14 @@ const CAP_DEC: [f32; 8] = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 const CAP_WIN: [f32; 8] = [0.0008, 0.0002, 0.0001, 0.0001, 0.0001, 3.0, 30.0, 200.0];
 const CAP_K: [f32; 8] = [1020.0, 1003.0, 102.7, 10.68, 1.5, 4.06, 41.0, 400.0];
 const CAP_R21: [u8; 3] = [0xDC, 0xCC, 0xBB];
+/// Ramp ranges: a poll's |dV| below this (mV) is no ramp (poll_cap, #74).
+const CAP_DV_MIN: f32 = 0.05;
+/// Polls without a ramp (255 ms each) before poll_cap decides open / short.
+const CAP_IDLE_N: u8 = 5;
+/// No ramp with the node below this (mV, after the discharge): a short.
+const CAP_SHORT_MV: f32 = 30.0;
+/// r5 (600 uF) steps down to r4 below this share of its range.
+const CAP_R5_DOWN: f32 = 0.07;
 const FREQ_DEC: [f32; 7] = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 const ACV_WIN: [f32; 4] = [0.002, 0.01, 0.1, 1.0];
 const ACMV_WIN: [f32; 2] = [0.01, 0.1];
@@ -1248,6 +1256,11 @@ pub struct Dmm {
     cap_cnt_up: u8,
     cap_cnt_dn: u8,
     cap_cnt_small: u8,
+    /// Ramp ranges: polls in a row without a ramp (`CAP_DV_MIN`).
+    cap_idle: u8,
+    /// DBG:CAP? (`cap_info`): the last poll's V (mV), dV (mV), dt (ms),
+    /// median dV, per-poll C (uF), oscillator C (uF).
+    cap_dbg: [f32; 6],
     ramp: CapRamp,
     beep_class: u8,
     beep_e: u8,
@@ -1867,6 +1880,8 @@ impl Dmm {
             cap_cnt_up: 0,
             cap_cnt_dn: 0,
             cap_cnt_small: 0,
+            cap_idle: 0,
+            cap_dbg: [0.0; 6],
             ramp: CapRamp {
                 discharging: false,
                 prev_v: 0.0,
@@ -2144,6 +2159,23 @@ impl Dmm {
     /// FAST's offset refreshes this session: (used, rejected, VOS in codes
     /// on the current path, AD1 conversion period in ms: EMA over every
     /// conversion, dropped ones included) (DBG:FAST?).
+    /// DBG:CAP?: range, manual, phase (0 oscillator, 1 discharge, 2 ramp),
+    /// oscillator frequency (EMA), shown C (uF), the last poll's V, dV, dt,
+    /// median dV, per-poll C, oscillator C (`cap_dbg`), ramp class, samples,
+    /// comparator, polls without a ramp, up / down / small counts.
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub fn cap_info(&self) -> [f32; 18] {
+        let r = &self.ramp;
+        let ph = if self.range < 5 { 0.0 } else if r.discharging { 1.0 } else { 2.0 };
+        let d = &self.cap_dbg;
+        [
+            self.range as f32, self.manual as u8 as f32, ph, self.f_cap, self.cap_c,
+            d[0], d[1], d[2], d[3], d[4], d[5],
+            r.class as f32, r.n as f32, r.cmp.map_or(-1.0, |c| c as u8 as f32), self.cap_idle as f32,
+            self.cap_cnt_up as f32, self.cap_cnt_dn as f32, self.cap_cnt_small as f32,
+        ]
+    }
+
     pub fn fast_info(&self) -> (u32, u32, f32, f32) {
         (self.fast.used, self.fast.rejected, self.fast.vos(), self.conv_ms)
     }
@@ -2798,7 +2830,7 @@ impl Dmm {
             13 => match r {
                 0..=2 => (3 - r, "nF"),
                 3..=5 => ((6 - r).min(3), "\u{b5}F"),
-                _ => ((9 - r.min(7)).min(3), "mF"),
+                _ => (0, "\u{b5}F"),
             },
             14 => {
                 let v = freq_val(0.0, self.freq.range, false);
@@ -3448,6 +3480,13 @@ impl Dmm {
                 self.manual = false;
                 if self.mode == 10 && self.range < self.ohm_auto_floor() {
                     self.set(clk, 10, 1, 150);
+                }
+            }
+            (Button::Cap, None) => self.manual = false,
+            (Button::Cap, Some(i)) if i <= 7 => {
+                self.manual = true;
+                if self.mode == 13 && self.range != i as i8 {
+                    self.cap_set_range(clk, i as i8);
                 }
             }
             (Button::Ohm, Some(i)) if i <= 6 => {
@@ -5477,8 +5516,10 @@ impl Dmm {
         let r = self.range as usize;
         let (v, dec, unit) = match r {
             0..=2 => (c_uf * 1000.0, 3 - r as u8, "nF"),
+            // 6 / 60 mF in uF too (owner 2026-10-30: "1000 uF", not
+            // "1 mF"): 4700 uF on 6 mF, 47000 uF on 60 mF (10 uF steps).
             3..=5 => (c_uf, 6 - r as u8, "\u{b5}F"),
-            _ => (c_uf * 1e-3, 9 - r as u8, "mF"),
+            _ => (c_uf, 0, "\u{b5}F"),
         };
         let dec = dec.min(3);
         self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, c_uf * 1e-6)
@@ -5505,6 +5546,7 @@ impl Dmm {
         self.cap_cnt_up = 0;
         self.cap_cnt_dn = 0;
         self.cap_cnt_small = 0;
+        self.cap_idle = 0;
     }
 
     fn poll_cap(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
@@ -5518,6 +5560,7 @@ impl Dmm {
             let fk = self.f_cap.max(1e-9);
             // Negative results are clamped to 0 as in the stock (m+0x18 == 0).
             let c = (cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * fk) - cal(0x190, 0.0)).clamp(0.0, 1.06 * lim);
+            self.cap_dbg[5] = c;
             let ol = c / lim > ov;
             if !self.manual {
                 if r >= 1 && self.f_cap > 2.0 {
@@ -5559,9 +5602,35 @@ impl Dmm {
         self.ramp.prev_v = v_mv;
         self.ramp.prev_t = now;
         self.deadline = now + 255;
-        if dv == 0.0 {
-            return None;
+        self.cap_dbg[0] = v_mv;
+        self.cap_dbg[1] = dv;
+        self.cap_dbg[2] = dt;
+        // No ramp (#74): open leads hold the node at its clamp, a short at
+        // 0 V, so dV is 0 (emulator) or noise (device: "0L mF" / "0.0 mF"
+        // stayed for good, as nothing below ran). A capacitor in range
+        // moves >= ~1.7 mV per poll (full scale: I / C x 255 ms); 0.05 mV
+        // is a capacitor ~30x over the range.
+        if dv < CAP_DV_MIN {
+            self.cap_idle = self.cap_idle.saturating_add(1);
+            if self.cap_idle < CAP_IDLE_N || self.manual {
+                return Some(self.cap_val(self.cap_c, self.cap_idle >= CAP_IDLE_N));
+            }
+            self.cap_c = 0.0;
+            if v_mv.abs() < CAP_SHORT_MV {
+                // A short: OL on 600 uF (r5), the lowest ramp range,
+                // looked at again every poll: open leads or a capacitor
+                // in its place go on from there.
+                if r > 5 {
+                    self.cap_set_range(clk, 5);
+                }
+                return Some(self.cap_val(0.0, true));
+            }
+            // Open leads (or a capacitor far below the range): the
+            // oscillator's smallest range, which steps up by itself.
+            self.cap_set_range(clk, 0);
+            return Some(self.cap_val(0.0, true));
         }
+        self.cap_idle = 0;
         if self.ramp.med_i == 0 {
             self.ramp.med = [dv; 5];
         } else {
@@ -5589,6 +5658,8 @@ impl Dmm {
             return Some(self.cap_val(0.0, true));
         }
         let c = (cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm).clamp(0.0, 1.06 * lim);
+        self.cap_dbg[3] = dvm;
+        self.cap_dbg[4] = c;
         if self.ramp.n < 35 {
             self.ramp.buf[self.ramp.n] = c;
             self.ramp.n += 1;
@@ -5624,11 +5695,14 @@ impl Dmm {
                 if self.cap_cnt_up >= 5 {
                     self.cap_set_range(clk, r as i8 + 1);
                 }
-            } else if cc < 0.1 * lim / ov && r >= 5 {
+            } else if r >= 5 && cc < if r == 5 { CAP_R5_DOWN * lim } else { 0.1 * lim / ov } {
                 // r5 steps down too, to the oscillator's 60 uF range (r4,
                 // which falls to r0 on a small C): without it a small
                 // capacitor after a large one stayed on 600 uF, read from
                 // the ramp (emulator: 100 nF read 3 .. 44 uF, final).
+                // r5 below 42 uF (`CAP_R5_DOWN`), not 58 uF: r4 steps up
+                // above 61.8 uF, so a 50 .. 60 uF capacitor's noise would
+                // hunt between the two.
                 // On r5 counted on a new ramp result only: `cap_c` is the
                 // last range's until the first one (a 330 uF after 4.7 mF
                 // hunted 600 uF <-> 60 uF on it, emulator). r6 / r7 count

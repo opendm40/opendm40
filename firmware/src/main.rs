@@ -757,6 +757,16 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
+                    scpi::Dbg::Cap => {
+                        scpi.len = 0;
+                        for (i, v) in app.dmm.cap_info().iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            scpi.put_f32(*v);
+                        }
+                        true
+                    }
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;

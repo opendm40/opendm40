@@ -56,13 +56,20 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
 /// Full scale of DMM `mode`: continuity (11) and diode (12) read up to
 /// their OL ceilings (dmm.rs poll_cont: > 1000 ohm; poll_diode: > 3.12 V,
 /// the 3 V scale), not the 60000-count scale of their format (600 ohm /
-/// 6 V); capacitance (13) has 6000 counts (dmm.rs cap_val: 600.0 nF on
-/// the 600 nF range); else `full_scale`.
-pub fn mode_full_scale(mode: u8, dec: u8, unit: &str) -> f32 {
+/// 6 V); capacitance (13): its range `range` (6 nF x 10^range, in nF on
+/// r0..r2, else in uF: 600.0 nF, 6000 uF, 60000 uF; dmm.rs cap_val);
+/// else `full_scale`.
+pub fn mode_full_scale(mode: u8, range: i8, dec: u8, unit: &str) -> f32 {
     match mode {
         11 => 1000.0,
         12 => 3.0,
-        13 => full_scale(dec, unit) / 10.0,
+        13 => {
+            let mut s = 6.0f32;
+            for _ in 0..(if unit == "nF" { range } else { range - 3 }).clamp(0, 7) {
+                s *= 10.0;
+            }
+            s
+        }
         _ => full_scale(dec, unit),
     }
 }

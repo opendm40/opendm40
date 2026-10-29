@@ -4113,7 +4113,7 @@ impl App {
                 let items = s::range_items(cur);
                 let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
-                    _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
+                    _ if cur == 14 => out.set_err("Illegal parameter value"),
                     Some(i) => {
                         self.dmm.set_range(clk, Some(s::range_item_code(cur, i)));
                         self.meter.rel_off();

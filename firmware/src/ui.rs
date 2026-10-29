@@ -107,13 +107,16 @@ fn button_index(b: Button) -> usize {
 use crate::stockfont::{self as sf, rect};
 
 const STATUS_FG: Color = 0xF7BE;
-/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ").
-const CELLS: [[u8; 7]; 5] = [
+/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ",
+/// %7.0f: capacitance 6000 / 60000 uF, at most 5 digits, so cell 1 is
+/// always blank).
+const CELLS: [[u8; 7]; 6] = [
     [40, 60, 20, 60, 60, 60, 60],
     [40, 60, 60, 20, 60, 60, 60],
     [40, 60, 60, 60, 20, 60, 60],
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
+    [40, 20, 60, 60, 60, 60, 60],
 ];
 /// Main-readout cells with the extra digit (formats 0..3 only, never OL):
 /// sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78 digits
@@ -207,7 +210,8 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
         4.. => 0,
         3 => 1,
         2 => 2,
-        _ => 3,
+        1 => 3,
+        _ => 5,
     };
     (core::str::from_utf8(&buf[..7]).unwrap_or(""), f, x)
 }
@@ -677,7 +681,7 @@ impl DmmView {
             return;
         }
         let temp = r.mode == 15;
-        let fs = crate::bargraph::mode_full_scale(r.mode, r.main.dec, r.main.unit);
+        let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
         let key = if temp { (0, "", false) } else { (fs.to_bits(), r.main.unit, self.bar.bipolar) };
         if self.bar_scale != Some(key) {
             self.bar_scale = Some(key);
