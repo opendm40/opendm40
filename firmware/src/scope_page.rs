@@ -350,6 +350,9 @@ pub(super) struct Sp {
     /// page (timebase, flash).
     list: Option<ListTouch>,
     tb_drawn: (u8, bool),
+    /// The REC mark's blink phase drawn while the page is covered (a popup
+    /// leaves the top bar visible); None = not drawn since it was covered.
+    rec_drawn: Option<bool>,
     /// UF-08: the press is on the cursor tab; the selection before the
     /// cursor tab turned the cursors on. UF-09: the last plain tap.
     cur_press: bool,
@@ -413,6 +416,7 @@ impl Sp {
             entries: 0,
             list: None,
             tb_drawn: (255, false),
+            rec_drawn: None,
             cur_press: false,
             presel: false,
             cur_saved: None,
@@ -551,8 +555,10 @@ impl App {
             // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
             wvdiv: self.scope.vdiv(),
             ch1_txt: if wave { self.wave_func_label() } else { "" },
-            // The combined view shows REC in the strip badge.
-            rec: self.view == View::Scope && crate::csvlog::active(),
+            // Both scope views (the combined view's strip badge no longer
+            // shows REC: one look everywhere).
+            rec: crate::csvlog::active(),
+            rec_dim: su::rec_blink(now),
         }
     }
 
@@ -636,7 +642,7 @@ impl App {
             }
         };
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
-        let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label, crate::csvlog::active());
+        let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label);
         ui::strip_acc(&mut d, &r, self.acc_ctx());
         if self.gen.s.on {
             let mut b = su::Buf::new();
@@ -1250,8 +1256,17 @@ impl App {
                     su::tb_badge(&m);
                 }
             }
+            // The REC mark keeps blinking above a popup.
+            if crate::csvlog::active() && !self.redraw {
+                let dim = su::rec_blink(now);
+                if self.sp.rec_drawn != Some(dim) {
+                    self.sp.rec_drawn = Some(dim);
+                    su::rec_mark_blink(su::SRC_BADGE, su::C_BAR, !dim);
+                }
+            }
             return;
         }
+        self.sp.rec_drawn = None;
         self.sp_update(now);
     }
 
@@ -2145,6 +2160,7 @@ impl App {
         self.sp.popup = p;
         self.sp.list = None;
         self.sp.tb_drawn = (255, false);
+        self.sp.rec_drawn = None;
         if !self.redraw {
             // The CH1 / math pill label shows the open popup (0x7bef).
             let m = self.sp_model(self.now);

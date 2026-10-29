@@ -391,6 +391,8 @@ pub struct App {
     /// change ends it), and whether REC is drawn in the status block.
     rec_func: u8,
     rec_shown: bool,
+    /// The REC dot's blink phase last drawn (scope_ui::rec_blink).
+    rec_dim_shown: bool,
     /// Record page: free bytes on the disk as scanned on page entry
     /// (csvlog::free_bytes; Err = busy / no disk), for the estimate.
     rec_free: Result<u32, crate::csvlog::GErr>,
@@ -673,6 +675,7 @@ impl App {
             set_page: 0,
             rec_func: 255,
             rec_shown: false,
+            rec_dim_shown: false,
             rec_free: Err(crate::csvlog::GErr::NoDisk),
             rec_fast: false,
             fast_req: None,
@@ -1046,6 +1049,7 @@ impl App {
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
+            rec_dim: crate::scope_ui::rec_blink(now),
             page: View::CYCLE.iter().position(|&v| v == self.view).map_or(255, |i| i as u8),
         }
     }
@@ -1776,6 +1780,18 @@ impl App {
                 View::Keypad if !self.kp_dmm() => ui::gen_status(&st),
                 View::DmmScope => self.draw_reading(),
                 View::Range if self.temp_page_on() => self.temp_info_tick(false),
+                _ => {}
+            }
+        }
+        // The REC dot's blink (0.5 s phases): the dot's box alone.
+        let dim = crate::scope_ui::rec_blink(now);
+        if self.rec_shown && dim != self.rec_dim_shown {
+            self.rec_dim_shown = dim;
+            let st = self.status(now);
+            match self.view {
+                View::Dmm => ui::status_rec_blink(&st, false),
+                View::Gen => ui::status_rec_blink(&st, true),
+                View::Keypad if !self.kp_dmm() => ui::status_rec_blink(&st, true),
                 _ => {}
             }
         }

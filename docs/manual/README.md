@@ -198,7 +198,7 @@ The top line of the multimeter page shows, from left to right:
    [alert](#safety-and-alerts);
 3. the time since the meter was switched on (hours:minutes:seconds);
 4. a lock symbol: open, or closed while the touch lock is on;
-5. **REC** in red while a recording to the disk runs;
+5. a red dot and **REC** while a recording to the disk runs; the dot blinks;
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
 7. the USB symbol while a computer has the meter connected (not with a charger);
@@ -1576,7 +1576,7 @@ From the left:
 - the function (**DC V**, **AC V**, **AC+DC**, **AutoDC** / **AutoAC**,
   **DC A**, **FREQ**, **TEMP**, **POWER** ...);
 - one state badge, the most important of: **HOLD** / **A-HOLD**, an
-  [alert](#the-alerts), **HV** (30 V and more), **REC**, **REL**, the
+  [alert](#the-alerts), **HV** (30 V and more), **REL**, the
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
   **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
 - the reading and its unit;
@@ -1962,8 +1962,8 @@ There are two recorders:
 ### Start and stop a recording
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
-meter beeps and shows **Recording CSV**; **REC** appears in red in the
-status bar (on the scope page in place of **MCX | DMM**). Swipe down again to stop. When the last rows are on the disk,
+meter beeps and shows **Recording CSV**; a blinking red dot and **REC** appear in the
+status bar (on the scope pages in the top bar, in place of **MCX | DMM**). Swipe down again to stop. When the last rows are on the disk,
 the meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.

@@ -738,7 +738,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, rec_dim: false, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -768,7 +768,7 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     scope_ui::graph().clear();
     scope_ui::update(&m);
     scope_ui::cells(&m, &["Freq:444.4kHz", "Vp-p:-444mV", "Cycl:444.4us", "Vrms:-444mV"]);
-    let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label, false);
+    let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label);
     // The accuracy label (none under REL: App::acc_ctx).
     ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: 2, tc: label == Some("TC K") }));
     d.gen = scope_ui::Txt::new(gen);
@@ -1528,7 +1528,7 @@ fn main() {
             for hold in 0..4u8 {
                 for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                     for rel in [false, true] {
-                        for (j, (hv, rec, gen)) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")].into_iter().enumerate() {
+                        for (j, (hv, gen)) in [(0u8, ""), (hv_of(r), "10.00MHz"), (1, "1.00kHz"), (2, "")].into_iter().enumerate() {
                           // Both phases of the 1 s alternation (REL / verdict;
                           // A-JACK / LIVE? with HOLD, decision 2026-10-22 #5).
                           for alt in [false, true] {
@@ -1537,7 +1537,7 @@ fn main() {
                                 r.alert = ALERTS[(j + hold as usize + rel as usize) % ALERTS.len()];
                             }
                             let r = &r;
-                            let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label, rec);
+                            let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label);
                             // The accuracy label on every model (DM40A: the
                             // x10 digit), none under REL (App::acc_ctx).
                             ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: j as u8 % 3, tc: true }));
@@ -1607,7 +1607,7 @@ fn main() {
         ck.check_area(&format!("combined/{name}/band"), &[("band", band_area)], true, Some(band_area));
         // The strip's sub texts fit their boxes (scope_ui::ST_SUB; the label
         // clips, so an overlong text loses its first glyphs silently).
-        let d = ui::strip_data(r, 0, 0, false, hv_of(r), false, *label, false);
+        let d = ui::strip_data(r, 0, 0, false, hv_of(r), false, *label);
         for i in 0..2 {
             ck.cases += 1;
             let w = stockfont::text_width(stockfont::SC_F12, d.sub[i].as_str(), 1);
@@ -1797,7 +1797,34 @@ fn main() {
             ("chg-empty-b", true, true, true, true, 1, true),
             ("bt-nousb", true, false, true, false, 1, false),
         ];
-        for (name, bt, usb, csv, locked, bars, charging) in states {
+        // REC: also its dot's off phase (rec_dim), and the blink step
+        // (status_rec_blink, the dot's box alone) equal to a fresh draw.
+        let draw = |gen: bool, st: &ui::Status, dv: &mut ui::DmmView| {
+            host::reset(0);
+            let mut r = cases[0].1;
+            r.auto = true;
+            if gen {
+                ui::gen_static(&w.gen);
+                ui::gen_status(st);
+            } else {
+                dv.label = None;
+                dv.draw_static(Button::Volt, 1, false, false);
+                dv.reading(&r, 0, 0);
+                ui::status_right(st);
+            }
+        };
+        for gen in [false, true] {
+            for dim in [false, true] {
+                let st = ui::Status { csv: true, rec_dim: dim, ..status(0) };
+                draw(gen, &st, &mut dv);
+                let want = emu().fb.clone();
+                draw(gen, &ui::Status { rec_dim: !dim, ..st }, &mut dv);
+                ui::status_rec_blink(&st, gen);
+                ck.same_as(&format!("statusbar/blink/{gen}/{dim}"), &want);
+            }
+        }
+        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[4], true))).collect();
+        for ((name, bt, usb, csv, locked, bars, charging), dim) in states {
             for gen in [false, true] {
                 host::reset(0);
                 let mut r = cases[0].1;
@@ -1810,7 +1837,8 @@ fn main() {
                     dv.reading(&r, 0, 0);
                 }
                 let mut st = status(0);
-                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging) = (bt, usb, csv, locked, bars, charging);
+                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging, st.rec_dim) = (bt, usb, csv, locked, bars, charging, dim);
+                let name = if dim { "all-rec-off" } else { name };
                 let h = if gen { 36 } else { ui::BAR_H as usize };
                 if gen {
                     ui::gen_status(&st);
