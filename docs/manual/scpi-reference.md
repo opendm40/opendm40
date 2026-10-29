@@ -577,7 +577,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - `WAVeform:PREamble?`: format 0 BYTE / 1 WORD; type 0 screen columns, 2
   record; count 1. Point i is at time `(i - xref) * xinc + xorig` seconds
   from the trigger point (screen centre when untriggered) and has
-  `(data - yref) * yinc + yorig` volts.
+  `(data - yref) * yinc + yorig` volts (BYTE: the middle of the four codes
+  a byte stands for).
 - `WAVeform:DATA?` for the record (any POINts other than SCReen) needs the
   scope stopped (`STOP`, `SINGle` or `DIGitize`, then `TRIGger:STATus?` =
   `STOP`); while it runs the reply is `#10` with `Settings conflict`. Over

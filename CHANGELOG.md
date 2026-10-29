@@ -52,6 +52,8 @@ section named after the tag as the release notes; how to cut a release:
   leads showed "-0.0000").
 - **SCPI:** `TRIGger:LEVel` keeps the level as given; it was up to one screen
   row lower (0.1 V became 0.113 V at 500 mV/div).
+- SCPI: `WAVeform:DATA?` in BYTE format is no longer 1.5 codes low on
+  average (the preamble's `yorig` is the middle of a byte's four codes).
 
 ## v0.3.0 (2026-10-27)
 
