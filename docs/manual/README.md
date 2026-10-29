@@ -1005,8 +1005,8 @@ detected](#what-cannot-be-detected)).
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
 | **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω and continuity a voltage on the V/Ω jack that would otherwise look like a current in the A jack (Ω: from about 3-5 V). | Ω, continuity, diode. |
-| **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V. |
-| **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V. |
+| **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V; the power meter in AC+DC ([Coupling](#coupling-dc-ac-acdc)). |
+| **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V; the power meter in DC. |
 | **FUSE?** | 0 A for 60 s: check the fuse? | A current function read zero for a minute. The fuse may be blown. | A functions. |
 
 How they end:
@@ -1649,7 +1649,8 @@ an external voltage can destroy the output.
 
 To use it:
 
-1. Tap the waveform box to step through **Sine → Square → Triangle → Ramp**.
+1. Tap the waveform name above the preview to step through **Sine → Square →
+   Triangle → Ramp**.
 2. Tap a value box to type a new value ([The keypad](#the-keypad)).
 3. Tap **RUN / STOP** in the top bar, or press **RUN**, to switch the
    output on or off.
@@ -2018,7 +2019,7 @@ time_s,value,unit,flags
 
 | Column | Content |
 |---|---|
-| `time_s` | Seconds since the start. In interval mode: the end of the interval. |
+| `time_s` | Seconds since the start. In interval mode: the end of the interval, also for the last one when the recording stops inside it. |
 | `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overload. |
 | `unit` | The unit. |
 | `flags` | Any of `OL` (overload), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
@@ -2582,7 +2583,7 @@ dmm.write('CONF:VOLT:DC')
 print(float(dmm.query('READ?')))
 ```
 
-pyvisa-py names the meter `USB0::4617::1::<serial>::0::INSTR`; NI-VISA
+pyvisa-py names the meter `USB0::4617::53312::<serial>::0::INSTR`; NI-VISA
 `USB0::0x1209::0xD040::<serial>::INSTR`. pyvisa-py talks to the meter
 through libusb and takes the interface away from the kernel driver:
 `/dev/usbtmcN` disappears until you re-plug the meter. Use either PyVISA or

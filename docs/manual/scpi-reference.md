@@ -45,7 +45,8 @@ the function USB reads, and the same as one set by touch.
 - **Binary blocks.** Some queries answer with an IEEE 488.2 definite-length
   block: `#`, one digit n, n digits of length, the data, then `\n`
   (`#3400` followed by 400 bytes). A block query must be the only query in
-  its message; otherwise it is refused with `Query error`.
+  its message; otherwise it is refused with `Query error`. Exception: the
+  400-byte `WAVeform:DATA?` (SCReen, BYTE) joins other replies.
 - **Numbers in replies** are in SCPI NR3 with 7 significant digits:
   `+1.234567E-03`, in SI units (V, A, ohm, F, Hz, s, W). Two special values:
   `+9.90000000E+37` is an overload (OL on the screen), `+9.91000000E+37`
@@ -465,7 +466,8 @@ power meter).
 - Setting a limit turns the limit check on.
 - Smoothing changes the displayed value and `READ?` / `MEASure?` /
   `FETCh?`; the statistics and the CSV log use the unsmoothed readings.
-  `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one.
+  `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one;
+  setting it turns smoothing on.
   Stored.
 
 ## Power meter
