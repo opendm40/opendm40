@@ -7,6 +7,15 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### New
+
+- **600 MΩ range, experimental:** on the range page or SCPI
+  `RES:RANG 600E6` only, never in AUTO; accuracy not specified. Leave the
+  leads open once: it learns the meter's own leakage
+  ([manual](docs/manual/README.md#resistance)).
+
+  ![The 600 MΩ range page and reading](docs/changelog/v0.4.0/ohm-600m.png)
+
 ### Changed
 
 - **The update loader no longer opens by itself** after repeated hangs (a

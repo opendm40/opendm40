@@ -578,6 +578,7 @@ fn prov(mut r: Reading) -> Reading {
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
+        10 if unit == "M\u{3a9}" && dec == 1 => dmm::OHM600,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
         10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
@@ -645,6 +646,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acma_bd_ol", rd(5, ol(3, "mA"), Some(val(50.000, 3, "Hz")), Some(ol(2, "mV")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
+        // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
+        ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
+        ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.
@@ -2362,6 +2366,11 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
+            // The app draws a note on the Voltage page only; the Resistor
+            // page's note row holds its 600 Mohm item.
+            if b == Button::Ohm && note.is_some() {
+                continue;
+            }
             for sub in 0..4u8 {
                 host::reset(0);
                 let n = ui::range_items(b).len();
@@ -3147,7 +3156,7 @@ fn main() {
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
-            for rg in 0..7i8 {
+            for rg in 0..8i8 {
                 host::reset(0);
                 let (r, _) = find("ohm_k");
                 let r = Reading { range: rg, ..r };
