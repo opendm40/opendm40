@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Scope roll mode: the measurements show -- instead of the values from
+  before roll started; `WAV:DATA?` follows the rolling trace.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

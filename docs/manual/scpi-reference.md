@@ -565,7 +565,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
   multimeter-input scope); timebase, trigger, the queries and the waveform
   commands work on it.
-- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each),
+- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each; in
+  roll mode the middle of each column's min and max, 0 before data),
   `MAXimum` the whole acquisition record, `<n>` the record thinned to at
   most n points.
 - `WAVeform:FORMat`: `BYTE` one byte per point (the 10-bit code divided by

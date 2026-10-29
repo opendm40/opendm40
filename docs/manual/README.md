@@ -1408,7 +1408,8 @@ restores Freq, Vp-p, Cycl, Vrms.
 | **Vavg** | Mean. |
 
 The measurements use the part of the signal on screen and update up to
-about three times a second.
+about three times a second. In roll mode they show **--** until a
+stopped record fills the screen.
 
 ### Cursors
 
