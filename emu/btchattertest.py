@@ -25,6 +25,12 @@ a start, and its bytes pass 400 ms before PC14 rises.
      firmware took as a host line (-113; the logfmttest --bt-port flake on
      LOG:DATA? blocks). Five cmd 09 frames: each reply carries "AT", and
      SYST:ERR:COUN? stays 0.
+  E. (in A's link) MEAS:RES?, then MEAS:VOLT:DC? (a function change: ~3 s
+     of settling) and, behind it at once, 1.5 KiB of SYST:REM (a no-op) and
+     a *IDN?: more than the 1 KiB RX ring while it waits (#123). The query
+     and *IDN? are answered, and the only error queued is -363 (input
+     overrun), none for a line cut by the lost input. The BT model paces
+     its bytes to the firmware at 115200 (RxByteUs), as the device's UART.
 Exit status 0 = passed.
 """
 import argparse
@@ -82,6 +88,9 @@ class Host:
     def q(self, c):
         """Send at once; the reply line, None if none within 30 s (wall)."""
         self.s.sendall(c.encode() + b'\n')
+        return self.recv_line()
+
+    def recv_line(self):
         while b'\n' not in self.buf:
             try:
                 d = self.s.recv(4096)
@@ -135,6 +144,16 @@ try:
     check(n is not None and n.lstrip('+') == '0', 'C: SYST:ERR:COUN? after them: %s (want 0)' % n)
     if n is not None and n.lstrip('+') not in ('', '0'):
         print('       queued: %s' % [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))])
+    # E: more than the RX ring behind a waiting MEAS:VOLT:DC? (#123).
+    h.q('MEAS:RES?')
+    h.s.sendall(b'MEAS:VOLT:DC?\n' + b'SYST:REM\n' * 170)
+    r = h.q('*IDN?')
+    check(r is not None and r.startswith('+2.15'), 'E: MEAS:VOLT:DC? before a 1.5 KiB burst answered: %s' % r)
+    i = h.recv_line()
+    check(i is not None and 'opendm40' in i, 'E: *IDN? after the burst: %s' % i)
+    n = h.q('SYST:ERR:COUN?')
+    errs = [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))] if n and n.lstrip('+').isdigit() else [n]
+    check(errs and all(e and e.startswith('-363') for e in errs), 'E: errors after the burst: %s (want -363 only)' % errs)
     h.s.close()
     marker('B.png')
     h = Host()   # linked by the model once the module is on again
