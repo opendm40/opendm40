@@ -53,6 +53,8 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Physical keys, touch, sound: "Device check (3 min): (1) `CALC:AHOL?`" (side keys, #57 partial), the
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
+- Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
+  check (2 min" (PR fix/smooth-redraw).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
   offset"; "Ohm OL above 60 000 counts" (calibrator).
