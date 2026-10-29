@@ -110,21 +110,28 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     r.v[11] = sqrt((sum_sq(n as u32, s1, s2, v_0, v_k) / n as f64) as f32);
     let clipped = lo == 0 || hi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };
-    // Top / base: most populated bin in the upper / lower 30 % band.
+    // Top / base: most populated bin in the upper / lower 30 % band, when
+    // it is a plateau: the bin and its two neighbours hold at least 4x the
+    // band's mean for three bins. Else (a triangle or ramp fills the band
+    // evenly, so its "mode" is any bin of the band) the extreme, Vmax /
+    // Vmin (#129).
     let pp_c = (hi - lo) as f32;
     let top_from = (hi as f32 - 0.3 * pp_c) as usize;
     let base_to = (lo as f32 + 0.3 * pp_c) as usize;
-    let mode_in = |a: usize, b: usize| -> usize {
-        let mut best = a;
-        for i in a..=b.min(1023) {
+    let mode_in = |a: usize, b: usize, ext: usize| -> usize {
+        let b = b.min(1023);
+        let (mut best, mut sum) = (a, 0usize);
+        for i in a..=b {
+            sum += hist[i] as usize;
             if hist[i] > hist[best] {
                 best = i;
             }
         }
-        best
+        let near: usize = hist[best.saturating_sub(1)..=(best + 1).min(1023)].iter().map(|&h| h as usize).sum();
+        if near * (b + 1 - a) >= 12 * sum { best } else { ext }
     };
-    let tb = mode_in(top_from, hi as usize);
-    let bb = mode_in(lo as usize, base_to);
+    let tb = mode_in(top_from, hi as usize, hi as usize);
+    let bb = mode_in(lo as usize, base_to, lo as usize);
     let (vtop, vbas) = (volts(tb as f32), volts(bb as f32));
     r.v[14] = vtop;
     r.v[15] = vbas;
