@@ -62,7 +62,7 @@ SCEN = [
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
     ('4.7mF-clamp', [(30, 'c:4.7e-3;capasym:0', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
-    ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', 6e-2, 'ol', 4),
+    ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', None, 'olsmall', 4),
                           (30, 'open', NF6, 'small', 5)]),
     ('10mF', [(40, 'c:10e-3', 6e-2, 10e-3, 15)]),
     ('47mF', [(40, 'c:47e-3', 6e-2, 47e-3, 15)]),
@@ -114,6 +114,10 @@ def value_ok(v, want):
         return True
     if want == 'ol':
         return v > 1e37
+    if want == 'olsmall':
+        # A short: OL on 60 mF (the device: no comparator turn), or ~0 on 60 nF
+        # (the emulator's comparator still turns under the forced AD1).
+        return v > 1e37 or 0 <= v < 0.2e-9
     if want == 'small':
         return 0 <= v < 0.2e-9
     if want == 'zero':
