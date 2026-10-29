@@ -665,6 +665,10 @@ pub fn battery(m: &Model) {
 /// Right-panel button k (0..6) as the stock draws it (sec. 5).
 pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
+    // A strip pass (lcd.rs "strip rendering") without its rows: no layout.
+    if !lcd::rows_hit(r.y, r.y + r.h - 1) {
+        return;
+    }
     let pal = m.pal();
     let mc = if m.math_on { m.math_pal() } else { C_FRAME };
     let mut b = Buf::new();
@@ -1603,7 +1607,19 @@ fn row_class(fy: i16, cy: i16, dh: i16) -> u8 {
 
 /// The `grid_on` classes of column `fx` (rows with `ROWS[fy] & mask != 0`
 /// are grid; R_ALL: all of them).
-fn col_classes(fx: i16) -> u8 {
+/// `col_classes` of fx = 0..=399 (flash): the row loop of a full graph in
+/// strips looks them up per pixel.
+static COLC: [u8; 400] = {
+    let mut t = [0u8; 400];
+    let mut fx = 0;
+    while fx < 400 {
+        t[fx] = col_classes(fx as i16);
+        fx += 1;
+    }
+    t
+};
+
+const fn col_classes(fx: i16) -> u8 {
     if fx == 200 {
         return R_ALL;
     }
@@ -1774,7 +1790,15 @@ impl Graph {
         let t0 = cycles();
         #[cfg(target_os = "none")]
         let budget = if FLUSH_SHORT.load(core::sync::atomic::Ordering::Relaxed) { FLUSH_BUDGET_SHORT } else { FLUSH_BUDGET };
-        for j in 0..399usize {
+        // A full graph in a strip pass (lcd.rs "strip rendering"): row by
+        // row, the strip's rows only (the row loop below), instead of 399
+        // column windows per strip.
+        let band = if full && lcd::in_strip() {
+            Some(lcd::clip_rows(d.top + 1, d.top + h - 2).map_or((1, 0), |(a, b)| (a - d.top, b - d.top)))
+        } else {
+            None
+        };
+        for j in 0..if band.is_some() { 0 } else { 399usize } {
             let i = (start + j) % 399;
             #[cfg(target_os = "none")]
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
@@ -1868,6 +1892,10 @@ impl Graph {
             // line: a full graph took 108 ms through the closure.
             let vrow = vcol.map_or(0, |_| h - 4);
             for &(a, b) in &cut[..nc] {
+                // A strip pass (lcd.rs "strip rendering"): the strip's rows.
+                let Some((a, b)) = lcd::clip_rows(d.top + a, d.top + b).map(|(a, b)| (a - d.top, b - d.top)) else {
+                    continue;
+                };
                 self.px += (b - a + 1) as u32;
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
@@ -1893,8 +1921,13 @@ impl Graph {
         // The changed line rows (`hrows`), left to right in runs between
         // the holes over that row; per row, only the holes and markers
         // that reach it are checked per pixel.
-        for &r in &hrows[..nh] {
+        let nrows = band.map_or(nh, |(a, b)| (b - a + 1).max(0) as usize);
+        for k in 0..nrows {
+            let r = band.map_or_else(|| hrows[k], |(a, _)| a + k as i16);
             let sy = d.top + r;
+            if !lcd::rows_hit(sy, sy) {
+                continue;
+            }
             let mut cuts = [(0i16, 0i16); NH];
             let mut ncut = 0;
             for o in self.holes.iter().flatten().filter(|o| sy >= o.y && sy < o.y + o.h) {
@@ -1910,30 +1943,92 @@ impl Graph {
                 }
             }
             let in_hole = |fx: i16| cuts[..ncut].iter().any(|&(a, b)| fx >= a && fx <= b);
+            // Pixels without a marker on a row without a horizontal line
+            // (most of a full graph in strips): `pix` inline, as the column
+            // loop. The markers' columns: mlo..=mhi.
+            let rc = rows[r as usize];
+            let line = rc & R_LINE != 0;
+            let (mut mlo, mut mhi) = (i16::MAX, i16::MIN);
+            for &k in &mrow[..nmr] {
+                mlo = mlo.min(d.marks[k].x);
+                mhi = mhi.max(d.marks[k].x + 11);
+            }
+            let vrow = r & 1 == 1 && r <= h - 4 && d.v.iter().any(|l| l.is_some());
             let mut fx = 1i16;
             while fx <= 399 {
                 if in_hole(fx) {
                     fx += 1;
                     continue;
                 }
-                let mut e = fx;
-                while e < 399 && !in_hole(e + 1) {
-                    e += 1;
+                // The run up to the next hole.
+                let mut e = 399;
+                for &(a, _) in &cuts[..ncut] {
+                    if a > fx && a - 1 < e {
+                        e = a - 1;
+                    }
                 }
                 self.px += (e - fx + 1) as u32;
-                lcd::set_window((13 + fx) as u16, sy as u16, (13 + e) as u16, sy as u16);
+                // A strip pass: straight into the strip's row.
+                let mut span = lcd::strip_span(sy, 13 + fx, 13 + e);
+                if let Some(sp) = span.as_deref_mut() {
+                    if !line && !vrow && (13 + e < mlo || 13 + fx > mhi) {
+                        // No marker, line or vertical line in the run: the
+                        // inline rule over the columns, no index checks.
+                        let (a, b) = ((fx - 1) as usize, e as usize);
+                        let cols = self.tr[a..b].iter().zip(&self.ps[a..b]).zip(&self.ma[a..b]).zip(&COLC[a + 1..=b]);
+                        for (p, (((tr, ps), ma), &cc)) in sp.iter_mut().zip(cols) {
+                            *p = if r >= ma.0 && r <= ma.1 {
+                                d.math
+                            } else if r >= tr.0 && r <= tr.1 {
+                                d.trace
+                            } else if r >= ps.0 && r <= ps.1 {
+                                d.half
+                            } else if (rc | R_ALL) & cc != 0 {
+                                d.grid
+                            } else {
+                                C_FILL
+                            };
+                        }
+                        fx = e + 1;
+                        continue;
+                    }
+                }
+                if span.is_none() {
+                    lcd::set_window((13 + fx) as u16, sy as u16, (13 + e) as u16, sy as u16);
+                }
                 for x in fx..=e {
                     let i = (x - 1) as usize;
                     let sx = 13 + x;
-                    let mut mcol = [0usize; NGRAPH];
-                    let mut nm = 0;
-                    for &k in &mrow[..nmr] {
-                        if sx >= d.marks[k].x && sx < d.marks[k].x + 12 {
-                            mcol[nm] = k;
-                            nm += 1;
+                    let c = if !line && (sx < mlo || sx > mhi || !mrow[..nmr].iter().any(|&k| sx >= d.marks[k].x && sx < d.marks[k].x + 12)) {
+                        let (tr, ps, ma) = (self.tr[i], self.ps[i], self.ma[i]);
+                        if r >= ma.0 && r <= ma.1 {
+                            d.math
+                        } else if r >= tr.0 && r <= tr.1 {
+                            d.trace
+                        } else if r >= ps.0 && r <= ps.1 {
+                            d.half
+                        } else if let Some(c) = if vrow { vl(&d, x) } else { None } {
+                            c
+                        } else if (rc | R_ALL) & COLC[x as usize] != 0 {
+                            d.grid
+                        } else {
+                            C_FILL
                         }
+                    } else {
+                        let mut mcol = [0usize; NGRAPH];
+                        let mut nm = 0;
+                        for &k in &mrow[..nmr] {
+                            if sx >= d.marks[k].x && sx < d.marks[k].x + 12 {
+                                mcol[nm] = k;
+                                nm += 1;
+                            }
+                        }
+                        pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm], col_classes(x))
+                    };
+                    match span.as_deref_mut() {
+                        Some(sp) => sp[(x - fx) as usize] = c,
+                        None => lcd::data(c),
                     }
-                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm], col_classes(x)));
                 }
                 fx = e + 1;
             }

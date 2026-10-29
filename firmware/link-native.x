@@ -256,7 +256,6 @@ SECTIONS
         *(.text.*8opendm402ui9temp_page*);
         *(.text.*8opendm402ui8temp_key*);
         *(.text.*8opendm402ui10gen_values*);
-        *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
         /* The ohm / diode test-current label: drawn on a function / range /

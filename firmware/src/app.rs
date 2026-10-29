@@ -784,12 +784,17 @@ impl App {
         self.update_rails(clk);
     }
 
-    fn draw_static(&mut self) {
+    /// What a page draw takes from the app state, before drawing.
+    fn draw_state(&mut self) {
         self.dmm_view.label = self.t_label();
         self.auto_drawn = if self.dmm.cpl_auto() { self.dmm.shown_mode() } else { 255 };
         ui::set_cpl_auto(self.dmm.cpl_auto());
         // The power meter's AC+DC parts layout (doc 3.17): this page only.
         ui::set_pw_parts(self.view == View::Dmm && self.pw_parts_want());
+    }
+
+    fn draw_static(&mut self) {
+        self.draw_state();
         match self.view {
             View::Dmm => {
                 self.dmm_view.power = self.dmm.pw.on;
@@ -1479,20 +1484,74 @@ impl App {
     #[inline(never)] // its draw frames stay out of the callers' frames (run's)
     fn repaint(&mut self, now: u64) {
         self.redraw = false;
-        // The page's background fills wait for the widgets (lcd.rs
-        // "deferred fills"); main.rs flushes after the tick.
-        crate::lcd::defer_start();
         // The full repaint drew any pressed item released.
         self.pressed = None;
         self.scope_invalidate();
         self.chart_cache.invalidate();
-        self.draw_static();
+        if !self.repaint_strips() {
+            // The page's background fills wait for the widgets (lcd.rs
+            // "deferred fills"); main.rs flushes after the tick.
+            crate::lcd::defer_start();
+            self.draw_static();
+        }
+        // What the tick draws after the page (status, chart, reading):
+        // a batch as above.
+        crate::lcd::defer_start();
         self.repaint_at = now;
         self.status_next = 0;
         self.chart_dirty = true;
         // draw_static() repaints the DMM reading (shown value + HOLD/RUN
         // label) from the meter, so the label now matches.
         self.hold_shown = self.shown_state();
+    }
+
+    /// The page drawn in strips (lcd.rs "strip rendering"): each pixel
+    /// reaches the panel once, top to bottom, in its final colour. Only
+    /// the pages whose drawing is the same on every pass (a full-screen
+    /// fill first, then widgets from the app state; their caches are reset
+    /// by the draw itself); false: not such a page, or the buffer is busy
+    /// (a disk job holds calbackup::SCRATCH): the caller draws directly.
+    #[inline(never)]
+    fn repaint_strips(&mut self) -> bool {
+        let ok = match self.view {
+            View::Menu | View::Settings | View::Help | View::Gen | View::Scope => true,
+            View::Range => self.dmm.hy_mode() != 15 && !self.dmm.pw.on,
+            _ => false,
+        };
+        if !ok {
+            return false;
+        }
+        let scope = self.view == View::Scope;
+        if scope {
+            self.draw_state();
+            // The graph rows once (rendering the frame costs more than
+            // drawing it), the drawing per strip.
+            self.sp.uncover = 0;
+            self.sp_prepare();
+        }
+        let Some(buf) = crate::calbackup::strip_take() else {
+            if scope {
+                crate::lcd::defer_start();
+                crate::scope_ui::invalidate();
+                self.sp_draw_widgets();
+                return true;
+            }
+            return false;
+        };
+        crate::lcd::strips(buf, || {
+            if scope {
+                crate::scope_ui::invalidate();
+                self.sp_draw_widgets();
+            } else {
+                self.draw_static();
+            }
+        });
+        if !crate::calbackup::strip_give() {
+            // A disk user took the buffer meanwhile: draw it again.
+            crate::lcd::defer_start();
+            self.draw_static();
+        }
+        true
     }
 
     /// Periodic work. `can_draw` is false before USB enumerated, while a

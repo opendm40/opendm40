@@ -32,7 +32,11 @@ pub fn cmd(c: u16) {
 
 #[inline(always)]
 pub fn data(d: u16) {
-    unsafe { w16(LCD_DATA, d) };
+    if strip_on() {
+        strip_px(d);
+    } else {
+        unsafe { w16(LCD_DATA, d) };
+    }
 }
 
 /// One read cycle on the data register (RS=1). Used for register reads and the
@@ -64,6 +68,10 @@ pub fn set_window(x0: u16, y0: u16, x1: u16, y1: u16) {
 
 /// Set the window, then issue `mem_cmd` (RAMWR 0x2C or RAMRD 0x2E).
 pub fn set_window_cmd(x0: u16, y0: u16, x1: u16, y1: u16, mem_cmd: u16) {
+    if strip_on() {
+        strip_window(x0, y0, x1, y1);
+        return;
+    }
     if defer_on() {
         if mem_cmd == CMD_RAMRD {
             defer_flush();
@@ -122,6 +130,10 @@ fn rgb666_to_565(r: u16, g: u16, b: u16) -> Color {
 
 pub fn fill_rect(x: u16, y: u16, w: u16, h: u16, color: Color) {
     if w == 0 || h == 0 {
+        return;
+    }
+    if strip_on() {
+        strip_fill(x, y, w, h, color);
         return;
     }
     if defer_on() && defer_fill(x, y, w, h, color) {
@@ -198,7 +210,7 @@ fn defer_on() -> bool {
 /// drawing over them). Nested starts are one batch.
 pub fn defer_start() {
     let d = defer();
-    if !d.on {
+    if !d.on && !strip_on() {
         d.on = true;
         d.n = 0;
         d.rows = 0;
@@ -344,4 +356,306 @@ fn for_runs(mut m: u64, mut f: impl FnMut(u16, u16)) {
 
 pub fn fill_screen(color: Color) {
     fill_rect(0, 0, W, H, color);
+}
+
+// ------------------------------------------------------------ strip rendering
+//
+// The page is drawn once per strip of full-width rows into a RAM buffer
+// (`strips`): the drawing calls are the same, but while a strip is open a
+// window and its pixels go to the buffer instead of the panel, and only
+// the rows of the strip are kept. A finished strip goes to the panel in
+// one window, so every pixel is written once, in its final colour, top to
+// bottom; the panel never shows a background without its widgets or a
+// half-drawn widget. The drawing code must give the same picture on every
+// pass (pages that start from a full-screen fill and keep no state
+// between draws) and should skip what lies outside the strip
+// (`rows_hit`, `clip_rows`): its cost is paid once per strip it crosses.
+
+struct Strip {
+    on: bool,
+    /// Rows of the open strip (inclusive).
+    y0: u16,
+    y1: u16,
+    /// The strip's pixels, row-major, `W` per row.
+    buf: *mut Color,
+    /// The open window (inclusive; x1 < W) and the row being written.
+    wx0: u16,
+    wx1: u16,
+    wy0: u16,
+    wy1: u16,
+    cy: u16,
+    /// Pixels left in row `cy` (0: the next pixel starts the next row) and
+    /// where the next one goes (null: row `cy` is outside the strip).
+    n: u16,
+    p: *mut Color,
+}
+
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut STRIP: Strip = Strip { on: false, y0: 0, y1: 0, buf: core::ptr::null_mut(), wx0: 0, wx1: 0, wy0: 0, wy1: 0, cy: 0, n: 0, p: core::ptr::null_mut() };
+
+#[inline(always)]
+fn strip() -> &'static mut Strip {
+    // Main loop only, as DEFER.
+    unsafe { &mut *core::ptr::addr_of_mut!(STRIP) }
+}
+
+#[inline(always)]
+fn strip_on() -> bool {
+    strip().on
+}
+
+/// The rows drawing can reach now: the open strip, else the whole screen.
+#[inline(always)]
+pub fn rows() -> (i16, i16) {
+    let s = strip();
+    if s.on { (s.y0 as i16, s.y1 as i16) } else { (0, H as i16 - 1) }
+}
+
+/// A strip pass is open (`strips`).
+#[inline(always)]
+pub fn in_strip() -> bool {
+    strip_on()
+}
+
+/// Whether rows y0..=y1 can reach the panel now (false: a strip pass
+/// that does not include them; the call can be skipped).
+#[inline(always)]
+pub fn rows_hit(y0: i16, y1: i16) -> bool {
+    let (a, b) = rows();
+    y0 <= b && y1 >= a
+}
+
+/// Rows y0..=y1 cut to what can reach the panel now (None: nothing).
+#[inline(always)]
+pub fn clip_rows(y0: i16, y1: i16) -> Option<(i16, i16)> {
+    let (a, b) = rows();
+    let (a, b) = (y0.max(a), y1.min(b));
+    if a <= b { Some((a, b)) } else { None }
+}
+
+#[inline(never)]
+fn strip_window(x0: u16, y0: u16, x1: u16, y1: u16) {
+    let s = strip();
+    s.wx0 = x0.min(W - 1);
+    s.wx1 = x1.min(W - 1).max(s.wx0);
+    s.wy0 = y0;
+    s.wy1 = y1.max(y0);
+    // The first pixel starts row wy0 (`strip_row` wraps from wy1).
+    s.cy = s.wy1;
+    s.n = 0;
+}
+
+/// One pixel at the controller's write position (next column, next row,
+/// back to the window's top after its last pixel), kept when its row is
+/// in the strip.
+#[inline(never)]
+fn strip_px(c: Color) {
+    let s = strip();
+    if s.n == 0 {
+        strip_row();
+    }
+    let s = strip();
+    if !s.p.is_null() {
+        unsafe {
+            *s.p = c;
+            s.p = s.p.add(1);
+        }
+    }
+    s.n -= 1;
+}
+
+/// In a strip pass, the buffer's pixels of row y, columns x0..=x1
+/// (0 <= x0 <= x1 < W): writing them draws them, no window needed. None:
+/// not a strip pass, or row y is not in the strip.
+#[inline(always)]
+pub fn strip_span(y: i16, x0: i16, x1: i16) -> Option<&'static mut [Color]> {
+    let s = strip();
+    if !s.on || y < s.y0 as i16 || y > s.y1 as i16 {
+        return None;
+    }
+    let o = (y as usize - s.y0 as usize) * W as usize + x0 as usize;
+    Some(unsafe { core::slice::from_raw_parts_mut(s.buf.add(o), (x1 - x0 + 1) as usize) })
+}
+
+/// Pixels of one row, left to right (`row_out`): straight into the strip's
+/// row in a strip pass, else to the panel's open window.
+pub struct Out(*mut Color);
+
+/// `Out` through the strip's write position (`data`).
+const CURSOR: *mut Color = 2 as *mut Color;
+
+impl Out {
+    /// To the panel's open window (or the strip's write position).
+    #[inline(always)]
+    pub fn panel() -> Out {
+        Out(if strip_on() { CURSOR } else { core::ptr::null_mut() })
+    }
+
+    #[inline(always)]
+    pub fn px(&mut self, c: Color) {
+        if self.0.is_null() {
+            unsafe { w16(LCD_DATA, c) };
+        } else if self.0 == CURSOR {
+            data(c);
+        } else {
+            unsafe {
+                *self.0 = c;
+                self.0 = self.0.add(1);
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn run(&mut self, c: Color, n: u16) {
+        if self.0.is_null() || self.0 == CURSOR {
+            run(c, n);
+        } else {
+            fill_px(self.0, n as usize, c);
+            self.0 = unsafe { self.0.add(n as usize) };
+        }
+    }
+}
+
+/// The writer of row y from column x (0 <= x, the row's pixels < W): into
+/// the strip in a strip pass, else the panel (the caller's window, row by
+/// row).
+#[inline(always)]
+pub fn row_out(y: i16, x: i16) -> Out {
+    let s = strip();
+    if !s.on {
+        Out(core::ptr::null_mut())
+    } else if y >= s.y0 as i16 && y <= s.y1 as i16 {
+        Out(unsafe { s.buf.add((y as usize - s.y0 as usize) * W as usize + x as usize) })
+    } else {
+        Out(CURSOR)
+    }
+}
+
+/// `n` pixels of colour `c` at the write position (as `n` x `data(c)`).
+#[inline(always)]
+pub fn run(c: Color, n: u16) {
+    if strip_on() {
+        strip_run(c, n);
+    } else {
+        for _ in 0..n {
+            unsafe { w16(LCD_DATA, c) };
+        }
+    }
+}
+
+#[inline(never)]
+fn strip_run(c: Color, mut n: u16) {
+    while n > 0 {
+        let s = strip();
+        if s.n == 0 {
+            strip_row();
+        }
+        let s = strip();
+        let k = n.min(s.n);
+        if !s.p.is_null() {
+            fill_px(s.p, k as usize, c);
+            s.p = unsafe { s.p.add(k as usize) };
+        }
+        s.n -= k;
+        n -= k;
+    }
+}
+
+/// The next row of the window.
+#[inline(never)]
+fn strip_row() {
+    let s = strip();
+    s.cy = if s.cy < s.wy1 { s.cy + 1 } else { s.wy0 };
+    s.n = s.wx1 - s.wx0 + 1;
+    s.p = if s.cy >= s.y0 && s.cy <= s.y1 {
+        unsafe { s.buf.add((s.cy - s.y0) as usize * W as usize + s.wx0 as usize) }
+    } else {
+        core::ptr::null_mut()
+    };
+}
+
+/// `n` pixels of colour `c` from `p`, two per word store.
+#[inline(always)]
+fn fill_px(mut p: *mut Color, mut n: usize, c: Color) {
+    unsafe {
+        if n > 0 && (p as usize) & 2 != 0 {
+            *p = c;
+            p = p.add(1);
+            n -= 1;
+        }
+        let w = c as u32 | (c as u32) << 16;
+        let q = p as *mut u32;
+        for i in 0..n / 2 {
+            *q.add(i) = w;
+        }
+        if n & 1 != 0 {
+            *p.add(n - 1) = c;
+        }
+    }
+}
+
+#[inline(never)]
+fn strip_fill(x: u16, y: u16, w: u16, h: u16, c: Color) {
+    let s = strip();
+    let (ya, yb) = (y.max(s.y0), (y as u32 + h as u32 - 1).min(s.y1 as u32) as u16);
+    let (xa, xb) = (x, (x as u32 + w as u32).min(W as u32) as u16);
+    if ya > yb || xa >= xb {
+        return;
+    }
+    if xa == 0 && xb == W {
+        // Whole rows: one run.
+        fill_px(unsafe { s.buf.add((ya - s.y0) as usize * W as usize) }, (yb - ya + 1) as usize * W as usize, c);
+        return;
+    }
+    for r in ya..=yb {
+        fill_px(unsafe { s.buf.add((r - s.y0) as usize * W as usize + xa as usize) }, (xb - xa) as usize, c);
+    }
+}
+
+/// Draw the screen with `draw` once per strip of `buf.len() / W` rows,
+/// each strip sent to the panel as one window when done. `draw` must
+/// cover every pixel (the buffer keeps the previous strip). Leaves the
+/// controller in RAMWR. `buf` must be 4-byte aligned.
+#[inline(never)]
+pub fn strips(buf: &mut [Color], mut draw: impl FnMut()) {
+    let n = (buf.len() / W as usize).min(H as usize) as u16;
+    if n == 0 {
+        draw();
+        return;
+    }
+    defer_flush();
+    let mut y = 0u16;
+    while y < H {
+        let y1 = (y + n - 1).min(H - 1);
+        let px = (y1 - y + 1) as usize * W as usize;
+        *strip() = Strip { on: true, y0: y, y1, buf: buf.as_mut_ptr(), wx0: 0, wx1: W - 1, wy0: y, wy1: y1, cy: y1, n: 0, p: core::ptr::null_mut() };
+        draw();
+        strip().on = false;
+        window_raw(0, y, W - 1, y1, CMD_RAMWR);
+        push(&buf[..px]);
+        y = y1 + 1;
+    }
+}
+
+/// Pixels to the panel, from RAM (the window is open).
+#[inline(never)]
+fn push(px: &[Color]) {
+    // Eight pixels per step; 16-bit bus writes.
+    let mut it = px.chunks_exact(8);
+    for c in &mut it {
+        let c: &[Color; 8] = c.try_into().unwrap_or(&[0; 8]);
+        unsafe {
+            w16(LCD_DATA, c[0]);
+            w16(LCD_DATA, c[1]);
+            w16(LCD_DATA, c[2]);
+            w16(LCD_DATA, c[3]);
+            w16(LCD_DATA, c[4]);
+            w16(LCD_DATA, c[5]);
+            w16(LCD_DATA, c[6]);
+            w16(LCD_DATA, c[7]);
+        }
+    }
+    for &c in it.remainder() {
+        unsafe { w16(LCD_DATA, c) };
+    }
 }
