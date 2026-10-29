@@ -12,7 +12,7 @@ The meter: USBTMC as tools/dm40dbg.py (DM40_USBTMC picks the device). Columns: h
 uptime ms, FETC? (F), range (F, CONF?), then DBG:CAP?'s 18 numbers (docs/manual/
 scpi-reference.md): range index, manual, phase (0 oscillator, 1 discharge, 2 ramp), oscillator
 Hz, shown C uF, ramp V mV, dV mV, dt ms, median dV mV, C of the poll uF, oscillator C uF, class,
-samples, comparator, polls without a ramp, up / down / small counts. A summary at the end:
+samples, comparator, polls without a ramp, up count, no final value yet (1), same-range restarts. A summary at the end:
 range changes, the values' spread per range.
 """
 import argparse
@@ -24,7 +24,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COLS = ['t_s', 'uptime_ms', 'fetch_F', 'range_F', 'r', 'manual', 'phase', 'osc_hz', 'c_uF', 'v_mV', 'dv_mV', 'dt_ms',
-        'dvm_mV', 'c_poll_uF', 'c_osc_uF', 'class', 'n', 'cmp', 'idle', 'cnt_up', 'cnt_dn', 'cnt_small']
+        'dvm_mV', 'c_poll_uF', 'c_osc_uF', 'class', 'n', 'cmp', 'idle', 'cnt_up', 'first', 'swaps']
 
 
 def link(a):

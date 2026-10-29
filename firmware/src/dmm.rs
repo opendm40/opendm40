@@ -188,6 +188,8 @@ pub const CAP_CLASS_AUTO: u8 = 2;
 /// agreeing final values.
 pub const CAP_CLASS_FAST: u8 = 1;
 const CAP_AGREE_N: u8 = 4;
+/// The first final value: two up + down pairs in a row within this.
+const CAP_SETTLE: f32 = 0.01;
 /// The direction ratios stay within 1 +- this.
 const CAP_RATIO_MAX: f32 = 0.03;
 pub const CAP_CLASS_STOCK: u8 = 4;
@@ -214,7 +216,7 @@ const CAP_DIS_MIN_MV: f32 = 100.0;
 pub const CAP_DIS_UNIT: &str = "Vdis";
 pub const CAP_CHG_UNIT: &str = "Vchg";
 /// A discharge longer than this: a charged capacitor (the warning).
-const CAP_CHARGED_MS: u64 = 2000;
+const CAP_CHARGED_MS: u64 = 5000;
 /// Ramp ranges: polls of one ramp direction that make a result.
 const CAP_LONG_N: usize = 16;
 /// 6 / 60 mF: a ramp result this far (share) from the shown value starts
@@ -1587,6 +1589,11 @@ pub struct Dmm {
     cap_cls2: bool,
     /// Comparator turns seen during the polls without a ramp.
     cap_idle_flips: u8,
+    /// The last up + down pair, and two of them in a row agreeing.
+    cap_pair_prev: Option<f32>,
+    cap_settled: bool,
+    /// Same-range restarts for another capacitor (DBG:CAP? field 17).
+    cap_swaps: u8,
     /// The discharge's first sample above CAP_DIS_MIN_MV (mV, 0 = none) and
     /// its time (ms).
     cap_dis_v0: f32,
@@ -2243,6 +2250,9 @@ impl Dmm {
             cap_agree: 0,
             cap_cls2: false,
             cap_idle_flips: 0,
+            cap_pair_prev: None,
+            cap_settled: false,
+            cap_swaps: 0,
             cap_dis_v0: 0.0,
             cap_dis_t0: 0,
             cap_last: CAP_R_MIN,
@@ -2536,7 +2546,8 @@ impl Dmm {
     /// DBG:CAP?: range, manual, phase (0 oscillator, 1 discharge, 2 ramp),
     /// oscillator frequency (EMA), shown C (uF), the last poll's V, dV, dt,
     /// median dV, per-poll C, oscillator C (`cap_dbg`), ramp class, samples,
-    /// comparator, polls without a ramp, up / down / small counts.
+    /// comparator, polls without a ramp, up count, no final value yet (1),
+    /// same-range restarts (`cap_swaps`).
     #[cfg_attr(target_os = "none", link_section = ".cold")]
     pub fn cap_info(&self) -> [f32; 18] {
         let r = &self.ramp;
@@ -2546,7 +2557,7 @@ impl Dmm {
             self.range as f32, self.manual as u8 as f32, ph, self.f_cap, self.cap_c,
             d[0], d[1], d[2], d[3], d[4], d[5],
             r.class as f32, r.n as f32, r.cmp.map_or(-1.0, |c| c as u8 as f32), self.cap_idle as f32,
-            self.cap_cnt_up as f32, self.cap_cnt_dn as f32, self.cap_cnt_small as f32,
+            self.cap_cnt_up as f32, if self.ramp.first { 1.0 } else { 0.0 }, self.cap_swaps as f32,
         ]
     }
 
@@ -6110,6 +6121,8 @@ impl Dmm {
         self.cap_agree = 0;
         self.cap_cls2 = false;
         self.cap_idle_flips = 0;
+        self.cap_pair_prev = None;
+        self.cap_settled = false;
         self.cap_res_ms = 0.0;
         self.cap_res_t = None;
     }
@@ -6411,6 +6424,13 @@ impl Dmm {
                     self.cap_ratio = [(p / d).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX), (p / u).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX)];
                     self.cap_ratio_ok = true;
                 }
+                // Settled: two pairs in a row within CAP_SETTLE (device
+                // cfe50b24, ~1 mF: 978 .. 1004 uF for ~4 s after the first
+                // value, the electrolytic settling): final only then.
+                if self.cap_pair_prev.is_some_and(|q| (p - q).abs() <= CAP_SETTLE * p) {
+                    self.cap_settled = true;
+                }
+                self.cap_pair_prev = Some(p);
             }
             self.ramp.n = 0;
         }
@@ -6428,7 +6448,7 @@ impl Dmm {
             }
             sort_f32(&mut b[..n]);
             let v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
-            if self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N {
+            if (self.cap_ratio_ok && (self.cap_settled || !self.ramp.first)) || self.cap_ring_n as usize >= CAP_NORATIO_N {
                 // Adaptive class (owner 2026-10-30): class 1 for a fast first
                 // value; once CAP_AGREE_N final values in a row agree within
                 // 2 % (the same capacitor), class 2 for accuracy. The value
@@ -6437,6 +6457,7 @@ impl Dmm {
                     // Another capacitor on the same range (a 470 uF after a
                     // 100 uF on 600 uF showed 290 .. 480 uF as final values,
                     // emulator): the range again from the start, class 1.
+                    self.cap_swaps = self.cap_swaps.wrapping_add(1);
                     self.cap_set_range(clk, r as i8);
                     return Some(self.cap_dash());
                 }

@@ -781,7 +781,7 @@ unless shown otherwise.
 | `DBG:PROF:RESET` | | Clears the timing table. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
-| `DBG:CAP?` | | Capacitance internals, 18 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<down count>,<small count>` | USB |
+| `DBG:CAP?` | | Capacitance internals, 18 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>` | USB |
 | `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 1 for a new capacitor, class 2 once 4 values agree within 2 %), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
 | `DBG:CAP:RDIS[?]` | ohm | The discharge path resistance for the capacitance estimate from the discharge decay (default 400, inferred). Not stored. | USB |
 | `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
