@@ -80,6 +80,8 @@ section named after the tag as the release notes; how to cut a release:
 - Scope: text stays readable in every channel colour (dark on a yellow, gold
   or pink math panel; white on a blue or purple CH1; a lighter blue, purple or
   brown for the trigger level, measurements and FFT labels).
+- DMM trend chart: a range change to another unit that reads OL (6 V to
+  600 mV on 3.3 V) starts the chart over in the new unit.
 
 ## v0.3.0 (2026-10-27)
 
