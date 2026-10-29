@@ -2017,8 +2017,8 @@ impl Scpi {
                     } else {
                         match parse_num(trim(arg)) {
                             Some(v) if (0.0..=100.0).contains(&v) => Cmd::SysBeepVol(Some(v as u8)),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            v => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2049,8 +2049,9 @@ impl Scpi {
                             Some(on) => Cmd::SysAlertEnable(Some(if on { crate::sentinel::M_ALL } else { 0 })),
                             None => match parse_num(a) {
                                 Some(v) if (0.0..=15.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
-                                _ => {
-                                    self.err_arg(no_arg, "Illegal parameter value");
+                                v => {
+                                    // A whole number outside 0..15: -222.
+                                    self.err_arg(no_arg, if v.is_some_and(|v| v == (v as i32) as f32) { "Data out of range" } else { "Illegal parameter value" });
                                     continue;
                                 }
                             },
@@ -2460,8 +2461,8 @@ impl Scpi {
                     } else if kw(sub, "SOURce") {
                         if query {
                             Out::Log(Log::Source(None))
-                        } else if a == b"AD2" || a == b"AD1" {
-                            Out::Log(Log::Source(Some(a == b"AD2")))
+                        } else if a.eq_ignore_ascii_case(b"AD2") || a.eq_ignore_ascii_case(b"AD1") {
+                            Out::Log(Log::Source(Some(a.eq_ignore_ascii_case(b"AD2"))))
                         } else {
                             self.err_arg(no_arg, "Illegal parameter value");
                             continue;
@@ -2470,8 +2471,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::SRate(None)),
                             (false, Some(v)) if v >= 1.0 && v <= 1.0e6 => Out::Log(Log::SRate(Some(v as u32))),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2481,8 +2482,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::Osr(None)),
                             (false, Some(v)) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => Out::Log(Log::Osr(Some(v as u8))),
-                            _ => {
-                                self.err_arg(no_arg, BAD);
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some_and(|v| v == (v as i32) as f32) { "Data out of range" } else { BAD });
                                 continue;
                             }
                         }
@@ -2531,7 +2532,8 @@ impl Scpi {
                                 match idx(set) {
                                     Some(i) => Some(i),
                                     None => {
-                                        self.err_arg(no_arg, "Illegal parameter value");
+                                        // A number not in the set: -222.
+                                        self.err_arg(no_arg, if parse_num(a).is_some() { RANGE } else { BAD });
                                         continue;
                                     }
                                 }
@@ -2565,8 +2567,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::Dur(None)),
                             (false, Some(v)) if (0.0..=1.0e6).contains(&v) => Out::Log(Log::Dur(Some(v as u32))),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2599,7 +2601,8 @@ impl Scpi {
                             }
                             (Some((n, true)), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
                             _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                                // A query: `no_arg` is false; no name is -109.
+                                self.err_arg(trim(arg).is_empty(), "Illegal parameter value");
                                 continue;
                             }
                         }

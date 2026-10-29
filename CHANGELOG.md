@@ -7,6 +7,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixes
+
+- **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
+  (`SYST:BEEP:VOL`, `SYST:ALER:ENAB`, `LOG:OSR`, `LOG:DUR`, `LOG:SRAT`, `LOG:CSV:INT` / `DUR`);
+  `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
