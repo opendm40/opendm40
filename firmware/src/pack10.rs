@@ -43,6 +43,29 @@ impl Src for std::vec::Vec<u16> {
     }
 }
 
+/// Code `n` of the coded ring (cring.rs; its `init` sets this): what a
+/// view with `cap` 0 reads, `off + i` its sample number.
+pub static mut CODED: fn(u32) -> u16 = no_coded;
+
+fn no_coded(_: u32) -> u16 {
+    512
+}
+
+/// Smallest and largest code of `n .. n + len` of the coded ring
+/// (cring::min_max).
+pub static mut CODED_MM: fn(u32, usize) -> (u16, u16) = no_coded_mm;
+
+fn no_coded_mm(_: u32, _: usize) -> (u16, u16) {
+    (u16::MAX, 0)
+}
+
+/// `CODED(n)`, out of line (Codes::at is inlined in every reader).
+#[inline(never)]
+fn coded(n: u32) -> u16 {
+    // SAFETY: CODED is set once at start-up.
+    unsafe { (*core::ptr::addr_of!(CODED))(n) }
+}
+
 /// Sample `i` of the packed stream at `base`.
 #[inline(always)]
 pub fn get(base: *const u8, i: usize) -> u16 {
@@ -51,14 +74,22 @@ pub fn get(base: *const u8, i: usize) -> u16 {
     (unsafe { core::ptr::read_unaligned(base.add(b >> 3) as *const u32) } >> (b & 7)) as u16 & 0x3FF
 }
 
-/// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`.
+/// Store sample `i` (low 10 bits of `v`) of the packed stream at `base`
+/// (host tests; the scope writes cring.rs's blocks: `set_at`).
+#[cfg(not(target_os = "none"))]
 #[inline(always)]
 pub fn set(base: *mut u8, i: usize, v: u16) {
     let b = i * 10;
-    let sh = b & 7;
-    // SAFETY: as `get`; main loop only (no DMA writes these bytes).
+    set_at(base, b >> 3, (b & 7) as u32, v);
+}
+
+/// Store a code (low 10 bits of `v`) at byte `byte`, bit `sh` (< 8).
+#[inline(always)]
+pub fn set_at(base: *mut u8, byte: usize, sh: u32, v: u16) {
+    // SAFETY: the caller keeps byte .. byte + 3 inside the buffer; main
+    // loop only (no DMA writes these bytes).
     unsafe {
-        let p = base.add(b >> 3) as *mut u32;
+        let p = base.add(byte) as *mut u32;
         let w = core::ptr::read_unaligned(p);
         core::ptr::write_unaligned(p, (w & !(0x3FF << sh)) | (((v & 0x3FF) as u32) << sh));
     }
@@ -87,7 +118,8 @@ pub fn pack_in_place(p: *mut u8, n: usize) {
 }
 
 /// Packed codes `off .. off + len` of a ring of `cap` samples at `base`
-/// (index wraps at `cap`; off < cap, len <= cap).
+/// (index wraps at `cap`; off < cap, len <= cap); `cap` 0: samples `off ..
+/// off + len` of the coded ring (`CODED`).
 #[derive(Clone, Copy)]
 pub struct Codes {
     base: *const u8,
@@ -119,6 +151,9 @@ impl Codes {
     /// Code `i` (0 .. len).
     #[inline(always)]
     pub fn at(&self, i: usize) -> u16 {
+        if self.cap == 0 {
+            return coded(self.off.wrapping_add(i) as u32);
+        }
         let mut j = self.off + i;
         if j >= self.cap {
             j -= self.cap;
@@ -131,8 +166,8 @@ impl Codes {
     pub fn sub(&self, a: usize, b: usize) -> Codes {
         let b = b.min(self.len);
         let a = a.min(b);
-        let mut o = self.off + a;
-        if o >= self.cap {
+        let mut o = self.off.wrapping_add(a);
+        if self.cap != 0 && o >= self.cap {
             o -= self.cap;
         }
         Codes { base: self.base, off: o, len: b - a, cap: self.cap }
@@ -141,16 +176,24 @@ impl Codes {
     /// Where `w` (a view of the same ring) starts in this one, if it lies
     /// wholly inside it.
     pub fn offset_of(&self, w: &Codes) -> Option<usize> {
-        if w.base != self.base || w.cap != self.cap || self.cap == 0 {
+        if w.base != self.base || w.cap != self.cap || self.len == 0 {
             return None;
         }
-        let o = (w.off + self.cap - self.off) % self.cap;
+        let o = if self.cap == 0 { w.off.wrapping_sub(self.off) as u32 as usize } else { (w.off + self.cap - self.off) % self.cap };
         (o + w.len <= self.len).then_some(o)
     }
 
     /// Smallest and largest code of a .. b ((u16::MAX, 0) when empty).
     #[inline(never)]
     pub fn min_max(&self, a: usize, b: usize) -> (u16, u16) {
+        if self.cap == 0 {
+            let b = b.min(self.len);
+            if a >= b {
+                return (u16::MAX, 0);
+            }
+            // SAFETY: CODED_MM is set once at start-up.
+            return unsafe { (*core::ptr::addr_of!(CODED_MM))(self.off.wrapping_add(a) as u32, b - a) };
+        }
         let (mut lo, mut hi) = (u16::MAX, 0u16);
         for i in a..b.min(self.len) {
             let v = self.at(i);

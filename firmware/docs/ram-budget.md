@@ -150,7 +150,7 @@ Ownership has runtime checks:
 Visible cost: the spectrum is not updated during a disk job (a commit,
 ~0.1-0.5 s every 60 s while recording; a shot; a whole fast-log session).
 
-## The scope record: raw ring and packed ring
+## The scope record: raw ring and coded ring
 
 `scope::BUF` ([`src/scope.rs`](../src/scope.rs), 86 016 B in SRAM) is
 the whole SRAM the budget leaves (8 KiB link floor + ~4 KB margin). The
@@ -174,15 +174,38 @@ sets two modes:
   the capture would need the CPU at 50 MS/s (4 cycles per sample at
   200 MHz), and with the comparator trigger the main loop learns of the
   edge only at its next poll.
-- **fs <= 25 kS/s** and the DMM-input wave view: a packed ring of
-  `PCAP` = 65 520 samples in BUF's first 81 900 B. MCX: the DMA fills a
-  2048-sample raw staging ring at BUF's top (82 ms at 25 kS/s), every poll
-  moves the new samples into the packed ring (`pk_drain`). A gap between
-  two polls longer than the staging ring (time x rate) restarts the
-  acquisition: a record with a hole is never kept. The wave view packs
-  the AD2 samples as it drains them (`wave_drain`).
+- **fs <= 25 kS/s** and the DMM-input wave view: the coded ring
+  ([`src/cring.rs`](../src/cring.rs)) in BUF's first 81 916 B. MCX: the
+  DMA fills a 2048-sample raw staging ring at BUF's top (82 ms at
+  25 kS/s), every poll moves the new samples into the ring (`pk_drain`).
+  A gap between two polls longer than the staging ring (time x rate)
+  restarts the acquisition: a record with a hole is never kept. The wave
+  view pushes the AD2 samples as it drains them (`wave_drain`).
 
-Every stored record (STOP, a shown frame, Single) is packed; its users
+  The ring is a sequence of 4096-sample blocks. The newest is written
+  packed (4 in 5 bytes); a full one is coded in place with the DLG scope
+  coder (dlog.rs, [compact-log-format.md](compact-log-format.md#scope-record-kind-2):
+  the fixed predictor with the least sum of |residual|, adaptive Rice)
+  when that is smaller and the coded bytes never run more than 64 codes
+  (`LA`, read ahead) past the packed codes they replace (a dry run checks
+  both first), else it stays packed. The next block starts after it; the
+  oldest goes when room is needed (a coded one whole, a packed one 4
+  samples at a time). So a record is at least 65 532 samples (white
+  noise: all packed, the old packed ring) and at most 64 blocks (262 144
+  samples; `dlog::SBLK_MAX`, the Save CSV file's block table). Blocks are
+  coded only for the long captures (Single, DIGitize, roll; in the Wave
+  view also only at 9600 S/s and slower): a running frame's record fits
+  the packed ring, and while no block was coded the ring is the plain
+  packed ring (`rb` * 8 a multiple of 10), read through plain views at the
+  old cost.
+
+  Reads go through `pack10::Codes` views with `cap` 0 (`pack10::CODED` =
+  `cring::at`): packed blocks directly, coded ones through one decoder
+  cursor (forward reads one code each; the last 16 codes it decoded are
+  kept, so the sin(x)/x taps step back for free; a read further behind
+  decodes its block again from the start).
+
+Every stored record (STOP, a shown frame, Single) is packed or coded; its users
 (the render, zoom / pan, measurements, FFT, autoset, Save CSV,
 `WAV:DATA?`, the software triggers, the sin(x)/x interpolation) read it
 through `pack10::Codes`, a window of the ring (index `off + i`, wrapping
@@ -202,12 +225,33 @@ hold whatever the ring had collected before the trigger. Linear records
 are the whole raw ring but at most max(26 624 samples, 0.1 s) in Normal /
 Auto, so the slow timebases do not wait longer per frame than before.
 
+Cost of the coded ring (emulator at --mips 110, the device's speed per
+instruction; [`emu/ringperf.py`](../../emu/ringperf.py), a 50 Hz sine on
+the model's input, which has no ADC noise; DBG:PROF?):
+
+| | before (packed ring) | coded ring |
+|---|---|---|
+| running, 100 ms/div: acquisition / frame / measurements | 2.1 % CPU, max 1.0 ms / 6.9 ms / 19.6 ms | 3.2 % CPU, max 1.0 ms / 6.9 ms / 23.1 ms |
+| roll, 200 ms/div (coding on): acquisition | 6.7 % CPU, max 6.1 ms | 4.6 % CPU, max 4.8 ms (the coding of a full block) |
+| DIGitize at 100 ms/div (177 380 samples) redrawn at 10 ms/div: frame + measurements | - | 5.9 + 16.3 ms |
+| the same at 100 ms/div (25 000 samples on the screen) | - | 36 + 133 ms |
+| the same zoomed out to 1 s/div (the whole record) | - | 228 ms |
+
+The coding of a full block costs ~4.5 ms in one pass, every 164 ms at
+25 kS/s; the plan (the order's bits, the in-place rule) runs as the codes
+come. A coded record is read ~1.3 us a code (the decoder), a packed one
+as before.
+
 Cost (emulator, emu/dragperf.py, 200 us/div): the acquisition section
 max 939 -> 3 545 us per pass (the in-place pack and the trigger search
 through `Codes`), a measurement of a 25 000-sample screen 3.1 -> 6.9 ms.
 
-The bound of a record is also the scope DLG format's: 16 blocks of 4096
-samples (`dlog::SBLK_MAX`), 65 536.
+The bound of a record is also the scope DLG format's: 64 blocks of 4096
+samples (`dlog::SBLK_MAX`), 262 144. Single / DIGitize on the coded ring
+(edge trigger) want 10 s, the trigger at the trigger position; the part
+after the trigger point is at most PCAP less the margins and the
+screen's pre part (52 156 at the centre), so it fits the ring whatever
+the signal, the part before it is what the ring keeps.
 
 Not done: the fast timebases at 65 520 samples. That needs 131 040 B of
 raw ring in one piece: BUF plus ~45 KB of buffers lent for the capture
