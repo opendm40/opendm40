@@ -2470,7 +2470,7 @@ fn main() {
     dv.bar_on = true;
     strip_check(&mut ck, "strip/dmm-bar", || dv.draw_static(Button::Amp, 3, false, false));
     dv.bar_on = false;
-    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()).take(8) {
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()) {
         // stock::draw without its screen reset (App::repaint: the scope
         // page from scope_ui::invalidate).
         let pv = stock::popvals(&sc.m);
