@@ -32,6 +32,8 @@ on the first byte of each request:
   then starts a frame.
 - A partial line is dropped after 2 s without a byte, a partial frame after
   0.5 s, and both are dropped when the host leaves (PC14 falls).
+  A query still waiting for its reply (`READ?`, `MEAS?`) and the rest of its
+  message are dropped then too: the next host gets no reply of the old one.
 - A line over 256 bytes is discarded; `SYST:ERR?` then reports "Input buffer
   overrun".
 - Replies: the text plus `\n`. A definite-length block (`WAV:DATA?`,

@@ -511,6 +511,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             scpi_wait[USB] = None;
             msgs[USB].reset();
         }
+        if bt.take_left() {
+            // The Bluetooth host left: its pending query is not answered to
+            // the next host (#122).
+            scpi_wait[BT] = None;
+            msgs[BT].reset();
+        }
         if scpi_func_key(&app.dmm) != func_key {
             // Changed on the meter (or by DBG:KEY's deferred key-up): no host
             // waits for its settle; a READ? already waiting answers now.

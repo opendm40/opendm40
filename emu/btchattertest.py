@@ -25,6 +25,9 @@ a start, and its bytes pass 400 ms before PC14 rises.
      firmware took as a host line (-113; the logfmttest --bt-port flake on
      LOG:DATA? blocks). Five cmd 09 frames: each reply carries "AT", and
      SYST:ERR:COUN? stays 0.
+  D. a host sends MEAS:CAP?;MEAS:RES?;*IDN? and leaves at once; the next
+     host's first reply is its own *IDN?, and no part of the old message
+     follows (#122).
 Exit status 0 = passed.
 """
 import argparse
@@ -143,6 +146,25 @@ try:
     check(n is not None and n.lstrip('+') == '0', 'B: SYST:ERR:COUN? after the start text: %s (want 0)' % n)
     if n is not None and n.lstrip('+') not in ('', '0'):
         print('       queued: %s' % [h.q('SYST:ERR?') for _ in range(int(n.lstrip('+')))])
+    h.s.close()
+    # D: a host leaves while its query waits for readings (#122).
+    time.sleep(1)
+    h = Host()
+    time.sleep(3)  # PC14 up (the model: 400 ms virtual after the connect)
+    h.q('*OPC?')
+    h.s.sendall(b'MEAS:CAP?;MEAS:RES?;*IDN?\n')
+    time.sleep(0.05)
+    h.s.close()
+    time.sleep(1)
+    h = Host()
+    i = h.q('*IDN?')
+    check(i is not None and i.startswith('Alientek'), 'D: the next host\'s first reply is its *IDN?: %s' % i)
+    h.s.settimeout(4)
+    try:
+        extra = h.buf + h.s.recv(4096)
+    except socket.timeout:
+        extra = h.buf
+    check(not extra, 'D: nothing of the old host\'s message after it: %r' % extra[:60])
     h.s.close()
 finally:
     p.terminate()
