@@ -564,12 +564,6 @@ fn nan(dec: u8, unit: &'static str) -> Val {
     Val { v: f32::NAN, dec, unit, ol: false, ext: false }
 }
 
-/// A manual-range reading (MANU / the range in the status bar).
-fn manu(mut r: Reading) -> Reading {
-    r.auto = false;
-    r
-}
-
 /// A provisional reading (dimmed: the placeholder, a value a gate holds).
 fn prov(mut r: Reading) -> Reading {
     r.prov = true;
@@ -578,14 +572,13 @@ fn prov(mut r: Reading) -> Reading {
 
 /// The HY3131 range a reading of `mode` in `unit` with `dec` decimals is on
 /// (the accuracy label picks its row by it): mV 600 mV (r1), ohm 60 Mohm
-/// (MΩ with 3 decimals, r6), 600 Mohm (MΩ with 1 decimal, r7, the
-/// experimental range, no row), 60 ohm (Ω with 3 decimals, r0, no row) else
+/// (MΩ with 3 decimals, r6), 60 ohm (Ω with 3 decimals, r0, no row) else
 /// 600 ohm .. 6 Mohm (r1..r5 share a row),
 /// capacitance by unit and decimals (dmm.rs cap_val), else r0.
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
-        10 if unit == "M\u{3a9}" && dec == 1 => 7,
+        10 if unit == "M\u{3a9}" && dec == 1 => dmm::OHM600,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
         10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
@@ -653,6 +646,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acma_bd_ol", rd(5, ol(3, "mA"), Some(val(50.000, 3, "Hz")), Some(ol(2, "mV")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
+        // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
+        ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
+        ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.
@@ -703,12 +699,6 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // An ohm conversion before the vet (dmm.rs OHM_VET_*: the range hunt).
         ("pv_ohm", prov(rd(10, val(219.40, 2, "\u{3a9}"), None, None, false)), None),
         ("pv_ohm_m", prov(rd(10, val(8.7800, 4, "M\u{3a9}"), None, None, false)), None),
-        // The experimental 600 Mohm range (dmm.rs OHM_EXP): manual only,
-        // 600.0 Mohm, the "EXP" mark beside the test current; OL; settling.
-        ("ohm_600m", manu(rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false)), None),
-        ("ohm_600m_neg", manu(rd(10, val(-0.4, 1, "M\u{3a9}"), None, None, false)), None),
-        ("ohm_600m_ol", manu(rd(10, ol(1, "M\u{3a9}"), None, None, false)), None),
-        ("pv_ohm_600m", prov(manu(rd(10, val(612.3, 1, "M\u{3a9}"), None, None, false))), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -2376,8 +2366,8 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
-            // The ohm page has no note (app.rs: the Voltage page only): its
-            // note row holds the 600 Mohm item.
+            // The app draws a note on the Voltage page only; the Resistor
+            // page's note row holds its 600 Mohm item.
             if b == Button::Ohm && note.is_some() {
                 continue;
             }
@@ -3179,8 +3169,7 @@ fn main() {
             // A range change 6 M -> 60 M (no test current): the label goes
             // (device check 2f56ff9: "I 0.22 uA" stayed on 60 M). Each range
             // pair against the screen drawn fresh on the second range.
-            // 600 Mohm (r7) in and out: its "EXP" goes with it.
-            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6), (7, 6), (6, 7), (7, 5), (5, 7)] {
+            for (a, b) in [(5i8, 6i8), (4, 6), (6, 5), (2, 6)] {
                 let (r, _) = find("ohm_k");
                 host::reset(0);
                 let mut dv = ui::DmmView::new();
@@ -3205,21 +3194,6 @@ fn main() {
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
         save(&out, "d06-dmm-ohm-on");
-        // The experimental 600 Mohm range: "600MΩ" in the status bar, "EXP"
-        // beside the test current; its item on the range page.
-        host::reset(0);
-        let (r, _) = find("ohm_600m");
-        let mut dv7 = ui::DmmView::new();
-        dv7.label = None;
-        dv7.draw_static(Button::Ohm, r.mode, false, false);
-        dv7.bar_update(&r);
-        dv7.reading(&r, 0, 0);
-        ui::status_right(&status(0));
-        ck.check("dmm-ohm-600m", &dmm_page_regions);
-        save(&out, "d07-dmm-ohm-600m");
-        host::reset(0);
-        ui::range_page(Button::Ohm, Some(8), 0, None);
-        save(&out, "m07b-range-ohm-600m");
         // ui-review #13: the stock >= 30 V red value (230 V AC).
         host::reset(0);
         let (r, _) = find("acv_230");

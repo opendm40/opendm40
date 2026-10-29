@@ -13,8 +13,6 @@ mod hy3131 {
 mod hy3131_tables;
 #[path = "../../src/dbgsrc.rs"]
 mod dbgsrc;
-#[path = "../../src/ohm600m.rs"]
-mod ohm600m;
 #[path = "../../src/touchcal.rs"]
 mod touchcal;
 
@@ -216,26 +214,27 @@ fn set_commands() {
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");
-    // The experimental 600 Mohm range (dmm.rs OHM_EXP): RES:RANG / CONF:RES
-    // above 60 Mohm select it (app.rs scpi_range: the smallest item that
-    // holds the value, Dmm::set_range item 7); MAX stays 60 Mohm.
+    // The experimental 600 Mohm range (dmm::OHM600, ohm r7): RES:RANG /
+    // CONF:RES above 60 Mohm select it (app.rs scpi_range: the smallest item
+    // that holds the value); MAX is the item before it, 60 Mohm.
     check(matches!(s.handle(b"RES:RANG 600E6", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v == 600e6), "RES:RANG 600E6");
     check(matches!(s.handle(b"CONF:RES 600E6", 1), Out::Instr(Cmd::Conf(10, Rng::Value(v), None)) if v == 600e6), "CONF:RES 600E6");
     check(matches!(s.handle(b"RES:RANG MAX", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v.is_infinite()), "RES:RANG MAX");
     {
         let items = scpi::range_items(10);
-        let pick = |x: f32| if x.is_infinite() { scpi::range_max_item(10) } else { items.iter().position(|&it| it >= x * 0.9999) };
+        // app.rs scpi_range: MAX = the top item, on ohm the one below 600 Mohm.
+        let pick = |x: f32| if x.is_infinite() { items.len().checked_sub(2) } else { items.iter().position(|&it| it >= x * 0.9999) };
         let code = |x: f32| pick(x).map(|i| scpi::range_item_code(10, i));
-        check(code(600e6) == Some(7) && code(100e6) == Some(7) && code(60.1e6) == Some(7), "RES:RANG 100E6 .. 600E6: item 7 (600 Mohm)");
+        check(code(600e6) == Some(7) && code(100e6) == Some(7) && code(60.1e6) == Some(7), "RES:RANG 100E6 .. 600E6: r7 (600 Mohm)");
         check(code(60e6) == Some(6) && code(f32::INFINITY) == Some(6) && code(0.0) == Some(0), "RES:RANG 60E6 / MAX: 60 Mohm, MIN: 60 ohm");
         check(code(601e6).is_none(), "RES:RANG 601E6: out of range");
-        check(scpi::range_max_item(1) == Some(5) && scpi::range_max_item(8) == Some(5) && scpi::range_max_item(13).is_none(), "MAX: the last item elsewhere");
-        check(scpi::range_step_exp(10, 600e6) == 5 && scpi::range_step_exp(10, 60e6) == 3 && scpi::range_step_exp(1, 6.0) == -4, "RES? of 600 Mohm: 0.1 Mohm");
         check(scpi::range_si(10, 7) == Some(600e6), "RANG? on 600 Mohm");
     }
-    check(matches!(s.handle(b"DBG:OHMX GAIN,1.007", 0), Out::Instr(Cmd::DbgOhmx(Some(ohm600m::Req::Set(ohm600m::Key::Gain, v)))) if v == 1.007f32), "DBG:OHMX GAIN,1.007");
-    check(matches!(s.handle(b"DBG:OHMX ROW,0x33,0xA0", 0), Out::Instr(Cmd::DbgOhmx(Some(ohm600m::Req::Row(0x33, 0xA0))))), "DBG:OHMX ROW,0x33,0xA0");
-    check(matches!(s.handle(b"DBG:OHMX?", 0), Out::Instr(Cmd::DbgOhmx(None))), "DBG:OHMX?");
+    check(matches!(s.handle(b"DBG:OHM6?", 0), Out::Dbg(scpi::Dbg::Ohm6(None))), "DBG:OHM6?");
+    check(
+        matches!(s.handle(b"DBG:OHM6 1.007,,3", 0), Out::Dbg(scpi::Dbg::Ohm6(Some(v))) if v[0] == 1.007f32 && v[1].is_nan() && v[2] == 3.0 && v[4].is_nan()),
+        "DBG:OHM6 1.007,,3: empty fields NaN",
+    );
     check(err(&mut s) == "0,\"No error\"", "no error after the good values");
 
     // Bad values: no reply, no Cmd (the setting kept), an error.

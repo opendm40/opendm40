@@ -3310,8 +3310,7 @@ impl App {
     /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
-    /// 60 ohm included, the experimental 600 Mohm never), the highest
-    /// wrapping to the lowest (`ui::range_key_next`). Long: the
+    /// 60 ohm included), the highest wrapping to the lowest. Long: the
     /// default autorange (V: AUTO+, A and ohm: AUTO). Both release HOLD and
     /// REL as before; AutoHold stays as it is.
     #[inline(never)]
@@ -3328,7 +3327,18 @@ impl App {
             self.beep(now, 200);
             if b == Button::Volt { Some(255) } else { None }
         } else {
-            ui::range_key_next(b, self.range_sel_manual(), self.dmm.is_auto())
+            let items = ui::range_items(b);
+            let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
+            let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
+            let cur = self.range_sel_manual();
+            // The items before AUTO, in a ring; from one after it (ohm
+            // 600 Mohm, experimental) back to the first.
+            let i = match cur {
+                Some(i) if !self.dmm.is_auto() => if i + 1 < n { i + 1 } else { 0 },
+                Some(i) => i,
+                None => 0,
+            };
+            manual(i)
         };
         // Held into AUTO: the placeholder (AUTO, dashes) at once, as the
         // range page's AUTO item and RES:RANG:AUTO do; before, the last
@@ -3542,7 +3552,7 @@ impl App {
                     let _ = self.inrush_open(clk);
                     return;
                 }
-                match ui::range_hit(b, x, y) {
+                match ui::range_hit(b, self.range_sel(), x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
                         let was = self.dmm.is_auto();
@@ -4130,11 +4140,15 @@ impl App {
             }
             return query;
         };
+        let cap = cur == 13;
         let fine = self.dmm.rate() != dmm::Rate::Fast && self.dmm.rate_info(self.dmm.rate()).1;
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
-            Rng::ResQuery => out.put_f32(s::pow10f(s::range_step_exp(cur, v) - fine as i32)),
+            // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
+            // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
+            Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
             Rng::Auto => {
@@ -4146,7 +4160,10 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { s::range_max_item(cur) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                // Ohm MAX: 60 Mohm; 600 Mohm (experimental) only by a value
+                // above it.
+                let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
+                let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
@@ -4156,10 +4173,13 @@ impl App {
                     None => out.set_err("Data out of range"),
                 }
             }
+            // 600 Mohm: its digits follow the value and its conversions are
+            // fixed (dmm.rs Ohm600): a resolution sets nothing.
+            Rng::Res(_) if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => {}
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.
-                let coarse = x >= s::pow10f(s::range_step_exp(cur, v)) * 0.999;
+                let coarse = x >= s::pow10f(s::step_exp(v, cap)) * 0.999;
                 let r = if coarse {
                     dmm::Rate::Fast
                 } else if self.dmm.rate() == dmm::Rate::Fast {
@@ -4731,16 +4751,6 @@ impl App {
             }
             C::DbgSrc(None) => {
                 self.dmm.src_text(out);
-                true
-            }
-            C::DbgOhmx(Some(r)) => {
-                if let Err(e) = self.dmm.ohmx_req(clk, r) {
-                    out.set_err(e);
-                }
-                false
-            }
-            C::DbgOhmx(None) => {
-                self.dmm.ohmx_text(out);
                 true
             }
             C::DbgSentReg => {

@@ -40,7 +40,6 @@ fn main() {
         ("DC mA", 8, &[0, 1], Some((15, 5))),
         ("DC uA", 9, &[0, 1], Some((15, 5))),
         ("ohm 60 ohm: no row", 10, &[0], None),
-        ("ohm 600 Mohm (experimental): no row", 10, &[7], None),
         ("ohm 600 .. 6 M", 10, &[1, 2, 3, 4, 5], Some((10, 5))),
         ("ohm 60 M", 10, &[6], Some((20, 10))),
         ("continuity", 11, &[0], Some((20, 5))),
@@ -57,6 +56,9 @@ fn main() {
         }
     }
     check("AC+DC: no row", acc::spec(1, 0, true, true, false).is_none(), String::new());
+    // The experimental 600 Mohm (ohm r7): no row; 60 Mohm (r6) keeps its own.
+    check("ohm 600 Mohm: no row", acc::spec(10, 7, false, true, false).is_none(), String::new());
+    check("ohm 60 Mohm: row 7", acc::spec(10, 6, false, true, false).map(|s| (s.pct, s.n)) == Some((20, 10)), String::new());
     let t = acc::spec(15, 0, false, true, false).unwrap();
     check("TC K deg C", (t.pct, t.n, t.abs) == (100, 5, true), format!("{t:?}"));
     let t = acc::spec(15, 0, false, true, true).unwrap();

@@ -562,10 +562,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
+- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ (and an
+  experimental 600 MΩ, below). 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
-- **600 MΩ** (experimental, not calibrated yet): only **600MΩ EXP** on the
-  range page or SCPI selects it, never AUTO; **EXP** shows while it is on.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
   measuring in a circuit. With 0.28 mA the Ω button shows a small **ON**
@@ -584,11 +583,15 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
+- **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
+  no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
 |---|---|
 | 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
+| ![412.3 MΩ on 600 MΩ](img/dmm-ohm-600m.png) | ![The range page with 600 MΩ chosen](img/range-ohm-600m.png) |
+| The experimental 600 MΩ: test current 105 nA | The range page with 600 MΩ chosen |
 
 #### Continuity
 

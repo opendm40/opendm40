@@ -192,6 +192,12 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm", &page, false);
     save1(out, "range-ohm");
 
+    // The experimental 600 Mohm chosen on the range page.
+    host::reset(0);
+    ui::range_page(Button::Ohm, Some(8), 0, None);
+    ck.check_opts("manual/range-ohm-600m", &page, false);
+    save1(out, "range-ohm-600m");
+
     // Hold & Limits of DC V: limits 4.8 .. 5.2 V on.
     host::reset(0);
     ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &["OFF", "ON", "5.2000 V", "4.8000 V", "", "", "", "ON", "Every reading"]);
@@ -316,6 +322,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-ma", dp(rd(8, val(12.000, 3, "mA"), None, Some(val(50.0, 1, "%")), false))),
         // Resistance, 4.7 k (the 6 kohm range: test current 197 uA).
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
+        // The experimental 600 Mohm range (manual only): 412.3 Mohm.
+        ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
         // Continuity: a short.
         ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.

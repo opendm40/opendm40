@@ -509,6 +509,11 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:OHM6 g,off,skip,keep,leak | DBG:OHM6?  600 Mohm range tuning (RAM
+///                           only, dmm::Ohm600): Rref gain, offset uV subtracted
+///                           from Vfb - Vx, conversions dropped / kept per phase,
+///                           the learned leak nS | g,off,skip,keep,leak,Vx,Vfb
+///                           (V, the last phase medians)
 ///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
 ///                           Shutdown setting (0 = the setting; RAM only, for
 ///                           tests) | ms since the last touch / key, ms since
@@ -565,12 +570,6 @@ pub enum Log {
 ///                           OP3 VREF = SFUVR tap <vref> on the stock ohm / diode row <path>
 ///   DBG:SRC?                0 | 1,cycles,vref,path,sense,V_in,V_far,I,V_vref,V_drop,V_com,
 ///                           VDDA-AGND,AGND-VSS;10 AD1 codes;R20..R35 hex
-///   DBG:OHMX DEF | <knob>,<value> | ROW,<reg>,<value> | ROW,CLR
-///                           600 Mohm range method (src/ohm600m.rs), RAM only:
-///                           TAP PLAN SKIP OSR NAVG SETTLE VET GAIN OFFS RREF; on
-///                           600 Mohm the row is written again
-///   DBG:OHMX?               knobs;on,cycles,ok,V_x,V_fb,V_com,V_drop,V_d,R_cycle,
-///                           R_window;5 AD1 codes;R20..R35 hex;overrides
 ///   DBG:SENTinel:PRECond <ms> / ?  RAM only, default 100, 0 = off: entering
 ///                           DC A / mA / uA while a_blind (V-JACK? enabled),
 ///                           run the temperature row for <ms> (<= 2000, blocking)
@@ -715,6 +714,10 @@ pub enum Dbg {
     /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
     /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
     Idle(Option<u32>),
+    /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
+    /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
+    /// (dmm::Ohm600, Dmm::ohm600_dbg).
+    Ohm6(Option<[f32; 5]>),
 }
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
@@ -947,9 +950,6 @@ pub enum Cmd {
     /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
     /// the ohm-source map row (src/dbgsrc.rs).
     DbgSrc(Option<crate::dbgsrc::Req>),
-    /// DBG:OHMX <knob> (Some) / DBG:OHMX? (None): the experimental 600 Mohm
-    /// range's method knobs and its last cycle (src/ohm600m.rs).
-    DbgOhmx(Option<crate::ohm600m::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
     DbgSentPrec(Option<u16>),
@@ -1064,29 +1064,15 @@ pub fn pow10f(e: i32) -> f32 {
 
 /// The settable ranges, ascending (the MF page's items, Dmm::set_range
 /// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
-/// 60 ohm .. 60 Mohm and the experimental 600 Mohm (dmm.rs OHM_EXP: only
-/// a value above 60 Mohm selects it, never MAX: `range_max_item`).
+/// 60 ohm .. 60 Mohm and the experimental 600 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
+        // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
     }
-}
-
-/// The `range_items(func)` index MAX selects: the last one, for ohm the
-/// last but the experimental 600 Mohm (60 Mohm). None: no items.
-pub fn range_max_item(func: u8) -> Option<usize> {
-    let n = range_items(func).len().checked_sub(1)?;
-    Some(if func == 10 { n - 1 } else { n })
-}
-
-/// Decimal exponent of the display step of range `v` of `func`
-/// (`step_exp`): the experimental 600 Mohm shows 600.0 Mohm, one digit
-/// less than the 60000-count format.
-pub fn range_step_exp(func: u8, v: f32) -> i32 {
-    step_exp(v, func == 13) + (func == 10 && v > 1e8) as i32
 }
 
 /// The Dmm::set_range item of `range_items(func)[i]`: V 60 mV is item 5
@@ -2271,16 +2257,6 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
-                _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"OHMX" => {
-                    if query {
-                        out = Out::Instr(Cmd::DbgOhmx(None));
-                    } else {
-                        match crate::ohm600m::parse(arg, parse_num) {
-                            Some(r) => out = Out::Instr(Cmd::DbgOhmx(Some(r))),
-                            None => self.set_err("Illegal parameter value"),
-                        }
-                    }
-                }
                 _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"SRC" => {
                     if query {
                         out = Out::Instr(Cmd::DbgSrc(None));
@@ -2446,6 +2422,13 @@ impl Scpi {
                             continue;
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
+                        b"OHM6" => Dbg::Ohm6((!query).then(|| {
+                            let mut v = [f32::NAN; 5];
+                            for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {
+                                *x = parse_num(trim(f)).unwrap_or(f32::NAN);
+                            }
+                            v
+                        })),
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
