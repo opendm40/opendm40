@@ -2465,12 +2465,27 @@ impl App {
         self.prof[0] = self.prof[0].max(cyc().wrapping_sub(t0) / 200);
         if let Some(f) = polled {
             let n = f.data.len();
-            // The screen columns for WAV:DATA? (scope_wav.rs, SRAM).
+            // The screen columns for WAV:DATA? (scope_wav.rs, SRAM); roll
+            // (#128): the middle of each column's min / max, 0 where the
+            // roll has no data yet.
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
                 let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
+            }
+            if let (0, Some(cols)) = (n, f.cols) {
+                for (w, &(lo, hi)) in crate::scope_wav::screen().iter_mut().zip(cols.iter()) {
+                    *w = if lo == u16::MAX { 0 } else { (lo + hi) / 2 };
+                }
+                // No linear record (rolling; a stopped record zoomed out beyond
+                // its length): no measurements, not the last frame's (#128).
+                if !self.meas_res.v[19].is_nan() {
+                    self.meas_res = crate::scope_meas::Results { v: [f32::NAN; 20] };
+                    self.cursor_values();
+                    self.meas = [f32::NAN; 4];
+                    self.sp.cells_due = true;
+                }
             }
             if self.sp.autoset.is_some() {
                 self.autoset_step(&f, now);
