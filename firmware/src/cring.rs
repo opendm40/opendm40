@@ -40,6 +40,12 @@ const PB: u32 = BLK * 10 / 8;
 /// Codes read ahead of the coder (`la_get`): the coded bytes may run up to
 /// LA codes ahead of the packed ones they replace.
 const LA: u32 = 64;
+/// Codes the cursor keeps behind it (`c_hist`, across a block start when
+/// it read on into the next block): a read up to this far back needs no
+/// new decode from a block's start. The sinc interpolation steps back 6
+/// codes a column, the protocol decoder's start edge search up to a
+/// quarter bit.
+const HIST: u32 = 16;
 
 struct Ring {
     base: *mut u8,
@@ -72,6 +78,11 @@ struct Ring {
     c_mode: u32,
     c_h: [i32; 3],
     c_ad: Ad,
+    /// The last codes decoded: sample n at [n % HIST], the h_len (<= HIST)
+    /// samples before h_end.
+    c_hist: [u16; HIST as usize],
+    h_end: u32,
+    h_len: u32,
     /// The codes read ahead while a block is coded in place.
     la: [u16; LA as usize],
     /// The head block's coding planned code by code (`plan`) in fixed
@@ -114,6 +125,9 @@ static mut R: Ring = Ring {
     c_mode: 0,
     c_h: [0; 3],
     c_ad: Ad { a: 0, n: 0 },
+    c_hist: [0; HIST as usize],
+    h_end: 0,
+    h_len: 0,
     la: [0; LA as usize],
     p_o: 0,
     p_sum: [0; 4],
@@ -177,6 +191,7 @@ pub fn reset(compress: bool) {
     s.coded = 0;
     (s.ob, s.s0, s.hb, s.hj, s.tail) = (0, 0, 0, 0, 0);
     s.c_ok = false;
+    s.h_len = 0;
     s.plan_reset();
 }
 
@@ -497,6 +512,11 @@ pub fn at(n: u32) -> u16 {
     if b == s.hb || !s.is_coded(b) {
         return s.pget(st, j);
     }
+    // A code just behind the cursor (sinc taps, an edge search): from the
+    // history, the cursor stays where it is (`min_max` steps it on).
+    if s.h_end.wrapping_sub(n).wrapping_sub(1) < s.h_len {
+        return s.c_hist[(n % HIST) as usize];
+    }
     s.dec(b, st, j)
 }
 
@@ -565,6 +585,13 @@ impl Ring {
             };
             self.c_h = [x, self.c_h[0], self.c_h[1]];
             self.c_x = (x & 0x3FF) as u16;
+            let n = self.c_b.wrapping_mul(BLK).wrapping_add(self.c_j);
+            if n != self.h_end {
+                self.h_len = 0;
+            }
+            self.c_hist[(n % HIST) as usize] = self.c_x;
+            self.h_end = n.wrapping_add(1);
+            self.h_len = (self.h_len + 1).min(HIST);
             self.c_j += 1;
         }
     }
