@@ -2588,6 +2588,15 @@ fn main() {
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
+    // The generator page's first strip draw after a boot (#153), each wave
+    // as the boot default: the preview's strip cache as the device has it
+    // then (`.sram_bss`, zeroed by the startup code).
+    for wave in gen::Wave::ALL {
+        unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
+        w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    w.gen.apply(gen::Settings::DEFAULT);
     strip_check(&mut ck, "strip/dmm", || {
         dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(1.234, 3, "V"); 5], 5, 4);

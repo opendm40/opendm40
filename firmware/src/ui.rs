@@ -2411,10 +2411,13 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
-/// `gen_preview` in strips: the wave (255 none) and each column's trace
-/// rows (from the preview's top).
+/// `gen_preview` in strips: the wave the table holds (its `sel` + 1; 0 =
+/// none) and each column's trace rows (from the preview's top). All zero
+/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
+/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
+/// table, so the boot-time Sine drew no trace).
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut GEN_SP: (u8, [(u8, u8); 239]) = (255, [(0, 0); 239]);
+pub(crate) static mut GEN_SP: (u8, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 
 // Region B (not inlined into the region C callers): drawn per strip.
 #[inline(never)]
@@ -2449,7 +2452,7 @@ fn gen_preview(w: gen::Wave) {
         // Row by row into the strip from the columns' trace rows,
         // worked out once per wave (not once per strip).
         let sp = unsafe { &mut *core::ptr::addr_of_mut!(GEN_SP) };
-        if sp.0 != sel {
+        if sp.0 != sel + 1 {
             let mut prev = yv(0);
             for i in 0..ww {
                 let y = yv(i.min(237));
@@ -2457,7 +2460,7 @@ fn gen_preview(w: gen::Wave) {
                 prev = y;
                 sp.1[i as usize] = ((a - y0) as u8, (b - y0) as u8);
             }
-            sp.0 = sel;
+            sp.0 = sel + 1;
         }
         for y in ya..=yb {
             let yy = y - y0;
