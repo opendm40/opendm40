@@ -781,6 +781,26 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
+                    scpi::Dbg::CapDisMode(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dismode(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dismode());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisRef(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_disref(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_disref());
+                            true
+                        }
+                    }
                     scpi::Dbg::CapIdis(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_idis(k);

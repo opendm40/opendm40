@@ -709,7 +709,7 @@ pub enum Dbg {
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
     Fast,
-    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 18 numbers.
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
     Cap,
     /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
     /// (dmm::set_cap_class; RAM only).
@@ -717,6 +717,12 @@ pub enum Dbg {
     /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
     /// the discharge slope (dmm::set_cap_idis; RAM only).
     CapIdis(Option<u32>),
+    /// DBG:CAP:DISMODE <0..3> / ?: the discharge experiment's mode
+    /// (dmm::set_cap_dismode; RAM only).
+    CapDisMode(Option<u32>),
+    /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
+    /// (dmm::set_cap_disref; RAM only).
+    CapDisRef(Option<u32>),
     /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
     /// (dmm::set_cap_dis_ms; RAM only).
     CapDisMs(Option<u32>),
@@ -2460,6 +2466,12 @@ impl Scpi {
                         }
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
                             Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMODE")) => {
+                            Dbg::CapDisMode(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISREF")) => {
+                            Dbg::CapDisRef(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
                             Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
