@@ -4,7 +4,7 @@
   * glyph 0x22 of the status-bar icon font SAVE_BT (0x0805B2E8, 0x21 =
     Bluetooth, 16 x 20 4 bpp): 14 x 20, 4 bpp (ui.rs status_right);
   * glyph 0x30 of the scope battery font SC_BATT (0x0806BD44, 1 bpp, 16 px
-    line): 11 x 16, 1 bpp (scope_ui.rs usb_icon, the scope top bar).
+    line): 11 x 18, 1 bpp (scope_ui.rs usb_icon, the scope top bar).
 
 The large one is drawn at 8x with PIL (stem with an arrow head, a round foot,
 a branch with a circle on the left and one with a square on the right) and
@@ -51,20 +51,24 @@ def draw(W, H, stroke=2.0):
     return [[min(15, (r.getpixel((x, y)) + 8) // 17) for x in range(W)] for y in range(H)]
 
 
-# The small one by hand (an area-averaged one comes out lopsided): 11 x 16,
-# the battery body's height (top bar y 1..16) and its 1 px outline weight;
-# odd width so the stem (column 5), the arrow head and the foot centre on
-# one column. Square higher on the right, circle lower on the left, as the
-# large one.
+# The small one by hand (an area-averaged one comes out lopsided): 11 x 18,
+# the top bar's height but a row at each end (y 1..18 of 0..19: top on the
+# battery's and the badges' top row; y 20 is the graph frame / meter strip);
+# the battery outline's 1 px weight; odd width so the stem (column 5), the
+# arrow head and the foot centre on one column. Square higher on the right,
+# circle lower on the left, as the large one. yoff -2: the font's line is 16
+# px, the glyph hangs 2 rows below it (scope_ui.rs USB_ICON).
 SMALL = [
     '.....@.....',
     '....@@@....',
     '...@@@@@...',
     '..@@@@@@@..',
+    '.....@.....',
     '.....@..@@@',
     '.....@..@@@',
     '.@...@..@@@',
     '@@@..@...@.',
+    '.@...@...@.',
     '.@...@...@.',
     '.@...@..@..',
     '..@..@.@...',
@@ -76,7 +80,7 @@ SMALL = [
 ]
 
 
-def entry(lines, name, font, code, px, four):
+def entry(lines, name, font, code, px, four, yoff=0):
     W, H = len(px[0]), len(px)
     if four:
         nib = [px[y][x] for x in range(W) for y in range(H)] + [0]
@@ -87,7 +91,7 @@ def entry(lines, name, font, code, px, four):
     lines.append('    // %s' % name)
     for row in px:
         lines.append('    //   ' + ''.join(('.:-=+*#%@@'[min(9, v * 10 // 16)] if four else ('@' if v >= 8 else '.')) for v in row))
-    lines.append("    (0x%08X, '\\u{%x}', %s, %d, %d, %d, 0, b\"%s\")," % (font, code, 'true' if four else 'false', W, H, W, ''.join('\\x%02x' % c for c in b)))
+    lines.append("    (0x%08X, '\\u{%x}', %s, %d, %d, %d, %d, b\"%s\")," % (font, code, 'true' if four else 'false', W, H, W, yoff, ''.join('\\x%02x' % c for c in b)))
 
 
 def main():
@@ -96,7 +100,7 @@ def main():
              '// (font object address, char, 4 bpp, w, h, adv, yoff, column-major bitmap).', '',
              'pub static USB_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 2] = [']
     entry(lines, 'SAVE_BT 0x22, status bar', 0x0805B2E8, 0x22, draw(14, 20), True)
-    entry(lines, 'SC_BATT 0x30, scope top bar', 0x0806BD44, 0x30, [[15 if c == '@' else 0 for c in r] for r in SMALL], False)
+    entry(lines, 'SC_BATT 0x30, scope top bar', 0x0806BD44, 0x30, [[15 if c == '@' else 0 for c in r] for r in SMALL], False, -2)
     lines.append('];')
     open(OUT, 'w').write('\n'.join(lines) + '\n')
     print('src/stockfont_usb.rs written')

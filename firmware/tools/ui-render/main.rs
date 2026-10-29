@@ -1679,9 +1679,10 @@ fn main() {
             scope_ui::graph().clear();
             scope_ui::update(&m);
             ck.check_replica(&format!("scopebar/{name}"));
-            // The USB symbol as tall as the battery body (same top and
-            // bottom row) and centred in the gap 414..434 between the
-            // trigger badge and the battery.
+            // The USB symbol on y 1..18 of the bar (0..19: top on the
+            // battery's top row, a free row above and below; y 20 is the
+            // graph frame / meter strip) and centred in the gap 414..434
+            // between the trigger badge and the battery.
             if m.usb {
                 let fb = &host::emu().fb;
                 let bar = fb[0];
@@ -1698,9 +1699,9 @@ fn main() {
                     (b, n)
                 };
                 let ((ux0, uy0, ux1, uy1), n) = ink(414, 434);
-                let ((_, by0, _, by1), _) = ink(435, 479);
-                if n == 0 || uy0 != by0 || uy1 != by1 || ux0 - 414 != 434 - ux1 {
-                    ck.fail(&format!("scopebar/{name}/usb"), format!("USB symbol x {ux0}..{ux1} y {uy0}..{uy1}, battery y {by0}..{by1}"));
+                let ((_, by0, _, _), _) = ink(435, 479);
+                if n == 0 || uy0 != 1 || uy1 != 18 || uy0 != by0 || ux0 - 414 != 434 - ux1 {
+                    ck.fail(&format!("scopebar/{name}/usb"), format!("USB symbol x {ux0}..{ux1} y {uy0}..{uy1} (want y 1..18), battery top y {by0}"));
                 }
             }
             host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
