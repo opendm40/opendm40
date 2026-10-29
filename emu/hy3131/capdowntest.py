@@ -53,10 +53,14 @@ SCEN = [
     # discharge, tau 1 s; device 832f89a4 went to 60 mF on ~1 mF): no overshoot past 6 mF.
     ('1mF-da', [(30, 'c:1000e-6;capda:0.6;capdatau:1', 6e-3, 1e-3, 15, 6e-2)]),
     ('4.7mF-da', [(30, 'c:4.7e-3;capda:0.6;capdatau:1', 6e-3, 4.7e-3, 15, 6e-2)]),
+    # Up and down ramps reading differently (capasym: +-12 %; device 40c25e2b alternated
+    # 1227 / 974 uF): the shown value does not swing (2 % over the last 15 s).
+    ('1mF-asym', [(35, 'c:1000e-6;capda:0;capasym:0.12', 6e-3, 1e-3, 15, 6e-2)]),
+    ('4.7mF-asym', [(35, 'c:4.7e-3;capda:0;capasym:0.12', 6e-3, 4.7e-3, 15, 6e-2)]),
     # The device's open / short on a ramp range (#74): the node at its clamp / at 0 V, no
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
-    ('4.7mF-clamp', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
+    ('4.7mF-clamp', [(30, 'c:4.7e-3;capasym:0', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
     ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', 6e-2, 'ol', 4),
                           (30, 'open', NF6, 'small', 5)]),
     ('10mF', [(40, 'c:10e-3', 6e-2, 10e-3, 15)]),
@@ -173,6 +177,10 @@ try:
                 seen = [r for s, r, _ in rows if s >= dur - stable]
                 if len(set(seen)) > 1:
                     why.append('%s: range changes in the last %g s: %s' % (inp, stable, ' '.join('%g' % r for r in seen)))
+                # No oscillation of the shown value (device 40c25e2b: 1227 / 974 / 1044 uF in turn).
+                vals = sorted(v for s, _, v in rows if s >= dur - stable and 0 < v < 1e37)
+                if isinstance(want, float) and vals and (vals[-1] - vals[0]) > 0.02 * vals[len(vals) // 2]:
+                    why.append('%s: values %g .. %g in the last %g s (spread > 2 %%)' % (inp, vals[0], vals[-1], stable))
         print('%s %s: %s%s' % ('ok  ' if not why else 'FAIL', name, ' -> '.join(p[1].split('|')[0] for p in phases),
                                '' if not why else ': ' + '; '.join(why)), flush=True)
         if why:

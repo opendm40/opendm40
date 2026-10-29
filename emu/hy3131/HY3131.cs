@@ -861,6 +861,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ohmtau": OhmTauMs = o.Value; break;
                 case "capda": CapDaK = o.Value; break;
                 case "capdatau": CapDaTau = o.Value; break;
+                case "capasym": CapAsym = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
                 case "senseneg": SenseNegV = o.Value; break;
@@ -2109,9 +2110,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             // and more on 600 uF and 60 mF).
             if(CapDaK > 0 && CapDaTau > 0)
                 slope *= Math.Max(0.05, 1 - CapDaK * Math.Exp(-(now - capDaT0) / CapDaTau));
+            var slope0 = slope;
             var remaining = dt;
             while(remaining > 0)
             {
+                // Up / down asymmetry (opt-in "capasym:a", CHOSEN, not measured): the up ramp
+                // (1 + a), the down ramp (1 - a) of the slope (device 40c25e2b, ~1 mF: the
+                // results alternated 1227 / 974 / 1044 / 982 uF).
+                slope = slope0 * (rampUp ? 1 + CapAsym : 1 - CapAsym);
                 var target = rampUp ? vh : vl;
                 var dist = Math.Abs(target - rampV);
                 var tt = dist / slope;
@@ -2755,7 +2761,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private int ctInit, ctA, ctB, ctC;
         private double rampV, rampLast;
         /// Dielectric absorption of the capacitor on the ramp rows ("capda:k;capdatau:s").
-        public double CapDaK, CapDaTau = 1.0;
+        public double CapDaK, CapDaTau = 1.0, CapAsym;
         private double capDaT0;
         private bool rampUp;
         private double vc, vcLast;
