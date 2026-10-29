@@ -65,7 +65,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
   check (2 min" (PR fix/smooth-redraw).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
-  offset"; "Ohm OL above 60 000 counts" (calibrator).
+  offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).
