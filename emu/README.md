@@ -277,7 +277,7 @@ recorded.
 
 | Test | What it checks | Runtime | Port |
 |---|---|---|---|
-| [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered | ~4 min | BT 4834 |
+| [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered; RX overrun reported (-363) | ~4 min | BT 4834 |
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
@@ -335,7 +335,7 @@ Models are C# files compiled by Renode at start-up; the platform is
 | Touch (I2C) | [`GD32_I2C.cs`](peripherals/GD32_I2C.cs), [`CST_Touch.cs`](peripherals/CST_Touch.cs) | `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
 | HY3131 and the front end | [`hy3131/HY3131.cs`](hy3131/HY3131.cs), [`hy3131/DM40Frontend.cs`](hy3131/DM40Frontend.cs) | registers, conversion timing, every DMM function, with the meter's calibration: [emu/hy3131/README.md](hy3131/README.md) |
 | Scope ADC and comparator | [`ScopeFeeder.cs`](peripherals/ScopeFeeder.cs) | one sample per TIM1 update; comparator on PA15 with the board's delay and hysteresis |
-| Bluetooth module (UART4) | [`BtModule.cs`](peripherals/BtModule.cs) | AT set-up, start-up banner, PC14 "connected", `--bt-port` |
+| Bluetooth module (UART4) | [`BtModule.cs`](peripherals/BtModule.cs) | AT set-up, start-up banner, PC14 "connected", `--bt-port`; its bytes to the firmware at most 115200 (`RxByteUs`), the firmware's TX at once |
 | Battery ADC | [`SimpleADC.cs`](peripherals/SimpleADC.cs) | channel 15 = 4.0 V (`SetVolts ch v`) |
 | Watchdog, reset flags | [`FWDGT.cs`](peripherals/FWDGT.cs) | a timeout resets the machine; RSTSCK flags |
 | USB OTG FS | `DWC2_OTG*.cs` | Renode's Synopsys OTG model with fixes for the GD32 drivers; [USB/IP](#usb-over-usbip) |

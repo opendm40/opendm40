@@ -30,7 +30,7 @@ use crate::meter::Meter;
 use crate::mmio::{modify32, r32, w32};
 use core::sync::atomic::{compiler_fence, Ordering};
 pub use proto::Frame;
-use proto::{Event, TxRing, LINE_MAX};
+use proto::{Event, RxCursor, TxRing, LINE_MAX};
 
 const GPIOA: u32 = 0x4002_0000;
 /// GPIOC input data register: PC14 = BT link up (the same read as
@@ -65,6 +65,7 @@ const RX_CTL: u32 = ch_reg(2, 0x10);
 const RX_CNT: u32 = ch_reg(2, 0x14);
 const RX_PADDR: u32 = ch_reg(2, 0x18);
 const RX_M0ADDR: u32 = ch_reg(2, 0x1C);
+const DMA_INTF0: u32 = DMA0 + 0x00;
 const DMA_INTC0: u32 = DMA0 + 0x08;
 /// TX: channel 4 (flags in INTF1/INTC1 at bit 0). gen.rs uses channel 5, the
 /// scope DMA1; nothing else in opendm40 uses DMA0.
@@ -75,11 +76,18 @@ const TX_M0ADDR: u32 = ch_reg(4, 0x1C);
 const DMA_INTC1: u32 = DMA0 + 0x0C;
 
 /// 89 ms at 115200: covers a long main-loop iteration (a full redraw).
+/// Input is not read while an SCPI line waits to be taken; more than this
+/// meanwhile is an overrun (`RxCursor`: "Input buffer overrun", resync).
 const RX_LEN: usize = 1024;
 /// Holds the largest reply (RSP_MAX block + LF) plus stock frames.
 const TX_LEN: usize = 8192;
 /// Largest reply built in place (`ScpiPort::respond_with`), as USBTMC.
 const BLK_LEN: usize = crate::usbtmc::RSP_MAX;
+/// The next SCPI line is taken only with room for the largest reply of one
+/// message (a block + LF; text replies are joined in Scpi's 512-byte buffer
+/// and a block cannot share a message) plus proto::TX_SLACK.
+const REPLY_MAX: usize = BLK_LEN + 1;
+const _: () = assert!(REPLY_MAX + proto::TX_SLACK <= TX_LEN);
 /// Lines that arrive this soon after an AT exchange are the module's late
 /// answer ("OK", "CBN+..."), not a host command.
 const AT_QUIET_MS: u64 = 500;
@@ -226,18 +234,34 @@ impl ScpiPort for Bt {
     }
 }
 
-fn rx_byte(rd: &mut usize) -> Option<u8> {
-    let wr = RX_LEN - unsafe { r32(RX_CNT) } as usize;
-    if *rd == wr % RX_LEN {
-        return None;
+/// Note how far the RX DMA has written (overrun check, `RxCursor::see`):
+/// the write index with channel 2's half / full transfer flags (INTF0 bits
+/// 20 / 21), read again until no byte came in between (one byte is 87 us),
+/// then the flags seen are cleared.
+fn rx_see(cur: &mut RxCursor) {
+    let pos = || RX_LEN - (unsafe { r32(RX_CNT) } as usize).min(RX_LEN);
+    let (mut wr, mut f) = (0, 0);
+    for _ in 0..4 {
+        wr = pos();
+        f = unsafe { r32(DMA_INTF0) } & (0x30 << 16);
+        if pos() == wr {
+            break;
+        }
     }
-    let b = unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RX[*rd])) };
-    *rd = (*rd + 1) % RX_LEN;
-    Some(b)
+    if f != 0 {
+        unsafe { w32(DMA_INTC0, f) };
+    }
+    cur.see(wr, f & (0x10 << 16) != 0, f & (0x20 << 16) != 0);
+}
+
+fn rx_byte(cur: &mut RxCursor) -> Option<u8> {
+    rx_see(cur);
+    let i = cur.next()?;
+    Some(unsafe { core::ptr::read_volatile(core::ptr::addr_of!(RX[i])) })
 }
 
 pub struct Bt {
-    rd: usize,
+    rd: RxCursor,
     rx: proto::Rx,
     tx: TxRing,
     /// Bytes of the DMA transfer in progress (consumed when it is done).
@@ -329,7 +353,7 @@ impl Bt {
             w32(CTL0, (1 << 13) | (1 << 3) | (1 << 2));
         }
         Bt {
-            rd: 0,
+            rd: RxCursor::new(RX_LEN),
             rx: proto::Rx::new(),
             tx: TxRing::new(TX_LEN),
             in_flight: 0,
@@ -493,6 +517,16 @@ impl Bt {
     pub fn poll(&mut self) -> Option<Frame> {
         self.pump();
         let now = self.ms();
+        // Also while a line waits (input held): the ring may wrap meanwhile.
+        rx_see(&mut self.rd);
+        if self.rd.take_lost() {
+            // The DMA overtook unread input: skip to the next terminator so
+            // no command cut by the gap runs.
+            self.rx.resync(now);
+            if self.lines_on {
+                self.err = Some("Input buffer overrun");
+            }
+        }
         // PC14 means nothing while the module is off. It is no gate for
         // input: a host's first bytes come ~0.34 s before it rises (device
         // 7b1b6d1), and it is high, with no host, while the module starts
@@ -544,13 +578,17 @@ impl Bt {
     /// link: nothing of it runs), an input overrun or an output overflow.
     /// Call it only when the previous BT query has been answered: lines are
     /// then handled in order like on a serial instrument (no interrupted
-    /// queries). Lines arrive through `poll`, so call that too.
+    /// queries). A line is held until the TX ring has room for its largest
+    /// reply (REPLY_MAX). Lines arrive through `poll`, so call that too.
     pub fn take_line(&mut self) -> Option<Result<&[u8], &'static str>> {
         self.lines_on = true;
         if let Some(e) = self.err.take() {
             return Some(Err(e));
         }
-        if !self.line_ready {
+        // Not before its reply fits the TX ring: a host pipelining block
+        // queries would otherwise overflow it (the last reply dropped).
+        // Meanwhile the line (and input after it) waits.
+        if !self.line_ready || !self.tx.room_for(REPLY_MAX) {
             return None;
         }
         self.line_ready = false;

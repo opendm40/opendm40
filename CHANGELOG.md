@@ -34,6 +34,9 @@ section named after the tag as the release notes; how to cut a release:
   ([manual](docs/manual/README.md#the-status-bar)).
 - **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
   that reply for the next host to connect.
+- **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
+  longer lose the last reply; input lost to a full receive buffer is reported
+  (-363) instead of running cut commands.
 
 ## v0.3.0 (2026-10-27)
 
