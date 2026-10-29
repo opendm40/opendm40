@@ -37,10 +37,6 @@ Additional requirements:
       - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
         = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
       Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
-- [ ] 600 MΩ range (experimental, ohm r7): calibrate on the device. The gain is the 6 MΩ calibration slot x 1.0
-      and the X-to-F offset 0; nothing on it is measured yet (settling, offset, scatter, the Q plan). Steps and the
-      `DBG:OHMX` knobs: [ohm-600m.md](docs/ohm-600m.md#device-calibration-plan); needs 100 MΩ .. 1 GΩ resistors
-      checked on another meter. Then: the found `GAIN` / `OFFS` into `Knobs::DEF`, a per-unit place for the gain.
 
 ## Open, by kind (2026-10-27)
 
@@ -61,7 +57,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
   check (2 min" (PR fix/smooth-redraw).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
-  offset"; "Ohm OL above 60 000 counts" (calibrator); "600 MΩ range (experimental)" (100 MΩ .. 1 GΩ resistors).
+  offset"; "Ohm OL above 60 000 counts" (calibrator).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).

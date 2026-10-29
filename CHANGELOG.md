@@ -7,17 +7,6 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
-### New
-
-- **600 MΩ range, experimental** (not calibrated yet): **600MΩ EXP** on the
-  resistance range page or SCPI `RES:RANG 600E6`; AUTO and the AUTO key
-  never select it, and the screen shows **EXP** while it is on
-  ([manual](docs/manual/README.md#resistance)).
-
-  ![Before and after: the resistance range page](docs/changelog/v0.4.0/ohm-600m-range.png)
-
-  ![600 MΩ: EXP beside the test current](docs/changelog/v0.4.0/ohm-600m.png)
-
 ### Changed
 
 - **The update loader no longer opens by itself** after repeated hangs (a

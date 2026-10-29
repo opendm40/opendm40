@@ -45,8 +45,6 @@ fn main() {
     check("fs continuity 1000 ohm", mode_full_scale(11, 2, "\u{3a9}") == 1000.0, String::new());
     check("fs diode 3 V", mode_full_scale(12, 4, "V") == 3.0, String::new());
     check("fs DC V by mode", mode_full_scale(1, 4, "V") == 6.0, String::new());
-    check("fs ohm 600 Mohm (experimental, 600.0)", mode_full_scale(10, 1, "M\u{3a9}") == 600.0, String::new());
-    check("fs ohm 60 Mohm", mode_full_scale(10, 3, "M\u{3a9}") == 60.0, String::new());
     // frac: fraction of the full scale.
     check("frac 4.8176 V", (frac(4.8176, 6.0, false).unwrap() - 4.8176 / 6.0).abs() < 1e-6, String::new());
     check("frac -600 mV", (frac(-600.0, 600.0, false).unwrap() + 1.0).abs() < 1e-6, String::new());

@@ -55,7 +55,6 @@ mod scpi;
 mod scpi_msg;
 mod sentinel;
 mod dbgsrc;
-mod ohm600m;
 mod stockfont;
 mod touch;
 mod touchcal;
@@ -669,7 +668,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     app.select_func(&mut clk, f);
                     false
                 }
-                scpi::Out::Instr(scpi::Cmd::DbgSrc(Some(_)) | scpi::Cmd::DbgOhmx(Some(_))) if logger.active() => {
+                scpi::Out::Instr(scpi::Cmd::DbgSrc(Some(_))) if logger.active() => {
                     scpi.set_err("Settings conflict");
                     false
                 }

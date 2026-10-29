@@ -48,24 +48,6 @@ mod src {
         }
     }
 }
-/// The experimental 600 Mohm range (ohm r7, OHM_EXP): ohm600m.rs /
-/// ohm600m_dmm.rs, docs/ohm-600m.md.
-#[cfg(target_os = "none")]
-#[path = "ohm600m_dmm.rs"]
-pub mod xr;
-/// Firmware only: the host tests that include dmm.rs get the stock 6 Mohm
-/// row and no readings.
-#[cfg(not(target_os = "none"))]
-mod xr {
-    pub fn row(_: u64) -> [u8; super::hy::CFG_LEN] {
-        crate::hy3131_tables::CFG_F10_P8CLR[5]
-    }
-    impl super::Dmm {
-        pub(super) fn poll_ohm_exp(&mut self, _: u64) -> Option<super::Reading> {
-            None
-        }
-    }
-}
 use pw::Pw;
 
 const GPIOA: u32 = 0x4002_0000;
@@ -321,8 +303,6 @@ fn avg_cfg(rate: Rate, acdc: bool, mode: u8, range: i8) -> Option<(usize, i32, b
         (10, 0) => (16, 150, false),
         (10, 1..=3) => (16, 150, true),
         (10, 6) => (1, 240, false),
-        // 600 Mohm: its own window (ohm600m.rs), no +1 digit.
-        (10, OHM_EXP) => return None,
         (10, _) => (1, 150, false),
         _ => return None,
     };
@@ -458,27 +438,6 @@ fn ohm_row_gain(r: usize, cal_r: f32, cal_r1: f32, mv10: f32, mv1: f32) -> f32 {
     if r == 0 { cal_r1 * mv10 / mv1 } else { cal_r }
 }
 
-/// Ohm r7: the experimental 600 Mohm range (the 6 Mohm row on OP3's
-/// AGNDP9 tap, two absolute AD1 conversions per reading: ohm600m.rs,
-/// docs/ohm-600m.md). Manual only (owner 2026-10-28): the MF page's item
-/// after AUTO and RES:RANG / CONF:RES above 60 Mohm select it; the
-/// autorange (`ohm_auto_range`) and the AUTO key's cycle
-/// (ui::range_key_next) never do, and it is not stored (the settings keep
-/// the function, not the range: ohm starts in AUTO).
-pub const OHM_EXP: i8 = 7;
-/// The highest range of the ohm autorange (60 Mohm).
-const OHM_AUTO_TOP: i8 = 6;
-/// Ohm r7's short-circuit test current (A): the AGNDP9 tap on the 10 Mohm
-/// path, V_drop / Rref in docs/data/short.csv (one unit).
-const OHM_EXP_ISC: f32 = 1.047e-7;
-
-/// The range the ohm autorange takes over from range `r` (AUTO chosen on
-/// it): within `floor` (`Dmm::ohm_auto_floor`) .. 60 Mohm, so 600 Mohm goes
-/// to 60 Mohm.
-fn ohm_auto_range(r: i8, floor: i8) -> i8 {
-    r.clamp(floor, OHM_AUTO_TOP)
-}
-
 /// Ohm short-circuit test current (A) per range, [default variant, "ON"
 /// variant (m+8, p8set rows)]: the drop across Rref / Rref with V/ohm - COM
 /// shorted, measured on one unit with DBG:SRC (tools/srcmap.py; data:
@@ -503,12 +462,8 @@ pub const DIODE_I: f32 = 0.756e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
-/// them it is less); r7 (600 Mohm, its own row) OHM_EXP_ISC whatever the
-/// variant. None where it is not measured (r6).
+/// them it is less). None where it is not measured (r6).
 pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
-    if r == OHM_EXP {
-        return Some(OHM_EXP_ISC);
-    }
     OHM_ISC[r.clamp(0, 6) as usize][(var & 1) as usize]
 }
 
@@ -2030,14 +1985,13 @@ impl Dmm {
         self.a_auto
     }
     /// Select the ohm variant (stock m+8: 0 normal, 1 "ON" low current,
-    /// the p8set rows; r0 always uses the normal row, r7 its own) and
-    /// re-enter ohm in the current range, as the stock's second tap on the
-    /// ohm button.
+    /// the p8set rows; r0 always uses the normal row) and re-enter ohm in
+    /// the current range, as the stock's second tap on the ohm button.
     pub fn set_ohm_var(&mut self, clk: &mut Clock, v: u8) {
         self.ohm_var = v & 1;
-        if self.mode == 10 && !(self.manual && self.range == OHM_EXP) {
+        if self.mode == 10 {
             // AUTO on 60 ohm and "ON" chosen: the autorange's floor, 600 ohm.
-            let r = if self.manual { self.range.clamp(0, OHM_AUTO_TOP) } else { ohm_auto_range(self.range, self.ohm_auto_floor()) };
+            let r = self.range.clamp(if self.manual { 0 } else { self.ohm_auto_floor() }, 6);
             self.set(clk, 10, r, 300);
         }
     }
@@ -2108,10 +2062,9 @@ impl Dmm {
     }
 
     /// The rate setting changes something in the current function (DC V /
-    /// mV / A, ohm; not AC+DC, not the 600 Mohm range with its own
-    /// conversion plan): the UI can grey the row out otherwise.
+    /// mV / A, ohm; not AC+DC): the UI can grey the row out otherwise.
     pub fn rate_applies(&self) -> bool {
-        !self.acdc && matches!(self.mode, 1 | 3 | 7..=10) && !(self.mode == 10 && self.range == OHM_EXP)
+        !self.acdc && matches!(self.mode, 1 | 3 | 7..=10)
     }
 
     /// Measured mean interval between readings (ms, EMA over the last few;
@@ -2224,8 +2177,7 @@ impl Dmm {
             5 | 6 => &CFG_F5_6[r.min(1)],
             7 => &CFG_F7[r.min(1)],
             8 | 9 => &CFG_F8_9[r.min(1)],
-            // r0 (60 ohm) always with the higher-current default variant;
-            // r7 (600 Mohm) its own row below.
+            // r0 (60 ohm) always with the higher-current default variant.
             10 => {
                 if r == 0 { &OHM_R0_ROW } else if self.ohm_var == 1 { &CFG_F10_P8SET[r.min(6)] } else { &CFG_F10_P8CLR[r.min(6)] }
             }
@@ -2238,11 +2190,9 @@ impl Dmm {
             _ if self.t_sensor != 0 => &CFG_F10_P8CLR[r.clamp(1, 6)],
             _ => &CFG_F15[0],
         };
-        // DBG:SRC (dbgsrc_dmm.rs): its row in place of the stock one; ohm
-        // r7 the 600 Mohm row (ohm600m_dmm.rs; restarts its cycle).
+        // DBG:SRC (dbgsrc_dmm.rs): its row in place of the stock one.
         let src_row = src::row(m, r);
-        let exp_row = (m == 10 && r == OHM_EXP as usize && src_row.is_none()).then(|| xr::row(clk.now_ms()));
-        let cfg = src_row.as_ref().or(exp_row.as_ref()).unwrap_or(cfg);
+        let cfg = src_row.as_ref().unwrap_or(cfg);
         self.avg.reset();
         self.t_rd = None;
         self.t_conv = None;
@@ -2841,8 +2791,6 @@ impl Dmm {
             10 => match r {
                 0 | 1 => (3 - r, "\u{3a9}"),
                 2..=4 => (6 - r, "k\u{3a9}"),
-                // 600.0 Mohm (ohm600m::DEC).
-                7 => (1, "M\u{3a9}"),
                 _ => (9 - r.min(6), "M\u{3a9}"),
             },
             11 => (2, "\u{3a9}"),
@@ -3419,10 +3367,7 @@ impl Dmm {
             2 | 3 if self.v_auto == 1 => self.set(clk, self.mode - 2, 0, 350),
             // A manual 60 ohm with the "ON" variant: AUTO continues from
             // 600 ohm (`ohm_auto_floor`); with the default one from 60 ohm.
-            // 600 Mohm (not in the autorange): from 60 Mohm.
-            10 if self.range != ohm_auto_range(self.range, self.ohm_auto_floor()) => {
-                self.set(clk, 10, ohm_auto_range(self.range, self.ohm_auto_floor()), 150)
-            }
+            10 if self.range < self.ohm_auto_floor() => self.set(clk, 10, 1, 150),
             // Stock: m+5 == 1 (AC) -> 5, else (DC, AC+DC) -> 8.
             4..=9 if self.a_auto == 1 => {
                 if self.sub() == 1 {
@@ -3435,22 +3380,20 @@ impl Dmm {
         }
     }
 
-    /// Freeze the current range (REL does this) or release it. 600 Mohm
-    /// (OHM_EXP) is never in the autorange: released, it stays manual.
+    /// Freeze the current range (REL does this) or release it.
     pub fn hold_range(&mut self, manual: bool) {
         if self.pw.on {
             return; // the power meter's ranges: its own page / SCPI
         }
-        self.manual = manual || (self.mode == 10 && self.range == OHM_EXP);
+        self.manual = manual;
     }
 
     /// Manual range from the MF popup: V items 600 mV, 6, 60, 600, 1000 V
     /// (0..4), 5 = 60 mV (the DC / AC mV r0 row, OP1 x10; the stock tables
     /// have it, its UI offers no 60 mV item); A items 600 uA, 6000 uA,
     /// 60 mA, 600 mA, 6 A, 10 A; ohm 1..6 (DM40C labels, COUNTS_MODEL),
-    /// ohm 0 = the 60 ohm range (the stock has no item for it), ohm 7 = the
-    /// experimental 600 Mohm (OHM_EXP; only an explicit choice gets there).
-    /// `None` = AUTO, `Some(255)` = AUTO+ (V/A only).
+    /// ohm 0 = the 60 ohm range (the stock has no item for it). `None` = AUTO, `Some(255)` =
+    /// AUTO+ (V/A only).
     pub fn set_range(&mut self, clk: &mut Clock, item: Option<u8>) {
         self.ovl_clear(clk.now_ms());
         match (self.button(), item) {
@@ -3503,12 +3446,11 @@ impl Dmm {
             }
             (Button::Ohm, None) => {
                 self.manual = false;
-                let to = ohm_auto_range(self.range, self.ohm_auto_floor());
-                if self.mode == 10 && self.range != to {
-                    self.set(clk, 10, to, 150);
+                if self.mode == 10 && self.range < self.ohm_auto_floor() {
+                    self.set(clk, 10, 1, 150);
                 }
             }
-            (Button::Ohm, Some(i)) if i <= OHM_EXP as u8 => {
+            (Button::Ohm, Some(i)) if i <= 6 => {
                 self.manual = true;
                 if !self.same_row(10, i as i8) {
                     self.set(clk, 10, i as i8, 150);
@@ -3566,9 +3508,8 @@ impl Dmm {
                 sub << 6 | r << 3 | 1
             }
             10 => {
-                // BT has no 60 ohm range: report it as 600 ohm; nor 600
-                // Mohm: as 60 Mohm (field 6 is AUTO).
-                let r = if self.manual { self.range.clamp(1, OHM_AUTO_TOP) as u8 - 1 } else { 6 };
+                // BT has no 60 ohm range: report it as 600 ohm.
+                let r = if self.manual { self.range.max(1) as u8 - 1 } else { 6 };
                 self.ohm_var << 6 | r << 3 | 2
             }
             11 => 0x44,
@@ -3590,10 +3531,6 @@ impl Dmm {
         // AUTO coupling: the byte it reports (the part shown as DC / AC)
         // echoed back keeps AUTO; any other byte sets what it says.
         if self.cpl_auto && b == self.mode_byte() {
-            return false;
-        }
-        // 600 Mohm, reported as 60 Mohm: the byte echoed back keeps it.
-        if self.mode == 10 && self.range == OHM_EXP && b == self.mode_byte() {
             return false;
         }
         self.ovl_clear(clk.now_ms());
@@ -3664,7 +3601,7 @@ impl Dmm {
                 self.ohm_var = s & 1;
                 if r == 6 {
                     self.manual = false;
-                    let rr = ohm_auto_range(self.range, self.ohm_auto_floor());
+                    let rr = self.range;
                     self.set(clk, 10, rr, 300);
                 } else {
                     self.manual = true;
@@ -3919,7 +3856,6 @@ impl Dmm {
         let r = if self.pw.on { self.poll_power(clk, now) } else { None };
         let r = if self.pw.on { r } else { match self.mode {
             10 | 12 if src::active() => self.poll_src(now),
-            10 if self.range == OHM_EXP => self.poll_ohm_exp(now),
             0 | 4..=6 if self.am_on() => self.poll_am(clk, now),
             0 | 2 | 4..=6 => self.poll_ac(clk, now),
             1 | 3 => self.poll_dcv(clk),
@@ -5889,35 +5825,6 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ohm_600m_never_in_the_autorange() {
-        // AUTO from 600 Mohm (the AUTO key, the range page's AUTO, BT AUTO)
-        // continues on 60 Mohm; the other ranges stay where they are, 60
-        // ohm with the "ON" variant goes to 600 ohm as before.
-        for floor in [0, 1] {
-            assert_eq!(ohm_auto_range(OHM_EXP, floor), 6);
-            for r in 1..=6 {
-                assert_eq!(ohm_auto_range(r, floor), r);
-            }
-        }
-        assert_eq!(ohm_auto_range(0, 0), 0);
-        assert_eq!(ohm_auto_range(0, 1), 1);
-        // The autorange's top is the last stock range.
-        assert_eq!(OHM_AUTO_TOP, 6);
-        assert!(OHM_EXP > OHM_AUTO_TOP);
-        // Its own test current (AGNDP9 tap) in both variants, its own
-        // averaging (no +1 digit at any rate).
-        assert_eq!(ohm_test_current(OHM_EXP, 0), Some(OHM_EXP_ISC));
-        assert_eq!(ohm_test_current(OHM_EXP, 1), Some(OHM_EXP_ISC));
-        assert_eq!(test_current(10, OHM_EXP, 0), Some(OHM_EXP_ISC));
-        assert_eq!(ohm_test_current(6, 0), None);
-        for rate in [Rate::Fast, Rate::Medium, Rate::Slow] {
-            assert_eq!(avg_cfg(rate, false, 10, OHM_EXP), None);
-        }
-        assert!(avg_cfg(Rate::Medium, false, 10, 6).is_none());
-        assert!(avg_cfg(Rate::Medium, false, 10, 3).is_some());
-    }
 
     #[test]
     fn ohm_r0_gain_from_r1() {

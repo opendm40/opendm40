@@ -40,7 +40,6 @@ fn main() {
         ("DC mA", 8, &[0, 1], Some((15, 5))),
         ("DC uA", 9, &[0, 1], Some((15, 5))),
         ("ohm 60 ohm: no row", 10, &[0], None),
-        ("ohm 600 Mohm (experimental): no row", 10, &[7], None),
         ("ohm 600 .. 6 M", 10, &[1, 2, 3, 4, 5], Some((10, 5))),
         ("ohm 60 M", 10, &[6], Some((20, 10))),
         ("continuity", 11, &[0], Some((20, 5))),
