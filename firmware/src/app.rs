@@ -150,7 +150,7 @@ const KP_NTC_BETA: u8 = 8;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
 fn trim_zeros(s: &str) -> &str {
-    if !s.contains('.') {
+    if !s.as_bytes().contains(&b'.') {
         return s;
     }
     s.trim_end_matches('0').trim_end_matches('.')
@@ -455,6 +455,10 @@ fn buzzer_init() {
 /// Buzzer duty (fraction of the period) at `vol` 0..100 % (stock: duty =
 /// min(v/3, 0.99) * 0.5; 100 % = 0.495, the loudest the stock drives).
 fn buzz_k(vol: u8) -> f32 {
+    // `mute` (test builds): every beep and alarm at duty 0.
+    if cfg!(feature = "mute") {
+        return 0.0;
+    }
     let v = vol as f32 / 100.0;
     (if v < 0.9 { v / 3.0 } else { v.min(0.99) }) * 0.5
 }
@@ -2418,6 +2422,15 @@ impl App {
             }
             return;
         }
+        // Stopped: the one re-render of the stored record that a pan, zoom
+        // or `refresh` asks for waits until it can be drawn. Polled while
+        // drawing is held (a GRAM read-back, a screenshot, a pending view
+        // redraw, an overlay on the scope page), it was dropped, and the
+        // screen kept the drag preview: the record beyond the old screen
+        // stayed blank (device 2026-10-26).
+        if !self.scope.s.run && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
+            return;
+        }
         let t0 = cyc();
         crate::prof::enter(crate::prof::ACQ);
         let polled = if self.scope.wave_on() { self.wave_poll(now) } else { self.scope.poll(now) };
@@ -2429,7 +2442,7 @@ impl App {
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
-                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                let sum: u32 = (a..b).map(|i| f.data.at(i) as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
             }
             if self.sp.autoset.is_some() {
@@ -2443,7 +2456,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
@@ -4926,6 +4939,7 @@ impl App {
             }
             C::Run => {
                 sc.run = true;
+                self.scope.run_on();
                 None
             }
             C::Stop => {

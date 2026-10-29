@@ -44,6 +44,7 @@ mod mmio;
 mod persist;
 mod power;
 mod prof;
+mod pack10;
 mod scope;
 mod hwtrig;
 mod scope_meas;

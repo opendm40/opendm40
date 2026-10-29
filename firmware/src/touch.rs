@@ -1006,7 +1006,10 @@ struct Log {
     n: u32,
 }
 
-// TCM .bss (was .sram_bss; 2026-10-22 memory budget: SRAM is the tighter).
+// Was TCM .bss from 2026-10-22 (SRAM was the tighter); back in SRAM 2026-10-26 for the stack headroom.
+/// In SRAM, not the TCM: the TCM holds the stack, and this debug log is
+/// main-loop only (never DMA).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut LOG: Log = Log { e: [LogEntry { t: 0, kind: 0, a: 0, b: 0, c: 0, x: 0, y: 0 }; LOG_N], n: 0 };
 
 fn log_ref() -> &'static mut Log {
@@ -1015,7 +1018,9 @@ fn log_ref() -> &'static mut Log {
     unsafe { &mut *core::ptr::addr_of_mut!(LOG) }
 }
 
-/// Append to the DBG:TOUCH? log (see `LogEntry` for the fields).
+/// Append to the DBG:TOUCH? log (see `LogEntry` for the fields). Not
+/// inlined (five callers, once per touch frame / gesture event).
+#[inline(never)]
 pub fn log(kind: u8, now: u64, a: u8, b: u8, c: u8, p: Point) {
     let l = log_ref();
     l.e[l.n as usize % LOG_N] = LogEntry { t: now as u32, kind, a, b, c, x: p.x, y: p.y };

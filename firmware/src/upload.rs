@@ -209,7 +209,7 @@ fn data_inner(dev: &mut dyn BlockDevice, m: &[u8], now_ms: u64) -> R<()> {
         return Err("Upload not started");
     }
     let comma = m.iter().position(|&c| c == b',').ok_or("Illegal parameter value")?;
-    let off: u32 = core::str::from_utf8(&m[..comma]).ok().and_then(|s| s.trim().parse().ok()).ok_or("Illegal parameter value")?;
+    let off: u32 = core::str::from_utf8(&m[..comma]).ok().and_then(|s| s.trim_ascii().parse().ok()).ok_or("Illegal parameter value")?;
     let d = &m[comma + 1..];
     if off != u.got {
         return Err("Data out of order");

@@ -844,14 +844,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
     let energy = u.ends_with("Wh") || u.ends_with("VAh");
+    // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
+    // core's two-way string searcher (~1 KB) into region B.
+    let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
             'k' if energy => 'k',
             'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
-            'C' if u.contains('\u{b0}') => '\u{2103}',
-            'F' if u.contains('\u{b0}') => '\u{2109}',
+            'C' if deg => '\u{2103}',
+            'F' if deg => '\u{2109}',
             c => c,
         };
         let mut t = [0u8; 4];
@@ -1095,8 +1098,13 @@ impl Ink {
 /// (cfg(test)): 0 = background, else `layer << 8 | glyph`, layer 1.. indexing
 /// `layers` = (probe kind, background colour) of each drawn element, so one
 /// composite window still reports its shapes, texts and icons separately.
-#[inline(never)]
+#[inline(always)]
 pub fn paint(r: Rect, layers: &[(u8, Color)], mut f: impl FnMut(i16, i16) -> (Color, u16)) {
+    paint_dyn(r, layers, &mut f)
+}
+
+#[inline(never)]
+fn paint_dyn(r: Rect, layers: &[(u8, Color)], f: &mut dyn FnMut(i16, i16) -> (Color, u16)) {
     let x0 = r.x.max(0);
     let y0 = r.y.max(0);
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);

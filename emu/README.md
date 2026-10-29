@@ -240,6 +240,7 @@ recorded.
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
+| [`pantest.py`](pantest.py) | stopped long record: pan by touch to both ends and back, zoom across it; each change right after a `DBG:LCD?` read (drawing held) | ~5 min | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
 | [`sratetest.py`](sratetest.py) | the timebase list's per-entry sample rates = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll and the Wave view; picks in the open list (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
@@ -356,7 +357,10 @@ Models are C# files compiled by Renode at start-up; the platform is
 - **Boot timing.** The ROM's and FS-loader's power-key (PA2) timing is set
   empirically: a release at 0.55 s gives the three-stage chain.
 - **Scope trigger.** opendm40's comparator path sometimes never completes a
-  frame after a restart; [`wavtest.py`](wavtest.py) turns it off.
+  frame after a restart; [`wavtest.py`](wavtest.py) turns it off. Its
+  STOP checks with `--hwtrig` end in `WAIT` for that reason; the device
+  check of the comparator path is
+  [`firmware/tools/scope-stop-check.py`](../firmware/tools/scope-stop-check.py).
 - **Gestures.** Horizontal swipes from the touch model were not recognised
   by opendm40's gesture engine; not investigated. The tests swipe with
   `DBG:SWIPE` over USB.

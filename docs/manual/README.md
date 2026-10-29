@@ -351,7 +351,7 @@ lightning from 100 V). opendm40 adds:
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
-| Capture length | 65 520 samples | 26 624 samples |
+| Capture length | 65 520 samples | 65 520 from 100 ms/div, 43 008 faster |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -423,7 +423,7 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The longer scope capture (65 520 samples).
+- The 65 520-sample scope capture below 100 ms/div (opendm40: 43 008).
 
 ## Multimeter
 
@@ -1444,8 +1444,10 @@ over the trace; tap the button again while its popup is open to turn it off.
 
 ### Stop, zoom and pan
 
-Press **RUN** (or tap the run state) to stop. The last capture (26 624
-samples) stays in memory:
+Press **RUN** (or tap the run state) to stop. The scope takes one more
+capture (the trigger point at the trigger position, as **Single**; up to
+the screen's time + 1 s), then stops; press again to stop at once. The
+capture stays in memory:
 
 - change the timebase to zoom in or out of the stored capture;
 - change the V/div to scale it;
@@ -1471,7 +1473,7 @@ samples) stays in memory:
 
 **MF > Settings**:
 
-- **Save CSV**: saves the whole stored capture (up to 26 624 samples, not
+- **Save CSV**: saves the whole stored capture (up to 65 520 samples, not
   only the screen). Stop the scope first (**Please stop sample**
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.

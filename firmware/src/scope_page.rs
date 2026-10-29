@@ -767,11 +767,7 @@ impl App {
             } else if n >= scope::COLS {
                 let a = i * n / scope::COLS;
                 let b = ((i + 1) * n / scope::COLS).max(a + 1).min(n);
-                let (mut cl, mut ch) = (u16::MAX, 0u16);
-                for &v in &f.data[a..b] {
-                    cl = cl.min(v);
-                    ch = ch.max(v);
-                }
+                let (cl, ch) = f.data.min_max(a, b);
                 let (r1, r2) = (row(cl), row(ch));
                 lo = r1.min(r2);
                 hi = r1.max(r2);
@@ -781,7 +777,7 @@ impl App {
                 // interpolation (UF-41, src/sinc.rs Lanczos-3) instead of
                 // straight lines between the samples.
                 let p = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
-                let r = (r0 + slope * crate::sinc::at(f.data, p)) as i32;
+                let r = (r0 + slope * crate::sinc::at(&f.data, p)) as i32;
                 lo = r;
                 hi = r;
             } else {
@@ -996,10 +992,9 @@ impl App {
         let (off, n) = if f.data.is_empty() {
             (0, rec.len())
         } else {
-            let o = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-            if o + f.data.len() > rec.len() {
+            let Some(o) = rec.offset_of(&f.data) else {
                 return;
-            }
+            };
             (o, f.data.len())
         };
         // N points: the window decimated by k (mean of k samples) when it
@@ -1021,7 +1016,7 @@ impl App {
             return;
         };
         crate::prof::enter(crate::prof::FFT);
-        fft().load(w, &rec[start..], k, len, a, b, f.fs as f32, m.win);
+        fft().load(w, &rec.sub(start, rec.len()), k, len, a, b, f.fs as f32, m.win);
         crate::prof::exit(crate::prof::FFT);
     }
 
@@ -2541,11 +2536,7 @@ impl App {
             return;
         }
         let mut st = self.scope.s;
-        let (mut lo, mut hi) = (1023u16, 0u16);
-        for &v in f.data {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
+        let (lo, hi) = f.data.min_max(0, f.data.len());
         let pp = (hi - lo) as f32;
         let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
         let swing = l70 - l30 > 19.0;
@@ -2553,8 +2544,8 @@ impl App {
         // Period from rising crossings of the 30 % / 70 % levels.
         let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
         if swing {
-            for (i, &v) in f.data.iter().enumerate() {
-                let v = v as f32;
+            for i in 0..f.data.len() {
+                let v = f.data.at(i) as f32;
                 if v < l30 {
                     armed = true;
                 } else if armed && v > l70 {
@@ -2676,7 +2667,7 @@ impl App {
         st.range = r;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
-        let res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+        let res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
         let cyc = res.v[9];
         if period > 0.0 {
             let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
