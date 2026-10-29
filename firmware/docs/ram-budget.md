@@ -51,9 +51,10 @@ row" token; the anti-aliased fonts and traces make rows differ):
 The median is ~30 KiB and the largest is 68 KiB (d02-dmm-acdc): a small
 buffer buys nearly nothing.
 
-Re-rendering in strips is not possible: the drawing code paints straight to
-the panel with diff state (scope_ui `d_*`, the page caches), not a region
-renderer, so a strip cannot be reproduced deterministically.
+Re-rendering in strips for a shot is not possible: the screen is the
+result of many diff draws (scope_ui `d_*`, the page caches), not of one
+page draw. (A full page repaint is drawn in strips, see
+[the third tenant of the arena](#the-disk-scratch-arena-calbackupscratch-12-kib).)
 
 ## The screenshot freeze: next shot's clusters erased in idle time
 
@@ -126,6 +127,7 @@ buffer of every on-device disk user, not only the boot-time calibration copy:
 | gallery.rs | [0] data, [1] FAT | no (inside one poll) |
 | fatdir.rs (SHOTS / LOGS / SCOPE created) | [0..2] | no |
 | setfile.rs (settings copy on the SPI disk) | [0..1] | no |
+| lcd.rs strip rendering (a page repaint; below) | 11 520 B | no |
 
 A csvlog commit runs every 60 s while a recording is on, so the arena
 cannot be overlaid on `scope::BUF`.
@@ -149,6 +151,24 @@ Ownership has runtime checks:
 
 Visible cost: the spectrum is not updated during a disk job (a commit,
 ~0.1-0.5 s every 60 s while recording; a shot; a whole fast-log session).
+
+Third tenant: the strip renderer
+([`lcd.rs`](../src/lcd.rs) "strip rendering"): a full page repaint
+(`App::repaint_strips`) draws the page into 12 rows x 480 px at a time
+(11 520 B of the arena) and sends each strip to the panel. Inside one call:
+
+- `calbackup::strip_take()` refuses while `disk_job()` (the page is then
+  drawn directly, as before), else bumps `GEN` like a disk user: an FFT
+  job in flight is dropped and redone (one spectrum update later on a page
+  change). `fft_work` returns None while the renderer holds the arena (the
+  scope page's draw can step the FFT).
+- `strip_give()` reports whether `GEN` moved meanwhile (a single-pass disk
+  user inside a page draw; none is known): the page is then drawn again
+  directly.
+
+Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 479 B: the
+generator preview's trace rows, worked out once per wave instead of per
+strip) and `scope_ui::COLC` (400 B, flash).
 
 ## Every static of 1 KiB or more
 
