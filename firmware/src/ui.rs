@@ -1131,9 +1131,10 @@ fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
 /// duty, the 4-20 mA percentage, the temperature sensor name), one state
 /// badge by priority A-JACK / LIVE? alternating with HOLD / A-HOLD (`alt`,
 /// `slot_alert`) > HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
-/// HV (>= 30 V) > REC > REL / limit
-/// verdict (alternating with `alt`) > range (`range_text`).
-pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
+/// HV (>= 30 V) > REL / limit
+/// verdict (alternating with `alt`) > range (`range_text`). A CSV
+/// recording shows in the top bar (scope_ui::rec_mark), not here.
+pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>) -> crate::scope_ui::StripData {
     use crate::scope_ui::{StripData, Txt};
     let mut d = StripData::EMPTY;
     d.func = match crate::meter::func_of(r) {
@@ -1210,7 +1211,6 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // Wrong-connection alert (sentinel.rs): above HV, below HOLD.
         _ if alert != crate::sentinel::Alert::None => (alert.strip_badge(), alert.color()),
         _ if hv >= 1 => ("HV", 0xc9a0),
-        _ if rec => ("REC", 0xf800),
         _ if rel && (verdict.is_none() || alt) => ("REL", 0xb833),
         _ if verdict.is_some() => verdict.unwrap_or(("", 0)),
         _ if temp => ("", 0x5acb),
@@ -1861,6 +1861,8 @@ pub struct Status {
     pub rec: bool,
     /// CSV recording to the disk running (csvlog.rs).
     pub csv: bool,
+    /// The REC dot's blink phase (scope_ui::rec_blink): true = hidden.
+    pub rec_dim: bool,
     /// Index of the shown view in View::CYCLE (page dots), 255 = none.
     pub page: u8,
 }
@@ -1888,10 +1890,35 @@ fn usb_glyph(st: &Status) -> &'static str {
     if st.usb { "\u{22}" } else { "" }
 }
 
-/// CSV recording badge colour (status blocks): red. The MIN/MAX session
-/// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
-/// column).
+/// CSV recording mark colour (the REC dot, scope_ui::rec_mark): red. The
+/// MIN/MAX session alone shows REC in the value orange (as "REC hh:mm:ss"
+/// in the DMM chart column).
 pub const REC_CSV: Color = 0xF800;
+
+/// The REC mark of the DMM / generator status bars (CSV recording): a red
+/// dot blinking with scope_ui::rec_blink and "REC" in the bar's text
+/// colour, as the scope top bar's (scope_ui::rec_mark), between the lock
+/// (box 327..350; 8 px left of the stock place to make room for the dot)
+/// and the BT icon (390..), "REC" where it was; `y` = the row of the label box
+/// (caps 2 rows below, the dot centred on them).
+const REC_DOT: sf::Rect = rect(354, 3, 7, 7);
+const REC_TXT_X: i16 = 364;
+
+fn rec_dot_at(y: i16) -> sf::Rect {
+    rect(REC_DOT.x, y + REC_DOT.y, REC_DOT.w, REC_DOT.h)
+}
+
+fn status_rec(st: &Status, bg: Color, y: i16) {
+    crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
+    sf::label(sf::F14, rect(REC_TXT_X, y, 20, 15), if st.csv { "REC" } else { "" }, STATUS_FG, bg, 8, 1);
+}
+
+/// The REC dot's blink step (App::tick on a `rec_blink` change): only the
+/// dot's box of the DMM page's (`gen` false) or the generator bar.
+pub fn status_rec_blink(st: &Status, gen: bool) {
+    let (bg, y) = if gen { (G_BAR, 11) } else { (BAR, 10) };
+    crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
+}
 
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
@@ -1901,9 +1928,8 @@ pub fn status_right(st: &Status) {
     let mut b = [0u8; 4];
     let bc = if st.charging { 0x04A9 } else { STATUS_FG };
     sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
-    // Between the lock (ink ..357) and the BT icon (390..).
-    sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
-    sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
+    status_rec(st, BAR, 10);
+    sf::label(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
     sf::label(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
@@ -2456,8 +2482,8 @@ pub fn gen_status(st: &Status) {
     let mut b = [0u8; 4];
     let bc = if st.charging { 0x04A9 } else { STATUS_FG };
     sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
-    sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
-    sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
+    status_rec(st, G_BAR, 11);
+    sf::label(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);

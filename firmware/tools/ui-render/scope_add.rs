@@ -467,53 +467,107 @@ pub fn run(ck: &mut Checker, out: &str) {
             nw += 1;
         }
     }
-    // A CSV recording on the Scope page (Model::rec, issue #101): red "REC"
-    // in the source badge's slot, the record bar beside it (also on the
-    // stock page of builds without the stream ISR, SRC_NONE): running,
-    // stopped with its brackets, roll, the generator frequency; updates
-    // between them and to / from no recording equal fresh draws.
-    let rec_scene = |src: u8, status: u8, roll: bool, gen: bool| {
+    // A CSV recording (Model::rec, issues #101, #105 feedback): the REC mark
+    // (scope_ui::rec_mark) in the source badge's slot, the record bar beside
+    // it (also on the stock page of builds without the stream ISR,
+    // SRC_NONE, and in the combined view): running, stopped with its
+    // brackets, roll, the generator frequency; both blink phases; each of
+    // the texts (RecStyle; the default Dmm last so the rest of the run
+    // draws it; RecFunc with every unit). Updates between them, to / from
+    // no recording and the blink step (the dot's box alone) equal fresh draws.
+    let rec_scene = |src: u8, status: u8, roll: bool, gen: bool, dim: bool| {
         let mut sc = wave_scene(src, 0, status, roll, 3);
         sc.name = "rec";
         sc.m.rec = true;
+        sc.m.rec_dim = dim;
         sc.m.gen_hz = if gen { 1000.0 } else { 0.0 };
         sc
     };
-    for src in [scope_ui::SRC_NONE, scope_ui::SRC_MCX] {
-        for (status, roll, gen) in [(scope_ui::ST_TD, false, false), (scope_ui::ST_STOP, false, false), (scope_ui::ST_RUN, true, false), (scope_ui::ST_TD, false, true)] {
-            let sc = rec_scene(src, status, roll, gen);
+    let styles = [(scope_ui::RecStyle::Rec, "rec"), (scope_ui::RecStyle::RecDmm, "b"), (scope_ui::RecStyle::RecFunc, "c"), (scope_ui::RecStyle::DmmRec, "d"), (scope_ui::RecStyle::Dmm, "a")];
+    for (style, sn) in styles {
+        scope_ui::set_rec_style(style);
+        for dim in [false, true] {
+            for src in [scope_ui::SRC_NONE, scope_ui::SRC_MCX] {
+                for (status, roll, gen) in [(scope_ui::ST_TD, false, false), (scope_ui::ST_STOP, false, false), (scope_ui::ST_RUN, true, false), (scope_ui::ST_TD, false, true)] {
+                    let sc = rec_scene(src, status, roll, gen, dim);
+                    stock::draw(&sc);
+                    let name = format!("rec/{sn}/{}/{src}/{status}/{}/{}", dim as u8, roll as u8, gen as u8);
+                    ck.check_replica(&name);
+                    ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                    nw += 1;
+                    if src == scope_ui::SRC_MCX {
+                        let st = match (status, roll, gen) {
+                            (scope_ui::ST_STOP, _, _) => "stop",
+                            (_, true, _) => "roll",
+                            (_, _, true) => "gen",
+                            _ => "run",
+                        };
+                        save(out, &format!("s05-rec-{sn}-{st}-{}", if dim { "off" } else { "on" }));
+                    }
+                }
+            }
+            // The combined view (no source badge; the strip below).
+            let mut sc = rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, false, dim);
+            sc.m.combined = true;
             stock::draw(&sc);
-            let name = format!("rec/{src}/{status}/{}/{}", roll as u8, gen as u8);
-            ck.check_replica(&name);
+            let name = format!("rec/{sn}/{}/combined", dim as u8);
             ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
             nw += 1;
-            if src == scope_ui::SRC_MCX && status == scope_ui::ST_STOP {
-                save(out, "s05-rec-badge");
-            }
-            if src == scope_ui::SRC_NONE && gen {
-                save(out, "s05-rec-badge-stock-gen");
+            save(out, &format!("s05-rec-{sn}-combined-{}", if dim { "off" } else { "on" }));
+        }
+        // RecFunc: every recorded function's unit (the widest decides).
+        if style == scope_ui::RecStyle::RecFunc {
+            for (k, f) in [1u8, 7, 10, 13, 14, 18, 15].into_iter().enumerate() {
+                let mut sc = rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false, false);
+                sc.m.rec_unit = scope_ui::rec_unit(f);
+                stock::draw(&sc);
+                let name = format!("rec/{sn}/unit/{f}");
+                ck.check_replica(&name);
+                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                nw += 1;
+                save(out, &format!("s05-rec-c-unit{k}"));
             }
         }
-    }
-    let states = [
-        stock::Scene { name: "rec", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
-        wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
-        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false),
-        rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false),
-        rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true),
-    ];
-    for (i, a) in states.iter().enumerate() {
-        for (j, b) in states.iter().enumerate() {
-            if i == j {
-                continue;
+        let states = [
+            stock::Scene { name: "rec", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
+            wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+            rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false, false),
+            rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false, true),
+            rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false, false),
+            rec_scene(scope_ui::SRC_MCX, scope_ui::ST_STOP, false, false, true),
+            rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true, false),
+            rec_scene(scope_ui::SRC_NONE, scope_ui::ST_TD, false, true, true),
+            rec_scene(scope_ui::SRC_NONE, scope_ui::ST_RUN, true, false, true),
+            {
+                let mut s = rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false, false);
+                s.m.rec_unit = scope_ui::rec_unit(14);
+                s
+            },
+        ];
+        for (i, a) in states.iter().enumerate() {
+            for (j, b) in states.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                stock::draw(b);
+                let want = emu().fb.clone();
+                stock::draw(a);
+                stock::load(b);
+                scope_ui::update(&b.m);
+                scope_ui::cells(&b.m, &b.cells);
+                ck.same_as(&format!("rec/{sn}/update/{i}->{j}"), &want);
+                nw += 1;
             }
-            stock::draw(b);
+        }
+        // The blink step above a popup (App::sp_tick: rec_mark_blink alone).
+        for dim in [false, true] {
+            let mut b = rec_scene(scope_ui::SRC_MCX, scope_ui::ST_TD, false, false, dim);
+            stock::draw(&b);
             let want = emu().fb.clone();
-            stock::draw(a);
-            stock::load(b);
-            scope_ui::update(&b.m);
-            scope_ui::cells(&b.m, &b.cells);
-            ck.same_as(&format!("rec/update/{i}->{j}"), &want);
+            b.m.rec_dim = !dim;
+            stock::draw(&b);
+            scope_ui::rec_mark_blink(scope_ui::SRC_BADGE, scope_ui::C_BAR, !dim, b.m.rec_unit);
+            ck.same_as(&format!("rec/{sn}/blink/{}", dim as u8), &want);
             nw += 1;
         }
     }

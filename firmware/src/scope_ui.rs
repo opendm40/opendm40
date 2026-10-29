@@ -239,11 +239,16 @@ pub struct Model {
     /// texts from `vdiv` / "CHA".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
-    /// A CSV recording runs (csvlog.rs; the Scope page only, the combined
-    /// view has it in the strip badge): red "REC" in the source badge's
-    /// slot, the record bar beside it. The Wave view (SRC_DMM) and a
-    /// recording exclude each other (App::wave_open, App::rec_conflict).
+    /// A CSV recording runs (csvlog.rs; the Scope page and the combined
+    /// view): the REC mark (`rec_mark`) in the source badge's slot, the
+    /// record bar beside it. The Wave view (SRC_DMM) and a recording
+    /// exclude each other (App::wave_open, App::rec_conflict).
     pub rec: bool,
+    /// The REC mark's blink phase (`rec_blink`): true = its dot hidden. A
+    /// change repaints the slot only.
+    pub rec_dim: bool,
+    /// The recorded function's unit (`rec_unit`) for RecStyle::RecFunc.
+    pub rec_unit: &'static str,
 }
 
 /// `Model::src` values.
@@ -321,6 +326,8 @@ impl Model {
         wvdiv: 0.0,
         ch1_txt: "",
         rec: false,
+        rec_dim: false,
+        rec_unit: "V",
     };
 
     pub fn pal(&self) -> Color {
@@ -600,18 +607,139 @@ pub fn record_bar(m: &Model) {
     });
 }
 
+/// The REC mark's blink (`now` in ms): true = off; on 1 s, off 1 s (owner
+/// 2026-10-30: 0.5 s was too fast). One phase for every page (the scope
+/// bar, the DMM and generator status bars).
+pub fn rec_blink(now: u64) -> bool {
+    now / 1000 & 1 == 1
+}
+
+/// Texts of the REC mark (owner feedback on #161, 2026-10-30: say that the
+/// recording is the multimeter's): `Rec` "REC", `Dmm` "DMM", `RecDmm`
+/// "REC DMM", `RecFunc` "REC" + the recorded function's unit (`rec_unit`),
+/// `DmmRec` "DMM REC"; always after the blinking red dot. ui-render draws
+/// all of them (`set_rec_style`).
+#[derive(Clone, Copy, PartialEq)]
+pub enum RecStyle {
+    Rec,
+    Dmm,
+    RecDmm,
+    RecFunc,
+    DmmRec,
+}
+
+#[cfg(not(test))]
+fn rec_style() -> RecStyle {
+    RecStyle::Dmm
+}
+#[cfg(test)]
+static mut REC_STYLE: RecStyle = RecStyle::Dmm;
+#[cfg(test)]
+fn rec_style() -> RecStyle {
+    unsafe { REC_STYLE }
+}
+#[cfg(test)]
+pub fn set_rec_style(s: RecStyle) {
+    unsafe { REC_STYLE = s }
+}
+
+/// The unit of a recorded DMM function (meter::func_of codes, csvlog::
+/// func_label) for `RecStyle::RecFunc`: V, A, Ω, F, Hz, W, °C.
+pub fn rec_unit(func: u8) -> &'static str {
+    match func {
+        0..=3 | 12 | 16 => "V",
+        4..=9 | 17 => "A",
+        10 | 11 => "\u{3a9}",
+        13 => "F",
+        14 => "Hz",
+        18 => "W",
+        _ => "\u{b0}C",
+    }
+}
+
+/// The REC dot's diameter: the 12 px font's cap height, smaller when the
+/// text needs the room (`rec_layout`).
+const REC_DOT: i16 = 9;
+
+/// The REC mark's parts in the slot `r`: the dot's box and the words (one
+/// Ink each: a gap narrower than the font's 6 px space). The largest of
+/// dot 9 / gap 4 / word gap 4 .. dot 5 / gap 2 / word gap 3 that leaves
+/// >= 2 px inside the box's ring; the group centred.
+fn rec_layout(r: Rect, unit: &'static str) -> (Rect, [Ink; 2]) {
+    let words: [&str; 2] = match rec_style() {
+        RecStyle::Rec => ["REC", ""],
+        RecStyle::Dmm => ["DMM", ""],
+        RecStyle::RecDmm => ["REC", "DMM"],
+        RecStyle::RecFunc => ["REC", unit],
+        RecStyle::DmmRec => ["DMM", "REC"],
+    };
+    let w = |t: &str| if t.is_empty() { 0 } else { sf::text_width(sf::SC_F12, t, 0) };
+    let (w0, w1) = (w(words[0]), w(words[1]));
+    let len = |l: (i16, i16, i16)| l.0 + l.1 + w0 + if w1 > 0 { l.2 + w1 } else { 0 };
+    let lay = [(REC_DOT, 4, 4), (7, 3, 4), (7, 2, 3), (5, 2, 3)].into_iter().find(|&l| len(l) <= r.w - 6).unwrap_or((5, 2, 3));
+    let (d, g, wg) = lay;
+    let x0 = r.x + (r.w - len(lay) + 1) / 2;
+    let dot = rect(x0, r.y + 4 + (REC_DOT - d) / 2, d, d);
+    let tx = x0 + d + g;
+    let t0 = Ink::new(sf::SC_F12, rect(tx, r.y, w0, r.h), words[0], 8, 0);
+    let t1 = if w1 > 0 { Ink::new(sf::SC_F12, rect(tx + w0 + wg, r.y, w1, r.h), words[1], 8, 0) } else { Ink::none() };
+    (dot, [t0, t1])
+}
+
+/// The REC mark in the 17 px slot `r` over `outside` (the top bar), boxed
+/// like the neighbouring badges: a red dot and white text (`RecStyle`) on
+/// the rows of the badges' 12 px caps (r.y + 4 ..= r.y + 12). `on` = the
+/// blink's on phase (the dot shows); `unit` = the recorded function's
+/// (`rec_unit`, RecFunc).
+pub fn rec_mark(r: Rect, outside: Color, on: bool, unit: &'static str) {
+    rec_paint(r, outside, on, false, unit);
+}
+
+/// The REC mark's blink step: only the dot's box.
+pub fn rec_mark_blink(r: Rect, outside: Color, on: bool, unit: &'static str) {
+    rec_paint(r, outside, on, true, unit);
+}
+
+/// The REC dot alone in its box `dot` over `bg` (the DMM and generator
+/// status bars, ui::status_rec), hidden when not `on`.
+pub fn rec_dot(dot: Rect, bg: Color, on: bool) {
+    paint(dot, &[(K_ICON, bg)], |x, y| if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) { (crate::ui::REC_CSV, tag(1, 0)) } else { (bg, 0) });
+}
+
+fn rec_paint(r: Rect, outside: Color, on: bool, dot_only: bool, unit: &'static str) {
+    let red = crate::ui::REC_CSV;
+    let (dot, [t0, t1]) = rec_layout(r, unit);
+    let win = if dot_only { dot } else { r };
+    paint(win, &[(K_SHAPE, outside), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_TEXT, C_FILL), (K_TEXT, C_FILL)], |x, y| {
+        if let Some(g) = t0.at(x, y) {
+            return (C_WHITE, tag(4, g));
+        }
+        if let Some(g) = t1.at(x, y) {
+            return (C_WHITE, tag(5, g));
+        }
+        if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) {
+            return (red, tag(3, 0));
+        }
+        if in_rbox(r, 5, 0x0f, x, y) {
+            if on_ring(r, 5, 0x0f, x, y) {
+                (C_FRAME, tag(1, 0))
+            } else {
+                (C_FILL, tag(2, 0))
+            }
+        } else {
+            (outside, 0)
+        }
+    });
+}
+
 /// Source badge (`Model::src` != SRC_NONE): "MCX | DMM", the active half
 /// in the CH1 colour with dark text, the other dark with grey text. While a
-/// CSV recording runs (`Model::rec`) the slot shows "REC" in red instead,
-/// as the DMM status bar does (the DMM source is refused then).
+/// CSV recording runs (`Model::rec`) the slot shows the REC mark instead
+/// (`rec_mark`; the DMM source is refused then).
 pub fn src_badge(m: &Model) {
     let r = SRC_BADGE;
     if m.rec {
-        let t = Ink::new(sf::SC_F12, r, "REC", 8, 0);
-        paint(r, &[(K_TEXT, C_BAR)], |x, y| match t.at(x, y) {
-            Some(g) => (crate::ui::REC_CSV, tag(1, g)),
-            None => (C_BAR, 0),
-        });
+        rec_mark(r, C_BAR, !m.rec_dim, m.rec_unit);
         return;
     }
     if m.src == SRC_NONE {
@@ -2229,8 +2357,11 @@ pub fn update(m: &Model) {
         // The record bar moves (beside the badge / REC or not): clear the slot.
         lcd::fill_rect(REC_BAR.x as u16, 0, REC_BAR.w as u16, 20, C_BAR);
     }
-    if d(ol.src != m.src || ol.rec != m.rec || (m.src != SRC_NONE && pal)) {
+    if d(ol.src != m.src || ol.rec != m.rec || ol.rec_unit != m.rec_unit || (m.src != SRC_NONE && pal)) {
         src_badge(m);
+    } else if m.rec && ol.rec_dim != m.rec_dim {
+        // The REC blink: its dot alone.
+        rec_mark_blink(SRC_BADGE, C_BAR, !m.rec_dim, m.rec_unit);
     }
     if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src || ol.rec != m.rec) {
         record_bar(m);
@@ -3405,7 +3536,7 @@ pub struct StripData {
     pub unit_letters: bool,
     /// Sub readings, 12 px ASCII, right-aligned.
     pub sub: [Txt; 2],
-    /// State badge (HOLD / A-HOLD / HV / REC / REL / PASS / FAIL / range).
+    /// State badge (HOLD / A-HOLD / HV / REL / PASS / FAIL / range).
     pub badge: &'static str,
     pub badge_col: Color,
     /// >= 100 V: the strip ring turns red.

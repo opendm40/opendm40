@@ -6,7 +6,7 @@
 use super::*;
 
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 fn save1(out: &str, name: &str) {
@@ -100,7 +100,7 @@ pub fn run(out: &str) -> usize {
         scope_ui::update(&sc.m);
         scope_ui::cells(&sc.m, &sc.cells);
         let acv = rd(0, val(1.0606, 4, "V"), Some(val(1.000, 3, "kHz")), Some(val(50.0, 1, "%")), false);
-        let mut d = ui::strip_data(&acv, 0, 0, false, 0, false, None, false);
+        let mut d = ui::strip_data(&acv, 0, 0, false, 0, false, None);
         d.gen = scope_ui::Txt::new("1.00kHz");
         scope_ui::meter_strip(&d);
         ck.check_area("readme/combined", &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
