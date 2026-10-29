@@ -1420,6 +1420,18 @@ impl App {
         matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA)
     }
 
+    /// The function has a range page (MF opens it; its Hold/Limits button
+    /// opens Hold & Limits). Without one MF opens Hold & Limits directly.
+    fn has_range_page(&self) -> bool {
+        matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power) || self.dmm.hy_mode() == 15
+    }
+
+    /// Where MENU / Back on Hold & Limits return to: one page up, the range
+    /// page it was opened from (#111), else the instrument.
+    fn limits_back(&self) -> View {
+        if self.has_range_page() { View::Range } else { self.back_view }
+    }
+
     /// Where OK / cancel / MENU on the keypad return to.
     fn kp_back(&self) -> View {
         match self.kp_target {
@@ -3221,7 +3233,8 @@ impl App {
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => View::Limits,
-                    View::Menu | View::Range | View::Keypad | View::Limits | View::Inrush => self.back_view,
+                    View::Limits => self.limits_back(),
+                    View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -3266,13 +3279,8 @@ impl App {
                 self.dmm_view.invalidate();
             }
             _ => match self.view {
-                View::Dmm | View::DmmScope
-                    // Power meter: its Power Settings page (View::Range).
-                    if matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap | Button::Power)
-                        || self.dmm.hy_mode() == 15 =>
-                {
-                    self.show(View::Range, clk)
-                }
+                // Power meter: its Power Settings page (View::Range).
+                View::Dmm | View::DmmScope if self.has_range_page() => self.show(View::Range, clk),
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
@@ -3624,7 +3632,7 @@ impl App {
             },
             View::Limits => {
                 if ui::title_back_hit(y) {
-                    let v = self.back_view;
+                    let v = self.limits_back();
                     self.show(v, clk);
                     return;
                 }

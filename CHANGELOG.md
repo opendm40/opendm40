@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- Hold & Limits: MENU and Back return to the range page (Power Settings)
+  it was opened from, not to the multimeter page.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
