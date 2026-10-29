@@ -17,7 +17,8 @@ Additional requirements:
 - [ ] A current in the A jack is missed or misnamed in some modes (device, 2026-10-26: owner's PSU 20 mA CC
       into A / COM, V empty; the same on main 0.2.5 and on the #25 + #26 test build).
       - AC mV: no alert; the readout reads OL.
-      - Ohm: LIVE instead of A-JACK (31 MΩ).
+      - Ohm: LIVE instead of A-JACK (31 MΩ). Device 2026-10-29 (600 MΩ branch): the same on 600 Ω, 60 MΩ,
+        AUTO and 600 MΩ; the ~31 MΩ comes with the PSU's COM lead alone (a ground loop, inferred), not the A current.
       - Hz: no alert.
       DC V / AC V / continuity / diode / capacitance raise A-JACK in 0.9-1.8 s. On main, DC mV also raised a false
       A-PROT at 20 mA (limit 125 mA), latched in every later mode; #25 removes it.
@@ -37,6 +38,13 @@ Additional requirements:
       - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
         = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
       Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
+- [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
+      100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
+      the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
+      far up to 5.57 MΩ only. The leak is steady over 13 min (±1.5 %), 0.041 .. 0.059 nS over an evening. Also: whether the leak (learned on open leads, ~21 GΩ on one unit) is a
+      resistor across the jacks or depends otherwise on the jack voltage; the jack check (AD2 = OP1O) reads
+      FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ gives LIVE, as
+      every ohm range does (the A-jack item above).
 
 ## Open, by kind (2026-10-27)
 
@@ -53,15 +61,19 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Physical keys, touch, sound: "Device check (3 min): (1) `CALC:AHOL?`" (side keys, #57 partial), the
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
+- Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
+  check (2 min" (PR fix/smooth-redraw).
 - Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
-  offset"; "Ohm OL above 60 000 counts" (calibrator).
+  offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
   check (MMB3.0 frequency), the [500 ohm](#500-ohm-from-the-mmb30-reads-ol-on-600-ohm-owner-2026-10-25-v020-branch-fixohm500-ol-merged-7)
   check (MMB3.0 500 Ω, a passive resistor), "E7 open" and "Method C's internal zero on 60 V" (> 30 V).
 - Generator on / looped back to CH1: "Scope in ngscopeclient" (3), (9); RUN key: its (2), (7).
 - Host systems and the stock: Windows / macOS in "Verify on device: swipe REC" and the two "Device: (... decision
   #6)" items; stock comparisons UF-02, UF-19.
+- USB cable and charger: the [charging indicator](#battery-charging-indicator-and-usb-badge-user-report-2026-10-28-branch-fixbattery-charging-indicator)
+  checks.
 
 **(b) Agent-doable: code, docs, device runs without a human (quiet-device rules, `--features mute`, #53)**
 - Code: none open. "A stream starting inside a multi-block READ(10)" (#60, test only) and
@@ -81,6 +93,24 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Boot time (bug-fix-only rule): "Left: `vdisk::mirror_boot`" (0.3 s per boot).
 - New features (bug-fix-only rule): "UF-24 tempco", [Backlog](#backlog-user-ideas) "Inductance", "Browser client",
   "Protocol decoders", "Hardware note (HW-1", "sigrok/SmuView" (SmuView on the device, upstream).
+
+## Battery charging indicator and USB badge (user report 2026-10-28, branch fix/battery-charging-indicator)
+
+User: the battery icon does not show charging; ideally show the PC connection. Fix (#68): PB11 with the stock
+pull-up; green on the charger (PB10 = 1), the top bar blinking while charging (PB11 = 1), steady when charged
+(PB11 = STDBY low); a USB symbol while a host has the meter configured. Pin findings: hw/README.md pin table.
+Device 2026-10-29 (battery full, 4.23 V): charged state, replug (charging 3.5..4.5 s, then charged), PB10 low
+/ released checked with `DBG:CHG?` / `DBG:CHG:LOG?`.
+- [ ] Device check with a battery below 80 % (needs hours on battery first): the top bar blinks while charging;
+      the battery voltage rises (`DBG:CHG?` battery ADC); charge time vs the stock's ~2 h 35 min.
+- [x] The stock's PB10 drive measured on opendm40 (2026-10-29, hw/README.md Unknowns 5): PB10 low stops the
+      charge, released the charger goes to standby until the next replug. opendm40 does not drive PB10 and
+      charges to termination. The stock pulses PB10 low ~10 ms per 2 s below 80..85 % and reads the battery
+      during the pulse (disassembly; purpose *inferred*: a reading without the charge current).
+- [ ] (c) Owner decision: copy the stock's 10 ms PB10 pulse for the battery reading on USB power (the bars
+      read high while charging without it), or keep PB10 undriven.
+- [ ] A power-key reboot after a replug (the user's "shows again after a reboot"): not tried; a software reset
+      keeps the charged state.
 
 ## Owner decisions pending (2026-10-25)
 
@@ -496,8 +526,10 @@ the scope full record.
         DBG:RELEASE twice over USB (WDT_RETRY, then recovery). All PASS on 1372e957 (= 37d3252's image); no
         shim bug found. The 60 s window is 60 s of RUNNING main loop since the last boot, not 60 s between
         resets (README wording fixed).
-  - [ ] T3 remaining on the device: the same triggers by hand (owner steps in docs/native-boot.md
-        "T3 recovery triggers: owner steps"); scope view stack high-water; first-boot timing.
+  - [ ] T3 remaining on the device: the boot and watchdog steps by hand (docs/native-boot.md
+        "Boot and watchdog: owner steps"; the hang-count entry into the loader was removed in 0.4.0,
+        owner 2026-10-29; the key hold and DBG:LOADER enter it through PA2, marker kept: "PA2 entry");
+        scope view stack high-water; first-boot timing.
   - [x] Native bugs seen: boots into AC+DC mV (persisted-mode mapping after the persist v3 change?);
         trend chart plots the separate AC/DC phases; AC part 40 mV on a DC calibrator input (AC zero?).
         (c44ca81; verify on device)
@@ -1658,14 +1690,21 @@ Firmware:
 - [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 058a1d36
       region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
       SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
-- [ ] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
+- [x] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
       before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
       pages open.
-      Open PR #57: PASS on the muted 0.3.0 image.
-- [ ] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
+      **Device 0.3.0 mute (2026-10-27): PASS.** The probe glyph (DC x1, AC x1) equals
+      [scope.png](../docs/manual/img/scope.png) / [scope-ch1.png](../docs/manual/img/scope-ch1.png) at RGB565.
+      `VOLT:RANG?` 60 -> 6, `RES:RANG:AUTO?` 1, no error; a bare `RANG?` is -113 (the syntax needs `<f>:`).
+      Help 1/7 .. 7/7 open, the tap wraps to 1/7; 1/7 equals [help.png](../docs/manual/img/help.png).
+- [x] Device check of region C audit #1: boot and settings restore (the .data image now in B), the gallery
       (open, page swipe, view, delete), a CSV recording start / stop and a scope Save CSV (csvlog JOB,
       scope_csv SNAP now zero-initialised), the temperature page keys, DBG:AD2:NOISE? / DCV? still answer.
-      Open PR #57: PASS on the muted 0.3.0 image.
+      **Device 0.3.0 mute (2026-10-27): PASS.** `DBG:RESET` with AC V, AutoHold on, 10 ms/div: all three back.
+      Gallery: page 2 and back, the viewer equals the file (a fresh screenshot), Delete -> dialog -> Delete removes
+      it. `LOG:CSV ON` / `OFF`: LOG022 (45 rows, header right); scope STOP + Save CSV: SCOP011, header and rows right.
+      Temperature page: sensor keys and offset +/- work. `DBG:AD2:NOISE?` (AC V) and `DBG:AD2:DCV?` (DC V) answer.
+      The power-key off / on restore was not repeated (device 705d2e9 above).
 - [x] Font storage 2026-10-22 (docs/fonts.md): the stock fonts were 104 KB of data in region B (90.9 KB
       bitmaps + 13.2 KB tables). CJK / full-width glyphs dropped (232, never drawn), 4 bpp glyphs as row-major
       nibble runs (RLE4, decoded straight into the LCD writes), 1 bpp glyphs cropped to their ink rows,
@@ -4186,12 +4225,16 @@ Emulator (emu/):
       made a 370 ms pass (`DBG:PROF?` tick max); keys pressed during such a pass were not exercised (the
       timed saves under test wrote blank slots, no erase). One EXTI edge is latched for the whole pass, so a
       release and the next press inside it read as one key-to-key change: the case fixed above (inferred).
-- [ ] Device check (3 min): (1) `CALC:AHOL?`; if 1, `CALC:AHOL OFF` (or hold RUN 1 s): AutoHold may be on from this
+- [x] Device check (3 min): (1) `CALC:AHOL?`; if 1, `CALC:AHOL OFF` (or hold RUN 1 s): AutoHold may be on from this
       bug. (2) DMM page, `DBG:TOUCH 0`; press RUN, release, and press AUTO at once (roll the thumb down the strip),
       10 times: no A-HOLD label appears, HOLD is off after each AUTO, `CALC:AHOL?` 0. (3) Press MENU then MF quickly:
       the range page opens (not the menu twice). (4) `firmware/tools/touch-log.py --raw`: every key shows
       `G,K,<code>` and `G,k,<code>` in pairs with its own code. (5) Hold RUN 1 s: A-HOLD on, again: off (unchanged).
-      Open PR #57: (1) and (5) PASS; (2)-(4) need the physical keys (`DBG:KEY` skips the touch debounce).
+      - Device 0.3.0 mute (2026-10-27): (1) `CALC:AHOL?` 0. (5) by `DBG:KEY 1,1200` in the DMM view: A-HOLD on
+        (`CALC:AHOL?` 1), again: off. Left for the owner: (2)-(4) with the physical keys (`DBG:KEY` goes to the app
+        directly, past the touch debounce and `gesture::Tracker`).
+      - Owner, test build 0.3.1 (all open PRs, 2026-10-29): (2) and (3) with the physical keys as expected. (4)
+        not logged: the key-report question below stays open.
 - [ ] Unknown (device data decides): whether the 0x5A controller repeats the key report while a key is held, and
       whether it ever drops the release report. The (4) log above shows it (frames `F,e,k<code>` per press). If
       releases are dropped, a held RUN still toggles AutoHold after 1 s; a key timeout would then need the
@@ -4206,10 +4249,15 @@ Emulator (emu/):
       long press does not step a range first). Emulator test: [emu/autokeytest.py](../emu/autokeytest.py).
       The test's two DBG:READout? checks were stale (4 fields, HOLD read from the last one) after the range field was
       added: now 5 fields, HOLD from the fourth; the firmware releases HOLD on a short press (PASS).
-- [ ] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
+- [x] Device check (2 min): DC V with ~1 V in: AUTO -> MANU 6 V; AUTO x6 -> 60, 600, 1000 V, 60 mV, 600 mV, 6 V
       (relays click per step); hold AUTO 1 s -> beep, AUTO+. RUN (HOLD), AUTO: HOLD off. AutoHold on (hold RUN 1 s),
       AUTO: A-HOLD stays. Ohm open: AUTO, AUTO -> 60 ohm. Scope page AUTO: auto-set as before.
-      Open PR #57: PASS on the muted 0.3.0 image.
+      **Device 0.3.0 mute (2026-10-27), keys by `DBG:KEY`, MR9270 1 V on V-COM: PASS.** AUTO -> MANU 6 V, then 60, 600,
+      1000 V, 60 mV (OL), 600 mV (OL), 6 V; AUTO 1.2 s -> AUTO+. RUN: HOLD 1; AUTO: HOLD 0, 6 -> 60 V. RUN 1.2 s:
+      A-HOLD (`CALC:AHOL?` 1); AUTO: A-HOLD stays, 60 -> 600 V. Under A-HOLD the status bar keeps the held reading's
+      range ("60V") while the bargraph scale shows the new range (+-600). Ohm (the calibrator's output off, not an
+      open input: 484 kohm): AUTO -> MANU 600 kohm; manual 60 Mohm, AUTO -> 60 ohm. Scope page AUTO (input open):
+      20 ms/div, 1 V/div, level 0 V. The beep is not checked (mute build).
 
 ## Hz below 7 Hz (owner 2026-10-25, v0.2.0 with the MMB3.0: 2 Hz and 5 Hz gave no reading; branch fix/low-freq, merged #43, v0.3.0)
 
@@ -4243,7 +4291,7 @@ Emulator (emu/):
 
 ## 500 ohm from the MMB3.0 reads OL on 600 ohm (owner 2026-10-25, v0.2.0, branch fix/ohm500-ol, merged #7)
 
-- [ ] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
+- [x] "500 Ом с калибратора вызывают оверлоад на пределе 600 Ом". Record of the run (DM40A, RES, manual, MED):
       [docs/data/res-steps-2026-10-25.csv](docs/data/res-steps-2026-10-25.csv). 0.01 .. 200 ohm read right on
       600 ohm; the step 200 -> 500 ohm at 99.8 s gave one mixed reading (231 ohm), then OL at every conversion
       for 32 s (rows 25 ms apart: R22 0x13, [src/dmm.rs](src/dmm.rs) `poll_ohm` on OL). Every later block of
@@ -4279,7 +4327,7 @@ Emulator (emu/):
       - The UI: "0L" with "Overload" next to it is the plain OL readout (`ui.rs` `ol_word`), not the sentinel's
         OVERLOAD alert (that one is the uA / mA shunt, DC / AC A only).
       Not changed: the firmware.
-- [ ] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
+- [x] Device check (10 min, MMB3.0 and a passive resistor; when the owner allows; `SYST:ALER:ALARm OFF` first
       if the owner is asleep, or the `--features mute` build, #53). Each step: `CONF:RES 600;:SENS:RATE MED`, then 20 x
       `RES:RANG?;:DBG:READout?;:DBG:SENTinel?` 0.5 s apart.
       (1) A passive 470 .. 560 ohm resistor: in range, the control.
@@ -4294,5 +4342,27 @@ Emulator (emu/):
       (6) If (2) reads 500 ohm: the 200 -> 500 ohm step on 600 ohm; OL until a range change = hypothesis 2.
       (7) MMB3.0 500 ohm on AUTO (long AUTO press): `RES:RANG?`. A passive 500 ohm lands on 600 ohm (emulator);
       6 kohm means AUTO tried 600 ohm, read OL and went back (OHM_BAND hold).
+      - Device 0.3.0 mute (2026-10-27), the MR9270S+ resistance output instead of the MMB3.0: the MR9270 gives at
+        most 400 ohm (a 500 ohm write reads back 4000 = 400.0 ohm once the output is on), so 500 ohm was not
+        tested. Same recipe (MED, 0.5 s polls), every row CMP_PB1 / NONE, `jack` 0: 300 ohm 301.71; 400 ohm
+        set on 6 kohm (396.45), then `CONF:RES 600`: 398.30 ohm, 20 of 20, no OL; 200 -> 400 ohm on 600 ohm:
+        one mixed reading (281.06 at the 200 step), then 398.30, no OL; 0.28 mA ON on 600 ohm: 396.78; AUTO:
+        600 ohm, 398.30. Step (3), 400 ohm: R1K I 0.868 mA, V_jack 0.493 V; R10K I 0.189 mA, V_jack 0.305 V.
+        V_jack / I is not 400 ohm on either row (568 / 1615 ohm); why is unknown (no passive reference was run).
+        Left for the owner: steps (1), (2), (4) .. (7) with the MMB3.0 at 500 ohm and a passive resistor.
+      - Owner, MMB3.0, test build 0.3.1 (2026-10-29): 500 ohm on 600 ohm reads OL with 0.90 mA and in range with
+        0.28 mA ON (499.53 .. 499.59 ohm over SCPI). Hypothesis 1: the MMB3.0's resistance output cannot carry
+        the 0.90 mA test current at 500 ohm; not a firmware fault. With this calibrator the 600 ohm range is
+        checked with 0.28 mA ON.
+        A passive 500 ohm resistor reads in range with both 0.90 mA and 0.28 mA ON (step 1, the control).
       Open PR #57: the MR9270 only (it stops at 400 Ω): at 400 Ω no OL static, after 200 -> 400 Ω, with 0.28 mA
       ON or on AUTO (lands on 600 Ω); the MMB3.0 500 Ω steps and the passive resistor stay open.
+
+## Jerky screen changes (owner 2026-10-29, branch fix/smooth-redraw)
+
+Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoothtest.py](../emu/smoothtest.py).
+- [ ] Device check (2 min, the `--features mute` build): menu > each tile and back, DMM V -> Ω -> A, MF range page
+      open / close, scope MF menu open, its tabs, close. Expected: no blank screen between pages; the old page
+      stays until the new one covers it.
+- [ ] Scope page entry: the full graph takes ~126 ms in the emulator (`--mips 110`), now a left-to-right wipe;
+      its speed is not changed. The device time is unknown.

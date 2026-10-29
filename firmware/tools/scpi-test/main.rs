@@ -21,9 +21,23 @@ mod boot {
     pub fn enter_loader_update() -> bool {
         false
     }
+    pub fn request_loader() {}
 }
 mod clock {
     pub const HCLK_HZ: u32 = 200_000_000;
+}
+mod power {
+    pub struct ChgLog {
+        pub n: u32,
+        pub ev: [u32; 8],
+    }
+    pub static mut CHG_LOG: ChgLog = ChgLog { n: 0, ev: [0; 8] };
+    pub fn dbg_state() -> [u32; 8] {
+        [0; 8]
+    }
+    pub fn dbg_pin(_pin: u32, _mode: u32) -> bool {
+        true
+    }
 }
 mod csvlog {
     pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
@@ -200,6 +214,27 @@ fn set_commands() {
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");
+    // The experimental 600 Mohm range (dmm::OHM600, ohm r7): RES:RANG /
+    // CONF:RES above 60 Mohm select it (app.rs scpi_range: the smallest item
+    // that holds the value); MAX is the item before it, 60 Mohm.
+    check(matches!(s.handle(b"RES:RANG 600E6", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v == 600e6), "RES:RANG 600E6");
+    check(matches!(s.handle(b"CONF:RES 600E6", 1), Out::Instr(Cmd::Conf(10, Rng::Value(v), None)) if v == 600e6), "CONF:RES 600E6");
+    check(matches!(s.handle(b"RES:RANG MAX", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v.is_infinite()), "RES:RANG MAX");
+    {
+        let items = scpi::range_items(10);
+        // app.rs scpi_range: MAX = the top item, on ohm the one below 600 Mohm.
+        let pick = |x: f32| if x.is_infinite() { items.len().checked_sub(2) } else { items.iter().position(|&it| it >= x * 0.9999) };
+        let code = |x: f32| pick(x).map(|i| scpi::range_item_code(10, i));
+        check(code(600e6) == Some(7) && code(100e6) == Some(7) && code(60.1e6) == Some(7), "RES:RANG 100E6 .. 600E6: r7 (600 Mohm)");
+        check(code(60e6) == Some(6) && code(f32::INFINITY) == Some(6) && code(0.0) == Some(0), "RES:RANG 60E6 / MAX: 60 Mohm, MIN: 60 ohm");
+        check(code(601e6).is_none(), "RES:RANG 601E6: out of range");
+        check(scpi::range_si(10, 7) == Some(600e6), "RANG? on 600 Mohm");
+    }
+    check(matches!(s.handle(b"DBG:OHM6?", 0), Out::Dbg(scpi::Dbg::Ohm6(None))), "DBG:OHM6?");
+    check(
+        matches!(s.handle(b"DBG:OHM6 1.007,,3", 0), Out::Dbg(scpi::Dbg::Ohm6(Some(v))) if v[0] == 1.007f32 && v[1].is_nan() && v[2] == 3.0 && v[4].is_nan()),
+        "DBG:OHM6 1.007,,3: empty fields NaN",
+    );
     check(err(&mut s) == "0,\"No error\"", "no error after the good values");
 
     // Bad values: no reply, no Cmd (the setting kept), an error.

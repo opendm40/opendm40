@@ -515,8 +515,9 @@ impl App {
             guide: now < sp.guide_until || sp.touch.is_some_and(|t| t.hit || t.moving),
             xcur: if self.cur.x_on { Some([self.cur.x[0] as i16, self.cur.x[1] as i16]) } else { None },
             ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
-            battery: self.power.bars.min(5),
-            charging: self.power.charging(),
+            battery: self.power.shown_bars(now / 1000 & 1 == 1),
+            charging: self.power.on_charger(),
+            usb: self.usb_host,
             roll: self.scope.rolling(),
             record,
             // Combined view: the strip's GEN badge shows it instead.
@@ -646,6 +647,8 @@ impl App {
     /// The page from the cached frame and the model (all of it after
     /// `su::invalidate`, the graph after `su::uncover`).
     fn sp_draw_page(&mut self) {
+        // An open popup's box is drawn last: the graph leaves it alone.
+        su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
         self.sp.bubble_dirty = self.sp.bubble;
         self.sp_render();
         self.sp_math();
@@ -2123,6 +2126,8 @@ impl App {
     }
 
     fn sp_popup_draw(&mut self) {
+        // The box's fills wait for its widgets (lcd.rs "deferred fills").
+        crate::lcd::defer_start();
         let v = self.sp_popvals();
         su::draw_popup(self.sp.popup, &v);
     }
@@ -2177,6 +2182,7 @@ impl App {
         // menu "Screenshot" closes it first) after SHOT_SETTLE_MS.
         self.scope_invalidate();
         self.repaint_at = self.now;
+        crate::lcd::defer_start();
         let m = self.sp_model(self.now);
         su::uncover(&m, u & 1 != 0, u & 2 != 0);
         self.sp_draw_page();
@@ -2353,9 +2359,21 @@ impl App {
             su::MfHit::Outside | su::MfHit::Inside | su::MfHit::Bright | su::MfHit::Grid => return,
             su::MfHit::Tab(t) => {
                 if t != tab {
-                    // A shorter page: the page under the old box comes back.
+                    let old = su::popup_box(self.sp.popup);
                     self.sp.popup = su::Popup::Mf(t);
-                    self.redraw = true;
+                    let new = su::popup_box(self.sp.popup);
+                    if let (View::Scope, Some(o), Some(n)) = (self.view, old, new) {
+                        // The new box, then the graph rows the old one
+                        // covered and the new one does not.
+                        self.sp_popup_draw();
+                        let m = self.sp_model(now);
+                        su::regraph_rows(&m, n, n.y + n.h, o.y + o.h);
+                    } else {
+                        // The combined view (its popups cover the meter
+                        // strip): the whole page, the graph skipping the
+                        // new box (sp_draw_page).
+                        self.redraw = true;
+                    }
                 }
                 return;
             }

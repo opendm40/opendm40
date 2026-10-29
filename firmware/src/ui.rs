@@ -875,7 +875,7 @@ impl DmmView {
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
             _ => 255,
         };
@@ -1104,10 +1104,12 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
         (i * 1e9, " nA")
     };
     let mut b = [0u8; 16];
-    let mut t = crate::scope_ui::Txt::new("I ");
+    // The experimental 600 Mohm says so, in the reading's colour.
+    let exp = crate::dmm::is_ohm600(mode, range);
+    let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
     t.push(u);
-    sf::label(sf::F14, OHM_I_RECT, t.as_str(), DIM, BG, 1, 1);
+    sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
 /// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
@@ -1155,6 +1157,10 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // AUTO coupling: the part it shows, marked Auto (6 characters fit
         // the 62 px badge; V / A is the unit's, as for "AC+DC").
         d.func = if r.is_ac() { "AutoAC" } else { "AutoDC" };
+    }
+    if crate::dmm::is_ohm600(r.mode, r.range) {
+        // The experimental 600 Mohm says so here too (the DMM page: EXP).
+        d.func = "OhmEXP";
     }
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
@@ -1313,9 +1319,12 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         ],
         // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
         // +1 digit notes), also in AUTO unless the 0.28 mA "ON" variant.
+        // 600 Mohm (dmm::OHM600): after AUTO, so the AUTO key's range steps
+        // (the items before AUTO) never reach it; its own row on the page.
         Button::Ohm => &[
             ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            (OHM600_ITEM, Some(7)),
         ],
         _ => &[("AUTO", None)],
     }
@@ -1343,6 +1352,7 @@ pub fn range_code(mode: u8, range: u8) -> u8 {
 pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
+        10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
         0..=10 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
@@ -1376,7 +1386,25 @@ fn range_status(s: &str) {
 }
 
 fn range_rect(i: usize) -> sf::Rect {
+    if i >= 8 {
+        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
+        // page), two columns wide for its label.
+        return rect(8, 141, 228, 36);
+    }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
+}
+
+/// The 600 Mohm item of the Resistor Settings page (dmm::OHM600), its index
+/// in `range_items(Button::Ohm)`, and the line in place of the test-current
+/// buttons while it is chosen (its source is fixed: `ohm_vars_shown`).
+pub const OHM600_ITEM: &str = "600M\u{3a9} experimental";
+const OHM600_IDX: usize = 8;
+pub const OHM600_NOTE: &str = "100 nA";
+
+/// The Resistor Settings page shows the 0.90 / 0.28 mA buttons: not with
+/// 600 Mohm chosen (`sel`: the page's selected item).
+pub fn ohm_vars_shown(sel: Option<usize>) -> bool {
+    sel != Some(OHM600_IDX)
 }
 
 /// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub
@@ -1410,7 +1438,11 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     if let Some((t, warn)) = note {
         range_note(t, warn);
     }
-    if b == Button::Ohm {
+    if b == Button::Ohm && !ohm_vars_shown(sel) {
+        // 600 Mohm runs its own source: the variant buttons would do nothing,
+        // so its test current under its item instead.
+        sf::glyphs(sf::TEXT22, rect(8, 182, 228, 38), OHM600_NOTE, DIM, BG, 8, 1);
+    } else if b == Button::Ohm {
         // The stock's second ohm mode (m+8, toggled by a second tap on the
         // ohm button; "ON" tag on the button): the p8set rows, a lower test
         // current for in-circuit measurements. `sub` = Dmm::ohm_var here.
@@ -1569,8 +1601,8 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
 /// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons.
-pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
+/// buttons, while `ohm_vars_shown(sel)`.
+pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
         let r = range_rect(i);
@@ -1579,7 +1611,7 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
             return Some(Ok(i));
         }
     }
-    if (179..223).contains(&y) && b == Button::Ohm {
+    if (179..223).contains(&y) && b == Button::Ohm && ohm_vars_shown(sel) {
         return Some(Err(if x < 240 { 0 } else { 1 }));
     }
     if (179..223).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
@@ -1759,6 +1791,10 @@ pub fn hv_warning(on: bool) {
 pub struct Status {
     pub uptime_s: u32,
     pub bt: bool,
+    /// A USB host configured the meter (USBTMC + USB disk usable): USB symbol.
+    pub usb: bool,
+    /// Battery level as shown (`Power::shown_bars`: blinks while charging).
+    /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
     pub locked: bool,
@@ -1786,6 +1822,13 @@ fn battery_glyph(b: &mut [u8; 4], bars: u8) -> &str {
     char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"').encode_utf8(b)
 }
 
+/// The USB symbol (SAVE_BT 0x22, tools/mkusbglyph.py) between the BT
+/// symbol and the battery while a USB host has the meter configured (not
+/// for a charger: no enumeration).
+fn usb_glyph(st: &Status) -> &'static str {
+    if st.usb { "\u{22}" } else { "" }
+}
+
 /// CSV recording badge colour (status blocks): red. The MIN/MAX session
 /// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
 /// column).
@@ -1793,7 +1836,7 @@ const REC_CSV: Color = 0xF800;
 
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
-/// column), lock, BT link, battery.
+/// column), lock, BT link, USB host, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
@@ -1803,6 +1846,7 @@ pub fn status_right(st: &Status) {
     sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
@@ -2345,7 +2389,7 @@ pub fn gen_run_hit(x: u16, y: u16) -> bool {
 }
 
 /// Generator bar status (ui-review #9; stock: uptime (186,0,120,36), battery
-/// (430,8,40,18)): uptime, REC, lock, BT link, battery, at the DMM bar's x
+/// (430,8,40,18)): uptime, REC, lock, BT link, USB, battery, at the DMM bar's x
 /// positions (`status_right`), centred in the 36 px bar.
 pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
@@ -2355,6 +2399,7 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
     sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 

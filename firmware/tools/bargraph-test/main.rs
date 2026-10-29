@@ -52,6 +52,11 @@ fn main() {
     check("fs cap 6 uF", (mode_full_scale(13, 3, 3, "\u{b5}F") - 6.0).abs() < 1e-5, String::new());
     check("fs cap 6000 uF", (mode_full_scale(13, 6, 0, "\u{b5}F") - 6000.0).abs() < 1e-2, String::new());
     check("fs cap 60000 uF", (mode_full_scale(13, 7, 0, "\u{b5}F") - 60000.0).abs() < 1e-1, String::new());
+    // The experimental 600 Mohm: its range at any decimals.
+    for d in 1..=3 {
+        check("fs 600 Mohm", mode_full_scale(10, 7, d, "M\u{3a9}") == 600.0, String::new());
+    }
+    check("fs 6 Mohm by mode", (mode_full_scale(10, 5, 4, "M\u{3a9}") - 6.0).abs() < 1e-6, String::new());
     // frac: fraction of the full scale.
     check("frac 4.8176 V", (frac(4.8176, 6.0, false).unwrap() - 4.8176 / 6.0).abs() < 1e-6, String::new());
     check("frac -600 mV", (frac(-600.0, 600.0, false).unwrap() + 1.0).abs() < 1e-6, String::new());
