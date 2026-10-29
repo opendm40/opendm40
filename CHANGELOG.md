@@ -67,6 +67,8 @@ section named after the tag as the release notes; how to cut a release:
   it was opened from, not to the multimeter page.
 - Temperature page: the cold junction line follows the readings and the
   offset while the page is open.
+- Inrush: the Trigger - / + no longer step the wrong way from a threshold
+  set over SCPI below 0.2 A or above 10 A.
 
 ## v0.3.0 (2026-10-27)
 
