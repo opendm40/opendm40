@@ -6001,15 +6001,16 @@ impl Dmm {
 /// Format `v` with `dec` decimals into `buf`; returns the text. A value too
 /// long for the 16 bytes (sign, 14 digits and the point; e.g. a limit of
 /// 1E20 set over SCPI, or infinity) shows as all nines instead of running
-/// past the buffer (a panic).
+/// past the buffer (a panic). A value that rounds to zero has no sign (no
+/// "-0.0000", #113).
 pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     let mut scale = 1.0f32;
     for _ in 0..dec {
         scale *= 10.0;
     }
-    let neg = v < 0.0;
     let max = 10u64.pow(15 - (dec > 0) as u32) - 1;
-    let mut n = (((if neg { -v } else { v }) * scale + 0.5) as u64).min(max);
+    let mut n = ((v.abs() * scale + 0.5) as u64).min(max);
+    let neg = v < 0.0 && n != 0;
     let mut tmp = [0u8; 16];
     let mut i = 0;
     loop {
@@ -6196,6 +6197,19 @@ mod tests {
         assert_eq!(format(&mut b, f32::INFINITY, 1), "9999999999999.9");
         assert_eq!(format(&mut b, f32::NEG_INFINITY, 0), "-999999999999999");
         assert_eq!(format(&mut b, f32::NAN, 2), "0.00");
+    }
+
+    #[test]
+    fn format_no_negative_zero() {
+        let mut b = [0u8; 16];
+        // #113: open DC V leads, a few uV below 0 at 4 decimals.
+        assert_eq!(format(&mut b, -0.000_04, 4), "0.0000");
+        assert_eq!(format(&mut b, -0.000_06, 4), "-0.0001");
+        // The extra digit (dec + 1): -10 uV keeps its sign.
+        assert_eq!(format(&mut b, -0.000_01, 5), "-0.00001");
+        assert_eq!(format(&mut b, -0.4, 0), "0");
+        assert_eq!(format(&mut b, -1.25, 1), "-1.3");
+        assert_eq!(format(&mut b, 0.0, 3), "0.000");
     }
 
     #[test]

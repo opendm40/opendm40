@@ -48,6 +48,8 @@ section named after the tag as the release notes; how to cut a release:
   instead of a wrapped number ([#97](https://github.com/opendm40/opendm40/issues/97)).
 - **Limits:** a huge limit set over SCPI (`CALC:LIM:UPP 1E20`) no longer restarts
   the meter when the Hold/Limits page opens.
+- Multimeter: a value that rounds to zero shows no minus sign (open DC V
+  leads showed "-0.0000").
 
 ## v0.3.0 (2026-10-27)
 
