@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""opendm40 power meter dialogs after a SCPI function change (#104): the
-wiring dialog and "Reset energy?" close, the new function's page shows.
+"""opendm40 dialogs after a SCPI function change (#104, #143): the power
+meter's wiring dialog and "Reset energy?" and the fuse check's start dialog
+close, the new function's page shows.
 
   cd firmware && ./build.sh
   emu/pwdialogtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
@@ -9,7 +10,9 @@ wiring dialog and "Reset energy?" close, the new function's page shows.
   * DMM page, tap W: the wiring dialog (its blue title bar, DBG:LCD?);
     `CONF:POW`: after 2 s no title bar, CONF? "POW ...";
   * long press the power page's right column: "Reset energy?" (its title
-    bar); `CONF:VOLT:DC`: after 2 s no title bar, DBG:READout? unit V.
+    bar); `CONF:VOLT:DC`: after 2 s no title bar, DBG:READout? unit V;
+  * `CONF:CURR:DC`, MF, Fuse check: its start dialog (title bar);
+    `CONF:VOLT:DC`: after 2 s no title bar, FUNC? "VOLT".
 Exit status 0 = all passed.
 """
 import argparse
@@ -44,6 +47,7 @@ def check(ok, what):
 # Dialog title bars (x, y, w, h) and their colour (RGB666 read-back).
 WIRING_TITLE = (20, 14, 440, 20)
 RESET_TITLE = (100, 84, 280, 24)
+FUSE_TITLE = (60, 62, 360, 22)
 TITLE = (0, 156, 224)
 
 tag = 'pwdialog-%d-%d' % (A.port, os.getpid())
@@ -139,6 +143,22 @@ try:
     check(f < 0.05, 'CONF:VOLT:DC closes Reset energy? (title bar %.0f %%)' % (100 * f))
     r = q('DBG:READout?')
     check(r.split(',')[1:2] == ['V'], 'DBG:READout? %s (unit V)' % r)
+
+    q('CONF:CURR:DC')
+    wait_ms(2000)
+    q('DBG:KEY 3')  # MF: Current Settings
+    wait_ms(1500)
+    q('DBG:TAP 236,159')  # Fuse check
+    wait_ms(1500)
+    f = title(FUSE_TITLE)
+    check(f > 0.5, 'Fuse check opens its start dialog (title bar %.0f %%)' % (100 * f))
+    q('CONF:VOLT:DC')
+    wait_ms(2000)
+    shot('3-fuse-conf-volt')
+    f = title(FUSE_TITLE)
+    check(f < 0.05, 'CONF:VOLT:DC closes the fuse check dialog (title bar %.0f %%)' % (100 * f))
+    r = q('FUNC?')
+    check(r == '"VOLT"', 'FUNC? %s' % r)
 finally:
     try:
         os.killpg(emu.pid, 15)

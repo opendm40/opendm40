@@ -9,8 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
-- Power meter: a function change over USB / Bluetooth closes the wiring and
-  "Reset energy?" dialogs (they stayed over a page no longer updated).
+- A function change over USB / Bluetooth closes the power meter's wiring
+  and "Reset energy?" dialogs and the fuse check dialog (they stayed over a
+  page no longer updated).
 
 ## v0.3.0 (2026-10-27)
 

@@ -229,7 +229,7 @@ recorded.
 | [`powtest.py`](hy3131/powtest.py) | power meter | | 3381 |
 | [`burdentest.py`](hy3131/burdentest.py) | burden voltage readout | | 3378 |
 | [`inrushtest.py`](hy3131/inrushtest.py) | inrush current capture | | 3597 |
-| [`pwdialogtest.py`](pwdialogtest.py) | power meter dialogs (wiring, Reset energy?) close on a SCPI function change (#104) | | free |
+| [`pwdialogtest.py`](pwdialogtest.py) | power meter dialogs (wiring, Reset energy?) and the fuse check dialog close on a SCPI function change (#104, #143) | | free |
 | [`btwaketest.py`](hy3131/btwaketest.py) | DMM rail (PE2) wake with a Bluetooth link | | 4833 |
 | [`tests/run.sh`](hy3131/tests/run.sh) | host unit tests of the HY3131 model, no emulator (dotnet 8) | | - |
 

@@ -3917,12 +3917,19 @@ impl App {
     }
 
     fn func_changed(&mut self) {
-        // A power meter dialog (wiring, Reset energy?, Zero / V cal) belongs
-        // to the page it was opened on: a function change from SCPI / BT
-        // closes it (#104; it stayed over a page no longer redrawn).
+        // A power meter dialog (wiring, Reset energy?, Zero / V cal) or the
+        // fuse check's start / result dialog belongs to the page it was
+        // opened on: a function change from SCPI / BT closes it (#104, #143;
+        // it stayed over a page no longer redrawn). The fuse check's
+        // measuring stage (1) has its own end path (`fuse_tick`).
         if matches!(
             self.overlay,
-            Some(crate::dialog::Overlay::PowerEntry { .. } | crate::dialog::Overlay::EnergyReset { .. } | crate::dialog::Overlay::PowJob { .. })
+            Some(
+                crate::dialog::Overlay::PowerEntry { .. }
+                    | crate::dialog::Overlay::EnergyReset { .. }
+                    | crate::dialog::Overlay::PowJob { .. }
+                    | crate::dialog::Overlay::FuseCheck { stage: 0 | 2, .. }
+            )
         ) {
             self.overlay_close();
         }
