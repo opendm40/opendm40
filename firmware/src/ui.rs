@@ -633,8 +633,10 @@ impl DmmView {
             b[..n].copy_from_slice(&s.as_bytes()[..n]);
             n
         };
-        let mut u = crate::scope_ui::Txt::new("");
-        ascii_unit(unit, &mut u);
+        // The unit as the readout and the accuracy label beside it spell
+        // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
+        let mut ub = [0u8; 16];
+        let us = sf::unit_text(unit, &mut ub);
         let (bx, mid, end) = (self.bar.x as i16, self.bar.mid_x() as i16, self.bar.end_x() as i16);
         // Left / centre / right labels.
         let mut l = [0u8; 16];
@@ -660,7 +662,6 @@ impl DmmView {
             nr = k;
         }
         sf::label(sf::F14, rect(bx, BAR_LBL_Y, 80, BAR_LBL_H), core::str::from_utf8(&l[..nl]).unwrap_or(""), DIM, BG, 1, 1);
-        let us = u.as_str();
         r[nr] = b' ';
         let k = us.len().min(24 - nr - 1);
         r[nr + 1..nr + 1 + k].copy_from_slice(&us.as_bytes()[..k]);

@@ -69,6 +69,8 @@ section named after the tag as the release notes; how to cut a release:
   offset while the page is open.
 - Inrush: the Trigger - / + no longer step the wrong way from a threshold
   set over SCPI below 0.2 A or above 10 A.
+- Bargraph scale: the unit spelled as the reading beside it (600 KΩ, not
+  600 kOhm).
 
 ## v0.3.0 (2026-10-27)
 
