@@ -2442,8 +2442,8 @@ impl App {
                 for (w, &(lo, hi)) in crate::scope_wav::screen().iter_mut().zip(cols.iter()) {
                     *w = if lo == u16::MAX { 0 } else { (lo + hi) / 2 };
                 }
-                // No linear record while rolling: no measurements (as no
-                // FFT), not the last frame's values (#128). Once per roll.
+                // No linear record (rolling; a stopped record zoomed out beyond
+                // its length): no measurements, not the last frame's (#128).
                 if !self.meas_res.v[19].is_nan() {
                     self.meas_res = crate::scope_meas::Results { v: [f32::NAN; 20] };
                     self.cursor_values();
