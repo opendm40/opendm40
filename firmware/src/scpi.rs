@@ -711,6 +711,9 @@ pub enum Dbg {
     Fast,
     /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 18 numbers.
     Cap,
+    /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
+    /// (dmm::set_cap_class; RAM only).
+    CapClass(Option<u8>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -2443,6 +2446,9 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
                         b"FAST" if query => Dbg::Fast,
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
+                            Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })
+                        }
                         b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,

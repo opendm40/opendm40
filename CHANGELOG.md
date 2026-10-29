@@ -21,9 +21,10 @@ section named after the tag as the release notes; how to cut a release:
   9 to 20 s; 47 mF did not settle); AUTO starts on the last value's range;
   the value stays grey until the slope settles (electrolytics); another
   capacitor on 6 / 60 mF starts the range choice again.
-- Capacitance: the rate chip shows the real update rate on 600 µF and up (a
-  value every few seconds, not 3.9/s); values before a range's first result
-  are grey.
+- Capacitance on 600 µF and up: a value every 0.25 s (the median of the
+  last polls, corrected for the ramp's two directions), grey until the ramp
+  has run both ways; "Discharging" while the meter discharges, orange
+  "Charged cap: discharge first" when that takes long.
 - Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
   ten times it.
 

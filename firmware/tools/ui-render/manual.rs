@@ -68,7 +68,10 @@ fn dmm_page(p: &Dp) {
         let items = [(v - 3.0 * q, r.main.dec, r.main.unit), (v - q, r.main.dec, r.main.unit), (v + 2.0 * q, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit)];
         ui::history(&items, 4, 3);
     } else {
-        dv.bar_update(r);
+        // (The meter feeds the bargraph final readings only: none for dashes.)
+        if !r.main.v.is_nan() {
+            dv.bar_update(r);
+        }
     }
     dv.reading(r, p.hold, p.lim);
     let mut st = status_real();
@@ -78,7 +81,8 @@ fn dmm_page(p: &Dp) {
         ui::hv_warning(true);
     }
     let q = 10f32.powi(-(r.main.dec as i32));
-    let v = if r.main.ol { 0.0 } else { r.main.v };
+    // (A reading with no value yet, NaN: a chart of the capacitor before, 4700.)
+    let v = if r.main.ol { 0.0 } else if r.main.v.is_nan() { 4700.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
     let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
@@ -330,6 +334,10 @@ pub fn run(out: &str) -> usize {
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
+        // Capacitance: the discharge before 600 uF and up, and its warning
+        // (the second only for the layout check).
+        ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         // Continuity: a short.
         ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.

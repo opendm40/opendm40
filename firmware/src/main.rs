@@ -761,6 +761,16 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
+                    scpi::Dbg::CapClass(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_class(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_class() as u32);
+                            true
+                        }
+                    }
                     scpi::Dbg::Cap => {
                         scpi.len = 0;
                         for (i, v) in app.dmm.cap_info().iter().enumerate() {

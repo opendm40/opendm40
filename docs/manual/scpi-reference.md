@@ -782,6 +782,7 @@ unless shown otherwise.
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
 | `DBG:CAP?` | | Capacitance internals, 18 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<down count>,<small count>` | USB |
+| `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` the default (class 1), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
 | `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
 | `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |

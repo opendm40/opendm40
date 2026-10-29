@@ -161,15 +161,38 @@ const CAP_IDLE_N: u8 = 5;
 /// No ramp with the node below this (mV, after the discharge): a short.
 const CAP_SHORT_MV: f32 = 30.0;
 /// Ramp ranges: slope samples over the range in a row before one range up
-/// (`poll_cap`), and before its first value.
+/// (`poll_cap`).
 const CAP_EARLY_N: usize = 2;
-const CAP_FIRST_N: usize = 3;
 /// A slope sample counts towards a step up only within this share of the
 /// one before (the absorption's falling early slope does not).
 const CAP_STEADY: f32 = 0.02;
 /// Polls over the range (running median) after which one step up comes
 /// regardless of the slope's steadiness (~2 s).
 const CAP_OVER_MAX: u8 = 8;
+/// Ramp ranges: the polls whose median is the value (`poll_cap`).
+const CAP_RING: usize = 6;
+/// Ramp ranges: polls of one long ramp after which the value is final
+/// without the directions' ratio.
+const CAP_NORATIO_N: usize = 24;
+/// The ramp comparator class (R21 threshold) used by default: 1, the
+/// smallest swing (+-21 mV): turns every few polls, so the directions'
+/// ratio comes early (the stock picks 3 for ~1 mF on 6 mF: +-85 mV, a
+/// turn every 3 s). DBG:CAP:CLASS: 0 this default, 1..3 fixed, 4 the
+/// stock's choice from the slope. RAM only.
+pub const CAP_CLASS_AUTO: u8 = 1;
+pub const CAP_CLASS_STOCK: u8 = 4;
+static CAP_CLASS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+pub fn cap_class() -> u8 {
+    CAP_CLASS.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_class(k: u8) {
+    CAP_CLASS.store(k.min(4), core::sync::atomic::Ordering::Relaxed);
+}
+/// The discharge's aux units (ui.rs draws them as a line, not a value).
+pub const CAP_DIS_UNIT: &str = "Vdis";
+pub const CAP_CHG_UNIT: &str = "Vchg";
+/// A discharge longer than this: a charged capacitor (the warning).
+const CAP_CHARGED_MS: u64 = 2000;
 /// Ramp ranges: polls of one ramp direction that make a result.
 const CAP_LONG_N: usize = 16;
 /// 6 / 60 mF: a ramp result this far (share) from the shown value starts
@@ -1522,6 +1545,15 @@ pub struct Dmm {
     cap_inst_n: u8,
     /// The last ramp result of this range per direction (down, up).
     cap_pair: [Option<f32>; 2],
+    /// The last CAP_RING polls' own slope C (uF), their directions (bit i
+    /// = up), the polls so far; the direction ratios (down, up) and
+    /// whether a pair set them; the discharge's start (ms).
+    cap_ring: [f32; CAP_RING],
+    cap_ring_up: u8,
+    cap_ring_n: u8,
+    cap_ratio: [f32; 2],
+    cap_ratio_ok: bool,
+    cap_dis_t: u64,
     /// The range of the last capacitance value: AUTO starts there when it
     /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
     /// steps before 600 uF).
@@ -2164,6 +2196,12 @@ impl Dmm {
             cap_inst: [0.0; 3],
             cap_inst_n: 0,
             cap_pair: [None; 2],
+            cap_ring: [0.0; CAP_RING],
+            cap_ring_up: 0,
+            cap_ring_n: 0,
+            cap_ratio: [1.0; 2],
+            cap_ratio_ok: false,
+            cap_dis_t: 0,
             cap_last: CAP_R_MIN,
             cap_res_ms: 0.0,
             cap_res_t: None,
@@ -2379,9 +2417,6 @@ impl Dmm {
         // Capacitance ramp ranges (600 uF up): a new value per ramp result
         // (device: 347 uF on 600 uF changed every ~4.1 s while the chip
         // said 3.9/s, the 255 ms poll).
-        if self.mode == 13 && self.range >= 5 && !self.pw.on {
-            return self.cap_res_ms as u32;
-        }
         self.period_ms as u32
     }
 
@@ -5944,6 +5979,26 @@ impl Dmm {
     /// A ramp range's reading: provisional (grey, no statistics) until the
     /// range's first ramp result; before it `cap_c` is the last range's
     /// (or 0: MIN 0.0 after every step onto 600 uF, emulator).
+    /// Write the ramp comparator's threshold class (1..3, R21).
+    fn cap_class_write(&mut self, class: u8) {
+        self.ramp.class = class;
+        // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
+        // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
+        let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
+        hy::write(0x21, &[v]);
+    }
+
+    /// The discharge before a ramp range: dashes, and the node voltage in
+    /// the aux row (`CAP_DIS_UNIT`; `CAP_CHG_UNIT` once it takes longer than
+    /// CAP_CHARGED_MS: a charged capacitor). The node's scale is the ramp
+    /// row's (INFERRED: the discharge row's AD1 input is not traced).
+    fn cap_discharge_val(&self, v_mv: f32, now: u64) -> Reading {
+        let mut rd = self.cap_dash();
+        let unit = if now.saturating_sub(self.cap_dis_t) > CAP_CHARGED_MS { CAP_CHG_UNIT } else { CAP_DIS_UNIT };
+        rd.aux2 = Some(Val::new(v_mv * 1e-3, 2, unit));
+        rd
+    }
+
     /// No value yet: dashes, provisional.
     fn cap_dash(&self) -> Reading {
         let mut rd = self.cap_val(f32::NAN, false);
@@ -6001,6 +6056,10 @@ impl Dmm {
         self.cap_under = 0;
         self.cap_inst_n = 0;
         self.cap_pair = [None; 2];
+        self.cap_ring_n = 0;
+        self.cap_ratio = [1.0; 2];
+        self.cap_ratio_ok = false;
+        self.cap_dis_t = now;
         self.cap_res_ms = 0.0;
         self.cap_res_t = None;
     }
@@ -6044,14 +6103,19 @@ impl Dmm {
         let ad1 = self.ad1()?;
         let v_mv = ad1 as f32 * 1000.0 * 1.25 / 0.9 / AD1_DIV;
         if self.ramp.discharging {
+            self.cap_dbg[0] = v_mv;
             if v_mv.abs() < 30.0 {
                 self.ramp.discharging = false;
                 self.write_config(clk);
+                if cap_class() != CAP_CLASS_STOCK {
+                    let k = if cap_class() == 0 { CAP_CLASS_AUTO } else { cap_class() };
+                    self.cap_class_write(k);
+                }
                 self.ramp.prev_t = now;
                 self.ramp.prev_v = v_mv;
             }
             self.deadline = now + 255;
-            return None;
+            return Some(self.cap_discharge_val(v_mv, now));
         }
         let _ = self.read_counters(0x50);
         let dv = (self.ramp.prev_v - v_mv).abs();
@@ -6099,25 +6163,28 @@ impl Dmm {
         let mut s = self.ramp.med;
         sort_f32(&mut s);
         let dvm = s[2];
-        let class = if dvm < 2.5 {
+        let stock = if dvm < 2.5 {
             1
         } else if dvm < 9.0 {
             2
         } else {
             3
         };
+        let class = match cap_class() {
+            CAP_CLASS_STOCK => stock,
+            0 => CAP_CLASS_AUTO,
+            k => k,
+        };
         if class != self.ramp.class {
-            // The comparator threshold changes: this poll is no slope sample
-            // (kept, it showed a grey 558 uF for ~1 mF on the device,
-            // 40c25e2b).
-            self.ramp.class = class;
-            self.ramp.med_i = 0;
-            // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
-            // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
-            let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
-            hy::write(0x21, &[v]);
-            self.deadline = now + 255;
-            return Some(self.cap_dash());
+            self.cap_class_write(class);
+            if cap_class() == CAP_CLASS_STOCK {
+                // The stock's choice from the slope: this poll is no slope
+                // sample (kept, it showed a grey 558 uF for ~1 mF on the
+                // device, 40c25e2b).
+                self.ramp.med_i = 0;
+                self.deadline = now + 255;
+                return Some(self.cap_dash());
+            }
         }
         let craw = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm;
         let c = craw.clamp(0.0, 1.06 * lim);
@@ -6168,14 +6235,18 @@ impl Dmm {
         // last 3 polls' own slopes (the range's first sample left out: a
         // range change's step), shown from CAP_FIRST_N samples on.
         let early = false;
-        if self.ramp.first && self.cap_inst_n as usize > CAP_FIRST_N {
-            let mut b = self.cap_inst;
-            sort_f32(&mut b);
-            self.cap_cand = b[1];
-        }
         let cmp = hy::read1(0x14) & 0x40 != 0;
         let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
         self.ramp.cmp = Some(cmp);
+        // Every poll's own slope C with its direction (the comparator state
+        // through the poll); not across a turn (a part of the poll each way:
+        // 6.07 mV of 10.5 on the device).
+        if !flip {
+            let i = self.cap_ring_n as usize % CAP_RING;
+            self.cap_ring[i] = cinst;
+            if cmp { self.cap_ring_up |= 1 << i } else { self.cap_ring_up &= !(1 << i) }
+            self.cap_ring_n = self.cap_ring_n.saturating_add(1);
+        }
         // A result per half ramp (a comparator flip), or after CAP_LONG_N
         // polls of one long ramp (was 35, a single sample: 4.7 mF on 6 mF
         // gave one value per 9 s).
@@ -6207,21 +6278,50 @@ impl Dmm {
             // kept the bias: 1.158 mF spikes in the emulator). The first
             // value waits for both.
             let up = if flip { !cmp } else { cmp };
-            self.cap_pair[up as usize] = Some(mean);
+            // Only a result of more than 4 polls (a trimmed mean): a short
+            // rest after a long ramp's CAP_LONG_N result moved the ratio by
+            // 3 % for one half ramp (emulator).
+            if n > 4 {
+                self.cap_pair[up as usize] = Some(mean);
+            }
             let pair = match self.cap_pair {
                 [Some(a), Some(b)] => Some(0.5 * (a + b)),
                 _ => None,
             };
-            if let Some(v) = pair {
-                if self.ramp.first {
-                    self.cap_c = v;
-                    self.ramp.first = false;
-                    self.cap_last = r as i8;
-                } else if !early {
-                    ema(CAP_WIN[r], 0.25, v, &mut self.cap_c);
+            if let (Some(p), [Some(d), Some(u)]) = (pair, self.cap_pair) {
+                // The two directions' share of their mean: the per-poll
+                // values below are corrected with it (device 2b46e895, ~1
+                // mF: up 1008 .. 1016, down 991 .. 1007 uF per poll).
+                if d > 0.0 && u > 0.0 {
+                    self.cap_ratio = [p / d, p / u];
+                    self.cap_ratio_ok = true;
                 }
             }
             self.ramp.n = 0;
+        }
+        // The value every poll (owner 2026-10-30: a new value per ramp
+        // result was every ~3 s): the median of the last CAP_RING polls'
+        // own slopes, each corrected for its direction. Final once the
+        // directions' ratio is known (a result each way), or after
+        // CAP_NORATIO_N polls of one long ramp; grey before.
+        let n = (self.cap_ring_n as usize).min(CAP_RING);
+        if n >= 3 {
+            let mut b = [0.0f32; CAP_RING];
+            for i in 0..n {
+                let k = if self.cap_ratio_ok { self.cap_ratio[(self.cap_ring_up >> i & 1) as usize] } else { 1.0 };
+                b[i] = self.cap_ring[i] * k;
+            }
+            sort_f32(&mut b[..n]);
+            let v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+            if self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N {
+                self.cap_c = v;
+                if self.ramp.first {
+                    self.ramp.first = false;
+                    self.cap_last = r as i8;
+                }
+            } else {
+                self.cap_cand = v;
+            }
         }
         let cc = self.cap_c;
         let ol = cc / lim > ov;

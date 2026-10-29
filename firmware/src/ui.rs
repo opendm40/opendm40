@@ -159,7 +159,8 @@ const LOOP_MIN_PCT: f32 = -2.5;
 /// drawn with BURDEN_CAP).
 fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
     let lp = r.mode == 8 && !r.parts() && r.aux2.is_some_and(|v| v.unit == "%");
-    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v)));
+    // Capacitance: aux2 is the discharge line (`cap_discharge_label`).
+    let a2 = r.aux2.filter(|v| r.mode != 13 && (!lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v))));
     ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
 
@@ -877,10 +878,15 @@ impl DmmView {
         let ik = match r.mode {
             10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
+            13 if !self.power => match r.aux2 {
+                Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
+                Some(_) => 0x20,
+                None => 255,
+            },
             _ => 255,
         };
-        if ik == 255 && self.last_iohm != 255 {
-            let b = OHM_I_RECT;
+        if (ik == 255 || (ik & 0xF0 == 0x20) != (self.last_iohm & 0xF0 == 0x20)) && self.last_iohm != 255 {
+            let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
         }
@@ -1013,7 +1019,11 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik != 255 && self.last_iohm != ik {
+        if ik & 0xF0 == 0x20 {
+            // Every reading: the node voltage moves.
+            cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
+            self.last_iohm = ik;
+        } else if ik != 255 && self.last_iohm != ik {
             test_current_label(r.mode, r.range, self.ohm_on);
             self.last_iohm = ik;
         }
@@ -1082,6 +1092,28 @@ fn ol_word(r: sf::Rect, c: Color) {
 /// The test current label's box: the aux1 slot's left part (the burden
 /// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
+/// The capacitance discharge line: the aux1 slot, to the aux2 tag (231).
+const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
+
+/// Capacitance, before a ramp range: "Discharging 0.42 V" (DIM), or
+/// "Charged cap: discharge first" (VALUE, orange) when the discharge takes
+/// long (`warn`). `full`: clear the box first (the other line was there).
+#[inline(never)] // .cold (link-native.x): during a discharge only
+pub fn cap_discharge_label(v: f32, warn: bool, full: bool) {
+    let b = CAP_DIS_RECT;
+    if full {
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+    }
+    if warn {
+        sf::label(sf::F14, b, "Charged cap: discharge first", VALUE, BG, 1, 1);
+        return;
+    }
+    let mut t = [0u8; 16];
+    let mut s = crate::scope_ui::Txt::new("Discharging ");
+    s.push(crate::dmm::format(&mut t, v, 2));
+    s.push(" V");
+    sf::label(sf::F14, b, s.as_str(), DIM, BG, 1, 1);
+}
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
