@@ -1206,6 +1206,8 @@ pub struct Dmm {
     r25: u8,
     prev_ad1: i32,
     r22: u8,
+    /// The row `start` last wrote (DBG:HY:CAP, hyexp.rs).
+    row_w: [u8; hy::CFG_LEN],
     ohm_settled: bool,
     /// Ohm vet (OHM_VET_*): the last conversion of this row (kohm, raw;
     /// INFINITY = OL, NaN = none since the row write) and whether two in a
@@ -1846,6 +1848,7 @@ impl Dmm {
             r25: 0,
             prev_ad1: 0,
             r22: 0,
+            row_w: [0; hy::CFG_LEN],
             ohm_settled: false,
             ohm_prev: f32::NAN,
             ohm_ok: false,
@@ -1958,6 +1961,11 @@ impl Dmm {
     /// Function code as seen from outside (= `func()`): the stock mode, or
     /// 16 / 17 in AC+DC. main.rs gates the data logger on this, so LOG:STATe ON
     /// is refused in AC+DC (its HY3131 mode alternates).
+    /// The row `start` last wrote.
+    pub fn row_w(&self) -> [u8; hy::CFG_LEN] {
+        self.row_w
+    }
+
     pub fn mode(&self) -> u8 {
         self.func()
     }
@@ -2287,6 +2295,7 @@ impl Dmm {
         }
         self.freq.fresh = ctr;
         self.r22 = row[2];
+        self.row_w = row;
         if let (true, Some(k)) = (self.r22 == fastvos::R22_FAST && self.dc_rated(), Fast::path(m, self.range)) {
             self.fast.start(k, clk.now_ms());
         }

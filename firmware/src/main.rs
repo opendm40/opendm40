@@ -4,6 +4,7 @@
 mod app;
 mod bargraph;
 mod bt;
+mod hyexp;
 mod clock;
 mod danger;
 mod dmm;
@@ -1017,6 +1018,20 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    scpi::Dbg::HyCap(a) => {
+                        if logger.active() {
+                            scpi.set_err("Settings conflict");
+                        } else {
+                            app.dmm_power(&mut clk);
+                            let row = app.dmm.row_w();
+                            let len = hyexp::cap(&row, &a, port.rsp_buf());
+                            port.respond_len(len);
+                            app.dmm.start(&mut clk);
+                            app.meter.reset();
+                            app.last_raw = None;
+                        }
+                        false
+                    }
                     scpi::Dbg::Ad2(6, state, n, item) => {
                         dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
                         false
@@ -1802,7 +1817,7 @@ fn block_reply(o: &scpi::Out) -> bool {
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
-            | Out::Dbg(Dbg::Ad2(0 | 1, ..))
+            | Out::Dbg(Dbg::Ad2(0 | 1, ..) | Dbg::HyCap(..))
     )
 }
 

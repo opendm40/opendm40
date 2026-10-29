@@ -134,6 +134,8 @@ SECTIONS
          * dc_enter runs in Logger::start before the stream ISR takes the
          * bus (wavetest / dcvtest's region C hooks and data watch). */
         *(.text.*8opendm406ad2exp*);
+        /* hyexp (DBG:HY:CAP?): debug only. */
+        *(.text.*8opendm405hyexp*);
         *(.text.*8opendm409scope_csv*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host

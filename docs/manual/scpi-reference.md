@@ -804,6 +804,7 @@ unless shown otherwise.
 | `DBG:AD2:DCV?` | `<range>,<r26>,<n>[,<flags>]` | DC V converter test report | USB |
 | `DBG:AD2:N7?` | `<item>,<state>,<n>` | DC row test report | USB |
 | `DBG:AD2:DRAW` | `0`, `1` or `2` | Logger panel redraw level. | USB |
+| `DBG:HY:CAP?` | `<kind>,<n>,<npre>{,<byte>,<value>}` | HY3131 row override and raw capture report | USB |
 | `DBG:AD2:DIV` | `0`, `8`, `16` or `32`[,`<cpha>`] | Stream read divider (0 = automatic). | USB |
 | `DBG:AD2:DMA[?]` | `0` or `1` | `1` | USB |
 | `DBG:POWer:ROW?` | | Power meter chip row, hex | USB |
