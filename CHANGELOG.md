@@ -30,9 +30,15 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 
 - **Bargraph / history row:** a double tap on the row switches between the
-  bargraph and the history boxes (before: Settings > More > DMM row only).
+  bargraph and the history boxes (before: Settings > More > DMM row only;
+  [manual](docs/manual/README.md#the-bargraph-and-the-history-row)).
+
+  ![A double tap on the row: bargraph or history](docs/changelog/v0.4.0/dmm-row-toggle.png)
+
 - **Combined view:** the meter strip's reading is in the multimeter's orange
   instead of yellow.
+
+  ![Before and after: the meter strip](docs/changelog/v0.4.0/meter-strip.png)
 
 ### Fixed
 

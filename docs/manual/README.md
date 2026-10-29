@@ -137,6 +137,7 @@ Every key press also silences the [danger alarm](#the-danger-alarm).
 |---|---|---|
 | Swipe left / right | Multimeter, combined view (start on the meter strip), generator | Next / previous view |
 | Swipe down with one finger | Multimeter | Start / stop a [recording](#recording) |
+| Double tap the row under the reading | Multimeter | [Bargraph / history](#the-bargraph-and-the-history-row) |
 | Swipe down with three fingers | Anywhere, while the touch lock is off | [Screenshot](#screenshots) to the disk |
 | Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
@@ -885,8 +886,11 @@ since they were last reset, and a timer **T hh:mm:ss**.
 
 **Settings > More > DMM row** chooses what the row under the reading
 shows: **Bargraph** (default) or **History**. A double tap on the row
-switches between the two without the trip to Settings (the choice is kept
-as the setting).
+switches between the two and changes the setting with it.
+
+![A double tap on the row: bargraph or history](img/dmm-row-toggle.png)
+
+*A double tap on the row switches between them.*
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
   DC A (25 segments per side, 4 % each), from zero elsewhere, empty in
@@ -1576,7 +1580,7 @@ From the left:
   [alert](#the-alerts), **HV** (30 V and more), **REC**, **REL**, the
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
   **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
-- the reading and its unit;
+- the reading and its unit, orange as on the multimeter page;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,
   or the voltage and current of the power meter;
