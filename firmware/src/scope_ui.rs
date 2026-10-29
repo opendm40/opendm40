@@ -806,13 +806,16 @@ pub fn battery(m: &Model) {
     });
 }
 
-/// The USB host symbol (SC_BATT 0x30, 9 x 12 1 bpp, tools/mkusbglyph.py) in
-/// the gap between the trigger badge (..413) and the battery (435..).
-pub const USB_ICON: Rect = rect(417, 1, 13, 17);
+/// The USB host symbol (SC_BATT 0x30, 11 x 18 1 bpp, tools/mkusbglyph.py)
+/// centred in the gap between the trigger badge (..413) and the battery
+/// (435..): ink x 419..429, y 1..18 (the bar is y 0..19; top on the
+/// battery's and the badges' top row). Top-centre alignment: the glyph's
+/// yoff -2 puts its top on the rect's.
+pub const USB_ICON: Rect = rect(414, 1, 21, 18);
 
 pub fn usb_icon(m: &Model) {
     let r = USB_ICON;
-    let u = if m.usb { Ink::icon(sf::SC_BATT, r, 0x30, 8) } else { Ink::none() };
+    let u = if m.usb { Ink::icon(sf::SC_BATT, r, 0x30, 6) } else { Ink::none() };
     paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
         Some(g) => (C_WHITE, tag(1, g)),
         None => (C_BAR, 0),
