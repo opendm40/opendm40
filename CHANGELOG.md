@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Limits:** a huge limit set over SCPI (`CALC:LIM:UPP 1E20`) no longer restarts
+  the meter when the Hold/Limits page opens.
+
 ## v0.3.0 (2026-10-27)
 
 ### New
