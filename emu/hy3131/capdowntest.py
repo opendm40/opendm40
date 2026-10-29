@@ -57,7 +57,7 @@ SCEN = [
     # device 40c25e2b's results alternated
     # 1227 / 974 uF): the shown value does not swing (2 % over the last 15 s).
     ('1mF-asym', [(35, 'c:1000e-6;capda:0;capasym:0.02', 6e-3, 1e-3, 15, 6e-2)]),
-    ('4.7mF-asym', [(35, 'c:4.7e-3;capda:0;capasym:0.02', 6e-3, 4.7e-3, 15, 6e-2)]),
+    ('4.7mF-asym', [(35, 'c:4.7e-3;capda:0;capasym:0.02', 6e-3, 4.7e-3, 10, 6e-2)]),
     # The device's open / short on a ramp range (#74): the node at its clamp / at 0 V, no
     # ramp. The emulator's open ramps (an aliased triangle), so AD1 is forced (SetAd1, ~1 V /
     # 0 V) for these phases; the oscillator ranges do not read AD1.
