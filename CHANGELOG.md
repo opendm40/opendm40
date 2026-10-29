@@ -37,6 +37,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
   longer lose the last reply; input lost to a full receive buffer is reported
   (-363) instead of running cut commands.
+- **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
+  value), not `+0.000000E-03`.
 
 ## v0.3.0 (2026-10-27)
 
