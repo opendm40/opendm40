@@ -272,7 +272,15 @@ try:
     def red(img, y):
         return sum(1 for x in range(14, 413) if near(img(x, y), C_ERR))
 
+    def prof_reset():
+        if has_prof:
+            q('DBG:PROF:RESET')
+
     def prof(what):
+        # DBG:PROF? only in a build with the feature dbg-prof (else -113):
+        # None, and the checks on its figures are skipped.
+        if not has_prof:
+            return None
         txt = q('DBG:PROF?', raw=True).decode(errors='replace')
         lines = {l.split()[0]: l.split() for l in txt.splitlines() if l and l.split()[0] in ('x2', 's.frame', 'dec.job', 'scope', 'tick')}
         z = ['', '0', '0', '0', '0', '0', '0']
@@ -326,8 +334,13 @@ try:
     if has_log:
         q('DEC:MODE BAND')
         wait_ms(1500)
-    print('decodetest: Modbus RTU %s, frame log %s' % ('in' if has_mb else 'NOT in this build (skipped)',
-                                                      'in' if has_log else 'NOT in this build (skipped)'), flush=True)
+    q('*CLS')
+    q('DBG:PROF:RESET')
+    has_prof = q('SYST:ERR?').split(',')[0].strip() in ('0', '+0')
+    q('*CLS')
+    print('decodetest: Modbus RTU %s, frame log %s, DBG:PROF? %s' % ('in' if has_mb else 'NOT in this build (skipped)',
+                                                      'in' if has_log else 'NOT in this build (skipped)',
+                                                      'in' if has_prof else 'NOT in this build (cost and decode counts skipped)'), flush=True)
     text = b'The quick brown fox 0123456789\r\n'
     sent = text * 4
 
@@ -354,10 +367,11 @@ try:
         q('CHAN1:SCAL 1;CHAN1:COUP DC;TRIG:SWE AUTO;TRIG:SLOP NEG;TRIG:LEV 8;TIM:SCAL 1E-3')
         run()
         wait_ms(800)
-        q('DBG:PROF:RESET')
+        prof_reset()
         wait_ms(1500)
         p = prof('1 ms/div Auto untriggered running')
-        check(p['jobs'] == 0 and p['slices'] == 0 and p['frames'] > 3, 'Auto, untriggered, running: no decode (%d records, %d frames)' % (p['jobs'], p['frames']))
+        if p:
+            check(p['jobs'] == 0 and p['slices'] == 0 and p['frames'] > 3, 'Auto, untriggered, running: no decode (%d records, %d frames)' % (p['jobs'], p['frames']))
         check(stop(), 'STOP (untriggered)')
         wait_ms(800)
         fr = frames()
@@ -372,10 +386,11 @@ try:
         q('TRIG:LEV 1.6')
         run()
         wait_ms(800)
-        q('DBG:PROF:RESET')
+        prof_reset()
         wait_ms(1500)
         p = prof('1 ms/div 9600 Auto running')
-        check(p['jobs'] >= 1 and p['jobs'] <= p['frames'] + 1, 'Auto, triggered, running: a decode per triggered record (%d records, %d frames)' % (p['jobs'], p['frames']))
+        if p:
+            check(p['jobs'] >= 1 and p['jobs'] <= p['frames'] + 1, 'Auto, triggered, running: a decode per triggered record (%d records, %d frames)' % (p['jobs'], p['frames']))
         check(q('DEC:PROT?') == 'UART', 'DEC:PROT? UART')
         check(q('DEC:RATE?') == '9600', 'auto-baud: DEC:RATE? 9600 (%s)' % q('DEC:RATE?'))
         fr = frames()
@@ -433,7 +448,9 @@ try:
         grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
         check(grey > 10, '100 ms/div: the note "Sample rate too low" (%d px)' % grey)
         check(frames() == [], '100 ms/div: no frames (too few samples per bit)')
-    if want('cost'):
+    if want('cost') and not has_prof:
+        print('cost: skipped (no DBG:PROF? in this build: --features dbg-prof)', flush=True)
+    if want('cost') and has_prof:
         # Cost at 1 / 10 / 100 ms/div with 9600 and 115200 traffic, Auto
         # trigger: the decoder off, then on (running: per triggered record and
         # per frame; then STOP: the stored record's decode, and a pan).
@@ -447,16 +464,16 @@ try:
                     q('DEC:PROT ' + proto)
                     run()
                     wait_ms(1000)
-                    q('DBG:PROF:RESET')
+                    prof_reset()
                     wait_ms(3000)
                     p = prof('%s s/div %d %s running' % (sc, baud, proto))
                     COST.append('| %s | %d | %s running | %d | %d / %d | %d | %d | %d / %d |' % (sc, baud, proto, p['jobs'], p['job_avg'], p['job_max'], p['slice_max'], p['frames'], p['frame_avg'], p['frame_max']))
-                q('DBG:PROF:RESET')
+                prof_reset()
                 stop()
                 wait_ms(1500)
                 p = prof('%s s/div %d STOP' % (sc, baud))
                 COST.append('| %s | %d | UART STOP | %d | %d / %d | %d | %d | %d / %d |' % (sc, baud, p['jobs'], p['job_avg'], p['job_max'], p['slice_max'], p['frames'], p['frame_avg'], p['frame_max']))
-                q('DBG:PROF:RESET')
+                prof_reset()
                 q('DBG:DRAG 300,150,200,150,300')
                 wait_ms(1500)
                 p = prof('%s s/div %d stopped, pan' % (sc, baud))
@@ -580,7 +597,7 @@ try:
         check('conflict' in e and q('LOG:STAT?') == '0', 'log open: LOG:STAT ON refused (%s)' % e)
         wait_ms(1000)
         fifo()
-        q('DBG:PROF:RESET')
+        prof_reset()
         wait_ms(3000)
         p = prof('log 9600, 3 s')
         check(q('DEC:RATE?') == '9600', 'log: DEC:RATE? 9600 (%s)' % q('DEC:RATE?'))
@@ -615,7 +632,7 @@ try:
         wait_ms(2000)
         fifo()
         lost0 = int(q('DEC:COUN?').split(',')[5])
-        q('DBG:PROF:RESET')
+        prof_reset()
         wait_ms(3000)
         p = prof('log 115200, 3 s')
         fr = fifo()

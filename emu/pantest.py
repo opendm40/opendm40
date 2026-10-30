@@ -8,7 +8,7 @@ record, in the emulator.
 A 1.6 Hz 2-12 V square on the MCX (period 250 px at 100 ms/div; the low
 level off the CH1 zero line), 5 V/div, EDGE 7 V, NORM, DIGitize at 100 ms/div. The
 stopped record's length, sample rate and trigger point come from WAV:PRE?
-(RAW): 62 240 samples (2.62 s, the trigger mid-record) from the packed
+(RAW): 65 520 samples (2.62 s, the trigger mid-record) from the packed
 ring, more from the coded ring (src/cring.rs); the drags to the record's
 ends and the true-scale zoom are sized from them. The graph is read back over
 DBG:LCD? and each column classed as high / low (yellow at the square's top /
@@ -34,7 +34,7 @@ beyond the old screen blank).
     about 210 columns), nothing beyond;
   * V/div while stopped: 10 V/div shows the trace across the graph, 5 V/div
     the square again;
-  * WAV:PRE? (RAW) points at least 62 240, the same throughout.
+  * WAV:PRE? (RAW) points at least 65 520, the same throughout.
 
 Exit status 0 = all passed.
 """
@@ -197,7 +197,7 @@ try:
     T = N * XINC  # the record's length (s)
     PRE_S = -XORG  # its part before the trigger (s)
     print('  record: %d samples, %.0f S/s, %.2f s (%.2f s before the trigger)' % (N, 1 / XINC, T, PRE_S), flush=True)
-    check(N >= 62240 and 0.5 < PRE_S < T - 0.5, 'the stored record: >= 62 240 samples, the trigger inside')
+    check(N >= 65520 and 0.5 < PRE_S < T - 0.5, 'the stored record: >= 65 520 samples, the trigger inside')
     # The screen is 1 s (100 ms/div) centred on the trigger, a drag of 200 px
     # moves it 0.5 s: half-screen drags until its left edge passes the
     # record's start, and from there (after one drag back) to its end.

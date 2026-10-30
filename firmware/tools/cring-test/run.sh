@@ -1,6 +1,6 @@
 #!/bin/bash
 # Host test of src/cring.rs (the scope's coded sample ring): read-back of
-# every live sample, the 62 240-sample floor (white noise), coded blocks =
+# every live sample, the 65 520-sample floor (white noise), coded blocks =
 # the DLG scope block coding, the views; bytes per sample per signal.
 #   tools/cring-test/run.sh
 set -e
