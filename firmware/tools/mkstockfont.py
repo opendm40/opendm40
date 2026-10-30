@@ -450,6 +450,8 @@ def main():
     cnt = [[sum(1 for s in ls if ls[s] == l + 1) for l in range(maxl)] for ls in lens]
     syms = [sorted(ls, key=lambda s: (ls[s], s)) for ls in lens]
     four_toks = iter(toks)
+    ntok = sum(len(gt) for gt in toks)
+    short = [sum(1 for gt in toks for cx, s, _, _, _ in gt if lens[cx][s] <= k) * 100.0 / ntok for k in range(1, maxl + 1)]
     huf_bytes = sum(len(c) + len(s) for c, s in zip(cnt, syms))
     for name, a, (line_h, descent, four, gl, cls) in loaded:
         bpp = 4 if four else 1
@@ -521,10 +523,11 @@ def main():
     out.append('/// Longest Huffman code, bits.')
     out.append('pub const HUF_MAXL: usize = %d;' % maxl)
     cc = codes[0].get(K_C << 4 | EOL)
-    out.append('/// Variant A: code of C(E) (the row above again) at a row start, left')
-    out.append('/// aligned in HUF_COPY_LEN bits (0: none).')
-    out.append('pub const HUF_COPY_CODE: u32 = %d;' % (cc[0] if cc and FMT == 'A' else 0))
-    out.append('pub const HUF_COPY_LEN: u32 = %d;' % (cc[1] if cc and FMT == 'A' else 0))
+    if FMT == 'A':
+        out.append('/// Variant A: code of C(E) (the row above again) at a row start, left')
+        out.append('/// aligned in HUF_COPY_LEN bits (0: none).')
+        out.append('pub const HUF_COPY_CODE: u32 = %d;' % (cc[0] if cc else 0))
+        out.append('pub const HUF_COPY_LEN: u32 = %d;' % (cc[1] if cc else 0))
     out.append('/// Codes per length 1..HUF_MAXL, per context.')
     out.append('#[link_section = ".rodata.fonts.HUF_CNT"]')
     out.append('pub static HUF_CNT: [[u8; HUF_MAXL]; %d] = [' % len(cnt))
@@ -541,7 +544,8 @@ def main():
     out.append('#[link_section = ".rodata.fonts.HUF_SYM"]')
     out.append('pub static HUF_SYM: [u8; %d] = [' % soff[-1])
     for sy in syms:
-        out.append('    %s,' % ', '.join('0x%02X' % v for v in sy))
+        if sy:
+            out.append('    %s,' % ', '.join('0x%02X' % v for v in sy))
     out.append('];')
     out.append('')
 
@@ -564,6 +568,7 @@ def main():
           % (len(fonts), total_glyphs, total_blob, raw_total[0], dropped[0], dropped[1]))
     print('4 bpp format %s: %d contexts, max code %d bits, tables %d bytes (counts + symbols)'
           % (FMT, len(cnt), maxl, huf_bytes + 2 * len(soff)))
+    print('  %d tokens; share with a code of <= k bits: %s' % (ntok, ' '.join('%d:%.1f%%' % (k + 1, v) for k, v in enumerate(short))))
     for (name, cls, bpp, lh, desc, n, nb) in summary:
         print('  %-9s class %-2s %dbpp line_h=%-3d descent=%-2d glyphs=%-4d blob=%d'
               % (name, cls, bpp, lh, desc, n, nb))
