@@ -41,6 +41,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
+  taken at, not the one shown.
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
   and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
   ([manual](docs/manual/README.md#the-status-bar)).
@@ -103,6 +105,7 @@ section named after the tag as the release notes; how to cut a release:
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
 
+||||||| e3c72437
 ## v0.3.0 (2026-10-27)
 
 ### New
