@@ -1,10 +1,7 @@
 # Fonts: the stock bitmap fonts, their storage and cost
 
 Every text and icon on the opendm40 screens is drawn with the stock DM40 V2.6
-bitmap fonts, copied into the image at build time and stored compressed,
-except the menu text font TEXT22 (the stock's is a serif face; the owner
-wants no serif on the screen, issue #136): its glyphs are rasterised from
-DejaVu Sans Condensed (section 2a).
+bitmap fonts, copied into the image at build time and stored compressed.
 This page describes where they come from, the storage format, where they
 live in flash, and why the storage is lossless.
 
@@ -48,20 +45,12 @@ What can be dropped or packed without changing a pixel:
 * **Duplicates** across fonts: 5 glyphs, ~0.4 KB after compression, not
   worth an indirection per glyph.
 
-## 2a. TEXT22: DejaVu Sans Condensed
-
-`mkstockfont.py` `load_sans` renders TEXT22 from DejaVu Sans Condensed
-(`/usr/share/fonts/truetype/dejavu/`, Bitstream Vera licence) at 20 px, 1 bpp
-with the face's hinting (FreeType mono), baseline on row 17 of the stock
-22 px line: caps on rows 2..16 as the stock's 4..18 (the descenders need the
-room below). The font key, line height and 1 bpp storage stay (the scope tabs
-draw it through `Ink`); the advances are proportional now (the stock's were
-11 px for every glyph), with 1 px after the ink of each glyph. Besides
-0x20..0x7F it has °, ±, µ, Ω, ℃ and ℉.
+## 2a. Glyphs of our own
 
 The unit fonts without a lowercase k (UNIT, LETTERS, F21, K_FONT, HIST) take
 ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
-"kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω.
+"kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
+(the menu text) ℃ and ℉: its own C / F after a 4 x 4 ring, 1 bpp.
 
 ## 3. Storage
 

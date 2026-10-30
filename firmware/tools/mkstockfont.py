@@ -52,7 +52,7 @@ FONTS = [
     ('SAVE_BT', 0x0805B2E8),
     ('ON_TAG', 0x0806C724),
     ('LIGHTNING', 0x0805A0E0),
-    ('TEXT22', 0x0806B13C),  # replaced by SANS22 (load_sans), key kept
+    ('TEXT22', 0x0806B13C),
     # Fonts constructed inline by address in src/ui.rs (kept address-keyed).
     ('G_08059428', 0x08059428),  # 42x42 box glyph
     ('K_FONT', 0x0805C5DC),      # keypad font
@@ -80,52 +80,6 @@ A2_FONTS = ('ASCII26', 'F14', 'LETTERS', 'UNIT', 'LOCK')
 CJK_FROM = 0x2E80
 # Widest glyph (F78 'O' = 64): the row buffer of stockfont.rs (MAXW there).
 MAXW = 64
-
-
-# The menu text font TEXT22 is the stock's SimSun-style serif; the owner wants
-# no serif face anywhere (issue #136, 2026-10-30). Its glyphs are rasterised
-# instead from DejaVu Sans Condensed (Bitstream Vera licence: free to embed),
-# 1 bpp with the face's hinting (FreeType mono), on the stock 22 px line: the
-# font key, line_h and the 1 bpp format (Ink::at, the scope tabs) stay, the
-# advances become proportional. Extra codes over the stock set: degree,
-# plus-minus, micro, ohm, deg C, deg F.
-SANS_FACE = '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf'
-SANS_PX = 20
-SANS_BASE = 17   # baseline row: caps on rows 2..16, descenders to row 21
-SANS_CODES = list(range(0x20, 0x7F)) + [0xB0, 0xB1, 0xB5, 0x3A9, 0x2103, 0x2109]
-
-
-def load_sans():
-    """TEXT22 from SANS_FACE: class B layout (h = line_h, yoff 0), w = adv
-    unless the ink runs past the advance; column-major 1 bpp bytes."""
-    from PIL import Image, ImageDraw, ImageFont
-    f = ImageFont.truetype(SANS_FACE, SANS_PX)
-    line_h = 22
-    gl = []
-    for code in SANS_CODES:
-        ch = chr(code)
-        adv = int(round(f.getlength(ch)))
-        im = Image.new('1', (adv + 8, line_h), 0)
-        d = ImageDraw.Draw(im)
-        d.fontmode = '1'
-        d.text((2, SANS_BASE), ch, font=f, fill=1, anchor='ls')
-        px = im.load()
-        cols = [x for x in range(im.width) if any(px[x, y] for y in range(line_h))]
-        lo = min(cols) if cols else 2
-        x0 = 2 - min(lo, 2)   # ink left of the pen ('j') moves right
-        if cols and code != 0x5F:
-            # 1 px of air after the ink: the hinted 't', 'f', 'r' reach their
-            # advance ("tt" in "Settings" touched).
-            adv = max(adv, max(cols) - 2 + x0 + 2)
-        w = max(adv, (max(cols) - 2 + x0 + 1) if cols else 0)
-        bits = [1 if 0 <= x - x0 + 2 < im.width and px[x - x0 + 2, y] else 0 for x in range(w) for y in range(line_h)]
-        data = bytearray((len(bits) + 7) // 8)
-        for p, v in enumerate(bits):
-            if v:
-                data[p >> 3] |= 0x80 >> (p & 7)
-        assert not any(px[x, 0] for x in range(im.width)), ch
-        gl.append((code, w, line_h, adv, 0, bytes(data)))
-    return line_h, 0, False, sorted(gl), 'S'
 
 
 def pixels(data, w, h, four):
@@ -324,7 +278,7 @@ def main():
     dropped = [0, 0]
     raw_total = [0]
     summary = []
-    fonts = [(name, a, (load_sans if name == 'TEXT22' else (lambda a=a: load(a)))) for name, a in FONTS]
+    fonts = [(name, a, (lambda a=a: load(a))) for name, a in FONTS]
     fonts += [(name, key, src) for name, key, src in [
         # Stock scope page fonts (stock/re/docs/stock-scope-ui.md sec. 0.1), keyed by
         # the font-object address the stock page uses.
