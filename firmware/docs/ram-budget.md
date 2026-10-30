@@ -166,20 +166,22 @@ Third tenant: the strip renderer
   user inside a page draw; none is known): the page is then drawn again
   directly.
 
-Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 484 B: the
+Two small statics serve the strip passes: `ui::GEN_SP` (TCM, 484 B: the
 generator preview's trace rows, worked out once per wave and square duty
 instead of per strip) and `scope_ui::COLC` (400 B, flash).
 
 ## The scope record: raw ring and coded ring
 
-`scope::BUF` ([`src/scope.rs`](../src/scope.rs), 69 632 B in SRAM on
-test/scope-chain-0.4 with 0.4.0's GEN / CH2: 86 016 B before) is the
-whole SRAM the budget leaves (8 KiB link floor + ~1 KB margin). The
+`scope::BUF` ([`src/scope.rs`](../src/scope.rs), 81 920 B in SRAM on
+test/scope-chain-0.4 with 0.4.0's GEN / CH2 after the
+[SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays):
+86 016 B before GEN / CH2) is the whole SRAM the budget leaves (8 KiB link
+floor + ~0.1 KB). The
 stock record is 65 520 samples; as u16 that is 131 040 B, more than the
 SRAM has free. 10-bit codes packed 4 in 5 bytes
 ([`src/pack10.rs`](../src/pack10.rs): a little-endian bit stream, sample
 i at bits 10 i .. 10 i + 9, one unaligned 32-bit load per sample) make
-65 520 samples 81 900 B; BUF holds 52 400 packed (`PCAP`).
+65 520 samples 81 900 B; BUF holds 62 240 packed (`PCAP`).
 
 The DMA writes u16 (GPIOB IDR, or the TIM8 latch, at up to 50 MS/s), and
 opendm40 has no interrupt besides the AD2 stream's (the main loop polls
@@ -187,16 +189,16 @@ everything, passes up to ~25 ms), so only the main loop can pack. That
 sets two modes:
 
 - **fs > 25 kS/s** (faster than 100 ms/div): the DMA writes a raw ring of
-  `CAP` = 34 816 u16 (linear or circular as before). When the
+  `CAP` = 40 960 u16 (linear or circular as before). When the
   acquisition stops, the ring is packed in place (`pack_in_place`: group
   g's 5 bytes are written after its 8 raw bytes are read, so it never
-  overtakes unread samples; ~0.6 ms for 34 816 samples, inferred from the
+  overtakes unread samples; ~0.7 ms for 40 960 samples, inferred from the
   instruction count). Packing during
   the capture would need the CPU at 50 MS/s (4 cycles per sample at
   200 MHz), and with the comparator trigger the main loop learns of the
   edge only at its next poll.
 - **fs <= 25 kS/s** and the DMM-input wave view: the coded ring
-  ([`src/cring.rs`](../src/cring.rs)) in BUF's first 81 916 B. MCX: the
+  ([`src/cring.rs`](../src/cring.rs)) in BUF's first 77 820 B. MCX: the
   DMA fills a 2048-sample raw staging ring at BUF's top (82 ms at
   25 kS/s), every poll moves the new samples into the ring (`pk_drain`).
   A gap between two polls longer than the staging ring (time x rate)
@@ -211,7 +213,7 @@ sets two modes:
   (`LA`, read ahead) past the packed codes they replace (a dry run checks
   both first), else it stays packed. The next block starts after it; the
   oldest goes when room is needed (a coded one whole, a packed one 4
-  samples at a time). So a record is at least 65 532 samples (white
+  samples at a time). So a record is at least 62 256 samples (white
   noise: all packed, the old packed ring) and at most 64 blocks (262 144
   samples; `dlog::SBLK_MAX`, the Save CSV file's block table). Blocks are
   coded only for the long captures (Single, DIGitize, roll; in the Wave
@@ -294,22 +296,22 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | logger::RING (SRAM) | 16 540 | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and `fastlog::begin`, but not by an SCPI LOG:STAT ON session | Idle in plain DMM / scope use. An overlay with the csvlog buffers would need csvlog and LOG:STAT ON to refuse each other, plus an owner token. Not done. |
 | calbackup::SCRATCH (SRAM) | 12 288 | any disk job (table above) + the FFT | see above | Already shared with the FFT. |
 | scope_ui::GRAPH (SRAM) | 9 956 | the scope pages (Scope, combined view, Wave view): trace / persistence / math rows and their on-screen diff copies | the scope record, the FFT | The combined view rules out an overlay with anything scope-side. The math rows (`ma`, `d_ma`) could go when math is off. Not done. |
-| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together) | DMM, scope, BT, USB | See logger::RING. |
-| bt::TX (SRAM) | 8 192 | while BT is connected: the largest reply (`usbtmc::RSP_MAX` block + LF) plus stock frames, queued for DMA | everything | Keep. |
+| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together); otherwise its head holds the MMEM:CAT? cache | DMM, scope, BT, USB | Shared with the catalog cache ([native-boot.md, SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays)). See logger::RING. |
+| bt::TX (SRAM) | 6 656 | while BT is connected: the largest reply (`usbtmc::RSP_MAX` block + LF) plus stock frames, queued for DMA | everything | Shrunk from 8 192 (SRAM audit); not below one whole reply. |
 | APP (TCM) | 6 672 | always (the App) | | Keep. |
 | vdisk::TAB (SRAM) | 6 420 | while USB exports the generated volume (the table regenerates on sector reads) | everything | Keep. |
-| csvlog::CAT (SRAM) | 6 156 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | Keep: a listing during a stream must not read the disk. |
+| csvlog::CAT | 12 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | The reply is in `csvlog::FIFO_BUF` (SRAM audit). |
 | dmm::acdctr::TR (SRAM) | 1 804 | DBG:ACDC:TRACE (debug, off at boot; the ring is allocated always) | | Debug aid: `TR_N` 192 -> 64 entries (2026-10-30); one entry without the feature `acdc-trace`. |
 | scope_page::CACHE (SRAM) | 4 824 | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
 | scope_page::FFT (TCM) | 4 128 | the last spectrum | | Must survive a dropped job. Keep. |
 | csvlog::TAIL (SRAM) | 4 096 | a CSV recording | FIFO_BUF | See logger::RING. |
 | gen::WAVE (SRAM) | 4 000 | while the generator outputs (DAC DMA, circular) | everything | Keep. |
-| touch::LOG (TCM) | 1 924 | always (DBG:TOUCH?) | | Debug aid; could go to 0.5 KiB. |
+| touch::LOG (TCM) | 196 | always (the touch test page; DBG:TOUCH? with `dbg-touch`, 1 924) | | 16 entries without the feature (SRAM audit). |
 | fastlog::JOB (SRAM) | 1 864 | a fast-log disk session | logger::RING | Keep. |
 | scope::ROLL_COLS (SRAM) | 1 600 | roll mode | | Keep. |
 | vwrite::W0 (SRAM) | 1 376 | the writable USB volume session | | Keep. |
 | scope_ui::dec::ANN (SRAM) | 1 236 | the decoder band's kept bytes / frames (positions in the record) | the scope record | Keep (TCM until 2026-10-30: stack headroom). |
-| dmm::REC_COPY (SRAM) | 1 024 | always: the RAM copy of the settings / calibration record (the record is in the slow flash bank) | | Keep. |
+| dmm::REC_COPY (TCM) | 1 024 | always: the RAM copy of the settings / calibration record (the record is in the slow flash bank) | | Keep. |
 | bt::RX (SRAM) | 1 024 | the DMA ring, while BT is powered | | Keep. |
 
 Never live together, so worth an owner token if RAM gets tight again:

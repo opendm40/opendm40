@@ -1026,6 +1026,105 @@ Emulator (--mips 110): a pass decodes for at most 3 ms (`x2` max 1.6 ms
 at 115200 with traffic), 4 588 frames in 3 s at 115200 without a lost
 sample; 267 Modbus 19200 frames with their waveforms fill the store.
 
+### SRAM audit (2026-10-30, feat/sram-overlays)
+
+Goal: room for the long scope record (`scope::CAP` 42 K u16) next to
+0.4.0's GEN / CH2. The firmware runs DMM + scope + generator together, with
+the USB disk and BT at any time, so a buffer is overlaid only where the code
+rules out both being live. Who is live when:
+[ram-budget.md](ram-budget.md#every-static-of-1-kib-or-more).
+
+| change | SRAM | TCM |
+|---|---|---|
+| `csvlog::CAT` reply into the row FIFO (below) | +6 156 | -12 |
+| `bt::TX` 8 192 -> 6 656 B (below) | +1 536 | |
+| `touch::LOG` 160 -> 16 entries without `dbg-touch` | | +1 728 |
+| `prof::P` and the profiler hooks only with `dbg-prof` | | +984 |
+| `dmm::REC_COPY`, `vdisk::CSV_CUR2`, `lcd::DEFER` from `.sram_bss` to TCM `.bss` (CPU only, no DMA) | +2 688 | -2 688 |
+
+The profiler hooks also leave region B (+4.2 KB). DBG:TOUCH? / DBG:TOUCH 0
+and DBG:PROF? / DBG:PROF:RESET are undefined headers without their
+features. A `--features dbg-touch,dbg-prof` build puts both buffers in
+`.sram_bss` (TCM has no room for them next to the stack); host tests build
+touch.rs with `dbg-touch`.
+
+**MMEM:CAT? cache in the row FIFO.** `Cat` keeps only `ok` / `stamp` /
+`len`; the reply is in `FIFO_BUF[..CAT_MAX]`
+([csvlog.rs](../src/csvlog.rs) `Cat`).
+- Writers of the FIFO: a CSV recording (`fifo()`, main loop) and a fast-log
+  session (`lend_fifo()`, main loop: `Job::run`, the drain / flush,
+  `run_begin`). No ISR touches it: the AD2 stream ISR writes only
+  `logger::RING`.
+- Both accessors clear `ok`. The cache is written only while `fifo_idle()`
+  (`!csvlog::active() && !fastlog::active()`): in `catalog_warm` and after
+  a scan in `catalog_scpi`. It is read only while `ok`.
+- No valid cache is lost. A recording commits its header right after
+  `start`, and every commit writes the flash (`FLASH_WRITES`). A fast-log
+  session holds the disk (`gallery_free` false: MMEM:CAT? is Busy) and
+  writes it.
+- The streams the cache is for (Wave view, CH2, inrush) refuse to start
+  during a recording ([app_wave.rs](../src/app_wave.rs),
+  [app_ch2.rs](../src/app_ch2.rs), [app_inrush.rs](../src/app_inrush.rs)
+  `csvlog::active`); the inrush page and `fastlog::begin` also refuse a
+  fast-log session or a recording.
+
+**`bt::TX` not at 4 KiB.** A BT reply goes into the ring whole (`send`).
+`Bt::respond_with` builds it on the stack and returns, so a 6 145-byte
+reply (MMEM:CAT?, MMEM:DATA?, LOG:DATA?, INRush:DATA?, WAV:DATA?) has nowhere
+else to wait. Sending it in parts would need one of:
+- a wait in the main loop (~0.2 s at 115 200 baud): the Wave view's ring
+  drops samples, which the MMEM:CAT? cache exists to prevent;
+- building the reply again per part: LOG:DATA? takes records out of the
+  logger's ring, so it cannot be built twice;
+- a shorter BT block: `tools/dm40scpi.py get` takes an MMEM:DATA? piece
+  under 6 000 bytes as the end of the file.
+
+The ring is now REPLY_MAX + TX_SLACK + 255 B.
+
+Pairs checked and not overlaid (each can be live with the other):
+
+| pair | why both can be live |
+|---|---|
+| `vdisk::TAB` / `CSV_CUR` / `CSV_CUR2` with any scope buffer | the host reads the USB volume at any time, also while the scope page draws |
+| `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
+| `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
+| `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
+| `calbackup::SCRATCH` with `csvlog::TAIL` | a commit uses SCRATCH [0] / [1] and TAIL together |
+| `fastlog::JOB` with `csvlog::JOB` | the sessions exclude each other, but each job keeps its result for LOG:CSV? / the fast logger's status after it ends |
+| `bt::TX` with the USBTMC reply buffer | both transports answer at the same time |
+| `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
+| `gen::WAVE` | the DAC's circular DMA source while the generator outputs, with everything |
+
+Not changed: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE) is debug-only.
+On `test/scope-chain-0.4` the `acdc-trace` feature leaves it out. On 0.4.0
+it stays in the image.
+
+| | before (release/0.4.0, e3229f7a) | after |
+|---|---|---|
+| region A2 free | 2 208 B | 2 208 B |
+| region B free | 8 280 B | 12 400 B |
+| region C free | 13 556 B | 13 996 B |
+| stack headroom (static worst path) | 20 744 B | 20 760 B |
+| SRAM free | 24 244 B | 34 628 B |
+
+On test/scope-chain-0.4 (the decoder's paths: static worst stack path
+24 800 B, 240 B more than 0.4.0) TCM has room for `dmm::REC_COPY` and
+`ui::GEN_SP` (484 B) only; `vdisk::CSV_CUR2` and `lcd::DEFER` stay in
+`.sram_bss`, and `touch::LOG` was in SRAM there already. The SRAM
+freed takes `scope::CAP` from 34 K to 40 K u16, not to 42 K (that needs
+4 KB more): the raw ring of the fast timebases 34 816 -> 40 960 samples,
+the packed ring (`PCAP`, white noise) 52 400 -> 62 240, the post-trigger
+part of a coded Single at the centre 39 036 -> 48 876. The `recovery-usb`
+variant keeps CAP 36 K / PCAP 55 000 again (it has its own MSC buffers).
+
+| | before (a5352720, CAP 34 K) | after (CAP 40 K) |
+|---|---|---|
+| region A2 free | 156 B | 156 B |
+| region B free | 9 440 B | 14 056 B |
+| region C free | 6 064 B | 6 472 B |
+| stack headroom (static worst path) | 21 312 B | 20 620 B |
+| SRAM free | 9 460 B | 8 308 B |
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as

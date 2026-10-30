@@ -683,12 +683,14 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:DIAG?               diagnostic block (#3); byte 61: bit 0 PB10, bit 1
 ///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
+///                           (feature dbg-touch, else undefined header)
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
 ///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
 ///                           b y + c, y' = d x + e y + f (touchcal.rs; RESET =
 ///                           none, 1,0,0,0,1,0; a set outside the limits is
 ///                           "Data out of range")
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
+///                           (feature dbg-prof, else undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
@@ -732,12 +734,15 @@ pub enum Dbg {
     Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
-    /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
+    /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log
+    /// (feature `dbg-touch`).
+    #[cfg_attr(not(feature = "dbg-touch"), allow(dead_code))]
     Touch(bool),
     Flash,
     Release,
     Reset,
-    /// DBG:PROF? (false) / DBG:PROF:RESET (true).
+    /// DBG:PROF? (false) / DBG:PROF:RESET (true) (feature `dbg-prof`).
+    #[cfg_attr(not(feature = "dbg-prof"), allow(dead_code))]
     Prof(bool),
     /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
     /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = automatic:
@@ -2469,7 +2474,10 @@ impl Scpi {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
-                        b"DIAG" => Dbg::Diag, b"TOUCH" => Dbg::Touch(!query),
+                        b"DIAG" => Dbg::Diag,
+                        // Without the feature: no such header (Cargo.toml).
+                        #[cfg(feature = "dbg-touch")]
+                        b"TOUCH" => Dbg::Touch(!query),
                         _ if kw(sub, "UPLoad") => {
                             let op = parts.get(2).copied().unwrap_or(b"");
                             let mut v = [0u32; 2];
@@ -2533,6 +2541,7 @@ impl Scpi {
                             }
                             v
                         })),
+                        #[cfg(feature = "dbg-prof")]
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,

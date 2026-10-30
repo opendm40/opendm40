@@ -151,7 +151,10 @@ static mut FIFO_BUF: [u8; FIFO] = [0; FIFO];
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut TAIL: [u8; BLK] = [0; BLK];
 
+/// The row FIFO of a recording. Its third tenant, the MMEM:CAT? cache
+/// (`Cat`), is dropped here: a recording's bytes overwrite it.
 fn fifo() -> &'static mut [u8; FIFO] {
+    cat().ok = false;
     unsafe { &mut *core::ptr::addr_of_mut!(FIFO_BUF) }
 }
 
@@ -159,9 +162,16 @@ fn fifo() -> &'static mut [u8; FIFO] {
 /// the way to the flash pages). The two never run together: fastlog::begin
 /// refuses while a recording is active, `start` refuses while a fast
 /// session holds the disk; nothing of a finished recording is left in it.
+/// Drops the MMEM:CAT? cache, as `fifo`.
 #[inline(always)]
 pub(crate) fn lend_fifo() -> &'static mut [u8; FIFO] {
     fifo()
+}
+
+/// The FIFO holds no bytes of a recording or a fast-log session: the
+/// MMEM:CAT? cache may be written into it (`Cat`).
+fn fifo_idle() -> bool {
+    !active() && !crate::fastlog::active()
 }
 fn tail() -> &'static mut [u8; BLK] {
     unsafe { &mut *core::ptr::addr_of_mut!(TAIL) }
@@ -1389,22 +1399,38 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
 /// Wave view, the inrush page), so a host listing the files while the
 /// stream runs finds it valid (nothing writes the disk then: a disk job
 /// pauses the Wave view's stream and the restart warms it again).
+///
+/// The reply itself is kept in the first CAT_MAX bytes of the row FIFO
+/// (`FIFO_BUF`; docs/native-boot.md "SRAM audit"), written only while
+/// `fifo_idle`. `fifo` / `lend_fifo` clear `ok` before a recording or a
+/// fast-log session writes there. Neither loses a valid cache: a recording
+/// commits its header right after `start` and every commit writes the
+/// flash, a fast-log session holds the disk (`gallery_free`: MMEM:CAT? is
+/// Busy) and writes it; and the Wave view, CH2 and inrush (the streams the
+/// cache is for) refuse to start during a recording (app_wave.rs,
+/// app_ch2.rs, app_inrush.rs `csvlog::active`).
 struct Cat {
     ok: bool,
     stamp: u32,
     len: usize,
-    buf: [u8; CAT_MAX],
 }
 
 /// The reply buffers' size (usbtmc::RSP_MAX, the BT block: main.rs asserts).
 pub const CAT_MAX: usize = 6144;
+const _: () = assert!(CAT_MAX <= FIFO);
 
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut CAT: Cat = Cat { ok: false, stamp: 0, len: 0, buf: [0; CAT_MAX] };
+static mut CAT: Cat = Cat { ok: false, stamp: 0, len: 0 };
 
 #[inline(always)]
 fn cat() -> &'static mut Cat {
     unsafe { &mut *core::ptr::addr_of_mut!(CAT) }
+}
+
+/// The cached reply's bytes (the FIFO's head; see `Cat`). Read only while
+/// `cat().ok`, written only while `fifo_idle()`.
+#[inline(always)]
+fn cat_buf() -> &'static mut [u8] {
+    unsafe { &mut (&mut *core::ptr::addr_of_mut!(FIFO_BUF))[..CAT_MAX] }
 }
 
 fn flash_writes() -> u32 {
@@ -1423,12 +1449,12 @@ pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
     let c = cat();
     let w = flash_writes();
     if c.ok && c.stamp == w && c.len <= out.len() {
-        out[..c.len].copy_from_slice(&c.buf[..c.len]);
+        out[..c.len].copy_from_slice(&cat_buf()[..c.len]);
         return Ok(c.len);
     }
     let n = catalog_scpi_on(disk(), out)?;
-    if n <= c.buf.len() && flash_writes() == w {
-        c.buf[..n].copy_from_slice(&out[..n]);
+    if n <= CAT_MAX && flash_writes() == w && fifo_idle() {
+        cat_buf()[..n].copy_from_slice(&out[..n]);
         (c.ok, c.stamp, c.len) = (true, w, n);
     }
     Ok(n)
@@ -1436,16 +1462,16 @@ pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
 
 /// Build the MMEM:CAT? cache now if it is stale (main.rs, before a stream
 /// starts: one scan, ~10 block reads, while the stream ISR is not running).
-/// Nothing when the disk is busy.
+/// Nothing when the disk is busy or the FIFO is in use.
 #[inline(never)]
 pub fn catalog_warm() {
     let c = cat();
     let w = flash_writes();
-    if (c.ok && c.stamp == w) || !gallery_free() {
+    if (c.ok && c.stamp == w) || !gallery_free() || !fifo_idle() {
         return;
     }
     c.ok = false;
-    if let Ok(n) = catalog_scpi_on(disk(), &mut c.buf) {
+    if let Ok(n) = catalog_scpi_on(disk(), cat_buf()) {
         if flash_writes() == w {
             (c.ok, c.stamp, c.len) = (true, w, n);
         }

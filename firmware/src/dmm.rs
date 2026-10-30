@@ -70,8 +70,8 @@ const CAL: u32 = SETTINGS + 0x168;
 /// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
 /// opendm40 never writes the record. Before the copy (and in the host tests)
 /// the flash is read.
+/// TCM .bss (CPU only; was .sram_bss until the SRAM audit, docs/native-boot.md).
 const REC_LEN: usize = 0x400;
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
 static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
