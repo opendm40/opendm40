@@ -29,15 +29,37 @@ Additional requirements:
       = 0.44 mA on 47.5 Ω; A-PROT needs only a trigger for the probe (125 mA = 5.9 V at PB1). The taps allow
       ±62.5 / 104 / 208 / 417 mV (AGNDP3..6 / AGNDN3..6, REFO 1.25 V: 1.3 / 2.2 / 4.4 / 8.8 mA); the AD1 / AD2
       peak thresholds (`PK_THR`, `PK2_THR`, 0.5 mA) are in software.
-      - First measure PB1 in mV (AD1 PB1 − PB3) where it picks up the V input, V–COM 1 / 5 / 10 V, A open:
-        DC V manual 60 V (and 6 V at 5 V), ohm, continuity (now ~±230 mV at 5 V), Hz (~54 mV); then the same
-        with A shorted to COM (pickup on the node, not a shunt current).
-      - Pick the window above the largest pickup; see whether DC V 60 V+ and Hz can get their sentinel back
-        (no sentinel now: [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md) 4.2). If the
-        pickup grows with the input, 600 / 1000 V can exceed any window.
-      - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
-        = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
-      Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
+      - [x] PB1 measured (device, 2026-10-27, 0.3.0 + the tools of branch `exp/pb1-meas`, A open, manual
+        ranges, V–COM from the calibrator). `DBG:SENT:PB1?` writes the running row with AD1 on PB1 − PB3, then
+        on PB1 − AGND (IG 0.9, REFO / AGND, SAD1I = 00), and writes the row back. Table:
+        [hw/README.md, Measured node behaviour](../hw/README.md#measured-node-behaviour) ("PB1 with AD1").
+        Up to 3 V the comparator rows (DC V, DC mV, ohm, temperature) keep PB1 within 13 mV of AGND; DC mV,
+        ohm and temperature reach 155..264 mV at 3.7 V, 353..698 mV at 5 V and 1.29..>1.39 V at 10 V. DC V
+        (every range) stays at 2.2 mV up to 10 V. Not measured: continuity and diode (their comparator drives
+        the buzzer at any volume), A shorted to COM.
+      - [x] Comparator window per R21 (`DBG:SENT:R21`; 10 CTSTA reads per point; DC V 6 V, DC mV, ohm 600 Ω /
+        60 MΩ, temperature, DC V 60 / 600 V with variant 4):
+        - 0xdd, 0xcc, 0xbb and AGNDP4..6 over AGNDN3 (0xab, 0x9b, 0x8b): CTSTA 0 from V–COM off to 3 V; DC V
+          6 V (0xdd .. 0x8b) also at 5 / 10 V.
+        - AGNDN4..6 as the low threshold (0xaa, 0x99, 0x88, 0xba): CTSTA 0x10 with nothing connected, A-JACK in
+          every row. These windows cannot be used.
+        - 3.7 V: ohm 60 MΩ, DC mV and temperature trip at every window (0x70; 0x50 at 0x9b / 0x8b), ohm 600 Ω
+          at none. 5 / 10 V: ohm 600 Ω / 60 MΩ, DC mV and temperature trip at 0xdd, 0xcc, 0xbb and 0x8b.
+        - DC V 60 / 600 V: CTSTA 0x50 and A-JACK at every R21, also with V–COM off, while AD1 reads PB1 at
+          ~2 mV. That is no pickup: in these rows the comparator does not compare PB1 with the AGND taps
+          (cause *unknown*). No window brings that sentinel back.
+      - Result: no window change. No measured pickup lies between ±20.8 mV and the usable maximum (+417 /
+        -62.5 mV): up to 3 V every row stays inside 0xdd, and from 3.7 V every row that trips also trips at
+        0xbb / 0x8b (at 5 V PB1 − AGND is 353..698 mV there, at 10 V 1.29 V or more). The pickup rows
+        keep their V gates (ohm / temperature: V_GATE and the jack check; DC mV: #35). The firmware keeps
+        0xdd (0.44 mA). Owner decision: keep it, or 0xbb (1.3 mA; nothing measured gets fixed).
+      - Hz: the standing ~54 mV (device d8e249d) came with the row's R33 SAD1I = 11, the AD1 temperature
+        sensor inputs (*inferred*). With SAD1I = 00, PB1 is 2.5 mV at rest and follows the input from 3 V on.
+        An AD1 sentinel in Hz (#44) needs SAD1I = 00; PB1 − PB3 there reaches -116 / -140 mV at 5 / 10 V
+        (#44's `PK_DC_THR` is ~180 mV, one-sided). PB3 moves too (Hz 10 V: PB3 − AGND +431 mV).
+      - Left (owner): the rows with A shorted to COM; continuity / diode; a real current in A
+        (20 mA and ~1 mA) per row. Tool: branch `exp/pb1-meas` (`DBG:SENT:PB1? [n]`, `DBG:SENT:R21 <v>`;
+        build with `--features mute`; not for merging, region B -1.5 KB).
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so

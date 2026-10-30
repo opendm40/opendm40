@@ -525,7 +525,12 @@ section 4 (sentinels) and 3 (power meter).
   CMPLO. *Inferred* reading: CMPHO = node above VRH, CMPLO = node above VRL,
   ACPO (bit 6) a latch set above VRH and reset below VRL; 0x70 = above the
   window, 0x50 = inside coming from above, 0x10 = inside coming from below,
-  0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70).
+  0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70). It
+  does not fit PB1 (2026-10-27): with PB1 at ~2 mV (AD1, below) the PB1
+  comparator reads 0x00 in the ±20.8 / 41.7 / 62.5 mV windows (R21 0xdd /
+  0xcc / 0xbb), and 0x10 with nothing connected whenever the low threshold
+  is AGNDN4..6 (0xaa, 0x99, 0x88, 0xba); AGNDP4..6 over AGNDN3 (0xab, 0x9b,
+  0x8b) read 0x00. What the bits mean is *unknown*.
 - **Both bits in one read (0x70)** also mark an overdriven comparator: on
   PB1 in the ohm rows with 5 V or 10 V DC or the 0 / 9.5 V square on V-COM
   (1 V and 3 V: no hit), on DC V's V tap with a steady 5 V, and on SENSE in
@@ -544,11 +549,39 @@ section 4 (sentinels) and 3 (power meter).
   - frequency: the AD1 peak on PB1 - PB3 (the AC rows' settings) stands at
     ~+41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at 5 V,
     -850 at 10 V (d8e249d); the row leaves the input divider open (R2C / R2D
-    0);
+    0). That row also keeps R33 SAD1I = 11 (AD1 on the temperature sensor
+    inputs), so these codes are *inferred* not to be PB1: with SAD1I = 00
+    PB1 - PB3 reads 2.5 mV at rest and -59 / -89 mV at 3 / 3.7 V (table
+    below);
   - DC V 60 / 600 / 1000 V: the comparator on PB1 tripped for as long as
     10 V was on V-COM, never on 6 V at 1 V (f80524f). Those rows drive the
     power bus from OP3 (R2F SMODE 0100, PS6 + PS8 closed); the 6 V row leaves
-    it off.
+    it off. With that comparator row back (`DBG:SENT:VAR 4`) CTSTA reads 0x50
+    at every R21 from ±20.8 to ±417 mV, also with V-COM open, while AD1 reads
+    PB1 at 2.1 mV up to 3.7 V (2026-10-27): the trip is not PB1 pickup.
+- **PB1 with AD1** (2026-10-27, A jack open, manual ranges; AD1 on PB1 -
+  PB3, then PB1 - AGND, IG 0.9, REFO / AGND, SAD1I = 00, in the row the
+  function runs; branch `exp/pb1-meas`, `DBG:SENT:PB1?`). mV, PB1 - PB3 /
+  PB1 - AGND, by the V-COM DC level (>1389 = AD1 at its limit):
+
+  | row | V-COM off | 1 V | 3 V | 3.7 V | 5 V | 10 V |
+  |---|---|---|---|---|---|---|
+  | DC V 6 V | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 |
+  | DC V 60 / 600 / 1000 V | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 |
+  | DC mV 600 / 60 mV | 2.2 / 2.2 | 2.2 / 2.2 | 4.1 / 11.7 | 67 / 240 | 350 / 652 | 1015 / >1389 |
+  | AC V 6 / 60 V | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..2.7 | 1.4..1.5 |
+  | AC mV 600 mV | 1.5 / 1.7 | 1.4 / 2.6 | -48 / 109 | -74 / 170 | -94 / 235 | -112 / 358 |
+  | ohm 600 Ω | 2.2 / 2.2 | 2.2 / 2.2 | 2.5 / 2.4 | 4.1 / 4.0 | 238 / 353 | 961 / 1289 |
+  | ohm 6 kΩ | 2.2 / 2.2 | 2.2 / 2.2 | 2.3 / 2.8 | -23 / 155 | 191 / 538 | 818 / 1332 |
+  | ohm 60 MΩ | 2.2 / 2.2 | 2.2 / 2.2 | 4.6 / 12.7 | 62 / 264 | 357 / 698 | 1000 / >1389 |
+  | temperature (TC) | 2.2 / 2.2 | 2.2 / 2.2 | -0.7 / 6.2 | 48 / 174 | 319 / 550 | 999 / 1340 |
+  | Hz | 2.5 / 1.8 | 1.8 / 1.8 | -59 / 64 | -89 / 108 | -116 / 164 | -140 / 291 |
+  | capacitance (AUTO) | 2.1 / 2.0 | 2.1 / 2.0 | -42 / 5.0 | 3.8 / 4.5 | -148 / 11 | -242 / 22 |
+
+  The difference of the two is PB3 - AGND: it follows the input too (Hz at
+  10 V: +431 mV, DC mV at 5 V: +302 mV). The ohm, DC mV and temperature
+  rows read 0x70 on the PB1 comparator at 5 and 10 V with R21 0xdd, 0xcc,
+  0xbb and 0x8b alike; DC V 6 V reads 0x00 at 10 V.
 - **OP1's chopper** (OP1CHOP = 10, 2 kHz in the stock AC V row, with AD1 off)
   starts when AD1 is turned on in that row: a 2 kHz square of OP1's offset
   (x10 in 6 V) at OP1O -> PB4 put a constant ~37 mV RMS floor on AC V 6 V
