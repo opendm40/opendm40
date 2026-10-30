@@ -768,7 +768,7 @@ unless shown otherwise.
 | `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
 | `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
-| `DBG:BOOT?` | | Boot and reset information | USB |
+| `DBG:BOOT?` | | `NONE`, or `B2,<57 words>,<renamed>`: boot and reset information ([below](#dbgboot)) | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
 | `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>,<trend chart ms/div>` | USB |
@@ -860,3 +860,40 @@ unless shown otherwise.
   copied there.
 - `DBG:LOADER`: a staged file is installed; switching the meter off and on
   leaves the loader and starts opendm40.
+
+### DBG:BOOT?
+
+`B2`, then 57 numbers in hex (no `0x`, no leading zeros), then the 8.3
+name fatren gave the installed `dm40*.bin` (11 characters, blanks if none).
+[`firmware/tools/dm40dbg.py boot`](../../firmware/tools/dm40dbg.py) prints it decoded.
+
+| # | Field |
+|---|---|
+| 0 | mode: 0 normal, 1 recovery |
+| 1 | reset reason: 0 none, 1 watchdog after recovery, 2 watchdog (stale), 3 watchdog (retry), 4 key hold aborted, 5 requested, 6 clock failed |
+| 2 | clock: 0 HXTAL, 1 IRC16M, 2 failed |
+| 3, 4 | reset flags (RCU_RSTSCK) at reset / after the shim |
+| 5 | the previous boot's last word |
+| 6 | the last loader trigger (`5452001x`: marker zeroed, failed, PA2 entry; `5452000x`: recovery file) |
+| 7..9 | loader marker words |
+| 10 | marker valid: 1 / 0 |
+| 11 | crash word (`435200nn`: nn watchdog resets in a row) |
+| 12 | healthy (60 s of uptime): 1 / 0 |
+| 13 | last flash status of the marker zeroing (0 = clean) |
+| 14..17 | FSMC BCR1, BTR1, BWTR1 and the panel ID as found at boot |
+| 18 | fatren: 0 not run, 1 no medium, 2 bad BPB, 3 clean, 4 dry run, 5 renamed, 6 error |
+| 19..25 | fatren: found, old backup, old deleted, freed clusters, others left, recovery file deleted, staged |
+| 26 | calibration safety copy: 0 not run, 1 no medium, 2 bad BPB, 3 present, 4 written, 5 no space, 6 error |
+| 27..29 | its written / conflict / differs masks (bit 0 CALIB, 1 BOOTDATA, 2 UID) |
+| 30 | its time, ms |
+| 31, 32 | stack used / stack size, bytes |
+| 33, 34 | SPI flash clock divider (4 / 16) and its check: 0 not run, 1 OK, 2 forced, 3 no chip, 4 no signature, 5 / 6 differed (1st / 2nd read) |
+| 35..37 | disk folders: ok, created, failed (bit masks) |
+| 38 | calibration record CRC: 1 OK, 0 bad |
+| 39 | settings from: 0 not run, 1 backup SRAM, 2 file, 3 defaults |
+| 40, 41 | the file slot and sequence number used |
+| 42 | the settings file at boot: 0 not run, 1 present, 2 created, 3 no file, 4 error |
+| 43 | the last settings save: 0 none, 1 OK, 2 deferred, 3 bad record, 4 error, 5 no file |
+| 44, 45 | saves this boot, the newest slot's sequence number |
+| 46..53 | boot phases, ms: board + splash, fatren, safety copy, folders, settings, mirror, USB disk, refresh |
+| 54..56 | main's clock at App::new's end, the first frame, the touch reset, ms |

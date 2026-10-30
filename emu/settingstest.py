@@ -49,6 +49,7 @@ ap.add_argument('--run1', type=float, default=45.0, help='virtual seconds of the
 A = ap.parse_args()
 sys.path.insert(0, HERE)
 import run  # noqa: E402
+import bootinfo  # noqa: E402
 if A.port is None:
     A.port = run.free_port(63900, 63999)
 print('USB/IP port %d' % A.port, flush=True)
@@ -94,10 +95,8 @@ class Link:
 
 
 def settings(boot):
-    """The SETTINGS.. fields of a DBG:BOOT? reply as a list."""
-    p = boot.split(',')
-    i = p.index('SETTINGS')
-    return p[i:]
+    """The settings fields of a DBG:BOOT? reply as a list (bootinfo.py)."""
+    return bootinfo.settings(boot)
 
 
 def start(name, disk, extra):
