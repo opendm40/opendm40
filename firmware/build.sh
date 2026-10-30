@@ -123,6 +123,12 @@ print("  backup SRAM free = %d bytes (.bkp_bss 0x%08x..0x%08x; record ends 0x%08
       % (0x40024FE8 - syms['__bkp_bss_end'], syms['__bkp_bss_start'], syms['__bkp_bss_end'], syms['__bkp_record_end']))
 print("  USBHS RAM free   = %d bytes (.usbhs_bss 0x%08x..0x%08x, limit 0x40061000)"
       % (0x40061000 - syms['__usbhs_bss_end'], syms['__usbhs_bss_start'], syms['__usbhs_bss_end']))
+# The USBHS FIFO RAM writes a byte or halfword store into the whole word
+# (src/wordram.rs): only wordram.rs `usbhs_static!` (a WordRam, word access
+# only) may place anything there.
+place = [os.path.join(d, f)[4:] for d, _, fs in os.walk('src') for f in fs if f.endswith('.rs')
+         and re.search(r'link_section\s*=\s*"\.usbhs_bss', open(os.path.join(d, f)).read())]
+assert place == ['wordram.rs'], '.usbhs_bss placed outside wordram.rs usbhs_static!: %s' % place
 print("  word0 initial SP = 0x%08x (loader only; reset sets 0x10010000)" % sp)
 print("  word1 reset      = 0x%08x" % entry)
 print("  region A end     = 0x%08x (shim + vectors, limit 0x%08x)" % (syms['__region_a_end'], MARK))

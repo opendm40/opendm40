@@ -717,7 +717,7 @@ impl Job {
             }
         }
         let buf = &calbackup::scratch()[0];
-        match disk.write_step(self.lba, &buf[..], &mut self.st)? {
+        match disk.write_step(self.lba, buf, &mut self.st)? {
             // A block that read blank but did not take the program (a
             // sector whose erase a power cut interrupted, `prep_step`):
             // once more, erased first. scratch[0] still holds the block.

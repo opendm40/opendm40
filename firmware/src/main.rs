@@ -63,6 +63,7 @@ mod ui;
 mod usb;
 mod usbtmc;
 mod wdt;
+mod wordram;
 
 use core::panic::PanicInfo;
 

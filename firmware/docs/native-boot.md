@@ -1042,7 +1042,20 @@ found two RAMs outside [link-native.x](../link-native.x)'s TCM + SRAM, both
 | area | range | size | kept over |
 |---|---|---|---|
 | backup SRAM after the settings record | `0x40024124..0x40024FE7` | 3 780 B | a reset and an update, not a power-off |
-| USBHS FIFO RAM (the DM40 has no USBHS port) | `0x40060000..0x40060FFF` | 4 KiB | needs `RCU_AHB1EN` bit 29 (USBHSEN) |
+| USBHS FIFO RAM (the DM40 has no USBHS port) | `0x40060000..0x40060FFF` | 4 KiB | needs `RCU_AHB1EN` bit 29 (USBHSEN); **32-bit stores only** |
+
+**The USBHS FIFO RAM ignores the store size.** A byte store writes the
+whole 32-bit word, the stored byte in all four lanes (a halfword store
+both halves: *inferred*). A CSV
+recording with `csvlog::TAIL` written byte by byte left every word of the
+DLG as one byte ×4 (`DLG1` → `31 31 31 31`), and `MMEM:DATA?` of its CSV
+answered -250 "Mass storage error". Reads of any size and word stores
+work. So a buffer there is a `WordRam` ([wordram.rs](../src/wordram.rs)):
+declared only by its `usbhs_static!`, reached only by `read(i)` /
+`write(i, u32)`, one volatile word access each; partial words are merged
+in a register and written whole. build.sh fails when `.usbhs_bss` is
+named outside wordram.rs. The probe results:
+[PR #183](https://github.com/opendm40/opendm40/pull/183) `hidden-memory.md`.
 
 **Link.** Two `MEMORY` regions and three NOLOAD sections:
 - `.bkp_record` holds `persist::RECORD_SPACE`, a `[u32; WORDS + 3]` that
@@ -1052,7 +1065,8 @@ found two RAMs outside [link-native.x](../link-native.x)'s TCM + SRAM, both
 - `.bkp_bss` follows it; asserted to start at or after the record's end and
   to end at or below `0x40024FE8` (`persist::BKP_SEQ`: the sequence words,
   then the boot words; persist.rs asserts the same constant).
-- `.usbhs_bss`, asserted inside the 4 KiB.
+- `.usbhs_bss`, asserted inside the 4 KiB; only `wordram::usbhs_static!`
+  places anything there (build.sh).
 
 **Boot.** `native::extra_ram_init`, right after `init_ram` and before the
 recovery / normal split: `boot::bkp_enable` (PMU clock, BKPWEN, BKPSRAM
@@ -1066,7 +1080,7 @@ stream ISR's paths:
 
 | buffer | size | area | from | who touches it |
 |---|---|---|---|---|
-| `csvlog::TAIL` | 4 096 | USBHS | SRAM `.dmabuf` | `rec_start` (C: fill 0xFF); `csvlog::poll` while a CSV recording commits: the FIFO bytes copied in, then `write_step` (the SPI flash takes it by CPU writes) |
+| `csvlog::TAIL` (`WordRam<1024>`) | 4 096 | USBHS | SRAM `.dmabuf` | `rec_start` (C: 0xFFFFFFFF word fill); `csvlog::poll` while a CSV recording commits: the FIFO bytes packed into words (`put_bytes`: the partial first / last word read, merged, written back), then `write_step`, which reads it word by word (wordram.rs `BlockSrc`; the SPI flash takes it by CPU writes) |
 | `screenshot::JOB` | 452 | backup | SRAM `.dmabuf` | `init`; per pass `busy` / `frozen` flags (tick, run, msc poll); the shot itself is C (`step`, `finish`) |
 | `vdisk::MIR` | 144 | backup | `.sram_bss` | `mir_read` (a host read of the mirror file), `Scpi::handle`, `mirror_boot` (C) |
 | `vdisk::STATE` | 372 | backup | SRAM `.dmabuf` | `init` (C); a few field loads per 512-byte sector in `read_block` / `read_busy` / `read_wait` |
@@ -1094,9 +1108,13 @@ Proofs:
 - **Hot paths.** Region C code never runs while a stream does
   ("The slow flash bank while an AD2 stream runs"), so the C-only buffers
   are idle then. The rest cost a few 5-cycle loads per main-loop pass
-  (flags) or per USB sector; `csvlog::TAIL`'s 4 KiB copy runs once per
-  filled block of a CSV recording (*estimated* ~33 000 extra cycles, ~0.2 ms, next to
-  a block program of several ms). A recording refuses the Wave view and
+  (flags) or per USB sector. `csvlog::TAIL` is touched once per commit of
+  a CSV recording: the bytes are packed in a register, one 5-cycle word
+  store per 4 bytes (before: a 5-cycle store per byte), and `write_step`
+  reads 1 024 words per pass (compare, program, read back) through a
+  `BlockSrc` call. *Estimated* ≤ 40 000 cycles (0.2 ms) per 4 KiB block,
+  spread over the `write_step` slices, next to the 3 × 4 096 SPI byte
+  transfers and a block program of several ms. A recording refuses the Wave view and
   inrush and stops CH2; only an SCPI LOG:STATe ON session can stream
   meanwhile, and the ISR does not wait for the main loop.
 - **Size.** The link asserts above; build.sh prints both areas' free bytes.
@@ -1112,13 +1130,19 @@ Checked and left where they are:
 | `ui::GEN_SP`, `dmm::REC_COPY`, `gallery::G`, `scope_csv::SNAP` | fit and are cold, but they are in TCM on the scope chain, where SRAM is short; room kept for `prof::P` |
 | `touch::LOG` (`dbg-touch`, 1 924), `acdctr::TR` (`acdc-trace`, 1 804) | do not fit next to `prof::P`; stay in `.sram_bss` |
 
-`emu/dm40.repl` maps the FIFO RAM as plain memory (the clock gate is not
-modelled); the backup SRAM was already plain memory, kept over DBG:RESET,
-zero in a new run. [emu/xramtest.py](../../emu/xramtest.py) fills both
-areas with 0xA5 before the firmware starts, saves a setting, takes a
-screenshot, records a CSV (checked back through MMEM:DATA?), opens the
-touch test page, then DBG:RESET: SETTINGS,BKP with the same record sequence
-number, the setting kept, and the same steps work again.
+`emu/dm40.repl` maps the FIFO RAM as
+[WordOnlyRam.cs](../../emu/peripherals/WordOnlyRam.cs): a byte store writes
+the byte into all four lanes of its word, as on the device (a halfword
+store both halves: *inferred*); the clock gate is not modelled. The backup
+SRAM was already plain memory, kept over DBG:RESET, zero in a new run.
+[emu/xramtest.py](../../emu/xramtest.py) fills both areas with 0xA5 before
+the firmware starts, saves a setting, takes a screenshot, records a CSV
+long enough for several commits and a second 4 KiB block, reads its DLG
+and CSV with MMEM:DATA? and compares the CSV with
+[dlog.py](../tools/dlog.py) of the DLG byte for byte, opens the touch test
+page, then DBG:RESET: SETTINGS,BKP with the same record sequence number,
+the setting kept, and the same steps work again. The byte-written TAIL
+fails it.
 
 | | before (11eb22cc) | after |
 |---|---|---|
@@ -1134,12 +1158,6 @@ Feature builds (SRAM / backup SRAM free): `dbg-prof` 45 852 / 1 016,
 42 164 / 1 016 (region B 8 688).
 
 Device checks still open:
-- Byte writes into the USBHS FIFO RAM. `csvlog::TAIL` is filled byte by
-  byte (`strb`); the device probe wrote only words, and the DWC2 core's
-  AHB slave may not honour byte lanes (*unknown*; Renode's plain memory
-  accepts them). Check: a CSV recording on the meter, read back with
-  `MMEM:DATA? "LOGnnn.CSV"`. If it fails: TAIL back to SRAM (`.dmabuf`),
-  or a word-wise fill of TAIL to keep it there.
 - The supply current with USBHSEN on (*unknown*).
 - The settings record and file over power cycles with this image.
 
