@@ -401,7 +401,7 @@ impl App {
         h.s(ui::pwv::fmt(&mut b, "P", st.p, "W")).s(", ").s(ui::pwv::fmt(&mut b, "f", st.f, "Hz")).s(" (over the frame's whole cycles)\r\n");
         h.s("# time_s = seconds from the first sample; each row is one sample: U in volts or I in amperes, the other column empty\r\n");
         let sc = s.sc;
-        crate::scope_csv::set_pwave(buf, s.cap.n, [sc.su, sc.ou, sc.si, sc.oi], pv::T_UNIT_US as f32 * 1e-6, s.cap.y_first, &h);
+        crate::scope_csv::set_pwave(buf, s.cap.n, pv::T_AT, [sc.su, sc.ou, sc.si, sc.oi], pv::T_UNIT_US as f32 * 1e-6, s.cap.y_first, &h);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
             return;

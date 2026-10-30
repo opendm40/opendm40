@@ -271,7 +271,7 @@ def run_case(name):
             us = [float(r[1]) for r in rows if len(r) == 3 and r[1]]
             is_ = [float(r[2]) for r in rows if len(r) == 3 and r[2]]
             res['csv_rows'] = len(rows)
-            check('time_s,volts,amperes' in lines and len(rows) == 2 * w3['n'] and abs(len(us) - len(is_)) <= 1,
+            check('time_s,volts,amperes' in lines and len(rows) in (2 * w3['n'], 2 * w3['n'] + 1) and abs(len(us) - len(is_)) <= 1,
                   'SCOP000.CSV: %d rows (U %d, I %d), %d samples per channel' % (len(rows), len(us), len(is_), w3['n']))
             if us and is_:
                 ur = math.sqrt(sum(x * x for x in us) / len(us))
