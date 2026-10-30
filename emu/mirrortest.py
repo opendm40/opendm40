@@ -91,13 +91,13 @@ def mirror_file(disk):
     return None
 
 
-def boot(n, app, disk_in, base=None, during=None):
+def boot(n, app, disk_in, base=None, during=None, run_for=None):
     disk = os.path.join(OUT, '%s-disk%d.bin' % (TAG, n))
     flash = os.path.join(OUT, '%s-flash%d.bin' % (TAG, n))
     shutil.copy(disk_in, disk)
     MADE.extend([disk, flash])
     cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', app, '--usbip', '0.01',
-           '--usbip-port', str(A.port), '--run-for', str(A.run_for), '--name', '%s-%d' % (TAG, n),
+           '--usbip-port', str(A.port), '--run-for', str(run_for or A.run_for), '--name', '%s-%d' % (TAG, n),
            '--disk', disk, '--save-disk', disk, '--save-flash', flash]
     if base:
         cmd += ['--base', base]
@@ -183,9 +183,11 @@ try:
         return q('DBG:ISR?').split(',')[1] == '1'
 
     def mid_read(m, q):
-        """A stream that starts inside a multi-block READ(10) (msc.rs: the
-        next slow-bank block fails the command with the residue, sense
-        02/04/01; the rest of the data phase is fill bytes). The READ
+        """A stream that starts inside a multi-block READ(10): the next
+        slow-bank block fails the command with the residue, sense 02/04/01;
+        the rest of the data phase is fill bytes. Without a mirror the vdisk
+        read of that block (`mir_read`) fails as well, so this checks the
+        behaviour, not msc.rs's own mid-transfer check. The READ
         crosses from FIRMWARE.BIN's zero-wait part into its slow-bank tail;
         the stream starts after PRE_N of its sectors were taken."""
         fw_lba, _ = infovol.vol_dir(m, 'INFO')['FIRMWARE.BIN']
@@ -198,7 +200,10 @@ try:
         m.d.bulk_out(m.ep_out, struct.pack('<4sIIBBB16s', b'USBC', m.tag, n * 512, 0x80, 0, len(cb), cb.ljust(16, b'\0')))
         data = b''
         while len(data) < pre_n * 512:
-            data += m.d.bulk_in(m.ep_in, 4096)
+            c = m.d.bulk_in(m.ep_in, 4096)
+            if not c:
+                break
+            data += c
         q('LOG:STATe ON')
         on = False
         for _ in range(20):
@@ -257,7 +262,9 @@ try:
     blank = os.path.join(OUT, '%s-blank.bin' % TAG)
     MADE.append(blank)
     open(blank, 'wb').write(bytes(16 << 20))
-    m6, _, _ = boot(6, A.app, blank, during=stream_read)
+    # Boot 6's callback (two READ(10)s around a stream, then INFO/ during
+    # another) takes longer than the other boots': 30 virtual s more.
+    m6, _, _ = boot(6, A.app, blank, during=stream_read, run_for=A.run_for + 30)
     print('boot 6 (blank SPI disk): DBG:VDISK:MIR? %s' % m6, flush=True)
     check(m6 is not None and m6[0] == 0 and m6[1] == 2, 'boot 6: blank disk -> mirror not served, status BADBPB (%s)' % m6)
 finally:

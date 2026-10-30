@@ -2192,8 +2192,8 @@ Firmware:
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
       **Device c785807: PASS** (doc "c785807" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
-- [x] A stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
-      with the residue, sense 02/04/01; the host retries the whole command).
+- [x] A stream starting inside a multi-block READ(10) (fails at the next slow block with the residue,
+      sense 02/04/01; the host retries the whole command).
       Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
       the slow-bank mirror is off (MIR_OK false after a failed SPI read); `DBG:VDISK:MIR?` 1 (OK), so a healthy
       meter cannot reach the path from the host; the device has no switch that turns the mirror off.
@@ -2202,7 +2202,7 @@ Firmware:
       the 64 slow sectors, sense 02/04/01, the 64 sectors before them correct; the retry during the stream fails
       before its data; after the stream it reads the same bytes. With msc.rs's mid-transfer check removed the
       result is the same (vdisk `fw_body` -> `mir_read` fails the slow sector without a mirror while the stream
-      runs; msc.rs takes the sense from `read_busy`).
+      runs; msc.rs takes the sense from `read_busy`), so msc.rs's own mid-transfer check is not exercised.
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device c92b605: LOG:DEST? / DUR? in the Wave view,
