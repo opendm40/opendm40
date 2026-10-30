@@ -127,7 +127,7 @@ pub fn top_item(k: usize, t: &Top) {
                 lcd::fill_rect(INV_BADGE.x as u16, INV_BADGE.y as u16, INV_BADGE.w as u16, INV_BADGE.h as u16, C_BAR);
             }
         }
-        _ => battery_lv(t.battery, t.charging),
+        _ => battery_lv(t.battery, t.charging, 0),
     }
 }
 

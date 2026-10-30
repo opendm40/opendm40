@@ -785,7 +785,7 @@ try:
     ib = ints(q('DBG:ISR?'))
     v = q('DBG:VIEW?')
     print('  badge exit at 2 ms/div: DBG:VIEW? %s, DBG:ISR? %s' % (v, ib[:14]))
-    check(ib[1] == 0 and v.startswith('Oscilloscope') and v.endswith(',0'), 'source badge DMM -> MCX: the Wave view closed (%s)' % v)
+    check(ib[1] == 0 and v.startswith('Oscilloscope') and v.split(',')[2:3] == ['0'], 'source badge DMM -> MCX: the Wave view closed (%s)' % v)
     check(ib[13] == ia[13] and ib[4] == ia[4] and ib[9] == ia[9] and ib[8] == ia[8],
           'badge exit at 38400: no forced stop, late entry, overrun or frame timeout (forced %d -> %d, late %d -> %d)'
           % (ia[13], ib[13], ia[4], ib[4]))

@@ -166,9 +166,9 @@ Third tenant: the strip renderer
   user inside a page draw; none is known): the page is then drawn again
   directly.
 
-Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 479 B: the
-generator preview's trace rows, worked out once per wave instead of per
-strip) and `scope_ui::COLC` (400 B, flash).
+Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 484 B: the
+generator preview's trace rows, worked out once per wave and square duty
+instead of per strip) and `scope_ui::COLC` (400 B, flash).
 
 ## The scope record: raw ring and coded ring
 

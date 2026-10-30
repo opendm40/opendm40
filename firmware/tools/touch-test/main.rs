@@ -814,6 +814,15 @@ fn hit_tests(ck: &mut Ck) {
     // steps down, the "+" key (410..463) up; the label side is "-".
     ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
     ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
+    // Backlight walks the manual's grid both ways and stays on it at the ends (#91).
+    let mut up = vec![55u8];
+    for _ in 0..6 { up.push(ui::backlight_step(*up.last().unwrap(), 1)); }
+    ck.t("backlight +: 55 65 75 85 95 100 100", up == [55, 65, 75, 85, 95, 100, 100]);
+    let mut dn = vec![100u8];
+    for _ in 0..11 { dn.push(ui::backlight_step(*dn.last().unwrap(), -1)); }
+    ck.t("backlight -: 100 95 85 ... 15 10 10", dn == [100, 95, 85, 75, 65, 55, 45, 35, 25, 15, 10, 10]);
+    ck.t("backlight: 10 + gives 15, 100 - gives 95", ui::backlight_step(10, 1) == 15 && ui::backlight_step(100, -1) == 95);
+    ck.t("backlight: off-grid 20 joins the grid (25 up, 15 down)", ui::backlight_step(20, 1) == 25 && ui::backlight_step(20, -1) == 15);
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());
@@ -991,7 +1000,7 @@ fn hit_tests(ck: &mut Ck) {
     scope_ui::invalidate();
     scope_ui::update(&scope_ui::Model::DEFAULT);
     page(ck, "replica panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= 414, &[0, 1, 2, 3, 4, 5, 6]);
-    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, dec: scope_ui::dec::SetupVals::DEFAULT };
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, dec: scope_ui::dec::SetupVals::DEFAULT };
     for tab in 0..5u8 {
         host::reset(0);
         scope_ui::draw_mf(tab, &pv);

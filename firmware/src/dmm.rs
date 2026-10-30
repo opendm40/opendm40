@@ -688,6 +688,11 @@ pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
 /// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
 /// MR9270S+ mA input into the jacks; device-check "RLD current-source path").
 pub const DIODE_I: f32 = 0.756e-3;
+/// Continuity test current (A), signed against diode's: -0.260 mA measured
+/// on one unit (MR9271S mA input into V/ohm - COM, 2026-10-30; diode read
+/// +0.753 mA, ohm 600 +0.868 mA the same way): its source drives the other
+/// way.
+pub const CONT_I: f32 = -0.260e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
@@ -700,12 +705,12 @@ pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
-/// variant, `ohm_test_current`; 12 diode: DIODE_I), None elsewhere.
-/// Continuity (11) has none: its row's source tap (R31 0xcd) is neither
-/// ohm variant's and no current for it is known.
+/// variant, `ohm_test_current`; 11 continuity: CONT_I; 12 diode: DIODE_I),
+/// None elsewhere.
 pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
     match mode {
         10 => ohm_test_current(r, var),
+        11 => Some(CONT_I),
         12 => Some(DIODE_I),
         _ => None,
     }

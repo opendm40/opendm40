@@ -34,6 +34,9 @@ mod app_power;
 mod app_wave;
 #[path = "app_press.rs"]
 mod app_press;
+/// The DMM as CH2 of the MCX scope page (the AD2 stream alongside).
+#[path = "app_ch2.rs"]
+mod app_ch2;
 /// Inrush current: open / arm / close / results / save (region C) and the
 /// part that runs while the AD2 stream does (region B).
 #[path = "app_inrush.rs"]
@@ -298,6 +301,8 @@ pub struct App {
     /// A view change out of the live wave view, held until main.rs has
     /// stopped the stream (`show`, app_wave.rs `wave_exit_done`).
     wave_exit_to: Option<View>,
+    /// The DMM CH2 on the MCX scope page (app_ch2.rs).
+    ch2: app_ch2::Ch2,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -380,6 +385,10 @@ pub struct App {
     toast_later: [u8; TOAST_LATER_MAX],
     toast_later_n: u8,
     toast_later_ok: bool,
+    /// A scope popup's tap is being handled: its toast waits for the popup
+    /// repaint that ends the tap (`toast_later`), else the popup is drawn
+    /// over it.
+    toast_hold: bool,
     /// 3-finger swipe seen: take the screenshot in tick() once the view is
     /// drawn.
     shot_req: bool,
@@ -643,6 +652,7 @@ impl App {
             wave_req: None,
             wave_auto: None,
             wave_exit_to: None,
+            ch2: app_ch2::Ch2::NEW,
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -695,6 +705,7 @@ impl App {
             toast_later: [0; TOAST_LATER_MAX],
             toast_later_n: 0,
             toast_later_ok: false,
+            toast_hold: false,
             shot_req: false,
             repaint_at: 0,
             band_until: 0,
@@ -722,7 +733,8 @@ impl App {
         // file on the SPI disk (setfile.rs; after a power-off the backup
         // SRAM holds none). A power-off starts a new measurement (owner
         // 2026-10-25): DC V and the measurement settings at their defaults;
-        // only a reset (the backup SRAM) continues them.
+        // only a reset (the backup SRAM) continues them, or Mode Remember ON
+        // (restore).
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
             a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
@@ -823,6 +835,8 @@ impl App {
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
         // So does the power meter (energy, the shunt state): every view.
         d |= self.host_dmm || self.logger_busy || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
+        // The DMM CH2 on the scope page streams from the DMM side.
+        d |= self.ch2_want().is_some();
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
@@ -2662,6 +2676,8 @@ impl App {
         let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
         let covered = self.sp.covered();
         crate::scope_ui::set_flush_short(self.view == View::DmmScope);
+        // The DMM CH2's stream into its store (also during a drag).
+        self.ch2_drain();
         if self.sp.frozen_or_pinch() {
             if page {
                 // The drag redraw (DBG:PROF? "s.frame"; touch->frame latency
@@ -3367,9 +3383,10 @@ impl App {
         self.toast_draw(now, txt, ok);
     }
 
-    /// Keep `txt` for after the confirm that is up; false = none is up.
+    /// Keep `txt` for after the confirm that is up (or the scope popup's
+    /// repaint, `toast_hold`); false = none is up.
     fn toast_defer(&mut self, txt: &str, ok: bool) -> bool {
-        if !self.overlay.is_some_and(|o| o.modal()) {
+        if !self.toast_hold && !self.overlay.is_some_and(|o| o.modal()) {
             return false;
         }
         let mut n = txt.len().min(TOAST_LATER_MAX);
@@ -4130,10 +4147,10 @@ impl App {
                 match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
-                    // -/+ steppers (ui-review #12): 10 % steps, clamped.
+                    // -/+ steppers (ui-review #12): Backlight on the
+                    // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     Some(2) => {
-                        let d = ui::settings_step(x) as i16 * 10;
-                        self.backlight = (self.backlight as i16 + d).clamp(10, 100) as u8;
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
                         backlight(self.backlight);
                     }
                     Some(3) => {
@@ -4622,6 +4639,45 @@ impl App {
         }
     }
 
+    /// DBG:GENTRIG:LAG / DBG:GENTRIG:STAT? / DBG:CH2:LAG (the GEN and CH2
+    /// channels' tuning replies): region C (link-native.x), out of
+    /// `scpi_dmm`'s frame.
+    #[inline(never)]
+    fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::DbgGenLag(Some(ns)) => {
+                // ns -> ticks of the 200 MHz timer clock (5 ns).
+                crate::scope::set_gen_lag((ns / 5.0) as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgGenStat => {
+                for (i, v) in crate::gen::stats().iter().enumerate() {
+                    if i > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_u32(*v);
+                }
+                true
+            }
+            C::DbgGenLag(None) => {
+                out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
+                true
+            }
+            C::DbgCh2Lag(Some(us)) => {
+                crate::scope_ch2::set_lag_us(us as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgCh2Lag(None) => {
+                out.put_f32(crate::scope_ch2::lag_us() as f32);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn scpi_dmm(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> Option<bool> {
         use crate::scpi::Cmd as C;
         let k = self.dmm.t_sensor();
@@ -5073,6 +5129,7 @@ impl App {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5171,6 +5228,7 @@ impl App {
             self.host_scope = true;
             self.update_rails(clk);
         }
+        let sc0 = sc;
         let reply = match cmd {
             C::GenFunc(Some(w)) => {
                 g.wave = Wave::ALL[w as usize % 4];
@@ -5289,6 +5347,14 @@ impl App {
                     scope::TrigMode::Normal => b"NORM",
                     scope::TrigMode::Single => b"SING",
                 });
+                Some(())
+            }
+            C::TrigSource(Some(t)) => {
+                sc.tsrc = t.min(scope::TSRC_GEN);
+                None
+            }
+            C::TrigSource(None) => {
+                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
                 Some(())
             }
             C::Run => {
@@ -5467,6 +5533,13 @@ impl App {
             && reply.is_none()
         {
             self.scope_set(sc, now);
+            if self.sp_on() && self.sp.popup != crate::scope_ui::Popup::None && self.scope.s != sc0 {
+                // A popup is open (#82): the page again with it (the graph
+                // around its box, then the popup), so the top bar, the panel
+                // and the popup's own values show the host's change now,
+                // not when the popup closes.
+                self.redraw = true;
+            }
             if matches!(cmd, C::Digitize) {
                 // After apply (a run change clears it): the acquisition it
                 // restarted is the one that ends the run.
