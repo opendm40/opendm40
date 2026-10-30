@@ -58,6 +58,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
   and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
   ([manual](docs/manual/README.md#the-status-bar)).
+- Scope page and combined view: the top bar shows the **Bluetooth symbol** while a phone or a computer is
+  connected over Bluetooth, beside the USB symbol when both are connected ([#167](https://github.com/opendm40/opendm40/issues/167)).
 - **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
   that reply for the next host to connect.
 - **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
