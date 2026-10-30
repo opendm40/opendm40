@@ -72,10 +72,14 @@ pub mod msc {
         fn block_count(&self) -> u32;
         fn read_block(&mut self, lba: u32, buf: &mut [u8]) -> bool;
         fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool;
-        fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+        fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut Step) -> Option<bool> {
             let _ = st;
-            Some(self.write_block(lba, buf))
+            Some(self.write_block(lba, &src_bytes(buf)))
         }
+    }
+    /// The bytes of a `write_step` source (src/wordram.rs `BlockSrc`).
+    pub fn src_bytes(buf: &dyn crate::wordram::BlockSrc) -> Vec<u8> {
+        (0..buf.len() / 4).flat_map(|i| buf.word(i).to_le_bytes()).collect()
     }
     #[derive(Clone, Copy, Default)]
     pub struct Step {
@@ -160,6 +164,9 @@ mod screenshot;
 mod scope_csv;
 #[path = "../../src/dlog.rs"]
 mod dlog;
+#[path = "../../src/wordram.rs"]
+#[allow(dead_code)]
+mod wordram;
 #[path = "../../src/csvlog.rs"]
 mod csvlog;
 #[path = "../../src/fastenc.rs"]

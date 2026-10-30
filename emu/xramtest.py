@@ -15,10 +15,15 @@ One run:
      left as they are.
   2. DBG:BOOT? SETTINGS,DEFAULTS; SYST:ALER:ALAR VOLUME; wait for SAVE,OK.
   3. The buffers in use: a screenshot (DBG:SWIPE D,3: screenshot::JOB), a
-     CSV recording started and stopped (csvlog::TAIL in the USBHS RAM), the
-     touch test page opened and closed (app_touchtest::TT), MMEM:CAT?.
+     CSV recording of --long seconds (csvlog::TAIL in the USBHS RAM: several
+     commits, more than one 4 KiB block), the touch test page opened and
+     closed (app_touchtest::TT), MMEM:CAT?. The recording's LOGnnn.DLG and
+     LOGnnn.CSV are read with MMEM:DATA?: the CSV must equal
+     firmware/tools/dlog.py of the DLG byte for byte. dm40.repl maps the
+     USBHS RAM as peripherals/WordOnlyRam.cs (a byte store fills the whole
+     word, as on the device), so a byte-written TAIL fails here.
   4. DBG:RESET: DBG:BOOT? SETTINGS,BKP with the same record sequence number,
-     SYST:ALER:ALAR? VOLUME; again a screenshot and a recording work.
+     SYST:ALER:ALAR? VOLUME; again a screenshot and a short recording work.
 USB/IP port: --port, else a free one in 64600-64699. Exit status 0 = PASS.
 """
 import argparse
@@ -34,6 +39,7 @@ OUT = os.path.join(HERE, 'out')
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True, help='opendm40 native ELF')
 ap.add_argument('--port', type=int, default=None, help='USB/IP port (default: a free one in 64600-64699)')
+ap.add_argument('--long', type=float, default=480, help='first recording, wall seconds (default 480: the emulator runs at about half speed; several commits, the DLG past one 4 KiB TAIL block)')
 A = ap.parse_args()
 sys.path.insert(0, HERE)
 import run  # noqa: E402
@@ -110,7 +116,59 @@ def shots(l):
     return [f for f in l.q('MMEM:CAT?').split(',') if 'BMP' in f.upper()]
 
 
-def use_buffers(l, pre):
+def block(r):
+    """The data of an IEEE 488.2 definite-length block (#<n><len><data>)."""
+    if r[:1] != b'#' or not r[1:2].isdigit():
+        return None
+    n = int(r[1:2])
+    ln = int(r[2:2 + n])
+    d = r[2 + n:2 + n + ln]
+    return d if len(d) == ln else None
+
+
+def get_file(l, name):
+    l.t.write('MMEM:DATA? "%s"' % name)
+    r = l.t.read(timeout=60)
+    d = block(r)
+    if d is None:
+        print('  MMEM:DATA? "%s": %r' % (name, r[:60]), flush=True)
+    return d
+
+
+def check_log(l, pre, rows):
+    """The newest LOGnnn: its CSV (generated from the DLG on the disk, whose
+    bytes went through csvlog::TAIL in the USBHS RAM) equals dlog.py of the
+    DLG byte for byte, and has a line per row."""
+    logs = sorted(e.strip('"').split(',')[0] for e in l.q('MMEM:CAT?').split(',"')[1:] if e.startswith('LOG'))
+    if not logs:
+        check(False, '%s: no LOG file in MMEM:CAT?' % pre)
+        return
+    base = logs[-1].rsplit('.', 1)[0]
+    dlg = get_file(l, base + '.DLG')
+    csv = get_file(l, base + '.CSV')
+    check(dlg is not None and dlg[:4] == b'DLG1', '%s: %s.DLG read back (%s bytes, starts %r)'
+          % (pre, base, len(dlg) if dlg else '-', dlg[:4] if dlg else None))
+    check(csv is not None, '%s: %s.CSV read back (%s bytes)' % (pre, base, len(csv) if csv else '-'))
+    if not dlg or csv is None:
+        return
+    fn = os.path.join(OUT, '%s-%s.DLG' % (TAG, base.replace('/', '-')))
+    open(fn, 'wb').write(dlg)
+    try:
+        ref = subprocess.run([sys.executable, os.path.join(ROOT, 'firmware/tools/dlog.py'), fn],
+                             capture_output=True).stdout
+        chk = subprocess.run([sys.executable, os.path.join(ROOT, 'firmware/tools/dlog.py'), '--check', fn],
+                             capture_output=True, text=True).stdout.strip()
+    finally:
+        os.remove(fn)
+    print('  dlog.py --check: %s' % chk.replace('\n', ' | '), flush=True)
+    check(ref == csv and len(ref) > 0, '%s: MMEM:DATA? %s.CSV == dlog.py %s.DLG (%d / %d bytes)'
+          % (pre, base, base, len(csv), len(ref)))
+    lines = [x for x in csv.decode(errors='replace').splitlines() if x[:1].isdigit()]
+    check(len(lines) == rows, '%s: %s.CSV has %d data lines for %d rows' % (pre, base, len(lines), rows))
+    return len(dlg)
+
+
+def use_buffers(l, pre, secs, min_dlg=0):
     n0 = len(shots(l))
     l.w('DBG:SWIPE D,3')
     ok = wait(l, 'screenshot', lambda: len(shots(l)) > n0, tries=90)
@@ -119,8 +177,15 @@ def use_buffers(l, pre):
     for _ in range(20):
         if l.q('SYST:ERR?').startswith('0,'):
             break
+    # A long recording commits every COMMIT_MS (60 s): later commits append
+    # at an offset that is not a multiple of 4 inside TAIL, and the file
+    # crosses into a second 4 KiB block.
     l.w('LOG:CSV ON')
-    time.sleep(4)
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        time.sleep(min(30, secs))
+        st = l.q('LOG:CSV?')
+        print('  %3.0f s LOG:CSV? %s' % (time.time() - t0, st), flush=True)
     st = l.q('LOG:CSV?')
     check(st.split(',')[0] != '0', '%s: CSV recording running (LOG:CSV? %s)' % (pre, st))
     l.w('LOG:CSV OFF')
@@ -130,18 +195,9 @@ def use_buffers(l, pre):
     f = st.split(',')
     rows = int(f[2]) if len(f) > 4 else 0
     check(ok and rows > 0 and f[3] == f[4], '%s: recording committed (LOG:CSV? %s)' % (pre, st))
-    # The recording's bytes went through csvlog::TAIL (USBHS RAM): its CSV
-    # (generated from the LOGnnn.DLG on the disk) has a line per row.
-    logs = sorted(e.strip('"').split(',')[0] for e in l.q('MMEM:CAT?').split(',"')[1:] if e.startswith('LOG'))
-    if logs:
-        name = logs[-1].rsplit('.', 1)[0] + '.CSV'
-        l.t.write('MMEM:DATA? "%s"' % name)
-        r = l.t.read(timeout=30)
-        body = r[6:].decode(errors='replace') if r[:2] == b'#4' else ''
-        lines = [x for x in body.splitlines() if x[:1].isdigit()]
-        check(len(lines) >= rows, '%s: %s has %d data lines for %d rows' % (pre, name, len(lines), rows))
-    else:
-        check(False, '%s: no LOG file in MMEM:CAT?' % pre)
+    n = check_log(l, pre, rows)
+    if min_dlg:
+        check((n or 0) > min_dlg, '%s: the DLG is %s bytes (> %d: more than one TAIL block)' % (pre, n, min_dlg))
     l.w('DBG:TOUCH:TEST ON')
     time.sleep(1)
     check(l.q('DBG:TOUCH:TEST?') == '1', '%s: touch test page open' % pre)
@@ -178,7 +234,7 @@ def main():
         l.w('SYST:ALER:ALAR VOLUME')
         ok = wait(l, 'settings save', lambda: (lambda s: s[s.index('SAVE') + 1] == 'OK')(settings(l)), tries=120)
         check(ok, 'the change saved (DBG:BOOT? SAVE,OK)')
-        use_buffers(l, 'boot 1')
+        use_buffers(l, 'boot 1', A.long, 4096 if A.long >= 480 else 0)
         s1 = settings(l)
         print('  before reset: %s' % ','.join(s1), flush=True)
         l.w('DBG:RESET')
@@ -197,7 +253,7 @@ def main():
         seq1 = s1[s1.index('SAVE') + 3]
         check(s2[3] == seq1, 'after DBG:RESET: the record sequence number %s (saved %s)' % (s2[3], seq1))
         check(l.q('SYST:ALER:ALAR?') == 'VOLUME', 'after DBG:RESET: SYST:ALER:ALAR? VOLUME')
-        use_buffers(l, 'boot 2')
+        use_buffers(l, 'boot 2', 4)
         l.close()
     except Exception as e:
         check(False, 'run: %r' % (e,))

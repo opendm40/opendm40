@@ -39,9 +39,11 @@ bkpsram: Memory.MappedMemory @ sysbus 0x40024000
 
 // USBHS FIFO RAM (the DWC2 core's direct FIFO window, base + 0x20000): the
 // DM40 has no USBHS port; opendm40 keeps CPU-only buffers there
-// (link-native.x .usbhs_bss; the device probe of PR #183). Plain RAM: the
-// USBHSEN clock gate is not modelled.
-usbhs_fifo: Memory.MappedMemory @ sysbus 0x40060000
+// (link-native.x .usbhs_bss; the device probe of PR #183). As on the device,
+// a byte / halfword store writes the whole word with the value replicated
+// (peripherals/WordOnlyRam.cs; firmware/src/wordram.rs). The USBHSEN clock
+// gate is not modelled.
+usbhs_fifo: Miscellaneous.WordOnlyRam @ sysbus 0x40060000
     size: 0x1000
 
 // System memory: OTP 0x1FFF7800 (512 B + 16 lock), UID 0x1FFF7A10, flash size 0x1FFF7A22

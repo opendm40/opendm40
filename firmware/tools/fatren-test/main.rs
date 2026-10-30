@@ -107,10 +107,14 @@ mod msc {
             let _ = (lba, n);
             false
         }
-        fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+        fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut Step) -> Option<bool> {
             let _ = st;
-            Some(self.write_block(lba, buf))
+            Some(self.write_block(lba, &src_bytes(buf)))
         }
+    }
+    /// The bytes of a `write_step` source (src/wordram.rs `BlockSrc`).
+    pub fn src_bytes(buf: &dyn crate::wordram::BlockSrc) -> Vec<u8> {
+        (0..buf.len() / 4).flat_map(|i| buf.word(i).to_le_bytes()).collect()
     }
     #[derive(Clone, Copy, Default)]
     pub struct Step {
@@ -247,6 +251,9 @@ mod scope_csv;
 #[path = "../../src/dlog.rs"]
 mod dlog;
 
+#[path = "../../src/wordram.rs"]
+#[allow(dead_code)]
+mod wordram;
 #[path = "../../src/csvlog.rs"]
 #[allow(dead_code)]
 mod csvlog;
@@ -781,7 +788,9 @@ impl msc::BlockDevice for Img {
         self.d[o..o + 4096].copy_from_slice(&buf[..4096]);
         true
     }
-    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut msc::Step) -> Option<bool> {
+    fn write_step(&mut self, lba: u32, buf: &dyn wordram::BlockSrc, st: &mut msc::Step) -> Option<bool> {
+        let v = msc::src_bytes(buf);
+        let buf = &v[..];
         if !self.nor_step {
             return Some(self.write_block(lba, buf));
         }

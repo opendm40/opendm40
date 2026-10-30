@@ -411,6 +411,9 @@ impl BlockDevice for HostDev {
     fn write_block(&mut self, lba: u32, buf: &[u8]) -> bool {
         self.d().write_block(lba, buf)
     }
+    fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut crate::msc::Step) -> Option<bool> {
+        self.d().write_step(lba, buf, st)
+    }
 }
 
 /// Host test: the device `pick` / `poll` / `flush` use.
