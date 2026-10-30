@@ -19,9 +19,13 @@ meter.
 | USBFS FIFO RAM, unallocated tail | FIFO words `0x70..0x13F` | 832 B | not probed: the USB stack owns the FIFO |
 | IPA (2D engine) | `0x4002B000` | - | **absent**: clock bit sets, registers read 0 and ignore writes |
 | TLI (LCD controller) | `0x40016800` | - | **absent**: clock bit sets, `TLI_CTL` reads its reset value `0x2220`, writes ignored |
-| CAN mailbox / filter RAM | `0x40006400`, `0x40006800` | < 1 KiB | not probed (clock off, too small) |
+| CAN0 filter banks | `0x40006640..0x4000671F` | 224 B | **usable** with `CAN0EN` on: all 56 words read / write, kept while the clock is gated off |
+| CAN0 transmit mailbox data | `0x40006588`, `0x4000658C`, `+0x10`, `+0x20` | 24 B | **usable** (6 full words) with `CAN0EN` on |
+| ENET MAC / PTP / DMA data registers | `0x40028008..0x4002805F`, `0x40028710..0x40028723`, `0x4002900C..0x40029013` | ~62 B in 20 registers | **usable** with `ENETEN` on (11 full words + partial ones), kept while the clock is gated off |
+| ENET FIFOs / descriptor RAM | - | - | none memory-mapped (descriptors live in system SRAM) |
 
-Usable: **3.7 KB backup SRAM and 4 KB USBHS FIFO RAM**, nothing large.
+Usable: **3.7 KB backup SRAM, 4 KB USBHS FIFO RAM**, and ~310 B in CAN0 and
+ENET registers. Nothing large.
 
 ## Identification
 
@@ -151,6 +155,59 @@ memory map. Clock bits: `IPAEN` (RCU_AHB1EN bit 23) and `TLIEN`
 
 Both clock bits were cleared again after the test.
 
+### CAN
+
+Two bxCAN-style controllers (user manual 26), unused on the DM40. The 28
+filter banks (`CAN_FxDATAy`, offset `0x240 + 8x + 4y`) exist in CAN0 only
+and are shared with CAN1; their reset value is undefined. They are writable
+while `CAN_FCTL.FLD` = 1 (filter lock disable), which is its reset value
+(`CAN_FCTL` read `0x2A1C0E01`); `CAN0EN` (RCU_APB1EN bit 25) is needed, also
+for CAN1's banks. CAN0 stays in sleep mode (`CAN_CTL` `0x00010002`).
+
+- Filter banks, `0x40006640..0x4000671F` (56 words): random at power-up;
+  `DBG:MTEST?` 168 of 168 OK; with `CAN0EN` off and on again, `DBG:MVER?`
+  56 of 56 intact. Load time not measured.
+- Transmit mailbox data `CAN_TMDATA0/1` of mailboxes 0..2 (`0x40006588`,
+  `0x4000658C`, `0x40006598`, `0x4000659C`, `0x400065A8`, `0x400065AC`): all
+  32 bits of each hold data (`DBG:MASK?`). `CAN_TMIx` was left alone: its
+  bit 0 starts a transmission.
+- With `CAN1EN` on, CAN1 reads like CAN0 at `0x40006800` and has nothing at
+  its filter offsets (`0x40006A40` reads 0). Its own mailbox data (another
+  24 B) was not probed.
+
+To keep: `CAN0EN` on (or on again before a read), `CAN_FCTL.FLD` = 1, and
+the controller never started (nothing enables a filter or a mailbox).
+
+### ENET
+
+The user manual's ENET (27) is the Synopsys MAC that STM32F4 parts carry.
+Its TX / RX FIFOs have no memory-mapped window, and its DMA descriptors
+and buffers sit in system SRAM (`ENET_DMA_RDTADDR` / `TDTADDR` point
+there); neither the manual nor STM32's reference manual documents FIFO
+access. That leaves registers that hold arbitrary data. With `ENETEN`
+(RCU_AHB1EN bit 25) on and no PHY clock, `DBG:MASK?` (bits that read back 1
+after writing all ones / 0 after writing 0):
+
+| register | address | data bits |
+|---|---|---|
+| `ENET_MAC_HLH`, `HLL` (hash list) | `0x40028008`, `0x4002800C` | 32 + 32 |
+| `ENET_MAC_VLT` | `0x4002801C` | 17 |
+| `ENET_MAC_ADDR0H` / `ADDR0L` | `0x40028040` / `0x40028044` | 16 (bit 31 reads 1) / 32 |
+| `ENET_MAC_ADDR1H..3H` | `0x40028048`, `0x50`, `0x58` | 16 + 8 control bits each |
+| `ENET_MAC_ADDR1L..3L` | `0x4002804C`, `0x54`, `0x5C` | 32 each |
+| `ENET_PTP_TSUH`, `TSUL`, `TSADDEND`, `ETH`, `ETL` | `0x40028710..0x40028720` | 32 each |
+| `ENET_DMA_RDTADDR`, `TDTADDR` | `0x4002900C`, `0x40029010` | 30 each (bits 31:2) |
+
+That is 11 full words (44 B) plus 4 × 16 + 17 + 2 × 30 bits (~18 B) in
+partial ones; the 24 `ADDRxH` control bits (address filter enable, source,
+byte mask) add 3 B while the MAC stays off. Values written to
+`HLH` / `HLL` / `TSADDEND` / `ADDR1L` survived `ENETEN` off and on. The
+remote-wakeup filter `ENET_MAC_RWFF` (`0x40028028`, 8 words behind one
+address and an internal pointer) was not probed.
+
+To keep: `ENETEN` on (or on again before a read), `ENET_MAC_CFG` and
+`ENET_DMA_CTL` never enabled; the ENET reset bit (RCU_AHB1RST) never set.
+
 ## How it was probed
 
 The cargo feature `memprobe` ([memprobe.rs](../src/memprobe.rs), not in
@@ -163,7 +220,8 @@ releases) adds debug commands:
 | `DBG:MTEST? addr,words[,seed]` | alias check, then pattern / inverse / pattern; `<ok>,<bad>,<first bad>,<faults>,<alias>` |
 | `DBG:MVER? addr,words[,seed]` | verify the pattern MTEST left |
 | `DBG:MTIME? addr,n[,stride]` | DWT cycles per load: `<first>,<min>,<max>,<total>` |
-| `DBG:MCLK[?] IPA\|USBHS\|TLI,0\|1` | that clock-enable bit only; reply the RCU register |
+| `DBG:MASK? addr` | write all ones, then 0, write the original back; reply `<original>,<after ones>,<after 0>` |
+| `DBG:MCLK[?] IPA\|USBHS\|TLI\|ENET\|CAN0\|CAN1,0\|1` | that clock-enable bit only; reply the RCU register |
 
 - A fault does not hang the meter: with the feature the HardFault vector is
   `probe_fault`, which, while a probe access is armed, records CFSR / BFAR,
@@ -171,8 +229,11 @@ releases) adds debug commands:
   escalates to HardFault. Any other fault still hangs as before (watchdog).
 - POKE / MTEST write only inside a fixed list: ADDSRAM, the free backup
   SRAM slice `0x40024200..0x40024EFF`, the USBHS FIFO window, the first
-  0x40 bytes of the IPA and TLI registers. Never the FMC, option bytes, RCU
-  or GPIO.
+  0x40 bytes of the IPA and TLI registers, the ENET and CAN0 data
+  registers above. Never the FMC, option bytes, RCU or GPIO. Every clock
+  bit a test set was cleared after it; the RCU enable registers read their
+  starting values (`AHB1EN 0x0074001F`, `APB1EN 0x3088C1D3`, `APB2EN
+  0x00004103`) at the end.
 - MTEST's alias check writes one word and reads every place in the 192 KiB
   SRAM and the TCM it could mirror to, restoring them; a mirror stops the
   test.
@@ -188,6 +249,6 @@ releases) adds debug commands:
   (memory map), 1.3.2 (on-chip SRAM), 1.6.1 (memory density), 2.2 / 2.4
   (FMC: zero-wait region, FMC_WS, FMC_OBCTL0, FMC_WSEN, FMC_PID), 4.3.10 /
   4.3.14 (RCU_AHB1EN / RCU_APB2EN), 11 (IPA), 23.7 (TLI
-  registers), 29 (USBHS).
+  registers), 26.4 (CAN registers), 27.4 (ENET registers), 29 (USBHS).
 
 [um]: https://www.gigadevice.com/product/mcu/high-performance-mcus/gd32f4xx-series/gd32f427
