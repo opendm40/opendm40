@@ -44,6 +44,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Power meter: **Vb 0.000** no longer in the warning colour with open leads.
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.

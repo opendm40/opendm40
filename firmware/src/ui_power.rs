@@ -329,11 +329,12 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     let g = side_geom();
     let mut b = [0u8; 16];
     // Burden voltage (amber with the compensation off and the drop above 1 %
-    // of the V reading: it is inside P then) and VAh; label dim left, value
-    // right. The Wh moved to the aux row (large).
+    // of the V reading: it is inside P then; not while it shows 0.000, the
+    // last digit 1 mV: #107) and VAh; label dim left, value right. The Wh
+    // moved to the aux row (large).
     let mut t0 = T::new();
     t0.push(sig_text(&mut b, pv.burden_v, 4));
-    let warn = !pv.comp && pv.burden_v > 0.01 * pv.v;
+    let warn = !pv.comp && pv.burden_v >= 0.0005 && pv.burden_v > 0.01 * pv.v;
     let mut b1 = [0u8; 16];
     let mut t1 = T::new();
     t1.push(sig_text(&mut b1, pv.vah, 5));
