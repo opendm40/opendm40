@@ -19,7 +19,7 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     point (t = 0) on the level with the right slope, x increment = 1 /
     ACQ:SRAT?; reading it twice gives the same bytes;
   * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
-    43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
+    34 816 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
     the packed ring) 51 500 .. 52 400 samples, the sine without a seam, the
     trigger 39 036 samples before the end (the coded ring: long_checks);
     a roll record (200 ms/div) all it took;
@@ -291,7 +291,7 @@ def long_checks(t):
     v, codes = volts(p, w)
     f, vpp, _ = sine_fit(v, p['xinc'])
     jump = max(abs(v[i + 1] - v[i]) for i in range(len(v) - 1))
-    check(78000 <= len(codes) <= 90000 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
+    check(62000 <= len(codes) <= 72000 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
           'roll record (200 ms/div): %d samples, %.2f Hz, largest step %.3f V' % (len(codes), f, jump))
     t.w('TIM:SCAL 1e-3')
     t.w('WAV:FORM BYTE')

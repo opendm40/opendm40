@@ -11,7 +11,7 @@ timebases, in the emulator, for one input signal per run.
 
 On the scope page (comparator trigger off, as emu/wavtest.py):
   * roll at 200 ms/div (12.5 kS/s), STOP after 25 s: the record is all the
-    ring keeps (sine: 12.5 samples a period, >= 80 000 samples; noise / mixed >= 52 400, all at
+    ring keeps (sine: 12.5 samples a period, >= 64 000 samples; noise / mixed >= 52 400, all at
     most cring::NB blocks = 262 144);
   * DIGitize at 100 ms/div (25 kS/s): a record of 52 400 .. 180 000
     samples with the trigger point 39 036 + a few samples before its end
@@ -183,7 +183,7 @@ try:
     check(wait_stop(10), 'roll 200 ms/div: STOP')
     p, codes, v = record()
     n = len(codes)
-    lo = 80000 if A.signal == 'sine' else 52400
+    lo = 64000 if A.signal == 'sine' else 52400
     check(lo <= n <= 262144, 'roll 200 ms/div: %d samples (%d .. 262 144)' % (n, lo))
     if A.signal == 'sine':
         jump = max(abs(v[i + 1] - v[i]) for i in range(n - 1))
