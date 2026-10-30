@@ -53,6 +53,8 @@ section named after the tag as the release notes; how to cut a release:
 
 - Power meter: **Vb 0.000** no longer in the warning colour with open leads.
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
+- Generator: the square wave's preview follows the duty cycle; it always showed 50 %
+  ([#81](https://github.com/opendm40/opendm40/issues/81)).
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges

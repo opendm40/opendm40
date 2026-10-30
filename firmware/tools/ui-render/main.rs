@@ -1134,6 +1134,24 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
 }
 
+/// The generator page's square preview (ui::gen_preview: x 4..243, high
+/// level at row 143, low at 258) is high in `duty` of its columns.
+fn gen_duty_check(ck: &mut Checker, duty: u16) {
+    const TRACE: u16 = 0x04A9;
+    let fb = &host::emu().fb;
+    let at = |x: usize, y: usize| fb[y * W + x] == TRACE;
+    let (mut hi, mut lo) = (0, 0);
+    for x in 5..242 {
+        hi += at(x, 143) as usize;
+        lo += at(x, 258) as usize;
+    }
+    let share = hi as f32 / (hi + lo).max(1) as f32;
+    ck.cases += 1;
+    if (share - duty as f32 / 10000.0).abs() > 0.03 {
+        ck.fail(&format!("gen-square/{duty}"), format!("preview high in {hi} of {} columns ({:.0} %), duty {} %", hi + lo, share * 100.0, duty / 100));
+    }
+}
+
 /// The bargraph's full-scale label ends with the unit as the readout and
 /// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
 /// kOhm"): the label's last columns (right-aligned at the bar's end, row
@@ -2666,6 +2684,13 @@ fn main() {
         unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
         w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
         strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    // The square preview follows the duty (#81): high for that share of
+    // each period (direct and strip draw; the strip cache keyed by it).
+    for duty in [5000u16, 2500, 10000] {
+        w.gen.apply(gen::Settings { wave: gen::Wave::Square, duty, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-square/{duty}"), || ui::gen_static(&w.gen));
+        gen_duty_check(&mut ck, duty);
     }
     w.gen.apply(gen::Settings::DEFAULT);
     strip_check(&mut ck, "strip/dmm", || {
