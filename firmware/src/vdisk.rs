@@ -228,7 +228,9 @@ struct Mir {
     written: bool,
     ms: u32,
 }
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// Backup SRAM (.bkp_bss, link-native.x; CPU only, zeroed at reset;
+// docs/native-boot.md "Extra RAM areas").
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut MIR: Mir = Mir { data: 0, cb: 0, cl: [0; MIR_NCL], status: 0, written: false, ms: 0 };
 /// The mirror equals the flash (checked or written at this boot) and is
 /// served; cleared for good by a failed SPI read.
@@ -286,9 +288,10 @@ struct Tab {
     left_out: u16,
 }
 
-/// NOLOAD SRAM (.dmabuf): written by `init` before READY is set; TCM is kept
+/// Backup SRAM (.bkp_bss, link-native.x; CPU only, docs/native-boot.md
+/// "Extra RAM areas"): written by `init` before READY is set; TCM is kept
 /// for the stack.
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut STATE: core::mem::MaybeUninit<State> = core::mem::MaybeUninit::uninit();
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut TAB: core::mem::MaybeUninit<Tab> = core::mem::MaybeUninit::uninit();
@@ -748,9 +751,11 @@ fn rd_cyc() -> u32 {
     return 0;
 }
 
-/// The second CSV cursor (`file_read`; TCM .bss like CSV_CUR since the SRAM
-/// audit, docs/native-boot.md; all zero = empty) and the least recently
-/// used one; a cursor at most this far before a read goes on from there.
+/// The second CSV cursor (`file_read`; SRAM on test/scope-chain-0.4, TCM
+/// .bss on release/0.4.0: docs/native-boot.md "SRAM audit"; all zero =
+/// empty) and the least recently used one; a cursor at most this far before
+/// a read goes on from there.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut CSV_CUR2: dlog::Slot<(u16, u32)> = dlog::Slot::new();
 static mut CSV_LRU: u8 = 0;
 const CUR_NEAR: u32 = 1 << 20;

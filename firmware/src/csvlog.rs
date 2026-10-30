@@ -148,7 +148,10 @@ const MAXNEW: usize = FIFO / BLK + 2;
 
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut FIFO_BUF: [u8; FIFO] = [0; FIFO];
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+/// The block being filled. In the USBHS FIFO RAM (.usbhs_bss, link-native.x;
+/// CPU only: the SPI flash takes it by CPU writes; docs/native-boot.md "Extra
+/// RAM areas"); `start` fills it with 0xFF.
+#[cfg_attr(target_os = "none", link_section = ".usbhs_bss")]
 static mut TAIL: [u8; BLK] = [0; BLK];
 
 /// The row FIFO of a recording. Its third tenant, the MMEM:CAT? cache
@@ -398,6 +401,16 @@ fn set_flags(session: bool, flushing: bool) {
 
 // ------------------------------------------------------------- recording API
 
+/// `JOB0` as a region C template (`.rodata.cold_tpl`, link-native.x):
+/// its readers (`start`, from App::rec_start) are region C code; a const copied there was an
+/// anonymous Job image in region B.
+#[repr(transparent)]
+struct JobTpl(Job);
+// SAFETY: read-only plain data.
+unsafe impl Sync for JobTpl {}
+#[cfg_attr(target_os = "none", link_section = ".rodata.cold_tpl")]
+static JOB0_C: JobTpl = JobTpl(JOB0);
+
 /// Start a recording: `func` / `range` go into the header (e.g. "DC V",
 /// "AUTO"), `unit` into every row (e.g. "V"; non-ASCII is transliterated:
 /// "\u{3a9}" -> "Ohm", "\u{b0}" -> "deg", "\u{b5}" -> "u"). `now_ms` = uptime,
@@ -410,7 +423,8 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     if active() || crate::fastlog::holds_disk() {
         return false;
     }
-    *j = JOB0;
+    // SAFETY: plain data, no Drop.
+    unsafe { core::ptr::copy_nonoverlapping(&JOB0_C.0, j, 1) };
     j.state = State::Recording;
     j.t0_ms = now_ms;
     j.last_commit = now_ms;

@@ -58,6 +58,10 @@ extern "C" {
     static mut __bss_end: u32;
     static mut __sram_bss_start: u32;
     static mut __sram_bss_end: u32;
+    static mut __bkp_bss_start: u32;
+    static mut __bkp_bss_end: u32;
+    static mut __usbhs_bss_start: u32;
+    static mut __usbhs_bss_end: u32;
     static mut __sdata: u32;
     static mut __edata: u32;
     static __sidata: u32;
@@ -107,6 +111,32 @@ unsafe fn zero_sram_bss() {
     while p < end {
         p.write_volatile(0);
         p = p.add(1);
+    }
+}
+
+/// RCU_AHB1EN.USBHSEN: the clock of the unused USBHS core, whose 4 KiB FIFO
+/// RAM at 0x40060000 holds `.usbhs_bss` (docs/native-boot.md "Extra RAM areas").
+const RCU_AHB1EN: u32 = 0x4002_3830;
+const USBHSEN: u32 = 1 << 29;
+
+/// The extra RAM areas (link-native.x `.bkp_bss`, `.usbhs_bss`): clocks on,
+/// then zeroed. Every boot, before anything uses them: the RCU is reset with
+/// the core, the backup SRAM keeps the previous image's bytes over a reset
+/// and an update, and the FIFO RAM holds random bytes after power-up. Only
+/// `__bkp_bss_*` is written: the settings record below it and the sequence /
+/// boot words above it are untouched (link-native.x asserts).
+unsafe fn extra_ram_init() {
+    boot::bkp_enable(); // PMU clock, BKPWEN, BKPSRAM clock (as persist::init)
+    mmio::modify32(RCU_AHB1EN, 0, USBHSEN);
+    let _ = mmio::r32(RCU_AHB1EN); // the clock is on before the first access
+    for (mut p, end) in [
+        (core::ptr::addr_of_mut!(__bkp_bss_start), core::ptr::addr_of_mut!(__bkp_bss_end)),
+        (core::ptr::addr_of_mut!(__usbhs_bss_start), core::ptr::addr_of_mut!(__usbhs_bss_end)),
+    ] {
+        while p < end {
+            p.write_volatile(0);
+            p = p.add(1);
+        }
     }
 }
 
@@ -366,6 +396,7 @@ pub fn before_usb() {
 /// Called by the shim (src/shim.rs) with the decision.
 pub unsafe fn start(info: BootInfo) -> ! {
     init_ram();
+    extra_ram_init();
     // The serial number (USB iSerial, SCSI VPD 0x80, *IDN?) for both modes.
     crate::uid::init();
     boot::set_info(info);
