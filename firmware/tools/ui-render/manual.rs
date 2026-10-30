@@ -85,7 +85,7 @@ fn dmm_page(p: &Dp) {
     let v = if r.main.ol { 0.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
-    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
+    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec, peak: false };
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
@@ -179,6 +179,7 @@ pub fn run(out: &str) -> usize {
     host::reset(0);
     ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
     ui::wave_button();
+    ui::peak_button();
     ck.check_opts("manual/range-v", &page, false);
     save1(out, "range-v");
 
@@ -186,6 +187,7 @@ pub fn run(out: &str) -> usize {
     host::reset(0);
     ui::range_page(Button::Amp, Some(7), 0, None);
     ui::wave_button();
+    ui::peak_button();
     ui::inrush_button();
     ck.check_opts("manual/range-a", &page, false);
     save1(out, "range-a");
@@ -689,6 +691,7 @@ pub fn run(out: &str) -> usize {
         host::reset(0);
         ui::range_page(Button::Volt, Some(7), 0, Some((dmm::MV_AUTO_WARN, true)));
         ui::wave_button();
+        ui::peak_button();
         ck.check_opts("manual/range-v-auto", &page, false);
         save1(out, "range-v-auto");
         // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked

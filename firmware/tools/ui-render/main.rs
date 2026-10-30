@@ -2019,7 +2019,9 @@ fn main() {
             continue;
         }
         for ext in [false, true] {
-            for (hold, lim) in [(0u8, meter::V_NONE), (1, meter::V_PASS), (2, meter::V_HI), (3, meter::V_LO)] {
+            // HOLD_PEAK: Peak (app_peak_live.rs): "PEAK", grey digits, the
+            // side column P+ / CF / P-.
+            for (hold, lim) in [(0u8, meter::V_NONE), (1, meter::V_PASS), (2, meter::V_HI), (3, meter::V_LO), (ui::HOLD_PEAK, meter::V_NONE)] {
                 // Timebase x rate chip (FR-05: worst widths SLOW 2.5/s,
                 // FAST 37/s, MED --/s, grey n/a) x REC.
                 let chips = [
@@ -2034,6 +2036,7 @@ fn main() {
                     let rc = chips[k];
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
+                    r.prov |= hold == ui::HOLD_PEAK;
                     // Every alert badge in the status slot, against every hold state.
                     r.alert = ALERTS[(k + hold as usize) % ALERTS.len()];
                     // The alert phase of A-JACK / LIVE? with HOLD (decision
@@ -2069,7 +2072,10 @@ fn main() {
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
-                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
+                    let pk = hold == ui::HOLD_PEAK;
+                    // Peak's CF: 3 decimals; a wide one (a spiky input) too.
+                    let cf = if k % 2 == 0 { 1.4142 } else { 123.456 };
+                    let side = ui::Side { max: Some(v), avg: Some(if pk { cf } else { v }), min: Some(if pk { -v } else { v }), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec, peak: pk };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
@@ -2245,7 +2251,7 @@ fn main() {
                     pts.remove(0);
                 }
                 pts.push(v);
-                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false };
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false, peak: false };
                 if i == 0 {
                     host::reset(0);
                 }
@@ -2602,6 +2608,7 @@ fn main() {
                 // The wave view's entry (builds with the AD2 stream ISR).
                 if b != Button::Ohm {
                     ui::wave_button();
+                    ui::peak_button();
                 }
                 // The inrush page's entry (Current Settings, same builds;
                 // the note row's right column, so not with a note: the app
@@ -3101,9 +3108,23 @@ fn main() {
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
-        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
+        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false, peak: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
+        // Peak (app_peak_live.rs): "PEAK" in the RUN / HOLD slot, the paused
+        // reading grey, P+ / CF / P- in the side column; on a fresh chart
+        // cache (the app's chart_dirty redraws the column).
+        {
+            host::reset(0);
+            dv.draw_static(Button::Volt, 0, false, false);
+            let r = rd(0, val(1.0003, 4, "V"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false);
+            dv.reading(&Reading { prov: true, ..r }, ui::HOLD_PEAK, meter::V_NONE);
+            ui::status_right(&status(0));
+            let pts: Vec<f32> = (0..200).map(|_| r.main.v).collect();
+            let side = ui::Side { max: Some(1.4146), avg: Some(1.414), min: Some(-1.4139), rel: None, secs: Some(42), rec: false, peak: true };
+            ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, "d01p-dmm-peak");
+        }
         // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
         for (file, rate) in [("d01b-dmm-trend-1s28", 8u8), ("d01c-dmm-trend-2s56", 16)] {
             ui::chart(&mut ui::ChartCache::new(), &pts, 4, rate, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
@@ -3213,7 +3234,7 @@ fn main() {
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
-        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true, peak: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         // AUTO coupling: the DC part (DC glyph on the V button and above
@@ -3336,10 +3357,12 @@ fn main() {
             let d_rv = || {
                 ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
                 ui::wave_button();
+                ui::peak_button();
             };
             let d_ra = || {
                 ui::range_page(Button::Amp, Some(7), 1, None);
                 ui::wave_button();
+                ui::peak_button();
                 ui::inrush_button();
             };
             let d_ro = || ui::range_page(Button::Ohm, Some(7), 1, None);
@@ -3358,6 +3381,9 @@ fn main() {
                 }
                 if b == Button::Amp {
                     t.push(ui::RP_INRUSH);
+                }
+                if matches!(b, Button::Volt | Button::Amp) {
+                    t.push(ui::RP_PEAK);
                 }
                 t
             };
@@ -3420,16 +3446,20 @@ fn main() {
         }
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some((dmm::MV_AUTO_WARN, true)));
+        ui::wave_button();
+        ui::peak_button();
         save(&out, "m03-range-v-warn");
         host::reset(0);
         ui::range_page(Button::Amp, Some(7), 1, None);
         ui::wave_button();
+        ui::peak_button();
         ui::inrush_button();
         save(&out, "m03b-range-a-wave");
         // AUTO coupling selected (the fourth coupling button, "AC/DC").
         host::reset(0);
         ui::range_page(Button::Volt, Some(5), 3, Some(("AUTO+ recommended: never steps to mV", false)));
         ui::wave_button();
+        ui::peak_button();
         save(&out, "m03c-range-v-auto");
         // Second ohm mode ("ON" low current): Resistor Settings with it
         // selected, the DMM page with the tag on the ohm button.
@@ -3444,6 +3474,7 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
         ui::wave_button();
+        ui::peak_button();
         save(&out, "m03i-range-v-recording");
         host::reset(0);
         ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: true, i_auto: true, ..pw_cases()[0].1 });
@@ -3573,7 +3604,7 @@ fn main() {
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
-            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false, peak: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
@@ -3606,7 +3637,7 @@ fn main() {
             dv.reading(r, 0, lim);
             dv.short_sync();
             ui::status_right(&status(0));
-            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false, peak: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             dv
         };

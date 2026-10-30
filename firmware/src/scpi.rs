@@ -236,6 +236,12 @@
 //!   CALCulate:AVERage:CLEar               restart the statistics
 //!   CALCulate:AVERage:STATe ON|OFF / ?    recording session (no idle
 //!     power-off; ON restarts the statistics)
+//!   CALCulate:PEAK:STATe ON|OFF / ?       Peak on the DMM page (V / A,
+//!     not AC+DC / AUTO coupling; app_peak.rs): the AD2 stream, the reading
+//!     paused; ON elsewhere / refused: "Settings conflict"
+//!   CALCulate:PEAK:MAXimum? / MINimum? / CRESt?   P+ / P- (SI) and the
+//!     crest factor since ON / CALC:AVER:CLE (kept after OFF); none yet:
+//!     +9.9E37 and "Data stale"
 //!   CALCulate:LIMit:LOWer|UPPer <v> / ?   set a limit (turns the check on);
 //!     query: +9.9E37 when not set
 //!   CALCulate:LIMit:STATe ON|OFF / ?      limit check on / off
@@ -918,6 +924,10 @@ pub enum Cmd {
     CalcAver(u8),
     CalcAverClear,
     CalcAverState(Option<bool>),
+    /// CALC:PEAK:STATe ON|OFF / ? (app_peak_live.rs).
+    CalcPeakState(Option<bool>),
+    /// CALC:PEAK:MAX? / MIN? / CRESt?: 0 / 1 / 2.
+    CalcPeak(u8),
     /// 0 LOWer, 1 UPPer; None = query.
     CalcLim(u8, Option<f32>),
     CalcLimClear,
@@ -2931,6 +2941,14 @@ impl Scpi {
                             Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
                             Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
                             Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
+                            _ => None,
+                        }
+                    } else if kw(sub, "PEAK") {
+                        match leaf {
+                            Some(l) if kw(l, "STATe") => state.map(Cmd::CalcPeakState),
+                            Some(l) if query && kw(l, "MAXimum") => Some(Cmd::CalcPeak(0)),
+                            Some(l) if query && kw(l, "MINimum") => Some(Cmd::CalcPeak(1)),
+                            Some(l) if query && kw(l, "CRESt") => Some(Cmd::CalcPeak(2)),
                             _ => None,
                         }
                     } else if kw(sub, "SMOothing") {

@@ -46,6 +46,13 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+/// Peak +/- and crest factor on the DMM page (src/peak.rs): start / end
+/// (region C) and the part that runs while the AD2 stream does (region B).
+#[path = "app_peak.rs"]
+mod app_peak;
+#[path = "app_peak_live.rs"]
+mod app_peak_live;
+pub use app_peak_live::{peak_on, PEAK_FS, REQ_START as PEAK_START, REQ_STOP as PEAK_STOP};
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -753,8 +760,16 @@ impl App {
             self.wave_exit_to = Some(v);
             return;
         }
+        if v != self.view && self.view == View::Dmm && self.peak_hold_view(v) {
+            // Peak's stream: the same (app_peak_live.rs, `peak_stopped`).
+            return;
+        }
         if v != self.view {
             self.band_until = 0;
+            if self.view == View::Dmm && peak_on() {
+                // Peak asked for, its stream not started: it ends here.
+                self.peak_end(clk, None);
+            }
             self.sp_leave(clk.now_ms());
             if self.view == View::Scope && self.scope.wave_on() {
                 // Leaving the wave view: MCX again, the DMM resumes; the
@@ -906,6 +921,9 @@ impl App {
                 if app_wave::WAVE_BUILD && b == Button::Amp {
                     ui::inrush_button();
                 }
+                if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) {
+                    ui::peak_button();
+                }
             }
             View::Settings if self.set_page == 1 => {
                 // FR-05: rate setting and the measured readings/s.
@@ -1055,8 +1073,14 @@ impl App {
     /// Repaint the shown DMM reading in the DMM page / the combined view's
     /// meter strip (only what changed is drawn).
     fn draw_reading(&mut self) {
-        let Some(r) = self.shown_reading() else { return };
-        let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
+        let Some(mut r) = self.shown_reading() else { return };
+        let (mut hold, lim) = (self.meter.hold_state(), self.meter.verdict());
+        if peak_on() {
+            // Peak (app_peak_live.rs): the AD1 reading is paused, the
+            // digits grey, "PEAK" in the RUN / HOLD slot (ui::hold_label).
+            r.prov = true;
+            hold = ui::HOLD_PEAK;
+        }
         match self.view {
             View::Dmm => {
                 // DBG:PROF? "d.read" (digits + aux rows + labels).
@@ -1678,7 +1702,7 @@ impl App {
         // Nor while the power meter integrates energy with a current flowing.
         // Nor during a CSV recording (Record page: a 24 h log on battery;
         // decisions-2026-10-22.md #1).
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !peak_on() && !self.dmm.pw.integrating() && !crate::csvlog::active() {
             self.persist_now();
             power_off();
         }
@@ -1904,7 +1928,9 @@ impl App {
         // while AutoHold freezes the readout (not in a manual HOLD).
         if now >= self.chart_next {
             self.chart_next = now + self.chart_rate as u64 * 10;
-            if let Some(r) = self.meter.live().copied() {
+            // Not while a stream pauses the DMM poll (Peak): the reading
+            // is stale.
+            if let Some(r) = self.meter.live().copied().filter(|_| !self.logger_busy) {
                 // An empty chart takes the unit / digits of the reading
                 // even while it reads OL: the axis labels name the
                 // function shown, not the previous one (device check
@@ -1938,14 +1964,9 @@ impl App {
         if self.chart_dirty && self.view == View::Dmm {
             self.chart_dirty = false;
             let st = self.meter.stats_disp();
-            let side = ui::Side {
-                max: st.map(|s| s.1),
-                avg: st.map(|s| s.2),
-                min: st.map(|s| s.0),
-                rel: self.meter.rel_value(),
-                secs: self.meter.stats.secs(now),
-                rec: self.meter.stats.rec,
-            };
+            let pk = peak_on();
+            let (max, avg, min) = if pk { self.peak_side() } else { (st.map(|s| s.1), st.map(|s| s.2), st.map(|s| s.0)) };
+            let side = ui::Side { max, avg, min, rel: self.meter.rel_value(), secs: self.meter.stats.secs(now), rec: self.meter.stats.rec, peak: pk };
             let rc = ui::RateChip { rate: self.dmm.rate() as u8, period_ms: self.dmm.reading_period_ms(), applies: self.dmm.rate_applies() };
             // DBG:PROF? "d.chart" (one trend point: columns + labels + side).
             crate::prof::enter(crate::prof::DCHART);
@@ -3103,10 +3124,10 @@ impl App {
             Gesture::LongPress(p) if self.view == View::Dmm && p.x >= 402 && (175..279).contains(&p.y) => {
                 captured = true;
                 // MIN/MAX/AVG column (REL box included): reset the statistics
-                // (UF-35; distinct from the history-row clear above).
-                self.meter.stats.clear();
+                // (UF-35; distinct from the history-row clear above); P+ /
+                // P- / CF too while Peak is on.
+                self.stats_clear();
                 self.beep(now, 300);
-                self.chart_dirty = true;
             }
             _ => {}
         }
@@ -3171,7 +3192,7 @@ impl App {
     /// goes on unless the user touches the screen or a key.
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = self.off_ms();
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
+        if off == 0 || self.meter.stats.rec || peak_on() || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }
@@ -3397,6 +3418,8 @@ impl App {
             Some("Settings conflict: Wave view")
         } else if self.view == View::Inrush {
             Some("Settings conflict: inrush page")
+        } else if peak_on() {
+            Some("Settings conflict: Peak")
         } else {
             None
         }
@@ -3604,7 +3627,7 @@ impl App {
                 // runs the idle shutdown is off (FR-02). Long press = reset.
                 let on = !self.meter.stats.rec;
                 if on {
-                    self.meter.stats.clear();
+                    self.stats_clear();
                 }
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
@@ -3771,6 +3794,10 @@ impl App {
                 }
                 if app_wave::WAVE_BUILD && b == Button::Amp && ui::inrush_hit(x, y) {
                     let _ = self.inrush_open(clk);
+                    return;
+                }
+                if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::peak_hit(x, y) {
+                    self.peak_tap(clk);
                     return;
                 }
                 match ui::range_hit(b, self.range_sel(), x, y) {
@@ -4482,6 +4509,7 @@ impl App {
     /// CALC:AVER:CLEar (keeps a running recording session).
     pub fn stats_clear(&mut self) {
         self.meter.stats.clear();
+        self.peak_clear();
         self.chart_dirty = true;
     }
 
@@ -4797,6 +4825,7 @@ impl App {
                 self.stats_clear();
                 false
             }
+            C::CalcPeakState(_) | C::CalcPeak(_) => self.peak_scpi(clk, cmd, out),
             C::CalcAverState(Some(on)) => {
                 self.set_stats_rec(on);
                 false

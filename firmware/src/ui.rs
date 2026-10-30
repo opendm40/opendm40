@@ -1339,6 +1339,7 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 /// With HOLD / A-HOLD, A-JACK and LIVE? take the slot every other second
 /// (`slot_alert`); each phase repaints the whole 119..201 box.
 fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
+    // HOLD_PEAK: Peak runs (the reading paused).
     use crate::sentinel::Alert;
     let r = rect(119, 1, 71, 32);
     if (hold == 0 && alert != Alert::None) || slot_alert(hold, alert, alt) {
@@ -1356,9 +1357,19 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
             lcd::fill_rect(119, 29, 71, 4, BAR);
             sf::label(sf::TEXT22, rect(119, 5, 71, 24), "A-HOLD", fg, bg, 8, 0);
         }
+        // Peak: the A-HOLD capture's face (dark on the value colour).
+        HOLD_PEAK => {
+            lcd::fill_rect(119, 1, 71, 4, BAR);
+            lcd::fill_rect(119, 29, 71, 4, BAR);
+            sf::label(sf::TEXT22, rect(119, 5, 71, 24), "PEAK", BG, VALUE, 8, 1);
+        }
         _ => sf::label(sf::F21, r, if hold == 1 { "HOLD" } else { "RUN" }, STATUS_FG, BAR, 8, 0),
     }
 }
+
+/// `DmmView::reading`'s `hold` while Peak runs (app.rs `draw_reading`):
+/// "PEAK" in the RUN / HOLD slot.
+pub const HOLD_PEAK: u8 = 4;
 
 /// FR-06 verdict badge (meter::V_*): a pill between the digits and the
 /// mode glyph, green "OK" (pass), red "HI" / "LO" (fail above / below), none
@@ -1571,6 +1582,22 @@ pub fn inrush_button() {
     sf::glyphs(sf::TEXT22, INRUSH_BTN, "Inrush", STATUS_FG, 0x2966, 8, 0);
 }
 
+/// "Peak" on the Voltage / Current Settings pages (app_peak.rs; builds with
+/// the AD2 stream ISR only): the note row, left column (left of Fuse check
+/// on the A page; the V page's note moves right of it, `range_note`).
+pub const PEAK_BTN: sf::Rect = rect(8, 141, 150, 36);
+
+pub fn peak_button() {
+    sf::rbox(PEAK_BTN, 6, 0x2966, BG);
+    sf::glyphs(sf::TEXT22, PEAK_BTN, "Peak", STATUS_FG, 0x2966, 8, 0);
+}
+
+/// The Peak button was hit (the gaps to its neighbours split as theirs).
+pub fn peak_hit(x: u16, y: u16) -> bool {
+    let (x, y) = (x as i16, y as i16);
+    (139..180).contains(&y) && (4..160).contains(&x)
+}
+
 /// The Inrush button was hit (the gaps to its neighbours split as theirs).
 pub fn inrush_hit(x: u16, y: u16) -> bool {
     let (x, y) = (x as i16, y as i16);
@@ -1606,10 +1633,12 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
 }
 
 /// Range page note line (`range_page`): rows 142..177, under the second
-/// button row (ends 136), above the DC / AC buttons (182); spacing 1 (TEXT22
-/// glyphs touch at spacing 0).
+/// button row (ends 136), above the DC / AC buttons (182), right of the
+/// Peak button (PEAK_BTN); F14 (the TEXT22 line was 430 px wide),
+/// spacing 1.
 pub fn range_note(t: &str, warn: bool) {
-    sf::glyphs(sf::TEXT22, rect(8, 142, 464, 36), t, if warn { VALUE } else { DIM }, BG, 8, 1);
+    let x = PEAK_BTN.x + PEAK_BTN.w + 6;
+    sf::glyphs(sf::F14, rect(x, 142, 472 - x, 36), t, if warn { VALUE } else { DIM }, BG, 8, 1);
 }
 
 /// The bottom row of the MF range / temperature pages (owner 2026-10-30:
@@ -1697,6 +1726,7 @@ pub const OHM_VARS: [&str; 2] = ["0.90 mA", "0.28 mA ON"];
 pub const RP_ERR: u8 = 100;
 pub const RP_WAVE: u8 = 120;
 pub const RP_INRUSH: u8 = 121;
+pub const RP_PEAK: u8 = 122;
 
 /// Pressed feedback on the MF range page (ui-review #11): button `t` (a
 /// range item index, RP_*) drawn pressed (`on`: the list rows' pressed
@@ -1707,6 +1737,7 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
     let (r, name, selected) = match t {
         RP_WAVE => (WAVE_BTN, "Wave", false),
         RP_INRUSH => (INRUSH_BTN, "Inrush", false),
+        RP_PEAK => (PEAK_BTN, "Peak", false),
         i if (i as usize) < items.len() => (range_rect(i as usize), items[i as usize].0, sel == Some(i as usize)),
         RP_ERR.. => match (t - RP_ERR, b) {
             (k @ 0..=1, Button::Ohm) => (rect([8, 244][k as usize], 182, 228, 38), OHM_VARS[k as usize], k == sub),
@@ -2102,7 +2133,7 @@ fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
 /// running AVG repaints only when a shown digit changes.
 pub struct ChartCache {
     scale: Option<(u32, u32, u8, &'static str)>,
-    side: Option<(u8, &'static str)>,
+    side: Option<(u8, &'static str, bool)>,
     rows: [i64; 4],
     time: Option<(u32, bool)>,
     rate: u8,
@@ -2227,6 +2258,9 @@ pub struct Side {
     pub rel: Option<f32>,
     pub secs: Option<u32>,
     pub rec: bool,
+    /// Peak (app_peak_live.rs): the rows are P+, CF, P- (`max`, `avg`,
+    /// `min`; CF a ratio, 3 decimals).
+    pub peak: bool,
 }
 
 /// Right column: text x range and the line tops of MAX, AVG, MIN, time
@@ -2400,17 +2434,18 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     // without the unit, which is shown once, in the REL box header
     // ("REL" .. "mV"). The stock version crammed "4.8170V" into 54 px with
     // touching glyphs.
-    if c.side != Some((dec, unit)) {
-        c.side = Some((dec, unit));
+    if c.side != Some((dec, unit, side.peak)) {
+        c.side = Some((dec, unit, side.peak));
         c.rows = [i64::MIN; 4];
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
         lcd::fill_rect(402, 243, 78, 36, BG);
-        for (i, t) in ["MAX", "AVG", "MIN"].iter().enumerate() {
-            sf::label(sf::F14, rect(SIDE_X, SIDE_Y[i], 22, 14), t, DIM, BG, 0, 1);
+        let names = if side.peak { ["P+", "CF", "P-"] } else { ["MAX", "AVG", "MIN"] };
+        for (i, t) in names.iter().enumerate() {
+            sf::label(sf::F14, rect(SIDE_X, SIDE_Y[i], 22, 14), t, if side.peak { VALUE } else { DIM }, BG, 0, 1);
         }
     }
-    let q = |v: Option<f32>| -> i64 {
+    let q = |v: Option<f32>, dec: u8| -> i64 {
         match v {
             Some(x) if x.is_finite() => {
                 let mut s = 1.0f32;
@@ -2425,7 +2460,9 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     };
     let mut t = [0u8; 16];
     for (i, v) in [side.max, side.avg, side.min].iter().enumerate() {
-        let k = q(*v);
+        // Peak's CF: a ratio, 3 decimals.
+        let dec = if side.peak && i == 1 { 3 } else { dec };
+        let k = q(*v, dec);
         if c.rows[i] != k {
             c.rows[i] = k;
             // One decimal less when the value is wider than its box
@@ -2439,7 +2476,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             sf::label(sf::F14, rect(SIDE_X + 25, SIDE_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
-    let k = q(side.rel.or(Some(0.0)));
+    let k = q(side.rel.or(Some(0.0)), dec);
     if c.rows[3] != k {
         c.rows[3] = k;
         let r = rect(405, 205, 71, 38);
