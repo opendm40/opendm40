@@ -2559,28 +2559,30 @@ fn main() {
     }
     // Record page: every interval x duration value in the steppers (they
     // fit the 134 px between the keys), the estimate texts, Start / Stop.
-    for (k, (iv, du, free, on)) in [
-        ("Every reading", "Until stopped", "about 1193 h (limit)", false),
-        ("1 min", "24 h", "about 62 h left", true),
-        ("10 s", "10 min", "-- (disk busy)", false),
-        ("1 s", "8 h", "< 1 h left", true),
-        ("Every reading", "1 h", "-- (no disk)", false),
+    for (k, (iv, ch, du, free, on)) in [
+        ("Every reading", "1 %", "Until stopped", "about 1193 h (limit)", false),
+        ("1 min", "1 %", "24 h", "about 62 h left", true),
+        ("On change", "0.1 %", "Until stopped", "about 62 h left", false),
+        ("On change", "5 %", "24 h", "< 1 h left", true),
+        ("10 s", "1 %", "10 min", "-- (disk busy)", false),
+        ("1 s", "5 %", "8 h", "< 1 h left", true),
+        ("Every reading", "0.1 %", "1 h", "-- (no disk)", false),
         // the fast logger (fastlog.rs): its estimate texts
-        ("Fast", "Until stopped", "-- (DC/AC V or A only)", false),
-        ("Fast", "10 min", "38400/s, 119 min left", true),
-        ("Fast", "24 h", "640/s, 1234 h left", false),
+        ("Fast", "1 %", "Until stopped", "-- (DC/AC V or A only)", false),
+        ("Fast", "1 %", "10 min", "38400/s, 119 min left", true),
+        ("Fast", "1 %", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()
     {
         host::reset(0);
-        ui::record_page([iv, du], free, on);
-        ck.check_opts(&format!("record/{iv}/{du}/{free}/{on}"), &page_regions, false);
-        if k < 2 {
-            save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
+        ui::record_page([iv, ch, du], free, on);
+        ck.check_opts(&format!("record/{iv}/{ch}/{du}/{free}/{on}"), &page_regions, false);
+        if k < 3 {
+            save(&out, &format!("m12-record-{}", ["start", "stop", "change"][k]));
         }
     }
-    for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
+    for t in ui::REC_INTERVALS.iter().chain(ui::REC_CHANGES.iter()).chain(ui::REC_DURATIONS.iter()) {
         ck.cases += 1;
         let w = stockfont::text_width(stockfont::TEXT22, t, 0);
         let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
@@ -3327,8 +3329,8 @@ fn main() {
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
             let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
-            let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
-            let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
+            let d_rec = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", false);
+            let d_recon = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", true);
             let g = &w.gen;
             let d_gen = || ui::gen_static(g);
             // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,

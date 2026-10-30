@@ -498,10 +498,12 @@ pub enum Log {
     /// LOG:FORMat: Some(logger::FMT_*) to set, None = query.
     Format(Option<u8>),
     Csv(Option<bool>),
-    /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
-    /// DURATIONS_S) to set, None = query.
+    /// LOG:CSV:INTerval / DURation / CHANge: Some(index into
+    /// csvlog::INTERVALS_S (csvlog::ON_CHANGE: CHANge) / DURATIONS_S /
+    /// CHANGES) to set, None = query.
     CsvInt(Option<u8>),
     CsvDur(Option<u8>),
+    CsvChg(Option<u8>),
     CsvFree,
     /// LOG:DEST DISK (true) | HOST (false) | ? (None).
     Dest(Option<bool>),
@@ -815,6 +817,36 @@ fn tcal_arg(a: &[u8]) -> bool {
         n += 1;
     }
     n == 6 && crate::touchcal::scpi_put(&v)
+}
+
+/// LOG:CSV:INTerval / DURation / CHANge [?], LOG:CSV:FREE? (the Record
+/// page's settings): the command, or the error. Values: exactly one of
+/// csvlog::INTERVALS_S (or CHANge) / DURATIONS_S (s) / CHANGES (%); another
+/// number is -222, anything else -224.
+#[inline(never)] // .cold (link-native.x)
+fn csv_arg(s2: &[u8], a: &[u8], query: bool) -> Result<Log, &'static str> {
+    use crate::csvlog::{CHANGES, DURATIONS_S, INTERVALS_S, ON_CHANGE};
+    const BAD: &str = "Illegal parameter value";
+    if kw(s2, "FREE") && query {
+        return Ok(Log::CsvFree);
+    }
+    let n = parse_num(a);
+    let pick = |i: Option<usize>| match (query, i) {
+        (true, _) => Ok(None),
+        (false, Some(i)) => Ok(Some(i as u8)),
+        (false, None) => Err(if n.is_some() { RANGE } else { BAD }),
+    };
+    let secs = |set: &[u32]| n.and_then(|v| set.iter().position(|&x| x as f32 == v));
+    if kw(s2, "INTerval") {
+        let i = if kw(a, "CHANge") { Some(ON_CHANGE as usize) } else { secs(&INTERVALS_S) };
+        Ok(Log::CsvInt(pick(i)?))
+    } else if kw(s2, "DURation") {
+        Ok(Log::CsvDur(pick(secs(&DURATIONS_S))?))
+    } else if kw(s2, "CHANge") {
+        Ok(Log::CsvChg(pick(n.and_then(|v| CHANGES.iter().position(|c| parse_num(c.as_bytes()) == Some(v))))?))
+    } else {
+        Err("Undefined header")
+    }
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -2674,28 +2706,12 @@ impl Scpi {
                             }
                         }
                     } else if kw(sub, "CSV") && parts.len() > 2 {
-                        let s2 = parts[2];
-                        // Seconds -> index of the allowed value (exact).
-                        let idx = |set: &[u32]| parse_num(a).and_then(|v| set.iter().position(|&x| x as f32 == v)).map(|i| i as u8);
-                        if kw(s2, "INTerval") || kw(s2, "DURation") {
-                            let int = kw(s2, "INTerval");
-                            let set: &[u32] = if int { &crate::csvlog::INTERVALS_S } else { &crate::csvlog::DURATIONS_S };
-                            let v = if query { None } else {
-                                match idx(set) {
-                                    Some(i) => Some(i),
-                                    None => {
-                                        // A number not in the set: -222.
-                                        self.err_arg(no_arg, if parse_num(a).is_some() { RANGE } else { BAD });
-                                        continue;
-                                    }
-                                }
-                            };
-                            Out::Log(if int { Log::CsvInt(v) } else { Log::CsvDur(v) })
-                        } else if kw(s2, "FREE") && query {
-                            Out::Log(Log::CsvFree)
-                        } else {
-                            self.err_arg(no_arg, "Undefined header");
-                            continue;
+                        match csv_arg(parts[2], a, query) {
+                            Ok(l) => Out::Log(l),
+                            Err(e) => {
+                                self.err_arg(no_arg, e);
+                                continue;
+                            }
                         }
                     } else if kw(sub, "CSV") {
                         match state {

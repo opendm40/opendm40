@@ -156,6 +156,10 @@ SECTIONS
          * (the per-frame apply is touch.rs `screen`, region B). */
         *(.text.*8opendm408touchcal*);
         *(.text.*8opendm404scpi8tcal_arg*);
+        /* The Record page's SCPI settings (LOG:CSV:INTerval / DURation /
+         * CHANge): parse and set / query, rarely sent. */
+        *(.text.*8opendm404scpi7csv_arg*);
+        *(.text.*8opendm408rec_scpi*);
         *(.text.*8opendm402ui3inr4page*);
         *(.text.*8opendm402ui3inr5trace*);
         *(.text.*8opendm406inrush*3Cap7results*);

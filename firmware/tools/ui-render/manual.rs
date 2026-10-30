@@ -208,13 +208,13 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/limits", &page, false);
     save1(out, "limits");
 
-    // Record page: every reading, until stopped; and while it records.
+    // Record page: on change, until stopped; and the fast recorder.
     host::reset(0);
-    ui::record_page(["Every reading", "Until stopped"], "about 240 h left", false);
+    ui::record_page(["On change", "1 %", "Until stopped"], "about 240 h left", false);
     ck.check_opts("manual/record", &page, false);
     save1(out, "record");
     host::reset(0);
-    ui::record_page(["Fast", "1 h"], "4800/s, 25 min left", false);
+    ui::record_page(["Fast", "1 %", "1 h"], "4800/s, 25 min left", false);
     ck.check_opts("manual/record-fast", &page, false);
     save1(out, "record-fast");
 

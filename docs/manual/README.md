@@ -2037,7 +2037,8 @@ frequency: **MF**, then **Record** at the bottom of Hold & Limits.
 
 | Row | What it does |
 |---|---|
-| **Interval** | **Every reading**: one row per reading. **1 s**, **10 s**, **1 min**: one row per interval with the mean of the readings in it. **Fast**: the [fast recorder](#fast-recording). Tap **-** / **+** to change. |
+| **Interval** | **Every reading**: one row per reading. **1 s**, **10 s**, **1 min**: one row per interval with the mean of the readings in it. **On change**: a row when the reading changes, see **Change**. **Fast**: the [fast recorder](#fast-recording). Tap **-** / **+** to change. |
+| **Change** | For **On change**: a row when the reading moves by more than **0.1 %**, **1 %** or **5 %** of the range, when OL / HI / LO changes, and at least once a minute. |
 | **Duration** | **Until stopped**, **10 min**, **1 h**, **8 h** or **24 h**. A recording with a duration stops by itself. |
 | **Free** | How long the free disk space lasts at this interval, for example **about 120 h left**. |
 | **Start recording** / **Stop recording** | Starts the recording and goes back to the multimeter page, or stops a running one. |

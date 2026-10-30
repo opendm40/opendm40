@@ -649,7 +649,8 @@ the disk.
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
 | `LOG:CSV[?]` | `ON` or `OFF` | `<state>,<file>,<rows>,<bytes>,<committed>,<dropped>` | both; `ON` USB only |
-| `LOG:CSV:INTerval[?]` | `0` (every reading, default), `1`, `10` or `60` s | `0` | both |
+| `LOG:CSV:INTerval[?]` | `0` (every reading, default), `1`, `10` or `60` s, or `CHANge` (on change) | `0`, or `CHAN` | both |
+| `LOG:CSV:CHANge[?]` | `0.1`, `1` (default) or `5` % of the range's full scale | `1` | both |
 | `LOG:CSV:DURation[?]` | `0` (until stopped, default), `600`, `3600`, `28800` or `86400` s | `0` | both |
 | `LOG:CSV:FREE?` | | Free bytes on the disk | both |
 
@@ -657,7 +658,9 @@ the disk.
   no disk, 6 error; file is -1 until the first save.
 - `INTerval` and `DURation` apply to the next recording (`Settings
   conflict` while one runs). With an interval, each row is the mean of the
-  readings in it.
+  readings in it. With `CHANge`, a row at its reading's time when the
+  value moves by more than `LOG:CSV:CHANge` % of the range's full scale
+  from the last row, when OL / HI / LO changes, or 60 s after the last row.
 - `LOG:CSV ON` fails with `Settings conflict: Wave view`, `Settings
   conflict: inrush page`, or `Settings conflict` (no reading yet, a
   recording already on, the disk not available).

@@ -889,7 +889,7 @@ fn recording(img: &mut Img, t: &mut dyn FnMut(&str, bool)) {
     let mut now = 1000;
     for _ in 0..50 {
         now += 200;
-        csvlog::push(now, 1.0, 0);
+        csvlog::push(now, 1.0, 0, 6.0);
         csvlog::poll_on(img, now);
     }
     let name = csvlog::recording_name();
