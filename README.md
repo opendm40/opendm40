@@ -77,10 +77,6 @@ You need a DM40 with the stock firmware, a USB cable and a charged battery.
 5. Back up your meter: copy the `INFO/` folder from the opendm40 USB disk to
    your computer and keep it ([Back up](#back-up-with-opendm40)).
 
-Installing over the stock **USB Connect** disk has not been tried with an
-opendm40 image yet. If the meter stops on the loader's update screen,
-[install the file from there](docs/manual/README.md#install-a-file-from-the-update-loader).
-
 The same steps with pictures, and updating from a running opendm40:
 [the manual, Getting started](docs/manual/README.md#getting-started).
 
