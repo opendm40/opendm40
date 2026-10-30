@@ -1706,6 +1706,21 @@ pub const RP_INRUSH: u8 = 121;
 /// colour) or as `range_page` draws it (`sel` / `sub` as there).
 #[inline(never)] // .cold (link-native.x): per touch on the MF page
 pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
+    let Some((r, item)) = range_press_item(b, t, sel, sub) else { return };
+    let Some((name, selected)) = item else { return record_button(r, on) };
+    let c = if on { K_SEL } else if selected { SEL } else { 0x2966 };
+    sf::rbox(r, 6, c, BG);
+    sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+}
+
+/// The box `range_press` draws for `t` (the press feedback's strip box).
+pub fn range_press_rect(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<sf::Rect> {
+    range_press_item(b, t, sel, sub).map(|i| i.0)
+}
+
+/// Range page item `t` (`range_press`): its box and (name, selected), or
+/// None for the Record button.
+fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf::Rect, Option<(&'static str, bool)>)> {
     let items = range_items(b);
     let (r, name, selected) = match t {
         RP_WAVE => (WAVE_BTN, "Wave", false),
@@ -1723,15 +1738,13 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
             }
             (2, _) => (bottom_rect(3), "OK", false),
             (4, _) => (bottom_rect(0), "Limits", false),
-            (7, _) => return record_button(bottom_rect(1), on),
+            (7, _) => return Some((bottom_rect(1), None)),
             (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
-            _ => return,
+            _ => return None,
         },
-        _ => return,
+        _ => return None,
     };
-    let c = if on { K_SEL } else if selected { SEL } else { 0x2966 };
-    sf::rbox(r, 6, c, BG);
-    sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+    Some((r, Some((name, selected))))
 }
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
@@ -1812,7 +1825,7 @@ const T_NTC_Y: i16 = 186;
 const T_ROW_H: i16 = 36;
 
 /// Button rectangle of a temperature-page code (None: not on this page).
-fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
+pub fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
     Some(match code {
         0..=7 => range_rect(code as usize),
         TK_MINUS => rect(132, T_ROW_Y, 72, T_ROW_H),
@@ -2567,6 +2580,11 @@ pub fn gen_press(g: &gen::Gen, k: usize, pressed: bool) {
     gen_box(g, k, bg);
 }
 
+/// The box `gen_press` draws for `k` (the press feedback's strip box).
+pub fn gen_press_rect(k: usize) -> sf::Rect {
+    if k >= 4 { rect(4, 40, 239, 42) } else { rect(246, GEN_BOX_Y[k.min(3)], 230, GEN_BOX_H) }
+}
+
 /// Box `k`'s fill and name.
 fn gen_box_frame(k: usize, bg: Color) {
     let y = GEN_BOX_Y[k];
@@ -2843,6 +2861,11 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str, sel: bool) {
 
 /// Keypad key `code` normal or pressed (stock pressed colour 0x04FC;
 /// ui-review #11: feedback at touch-down).
+/// The box of keypad key `code` (`keypad_key`).
+pub fn keypad_key_rect(kind: u8, code: u8) -> Option<sf::Rect> {
+    keypad_keys(kind).iter().find(|k| k.2 == code && code != 0).map(|k| k.0)
+}
+
 pub fn keypad_key(kind: u8, code: u8, pressed: bool) {
     if let Some(&(r, l, c)) = keypad_keys(kind).iter().find(|k| k.2 == code && code != 0) {
         let bg = if pressed { K_SEL } else { K_KEY };

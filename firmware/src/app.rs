@@ -2981,18 +2981,18 @@ impl App {
             match g {
                 Gesture::Down(p) => {
                     if let Some(c) = self.tp_pressed.take() {
-                        self.with_temp_page(Some((c, false)));
+                        self.tp_key(c, false);
                     }
                     self.tp_pressed = ui::temp_hit(k, p.x, p.y);
                     if let Some(c) = self.tp_pressed {
-                        self.with_temp_page(Some((c, true)));
+                        self.tp_key(c, true);
                     }
                 }
                 Gesture::Drag(_, p, _) | Gesture::Move(_, p) if ui::temp_hit(k, p.x, p.y) == self.tp_pressed => {}
                 Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.tp_pressed.take() {
-                        self.with_temp_page(Some((c, false)));
+                        self.tp_key(c, false);
                     }
                 }
             }
@@ -3003,11 +3003,11 @@ impl App {
             match g {
                 Gesture::Down(p) => {
                     if let Some(c) = self.kp_pressed.take() {
-                        ui::keypad_key(self.kp_kind(), c, false);
+                        self.kp_key(c, false);
                     }
                     self.kp_pressed = ui::keypad_hit(self.kp_kind(), p.x, p.y);
                     if let Some(c) = self.kp_pressed {
-                        ui::keypad_key(self.kp_kind(), c, true);
+                        self.kp_key(c, true);
                     }
                 }
                 // A finger rolled off the key (its release may emit
@@ -3016,7 +3016,7 @@ impl App {
                 Gesture::Grab(_) => {}
                 _ => {
                     if let Some(c) = self.kp_pressed.take() {
-                        ui::keypad_key(self.kp_kind(), c, false);
+                        self.kp_key(c, false);
                     }
                 }
             }
@@ -4195,7 +4195,7 @@ impl App {
     /// (Some((code, pressed))). One function, not a closure parameter: four
     /// monomorphized copies of ~330 B each before (region C audit #1).
     #[inline(never)] // .cold (link-native.x): temperature page draw / taps
-    fn with_temp_page(&self, key: Option<(u8, bool)>) {
+    pub(super) fn with_temp_page(&self, key: Option<(u8, bool)>) {
         let k = self.dmm.t_sensor();
         let mut b = [0u8; 64];
         let n = self.temp_info_text(&mut b);
@@ -4261,7 +4261,7 @@ impl App {
         let k = self.dmm.t_sensor();
         self.dmm.set_t_offs(k, c);
         if self.view == View::Range && self.dmm.hy_mode() == 15 {
-            self.with_temp_page(Some((ui::TK_OFFS, false)));
+            self.tp_key(ui::TK_OFFS, false);
         }
     }
 

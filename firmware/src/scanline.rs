@@ -114,14 +114,16 @@ fn calibrate() {
 #[inline(never)]
 pub fn wait(x0: u16, y0: u16, x1: u16, y1: u16) -> u32 {
     let st = s();
-    if st.on && st.cal == 0 {
+    if st.on && st.cal == 0 && !crate::hy3131::streaming() {
         calibrate();
     }
     let st = *s();
     let t_start = cyc();
     let mut ok = false;
     let mut l = 0;
-    if st.on && st.cal == 1 {
+    // Not while the AD2 stream ISR needs the bus and the CPU (the scope /
+    // Wave stream, an armed inrush capture).
+    if st.on && st.cal == 1 && !crate::hy3131::streaming() {
         let (a, b) = match st.dir {
             0 => (x0, x1),
             1 => (479 - x1.min(479), 479 - x0.min(479)),

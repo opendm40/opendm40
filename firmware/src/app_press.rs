@@ -134,20 +134,20 @@ impl App {
     /// one strip pass where `ui::press_rect` knows it (each pixel once),
     /// else directly.
     fn press_draw(&mut self, t: ui::RowPress) {
-        if let Some(r) = ui::press_rect(self.view, t) {
-            if let Some(buf) = crate::calbackup::strip_take() {
-                let (x0, y0, x1, y1) = (r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
-                // Between two passes of the panel's refresh scan (no TE).
-                let t0 = crate::scanline::wait(x0, y0, x1, y1);
-                crate::lcd::strips_box(buf, x0, y0, x1, y1, || self.press_draw_direct(t));
-                crate::scanline::done(t0, r.w as u32 * r.h as u32);
-                if crate::calbackup::strip_give() {
-                    return;
-                }
-                // A disk user took the buffer meanwhile: draw it again.
+        let r = match self.view {
+            View::Gen => Some(ui::gen_press_rect(t.row as usize)),
+            View::Range if self.dmm.pw.on => ui::pw::settings_press_rect(&self.dmm.pw_state(), t.row),
+            View::Range => {
+                let b = self.dmm.button();
+                let sub = if b == Button::Ohm { self.dmm.ohm_var() } else { self.dmm.sub() };
+                ui::range_press_rect(b, t.row, self.range_sel(), sub)
             }
+            v => ui::press_rect(v, t),
+        };
+        match r {
+            Some(r) => draw_box(r, &mut || self.press_draw_direct(t)),
+            None => self.press_draw_direct(t),
         }
-        self.press_draw_direct(t);
     }
 
     /// Item `t` drawn pressed / released: the page's own draw call limited
@@ -170,6 +170,25 @@ impl App {
         }
     }
 
+    /// Keypad key `c` drawn pressed / released (a strip box, `draw_box`).
+    #[inline(never)]
+    pub(super) fn kp_key(&self, c: u8, on: bool) {
+        let k = self.kp_kind();
+        match ui::keypad_key_rect(k, c) {
+            Some(r) => draw_box(r, &mut || ui::keypad_key(k, c, on)),
+            None => ui::keypad_key(k, c, on),
+        }
+    }
+
+    /// Temperature page key `c` drawn pressed / released (`draw_box`).
+    #[inline(never)]
+    pub(super) fn tp_key(&self, c: u8, on: bool) {
+        match ui::temp_rect(self.dmm.t_sensor(), c) {
+            Some(r) => draw_box(r, &mut || self.with_temp_page(Some((c, on)))),
+            None => self.with_temp_page(Some((c, on))),
+        }
+    }
+
     /// After a tap's action: the item drawn released, unless the page is
     /// left or repainted anyway.
     #[inline(never)]
@@ -187,4 +206,23 @@ impl App {
     fn press_end(&mut self) {
         self.pressed = None;
     }
+}
+
+/// A tap-feedback box `r` drawn by `draw` (which must cover it): composed
+/// in RAM strips and sent once each pixel (lcd::strips_box), started when
+/// the panel's refresh scan has just left the box (scanline.rs); directly
+/// while a disk job holds the strip buffer.
+#[inline(never)]
+pub(super) fn draw_box(r: crate::stockfont::Rect, draw: &mut dyn FnMut()) {
+    if let Some(buf) = crate::calbackup::strip_take() {
+        let (x0, y0, x1, y1) = (r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
+        let t0 = crate::scanline::wait(x0, y0, x1, y1);
+        crate::lcd::strips_box(buf, x0, y0, x1, y1, draw);
+        crate::scanline::done(t0, r.w as u32 * r.h as u32);
+        if crate::calbackup::strip_give() {
+            return;
+        }
+        // A disk user took the buffer meanwhile: draw it again.
+    }
+    draw();
 }

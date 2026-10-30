@@ -651,7 +651,7 @@ pub fn strips(buf: &mut [Color], mut draw: impl FnMut()) {
 /// box's pixels are sent, each once in its final colour; what `draw` puts
 /// outside the box is dropped. `draw` must cover the whole box.
 #[inline(never)]
-pub fn strips_box(buf: &mut [Color], x0: u16, y0: u16, x1: u16, y1: u16, mut draw: impl FnMut()) {
+pub fn strips_box(buf: &mut [Color], x0: u16, y0: u16, x1: u16, y1: u16, draw: &mut dyn FnMut()) {
     let n = (buf.len() / W as usize).min(H as usize) as u16;
     let (x1, y1) = (x1.min(W - 1), y1.min(H - 1));
     if n == 0 || x0 > x1 || y0 > y1 {

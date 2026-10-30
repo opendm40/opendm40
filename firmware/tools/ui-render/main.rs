@@ -1164,13 +1164,13 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
 }
 
-/// Pressed feedback in one pass (app_press.rs, lcd::strips_box): over the
-/// page drawn by `page`, item `t` drawn pressed / released by `item` in a
-/// strip pass over `ui::press_rect` ends as the direct draw does, the
+/// Pressed feedback in one pass (app_press.rs draw_box, lcd::strips_box):
+/// over the page drawn by `page`, an item drawn pressed / released by
+/// `item` in a strip pass over its box `r` ends as the direct draw does, the
 /// direct draw changes nothing outside that box, and the pass writes each
 /// pixel of the box once and nothing else.
-fn press_check(ck: &mut Checker, name: &str, view: ui::View, t: ui::RowPress, page: &dyn Fn(), item: &dyn Fn()) {
-    let Some(r) = ui::press_rect(view, t) else {
+fn press_check(ck: &mut Checker, name: &str, r: Option<stockfont::Rect>, page: &dyn Fn(), item: &dyn Fn()) {
+    let Some(r) = r else {
         ck.fail(name, "press: no box".into());
         return;
     };
@@ -1184,7 +1184,7 @@ fn press_check(ck: &mut Checker, name: &str, view: ui::View, t: ui::RowPress, pa
     page();
     let w0 = host::emu().writes;
     let mut buf = vec![0u16; 6144];
-    lcd::strips_box(&mut buf, x0 as u16, y0 as u16, x1 as u16, y1 as u16, || item());
+    lcd::strips_box(&mut buf, x0 as u16, y0 as u16, x1 as u16, y1 as u16, &mut || item());
     let writes = host::emu().writes - w0;
     ck.cases += 1;
     let inside = |i: usize| (x0..=x1).contains(&(i % W)) && (y0..=y1).contains(&(i / W));
@@ -2632,6 +2632,16 @@ fn main() {
         if emu().fb != before {
             ck.fail(&format!("temp/{k}/{offs}"), "pressed / released key differs from a full draw".into());
         }
+        // Each key in one strip pass over its box (app_press.rs draw_box).
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
+            for on in [true, false] {
+                if ui::temp_rect(k, code).is_some() {
+                    press_check(&mut ck, &format!("press/temp{k}/{code}/{on}"), ui::temp_rect(k, code), &|| ui::temp_page(&tp), &|| ui::temp_key(&tp, code, on));
+                }
+            }
+        }
+        host::reset(0);
+        ui::temp_page(&tp);
         if k == 5 {
             save(&out, "m06-temp-offset");
         }
@@ -2724,55 +2734,6 @@ fn main() {
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
     for tab in 0..ui::SET_TABS.len() as u8 {
         strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
-    }
-    // Pressed feedback (app_press.rs): every item of the menu, the
-    // Settings tabs, rows and keys, the Hold & Limits and Record pages,
-    // pressed and released.
-    for on in [true, false] {
-        let pr = |row: usize, part: i8| ui::RowPress { row: row as u8, part, on };
-        let combo = ui::view_name(ui::View::DmmScope);
-        for i in 0..6 {
-            press_check(&mut ck, &format!("press/menu{i}/{on}"), ui::View::Menu, pr(i, 0), &|| ui::main_menu(combo), &|| ui::menu_item(i, combo, on));
-        }
-        for tab in 0..ui::SET_TABS.len() as u8 {
-            let page = || ui::settings(tab, &sv);
-            let mut items: Vec<ui::RowPress> = (0..ui::SET_TABS.len()).filter(|&t| t != tab as usize).map(|t| pr(0x80 | t, 0)).collect();
-            for (k, &id) in ui::SET_TABS[tab as usize].1.iter().enumerate() {
-                if ui::set_is_stepper(id) {
-                    items.extend([pr(k, -1), pr(k, 1)]);
-                } else {
-                    items.push(pr(k, 0));
-                }
-            }
-            for t in items {
-                let item = || {
-                    ui::set_row_only(Some(t));
-                    ui::settings(tab, &sv);
-                    ui::set_row_only(None);
-                };
-                press_check(&mut ck, &format!("press/settings{tab}/{}.{}/{on}", t.row, t.part), ui::View::Settings, t, &page, &item);
-            }
-        }
-        let lv = ["ON"; 9];
-        for k in 0..ui::LIMIT_ROWS.len() {
-            let t = pr(k, 0);
-            let page = || ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &lv);
-            let item = || {
-                ui::set_row_only(Some(t));
-                ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &lv);
-                ui::set_row_only(None);
-            };
-            press_check(&mut ck, &format!("press/limits{k}/{on}"), ui::View::Limits, t, &page, &item);
-        }
-        for t in [pr(0, -1), pr(0, 1), pr(1, -1), pr(1, 1), pr(ui::REC_START_ROW, 0)] {
-            let page = || ui::record_page(["Every reading", "Until stopped"], "about 3 h left", false);
-            let item = || {
-                ui::set_row_only(Some(t));
-                ui::record_page(["Every reading", "Until stopped"], "about 3 h left", false);
-                ui::set_row_only(None);
-            };
-            press_check(&mut ck, &format!("press/record{}.{}/{on}", t.row, t.part), ui::View::Record, t, &page, &item);
-        }
     }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
@@ -3409,26 +3370,40 @@ fn main() {
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
             let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
-            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
-                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
+            let pr = |row: u8, part: i8| ui::RowPress { row, part, on: true };
+            let d_kp = || ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
+            let kp_codes: Vec<u8> = ui::keypad_keys(ui::KP_NUM).iter().map(|k| k.2).filter(|&c| c != 0).collect();
+            type Case<'a> = (String, &'a dyn Fn(), Box<dyn Fn(bool) + 'a>, Option<stockfont::Rect>);
+            let cases: Vec<Case> = (0..6)
+                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Menu, pr(i as u8, 0))))
                 .chain(set_t.iter().map(|&(t, r, part)| {
                     let d: &dyn Fn() = &*d_sets[t as usize];
-                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>)
+                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Settings, pr(r, part)))
                 }))
-                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
+                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Limits, pr(r, 0)))))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [
-                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>),
-                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>),
+                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
+                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
                     ]
                 }))
-                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
+                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>, Some(ui::gen_press_rect(k)))))
                 .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
-                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
+                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>, ui::range_press_rect(b, t, sel, sub)))
                 }))
-                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
+                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>, ui::pw::settings_press_rect(&ps_pv, c))))
                 .collect();
-            for (name, draw, press) in cases.iter() {
+            // Keypad keys (their page has its own layout checks).
+            for &c in &kp_codes {
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/keypad{c}/{on}"), ui::keypad_key_rect(ui::KP_NUM, c), &d_kp, &|| ui::keypad_key(ui::KP_NUM, c, on));
+                }
+            }
+            for (name, draw, press, r) in cases.iter() {
+                // Each in one strip pass over its box (app_press.rs draw_box).
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/{name}/{on}"), *r, draw, &|| press(on));
+                }
                 host::reset(0);
                 draw();
                 let want = emu().fb.clone();
