@@ -145,6 +145,12 @@ SECTIONS
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
         *(.text.*8opendm403app10app_inrush*);
+        /* Peak's start / end (src/app_peak.rs: before main.rs starts the
+         * AD2 stream, after it stopped; app_peak_live.rs, the drain, the
+         * side column and the SCPI queries, stays in region B) and the MF
+         * page's Peak button. */
+        *(.text.*8opendm403app8app_peak*);
+        *(.text.*8opendm402ui11peak_button*);
         /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
          * never open while the AD2 stream or a logger session runs (the page
          * refuses to open then, closes when one starts; main.rs calls

@@ -465,6 +465,10 @@ power meter).
 | `CALCulate:LIMit:FAIL?` | | `1` the value is outside the limits, else `0` | both |
 | `CALCulate:SMOothing[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
 | `CALCulate:SMOothing:RESPonse[?]` | `SLOW`, `MEDium` or `FAST` | `SLOW` or `FAST` | both |
+| `CALCulate:PEAK:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:PEAK:MAXimum?` | | P+: `+1.414200E+00` | both |
+| `CALCulate:PEAK:MINimum?` | | P−: `-1.413900E+00` | both |
+| `CALCulate:PEAK:CRESt?` | | Crest factor: `+1.414000E+00` | both |
 
 - `AHOLd`: AutoHold, as a long press on RUN.
 - `AVERage...?` before the first sample answer `+9.9E37` with `Data stale`.
@@ -473,6 +477,14 @@ power meter).
 - Setting a limit turns the limit check on.
 - Smoothing changes the displayed value and `READ?` / `MEASure?` /
   `FETCh?`; the statistics and the CSV log use the unsmoothed readings.
+- `PEAK:STATe ON` starts [Peak](README.md#peak-and-crest-factor) on the
+  multimeter page (DC or AC V, mV, A): `Settings conflict` in other
+  functions, in AC+DC or AC/DC coupling, while recording or outside the
+  multimeter page and its range page. While Peak runs the DMM reading is
+  paused. `OFF`, a view, function or range change end it.
+- `PEAK:MAXimum?` / `MINimum?` / `CRESt?`: since `ON` or
+  `CALCulate:AVERage:CLEar`, kept after `OFF`; `+9.9E37` with `Data stale`
+  before the first samples.
   `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one;
   setting it turns smoothing on.
   Stored.

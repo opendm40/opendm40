@@ -31,7 +31,7 @@ limitations](#known-limitations).
    the main menu, the status bar, touch lock, battery and sleep.
 2. [What's new compared with the stock firmware](#whats-new-compared-with-the-stock-firmware)
 3. [Multimeter](#multimeter): every function, ranges, rate and resolution,
-   HOLD, AutoHold, REL, MIN/MAX/AVG, limits, the bargraph and the trend
+   HOLD, AutoHold, REL, MIN/MAX/AVG, Peak, limits, the bargraph and the trend
    chart, burden voltage.
 4. [Safety and alerts](#safety-and-alerts): wrong-connection alerts, the
    danger alarm, the fuse check.
@@ -242,7 +242,7 @@ the combined view switches to the next sub-mode of the current function
   do not count for **Dim screen**: during a long remote session the screen
   still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
-  MIN/MAX/AVG session runs, or while the power meter counts energy with a
+  MIN/MAX/AVG session or Peak runs, or while the power meter counts energy with a
   current flowing. The screen still dims.
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
@@ -293,6 +293,7 @@ scope.
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
 | AVG | — | The [mean](#min-max-avg) next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
+| Peak | — | [P+, P− and the crest factor](#peak-and-crest-factor) at 38.4 kS/s |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
 | Temperature offset | — | An offset per sensor |
@@ -732,7 +733,8 @@ Limits](#limits-and-autohold)).
 - Current page only: [**Fuse check**](#fuse-check) and
   [**Inrush**](#inrush-current).
 - Voltage and current pages: **Wave** opens the oscilloscope on the
-  multimeter inputs ([Wave view](#wave-view-the-scope-on-the-multimeter-inputs)).
+  multimeter inputs ([Wave view](#wave-view-the-scope-on-the-multimeter-inputs)),
+  **Peak** starts [Peak](#peak-and-crest-factor).
 
 Choosing a range turns REL off.
 
@@ -901,6 +903,21 @@ since they were last reset, and a timer **T hh:mm:ss**.
 ![A MIN/MAX/AVG session running for 5 min 12 s](img/dmm-minmax.png)
 
 *A MIN/MAX/AVG session running for 5 min 12 s.*
+
+### Peak and crest factor
+
+**MF > Peak** (DC or AC V, mV, A) samples the input at 38.4 kS/s on a fixed range.
+The column shows **P+** and **P−** (the highest and lowest value that two
+adjacent samples reach, about 52 µs) and **CF**, the crest factor
+max(|P+|, |P−|) / RMS of the same samples.
+
+- **PEAK** in the status bar: the reading is paused (grey) meanwhile.
+- **Long press the column**: reset P+, P− and CF.
+- Any other page, function or range ends Peak. In DC A it uses the DC-coupled AC A path.
+
+![Peak on a 1 V sine: P+ 1.4146, P− −1.4139, CF 1.414](img/dmm-peak.png)
+
+*Peak on a 1 V sine: P+ 1.4146, P− −1.4139, CF 1.414.*
 
 ### The bargraph and the history row
 

@@ -64,13 +64,15 @@ impl App {
             // The temperature page has its own (`tp_pressed`).
             View::Range if self.dmm.hy_mode() == 15 => None,
             View::Range if self.dmm.pw.on => r(ui::pw::settings_hit(x, y)? as usize, 0),
-            // MF range page: the tap handler's order (Wave, Inrush, the rest).
+            // MF range page: the tap handler's order (Wave, Inrush, Peak, the rest).
             View::Range => {
                 let b = self.dmm.button();
                 if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::wave_hit(x, y) {
                     r(ui::RP_WAVE as usize, 0)
                 } else if app_wave::WAVE_BUILD && b == Button::Amp && ui::inrush_hit(x, y) {
                     r(ui::RP_INRUSH as usize, 0)
+                } else if app_wave::WAVE_BUILD && matches!(b, Button::Volt | Button::Amp) && ui::peak_hit(x, y) {
+                    r(ui::RP_PEAK as usize, 0)
                 } else {
                     match ui::range_hit(b, self.range_sel(), x, y)? {
                         Ok(i) => r(i, 0),

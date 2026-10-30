@@ -19,6 +19,7 @@ mod hyspi;
 mod lcd;
 mod logger;
 mod inrush;
+mod peak;
 mod ad2exp;
 mod ad2pll;
 
@@ -460,6 +461,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if was_wave {
                 app.wave_lost(&mut clk, "Wave stopped: DMM changed");
                 app.inrush_lost(&mut clk, "Stopped: DMM changed");
+                app.peak_lost(&mut clk, "Peak stopped: DMM changed");
             } else {
                 for s in scpis.iter_mut() {
                     s.set_err("Settings conflict");
@@ -1556,12 +1558,17 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
             }
         }
+        // Peak on the DMM page (app_peak_live.rs): the ring into the
+        // accumulator; its stream starts / stops on the app's request.
+        app.peak_poll();
+        peak_service(app, &mut clk, logger);
         if logger.active() && (app.dmm.mode() != logger.mode() || app.dmm.range() != logger.range()) {
             let wave = logger.wave();
             logger.stop();
             if wave {
                 app.wave_lost(&mut clk, "Wave stopped: DMM changed");
                 app.inrush_lost(&mut clk, "Stopped: DMM changed");
+                app.peak_lost(&mut clk, "Peak stopped: DMM changed");
             } else {
                 for s in scpis.iter_mut() {
                     s.set_err("Settings conflict");
@@ -2022,6 +2029,40 @@ fn log_scale(scpi: &mut scpi::Scpi, l: &logger::Logger, sc: Option<dmm::Ad2Scale
 fn fmt_par(l: &logger::Logger, sc: Option<dmm::Ad2Scale>) -> logger::FmtPar {
     let sc = sc.filter(|_| l.ad2() && logger::Logger::mode_ok(true, l.mode()));
     logger::FmtPar { rate_mhz: l.rate_mhz(), a: sc.map_or(0.0, |s| -s.offset), b: sc.map_or(0.0, |s| s.per_code) }
+}
+
+/// Peak's stream (app_peak_live.rs REQ_*): started at PEAK_FS on the
+/// current row (the full row first on a fresh start, as the wave view's),
+/// stopped on the app's request (then `peak_stopped`: Peak ends, a held
+/// view change runs). Not inlined into `run` (its stack frame).
+#[inline(never)]
+fn peak_service(app: &mut app::App, clk: &mut Clock, logger: &mut logger::Logger) {
+    let r = app.take_peak_req();
+    if r == app::PEAK_START {
+        if logger.host_active() {
+            app.peak_lost(clk, "Peak: data logger running");
+            return;
+        }
+        let fresh = !logger.active();
+        if !fresh {
+            logger.stop();
+        }
+        if fresh {
+            app.dmm.start(clk);
+        }
+        if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+            csvlog::catalog_warm(); // MMEM:CAT? while Peak runs: from the cache
+            logger.start_wave(app.dmm.mode(), app.dmm.range(), app::PEAK_FS);
+            app.peak_started();
+        } else {
+            app.peak_lost(clk, "Peak: no AD2 row here");
+        }
+    } else if r == app::PEAK_STOP {
+        if app.peak_live() && logger.active() && logger.wave() {
+            logger.stop();
+        }
+        app.peak_stopped(clk);
+    }
 }
 
 /// The fast logger's rare events of this pass: Ev::Start (the logger

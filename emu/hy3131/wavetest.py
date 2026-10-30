@@ -48,6 +48,16 @@ path is AC-coupled in AC V like the meter). Checks:
     step with the stream on, then a range step: its full repaint before
     the stream restarts, app_wave.rs wave_rescale); the source badge exit DMM -> MCX at 2 ms/div (the close
     held for the stream's stop, wave_badge_close; DBG:VIEW?).
+  * --case peak: Peak on the DMM page (src/app_peak.rs, MF "Peak", the AD2
+    stream at 38400 S/s with the AD1 reading paused): a 1 V rms 50 Hz sine
+    on AC V, then (at --peak-t virtual s) a 0.5 V rms 50 Hz square:
+    CALC:PEAK:MAX? / MIN? within 2 % of +-1.414 V and CRESt? 1.414 (2 %);
+    the square keeps the held sine peaks until CALC:AVER:CLE, then +-0.5 V,
+    CF 1.0; the long press on the side column; no late / overrun / ring
+    overflow on the DMM page; CALC:PEAK:STAT OFF: the DMM resumes (READ?)
+    and AUTO comes back; STAT ON over SCPI, then MENU: the view change
+    waits for the stream's stop. Region C checked per stage and over the
+    whole run.
 --shots DIR: PNG screenshots (DBG:LCD?) of each stage for a look.
 Exit status 0 = all passed.
 """
@@ -67,7 +77,8 @@ ap.add_argument('--dmm', default='vsrc:0,ac=1.0,f=50', help='DMM jack input (emu
 ap.add_argument('--shots', help='directory for PNG screenshots')
 ap.add_argument('--mips', default='200')
 ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
-ap.add_argument('--case', choices=['volt', 'current', 'dcv', 'fullv', 'fulla', 'csvtb'], default='volt',
+ap.add_argument('--peak-t', type=float, default=70.0, help='--case peak: virtual s of the sine -> square step')
+ap.add_argument('--case', choices=['volt', 'current', 'dcv', 'fullv', 'fulla', 'csvtb', 'peak'], default='volt',
                 help='current: --dmm defaults to a 10 mA DC + 40 Hz square on A-COM; the AC A row is '
                      'DC-coupled: FREQ? 40 Hz, VAVG? = the DC part, values in A. dcv: 0.2 V DC + 1 V rms '
                      '50 Hz; MF -> Wave from DC V AUTO (DC mV, the AC mV row) clips and autoranges to 6 V '
@@ -115,6 +126,16 @@ TAG = 'wavetest-%d-%d' % (A.port, os.getpid())
 import regionc  # noqa: E402
 RC = None if A.no_region_c else regionc.Hooks(A.app, OUT, TAG)
 HOOKS = RC and RC.script
+if A.case == 'peak':
+    # The sine -> square step at --peak-t (an event script line; with the
+    # region C hook lines when there are any).
+    SCRIPT = os.path.join(OUT, TAG + '.script')
+    with open(SCRIPT, 'w') as f_:
+        f_.write(RC.lines() if RC else '')
+        f_.write('%.4f dmm vsrc:0,ac=0.5,f=50,shape=square\n' % A.peak_t)
+    HOOKS_SCRIPT = SCRIPT
+else:
+    HOOKS_SCRIPT = HOOKS
 # A private copy of the SPI disk (the test records a CSV and saves a scope
 # record): parallel runs share nothing (port + pid in every name).
 DISK = os.path.join(OUT, TAG + '.disk.bin')
@@ -122,7 +143,7 @@ import shutil  # noqa: E402
 shutil.copy(os.path.join(ROOT, 'stock/re/dumps/spi_dumps/dm40_msc_full_2026-10-13.bin'), DISK)
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', TAG,
-       '--log', os.path.join(OUT, TAG + '.log'), '--disk', DISK, '--dmm', A.dmm] + (['--script', HOOKS] if HOOKS else [])
+       '--log', os.path.join(OUT, TAG + '.log'), '--disk', DISK, '--dmm', A.dmm] + (['--script', HOOKS_SCRIPT] if HOOKS_SCRIPT else [])
 if not HOOKS:
     print('(no llvm-nm / symbols: the region C checks are skipped)')
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
@@ -444,6 +465,98 @@ try:
         q('DBG:KEY 0')
         wait_ms(2500)
 
+    def peak_case():
+        import emusync
+        mk = emusync.Markers(os.path.join(OUT, TAG + '.log'))
+        if mk.wait_clock() is None:
+            check(False, 'clock marker in the log')
+            return
+        t_sq = mk.at(A.peak_t)
+
+        def pk():
+            return [float(q('CALC:PEAK:%s?' % k)) for k in ('MAX', 'MIN', 'CRES')]
+
+        def isr():
+            return ints(q('DBG:ISR?'))
+
+        q('CONF:VOLT:AC')
+        wait_ms(4500)
+        print('  AC V before: READ? %s CONF? %s' % (q('READ?'), q('CONF?')))
+        c_reset()
+        q('DBG:KEY 3')  # MF -> Voltage Settings -> Peak (the note row's left column)
+        wait_ms(800)
+        shot('p00-range-v')
+        q('DBG:TAP 83,159')
+        wait_ms(3000)
+        shot('p01-peak-sine')
+        e0 = isr()
+        print('  Peak on: DBG:VIEW? %s, FUNC? %s, CONF? %s, DBG:ISR? %s' % (q('DBG:VIEW?'), q('FUNC?'), q('CONF?'), e0[:14]))
+        check(e0[1] == 1 and q('CALC:PEAK:STAT?') == '1', 'MF -> Peak: the stream runs, CALC:PEAK:STAT? 1')
+        check(q('DBG:VIEW?').startswith(ui_dmm_name()), 'back on the DMM page (%s)' % q('DBG:VIEW?'))
+        check(q('FUNC?').strip('"').upper() == 'VOLT:AC', 'AC V stays (%s)' % q('FUNC?'))
+        check(e0[12] // 1000 in range(38000, 38800), 'the stream at ~38400 S/s (rate_mhz %d)' % e0[12])
+        check(q('VOLT:AC:RANG:AUTO?') == '0', 'the range fixed while Peak runs')
+        wait_ms(4000)
+        e1 = isr()
+        p, n, c = pk()
+        print('  sine 1 V rms: P+ %.4f P- %.4f CF %.4f; DBG:ISR? late %d->%d dropped %d->%d overruns %d->%d'
+              % (p, n, c, e0[4], e1[4], e0[6], e1[6], e0[9], e1[9]))
+        check(near(p, 2 ** 0.5, 0.02) and near(n, -2 ** 0.5, 0.02), 'sine: P+ / P- +-1.414 V within 2 %% (%.4f, %.4f)' % (p, n))
+        check(near(c, 2 ** 0.5, 0.02), 'sine: CF 1.414 within 2 %% (%.4f)' % c)
+        check(e1[4] == e0[4] and e1[6] == e0[6] and e1[9] == e0[9],
+              'the DMM page keeps up at 38400: no late entry, ring overflow or overrun over 4 s')
+        c_check('Peak on (MF tap), the DMM page streaming')
+        # The statistics reset: CALC:AVER:CLE, the long press on the column.
+        c_reset()
+        q('CALC:AVER:CLE')
+        wait_ms(1500)
+        p2, n2, c2 = pk()
+        check(near(p2, 2 ** 0.5, 0.02) and near(c2, 2 ** 0.5, 0.02), 'after CALC:AVER:CLE: the sine again (%.4f, CF %.4f)' % (p2, c2))
+        q('DBG:DRAG 440,190,440,190,0,1200')
+        wait_ms(1500)
+        check(isr()[1] == 1 and near(pk()[0], 2 ** 0.5, 0.02), 'long press on the side column: still streaming, P+ again')
+        c_check('Peak: CALC:AVER:CLE, the long press')
+        # The square: the sine's peaks held until a reset.
+        while up() < (t_sq + 1.5) * 1000:
+            time.sleep(0.3)
+        c_reset()
+        p, n, c = pk()
+        check(near(p, 2 ** 0.5, 0.02), 'square on: P+ holds the sine peak until a reset (%.4f)' % p)
+        q('CALC:AVER:CLE')
+        wait_ms(2500)
+        shot('p02-peak-square')
+        p, n, c = pk()
+        print('  square 0.5 V rms: P+ %.4f P- %.4f CF %.4f' % (p, n, c))
+        check(near(p, 0.5, 0.02) and near(n, -0.5, 0.02), 'square: P+ / P- +-0.5 V within 2 %% (%.4f, %.4f)' % (p, n))
+        check(near(c, 1.0, 0.02), 'square: CF 1.0 within 2 %% (%.4f)' % c)
+        c_check('Peak: the square, CALC:PEAK:* polled')
+        # OFF over SCPI: the DMM resumes, AUTO again, the results kept.
+        q('CALC:PEAK:STAT OFF')
+        wait_ms(3500)
+        e = isr()
+        v = f('READ?')
+        print('  OFF: DBG:ISR? active %d, READ? %.4f, CONF? %s, CALC:PEAK:MAX? %s' % (e[1], v, q('CONF?'), q('CALC:PEAK:MAX?')))
+        check(e[1] == 0 and q('CALC:PEAK:STAT?') == '0', 'CALC:PEAK:STAT OFF: the stream stopped')
+        check(near(v, 0.5, 0.03), 'the DMM reads again (READ? %.4f)' % v)
+        check(q('VOLT:AC:RANG:AUTO?') == '1', 'autorange again (VOLT:AC:RANG:AUTO? %s)' % q('VOLT:AC:RANG:AUTO?'))
+        check(near(f('CALC:PEAK:MAX?'), 0.5, 0.02), 'the results kept after OFF')
+        # ON over SCPI, then MENU: the view change waits for the stop.
+        q('CALC:PEAK:STAT ON')
+        wait_ms(3000)
+        check(isr()[1] == 1, 'CALC:PEAK:STAT ON: streaming')
+        c_reset()
+        q('DBG:KEY 0')
+        wait_ms(2500)
+        e = isr()
+        v = q('DBG:VIEW?')
+        print('  MENU: DBG:VIEW? %s, DBG:ISR? %s' % (v, e[:14]))
+        check(e[1] == 0 and q('CALC:PEAK:STAT?') == '0' and not v.startswith(ui_dmm_name()), 'MENU: Peak ends, the menu shows (%s)' % v)
+        c_check('Peak: MENU exit (the view change held for the stop)')
+        check(not q('SYST:ERR?').startswith('-'), 'no SYST:ERR?')
+
+    def ui_dmm_name():
+        return 'Multimeter'
+
     print('*IDN?', q('*IDN?'))
     isr0 = ints(q('DBG:ISR?'))
     check(isr0[0] == 1, 'DBG:ISR? feature = 1 (an ad2-isr build)')
@@ -458,6 +571,9 @@ try:
         raise Done
     if A.case == 'csvtb':
         csvtb_case()
+        raise Done
+    if A.case == 'peak':
+        peak_case()
         raise Done
     q('CONF:VOLT:AC')
     wait_ms(4500)
@@ -826,6 +942,8 @@ finally:
         RC.cleanup()
     if os.path.exists(DISK):
         os.remove(DISK)
+    if A.case == 'peak' and os.path.exists(HOOKS_SCRIPT):
+        os.remove(HOOKS_SCRIPT)
 
 print('wavetest: %s' % ('PASS' if not FAIL else 'FAIL: ' + '; '.join(FAIL)))
 sys.exit(1 if FAIL else 0)

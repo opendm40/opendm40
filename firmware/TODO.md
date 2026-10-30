@@ -731,6 +731,11 @@ the scope full record.
       signal, beep on capture (Fluke/Keysight style). (8f98171; verify on device) (f44e63d re-capture: verified on
       device f80524f: 1.10 -> 1.20 -> 1.10 -> 1.12 V captured, 1.11 V not, as meter-test)
 - [x] FR-02 MIN/MAX/AVG (P0): MIN/MAX exist; add AVG (running average, no auto-off while active).  (8f98171; verify on device)
+- [x] FR-03 peak detect (P1): MF **Peak** on the V / A range pages, CALC:PEAK:* (src/peak.rs,
+      src/app_peak.rs, app_peak_live.rs, branch feat/peak-crest): the AD2 stream at 38 400 S/s on a fixed
+      range, AD1 paused; P+ / P- = 2-adjacent-sample extremes, CF over the same samples. Emulator:
+      emu/hy3131/wavetest.py --case peak. Device check open (calibrator AC 1 V 50 Hz: CF 1.41; DC: CF 1.00).
+      The AD2 bandwidth at 38.4 kS/s is *unknown* (a narrow pulse's P+ may read low).
 - [x] FR-05 smoothing + selectable sample rate (P1): slow/fast conversion + display smoothing.  (4c157a8, c7ec2c1; verify on device)
       Rate chip under the DMM chart timebase (tap = SLOW/MED/FAST, grey "n/a" where the
       rate does not apply), Settings 2/2 "DMM rate" / "Smoothing", SENS:RATE[:PER?], CALC:SMO[:STAT|:RESP],

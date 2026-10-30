@@ -43,10 +43,13 @@ struct Dp {
     rate: bool,
     /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
     short: u8,
+    /// Peak (app_peak_live.rs): "PEAK", the paused reading grey, P+ / CF /
+    /// P- of a 1 V rms sine in the side column.
+    peak: bool,
 }
 
 fn dp(r: Reading) -> Dp {
-    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true, short: 0 }
+    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true, short: 0, peak: false }
 }
 
 /// The multimeter page: the reading, the bargraph or the history row, the
@@ -73,7 +76,11 @@ fn dmm_page(p: &Dp) {
         dv.bar_update(r);
     }
     dv.short = p.short;
-    dv.reading(r, p.hold, p.lim);
+    if p.peak {
+        dv.reading(&Reading { prov: true, auto: false, ..*r }, ui::HOLD_PEAK, p.lim);
+    } else {
+        dv.reading(r, p.hold, p.lim);
+    }
     dv.short_sync();
     let mut st = status_real();
     st.csv = p.csv;
@@ -85,7 +92,10 @@ fn dmm_page(p: &Dp) {
     let v = if r.main.ol { 0.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
-    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
+    let mut side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec, peak: false };
+    if p.peak {
+        side = ui::Side { max: Some(1.4146), avg: Some(1.414), min: Some(-1.4139), secs: Some(42), peak: true, ..side };
+    }
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
@@ -179,6 +189,7 @@ pub fn run(out: &str) -> usize {
     host::reset(0);
     ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
     ui::wave_button();
+    ui::peak_button();
     ck.check_opts("manual/range-v", &page, false);
     save1(out, "range-v");
 
@@ -186,6 +197,7 @@ pub fn run(out: &str) -> usize {
     host::reset(0);
     ui::range_page(Button::Amp, Some(7), 0, None);
     ui::wave_button();
+    ui::peak_button();
     ui::inrush_button();
     ck.check_opts("manual/range-a", &page, false);
     save1(out, "range-a");
@@ -352,6 +364,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-rel", Dp { rel: Some(4.8176), ..dp(rd(1, val(0.0027, 4, "V"), None, None, false)) }),
         // A MIN/MAX/AVG session running.
         ("dmm-minmax", Dp { rec: true, ..dp(dcv) }),
+        // Peak on a 1 V rms 50 Hz sine (AC V): P+ / P- +-1.414 V, CF 1.414.
+        ("dmm-peak", Dp { peak: true, ..dp(rd(0, val(1.0003, 4, "V"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false)) }),
         // Limits 4.8 .. 5.2 V, the reading above.
         ("dmm-limit-hi", Dp { lim: meter::V_HI, ..dp(rd(1, val(5.2871, 4, "V"), None, None, false)) }),
         // The history row.
@@ -689,6 +703,7 @@ pub fn run(out: &str) -> usize {
         host::reset(0);
         ui::range_page(Button::Volt, Some(7), 0, Some((dmm::MV_AUTO_WARN, true)));
         ui::wave_button();
+        ui::peak_button();
         ck.check_opts("manual/range-v-auto", &page, false);
         save1(out, "range-v-auto");
         // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked

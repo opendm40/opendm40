@@ -9,6 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Peak and crest factor** (MF > **Peak**, DC or AC V, mV, A; as the
+  Fluke 287/289 Peak): P+, P− and CF in the column right of the chart,
+  sampled at 38.4 kS/s on a fixed range, the reading paused meanwhile. SCPI
+  `CALCulate:PEAK:STATe`, `:MAXimum?`, `:MINimum?`, `:CRESt?`
+  ([manual](docs/manual/README.md#peak-and-crest-factor)).
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.

@@ -1,4 +1,4 @@
-// Host test crate for src/meter.rs, src/dmm.rs and src/logger.rs (FR-05 smoothing / rate,
+// Host test crate for src/meter.rs, src/dmm.rs, src/logger.rs and src/peak.rs (FR-05 smoothing / rate,
 // UF-21): the modules are compiled for the host with their register-level
 // dependencies; the tests only call pure logic (no MMIO is touched).
 #![allow(dead_code, unused_imports, clippy::all)]
@@ -43,6 +43,9 @@ mod trigsoft;
 // The inrush capture's detector / results (src/inrush.rs, pure).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+// Peak +/- and crest factor (src/peak.rs, pure).
+#[path = "../../src/peak.rs"]
+mod peak;
 #[path = "../../src/ad2pll.rs"]
 mod ad2pll;
 // Scope / wave view measurements (src/scope_meas.rs; `compute` needs the
