@@ -40,6 +40,11 @@ SCEN = [
     ('1mF', 'c:1000e-6', 16, 1e-3, 7.5),
     # An electrolytic's dielectric absorption (capdowntest's model: the early slope 60 % low).
     ('1mF-da', 'c:1000e-6;capda:0.6;capdatau:1', 18, 1e-3, 8),
+    # A narrow comparator window (capcmpw, the device's ~1 mF on 6 mF after a charge: class 1
+    # turned every 1 .. 2 polls) and an AD1 reading averaged over 0.2 s (capvavg: a part of the
+    # dV in the poll after a turn): the class widens, a final value comes.
+    ('1mF-narrow', 'c:1000e-6;capcmpw:0.25;capvavg:0.2', 18, 1e-3, 10),
+    ('1mF-narrow-da', 'c:1000e-6;capcmpw:0.25;capvavg:0.2;capda:0.6;capdatau:1', 18, 1e-3, 10),
     # Absorption on a capacitor inside 600 uF: its early slope reads it over the range.
     ('470uF-da', 'c:470e-6;capda:0.6;capdatau:1', 18, 470e-6, 9),
     ('open', 'open', 8, 'small', 1),
