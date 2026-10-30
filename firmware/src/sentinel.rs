@@ -310,7 +310,7 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         0 if acdc && range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
         1 | 3 | 10 | 15 if mask & M_AJACK != 0 => {
             c[0] = R20_PB1;
-            if mode == 1 && var & VAR_NEG_OFF == 0 {
+            if mode == 1 && !acdc && var & VAR_NEG_OFF == 0 {
                 c[1] = R21_DCV_PB1;
             }
             Kind::CmpA
