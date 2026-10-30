@@ -327,7 +327,14 @@ try:
     t.w('TIM:SCAL %g' % (float(tb0) / 10))
     sz = float(t.q('ACQ:SRAT?'))
     pz = pre(t)
-    check(sz == sr and pz['xinc'] == p['xinc'], 'stopped zoom (TIM:SCAL %g): ACQ:SRAT? %g = the record\'s %g' % (float(tb0) / 10, sz, sr))
+    check(sz == sr and pz['xinc'] == p['xinc'], 'stopped zoom (TIM:SCAL %g): ACQ:SRAT? %g = the record\'s %g, record x increment kept' % (float(tb0) / 10, sz, sr))
+    # The screen columns (WAV:POIN SCR, type 0) are the zoomed view: their x
+    # increment follows the shown timebase (10 div / 400 columns).
+    t.w('WAV:POIN SCR')
+    ps = pre(t)
+    check(ps['type'] == 0 and abs(ps['xinc'] - float(tb0) / 10 * 10 / 400) < 1e-12,
+          'stopped zoom: screen preamble x increment %g = the shown timebase / 40' % ps['xinc'])
+    t.w('WAV:POIN MAX')
     t.w('TIM:SCAL %s' % tb0)
     check(t.q('TRIG:STAT?') == 'STOP', 'the zoom keeps the scope stopped')
     lm0 = max(loop_max(t) for _ in range(2) if time.sleep(1.1) is None)
