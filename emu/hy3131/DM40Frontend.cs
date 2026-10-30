@@ -456,7 +456,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "agndz": case "lpfcreep": case "creeptau": case "creepord": case "lpfn":
                 case "pb5drift": case "pb5tau": case "acastep": case "acastepms": case "acasteptau": case "ad1vos": case "ad1ug": case "ad1chopjit": case "r22part": case "r22off": case "r22n": case "r22win": case "chophalf": case "chopskew": case "vjblind": case "senseneg": case "sensetau":
                 case "mvclamp": case "mvpb1": case "hfbw": case "hfdc": case "hfpb1": case "hfpb2": case "hfnocnt": case "hfboth": case "contbump": case "contbumptau":
-                case "pb1cmp70": case "hzpb1": case "ailift": case "ainz": case "ainzhz":
+                case "pb1cmp70": case "pb1lo0": case "hzpb1": case "ailift": case "ainz": case "ainzhz":
                     options.Add(new KeyValuePair<string, double>(key, v));
                     break;
                 default:
