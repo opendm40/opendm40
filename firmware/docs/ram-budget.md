@@ -173,7 +173,7 @@ strip) and `scope_ui::COLC` (400 B, flash).
 ## The scope record: raw ring and coded ring
 
 `scope::BUF` ([`src/scope.rs`](../src/scope.rs), 86 016 B in SRAM) is
-the whole SRAM the budget leaves (8 KiB link floor + ~4 KB margin). The
+the whole SRAM the budget leaves (8 KiB link floor + ~3 KB margin). The
 stock record is 65 520 samples; as u16 that is 131 040 B, more than the
 SRAM has free. 10-bit codes packed 4 in 5 bytes
 ([`src/pack10.rs`](../src/pack10.rs): a little-endian bit stream, sample
@@ -298,7 +298,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | APP (TCM) | 6 672 | always (the App) | | Keep. |
 | vdisk::TAB (SRAM) | 6 420 | while USB exports the generated volume (the table regenerates on sector reads) | everything | Keep. |
 | csvlog::CAT (SRAM) | 6 156 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | Keep: a listing during a stream must not read the disk. |
-| dmm::acdctr::TR (SRAM) | 5 388 | DBG:ACDC:TRACE (debug, off at boot; the ring is allocated always) | | Debug aid; could shrink (`TR_N` = 192 entries). |
+| dmm::acdctr::TR (SRAM) | 1 804 | DBG:ACDC:TRACE (debug, off at boot; the ring is allocated always) | | Debug aid: `TR_N` 192 -> 64 entries (2026-10-30); one entry without the feature `acdc-trace`. |
 | scope_page::CACHE (SRAM) | 4 824 | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
 | scope_page::FFT (TCM) | 4 128 | the last spectrum | | Must survive a dropped job. Keep. |
 | csvlog::TAIL (SRAM) | 4 096 | a CSV recording | FIFO_BUF | See logger::RING. |
@@ -307,6 +307,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | fastlog::JOB (SRAM) | 1 864 | a fast-log disk session | logger::RING | Keep. |
 | scope::ROLL_COLS (SRAM) | 1 600 | roll mode | | Keep. |
 | vwrite::W0 (SRAM) | 1 376 | the writable USB volume session | | Keep. |
+| scope_ui::dec::ANN (SRAM) | 1 236 | the decoder band's kept bytes / frames (positions in the record) | the scope record | Keep (TCM until 2026-10-30: stack headroom). |
 | dmm::REC_COPY (SRAM) | 1 024 | always: the RAM copy of the settings / calibration record (the record is in the slow flash bank) | | Keep. |
 | bt::RX (SRAM) | 1 024 | the DMA ring, while BT is powered | | Keep. |
 

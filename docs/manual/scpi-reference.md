@@ -636,8 +636,9 @@ UART and Modbus RTU on the scope page ([the decoder](README.md#protocol-decoder)
   it to follow the bus). `time_s` counts from the log's start; `seq`
   numbers every frame; a gap in `seq` means frames the list dropped
   (oldest first when full) before they were read. `lost`: times the
-  decoder fell behind the input (samples skipped). `LOG` in the Wave view:
-  `Settings conflict`.
+  decoder fell behind the input (samples skipped). `LOG` in the Wave view
+  or while a DMM logger session streams (`LOG:STATe ON`): `Settings
+  conflict`; so is `LOG:STATe ON` while the frame log is open.
 - With too few samples per bit (fewer than 4: a slow timebase, the Wave
 
   view above 4800 baud) nothing is decoded; `DECode:RATE?` gives `0` with

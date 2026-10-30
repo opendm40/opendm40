@@ -292,9 +292,13 @@ try:
         got = RC.calls()
         own = [f for f in got if any(k in f for k in ('decode', 'app_log', 'ui_log', 'scope', 'pack10'))]
         LOG_OTHER.update(f for f in got if f not in own)
-        # The waveform view and the counters are region C on purpose
-        # (link-native.x).
-        own = [f for f in own if 'log_snip_show' not in f and 'log_stats' not in f]
+        # The waveform view, the counters, the page draw, the setup popup,
+        # the view's touches and its panel buttons are region C on purpose
+        # (link-native.x `.text.log_cold`); the per-pass decode and rows
+        # are not.
+        cold = ('log_snip_show', 'log_stats', 'log_page', 'log_setup_draw', 'log_gesture', 'log_setup_changed',
+                'log_unpress', 'log_page_step', 'log_pause', 'log_snip_hide', 'log::panel_button', 'log::panel_hit')
+        own = [f for f in own if not any(k in f for k in cold)]
 
         print('  region C functions called while the log streamed: %s' % (', '.join(sorted(got)) or 'none'))
         check(not own, 'the frame log: none of its code in region C (%s)' % ', '.join(own))
@@ -551,6 +555,10 @@ try:
             RC.reset()
         q('DEC:MODE LOG')
         check(q('DEC:MODE?') == 'LOG', 'DEC:MODE LOG: the frame log (%s)' % q('DEC:MODE?'))
+        # No DMM logger stream with the log open (its view code is region C).
+        q('LOG:STAT ON')
+        e = err()
+        check('conflict' in e and q('LOG:STAT?') == '0', 'log open: LOG:STAT ON refused (%s)' % e)
         wait_ms(1000)
         fifo()
         q('DBG:PROF:RESET')

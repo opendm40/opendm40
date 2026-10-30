@@ -864,6 +864,59 @@ stack headroom (each gains the same ~5.6 KB of C):
 Next candidates if C gets tight again (DBG-only, still in C): `hyspi`
 (DBG:HYSPI:SELF? / WR?, 2.3 KB), `boot::put_info` (DBG:BOOT?, 1.6 KB).
 
+### Region B audit #7 (2026-10-30, test/scope-chain-0.4)
+
+The scope chain #41 (long record) + #59 (coded ring) + #63 (protocol
+decoder) merged on release/0.4.0 (8eecb058, with #44) did not link: the
+decoder's ~23 KB of region B code had been budgeted against an older
+base. Free flash in all was B -6 296 + C 10 824 + A2 2 208 = 6 736 B
+against 12 288 B of floors, so moves alone could not fit it; about 5.6 KB
+had to leave the image.
+
+| | merged, before | after |
+|---|---|---|
+| region A2 free | 2 208 B | 156 B |
+| region B free | -6 296 B (no link) | 9 000 B |
+| region C free | 10 824 B | 6 912 B |
+| stack headroom (static worst path) | 20 320 B | 21 560 B |
+| SRAM free | 7 244 B | 11 484 B |
+
+RAM:
+- `scope_ui::dec::ANN` (1 236 B) TCM -> `.sram_bss` (stack headroom).
+- `app_decode::JOB` zero bytes until `init` writes None (no `.data` image).
+- `acdctr::TR_N` 192 -> 64 entries, `TR_POST` 32 (1 792 B of SRAM); with
+  the trace off (below) one entry.
+
+Moves (no code removed):
+- `fft::QSIN` (2 052 B, read per butterfly) -> region A2 (`.rodata.a2`):
+  as fast as B. A2 is left with 156 B (build.sh banner below 2 KiB).
+- `K_FONT` (2 420 B) -> C: its only reader is `ui::keypad_key`, already
+  in C (the Keypad page / popup, no stream).
+- The decoder frame log's page draw, setup popup, touches and panel
+  buttons (`log_page`, `log_setup_draw`, `log_gesture`, ... ~2 KB) ->
+  `.text.log_cold`. The per-pass decode and row drawing (`log_poll`,
+  `log_tick`, `log_row`, `store_frame`) stay in B. The decode tab
+  (`dec::page`, `dec_setup_tap`) and the DECode:* queries stay in B: the
+  Wave view's MF popup and a host reach them while its AD2 stream runs.
+  New guards, so that no AD2 stream runs with the log: `log_open`
+  refuses while `hy3131::streaming()`, `LOG:STAT ON` is refused while the
+  log is open (`log_on_check`). Before, a host `LOG:STAT ON` with the log
+  open could run the existing `.text.log_cold` code under the ISR.
+
+Left out of this test image (cargo features, not default here; build with
+them for a debug session, which does not fit region B with the decoder):
+- `ad2-exp`: DBG:AD2:TORN? / NOISE? / DCV? / N7? (`ad2exp` torn / noise /
+  dcv_test / n7_test, `dbg_dcv`, `dbg_n7`, `dcv_arg`, `n7_arg`; E7's
+  `dc_enter` / `dcv_row` stay): B +5 040 B.
+- `acdc-trace`: DBG:ACDC:TRACE records nothing (the query answers an empty
+  ring): B +864 B, SRAM +1 768 B.
+- `dbg-src`: DBG:SRC (`dbgsrc_dmm`, the parser): B +2 640 B, C +984 B.
+
+Not done: the decode tab to C (it would need the tab hidden in the Wave
+view); the gallery's `dlog` decoder copies for `GSrc` (~0.6 KB of B,
+`.text.vdisk_rd` on the generic functions); glyph tables without the
+code field where dense (~0.65 KB).
+
 ### Protocol decoder (2026-10-28, feat/decoder-uart)
 
 The decoder band (src/decode.rs, app_decode.rs, ui_decode.rs) decodes each
