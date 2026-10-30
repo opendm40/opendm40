@@ -124,9 +124,6 @@ section named after the tag as the release notes; how to cut a release:
   ([manual](docs/manual/README.md#settings-page-1)).
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
-- DMM trend chart: REL on or off starts the chart over, so the REL
-  deviations are not squashed under the absolute points
-  ([#98](https://github.com/opendm40/opendm40/issues/98)).
 - Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
   after an end (10 + gave 20 %, and 55 % was out of reach)
   ([#91](https://github.com/opendm40/opendm40/issues/91)).

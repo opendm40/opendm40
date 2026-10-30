@@ -934,8 +934,10 @@ The chart plots the reading over time, 321 points wide.
   160 → 320 → 640 ms/div → 1.28 → 2.56 s/div; the chart restarts.
 - The scale follows the data.
 - It stops during HOLD and keeps running during AutoHold.
-- It restarts when you change the function, switch to a range with
-  another unit (6 V to 600 mV) or turn REL on or off.
+- It restarts when you change the function or switch to a range with
+  another unit (6 V to 600 mV).
+- REL on or off does not restart it: the points from before stay, as in
+  the stock firmware.
 
 ![The trend chart](img/trend-chart.png)
 

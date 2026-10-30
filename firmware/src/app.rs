@@ -351,8 +351,6 @@ pub struct App {
     chart_rate: u8,
     chart_next: u64,
     chart_unit: &'static str,
-    /// The chart's points are REL values (`meter.live_rel()` when it began).
-    chart_rel: bool,
     chart_dec: u8,
     chart_dirty: bool,
     chart_cache: ui::ChartCache,
@@ -672,7 +670,6 @@ impl App {
             chart_rate: ui::TREND_DEFAULT,
             chart_next: 0,
             chart_unit: "",
-            chart_rel: false,
             chart_dec: 0,
             chart_dirty: false,
             chart_cache: ui::ChartCache::new(),
@@ -1903,16 +1900,9 @@ impl App {
                 // the new unit, also when the new range reads OL (#93: 3.3 V
                 // on 6 V -> 600 mV kept the V trace and labels). Not under
                 // HOLD: the readout keeps the held unit too.
-                // REL on / off starts it over too, as the statistics (#98:
-                // the absolute points squashed the REL deviations), from the
-                // first reading taken with the new REL state (`live_rel`: the
-                // live reading lags a toggle by up to one reading); under
-                // HOLD (REL off is taken) once the HOLD ends.
                 let unit_new = r.main.unit != self.chart_unit && !self.meter.hold;
-                let rel_new = self.meter.live_rel() != self.chart_rel && !self.meter.hold;
-                if unit_new || rel_new || (self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec)) {
+                if unit_new || (self.chart_n == 0 && (r.main.unit != self.chart_unit || r.main.dec != self.chart_dec)) {
                     self.chart_unit = r.main.unit;
-                    self.chart_rel = self.meter.live_rel();
                     self.chart_dec = r.main.dec;
                     self.chart_n = 0;
                     self.chart_dirty = true;

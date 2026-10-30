@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""opendm40 DMM trend chart on REL on / off (#98): the chart starts over, so
-the REL deviations are not squashed under the absolute points (and back).
+"""opendm40 DMM trend chart on REL on / off (#98): the chart keeps its points,
+as the stock (FUN_0803e398 / FUN_0803e408 leave the chart's point count; only
+a function change clears it): the absolute and the REL points both stay.
 
   cd firmware && ./build.sh
   emu/chartreltest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
 3.3 V DC on V-COM, the chart full of 3.3 V points (8 s; it holds 6.4 s).
 Tap REL, 2 s later the trace (orange pixels of the plot, DBG:LCD? x 80..401,
-rows 172..281) is one flat line: its rows span a few pixels (before the fix
-the old 3.3 V points and the new 0 V ones spanned the plot's height). Tap REL
-again: the same for the absolute points.
+rows 172..281) still holds the old 3.3 V points and the new 0 V ones: its rows
+span most of the plot's height (a restarted chart is one flat line of a few
+rows). Tap REL again: the same, the REL points and the absolute ones.
 Exit status 0 = all passed.
 """
 import argparse
@@ -124,7 +125,7 @@ try:
         rows = trace_rows()
         shot('%d-rel-2s' % k)
         span = rows[-1] - rows[0] + 1 if rows else 0
-        check(rows and span <= 8, '%s: 2 s later the trace is one flat line (rows %s..%s, %d px)'
+        check(rows and span >= 40, '%s: 2 s later the trace keeps the old points (rows %s..%s, %d px)'
               % (what, rows[0] if rows else '-', rows[-1] if rows else '-', span))
 finally:
     try:
