@@ -1126,6 +1126,8 @@ pub struct Sentinel {
     /// comparator hit (no probe / jack check for it, `cmp_run`).
     pub neg: bool,
     neg_pend: bool,
+    /// ... DC V 6 V: a hold across both lines (an AC current, `neg_peak`).
+    neg_ac: bool,
     neg_only: bool,
     /// DC V 6 V (`dmm.rs` per reading): the reading is small enough for an
     /// open V jack (a source on V-COM, negative, might move PB1 too; not
@@ -1205,6 +1207,7 @@ impl Sentinel {
             pk_dc: false,
             neg: false,
             neg_pend: false,
+            neg_ac: false,
             neg_only: false,
             neg_vok: true,
             hi_only: false,
@@ -1256,6 +1259,7 @@ impl Sentinel {
         }
         self.kind = kind;
         self.neg_pend = false;
+        self.neg_ac = false;
         self.blank_until = now;
         self.win_t0 = now;
         self.win_hit = false;
@@ -1392,6 +1396,9 @@ impl Sentinel {
         }
         self.pk = (pkmin, pkmax);
         self.neg_pend |= self.neg_vok && neg_hit(pkmin, pkmax, self.neg_thr);
+        // DC V 6 V (`hi_only`): an AC current reads 0x70 / 0 in turn there
+        // (MIXED, as the 66 kHz square on V-COM): a hold across both lines
+        self.neg_ac |= self.hi_only && pkmax > self.neg_thr && pkmin < -self.neg_thr;
     }
 
     /// Alerts masked off by the user are dropped at once.
@@ -1510,10 +1517,11 @@ impl Sentinel {
             // NEGATIVE LEG: an AD2 hold below the line since the last window,
             // and the comparator read no bit (PB1 below its window)
             let cmp_hit = hit;
-            let hit = hit || (self.kind == Kind::CmpA && self.neg_pend && wb & (W_ONE | W_BOTH) == 0 && !self.win_hit);
+            let hit = hit || (self.kind == Kind::CmpA && (self.neg_ac || self.neg_pend && wb & (W_ONE | W_BOTH) == 0 && !self.win_hit));
             let neg_win = !(self.alt && self.alt_v);
             if neg_win {
                 self.neg_pend = false;
+                self.neg_ac = false;
             }
             let both = wb == CTSTA_CMP;
             self.win_t0 = now;
@@ -2932,6 +2940,22 @@ mod tests {
                 s.sample_cmp(t, ct);
             }
             assert_eq!(s.alert == Alert::AJack, aj, "{ct:#x}");
+        }
+        // DC V 6 V: an AC current (0x70 / 0 in turn, MIXED) with the AD2 hold across both
+        // lines: a hit; the same comparator reads with a small hold (the 66 kHz V side): none
+        for (lo, hi, aj) in [(-262_144, 262_143, true), (-20_000, 30_000, false)] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.neg = true;
+            s.hi_only = true;
+            s.neg_thr = PK2_NEG_THR_DCV;
+            for t in (0..400).step_by(10) {
+                if t % 100 == 50 {
+                    s.neg_peak(t, lo, hi);
+                }
+                s.sample_cmp(t, if (t / 10) % 2 == 0 { 0x70 } else { 0 });
+            }
+            assert_eq!(s.alert == Alert::AJack, aj, "{lo} {hi}");
         }
         // the rows
         assert!(neg_leg(1, 0, false, Kind::CmpA, 0) && neg_leg(3, 1, false, Kind::CmpA, 0) && neg_leg(10, 6, false, Kind::CmpA, 0));

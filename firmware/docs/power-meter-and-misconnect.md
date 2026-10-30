@@ -1600,6 +1600,10 @@ behaviour), so the comparator rows see one polarity only.
   the owner accepts the higher line. The AC? hint's V-tap window keeps 0xDD
   (`dmm.rs` swaps R21 with R20). Also an onset window (0 reads, then 0x70
   to its end) only starts a run now.
+  An AC current there reads 0x70 / 0 in turn (MIXED, as the 66 kHz square):
+  a window counts when the negative leg's AD2 hold since the last one spans
+  both +-`PK2_NEG_THR_DCV` (the square's pickup, if any, is averaged by
+  AD2's filter: *inferred*). Such runs too get no probe.
 * DBG:SENTinel:VARiant bit 7 (`VAR_NEG_OFF`) restores the 0.4.0 rows (no AD2
   on PB1, R21 0xDD) for an A/B of the readings.
 
