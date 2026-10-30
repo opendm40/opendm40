@@ -915,8 +915,8 @@ impl Meter {
     }
 }
 
-/// Continuity / diode with the reading over its ceiling: open leads, shown
-/// as "OPEN" (owner 2026-10-30), not "0L".
+/// Continuity / diode with the reading over its ceiling: open leads, "0L"
+/// captioned "OPEN" (owner 2026-10-30), not "Overflow".
 pub fn open(r: &Reading) -> bool {
     r.main.ol && matches!(r.mode, 11 | 12)
 }
