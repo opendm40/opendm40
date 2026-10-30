@@ -51,7 +51,7 @@ Bit-banged SPI on port F (no SPI peripheral is used), init at 0x58608:
   R37 = 0x60 (reset) only when the device is opened (ioctl 0, 0x58DB0) and at 0x586E8; single-register
   read-modify-writes of R20, R2A, R2B, R2F, R30; R1C..R1D for the counter.
 - Interrupt handler 0x5A17C: reads INTF; CTF → R1B..R1D, R18..R1A, R15..R17 (CTA, CTB, CTC) and R14; AD1F →
-  R00..R02 (24-bit, sign-extended); RMSF → R09..R0D (40 bits) and a square root. No row enables the RMS
+  R00..R02 (24-bit, sign-extended); RMSF → R09..R0D (40 bits) and a floating-point conversion. No row enables the RMS
   block, so that path runs only after a register write from outside the tables.
 
 ### Row selection (ioctl handler 0x58DB0)
@@ -95,8 +95,8 @@ Key fields:
 
 - **Mode / range change**: relays and analog switches first (GPIO descriptors 0xXXYY0100 via 0x5AB5C /
   0x5ABA4, plus 0x5A42C / 0x5A50C / 0x5A614), then the 25-byte burst, then the trims below. No read-back.
-- **AC trim** (0x5A7BC, a 16-bit word): bits 0..6 → R30 ACC (SREFO kept), bit 9 → R2A bit 3 (PS0), bit 8 →
-  R2A bit 7 (PS1), bit 7 → R2B bit 3 (PS2), bits 10..12 → three MCU GPIOs. V AC (mode 0, coupling ≠ 1) and
+- **AC trim** (0x5A7BC, a 16-bit word): bits 0..6 → R30 ACC (SREFO kept), bit 9 → R2A bit 3 (P0), bit 8 →
+  R2A bit 7 (P1), bit 7 → R2B bit 3 (P2): the power-bus switches of PA0..PA2; bits 10..12 → three MCU GPIOs. V AC (mode 0, coupling ≠ 1) and
   mode 9 load it from calibration record 0x11 for the range, Hz for the sensitivity index (after writing 0x1C00
   for index 3, 0x1000 otherwise); V DC writes 0.
 - **Offset DAC**: on V and A range changes the firmware loads calibration record 0x12 / 0x1E (V) or
@@ -113,8 +113,9 @@ Key fields:
 The Modbus map is a bank table at 0xAF218 ({descriptor array, base, count}: banks 0x0000..0x6000, 0x7000,
 0x8000, 0x9000, 0xA000, 0xE000, 0xF000). Each descriptor is 16 bytes {offset, read handler, write handler,
 type, size}. Bank 0xF000 (array at 0xAE028) is the calibration store: the handlers 0x40B88..0x40CDC copy
-`(reg − 0xF000) · 2` bytes from / into it. Types: 0x80 float (2 registers), 0x82 signed 32-bit
-(2 registers), 0x81 16-bit.
+the entry's bytes at offset `(reg − 0xF000) · 2` from / into it. Types 0x80 and 0x82: 4 bytes (2 registers),
+with identical handlers; 0x81: 2 bytes. 0x80 = float and 0x82 = signed 32-bit (SL) follow from the EEVblog
+labels (*inferred*).
 
 | registers | layout |
 |---|---|
