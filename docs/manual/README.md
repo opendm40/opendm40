@@ -552,7 +552,7 @@ above it. Both parts are always shown above the reading.
 All current ranges use the **A** jack and **COM**. The meter switches the
 shunt inside.
 
-- Ranges: 600 µA, 6000 µA, 60 mA, 600 mA, 6 A, 10 A.
+- Ranges: 600 µA, 6 mA, 60 mA, 600 mA, 6 A, 10 A.
 - DC A: the signed current. In the mA ranges the value above it shows the
   **4-20 mA** loop percentage: 4 mA = 0 %, 20 mA = 100 %. It is hidden below
   3.6 mA and above 125 %.
@@ -982,7 +982,7 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 - It is computed from the shunt resistance alone (10 mΩ for A, 0.5 Ω for
   mA, 47.5 Ω for µA); the fuse and the wiring add a little more.
 - At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
-  (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
+  (60 mA), 285 mV (6 mA), 28.5 mV (600 µA).
 
 ![123.45 µA; the burden voltage, 5.9 mV, above it](img/burden.png)
 
