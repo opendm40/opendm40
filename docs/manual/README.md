@@ -606,7 +606,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Continuity
 
-- Shows the resistance with two decimals; **0L** above 1000 Ω.
+- Shows the resistance with two decimals; **0L** with **OPEN** above 1000 Ω.
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
@@ -633,7 +633,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Diode
 
-- Shows the forward voltage with four decimals; **0L** above 3.12 V.
+- Shows the forward voltage with four decimals; **0L** with **OPEN** above
+  3.12 V (open leads or a reversed diode).
 - Top left, small: the test current, **I 0.76 mA** (the short-circuit
   current, measured on one unit; the open-circuit voltage is 3.2 V).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
@@ -755,20 +756,22 @@ AUTO+ is safer**.
 AUTO+ is the default for volts because owners have linked damaged inputs
 to a high voltage applied while the meter sat on the mV range.
 
-#### Overload
+#### Overflow
 
-- **0L** in the reading with the word **Overload** next to it: the value
+- **0L** in the reading with the word **Overflow** next to it: the value
   is above the range (or the function's limit). The bargraph turns red with
-  an **OL** mark. On the scope page's meter strip, **Overload** is in the
+  an **OL** mark. On the scope page's meter strip, **Overflow** is in the
   small text right of the reading.
+- Continuity and diode say **OPEN** instead of **Overflow** (also the
+  bargraph mark).
 - A small value (for example the diode's Ω value) that is over its limit
-  shows **0L** with a small **Overload** before it.
-- An overload is never stored in MIN/MAX/AVG, the chart or the history.
+  shows **0L** with a small **Overflow** before it.
+- An overflow is never stored in MIN/MAX/AVG, the chart or the history.
 
 
-![Overload](img/dmm-ol.png)
-
-*Overload.*
+| ![Over range: 0L, Overflow](img/dmm-ol.png) | ![Continuity, open leads: 0L, OPEN](img/dmm-open.png) |
+|---|---|
+| Over range: 0L, Overflow | Continuity, open leads: 0L, OPEN |
 
 ### Counts, rate and the extra digit
 
@@ -1025,7 +1028,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read OL), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -2105,8 +2108,8 @@ ended**).
 
 Each row holds the reading as the multimeter measured it, with REL applied
 but without the display smoothing. In the interval modes, a row holds the
-mean of the readings of that interval; an interval with an overload reading
-becomes an overload row.
+mean of the readings of that interval; an interval with an overflow reading
+(0L, OPEN) becomes an overflow row.
 
 The meter has no real-time clock. Times count in seconds from the start of
 the recording; the header says how long after power-on it started.
@@ -2115,7 +2118,7 @@ The CSV file looks like this:
 
 ```
 # Alientek DM40A, opendm40 0.2.0, function DC V, range AUTO, started uptime 12.345 s
-# time_s = seconds since the start of this recording (no real-time clock); empty value = overload
+# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow
 time_s,value,unit,flags
 0.250,1.23456,V,
 0.750,,V,OL
@@ -2124,9 +2127,9 @@ time_s,value,unit,flags
 | Column | Content |
 |---|---|
 | `time_s` | Seconds since the start. In interval mode: the end of the interval, also for the last one when the recording stops inside it. |
-| `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overload. |
+| `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overflow. |
 | `unit` | The unit. |
-| `flags` | Any of `OL` (overload), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
+| `flags` | Any of `OL` (overflow: 0L or OPEN), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
 
 Interval files have one more header line that names the interval.
 

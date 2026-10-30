@@ -667,9 +667,11 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
         ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
+        // Open leads: "0L" with "OPEN" (continuity / diode).
+        ("cont_ol", rd(11, ol(2, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
-        // A reading with an OL aux value only ("Overload" before its 0L).
+        // A reading with an OL aux value only ("Overflow" before its 0L).
         ("diode_aux_ol", rd(12, val(1.2034, 4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
         ("cap_mf", rd(13, val(44.444, 3, "mF"), None, None, false), None),
         ("cap_nf", rd(13, val(4.444, 3, "nF"), None, None, false), None),
@@ -3078,7 +3080,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 19] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -3096,6 +3098,8 @@ fn main() {
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
         ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
+        ("c24-strip-open-cont", "cont_ol", 0, 0, false, false),
+        ("c25-strip-open-diode", "diode_ol", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -3582,7 +3586,7 @@ fn main() {
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm)] {
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm), ("cont_ol", "d26-dmm-open-cont", Button::ContDiode)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();

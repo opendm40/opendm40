@@ -268,6 +268,11 @@ SECTIONS
         *(.text.*8opendm403app9app_power*3App15pw_pending_draw*);
         *(.text.*8opendm402ui8settings*);
         *(.text.*8opendm402ui9temp_page*);
+        /* Its info line, once a second while the temperature page is open
+         * (no AD2 stream in temperature). Region B audit 2026-10-30, ~0.45 KB:
+         * room for ui::ol_word's "OPEN" / "Overflow" in B. */
+        *(.text.*8opendm403app*3App14temp_info_text*);
+        *(.text.*8opendm403app*3App14temp_info_tick*);
         *(.text.*8opendm402ui8temp_key*);
         *(.text.*8opendm402ui10gen_values*);
         *(.text.*8opendm402ui10gen_static*);

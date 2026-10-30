@@ -281,7 +281,7 @@ pub struct DmmView {
     /// Bargraph scale as last labelled: (full scale bits, unit, bipolar),
     /// None = labels to draw; and the overload marker as last drawn.
     bar_scale: Option<(u32, &'static str, bool)>,
-    bar_ol: Option<bool>,
+    bar_ol: Option<u8>,
     /// ui-review #13: draw the value in the stock >= 30 V red (set by the
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
@@ -297,8 +297,9 @@ pub struct DmmView {
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
-    /// The "Overload" word is drawn next to the main readout's "0L".
-    ol_word: bool,
+    /// The caption next to the main readout's "0L" as drawn: 0 none,
+    /// 1 "Overflow", 2 "OPEN" (`ol_word`).
+    ol_word: u8,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings 2/3 "DMM row": History) and the power meter
@@ -380,7 +381,7 @@ use crate::scope_ui::{pm, PM_W};
 /// grey (`StripData::grey`); the accuracy label (`acc_ulps`, ASCII unit,
 /// no space, as the sub readings) in the lower sub row when it is free,
 /// else in the upper one; none when both hold a sub reading (AC V / A: Hz
-/// and duty) or "Overload".
+/// and duty) or the "0L" caption.
 #[inline(never)]
 #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
 pub fn strip_acc(d: &mut crate::scope_ui::StripData, r: &Reading, acc: Option<Acc>) {
@@ -604,7 +605,7 @@ impl DmmView {
             pwc: pw::PwCache::new(),
             ohm_on: false,
             last_iohm: 254,
-            ol_word: false,
+            ol_word: 0,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -753,10 +754,11 @@ impl DmmView {
             self.bar_labels(fs, key.1);
         }
         let f = if temp { Some(0.0) } else { crate::bargraph::frac(r.main.v, fs, r.main.ol) };
-        let ol = f.is_none();
+        // The overflow mark: "OL", "OPEN" in continuity / diode.
+        let ol = if f.is_some() { 0 } else if meter::open(r) { 2 } else { 1 };
         if self.bar_ol != Some(ol) {
             self.bar_ol = Some(ol);
-            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
+            sf::label(sf::F14, BAR_OL, ["", "OL", "OPEN"][ol as usize], 0xF800, BG, 1, 1);
         }
         self.bar.update(f);
     }
@@ -863,17 +865,18 @@ impl DmmView {
         };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
-        // "Overload" after the "0L" (`ol_word`): cleared before the cells
+        // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
-        if !r.main.ol && self.ol_word {
+        let ok = if !r.main.ol { 0 } else if meter::open(r) { 2 } else { 1 };
+        if ok != self.ol_word && self.ol_word != 0 {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
-            self.ol_word = false;
+            self.ol_word = 0;
         }
         sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if r.main.ol && (!same_layout || !self.ol_word) {
-            ol_word(ow, color);
-            self.ol_word = true;
+        if ok != 0 && (!same_layout || self.ol_word != ok) {
+            ol_word(ow, color, ok == 2);
+            self.ol_word = ok;
         }
         if let Some(e) = ext {
             if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
@@ -1038,12 +1041,12 @@ impl DmmView {
                         sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE, BG, 4, 0);
                         sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
                     } else if v.ol && !r.main.ol {
-                        // "0L" with "Overload" (F14) before it, unless the
-                        // main readout's "Overload" already says it (the
+                        // "0L" with "Overflow" (F14) before it, unless the
+                        // main readout's caption already says it (the
                         // power meter's V / I are OL only with it): two
                         // boxes tiling the plain one, so a value after it
                         // leaves nothing behind.
-                        sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overload", vcol, BG, 4, 1);
+                        sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overflow", vcol, BG, 4, 1);
                         sf::label(sf::LETTERS, rect(vx + 51, 36, 56, 30), txt, vcol, BG, 4, 0);
                     } else {
                         sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, vcol, BG, 4, 0);
@@ -1149,16 +1152,19 @@ impl DmmView {
 
 }
 
-/// The "Overload" word's box on the DMM page: the empty cells after the
+/// The "0L" caption's box on the DMM page: the empty cells after the
 /// "0L" of the main readout (CELLS[4]: "0L" ends at x 304), bottom-aligned
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
 const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
 
-/// "Overload" (what "0L" means) in `r`, in the readout's colour.
+/// What "0L" means in `r`, in the readout's colour and F14 (the old
+/// "Overload" caption's font): "OPEN" (continuity / diode, open leads:
+/// meter::open) or "Overflow" (owner 2026-10-30). Region B (F14: blob in
+/// A2, index in B), not .cold: an OL can start while the fast logger's AD2
+/// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color) {
-    let (f, sp) = if sf::text_width(sf::TEXT22, "Overload", 0) <= r.w { (sf::TEXT22, 0) } else { (sf::F14, 1) };
-    sf::label(f, r, "Overload", c, BG, 2, sp);
+fn ol_word(r: sf::Rect, c: Color, open: bool) {
+    sf::label(sf::F14, r, if open { "OPEN" } else { "Overflow" }, c, BG, 2, 1);
 }
 
 /// The test current label's box: the aux1 slot's left part (the burden
@@ -1279,7 +1285,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     // "0L": what it means, in the first free sub row (else the second:
     // the reading matters more than its sub values then).
     if r.main.ol {
-        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new("Overload");
+        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new(if meter::open(r) { "OPEN" } else { "Overflow" });
     }
     let verdict = match lim {
         meter::V_PASS => Some(("PASS", 0x0400)),
