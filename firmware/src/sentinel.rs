@@ -264,7 +264,7 @@ pub const VAR_NEG_OFF: u8 = 128;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 pub fn set_variant(v: u8) {
-    VARIANT.store(v & 127, core::sync::atomic::Ordering::Relaxed);
+    VARIANT.store(v, core::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn variant() -> u8 {
