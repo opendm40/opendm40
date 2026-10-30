@@ -27,23 +27,23 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
-- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
-  43 008 at the faster timebases (was 26 624), for the stopped zoom / pan,
+- Scope: a longer capture: 52 400 samples from 100 ms/div (the stock's
+  65 520 does not fit next to the GEN / CH2 channels), 34 816 at the faster
+  timebases (was 26 624), for the stopped zoom / pan,
   Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
   capture (at most 10 s) with the trigger point at the trigger position
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
   Wave view at 9600 S/s and slower) keep the capture compressed with the
-  DLG scope coder as it comes in: at least 65 520 samples (white noise),
+  DLG scope coder as it comes in: at least 52 400 samples (white noise),
   more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
-  for up to 10 s; the part after the trigger point is at most 52 156
+  for up to 10 s; the part after the trigger point is at most 39 036
   samples, the part before it what the memory keeps
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
-- **Protocol decoder:** UART (RS-232, RS-485) and Modbus RTU drawn under
-  the trace, each triggered capture and on STOP, also in the Wave view;
-  or a frame log (Mode Log) decoded while the input streams, each frame
-  with its waveform, read over SCPI as a FIFO. Scope MF > Decode; SCPI `DECode`
-  ([manual](docs/manual/README.md#protocol-decoder)).
+- **Protocol decoder:** UART (RS-232, RS-485) drawn under the trace, each
+  triggered capture and on STOP, also in the Wave view. Scope MF > Decode;
+  SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)). Modbus
+  RTU and the frame log (Mode Log) are left out of this build (flash).
 
   ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
 - **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
@@ -172,7 +172,7 @@ section named after the tag as the release notes; how to cut a release:
   record with a step where two captures met. STOP now ends on one more
   complete capture (as **Single** / `DIGitize`: the trigger point at the
   trigger position), of the full record up to the screen's time + 0.5 s
-  (43 008 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  (34 816 samples at the faster timebases, 37 500 at 100 ms/div). It ends
   at most the screen's time + 1 s after the STOP, with what is in when
   nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
   2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for

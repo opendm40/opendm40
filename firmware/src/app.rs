@@ -49,7 +49,11 @@ mod app_touchtest;
 /// The protocol decoder view (region B: it runs while the scope streams).
 #[path = "app_decode.rs"]
 mod app_decode;
+#[cfg(feature = "dec-log")]
 #[path = "app_log.rs"]
+mod app_log;
+#[cfg(not(feature = "dec-log"))]
+#[path = "app_log_off.rs"]
 mod app_log;
 
 pub use app_wave::WaveReq;

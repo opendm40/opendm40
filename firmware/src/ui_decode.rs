@@ -136,7 +136,7 @@ impl Ann {
 
 /// The band's rect (the graph hole) for `dec` (1 UART, 2 Modbus).
 pub fn band_rect(dec: u8) -> Rect {
-    if dec == 2 { rect(14, FRAME_Y, 399, BYTE_Y + ROW_H - FRAME_Y) } else { rect(14, BYTE_Y, 399, ROW_H) }
+    if dc::MODBUS && dec == 2 { rect(14, FRAME_Y, 399, BYTE_Y + ROW_H - FRAME_Y) } else { rect(14, BYTE_Y, 399, ROW_H) }
 }
 
 const C_ERR: Color = 0xf800;
@@ -226,7 +226,7 @@ pub fn band(dec: u8, blank: bool) {
     }
     if a.mode == M_BAR {
         draw_bar(BYTE_Y);
-        if dec == 2 {
+        if dc::MODBUS && dec == 2 {
             draw_bar(FRAME_Y);
         }
         return;
@@ -330,6 +330,9 @@ impl SetupVals {
 
 /// The tab's page height (MF_PAGE_H).
 pub const PAGE_H: i16 = 162;
+/// The frame log (Mode Log) is built in (firmware: feature `dec-log`; the
+/// host tests always).
+const LOG: bool = cfg!(any(feature = "dec-log", not(target_os = "none")));
 pub const SU_PROTO: Rect = rect(24, 81, 180, 24);
 pub const SU_MODE: Rect = rect(214, 81, 120, 24);
 pub const SU_FMT: Rect = rect(24, 125, 176, 24);
@@ -364,8 +367,10 @@ pub fn page(v: &SetupVals, pc: Rect) {
             None => (C_POP_BG, 0),
         });
     }
-    option_list(SU_PROTO, pc, &["Off", "UART", "Modbus"], 60, v.proto.min(2) as usize);
-    option_list(SU_MODE, pc, &["Band", "Log"], 60, v.mode.min(1) as usize);
+    let protos: &[&str] = if dc::MODBUS { &["Off", "UART", "Modbus"] } else { &["Off", "UART"] };
+    option_list(SU_PROTO, pc, protos, 60, v.proto.min(protos.len() as u8 - 1) as usize);
+    let modes: &[&str] = if LOG { &["Band", "Log"] } else { &["Band"] };
+    option_list(SU_MODE, pc, modes, 60, v.mode.min(modes.len() as u8 - 1) as usize);
     option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
     option_list(SU_POL, pc, &["Normal", "Inverted"], 88, v.inv as usize);
     option_list(SU_TAUTO, pc, &["Auto", "Manual"], 60, v.thr.is_finite() as usize);
@@ -403,9 +408,9 @@ pub enum SetupHit {
 /// What a touch on the Decode tab's page hits.
 pub fn page_hit(x: i16, y: i16) -> SetupHit {
     let near = |r: Rect| rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y);
-    if let Some(i) = option_hit(SU_PROTO, 3, 60, x, y) {
+    if let Some(i) = option_hit(SU_PROTO, if dc::MODBUS { 3 } else { 2 }, 60, x, y) {
         SetupHit::Proto(i)
-    } else if let Some(i) = option_hit(SU_MODE, 2, 60, x, y) {
+    } else if let Some(i) = option_hit(SU_MODE, if LOG { 2 } else { 1 }, 60, x, y) {
         SetupHit::Mode(i)
     } else if let Some(i) = option_hit(SU_FMT, 4, 44, x, y) {
         SetupHit::Fmt(i)

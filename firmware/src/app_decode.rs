@@ -127,7 +127,7 @@ impl App {
     pub(super) fn dec_band(&self) -> u8 {
         match ds().cfg.proto {
             dc::P_UART => 1,
-            dc::P_MODBUS => 2,
+            dc::P_MODBUS if dc::MODBUS => 2,
             _ => 0,
         }
     }
@@ -351,7 +351,7 @@ impl App {
     fn dec_margin(&self, x: usize, up: bool, baud: u32, fs: u32) -> usize {
         let cb = ds().cfg.char_bits() as u64;
         let cs = (fs as u64 * cb / baud.max(1) as u64) as usize;
-        let m = cs * if ds().cfg.proto == dc::P_MODBUS { 6 } else { 2 } + (fs as u64 * 2 / baud.max(1) as u64) as usize;
+        let m = cs * if ds().cfg.proto == dc::P_MODBUS && dc::MODBUS { 6 } else { 2 } + (fs as u64 * 2 / baud.max(1) as u64) as usize;
         if up { x.saturating_add(m) } else { x.saturating_sub(m) }
     }
 
@@ -372,7 +372,7 @@ impl App {
             return;
         }
         let cs = j.line.char_samples();
-        j.fr = dc::Framer::new(s.cfg.proto == dc::P_MODBUS, cs, a.fs, baud, j.a as u32, j.b as u32);
+        j.fr = dc::Framer::new(s.cfg.proto == dc::P_MODBUS && dc::MODBUS, cs, a.fs, baud, j.a as u32, j.b as u32);
         j.cur = dc::Cursor::at(j.a);
     }
 
@@ -486,7 +486,7 @@ impl App {
             }
             return;
         }
-        let modbus = ds().cfg.proto == dc::P_MODBUS;
+        let modbus = ds().cfg.proto == dc::P_MODBUS && dc::MODBUS;
         let lim = j.cur.n.saturating_add(n);
         let (b, line) = (j.b, j.line);
         let fr = &mut j.fr;
@@ -553,7 +553,7 @@ impl App {
         let old = s.cfg;
         let old_thr = s.thr_v;
         match h {
-            ud::SetupHit::Proto(p) => s.cfg.proto = p,
+            ud::SetupHit::Proto(p) => s.cfg.proto = p.min(if dc::MODBUS { 2 } else { 1 }),
             ud::SetupHit::Mode(m) => {
                 if m != s.mode {
                     self.dec_mode(clk, m);
@@ -643,10 +643,14 @@ impl App {
         match c {
             D::Proto(None) => out.put_bytes(match s.cfg.proto {
                 dc::P_UART => b"UART",
-                dc::P_MODBUS => b"MODB",
+                dc::P_MODBUS if dc::MODBUS => b"MODB",
                 _ => b"OFF",
             }),
-            D::Proto(Some(p)) => s.cfg.proto = p,
+            D::Proto(Some(p)) if p != dc::P_MODBUS || dc::MODBUS => s.cfg.proto = p,
+            D::Proto(Some(_)) => {
+                out.set_err("Parameter not allowed");
+                return false;
+            }
             D::Baud(None) => {
                 if s.cfg.baud == 0 {
                     out.put_bytes(b"AUTO");
@@ -842,7 +846,7 @@ impl App {
             return 0;
         }
 
-        let modbus = s.cfg.proto == dc::P_MODBUS;
+        let modbus = s.cfg.proto == dc::P_MODBUS && dc::MODBUS;
         if !self.scope.s.run && (a.c0 > 0 || (a.c1 as usize) < self.scope.record().len()) {
             // Stopped, more than the lists hold: the whole record again,
             // straight into the reply.

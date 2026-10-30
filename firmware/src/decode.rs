@@ -38,6 +38,14 @@ pub const MIN_BAUD: u32 = 300;
 pub const P_OFF: u8 = 0;
 pub const P_UART: u8 = 1;
 pub const P_MODBUS: u8 = 2;
+/// Modbus RTU is built in (firmware: feature `dec-modbus`; the host tests
+/// always); without it only UART.
+pub const MODBUS: bool = cfg!(any(feature = "dec-modbus", not(target_os = "none")));
+/// `proto` is Modbus RTU (always false without `dec-modbus`).
+#[inline(always)]
+pub fn is_mb(proto: u8) -> bool {
+    MODBUS && proto == P_MODBUS
+}
 
 /// Frame formats: data bits, parity (0 none, 1 even, 2 odd).
 pub const FMT_NAMES: [&str; 4] = ["8N1", "8E1", "8O1", "7E1"];
@@ -444,6 +452,7 @@ pub struct Framer {
 impl Framer {
     /// `cs`: the character time, samples; `fs` the sample rate.
     pub fn new(modbus: bool, cs: u32, fs: u32, baud: u32, lo: u32, hi: u32) -> Framer {
+        let modbus = MODBUS && modbus;
         let gap = if !modbus {
             cs * 2
         } else if baud > 19200 {
@@ -515,7 +524,7 @@ impl Framer {
         let mut f = self.cur;
         self.cur.len = 0;
         self.prev_end = f.end;
-        if self.modbus {
+        if MODBUS && self.modbus {
             let n = f.len as usize;
             let part = open || (!self.seen_gap && f.start.saturating_sub(self.lo) <= self.gap);
             if part {
@@ -676,6 +685,9 @@ pub fn status(flags: u8) -> &'static str {
 /// Modbus fields as text: "REQ 01 03 @0000 n=10", "RSP 01 03 20B",
 /// "EXC 01 83 E02", "RSP 01 06 @0005 =1234"; "?" without fields.
 pub fn mb_text(w: &mut W, f: &Fr) {
+    if !MODBUS {
+        return;
+    }
     if !matches!(f.kind, K_REQ | K_RSP | K_EXC) {
         w.s("?");
         return;

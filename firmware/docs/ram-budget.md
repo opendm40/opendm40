@@ -172,13 +172,14 @@ instead of per strip) and `scope_ui::COLC` (400 B, flash).
 
 ## The scope record: raw ring and coded ring
 
-`scope::BUF` ([`src/scope.rs`](../src/scope.rs), 86 016 B in SRAM) is
-the whole SRAM the budget leaves (8 KiB link floor + ~3 KB margin). The
+`scope::BUF` ([`src/scope.rs`](../src/scope.rs), 69 632 B in SRAM on
+test/scope-chain-0.4 with 0.4.0's GEN / CH2: 86 016 B before) is the
+whole SRAM the budget leaves (8 KiB link floor + ~1 KB margin). The
 stock record is 65 520 samples; as u16 that is 131 040 B, more than the
 SRAM has free. 10-bit codes packed 4 in 5 bytes
 ([`src/pack10.rs`](../src/pack10.rs): a little-endian bit stream, sample
 i at bits 10 i .. 10 i + 9, one unaligned 32-bit load per sample) make
-65 520 samples 81 900 B.
+65 520 samples 81 900 B; BUF holds 52 400 packed (`PCAP`).
 
 The DMA writes u16 (GPIOB IDR, or the TIM8 latch, at up to 50 MS/s), and
 opendm40 has no interrupt besides the AD2 stream's (the main loop polls
@@ -186,10 +187,10 @@ everything, passes up to ~25 ms), so only the main loop can pack. That
 sets two modes:
 
 - **fs > 25 kS/s** (faster than 100 ms/div): the DMA writes a raw ring of
-  `CAP` = 43 008 u16 (linear or circular as before). When the
+  `CAP` = 34 816 u16 (linear or circular as before). When the
   acquisition stops, the ring is packed in place (`pack_in_place`: group
   g's 5 bytes are written after its 8 raw bytes are read, so it never
-  overtakes unread samples; ~0.7 ms for 43 008 samples, inferred from the
+  overtakes unread samples; ~0.6 ms for 34 816 samples, inferred from the
   instruction count). Packing during
   the capture would need the CPU at 50 MS/s (4 cycles per sample at
   200 MHz), and with the comparator trigger the main loop learns of the
@@ -270,7 +271,7 @@ The bound of a record is also the scope DLG format's: 64 blocks of 4096
 samples (`dlog::SBLK_MAX`), 262 144. Single / DIGitize on the coded ring
 (edge trigger) want 10 s, the trigger at the trigger position; the part
 after the trigger point is at most PCAP less the margins and the
-screen's pre part (52 156 at the centre), so it fits the ring whatever
+screen's pre part (39 036 at the centre), so it fits the ring whatever
 the signal, the part before it is what the ring keeps.
 
 Not done: the fast timebases at 65 520 samples. That needs 131 040 B of
@@ -289,7 +290,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 
 | static | size (B) | live when | live at the same time | overlay / shrink? |
 |---|---|---|---|---|
-| scope::BUF (SRAM) | 86 016 | always: the scope acquires in the background in every view (measurements, SCPI); the stored record while stopped | everything | Lent to inrush (`Scope::lend_buf`) while the inrush page is open. Keep. |
+| scope::BUF (SRAM) | 69 632 | always: the scope acquires in the background in every view (measurements, SCPI); the stored record while stopped | everything | Lent to inrush (`Scope::lend_buf`) while the inrush page is open. Keep. |
 | logger::RING (SRAM) | 16 540 | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and `fastlog::begin`, but not by an SCPI LOG:STAT ON session | Idle in plain DMM / scope use. An overlay with the csvlog buffers would need csvlog and LOG:STAT ON to refuse each other, plus an owner token. Not done. |
 | calbackup::SCRATCH (SRAM) | 12 288 | any disk job (table above) + the FFT | see above | Already shared with the FFT. |
 | scope_ui::GRAPH (SRAM) | 9 956 | the scope pages (Scope, combined view, Wave view): trace / persistence / math rows and their on-screen diff copies | the scope record, the FFT | The combined view rules out an overlay with anything scope-side. The math rows (`ma`, `d_ma`) could go when math is off. Not done. |

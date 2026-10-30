@@ -5,7 +5,7 @@ wait, STOP, wait for TRIG:STAT? STOP, read the whole record (WAV:POIN MAX,
 WORD) and check it:
 
   * length: the STOP's capture (scope.rs `rec_split`, `stop_req`): the
-    screen + 0.5 s, at most 42 144 .. 43 008 samples (37 500 at 100 ms/div,
+    screen + 0.5 s, at most 33 952 .. 34 816 samples (37 500 at 100 ms/div,
     untriggered up to ~50 000); STOP done within the screen's time + 1 s;
   * the trigger point (WAV:PRE? x origin) inside the record, on the level
     (the generator's offset: the sine's mid code) and rising;
@@ -73,8 +73,8 @@ def expected(fs):
     # The STOP's capture (scope.rs rec_split, stop_req): the screen (25 000
     # samples) + 0.5 s, at most the raw ring less the margins (42 144);
     # at the deadline (untriggered) what is in, up to the ring.
-    lo = min(42144, 25000 + int(fs) // 2 - 500)
-    return (lo, 65520 if fs <= 25000 else 43008)
+    lo = min(33952, 25000 + int(fs) // 2 - 500)
+    return (lo, 52400 if fs <= 25000 else 34816)
 
 
 def check_record(y, pre, fs):

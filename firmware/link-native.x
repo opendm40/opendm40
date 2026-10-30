@@ -431,6 +431,30 @@ SECTIONS
         *(.text.*8opendm406vwrite5check*);
         *(.text.*8opendm406vwrite8finalize*);
         *(.text.*8opendm406vwrite6commit*);
+        /* Region B audit #8 (2026-10-30, test/scope-chain-0.4 on 0.4.0 with
+         * GEN / CH2): functions whose every caller is region C code (a call
+         * graph from the ELF, every address-taken function counted as hot):
+         * the generator page's wave preview (ui::gen_values), vwrite's
+         * staging of a host write (VDisk::write_block), the scope CSV's DLG
+         * sample coder (App::sp_save_csv), the gallery's DLG decoders,
+         * HwTrig::calibrate's sweep, the limits / keypad / record page
+         * helpers. */
+        *(.text.*8opendm402ui11gen_preview*);
+        *(.text.*8opendm406vwrite5stage*);
+        *(.text.*8opendm406vwrite9ours_live*);
+        *(.text.*4dlog*4SEnc4next*6pack105Codes*);
+        *(.text.*4dlog*4SEnc3put*);
+        *(.text.*7gallery4GSrcE*);
+        *(.text.*8opendm406csvlog5ascii*);
+        *(.text.*8opendm402ui21ok_and_limits_buttons*);
+        *(.text.*8opendm406hwtrig*6HwTrig5sweep*);
+        *(.text.*8opendm402ui2pw7outline*);
+        *(.text.*8opendm402ui13record_button*);
+        *(.text.*8opendm403app12kp_unit_text*);
+        *(.text.*8opendm408spiflash9block_crc*);
+        /* Struct templates copied only by region C code (fastlog::begin,
+         * csvlog::start from App::rec_start, App::tt_open). */
+        *(.rodata.cold_tpl*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C

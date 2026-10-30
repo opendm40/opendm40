@@ -57,18 +57,20 @@ const WIN: usize = 800;
 const STREAM_FS: u32 = 1_250_000;
 /// Longest busy-wait inside a poll for the post-trigger samples (us).
 const STREAM_SPIN_US: u64 = 1000;
-/// Record buffer in SRAM0 (86 KB, the SRAM budget: docs/native-boot.md
+/// Record buffer in SRAM0 (68 KB, the SRAM budget: docs/native-boot.md
 /// "Memory budget"), as CAP u16: the raw ring of the fast acquisitions
 /// (fs > PK_FS), packed in place (pack10.rs) when it stops. Slow ones
 /// (fs <= PK_FS) and the wave view keep a packed ring of PCAP samples in
-/// its first 81 900 bytes, filled each poll from a DMA staging ring of STG
+/// its first 65 500 bytes, filled each poll from a DMA staging ring of STG
 /// raw samples at its top (`pk_drain`). Every stored record is packed.
-#[cfg(not(feature = "recovery-usb"))]
-pub const CAP: usize = 42 * 1024;
+/// 34 K: 0.4.0's GEN / CH2 channels left no SRAM for the 42 K (65 520
+/// packed samples, the stock's) of feat/scope-long-record.
+pub const CAP: usize = 34 * 1024;
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
 pub const LOG_RING: usize = 16 * 1024;
 /// The log stream's highest rate (10.9 samples a bit at 115200 baud).
+#[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
 pub const LOG_FS_MAX: u32 = 1_250_000;
 /// The decoder's log stream runs (emu/decodetest.py's region C hooks gate
 /// on it, as emu/regionc.py on hy3131::HANDED for the AD2 stream). Nothing
@@ -76,15 +78,9 @@ pub const LOG_FS_MAX: u32 = 1_250_000;
 #[used]
 pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// The `recovery-usb` variant (no LCD, no scope use) needs its own MSC
-/// buffers: a smaller ring keeps its SRAM above the 8 KiB link floor.
-#[cfg(feature = "recovery-usb")]
-pub const CAP: usize = 36 * 1024;
-/// Packed ring (samples): the stock's 65 520-sample record.
-#[cfg(not(feature = "recovery-usb"))]
-pub const PCAP: usize = 65_520;
-#[cfg(feature = "recovery-usb")]
-pub const PCAP: usize = 55_000;
+/// Packed ring (samples): what RB holds packed (the stock's record is
+/// 65 520).
+pub const PCAP: usize = 52_400;
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;
@@ -416,6 +412,7 @@ pub struct Scope {
     log_last: usize,
     log_ms: u64,
     log_cyc: u32,
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     log_settle: bool,
     stored_len: usize,
     stored_trig: Option<usize>,
@@ -2528,6 +2525,7 @@ impl Scope {
     /// fills its first LOG_RING samples circularly at the table rate at or
     /// above `fs` (at most LOG_FS_MAX). The front end stays as the scope
     /// set it. Returns the rate.
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_begin(&mut self, fs: u32, now: u64) -> u32 {
         if !self.log {
             self.lend_buf();
@@ -2542,6 +2540,7 @@ impl Scope {
     }
 
     /// The log's DMA (again: after a halt, a settings change).
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     fn log_run(&mut self, now: u64) {
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == self.log_fs).unwrap_or(&HW[0]);
         unsafe {
@@ -2586,6 +2585,7 @@ impl Scope {
     }
 
     /// Pause the log stream (the log's memory stays); `log_resume` goes on.
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_halt(&mut self) {
         if self.log_live {
             self.halt();
@@ -2594,6 +2594,7 @@ impl Scope {
         }
     }
 
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_resume(&mut self, now: u64) {
         if self.log && !self.log_live {
             self.log_run(now);
@@ -2603,6 +2604,7 @@ impl Scope {
     /// End the log: BUF back to the scope (the next poll starts an
     /// acquisition; no stored record, `rec_gen` moves on so nothing kept
     /// for the old one shows).
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_end(&mut self) {
         if !self.log {
             return;
@@ -2617,6 +2619,7 @@ impl Scope {
         self.return_buf();
     }
 
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_on(&self) -> bool {
         self.log
     }
@@ -2624,6 +2627,7 @@ impl Scope {
     /// The log stream: (samples written since its start, its generation,
     /// whole ring laps missed), None while paused. A new generation starts
     /// at sample 0.
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_poll(&mut self, now: u64) -> Option<(u64, u32, u32)> {
         if !self.log_live {
             return None;
@@ -2660,6 +2664,7 @@ impl Scope {
     }
 
     /// The log's sample ring (sample n at n % LOG_RING) and its rate.
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_ring(&self) -> (&'static [u16], u32) {
         // SAFETY: main loop only; the DMA writes the ring, readers take
         // samples well behind its position (app_log.rs).
@@ -2667,6 +2672,7 @@ impl Scope {
     }
 
     /// The log's memory: BUF above the ring (bytes).
+    #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_mem(&self) -> (*mut u8, usize) {
         (unsafe { (core::ptr::addr_of_mut!(BUF) as *mut u8).add(LOG_RING * 2) }, (CAP - LOG_RING) * 2)
     }

@@ -922,6 +922,52 @@ view); the gallery's `dlog` decoder copies for `GSrc` (~0.6 KB of B,
 `.text.vdisk_rd` on the generic functions); glyph tables without the
 code field where dense (~0.65 KB).
 
+### Region B audit #8 (2026-10-30, test/scope-chain-0.4 on 0.4.0 + GEN / CH2)
+
+The chain merged again on release/0.4.0 (e3229f7a: #64 / #177 GEN and
+DMM CH2, #172, #180) did not link: region B -6 304 B, SRAM -6 924 B
+(release alone: B 8 280, SRAM 24 244), with region C 6 588 B and A2 156 B
+free. With CH2 the AD2 stream also runs on the MCX scope page, so no
+scope-page code can go to region C; about 12 KB of flash and 15 KB of
+SRAM had to leave the image.
+
+| | merged | after |
+|---|---|---|
+| region A2 free | 156 B | 156 B |
+| region B free | -6 304 B (no link) | 9 440 B |
+| region C free | 6 588 B | 6 064 B |
+| stack headroom (static worst path) | 21 312 B | 21 312 B |
+| SRAM free | -6 924 B | 9 460 B |
+
+Left out (cargo features, not default here):
+- `dec-log`: the decoder's frame log (Mode Log, DECode:MODE LOG, the
+  FRAMes? FIFO of the log; src/app_log.rs, a stub app_log_off.rs refuses
+  it): B ~9 KB, C ~5 KB. The Decode tab's Mode row shows Band only.
+- `dec-modbus`: Modbus RTU in the decoder (decode.rs `MODBUS`; UART
+  only, DECode:PROTocol MODBus refused): B 1 176 B. The host tests build
+  it always.
+
+SRAM: `scope::CAP` 42 K -> 34 K u16 (-16 384 B): the raw ring of the fast
+timebases 43 008 -> 34 816 samples, the packed ring (`PCAP`, white
+noise) 65 520 -> 52 400, the post-trigger part of a coded Single at the
+centre 52 156 -> 39 036; a compressible signal keeps ~0.8 of what it did
+(tools/cring-test). The `recovery-usb` split of CAP is gone (it was the
+smaller one).
+
+Moves (functions whose every caller is region C code, from a call graph
+of the ELF with every address-taken function counted as hot): the
+generator page's wave preview (`ui::gen_preview`, from `gen_values`),
+vwrite's `stage` / `ours_live` (`VDisk::write_block`), `HwTrig::sweep`
+(`calibrate`), `csvlog::ascii`, `ui::ok_and_limits_buttons`,
+`ui::pw::outline`, `ui::record_button`, `app::kp_unit_text`,
+`spiflash::block_crc`: B +2 992 B. The struct templates copied by region
+C code only (`fastlog::JOB0` 1 864 B for `fastlog::begin`, `csvlog::JOB0`
+512 B for `start` from `App::rec_start`, `app_touchtest::TT0` for
+`tt_open`) are statics in `.rodata.cold_tpl` (C): B +2 552 B. A `const`
+copied by `*j = JOB0` is an anonymous image in region B whoever reads it.
+
+Still off: `ad2-exp`, `acdc-trace`, `dbg-src` (audit #7).
+
 ### Protocol decoder (2026-10-28, feat/decoder-uart)
 
 The decoder band (src/decode.rs, app_decode.rs, ui_decode.rs) decodes each

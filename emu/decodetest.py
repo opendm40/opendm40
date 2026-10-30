@@ -314,6 +314,20 @@ try:
     wait_ms(600)
     q('DBG:TAP 339,105')  # Oscilloscope
     wait_ms(1500)
+    # A build without Modbus RTU / the frame log (cargo features dec-modbus /
+    # dec-log off) refuses them: those cases are skipped, and said so.
+    q('*CLS')
+    q('DEC:PROT MODB')
+    has_mb = q('SYST:ERR?').split(',')[0].strip() in ('0', '+0')
+    q('DEC:PROT OFF')
+    q('*CLS')
+    q('DEC:MODE LOG')
+    has_log = q('SYST:ERR?').split(',')[0].strip() in ('0', '+0')
+    if has_log:
+        q('DEC:MODE BAND')
+        wait_ms(1500)
+    print('decodetest: Modbus RTU %s, frame log %s' % ('in' if has_mb else 'NOT in this build (skipped)',
+                                                      'in' if has_log else 'NOT in this build (skipped)'), flush=True)
     text = b'The quick brown fox 0123456789\r\n'
     sent = text * 4
 
@@ -460,38 +474,39 @@ try:
         img = shot('m07-uart-fe')
         check(red(img, BYTE_Y + 8) > 3 or red(img, BYTE_Y) > 3, 'framing error: a red box in the band')
 
-        # ---- MCX Modbus RTU 19200 8E1 ----
-        baud = 19200
-        gap = '1' * 60
-        bits = '1' * 80 + ''.join(uart_bits(f, '8E1') + gap for f in seq)
-        put(BITS, bits, baud, 0.0, 3.3, 0.003)
-        q('DEC:PROT MODB;DEC:BAUD AUTO;DEC:FORM 8E1')
-        for sc in ('2E-3', '5E-3'):
-            q('TIM:SCAL ' + sc)
-            run()
-            stop()
-            fr = frames()
-            for f in fr[:9]:
-                print('    ' + ','.join(f), flush=True)
-            by = {f[0]: f for f in fr}
-            pairs = [f for f in fr if f[5].startswith('RSP 01 03 4B req=') and by.get(f[5].split('req=')[1], [''] * 6)[5] == 'REQ 01 03 @0000 n=2']
-            if sc == '2E-3':
-                # 34 ms of the ~60 ms cycle: where the trigger caught it.
-                check(any(f[5].startswith(('REQ', 'RSP', 'EXC')) for f in fr), '2 ms/div: Modbus frames decoded (%d)' % len(fr))
-            if sc == '5E-3':
-                check(len(pairs) >= 1, '%s s/div: a 03 reply paired with its request' % sc)
+        if has_mb:
+            # ---- MCX Modbus RTU 19200 8E1 ----
+            baud = 19200
+            gap = '1' * 60
+            bits = '1' * 80 + ''.join(uart_bits(f, '8E1') + gap for f in seq)
+            put(BITS, bits, baud, 0.0, 3.3, 0.003)
+            q('DEC:PROT MODB;DEC:BAUD AUTO;DEC:FORM 8E1')
+            for sc in ('2E-3', '5E-3'):
+                q('TIM:SCAL ' + sc)
+                run()
+                stop()
+                fr = frames()
+                for f in fr[:9]:
+                    print('    ' + ','.join(f), flush=True)
+                by = {f[0]: f for f in fr}
+                pairs = [f for f in fr if f[5].startswith('RSP 01 03 4B req=') and by.get(f[5].split('req=')[1], [''] * 6)[5] == 'REQ 01 03 @0000 n=2']
+                if sc == '2E-3':
+                    # 34 ms of the ~60 ms cycle: where the trigger caught it.
+                    check(any(f[5].startswith(('REQ', 'RSP', 'EXC')) for f in fr), '2 ms/div: Modbus frames decoded (%d)' % len(fr))
+                if sc == '5E-3':
+                    check(len(pairs) >= 1, '%s s/div: a 03 reply paired with its request' % sc)
 
-                # The 86 ms record holds a whole cycle.
-                check(any(f[5].startswith('EXC 01 84 E02 req=') for f in fr), '5 ms/div: the exception, paired')
-                check(any(f[4] == 'CRC' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad CRC')
-            img = shot('m08-modbus-%s' % sc)
-            if sc == '2E-3':
-                fe = edges(img, FRAME_Y + 8, C_FEDGE)
-                check(len(fe) >= 2, '2 ms/div: frame boxes in the band (%d edges)' % len(fe))
-            else:
-                # 19200 at 5 ms/div: a character is 4.6 px, the bar.
-                bar = sum(1 for x in range(14, 413) if near(img(x, FRAME_Y + 8), C_EDGE))
-                check(bar > 60, '5 ms/div: the bar (%d px)' % bar)
+                    # The 86 ms record holds a whole cycle.
+                    check(any(f[5].startswith('EXC 01 84 E02 req=') for f in fr), '5 ms/div: the exception, paired')
+                    check(any(f[4] == 'CRC' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad CRC')
+                img = shot('m08-modbus-%s' % sc)
+                if sc == '2E-3':
+                    fe = edges(img, FRAME_Y + 8, C_FEDGE)
+                    check(len(fe) >= 2, '2 ms/div: frame boxes in the band (%d edges)' % len(fe))
+                else:
+                    # 19200 at 5 ms/div: a character is 4.6 px, the bar.
+                    bar = sum(1 for x in range(14, 413) if near(img(x, FRAME_Y + 8), C_EDGE))
+                    check(bar > 60, '5 ms/div: the bar (%d px)' % bar)
 
     if want('wave'):
         # ---- the Wave view (DC V, 5 V TTL on V-COM) ----
@@ -511,7 +526,7 @@ try:
             wait_ms(2000)
             if RC:
                 RC.reset()
-            for baud, fmt, proto in ((2400, '8N1', 'UART'), (4800, '8N1', 'UART'), (2400, '8E1', 'MODB')):
+            for baud, fmt, proto in ((2400, '8N1', 'UART'), (4800, '8N1', 'UART')) + (((2400, '8E1', 'MODB'),) if has_mb else ()):
                 if proto == 'MODB':
                     bits = '1' * 60 + ''.join(uart_bits(f, fmt) + '1' * 60 for f in seq)
                     put(DBITS, bits, baud, 0.0, 5.0, 0.01)
@@ -548,7 +563,7 @@ try:
             q('DBG:KEY 0')
             wait_ms(2500)
 
-    if want('log'):
+    if want('log') and has_log:
         # ---- the frame log (Mode Log): MCX, decoded while the input streams ----
         q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1;DEC:POL NORM;DEC:THR AUTO')
         q('CHAN1:SCAL 1;CHAN1:COUP DC;TIM:SCAL 1E-3;TRIG:SWE AUTO;TRIG:LEV 1.6')

@@ -60,6 +60,15 @@ acdc-trace = []
 # DBG:SRC, the ohm-source map row (src/dbgsrc.rs, tools/srcmap.py). Not
 # default on test/scope-chain-0.4 for the same reason.
 dbg-src = []
+# The decoder's frame log (Mode Log, DECode:MODE LOG, View::Decode;
+# src/app_log.rs). Not default on test/scope-chain-0.4: region B has no room
+# for it next to 0.4.0's GEN / CH2 channels; without it Mode Log is refused
+# and the band decode is unchanged.
+dec-log = []
+# Modbus RTU in the protocol decoder (src/decode.rs `MODBUS`). Not default on
+# test/scope-chain-0.4 for the same reason; without it the decoder is UART
+# only (DECode:PROTocol MODBus is refused).
+dec-modbus = []
 # Test builds next to a sleeping owner: the buzzer never sounds (every beep,
 # the danger alarm and the power-off warning at duty 0; the continuity / diode
 # beeper's CMP pin buffer, HY3131 R20 bit 2, off; the boot key-hold cue
