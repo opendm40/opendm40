@@ -677,7 +677,7 @@ audit #1 above) or a larger blob moved out of B.
 ### The long scope record (2026-10-26)
 
 The scope record buffer `scope::BUF` grew from 53 248 B to 86 016 B (the
-design: [ram-budget.md, The scope record](ram-budget.md#the-scope-record-raw-ring-and-packed-ring)).
+design: [ram-budget.md, The scope record](ram-budget.md#the-scope-record-raw-ring-and-coded-ring)).
 Flash for the new code (the packed ring, the `pack10` reads in every
 record user) came from `stockfont::paint`: it was one copy per closure
 type (23 copies, 4.0 KB in region B); it is now a thin generic wrapper

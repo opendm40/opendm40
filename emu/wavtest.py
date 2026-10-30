@@ -21,7 +21,8 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
   * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
     43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
     the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
-    trigger at the centre; a roll record (200 ms/div) the full 65 520;
+    trigger 52 156 samples before the end (the coded ring: long_checks);
+    a roll record (200 ms/div) all it took;
   * STOP while running (5 / 2 ms/div the raw ring, 100 ms/div the packed
     one; Auto at several moments, Normal without a trigger) ends on one
     more complete capture: the DIGitize length, the sine everywhere (no
@@ -235,29 +236,31 @@ def csv_check(t, p, codes):
 
 
 def long_checks(t):
-    """Slow timebases: the packed 65 520-sample ring. DIGitize at 100 ms/div
-    (25 kS/s): the record is the whole ring less the margins (64 656 ..
-    65 520 samples), the trigger at its centre, the input sine in it; a
-    roll record (200 ms/div, STOP after the ring filled) is the full
-    65 520; back to 1 ms/div after."""
+    """Slow timebases: the coded ring (cring.rs). DIGitize at 100 ms/div
+    (25 kS/s): 10 s wanted, the trigger at the centre; the post part is
+    what any signal leaves room for (65 520 less the margins and the
+    screen's pre part: 52 156), the pre part what the ring keeps (up to
+    125 000; the model's 25-sample sine: ~96 000), so the record is
+    100 000 .. 177 000 samples, the input sine in it, no seam; a roll record (200
+    ms/div, STOP after 6.5 s) all 81 000 samples; back to 1 ms/div after."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
     t.w('TIM:SCAL 0.1')
     t.w('DIG')
-    check(t.wait_stop(s=30, wall=600), 'DIGitize at 100 ms/div ends in STOP')
+    check(t.wait_stop(s=30, wall=900), 'DIGitize at 100 ms/div ends in STOP')
     p = pre(t)
     sr = float(t.q('ACQ:SRAT?'))
-    w = block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60))
+    w = block(t.qraw('WAV:DATA?', maxlen=1 << 20, timeout=120))
     v, codes = volts(p, w)
     n = len(codes)
-    check(sr == 25000 and 64600 <= n <= 65520 and p['n'] == n, '100 ms/div record: %d samples at %g S/s' % (n, sr))
+    check(sr == 25000 and 100000 <= n <= 180000 and p['n'] == n, '100 ms/div record: %d samples at %g S/s' % (n, sr))
     f, vpp, _ = sine_fit(v, p['xinc'])
     check(abs(f - A.hz) < A.hz * 0.02 and abs(vpp - A.vpp) < A.vpp * 0.2, '100 ms/div record: %.2f Hz, %.3f Vpp' % (f, vpp))
     i0 = round(-p['xorig'] / p['xinc'])
     ok = 2 <= i0 < n - 2
     # On the level within one sample's step (25 samples per period).
     step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
-    check(ok and -0.03 * n < i0 - n / 2 < sr / A.hz + 0.03 * n and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
+    check(ok and 52156 <= n - i0 <= 52156 + 2000 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
           '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
     # A smooth sine end to end: no seam from the ring / staging (25 samples
     # per period: neighbours differ by at most ~0.13 Vpp).
@@ -284,11 +287,11 @@ def long_checks(t):
     t.w('STOP')
     time.sleep(0.5)
     p = pre(t)
-    w = block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60))
+    w = block(t.qraw('WAV:DATA?', maxlen=1 << 20, timeout=120))
     v, codes = volts(p, w)
     f, vpp, _ = sine_fit(v, p['xinc'])
     jump = max(abs(v[i + 1] - v[i]) for i in range(len(v) - 1))
-    check(len(codes) == 65520 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
+    check(78000 <= len(codes) <= 90000 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
           'roll record (200 ms/div): %d samples, %.2f Hz, largest step %.3f V' % (len(codes), f, jump))
     t.w('TIM:SCAL 1e-3')
     t.w('WAV:FORM BYTE')
@@ -323,7 +326,7 @@ def stop_checks(t):
             dt = t.vtime() - vs
             stopped = stopped and dt < tb * 10 + 1.6
             p = pre(t)
-            v, codes = volts(p, block(t.qraw('WAV:DATA?', maxlen=65536 * 4, timeout=60)))
+            v, codes = volts(p, block(t.qraw('WAV:DATA?', maxlen=1 << 20, timeout=120)))
             n = len(v)
             out = sum(1 for x in v if abs(x) > 0.6 * A.vpp)
             step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2

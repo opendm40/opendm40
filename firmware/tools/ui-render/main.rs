@@ -36,6 +36,10 @@ pub use host::mmio;
 
 #[path = "../../src/pack10.rs"]
 mod pack10;
+#[path = "../../src/cring.rs"]
+mod cring;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]

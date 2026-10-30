@@ -45,6 +45,7 @@ mod persist;
 mod power;
 mod prof;
 mod pack10;
+mod cring;
 mod scope;
 mod hwtrig;
 mod scope_meas;
