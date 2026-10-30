@@ -105,7 +105,7 @@ try:
         # DBG:DIAG? needs --features dbg-diag (refused: an empty reply, the
         # check is skipped).
         r = q('DBG:DIAG?', raw=True)
-        return block(r)[61] if r else None
+        return block(r)[61] if r.strip() else None
 
     def check61(d, want, what):
         if d is None:

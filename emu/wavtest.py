@@ -123,7 +123,7 @@ def loop_max(t):
     """Main-loop pass maximum (us) of the last full 1 s window (DBG:DIAG?;
     None in a build without --features dbg-diag: refused, an empty reply)."""
     r = t.qraw('DBG:DIAG?')
-    if not r:
+    if not r.strip():
         return None
     d = block(r)
     return d[97] | d[98] << 8

@@ -98,9 +98,14 @@ def main():
 
     if tm is None:
         bad.append('no USB/IP attach')
-    elif not q('DBG:SENT:REG?'):
-        print('beeptest: skipped: DBG:SENTinel:REG? not in this build (--features dbg-sent)', flush=True)
     else:
+        # R20 read back needs --features dbg-sent (DBG:SENTinel:REG?;
+        # refused: an empty reply): without it the phases still run and
+        # only the emulator log's R20 writes are checked.
+        has_reg = bool(q('DBG:SENT:REG?'))
+        if not has_reg:
+            tm.write('*CLS')
+            print('beeptest: DBG:SENTinel:REG? not in this build (--features dbg-sent): R20 read back skipped', flush=True)
         try:
             for ph, scpi, want in PHASES:
                 for c in scpi:
@@ -111,6 +116,10 @@ def main():
                     t = int(q('DBG:PING?').split(',')[0]) / 1000.0
                     if t - t0 > HOLD:
                         break
+                    if not has_reg:
+                        seen += 1
+                        time.sleep(0.2)
+                        continue
                     reg = q('DBG:SENT:REG?')
                     r20 = int(reg[:2], 16)
                     rows.append({'ph': ph, 't': t, 'REG?': reg})
