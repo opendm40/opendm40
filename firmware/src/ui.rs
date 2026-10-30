@@ -45,12 +45,40 @@ pub const VALUE_PROV: Color = DIM;
 /// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
 pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-10-26)
 
+/// The continuity / diode beeper indicator (`DmmView::short`): the band's
+/// fill, the stock "OK" badge green (`lim_badge`), and the digits' colour,
+/// the stock RUN green (`gen_status`).
+pub const SHORT_BG: Color = 0x04A9;
+pub const SHORT_FG: Color = 0x07E0;
+/// The indicator's band over the aux row (y 38..63, as the temperature
+/// chip): 4 px under the status bar and above the digits' cells (68).
+pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
+/// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
+/// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
+/// others (`set_short_style`, the PR's comparison).
+pub const SHORT_STYLE: u8 = 3;
+#[cfg(test)]
+static SHORT_STYLE_T: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(SHORT_STYLE);
+#[cfg(test)]
+pub fn set_short_style(s: u8) {
+    SHORT_STYLE_T.store(s, core::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(test)]
+fn short_style() -> u8 {
+    SHORT_STYLE_T.load(core::sync::atomic::Ordering::Relaxed)
+}
+#[cfg(not(test))]
+#[inline(always)]
+fn short_style() -> u8 {
+    SHORT_STYLE
+}
+
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
-/// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
+/// (from 406); 28 px = the widest half-size F78 digit ("4", 56 / 2).
 const XT_X: u16 = 375;
 const XT_W: u16 = 28;
 const VALUE_BASE: u16 = 146;
@@ -139,6 +167,16 @@ const LOOP_CAP: &str = "4-20mA";
 /// Caption of the burden voltage readout (A functions, Settings 3/3
 /// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
 const BURDEN_CAP: &str = "Burden";
+/// An aux row's F14 caption and LETTERS value in the boxes cx..te, te..end
+/// (they tile cx..end): the value right-aligned, the caption right-aligned
+/// 6 px before the value's ink, so it hugs a short value as a long one
+/// (te no further left than the caption's own width allows).
+fn caption_value(cx: i16, end: i16, cap: &str, txt: &str, vcol: Color) {
+    let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 6).max(cx + sf::text_width(sf::F14, cap, 1) + 1);
+    sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+    sf::label(sf::F14, rect(cx, 36, te - cx, 30), cap, VALUE, BG, 4, 1);
+}
+
 /// Power meter, "At load" on (doc 3.16): the mark after the compensated V's
 /// unit (aux1) and at the main readout's top left (P / its energy; ui::pw
 /// `coupling`).
@@ -280,6 +318,11 @@ pub struct DmmView {
     /// empty) and whether ACC_RECT holds it (false: to draw).
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
+    /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
+    /// none, 1 SHORT (continuity, a diode-mode short), 2 BEEP (a diode
+    /// pattern); and the band as drawn (`short_sync`).
+    pub short: u8,
+    short_drawn: u8,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -573,7 +616,39 @@ impl DmmView {
             acc_on: true,
             acc_k: None,
             acc_drawn: false,
+            short: 0,
+            short_drawn: 0,
         }
+    }
+
+    /// The beeper indicator's band holds the aux row: `reading` leaves it.
+    fn band(&self) -> bool {
+        self.short_drawn != 0
+    }
+
+    /// Draw or clear the beeper indicator's band (SHORT_RECT) after a
+    /// change of `short`; a clear hands the aux row back to `reading`
+    /// (its next call repaints the aux values and the test current).
+    pub fn short_sync(&mut self) {
+        let want = if self.power || short_style() & 1 == 0 { 0 } else { self.short };
+        if want == self.short_drawn {
+            return;
+        }
+        self.short_drawn = want;
+        let b = SHORT_RECT;
+        if want != 0 {
+            sf::rbox(b, 6, SHORT_BG, BG);
+            // The scope's 26 px face (the status bar's F21 lacks B / E).
+            sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+        } else {
+            lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        }
+        // The band covers / uncovers the aux values and the test current:
+        // nothing of them is on the screen now.
+        self.aux_val = [None; 2];
+        self.aux_unit = [None; 2];
+        self.last_aux = [false; 2];
+        self.last_iohm = 255;
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -633,8 +708,10 @@ impl DmmView {
             b[..n].copy_from_slice(&s.as_bytes()[..n]);
             n
         };
-        let mut u = crate::scope_ui::Txt::new("");
-        ascii_unit(unit, &mut u);
+        // The unit as the readout and the accuracy label beside it spell
+        // it (F14 has the ohm glyph): "600 KΩ", not "600 kOhm".
+        let mut ub = [0u8; 16];
+        let us = sf::unit_text(unit, &mut ub);
         let (bx, mid, end) = (self.bar.x as i16, self.bar.mid_x() as i16, self.bar.end_x() as i16);
         // Left / centre / right labels.
         let mut l = [0u8; 16];
@@ -660,7 +737,6 @@ impl DmmView {
             nr = k;
         }
         sf::label(sf::F14, rect(bx, BAR_LBL_Y, 80, BAR_LBL_H), core::str::from_utf8(&l[..nl]).unwrap_or(""), DIM, BG, 1, 1);
-        let us = u.as_str();
         r[nr] = b' ';
         let k = us.len().min(24 - nr - 1);
         r[nr + 1..nr + 1 + k].copy_from_slice(&us.as_bytes()[..k]);
@@ -677,7 +753,7 @@ impl DmmView {
             return;
         }
         let temp = r.mode == 15;
-        let fs = crate::bargraph::mode_full_scale(r.mode, r.main.dec, r.main.unit);
+        let fs = crate::bargraph::mode_full_scale(r.mode, r.range, r.main.dec, r.main.unit);
         let key = if temp { (0, "", false) } else { (fs.to_bits(), r.main.unit, self.bar.bipolar) };
         if self.bar_scale != Some(key) {
             self.bar_scale = Some(key);
@@ -730,6 +806,7 @@ impl DmmView {
         self.pwc = pw::PwCache::new();
         self.last_iohm = 254;
         self.acc_drawn = false;
+        self.short_drawn = 0;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -743,7 +820,16 @@ impl DmmView {
         // ui-review #13: the stock >= 30 V cue, the value in VALUE_HV (V
         // functions, set by the app from the live reading); a provisional
         // value in VALUE_PROV. A colour change repaints every digit.
-        let color = if r.prov { VALUE_PROV } else if self.hv_red { VALUE_HV } else { VALUE };
+        // The beeper indicator (`short`): the digits green.
+        let color = if r.prov {
+            VALUE_PROV
+        } else if self.short != 0 && short_style() & 2 != 0 {
+            SHORT_FG
+        } else if self.hv_red {
+            VALUE_HV
+        } else {
+            VALUE
+        };
         let recolor = self.last_col != color;
         self.last_col = color;
         let vcol = if r.prov { VALUE_PROV } else { VALUE };
@@ -811,7 +897,8 @@ impl DmmView {
             // The aux row layout follows the mode (AC+DC tags, loop caption).
             self.aux_val = [None; 2];
             self.aux_unit = [None; 2];
-            // From x 404: clear of the +1 digit cell (375..402).
+            // From x 406: 4 px clear of the +1 digit cell (375..402; it
+            // touched the unit at 404, issue #136).
             // Power meter fallback "VA": its V and A touch at the stock -1.
             // The UNIT face has no 'h' (power meter energy: Wh / VAh):
             // LETTERS, 1 px apart when that fits the box (W and h touch).
@@ -820,22 +907,23 @@ impl DmmView {
                 1
             } else if uf.0 != sf::UNIT.0 {
                 // V / A of the stock overhang by 1: 2 px spacing for "VAh".
-                if sf::text_width(uf, unit, 2) <= 72 { 2 } else { 0 }
+                if sf::text_width(uf, unit, 2) <= 70 { 2 } else { 0 }
             } else {
                 -1
             };
-            // Wider than the 72 px box ("MHz", "mW" in UNIT, "mWh"): the
+            // Wider than the 70 px box ("MHz", "mW" in UNIT, "mWh"): the
             // narrower LETTERS, else TEXT22 (device check 92fb8fa: no unit
             // is cut).
             for (f, s) in [(sf::LETTERS, 0), (sf::TEXT22, 1)] {
-                if sf::text_width(uf, unit, sp) <= 72 {
+                if sf::text_width(uf, unit, sp) <= 70 {
                     break;
                 }
                 if sf::has_all(f, unit) {
                     (uf, sp) = (f, s);
                 }
             }
-            sf::label(uf, rect(404, 114 + md, 72, 32), unit, VALUE, BG, 4, sp);
+            lcd::fill_rect(403, (114 + md) as u16, 3, 32, BG);
+            sf::label(uf, rect(406, 114 + md, 70, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
@@ -853,7 +941,7 @@ impl DmmView {
             self.pwc.coup_invalidate();
             // The AUTO-coupling label shares the limit badge's slot.
             self.last_lim = 255;
-            if !r.parts() {
+            if !r.parts() && !self.band() {
                 // Leaving AC+DC / AUTO: the tag slots left of the aux values
                 // (the ohm test current label's left part).
                 for i in 0..2 {
@@ -865,13 +953,19 @@ impl DmmView {
             }
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
-        let (aux, lp, bd) = aux_shown(r);
+        let (mut aux, lp, bd) = aux_shown(r);
+        let band = self.band();
+        if band {
+            // The beeper indicator's band holds the row (`short_sync`).
+            aux = [None; 2];
+        }
         // Ohm / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
-            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 6) as u8 | (self.ohm_on as u8) << 3,
+            _ if band => 255,
+            10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
             _ => 255,
         };
@@ -930,18 +1024,19 @@ impl DmmView {
                         // the loop percentage's (aux2: 256..396; aux1:
                         // 8..175, the value's box ending where the plain
                         // one does), so no older text stays behind.
+                        // The caption hugs the value (6 px before its
+                        // ink, as the AC+DC tags; issue #136).
                         let (cx, vx0, vw) = if i == 0 { (8, 68, 107) } else { (256, 316, 81) };
-                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(cx, 36, 60, 30), BURDEN_CAP, VALUE, BG, 4, 1);
+                        caption_value(cx, vx0 + vw, BURDEN_CAP, txt, vcol);
                     } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
                         // right-aligned in 316..396, the F14 caption
-                        // right-aligned in 256..315 (ink from ~272: clear of
-                        // aux1's unit box, which ends at 254; the None
-                        // branch below clears it). The two boxes tile
-                        // 256..396, so an older text leaves nothing behind.
-                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
+                        // right-aligned before it (ink from ~272 at the
+                        // widest: clear of aux1's unit box, which ends at
+                        // 254; the None branch below clears it). The two
+                        // boxes tile 256..396, so an older text leaves
+                        // nothing behind.
+                        caption_value(256, 397, LOOP_CAP, txt, vcol);
                     } else if r.parts() {
                         // AC+DC / AUTO: the part's tag (AC for aux1, DC for aux2)
                         // right before its value, which stays right-aligned
@@ -1100,20 +1195,20 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
         (i * 1e9, " nA")
     };
     let mut b = [0u8; 16];
-    let mut t = crate::scope_ui::Txt::new("I ");
+    // The experimental 600 Mohm says so, in the reading's colour.
+    let exp = crate::dmm::is_ohm600(mode, range);
+    let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
     t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
     t.push(u);
-    sf::label(sf::F14, OHM_I_RECT, t.as_str(), DIM, BG, 1, 1);
+    sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
-/// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
-/// glyphs): ohm -> "Ohm", micro -> "u", "deg C" -> "C".
+/// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
+/// F12_GLYPHS): micro -> "u" as the stock.
 fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
     for c in u.chars() {
         match c {
-            '\u{3a9}' => out.push("Ohm"),
             '\u{b5}' => out.push("u"),
-            '\u{b0}' => {}
             c => {
                 let mut b = [0u8; 4];
                 out.push(c.encode_utf8(&mut b));
@@ -1128,9 +1223,10 @@ fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
 /// duty, the 4-20 mA percentage, the temperature sensor name), one state
 /// badge by priority A-JACK / LIVE? alternating with HOLD / A-HOLD (`alt`,
 /// `slot_alert`) > HOLD / A-HOLD > A-JACK / V-JACK? / LIVE? (r.alert) >
-/// HV (>= 30 V) > REC > REL / limit
-/// verdict (alternating with `alt`) > range (`range_text`).
-pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>, rec: bool) -> crate::scope_ui::StripData {
+/// HV (>= 30 V) > REL / limit
+/// verdict (alternating with `alt`) > range (`range_text`). A CSV
+/// recording shows in the top bar (scope_ui::rec_mark), not here.
+pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, label: Option<&'static str>) -> crate::scope_ui::StripData {
     use crate::scope_ui::{StripData, Txt};
     let mut d = StripData::EMPTY;
     d.func = match crate::meter::func_of(r) {
@@ -1151,6 +1247,10 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // AUTO coupling: the part it shows, marked Auto (6 characters fit
         // the 62 px badge; V / A is the unit's, as for "AC+DC").
         d.func = if r.is_ac() { "AutoAC" } else { "AutoDC" };
+    }
+    if crate::dmm::is_ohm600(r.mode, r.range) {
+        // The experimental 600 Mohm says so here too (the DMM page: EXP).
+        d.func = "OhmEXP";
     }
     let mut buf = [0u8; 16];
     let (v, _, _) = fmt7(&mut buf, &r.main, false);
@@ -1203,7 +1303,6 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         // Wrong-connection alert (sentinel.rs): above HV, below HOLD.
         _ if alert != crate::sentinel::Alert::None => (alert.strip_badge(), alert.color()),
         _ if hv >= 1 => ("HV", 0xc9a0),
-        _ if rec => ("REC", 0xf800),
         _ if rel && (verdict.is_none() || alt) => ("REL", 0xb833),
         _ if verdict.is_some() => verdict.unwrap_or(("", 0)),
         _ if temp => ("", 0x5acb),
@@ -1304,14 +1403,17 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600V", Some(3)), ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Amp => &[
-            ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
+            ("600uA", Some(0)), ("6mA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
         // +1 digit notes), also in AUTO unless the 0.28 mA "ON" variant.
+        // 600 Mohm (dmm::OHM600): after AUTO, so the AUTO key's range steps
+        // (the items before AUTO) never reach it; its own row on the page.
         Button::Ohm => &[
-            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
-            ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6k\u{3a9}", Some(2)), ("60k\u{3a9}", Some(3)),
+            ("600k\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            (OHM600_ITEM, Some(7)),
         ],
         _ => &[("AUTO", None)],
     }
@@ -1333,12 +1435,13 @@ pub fn range_code(mode: u8, range: u8) -> u8 {
 /// The status bar's label of a manual range, as the stock writes it there
 /// ("%d" + unit of the range's full scale, FUN_0803d0xx; checked on stock
 /// V2.6 in the emulator): the MF page's item text, "6V", "600mV",
-/// "6000uA", "6K\u{3a9}" .. None: a function with no range list
+/// "6mA", "6k\u{3a9}" .. None: a function with no range list
 /// (continuity, diode, capacitance, frequency, temperature), where the
 /// stock always shows "AUTO".
 pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
+        10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
         0..=10 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
@@ -1348,7 +1451,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
 }
 
 /// Status-bar range text (stock): "AUTO" / "AUTO+" in auto, the range
-/// ("6V", "600mV", "60K\u{3a9}" ..) in manual. The power meter (two
+/// ("6V", "600mV", "60k\u{3a9}" ..) in manual. The power meter (two
 /// channels, their ranges in its side column) and a range held in a
 /// function with no range list (REL in frequency, SCPI RANG:AUTO OFF) keep
 /// "MANU": "600KHz" does not fit the slot.
@@ -1372,7 +1475,25 @@ fn range_status(s: &str) {
 }
 
 fn range_rect(i: usize) -> sf::Rect {
+    if i >= 8 {
+        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
+        // page), two columns wide for its label.
+        return rect(8, 141, 228, 36);
+    }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
+}
+
+/// The 600 Mohm item of the Resistor Settings page (dmm::OHM600), its index
+/// in `range_items(Button::Ohm)`, and the line in place of the test-current
+/// buttons while it is chosen (its source is fixed: `ohm_vars_shown`).
+pub const OHM600_ITEM: &str = "600M\u{3a9} experimental";
+const OHM600_IDX: usize = 8;
+pub const OHM600_NOTE: &str = "100 nA";
+
+/// The Resistor Settings page shows the 0.90 / 0.28 mA buttons: not with
+/// 600 Mohm chosen (`sel`: the page's selected item).
+pub fn ohm_vars_shown(sel: Option<usize>) -> bool {
+    sel != Some(OHM600_IDX)
 }
 
 /// The V / A range page's coupling row: DC, AC, AC+DC, AUTO (= Dmm::sub
@@ -1406,7 +1527,11 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
     if let Some((t, warn)) = note {
         range_note(t, warn);
     }
-    if b == Button::Ohm {
+    if b == Button::Ohm && !ohm_vars_shown(sel) {
+        // 600 Mohm runs its own source: the variant buttons would do nothing,
+        // so its test current under its item instead.
+        sf::glyphs(sf::TEXT22, rect(8, 182, 228, 38), OHM600_NOTE, DIM, BG, 8, 1);
+    } else if b == Button::Ohm {
         // The stock's second ohm mode (m+8, toggled by a second tap on the
         // ohm button; "ON" tag on the button): the p8set rows, a lower test
         // current for in-circuit measurements. `sub` = Dmm::ohm_var here.
@@ -1464,7 +1589,7 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
             let mut t = [0u8; 16];
             let v = crate::dmm::format(&mut t, r, if r < 100.0 { 2 } else { 1 });
             let mut n = 0;
-            for part in [v, " ohm, expect ~48"] {
+            for part in [v, " \u{3a9}, expect ~48"] {
                 let k = part.len().min(buf.len() - n);
                 buf[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
                 n += k;
@@ -1475,9 +1600,9 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
     };
     match (stage, res) {
         (0, _) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
-        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 ohm", Some("Cancel"), None),
-        (_, F::Ok(_)) => crate::dialog::fuse_check("FUSE OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
-        (_, F::Open) => crate::dialog::fuse_check("FUSE OPEN", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
+        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 \u{3a9}", Some("Cancel"), None),
+        (_, F::Ok(_)) => crate::dialog::fuse_check("Fuse OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
+        (_, F::Open) => crate::dialog::fuse_check("Fuse open", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
         (_, F::Odd(_)) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
         (_, F::NoReading) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
     }
@@ -1490,20 +1615,66 @@ pub fn range_note(t: &str, warn: bool) {
     sf::glyphs(sf::TEXT22, rect(8, 142, 464, 36), t, if warn { VALUE } else { DIM }, BG, 8, 1);
 }
 
-/// The "Hold/Limits" (opens View::Limits) and OK buttons at the bottom of
-/// the MF range / temperature pages.
+/// The bottom row of the MF range / temperature pages (owner 2026-10-30:
+/// Record one tap from MF, not under Hold & Limits): four buttons on the
+/// range grid's columns, `bottom_rect(0..3)` = Limits (View::Limits),
+/// Record (View::Record), Wave (V / A in ad2-isr builds, else empty), OK.
+/// "Limits", as on Power Settings: "Hold/Limits" (120 px) is wider than a
+/// column (112).
+pub fn bottom_rect(col: usize) -> sf::Rect {
+    rect(8 + col as i16 * 117, 240, 112, 38)
+}
+
+/// Bottom-row column under x (the 5 px gaps split between the buttons), or
+/// None off the row (y 240..278).
+fn bottom_col(x: u16, y: u16) -> Option<usize> {
+    let (x, y) = (x as i16, y as i16);
+    if !(240..278).contains(&y) {
+        return None;
+    }
+    Some(((x.max(8) - 8 + 2) / 117).min(3) as usize)
+}
+
+/// Limits, Record and OK of the bottom row (`bottom_rect`); region B, as
+/// `record_button`.
+#[inline(never)]
 fn ok_and_limits_buttons() {
-    for (x, t) in [(8i16, "Hold/Limits"), (319, "OK")] {
-        let r = rect(x, 240, 150, 38);
+    for (c, t) in [(0, "Limits"), (3, "OK")] {
+        let r = bottom_rect(c);
         sf::rbox(r, 6, 0x2966, BG);
         sf::glyphs(sf::TEXT22, r, t, STATUS_FG, 0x2966, 8, 0);
     }
+    record_button(bottom_rect(1), false);
+}
+
+/// A CSV recording or a fast-log session runs (`record_button` red, as the
+/// Record page's Stop). Set by the app with the page draw (`set_rec_on`).
+static REC_ON: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn set_rec_on(on: bool) {
+    REC_ON.store(on, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// "Record" (opens View::Record) on the range, temperature and Power
+/// Settings pages: red while recording (`set_rec_on`), `pressed` the
+/// pressed colour. Region B (not inlined into the .cold page draws).
+#[inline(never)]
+pub fn record_button(r: sf::Rect, pressed: bool) {
+    let c = if pressed {
+        K_SEL
+    } else if REC_ON.load(core::sync::atomic::Ordering::Relaxed) {
+        REC_CSV
+    } else {
+        0x2966
+    };
+    sf::rbox(r, 6, c, BG);
+    sf::glyphs(sf::TEXT22, r, "Record", STATUS_FG, c, 8, 0);
 }
 
 /// "Wave" on the V / A range pages (the DMM wave view, app_wave.rs; builds
-/// with the AD2 stream ISR only): between Hold/Limits and OK, in the
-/// stock DC / AC / AC+DC column grid (x 162, the AC button's column).
-pub const WAVE_BTN: sf::Rect = rect(162, 240, 150, 38);
+/// with the AD2 stream ISR only): the bottom row's third column, between
+/// Record and OK.
+pub const WAVE_BTN: sf::Rect = rect(242, 240, 112, 38);
 
 /// "Fuse check" on the Current Settings page (`range_page`): rows 141..177
 /// between the range buttons (to 136) and DC / AC / AC+DC (from 182).
@@ -1516,8 +1687,7 @@ pub fn wave_button() {
 
 /// The Wave button was hit (the gaps to its neighbours split as theirs).
 pub fn wave_hit(x: u16, y: u16) -> bool {
-    let (x, y) = (x as i16, y as i16);
-    (240..278).contains(&y) && (160..316).contains(&x)
+    bottom_col(x, y) == Some(2)
 }
 
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
@@ -1551,8 +1721,9 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
                 };
                 (cpl_rect(i as usize), CPL_NAMES[i as usize], i == sub)
             }
-            (2, _) => (rect(319, 240, 150, 38), "OK", false),
-            (4, _) => (rect(8, 240, 150, 38), "Hold/Limits", false),
+            (2, _) => (bottom_rect(3), "OK", false),
+            (4, _) => (bottom_rect(0), "Limits", false),
+            (7, _) => return record_button(bottom_rect(1), on),
             (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
             _ => return,
         },
@@ -1564,9 +1735,9 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
 }
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
-/// Hold/Limits, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
-/// buttons.
-pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
+/// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
+/// buttons, while `ohm_vars_shown(sel)`.
+pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
     for i in 0..range_items(b).len() {
         let r = range_rect(i);
@@ -1575,7 +1746,7 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
             return Some(Ok(i));
         }
     }
-    if (179..223).contains(&y) && b == Button::Ohm {
+    if (179..223).contains(&y) && b == Button::Ohm && ohm_vars_shown(sel) {
         return Some(Err(if x < 240 { 0 } else { 1 }));
     }
     if (179..223).contains(&y) && matches!(b, Button::Volt | Button::Amp) {
@@ -1584,11 +1755,11 @@ pub fn range_hit(b: Button, x: u16, y: u16) -> Option<Result<usize, u8>> {
         let i = ((x.max(8) - 8 + 2) / 117).min(3);
         return Some(Err([0, 1, 3, 6][i as usize]));
     }
-    if (240..278).contains(&y) && x >= 319 {
-        return Some(Err(2));
-    }
-    if (240..278).contains(&y) && (8..158).contains(&x) {
-        return Some(Err(4));
+    match bottom_col(x as u16, y as u16) {
+        Some(0) => return Some(Err(4)),
+        Some(1) => return Some(Err(7)),
+        Some(3) => return Some(Err(2)),
+        _ => {}
     }
     if (139..180).contains(&y) && (160..315).contains(&x) && b == Button::Amp {
         return Some(Err(5));
@@ -1610,7 +1781,8 @@ const T_KEYS: [&str; 7] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "1
 ///   row 144..180   "Offset"  [ - ]  value  [ + ]  (settings-stepper look;
 ///                  0.1 C steps; a tap on the value opens the signed keypad)
 ///   row 186..222   NTC user only: R25 and Beta fields (tap = keypad)
-///   row 240..278   Hold/Limits, OK;  282..316 the info line.
+///   row 240..278   Limits, Record, OK (`bottom_rect`);  282..316 the
+///                  info line.
 /// Every hit box reaches 3 px into the gaps around its button.
 #[derive(Clone, Copy)]
 pub struct TempPage<'a> {
@@ -1631,6 +1803,7 @@ pub const TK_PLUS: u8 = 9;
 pub const TK_OFFS: u8 = 10;
 pub const TK_R25: u8 = 11;
 pub const TK_BETA: u8 = 12;
+pub const TK_RECORD: u8 = 253;
 pub const TK_LIMITS: u8 = 254;
 pub const TK_OK: u8 = 255;
 
@@ -1647,45 +1820,49 @@ fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
         TK_PLUS => rect(402, T_ROW_Y, 70, T_ROW_H),
         TK_R25 if sensor == 6 => rect(8, T_NTC_Y, 228, T_ROW_H),
         TK_BETA if sensor == 6 => rect(244, T_NTC_Y, 228, T_ROW_H),
-        TK_LIMITS => rect(8, 240, 150, 38),
-        TK_OK => rect(319, 240, 150, 38),
+        TK_LIMITS => bottom_rect(0),
+        TK_RECORD => bottom_rect(1),
+        TK_OK => bottom_rect(3),
         _ => return None,
     })
 }
 
-const T_CODES: [u8; 15] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_OK];
+const T_CODES: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_RECORD, TK_OK];
 
-/// Offset text "+7.3 C" (TEXT22 has no degree sign).
+/// Offset text "+7.3 ℃".
 fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
     let mut t = [0u8; 16];
     let v = crate::dmm::format(&mut t, offs, 1);
-    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " C"])
+    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " \u{2103}"])
 }
 
 /// One temperature-page button, normal or pressed (stock pressed colour,
 /// ui-review #11: feedback from touch-down).
 pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
     let Some(r) = temp_rect(p.sensor, code) else { return };
+    if code == TK_RECORD {
+        return record_button(r, pressed);
+    }
     let sel = code < 7 && code == p.sensor;
     let c = if pressed { K_SEL } else if sel { SEL } else { 0x2966 };
     let mut b = [0u8; 24];
     let mut t = [0u8; 16];
     let txt: &str = match code {
         0..=6 => T_KEYS[code as usize],
-        TK_UNIT => if p.unit_f { "Unit: F" } else { "Unit: C" },
+        TK_UNIT => if p.unit_f { "Unit: \u{2109}" } else { "Unit: \u{2103}" },
         TK_MINUS => "-",
         TK_PLUS => "+",
         TK_OFFS => temp_offs_text(&mut b, p.offs),
         TK_R25 => {
             let k = p.r25 / 1000.0;
             let v = crate::dmm::format(&mut t, k, if k < 10.0 { 2 } else if k < 100.0 { 1 } else { 0 });
-            join(&mut b, &["R25  ", v, " kohm"])
+            join(&mut b, &["R25  ", v, " k\u{3a9}"])
         }
         TK_BETA => {
             let v = crate::dmm::format(&mut t, p.beta, 0);
             join(&mut b, &["Beta  ", v, " K"])
         }
-        TK_LIMITS => "Hold/Limits",
+        TK_LIMITS => "Limits",
         _ => "OK",
     };
     if code == TK_OFFS {
@@ -1712,7 +1889,17 @@ pub fn temp_page(p: &TempPage) {
         let hint = if p.sensor == 0 { "Tap the value to type it (TC: on the CJ)" } else { "Tap the value to type it" };
         sf::glyphs(sf::TEXT22, rect(8, T_NTC_Y, 464, T_ROW_H), hint, DIM, BG, 8, 0);
     }
-    sf::glyphs(sf::TEXT22, rect(8, 282, 464, 34), p.info, STATUS_FG, BG, 1, 0);
+    sf::glyphs(sf::TEXT22, T_INFO, p.info, STATUS_FG, BG, 1, 0);
+}
+
+/// The temperature page's info line (cold junction / sensor current).
+const T_INFO: sf::Rect = rect(8, 282, 464, 34);
+
+/// The info line again, while the page is shown (App::temp_info_tick: the
+/// cold junction changes with each thermocouple reading and the offset).
+pub fn temp_info(info: &str) {
+    lcd::fill_rect(T_INFO.x as u16, T_INFO.y as u16, T_INFO.w as u16, T_INFO.h as u16, BG);
+    sf::glyphs(sf::TEXT22, T_INFO, info, STATUS_FG, BG, 1, 0);
 }
 
 /// Temperature page touch: a T_CODES code (3 px of slop into the gaps:
@@ -1730,6 +1917,11 @@ pub fn temp_hit(sensor: u8, x: u16, y: u16) -> Option<u8> {
     }
     None
 }
+
+/// Touch rows of the history boxes (drawn 153..171): the dead rows between
+/// the value's target (..150) and the MIN/MAX column (175..) join them
+/// (issue #136: 19 px was the smallest DMM target).
+pub const HIST_HIT: core::ops::Range<u16> = 151..175;
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
 pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
@@ -1755,6 +1947,10 @@ pub fn hv_warning(on: bool) {
 pub struct Status {
     pub uptime_s: u32,
     pub bt: bool,
+    /// A USB host configured the meter (USBTMC + USB disk usable): USB symbol.
+    pub usb: bool,
+    /// Battery level as shown (`Power::shown_bars`: blinks while charging).
+    /// `charging`: on a charger (charging or charged), the battery green.
     pub bars: u8,
     pub charging: bool,
     pub locked: bool,
@@ -1762,6 +1958,8 @@ pub struct Status {
     pub rec: bool,
     /// CSV recording to the disk running (csvlog.rs).
     pub csv: bool,
+    /// The REC dot's blink phase (scope_ui::rec_blink): true = hidden.
+    pub rec_dim: bool,
     /// Index of the shown view in View::CYCLE (page dots), 255 = none.
     pub page: u8,
 }
@@ -1782,29 +1980,85 @@ fn battery_glyph(b: &mut [u8; 4], bars: u8) -> &str {
     char::from_u32(0x22 + bars.min(5) as u32).unwrap_or('"').encode_utf8(b)
 }
 
-/// CSV recording badge colour (status blocks): red. The MIN/MAX session
-/// alone shows REC in the value orange (as "REC hh:mm:ss" in the DMM chart
-/// column).
-const REC_CSV: Color = 0xF800;
+/// The USB symbol (SAVE_BT 0x22, tools/mkusbglyph.py) between the BT
+/// symbol and the battery while a USB host has the meter configured (not
+/// for a charger: no enumeration).
+fn usb_glyph(st: &Status) -> &'static str {
+    if st.usb { "\u{22}" } else { "" }
+}
+
+/// CSV recording mark colour (the REC dot, scope_ui::rec_mark): red. The
+/// MIN/MAX session alone shows REC in the value orange (as "REC hh:mm:ss"
+/// in the DMM chart column).
+pub const REC_CSV: Color = 0xF800;
+
+/// The REC mark of the DMM / generator status bars (CSV recording): a red
+/// dot blinking with scope_ui::rec_blink and "REC" in the bar's text
+/// colour, as the scope top bar's (scope_ui::rec_mark), between the lock
+/// (box 327..350; 8 px left of the stock place to make room for the dot)
+/// and the BT icon (390..), "REC" where it was; `y` = the row of the label box
+/// (caps 2 rows below, the dot centred on them).
+const REC_DOT: sf::Rect = rect(354, 3, 7, 7);
+const REC_TXT_X: i16 = 364;
+
+fn rec_dot_at(y: i16) -> sf::Rect {
+    rect(REC_DOT.x, y + REC_DOT.y, REC_DOT.w, REC_DOT.h)
+}
+
+fn status_rec(st: &Status, bg: Color, y: i16) {
+    crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
+    sf::label(sf::F14, rect(REC_TXT_X, y, 20, 15), if st.csv { "REC" } else { "" }, STATUS_FG, bg, 8, 1);
+}
+
+/// The REC dot's blink step (App::tick on a `rec_blink` change): only the
+/// dot's box of the DMM page's (`gen` false) or the generator bar.
+pub fn status_rec_blink(st: &Status, gen: bool) {
+    let (bg, y) = if gen { (G_BAR, 11) } else { (BAR, 10) };
+    crate::scope_ui::rec_dot(rec_dot_at(y), bg, st.csv && !st.rec_dim);
+}
 
 /// Right part of the DMM page status bar (34 px, stock positions): uptime,
 /// REC (CSV recording; the MIN/MAX session has its own line in the chart
-/// column), lock, BT link, battery.
+/// column), lock, BT link, USB host, battery.
 pub fn status_right(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     let bc = if st.charging { 0x04A9 } else { STATUS_FG };
     sf::label(sf::F21, rect(205, 5, 112, 24), hms(&mut t, st.uptime_s), STATUS_FG, BAR, 1, -1);
-    // Between the lock (ink ..357) and the BT icon (390..).
-    sf::label(sf::F14, rect(361, 10, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, BAR, 8, 1);
-    sf::label(sf::LOCK, rect(335, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
+    status_rec(st, BAR, 10);
+    sf::label(sf::LOCK, rect(327, 7, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 0, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 0, 16, 32), usb_glyph(st), STATUS_FG, BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 9, 40, 16), battery_glyph(&mut b, st.bars), bc, BAR, 8, 0);
 }
 
 /// Strip chart (stock frame (80,176,321,97)) with labels, rate button and
 /// MAX / REL / MIN. `pts` are display values, oldest first.
 pub const CHART_X: u16 = 80;
+/// Trend chart timebases: one point per `rate` x 10 ms, 16 points (px) a
+/// division, so `rate` x 160 ms/div. The stock has 1 / 2 / 4 (160 / 320 /
+/// 640 ms/div, default 320); 8 and 16 (1.28 / 2.56 s/div) are opendm40's.
+/// The point ring (App::chart, CHART_W points) is the same at every rate.
+pub const TREND_RATES: [u8; 5] = [1, 2, 4, 8, 16];
+pub const TREND_DEFAULT: u8 = 2;
+
+/// The timebase after `rate` (a tap on the chart's left column).
+pub fn trend_next(rate: u8) -> u8 {
+    let i = TREND_RATES.iter().position(|&r| r == rate).map_or(0, |i| (i + 1) % TREND_RATES.len());
+    TREND_RATES[i]
+}
+
+/// Settings code of a timebase (0 = the default, older records), and back.
+pub fn trend_code(rate: u8) -> u32 {
+    if rate == TREND_DEFAULT { 0 } else { TREND_RATES.iter().position(|&r| r == rate).map_or(0, |i| i as u32 + 1) }
+}
+
+pub fn trend_of_code(c: u32) -> u8 {
+    match c {
+        1..=5 => TREND_RATES[c as usize - 1],
+        _ => TREND_DEFAULT,
+    }
+}
 pub const CHART_W: u16 = 321;
 const CHART_Y: u16 = 176;
 const CHART_H: u16 = 97;
@@ -2114,33 +2368,37 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         };
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
+        // (Never in a strip pass: the DMM page is drawn directly.)
         lcd::set_window(CHART_X + x, cy + y0, CHART_X + x, cy + y1);
         // Template above the trace, trace, template below (NO_SPAN: the
         // first loop covers the column).
         let (a, b2) = (span.0 as u16, span.1 as u16);
         let a_end = a.min(y1 + 1);
         for y in y0..a_end {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
         for _ in a.max(y0)..=b2.min(y1) {
-            lcd::data(0xFC40);
+            lcd::data_panel(0xFC40);
         }
         for y in (b2 + 1).max(y0).max(a_end)..=y1 {
-            lcd::data(t[y as usize]);
+            lcd::data_panel(t[y as usize]);
         }
     }
     if c.rate != rate {
         c.rate = rate;
         let mut t = [0u8; 16];
-        let s = crate::dmm::format(&mut t, rate as f32 * 160.0, 0);
+        // "640ms/div", from 1280 ms "1.28s/div" (the chip holds 9 glyphs).
+        let ms = rate as u32 * 160;
+        let (s, u): (&str, &[u8]) =
+            if ms < 1000 { (crate::dmm::format(&mut t, ms as f32, 0), b"ms/div") } else { (crate::dmm::format(&mut t, ms as f32 / 1000.0, 2), b"s/div") };
         let mut l = [0u8; 16];
-        let k = s.len();
-        l[..k].copy_from_slice(s.as_bytes());
-        l[k..k + 6].copy_from_slice(b"ms/div");
+        let k = s.len().min(10);
+        l[..k].copy_from_slice(&s.as_bytes()[..k]);
+        l[k..k + u.len()].copy_from_slice(u);
         // Timebase chip (tap: next rate), between the top and middle labels.
         let r = rect(4, g.tb, 73, 17);
         sf::rbox(r, 4, BTN, BG);
-        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + 6]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
+        sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), core::str::from_utf8(&l[..k + u.len()]).unwrap_or(""), STATUS_FG, BTN, 8, 1);
     }
     rate_chip(c, rc);
     let Some(side) = side else { return };
@@ -2341,19 +2599,30 @@ pub fn gen_run_hit(x: u16, y: u16) -> bool {
 }
 
 /// Generator bar status (ui-review #9; stock: uptime (186,0,120,36), battery
-/// (430,8,40,18)): uptime, REC, lock, BT link, battery, at the DMM bar's x
+/// (430,8,40,18)): uptime, REC, lock, BT link, USB, battery, at the DMM bar's x
 /// positions (`status_right`), centred in the 36 px bar.
 pub fn gen_status(st: &Status) {
     let mut t = [0u8; 8];
     let mut b = [0u8; 4];
     let bc = if st.charging { 0x04A9 } else { STATUS_FG };
     sf::label(sf::F21, rect(186, 6, 120, 24), hms(&mut t, st.uptime_s), STATUS_FG, G_BAR, 1, -1);
-    sf::label(sf::F14, rect(361, 11, 27, 15), if st.csv { "REC" } else { "" }, REC_CSV, G_BAR, 8, 1);
-    sf::label(sf::LOCK, rect(335, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
+    status_rec(st, G_BAR, 11);
+    sf::label(sf::LOCK, rect(327, 8, 24, 20), if st.locked { "\u{20}" } else { "\u{21}" }, STATUS_FG, G_BAR, 8, 0);
     sf::label(sf::SAVE_BT, rect(390, 2, 16, 32), if st.bt { "\u{21}" } else { "" }, STATUS_FG, G_BAR, 1, 0);
+    sf::label(sf::SAVE_BT, rect(412, 2, 16, 32), usb_glyph(st), STATUS_FG, G_BAR, 1, 0);
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
+/// `gen_preview` in strips: the wave the table holds (its `sel` + 1; 0 =
+/// none) and each column's trace rows (from the preview's top). All zero
+/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
+/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
+/// table, so the boot-time Sine drew no trace).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+pub(crate) static mut GEN_SP: (u8, [(u8, u8); 239]) = (0, [(0, 0); 239]);
+
+// Region B (not inlined into the region C callers): drawn per strip.
+#[inline(never)]
 fn gen_preview(w: gen::Wave) {
     // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
     let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);
@@ -2376,13 +2645,53 @@ fn gen_preview(w: gen::Wave) {
         };
         y0 + hh * 3 / 4 - (v * (hh / 2) as f32) as u16
     };
+    // A strip pass (lcd.rs "strip rendering"): the strip's rows.
+    let Some((ya, yb)) = lcd::clip_rows(y0 as i16, (y0 + hh - 1) as i16) else {
+        return;
+    };
+    let (ya, yb) = (ya as u16, yb as u16);
+    if lcd::in_strip() {
+        // Row by row into the strip from the columns' trace rows,
+        // worked out once per wave (not once per strip).
+        let sp = unsafe { &mut *core::ptr::addr_of_mut!(GEN_SP) };
+        if sp.0 != sel + 1 {
+            let mut prev = yv(0);
+            for i in 0..ww {
+                let y = yv(i.min(237));
+                let (a, b) = if y < prev { (y, prev) } else { (prev, y) };
+                prev = y;
+                sp.1[i as usize] = ((a - y0) as u8, (b - y0) as u8);
+            }
+            sp.0 = sel + 1;
+        }
+        for y in ya..=yb {
+            let yy = y - y0;
+            let Some(row) = lcd::strip_span(y as i16, x0 as i16, (x0 + ww - 1) as i16) else {
+                continue;
+            };
+            let (edge, grid) = (yy == 0 || yy == hh - 1, yy % 46 == 0 && yy > 0);
+            for (i, (p, &(a, b))) in row.iter_mut().zip(sp.1.iter()).enumerate() {
+                let i = i as u16;
+                *p = if yy >= a as u16 && yy <= b as u16 {
+                    G_TRACE
+                } else if edge || i == 0 || i == ww - 1 {
+                    0x73CF
+                } else if grid || (i % 48 == 0 && i > 0) {
+                    G_BOX
+                } else {
+                    G_BG
+                };
+            }
+        }
+        return;
+    }
     let mut prev = yv(0);
     for i in 0..ww {
         let y = yv(i.min(237));
         let (a, b) = if y < prev { (y, prev) } else { (prev, y) };
         prev = y;
-        lcd::set_window(x0 + i, y0, x0 + i, y0 + hh - 1);
-        for yy in 0..hh {
+        lcd::set_window(x0 + i, ya, x0 + i, yb);
+        for yy in ya - y0..=yb - y0 {
             let edge = i == 0 || i == ww - 1 || yy == 0 || yy == hh - 1;
             let grid = (i % 48 == 0 && i > 0) || (yy % 46 == 0 && yy > 0);
             let c = if y0 + yy >= a && y0 + yy <= b {
@@ -2477,7 +2786,8 @@ pub const KP_FREQ: u8 = 0;
 pub const KP_NUM: u8 = 1;
 pub const KP_SIGNED: u8 = 2;
 
-/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
+/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M' (the K key
+/// labelled "k", issue #136), '<' backspace,
 /// '-' sign toggle, '=' OK. Constant tables (cheaper in the RAM image than
 /// building them).
 pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
@@ -2487,7 +2797,7 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
     const FREQ: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
-            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "K", b'K'), (r(228, 234, 60, 40), "7", b'7'),
+            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "k", b'K'), (r(228, 234, 60, 40), "7", b'7'),
             (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
         ];
@@ -2670,7 +2980,12 @@ pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit
 /// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
 /// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
 /// so the rows above keep their places.
-pub const SETTINGS3: [&str; 8] = ["Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm"];
+/// Row 9, "Mode Remember" (the stock's name and place, Other Settings;
+/// default OFF as the stock): ON restarts the multimeter after a power-off
+/// as it was (app.rs `restore`).
+pub const SETTINGS3: [&str; 9] = [
+    "Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm", "Mode Remember",
+];
 
 /// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
@@ -2874,7 +3189,8 @@ pub fn list_hit(y: u16, n: usize) -> Option<usize> {
 
 /// Rows of the DMM Hold & Limits page (View::Limits). The ninth, "Record",
 /// opens the Record page (View::Record; 9 rows at the settings pitch fit:
-/// 44 + 8 x 30 + 27 = 311).
+/// 44 + 8 x 30 + 27 = 311): the way there for continuity, diode and
+/// frequency, which have no range page and so no Record button.
 pub const LIMIT_ROWS: [&str; 9] = [
     "Auto Hold", "Limits", "Upper limit", "Lower limit", "Upper = reading", "Lower = reading", "Clear limits",
     "Fail beep", "Record",
@@ -2983,7 +3299,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
         ],
     ),
     (
-        "Limits",
+        "Specs",
         [
             ("AUTO on volts", "Starts on mV: AUTO+"),
             ("Scope bandwidth", "Flat to about 3 MHz"),
@@ -2991,14 +3307,14 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("Gen square", "Up to 10 MHz"),
             ("Gen amplitude", "0 to 3 Vpp"),
             ("Gen output", "Never apply voltage"),
-            ("Supplied TC probe", "Rated to 300 C"),
+            ("Supplied TC probe", "Rated to 300 \u{2103}"),
             ("Key/alert volume", "Keys and alerts"),
         ],
     ),
     (
         "Record + alerts",
         [
-            ("Record page", "MF > Hold & Limits"),
+            ("Record page", "MF > Record"),
             ("Interval rows", "Mean of the readings"),
             ("Swipe down (DMM)", "Same settings"),
             ("While recording", "No auto power-off"),
@@ -3085,6 +3401,24 @@ pub fn help_page(page: usize) {
 /// replacement firmware's own version, NOT the stock "Software V2.6".
 pub const FW_VERSION: &str = crate::ident::VERSION;
 
+/// Width of the Device page's value column (`device_page`).
+const DEVICE_VALUE_W: i16 = 260;
+
+/// The Device page's "Software" value: "opendm40 <version>", or the version
+/// alone when that is wider than the value column (a CI pull request build,
+/// e.g. 0.3.2-pr148.1a2b3c4).
+pub fn device_software(buf: &mut [u8; 48]) -> &str {
+    let pre = b"opendm40 ";
+    let v = FW_VERSION.as_bytes();
+    let n = (pre.len() + v.len()).min(buf.len());
+    buf[..pre.len()].copy_from_slice(pre);
+    buf[pre.len()..n].copy_from_slice(&v[..n - pre.len()]);
+    match core::str::from_utf8(&buf[..n]) {
+        Ok(s) if sf::text_width(sf::TEXT22, s, 0) <= DEVICE_VALUE_W - 8 => s,
+        _ => FW_VERSION,
+    }
+}
+
 /// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
 /// in the opendm40 settings style (title bar + rows) so it matches the other
@@ -3097,6 +3431,6 @@ pub fn device_page(lines: &[(&str, &str)]) {
         let y = 48 + i as i16 * 36;
         sf::rbox(rect(8, y, 464, 33), 6, M_TILE, M_BG);
         sf::glyphs(sf::TEXT22, rect(20, y, 180, 33), label, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(200, y, 260, 33), value, M_ACCENT, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(200, y, DEVICE_VALUE_W, 33), value, M_ACCENT, M_TILE, 1, 0);
     }
 }

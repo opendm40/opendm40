@@ -350,6 +350,9 @@ pub(super) struct Sp {
     /// page (timebase, flash).
     list: Option<ListTouch>,
     tb_drawn: (u8, bool),
+    /// The REC mark's blink phase drawn while the page is covered (a popup
+    /// leaves the top bar visible); None = not drawn since it was covered.
+    rec_drawn: Option<bool>,
     /// UF-08: the press is on the cursor tab; the selection before the
     /// cursor tab turned the cursors on. UF-09: the last plain tap.
     cur_press: bool,
@@ -413,6 +416,7 @@ impl Sp {
             entries: 0,
             list: None,
             tb_drawn: (255, false),
+            rec_drawn: None,
             cur_press: false,
             presel: false,
             cur_saved: None,
@@ -515,8 +519,9 @@ impl App {
             guide: now < sp.guide_until || sp.touch.is_some_and(|t| t.hit || t.moving),
             xcur: if self.cur.x_on { Some([self.cur.x[0] as i16, self.cur.x[1] as i16]) } else { None },
             ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
-            battery: self.power.bars.min(5),
-            charging: self.power.charging(),
+            battery: self.power.shown_bars(now / 1000 & 1 == 1),
+            charging: self.power.on_charger(),
+            usb: self.usb_host,
             roll: self.scope.rolling(),
             record,
             // Combined view: the strip's GEN badge shows it instead.
@@ -546,8 +551,15 @@ impl App {
                 su::SRC_MCX
             },
             amps,
-            wvdiv: if wave { self.scope.vdiv() } else { 0.0 },
+            // The V/div text from the value (fmt_div) also off the Wave
+            // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
+            wvdiv: self.scope.vdiv(),
             ch1_txt: if wave { self.wave_func_label() } else { "" },
+            // Both scope views (the combined view's strip badge no longer
+            // shows REC: one look everywhere).
+            rec: crate::csvlog::active(),
+            rec_dim: su::rec_blink(now),
+            rec_unit: su::rec_unit(self.rec_func),
         }
     }
 
@@ -621,13 +633,24 @@ impl App {
         if self.sp.covered() {
             return;
         }
-        let Some(r) = self.shown_reading() else {
-            su::meter_strip(&su::StripData::EMPTY);
-            return;
+        let r = match self.shown_reading() {
+            Some(r) => r,
+            // The power meter before its first reading (#108).
+            None if self.dmm.pw.on => self.pw_strip_wait(),
+            None => {
+                su::meter_strip(&su::StripData::EMPTY);
+                return;
+            }
         };
         let (hold, lim) = (self.meter.hold_state(), self.meter.verdict());
-        let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label, crate::csvlog::active());
+        let mut d = ui::strip_data(&r, hold, lim, self.meter.rel_active(), self.hv_level, self.strip_alt, self.dmm_view.label);
         ui::strip_acc(&mut d, &r, self.acc_ctx());
+        if self.dmm_view.short != 0 && r.alert == crate::sentinel::Alert::None {
+            // The beeper indicator (`beep_ind`): the badge and the value green.
+            d.badge = if self.dmm_view.short == 1 { "SHORT" } else { "BEEP" };
+            d.badge_col = ui::SHORT_BG;
+            d.short = true;
+        }
         if self.gen.s.on {
             let mut b = su::Buf::new();
             su::fmt_hz(&mut b, self.gen.actual_hz());
@@ -646,9 +669,22 @@ impl App {
     /// The page from the cached frame and the model (all of it after
     /// `su::invalidate`, the graph after `su::uncover`).
     fn sp_draw_page(&mut self) {
-        self.sp.bubble_dirty = self.sp.bubble;
+        self.sp_prepare();
+        self.sp_draw_widgets();
+    }
+
+    /// The page's graph rows from the cached frame (no drawing).
+    pub(super) fn sp_prepare(&mut self) {
+        // An open popup's box is drawn last: the graph leaves it alone.
+        su::graph().set_hole_at(su::H_POPUP, su::popup_box(self.sp.popup));
         self.sp_render();
         self.sp_math();
+    }
+
+    /// The page from the graph rows and the model: the same pixels on
+    /// every call after `su::invalidate` (App::repaint_strips).
+    pub(super) fn sp_draw_widgets(&mut self) {
+        self.sp.bubble_dirty = self.sp.bubble;
         self.sp_update(self.now);
         self.sp_cells();
         if self.view == View::DmmScope {
@@ -852,12 +888,12 @@ impl App {
 
     /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
     /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
-    /// Stock rule: refused while sampling ("Please stop sample").
+    /// Stock rule: refused while sampling ("Stop the scope first").
     #[inline(never)] // .cold (link-native.x): a tap (MF Settings Save CSV)
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
-            self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
+            self.toast(now, if self.scope.s.run { "Stop the scope first" } else { "No record to save" }, false);
             return;
         }
         if crate::screenshot::busy() || crate::csvlog::writing() {
@@ -875,15 +911,13 @@ impl App {
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
-        if wave {
-            su::fmt_div(&mut v, self.scope.vdiv(), unit);
-        } else {
-            su::vdiv_text(&mut v, vdiv_idx(s.range, s.probe));
-        }
+        // From the value: the label table index (vdiv_idx) is wrong with
+        // a x2 / x5 ... probe (#133).
+        su::fmt_div(&mut v, self.scope.vdiv(), unit);
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[s.tb.min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        h.s("# timebase ").s(su::TB_LABELS[self.scope.record_tb().min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
         if wave {
             // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
             h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");
@@ -914,7 +948,7 @@ impl App {
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
-            self.toast(now, "Save CSV Error", false);
+            self.toast(now, "CSV save failed", false);
             return;
         }
         self.scope.hold = true;
@@ -956,7 +990,7 @@ impl App {
             }
             crate::screenshot::Shot::NoDisk => ("No disk", false),
             crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("Save CSV Error", false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("CSV save failed", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -1240,8 +1274,17 @@ impl App {
                     su::tb_badge(&m);
                 }
             }
+            // The REC mark keeps blinking above a popup.
+            if crate::csvlog::active() && !self.redraw {
+                let dim = su::rec_blink(now);
+                if self.sp.rec_drawn != Some(dim) {
+                    self.sp.rec_drawn = Some(dim);
+                    su::rec_mark_blink(su::SRC_BADGE, su::C_BAR, !dim, su::rec_unit(self.rec_func));
+                }
+            }
             return;
         }
+        self.sp.rec_drawn = None;
         self.sp_update(now);
     }
 
@@ -1997,7 +2040,7 @@ impl App {
             su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
             b.push("/div");
         } else {
-            su::vdiv_text(&mut b, vdiv_idx(p.i, self.scope.s.probe));
+            su::fmt_div(&mut b, scope::VDIV[p.i.min(9)] * self.scope.s.probe, "V");
             b.push("/div");
         }
         let t = sf::Ink::new(sf::SC_F16, BUBBLE, b.as_str(), 8, 0);
@@ -2123,6 +2166,8 @@ impl App {
     }
 
     fn sp_popup_draw(&mut self) {
+        // The box's fills wait for its widgets (lcd.rs "deferred fills").
+        crate::lcd::defer_start();
         let v = self.sp_popvals();
         su::draw_popup(self.sp.popup, &v);
     }
@@ -2133,6 +2178,7 @@ impl App {
         self.sp.popup = p;
         self.sp.list = None;
         self.sp.tb_drawn = (255, false);
+        self.sp.rec_drawn = None;
         if !self.redraw {
             // The CH1 / math pill label shows the open popup (0x7bef).
             let m = self.sp_model(self.now);
@@ -2177,6 +2223,7 @@ impl App {
         // menu "Screenshot" closes it first) after SHOT_SETTLE_MS.
         self.scope_invalidate();
         self.repaint_at = self.now;
+        crate::lcd::defer_start();
         let m = self.sp_model(self.now);
         su::uncover(&m, u & 1 != 0, u & 2 != 0);
         self.sp_draw_page();
@@ -2353,9 +2400,21 @@ impl App {
             su::MfHit::Outside | su::MfHit::Inside | su::MfHit::Bright | su::MfHit::Grid => return,
             su::MfHit::Tab(t) => {
                 if t != tab {
-                    // A shorter page: the page under the old box comes back.
+                    let old = su::popup_box(self.sp.popup);
                     self.sp.popup = su::Popup::Mf(t);
-                    self.redraw = true;
+                    let new = su::popup_box(self.sp.popup);
+                    if let (View::Scope, Some(o), Some(n)) = (self.view, old, new) {
+                        // The new box, then the graph rows the old one
+                        // covered and the new one does not.
+                        self.sp_popup_draw();
+                        let m = self.sp_model(now);
+                        su::regraph_rows(&m, n, n.y + n.h, o.y + o.h);
+                    } else {
+                        // The combined view (its popups cover the meter
+                        // strip): the whole page, the graph skipping the
+                        // new box (sp_draw_page).
+                        self.redraw = true;
+                    }
                 }
                 return;
             }

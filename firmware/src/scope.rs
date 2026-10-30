@@ -281,6 +281,9 @@ pub struct Scope {
     stored_trig: Option<usize>,
     stored_anchor: usize,
     stored_fs: u32,
+    /// Timebase the stored record was captured at (a stopped zoom changes
+    /// `s.tb` only): the scope CSV header's.
+    stored_tb: u8,
     /// Hardware range the stored codes were captured with (the code -> volts
     /// gain); the current range only sets the display scale while stopped.
     stored_range: usize,
@@ -649,6 +652,7 @@ impl Scope {
             stored_trig: None,
             stored_anchor: 0,
             stored_fs: 0,
+            stored_tb: 0,
             stored_range: 0,
             stored_roll: false,
             zoom_pending: false,
@@ -791,6 +795,18 @@ impl Scope {
 
     pub fn row_of_code(&self, code: f32) -> f32 {
         self.row_of_volts(self.volts(code))
+    }
+
+    /// TRIG:LEV: the level in volts as given, also off screen (its marker
+    /// on the nearest edge row, as a level kept across a zoom). Returns the
+    /// marker row for the settings the caller applies next (`apply` keeps
+    /// the volts: the row does not move on its own).
+    pub fn set_trig_volts(&mut self, v: f32) -> i32 {
+        let r = self.row_of_volts(v);
+        let row = if r.is_finite() { (if r >= 0.0 { r + 0.5 } else { r - 0.5 }).clamp(-10.0, 290.0) as i32 } else { self.s.trig_row };
+        self.trig_v = v;
+        self.s.trig_row = row;
+        row
     }
 
     pub fn trig_volts(&self) -> f32 {
@@ -1117,6 +1133,7 @@ impl Scope {
         }
         self.stored_len = len;
         self.stored_fs = self.sample_rate();
+        self.stored_tb = self.s.tb as u8;
         self.stored_range = self.s.range;
         self.stored_pos = self.s.pos;
         self.stored_roll = roll;
@@ -1475,6 +1492,11 @@ impl Scope {
     pub fn record_info(&self) -> (u32, usize, bool) {
         let t0 = self.stored_trig.unwrap_or(if self.stored_roll { self.stored_len.saturating_sub(1) } else { self.stored_anchor });
         (self.stored_fs, t0, self.stored_trig.is_some())
+    }
+
+    /// The timebase (TB index) the stored record was captured at.
+    pub fn record_tb(&self) -> usize {
+        self.stored_tb as usize
     }
 
     /// Drag preview: take the position settings (CH1 position, trigger level
