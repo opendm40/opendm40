@@ -911,13 +911,13 @@ fn hit_tests(ck: &mut Ck) {
     let mut dv = ui::DmmView::new();
     dv.draw_static(dmm::Button::Volt, 1, false, true);
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
-    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
+    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), sd: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
     ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
         if ui::value_hit(x, y) {
             Some(105) // main value: resolution / rate
-        } else if x >= 402 && (205..243).contains(&y) {
+        } else if x >= 402 && (205..241).contains(&y) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column

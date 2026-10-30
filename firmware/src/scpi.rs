@@ -233,6 +233,8 @@
 //!   CALCulate:AVERage[:AVERage]?  CALCulate:AVERage:MINimum? / MAXimum?
 //!     no sample yet: +9.9E37 and "Data stale" in SYST:ERR?
 //!   CALCulate:AVERage:COUNt?              samples in the statistics
+//!   CALCulate:AVERage:SDEViation?         sample standard deviation (N - 1;
+//!     0 after one sample)
 //!   CALCulate:AVERage:CLEar               restart the statistics
 //!   CALCulate:AVERage:STATe ON|OFF / ?    recording session (no idle
 //!     power-off; ON restarts the statistics)
@@ -914,7 +916,7 @@ pub enum Cmd {
     SysRailState,
     /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
     CalcAhold(Option<bool>),
-    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt.
+    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt, 4 SDEViation.
     CalcAver(u8),
     CalcAverClear,
     CalcAverState(Option<bool>),
@@ -2929,6 +2931,7 @@ impl Scpi {
                             Some(l) if query && kw(l, "MAXimum") => Some(Cmd::CalcAver(1)),
                             Some(l) if query && kw(l, "AVERage") => Some(Cmd::CalcAver(2)),
                             Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
+                            Some(l) if query && kw(l, "SDEViation") => Some(Cmd::CalcAver(4)),
                             Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
                             Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
                             _ => None,
