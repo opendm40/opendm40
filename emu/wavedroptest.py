@@ -82,11 +82,17 @@ try:
         return dict(active=int(r[1]), dropped=int(r[6]), late=int(r[4]), over=int(r[9]), max_lat=int(r[11]))
 
     def prof():
+        if not has_prof:
+            return '', -1
         p = q('DBG:PROF?')
         m = re.search(r'max (\d+) max1s', p)
         return p, int(m.group(1)) if m else -1
 
     print('*IDN?', q('*IDN?'), flush=True)
+    # DBG:PROF? / DBG:PROF:RESET only in a build with the feature dbg-prof
+    # (else -113 "Undefined header"): without it the loop maxima read -1.
+    q('DBG:PROF:RESET')
+    has_prof = q('SYST:ERR?').startswith('0,')
     q('CONF:VOLT:DC')
     wait_dev(2)
     for cmd, want in (('DBG:KEY 3', 'Range'), ('DBG:TAP 298,259', 'Oscilloscope')):
@@ -105,7 +111,8 @@ try:
     lba = size = 0
     if m:
         lba, size = infovol.vol_dir(m, 'INFO')['LOADER.BIN']
-    q('DBG:PROF:RESET')
+    if has_prof:
+        q('DBG:PROF:RESET')
     a = isr()
     t0 = up()
     rows = []

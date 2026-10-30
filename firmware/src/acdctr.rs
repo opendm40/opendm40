@@ -9,11 +9,15 @@
 //! later, so the events around it stay for the host to read
 //! (`DBG:ACDC:TRACE? <i>`, entries from the oldest; `DBG:ACDC:TRACE <0|1|2>`
 //! = off / on / on with the readback, and re-arms).
+//! Debug builds only: cargo feature `acdc-trace` (Cargo.toml).
+#![cfg_attr(not(feature = "acdc-trace"), allow(dead_code))]
 
-/// Ring length (28 bytes each). Without the feature `acdc-trace` (not
-/// default on test/scope-chain-0.4, Cargo.toml) the trace stays off: one
-/// entry, nothing recorded, the query reports an empty ring.
+/// Ring length (28 bytes each). Without the feature `acdc-trace` (Cargo.toml)
+/// the trace stays off: one entry, nothing recorded, and DBG:ACDC:TRACE is
+/// an undefined header (scpi.rs).
 pub const TR_N: usize = if cfg!(feature = "acdc-trace") { 64 } else { 1 };
+/// The trace is built (feature `acdc-trace`); the Dmm hooks test this first.
+pub const ON: bool = cfg!(feature = "acdc-trace");
 /// Events recorded after the trigger.
 const TR_POST: u32 = 32;
 /// Trigger: an accepted DC part off by more than this fraction of the one before.
@@ -125,7 +129,7 @@ pub fn hash16(b: &[u8]) -> u16 {
 impl Trace {
     /// Recording (on, and not frozen after a trigger).
     pub fn live(&self) -> bool {
-        cfg!(feature = "acdc-trace") && self.on != 0 && (self.trig == u32::MAX || self.n < self.trig.saturating_add(TR_POST))
+        ON && self.on != 0 && (self.trig == u32::MAX || self.n < self.trig.saturating_add(TR_POST))
     }
 
     pub fn push(&mut self, e: TrEnt) {
@@ -141,7 +145,7 @@ impl Trace {
 
     /// DBG:ACDC:TRACE <on>: set and re-arm (clears the ring).
     pub fn arm(&mut self, on: u8) {
-        self.on = if cfg!(feature = "acdc-trace") { on.min(2) } else { 0 };
+        self.on = if ON { on.min(2) } else { 0 };
         self.n = 0;
         self.trig = u32::MAX;
     }

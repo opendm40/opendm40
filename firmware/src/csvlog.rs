@@ -148,7 +148,10 @@ const MAXNEW: usize = FIFO / BLK + 2;
 
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut FIFO_BUF: [u8; FIFO] = [0; FIFO];
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+/// The block being filled. In the USBHS FIFO RAM (.usbhs_bss, link-native.x;
+/// CPU only: the SPI flash takes it by CPU writes; docs/native-boot.md "Extra
+/// RAM areas"); `start` fills it with 0xFF.
+#[cfg_attr(target_os = "none", link_section = ".usbhs_bss")]
 static mut TAIL: [u8; BLK] = [0; BLK];
 
 /// The row FIFO of a recording. Its third tenant, the MMEM:CAT? cache

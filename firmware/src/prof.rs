@@ -154,9 +154,11 @@ struct Prof {
     win_ms: u64,
 }
 
-// A `dbg-prof` build only (see ON). In .sram_bss (zeroed; every field's
-// initial value is zero bytes): TCM has no 1 KB to spare next to the stack.
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// A `dbg-prof` build only (see ON). In the backup SRAM (.bkp_bss,
+// link-native.x; zeroed at reset, every field's initial value is zero
+// bytes; docs/native-boot.md "Extra RAM areas"): TCM has no 1 KB to spare
+// next to the stack, SRAM none on the scope chain.
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut P: Prof = Prof {
     t0: [0; N],
     sec: [Stat::ZERO; N],

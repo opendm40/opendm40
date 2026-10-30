@@ -294,6 +294,7 @@ recorded.
 | [`limitsbacktest.py`](limitsbacktest.py) | MENU / Back on Hold & Limits and Record: one page up (the range page or the multimeter); the range pages' Record button, Start / Stop | ~2 min | free |
 | [`chartunittest.py`](chartunittest.py) | DMM trend chart after a range change to another unit that reads OL (#93) | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
+| [`xramtest.py`](xramtest.py) | the extra RAM areas (backup SRAM after the settings record, USBHS FIFO RAM) start zeroed over stale bytes; the settings record survives DBG:RESET while their buffers are in use | ~4 min | 64600-64699 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
 | [`tempinfotest.py`](tempinfotest.py) | the temperature page's cold junction line follows an offset step (#142) | | free |
 | [`monkeytest.py`](monkeytest.py) | seeded random taps, keys, drags, swipes and SCPI (edge values) on every page: no restart, no hang, MENU always reaches the main menu, the deepest stack use; optional soak (`--seed`, `--minutes`) | about real time (`--fast`) | free |

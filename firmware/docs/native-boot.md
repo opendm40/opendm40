@@ -1097,9 +1097,8 @@ Pairs checked and not overlaid (each can be live with the other):
 | `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
 | `gen::WAVE` | the DAC's circular DMA source while the generator outputs, with everything |
 
-Not changed: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE) is debug-only.
-On `test/scope-chain-0.4` the `acdc-trace` feature leaves it out. On 0.4.0
-it stays in the image.
+Not changed here: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE); the next
+section puts it behind a feature.
 
 | | before (release/0.4.0, e3229f7a) | after |
 |---|---|---|
@@ -1126,6 +1125,128 @@ variant keeps CAP 36 K / PCAP 55 000 again (it has its own MSC buffers).
 | region C free | 6 064 B | 6 472 B |
 | stack headroom (static worst path) | 21 312 B | 20 620 B |
 | SRAM free | 9 460 B | 8 308 B |
+
+### AC+DC trace behind a feature (2026-10-30, feat/sram-extra-areas)
+
+The owner does not want DBG:ACDC:TRACE in the firmware. The cargo feature
+`acdc-trace` ([Cargo.toml](../Cargo.toml), off by default; the same feature
+as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
+- without it [acdctr.rs](../src/acdctr.rs) keeps one ring entry, `live()`
+  is constant false and the `Dmm` hooks test `acdctr::ON` first, so their
+  code is dropped; DBG:ACDC:TRACE[?] is an undefined header;
+- with it the ring has 64 entries (was 192) and 32 events after the
+  trigger (was 48).
+
+| | before (0e7ffa6e) | after |
+|---|---|---|
+| region B free | 12 872 B | 13 912 B |
+| region C free | 13 476 B | 14 188 B |
+| SRAM free | 34 628 B | 39 980 B |
+
+`--features acdc-trace`: SRAM 38 212 B, B 12 888 B, C 13 508 B.
+
+### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
+
+The device probe of [PR #183](https://github.com/opendm40/opendm40/pull/183)
+found two RAMs outside [link-native.x](../link-native.x)'s TCM + SRAM, both
+~5 cycles a load:
+
+| area | range | size | kept over |
+|---|---|---|---|
+| backup SRAM after the settings record | `0x40024124..0x40024FE7` | 3 780 B | a reset and an update, not a power-off |
+| USBHS FIFO RAM (the DM40 has no USBHS port) | `0x40060000..0x40060FFF` | 4 KiB | needs `RCU_AHB1EN` bit 29 (USBHSEN) |
+
+**Link.** Two `MEMORY` regions and three NOLOAD sections:
+- `.bkp_record` holds `persist::RECORD_SPACE`, a `[u32; WORDS + 3]` that
+  is never accessed: it puts the settings record's size from
+  [persist.rs](../src/persist.rs) into the link. Asserted at 0x40024000 and
+  non-empty.
+- `.bkp_bss` follows it; asserted to start at or after the record's end and
+  to end at or below `0x40024FE8` (`persist::BKP_SEQ`: the sequence words,
+  then the boot words; persist.rs asserts the same constant).
+- `.usbhs_bss`, asserted inside the 4 KiB.
+
+**Boot.** `native::extra_ram_init`, right after `init_ram` and before the
+recovery / normal split: `boot::bkp_enable` (PMU clock, BKPWEN, BKPSRAM
+clock), USBHSEN, then both sections zeroed word by word. `.bss` zeroing
+does not cover them; the backup SRAM keeps the previous image's bytes over
+a reset; the FIFO RAM is random after power-up. `board::init` sets USBHSEN
+too. The record and the words above `.bkp_bss` are never written.
+
+**What moved.** CPU-only buffers, none touched by DMA and none on the AD2
+stream ISR's paths:
+
+| buffer | size | area | from | who touches it |
+|---|---|---|---|---|
+| `csvlog::TAIL` | 4 096 | USBHS | SRAM `.dmabuf` | `rec_start` (C: fill 0xFF); `csvlog::poll` while a CSV recording commits: the FIFO bytes copied in, then `write_step` (the SPI flash takes it by CPU writes) |
+| `screenshot::JOB` | 452 | backup | SRAM `.dmabuf` | `init`; per pass `busy` / `frozen` flags (tick, run, msc poll); the shot itself is C (`step`, `finish`) |
+| `vdisk::MIR` | 144 | backup | `.sram_bss` | `mir_read` (a host read of the mirror file), `Scpi::handle`, `mirror_boot` (C) |
+| `vdisk::STATE` | 372 | backup | SRAM `.dmabuf` | `init` (C); a few field loads per 512-byte sector in `read_block` / `read_busy` / `read_wait` |
+| `upload::UP` | 368 | backup | `.sram_bss` | per pass `active` flag; the upload is C (`begin`, `data_msg`, `flush`, `end`) |
+| `scope_csv::PLAN` | 264 | backup | SRAM `.dmabuf` | C only (`sp_save_csv`, `screenshot::step`) |
+| `app_touchtest::TT` | 168 | backup | `.sram_bss` | C only (the touch test page) |
+| `prof::P` (`dbg-prof` builds) | 984 | backup | `.sram_bss` | the profiler hooks (debug) |
+
+Proofs:
+- **DMA.** Every DMA memory address the firmware programs: `bt::RX` /
+  `bt::TX` (bt.rs, `*_M0ADDR`), `scope::LATCH` and the scope record
+  (scope.rs, S3 / S4; `scope::BUF` or the inrush record lent from it),
+  `gen::WAVE` (gen.rs, S5), and the HY3131 SPI frames `TXI` / `RXI` /
+  `TXB` / `RXB` (logger.rs → hy3131.rs `dma_arm`). None of the buffers
+  above. (`.dmabuf` held PLAN, JOB, STATE only as NOLOAD SRAM.) USBFS moves
+  its FIFO by CPU, the LCD is CPU writes over FSMC, the SPI flash has no DMA.
+- **The AD2 stream ISR.** build.sh disassembles every function reachable
+  from `ad2_stream_irq` (34 today) and fails when one holds an address in
+  `.bkp_bss` or `.usbhs_bss` (literal-pool word or movw / movt pair). The
+  addresses the ISR loads are TCM / SRAM statics (`logger::isr::*`, its
+  DMA frames) and peripherals. In the `no-ad2-isr` variant the main-loop
+  sampler (`Logger::poll` / `sample`, inlined into `run`; `Producer::push`
+  / `tick`) names none of the moved modules, and push / tick hold no such
+  address.
+- **Hot paths.** Region C code never runs while a stream does
+  ("The slow flash bank while an AD2 stream runs"), so the C-only buffers
+  are idle then. The rest cost a few 5-cycle loads per main-loop pass
+  (flags) or per USB sector; `csvlog::TAIL`'s 4 KiB copy runs once per
+  filled block of a CSV recording (*estimated* ~33 000 extra cycles, ~0.2 ms, next to
+  a block program of several ms). A recording refuses the Wave view and
+  inrush and stops CH2; only an SCPI LOG:STATe ON session can stream
+  meanwhile, and the ISR does not wait for the main loop.
+- **Size.** The link asserts above; build.sh prints both areas' free bytes.
+
+Checked and left where they are:
+
+| buffer | why not |
+|---|---|
+| `lcd::DEFER` | read by every `fill_rect` / `set_window_cmd` (the drawing hot path, also while the scope streams) |
+| `vdisk::CSV_CUR` / `CSV_CUR2`, `dlog::SCPI_GEN` | CSV / MMEM:DATA? generators that run in place, per byte of a host read |
+| `fastlog::JOB`, `csvlog::JOB`, `scope_wav::SCREEN` | per sample / row / frame while a stream or a recording runs |
+| `vwrite::W0` (1 376) | read on every pass and every USB sector read by many region B functions; the next candidate if SRAM gets short |
+| `ui::GEN_SP`, `dmm::REC_COPY`, `gallery::G`, `scope_csv::SNAP` | fit and are cold, but they are in TCM on the scope chain, where SRAM is short; room kept for `prof::P` |
+| `touch::LOG` (`dbg-touch`, 1 924), `acdctr::TR` (`acdc-trace`, 1 804) | do not fit next to `prof::P`; stay in `.sram_bss` |
+
+`emu/dm40.repl` maps the FIFO RAM as plain memory (the clock gate is not
+modelled); the backup SRAM was already plain memory, kept over DBG:RESET,
+zero in a new run. [emu/xramtest.py](../../emu/xramtest.py) fills both
+areas with 0xA5 before the firmware starts, saves a setting, takes a
+screenshot, records a CSV (checked back through MMEM:DATA?), opens the
+touch test page, then DBG:RESET: SETTINGS,BKP with the same record sequence
+number, the setting kept, and the same steps work again.
+
+| | before (11eb22cc) | after |
+|---|---|---|
+| region B free | 13 912 B | 13 912 B |
+| region C free | 14 188 B | 14 104 B |
+| stack headroom (static worst path) | 20 760 B | 20 736 B |
+| SRAM free | 39 980 B | 45 852 B |
+| backup SRAM free | | 2 008 B |
+| USBHS RAM free | | 0 B |
+
+Feature builds (SRAM / backup SRAM free): `dbg-prof` 45 852 / 1 016,
+`dbg-touch` 43 932 / 2 008, `acdc-trace` 44 084 / 2 008, all three
+42 164 / 1 016 (region B 8 688).
+
+Device checks still open: the supply current with USBHSEN on (*unknown*),
+and the settings record and file over power cycles with this image.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

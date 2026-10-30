@@ -228,7 +228,9 @@ struct Mir {
     written: bool,
     ms: u32,
 }
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// Backup SRAM (.bkp_bss, link-native.x; CPU only, zeroed at reset;
+// docs/native-boot.md "Extra RAM areas").
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut MIR: Mir = Mir { data: 0, cb: 0, cl: [0; MIR_NCL], status: 0, written: false, ms: 0 };
 /// The mirror equals the flash (checked or written at this boot) and is
 /// served; cleared for good by a failed SPI read.
@@ -286,9 +288,10 @@ struct Tab {
     left_out: u16,
 }
 
-/// NOLOAD SRAM (.dmabuf): written by `init` before READY is set; TCM is kept
+/// Backup SRAM (.bkp_bss, link-native.x; CPU only, docs/native-boot.md
+/// "Extra RAM areas"): written by `init` before READY is set; TCM is kept
 /// for the stack.
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut STATE: core::mem::MaybeUninit<State> = core::mem::MaybeUninit::uninit();
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut TAB: core::mem::MaybeUninit<Tab> = core::mem::MaybeUninit::uninit();
