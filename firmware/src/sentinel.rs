@@ -2261,7 +2261,12 @@ mod tests {
             (5, 0, &CFG_F5_6[0], Kind::PeakV),
             (1, 2, &CFG_F1[2], Kind::Off),
         ] {
-            assert_eq!(row_for(m, r, true, M_ALL, 0, row), row_for(m, r, false, M_ALL, 0, row), "mode {m}");
+            // (the same rows; plain DC V 6 V's PB1 window aside, R21_DCV_PB1)
+            let (mut plain, pk) = row_for(m, r, false, M_ALL, 0, row);
+            if (m, r) == (1, 0) {
+                plain[1] = row[1];
+            }
+            assert_eq!(row_for(m, r, true, M_ALL, 0, row), (plain, pk), "mode {m}");
             assert_eq!(row_for(m, r, true, M_ALL, 0, row).1, k, "mode {m}");
         }
         // Above 6 V both phases are quiet (the DC phase has none): the same
