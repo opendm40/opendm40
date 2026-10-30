@@ -3132,6 +3132,8 @@ const ST_PITCH: i16 = 45;
 const ST_H: i16 = 42;
 const ST_TAB_X: i16 = 4;
 const ST_TAB_W: i16 = 120;
+/// Tab label's left padding.
+const ST_TAB_PAD: i16 = 5;
 /// Touch split between the tab column and the rows.
 const ST_SPLIT: u16 = 127;
 const ST_ROW_X: i16 = 130;
@@ -3188,9 +3190,9 @@ pub fn settings(tab: u8, vals: &[&str]) {
         let bg = if pressed { K_SEL } else if i == tab { SEL } else { M_TILE };
         let r = st_tab(i);
         sf::rbox(r, 6, bg, M_BG);
-        // Centred: "Multimeter" (110 px in the stock TEXT22) leaves 5 px
-        // either side.
-        sf::glyphs(sf::TEXT22, rect(r.x + 4, r.y, r.w - 8, r.h), name, STATUS_FG, bg, 8, 0);
+        // Left-aligned, 5 px in: "Multimeter" (110 px in the stock
+        // TEXT22) keeps 1.5 word spaces to the row labels.
+        sf::glyphs(sf::TEXT22, rect(r.x + ST_TAB_PAD, r.y, r.w - ST_TAB_PAD - 2, r.h), name, STATUS_FG, bg, 1, 0);
     }
     for (i, &id) in SET_TABS[tab].1.iter().enumerate() {
         let v = vals.get(id as usize).copied().unwrap_or("");
@@ -3261,7 +3263,20 @@ pub fn settings_hit(tab: u8, x: u16, y: u16) -> Option<SetHit> {
     if x < ST_SPLIT {
         (i < SET_TABS.len()).then_some(SetHit::Tab(i as u8))
     } else {
-        (i < SET_TABS[(tab as usize).min(SET_TABS.len() - 1)].1.len()).then_some(SetHit::Row(i))
+        let id = settings_id(tab.min(SET_TABS.len() as u8 - 1), i)?;
+        ((x as i16) >= set_value_x(id)).then_some(SetHit::Row(i))
+    }
+}
+
+/// Left edge of a row's touch target (owner 2026-10-30: the setting's name
+/// is not a target): the value (and ">") from half the 12 px gap after the
+/// label to the row's right end; on a stepper row the "-" key's left edge
+/// less 6 px.
+pub fn set_value_x(id: u8) -> i16 {
+    if set_is_stepper(id) {
+        ST_MINUS_X - 6
+    } else {
+        ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6
     }
 }
 
@@ -3271,7 +3286,7 @@ pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
 }
 
 /// A tap at `x` on a stepper row: -1 (left of the value's centre: the
-/// label and the "-" key) or +1.
+/// "-" key) or +1.
 pub fn settings_step(x: u16) -> i8 {
     if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }

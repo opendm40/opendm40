@@ -2249,8 +2249,8 @@ The gallery also shows the screenshots made by the stock firmware.
 ## Settings
 
 To open: main menu, **Settings**. The tabs on the left are the sections;
-tap one to show its rows. Tap a row to step to its next value; rows with
-**-** / **+** change in steps, a row with **>** opens a page. **< Back** in
+tap one to show its rows. Tap a value to step to the next one (the name
+does nothing); rows with **-** / **+** change in steps, a **>** opens a page. **< Back** in
 the title bar or **MENU** goes back to the main menu.
 
 ### Display tab

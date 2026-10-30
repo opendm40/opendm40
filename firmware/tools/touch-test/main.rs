@@ -799,17 +799,35 @@ fn hit_tests(ck: &mut Ck) {
         host::reset(0);
         ui::settings(t, &vals);
         let n = ui::SET_TABS[t as usize].1.len() as u32;
-        let want: Vec<u32> = (0..n).chain(100..100 + ui::SET_TABS.len() as u32).collect();
         let hit = |x: u16, y: u16| match ui::settings_hit(t, x, y) {
             Some(ui::SetHit::Tab(i)) => Some(100 + i as u32),
             Some(ui::SetHit::Row(r)) => Some(r as u32),
             None => None,
         };
-        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &|b| b.y0 >= 40, &want);
+        // The tabs as drawn; a row is a target only on its value side (the
+        // name is not): checked below.
+        let tab_only = |b: &Bx| b.y0 >= 40 && b.x1 < 127;
+        let want_t: Vec<u32> = (100..100 + ui::SET_TABS.len() as u32).collect();
+        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &tab_only, &want_t);
+        for r in 0..n as usize {
+            let id = ui::settings_id(t, r).unwrap();
+            let (x0, y0) = (ui::set_value_x(id), 44 + 45 * r as i16);
+            let name = ui::SET_NAMES[id as usize];
+            let mut ok = true;
+            for y in y0..y0 + 42 {
+                // The name (from x 138 to its end + 5) is not a target, the
+                // value side to the row's end (476) is, all of it.
+                for x in 131..476i16 {
+                    let want = (x >= x0).then_some(r as u32);
+                    ok &= hit(x as u16, y as u16) == want;
+                }
+            }
+            ck.t(&format!("settings {} row {r} \"{name}\": name not a target, value x {x0}..476 is", ui::SET_TABS[t as usize].0), ok && 476 - x0 >= 60);
+        }
     }
     // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
-    // and the label side step down, the "+" key (426..465) up.
-    ck.t("settings stepper: '-' key and label step down", ui::settings_step(340) == -1 && ui::settings_step(150) == -1);
+    // steps down, the "+" key (426..465) up.
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
     ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
