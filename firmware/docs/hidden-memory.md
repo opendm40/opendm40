@@ -45,7 +45,7 @@ bus faults above 0x2002FFFF.
 
 The [GD32F4xx user manual][um] (Rev3.3, 1.3.2 and table 1-2) maps 512 KiB
 of ADDSRAM at `0x20030000..0x200AFFFF` "available only in some particular
-GD32F4xx devices" (the GD32F470 has 768 KiB in all). The GD32F427
+GD32F4xx devices". The GD32F427
 [datasheet](../../hw/datasheets/gigadevice-gd32f427xx-datasheet-rev1.9.pdf)
 (table 2-3) marks `0x20030000..0x2006FFFF` reserved. No RCU bit gates it.
 
@@ -81,8 +81,9 @@ So a data load from region C costs ~1.5 us per new 64-byte line. Above 1
 MiB the reads never stall, so they do not reach a flash array: there is no
 hidden flash there. The ~21.8 us bus stall per region-C load in
 [native-boot.md](native-boot.md) "The slow flash bank while an AD2 stream
-runs" came from ISR-latency and lost-sample counts, not from a timed load;
-why it is ~15x the line-miss time measured here is *unknown*.
+runs" came from ISR-latency and lost-sample counts, not from a timed load.
+MTIME times single D-bus data loads on an idle meter; no instruction fetch
+from region C was timed. Why the two differ ~15x is *unknown*.
 
 Nothing was erased or programmed.
 
