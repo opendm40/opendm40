@@ -356,7 +356,8 @@ lightning from 100 V). opendm40 adds:
 | Pinch | — | Pinch to change the timebase or the V/div |
 | V/div buttons | The top "+" made the trace smaller | Magnifier icons: the top one zooms in |
 | Trigger position | Always the centre | Drag it |
-| Triggers | Edge | Edge, pulse width, runt |
+| Triggers | Edge | Edge, pulse width, runt; the generator as a trigger source |
+| Channels | CH1 | CH1, the multimeter input as CH2, the generator's output (computed) |
 | Auto-set | Switches AC coupling to DC | Keeps AC coupling |
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
@@ -1333,6 +1334,7 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
+| **Source** | **CH1**, or **GEN**: the generator's own output. |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1349,6 +1351,16 @@ Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
 
 The edge trigger uses the trigger hardware where it can, so it does not miss
 edges between captures.
+
+**Source GEN** triggers on the generator without a wire: the meter knows
+from the generator's timers when its output crosses the trigger level, and
+places the trigger there. The level is in the generator's volts (0 to
+3 V; a square above 50 kHz switches between 0 and 3.3 V); a level outside
+the output's swing never triggers. It is an edge trigger (Rising / Falling);
+the trigger badge turns cyan. Useful when the circuit's response to the
+generator is on CH1 and too noisy or too small to trigger on. With the
+generator off, nothing triggers (Auto still shows frames). SCPI
+`TRIGger:SOURce GENerator`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 
@@ -1485,7 +1497,25 @@ samples) stays in memory:
 ### Display settings
 
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity.
+**Brightness** and **Grid** intensity; **GEN trace** on / off.
+
+**GEN trace** draws the generator's output in cyan under CH1, on CH1's
+V/div and position: computed from the generator's settings and timers, not
+measured (the trace is the ideal waveform; a probe on the output shows the
+real one). It is not drawn in roll mode, zoomed out past the record, or
+while a drag or pinch is in progress. While it is on, the edge trigger does
+not use the trigger hardware.
+
+**CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
+over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
+signal, alongside the scope. **-** / **+** set its V/div (A/div), shown in
+the graph as "CH2 1.5V"; 0 is the centre line. It works in V, mV and
+AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
+multimeter's reading pauses while CH2 is on (the multimeter chip streams
+the waveform instead), and with it the misconnection alerts and the
+Bluetooth link; they return when CH2 is off or you leave the page.
+CH2 has at most 76.8 k samples/s: below 1 ms/div it shows steps. While it
+is on, the edge trigger does not use the trigger hardware.
 
 
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |

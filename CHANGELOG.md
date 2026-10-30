@@ -27,6 +27,14 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
+- **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
+  the trigger is computed from the generator's timers, no wire needed;
+  and a **GEN trace** (MF > Display) showing the generator's output under
+  CH1 ([manual](docs/manual/README.md#trigger)). SCPI `TRIGger:SOURce`.
+- **Scope: the multimeter as CH2** (MF > Display > CH2 (DMM)): the
+  multimeter's input drawn over CH1 on the same time axis, in V, mV and
+  AC A ([manual](docs/manual/README.md#display-settings)). The multimeter
+  reading pauses while it is on.
 
 ### Changed
 

@@ -827,6 +827,8 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
+///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator (GEN: the generator's output
+///   computed from its timers, docs/scope-gen-channel.md)
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
 ///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
 ///   the stored record's rate)
@@ -863,6 +865,12 @@ pub enum Cmd {
     TrigLevel(Option<f32>),
     TrigSlope(Option<bool>),
     TrigSweep(Option<u8>),
+    /// TRIG:SOURce: Some(scope::TSRC_*); None = ?
+    TrigSource(Option<u8>),
+    /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
+    DbgGenLag(Option<f32>),
+    /// DBG:CH2:LAG <us>: the DMM CH2's conversion lag (scope_ch2).
+    DbgCh2Lag(Option<f32>),
     Run,
     Stop,
     Single,
@@ -1543,6 +1551,8 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
             Ok(Cmd::TrigSlope(pick(&["POSitive", "NEGative"])?.map(|i| i == 0)))
         } else if kw(sub, "SWEep") {
             Ok(Cmd::TrigSweep(pick(&["AUTO", "NORMal", "SINGle"])?))
+        } else if kw(sub, "SOURce") {
+            Ok(Cmd::TrigSource(pick(&["CHANnel1", "GENerator"])?.map(|i| i as u8)))
         } else if sub.is_empty() || kw(sub, "LEVel") {
             Ok(Cmd::TrigLevel(num(b"V", any)?))
         } else {
@@ -2294,6 +2304,20 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgCh2Lag(None)),
+                        Some(v) if v.abs() <= 1e5 => out = Out::Instr(Cmd::DbgCh2Lag(Some(v))),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
+                    }
+                }
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgGenLag(None)),
+                        Some(v) if v.abs() <= 1e6 => out = Out::Instr(Cmd::DbgGenLag(Some(v))),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),

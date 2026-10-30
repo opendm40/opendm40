@@ -25,8 +25,8 @@ mod plan;
 
 #[allow(unused_imports)]
 pub use plan::{
-    clamp_freq, compute, limits, target_hz, Limits, Out, Path, Settings, Timing, Wave, AMP_MAX, AMP_MIN, F_MAX,
-    F_MIN, N_MAX, SQUARE_DAC_MAX, V_FS,
+    clamp_freq, compute, limits, loop_ticks, wrap, target_hz, Limits, Out, Path, Settings, Shape, Sync, Timing, Wave, AMP_MAX,
+    AMP_MIN, F_MAX, F_MIN, N_MAX, SQUARE_DAC_MAX, V_FS,
 };
 
 use crate::mmio::{modify32, r32, w32};
@@ -60,7 +60,72 @@ pub struct Gen {
     out_hz: f32,
 }
 
+/// The output running now (timing, shape), for the scope's GEN channel
+/// (`now`); None while off. Main loop only.
+static mut RUNNING: Option<(Timing, Shape)> = None;
+
+/// The running output's timing and shape (None: off).
+pub fn running() -> Option<(Timing, Shape)> {
+    unsafe { *core::ptr::addr_of!(RUNNING) }
+}
+
+/// Count of output (re)starts and stops: a scope record whose generator
+/// reading is of another epoch has no GEN phase (the output restarted).
+static mut EPOCH: u32 = 0;
+
+pub fn epoch() -> u32 {
+    unsafe { *core::ptr::addr_of!(EPOCH) }
+}
+
+const TIM6_CNT: u32 = TIM6 + 0x24;
+const TIM12_CNT: u32 = TIM12 + 0x24;
+const DWT_CYCCNT: u32 = 0xE000_1004;
+
+/// Where the running output is now (docs/scope-gen-channel.md): its time,
+/// ticks of the 200 MHz timer clock into its table loop (`loop_ticks`:
+/// 0 = the start of table sample 0 / PWM count 0), and the DWT cycle count
+/// (= the same 200 MHz) at that instant. None while off, or when the reads
+/// were not consistent (an interrupt between them, a DMA update in flight)
+/// in a few tries.
+///
+/// DAC: the DMA has moved (L - NDTR) samples into DHR; the DAC output (DOR)
+/// holds the one before the last moved (each TIM6 update copies DHR to DOR,
+/// then requests the next sample), so it is table sample L - NDTR - 2 since
+/// the update TIM6 CNT counts from. PWM: TIM12 CNT is the phase itself.
+pub fn now() -> Option<(u64, u32)> {
+    let (t, _) = running()?;
+    let ps = t.psc as u64 + 1;
+    let (q, _) = loop_ticks(&t);
+    for _ in 0..8 {
+        unsafe {
+            let d0 = r32(DWT_CYCCNT);
+            let (g, ok) = match t.path {
+                Path::Pwm => (r32(TIM12_CNT) as u64 * ps, true),
+                Path::Dac => {
+                    let n1 = r32(S5 + 0x04) & 0xFFFF;
+                    let c = r32(TIM6_CNT) as u64;
+                    let n2 = r32(S5 + 0x04) & 0xFFFF;
+                    let l = t.len as u64;
+                    let idx = (2 * l + l - (n1 as u64 % (l + 1)) - 2) % l;
+                    // Right after an update the DMA may not have moved yet.
+                    (idx * t.div() + c * ps, n1 == n2 && c * ps >= 8)
+                }
+            };
+            let d1 = r32(DWT_CYCCNT);
+            if ok && d1.wrapping_sub(d0) < 64 {
+                return Some((g % q, d0.wrapping_add(d1.wrapping_sub(d0) / 2)));
+            }
+        }
+    }
+    None
+}
+
 fn stop_outputs() {
+    // SAFETY: main loop only.
+    unsafe {
+        *core::ptr::addr_of_mut!(RUNNING) = None;
+        *core::ptr::addr_of_mut!(EPOCH) = epoch().wrapping_add(1);
+    }
     unsafe {
         // Timers off, DAC off, then DMA off: a TIM6 trigger with the DAC's
         // DMA request on and the stream off sets DMA underrun (DAC_SR
@@ -125,6 +190,8 @@ impl Gen {
             Path::Dac => self.dac(&s, &t),
         }
         self.real_hz = t.hz() as f32;
+        // SAFETY: main loop only (the scope reads it from the main loop).
+        unsafe { *core::ptr::addr_of_mut!(RUNNING) = Some((t, Shape::of(&s, &self.out))) };
     }
 
     fn pwm(&mut self, t: &Timing) {

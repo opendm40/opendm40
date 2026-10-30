@@ -155,6 +155,10 @@ pub fn set_pinch_mode(m: u8) {
 /// what the frame was captured with: the base of every preview.
 struct Cache {
     seg: [(i16, i16); 400],
+    /// The GEN trace's and the DMM CH2's rows per engine column
+    /// (docs/scope-gen-channel.md).
+    gseg: [(i16, i16); 400],
+    c2seg: [(i16, i16); 400],
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -171,6 +175,8 @@ struct Cache {
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut CACHE: Cache = Cache {
     seg: [su::EMPTY; 400],
+    gseg: [su::EMPTY; 400],
+    c2seg: [su::EMPTY; 400],
     valid: false,
     pos: 0,
     hpos: 200,
@@ -191,6 +197,8 @@ pub(super) fn sp_init() {
     let c = cache();
     for i in 0..400 {
         c.seg[i] = su::EMPTY;
+        c.gseg[i] = su::EMPTY;
+        c.c2seg[i] = su::EMPTY;
     }
     for i in 0..399 {
         c.ps_a[i] = su::EMPTY;
@@ -203,6 +211,7 @@ pub(super) fn sp_init() {
     c.tb = 13;
     c.ps_t = 0;
     su::init();
+    crate::scope_ch2::init();
 }
 
 /// AUTO-set state (stock mode 4).
@@ -561,6 +570,8 @@ impl App {
             rec: crate::csvlog::active(),
             rec_dim: su::rec_blink(now),
             rec_unit: su::rec_unit(self.rec_func),
+            tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
+            ch2_txt: self.ch2_label(true),
         }
     }
 
@@ -839,6 +850,8 @@ impl App {
         c.hpos = s.hpos;
         c.range = s.range;
         c.tb = s.tb;
+        self.sp_gen_frame(f);
+        self.ch2_rows(f, &mut c.c2seg);
         self.sp_math_frame(f);
         self.sp_render();
     }
@@ -875,6 +888,11 @@ impl App {
         for j in 0..399 {
             let (a, b) = preview_rows(c, j as i32, d_pos, hpos, ky, kx, zr);
             g.tr[j] = if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
+            // The GEN / CH2 traces only as captured (no preview mapping).
+            let still = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
+            let fy = |(a, b): (i16, i16)| if a > b || !still { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
+            g.gn[j] = fy(c.gseg[j]);
+            g.c2[j] = fy(c.c2seg[j]);
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
             g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
@@ -1003,6 +1021,39 @@ impl App {
     /// record around the frame (now, while its samples are still in the
     /// record; `step` finishes it over the next passes), ABS maps the shown
     /// columns.
+    /// The GEN trace of frame `f` (`Cache::gseg`): the generator's volts
+    /// over each column's samples, from the stored record's generator
+    /// phase (scope `gen_sync`), on CH1's scale. Nothing for a roll /
+    /// zoomed-out frame (columns, no samples) or a record without the
+    /// phase.
+    fn sp_gen_frame(&mut self, f: &scope::Frame) {
+        let c = cache();
+        c.gseg = [su::EMPTY; 400];
+        if !self.scope.gen_trace || f.data.len() < 2 {
+            return;
+        }
+        let Some(g) = self.scope.gen_sync() else { return };
+        let rec = self.scope.record();
+        let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
+        if off + f.data.len() > rec.len() {
+            return;
+        }
+        let n = f.data.len();
+        let row = |v: f32| self.scope.row_of_volts(v).clamp(-30000.0, 30000.0) as i16;
+        for i in 0..scope::COLS {
+            let (a, b) = if n >= scope::COLS {
+                ((i * n / scope::COLS) as f64, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f64)
+            } else {
+                // Fewer samples than columns: the column's own time span.
+                let k = (n - 1) as f64 / (scope::COLS - 1) as f64;
+                (i as f64 * k, (i as f64 + 1.0) * k)
+            };
+            let (lo, hi) = g.span(off as f64 + a, off as f64 + b);
+            let (r1, r2) = (row(lo), row(hi));
+            c.gseg[i] = (r1.min(r2), r1.max(r2));
+        }
+    }
+
     fn sp_math_frame(&mut self, f: &scope::Frame) {
         let m = self.sp.math;
         if !m.on {
@@ -2164,6 +2215,10 @@ impl App {
             pcond: s.pcond,
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
+            tsrc: s.tsrc,
+            gen_trace: self.scope.gen_trace,
+            ch2_on: self.ch2.on,
+            ch2_vdiv: self.ch2_label(false),
         }
     }
 
@@ -2467,6 +2522,26 @@ impl App {
                 }
                 self.scope_set(st, now);
                 // The page height is the same, the rows below change.
+            }
+            su::MfHit::TSrc(t) => {
+                st.tsrc = t.min(1);
+                self.scope_set(st, now);
+                if st.tsrc == scope::TSRC_GEN && !self.gen.s.on {
+                    self.toast(now, "Generator is off", false);
+                }
+            }
+            su::MfHit::Ch2(on) => {
+                self.ch2_set(clk, on);
+            }
+            su::MfHit::Ch2Step(up) => {
+                self.ch2_step(up, now);
+            }
+            su::MfHit::GenTrace(on) => {
+                self.scope.gen_trace = on;
+                // The next record is taken without the comparator (or
+                // with it again): restart the acquisition.
+                self.scope_set(st, now);
+                self.scope_invalidate();
             }
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
@@ -2798,7 +2873,13 @@ impl App {
         // The MCX settings (the wave view's trigger is not persisted).
         let s = &self.scope.mcx_settings();
         let dr = scope::Settings::DEFAULT.runt_row;
-        p[3] = (s.ttype as u32 & 3) | (s.pcond as u32 & 3) << 2 | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
+        // Bits 4 / 5: the trigger source GEN, the GEN trace shown.
+        p[3] = (s.ttype as u32 & 3)
+            | (s.pcond as u32 & 3) << 2
+            | (s.tsrc as u32 & 1) << 4
+            | (self.scope.gen_trace as u32) << 5
+            | (self.ch2.on as u32) << 6
+            | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
     }
 
@@ -2823,6 +2904,10 @@ impl App {
         let dd = scope::Settings::DEFAULT;
         st.ttype = (p[3] & 3).min(2) as u8;
         st.pcond = (p[3] >> 2 & 3).min(2) as u8;
+        st.tsrc = (p[3] >> 4 & 1) as u8;
+        self.scope.gen_trace = p[3] >> 5 & 1 != 0;
+        self.ch2.on = p[3] >> 6 & 1 != 0;
+        self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
         self.scope.apply(st, 0);
