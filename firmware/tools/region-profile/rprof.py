@@ -25,8 +25,9 @@ A data item reachable from a function makes every function it points to
 reachable (a vtable read means its methods may run). Classes:
   isr      reachable from the stream ISR (ad2_stream_irq): must be fast;
   traced   executed while hy3131::HANDED was set in an emulator run
-           (--trace: emu/run.py with DM40_BTRACE=DIR, peripherals/BTrace.cs),
-           or data referred to by such code: must be fast;
+           (--trace: emu/run.py with DM40_BTRACE=DIR, peripherals/BTrace.cs;
+           --trace DIR@ELF: a trace of another build, matched by function
+           name), or data referred to by such code: must be fast;
   loop     reachable from the main loop (opendm40::run) without passing
            through region C code, but not seen in the traces: may run
            under the stream (the static graph cannot tell which page /
@@ -348,16 +349,31 @@ def reach(roots, edges, blocked):
 
 
 def load_traces(paths):
-    blocks = {}
+    """{pc: instructions} of the traces of this ELF, and the mangled names
+    of the functions hit in traces of another build (PATH@ELF)."""
+    blocks, names = {}, set()
     for p in paths:
+        p, _, other = p.partition('@')
         fs = sorted(glob.glob(os.path.join(p, '*.btrace'))) if os.path.isdir(p) else [p]
+        if other:
+            o = Image(other, 'b')
+            oaddrs = sorted(o.mangled_funcs)
+            for f in fs:
+                for l in open(f, errors='replace'):
+                    q = l.split()
+                    if len(q) == 2:
+                        a = int(q[0], 16)
+                        i = bisect.bisect_right(oaddrs, a) - 1
+                        if i >= 0 and a < oaddrs[i] + max(o.mangled_funcs[oaddrs[i]][1], 2):
+                            names.add(o.mangled_funcs[oaddrs[i]][0])
+            continue
         for f in fs:
             for l in open(f, errors='replace'):
                 q = l.split()
                 if len(q) == 2:
                     a, n = int(q[0], 16), int(q[1])
                     blocks[a] = max(blocks.get(a, 0), n)
-    return blocks
+    return blocks, names
 
 
 def symbolize(img, dis, lo, hi):
@@ -390,7 +406,8 @@ def symbolize(img, dis, lo, hi):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('elf')
-    ap.add_argument('--trace', action='append', default=[], help='BTrace file or directory (emu DM40_BTRACE)')
+    ap.add_argument('--trace', action='append', default=[], help='BTrace file or directory (emu DM40_BTRACE); PATH@ELF: a trace of another build '
+                    '(ELF), matched by function name')
     ap.add_argument('--region', choices=['b', 'c'], default='b')
     ap.add_argument('--top', type=int, default=25)
     ap.add_argument('--json', help='write every item here')
@@ -437,7 +454,12 @@ def main():
 
     # Dynamic trace -> executed functions (by instruction ranges).
     traced_f = set()
-    blocks = load_traces(a.trace)
+    blocks, other_names = load_traces(a.trace)
+    if other_names:
+        # Another build's trace: the same (mangled) function names here.
+        for ad, (n, _) in funcs.items():
+            if n in other_names:
+                traced_f.add(('f', ad))
     if blocks:
         for pc, n in blocks.items():
             f = func_at(pc)
@@ -491,8 +513,9 @@ def main():
     used = sum(tot.values()) + data_img
     reg = 'B (0x%08x..0x%08x)' % (lo, hi) if a.region == 'b' else 'C (0x%08x..0x%08x)' % (lo, hi)
     print('region %s: %d bytes used%s' % (reg, used, (' (+ .data load image %d)' % data_img) if data_img else ''))
-    if blocks:
-        print('trace: %d blocks executed while HANDED, %d functions' % (len(blocks), len(traced_f)))
+    if blocks or other_names:
+        print('trace: %d blocks executed while HANDED (+ %d function names from other builds), %d functions'
+              % (len(blocks), len(other_names), len(traced_f)))
     order = ['isr', 'traced', 'loop', 'c-only', 'none']
     print('\n%-8s %9s %9s %9s' % ('class', 'code', 'data', 'total'))
     for c in order:
