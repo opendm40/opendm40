@@ -22,6 +22,14 @@
 //! chain first) and any block can be filled on its own (`fill`). The whole
 //! record (up to scope::CAP samples, ~10 s) is written, not only the screen.
 //!
+//! A Power Wave frame (app_pwave.rs "CSV", `set_pwave`) goes the same way
+//! into the same SCOPE/SCOP%03u.DLG names, as DLG kind 4 (dlog.rs "power
+//! wave": the samples and their times, not coded): its CSV is
+//!   time_s,volts,amperes
+//!   +0.00000e+00,+3.2512e+02,
+//!   +7.81200e-05,,+1.4100e+00
+//! one row per sample, U and I in turn (the other column empty).
+//!
 //! The record lives in the scope buffer: while it is written the scope is
 //! held stopped (`Scope::hold`; RUN / AUTO / SCPI RUN do not restart it)
 //! and the code -> volts map is the one taken at `start` (a probe or V/div
@@ -53,9 +61,34 @@ struct Snap {
     nb: usize,
     /// PLAN's fill cursor is valid.
     cur_ok: bool,
+    /// A Power Wave frame (`set_pwave`) instead of a scope record: `rec`
+    /// is the page's buffer (codes at 0.., times at pwave::T_AT..), `pw_n`
+    /// samples, scales, time unit, sample 0 is U, the samples' CRC-32.
+    pw: bool,
+    pw_n: usize,
+    pw_sc: [f32; 4],
+    pw_tu: f32,
+    pw_y: bool,
+    pw_crc: u32,
 }
 
-static mut SNAP: Snap = Snap { rec: None, a: 0.0, b: 0.0, dt: 0.0, t0: 0, hdr: [0; HDR_MAX], hdr_n: 0, nb: 0, cur_ok: false };
+static mut SNAP: Snap = Snap {
+    rec: None,
+    a: 0.0,
+    b: 0.0,
+    dt: 0.0,
+    t0: 0,
+    hdr: [0; HDR_MAX],
+    hdr_n: 0,
+    nb: 0,
+    cur_ok: false,
+    pw: false,
+    pw_n: 0,
+    pw_sc: [0.0; 4],
+    pw_tu: 0.0,
+    pw_y: false,
+    pw_crc: 0,
+};
 
 /// Per block: mode (fixed predictor order / raw), coded bytes, CRC-32.
 /// Written by `set` before any use: SRAM (.dmabuf, not zeroed at reset),
@@ -119,6 +152,7 @@ impl Hdr {
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amps: bool) {
     let s = snap();
+    s.pw = false;
     s.rec = Some(rec);
     s.a = a;
     s.b = b;
@@ -147,6 +181,49 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amp
     }
 }
 
+/// Take a Power Wave frame for writing (app_pwave.rs, the page stopped
+/// and the scope buffer held until the writer's result): `buf` = the
+/// page's buffer, `n` samples, `sc` = su, ou, si, oi (pwave::Scale), `tu`
+/// seconds per time unit, `y_first` = sample 0 is U, the header lines
+/// (without the column line).
+pub fn set_pwave(buf: &'static [u16], n: usize, sc: [f32; 4], tu: f32, y_first: bool, h: &Hdr) {
+    let s = snap();
+    let n = n.min(crate::pwave::NMAX);
+    s.pw = true;
+    s.rec = Some(buf);
+    s.pw_n = n;
+    s.pw_sc = sc;
+    s.pw_tu = tu;
+    s.pw_y = y_first;
+    s.cur_ok = false;
+    s.nb = 0;
+    let mut k = h.n;
+    s.hdr[..k].copy_from_slice(&h.b[..k]);
+    for &c in b"time_s,volts,amperes\r\n" {
+        if k < HDR_MAX {
+            s.hdr[k] = c;
+            k += 1;
+        }
+    }
+    s.hdr_n = k;
+    let mut c = !0u32;
+    for i in 0..n {
+        c = crate::dlog::crc32_upd(c, &pw_sample(buf, i));
+    }
+    s.pw_crc = !c;
+}
+
+/// The 4 file bytes of Power Wave sample `i`: u16 time, i16 code.
+fn pw_sample(buf: &[u16], i: usize) -> [u8; 4] {
+    let (t, c) = (buf[crate::pwave::T_AT + i], buf[i]);
+    [t as u8, (t >> 8) as u8, c as u8, (c >> 8) as u8]
+}
+
+/// Power Wave: bytes before the samples (DLG header, parameters).
+fn pw_head_len(s: &Snap) -> usize {
+    crate::dlog::FHDR + s.hdr_n + crate::dlog::PW_PAR
+}
+
 /// Bytes before the first coded block: DLG header, parameters, table.
 fn head_len(s: &Snap) -> usize {
     crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR + 8 * s.nb + 4
@@ -155,6 +232,9 @@ fn head_len(s: &Snap) -> usize {
 /// File length in bytes (the DLG file).
 pub fn len() -> u32 {
     let s = snap();
+    if s.pw {
+        return (pw_head_len(s) + 4 * s.pw_n + 4) as u32;
+    }
     let p = plan();
     (head_len(s) + p.len[..s.nb].iter().map(|&l| l as usize).sum::<usize>()) as u32
 }
@@ -165,6 +245,10 @@ pub fn len() -> u32 {
 /// pieces: each piece costs only its own samples).
 pub fn fill(off: u32, buf: &mut [u8]) {
     let s = snap();
+    if s.pw {
+        pw_fill(s, off as usize, buf);
+        return;
+    }
     let p = plan();
     let off = off as usize;
     let head = head_len(s);
@@ -209,5 +293,29 @@ pub fn fill(off: u32, buf: &mut [u8]) {
                 p.enc = crate::dlog::SEnc::new(p.mode[p.cb], at);
             }
         }
+    }
+}
+
+/// `fill` of a Power Wave frame (kind 4): header + parameters, the samples,
+/// their CRC-32; zeros past the end.
+fn pw_fill(s: &Snap, off: usize, buf: &mut [u8]) {
+    let head = pw_head_len(s);
+    let rec = s.rec.unwrap_or(&[]);
+    let end = head + 4 * s.pw_n;
+    let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::PW_PAR];
+    if off < head {
+        crate::dlog::pw_header(&s.hdr[..s.hdr_n], s.pw_sc, s.pw_tu, s.pw_n as u32, s.pw_y, &mut h);
+    }
+    for (j, b) in buf.iter_mut().enumerate() {
+        let at = off + j;
+        *b = if at < head {
+            h[at]
+        } else if at < end {
+            pw_sample(rec, (at - head) / 4)[(at - head) % 4]
+        } else if at < end + 4 {
+            s.pw_crc.to_le_bytes()[at - end]
+        } else {
+            0
+        };
     }
 }

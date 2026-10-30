@@ -6,7 +6,8 @@ page specifies the format, the writers and the readers.
 
 Users of the format: the DMM recording ([`src/csvlog.rs`](../src/csvlog.rs),
 DMM page swipe down / `LOG:CSV ON`), the scope record
-([`src/scope_csv.rs`](../src/scope_csv.rs), "Save CSV") and the fast logger
+([`src/scope_csv.rs`](../src/scope_csv.rs), "Save CSV"; also the Power
+Wave page's frames, kind 4) and the fast logger
 to the disk ([`src/fastlog.rs`](../src/fastlog.rs), section "Fast stream
 (kind 3)"). Codec and CSV generator: [`src/dlog.rs`](../src/dlog.rs).
 
@@ -56,7 +57,7 @@ first row number and the CSV byte offset of its first row, so:
 | off | size | field |
 |---|---|---|
 | 0 | 4 | magic `DLG1` |
-| 4 | 1 | kind: 1 DMM readings, 2 scope record, 3 fast logger stream |
+| 4 | 1 | kind: 1 DMM readings, 2 scope record, 3 fast logger stream, 4 Power Wave frame |
 | 5 | 1 | unit length `ul` (<= 12) |
 | 6 | 2 | header text length `hl` |
 | 8 | 4 | CRC-32 (zlib) of bytes 12 .. 12 + 12 + hl |
@@ -159,6 +160,32 @@ fatren-test record (a clean sine) is 5908 bytes. Emulator (native image,
 bytes for 26624 samples (0.16 B/sample; the model has no ADC noise; u16
 would be 53624), decoded by dlog.py to the 692552-byte CSV. The generated CSV is byte
 for byte the old SCOPnnn.CSV (fatren-test md5, dlog-test vs scope_row).
+
+### Power Wave frame (kind 4)
+
+A frame of the power meter's Power Wave page
+([power-meter-and-misconnect.md 3.18](power-meter-and-misconnect.md#318-power-wave-u-and-i-waveforms)),
+written by [`src/scope_csv.rs`](../src/scope_csv.rs) `set_pwave` under the
+scope record's name `SCOPE/SCOPnnn.DLG` (so the USB volume and
+`MMEM:DATA?` serve its CSV as `SCOPnnn.CSV` with no change there). File:
+the file header (kind 4, unit `V,A`, the CSV header text incl. the column
+line `time_s,volts,amperes`), then 32 bytes of parameters:
+
+| off | size | field |
+|---|---|---|
+| 0 | 16 | f32 su, ou, si, oi: volts = (code - ou) x su, amperes = (code - oi) x si |
+| 16 | 4 | f32 tu: seconds per time unit (4e-6) |
+| 20 | 4 | u32 n: samples |
+| 24 | 4 | u8 flags (bit 0: sample 0 is U), 3 bytes 0 |
+| 28 | 4 | u32 CRC-32 of bytes 0..28 |
+
+then n samples of 4 bytes (u16 time from sample 0 in tu, i16 code; U and I
+in turn) and a u32 CRC-32 of them. Not coded: a frame is at most 2048
+samples (8 KiB). A torn file or a CRC error is not a file (no partial
+CSV). CSV rows are 27 bytes: `+d.ddddde+xx,+d.dddde+xx,` for a U sample,
+`+d.ddddde+xx,,+d.dddde+xx` for an I sample (time from the first sample).
+Tested: tools/dlog-test (round trip, random reads, cuts, a flipped bit,
+tools/dlog.py).
 
 ### Fast stream (kind 3: the fast logger)
 
