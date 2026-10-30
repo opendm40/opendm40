@@ -4244,6 +4244,7 @@ impl App {
 
     /// The temperature page's info line into `b` (its length): the sensor
     /// current of a resistive sensor, else the cold junction.
+    #[inline(never)] // .cold (link-native.x): temperature page only
     fn temp_info_text(&self, b: &mut [u8; 64]) -> usize {
         let mut n = 0;
         let mut put = |t: &[u8]| {
@@ -4270,6 +4271,7 @@ impl App {
     /// changed (the cold junction follows each thermocouple reading and an
     /// offset step; it stayed as drawn when the page opened). `drawn`: the
     /// whole page was just drawn, only note its text.
+    #[inline(never)] // .cold (link-native.x): temperature page, once a second
     fn temp_info_tick(&mut self, drawn: bool) {
         let mut b = [0u8; 64];
         let n = self.temp_info_text(&mut b);
