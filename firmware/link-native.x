@@ -134,12 +134,22 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
-        /* The decoder's frame log: a frame's waveform, drawn on a tap, and
-         * the top bar / counters (app_log.rs `log_snip_show`, `log_stats`:
-         * `.text.log_cold`). The log streams
-         * by DMA (the decode catches up from its ring); it never runs with
-         * the AD2 stream (the Wave view refuses it). */
+        /* The decoder's frame log: a frame's waveform, drawn on a tap, the
+         * top bar / counters, the page draw, the setup popup and the
+         * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
+         * buttons below). The log streams by DMA (the decode catches up
+         * from its ring, log_poll / log_tick / log_row stay in B). It
+         * never runs with the AD2 stream: `log_open` refuses while one
+         * runs, LOG:STAT ON is refused while the log is open (main.rs
+         * log_on_check), and every other stream start (Wave view, inrush,
+         * the fast logger's page) leaves View::Decode first. */
         *(.text.log_cold*);
+        *(.text.*8opendm408scope_ui3log12panel_button*);
+        *(.text.*8opendm408scope_ui3log9panel_hit*);
+        /* The keypad's digit font: read only by ui::keypad_key (above, in
+         * C: the Keypad page / popup, no stream). */
+        *(.rodata.fonts.K_FONT_E);
+        *(.rodata.fonts.K_FONT_B);
 
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host

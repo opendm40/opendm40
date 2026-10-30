@@ -30,11 +30,14 @@ pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
 #[path = "acdcm.rs"]
 pub mod am;
-#[cfg(target_os = "none")]
+#[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
-/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
-#[cfg(not(target_os = "none"))]
+/// DBG:SRC is firmware only (the host tests that include dmm.rs get it
+/// off) and needs the feature `dbg-src` (not default on
+/// test/scope-chain-0.4, Cargo.toml): without it DBG:SRC is an unknown
+/// header.
+#[cfg(not(all(target_os = "none", feature = "dbg-src")))]
 mod src {
     pub fn active() -> bool {
         false

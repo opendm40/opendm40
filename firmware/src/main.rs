@@ -57,6 +57,7 @@ mod trigsoft;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
+#[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
 mod dbgsrc;
 mod stockfont;
 mod touch;
@@ -1036,14 +1037,21 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(6, state, n, item) => {
                         dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(5, r26, nr, flags) => {
                         dbg_dcv(app, &mut clk, logger, &mut scpi, port, r26, nr, flags);
                         false
                     }
+                    // Without the feature the parser makes no TORN / NOISE /
+                    // DCV / N7 request.
+                    #[cfg(not(feature = "ad2-exp"))]
+                    scpi::Dbg::Ad2(..) => false,
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(kind, r26, n, b) => {
                         // Synchronous AD2 experiment in the current stock AC
                         // row; the row is rewritten afterwards.
@@ -1840,6 +1848,7 @@ fn block_reply(o: &scpi::Out) -> bool {
     )
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:DCV? range,r26,n[,flags] (device test 6.5, src/ad2exp.rs
 /// `dcv_test`): in plain DC V, not while logging; sets the manual DC V
 /// range, runs the test, appends the AD1 means in uV (the DC V calibration
@@ -1887,6 +1896,7 @@ fn dbg_dcv(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &
     app.last_raw = None;
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:N7? item,state,n (datasheet note 7 in the stock DC rows,
 /// src/ad2exp.rs `n7_test`): in DC V / DC mV, not while logging; sets the
 /// MF range item (0 = 600 mV DC, 1..4 = 6 .. 1000 V; it stays manual), runs
@@ -2116,8 +2126,10 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
 #[inline(never)] // .cold (link-native.x): once per session
 fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur_s: u32, trusted: bool) -> Option<&'static str> {
     let hz = fast_next_hz(logger, logger.ad2());
-    if (logger.wave() && logger.active()) || fastlog::active() {
-        // The DMM wave view owns the AD2 stream / a disk session runs.
+    if (logger.wave() && logger.active()) || fastlog::active() || app.scope.log_on() {
+        // The DMM wave view owns the AD2 stream / a disk session runs / the
+        // decoder's frame log is open (its view code is in region C, which
+        // must not run under the stream ISR: app_log.rs log_open).
         return Some("Settings conflict");
     }
     if disk && !trusted {

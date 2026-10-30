@@ -747,6 +747,7 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level), 5 DCV? range,r26,n[,flags] (the
     /// DC-coupled V row, device test 6.5: n | range << 8, flags).
+    #[cfg_attr(not(feature = "ad2-exp"), allow(dead_code))]
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
@@ -773,6 +774,7 @@ pub enum Dbg {
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
 /// flags) (main.rs `dbg_dcv`).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn dcv_arg(a: &[u8]) -> Dbg {
     let w = nums::<4>(a);
@@ -825,6 +827,7 @@ fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static st
 }
 
 /// DBG:AD2:N7? item,state,n -> Dbg::Ad2(6, state, n, item) (main.rs).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn n7_arg(a: &[u8]) -> Dbg {
     let w = nums::<3>(a);
@@ -1000,6 +1003,7 @@ pub enum Cmd {
     DbgSentReg,
     /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
     /// the ohm-source map row (src/dbgsrc.rs).
+    #[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
     DbgSrc(Option<crate::dbgsrc::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
@@ -2312,6 +2316,7 @@ impl Scpi {
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                #[cfg(feature = "dbg-src")]
                 _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"SRC" => {
                     if query {
                         out = Out::Instr(Cmd::DbgSrc(None));
@@ -2372,8 +2377,12 @@ impl Scpi {
                     let third = a.split(|&b| b == b',').nth(2).map(trim);
                     let n = v[1].clamp(1, 2000) as u16; // ad2exp::N_MAX
                     let r26 = (v[0] & 0x3F) as u8;
+                    #[cfg(not(feature = "ad2-exp"))]
+                    let _ = (third, n, r26);
                     let d = match (parts.get(2).copied(), query) {
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"TORN"), true) => Some(Dbg::Ad2(0, r26, n, third.is_some_and(|t| kw(t, "SYNChronous")) as u8)),
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"NOISE"), true) => {
                             Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
                         }
@@ -2382,8 +2391,10 @@ impl Scpi {
                         (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
                         (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
                         // DCV? range,r26,n[,flags]: (5, r26, n | range << 8, flags).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"DCV"), true) => Some(dcv_arg(a)),
                         // N7? item,state,n: (6, state, n, item).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"N7"), true) => Some(n7_arg(a)),
                         _ => None,
                     };

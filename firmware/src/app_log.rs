@@ -472,6 +472,10 @@ impl App {
             Some("Decode log: scope record in use")
         } else if self.view == View::Inrush {
             Some("Decode log: inrush page open")
+        } else if crate::hy3131::streaming() {
+            // An AD2 stream (LOG:STAT ON, a fast-log session): the view's
+            // page / touch code is in region C (link-native.x).
+            Some("Decode log: DMM stream on")
         } else {
             None
         };
@@ -737,6 +741,7 @@ impl App {
 
     /// The whole view (draw_static).
     #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     pub(super) fn log_page(&mut self) {
         let now = self.now;
         ul::chrome(&mut || self.log_poll(now));
@@ -1087,6 +1092,8 @@ impl App {
     }
 
     /// Back from a waveform to the list.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_snip_hide(&mut self) {
         let l = lg();
         l.snip = 0;
@@ -1103,6 +1110,8 @@ impl App {
 
     // ---- setup popup ----
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_setup_draw(&mut self) {
         let v = self.dec_setup_vals();
         ul::setup(&v);
@@ -1111,6 +1120,8 @@ impl App {
     // ---- input ----
 
     /// Touches and keys of the view: Some(captured) when handled.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     pub(super) fn log_gesture(&mut self, clk: &mut Clock, g: Gesture) -> Option<bool> {
         let now = clk.now_ms();
         if !self.scope.log_on() {
@@ -1207,6 +1218,8 @@ impl App {
     }
 
     /// The setup popup changed a setting (app_decode `dec_setup_tap`).
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     pub(super) fn log_setup_changed(&mut self) {
         if self.view == View::Decode && self.scope.log_on() {
             self.log_reset_decode();
@@ -1216,6 +1229,8 @@ impl App {
         }
     }
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_unpress(&mut self) {
         let l = lg();
         if l.pressed != 0 {
@@ -1236,6 +1251,8 @@ impl App {
         l.top = top;
     }
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_page_step(&mut self, down: bool) {
         let l = lg();
         let n = ul::ROWS as u32;
@@ -1270,6 +1287,8 @@ impl App {
         }
     }
 
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.log_cold")]
     fn log_pause(&mut self, now: u64) {
         let l = lg();
         l.paused = !l.paused;

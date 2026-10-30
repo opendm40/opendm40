@@ -53,6 +53,8 @@ const LOBE: [usize; 6] = [1, 3, 2, 2, 2, 5];
 const Q: usize = N / 4;
 
 /// sin(2 pi k / N), k = 0..=N/4, at compile time (Taylor series in f64).
+/// Region A2 (zero-wait, link-native.x): read per butterfly.
+#[cfg_attr(target_os = "none", link_section = ".rodata.a2.QSIN")]
 static QSIN: [f32; Q + 1] = qsin();
 
 const fn qsin() -> [f32; Q + 1] {

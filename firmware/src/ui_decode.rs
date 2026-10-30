@@ -102,6 +102,9 @@ pub struct Ann {
     pub bar: [u8; 50],
 }
 
+// SRAM (`.sram_bss`, all-zero), not TCM: TCM .bss shortens the stack
+// (docs/ram-budget.md); drawn from, not on a per-sample path.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut ANN: Ann = unsafe { core::mem::zeroed() };
 
 pub fn ann() -> &'static mut Ann {

@@ -62,6 +62,7 @@ pub(super) fn init() {
     s.cfg = dc::Cfg::DEFAULT;
     s.thr_v = f32::NAN;
     s.gen = 1;
+    unsafe { (*core::ptr::addr_of_mut!(JOB)).write(None) };
 }
 
 /// A record decode in progress.
@@ -85,12 +86,15 @@ struct Job {
     passes: u16,
 }
 
-static mut JOB: Option<Job> = None;
+// Zero bytes until `init` writes None (Option<Job>'s None is not all-zero:
+// a `.data` image in region B otherwise).
+static mut JOB: core::mem::MaybeUninit<Option<Job>> = core::mem::MaybeUninit::zeroed();
 /// Cycles the decode in progress took so far (prof DJOB).
 static mut JOB_CYC: u32 = 0;
 
 fn job() -> &'static mut Option<Job> {
-    unsafe { &mut *core::ptr::addr_of_mut!(JOB) }
+    // SAFETY: `init` (App::new, before any decode) wrote None.
+    unsafe { (*core::ptr::addr_of_mut!(JOB)).assume_init_mut() }
 }
 
 /// Lines of DECode:FRAMes?: the reply buffer, frames before `first` and
