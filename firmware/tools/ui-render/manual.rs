@@ -41,10 +41,12 @@ struct Dp {
     ohm_on: bool,
     /// The rate applies (DC V / A / ohm), else the chip reads n/a.
     rate: bool,
+    /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
+    short: u8,
 }
 
 fn dp(r: Reading) -> Dp {
-    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true }
+    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true, short: 0 }
 }
 
 /// The multimeter page: the reading, the bargraph or the history row, the
@@ -70,7 +72,9 @@ fn dmm_page(p: &Dp) {
     } else {
         dv.bar_update(r);
     }
+    dv.short = p.short;
     dv.reading(r, p.hold, p.lim);
+    dv.short_sync();
     let mut st = status_real();
     st.csv = p.csv;
     ui::status_right(&st);
@@ -324,8 +328,8 @@ pub fn run(out: &str) -> usize {
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
-        // Continuity: a short.
-        ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        // Continuity: a short, the beeper indicator on.
+        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.

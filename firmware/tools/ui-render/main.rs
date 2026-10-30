@@ -3469,6 +3469,127 @@ fn main() {
         }
     }
 
+    // Beeper indicator (continuity / diode, App::beep_ind): every style
+    // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
+    // x bargraph / history row x limit badge, layout checked; on -> off
+    // and off -> on (with new readings in between) equal a fresh page.
+    // Renders: b01..b11 (the PR's comparison), b12 the bargraph-row
+    // mock-up (not in the firmware).
+    {
+        let short_cases = [
+            ("cont", rd(11, val(0.4, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
+            ("cont-wide", rd(11, val(67.0, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
+            ("diode", rd(12, val(0.0042, 4, "V"), None, Some(val(5.5, 1, "\u{3a9}")), false), Button::ContDiode),
+            ("diode-pn", rd(12, val(0.5871, 4, "V"), None, Some(val(767.4, 1, "\u{3a9}")), false), Button::ContDiode),
+        ];
+        let page = |r: &Reading, b: Button, short: u8, bar: bool, lim: u8| -> ui::DmmView {
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            dv.bar_on = bar;
+            dv.draw_static(b, r.mode, false, false);
+            if bar {
+                dv.bar_update(r);
+            } else {
+                ui::history(&[(r.main.v, r.main.dec, r.main.unit); 5], 5, 4);
+            }
+            dv.short = short;
+            dv.reading(r, 0, lim);
+            dv.short_sync();
+            ui::status_right(&status(0));
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
+            dv
+        };
+        for style in 1..=3u8 {
+            ui::set_short_style(style);
+            for (name, r, b) in &short_cases {
+                let k = if *name == "diode-pn" { 2 } else { 1 };
+                for bar in [true, false] {
+                    for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
+                        page(r, *b, k, bar, lim);
+                        ck.check(&format!("short/s{style}/{name}/b{}/l{lim}", bar as u8), &dmm_page_regions);
+                        // Off -> on and on -> off, new readings after the
+                        // switch: as a fresh page (rows < 176).
+                        for (from, to) in [(0u8, k), (k, 0)] {
+                            page(r, *b, to, bar, lim);
+                            let want = emu().fb.clone();
+                            let mut dv = page(r, *b, from, bar, lim);
+                            dv.short = to;
+                            dv.short_sync();
+                            dv.reading(r, 0, lim);
+                            let mut r2 = *r;
+                            r2.main.v *= 0.5;
+                            dv.reading(&r2, 0, lim);
+                            dv.reading(r, 0, lim);
+                            ck.cases += 1;
+                            let got = &emu().fb;
+                            let bad = (0..W * 176).filter(|&i| got[i] != want[i]).count();
+                            if bad > 0 {
+                                ck.fail(&format!("short/s{style}/{name}/{from}->{to}/b{}/l{lim}", bar as u8), format!("{bad} stale pixels"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Renders: off, then each style; continuity, a diode short, a
+        // diode pattern (BEEP).
+        let mut n = 1;
+        for (name, k) in [("cont", 1u8), ("diode", 1), ("diode-pn", 2)] {
+            let (_, r, b) = short_cases.iter().find(|c| c.0 == name).unwrap();
+            for style in [0u8, 1, 2, 3] {
+                if style == 0 && name == "diode-pn" {
+                    continue;
+                }
+                ui::set_short_style(style.max(1));
+                page(r, *b, if style == 0 { 0 } else { k }, true, meter::V_NONE);
+                let tag = ["off", "band", "digits", "band-digits"][style as usize];
+                save(&out, &format!("b{n:02}-short-{name}-{tag}"));
+                n += 1;
+            }
+        }
+        ui::set_short_style(ui::SHORT_STYLE);
+        // (c) mock-up: the bargraph row as a green band (not in the
+        // firmware: with Settings "DMM row" History the row holds the
+        // history boxes, and the bar is the reading's live picture).
+        let (_, r, b) = &short_cases[0];
+        page(r, *b, 0, true, meter::V_NONE);
+        let br = stockfont::rect(8, 147, 464, 26);
+        stockfont::rbox(br, 6, ui::SHORT_BG, ui::BG);
+        stockfont::glyphs(stockfont::TEXT22, br, "SHORT", 0xFFFF, ui::SHORT_BG, 8, 2);
+        save(&out, &format!("b{n:02}-short-cont-barrow-mockup"));
+        // Combined view: the strip's badge SHORT / BEEP and its value green
+        // (scope_page.rs sp_strip); off -> on -> off equals a fresh strip.
+        for (i, (name, r, _)) in short_cases.iter().enumerate() {
+            let k = if *name == "diode-pn" { 2u8 } else { 1 };
+            let strip = |on: bool| {
+                let mut d = ui::strip_data(r, 0, meter::V_NONE, false, 0, false, None);
+                ui::strip_acc(&mut d, r, Some(ui::Acc { model: 2, tc: true }));
+                if on {
+                    d.badge = if k == 1 { "SHORT" } else { "BEEP" };
+                    d.badge_col = ui::SHORT_BG;
+                    d.short = true;
+                }
+                scope_ui::meter_strip(&d);
+            };
+            combined(r, None, 0, meter::V_NONE, false, false, false, "");
+            strip(true);
+            ck.check_area(&format!("short/strip/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
+            if i == 0 || k == 2 {
+                save(&out, &format!("b{:02}-short-combined-{name}", n + 1 + i));
+            }
+            for on in [false, true] {
+                combined(r, None, 0, meter::V_NONE, false, false, false, "");
+                strip(on);
+                let want = emu().fb.clone();
+                combined(r, None, 0, meter::V_NONE, false, false, false, "");
+                strip(!on);
+                strip(on);
+                ck.same_as(&format!("short/strip/{name}/{}", on as u8), &want);
+            }
+        }
+    }
+
     // Power meter scenes.
     {
         let pcs = pw_cases();

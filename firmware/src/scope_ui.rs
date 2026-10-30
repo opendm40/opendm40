@@ -3545,6 +3545,8 @@ pub struct StripData {
     pub gen: Txt,
     /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
     pub dim: bool,
+    /// The beeper indicator (App::beep_ind): the value in ui::SHORT_FG.
+    pub short: bool,
     /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
     /// "+-" sign); 0 = none.
     pub acc: u8,
@@ -3565,6 +3567,7 @@ impl StripData {
         hv: false,
         gen: Txt::EMPTY,
         dim: false,
+        short: false,
         acc: 0,
         grey: u8::MAX,
     };
@@ -3694,8 +3697,9 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
-        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
+    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey && ol.short == d.short) {
+        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { C_YELLOW };
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), c, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to

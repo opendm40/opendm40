@@ -45,6 +45,34 @@ pub const VALUE_PROV: Color = DIM;
 /// label, ../docs/dmm-accuracy.md section 5), and the extra digit then.
 pub const VALUE_LOW: Color = 0xB4D0; // (176, 152, 128): warm grey (owner 2026-10-26)
 
+/// The continuity / diode beeper indicator (`DmmView::short`): the band's
+/// fill, the stock "OK" badge green (`lim_badge`), and the digits' colour,
+/// the stock RUN green (`gen_status`).
+pub const SHORT_BG: Color = 0x04A9;
+pub const SHORT_FG: Color = 0x07E0;
+/// The indicator's band over the aux row (y 38..63, as the temperature
+/// chip): 4 px under the status bar and above the digits' cells (68).
+pub const SHORT_RECT: sf::Rect = rect(8, 38, 464, 26);
+/// Indicator style, bit 0: the band with SHORT / BEEP; bit 1: the main
+/// digits green. The firmware draws SHORT_STYLE; ui-render also draws the
+/// others (`set_short_style`, the PR's comparison).
+pub const SHORT_STYLE: u8 = 3;
+#[cfg(test)]
+static SHORT_STYLE_T: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(SHORT_STYLE);
+#[cfg(test)]
+pub fn set_short_style(s: u8) {
+    SHORT_STYLE_T.store(s, core::sync::atomic::Ordering::Relaxed);
+}
+#[cfg(test)]
+fn short_style() -> u8 {
+    SHORT_STYLE_T.load(core::sync::atomic::Ordering::Relaxed)
+}
+#[cfg(not(test))]
+#[inline(always)]
+fn short_style() -> u8 {
+    SHORT_STYLE
+}
+
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
@@ -280,6 +308,11 @@ pub struct DmmView {
     /// empty) and whether ACC_RECT holds it (false: to draw).
     acc_k: Option<(u32, u8, &'static str)>,
     acc_drawn: bool,
+    /// The beeper indicator to show (set by the app, `App::beep_ind`): 0
+    /// none, 1 SHORT (continuity, a diode-mode short), 2 BEEP (a diode
+    /// pattern); and the band as drawn (`short_sync`).
+    pub short: u8,
+    short_drawn: u8,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -573,7 +606,39 @@ impl DmmView {
             acc_on: true,
             acc_k: None,
             acc_drawn: false,
+            short: 0,
+            short_drawn: 0,
         }
+    }
+
+    /// The beeper indicator's band holds the aux row: `reading` leaves it.
+    fn band(&self) -> bool {
+        self.short_drawn != 0
+    }
+
+    /// Draw or clear the beeper indicator's band (SHORT_RECT) after a
+    /// change of `short`; a clear hands the aux row back to `reading`
+    /// (its next call repaints the aux values and the test current).
+    pub fn short_sync(&mut self) {
+        let want = if self.power || short_style() & 1 == 0 { 0 } else { self.short };
+        if want == self.short_drawn {
+            return;
+        }
+        self.short_drawn = want;
+        let b = SHORT_RECT;
+        if want != 0 {
+            sf::rbox(b, 6, SHORT_BG, BG);
+            // The scope's 26 px face (the status bar's F21 lacks B / E).
+            sf::glyphs(sf::ASCII26, b, if want == 1 { "SHORT" } else { "BEEP" }, 0xFFFF, SHORT_BG, 8, 2);
+        } else {
+            lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        }
+        // The band covers / uncovers the aux values and the test current:
+        // nothing of them is on the screen now.
+        self.aux_val = [None; 2];
+        self.aux_unit = [None; 2];
+        self.last_aux = [false; 2];
+        self.last_iohm = 255;
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -731,6 +796,7 @@ impl DmmView {
         self.pwc = pw::PwCache::new();
         self.last_iohm = 254;
         self.acc_drawn = false;
+        self.short_drawn = 0;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -744,7 +810,16 @@ impl DmmView {
         // ui-review #13: the stock >= 30 V cue, the value in VALUE_HV (V
         // functions, set by the app from the live reading); a provisional
         // value in VALUE_PROV. A colour change repaints every digit.
-        let color = if r.prov { VALUE_PROV } else if self.hv_red { VALUE_HV } else { VALUE };
+        // The beeper indicator (`short`): the digits green.
+        let color = if r.prov {
+            VALUE_PROV
+        } else if self.short != 0 && short_style() & 2 != 0 {
+            SHORT_FG
+        } else if self.hv_red {
+            VALUE_HV
+        } else {
+            VALUE
+        };
         let recolor = self.last_col != color;
         self.last_col = color;
         let vcol = if r.prov { VALUE_PROV } else { VALUE };
@@ -854,7 +929,7 @@ impl DmmView {
             self.pwc.coup_invalidate();
             // The AUTO-coupling label shares the limit badge's slot.
             self.last_lim = 255;
-            if !r.parts() {
+            if !r.parts() && !self.band() {
                 // Leaving AC+DC / AUTO: the tag slots left of the aux values
                 // (the ohm test current label's left part).
                 for i in 0..2 {
@@ -866,12 +941,18 @@ impl DmmView {
             }
         }
         // Aux readouts (stock: value right-aligned cells at y 40, unit after).
-        let (aux, lp, bd) = aux_shown(r);
+        let (mut aux, lp, bd) = aux_shown(r);
+        let band = self.band();
+        if band {
+            // The beeper indicator's band holds the row (`short_sync`).
+            aux = [None; 2];
+        }
         // Ohm / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
         let ik = match r.mode {
+            _ if band => 255,
             10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
             _ => 255,

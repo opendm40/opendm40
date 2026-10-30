@@ -1482,6 +1482,9 @@ pub struct Dmm {
     beep_e: u8,
     beep_next: u64,
     beep_n: u8,
+    /// The beeper's condition (`beeping`): continuity, CTSTA ACPO as last
+    /// read; diode, the pattern's last on / off (`diode_beep`).
+    beep_on: bool,
     t_phase: u8,
     t_code_a: i32,
     t_cj: f32,
@@ -2114,6 +2117,7 @@ impl Dmm {
             beep_e: 0,
             beep_next: 0,
             beep_n: 0,
+            beep_on: false,
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
@@ -2946,6 +2950,7 @@ impl Dmm {
         self.cap_c = 0.0;
         self.ohm_settled = false;
         self.beep_class = 4;
+        self.beep_on = false;
         self.t_phase = 0;
         self.t_votes = 0;
         // No value before a counter result past the settle: NaN, drawn "--"
@@ -4033,6 +4038,7 @@ impl Dmm {
         if self.suspended || self.watchdog(clk, now) {
             return None;
         }
+        hy::beeper_sync(); // a volume change while in continuity
         self.diode_beep(now);
         // AC+DC: the stock runs the frequency counter at the top of the ACV /
         // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;
@@ -4051,6 +4057,15 @@ impl Dmm {
         // temperature phases), so the probe windows keep their 100 ms.
         if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {
             self.aprot_poll(clk, now);
+        }
+        if self.mode == 11 && self.jwin == 0 && !self.pw.on && !hy::streaming() && !self.sent.blanked(now) {
+            // The continuity beeper's comparator: CTSTA bit 6 (ACPO) is
+            // the latch whose buffered copy CMPO drives the CMP pin
+            // (datasheet, comparator section), also while ENPCMPO is off
+            // (volume 0 %, `mute`). Every poll (5 ms), also through the
+            // entry settle (the beeper sounds from the row write on; not
+            // in the relay pulse's blank): `beeping`.
+            self.beep_on = hy::read1(0x14) & 0x40 != 0;
         }
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
@@ -5335,6 +5350,23 @@ impl Dmm {
         Some(rd)
     }
 
+    /// The continuity / diode beeper sounds now (or would, at volume 0 % /
+    /// `mute`): 1 = a short (continuity's comparator, diode's continuous
+    /// tone below 22 mV), 2 = a diode pattern's on phase, 0 = silent (and
+    /// in every other function, while the source (DBG:SRC) or the power
+    /// meter has the row).
+    pub fn beeping(&self) -> u8 {
+        if !self.beep_on || self.pw.on || src::active() || self.suspended {
+            return 0;
+        }
+        match self.mode {
+            11 => 1,
+            12 if self.beep_class == 0 => 1,
+            12 => 2,
+            _ => 0,
+        }
+    }
+
     /// Diode beep patterns through the HY3131 CMP pin buffer (R20 0xb4 / 0xb0).
     fn diode_beep(&mut self, now: u64) {
         if self.mode != 12 || now < self.beep_next || src::active() {
@@ -5348,6 +5380,7 @@ impl Dmm {
             _ => (false, 100, 0),
         };
         hy::write(0x20, &[if on { 0xB4 } else { 0xB0 }]);
+        self.beep_on = on;
         if self.beep_e < max_e {
             self.beep_e += 1;
         }

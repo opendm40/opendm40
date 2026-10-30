@@ -15,6 +15,11 @@ section named after the tag as the release notes; how to cut a release:
   ([manual](docs/manual/README.md#resistance)).
 
   ![The 600 MΩ range page and reading](docs/changelog/v0.4.0/ohm-600m.png)
+- **Continuity and diode: a green SHORT band** above the reading and green
+  digits while the beeper sounds, also at volume 0 %; **BEEP** for a diode
+  pattern ([manual](docs/manual/README.md#continuity)).
+
+  ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
 
 ### Changed
 
@@ -93,6 +98,8 @@ section named after the tag as the release notes; how to cut a release:
   600 mV on 3.3 V) starts the chart over in the new unit.
 - Power meter: no multimeter MAX / AVG / REL / MIN column while the page
   shows "I ranging...".
+- **Key/alert volume 0 %** also silences the continuity and diode beeper
+  ([manual](docs/manual/README.md#settings-page-1)).
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
 
