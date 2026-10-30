@@ -937,6 +937,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         reset_at = Some(now + 50);
                         false
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpi(n, div) => {
                         // Bus self-test (hyspi.rs): the DMM is paused and its
                         // row rewritten afterwards; the logger owns the chip.
@@ -953,6 +954,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpiWr(mode, div) => {
                         if logger.active() {
                             scpi.set_err("Settings conflict");
@@ -967,6 +969,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    // DBG:HYSPI needs --features dbg-hyspi (scpi.rs refuses it).
+                    #[cfg(not(feature = "dbg-hyspi"))]
+                    scpi::Dbg::HySpi(..) | scpi::Dbg::HySpiWr(..) => false,
                     scpi::Dbg::Isr => {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;

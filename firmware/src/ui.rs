@@ -3272,99 +3272,27 @@ pub fn view_name(v: View) -> &'static str {
 /// On-device help (UF-29: owners have no manual; gestures, resets and limits
 /// were undiscoverable). Pages of (topic, what it does) rows in the settings
 /// list style; a tap below the title bar turns the page, the title bar or
-/// MENU goes back. Only behaviour of this firmware (app.rs, gesture.rs) and
-/// limits the repo documents (genplan.rs, docs/user-feedback.md section
-/// 6.3 / 7 / 3) - no input ratings that are not sourced.
-pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
+/// MENU goes back. The essentials only (region B audit #9: the old seven
+/// pages were 1.4 KB of region B text); the manual has the rest.
+pub const HELP: [(&str, &[(&str, &str)]); 2] = [
     (
         "Gestures",
-        [
-            ("Swipe left / right", "Next / previous view"),
+        &[
+            ("Swipe left / right", "Change view"),
             ("Swipe down (DMM)", "Record on / off"),
-            ("3 fingers down", "Screenshot to disk"),
-            ("2 fingers down", "Power off (confirm)"),
-            ("Scope: drag up/down", "Move the trace"),
-            ("Scope: right edge", "Drag trigger level"),
-            ("Scope: side drag", "Trigger position"),
-            ("Scope drag setting", "Direct or hold first"),
+            ("3 fingers down", "Screenshot"),
+            ("2 fingers down", "Power off"),
+            ("Scope: drag", "Move the trace"),
         ],
     ),
     (
-        "Side keys",
-        [
-            ("MENU", "Main menu / back"),
-            ("RUN", "HOLD; scope run/stop"),
-            ("RUN held 1 s (DMM)", "AutoHold on / off"),
-            ("AUTO", "Autorange / auto-set"),
-            ("MF", "Range / scope menu"),
-            ("Power key 1.5 s", "Power off"),
-            ("Power key twice", "Touch lock on / off"),
-            ("Power key, locked", "Next DMM sub-mode"),
-        ],
-    ),
-    (
-        "Multimeter",
-        [
-            ("Tap / hold history", "Store / clear"),
-            ("History row shown", "Settings: DMM row"),
-            ("Tap MIN/MAX column", "Session on / off"),
-            ("Hold MIN/MAX column", "Reset MIN/MAX/AVG"),
-            ("Tap REL", "Zero on / off"),
-            ("Tap value / chip", "Digits / rate"),
-            ("Tap function again", "Next sub-mode"),
-            ("Hold meter strip", "Full DMM page"),
-        ],
-    ),
-    (
-        "Limits",
-        [
-            ("AUTO on volts", "Starts on mV: AUTO+"),
-            ("Scope bandwidth", "Flat to about 3 MHz"),
-            ("Gen sine/tri/ramp", "Up to 50 kHz"),
-            ("Gen square", "Up to 10 MHz"),
-            ("Gen amplitude", "0 to 3 Vpp"),
-            ("Gen output", "Never apply voltage"),
-            ("Supplied TC probe", "Rated to 300 C"),
-            ("Key/alert volume", "Keys and alerts"),
-        ],
-    ),
-    (
-        "Record + alerts",
-        [
-            ("Record page", "MF > Record"),
-            ("Interval rows", "Mean of the readings"),
-            ("Swipe down (DMM)", "Same settings"),
-            ("While recording", "No auto power-off"),
-            ("Backlight", "Still dims (battery)"),
-            ("A-JACK LIVE? OVLD", "Alternate with HOLD"),
-            ("V-JACK? DC? AC?", "Hints, below HOLD"),
-            ("Jack alerts", "Settings 3/3"),
-        ],
-    ),
-    (
-        "USB disk",
-        [
-            ("Files live", "Default, read-only"),
-            ("New files", "Show while mounted"),
-            ("File manager", "Refresh (F5)"),
-            ("PC can edit", "Delete, copy update"),
-            ("Change mode", "Settings 3/3"),
-            ("Takes effect", "At next USB plug"),
-            ("At power-on", "Files live again"),
-            ("Delete on meter", "Gallery, MMEM:DEL"),
-        ],
-    ),
-    (
-        "Power meter",
-        [
-            ("Tap W again", "DC > AC > AC+DC"),
-            ("DC", "P = Vdc x Idc"),
-            ("AC", "Only the AC parts"),
-            ("AC+DC", "Pac + Vdc x Idc"),
-            ("MF: At load (off)", "@load: V - I*R"),
-            ("MF: Zero", "Leads open, 12 s"),
-            ("Tap the value", "P > Wh > VAh"),
-            ("Hold energy box", "Reset Wh (confirm)"),
+        "Keys",
+        &[
+            ("MENU", "Menu / back"),
+            ("RUN", "Hold; run / stop"),
+            ("AUTO", "Autorange"),
+            ("MF", "Range / menu"),
+            ("Power key twice", "Touch lock"),
         ],
     ),
 ];

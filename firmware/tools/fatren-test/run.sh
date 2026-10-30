@@ -1263,7 +1263,7 @@ volok $VD.1 $VS && echo "ok: step 1: every CSV == dlog.py of its DLG (LOG005 fro
 mdir -b -i $VD.1 ::LOGS ::SHOTS ::SCOPE | grep -qE "LOG002|SNAP" && { echo "FAIL at line $LINENO: foreign / unnumbered file shown"; exit 1; }
 echo "ok: the foreign LOG002.DLG and the unnumbered SNAP.BMP are not shown"
 [ "$(mcopy -n -i $VD.1 ::LOGS/LOG000.CSV - | md5sum | cut -c1-32)" = 8ca36a74fc33171580669fafddda6c88 ] && [ "$(mcopy -n -i $VD.1 ::SCOPE/SCOP000.CSV - | md5sum | cut -c1-32)" = 4921f54425a8f14d910a25e65a4fc3c6 ] && echo "ok: LOGS/LOG000.CSV and SCOPE/SCOP000.CSV == the old CSV writer's files" || { echo "FAIL at line $LINENO"; exit 1; }
-mtype -i $VD.1 ::README.TXT | grep -q "DBG:UPLOAD" && echo "ok: README.TXT" || { echo "FAIL at line $LINENO"; exit 1; }
+mtype -i $VD.1 ::README.TXT | grep -q "docs/manual" && echo "ok: README.TXT" || { echo "FAIL at line $LINENO"; exit 1; }
 # places <a> <b> <rule>: directory slot + first cluster of every LOGS /
 # SCOPE / SHOTS file in two dumps (independent parse).
 places() {

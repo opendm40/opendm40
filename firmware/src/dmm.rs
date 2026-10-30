@@ -2634,6 +2634,7 @@ impl Dmm {
     /// AC+DC diagnostic: the last AC phases (oldest first) and the number of
     /// AC phases started so far. The entry for the running phase may hold
     /// fewer than its 4 (V) / 3 (mV, A) results.
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag(&self) -> (u32, [AcPhaseDiag; ACDC_DIAG_N]) {
         let mut d = [AcPhaseDiag::EMPTY; ACDC_DIAG_N];
         let n = (self.diag_k as usize).min(ACDC_DIAG_N);
@@ -2651,6 +2652,7 @@ impl Dmm {
     /// logs every 4 results as one entry. Returns the length used; the
     /// oldest phases are left out when `buf` is too small.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
