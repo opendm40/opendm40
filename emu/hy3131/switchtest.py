@@ -283,7 +283,7 @@ def run(name):
                         continue
                     tm.write('DBG:KEY 3')
                     time.sleep(0.6)
-                    tm.write('DBG:TAP 237,259')
+                    tm.write('DBG:TAP 298,259')
                     w = up() + 3.0
                     while up() < w and p.poll() is None:
                         time.sleep(0.2)

@@ -509,6 +509,9 @@ impl Checker {
                 let g = its[a].b.gap(&its[b].b);
                 if g < 3 {
                     self.fail(scene, format!("{} and {} {} by {} px", desc(&its[a]), desc(&its[b]), if g < 0 { "overlap" } else { "too close" }, g));
+                } else if matches!((parent[a], parent[b]), (Some(pa), Some(pb)) if pa != pb) {
+                    // Texts in two different boxes (e.g. the REC mark and the
+                    // record bar): the boxes' rings part them, not a word gap.
                 } else if let Some(m) = line_gap(&its[a], &its[b]) {
                     self.fail(scene, m);
                 }
@@ -578,6 +581,7 @@ fn prov(mut r: Reading) -> Reading {
 fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     match mode {
         2 | 3 => 1,
+        10 if unit == "M\u{3a9}" && dec == 1 => dmm::OHM600,
         10 if unit == "M\u{3a9}" && dec <= 3 => 6,
         10 if unit == "\u{3a9}" && dec == 3 => 0,
         10 => 1,
@@ -645,6 +649,9 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("acma_bd_ol", rd(5, ol(3, "mA"), Some(val(50.000, 3, "Hz")), Some(ol(2, "mV")), false), None),
         ("ohm_mohm", rd(10, val(44.444, 3, "M\u{3a9}"), None, None, false), None),
         ("ohm_ol", rd(10, ol(3, "M\u{3a9}"), None, None, false), None),
+        // The experimental 600 Mohm (r7): one decimal, EXP before the test current.
+        ("ohm_600m", rd(10, val(444.4, 1, "M\u{3a9}"), None, None, false), None),
+        ("ohm_600m_ol", rd(10, ol(1, "M\u{3a9}"), None, None, false), None),
         ("ohm_k", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false), None),
         // Settings 3/3 "Negative ohm": shorted leads below 0 (the offset),
         // with and without the extra digit.
@@ -709,6 +716,16 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
     v.extend(extra);
     // Power meter readings (strip: "POWER", aux V / I; DMM page).
     v.extend(pw_cases().into_iter().map(|(n, p)| (n, pw_rd(p), None)));
+    // The combined view before the first power reading (App::pw_strip_wait,
+    // #108): dimmed dashes, the V once measured (worst: 1000 V range), no I.
+    for (n, a1) in [("pw_wait", None), ("pw_wait_v", Some(val(-1049.9, 1, "V")))] {
+        let p = pw_cases().into_iter().find(|c| c.0 == "pending-acdc").map(|c| c.1).unwrap();
+        let mut r = pw_rd(p);
+        r.prov = true;
+        r.aux1 = a1;
+        r.aux2 = None;
+        v.push((n, r, None));
+    }
     v
 }
 
@@ -724,7 +741,7 @@ struct World {
 }
 
 fn status(page: u8) -> ui::Status {
-    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, bars: 5, charging: false, locked: false, rec: true, csv: true, page }
+    ui::Status { uptime_s: 99 * 3600 + 59 * 60 + 59, bt: true, usb: true, bars: 5, charging: false, locked: false, rec: true, csv: true, rec_dim: false, page }
 }
 
 fn meas_worst() -> (Vec<u8>, scope_meas::Results) {
@@ -748,12 +765,13 @@ fn combined(r: &Reading, label: Option<&'static str>, hold: u8, lim: u8, rel: bo
     host::reset(0);
     let mut m = scope_ui::Model::DEFAULT;
     m.combined = true;
+    m.usb = true;
     scope_ui::invalidate();
     scope_ui::strip_invalidate();
     scope_ui::graph().clear();
     scope_ui::update(&m);
     scope_ui::cells(&m, &["Freq:444.4kHz", "Vp-p:-444mV", "Cycl:444.4us", "Vrms:-444mV"]);
-    let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label, false);
+    let mut d = ui::strip_data(r, hold, lim, rel, hv_of(r), alt, label);
     // The accuracy label (none under REL: App::acc_ctx).
     ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: 2, tc: label == Some("TC K") }));
     d.gen = scope_ui::Txt::new(gen);
@@ -822,6 +840,9 @@ fn pw_cases() -> Vec<(&'static str, dmm::pw::PowerVals)> {
         // No current: values that round to zero (never "-0.0000").
         ("zero", P { p: -2.0e-8, s: 1.0e-8, q: -1.0e-8, pf: -0.0001, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.66e-9, vah: 1.0e-9, secs: 55, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
         ("main-zero", P { main: dmm::pw::MAIN_WH, p: -2.0e-8, v: 6.738, i: -1.0e-9, f_hz: 40.0, e_wh: -1.27e-10, secs: 70, p_avg: -1.0e-9, vr: 1, ik: 0, ..z }),
+        // Leads open after a load (#107): V 0, a few uV of burden (noise on
+        // the uA shunt) that shows as Vb 0.000: not in the warning colour.
+        ("open-vb", P { p: 0.0, s: 0.0, q: 0.0, pf: f32::NAN, v: 0.0, i: 9.9e-9, vdc: 0.0, idc: 9.9e-9, f_hz: f32::NAN, burden_v: 4.7e-7, vr: 0, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
         ("dc-ua", P { p: 5.9999e-3, s: 5.9999e-3, pf: 1.0, v: 9.9999, i: 599.99e-6, vdc: 9.9999, idc: 599.99e-6, vr: 1, ik: 0, dc: true, coup: dmm::pw::COUP_DC, comp: false, ..z }),
         // AC+DC parts layout (doc 3.17): 12 V + 1 V ripple, 2 A + 0.3 A in
         // phase (the owner's mock); pure DC (no AC part: the DC? hint);
@@ -1059,6 +1080,88 @@ pub fn touchcal_scene(k: u8, long: bool) {
                 tt::cal_status(Some(touchcal::to_f32(&f.cal)));
             }
         }
+    }
+}
+
+/// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
+/// in a batch over an arbitrary previous screen ends pixel-identical to the
+/// page drawn directly.
+fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    draw();
+    let a = host::emu().fb.clone();
+    host::reset(0);
+    lcd::defer_start();
+    draw();
+    lcd::defer_flush();
+    unsafe { host::PATTERN = false };
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("deferred fills: {n} px differ from the direct draw"));
+    }
+}
+
+/// lcd.rs strip rendering (App::repaint): the page drawn in strips over one
+/// previous screen ends pixel-identical to the page drawn directly over
+/// another (a page must cover every pixel: nothing of the old screen may
+/// show through), every pixel is written once, and the strips do not cost
+/// much more than the direct draw (host CPU time, printed).
+fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
+    unsafe { host::PATTERN = true };
+    host::reset(0);
+    let t = std::time::Instant::now();
+    draw();
+    let td = t.elapsed();
+    let a = host::emu().fb.clone();
+    unsafe { host::PATTERN = false };
+    host::reset(0x1234);
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    let t = std::time::Instant::now();
+    lcd::strips(&mut buf, || draw());
+    let ts = t.elapsed();
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let n = a.iter().zip(host::emu().fb.iter()).filter(|(x, y)| x != y).count();
+    if n != 0 {
+        ck.fail(name, format!("strips: {n} px differ from the direct draw"));
+    }
+    if writes != (W * H) as u64 {
+        ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
+    }
+    println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
+/// The bargraph's full-scale label ends with the unit as the readout and
+/// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
+/// kOhm"): the label's last columns (right-aligned at the bar's end, row
+/// 161..172) hold exactly the ink of `unit_text` drawn alone there.
+fn bar_unit_check(ck: &mut Checker, scene: &str, r: &Reading) {
+    use stockfont as sf;
+    if r.mode == 15 {
+        return; // temperature: no scale labels
+    }
+    let mut ub = [0u8; 16];
+    let u = sf::unit_text(r.main.unit, &mut ub).to_string();
+    let b = &ui::BAR_RECT;
+    let end = bargraph::Bar::new(b.0, b.1, b.2, b.3, false).end_x() as i32;
+    let w = sf::text_width(sf::F14, &u, 1) as i32;
+    let bg = ui::BG;
+    let mask = |x0: i32| -> Vec<bool> {
+        let e = emu();
+        (161..173).flat_map(|y| (x0..end).map(move |x| (x, y))).map(|(x, y)| e.fb[y as usize * W + x as usize] != bg).collect()
+    };
+    let got = mask(end - w - 2);
+    let snap = host::snapshot();
+    lcd::fill_rect((end - 120) as u16, 161, 120, 12, bg);
+    sf::label(sf::F14, sf::rect((end - 120) as i16, 161, 120, 12), &u, ui::DIM, bg, 4, 1);
+    let want = mask(end - w - 2);
+    host::restore(&snap);
+    ck.cases += 1;
+    if got != want {
+        ck.fail(&format!("bar-unit/{scene}"), format!("bargraph full-scale label does not end with {u:?}"));
     }
 }
 
@@ -1462,7 +1565,7 @@ fn main() {
             for hold in 0..4u8 {
                 for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
                     for rel in [false, true] {
-                        for (j, (hv, rec, gen)) in [(0u8, false, ""), (hv_of(r), true, "10.00MHz"), (1, false, "1.00kHz"), (2, false, "")].into_iter().enumerate() {
+                        for (j, (hv, gen)) in [(0u8, ""), (hv_of(r), "10.00MHz"), (1, "1.00kHz"), (2, "")].into_iter().enumerate() {
                           // Both phases of the 1 s alternation (REL / verdict;
                           // A-JACK / LIVE? with HOLD, decision 2026-10-22 #5).
                           for alt in [false, true] {
@@ -1471,7 +1574,7 @@ fn main() {
                                 r.alert = ALERTS[(j + hold as usize + rel as usize) % ALERTS.len()];
                             }
                             let r = &r;
-                            let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label, rec);
+                            let mut d = ui::strip_data(r, hold, lim, rel, hv, alt, *label);
                             // The accuracy label on every model (DM40A: the
                             // x10 digit), none under REL (App::acc_ctx).
                             ui::strip_acc(&mut d, r, (!rel).then_some(ui::Acc { model: j as u8 % 3, tc: true }));
@@ -1541,7 +1644,7 @@ fn main() {
         ck.check_area(&format!("combined/{name}/band"), &[("band", band_area)], true, Some(band_area));
         // The strip's sub texts fit their boxes (scope_ui::ST_SUB; the label
         // clips, so an overlong text loses its first glyphs silently).
-        let d = ui::strip_data(r, 0, 0, false, hv_of(r), false, *label, false);
+        let d = ui::strip_data(r, 0, 0, false, hv_of(r), false, *label);
         for i in 0..2 {
             ck.cases += 1;
             let w = stockfont::text_width(stockfont::SC_F12, d.sub[i].as_str(), 1);
@@ -1569,12 +1672,76 @@ fn main() {
                 m.gen_hz = if k == 1 { 10.0e6 } else { 0.0 };
                 m.battery = vdiv % 6;
                 m.charging = k == 0;
+                m.usb = true;
                 host::reset(0);
                 scope_ui::invalidate();
                 scope_ui::graph().clear();
                 scope_ui::update(&m);
                 ck.check_replica(&format!("replica-bar/tb{tb}/v{vdiv}/{k}"));
             }
+        }
+    }
+    // 3a. Scope top bar with the USB symbol: states for the contact sheet
+    //     (<out>/scopebar/, 2x): plain, USB, USB + charging, roll + long
+    //     trigger text + generator, STOP, the wave view's amps, combined.
+    {
+        let dir = format!("{out}/scopebar");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = scope_ui::Model::DEFAULT;
+        let mut v: Vec<(&str, scope_ui::Model)> = vec![("plain", base)];
+        let mut m = base;
+        m.usb = true;
+        v.push(("usb", m));
+        m.charging = true;
+        m.battery = 5;
+        v.push(("usb-charged", m));
+        let mut r = m;
+        r.roll = true;
+        r.tb = 29;
+        r.trig_v = -444.4e-3;
+        r.rising = false;
+        r.gen_hz = 10.0e6;
+        r.battery = 0;
+        v.push(("usb-roll-long", r));
+        let mut st = m;
+        st.status = 3;
+        st.trig_v = 9.876e3;
+        v.push(("usb-stop", st));
+        let mut c = m;
+        c.combined = true;
+        v.push(("usb-combined", c));
+        for (name, m) in v {
+            host::reset(0);
+            scope_ui::invalidate();
+            scope_ui::graph().clear();
+            scope_ui::update(&m);
+            ck.check_replica(&format!("scopebar/{name}"));
+            // The USB symbol on y 1..18 of the bar (0..19: top on the
+            // battery's top row, a free row above and below; y 20 is the
+            // graph frame / meter strip) and centred in the gap 414..434
+            // between the trigger badge and the battery.
+            if m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let ink = |x0: usize, x1: usize| {
+                    let (mut b, mut n) = ((usize::MAX, usize::MAX, 0, 0), 0);
+                    for y in 0..20 {
+                        for x in x0..=x1 {
+                            if fb[y * 480 + x] != bar {
+                                b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+                                n += 1;
+                            }
+                        }
+                    }
+                    (b, n)
+                };
+                let ((ux0, uy0, ux1, uy1), n) = ink(414, 434);
+                let ((_, by0, _, _), _) = ink(435, 479);
+                if n == 0 || uy0 != 1 || uy1 != 18 || uy0 != by0 || ux0 - 414 != 434 - ux1 {
+                    ck.fail(&format!("scopebar/{name}/usb"), format!("USB symbol x {ux0}..{ux1} y {uy0}..{uy1} (want y 1..18), battery top y {by0}"));
+                }
+            }
+            host::save_ppm(&format!("{dir}/{name}.ppm"), 2);
         }
     }
     // Every measurement item, worst values, in every cell.
@@ -1598,7 +1765,7 @@ fn main() {
     for l in &labels {
         for hold in 0..4u8 {
             for (auto, plus) in [(true, false), (true, true), (false, false)] {
-                for (locked, csv) in [(false, false), (true, true), (false, true), (true, false)] {
+                for (k, (locked, csv)) in [(false, false), (true, true), (false, true), (true, false)].into_iter().enumerate() {
                     host::reset(0);
                     let mut r = cases[0].1;
                     r.auto = auto;
@@ -1609,6 +1776,8 @@ fn main() {
                     let mut s = status(0);
                     s.locked = locked;
                     s.csv = csv;
+                    // Battery: charged (steady green), charging (both blink phases), empty.
+                    (s.bars, s.charging) = [(5, true), (4, true), (3, true), (0, true)][k];
                     ui::status_right(&s);
                     // Only the bar is checked (the stock page body is unchanged).
                     let keep = ui::BAR_H as usize * W;
@@ -1670,6 +1839,85 @@ fn main() {
         }
     }
 
+    // 5c. Status block states (BT, USB host, REC, lock, battery level,
+    //     charging blink phases): DMM bar and generator bar, 2x renders in
+    //     <out>/statusbar/ (the contact sheet of the states).
+    {
+        let dir = format!("{out}/statusbar");
+        std::fs::create_dir_all(&dir).unwrap();
+        // (name, bt, usb, csv, locked, bars, charging)
+        // `charging` = on a charger (green); the blink is the caller's level.
+        let states: [(&str, bool, bool, bool, bool, u8, bool); 10] = [
+            ("plain", false, false, false, false, 4, false),
+            ("charged", false, true, false, false, 5, true),
+            ("usb", false, true, false, false, 4, false),
+            ("bt-usb", true, true, false, false, 5, false),
+            ("all", true, true, true, true, 5, false),
+            ("chg-a", false, true, false, false, 3, true),
+            ("chg-b", false, true, false, false, 2, true),
+            ("chg-empty-a", true, true, true, true, 0, true),
+            ("chg-empty-b", true, true, true, true, 1, true),
+            ("bt-nousb", true, false, true, false, 1, false),
+        ];
+        // REC: also its dot's off phase (rec_dim), and the blink step
+        // (status_rec_blink, the dot's box alone) equal to a fresh draw.
+        let draw = |gen: bool, st: &ui::Status, dv: &mut ui::DmmView| {
+            host::reset(0);
+            let mut r = cases[0].1;
+            r.auto = true;
+            if gen {
+                ui::gen_static(&w.gen);
+                ui::gen_status(st);
+            } else {
+                dv.label = None;
+                dv.draw_static(Button::Volt, 1, false, false);
+                dv.reading(&r, 0, 0);
+                ui::status_right(st);
+            }
+        };
+        for gen in [false, true] {
+            for dim in [false, true] {
+                let st = ui::Status { csv: true, rec_dim: dim, ..status(0) };
+                draw(gen, &st, &mut dv);
+                let want = emu().fb.clone();
+                draw(gen, &ui::Status { rec_dim: !dim, ..st }, &mut dv);
+                ui::status_rec_blink(&st, gen);
+                ck.same_as(&format!("statusbar/blink/{gen}/{dim}"), &want);
+            }
+        }
+        let states: Vec<_> = states.into_iter().map(|s| (s, false)).chain(std::iter::once((states[4], true))).collect();
+        for ((name, bt, usb, csv, locked, bars, charging), dim) in states {
+            for gen in [false, true] {
+                host::reset(0);
+                let mut r = cases[0].1;
+                r.auto = true;
+                if gen {
+                    ui::gen_static(&w.gen);
+                } else {
+                    dv.label = None;
+                    dv.draw_static(Button::Volt, 1, false, false);
+                    dv.reading(&r, 0, 0);
+                }
+                let mut st = status(0);
+                (st.bt, st.usb, st.csv, st.locked, st.bars, st.charging, st.rec_dim) = (bt, usb, csv, locked, bars, charging, dim);
+                let name = if dim { "all-rec-off" } else { name };
+                let h = if gen { 36 } else { ui::BAR_H as usize };
+                if gen {
+                    ui::gen_status(&st);
+                } else {
+                    ui::status_right(&st);
+                }
+                let keep = h * W;
+                for p in emu().owner[keep..].iter_mut() {
+                    *p = 0;
+                }
+                let tag = if gen { "gen" } else { "dmm" };
+                ck.check(&format!("statusbar/{tag}-{name}"), &[("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, h as i32))]);
+                host::save_ppm(&format!("{dir}/{tag}-{name}.ppm"), 2);
+            }
+        }
+    }
+
     // 5b. Full DMM page: readout (+1 digit), aux rows, limit badge, HV,
     //     history row, trend chart (axis labels, timebase chip) and the
     //     MAX / AVG / MIN / REL / time column, every case.
@@ -1700,7 +1948,7 @@ fn main() {
                     ui::RateChip { rate: 1, period_ms: 400, applies: false },
                     ui::RateChip { rate: 0, period_ms: 2200, applies: true },
                 ];
-                for (k, (rate, rec)) in [(1u8, false), (4, true), (2, false), (1, true), (4, false)].into_iter().enumerate() {
+                for (k, (rate, rec)) in [(1u8, false), (4, true), (2, false), (8, true), (16, false)].into_iter().enumerate() {
                   for alt in [false, true] {
                     let rc = chips[k];
                     let mut r = *r;
@@ -2037,6 +2285,18 @@ fn main() {
                 }
             }
         }
+        // Vb in the warning colour (ui::VALUE) only for a drop it shows
+        // (#107): not for "open-vb" (0.000), but for 0.2 V at 5 V.
+        let ov = pcs.iter().find(|c| c.0 == "open-vb").map(|c| c.1).unwrap();
+        for (name, pv, want) in [("open-vb", ov, false), ("open-vb-5v", dmm::pw::PowerVals { v: 5.0, vdc: 5.0, burden_v: 0.2, ..ov }, true)] {
+            host::reset(0);
+            power_page(pv, 0, sentinel::Alert::None, rc);
+            ck.cases += 1;
+            let n = (176..190).flat_map(|y| (431..476).map(move |x| y * W + x)).filter(|&i| emu().fb[i] == ui::VALUE).count();
+            if (n > 0) != want {
+                ck.fail(&format!("power/{name}/vb-colour"), format!("Vb warning colour: {n} px, want {}", if want { "some" } else { "none" }));
+            }
+        }
         for (name, pv) in pcs.iter().filter(|c| c.0.starts_with("pending")) {
             host::reset(0);
             power_page(*pv, 0, sentinel::Alert::None, rc);
@@ -2197,10 +2457,10 @@ fn main() {
         (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
         // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
         // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON"]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)"]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON"]),
+        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]),
+        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON", "ON"]),
+        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)", "ON"]),
+        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON", "OFF"]),
     ] {
         host::reset(0);
         ui::settings(page, &vals);
@@ -2249,6 +2509,11 @@ fn main() {
     }
     for b in [Button::Volt, Button::Amp, Button::Ohm] {
         for note in [None, Some((dmm::MV_AUTO_WARN, true)), Some(("AUTO+ recommended: never steps to mV", false))] {
+            // The app draws a note on the Voltage page only; the Resistor
+            // page's note row holds its 600 Mohm item.
+            if b == Button::Ohm && note.is_some() {
+                continue;
+            }
             for sub in 0..4u8 {
                 host::reset(0);
                 let n = ui::range_items(b).len();
@@ -2292,7 +2557,7 @@ fn main() {
         ui::temp_page(&tp);
         ck.check_opts(&format!("temp/{k}/{offs}/{r25}"), &page_regions, false);
         let before: Vec<u16> = emu().fb.clone();
-        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_OK] {
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
             ui::temp_key(&tp, code, true);
             ui::temp_key(&tp, code, false);
         }
@@ -2365,6 +2630,62 @@ fn main() {
         if k == "fw-install" {
             save(&out, "t04-confirm-fw-install");
         }
+    }
+
+    // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
+    defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    defer_check(&mut ck, "defer/help", || ui::help_page(0));
+    defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
+    defer_check(&mut ck, "defer/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()).filter(|sc| sc.popup != scope_ui::Popup::None).take(6) {
+        // stock::draw resets the screen itself: the pattern stays on.
+        defer_check(&mut ck, &format!("defer/scope/{}", sc.name), || {
+            unsafe { host::PATTERN = true };
+            stock::draw(sc);
+        });
+    }
+
+    // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
+    strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
+    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
+    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
+    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]));
+    strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
+    strip_check(&mut ck, "strip/help", || ui::help_page(0));
+    strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
+    // The generator page's first strip draw after a boot (#153), each wave
+    // as the boot default: the preview's strip cache as the device has it
+    // then (`.sram_bss`, zeroed by the startup code).
+    for wave in gen::Wave::ALL {
+        unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
+        w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    w.gen.apply(gen::Settings::DEFAULT);
+    strip_check(&mut ck, "strip/dmm", || {
+        dv.draw_static(Button::Volt, 1, false, false);
+        ui::history(&[(1.234, 3, "V"); 5], 5, 4);
+    });
+    dv.bar_on = true;
+    strip_check(&mut ck, "strip/dmm-bar", || dv.draw_static(Button::Amp, 3, false, false));
+    dv.bar_on = false;
+    for sc in stock::scenes().iter().chain(stock::emu_scenes().iter()) {
+        // stock::draw without its screen reset (App::repaint: the scope
+        // page from scope_ui::invalidate).
+        let pv = stock::popvals(&sc.m);
+        strip_check(&mut ck, &format!("strip/scope/{}", sc.name), || {
+            scope_ui::invalidate();
+            stock::load(sc);
+            scope_ui::update(&sc.m);
+            scope_ui::cells(&sc.m, &sc.cells);
+            scope_ui::draw_popup(sc.popup, &pv);
+        });
     }
 
     // 6d. Main menu (gallery row on top, four tiles, combined-view row).
@@ -2650,7 +2971,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 16] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -2667,6 +2988,7 @@ fn main() {
         ("c19-auto-dcv", "auto_dcv", 0, 0, false, false),
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
+        ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -2681,6 +3003,9 @@ fn main() {
         host::reset(0);
         let (r, _) = find("dcv");
         dv.label = None;
+        // The history row (Settings 2/3 "DMM row": History): the app turns
+        // the bargraph row off first, so no accuracy label clears a box.
+        dv.bar_on = false;
         dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(4.8170, 4, "V"); 5], 3, 2);
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
@@ -2689,6 +3014,11 @@ fn main() {
         let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
+        // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
+        for (file, rate) in [("d01b-dmm-trend-1s28", 8u8), ("d01c-dmm-trend-2s56", 16)] {
+            ui::chart(&mut ui::ChartCache::new(), &pts, 4, rate, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, file);
+        }
         // The accuracy label (docs/dmm-accuracy.md) in every function with a
         // row in the manual, the bargraph row on (the default); a DM40A
         // above its stock 4 V range (one d = 1 mV there); a function with
@@ -2718,6 +3048,7 @@ fn main() {
             let v = if r.main.ol { 1.0 } else { r.main.v };
             let pts: Vec<f32> = (0..321).map(|i| v + ((i / 40) % 3) as f32 * v.abs() * 1e-4).collect();
             ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 1, None, r.main.unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            bar_unit_check(&mut ck, file, &r);
             save(&out, file);
         }
         for (file, case) in [("a30-acc-strip-dcv", "dcv"), ("a31-acc-strip-hz", "hz_khz"), ("a32-acc-strip-ohm", "ohm_k"), ("a33-acc-strip-temp-tc", "temp_tc"), ("a34-acc-strip-ohm-neg", "ohm_neg")] {
@@ -2810,6 +3141,7 @@ fn main() {
             ui::status_right(&status(0));
             save(&out, file);
         }
+        dv.bar_on = true;
         // A function switch (switch-latency.md proposals 1 / 6): the page
         // as it was before (blank readout until the first reading), the
         // placeholder, provisional values, and the settled value after.
@@ -2887,7 +3219,7 @@ fn main() {
         ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
         save(&out, "m02-settings2");
         host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON"]);
+        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "ON"]);
         save(&out, "m10-settings3");
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
@@ -2903,7 +3235,7 @@ fn main() {
             let d_menu = || ui::main_menu(combo);
             let d_set = || ui::settings(0, &s0);
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON"]);
+            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
@@ -2925,10 +3257,10 @@ fn main() {
             let range_t = |b: Button| -> Vec<u8> {
                 let mut t: Vec<u8> = (0..ui::range_items(b).len() as u8).collect();
                 let errs: &[u8] = match b {
-                    Button::Volt => &[0, 1, 3, 6, 2, 4],
-                    Button::Amp => &[0, 1, 3, 6, 2, 4, 5],
-                    Button::Ohm => &[0, 1, 2, 4],
-                    _ => &[2, 4],
+                    Button::Volt => &[0, 1, 3, 6, 2, 4, 7],
+                    Button::Amp => &[0, 1, 3, 6, 2, 4, 7, 5],
+                    Button::Ohm => &[0, 1, 2, 4, 7],
+                    _ => &[2, 4, 7],
                 };
                 t.extend(errs.iter().map(|k| ui::RP_ERR + k));
                 if matches!(b, Button::Volt | Button::Amp) {
@@ -2941,7 +3273,7 @@ fn main() {
             };
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
-            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=31).filter(|&c| c != 21).collect();
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
@@ -2952,7 +3284,7 @@ fn main() {
                     (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
                 }))
                 .chain((0..9u8).map(|r| (format!("settings2-{r}"), &d_set2 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set2)) as Box<dyn Fn(bool)>)))
-                .chain((0..5u8).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
+                .chain((0..5u8).chain([8]).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
                 .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [
@@ -2983,6 +3315,8 @@ fn main() {
                     "range0-103" => "m03e-range-v-cpl-pressed",
                     "range1-105" => "m03f-range-a-fuse-pressed",
                     "range1-102" => "m03g-range-a-ok-pressed",
+                    "range0-107" => "m03h-range-v-record-pressed",
+                    "pwset32" => "p31c-power-settings-record-pressed",
                     "pwset2" => "p31-power-settings-pressed",
                     "pwset28" => "p31b-power-settings-cpl-pressed",
                     _ => "",
@@ -3012,10 +3346,26 @@ fn main() {
         host::reset(0);
         ui::range_page(Button::Ohm, Some(7), 1, None);
         save(&out, "m07-range-ohm-on");
+        host::reset(0);
+        ui::range_page(Button::Cap, Some(7), 0, None);
+        save(&out, "m07b-range-cap");
+        // While recording: the Record button red (V, power, temperature).
+        ui::set_rec_on(true);
+        host::reset(0);
+        ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false)));
+        ui::wave_button();
+        save(&out, "m03i-range-v-recording");
+        host::reset(0);
+        ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: true, i_auto: true, ..pw_cases()[0].1 });
+        save(&out, "p07b-power-settings-recording");
+        host::reset(0);
+        ui::temp_page(&ui::TempPage { sensor: 0, offs: 0.0, unit_f: false, r25: 10_000.0, beta: 3950.0, info: "Cold junction 24.6 C" });
+        save(&out, "m06b-temp-recording");
+        ui::set_rec_on(false);
         // The test current label (top left) of every range in both
         // variants; the saved one: 600 kohm, "ON" (I 0.66 uA).
         for on in [false, true] {
-            for rg in 0..7i8 {
+            for rg in 0..8i8 {
                 host::reset(0);
                 let (r, _) = find("ohm_k");
                 let r = Reading { range: rg, ..r };
@@ -3136,6 +3486,127 @@ fn main() {
             let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
+        }
+    }
+
+    // Beeper indicator (continuity / diode, App::beep_ind): every style
+    // (bit 0 the SHORT / BEEP band, bit 1 the digits green) x SHORT / BEEP
+    // x bargraph / history row x limit badge, layout checked; on -> off
+    // and off -> on (with new readings in between) equal a fresh page.
+    // Renders: b01..b11 (the PR's comparison), b12 the bargraph-row
+    // mock-up (not in the firmware).
+    {
+        let short_cases = [
+            ("cont", rd(11, val(0.4, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
+            ("cont-wide", rd(11, val(67.0, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
+            ("diode", rd(12, val(0.0042, 4, "V"), None, Some(val(5.5, 1, "\u{3a9}")), false), Button::ContDiode),
+            ("diode-pn", rd(12, val(0.5871, 4, "V"), None, Some(val(767.4, 1, "\u{3a9}")), false), Button::ContDiode),
+        ];
+        let page = |r: &Reading, b: Button, short: u8, bar: bool, lim: u8| -> ui::DmmView {
+            host::reset(0);
+            let mut dv = ui::DmmView::new();
+            dv.bar_on = bar;
+            dv.draw_static(b, r.mode, false, false);
+            if bar {
+                dv.bar_update(r);
+            } else {
+                ui::history(&[(r.main.v, r.main.dec, r.main.unit); 5], 5, 4);
+            }
+            dv.short = short;
+            dv.reading(r, 0, lim);
+            dv.short_sync();
+            ui::status_right(&status(0));
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
+            dv
+        };
+        for style in 1..=3u8 {
+            ui::set_short_style(style);
+            for (name, r, b) in &short_cases {
+                let k = if *name == "diode-pn" { 2 } else { 1 };
+                for bar in [true, false] {
+                    for lim in [meter::V_NONE, meter::V_PASS, meter::V_HI] {
+                        page(r, *b, k, bar, lim);
+                        ck.check(&format!("short/s{style}/{name}/b{}/l{lim}", bar as u8), &dmm_page_regions);
+                        // Off -> on and on -> off, new readings after the
+                        // switch: as a fresh page (rows < 176).
+                        for (from, to) in [(0u8, k), (k, 0)] {
+                            page(r, *b, to, bar, lim);
+                            let want = emu().fb.clone();
+                            let mut dv = page(r, *b, from, bar, lim);
+                            dv.short = to;
+                            dv.short_sync();
+                            dv.reading(r, 0, lim);
+                            let mut r2 = *r;
+                            r2.main.v *= 0.5;
+                            dv.reading(&r2, 0, lim);
+                            dv.reading(r, 0, lim);
+                            ck.cases += 1;
+                            let got = &emu().fb;
+                            let bad = (0..W * 176).filter(|&i| got[i] != want[i]).count();
+                            if bad > 0 {
+                                ck.fail(&format!("short/s{style}/{name}/{from}->{to}/b{}/l{lim}", bar as u8), format!("{bad} stale pixels"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Renders: off, then each style; continuity, a diode short, a
+        // diode pattern (BEEP).
+        let mut n = 1;
+        for (name, k) in [("cont", 1u8), ("diode", 1), ("diode-pn", 2)] {
+            let (_, r, b) = short_cases.iter().find(|c| c.0 == name).unwrap();
+            for style in [0u8, 1, 2, 3] {
+                if style == 0 && name == "diode-pn" {
+                    continue;
+                }
+                ui::set_short_style(style.max(1));
+                page(r, *b, if style == 0 { 0 } else { k }, true, meter::V_NONE);
+                let tag = ["off", "band", "digits", "band-digits"][style as usize];
+                save(&out, &format!("b{n:02}-short-{name}-{tag}"));
+                n += 1;
+            }
+        }
+        ui::set_short_style(ui::SHORT_STYLE);
+        // (c) mock-up: the bargraph row as a green band (not in the
+        // firmware: with Settings "DMM row" History the row holds the
+        // history boxes, and the bar is the reading's live picture).
+        let (_, r, b) = &short_cases[0];
+        page(r, *b, 0, true, meter::V_NONE);
+        let br = stockfont::rect(8, 147, 464, 26);
+        stockfont::rbox(br, 6, ui::SHORT_BG, ui::BG);
+        stockfont::glyphs(stockfont::TEXT22, br, "SHORT", 0xFFFF, ui::SHORT_BG, 8, 2);
+        save(&out, &format!("b{n:02}-short-cont-barrow-mockup"));
+        // Combined view: the strip's badge SHORT / BEEP and its value green
+        // (scope_page.rs sp_strip); off -> on -> off equals a fresh strip.
+        for (i, (name, r, _)) in short_cases.iter().enumerate() {
+            let k = if *name == "diode-pn" { 2u8 } else { 1 };
+            let strip = |on: bool| {
+                let mut d = ui::strip_data(r, 0, meter::V_NONE, false, 0, false, None);
+                ui::strip_acc(&mut d, r, Some(ui::Acc { model: 2, tc: true }));
+                if on {
+                    d.badge = if k == 1 { "SHORT" } else { "BEEP" };
+                    d.badge_col = ui::SHORT_BG;
+                    d.short = true;
+                }
+                scope_ui::meter_strip(&d);
+            };
+            combined(r, None, 0, meter::V_NONE, false, false, false, "");
+            strip(true);
+            ck.check_area(&format!("short/strip/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
+            if i == 0 || k == 2 {
+                save(&out, &format!("b{:02}-short-combined-{name}", n + 1 + i));
+            }
+            for on in [false, true] {
+                combined(r, None, 0, meter::V_NONE, false, false, false, "");
+                strip(on);
+                let want = emu().fb.clone();
+                combined(r, None, 0, meter::V_NONE, false, false, false, "");
+                strip(!on);
+                strip(on);
+                ck.same_as(&format!("short/strip/{name}/{}", on as u8), &want);
+            }
         }
     }
 
