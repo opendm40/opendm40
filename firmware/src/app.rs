@@ -5138,6 +5138,7 @@ impl App {
                 }
                 matches!(op, 1 | 2 | 4 | 6 | 8)
             }
+            #[cfg(feature = "dbg-acdc")]
             C::DbgAcdc => {
                 let mut b = [0u8; 400];
                 let n = self.dmm.acdc_diag_text(&mut b);

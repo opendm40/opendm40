@@ -718,8 +718,10 @@ pub enum Dbg {
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
+    #[cfg_attr(not(feature = "dbg-hyspi"), allow(dead_code))]
     HySpi(u16, u8),
     /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`).
+    #[cfg_attr(not(feature = "dbg-hyspi"), allow(dead_code))]
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
@@ -2291,7 +2293,10 @@ impl Scpi {
                         None => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
+                // DBG:ACDC? only with --features dbg-acdc (region B audit #9).
+                _ if cfg!(feature = "dbg-acdc") && p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => {
+                    out = Out::Instr(Cmd::DbgAcdc)
+                }
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
@@ -2351,7 +2356,9 @@ impl Scpi {
                     }
                 }
                 // HY3131 bus self-test (src/hyspi.rs, main.rs).
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HYSPI"[..]) => {
+                // Only with --features dbg-hyspi (region B audit #9): else
+                // an undefined header.
+                _ if cfg!(feature = "dbg-hyspi") && p0 == b"DBG" && parts.get(1) == Some(&&b"HYSPI"[..]) => {
                     let a = trim(arg);
                     let mut it = a.split(|&b| b == b',').map(trim);
                     let first = it.next().unwrap_or(&[]);
