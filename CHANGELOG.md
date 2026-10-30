@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Russian README and user manual:** [README.ru.md](README.ru.md) and
+  [docs/manual/README.ru.md](docs/manual/README.ru.md), with a language
+  switch at the top of each.
 - **600 MΩ range, experimental:** on the range page or SCPI
   `RES:RANG 600E6` only, never in AUTO; accuracy not specified. Leave the
   leads open once: it learns the meter's own leakage
