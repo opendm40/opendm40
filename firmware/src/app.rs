@@ -4851,7 +4851,7 @@ impl App {
                 app_touchtest::tc_scpi(op, out)
             }
             C::DbgView => {
-                // <view>,<settings section 1..7>,<wave view on>,<trend chart
+                // <view>,<settings section 1..6>,<wave view on>,<trend chart
                 // ms/div> (emulator tests: where a DBG:KEY / DBG:TAP landed;
                 // settingstest.py).
                 out.put_bytes(ui::view_name(self.view).as_bytes());
