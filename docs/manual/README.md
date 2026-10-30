@@ -242,8 +242,8 @@ the combined view switches to the next sub-mode of the current function
   do not count for **Dim screen**: during a long remote session the screen
   still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
-  MIN/MAX/AVG session runs, or while the power meter counts energy with a
-  current flowing. The screen still dims.
+  MIN/MAX/AVG session runs, while the power meter counts energy with a
+  current flowing, or while the inrush page is armed. The screen still dims.
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
