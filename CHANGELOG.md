@@ -39,6 +39,13 @@ section named after the tag as the release notes; how to cut a release:
   for up to 10 s; the part after the trigger point is at most 52 156
   samples, the part before it what the memory keeps
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- **Protocol decoder:** UART (RS-232, RS-485) and Modbus RTU drawn under
+  the trace, each triggered capture and on STOP, also in the Wave view;
+  or a frame log (Mode Log) decoded while the input streams, each frame
+  with its waveform, read over SCPI as a FIFO. Scope MF > Decode; SCPI `DECode`
+  ([manual](docs/manual/README.md#protocol-decoder)).
+
+  ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
 
 ### Changed
 

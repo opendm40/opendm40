@@ -598,6 +598,51 @@ and `MEASure:POWer?` then give the real power P in W.
 - Only the SCReen + BYTE reply may be combined with other queries in one
   message.
 
+## Protocol decoder
+
+UART and Modbus RTU on the scope page ([the decoder](README.md#protocol-decoder)).
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `DECode:PROTocol[?]` | `OFF` (default), `UART` or `MODBus` | `OFF`, `UART` or `MODB` | both |
+| `DECode:BAUD[?]` | bit rate, 300 .. 115200, or `AUTO` (default) | `AUTO` or `9600` | both |
+| `DECode:RATE?` | | the bit rate of the decoded record: `9600` (`0`: none) | both |
+| `DECode:FORMat[?]` | `8N1` (default), `8E1`, `8O1` or `7E1` | `8N1` | both |
+| `DECode:POLarity[?]` | `NORMal` (default) or `INVerted` (RS-232 levels) | `NORM` or `INV` | both |
+| `DECode:THReshold[?]` | level, V at the probe tip, or `AUTO` (default) | `AUTO` or `+1.500000E+00` | both |
+| `DECode:LEVel?` | | the level of the decoded record, V (`+9.91E37`: none) | both |
+| `DECode:MODE[?]` | `BAND` (default: under the trace) or `LOG` (the frame log; leaving it: `BAND`) | `BAND` or `LOG` | both |
+| `DECode:COUNt?` | | `frames,bytes,framing,parity,crc,lost` (Band: of what `DECode:FRAMes?` reports, `lost` 0; Log: since the start or `DECode:CLEar`) | both |
+| `DECode:FRAMes?` | Band: `[<first>]`, from frame number `first` (default 0); Log: `[<n>]`, at most n frames (default all) | block of frame lines | both |
+| `DECode:CLEar` | | Log: the list and the counters start again | both |
+
+- `DECode:FRAMes?` answers a `#4nnnn` block of text lines, one per frame:
+  `seq,time_s,proto,hex,status,info`, of the decoded record: running, the
+  last record that triggered; stopped, the stored record (decoded on the
+  query if the scope page has not shown it). It holds up to 80 bytes and
+  16 Modbus frames; a record with more: those around the screen. `seq`
+  counts from 0; a reply holds as many whole lines as fit (about 6 kB), so
+  read on from the last `seq` + 1 until the block is empty (`#40000`).
+
+  `time_s` is the frame start in seconds from the trigger point (as Save
+  CSV), `proto` `UART` or `MB`, `hex` the bytes, `status` `OK`, `FE`
+  (framing error), `PE` (parity), `CRC` or `PART` (the frame runs past the
+  record or the screen). Modbus `info`: the fields, for example `REQ 01 03
+  @0000 n=10`, `RSP 01 03 20B req=12` (the request's `seq`), `EXC 01 83
+  E02`; `?` without fields. UART frames: bytes with less than 2 character
+  times between them, at most 16.
+- Log (`DECode:MODE LOG`, the scope page's input): `DECode:FRAMes?` gives
+  the frames not read yet, oldest first, and moves past them (a FIFO; poll
+  it to follow the bus). `time_s` counts from the log's start; `seq`
+  numbers every frame; a gap in `seq` means frames the list dropped
+  (oldest first when full) before they were read. `lost`: times the
+  decoder fell behind the input (samples skipped). `LOG` in the Wave view:
+  `Settings conflict`.
+- With too few samples per bit (fewer than 4: a slow timebase, the Wave
+
+  view above 4800 baud) nothing is decoded; `DECode:RATE?` gives `0` with
+  `AUTO`.
+
 ## Generator (SOURce)
 
 | Command | Parameters | Reply | Link |

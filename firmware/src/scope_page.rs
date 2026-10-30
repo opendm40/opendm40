@@ -181,6 +181,11 @@ static mut CACHE: Cache = Cache {
     ps_t: 0,
 };
 
+/// The shown frame's column rows (the decoder's bar, app_decode.rs).
+pub(super) fn cache_seg() -> &'static [(i16, i16); 400] {
+    &cache().seg
+}
+
 fn cache() -> &'static mut Cache {
     unsafe { &mut *core::ptr::addr_of_mut!(CACHE) }
 }
@@ -560,6 +565,8 @@ impl App {
             rec: crate::csvlog::active(),
             rec_dim: su::rec_blink(now),
             rec_unit: su::rec_unit(self.rec_func),
+            dec: self.dec_band(),
+            dec_gen: self.dec_gen_shown(),
         }
     }
 
@@ -834,6 +841,8 @@ impl App {
         c.hpos = s.hpos;
         c.range = s.range;
         c.tb = s.tb;
+        // The protocol decoder's band (app_decode.rs).
+        self.dec_frame(f);
         self.sp_math_frame(f);
         self.sp_render();
     }
@@ -2157,10 +2166,11 @@ impl App {
             pcond: s.pcond,
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
+            dec: self.dec_setup_vals(),
         }
     }
 
-    fn sp_popup_draw(&mut self) {
+    pub(super) fn sp_popup_draw(&mut self) {
         // The box's fills wait for its widgets (lcd.rs "deferred fills").
         crate::lcd::defer_start();
         let v = self.sp_popvals();
@@ -2187,7 +2197,7 @@ impl App {
     /// only that (`sp_uncover`, the next tick); the combined view, whose
     /// popups also cover the meter strip, repaints the whole page.
     #[inline(never)] // region C (link-native.x)
-    fn sp_popup_close(&mut self) {
+    pub(super) fn sp_popup_close(&mut self) {
         let grey = match self.sp.popup {
             su::Popup::Ch1(_) => 1,
             su::Popup::Math(_) => 2,
@@ -2302,6 +2312,7 @@ impl App {
                         su::TbHit::Row(r) => self.sp_tb_pick(r, now),
                         su::TbHit::Inside => {}
                     },
+
                     su::Popup::None => {}
                 }
                 if had_press && self.sp.popup != su::Popup::None && !self.redraw {
@@ -2485,6 +2496,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::Dec(h) => {
+                self.dec_setup_tap(clk, h, now);
+                return;
+            }
+
         }
         let _ = clk;
         self.sp_popup_draw();

@@ -864,6 +864,64 @@ stack headroom (each gains the same ~5.6 KB of C):
 Next candidates if C gets tight again (DBG-only, still in C): `hyspi`
 (DBG:HYSPI:SELF? / WR?, 2.3 KB), `boot::put_info` (DBG:BOOT?, 1.6 KB).
 
+### Protocol decoder (2026-10-28, feat/decoder-uart)
+
+The decoder band (src/decode.rs, app_decode.rs, ui_decode.rs) decodes each
+stored record once (running: one that triggered; stopped: on STOP), in
+the main loop (`dec_step`, up to 3 ms a pass) while the next acquisition
+waits (`Scope::hold_restart`), and keeps its bytes and frames
+(`ui_decode::ANN`: 80 bytes, 16 frames, ~1.3 KB) in TCM; every redraw
+draws from them. SRAM is untouched (the scope ring of feat/scope-dlg-ring
+leaves 8.5 KB). All of it is region B (emu/decodetest.py: no region C
+function while the Wave view's AD2 stream ISR owns the bus).
+
+| | feat/scope-dlg-ring (4f4294eb) | with the decoder |
+|---|---|---|
+| region B free | 46 300 B | 29 940 B |
+| region C free | 8 196 B | 8 240 B |
+| stack headroom (static worst path) | 22 220 B | 20 656 B |
+| SRAM free | 8 524 B | 8 524 B |
+
+Variants (B / C free, headroom): recovery-usb 28 532 / 8 276 / 21 168 B,
+recovery-file 29 780 / 7 752 / 20 656 B, no-ad2-isr 39 000 / 9 244 /
+21 128 B, spi-disk 48 064 / 18 216 / 22 244 B, fatren-dry-run 29 924 /
+8 664 / 20 656 B, keep-screen 29 972 / 8 232 / 20 656 B, mute 29 620 /
+8 120 / 20 656 B.
+
+Cost (emulator at --mips 110, DBG:PROF?: `dec.job` one record's decode,
+`x2` a pass's part of it, `s.frame` the frame; UART traffic on MCX, Auto
+sweep with the trigger level in the swing, 3 s running; emu/decodetest.py):
+
+| s/div | baud | frames off / on | frame avg, us (off / on) | decode per record avg / max, us |
+|---|---|---|---|---|
+| 1 ms | 9600 | 79 / 70 | 6 887 / 6 978 | 3 049 / 8 328 |
+| 10 ms | 9600 | 24 / 24 | 6 887 / 7 247 | 2 296 / 2 797 |
+| 100 ms | 9600 | 3 / 3 | 6 887 / 6 978 | 115 / 169 (the note) |
+| 1 ms | 115200 | 89 / 69 | 6 887 / 7 253 | 4 098 / 4 904 |
+| 10 ms | 115200 | 25 / 25 | 6 887 / 6 978 | 133 / 178 (the note) |
+| 100 ms | 115200 | 3 / 3 | 6 887 / 6 978 | 123 / 140 (the note) |
+
+STOP: one decode of the stored record (1 ms/div 3.9-4.3 ms); a pan or zoom
+inside what is kept: none; outside it (a record with more than the lists
+hold): the window, ~2 ms. A pass decodes for up to 3 ms (`x2` max
+3.3 ms); the next acquisition waits for the decode: at 1 ms/div 70 / 69
+frames in 3 s instead of 79 / 89.
+
+The frame log (Mode Log, app_log.rs, ui_log.rs) lends BUF from the scope
+(`Scope::log_begin`): its first 16 K samples a circular DMA ring, then
+`app_log::Log` (the decoder and the view, under 1 KB), a snippet's
+decoded samples (8 KB), then the frame store (~44 KB with CAP 42 K; 32 KB
+in recovery-usb's 36 K, which has no scope). TCM: a pointer; SRAM:
+nothing. Region B 18 780 B free, region C 5 668 B (the waveform view and
+the log's top bar / counters, `.text.log_cold`; variants: B 16 900 ..
+36 576 B, C 5 180 .. 15 684 B, mute 17 804 / 5 564 B). No idle power-off
+while the log runs. While the log
+streams, the settings save and the screenshot clusters' erase wait (an
+SPI erase outlasts the 13 ms ring at 1.25 MS/s). The static worst path is 24 728 B (headroom 20 600 B).
+Emulator (--mips 110): a pass decodes for at most 3 ms (`x2` max 1.6 ms
+at 115200 with traffic), 4 588 frames in 3 s at 115200 without a lost
+sample; 267 Modbus 19200 frames with their waveforms fill the store.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as

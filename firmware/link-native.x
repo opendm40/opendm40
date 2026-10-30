@@ -134,6 +134,13 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* The decoder's frame log: a frame's waveform, drawn on a tap, and
+         * the top bar / counters (app_log.rs `log_snip_show`, `log_stats`:
+         * `.text.log_cold`). The log streams
+         * by DMA (the decode catches up from its ring); it never runs with
+         * the AD2 stream (the Wave view refuses it). */
+        *(.text.log_cold*);
+
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
          * polls them while the Wave view's stream runs (device c830e09:

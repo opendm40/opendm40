@@ -36,8 +36,9 @@ limitations](#known-limitations).
 4. [Safety and alerts](#safety-and-alerts): wrong-connection alerts, the
    danger alarm, the fuse check.
 5. [Oscilloscope](#oscilloscope): timebase, V/div, triggers, cursors,
-   measurements, FFT, Save CSV, and the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
-   on the multimeter inputs.
+   measurements, FFT, Save CSV, the [protocol decoder](#protocol-decoder) and
+   the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs) on the
+   multimeter inputs.
 6. [Combined view](#combined-view): the multimeter and the scope on one
    screen; analog power.
 7. [Signal generator](#signal-generator)
@@ -362,6 +363,7 @@ lightning from 100 V). opendm40 adds:
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
 | Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 43 008 faster |
+| Serial decoding | — | [UART and Modbus RTU](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -1507,6 +1509,7 @@ smooth signal):
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Decode**: the [protocol decoder](#protocol-decoder).
 
 
 ![The Settings tab](img/scope-settings.png)
@@ -1518,6 +1521,43 @@ sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
 the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
+
+### Protocol decoder
+
+**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
+or Modbus RTU, drawn under the trace: a box per byte, Modbus frames above
+them, errors in red. Each capture is decoded once: running, one that
+triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
+Zoom and pan show the decoded capture.
+
+![The Decode tab](img/scope-decode-tab.png)
+
+| ![UART: hex and the character in each box](img/scope-decode.png) | ![Modbus RTU stopped: request, reply, a CRC error](img/scope-decode-modbus.png) |
+|---|---|
+| UART: hex and the character in each box | Modbus RTU, stopped: frames and a CRC error |
+
+- **Mode**: **Band** (under the trace) or **Log**: a list of every frame
+  while the input streams, for as long as it runs (up to 115200 baud). Tap
+  a frame: its waveform with its bytes (tap again: the list). The list
+  fills the scope's record memory, the oldest frames go first: about 270
+  Modbus frames with their waveforms. **SCOPE** goes back: the list is
+  gone, the scope starts a new capture.
+
+  | ![The frame log: Modbus RTU](img/scope-decode-log.png) | ![A frame's waveform](img/scope-decode-log-wave.png) |
+  |---|---|
+  | The frame log | A frame tapped: its waveform |
+
+- Settings: protocol (**Off**, **UART**, **Modbus**), baud (**Auto** or 300
+
+  to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
+  (**Auto** or a level).
+- Zoomed out, the bytes become a bar. Too few samples per bit: **Rate too
+  low for N baud**: use a faster timebase.
+- In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
+  between A and B on the floating multimeter input, up to 4800 baud (9600
+  at 1 ms/div), e.g. a slow Modbus bus; decoded on STOP.
+
+- Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs
 

@@ -315,6 +315,43 @@ pub enum Out {
     Mmem(Mmem),
     /// Inrush current (INRush:...), handled by the main loop with the app.
     Inr(Inr),
+    /// Protocol decoder (DECode:...), handled by the main loop with the app.
+    Dcd(Dcd),
+}
+
+/// Protocol decoder on the scope page (src/decode.rs, src/app_decode.rs);
+/// `None` = query:
+///   DECode:PROTocol OFF|UART|MODBus / ?  OFF / UART / MODB (the band)
+///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
+///   DECode:RATE?                     the bit rate of the last decode (0: none)
+///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
+///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
+///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
+///   DECode:LEVel?                    the level of the last decode, V
+///   DECode:MODE BAND|LOG / ?         the band on the scope page, or the
+///                                    frame log (View::Decode, app_log.rs)
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc,lost
+///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines. Band: from
+///                                    frame `n` of the decoded record; Log:
+///                                    the unread frames (at most n; 0 all)
+///   DECode:CLEar                     Log: the list and counters start again
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dcd {
+    /// decode::P_OFF / P_UART / P_MODBUS.
+    Proto(Option<u8>),
+    /// Some(0) = AUTO.
+    Baud(Option<u32>),
+    Rate,
+    Fmt(Option<u8>),
+    Inv(Option<bool>),
+    /// Some(NaN) = AUTO.
+    Thr(Option<f32>),
+    Level,
+    /// ui_decode MODE_BAND / MODE_LOG.
+    Mode(Option<u8>),
+    Count,
+    Frames(u32),
+    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -2539,6 +2576,83 @@ impl Scpi {
                         Some(c) => out = Out::Inr(c),
                         None => {
                             self.err_arg(no_arg, if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
+                }
+                _ if kw(p0, "DECode") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    let auto = kw(a, "AUTO");
+                    let c = if kw(sub, "PROTocol") {
+                        if query {
+                            Some(Dcd::Proto(None))
+                        } else if kw(a, "OFF") {
+                            Some(Dcd::Proto(Some(crate::decode::P_OFF)))
+                        } else if kw(a, "UART") {
+                            Some(Dcd::Proto(Some(crate::decode::P_UART)))
+                        } else if kw(a, "MODBus") {
+                            Some(Dcd::Proto(Some(crate::decode::P_MODBUS)))
+                        } else {
+                            None
+                        }
+                    } else if sub == b"BAUD" {
+                        if query {
+                            Some(Dcd::Baud(None))
+                        } else if auto {
+                            Some(Dcd::Baud(Some(0)))
+                        } else {
+                            parse_num(a).filter(|v| (crate::decode::MIN_BAUD as f32..=crate::decode::MAX_BAUD as f32).contains(v)).map(|v| Dcd::Baud(Some(v as u32)))
+                        }
+                    } else if kw(sub, "RATE") && query {
+                        Some(Dcd::Rate)
+                    } else if kw(sub, "FORMat") {
+                        if query { Some(Dcd::Fmt(None)) } else { crate::decode::FMT_NAMES.iter().position(|n| a.eq_ignore_ascii_case(n.as_bytes())).map(|i| Dcd::Fmt(Some(i as u8))) }
+                    } else if kw(sub, "POLarity") {
+                        if query {
+                            Some(Dcd::Inv(None))
+                        } else if kw(a, "NORMal") {
+                            Some(Dcd::Inv(Some(false)))
+                        } else if kw(a, "INVerted") {
+                            Some(Dcd::Inv(Some(true)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "THReshold") {
+                        if query {
+                            Some(Dcd::Thr(None))
+                        } else if auto {
+                            Some(Dcd::Thr(Some(f32::NAN)))
+                        } else {
+                            parse_num_u(a, b"V").filter(|v| v.abs() <= 100.0).map(|v| Dcd::Thr(Some(v)))
+                        }
+                    } else if kw(sub, "LEVel") && query {
+                        Some(Dcd::Level)
+                    } else if kw(sub, "MODE") {
+                        if query {
+                            Some(Dcd::Mode(None))
+                        } else if kw(a, "BAND") {
+                            Some(Dcd::Mode(Some(0)))
+                        } else if kw(a, "LOG") {
+                            Some(Dcd::Mode(Some(1)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "CLEar") && !query {
+                        Some(Dcd::Clear)
+                    } else if kw(sub, "COUNt") && query {
+                        Some(Dcd::Count)
+                    } else if kw(sub, "FRAMes") && query {
+                        if a.is_empty() { Some(Dcd::Frames(0)) } else { parse_num(a).filter(|v| *v >= 0.0).map(|v| Dcd::Frames(v as u32)) }
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Dcd(c),
+                        None => {
+                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes", "MODE"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+
+                            self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }
                     }
