@@ -98,6 +98,8 @@ def main():
 
     if tm is None:
         bad.append('no USB/IP attach')
+    elif not q('DBG:SENT:REG?'):
+        print('beeptest: skipped: DBG:SENTinel:REG? not in this build (--features dbg-sent)', flush=True)
     else:
         try:
             for ph, scpi, want in PHASES:

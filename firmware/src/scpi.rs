@@ -696,6 +696,7 @@ pub enum Dbg {
     /// x0, y0, x1, y1, ms, hold ms, jitter px.
     Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
+    #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
     Diag,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log
     /// (feature `dbg-touch`).
@@ -738,6 +739,7 @@ pub enum Dbg {
     /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
     /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
     /// (dmm::Ohm600, Dmm::ohm600_dbg).
+    #[cfg_attr(not(feature = "dbg-ohm6"), allow(dead_code))]
     Ohm6(Option<[f32; 5]>),
 }
 
@@ -971,6 +973,7 @@ pub enum Cmd {
     /// DBG:ALARm?: the danger alarm's state.
     DbgAlarm,
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
@@ -978,9 +981,11 @@ pub enum Cmd {
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     DbgSentReg,
     /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
     /// the ohm-source map row (src/dbgsrc.rs).
+    #[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
     DbgSrc(Option<crate::dbgsrc::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
@@ -2305,7 +2310,9 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
+                #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                #[cfg(feature = "dbg-src")]
                 _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"SRC" => {
                     if query {
                         out = Out::Instr(Cmd::DbgSrc(None));
@@ -2323,6 +2330,8 @@ impl Scpi {
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
+                // DBG:SENTinel? / :REG? only with the feature `dbg-sent`.
+                #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {
@@ -2433,6 +2442,8 @@ impl Scpi {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
+                        // Without the feature: no such header (Cargo.toml).
+                        #[cfg(feature = "dbg-diag")]
                         b"DIAG" => Dbg::Diag,
                         // Without the feature: no such header (Cargo.toml).
                         #[cfg(feature = "dbg-touch")]
@@ -2493,6 +2504,7 @@ impl Scpi {
                             continue;
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
+                        #[cfg(feature = "dbg-ohm6")]
                         b"OHM6" => Dbg::Ohm6((!query).then(|| {
                             let mut v = [f32::NAN; 5];
                             for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {

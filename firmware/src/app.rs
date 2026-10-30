@@ -5054,6 +5054,7 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-src")]
             C::DbgSrc(Some(r)) => {
                 match self.dmm.src_req(clk, r) {
                     Ok(()) => self.host_func_changed(),
@@ -5061,10 +5062,14 @@ impl App {
                 }
                 false
             }
+            #[cfg(feature = "dbg-src")]
             C::DbgSrc(None) => {
                 self.dmm.src_text(out);
                 true
             }
+            #[cfg(not(feature = "dbg-src"))]
+            C::DbgSrc(_) => false,
+            #[cfg(feature = "dbg-sent")]
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);
@@ -5093,6 +5098,7 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-sent")]
             C::DbgSent => {
                 let mut b = [0u8; 96];
                 let n = self.dmm.sent.diag_text(&mut b);
