@@ -183,6 +183,9 @@ pub struct Model {
     /// A USB host has the meter configured: the small USB symbol between
     /// the trigger badge and the battery (`usb_icon`).
     pub usb: bool,
+    /// A Bluetooth host is connected: the Bluetooth rune in the same gap
+    /// (`usb_icon`; with USB too, left of it, the battery 3 px right).
+    pub bt: bool,
     /// Roll mode (record bar "ROLL").
     pub roll: bool,
     /// Record bar window (start, end) as fractions of the record.
@@ -303,6 +306,7 @@ impl Model {
         battery: 4,
         charging: false,
         usb: false,
+        bt: false,
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
@@ -822,14 +826,22 @@ pub fn trig_badge(m: &Model) {
     badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal_text()), (&t, m.pal_text())]);
 }
 
-/// 2.6 battery (outline + level clipped to (437,3,33,12)).
+/// The battery's shift to the right (px) while both the Bluetooth rune and
+/// the USB symbol need the gap before it (`usb_icon`).
+fn icons_dx(m: &Model) -> i16 {
+    if m.bt && m.usb { 3 } else { 0 }
+}
+
+/// 2.6 battery (outline + level clipped to (437,3,33,12)); `icons_dx` px
+/// further right with both link icons. Painted over both places.
 pub fn battery(m: &Model) {
-    let r = rect(435, 1, 40, 16);
+    let dx = icons_dx(m);
+    let r = rect(435 + dx, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
     let l = if m.battery > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + m.battery.min(5) as u32, 0) } else { Ink::none() };
-    let clip = rect(437, 3, 33, 12);
+    let clip = rect(437 + dx, 3, 33, 12);
     let lc = if m.charging { C_GREEN } else { C_WHITE };
-    paint(r, &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
+    paint(rect(435, 1, 43, 16), &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
                 return (lc, tag(2, g));
@@ -849,9 +861,20 @@ pub fn battery(m: &Model) {
 /// yoff -2 puts its top on the rect's.
 pub const USB_ICON: Rect = rect(414, 1, 21, 18);
 
+/// The link icons in that gap: the USB symbol, the Bluetooth rune (SC_BATT
+/// 0x31, 7 x 13, ink y 3..15), each centred alone; both: the rune at x
+/// 416..422, the symbol at 425..435, the battery moved 3 px right
+/// (`icons_dx`), 2 px between neighbours.
 pub fn usb_icon(m: &Model) {
-    let r = USB_ICON;
-    let u = if m.usb { Ink::icon(sf::SC_BATT, r, 0x30, 6) } else { Ink::none() };
+    let dx = icons_dx(m);
+    let r = rect(USB_ICON.x, USB_ICON.y, USB_ICON.w + dx, USB_ICON.h);
+    // One Ink (stack: the top bar is on the deepest draw path).
+    let u = match (m.usb, m.bt) {
+        (true, true) => Ink::new(sf::SC_BATT, rect(416, 1, 20, 18), "\u{31}\u{30}", 0, 2),
+        (true, false) => Ink::icon(sf::SC_BATT, r, 0x30, 6),
+        (false, true) => Ink::icon(sf::SC_BATT, r, 0x31, 6),
+        (false, false) => Ink::none(),
+    };
     paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
         Some(g) => (C_WHITE, tag(1, g)),
         None => (C_BAR, 0),
@@ -2369,10 +2392,10 @@ pub fn update(m: &Model) {
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
         vdiv_badge(m);
     }
-    if d(ol.battery != m.battery || ol.charging != m.charging) {
+    if d(ol.battery != m.battery || ol.charging != m.charging || icons_dx(&ol) != icons_dx(m)) {
         battery(m);
     }
-    if d(ol.usb != m.usb) {
+    if d(ol.usb != m.usb || ol.bt != m.bt) {
         usb_icon(m);
     }
     for k in 0..7 {

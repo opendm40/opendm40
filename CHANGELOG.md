@@ -53,11 +53,17 @@ section named after the tag as the release notes; how to cut a release:
 
 - Power meter: **Vb 0.000** no longer in the warning colour with open leads.
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
+- Generator: the square wave's preview follows the duty cycle; it always showed 50 %
+  ([#81](https://github.com/opendm40/opendm40/issues/81)).
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.
+- Scope: a setting changed over SCPI while a popup is open shows at once in the top bar, the right
+  panel and the trace beside the popup, not only after it closes ([#82](https://github.com/opendm40/opendm40/issues/82)).
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
   and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
   ([manual](docs/manual/README.md#the-status-bar)).
+- Scope page and combined view: the top bar shows the **Bluetooth symbol** while a phone or a computer is
+  connected over Bluetooth, beside the USB symbol when both are connected ([#167](https://github.com/opendm40/opendm40/issues/167)).
 - **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
   that reply for the next host to connect.
 - **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
@@ -68,6 +74,8 @@ section named after the tag as the release notes; how to cut a release:
 - **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
   (`SYST:BEEP:VOL`, `SYST:ALER:ENAB`, `LOG:OSR`, `LOG:DUR`, `LOG:SRAT`, `LOG:CSV:INT` / `DUR`);
   `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
+- SCPI: `ACQ:SRAT?` of a stopped scope after a zoom answers the stored record's sample rate, as
+  the record preamble (`WAV:POIN MAX`) and Save CSV use, not the shown timebase's ([#158](https://github.com/opendm40/opendm40/issues/158)).
 - SCPI: `INRush:THReshold` and `POWer:PHASe` with a number out of range queue
   `-222 Data out of range`, not `-224 Illegal parameter value`.
 - `DBG:PING?`: the keepalive field reads `4294967295` (no limit) after boot
@@ -119,6 +127,9 @@ section named after the tag as the release notes; how to cut a release:
 - **Inrush:** the automatic power-off no longer switches the meter off while
   the page is armed and waits for a load to start
   ([#144](https://github.com/opendm40/opendm40/issues/144)).
+- Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
+  after an end (10 + gave 20 %, and 55 % was out of reach)
+  ([#91](https://github.com/opendm40/opendm40/issues/91)).
 
 ## v0.3.0 (2026-10-27)
 

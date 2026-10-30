@@ -251,6 +251,7 @@ recorded.
 | [`rollmeastest.py`](rollmeastest.py) | roll mode: no measurements while rolling (not the last frame's), a stopped roll record measured | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
+| [`popupscpitest.py`](popupscpitest.py) | scope: SCPI timebase / V/div changes while the CH1 popup is open show in the top bar at once (#82) | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
 | [`triglevtest.py`](triglevtest.py) | `TRIG:LEV` keeps the level as given (V/div steps, off screen); Normal triggers on it | ~2 min | free |
 | [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |

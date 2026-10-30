@@ -313,11 +313,10 @@ SECTIONS
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
         *(.text.*8opendm403app*3App9wave_open*);
-        /* A popup closed on the scope page (event rate): the page under it
-         * is marked for repaint (the repaint itself is in region B). */
-        *(.text.*8opendm403app*3App14sp_popup_close*);
-        *(.text.*8opendm403app*3App10sp_uncover*);
-        *(.text.*8opendm408scope_ui7uncover*);
+        /* NOT App::sp_popup_close / sp_uncover, scope_ui::uncover (~0.3 KB,
+         * region B since 2026-10-30): an MF popup open in the Wave view is
+         * closed by MENU while the AD2 stream runs (hy3131/wavetest.py
+         * "exit (MENU)"). */
         /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
         *(.text.*8opendm403app*3App8dbg_idle*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */

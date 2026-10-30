@@ -141,7 +141,10 @@ pub fn query(app: &App, cmd: Cmd, out: &mut Scpi) {
                 _ => b"WAIT",
             }
         }),
-        Cmd::AcqSrate => out.put_f32(sc.sample_rate() as f32),
+        // Stopped with a stored record: its rate (what WAV:PRE? x increment,
+        // the screen and Save CSV use), not the timebase shown after a zoom
+        // (#158).
+        Cmd::AcqSrate => out.put_f32(if record(app).is_empty() { sc.sample_rate() } else { sc.record_info().0 } as f32),
         _ => out.put_f32(-(sc.s.pos as f32) * 4.0 * sc.vdiv() / 141.0),
     }
 }

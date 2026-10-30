@@ -180,7 +180,7 @@ pub enum TrigMode {
     Single,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Settings {
     pub run: bool,
     pub tb: usize,
