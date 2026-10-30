@@ -127,12 +127,18 @@ def block(r):
 
 
 def get_file(l, name):
-    l.t.write('MMEM:DATA? "%s"' % name)
-    r = l.t.read(timeout=60)
-    d = block(r)
-    if d is None:
-        print('  MMEM:DATA? "%s": %r' % (name, r[:60]), flush=True)
-    return d
+    """A disk file in MMEM:DATA? pieces of 6000 bytes (firmware/tools/dm40scpi.py get_file)."""
+    data = b''
+    while True:
+        l.t.write('MMEM:DATA? "%s",%d' % (name, len(data)))
+        r = l.t.read(timeout=60)
+        d = block(r)
+        if d is None:
+            print('  MMEM:DATA? "%s",%d: %r' % (name, len(data), r[:60]), flush=True)
+            return None
+        data += d
+        if len(d) < 6000:
+            return data
 
 
 def check_log(l, pre, rows):
