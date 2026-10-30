@@ -707,7 +707,8 @@ impl App {
         // file on the SPI disk (setfile.rs; after a power-off the backup
         // SRAM holds none). A power-off starts a new measurement (owner
         // 2026-10-25): DC V and the measurement settings at their defaults;
-        // only a reset (the backup SRAM) continues them.
+        // only a reset (the backup SRAM) continues them, or Mode Remember ON
+        // (restore).
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
             a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
@@ -4092,10 +4093,10 @@ impl App {
                 match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
-                    // -/+ steppers (ui-review #12): 10 % steps, clamped.
+                    // -/+ steppers (ui-review #12): Backlight on the
+                    // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     Some(2) => {
-                        let d = ui::settings_step(x) as i16 * 10;
-                        self.backlight = (self.backlight as i16 + d).clamp(10, 100) as u8;
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
                         backlight(self.backlight);
                     }
                     Some(3) => {
@@ -5129,6 +5130,7 @@ impl App {
             self.host_scope = true;
             self.update_rails(clk);
         }
+        let sc0 = sc;
         let reply = match cmd {
             C::GenFunc(Some(w)) => {
                 g.wave = Wave::ALL[w as usize % 4];
@@ -5424,6 +5426,13 @@ impl App {
             && reply.is_none()
         {
             self.scope_set(sc, now);
+            if self.sp_on() && self.sp.popup != crate::scope_ui::Popup::None && self.scope.s != sc0 {
+                // A popup is open (#82): the page again with it (the graph
+                // around its box, then the popup), so the top bar, the panel
+                // and the popup's own values show the host's change now,
+                // not when the popup closes.
+                self.redraw = true;
+            }
             if matches!(cmd, C::Digitize) {
                 // After apply (a run change clears it): the acquisition it
                 // restarted is the one that ends the run.

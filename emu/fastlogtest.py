@@ -423,7 +423,7 @@ class UiNav:
         v = self.q('DBG:VIEW?')
         # The source badge in a session: the Wave view is refused (no
         # stream of its own while the logger owns the HY3131).
-        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and not v.endswith(',0')):
+        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and v.split(',')[2:3] != ['0']):
             self.bad.append('%s -> %s (want %s)' % (c, v, want))
         self.k = (self.k + 1) % len(NAV)
         self.n += 1

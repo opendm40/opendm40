@@ -2597,17 +2597,18 @@ pub fn gen_status(st: &Status) {
     sf::label(sf::BATTERY, rect(435, 10, 40, 16), battery_glyph(&mut b, st.bars), bc, G_BAR, 8, 0);
 }
 
-/// `gen_preview` in strips: the wave the table holds (its `sel` + 1; 0 =
-/// none) and each column's trace rows (from the preview's top). All zero
+/// `gen_preview` in strips: the wave the table holds (its `sel` + 1, the
+/// square's duty above bit 8; 0 = none) and each column's trace rows (from
+/// the preview's top). All zero
 /// at boot: `.sram_bss` is zeroed by the startup code, whatever the
 /// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
 /// table, so the boot-time Sine drew no trace).
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-pub(crate) static mut GEN_SP: (u8, [(u8, u8); 239]) = (0, [(0, 0); 239]);
+pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 
 // Region B (not inlined into the region C callers): drawn per strip.
 #[inline(never)]
-fn gen_preview(w: gen::Wave) {
+fn gen_preview(w: gen::Wave, duty: u16) {
     // Two periods over 238 points between h/4 and 3h/4, as the stock preview.
     let (x0, y0, ww, hh) = (4u16, 85u16, 239u16, 231u16);
     let sel = match w {
@@ -2616,6 +2617,10 @@ fn gen_preview(w: gen::Wave) {
         gen::Wave::Triangle => 2,
         gen::Wave::Square => 3,
     };
+    // The square is high for the effective duty of each period (#81).
+    let duty = if sel == 3 { duty.min(10000) } else { 0 };
+    let d = duty as f32 / 10000.0;
+    let key = (sel as u32 + 1) | (duty as u32) << 8;
     let yv = |i: u16| -> u16 {
         // The fraction (x in 0..2: exact, as `% 1.0`; f32 `%` pulls libm's
         // fmodf, ~0.7 KB, into region B).
@@ -2625,7 +2630,7 @@ fn gen_preview(w: gen::Wave) {
             0 => 0.5 + 0.5 * libsin(ph * 2.0 * core::f32::consts::PI),
             1 => ph,
             2 => if ph < 0.5 { ph * 2.0 } else { 2.0 - ph * 2.0 },
-            _ => if ph < 0.5 { 1.0 } else { 0.0 },
+            _ => if ph < d { 1.0 } else { 0.0 },
         };
         y0 + hh * 3 / 4 - (v * (hh / 2) as f32) as u16
     };
@@ -2638,7 +2643,7 @@ fn gen_preview(w: gen::Wave) {
         // Row by row into the strip from the columns' trace rows,
         // worked out once per wave (not once per strip).
         let sp = unsafe { &mut *core::ptr::addr_of_mut!(GEN_SP) };
-        if sp.0 != sel + 1 {
+        if sp.0 != key {
             let mut prev = yv(0);
             for i in 0..ww {
                 let y = yv(i.min(237));
@@ -2646,7 +2651,7 @@ fn gen_preview(w: gen::Wave) {
                 prev = y;
                 sp.1[i as usize] = ((a - y0) as u8, (b - y0) as u8);
             }
-            sp.0 = sel + 1;
+            sp.0 = key;
         }
         for y in ya..=yb {
             let yy = y - y0;
@@ -2708,7 +2713,7 @@ pub fn gen_values(g: &gen::Gen) {
     // Top bar: RUN/STOP (output state).
     sf::label(sf::F21, rect(BAR_X, 0, 80, 36), if s.on { "RUN" } else { "STOP" }, if s.on { 0x07E0 } else { STATUS_FG }, G_BAR, 1, 0);
     gen_wave_box(s.wave, G_BOX);
-    gen_preview(s.wave);
+    gen_preview(s.wave, g.out.duty);
     for k in 0..4 {
         gen_box(g, k, G_BOX);
     }
@@ -3142,6 +3147,19 @@ pub const REC_STEP_MINUS_X: i16 = 150;
 /// label and the "-" key) or +1.
 pub fn settings_step(x: u16) -> i8 {
     step_dir(x, STEP_MINUS_X)
+}
+
+/// Settings' Backlight stepper: the next value on the 10, 15, 25 ... 95, 100
+/// grid above (`dir` > 0) or below the current one, so 10 + goes to 15 and
+/// 100 - to 95 (the manual's list); an off-grid value (an old settings file)
+/// joins the grid on the first step.
+pub fn backlight_step(cur: u8, dir: i8) -> u8 {
+    const GRID: [u8; 11] = [10, 15, 25, 35, 45, 55, 65, 75, 85, 95, 100];
+    if dir > 0 {
+        GRID.iter().copied().find(|&g| g > cur).unwrap_or(100)
+    } else {
+        GRID.iter().rev().copied().find(|&g| g < cur).unwrap_or(10)
+    }
 }
 
 /// `settings_step` on the Record page.

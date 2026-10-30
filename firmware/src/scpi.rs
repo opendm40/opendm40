@@ -828,7 +828,8 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
-///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s)
+///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
+///   the stored record's rate)
 ///   RUN  STOP  SINGle   DIGitize (one acquisition with the current sweep,
 ///   then STOP)   TRIGger:STATus? (STOP|WAIT|AUTO|TD|RUN)
 ///   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?

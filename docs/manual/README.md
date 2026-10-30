@@ -1237,8 +1237,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
   the record bar, the V/div with the probe and coupling, the trigger (edge
-  and level), the USB symbol while a computer has the meter connected, the
-  battery.
+  and level), the Bluetooth symbol while a phone or a computer is connected
+  over Bluetooth, the USB symbol while a computer has the meter connected,
+  the battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored
@@ -2812,7 +2813,7 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
 | Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
