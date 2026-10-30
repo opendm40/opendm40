@@ -210,7 +210,8 @@ impl App {
         s.retries = s.retries.wrapping_add(s.cap.retries);
         s.bad = s.bad.wrapping_add(s.cap.bad);
         s.frames = s.frames.wrapping_add(1);
-        s.st = pv::stats(buf, &s.cap, &sc, trig.map_or(true, |t| t.y));
+        let y = trig.map_or(true, |t| t.y);
+        s.st = pv::stats(buf, &s.cap, &sc, y, if y { s.fu } else { s.fi } / 2.0);
         s.du = pv::div_for(s.st.upk, s.du, s.fu);
         s.di = pv::div_for(s.st.ipk, s.di, s.fi);
         pv::columns(buf, &s.cap, &sc, s.du, s.di, span_us);

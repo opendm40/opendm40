@@ -199,9 +199,11 @@ fn t_us(buf: &[u16], k: usize) -> f32 {
     (buf[T_AT + k] as u32 * T_UNIT_US) as f32
 }
 
-/// `Stats` of frame `c` (`y`: the channel the cycles are counted on).
+/// `Stats` of frame `c` (`y`: the channel the cycles are counted on; no
+/// cycles when its peak-peak is below `min_pp`, volts / amperes: noise on
+/// a DC level is not a frequency).
 #[inline(never)]
-pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool) -> Stats {
+pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool, min_pp: f32) -> Stats {
     let n = c.n;
     if n < 4 {
         return Stats::NONE;
@@ -249,7 +251,7 @@ pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool) -> Stats {
         }
         prev = Some((t, v));
     }
-    let whole = cycles >= 1 && hi - lo > 0.0;
+    let whole = cycles >= 1 && hi - lo >= min_pp && hi - lo > 0.0;
     let (ta, tb) = if whole { (first, last) } else { (f32::MIN, f32::MAX) };
     let (mut su, mut nu, mut si, mut ni, mut sp, mut np) = (0.0f32, 0u32, 0.0f32, 0u32, 0.0f32, 0u32);
     for k in 0..n {
@@ -509,7 +511,7 @@ mod tests {
         // 230 V rms, 1 A rms, 60 deg: P = 115 W; 100 ms at 100 us per sample.
         let mut b = Vec::new();
         let c = frame(&mut b, 1000, 100, 50.0, 325.27, 1.4142, core::f32::consts::PI / 3.0, &SC);
-        let s = stats(&b, &c, &SC, true);
+        let s = stats(&b, &c, &SC, true, 1.0);
         assert!((s.urms - 230.0).abs() < 0.3, "{s:?}");
         assert!((s.irms - 1.0).abs() < 0.003, "{s:?}");
         assert!((s.p - 115.0).abs() < 1.0, "{s:?}");
@@ -526,10 +528,16 @@ mod tests {
             b[k] = if k % 2 == 0 { (1200 + 5) as u16 } else { (20000 - 3) as u16 };
         }
         c.y_first = true;
-        let s = stats(&b, &c, &SC, true);
+        let s = stats(&b, &c, &SC, true, 1.0);
         assert!((s.urms - 12.0).abs() < 1e-3 && (s.irms - 2.0).abs() < 1e-3 && (s.p - 24.0).abs() < 0.01, "{s:?}");
         assert!(s.f.is_nan());
         assert!(next_trig(&b, &c, 10, 10).is_none());
+        // Noise of a few codes on the DC: no frequency.
+        for k in 0..c.n {
+            b[k] = b[k].wrapping_add([0u16, 3, 0xFFFE, 1][k % 4]);
+        }
+        let s = stats(&b, &c, &SC, true, 1.0);
+        assert!(s.f.is_nan() && (s.urms - 12.0).abs() < 0.05, "{s:?}");
     }
 
     #[test]

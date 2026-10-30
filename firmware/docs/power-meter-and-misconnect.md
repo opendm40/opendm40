@@ -785,9 +785,14 @@ writes it (`configure_ph`: SPHACAL first, AD3 then AD2, AD1 off), then:
   that SDO23 routes AD3 into the register);
 * the reads run every three conversions (156.25 us, `SLOT_CYC`), so each
   sits at the same place between two conversion edges and U and I lag
-  their conversions alike (a read every 2 x 13 us + a flip at a free time
-  gave P +0.5 .. +1.9 % at PF 0.5 in the emulator: a lag that differed
-  between the channels).
+  their conversions alike. In the emulator (one conversion grid) P at
+  PF 0.5 is within 0.2 % of the power meter's this way; reads at free
+  times gave +0.5 .. +1.9 % (a lag that differed between the channels).
+  On the chip AD3 is enabled one register write before AD2
+  (`configure_ph`), so its grid may sit ~10 us earlier (INFERRED from the
+  "AD2F twice per period" of `set_ad2_stream`; SPHACAL moves it by
+  0.407 us per step): a U / I skew of that size stays in the traces
+  (0.2 deg at 50 Hz).
 
 3200 samples per second and channel (64 per 50 Hz cycle), at most 2048
 samples per frame (the scope's record buffer, lent while the page is
@@ -801,8 +806,9 @@ frame's mid level on U (on I when U's peak-peak is below half a minimum
 division, free run when both are), then runs for the timebase's 10
 divisions; one frame every >= 250 ms. The frame blocks the main loop (up
 to ~260 ms at 20 ms/div). U, I and P are over the whole cycles of the
-trigger channel inside the frame (all of it without two crossings), f from
-those cycles. Scales: 1-2-5 per division, the peak within 3.5 divisions,
+trigger channel inside the frame (all of it without two crossings, or
+when its peak-peak is below half a minimum division: noise on DC is no
+frequency), f from those cycles. Scales: 1-2-5 per division, the peak within 3.5 divisions,
 kept while it stays within 1 .. 3.9; not below the range's full scale /
 100. A sample at the converter's rail shows "U OL" / "I OL". The ranges
 are the power meter's at the entry (no autorange on the page; a range
@@ -823,11 +829,12 @@ both channels on the AD2 stream ISR: its phase lock keys on INTF AD2F,
 which both converters set; its DMA frames have no write path for the R34
 flip; the read would have to fit the flip and two reads into one period.
 
-**Device checks** (none done; the emulator's model shows the selected
-converter live at each read):
-1. Mains through a resistive load and through a capacitor: the trace's
-   phase against the power meter's PF; P on the page against
-   `FETC:POW:ALL?`.
+**Device checks** (none done; the emulator's model latches the selected
+converter's value at each conversion, on one grid for both):
+1. Mains through a resistive load: P on the page (`POW:WAVE?`) within
+   ~1 % of `FETC:POW:ALL?`. Through a capacitor (PF ~0): the difference
+   of the two P measures the U / I skew, ~0.7 W per 10 us at 230 V, 1 A,
+   50 Hz (S x omega x skew); pass: within ~1 W (~15 us).
 2. `POW:WAVE?` repeated and unreadable read counts over a minute (the
    torn-read question at 19.2 kS/s).
 3. Whether the SDO23 flip with AD3 running disturbs AD3 (a DC voltage:

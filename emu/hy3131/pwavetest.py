@@ -16,10 +16,10 @@ Cases (default all):
          (FETC:POW:ALL? V 230, I 1 within 2 %); POW:WAVE ON / OFF over SCPI.
   dc     12 V, 2 A DC: Urms 12, Irms 2, P 24, f none (9.91E37).
   alt    POW:METH ALT: POW:WAVE ON refused (SYST:ERR? Settings conflict).
-The model reads R03..R05 as the live waveform of the selected converter
-(SDO23) at the read: whether the device latches it per conversion is the
-device check's question (doc 3.18), the firmware waits one conversion
-after each R34 write for that reason.
+The model latches R03..R05 at each conversion from the converter SDO23
+selects then, one conversion grid for both: whether the device does so
+(and how far AD3's grid sits from AD2's) is the device check's question
+(doc 3.18); the firmware waits one conversion after each R34 write.
 Exit status 0 = all passed. Results: emu/out/pwave-<case>.json.
 """
 import argparse

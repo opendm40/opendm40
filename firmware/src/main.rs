@@ -1543,7 +1543,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             app.invalidate();
         }
         logging_prev = busy;
-        app.logger_busy = busy;
+        app.logger_busy = logger.active();
 
         // No drawing right after a GRAM read-back, so a multi-request
         // screenshot does not tear (the first frame was drawn before USB
