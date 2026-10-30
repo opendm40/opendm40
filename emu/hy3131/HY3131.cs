@@ -1735,9 +1735,10 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-1e9, Math.Min(1e9, code + Dcos / rg * fs)));
             }
-            if((role == Role.Ohm || role == Role.Diode) && SrcDirect())
+            if((role == Role.Ohm || role == Role.Diode || role == Role.Cont) && SrcDirect())
             {
-                // opendm40 DBG:SRC: a direct node read, saturating at full scale
+                // opendm40 DBG:SRC / the continuity current phase (dmm.rs CONT_I_R24): a direct
+                // node read, saturating at full scale
                 code = SrcCode(ig, rg, fs);
                 if(NoiseScale > 0) code += Gauss() * 25.0 * Math.Sqrt(32768.0 / Osr1) * NoiseScale;
                 return (int)Math.Round(Math.Max(-(fs - 1), Math.Min(fs - 1, code + Dcos / rg * fs)));
@@ -2002,7 +2003,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private double SrcNode(string n)
         {
             double vs = 0, rref = 0, vx = 0, dummy;
-            if(role == Role.Ohm)
+            if(role == Role.Ohm || role == Role.Cont)
             {
                 OhmSource(out vs, out rref);
                 Fe.OhmNode(vs, rref, out vx, out dummy);
@@ -2010,7 +2011,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             else vx = Fe.DiodeNode(DiodeTestCurrent, DiodeCompliance);
             switch(n)
             {
-            case "FB": return role == Role.Ohm ? vs : 0;
+            case "FB": return role != Role.Diode ? vs : 0;
             case "RLU": return vx;
             case "PB0": case "OP1O": return role == Role.Diode ? vx / 10 : vx;
             case "VREF": return OhmSourceVolts();
@@ -2578,7 +2579,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     // other nodes: the AD1 reference buffers, SAD1FP / FN (not SDIO) and R28 are free.
                     // opendm40 ohm r0 (dmm.rs OHM_R0_ROW): the stock r0 row with PA2's DS2 / FS2 open.
                     if(row.Role == Role.Ohm && row.Range == 0 && j == 11) mask &= 0xF9;
-                    if(row.Role == Role.Ohm || row.Role == Role.Diode)
+                    // opendm40 continuity current phase (dmm.rs CONT_I_R24): R24 / R28 too.
+                    if(row.Role == Role.Ohm || row.Role == Role.Diode || row.Role == Role.Cont)
                     {
                         if(j == 3) mask &= 0xF3;
                         if(j == 4) mask &= 0x08;

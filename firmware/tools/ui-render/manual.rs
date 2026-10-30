@@ -330,7 +330,9 @@ pub fn run(out: &str) -> usize {
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
         // Continuity: a short, the beeper indicator on.
-        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, Some(val(202.8, 1, "\u{b5}A")), false)) }),
+        // Continuity: a source on the circuit drives current the other way.
+        ("dmm-cont-neg", Dp { rate: false, ..dp(Reading { alert: sentinel::Alert::Live, ..rd(11, val(0.0, 2, ohm), None, Some(val(-412.6, 1, "\u{b5}A")), false) }) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.

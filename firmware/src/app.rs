@@ -4558,6 +4558,21 @@ impl App {
                 out.put_bytes(if self.mode_remember { b"1" } else { b"0" });
                 true
             }
+            C::FetchContCur => {
+                // Continuity's last current measurement (Dmm::cont_i).
+                let i = self.dmm.cont_i;
+                if self.last_raw.as_ref().is_some_and(|r| r.mode == 11) && !i.is_nan() {
+                    if i.is_finite() {
+                        out.put_f32(i);
+                    } else {
+                        out.put_bytes(if i < 0.0 { b"-9.90000000E+37" } else { b"+9.90000000E+37" });
+                    }
+                } else {
+                    out.set_err("Data stale");
+                    out.put_bytes(b"+9.90000000E+37");
+                }
+                true
+            }
             _ => {
                 // The latest pre-REL reading of a current function.
                 match self.last_raw.as_ref().filter(|r| crate::sentinel::shunt_of(r.mode).is_some() && r.power.is_none()) {
@@ -5098,7 +5113,7 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
-        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
+        if matches!(cmd, C::FetchBurden | C::FetchContCur | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
             return self.burden_scpi(cmd, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {

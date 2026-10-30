@@ -657,7 +657,10 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // with and without the extra digit.
         ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
         ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
-        ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
+        // The continuity current (aux2, signed; dmm::cont_i_val).
+        ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, Some(val(-999.9, 1, "\u{b5}A")), false), None),
+        ("cont_ma", rd(11, val(0.0, 2, "\u{3a9}"), None, Some(val(-1.349, 3, "mA")), false), None),
+        ("cont_i_ol", rd(11, ol(2, "\u{3a9}"), None, Some(Val { v: -1.0, ..ol(3, "mA") }), false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
         // A reading with an OL aux value only ("Overload" before its 0L).
@@ -3522,8 +3525,9 @@ fn main() {
     // mock-up (not in the firmware).
     {
         let short_cases = [
-            ("cont", rd(11, val(0.4, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
-            ("cont-wide", rd(11, val(67.0, 1, "\u{3a9}"), None, None, false), Button::ContDiode),
+            ("cont", rd(11, val(0.4, 1, "\u{3a9}"), None, Some(val(203.1, 1, "\u{b5}A")), false), Button::ContDiode),
+            ("cont-wide", rd(11, val(67.0, 1, "\u{3a9}"), None, Some(val(-999.9, 1, "\u{b5}A")), false), Button::ContDiode),
+            ("cont-ol", rd(11, val(0.0, 1, "\u{3a9}"), None, Some(Val { v: -1.0, ..ol(3, "mA") }), false), Button::ContDiode),
             ("diode", rd(12, val(0.0042, 4, "V"), None, Some(val(5.5, 1, "\u{3a9}")), false), Button::ContDiode),
             ("diode-pn", rd(12, val(0.5871, 4, "V"), None, Some(val(767.4, 1, "\u{3a9}")), false), Button::ContDiode),
         ];

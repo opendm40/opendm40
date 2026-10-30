@@ -200,6 +200,11 @@
 //!     shunt 10 mohm / 0.5 ohm / 47.5 ohm), DC signed, AC and AC+DC the RMS,
 //!     REL ignored; outside the A functions / no reading: +9.9E37 and "Data
 //!     stale"; over range: +9.9E37 (doc 3.15). Works with the readout off.
+//!   FETCh:CONTinuity:CURRent?   the current (A) through the leads in
+//!     continuity, signed (+ the meter's own test current, - a source
+//!     driving the other way), measured about once a second (Dmm::cont_i);
+//!     +-9.9E37 beyond +-1.35 mA; outside continuity / none yet: +9.9E37
+//!     and "Data stale"
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
 //!     Settings 3/3 "Burden voltage", persisted, default OFF
@@ -974,6 +979,8 @@ pub enum Cmd {
     Pow(Pow),
     /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
     FetchBurden,
+    /// FETCh:CONTinuity:CURRent?: the continuity current (Dmm::cont_i).
+    FetchContCur,
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
     DispBurden(Option<bool>),
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
@@ -2734,6 +2741,9 @@ impl Scpi {
                 },
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
+                }
+                _ if kw(p0, "FETCh") && query && parts.len() == 3 && kw(parts[1], "CONTinuity") && kw(parts[2], "CURRent") => {
+                    out = Out::Instr(Cmd::FetchContCur)
                 }
                 // DISPlay:BURDen, [SENSe:]RESistance:NEGative,
                 // MEMory:STATe:RECall:AUTO: ON|OFF / ?.

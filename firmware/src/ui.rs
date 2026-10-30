@@ -313,6 +313,10 @@ pub struct DmmView {
     /// pattern); and the band as drawn (`short_sync`).
     pub short: u8,
     short_drawn: u8,
+    /// Continuity: the current (aux2) of the last reading, and the key of
+    /// the copy drawn in the band (`band_cur`; None = not drawn).
+    cont_cur: Option<crate::dmm::Val>,
+    band_cur_k: Option<(i32, bool)>,
 }
 
 /// Bargraph geometry in the history row's place (rows 150..172 between the
@@ -608,6 +612,8 @@ impl DmmView {
             acc_drawn: false,
             short: 0,
             short_drawn: 0,
+            cont_cur: None,
+            band_cur_k: None,
         }
     }
 
@@ -639,6 +645,25 @@ impl DmmView {
         self.aux_unit = [None; 2];
         self.last_aux = [false; 2];
         self.last_iohm = 255;
+        self.band_cur_k = None;
+        self.band_cur();
+    }
+
+    /// Continuity: the current (aux2, hidden under the band with the aux
+    /// row) at the band's right end, small, on a change.
+    #[inline(never)]
+    fn band_cur(&mut self) {
+        let Some(v) = self.cont_cur.filter(|_| self.band()) else {
+            return;
+        };
+        let k = (if v.ol { v.v as i32 } else { (v.v * 10.0) as i32 }, v.unit == "mA");
+        if self.band_cur_k == Some(k) {
+            return;
+        }
+        self.band_cur_k = Some(k);
+        let mut t = crate::scope_ui::Txt::new("I ");
+        cont_i_text(&v, &mut t);
+        sf::label(sf::F14, BAND_CUR_RECT, t.as_str(), 0xFFFF, SHORT_BG, 4, 1);
     }
 
     /// The accuracy label of `r` (the end of `reading`; `ulps`: `acc_ulps`
@@ -797,6 +822,7 @@ impl DmmView {
         self.last_iohm = 254;
         self.acc_drawn = false;
         self.short_drawn = 0;
+        self.band_cur_k = None;
     }
 
     /// Draw a reading on the standalone DMM page. `hold`: Meter::hold_state
@@ -1095,6 +1121,10 @@ impl DmmView {
             test_current_label(r.mode, r.range, self.ohm_on);
             self.last_iohm = ik;
         }
+        self.cont_cur = if r.mode == 11 { r.aux2 } else { None };
+        if band {
+            self.band_cur();
+        }
         // The phase is part of the key only while it alternates: no
         // repaint every second otherwise.
         // The key holds the auto state itself: AUTO+ and a manual range
@@ -1155,6 +1185,18 @@ const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
 fn ol_word(r: sf::Rect, c: Color) {
     let (f, sp) = if sf::text_width(sf::TEXT22, "Overload", 0) <= r.w { (sf::TEXT22, 0) } else { (sf::F14, 1) };
     sf::label(f, r, "Overload", c, BG, 2, sp);
+}
+
+/// The continuity current in the band (`band_cur`): its right part, right
+/// of the centred SHORT (SHORT_RECT, 3 px inside its rounded ends).
+const BAND_CUR_RECT: sf::Rect = rect(SHORT_RECT.x + SHORT_RECT.w - 3 - 132, SHORT_RECT.y + 3, 132, SHORT_RECT.h - 6);
+
+/// "203.1 uA", "-1.042 mA", "0L mA" (saturated, as the aux slot): the
+/// continuity current `v` (dmm::cont_i_val) in the 12 px stock font's ASCII.
+fn cont_i_text(v: &crate::dmm::Val, t: &mut crate::scope_ui::Txt) {
+    let mut b = [0u8; 16];
+    t.push(if v.ol { "0L" } else { crate::dmm::format(&mut b, v.v, v.dec) });
+    t.push(if v.unit == "mA" { " mA" } else { " uA" });
 }
 
 /// The test current label's box: the aux1 slot's left part (the burden

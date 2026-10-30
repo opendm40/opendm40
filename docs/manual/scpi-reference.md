@@ -444,6 +444,17 @@ Functions:
 - `DISPlay:BURDen` shows the burden voltage on the DMM page (DC A and AC A).
   Stored.
 
+## Continuity current
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `FETCh:CONTinuity:CURRent?` | | Current through the leads in continuity, A: `+2.031000E-04` | both |
+
+- Signed: positive is the meter's own test current, negative a source on
+  the circuit driving current the other way. Measured about once a second.
+  Beyond ±1.35 mA it answers `+9.9E37` or `-9.9E37`; outside continuity, or
+  before the first measurement, `+9.9E37` with `Data stale`.
+
 ## CALCulate: hold, statistics, limits, smoothing
 
 These act on the present DMM function; values are in its SI unit (W in the

@@ -686,6 +686,43 @@ pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
 /// MR9270S+ mA input into the jacks; device-check "RLD current-source path").
 pub const DIODE_I: f32 = 0.756e-3;
 
+// Continuity current (`Dmm::cont_i`): the current through the leads, from
+// the drop across the row's 1 k reference resistor, FB - RLU, read by AD1
+// against PB6 - AGND (1.25 V) in a phase of its own every CONT_I_MS: the
+// DBG:SRC phase 8 node pair (dbgsrc.rs; on the device it agreed with the
+// MR9270S+ mA input within 3 %), here in the continuity row (inferred to
+// behave the same). The same current flows through Rref and the leads
+// (RLU is the jack side of Rref, inferred), so a source on V-COM shows up
+// in it, signed: + = the meter's own direction (OP3 at AGNDN7, below AGND:
+// FB - RLU < 0), - = a source driving the other way. Short circuit, one
+// unit, f10 row with the AGNDN7 tap (data/short.csv): 0.203 mA; full scale
+// 1.25 V / 0.9 / 1 k = 1.39 mA.
+/// Continuity current phase: R24 SAD1FP = FB, SAD1FN = RLU.
+const CONT_I_R24: u8 = 0x11;
+/// ... R28 SAD1RH = PB6, SAD1RL = AGND (dbgsrc REF_N).
+const CONT_I_R28: u8 = 0x31;
+/// ... R22 during the phase (continuity's fast OSR, `osr`).
+const CONT_I_R22: u8 = 0x14;
+/// A current measurement every this long (ms); the first this long after
+/// the row write.
+const CONT_I_MS: u64 = 1000;
+const CONT_I_FIRST_MS: u64 = 300;
+/// AD1 code -> A: -PB6 / IG / 2^23 / Rref (Rref = 1 k x the continuity
+/// gain cal 0x15C, as the resistance uses it).
+const CONT_I_K: f32 = -1.25 / 0.9 / 8_388_608.0 / 1000.0;
+
+/// The continuity current readout (A -> "203.1 uA", "-1.042 mA"; signed;
+/// a saturated phase reads OL). None before the first phase.
+pub fn cont_i_val(i: f32) -> Option<Val> {
+    if i.is_nan() {
+        return None;
+    }
+    if i.is_infinite() {
+        return Some(Val { v: i.signum(), ..Val::ol(3, "mA") });
+    }
+    Some(if i.abs() < 0.99995e-3 { Val::new(i * 1e6, 1, "\u{b5}A") } else { Val::new(i * 1e3, 3, "mA") })
+}
+
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
 /// them it is less). None where it is not measured (r6).
@@ -698,8 +735,7 @@ pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
 /// variant, `ohm_test_current`; 12 diode: DIODE_I), None elsewhere.
-/// Continuity (11) has none: its row's source tap (R31 0xcd) is neither
-/// ohm variant's and no current for it is known.
+/// Continuity (11) measures its current instead (`Dmm::cont_i`).
 pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
     match mode {
         10 => ohm_test_current(r, var),
@@ -1429,6 +1465,15 @@ pub struct Dmm {
     /// Continuity's jack check phase (`cont_jack`: 0 none, 1 settle, 2
     /// window, 3 back) and the row's R25 to restore.
     jwin: u8,
+    /// Continuity current phase (`cont_i_step`: 0 none, 1 drop, 2 the
+    /// current's conversion, 3 drop after the restore), when the next one
+    /// starts, the row's R24 / R28 to restore, and the last current (A,
+    /// signed; NaN none yet, +-INFINITY saturated).
+    ci_ph: u8,
+    ci_t: u64,
+    ci_r24: u8,
+    ci_r28: u8,
+    pub cont_i: f32,
     /// Continuity / diode: the last reading that was not OL (V-COM closed by
     /// something; V_GATE, `CLOSED_HOLD_MS`); 0 none.
     closed_t: u64,
@@ -2076,6 +2121,11 @@ impl Dmm {
             entry: 0,
             mv_clip: 0.0,
             jwin: 0,
+            ci_ph: 0,
+            ci_t: 0,
+            ci_r24: 0,
+            ci_r28: 0,
+            cont_i: f32::NAN,
             closed_t: 0,
             r25: 0,
             prev_ad1: 0,
@@ -2511,6 +2561,12 @@ impl Dmm {
         }
         let restart = dc_rows && row[2] == self.r22 && row[3] & 0x80 != 0;
         self.jwin = 0;
+        // Continuity current: a row write ends its phase (the row's own
+        // R24 / R28 / R22 are back).
+        self.ci_ph = 0;
+        self.ci_t = clk.now_ms() + CONT_I_FIRST_MS;
+        self.ci_r24 = row[4];
+        self.ci_r28 = row[8];
         if sentinel::ad1_last(kind, &row) || ((self.probe || am || restart) && row[3] & 0x80 != 0) {
             let mut c = row;
             c[3] &= !0x80;
@@ -2946,6 +3002,7 @@ impl Dmm {
         self.ac_lead = if self.acdc || self.mode > 2 { 0 } else { 2 };
         self.f_dc = 0.0;
         self.f_diode = 0.0;
+        self.cont_i = f32::NAN;
         self.f_cap = 0.0;
         self.cap_c = 0.0;
         self.ohm_settled = false;
@@ -4130,7 +4187,7 @@ impl Dmm {
             7..=9 => self.poll_dca(clk),
             10 if is_ohm600(self.mode, self.range) => self.poll_ohm600(clk),
             10 => self.poll_ohm(clk, now),
-            11 => self.poll_cont(),
+            11 => self.poll_cont(now),
             12 => self.poll_diode(now),
             13 => self.poll_cap(clk, now),
             14 => self.poll_freq_mode(now),
@@ -5300,9 +5357,13 @@ impl Dmm {
         rd
     }
 
-    fn poll_cont(&mut self) -> Option<Reading> {
+    fn poll_cont(&mut self, now: u64) -> Option<Reading> {
         let ad1 = self.ad1()?;
-        self.osr(ad1, 0x206, 0x14);
+        if self.ci_ph != 0 {
+            self.cont_i_step(ad1);
+            return None;
+        }
+        self.osr(ad1, 0x206, CONT_I_R22);
         // Negative results (a source, a diode the wrong way or a charged
         // capacitor on the jacks) clamp to 0 as the stock (dmm_v2_6.h m+0x18:
         // only its raw mode skips the clamp); emulator cross table.
@@ -5310,7 +5371,51 @@ impl Dmm {
         self.live = ohm < -LIVE_CONT_OHM;
         let ohm = ohm.max(0.0);
         let ol = ohm > 1000.0;
-        Some(self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm))
+        let mut rd = self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm);
+        rd.aux2 = cont_i_val(self.cont_i);
+        if now >= self.ci_t {
+            self.cont_i_start(now);
+        }
+        Some(rd)
+    }
+
+    /// Continuity current phase start (`CONT_I_R24` notes): AD1 off, the
+    /// fast OSR, FB - RLU against PB6 - AGND, AD1 on; `cont_i_step` takes
+    /// the second conversion and puts the row's AD1 bytes back. `osr`
+    /// brings the slow OSR back once the resistance stands still again.
+    fn cont_i_start(&mut self, now: u64) {
+        self.ci_t = now + CONT_I_MS;
+        self.ci_ph = 1;
+        let r23 = hy::read1(0x23);
+        hy::write(0x23, &[r23 & !0x80]);
+        hy::write(0x22, &[CONT_I_R22]);
+        hy::write(0x24, &[CONT_I_R24 | (self.ci_r24 & 0x08)]);
+        hy::write(0x28, &[CONT_I_R28]);
+        hy::write(0x23, &[r23 | 0x80]);
+        self.r22 = CONT_I_R22;
+    }
+
+    /// One AD1 conversion of the continuity current phase.
+    fn cont_i_step(&mut self, code: i32) {
+        self.wd_t = self.t_poll;
+        self.ci_ph = match self.ci_ph {
+            1 => 2,
+            2 => {
+                self.cont_i = if code.unsigned_abs() as f32 >= 0.97 * 8_388_608.0 {
+                    // Saturated: |I| > 1.35 mA, its sign known.
+                    f32::INFINITY.copysign(-(code as f32))
+                } else {
+                    code as f32 * CONT_I_K / cal(0x15C, 1.0)
+                };
+                let r23 = hy::read1(0x23);
+                hy::write(0x23, &[r23 & !0x80]);
+                hy::write(0x24, &[self.ci_r24]);
+                hy::write(0x28, &[self.ci_r28]);
+                hy::write(0x23, &[r23 | 0x80]);
+                3
+            }
+            _ => 0,
+        };
     }
 
     fn poll_diode(&mut self, now: u64) -> Option<Reading> {

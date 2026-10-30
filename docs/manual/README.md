@@ -611,8 +611,11 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   at [Key/alert volume](#settings-page-1) 0 %.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
-- No test current is shown: continuity uses its own source setting, whose
-  current is not known yet.
+- Above the reading: the current through the leads, updated once a second
+  (about 0.2 mA into a short, *inferred*); at the right end of the **SHORT**
+  band while it shows.
+- A source driving current the other way reads negative; beyond ±1.35 mA
+  the current reads **0L**.
 - The firmware adds no latch and no minimum beep length: the beep starts and
   stops with the contact.
 - The comparator itself is fast (a bandwidth of a few MHz in the chip's data
@@ -624,9 +627,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shows [**LIVE?**](#the-alerts).
 
 
-![Continuity: a short](img/dmm-cont.png)
-
-*Continuity: a short, the beeper sounds.*
+| ![Continuity: a short](img/dmm-cont.png) | ![Continuity: a source on the circuit](img/dmm-cont-neg.png) |
+|---|---|
+| A short, the beeper sounds | A source on the circuit drives current back: negative |
 
 #### Diode
 
