@@ -962,7 +962,7 @@ def tap_pair(name, a, tap, ca, b, cb, scale=0.5):
 def usb_steps():
     sd = os.path.join(HERE, 'stock-shots')
     tap_pair('install-stock-usb', (sd, 'stock-usb-menu'), (445, 60), 'Stock: Settings > 5. Other Settings', (sd, 'stock-usb-screen'), 'USB Connect: the USB disk is on')
-    tap_pair('update-steps', (RENDERS, 'settings-usb-edit'), (400, 110), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
+    tap_pair('update-steps', (RENDERS, 'settings-usb-edit'), (400, 110), 'USB disk: PC can edit (replug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
 
 
 def shunt_chain():

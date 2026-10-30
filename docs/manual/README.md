@@ -106,7 +106,7 @@ To install a newer opendm40 (or any other DM40 update file) from a running
 opendm40:
 
 1. **Settings > Other > USB disk**: tap until it reads
-   **PC can edit (re-plug)**.
+   **PC can edit (replug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
 3. Copy the update file onto the disk, into the top folder
    (`dm40_opendm40_v<version>.bin`; any `dm40*.bin` name works).
@@ -2147,7 +2147,7 @@ Set in **Settings > Other > USB disk**.
   read-only.
 
 A change of the mode takes effect at the next USB plug: unplug the cable
-and plug it in again. Until then the row shows **(re-plug)**. The meter
+and plug it in again. Until then the row shows **(replug)**. The meter
 always starts in **Files live**.
 
 A file manager usually moves a deleted file to the trash. A file moved to

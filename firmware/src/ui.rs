@@ -3043,14 +3043,14 @@ pub fn set_is_stepper(id: u8) -> bool {
     matches!(id, S_BACKLIGHT | S_VOLUME)
 }
 
-/// The "USB disk" setting's value: the mode asked for, "(re-plug)" while the
+/// The "USB disk" setting's value: the mode asked for, "(replug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
 pub fn usb_disk_name(ro_now: bool, ro_want: bool) -> &'static str {
     match (ro_want, ro_now == ro_want) {
         (true, true) => "Files live",
         (false, true) => "PC can edit",
-        (true, false) => "Files live (re-plug)",
-        (false, false) => "PC can edit (re-plug)",
+        (true, false) => "Files live (replug)",
+        (false, false) => "PC can edit (replug)",
     }
 }
 
@@ -3136,9 +3136,10 @@ const ST_TAB_W: i16 = 120;
 const ST_SPLIT: u16 = 127;
 const ST_ROW_X: i16 = 130;
 const ST_ROW_W: i16 = 346;
-/// The rows' text: label from x 142, value right-aligned to 466.
-const ST_TXT_X: i16 = ST_ROW_X + 12;
-const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 10;
+/// The rows' text: label from x 138, value right-aligned to 470 (the stock
+/// TEXT22's 11 px cells: "Burden voltage  ON (A, mA, uA)" needs the room).
+const ST_TXT_X: i16 = ST_ROW_X + 8;
+const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 6;
 /// A stepper row's keys ("-" at ST_MINUS_X, "+" at ST_PLUS_X) and value
 /// between them.
 const ST_KEY_W: i16 = 40;
@@ -3187,7 +3188,9 @@ pub fn settings(tab: u8, vals: &[&str]) {
         let bg = if pressed { K_SEL } else if i == tab { SEL } else { M_TILE };
         let r = st_tab(i);
         sf::rbox(r, 6, bg, M_BG);
-        sf::glyphs(sf::TEXT22, rect(r.x + 8, r.y, r.w - 14, r.h), name, STATUS_FG, bg, 1, 0);
+        // Centred: "Multimeter" (110 px in the stock TEXT22) leaves 5 px
+        // either side.
+        sf::glyphs(sf::TEXT22, rect(r.x + 4, r.y, r.w - 8, r.h), name, STATUS_FG, bg, 8, 0);
     }
     for (i, &id) in SET_TABS[tab].1.iter().enumerate() {
         let v = vals.get(id as usize).copied().unwrap_or("");
