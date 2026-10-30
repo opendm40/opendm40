@@ -15,7 +15,7 @@ meter.
 | Flash above 1 MiB | `0x08100000..0x0FFFFFFF` | - | reads `0xFFFFFFFF`, no fault, 5 cycles at every offset: no flash array behind it (*inferred* from the speed, see below) |
 | Zero-wait flash | `0x08000000..0x0807FFFF` | 512 KiB | ends exactly at `0x08080000`; no register sets the size |
 | Backup SRAM, free part | `0x40024124..0x40024FE7` | 3 780 B | **usable**: read / write OK, 5 cycles; kept over a reset, lost at power-off |
-| USBHS FIFO RAM | `0x40060000..0x40060FFF` | 4 KiB | **usable** with `USBHSEN` on: read / write OK, 5 cycles, kept while the clock is gated off |
+| USBHS FIFO RAM | `0x40060000..0x40060FFF` | 4 KiB | **usable** with `USBHSEN` on, **32-bit stores only** (a byte store fills the whole word with that byte); reads of any size; 5 cycles; kept while the clock is gated off |
 | USBFS FIFO RAM, unallocated tail | FIFO words `0x70..0x13F` | 832 B | not probed: the USB stack owns the FIFO |
 | IPA (2D engine) | `0x4002B000` | - | **absent**: clock bit sets, registers read 0 and ignore writes |
 | TLI (LCD controller) | `0x40016800` | - | **absent**: clock bit sets, `TLI_CTL` reads its reset value `0x2220`, writes ignored |
@@ -127,7 +127,16 @@ With `USBHSEN` (RCU_AHB1EN bit 29) on:
 With the clock off, or above `0x40060FFF`, reads return the last value the
 bus carried (no fault). So the RAM is 4 KiB.
 
-To use it: set `USBHSEN`, CPU word / byte access only. Whether DMA reaches
+**Stores must be 32-bit.** The window ignores the store size: a byte
+store writes the whole word, the stored byte in all four lanes. A CSV
+recording whose 4 KiB block buffer was written byte by byte there left
+every word of the DLG as one byte ×4 (`DLG1` → `31 31 31 31`). A halfword
+store is taken to write both halves (*inferred*). Reads of any size and
+word stores work (the `DBG:MTEST?` above wrote words). opendm40 reaches the area only through
+[wordram.rs](../src/wordram.rs) `WordRam` (on
+[PR #185](https://github.com/opendm40/opendm40/pull/185)).
+
+To use it: set `USBHSEN`, CPU word stores, any read size. Whether DMA reaches
 it is *unknown* (the AHB matrix table in the manual gives DMA1 a path to
 AHB1, DMA0 none). The supply current with `USBHSEN` on is *unknown*.
 
