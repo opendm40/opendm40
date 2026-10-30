@@ -40,6 +40,8 @@ unsafe impl critical_section::Impl for NoMask {
     }
 }
 mod meter;
+#[cfg(feature = "memprobe")]
+mod memprobe;
 mod mmio;
 mod persist;
 mod power;

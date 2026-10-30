@@ -134,6 +134,9 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
+         * loop and asm are `.text.a2.*` (zero-wait region A2). */
+        *(.text.*8opendm408memprobe*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
          * polls them while the Wave view's stream runs (device c830e09:
