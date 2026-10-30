@@ -219,6 +219,7 @@ recorded.
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
 | [`capdowntest.py`](hy3131/capdowntest.py) | capacitance AUTO: a small capacitor after a large one, open leads and a short (also the device's no-ramp case, AD1 forced) end on their own range; large capacitors keep theirs | | 47750 |
+| [`captimetest.py`](hy3131/captimetest.py) | capacitance AUTO timing from DC V: time to the first grey and the first final value (1 nF .. 1 mF, absorption, open leads, a resistor) | | 47760 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
 | [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
