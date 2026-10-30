@@ -18,9 +18,6 @@ DBG:IDLE 20000 sets a 20 s power-off time (instead of the Shutdown setting,
   msc   a USB disk READ(10) every 4 s, no SCPI: the meter stays on;
   inrush  the inrush page armed (INR:STAT ON, INR:COND? ARMED), then nothing
         for 60 s: the meter stays on, still armed (#144); INR:STAT OFF after;
-  usbpwr  USB power (PB10 driven high: DBG:CHG:PIN 10,4), then nothing for
-        60 s: the meter stays on (no automatic power-off on USB power);
-        DBG:CHG:PIN 10,6 after (PB10 back to the input, low here);
   off   nothing for 30 s: the meter is off (USBTMC no longer answers). Runs
         last (the meter stays off).
 "On" is checked with a USBTMC *IDN? after the case; the emulator's virtual
@@ -41,7 +38,7 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=None, help='USB/IP port (default: a free one, run.free_port)')
 ap.add_argument('--bt-port', type=int, default=None, help='Bluetooth passthrough port (default: a free one)')
-ap.add_argument('--cases', default='usb,bt,msc,inrush,usbpwr,off')
+ap.add_argument('--cases', default='usb,bt,msc,inrush,off')
 ap.add_argument('--keep', type=float, default=40.0, help='seconds of each keep-on case (default 40)')
 A = ap.parse_args()
 sys.path.insert(0, HERE)
@@ -171,24 +168,6 @@ try:
             c = l.q('INR:COND?')
             check(c == 'ARMED', 'inrush: the meter answers, INR:COND? %s' % c)
             l.t.write('INR:STAT OFF')
-        elif case == 'usbpwr':
-            l.t.write('DBG:CHG:PIN 10,4')
-            pb10 = l.q('DBG:CHG?').split(',')[0]
-            check(pb10 == '1', 'usbpwr: PB10 reads %s with DBG:CHG:PIN 10,4' % pb10)
-            l.t.write('DBG:IDLE %d' % OFF_MS)
-            t0 = l.uptime()
-            time.sleep(2 * (OFF_MS / 1000 + 10))
-            try:
-                up = l.uptime()
-            except OSError as e:
-                check(False, 'usbpwr: the meter answers after %d s on USB power without traffic (%r)'
-                      % (2 * (OFF_MS / 1000 + 10), e))
-                continue
-            check(up - t0 > OFF_MS + 5000, 'usbpwr: %d ms on USB power without traffic > the %d ms power-off time + 5 s'
-                  % (up - t0, OFF_MS))
-            l.t.write('DBG:CHG:PIN 10,6')
-            pb10 = l.q('DBG:CHG?').split(',')[0]
-            check(pb10 == '0', 'usbpwr: PB10 reads %s after DBG:CHG:PIN 10,6' % pb10)
         elif case == 'off':
             l.t.write('DBG:IDLE %d' % OFF_MS)
             time.sleep(OFF_MS / 1000 + 10)

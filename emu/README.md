@@ -278,8 +278,9 @@ recorded.
 | [`gallerytest.py`](gallerytest.py) | the gallery: grid, viewer, Delete | ~8 min | 19310 |
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
-| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic, an armed inrush page and USB power hold off the automatic power-off | | free, BT free |
+| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
+| [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |
 | [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
