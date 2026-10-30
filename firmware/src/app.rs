@@ -5119,6 +5119,7 @@ impl App {
             self.host_scope = true;
             self.update_rails(clk);
         }
+        let sc0 = sc;
         let reply = match cmd {
             C::GenFunc(Some(w)) => {
                 g.wave = Wave::ALL[w as usize % 4];
@@ -5414,6 +5415,13 @@ impl App {
             && reply.is_none()
         {
             self.scope_set(sc, now);
+            if self.sp_on() && self.sp.popup != crate::scope_ui::Popup::None && self.scope.s != sc0 {
+                // A popup is open (#82): the page again with it (the graph
+                // around its box, then the popup), so the top bar, the panel
+                // and the popup's own values show the host's change now,
+                // not when the popup closes.
+                self.redraw = true;
+            }
             if matches!(cmd, C::Digitize) {
                 // After apply (a run change clears it): the acquisition it
                 // restarted is the one that ends the run.

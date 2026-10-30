@@ -1265,9 +1265,10 @@ impl App {
             }
         }
         if self.sp_covered() {
-            // The timebase list leaves the top bar visible: its badge
-            // follows the picks.
-            if matches!(self.sp.popup, su::Popup::Tb(_)) && !self.redraw {
+            // Popups leave the top bar visible: the timebase badge follows
+            // the list's picks and ends its flash (also after a host's
+            // change, #82).
+            if self.sp.popup != su::Popup::None && !self.redraw {
                 let m = self.sp_model(now);
                 if self.sp.tb_drawn != (m.tb, m.tb_flash) {
                     self.sp.tb_drawn = (m.tb, m.tb_flash);
