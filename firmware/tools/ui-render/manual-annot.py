@@ -528,7 +528,7 @@ def usb_disk():
 
 def usb_row():
     sc = 2
-    s = render('settings3-edit', scale=sc, crop=(0, 102, 480, 135))
+    s = render('settings-usb-edit', scale=sc, crop=(128, 86, 480, 134))
     im, d = canvas(s.size[0] + 40, s.size[1] + 70)
     paste(im, d, s, 20, 20)
     text_c(d, im.size[0] / 2, s.size[1] + 34, 'PC can edit, waiting for the re-plug', font(14), MID)
@@ -962,7 +962,7 @@ def tap_pair(name, a, tap, ca, b, cb, scale=0.5):
 def usb_steps():
     sd = os.path.join(HERE, 'stock-shots')
     tap_pair('install-stock-usb', (sd, 'stock-usb-menu'), (445, 60), 'Stock: Settings > 5. Other Settings', (sd, 'stock-usb-screen'), 'USB Connect: the USB disk is on')
-    tap_pair('update-steps', (RENDERS, 'settings3-edit'), (445, 119), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
+    tap_pair('update-steps', (RENDERS, 'settings-usb-edit'), (400, 110), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
 
 
 def shunt_chain():

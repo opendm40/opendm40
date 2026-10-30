@@ -791,19 +791,26 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::main_menu("DMM + Scope");
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
-    // Settings 1/3, 2/3 and 3/3, Hold & Limits (list pages).
-    let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
-    for p in 0..3u8 {
+    // Settings: every section (the tabs 100 + i, the rows i), Hold &
+    // Limits (list page).
+    let mut vals = vec!["Hold 5000 ms"; ui::SET_N];
+    vals[ui::S_USB as usize] = ui::usb_disk_name(true, false);
+    for t in 0..ui::SET_TABS.len() as u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize]]);
-        let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
-        let want: Vec<u32> = (0..n as u32).collect();
-        page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
+        ui::settings(t, &vals);
+        let n = ui::SET_TABS[t as usize].1.len() as u32;
+        let want: Vec<u32> = (0..n).chain(100..100 + ui::SET_TABS.len() as u32).collect();
+        let hit = |x: u16, y: u16| match ui::settings_hit(t, x, y) {
+            Some(ui::SetHit::Tab(i)) => Some(100 + i as u32),
+            Some(ui::SetHit::Row(r)) => Some(r as u32),
+            None => None,
+        };
+        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &|b| b.y0 >= 40, &want);
     }
-    // Backlight / volume steppers (ui-review #12): the "-" key (x 210..263)
-    // steps down, the "+" key (410..463) up; the label side is "-".
-    ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
+    // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
+    // and the label side step down, the "+" key (426..465) up.
+    ck.t("settings stepper: '-' key and label step down", ui::settings_step(340) == -1 && ui::settings_step(150) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());

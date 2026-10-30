@@ -113,7 +113,7 @@ section named after the tag as the release notes; how to cut a release:
 - Power meter: no multimeter MAX / AVG / REL / MIN column while the page
   shows "I ranging...".
 - **Key/alert volume 0 %** also silences the continuity and diode beeper
-  ([manual](docs/manual/README.md#settings-page-1)).
+  ([manual](docs/manual/README.md#alerts-tab)).
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
 

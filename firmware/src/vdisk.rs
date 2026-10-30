@@ -59,7 +59,7 @@
 //! them until the unmount).
 //!
 //! Host writes (vwrite.rs): read-only by default ("Files live": the WP bit,
-//! the UNIT ATTENTION above at once). Settings 3/3 "USB disk" = "PC can
+//! the UNIT ATTENTION above at once). Settings > Other "USB disk" = "PC can
 //! edit" (DBG:VDISK:RO 0) makes it writable from the next bus reset (a
 //! re-plug; volatile, read-only again at boot). Writable, a write is only
 //! accepted as a delete of a LOGS / SCOPE /
@@ -1374,7 +1374,7 @@ fn readme(base: usize, out: &mut [u8]) -> u32 {
     w.s(b"         meter's internal FAT16 storage).\r\n\r\n");
     w.s(b"The files are stored on the meter in a compact form and converted\r\n");
     w.s(b"when read.\r\n\r\n");
-    w.s(b"Mode (meter: Settings 3/3, \"USB disk\"):\r\n");
+    w.s(b"Mode (meter: Settings > Other, \"USB disk\"):\r\n");
     w.s(b"Files live (default, read-only): recordings and screenshots saved\r\n");
     w.s(b"while the disk is mounted appear at once (refresh the folder, F5).\r\n");
     w.s(b"PC can edit: delete files and copy a firmware file (below); new files\r\n");

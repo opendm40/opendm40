@@ -24,7 +24,7 @@ sectors answer NOT READY 02/04/01 (and only those, from FIRMWARE.BIN's
 sector 0x7C000), and after the session every file reads whole with the same
 bytes.
 --ui-nav: UI navigation by DBG:KEY / DBG:TAP while each session streams
-(the main menu, Settings 1..3, Device, MENU, the Oscilloscope tile, its
+(the main menu, Settings > Scope / Other, Device, MENU, the Oscilloscope tile, its
 source badge, MENU, the Multimeter tile; each landing checked with
 DBG:VIEW?), each session started on the MCX scope page; before the sessions
 the page tree with no stream (MENU on the Device page = the main menu). Real
@@ -102,7 +102,7 @@ ap.add_argument('--host-only', action='store_true', help='with --host-read: no S
 ap.add_argument('--poll', default='', help='with --host-read: more queries sent at each step, ";"-separated (e.g. '
                 '"SCOP:MEAS:VPP?;DBG:HWTRIG?": scope commands read the calibration record, slow bank)')
 ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each session streams (DBG:KEY / DBG:TAP, '
-                'each landing checked with DBG:VIEW?): MENU, the Settings tile, More, More, Device, MENU (the main menu), '
+                'each landing checked with DBG:VIEW?): MENU, the Settings tile, the Scope and Other tabs, Device info, MENU (the main menu), '
                 'the Oscilloscope tile (the MCX scope page), its source badge (the Wave view: refused while a session '
                 'streams), MENU, the Multimeter tile; the next session starts on the scope page. Before the sessions, the '
                 'same page tree with no stream (MENU on the Device page = the main menu). With --region-c: no region C '
@@ -368,12 +368,12 @@ class HostRead:
 
 
 # UI navigation (--ui-nav): (command, the DBG:VIEW? page it must land on).
-# Coordinates: ui.rs TILES (main menu), the settings rows (SET_Y0 44, pitch
-# 30: row 8 "More" y 297, Settings 3/3 row 4 "Device" y 177, row 3 "Burden voltage" y 147, since the "A-lead
-# reminder" row went), scope_ui.rs
-# SRC_BADGE (the source badge, top bar).
-NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 240,297', 'Settings,2'),
-       ('DBG:TAP 240,297', 'Settings,3'), ('DBG:TAP 240,177', 'Device'), ('DBG:KEY 0', 'Main menu'),
+# Coordinates: ui.rs TILES (main menu), the Settings tabs and rows (ST_Y0 44,
+# pitch 45: tab 4 "Scope" y 246, tab 5 "Other" y 291 at x 60; Other's row 2
+# "Device info" y 156 at x 300), scope_ui.rs SRC_BADGE (the source badge, top
+# bar).
+NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 60,246', 'Settings,5'),
+       ('DBG:TAP 60,291', 'Settings,6'), ('DBG:TAP 300,156', 'Device'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 341,107', 'Oscilloscope'), ('DBG:TAP 177,10', 'Oscilloscope'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 140,107', 'Multimeter')]
 
@@ -399,11 +399,11 @@ def nav_to(q, steps, what):
 
 def nav_tree(q):
     """No stream: the page tree; MENU on the Device page = the main menu
-    (device check 519fb8a: it returned to Settings 3/3), a tap on Device =
-    Settings 3/3, MENU from the menu = back to the instrument (DMM)."""
+    (device check 519fb8a), a tap on Device = Settings > Other, MENU there =
+    the main menu, MENU from the menu = back to the instrument (DMM)."""
     nav_to(q, NAV[:6], 'page tree, MENU on Device -> the main menu')
-    nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,3'), ('DBG:KEY 0', 'Settings,2'), ('DBG:KEY 0', 'Settings,1'),
-                          ('DBG:KEY 0', 'Main menu'), ('DBG:KEY 0', 'Multimeter')], 'a tap on Device -> Settings 3/3, MENU back up')
+    nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,6'), ('DBG:KEY 0', 'Main menu'), ('DBG:KEY 0', 'Multimeter')],
+           'a tap on Device -> Settings > Other, MENU back up')
 
 
 class UiNav:
@@ -423,7 +423,9 @@ class UiNav:
         v = self.q('DBG:VIEW?')
         # The source badge in a session: the Wave view is refused (no
         # stream of its own while the logger owns the HY3131).
-        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and not v.endswith(',0')):
+        # DBG:VIEW? field 3: the Wave view on (a fourth field, the trend
+        # chart's ms/div, follows it).
+        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and v.split(',')[2:3] != ['0']):
             self.bad.append('%s -> %s (want %s)' % (c, v, want))
         self.k = (self.k + 1) % len(NAV)
         self.n += 1

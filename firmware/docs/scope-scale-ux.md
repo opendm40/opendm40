@@ -21,7 +21,7 @@ graph (14,21,399,279), `INNER` (0,15,414,290).
 
 ### 1.1 Tap-step modes
 
-Settings page 2 "Scope tap step" cycles Corners -> Halves (stock) -> Off.
+Settings > Scope "Tap step" cycles Corners -> Halves (stock) -> Off.
 **Corners is the default** (`scope_ui::TAP_DEFAULT`). The mode is persisted
 in p[1] bits 28..29 as the mode XOR the default, so a record written before
 the setting existed restores the default.

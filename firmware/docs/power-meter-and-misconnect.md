@@ -634,7 +634,7 @@ measurement adds to a low-voltage circuit.
   current (REL and smoothing do not change it; HOLD freezes it with the
   reading). The unit / decimals follow the range's burden at the OL limit
   (fixed while the reading moves, <= 4 digits); OL shows "0L".
-* **Toggle**: Settings 3/3 "Burden voltage" OFF (default, stock look) / ON,
+* **Toggle**: Settings > Multimeter "Burden voltage" OFF (default, stock look) / ON,
   persisted in p[38] bit 14 (`meter::EXT_BURDEN`).
 * **SCPI**: `FETCh:BURDen?` (whether the readout is on or not),
   `DISPlay:BURDen`:
@@ -857,7 +857,7 @@ in `Reading.alert` (`sentinel::Alert`):
 The red alerts alternate with HOLD in the DMM status slot (119..201) and in
 the combined-view strip badge (decision #5 of
 [decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md));
-the hints sit below every alert and never alternate with HOLD. Settings 3/3
+the hints sit below every alert and never alternate with HOLD. Settings > Alerts
 "Jack alerts": ON (all) / A-JACK only (no V-JACK?, LIVE?, hints) / OFF,
 persisted in p[38] bits 11..13; a disabled sentinel writes the stock row.
 SCPI: `SYSTem:ALERt?` (NONE | OVERLOAD | APROT | AJACK | VJACK | LIVE | DC |
@@ -876,7 +876,7 @@ Code: [`src/sentinel.rs`](../src/sentinel.rs) (row builder, alert state
 machine, host tests), hooks in [`src/dmm.rs`](../src/dmm.rs)
 (`write_config`, `poll`, `poll_ac`, ohm / continuity / diode),
 [`src/app.rs`](../src/app.rs) / [`src/ui.rs`](../src/ui.rs) (badge, toast,
-beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
+beep, Settings > Alerts), [`src/scpi.rs`](../src/scpi.rs).
 
 * **A-JACK, comparator**: the CTSTA read (1 byte) on every `poll`, ORed into
   100 ms windows (`WIN_MS`); 2 hit windows in a row assert, 1 s without a
@@ -1127,7 +1127,7 @@ period.
   main-loop pass (written only when TIM14 differs), so a key beep in between
   cannot mute it; at its end CCR1 = 0 and ARR = 11199 (the stock pitch).
 
-**Setting.** Settings 3/3 "Danger alarm" (the second row): **Loud**
+**Setting.** Settings > Alerts "Danger alarm" (the second row): **Loud**
 (default) -> **Volume** (the same pattern at the key / alert volume; 0 % =
 silent) -> **Off** (badge and toast only). Persisted in p[38] bits 16..17
 (`meter::EXT_DANGER_SHIFT`, 0 = Loud). SCPI `SYSTem:ALERt:ALARm`,

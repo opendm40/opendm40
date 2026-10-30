@@ -56,10 +56,15 @@ impl App {
                 k => r(k, 0),
             },
             View::Settings | View::Limits | View::Record if ui::title_back_hit(y) => None,
-            View::Settings => {
-                let k = ui::settings_hit(self.set_page, y)?;
-                r(k, if self.set_page == 0 && ui::SET_STEP_ROWS.contains(&k) { ui::settings_step(x) } else { 0 })
-            }
+            View::Settings => match ui::settings_hit(self.set_tab, x, y)? {
+                // The shown section's tab does nothing.
+                ui::SetHit::Tab(t) if t == self.set_tab => None,
+                ui::SetHit::Tab(t) => r(0x80 | t as usize, 0),
+                ui::SetHit::Row(k) => {
+                    let id = ui::settings_id(self.set_tab, k)?;
+                    r(k, if ui::set_is_stepper(id) { ui::settings_step(x) } else { 0 })
+                }
+            },
             View::Limits => r(ui::list_hit(y, ui::LIMIT_ROWS.len())?, 0),
             // The temperature page has its own (`tp_pressed`).
             View::Range if self.dmm.hy_mode() == 15 => None,

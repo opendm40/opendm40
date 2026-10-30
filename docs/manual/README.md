@@ -105,7 +105,7 @@ meter.
 To install a newer opendm40 (or any other DM40 update file) from a running
 opendm40:
 
-1. **Settings > More > More > USB disk**: tap until it reads
+1. **Settings > Other > USB disk**: tap until it reads
    **PC can edit (re-plug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
 3. Copy the update file onto the disk, into the top folder
@@ -132,7 +132,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 
 | Key | What it does |
 |---|---|
-| **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
+| **MENU** | Opens the main menu. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
 | **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
@@ -184,8 +184,7 @@ The four instrument views follow each other in this order:
 On the multimeter, the generator and the combined view (start on the meter
 strip there), swipe left for the next view and right for the previous one.
 On the oscilloscope page a drag moves the trace, so a swipe does not change
-the view: leave it with **MENU**, or switch on **Settings > More > Scope
-swipe**, which lets a swipe that starts on the top bar or the side panel
+the view: leave it with **MENU**, or switch on **Settings > Scope > Swipe**, which lets a swipe that starts on the top bar or the side panel
 change the view.
 
 ![A swipe changes the view; from the oscilloscope only with MENU or Scope swipe](img/swipe.png)
@@ -254,7 +253,7 @@ the combined view switches to the next sub-mode of the current function
 
 ### On-screen help
 
-**Settings > More > Help** opens seven short help pages: gestures, side
+**Settings > Other > Help** opens seven short help pages: gestures, side
 keys, multimeter, limits, recording and alerts, the USB disk, and the power
 meter. Tap to turn the page.
 
@@ -608,7 +607,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
   resistance is below about 67 Ω (*inferred* from the chip setting). Silent
-  at [Key/alert volume](#settings-page-1) 0 %.
+  at [Key/alert volume](#alerts-tab) 0 %.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - No test current is shown: continuity uses its own source setting, whose
@@ -701,7 +700,7 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
 - **Unit: ℃** / **Unit: ℉** switches between °C and °F for the whole meter
-  (also **Settings > More > Temp unit**).
+  (also **Settings > Multimeter > Temp unit**).
 - The 2-wire leads add their resistance: about 0.4 °C per 0.1 Ω on a PT100.
   Correct it with the offset or with REL.
 - The supplied thermocouple is rated to 300 °C.
@@ -812,7 +811,7 @@ so a change shows at once.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
-- Also in **Settings > More > DMM rate**.
+- Also in **Settings > Multimeter > DMM rate**.
 
 
 ![A tap on the reading steps the rate](img/dmm-rate.png)
@@ -825,16 +824,16 @@ DC) or 3.2 s (SLOW, and in Ω) after the input settles.
 
 #### Smoothing
 
-**Settings > More > Smoothing**: **OFF** (default), **LOW**, **HIGH**. A
+**Settings > Multimeter > Smoothing**: **OFF** (default), **LOW**, **HIGH**. A
 moving average of the shown readings, for a calmer display. It restarts on a
 real step, so changes still show at once. Smoothing applies to the reading,
 the limits, the chart and readings over USB or Bluetooth; not to
 MIN/MAX/AVG, AutoHold, recordings or the bargraph. Continuity is never
 smoothed.
 
-![Smoothing LOW in Settings, page 2](img/settings2-smooth.png)
+![Smoothing LOW in Settings, the Multimeter tab](img/settings-smooth.png)
 
-*Smoothing LOW in Settings, page 2.*
+*Smoothing LOW in Settings, the Multimeter tab.*
 
 ### HOLD, AutoHold and REL
 
@@ -901,7 +900,7 @@ since they were last reset, and a timer **T hh:mm:ss**.
 
 ### The bargraph and the history row
 
-**Settings > More > DMM row** chooses what the row under the reading
+**Settings > Display > DMM row** chooses what the row under the reading
 shows: **Bargraph** (default) or **History**.
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
@@ -923,7 +922,7 @@ shows: **Bargraph** (default) or **History**.
 Under the unit: the specified accuracy of this reading for the meter's
 model ([details](../../firmware/docs/dmm-accuracy.md)). Digits finer than
 it are grey. Not shown with the History row, in AC+DC, the 60 mV and 60 Ω
-ranges, PT / NTC, the power meter or under REL. **Settings > More > More >
+ranges, PT / NTC, the power meter or under REL. **Settings > Multimeter >
 Accuracy** turns it off.
 
 ### The trend chart
@@ -973,7 +972,7 @@ Limits: DC V**.
 
 A current meter drops a small voltage across its shunt (the burden
 voltage), which the circuit under test loses. To show it: **Settings >
-More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
+Multimeter > Burden voltage: ON (A, mA, uA)**. Default OFF.
 
 - DC: the burden voltage above the reading, on the left, labelled
   **Burden**.
@@ -1060,7 +1059,7 @@ LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 
 *FUSE?: 0 A for a minute.*
 
-**Settings > More > More > Jack alerts** chooses which alerts are on:
+**Settings > Alerts > Jack alerts** chooses which alerts are on:
 **ON** (all of the above, default), **A-JACK only** (A-JACK and A-PROT),
 **OFF** (none of them, and no A-PROT protection). OVLD and the 10 A alarm
 are always on.
@@ -1158,7 +1157,7 @@ To silence it (for this event): tap the badge or the message, or press any
 key (the key still does its job), or the power key. A new event sounds
 again.
 
-**Settings > More > More > Danger alarm**:
+**Settings > Alerts > Danger alarm**:
 
 - **Loud** (default): full volume, also when the key/alert volume is 0.
 - **Volume**: at the key/alert volume.
@@ -1283,7 +1282,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 |---|---|
 | A tap on the bottom-left corner: one step slower | The timebase list |
 
-**Settings > More > Scope tap step** sets which taps step the timebase:
+**Settings > Scope > Tap step** sets which taps step the timebase:
 **Corners** (default, only the two corners step), **Halves (stock)** (a tap
 in the left or right half of the graph steps), **Off**.
 
@@ -2131,7 +2130,7 @@ space it takes on the meter.
 
 #### Files live and PC can edit
 
-Set in **Settings > More > More > USB disk**.
+Set in **Settings > Other > USB disk**.
 
 ![The USB disk row after a tap to PC can edit](img/usb-mode.png)
 
@@ -2249,68 +2248,93 @@ The gallery also shows the screenshots made by the stock firmware.
 
 ## Settings
 
-To open: main menu, **Settings**. There are three pages; on pages 1 and 2
-the last row, **More**, opens the next page. **< Back** in the title bar or
-**MENU** goes one page back (from page 1: to the main menu). Tap a row to
-step to its next value; rows with **-** / **+** change in steps.
+To open: main menu, **Settings**. The tabs on the left are the sections;
+tap one to show its rows. Tap a row to step to its next value; rows with
+**-** / **+** change in steps, a row with **>** opens a page. **< Back** in
+the title bar or **MENU** goes back to the main menu.
 
-### Settings page 1
+### Display tab
 
-![Settings, page 1](img/settings1.png)
+![Settings, the Display tab](img/settings-display.png)
 
-*Settings, page 1.*
+*Settings, the Display tab.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
-| **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
+| **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
+| **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
+
+### Alerts tab
+
+![Settings, the Alerts tab](img/settings-alerts.png)
+
+*Settings, the Alerts tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
+| **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
+
+### Power tab
+
+![Settings, the Power tab](img/settings-power.png)
+
+*Settings, the Power tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
-| **Scope drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
-| **More** | | | Page 2. |
+| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter continues as you left it ([What is kept](#what-is-kept-when-you-switch-off)). |
 
-### Settings page 2
+### Multimeter tab
 
-![Settings, page 2](img/settings2.png)
+![Settings, the Multimeter tab](img/settings-multimeter.png)
 
-*Settings, page 2.*
+*Settings, the Multimeter tab.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **DMM rate** | SLOW, MED, FAST | MED | [Rate](#rate-fast-med-slow); shows the readings per second, or **(n/a here)** where the current function has a fixed rate. |
 | **Smoothing** | OFF, LOW, HIGH | OFF | [Smoothing](#smoothing). |
-| **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
 | **Temp unit** | ℃ (Celsius), ℉ (Fahrenheit) | ℃ | Temperature unit everywhere. |
-| **Scope swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
-| **Scope press** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
-| **Scope tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
-| **Help** | | | The [on-screen help](#on-screen-help). |
-| **More** | | | Page 3. |
+| **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
+| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
+| **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
 
-### Settings page 3
+### Scope tab
 
-![Settings, page 3](img/settings3.png)
+![Settings, the Scope tab](img/settings-scope.png)
 
-*Settings, page 3.*
+*Settings, the Scope tab.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
-| **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
+| **Drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
+| **Swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
+| **Press effect** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
+| **Tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
+
+### Other tab
+
+![Settings, the Other tab](img/settings-other.png)
+
+*Settings, the Other tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
 | **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
-| **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
-| **Device** | | | The [Device page](#the-device-page). |
+| **Device info** | | | Opens the [Device page](#the-device-page). |
 | **Touch test** | | | The [touch test page](#touch-test). |
-| **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
-| **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
-| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter continues as you left it ([What is kept](#what-is-kept-when-you-switch-off)). |
+| **Help** | | | The [on-screen help](#on-screen-help). |
 
 ### The Device page
 
-**Settings > More > More > Device** shows:
+**Settings > Other > Device info** shows:
 
 ![The Device page](img/device.png)
 
@@ -2329,7 +2353,7 @@ Tap anywhere to go back to Settings; **MENU** goes to the main menu.
 
 ### Touch test
 
-**Settings > More > More > Touch test** shows what the touch screen
+**Settings > Other > Touch test** shows what the touch screen
 reports, to check where a tap lands:
 
 ![The touch test page](img/touch-test.png)
@@ -2354,7 +2378,7 @@ do nothing on this page.
 
 - **Clear**: tap it to clear the dots.
 - To leave the page, press the power key, or hold one finger still
-  anywhere for 2 s. Both go back to Settings page 3.
+  anywhere for 2 s. Both go back to Settings, the Other tab.
 
 #### Touch calibration
 
@@ -2817,7 +2841,7 @@ measurement as it was.
 | Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
-**Mode Remember** ON (Settings 3/3, as the stock's) also keeps after
+**Mode Remember** ON (Settings > Power, as the stock's) also keeps after
 switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
 or a fixed V, A or Ω range, the Ω test current, the rate and smoothing and
 the trend timebase. AutoHold and the limits still start afresh.

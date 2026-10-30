@@ -106,11 +106,11 @@ pub enum View {
     Record,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
-    /// On-device help (UF-29), Settings 2/3 -> Help: HELP pages.
+    /// On-device help (UF-29), Settings > Other -> Help: HELP pages.
     Help,
     /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
     Inrush,
-    /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
+    /// Touch test (Settings > Other -> Touch test; app_touchtest.rs).
     TouchTest,
 }
 
@@ -164,7 +164,7 @@ const AUX_VX: [i16; 2] = [38, 260];
 /// UF-26: caption of the 4-20 mA loop percentage (DC mA, aux2 "%").
 const LOOP_CAP: &str = "4-20mA";
 
-/// Caption of the burden voltage readout (A functions, Settings 3/3
+/// Caption of the burden voltage readout (A functions, Settings > Multimeter
 /// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
 const BURDEN_CAP: &str = "Burden";
 /// An aux row's F14 caption and LETTERS value in the boxes cx..te, te..end
@@ -280,7 +280,7 @@ pub struct DmmView {
     /// leaves a part unchanged does not repaint it.
     aux_val: [Option<([u8; 16], u8)>; 2],
     aux_unit: [Option<(&'static str, u8)>; 2],
-    /// UF-30: the fast bargraph in the history row's place (Settings 2/2
+    /// UF-30: the fast bargraph in the history row's place (Settings > Display
     /// "DMM row": Bargraph, the default / History). Set by the app before
     /// `draw_static`.
     pub bar_on: bool,
@@ -308,10 +308,10 @@ pub struct DmmView {
     ol_word: bool,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
-    /// history row (Settings 2/3 "DMM row": History) and the power meter
+    /// history row (Settings > Display "DMM row": History) and the power meter
     /// have none.
     pub acc: Option<Acc>,
-    /// Settings 3/3 "Accuracy" (persisted, default ON; the app turns it
+    /// Settings > Multimeter "Accuracy" (persisted, default ON; the app turns it
     /// into `acc`).
     pub acc_on: bool,
     /// The label as last drawn (`acc_ulps`, the decimals, the unit; None =
@@ -341,7 +341,7 @@ const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
 const ACC_RECT: sf::Rect = rect(415, BAR_LBL_Y, 61, BAR_LBL_H);
 
 /// What the accuracy label needs besides the reading (set by the app; None
-/// = no label: Settings 3/3 "Accuracy" OFF, or REL in force).
+/// = no label: Settings > Multimeter "Accuracy" OFF, or REL in force).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Acc {
     /// Dmm::model: 0 DM40A, 1 DM40B, 2 DM40C (the stock digit, acc::err_ulps).
@@ -1778,7 +1778,7 @@ const T_KEYS: [&str; 7] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "1
 /// "NTC user" unexplained, the buttons "fuzzy" = hit boxes exactly the drawn
 /// boxes, so a touch in the 5..6 px gaps did nothing):
 ///   rows 50 / 96   sensors (range-page grid), slot 7 = the global deg C /
-///                  deg F unit (the Settings 2/2 row; a shortcut here)
+///                  deg F unit (the Settings > Multimeter row; a shortcut here)
 ///   row 144..180   "Offset"  [ - ]  value  [ + ]  (settings-stepper look;
 ///                  0.1 C steps; a tap on the value opens the signed keypad)
 ///   row 186..222   NTC user only: R25 and Beta fields (tap = keypad)
@@ -2959,36 +2959,92 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     None
 }
 
-/// System settings (subset of the stock sections that this firmware has),
-/// three pages of at most SET_ROWS rows. Page 1: the last row "More" opens
-/// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
-/// bargraph / history row (UF-30), Help; its "More" opens page 3
-/// (SETTINGS3): the wrong-connection alerts, "Device" (the stock §6
-/// Device/About page) and "Touch test". "Back" is the tappable title bar (stock settings have
-/// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
-/// page 2 -> page 1 -> menu), so the lists hold only settings.
-pub const SETTINGS: [&str; 9] = [
-    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
-    "Scope drag", "More",
-];
-pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
-/// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
-/// OFF), the danger alarm (danger.rs, doc
-/// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
-/// applies at the next USB plug), the burden voltage readout of the A
-/// functions (doc 3.15; persisted, default OFF = the stock aux row), the
-/// Device / About page, the touch test page (app_touchtest.rs) and the
-/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
-/// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
-/// so the rows above keep their places.
-/// Row 9, "Mode Remember" (the stock's name and place, Other Settings;
-/// default OFF as the stock): ON restarts the multimeter after a power-off
-/// as it was (app.rs `restore`).
-pub const SETTINGS3: [&str; 9] = [
-    "Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm", "Mode Remember",
+/// System settings, grouped as the stock's (owner 2026-10-30): a column of
+/// section tabs on the left, the selected section's rows on the right, 45 px
+/// per tab and row (the stock's Settings screen, user manual 4.1, has 40). "Back"
+/// is the tappable title bar (`title_back_hit`), straight to the menu.
+///
+/// Every setting has an id (`S_*`, the index into `SET_NAMES` and into the
+/// value array `settings` takes); `SET_TABS` lists each section's rows.
+pub const S_DIM: u8 = 0;
+pub const S_SHUTDOWN: u8 = 1;
+/// -/+ stepper rows (ui-review #12): 10 % steps, no wrap-around.
+pub const S_BACKLIGHT: u8 = 2;
+pub const S_VOLUME: u8 = 3;
+pub const S_BT: u8 = 4;
+pub const S_START: u8 = 5;
+pub const S_RAILS: u8 = 6;
+pub const S_DRAG: u8 = 7;
+/// FR-05: the DMM rate / smoothing; UF-30: the DMM page's bargraph /
+/// history row.
+pub const S_RATE: u8 = 8;
+pub const S_SMOOTH: u8 = 9;
+pub const S_DMM_ROW: u8 = 10;
+pub const S_TEMP_UNIT: u8 = 11;
+pub const S_SWIPE: u8 = 12;
+pub const S_PRESS: u8 = 13;
+pub const S_TAP_STEP: u8 = 14;
+/// Opens the help pages (UF-29).
+pub const S_HELP: u8 = 15;
+/// The wrong-connection alerts (sentinel.rs; ON = all, A-JACK only, OFF).
+pub const S_JACK: u8 = 16;
+/// The danger alarm (danger.rs, doc 4.10: Loud / Volume / Off).
+pub const S_ALARM: u8 = 17;
+/// The USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
+/// applies at the next USB plug).
+pub const S_USB: u8 = 18;
+/// The burden voltage readout of the A functions (doc 3.15; default OFF =
+/// the stock aux row).
+pub const S_BURDEN: u8 = 19;
+/// Opens the Device / About page (the stock section 6).
+pub const S_DEVICE: u8 = 20;
+/// Opens the touch test page (app_touchtest.rs).
+pub const S_TOUCH: u8 = 21;
+/// The accuracy label (../docs/dmm-accuracy.md; default ON).
+pub const S_ACC: u8 = 22;
+/// Ohm readings below 0 (Dmm::ohm_neg; default OFF).
+pub const S_OHM_NEG: u8 = 23;
+/// "Mode Remember" (the stock's name, Other Settings; default OFF as the
+/// stock): ON restarts the multimeter after a power-off as it was (app.rs
+/// `restore`).
+pub const S_REMEMBER: u8 = 24;
+/// Number of settings (the value array's length).
+pub const SET_N: usize = 25;
+
+/// Row labels by id. In the Scope section without the "Scope" prefix.
+pub const SET_NAMES: [&str; SET_N] = [
+    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power", "Drag",
+    "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
+    "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
+    "Mode Remember",
 ];
 
-/// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
+/// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
+/// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
+/// there) with its Device section and our help / touch test pages.
+pub const SET_TABS: [(&str, &[u8]); 6] = [
+    ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
+    ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
+    ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
+    ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
+    ("Scope", &[S_DRAG, S_SWIPE, S_PRESS, S_TAP_STEP]),
+    ("Other", &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP]),
+];
+/// The section of the USB disk row (its value follows the bus), the
+/// Device / touch test / help rows (their pages return to it).
+pub const TAB_OTHER: u8 = 5;
+
+/// Rows that open a page (a ">" instead of a value).
+pub fn set_opens(id: u8) -> bool {
+    matches!(id, S_HELP | S_DEVICE | S_TOUCH)
+}
+
+/// Rows with a -/+ stepper.
+pub fn set_is_stepper(id: u8) -> bool {
+    matches!(id, S_BACKLIGHT | S_VOLUME)
+}
+
+/// The "USB disk" setting's value: the mode asked for, "(re-plug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
 pub fn usb_disk_name(ro_now: bool, ro_want: bool) -> &'static str {
     match (ro_want, ro_now == ro_want) {
@@ -3064,32 +3120,158 @@ pub fn title_back_hit(y: u16) -> bool {
     (y as i16) < PAGE_BAR_H
 }
 
-/// Settings page 1 rows with -/+ steppers (Backlight, Key/alert volume;
-/// ui-review #12): no more wrap-around +10 % per tap.
-pub const SET_STEP_ROWS: [usize; 2] = [2, 3];
-/// Stepper keys of a settings row (x of "-", "+"), value between them.
-const STEP_MINUS_X: i16 = 210;
+/// Stepper keys of a list-page row (x of "-", "+"), value between them
+/// (the Record page).
 const STEP_PLUS_X: i16 = 410;
 const STEP_KEY_W: i16 = 54;
 
-/// Settings page `page` (0 / 1 / 2) with its row values.
-pub fn settings(page: u8, vals: &[&str]) {
-    if page == 0 {
-        let mut v = [""; 9];
-        for (i, s) in vals.iter().enumerate().take(9) {
-            v[i] = if SET_STEP_ROWS.contains(&i) { "" } else { s };
-        }
-        list_page("Settings", &SETTINGS, &v[..vals.len().min(9)]);
-        for i in SET_STEP_ROWS {
-            if let Some(t) = vals.get(i) {
-                set_stepper(i, t, STEP_MINUS_X);
-            }
-        }
-    } else if page == 1 {
-        list_page("Settings 2/3", &SETTINGS2, vals);
-    } else {
-        list_page("Settings 3/3", &SETTINGS3, vals);
+/// Settings geometry: tabs x 4..124, rows x 130..476, both 42 px tall at a
+/// 45 px pitch from y 44 (6 of them end at 311; the touch target is the
+/// whole 45 px: the stock rows are 40).
+const ST_Y0: i16 = 44;
+const ST_PITCH: i16 = 45;
+const ST_H: i16 = 42;
+const ST_TAB_X: i16 = 4;
+const ST_TAB_W: i16 = 120;
+/// Touch split between the tab column and the rows.
+const ST_SPLIT: u16 = 127;
+const ST_ROW_X: i16 = 130;
+const ST_ROW_W: i16 = 346;
+/// The rows' text: label from x 142, value right-aligned to 466.
+const ST_TXT_X: i16 = ST_ROW_X + 12;
+const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 10;
+/// A stepper row's keys ("-" at ST_MINUS_X, "+" at ST_PLUS_X) and value
+/// between them.
+const ST_KEY_W: i16 = 40;
+const ST_PLUS_X: i16 = ST_TXT_END - ST_KEY_W;
+const ST_MINUS_X: i16 = ST_PLUS_X - 4 - 56 - 4 - ST_KEY_W;
+/// Most rows a section can have (and most sections).
+pub const SET_ROWS_MAX: usize = 6;
+const _: () = {
+    let mut i = 0;
+    while i < SET_TABS.len() {
+        assert!(SET_TABS[i].1.len() <= SET_ROWS_MAX);
+        i += 1;
     }
+    assert!(SET_TABS.len() <= SET_ROWS_MAX);
+};
+
+/// Tab `i` / row `i` boxes. Shared by `settings()` and `settings_hit()` so
+/// the render and the touch map cannot drift.
+fn st_tab(i: usize) -> sf::Rect {
+    rect(ST_TAB_X, ST_Y0 + i as i16 * ST_PITCH, ST_TAB_W, ST_H)
+}
+
+fn st_row(i: usize) -> sf::Rect {
+    rect(ST_ROW_X, ST_Y0 + i as i16 * ST_PITCH, ST_ROW_W, ST_H)
+}
+
+/// The Settings screen with section `tab` selected; `vals` = the value
+/// text of every setting, by id (SET_N). In `set_row_only` mode only the
+/// pressed / released tab (row 0x80 | tab), row or stepper key.
+pub fn settings(tab: u8, vals: &[&str]) {
+    if cfg!(not(target_os = "none")) {
+        assert_eq!(vals.len(), SET_N, "settings: one value per setting");
+    }
+    let tab = (tab as usize).min(SET_TABS.len() - 1);
+    let only = row_only();
+    if only.is_none() {
+        page_title("Settings");
+        lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    }
+    for (i, (name, _)) in SET_TABS.iter().enumerate() {
+        let pressed = match only {
+            None => false,
+            Some(p) if p.row == 0x80 | i as u8 => p.on,
+            Some(_) => continue,
+        };
+        let bg = if pressed { K_SEL } else if i == tab { SEL } else { M_TILE };
+        let r = st_tab(i);
+        sf::rbox(r, 6, bg, M_BG);
+        sf::glyphs(sf::TEXT22, rect(r.x + 8, r.y, r.w - 14, r.h), name, STATUS_FG, bg, 1, 0);
+    }
+    for (i, &id) in SET_TABS[tab].1.iter().enumerate() {
+        let v = vals.get(id as usize).copied().unwrap_or("");
+        let r = st_row(i);
+        if set_is_stepper(id) {
+            st_stepper(i, id, v, only);
+            continue;
+        }
+        let (bg, vfg) = match only {
+            None => (M_TILE, M_ACCENT),
+            Some(p) if p.row as usize == i && p.part == 0 => if p.on { (K_SEL, STATUS_FG) } else { (M_TILE, M_ACCENT) },
+            Some(_) => continue,
+        };
+        sf::rbox(r, 6, bg, M_BG);
+        let name = SET_NAMES[id as usize];
+        let lw = sf::text_width(sf::TEXT22, name, 0);
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, lw + 2, r.h), name, STATUS_FG, bg, 1, 0);
+        // The value right-aligned (the stock's ON / OFF at the right end);
+        // a row that opens a page: ">".
+        let vx = ST_TXT_X + lw + 12;
+        let v = if set_opens(id) { ">" } else { v };
+        sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_TXT_END - vx, r.h), v, if set_opens(id) { STATUS_FG } else { vfg }, bg, 4, 0);
+    }
+}
+
+/// Stepper row `i` (setting `id`): label, "-" key, value, "+" key.
+fn st_stepper(i: usize, id: u8, val: &str, only: Option<RowPress>) {
+    if only.is_some_and(|p| p.row as usize != i) {
+        return;
+    }
+    let r = st_row(i);
+    if only.is_none() {
+        sf::rbox(r, 6, M_TILE, M_BG);
+        let name = SET_NAMES[id as usize];
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, ST_MINUS_X - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        let vx = ST_MINUS_X + ST_KEY_W + 4;
+        sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_PLUS_X - 4 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
+    }
+    for (d, x, t) in [(-1, ST_MINUS_X, "-"), (1, ST_PLUS_X, "+")] {
+        let bg = match only {
+            None => M_ACCENT,
+            Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
+            Some(_) => continue,
+        };
+        let k = rect(x, r.y + 4, ST_KEY_W, r.h - 8);
+        sf::rbox(k, 4, bg, M_TILE);
+        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, bg, 8, 0);
+    }
+}
+
+/// What a touch on the Settings screen hits.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SetHit {
+    /// Section tab `i`.
+    Tab(u8),
+    /// Row `i` of the shown section (`SET_TABS[tab].1[i]`).
+    Row(usize),
+}
+
+/// The tab or row under a touch at (x, y) below the title bar, `tab`
+/// shown. Each target owns the 2 px gap below it: 40 px tall.
+pub fn settings_hit(tab: u8, x: u16, y: u16) -> Option<SetHit> {
+    let y = y as i16 - (ST_Y0 - (ST_PITCH - ST_H) / 2);
+    if y < 0 {
+        return None;
+    }
+    let i = (y / ST_PITCH) as usize;
+    if x < ST_SPLIT {
+        (i < SET_TABS.len()).then_some(SetHit::Tab(i as u8))
+    } else {
+        (i < SET_TABS[(tab as usize).min(SET_TABS.len() - 1)].1.len()).then_some(SetHit::Row(i))
+    }
+}
+
+/// The setting id of row `row` in section `tab`.
+pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
+    SET_TABS.get(tab as usize)?.1.get(row).copied()
+}
+
+/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// label and the "-" key) or +1.
+pub fn settings_step(x: u16) -> i8 {
+    if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
@@ -3156,13 +3338,8 @@ pub const fn step_value_w(minus_x: i16) -> i16 {
 /// 134 px value box.
 pub const REC_STEP_MINUS_X: i16 = 150;
 
-/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
-/// label and the "-" key) or +1.
-pub fn settings_step(x: u16) -> i8 {
-    step_dir(x, STEP_MINUS_X)
-}
-
-/// `settings_step` on the Record page.
+/// A tap at `x` on a Record page stepper row: -1 (left of the value's
+/// centre: the label and the "-" key) or +1.
 pub fn record_step(x: u16) -> i8 {
     step_dir(x, REC_STEP_MINUS_X)
 }
@@ -3170,10 +3347,6 @@ pub fn record_step(x: u16) -> i8 {
 fn step_dir(x: u16, minus_x: i16) -> i8 {
     let mid = (minus_x + STEP_KEY_W + STEP_PLUS_X) / 2;
     if (x as i16) < mid { -1 } else { 1 }
-}
-
-pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
-    list_hit(y, [SETTINGS.len(), SETTINGS2.len(), SETTINGS3.len()][page.min(2) as usize])
 }
 
 /// Row of a `list_page` with `n` rows under a touch at `y`.
@@ -3322,7 +3495,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("Backlight", "Still dims (battery)"),
             ("A-JACK LIVE? OVLD", "Alternate with HOLD"),
             ("V-JACK? DC? AC?", "Hints, below HOLD"),
-            ("Jack alerts", "Settings 3/3"),
+            ("Jack alerts", "Settings > Alerts"),
         ],
     ),
     (
@@ -3332,7 +3505,7 @@ pub const HELP: [(&str, [(&str, &str); 8]); 7] = [
             ("New files", "Show while mounted"),
             ("File manager", "Refresh (F5)"),
             ("PC can edit", "Delete, copy update"),
-            ("Change mode", "Settings 3/3"),
+            ("Change mode", "Settings > Other"),
             ("Takes effect", "At next USB plug"),
             ("At power-on", "Files live again"),
             ("Delete on meter", "Gallery, MMEM:DEL"),

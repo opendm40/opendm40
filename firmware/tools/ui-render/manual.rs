@@ -161,19 +161,15 @@ pub fn run(out: &str) -> usize {
     let page = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     let screen = vec![("screen", Bx::new(0, 0, 480, 320))];
 
-    // Settings pages with the defaults of a new meter.
-    host::reset(0);
-    ui::settings(0, &["5 min", "30 min", "55%", "50%", "ON", "Multimeter", "Auto (per view)", "Stock", ""]);
-    ck.check_opts("manual/settings1", &page, false);
-    save1(out, "settings1");
-    host::reset(0);
-    ui::settings(1, &["MED  5.0/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
-    ck.check_opts("manual/settings2", &page, false);
-    save1(out, "settings2");
-    host::reset(0);
-    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]);
-    ck.check_opts("manual/settings3", &page, false);
-    save1(out, "settings3");
+    // Settings, every section, with the defaults of a new meter.
+    let sv = set_vals(&[]);
+    for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+        host::reset(0);
+        ui::settings(tab as u8, &sv);
+        let n = format!("settings-{}", name.to_lowercase());
+        ck.check_opts(&format!("manual/{n}"), &page, false);
+        save1(out, &n);
+    }
 
     // Voltage range page: AUTO+ selected, DC, the AUTO+ note, Wave.
     host::reset(0);
@@ -689,16 +685,16 @@ pub fn run(out: &str) -> usize {
         ui::wave_button();
         ck.check_opts("manual/range-v-auto", &page, false);
         save1(out, "range-v-auto");
-        // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked
-        // for (re-plug pending).
+        // Settings > Multimeter with smoothing LOW; Settings > Connections
+        // with PC can edit asked for (re-plug pending).
         host::reset(0);
-        ui::settings(1, &["MED  5.0/s", "LOW", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
-        ck.check_opts("manual/settings2-smooth", &page, false);
-        save1(out, "settings2-smooth");
+        ui::settings(3, &set_vals(&[(ui::S_SMOOTH, "LOW")]));
+        ck.check_opts("manual/settings-smooth", &page, false);
+        save1(out, "settings-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]);
-        ck.check_opts("manual/settings3-edit", &page, false);
-        save1(out, "settings3-edit");
+        ui::settings(ui::TAB_OTHER, &set_vals(&[(ui::S_USB, ui::usb_disk_name(true, false))]));
+        ck.check_opts("manual/settings-usb-edit", &page, false);
+        save1(out, "settings-usb-edit");
     }
 
     // Every alert badge (A-JACK, LIVE?, OVLD are above).

@@ -244,7 +244,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 - `SYSTem:ALERt:ALARm`: the two-tone alarm for AJACK, APROT and a current
   above 10 A, at full volume (`LOUD`), at the key volume (`VOLume`) or off.
   Stored.
-- `MEMory:STATe:RECall:AUTO` is Settings 3/3 **Mode Remember**: `ON`
+- `MEMory:STATe:RECall:AUTO` is Settings > Power **Mode Remember**: `ON`
   continues the multimeter after a power-off as it was. Stored.
 - `SYSTem:FUSE:TEST`: plug one lead from V/ohm into A, nothing else. The
   meter measures 600 ohm for three readings, then returns to the function
@@ -409,7 +409,7 @@ Functions:
   conversions (0.2 s) give no new reading then (`DBG:FAST?`). It applies to
   DC voltage, DC current and resistance; other functions keep their own
   timing. Stored.
-- `RESistance:NEGative` is Settings 3/3 **Negative ohm**. Stored.
+- `RESistance:NEGative` is Settings > Multimeter **Negative ohm**. Stored.
 
 ## Temperature
 
@@ -770,7 +770,7 @@ unless shown otherwise.
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
-| `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>,<trend chart ms/div>` | USB |
+| `DBG:VIEW?` | | `<page>,<Settings tab 1..6>,<wave view 1/0>,<trend chart ms/div>` | USB |
 | `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
 | `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
