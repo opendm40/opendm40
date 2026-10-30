@@ -62,6 +62,12 @@ FAIL = []
 # Region C functions called while the log streamed that are not its own
 # (c_check_log).
 LOG_OTHER = set()
+# The frame log's code that is region C on purpose (link-native.x
+# `.text.log_cold`): the waveform view, the counters, the page draw, the
+# setup popup, the view's touches and its panel buttons; the per-pass
+# decode and rows are not.
+LOG_COLD = ('log_snip_show', 'log_stats', 'log_page', 'log_setup_draw', 'log_gesture', 'log_setup_changed',
+            'log_unpress', 'log_page_step', 'log_pause', 'log_snip_hide', 'log::panel_button', 'log::panel_hit')
 
 
 def want(s):
@@ -279,7 +285,10 @@ try:
     def c_check(what, every=False):
         if not RC:
             return
-        got = [f for f in RC.calls(every) if f not in LOG_OTHER]
+        # The hooks are gated on the frame log's stream too: its own region
+        # C code (LOG_COLD) runs then, never with the AD2 stream (log_open /
+        # LOG:STAT ON refuse each other).
+        got = [f for f in RC.calls(every) if f not in LOG_OTHER and not any(k in f for k in LOG_COLD)]
         print('  region C functions called while the AD2 stream ran: %s' % (', '.join(sorted(got)) or 'none'))
         check(not got, '%s: no region C code while the stream ISR owns the bus' % what)
 
@@ -292,13 +301,8 @@ try:
         got = RC.calls()
         own = [f for f in got if any(k in f for k in ('decode', 'app_log', 'ui_log', 'scope', 'pack10'))]
         LOG_OTHER.update(f for f in got if f not in own)
-        # The waveform view, the counters, the page draw, the setup popup,
-        # the view's touches and its panel buttons are region C on purpose
-        # (link-native.x `.text.log_cold`); the per-pass decode and rows
-        # are not.
-        cold = ('log_snip_show', 'log_stats', 'log_page', 'log_setup_draw', 'log_gesture', 'log_setup_changed',
-                'log_unpress', 'log_page_step', 'log_pause', 'log_snip_hide', 'log::panel_button', 'log::panel_hit')
-        own = [f for f in own if not any(k in f for k in cold)]
+        # Region C on purpose: LOG_COLD.
+        own = [f for f in own if not any(k in f for k in LOG_COLD)]
 
         print('  region C functions called while the log streamed: %s' % (', '.join(sorted(got)) or 'none'))
         check(not own, 'the frame log: none of its code in region C (%s)' % ', '.join(own))
@@ -501,7 +505,7 @@ try:
             wait_ms(4500)
             q('DBG:KEY 3')
             wait_ms(600)
-            q('DBG:TAP 237,259')  # Wave
+            q('DBG:TAP 298,259')  # Wave (0.4.0 MF layout, as hy3131/wavetest.py)
             wait_ms(6000)
             q('TIM:SCAL 2E-3')  # 38.4 kS/s
             wait_ms(2000)
