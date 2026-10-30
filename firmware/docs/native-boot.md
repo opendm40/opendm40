@@ -876,8 +876,8 @@ had to leave the image.
 | | merged, before | after |
 |---|---|---|
 | region A2 free | 2 208 B | 156 B |
-| region B free | -6 296 B (no link) | 9 000 B |
-| region C free | 10 824 B | 6 912 B |
+| region B free | -6 296 B (no link) | 8 704 B |
+| region C free | 10 824 B | 7 204 B |
 | stack headroom (static worst path) | 20 320 B | 21 560 B |
 | SRAM free | 7 244 B | 11 484 B |
 
@@ -911,6 +911,11 @@ them for a debug session, which does not fit region B with the decoder):
 - `acdc-trace`: DBG:ACDC:TRACE records nothing (the query answers an empty
   ring): B +864 B, SRAM +1 768 B.
 - `dbg-src`: DBG:SRC (`dbgsrc_dmm`, the parser): B +2 640 B, C +984 B.
+
+Back to region B: `App::sp_popup_close`, `sp_uncover`, `scope_ui::uncover`
+(292 B; C since region B audit #3). MENU with an MF popup open in the
+Wave view closes it while the AD2 stream runs (hy3131/wavetest.py "exit
+(MENU)", reached once its Settings tap missed the five-tab MF bar).
 
 Not done: the decode tab to C (it would need the tab hidden in the Wave
 view); the gallery's `dlog` decoder copies for `GSrc` (~0.6 KB of B,
