@@ -1555,6 +1555,9 @@ pub struct Dmm {
     pub sent: Sentinel,
     sent_mode: u8,
     r29: u8,
+    /// DC V 6 V's AC? alternation: R21 for the PB1 window (the row's) and
+    /// for the V-tap window (the stock row's, sentinel R21_DCV_PB1).
+    r21: (u8, u8),
     /// Last peak-hold harvest in `poll` (frequency, AD2 kinds), ms.
     pk_t: u64,
     /// AC V with the DC? alternation: ENPKH back on at this time (ms; 0 =
@@ -2159,6 +2162,7 @@ impl Dmm {
             sent: Sentinel::new(),
             sent_mode: 255,
             r29: 0,
+            r21: (0, 0),
             pk_t: 0,
             pkh_due: 0,
             sent_arm: false,
@@ -2483,6 +2487,10 @@ impl Dmm {
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
         let mask = if self.fuse_job.is_some() || src_row.is_some() { 0 } else { self.sent.mask };
         let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
+        // The comparator rows' negative leg (sentinel NEGATIVE LEG): AD2 on
+        // PB1 (not ohm 600 ohm: its phases write R32 whole).
+        let neg = !am && !is_ohm600(m, self.range) && sentinel::neg_leg(m, r as u8, self.acdc, kind, sentinel::variant());
+        let row = if neg { sentinel::neg_row(&row) } else { row };
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
         // unused there; DC V 60 V+ has no comparator but the probe fits).
@@ -2535,6 +2543,7 @@ impl Dmm {
             self.fast.start(k, clk.now_ms());
         }
         self.r29 = row[9];
+        self.r21 = (row[1], cfg[1]);
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
         if self.tr.on != 0 {
             let h = tr::hash16(&row);
@@ -2550,6 +2559,9 @@ impl Dmm {
         self.sent_arm = true;
         self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
+        self.sent.neg = neg;
+        self.sent.neg_vok = true;
+        self.sent.neg_thr = if m == 1 { sentinel::PK2_NEG_THR_DCV } else { sentinel::PK2_NEG_THR };
         self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
         // Leaving the ohm network into a V-JACK? comparator row (sentinel::OHM_EXIT_*).
         // Every row within OHM_EXIT_MAX_MS of it (DC A, its range steps, the
@@ -4093,6 +4105,9 @@ impl Dmm {
                 // AC? alternation: the next window's node; the first CTSTA
                 // after the switch is dropped (a bit of the other node).
                 hy::write(0x20, &[if self.sent.alt_v { sentinel::R20_SENSE } else { sentinel::R20_PB1 }]);
+                if self.r21.0 != self.r21.1 {
+                    hy::write(0x21, &[if self.sent.alt_v { self.r21.1 } else { self.r21.0 }]);
+                }
                 let _ = hy::read1(0x14);
             }
         }
@@ -4104,6 +4119,16 @@ impl Dmm {
             && self.sent.kind == Kind::Ad2A
             && (self.jwin != 0 || self.sent.jack_due(now))
             && self.cont_jack(now);
+        if self.sent.neg && !self.probe && !self.pw.on && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
+            // The negative leg (sentinel NEGATIVE LEG): the AD2 hold on PB1
+            // every window, restarted as the AD2 kinds' is.
+            self.pk_t = now;
+            let mut b = [0u8; 6];
+            hy::read(0x0E, &mut b);
+            self.sent.neg_peak(now, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+            hy::write(0x29, &[self.r29]);
+        }
         if !jw && self.peak_in_poll() && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
             // Frequency / the AD2 kinds: no AC result to bring PKHMIN /
             // PKHMAX along; read them (6 bytes) every window and restart
@@ -4422,6 +4447,10 @@ impl Dmm {
         // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         let now = clk.now_ms();
+        if m == 1 {
+            // (the negative leg counts only with an open-looking V jack)
+            self.sent.neg_vok = x > -sentinel::NEG_DCV_MAX_V;
+        }
         if m == 3 && acdc {
             // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
             self.mv_dc_drv = mag > ov * lim;
@@ -5486,7 +5515,7 @@ impl Dmm {
         if !self.acdc {
             self.sent.rearm(now);
         }
-        if matches!(self.sent.kind, Kind::PeakA | Kind::PeakV | Kind::Ad2A) && !self.pw.on {
+        if (matches!(self.sent.kind, Kind::PeakA | Kind::PeakV | Kind::Ad2A) || self.sent.neg) && !self.pw.on {
             self.pkh_due = 0;
             self.pk_t = now;
             hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
@@ -5504,7 +5533,9 @@ impl Dmm {
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
         if !self.probe {
-            if run.is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
+            // (on a run the comparator saw: one of the negative leg alone
+            // keeps AD2 on PB1, sentinel `cmp_run`)
+            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
                 self.probe = true;
                 self.probe_rewrite(clk, 120);
             }

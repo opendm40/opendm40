@@ -38,6 +38,8 @@ Additional requirements:
       - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
         = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
       Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
+      DC V 6 V's window goes to ~0.4 V (R21 0x86) with fix/ajack-polarity (the 66 kHz false A-JACK);
+      a reversed current (COM -> A) gets A-JACK but no A-PROT there (the probe needs a comparator run).
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so

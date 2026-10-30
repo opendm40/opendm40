@@ -256,6 +256,11 @@ pub const VAR_ACA_PB5: u8 = 32;
 /// below -347 mV, with V-COM at 1 V or the source off: device d2aff22).
 /// The swing threshold is not rescaled (4x fewer codes per volt).
 pub const VAR_ACA_IG09: u8 = 64;
+/// bit 7: release 0.4.0's comparator rows: no negative leg (NEGATIVE LEG
+/// below: DC V 6 V / DC mV / ohm keep the stock rows' OP2 / AD2, off,
+/// outside the probe / jack check) and DC V 6 V's PB1 window at the stock
+/// R21 (R21_DCV_PB1).
+pub const VAR_NEG_OFF: u8 = 128;
 static VARIANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 pub fn set_variant(v: u8) {
@@ -305,6 +310,9 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
         0 if acdc && range > 0 && var & VAR_DCV_HI == 0 => Kind::Off,
         1 | 3 | 10 | 15 if mask & M_AJACK != 0 => {
             c[0] = R20_PB1;
+            if mode == 1 && var & VAR_NEG_OFF == 0 {
+                c[1] = R21_DCV_PB1;
+            }
             Kind::CmpA
         }
         0 if var & VAR_ACV_OFF != 0 => Kind::Off,
@@ -383,7 +391,7 @@ fn ad2_sentinel(c: &mut [u8; CFG_LEN]) -> Kind {
 /// on last, so AD2 never starts while AD1 converts (datasheet 13.1 note 7;
 /// `powermeter::configure_dc` does the same).
 pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
-    kind == Kind::Ad2A && row[3] & 0x80 != 0
+    (kind == Kind::Ad2A || (kind == Kind::CmpA && row[6] & 0x80 != 0)) && row[3] & 0x80 != 0
 }
 
 // V_GATE (TODO "False A-JACK in ohm / temperature", devices 22c85ba /
@@ -571,6 +579,75 @@ pub const PK_DC_NEG_THR: i32 = 211_400;
 /// (positive) or PK_DC_NEG_THR (negative), 0 for a hold across zero.
 pub fn pk_dc_hit(pkmin: i32, pkmax: i32) -> bool {
     pkmax >= pkmin && (pkmin > PK_DC_THR || pkmax < -PK_DC_NEG_THR)
+}
+
+// NEGATIVE LEG (device 2026-10-30, PR #44's reversed-current check: DC mA
+// -20.6 / -4.7 mA, the current from COM to A): the comparator rows (DC V
+// 6 V, DC mV, ohm) never raised A-JACK; with the current A -> COM they did
+// at once. CTSTA reads 0x00 for PB1 below the comparator's +-20.8 mV window,
+// as for an idle PB1 (hw/README "Measured node behaviour": 0x00 = below,
+// INFERRED there; the reversed run fits it), so the comparator sees one
+// polarity only. These rows leave OP2 / AD2 unused (the A-PROT probe and
+// the jack check borrow them after a comparator hit), so the row carries
+// OP2 (x1) on PB1 -> AD2 with the peak hold, as continuity's AD2 sentinel
+// (`neg_row`), and a comparator window counts as a hit when an AD2 hold
+// since the last one sat wholly below -PK2_NEG_THR AND the comparator read
+// no bit in the window. A source on V-COM that moves PB1 up (ohm at 5 /
+// 10 V, the 66 kHz square in DC V) reads 0x70 / MIXED, so the leg adds
+// nothing there. Not covered: A-PROT for a reversed current (the probe goes
+// in on comparator runs only, `cmp_run`: its row would take the leg's AD2
+// away), temperature, ohm 600 ohm (its phases rewrite R32), AC+DC.
+
+/// AD2 codes (IG 2.0) for the negative leg: PB1 ~180 mV below PB3, a
+/// reversed DC current from ~3.8 mA on 47.5 ohm (PK_DC_THR's level, the
+/// other sign; -4.7 mA puts ~-223 mV there). The V-side levels on
+/// PB1 - PB3 measured in other rows stay above it (Hz -140 mV at 10 V DC,
+/// AC mV -112 mV); in these rows they were never measured (INFERRED to be
+/// smaller).
+pub const PK2_NEG_THR: i32 = 75_500;
+/// DC V 6 V: the negative leg counts only while the reading is above
+/// -NEG_DCV_MAX_V (V): an open V jack reads ~0 (a reversed 20 mA moves it
+/// by ~-0.14 V, INFERRED from DC mV's +139 mV at +20 mA); a negative source
+/// on V-COM might pull PB1 down too (not measured).
+pub const NEG_DCV_MAX_V: f32 = 1.0;
+
+/// The negative leg's window hit: the hold wholly below -PK2_NEG_THR (a
+/// rail-pinned hold, -262 144 from ~-0.63 V on, counts).
+pub fn neg_hit(pkmin: i32, pkmax: i32, thr: i32) -> bool {
+    pkmax >= pkmin && pkmax < -thr
+}
+
+/// DC V 6 V's negative leg: ~400 mV, from ~8.4 mA, the PB1 window's level
+/// (R21_DCV_PB1) on the other side.
+pub const PK2_NEG_THR_DCV: i32 = 167_800;
+
+/// DC V 6 V: R21 of the PB1 window. Stock 0xDD (+-20.8 mV, 0.44 mA on
+/// 47.5 ohm). Device 2026-10-30 (release 0.4.0 + #44 + #35): a 66 kHz
+/// square on V-COM (DC V read +2.786 V), A jack empty, raised A-JACK in
+/// DC V AUTO in 3 of 4 runs of 10-15 s; the owner accepts losing the small
+/// currents for it. SCMPRH 1000 = AGNDP6 (+416.7 mV), SCMPRL 0110 = VDSC11
+/// (+0.4 V with VDDA 3.6 V and AGND at VDDA / 2: INFERRED, as is the
+/// polarity reading: CTSTA never showed CMPHO without CMPLO, so CMPLO is
+/// INFERRED to mean "above VRL" and any bit to need PB1 above VRL). So a hit
+/// needs PB1 above ~0.4 V: a current A -> COM from ~8.4 mA. Whether the
+/// 66 kHz pickup on PB1 stays below it: not measured.
+pub const R21_DCV_PB1: u8 = 0x86;
+
+/// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): DC V
+/// 6 V (1 r0), DC mV (3), ohm (10; not 600 ohm: the caller), plain (not
+/// AC+DC), the comparator sentinel on, and not dropped by
+/// DBG:SENTinel:VARiant bit 7 (VAR_NEG_OFF, an A/B of the readings).
+pub fn neg_leg(mode: u8, range: u8, acdc: bool, kind: Kind, var: u8) -> bool {
+    kind == Kind::CmpA && !acdc && var & VAR_NEG_OFF == 0 && matches!((mode, range), (1, 0) | (3, _) | (10, _))
+}
+
+/// The negative leg's row: OP2 (x1) on PB1, AD2 = OP2O - PB3 at IG 2.0,
+/// OSR 256, the peak hold on AD2 (`ad2_sentinel`); AD1 written last
+/// (`ad1_last`).
+pub fn neg_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
+    let mut c = *row;
+    ad2_sentinel(&mut c);
+    c
 }
 
 /// The AD1 peak pair's one-sided level (codes): the smaller magnitude of a
@@ -1041,6 +1118,19 @@ pub struct Sentinel {
     /// Frequency (set by `dmm.rs` with the row): an AD1 peak window hits
     /// only on a one-sided level (`pk_dc_hit`).
     pub pk_dc: bool,
+    /// NEGATIVE LEG (set by `dmm.rs` with the row): the row carries AD2 on
+    /// PB1; `neg_pend` = a harvest since the last comparator window hit
+    /// (`neg_peak`); `neg_only` = the present run of hits has had no
+    /// comparator hit (no probe / jack check for it, `cmp_run`).
+    pub neg: bool,
+    neg_pend: bool,
+    neg_only: bool,
+    /// DC V 6 V (`dmm.rs` per reading): the reading is small enough for an
+    /// open V jack (a source on V-COM, negative, might move PB1 too; not
+    /// measured). True in the other rows (their V_GATE / jack check).
+    pub neg_vok: bool,
+    /// ... and its line (AD2 codes, PK2_NEG_THR / PK2_NEG_THR_DCV).
+    pub neg_thr: i32,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
     /// emu/hy3131/switchtest.py): the last LOG_N alerts that came on, as
     /// (alert, kind, ms); `log_n` = assertions logged so far.
@@ -1108,6 +1198,11 @@ impl Sentinel {
             vin_t: 0,
             jack_low: 0,
             pk_dc: false,
+            neg: false,
+            neg_pend: false,
+            neg_only: false,
+            neg_vok: true,
+            neg_thr: PK2_NEG_THR,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
             log_n: 0,
         }
@@ -1154,6 +1249,7 @@ impl Sentinel {
             }
         }
         self.kind = kind;
+        self.neg_pend = false;
         self.blank_until = now;
         self.win_t0 = now;
         self.win_hit = false;
@@ -1273,6 +1369,25 @@ impl Sentinel {
         (self.streak > 0).then_some(self.run_t0)
     }
 
+    /// `run_since` for a run the comparator saw (the probe / jack check go
+    /// in on it): not for one of the negative leg alone, whose evidence
+    /// (AD2 on PB1) the probe's row would take away.
+    pub fn cmp_run(&self) -> Option<u64> {
+        self.run_since().filter(|_| !self.neg_only)
+    }
+
+    /// NEGATIVE LEG: one AD2 peak harvest (`dmm.rs`, every WIN_MS while the
+    /// row carries the leg and no probe / jack check): a hit counts in the
+    /// next comparator window that reads no bit.
+    #[inline(never)]
+    pub fn neg_peak(&mut self, now: u64, pkmin: i32, pkmax: i32) {
+        if self.blanked(now) || pkmax < pkmin {
+            return;
+        }
+        self.pk = (pkmin, pkmax);
+        self.neg_pend |= self.neg_vok && neg_hit(pkmin, pkmax, self.neg_thr);
+    }
+
     /// Alerts masked off by the user are dropped at once.
     pub fn set_mask(&mut self, mask: u8) {
         self.mask = mask & M_ALL;
@@ -1364,9 +1479,15 @@ impl Sentinel {
             // comes on: no bit, then 0x70 to its end, one change (the device
             // reads 0x70 for any level above the window). A run of 0x70 that
             // ends within the window stays MIXED (the V side's sparse 0x70).
-            let mix = wb == W_BOTH | W_ZERO && !(self.win_flips == 1 && self.win_last == W_BOTH);
+            let onset = self.win_flips == 1 && self.win_last == W_BOTH;
+            let mix = wb == W_BOTH | W_ZERO && !onset;
             let hit = if self.kind == Kind::CmpA && !self.jchk {
-                wb & W_ONE != 0 || wb & W_BOTH != 0 && !mix
+                // (an onset window only starts a run: a level stays above the
+                // window after it, so the next window reads 0x70 alone. Device
+                // 2026-10-30, the 66 kHz square on V-COM in DC V AUTO, A jack
+                // empty: false A-JACK in 3 of 4 runs, INFERRED from two onset
+                // shapes in a row; the square's 0x70 runs come and go)
+                wb & W_ONE != 0 || wb & W_BOTH != 0 && !mix && !(wb & W_ZERO != 0 && self.streak > 0)
             } else if self.kind == Kind::CmpA {
                 // JCHK: a hit needs CMPHO (PB1 above the window: the device
                 // reads 0x70 there); CMPLO alone is a source near the pickup's
@@ -1376,6 +1497,14 @@ impl Sentinel {
             } else {
                 self.win_hit
             };
+            // NEGATIVE LEG: an AD2 hold below the line since the last window,
+            // and the comparator read no bit (PB1 below its window)
+            let cmp_hit = hit;
+            let hit = hit || (self.kind == Kind::CmpA && self.neg_pend && wb & (W_ONE | W_BOTH) == 0 && !self.win_hit);
+            let neg_win = !(self.alt && self.alt_v);
+            if neg_win {
+                self.neg_pend = false;
+            }
             let both = wb == CTSTA_CMP;
             self.win_t0 = now;
             self.win_hit = false;
@@ -1386,6 +1515,9 @@ impl Sentinel {
             if self.alt && self.alt_v {
                 self.ac.feed(now, both && self.ac_dc_ok, HINT_ASSERT_MS, HINT_CLEAR_MS);
             } else {
+                if hit && (self.streak == 0 || cmp_hit) {
+                    self.neg_only = !cmp_hit;
+                }
                 self.window(now, hit);
                 // MIXED in a JCHK row: the square on V-COM (device c6a3ac3:
                 // 0x70 on about half of the polls, 0 on the rest)
@@ -1621,13 +1753,13 @@ impl Sentinel {
                 if on {
                     now.saturating_sub(self.last_hit) < AJACK_CLEAR_MS
                         && !(self.vgate && self.vdrv)
-                        && !(self.jchk && (self.jack_drv || self.v_both(now)))
+                        && !(self.jchk && !self.neg_only && (self.jack_drv || self.v_both(now)))
                 } else {
                     // V_GATE: a V-side result since the run began (+ vlag) said
                     // V-COM is free; JCHK: so did the jack check
                     self.streak >= AJACK_WINDOWS
                         && self.v_free()
-                        && (!self.jchk || (!self.jack_drv && !self.v_both(now) && self.jack_in_run()))
+                        && (!self.jchk || self.neg_only || (!self.jack_drv && !self.v_both(now) && self.jack_in_run()))
                 }
             }
             _ => false,
@@ -1781,7 +1913,16 @@ mod tests {
             let var = if rr & 0x80 != 0 { VAR_DCV_HI } else { 0 };
             let (c, k) = row_for(m, rr & 0x7F | (rr >> 7), false, M_ALL, var, r);
             assert_eq!(k, Kind::CmpA);
-            assert_eq!(diff(r, &c), vec![(0, r[0], 0x90)], "mode {m}");
+            // (DC V 6 V: its PB1 window, R21_DCV_PB1)
+            let mut want = vec![(0, r[0], 0x90)];
+            if m == 1 {
+                want.push((1, r[1], R21_DCV_PB1));
+            }
+            assert_eq!(diff(r, &c), want, "mode {m}");
+            if m == 1 {
+                let (c, _) = row_for(m, rr & 0x7F | (rr >> 7), false, M_ALL, var | VAR_NEG_OFF, r);
+                assert_eq!(diff(r, &c), vec![(0, r[0], 0x90)], "mode {m}");
+            }
             // The stock R20 of these rows: SCMPI = PB4 (0xf0) or ENCMP off
             // (0xe0, 0xc0): no counter, no CMP pin either way.
             assert_eq!(r[0] & 0x0E, 0, "mode {m}");
@@ -2710,6 +2851,71 @@ mod tests {
             s.sample_cmp(t, if t % 100 < 40 { 0x70 } else { 0 });
         }
         assert_eq!((s.alert, s.hits), (Alert::None, 0));
+        // onset shapes window after window (the V side's 0x70 runs that start within a window
+        // and last to its end; device 2026-10-30, the 66 kHz square in DC V AUTO): an onset
+        // window only starts a run, so two never assert
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        for t in (0..1000).step_by(10) {
+            s.sample_cmp(t, if (t % 100 == 0 && t > 0) || t % 100 >= 60 { 0x70 } else { 0 });
+        }
+        assert_eq!(s.alert, Alert::None);
+        assert!(s.hits > 0);
+    }
+
+    #[test]
+    fn negative_leg() {
+        // A reversed current: the comparator reads 0x00 (PB1 below its window), AD2 on PB1 holds
+        // below the line: A-JACK, no comparator run (no probe / jack check for it).
+        for jchk in [false, true] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.neg = true;
+            s.jchk = jchk;
+            for t in (0..400).step_by(10) {
+                if t % 100 == 50 {
+                    s.neg_peak(t, -262_144, -200_000);
+                }
+                s.sample_cmp(t, 0);
+            }
+            assert_eq!(s.alert, Alert::AJack, "jchk {jchk}");
+            assert!(s.run_since().is_some() && s.cmp_run().is_none());
+            // gone: clears 1 s after the last hit
+            for t in (400..1600).step_by(10) {
+                s.sample_cmp(t, 0);
+            }
+            assert_eq!(s.alert, Alert::None);
+        }
+        // above the line, a hold across zero, or a window with comparator bits (MIXED: the V
+        // side): no hit
+        for (lo, hi, ct) in [(-70_000, -60_000, 0u8), (-200_000, 1_000, 0), (-262_144, -200_000, 0x70)] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.neg = true;
+            for t in (0..1000).step_by(10) {
+                if t % 100 == 50 {
+                    s.neg_peak(t, lo, hi);
+                }
+                s.sample_cmp(t, if ct != 0 && (t / 10) % 2 == 0 { ct } else { 0 });
+            }
+            assert_eq!(s.alert, Alert::None, "{lo} {hi} {ct}");
+        }
+        // DC V: a negative reading (a source on V-COM) blocks it
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.neg = true;
+        s.neg_vok = false;
+        for t in (0..1000).step_by(10) {
+            if t % 100 == 50 {
+                s.neg_peak(t, -262_144, -200_000);
+            }
+            s.sample_cmp(t, 0);
+        }
+        assert_eq!(s.alert, Alert::None);
+        // the rows
+        assert!(neg_leg(1, 0, false, Kind::CmpA, 0) && neg_leg(3, 1, false, Kind::CmpA, 0) && neg_leg(10, 6, false, Kind::CmpA, 0));
+        assert!(!neg_leg(1, 0, true, Kind::CmpA, 0) && !neg_leg(15, 0, false, Kind::CmpA, 0));
+        assert!(!neg_leg(1, 0, false, Kind::CmpA, VAR_NEG_OFF) && !neg_leg(1, 0, false, Kind::Off, 0));
     }
 
     #[test]

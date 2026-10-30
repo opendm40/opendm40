@@ -553,7 +553,7 @@ pub enum Log {
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)
-///   DBG:SENTinel:VARiant <0..127> / ?
+///   DBG:SENTinel:VARiant <0..255> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (f80524f row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
@@ -942,7 +942,7 @@ pub enum Cmd {
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
-    /// DBG:SENTinel:VARiant <0..127> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..255> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
@@ -2251,7 +2251,7 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=127.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=255.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }

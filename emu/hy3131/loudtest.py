@@ -87,12 +87,12 @@ SC = {
                           ('stops', 31, 32.0), ('quiet', 32.0, 35)],
                   # sounding in the first event, silenced, then latched with no current: quiet
                   seen=[('APROT', '1,0,1,0'), ('APROT', '0,1,1,0'), ('APROT', '1,0,2,0'), ('APROT', '0,0,2,0')]),
-    # A-JACK (1 mA into A in DC V): RUN key at 15.45 (inside a burst) silences (and toggles
+    # A-JACK (20 mA into A in DC V; its PB1 window needs ~8.4 mA): RUN key at 15.45 (inside a burst) silences (and toggles
     # HOLD); the current off at 18 / on at 21: loud again; off at 26: stops within the 1 s
     # A-JACK clear; on at 29, a tap on its toast at 29.5 (inside the first burst) silences.
     'ajack': dict(func=None, run_for=34, setup=['SYST:BEEP:VOL 0'],
-                  script=[(0, 'dmm open;vsrc:1.234'), (10, 'dmm isrc:0.001'), (15.45, 'key run'), (18, 'dmm isrc:none'),
-                          (21, 'dmm isrc:0.001'), (26, 'dmm isrc:none'), (29, 'dmm isrc:0.001'), (29.5, TOAST)],
+                  script=[(0, 'dmm open;vsrc:1.234'), (10, 'dmm isrc:0.02'), (15.45, 'key run'), (18, 'dmm isrc:none'),
+                          (21, 'dmm isrc:0.02'), (26, 'dmm isrc:none'), (29, 'dmm isrc:0.02'), (29.5, TOAST)],
                   checks=[('quiet', 6, 10), ('starts', 10, 11.0, LOUD), ('loud', 10, 15, LOUD), ('pattern', 10.5, 15),
                           ('stops', 15.45, 15.65), ('quiet', 15.65, 21), ('starts', 21, 22.0, LOUD), ('loud', 21, 26, LOUD),
                           ('stops', 26, 27.8), ('quiet', 27.8, 29), ('starts', 29, 29.45, LOUD), ('stops', 29.5, 29.7),
@@ -111,7 +111,7 @@ SC = {
     # V-JACK? (24 V on V/ohm in DC A, no current): an advisory, no alarm. Then Off: A-JACK
     # in DC V makes no sound; then Volume at 40 %: the alarm at the key volume.
     'vjack-off': dict(func='CURR:DC', run_for=40, setup=['SYST:BEEP:VOL 0'],
-                      script=[(0, 'dmm open'), (10, 'dmm vsrc:24'), (19, 'dmm vsrc:none;vsrc:1.234'), (26, 'dmm isrc:0.001')],
+                      script=[(0, 'dmm open'), (10, 'dmm vsrc:24'), (19, 'dmm vsrc:none;vsrc:1.234'), (26, 'dmm isrc:0.02')],
                       acts={22: ['SYST:ALER:ALARm OFF', 'CONF:VOLT:DC'], 33: ['SYST:BEEP:VOL 40', 'SYST:ALER:ALARm VOL']},
                       checks=[('quiet', 6, 33), ('starts', 33, 34.5, VOL40), ('loud', 33, 40, VOL40)],
                       seen=[('VJACK', '0,0,0,0'), ('AJACK', '0,0,1,2'), ('AJACK', '1,0,1,1')]),
@@ -123,7 +123,7 @@ SC = {
     # evidence a driven V-COM cannot give -> loud; off at 30 -> stops.
     'ajack-res': dict(func='RES', run_for=34, setup=['SYST:BEEP:VOL 0'],
                       script=[(0, 'monitor sysbus.hy3131 Pb1VjackMv 10'), (0, 'dmm open;r:4700'), (8, 'dmm vsrc:5'),
-                              (14, 'dmm open;isrc:0.002;aiohm:31e6'), (30, 'dmm isrc:none')],
+                              (14, 'dmm open;isrc:0.02;aiohm:31e6'), (30, 'dmm isrc:none')],
                       acts={24.0: ['CONF:VOLT:DC']},  # virtual s (it was fw uptime 21.0, ~3 s behind)
                       checks=[('quiet', 6, 24), ('starts', 24, 25.6, LOUD), ('loud', 24.5, 29.5, LOUD), ('stops', 30, 31.8),
                               ('quiet', 31.8, 34)],
