@@ -4591,6 +4591,45 @@ impl App {
         }
     }
 
+    /// DBG:GENTRIG:LAG / DBG:GENTRIG:STAT? / DBG:CH2:LAG (the GEN and CH2
+    /// channels' tuning replies): region C (link-native.x), out of
+    /// `scpi_dmm`'s frame.
+    #[inline(never)]
+    fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::DbgGenLag(Some(ns)) => {
+                // ns -> ticks of the 200 MHz timer clock (5 ns).
+                crate::scope::set_gen_lag((ns / 5.0) as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgGenStat => {
+                for (i, v) in crate::gen::stats().iter().enumerate() {
+                    if i > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_u32(*v);
+                }
+                true
+            }
+            C::DbgGenLag(None) => {
+                out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
+                true
+            }
+            C::DbgCh2Lag(Some(us)) => {
+                crate::scope_ch2::set_lag_us(us as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgCh2Lag(None) => {
+                out.put_f32(crate::scope_ch2::lag_us() as f32);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn scpi_dmm(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> Option<bool> {
         use crate::scpi::Cmd as C;
         let k = self.dmm.t_sensor();
@@ -5038,34 +5077,7 @@ impl App {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
-            C::DbgGenLag(Some(ns)) => {
-                // ns -> ticks of the 200 MHz timer clock (5 ns).
-                crate::scope::set_gen_lag((ns / 5.0) as i32);
-                self.scope.refresh();
-                false
-            }
-            C::DbgGenStat => {
-                for (i, v) in crate::gen::stats().iter().enumerate() {
-                    if i > 0 {
-                        out.put_bytes(b",");
-                    }
-                    out.put_u32(*v);
-                }
-                true
-            }
-            C::DbgGenLag(None) => {
-                out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
-                true
-            }
-            C::DbgCh2Lag(Some(us)) => {
-                crate::scope_ch2::set_lag_us(us as i32);
-                self.scope.refresh();
-                false
-            }
-            C::DbgCh2Lag(None) => {
-                out.put_f32(crate::scope_ch2::lag_us() as f32);
-                true
-            }
+            c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);

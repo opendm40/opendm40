@@ -1780,8 +1780,8 @@ pub fn init() {
     init_shown();
 }
 
-/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: its code stays in
-/// region B with this module instead of growing `new_app` in region C.
+/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: start-up only, in
+/// region C (link-native.x) apart from `new_app`.
 #[inline(never)]
 fn init_shown() {
     unsafe {
