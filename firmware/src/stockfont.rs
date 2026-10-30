@@ -110,6 +110,65 @@ mod data {
         next: u8,
     }
 
+    /// Bits of the first-level decode table: 95 % of the tokens have a
+    /// code this short (tools/mkstockfont.py prints the share).
+    const LUTK: u32 = 6;
+
+    /// Per context, per LUTK-bit prefix: len << 8 | symbol of the code it
+    /// starts with, 0 = a longer code. Built from HUF_CNT / HUF_SYM at the
+    /// first glyph lookup (lut_init); 512 bytes in SRAM (TCM is the stack).
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut LUT: [[u16; 1 << LUTK]; HUF_CNT.len()] = [[0; 1 << LUTK]; HUF_CNT.len()];
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut LUT_OK: bool = false;
+
+    fn lut_init() {
+        // Single-threaded, never from the ISR.
+        let lut = unsafe { &mut *core::ptr::addr_of_mut!(LUT) };
+        for (ctx, t) in lut.iter_mut().enumerate() {
+            let (mut code, mut idx) = (0usize, HUF_SOFF[ctx] as usize);
+            for (l, &n) in HUF_CNT[ctx].iter().enumerate() {
+                let l = l + 1;
+                for _ in 0..n {
+                    if l <= LUTK as usize {
+                        let sh = LUTK as usize - l;
+                        let e = (l as u16) << 8 | HUF_SYM.get(idx).copied().unwrap_or(0) as u16;
+                        for v in t.iter_mut().skip(code << sh).take(1 << sh) {
+                            *v = e;
+                        }
+                    }
+                    code += 1;
+                    idx += 1;
+                }
+                code <<= 1;
+            }
+        }
+        unsafe { *core::ptr::addr_of_mut!(LUT_OK) = true };
+    }
+
+    /// Canonical decode bit by bit from the per-length counts: (symbol,
+    /// code length) of the code at the top of `win`; a code that is not in
+    /// the table reads as symbol 0 (one pixel of coverage 0).
+    #[inline(never)]
+    fn slow(mut win: u32, ctx: usize) -> (u8, u32) {
+        let (mut code, mut first, mut idx) = (0u32, 0u32, 0u32);
+        let mut l = 0u32;
+        for &c in HUF_CNT[ctx].iter() {
+            code |= win >> 31;
+            win <<= 1;
+            l += 1;
+            let c = c as u32;
+            let d = code.wrapping_sub(first);
+            if d < c {
+                return (HUF_SYM.get(HUF_SOFF[ctx] as usize + (idx + d) as usize).copied().unwrap_or(0), l);
+            }
+            idx += c;
+            first = (first + c) << 1;
+            code <<= 1;
+        }
+        (0, l)
+    }
+
     impl Glyph {
         pub const EMPTY: Glyph = Glyph { blob: &[], fmt: BIT1, w: 0, h: 0, adv: 0, yoff: 0, t: 0, ih: 0 };
 
@@ -300,24 +359,13 @@ mod data {
         /// is not in the table reads as one pixel of coverage 0.
         #[inline(always)]
         fn token(&self, p: &mut u32, ctx: usize, x: usize, w: usize) -> (u8, u8, usize) {
-            let mut win = self.peek(*p);
-            let (mut code, mut first, mut idx) = (0u32, 0u32, 0u32);
-            let mut s = 0u8;
-            let mut l = 0u32;
-            for &c in HUF_CNT[ctx % HUF_CNT.len()].iter() {
-                code |= win >> 31;
-                win <<= 1;
-                l += 1;
-                let c = c as u32;
-                let d = code.wrapping_sub(first);
-                if d < c {
-                    s = HUF_SYM.get(HUF_SOFF[ctx % HUF_CNT.len()] as usize + (idx + d) as usize).copied().unwrap_or(0);
-                    break;
-                }
-                idx += c;
-                first = (first + c) << 1;
-                code <<= 1;
-            }
+            let ctx = ctx % HUF_CNT.len();
+            let w0 = self.peek(*p);
+            // Codes of up to LUTK bits from the table (lut_init), longer
+            // ones bit by bit from the per-length counts.
+            let e = unsafe { (*core::ptr::addr_of!(LUT))[ctx][(w0 >> (32 - LUTK)) as usize] };
+            let (s, l) = if e != 0 { (e as u8, (e >> 8) as u32) } else { slow(w0, ctx) };
+            let win = w0 << l;
             *p += l;
             let kind = s >> 4;
             if kind == K_L {
@@ -367,6 +415,9 @@ mod data {
 
         pub fn glyph(&self, code: u32) -> Option<Glyph> {
             let fd = font_data(self.0)?;
+            if fd.fmt == HUF && !unsafe { *core::ptr::addr_of!(LUT_OK) } {
+                lut_init();
+            }
             let code = u16::try_from(code).ok()?;
             let e = fd.entries;
             let (mut lo, mut hi) = (0usize, e.len());

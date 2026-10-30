@@ -1326,8 +1326,8 @@ pub static SC_F16_FD: FontData = FontData{line_h:16,descent:0,fmt:BIT1,entries:&
 
 /// Longest Huffman code, bits.
 pub const HUF_MAXL: usize = 12;
-/// Variant A: code of C(E) (the row above again) at a row start, left
-/// aligned in HUF_COPY_LEN bits (0: none).
+/// Code of C(E) (the row above again) at a row start, in its
+/// HUF_COPY_LEN low bits (0: none).
 pub const HUF_COPY_CODE: u32 = 0;
 pub const HUF_COPY_LEN: u32 = 2;
 /// Codes per length 1..HUF_MAXL, per context.
