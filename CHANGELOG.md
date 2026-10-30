@@ -56,6 +56,10 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
+- **Auto power-off on battery only:** with USB power (a computer or a
+  charger) the meter never switches itself off; after the unplug the
+  **Shutdown** time counts afresh
+  ([manual](docs/manual/README.md#power-battery-and-sleep)).
 
 ### Fixed
 
@@ -132,6 +136,9 @@ section named after the tag as the release notes; how to cut a release:
   ([manual](docs/manual/README.md#settings-page-1)).
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
+- **Inrush:** the automatic power-off no longer switches the meter off while
+  the page is armed and waits for a load to start
+  ([#144](https://github.com/opendm40/opendm40/issues/144)).
 - Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
   after an end (10 + gave 20 %, and 55 % was out of reach)
   ([#91](https://github.com/opendm40/opendm40/issues/91)).
