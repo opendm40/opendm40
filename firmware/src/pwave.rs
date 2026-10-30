@@ -288,6 +288,32 @@ pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool, min_pp: f32) -> Stats {
     }
 }
 
+/// Largest I zero correction `anchor` takes, raw codes: ~2 x the AD2 X
+/// zeros seen on the device (155 codes with OP1 x1, ~880 with x10, doc
+/// 3.11 / 3.12); a bigger difference is not a zero (a gain error, a
+/// current that changed): no correction.
+pub const ANCHOR_MAX_RAW: f32 = 2000.0;
+
+/// The I zero from a reference current `i_ref` (A, the power meter's DC
+/// coupling: AD1 on the same OP1 output, calibrated): the stored-code
+/// shift that makes frame `c`'s mean I equal it, None when the frame has
+/// fewer than 8 I samples or the shift exceeds ANCHOR_MAX_RAW. Add it to
+/// `Scale::oi`.
+pub fn anchor(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
+    let (mut s, mut n) = (0.0f32, 0u32);
+    for k in 0..c.n {
+        if !c.is_u(k) {
+            s += buf[k] as i16 as f32;
+            n += 1;
+        }
+    }
+    if n < 8 || !(sc.si > 0.0) || !i_ref.is_finite() {
+        return None;
+    }
+    let d = s / n as f32 - (i_ref / sc.si + sc.oi);
+    (d.abs() * 8.0 <= ANCHOR_MAX_RAW).then_some(d)
+}
+
 /// 1-2-5 steps (per division) from 1 uV / 1 uA up.
 pub fn step(i: i32) -> f32 {
     let m = [1.0f32, 2.0, 5.0][i.rem_euclid(3) as usize];
@@ -555,6 +581,31 @@ mod tests {
         // U flat: the trigger goes to I.
         let c2 = frame(&mut b, 1000, 100, 50.0, 0.0, 1.0, 0.0, &SC);
         assert!(!next_trig(&b, &c2, 100, 100).unwrap().y);
+    }
+
+    #[test]
+    fn anchor_to_the_dc_meter() {
+        // DC 20 mA read 4 % high by an AD2 zero of 888 raw codes (OP1 x10,
+        // the 60 mA range: 0.954 uA per raw code): the anchor to the DC
+        // meter's 20.000 mA takes the zero out.
+        let sc = Scale { su: 8.0 * 4.768e-5, ou: 0.0, si: 8.0 * 1.25 / 5.0 / 262_144.0, oi: 0.0 };
+        let mut b = vec![0u16; BUF_MIN];
+        let n = 200;
+        for k in 0..n {
+            let raw = if k % 2 == 0 { 5.0 / (sc.su / 8.0) } else { 0.020 / (sc.si / 8.0) + 888.0 };
+            b[k] = code_of(raw as i32) as u16;
+            b[T_AT + k] = (k * 40) as u16;
+        }
+        let c = Cap { n, y_first: true, ..Cap::default() };
+        let s0 = stats(&b, &c, &sc, true, 1.0);
+        assert!((s0.irms / 0.020 - 1.042).abs() < 0.003, "{s0:?}");
+        let d = anchor(&b, &c, &sc, 0.020).unwrap();
+        assert!((d - 111.0).abs() < 1.0, "{d}");
+        let sc2 = Scale { oi: sc.oi + d, ..sc };
+        let s1 = stats(&b, &c, &sc2, true, 1.0);
+        assert!((s1.irms - 0.020).abs() < 2e-6 && (s1.p - 0.100).abs() < 1e-4, "{s1:?}");
+        // A difference too large to be a zero: none.
+        assert!(anchor(&b, &c, &sc, 0.010).is_none());
     }
 
     #[test]

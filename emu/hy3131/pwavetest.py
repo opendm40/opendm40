@@ -16,6 +16,9 @@ Cases (default all):
          (FETC:POW:ALL? V 230, I 1 within 2 %); POW:WAVE ON / OFF over SCPI.
   dc     12 V, 2 A DC: Urms 12, Irms 2, P 24, f none (9.91E37).
   alt    POW:METH ALT: POW:WAVE ON refused (SYST:ERR? Settings conflict).
+  dc-zero  5 V, 20 mA, the device's AD2 zeros (powz:1), no POW:ZERO, DC
+         coupling: the I zero from the DC meter (POW:WAVE? field 10 ~0.85
+         mA), Irms within 0.5 % of 20 mA and of the meter's I.
 The model latches R03..R05 at each conversion from the converter SDO23
 selects then, one conversion grid for both: whether the device does so
 (and how far AD3's grid sits from AD2's) is the device check's question
@@ -51,7 +54,13 @@ CASES = {
     'mains': 'open;pow:230@50,i=1,pf=0.5',
     'dc': 'open;vsrc:12;isrc:2',
     'alt': 'open;pow:230@50,i=1,pf=1',
+    # The device's AD2 X zero (powz:1: 888 codes with OP1 x10) and no
+    # POW:ZERO, the power meter in DC coupling (AD1, factory DC A): the
+    # page takes I's zero from the meter's current (device 468ea813: I
+    # 6 % high on 20.6 mA without it).
+    'dc-zero': 'open;powz:1;vsrc:5;isrc:0.02',
 }
+COUPLING = {'dc-zero': 'DC'}
 # The Wave button of Power Settings (ui_power.rs ps_row4(3)) and the page's
 # buttons (ui_pwave.rs BTN_R).
 WAVE_BTN = (414, 201)
@@ -136,7 +145,7 @@ def run_case(name):
         def wave():
             f = q('POW:WAVE?').split(',')
             return {'on': f[0] == '1', 'frames': int(f[1]), 'U': num(f[2]), 'I': num(f[3]), 'P': num(f[4]),
-                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8])}
+                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8]), 'izero': num(f[9])}
 
         def wait_frames(k, limit_ms=20000):
             w0 = wave()
@@ -150,13 +159,13 @@ def run_case(name):
         def view():
             return q('DBG:VIEW?')
 
-        for c in ['CONF:POW', 'POW:COUP ACDC', 'POW:BURD:STAT OFF'] + (['POW:METH ALT'] if name == 'alt' else []):
+        for c in ['CONF:POW', 'POW:COUP ' + COUPLING.get(name, 'ACDC'), 'POW:BURD:STAT OFF'] + (['POW:METH ALT'] if name == 'alt' else []):
             q(c)
         # The power meter settles on its ranges (V 600, I autoranging down).
         t0 = up()
         while up() - t0 < 40000:
             p = pw_all()
-            if len(p) > 5 and p[4] == p[4] and p[5] == p[5] and p[4] > 1 and p[5] > 0.1:
+            if len(p) > 5 and p[4] == p[4] and p[5] == p[5] and p[4] > 1 and p[5] > 0.005:
                 break
             time.sleep(1)
         wait_ms(4000)
@@ -225,6 +234,13 @@ def run_case(name):
             check(not wave()['on'] and not view().startswith('Power Wave'), 'POW:WAVE OFF closes it')
             e = q('SYST:ERR?')
             check(e.startswith('0') or e.startswith('+0'), 'no SCPI error (%s)' % e)
+        elif name == 'dc-zero':
+            check(near(w['izero'], 888 * 1.25 / 5 / 262144, 0.15), 'I zero from the DC meter %.4g A ~ 888 codes' % w['izero'])
+            check(near(w['I'], 0.020, 0.005) and near(w['I'], p0[5], 0.005), 'Irms %.5f ~ 0.020 and the meter %.5f' % (w['I'], p0[5]))
+            # U keeps the Y zero (1080 codes, +1 % on 6 V) without POW:ZERO,
+            # as the meter's own U does (device 468ea813: 5.0509 V for 5.000).
+            check(near(w['U'], p0[4], 0.001), 'Urms %.4f = the meter %.4f' % (w['U'], p0[4]))
+            check(near(w['P'], p0[0], 0.005), 'P %.5f = the meter %.5f' % (w['P'], p0[0]))
         else:
             check(near(w['U'], 12, 0.01), 'Urms %.3f ~ 12' % w['U'])
             check(near(w['I'], 2, 0.01), 'Irms %.4f ~ 2' % w['I'])

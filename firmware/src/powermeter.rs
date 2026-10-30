@@ -1033,6 +1033,15 @@ impl Dmm {
         (row, r36_of(pw.sph), sc, V_LIM[pw.vr as usize], I_LIM[pw.ik.min(5) as usize])
     }
 
+    /// Power Wave's I zero reference (doc 3.18): the DC coupling's current
+    /// (AD1 on the same OP1 output that AD2 reads, the factory DC A
+    /// calibration and its zero), None in the other couplings or before a
+    /// current reading.
+    pub fn pw_wave_iref(&self) -> Option<f32> {
+        let pw = &*self.pw;
+        (pw.on && pw.dc && !pw.alt && pw.job == 0 && pw.seen & 4 != 0 && pw.i_dc.is_finite()).then_some(pw.i_dc)
+    }
+
     /// Leaving Power Wave: the time it was open is not integrated into
     /// the energy (no readings then), the current-limit countdown starts over.
     pub fn pw_wave_gap(&mut self) {

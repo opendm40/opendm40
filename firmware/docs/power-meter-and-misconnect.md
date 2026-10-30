@@ -801,6 +801,25 @@ with the AC A RMS gain and the X zero of the range (the LPF zeros applied
 to single samples: INFERRED). "At load" is not applied: the traces are at
 the jacks.
 
+**I zero from the DC meter.** Device 468ea813 (5.000 V, 20.6 mA DC, DC
+coupling, no `POW:ZERO` known): U matched the meter (5.0508 V) but I read
+21.85 mA, +6.1 % (P +6 %); the trace's level agreed with that value. U
+and method B's I_dc share Power Wave's offset handling, so the difference
+is between the meter's DC coupling (AD1, factory DC A gain and offset) and
+AD2: AD2's X zero is not in the factory record (0x10C.. all 0, inrush.rs)
+and is ~880 raw codes with OP1 x10 (3.11 / 3.12) = 0.84 mA on the 60 mA
+range, 4.1 % of 20.6 mA; the rest (~2 %) is a gain (INFERRED: AD2 reads
++0.3 .. +1.8 % above nominal against AD1 in device test 6.5 of
+[dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md); not the
+19.2 kS/s OSR: U on AD3 at the same OSR matched). So when the page opens
+in DC coupling with a current reading, its first frame takes I's zero
+from that reading (`pwave::anchor`: the shift that makes the frame's mean
+I equal the meter's, at most 2000 raw codes, else none; kept while the
+page is open; `POW:WAVE?` field 10). A gain error left in it shows at
+other currents (device recheck: two currents, e.g. 5 and 50 mA). In AC
+and AC+DC coupling there is no AD1 reading: the zero is `POW:ZERO`'s, as
+the meter's own I_dc.
+
 **Frames.** Each frame waits up to 60 ms for a rising crossing of the last
 frame's mid level on U (on I when U's peak-peak is below half a minimum
 division, free run when both are), then runs for the timebase's 10
@@ -829,14 +848,20 @@ both channels on the AD2 stream ISR: its phase lock keys on INTF AD2F,
 which both converters set; its DMA frames have no write path for the R34
 flip; the read would have to fit the flip and two reads into one period.
 
-**Device checks** (none done; the emulator's model latches the selected
-converter's value at each conversion, on one grid for both):
+**Device checks** (one DC run on 468ea813, above; the emulator's model
+latches the selected converter's value at each conversion, on one grid
+for both):
 1. Mains through a resistive load: P on the page (`POW:WAVE?`) within
    ~1 % of `FETC:POW:ALL?`. Through a capacitor (PF ~0): the difference
    of the two P measures the U / I skew, ~0.7 W per 10 us at 230 V, 1 A,
    50 Hz (S x omega x skew); pass: within ~1 W (~15 us).
 2. `POW:WAVE?` repeated and unreadable read counts over a minute (the
-   torn-read question at 19.2 kS/s).
+   torn-read question at 19.2 kS/s). Device 468ea813: 0 unreadable,
+   ~2900 repeated in 16 s; U 5.0508 V = the meter (so the SDO23 flip does
+   not disturb AD3, check 3).
+2a. DC coupling, 5 V and 5 / 20 / 50 mA: I on the page = the meter's
+   within ~0.5 % at each (the anchored zero; a residual gain shows as a
+   level-dependent difference).
 3. Whether the SDO23 flip with AD3 running disturbs AD3 (a DC voltage:
    flat U trace, Urms = the DC meter).
 4. USB / touch while frames block the loop at 20 ms/div.

@@ -38,6 +38,11 @@ pub(super) struct Pwv {
     /// Reads repeated / unreadable samples, all frames (POW:WAVE?).
     pub retries: u32,
     pub bad: u32,
+    /// The DC coupling's current at the entry (`Dmm::pw_wave_iref`; NaN:
+    /// none) and the I zero taken from it with the first frame
+    /// (`pwave::anchor`, stored codes; NaN: none yet / none taken).
+    iref: f32,
+    oi_fix: f32,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -58,6 +63,8 @@ static mut PWV: Pwv = Pwv {
     ik: 0,
     retries: 0,
     bad: 0,
+    iref: 0.0,
+    oi_fix: 0.0,
 };
 
 pub(super) fn pwv() -> &'static mut Pwv {
@@ -122,6 +129,8 @@ impl App {
             ik: self.dmm.pw.ik,
             retries: 0,
             bad: 0,
+            iref: self.dmm.pw_wave_iref().unwrap_or(f32::NAN),
+            oi_fix: f32::NAN,
         };
         self.show(View::PWave, clk);
         Ok(())
@@ -200,8 +209,10 @@ impl App {
         let Some(buf) = self.scope.lent_buf() else {
             return;
         };
-        let (row, r36, sc, _, _) = self.dmm.pw_wave_setup();
-        s.sc = sc;
+        let (row, r36, mut sc, _, _) = self.dmm.pw_wave_setup();
+        if s.oi_fix.is_finite() {
+            sc.oi += s.oi_fix;
+        }
         let span_us = pv::TB_MS[s.tb1 as usize - 1] as u32 * pv::DIVS_X * 1000;
         // The trigger: from the last frame (U, else I), else free run.
         let trig = if s.frames > 0 { pv::next_trig(buf, &s.cap, (s.fu / sc.su / 2.0) as i32, (s.fi / sc.si / 2.0) as i32) } else { None };
@@ -210,6 +221,17 @@ impl App {
         s.retries = s.retries.wrapping_add(s.cap.retries);
         s.bad = s.bad.wrapping_add(s.cap.bad);
         s.frames = s.frames.wrapping_add(1);
+        // The first frame: the I zero from the DC meter's current (doc
+        // 3.18: AD2's zero is not in the factory record, POW:ZERO may not
+        // have run), once.
+        if s.iref.is_finite() {
+            if let Some(d) = pv::anchor(buf, &s.cap, &sc, s.iref) {
+                s.oi_fix = d;
+                sc.oi += d;
+            }
+            s.iref = f32::NAN;
+        }
+        s.sc = sc;
         let y = trig.map_or(true, |t| t.y);
         s.st = pv::stats(buf, &s.cap, &sc, y, if y { s.fu } else { s.fi } / 2.0);
         s.du = pv::div_for(s.st.upk, s.du, s.fu);
@@ -255,7 +277,8 @@ impl App {
     }
 
     /// POW:WAVE? : open, frames, Urms, Irms, P, f, samples per channel,
-    /// repeated reads, unreadable samples.
+    /// repeated reads, unreadable samples, the I zero taken from the DC
+    /// meter (A; 0 = none).
     pub(super) fn pwave_query(&self, out: &mut crate::scpi::Scpi) {
         let s = pwv();
         let mut t = [0u8; 24];
@@ -269,5 +292,7 @@ impl App {
             out.put_bytes(b",");
             out.put_bytes(crate::dmm::pw::i64_text(&mut t, v));
         }
+        out.put_bytes(b",");
+        out.put_f32(if s.oi_fix.is_finite() { s.oi_fix * s.sc.si } else { 0.0 });
     }
 }
