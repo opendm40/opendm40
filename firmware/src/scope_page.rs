@@ -2350,15 +2350,29 @@ impl App {
                 let (x, y) = (p.x as i16, p.y as i16);
                 let had_press = self.sp.pressed_cell.take().is_some();
                 match self.sp.popup {
-                    su::Popup::Mf(t) => self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now),
-                    su::Popup::Ch1(t) => self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now),
+                    // A toast from the tap (CH2 refused, "Generator is
+                    // off", ...) waits for the popup's repaint (`toast_hold`).
+                    su::Popup::Mf(t) => {
+                        self.toast_hold = true;
+                        self.sp_mf_tap(clk, t, su::mf_hit(t, &v, x, y), now);
+                        self.sp_toast_release(now);
+                    }
+                    su::Popup::Ch1(t) => {
+                        self.toast_hold = true;
+                        self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now);
+                        self.sp_toast_release(now);
+                    }
                     su::Popup::Math(_) if su::panel_hit(p.x, p.y) == Some(4) => {
                         // Stock: the math label with its popup open = math off.
                         self.sp.math.on = false;
                         self.sp_math_changed(false);
                         self.sp_popup_close();
                     }
-                    su::Popup::Math(t) => self.sp_side_tap(true, t, su::side_hit(true, t, &v, x, y), now),
+                    su::Popup::Math(t) => {
+                        self.toast_hold = true;
+                        self.sp_side_tap(true, t, su::side_hit(true, t, &v, x, y), now);
+                        self.sp_toast_release(now);
+                    }
                     su::Popup::Tb(i) => match su::tb_hit(i, x, y) {
                         su::TbHit::Close => self.sp_popup_close(),
                         su::TbHit::Row(r) => self.sp_tb_pick(r, now),
@@ -2445,6 +2459,15 @@ impl App {
         }
         let v = self.sp_popvals();
         su::mf_display_values(&v);
+    }
+
+    /// End of a popup tap (`toast_hold`): its toast now, over the popup
+    /// drawn again.
+    fn sp_toast_release(&mut self, now: u64) {
+        self.toast_hold = false;
+        if self.toast_later_n != 0 && !self.overlay.is_some_and(|o| o.modal()) {
+            self.toast_later_show(now);
+        }
     }
 
     fn sp_mf_tap(&mut self, clk: &mut Clock, tab: u8, h: su::MfHit, now: u64) {

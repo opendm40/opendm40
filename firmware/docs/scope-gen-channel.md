@@ -31,9 +31,17 @@ crystal). Nothing is digitised; the GEN channel needs no wire.
   into its table loop (q = M L ticks for K periods; PWM q = D, K = 1) and
   the DWT count of that instant. DAC: the output (DOR) holds table sample
   L - NDTR - 2 (each TIM6 update copies DHR to DOR, then the DMA loads the
-  next sample into DHR), plus TIM6 CNT (PSC+1) ticks into it. Retried when
-  NDTR moved during the reads, CNT is within 8 ticks of an update (the DMA
-  may lag), or an interrupt stretched the reads (> 64 cycles).
+  next sample into DHR), plus TIM6 CNT (PSC+1) ticks into it. Up to 16
+  tries of DWT, NDTR, CNT, NDTR, DWT (PWM: DWT, TIM12 CNT, DWT) with only
+  the loads between the DWT reads (`gen::reads`); a try counts unless NDTR
+  moved during it, CNT is within 8 ticks of an update (the DMA may lag), or
+  its window is 128 cycles or more (an interrupt). The first such try is
+  taken. All arithmetic comes after the
+  reads: with a u64 modulo inside the window every DAC try was over the
+  old 64-cycle limit on the device, so the DAC path had no phase (no GEN
+  trigger, no GEN trace; PR #64 device check). `DBG:GENTRIG:STAT?` counts
+  the readings and the failed ones, with the last reading's window and the
+  narrowest window of the last failure.
 * `Scope::start` reads the generator right before the TIM1 enable and the
   DWT right after it: `Sync { t0, s, q, k, shape }` with
   t0 = g + (DWT_enable - DWT_g) + ccr4 (PSC+1) - lag, s = ticks per sample.
@@ -48,8 +56,8 @@ crystal). Nothing is digitised; the GEN channel needs no wire.
 * The trace: `Sync::span(a, b)` = the output's min / max over samples
   [a, b) (the column), from the shape (ends plus the extremes / jumps in
   between). The DAC staircase and the output filter are not modelled.
-* PWM path: the levels are 0 and 3.3 V (the logic output, not measured
-  after the output stage).
+* PWM path: the levels are 0 and 3.0 V (`PWM_HIGH_V`: CH1 showed 0..3.0 V,
+  3.07 Vpp, on the device; the output stage, not the 3.3 V logic level).
 * `gen::epoch()` counts output (re)starts: a record read in another epoch
   has no phase (the user changed the generator meanwhile).
 
@@ -58,7 +66,7 @@ crystal). Nothing is digitised; the GEN channel needs no wire.
 | path | GEN trigger |
 |---|---|
 | linear record (fs > 1.25 MS/s) | `finish`: the first crossing in [pre, pre + CAP - screen]. That window (65 us at 100 us/div, 32 us at 50 MS/s) can be shorter than a generator period, so `gen_ready` starts the record at the generator phase that puts a crossing in the window's middle: busy-wait up to 1 ms (`GEN_SPIN`), else not this main-loop pass. Auto past its timeout starts at once (untriggered if no crossing falls in). |
-| stream (fs <= 1.25 MS/s, circular) | `stream_poll`: the next crossing is computed instead of searched; emitted once its post-trigger part is in, as the CH1 stream path. |
+| stream (fs <= 1.25 MS/s, circular) | `stream_poll`: the next crossing is computed instead of searched; emitted once its post-trigger part is in, as the CH1 stream path. A record without the phase (the start's reading failed, the generator restarted since) reads it again against the record's sample 0 (`gen_resync`). |
 | comparator (hwtrig) | not used: off while the source is GEN or the GEN trace shows (its stop instant is not known, so its records have no phase). |
 | roll | no trigger (as CH1); no GEN trace (column frames). |
 | wave view (source DMM) | not offered: the HY3131 runs on its own crystal. |
@@ -74,7 +82,8 @@ The trigger type (pulse / runt) does not apply to GEN: edge only.
   Hidden while dragging / pinching (drawn again on release) and in roll /
   zoomed-out column frames.
 * SCPI `TRIGger[:EDGE]:SOURce CHANnel1|GENerator` (`CHAN1` / `GEN`);
-  `DBG:GENTRIG:LAG <ns>` (not kept) sets the lag below.
+  `DBG:GENTRIG:LAG <ns>` (not kept) sets the lag below; `DBG:GENTRIG:STAT?`
+  the phase readings (above).
 * Kept across a restart in the same session with the other trigger
   settings (W_SCOPE_EXT word 3, bits 4 / 5).
 
@@ -82,13 +91,17 @@ The trigger type (pulse / runt) does not apply to GEN: edge only.
 
 The lag between the timers and the voltage at the CH1 input (DAC settling,
 the generator's output stage, the scope's front end and the ADC pipeline,
-the TIM8 latch below 50 MS/s) is 0 until measured; it matters at the fast
+the TIM8 latch below 50 MS/s) defaults to 185 ns (37 ticks), measured on
+the PWM path (`DBG:GENTRIG:LAG 188`: the CH1 crossing within 2 ns of T at
+100 ns and 10 ns/div); the DAC path's lag is not measured (*unknown*). It matters at the fast
 timebases only (40 px per division: a 100 ns lag is 40 px at 100 ns/div,
 0.2 px at 20 us/div). Device check, the generator looped back to CH1 (x1):
 
 1. Sine 1 kHz 3 Vpp, 200 us/div, Source GEN, level 1.5 V rising, Normal:
    T'D on every frame, the CH1 crossing on the T marker; GEN trace On: the
    cyan trace on CH1. Repeat with falling, level 0.5 V / 2.5 V, Single.
+   `DBG:GENTRIG:STAT?`: the readings grow, the failed count stays (or
+   nearly), the last window well under 128 cycles.
 2. Level 3.2 V (outside the swing): WAIT in Normal, AUTO frames in Auto.
 3. Square 2 MHz (PWM path), 100 ns/div: the edge on the T marker; read the
    offset in ns and set `DBG:GENTRIG:LAG`; repeat at 10 ns/div and 1 us/div
@@ -116,7 +129,7 @@ The DMM reading pauses while CH2 streams (decision #3: the stream owns
 the HY3131 bus; the sentinel and BT serve pause with it, as in the wave
 view); it comes back when CH2 is turned off or the page is left. CH2 runs
 on V (DC / AC V, DC / AC mV) and AC A / mA / uA (DC-coupled rows); not in
-DC A (no AD2 path: "CH2: DMM in AC A"), AC+DC / AUTO coupling, the power
+DC A (no AD2 path: "CH2: needs AC A"), AC+DC / AUTO coupling, the power
 meter, the other functions, or while a CSV recording runs.
 
 ### 2.2 Time alignment ([scope_ch2.rs](../src/scope_ch2.rs))

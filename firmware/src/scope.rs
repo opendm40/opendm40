@@ -220,9 +220,12 @@ pub const TSRC_NAMES: [&str; 2] = ["CH1", "GEN"];
 /// Ticks of the 200 MHz timer clock the generator's output reaches the
 /// MCX samples later than its timers say (DAC settling, the output and
 /// input stages, the ADC pipeline): taken off the GEN phase of every
-/// sample. 0 until measured on the device (DBG:GENTRIG:LAG, the generator
-/// looped back to CH1; docs/scope-gen-channel.md "Device check").
-static GEN_LAG: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(0);
+/// sample. Default: `DBG:GENTRIG:LAG 188` (37 ticks, 185 ns), measured on
+/// the PWM path with the generator looped back to CH1 (PR #64 device
+/// check); the DAC path's own lag is not measured yet
+/// (docs/scope-gen-channel.md "Device check").
+pub const GEN_LAG_DEFAULT: i32 = 37;
+static GEN_LAG: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(GEN_LAG_DEFAULT);
 
 pub fn gen_lag() -> i32 {
     GEN_LAG.load(core::sync::atomic::Ordering::Relaxed)
@@ -237,6 +240,12 @@ pub fn set_gen_lag(ticks: i32) {
 /// (`gen_ready`).
 const GEN_SPIN: u32 = 200_000;
 const DWT_CYCCNT: u32 = 0xE000_1004;
+
+/// Round to the nearest integer (f64, no std; |x| < 2^52).
+fn round_f64(x: f64) -> f64 {
+    let t = (x + if x < 0.0 { -0.5 } else { 0.5 }) as i64;
+    t as f64
+}
 
 impl Settings {
     /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
@@ -1383,6 +1392,28 @@ impl Scope {
         Some((t.wrapping_add((self.roll_written as f64 * self.t_step as f64) as u64 as u32), per * self.t_step))
     }
 
+    /// A stream record without the generator's phase (the reading at its
+    /// start failed, or the generator was restarted since: a new epoch):
+    /// read it now against the record's sample 0 (`t_s0`, the DWT of the
+    /// TIM1 start + CC4), so a long Normal wait does not stay blind. `wr`
+    /// (samples written) unwraps the 21 s DWT wrap. The samples before a
+    /// generator restart get the new phase too (only later ones are
+    /// searched; the GEN trace of that record is off by the restart).
+    fn gen_resync(&mut self, wr: u64) {
+        let Some(s0) = self.t_s0 else { return };
+        let Some((t, shape)) = crate::gen::running() else { return };
+        let ep = crate::gen::epoch();
+        let Some((g, d)) = crate::gen::now() else { return };
+        let (q, k) = crate::gen::loop_ticks(&t);
+        let s = self.t_step as f64;
+        let span = 4_294_967_296.0;
+        let e0 = d.wrapping_sub(s0) as f64;
+        let e = e0 + span * round_f64((wr as f64 * s - e0) / span);
+        let t0 = g as f64 - e - gen_lag() as f64;
+        let sy = crate::gen::Sync { t0: crate::gen::wrap(t0, q as f64), s, q: q as f64, k: k as f64, shape };
+        self.gsync = Some((sy, ep));
+    }
+
     /// The trigger source is the generator (MCX records only).
     fn gen_src(&self) -> bool {
         self.s.tsrc == TSRC_GEN && !self.wave
@@ -1883,6 +1914,9 @@ impl Scope {
                 // Computed, not searched: the next crossing at or after the
                 // scan position, once it has been sampled.
                 // (The scan below then starts at `wr`: nothing to scan.)
+                if self.gen_live().is_none() {
+                    self.gen_resync(wr);
+                }
                 if let Some(t) = self.gen_next(self.st_scan).filter(|&t| t < wr) {
                     self.st_found = Some(t);
                 }

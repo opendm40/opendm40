@@ -57,7 +57,7 @@ impl App {
         } else if b == Button::Amp && self.dmm.sub() == 0 {
             // DC A has no AD2 path (AD1 only); the wave view switches to the
             // AC A row, CH2 leaves the user's function alone.
-            Some("CH2: DMM in AC A (DC-coupled)")
+            Some("CH2: needs AC A")
         } else if crate::csvlog::active() {
             Some("CH2: recording runs")
         } else if self.dmm.ad2_scale().is_none() {
@@ -73,6 +73,13 @@ impl App {
     pub fn ch2_want(&self) -> Option<u32> {
         if !self.ch2.on || self.view != View::Scope || self.scope.wave_on() || self.now < self.ch2.retry_at || self.ch2_why().is_some() {
             return None;
+        }
+        // Stopped: the store holds the stored record's CH2; a timebase
+        // change (a stopped zoom) must not restart the stream at the new
+        // rate, which empties the store (PR #64 device check: no CH2 in a
+        // stopped zoom). RUN picks the new rate up.
+        if !self.scope.s.run && self.ch2.live {
+            return Some(self.ch2.fs);
         }
         Some(scope::wave_fs_for(self.scope.s.tb))
     }

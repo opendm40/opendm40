@@ -1355,7 +1355,7 @@ edges between captures.
 **Source GEN** triggers on the generator without a wire: the meter knows
 from the generator's timers when its output crosses the trigger level, and
 places the trigger there. The level is in the generator's volts (0 to
-3 V; a square above 50 kHz switches between 0 and 3.3 V); a level outside
+3 V; a square above 50 kHz switches between 0 and 3 V); a level outside
 the output's swing never triggers. It is an edge trigger (Rising / Falling);
 the trigger badge turns cyan. Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the

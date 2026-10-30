@@ -368,6 +368,10 @@ pub struct App {
     toast_later: [u8; TOAST_LATER_MAX],
     toast_later_n: u8,
     toast_later_ok: bool,
+    /// A scope popup's tap is being handled: its toast waits for the popup
+    /// repaint that ends the tap (`toast_later`), else the popup is drawn
+    /// over it.
+    toast_hold: bool,
     /// 3-finger swipe seen: take the screenshot in tick() once the view is
     /// drawn.
     shot_req: bool,
@@ -683,6 +687,7 @@ impl App {
             toast_later: [0; TOAST_LATER_MAX],
             toast_later_n: 0,
             toast_later_ok: false,
+            toast_hold: false,
             shot_req: false,
             repaint_at: 0,
             band_until: 0,
@@ -3332,9 +3337,10 @@ impl App {
         self.toast_draw(now, txt, ok);
     }
 
-    /// Keep `txt` for after the confirm that is up; false = none is up.
+    /// Keep `txt` for after the confirm that is up (or the scope popup's
+    /// repaint, `toast_hold`); false = none is up.
     fn toast_defer(&mut self, txt: &str, ok: bool) -> bool {
-        if !self.overlay.is_some_and(|o| o.modal()) {
+        if !self.toast_hold && !self.overlay.is_some_and(|o| o.modal()) {
             return false;
         }
         let mut n = txt.len().min(TOAST_LATER_MAX);
@@ -5037,6 +5043,15 @@ impl App {
                 crate::scope::set_gen_lag((ns / 5.0) as i32);
                 self.scope.refresh();
                 false
+            }
+            C::DbgGenStat => {
+                for (i, v) in crate::gen::stats().iter().enumerate() {
+                    if i > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_u32(*v);
+                }
+                true
             }
             C::DbgGenLag(None) => {
                 out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
