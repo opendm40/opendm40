@@ -2562,6 +2562,7 @@ impl Dmm {
         self.sent.neg = neg;
         self.sent.neg_vok = true;
         self.sent.neg_thr = if m == 1 { sentinel::PK2_NEG_THR_DCV } else { sentinel::PK2_NEG_THR };
+        self.sent.hi_only = kind == Kind::CmpA && row[1] == sentinel::R21_DCV_PB1 && cfg[1] != row[1];
         self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
         // Leaving the ohm network into a V-JACK? comparator row (sentinel::OHM_EXIT_*).
         // Every row within OHM_EXIT_MAX_MS of it (DC A, its range steps, the

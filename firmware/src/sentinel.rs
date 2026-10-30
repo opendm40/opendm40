@@ -617,21 +617,23 @@ pub fn neg_hit(pkmin: i32, pkmax: i32, thr: i32) -> bool {
     pkmax >= pkmin && pkmax < -thr
 }
 
-/// DC V 6 V's negative leg: ~400 mV, from ~8.4 mA, the PB1 window's level
-/// (R21_DCV_PB1) on the other side.
+/// DC V 6 V's negative leg: ~400 mV, from ~8.4 mA, about the PB1 window's
+/// level (R21_DCV_PB1, ~8.8 mA) on the other side.
 pub const PK2_NEG_THR_DCV: i32 = 167_800;
 
-/// DC V 6 V: R21 of the PB1 window. Stock 0xDD (+-20.8 mV, 0.44 mA on
-/// 47.5 ohm). Device 2026-10-30 (release 0.4.0 + #44 + #35): a 66 kHz
-/// square on V-COM (DC V read +2.786 V), A jack empty, raised A-JACK in
-/// DC V AUTO in 3 of 4 runs of 10-15 s; the owner accepts losing the small
-/// currents for it. SCMPRH 1000 = AGNDP6 (+416.7 mV), SCMPRL 0110 = VDSC11
-/// (+0.4 V with VDDA 3.6 V and AGND at VDDA / 2: INFERRED, as is the
-/// polarity reading: CTSTA never showed CMPHO without CMPLO, so CMPLO is
-/// INFERRED to mean "above VRL" and any bit to need PB1 above VRL). So a hit
-/// needs PB1 above ~0.4 V: a current A -> COM from ~8.4 mA. Whether the
-/// 66 kHz pickup on PB1 stays below it: not measured.
-pub const R21_DCV_PB1: u8 = 0x86;
+/// DC V 6 V: R21 of the PB1 window, and its hits need CMPHO (`hi_only`).
+/// Stock 0xDD (+-20.8 mV, 0.44 mA on 47.5 ohm). Device 2026-10-30
+/// (release 0.4.0 + #44 + #35): a 66 kHz square on V-COM (DC V read
+/// +2.786 V), A jack empty, raised A-JACK in DC V AUTO in 3 of 4 runs of
+/// 10-15 s; the owner accepts losing the small currents for it. 0x8B:
+/// SCMPRH AGNDP6 (+416.7 mV), SCMPRL AGNDN3 (-62.5 mV); PR #55 read CTSTA 0
+/// with it in DC V 6 V with V-COM off and at 3 / 5 / 10 V (a low threshold
+/// of AGNDN4..6 read 0x10 at rest). CTSTA never shows CMPHO without CMPLO
+/// (hw/README), so CMPLO marks "above VRL" (INFERRED) and a level between
+/// the thresholds reads 0x10 / 0x50: only reads with CMPHO count, i.e. PB1
+/// above ~0.42 V, a current A -> COM from ~8.8 mA. Whether the 66 kHz
+/// pickup on PB1 stays below it: not measured.
+pub const R21_DCV_PB1: u8 = 0x8B;
 
 /// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): DC V
 /// 6 V (1 r0), DC mV (3), ohm (10; not 600 ohm: the caller), plain (not
@@ -1129,6 +1131,9 @@ pub struct Sentinel {
     /// open V jack (a source on V-COM, negative, might move PB1 too; not
     /// measured). True in the other rows (their V_GATE / jack check).
     pub neg_vok: bool,
+    /// DC V 6 V (set by `dmm.rs` with the row): its PB1 windows count only
+    /// reads with CMPHO (R21_DCV_PB1); one-bit reads count as none.
+    pub hi_only: bool,
     /// ... and its line (AD2 codes, PK2_NEG_THR / PK2_NEG_THR_DCV).
     pub neg_thr: i32,
     /// Assertion log (DBG:SENTinel:LOG?, the switch regression test
@@ -1202,6 +1207,7 @@ impl Sentinel {
             neg_pend: false,
             neg_only: false,
             neg_vok: true,
+            hi_only: false,
             neg_thr: PK2_NEG_THR,
             log: [(Alert::None, Kind::Off, 0); LOG_N],
             log_n: 0,
@@ -1424,6 +1430,10 @@ impl Sentinel {
             } else if bits == CTSTA_CMPLO && now < self.lo_mask_until {
                 bits = 0;
             }
+        }
+        if self.hi_only && !(self.alt && self.alt_v) && bits & 0x20 == 0 {
+            // DC V 6 V's wide window: below VRH is no hit (R21_DCV_PB1)
+            bits = 0;
         }
         if self.blanked(now) {
             self.win_t0 = self.blank_until;
@@ -2912,6 +2922,17 @@ mod tests {
             s.sample_cmp(t, 0);
         }
         assert_eq!(s.alert, Alert::None);
+        // DC V 6 V's wide window (hi_only): one-bit reads (PB1 between the thresholds) are
+        // no hit, 0x70 is
+        for (ct, aj) in [(0x50u8, false), (0x10, false), (0x70, true)] {
+            let mut s = Sentinel::new();
+            s.configured(Kind::CmpA, 0, true);
+            s.hi_only = true;
+            for t in (0..400).step_by(10) {
+                s.sample_cmp(t, ct);
+            }
+            assert_eq!(s.alert == Alert::AJack, aj, "{ct:#x}");
+        }
         // the rows
         assert!(neg_leg(1, 0, false, Kind::CmpA, 0) && neg_leg(3, 1, false, Kind::CmpA, 0) && neg_leg(10, 6, false, Kind::CmpA, 0));
         assert!(!neg_leg(1, 0, true, Kind::CmpA, 0) && !neg_leg(15, 0, false, Kind::CmpA, 0));

@@ -785,7 +785,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
-| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP); DC V 6 V R21 0x86; DC V 6 V / DC mV / ohm: the negative leg's AD2 (4.14) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm; DC V 6 V ~0.4 V = ~8.4 mA (4.14) |
+| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP); DC V 6 V R21 0x8B, CMPHO reads only; DC V 6 V / DC mV / ohm: the negative leg's AD2 (4.14) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm; DC V 6 V +416.7 mV = ~8.8 mA (4.14) |
 | DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device f80524f; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
 | AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
 | continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
@@ -1591,12 +1591,15 @@ behaviour), so the comparator rows see one polarity only.
   0x70 / MIXED, so the leg adds nothing to those cases; DC V counts it only
   with the reading above -1 V; ohm and DC mV keep V_GATE. Such a run gets
   no probe and no jack check (`cmp_run`): no A-PROT for a reversed current.
-* **DC V 6 V's PB1 window** R21 0x86 (SCMPRH AGNDP6 +416.7 mV, SCMPRL VDSC11
-  +0.4 V, the latter *inferred* from VDDA 3.6 V / AGND = VDDA / 2): a 66 kHz
-  square on V-COM (DC V +2.786 V), A empty, raised A-JACK in 3 of 4 runs.
-  The owner accepts the higher line (~8.4 mA). The AC? hint's V-tap window
-  keeps the stock 0xDD (`dmm.rs` swaps R21 with R20). Also an onset window
-  (0 reads, then 0x70 to its end) only starts a run now.
+* **DC V 6 V's PB1 window** R21 0x8B (SCMPRH AGNDP6 +416.7 mV, SCMPRL
+  AGNDN3 -62.5 mV; PR #55 read CTSTA 0 with it at rest and with 3 / 5 / 10 V
+  on V-COM) and only reads with CMPHO count (`hi_only`: a level between the
+  thresholds reads 0x10 / 0x50, CMPLO = above VRL, *inferred*): a hit needs
+  PB1 above ~0.42 V, a current A -> COM from ~8.8 mA. A 66 kHz square on
+  V-COM (DC V +2.786 V), A empty, raised A-JACK in 3 of 4 runs with 0xDD;
+  the owner accepts the higher line. The AC? hint's V-tap window keeps 0xDD
+  (`dmm.rs` swaps R21 with R20). Also an onset window (0 reads, then 0x70
+  to its end) only starts a run now.
 * DBG:SENTinel:VARiant bit 7 (`VAR_NEG_OFF`) restores the 0.4.0 rows (no AD2
   on PB1, R21 0xDD) for an A/B of the readings.
 
