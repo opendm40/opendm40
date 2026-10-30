@@ -28,7 +28,7 @@
  *                                      calibration backup, fatren, the
  *                                      gallery, screenshots, the DLG writer,
  *                                      FAT / vdisk generation, uploads, the
- *                                      bus self-tests / AD2 experiments (DBG),
+ *                                      bus self-tests (DBG),
  *                                      scope CSV, boot / DBG:BOOT?). Must
  *                                      end below 0x080A0000 (FS-loader, UID
  *                                      data, calibration above). The .data
@@ -127,13 +127,12 @@ SECTIONS
         *(.text.*8opendm405vdisk*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
-        /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter and
-         * dcv_row) and main.rs dbg_dcv (below): back in C since region B
-         * audit #4 (2026-10-25, B at 15 KB free; they were in B from region
-         * C audit #1, 133f81e, while B had ~80 KB free). DBG replies, and
-         * dc_enter runs in Logger::start before the stream ISR takes the
-         * bus (wavetest / dcvtest's region C hooks and data watch). */
-        *(.text.*8opendm406ad2exp*);
+        /* NOT ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter
+         * and dcv_row) nor main.rs dbg_dcv / dbg_n7 and scpi::dcv_arg /
+         * n7_arg: region B again since region C audit #3 (2026-10-29, C at
+         * 7.7 KB free, B at 50 KB; docs/native-boot.md). They were in B
+         * from region C audit #1 (133f81e) and in C from region B audit #4
+         * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
@@ -146,6 +145,11 @@ SECTIONS
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
         *(.text.*8opendm403app10app_inrush*);
+        /* Power Wave: the page's glue and drawing (src/app_pwave.rs,
+         * src/ui_pwave.rs; no stream runs while it is open). The capture,
+         * the readouts and the plot columns (src/pwave.rs) stay in region B. */
+        *(.text.*8opendm403app9app_pwave*);
+        *(.text.*8opendm402ui3pwv*);
         /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
          * never open while the AD2 stream or a logger session runs (the page
          * refuses to open then, closes when one starts; main.rs calls
@@ -224,7 +228,6 @@ SECTIONS
         *(.rodata.*8opendm405vdisk*);
         *(.rodata.*8opendm406upload*);
         *(.rodata.*8opendm405hyspi*);
-        *(.rodata.*8opendm406ad2exp*);
         *(.rodata.*8opendm409scope_csv*);
         *(.rodata.*8opendm404boot*);
         *(.rodata.*8opendm403app9app_press*);
@@ -251,12 +254,10 @@ SECTIONS
         /* The power page after a coupling change (once per change). */
         *(.text.*8opendm403app9app_power*3App15pw_coup_changed*);
         *(.text.*8opendm403app9app_power*3App15pw_pending_draw*);
-        *(.text.*8opendm403dmm2pw*3Dmm10pw_pending);
         *(.text.*8opendm402ui8settings*);
         *(.text.*8opendm402ui9temp_page*);
         *(.text.*8opendm402ui8temp_key*);
         *(.text.*8opendm402ui10gen_values*);
-        *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
         /* The ohm / diode test-current label: drawn on a function / range /
@@ -279,7 +280,6 @@ SECTIONS
          * (main.rs log_scale: a host scales the session's data with it;
          * fastlogtest --poll, 2026-10-23: region C code and its literal
          * loads while streaming). */
-        *(.text.*8opendm404scpi7dcv_arg*);
         /* NOT the SCPI range / resolution commands (scpi::range_cmd,
          * conf_cmd, range_arg, res_arg, step_exp, pow10f, App::scpi_range;
          * ~2 KB): back in region B since region C audit #2 (2026-10-25,
@@ -287,9 +287,6 @@ SECTIONS
          * with them and returned here with the DMM accuracy label (0.6.0,
          * the same section): drawn on the Help pages only, where no stream
          * runs (the list below). */
-        *(.text.*8opendm404scpi6n7_arg*);
-        *(.text.*8opendm406dbg_n7*);
-        *(.text.*8opendm407dbg_dcv*);
         *(.text.*8opendm405touch8log_text*);
         *(.text.*8opendm4010touch_diag*);
         *(.text.*8opendm406csvlog6delete*);
@@ -328,6 +325,8 @@ SECTIONS
         *(.text.*8opendm408scope_ui7uncover*);
         /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
         *(.text.*8opendm403app*3App8dbg_idle*);
+        /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
+        *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
         *(.text.*8opendm403app*3App9rec_start*);
         *(.text.*8opendm402ui2pw13settings_page*);
         *(.text.*8opendm402ui11device_page*);

@@ -45,7 +45,8 @@ the function USB reads, and the same as one set by touch.
 - **Binary blocks.** Some queries answer with an IEEE 488.2 definite-length
   block: `#`, one digit n, n digits of length, the data, then `\n`
   (`#3400` followed by 400 bytes). A block query must be the only query in
-  its message; otherwise it is refused with `Query error`.
+  its message; otherwise it is refused with `Query error`. Exception: the
+  400-byte `WAVeform:DATA?` (SCReen, BYTE) joins other replies.
 - **Numbers in replies** are in SCPI NR3 with 7 significant digits:
   `+1.234567E-03`, in SI units (V, A, ohm, F, Hz, s, W). Two special values:
   `+9.90000000E+37` is an overload (OL on the screen), `+9.91000000E+37`
@@ -215,12 +216,13 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 | `SYSTem:ALERt?` | | `NONE`, `OVERLOAD`, `AJACK`, `APROT`, `VJACK`, `LIVE`, `DC`, `AC` or `FUSE` | both |
 | `SYSTem:ALERt:ENABle[?]` | `0`..`15` (8 is ignored), `ON` (= 7, default) or `OFF` (= 0) | the mask, `7` | both |
 | `SYSTem:ALERt:ALARm[?]` | `LOUD` (default), `VOLume` or `OFF` | `LOUD`, `VOLUME` or `OFF` | both |
-| `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the volume, `0`..`100` | both |
+| `SYSTem:BEEPer:VOLume[?]` | `0`..`100` (%) | the key/alert volume, `0`..`100`; `0` also silences the continuity / diode beeper | both |
 | `SYSTem:FUSE:TEST` | | Starts the fuse check; returns at once. | both |
 | `SYSTem:FUSE?` | | `IDLE`, `BUSY`, `OK,<ohm>`, `OPEN`, `FAIL,<ohm>` or `FAIL,NONE` | both |
 | `STATus:QUEStionable:CONDition?` | | Bits now: bit 9 (512) a red alert (AJACK, APROT, OVERLOAD), bit 1 (2) OVERLOAD | both |
 | `STATus:QUEStionable[:EVENt]?` | | The same bits collected since the last read or `*CLS`; reading clears them | both |
 | `UNIT:TEMPerature[?]` | `C` or `F` | `C` or `F` | both |
+| `MEMory:STATe:RECall:AUTO[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
 
 - `SYSTem:IDN:EMULation 34401A` makes `*IDN?` report an HP 34401A, for
   programs that know that meter but not the DM40 (sigrok and SmuView without
@@ -242,6 +244,8 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 - `SYSTem:ALERt:ALARm`: the two-tone alarm for AJACK, APROT and a current
   above 10 A, at full volume (`LOUD`), at the key volume (`VOLume`) or off.
   Stored.
+- `MEMory:STATe:RECall:AUTO` is Settings 3/3 **Mode Remember**: `ON`
+  continues the multimeter after a power-off as it was. Stored.
 - `SYSTem:FUSE:TEST`: plug one lead from V/ohm into A, nothing else. The
   meter measures 600 ohm for three readings, then returns to the function
   before. `OK` is about 48 ohm; `OPEN` is a blown fuse or lead.
@@ -385,6 +389,10 @@ Functions:
   AUTO); `OFF` and `ONCE` keep the present range. Setting a range turns REL
   off.
 - `:RANGe?` also reports the range while autoranging.
+- `RESistance:RANGe` above 60 MΩ selects the experimental 600 MΩ
+  (`+6.000000E+08`); `MAX` is 60 MΩ. `:RANGe:AUTO ON` leaves it. It reads
+  once per ~2 s, so `READ?` may answer with a reading up to 2 s old;
+  `:RESolution` sets nothing there (its digits follow the value).
 - In the power meter, `VOLTage:RANGe?`, `CURRent:RANGe?` and their `:AUTO?`
   report the power meter's V and I channels; set them with
   `POWer:VOLTage:RANGe` / `POWer:CURRent:RANGe`.
@@ -465,7 +473,8 @@ power meter).
 - Setting a limit turns the limit check on.
 - Smoothing changes the displayed value and `READ?` / `MEASure?` /
   `FETCh?`; the statistics and the CSV log use the unsmoothed readings.
-  `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one.
+  `RESPonse SLOW` is the strong smoothing, `MEDium` and `FAST` the light one;
+  setting it turns smoothing on.
   Stored.
 
 ## Power meter
@@ -491,10 +500,11 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:BURDen[?]` | `<ohm>` (0 .. 1000) or `DEFault` | `+1.000000E-02` | both |
 | `[SENSe:]POWer:BURDen:STATe[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
 | `[SENSe:]POWer:METHod[?]` | `SIMultaneous` or `ALTernate` | `SIM` or `ALT` | both |
-| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0.1 .. 10 A (smaller values are set to 0.1), 0 .. 3600 s (default 30) | `+1.000000E+01,30` | both |
+| `[SENSe:]POWer:LIMit[?]` | `<A>[,<s>]`: 0.1 .. 10 A (default 6; smaller values are set to 0.1), 0 .. 3600 s (default 30) | `+6.000000E+00,30` | both |
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
+| `[SENSe:]POWer:WAVE[:STATe][?]` | `ON` or `OFF` | `<open 1/0>,<frames>,<Urms>,<Irms>,<P>,<F>,<points per channel>,<repeated reads>,<unreadable points>,<I zero A>,<I gain>,<checked I A>,<on the rail 1/0>,<closed by: 0 -, 1 above 10 A, 2 over range, 3 current limit>` | both |
 | `[SENSe:]POWer:ZERO[?]` | none (start) or `CLEar` | `<result>,SET\|NONE,<V zero>,<6 current zeros>,<6 DC zeros>` | both |
 | `[SENSe:]POWer:VOLTage:CALibrate[?]` | none (start) or `DEFault` | `<result>,<V range>,<gain>,SELF\|FACT` | both |
 | `[SENSe:]POWer:VOLTage:GAIN?` | | the four V range gains | both |
@@ -507,8 +517,9 @@ and `MEASure:POWer?` then give the real power P in W.
   15 s.
 - `FETCh:POWer:ALL?` and `MEASure:POWer:<x>?` answer only in the power
   meter (else no reply, `Settings conflict`). A part with no value is
-  `+9.91E37` (PF, S, Q and F below their AC thresholds; F when no frequency
-  is measured).
+  `+9.91E37` (PF, S, Q and F below their AC thresholds; PF also with no
+  current or voltage, S at the noise level; F when no frequency is
+  measured).
 - `BURDen`: the resistance of the current path, used for the burden voltage
   and for "At load" (`BURDen:STATe ON`: V and P corrected for the drop in
   the meter). `DEFault` restores the shunt's value.
@@ -522,6 +533,13 @@ and `MEASure:POWer?` then give the real power P in W.
 - `ZERO` (leads open, nothing in A, about 12 s) measures the zero offsets;
   `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
   `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
+- `WAVE ON` opens the [Power Wave](README.md#power-wave) page (`OFF`
+  closes it); refused with `METHod ALTernate` or during `ZERO` /
+  `VOLTage:CALibrate`. The query gives the last picture's values (RMS over
+  its whole cycles; `+9.91E37` when none), the read counters and what was taken from the DC coupling's current
+  reading: a zero in A (0: none; without `POW:ZERO`) or a gain (1: none;
+  with it), then the page's last current check and why it closed the page.
+  While the page is open the power meter does not measure.
 - `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
   on V/COM) matches the V channel's gain on the present range to the meter's
   voltmeter; `DEFault` returns to the factory-derived gain.
@@ -565,7 +583,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
   multimeter-input scope); timebase, trigger, the queries and the waveform
   commands work on it.
-- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each),
+- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each; in
+  roll mode the middle of each column's min and max, 0 before data),
   `MAXimum` the whole acquisition record, `<n>` the record thinned to at
   most n points.
 - `WAVeform:FORMat`: `BYTE` one byte per point (the 10-bit code divided by
@@ -573,7 +592,8 @@ and `MEASure:POWer?` then give the real power P in W.
 - `WAVeform:PREamble?`: format 0 BYTE / 1 WORD; type 0 screen columns, 2
   record; count 1. Point i is at time `(i - xref) * xinc + xorig` seconds
   from the trigger point (screen centre when untriggered) and has
-  `(data - yref) * yinc + yorig` volts.
+  `(data - yref) * yinc + yorig` volts (BYTE: the middle of the four codes
+  a byte stands for).
 - `WAVeform:DATA?` for the record (any POINts other than SCReen) needs the
   scope stopped (`STOP`, `SINGle` or `DIGitize`, then `TRIGger:STATus?` =
   `STOP`); while it runs the reply is `#10` with `Settings conflict`. Over
@@ -754,18 +774,23 @@ unless shown otherwise.
 |---|---|---|---|
 | `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
-| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>` | USB |
+| `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
 | `DBG:BOOT?` | | Boot and reset information | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
-| `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>` | USB |
+| `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>,<trend chart ms/div>` | USB |
 | `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
 | `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
 | `DBG:DRAG` | `<x0>,<y0>,<x1>,<y1>,<ms>[,<hold ms>[,<jitter px>]]` | One-finger drag; the jitter wobbles the path sideways. | USB |
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
+| `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
+| `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
+| `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
+| `DBG:CHG:OUT` | `IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | `DBG:CHG:PIN 10,…` | USB |
 | `DBG:TOUCH[?]` | `0` clears | Touch log text | USB |
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
@@ -785,6 +810,8 @@ unless shown otherwise.
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
+| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
+| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
@@ -823,7 +850,8 @@ unless shown otherwise.
 | `DBG:UPLoad:ABORt` | | Cancels the upload. | USB |
 | `DBG:UPLoad?` | | `<active 1/0>,<received>,<size>` | USB |
 | `DBG:UPDATE` | | Makes the vendor loader install the uploaded file: the meter restarts. | USB |
-| `DBG:RECOVER` | | Same as `DBG:UPDATE`. | USB |
+| `DBG:LOADER` | | Restarts into the vendor loader's update screen; the installed firmware stays. | USB |
+| `DBG:RECOVER` | | Same as `DBG:LOADER`. | USB |
 | `DBG:RESET` | | Restarts the meter. | USB |
 | `DBG:RELEASE` | | Stops feeding the watchdog: the meter resets in about 20 s and counts a crash. | USB |
 
@@ -831,7 +859,8 @@ unless shown otherwise.
   space; the bytes after the comma are binary and run to the end of the USB
   message. The offset is the number of bytes sent so far.
   `firmware/tools/dm40dbg.py upload` and `update` do the whole sequence.
-- `DBG:UPDATE` and `DBG:RECOVER`: the vendor loader installs the staged
-  file; without one it stays on its update screen with its own USB disk
-  until a firmware file is copied there. `DBG:RELEASE`: a second crash in a
-  row leads to the same screen.
+- `DBG:UPDATE`: the vendor loader installs the staged file; without one it
+  stays on its update screen with its own USB disk until a firmware file is
+  copied there.
+- `DBG:LOADER`: a staged file is installed; switching the meter off and on
+  leaves the loader and starts opendm40.

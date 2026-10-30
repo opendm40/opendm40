@@ -492,8 +492,101 @@ fn scope_tests(dir: Option<String>) -> u32 {
     fails
 }
 
+/// Power Wave frames (kind 4, dlog.rs "power wave"; the file as
+/// scope_csv.rs `set_pwave` / `pw_fill` lays it out): the CSV against
+/// `pw_row`, random reads, a cut anywhere = not a file (one CRC over the
+/// samples), a flipped sample bit = not a file.
+fn pw_tests(dir: Option<String>) -> u32 {
+    let mut fails = 0;
+    let text = b"# test frame\r\ntime_s,volts,amperes\r\n";
+    let sc = [0.0123f32, 5.0, 0.000123, -3.0];
+    let tu = 4e-6f32;
+    let mut r = Rng(11);
+    let mut v = vec![];
+    // (name, sample 0 is U, n): 50 Hz mains, 2048 samples; I first; 3; 0.
+    for (name, y, n) in [("mains 2048", true, 2048usize), ("I first 641", false, 641), ("3 samples", true, 3), ("empty", true, 0)] {
+        let s: Vec<(u16, i16)> = (0..n)
+            .map(|k| {
+                let t = (k as u32 * 39 + (r.next() % 3) as u32) as u16;
+                let w = 2.0 * std::f32::consts::PI * 50.0 * t as f32 * tu;
+                let u = (k % 2 == 0) == y;
+                let c = if u { 26000.0 * w.sin() } else { -30000.0 * (w - 1.0).sin() };
+                (t, c as i16)
+            })
+            .collect();
+        v.push((name, y, s));
+    }
+    for (pi, (name, y, s)) in v.iter().enumerate() {
+        let mut f = vec![0u8; FHDR + text.len() + PW_PAR];
+        let k = pw_header(text, sc, tu, s.len() as u32, *y, &mut f);
+        assert_eq!(k, f.len());
+        let mut c = !0u32;
+        for &(t, code) in s {
+            let b = [t as u8, (t >> 8) as u8, code as u8, (code as u16 >> 8) as u8];
+            c = crc32_upd(c, &b);
+            f.extend_from_slice(&b);
+        }
+        f.extend_from_slice(&(!c).to_le_bytes());
+        let mut csv = text.to_vec();
+        for (k, &(t, code)) in s.iter().enumerate() {
+            let mut row = [0u8; PW_ROW];
+            pw_row(&sc, tu, *y, k as u32, t, code, &mut row);
+            csv.extend_from_slice(&row);
+        }
+        match gen_all(&f) {
+            Some((info, out)) if out == csv && info.rows as usize == s.len() && info.kind == KIND_PWAVE => {}
+            _ => {
+                println!("FAIL power wave {name}: CSV differs");
+                fails += 1;
+                continue;
+            }
+        }
+        let mut g = Gen::open(&f[..], f.len() as u32).unwrap();
+        let mut rr = Rng(21 + pi as u64);
+        for _ in 0..400 {
+            let off = rr.next() as usize % (csv.len() + 10);
+            let len = 1 + rr.next() as usize % 900;
+            let mut b = vec![0xAAu8; len];
+            g.read(off as u32, &mut b);
+            let want: Vec<u8> = (off..off + len).map(|i| csv.get(i).copied().unwrap_or(0)).collect();
+            if b != want {
+                println!("FAIL power wave {name}: random read at {off}+{len}");
+                fails += 1;
+                break;
+            }
+        }
+        let torn = (0..f.len()).step_by(13).filter(|&l| gen_all(&f[..l]).is_some()).count();
+        let mut flip = f.clone();
+        let at = f.len() - 5;
+        flip[at] ^= 0x10;
+        if torn > 0 || (!s.is_empty() && gen_all(&flip).is_some()) {
+            println!("FAIL power wave {name}: a torn / flipped file decodes ({torn})");
+            fails += 1;
+            continue;
+        }
+        // Row shape: U rows "t,v,", I rows "t,,v".
+        if s.len() >= 2 {
+            let r0 = &csv[text.len()..text.len() + PW_ROW];
+            let r1 = &csv[text.len() + PW_ROW..text.len() + 2 * PW_ROW];
+            let (ur, ir) = if *y { (r0, r1) } else { (r1, r0) };
+            if ur[24] != b',' || ir[13] != b',' || ir[12] != b',' {
+                println!("FAIL power wave {name}: row shape {:?} {:?}", String::from_utf8_lossy(ur), String::from_utf8_lossy(ir));
+                fails += 1;
+                continue;
+            }
+        }
+        println!("{:<40} {:>6} rows, CSV {} B  ok", format!("power wave {name}"), s.len(), csv.len());
+        if let Some(d) = &dir {
+            std::fs::write(format!("{d}/p{pi}.dlg"), &f).unwrap();
+            std::fs::write(format!("{d}/p{pi}.csv"), &csv).unwrap();
+        }
+    }
+    fails
+}
+
 fn main() {
     let mut fails = scope_tests(std::env::args().nth(1));
+    fails += pw_tests(std::env::args().nth(1));
     fails += fast::tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");

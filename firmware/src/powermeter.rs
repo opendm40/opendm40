@@ -125,7 +125,7 @@ pub const RING_N: usize = 16;
 /// stock AC A. AC coupling: a part below its floor reads 0 and PF / S / Q
 /// are "--" (NaN, SCPI 9.91E37); f also "--" when the channel the counter
 /// watches is below. AC+DC: the part is left out of the totals (Q 0 when
-/// either is).
+/// either is); PF "--" when S is at the noise level.
 pub const FLOOR_V: f32 = AUTO_FLOOR_V[1];
 pub const FLOOR_I: f32 = 0.005;
 /// RMS noise assumed on an AC part above its floor, fractions of the range
@@ -843,7 +843,8 @@ pub fn totals(p_ac: f32, v_ac: f32, v_dc: f32, i_ac: f32, i_dc: f32, r: f32) -> 
     let v = sqrt(v2.max(0.0));
     let s = v * i;
     // |P| can exceed S by the noise of the separate statistics: PF clamped.
-    let pf = if s > 0.0 { (p / s).clamp(-1.0, 1.0) } else { 0.0 };
+    // S 0: no PF (NaN, not 0 = "purely reactive"; #109).
+    let pf = if s > 0.0 { (p / s).clamp(-1.0, 1.0) } else { f32::NAN };
     let q = sqrt((s * s - p * p).max(0.0));
     (p, s, q, pf, v, i)
 }
@@ -1006,6 +1007,76 @@ impl Dmm {
         self.sent_mode = 255;
         self.sent.configured(Kind::Off, clk.now_ms(), true);
         self.diag_on = false;
+    }
+
+    /// Power Wave (src/pwave.rs, doc 3.18): the frame's row (the method-B
+    /// power row of the ranges in force, R34 = XY: SDO23 0; the relays and
+    /// the shunt are the power meter's), SPHACAL (the phase calibration's,
+    /// also in the DC coupling), the sample scaling as `pw_take` (V: the V
+    /// gain in force and the Y zero; I: the AC A RMS gain and the X zero of
+    /// the range; the LPF zeros on single samples: INFERRED) and the full
+    /// scales of the two ranges.
+    pub fn pw_wave_setup(&self) -> ([u8; hy::CFG_LEN], u8, crate::pwave::Scale, f32, f32) {
+        let pw = &*self.pw;
+        let (iu, ir) = iu_ir(pw.ik);
+        let ci = (iu * 2 + ir) as u32;
+        let mut row = power_row(pw.vr, pw.ik, R34_XY);
+        row[0] = pw.r20 | 0x02;
+        row[1] = pw.r21;
+        let (zx, zy) = if pw.zero_ok { (pw.zx[pw.ik.min(5) as usize] as f32, pw.zy as f32) } else { (0.0, 0.0) };
+        let sc = crate::pwave::Scale {
+            su: 8.0 * CODE * KV[pw.vr as usize] * pw.v_gain(pw.vr),
+            ou: zy / 8.0,
+            si: 8.0 * CODE / (SHUNT_OHM[iu as usize] * MV_DIV[ir as usize]) * cal(0xC4 + 4 * ci, 1.0),
+            oi: zx / 8.0,
+        };
+        (row, r36_of(pw.sph), sc, V_LIM[pw.vr as usize], I_LIM[pw.ik.min(5) as usize])
+    }
+
+    /// Power Wave's I zero reference (doc 3.18): the DC coupling's current
+    /// (AD1 on the same OP1 output that AD2 reads, the factory DC A
+    /// calibration and its zero), None in the other couplings or before a
+    /// current reading; with whether `POW:ZERO`'s X zero is stored (then
+    /// the page fits AD2's gain to it, else its zero).
+    pub fn pw_wave_iref(&self) -> Option<(f32, bool)> {
+        let pw = &*self.pw;
+        (pw.on && pw.dc && !pw.alt && pw.job == 0 && pw.seen & 4 != 0 && pw.i_dc.is_finite()).then_some((pw.i_dc, pw.zero_ok))
+    }
+
+    /// Leaving Power Wave: the time it was open is not integrated into
+    /// the energy (no readings then). The current-limit countdown goes on
+    /// (the page keeps it, `pw_wave_current`).
+    pub fn pw_wave_gap(&mut self) {
+        self.pw.t_last = None;
+    }
+
+    /// Power Wave's current check (app_pwave.rs `pwave_guard`, about once
+    /// a second): `i` = the RMS current of the page (A, DC included), `clip`
+    /// = a sample on the converter's rail. The continuous-current limit as
+    /// `pw_account` keeps it (above `i_cont` the countdown runs, below 0.95
+    /// x it stops). Returns 1 = over the range on a range below 10 A (the
+    /// meter's OVERLOAD trip / I AUTO up-range would act: `pw_autorange`),
+    /// 2 = the limit ran out (the meter's `pw_over_expired` then toasts and
+    /// beeps), 0 = neither.
+    pub fn pw_wave_current(&mut self, now: u64, i: f32, clip: bool) -> u8 {
+        let over = self.over();
+        let pw = &mut *self.pw;
+        if i > pw.i_cont {
+            if pw.over_t0.is_none() {
+                pw.over_t0 = Some(now);
+                pw.over_beeped = false;
+            }
+        } else if i < 0.95 * pw.i_cont {
+            pw.over_t0 = None;
+        }
+        let k = pw.ik.min(5) as usize;
+        if k < 5 && (clip || i > over * I_LIM[k]) {
+            1
+        } else if matches!(pw.over_t0, Some(t0) if pw.t_lim > 0 && now.saturating_sub(t0) >= pw.t_lim as u64 * 1000) {
+            2
+        } else {
+            0
+        }
     }
 
     /// Restart after the DMM rail came back (`start`).
@@ -1187,6 +1258,11 @@ impl Dmm {
             } else if !(v_ok && i_ok) || q < qn {
                 q = 0.0;
             }
+            // S at the noise level (no current, or no voltage): PF has no
+            // value (AC+DC; AC has it from the floors above; #109).
+            if !(s > qn) {
+                pf = f32::NAN;
+            }
         }
         // The counter watches the V tap, or the current (PB4) when the tap
         // has no window: "--" when that channel's AC part is below its floor.
@@ -1273,7 +1349,9 @@ impl Dmm {
     /// values stayed up to ~4 s): the new coupling's layout and units,
     /// every measured value NaN ("--"); the energy, the time and the
     /// settings as they are.
-    #[inline(never)] // .cold (link-native.x): once per coupling change
+    /// Also the combined view's strip before the first reading
+    /// (`App::pw_strip_wait`, #108): region B.
+    #[inline(never)]
     pub fn pw_pending(&self) -> (Reading, PowerVals) {
         let n = f32::NAN;
         let pv = PowerVals {
@@ -2306,6 +2384,9 @@ mod tests {
         // Reversed current: P < 0, PF -1.
         let (p, _, _, pf, _, _) = totals(0.0, 0.0, 12.0, 0.0, -2.0, 0.0);
         assert!(close(p, -24.0, 1e-6) && close(pf, -1.0, 1e-6));
+        // No current (#109): S 0, Q 0, PF none (not 0 = "purely reactive").
+        let (p, s, q, pf, v, _) = totals(0.0, 0.0, 5.0, 0.0, 0.0, 0.0);
+        assert!(p == 0.0 && s == 0.0 && q == 0.0 && pf.is_nan() && close(v, 5.0, 1e-6));
         // Burden: 5 V source, 0.4 A, R_path 0.6 ohm (DC, wiring 1): the
         // load sees 5 - 0.24 = 4.76 V and takes 1.904 W; the meter 0.096 W.
         let (p, s, _, pf, v, i) = totals(0.0, 0.0, 5.0, 0.0, 0.4, 0.6);

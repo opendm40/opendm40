@@ -308,6 +308,24 @@ def decode(d, errors):
     if kind == 3:
         rows, chunks = fast_decode(d, off, out, errors)
         return ''.join(out), {'rows': rows, 'chunks': chunks}
+    if kind == 4:
+        # Power Wave frame (dlog.rs "power wave"): su, ou, si, oi, tu, n,
+        # flags; n x (u16 time, i16 code), U and I in turn; CRC-32.
+        su, ou, si, oi, tu = struct.unpack_from('<5f', d, off)
+        n, fl, crc = struct.unpack_from('<IB3xI', d, off + 20)
+        if zlib.crc32(d[off:off + 28]) != crc:
+            raise ValueError('bad power wave parameters')
+        p = off + 32
+        if p + 4 * n + 4 > len(d) or zlib.crc32(d[p:p + 4 * n]) != struct.unpack_from('<I', d, p + 4 * n)[0]:
+            raise ValueError('power wave samples torn or CRC error')
+        f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
+        for k in range(n):
+            t, c = struct.unpack_from('<Hh', d, p + 4 * k)
+            if (k % 2 == 0) == bool(fl & 1):
+                out.append(sci(f(t * tu), 5) + ',' + sci(f(f(c - ou) * su), 4) + ',\r\n')
+            else:
+                out.append(sci(f(t * tu), 5) + ',,' + sci(f(f(c - oi) * si), 4) + '\r\n')
+        return ''.join(out), {'rows': n, 'chunks': 0}
     if kind == 2:
         a, b, dt = struct.unpack_from('<fff', d, off)
         t0, n, crc = struct.unpack_from('<III', d, off + 12)

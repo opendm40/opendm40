@@ -2,7 +2,7 @@
 """opendm40: the DMM Wave view's ring drops (DBG:ISR? field 6 `dropped`: the
 logger ring was full, the newest stream samples dropped; device c785807 M3:
 ~50/s at 1 ms/div). The view is entered as on the device (DC V, MF > Wave:
-DBG:KEY 3, DBG:TAP 237,259), set to --tb s/div, then watched for --dur s
+DBG:KEY 3, DBG:TAP 298,259), set to --tb s/div, then watched for --dur s
 of device time: DBG:ISR? (dropped, late, overruns, max_lat) and DBG:PROF?
 (the main loop's longest pass and section maxima) every --step s. Optional
 --host-read: a host reads INFO/LOADER.BIN (all of it from the SPI-disk
@@ -89,7 +89,7 @@ try:
     print('*IDN?', q('*IDN?'), flush=True)
     q('CONF:VOLT:DC')
     wait_dev(2)
-    for cmd, want in (('DBG:KEY 3', 'Range'), ('DBG:TAP 237,259', 'Oscilloscope')):
+    for cmd, want in (('DBG:KEY 3', 'Range'), ('DBG:TAP 298,259', 'Oscilloscope')):
         q(cmd)
         wait_dev(1.5)
         v = q('DBG:VIEW?')

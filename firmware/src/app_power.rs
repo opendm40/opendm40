@@ -130,6 +130,14 @@ impl App {
                         self.show(View::Limits, clk);
                         return true;
                     }
+                    Some(ui::pw::PS_RECORD) => {
+                        self.record_open(clk);
+                        return true;
+                    }
+                    Some(ui::pw::PS_WAVE) => {
+                        let _ = self.pwave_open(clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
@@ -186,8 +194,12 @@ impl App {
         // DMM page before the first full reading: V and "I ranging..."
         // (the I channel walks down from 10 A, ~0.9 s per range); after a
         // coupling change the pending page instead (no job running).
-        if self.view == View::Dmm && !self.redraw && self.meter.shown().is_none() {
-            self.pw_no_reading();
+        if !self.redraw && self.meter.shown().is_none() {
+            match self.view {
+                View::Dmm => self.pw_no_reading(),
+                View::DmmScope => self.pw_strip_partial(),
+                _ => {}
+            }
         }
         if self.dmm.pw_over_expired() {
             self.toast(now, "Current too high: reduce it", false);
@@ -210,6 +222,33 @@ impl App {
             }
         } else if let Some((v, txt)) = self.dmm.pw_partial() {
             self.pw_rng_key = ui::pw::ranging(v, txt, self.pw_rng_key);
+        }
+    }
+
+    /// The combined view's meter strip before the first power reading
+    /// (#108; the I channel walks down from 10 A, ~0.9 s per range): POWER,
+    /// the range badge and dimmed dashes as after any other function change,
+    /// the V once measured (the DMM page's `pw_no_reading`).
+    pub(super) fn pw_strip_wait(&self) -> crate::dmm::Reading {
+        let mut r = self.dmm.pw_pending().0;
+        r.prov = true;
+        r.auto = self.dmm.pw.v_auto && self.dmm.pw.i_auto;
+        r.aux1 = self.dmm.pw_partial().and_then(|p| p.0);
+        r.aux2 = None;
+        r
+    }
+
+    /// `pw_tick`, the combined view without a power reading: the strip again
+    /// when the partial V changes (`pw_rng_key` as on the DMM page).
+    #[inline(never)]
+    fn pw_strip_partial(&mut self) {
+        let k = match self.dmm.pw_partial() {
+            Some((Some(v), _)) => v.v.to_bits() | 1,
+            _ => 2,
+        };
+        if k != self.pw_rng_key {
+            self.pw_rng_key = k;
+            self.sp_strip();
         }
     }
 
@@ -439,6 +478,23 @@ impl App {
                 out.put_bytes(pw::CAL_NAMES[self.dmm.pw.cal_res.min(5) as usize].as_bytes());
                 out.put_bytes(b",");
                 put_i(out, &mut t, self.dmm.pw.sph as i64);
+                true
+            }
+            Pow::Wave(Some(true)) => {
+                if self.pwave_open(clk).is_err() {
+                    out.set_err("Settings conflict");
+                }
+                false
+            }
+            Pow::Wave(Some(false)) => {
+                if self.view == View::PWave {
+                    let v = self.back_view;
+                    self.show(v, clk);
+                }
+                false
+            }
+            Pow::Wave(None) => {
+                self.pwave_query(out);
                 true
             }
             Pow::Cycle => {
