@@ -1126,6 +1126,22 @@ variant keeps CAP 36 K / PCAP 55 000 again (it has its own MSC buffers).
 | stack headroom (static worst path) | 21 312 B | 20 620 B |
 | SRAM free | 9 460 B | 8 308 B |
 
+Then (feat/sram-extra-areas, the next sections) `scope::CAP` goes back to
+42 K u16 / `PCAP` 65 520 (the raw ring 43 008, the post-trigger part of a
+coded Single at the centre 52 156; the test floors as on
+feat/scope-long-record). On this branch `ui::GEN_SP` also moves from TCM
+to the backup SRAM, except in a `dbg-prof` build (`prof::P` takes that
+room).
+
+| | CAP 40 K, release/0.4.0 + extra areas merged | CAP 42 K |
+|---|---|---|
+| region A2 free | 156 B | 156 B |
+| region B free | 14 904 B | 14 912 B |
+| region C free | 6 624 B | 6 624 B |
+| stack headroom (static worst path) | 20 596 B | 21 076 B |
+| SRAM free | 14 756 B | 10 660 B |
+| backup SRAM free | 1 424 B | 936 B |
+
 ### AC+DC trace behind a feature (2026-10-30, feat/sram-extra-areas)
 
 The owner does not want DBG:ACDC:TRACE in the firmware. The cargo feature

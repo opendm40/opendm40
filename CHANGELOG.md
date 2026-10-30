@@ -27,17 +27,16 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
-- Scope: a longer capture: 62 240 samples from 100 ms/div (the stock's
-  65 520 does not fit next to the GEN / CH2 channels), 40 960 at the faster
-  timebases (was 26 624), for the stopped zoom / pan,
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  43 008 at the faster timebases (was 26 624), for the stopped zoom / pan,
   Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
   capture (at most 10 s) with the trigger point at the trigger position
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
   Wave view at 9600 S/s and slower) keep the capture compressed with the
-  DLG scope coder as it comes in: at least 62 240 samples (white noise),
+  DLG scope coder as it comes in: at least 65 520 samples (white noise),
   more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
-  for up to 10 s; the part after the trigger point is at most 48 876
+  for up to 10 s; the part after the trigger point is at most 52 156
   samples, the part before it what the memory keeps
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - **Protocol decoder:** UART (RS-232, RS-485) drawn under the trace, each
@@ -178,7 +177,7 @@ section named after the tag as the release notes; how to cut a release:
   record with a step where two captures met. STOP now ends on one more
   complete capture (as **Single** / `DIGitize`: the trigger point at the
   trigger position), of the full record up to the screen's time + 0.5 s
-  (40 960 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  (43 008 samples at the faster timebases, 37 500 at 100 ms/div). It ends
   at most the screen's time + 1 s after the STOP, with what is in when
   nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
   2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for

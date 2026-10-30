@@ -181,7 +181,7 @@ stock record is 65 520 samples; as u16 that is 131 040 B, more than the
 SRAM has free. 10-bit codes packed 4 in 5 bytes
 ([`src/pack10.rs`](../src/pack10.rs): a little-endian bit stream, sample
 i at bits 10 i .. 10 i + 9, one unaligned 32-bit load per sample) make
-65 520 samples 81 900 B; BUF holds 62 240 packed (`PCAP`).
+65 520 samples 81 900 B; BUF holds 65 520 packed (`PCAP`).
 
 The DMA writes u16 (GPIOB IDR, or the TIM8 latch, at up to 50 MS/s), and
 opendm40 has no interrupt besides the AD2 stream's (the main loop polls
@@ -189,10 +189,10 @@ everything, passes up to ~25 ms), so only the main loop can pack. That
 sets two modes:
 
 - **fs > 25 kS/s** (faster than 100 ms/div): the DMA writes a raw ring of
-  `CAP` = 40 960 u16 (linear or circular as before). When the
+  `CAP` = 43 008 u16 (linear or circular as before). When the
   acquisition stops, the ring is packed in place (`pack_in_place`: group
   g's 5 bytes are written after its 8 raw bytes are read, so it never
-  overtakes unread samples; ~0.7 ms for 40 960 samples, inferred from the
+  overtakes unread samples; ~0.7 ms for 43 008 samples, inferred from the
   instruction count). Packing during
   the capture would need the CPU at 50 MS/s (4 cycles per sample at
   200 MHz), and with the comparator trigger the main loop learns of the

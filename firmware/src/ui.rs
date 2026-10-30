@@ -2610,12 +2610,14 @@ pub fn gen_status(st: &Status) {
 
 /// `gen_preview` in strips: the wave the table holds (its `sel` + 1, the
 /// square's duty above bit 8; 0 = none) and each column's trace rows (from
-/// the preview's top). All zero
-/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
-/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
-/// table, so the boot-time Sine drew no trace).
-// TCM .bss on test/scope-chain-0.4 (CPU only; SRAM for the scope record,
-// docs/native-boot.md "SRAM audit").
+/// the preview's top). All zero at boot, whatever the initialiser says
+/// (#153: a 255 "none" read back 0 = Sine with an empty table, so the
+/// boot-time Sine drew no trace): on test/scope-chain-0.4 it is in the
+/// backup SRAM (.bkp_bss, link-native.x; CPU only, zeroed by
+/// native::extra_ram_init; docs/native-boot.md "Extra RAM areas"), which
+/// leaves TCM to the stack and SRAM to the scope record. A dbg-prof build
+/// keeps it in TCM .bss (prof::P takes that room).
+#[cfg_attr(all(target_os = "none", not(feature = "dbg-prof")), link_section = ".bkp_bss")]
 pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 
 // Region B (not inlined into the region C callers): drawn per strip.
