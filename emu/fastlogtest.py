@@ -272,6 +272,7 @@ class HostRead:
         self.off = 0
         self.bytes = 0
         self.profs = 0
+        self.has_prof = None
         self.seen = set()
         self.refused = {}   # name: NOT READY count
         self.first = {}     # name: file offset of its first refused sector
@@ -323,7 +324,12 @@ class HostRead:
         if A.host_only:
             self.profs += 1
             return
-        if 'PROF' in self.q('DBG:PROF?'):
+        # DBG:PROF? only in a build with the feature dbg-prof: without it
+        # the poll counts without the query.
+        if self.has_prof is None:
+            self.q('DBG:PROF?')
+            self.has_prof = not self.q('SYST:ERR?').startswith('-113')
+        if not self.has_prof or 'PROF' in self.q('DBG:PROF?'):
             self.profs += 1
         self.q('LOG:DEST?')
         self.q('LOG:DURation?')
@@ -423,7 +429,7 @@ class UiNav:
         v = self.q('DBG:VIEW?')
         # The source badge in a session: the Wave view is refused (no
         # stream of its own while the logger owns the HY3131).
-        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and not v.endswith(',0')):
+        if not v.startswith(want) or (c == 'DBG:TAP 177,10' and v.split(',')[2:3] != ['0']):
             self.bad.append('%s -> %s (want %s)' % (c, v, want))
         self.k = (self.k + 1) % len(NAV)
         self.n += 1

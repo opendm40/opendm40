@@ -11,7 +11,7 @@ fn save1(out: &str, name: &str) {
 
 /// An ordinary status bar: 00:12:34 since power-on, no REC, no BT host.
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 const DMM_REGIONS: [(&str, Bx); 7] = [
@@ -41,10 +41,12 @@ struct Dp {
     ohm_on: bool,
     /// The rate applies (DC V / A / ohm), else the chip reads n/a.
     rate: bool,
+    /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
+    short: u8,
 }
 
 fn dp(r: Reading) -> Dp {
-    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true }
+    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true, short: 0 }
 }
 
 /// The multimeter page: the reading, the bargraph or the history row, the
@@ -73,7 +75,9 @@ fn dmm_page(p: &Dp) {
             dv.bar_update(r);
         }
     }
+    dv.short = p.short;
     dv.reading(r, p.hold, p.lim);
+    dv.short_sync();
     let mut st = status_real();
     st.csv = p.csv;
     ui::status_right(&st);
@@ -171,7 +175,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/settings2", &page, false);
     save1(out, "settings2");
     host::reset(0);
-    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
+    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]);
     ck.check_opts("manual/settings3", &page, false);
     save1(out, "settings3");
 
@@ -232,13 +236,14 @@ pub fn run(out: &str) -> usize {
 
     // Device page (no serial number on it).
     host::reset(0);
-    let ver = format!("opendm40 {}", ui::FW_VERSION);
+    let mut fwb = [0u8; 48];
+    let ver = ui::device_software(&mut fwb);
     ui::device_page(&[
         ("Vendor", "Alientek"),
         ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
         ("Bootloader", "V1.1"),
-        ("Software", &ver),
+        ("Software", ver),
         ("Hardware", "V4"),
         ("Board temp", "31.5 C (MCU)"),
     ]);
@@ -338,8 +343,8 @@ pub fn run(out: &str) -> usize {
         // (the second only for the layout check).
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
-        // Continuity: a short.
-        ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        // Continuity: a short, the beeper indicator on.
+        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.
@@ -365,8 +370,10 @@ pub fn run(out: &str) -> usize {
         ("dmm-limit-hi", Dp { lim: meter::V_HI, ..dp(rd(1, val(5.2871, 4, "V"), None, None, false)) }),
         // The history row.
         ("dmm-history", Dp { hist: true, ..dp(dcv) }),
-        // Overload.
+        // Over range.
         ("dmm-ol", dp(rd(1, ol(4, "V"), None, None, false))),
+        // Continuity with open leads.
+        ("dmm-open", Dp { rate: false, ..dp(rd(11, ol(2, ohm), None, None, false)) }),
         // A recording running (REC in the status bar).
         ("dmm-rec", Dp { csv: true, ..dp(dcv) }),
     ];
@@ -654,7 +661,7 @@ pub fn run(out: &str) -> usize {
         scope_ui::update(&sc.m);
         scope_ui::cells(&sc.m, &sc.cells);
         let acv = rd(0, val(230.12, 2, "V"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false);
-        let d = ui::strip_data(&acv, 0, 0, false, 1, false, None, false);
+        let d = ui::strip_data(&acv, 0, 0, false, 1, false, None);
         scope_ui::meter_strip(&d);
         ui::func_band(Button::Volt, 0, false, false);
         ck.check_area("manual/combined-band", &screen, true, Some(Bx::new(13, 20, 401, 56)));
@@ -705,7 +712,7 @@ pub fn run(out: &str) -> usize {
         ck.check_opts("manual/settings2-smooth", &page, false);
         save1(out, "settings2-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
+        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]);
         ck.check_opts("manual/settings3-edit", &page, false);
         save1(out, "settings3-edit");
     }

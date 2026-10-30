@@ -7,7 +7,7 @@ All documentation of opendm40, by reader. Start at the
 
 - [User manual](manual/README.md): install and update, every feature, safety
   and alerts, connecting from a computer, backup, recovery and back to stock,
-  known limitations.
+  known limitations. In Russian: [manual/README.ru.md](manual/README.ru.md).
 - [SCPI reference](manual/scpi-reference.md): every SCPI command, over USB
   and Bluetooth.
 - [CHANGELOG.md](../CHANGELOG.md): the changes per release.
@@ -71,6 +71,8 @@ All documentation of opendm40, by reader. Start at the
   multimeter and scope combined view.
 - [scope-scale-ux.md](../firmware/docs/scope-scale-ux.md): the scope timebase
   and V/div by touch.
+- [scope-gen-channel.md](../firmware/docs/scope-gen-channel.md): the
+  generator as a computed scope channel (trigger source, trace) and the DMM as CH2.
 
 ### Planning
 

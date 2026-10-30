@@ -51,9 +51,10 @@ row" token; the anti-aliased fonts and traces make rows differ):
 The median is ~30 KiB and the largest is 68 KiB (d02-dmm-acdc): a small
 buffer buys nearly nothing.
 
-Re-rendering in strips is not possible: the drawing code paints straight to
-the panel with diff state (scope_ui `d_*`, the page caches), not a region
-renderer, so a strip cannot be reproduced deterministically.
+Re-rendering in strips for a shot is not possible: the screen is the
+result of many diff draws (scope_ui `d_*`, the page caches), not of one
+page draw. (A full page repaint is drawn in strips, see
+[the third tenant of the arena](#the-disk-scratch-arena-calbackupscratch-12-kib).)
 
 ## The screenshot freeze: next shot's clusters erased in idle time
 
@@ -126,6 +127,7 @@ buffer of every on-device disk user, not only the boot-time calibration copy:
 | gallery.rs | [0] data, [1] FAT | no (inside one poll) |
 | fatdir.rs (SHOTS / LOGS / SCOPE created) | [0..2] | no |
 | setfile.rs (settings copy on the SPI disk) | [0..1] | no |
+| lcd.rs strip rendering (a page repaint; below) | 11 520 B | no |
 
 A csvlog commit runs every 60 s while a recording is on, so the arena
 cannot be overlaid on `scope::BUF`.
@@ -150,6 +152,24 @@ Ownership has runtime checks:
 Visible cost: the spectrum is not updated during a disk job (a commit,
 ~0.1-0.5 s every 60 s while recording; a shot; a whole fast-log session).
 
+Third tenant: the strip renderer
+([`lcd.rs`](../src/lcd.rs) "strip rendering"): a full page repaint
+(`App::repaint_strips`) draws the page into 12 rows x 480 px at a time
+(11 520 B of the arena) and sends each strip to the panel. Inside one call:
+
+- `calbackup::strip_take()` refuses while `disk_job()` (the page is then
+  drawn directly, as before), else bumps `GEN` like a disk user: an FFT
+  job in flight is dropped and redone (one spectrum update later on a page
+  change). `fft_work` returns None while the renderer holds the arena (the
+  scope page's draw can step the FFT).
+- `strip_give()` reports whether `GEN` moved meanwhile (a single-pass disk
+  user inside a page draw; none is known): the page is then drawn again
+  directly.
+
+Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 484 B: the
+generator preview's trace rows, worked out once per wave and square duty
+instead of per strip) and `scope_ui::COLC` (400 B, flash).
+
 ## Every static of 1 KiB or more
 
 Sizes from `llvm-nm -S` of a native release ELF (default features) of
@@ -162,21 +182,21 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | logger::RING (SRAM) | 16 540 | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and `fastlog::begin`, but not by an SCPI LOG:STAT ON session | Idle in plain DMM / scope use. An overlay with the csvlog buffers would need csvlog and LOG:STAT ON to refuse each other, plus an owner token. Not done. |
 | calbackup::SCRATCH (SRAM) | 12 288 | any disk job (table above) + the FFT | see above | Already shared with the FFT. |
 | scope_ui::GRAPH (SRAM) | 9 956 | the scope pages (Scope, combined view, Wave view): trace / persistence / math rows and their on-screen diff copies | the scope record, the FFT | The combined view rules out an overlay with anything scope-side. The math rows (`ma`, `d_ma`) could go when math is off. Not done. |
-| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together) | DMM, scope, BT, USB | See logger::RING. |
-| bt::TX (SRAM) | 8 192 | while BT is connected: the largest reply (`usbtmc::RSP_MAX` block + LF) plus stock frames, queued for DMA | everything | Keep. |
+| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together); otherwise its head holds the MMEM:CAT? cache | DMM, scope, BT, USB | Shared with the catalog cache ([native-boot.md, SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays)). See logger::RING. |
+| bt::TX (SRAM) | 6 656 | while BT is connected: the largest reply (`usbtmc::RSP_MAX` block + LF) plus stock frames, queued for DMA | everything | Shrunk from 8 192 (SRAM audit); not below one whole reply. |
 | APP (TCM) | 6 672 | always (the App) | | Keep. |
 | vdisk::TAB (SRAM) | 6 420 | while USB exports the generated volume (the table regenerates on sector reads) | everything | Keep. |
-| csvlog::CAT (SRAM) | 6 156 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | Keep: a listing during a stream must not read the disk. |
+| csvlog::CAT | 12 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | The reply is in `csvlog::FIFO_BUF` (SRAM audit). |
 | dmm::acdctr::TR (SRAM) | 5 388 | DBG:ACDC:TRACE (debug, off at boot; the ring is allocated always) | | Debug aid; could shrink (`TR_N` = 192 entries). |
 | scope_page::CACHE (SRAM) | 4 824 | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
 | scope_page::FFT (TCM) | 4 128 | the last spectrum | | Must survive a dropped job. Keep. |
 | csvlog::TAIL (SRAM) | 4 096 | a CSV recording | FIFO_BUF | See logger::RING. |
 | gen::WAVE (SRAM) | 4 000 | while the generator outputs (DAC DMA, circular) | everything | Keep. |
-| touch::LOG (TCM) | 1 924 | always (DBG:TOUCH?) | | Debug aid; could go to 0.5 KiB. |
+| touch::LOG (TCM) | 196 | always (the touch test page; DBG:TOUCH? with `dbg-touch`, 1 924) | | 16 entries without the feature (SRAM audit). |
 | fastlog::JOB (SRAM) | 1 864 | a fast-log disk session | logger::RING | Keep. |
 | scope::ROLL_COLS (SRAM) | 1 600 | roll mode | | Keep. |
 | vwrite::W0 (SRAM) | 1 376 | the writable USB volume session | | Keep. |
-| dmm::REC_COPY (SRAM) | 1 024 | always: the RAM copy of the settings / calibration record (the record is in the slow flash bank) | | Keep. |
+| dmm::REC_COPY (TCM) | 1 024 | always: the RAM copy of the settings / calibration record (the record is in the slow flash bank) | | Keep. |
 | bt::RX (SRAM) | 1 024 | the DMA ring, while BT is powered | | Keep. |
 
 Never live together, so worth an owner token if RAM gets tight again:

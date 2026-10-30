@@ -215,6 +215,8 @@ recorded.
 | [`ohmsinktest.py`](hy3131/ohmsinktest.py) | RES AUTO on an input the 6 Mohm and 600 kohm ranges disagree on | | 64810 |
 | [`ohmnegtest.py`](hy3131/ohmnegtest.py) | ohm readings below 0 (RES:NEG ON / OFF) on shorted leads; AUTO stays on 60 ohm | | 64751 |
 | [`ohm600mtest.py`](hy3131/ohm600mtest.py) | the experimental 600 Mohm range: manual only (explicit, MAX, AUTO, the AUTO key), READ? / MEAS? answer in time | | 64761 |
+| [`contvistest.py`](hy3131/contvistest.py) | the beeper indicator (SHORT / BEEP band, green digits) against the input in CONT and DIOD at volume 0 / 50 %: on latency, 150 ms hold, a chattering contact, from the LCD write trace | | 40310 |
+| [`beeptest.py`](hy3131/beeptest.py) | continuity / diode beeper (R20 bit 2) off at key/alert volume 0 %, on at 50 %, also after a volume change in continuity | | 64761 |
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
@@ -230,8 +232,11 @@ recorded.
 | [`switchtest.py`](hy3131/switchtest.py) | misconnect sentinel through function / range / coupling switches | | 44100 |
 | [`loudtest.py`](hy3131/loudtest.py) | danger alarm (buzzer register log) | | 53101 |
 | [`powtest.py`](hy3131/powtest.py) | power meter | | 3381 |
+| [`pwrangingtest.py`](pwrangingtest.py) | power meter before its first reading: no DMM column beside "I ranging..." (#96) | | free |
+| [`stripwaittest.py`](stripwaittest.py) | combined view: the meter strip names the power meter before its first reading (#108) | ~2 min | free |
 | [`burdentest.py`](hy3131/burdentest.py) | burden voltage readout | | 3378 |
 | [`inrushtest.py`](hy3131/inrushtest.py) | inrush current capture | | 3597 |
+| [`pwdialogtest.py`](pwdialogtest.py) | power meter dialogs (wiring, Reset energy?) and the fuse check dialog close on a SCPI function change (#104, #143) | | free |
 | [`btwaketest.py`](hy3131/btwaketest.py) | DMM rail (PE2) wake with a Bluetooth link | | 4833 |
 | [`tests/run.sh`](hy3131/tests/run.sh) | host unit tests of the HY3131 model, no emulator (dotnet 8) | | - |
 
@@ -242,12 +247,17 @@ recorded.
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
-| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
+| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples (`--ch2`: the scope page with CH2 (DMM) on) | | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
 | [`sratetest.py`](sratetest.py) | the timebase list's per-entry sample rates = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll and the Wave view; picks in the open list (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
+| [`rollmeastest.py`](rollmeastest.py) | roll mode: no measurements while rolling (not the last frame's), a stopped roll record measured | | free |
+| [`gentrigtest.py`](gentrigtest.py) | trigger source GEN: DAC-path phase readings (`DBG:GENTRIG:STAT?`) and a stream-timebase trigger, the PWM path triggering, `TRIG:SOUR CHAN1`, the generator off. The DAC phase itself stands still here (no DMA from TIM6) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
+| [`popupscpitest.py`](popupscpitest.py) | scope: SCPI timebase / V/div changes while the CH1 popup is open show in the top bar at once (#82) | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
+| [`triglevtest.py`](triglevtest.py) | `TRIG:LEV` keeps the level as given (V/div steps, off screen); Normal triggers on it | ~2 min | free |
+| [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |
 
 ### Logger and the AD2 stream
 
@@ -279,10 +289,14 @@ recorded.
 
 | Test | What it checks | Runtime | Port |
 |---|---|---|---|
-| [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered | ~4 min | BT 4834 |
+| [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered; RX overrun reported (-363) | ~4 min | BT 4834 |
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
+| [`limitsbacktest.py`](limitsbacktest.py) | MENU / Back on Hold & Limits and Record: one page up (the range page or the multimeter); the range pages' Record button, Start / Stop | ~2 min | free |
+| [`chartunittest.py`](chartunittest.py) | DMM trend chart after a range change to another unit that reads OL (#93) | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
+| [`tempinfotest.py`](tempinfotest.py) | the temperature page's cold junction line follows an offset step (#142) | | free |
+| [`monkeytest.py`](monkeytest.py) | seeded random taps, keys, drags, swipes and SCPI (edge values) on every page: no restart, no hang, MENU always reaches the main menu, the deepest stack use; optional soak (`--seed`, `--minutes`) | about real time (`--fast`) | free |
 | [`flowtest.py`](flowtest.py) | the live window's signal-flow diagram does not move; no emulator | | - |
 
 ### Helpers
@@ -337,7 +351,7 @@ Models are C# files compiled by Renode at start-up; the platform is
 | Touch (I2C) | [`GD32_I2C.cs`](peripherals/GD32_I2C.cs), [`CST_Touch.cs`](peripherals/CST_Touch.cs) | `Tap`, `Press`, `Move`, `Release`, `Drag`, `Key` |
 | HY3131 and the front end | [`hy3131/HY3131.cs`](hy3131/HY3131.cs), [`hy3131/DM40Frontend.cs`](hy3131/DM40Frontend.cs) | registers, conversion timing, every DMM function, with the meter's calibration: [emu/hy3131/README.md](hy3131/README.md) |
 | Scope ADC and comparator | [`ScopeFeeder.cs`](peripherals/ScopeFeeder.cs) | one sample per TIM1 update; comparator on PA15 with the board's delay and hysteresis |
-| Bluetooth module (UART4) | [`BtModule.cs`](peripherals/BtModule.cs) | AT set-up, start-up banner, PC14 "connected", `--bt-port` |
+| Bluetooth module (UART4) | [`BtModule.cs`](peripherals/BtModule.cs) | AT set-up, start-up banner, PC14 "connected", `--bt-port`; its bytes to the firmware at most 115200 (`RxByteUs`), the firmware's TX at once |
 | Battery ADC | [`SimpleADC.cs`](peripherals/SimpleADC.cs) | channel 15 = 4.0 V (`SetVolts ch v`) |
 | Watchdog, reset flags | [`FWDGT.cs`](peripherals/FWDGT.cs) | a timeout resets the machine; RSTSCK flags |
 | USB OTG FS | `DWC2_OTG*.cs` | Renode's Synopsys OTG model with fixes for the GD32 drivers; [USB/IP](#usb-over-usbip) |

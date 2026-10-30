@@ -48,6 +48,7 @@ mod scope;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
+mod scope_ch2;
 mod fft;
 mod sinc;
 mod trigsoft;
@@ -511,6 +512,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             scpi_wait[USB] = None;
             msgs[USB].reset();
         }
+        if bt.take_left() {
+            // The Bluetooth host left: its pending query is not answered to
+            // the next host (#122).
+            scpi_wait[BT] = None;
+            msgs[BT].reset();
+        }
         if scpi_func_key(&app.dmm) != func_key {
             // Changed on the meter (or by DBG:KEY's deferred key-up): no host
             // waits for its settle; a READ? already waiting answers now.
@@ -869,7 +876,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
                         }
                         let flags = hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1;
-                        let left = if feeding { deadline.saturating_sub(now) as u32 } else { 0 };
+                        let left = if feeding { scpi::keepalive_left(deadline, now) } else { 0 };
                         scpi.len = 0;
                         for (i, v) in [now as u32, flags, left].iter().enumerate() {
                             if i > 0 {
@@ -947,6 +954,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         draw_hold_until = now + 300;
                         false
                     }
+                    // Never parsed without the features (scpi.rs).
+                    #[cfg(not(feature = "dbg-touch"))]
+                    scpi::Dbg::Touch(_) => false,
+                    #[cfg(not(feature = "dbg-prof"))]
+                    scpi::Dbg::Prof(_) => false,
+                    #[cfg(feature = "dbg-touch")]
                     scpi::Dbg::Touch(clear) => {
                         if clear {
                             touch::log_clear();
@@ -982,6 +995,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         true
                     }
+                    #[cfg(feature = "dbg-prof")]
                     scpi::Dbg::Prof(reset) => {
                         if reset {
                             prof::reset();
@@ -999,6 +1013,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         reset_at = Some(now + 50);
                         false
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpi(n, div) => {
                         // Bus self-test (hyspi.rs): the DMM is paused and its
                         // row rewritten afterwards; the logger owns the chip.
@@ -1015,6 +1030,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpiWr(mode, div) => {
                         if logger.active() {
                             scpi.set_err("Settings conflict");
@@ -1029,6 +1045,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    // DBG:HYSPI needs --features dbg-hyspi (scpi.rs refuses it).
+                    #[cfg(not(feature = "dbg-hyspi"))]
+                    scpi::Dbg::HySpi(..) | scpi::Dbg::HySpiWr(..) => false,
                     scpi::Dbg::Isr => {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
@@ -1471,6 +1490,44 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             port.respond(r);
         }
 
+        // The DMM CH2 of the MCX scope page (app_ch2.rs): its stream starts,
+        // restarts at a timebase in another rate band and stops here, before
+        // the wave view's / inrush page's requests (their streams take the
+        // logger over: CH2's is stopped first, `ch2_want` is None in their
+        // views). A disk job stops it (region C code every pass, as the
+        // wave view's pause); it starts again after. A stream it did not
+        // start (a host session, the wave view, inrush) is left alone.
+        {
+            let want = app.ch2_want().filter(|_| !screenshot::busy() && !logger.host_active() && !fastlog::active());
+            let mine = app.ch2_live() && logger.active() && logger.wave();
+            if app.ch2_live() && !mine {
+                app.ch2_lost(now); // a DMM change, or taken over
+            }
+            match want {
+                Some(fs) if (!mine || app.ch2_fs() != fs) && (mine || !logger.active()) => {
+                    let fresh = !logger.active();
+                    if mine {
+                        logger.stop();
+                    }
+                    if fresh {
+                        // The full row first, as the wave view's entry.
+                        app.dmm.start(&mut clk);
+                    }
+                    if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        csvlog::catalog_warm(); // MMEM:CAT? while CH2 streams: from the cache
+                        logger.start_wave(app.dmm.mode(), app.dmm.range(), fs);
+                        app.ch2_started(fs, logger.nominal_mhz(), logger.begin_cyc());
+                    } else {
+                        app.ch2_stopped();
+                    }
+                }
+                None if mine => {
+                    logger.stop();
+                    app.ch2_stopped();
+                }
+                _ => {}
+            }
+        }
         // Any path that reconfigures the DMM (a host CONFigure, a touch/key
         // FUNC/RANGE change, a BT mode-byte) rewrites the 22-byte HY3131 config
         // and R22 behind the logger's back. Detect that and auto-stop so the
@@ -1876,6 +1933,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                 }
             }
+            // The beeper indicator follows the comparator read just now.
+            app.beep_ind(now, can_draw, !busy);
             prof::exit(prof::DMM);
             mark(5, &mut ts);
         }

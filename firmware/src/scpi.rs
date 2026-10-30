@@ -208,6 +208,10 @@
 //!     (shorted leads: the internal offset, a few tens of mohm) instead of
 //!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
 //!     default OFF
+//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings 3/3 "Mode Remember"
+//!     (the stock's switch; the header is the Keysight 34461A's "recall the
+//!     power-down state at power-on"): ON = a power-on continues the
+//!     multimeter as it was (app.rs `restore`); persisted, default OFF
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
@@ -508,8 +512,17 @@ pub enum Log {
     Disk,
 }
 
+/// DBG:PING? field 3: ms until the watchdog feeding stops, saturated at
+/// u32::MAX. The boot hold (main.rs INITIAL_HOLD_MS, u64::MAX / 4) has no
+/// limit and reads u32::MAX; a plain `as u32` wrapped it (issue #97).
+pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
+    deadline.saturating_sub(now).min(u32::MAX as u64) as u32
+}
+
 /// Debug commands over USBTMC (development aids, not SCPI standard):
-///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive;
+///                           keepalive_left 4294967295 = no limit, see
+///                           keepalive_left)
 ///   DBG:OHM6 g,off,skip,keep,leak | DBG:OHM6?  600 Mohm range tuning (RAM
 ///                           only, dmm::Ohm600): Rref gain, offset uV subtracted
 ///                           from Vfb - Vx, conversions dropped / kept per phase,
@@ -627,18 +640,21 @@ pub enum Log {
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
+///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
 ///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
 ///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
 ///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
 ///   DBG:DIAG?               diagnostic block (#3); byte 61: bit 0 PB10, bit 1
 ///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
+///                           (feature dbg-touch, else undefined header)
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
 ///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
 ///                           b y + c, y' = d x + e y + f (touchcal.rs; RESET =
 ///                           none, 1,0,0,0,1,0; a set outside the limits is
 ///                           "Data out of range")
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
+///                           (feature dbg-prof, else undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
@@ -682,12 +698,15 @@ pub enum Dbg {
     Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
     Diag,
-    /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log.
+    /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log
+    /// (feature `dbg-touch`).
+    #[cfg_attr(not(feature = "dbg-touch"), allow(dead_code))]
     Touch(bool),
     Flash,
     Release,
     Reset,
-    /// DBG:PROF? (false) / DBG:PROF:RESET (true).
+    /// DBG:PROF? (false) / DBG:PROF:RESET (true) (feature `dbg-prof`).
+    #[cfg_attr(not(feature = "dbg-prof"), allow(dead_code))]
     Prof(bool),
     /// DBG:AD2:TORN? r26,n[,SYNC] / NOISE? r26,n[,op1chop] / DRAW 0|1|2 /
     /// DIV 0|8|16|32[,cpha] (the stream ISR's read divider, 0 = automatic:
@@ -700,8 +719,10 @@ pub enum Dbg {
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
+    #[cfg_attr(not(feature = "dbg-hyspi"), allow(dead_code))]
     HySpi(u16, u8),
     /// DBG:HYSPI:WR? mode[,div] (src/hyspi.rs `write_test`).
+    #[cfg_attr(not(feature = "dbg-hyspi"), allow(dead_code))]
     HySpiWr(u8, u8),
     /// DBG:ISR? (logger.rs `isr`).
     Isr,
@@ -837,8 +858,11 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   effective duty, VOLT? / OFFS? the set values (OFFS? with AUTO: Vpp/2)
 ///   TIMebase[:MAIN]:SCALe <s/div>   CHANnel1:SCALe <V/div>   CHANnel1:COUPling AC|DC
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
+///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator (GEN: the generator's output
+///   computed from its timers, docs/scope-gen-channel.md)
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
-///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s)
+///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
+///   the stored record's rate)
 ///   RUN  STOP  SINGle   DIGitize (one acquisition with the current sweep,
 ///   then STOP)   TRIGger:STATus? (STOP|WAIT|AUTO|TD|RUN)
 ///   SCOPe:MEASure:VPP|VAVG|VRMS|FREQ?
@@ -872,6 +896,14 @@ pub enum Cmd {
     TrigLevel(Option<f32>),
     TrigSlope(Option<bool>),
     TrigSweep(Option<u8>),
+    /// TRIG:SOURce: Some(scope::TSRC_*); None = ?
+    TrigSource(Option<u8>),
+    /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
+    DbgGenLag(Option<f32>),
+    /// DBG:GENTRIG:STAT?: the generator phase readings (gen::stats).
+    DbgGenStat,
+    /// DBG:CH2:LAG <us>: the DMM CH2's conversion lag (scope_ch2).
+    DbgCh2Lag(Option<f32>),
     Run,
     Stop,
     Single,
@@ -988,6 +1020,8 @@ pub enum Cmd {
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
     /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
     ResNeg(Option<bool>),
+    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings 3/3 "Mode Remember".
+    ModeRemember(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
     /// (App::scpi_range).
@@ -1451,7 +1485,8 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
             None if query => Ok(Pow::Phase(None)),
             None => match parse_num(a) {
                 Some(v) if (-127.0..=127.0).contains(&v) => Ok(Pow::Phase(Some(v as i8))),
-                _ => Err(BAD),
+                Some(_) => Err(RANGE),
+                None => Err(BAD),
             },
             _ => Err(HDR),
         };
@@ -1556,6 +1591,8 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
             Ok(Cmd::TrigSlope(pick(&["POSitive", "NEGative"])?.map(|i| i == 0)))
         } else if kw(sub, "SWEep") {
             Ok(Cmd::TrigSweep(pick(&["AUTO", "NORMal", "SINGle"])?))
+        } else if kw(sub, "SOURce") {
+            Ok(Cmd::TrigSource(pick(&["CHANnel1", "GENerator"])?.map(|i| i as u8)))
         } else if sub.is_empty() || kw(sub, "LEVel") {
             Ok(Cmd::TrigLevel(num(b"V", any)?))
         } else {
@@ -1746,13 +1783,21 @@ pub fn err_code(e: &str) -> i16 {
 }
 
 /// Match `tok` (upper case) against a mnemonic written as e.g. "MEASure":
-/// accepted are the short form (upper-case letters) and the full word.
+/// accepted are the short form (upper-case letters) and the full word. A
+/// numeric suffix ("CHANnel1") also goes with the short form ("CHAN1");
+/// the short form without it ("CHAN") stays accepted.
 fn kw(tok: &[u8], mnem: &str) -> bool {
-    let short: usize = mnem.bytes().take_while(|b| b.is_ascii_uppercase() || *b == b'*').count();
-    let full = mnem.len();
     let m = mnem.as_bytes();
+    let short: usize = m.iter().take_while(|b| b.is_ascii_uppercase() || **b == b'*').count();
+    let full = m.len();
+    let digits = m.iter().rev().take_while(|b| b.is_ascii_digit()).count();
     let eq = |n: usize| tok.len() == n && tok.iter().zip(m).all(|(a, b)| *a == b.to_ascii_uppercase());
-    eq(short) || eq(full)
+    let suffixed = digits > 0
+        && short + digits < full
+        && tok.len() == short + digits
+        && tok[..short].iter().zip(m).all(|(a, b)| *a == b.to_ascii_uppercase())
+        && tok[short..] == m[full - digits..];
+    eq(short) || eq(full) || suffixed
 }
 
 /// [SENSe:]VOLTage:COUPling (Some(false)) / [SENSe:]CURRent:COUPling
@@ -2064,8 +2109,8 @@ impl Scpi {
                     } else {
                         match parse_num(trim(arg)) {
                             Some(v) if (0.0..=100.0).contains(&v) => Cmd::SysBeepVol(Some(v as u8)),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            v => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2096,8 +2141,9 @@ impl Scpi {
                             Some(on) => Cmd::SysAlertEnable(Some(if on { crate::sentinel::M_ALL } else { 0 })),
                             None => match parse_num(a) {
                                 Some(v) if (0.0..=15.0).contains(&v) && v == (v as u8) as f32 => Cmd::SysAlertEnable(Some(v as u8)),
-                                _ => {
-                                    self.err_arg(no_arg, "Illegal parameter value");
+                                v => {
+                                    // A whole number outside 0..15: -222.
+                                    self.err_arg(no_arg, if v.is_some_and(|v| v == (v as i32) as f32) { "Data out of range" } else { "Illegal parameter value" });
                                     continue;
                                 }
                             },
@@ -2278,7 +2324,10 @@ impl Scpi {
                         None => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => out = Out::Instr(Cmd::DbgAcdc),
+                // DBG:ACDC? only with --features dbg-acdc (region B audit #9).
+                _ if cfg!(feature = "dbg-acdc") && p0 == b"DBG" && parts.get(1) == Some(&&b"ACDC"[..]) => {
+                    out = Out::Instr(Cmd::DbgAcdc)
+                }
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
@@ -2306,6 +2355,23 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgCh2Lag(None)),
+                        Some(v) if v.abs() <= 1e5 => out = Out::Instr(Cmd::DbgCh2Lag(Some(v))),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
+                    }
+                }
+                _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"STAT"[..]) => {
+                    out = Out::Instr(Cmd::DbgGenStat)
+                }
+                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
+                    match parse_num(arg) {
+                        _ if query => out = Out::Instr(Cmd::DbgGenLag(None)),
+                        Some(v) if v.abs() <= 1e6 => out = Out::Instr(Cmd::DbgGenLag(Some(v))),
+                        _ => self.err_arg(no_arg, "Illegal parameter value"),
+                    }
+                }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HWTRIG"[..]) => {
                     let c = match (parts.get(2).copied(), parts.get(3).copied(), query) {
                         (None, _, true) => Some(Cmd::DbgHwTrig(0, false)),
@@ -2321,7 +2387,9 @@ impl Scpi {
                     }
                 }
                 // HY3131 bus self-test (src/hyspi.rs, main.rs).
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"HYSPI"[..]) => {
+                // Only with --features dbg-hyspi (region B audit #9): else
+                // an undefined header.
+                _ if cfg!(feature = "dbg-hyspi") && p0 == b"DBG" && parts.get(1) == Some(&&b"HYSPI"[..]) => {
                     let a = trim(arg);
                     let mut it = a.split(|&b| b == b',').map(trim);
                     let first = it.next().unwrap_or(&[]);
@@ -2396,7 +2464,10 @@ impl Scpi {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
-                        b"DIAG" => Dbg::Diag, b"TOUCH" => Dbg::Touch(!query),
+                        b"DIAG" => Dbg::Diag,
+                        // Without the feature: no such header (Cargo.toml).
+                        #[cfg(feature = "dbg-touch")]
+                        b"TOUCH" => Dbg::Touch(!query),
                         _ if kw(sub, "UPLoad") => {
                             let op = parts.get(2).copied().unwrap_or(b"");
                             let mut v = [0u32; 2];
@@ -2460,6 +2531,7 @@ impl Scpi {
                             }
                             v
                         })),
+                        #[cfg(feature = "dbg-prof")]
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
@@ -2492,6 +2564,27 @@ impl Scpi {
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
+                        // DBG:TE? = the panel TE probe (lcd.rs te_probe,
+                        // ~0.3 s): per phase (TE off; on, mode 0; on, mode
+                        // 1), ";" between: <samples>, then per pin PA3,
+                        // PB13, PC1, PC15 <level changes>,<samples high>.
+                        #[cfg(target_os = "none")]
+                        b"TE" if query => {
+                            self.len = 0;
+                            for (k, (n, o)) in crate::lcd::te_probe().iter().enumerate() {
+                                if k > 0 {
+                                    self.put_bytes(b";");
+                                }
+                                self.put_u32(*n);
+                                for &(e, h) in o {
+                                    self.put_bytes(b",");
+                                    self.put_u32(e);
+                                    self.put_bytes(b",");
+                                    self.put_u32(h);
+                                }
+                            }
+                            continue;
+                        }
                         b"BOOT" => {
                             crate::boot::put_info(self);
                             continue;
@@ -2573,8 +2666,8 @@ impl Scpi {
                     } else if kw(sub, "SOURce") {
                         if query {
                             Out::Log(Log::Source(None))
-                        } else if a == b"AD2" || a == b"AD1" {
-                            Out::Log(Log::Source(Some(a == b"AD2")))
+                        } else if a.eq_ignore_ascii_case(b"AD2") || a.eq_ignore_ascii_case(b"AD1") {
+                            Out::Log(Log::Source(Some(a.eq_ignore_ascii_case(b"AD2"))))
                         } else {
                             self.err_arg(no_arg, "Illegal parameter value");
                             continue;
@@ -2583,8 +2676,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::SRate(None)),
                             (false, Some(v)) if v >= 1.0 && v <= 1.0e6 => Out::Log(Log::SRate(Some(v as u32))),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2594,8 +2687,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::Osr(None)),
                             (false, Some(v)) if (0.0..=7.0).contains(&v) && v == (v as u8) as f32 => Out::Log(Log::Osr(Some(v as u8))),
-                            _ => {
-                                self.err_arg(no_arg, BAD);
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some_and(|v| v == (v as i32) as f32) { "Data out of range" } else { BAD });
                                 continue;
                             }
                         }
@@ -2644,7 +2737,8 @@ impl Scpi {
                                 match idx(set) {
                                     Some(i) => Some(i),
                                     None => {
-                                        self.err_arg(no_arg, "Illegal parameter value");
+                                        // A number not in the set: -222.
+                                        self.err_arg(no_arg, if parse_num(a).is_some() { RANGE } else { BAD });
                                         continue;
                                     }
                                 }
@@ -2678,8 +2772,8 @@ impl Scpi {
                         match (query, parse_num(a)) {
                             (true, _) => Out::Log(Log::Dur(None)),
                             (false, Some(v)) if (0.0..=1.0e6).contains(&v) => Out::Log(Log::Dur(Some(v as u32))),
-                            _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                            (_, v) => {
+                                self.err_arg(no_arg, if v.is_some() { "Data out of range" } else { "Illegal parameter value" });
                                 continue;
                             }
                         }
@@ -2712,7 +2806,8 @@ impl Scpi {
                             }
                             (Some((n, true)), Some(off), Some(len)) => Out::Mmem(Mmem::Data(n, off, len.min(MMEM_DATA_MAX))),
                             _ => {
-                                self.err_arg(no_arg, "Illegal parameter value");
+                                // A query: `no_arg` is false; no name is -109.
+                                self.err_arg(trim(arg).is_empty(), "Illegal parameter value");
                                 continue;
                             }
                         }
@@ -2746,11 +2841,14 @@ impl Scpi {
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
-                // DISPlay:BURDen, [SENSe:]RESistance:NEGative: ON|OFF / ?.
-                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen")) || {
-                    let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
-                    r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
-                } =>
+                // DISPlay:BURDen, [SENSe:]RESistance:NEGative,
+                // MEMory:STATe:RECall:AUTO: ON|OFF / ?.
+                _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen"))
+                    || (kw(p0, "MEMory") && parts.len() == 4 && kw(parts[1], "STATe") && kw(parts[2], "RECall") && kw(parts[3], "AUTO"))
+                    || {
+                        let r = if kw(p0, "SENSe") { &parts[1..] } else { parts };
+                        r.len() == 2 && kw(r[0], "RESistance") && kw(r[1], "NEGative")
+                    } =>
                 {
                     let v = if query {
                         None
@@ -2763,7 +2861,13 @@ impl Scpi {
                             }
                         }
                     };
-                    out = Out::Instr(if kw(p0, "DISPlay") { Cmd::DispBurden(v) } else { Cmd::ResNeg(v) });
+                    out = Out::Instr(if kw(p0, "DISPlay") {
+                        Cmd::DispBurden(v)
+                    } else if kw(p0, "MEMory") {
+                        Cmd::ModeRemember(v)
+                    } else {
+                        Cmd::ResNeg(v)
+                    });
                 }
                 _ if kw(p0, "FETCh") && query => out = Out::Fetch,
                 // [SENSe:]VOLTage:COUPling / CURRent:COUPling (opendm40).
@@ -2965,6 +3069,12 @@ impl Scpi {
 
     /// Append a number in NR3.
     pub fn put_f32(&mut self, v: f32) {
+        // No value (a scope measurement without a result): SCPI NaN, the
+        // reference's "no value" (nr3 printed the NaN as +0.000000E-03).
+        if v.is_nan() {
+            self.put(NAN);
+            return;
+        }
         let mut b = [0u8; 20];
         let n = nr3(&mut b, v);
         self.put(&b[..n]);

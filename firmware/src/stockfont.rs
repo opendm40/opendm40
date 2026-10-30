@@ -210,18 +210,19 @@ mod data {
         }
 
         /// RLE4 only: hand the coverage of columns x0 .. x1 of row `y` to
-        /// `f`, decoded straight from the runs (no row buffer). Same cursor
-        /// rules as `row`.
+        /// `f` as runs, f(coverage, count), decoded straight from the runs
+        /// (no row buffer). Same cursor rules as `row`.
         #[inline(always)]
-        pub fn row_emit<F: FnMut(u8)>(&self, c: &mut Cur, y: u32, x0: usize, x1: usize, mut f: F) {
+        pub fn row_runs<F: FnMut(u8, u16)>(&self, c: &mut Cur, y: u32, x0: usize, x1: usize, mut f: F) {
             let w = (self.w as usize).min(MAXW);
             let (mut p, lit) = self.seek(c, y, w);
             let mut x = 0usize;
             while x < w {
                 let (v, l) = self.token(&mut p);
                 let e = (x + l).min(w);
-                for _ in x.max(x0)..e.min(x1) {
-                    f(v);
+                let (a, b) = (x.max(x0), e.min(x1));
+                if a < b {
+                    f(v, (b - a) as u16);
                 }
                 x = e;
             }
@@ -403,6 +404,16 @@ include!("stockfont_w.rs");
 // The USB symbol for the status bar (tools/mkusbglyph.py).
 include!("stockfont_usb.rs");
 
+/// Hand-drawn 1 bpp glyphs for SC_F12 (the scope bar's 12 px font has ASCII
+/// only): Ω and ° for the REC mark's function (scope_ui::rec_unit), drawn on
+/// the font's cap rows (2..10) with its 2 px stems; column-major, MSB first.
+///   Ω  ...###..  ..##.##.  .##...##  .##...##  .##...##  ..##.##.
+///      ...#.#..  ...#.#..  .###.###        °  ..##.  .#..#  .#..#  ..##.
+static F12_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 2] = [
+    (0x0804_F24C, '\u{3a9}', false, 8, 9, 8, 1, &[0x00, 0x1c, 0x5f, 0x38, 0xf8, 0x06, 0x3d, 0xf2, 0x71]),
+    (0x0804_F24C, '\u{b0}', false, 5, 4, 6, 6, &[0x06, 0x99, 0x60]),
+];
+
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
 /// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw), no k in LETTERS
 /// ("kWh"); those take ours of the same face (stockfont_w.rs), any other font
@@ -412,7 +423,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(F12_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
@@ -565,11 +576,14 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
     if r.w <= 0 || r.h <= 0 {
         return;
     }
+    // A strip pass (lcd.rs "strip rendering"): only the strip's rows.
+    let Some((ya, yb)) = lcd::clip_rows(r.y.max(0), (r.y + r.h - 1).min(lcd::H as i16 - 1)) else {
+        return;
+    };
     let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
     let n = layout(font, r, text, align, spacing, &mut pl);
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
-    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
-    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let (x0, y0, y1) = (r.x.max(0), ya, yb);
     // Per column: the glyph covering it (last one wins on 1-2 px overlaps of
     // negative spacing), so each pixel needs one lookup instead of a scan.
     let mut cover = [u8::MAX; 480];
@@ -595,6 +609,7 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
         // a plain fill, glyph runs read the glyph's row y.
         let mut bi = u8::MAX;
         let mut x = x0;
+        let mut out = lcd::row_out(y, x0);
         while x <= x1 {
             let gi = cover[x as usize];
             let mut e = x + 1;
@@ -614,21 +629,17 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                     Some((i0, st)) => {
                         let mut i = i0 + (x - p.x) as u32 * st;
                         for _ in x..e {
-                            lcd::data(lut[p.g.at(i) as usize]);
+                            out.px(lut[p.g.at(i) as usize]);
                             i += st;
                         }
                     }
-                    None => {
-                        for _ in x..e {
-                            lcd::data(lut[0]);
-                        }
-                    }
+                    None => out.run(lut[0], (e - x) as u16),
                 },
                 // RLE4: the glyph's row y straight from its runs; a twin W
                 // through the row buffer.
                 Some(p) if p.twin == 0 => {
                     let gx = (x - p.x) as usize;
-                    p.g.row_emit(&mut p.cur, (y - p.y) as u32, gx, gx + (e - x) as usize, |a| lcd::data(lut[a as usize]));
+                    p.g.row_runs(&mut p.cur, (y - p.y) as u32, gx, gx + (e - x) as usize, |a, n| out.run(lut[a as usize], n));
                 }
                 Some(p) => {
                     if bi != gi {
@@ -637,14 +648,10 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                     }
                     let gx = (x - p.x) as usize;
                     for (k, _) in (x..e).enumerate() {
-                        lcd::data(lut[twin_buf(&buf, p.g.w, p.twin, gx + k) as usize]);
+                        out.px(lut[twin_buf(&buf, p.g.w, p.twin, gx + k) as usize]);
                     }
                 }
-                None => {
-                    for _ in x..e {
-                        lcd::data(bg);
-                    }
-                }
+                None => out.run(bg, (e - x) as u16),
             }
             x = e;
         }
@@ -665,6 +672,9 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
     if r.w <= 0 || r.h <= 0 {
         return;
     }
+    let Some((ya, yb)) = lcd::clip_rows(r.y.max(0), (r.y + r.h - 1).min(lcd::H as i16 - 1)) else {
+        return;
+    };
     let g = font.glyph(c as u32);
     // Full-size row of glyph row 0, relative to the baseline; left x of the
     // half-size glyph.
@@ -673,8 +683,7 @@ pub fn label_half(font: Font, r: Rect, c: char, base: i16, fg: Color, bg: Color)
         None => (0, 0),
     };
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
-    let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
-    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let (x0, y0, y1) = (r.x.max(0), ya, yb);
     let lut = ramp(fg, bg);
     #[cfg(test)]
     crate::probe::begin(crate::probe::TEXT, bg);
@@ -758,16 +767,35 @@ pub fn cells_diff(font: Font, r: Rect, text: &str, prev: &str, widths: &[u8], fg
 
 /// Rounded box (corners cut at `radius`, no anti-aliasing).
 pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
-    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let x0 = r.x.max(0);
+    let Some((ya, yb)) = lcd::clip_rows(r.y.max(0), r.y + r.h - 1) else {
+        return;
+    };
     #[cfg(test)]
     crate::probe::begin(crate::probe::SHAPE, outside);
-    lcd::set_window(x0 as u16, y0 as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
-    for y in 0..r.h {
+    lcd::set_window(x0 as u16, ya as u16, (r.x + r.w - 1) as u16, yb as u16);
+    let rr = radius as i32 * radius as i32;
+    for y in ya - r.y..=yb - r.y {
+        // Into the strip in a strip pass (lcd.rs), when the box is on the screen.
+        let mut out = if r.x >= 0 && r.x + r.w <= lcd::W as i16 { lcd::row_out(r.y + y, r.x) } else { lcd::Out::panel() };
+        let dy = if y < radius { radius - y } else if y >= r.h - radius { y - (r.h - radius - 1) } else { 0 };
+        if radius >= 0 && r.w >= 2 * radius {
+            // The row as three runs: `k` corner pixels outside on each side
+            // (the same test as below, symmetric: dx = radius - k on both).
+            let mut k = 0;
+            while k < radius && (radius - k) as i32 * (radius - k) as i32 + dy as i32 * dy as i32 > rr {
+                k += 1;
+            }
+            out.run(outside, k as u16);
+            out.run(color, (r.w - 2 * k) as u16);
+            out.run(outside, k as u16);
+            continue;
+        }
         for x in 0..r.w {
             let dx = if x < radius { radius - x } else if x >= r.w - radius { x - (r.w - radius - 1) } else { 0 };
             let dy = if y < radius { radius - y } else if y >= r.h - radius { y - (r.h - radius - 1) } else { 0 };
             let inside = (dx as i32 * dx as i32 + dy as i32 * dy as i32) <= radius as i32 * radius as i32;
-            lcd::data(if inside { color } else { outside });
+            out.px(if inside { color } else { outside });
         }
     }
     #[cfg(test)]
@@ -777,6 +805,9 @@ pub fn rbox(r: Rect, radius: i16, color: Color, outside: Color) {
 /// Draw only the glyph boxes of `text` placed in `r` (pixels outside the
 /// glyphs are left alone): for text over shapes such as rounded buttons.
 pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, spacing: i8) {
+    if !lcd::rows_hit(r.y, r.y + r.h - 1) {
+        return;
+    }
     let mut pl: [Option<Placed>; MAXG] = [const { None }; MAXG];
     let n = layout(font, r, text, align, spacing, &mut pl);
     #[cfg(test)]
@@ -786,27 +817,32 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
         if p.g.w == 0 || p.g.h == 0 || p.x < 0 || p.y < 0 {
             continue;
         }
+        // A strip pass (lcd.rs "strip rendering"): the strip's rows.
+        let Some((ya, yb)) = lcd::clip_rows(p.y, p.y + p.g.h as i16 - 1) else {
+            continue;
+        };
         #[cfg(test)]
         crate::probe::sub(_i as u8);
-        let (x, y) = (p.x as u16, p.y as u16);
+        let x = p.x as u16;
         let lut = ramp(fg, bg);
         let w = p.g.w as u16 + p.twin as u16;
-        lcd::set_window(x, y, x + w - 1, y + p.g.h as u16 - 1);
+        lcd::set_window(x, ya as u16, x + w - 1, yb as u16);
         let mut buf = [0u8; MAXW];
         let mut cur = Cur::default();
-        for gy in 0..p.g.h as u32 {
+        for gy in (ya - p.y) as u32..=(yb - p.y) as u32 {
+            let mut out = if x + w <= lcd::W { lcd::row_out(p.y + gy as i16, x as i16) } else { lcd::Out::panel() };
             if p.twin == 0 {
                 match p.g.col_walk(gy) {
-                    None => p.g.row_emit(&mut cur, gy, 0, w as usize, |a| lcd::data(lut[a as usize])),
+                    None => p.g.row_runs(&mut cur, gy, 0, w as usize, |a, n| out.run(lut[a as usize], n)),
                     Some(Some((mut i, st))) => {
                         for _ in 0..w {
-                            lcd::data(lut[p.g.at(i) as usize]);
+                            out.px(lut[p.g.at(i) as usize]);
                             i += st;
                         }
                     }
                     Some(None) => {
                         for _ in 0..w {
-                            lcd::data(lut[0]);
+                            out.px(lut[0]);
                         }
                     }
                 }
@@ -814,7 +850,7 @@ pub fn glyphs(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, 
             }
             p.g.row(&mut cur, gy, &mut buf);
             for gx in 0..w as usize {
-                lcd::data(lut[twin_buf(&buf, p.g.w, p.twin, gx) as usize]);
+                out.px(lut[twin_buf(&buf, p.g.w, p.twin, gx) as usize]);
             }
         }
     }
@@ -1107,6 +1143,21 @@ pub fn paint(r: Rect, layers: &[(u8, Color)], mut f: impl FnMut(i16, i16) -> (Co
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);
     let y1 = (r.y + r.h - 1).min(lcd::H as i16 - 1);
     if x1 < x0 || y1 < y0 {
+        return;
+    }
+    // A strip pass (lcd.rs "strip rendering"): only the strip's rows.
+    let Some((y0, y1)) = lcd::clip_rows(y0, y1) else {
+        return;
+    };
+    // A strip pass: straight into the strip's rows (no layout probes).
+    if lcd::in_strip() {
+        for y in y0..=y1 {
+            if let Some(row) = lcd::strip_span(y, x0, x1) {
+                for (p, x) in row.iter_mut().zip(x0..=x1) {
+                    *p = f(x, y).0;
+                }
+            }
+        }
         return;
     }
     #[cfg(test)]

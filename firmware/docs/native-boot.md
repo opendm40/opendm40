@@ -35,7 +35,7 @@ Stock flash layout (`stock/re/ANALYSIS.md` §1):
 
 ```
 0x08000000  ROM (primary bootloader)  16 KB  sector 0      never touched by updates
-0x08004000  application              ~480 KB sectors 1..8  = update body offset 0
+0x08004000  application              624 KB sectors 1..8  = update body offset 0 (zero-wait below 0x08080000)
 0x080a0000  FS-loader                  64 KB sector 9      never touched by updates
 0x080a4000  UID-bound bootloader data        sector 9      never erase
 0x080c0000  settings / calibration           sector 10     opendm40 only reads it
@@ -797,6 +797,224 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 | keep-screen | 16 428 / 4 724 / 20 500 B | 50 924 / 7 932 / 21 196 B |
 | mute (`--features mute`, not in build-variants) | | 50 572 / 7 808 / 21 196 B |
 
+### Region C audit #3 (2026-10-29, chore/region-c-headroom)
+
+On 3b142426 (0.3.1, `--features mute`) region C had 7 720 B free (below
+the 8 KiB warning), region B 50 572 B. The AD2 experiment DBG code goes
+back to region B, where region C audit #1 had put it (133f81e) and region
+B audit #4 took it out of (B at 15 KB then): `ad2exp` (DBG:AD2:TORN? /
+NOISE? / DCV? / N7?, E7's `dc_enter` / `dcv_row`), `main.rs` `dbg_dcv` /
+`dbg_n7`, `scpi::dcv_arg` / `n7_arg` (C +5 632 B, B -5 648 B). Their patterns are gone
+from [`link-native.x`](../link-native.x); no source changed. An nm diff
+of the two images: only these 21 symbols changed region (the
+`OUTLINED_FUNCTION_*` are renumbered, 8 B smaller in all). Code moved into
+B cannot stall the AD2 stream ISR (B is zero-wait), so the region C rule
+is not touched; `dc_enter` (in `Logger::start`, before the stream takes
+the bus) now runs from zero-wait flash.
+
+| | before (3b142426) | after |
+|---|---|---|
+| region A2 free | 2 396 B | 2 396 B |
+| region B free | 50 572 B | 44 924 B |
+| region C free | 7 720 B | 13 352 B |
+| stack headroom (static worst path) | 21 196 B | 21 196 B |
+| SRAM free | 43 912 B | 43 912 B |
+
+The variants (tools/build-variants/run.sh) after the move, B / C free and
+stack headroom (each gains the same ~5.6 KB of C):
+
+| variant | after |
+|---|---|
+| recovery-usb | 44 284 / 13 544 / 21 708 B |
+| recovery-file | 45 092 / 13 004 / 21 196 B |
+| no-ad2-isr | 54 736 / 14 568 / 21 640 B |
+| spi-disk | 63 028 / 23 480 / 22 692 B |
+| fatren-dry-run | 45 228 / 13 932 / 21 196 B |
+| keep-screen | 45 292 / 13 484 / 21 196 B |
+
+Next candidates if C gets tight again (DBG-only, still in C): `hyspi`
+(DBG:HYSPI:SELF? / WR?, 2.3 KB), `boot::put_info` (DBG:BOOT?, 1.6 KB).
+
+### Region B audit #9 (2026-10-30, feat/region-b-profile)
+
+Asked for: why so much code is in region B, and room for the decoder's
+`dec-log` / `dec-modbus` on test/scope-chain-0.4 (#174). Tool:
+[`tools/region-profile/rprof.py`](../tools/region-profile/rprof.py). It
+charges every byte of B to a function, a named static or a piece of
+anonymous rodata (cut at every address that code or data refers to, and
+charged to the referrers), with the innermost inlined callee and its
+module, and puts each item in a class:
+- `isr`: reachable from `ad2_stream_irq`;
+- `traced`: executed while `hy3131::HANDED` was set in an emulator run
+  (`DM40_BTRACE=DIR`, [`emu/peripherals/BTrace.cs`](../../emu/peripherals/BTrace.cs)),
+  or data such code refers to;
+- `loop`: reachable from `run` without passing through region C code, and
+  not executed under the stream in these runs: not exercised, not proven
+  cold;
+- `c-only`: reachable only through region C code, so it never runs under
+  the stream while the region C rule holds.
+
+Profile of #174 (e7c11934) with this branch merged, `--features
+dec-log,dec-modbus`. Traces: decodetest (MCX UART / Modbus, the Wave view)
+and an MCX scope page with CH2 on (timebases 1 ms .. 500 ms/div, STOP /
+RUN, a pan, the MF tabs, DEC:PROT UART) on the full-decoder build;
+wavetest on the default build (matched by function name).
+
+| class | code | data | total |
+|---|---|---|---|
+| `isr` | 6 234 | 114 | 6 348 |
+| `traced` | 233 344 | 48 568 | 281 912 |
+| `loop` | 169 830 | 8 503 | 178 333 |
+| `c-only` | 4 788 | 9 957 | 14 745 |
+| unreferenced (alignment) | | 294 | 294 |
+| `.data` load image | | 544 | 544 |
+| region B used | | | 482 176 |
+
+60 % of B ran under the stream in these runs. The largest `loop` items run
+under the stream in cases these runs do not reach: `App::gesture` / `tap`
+(touches in the Wave view and on the inrush page), `VDisk::read_block` and
+`dlog::Gen::*` (a host reading the USB volume during a stream),
+`gen::plan` / `Gen::apply` (SOUR:* from a host). `DmmView::reading` (7.7
+KB) is the DMM view, which the stream pauses. A move of a `loop` function
+to C needs a reason why it never runs under the stream.
+
+Not found: `core::fmt`; generic copies (every function with several
+monomorphisations: < 1 KB above the largest copy); compiler settings that
+help (the release profile is opt-level "z" already, so a separate "z"
+crate gains nothing; LLVM `-inline-threshold` 25 / 50 and opt-level "s"
+grow the image by 6 / 32 KB, -20 grows region B by 2 KB;
+`-Zinline-mir=no` changes nothing).
+
+Rodata: 16.3 KB of B are printable string runs. 10.0 KB of B's rodata is
+referred to only by region C code. It cannot move: region C is the fuller
+region, and an anonymous string has no section name for a link-native.x
+pattern (each would need a named static in a `.rodata.cold*` section, as
+`fastlog::JOB0`).
+
+Done:
+
+| change | region B | region C |
+|---|---|---|
+| README.TXT of the USB disk: one line per folder, the version and a link to the manual (3 075 -> 314 B of text; the file stays 2 048 B) | | |
+| on-screen help: 2 pages of 5 rows (gestures, keys) instead of 7 pages of 8 rows (1 359 -> 230 B of text) | +3 984 (both texts) | +36 |
+| DBG:HYSPI ([`src/hyspi.rs`](../src/hyspi.rs)) and DBG:ACDC? behind cargo features `dbg-hyspi`, `dbg-acdc` (without them: undefined header) | +432 | +3 132 |
+
+| | release/0.4.0 (ae0dc031) | this branch |
+|---|---|---|
+| region A2 free | 2 208 B | 2 208 B |
+| region B free | 8 728 B | 13 144 B |
+| region C free | 13 036 B | 16 204 B |
+| stack headroom (static worst path) | 20 744 B | 20 744 B |
+| SRAM free | 24 244 B | 24 244 B |
+
+#174 (e7c11934) with `--features dec-log,dec-modbus`:
+
+| | #174 | #174 + this branch |
+|---|---|---|
+| region A2 free | 156 B | 156 B |
+| region B free | 3 888 B (no link) | 9 328 B |
+| region C free | 1 536 B (no link) | 4 216 B |
+| stack headroom (static worst path) | 20 644 B | 20 644 B |
+| SRAM free | 8 308 B | 8 308 B |
+
+`dec-log` costs ~5 KB of region C (`.text.log_cold`), so with both
+features region C, not B, is the tighter region. Next, not done (bytes
+per decision):
+- more DBG replies behind features (region C): `boot::put_info` (DBG:BOOT?,
+  1.5 KB; a dozen emu tests read it), `touch_diag` (DBG:DIAG?, 0.7 KB),
+  `acdctr::Trace::text` (0.6 KB), `Dmm::ohm600_dbg` (DBG:OHM6, 0.5 KB),
+  `Sentinel::diag_text` (DBG:SENT?, 0.5 KB);
+- texts over ~300 B in B, unchanged: the power meter's zero / V cal
+  messages (487 B, `c-only`), the jack / overload codes (462 B), the
+  generator notes (450 B), the settings file keys (428 B, a file format),
+  the DBG:PROF? labels (368 B);
+- with room in region C: the `c-only` code (4.8 KB: `dlog::SEnc`,
+  `cring::min_max`, the gallery's `dlog` decoder copies, ...) and the
+  named `c-only` rodata, function by function under the region C hooks.
+
+### SRAM audit (2026-10-30, feat/sram-overlays)
+
+Goal: room for the long scope record (`scope::CAP` 42 K u16) next to
+0.4.0's GEN / CH2. The firmware runs DMM + scope + generator together, with
+the USB disk and BT at any time, so a buffer is overlaid only where the code
+rules out both being live. Who is live when:
+[ram-budget.md](ram-budget.md#every-static-of-1-kib-or-more).
+
+| change | SRAM | TCM |
+|---|---|---|
+| `csvlog::CAT` reply into the row FIFO (below) | +6 156 | -12 |
+| `bt::TX` 8 192 -> 6 656 B (below) | +1 536 | |
+| `touch::LOG` 160 -> 16 entries without `dbg-touch` | | +1 728 |
+| `prof::P` and the profiler hooks only with `dbg-prof` | | +984 |
+| `dmm::REC_COPY`, `vdisk::CSV_CUR2`, `lcd::DEFER` from `.sram_bss` to TCM `.bss` (CPU only, no DMA) | +2 688 | -2 688 |
+
+The profiler hooks also leave region B (+4.2 KB). DBG:TOUCH? / DBG:TOUCH 0
+and DBG:PROF? / DBG:PROF:RESET are undefined headers without their
+features. A `--features dbg-touch,dbg-prof` build puts both buffers in
+`.sram_bss` (TCM has no room for them next to the stack); host tests build
+touch.rs with `dbg-touch`.
+
+**MMEM:CAT? cache in the row FIFO.** `Cat` keeps only `ok` / `stamp` /
+`len`; the reply is in `FIFO_BUF[..CAT_MAX]`
+([csvlog.rs](../src/csvlog.rs) `Cat`).
+- Writers of the FIFO: a CSV recording (`fifo()`, main loop) and a fast-log
+  session (`lend_fifo()`, main loop: `Job::run`, the drain / flush,
+  `run_begin`). No ISR touches it: the AD2 stream ISR writes only
+  `logger::RING`.
+- Both accessors clear `ok`. The cache is written only while `fifo_idle()`
+  (`!csvlog::active() && !fastlog::active()`): in `catalog_warm` and after
+  a scan in `catalog_scpi`. It is read only while `ok`.
+- A fast-log session holds the disk (`gallery_free` false: MMEM:CAT? is
+  Busy) and writes it, so it loses no valid cache.
+- During a CSV recording every MMEM:CAT? reads the disk (~10 block reads).
+  Before, a second query between two commits (every commit writes the
+  flash, at most 60 s apart) was a copy. No stream that the cache is for
+  runs then: the Wave view and inrush refuse to start during a recording,
+  CH2 stops for one ([app_wave.rs](../src/app_wave.rs),
+  [app_inrush.rs](../src/app_inrush.rs), [app_ch2.rs](../src/app_ch2.rs)
+  `csvlog::active`), and the inrush page and `fastlog::begin` also refuse
+  a fast-log session. An SCPI LOG:STATe ON session never warmed the
+  cache.
+
+**`bt::TX` not at 4 KiB.** A BT reply goes into the ring whole (`send`).
+`Bt::respond_with` builds it on the stack and returns, so a 6 145-byte
+reply (MMEM:CAT?, MMEM:DATA?, LOG:DATA?, INRush:DATA?, WAV:DATA?) has nowhere
+else to wait. Sending it in parts would need one of:
+- a wait in the main loop (~0.2 s at 115 200 baud): the Wave view's ring
+  drops samples, which the MMEM:CAT? cache exists to prevent;
+- building the reply again per part: LOG:DATA? takes records out of the
+  logger's ring, so it cannot be built twice;
+- a shorter BT block: `tools/dm40scpi.py get` takes an MMEM:DATA? piece
+  under 6 000 bytes as the end of the file.
+
+The ring is now REPLY_MAX + TX_SLACK + 255 B.
+
+Pairs checked and not overlaid (each can be live with the other):
+
+| pair | why both can be live |
+|---|---|
+| `vdisk::TAB` / `CSV_CUR` / `CSV_CUR2` with any scope buffer | the host reads the USB volume at any time, also while the scope page draws |
+| `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
+| `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
+| `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
+| `calbackup::SCRATCH` with `csvlog::TAIL` | a commit uses SCRATCH [0] / [1] and TAIL together |
+| `fastlog::JOB` with `csvlog::JOB` | the sessions exclude each other, but each job keeps its result for LOG:CSV? / the fast logger's status after it ends |
+| `bt::TX` with the USBTMC reply buffer | both transports answer at the same time |
+| `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
+| `gen::WAVE` | the DAC's circular DMA source while the generator outputs, with everything |
+
+Not changed: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE) is debug-only.
+On `test/scope-chain-0.4` the `acdc-trace` feature leaves it out. On 0.4.0
+it stays in the image.
+
+| | before (release/0.4.0, e3229f7a) | after |
+|---|---|---|
+| region A2 free | 2 208 B | 2 208 B |
+| region B free | 8 280 B | 12 400 B |
+| region C free | 13 556 B | 13 996 B |
+| stack headroom (static worst path) | 20 744 B | 20 760 B |
+| SRAM free | 24 244 B | 34 628 B |
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
@@ -1161,8 +1379,8 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
   2 NoMedium, 3 BadBpb, 4 NoSpace, 5 Error.
-- **`DBG:PING?`:** its `keepalive_left` field means nothing (it is a
-  truncated `u64::MAX/4`).
+- **`DBG:PING?`:** its `keepalive_left` field saturates at `4294967295`
+  (`u32::MAX`): the boot hold (`u64::MAX/4`) reads as no limit.
 - **Power-off** (key held 1.5 s, or idle timeout): if the unit stays
   powered (USB), `wdt::powered_off()` turns the backlight off and keeps
   feeding. The next key press after a release reboots normally. Without this,

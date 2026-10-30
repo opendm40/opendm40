@@ -206,11 +206,17 @@ fn set_commands() {
     check(matches!(s.handle(b"TRIG:EDGE:SLOP POS", 1), Out::Instr(Cmd::TrigSlope(Some(true)))), "TRIG:EDGE:SLOP POS");
     check(matches!(s.handle(b"TRIG:EDGE:LEV 1.5", 1), Out::Instr(Cmd::TrigLevel(Some(v))) if v == 1.5), "TRIG:EDGE:LEV 1.5");
     check(matches!(s.handle(b"TRIG:SWE NORM", 1), Out::Instr(Cmd::TrigSweep(Some(1)))), "TRIG:SWE NORM");
+    check(matches!(s.handle(b"TRIG:SOUR CHAN1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR CHAN1 (short form with its suffix)");
+    check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
+    check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
+    check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
     check(matches!(s.handle(b"RES:NEG ON", 1), Out::Instr(Cmd::ResNeg(Some(true)))), "RES:NEG ON");
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");
     check(matches!(s.handle(b"DISP:BURD 1", 1), Out::Instr(Cmd::DispBurden(Some(true)))), "DISP:BURD 1");
-    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
+    check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");
@@ -248,6 +254,8 @@ fn set_commands() {
         ("SOUR:VOLT -1", "-222"),
         ("SOUR:VOLT:OFFS x", "-224"),
         ("SOUR:FUNC:SQU:DCYC 150", "-222"),
+        ("POW:PHAS 200", "-222"),
+        ("POW:PHAS x", "-224"),
         ("SOUR:FUNC NOISE", "-224"),
         ("SOUR:FUNC", "-109"),
         ("OUTP MAYBE", "-224"),
@@ -261,10 +269,28 @@ fn set_commands() {
         ("CHAN1:DISP ON", "-113"),
         ("TRIG:SLOP UP", "-224"),
         ("TRIG:SWE NEVER", "-224"),
+        ("TRIG:SOUR CHAN2", "-224"),
+        ("TRIG:SOUR CHANNEL", "-224"),
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),
         ("LOG:STAT MAYBE", "-224"),
-        ("LOG:OSR 9", "-224"),
+        ("LOG:OSR 9", "-222"),
+        ("LOG:OSR 2.5", "-224"),
+        ("LOG:OSR x", "-224"),
+        ("LOG:DUR -5", "-222"),
+        ("LOG:DUR x", "-224"),
+        ("LOG:SRAT 0", "-222"),
+        ("LOG:CSV:INT 5", "-222"),
+        ("LOG:CSV:INT x", "-224"),
+        ("LOG:CSV:DUR 7", "-222"),
+        ("LOG:SOUR AD3", "-224"),
+        ("SYST:BEEP:VOL 101", "-222"),
+        ("SYST:BEEP:VOL -1", "-222"),
+        ("SYST:BEEP:VOL x", "-224"),
+        ("SYST:BEEP:VOL", "-109"),
+        ("SYST:ALER:ENAB 16", "-222"),
+        ("SYST:ALER:ENAB 2.5", "-224"),
+        ("MMEM:DATA?", "-109"),
         ("LOG:CHOP 2", "-224"),
         ("LOG:CSV x", "-224"),
         ("VOLT:RANG x", "-224"),
@@ -290,6 +316,8 @@ fn set_commands() {
     let o = s.handle(b"SOUR:FREQ x;SOUR:FREQ?", 1);
     check(matches!(o, Out::Instr(Cmd::GenFreq(None))) && err(&mut s).starts_with("-224,"), "SOUR:FREQ x;SOUR:FREQ?: the query runs, -224 queued");
     check(matches!(s.handle(b"LOG:STAT ON", 1), Out::Log(Log::State(Some(true)))), "LOG:STAT ON");
+    check(matches!(s.handle(b"LOG:SOUR ad2", 1), Out::Log(Log::Source(Some(true)))), "LOG:SOUR ad2: parameters are not case-sensitive");
+    check(matches!(s.handle(b"log:sour Ad1", 1), Out::Log(Log::Source(Some(false)))), "log:sour Ad1");
 }
 
 fn error_queue() {
@@ -380,6 +408,9 @@ fn nr3_exact() {
         let r = nr3(v);
         check(r == want, &format!("nr3 {v} = {r} (want {want})"));
     }
+    // No value (a scope measurement without a result, #79): SCPI NaN.
+    let r = nr3(f32::NAN);
+    check(r == "+9.91000000E+37", &format!("nr3 NaN = {r} (want +9.91000000E+37)"));
     // A sweep against Rust's correctly rounded {:.6E}.
     let mut bad = 0;
     let mut seed: u32 = 12345;
@@ -481,6 +512,18 @@ fn touch_cal() {
     }
 }
 
+/// DBG:PING? field 3 (issue #97): the boot hold reads u32::MAX, not a
+/// wrapped u64; a host keepalive reads the ms left; past the deadline 0.
+fn ping_keepalive() {
+    let hold = u64::MAX / 4; // main.rs INITIAL_HOLD_MS
+    for now in [0u64, 7750, 1 << 40] {
+        let l = scpi::keepalive_left(hold, now);
+        check(l == u32::MAX, &format!("keepalive_left(hold, {now}) = {l}"));
+    }
+    check(scpi::keepalive_left(20_000, 5_000) == 15_000, "keepalive_left 15 s");
+    check(scpi::keepalive_left(5_000, 20_000) == 0, "keepalive_left past the deadline");
+}
+
 fn main() {
     suffixes();
     set_commands();
@@ -490,6 +533,7 @@ fn main() {
     pow10f_exact();
     mmem_dirs();
     touch_cal();
+    ping_keepalive();
     let f = unsafe { FAILS };
     if f > 0 {
         println!("{f} FAILED");

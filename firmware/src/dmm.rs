@@ -67,8 +67,8 @@ const CAL: u32 = SETTINGS + 0x168;
 /// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
 /// opendm40 never writes the record. Before the copy (and in the host tests)
 /// the flash is read.
+/// TCM .bss (CPU only; was .sram_bss until the SRAM audit, docs/native-boot.md).
 const REC_LEN: usize = 0x400;
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
 static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
@@ -879,6 +879,11 @@ pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
 /// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
 /// MR9270S+ mA input into the jacks; device-check "RLD current-source path").
 pub const DIODE_I: f32 = 0.756e-3;
+/// Continuity test current (A), signed against diode's: -0.260 mA measured
+/// on one unit (MR9271S mA input into V/ohm - COM, 2026-10-30; diode read
+/// +0.753 mA, ohm 600 +0.868 mA the same way): its source drives the other
+/// way.
+pub const CONT_I: f32 = -0.260e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
@@ -891,12 +896,12 @@ pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
-/// variant, `ohm_test_current`; 12 diode: DIODE_I), None elsewhere.
-/// Continuity (11) has none: its row's source tap (R31 0xcd) is neither
-/// ohm variant's and no current for it is known.
+/// variant, `ohm_test_current`; 11 continuity: CONT_I; 12 diode: DIODE_I),
+/// None elsewhere.
 pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
     match mode {
         10 => ohm_test_current(r, var),
+        11 => Some(CONT_I),
         12 => Some(DIODE_I),
         _ => None,
     }
@@ -1773,6 +1778,9 @@ pub struct Dmm {
     beep_e: u8,
     beep_next: u64,
     beep_n: u8,
+    /// The beeper's condition (`beeping`): continuity, CTSTA ACPO as last
+    /// read; diode, the pattern's last on / off (`diode_beep`).
+    beep_on: bool,
     t_phase: u8,
     t_code_a: i32,
     t_cj: f32,
@@ -2457,6 +2465,7 @@ impl Dmm {
             beep_e: 0,
             beep_next: 0,
             beep_n: 0,
+            beep_on: false,
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
@@ -2975,6 +2984,7 @@ impl Dmm {
     /// AC+DC diagnostic: the last AC phases (oldest first) and the number of
     /// AC phases started so far. The entry for the running phase may hold
     /// fewer than its 4 (V) / 3 (mV, A) results.
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag(&self) -> (u32, [AcPhaseDiag; ACDC_DIAG_N]) {
         let mut d = [AcPhaseDiag::EMPTY; ACDC_DIAG_N];
         let n = (self.diag_k as usize).min(ACDC_DIAG_N);
@@ -2992,6 +3002,7 @@ impl Dmm {
     /// logs every 4 results as one entry. Returns the length used; the
     /// oldest phases are left out when `buf` is too small.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
@@ -3313,6 +3324,7 @@ impl Dmm {
         self.cap_c = 0.0;
         self.ohm_settled = false;
         self.beep_class = 4;
+        self.beep_on = false;
         self.t_phase = 0;
         self.t_votes = 0;
         // No value before a counter result past the settle: NaN, drawn "--"
@@ -4418,6 +4430,7 @@ impl Dmm {
         if self.suspended || self.watchdog(clk, now) {
             return None;
         }
+        hy::beeper_sync(); // a volume change while in continuity
         self.diode_beep(now);
         // AC+DC: the stock runs the frequency counter at the top of the ACV /
         // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;
@@ -4436,6 +4449,15 @@ impl Dmm {
         // temperature phases), so the probe windows keep their 100 ms.
         if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {
             self.aprot_poll(clk, now);
+        }
+        if self.mode == 11 && self.jwin == 0 && !self.pw.on && !hy::streaming() && !self.sent.blanked(now) {
+            // The continuity beeper's comparator: CTSTA bit 6 (ACPO) is
+            // the latch whose buffered copy CMPO drives the CMP pin
+            // (datasheet, comparator section), also while ENPCMPO is off
+            // (volume 0 %, `mute`). Every poll (5 ms), also through the
+            // entry settle (the beeper sounds from the row write on; not
+            // in the relay pulse's blank): `beeping`.
+            self.beep_on = hy::read1(0x14) & 0x40 != 0;
         }
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
@@ -5720,6 +5742,23 @@ impl Dmm {
         Some(rd)
     }
 
+    /// The continuity / diode beeper sounds now (or would, at volume 0 % /
+    /// `mute`): 1 = a short (continuity's comparator, diode's continuous
+    /// tone below 22 mV), 2 = a diode pattern's on phase, 0 = silent (and
+    /// in every other function, while the source (DBG:SRC) or the power
+    /// meter has the row).
+    pub fn beeping(&self) -> u8 {
+        if !self.beep_on || self.pw.on || src::active() || self.suspended {
+            return 0;
+        }
+        match self.mode {
+            11 => 1,
+            12 if self.beep_class == 0 => 1,
+            12 => 2,
+            _ => 0,
+        }
+    }
+
     /// Diode beep patterns through the HY3131 CMP pin buffer (R20 0xb4 / 0xb0).
     fn diode_beep(&mut self, now: u64) {
         if self.mode != 12 || now < self.beep_next || src::active() {
@@ -5733,6 +5772,7 @@ impl Dmm {
             _ => (false, 100, 0),
         };
         hy::write(0x20, &[if on { 0xB4 } else { 0xB0 }]);
+        self.beep_on = on;
         if self.beep_e < max_e {
             self.beep_e += 1;
         }
@@ -7024,14 +7064,19 @@ impl Dmm {
     }
 }
 
-/// Format `v` with `dec` decimals into `buf`; returns the text.
+/// Format `v` with `dec` decimals into `buf`; returns the text. A value too
+/// long for the 16 bytes (sign, 14 digits and the point; e.g. a limit of
+/// 1E20 set over SCPI, or infinity) shows as all nines instead of running
+/// past the buffer (a panic). A value that rounds to zero has no sign (no
+/// "-0.0000", #113).
 pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     let mut scale = 1.0f32;
     for _ in 0..dec {
         scale *= 10.0;
     }
-    let neg = v < 0.0;
-    let mut n = ((if neg { -v } else { v }) * scale + 0.5) as u64;
+    let max = 10u64.pow(15 - (dec > 0) as u32) - 1;
+    let mut n = ((v.abs() * scale + 0.5) as u64).min(max);
+    let neg = v < 0.0 && n != 0;
     let mut tmp = [0u8; 16];
     let mut i = 0;
     loop {
@@ -7222,6 +7267,34 @@ mod tests {
             assert_eq!((p as usize + 1) % 3, n as usize % 3);
             assert!(i < 24 || n as usize >= CAP_NORATIO_N);
         }
+    }
+
+    #[test]
+    fn format_never_overruns() {
+        let mut b = [0u8; 16];
+        assert_eq!(format(&mut b, 1.5, 3), "1.500");
+        assert_eq!(format(&mut b, -0.25, 2), "-0.25");
+        assert_eq!(format(&mut b, 12345.0, 0), "12345");
+        // Too long for 16 bytes (a limit of 1E20 set over SCPI): all nines.
+        assert_eq!(format(&mut b, 1e20, 3), "99999999999.999");
+        assert_eq!(format(&mut b, -1e20, 3), "-99999999999.999");
+        assert_eq!(format(&mut b, 9.9e37, 0), "999999999999999");
+        assert_eq!(format(&mut b, f32::INFINITY, 1), "9999999999999.9");
+        assert_eq!(format(&mut b, f32::NEG_INFINITY, 0), "-999999999999999");
+        assert_eq!(format(&mut b, f32::NAN, 2), "0.00");
+    }
+
+    #[test]
+    fn format_no_negative_zero() {
+        let mut b = [0u8; 16];
+        // #113: open DC V leads, a few uV below 0 at 4 decimals.
+        assert_eq!(format(&mut b, -0.000_04, 4), "0.0000");
+        assert_eq!(format(&mut b, -0.000_06, 4), "-0.0001");
+        // The extra digit (dec + 1): -10 uV keeps its sign.
+        assert_eq!(format(&mut b, -0.000_01, 5), "-0.00001");
+        assert_eq!(format(&mut b, -0.4, 0), "0");
+        assert_eq!(format(&mut b, -1.25, 1), "-1.3");
+        assert_eq!(format(&mut b, 0.0, 3), "0.000");
     }
 
     #[test]
