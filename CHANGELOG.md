@@ -55,6 +55,8 @@ section named after the tag as the release notes; how to cut a release:
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.
+- Scope: a setting changed over SCPI while a popup is open shows at once in the top bar, the right
+  panel and the trace beside the popup, not only after it closes ([#82](https://github.com/opendm40/opendm40/issues/82)).
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
   and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
   ([manual](docs/manual/README.md#the-status-bar)).
