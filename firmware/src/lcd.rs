@@ -201,7 +201,7 @@ struct Defer {
     layer: [(u16, u16, u16, u16, Color); DEFER_N],
 }
 
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// TCM .bss (CPU only; was .sram_bss until the SRAM audit, docs/native-boot.md).
 static mut DEFER: Defer = Defer { on: false, n: 0, rows: 0, pend: [0; CH], drawn: [0; CH], layer: [(0, 0, 0, 0, 0); DEFER_N] };
 
 #[inline(always)]
