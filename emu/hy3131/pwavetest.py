@@ -19,6 +19,8 @@ Cases (default all):
   dc-zero  5 V, 20 mA, the device's AD2 zeros (powz:1), no POW:ZERO, DC
          coupling: the I zero from the DC meter (POW:WAVE? field 10 ~0.85
          mA), Irms within 0.5 % of 20 mA and of the meter's I.
+  dc-gain  the same after POW:ZERO (leads open first): a gain taken (field
+         11 ~1), no zero (field 10 = 0), Irms = the meter.
 The model latches R03..R05 at each conversion from the converter SDO23
 selects then, one conversion grid for both: whether the device does so
 (and how far AD3's grid sits from AD2's) is the device check's question
@@ -59,8 +61,12 @@ CASES = {
     # page takes I's zero from the meter's current (device 468ea813: I
     # 6 % high on 20.6 mA without it).
     'dc-zero': 'open;powz:1;vsrc:5;isrc:0.02',
+    # The same after POW:ZERO (leads open until 30 s): the zero is known,
+    # the page fits AD2's gain to the DC meter instead (the model's AD2
+    # gain is the calibration's: ~1).
+    'dc-gain': ['open;powz:1@0', 'open;powz:1;vsrc:5;isrc:0.02@30'],
 }
-COUPLING = {'dc-zero': 'DC'}
+COUPLING = {'dc-zero': 'DC', 'dc-gain': 'DC'}
 # The Wave button of Power Settings (ui_power.rs ps_row4(3)) and the page's
 # buttons (ui_pwave.rs BTN_R).
 WAVE_BTN = (414, 201)
@@ -90,7 +96,7 @@ def run_case(name):
 
     tag = 'pwave-%s-%d-%d' % (name, A.port, os.getpid())
     cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--usbip', '0.01', '--usbip-port', str(A.port),
-           '--run-for', '600', '--name', tag, '--log', os.path.join(OUT, tag + '.log'), '--dmm', CASES[name] + '@0'] \
+           '--run-for', '600', '--name', tag, '--log', os.path.join(OUT, tag + '.log'), ] + sum((['--dmm', d] for d in (CASES[name] if isinstance(CASES[name], list) else [CASES[name] + '@0'])), []) \
         + (['--app', os.path.abspath(A.app)] if A.app else [])
     emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
     try:
@@ -145,7 +151,7 @@ def run_case(name):
         def wave():
             f = q('POW:WAVE?').split(',')
             return {'on': f[0] == '1', 'frames': int(f[1]), 'U': num(f[2]), 'I': num(f[3]), 'P': num(f[4]),
-                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8]), 'izero': num(f[9])}
+                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8]), 'izero': num(f[9]), 'igain': num(f[10])}
 
         def wait_frames(k, limit_ms=20000):
             w0 = wave()
@@ -161,6 +167,15 @@ def run_case(name):
 
         for c in ['CONF:POW', 'POW:COUP ' + COUPLING.get(name, 'ACDC'), 'POW:BURD:STAT OFF'] + (['POW:METH ALT'] if name == 'alt' else []):
             q(c)
+        if name == 'dc-gain':
+            wait_ms(4000)
+            q('POW:ZERO')
+            t0 = up()
+            while up() - t0 < 30000 and not q('POW:ZERO?').startswith('OK'):
+                time.sleep(1)
+            check(q('POW:ZERO?').startswith('OK'), 'POW:ZERO with the leads open')
+            while up() < 33000:
+                time.sleep(0.5)
         # The power meter settles on its ranges (V 600, I autoranging down).
         t0 = up()
         while up() - t0 < 40000:
@@ -234,8 +249,12 @@ def run_case(name):
             check(not wave()['on'] and not view().startswith('Power Wave'), 'POW:WAVE OFF closes it')
             e = q('SYST:ERR?')
             check(e.startswith('0') or e.startswith('+0'), 'no SCPI error (%s)' % e)
+        elif name == 'dc-gain':
+            check(w['izero'] == 0 and near(w['igain'], 1.0, 0.005), 'POW:ZERO stored: a gain taken (%.5f), no zero (%g)' % (w['igain'], w['izero']))
+            check(near(w['I'], 0.020, 0.005) and near(w['I'], p0[5], 0.003), 'Irms %.5f ~ 0.020 and the meter %.5f' % (w['I'], p0[5]))
+            check(near(w['U'], p0[4], 0.001), 'Urms %.4f = the meter %.4f' % (w['U'], p0[4]))
         elif name == 'dc-zero':
-            check(near(w['izero'], 888 * 1.25 / 5 / 262144, 0.15), 'I zero from the DC meter %.4g A ~ 888 codes' % w['izero'])
+            check(near(w['izero'], 888 * 1.25 / 5 / 262144, 0.15) and w['igain'] == 1.0, 'I zero from the DC meter %.4g A ~ 888 codes, no gain' % w['izero'])
             check(near(w['I'], 0.020, 0.005) and near(w['I'], p0[5], 0.005), 'Irms %.5f ~ 0.020 and the meter %.5f' % (w['I'], p0[5]))
             # U keeps the Y zero (1080 codes, +1 % on 6 V) without POW:ZERO,
             # as the meter's own U does (device 468ea813: 5.0509 V for 5.000).

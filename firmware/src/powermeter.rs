@@ -1036,10 +1036,11 @@ impl Dmm {
     /// Power Wave's I zero reference (doc 3.18): the DC coupling's current
     /// (AD1 on the same OP1 output that AD2 reads, the factory DC A
     /// calibration and its zero), None in the other couplings or before a
-    /// current reading.
-    pub fn pw_wave_iref(&self) -> Option<f32> {
+    /// current reading; with whether `POW:ZERO`'s X zero is stored (then
+    /// the page fits AD2's gain to it, else its zero).
+    pub fn pw_wave_iref(&self) -> Option<(f32, bool)> {
         let pw = &*self.pw;
-        (pw.on && pw.dc && !pw.alt && pw.job == 0 && pw.seen & 4 != 0 && pw.i_dc.is_finite()).then_some(pw.i_dc)
+        (pw.on && pw.dc && !pw.alt && pw.job == 0 && pw.seen & 4 != 0 && pw.i_dc.is_finite()).then_some((pw.i_dc, pw.zero_ok))
     }
 
     /// Leaving Power Wave: the time it was open is not integrated into

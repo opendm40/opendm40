@@ -314,6 +314,28 @@ pub fn anchor(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
     (d.abs() * 8.0 <= ANCHOR_MAX_RAW).then_some(d)
 }
 
+/// Gain anchor (`POW:ZERO`'s X zero stored, so AD2's zero is known): the
+/// factor on `Scale::si` that makes frame `c`'s mean I equal `i_ref`;
+/// None below ANCHOR_GAIN_MIN_RAW of mean (a small current says nothing
+/// of the gain), or outside 0.9 .. 1.1.
+pub const ANCHOR_GAIN_MIN_RAW: f32 = 2000.0;
+
+pub fn anchor_gain(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
+    let (mut s, mut n) = (0.0f32, 0u32);
+    for k in 0..c.n {
+        if !c.is_u(k) {
+            s += buf[k] as i16 as f32;
+            n += 1;
+        }
+    }
+    let m = if n >= 8 { s / n as f32 - sc.oi } else { 0.0 };
+    if (m * 8.0).abs() < ANCHOR_GAIN_MIN_RAW || !(sc.si > 0.0) || !i_ref.is_finite() {
+        return None;
+    }
+    let g = i_ref / (m * sc.si);
+    (0.9..=1.1).contains(&g).then_some(g)
+}
+
 /// 1-2-5 steps (per division) from 1 uV / 1 uA up.
 pub fn step(i: i32) -> f32 {
     let m = [1.0f32, 2.0, 5.0][i.rem_euclid(3) as usize];
@@ -606,6 +628,15 @@ mod tests {
         assert!((s1.irms - 0.020).abs() < 2e-6 && (s1.p - 0.100).abs() < 1e-4, "{s1:?}");
         // A difference too large to be a zero: none.
         assert!(anchor(&b, &c, &sc, 0.010).is_none());
+        // With the zero known (POW:ZERO: oi = 888 / 8) a 2 % gain error
+        // is fitted as a gain, not as a zero.
+        let scz = Scale { oi: 111.0, ..sc };
+        let g = anchor_gain(&b, &c, &scz, 0.020 / 1.02).unwrap();
+        assert!((g - 1.0 / 1.02).abs() < 1e-3, "{g}");
+        let s2 = stats(&b, &c, &Scale { si: scz.si * g, ..scz }, true, 1.0);
+        assert!((s2.irms - 0.020 / 1.02).abs() < 3e-6, "{s2:?}");
+        // Too little current to say anything of the gain: none.
+        assert!(anchor_gain(&b, &c, &Scale { oi: 2000.0, ..sc }, 0.001).is_none());
     }
 
     #[test]

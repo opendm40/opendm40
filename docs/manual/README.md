@@ -1929,6 +1929,9 @@ with its own scale; above them U and I (RMS), P and f of the picture.
   RUN key) holds the picture.
 - U and I are converted at the same time and read in turn, 3200 points
   per second each.
+- In DC coupling the current trace is matched to the meter's current when
+  the page opens. Run **Zero** first (leads open) so that it is also
+  right at other currents and for AC.
 - While the page is open the power meter does not measure (no readings,
   alerts or energy). **Back**, **MENU** or **MF** return to it.
 

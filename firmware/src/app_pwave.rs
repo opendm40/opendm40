@@ -43,6 +43,11 @@ pub(super) struct Pwv {
     /// (`pwave::anchor`, stored codes; NaN: none yet / none taken).
     iref: f32,
     oi_fix: f32,
+    /// `POW:ZERO`'s X zero was stored at the entry: the anchor fits AD2's
+    /// gain (`pwave::anchor_gain`, a factor on `Scale::si`, NaN: none),
+    /// not its zero.
+    zero_ok: bool,
+    gi_fix: f32,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -65,6 +70,8 @@ static mut PWV: Pwv = Pwv {
     bad: 0,
     iref: 0.0,
     oi_fix: 0.0,
+    zero_ok: false,
+    gi_fix: 0.0,
 };
 
 pub(super) fn pwv() -> &'static mut Pwv {
@@ -129,8 +136,10 @@ impl App {
             ik: self.dmm.pw.ik,
             retries: 0,
             bad: 0,
-            iref: self.dmm.pw_wave_iref().unwrap_or(f32::NAN),
+            iref: self.dmm.pw_wave_iref().map_or(f32::NAN, |r| r.0),
             oi_fix: f32::NAN,
+            zero_ok: self.dmm.pw_wave_iref().is_some_and(|r| r.1),
+            gi_fix: f32::NAN,
         };
         self.show(View::PWave, clk);
         Ok(())
@@ -213,6 +222,9 @@ impl App {
         if s.oi_fix.is_finite() {
             sc.oi += s.oi_fix;
         }
+        if s.gi_fix.is_finite() {
+            sc.si *= s.gi_fix;
+        }
         let span_us = pv::TB_MS[s.tb1 as usize - 1] as u32 * pv::DIVS_X * 1000;
         // The trigger: from the last frame (U, else I), else free run.
         let trig = if s.frames > 0 { pv::next_trig(buf, &s.cap, (s.fu / sc.su / 2.0) as i32, (s.fi / sc.si / 2.0) as i32) } else { None };
@@ -224,8 +236,19 @@ impl App {
         // The first frame: the I zero from the DC meter's current (doc
         // 3.18: AD2's zero is not in the factory record, POW:ZERO may not
         // have run), once.
+        // With POW:ZERO's zero stored the difference is AD2's gain against
+        // AD1 (device 27a0e81f: the zero taken grew with the current, 1.15
+        // mA at 20 mA, 1.69 mA at 50 mA: ~0.8 mA zero + ~1.8 % gain); without
+        // it one reading cannot tell the two apart: the zero takes both
+        // (exact at this current, the gain error stays on the AC part and
+        // on other currents; doc 3.18).
         if s.iref.is_finite() {
-            if let Some(d) = pv::anchor(buf, &s.cap, &sc, s.iref) {
+            if s.zero_ok {
+                if let Some(g) = pv::anchor_gain(buf, &s.cap, &sc, s.iref) {
+                    s.gi_fix = g;
+                    sc.si *= g;
+                }
+            } else if let Some(d) = pv::anchor(buf, &s.cap, &sc, s.iref) {
                 s.oi_fix = d;
                 sc.oi += d;
             }
@@ -278,7 +301,7 @@ impl App {
 
     /// POW:WAVE? : open, frames, Urms, Irms, P, f, samples per channel,
     /// repeated reads, unreadable samples, the I zero taken from the DC
-    /// meter (A; 0 = none).
+    /// meter (A; 0 = none), the I gain taken from it (1 = none).
     pub(super) fn pwave_query(&self, out: &mut crate::scpi::Scpi) {
         let s = pwv();
         let mut t = [0u8; 24];
@@ -294,5 +317,7 @@ impl App {
         }
         out.put_bytes(b",");
         out.put_f32(if s.oi_fix.is_finite() { s.oi_fix * s.sc.si } else { 0.0 });
+        out.put_bytes(b",");
+        out.put_f32(if s.gi_fix.is_finite() { s.gi_fix } else { 1.0 });
     }
 }

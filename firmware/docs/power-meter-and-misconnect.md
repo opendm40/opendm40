@@ -812,13 +812,25 @@ range, 4.1 % of 20.6 mA; the rest (~2 %) is a gain (INFERRED: AD2 reads
 +0.3 .. +1.8 % above nominal against AD1 in device test 6.5 of
 [dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md); not the
 19.2 kS/s OSR: U on AD3 at the same OSR matched). So when the page opens
-in DC coupling with a current reading, its first frame takes I's zero
-from that reading (`pwave::anchor`: the shift that makes the frame's mean
-I equal the meter's, at most 2000 raw codes, else none; kept while the
-page is open; `POW:WAVE?` field 10). A gain error left in it shows at
-other currents (device recheck: two currents, e.g. 5 and 50 mA). In AC
-and AC+DC coupling there is no AD1 reading: the zero is `POW:ZERO`'s, as
-the meter's own I_dc.
+in DC coupling with a current reading, its first frame matches its mean I
+to that reading, kept while the page is open:
+
+* with `POW:ZERO`'s X zero stored (AD2's zero known): as a **gain** on I
+  (`pwave::anchor_gain`, 0.9 .. 1.1, only above 2000 raw codes of mean;
+  `POW:WAVE?` field 11);
+* without it: as a **zero** (`pwave::anchor`, at most 2000 raw codes;
+  field 10). One reading cannot tell a zero from a gain, so this zero
+  takes both: exact at that DC current, but the gain error stays on the
+  AC part and at other currents. Device 27a0e81f (5 V, no `POW:ZERO`):
+  error against the meter +0.42 / +0.26 / +0.17 % at 5 / 20 / 50 mA, the
+  zero taken 0.070 mA (6 mA range) / 1.149 / 1.688 mA (60 mA range): on
+  the 60 mA range ~0.79 mA of zero plus ~1.8 % of gain. That gain stays
+  on an AC current (INFERRED: ~1.8 % high on 60 mA). Known limitation;
+  `POW:ZERO` (Power Settings > Zero) before the page removes it.
+
+In AC and AC+DC coupling there is no AD1 reading: the zero is
+`POW:ZERO`'s and the gain the AC A calibration's, as the meter's own
+method B.
 
 **Frames.** Each frame waits up to 60 ms for a rising crossing of the last
 frame's mid level on U (on I when U's peak-peak is below half a minimum
@@ -859,9 +871,10 @@ for both):
    torn-read question at 19.2 kS/s). Device 468ea813: 0 unreadable,
    ~2900 repeated in 16 s; U 5.0508 V = the meter (so the SDO23 flip does
    not disturb AD3, check 3).
-2a. DC coupling, 5 V and 5 / 20 / 50 mA: I on the page = the meter's
-   within ~0.5 % at each (the anchored zero; a residual gain shows as a
-   level-dependent difference).
+2a. DC coupling, 5 V and 5 / 20 / 50 mA without `POW:ZERO`: done on
+   27a0e81f (above, +0.17 .. +0.42 %). Still to do: the same after
+   `POW:ZERO` (field 10 = 0, field 11 ~0.98, the error within ~0.3 % at
+   each current), then an AC current against AC A.
 3. Whether the SDO23 flip with AD3 running disturbs AD3 (a DC voltage:
    flat U trace, Urms = the DC meter).
 4. USB / touch while frames block the loop at 20 ms/div.
