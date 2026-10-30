@@ -23,6 +23,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Test builds of pull requests:** each pull request gets a comment with
+  its update file to try (version `0.4.0-pr<N>.<commit>`)
+  ([manual](docs/manual/README.md#install)).
 - **Record button on the range pages:** MF, then **Record** opens the Record
   page (red while recording); **Hold/Limits** is now **Limits**
   ([manual](docs/manual/README.md#the-record-page)).
@@ -106,6 +109,7 @@ section named after the tag as the release notes; how to cut a release:
   the power meter ranges, not an empty strip.
 
 ||||||| e3c72437
+||||||| 3b142426
 ## v0.3.0 (2026-10-27)
 
 ### New

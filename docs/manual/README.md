@@ -91,6 +91,13 @@ If the meter stops on the loader's update screen instead, install the file
 from there ([Install a file from the update
 loader](#install-a-file-from-the-update-loader)).
 
+To try a change before its release: open [pull
+requests](https://github.com/opendm40/opendm40/pulls) have a **Test build**
+comment with the update file (all of them: [PR test
+builds](https://github.com/opendm40/opendm40/releases/tag/pr-builds)); its
+version reads like `0.3.2-pr148.1a2b3c4`. These builds are not tested on a
+meter.
+
 ### Update
 
 To install a newer opendm40 (or any other DM40 update file) from a running
