@@ -805,7 +805,7 @@ unless shown otherwise.
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
 | `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
 | `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians) | USB |
-| `DBG:ACDC?` | | AC+DC phase diagnostic | USB |
+| `DBG:ACDC?` | | AC+DC phase diagnostic. Only in builds with the `dbg-acdc` feature. | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
 | `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>` | USB |
@@ -820,8 +820,8 @@ unless shown otherwise.
 | `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+1.850000E+02` (37 ticks of 5 ns) | USB |
 | `DBG:GENTRIG:STAT?` | | `<readings>,<failed>,<last window>,<failed window>`: the generator phase readings for the GEN trigger and trace (failed = no consistent reading; the windows in CPU cycles: the last reading's, the narrowest try of the last failure) | USB |
 | `DBG:CH2:LAG[?]` | us the DMM CH2's conversion is older than its stamp (CH2 against CH1; not kept) | `+0.000000E+00` | USB |
-| `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report | USB |
-| `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report | USB |
+| `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report. Only in builds with the `dbg-hyspi` feature. | USB |
+| `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report. Only in builds with the `dbg-hyspi` feature. | USB |
 | `DBG:AD2:TORN?` | `<r26>,<n>[,SYNChronous]` | Converter read test report (AC rows) | USB |
 | `DBG:AD2:NOISE?` | `<r26>,<n>[,<op1chop>]` | Converter noise report (AC rows) | USB |
 | `DBG:AD2:DCV?` | `<range>,<r26>,<n>[,<flags>]` | DC V converter test report | USB |
