@@ -835,6 +835,103 @@ stack headroom (each gains the same ~5.6 KB of C):
 Next candidates if C gets tight again (DBG-only, still in C): `hyspi`
 (DBG:HYSPI:SELF? / WR?, 2.3 KB), `boot::put_info` (DBG:BOOT?, 1.6 KB).
 
+### Region B audit #9 (2026-10-30, feat/region-b-profile)
+
+Asked for: why so much code is in region B, and room for the decoder's
+`dec-log` / `dec-modbus` on test/scope-chain-0.4 (#174). Tool:
+[`tools/region-profile/rprof.py`](../tools/region-profile/rprof.py). It
+charges every byte of B to a function, a named static or a piece of
+anonymous rodata (cut at every address that code or data refers to, and
+charged to the referrers), with the innermost inlined callee and its
+module, and puts each item in a class:
+- `isr`: reachable from `ad2_stream_irq`;
+- `traced`: executed while `hy3131::HANDED` was set in an emulator run
+  (`DM40_BTRACE=DIR`, [`emu/peripherals/BTrace.cs`](../../emu/peripherals/BTrace.cs)),
+  or data such code refers to;
+- `loop`: reachable from `run` without passing through region C code, and
+  not executed under the stream in these runs: not exercised, not proven
+  cold;
+- `c-only`: reachable only through region C code, so it never runs under
+  the stream while the region C rule holds.
+
+Profile of #174 (e7c11934) with this branch merged, `--features
+dec-log,dec-modbus`. Traces: decodetest (MCX UART / Modbus, the Wave view)
+and an MCX scope page with CH2 on (timebases 1 ms .. 500 ms/div, STOP /
+RUN, a pan, the MF tabs, DEC:PROT UART) on the full-decoder build;
+wavetest on the default build (matched by function name).
+
+| class | code | data | total |
+|---|---|---|---|
+| `isr` | 6 234 | 114 | 6 348 |
+| `traced` | 233 344 | 48 568 | 281 912 |
+| `loop` | 169 830 | 8 503 | 178 333 |
+| `c-only` | 4 788 | 9 957 | 14 745 |
+| unreferenced (alignment) | | 294 | 294 |
+| `.data` load image | | 544 | 544 |
+| region B used | | | 482 176 |
+
+60 % of B ran under the stream in these runs. The largest `loop` items run
+under the stream in cases these runs do not reach: `App::gesture` / `tap`
+(touches in the Wave view and on the inrush page), `VDisk::read_block` and
+`dlog::Gen::*` (a host reading the USB volume during a stream),
+`gen::plan` / `Gen::apply` (SOUR:* from a host). `DmmView::reading` (7.7
+KB) is the DMM view, which the stream pauses. A move of a `loop` function
+to C needs a reason why it never runs under the stream.
+
+Not found: `core::fmt`; generic copies (every function with several
+monomorphisations: < 1 KB above the largest copy); compiler settings that
+help (the release profile is opt-level "z" already, so a separate "z"
+crate gains nothing; LLVM `-inline-threshold` 25 / 50 and opt-level "s"
+grow the image by 6 / 32 KB, -20 grows region B by 2 KB;
+`-Zinline-mir=no` changes nothing).
+
+Rodata: 16.3 KB of B are printable string runs. 10.0 KB of B's rodata is
+referred to only by region C code. It cannot move: region C is the fuller
+region, and an anonymous string has no section name for a link-native.x
+pattern (each would need a named static in a `.rodata.cold*` section, as
+`fastlog::JOB0`).
+
+Done:
+
+| change | region B | region C |
+|---|---|---|
+| README.TXT of the USB disk: one line per folder, the version and a link to the manual (3 075 -> 314 B of text; the file stays 2 048 B) | | |
+| on-screen help: 2 pages of 5 rows (gestures, keys) instead of 7 pages of 8 rows (1 359 -> 230 B of text) | +3 984 (both texts) | +36 |
+| DBG:HYSPI ([`src/hyspi.rs`](../src/hyspi.rs)) and DBG:ACDC? behind cargo features `dbg-hyspi`, `dbg-acdc` (without them: undefined header) | +432 | +3 132 |
+
+| | release/0.4.0 (ae0dc031) | this branch |
+|---|---|---|
+| region A2 free | 2 208 B | 2 208 B |
+| region B free | 8 728 B | 13 144 B |
+| region C free | 13 036 B | 16 204 B |
+| stack headroom (static worst path) | 20 744 B | 20 744 B |
+| SRAM free | 24 244 B | 24 244 B |
+
+#174 (e7c11934) with `--features dec-log,dec-modbus`:
+
+| | #174 | #174 + this branch |
+|---|---|---|
+| region A2 free | 156 B | 156 B |
+| region B free | 3 888 B (no link) | 9 328 B |
+| region C free | 1 536 B (no link) | 4 216 B |
+| stack headroom (static worst path) | 20 644 B | 20 644 B |
+| SRAM free | 8 308 B | 8 308 B |
+
+`dec-log` costs ~5 KB of region C (`.text.log_cold`), so with both
+features region C, not B, is the tighter region. Next, not done (bytes
+per decision):
+- more DBG replies behind features (region C): `boot::put_info` (DBG:BOOT?,
+  1.5 KB; a dozen emu tests read it), `touch_diag` (DBG:DIAG?, 0.7 KB),
+  `acdctr::Trace::text` (0.6 KB), `Dmm::ohm600_dbg` (DBG:OHM6, 0.5 KB),
+  `Sentinel::diag_text` (DBG:SENT?, 0.5 KB);
+- texts over ~300 B in B, unchanged: the power meter's zero / V cal
+  messages (487 B, `c-only`), the jack / overload codes (462 B), the
+  generator notes (450 B), the settings file keys (428 B, a file format),
+  the DBG:PROF? labels (368 B);
+- with room in region C: the `c-only` code (4.8 KB: `dlog::SEnc`,
+  `cring::min_max`, the gallery's `dlog` decoder copies, ...) and the
+  named `c-only` rodata, function by function under the region C hooks.
+
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
 The GD32F427 here has 1 MiB (flash density 0x0400 at `0x1FFF7A22`, as
