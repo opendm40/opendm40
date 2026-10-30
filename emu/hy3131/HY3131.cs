@@ -2780,9 +2780,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private readonly List<double> rampHt = new List<double>(), rampHv = new List<double>();
         private void RampMark(double t)
         {
-            if(rampHt.Count > 0 && t < rampHt[rampHt.Count - 1]) { rampHt.Clear(); rampHv.Clear(); }
+            var k = rampHt.Count;
+            if(k > 0 && t < rampHt[k - 1]) { rampHt.Clear(); rampHv.Clear(); k = 0; }
+            // (open leads turn the ramp ~10^5 times a second: at most one point per 0.1 ms)
+            if(k > 1 && t - rampHt[k - 2] < 1e-4) { rampHt[k - 1] = t; rampHv[k - 1] = rampV; return; }
             rampHt.Add(t); rampHv.Add(rampV);
-            while(rampHt.Count > 2 && rampHt[1] < t - CapVAvg - 1) { rampHt.RemoveAt(0); rampHv.RemoveAt(0); }
+            var old = 0;
+            while(old < rampHt.Count - 2 && rampHt[old + 1] < t - CapVAvg - 1) old++;
+            if(old > 0) { rampHt.RemoveRange(0, old); rampHv.RemoveRange(0, old); }
         }
         /// The node's mean over [t - CapVAvg, t] from the marked breakpoints (piecewise linear).
         private double RampMean(double t)

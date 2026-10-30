@@ -45,8 +45,9 @@ SCEN = [
     # dV in the poll after a turn): the class widens, a final value comes.
     ('1mF-narrow', 'c:1000e-6;capcmpw:0.25;capvavg:0.2', 18, 1e-3, 10),
     ('1mF-narrow-da', 'c:1000e-6;capcmpw:0.25;capvavg:0.2;capda:0.6;capdatau:1', 18, 1e-3, 10),
-    # Absorption on a capacitor inside 600 uF: its early slope reads it over the range.
-    ('470uF-da', 'c:470e-6;capda:0.6;capdatau:1', 18, 470e-6, 9),
+    # Absorption on a capacitor inside 600 uF: its early slope reads it over the range (the
+    # chip options stay set: capcmpw / capvavg back to their defaults).
+    ('470uF-da', 'c:470e-6;capcmpw:1;capvavg:0;capda:0.6;capdatau:1', 18, 470e-6, 9),
     ('open', 'open', 8, 'small', 1),
     # Open leads entered from a 1 mF value's range (AUTO starts on 6 mF: discharge, ramp).
     ('open-1mF', 'open', 10, 'small', 8, ('c:1000e-6', 9)),
