@@ -6637,7 +6637,7 @@ impl Dmm {
         let part = !self.cap_row_new && self.cap_dvh_n >= 3 && dv < CAP_PART * self.cap_dv_ref();
         if !self.cap_row_new {
             self.cap_dvh[self.cap_dvh_n as usize % CAP_DVH] = dv;
-            self.cap_dvh_n = self.cap_dvh_n.saturating_add(1);
+            self.cap_dvh_n = ring_inc(self.cap_dvh_n);
             // The ramp's V extremes in this half ramp.
             let e = &mut self.cap_vext;
             if self.cap_vext_n == 0 {
@@ -6699,7 +6699,7 @@ impl Dmm {
         let row_new = core::mem::take(&mut self.cap_row_new);
         if !row_new {
             self.cap_inst[self.cap_inst_n as usize % 3] = cinst;
-            self.cap_inst_n = self.cap_inst_n.saturating_add(1);
+            self.cap_inst_n = ring_inc(self.cap_inst_n);
         }
         // The range from the slope (device: 1 mF took 7.5 s on 600 uF,
         // waiting for 5 over-range results of the full ramp): one poll
@@ -6776,7 +6776,7 @@ impl Dmm {
             let i = self.cap_ring_n as usize % CAP_RING;
             self.cap_ring[i] = cinst;
             if cmp { self.cap_ring_up |= 1 << i } else { self.cap_ring_up &= !(1 << i) }
-            self.cap_ring_n = self.cap_ring_n.saturating_add(1);
+            self.cap_ring_n = ring_inc(self.cap_ring_n);
             // The last two half ramps' polls, for the first value.
             let k = self.cap_half_n as usize;
             if k < CAP_HALF_MAX {
@@ -7188,6 +7188,13 @@ impl Dmm {
 /// order as `sort_unstable_by(partial_cmp)` for numbers (NaN compares as
 /// equal, so its place is not defined, as there). ~0.1 KB instead of the
 /// ~3.3 KB core quicksort instantiation (region B).
+/// A ring's poll count: +1, from 240 back to 120 (both multiples of the
+/// ring lengths 3 and 6, so the slot `n % len` keeps turning; saturating at
+/// 255 wrote slot 3 for good, the other slots frozen).
+fn ring_inc(n: u8) -> u8 {
+    if n >= 239 { n - 119 } else { n + 1 }
+}
+
 fn sort_f32(v: &mut [f32]) {
     for i in 1..v.len() {
         let x = v[i];
@@ -7204,6 +7211,18 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ring_inc_keeps_turning() {
+        let mut n = 0u8;
+        for i in 1..2000u32 {
+            let p = n;
+            n = ring_inc(n);
+            assert_eq!((p as usize + 1) % CAP_RING, n as usize % CAP_RING, "poll {i}");
+            assert_eq!((p as usize + 1) % 3, n as usize % 3);
+            assert!(i < 24 || n as usize >= CAP_NORATIO_N);
+        }
+    }
 
     #[test]
     fn ohm_r0_gain_from_r1() {
