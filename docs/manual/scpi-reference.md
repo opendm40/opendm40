@@ -798,7 +798,8 @@ unless shown otherwise.
 | `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |
 | `DBG:HWTRIG:STAT?` | | `<hits>,<misses>,<last>,<min>,<max>,<mean>` | USB |
 | `DBG:HWTRIG:STAT:RESET` | | Clears the statistics. | USB |
-| `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+0.000000E+00` | USB |
+| `DBG:GENTRIG:LAG[?]` | ns the generator's output reaches CH1 later than its timers say (GEN trigger and trace; not kept) | `+1.850000E+02` (37 ticks of 5 ns) | USB |
+| `DBG:GENTRIG:STAT?` | | `<readings>,<failed>,<last window>,<failed window>`: the generator phase readings for the GEN trigger and trace (failed = no consistent reading; the windows in CPU cycles: the last reading's, the narrowest try of the last failure) | USB |
 | `DBG:CH2:LAG[?]` | us the DMM CH2's conversion is older than its stamp (CH2 against CH1; not kept) | `+0.000000E+00` | USB |
 | `DBG:HYSPI:SELF?` | `<n>[,<div>[,<cpha>]]` | Measurement chip bus self-test report | USB |
 | `DBG:HYSPI:WR?` | `<mode 0..3>[,<div>]` | Bus write test report | USB |

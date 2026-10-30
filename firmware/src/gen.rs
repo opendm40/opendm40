@@ -83,41 +83,97 @@ const DWT_CYCCNT: u32 = 0xE000_1004;
 
 /// Where the running output is now (docs/scope-gen-channel.md): its time,
 /// ticks of the 200 MHz timer clock into its table loop (`loop_ticks`:
-/// 0 = the start of table sample 0 / PWM count 0), and the DWT cycle count
-/// (= the same 200 MHz) at that instant. None while off, or when the reads
-/// were not consistent (an interrupt between them, a DMA update in flight)
-/// in a few tries.
+/// 0 = the start of table sample 0 / PWM count 0; always below the loop
+/// length), and the DWT cycle count (= the same 200 MHz) at that instant.
+/// None while off, or when no try gave consistent reads (an interrupt
+/// between them, a DMA update in flight).
 ///
 /// DAC: the DMA has moved (L - NDTR) samples into DHR; the DAC output (DOR)
 /// holds the one before the last moved (each TIM6 update copies DHR to DOR,
 /// then requests the next sample), so it is table sample L - NDTR - 2 since
 /// the update TIM6 CNT counts from. PWM: TIM12 CNT is the phase itself.
+///
+/// The reads are timed by the DWT reads around them (`reads`); nothing
+/// else runs between those (a u64 division in that window made every try
+/// fail on the device: the DAC path had no GEN phase, PR #64 device check).
+/// The first consistent try whose window is under `WIN_MAX` cycles is
+/// taken (a later one would put the instant further from the caller's next
+/// DWT read: Scope::start allows 400 cycles).
 pub fn now() -> Option<(u64, u32)> {
+    const TRIES: u32 = 16;
+    const WIN_MAX: u32 = 128;
     let (t, _) = running()?;
     let ps = t.psc as u64 + 1;
-    let (q, _) = loop_ticks(&t);
-    for _ in 0..8 {
-        unsafe {
+    let dac = t.path == Path::Dac;
+    let mut wmin = u32::MAX;
+    for _ in 0..TRIES {
+        let (d0, n, c, n2, d1) = reads(dac);
+        let w = d1.wrapping_sub(d0);
+        wmin = wmin.min(w);
+        // DAC: no DMA move between the two NDTR reads, and not right after
+        // an update (the DMA may not have moved yet).
+        if w >= WIN_MAX || (dac && (n != n2 || (c as u64 * ps) < 8)) {
+            continue;
+        }
+        stat(true, w);
+        let g = if dac {
+            let l = t.len as u32;
+            let idx = (3 * l - (n % (l + 1)) - 2) % l;
+            idx as u64 * t.div() + c as u64 * ps
+        } else {
+            c as u64 * ps
+        };
+        return Some((g, d0.wrapping_add(w / 2)));
+    }
+    stat(false, wmin);
+    None
+}
+
+/// One try's bus reads, DWT first and last and nothing between them but
+/// the loads (no arithmetic: the window times the reads): (DWT, NDTR, CNT,
+/// NDTR, DWT). PWM: (DWT, 0, TIM12 CNT, 0, DWT).
+#[inline(never)]
+fn reads(dac: bool) -> (u32, u32, u32, u32, u32) {
+    // SAFETY: plain register reads (DWT, DMA0 stream 5, TIM6 / TIM12).
+    unsafe {
+        if dac {
             let d0 = r32(DWT_CYCCNT);
-            let (g, ok) = match t.path {
-                Path::Pwm => (r32(TIM12_CNT) as u64 * ps, true),
-                Path::Dac => {
-                    let n1 = r32(S5 + 0x04) & 0xFFFF;
-                    let c = r32(TIM6_CNT) as u64;
-                    let n2 = r32(S5 + 0x04) & 0xFFFF;
-                    let l = t.len as u64;
-                    let idx = (2 * l + l - (n1 as u64 % (l + 1)) - 2) % l;
-                    // Right after an update the DMA may not have moved yet.
-                    (idx * t.div() + c * ps, n1 == n2 && c * ps >= 8)
-                }
-            };
+            let n1 = r32(S5 + 0x04);
+            let c = r32(TIM6_CNT);
+            let n2 = r32(S5 + 0x04);
             let d1 = r32(DWT_CYCCNT);
-            if ok && d1.wrapping_sub(d0) < 64 {
-                return Some((g % q, d0.wrapping_add(d1.wrapping_sub(d0) / 2)));
-            }
+            (d0, n1 & 0xFFFF, c & 0xFFFF, n2 & 0xFFFF, d1)
+        } else {
+            let d0 = r32(DWT_CYCCNT);
+            let c = r32(TIM12_CNT);
+            let d1 = r32(DWT_CYCCNT);
+            (d0, 0, c & 0xFFFF, 0, d1)
         }
     }
-    None
+}
+
+/// `DBG:GENTRIG:STAT?`: phase readings taken, failed (`now` gave None),
+/// the last reading's window and the narrowest window of the last failed
+/// call (DWT cycles; u32::MAX = none).
+static mut STAT: [u32; 4] = [0, 0, 0, u32::MAX];
+
+fn stat(ok: bool, w: u32) {
+    // SAFETY: main loop only.
+    unsafe {
+        let s = &mut *core::ptr::addr_of_mut!(STAT);
+        if ok {
+            s[0] = s[0].wrapping_add(1);
+            s[2] = w;
+        } else {
+            s[1] = s[1].wrapping_add(1);
+            s[3] = w;
+        }
+    }
+}
+
+/// The counters `stat` keeps (see there).
+pub fn stats() -> [u32; 4] {
+    unsafe { *core::ptr::addr_of!(STAT) }
 }
 
 fn stop_outputs() {

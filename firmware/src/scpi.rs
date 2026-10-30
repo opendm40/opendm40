@@ -839,6 +839,8 @@ pub enum Cmd {
     TrigSource(Option<u8>),
     /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
     DbgGenLag(Option<f32>),
+    /// DBG:GENTRIG:STAT?: the generator phase readings (gen::stats).
+    DbgGenStat,
     /// DBG:CH2:LAG <us>: the DMM CH2's conversion lag (scope_ch2).
     DbgCh2Lag(Option<f32>),
     Run,
@@ -1709,13 +1711,21 @@ pub fn err_code(e: &str) -> i16 {
 }
 
 /// Match `tok` (upper case) against a mnemonic written as e.g. "MEASure":
-/// accepted are the short form (upper-case letters) and the full word.
+/// accepted are the short form (upper-case letters) and the full word. A
+/// numeric suffix ("CHANnel1") also goes with the short form ("CHAN1");
+/// the short form without it ("CHAN") stays accepted.
 fn kw(tok: &[u8], mnem: &str) -> bool {
-    let short: usize = mnem.bytes().take_while(|b| b.is_ascii_uppercase() || *b == b'*').count();
-    let full = mnem.len();
     let m = mnem.as_bytes();
+    let short: usize = m.iter().take_while(|b| b.is_ascii_uppercase() || **b == b'*').count();
+    let full = m.len();
+    let digits = m.iter().rev().take_while(|b| b.is_ascii_digit()).count();
     let eq = |n: usize| tok.len() == n && tok.iter().zip(m).all(|(a, b)| *a == b.to_ascii_uppercase());
-    eq(short) || eq(full)
+    let suffixed = digits > 0
+        && short + digits < full
+        && tok.len() == short + digits
+        && tok[..short].iter().zip(m).all(|(a, b)| *a == b.to_ascii_uppercase())
+        && tok[short..] == m[full - digits..];
+    eq(short) || eq(full) || suffixed
 }
 
 /// [SENSe:]VOLTage:COUPling (Some(false)) / [SENSe:]CURRent:COUPling
@@ -2275,6 +2285,9 @@ impl Scpi {
                         Some(v) if v.abs() <= 1e5 => out = Out::Instr(Cmd::DbgCh2Lag(Some(v))),
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
+                }
+                _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"STAT"[..]) => {
+                    out = Out::Instr(Cmd::DbgGenStat)
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GENTRIG"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {

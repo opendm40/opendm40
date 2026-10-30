@@ -607,9 +607,11 @@ pub fn fill(table: &mut [u16], s: &Settings, t: &Timing) {
 // sample of that record. The trigger is computed (`Sync::next`) and the
 // trace drawn from the wave's shape (`Shape::span`).
 
-/// Logic level of the PWM path (PB14, a 3.3 V GPIO; not measured after
-/// the output stage): the GEN trace's high level there.
-pub const PWM_HIGH_V: f32 = 3.3;
+/// High level of the PWM path at the output (PB14's 3.3 V logic level
+/// through the output stage): the GEN trace's high level there. 3.0 V: a
+/// 2 MHz square looped back to CH1 read 0..3.0 V (3.07 Vpp) on the device
+/// (PR #64 device check).
+pub const PWM_HIGH_V: f32 = 3.0;
 
 /// The output as a function of its phase (0..1 = one period, 0 = the first
 /// table sample: sine mid-rising, square rising edge, triangle / ramp at

@@ -74,6 +74,13 @@ impl App {
         if !self.ch2.on || self.view != View::Scope || self.scope.wave_on() || self.now < self.ch2.retry_at || self.ch2_why().is_some() {
             return None;
         }
+        // Stopped: the store holds the stored record's CH2; a timebase
+        // change (a stopped zoom) must not restart the stream at the new
+        // rate, which empties the store (PR #64 device check: no CH2 in a
+        // stopped zoom). RUN picks the new rate up.
+        if !self.scope.s.run && self.ch2.live {
+            return Some(self.ch2.fs);
+        }
         Some(scope::wave_fs_for(self.scope.s.tb))
     }
 

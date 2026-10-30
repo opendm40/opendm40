@@ -192,6 +192,10 @@ fn set_commands() {
     check(matches!(s.handle(b"TRIG:EDGE:SLOP POS", 1), Out::Instr(Cmd::TrigSlope(Some(true)))), "TRIG:EDGE:SLOP POS");
     check(matches!(s.handle(b"TRIG:EDGE:LEV 1.5", 1), Out::Instr(Cmd::TrigLevel(Some(v))) if v == 1.5), "TRIG:EDGE:LEV 1.5");
     check(matches!(s.handle(b"TRIG:SWE NORM", 1), Out::Instr(Cmd::TrigSweep(Some(1)))), "TRIG:SWE NORM");
+    check(matches!(s.handle(b"TRIG:SOUR CHAN1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR CHAN1 (short form with its suffix)");
+    check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
+    check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
+    check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
     check(matches!(s.handle(b"RES:NEG ON", 1), Out::Instr(Cmd::ResNeg(Some(true)))), "RES:NEG ON");
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");
@@ -226,6 +230,8 @@ fn set_commands() {
         ("CHAN1:DISP ON", "-113"),
         ("TRIG:SLOP UP", "-224"),
         ("TRIG:SWE NEVER", "-224"),
+        ("TRIG:SOUR CHAN2", "-224"),
+        ("TRIG:SOUR CHANNEL", "-224"),
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),
         ("LOG:STAT MAYBE", "-224"),

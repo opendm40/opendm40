@@ -82,7 +82,7 @@ rm -f $TDIR/regiona2.warn $TDIR/regionb.warn $TDIR/regionc.warn
 "$OBJCOPY" -O binary --gap-fill=0xff "$ELF" "$BODY"
 python3 ../stock/dm40fw.py pack --pad "$BODY" "$OUT"
 python3 - "$BODY" "$ELF" "$TDIR" <<'PY'
-import os, struct, subprocess, sys
+import os, re, struct, subprocess, sys
 body = open(sys.argv[1], 'rb').read()
 BASE, MARK, END = 0x08004000, 0x08008000, 0x080A0000
 end = BASE + len(body)
@@ -130,6 +130,17 @@ assert gap == b'\xff' * 16, 'marker gap is not 0xFF'
 assert pad == b'\xff' * len(pad), 'padding between region A2 and region B is not 0xFF'
 assert body[:4] == struct.pack('<I', 0x2002F7F8)
 assert BASE <= entry - 1 < MARK and entry & 1, 'reset vector not in region A (thumb)'
+# gen::reads (the GEN channel's timed register reads, gen.rs): loads only
+# between its DWT reads. A call or a division there (a u64 modulo did) puts
+# every DAC-path reading over its window on the device (PR #64).
+od = os.environ['DM40_LLVMBIN'] + '/llvm-objdump'
+rd = [k for k in syms if '3gen5reads' in k]
+assert rd, 'gen::reads not found (inline(never) dropped?)'
+dis = subprocess.run([od, '-d', '--no-show-raw-insn', '--disassemble-symbols=' + rd[0], sys.argv[2]],
+                     capture_output=True, text=True).stdout
+ops = [m.group(1) for m in re.finditer(r'^\s*[0-9a-f]+:\s*\t(\S+)', dis, re.M)]
+bad = [o for o in ops if o in ('bl', 'blx', 'udiv', 'sdiv')]
+assert ops and not bad, 'gen::reads: %s between the timed reads' % bad
 PY
 python3 ../stock/dm40fw.py info "$OUT"
 # The FS-loader mis-decodes a short last 128-byte block whose key position is
