@@ -134,7 +134,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current, resistance and capacitance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current, resistance and capacitance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -648,14 +648,21 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Capacitance
 
-- Ranges: 6 nF to 60 mF, autorange only.
+- Ranges: 60 nF to 60 mF; **MF** chooses one or AUTO. Below 6 nF the value
+  has 3 decimals; from 6 mF it is in µF (4700 µF).
+- From 600 µF the meter first discharges the capacitor (**Discharging**, or
+  orange **Charged cap: discharge first** above ~1.2 V), then updates
+  every 0.25 s; the value is grey until the ramp has run both ways.
+
+  ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
+- Open leads end on the 60 nF range; a short shows **0L**.
 - Large capacitors take longer: from the 600 µF range up the meter first
   discharges, then measures.
 
 
-![A 100 nF capacitor](img/dmm-cap.png)
-
-*A 100 nF capacitor.*
+| ![A 100 nF capacitor](img/dmm-cap.png) | ![The capacitance range page](img/range-cap.png) |
+|---|---|
+| A 100 nF capacitor | The capacitance range page, 600 µF chosen |
 
 #### Frequency and duty cycle
 

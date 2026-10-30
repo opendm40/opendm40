@@ -398,6 +398,21 @@ the scope full record.
 
 ## Remaining work
 
+- [ ] Capacitance gain per range (device 2026-10-30, #90, UT61E+ reference): 4.911 µF film reads 4.8208 µF
+      on 6 µF (−1.8 %) and 4.9046 µF on 60 µF (−0.1 %); 330 µF electrolytic 346.4–347.1 µF on 600 µF (UT61E+
+      351.6, OWON 358.9); 1.0462 mF electrolytic 999.5 µF on 6 mF (−4.5 %). Electrolytics alone do not set a
+      gain (dielectric absorption and the test frequency move their value), so CAP_K / the ramp constants stay.
+      Procedure (owner, `tools/capdiag.py`, one film capacitor per pair of ranges, its value from a reference
+      meter): (1) a film capacitor at ~50 % of the lower range, `capdiag.py OUT --range <lower> --secs 60`, then
+      `--range <upper>` (the ranges are fixed over SCPI, CONF:CAP <F>); (2) per range: gain = reference /
+      median; (3) the ramp ranges from the 60 µF reading of the same capacitor: e.g. a 47 µF film on 60 µF,
+      then forced 600 µF (`--range 6e-4`), the 600 µF gain = the 60 µF reading / the 600 µF median; 6 mF from a
+      ~470 µF film on 600 µF and forced 6 mF. Apply as CAP_K changes (per range), not the cal record. Open:
+      run it.
+- [x] Capacitance 6 nF and 60 nF ranges merged into one 60 nF range (owner 2026-10-30, #90): the stock rows are
+      byte-identical; r1's constants (CAP_K 1003 kΩ); 3 decimals below 6 nF. That r1's K suits < 6 nF is
+      INFERRED (r0's 1020 reads 1.7 % higher).
+
 - [x] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" was
       wrong while the trigger-level marker T was on the left edge; the marker moved to the graph's
       right edge (scope_ui.rs `strip_items`), so the help text is now correct.

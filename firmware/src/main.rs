@@ -768,6 +768,86 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
+                    scpi::Dbg::CapDisMs(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_ms(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_ms());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapJumpN(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_jumpn(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_jumpn());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisEnd(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_end(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_end());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisMode(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dismode(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dismode());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisRef(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_disref(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_disref());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapIdis(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_idis(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_idis());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapClass(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_class(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_class() as u32);
+                            true
+                        }
+                    }
+                    scpi::Dbg::Cap => {
+                        scpi.len = 0;
+                        for (i, v) in app.dmm.cap_info().iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            scpi.put_f32(*v);
+                        }
+                        true
+                    }
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;
