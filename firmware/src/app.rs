@@ -2638,11 +2638,12 @@ impl App {
         }
         // A stopped scope renders its stored record once per change (a zoom,
         // a pan, a V/div step). While nothing may be drawn (a GRAM read-back
-        // or an on-device screenshot holds the panel, a host log stream)
-        // leave that render pending: polled now, the frame would be dropped
-        // below and the screen would keep the old trace until the next
-        // change.
-        if !can_draw && !self.scope.s.run {
+        // or an on-device screenshot holds the panel, a host log stream, a
+        // pending view redraw, an overlay on the scope page) leave that
+        // render pending: polled now, the frame would be dropped and the
+        // screen would keep the old trace or the drag preview (device
+        // 2026-10-26).
+        if !self.scope.s.run && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
             return;
         }
         let t0 = cyc();
@@ -2658,7 +2659,7 @@ impl App {
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
-                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                let sum: u32 = (a..b).map(|i| f.data.at(i) as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
             }
             if let (0, Some(cols)) = (n, f.cols) {
@@ -2685,7 +2686,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
@@ -5241,6 +5242,7 @@ impl App {
             }
             C::Run => {
                 sc.run = true;
+                self.scope.run_on();
                 None
             }
             C::Stop => {

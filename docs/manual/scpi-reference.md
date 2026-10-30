@@ -162,6 +162,8 @@ A full scope record as 16-bit samples:
 
 ```
 > STOP
+> TRIG:STAT?            (repeat until STOP)
+< STOP
 > WAV:POIN MAX
 > WAV:FORM WORD
 > WAV:PRE?
@@ -184,6 +186,8 @@ print(m.query('*IDN?'))
 m.write('CONF:VOLT:DC')
 print(float(m.query('READ?')))
 m.write('STOP;:WAV:POIN MAX;:WAV:FORM WORD')
+while m.query('TRIG:STAT?') != 'STOP':
+    pass
 fmt, typ, n, _, xinc, xorig, xref, yinc, yorig, yref = map(float, m.query('WAV:PRE?').split(','))
 codes = m.query_binary_values('WAV:DATA?', datatype='H', container=list)
 volts = [(c - yref) * yinc + yorig for c in codes]
@@ -542,7 +546,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
 | `RUN` | | Starts acquiring. | both |
-| `STOP` | | Stops. | both |
+| `STOP` | | Stops after one more capture (as `DIGitize`, at most the screen's time + 1 s; `TRIGger:STATus?` is `STOP` once it is in); a second `STOP` meanwhile stops at once. | both |
 | `SINGle` | | Sets the sweep to Single and starts. | both |
 | `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
 | `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |

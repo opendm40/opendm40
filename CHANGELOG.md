@@ -27,6 +27,11 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  43 008 at the faster timebases (was 26 624), for the stopped zoom / pan,
+  Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
+  capture (at most 10 s) with the trigger point at the trigger position
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 
 ### Changed
 
@@ -129,6 +134,22 @@ section named after the tag as the release notes; how to cut a release:
   and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
   hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
   (~0.45 s).
+- Scope, STOP: the stopped record was the part of the capture in flight
+  up to the STOP (a few ms after the trigger at 5 ms/div), or the whole
+  record with a step where two captures met. STOP now ends on one more
+  complete capture (as **Single** / `DIGitize`: the trigger point at the
+  trigger position), of the full record up to the screen's time + 0.5 s
+  (43 008 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  at most the screen's time + 1 s after the STOP, with what is in when
+  nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
+  2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for
+  `TRIG:STAT?` = `STOP` before `WAV:DATA?`
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope, stopped: a pan, zoom or V/div change made while the screen was held
+  (right after a screenshot over USB, a message box on the scope page) is
+  drawn when the hold ends; before, the screen kept the drag preview with
+  the rest of the record blank. A drag back from either end of the record
+  moves at once.
 
 ## v0.3.0 (2026-10-27)
 

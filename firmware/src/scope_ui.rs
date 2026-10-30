@@ -1417,7 +1417,7 @@ pub fn drag_delta(horizontal: bool, dx: i32, dy: i32) -> (i32, i32) {
 /// math offset when on, runt level when shown, Y cursors when shown; an
 /// off-screen level at its edge marker). No distance limit; a tie goes to
 /// the one drawn later (on top). (level group, item id).
-#[inline(never)] // .cold (link-native.x): once per drag
+#[inline(never)] // once per drag (region B: link-native.x)
 pub fn drag_target(m: &Model, horizontal: bool, x0: i16, y0: i16) -> Option<(bool, u8)> {
     let mut best: Option<(u8, i16)> = None;
     let mut take = |id: u8, d: i16| {

@@ -34,6 +34,8 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]

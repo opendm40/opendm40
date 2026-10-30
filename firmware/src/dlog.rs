@@ -660,11 +660,11 @@ fn s_pred(order: u32, j: usize, h: &[i32; 3]) -> i32 {
 
 /// The fixed order (0..3) with the least sum of |residual| over `codes`.
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
-pub fn scope_order(codes: &[u16]) -> u32 {
+pub fn scope_order<S: crate::pack10::Src + ?Sized>(codes: &S) -> u32 {
     let mut sum = [0u64; 4];
     let mut h = [0i32; 3];
-    for (j, &c) in codes.iter().enumerate() {
-        let x = (c & 0x3FF) as i32;
+    for j in 0..codes.len() {
+        let x = (codes.at(j) & 0x3FF) as i32;
         for (o, s) in sum.iter_mut().enumerate() {
             *s += (x - s_pred(o as u32, j, &h)).unsigned_abs() as u64;
         }
@@ -715,7 +715,7 @@ impl SEnc {
     }
     /// The next byte of the block coding `codes`; None at its end.
     #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
-    pub fn next(&mut self, codes: &[u16]) -> Option<u8> {
+    pub fn next<S: crate::pack10::Src + ?Sized>(&mut self, codes: &S) -> Option<u8> {
         loop {
             if self.qh != self.qt {
                 let b = self.q[(self.qh & 15) as usize];
@@ -724,7 +724,7 @@ impl SEnc {
                 return Some(b);
             }
             if self.j < codes.len() {
-                let x = (codes[self.j] & 0x3FF) as i32;
+                let x = (codes.at(self.j) & 0x3FF) as i32;
                 if self.mode == S_RAW {
                     self.put(x as u32, 10);
                 } else {
@@ -771,7 +771,7 @@ impl SEnc {
 /// region B) runs at the Save CSV tap, while the Wave view's stream may run:
 /// a dyn sink closure would be a symbol of its own in region C.
 #[inline(always)]
-pub fn scope_block<F: FnMut(u8)>(codes: &[u16], mode: u32, sink: &mut F) -> usize {
+pub fn scope_block<S: crate::pack10::Src + ?Sized, F: FnMut(u8)>(codes: &S, mode: u32, sink: &mut F) -> usize {
     let mut e = SEnc::new(mode, 0);
     while let Some(b) = e.next(codes) {
         sink(b);
@@ -782,7 +782,7 @@ pub fn scope_block<F: FnMut(u8)>(codes: &[u16], mode: u32, sink: &mut F) -> usiz
 /// Choose and size a block's coding: (mode, bytes, CRC-32 of the bytes).
 /// The fixed order with the least |residual|, or raw when that is smaller.
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
-pub fn scope_plan(codes: &[u16]) -> (u32, u32, u32) {
+pub fn scope_plan<S: crate::pack10::Src + ?Sized>(codes: &S) -> (u32, u32, u32) {
     let o = scope_order(codes);
     let mut crc = !0u32;
     let n = scope_block(codes, o, &mut |b| crc = crc32_upd(crc, &[b]));
