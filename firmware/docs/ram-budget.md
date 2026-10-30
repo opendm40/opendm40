@@ -189,7 +189,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | csvlog::CAT | 12 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | The reply is in `csvlog::FIFO_BUF` (SRAM audit). |
 | scope_page::CACHE (SRAM) | 4 824 | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
 | scope_page::FFT (TCM) | 4 128 | the last spectrum | | Must survive a dropped job. Keep. |
-| csvlog::TAIL (SRAM) | 4 096 | a CSV recording | FIFO_BUF | See logger::RING. |
+| csvlog::TAIL (USBHS RAM) | 4 096 | a CSV recording | FIFO_BUF | In the USBHS FIFO RAM ([native-boot.md, Extra RAM areas](native-boot.md#extra-ram-areas-2026-10-30-featsram-extra-areas)). |
 | gen::WAVE (SRAM) | 4 000 | while the generator outputs (DAC DMA, circular) | everything | Keep. |
 | dmm::acdctr::TR (SRAM) | 40 | DBG:ACDC:TRACE only with the `acdc-trace` feature (64 entries, 1 804) | | One unused entry without the feature. |
 | touch::LOG (TCM) | 196 | always (the touch test page; DBG:TOUCH? with `dbg-touch`, 1 924) | | 16 entries without the feature (SRAM audit). |
