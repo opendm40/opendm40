@@ -35,7 +35,7 @@ Stock flash layout (`stock/re/ANALYSIS.md` §1):
 
 ```
 0x08000000  ROM (primary bootloader)  16 KB  sector 0      never touched by updates
-0x08004000  application              ~480 KB sectors 1..8  = update body offset 0
+0x08004000  application              624 KB sectors 1..8  = update body offset 0 (zero-wait below 0x08080000)
 0x080a0000  FS-loader                  64 KB sector 9      never touched by updates
 0x080a4000  UID-bound bootloader data        sector 9      never erase
 0x080c0000  settings / calibration           sector 10     opendm40 only reads it
