@@ -228,23 +228,22 @@ pub fn cap_dis_end() -> u32 {
 pub fn set_cap_dis_end(mv: u32) {
     CAP_DIS_END.store(mv.clamp(1, 1300), core::sync::atomic::Ordering::Relaxed);
 }
-/// Discharge experiment (owner 2026-10-30: discharge faster), RAM only,
-/// default 0: DBG:CAP:DISMODE 0 the stock row (constant current, OP3
-/// servo, SMODE 1110, SFUVR 2 = VDS15 / VDS3), 1 the same with OP3's
-/// reference SFUVR = DBG:CAP:DISREF (3..6: AGNDP9..6 / AGNDN9..6, a larger
-/// drop over the legs: more current, INFERRED), 2 resistive (SMODE 0001:
-/// SGND, the bus to AGND through the same PS4..PS7 legs; the current set
-/// by the external resistors only, INFERRED), 3 resistive down to
-/// CAP_DIS_SWITCH_MV, then 0. Modes 1..3 only after the node voltage, read
-/// on the DC V 60 V row, is within CAP_DIS_SAFE_V; back to 0 when the node
-/// rises or after CAP_DIS_EXP_MS.
-static CAP_DISMODE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The discharge (owner 2026-10-30: discharge faster): DBG:CAP:DISMODE 0
+/// the stock row (constant current, OP3 servo, SMODE 1110, SFUVR 2 = VDS15
+/// / VDS3), 1 (default) the same row with OP3's reference SFUVR =
+/// DBG:CAP:DISREF (3..6: AGNDP9..6 / AGNDN9..6 per the datasheet table;
+/// the current per step in CAP_IDIS_REF). Mode 1 only for a charged
+/// capacitor (the node at the AD1 clamp) whose voltage, read on the DC V
+/// 60 V row, is within CAP_DIS_SAFE_V; back to 0 when the node rises or
+/// after CAP_DIS_EXP_MS. (SMODE 0001, SGND, did not discharge: device
+/// 138d145f, 1.2016 -> 1.1977 V in 5 s.) RAM only.
+static CAP_DISMODE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
 static CAP_DISREF: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(3);
 pub fn cap_dismode() -> u32 {
     CAP_DISMODE.load(core::sync::atomic::Ordering::Relaxed)
 }
 pub fn set_cap_dismode(m: u32) {
-    CAP_DISMODE.store(m.min(3), core::sync::atomic::Ordering::Relaxed);
+    CAP_DISMODE.store(m.min(1), core::sync::atomic::Ordering::Relaxed);
 }
 pub fn cap_disref() -> u32 {
     CAP_DISREF.load(core::sync::atomic::Ordering::Relaxed)
@@ -253,8 +252,30 @@ pub fn set_cap_disref(k: u32) {
     CAP_DISREF.store(k.clamp(2, 6), core::sync::atomic::Ordering::Relaxed);
 }
 const CAP_DIS_SAFE_V: f32 = 5.0;
-const CAP_DIS_EXP_MS: u64 = 10_000;
-const CAP_DIS_SWITCH_MV: f32 = 500.0;
+const CAP_DIS_EXP_MS: u64 = 60_000;
+/// The discharge also ends when the node, below CAP_STALL_MV, falls less
+/// than CAP_STALL_DV_MV in CAP_STALL_MS (device 138d145f: flat at 33.6 ..
+/// 34.0 mV for many seconds, above the 30 mV end; the discharge servo's
+/// comparator window edge, INFERRED; 60 mF falls ~6 mV/s at 0.38 mA), or
+/// after CAP_DIS_MAX_MS in all.
+const CAP_STALL_MV: f32 = 150.0;
+const CAP_STALL_DV_MV: f32 = 2.0;
+const CAP_STALL_MS: u64 = 1000;
+const CAP_DIS_MAX_MS: u64 = 300_000;
+/// Mode 1's discharge current (uA) per DISREF 2..6, from the slope on ~1 mF
+/// (device 138d145f, one unit, from 3.19 V: 0.38 / 0.72 / 0.88 / 0.95 /
+/// ~1.05 mA; not in the order of the datasheet's AGNDP levels).
+const CAP_IDIS_REF: [f32; 5] = [380.0, 720.0, 880.0, 950.0, 1050.0];
+/// The slope estimate: its first sample at or above CAP_DIS_ANCHOR_MV, and
+/// at least CAP_DIS_SPAN_MV below it (device 138d145f: 912 uF for ~1 mF
+/// from a few tens of mV after DC V).
+const CAP_DIS_ANCHOR_MV: f32 = 200.0;
+const CAP_DIS_SPAN_MV: f32 = 100.0;
+/// After a charged capacitor's discharge the first final value waits for
+/// two ramp results in a row within this fraction (device 138d145f, ~1 mF
+/// from 3 V: finals 1191 / 942 / 1054 / 935 uF over 4 s; dielectric
+/// absorption, INFERRED).
+const CAP_CHG_AGREE: f32 = 0.03;
 /// The discharge samples used for the slope: below the AD1 clamp (1.2 V at
 /// the node) and above the end of the discharge.
 const CAP_DIS_HI_MV: f32 = 1150.0;
@@ -1678,6 +1699,19 @@ pub struct Dmm {
     cap_dis_v0: f32,
     cap_dis_last: f32,
     cap_dis_abort: u8,
+    /// This discharge: the voltage read done, samples in a row below
+    /// cap_dis_end, the node seen at the clamp (charged), the last ramp
+    /// result while waiting for two to agree (`CAP_CHG_AGREE`).
+    cap_pre_done: bool,
+    cap_dis_low: u8,
+    cap_dis_chg: bool,
+    cap_chg_prev: f32,
+    /// The stall check's reference sample (mV) and its time (ms, 0 = none).
+    cap_stall_v: f32,
+    cap_stall_t: u64,
+    /// The discharge ended on a flat node (`CAP_STALL_MV`): a resistive
+    /// load; no ramp then counts as a short (`poll_cap_in`).
+    cap_dis_res: bool,
     /// The range of the last capacitance value: AUTO starts there when it
     /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
     /// steps before 600 uF).
@@ -2342,6 +2376,13 @@ impl Dmm {
             cap_dis_v0: f32::NAN,
             cap_dis_last: 0.0,
             cap_dis_abort: 0,
+            cap_pre_done: false,
+            cap_dis_low: 0,
+            cap_dis_chg: false,
+            cap_chg_prev: 0.0,
+            cap_stall_v: 0.0,
+            cap_stall_t: 0,
+            cap_dis_res: false,
             cap_half: [0.0; CAP_HALF_MAX],
             cap_half_up: 0,
             cap_half_n: 0,
@@ -6176,17 +6217,11 @@ impl Dmm {
         rd
     }
 
-    /// The discharge experiment's mode `m` on the discharge row (bytes
-    /// relative to CFG_F13_DISCHARGE: R2F index 0x0F, R31 index 0x11).
+    /// The discharge's mode `m` on the discharge row (R31, index 0x11 of
+    /// CFG_F13_DISCHARGE).
     fn cap_dis_set(&mut self, m: u8) {
-        match m {
-            1 => hy::write(0x31, &[(CFG_F13_DISCHARGE[0x11] & 0xF0) | cap_disref() as u8]),
-            2 | 3 => hy::write(0x2F, &[0x81]),
-            _ => {
-                hy::write(0x2F, &[CFG_F13_DISCHARGE[0x0F]]);
-                hy::write(0x31, &[CFG_F13_DISCHARGE[0x11]]);
-            }
-        }
+        let r31 = CFG_F13_DISCHARGE[0x11];
+        hy::write(0x31, &[if m == 1 { (r31 & 0xF0) | cap_disref() as u8 } else { r31 }]);
         self.cap_dis_on = m;
         // The slope estimate (mode 0 only) from a new anchor.
         self.cap_dis_pv = 0.0;
@@ -6217,18 +6252,13 @@ impl Dmm {
             // Discharge first, then start the ramp when |V| < 30 mV.
             self.cap_dis_v0 = f32::NAN;
             self.cap_dis_last = 0.0;
+            self.cap_pre_done = false;
+            self.cap_dis_low = 0;
+            self.cap_dis_chg = false;
+            self.cap_stall_t = 0;
+            self.cap_dis_res = false;
             hy::quiesce();
-            if cap_dismode() != 0 {
-                // The experiment: the node voltage first, on the DC V 60 V
-                // row through the 10 M divider (relay to DC V and back).
-                relay_pa(clk, 0);
-                self.pa_now = Some(0);
-                hy::configure(&CFG_F1[1]);
-                self.cap_pre = true;
-                self.cap_pre_n = 0;
-            } else {
-                hy::configure(&CFG_F13_DISCHARGE);
-            }
+            hy::configure(&CFG_F13_DISCHARGE);
             self.ramp.discharging = true;
             self.ramp.n = 0;
             self.ramp.med_i = 0;
@@ -6274,7 +6304,10 @@ impl Dmm {
             // The oscillator: from the start (open leads, another
             // capacitor), no grey value kept.
             self.cap_grey = 0.0;
+            self.cap_dis_chg = false;
+            self.cap_dis_res = false;
         }
+        self.cap_chg_prev = 0.0;
         self.cap_agree = 0;
         self.cap_cls2 = false;
         self.cap_idle_flips = 0;
@@ -6373,7 +6406,9 @@ impl Dmm {
             hy::configure(&CFG_F13_DISCHARGE);
             let m = if v0.abs() <= CAP_DIS_SAFE_V { cap_dismode() as u8 } else { 0 };
             self.cap_dis_set(m);
-            self.cap_dis_t = now;
+            self.cap_dis_last = 0.0;
+            self.cap_dis_low = 0;
+            // The row settles before its first sample.
             self.deadline = now + 255;
             return Some(self.cap_discharge_val(v0 * 1000.0, now));
         }
@@ -6390,26 +6425,44 @@ impl Dmm {
             // baseline with each sample), above CAP_DIS_LO_MV; grey only.
             // I: DBG:CAP:IDIS (INFERRED, one capacitor).
             let a = v_mv.abs();
+            if a >= CAP_DIS_HI_MV {
+                self.cap_dis_chg = true;
+                if cap_dismode() != 0 && !self.cap_pre_done {
+                    // Charged: its voltage first, on the DC V 60 V row
+                    // through the 10 M divider (relay to DC V and back),
+                    // then the faster discharge if it is within
+                    // CAP_DIS_SAFE_V.
+                    self.cap_pre_done = true;
+                    hy::quiesce();
+                    relay_pa(clk, 0);
+                    self.pa_now = Some(0);
+                    hy::configure(&CFG_F1[1]);
+                    self.cap_pre = true;
+                    self.cap_pre_n = 0;
+                    self.deadline = now + 120;
+                    return Some(self.cap_discharge_val(v_mv, now));
+                }
+            }
             if self.cap_dis_on != 0 {
-                // The experiment: back to the stock row when the node rises
-                // (below the clamp) or after CAP_DIS_EXP_MS; mode 3 at
-                // CAP_DIS_SWITCH_MV.
+                // Back to the stock row when the node rises (below the
+                // clamp) or after CAP_DIS_EXP_MS.
                 let rising = a < CAP_DIS_HI_MV && self.cap_dis_last > 0.0 && a > self.cap_dis_last + 20.0;
                 if rising || now.saturating_sub(self.cap_dis_t) > CAP_DIS_EXP_MS {
                     self.cap_dis_abort = self.cap_dis_abort.wrapping_add(1);
                     self.cap_dis_set(0);
-                } else if self.cap_dis_on == 3 && a < CAP_DIS_SWITCH_MV {
-                    self.cap_dis_set(0);
                 }
             }
             self.cap_dis_last = a;
-            if self.cap_dis_on == 0 && a > CAP_DIS_LO_MV && a < CAP_DIS_HI_MV {
+            if a > CAP_DIS_LO_MV && a < CAP_DIS_HI_MV {
                 if self.cap_dis_pv == 0.0 {
-                    self.cap_dis_pv = a;
-                    self.cap_dis_pt = now;
-                } else if self.cap_dis_pv > a && now > self.cap_dis_pt {
+                    if a >= CAP_DIS_ANCHOR_MV {
+                        self.cap_dis_pv = a;
+                        self.cap_dis_pt = now;
+                    }
+                } else if self.cap_dis_pv - a >= CAP_DIS_SPAN_MV && now > self.cap_dis_pt {
                     let slope = (self.cap_dis_pv - a) / (now - self.cap_dis_pt) as f32; // mV / ms = V / s
-                    let cest = cap_idis() as f32 / slope; // uA / (V / s) = uF
+                    let i = if self.cap_dis_on == 1 { CAP_IDIS_REF[cap_disref() as usize - 2] } else { cap_idis() as f32 };
+                    let cest = i / slope; // uA / (V / s) = uF
                     if cest.is_finite() && cest > 0.0 {
                         self.cap_cand = cest;
                         if now - self.cap_dis_pt >= CAP_DIS_BASE_MS {
@@ -6418,18 +6471,35 @@ impl Dmm {
                     }
                 }
             }
-            if v_mv.abs() < cap_dis_end() as f32 {
+            // The end: two samples in a row below cap_dis_end (one may be
+            // the last row's).
+            self.cap_dis_low = if a < cap_dis_end() as f32 { self.cap_dis_low.saturating_add(1) } else { 0 };
+            let mut stalled = false;
+            if a < CAP_STALL_MV {
+                if self.cap_stall_t == 0 || self.cap_stall_v - a >= CAP_STALL_DV_MV {
+                    self.cap_stall_v = a;
+                    self.cap_stall_t = now;
+                } else if now - self.cap_stall_t >= CAP_STALL_MS {
+                    stalled = true;
+                }
+            } else {
+                self.cap_stall_t = 0;
+            }
+            if self.cap_dis_low >= 2 || stalled || now.saturating_sub(self.cap_dis_t) > CAP_DIS_MAX_MS {
+                self.cap_dis_res = stalled && self.cap_dis_low == 0;
                 self.ramp.discharging = false;
                 self.cap_dis_on = 0;
                 if !self.manual && self.cap_dis_c > 0.0 {
                     // The ramp range from the discharge's estimate (the
-                    // smallest whose 0.9 x full scale holds it), not range
-                    // by range from the slope.
+                    // smallest whose 0.9 x full scale holds it), up only:
+                    // down is the ramp's own rule.
                     let mut t = 5;
                     while t < 7 && self.cap_dis_c > 0.9 * f_dec * CAP_DEC[t] {
                         t += 1;
                     }
-                    self.range = t as i8;
+                    if t as i8 > self.range {
+                        self.range = t as i8;
+                    }
                 }
                 self.write_config(clk);
                 self.cap_row_new = true;
@@ -6470,10 +6540,17 @@ impl Dmm {
             }
             self.ramp.cmp = Some(cmp);
             if self.cap_idle < CAP_IDLE_N || self.manual {
+                // (No value yet: dashes, not a grey 0.)
+                if self.cap_c <= 0.0 && self.ramp.first {
+                    return Some(self.cap_dash());
+                }
                 return Some(self.cap_ramp_val(self.cap_c, self.cap_idle >= CAP_IDLE_N));
             }
             self.cap_c = 0.0;
-            if v_mv.abs() < CAP_SHORT_MV && self.cap_idle_flips < 2 {
+            // A resistor on the leads (device 138d145f: 50 ohm held the
+            // node at ~34 mV, the discharge stalled there, then the ramp
+            // range cycled 600 uF -> 60 uF -> 60 nF -> 600 uF): a short too.
+            if self.cap_dis_res || (v_mv.abs() < CAP_SHORT_MV && self.cap_idle_flips < 2) {
                 // Near 0 V: a capacitor too large for this range's current
                 // (47 mF on 600 uF moves 0.02 mV per poll) or a short: the
                 // next range up; on 60 mF a short, OL, looked at again
@@ -6702,11 +6779,20 @@ impl Dmm {
                 b[i] = self.cap_ring[i] * k;
             }
             sort_f32(&mut b[..n]);
-            let mut v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
-            if self.ramp.first && self.cap_first_v > 0.0 {
+            let v_ring = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+            let mut v = v_ring;
+            if self.ramp.first && self.cap_first_v > 0.0 && !self.cap_dis_chg {
                 v = self.cap_first_v;
             }
-            if self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N {
+            let ready = self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N;
+            // After a charged capacitor's discharge: the first final value
+            // once two results in a row agree (CAP_CHG_AGREE).
+            let wait = ready && self.ramp.first && self.cap_dis_chg && {
+                let ok = self.cap_chg_prev > 0.0 && (v_ring - self.cap_chg_prev).abs() <= CAP_CHG_AGREE * v_ring;
+                self.cap_chg_prev = v_ring;
+                !ok
+            };
+            if ready && !wait {
                 // Adaptive class (owner 2026-10-30): class 1 for a fast first
                 // value; once CAP_AGREE_N final values in a row agree within
                 // 2 % (the same capacitor), class 2 for accuracy. The value
@@ -6741,6 +6827,7 @@ impl Dmm {
                     self.ramp.first = false;
                     self.cap_last = r as i8;
                     self.cap_dis_c = 0.0;
+                    self.cap_dis_chg = false;
                 }
             } else if self.cap_dis_c <= 0.0 || (v - self.cap_dis_c).abs() <= CAP_DIS_AGREE * self.cap_dis_c {
                 self.cap_cand = v;

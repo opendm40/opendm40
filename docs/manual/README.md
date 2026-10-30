@@ -636,7 +636,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Ranges: 60 nF to 60 mF; **MF** chooses one or AUTO. Below 6 nF the value
   has 3 decimals; from 6 mF it is in µF (4700 µF).
 - From 600 µF the meter first discharges the capacitor (**Discharging**, or
-  orange **Charged cap: discharge first** when it takes long), then updates
+  orange **Charged cap: discharge first** above ~1.2 V), then updates
   every 0.25 s; the value is grey until the ramp has run both ways.
 
   ![Discharging before 600 µF and up](img/dmm-cap-dis.png)

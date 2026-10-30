@@ -23,8 +23,9 @@ section named after the tag as the release notes; how to cut a release:
   capacitor on 6 / 60 mF starts the range choice again.
 - Capacitance on 600 µF and up: a value every 0.25 s (the median of the
   last polls, corrected for the ramp's two directions), grey until the ramp
-  has run both ways; "Discharging" while the meter discharges, orange
-  "Charged cap: discharge first" when that takes long.
+  has run both ways; "Discharging" with a rough grey value while the meter
+  discharges, orange "Charged cap: discharge first" above ~1.2 V; a charged
+  capacitor (up to 5 V) discharges about twice as fast.
 - Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
   ten times it.
 

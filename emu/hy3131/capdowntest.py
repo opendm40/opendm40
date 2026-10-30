@@ -64,6 +64,17 @@ SCEN = [
     ('4.7mF-clamp', [(30, 'c:4.7e-3;capasym:0', 6e-3, 4.7e-3, 0), (12, 'open|SetAd1 6000000', NF6, 'small', 4)]),
     ('4.7mF-short-open', [(30, 'c:4.7e-3', 6e-3, 4.7e-3, 0), (12, 'short|SetAd1 0', None, 'olsmall', 4),
                           (30, 'open', NF6, 'small', 5)]),
+    # A resistor on the leads (device 138d145f: 50 ohm held the discharge at ~34 mV for good,
+    # then 600 uF -> 60 uF -> 60 nF -> 600 uF with a grey 0): the discharge ends on the flat
+    # node and the meter ends on a short's result (#74) without cycling. The emulator's
+    # discharge decays to 0 and its oscillator reads a resistor as ~0, so AD1 is forced to the
+    # device's 34 mV (SetAd1) and the ramp ranges are entered from DC V (AUTO starts on the
+    # last value's range). `scpi:` parts are sent at the phase's start.
+    ('r50-dcv', [(14, 'c:1000e-6', None, None, 0), (4, 'r:50|SetAd1 205350|scpi:CONF:VOLT:DC', None, None, 0),
+                 (30, 'r:50|SetAd1 205350|scpi:CONF:CAP', None, 'olsmall', 8, NF6)]),
+    ('r50-after-1mF', [(14, 'c:1000e-6', None, None, 0), (25, 'r:50|SetAd1 205350', None, 'olsmall', 8)]),
+    ('r1k-dcv', [(14, 'c:1000e-6', None, None, 0), (4, 'r:1000|scpi:CONF:VOLT:DC', None, None, 0),
+                 (30, 'r:1000|scpi:CONF:CAP', None, 'olsmall', 8)]),
     ('10mF', [(40, 'c:10e-3', 6e-2, 10e-3, 15)]),
     ('47mF', [(40, 'c:47e-3', 6e-2, 47e-3, 15)]),
 ]
@@ -95,6 +106,8 @@ with open(script, 'w') as f:
         spec, *mon = scen[k][1][j][1].split('|')
         f.write('%.3f dmm open;%s\n' % (s + BOOT_OFS, spec))
         for m in mon:
+            if m.startswith('scpi:'):
+                continue
             f.write('%.3f monitor sysbus.hy3131 %s\n' % (s + BOOT_OFS + 0.001, m))
 cmd = [sys.executable, os.path.join(EMU, 'run.py'), 'fwrs', '--app', A.app, '--usbip', '0.01', '--usbip-port', str(A.port),
        '--run-for', '%.1f' % end, '--name', tag, '--script', script]
@@ -157,6 +170,10 @@ try:
             if j == 0:
                 wait_until(w0 + 1)
                 q('CONF:CAP;*OPC?')
+            for m in inp.split('|')[1:]:
+                if m.startswith('scpi:'):
+                    wait_until(w0 + 0.3)
+                    q(m[5:] + ';*OPC?')
             rows = []
             last = None
             while True:
