@@ -19,8 +19,8 @@ its ratings. Follow the safety rules and limits in Alientek's user manual.
 opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
-**Status.** opendm40 is experimental. It is developed on a DM40A; DM40B and
-DM40C ran only in the emulator. What is untested on a real meter is listed in [Known
+**Status.** opendm40 is experimental. It is developed on a DM40A and tested on
+DM40A, DM40B and DM40C. What is untested on a real meter is listed in [Known
 limitations](#known-limitations).
 
 ## Contents
