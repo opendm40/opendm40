@@ -4082,10 +4082,10 @@ impl App {
                 match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
-                    // -/+ steppers (ui-review #12): 10 % steps, clamped.
+                    // -/+ steppers (ui-review #12): Backlight on the
+                    // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     Some(2) => {
-                        let d = ui::settings_step(x) as i16 * 10;
-                        self.backlight = (self.backlight as i16 + d).clamp(10, 100) as u8;
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
                         backlight(self.backlight);
                     }
                     Some(3) => {

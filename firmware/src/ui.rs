@@ -3144,6 +3144,19 @@ pub fn settings_step(x: u16) -> i8 {
     step_dir(x, STEP_MINUS_X)
 }
 
+/// Settings' Backlight stepper: the next value on the 10, 15, 25 ... 95, 100
+/// grid above (`dir` > 0) or below the current one, so 10 + goes to 15 and
+/// 100 - to 95 (the manual's list); an off-grid value (an old settings file)
+/// joins the grid on the first step.
+pub fn backlight_step(cur: u8, dir: i8) -> u8 {
+    const GRID: [u8; 11] = [10, 15, 25, 35, 45, 55, 65, 75, 85, 95, 100];
+    if dir > 0 {
+        GRID.iter().copied().find(|&g| g > cur).unwrap_or(100)
+    } else {
+        GRID.iter().rev().copied().find(|&g| g < cur).unwrap_or(10)
+    }
+}
+
 /// `settings_step` on the Record page.
 pub fn record_step(x: u16) -> i8 {
     step_dir(x, REC_STEP_MINUS_X)
