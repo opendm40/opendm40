@@ -1583,7 +1583,7 @@ below the comparator's window, as for an idle PB1 (hw/README, Measured node
 behaviour), so the comparator rows see one polarity only.
 
 * **Negative leg** (`sentinel.rs` NEGATIVE LEG): DC V 6 V, DC mV and ohm
-  (not 600 ohm, not temperature, not AC+DC) carry OP2 (x1) on PB1 -> AD2 with
+  (not 600 Mohm, not temperature, not AC+DC) carry OP2 (x1) on PB1 -> AD2 with
   the peak hold, as continuity's `Ad2A` row. The hold is read every 100 ms;
   wholly below `PK2_NEG_THR` (~-180 mV, ~3.8 mA) or, in DC V,
   `PK2_NEG_THR_DCV` (~-400 mV, ~8.4 mA) it makes the next comparator window
@@ -1603,7 +1603,8 @@ behaviour), so the comparator rows see one polarity only.
   An AC current there reads 0x70 / 0 in turn (MIXED, as the 66 kHz square):
   a window counts when the negative leg's AD2 hold since the last one spans
   both +-`PK2_NEG_THR_DCV` (the square's pickup, if any, is averaged by
-  AD2's filter: *inferred*). Such runs too get no probe.
+  AD2's filter: *inferred*). Such runs too get no probe: no A-PROT for an AC
+  current (an AC source across A-COM) in DC V; DC mV keeps it.
 * DBG:SENTinel:VARiant bit 7 (`VAR_NEG_OFF`) restores the 0.4.0 rows (no AD2
   on PB1, R21 0xDD) for an A/B of the readings.
 

@@ -596,7 +596,7 @@ pub fn pk_dc_hit(pkmin: i32, pkmax: i32) -> bool {
 // 10 V, the 66 kHz square in DC V) reads 0x70 / MIXED, so the leg adds
 // nothing there. Not covered: A-PROT for a reversed current (the probe goes
 // in on comparator runs only, `cmp_run`: its row would take the leg's AD2
-// away), temperature, ohm 600 ohm (its phases rewrite R32), AC+DC.
+// away), temperature, ohm 600 Mohm (its phases rewrite R32), AC+DC.
 
 /// AD2 codes (IG 2.0) for the negative leg: PB1 ~180 mV below PB3, a
 /// reversed DC current from ~3.8 mA on 47.5 ohm (PK_DC_THR's level, the
@@ -636,7 +636,7 @@ pub const PK2_NEG_THR_DCV: i32 = 167_800;
 pub const R21_DCV_PB1: u8 = 0x8B;
 
 /// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): DC V
-/// 6 V (1 r0), DC mV (3), ohm (10; not 600 ohm: the caller), plain (not
+/// 6 V (1 r0), DC mV (3), ohm (10; not 600 Mohm: the caller), plain (not
 /// AC+DC), the comparator sentinel on, and not dropped by
 /// DBG:SENTinel:VARiant bit 7 (VAR_NEG_OFF, an A/B of the readings).
 pub fn neg_leg(mode: u8, range: u8, acdc: bool, kind: Kind, var: u8) -> bool {

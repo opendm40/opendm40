@@ -1191,7 +1191,7 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   A-JACK shows only with the V/Ω jack free. Manual Ω ranges below 6 MΩ may
   show LIVE? for a current in A even with V/Ω free. The same with a signal above
   the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
-- No A-PROT for a current flowing from COM into the A jack: A-JACK only.
+- No A-PROT for a current flowing from COM into the A jack, or for an AC current in DC V: A-JACK only.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 

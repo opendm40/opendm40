@@ -2488,7 +2488,7 @@ impl Dmm {
         let mask = if self.fuse_job.is_some() || src_row.is_some() { 0 } else { self.sent.mask };
         let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
         // The comparator rows' negative leg (sentinel NEGATIVE LEG): AD2 on
-        // PB1 (not ohm 600 ohm: its phases write R32 whole).
+        // PB1 (not ohm 600 Mohm: its phases write R32 whole).
         let neg = !am && !is_ohm600(m, self.range) && sentinel::neg_leg(m, r as u8, self.acdc, kind, sentinel::variant());
         let row = if neg { sentinel::neg_row(&row) } else { row };
         // The probe (PB2) over the comparator rows after a hit, and while
