@@ -1392,12 +1392,11 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
 /// The reply itself is kept in the first CAT_MAX bytes of the row FIFO
 /// (`FIFO_BUF`; docs/native-boot.md "SRAM audit"), written only while
 /// `fifo_idle`. `fifo` / `lend_fifo` clear `ok` before a recording or a
-/// fast-log session writes there. Neither loses a valid cache: a recording
-/// commits its header right after `start` and every commit writes the
-/// flash, a fast-log session holds the disk (`gallery_free`: MMEM:CAT? is
-/// Busy) and writes it; and the Wave view, CH2 and inrush (the streams the
-/// cache is for) refuse to start during a recording (app_wave.rs,
-/// app_ch2.rs, app_inrush.rs `csvlog::active`).
+/// fast-log session writes there. A fast-log session holds the disk
+/// (`gallery_free`: MMEM:CAT? is Busy); during a recording every query
+/// reads the disk, but no stream the cache is for runs then: the Wave view
+/// and inrush refuse to start during one, CH2 stops (app_wave.rs,
+/// app_inrush.rs, app_ch2.rs `csvlog::active`).
 struct Cat {
     ok: bool,
     stamp: u32,

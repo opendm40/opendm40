@@ -867,15 +867,17 @@ touch.rs with `dbg-touch`.
 - Both accessors clear `ok`. The cache is written only while `fifo_idle()`
   (`!csvlog::active() && !fastlog::active()`): in `catalog_warm` and after
   a scan in `catalog_scpi`. It is read only while `ok`.
-- No valid cache is lost. A recording commits its header right after
-  `start`, and every commit writes the flash (`FLASH_WRITES`). A fast-log
-  session holds the disk (`gallery_free` false: MMEM:CAT? is Busy) and
-  writes it.
-- The streams the cache is for (Wave view, CH2, inrush) refuse to start
-  during a recording ([app_wave.rs](../src/app_wave.rs),
-  [app_ch2.rs](../src/app_ch2.rs), [app_inrush.rs](../src/app_inrush.rs)
-  `csvlog::active`); the inrush page and `fastlog::begin` also refuse a
-  fast-log session or a recording.
+- A fast-log session holds the disk (`gallery_free` false: MMEM:CAT? is
+  Busy) and writes it, so it loses no valid cache.
+- During a CSV recording every MMEM:CAT? reads the disk (~10 block reads).
+  Before, a second query between two commits (every commit writes the
+  flash, at most 60 s apart) was a copy. No stream that the cache is for
+  runs then: the Wave view and inrush refuse to start during a recording,
+  CH2 stops for one ([app_wave.rs](../src/app_wave.rs),
+  [app_inrush.rs](../src/app_inrush.rs), [app_ch2.rs](../src/app_ch2.rs)
+  `csvlog::active`), and the inrush page and `fastlog::begin` also refuse
+  a fast-log session. An SCPI LOG:STATe ON session never warmed the
+  cache.
 
 **`bt::TX` not at 4 KiB.** A BT reply goes into the ring whole (`send`).
 `Bt::respond_with` builds it on the stack and returns, so a 6 145-byte
