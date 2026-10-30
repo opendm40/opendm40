@@ -1652,7 +1652,12 @@ impl App {
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
-        // shutdown host activity too (`note_host_activity`).
+        // shutdown host activity too (`note_host_activity`). On USB power
+        // (PB10, `Power::on_charger`) the shutdown timer does not run, in any
+        // view: it counts afresh from the unplug (owner, 2026-10-30).
+        if self.power.on_charger() {
+            self.note_host_activity(now);
+        }
         let dim_idle = now.saturating_sub(self.last_input);
         let idle = now.saturating_sub(self.last_input.max(self.last_host));
         self.pw_tick(now);
@@ -1660,19 +1665,7 @@ impl App {
             self.dimmed = true;
             backlight(5);
         }
-        // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
-        // started explicitly, see Stats::rec). Dimming still applies.
-        // Nor while the power meter integrates energy with a current flowing.
-        // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1), nor while the inrush page is armed or
-        // capturing (its stream runs: #144, a load that starts on its own).
-        if self.off_ms() != 0
-            && idle > self.off_ms()
-            && !self.meter.stats.rec
-            && !self.dmm.pw.integrating()
-            && !crate::csvlog::active()
-            && !crate::inrush::ses().streaming
-        {
+        if !self.off_held() && idle > self.off_ms() {
             self.persist_now();
             power_off();
         }
@@ -3161,9 +3154,24 @@ impl App {
     /// UF-28: before the idle power-off, "Auto power-off in 30 s" (20, 10)
     /// with a beep that ignores a 0 % volume. Not an input: the countdown
     /// goes on unless the user touches the screen or a key.
+    /// No idle shutdown (nor its countdown): Shutdown Never, or during a
+    /// MIN/MAX/AVG recording session (FR-02; started explicitly, see
+    /// Stats::rec), while the power meter integrates energy with a current
+    /// flowing, during a CSV recording (Record page: a 24 h log on battery;
+    /// decisions-2026-10-22.md #1), or while the inrush page is armed or
+    /// capturing (its stream runs: #144, a load that starts on its own).
+    /// Dimming still applies. USB power holds it off through `idle` (`tick`).
+    fn off_held(&self) -> bool {
+        self.off_ms() == 0
+            || self.meter.stats.rec
+            || self.dmm.pw.integrating()
+            || crate::csvlog::active()
+            || crate::inrush::ses().streaming
+    }
+
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = self.off_ms();
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
+        if self.off_held() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }

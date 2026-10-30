@@ -232,8 +232,9 @@ the combined view switches to the next sub-mode of the current function
 - **Dim screen** (Settings, default 5 min): without a touch or a key press
   for this long, the backlight dims. Any touch or key brings it back; that
   first touch only wakes the screen and does nothing else.
-- **Shutdown** (Settings, default 30 min): without input for this long, the
-  meter switches off. 30 s before, it beeps and shows **Auto power-off in
+- **Shutdown** (Settings, default 30 min): on battery, without input for
+  this long, the meter switches off; with USB power (a computer or a charger)
+  it never does, and the time counts afresh from the unplug. 30 s before, it beeps and shows **Auto power-off in
   30 s** (then 20, 10); touch the screen or press a key to keep it on.
 - A connected computer or phone also keeps the meter on: any SCPI command
   over USB or Bluetooth, a phone-app request, and the computer reading or
@@ -2264,7 +2265,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
+| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
 | **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
