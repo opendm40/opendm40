@@ -9,6 +9,10 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Mode Remember** (Settings > More > More, as the stock's; default OFF):
+  ON restarts the multimeter after a power-off in the function, range, rate
+  and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
+- **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
 - **Russian README and user manual:** [README.ru.md](README.ru.md) and
   [docs/manual/README.ru.md](docs/manual/README.ru.md), with a language
   switch at the top of each.

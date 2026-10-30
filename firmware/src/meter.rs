@@ -381,6 +381,12 @@ const SHOW_MIN_MS: u64 = 80;
 //              ../docs/dmm-accuracy.md), EXT_ACC_OFF
 //   bit 19     ohm readings below 0 shown (0 = clamped at 0, the stock),
 //              EXT_OHM_NEG
+//   bit 20     Mode Remember ON (0 = OFF, the stock's default): a power-on
+//              restores the multimeter's function and settings, EXT_MODE_REMEMBER
+//   bits 21..23 the trend chart timebase (ui::trend_code; 0 = 320 ms/div),
+//              EXT_TREND_SHIFT
+//   bits 24..27 the stored function's fixed range: its range page item + 1
+//              (ui::range_items; 0 = autorange), EXT_RANGE_SHIFT
 // (bits 9.. are set / read by app.rs next to ext_word / ext_settings.)
 
 /// p[38] bit 9: temperature unit deg F.
@@ -399,6 +405,12 @@ pub const EXT_DANGER_SHIFT: u32 = 16;
 pub const EXT_ACC_OFF: u32 = 1 << 18;
 /// p[38] bit 19: ohm readings below 0 shown (0 = clamped: every older record).
 pub const EXT_OHM_NEG: u32 = 1 << 19;
+/// p[38] bit 20: Mode Remember ON (0 = OFF: every older record).
+pub const EXT_MODE_REMEMBER: u32 = 1 << 20;
+/// p[38] bits 21..23: the trend timebase code (0 = default: older records).
+pub const EXT_TREND_SHIFT: u32 = 21;
+/// p[38] bits 24..27: the fixed range item + 1 (0 = autorange: older records).
+pub const EXT_RANGE_SHIFT: u32 = 24;
 
 /// Settings decoded from p[38].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
