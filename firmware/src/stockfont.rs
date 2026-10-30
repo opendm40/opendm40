@@ -365,7 +365,7 @@ pub const LOCK: Font = Font(0x0806_BF24); // 0x20 closed, 0x21 open
 pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth, 0x22 USB (ours)
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
-pub const TEXT22: Font = Font(0x0806_B13C); // menu text, 1 bpp (DejaVu Sans Condensed, docs/fonts.md)
+pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp (+ our ℃ / ℉)
 
 /// Stock alignment 0..8: 0 left/top, 1 left/vcenter, 2 left/bottom, 3 right/top,
 /// 4 right/vcenter, 5 right/bottom, 6 hcenter/top, 7 hcenter/bottom, 8 center.

@@ -1330,10 +1330,9 @@ pub fn slot_alert(hold: u8, alert: crate::sentinel::Alert, alt: bool) -> bool {
 
 /// HOLD / RUN slot of the DMM status bar. Manual HOLD keeps the stock F21
 /// "HOLD"; AutoHold is a different face so the two cannot be confused:
-/// "A-HOLD" in TEXT22 (73 px, F21 would need 103), accent blue while it waits
+/// "A-HOLD" in TEXT22 (66 px, F21 would need 103), accent blue while it waits
 /// for a stable value, inverted (dark on orange) while it shows a captured
-/// one, in the alerts' 119..201 box. Slot 119..190 (after the range label;
-/// uptime from 205).
+/// one. Slot 119..190 (after the range label; uptime from 205).
 ///
 /// With no HOLD / AutoHold the slot carries the wrong-connection alert
 /// (sentinel.rs) instead of "RUN", in the same TEXT22 face: "A-JACK" white
@@ -1356,9 +1355,9 @@ fn hold_label(hold: u8, alert: crate::sentinel::Alert, alt: bool) {
     match hold {
         2 | 3 => {
             let (fg, bg) = if hold == 3 { (BG, VALUE) } else { (0x04FC, BAR) };
-            lcd::fill_rect(119, 1, 83, 4, BAR);
-            lcd::fill_rect(119, 29, 83, 4, BAR);
-            sf::label(sf::TEXT22, rect(119, 5, 83, 24), "A-HOLD", fg, bg, 8, 0);
+            lcd::fill_rect(119, 1, 71, 4, BAR);
+            lcd::fill_rect(119, 29, 71, 4, BAR);
+            sf::label(sf::TEXT22, rect(119, 5, 71, 24), "A-HOLD", fg, bg, 8, 0);
         }
         _ => sf::label(sf::F21, r, if hold == 1 { "HOLD" } else { "RUN" }, STATUS_FG, BAR, 8, 0),
     }

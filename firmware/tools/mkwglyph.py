@@ -3,8 +3,9 @@
 one (UNIT, LETTERS, SC_DIGITS = K_FONT, HIST), used by stockfont.rs
 glyph_or_twin instead of the two overlapped V of before (owner 2026-10-22),
 a lowercase 'k' for the unit fonts (UNIT, LETTERS, F21, K_FONT, HIST; owner
-issue #136: "kW", "kΩ", not the stock "K") and an Ω for ASCII26 (the
-dialogs).
+issue #136: "kW", "kΩ", not the stock "K"), an Ω for ASCII26 (the
+dialogs) and ℃ / ℉ for the menu text font TEXT22 (pixel art: the stock
+C / F of the font after a 4 x 4 ring).
 
 The stock faces are a Helvetica-style bold (of the installed faces FreeSans
 Bold fits their A H K M N V best: mean |alpha| error 0.77..0.98 of 15). The
@@ -149,6 +150,36 @@ def ohm_from_o(f):
     return dict(w=width, h=height, adv=e['adv'], yoff=e['yoff'] + e['h'] - height, px=px)
 
 
+# The degree ring of TEXT22's ℃ / ℉ (1 bpp), on the caps' top row.
+DEG_RING = """
+.##.
+#..#
+#..#
+.##.
+"""
+
+
+def deg_text22(base):
+    """℃ / ℉ for TEXT22 (1 bpp, 22 px line, the stock's 11 px cells): the
+    ring at x 0..3 on the caps' rows 4..7, then the font's own `base` glyph
+    from x 5 (C ink from x 6, F from x 5); 16 px box and advance."""
+    def make(f):
+        e, px = glyph(f, ord(base))
+        ring = DEG_RING.split()
+        w = 16
+        out = [[0] * w for _ in range(e['h'])]
+        for y, r in enumerate(ring):
+            for x, c in enumerate(r):
+                if c == '#':
+                    out[4 + y][x] = 15
+        for y in range(e['h']):
+            for x in range(e['w']):
+                if px[y][x] and 5 + x < w:
+                    out[y][5 + x] = 15
+        return dict(w=w, h=e['h'], adv=w, yoff=e['yoff'], px=out)
+    return make
+
+
 def w_from_m(f):
     e, px = glyph(f, ord('M'))
     # rows with ink, mirrored in place (the blank top / bottom rows stay)
@@ -210,7 +241,8 @@ OWN = [('UNIT', 0x0805ECB8, 'W', w_from_face), ('LETTERS', 0x0805DAB4, 'W', w_fr
        ('LETTERS', 0x0805DAB4, 'k', k_from_cap), ('BTN_GLYPH', 0x0805A9FC, '\x09', acdc_from_btn),
        ('UNIT', 0x0805ECB8, 'k', k_from_cap), ('F21', 0x080667F8, 'k', k_from_cap),
        ('K_FONT', 0x0805C5DC, 'k', k_from_cap), ('HIST', 0x0806C3E8, 'k', k_hist),
-       ('ASCII26', 0x080592F0, '\u03a9', ohm_from_o)]
+       ('ASCII26', 0x080592F0, '\u03a9', ohm_from_o),
+       ('TEXT22', 0x0806B13C, '\u2103', deg_text22('C')), ('TEXT22', 0x0806B13C, '\u2109', deg_text22('F'))]
 
 
 def main():
