@@ -349,7 +349,7 @@ def reach(roots, edges, blocked):
 
 
 def load_traces(paths):
-    """{pc: instructions} of the traces of this ELF, and the mangled names
+    """{pc: instructions} of the traces of this ELF, and the demangled names
     of the functions hit in traces of another build (PATH@ELF)."""
     blocks, names = {}, set()
     for p in paths:
@@ -365,7 +365,8 @@ def load_traces(paths):
                         a = int(q[0], 16)
                         i = bisect.bisect_right(oaddrs, a) - 1
                         if i >= 0 and a < oaddrs[i] + max(o.mangled_funcs[oaddrs[i]][1], 2):
-                            names.add(o.mangled_funcs[oaddrs[i]][0])
+                            n = o.mangled_funcs[oaddrs[i]][0]
+                            names.add(o.dem.get(n, n))
             continue
         for f in fs:
             for l in open(f, errors='replace'):
@@ -456,9 +457,10 @@ def main():
     traced_f = set()
     blocks, other_names = load_traces(a.trace)
     if other_names:
-        # Another build's trace: the same (mangled) function names here.
+        # Another build's trace: the same demangled function names here (the
+        # mangled ones carry a crate hash that differs between feature sets).
         for ad, (n, _) in funcs.items():
-            if n in other_names:
+            if D(n) in other_names:
                 traced_f.add(('f', ad))
     if blocks:
         for pc, n in blocks.items():
