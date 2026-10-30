@@ -131,6 +131,23 @@ mod data {
         *b = if x & 1 == 0 { (*b & 0x0F) | v << 4 } else { (*b & 0xF0) | v };
     }
 
+    /// Columns a .. b of a nibble row set to v: whole bytes where it can.
+    #[inline(always)]
+    fn nfill(r: &mut [u8; MAXW / 2], mut a: usize, b: usize, v: u8) {
+        if a & 1 == 1 && a < b {
+            nset(r, a, v);
+            a += 1;
+        }
+        let vv = v * 0x11;
+        while a + 1 < b {
+            r[(a >> 1) & (MAXW / 2 - 1)] = vv;
+            a += 2;
+        }
+        if a < b {
+            nset(r, a, v);
+        }
+    }
+
     /// Columns a .. b of a row held as nibbles to f as runs of equal coverage.
     #[inline(always)]
     fn emit<F: FnMut(u8, u16)>(r: &[u8; MAXW / 2], mut a: usize, b: usize, f: &mut F) {
@@ -369,9 +386,7 @@ mod data {
                 if k == K_C {
                     emit(&c.prev, a, b, f);
                 } else {
-                    for i in x..e {
-                        nset(&mut c.prev, i, v);
-                    }
+                    nfill(&mut c.prev, x, e, v);
                     if a < b {
                         f(v, (b - a) as u16);
                     }
