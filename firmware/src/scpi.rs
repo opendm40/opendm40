@@ -606,10 +606,11 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           unit*2+range; B zero, C A offset) / measure again;
 ///                           ? = valid,fixed;c0..c9
 ///   DBG:ACDC:R0 1|2 / ?     B 6 V: (i) AD1 SENSE - PB5 / (ii) OP1O - RLU
-///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs): off / on / on with
+///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs; feature acdc-trace, else
+///                           undefined header): off / on / on with
 ///                           the row read back per DC conversion; re-arms
 ///   DBG:ACDC:TRACE? [from]  n,held,trig,on then ";" + 56 hex digits per entry
-///                           (oldest = 0, from `from`); frozen 48 events after
+///                           (oldest = 0, from `from`); frozen 32 events after
 ///                           an accepted DC part > 20 % off the one before
 ///   DBG:ACDC:RANG <item>|AUTO  the MF range item (V 0 = 600 mV, 1..4 = 6 ..
 ///                           1000 V; A 0..5 = 600 uA .. 10 A; manual) / AUTO+
@@ -2250,6 +2251,9 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "READout") => out = Out::Instr(Cmd::DbgReadout),
+                // Without the feature `acdc-trace`: no such header (Cargo.toml).
+                #[cfg(not(feature = "acdc-trace"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
@@ -2274,7 +2278,9 @@ impl Scpi {
                             Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-trace")]
                         (b"TRACE", true) => Some(Cmd::DbgAm(8, parse_num(a0).unwrap_or(0.0).clamp(0.0, 255.0) as u8, 0.0)),
+                        #[cfg(feature = "acdc-trace")]
                         (b"TRACE", false) => match parse_num(a0) {
                             Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,

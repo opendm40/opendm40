@@ -906,9 +906,8 @@ Pairs checked and not overlaid (each can be live with the other):
 | `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
 | `gen::WAVE` | the DAC's circular DMA source while the generator outputs, with everything |
 
-Not changed: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE) is debug-only.
-On `test/scope-chain-0.4` the `acdc-trace` feature leaves it out. On 0.4.0
-it stays in the image.
+Not changed here: `dmm::acdctr::TR` (5 388 B, DBG:ACDC:TRACE); the next
+section puts it behind a feature.
 
 | | before (release/0.4.0, e3229f7a) | after |
 |---|---|---|
@@ -917,6 +916,25 @@ it stays in the image.
 | region C free | 13 556 B | 13 996 B |
 | stack headroom (static worst path) | 20 744 B | 20 760 B |
 | SRAM free | 24 244 B | 34 628 B |
+
+### AC+DC trace behind a feature (2026-10-30, feat/sram-extra-areas)
+
+The owner does not want DBG:ACDC:TRACE in the firmware. The cargo feature
+`acdc-trace` ([Cargo.toml](../Cargo.toml), off by default; the same feature
+as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
+- without it [acdctr.rs](../src/acdctr.rs) keeps one ring entry, `live()`
+  is constant false and the `Dmm` hooks test `acdctr::ON` first, so their
+  code is dropped; DBG:ACDC:TRACE[?] is an undefined header;
+- with it the ring has 64 entries (was 192) and 32 events after the
+  trigger (was 48).
+
+| | before (0e7ffa6e) | after |
+|---|---|---|
+| region B free | 12 872 B | 13 912 B |
+| region C free | 13 476 B | 14 188 B |
+| SRAM free | 34 628 B | 39 980 B |
+
+`--features acdc-trace`: SRAM 38 212 B, B 12 888 B, C 13 508 B.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 

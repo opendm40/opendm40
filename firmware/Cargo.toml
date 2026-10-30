@@ -57,6 +57,10 @@ dbg-touch = []
 # RAM and its hooks in every pass). Off by default: the hooks are empty and
 # the two commands are refused (undefined header).
 dbg-prof = []
+# DBG:ACDC:TRACE, the AC+DC event trace (src/acdctr.rs; a 64-entry ring,
+# 1.8 KB of RAM). Off by default: the trace never records and the command is
+# refused (undefined header).
+acdc-trace = []
 # Test builds next to a sleeping owner: the buzzer never sounds (every beep,
 # the danger alarm and the power-off warning at duty 0; the continuity / diode
 # beeper's CMP pin buffer, HY3131 R20 bit 2, off; the boot key-hold cue

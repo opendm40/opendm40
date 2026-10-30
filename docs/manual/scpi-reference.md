@@ -811,7 +811,7 @@ unless shown otherwise.
 | `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>` | USB |
 | `DBG:ACDC:R0[?]` | `1` or `2` | `1` | USB |
 | `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
-| `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...` | USB |
+| `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...`. Only in builds with the `acdc-trace` feature. | USB |
 | `DBG:HWTRIG?` | | Comparator trigger state | USB |
 | `DBG:HWTRIG:ENABLE` | `1` or `0` | | USB |
 | `DBG:HWTRIG:CAL?` | | Calibration result or the error name | USB |

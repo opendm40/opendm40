@@ -2539,7 +2539,7 @@ impl Dmm {
         }
         self.r29 = row[9];
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             let h = tr::hash16(&row);
             self.tr_ev(clk.now_ms(), tr::K_ROW, h as i32, self.dc_val, 0);
         }
@@ -4473,7 +4473,7 @@ impl Dmm {
     /// Trace a DC conversion (acdctr.rs); the trigger is an accepted DC
     /// part more than TR_JUMP off the DC part before it.
     fn tr_dc(&mut self, now: u64, ad1: i32, x: f32, lim: f32, vet: bool, hold: bool) {
-        if self.tr.on == 0 {
+        if !tr::ON || self.tr.on == 0 {
             return;
         }
         let d = self.dc_val;
@@ -4883,7 +4883,7 @@ impl Dmm {
         }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
         }
         let seed = (acdc && was && !settling) || first;
