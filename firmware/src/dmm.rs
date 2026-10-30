@@ -169,6 +169,15 @@ const CAP_STEADY: f32 = 0.02;
 /// Polls over the range (running median) after which one step up comes
 /// regardless of the slope's steadiness (~2 s).
 const CAP_OVER_MAX: u8 = 8;
+/// Ramp ranges: one poll's own slope over this share of the range steps up
+/// at once, steady or not (owner 2026-10-30: the absorption kept the
+/// slope unsteady, ~1 mF waited CAP_OVER_MAX polls on 600 uF).
+const CAP_JUMP: f32 = 1.5;
+/// The step's target: the smallest range whose 0.9 x full scale holds the
+/// slope's C over this (the absorption reads an electrolytic high right
+/// after the discharge: device 832f89a4, ~1 mF read 1.5 mF and more;
+/// the emulator's capda 0.6 model up to 2.5x), at least one range up.
+const CAP_JUMP_DA: f32 = 2.5;
 /// Ramp range steps without a value after which AUTO goes to 60 nF.
 const CAP_HOPS_MAX: u8 = 4;
 /// Ramp ranges: the most polls kept for the first value (two half ramps).
@@ -6622,12 +6631,33 @@ impl Dmm {
             self.cap_inst_n = self.cap_inst_n.saturating_add(1);
         }
         // The range from the slope (device: 1 mF took 7.5 s on 600 uF,
-        // waiting for 5 over-range results of the full ramp): CAP_EARLY_N
-        // slope samples in a row over the range: one range up. One step at
-        // a time: right after the discharge an electrolytic's slope reads
-        // it high (dielectric absorption; device 832f89a4: ~1 mF went to 60
-        // mF and read 1.52 mF there), the next range's current re-checks.
+        // waiting for 5 over-range results of the full ramp): one poll
+        // clearly over (CAP_JUMP), or CAP_EARLY_N steady slope samples in a
+        // row over the range: up. Right after the discharge an
+        // electrolytic's slope reads it high (dielectric absorption; device
+        // 832f89a4: ~1 mF went to 60 mF and read 1.52 mF there): the jump's
+        // target allows for it (CAP_JUMP_DA), the next range's current
+        // re-checks.
+        // The comparator through this poll (a turn: the poll's dV is part
+        // up, part down).
+        let cmp = hy::read1(0x14) & 0x40 != 0;
+        let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
+        self.ramp.cmp = Some(cmp);
         if self.ramp.first && !self.manual {
+            // Clearly over the range in this poll's own slope (not the
+            // range's first sample, not across a turn): up at once, by as
+            // many ranges as the slope says (CAP_JUMP_DA: not past the
+            // range an absorption's high reading would pick).
+            if r < 7 && !row_new && !flip && craw_i > CAP_JUMP * lim {
+                let est = craw_i / CAP_JUMP_DA;
+                let mut t = r + 1;
+                while t < 7 && est > 0.9 * f_dec * CAP_DEC[t] {
+                    t += 1;
+                }
+                self.cap_hops += 1;
+                self.cap_set_range(clk, t as i8);
+                return Some(self.cap_dash());
+            }
             // Counted only while the slope holds still (CAP_STEADY from the
             // poll before): the absorption's early slope falls for ~1 s.
             // Falling (the absorption) blocks; noise up or down by less
@@ -6667,9 +6697,6 @@ impl Dmm {
         // last 3 polls' own slopes (the range's first sample left out: a
         // range change's step), shown from CAP_FIRST_N samples on.
         let early = false;
-        let cmp = hy::read1(0x14) & 0x40 != 0;
-        let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
-        self.ramp.cmp = Some(cmp);
         // Every poll's own slope C with its direction (the comparator state
         // through the poll); not across a turn (a part of the poll each way:
         // 6.07 mV of 10.5 on the device).
