@@ -704,7 +704,8 @@ impl App {
         // file on the SPI disk (setfile.rs; after a power-off the backup
         // SRAM holds none). A power-off starts a new measurement (owner
         // 2026-10-25): DC V and the measurement settings at their defaults;
-        // only a reset (the backup SRAM) continues them.
+        // only a reset (the backup SRAM) continues them, or Mode Remember ON
+        // (restore).
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
             a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
