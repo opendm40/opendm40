@@ -785,7 +785,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
-| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm |
+| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP); DC V 6 V R21 0x8B, CMPHO reads only; DC V 6 V / DC mV / ohm: the negative leg's AD2 (4.14) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm; DC V 6 V +416.7 mV = ~8.8 mA (4.14) |
 | DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device f80524f; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
 | AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
 | continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
@@ -1573,6 +1573,45 @@ A jack empty unless stated; alarm Off (quiet rule); read `DBG:SENT?` and
    source off: `DBG:SENT:LOG?` grows by at most one entry. Device c6a3ac3:
    **PASS** (and items 1 and 3 with manual 60 / 600 mV; the mV-first AUTO,
    item 4 and RTD / NTC not run).
+
+### 4.14 A reversed current; DC V's window (device 2026-10-30)
+
+Release 0.4.0 + #44 + #35, the PSU's leads swapped (DC mA -20.6 / -4.7 mA):
+AC mV alerted at both, Hz at -20 mA only (`PK_DC_NEG_THR`, ~5.9 mA, as
+designed), DC V 6 V and ohm AUTO never. *Inferred*: CTSTA reads 0x00 for PB1
+below the comparator's window, as for an idle PB1 (hw/README, Measured node
+behaviour), so the comparator rows see one polarity only.
+
+* **Negative leg** (`sentinel.rs` NEGATIVE LEG): DC V 6 V, DC mV and ohm
+  (not 600 Mohm, not temperature, not AC+DC) carry OP2 (x1) on PB1 -> AD2 with
+  the peak hold, as continuity's `Ad2A` row. The hold is read every 100 ms;
+  wholly below `PK2_NEG_THR` (~-180 mV, ~3.8 mA) or, in DC V,
+  `PK2_NEG_THR_DCV` (~-400 mV, ~8.4 mA) it makes the next comparator window
+  a hit if that window read no bit. A V-COM source that lifts PB1 reads
+  0x70 / MIXED, so the leg adds nothing to those cases; DC V counts it only
+  with the reading above -1 V; ohm and DC mV keep V_GATE. Such a run gets
+  no probe and no jack check (`cmp_run`): no A-PROT for a reversed current.
+* **DC V 6 V's PB1 window** R21 0x8B (SCMPRH AGNDP6 +416.7 mV, SCMPRL
+  AGNDN3 -62.5 mV; PR #55 read CTSTA 0 with it at rest and with 3 / 5 / 10 V
+  on V-COM) and only reads with CMPHO count (`hi_only`: a level between the
+  thresholds reads 0x10 / 0x50, CMPLO = above VRL, *inferred*): a hit needs
+  PB1 above ~0.42 V, a current A -> COM from ~8.8 mA. A 66 kHz square on
+  V-COM (DC V +2.786 V), A empty, raised A-JACK in 3 of 4 runs with 0xDD;
+  the owner accepts the higher line. The AC? hint's V-tap window keeps 0xDD
+  (`dmm.rs` swaps R21 with R20). Also an onset window (0 reads, then 0x70
+  to its end) only starts a run now.
+  An AC current there reads 0x70 / 0 in turn (MIXED, as the 66 kHz square):
+  a window counts when the negative leg's AD2 hold since the last one spans
+  both +-`PK2_NEG_THR_DCV` (the square's pickup, if any, is averaged by
+  AD2's filter: *inferred*). Such runs too get no probe: no A-PROT for an AC
+  current (an AC source across A-COM) in DC V; DC mV keeps it.
+* DBG:SENTinel:VARiant bit 7 (`VAR_NEG_OFF`) restores the 0.4.0 rows (no AD2
+  on PB1, R21 0xDD) for an A/B of the readings.
+
+Not measured: the 66 kHz pickup on PB1 in DC V; PB1 in these rows with a
+negative source on V-COM; whether AD2 on in these rows moves their readings.
+Emulator: `pb1cmp70` reads PB1 below the window as 0x00; senttest `dcv-neg`,
+`dcv-neg-small`, `dcmv-neg`, `ohm-acur-neg`, `freq-acur-neg`, `ohm-vneg`.
 
 ## 5. Fuse, CAT and current limits (the DM40 manual)
 

@@ -53,16 +53,27 @@ BOUNCE_ON = [(0.05, 814.6), (0.12, 1e12), (0.2, 277), (0.3, 28.85), (0.38, 1e12)
              (0.7, 2.1), (0.8, 0.67)]
 BOUNCE_OFF = [(0.05, 1e12), (0.15, 552), (0.25, 1e12), (0.32, 2.1), (0.4, 1e12)]
 SC = {
-    'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.001', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
-    'dcv-neg':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'AJACK'})]),
-    'dcv-aac':  ('VOLT:DC', 20, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0,ac=0.005,f=50', {'AJACK'})]),
+    # (DC V 6 V's PB1 window is ~0.4 V, R21_DCV_PB1: a current from ~8.4 mA; dcv-5ma below it)
+    'dcv-adc':  ('VOLT:DC', 26, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'dcv-5ma':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0.005', {'NONE'})]),
+    # A reversed current (COM -> A; device 2026-10-30: DC V 6 V / ohm never alerted, Hz from
+    # ~5.9 mA): PB1 below the comparator's window reads 0x00 (the model's `pb1lo0`), so the
+    # comparator rows see it through AD2 on PB1 (sentinel.rs NEGATIVE LEG: ~3.8 mA, DC V ~8.4 mA
+    # as its window). -1 mA stays below that line (dcv-neg-small, the gap).
+    'dcv-neg':  ('VOLT:DC', 30, [(0, 'open;pb1lo0:1;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.005', {'NONE'}), (17, 'isrc:-0.02', {'AJACK'}),
+                                 (24, 'isrc:none', {'NONE'})]),
+    # (the same with DBG:SENT:VAR 128, release 0.4.0's rows: no A-JACK, as on the device)
+    'dcv-neg-var128': ('VOLT:DC', 18, [(0, 'open;pb1lo0:1;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.02', {'NONE'})], ['DBG:SENT:VAR 128']),
+    'dcv-neg-small': ('VOLT:DC', 18, [(0, 'open;pb1lo0:1;vsrc:1.234', {'NONE'}), (10, 'isrc:-0.001', {'NONE'})]),
+    'dcmv-neg': ('VOLT:DC 0.6', 24, [(0, 'open;pb1lo0:1', {'NONE'}), (10, 'isrc:-0.005', {'AJACK'}), (17, 'isrc:none', {'NONE'})]),
+    'dcv-aac':  ('VOLT:DC', 20, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'isrc:0,ac=0.02,f=50', {'AJACK'})]),
     'dcv-avs':  ('VOLT:DC', 18, [(0, 'open;vsrc:1.234', {'NONE'}), (10, 'avsrc:5', {'AJACK'})]),
     'dcv-small': ('VOLT:DC', 18, [(0, 'open;vsrc:1.234;isrc:0.0002', {'NONE'})]),
     # f80524f device check: A-JACK with 10 V on the 60 V range, A jack open. The model has no
     # such coupling; this checks that the autorange 6 <-> 60 V leaves the r0 sentinel working.
     'dcv-step': ('VOLT:DC', 36, [(0, 'open;vsrc:1', {'NONE'}), (8, 'vsrc:10', {'NONE'}), (14, 'vsrc:1', {'NONE'}),
-                                 (20, 'vsrc:10', {'NONE'}), (26, 'vsrc:1;isrc:0.001', {'AJACK'})]),
-    'dcmv':     ('VOLT:DC', 20, [(0, 'open;vsrc:0.1', {'NONE'}), (10, 'isrc:0.002', {'AJACK'})]),
+                                 (20, 'vsrc:10', {'NONE'}), (26, 'vsrc:1;isrc:0.02', {'AJACK'})]),
+    'dcmv':     ('VOLT:DC', 20, [(0, 'open;vsrc:0.1', {'NONE'}), (10, 'isrc:0.02', {'AJACK'})]),
     # (ohm: 4.7 Mohm, the 6 Mohm row, whose jack check line tells a current in A from a source;
     # on the rows below it a current in A shows LIVE?, the gap: ohm-v5-600)
     'ohm':      ('RES', 26, [(0, 'open;r:4.7e6', {'NONE'}), (12, 'isrc:0.002', {'AJACK'})]),
@@ -151,7 +162,7 @@ SC = {
     # (`hfboth`: the comparator on PB1 reads 0x70 and 0 in turn, as the device in DC V AUTO / DC mV)
     'dcv-auto-sq66k': ('VOLT:DC', 30, [(0, 'open;%s;hfnocnt:1;hfboth:0.3;mvclamp:1.212;mvpb1:10;vsrc:1' % HF, {'NONE'}),
                                        (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
-                                       (20, 'vsrc:none;isrc:0.002', {'AJACK'})], [],
+                                       (20, 'vsrc:none;isrc:0.02', {'AJACK'})], [],
                        {'never': [('AJACK', 1, 2), ('APROT', 0, 3)]}),
     'dcmv-sq66k': ('VOLT:DC 0.6', 30, [(0, 'open;%s;hfnocnt:1;hfboth:0.3;mvclamp:1.212;mvpb1:10;vsrc:0.1' % HF, {'NONE'}),
                                        (10, 'vsrc:4.776,ac=4.776,f=66000,shape=square', {'NONE'}),
@@ -229,6 +240,16 @@ SC = {
                  {'never': [('LIVE', 1, 3)], 'queries': ['RES:RANG?']}),
     'acmv-acur': ('VOLT:AC 0.6', 30, [(0, 'open;ailift:0.146;ainz:1500', {'NONE'}), (10, 'isrc:0.02', {'AJACK'}),
                                       (20, 'isrc:none', {'NONE'})]),
+    # (the same, reversed: ohm and DC V through the negative leg; Hz from ~5.9 mA, PK_DC_NEG_THR,
+    # so -5 mA stays NONE there)
+    'ohm-acur-neg': ('RES', 37, [(0, 'open;pb1lo0:1;aiohm:31e6', {'NONE'}), (10, 'isrc:-0.02', {'AJACK'}), (17, 'isrc:-0.005', {'AJACK'}),
+                                 (27, 'isrc:none', {'NONE'})], [],
+                     {'never': [('LIVE', 1, 4)]}),
+    'freq-acur-neg': ('FREQ', 30, [(0, 'open;pb1lo0:1;hzpb1:2.5', {'NONE'}), (10, 'isrc:-0.02', {'AJACK'}), (20, 'isrc:-0.005', {'NONE'})]),
+    # A negative source with a resistor on V-COM in ohm, its PB1 pickup below the negative leg's
+    # line (Pb1VjackMv 10: -240 mV at -24 V): the ohm reading's sign says driven (LIVE?), never A-JACK.
+    'ohm-vneg': ('RES', 26, [(0, 'open;r:4700', {'NONE'}), (8, 'vsrc:-10', {'LIVE'}), (16, 'vsrc:-24', {'LIVE'})],
+                 [], {'monitor': ['sysbus.hy3131 Pb1VjackMv 10'], 'never': [('AJACK', 1, 3)]}),
     'freq-acur': ('FREQ', 30, [(0, 'open;hzpb1:2.5;vsrc:0,ac=1,f=1000', {'NONE'}), (10, 'vsrc:none;isrc:0.02', {'AJACK'}),
                                (20, 'isrc:none', {'NONE'})]),
     # (continuity / diode: A-JACK only while V-COM reads OL, as with the leads in A / COM; with a
@@ -258,7 +279,7 @@ SC = {
     'acv-dc-ajack': ('VOLT:AC', 26, [(0, 'open;vsrc:5', {'NONE', 'DC'}), (10, 'isrc:0.001', {'AJACK'}), (18, 'isrc:none', {'NONE', 'DC'})]),
     'dcv-achint': ('VOLT:DC', 32, [(0, 'open;vsrc:1', {'NONE'}), (10, 'vsrc:0,ac=2,f=50', {'NONE', 'AC'}),
                                    (15, 'vsrc:0,ac=2,f=50', {'AC'}), (23, 'vsrc:1', {'NONE'})]),
-    'dcv-ac-ajack': ('VOLT:DC', 24, [(0, 'open;vsrc:0,ac=2,f=50', {'NONE', 'AC'}), (10, 'isrc:0.001', {'AJACK'})]),
+    'dcv-ac-ajack': ('VOLT:DC', 24, [(0, 'open;vsrc:0,ac=2,f=50', {'NONE', 'AC'}), (10, 'isrc:0.02', {'AJACK'})]),
     'fuse-hint': ('CURR:DC', 76, [(0, 'open;fuseopen', {'NONE'}), (62, 'open;fuseopen', {'NONE', 'FUSE'}),
                                   (66, 'open;fuseopen', {'FUSE'})]),
     # Fuse check (SYST:FUSE:TEST, doc 4.7): a lead V -> A, the fuse intact / blown, a short V-COM.
