@@ -175,12 +175,11 @@ const CAP_OVER_MAX: u8 = 8;
 const CAP_JUMP: f32 = 1.5;
 /// Only on 600 uF (device 6f3f0b79, ~1 mF charged: one noisy 6 mF poll
 /// read > 9 mF and hopped to 60 mF and back, the first final 10 s later),
-/// and from its `cap_jumpn`-th ramp poll on (device 6f3f0b79, ~1 mF
-/// discharged: on 6 mF 1.2 s after the discharge, no final value in 12 s,
-/// was 3 s after it with 6 mF at ~3 s; INFERRED: the absorption's
-/// recovery, still fast that early, upsets the two directions).
-/// DBG:CAP:JUMPN sets it (RAM only; 0: from the first).
-static CAP_JUMPN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(4);
+/// and from its `cap_jumpn`-th ramp poll on (default 0: from the first;
+/// the no-final-value runs a wait of 4 was for came from the narrow
+/// comparator swing, `CAP_WIDEN`, device 19b6e3b7).
+/// DBG:CAP:JUMPN sets it (RAM only).
+static CAP_JUMPN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 pub fn cap_jumpn() -> u32 {
     CAP_JUMPN.load(core::sync::atomic::Ordering::Relaxed)
 }
@@ -213,6 +212,19 @@ pub const CAP_CLASS_AUTO: u8 = 2;
 /// agreeing final values.
 pub const CAP_CLASS_FAST: u8 = 1;
 const CAP_AGREE_N: u8 = 4;
+/// Ramp ranges: a poll whose dV is under this share of the full-poll dV
+/// (`cap_dv_ref`) holds a comparator turn (a part of the poll each way;
+/// device 19b6e3b7, ~1 mF on 6 mF: 1 .. 5 mV among 10.5, often in the poll
+/// after the one where the comparator bit turned): left out of the value,
+/// the slope median and the range steps.
+const CAP_PART: f32 = 0.7;
+/// Adaptive class: a full-poll dV of this share of the ramp's swing (V
+/// between the last two turns) or more: the next wider class at once (the
+/// same device run: class 1 turned between -20 and -35 mV, every 1 .. 2
+/// polls, no final value in 14 s; ~60 mV wide on a clean start).
+const CAP_WIDEN: f32 = 0.5;
+/// The polls whose dV `cap_dv_ref` looks at.
+const CAP_DVH: usize = 6;
 /// The direction ratios stay within 1 +- this.
 const CAP_RATIO_MAX: f32 = 0.03;
 pub const CAP_CLASS_STOCK: u8 = 4;
@@ -1687,6 +1699,15 @@ pub struct Dmm {
     /// Final values in a row within 2 %, and the switch to class 2 done.
     cap_agree: u8,
     cap_cls2: bool,
+    /// Adaptive class: the narrowest one allowed (`CAP_WIDEN`; 0 any).
+    cap_cls_min: u8,
+    /// The last CAP_DVH polls' dV on this row (`cap_dv_ref`).
+    cap_dvh: [f32; CAP_DVH],
+    cap_dvh_n: u8,
+    /// The ramp V's highest / lowest in this half ramp and the one before
+    /// (from the comparator turns), the half ramps seen (0 .. 2).
+    cap_vext: [f32; 4],
+    cap_vext_n: u8,
     /// Comparator turns seen during the polls without a ramp.
     cap_idle_flips: u8,
     /// The polls (own slope C) of the last two half ramps, their
@@ -2386,6 +2407,11 @@ impl Dmm {
             cap_hops: 0,
             cap_agree: 0,
             cap_cls2: false,
+            cap_cls_min: 0,
+            cap_dvh: [0.0; CAP_DVH],
+            cap_dvh_n: 0,
+            cap_vext: [0.0; 4],
+            cap_vext_n: 0,
             cap_idle_flips: 0,
             cap_swaps: 0,
             cap_dis_pv: 0.0,
@@ -6221,6 +6247,15 @@ impl Dmm {
         rd
     }
 
+    /// The full-poll dV: the second largest of the last CAP_DVH polls' (a
+    /// turn only makes a poll's dV smaller; one noisy poll is not it).
+    fn cap_dv_ref(&self) -> f32 {
+        let n = (self.cap_dvh_n as usize).min(CAP_DVH);
+        let mut b = self.cap_dvh;
+        sort_f32(&mut b[..n]);
+        b[n.saturating_sub(2)]
+    }
+
     /// No value yet: dashes, provisional.
     fn cap_dash(&self) -> Reading {
         let mut rd = self.cap_val(f32::NAN, false);
@@ -6333,6 +6368,9 @@ impl Dmm {
         self.cap_chg_prev = 0.0;
         self.cap_agree = 0;
         self.cap_cls2 = false;
+        self.cap_cls_min = 0;
+        self.cap_dvh_n = 0;
+        self.cap_vext_n = 0;
         self.cap_idle_flips = 0;
         self.cap_res_ms = 0.0;
         self.cap_res_t = None;
@@ -6592,12 +6630,32 @@ impl Dmm {
         }
         self.cap_idle = 0;
         self.cap_idle_flips = 0;
-        if self.ramp.med_i == 0 {
-            self.ramp.med = [dv; 5];
-        } else {
-            self.ramp.med[self.ramp.med_i % 5] = dv;
+        // A part of a poll's dV (a comparator turn in it, `CAP_PART`): not
+        // a slope sample. Its reference, the full-poll dV, from every poll
+        // (rejected ones too: a larger capacitor's smaller dV takes over
+        // within CAP_DVH polls); the row's first poll is the last row's.
+        let part = !self.cap_row_new && self.cap_dvh_n >= 3 && dv < CAP_PART * self.cap_dv_ref();
+        if !self.cap_row_new {
+            self.cap_dvh[self.cap_dvh_n as usize % CAP_DVH] = dv;
+            self.cap_dvh_n = self.cap_dvh_n.saturating_add(1);
+            // The ramp's V extremes in this half ramp.
+            let e = &mut self.cap_vext;
+            if self.cap_vext_n == 0 {
+                e[0] = v_mv;
+                e[1] = v_mv;
+                self.cap_vext_n = 1;
+            }
+            e[0] = e[0].max(v_mv);
+            e[1] = e[1].min(v_mv);
         }
-        self.ramp.med_i += 1;
+        if !part || self.ramp.med_i == 0 {
+            if self.ramp.med_i == 0 {
+                self.ramp.med = [dv; 5];
+            } else {
+                self.ramp.med[self.ramp.med_i % 5] = dv;
+            }
+            self.ramp.med_i += 1;
+        }
         let mut s = self.ramp.med;
         sort_f32(&mut s);
         let dvm = s[2];
@@ -6610,8 +6668,7 @@ impl Dmm {
         };
         let class = match cap_class() {
             CAP_CLASS_STOCK => stock,
-            0 if self.cap_cls2 => CAP_CLASS_AUTO,
-            0 => CAP_CLASS_FAST,
+            0 => (if self.cap_cls2 { CAP_CLASS_AUTO } else { CAP_CLASS_FAST }).max(self.cap_cls_min),
             k => k,
         };
         if class != self.ramp.class {
@@ -6629,7 +6686,7 @@ impl Dmm {
         let c = craw.clamp(0.0, 1.06 * lim);
         self.cap_dbg[3] = dvm;
         self.cap_dbg[4] = c;
-        if self.ramp.n < 35 {
+        if self.ramp.n < 35 && !part {
             self.ramp.buf[self.ramp.n] = c;
             self.ramp.n += 1;
         }
@@ -6657,7 +6714,7 @@ impl Dmm {
         let cmp = hy::read1(0x14) & 0x40 != 0;
         let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
         self.ramp.cmp = Some(cmp);
-        if self.ramp.first && !self.manual {
+        if self.ramp.first && !self.manual && !part {
             // Clearly over the range in this poll's own slope (not the
             // range's first sample, not across a turn; 600 uF only, from
             // its CAP_JUMPN-th poll): up at once, by as
@@ -6715,7 +6772,7 @@ impl Dmm {
         // Every poll's own slope C with its direction (the comparator state
         // through the poll); not across a turn (a part of the poll each way:
         // 6.07 mV of 10.5 on the device).
-        if !flip && !row_new {
+        if !flip && !row_new && !part {
             let i = self.cap_ring_n as usize % CAP_RING;
             self.cap_ring[i] = cinst;
             if cmp { self.cap_ring_up |= 1 << i } else { self.cap_ring_up &= !(1 << i) }
@@ -6732,6 +6789,35 @@ impl Dmm {
         // polls of one long ramp (was 35, a single sample: 4.7 mF on 6 mF
         // gave one value per 9 s).
         let fresh = flip || self.ramp.n >= CAP_LONG_N;
+        if flip && !row_new {
+            // Adaptive class: the full-poll dV against the ramp's swing over
+            // the last two half ramps (the V samples miss the turns by up to
+            // a poll's dV each side: a clean class-1 1 mF on 6 mF read 40 ..
+            // 60 mV of swing for 10.5 mV per poll).
+            let e = self.cap_vext;
+            let widen = self.cap_vext_n >= 2 && cap_class() == 0 && self.ramp.class < 3 && self.cap_dvh_n >= 3 && {
+                let span = e[0].max(e[2]) - e[1].min(e[3]);
+                self.cap_dv_ref() >= CAP_WIDEN * span
+            };
+            self.cap_vext = [v_mv, v_mv, e[0], e[1]];
+            self.cap_vext_n = 2;
+            if widen {
+                // The ring, the pairs and the ratio from the new class's polls;
+                // the value shown stays.
+                self.cap_cls_min = self.ramp.class + 1;
+                self.cap_vext_n = 0;
+                self.cap_agree = 0;
+                self.cap_pair = [None; 2];
+                self.cap_ring_n = 0;
+                self.cap_half_n = 0;
+                self.cap_half_prev = 0;
+                self.cap_ratio = [1.0; 2];
+                self.cap_ratio_ok = false;
+                self.cap_first_v = 0.0;
+                self.ramp.n = 0;
+                return Some(if self.ramp.first { self.cap_dash() } else { self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov) });
+            }
+        }
         if fresh {
             ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
             let n = self.ramp.n;
@@ -6814,7 +6900,7 @@ impl Dmm {
         // directions' ratio is known (a result each way), or after
         // CAP_NORATIO_N polls of one long ramp; grey before.
         let n = (self.cap_ring_n as usize).min(CAP_RING);
-        if n >= 3 {
+        if n >= 3 && !part {
             let mut b = [0.0f32; CAP_RING];
             for i in 0..n {
                 let k = if self.cap_ratio_ok { self.cap_ratio[(self.cap_ring_up >> i & 1) as usize] } else { 1.0 };
