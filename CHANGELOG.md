@@ -56,6 +56,10 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
+- **Continuity and diode show OPEN** with open leads (diode: also a
+  reversed diode) instead of `0L`. The small "Overload" next to the big `0L`
+  is gone; elsewhere over range reads "Overflow"
+  ([manual](docs/manual/README.md#overflow)).
 
 ### Fixed
 

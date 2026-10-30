@@ -106,6 +106,10 @@ mod data {
         pub fn own(b: &'static [u8], four: bool, w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
             Glyph { blob: b, fmt: if four { RAW4 } else { BIT1 }, w, h, adv, yoff, t: 0, ih: h }
         }
+        /// Our own RLE4 glyph (stockfont_open.rs).
+        pub fn own_rle(b: &'static [u8], w: u8, h: u8, adv: u8, yoff: i8) -> Glyph {
+            Glyph { blob: b, fmt: RLE4, w, h, adv, yoff, t: 0, ih: h }
+        }
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box, random access
         /// (Ink::at, the scope markers: 1 bpp fonts). An RLE4 glyph decodes
@@ -403,6 +407,9 @@ pub fn has_all(font: Font, s: &str) -> bool {
 include!("stockfont_w.rs");
 // The USB symbol for the status bar (tools/mkusbglyph.py).
 include!("stockfont_usb.rs");
+// "OPEN" (continuity / diode, open leads): P, E, N for F78 and P, E for
+// K_FONT (tools/mkopenglyph.py).
+include!("stockfont_open.rs");
 
 /// Hand-drawn 1 bpp glyphs for SC_F12 (the scope bar's 12 px font has ASCII
 /// only): Ω and ° for the REC mark's function (scope_ui::rec_unit), drawn on
@@ -425,9 +432,19 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     }
     match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(F12_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
+        None if matches!(ch, 'P' | 'E' | 'N') => open_glyph(font, ch).map(|g| (g, 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
     }
+}
+
+/// P / E / N of "OPEN" (stockfont_open.rs), next to its data in region A2
+/// (zero-wait; region B is full).
+#[inline(never)]
+#[link_section = ".text.a2.open_glyph"]
+fn open_glyph(font: Font, ch: char) -> Option<Glyph> {
+    let &(_, _, off, w, h, adv, yoff) = OPEN_GLYPHS.iter().find(|o| o.0 == font.0 && o.1 == ch)?;
+    Some(Glyph::own_rle(OPEN_B.get(off as usize..).unwrap_or(&[]), w, h, adv, yoff))
 }
 
 /// Coverage at column `gx` (0 .. w + twin) of a glyph row decoded into

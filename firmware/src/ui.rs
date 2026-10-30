@@ -135,13 +135,15 @@ fn button_index(b: Button) -> usize {
 use crate::stockfont::{self as sf, rect};
 
 const STATUS_FG: Color = 0xF7BE;
-/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ").
-const CELLS: [[u8; 7]; 5] = [
+/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ",
+/// "  OPEN ": F78 O / P / E / N are 64 / 54 / 46 / 57 px).
+const CELLS: [[u8; 7]; 6] = [
     [40, 60, 20, 60, 60, 60, 60],
     [40, 60, 60, 20, 60, 60, 60],
     [40, 60, 60, 60, 20, 60, 60],
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
+    [40, 64, 72, 62, 54, 64, 4],
 ];
 /// Main-readout cells with the extra digit (formats 0..3 only, never OL):
 /// sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78 digits
@@ -200,16 +202,17 @@ fn mode_glyph(mode: u8, acdc: bool) -> &'static str {
     }
 }
 
-/// "%7.<dec>f" (right aligned in 7 characters), or the stock "   0L  ".
+/// "%7.<dec>f" (right aligned in 7 characters), or the stock "   0L  "
+/// ("  OPEN " with `open`: meter::open).
 /// With `ext` (Val::ext, not OL): the value is formatted with dec + 1
 /// decimals and split: the 7-character main part plus the last digit, which
 /// is drawn small after it (so the main digits are never rounded up past it).
-fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, usize, Option<u8>) {
+fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool, open: bool) -> (&'a str, usize, Option<u8>) {
     if v.ol || v.v.is_nan() {
         // NaN: no value yet ("--" where "0L" goes: the power meter's
         // pending reading).
-        buf[..7].copy_from_slice(if v.ol { b"   0L  " } else { b"   --  " });
-        return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4, None);
+        buf[..7].copy_from_slice(if open { b"  OPEN " } else if v.ol { b"   0L  " } else { b"   --  " });
+        return (core::str::from_utf8(&buf[..7]).unwrap_or(""), 4 + open as usize, None);
     }
     let mut ext = ext && v.ext && v.dec >= 1;
     let mut t = [0u8; 16];
@@ -278,7 +281,7 @@ pub struct DmmView {
     /// Bargraph scale as last labelled: (full scale bits, unit, bipolar),
     /// None = labels to draw; and the overload marker as last drawn.
     bar_scale: Option<(u32, &'static str, bool)>,
-    bar_ol: Option<bool>,
+    bar_ol: Option<u8>,
     /// ui-review #13: draw the value in the stock >= 30 V red (set by the
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
@@ -294,8 +297,6 @@ pub struct DmmView {
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
-    /// The "Overload" word is drawn next to the main readout's "0L".
-    ol_word: bool,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings 2/3 "DMM row": History) and the power meter
@@ -377,7 +378,7 @@ use crate::scope_ui::{pm, PM_W};
 /// grey (`StripData::grey`); the accuracy label (`acc_ulps`, ASCII unit,
 /// no space, as the sub readings) in the lower sub row when it is free,
 /// else in the upper one; none when both hold a sub reading (AC V / A: Hz
-/// and duty) or "Overload".
+/// and duty) or "Overflow".
 #[inline(never)]
 #[cfg_attr(target_os = "none", link_section = ".text.a2.acc")]
 pub fn strip_acc(d: &mut crate::scope_ui::StripData, r: &Reading, acc: Option<Acc>) {
@@ -601,7 +602,6 @@ impl DmmView {
             pwc: pw::PwCache::new(),
             ohm_on: false,
             last_iohm: 254,
-            ol_word: false,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -750,10 +750,11 @@ impl DmmView {
             self.bar_labels(fs, key.1);
         }
         let f = if temp { Some(0.0) } else { crate::bargraph::frac(r.main.v, fs, r.main.ol) };
-        let ol = f.is_none();
+        // The overflow mark: "OL", "OPEN" with the readout's OPEN.
+        let ol = if f.is_some() { 0 } else if meter::open(r) { 2 } else { 1 };
         if self.bar_ol != Some(ol) {
             self.bar_ol = Some(ol);
-            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
+            sf::label(sf::F14, BAR_OL, ["", "OL", "OPEN"][ol as usize], 0xF800, BG, 1, 1);
         }
         self.bar.update(f);
     }
@@ -804,7 +805,7 @@ impl DmmView {
     /// Meter::verdict.
     pub fn reading(&mut self, r: &Reading, hold: u8, lim: u8) {
         let mut buf = [0u8; 16];
-        let (s, f, ext) = fmt7(&mut buf, &r.main, true);
+        let (s, f, ext) = fmt7(&mut buf, &r.main, true, meter::open(r));
         let mut ub = [0u8; 16];
         let unit = sf::unit_text(r.main.unit, &mut ub);
         // ui-review #13: the stock >= 30 V cue, the value in VALUE_HV (V
@@ -860,18 +861,7 @@ impl DmmView {
         };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
-        // "Overload" after the "0L" (`ol_word`): cleared before the cells
-        // (a value's digits reach into its box), drawn after them.
-        let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
-        if !r.main.ol && self.ol_word {
-            lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
-            self.ol_word = false;
-        }
         sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if r.main.ol && (!same_layout || !self.ol_word) {
-            ol_word(ow, color);
-            self.ol_word = true;
-        }
         if let Some(e) = ext {
             if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
                 let r = rect(XT_X as i16, 68 + md, XT_W as i16, 80);
@@ -1035,12 +1025,12 @@ impl DmmView {
                         sf::label(sf::AUX_TAG, rect(AUX_TAG_X[i], 36, te - AUX_TAG_X[i], 30), AUX_TAGS[i], VALUE, BG, 4, 0);
                         sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
                     } else if v.ol && !r.main.ol {
-                        // "0L" with "Overload" (F14) before it, unless the
-                        // main readout's "Overload" already says it (the
-                        // power meter's V / I are OL only with it): two
-                        // boxes tiling the plain one, so a value after it
-                        // leaves nothing behind.
-                        sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overload", vcol, BG, 4, 1);
+                        // "0L" with "Overflow" (F14) before it, unless the
+                        // main readout is 0L / OPEN too (the power meter's
+                        // V / I are OL only with it): two boxes tiling the
+                        // plain one, so a value after it leaves nothing
+                        // behind.
+                        sf::label(sf::F14, rect(vx - 30, 36, 81, 30), "Overflow", vcol, BG, 4, 1);
                         sf::label(sf::LETTERS, rect(vx + 51, 36, 56, 30), txt, vcol, BG, 4, 0);
                     } else {
                         sf::label(sf::LETTERS, rect(vx - 30, 36, 137, 30), txt, vcol, BG, 4, 0);
@@ -1146,18 +1136,6 @@ impl DmmView {
 
 }
 
-/// The "Overload" word's box on the DMM page: the empty cells after the
-/// "0L" of the main readout (CELLS[4]: "0L" ends at x 304), bottom-aligned
-/// on the digits' baseline; left of the limit badge / unit box (x >= 403).
-const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
-
-/// "Overload" (what "0L" means) in `r`, in the readout's colour.
-#[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color) {
-    let (f, sp) = if sf::text_width(sf::TEXT22, "Overload", 0) <= r.w { (sf::TEXT22, 0) } else { (sf::F14, 1) };
-    sf::label(f, r, "Overload", c, BG, 2, sp);
-}
-
 /// The test current label's box: the aux1 slot's left part (the burden
 /// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
@@ -1244,7 +1222,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         d.func = "OhmEXP";
     }
     let mut buf = [0u8; 16];
-    let (v, _, _) = fmt7(&mut buf, &r.main, false);
+    let (v, _, _) = fmt7(&mut buf, &r.main, false, meter::open(r));
     d.value = Txt::new(v.trim_ascii());
     d.dim = r.prov;
     let mut ub = [0u8; 16];
@@ -1274,9 +1252,9 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
         d.sub[i] = t;
     }
     // "0L": what it means, in the first free sub row (else the second:
-    // the reading matters more than its sub values then).
-    if r.main.ol {
-        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new("Overload");
+    // the reading matters more than its sub values then); "OPEN" says it.
+    if r.main.ol && !meter::open(r) {
+        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new("Overflow");
     }
     let verdict = match lim {
         meter::V_PASS => Some(("PASS", 0x0400)),
