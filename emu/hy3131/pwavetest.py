@@ -27,11 +27,13 @@ Cases (default all):
          the page stopped (the current check's I-only read): the page
          stays open at 8 A, closes into the power meter within 4 s of the
          step and the danger alarm sounds (DBG:ALARm?).
-  ovr    12 V DC, 2 A (I AUTO: the 6 A range), then 8 A at 45 s, page
-         running: it closes at the step (over the range) and the meter
-         ranges up and reads 8 A.
-  limit  12 V DC, 0.5 A, then 2 A at 45 s with POW:LIM 1,3 (1 A for 3 s),
-         page running: still open 2 s after the step, closed 6 s after.
+  ovr    12 V DC, 0.5 A (I AUTO: the 600 mA range), then 8 A at 45 s,
+         page running: it closes at the step (over the range) and the
+         meter ranges up to 10 A and reads 8 A.
+  limit  12 V DC, 0.5 A, then 2 A at 45 s with POW:LIM 1,10 (1 A for 10 s),
+         page running: still open 2 s after the step, closed 12 s after.
+  (The model's 45 s is ~2.7 s earlier than the firmware's uptime, which
+  the test's times use: the checks before the step leave 4 s.)
 The model latches R03..R05 at each conversion from the converter SDO23
 selects then, one conversion grid for both: whether the device does so
 (and how far AD3's grid sits from AD2's) is the device check's question
@@ -79,11 +81,11 @@ CASES = {
     # The page's own current check (app_pwave.rs pwave_guard): a step at
     # 45 s of emulator time, the page open by then.
     'over10': ['open;vsrc:12;isrc:8@0', 'open;vsrc:12;isrc:12@45'],
-    'ovr': ['open;vsrc:12;isrc:2@0', 'open;vsrc:12;isrc:8@45'],
+    'ovr': ['open;vsrc:12;isrc:0.5@0', 'open;vsrc:12;isrc:8@45'],
     'limit': ['open;vsrc:12;isrc:0.5@0', 'open;vsrc:12;isrc:2@45'],
 }
 COUPLING = {'dc-zero': 'DC', 'dc-gain': 'DC'}
-SETUP = {'over10': ['POW:CURR:RANG 10', 'POW:LIM 10,0'], 'limit': ['POW:LIM 1,3']}
+SETUP = {'over10': ['POW:CURR:RANG 10', 'POW:LIM 10,0'], 'limit': ['POW:LIM 1,10']}
 STEP_MS = 45000
 # The Wave button of Power Settings (ui_power.rs ps_row4(3)) and the page's
 # buttons (ui_pwave.rs BTN_R).
@@ -170,7 +172,8 @@ def run_case(name):
         def wave():
             f = q('POW:WAVE?').split(',')
             return {'on': f[0] == '1', 'frames': int(f[1]), 'U': num(f[2]), 'I': num(f[3]), 'P': num(f[4]),
-                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8]), 'izero': num(f[9]), 'igain': num(f[10])}
+                    'f': num(f[5]), 'n': int(f[6]), 'retries': int(f[7]), 'bad': int(f[8]), 'izero': num(f[9]), 'igain': num(f[10]),
+                    'chk_i': num(f[11]), 'chk_clip': f[12] == '1', 'why': int(f[13])}
 
         def wait_frames(k, limit_ms=20000):
             w0 = wave()
@@ -319,21 +322,21 @@ def run_case(name):
                 # STOP: no frames, the I-only read checks the current.
                 q('DBG:KEY 1')
                 wait_ms(600)
-            check(up() < STEP_MS - 2000 and view().startswith('Power Wave'), 'the page is open %d ms before the step' % (STEP_MS - up()))
-            until(STEP_MS - 500)
+            check(up() < STEP_MS - 6000 and view().startswith('Power Wave'), 'the page is open %d ms before the step' % (STEP_MS - up()))
+            until(STEP_MS - 4000)
             w = wave()
-            check(w['on'], 'still open just before the step (I %.3f A)' % w['I'])
+            check(w['on'], 'still open just before the step (I %.3f A, check %s)' % (w['I'], (w['chk_i'], w['chk_clip'], w['why'])))
             if name == 'over10':
                 until(STEP_MS + 4000)
                 a = q('DBG:ALARm?')
                 v = view()
                 res['alarm'] = a
-                check(not v.startswith('Power Wave'), '12 A on the 10 A range: the page closed (%s)' % v)
+                check(not v.startswith('Power Wave') and wave()['why'] == 1, '12 A on the 10 A range: the page closed (%s; %s)' % (v, wave()))
                 check(a.split(',')[0] == '1', 'the danger alarm sounds (DBG:ALARm? %s)' % a)
             elif name == 'ovr':
                 until(STEP_MS + 1500)
                 v = view()
-                check(not v.startswith('Power Wave'), '8 A on the 6 A range: the page closed (%s)' % v)
+                check(not v.startswith('Power Wave') and wave()['why'] == 2, '8 A on the 6 A range: the page closed (%s; why %d)' % (v, wave()['why']))
                 t0 = up()
                 while up() - t0 < 30000:
                     p = pw_all()
@@ -343,10 +346,10 @@ def run_case(name):
                 check(near(p[5], 8.0, 0.02) and q('POW:CURR:RANG?').endswith('E+01'), 'the meter ranges up to 10 A and reads %.3f A (%s)' % (p[5], q('POW:CURR:RANG?')))
             else:
                 until(STEP_MS + 2000)
-                check(wave()['on'], '2 s over the 1 A limit (3 s): still open')
-                until(STEP_MS + 6000)
+                check(wave()['on'], '2 s over the 1 A limit (10 s): still open')
+                until(STEP_MS + 12000)
                 v = view()
-                check(not wave()['on'] and not v.startswith('Power Wave'), 'the limit ran out: the page closed (%s)' % v)
+                check(not wave()['on'] and not v.startswith('Power Wave') and wave()['why'] == 3, 'the limit ran out: the page closed (%s; why %d)' % (v, wave()['why']))
             shot('pwave-' + name + '-after')
         else:
             check(near(w['U'], 12, 0.01), 'Urms %.3f ~ 12' % w['U'])

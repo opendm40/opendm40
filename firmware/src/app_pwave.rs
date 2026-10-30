@@ -55,6 +55,12 @@ pub(super) struct Pwv {
     gi_fix: f32,
     /// The next current check of a stopped page (ms).
     check: u64,
+    /// The last current check (`pwave_guard`): I (A), a sample on the
+    /// rail, and why it closed the page (0 none, 1 above 10 A, 2 over the
+    /// range, 3 the current limit); POW:WAVE? fields 12..14.
+    chk_i: f32,
+    chk_clip: bool,
+    chk_why: u8,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -80,6 +86,9 @@ static mut PWV: Pwv = Pwv {
     zero_ok: false,
     gi_fix: 0.0,
     check: 0,
+    chk_i: 0.0,
+    chk_clip: false,
+    chk_why: 0,
 };
 
 pub(super) fn pwv() -> &'static mut Pwv {
@@ -149,6 +158,9 @@ impl App {
             zero_ok: self.dmm.pw_wave_iref().is_some_and(|r| r.1),
             gi_fix: f32::NAN,
             check: now,
+            chk_i: f32::NAN,
+            chk_clip: false,
+            chk_why: 0,
         };
         self.show(View::PWave, clk);
         Ok(())
@@ -316,13 +328,17 @@ impl App {
             self.i10_since = None;
         }
         let i10 = self.i10_since.is_some_and(|t| now.saturating_sub(t) >= crate::danger::I10_ASSERT_MS);
-        let why = match self.dmm.pw_wave_current(now, i, clip) {
+        let r = self.dmm.pw_wave_current(now, i, clip);
+        let s = pwv();
+        (s.chk_i, s.chk_clip) = (i, clip);
+        let why = match r {
             _ if i10 => Some("Wave: current above 10 A"),
             1 => Some("Wave: current over range"),
             // The meter's own toast and beeps follow (`pw_over_expired`).
             2 => None,
             _ => return false,
         };
+        s.chk_why = if i10 { 1 } else if r == 1 { 2 } else { 3 };
         // Into a view with the power meter's readout (the DMM rail on: the
         // alarm sounds only with it), whatever the page was opened from.
         let v = if matches!(self.back_view, View::Dmm | View::DmmScope) { self.back_view } else { View::Dmm };
@@ -425,7 +441,8 @@ impl App {
 
     /// POW:WAVE? : open, frames, Urms, Irms, P, f, samples per channel,
     /// repeated reads, unreadable samples, the I zero taken from the DC
-    /// meter (A; 0 = none), the I gain taken from it (1 = none).
+    /// meter (A; 0 = none), the I gain taken from it (1 = none), the last
+    /// current check's I (A), its rail flag and why it closed the page.
     pub(super) fn pwave_query(&self, out: &mut crate::scpi::Scpi) {
         let s = pwv();
         let mut t = [0u8; 24];
@@ -443,5 +460,9 @@ impl App {
         out.put_f32(if s.oi_fix.is_finite() { s.oi_fix * s.sc.si } else { 0.0 });
         out.put_bytes(b",");
         out.put_f32(if s.gi_fix.is_finite() { s.gi_fix } else { 1.0 });
+        out.put_bytes(b",");
+        out.put_f32(if s.chk_i.is_finite() { s.chk_i } else { 9.91e37 });
+        out.put_bytes(if s.chk_clip { b",1," } else { b",0," });
+        out.put_bytes(&[b'0' + s.chk_why]);
     }
 }
