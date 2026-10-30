@@ -1748,6 +1748,16 @@ fn main() {
         let mut buk = bu;
         buk.combined = true;
         v.push(("bt-usb-combined", buk));
+        // Both link icons beside the GEN trigger badge (cyan, long level
+        // text) and the generator's frequency (#64).
+        let mut bug = bu;
+        bug.tsrc = scope::TSRC_GEN;
+        bug.trig_v = -444.4e-3;
+        bug.gen_hz = 10.0e6;
+        v.push(("bt-usb-gen", bug));
+        let mut bugc = bug;
+        bugc.combined = true;
+        v.push(("bt-usb-gen-combined", bugc));
         for (name, m) in v {
             host::reset(0);
             scope_ui::invalidate();
