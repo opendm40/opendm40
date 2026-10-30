@@ -2748,7 +2748,7 @@ fn gen_box(g: &gen::Gen, k: usize, bg: Color) {
             let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
             gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG }, bg);
             let note = s.wave.max_note();
-            gen_box_note(0, if clamped { note.find(':').map_or(note, |i| note[i + 1..].trim_start_matches(' ')) } else { "" }, VALUE, bg);
+            gen_box_note(0, if clamped { note } else { "" }, VALUE, bg);
         }
         1 | 2 => {
             match (k, s.offset_v) {

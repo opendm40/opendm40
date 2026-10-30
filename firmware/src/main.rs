@@ -2335,9 +2335,7 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         w.s(", osr ");
         w.u(l.osr() as u64);
     }
-    w.s("\r\n# t_s = device clock, s; raw = ");
-    w.s(if ad2 { "AD2 code (+-262143 = +-1.25 V at the AD2 input); value = the DMM's AD2 calibration" } else { "AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)" });
-    w.s("; lost_before = conversions missing before the row\r\n");
+    w.s(if ad2 { "\r\n# raw: AD2 code, 262143 = 1.25 V\r\n" } else { "\r\n# raw: AD1 counts, uncalibrated\r\n" });
     w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
     if sc.is_some() {
         w.bytes(unit);
