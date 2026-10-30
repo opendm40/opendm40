@@ -640,6 +640,8 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
+///   DBG:SCANLINE?           panel Get Scanline + press sync state (scanline.rs)
+///   DBG:SCANLINE:DIR n | :SYNC 0|1   scan axis 0..3 / press sync off, on
 ///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
 ///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
 ///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
@@ -2461,6 +2463,26 @@ impl Scpi {
                         // ~0.3 s): per phase (TE off; on, mode 0; on, mode
                         // 1), ";" between: <samples>, then per pin PA3,
                         // PB13, PC1, PC15 <level changes>,<samples high>.
+                        // DBG:SCANLINE? = the panel's Get Scanline (0x45) and
+                        // the press feedback's sync (scanline.rs `query`);
+                        // DBG:SCANLINE:DIR 0..3 = the screen axis of the scan,
+                        // DBG:SCANLINE:SYNC 0|1 = the wait before a pressed box.
+                        #[cfg(target_os = "none")]
+                        b"SCANLINE" => {
+                            self.len = 0;
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            let v = core::str::from_utf8(trim(a)).ok().and_then(|t| t.parse::<u8>().ok());
+                            if op.is_empty() && query {
+                                crate::scanline::query(self);
+                            } else if kw(op, "DIR") && !query && v.is_some_and(|d| d < 4) {
+                                crate::scanline::set(v, None);
+                            } else if kw(op, "SYNC") && !query && v.is_some_and(|d| d < 2) {
+                                crate::scanline::set(None, v.map(|d| d == 1));
+                            } else {
+                                self.err_arg(no_arg, "Illegal parameter value");
+                            }
+                            continue;
+                        }
                         #[cfg(target_os = "none")]
                         b"TE" if query => {
                             self.len = 0;

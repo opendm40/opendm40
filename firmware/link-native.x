@@ -141,6 +141,8 @@ SECTIONS
          * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*8opendm404boot*);
         *(.text.*8opendm403app9app_press*);
+        /* The press feedback's scan-line sync and DBG:SCANLINE? (src/scanline.rs). */
+        *(.text.*8opendm408scanline*);
         /* Inrush current: open / arm / close / results / save glue and the
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */

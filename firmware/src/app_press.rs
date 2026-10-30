@@ -12,7 +12,8 @@
 //! and its release in one frame cancel out), and on the menu and the list
 //! pages the item's box is composed in RAM strips and sent once
 //! (`ui::press_rect`, lcd::strips_box): each pixel written once, nothing
-//! outside the box.
+//! outside the box, started when the panel's refresh scan has just left
+//! the box (scanline.rs).
 
 use super::*;
 
@@ -135,8 +136,11 @@ impl App {
     fn press_draw(&mut self, t: ui::RowPress) {
         if let Some(r) = ui::press_rect(self.view, t) {
             if let Some(buf) = crate::calbackup::strip_take() {
-                let (x1, y1) = ((r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
-                crate::lcd::strips_box(buf, r.x as u16, r.y as u16, x1, y1, || self.press_draw_direct(t));
+                let (x0, y0, x1, y1) = (r.x as u16, r.y as u16, (r.x + r.w - 1) as u16, (r.y + r.h - 1) as u16);
+                // Between two passes of the panel's refresh scan (no TE).
+                let t0 = crate::scanline::wait(x0, y0, x1, y1);
+                crate::lcd::strips_box(buf, x0, y0, x1, y1, || self.press_draw_direct(t));
+                crate::scanline::done(t0, r.w as u32 * r.h as u32);
                 if crate::calbackup::strip_give() {
                     return;
                 }

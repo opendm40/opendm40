@@ -51,6 +51,7 @@ mod scope_ui;
 mod fft;
 mod sinc;
 mod trigsoft;
+mod scanline;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
