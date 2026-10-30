@@ -1009,6 +1009,37 @@ impl Dmm {
         self.diag_on = false;
     }
 
+    /// Power Wave (src/pwave.rs, doc 3.18): the frame's row (the method-B
+    /// power row of the ranges in force, R34 = XY: SDO23 0; the relays and
+    /// the shunt are the power meter's), SPHACAL (the phase calibration's,
+    /// also in the DC coupling), the sample scaling as `pw_take` (V: the V
+    /// gain in force and the Y zero; I: the AC A RMS gain and the X zero of
+    /// the range; the LPF zeros on single samples: INFERRED) and the full
+    /// scales of the two ranges.
+    pub fn pw_wave_setup(&self) -> ([u8; hy::CFG_LEN], u8, crate::pwave::Scale, f32, f32) {
+        let pw = &*self.pw;
+        let (iu, ir) = iu_ir(pw.ik);
+        let ci = (iu * 2 + ir) as u32;
+        let mut row = power_row(pw.vr, pw.ik, R34_XY);
+        row[0] = pw.r20 | 0x02;
+        row[1] = pw.r21;
+        let (zx, zy) = if pw.zero_ok { (pw.zx[pw.ik.min(5) as usize] as f32, pw.zy as f32) } else { (0.0, 0.0) };
+        let sc = crate::pwave::Scale {
+            su: 8.0 * CODE * KV[pw.vr as usize] * pw.v_gain(pw.vr),
+            ou: zy / 8.0,
+            si: 8.0 * CODE / (SHUNT_OHM[iu as usize] * MV_DIV[ir as usize]) * cal(0xC4 + 4 * ci, 1.0),
+            oi: zx / 8.0,
+        };
+        (row, r36_of(pw.sph), sc, V_LIM[pw.vr as usize], I_LIM[pw.ik.min(5) as usize])
+    }
+
+    /// Leaving Power Wave: the time it was open is not integrated into
+    /// the energy (no readings then), the current-limit countdown starts over.
+    pub fn pw_wave_gap(&mut self) {
+        self.pw.t_last = None;
+        self.pw.over_t0 = None;
+    }
+
     /// Restart after the DMM rail came back (`start`).
     pub(super) fn pw_restart(&mut self, clk: &mut Clock) {
         self.pa_now = None;

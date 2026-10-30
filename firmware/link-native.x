@@ -145,6 +145,11 @@ SECTIONS
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
         *(.text.*8opendm403app10app_inrush*);
+        /* Power Wave: the page's glue and drawing (src/app_pwave.rs,
+         * src/ui_pwave.rs; no stream runs while it is open). The capture,
+         * the readouts and the plot columns (src/pwave.rs) stay in region B. */
+        *(.text.*8opendm403app9app_pwave*);
+        *(.text.*8opendm402ui3pwv*);
         /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
          * never open while the AD2 stream or a logger session runs (the page
          * refuses to open then, closes when one starts; main.rs calls

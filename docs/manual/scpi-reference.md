@@ -504,6 +504,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
+| `[SENSe:]POWer:WAVE[:STATe][?]` | `ON` or `OFF` | `<open 1/0>,<frames>,<Urms>,<Irms>,<P>,<F>,<points per channel>,<repeated reads>,<unreadable points>` | both |
 | `[SENSe:]POWer:ZERO[?]` | none (start) or `CLEar` | `<result>,SET\|NONE,<V zero>,<6 current zeros>,<6 DC zeros>` | both |
 | `[SENSe:]POWer:VOLTage:CALibrate[?]` | none (start) or `DEFault` | `<result>,<V range>,<gain>,SELF\|FACT` | both |
 | `[SENSe:]POWer:VOLTage:GAIN?` | | the four V range gains | both |
@@ -532,6 +533,11 @@ and `MEASure:POWer?` then give the real power P in W.
 - `ZERO` (leads open, nothing in A, about 12 s) measures the zero offsets;
   `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
   `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
+- `WAVE ON` opens the [Power Wave](README.md#power-wave) page (`OFF`
+  closes it); refused with `METHod ALTernate` or during `ZERO` /
+  `VOLTage:CALibrate`. The query gives the last picture's values (RMS over
+  its whole cycles; `+9.91E37` when none) and the read counters. While the
+  page is open the power meter does not measure.
 - `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
   on V/COM) matches the V channel's gain on the present range to the meter's
   voltmeter; `DEFault` returns to the factory-derived gain.

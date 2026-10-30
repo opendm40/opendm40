@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Power Wave:** the power meter's voltage and current as two waveforms
+  with their own scales, U, I, P and f of the picture (Power Settings >
+  Wave, SCPI `POW:WAVE`; [manual](docs/manual/README.md#power-wave)).
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
