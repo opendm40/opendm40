@@ -121,9 +121,12 @@ as a second trace (magenta) over the MCX record, time-aligned. MF > Display
 screen only: the DMM range stays); the graph shows "CH2 1.5V" (a hole
 below the FFT's box). 0 A / 0 V of CH2 is on the centre row (no CH2
 position yet). The rate follows the timebase as in the wave view
-(`scope::wave_fs_for`: 76.8 kS/s up to 1 ms/div, 1200 S/s from
-200 ms/div); faster timebases show CH2 as steps (fewer samples than
-columns).
+(`scope::wave_fs_for`, 1200 S/s from 200 ms/div), but at most 38.4 kS/s
+(`app_ch2::CH2_MAX_FS`, 2 ms/div and faster): at the wave view's
+76.8 kS/s the stream ISR takes ~46 % of the CPU and the logger ring
+overflowed in the scope page's passes (device: ~1500 samples/s dropped at
+1 and 0.5 ms/div). Faster than 2 ms/div CH2 shows as steps (fewer samples
+than columns).
 
 The DMM reading pauses while CH2 streams (decision #3: the stream owns
 the HY3131 bus; the sentinel and BT serve pause with it, as in the wave
@@ -152,8 +155,10 @@ meter, the other functions, or while a CSV recording runs.
 * The stamp is the read, not the conversion: a conversion integrates over
   the period before it, and the AD2 filter delays it further.
   `DBG:CH2:LAG <us>` (0 until measured) takes that off; until then CH2 may
-  lag CH1 by about a conversion period (13 us at 76.8 kS/s = 0.5 px at
-  1 ms/div; 0.8 ms at 1200 S/s = 0.2 px at 200 ms/div).
+  lag CH1 by about a conversion period (26 us at 38.4 kS/s = 1 px at
+  1 ms/div; 0.8 ms at 1200 S/s = 0.2 px at 200 ms/div). The lag is one
+  value for every rung; one measured at 2 ms/div holds at the faster
+  timebases (the same rung).
 * DWT wraps every 21.5 s: anchors and the record's time are compared as
   wrapping i32 differences, which holds while they are within ~10 s of
   each other (the store spans at most 3.4 s).

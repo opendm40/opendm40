@@ -1516,7 +1516,7 @@ AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
-CH2 has at most 76.8 k samples/s: below 1 ms/div it shows steps. While it
+CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps. While it
 is on, the edge trigger does not use the trigger hardware.
 
 
