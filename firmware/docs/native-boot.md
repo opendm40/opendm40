@@ -1133,8 +1133,15 @@ Feature builds (SRAM / backup SRAM free): `dbg-prof` 45 852 / 1 016,
 `dbg-touch` 43 932 / 2 008, `acdc-trace` 44 084 / 2 008, all three
 42 164 / 1 016 (region B 8 688).
 
-Device checks still open: the supply current with USBHSEN on (*unknown*),
-and the settings record and file over power cycles with this image.
+Device checks still open:
+- Byte writes into the USBHS FIFO RAM. `csvlog::TAIL` is filled byte by
+  byte (`strb`); the device probe wrote only words, and the DWC2 core's
+  AHB slave may not honour byte lanes (*unknown*; Renode's plain memory
+  accepts them). Check: a CSV recording on the meter, read back with
+  `MMEM:DATA? "LOGnnn.CSV"`. If it fails: TAIL back to SRAM (`.dmabuf`),
+  or a word-wise fill of TAIL to keep it there.
+- The supply current with USBHSEN on (*unknown*).
+- The settings record and file over power cycles with this image.
 
 ### Flash outside the image (2026-10-22, from the 2026-10-13 dump; not tried)
 
