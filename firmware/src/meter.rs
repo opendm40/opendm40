@@ -583,6 +583,8 @@ pub struct Meter {
     rel: Option<(f32, &'static str)>,
     shown: Option<Reading>,
     live: Option<Reading>,
+    /// `live` was taken with REL (the reference, at the time it came in).
+    live_rel: bool,
     unit: &'static str,
     pub stats: Stats,
     /// AutoHold enabled (persisted setting).
@@ -610,6 +612,7 @@ impl Meter {
             rel: None,
             shown: None,
             live: None,
+            live_rel: false,
             unit: "",
             stats: Stats::new(),
             ahold: false,
@@ -661,6 +664,12 @@ impl Meter {
 
     pub fn rel_active(&self) -> bool {
         self.rel.is_some()
+    }
+
+    /// `live()` is a REL value: REL was on when it came in (it lags
+    /// `rel_active` until the next reading after a REL toggle).
+    pub fn live_rel(&self) -> bool {
+        self.live_rel
     }
 
     pub fn rel_value(&self) -> Option<f32> {
@@ -754,6 +763,7 @@ impl Meter {
         let f = self.smoothed(r);
         let d = apply_rel(&f);
         self.live = Some(d);
+        self.live_rel = rel.is_some();
         let mut u = Update { live: d, raw, show: None, captured: false, fail_edge: false };
         // HOLD pressed before the function's first settled reading (the
         // placeholder, AUTO still deciding: device 6bc494a) is armed: it

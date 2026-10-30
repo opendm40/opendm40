@@ -5,11 +5,11 @@ the REL deviations are not squashed under the absolute points (and back).
   cd firmware && ./build.sh
   emu/chartreltest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--shots DIR]
 
-3.3 V DC on V-COM, the chart full of 3.3 V points (8 s; it holds 6.4 s):
-  * tap REL: the axis labels (DBG:LCD?, x 0..76, rows 172..281) 2 s later
-    equal those 9 s later, when every point is a REL one (before the fix: 2 s
-    later the scale still spanned 0 .. 3.3 V);
-  * tap REL again: the same for the absolute points.
+3.3 V DC on V-COM, the chart full of 3.3 V points (8 s; it holds 6.4 s).
+Tap REL, 2 s later the trace (orange pixels of the plot, DBG:LCD? x 80..401,
+rows 172..281) is one flat line: its rows span a few pixels (before the fix
+the old 3.3 V points and the new 0 V ones spanned the plot's height). Tap REL
+again: the same for the absolute points.
 Exit status 0 = all passed.
 """
 import argparse
@@ -41,8 +41,8 @@ def check(ok, what):
         FAIL.append(what)
 
 
-# The chart's axis labels: rows 172..281, x 0..76.
-LABELS = (172, 110, 0, 77)
+# The chart's plot: x 80..401, rows 172..281.
+PLOT = (80, 172, 322, 110)
 
 tag = 'chartrel-%d-%d' % (A.port, os.getpid())
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--fast',
@@ -105,21 +105,27 @@ try:
         im.save(os.path.join(A.shots, name + '.png'))
 
     print('*IDN?', q('*IDN?'), flush=True)
+
+    def trace_rows():
+        """The rows of the plot holding trace (orange) pixels."""
+        x0, y0, w, h = PLOT
+        px = lcd(y0, h, x0, w)
+        rows = set()
+        for k, (r, g, b) in enumerate(px):
+            if r > 200 and 80 < g < 200 and b < 80:
+                rows.add(y0 + k // w)
+        return sorted(rows)
+
     wait_ms(8000)
-    lab0 = lcd(*LABELS)
     shot('0-abs')
     for k, what in ((1, 'REL on'), (2, 'REL off')):
         q('DBG:TAP 440,224')  # the REL box
         wait_ms(2000)
-        lab1 = lcd(*LABELS)
+        rows = trace_rows()
         shot('%d-rel-2s' % k)
-        wait_ms(9000)
-        lab2 = lcd(*LABELS)
-        shot('%d-rel-11s' % k)
-        if k == 1:
-            check(sum(a != b for a, b in zip(lab0, lab2)) > 50, 'REL on: the labels change from the 3.3 V scale')
-        diff = sum(a != b for a, b in zip(lab1, lab2))
-        check(diff == 0, '%s: the labels 2 s after = 11 s after (%d pixels differ)' % (what, diff))
+        span = rows[-1] - rows[0] + 1 if rows else 0
+        check(rows and span <= 8, '%s: 2 s later the trace is one flat line (rows %s..%s, %d px)'
+              % (what, rows[0] if rows else '-', rows[-1] if rows else '-', span))
 finally:
     try:
         os.killpg(emu.pid, 15)
