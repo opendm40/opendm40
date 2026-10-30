@@ -726,6 +726,9 @@ pub enum Dbg {
     /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
     /// (dmm::set_cap_dis_ms; RAM only).
     CapDisMs(Option<u32>),
+    /// DBG:CAP:JUMPN <n> / ?: 600 uF ramp polls before the one-poll step
+    /// up (dmm::set_cap_jumpn; RAM only).
+    CapJumpN(Option<u32>),
     /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
     /// (dmm::set_cap_dis_end; RAM only).
     CapDisEnd(Option<u32>),
@@ -2463,6 +2466,9 @@ impl Scpi {
                         b"FAST" if query => Dbg::Fast,
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
                             Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "JUMPN")) => {
+                            Dbg::CapJumpN(if query { None } else { Some(nums::<1>(a)[0]) })
                         }
                         b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
                             Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })

@@ -173,6 +173,20 @@ const CAP_OVER_MAX: u8 = 8;
 /// at once, steady or not (owner 2026-10-30: the absorption kept the
 /// slope unsteady, ~1 mF waited CAP_OVER_MAX polls on 600 uF).
 const CAP_JUMP: f32 = 1.5;
+/// Only on 600 uF (device 6f3f0b79, ~1 mF charged: one noisy 6 mF poll
+/// read > 9 mF and hopped to 60 mF and back, the first final 10 s later),
+/// and from its `cap_jumpn`-th ramp poll on (device 6f3f0b79, ~1 mF
+/// discharged: on 6 mF 1.2 s after the discharge, no final value in 12 s,
+/// was 3 s after it with 6 mF at ~3 s; INFERRED: the absorption's
+/// recovery, still fast that early, upsets the two directions).
+/// DBG:CAP:JUMPN sets it (RAM only; 0: from the first).
+static CAP_JUMPN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(4);
+pub fn cap_jumpn() -> u32 {
+    CAP_JUMPN.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_jumpn(n: u32) {
+    CAP_JUMPN.store(n.min(255), core::sync::atomic::Ordering::Relaxed);
+}
 /// The step's target: the smallest range whose 0.9 x full scale holds the
 /// slope's C over this (the absorption reads an electrolytic high right
 /// after the discharge: device 832f89a4, ~1 mF read 1.5 mF and more;
@@ -6645,10 +6659,11 @@ impl Dmm {
         self.ramp.cmp = Some(cmp);
         if self.ramp.first && !self.manual {
             // Clearly over the range in this poll's own slope (not the
-            // range's first sample, not across a turn): up at once, by as
+            // range's first sample, not across a turn; 600 uF only, from
+            // its CAP_JUMPN-th poll): up at once, by as
             // many ranges as the slope says (CAP_JUMP_DA: not past the
             // range an absorption's high reading would pick).
-            if r < 7 && !row_new && !flip && craw_i > CAP_JUMP * lim {
+            if r == 5 && !row_new && !flip && self.cap_inst_n as u32 >= cap_jumpn() && craw_i > CAP_JUMP * lim {
                 let est = craw_i / CAP_JUMP_DA;
                 let mut t = r + 1;
                 while t < 7 && est > 0.9 * f_dec * CAP_DEC[t] {

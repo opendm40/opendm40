@@ -771,6 +771,16 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             true
                         }
                     }
+                    scpi::Dbg::CapJumpN(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_jumpn(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_jumpn());
+                            true
+                        }
+                    }
                     scpi::Dbg::CapDisEnd(k) => {
                         if let Some(k) = k {
                             crate::dmm::set_cap_dis_end(k);
