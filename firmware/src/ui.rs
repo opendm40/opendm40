@@ -2919,24 +2919,32 @@ pub fn main_menu(combo: &str) {
 /// the gallery row 5), normal or pressed (ui-review #11: from touch-down).
 pub fn menu_item(i: usize, combo: &str, pressed: bool) {
     let bg = if pressed { M_PRESSED } else { M_TILE };
+    sf::rbox(menu_item_rect(i), 8, bg, M_BG);
     if let Some(&(x, y, name, icon)) = TILES.get(i) {
-        sf::rbox(rect(x, y, 190, 106), 8, bg, M_BG);
         let g = char::from_u32(icon).unwrap_or(' ');
         let mut b = [0u8; 4];
         sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, bg, 8, 0);
         sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, bg, 8, 0);
     } else if i == 5 {
         // Gallery row above the tiles (FR-16).
-        sf::rbox(rect(46, 10, 388, 34), 8, bg, M_BG);
         sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, bg, 8, 0);
     } else {
-        sf::rbox(rect(46, 280, 388, 34), 8, bg, M_BG);
         let mut t = [0u8; 48];
         let pre = b"Combined view: ";
         t[..pre.len()].copy_from_slice(pre);
         let k = combo.len().min(48 - pre.len());
         t[pre.len()..pre.len() + k].copy_from_slice(&combo.as_bytes()[..k]);
         sf::glyphs(sf::TEXT22, rect(46, 280, 388, 34), core::str::from_utf8(&t[..pre.len() + k]).unwrap_or(""), STATUS_FG, bg, 8, 0);
+    }
+}
+
+/// Box of main-menu item `i` (`menu_item`): a tile, 5 the Gallery row,
+/// else the combined-view row.
+fn menu_item_rect(i: usize) -> sf::Rect {
+    match TILES.get(i) {
+        Some(&(x, y, _, _)) => rect(x, y, 190, 106),
+        None if i == 5 => rect(46, 10, 388, 34),
+        None => rect(46, 280, 388, 34),
     }
 }
 
@@ -3077,6 +3085,24 @@ pub fn set_row_only(p: Option<RowPress>) {
 fn row_only() -> Option<RowPress> {
     let v = ROW_ONLY.load(core::sync::atomic::Ordering::Relaxed);
     (v != 0).then(|| RowPress { row: v as u8, part: ((v >> 8) & 0xFF) as i8 - 1, on: v & (1 << 17) != 0 })
+}
+
+/// The box pressed item `t` of `view` covers (app_press.rs draws it pressed
+/// / released in one strip pass, nothing outside it); None: the view's
+/// items are drawn directly.
+pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
+    let row = t.row as usize;
+    let key = |r: sf::Rect, minus: i16, plus: i16, w: i16, m: i16| rect(if t.part < 0 { minus } else { plus }, r.y + m, w, r.h - 2 * m);
+    Some(match view {
+        View::Menu => menu_item_rect(row),
+        View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
+        View::Settings if t.part == 0 => st_row(row),
+        View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
+        View::Limits => set_row(row),
+        View::Record if t.part == 0 => set_row(row),
+        View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
+        _ => return None,
+    })
 }
 
 /// Pressed stepper key / Start button (already the accent colour): the
@@ -3328,7 +3354,7 @@ fn set_stepper(i: usize, val: &str, minus_x: i16) {
         return;
     }
     let r = set_row(i);
-    for (d, x, t) in [(-1, minus_x, "-"), (1, STEP_PLUS_X, "+")] {
+    for (d, x) in [(-1, minus_x), (1, STEP_PLUS_X)] {
         let bg = match only {
             None => M_ACCENT,
             Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
@@ -3336,7 +3362,13 @@ fn set_stepper(i: usize, val: &str, minus_x: i16) {
         };
         let k = rect(x, r.y + 3, STEP_KEY_W, r.h - 6);
         sf::rbox(k, 4, bg, M_TILE);
-        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, bg, 8, 0);
+        // TEXT22's "-" / "+" (9 x 1, 9 x 11 px) drawn as bars: its 22 px
+        // cell centred in the 21 px key wrote a row above it.
+        let (cx, cy) = ((k.x + k.w / 2) as u16, (k.y + k.h / 2) as u16);
+        lcd::fill_rect(cx - 5, cy, 9, 1, STATUS_FG);
+        if d > 0 {
+            lcd::fill_rect(cx - 1, cy - 5, 1, 11, STATUS_FG);
+        }
     }
     if only.is_some() {
         return;

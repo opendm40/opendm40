@@ -250,6 +250,10 @@ pub struct App {
     /// Menu tile / list-page row or stepper key / generator box drawn
     /// pressed since its touch-down, on that view (ui-review #11).
     pressed: Option<(View, ui::RowPress)>,
+    /// The item drawn pressed now (app_press.rs `press_flush`).
+    press_shown: Option<(View, ui::RowPress)>,
+    /// Touch-down time of `pressed`.
+    press_t: u64,
     cur: ui::Cursors,
     /// Analog rail policy: false = Auto (default, stock-like: the rails the
     /// shown view needs, see update_rails), true = both rails always on.
@@ -610,6 +614,8 @@ impl App {
             kp_edit: false,
             kp_pressed: None,
             pressed: None,
+            press_shown: None,
+            press_t: 0,
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
@@ -1527,6 +1533,7 @@ impl App {
         self.redraw = false;
         // The full repaint drew any pressed item released.
         self.pressed = None;
+        self.press_shown = None;
         self.scope_invalidate();
         self.chart_cache.invalidate();
         if !self.repaint_strips() {
@@ -1794,6 +1801,10 @@ impl App {
         // ---- drawing only below this point.
         if self.redraw {
             self.repaint(now);
+        }
+        // Pressed feedback (app_press.rs): only while it changes.
+        if self.pressed != self.press_shown && !crate::hy3131::streaming() {
+            self.press_flush(now);
         }
         if self.sp.uncover != 0 {
             self.sp_uncover();
@@ -4086,7 +4097,16 @@ impl App {
                     }
                     _ => return,
                 }
-                self.redraw = true;
+                // A tapped row (not a stepper: its keys are the pressed
+                // item): only that row again, with its new value, as its
+                // release (app_press.rs; drawn even when the press was too
+                // short to show). Else the page.
+                match self.pressed {
+                    Some((View::Settings, t)) if t.part == 0 && t.row & 0x80 == 0 && ui::settings_id(self.set_tab, t.row as usize) == Some(id) => {
+                        self.press_shown = self.pressed;
+                    }
+                    _ => self.redraw = true,
+                }
             }
         }
         let _ = dmm::button_of;

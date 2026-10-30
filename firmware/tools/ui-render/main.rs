@@ -1164,6 +1164,43 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
 }
 
+/// Pressed feedback in one pass (app_press.rs, lcd::strips_box): over the
+/// page drawn by `page`, item `t` drawn pressed / released by `item` in a
+/// strip pass over `ui::press_rect` ends as the direct draw does, the
+/// direct draw changes nothing outside that box, and the pass writes each
+/// pixel of the box once and nothing else.
+fn press_check(ck: &mut Checker, name: &str, view: ui::View, t: ui::RowPress, page: &dyn Fn(), item: &dyn Fn()) {
+    let Some(r) = ui::press_rect(view, t) else {
+        ck.fail(name, "press: no box".into());
+        return;
+    };
+    let (x0, y0, x1, y1) = (r.x as usize, r.y as usize, (r.x + r.w - 1) as usize, (r.y + r.h - 1) as usize);
+    host::reset(0);
+    page();
+    let a = host::emu().fb.clone();
+    item();
+    let b = host::emu().fb.clone();
+    host::reset(0);
+    page();
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    lcd::strips_box(&mut buf, x0 as u16, y0 as u16, x1 as u16, y1 as u16, || item());
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let inside = |i: usize| (x0..=x1).contains(&(i % W)) && (y0..=y1).contains(&(i / W));
+    let out = a.iter().zip(b.iter()).enumerate().filter(|(i, (p, q))| p != q && !inside(*i)).count();
+    if out != 0 {
+        ck.fail(name, format!("press: the direct draw changes {out} px outside the box {x0},{y0}..{x1},{y1}"));
+    }
+    let n = b.iter().zip(host::emu().fb.iter()).filter(|(p, q)| p != q).count();
+    if n != 0 {
+        ck.fail(name, format!("press: {n} px differ from the direct draw"));
+    }
+    if writes != (r.w as u64) * (r.h as u64) {
+        ck.fail(name, format!("press: {writes} pixel writes for the {}x{} box", r.w, r.h));
+    }
+}
+
 /// The bargraph's full-scale label ends with the unit as the readout and
 /// the accuracy label spell it (`sf::unit_text`: "600 K\u{3a9}", not "600
 /// kOhm"): the label's last columns (right-aligned at the bar's end, row
@@ -2687,6 +2724,55 @@ fn main() {
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
     for tab in 0..ui::SET_TABS.len() as u8 {
         strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
+    }
+    // Pressed feedback (app_press.rs): every item of the menu, the
+    // Settings tabs, rows and keys, the Hold & Limits and Record pages,
+    // pressed and released.
+    for on in [true, false] {
+        let pr = |row: usize, part: i8| ui::RowPress { row: row as u8, part, on };
+        let combo = ui::view_name(ui::View::DmmScope);
+        for i in 0..6 {
+            press_check(&mut ck, &format!("press/menu{i}/{on}"), ui::View::Menu, pr(i, 0), &|| ui::main_menu(combo), &|| ui::menu_item(i, combo, on));
+        }
+        for tab in 0..ui::SET_TABS.len() as u8 {
+            let page = || ui::settings(tab, &sv);
+            let mut items: Vec<ui::RowPress> = (0..ui::SET_TABS.len()).filter(|&t| t != tab as usize).map(|t| pr(0x80 | t, 0)).collect();
+            for (k, &id) in ui::SET_TABS[tab as usize].1.iter().enumerate() {
+                if ui::set_is_stepper(id) {
+                    items.extend([pr(k, -1), pr(k, 1)]);
+                } else {
+                    items.push(pr(k, 0));
+                }
+            }
+            for t in items {
+                let item = || {
+                    ui::set_row_only(Some(t));
+                    ui::settings(tab, &sv);
+                    ui::set_row_only(None);
+                };
+                press_check(&mut ck, &format!("press/settings{tab}/{}.{}/{on}", t.row, t.part), ui::View::Settings, t, &page, &item);
+            }
+        }
+        let lv = ["ON"; 9];
+        for k in 0..ui::LIMIT_ROWS.len() {
+            let t = pr(k, 0);
+            let page = || ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &lv);
+            let item = || {
+                ui::set_row_only(Some(t));
+                ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &lv);
+                ui::set_row_only(None);
+            };
+            press_check(&mut ck, &format!("press/limits{k}/{on}"), ui::View::Limits, t, &page, &item);
+        }
+        for t in [pr(0, -1), pr(0, 1), pr(1, -1), pr(1, 1), pr(ui::REC_START_ROW, 0)] {
+            let page = || ui::record_page(["Every reading", "Until stopped"], "about 3 h left", false);
+            let item = || {
+                ui::set_row_only(Some(t));
+                ui::record_page(["Every reading", "Until stopped"], "about 3 h left", false);
+                ui::set_row_only(None);
+            };
+            press_check(&mut ck, &format!("press/record{}.{}/{on}", t.row, t.part), ui::View::Record, t, &page, &item);
+        }
     }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
