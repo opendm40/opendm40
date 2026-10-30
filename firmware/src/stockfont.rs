@@ -30,11 +30,10 @@ mod data {
     /// column-major, high nibble first (our own glyphs, stockfont_w.rs).
     /// HUF: 4 bpp row tokens, Huffman coded (tools/mkstockfont.py; docs/fonts.md):
     /// per row L(v) one pixel of coverage 1..14, F0(n) / F15(n) n pixels of
-    /// 0 / 15, C(n) n pixels copied from the row above; n = a length class
-    /// (CLS_LO, CLS_EB extra bits) or EOL (to the row end). Each token is a
-    /// canonical Huffman code of its context (the previous token's kind in
-    /// the row x the class of the pixel above: 0, 15, 1..14, none; HUF_CNT /
-    /// HUF_SYM), then its extra bits, MSB
+    /// 0 / 15, C(E) as a row's first token: the row above again; n = a
+    /// length class (CLS_LO, CLS_EB extra bits) or EOL (to the row end).
+    /// Each token is a canonical Huffman code of its context (the previous
+    /// token's kind in the row, HUF_CNT / HUF_SYM), then its extra bits, MSB
     /// first. No token crosses a row end; a glyph starts at a byte boundary.
     pub const BIT1: u8 = 0;
     pub const RAW4: u8 = 1;
@@ -43,7 +42,6 @@ mod data {
     /// Token kinds (symbol >> 4).
     const K_L: u8 = 0;
     const K_F15: u8 = 2;
-    const K_C: u8 = 3;
     /// Run length classes: first length and extra bits; class EOL = to the
     /// end of the row.
     const CLS_LO: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 9, 13, 21, 37, 0];
@@ -103,72 +101,22 @@ mod data {
 
     /// Row cursor of one HUF glyph: rows are decoded in order (a label
     /// draws top to bottom), so no per-row index is stored. `next` = the row
-    /// the next token starts, `pos` = bit index of the next token, `prev` =
-    /// row next - 1 as nibbles (high first): the contexts and the copies
-    /// read it, the next row is decoded over it in place.
-    #[derive(Clone, Copy)]
+    /// the next token starts, `pos` = bit index of the next token, `src` =
+    /// bit index of the last literal row (a copied row is decoded from there).
+    #[derive(Clone, Copy, Default)]
     pub struct Cur {
         pos: u16,
+        src: u16,
         next: u8,
-        prev: [u8; MAXW / 2],
     }
 
-    impl Default for Cur {
-        fn default() -> Cur {
-            Cur { pos: 0, next: 0, prev: [0; MAXW / 2] }
-        }
-    }
-
-    #[inline(always)]
-    fn nget(r: &[u8; MAXW / 2], x: usize) -> u8 {
-        let b = r[(x >> 1) & (MAXW / 2 - 1)];
-        if x & 1 == 0 { b >> 4 } else { b & 15 }
-    }
-
-    #[inline(always)]
-    fn nset(r: &mut [u8; MAXW / 2], x: usize, v: u8) {
-        let b = &mut r[(x >> 1) & (MAXW / 2 - 1)];
-        *b = if x & 1 == 0 { (*b & 0x0F) | v << 4 } else { (*b & 0xF0) | v };
-    }
-
-    /// Columns a .. b of a nibble row set to v: whole bytes where it can.
-    #[inline(always)]
-    fn nfill(r: &mut [u8; MAXW / 2], mut a: usize, b: usize, v: u8) {
-        if a & 1 == 1 && a < b {
-            nset(r, a, v);
-            a += 1;
-        }
-        let vv = v * 0x11;
-        while a + 1 < b {
-            r[(a >> 1) & (MAXW / 2 - 1)] = vv;
-            a += 2;
-        }
-        if a < b {
-            nset(r, a, v);
-        }
-    }
-
-    /// Columns a .. b of a row held as nibbles to f as runs of equal coverage.
-    #[inline(always)]
-    fn emit<F: FnMut(u8, u16)>(r: &[u8; MAXW / 2], mut a: usize, b: usize, f: &mut F) {
-        while a < b {
-            let v = nget(r, a);
-            let mut z = a + 1;
-            while z < b && nget(r, z) == v {
-                z += 1;
-            }
-            f(v, (z - a) as u16);
-            a = z;
-        }
-    }
-
-    /// Bits of the first-level decode table: 96 % of the tokens have a
+    /// Bits of the first-level decode table: 95 % of the tokens have a
     /// code this short (tools/mkstockfont.py prints the share).
     const LUTK: u32 = 6;
 
     /// Per context, per LUTK-bit prefix: len << 8 | symbol of the code it
     /// starts with, 0 = a longer code. Built from HUF_CNT / HUF_SYM at the
-    /// first glyph lookup (lut_init), in SRAM (TCM is the stack).
+    /// first glyph lookup (lut_init); 512 bytes in SRAM (TCM is the stack).
     #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
     static mut LUT: [[u16; 1 << LUTK]; HUF_CNT.len()] = [[0; 1 << LUTK]; HUF_CNT.len()];
     static mut LUT_OK: bool = false;
@@ -321,11 +269,10 @@ mod data {
                     }
                 }
                 _ => {
-                    if !self.seek(c, y, w) {
-                        self.step(c, w, 0, 0, &mut |_, _| {});
-                    }
-                    for (x, v) in buf[..w].iter_mut().enumerate() {
-                        *v = nget(&c.prev, x);
+                    let (s, lit) = self.seek(c, y, w);
+                    let e = self.runs::<true>(s, w, buf);
+                    if lit {
+                        c.pos = e as u16;
                     }
                 }
             }
@@ -337,65 +284,56 @@ mod data {
         #[inline(always)]
         pub fn row_runs<F: FnMut(u8, u16)>(&self, c: &mut Cur, y: u32, x0: usize, x1: usize, mut f: F) {
             let w = (self.w as usize).min(MAXW);
-            if self.seek(c, y, w) {
-                emit(&c.prev, x0, x1.min(w), &mut f);
-            } else {
-                self.step(c, w, x0, x1, &mut f);
+            let (mut p, lit) = self.seek(c, y, w);
+            let mut x = 0usize;
+            let mut ctx = 0usize;
+            while x < w {
+                let (k, v, l) = self.token(&mut p, ctx, x, w);
+                ctx = (1 + k as usize) & 3;
+                let e = (x + l).min(w);
+                let (a, b) = (x.max(x0), e.min(x1));
+                if a < b {
+                    f(v, (b - a) as u16);
+                }
+                x = e;
+            }
+            if lit {
+                c.pos = p as u16;
             }
         }
 
-        /// Move the cursor so that row `y` is the next one to decode (false)
-        /// or is already in c.prev (true: the same row again). A later row
-        /// decodes the rows between; an earlier row restarts from the top.
-        fn seek(&self, c: &mut Cur, y: u32, w: usize) -> bool {
+        /// Move the cursor to row `y`: (bit index where row y's tokens
+        /// start, true if that is a new literal row whose end the caller
+        /// stores in c.pos). Same row again: its start; a later row: skips
+        /// the rows between; an earlier row: from the top.
+        fn seek(&self, c: &mut Cur, y: u32, w: usize) -> (u32, bool) {
             let y = y.min(255);
             if y + 1 == c.next as u32 {
-                return true;
+                return (c.src as u32, false);
             }
             if y < c.next as u32 {
                 *c = Cur::default();
             }
             while (c.next as u32) < y {
-                self.step(c, w, 0, 0, &mut |_, _| {});
+                let (s, lit) = self.begin(c);
+                if lit {
+                    c.pos = self.runs::<false>(s, w, &mut [0; MAXW]) as u16;
+                }
             }
-            false
+            self.begin(c)
         }
 
-        /// Decode row c.next over c.prev (in place) and hand the runs of
-        /// its columns x0 .. x1 to f; a copied span goes out as runs of
-        /// equal coverage, fills and single pixels as decoded.
-        #[inline(always)]
-        fn step<F: FnMut(u8, u16)>(&self, c: &mut Cur, w: usize, x0: usize, x1: usize, f: &mut F) {
-            let first = c.next == 0;
-            let mut p = c.pos as u32;
-            let mut x = 0usize;
-            let mut pk = 0usize;
-            while x < w {
-                let up = if first {
-                    3
-                } else {
-                    match nget(&c.prev, x) {
-                        0 => 0,
-                        15 => 1,
-                        _ => 2,
-                    }
-                };
-                let (k, v, l) = self.token(&mut p, pk * 4 + up, x, w);
-                let e = (x + l).min(w);
-                let (a, b) = (x.max(x0), e.min(x1));
-                if k == K_C {
-                    emit(&c.prev, a, b, f);
-                } else {
-                    nfill(&mut c.prev, x, e, v);
-                    if a < b {
-                        f(v, (b - a) as u16);
-                    }
-                }
-                x = e;
-                pk = (1 + k as usize).min(4);
-            }
-            c.pos = p as u16;
+        /// Start the next row: a copy of the last literal row (C(E): its
+        /// start, false), else a literal row at c.pos (true).
+        fn begin(&self, c: &mut Cur) -> (u32, bool) {
             c.next = c.next.wrapping_add(1);
+            let p = c.pos as u32;
+            if HUF_COPY_LEN > 0 && self.peek(p) >> (32 - HUF_COPY_LEN) == HUF_COPY_CODE {
+                c.pos += HUF_COPY_LEN as u16;
+                return (c.src as u32, false);
+            }
+            c.src = c.pos;
+            (p, true)
         }
 
         /// 32 bits of the blob from bit `p` on, MSB first (zeros past the end).
@@ -441,6 +379,27 @@ mod data {
                 CLS_LO[c] as usize + if e > 0 { (win >> (32 - e)) as usize } else { 0 }
             };
             (kind, if kind == K_F15 { 15 } else { 0 }, n)
+        }
+
+        /// One literal row of tokens from bit `p` into o[..w] (if PUT);
+        /// returns the bit index after the row.
+        #[inline(always)]
+        fn runs<const PUT: bool>(&self, mut p: u32, w: usize, o: &mut [u8; MAXW]) -> u32 {
+            let w = w.min(MAXW);
+            let mut x = 0usize;
+            let mut ctx = 0usize;
+            while x < w {
+                let (k, v, l) = self.token(&mut p, ctx, x, w);
+                let e = (x + l).min(w);
+                if PUT {
+                    for d in &mut o[x..e] {
+                        *d = v;
+                    }
+                }
+                x = e;
+                ctx = (1 + k as usize) & 3;
+            }
+            p
         }
     }
 
