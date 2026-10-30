@@ -429,7 +429,7 @@ impl Buf {
     }
 }
 
-/// FUN_08032bfa (V / A / W): NaN " -- "; |v| < 1e-6 "%1.2fu"; else scaled
+/// FUN_08032bfa (V / A / W): NaN " -- "; 0 "0.00" (ours); |v| < 1e-6 "%1.2fu"; else scaled
 /// into [1, 1000) over u m - k M with "%1.2f" (< 9.995), "%2.1f" (< 99.95)
 /// or "%3.0f".
 pub fn fmt_v(out: &mut Buf, v: f32, unit: &str) {
@@ -443,6 +443,12 @@ fn fmt_v_cut(out: &mut Buf, v: f32, unit: &str, cut: u8) {
         return;
     }
     let mut t = [0u8; 16];
+    if v == 0.0 {
+        // Exactly zero (a trigger level at 0): "0.00V", not the stock's
+        // "0.00uV" (issue #136).
+        out.push("0.00").push(unit);
+        return;
+    }
     if v.abs() < 1e-6 {
         out.push(crate::dmm::format(&mut t, v * 1e6, 2)).push("u").push(unit);
         return;
@@ -3734,10 +3740,11 @@ pub fn meter_strip(d: &StripData) {
                     pm(r.x - PM_W, r.y + 3, C_DIS);
                 }
             }
-            // Narrow (GEN shown): the text without its spaces if it is too
-            // wide, then at the stock spacing 0 (as the scope's cells).
+            // Narrow (GEN shown): the stock spacing 0 (as the scope's cells)
+            // first, then the text without its spaces ("AC444.44mV" read as
+            // one word; issue #136) only if it is still too wide.
             let mut b = [0u8; 24];
-            let wide = sf::text_width(sf::SC_F12, t, 1) > r.w;
+            let wide = sf::text_width(sf::SC_F12, t, 0) > r.w;
             let t = if wide {
                 let mut n = 0;
                 for &c in t.as_bytes().iter().filter(|&&c| c != b' ') {
@@ -3750,7 +3757,7 @@ pub fn meter_strip(d: &StripData) {
             } else {
                 t
             };
-            let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
+            let sp = if sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
             st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }

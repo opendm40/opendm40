@@ -888,12 +888,12 @@ impl App {
 
     /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
     /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
-    /// Stock rule: refused while sampling ("Please stop sample").
+    /// Stock rule: refused while sampling ("Stop the scope first").
     #[inline(never)] // .cold (link-native.x): a tap (MF Settings Save CSV)
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
-            self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
+            self.toast(now, if self.scope.s.run { "Stop the scope first" } else { "No record to save" }, false);
             return;
         }
         if crate::screenshot::busy() || crate::csvlog::writing() {
@@ -948,7 +948,7 @@ impl App {
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
-            self.toast(now, "Save CSV Error", false);
+            self.toast(now, "CSV save failed", false);
             return;
         }
         self.scope.hold = true;
@@ -990,7 +990,7 @@ impl App {
             }
             crate::screenshot::Shot::NoDisk => ("No disk", false),
             crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("Save CSV Error", false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("CSV save failed", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });

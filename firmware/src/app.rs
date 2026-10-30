@@ -160,11 +160,12 @@ fn trim_zeros(s: &str) -> &str {
     s.trim_end_matches('0').trim_end_matches('.')
 }
 
-/// Unit text the keypad's TEXT22 font can show (no deg / micro glyphs).
+/// Unit text of the keypad (TEXT22): one glyph for deg C / deg F, micro as
+/// "u" as everywhere else on the screen.
 fn kp_unit_text(u: &'static str) -> &'static str {
     match u {
-        "\u{b0}C" => "C",
-        "\u{b0}F" => "F",
+        "\u{b0}C" => "\u{2103}",
+        "\u{b0}F" => "\u{2109}",
         "\u{b5}A" => "uA",
         "\u{b5}F" => "uF",
         u => u,
@@ -909,7 +910,7 @@ impl App {
                     core::str::from_utf8(&vb[..n]).unwrap_or(""),
                     crate::meter::SMOOTH_NAMES[self.meter.smoothing() as usize],
                     if self.dmm_view.bar_on { "Bargraph" } else { "History" },
-                    if self.dmm.temp_f() { "F (Fahrenheit)" } else { "C (Celsius)" },
+                    if self.dmm.temp_f() { "\u{2109} (Fahrenheit)" } else { "\u{2103} (Celsius)" },
                     if self.sp.swipes { "Top bar" } else { "Off (stock)" },
                     if self.sp.press_fx { "ON" } else { "OFF (stock)" },
                     crate::scope_ui::TAP_NAMES[self.sp.tap_mode.min(2) as usize],
@@ -2046,13 +2047,13 @@ impl App {
         match self.kp_target {
             0 => ("Frequency", match self.kp_mult {
                 b'M' => "MHz",
-                b'K' => "KHz",
+                b'K' => "kHz",
                 _ => "Hz",
             }),
             1 => ("Vpp", "V"),
             2 => ("Duty", "%"),
             5 => ("Offset", "V"),
-            KP_T_OFFS => ("Offset", "C"),
+            KP_T_OFFS => ("Offset", "\u{2103}"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
@@ -3077,8 +3078,8 @@ impl App {
                 captured = true;
                 self.pw_long_side(now);
             }
-            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && (153..172).contains(&p.y) => captured = true,
-            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && (153..172).contains(&p.y) => {
+            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && ui::HIST_HIT.contains(&p.y) => captured = true,
+            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && ui::HIST_HIT.contains(&p.y) => {
                 captured = true;
                 self.hist_n = 0;
                 self.beep(now, 300);
@@ -3592,7 +3593,7 @@ impl App {
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
             }
-            View::Dmm if !self.dmm_view.bar_on && (153..172).contains(&y) => {
+            View::Dmm if !self.dmm_view.bar_on && ui::HIST_HIT.contains(&y) => {
                 // History row: record the shown value (not OL). While HOLD
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).

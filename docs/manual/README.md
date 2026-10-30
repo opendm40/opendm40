@@ -201,7 +201,7 @@ The top line of the multimeter page shows, from left to right:
 *The status bar.*
 
 1. the range: **AUTO** or **AUTO+** while the meter picks the range, or
-   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6KΩ**
+   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6kΩ**
    (as the stock firmware shows it);
 2. **RUN**, **HOLD** or **A-HOLD**, or in that place a wrong-connection
    [alert](#safety-and-alerts);
@@ -700,7 +700,7 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 - **Offset**: -20 to +20 °C in 0.1 °C steps, one per sensor. Tap **-** /
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
-- **Unit: C** / **Unit: F** switches between °C and °F for the whole meter
+- **Unit: ℃** / **Unit: ℉** switches between °C and °F for the whole meter
   (also **Settings > More > Temp unit**).
 - The 2-wire leads add their resistance: about 0.4 °C per 0.1 Ω on a PT100.
   Correct it with the offset or with REL.
@@ -1182,8 +1182,8 @@ Checks the fuse and the current path inside the meter without opening it.
 
 | Result | Meaning |
 |---|---|
-| **FUSE OK** (about 48 Ω) | The fuse and the A input path are intact. |
-| **FUSE OPEN** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
+| **Fuse OK** (about 48 Ω) | The fuse and the A input path are intact. |
+| **Fuse open** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
 | **Check leads** | A reading far from 48 Ω or none: one lead from V/Ω to A only. |
 
 **Again** repeats, **OK** returns to the function you were in. Cancel or
@@ -1496,7 +1496,7 @@ samples) stays in memory:
 **MF > Settings**:
 
 - **Save CSV**: saves the whole stored capture (up to 26 624 samples, not
-  only the screen). Stop the scope first (**Please stop sample**
+  only the screen). Stop the scope first (**Stop the scope first**
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
@@ -2283,7 +2283,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **DMM rate** | SLOW, MED, FAST | MED | [Rate](#rate-fast-med-slow); shows the readings per second, or **(n/a here)** where the current function has a fixed rate. |
 | **Smoothing** | OFF, LOW, HIGH | OFF | [Smoothing](#smoothing). |
 | **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
-| **Temp unit** | C (Celsius), F (Fahrenheit) | C | Temperature unit everywhere. |
+| **Temp unit** | ℃ (Celsius), ℉ (Fahrenheit) | ℃ | Temperature unit everywhere. |
 | **Scope swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
 | **Scope press** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
 | **Scope tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |

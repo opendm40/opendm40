@@ -912,7 +912,7 @@ fn hit_tests(ck: &mut Ck) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column
-        } else if (153..172).contains(&y) {
+        } else if ui::HIST_HIT.contains(&y) {
             Some(102) // history row (one target for all five boxes)
         } else if ui::rate_chip_hit(x, y) {
             Some(103)

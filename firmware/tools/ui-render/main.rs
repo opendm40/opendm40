@@ -2243,7 +2243,7 @@ fn main() {
         // themselves are the stock keypad geometry (not checked here: its
         // 40 px keys sit 1 px apart and 3 px from the screen edge).
         if k == 0 {
-            ui::keypad_input(true, "1234567", "KHz", false);
+            ui::keypad_input(true, "1234567", "kHz", false);
             ck.check_opts("gen/keypad-freq-input", &gen_regions, false);
             // Prefilled current value, selected (ui-review #10).
             ui::keypad_input(true, "2", "MHz", true);
