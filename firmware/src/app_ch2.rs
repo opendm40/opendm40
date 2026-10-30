@@ -29,6 +29,15 @@ pub struct Ch2 {
     pub frozen: bool,
 }
 
+/// CH2's highest stream rate (S/s): the 38 400 rung at 2 ms/div and
+/// faster. At 76 800 (the wave view's rung up to 1 ms/div) the stream ISR
+/// takes ~46 % of the CPU (2 ms/div: ~15 %) and the logger ring (2048
+/// samples, 27 ms there) overflowed in the scope page's longer passes
+/// (device: ~1500 samples/s dropped at 1 and 0.5 ms/div, 0 at 2 ms/div).
+/// One rung for every timebase up to 2 ms/div also keeps one CH2 lag
+/// (`DBG:CH2:LAG`) right for all of them.
+pub const CH2_MAX_FS: u32 = 38_400;
+
 impl Ch2 {
     pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false };
 }
@@ -81,7 +90,7 @@ impl App {
         if !self.scope.s.run && self.ch2.live {
             return Some(self.ch2.fs);
         }
-        Some(scope::wave_fs_for(self.scope.s.tb))
+        Some(scope::wave_fs_for(self.scope.s.tb).min(CH2_MAX_FS))
     }
 
     /// main.rs: the stream for CH2 runs (or stopped / was lost: `live`
