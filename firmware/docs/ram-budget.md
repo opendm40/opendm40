@@ -213,7 +213,7 @@ sets two modes:
   (`LA`, read ahead) past the packed codes they replace (a dry run checks
   both first), else it stays packed. The next block starts after it; the
   oldest goes when room is needed (a coded one whole, a packed one 4
-  samples at a time). So a record is at least 62 256 samples (white
+  samples at a time). So a record is at least about 62 250 samples (white
   noise: all packed, the old packed ring) and at most 64 blocks (262 144
   samples; `dlog::SBLK_MAX`, the Save CSV file's block table). Blocks are
   coded only for the long captures (Single, DIGitize, roll; in the Wave
