@@ -1481,7 +1481,7 @@ fn describe(st: &State, base: usize, out: &mut [u8]) -> usize {
             w.s(b"reinstall it: tools/reload.sh --image FIRMWARE.BIN, or copy it as\r\n");
             w.s(b"dm40_opendm40_v");
             w.s(VERSION.as_bytes());
-            w.s(b".bin to the vendor loader's own USB disk (see README.TXT).\r\n");
+            w.s(b".bin to the vendor loader's own USB disk (see the manual).\r\n");
         }
         None => w.s(b"; no FIRMWARE.BIN (no valid loader record at 08008000).\r\n"),
     }
