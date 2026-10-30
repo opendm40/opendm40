@@ -254,9 +254,8 @@ the combined view switches to the next sub-mode of the current function
 
 ### On-screen help
 
-**Settings > More > Help** opens seven short help pages: gestures, side
-keys, multimeter, limits, recording and alerts, the USB disk, and the power
-meter. Tap to turn the page.
+**Settings > More > Help** opens two short help pages: gestures and side
+keys. Tap to turn the page.
 
 ![The first help page: gestures](img/help.png)
 

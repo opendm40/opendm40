@@ -47,6 +47,14 @@ fatren-dry-run = []
 #   recovery-usb: our own minimal USB mass-storage disk (no LCD).
 recovery-file = []
 recovery-usb = []
+# DBG:HYSPI:SELF? / WR?, the HY3131 bus self-test and write experiment
+# (src/hyspi.rs; emu/hy3131/ad2streamtest.py). Off by default: ~2.3 KB of
+# region C (docs/native-boot.md "Region B audit #9"); without it the two
+# queries are refused (undefined header).
+dbg-hyspi = []
+# DBG:ACDC?, the AC+DC phase diagnostic text (Dmm::acdc_diag_text). Off by
+# default for the same reason (~0.8 KB of region C); refused without it.
+dbg-acdc = []
 # DBG:TOUCH? / DBG:TOUCH 0, the 160-entry touch log (src/touch.rs; 1.9 KB of
 # RAM). Off by default: without it the log keeps 16 entries, enough for the
 # touch test page (Settings > Touch test, read every pass), and the two
