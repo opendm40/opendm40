@@ -57,7 +57,7 @@ impl App {
         } else if b == Button::Amp && self.dmm.sub() == 0 {
             // DC A has no AD2 path (AD1 only); the wave view switches to the
             // AC A row, CH2 leaves the user's function alone.
-            Some("CH2: DMM in AC A (DC-coupled)")
+            Some("CH2: needs AC A")
         } else if crate::csvlog::active() {
             Some("CH2: recording runs")
         } else if self.dmm.ad2_scale().is_none() {

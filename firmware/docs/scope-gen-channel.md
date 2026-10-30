@@ -129,7 +129,7 @@ The DMM reading pauses while CH2 streams (decision #3: the stream owns
 the HY3131 bus; the sentinel and BT serve pause with it, as in the wave
 view); it comes back when CH2 is turned off or the page is left. CH2 runs
 on V (DC / AC V, DC / AC mV) and AC A / mA / uA (DC-coupled rows); not in
-DC A (no AD2 path: "CH2: DMM in AC A"), AC+DC / AUTO coupling, the power
+DC A (no AD2 path: "CH2: needs AC A"), AC+DC / AUTO coupling, the power
 meter, the other functions, or while a CSV recording runs.
 
 ### 2.2 Time alignment ([scope_ch2.rs](../src/scope_ch2.rs))
