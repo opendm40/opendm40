@@ -441,7 +441,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
 /// P / E / N of "OPEN" (stockfont_open.rs), next to its data in region A2
 /// (zero-wait; region B is full).
 #[inline(never)]
-#[link_section = ".text.a2.open_glyph"]
+#[cfg_attr(target_os = "none", link_section = ".text.a2.open_glyph")]
 fn open_glyph(font: Font, ch: char) -> Option<Glyph> {
     let &(_, _, off, w, h, adv, yoff) = OPEN_GLYPHS.iter().find(|o| o.0 == font.0 && o.1 == ch)?;
     Some(Glyph::own_rle(OPEN_B.get(off as usize..).unwrap_or(&[]), w, h, adv, yoff))
