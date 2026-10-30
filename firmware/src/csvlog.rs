@@ -11,7 +11,7 @@
 //! tools/dlog.py) and is byte for byte what this module wrote before DLG:
 //! CRLF line ends, '.' decimal point, ASCII only:
 //!   # Alientek DM40A, opendm40 0.1.0, function DC V, range AUTO, started uptime 12.345 s
-//!   # time_s = seconds since the start of this recording (no real-time clock); empty value = overload
+//!   # time_s = seconds since the start of this recording (no real-time clock); empty value = overflow
 //!   time_s,value,unit,flags
 //!   0.250,1.23456,V,
 //!   0.750,,V,OL
@@ -429,7 +429,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     w.a(range);
     w.s(", started uptime ");
     w.ms(now_ms);
-    w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overload\r\n");
+    w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n");
     let (ii, di) = next();
     j.ival = INTERVALS_S[ii as usize] * 1000;
     j.dur = DURATIONS_S[di as usize] * 1000;
@@ -438,7 +438,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
         // reading mode keeps the header byte for byte.
         w.s("# interval ");
         w.u(j.ival as u64 / 1000);
-        w.s(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overload in it\r\n");
+        w.s(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overflow in it\r\n");
     }
     w.s("time_s,value,unit,flags\r\n");
     let n = w.n;

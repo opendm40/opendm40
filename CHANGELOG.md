@@ -56,6 +56,9 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
+- **Continuity and diode say OPEN** next to the big `0L` with open leads
+  (diode: also a reversed diode); the other functions say "Overflow"
+  where "Overload" was ([manual](docs/manual/README.md#overflow)).
 - `DBG:TOUCH?` and `DBG:PROF?` (debug) are only in builds with the
   `dbg-touch` / `dbg-prof` features
   ([SCPI reference](docs/manual/scpi-reference.md#debug-commands)).
