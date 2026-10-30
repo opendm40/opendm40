@@ -947,7 +947,7 @@ impl DmmView {
             // The beeper indicator's band holds the row (`short_sync`).
             aux = [None; 2];
         }
-        // Ohm / diode: the test current, small, in the empty aux1 slot
+        // Ohm / continuity / diode: the test current, small, in the empty aux1 slot
         // (`test_current_label`). Cleared before the aux rows (an aux1 that
         // replaces it paints over the cleared box), drawn after them (the
         // aux1 clear below and the unit change above mark it for a redraw).
@@ -955,6 +955,7 @@ impl DmmView {
             _ if band => 255,
             10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
+            11 if aux[0].is_none() && !self.power => 0x11,
             _ => 255,
         };
         if ik == 255 && self.last_iohm != 255 {
@@ -1163,7 +1164,7 @@ const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
-/// (none on 60 M: the box is cleared); diode, the source current (owners' reports). Two significant digits, DIM F14 (small: a
+/// (none on 60 M: the box is cleared); continuity / diode, the source current (measured, continuity negative). Two significant digits, DIM F14 (small: a
 /// property of the function, not a reading).
 #[inline(never)] // .cold (link-native.x): drawn on a function / range / variant change only
 fn test_current_label(mode: u8, range: i8, on: bool) {
@@ -1174,9 +1175,10 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         return;
     };
-    let (v, u) = if i >= 0.2e-3 {
+    // Continuity's is negative (its source drives the other way).
+    let (v, u) = if i.abs() >= 0.2e-3 {
         (i * 1e3, " mA")
-    } else if i >= 0.2e-6 {
+    } else if i.abs() >= 0.2e-6 {
         (i * 1e6, " uA")
     } else {
         (i * 1e9, " nA")
@@ -1185,7 +1187,7 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     // The experimental 600 Mohm says so, in the reading's colour.
     let exp = crate::dmm::is_ohm600(mode, range);
     let mut t = crate::scope_ui::Txt::new(if exp { "EXP  I " } else { "I " });
-    t.push(crate::dmm::format(&mut b, v, if v < 1.0 { 2 } else if v < 10.0 { 1 } else { 0 }));
+    t.push(crate::dmm::format(&mut b, v, if v.abs() < 1.0 { 2 } else if v.abs() < 10.0 { 1 } else { 0 }));
     t.push(u);
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }

@@ -611,8 +611,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   at [Key/alert volume](#settings-page-1) 0 %.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
-- No test current is shown: continuity uses its own source setting, whose
-  current is not known yet.
+- Top left, small: the test current, **I -0.26 mA** (the short-circuit
+  current; negative: it flows the other way than in the diode test).
 - The firmware adds no latch and no minimum beep length: the beep starts and
   stops with the contact.
 - The comparator itself is fast (a bandwidth of a few MHz in the chip's data
