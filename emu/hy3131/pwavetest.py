@@ -11,8 +11,9 @@ Cases (default all):
          "Wave" opens the page (DBG:VIEW?); POW:WAVE? Urms 230, Irms 1,
          P 115 (the U x I pairing across the alternate reads keeps the
          phase), f 50, no unreadable sample, >= 100 samples per channel;
-         "+ ms/div": more samples per channel; RUN key: STOP (no new frames),
-         RUN again; MENU: the page closes and the power meter reads again
+         "+ms/div": more samples per channel; RUN key: STOP (no new frames),
+         RUN again; CSV: the page stops, SCOPE/SCOP000.CSV (MMEM:DATA?)
+         holds 2 rows per point pair with U ~230 V and I ~1 A RMS; MENU: the page closes and the power meter reads again
          (FETC:POW:ALL? V 230, I 1 within 2 %); POW:WAVE ON / OFF over SCPI.
   dc     12 V, 2 A DC: Urms 12, Irms 2, P 24, f none (9.91E37).
   alt    POW:METH ALT: POW:WAVE ON refused (SYST:ERR? Settings conflict).
@@ -21,6 +22,16 @@ Cases (default all):
          mA), Irms within 0.5 % of 20 mA and of the meter's I.
   dc-gain  the same after POW:ZERO (leads open first): a gain taken (field
          11 ~1), no zero (field 10 = 0), Irms = the meter.
+  over10  12 V DC, 8 A on the manual 10 A range (no current limit:
+         POW:LIM 10,0), then 12 A at 45 s with
+         the page stopped (the current check's I-only read): the page
+         stays open at 8 A, closes into the power meter within 4 s of the
+         step and the danger alarm sounds (DBG:ALARm?).
+  ovr    12 V DC, 2 A (I AUTO: the 6 A range), then 8 A at 45 s, page
+         running: it closes at the step (over the range) and the meter
+         ranges up and reads 8 A.
+  limit  12 V DC, 0.5 A, then 2 A at 45 s with POW:LIM 1,3 (1 A for 3 s),
+         page running: still open 2 s after the step, closed 6 s after.
 The model latches R03..R05 at each conversion from the converter SDO23
 selects then, one conversion grid for both: whether the device does so
 (and how far AD3's grid sits from AD2's) is the device check's question
@@ -65,12 +76,20 @@ CASES = {
     # the page fits AD2's gain to the DC meter instead (the model's AD2
     # gain is the calibration's: ~1).
     'dc-gain': ['open;powz:1@0', 'open;powz:1;vsrc:5;isrc:0.02@30'],
+    # The page's own current check (app_pwave.rs pwave_guard): a step at
+    # 45 s of emulator time, the page open by then.
+    'over10': ['open;vsrc:12;isrc:8@0', 'open;vsrc:12;isrc:12@45'],
+    'ovr': ['open;vsrc:12;isrc:2@0', 'open;vsrc:12;isrc:8@45'],
+    'limit': ['open;vsrc:12;isrc:0.5@0', 'open;vsrc:12;isrc:2@45'],
 }
 COUPLING = {'dc-zero': 'DC', 'dc-gain': 'DC'}
+SETUP = {'over10': ['POW:CURR:RANG 10', 'POW:LIM 10,0'], 'limit': ['POW:LIM 1,3']}
+STEP_MS = 45000
 # The Wave button of Power Settings (ui_power.rs ps_row4(3)) and the page's
 # buttons (ui_pwave.rs BTN_R).
 WAVE_BTN = (414, 201)
-PLUS_BTN = (296, 298)
+PLUS_BTN = (238, 298)
+CSV_BTN = (331, 298)
 
 
 def num(s):
@@ -165,7 +184,7 @@ def run_case(name):
         def view():
             return q('DBG:VIEW?')
 
-        for c in ['CONF:POW', 'POW:COUP ' + COUPLING.get(name, 'ACDC'), 'POW:BURD:STAT OFF'] + (['POW:METH ALT'] if name == 'alt' else []):
+        for c in ['CONF:POW', 'POW:COUP ' + COUPLING.get(name, 'ACDC'), 'POW:BURD:STAT OFF'] + (['POW:METH ALT'] if name == 'alt' else []) + SETUP.get(name, []):
             q(c)
         if name == 'dc-gain':
             wait_ms(4000)
@@ -230,6 +249,38 @@ def run_case(name):
             q('DBG:KEY 1')
             c = wait_frames(2)['frames']
             check(c > b, 'RUN: frames again (%d)' % c)
+            # CSV: the page stops, the frame goes to SCOPE/SCOP000.DLG (kind
+            # 4), served as SCOP000.CSV; its rows give the page's readouts.
+            q('DBG:TAP %d,%d' % CSV_BTN)
+            wait_ms(3000)
+            w3 = wave()
+            wait_ms(1000)
+            check(wave()['frames'] == w3['frames'], 'CSV stops the page (%d frames)' % w3['frames'])
+            cat = q('MMEM:CAT?')
+            check('SCOPE/SCOP000.DLG' in cat, 'SCOPE/SCOP000.DLG written (%s)' % cat[:120])
+            csv = b''
+            while True:
+                b_ = q('MMEM:DATA? "SCOPE/SCOP000.CSV",%d,6000' % len(csv), raw=True)
+                nd = int(b_[1:2])
+                part = b_[2 + nd:2 + nd + int(b_[2:2 + nd])]
+                csv += part
+                if len(part) < 6000:
+                    break
+            lines = csv.decode(errors='replace').split('\r\n')
+            rows = [l.split(',') for l in lines if l and not l.startswith('#') and not l.startswith('time_s')]
+            us = [float(r[1]) for r in rows if len(r) == 3 and r[1]]
+            is_ = [float(r[2]) for r in rows if len(r) == 3 and r[2]]
+            res['csv_rows'] = len(rows)
+            check('time_s,volts,amperes' in lines and len(rows) == 2 * w3['n'] and abs(len(us) - len(is_)) <= 1,
+                  'SCOP000.CSV: %d rows (U %d, I %d), %d samples per channel' % (len(rows), len(us), len(is_), w3['n']))
+            if us and is_:
+                ur = math.sqrt(sum(x * x for x in us) / len(us))
+                ir = math.sqrt(sum(x * x for x in is_) / len(is_))
+                check(near(ur, 230, 0.03) and near(ir, 1.0, 0.03), 'CSV RMS U %.2f I %.4f (whole frame)' % (ur, ir))
+            shot('pwave-csv')
+            q('DBG:KEY 1')
+            c = wait_frames(2)['frames']
+            check(c > w3['frames'], 'RUN after the CSV: frames again (%d)' % c)
             # MENU: back to the power meter.
             q('DBG:KEY 0')
             wait_ms(800)
@@ -260,6 +311,43 @@ def run_case(name):
             # as the meter's own U does (device 468ea813: 5.0509 V for 5.000).
             check(near(w['U'], p0[4], 0.001), 'Urms %.4f = the meter %.4f' % (w['U'], p0[4]))
             check(near(w['P'], p0[0], 0.005), 'P %.5f = the meter %.5f' % (w['P'], p0[0]))
+        elif name in ('over10', 'ovr', 'limit'):
+            def until(ms):
+                while up() < ms:
+                    time.sleep(0.3)
+            if name == 'over10':
+                # STOP: no frames, the I-only read checks the current.
+                q('DBG:KEY 1')
+                wait_ms(600)
+            check(up() < STEP_MS - 2000 and view().startswith('Power Wave'), 'the page is open %d ms before the step' % (STEP_MS - up()))
+            until(STEP_MS - 500)
+            w = wave()
+            check(w['on'], 'still open just before the step (I %.3f A)' % w['I'])
+            if name == 'over10':
+                until(STEP_MS + 4000)
+                a = q('DBG:ALARm?')
+                v = view()
+                res['alarm'] = a
+                check(not v.startswith('Power Wave'), '12 A on the 10 A range: the page closed (%s)' % v)
+                check(a.split(',')[0] == '1', 'the danger alarm sounds (DBG:ALARm? %s)' % a)
+            elif name == 'ovr':
+                until(STEP_MS + 1500)
+                v = view()
+                check(not v.startswith('Power Wave'), '8 A on the 6 A range: the page closed (%s)' % v)
+                t0 = up()
+                while up() - t0 < 30000:
+                    p = pw_all()
+                    if near(p[5], 8.0, 0.02):
+                        break
+                    time.sleep(1)
+                check(near(p[5], 8.0, 0.02) and q('POW:CURR:RANG?').endswith('E+01'), 'the meter ranges up to 10 A and reads %.3f A (%s)' % (p[5], q('POW:CURR:RANG?')))
+            else:
+                until(STEP_MS + 2000)
+                check(wave()['on'], '2 s over the 1 A limit (3 s): still open')
+                until(STEP_MS + 6000)
+                v = view()
+                check(not wave()['on'] and not v.startswith('Power Wave'), 'the limit ran out: the page closed (%s)' % v)
+            shot('pwave-' + name + '-after')
         else:
             check(near(w['U'], 12, 0.01), 'Urms %.3f ~ 12' % w['U'])
             check(near(w['I'], 2, 0.01), 'Irms %.4f ~ 2' % w['I'])

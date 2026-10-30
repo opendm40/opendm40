@@ -3,8 +3,11 @@
 //! waveforms. Entry: Power Settings (MF in W) -> "Wave", or SCPI
 //! POWer:WAVE ON. The page lends the scope's record buffer, and while it
 //! is open main.rs treats the HY3131 as busy (no power readings, no BT
-//! serve, the alerts pause); each pass after FRAME_MS the page writes its
-//! row, captures a frame (pwave::capture, blocking), draws it. Back / MENU /
+//! serve); each pass after FRAME_MS the page writes its row, captures a
+//! frame (pwave::capture, blocking), draws it. The page checks the current
+//! itself (`pwave_guard`: every frame, or a short I-only read once a second
+//! while stopped): over 10 A, over the range, or the current limit run out
+//! closes it into the power meter with the meter's own alarm. Back / MENU /
 //! MF or any view change closes it: the buffer goes back, the power row is
 //! rewritten (main.rs: busy -> idle, Dmm::start -> pw_restart).
 
@@ -13,6 +16,8 @@ use crate::pwave::{self as pv, Cap, Scale, Stats};
 
 /// Least time between two frames (ms): touch, USB and the keys get passes.
 const FRAME_MS: u64 = 250;
+/// The current check of a stopped page (`pwave::i_probe`) this often (ms).
+const CHECK_MS: u64 = 1000;
 
 /// All zero at reset (.sram_bss, not the TCM's .data: the stack's
 /// headroom); `pwave_open` sets the rest.
@@ -48,6 +53,8 @@ pub(super) struct Pwv {
     /// not its zero.
     zero_ok: bool,
     gi_fix: f32,
+    /// The next current check of a stopped page (ms).
+    check: u64,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -72,6 +79,7 @@ static mut PWV: Pwv = Pwv {
     oi_fix: 0.0,
     zero_ok: false,
     gi_fix: 0.0,
+    check: 0,
 };
 
 pub(super) fn pwv() -> &'static mut Pwv {
@@ -140,6 +148,7 @@ impl App {
             oi_fix: f32::NAN,
             zero_ok: self.dmm.pw_wave_iref().is_some_and(|r| r.1),
             gi_fix: f32::NAN,
+            check: now,
         };
         self.show(View::PWave, clk);
         Ok(())
@@ -212,12 +221,9 @@ impl App {
             return;
         }
         let now = clk.now_ms();
-        if !s.run || now < s.next || crate::hy3131::streaming() {
+        if crate::hy3131::streaming() {
             return;
         }
-        let Some(buf) = self.scope.lent_buf() else {
-            return;
-        };
         let (row, r36, mut sc, _, _) = self.dmm.pw_wave_setup();
         if s.oi_fix.is_finite() {
             sc.oi += s.oi_fix;
@@ -225,6 +231,21 @@ impl App {
         if s.gi_fix.is_finite() {
             sc.si *= s.gi_fix;
         }
+        if !s.run || now < s.next {
+            // Stopped: no frames, so a short I-only read keeps the check.
+            if !s.run && now >= s.check {
+                if s.frames == 0 {
+                    pv::arm(&row, r36);
+                }
+                let (i, clip) = pv::i_probe(pv::PROBE_US, row[20], &sc);
+                s.check = clk.now_ms() + CHECK_MS;
+                self.pwave_guard(clk, i, clip);
+            }
+            return;
+        }
+        let Some(buf) = self.scope.lent_buf() else {
+            return;
+        };
         let span_us = pv::TB_MS[s.tb1 as usize - 1] as u32 * pv::DIVS_X * 1000;
         // The trigger: from the last frame (U, else I), else free run.
         let trig = if s.frames > 0 { pv::next_trig(buf, &s.cap, (s.fu / sc.su / 2.0) as i32, (s.fi / sc.si / 2.0) as i32) } else { None };
@@ -260,8 +281,56 @@ impl App {
         s.du = pv::div_for(s.st.upk, s.du, s.fu);
         s.di = pv::div_for(s.st.ipk, s.di, s.fi);
         pv::columns(buf, &s.cap, &sc, s.du, s.di, span_us);
-        self.pwave_draw(false);
         s.next = clk.now_ms() + FRAME_MS;
+        s.check = s.next.max(now + CHECK_MS);
+        if self.pwave_guard(clk, s.st.irms, s.cap.clip_i) {
+            return;
+        }
+        self.pwave_draw(false);
+    }
+
+    /// The current check (the frame's I, or `pwave::i_probe` while
+    /// stopped; `i` RMS in A with the DC part, `clip` a sample on the
+    /// rail). The meter's own rules, which do not run while the page holds
+    /// the HY3131:
+    ///   * above the 10 A rating (`danger::over_rating`) for
+    ///     I10_ASSERT_MS: the danger alarm (`i10_since`, `alert_beep`);
+    ///   * over the range on a range below 10 A: the meter's OVERLOAD trip
+    ///     (uA / mA shunt) or I AUTO up-range would act;
+    ///   * the continuous-current limit ran out (`Dmm::pw_wave_current`
+    ///     keeps its countdown).
+    /// Each closes the page into the power meter (toast), which takes over
+    /// with its alarm / range change / limit beeps. True = closed.
+    /// (A-PROT does not apply: the power meter measures through A on
+    /// purpose, `pw_enter` ends it.)
+    /// Region B (`.text.pwave_guard`, not this module's .cold): it keeps
+    /// region C above its 8 KiB warning line.
+    #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.pwave_guard")]
+    fn pwave_guard(&mut self, clk: &mut Clock, i: f32, clip: bool) -> bool {
+        let now = clk.now_ms();
+        let ik = self.dmm.pw.ik;
+        if crate::danger::over_rating(0, 0, false, 0.0, Some((ik, clip, i))) {
+            self.i10_since.get_or_insert(now);
+        } else {
+            self.i10_since = None;
+        }
+        let i10 = self.i10_since.is_some_and(|t| now.saturating_sub(t) >= crate::danger::I10_ASSERT_MS);
+        let why = match self.dmm.pw_wave_current(now, i, clip) {
+            _ if i10 => Some("Wave: current above 10 A"),
+            1 => Some("Wave: current over range"),
+            // The meter's own toast and beeps follow (`pw_over_expired`).
+            2 => None,
+            _ => return false,
+        };
+        // Into a view with the power meter's readout (the DMM rail on: the
+        // alarm sounds only with it), whatever the page was opened from.
+        let v = if matches!(self.back_view, View::Dmm | View::DmmScope) { self.back_view } else { View::Dmm };
+        self.show(v, clk);
+        if let Some(t) = why {
+            self.toast(now, t, false);
+        }
+        true
     }
 
     /// Page taps.
@@ -272,6 +341,10 @@ impl App {
             Some(0) => {
                 let v = self.back_view;
                 self.show(v, clk);
+            }
+            Some(k @ (1 | 2)) if self.scope.hold => {
+                let _ = k;
+                self.toast(now, "Saving CSV...", true);
             }
             Some(k @ (1 | 2)) => {
                 let tb = s.tb1 - 1;
@@ -287,13 +360,64 @@ impl App {
                 }
             }
             Some(3) => self.pwave_run(now),
+            Some(4) => self.pwave_csv(now),
             _ => {}
         }
+    }
+
+    /// "CSV": the frame on the screen to the disk as the next free
+    /// SCOPE/SCOPnnn.DLG (DLG kind 4, served as SCOPnnn.CSV; scope_csv.rs
+    /// `set_pwave`), by the screenshot writer like a scope record: the page
+    /// stops first, the scope buffer stays held (Scope::hold: no frame, no
+    /// RUN, no timebase change, the scope does not take it back) until the
+    /// writer's result (scope_page.rs `sp_csv_poll`: "Saved SCOPnnn.DLG").
+    #[inline(never)]
+    fn pwave_csv(&mut self, now: u64) {
+        let s = pwv();
+        if s.frames == 0 || s.cap.n < 2 {
+            self.toast(now, "No record to save", false);
+            return;
+        }
+        if self.scope.hold || crate::screenshot::busy() || crate::csvlog::writing() {
+            self.toast(now, "Disk busy, try again", false);
+            return;
+        }
+        let Some(buf) = self.scope.lent_buf() else {
+            return;
+        };
+        if s.run {
+            s.run = false;
+            ui::pwv::run_button(false);
+        }
+        let mut h = crate::scope_csv::Hdr::new();
+        let mut b = [0u8; 24];
+        let mut nb = [0u8; 16];
+        h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", power wave frame (no real-time clock)\r\n");
+        h.s("# timebase ").s(crate::dmm::format(&mut nb, pv::TB_MS[s.tb1 as usize - 1] as f32, 0)).s("ms/div, U ");
+        h.s(ui::pwv::fmt_div(&mut b, s.du, "V")).s("/div, I ").s(ui::pwv::fmt_div(&mut b, s.di, "A")).s("/div, samples ");
+        h.s(crate::dmm::format(&mut nb, s.cap.n as f32, 0)).s(" (U and I in turn), ").s(if s.cap.trig { "triggered\r\n" } else { "untriggered\r\n" });
+        let st = s.st;
+        h.s("# ").s(ui::pwv::fmt(&mut b, "U", st.urms, "V")).s(", ").s(ui::pwv::fmt(&mut b, "I", st.irms, "A")).s(", ");
+        h.s(ui::pwv::fmt(&mut b, "P", st.p, "W")).s(", ").s(ui::pwv::fmt(&mut b, "f", st.f, "Hz")).s(" (over the frame's whole cycles)\r\n");
+        h.s("# time_s = seconds from the first sample; each row is one sample: U in volts or I in amperes, the other column empty\r\n");
+        let sc = s.sc;
+        crate::scope_csv::set_pwave(buf, s.cap.n, [sc.su, sc.ou, sc.si, sc.oi], pv::T_UNIT_US as f32 * 1e-6, s.cap.y_first, &h);
+        if !crate::screenshot::start_csv() {
+            self.toast(now, "Save CSV Error", false);
+            return;
+        }
+        self.scope.hold = true;
+        self.toast(now, "Saving CSV...", true);
     }
 
     /// RUN / STOP (the button, the RUN key).
     pub(super) fn pwave_run(&mut self, now: u64) {
         let s = pwv();
+        if self.scope.hold {
+            // A CSV of this frame is being written (`pwave_csv`).
+            self.toast(now, "Saving CSV...", true);
+            return;
+        }
         s.run = !s.run;
         s.next = now;
         ui::pwv::run_button(s.run);

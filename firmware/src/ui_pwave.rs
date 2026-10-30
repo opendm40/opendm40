@@ -7,7 +7,7 @@
 //!   74..250   the plot (x 40..440, 10 x 40 px; 8 x 22 px, zero in the
 //!             middle for both), "U" left of it, "I" right of it
 //!   252..276  the scales: "U 100V/div" left, "I 500mA/div" right
-//!   280..316  [ Back ] [ - ms/div ] [ + ms/div ] [ STOP / RUN ]
+//!   280..316  [ Back ] [ -ms/div ] [ +ms/div ] [ CSV ] [ STOP / RUN ]
 
 use super::*;
 use crate::pwave::{PH, PW};
@@ -21,12 +21,13 @@ pub const PX: u16 = 40;
 pub const PY: u16 = 74;
 const GRID: Color = 0x4208;
 const AXIS: Color = 0x7BEF;
-/// Readout boxes (U, I, P, f) and the bottom buttons (4-column grid).
+/// Readout boxes (U, I, P, f) and the bottom buttons (5 columns; index 3
+/// RUN / STOP at the right, 4 CSV before it).
 /// (Centred so that the widest texts, "U 999.9mV", "I 999.9uA",
 /// "P -999.9mW", "f 999.9Hz", keep 1.5 word spaces apart.)
 const RD: [sf::Rect; 4] = [rect(4, 44, 101, 26), rect(117, 44, 108, 26), rect(237, 44, 117, 26), rect(365, 44, 107, 26)];
-pub const BTN_R: [sf::Rect; 4] = [rect(8, 280, 112, 36), rect(124, 280, 112, 36), rect(240, 280, 112, 36), rect(356, 280, 116, 36)];
-const BTN_T: [&str; 3] = ["Back", "- ms/div", "+ ms/div"];
+pub const BTN_R: [sf::Rect; 5] = [rect(8, 280, 89, 36), rect(101, 280, 89, 36), rect(194, 280, 89, 36), rect(380, 280, 92, 36), rect(287, 280, 89, 36)];
+const BTN_T: [(usize, &str); 4] = [(0, "Back"), (1, "-ms/div"), (2, "+ms/div"), (4, "CSV")];
 /// The channel names beside the plot at its zero line, the scales under it.
 const NAME_R: [sf::Rect; 2] = [rect(4, 150, 32, 26), rect(444, 150, 32, 26)];
 const SCL_R: [sf::Rect; 2] = [rect(40, 252, 196, 24), rect(244, 252, 196, 24)];
@@ -51,9 +52,9 @@ pub fn page(v: &Vals) {
     lcd::fill_rect(0, 0, lcd::W, 40, BTN);
     lcd::fill_rect(0, 40, lcd::W, lcd::H - 40, BG);
     sf::glyphs(sf::TEXT22, rect(8, 0, 282, 40), "Power Wave", STATUS_FG, BTN, 1, 0);
-    for (r, t) in BTN_R.iter().zip(BTN_T) {
-        sf::rbox(*r, 6, BTN, BG);
-        sf::glyphs(sf::TEXT22, *r, t, STATUS_FG, BTN, 8, 0);
+    for (k, t) in BTN_T {
+        sf::rbox(BTN_R[k], 6, BTN, BG);
+        sf::glyphs(sf::TEXT22, BTN_R[k], t, STATUS_FG, BTN, 8, 0);
     }
     live(v);
 }
@@ -116,8 +117,8 @@ fn hit(r: sf::Rect, x: u16, y: u16) -> bool {
     x >= r.x - 2 && x < r.x + r.w + 2 && y >= r.y - 2 && y < r.y + r.h + 2
 }
 
-/// Page touch: 0 Back, 1 "- ms/div" (shorter timebase), 2 "+ ms/div",
-/// 3 RUN / STOP.
+/// Page touch: 0 Back, 1 "-ms/div" (shorter timebase), 2 "+ms/div",
+/// 3 RUN / STOP, 4 CSV.
 pub fn page_hit(x: u16, y: u16) -> Option<u8> {
     BTN_R.iter().position(|&r| hit(r, x, y)).map(|i| i as u8)
 }

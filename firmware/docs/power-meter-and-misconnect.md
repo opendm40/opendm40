@@ -846,17 +846,43 @@ are the power meter's at the entry (no autorange on the page; a range
 change from SCPI closes it).
 
 **What pauses.** While the page is open main.rs counts the HY3131 as busy
-(as for a logger session): no power readings, no BT serve, no alerts or
-current limit, no energy; leaving it rewrites the power row (`Dmm::start`
--> `pw_restart`) and the open time is not integrated
-(`Dmm::pw_wave_gap`). Refused with `POW:METH ALT`, during Zero / V cal, a
-recording or a logger session.
+(as for a logger session): no power readings, no BT serve, no energy;
+leaving it rewrites the power row (`Dmm::start` -> `pw_restart`) and the
+open time is not integrated (`Dmm::pw_wave_gap`). Refused with
+`POW:METH ALT`, during Zero / V cal, a recording or a logger session.
 
-**Not done.** CSV export: the Wave view's Save CSV writes the compact DLG
-kind 2, one column at a uniform rate; two columns with their own times
-need a new DLG kind (dlog.rs generator, tools/dlog.py,
-[compact-log-format.md](compact-log-format.md)). Gap-free streaming of
-both channels on the AD2 stream ISR: its phase lock keys on INTF AD2F,
+**Current check.** The meter's own current rules do not run while the
+page holds the chip, so the page applies them to its I (RMS with the DC
+part; `App::pwave_guard`): after every frame, and while stopped once a
+second from a 100 ms I-only read (`pwave::i_probe`: SDO23 0, no flips;
+5 / 6 whole cycles at 50 / 60 Hz; the stopped frame's samples are not
+touched). Each closes the page into the power meter's view with a toast:
+
+* the 10 A rating (`danger::over_rating`: the 10 A range and I > 10 A or
+  a sample on the rail) for `I10_ASSERT_MS` (1 s): `i10_since` is set, so
+  the danger alarm (4.10) sounds at once and the meter's readings keep it;
+* over the range on a range below 10 A (a sample on the rail or I above
+  1.03 x the range): the meter's first reading then trips OVERLOAD on a
+  manual uA / mA range or ranges up in I AUTO (`pw_autorange`);
+* the continuous-current limit (3.6): `Dmm::pw_wave_current` keeps its
+  countdown (`over_t0`, I > `i_cont` starts it, < 0.95 x stops it; kept
+  across the page) and closes the page when it runs out; the meter then
+  toasts and beeps (`pw_over_expired`).
+
+A-PROT does not apply (the power meter measures through A on purpose,
+`pw_enter` ends it). Emulator: `pwavetest.py` over10 / ovr / limit.
+
+**CSV.** The page's **CSV** button stops it and writes the frame on the
+screen as the next free `SCOPE/SCOPnnn.DLG`, like the scope's Save CSV
+(the screenshot writer, the scope buffer held until its result), as DLG
+kind 4 ([compact-log-format.md](compact-log-format.md#power-wave-frame-kind-4)):
+the samples and their times, not coded. The USB volume and `MMEM:DATA?`
+serve it as `SCOPnnn.CSV`: header lines (timebase, scales, samples, the
+readouts), then `time_s,volts,amperes`, one row per sample from the
+first, U and I in turn with the other column empty (no interpolated
+values). No SCPI command (the scope's Save CSV has none either).
+
+**Not done.** Gap-free streaming of both channels on the AD2 stream ISR: its phase lock keys on INTF AD2F,
 which both converters set; its DMA frames have no write path for the R34
 flip; the read would have to fit the flip and two reads into one period.
 
