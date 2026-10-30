@@ -1077,8 +1077,10 @@ impl App {
         let (mut hold, lim) = (self.meter.hold_state(), self.meter.verdict());
         if peak_on() {
             // Peak (app_peak_live.rs): the AD1 reading is paused, the
-            // digits grey, "PEAK" in the RUN / HOLD slot (ui::hold_label).
+            // digits grey, "PEAK" in the RUN / HOLD slot (ui::hold_label),
+            // the range fixed (the status bar names it, not AUTO).
             r.prov = true;
+            r.auto = false;
             hold = ui::HOLD_PEAK;
         }
         match self.view {

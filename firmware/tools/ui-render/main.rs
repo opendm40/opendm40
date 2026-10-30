@@ -2037,6 +2037,7 @@ fn main() {
                     let mut r = *r;
                     r.main.ext = ext && !r.main.ol;
                     r.prov |= hold == ui::HOLD_PEAK;
+                    r.auto &= hold != ui::HOLD_PEAK;
                     // Every alert badge in the status slot, against every hold state.
                     r.alert = ALERTS[(k + hold as usize) % ALERTS.len()];
                     // The alert phase of A-JACK / LIVE? with HOLD (decision
@@ -3118,7 +3119,7 @@ fn main() {
             host::reset(0);
             dv.draw_static(Button::Volt, 0, false, false);
             let r = rd(0, val(1.0003, 4, "V"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false);
-            dv.reading(&Reading { prov: true, ..r }, ui::HOLD_PEAK, meter::V_NONE);
+            dv.reading(&Reading { prov: true, auto: false, ..r }, ui::HOLD_PEAK, meter::V_NONE);
             ui::status_right(&status(0));
             let pts: Vec<f32> = (0..200).map(|_| r.main.v).collect();
             let side = ui::Side { max: Some(1.4146), avg: Some(1.414), min: Some(-1.4139), rel: None, secs: Some(42), rec: false, peak: true };

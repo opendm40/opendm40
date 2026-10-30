@@ -92,7 +92,9 @@ impl App {
         p.live = true;
         p.dropped = crate::logger::wave::dropped();
         p.acc.hole();
-        self.redraw_peak();
+        // The look changed at the start (`peak_open`, no stream yet): only
+        // the side column now (a status-bar repaint is region C code).
+        self.chart_dirty = true;
     }
 
     /// The reading's look and the side column follow the mode now.
