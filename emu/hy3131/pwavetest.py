@@ -30,7 +30,7 @@ Cases (default all):
   ovr    12 V DC, 0.5 A (I AUTO: the 600 mA range), then 8 A at 45 s,
          page running: it closes at the step (over the range) and the
          meter ranges up to 10 A and reads 8 A.
-  limit  12 V DC, 0.5 A, then 2 A at 45 s with POW:LIM 1,10 (1 A for 10 s),
+  limit  12 V DC, 0.7 A (the 6 A range), then 2 A at 45 s with POW:LIM 1,10 (1 A for 10 s),
          page running: still open 2 s after the step, closed 12 s after.
   (The model's 45 s is ~2.7 s earlier than the firmware's uptime, which
   the test's times use: the checks before the step leave 4 s.)
@@ -82,7 +82,7 @@ CASES = {
     # 45 s of emulator time, the page open by then.
     'over10': ['open;vsrc:12;isrc:8@0', 'open;vsrc:12;isrc:12@45'],
     'ovr': ['open;vsrc:12;isrc:0.5@0', 'open;vsrc:12;isrc:8@45'],
-    'limit': ['open;vsrc:12;isrc:0.5@0', 'open;vsrc:12;isrc:2@45'],
+    'limit': ['open;vsrc:12;isrc:0.7@0', 'open;vsrc:12;isrc:2@45'],
 }
 COUPLING = {'dc-zero': 'DC', 'dc-gain': 'DC'}
 SETUP = {'over10': ['POW:CURR:RANG 10', 'POW:LIM 10,0'], 'limit': ['POW:LIM 1,10']}
