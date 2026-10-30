@@ -874,6 +874,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         draw_hold_until = now + 300;
                         false
                     }
+                    // Never parsed without the features (scpi.rs).
+                    #[cfg(not(feature = "dbg-touch"))]
+                    scpi::Dbg::Touch(_) => false,
+                    #[cfg(not(feature = "dbg-prof"))]
+                    scpi::Dbg::Prof(_) => false,
+                    #[cfg(feature = "dbg-touch")]
                     scpi::Dbg::Touch(clear) => {
                         if clear {
                             touch::log_clear();
@@ -909,6 +915,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         true
                     }
+                    #[cfg(feature = "dbg-prof")]
                     scpi::Dbg::Prof(reset) => {
                         if reset {
                             prof::reset();

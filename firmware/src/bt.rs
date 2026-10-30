@@ -79,8 +79,13 @@ const DMA_INTC1: u32 = DMA0 + 0x0C;
 /// Input is not read while an SCPI line waits to be taken; more than this
 /// meanwhile is an overrun (`RxCursor`: "Input buffer overrun", resync).
 const RX_LEN: usize = 1024;
-/// Holds the largest reply (RSP_MAX block + LF) plus stock frames.
-const TX_LEN: usize = 8192;
+/// Holds the largest reply (RSP_MAX block + LF) plus stock frames: REPLY_MAX
+/// + TX_SLACK (6 401) and 255 bytes more, so a line is taken with a few
+/// stock frames still queued. Not smaller: a reply goes into the ring whole
+/// (`send`); built on the stack (`respond_with`) it has nowhere else to
+/// wait, and LOG:DATA? cannot be built again in parts (it takes the
+/// logger's ring). Was 8 KiB (docs/native-boot.md "SRAM audit").
+const TX_LEN: usize = 6656;
 /// Largest reply built in place (`ScpiPort::respond_with`), as USBTMC.
 const BLK_LEN: usize = crate::usbtmc::RSP_MAX;
 /// The next SCPI line is taken only with room for the largest reply of one
@@ -458,7 +463,7 @@ impl Bt {
     }
 
     /// Fallback TX: write the whole queue out, byte by byte (blocks; a full
-    /// 8 KiB ring is ~0.7 s at 115200, the watchdog fed meanwhile). Bounded
+    /// 6.5 KiB ring is ~0.6 s at 115200, the watchdog fed meanwhile). Bounded
     /// (review 6595d46 L2): a TBE that does not come within 10 ms (one byte
     /// is 87 us) or 2 s in all drops the rest of the queue (counted in
     /// `tx_dropped`).
