@@ -18,6 +18,10 @@
 //!   DBG:POKE[?] addr,value    one word, only inside `WRITABLE`; replies the
 //!                             read-back or F<cfsr>/<bfar> (a host reads the
 //!                             reply of the query form only)
+//!   DBG:MASK? addr            which bits of a register inside `WRITABLE`
+//!                             hold data: <original>,<read after writing
+//!                             all ones>,<read after writing 0>; the original
+//!                             is written back
 //!   DBG:MTEST? addr,words[,seed]
 //!                             RAM test inside `WRITABLE` (words <= 16384):
 //!                             alias check first (one word written, every
@@ -38,8 +42,9 @@
 //!                             are read through probe_rw first: a fault
 //!                             refuses the run (F...).
 //!   DBG:MCLK[?] name,0|1      clock gate of a block the probes need, by
-//!                             name only (IPA / USBHS: RCU_AHB1EN bit 23 / 29,
-//!                             TLI: RCU_APB2EN bit 26); replies the register
+//!                             name only (IPA / USBHS / ENET: RCU_AHB1EN bit
+//!                             23 / 29 / 25, TLI: RCU_APB2EN bit 26, CAN0 /
+//!                             CAN1: RCU_APB1EN bit 25 / 26); replies the register
 //!                             after the write. Nothing else in the RCU.
 
 use core::arch::global_asm;
@@ -156,12 +161,25 @@ fn poke(addr: u32, v: u32) -> Result<u32, (u32, u32)> {
 
 /// The only ranges POKE / MTEST may write ([start, end)). Reasoned in
 /// docs/hidden-memory.md; none is used by opendm40.
-const WRITABLE: [(u32, u32); 5] = [
+const WRITABLE: [(u32, u32); 14] = [
     (0x2003_0000, 0x200B_0000), // ADDSRAM (UM: 512 KB on "some" GD32F4xx)
     (0x4002_4200, 0x4002_4F00), // backup SRAM between the settings record and the top words
     (0x4006_0000, 0x4006_1000), // USBHS FIFO RAM, DWC2 direct-access window (unused block)
     (0x4002_B000, 0x4002_B040), // IPA registers (presence check)
     (0x4001_6800, 0x4001_6840), // TLI registers (presence check)
+    // ENET (unused, no PHY): data-only registers, never MAC_CFG / DMA_CTL.
+    (0x4002_8008, 0x4002_8010), // ENET_MAC_HLH, HLL (hash list)
+    (0x4002_801C, 0x4002_8020), // ENET_MAC_VLT
+    (0x4002_8040, 0x4002_8060), // ENET_MAC_ADDR0H..ADDR3L
+    (0x4002_8710, 0x4002_8724), // ENET_PTP_TSUH, TSUL, TSADDEND, ETH, ETL
+    (0x4002_900C, 0x4002_9014), // ENET_DMA_RDTADDR, TDTADDR
+    // CAN0 (unused): transmit mailbox data (never CAN_TMIx: its bit 0
+    // starts a transmission) and the 28 filter banks (CAN0 only, shared
+    // with CAN1; writable while CAN_FCTL.FLD = 1, its reset value).
+    (0x4000_6588, 0x4000_6590), // CAN_TMDATA0/1 mailbox 0
+    (0x4000_6598, 0x4000_65A0), // mailbox 1
+    (0x4000_65A8, 0x4000_65B0), // mailbox 2
+    (0x4000_6640, 0x4000_6720), // CAN_F0DATA0..F27DATA1
 ];
 
 fn writable(a: u32, words: u32) -> bool {
@@ -373,6 +391,27 @@ pub fn scpi(s: &mut crate::scpi::Scpi, sub: &[u8], query: bool, arg: &[u8]) -> b
                 }
             }
         }
+        (b"MASK", true) => {
+            let [a] = args::<1>(arg);
+            match a {
+                Some(a) if writable(a, 1) => {
+                    let r = (peek(a), poke(a, u32::MAX), poke(a, 0));
+                    match r {
+                        (Ok(o), Ok(ones), Ok(zeros)) => {
+                            let _ = poke(a, o);
+                            for (i, v) in [o, ones, zeros].into_iter().enumerate() {
+                                if i > 0 {
+                                    s.put_bytes(b",");
+                                }
+                                hex(s, v);
+                            }
+                        }
+                        (Err(f), ..) | (_, Err(f), _) | (.., Err(f)) => put_fault(s, f),
+                    }
+                }
+                _ => s.put_bytes(b"ERR range"),
+            }
+        }
         (b"POKE", _) => {
             let [a, v] = args::<2>(arg);
             match (a, v) {
@@ -446,10 +485,14 @@ pub fn scpi(s: &mut crate::scpi::Scpi, sub: &[u8], query: bool, arg: &[u8]) -> b
             let on = it.next().and_then(num).map(|v| v != 0);
             const AHB1EN: u32 = 0x4002_3830;
             const APB2EN: u32 = 0x4002_3844;
+            const APB1EN: u32 = 0x4002_3840;
             let (reg, bit) = match name {
                 b"IPA" => (AHB1EN, 23),
                 b"USBHS" => (AHB1EN, 29),
                 b"TLI" => (APB2EN, 26),
+                b"ENET" => (AHB1EN, 25),
+                b"CAN0" => (APB1EN, 25),
+                b"CAN1" => (APB1EN, 26),
                 _ => {
                     s.put_bytes(b"ERR name");
                     return true;
