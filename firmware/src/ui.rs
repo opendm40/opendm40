@@ -2608,7 +2608,8 @@ pub fn gen_status(st: &Status) {
 /// at boot: `.sram_bss` is zeroed by the startup code, whatever the
 /// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
 /// table, so the boot-time Sine drew no trace).
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// TCM .bss on test/scope-chain-0.4 (CPU only; SRAM for the scope record,
+// docs/native-boot.md "SRAM audit").
 pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 
 // Region B (not inlined into the region C callers): drawn per strip.

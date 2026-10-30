@@ -57,15 +57,17 @@ const WIN: usize = 800;
 const STREAM_FS: u32 = 1_250_000;
 /// Longest busy-wait inside a poll for the post-trigger samples (us).
 const STREAM_SPIN_US: u64 = 1000;
-/// Record buffer in SRAM0 (68 KB, the SRAM budget: docs/native-boot.md
+/// Record buffer in SRAM0 (80 KB, the SRAM budget: docs/native-boot.md
 /// "Memory budget"), as CAP u16: the raw ring of the fast acquisitions
 /// (fs > PK_FS), packed in place (pack10.rs) when it stops. Slow ones
 /// (fs <= PK_FS) and the wave view keep a packed ring of PCAP samples in
-/// its first 65 500 bytes, filled each poll from a DMA staging ring of STG
+/// its first 77 800 bytes, filled each poll from a DMA staging ring of STG
 /// raw samples at its top (`pk_drain`). Every stored record is packed.
-/// 34 K: 0.4.0's GEN / CH2 channels left no SRAM for the 42 K (65 520
-/// packed samples, the stock's) of feat/scope-long-record.
-pub const CAP: usize = 34 * 1024;
+/// 40 K: next to 0.4.0's GEN / CH2 channels the SRAM audit
+/// (docs/native-boot.md) freed room for 40 K, not the 42 K (65 520 packed
+/// samples, the stock's) of feat/scope-long-record.
+#[cfg(not(feature = "recovery-usb"))]
+pub const CAP: usize = 40 * 1024;
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
 pub const LOG_RING: usize = 16 * 1024;
@@ -78,9 +80,16 @@ pub const LOG_FS_MAX: u32 = 1_250_000;
 #[used]
 pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Packed ring (samples): what RB holds packed (the stock's record is
-/// 65 520).
-pub const PCAP: usize = 52_400;
+/// The `recovery-usb` variant (no LCD, no scope use) needs its own MSC
+/// buffers: a smaller ring keeps its SRAM above the 8 KiB link floor.
+#[cfg(feature = "recovery-usb")]
+pub const CAP: usize = 36 * 1024;
+/// Packed ring (samples): what RB holds packed, less 20 bytes (the stock's
+/// record is 65 520).
+#[cfg(not(feature = "recovery-usb"))]
+pub const PCAP: usize = 62_240;
+#[cfg(feature = "recovery-usb")]
+pub const PCAP: usize = 55_000;
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;

@@ -363,7 +363,7 @@ lightning from 100 V). opendm40 adds:
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
-| Capture length | 65 520 samples | From 100 ms/div 52 400 or more, up to 262 144 (what the signal allows); 34 816 faster |
+| Capture length | 65 520 samples | From 100 ms/div 62 240 or more, up to 262 144 (what the signal allows); 40 960 faster |
 | Serial decoding | — | [UART](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
@@ -436,7 +436,7 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The 65 520-sample scope capture (opendm40: 52 400 from 100 ms/div, 34 816 faster).
+- The 65 520-sample scope capture (opendm40: 62 240 from 100 ms/div, 40 960 faster).
 
 ## Multimeter
 
@@ -1490,7 +1490,7 @@ Press **RUN** (or tap the run state) to stop. The scope takes one more
 capture (the trigger point at the trigger position, as **Single**; up to
 the screen's time + 1 s), then stops; press again to stop at once. The
 capture stays in memory (from 100 ms/div a **Single** capture, up to
-10 s, or a roll capture: at least 52 400 samples, up to 262 144 for a
+10 s, or a roll capture: at least 62 240 samples, up to 262 144 for a
 smooth signal):
 
 - change the timebase to zoom in or out of the stored capture;

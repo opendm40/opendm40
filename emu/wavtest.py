@@ -19,9 +19,9 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     point (t = 0) on the level with the right slope, x increment = 1 /
     ACQ:SRAT?; reading it twice gives the same bytes;
   * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
-    34 816 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
-    the packed ring) 51 500 .. 52 400 samples, the sine without a seam, the
-    trigger 39 036 samples before the end (the coded ring: long_checks);
+    40 960 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
+    the packed ring) 61 300 .. 62 240 samples, the sine without a seam, the
+    trigger 48 876 samples before the end (the coded ring: long_checks);
     a roll record (200 ms/div) all it took;
   * STOP while running (5 / 2 ms/div the raw ring, 100 ms/div the packed
     one; Auto at several moments, Normal without a trigger) ends on one
@@ -238,8 +238,8 @@ def csv_check(t, p, codes):
 def long_checks(t):
     """Slow timebases: the coded ring (cring.rs). DIGitize at 100 ms/div
     (25 kS/s): 10 s wanted, the trigger at the centre; the post part is
-    what any signal leaves room for (52 400 less the margins and the
-    screen's pre part: 39 036), the pre part what the ring keeps (up to
+    what any signal leaves room for (62 240 less the margins and the
+    screen's pre part: 48 876), the pre part what the ring keeps (up to
     125 000; the model's 25-sample sine: ~96 000), so the record is
     100 000 .. 177 000 samples, the input sine in it, no seam; a roll record (200
     ms/div, STOP after 6.5 s) all 81 000 samples; back to 1 ms/div after."""
@@ -260,7 +260,7 @@ def long_checks(t):
     ok = 2 <= i0 < n - 2
     # On the level within one sample's step (25 samples per period).
     step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
-    check(ok and 39036 <= n - i0 <= 39036 + 2000 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
+    check(ok and 48876 <= n - i0 <= 48876 + 2000 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
           '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
     # A smooth sine end to end: no seam from the ring / staging (25 samples
     # per period: neighbours differ by at most ~0.13 Vpp).
@@ -291,7 +291,7 @@ def long_checks(t):
     v, codes = volts(p, w)
     f, vpp, _ = sine_fit(v, p['xinc'])
     jump = max(abs(v[i + 1] - v[i]) for i in range(len(v) - 1))
-    check(62000 <= len(codes) <= 72000 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
+    check(74000 <= len(codes) <= 86000 and abs(f - A.hz) < A.hz * 0.02 and jump < 0.4 * A.vpp,
           'roll record (200 ms/div): %d samples, %.2f Hz, largest step %.3f V' % (len(codes), f, jump))
     t.w('TIM:SCAL 1e-3')
     t.w('WAV:FORM BYTE')
@@ -304,7 +304,7 @@ def stop_checks(t):
     in flight), and Normal with the level above the sine (no trigger). STOP
     ends on a complete capture (TRIG:STAT? STOP once it is in, at most the
     screen's time + 1 s and a margin later, device time): the DIGitize
-    length capped at the screen + 0.5 s (34 816 less the margins at 5 / 2
+    length capped at the screen + 0.5 s (40 960 less the margins at 5 / 2
     ms/div, 37 500 at 100 ms/div; untriggered at the deadline, what is
     in), the input sine everywhere (every code inside its range, no
     step larger than the sine's: no seam), in Auto the trigger point inside
@@ -313,7 +313,7 @@ def stop_checks(t):
     stop's own TCIF4 read as a wrap, the full ring with a seam."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
-    for tb, nmin, waits in ((5e-3, 33952, (0.6, 0.9, 1.3)), (2e-3, 33952, (0.5, 0.8)), (0.1, 37000, (2.5, 4.0))):
+    for tb, nmin, waits in ((5e-3, 40096, (0.6, 0.9, 1.3)), (2e-3, 40096, (0.5, 0.8)), (0.1, 37000, (2.5, 4.0))):
         for mode, lev, wait in [('AUTO', 0, w) for w in waits] + [('NORM', 2 * A.vpp, 1.0)]:
             for c in ('TIM:SCAL %g' % tb, 'TRIG:SWE %s' % mode, 'TRIG:LEV %g' % lev, 'RUN'):
                 t.w(c)

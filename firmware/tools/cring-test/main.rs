@@ -3,7 +3,7 @@
 //      after pushing signals that code well (sine + noise, DC, square),
 //      white noise (every block stays packed) and a mix of both, through
 //      several turns of the ring;
-//   2. the ring keeps at least scope::PCAP = 52 400 samples once that many
+//   2. the ring keeps at least scope::PCAP = 62 240 samples once that many
 //      were pushed, after every push (the worst case: white noise);
 //   3. a coded block's bytes are dlog's scope block coding of its samples
 //      (dlog::scope_block, the DLG file's format: tools/dlog.py reads it);
@@ -20,9 +20,9 @@ mod cring;
 
 use pack10::Src;
 
-/// scope.rs: RB = ((CAP - STG) * 2 - 4) / 5 * 5 with CAP = 42 KiB, STG = 2048.
-const RB: usize = ((34 * 1024 - 2048) * 2 - 4) / 5 * 5;
-const PCAP: u32 = 52_400;
+/// scope.rs: RB = ((CAP - STG) * 2 - 4) / 5 * 5 with CAP = 40 KiB, STG = 2048.
+const RB: usize = ((40 * 1024 - 2048) * 2 - 4) / 5 * 5;
+const PCAP: u32 = 62_240;
 
 struct Rng(u64);
 impl Rng {
@@ -158,12 +158,12 @@ fn main() {
         if kind == "noise" {
             t(ncoded == 0, "noise: no block coded");
         }
-        // Longer than the packed ring (52 424) by what each codes to.
+        // Longer than the packed ring (62 256) by what each codes to.
         let want = match kind {
-            "dc" => 160_000,
-            "slow" => 120_000,
-            "sine" | "square" => 88_000,
-            "mixed" => 64_000,
+            "dc" => 190_000,
+            "slow" => 142_000,
+            "sine" | "square" => 104_000,
+            "mixed" => 76_000,
             _ => 0,
         };
         t(e - f >= want, &format!("{kind}: record >= {want} samples ({})", e - f));
