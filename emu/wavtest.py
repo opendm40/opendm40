@@ -322,6 +322,14 @@ try:
     check(p['fmt'] == 1 and p['type'] == 2 and p['n'] == n and n > 400, 'record preamble: WORD, RAW, %d points (%s)' % (n, p))
     sr = float(t.q('ACQ:SRAT?'))
     check(abs(p['xinc'] * sr - 1) < 1e-4, 'x increment = 1 / ACQ:SRAT? (%g S/s)' % sr)
+    # #158: a stopped zoom (another timebase shown) keeps the record's rate.
+    tb0 = t.q('TIM:SCAL?')
+    t.w('TIM:SCAL %g' % (float(tb0) / 10))
+    sz = float(t.q('ACQ:SRAT?'))
+    pz = pre(t)
+    check(sz == sr and pz['xinc'] == p['xinc'], 'stopped zoom (TIM:SCAL %g): ACQ:SRAT? %g = the record\'s %g' % (float(tb0) / 10, sz, sr))
+    t.w('TIM:SCAL %s' % tb0)
+    check(t.q('TRIG:STAT?') == 'STOP', 'the zoom keeps the scope stopped')
     lm0 = max(loop_max(t) for _ in range(2) if time.sleep(1.1) is None)
     rounds = []
     t0 = time.time()

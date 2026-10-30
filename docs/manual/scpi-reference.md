@@ -553,7 +553,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
-| `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07` | both |
+| `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07`; stopped, the stored record's (also after a zoom) | both |
 | `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
 | `SCOPe:MEASure:VAVG?` | | Mean, V | both |
 | `SCOPe:MEASure:VRMS?` | | RMS, V | both |
