@@ -32,6 +32,9 @@ All documentation of opendm40, by reader. Start at the
   number.
 - [ram-budget.md](../firmware/docs/ram-budget.md): the RAM users and when each
   is live.
+- [hidden-memory.md](../firmware/docs/hidden-memory.md): memory beyond the
+  datasheet (ADDSRAM, flash above 1 MiB, peripheral RAMs) probed on the
+  device; the memprobe debug commands.
 - [compact-log-format.md](../firmware/docs/compact-log-format.md): the DLG log
   format on the disk, CSV on read.
 - [bt-scpi.md](../firmware/docs/bt-scpi.md): SCPI over Bluetooth next to the

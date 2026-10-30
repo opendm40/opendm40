@@ -15,8 +15,9 @@
 //!   DBG:PEEK? addr[,n]        n (1..32) words from addr (word aligned):
 //!                             0xXXXXXXXX each, or F<cfsr>/<bfar> (hex) for
 //!                             a word whose read faulted
-//!   DBG:POKE addr,value       one word, only inside `WRITABLE`; replies the
-//!                             read-back or F<cfsr>/<bfar>
+//!   DBG:POKE[?] addr,value    one word, only inside `WRITABLE`; replies the
+//!                             read-back or F<cfsr>/<bfar> (a host reads the
+//!                             reply of the query form only)
 //!   DBG:MTEST? addr,words[,seed]
 //!                             RAM test inside `WRITABLE` (words <= 16384):
 //!                             alias check first (one word written, every
@@ -36,7 +37,7 @@
 //!                             against TCM). The first and the last address
 //!                             are read through probe_rw first: a fault
 //!                             refuses the run (F...).
-//!   DBG:MCLK name,0|1         clock gate of a block the probes need, by
+//!   DBG:MCLK[?] name,0|1      clock gate of a block the probes need, by
 //!                             name only (IPA / USBHS: RCU_AHB1EN bit 23 / 29,
 //!                             TLI: RCU_APB2EN bit 26); replies the register
 //!                             after the write. Nothing else in the RCU.
@@ -69,6 +70,10 @@ probe_fault:
     ldr   r2, =0x50524F31
     cmp   r1, r2
     bne   2f
+    ldr   r2, =0xE000ED38      /* BFAR before CFSR is cleared (the device */
+    ldr   r3, [r2]             /* read 0xE000ED38 when it came after) */
+    ldr   r1, =PROBE_BFAR
+    str   r3, [r1]
     ldr   r2, =0xE000ED28      /* CFSR: read, write 1s back to clear */
     ldr   r3, [r2]
     str   r3, [r2]
@@ -78,10 +83,6 @@ probe_fault:
     ldr   r3, [r2]
     str   r3, [r2]
     ldr   r1, =PROBE_HFSR
-    str   r3, [r1]
-    ldr   r2, =0xE000ED38      /* BFAR */
-    ldr   r3, [r2]
-    ldr   r1, =PROBE_BFAR
     str   r3, [r1]
     ldr   r1, =0x50524F32
     str   r1, [r0]
@@ -439,7 +440,7 @@ pub fn scpi(s: &mut crate::scpi::Scpi, sub: &[u8], query: bool, arg: &[u8]) -> b
             let (first, lo, hi, tot) = time_loads(a, n, st);
             put_list(s, &[first, lo, hi, tot]);
         }
-        (b"MCLK", false) => {
+        (b"MCLK", _) => {
             let mut it = arg.split(|&b| b == b',');
             let name = trim(it.next().unwrap_or(b""));
             let on = it.next().and_then(num).map(|v| v != 0);
