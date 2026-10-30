@@ -27,9 +27,10 @@
 //! samples per second and channel, 64 per 50 Hz cycle.
 //!
 //! The frame blocks the main loop (at most the trigger wait + 200 ms); the
-//! power meter's readings, its alerts and the energy pause while the page
-//! is open (main.rs `busy`); leaving it restores the power row
-//! (Dmm::start -> pw_restart).
+//! power meter's readings and the energy pause while the page is open
+//! (main.rs `busy`); the page checks the current itself (app_pwave.rs
+//! `pwave_guard`: the 10 A rating, over range, the current limit); leaving
+//! it restores the power row (Dmm::start -> pw_restart).
 
 #![allow(dead_code)]
 
@@ -519,6 +520,38 @@ pub fn capture(buf: &mut [u16], span_us: u32, trig: Option<Trig>, r34: u8) -> Ca
     }
     c.n = k;
     c
+}
+
+/// Length of the current check of a stopped page (`i_probe`): 5 cycles at
+/// 50 Hz, 6 at 60 Hz (the RMS of whole cycles at both).
+pub const PROBE_US: u32 = 100_000;
+
+/// The current check while the page is stopped (app_pwave.rs, about once
+/// a second; a running page takes its frames' I): I only (SDO23 0, no R34
+/// flips), one read every SLOT_CYC for `span_us`, on the row the last
+/// frame armed. Returns the RMS in A (`sc`, the DC part included; NaN
+/// without a readable sample) and whether a read hit the converter's rail.
+/// The frame's samples in the lent buffer are not touched (a stopped
+/// frame stays for the screen and the CSV).
+#[inline(never)]
+pub fn i_probe(span_us: u32, r34: u8, sc: &Scale) -> (f32, bool) {
+    sel(r34, false);
+    wait_until(cyc().wrapping_add(GUARD_US * CYC_US));
+    let (mut s, mut n, mut clip, mut retries) = (0.0f32, 0u32, false, 0u32);
+    let t0 = cyc();
+    let mut k = 0u32;
+    while cyc().wrapping_sub(t0) < span_us * CYC_US {
+        let (v, ok) = read_stable(&mut retries);
+        clip |= v.abs() > CLIP_RAW;
+        if ok {
+            let a = sc.i(code_of(v));
+            s += a * a;
+            n += 1;
+        }
+        k += 1;
+        wait_until(t0.wrapping_add(k * SLOT_CYC));
+    }
+    (if n > 0 { sqrtf(s / n as f32) } else { f32::NAN }, clip)
 }
 
 /// The later of two cycle-counter times (wrapping).

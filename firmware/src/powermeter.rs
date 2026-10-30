@@ -1044,10 +1044,39 @@ impl Dmm {
     }
 
     /// Leaving Power Wave: the time it was open is not integrated into
-    /// the energy (no readings then), the current-limit countdown starts over.
+    /// the energy (no readings then). The current-limit countdown goes on
+    /// (the page keeps it, `pw_wave_current`).
     pub fn pw_wave_gap(&mut self) {
         self.pw.t_last = None;
-        self.pw.over_t0 = None;
+    }
+
+    /// Power Wave's current check (app_pwave.rs `pwave_guard`, about once
+    /// a second): `i` = the RMS current of the page (A, DC included), `clip`
+    /// = a sample on the converter's rail. The continuous-current limit as
+    /// `pw_account` keeps it (above `i_cont` the countdown runs, below 0.95
+    /// x it stops). Returns 1 = over the range on a range below 10 A (the
+    /// meter's OVERLOAD trip / I AUTO up-range would act: `pw_autorange`),
+    /// 2 = the limit ran out (the meter's `pw_over_expired` then toasts and
+    /// beeps), 0 = neither.
+    pub fn pw_wave_current(&mut self, now: u64, i: f32, clip: bool) -> u8 {
+        let over = self.over();
+        let pw = &mut *self.pw;
+        if i > pw.i_cont {
+            if pw.over_t0.is_none() {
+                pw.over_t0 = Some(now);
+                pw.over_beeped = false;
+            }
+        } else if i < 0.95 * pw.i_cont {
+            pw.over_t0 = None;
+        }
+        let k = pw.ik.min(5) as usize;
+        if k < 5 && (clip || i > over * I_LIM[k]) {
+            1
+        } else if matches!(pw.over_t0, Some(t0) if pw.t_lim > 0 && now.saturating_sub(t0) >= pw.t_lim as u64 * 1000) {
+            2
+        } else {
+            0
+        }
     }
 
     /// Restart after the DMM rail came back (`start`).
