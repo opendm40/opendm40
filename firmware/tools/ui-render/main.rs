@@ -1728,6 +1728,26 @@ fn main() {
         let mut c = m;
         c.combined = true;
         v.push(("usb-combined", c));
+        // The Bluetooth rune (#167): alone, with USB (the battery 3 px
+        // right), with USB on the charger, roll + long texts, combined.
+        let mut b = base;
+        b.bt = true;
+        v.push(("bt", b));
+        let mut bu = m;
+        bu.bt = true;
+        bu.charging = false;
+        bu.battery = 4;
+        v.push(("bt-usb", bu));
+        let mut buc = bu;
+        buc.charging = true;
+        buc.battery = 5;
+        v.push(("bt-usb-charged", buc));
+        let mut bur = r;
+        bur.bt = true;
+        v.push(("bt-usb-roll-long", bur));
+        let mut buk = bu;
+        buk.combined = true;
+        v.push(("bt-usb-combined", buk));
         for (name, m) in v {
             host::reset(0);
             scope_ui::invalidate();
@@ -1738,7 +1758,38 @@ fn main() {
             // battery's top row, a free row above and below; y 20 is the
             // graph frame / meter strip) and centred in the gap 414..434
             // between the trigger badge and the battery.
-            if m.usb {
+            // The link icons' and the battery's ink columns from x 414 (#167):
+            // each alone centred in 414..434; both 2 px apart, the battery
+            // 3 px right.
+            if m.bt || m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let mut runs: Vec<(usize, usize)> = Vec::new();
+                for x in 414..480 {
+                    if (0..20).any(|y| fb[y * 480 + x] != bar) {
+                        match runs.last_mut() {
+                            Some(r) if r.1 + 1 == x => r.1 = x,
+                            _ => runs.push((x, x)),
+                        }
+                    }
+                }
+                let rows = |x0: usize, x1: usize| {
+                    let ys: Vec<usize> = (0..20).filter(|&y| (x0..=x1).any(|x| fb[y * 480 + x] != bar)).collect();
+                    (ys[0], ys[ys.len() - 1])
+                };
+                let want: &[(usize, usize)] = match (m.bt, m.usb) {
+                    (true, true) => &[(416, 422), (425, 435)],
+                    (true, false) => &[(421, 427)],
+                    _ => &[(419, 429)],
+                };
+                let bat = if m.bt && m.usb { 438 } else { 435 };
+                let ok = runs.len() > want.len() && runs[..want.len()] == *want && runs[want.len()].0 == bat
+                    && (!m.bt || rows(want[0].0, want[0].1) == (3, 15));
+                if !ok {
+                    ck.fail(&format!("scopebar/{name}/icons"), format!("ink columns from 414: {runs:?}, want {want:?} then the battery at {bat}"));
+                }
+            }
+            if m.usb && !m.bt {
                 let fb = &host::emu().fb;
                 let bar = fb[0];
                 let ink = |x0: usize, x1: usize| {

@@ -522,6 +522,7 @@ impl App {
             battery: self.power.shown_bars(now / 1000 & 1 == 1),
             charging: self.power.on_charger(),
             usb: self.usb_host,
+            bt: self.bt_on && self.power.bt_connected(),
             roll: self.scope.rolling(),
             record,
             // Combined view: the strip's GEN badge shows it instead.
