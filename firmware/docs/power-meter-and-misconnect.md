@@ -634,7 +634,7 @@ measurement adds to a low-voltage circuit.
   current (REL and smoothing do not change it; HOLD freezes it with the
   reading). The unit / decimals follow the range's burden at the OL limit
   (fixed while the reading moves, <= 4 digits); OL shows "0L".
-* **Toggle**: Settings 3/3 "Burden voltage" OFF (default, stock look) / ON,
+* **Toggle**: Settings > Multimeter "Burden voltage" OFF (default, stock look) / ON,
   persisted in p[38] bit 14 (`meter::EXT_BURDEN`).
 * **SCPI**: `FETCh:BURDen?` (whether the readout is on or not),
   `DISPlay:BURDen`:
@@ -786,7 +786,7 @@ where it is idle: it needs no converter, so no note-7 exposure.
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
 | DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm |
-| DC V 60 / 600 / 1000 V (1 r1..3) | none (PB1 picks up the input there: A-JACK tripped at 10 V with the A jack open, device f80524f; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
+| DC V 60 / 600 / 1000 V (1 r1..3) | none (the PB1 comparator trips in these rows: A-JACK at 10 V with the A jack open, device f80524f; CTSTA 0x50 at every R21 window also with V-COM open, while AD1 reads PB1 at ~2 mV, 2026-10-27; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
 | AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
 | continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
 | DC A / mA / uA (7..9) | V-JACK?: comparator on SENSE via the /1000 tap (`CmpV`; SS5 only: the A rows run the power bus as SGND, PS5 would ground the tap) | R20 0x10, R2C \|= 0x10 | ~21 V on V/ohm |
@@ -799,8 +799,11 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 Gaps (no fake coverage):
 
-* **Frequency**: PB1 - PB3 follows the input path there (device d8e249d,
-  [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)): no fixed threshold tells a current from it.
+* **Frequency**: PB1 - PB3 follows the input from ~3 V on (-59 / -89 mV at
+  3 / 3.7 V, 2.5 mV at rest; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)).
+  The standing ~54 mV of device d8e249d came with the row's SAD1I = 11 (AD1
+  on the temperature sensor inputs, *inferred*): an AD1 sentinel there needs
+  R33 SAD1I = 00.
 * **Capacitance r5..7** (the ramp): both op amps on PB0, AD1 and the
   comparator busy.
 * **DC V 60 V+** (above) and so AC+DC V above 6 V in both phases (an
@@ -854,7 +857,7 @@ in `Reading.alert` (`sentinel::Alert`):
 The red alerts alternate with HOLD in the DMM status slot (119..201) and in
 the combined-view strip badge (decision #5 of
 [decisions-2026-10-22.md](../../docs/history/decisions-2026-10-22.md));
-the hints sit below every alert and never alternate with HOLD. Settings 3/3
+the hints sit below every alert and never alternate with HOLD. Settings > Alerts
 "Jack alerts": ON (all) / A-JACK only (no V-JACK?, LIVE?, hints) / OFF,
 persisted in p[38] bits 11..13; a disabled sentinel writes the stock row.
 SCPI: `SYSTem:ALERt?` (NONE | OVERLOAD | APROT | AJACK | VJACK | LIVE | DC |
@@ -873,7 +876,7 @@ Code: [`src/sentinel.rs`](../src/sentinel.rs) (row builder, alert state
 machine, host tests), hooks in [`src/dmm.rs`](../src/dmm.rs)
 (`write_config`, `poll`, `poll_ac`, ohm / continuity / diode),
 [`src/app.rs`](../src/app.rs) / [`src/ui.rs`](../src/ui.rs) (badge, toast,
-beep, Settings 3/3), [`src/scpi.rs`](../src/scpi.rs).
+beep, Settings > Alerts), [`src/scpi.rs`](../src/scpi.rs).
 
 * **A-JACK, comparator**: the CTSTA read (1 byte) on every `poll`, ORed into
   100 ms windows (`WIN_MS`); 2 hit windows in a row assert, 1 s without a
@@ -979,7 +982,7 @@ sentinel off (the check drives the ohm current through the A shunt on
 purpose), PE = 2 as every ohm row: V/ohm -> lead -> A -> fuse -> 10 mohm +
 0.5 + 47 ohm -> COM. The first final reading of the 600 ohm row whose ohm
 vet saw two conversions agree (dmm.rs `OHM_VET_*`) decides: 44..54 ohm FUSE
-OK (`FUSE_OHM`), OL FUSE OPEN ("Replace: 10 A ceramic fuse"), anything else
+OK (`FUSE_OHM`), OL "Fuse open" ("Replace: 10 A ceramic fuse"), anything else
 "Check leads" (a short V-COM, the lead in COM); no reading in 8 s: "No ohm
 reading". Then the function before comes back (a manual range too; from
 the power meter the energy restarts); Cancel / a key aborts and restores;
@@ -1124,7 +1127,7 @@ period.
   main-loop pass (written only when TIM14 differs), so a key beep in between
   cannot mute it; at its end CCR1 = 0 and ARR = 11199 (the stock pitch).
 
-**Setting.** Settings 3/3 "Danger alarm" (the second row): **Loud**
+**Setting.** Settings > Alerts "Danger alarm" (the second row): **Loud**
 (default) -> **Volume** (the same pattern at the key / alert volume; 0 % =
 silent) -> **Off** (badge and toast only). Persisted in p[38] bits 16..17
 (`meter::EXT_DANGER_SHIFT`, 0 = Loud). SCPI `SYSTem:ALERt:ALARm`,

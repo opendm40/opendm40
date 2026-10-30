@@ -4,7 +4,7 @@
 //! Mode (decisions-2026-10-22 #6): the volume is READ-ONLY by default
 //! ("Files live": the WP bit set, every WRITE fails 07/27/00, a new
 //! recording / screenshot raises the UNIT ATTENTION at once, also while
-//! mounted). Settings 3/3 "USB disk" = "PC can edit" (or DBG:VDISK:RO 0)
+//! mounted). Settings > Other "USB disk" = "PC can edit" (or DBG:VDISK:RO 0)
 //! asks for the writable volume described below. Volatile (read-only again
 //! at every boot) and applied at the next USB bus reset (`on_bus_reset`: a
 //! re-plug), never under a host that has the volume: a host reads the WP bit
@@ -182,7 +182,7 @@ struct W {
     /// live updates while mounted, no delete / update from the PC). Zero =
     /// read-only: W0 lives in .sram_bss, zeroed at start-up.
     rw: bool,
-    /// Asked for (Settings 3/3 "USB disk", DBG:VDISK:RO); copied to `rw` at
+    /// Asked for (Settings > Other "USB disk", DBG:VDISK:RO); copied to `rw` at
     /// the next bus reset.
     want_rw: bool,
     boot: u8,
@@ -298,7 +298,7 @@ pub fn read_only_pending() -> bool {
     !w().want_rw
 }
 
-/// Settings 3/3 "USB disk", DBG:VDISK:RO: ask for the read-only (true) or
+/// Settings > Other "USB disk", DBG:VDISK:RO: ask for the read-only (true) or
 /// the writable volume. A host reads the WP bit when it mounts, so the mode
 /// changes only at the next bus reset (`on_bus_reset`, a re-plug).
 pub fn set_read_only(on: bool) {

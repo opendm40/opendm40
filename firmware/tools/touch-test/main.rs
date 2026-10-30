@@ -791,19 +791,44 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::main_menu("DMM + Scope");
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
-    // Settings 1/3, 2/3 and 3/3, Hold & Limits (list pages).
-    let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
-    for p in 0..3u8 {
+    // Settings: every section (the tabs 100 + i, the rows i), Hold &
+    // Limits (list page).
+    let mut vals = vec!["Hold 5000 ms"; ui::SET_N];
+    vals[ui::S_USB as usize] = ui::usb_disk_name(true, false);
+    for t in 0..ui::SET_TABS.len() as u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize]]);
-        let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
-        let want: Vec<u32> = (0..n as u32).collect();
-        page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
+        ui::settings(t, &vals);
+        let n = ui::SET_TABS[t as usize].1.len() as u32;
+        let hit = |x: u16, y: u16| match ui::settings_hit(t, x, y) {
+            Some(ui::SetHit::Tab(i)) => Some(100 + i as u32),
+            Some(ui::SetHit::Row(r)) => Some(r as u32),
+            None => None,
+        };
+        // The tabs as drawn; a row is a target only on its value side (the
+        // name is not): checked below.
+        let tab_only = |b: &Bx| b.y0 >= 40 && b.x1 < 127;
+        let want_t: Vec<u32> = (100..100 + ui::SET_TABS.len() as u32).collect();
+        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &tab_only, &want_t);
+        for r in 0..n as usize {
+            let id = ui::settings_id(t, r).unwrap();
+            let (x0, y0) = (ui::set_value_x(id), 44 + 45 * r as i16);
+            let name = ui::SET_NAMES[id as usize];
+            let mut ok = true;
+            for y in y0..y0 + 42 {
+                // The name (from x 138 to its end + 5) is not a target, the
+                // value side to the row's end (476) is, all of it.
+                for x in 131..476i16 {
+                    let want = (x >= x0).then_some(r as u32);
+                    ok &= hit(x as u16, y as u16) == want;
+                }
+            }
+            ck.t(&format!("settings {} row {r} \"{name}\": name not a target, value x {x0}..476 is", ui::SET_TABS[t as usize].0), ok && 476 - x0 >= 60);
+        }
     }
-    // Backlight / volume steppers (ui-review #12): the "-" key (x 210..263)
-    // steps down, the "+" key (410..463) up; the label side is "-".
-    ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
+    // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
+    // steps down, the "+" key (426..465) up.
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());
@@ -814,19 +839,40 @@ fn hit_tests(ck: &mut Ck) {
     page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3]);
     ck.t("record stepper: '-' key and label step down", ui::record_step(177) == -1 && ui::record_step(20) == -1);
     ck.t("record stepper: '+' key steps up", ui::record_step(437) == 1 && ui::record_step(463) == 1);
-    // Range pages and the temperature page.
+    // Range pages and the temperature page. V / A with the ad2-isr builds'
+    // Wave button (200) and the A page's Inrush (201), in App::tap's order
+    // (Wave, Inrush, then range_hit).
     for b in [dmm::Button::Volt, dmm::Button::Amp, dmm::Button::Ohm, dmm::Button::Cap] {
         host::reset(0);
         let n = ui::range_items(b).len();
         ui::range_page(b, Some(0), 0, None);
+        let va = matches!(b, dmm::Button::Volt | dmm::Button::Amp);
+        if va {
+            ui::wave_button();
+        }
+        if b == dmm::Button::Amp {
+            ui::inrush_button();
+        }
         let hit = move |x, y| {
-            ui::range_hit(b, x, y).map(|r| match r {
+            if va && ui::wave_hit(x, y) {
+                return Some(200);
+            }
+            if b == dmm::Button::Amp && ui::inrush_hit(x, y) {
+                return Some(201);
+            }
+            ui::range_hit(b, None, x, y).map(|r| match r {
                 Ok(i) => i as u32,
                 Err(k) => 100 + k as u32,
             })
         };
         let mut want: Vec<u32> = (0..n as u32).collect();
-        want.extend([102, 104]);
+        want.extend([102, 104, 107]); // OK, Limits, Record
+        if va {
+            want.push(200);
+        }
+        if b == dmm::Button::Amp {
+            want.extend([105, 201]); // Fuse check, Inrush
+        }
         if matches!(b, dmm::Button::Volt | dmm::Button::Amp) {
             want.extend([100, 101, 103, 106]); // DC / AC / AC+DC / AUTO (AC/DC)
         }
@@ -835,6 +881,27 @@ fn hit_tests(ck: &mut Ck) {
         }
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }
+    // Resistor page with 600 Mohm chosen: no test-current buttons (their
+    // line is text), nothing to hit there.
+    host::reset(0);
+    let n = ui::range_items(dmm::Button::Ohm).len();
+    ui::range_page(dmm::Button::Ohm, Some(n - 1), 0, None);
+    let hit = move |x, y| {
+        ui::range_hit(dmm::Button::Ohm, Some(n - 1), x, y).map(|r| match r {
+            Ok(i) => i as u32,
+            Err(k) => 100 + k as u32,
+        })
+    };
+    let mut want: Vec<u32> = (0..n as u32).collect();
+    want.extend([102, 104, 107]);
+    page(ck, "range ohm 600M", &hit, &|b| b.y0 >= 40, &want);
+    // Power Settings: every button, the bottom row's five included.
+    host::reset(0);
+    let pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..dmm::pw::PowerVals::ZERO };
+    ui::pw::settings_page(&pv);
+    let want: Vec<u32> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
+    page(ck, "power settings", &|x, y| ui::pw::settings_hit(x, y).map(|c| c as u32), &|b| b.y0 >= 40, &want);
+    ck.t("range ohm 600M: the test-current row is dead", (12..470).step_by(20).all(|x| hit(x, 200).is_none()));
     host::reset(0);
     // Temperature page: every key of both layouts (NTC user adds R25 / Beta).
     for k in [0u8, 6] {
@@ -844,7 +911,7 @@ fn hit_tests(ck: &mut Ck) {
         if k == 6 {
             want.extend([11, 12]);
         }
-        want.extend([254, 255]);
+        want.extend([253, 254, 255]);
         page(ck, &format!("temperature {k}"), &move |x, y| ui::temp_hit(k, x, y).map(|v| v as u32), &|b| b.y0 >= 40 && b.y1 < 280, &want);
     }
     // Keypads.
@@ -870,7 +937,7 @@ fn hit_tests(ck: &mut Ck) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column
-        } else if (153..172).contains(&y) {
+        } else if ui::HIST_HIT.contains(&y) {
             Some(102) // history row (one target for all five boxes)
         } else if ui::rate_chip_hit(x, y) {
             Some(103)
@@ -1344,6 +1411,31 @@ fn wave_step_tests(ck: &mut Ck) {
         scope_ui::fmt_div(&mut b, v, if a { "A" } else { "V" });
         ck.t(&format!("fmt_div {v} = {want} ({})", b.as_str()), b.as_str() == want);
     }
+    // #133: the CH1 V/div text is fmt_div(VDIV[range] * probe) (the label
+    // table index range + probe index read "2V" for 2.5 V/div at x5): every
+    // range x probe reads back as its value; a decade probe gives the
+    // stock label.
+    let mut bad = vec![];
+    for (pi, &p) in scope::PROBES.iter().enumerate() {
+        for (r, &d) in scope::VDIV.iter().enumerate() {
+            let v = d * p;
+            let mut b = scope_ui::Buf::new();
+            scope_ui::fmt_div(&mut b, v, "V");
+            let s = b.as_str().strip_suffix('V').unwrap_or("?").to_string();
+            let (num, k) = match s.chars().last() {
+                Some('u') => (&s[..s.len() - 1], 1e-6),
+                Some('m') => (&s[..s.len() - 1], 1e-3),
+                Some('k') => (&s[..s.len() - 1], 1e3),
+                _ => (&s[..], 1.0),
+            };
+            let back = num.parse::<f32>().map(|x| x * k).unwrap_or(f32::NAN);
+            let stock = format!("{}V", scope_ui::VDIV_LABELS[r + pi]);
+            if !((back - v).abs() <= v * 1e-3) || (pi % 3 == 0 && b.as_str() != stock) {
+                bad.push(format!("x{p} {d}: {}", b.as_str()));
+            }
+        }
+    }
+    ck.t(&format!("CH1 V/div text = the value for every range x probe ({bad:?})"), bad.is_empty());
 }
 
 // ------------------------------------------------------- 5. calibration

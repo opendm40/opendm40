@@ -329,11 +329,12 @@ pub fn side(c: &mut PwCache, pv: &PowerVals) {
     let g = side_geom();
     let mut b = [0u8; 16];
     // Burden voltage (amber with the compensation off and the drop above 1 %
-    // of the V reading: it is inside P then) and VAh; label dim left, value
-    // right. The Wh moved to the aux row (large).
+    // of the V reading: it is inside P then; not while it shows 0.000, the
+    // last digit 1 mV: #107) and VAh; label dim left, value right. The Wh
+    // moved to the aux row (large).
     let mut t0 = T::new();
     t0.push(sig_text(&mut b, pv.burden_v, 4));
-    let warn = !pv.comp && pv.burden_v > 0.01 * pv.v;
+    let warn = !pv.comp && pv.burden_v >= 0.0005 && pv.burden_v > 0.01 * pv.v;
     let mut b1 = [0u8; 16];
     let mut t1 = T::new();
     t1.push(sig_text(&mut b1, pv.vah, 5));
@@ -680,15 +681,19 @@ pub fn coup_help(c: u8) -> &'static str {
     }
 }
 pub const PS_VCAL: u8 = 27;
-/// Hold & Limits (View::Limits: the W limits), as the other settings pages'
-/// "Hold/Limits".
+/// Hold & Limits (View::Limits: the W limits), "Limits" as on the other
+/// settings pages.
 pub const PS_LIMITS: u8 = 31;
-/// The bottom row, left to right: Reset Wh, Wiring, Limits, OK (110 px
-/// buttons at 118 px pitch, 8..472).
-const PS_ROW5: [(u8, &str); 4] = [(PS_RESET, "Reset Wh"), (PS_WIRING, "Wiring"), (PS_LIMITS, "Limits"), (PS_OK, "OK")];
+/// The Record page (View::Record), beside Limits as on the DMM range pages.
+pub const PS_RECORD: u8 = 32;
+/// The bottom row, left to right: Reset Wh, Wiring, Limits, Record, OK
+/// (8..472, 6 px gaps; Reset Wh, 87 px of text, the widest button).
+const PS_ROW5: [(u8, &str); 5] =
+    [(PS_RESET, "Reset Wh"), (PS_WIRING, "Wiring"), (PS_LIMITS, "Limits"), (PS_RECORD, "Record"), (PS_OK, "OK")];
+const PS_ROW5_X: [i16; 6] = [8, 114, 206, 298, 390, 478];
 
 fn ps_row5(i: usize) -> sf::Rect {
-    rect(8 + 118 * i as i16, 240, 110, 38)
+    rect(PS_ROW5_X[i], 240, PS_ROW5_X[i + 1] - PS_ROW5_X[i] - 6, 38)
 }
 
 /// Grid: label column 8..40, five 83 px columns from 44 (87 px pitch).
@@ -733,8 +738,12 @@ pub fn settings_page(pv: &PowerVals) {
     for (i, c) in PS_COUPS.iter().enumerate() {
         ps_button(rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(*c), pv.coup == *c);
     }
-    for (i, (_, t)) in PS_ROW5.iter().enumerate() {
-        ps_button(ps_row5(i), t, false);
+    for (i, &(c, t)) in PS_ROW5.iter().enumerate() {
+        if c == PS_RECORD {
+            super::record_button(ps_row5(i), false);
+        } else {
+            ps_button(ps_row5(i), t, false);
+        }
     }
 }
 
@@ -743,6 +752,21 @@ pub fn settings_page(pv: &PowerVals) {
 /// colour) or as `settings_page` draws it.
 #[inline(never)] // .cold (link-native.x): per touch on the page
 pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
+    let Some((r, item)) = press_item(pv, c) else { return };
+    let Some((t, sel)) = item else { return super::record_button(r, on) };
+    let bg = if on { super::K_SEL } else if sel { SEL } else { 0x2966 };
+    sf::rbox(r, 6, bg, BG);
+    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+}
+
+/// The box `settings_press` draws for `c` (the press feedback's strip box).
+pub fn settings_press_rect(pv: &PowerVals, c: u8) -> Option<sf::Rect> {
+    press_item(pv, c).map(|i| i.0)
+}
+
+/// Button `c` (`settings_press`): its box and (text, selected), or None
+/// for the Record button.
+fn press_item(pv: &PowerVals, c: u8) -> Option<(sf::Rect, Option<(&'static str, bool)>)> {
     let (r, t, sel) = match c {
         0..=3 => (ps_cell(0, c as i16), pw::V_NAMES[c as usize], !pv.v_auto && pv.vr == c),
         4 => (ps_cell(0, 4), "AUTO", pv.v_auto),
@@ -758,14 +782,13 @@ pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
             let i = (c - PS_COUP) as usize;
             (rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
         }
+        PS_RECORD => return Some((ps_row5(3), None)),
         _ => match PS_ROW5.iter().position(|&(k, _)| k == c) {
             Some(i) => (ps_row5(i), PS_ROW5[i].1, false),
-            None => return,
+            None => return None,
         },
     };
-    let bg = if on { super::K_SEL } else if sel { SEL } else { 0x2966 };
-    sf::rbox(r, 6, bg, BG);
-    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+    Some((r, Some((t, sel))))
 }
 
 /// The Zero... / V cal... dialog (dialog.rs fuse-check box, Cancel / Start;
@@ -805,8 +828,8 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
     }
     for (i, (c, _)) in PS_ROW5.iter().enumerate() {
         let r = ps_row5(i);
-        // Touch boxes up to the 8 px gaps' middle.
-        if hit(rect(r.x - 4, r.y, r.w + 8, r.h), x, y) {
+        // Touch boxes up to the 6 px gaps' middle.
+        if hit(rect(r.x - 3, r.y, r.w + 6, r.h), x, y) {
             return Some(*c);
         }
     }

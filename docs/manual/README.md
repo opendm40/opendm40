@@ -1,3 +1,5 @@
+**English** | [Русский](README.ru.md)
+
 # opendm40 user manual
 
 opendm40 is an open replacement firmware for the Alientek DM40 multimeter,
@@ -19,8 +21,8 @@ its ratings. Follow the safety rules and limits in Alientek's user manual.
 opendm40 adds warnings for wrong connections ([Safety and
 alerts](#safety-and-alerts)), but they cannot catch every mistake.
 
-**Status.** opendm40 is experimental. It is developed on a DM40A; DM40B and
-DM40C ran only in the emulator. What is untested on a real meter is listed in [Known
+**Status.** opendm40 is experimental. It is developed on a DM40A and tested on
+DM40A, DM40B and DM40C. What is untested on a real meter is listed in [Known
 limitations](#known-limitations).
 
 ## Contents
@@ -91,13 +93,20 @@ If the meter stops on the loader's update screen instead, install the file
 from there ([Install a file from the update
 loader](#install-a-file-from-the-update-loader)).
 
+To try a change before its release: open [pull
+requests](https://github.com/opendm40/opendm40/pulls) have a **Test build**
+comment with the update file (all of them: [PR test
+builds](https://github.com/opendm40/opendm40/releases/tag/pr-builds)); its
+version reads like `0.3.2-pr148.1a2b3c4`. These builds are not tested on a
+meter.
+
 ### Update
 
 To install a newer opendm40 (or any other DM40 update file) from a running
 opendm40:
 
-1. **Settings > More > More > USB disk**: tap until it reads
-   **PC can edit (re-plug)**.
+1. **Settings > Other > USB disk**: tap until it reads
+   **PC can edit (replug)**.
 2. Unplug the USB cable and plug it in again. The disk is now writable.
 3. Copy the update file onto the disk, into the top folder
    (`dm40_opendm40_v<version>.bin`; any `dm40*.bin` name works).
@@ -123,7 +132,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 
 | Key | What it does |
 |---|---|
-| **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
+| **MENU** | Opens the main menu. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
 | **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
@@ -175,8 +184,7 @@ The four instrument views follow each other in this order:
 On the multimeter, the generator and the combined view (start on the meter
 strip there), swipe left for the next view and right for the previous one.
 On the oscilloscope page a drag moves the trace, so a swipe does not change
-the view: leave it with **MENU**, or switch on **Settings > More > Scope
-swipe**, which lets a swipe that starts on the top bar or the side panel
+the view: leave it with **MENU**, or switch on **Settings > Scope > Swipe**, which lets a swipe that starts on the top bar or the side panel
 change the view.
 
 ![A swipe changes the view; from the oscilloscope only with MENU or Scope swipe](img/swipe.png)
@@ -192,16 +200,17 @@ The top line of the multimeter page shows, from left to right:
 *The status bar.*
 
 1. the range: **AUTO** or **AUTO+** while the meter picks the range, or
-   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6KΩ**
+   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6kΩ**
    (as the stock firmware shows it);
 2. **RUN**, **HOLD** or **A-HOLD**, or in that place a wrong-connection
    [alert](#safety-and-alerts);
 3. the time since the meter was switched on (hours:minutes:seconds);
 4. a lock symbol: open, or closed while the touch lock is on;
-5. **REC** in red while a recording to the disk runs;
+5. a red dot and **REC** while a recording to the disk runs; the dot blinks;
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
-7. the battery level; the symbol turns green while the battery charges.
+7. the USB symbol while a computer has the meter connected (not with a charger);
+8. the battery level; green on the charger: the top bar blinks while the battery charges and stays when it is full.
 
 ### Touch lock
 
@@ -244,7 +253,7 @@ the combined view switches to the next sub-mode of the current function
 
 ### On-screen help
 
-**Settings > More > Help** opens seven short help pages: gestures, side
+**Settings > Other > Help** opens seven short help pages: gestures, side
 keys, multimeter, limits, recording and alerts, the USB disk, and the power
 meter. Tap to turn the page.
 
@@ -542,7 +551,7 @@ above it. Both parts are always shown above the reading.
 All current ranges use the **A** jack and **COM**. The meter switches the
 shunt inside.
 
-- Ranges: 600 µA, 6000 µA, 60 mA, 600 mA, 6 A, 10 A.
+- Ranges: 600 µA, 6 mA, 60 mA, 600 mA, 6 A, 10 A.
 - DC A: the signed current. In the mA ranges the value above it shows the
   **4-20 mA** loop percentage: 4 mA = 0 %, 20 mA = 100 %. It is hidden below
   3.6 mA and above 125 %.
@@ -560,7 +569,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Resistance
 
-- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ. 60 Ω shows
+- Ranges: 60 Ω, 600 Ω, 6 kΩ, 60 kΩ, 600 kΩ, 6 MΩ, 60 MΩ (and an
+  experimental 600 MΩ, below). 60 Ω shows
   milliohms and always uses 0.90 mA; AUTO goes there only with 0.90 mA.
 - Two test currents. **0.90 mA** (the default) and **0.28 mA ON** (second
   tap on Ω, or **0.28 mA ON** on the range page): the smaller one is for
@@ -580,11 +590,15 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
   The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
+- **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
+  no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
 |---|---|
 | 4.7 kΩ on 6 kΩ: test current 197 µA | The range page with 0.28 mA (ON) on |
+| ![412.3 MΩ on 600 MΩ](img/dmm-ohm-600m.png) | ![The range page with 600 MΩ chosen](img/range-ohm-600m.png) |
+| The experimental 600 MΩ: test current 105 nA | The range page with 600 MΩ chosen |
 
 #### Continuity
 
@@ -592,7 +606,10 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
-  resistance is below about 67 Ω (*inferred* from the chip setting).
+  resistance is below about 67 Ω (*inferred* from the chip setting). Silent
+  at [Key/alert volume](#alerts-tab) 0 %.
+- While it sounds (also at volume 0 %) a green **SHORT** band shows above the
+  reading and the digits turn green, for at least 0.15 s.
 - No test current is shown: continuity uses its own source setting, whose
   current is not known yet.
 - The firmware adds no latch and no minimum beep length: the beep starts and
@@ -608,7 +625,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 ![Continuity: a short](img/dmm-cont.png)
 
-*Continuity: a short.*
+*Continuity: a short, the beeper sounds.*
 
 #### Diode
 
@@ -618,7 +635,9 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
   below 22 mV (a short), three different beep patterns below 0.45 V,
   0.75 V and 1.5 V, silent above. A pattern plays for the first few
-  readings only.
+  readings only. Silent at Key/alert volume 0 %.
+- The same green band while it beeps: **SHORT** below 22 mV, **BEEP** for a
+  pattern.
 
 
 ![A silicon diode](img/dmm-diode.png)
@@ -680,8 +699,8 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 - **Offset**: -20 to +20 °C in 0.1 °C steps, one per sensor. Tap **-** /
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
-- **Unit: C** / **Unit: F** switches between °C and °F for the whole meter
-  (also **Settings > More > Temp unit**).
+- **Unit: ℃** / **Unit: ℉** switches between °C and °F for the whole meter
+  (also **Settings > Multimeter > Temp unit**).
 - The 2-wire leads add their resistance: about 0.4 °C per 0.1 Ω on a PT100.
   Correct it with the offset or with REL.
 - The supplied thermocouple is rated to 300 °C.
@@ -705,7 +724,8 @@ Limits](#limits-and-autohold)).
   the next higher one; after the highest comes the lowest (the
   [key table](#keys) has the details).
 - The coupling row: **DC**, **AC**, **AC+DC**, **AC/DC** (AUTO coupling).
-- **Hold/Limits** opens the [Hold & Limits page](#limits-and-autohold).
+- **Limits** opens the [Hold & Limits page](#limits-and-autohold), **Record**
+  the [Record page](#the-record-page) (red while recording).
 - **OK** or **MF** goes back.
 - Current page only: [**Fuse check**](#fuse-check) and
   [**Inrush**](#inrush-current).
@@ -791,7 +811,7 @@ so a change shows at once.
 - In the other functions (AC, AC+DC, capacitance, frequency, temperature,
   continuity, diode) the speed is fixed: the chip shows **n/a**; a tap on the
   reading shows **Fixed rate in this function**.
-- Also in **Settings > More > DMM rate**.
+- Also in **Settings > Multimeter > DMM rate**.
 
 
 ![A tap on the reading steps the rate](img/dmm-rate.png)
@@ -804,16 +824,16 @@ DC) or 3.2 s (SLOW, and in Ω) after the input settles.
 
 #### Smoothing
 
-**Settings > More > Smoothing**: **OFF** (default), **LOW**, **HIGH**. A
+**Settings > Multimeter > Smoothing**: **OFF** (default), **LOW**, **HIGH**. A
 moving average of the shown readings, for a calmer display. It restarts on a
 real step, so changes still show at once. Smoothing applies to the reading,
 the limits, the chart and readings over USB or Bluetooth; not to
 MIN/MAX/AVG, AutoHold, recordings or the bargraph. Continuity is never
 smoothed.
 
-![Smoothing LOW in Settings, page 2](img/settings2-smooth.png)
+![Smoothing LOW in Settings, the Multimeter tab](img/settings-smooth.png)
 
-*Smoothing LOW in Settings, page 2.*
+*Smoothing LOW in Settings, the Multimeter tab.*
 
 ### HOLD, AutoHold and REL
 
@@ -880,7 +900,7 @@ since they were last reset, and a timer **T hh:mm:ss**.
 
 ### The bargraph and the history row
 
-**Settings > More > DMM row** chooses what the row under the reading
+**Settings > Display > DMM row** chooses what the row under the reading
 shows: **Bargraph** (default) or **History**.
 
 - **Bargraph**: 50 segments, each 2 % of the range; centre zero in DC V and
@@ -902,7 +922,7 @@ shows: **Bargraph** (default) or **History**.
 Under the unit: the specified accuracy of this reading for the meter's
 model ([details](../../firmware/docs/dmm-accuracy.md)). Digits finer than
 it are grey. Not shown with the History row, in AC+DC, the 60 mV and 60 Ω
-ranges, PT / NTC, the power meter or under REL. **Settings > More > More >
+ranges, PT / NTC, the power meter or under REL. **Settings > Multimeter >
 Accuracy** turns it off.
 
 ### The trend chart
@@ -910,10 +930,11 @@ Accuracy** turns it off.
 The chart plots the reading over time, 321 points wide.
 
 - Tap the left column of the chart (the timebase label) to switch
-  160 → 320 → 640 ms/div; the chart restarts.
+  160 → 320 → 640 ms/div → 1.28 → 2.56 s/div; the chart restarts.
 - The scale follows the data.
 - It stops during HOLD and keeps running during AutoHold.
-- It restarts when you change the function.
+- It restarts when you change the function or switch to a range with
+  another unit (6 V to 600 mV).
 
 ![The trend chart](img/trend-chart.png)
 
@@ -921,7 +942,7 @@ The chart plots the reading over time, 321 points wide.
 
 ### Limits and AutoHold
 
-To open: **MF**, then **Hold/Limits** (for continuity, diode and frequency,
+To open: **MF**, then **Limits** (for continuity, diode and frequency,
 MF opens it directly). The title names the quantity, for example **Hold &
 Limits: DC V**.
 
@@ -951,7 +972,7 @@ Limits: DC V**.
 
 A current meter drops a small voltage across its shunt (the burden
 voltage), which the circuit under test loses. To show it: **Settings >
-More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
+Multimeter > Burden voltage: ON (A, mA, uA)**. Default OFF.
 
 - DC: the burden voltage above the reading, on the left, labelled
   **Burden**.
@@ -960,7 +981,7 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 - It is computed from the shunt resistance alone (10 mΩ for A, 0.5 Ω for
   mA, 47.5 Ω for µA); the fuse and the wiring add a little more.
 - At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
-  (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
+  (60 mA), 285 mV (6 mA), 28.5 mV (600 µA).
 
 ![123.45 µA; the burden voltage, 5.9 mV, above it](img/burden.png)
 
@@ -1005,8 +1026,8 @@ detected](#what-cannot-be-detected)).
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
 | **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω and continuity a voltage on the V/Ω jack that would otherwise look like a current in the A jack (Ω: from about 3-5 V). | Ω, continuity, diode. |
-| **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V. |
-| **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V. |
+| **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V; the power meter in AC+DC ([Coupling](#coupling-dc-ac-acdc)). |
+| **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V; the power meter in DC. |
 | **FUSE?** | 0 A for 60 s: check the fuse? | A current function read zero for a minute. The fuse may be blown. | A functions. |
 
 How they end:
@@ -1038,7 +1059,7 @@ LIVE? beeps once. OVLD beeps once (300 ms). The others are silent.
 
 *FUSE?: 0 A for a minute.*
 
-**Settings > More > More > Jack alerts** chooses which alerts are on:
+**Settings > Alerts > Jack alerts** chooses which alerts are on:
 **ON** (all of the above, default), **A-JACK only** (A-JACK and A-PROT),
 **OFF** (none of them, and no A-PROT protection). OVLD and the 10 A alarm
 are always on.
@@ -1136,7 +1157,7 @@ To silence it (for this event): tap the badge or the message, or press any
 key (the key still does its job), or the power key. A new event sounds
 again.
 
-**Settings > More > More > Danger alarm**:
+**Settings > Alerts > Danger alarm**:
 
 - **Loud** (default): full volume, also when the key/alert volume is 0.
 - **Volume**: at the key/alert volume.
@@ -1160,8 +1181,8 @@ Checks the fuse and the current path inside the meter without opening it.
 
 | Result | Meaning |
 |---|---|
-| **FUSE OK** (about 48 Ω) | The fuse and the A input path are intact. |
-| **FUSE OPEN** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
+| **Fuse OK** (about 48 Ω) | The fuse and the A input path are intact. |
+| **Fuse open** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
 | **Check leads** | A reading far from 48 Ω or none: one lead from V/Ω to A only. |
 
 **Again** repeats, **OK** returns to the function you were in. Cancel or
@@ -1215,7 +1236,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
   the record bar, the V/div with the probe and coupling, the trigger (edge
-  and level), the battery.
+  and level), the USB symbol while a computer has the meter connected, the
+  battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored
@@ -1260,7 +1282,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 |---|---|
 | A tap on the bottom-left corner: one step slower | The timebase list |
 
-**Settings > More > Scope tap step** sets which taps step the timebase:
+**Settings > Scope > Tap step** sets which taps step the timebase:
 **Corners** (default, only the two corners step), **Halves (stock)** (a tap
 in the left or right half of the graph steps), **Off**.
 
@@ -1408,7 +1430,8 @@ restores Freq, Vp-p, Cycl, Vrms.
 | **Vavg** | Mean. |
 
 The measurements use the part of the signal on screen and update up to
-about three times a second.
+about three times a second. While the trace rolls, and on a stopped
+record zoomed out beyond its length, they show **--**.
 
 ### Cursors
 
@@ -1472,7 +1495,7 @@ samples) stays in memory:
 **MF > Settings**:
 
 - **Save CSV**: saves the whole stored capture (up to 26 624 samples, not
-  only the screen). Stop the scope first (**Please stop sample**
+  only the screen). Stop the scope first (**Stop the scope first**
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
@@ -1567,7 +1590,7 @@ From the left:
 - the function (**DC V**, **AC V**, **AC+DC**, **AutoDC** / **AutoAC**,
   **DC A**, **FREQ**, **TEMP**, **POWER** ...);
 - one state badge, the most important of: **HOLD** / **A-HOLD**, an
-  [alert](#the-alerts), **HV** (30 V and more), **REC**, **REL**, the
+  [alert](#the-alerts), **HV** (30 V and more), **REL**, the
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
   **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
 - the reading and its unit;
@@ -1586,7 +1609,7 @@ From 100 V the strip gets a red frame.
 | Tap elsewhere on the strip | Opens the function band: the seven function buttons of the multimeter over the bottom of the graph. Tap a function as on the multimeter page. The band closes 4 s after the last tap, or with a tap elsewhere or MENU. |
 | Long press the strip | The full multimeter page. |
 | **RUN** | Multimeter HOLD; hold 1 s for AutoHold. |
-| **AUTO** | Multimeter autorange. |
+| **AUTO** | As on the multimeter page ([Keys](#keys)): fixes or steps the range; hold 1 s for autorange. |
 | **MF** | The multimeter's range page (or Hold & Limits). |
 | Tap the run state in the top bar | Scope run / stop. |
 | **TRIG** or the trigger in the top bar | The scope menu. |
@@ -1649,7 +1672,8 @@ an external voltage can destroy the output.
 
 To use it:
 
-1. Tap the waveform box to step through **Sine → Square → Triangle → Ramp**.
+1. Tap the waveform name above the preview to step through **Sine → Square →
+   Triangle → Ramp**.
 2. Tap a value box to type a new value ([The keypad](#the-keypad)).
 3. Tap **RUN / STOP** in the top bar, or press **RUN**, to switch the
    output on or off.
@@ -1782,7 +1806,8 @@ ranging...** (a few seconds).
 2. The current.
 3. The power P and the coupling symbol. Tap to step **P → Wh → VAh → P**.
 4. Energy **E** (or **P** while the main value shows energy), **PF**,
-   **S** (VA), **Q** (var), **f**; **--** where there is no value (PF in DC).
+   **S** (VA), **Q** (var), **f**; **--** where there is no value (PF in DC
+   or with no current).
 5. **Vb** (the voltage drop in the meter itself), **VAh**, the energy timer
    (**RUN** / **PAUSE** and the time), **AVG** (the mean power), the ranges.
 6. The trend chart of the main value.
@@ -1878,7 +1903,8 @@ voltage: small voltages read on the 6 V range.
 | **DC / AC / AC+DC** | The coupling; the help line explains the chosen one. |
 | **Reset Wh** | Resets Wh, VAh and the time at once. |
 | **Wiring** | Shows the wiring picture. |
-| **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep, Record. |
+| **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep. |
+| **Record** | Opens the [Record page](#the-record-page). |
 | **OK** | Back. |
 
 The status line shows the running job or its result, or the voltage gain
@@ -1953,8 +1979,8 @@ There are two recorders:
 ### Start and stop a recording
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
-meter beeps and shows **Recording CSV**; **REC** appears in red in the
-status bar. Swipe down again to stop. When the last rows are on the disk,
+meter beeps and shows **Recording CSV**; a blinking red dot and **REC** appear in the
+status bar (on the scope pages a red dot and **DMM** in the top bar, in place of **MCX | DMM**). Swipe down again to stop. When the last rows are on the disk,
 the meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.
@@ -1972,9 +1998,8 @@ with the last other interval.
 
 *The Record page.*
 
-To open it: on the multimeter page press **MF**, tap **Hold/Limits**, then
-tap **Record** at the bottom (for continuity, diode and frequency, MF opens
-the Hold & Limits page directly).
+To open it: press **MF**, then tap **Record**. For continuity, diode and
+frequency: **MF**, then **Record** at the bottom of Hold & Limits.
 
 | Row | What it does |
 |---|---|
@@ -2018,7 +2043,7 @@ time_s,value,unit,flags
 
 | Column | Content |
 |---|---|
-| `time_s` | Seconds since the start. In interval mode: the end of the interval. |
+| `time_s` | Seconds since the start. In interval mode: the end of the interval, also for the last one when the recording stops inside it. |
 | `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overload. |
 | `unit` | The unit. |
 | `flags` | Any of `OL` (overload), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
@@ -2105,7 +2130,7 @@ space it takes on the meter.
 
 #### Files live and PC can edit
 
-Set in **Settings > More > More > USB disk**.
+Set in **Settings > Other > USB disk**.
 
 ![The USB disk row after a tap to PC can edit](img/usb-mode.png)
 
@@ -2122,7 +2147,7 @@ Set in **Settings > More > More > USB disk**.
   read-only.
 
 A change of the mode takes effect at the next USB plug: unplug the cable
-and plug it in again. Until then the row shows **(re-plug)**. The meter
+and plug it in again. Until then the row shows **(replug)**. The meter
 always starts in **Files live**.
 
 A file manager usually moves a deleted file to the trash. A file moved to
@@ -2223,67 +2248,93 @@ The gallery also shows the screenshots made by the stock firmware.
 
 ## Settings
 
-To open: main menu, **Settings**. There are three pages; on pages 1 and 2
-the last row, **More**, opens the next page. **< Back** in the title bar or
-**MENU** goes one page back (from page 1: to the main menu). Tap a row to
-step to its next value; rows with **-** / **+** change in steps.
+To open: main menu, **Settings**. The tabs on the left are the sections;
+tap one to show its rows. Tap a value to step to the next one (the name
+does nothing); rows with **-** / **+** change in steps, a **>** opens a page. **< Back** in
+the title bar or **MENU** goes back to the main menu.
 
-### Settings page 1
+### Display tab
 
-![Settings, page 1](img/settings1.png)
+![Settings, the Display tab](img/settings-display.png)
 
-*Settings, page 1.*
+*Settings, the Display tab.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
-| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
-| **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
+| **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
+| **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
+
+### Alerts tab
+
+![Settings, the Alerts tab](img/settings-alerts.png)
+
+*Settings, the Alerts tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
+| **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
+| **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
+
+### Power tab
+
+![Settings, the Power tab](img/settings-power.png)
+
+*Settings, the Power tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
-| **Scope drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
-| **More** | | | Page 2. |
+| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter continues as you left it ([What is kept](#what-is-kept-when-you-switch-off)). |
 
-### Settings page 2
+### Multimeter tab
 
-![Settings, page 2](img/settings2.png)
+![Settings, the Multimeter tab](img/settings-multimeter.png)
 
-*Settings, page 2.*
+*Settings, the Multimeter tab.*
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **DMM rate** | SLOW, MED, FAST | MED | [Rate](#rate-fast-med-slow); shows the readings per second, or **(n/a here)** where the current function has a fixed rate. |
 | **Smoothing** | OFF, LOW, HIGH | OFF | [Smoothing](#smoothing). |
-| **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
-| **Temp unit** | C (Celsius), F (Fahrenheit) | C | Temperature unit everywhere. |
-| **Scope swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
-| **Scope press** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
-| **Scope tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
-| **Help** | | | The [on-screen help](#on-screen-help). |
-| **More** | | | Page 3. |
-
-### Settings page 3
-
-![Settings, page 3](img/settings3.png)
-
-*Settings, page 3.*
-
-| Row | Values | Default | What it does |
-|---|---|---|---|
-| **Jack alerts** | ON, A-JACK only, OFF | ON | Which [wrong-connection alerts](#the-alerts) are on. |
-| **Danger alarm** | Loud, Volume, Off | Loud | The [danger alarm](#the-danger-alarm)'s volume. |
-| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
+| **Temp unit** | ℃ (Celsius), ℉ (Fahrenheit) | ℃ | Temperature unit everywhere. |
 | **Burden voltage** | OFF (stock), ON (A, mA, uA) | OFF | Shows the [burden voltage](#burden-voltage). |
-| **Device** | | | The [Device page](#the-device-page). |
-| **Touch test** | | | The [touch test page](#touch-test). |
 | **Accuracy** | ON, OFF | ON | Shows the reading's [accuracy](#accuracy). |
 | **Negative ohm** | OFF (stock), ON | OFF | ON: readings below 0 Ω are shown (e.g. -0.028 Ω with the leads shorted); OFF: 0. |
 
+### Scope tab
+
+![Settings, the Scope tab](img/settings-scope.png)
+
+*Settings, the Scope tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
+| **Swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
+| **Press effect** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
+| **Tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
+
+### Other tab
+
+![Settings, the Other tab](img/settings-other.png)
+
+*Settings, the Other tab.*
+
+| Row | Values | Default | What it does |
+|---|---|---|---|
+| **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |
+| **USB disk** | Files live, PC can edit | Files live | [Files live and PC can edit](#files-live-and-pc-can-edit). Back to Files live at every power-on. |
+| **Device info** | | | Opens the [Device page](#the-device-page). |
+| **Touch test** | | | The [touch test page](#touch-test). |
+| **Help** | | | The [on-screen help](#on-screen-help). |
+
 ### The Device page
 
-**Settings > More > More > Device** shows:
+**Settings > Other > Device info** shows:
 
 ![The Device page](img/device.png)
 
@@ -2302,7 +2353,7 @@ Tap anywhere to go back to Settings; **MENU** goes to the main menu.
 
 ### Touch test
 
-**Settings > More > More > Touch test** shows what the touch screen
+**Settings > Other > Touch test** shows what the touch screen
 reports, to check where a tap lands:
 
 ![The touch test page](img/touch-test.png)
@@ -2327,7 +2378,7 @@ do nothing on this page.
 
 - **Clear**: tap it to clear the dots.
 - To leave the page, press the power key, or hold one finger still
-  anywhere for 2 s. Both go back to Settings page 3.
+  anywhere for 2 s. Both go back to Settings, the Other tab.
 
 #### Touch calibration
 
@@ -2582,7 +2633,7 @@ dmm.write('CONF:VOLT:DC')
 print(float(dmm.query('READ?')))
 ```
 
-pyvisa-py names the meter `USB0::4617::1::<serial>::0::INSTR`; NI-VISA
+pyvisa-py names the meter `USB0::4617::53312::<serial>::0::INSTR`; NI-VISA
 `USB0::0x1209::0xD040::<serial>::INSTR`. pyvisa-py talks to the meter
 through libusb and takes the interface away from the kernel driver:
 `/dev/usbtmcN` disappears until you re-plug the meter. Use either PyVISA or
@@ -2727,21 +2778,20 @@ gets you there:
 *The power key way into the update loader.*
 
 - **From the power key.** With the meter off, press and hold the power key.
-  The screen lights up. About 4 s later the backlight blinks and the meter
-  beeps. Keep holding at least 0.5 s more, then let go. Letting go during
-  that half second cancels: the meter starts normally.
+  About 4 s later the backlight blinks and the meter beeps; keep holding
+  0.5 s more, then let go. Letting go earlier starts the meter normally.
 - **From a computer.** While opendm40 runs and is connected over USB:
-  `python3 firmware/tools/dm40dbg.py update`
-  (the SCPI command `DBG:UPDATE`, see [SCPI reference](scpi-reference.md)).
-- **By itself after repeated hangs.** If the firmware hangs, it restarts
-  after about 20 s. If it hangs again within its first 60 s of running, the
-  next start opens the update loader.
-- **Through the board.** If nothing else works: open the case, connect
-  the debug header's TX pad to ground while switching on, and keep it until
-  the update screen appears; remove it after the update. See
+  `python3 firmware/tools/dm40dbg.py loader`
+  (the SCPI command `DBG:LOADER`, see [SCPI reference](scpi-reference.md)).
+- **By itself.** A firmware file that does not pass the loader's check
+  leaves the meter in the update loader.
+- **Through the board.** If nothing else works: open the case, connect the
+  debug header's TX pad to ground while switching on, and keep it until the
+  update screen appears; remove it after the update. See
   [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery).
 
-Once there, the loader shows its update screen on every start until a valid
+To leave the loader without installing, switch the meter off and on again:
+opendm40 starts. After a failed install the loader stays until a valid
 update file has been installed.
 
 ### Install a file from the update loader
@@ -2786,10 +2836,15 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange) |
 | Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
+
+**Mode Remember** ON (Settings > Power, as the stock's) also keeps after
+switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
+or a fixed V, A or Ω range, the Ω test current, the rate and smoothing and
+the trend timebase. AutoHold and the limits still start afresh.
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
@@ -2801,15 +2856,15 @@ everything, also without the file.
 
 The stock firmware keeps its own settings separately, in `config.bin`;
 switching between the two firmwares does not mix them. After the stock
-firmware has run, opendm40 starts on DC V.
+firmware has run, opendm40 starts on DC V, or with **Mode Remember** ON in
+the function last used in opendm40.
 
 ## Known limitations
 
 Untested on a real meter:
 
-- Getting started and recovery: installing over the stock firmware's
-  **USB Connect** disk; entering the update loader with the power key; the
-  automatic entry after repeated hangs.
+- Getting started: installing over the stock firmware's **USB Connect**
+  disk.
 - Multimeter: with a current through the A jack, the overload handling,
   AUTO coupling and the burden voltage; the diode beeps; PT1000 and the
   100 kΩ NTC (PT100 and the 10 kΩ NTC ran on a
