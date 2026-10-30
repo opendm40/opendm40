@@ -18,7 +18,7 @@ Checks:
     only grows (a drop = the firmware restarted: a panic or a watchdog);
   - every --home steps: MENU (up to 4 presses) reaches the main menu, and
     the Multimeter tile opens the multimeter (a stuck page otherwise);
-    then SYST:ERR:COUNT? (at most 8) and the queue drained;
+    then the error queue drained (random SCPI fills it; not checked);
   - the Renode log's "fwdgt: timeout" lines (watchdog resets);
   - the deepest stack use (DBG:BOOT? STACK, the paint high-water mark),
     sampled at every home check and printed at the end.
@@ -263,6 +263,18 @@ def stack_report():
 
 emu = None
 step = 0
+DISK = os.path.join(OUT, name + '-disk.bin')
+
+
+def kill_emu():
+    global emu
+    if emu:
+        try:
+            os.killpg(emu.pid, 15)
+        except OSError:
+            pass
+        emu.wait()
+        emu = None
 
 
 def finish(code):
@@ -270,15 +282,12 @@ def finish(code):
         stack_sample()
     except Exception:
         pass
-    if emu:
-        try:
-            os.killpg(emu.pid, 15)
-        except OSError:
-            pass
-        emu.wait()
+    kill_emu()
+    ok = code == 0 and not FAILS
+    if ok and os.path.exists(DISK):
+        os.remove(DISK)  # kept after a failure: the screenshots / recordings on it
     print(stack_report())
-    print('%s: %d inputs, seed %d, %d failure(s)' % ('PASS' if code == 0 and not FAILS else 'FAIL', step, A.seed,
-                                                    len(FAILS)))
+    print('%s: %d inputs, seed %d, %d failure(s)' % ('PASS' if ok else 'FAIL', step, A.seed, len(FAILS)))
     sys.exit(code or (1 if FAILS else 0))
 
 
@@ -297,9 +306,8 @@ def main():
     src = A.disk or os.path.join(OUT, 'disk.bin')
     if not os.path.exists(src):
         src = run.DISK_SRC
-    disk = os.path.join(OUT, name + '-disk.bin')
-    subprocess.run(['cp', src, disk], check=True)
-    args += ['--disk', disk]
+    subprocess.run(['cp', src, DISK], check=True)
+    args += ['--disk', DISK]
     emu = subprocess.Popen(args, cwd=ROOT, stdout=open(os.path.join(OUT, name + '-emu.out'), 'w'),
                            stderr=subprocess.STDOUT, start_new_session=True)
     if not L.connect(300):
@@ -372,7 +380,10 @@ def home_check():
         HIST.append('%8s home: %s' % ('', v))
         log('%d home %s' % (step, v))
         if not v.startswith('Main menu'):
-            screenshot(os.path.join(OUT, '%s-stuck-%d.png' % (name, step)))
+            try:
+                screenshot(os.path.join(OUT, '%s-stuck-%d.png' % (name, step)))
+            except Exception as e:
+                print('  no screenshot (%s)' % type(e).__name__)
             fail('MENU x4 does not reach the main menu: DBG:VIEW? %s' % v)
             return
         L.q('DBG:TAP 140,105')
@@ -381,9 +392,10 @@ def home_check():
         if not v.startswith('Multimeter'):
             fail('the Multimeter tile opens %s' % v)
         stack_sample()
+        # The queue: drained only. Random SCPI fills it to its 8 entries
+        # (scpi.rs ERRQ) between home checks, so neither the count nor an
+        # overflow (-350) says anything.
         n = int(L.q('SYST:ERR:COUN?'))
-        if not 0 <= n <= 8:
-            fail('SYST:ERR:COUNT? %d' % n)
         for _ in range(n + 1):
             if L.q('SYST:ERR?').startswith('0,'):
                 break
@@ -396,3 +408,5 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         finish(1)
+    finally:
+        kill_emu()  # any other exception: no emulator left running
