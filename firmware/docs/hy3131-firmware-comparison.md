@@ -25,7 +25,7 @@ the OWON runtime notes.
 
 **Method.** One decoder turns every row (R20..R36, missing registers marked
 "not written") into named fields; every table below is generated from it, 379
-rows in all. The decoder output agrees with the hand decodes of DM40
+rows in all ([`tools/`](data/hy3131-comparison/tools/README.md)). The decoder output agrees with the hand decodes of DM40
 `CFG_F3[0]` (DC 60 mV, [`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) §4),
 DM40 `CFG_F13[0]` (R21 = VDSC11 / VDSC5, SMODE 0x1A), Keysight row 0 and row 4
 and OWON `RES 5E6`. The power-bus row of SMODE uses the truth table in the

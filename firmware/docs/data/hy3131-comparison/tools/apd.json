@@ -1,0 +1,97 @@
+{
+ "dcmv": {
+  "AD1 input (+ / −)": "p7 50 mV OP1O − PB3; p8 500 mV PB0 − PB3",
+  "AD1 reference (+ / −)": "p7–8 PB6 − AGND",
+  "AD1IG": "p7–8 1.8",
+  "AD1RG": "p7–8 1",
+  "R22: OSR1, AD1CHOP, DCOS (period)": "p7–8 ADSCHP 11, OSR not marked",
+  "SFT1 pre-filter R": "p7–8 100k (FTMOD 00)",
+  "OP1 (+ input, OPS1, chop)": "p7 on +PB0 OPS1 (x10) chop 2 kHz; p8 off",
+  "PA switches": "p6 PS8 (10 M from the input to AGND)",
+  "REFO, AGND, ACM": "p7 SREFO PB6, VAGND 00 (0.5)"
+ },
+ "acmv": {
+  "OP1 (+ input, OPS1, chop)": "p10 +RLU OPS1 (x10) chop 2 kHz; p11 x1 chop 2 kHz",
+  "AD2 in / ref / gain": "p10–11 OP1O − AGND; ref REFO − AGND; IG 0.5, RG 1",
+  "R26 AD2: OSR2, clock, chop": "p10 ADFOSR 000 (32)",
+  "R29 LPF / RMS / peak": "p10 LPFBW 111, ENLPF, ENRMS",
+  "R2F ENVS, SMODE": "p9 SMODE4 (RLD–RLU)",
+  "PA switches": "p9 PS8"
+ },
+ "dcv": {
+  "AD1 input (+ / −)": "p16 SENSE − PB3",
+  "AD1 reference (+ / −)": "p16 PB6 − AGND",
+  "AD1IG": "p16 1.8",
+  "AD1RG": "p16 1",
+  "R22: OSR1, AD1CHOP, DCOS (period)": "p16 ADSCHP 11",
+  "SFT1 pre-filter R": "p16 100k",
+  "OP1 (+ input, OPS1, chop)": "p16 off",
+  "PA switches": "p12–15 PS8 + PS7/6/5/4 (tap), SS of the tap, FS9 FS1",
+  "R2F ENVS, SMODE": "p12 SMODE5"
+ },
+ "acv": {
+  "OP1 (+ input, OPS1, chop)": "p22 +SENSE x1, chop 00",
+  "AD2 in / ref / gain": "p22 OP1O − AGND; ref REFO − AGND; IG 0.5",
+  "R29 LPF / RMS / peak": "p22 LPFBW 111, ENLPF, ENRMS",
+  "PA switches": "p18 5 V: PS9 PS8 PS7 DS7 SS7; p19 50 V: PS8 PS6 DS6 SS6 FS9 FS1; p20–21: PS8 PS5/PS4 SS FS9 FS1",
+  "ACC (R30)": "p18–19 capacitor array on DS bus (value not given)"
+ },
+ "dca": {
+  "AD1 input (+ / −)": "p45 50 mA OP1O − PB3; p46 500 mA PB1 − PB3",
+  "AD1 reference (+ / −)": "p45–46 PB6 − AGND (REFO block drawn black)",
+  "AD1IG": "p45–46 1.8",
+  "SFT1 pre-filter R": "p45–46 100k",
+  "OP1 (+ input, OPS1, chop)": "p45 +PB1 x10 chop 2 kHz; p46 off"
+ },
+ "aca": {
+  "OP1 (+ input, OPS1, chop)": "p47 +PB1 x10 chop 00; p48 x1 chop 2 kHz",
+  "AD2 in / ref / gain": "p47–48 OP1O − AGND; ref REFO − AGND; IG 0.5",
+  "R29 LPF / RMS / peak": "p47 LPFBW 111, ENLPF, ENRMS"
+ },
+ "ohm": {
+  "AD1 input (+ / −)": "p35 50 Ω OP1O − PB3 (OP1 x10); p36, p41 PB0 − PB3",
+  "AD1 reference (+ / −)": "p35–36 FB − RLU; p41 (500 k..50 M) VDDA − VSSA",
+  "AD1RG": "p35–36 1; p41 1/3",
+  "SFT1 pre-filter R": "p35–41 100k",
+  "PA switches": "p33 DS4 FS4 DS3 (10 nF); p34 DS5 FS5; p37 DS6 FS6; p38 PS6 PS2; p39 PS7 PS2; p40 PS2",
+  "R2F ENVS, SMODE": "p33 SMODE 0100 (SVSO1) + SMODE4; p38–40 0110 (SVDD SVSO2 SCP)",
+  "OP3 VREF (SFUVR)": "p33 VDS15; p34, p37 AGNDP9; p38–40 VDS16",
+  "REFO, AGND, ACM": "p35–41 VAGND 01 (0.3)"
+ },
+ "cont": {
+  "PA switches": "p44 PS1 (1 k)",
+  "R2F ENVS, SMODE": "p44 0110 (SVDD SVSO2 SCP)",
+  "OP3 VREF (SFUVR)": "p44 VDS15",
+  "Comparator (R20, R21)": "p44 on, PB0; H=AGNDP2 L=AGNDN1",
+  "Counter, CNT, CMP pin": "p44 ACPO → CMPO; CMP pin drawn black",
+  "AD1 input (+ / −)": "p44 no ADC block"
+ },
+ "diode": {
+  "AD1 input (+ / −)": "p43 PB0 − PB3",
+  "AD1 reference (+ / −)": "p43 PB6 − AGND",
+  "AD1IG": "p43 1.8",
+  "SDIO (PB0–PB8)": "p42 1",
+  "PA switches": "p42 PS6 (101 k)",
+  "R2F ENVS, SMODE": "p42 0110",
+  "OP3 VREF (SFUVR)": "p42 VDS15",
+  "REFO, AGND, ACM": "p43 VAGND 10 (0.1)"
+ },
+ "cap": {
+  "R2F ENVS, SMODE": "p24 CV 1010 (SVDD/SVSS by CMPO) + SMODE4; p25 CC 1110; p26–27 0110 charge; p29 1110 discharge",
+  "PA switches": "p24–26 PS6 (101 k); p27, p29 PS1 (1 k)",
+  "OP3 VREF (SFUVR)": "p25 VDS16 / VDS2; p26–27 VDS16; p29 VDS3",
+  "Comparator (R20, R21)": "p24–25 PB0, H=VDSC11 L=VDSC5; p29 PB0, AGNDP0 / AGNDP0; p26–27 off",
+  "AD1 input (+ / −)": "p28, p30 PB0 − PB3",
+  "AD1 reference (+ / −)": "p28, p30 VDDA − VSSA",
+  "AD1IG": "p28 1.8",
+  "AD1RG": "p28 1/3",
+  "R22: OSR1, AD1CHOP, DCOS (period)": "p28 OSR 4096, CHOP 00, DCOS 101 (−0.25)",
+  "SFT1 pre-filter R": "p28 open (11)",
+  "REFO, AGND, ACM": "p28 VAGND 01 (0.3)"
+ },
+ "freq": {
+  "Comparator (R20, R21)": "p51, p53 PB4 (OP1O → 1 µF → 1 M → PB4); H=AGNDP1 L=AGNDN1",
+  "Counter, CNT, CMP pin": "p51 ACPO → counter (ENCTR); p54 CNT pin (ENCNTI)",
+  "OP1 (+ input, OPS1, chop)": "p51 +SENSE x1; p53 +PB1 x1"
+ }
+}
