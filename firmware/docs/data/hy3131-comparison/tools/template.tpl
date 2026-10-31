@@ -1,6 +1,6 @@
-# HY3131 configuration in eight firmwares: a per-mode comparison
+# HY3131 configuration in nine firmwares: a per-mode comparison
 
-How the Alientek DM40 stock firmware and seven other sources set up the Hycon
+How the Alientek DM40 stock firmware and eight other sources set up the Hycon
 [HY3131](../../hw/datasheets/hycon-hy3131-datasheet-v10.pdf) in each
 measuring mode, field by field (R20..R36), and what each mode does on the chip.
 Field names and option tables follow
@@ -16,6 +16,7 @@ Field names and option tables follow
 | Digilent DMM Shield | Arduino Uno / Mega 2560 / Due | source table (INTE + R20..R36) | [Digilent/Arduino-DMMShield-Library](https://github.com/Digilent/Arduino-DMMShield-Library) `dmm.cpp` |
 | Temco T3 | STM32F103 (tables), ESP32 (driver) | source tables (20 bytes, R20..R33). The STM32 project's `main.c` excludes the HY3131 task; which rows a shipped firmware writes is unknown | [temcocontrols/T3-programmable-controller-on-ESP32](https://github.com/temcocontrols/T3-programmable-controller-on-ESP32) `STM32/Multimeter/USER/HY3131_FunTable.h`, `main/hy3131_sw.c` |
 | OWON XDM2041 V1.7.2 | GD32F103CBT6 | SPI captures (bulk write R00..R37 per mode change) plus a static decompilation of the stock image ([notes](data/hy3131-comparison/owon-xdm2041.md)) | [PetteriAimonen/owon-xdm2041-info](https://github.com/PetteriAimonen/owon-xdm2041-info) `spi_captures/all_modes.txt` |
+| OWON XDM1041 V2.1.2 | unknown (the image names only ST StdPeriph sources) | the stock image's own `set_mode` run in an emulator for every mode and range, plus a static decompilation; same code base as the XDM2041 V1.7.2 ([notes](data/hy3131-comparison/owon-xdm1041.md)) | [TheHWcave/OWON-XDM1041](https://github.com/TheHWcave/OWON-XDM1041/tree/main/OWON%20firmware) `XDM1041_OS_V2.1.2_20210525.bin` (shared with OWON's permission, per its readme) |
 | Keysight U1281A / U1282A v1.05 | NEC 78K0 (*inferred*) | static decode of the update image (nibble-swapped, byte-reversed): a 13-row table (R20..R33) at 0x18EA plus per-range overlays; the mode-to-function mapping is *inferred* ([notes](data/hy3131-comparison/keysight-u128x.md)) | "Keysight U1281A U1282A Firmware Update Software (Version 1.05)", file `u1281a_82a_v105.ag` |
 | Metrix MTX3292(B) / MTX3293(B), CA 5292 / 5293 (Chauvin Arnoux ASYC IV) v1.02; rows identical in the v1.08 images | Kinetis K70 (`MK70FN1M0`, *inferred*) | static analysis of the plain update image (linked at 0x8000): 64 rows of 25 bytes (R1E..R36) at flash 0xB4C64, one per mode / coupling / range; mode names from the firmware's task table ([notes](data/hy3131-comparison/metrix-mtx3293.md)) | Chauvin Arnoux "Logiciel embarqué ASYC IV", loader v1.09 (`loader_asyc4_v1.09.zip`), file `X04877C01_P_CODE_V1_02_ASYC4B_GB_FR.BIN` |
 
@@ -24,7 +25,7 @@ for the XDM2041) copies the OWON stock rows; its differences are listed under
 the OWON runtime notes.
 
 **Method.** One decoder turns every row (R20..R36, missing registers marked
-"not written") into named fields; every table below is generated from it, 379
+"not written") into named fields; every table below is generated from it, 432
 rows in all ([`tools/`](data/hy3131-comparison/tools/README.md)). The decoder output agrees with the hand decodes of DM40
 `CFG_F3[0]` (DC 60 mV, [`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) §4),
 DM40 `CFG_F13[0]` (R21 = VDSC11 / VDSC5, SMODE 0x1A), Keysight row 0 and row 4
@@ -46,8 +47,10 @@ source names them (Hycon/121GW/Digilent/OWON 5/50/500 V-style, DM40/Temco
 Temco "Auto" rows (identical to the manual ones), the DM40 ohm rows r0 and
 row 7 (never selected) and the DM40 ohm "P8SET" variant (see the ohm section),
 Keysight base rows 1 / 4 / 7 (replaced by base row + per-range overlay), the
-Metrix AC+DC and mode 9 rows (byte-identical to its AC rows) and its all-zero
-Ω row 6. Metrix rows carry the range values of its range table. All
+Metrix AC+DC and mode 9 rows (byte-identical to its AC rows), its all-zero
+Ω row 6, and the XDM1041 variant rows (large-capacitor phase B, the two die-sensor
+temperature rows; its speed 1 / 2 and secondary-frequency rows are filed under
+"other"). Metrix rows carry the range values of its range table. All
 rows are in the [appendix](#appendix-raw-rows).
 
 ## How the HY3131 measures
@@ -102,6 +105,10 @@ everywhere.
 - 121GW sets AD1CHOP = 11 on 50 mV and OSR 256 on 500 mV in the table and
   never rewrites R22; it averages up to 10 readings in software instead
   ([notes](data/hy3131-comparison/eevblog-121gw.md#runtime-logic)).
+- "OWON" in these notes is the XDM2041. The XDM1041 has the same rows except
+  where noted: here SFT1 10 k (XDM2041 0) and OSR 16384 at speed 0 (XDM2041
+  4096; its speed table is 16384 / 4096 / 256). Its ENCTR 0 is the post-boot
+  state; the XDM2041 captures' ENCTR 1 is left from earlier modes (*inferred*).
 
 ## DC V
 
@@ -124,7 +131,7 @@ connect the input and divider foot to FB.
 - DM40 1000 V closes PS5 and PS4 together (two taps in parallel); Hycon and
   121GW close PS4 alone. DM40 also closes DS0 with FS0, and DS9 with FS9 on
   the ranges from 60 V.
-- SFT1: DM40 and Keysight open, OWON 0, Hycon / Digilent / Temco 100 k.
+- SFT1: DM40 and Keysight open, OWON 0 (XDM1041 10 k), Hycon / Digilent / Temco 100 k.
 - Hycon's two references differ: the APD diagram (p16) reads SENSE − PB3, the
   ENOB tool rows SENSE − RLU (the 121GW uses SENSE − PB3).
 - Metrix reads OP1O − PB5 against PB6 − PB5 (alternate r1 row: PB2 − PB5) with OP1 chopped at
@@ -220,6 +227,9 @@ the mA and µA ranges share one row. The Hycon board has 0.01 / 0.99 / 99 Ω
   open elsewhere.
 - OWON references AD1 to REFO − AGND here, the others to PB6 − AGND
   (Keysight PB6 − PB3 with RG 1/3).
+- XDM1041: OP1 takes PB8 (not PB1) on the µA / mA ranges, DC and AC; the
+  direct 5 mA / 500 mA rows read PB3 − PB3 (how the shunt is read there is
+  unknown); SFT1 0 (XDM2041 open).
 - Metrix buffers PB8 through OP1 x10 on every range (OP1O − PB5) and changes
   AD1IG to 2.7 on r4 / r5.
 
@@ -264,8 +274,10 @@ DM40 Rref: 1 k .. 10 M and 63 M on PA2..PA7 (*inferred* from the stock scaling,
   It adds 1.5 nF from PB0 to AGND in Ω (U16). While EEPROM byte 0x26 ≠ 0xA5
   (the byte the 50 MΩ calibration step writes) its 50 MΩ row opens PA0's bus
   switch and the 5 / 50 MΩ software corrections are skipped.
-- 4-wire: only the OWON (sense on PB2 − PB5, `FRES`); the others have no 4-wire
-  rows.
+- 4-wire: only the two OWONs (sense on PB2 − PB5, `FRES`); the others have no
+  4-wire rows.
+- XDM1041: DS3 closed (R2B = 40) on Ω ≤500 kΩ, 4-wire and RTD (the XDM2041
+  only in continuity), and SFT1 10 k on 2-wire.
 - Metrix: ratiometric r0..r3 with Rref on PA5 / PA7 / PA8 / PA3, current
   source with RG 1/3 against REFO on r4 / r5. Its mode 6 (10 mA low-Ω,
   *inferred*) closes no PA switch. Its continuity row is Ω r0 with OP2 on and
@@ -283,7 +295,8 @@ voltage across the probe: the comparator output CMPO is enabled to the CMP pin
   reference (RLU − FB, read as a negative value); OP3 VREF is AGNDN7 (SFUVR
   13, below AGND). The others compare PB0 against AGNDP2 / AGNDP1 with OP3 at
   VDS15; OWON uses VDSC7 for both thresholds.
-- DM40 runs AD1 at OSR 2048 with SFT1 = 0; ENCTR = 1.
+- DM40 runs AD1 at OSR 2048 with SFT1 = 0; ENCTR = 1. XDM1041 OSR 256
+  (XDM2041 2048).
 
 ## Diode
 
@@ -298,6 +311,8 @@ connects PB0 to PB8 so the 900 k / 100 k divider brings the forward voltage
 - DM40 buffers PB0 through OP1 (OP1O − PB3, IG 0.9); the others read PB0
   directly (IG 1.8; Temco 2.7, 121GW 0.9). The DM40 comparator is on RLD and
   the firmware sounds the beeper by toggling ENPCMPO (R20 0xB4 / 0xB0).
+- XDM1041: no comparator (R20 = C0; the XDM2041 has it on SENSE), SFT1 10 k,
+  OSR 256.
 
 ## Capacitance
 
@@ -333,7 +348,8 @@ Three methods appear:
   r4..r7.
 - OWON `CAP 50E-9` AD1 fields are left from the previous mode (the RC rows do
   not call the AD1 composer); 121GW and Keysight use the band-gap REFO
-  (SREFO = 0) in these rows.
+  (SREFO = 0) in these rows. The XDM1041 RC rows (50 nF..500 µF) do the same;
+  its 5 µF uses CTA 0xBF0000 (XDM2041 0x130000) and 500 µF R21 = 21, SFUVR 2.
 
 ## Frequency / counter
 
@@ -370,7 +386,10 @@ HY3131 has a die sensor read by AD1 with SAD1I = 10 (TS1P / TS2N) and 11
   unknown.
 - OWON runs the thermocouple as DC V 500 mV (PB0 − PB3, OSR 4096), reads the
   die sensor only at boot (R33 0xAA / 0xAB, SAD1I 2 / 3), and runs the RTD as
-  ohm 500. 121GW uses its DC mV 50 mV row (K type, −200..1350 °C) with the
+  ohm 500. XDM1041: OSR 16384 and SFT1 10 k on the thermocouple, DS3 closed on
+  the RTD; a sub-reading flag reads the die sensor (SAD1I 2 / 3) on the
+  thermocouple row (appendix), presumably for the cold junction (*inferred*).
+  121GW uses its DC mV 50 mV row (K type, −200..1350 °C) with the
   cold junction from a 10 kΩ NTC on the MCU ADC (PA4), and feeds the input from VDD
   through 20 MΩ in this mode, so an open input reads as overload. Temco's two rows are the die sensor
   only. Keysight row 6: OP1 on PB1, OP1O − AGND (*inferred* mapping).
@@ -386,29 +405,33 @@ HY3131 has a die sensor read by AD1 with SAD1I = 10 (TS1P / TS2N) and 11
   neighbouring tap is on the bus and SENSE (PS), AD1 reads RLU − SENSE: a
   divider-ratio check of adjacent PA resistors (*inferred* from the decode).
 - Keysight row 12 (flag 0xFE24.2): AD2 and AD1 on, OP1 on PB2; use unknown.
+- XDM1041: DCV 5 V and ACV 5 V at speed 1 / 2 (only R22 OSR or the LPF OSR4
+  change), and ACV 5 V / ACI 5 mA with the secondary frequency on (comparator
+  on PB4, R21 = DD, ENCTR).
 - Metrix mode 10 (task `mdiodez`, 20.000 V, OL from 26 V; a Zener diode test,
   *inferred* from the name): AD1 OP1O − PB5 against REFO, RG 1/3, OSR 32768,
   no PA switch; all four latching relays on.
 
 ## Runtime behaviour
 
-| | DM40 stock V2.6 | 121GW | Digilent | Temco | OWON XDM2041 | Keysight | Metrix MTX3293 |
-|---|---|---|---|---|---|---|---|
-| mode change | R26, R34, R36 = 0; relays; R20..R35 (22 bytes); INTE = 0; poll INTF | 20 bytes R20..R33 from the row table; R1E..R1F = 00, INTE (AD1IE; + CTIE in AC; RMSIE + CTIE in 1 ms peak; CTIE in cap / Hz); counter restart (ENCTR off, R1B..R1D = 00 + CTA preset, read back, ENCTR on); calibration; then the AC-path muxes and relays (GPIO); no read-back | R37 = 0x60 (reset) every scale change, then INTE + R20..R36 (24 bytes), read back and compared with a mask | 20 bytes from R20, then INTF = 0x02 and INTE (ESP32 driver) | R20 ENCMP off at once, then all 56 bytes R00..R37 in one burst; 74HC595 relay byte before every reading | buffer of 20 bytes from the table, per-range overlays, 22 bytes sent (R20..R34; R34 unset) | relays, then one 25-byte burst R1E..R36 (INTF = 0, INTE from the row); R37 = 0x60 only when the driver opens; no read-back |
-| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | no zero row (AD1CHOP = 10 in the DC rows); calibrated offset subtracted, plus a stored zero on range 0 of each current mode | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | unknown | 12-bit MCU DAC loaded from a calibration word on every V / A range change, DC and AC (offset trim, *inferred*; image defaults 0); calibrated offset subtracted in software; OP1 and AD1 chopping in the rows |
-| speed / OSR | R22 0x15 (8192) while the reading moves, 0x17 (32768) when steady (DC V 0x206 codes, DC mV 3618 / 1218, DC A 0x168); ohm 0x13 on overload, 0x17 in range; continuity 0x14 / 0x17 | R22 only from the rows; no other R22 write. Software moving average instead: N 2..20 readings, restarted when a reading leaves a ±W window (DC V 2 / 2, DC mV 10 / 5, AC 10 / 20, Ω 5..20 / 10..100) | fixed R22 0x17 (OSR 32768) | unknown | speed key: R22 OSR {4096, 2048, 2048} by a single R22 write | a flag sets R22 = 0x11 (OSR 512) and changes LPFBW | R22 only from the rows (AD1 period 100 ms; 200 ms in mode 10); no other R22 write. Running mean of up to 16 readings, restarted when a reading moves ≥ 20 counts (V r0: 90) or ≥ P % (V 1, A 8..20) |
-| autorange first conversion | settle deadlines after each range write (ohm 150 ms, DC V 250 ms, AC V 450 ms, …) | autorange held for N readings after a change (DC V 2 = 0.8 s, AC V 3 = 0.3 s, AC mV 4 = 1.6 s, DC mV 1, Ω 1..2, cap 1, Low-Z DC 5 = 2.0 s, 1 ms peak 5, else 3; a reading averages 16 AD1 results, Ω 8); up > 110 % of full scale, down < 10 %; Ω down-range blocked for 1.0 s after an up-range; capacitance steps up after 1.5..3.0 s without a counter result | — | unknown | after a range change OSR 1024 (Ω, DC A) / LPFBW 5 (AC A) for the first conversion | unknown | up on OL (≥ 100 % of full scale), down < 9 %; V never ranges down into 100 mV; 2 readings discarded after each range change (200 ms); AUTO PEAK ranges up only |
-| AC trim (ACC) | none, R30 = 0x80 | table values only: 0, except 25 / 48 in the 1 ms peak 5 V / 50 V rows; frequency response corrected in software (per-range tables × two calibrated coefficients) | 127 fixed | table values | per-unit calibration byte into R30 on 5 V / 50 V | calibrated value on mode 1 range 0 | 16-bit calibration word per range: ACC (R30), P0..P2 (the power-bus switches of PA0..PA2) and three MCU GPIOs; 0 in V DC |
-| AC+DC | alternates the AC and DC rows of the same quantity (~3 readings each) | 5 readings on the AC V row, 3 on the DC V row of the same range, row and calibration reloaded at each switch; √(AC² + DC²) | — (no such mode) | unknown | — (no such mode in the captures) | unknown | one reading: coupling 2 sends the AC rows, switches the input to DC coupling and keeps the external converter, with its own calibration set; no software combination |
-| capacitance | counter restart per reading (R20 0x50, CTA 0xFC0000, R20 0x52); r5..r7: discharge row until \|V\| < 30 mV, then the ramp row; R21 rewritten to 0xDC / 0xCC / 0xBB by slope class; comparator state (R14 bit 6) splits batches | all ranges from the counter: C ∝ CTC / CTB, gate 427 ms (CTA 0xE00000) plus the oscillator cycle in progress; no reading before a timeout → 1 µF or 10 mF range; second table for boards with PF8 low | — | counter preset CTA by frequency class; R33 0xA0 / 0xA8 switches SFT1 100 k / 0 for counting | counter restart R20 0x70 / CTA 0xBF0000 / R20 0x72; 5 / 50 mF: open R2A / R2C, read AD1, alternate two bulk rows (phases A / B) | — | ioctl 2 restarts the counter: ENCTR off, R1C..R1D = 00 F1, INTF read, ENCTR on |
-| temperature | R33 0xAF → 0xAE → 0xAC: die sensor 11, 10, then the thermocouple; 700 / 800 / 700 ms | DC mV 50 mV row, K type table in flash; cold junction from a 10 kΩ NTC on MCU ADC channel 4, table in 5 °C steps, averaged over 10 reads 200 ms apart; 20 MΩ pull-up on the input in this mode | — | rows with SAD1I 3 / 2 | die sensor at boot (R33 0xAA, 0xAB, ~2 s each) | unknown | Pt100 / Pt1000 on Ω r0 / r1, J / K on V DC r0 with relays; die sensor unused; cold junction from a digital sensor (`/dev/TempE`) every 100 readings |
-| other | diode beeper by R20 0xB4 / 0xB0 (ENPCMPO); frequency source alternates ENCMP (0xF0) / CNT (0x08) | AC value from an external AD8436 on PB7; HY3131 RMS result unused; 1 ms peak: R29 ENPKH pulsed after every RMS interrupt; CTA preset swapped 0x8000 / 0xE000 after 1.01 s without a counter result in AC (row re-sent); 5 / 50 MΩ corrections and the 50 MΩ PA0 switch depend on an EEPROM marker set by the 50 MΩ calibration step; a boot-time strap on PF8 selects alternative capacitance and VA tables | — | — | ENCTR set in most rows; Phoenix clears it and manages the counter itself, hard-codes ACC E9 / FF, and has a 50 Ω range and its own 500 µF..10 mF rows | idle set: R26 0x19, R33 0x0C (*inferred*) | AD2 / RMS unused; AC value from an external converter on PB1 (*inferred*); Modbus 0xE016 / 0xE017 select and read / write any register R00..R37; calibration records at 0xF000..0xF20C, defaults in the image |
+| | DM40 stock V2.6 | 121GW | Digilent | Temco | OWON XDM2041 | OWON XDM1041 | Keysight | Metrix MTX3293 |
+|---|---|---|---|---|---|---|---|---|
+| mode change | R26, R34, R36 = 0; relays; R20..R35 (22 bytes); INTE = 0; poll INTF | 20 bytes R20..R33 from the row table; R1E..R1F = 00, INTE (AD1IE; + CTIE in AC; RMSIE + CTIE in 1 ms peak; CTIE in cap / Hz); counter restart (ENCTR off, R1B..R1D = 00 + CTA preset, read back, ENCTR on); calibration; then the AC-path muxes and relays (GPIO); no read-back | R37 = 0x60 (reset) every scale change, then INTE + R20..R36 (24 bytes), read back and compared with a mask | 20 bytes from R20, then INTF = 0x02 and INTE (ESP32 driver) | R20 ENCMP off at once, then all 56 bytes R00..R37 in one burst; 74HC595 relay byte before every reading | as XDM2041; then two relay pins PA8 / PA13 (no 74HC595) | buffer of 20 bytes from the table, per-range overlays, 22 bytes sent (R20..R34; R34 unset) | relays, then one 25-byte burst R1E..R36 (INTF = 0, INTE from the row); R37 = 0x60 only when the driver opens; no read-back |
+| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | no zero row (AD1CHOP = 10 in the DC rows); calibrated offset subtracted, plus a stored zero on range 0 of each current mode | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | as XDM2041 | unknown | 12-bit MCU DAC loaded from a calibration word on every V / A range change, DC and AC (offset trim, *inferred*; image defaults 0); calibrated offset subtracted in software; OP1 and AD1 chopping in the rows |
+| speed / OSR | R22 0x15 (8192) while the reading moves, 0x17 (32768) when steady (DC V 0x206 codes, DC mV 3618 / 1218, DC A 0x168); ohm 0x13 on overload, 0x17 in range; continuity 0x14 / 0x17 | R22 only from the rows; no other R22 write. Software moving average instead: N 2..20 readings, restarted when a reading leaves a ±W window (DC V 2 / 2, DC mV 10 / 5, AC 10 / 20, Ω 5..20 / 10..100) | fixed R22 0x17 (OSR 32768) | unknown | speed key: R22 OSR {4096, 2048, 2048} by a single R22 write | remote `RATE` S / M / F: OSR {16384, 4096, 256}; how a new rate reaches R22 is not traced | a flag sets R22 = 0x11 (OSR 512) and changes LPFBW | R22 only from the rows (AD1 period 100 ms; 200 ms in mode 10); no other R22 write. Running mean of up to 16 readings, restarted when a reading moves ≥ 20 counts (V r0: 90) or ≥ P % (V 1, A 8..20) |
+| autorange first conversion | settle deadlines after each range write (ohm 150 ms, DC V 250 ms, AC V 450 ms, …) | autorange held for N readings after a change (DC V 2 = 0.8 s, AC V 3 = 0.3 s, AC mV 4 = 1.6 s, DC mV 1, Ω 1..2, cap 1, Low-Z DC 5 = 2.0 s, 1 ms peak 5, else 3; a reading averages 16 AD1 results, Ω 8); up > 110 % of full scale, down < 10 %; Ω down-range blocked for 1.0 s after an up-range; capacitance steps up after 1.5..3.0 s without a counter result | — | unknown | after a range change OSR 1024 (Ω, DC A) / LPFBW 5 (AC A) for the first conversion | no faster first conversion after a range change | unknown | up on OL (≥ 100 % of full scale), down < 9 %; V never ranges down into 100 mV; 2 readings discarded after each range change (200 ms); AUTO PEAK ranges up only |
+| AC trim (ACC) | none, R30 = 0x80 | table values only: 0, except 25 / 48 in the 1 ms peak 5 V / 50 V rows; frequency response corrected in software (per-range tables × two calibrated coefficients) | 127 fixed | table values | per-unit calibration byte into R30 on 5 V / 50 V | as XDM2041 (calibration bytes +0x568 / +0x56A) | calibrated value on mode 1 range 0 | 16-bit calibration word per range: ACC (R30), P0..P2 (the power-bus switches of PA0..PA2) and three MCU GPIOs; 0 in V DC |
+| AC+DC | alternates the AC and DC rows of the same quantity (~3 readings each) | 5 readings on the AC V row, 3 on the DC V row of the same range, row and calibration reloaded at each switch; √(AC² + DC²) | — (no such mode) | unknown | — (no such mode in the captures) | unknown | unknown | one reading: coupling 2 sends the AC rows, switches the input to DC coupling and keeps the external converter, with its own calibration set; no software combination |
+| capacitance | counter restart per reading (R20 0x50, CTA 0xFC0000, R20 0x52); r5..r7: discharge row until \|V\| < 30 mV, then the ramp row; R21 rewritten to 0xDC / 0xCC / 0xBB by slope class; comparator state (R14 bit 6) splits batches | all ranges from the counter: C ∝ CTC / CTB, gate 427 ms (CTA 0xE00000) plus the oscillator cycle in progress; no reading before a timeout → 1 µF or 10 mF range; second table for boards with PF8 low | — | counter preset CTA by frequency class; R33 0xA0 / 0xA8 switches SFT1 100 k / 0 for counting | counter restart R20 0x70 / CTA 0xBF0000 / R20 0x72; 5 / 50 mF: open R2A / R2C, read AD1, alternate two bulk rows (phases A / B) | as XDM2041 (5 µF CTA 0xBF0000) | — | ioctl 2 restarts the counter: ENCTR off, R1C..R1D = 00 F1, INTF read, ENCTR on |
+| temperature | R33 0xAF → 0xAE → 0xAC: die sensor 11, 10, then the thermocouple; 700 / 800 / 700 ms | DC mV 50 mV row, K type table in flash; cold junction from a 10 kΩ NTC on MCU ADC channel 4, table in 5 °C steps, averaged over 10 reads 200 ms apart; 20 MΩ pull-up on the input in this mode | — | rows with SAD1I 3 / 2 | die sensor at boot (R33 0xAA, 0xAB, ~2 s each) | die sensor at boot (R33 0xA6, 0xA7) and in TEMP range 0 by a sub-reading flag | unknown | Pt100 / Pt1000 on Ω r0 / r1, J / K on V DC r0 with relays; die sensor unused; cold junction from a digital sensor (`/dev/TempE`) every 100 readings |
+| other | diode beeper by R20 0xB4 / 0xB0 (ENPCMPO); frequency source alternates ENCMP (0xF0) / CNT (0x08) | AC value from an external AD8436 on PB7; HY3131 RMS result unused; 1 ms peak: R29 ENPKH pulsed after every RMS interrupt; CTA preset swapped 0x8000 / 0xE000 after 1.01 s without a counter result in AC (row re-sent); 5 / 50 MΩ corrections and the 50 MΩ PA0 switch depend on an EEPROM marker set by the 50 MΩ calibration step; a boot-time strap on PF8 selects alternative capacitance and VA tables | — | — | ENCTR set in most rows; Phoenix clears it and manages the counter itself, hard-codes ACC E9 / FF, and has a 50 Ω range and its own 500 µF..10 mF rows | calibration (0x0803F800) and settings (0x0803F000) in internal flash; factory calibration drives an external calibrator over a UART (*inferred*) | idle set: R26 0x19, R33 0x0C (*inferred*) | AD2 / RMS unused; AC value from an external converter on PB1 (*inferred*); Modbus 0xE016 / 0xE017 select and read / write any register R00..R37; calibration records at 0xF000..0xF20C, defaults in the image |
 
 Sources: DM40 — stock V2.6 disassembly, mirrored in [`src/dmm.rs`](../src/dmm.rs);
 121GW — the v2.05 image and the circuit diagram
 ([notes](data/hy3131-comparison/eevblog-121gw.md));
 Digilent — `dmm.cpp` `DMM_SetScale`; Temco — `DMM_DCV.c`, `main/hy3131_sw.c`
 (not built in the STM32 project); OWON — captures and the stock image;
+XDM1041 — the stock image ([notes](data/hy3131-comparison/owon-xdm1041.md));
 Keysight — the decoded image; Metrix — the v1.02 image
 ([notes](data/hy3131-comparison/metrix-mtx3293.md)).
 
@@ -419,6 +442,7 @@ Keysight — the decoded image; Metrix — the v1.02 image
   [notes](data/hy3131-comparison/eevblog-121gw.md#board-wiring-circuit-diagram)).
 - Keysight: the mode-to-function mapping and R34..R36.
 - Temco: which rows a built firmware writes.
+- XDM1041: what PA8 / PA13 switch, the MCU part, and how a new rate reaches R22.
 - Metrix: the AC converter part, what the three trim GPIOs switch, what MCU
   ADC1 channel 16 measures on V r0, and the use of calibration records
   0x09..0x0D, 0x10, 0x17, 0x1C
@@ -430,7 +454,7 @@ Keysight — the decoded image; Metrix — the v1.02 image
 ## Appendix: raw rows
 
 Every row in hex from R20 upwards (22 bytes R20..R35 for the DM40, 20 bytes
-R20..R33 for the 121GW, Temco and Keysight, R20..R36 for Digilent and OWON,
+R20..R33 for the 121GW, Temco and Keysight, R20..R36 for Digilent and both OWONs,
 R1E..R36 for Metrix, as present in the file for the Hycon tool), with the mode key used above and the
 source location. 121GW rows are the v2.05 tables (flash address, and whether
 v1.02 has the same row); the two rows marked "modified at run time" are the

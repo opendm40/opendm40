@@ -9,9 +9,9 @@ for e in rows:
     e["r"] = {int(k, 16): v for k, v in e["regs"].items()}
     e["d"] = decode(e["r"])
 
-SRCS = ["hycon", "dm40", "121gw", "digilent", "temco", "owon", "keysight", "metrix"]
+SRCS = ["hycon", "dm40", "121gw", "digilent", "temco", "owon", "owon-xdm1041", "keysight", "metrix"]
 HEAD = {"hycon": "Hycon ENOB tool rows", "dm40": "DM40 stock", "121gw": "121GW",
-        "digilent": "Digilent", "temco": "Temco", "owon": "OWON XDM2041", "keysight": "Keysight U128xA (mode mapping inferred)",
+        "digilent": "Digilent", "temco": "Temco", "owon": "OWON XDM2041", "owon-xdm1041": "OWON XDM1041", "keysight": "Keysight U128xA (mode mapping inferred)",
         "metrix": "Metrix MTX3293"}
 APD = json.load(open(D + "/apd.json")) if os.path.exists(D + "/apd.json") else {}
 
@@ -32,6 +32,10 @@ def short(e):
             return {"OHMCV": "CV", "OHMCC": "CC", "CapCV": "CV", "CapCC": "CC"}[m.group(1)] + m.group(2)
         l = re.sub(r"^(DCVolt|ACVolt|DCmVolt|ACmVolt|DCmA|DCA|ACmA|ACA|OHM|Cap|Freq|Diode|Continuity|Temp) ", "", l)
         return l
+    if s == "owon-xdm1041":
+        if l.startswith("TEMP"):
+            return l.split(" (")[0].split(",")[0].replace("TEMP range ", "TEMP r")
+        return l.split(" [")[0].replace("CONF:", "").replace("VOLT:", "").replace("CURR:", "")
     if s == "owon":
         if "TEMP" in l:
             return "TC (TEMP:RTD KITS90 capture)"
@@ -61,7 +65,7 @@ def view(e):
     ad2 = d["ENAD2"] == "1"
     v = {}
     off1 = "AD1 off"
-    if "left from the previous mode" in e["label"]:
+    if "AD1 fields left from the previous mode" in e["label"]:
         ad1, off1 = False, "previous-mode leftover"
     v["AD1 input (+ / −)"] = d["AD1 in"] if ad1 else off1
     v["AD1 reference (+ / −)"] = d["AD1 ref"] if ad1 else off1
@@ -165,6 +169,8 @@ def excluded(e):
         return True
     if e["src"] == "dm40" and ("never selected" in e["label"] or e["label"].startswith("P8SET")):
         return True
+    if e["src"] == "owon-xdm1041" and ("phase B" in e["label"] or "state+0x448" in e["label"]):
+        return True
     if e["src"] == "metrix" and ("AC+DC" in e["label"] or e["label"].startswith("mode 9") or "all zero" in e["label"]):
         return True
     return False
@@ -181,6 +187,7 @@ def appendix():
              "dm40": "Alientek DM40 stock V2.6", "121gw": "EEVblog 121GW v2.05",
              "digilent": "Digilent DMM Shield (dmm.cpp)", "temco": "Temco T3 (HY3131_FunTable.h)",
              "owon": "OWON XDM2041 V1.7.2 (SPI capture, bulk writes)",
+             "owon-xdm1041": "OWON XDM1041 V2.1.2 (set_mode emulated from the stock image, bulk writes)",
              "keysight": "Keysight U1281A/U1282A v1.05 (decoded table 0x18EA and overlays)",
              "metrix": "Metrix MTX3293 / ASYC IV, image v1.02 (table at flash 0xB4C64, R1E..R36)"}
     for s in SRCS:
