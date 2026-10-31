@@ -1020,7 +1020,7 @@ Pairs checked and not overlaid (each can be live with the other):
 
 | pair | why both can be live |
 |---|---|
-| `vdisk::TAB` / `CSV_CUR` / `CSV_CUR2` with any scope buffer | the host reads the USB volume at any time, also while the scope page draws |
+| `vdisk::TAB` / `dlog::CSV` with any scope buffer | the host reads the USB volume at any time, also while the scope page draws |
 | `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
 | `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
 | `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
@@ -1169,7 +1169,7 @@ Checked and left where they are:
 | buffer | why not |
 |---|---|
 | `lcd::DEFER` | read by every `fill_rect` / `set_window_cmd` (the drawing hot path, also while the scope streams) |
-| `vdisk::CSV_CUR` / `CSV_CUR2`, `dlog::SCPI_GEN` | CSV / MMEM:DATA? generators that run in place, per byte of a host read |
+| `dlog::CSV` | the CSV generators of the USB volume and MMEM:DATA? that run in place, per byte of a host read |
 | `fastlog::JOB`, `csvlog::JOB`, `scope_wav::SCREEN` | per sample / row / frame while a stream or a recording runs |
 | `vwrite::W0` (1 376) | read on every pass and every USB sector read by many region B functions; the next candidate if SRAM gets short |
 | `ui::GEN_SP`, `dmm::REC_COPY`, `gallery::G`, `scope_csv::SNAP` | fit and are cold, but they are in TCM on the scope chain, where SRAM is short; room kept for `prof::P` |
@@ -1810,10 +1810,10 @@ first cluster: allocation is append-only, a compaction keeps the order); a
 subdirectory sector = `.` / `..` + the files of that directory by slot; data
 → the owning file (MCU regions by byte loads, `BACKUP.TXT` / `README.TXT`
 through a windowed text writer, `FIRMWARE.BIN` encoded per 128-byte block,
-SPIFLASH by raw SPI reads, a CSV through the cached `dlog::Gen`, a BMP
+SPIFLASH by raw SPI reads, a CSV through a cached `dlog::Gen` (`dlog::CSV`: two, shared with MMEM:DATA?), a BMP
 through a cached FAT chain cursor). `DBG:VDISK:STAT?` → `<files>,<next free
 cluster>,<files left out>`; `DBG:VDISK:RD?` → `<read_block calls>,<their
-total ms>,<max us>,<CSV generator opens>,<SPI flash reads>,<their bytes>,<kind-3
+total ms>,<max us>,<CSV generator opens (USB and MMEM:DATA?)>,<SPI flash reads>,<their bytes>,<kind-3
 seeks not from the cursor>,<chunk headers read>,<rows decoded>`
 (cumulative since boot; diff two readings around a copy); `DBG:VDISK:EJECT n` = "no medium" for n commands,
 then a UNIT ATTENTION (the earlier ADD / FORCE experiment hooks are gone).
