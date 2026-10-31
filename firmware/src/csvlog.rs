@@ -1594,6 +1594,7 @@ fn delete_in(disk: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8
         }
     }
     crate::screenshot::MEDIUM_CHANGED.store(true, Ordering::Relaxed);
+    dlog::csv_forget();
     #[cfg(feature = "vdisk")]
     {
         dlog::set_stale();
