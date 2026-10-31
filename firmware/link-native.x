@@ -52,6 +52,13 @@
  *   TCM     0x10000000  64 KiB  .data, .bss, stack (top 0x10010000)
  *   SRAM    0x20000000 192 KiB  .dmabuf (DMA buffers, scope record),
  *                               .sram_bss
+ *   BKPSRAM 0x40024000          backup SRAM after the settings record
+ *                               (.bkp_record, persist.rs) up to its
+ *                               sequence words at 0x40024FE8: .bkp_bss
+ *   USBHSRAM 0x40060000  4 KiB  the unused USBHS core's FIFO RAM: .usbhs_bss
+ *   Both: CPU only (no DMA), ~5 cycles a load, never touched by the AD2
+ *   stream ISR, zeroed at reset by native.rs extra_ram_init (docs/
+ *   native-boot.md "Extra RAM areas").
  */
 MEMORY
 {
@@ -60,6 +67,9 @@ MEMORY
     FLASH_C (rx) : ORIGIN = 0x08080000, LENGTH = 0x080A0000 - 0x08080000
     TCM (rw)     : ORIGIN = 0x10000000, LENGTH = 64K
     SRAM (rw)    : ORIGIN = 0x20000000, LENGTH = 192K
+    /* Ends at persist.rs BKP_SEQ (the sequence + boot words above). */
+    BKPSRAM (rw) : ORIGIN = 0x40024000, LENGTH = 0x40024FE8 - 0x40024000
+    USBHSRAM (rw) : ORIGIN = 0x40060000, LENGTH = 4K
 }
 
 ENTRY(reset);
@@ -466,6 +476,33 @@ SECTIONS
         __sram_bss_end = .;
     } > SRAM
 
+    /* The settings record's place (persist.rs RECORD_SPACE), then the
+     * CPU-only buffers (`#[link_section = ".bkp_bss"]`). */
+    .bkp_record (NOLOAD) :
+    {
+        __bkp_record_start = .;
+        KEEP(*(.bkp_record));
+        __bkp_record_end = .;
+    } > BKPSRAM
+
+    .bkp_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __bkp_bss_start = .;
+        *(.bkp_bss .bkp_bss.*);
+        . = ALIGN(4);
+        __bkp_bss_end = .;
+    } > BKPSRAM
+
+    .usbhs_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __usbhs_bss_start = .;
+        *(.usbhs_bss .usbhs_bss.*);
+        . = ALIGN(4);
+        __usbhs_bss_end = .;
+    } > USBHSRAM
+
     __image_end = __cold_end;
 
     /DISCARD/ :
@@ -513,6 +550,12 @@ ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free
  *   the marker, build.sh warns below 2 KiB), App::tap / key / show and
  *   vdisk::describe back in B: B 30 572 / 37 836, C 17 840 / 19 880 B
  *   (docs/native-boot.md "Region A2"). */
+/* Extra RAM areas: never over the settings record or its sequence words. */
+ASSERT(__bkp_record_start == 0x40024000, "persist.rs RECORD_SPACE is not at the start of the backup SRAM");
+ASSERT(__bkp_record_end > __bkp_record_start, "persist.rs RECORD_SPACE missing: .bkp_bss would overlay the settings record");
+ASSERT(__bkp_bss_start >= __bkp_record_end, ".bkp_bss starts inside the settings record");
+ASSERT(__bkp_bss_end <= 0x40024FE8, ".bkp_bss reaches the settings sequence words at 0x40024FE8: move a buffer out");
+ASSERT(__usbhs_bss_start >= 0x40060000 && __usbhs_bss_end <= 0x40061000, ".usbhs_bss outside the 4 KiB USBHS FIFO RAM");
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
 ASSERT(0x08080000 - __b_end >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

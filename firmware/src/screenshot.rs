@@ -267,11 +267,12 @@ const JOB0: Job = Job {
     retried: false,
 };
 
-/// In .dmabuf, not TCM .bss (review 60605d2 B1: 1.7 KB of stack margin, and
-/// the target LBAs / cluster list out of the stack-overflow path). .dmabuf is
-/// NOLOAD (not zeroed at reset): `init` must run before anything reads it
-/// (`busy`, `frozen`, `poll`, msc.rs).
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+/// Not TCM .bss (review 60605d2 B1: 1.7 KB of stack margin, and the target
+/// LBAs / cluster list out of the stack-overflow path). In the backup SRAM
+/// (.bkp_bss, link-native.x; CPU only, docs/native-boot.md "Extra RAM
+/// areas"; zeroed at reset, not JOB0): `init` must run before anything reads
+/// it (`busy`, `frozen`, `poll`, msc.rs).
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut JOB: Job = JOB0;
 /// The last finished shot, not yet shown (`take_result`); the last scope
 /// CSV (`take_csv_result`).
@@ -716,7 +717,7 @@ impl Job {
             }
         }
         let buf = &calbackup::scratch()[0];
-        match disk.write_step(self.lba, &buf[..], &mut self.st)? {
+        match disk.write_step(self.lba, buf, &mut self.st)? {
             // A block that read blank but did not take the program (a
             // sector whose erase a power cut interrupted, `prep_step`):
             // once more, erased first. scratch[0] still holds the block.

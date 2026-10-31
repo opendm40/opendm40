@@ -148,8 +148,13 @@ const MAXNEW: usize = FIFO / BLK + 2;
 
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut FIFO_BUF: [u8; FIFO] = [0; FIFO];
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut TAIL: [u8; BLK] = [0; BLK];
+crate::wordram::usbhs_static! {
+    /// The block being filled. In the USBHS FIFO RAM, which takes whole
+    /// words only (wordram.rs; CPU only: the SPI flash takes it by CPU
+    /// writes; docs/native-boot.md "Extra RAM areas"); `start` fills it with
+    /// 0xFF.
+    static TAIL: WordRam<{ BLK / 4 }>;
+}
 
 /// The row FIFO of a recording. Its third tenant, the MMEM:CAT? cache
 /// (`Cat`), is dropped here: a recording's bytes overwrite it.
@@ -172,9 +177,6 @@ pub(crate) fn lend_fifo() -> &'static mut [u8; FIFO] {
 /// MMEM:CAT? cache may be written into it (`Cat`).
 fn fifo_idle() -> bool {
     !active() && !crate::fastlog::active()
-}
-fn tail() -> &'static mut [u8; BLK] {
-    unsafe { &mut *core::ptr::addr_of_mut!(TAIL) }
 }
 
 /// `push` flags.
@@ -415,7 +417,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     j.t0_ms = now_ms;
     j.last_commit = now_ms;
     j.now = now_ms;
-    tail().fill(0xFF);
+    TAIL.fill_words(0xFFFF_FFFF);
     j.ulen = ascii(unit, &mut j.unit);
     let mut h = [0u8; 384];
     let mut w = W { b: &mut h, n: 0 };
@@ -879,15 +881,17 @@ impl Job {
             if self.tfill == BLK as u32 {
                 self.tb += 1;
                 self.tfill = 0;
-                tail().fill(0xFF);
+                TAIL.fill_words(0xFFFF_FFFF);
             }
             let k = (BLK as u32 - self.tfill).min(self.tx_left);
-            let t = tail();
             let f = fifo();
-            for b in &mut t[self.tfill as usize..(self.tfill + k) as usize] {
-                *b = f[self.ft as usize % FIFO];
-                self.ft = self.ft.wrapping_add(1);
-            }
+            let mut ft = self.ft;
+            TAIL.put_bytes(self.tfill as usize, k as usize, || {
+                let b = f[ft as usize % FIFO];
+                ft = ft.wrapping_add(1);
+                b
+            });
+            self.ft = ft;
             self.tfill += k;
             self.size += k;
             self.tx_left -= k;
@@ -896,7 +900,7 @@ impl Job {
             self.wrote = true;
             self.st = STEP0;
         }
-        match disk.write_step(self.lba, &tail()[..], &mut self.st)? {
+        match disk.write_step(self.lba, &TAIL, &mut self.st)? {
             false => Some(State::Error),
             true => {
                 self.filled = false;

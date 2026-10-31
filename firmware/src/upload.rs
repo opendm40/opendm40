@@ -77,7 +77,9 @@ struct Up {
     err: Option<&'static str>,
 }
 
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+// Backup SRAM (.bkp_bss, link-native.x; CPU only, zeroed at reset;
+// docs/native-boot.md "Extra RAM areas").
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut UP: Up = Up { active: false, size: 0, crc: 0, got: 0, run: 0, cl: [0; MAXCL], ncl: 0, hint: 0, blocks: 0, fill: 0, t_last: 0, err: None };
 /// The device's own SpiFlash handle (as screenshot.rs).
 #[cfg(target_os = "none")]
