@@ -90,8 +90,7 @@ to recreate it.
 | `APP` | 7 056 | main.rs | M | always (below) | yes |
 | `scope_page::FFT` | 4 128 | scope_page.rs | M | the last spectrum (`db` 4 100 B) and the job in flight; scope page FFT view | yes: kept when a job is dropped ([ram-budget.md](ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)) |
 | `dmm::REC_COPY` | 1 024 | dmm.rs | M | always (settings / calibration record copy) | yes |
-| `dlog::SCPI_GEN` | 960 | dlog.rs | M | MMEM:DATA? of a CSV generated from a DLG | per transfer |
-| `vdisk::CSV_CUR`, `CSV_CUR2` | 952 each | vdisk.rs | M (per host byte) | host reads of the generated CSV files | per file read; restartable |
+| `dlog::CSV` | 2 x 952 | dlog.rs | M (per host byte) | host reads of the generated CSV files and MMEM:DATA? of them (one pool, #197) | per file read; restartable |
 | `lcd::DEFER` | 712 | lcd.rs | M | always (draw path) | no |
 | `gallery::G` | 672 | gallery.rs | M | page Gallery (`poll` only there; `open` resets the list) | no: `open` rebuilds (*inferred*) |
 | `scope_csv::SNAP` | 548 | scope_csv.rs | M | one scope CSV save (one-shot, then released by `sp_csv_poll`, any view) | no |
@@ -164,7 +163,7 @@ Buffers per activity (SRAM, B):
 | fast log | RING, FIFO_BUF, ARENA, fastlog JOB 1 864 |
 | LOG:STAT ON | RING |
 | BT | RX 1 024, TX 6 656 |
-| USB volume | TAB 6 420, MSC_IO / MSC_BLK, CSV_CUR / CSV_CUR2 / SCPI_GEN on CSV reads, W0 1 376 in writable sessions |
+| USB volume | TAB 6 420, MSC_IO / MSC_BLK, `dlog::CSV` on CSV reads, W0 1 376 in writable sessions |
 | disk job / FFT / strip repaint | ARENA 12 288 (shared today) |
 | gen output | WAVE 4 000 |
 
@@ -320,7 +319,7 @@ One const table per pool: the specs (offset, length, rule) and
 |---|---|
 | the disk arena moved into its own module (`diskbuf::ARENA`, #198) | the disk pool above is that module's tenants |
 | `src/acdcm.rs` behind the feature `acdc-meth` | `acdcm::AM` (480 B SRAM) leaves the default build: +240 samples for A |
-| `dlog::SCPI_GEN` + `vdisk::CSV_CUR` / `CSV_CUR2` as one 2-cursor pool | ~950 B TCM (stack headroom), not SRAM |
+| `dlog::SCPI_GEN` + `vdisk::CSV_CUR` / `CSV_CUR2` as one 2-cursor pool `dlog::CSV` (#197) | ~950 B TCM (stack headroom), not SRAM |
 | slow USB with scope CH2 | none on the layout; B's `Ch2Store` eviction must not add work on the CH2 path |
 
 ## 6. Open questions
