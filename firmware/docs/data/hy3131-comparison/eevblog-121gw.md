@@ -84,9 +84,12 @@ duty, 9 Ω, 10 continuity, 11 diode, 12 capacitance, 13..15 AC VA, 16..21 AC / D
 
 **PF8 strap.** At boot (0x0800C28C) PF8 is made an input with the internal pull-up and sampled 20 times; fewer
 than 10 high samples set a board-variant flag, then PF8 goes back to analog. In the circuit diagram PF8 (pin 20)
-is the net BURDEN_VOLT, which reaches rotary switch T1 pin 35 only through R92, marked "x" (not fitted); the
-mating contact T1 pin 34 is the junction of R33 100 Ω and R43 1 Ω (the µA / mA shunt chain). With R92 absent
-PF8 reads high and the firmware uses the default tables. The PF8-low variant changes:
+is the net BURDEN_VOLT, which reaches rotary switch T1 pin 35 only through R92, marked "x" (not fitted). T1
+connects pin 35 to A_OUT in the µA position and to the R33 / R43 junction in the mA / A position (both tied to
+AGND through the shunts), and to nothing in the others. With R92 absent PF8 floats, reads high through the
+pull-up, and the firmware uses the default tables; with R92 fitted, PF8 would see the shunt node only when the
+meter is switched on in µA or mA / A. No code reads PF8 after boot, so the net never measures a burden voltage (that
+feature uses the V input, below). The PF8-low variant changes:
 
 - capacitance: the second row table (100 nF and 100 µF comparator thresholds), a gain divisor of 10⁴ instead
   of 10⁵ on 100 µF, and a 1.5 s instead of 2.0 s counter timeout on 100 nF;
@@ -96,10 +99,10 @@ PF8 reads high and the firmware uses the default tables. The PF8-low variant cha
 - DC VA: no fixed sign-dependent offsets (below, EEPROM byte 0x26);
 - high-voltage diode: +500 counts above 14000 counts.
 
-v2.04 has the same PF8 test, read by the same seven functions; v1.02 has none. Which units read PF8 low, and
-what differs on their boards, is unknown: the published diagram has no fitted strap, and the manual's firmware
-table and the EEVblog forum threads found mention no board revision other than the range-switch shim and
-indent ring.
+v2.04 has the same PF8 test, read by the same seven functions; v1.02 has none. Which production boards pull
+PF8 low is a hardware question the image cannot answer: the published diagram has R92 not fitted, and neither
+the manual's firmware table, the EEVblog forum threads, nor tpwrules' repositories (121gw-88mph does not use
+PF8) name a board revision other than the range-switch shim and indent ring and the PCB thickness change.
 
 ### v1.02 → v2.05 row changes
 
@@ -164,8 +167,15 @@ The other 32 table rows are byte-identical. Decoded with the [comparison](../../
   subtracted too.
 - **AC**: the normal AC rows read the external AD8436 true-RMS converter on PB7 with AD1 (see Board wiring).
   The HY3131 RMS block runs only in the 1 ms peak rows, and its result is not used: the RMS interrupt
-  handlers are empty. 1 ms peak: on each RMS interrupt the firmware reads PKHMAX / PKHMIN (R11..R13 / R0E..R10),
-  pulses ENPKH and keeps the software maximum. The LPF key switches the analog path, not a row.
+  handlers are empty. The LPF key switches the analog path, not a row.
+- **1 ms peak** (0x0800A7FC): the peak-hold block follows AD2 (PKHSEL 00), OSR2 1024 at SYSCLK / 2 =
+  2400 samples/s (0.417 ms per sample) on the V rows, OSR2 64 = 38400 samples/s (26 µs) on the mV rows.
+  INTE 0x11 enables the RMS and counter interrupts; the RMS interrupt comes every OSR4 AD2 samples (datasheet:
+  LPF rate = AD2 rate / OSR4): 5 V (OSR4 128) 53.3 ms, 50..600 V (4096) 1.707 s, mV (4096) 106.7 ms; on the DM40
+  the LPF period measured half the formula ([scope feasibility](../../dmm-input-scope-feasibility.md)). The
+  counter interrupt (gate 0.427 s, below) also arrives. On every HY3131 interrupt the firmware reads PKHMAX
+  (R11..R13), clears ENPKH, waits, sets it again (re-arm), calibrates the value and shows the largest since the
+  mode was entered; one interrupt counts as one reading (settle: 5).
 - **AC frequency-response correction** (0x080124F4, below): applied to AC V, AC mV and AC A (µA, mA) for input
   ≥ 51 Hz and < 55000 counts, from the measured frequency and four per-range calibration coefficients.
 - **Counter gate** (0x0800ED64, every tick): in AC V / mV / A, when no counter interrupt arrives for 101 ticks
@@ -178,16 +188,34 @@ The other 32 table rows are byte-identical. Decoded with the [comparison](../../
 - **AC+DC** (ACV with the AC+DC flag): 5 readings on the ACV row, then 3 on the DCV row of the same range
   (row and calibration reloaded at every switch); displayed value √(AC² + DC²) of the last reading of each,
   overload when either exceeds 60000 counts.
-- **Burden voltage / VA**: the firmware alternates the A rows with the DCV / ACV rows (4 readings per phase on
-  DC A with burden), reloading row and calibration at each switch.
-- **Capacitance**: every range is counter-based: C ∝ CTC (comparator high time) / CTB (cycles), ×100 on
-  1..100 µF; AD1 is configured in the 10 / 100 µF rows but the value comes from the counter (v1.02
-  `meas_process_cap`, same structure in v2.05). Offset subtracted on 10 / 100 nF; gain divisor 10⁵ (10⁴ on
-  100 µF with the PF8 variant).
+- **Burden voltage / VA**: burden voltage is a sub-display of the current ranges (string "Burden" in the
+  image). The firmware alternates the A rows with the DCV / ACV 5 V rows (4 readings per phase on DC A with
+  burden), reloading row and calibration at each switch; the V reading comes through the normal V divider,
+  which is why the [manual](https://www.eevblog.com/files/EEVblog-121GW-Manual.pdf) (pp. 42–43) asks for an
+  extra lead from the active current terminal to the V input.
+  No code reads PF8 (net BURDEN_VOLT) after boot: it is analog afterwards, and the ADC converts only
+  channels 4 and 5.
+- **Capacitance** (0x0800B33C): every range is counter-based. The rows make a relaxation oscillator: OP3
+  drives the power bus to VDS15 (32/36 VDDA) or VDS3 (4/36) by the comparator state, through PA7 + PA2
+  (R13 1.11 MΩ ∥ R29 10 MΩ) on 10 / 100 nF, PA5 + PA2 (R21 10 kΩ ∥ R29) on 1 µF, PA4 + PA2 (R26 1 kΩ ∥ R29) on
+  10 / 100 µF; the comparator watches PB0 against VDSC11 / VDSC5 (22/36 and 10/36 VDDA; PF8-low rows: 100 nF
+  VDSC9 / VDSC8, 100 µF VDSC10 / VDSC8). The 10 mF row drives the bus directly (SMODE 0x1A, PA4 only) and
+  compares OP1O. The counter input is the comparator; CTC counts SYSCLK while it is high, CTB counts cycles.
+  Reading D (counts) = (CTC / CTB · m − offset) / g, with m = 100 on 1..100 µF, else 1; offset (10 / 100 nF
+  only) and g (stored / 10⁵; 100 µF on PF8-low boards / 10⁴) are per-unit calibration. AD1 is configured in the
+  10 / 100 µF rows, but the value comes only from the counter. Timing: after each result the counter restarts
+  (R20 ENCTR off, a busy-wait of 10000 loop passes, 14..19 ms at 4.19 MHz, CTA = 0xE00000, ENCTR on); the gate
+  is (2²⁴ − 0xE00000) / 4.9152 MHz = **427 ms**, and the counter then runs to the end of the current
+  oscillator cycle. So one reading takes 0.44 s plus up to one oscillator period, and at least one period
+  when that is longer. The high time per cycle is t_high = (g · D / m + offset) / 4.9152 MHz; with the one
+  published calibration (121gw-re `binaries/CAL - Iagash.BIN`) that is 3.0 ms per nF on 10 / 100 nF (31.6 ms
+  at 10 nF, 303 ms at 100 nF), 30 ms at 1 µF, 35 ms at 10 µF, 349 ms at 100 µF and 2.66 s at 10 mF.
 - **Temperature**: K thermocouple on the DCmV 50 mV row; flash table 0x08025CF8 (µV every 10 °C from
   −210 °C, 0 µV at index 21); valid −5891..54139 µV (−200..1350 °C), outside it the open / over flag. In
-  temperature mode TEMP_CTL feeds the V input from VDD through 20 MΩ (U16 switch Z; open-lead detection,
-  *inferred* in 121gw-re).
+  temperature mode PH2 (TEMP_CTL) is high (0x0800FDB0) and feeds the V input from VDD through 20 MΩ (U16
+  switch Z). There is no separate open-lead code: an open input is pulled far above 54139 µV and takes the
+  over-range branch of the µV→°C conversion (0x08013C40), so it shows the same overload as > 1350 °C; below
+  −5891 µV the negative overload.
 - **Cold junction** (0x0801381E, every 200 ms): NTC1 10 kΩ to VSS with R38 10 kΩ to VDD, net THERMISTOR on
   PA4 = ADC1 channel 4 (12 bit, 384-cycle sample; PA5 / channel 5 is LOW_BAT, read on the other 100 ms
   slot). Raw values below 51 are ignored; a moving average of the last 10 is looked up in the table at
@@ -274,21 +302,89 @@ writes them; v2.04 has the same code, v1.02 neither marker. What they gate:
 | 0x26 | 50 MΩ row with PA0 P closed; 5 MΩ / 50 MΩ non-linearity corrections | 50 MΩ row with PA0 P open (R2A bit 3 cleared); no Ω correction; on PF8-high boards, fixed DC VA offsets by range and by the signs of the two readings (e.g. DC µVA range 0: ±200 counts) when the reading is outside ±2500 counts (0x080087F8) |
 
 After the 50 MΩ step the RAM flag is forced to "≠ 0xA5" until the next power-up, so the rest of that
-calibration session runs with PA0 P open and without corrections. So each marker tells whether the unit's
-stored ACV 5 V / 50 MΩ calibration was made by a firmware that has these steps, and the firmware keeps the older
-fixed corrections for units whose calibration predates them (*inferred*). The firmware table in the
-[manual](https://www.eevblog.com/files/EEVblog-121GW-Manual.pdf) mentions neither; its nearest entry is 2.01
-"Resolved calibration glitch with V2.00 firmware". The code never derives either marker from a GPIO.
+calibration session runs with PA0 P open and without corrections. So a marker is 0xA5 exactly when the unit's
+ACV 5 V / 50 MΩ calibration step was run by a firmware that writes it (v2.04 and v2.05 do, v1.02 does not; other
+versions not examined); otherwise the firmware falls back to the fixed corrections
+and the PA0-open row. The firmware table in the
+[manual](https://www.eevblog.com/files/EEVblog-121GW-Manual.pdf) mentions neither marker. The code never
+derives either marker from a GPIO.
 
 ## Board wiring (circuit diagram)
 
-- **PB7**: output of U17 **AD8436** (true RMS-to-DC, C_AVG 10 µF) via EXT_AC_OUT and R44 0 Ω (U16 HEF4053
-  switch X in parallel). Its input RMS_IN comes through 1 µF from U15 (HEF4052) switch X: X1 = net AC (HY3131
-  OP1O), X2 = net 1kHz, X0 = TP7. U15 switch Y sends AC to net LPF; LPF → R28 → the OP2O pin → C38, R22, R23, C25
-  → 1kHz, a passive RC network (OP2 is off in every row; the 1 kHz corner is *inferred* from the net name). MCU: CTL_D = PF4, CTL_E = PF5 (AC: X1, LPF: X2, other modes: X3 open), CTL_A = PD0 (low in AC).
-- OP1O → R24 90 k → OP1N → R25 10 k → AGND (the ×10 network); OP1O → C51 1 µF → PB4 with R78 1 M to AGND.
-- PB0: U16 switch Y adds C45 1.5 nF to AGND in Ω (CTL_B = PC11). PB6: ADR3412 1.2 V reference (ZD1). HY3131
-  clock 4.9152 MHz crystal (X1).
+Names: VIN = the V/Ω jack after PTC3 1.2 kΩ + R16 1 kΩ; RBUS = the node shared by the PA resistors and RLU,
+which reaches rotary switch T1 pins 14 / 16 through bead FB4; CBUS = the node of the compensation capacitors,
+joined to net COM (T1 pin 8) by R14 0 Ω. The COM jack is net GND = AGND. There are no relays: ranges are the
+HY3131 switches, T1 and the analog switches below.
+
+| HY3131 pin | connection |
+|---|---|
+| PA9 | R9 30 kΩ + C13 6 pF in series to VIN (AC compensation) |
+| PA8 | R11 10 MΩ to VIN (divider top) |
+| PA7 / PA6 / PA5 / PA4 | R13 1.11 MΩ / R15 101 kΩ / R21 10 kΩ / R26 1 kΩ to RBUS; to CBUS: C16, C17 (not fitted) / C19 36 pF + C20 560 pF / C22 750 pF + C23 5.6 nF / C24 10 nF + C26 56 nF |
+| PA3 | C27 100 nF to PB2 |
+| PA2 / PA1 / PA0 | R29 10 MΩ / R32 1 kΩ / C30 27 nF to RBUS |
+| RLU | RBUS |
+| RLD | R79 + R42 49.9 Ω each to net RLD; Q3 + Q5 (2SC3876 as diodes, anti-series) from RLD to AGND |
+| PB0 | R18 + R19 + R20 (3 × 300 kΩ) to the sense node P9; U16 Y adds C45 1.5 nF to AGND |
+| PB1 | A_IN (current amplifier output, below) through R30 0 Ω |
+| PB2 | C27 to PA3; R41 to AGND not fitted |
+| PB3 | R37 10 kΩ to AGND |
+| PB4 | C51 1 µF from OP1O, R78 1 MΩ to AGND (0.16 Hz high-pass) |
+| PB5 | not connected |
+| PB6 | ZD1 ADR3412 1.2 V reference, C61 100 nF |
+| PB7 | AD8436 output (EXT_AC_OUT) through R44 + R134 0 Ω |
+| PB8 | R27 47 kΩ to AGND |
+| OP1N / OP1O | R24 90 kΩ from OP1O, R25 10 kΩ to AGND (×10); OP1O = net AC |
+| OP2N / OP2O | tied together; OP2O drives C38 |
+| FTP / FTN | C21 27 nF |
+| CNT | C32 2.2 µF from RLD1 (U9 X1), R45 1 MΩ to AGND |
+| REFO / ACM | C33 100 nF to AGND / C28 100 nF to AVSS |
+| XIN / XOUT | X1 4.9152 MHz, C12 / C14 15 pF, R8 1 MΩ |
+| CS / CK / DI / DO | MCU PF1 / PF0 / PF2 / PF3 |
+
+**Rotary switch T1** (contact pairs per position; positions named by the mode line each one pulls low):
+
+| position | pairs |
+|---|---|
+| off | 19–23 (RESET to VSS) |
+| Low-Z | 1–7: PTC1 + PTC2 (2 × 1.5 kΩ) from the jack to AGND as the load; 11–14: RBUS to AGND; 17–18 (all positions on): battery |
+| V | 2–8: CBUS to AGND; 11–14: RBUS to AGND |
+| mV / temperature | 3–9: net R (jack via PTC4 1.2 kΩ + R17 1 kΩ) to P9; 12–15: RLD to VIN |
+| Hz / duty, Ω / continuity / diode / capacitance | 3–9; 36–37: VIN to R_RLD (→ R82 100 Ω → U9 Y → RLD) |
+| VA | 4–10: µA/mA jack (after F1) to junction J; 13–16: RBUS to AGND |
+| µA | 5–10: jack to A_OUT; 33–35: A_OUT to R92 (not fitted) |
+| mA / A | 6–10: jack to J; 34–35: J to R92 (not fitted) → BURDEN_VOLT (PF8) |
+| end | 22–32 (RESET to VSS) |
+
+**Current inputs.** µA/mA jack → F1 440 mA / 1000 V → T1 pin 10, clamped to AGND by BD1 (DF10S bridge with
+± shorted). Shunt chain A_OUT – R33 100 Ω – J – R43 1 Ω – SHUNT 0.01 Ω – AGND; 10 A jack → F2 10 A / 1000 V →
+SHUNT. Burden without fuse: µA 101.01 Ω, mA and VA 1.01 Ω, A 0.01 Ω. A_OUT → R126 100 Ω → U8 MAX4238 ×10
+(R106 90 kΩ / R46 10 kΩ; shutdown SHDN_A = PE12) → R104 100 Ω; U11 74HC4053 picks ×10 or direct onto A_IN
+(control A_CTL = PE5 through inverter Q16). Fuse check: U5 TLC272 compares each jack (before its fuse; R54 +
+R55 / R61 + R62 9.4 MΩ, 30 MΩ pull-up to VDD, 10 nF) with REFO (R59 100 kΩ) → FUSE_mA (PE10), FUSE_A (PE11).
+
+**Protection.** V/Ω jack: PTC3 + R16 to VIN, PTC4 + R17 to the sense net R, PTC1 + PTC2 to the Low-Z load;
+MOV1 VIN – X, MOV3 X – AGND, MOV2 X – R (S05K575 each); D13 SM6T22CA from P9 to AGND; P9 also has R35 1 MΩ to
+TEMP_OL. Diode test (U9 HEF4053, 15 V): RT9271 boost U10 (enable ENB = PF6) or VDD via D9 powers U9; D7 / D8
+1N4007 clamp U9's Y node; U9 selects RLD or RLD1 (→ C32 → CNT), and RLD or the boosted rail through R39
+1 kΩ (control FRE_CTL = PA12 and LED_CK = PE15 through inverters Q12 / Q11). U14 with Q14 / Q15 (DCmV_CTL
+PD7, VA_CTL PA11) is not fitted.
+
+**Analog switches.**
+- U15 HEF4052 (A = CTL_D PF4, B = CTL_E PF5): X → RMS_IN from X0 TP7, X1 AC, X2 1kHz (X3 open); Y → LPF from
+  Y2 AC. So AC: X1; LPF key: X2 with Y2.
+- U16 HEF4053 (A = CTL_A PD0, B = CTL_B PC11, C = TEMP_CTL PH2 through inverter Q13): X: PB7 via R105 (not
+  fitted); Y: C45 1.5 nF on PB0; Z: R113 + R114 (20 MΩ) from VDD to TEMP_OL.
+
+**AC path.** OP1O (net AC) → U15 → RMS_IN → C85 1 µF (R132 10 MΩ to IGND, 0.016 Hz) → U17 AD8436 (C_AVG C79
+10 µF ∥ C78 470 pF, CCF C80 100 nF, output C86 4.7 µF, output buffer as follower, VCC +4.0 V) → EXT_AC_OUT →
+PB7. LPF network (only with the LPF key): AC → R28 4.02 kΩ → N2 (C50 100 nF to AGND) → R23 1.21 kΩ → N1 (C38
+470 nF to OP2O) → R22 2.49 kΩ → net 1kHz (C25 100 nF to AGND) → RMS_IN. Single sections: 396, 280, 639 Hz.
+The whole ladder: −3 dB at 47.5 Hz (−31.8 dB at 1 kHz) if OP2O holds AGND, 152 Hz (−18.9 dB at 1 kHz) if
+OP2O is high-impedance. OP2 is off in every row, and the datasheet does not state a disabled OP2's output,
+so which of the two applies is unknown.
+
+**Other.** NTC1 / R38 on MCU PA4, LOW_BAT on PA5; PB6 reference ADR3412 from B+ (R94 0 Ω).
 
 ## Bluetooth
 
@@ -303,5 +399,7 @@ else is accepted: measurement settings change only through the emulated keys, an
 
 ## Not determined
 
-- Which boards read PF8 low, and what hardware differs on them (the published diagram has R92 not fitted).
-- The circuit behind the range relays and PA pins beyond the nets named above.
+- Hardware: which production boards pull PF8 low (the published diagram has R92 not fitted; no source names a
+  board revision).
+- Hardware: whether a disabled OP2 drives OP2O, which sets the LPF corner (47 or 152 Hz, above); the
+  datasheet does not say.
