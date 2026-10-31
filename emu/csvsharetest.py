@@ -179,7 +179,12 @@ def newest(l, pre):
 
 
 def record_csv(l):
-    l.w('LOG:CSV ON')
+    for _ in range(30):  # refused while the disk is busy after the boot
+        l.w('LOG:CSV ON')
+        time.sleep(2)
+        if l.q('LOG:CSV?').split(',')[0] == '1':
+            break
+        print('  LOG:CSV ON: %s, again' % l.q('SYST:ERR?'), flush=True)
     time.sleep(A.rec)
     l.w('LOG:CSV OFF')
     for _ in range(120):
