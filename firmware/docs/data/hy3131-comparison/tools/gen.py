@@ -12,7 +12,7 @@ for e in rows:
 SRCS = ["hycon", "dm40", "121gw", "digilent", "temco", "owon", "keysight", "metrix"]
 HEAD = {"hycon": "Hycon ENOB tool rows", "dm40": "DM40 stock", "121gw": "121GW",
         "digilent": "Digilent", "temco": "Temco", "owon": "OWON XDM2041", "keysight": "Keysight U128xA (mode mapping inferred)",
-        "metrix": "Metrix MTX3293 (mode mapping inferred)"}
+        "metrix": "Metrix MTX3293"}
 APD = json.load(open(D + "/apd.json")) if os.path.exists(D + "/apd.json") else {}
 
 

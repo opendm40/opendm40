@@ -9169,7 +9169,7 @@
 {
 "src": "metrix",
 "mode": "dcmv",
-"label": "V DC r0",
+"label": "V DC r0 100 mV",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9202,7 +9202,7 @@
 {
 "src": "metrix",
 "mode": "dcv",
-"label": "V DC r1",
+"label": "V DC r1 1 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9235,7 +9235,7 @@
 {
 "src": "metrix",
 "mode": "dcv",
-"label": "V DC r2",
+"label": "V DC r2 10 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9268,7 +9268,7 @@
 {
 "src": "metrix",
 "mode": "dcv",
-"label": "V DC r3",
+"label": "V DC r3 100 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9301,7 +9301,7 @@
 {
 "src": "metrix",
 "mode": "dcv",
-"label": "V DC r4",
+"label": "V DC r4 1000 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9334,7 +9334,7 @@
 {
 "src": "metrix",
 "mode": "dcmv",
-"label": "V DC r0 alt",
+"label": "V DC r0 100 mV (Impedance 1)",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9367,7 +9367,7 @@
 {
 "src": "metrix",
 "mode": "dcv",
-"label": "V DC r1 alt",
+"label": "V DC r1 1 V (Impedance 1)",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9400,7 +9400,7 @@
 {
 "src": "metrix",
 "mode": "acmv",
-"label": "V AC r0",
+"label": "V AC r0 100 mV",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9433,7 +9433,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC r1",
+"label": "V AC r1 1 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9466,7 +9466,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC r2",
+"label": "V AC r2 10 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9499,7 +9499,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC r3",
+"label": "V AC r3 100 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9532,7 +9532,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC r4",
+"label": "V AC r4 1000 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9565,7 +9565,7 @@
 {
 "src": "metrix",
 "mode": "acmv",
-"label": "V AC+DC r0",
+"label": "V AC+DC r0 100 mV",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9598,7 +9598,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC+DC r1",
+"label": "V AC+DC r1 1 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9631,7 +9631,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC+DC r2",
+"label": "V AC+DC r2 10 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9664,7 +9664,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC+DC r3",
+"label": "V AC+DC r3 100 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9697,7 +9697,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "V AC+DC r4",
+"label": "V AC+DC r4 1000 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9730,7 +9730,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "mode 9 r0",
+"label": "mode 9 low-Z r0 10 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9763,7 +9763,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "mode 9 r1",
+"label": "mode 9 low-Z r1 100 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9796,7 +9796,7 @@
 {
 "src": "metrix",
 "mode": "acv",
-"label": "mode 9 r2",
+"label": "mode 9 low-Z r2 1000 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9829,7 +9829,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r0",
+"label": "A DC r0 1000 µA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9862,7 +9862,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r1",
+"label": "A DC r1 10 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9895,7 +9895,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r2",
+"label": "A DC r2 100 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9928,7 +9928,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r3",
+"label": "A DC r3 1000 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9961,7 +9961,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r4",
+"label": "A DC r4 10 A",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -9994,7 +9994,7 @@
 {
 "src": "metrix",
 "mode": "dca",
-"label": "A DC r5",
+"label": "A DC r5 100 A",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10027,7 +10027,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r0",
+"label": "A AC r0 1000 µA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10060,7 +10060,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r1",
+"label": "A AC r1 10 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10093,7 +10093,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r2",
+"label": "A AC r2 100 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10126,7 +10126,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r3",
+"label": "A AC r3 1000 mA",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10159,7 +10159,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r4",
+"label": "A AC r4 10 A",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10192,7 +10192,7 @@
 {
 "src": "metrix",
 "mode": "aca",
-"label": "A AC r5",
+"label": "A AC r5 100 A",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10225,7 +10225,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r0",
+"label": "Ω r0 1 kΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10258,7 +10258,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r1",
+"label": "Ω r1 10 kΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10291,7 +10291,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r2",
+"label": "Ω r2 100 kΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10324,7 +10324,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r3",
+"label": "Ω r3 1 MΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10357,7 +10357,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r4",
+"label": "Ω r4 10 MΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10390,7 +10390,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "Ω r5",
+"label": "Ω r5 100 MΩ",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10456,7 +10456,7 @@
 {
 "src": "metrix",
 "mode": "ohm",
-"label": "mode 6",
+"label": "mode 6 100 Ω",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10489,7 +10489,7 @@
 {
 "src": "metrix",
 "mode": "cont",
-"label": "mode 4",
+"label": "mode 4 continuity",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10522,7 +10522,7 @@
 {
 "src": "metrix",
 "mode": "diode",
-"label": "mode 5",
+"label": "mode 5 diode",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10555,7 +10555,7 @@
 {
 "src": "metrix",
 "mode": "other",
-"label": "mode 10",
+"label": "mode 10 Zener 20 V",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -10918,7 +10918,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r0",
+"label": "cap r0 1000 pF",
 "regs": {
 "1E": 0,
 "1F": 1,
@@ -10951,7 +10951,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r1",
+"label": "cap r1 10 nF",
 "regs": {
 "1E": 0,
 "1F": 1,
@@ -10984,7 +10984,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r2",
+"label": "cap r2 100 nF",
 "regs": {
 "1E": 0,
 "1F": 1,
@@ -11017,7 +11017,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r3",
+"label": "cap r3 1000 nF",
 "regs": {
 "1E": 0,
 "1F": 1,
@@ -11050,7 +11050,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r4",
+"label": "cap r4 10 µF",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -11083,7 +11083,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r5",
+"label": "cap r5 100 µF",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -11116,7 +11116,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r6",
+"label": "cap r6 1000 µF",
 "regs": {
 "1E": 0,
 "1F": 4,
@@ -11149,7 +11149,7 @@
 {
 "src": "metrix",
 "mode": "cap",
-"label": "cap r7",
+"label": "cap r7 10 mF",
 "regs": {
 "1E": 0,
 "1F": 4,
