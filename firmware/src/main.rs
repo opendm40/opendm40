@@ -1176,31 +1176,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.len = csvlog::status_scpi(&mut scpi.buf);
                         true
                     }
-                    // Record page settings (decision 2026-10-22 #1): for
-                    // the next recording; a running one keeps its own.
-                    scpi::Log::CsvInt(Some(_)) | scpi::Log::CsvDur(Some(_)) if csvlog::active() => {
-                        scpi.set_err("Settings conflict");
-                        false
-                    }
-                    scpi::Log::CsvInt(Some(i)) => {
-                        csvlog::set_next(i, csvlog::next().1);
-                        app.invalidate();
-                        false
-                    }
-                    scpi::Log::CsvDur(Some(d)) => {
-                        csvlog::set_next(csvlog::next().0, d);
-                        app.invalidate();
-                        false
-                    }
-                    scpi::Log::CsvInt(None) => {
-                        scpi.len = 0;
-                        put_u32(&mut scpi, csvlog::INTERVALS_S[csvlog::next().0 as usize]);
-                        true
-                    }
-                    scpi::Log::CsvDur(None) => {
-                        scpi.len = 0;
-                        put_u32(&mut scpi, csvlog::DURATIONS_S[csvlog::next().1 as usize]);
-                        true
+                    // Record page settings (decision 2026-10-22 #1).
+                    l @ (scpi::Log::CsvInt(_) | scpi::Log::CsvDur(_) | scpi::Log::CsvChg(_)) => {
+                        let r = rec_scpi(&mut scpi, l);
+                        if !r {
+                            app.invalidate();
+                        }
+                        r
                     }
                     scpi::Log::CsvFree => match csvlog::free_bytes() {
                         Ok(f) => {
@@ -2343,6 +2325,34 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         w.s(",lost_before\r\n");
     }
     (w.n, par, unit)
+}
+
+/// LOG:CSV:INTerval / DURation / CHANge (the Record page's settings, for
+/// the next recording; a running one keeps its own: Settings conflict).
+/// True: a reply in `scpi`; false: set (or refused).
+#[inline(never)] // .cold (link-native.x)
+fn rec_scpi(scpi: &mut scpi::Scpi, l: scpi::Log) -> bool {
+    use scpi::Log::{CsvChg, CsvDur, CsvInt};
+    let (ii, di) = csvlog::next();
+    match l {
+        CsvInt(Some(_)) | CsvDur(Some(_)) | CsvChg(Some(_)) if csvlog::active() => scpi.set_err("Settings conflict"),
+        CsvInt(Some(i)) => csvlog::set_next(i, di),
+        CsvDur(Some(d)) => csvlog::set_next(ii, d),
+        CsvChg(Some(c)) => csvlog::set_change(c),
+        _ => {
+            scpi.len = 0;
+            match l {
+                CsvChg(_) => scpi.put_bytes(csvlog::CHANGES[csvlog::change() as usize].as_bytes()),
+                CsvDur(_) => put_u32(scpi, csvlog::DURATIONS_S[di as usize]),
+                _ => match csvlog::INTERVALS_S.get(ii as usize) {
+                    Some(&s) => put_u32(scpi, s),
+                    None => scpi.put_bytes(b"CHAN"),
+                },
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding).

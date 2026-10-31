@@ -3211,28 +3211,32 @@ pub const LIMIT_ROWS: [&str; 9] = [
     "Fail beep", "Record",
 ];
 
-/// Record page rows (decision 2026-10-22 #1): interval and duration with
-/// -/+ steppers (as Settings 1), the free-time estimate, Start / Stop.
-pub const RECORD_ROWS: [&str; 4] = ["Interval", "Duration", "Free", ""];
+/// Record page rows (decision 2026-10-22 #1): interval, On change
+/// threshold and duration with -/+ steppers (as Settings 1), the free-time
+/// estimate, Start / Stop.
+pub const RECORD_ROWS: [&str; 5] = ["Interval", "Change", "Duration", "Free", ""];
 /// Rows with a stepper on the Record page.
-pub const REC_STEP_ROWS: [usize; 2] = [0, 1];
+pub const REC_STEP_ROWS: [usize; 3] = [0, 1, 2];
 /// Value texts of csvlog::INTERVALS_S / DURATIONS_S; the last interval,
 /// "Fast", is the fast logger (fastlog.rs: raw AD1 / AD2 samples to
 /// LOGS/FASTnnn.DLG at the LOG:OSR / LOG:SRATe rate; App::rec_fast).
-pub const REC_INTERVALS: [&str; 5] = ["Every reading", "1 s", "10 s", "1 min", "Fast"];
+/// "On change" is csvlog::ON_CHANGE.
+pub const REC_INTERVALS: [&str; 6] = ["Every reading", "1 s", "10 s", "1 min", "On change", "Fast"];
 /// Index of "Fast" in REC_INTERVALS.
-pub const REC_FAST: usize = 4;
+pub const REC_FAST: usize = 5;
+/// Texts of csvlog::CHANGES (the On change threshold, % of full scale).
+pub const REC_CHANGES: [&str; 3] = ["0.1 %", "1 %", "5 %"];
 pub const REC_DURATIONS: [&str; 5] = ["Until stopped", "10 min", "1 h", "8 h", "24 h"];
 /// Record page row of the Start / Stop button.
-pub const REC_START_ROW: usize = 3;
+pub const REC_START_ROW: usize = 4;
 
 /// The Record page: title bar, interval / duration steppers, the estimate
 /// (`free`: "about N h left" at the interval, or why there is none), Start / Stop
 /// (a filled row: accent Start, red Stop while recording). `vals` =
-/// interval, duration texts.
-pub fn record_page(vals: [&str; 2], free: &str, recording: bool) {
+/// interval, threshold, duration texts.
+pub fn record_page(vals: [&str; 3], free: &str, recording: bool) {
     let names = RECORD_ROWS;
-    list_page("Record", &names[..3], &["", "", free]);
+    list_page("Record", &names[..4], &["", "", "", free]);
     for (i, v) in REC_STEP_ROWS.iter().zip(vals) {
         set_stepper(*i, v, REC_STEP_MINUS_X);
     }

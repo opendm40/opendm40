@@ -39,6 +39,15 @@
 //! (`push` / `poll`) with the usual result. Interval files have one more
 //! header line ("# interval N s: ..."); every-reading files are unchanged.
 //!
+//! On-change mode (Record page "On change", LOG:CSV:INTerval CHANge; event
+//! logging as the Fluke 289 / Keysight U1281A, TODO FR-04): a reading
+//! becomes a row, at its own time as in every-reading mode, when it is
+//! the first, when |value - the last row's value| > N % of the range's
+//! full scale (`push` `fs`, per reading: autorange changes it), when its
+//! OL / HI / LO flags differ from the last row's, or when the last row is
+//! HEARTBEAT_MS old. N = CHANGES (0.1 / 1 / 5 %). One more header line
+//! ("# event: change > N % ...").
+//!
 //! Non-blocking, like screenshot.rs: `start` / `push` / `stop` only touch RAM;
 //! `poll` (every main-loop pass) does one bounded slice of a flush (one block
 //! read, one Alloc FAT block, one `write_step` slice of <= ~2 ms of a data
@@ -300,6 +309,15 @@ struct Job {
     inum: u32,
     iall: u32,
     iflags: u8,
+    // --- on-change mode
+    /// Threshold as a fraction of full scale (0 = not on-change mode); the
+    /// last row's value (NaN: OL / none), flags (OL HI LO) and time (ms);
+    /// a row was written.
+    chg: f32,
+    ev_v: f32,
+    ev_f: u8,
+    ev_t: u64,
+    ev_any: bool,
 }
 
 const JOB0: Job = Job {
@@ -354,6 +372,11 @@ const JOB0: Job = Job {
     inum: 0,
     iall: 0,
     iflags: 0,
+    chg: 0.0,
+    ev_v: 0.0,
+    ev_f: 0,
+    ev_t: 0,
+    ev_any: false,
 };
 
 /// Record page choices (decision 2026-10-22 #1): row interval in s (0 =
@@ -362,6 +385,27 @@ const JOB0: Job = Job {
 /// values only; persisted as their indices (app.rs, persist.rs W_REC).
 pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
 pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
+/// Interval index of the on-change mode (after INTERVALS_S; SCPI
+/// LOG:CSV:INTerval CHANge).
+pub const ON_CHANGE: u8 = INTERVALS_S.len() as u8;
+/// On-change thresholds in % of full scale (texts: header, Record page,
+/// LOG:CSV:CHANge, which accepts these only); default index 1 (1 %).
+pub const CHANGES: [&str; 3] = ["0.1", "1", "5"];
+const CHANGE_FR: [f32; 3] = [0.001, 0.01, 0.05];
+/// On-change mode: a row at least this often (ms) while readings arrive.
+pub const HEARTBEAT_MS: u64 = 60_000;
+/// Threshold index of the next recording (CHANGES).
+static mut NEXT_CHG: u8 = 1;
+
+/// The on-change threshold of the next recording (index into CHANGES;
+/// out of range = the default 1 %).
+pub fn set_change(i: u8) {
+    unsafe { *core::ptr::addr_of_mut!(NEXT_CHG) = if (i as usize) < CHANGES.len() { i } else { 1 } };
+}
+
+pub fn change() -> u8 {
+    unsafe { *core::ptr::addr_of!(NEXT_CHG) }
+}
 /// Row interval / length of the next recording (indices into the above).
 static mut NEXT: (u8, u8) = (0, 0);
 
@@ -369,7 +413,7 @@ static mut NEXT: (u8, u8) = (0, 0);
 /// DURation; the swipe-down REC uses them too). Out-of-range indices = the
 /// defaults. A running recording keeps the values it started with.
 pub fn set_next(ival_idx: u8, dur_idx: u8) {
-    let i = if (ival_idx as usize) < INTERVALS_S.len() { ival_idx } else { 0 };
+    let i = if ival_idx <= ON_CHANGE { ival_idx } else { 0 };
     let d = if (dur_idx as usize) < DURATIONS_S.len() { dur_idx } else { 0 };
     unsafe { *core::ptr::addr_of_mut!(NEXT) = (i, d) };
 }
@@ -433,8 +477,15 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     w.ms(now_ms);
     w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n");
     let (ii, di) = next();
-    j.ival = INTERVALS_S[ii as usize] * 1000;
+    j.ival = INTERVALS_S.get(ii as usize).map_or(0, |s| s * 1000);
     j.dur = DURATIONS_S[di as usize] * 1000;
+    if ii == ON_CHANGE {
+        let c = change() as usize;
+        j.chg = CHANGE_FR[c];
+        w.s("# event: change > ");
+        w.s(CHANGES[c]);
+        w.s(" % of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading\r\n");
+    }
     if j.ival > 0 {
         // Interval mode (Record page): one more comment line; every
         // reading mode keeps the header byte for byte.
@@ -455,12 +506,14 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
 }
 
 /// One reading: `t_ms` = uptime (same clock as `start`), `value` in the
-/// recording's unit, `flags` = F_* bits. Every-reading mode: one row each;
-/// interval mode: added to the open interval (`Job::add`). A row that does
+/// recording's unit, `flags` = F_* bits, `fs` = the full scale of the
+/// reading's range in that unit (on-change mode). Every-reading mode: one
+/// row each; interval mode: added to the open interval (`Job::add`);
+/// on-change mode: a row if `Job::event` says so. A row that does
 /// not fit FIFO is dropped (and counted); the next row that fits carries
 /// GAP. Ignored unless recording. Ends the recording at its duration and
 /// at the 49.7-day limit of the u32 ms DLG time.
-pub fn push(t_ms: u64, value: f32, flags: u8) {
+pub fn push(t_ms: u64, value: f32, flags: u8, fs: f32) {
     let j = job();
     if j.state != State::Recording || j.stopping {
         return;
@@ -470,7 +523,9 @@ pub fn push(t_ms: u64, value: f32, flags: u8) {
         stop();
         return;
     }
-    if j.ival == 0 {
+    if j.chg > 0.0 {
+        j.event(t, value, flags & 31, fs);
+    } else if j.ival == 0 {
         j.row(t, value, flags & 31);
     } else {
         j.add(t, value, flags & 31);
@@ -637,6 +692,22 @@ impl Job {
         } else {
             self.dropped += 1;
             self.gap = true;
+        }
+    }
+
+    /// On-change mode: a row for this reading when it is the first, its OL
+    /// / HI / LO flags differ from the last row's, its value is more than
+    /// `chg` x `fs` away from the last row's (both not OL), or the last
+    /// row is HEARTBEAT_MS old.
+    fn event(&mut self, t: u64, value: f32, flags: u8, fs: f32) {
+        let ev = flags & (F_OL | F_HI | F_LO);
+        let v = if flags & F_OL == 0 && value.is_finite() { value } else { f32::NAN };
+        if !self.ev_any || ev != self.ev_f || (v - self.ev_v).abs() > self.chg * fs || t >= self.ev_t + HEARTBEAT_MS {
+            self.row(t, value, flags);
+            self.ev_any = true;
+            self.ev_f = ev;
+            self.ev_v = v;
+            self.ev_t = t;
         }
     }
 
