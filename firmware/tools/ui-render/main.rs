@@ -75,6 +75,9 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+#[path = "../../src/pool.rs"]
+#[allow(dead_code)]
+mod pool;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
@@ -2744,9 +2747,9 @@ fn main() {
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
     // The generator page's first strip draw after a boot (#153), each wave
     // as the boot default: the preview's strip cache as the device has it
-    // then (`.sram_bss`, zeroed by the startup code).
+    // then (fresh page-pool bytes: the key "none", pool.rs PAGE).
     for wave in gen::Wave::ALL {
-        unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
+        pool::PAGE.give(pool::Tenant::GenPreview);
         w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
         strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
     }

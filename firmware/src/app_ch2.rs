@@ -173,7 +173,9 @@ impl App {
         self.ch2.on = on;
         self.scope.ch2_on = on;
         if !on {
-            crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; 399];
+            if let Some(g) = crate::scope_ui::graph_held() {
+                g.c2 = [crate::scope_ui::EMPTY; 399];
+            }
         }
         // The comparator on / off: restart the acquisition.
         let st = self.scope.s;

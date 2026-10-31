@@ -2613,12 +2613,25 @@ pub fn gen_status(st: &Status) {
 
 /// `gen_preview` in strips: the wave the table holds (its `sel` + 1, the
 /// square's duty above bit 8; 0 = none) and each column's trace rows (from
-/// the preview's top). All zero
-/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
-/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
-/// table, so the boot-time Sine drew no trace).
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
+/// the preview's top). A tenant of the page pool (pool.rs `PAGE`, SRAM):
+/// set to "none" (0) whenever it takes the bytes, so the next strip pass
+/// works the rows out (#153: the key must not read as a valid wave on
+/// fresh bytes).
+pub(crate) struct GenSp(u32, [(u8, u8); 239]);
+
+// SAFETY: `init` writes the key; the rows are only read after a pass
+// that wrote them for that key.
+unsafe impl crate::pool::Tenancy for GenSp {
+    const T: crate::pool::Tenant = crate::pool::Tenant::GenPreview;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::GenPreview).off;
+    fn init(p: *mut Self) {
+        // SAFETY: the pool's GenPreview range (asserted to fit below); the
+        // rows are plain bytes (any value is valid).
+        unsafe { core::ptr::addr_of_mut!((*p).0).write(0) };
+    }
+}
+
+const _: () = assert!(crate::pool::fits::<GenSp>(crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::GenPreview).len));
 
 // Region B (not inlined into the region C callers): drawn per strip.
 #[inline(never)]
@@ -2656,7 +2669,8 @@ fn gen_preview(w: gen::Wave, duty: u16) {
     if lcd::in_strip() {
         // Row by row into the strip from the columns' trace rows,
         // worked out once per wave (not once per strip).
-        let sp = unsafe { &mut *core::ptr::addr_of_mut!(GEN_SP) };
+        // SAFETY: the pool's GenSp (main loop only); u8 rows: any bytes valid.
+        let sp = unsafe { &mut *crate::pool::PAGE.take_ptr::<GenSp>() };
         if sp.0 != key {
             let mut prev = yv(0);
             for i in 0..ww {

@@ -611,7 +611,9 @@ impl App {
         self.sp.touch = None;
         self.sp.pinch = None;
         self.sp.bubble = false;
-        su::graph().set_hole(None);
+        if let Some(g) = su::graph_held() {
+            g.set_hole(None);
+        }
         self.sp.popup = su::Popup::None;
         self.sp.pressed_cell = None;
         self.sp.slider = None;
@@ -2066,7 +2068,9 @@ impl App {
     fn sp_pinch_end(&mut self, ok: bool, now: u64) {
         let Some(p) = self.sp.pinch.take() else { return };
         self.sp.bubble = false;
-        su::graph().set_hole(None);
+        if let Some(g) = su::graph_held() {
+            g.set_hole(None);
+        }
         let mut st = self.scope.s;
         if ok && p.i != p.i0 && p.axis == Axis::V && self.scope.wave_on() {
             self.wave_step_to(p.i, now);
