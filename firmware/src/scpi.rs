@@ -98,13 +98,14 @@
 //!   CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]   select
 //!     the function, then the range (none / AUTO / DEF = autorange, also on
 //!     the function already selected), then the resolution if given
-//!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
+//!     (CONT / DIOD: no argument; FREQ: AUTO / DEF only; CAP: a range,
+//!     60 nF .. 60 mF; 6 nF = the 60 nF range)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
 //!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
 //!     items; above the top one: "Data out of range"). The query gives the
-//!     present range also while autoranging (CAP 6 nF .. 60 mF, FREQ 60 Hz
-//!     .. 60 MHz, not settable)
+//!     present range also while autoranging (CAP 6 nF .. 60 mF, settable;
+//!     FREQ 60 Hz .. 60 MHz, not settable)
 //!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
 //!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
 //!     SCPI does not change that choice); OFF / ONCE keep the present range
@@ -737,6 +738,29 @@ pub enum Dbg {
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
     Fast,
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    Cap,
+    /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
+    /// (dmm::set_cap_class; RAM only).
+    CapClass(Option<u8>),
+    /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
+    /// the discharge slope (dmm::set_cap_idis; RAM only).
+    CapIdis(Option<u32>),
+    /// DBG:CAP:DISMODE <0..3> / ?: the discharge experiment's mode
+    /// (dmm::set_cap_dismode; RAM only).
+    CapDisMode(Option<u32>),
+    /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
+    /// (dmm::set_cap_disref; RAM only).
+    CapDisRef(Option<u32>),
+    /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
+    /// (dmm::set_cap_dis_ms; RAM only).
+    CapDisMs(Option<u32>),
+    /// DBG:CAP:JUMPN <n> / ?: 600 uF ramp polls before the one-poll step
+    /// up (dmm::set_cap_jumpn; RAM only).
+    CapJumpN(Option<u32>),
+    /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
+    /// (dmm::set_cap_dis_end; RAM only).
+    CapDisEnd(Option<u32>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -1145,6 +1169,10 @@ pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
+        // Capacitance: CONF:CAP <F>, CAP:RANG, the MF page (ui::range_items),
+        // for comparing a fixed range with AUTO (#74).
+        // 6 nF is the 60 nF range (dmm::CAP_R_MIN): CONF:CAP 6E-9 picks it.
+        13 => &[6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3, 6e-2],
         // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
@@ -1156,6 +1184,9 @@ pub fn range_items(func: u8) -> &'static [f32] {
 pub fn range_item_code(func: u8, i: usize) -> u8 {
     if quantity(func & !ANY_CPL) == 1 {
         if i == 0 { 5 } else { i as u8 - 1 }
+    } else if func == 13 {
+        // Capacitance: the list starts at the 60 nF range, dmm r1.
+        i as u8 + 1
     } else {
         i as u8
     }
@@ -1267,7 +1298,7 @@ fn conf_cmd(f: u8, arg: &[u8]) -> Result<Cmd, &'static str> {
         Some(s) => Some(res_arg(s, unit_of(f)).ok_or(BAD)?),
         None => None,
     };
-    if matches!(f, 13 | 14) && (rng != Rng::Auto || res.is_some_and(|v| !v.is_nan())) {
+    if (f == 14 && rng != Rng::Auto) || (matches!(f, 13 | 14) && res.is_some_and(|v| !v.is_nan())) {
         return Err(BAD);
     }
     Ok(Cmd::Conf(f, rng, res))
@@ -2572,6 +2603,28 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
                         b"FAST" if query => Dbg::Fast,
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
+                            Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "JUMPN")) => {
+                            Dbg::CapJumpN(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
+                            Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMODE")) => {
+                            Dbg::CapDisMode(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISREF")) => {
+                            Dbg::CapDisRef(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
+                            Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
+                            Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })
+                        }
+                        b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
                         // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader

@@ -135,13 +135,16 @@ fn button_index(b: Button) -> usize {
 use crate::stockfont::{self as sf, rect};
 
 const STATUS_FG: Color = 0xF7BE;
-/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ").
-const CELLS: [[u8; 7]; 5] = [
+/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ",
+/// %7.0f: capacitance 6000 / 60000 uF, at most 5 digits, so cell 1 is
+/// always blank).
+const CELLS: [[u8; 7]; 6] = [
     [40, 60, 20, 60, 60, 60, 60],
     [40, 60, 60, 20, 60, 60, 60],
     [40, 60, 60, 60, 20, 60, 60],
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
+    [40, 20, 60, 60, 60, 60, 60],
 ];
 /// Main-readout cells with the extra digit (formats 0..3 only, never OL):
 /// sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78 digits
@@ -184,7 +187,8 @@ const LOOP_MIN_PCT: f32 = -2.5;
 /// drawn with BURDEN_CAP).
 fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
     let lp = r.mode == 8 && !r.parts() && r.aux2.is_some_and(|v| v.unit == "%");
-    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v)));
+    // Capacitance: aux2 is the discharge line (`cap_discharge_label`).
+    let a2 = r.aux2.filter(|v| r.mode != 13 && (!lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v))));
     ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
 
@@ -235,7 +239,8 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
         4.. => 0,
         3 => 1,
         2 => 2,
-        _ => 3,
+        1 => 3,
+        _ => 5,
     };
     (core::str::from_utf8(&buf[..7]).unwrap_or(""), f, x)
 }
@@ -958,11 +963,16 @@ impl DmmView {
             _ if band => 255,
             10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
+            13 if !self.power => match r.aux2 {
+                Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
+                Some(_) => 0x20,
+                None => 255,
+            },
             11 if aux[0].is_none() && !self.power => 0x11,
             _ => 255,
         };
-        if ik == 255 && self.last_iohm != 255 {
-            let b = OHM_I_RECT;
+        if (ik == 255 || (ik & 0xF0 == 0x20) != (self.last_iohm & 0xF0 == 0x20)) && self.last_iohm != 255 {
+            let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
         }
@@ -1095,7 +1105,11 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik != 255 && self.last_iohm != ik {
+        if ik & 0xF0 == 0x20 {
+            // Every reading: the node voltage moves.
+            cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
+            self.last_iohm = ik;
+        } else if ik != 255 && self.last_iohm != ik {
             test_current_label(r.mode, r.range, self.ohm_on);
             self.last_iohm = ik;
         }
@@ -1167,6 +1181,34 @@ fn ol_word(r: sf::Rect, c: Color, open: bool) {
 /// The test current label's box: the aux1 slot's left part (the burden
 /// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
+/// The capacitance discharge line: the aux1 slot, to the aux2 tag (231).
+const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
+
+/// Capacitance, before a ramp range: "Discharging... 0.42 V", or
+/// "Discharging... >1.2 V" while the node sits at the AD1 clamp (`clamp`;
+/// owner 2026-10-31: the orange "Charged cap: discharge first" read as an
+/// order to the user). DIM. `full`: the whole line (the other line was
+/// there), else only the value part.
+#[inline(never)] // .cold (link-native.x): during a discharge only
+pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
+    const PRE: &str = "Discharging...";
+    let b = CAP_DIS_RECT;
+    // (The value from a word space after the prefix.)
+    let w = sf::text_width(sf::F14, PRE, 1) + 6;
+    if full {
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
+    }
+    let mut t = [0u8; 16];
+    let mut s = crate::scope_ui::Txt::new("");
+    if clamp {
+        s.push(">1.2");
+    } else {
+        s.push(crate::dmm::format(&mut t, v, 2));
+    }
+    s.push(" V");
+    sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
+}
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
@@ -1412,6 +1454,13 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
         ],
+        // Capacitance (owner 2026-10-30): dmm.rs ranges r1..r7 (one 60 nF
+        // range for the stock's 6 / 60 nF rows: dmm::CAP_R_MIN), the mF
+        // ranges in uF as the readout (cap_val).
+        Button::Cap => &[
+            ("60nF", Some(1)), ("600nF", Some(2)), ("6uF", Some(3)), ("60uF", Some(4)),
+            ("600uF", Some(5)), ("6000uF", Some(6)), ("60 000uF", Some(7)), ("AUTO", None),
+        ],
         _ => &[("AUTO", None)],
     }
 }
@@ -1439,7 +1488,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
         10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
-        0..=10 => {
+        0..=10 | 13 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
         }
@@ -1473,8 +1522,8 @@ fn range_status(s: &str) {
 
 fn range_rect(i: usize) -> sf::Rect {
     if i >= 8 {
-        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
-        // page), two columns wide for its label.
+        // The Ohm page's 600 Mohm item: the note row (141..177, free on
+        // that page), two columns wide.
         return rect(8, 141, 228, 36);
     }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
