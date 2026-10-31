@@ -873,12 +873,12 @@ name fatren gave the installed `dm40*.bin` (11 characters, blanks if none).
 
 | # | Field |
 |---|---|
-| 0 | mode: 0 normal, 1 recovery |
-| 1 | reset reason: 0 none, 1 watchdog after recovery, 2 watchdog (stale), 3 watchdog (retry), 4 key hold aborted, 5 requested, 6 clock failed |
+| 0 | mode: always 0 (1 was the removed recovery mode) |
+| 1 | reset reason: 0 none, 1 watchdog after a loader (PA2) entry, 2 watchdog (stale), 3 watchdog (retry), 4 key hold aborted, 6 clock failed (5 unused) |
 | 2 | clock: 0 HXTAL, 1 IRC16M, 2 failed |
 | 3, 4 | reset flags (RCU_RSTSCK) at reset / after the shim |
 | 5 | the previous boot's last word |
-| 6 | the last loader trigger (`5452001x`: marker zeroed, failed, PA2 entry) |
+| 6 | the last loader entry (`54520012`: PA2 entry, `54520013`: PA2 entry, lock not read back) |
 | 7..9 | loader marker words |
 | 10 | marker valid: 1 / 0 |
 | 11 | crash word (`435200nn`: nn watchdog resets in a row) |

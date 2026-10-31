@@ -18,7 +18,7 @@
 //! the loader resets with SYSRESETREQ, not a power-on).
 //!
 //! When: native normal boot, before USB exists (the host cannot have the
-//! volume mounted). Never in recovery (the user is about to copy a file).
+//! volume mounted).
 //!
 //! Observed on the device (T3): the FS-loader itself deletes the installed
 //! file, so normally there is nothing to rename. calbackup (runs after this)
@@ -70,7 +70,7 @@ pub const FAKE: [u8; 11] = *b"DM40RCVRBIN";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
-    /// Not run (warm boot, recovery, or a build without the call).
+    /// Not run (warm boot, or a build without the call).
     NotRun,
     /// No SPI flash / medium.
     NoMedium,

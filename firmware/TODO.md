@@ -546,7 +546,8 @@ the scope full record.
         no FAT/SPI/USB/LCD in the shim); DBG:UPDATE / DBG:RECOVER do the same (dev flow: copy a
         dm40*.bin onto opendm40's disk, DBG:UPDATE). Built (recovery ~490 B, test-recovery image
         1712 B); DM40RCVR.BIN / own-USB variants were kept behind recovery-file / recovery-usb (both removed
-        2026-10-31).
+        2026-10-31, with the shim's recovery mode on the request word; DBG:UPDATE keeps the marker
+        zeroing, DBG:RECOVER = DBG:LOADER the PA2 entry).
         (device-verified by T2 and the T3 way back)
   - [x] Test: power-on holding the power key ~5 s with no dm40*.bin -> stock booted. No vendor
         button entry; PA2 is not the power key. 2026-10-24 (owner, device): PA2 = the debug

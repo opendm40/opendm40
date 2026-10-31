@@ -122,8 +122,6 @@ SECTIONS
         *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
-        /* recovery.rs (only `run`). */
-        *(.text.*8opendm408recovery3run*);
         *(.text.*8opendm407gallery*);
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);

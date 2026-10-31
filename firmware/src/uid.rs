@@ -12,7 +12,7 @@
 //!
 //! The UID is in system memory (0x1FFF7A10..0x1FFF7A1B), not in the main
 //! flash's slow bank (0x08080000..), but it is still read once: `init` in
-//! native::start, before the recovery / normal decision is acted on, into a
+//! native::start, before the normal boot, into a
 //! TCM static. Privacy: docs/native-boot.md "USB serial number".
 
 /// The 96-bit unique ID (GD32F4xx system memory).

@@ -2465,5 +2465,4 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-mod recovery;
 mod shim;

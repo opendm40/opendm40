@@ -330,8 +330,8 @@ BOOT_FIELDS = ['mode', 'reason', 'clock', 'rstsck', 'rstsck_after', 'last', 'las
                'main_app', 'main_frame', 'main_touch']
 # Enum fields: the firmware's declaration order (as u32).
 BOOT_ENUMS = {
-    'mode': ['NORMAL', 'RECOVERY'],
-    'reason': ['NONE', 'WDT_AFTER_RECOVERY', 'WDT_STALE', 'WDT_RETRY', 'KEY_HOLD_ABORTED', 'REQUESTED', 'CLOCK_FAIL'],
+    'mode': ['NORMAL'],  # 1 was the removed recovery mode
+    'reason': ['NONE', 'WDT_AFTER_LOADER', 'WDT_STALE', 'WDT_RETRY', 'KEY_HOLD_ABORTED', '-', 'CLOCK_FAIL'],
     'clock': ['HXTAL', 'IRC16M', 'FAILED'],
     'fatren': ['NOTRUN', 'NOMEDIUM', 'BADBPB', 'CLEAN', 'DRYRUN', 'RENAMED', 'ERROR'],
     'calbk': ['NOTRUN', 'NOMEDIUM', 'BADBPB', 'SAFECOPY_PRESENT', 'SAFECOPY_WRITTEN', 'NOSPACE', 'ERROR'],
@@ -357,8 +357,7 @@ CALBK_STATUS = {'SAFECOPY_PRESENT': 'safety copy on the SPI disk, nothing writte
                 'BADBPB': 'SPI disk is not the expected FAT16: untouched',
                 'NOMEDIUM': 'no SPI flash', 'ERROR': 'SPI disk read/write/verify failed',
                 'NOTRUN': 'not run'}
-TRIGGERS = {0x54520010: 'marker zeroed by recovery/update', 0x54520011: 'marker zeroing FAILED',
-            0x54520012: 'PA2 entry into the loader', 0x54520013: 'PA2 entry, GPIO lock NOT confirmed'}
+TRIGGERS = {0x54520012: 'PA2 entry into the loader', 0x54520013: 'PA2 entry, GPIO lock NOT confirmed'}
 
 
 def parse_boot(text):
