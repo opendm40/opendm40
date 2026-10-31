@@ -1109,8 +1109,8 @@ pub struct Reading {
     /// sentinel, BT or SCPI (`Dmm::poll` returns it without clearing
     /// `reading_pending` or counting `seq`).
     pub prov: bool,
-    /// Continuity / diode over range from below half the limit or from
-    /// the function's entry (`ol_open`): "OPEN", not "Overflow".
+    /// Continuity over range from below half the limit or from the
+    /// function's entry (`ol_open`): "OPEN", not "Overflow".
     pub open: bool,
 }
 
@@ -1161,9 +1161,9 @@ fn cal(off: u32, dflt: f32) -> f32 {
 }
 
 /// FUN_080160c6: EMA that jumps (0.99) when the step exceeds `thr`.
-/// Continuity / diode over range: open leads ("OPEN") or a value that
-/// climbed past the limit ("Overflow": a charging capacitor, a large
-/// resistor). `near`: the last in-range reading was at least half the limit
+/// Continuity over range: open leads ("OPEN") or a value that climbed
+/// past the limit ("Overflow": a charging capacitor, a large resistor).
+/// Diode never says "OPEN". `near`: the last in-range reading was at least half the limit
 /// (`half`), false at the function's entry; only in-range readings change
 /// it, so a whole over-range run keeps one word. True = "OPEN".
 pub fn ol_open(near: &mut bool, ol: bool, half: bool) -> bool {
@@ -1770,8 +1770,8 @@ pub struct Dmm {
     f_lpf: f32,
     f_dc: f32,
     f_diode: f32,
-    /// Continuity / diode: the last in-range reading was at least half the
-    /// limit (`ol_open`).
+    /// Continuity: the last in-range reading was at least half the limit
+    /// (`ol_open`).
     ol_near: bool,
     f_cap: f32,
     cap_c: f32,
@@ -5892,7 +5892,8 @@ impl Dmm {
             self.beep_n = self.beep_n.saturating_add(1);
         }
         let mut rd = self.reading(if ol { Val::ol(4, "V") } else { Val::new(v, 4, "V") }, v);
-        rd.open = ol_open(&mut self.ol_near, ol, v >= 1.56);
+        // Over range is always "Overflow" here: a charged capacitor and
+        // open leads read the same (owner 2026-10-31).
         // Aux "ohm" readout (stock m+0xdc = V*gain/0.765, shown only below 1.04).
         let k = v * g / 0.765;
         rd.aux2 = Some(if k < 1.04 { Val::new(k * 1000.0, 1, "\u{3a9}") } else { Val::ol(1, "\u{3a9}") });
