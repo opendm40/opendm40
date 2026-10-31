@@ -271,6 +271,9 @@ const CAP_SEG_HYST_MV: f32 = 1.0;
 /// and down half ramps within CAP_SEG_DU.
 const CAP_SEG_AGREE: f32 = 0.01;
 const CAP_SEG_DU: f32 = 0.05;
+/// Ramp ranges: a comparator frequency (kHz) over this is a half ramp of
+/// under ~6 samples (device, class 2: 1 mF on 6 mF 0.5 Hz, 5 uF 50 Hz).
+const CAP_FAST_KHZ: f32 = 0.0015;
 /// The 255 ms poll's rules run when this long has passed since the last.
 const CAP_POLL_MS: u64 = 230;
 /// The discharge's line fit is final from CAP_DIS_FIN_MS on, once it moved
@@ -1558,6 +1561,14 @@ pub(crate) fn ctr_valid(ctb: u32, cta: u32) -> bool {
 
 /// Restart the HY3131 counter on source `src` (R20 without ENCTR): ENCTR
 /// off, the gate preset CTA = 0xfc0000 (0x40000 SYSCLK = 53.3 ms), ENCTR on.
+/// The ramp rows' counter from CTA 0: a 3.4 s gate (`ctr_restart`'s
+/// 0xFC0000 stops it after 262 144 ticks, 53 ms; device bc205357+).
+fn cap_ctr_restart() {
+    hy::write(0x20, &[0x50]);
+    hy::write(0x1B, &[0x00, 0x00, 0x00]);
+    hy::write(0x20, &[0x52]);
+}
+
 fn ctr_restart(src: u8) {
     hy::write(0x20, &[src & !2]);
     hy::write(0x1B, &[0x00, 0x00, 0xFC]);
@@ -1832,6 +1843,13 @@ pub struct Dmm {
     /// A final value from the 50 ms fits on this range: the poll's ring no
     /// longer sets the value.
     cap_seg_ok: bool,
+    /// The ramp's comparator periods (CTB) and SYSCLK ticks (CTA) summed
+    /// over the counter's restarts on this row and class.
+    cap_ct_b: u32,
+    cap_ct_n: u32,
+    /// A manual ramp range measured on a lower row (the ramp too fast for
+    /// its 50 ms samples): the range shown (`range`, `cap_val`).
+    cap_disp: Option<i8>,
     cap_dis_e1: f32,
     cap_dis_et: u64,
     cap_dis_on: u8,
@@ -2525,6 +2543,9 @@ impl Dmm {
             cap_dis_fin: false,
             cap_dis_ls: [0.0; 5],
             cap_seg_ok: false,
+            cap_ct_b: 0,
+            cap_ct_n: 0,
+            cap_disp: None,
             cap_dis_e1: 0.0,
             cap_dis_et: 0,
             cap_dis_on: 0,
@@ -2649,7 +2670,7 @@ impl Dmm {
         self.mode
     }
     pub fn range(&self) -> i8 {
-        self.range
+        self.cap_disp.unwrap_or(self.range)
     }
     /// The frequency counter's range (60 Hz .. 60 MHz, `freq_range_for`).
     pub fn counter_range(&self) -> u8 {
@@ -3149,6 +3170,7 @@ impl Dmm {
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
+        self.cap_disp = None;
         let changed_mode = mode != self.mode || self.pw.on;
         let old = (self.mode, self.range);
         // The R22 (AD1 OSR) the chip runs now (R22_DROP).
@@ -6349,7 +6371,7 @@ impl Dmm {
     }
 
     fn cap_val(&self, c_uf: f32, ol: bool) -> Reading {
-        let r = self.range as usize;
+        let r = self.cap_disp.unwrap_or(self.range) as usize;
         let (v, dec, unit) = match r {
             // The 60 nF range (CAP_R_MIN): 3 decimals below 6 nF, as r0.
             1 if c_uf < 0.006 && !ol => (c_uf * 1000.0, 3, "nF"),
@@ -6373,6 +6395,10 @@ impl Dmm {
         // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
         let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
         hy::write(0x21, &[v]);
+        // The comparator period from this class on (`cap_ctr`).
+        self.cap_ct_b = 0;
+        self.cap_ct_n = 0;
+        cap_ctr_restart();
     }
 
     /// The discharge before a ramp range: dashes, and the node voltage in
@@ -6435,6 +6461,25 @@ impl Dmm {
         }
         self.cap_cand = c;
         Some(self.cap_ramp_val(c, false))
+    }
+
+    /// The ramp's comparator frequency (kHz) from the counter, summed since
+    /// the row / class began (ENCTR is on in the ramp rows: CTB counts the
+    /// comparator periods, CTA the gate's 4.9 MHz ticks), restarted before
+    /// CTA wraps.
+    fn cap_ctr(&mut self) -> (f32, u32) {
+        let mut b = [0u8; 9];
+        hy::read(0x15, &mut b);
+        let (ctb, cta) = (u24(&b[3..6]), u24(&b[6..9]));
+        let n = cta;
+        let (tb, tn) = (self.cap_ct_b + ctb, self.cap_ct_n + n);
+        if n > 8_000_000 {
+            self.cap_ct_b = tb;
+            self.cap_ct_n = tn;
+            cap_ctr_restart();
+            self.diag_ctr = self.diag_ctr.saturating_add(1);
+        }
+        (if tn == 0 { 0.0 } else { tb as f32 / tn as f32 * 4915.28 }, tb)
     }
 
     /// No value yet: dashes, provisional.
@@ -6554,6 +6599,8 @@ impl Dmm {
         *self.cap_seg = CapSeg::new();
         self.cap_dis_fin = false;
         self.cap_seg_ok = false;
+        self.cap_ct_b = 0;
+        self.cap_ct_n = 0;
         self.cap_dis_e1 = 0.0;
         self.cap_vext_n = 0;
         self.cap_idle_flips = 0;
@@ -6587,12 +6634,25 @@ impl Dmm {
         if r < 5 {
             let (f, _) = self.read_counters(0x50);
             self.deadline = now + 420;
-            ema(CAP_WIN[r], 0.05, f, &mut self.f_cap);
+            if r == 4 {
+                // 60 uF: its 0.1 Hz window let every gate through (~5 uF:
+                // 4.77 .. 4.97 uF, device bc205357): a quarter of each gate
+                // within 3 %, a jump at once.
+                ema((0.03 * self.f_cap).max(CAP_WIN[r]), 0.25, f, &mut self.f_cap);
+            } else {
+                ema(CAP_WIN[r], 0.05, f, &mut self.f_cap);
+            }
+            self.cap_over = self.cap_over.saturating_add(1);
             let fk = self.f_cap.max(1e-9);
             // Negative results are clamped to 0 as in the stock (m+0x18 == 0).
             let c = (cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * fk) - cal(0x190, 0.0)).clamp(0.0, 1.06 * lim);
             self.cap_dbg[5] = c;
             let ol = c / lim > ov;
+            if self.manual && self.cap_disp.is_some_and(|d| d > r as i8) && ol {
+                // A manual ramp range measured here: back up a row.
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_dash());
+            }
             if !self.manual {
                 // Straight to the range that fits (owner 2026-10-30: a rough
                 // value fast, the range from it, then refine), not one range
@@ -6617,7 +6677,9 @@ impl Dmm {
                 } else {
                     self.cap_cnt_small = 0;
                 }
-                if c > ov * lim {
+                // (Below 60 uF not on the first gate with no count: it spans
+                // the switch; ~5 uF hunted 60 uF -> 6 uF -> 60 uF on it.)
+                if c > ov * lim && (r == 4 || f > 0.0 || self.cap_over >= 2) {
                     // This poll's own count (the average is the last
                     // range's): no oscillation in the gate at all (a large C
                     // on a small range) goes to 60 uF, the oscillator's top.
@@ -6627,6 +6689,10 @@ impl Dmm {
                     // there).
                     let t = if est.is_finite() { fit(est) } else if r == 4 { 6 } else { 4 };
                     self.cap_set_range(clk, t.max(r as i8 + 1));
+                    return Some(self.cap_dash());
+                }
+                if c > ov * lim {
+                    // (Over, the step waits a gate: dashes, not a final OL.)
                     return Some(self.cap_dash());
                 }
             }
@@ -6823,6 +6889,19 @@ impl Dmm {
         }
         // Every 50 ms sample to the half ramps' fit; the poll's rules below
         // every CAP_POLL_MS.
+        // A ramp too fast for the 50 ms samples (the comparator's counter:
+        // ~5 uF on 6 mF turned 50 times a second and its samples aliased
+        // into 1.2 .. 5.4 mF, on 600 uF 7 times a second into 190 .. 240
+        // uF; device bc205357): the row below, in AUTO as the range, on a
+        // manual range for the value only (shown in that range's units).
+        let (cf, cn) = self.cap_ctr();
+        if cn >= 3 && cf > CAP_FAST_KHZ {
+            if self.manual && self.cap_disp.is_none() {
+                self.cap_disp = Some(self.range);
+            }
+            self.cap_set_range(clk, r as i8 - 1);
+            return Some(self.cap_dash());
+        }
         let seg = {
             let k = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r];
             let ev = self.cap_seg.add(now, v_mv, k);
@@ -6841,7 +6920,6 @@ impl Dmm {
             self.deadline = now + CAP_SEG_MS;
             return seg;
         }
-        let _ = self.read_counters(0x50);
         let dv = (self.ramp.prev_v - v_mv).abs();
         let dt = now.saturating_sub(self.ramp.prev_t) as f32;
         self.ramp.prev_v = v_mv;
@@ -7232,6 +7310,15 @@ impl Dmm {
         }
         let cc = self.cap_c;
         let ol = cc / lim > ov;
+        if self.manual && self.cap_disp.is_some_and(|d| d > r as i8) {
+            // A manual range measured on this lower row: back up a row when
+            // over it.
+            self.cap_cnt_up = if craw > ov * lim { self.cap_cnt_up + 1 } else { 0 };
+            if self.cap_cnt_up >= 3 {
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_dash());
+            }
+        }
         // The steps below look at this range's own values only (before its
         // first one the slope's jump above decides).
         if !self.manual && !self.ramp.first {
