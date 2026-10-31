@@ -1589,7 +1589,7 @@ impl App {
     /// the pages whose drawing is the same on every pass (a full-screen
     /// fill first, then widgets from the app state; their caches are reset
     /// by the draw itself); false: not such a page, or the buffer is busy
-    /// (a disk job holds calbackup::SCRATCH): the caller draws directly.
+    /// (a disk job holds diskbuf::ARENA): the caller draws directly.
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
@@ -1608,7 +1608,7 @@ impl App {
             self.sp.uncover = 0;
             self.sp_prepare();
         }
-        let Some(buf) = crate::calbackup::strip_take() else {
+        let Some(buf) = crate::diskbuf::strip_take() else {
             if scope {
                 crate::lcd::defer_start();
                 crate::scope_ui::invalidate();
@@ -1625,7 +1625,7 @@ impl App {
                 self.draw_static();
             }
         });
-        if !crate::calbackup::strip_give() {
+        if !crate::diskbuf::strip_give() {
             // A disk user took the buffer meanwhile: draw it again.
             crate::lcd::defer_start();
             self.draw_static();

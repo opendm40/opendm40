@@ -286,7 +286,7 @@ file's header there), and only the low 512 KiB of the flash are zero-wait
             end of image below 0x080A0000 (FS-loader above)
 RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
      SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the disk
-          scratch arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
+          buffer arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
 ```
 
 ### Memory budget (2026-10-22 rework)
@@ -322,8 +322,8 @@ the FFT / screenshot sharing below):
   worst case. stackdepth.py follows the dyn calls (its `INDIRECT` list).
 - **FFT work buffer** (superseded the same day, [ram-budget.md](ram-budget.md): the
   screenshot capture buffer CAP is gone, the screenshot streams from the
-  panel, and the FFT work buffer lives in the disk scratch arena
-  `calbackup::SCRATCH` with an ownership check; SRAM free 10.9 -> 60.7 KB.
+  panel, and the FFT work buffer lives in the disk buffer arena
+  `diskbuf::ARENA` (then `calbackup::SCRATCH`) with an ownership check; SRAM free 10.9 -> 60.7 KB.
   As it was before that:) (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
   arena with an explicit owner, the last 8 KiB of the screenshot capture
   buffer (`screenshot::CAP`, 48 KiB). The FFT renews a lease every time it
@@ -1024,7 +1024,7 @@ Pairs checked and not overlaid (each can be live with the other):
 | `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
 | `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
 | `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
-| `calbackup::SCRATCH` with `csvlog::TAIL` | a commit uses SCRATCH [0] / [1] and TAIL together |
+| `diskbuf::ARENA` with `csvlog::TAIL` | a commit uses ARENA [0] / [1] and TAIL together |
 | `fastlog::JOB` with `csvlog::JOB` | the sessions exclude each other, but each job keeps its result for LOG:CSV? / the fast logger's status after it ends |
 | `bt::TX` with the USBTMC reply buffer | both transports answer at the same time |
 | `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
