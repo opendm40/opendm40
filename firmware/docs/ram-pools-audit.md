@@ -69,7 +69,7 @@ to recreate it.
 | `scope_ch2::STORE` | 8 776 | scope_ch2.rs | M (`ch2_drain` from the logger ring) | page Scope with CH2 on (`ch2_want`: `View::Scope` only, not the combined / wave view); after a STOP it holds the stored record's CH2 and `ch2_rows` draws from it while CH2 is on, also after leaving and re-entering the page (*inferred* from `ch2_rows` / `ch2_want`: no reset until the next stream start) | stopped + CH2 on: yes (not rebuildable); running: no (`reset` at stream start); its scale (`scale().amps`) is read for the label | none |
 | `logger::RING` | 16 540 | logger.rs | ISR producer (AD2 stream) or M producer (AD1, `no-ad2-isr`); M consumer | an AD2 / AD1 stream: SCPI LOG:STATe ON (any view), a fast-log session, CH2, the wave view, the inrush capture | records are drained by LOG:DATA? / fastlog / the views; after `stop` nothing reads them except LOG:DATA? of a host session (*inferred*: "Captured data stays readable" in main.rs) | written by the ISR: never revocable while a stream runs; atomics only |
 | `csvlog::FIFO_BUF` | 8 192 | csvlog.rs | M | CSV recording (`fifo()`); fast-log session (`lend_fifo`); otherwise its first 6 144 B (`CAT_MAX`) are the MMEM:CAT? cache, warmed before every stream start | cache: droppable (`ok` cleared, rescan ~10 block reads); recording rows: until committed | none |
-| `calbackup::SCRATCH` | 12 288 | calbackup.rs | M | the disk arena: every disk job, the FFT work buffer, the strip renderer ([ram-budget.md](ram-budget.md#the-disk-scratch-arena-calbackupscratch-12-kib)) | no; FFT job: restartable (`GEN`) | none |
+| `diskbuf::ARENA` | 12 288 | diskbuf.rs | M | the disk arena: every disk job, the FFT work buffer, the strip renderer ([ram-budget.md](ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)) | no; FFT job: restartable (`GEN`) | none |
 | `bt::RX` | 1 024 | bt.rs | DMA0 ch2 circular (UART4 RX) + M | BT powered | no | DMA; not revocable while BT is on |
 | `bt::TX` | 6 656 | bt.rs | DMA0 ch4 + M | BT connected: one whole reply + stock frames | until sent | DMA, whole reply ([SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays)) |
 | `gen::WAVE` | 4 000 | gen.rs | DMA0 S5 circular (DAC) | generator output on (any view) | the table: rebuilt from the settings (`genplan`) | DMA; not revocable while on |
@@ -88,7 +88,7 @@ to recreate it.
 | static | B | module | access | lifetime | survives? |
 |---|---|---|---|---|---|
 | `APP` | 7 056 | main.rs | M | always (below) | yes |
-| `scope_page::FFT` | 4 128 | scope_page.rs | M | the last spectrum (`db` 4 100 B) and the job in flight; scope page FFT view | yes: kept when a job is dropped ([ram-budget.md](ram-budget.md#the-disk-scratch-arena-calbackupscratch-12-kib)) |
+| `scope_page::FFT` | 4 128 | scope_page.rs | M | the last spectrum (`db` 4 100 B) and the job in flight; scope page FFT view | yes: kept when a job is dropped ([ram-budget.md](ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)) |
 | `dmm::REC_COPY` | 1 024 | dmm.rs | M | always (settings / calibration record copy) | yes |
 | `dlog::SCPI_GEN` | 960 | dlog.rs | M | MMEM:DATA? of a CSV generated from a DLG | per transfer |
 | `vdisk::CSV_CUR`, `CSV_CUR2` | 952 each | vdisk.rs | M (per host byte) | host reads of the generated CSV files | per file read; restartable |
@@ -160,16 +160,16 @@ Buffers per activity (SRAM, B):
 | CH2 | + STORE 8 776, RING 16 540 |
 | wave view | GRAPH, CACHE, BUF (wave record from the ring), RING |
 | inrush page | BUF (lent), RING; not GRAPH / CACHE / STORE |
-| CSV recording | FIFO_BUF 8 192, TAIL 4 096 (USBHS), SCRATCH during commits, csvlog JOB |
-| fast log | RING, FIFO_BUF, SCRATCH, fastlog JOB 1 864 |
+| CSV recording | FIFO_BUF 8 192, TAIL 4 096 (USBHS), ARENA during commits, csvlog JOB |
+| fast log | RING, FIFO_BUF, ARENA, fastlog JOB 1 864 |
 | LOG:STAT ON | RING |
 | BT | RX 1 024, TX 6 656 |
 | USB volume | TAB 6 420, MSC_IO / MSC_BLK, CSV_CUR / CSV_CUR2 / SCPI_GEN on CSV reads, W0 1 376 in writable sessions |
-| disk job / FFT / strip repaint | SCRATCH 12 288 (shared today) |
+| disk job / FFT / strip repaint | ARENA 12 288 (shared today) |
 | gen output | WAVE 4 000 |
 
 Worst case on the scope page (CH2 on, recording refused then; BT, USB, a
-disk job, gen output): BUF + GRAPH + CACHE + STORE + RING + SCRATCH +
+disk job, gen output): BUF + GRAPH + CACHE + STORE + RING + ARENA +
 FIFO_BUF (cache) + TX/RX + TAB + WAVE = every big buffer. So no two SRAM
 buffers over 4 KiB can share bytes statically, except STORE with
 the CSV recording's FIFO_BUF use, which fails on the MMEM:CAT? cache that
@@ -310,7 +310,7 @@ One const table per pool: the specs (offset, length, rule) and
 
 | today | as tenants |
 |---|---|
-| `calbackup::SCRATCH`: disk users / `fft_work` / `strip_take` with `GEN`, `disk_job` | disk pool: `Disk` (Never while `disk_job()`), `FftWork` (Restart), `Strip` (Drop, inside one call) |
+| `diskbuf::ARENA`: disk users / `fft_work` / `strip_take` with `GEN`, `disk_job` | disk pool: `Disk` (Never while `disk_job()`), `FftWork` (Restart), `Strip` (Drop, inside one call) |
 | `csvlog::FIFO_BUF`: `fifo()` / `lend_fifo()` / the MMEM:CAT? cache | `Rec`, `FastLog` (Never), `CatCache` (Drop: `ok` cleared) |
 | `scope::BUF` lent to inrush | `ScopeRec` (Restart) vs `InrushRing` (Never while the page is open) |
 
@@ -318,7 +318,7 @@ One const table per pool: the specs (offset, length, rule) and
 
 | change | effect on this plan |
 |---|---|
-| the disk arena (`calbackup::SCRATCH`) moves into its own module | the disk pool above is that module's tenants; this plan does not rename it |
+| the disk arena moved into its own module (`diskbuf::ARENA`, #198) | the disk pool above is that module's tenants |
 | `src/acdcm.rs` behind the feature `acdc-meth` | `acdcm::AM` (480 B SRAM) leaves the default build: +240 samples for A |
 | `dlog::SCPI_GEN` + `vdisk::CSV_CUR` / `CSV_CUR2` as one 2-cursor pool | ~950 B TCM (stack headroom), not SRAM |
 | slow USB with scope CH2 | none on the layout; B's `Ch2Store` eviction must not add work on the CH2 path |
