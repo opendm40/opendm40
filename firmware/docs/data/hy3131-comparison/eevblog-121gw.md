@@ -206,15 +206,16 @@ range: offset int32, gain uint32 / 10⁶ (capacitance / 10⁵), then the four 16
 | internal thermistor | 0x2E0 (16-bit, ±1000) | DC VA (µ, m, —) | 0x3C0 / 0x400 / 0x440 |
 
 Defaults in code: HY3131 clock 49,152,050 (4.915205 MHz) when the stored value is outside 40,000,000..60,000,000;
-thermistor factor 0 outside ±1000; 50 MΩ factor 0 outside −3000..3000. Offsets and gains have no default.
+thermistor factor 0 outside ±1000; 50 MΩ factor 0 outside −3000..3000; AC coefficients 0 outside ±20000
+(20 kHz pair) / ±10000 (100 kHz pair). The per-range offset / gain loader has no default.
 EEPROM markers: byte 0x1F (ACV 5 V calibrated, 0xA5), byte 0x26 (50 MΩ, 0xA5).
 
 ## Board wiring (circuit diagram)
 
-- **PB7**: output of U17 **AD8436** (true RMS-to-DC, C_AVG 10 µF) via EXT_AC_OUT, U16 (HEF4053) switch X, and
-  R44 0 Ω. Its input RMS_IN comes through 1 µF from U15 (HEF4052) switch X: X1 = net AC (HY3131 OP1O), X2 = the
-  output of the 1 kHz filter built around OP2 (C38, R22, R23, C25, R28), X0 = TP7. U15 switch Y sends AC to that
-  filter (net LPF). MCU: CTL_D = PF4, CTL_E = PF5 (AC: X1, LPF: X2, other modes: X3 open), CTL_A = PD0 (low in AC).
+- **PB7**: output of U17 **AD8436** (true RMS-to-DC, C_AVG 10 µF) via EXT_AC_OUT and R44 0 Ω (U16 HEF4053
+  switch X in parallel). Its input RMS_IN comes through 1 µF from U15 (HEF4052) switch X: X1 = net AC (HY3131
+  OP1O), X2 = net 1kHz, X0 = TP7. U15 switch Y sends AC to net LPF; LPF → R28 → the OP2O pin → C38, R22, R23, C25
+  → 1kHz, a passive RC network (OP2 is off in every row; the 1 kHz corner is *inferred* from the net name). MCU: CTL_D = PF4, CTL_E = PF5 (AC: X1, LPF: X2, other modes: X3 open), CTL_A = PD0 (low in AC).
 - OP1O → R24 90 k → OP1N → R25 10 k → AGND (the ×10 network); OP1O → C51 1 µF → PB4 with R78 1 M to AGND.
 - PB0: U16 switch Y adds C45 1.5 nF to AGND in Ω (CTL_B = PC11). PB6: ADR3412 1.2 V reference (ZD1). HY3131
   clock 4.9152 MHz crystal (X1).

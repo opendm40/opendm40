@@ -220,8 +220,9 @@ same signal for the frequency readout (ENCTR = 1).
   the chopper off.
 - 121GW: the normal AC mV rows read AD1 (unchopped, OSR 2048) on PB7 with AD2,
   LPF and RMS off. PB7 is the DC output of an AD8436 true-RMS converter fed
-  from OP1O (the 121GW circuit diagram); the LPF key inserts a 1 kHz filter
-  built around OP2 before it. AD2 + RMS + peak run only in the "1 ms peak"
+  from OP1O (the 121GW circuit diagram); the LPF key routes it through a
+  passive RC network on the OP2O pin first (OP2 is off; the 1 kHz corner is
+  *inferred* from the net name). AD2 + RMS + peak run only in the "1 ms peak"
   table, which uses only the peak-hold result.
   Keysight runs AD2 on PB7 with the LPF on and ENRMS = 0 in every row.
 - Metrix has AD2, LPF and RMS off in every row: AD1 reads PB1 − PB5 (OSR
@@ -417,9 +418,9 @@ DM40 Rref: 1 k .. 10 M and 63 M on PA2..PA7 (*inferred* from the stock scaling,
   OP1 enabled on PB8 (x10, purpose unknown) and SFT1 open; Hycon reads PB0 directly on the middle ranges.
 - 121GW v2.05 cut the OSR on 50 Ω..500 kΩ by 4 against v1.02 (OSR 512..2048)
   and raised 5 MΩ to 32768, with a software moving average of 5..20 readings.
-  It adds 1.5 nF from PB0 to AGND in Ω (U16). Its 50 MΩ row opens PA0's
-  bus switch, and the 5 / 50 MΩ software corrections are skipped, until the
-  50 MΩ calibration step writes its EEPROM marker.
+  It adds 1.5 nF from PB0 to AGND in Ω (U16). While EEPROM byte 0x26 ≠ 0xA5
+  (the byte the 50 MΩ calibration step writes) its 50 MΩ row opens PA0's bus
+  switch and the 5 / 50 MΩ software corrections are skipped.
 - 4-wire: only the OWON (sense on PB2 − PB5, `FRES`); the others have no 4-wire
   rows.
 - Metrix: ratiometric r0..r3 with Rref on PA5 / PA7 / PA8 / PA3, current
@@ -664,7 +665,7 @@ HY3131 has a die sensor read by AD1 with SAD1I = 10 (TS1P / TS2N) and 11
 | | DM40 stock V2.6 | 121GW | Digilent | Temco | OWON XDM2041 | Keysight | Metrix MTX3293 |
 |---|---|---|---|---|---|---|---|
 | mode change | R26, R34, R36 = 0; relays; R20..R35 (22 bytes); INTE = 0; poll INTF | 20 bytes R20..R33 from the row table; R1E..R1F = 00, INTE (AD1IE; + CTIE in AC; RMSIE + CTIE in 1 ms peak; CTIE in cap / Hz); counter restart (ENCTR off, R1B..R1D = 00 + CTA preset, read back, ENCTR on); calibration; then the AC-path muxes and relays (GPIO); no read-back | R37 = 0x60 (reset) every scale change, then INTE + R20..R36 (24 bytes), read back and compared with a mask | 20 bytes from R20, then INTF = 0x02 and INTE (ESP32 driver) | R20 ENCMP off at once, then all 56 bytes R00..R37 in one burst; 74HC595 relay byte before every reading | buffer of 20 bytes from the table, per-range overlays, 22 bytes sent (R20..R34; R34 unset) | relays, then one 25-byte burst R1E..R36 (INTF = 0, INTE from the row); R37 = 0x60 only when the driver opens; no read-back |
-| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | none in hardware; calibrated offset subtracted, plus a stored zero on range 0 of each current mode | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | unknown | 12-bit MCU DAC loaded from a calibration record on every V / A range change (offset trim, *inferred*); OP1 and AD1 chopping in the rows |
+| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | no zero row (AD1CHOP = 10 in the DC rows); calibrated offset subtracted, plus a stored zero on range 0 of each current mode | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | unknown | 12-bit MCU DAC loaded from a calibration record on every V / A range change (offset trim, *inferred*); OP1 and AD1 chopping in the rows |
 | speed / OSR | R22 0x15 (8192) while the reading moves, 0x17 (32768) when steady (DC V 0x206 codes, DC mV 3618 / 1218, DC A 0x168); ohm 0x13 on overload, 0x17 in range; continuity 0x14 / 0x17 | R22 only from the rows; no other R22 write. Software moving average instead: N 2..20 readings, restarted when a reading leaves a ±W window (DC V 2 / 2, DC mV 10 / 5, AC 10 / 20, Ω 5..20 / 10..100) | fixed R22 0x17 (OSR 32768) | unknown | speed key: R22 OSR {4096, 2048, 2048} by a single R22 write | a flag sets R22 = 0x11 (OSR 512) and changes LPFBW | R22 only from the rows (AD1 period 100 ms; 200 ms in mode 10); no other R22 write |
 | autorange first conversion | settle deadlines after each range write (ohm 150 ms, DC V 250 ms, AC V 450 ms, …) | autorange held for N readings after a change (DC V 2, AC V 3, AC mV 4, DC mV 1, Ω 1..2, cap 1, Low-Z DC 5, 1 ms peak 5, else 3); up > 110 % of full scale, down < 10 %; Ω down-range blocked for 100 timer ticks after an up-range | — | unknown | after a range change OSR 1024 (Ω, DC A) / LPFBW 5 (AC A) for the first conversion | unknown | unknown |
 | AC trim (ACC) | none, R30 = 0x80 | table values only: 0, except 25 / 48 in the 1 ms peak 5 V / 50 V rows; frequency response corrected in software (per-range tables × two calibrated coefficients) | 127 fixed | table values | per-unit calibration byte into R30 on 5 V / 50 V | calibrated value on mode 1 range 0 | 16-bit calibration word per range: ACC (R30), P0..P2 (the power-bus switches of PA0..PA2) and three MCU GPIOs; 0 in V DC |
