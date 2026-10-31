@@ -12,7 +12,7 @@ Field names and option tables follow
 |---|---|---|---|
 | Hycon reference | — | (a) application note APD-DMM003 "HY313X Configurations": block diagrams with the active switches and mux inputs drawn in red, read by eye (lines starting "APD p.N" in the Hycon column; where the drawing is ambiguous, e.g. whether the AD1 reference buffers are on, nothing is listed); (b) register images of Hycon's "HY313x ENOB V1.4" evaluation tool (`Config/*/HYCONFIG-n.txt`, rows R20..R33 or R20..R36) | [`hycon-hy313x-configurations-apd-dmm003.pdf`](../../hw/datasheets/hycon-hy313x-configurations-apd-dmm003.pdf); ENOB rows: [`RESEARCH.md`](../../emu/hy3131/RESEARCH.md) §5 (the tool archive is not in the repository) |
 | Alientek DM40 stock V2.6 | GD32F427VGT6 | tables in the stock image (22 bytes, R20..R35); the open firmware carries them unchanged | [`src/hy3131_tables.rs`](../src/hy3131_tables.rs), two capacitance rows in [`src/dmm.rs`](../src/dmm.rs) (`CFG_F13_R7`, `CFG_F13_DISCHARGE`) |
-| EEVblog 121GW | STM32L152 (the [88mph](https://github.com/tpwrules/121gw-88mph) project's linker script) | IDA tables of firmware v1.02 (20 bytes, R20..R33), each row searched in the nine release images v1.00..v2.05 | [tpwrules/121gw-re](https://github.com/tpwrules/121gw-re) `tables/hy_regtbl.h` |
+| EEVblog 121GW v2.05 | STM32L152ZD (schematic; image linked at 0x08006000) | static analysis of the plain update image: row tables (20 bytes, R20..R33) and the code that selects and edits them; v1.02 differences against the community IDA tables ([notes](data/hy3131-comparison/eevblog-121gw.md)) | EEVblog `EEVBlog2_05.zip`; [tpwrules/121gw-re](https://github.com/tpwrules/121gw-re) (v1.02 IDA database, `tables/hy_regtbl.h`), [121gw-88mph](https://github.com/tpwrules/121gw-88mph) |
 | Digilent DMM Shield | Arduino Uno / Mega 2560 / Due | source table (INTE + R20..R36) | [Digilent/Arduino-DMMShield-Library](https://github.com/Digilent/Arduino-DMMShield-Library) `dmm.cpp` |
 | Temco T3 | STM32F103 (tables), ESP32 (driver) | source tables (20 bytes, R20..R33). The STM32 project's `main.c` excludes the HY3131 task; which rows a shipped firmware writes is unknown | [temcocontrols/T3-programmable-controller-on-ESP32](https://github.com/temcocontrols/T3-programmable-controller-on-ESP32) `STM32/Multimeter/USER/HY3131_FunTable.h`, `main/hy3131_sw.c` |
 | OWON XDM2041 V1.7.2 | GD32F103CBT6 | SPI captures (bulk write R00..R37 per mode change) plus a static decompilation of the stock image ([notes](data/hy3131-comparison/owon-xdm2041.md)) | [PetteriAimonen/owon-xdm2041-info](https://github.com/PetteriAimonen/owon-xdm2041-info) `spi_captures/all_modes.txt` |
@@ -24,7 +24,7 @@ for the XDM2041) copies the OWON stock rows; its differences are listed under
 the OWON runtime notes.
 
 **Method.** One decoder turns every row (R20..R36, missing registers marked
-"not written") into named fields; every table below is generated from it, 372
+"not written") into named fields; every table below is generated from it, 379
 rows in all. The decoder output agrees with the hand decodes of DM40
 `CFG_F3[0]` (DC 60 mV, [`hy3131-frontend-2026-10-26.md`](hy3131-frontend-2026-10-26.md) §4),
 DM40 `CFG_F13[0]` (R21 = VDSC11 / VDSC5, SMODE 0x1A), Keysight row 0 and row 4
@@ -123,8 +123,9 @@ everywhere.
   range, OWON 0. DM40 AGND is 0.3 · VDDA here (as on DC V 6 V, ohm and
   temperature; 0.5 on DC V ≥60 V, AC and DC A), and its
   comparator stays enabled on PB4 in every DC row.
-- 121GW sets AD1CHOP = 11 on 50 mV and OSR 256 on 500 mV in the table; whether
-  the firmware changes R22 at run time is unknown.
+- 121GW sets AD1CHOP = 11 on 50 mV and OSR 256 on 500 mV in the table and
+  never rewrites R22; it averages up to 10 readings in software instead
+  ([notes](data/hy3131-comparison/eevblog-121gw.md#runtime-logic)).
 
 ## DC V
 
@@ -218,7 +219,10 @@ same signal for the frequency readout (ENCTR = 1).
 - DM40 keeps OP1 chopped at 2 kHz in AC (OWON also on 500 mV); the others turn
   the chopper off.
 - 121GW: the normal AC mV rows read AD1 (unchopped, OSR 2048) on PB7 with AD2,
-  LPF and RMS off; AD2 + RMS + peak are used only in the "1 ms peak" table.
+  LPF and RMS off. PB7 is the DC output of an AD8436 true-RMS converter fed
+  from OP1O (the 121GW circuit diagram); the LPF key inserts a 1 kHz filter
+  built around OP2 before it. AD2 + RMS + peak run only in the "1 ms peak"
+  table, which uses only the peak-hold result.
   Keysight runs AD2 on PB7 with the LPF on and ENRMS = 0 in every row.
 - Metrix has AD2, LPF and RMS off in every row: AD1 reads PB1 − PB5 (OSR
   16384) while the comparator on PB3 drives the counter; the AC value comes
@@ -237,23 +241,23 @@ part.
 
 | field | Hycon ENOB tool rows | DM40 stock | 121GW | Digilent | Temco | OWON XDM2041 | Keysight U128xA (mode mapping inferred) | Metrix MTX3293 (mode mapping inferred) |
 |---|---|---|---|---|---|---|---|---|
-| AD1 input (+ / −) | AD1 off | AD1 off | PB7 - PB3 (5.0000V, 50.000V, 500.00V, 1000.0V)<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | PB1 - PB5 |
-| AD1 reference (+ / −) | AD1 off | AD1 off | PB6 - AGND (5.0000V, 50.000V, 500.00V, 1000.0V)<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | PB6 - PB5 |
-| AD1IG | AD1 off | AD1 off | 0.9 (5.0000V, 50.000V, 500.00V, 1000.0V)<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | 0.9 |
-| AD1RG | AD1 off | AD1 off | 1 (5.0000V, 50.000V, 500.00V, 1000.0V)<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | 1 |
-| R22: OSR1, AD1CHOP, DCOS (period) | AD1 off | AD1 off | AD1 off<br>OSR 1024, CHOP 00, DCOS 0 (6.2 ms) (5.0000V, 50.000V, 500.00V)<br>OSR 256, CHOP 00, DCOS 0 (1.6 ms) (1000.0V) | AD1 off | AD1 off | AD1 off | AD1 off | OSR 16384, CHOP 01, DCOS 0 (100.0 ms) (V AC r1, V AC r2)<br>OSR 8192, CHOP 10, DCOS 0 (100.0 ms) (V AC r3, V AC r4) |
-| AD1 buffers (H L P N) | AD1 off | AD1 off | PN (5.0000V, 50.000V, 500.00V, 1000.0V)<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | HLPN<br>HP (V AC r1) |
-| SFT1 pre-filter R | 100k | open | open (5.0000V, 50.000V, 500.00V, 1000.0V)<br>100k (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | 100k | 100k | 100k | open | 100k |
-| OP1 (+ input, OPS1, chop) | on +SENSE OPS1=0 chop off<br>APD p22 +SENSE x1, chop 00 | on +SENSE OPS1=0 chop 2 kHz<br>on +SENSE OPS1=1 chop 2 kHz (6 V) | on +SENSE OPS1=1 chop off (5.0000V, 50.000V, 500.00V, 1000.0V)<br>on +SENSE OPS1=0 chop off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | on +SENSE OPS1=0 chop off | on +SENSE OPS1=0 chop off<br>on +PB1 OPS1=0 chop off (6V ZERO) | on +SENSE OPS1=0 chop off | on +PB1 OPS1=1 chop off | on +SENSE OPS1=0 chop off<br>on +SENSE OPS1=1 chop off (V AC r1) |
+| AD1 input (+ / −) | AD1 off | AD1 off | PB7 - PB3<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | PB1 - PB5 |
+| AD1 reference (+ / −) | AD1 off | AD1 off | PB6 - AGND<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | PB6 - PB5 |
+| AD1IG | AD1 off | AD1 off | 0.9<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | 0.9 |
+| AD1RG | AD1 off | AD1 off | 1<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | 1 |
+| R22: OSR1, AD1CHOP, DCOS (period) | AD1 off | AD1 off | AD1 off<br>OSR 1024, CHOP 00, DCOS 0 (6.2 ms) (5.0000V, 50.000V, 500.00V)<br>OSR 256, CHOP 00, DCOS 0 (1.6 ms) (1000.0V, LowZ AC (edited 1000.0V row)) | AD1 off | AD1 off | AD1 off | AD1 off | OSR 16384, CHOP 01, DCOS 0 (100.0 ms) (V AC r1, V AC r2)<br>OSR 8192, CHOP 10, DCOS 0 (100.0 ms) (V AC r3, V AC r4) |
+| AD1 buffers (H L P N) | AD1 off | AD1 off | PN<br>AD1 off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | AD1 off | AD1 off | AD1 off | AD1 off | HLPN<br>HP (V AC r1) |
+| SFT1 pre-filter R | 100k | open | open<br>100k (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | 100k | 100k | 100k | open | 100k |
+| OP1 (+ input, OPS1, chop) | on +SENSE OPS1=0 chop off<br>APD p22 +SENSE x1, chop 00 | on +SENSE OPS1=0 chop 2 kHz<br>on +SENSE OPS1=1 chop 2 kHz (6 V) | on +SENSE OPS1=1 chop off<br>on +SENSE OPS1=0 chop off (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | on +SENSE OPS1=0 chop off | on +SENSE OPS1=0 chop off<br>on +PB1 OPS1=0 chop off (6V ZERO) | on +SENSE OPS1=0 chop off | on +PB1 OPS1=1 chop off | on +SENSE OPS1=0 chop off<br>on +SENSE OPS1=1 chop off (V AC r1) |
 | OP2 (+ input, OPS2) | off | off | off | off | off | off | on +AGND OPS2=1 | on +AGND OPS2=1 |
-| PA switches | P9 P8 PDS7 F1 F0 (ACV-0)<br>F9 P8 PDS6 F1 F0 (ACV-1)<br>F9 P8 PS5 F1 F0 (ACV-2)<br>F9 P8 PS4 F1 F0 (ACV-3)<br>APD p18 5 V: PS9 PS8 PS7 DS7 SS7; p19 50 V: PS8 PS6 DS6 SS6 FS9 FS1; p20–21: PS8 PS5/PS4 SS FS9 FS1 | F9 P8 PS6 F1<br>F9 P8 PS5 F1 (600 V)<br>F9 P8 PS5 PS4 F1 (1000 V) | P9 P8 PS4<br>P9 P8 PS6 (5.0000V, 50.000V 1ms-pk)<br>P9 P8 PS5 (50.000V, 500.00V 1ms-pk)<br>P9 P8 PS7 (5.0000V 1ms-pk) | F9 P8 PDS6 F1 F0 (30 V)<br>P9 P8 PDS7 F1 F0 (5 V) | P7 PS3<br>P7 PS2 (60V)<br>P7 PS1 (600V)<br>P7 PS0 (1000V) | F9 P8 PS5 F1 F0<br>P9 P8 PDS7 F1 F0 (AC 5)<br>F9 P8 PS6 F1 F0 (AC 50) | S7 P5 PDS3 | P9 PDS8 (V AC r1)<br>P9 PDFS8 (V AC r2)<br>P9 PDFS7 (V AC r3)<br>P9 PDS6 (V AC r4) |
-| R2F ENVS, SMODE | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x30: bus none, SMODE4 (RLU), SMODE5 (ACC array) (5.0000V, 50.000V, 500.00V, 1000.0V)<br>ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x00: bus none | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) |
-| OP3 VREF (SFUVR) | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=0: VDS17 (5.0000V, 50.000V, 500.00V, 1000.0V)<br>SFUVR=7: AGNDP0 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=0: VDS17 | SFUVR=7: AGNDP0 |
+| PA switches | P9 P8 PDS7 F1 F0 (ACV-0)<br>F9 P8 PDS6 F1 F0 (ACV-1)<br>F9 P8 PS5 F1 F0 (ACV-2)<br>F9 P8 PS4 F1 F0 (ACV-3)<br>APD p18 5 V: PS9 PS8 PS7 DS7 SS7; p19 50 V: PS8 PS6 DS6 SS6 FS9 FS1; p20–21: PS8 PS5/PS4 SS FS9 FS1 | F9 P8 PS6 F1<br>F9 P8 PS5 F1 (600 V)<br>F9 P8 PS5 PS4 F1 (1000 V) | P9 P8 PS4<br>P9 P8 PS6 (5.0000V, 50.000V 1ms-pk)<br>P9 P8 PS5 (50.000V, 500.00V 1ms-pk)<br>F9 P8 PS4 F1 (LowZ AC (edited 1000.0V row))<br>P9 P8 PS7 (5.0000V 1ms-pk) | F9 P8 PDS6 F1 F0 (30 V)<br>P9 P8 PDS7 F1 F0 (5 V) | P7 PS3<br>P7 PS2 (60V)<br>P7 PS1 (600V)<br>P7 PS0 (1000V) | F9 P8 PS5 F1 F0<br>P9 P8 PDS7 F1 F0 (AC 5)<br>F9 P8 PS6 F1 F0 (AC 50) | S7 P5 PDS3 | P9 PDS8 (V AC r1)<br>P9 PDFS8 (V AC r2)<br>P9 PDFS7 (V AC r3)<br>P9 PDS6 (V AC r4) |
+| R2F ENVS, SMODE | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x30: bus none, SMODE4 (RLU), SMODE5 (ACC array)<br>ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) | ENVS=1 SMODE=0x00: bus none | ENVS=1 SMODE=0x20: bus none, SMODE5 (ACC array) |
+| OP3 VREF (SFUVR) | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=0: VDS17<br>SFUVR=7: AGNDP0 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=7: AGNDP0 | SFUVR=0: VDS17 | SFUVR=7: AGNDP0 |
 | SDIO (PB0–PB8) | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 0 |
 | REFO, AGND, ACM | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.5 V | ENREFO=1 SREFO=1 (PB6) AGND=0.5 VDDA ACM=1.2 V |
 | ACC (R30) | 0 (0.0 pF)<br>25 (5.0 pF) (ACV-0)<br>48 (9.6 pF) (ACV-1)<br>APD p18–19 capacitor array on DS bus (value not given) | 0 (0.0 pF) | 0 (0.0 pF)<br>25 (5.0 pF) (5.0000V 1ms-pk)<br>48 (9.6 pF) (50.000V 1ms-pk) | 127 (25.4 pF) | 25 (5.0 pF) (6V, 6V ZERO)<br>0 (0.0 pF) (600V, 1000V)<br>48 (9.6 pF) (60V) | 0 (0.0 pF)<br>105 (21.0 pF) (AC 5)<br>127 (25.4 pF) (AC 50) | 64 (12.8 pF) | 0 (0.0 pF) |
-| AD2 in / ref / gain | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1<br>APD p22 OP1O − AGND; ref REFO − AGND; IG 0.5 | PB4 - AGND; ref PB6 - AGND; IG 1.0, RG 1 | off (5.0000V, 50.000V, 500.00V, 1000.0V)<br>OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 | OP1O - AGND; ref REFO - AGND; IG 0.5, RG 1 | PB7 - AGND; ref PB6 - PB3; IG 1.5, RG 1/3 | off |
-| R26 AD2: OSR2, clock, chop | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/2, CHOP 0 | off (5.0000V, 50.000V, 500.00V, 1000.0V)<br>OSR2 1024, CLK SYSCLK/2, CHOP 0 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/4, CHOP 0 | OSR2 64, CLK SYSCLK/4, CHOP 0 | off |
+| AD2 in / ref / gain | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1<br>APD p22 OP1O − AGND; ref REFO − AGND; IG 0.5 | PB4 - AGND; ref PB6 - AGND; IG 1.0, RG 1 | off<br>OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 | OP1O - PB3; ref REFO - AGND; IG 0.5, RG 1 | OP1O - AGND; ref REFO - AGND; IG 0.5, RG 1 | PB7 - AGND; ref PB6 - PB3; IG 1.5, RG 1/3 | off |
+| R26 AD2: OSR2, clock, chop | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/2, CHOP 0 | off<br>OSR2 1024, CLK SYSCLK/2, CHOP 0 (5.0000V 1ms-pk, 50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk) | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/2, CHOP 0 | OSR2 32, CLK SYSCLK/4, CHOP 0 | OSR2 64, CLK SYSCLK/4, CHOP 0 | off |
 | R29 LPF / RMS / peak | ENRMS=1 ENLPF=1 OSR4 16384 ENPKH=0 PKHSEL=AD2<br>APD p22 LPFBW 111, ENLPF, ENRMS | ENRMS=1 ENLPF=1 OSR4 16384 ENPKH=1 PKHSEL=AD2 | off<br>ENRMS=1 ENLPF=1 OSR4 4096 ENPKH=1 PKHSEL=AD2 (50.000V 1ms-pk, 500.00V 1ms-pk, 1000.0V 1ms-pk)<br>ENRMS=1 ENLPF=1 OSR4 128 ENPKH=1 PKHSEL=AD2 (5.0000V 1ms-pk) | ENRMS=1 ENLPF=1 OSR4 16384 ENPKH=0 PKHSEL=AD2 | ENRMS=1 ENLPF=1 OSR4 16384 ENPKH=0 PKHSEL=AD2 | ENRMS=1 ENLPF=1 OSR4 16384 ENPKH=0 PKHSEL=AD2 | ENRMS=0 ENLPF=1 OSR4 2048 ENPKH=0 PKHSEL=AD2 | off |
 | AD3, SVXI, SDO23 (R34, R35) | AD3 off (R34=0x02) (ACV-0, ACV-3)<br>not written (ACV-1, ACV-2) | ENAD3=1 CHOP=0 RG=1 SVXI=1 SDO23=0; in PB4 - AGND, IG 1.0 | not written | off (0x00) (30 V)<br>AD3 off (R34=0x02) (5 V) | not written | off (0x00) | not written | off (0x00) |
 | SPHACAL (R36) | 0x0c (ACV-0, ACV-3)<br>not written (ACV-1, ACV-2) | not written | not written | 0x00 (30 V)<br>0x0c (5 V) | not written | 0x00 | not written | 0x00 |
@@ -267,12 +271,18 @@ part.
   doc](hy3131-frontend-2026-10-26.md) §3); Hycon 25 / 48 (5.0 / 9.6 pF) on the
   two low ranges, Digilent 127, Keysight 64 (127 on one range, and a calibrated
   value on another); OWON loads it per unit from calibration (E9 / FF in the
-  capture are one unit's values).
+  capture are one unit's values). 121GW uses the Hycon values in its 1 ms peak
+  rows only, never writes R30 at run time, and corrects the frequency response
+  in software instead: per-range tables of percent against frequency scale two
+  calibrated coefficients
+  ([notes](data/hy3131-comparison/eevblog-121gw.md#ac-frequency-response-correction)).
 - DM40 compensates with FS9 + FS1 (no FS0) and the tap on the bus (PS6 on 6 V
   and 60 V, OP1 x10 on 6 V); Hycon and OWON close FS0 / FS1 / FS9 and drive
   the tap with DS as well on the low range (PDS7).
 - DM40 enables AD3 + SVXI (ΣXY) and the peak-hold on AD2 (ENPKH = 1); 121GW
-  normal rows use AD1 on PB7 with AD2 off, as in AC mV.
+  normal rows use AD1 on PB7 (the AD8436 output) with AD2 off, as in AC mV.
+  121GW Low-Z in AC sends the 1000 V row with PA9 moved from the bus to FB and
+  FS1 added.
 - Metrix: ACC 0 in the rows; at run time a 16-bit calibration word sets ACC,
   P0..P2 and three MCU-switched parts (see the runtime table).
 
@@ -289,11 +299,11 @@ the mA and µA ranges share one row. The Hycon board has 0.01 / 0.99 / 99 Ω
 |---|---|---|---|---|---|---|---|---|
 | AD1 input (+ / −) | PB1 - PB3 (Current-0, Current-2)<br>OP1O - PB3 (Current-1, Current-3)<br>APD p45 50 mA OP1O − PB3; p46 500 mA PB1 − PB3 | OP1O - PB3 | PB1 - AGND | PB1 - PB3<br>OP1O - PB3 (50 mA, 500 uA) | OP1O - PB3 (60mA, 6A)<br>PB1 - PB3 (600mA, 10A) | OP1O - PB3<br>PB1 - PB3 (DC 0.005, DC 0.5) | OP1O - AGND | OP1O - PB5 |
 | AD1 reference (+ / −) | PB6 - AGND<br>APD p45–46 PB6 − AGND (REFO block drawn black) | PB6 - AGND | PB6 - AGND | PB6 - AGND | PB6 - AGND | REFO - AGND | PB6 - PB3 | PB6 - PB5 |
-| AD1IG | 1.8<br>APD p45–46 1.8 | 0.9 | 1.8<br>3.6 (500.00mA) | 1.8 | 1.8 (60mA, 600mA)<br>0.9 (6A, 10A) | 1.8<br>0.9 (DC 10) | 0.9 | 0.9<br>2.7 (A DC r4, A DC r5) |
-| AD1RG | 1 | 1 | 1<br>1/3 (500.00mA) | 1 | 1 | 1 | 1/3 | 1 |
+| AD1IG | 1.8<br>APD p45–46 1.8 | 0.9 | 1.8<br>3.6 (500.00mA, DC power 500.00mA) | 1.8 | 1.8 (60mA, 600mA)<br>0.9 (6A, 10A) | 1.8<br>0.9 (DC 10) | 0.9 | 0.9<br>2.7 (A DC r4, A DC r5) |
+| AD1RG | 1 | 1 | 1<br>1/3 (500.00mA, DC power 500.00mA) | 1 | 1 | 1 | 1/3 | 1 |
 | R22: OSR1, AD1CHOP, DCOS (period) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (Current-0, Current-1)<br>OSR 16384, CHOP 10, DCOS 0 (200.0 ms) (Current-2, Current-3) | OSR 8192, CHOP 10, DCOS 0 (100.0 ms) | OSR 1024, CHOP 10, DCOS 0 (12.5 ms) | OSR 32768, CHOP 10, DCOS 0 (400.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 8192, CHOP 10, DCOS 0 (100.0 ms)<br>OSR 16384, CHOP 01, DCOS 0 (100.0 ms) (A DC r4, A DC r5) |
 | AD1 buffers (H L P N) | HPN | PN<br>none (6 A) | HPN | HPN | HLPN | HPN | none | HPN |
-| SFT1 pre-filter R | 100k<br>APD p45–46 100k | open<br>10k (mA,µA r0) | open | 100k | 100k | open | open | 100k |
+| SFT1 pre-filter R | 100k<br>APD p45–46 100k | open<br>10k (mA,µA r0) | 100k (500.00mA, 5.0000A, 10.000A)<br>open (DC power 500.00mA, DC power 5.0000A, DC power 10.000A) | 100k | 100k | open | open | 100k |
 | OP1 (+ input, OPS1, chop) | off (Current-0, Current-2)<br>on +PB1 OPS1=1 chop 2 kHz (Current-1, Current-3)<br>APD p45 +PB1 x10 chop 2 kHz; p46 off | on +PB2 OPS1=1 chop 2 kHz (6 A)<br>on +PB2 OPS1=0 chop 2 kHz (10 A)<br>on +PB1 OPS1=1 chop 2 kHz (mA,µA r0)<br>on +PB1 OPS1=0 chop 2 kHz (mA,µA r1) | off | off<br>on +PB1 OPS1=1 chop 2 kHz (50 mA, 500 uA) | off<br>on +PB1 OPS1=1 chop 2 kHz (60mA)<br>on +PB1 OPS1=0 chop 2 kHz (6A) | on +PB1 OPS1=1 chop 2 kHz<br>off (DC 0.005, DC 0.5) | on +PB1 OPS1=1 chop off | on +PB8 OPS1=1 chop 1 kHz<br>on +PB8 OPS1=1 chop 2 kHz (A DC r4, A DC r5) |
 | OP2 (+ input, OPS2) | off | off | off | off | off | off | off | off |
 | PA switches | none | P8 | none | none | none | none | P5 PFS1 | P9 |
@@ -313,7 +323,8 @@ the mA and µA ranges share one row. The Hycon board has 0.01 / 0.99 / 99 Ω
 - DM40 routes every range through OP1 (x10 on the low range of each shunt, x1 on
   the high one) and reads OP1O − PB3; Hycon, Digilent, Temco and OWON alternate
   OP1 x10 and the bare shunt pin; 121GW reads PB1 directly and changes AD1IG
-  (1.8 / 3.6) and AD1RG (1 / 1/3) instead.
+  (1.8 / 3.6) and AD1RG (1 / 1/3) instead. Its v2.05 DC A rows use SFT1 100 k;
+  the VA / burden rows (and v1.02 for both) leave it open.
 - DM40 AD1IG is 0.9 on every range (others 1.8, 0.9 only on 10 A for OWON /
   Temco). DM40 sets SFT1 = 10 k on the low mA / µA range (60 mA, 600 µA) and
   open elsewhere.
@@ -355,7 +366,7 @@ AC V.
 - DM40: AD2 on OP1O − PB3 with IG 1.0, reference PB6, AD3 + SVXI, peak-hold
   on, OP1 chopped at 2 kHz; the A ranges use LPF OSR4 8192 instead of 16384.
   Hycon, Digilent and Temco: IG 0.5, reference REFO, chopper off.
-- 121GW normal rows: AD1 on PB7 (OSR 1024), AD2 off.
+- 121GW normal rows: AD1 on PB7 (OSR 1024, the AD8436 output), AD2 off.
 
 ## Ohms
 
@@ -372,17 +383,17 @@ DM40 Rref: 1 k .. 10 M and 63 M on PA2..PA7 (*inferred* from the stock scaling,
 | field | Hycon ENOB tool rows | DM40 stock | 121GW | Digilent | Temco | OWON XDM2041 | Keysight U128xA (mode mapping inferred) | Metrix MTX3293 (mode mapping inferred) |
 |---|---|---|---|---|---|---|---|---|
 | AD1 input (+ / −) | PB0 - PB3<br>OP1O - PB3 (OHM-0, OHM-1)<br>FB - RLU (SAD1I=1; filter mux PB0 - PB3) (OHM-8)<br>APD p35 50 Ω OP1O − PB3 (OP1 x10); p36, p41 PB0 − PB3 | OP1O - PB3 | PB0 - PB3 | PB0 - PB3<br>OP1O - PB3 (500 Ohm, 50 Ohm) | PB0 - PB3<br>OP1O - PB3 (60, 600, 6K, 60K) | PB0 - PB3<br>PB2 - PB5 (FRES 500, FRES 5E3, FRES 50E3) | OP1O - AGND | OP1O - PB5<br>PB2 - PB5 (Ω r4, Ω r5) |
-| AD1 reference (+ / −) | FB - RLU<br>VDDA - VSSA (OHM-4, OHM-5, OHM-6)<br>FB - AGND (OHM-7, OHM-8)<br>APD p35–36 FB − RLU; p41 (500 k..50 M) VDDA − VSSA | FB - RLU<br>REFO - AGND (60 M) | FB - RLU<br>VDDA - VSSA (5.0000M Ω, 50.000M Ω) | FB - RLU<br>VDDA - VSSA (50M Ohm, 5M Ohm, 500k Ohm) | FB - RLU<br>PB6 - AGND (CC0, CC1, CC2, CC3, CC4)<br>VDDA - VSSA (600K, 6M, 60M) | FB - RLU<br>VDDA - VSSA (RES 5E6, RES 50E6) | FB - RLU | FB - RLU<br>REFO - PB5 (Ω r4, Ω r5, mode 6) |
+| AD1 reference (+ / −) | FB - RLU<br>VDDA - VSSA (OHM-4, OHM-5, OHM-6)<br>FB - AGND (OHM-7, OHM-8)<br>APD p35–36 FB − RLU; p41 (500 k..50 M) VDDA − VSSA | FB - RLU<br>REFO - AGND (60 M) | FB - RLU<br>VDDA - VSSA (5.0000M Ω, 50.000M Ω, 50.000M Ω (PA0 P open)) | FB - RLU<br>VDDA - VSSA (50M Ohm, 5M Ohm, 500k Ohm) | FB - RLU<br>PB6 - AGND (CC0, CC1, CC2, CC3, CC4)<br>VDDA - VSSA (600K, 6M, 60M) | FB - RLU<br>VDDA - VSSA (RES 5E6, RES 50E6) | FB - RLU | FB - RLU<br>REFO - PB5 (Ω r4, Ω r5, mode 6) |
 | AD1IG | 0.9 | 0.9 | 0.9 | 0.9 | 0.9 | 0.9 | 0.9 | 0.9 |
-| AD1RG | 1<br>1/3 (OHM-4, OHM-5, OHM-6)<br>APD p35–36 1; p41 1/3 | 1 | 1<br>1/3 (5.0000M Ω, 50.000M Ω) | 1<br>1/3 (50M Ohm, 5M Ohm, 500k Ohm) | 1<br>1/3 (600K, 6M, 60M) | 1<br>1/3 (RES 5E6, RES 50E6) | 1 | 1<br>1/3 (Ω r4, Ω r5) |
-| R22: OSR1, AD1CHOP, DCOS (period) | OSR 16384, CHOP 10, DCOS 0 (200.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 8192, CHOP 10, DCOS 0 (100.0 ms) (50.000 Ω, 500.00 Ω, 50.000M Ω)<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (50.000k Ω, 500.00k Ω, 5.0000M Ω)<br>OSR 2048, CHOP 10, DCOS 0 (25.0 ms) (5.0000k Ω) | OSR 32768, CHOP 10, DCOS 0 (400.0 ms) | OSR 16384, CHOP 10, DCOS 0 (200.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 16384, CHOP 01, DCOS 0 (100.0 ms) |
+| AD1RG | 1<br>1/3 (OHM-4, OHM-5, OHM-6)<br>APD p35–36 1; p41 1/3 | 1 | 1<br>1/3 (5.0000M Ω, 50.000M Ω, 50.000M Ω (PA0 P open)) | 1<br>1/3 (50M Ohm, 5M Ohm, 500k Ohm) | 1<br>1/3 (600K, 6M, 60M) | 1<br>1/3 (RES 5E6, RES 50E6) | 1 | 1<br>1/3 (Ω r4, Ω r5) |
+| R22: OSR1, AD1CHOP, DCOS (period) | OSR 16384, CHOP 10, DCOS 0 (200.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 2048, CHOP 10, DCOS 0 (25.0 ms) (50.000 Ω, 500.00 Ω)<br>OSR 1024, CHOP 10, DCOS 0 (12.5 ms) (50.000k Ω, 500.00k Ω)<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (50.000M Ω, 50.000M Ω (PA0 P open))<br>OSR 512, CHOP 10, DCOS 0 (6.2 ms) (5.0000k Ω)<br>OSR 32768, CHOP 10, DCOS 0 (400.0 ms) (5.0000M Ω) | OSR 32768, CHOP 10, DCOS 0 (400.0 ms) | OSR 16384, CHOP 10, DCOS 0 (200.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 4096, CHOP 10, DCOS 0 (50.0 ms) | OSR 16384, CHOP 01, DCOS 0 (100.0 ms) |
 | AD1 buffers (H L P N) | PN | PN<br>HLPN (600 k, 6 M) | PN<br>HLPN (50.000 Ω, 500.00 Ω) | PN | PN<br>HLPN (CV0, CV1, CV2, CV3, CV4) | PN | HLPN<br>none (m4 r0, m4 r1, m4 r2, m4 r3) | HLPN |
 | SFT1 pre-filter R | 100k<br>APD p35–41 100k | 0<br>100k (6 M, 60 M) | open<br>100k (500.00k Ω) | 100k | 100k | open | 100k | 100k |
-| OP1 (+ input, OPS1, chop) | off<br>on +PB0 OPS1=0 chop 2 kHz (OHM-1, OHM-5, OHM-6)<br>on +PB0 OPS1=1 chop 2 kHz (OHM-0) | on +PB0 OPS1=0 chop 1 kHz | on +PB0 OPS1=0 chop off<br>off (5.0000M Ω, 50.000M Ω) | on +PB0 OPS1=0 chop 2 kHz (50M Ohm, 5M Ohm, 500 Ohm)<br>off (500k Ohm, 50k Ohm, 5k Ohm)<br>on +PB0 OPS1=1 chop 2 kHz (50 Ohm) | on +PB0 OPS1=0 chop off<br>on +PB0 OPS1=0 chop 1 kHz (CC0, CC1, CC2, CC3, CC4)<br>on +PB0 OPS1=0 chop 2 kHz (600, 6M, 60M)<br>on +PB0 OPS1=1 chop 2 kHz (60)<br>off (600K) | on +PB8 OPS1=1 chop 2 kHz | on +PB1 OPS1=0 chop 2 kHz<br>on +PB1 OPS1=1 chop 2 kHz (m4 r0) | on +PB0 OPS1=0 chop 2 kHz |
+| OP1 (+ input, OPS1, chop) | off<br>on +PB0 OPS1=0 chop 2 kHz (OHM-1, OHM-5, OHM-6)<br>on +PB0 OPS1=1 chop 2 kHz (OHM-0) | on +PB0 OPS1=0 chop 1 kHz | on +PB0 OPS1=0 chop off<br>off (5.0000M Ω, 50.000M Ω, 50.000M Ω (PA0 P open)) | on +PB0 OPS1=0 chop 2 kHz (50M Ohm, 5M Ohm, 500 Ohm)<br>off (500k Ohm, 50k Ohm, 5k Ohm)<br>on +PB0 OPS1=1 chop 2 kHz (50 Ohm) | on +PB0 OPS1=0 chop off<br>on +PB0 OPS1=0 chop 1 kHz (CC0, CC1, CC2, CC3, CC4)<br>on +PB0 OPS1=0 chop 2 kHz (600, 6M, 60M)<br>on +PB0 OPS1=1 chop 2 kHz (60)<br>off (600K) | on +PB8 OPS1=1 chop 2 kHz | on +PB1 OPS1=0 chop 2 kHz<br>on +PB1 OPS1=1 chop 2 kHz (m4 r0) | on +PB0 OPS1=0 chop 2 kHz |
 | OP2 (+ input, OPS2) | off | off | off | off | off | off | off | off<br>on +PB2 OPS2=0 (Ω r4, Ω r5) |
-| PA switches | D9 D8 DF4 D3 (OHM-0, OHM-1)<br>D9 DF8 D3 (OHM-7, OHM-8)<br>D9 D8 DF5 D3 (OHM-2)<br>D9 D8 DF6 D3 (OHM-3)<br>P9 P6 P2 (OHM-4)<br>P9 P7 P2 (OHM-5)<br>P9 P2 (OHM-6)<br>APD p33 DS4 FS4 DS3 (10 nF); p34 DS5 FS5; p37 DS6 FS6; p38 PS6 PS2; p39 PS7 PS2; p40 PS2 | DF4 D3 (600 ohm)<br>DF5 D3 (6 k)<br>DF6 D3 (60 k)<br>DF7 DF2 (600 k)<br>DF2 (6 M)<br>P2 (60 M) | D8 DF4 D3<br>DF5 D3 (5.0000k Ω)<br>DF6 D3 (50.000k Ω)<br>DF7 D3 (500.00k Ω)<br>P9 P7 P2 (5.0000M Ω)<br>P2 P0 (50.000M Ω) | D9 D8 DF4 D3<br>P9 P2 (50M Ohm)<br>P9 P7 P2 (5M Ohm)<br>P9 P6 P2 (500k Ohm)<br>D9 D8 DF6 D3 (50k Ohm)<br>D9 D8 DF5 D3 (5k Ohm) | D4 DF0 (60, 600)<br>P5 P3 (600K, 6M)<br>D8 DF4 D3 (CV0)<br>D8 DF5 D3 (CV1)<br>D8 DF6 D3 (CV2)<br>D8 DF7 D3 (CV3)<br>DF8 DF5 D3 (CV4)<br>D4 DF1 (6K)<br>D4 DF2 (60K)<br>P5 (60M)<br>P4 D3 (CC0)<br>P5 D3 (CC1)<br>P6 D3 P2 (CC2)<br>P7 D3 P2 (CC3)<br>D3 P2 (CC4) | DF4 (RES 500, FRES 500)<br>DF5 (RES 5E3, FRES 5E3)<br>DF6 (RES 50E3, FRES 50E3)<br>DF7 (RES 500E3)<br>P7 (RES 5E6)<br>P2 (RES 50E6) | DF0<br>D8 DF1 (m4 r0)<br>DF1 (m4 r1)<br>DF2 (m4 r2)<br>DF3 (m4 r3)<br>DF4 (m4 r4) | DF5 (Ω r0)<br>DF7 (Ω r1)<br>DF8 (Ω r2)<br>DF3 (Ω r3)<br>P8 (Ω r4)<br>P4 (Ω r5)<br>none (mode 6) |
-| R2F ENVS, SMODE | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (OHM-4, OHM-5, OHM-6)<br>APD p33 SMODE 0100 (SVSO1) + SMODE4; p38–40 0110 (SVDD SVSO2 SCP) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (60 M) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (5.0000M Ω, 50.000M Ω) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (50M Ohm, 5M Ohm, 500k Ohm) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (600K, 6M, 60M, CC0, CC1, CC2, CC3, CC4) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (RES 5E6, RES 50E6) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (Ω r4, Ω r5)<br>ENVS=1 SMODE=0x00: bus none (mode 6) |
-| OP3 VREF (SFUVR) | SFUVR=3: AGNDP9<br>SFUVR=1: VDS16 (OHM-4, OHM-5, OHM-6)<br>SFUVR=2: VDS15 (OHM-0, OHM-1)<br>APD p33 VDS15; p34, p37 AGNDP9; p38–40 VDS16 | SFUVR=2: VDS15<br>SFUVR=1: VDS16 (60 M) | SFUVR=2: VDS15<br>SFUVR=3: AGNDP9 (5.0000k Ω, 50.000k Ω)<br>SFUVR=1: VDS16 (5.0000M Ω, 50.000M Ω) | SFUVR=1: VDS16<br>SFUVR=3: AGNDP9 (50k Ohm, 5k Ohm)<br>SFUVR=2: VDS15 (500 Ohm, 50 Ohm) | SFUVR=1: VDS16<br>SFUVR=2: VDS15 (CV0, CV1, CV2, CV3, CV4, 60, 600)<br>SFUVR=3: AGNDP9 (6K, 60K) | SFUVR=3: AGNDP9<br>SFUVR=2: VDS15 (RES 500, FRES 500)<br>SFUVR=1: VDS16 (RES 5E6, RES 50E6) | SFUVR=2: VDS15 | SFUVR=2: VDS15<br>SFUVR=15: PB7 (Ω r4, Ω r5) |
+| PA switches | D9 D8 DF4 D3 (OHM-0, OHM-1)<br>D9 DF8 D3 (OHM-7, OHM-8)<br>D9 D8 DF5 D3 (OHM-2)<br>D9 D8 DF6 D3 (OHM-3)<br>P9 P6 P2 (OHM-4)<br>P9 P7 P2 (OHM-5)<br>P9 P2 (OHM-6)<br>APD p33 DS4 FS4 DS3 (10 nF); p34 DS5 FS5; p37 DS6 FS6; p38 PS6 PS2; p39 PS7 PS2; p40 PS2 | DF4 D3 (600 ohm)<br>DF5 D3 (6 k)<br>DF6 D3 (60 k)<br>DF7 DF2 (600 k)<br>DF2 (6 M)<br>P2 (60 M) | D8 DF4 D3<br>DF5 D3 (5.0000k Ω)<br>DF6 D3 (50.000k Ω)<br>DF7 D3 (500.00k Ω)<br>P7 P2 (5.0000M Ω)<br>P2 P0 (50.000M Ω)<br>P2 (50.000M Ω (PA0 P open)) | D9 D8 DF4 D3<br>P9 P2 (50M Ohm)<br>P9 P7 P2 (5M Ohm)<br>P9 P6 P2 (500k Ohm)<br>D9 D8 DF6 D3 (50k Ohm)<br>D9 D8 DF5 D3 (5k Ohm) | D4 DF0 (60, 600)<br>P5 P3 (600K, 6M)<br>D8 DF4 D3 (CV0)<br>D8 DF5 D3 (CV1)<br>D8 DF6 D3 (CV2)<br>D8 DF7 D3 (CV3)<br>DF8 DF5 D3 (CV4)<br>D4 DF1 (6K)<br>D4 DF2 (60K)<br>P5 (60M)<br>P4 D3 (CC0)<br>P5 D3 (CC1)<br>P6 D3 P2 (CC2)<br>P7 D3 P2 (CC3)<br>D3 P2 (CC4) | DF4 (RES 500, FRES 500)<br>DF5 (RES 5E3, FRES 5E3)<br>DF6 (RES 50E3, FRES 50E3)<br>DF7 (RES 500E3)<br>P7 (RES 5E6)<br>P2 (RES 50E6) | DF0<br>D8 DF1 (m4 r0)<br>DF1 (m4 r1)<br>DF2 (m4 r2)<br>DF3 (m4 r3)<br>DF4 (m4 r4) | DF5 (Ω r0)<br>DF7 (Ω r1)<br>DF8 (Ω r2)<br>DF3 (Ω r3)<br>P8 (Ω r4)<br>P4 (Ω r5)<br>none (mode 6) |
+| R2F ENVS, SMODE | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (OHM-4, OHM-5, OHM-6)<br>APD p33 SMODE 0100 (SVSO1) + SMODE4; p38–40 0110 (SVDD SVSO2 SCP) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (60 M) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (5.0000M Ω, 50.000M Ω, 50.000M Ω (PA0 P open)) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (50M Ohm, 5M Ohm, 500k Ohm) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (600K, 6M, 60M, CC0, CC1, CC2, CC3, CC4) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (RES 5E6, RES 50E6) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU) | ENVS=1 SMODE=0x14: bus SVSO1, SMODE4 (RLU)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (Ω r4, Ω r5)<br>ENVS=1 SMODE=0x00: bus none (mode 6) |
+| OP3 VREF (SFUVR) | SFUVR=3: AGNDP9<br>SFUVR=1: VDS16 (OHM-4, OHM-5, OHM-6)<br>SFUVR=2: VDS15 (OHM-0, OHM-1)<br>APD p33 VDS15; p34, p37 AGNDP9; p38–40 VDS16 | SFUVR=2: VDS15<br>SFUVR=1: VDS16 (60 M) | SFUVR=2: VDS15 (50.000 Ω, 500.00 Ω, 500.00k Ω)<br>SFUVR=1: VDS16 (5.0000M Ω, 50.000M Ω, 50.000M Ω (PA0 P open))<br>SFUVR=3: AGNDP9 (5.0000k Ω, 50.000k Ω) | SFUVR=1: VDS16<br>SFUVR=3: AGNDP9 (50k Ohm, 5k Ohm)<br>SFUVR=2: VDS15 (500 Ohm, 50 Ohm) | SFUVR=1: VDS16<br>SFUVR=2: VDS15 (CV0, CV1, CV2, CV3, CV4, 60, 600)<br>SFUVR=3: AGNDP9 (6K, 60K) | SFUVR=3: AGNDP9<br>SFUVR=2: VDS15 (RES 500, FRES 500)<br>SFUVR=1: VDS16 (RES 5E6, RES 50E6) | SFUVR=2: VDS15 | SFUVR=2: VDS15<br>SFUVR=15: PB7 (Ω r4, Ω r5) |
 | SDIO (PB0–PB8) | 0 | 0 | 0 | 0 | 0<br>1 (600K) | 0 | 1 | 0 |
 | REFO, AGND, ACM | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V<br>APD p35–41 VAGND 01 (0.3) | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V<br>ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.5 V (600 k, 6 M) | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.5 V | ENREFO=1 SREFO=1 (PB6) AGND=0.3 VDDA ACM=1.2 V |
 | ACC (R30) | 0 (0.0 pF) | 0 (0.0 pF) | 0 (0.0 pF) | 0 (0.0 pF) | 0 (0.0 pF) | 0 (0.0 pF) | 64 (12.8 pF) | 0 (0.0 pF) |
@@ -404,6 +415,11 @@ DM40 Rref: 1 k .. 10 M and 63 M on PA2..PA7 (*inferred* from the stock scaling,
 - DM40 buffers PB0 through OP1 on every range (OP1O − PB3, chop 1 kHz) and
   uses SFT1 = 0 below 6 MΩ, 100 k above; OWON reads PB0 − PB3 directly with
   OP1 enabled on PB8 (x10, purpose unknown) and SFT1 open; Hycon reads PB0 directly on the middle ranges.
+- 121GW v2.05 cut the OSR on 50 Ω..500 kΩ by 4 against v1.02 (OSR 512..2048)
+  and raised 5 MΩ to 32768, with a software moving average of 5..20 readings.
+  It adds 1.5 nF from PB0 to AGND in Ω (U16). Its 50 MΩ row opens PA0's
+  bus switch, and the 5 / 50 MΩ software corrections are skipped, until the
+  50 MΩ calibration step writes its EEPROM marker.
 - 4-wire: only the OWON (sense on PB2 − PB5, `FRES`); the others have no 4-wire
   rows.
 - Metrix: ratiometric r0..r3 with Rref on PA5 / PA7 / PA8 / PA3, current
@@ -503,16 +519,16 @@ Three methods appear:
 
 | field | Hycon ENOB tool rows | DM40 stock | 121GW | Digilent | Temco | OWON XDM2041 | Keysight U128xA (mode mapping inferred) | Metrix MTX3293 (mode mapping inferred) |
 |---|---|---|---|---|---|---|---|---|
-| AD1 input (+ / −) | PB0 - PB3<br>AD1 off (CAP-0, CAP-1)<br>APD p28, p30 PB0 − PB3 | AD1 off<br>OP2O - AGND (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>PB2 - PB3 (10.00uF, 100.0uF) | — | AD1 off<br>PB0 - PB3 (Charge ADC get, disCharge) | PB0 - PB3<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>OP1O - AGND (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>OP1O - PB5 (cap r4, cap r5, cap r6, cap r7) |
-| AD1 reference (+ / −) | VDDA - VSSA<br>AD1 off (CAP-0, CAP-1)<br>APD p28, p30 VDDA − VSSA | AD1 off<br>PB6 - AGND (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>VDDA - VSSA (10.00uF, 100.0uF) | — | AD1 off<br>VDDA - VSSA (Charge ADC get, disCharge) | VDDA - VSSA<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>PB6 - PB3 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>VDDA - AGND (cap r4, cap r5, cap r6, cap r7) |
-| AD1IG | 1.8<br>AD1 off (CAP-0, CAP-1)<br>APD p28 1.8 | AD1 off<br>0.9 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>0.9 (10.00uF, 100.0uF) | — | AD1 off<br>1.8 (Charge ADC get, disCharge) | 1.8<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>0.9 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>0.9 (cap r4, cap r5, cap r6, cap r7) |
-| AD1RG | 1/3<br>AD1 off (CAP-0, CAP-1)<br>APD p28 1/3 | AD1 off<br>1 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>1 (10.00uF, 100.0uF) | — | AD1 off<br>1/3 (Charge ADC get, disCharge) | 1/3<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>1/3 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>1 (cap r4, cap r5, cap r6, cap r7) |
-| R22: OSR1, AD1CHOP, DCOS (period) | OSR 4096, CHOP 00, DCOS -0.25 (25.0 ms)<br>AD1 off (CAP-0, CAP-1)<br>APD p28 OSR 4096, CHOP 00, DCOS 101 (−0.25) | AD1 off<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp))<br>OSR 2048, CHOP 10, DCOS 0 (25.0 ms) (discharge (row 8)) | AD1 off<br>OSR 4096, CHOP 00, DCOS 0 (25.0 ms) (10.00uF, 100.0uF) | — | AD1 off<br>OSR 16384, CHOP 00, DCOS -0.25 (100.0 ms) (Charge ADC get, disCharge) | OSR 32768, CHOP 00, DCOS 0 (200.0 ms)<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>OSR 8192, CHOP 10, DCOS 0 (100.0 ms) (cap r4, cap r5, cap r6, cap r7) |
-| AD1 buffers (H L P N) | PN<br>AD1 off (CAP-0, CAP-1) | AD1 off<br>PN (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>HP (10.00uF, 100.0uF) | — | AD1 off<br>PN (Charge ADC get, disCharge) | PN<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>none (m7 r8) | AD1 off<br>PN (cap r5, cap r6, cap r7)<br>HPN (cap r4) |
+| AD1 input (+ / −) | PB0 - PB3<br>AD1 off (CAP-0, CAP-1)<br>APD p28, p30 PB0 − PB3 | AD1 off<br>OP2O - AGND (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>PB2 - PB3 (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>PB0 - PB3 (Charge ADC get, disCharge) | PB0 - PB3<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>OP1O - AGND (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>OP1O - PB5 (cap r4, cap r5, cap r6, cap r7) |
+| AD1 reference (+ / −) | VDDA - VSSA<br>AD1 off (CAP-0, CAP-1)<br>APD p28, p30 VDDA − VSSA | AD1 off<br>PB6 - AGND (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>VDDA - VSSA (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>VDDA - VSSA (Charge ADC get, disCharge) | VDDA - VSSA<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>PB6 - PB3 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>VDDA - AGND (cap r4, cap r5, cap r6, cap r7) |
+| AD1IG | 1.8<br>AD1 off (CAP-0, CAP-1)<br>APD p28 1.8 | AD1 off<br>0.9 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>0.9 (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>1.8 (Charge ADC get, disCharge) | 1.8<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>0.9 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>0.9 (cap r4, cap r5, cap r6, cap r7) |
+| AD1RG | 1/3<br>AD1 off (CAP-0, CAP-1)<br>APD p28 1/3 | AD1 off<br>1 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>1 (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>1/3 (Charge ADC get, disCharge) | 1/3<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>1/3 (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>1 (cap r4, cap r5, cap r6, cap r7) |
+| R22: OSR1, AD1CHOP, DCOS (period) | OSR 4096, CHOP 00, DCOS -0.25 (25.0 ms)<br>AD1 off (CAP-0, CAP-1)<br>APD p28 OSR 4096, CHOP 00, DCOS 101 (−0.25) | AD1 off<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp))<br>OSR 2048, CHOP 10, DCOS 0 (25.0 ms) (discharge (row 8)) | AD1 off<br>OSR 4096, CHOP 00, DCOS 0 (25.0 ms) (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>OSR 16384, CHOP 00, DCOS -0.25 (100.0 ms) (Charge ADC get, disCharge) | OSR 32768, CHOP 00, DCOS 0 (200.0 ms)<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>OSR 4096, CHOP 10, DCOS 0 (50.0 ms) (m7 r8) | AD1 off (cap r0, cap r1, cap r2, cap r3)<br>OSR 8192, CHOP 10, DCOS 0 (100.0 ms) (cap r4, cap r5, cap r6, cap r7) |
+| AD1 buffers (H L P N) | PN<br>AD1 off (CAP-0, CAP-1) | AD1 off<br>PN (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | AD1 off<br>HP (10.00uF, 100.0uF, 100.0uF (PF8 low)) | — | AD1 off<br>PN (Charge ADC get, disCharge) | PN<br>previous-mode leftover (CAP 50E-9) | AD1 off<br>none (m7 r8) | AD1 off<br>PN (cap r5, cap r6, cap r7)<br>HPN (cap r4) |
 | SFT1 pre-filter R | open<br>100k (CAP-0, CAP-1)<br>APD p28 open (11) | open<br>0 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | 100k | — | open<br>100k (60nF~600nF ->0, 600nF~60uF ->1, 60uF~600uF ->2) | open<br>0 (CAP 50E-9) | open | 100k<br>open (cap r5, cap r6, cap r7) |
 | OP1 (+ input, OPS1, chop) | off<br>on +PB0 OPS1=1 chop off (CAP-4) | on +PB0 OPS1=0 chop 2 kHz | on +PB2 OPS1=0 chop off<br>on +PB0 OPS1=1 chop off (10.00mF) | — | off<br>on +PB2 OPS1=0 chop off (CV0, CV1, CV2, CV3)<br>on +PB2 OPS1=1 chop off (CC0, CC1, CC2, CC3) | off | on +PB1 OPS1=0 chop off<br>on +PB1 OPS1=1 chop off (m7 r6, m7 r7, m7 r8, m7 r9) | on +PB0 OPS1=0 chop off |
 | OP2 (+ input, OPS2) | off | off<br>on +PB0 OPS2=0 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | off | — | off | off | off | off |
-| PA switches | P6<br>P5 (CAP-1)<br>P1 (CAP-3)<br>P4 P1 (CAP-4)<br>APD p24–26 PS6 (101 k); p27, p29 PS1 (1 k) | P9 P7 P2 (r0 6 nF (RC), r1 60 nF (RC))<br>P6 P5 (r3 6 uF (RC), r6 6 mF (ramp))<br>P6 (r2 600 nF (RC))<br>P5 P1 (r4 60 uF (RC))<br>P7 P6 (r5 600 uF (ramp))<br>P6 P5 P4 (r7 60 mF (ramp))<br>P7 P6 P5 P4 (discharge (row 8)) | P7 P2 (10.00nF, 100.0nF)<br>P4 P2 (10.00uF, 100.0uF)<br>P5 P2 (1.000uF)<br>P4 (10.00mF) | — | P0<br>P7 P2 (CV0, CC0)<br>P6 P2 (CV1, CC1)<br>P5 P2 (CV2, CC2)<br>P4 P2 (CV3, CC3)<br>P2 (60nF~600nF ->0)<br>P1 (600nF~60uF ->1) | P4 P1<br>P6 (CAP 50E-9) | P3 (m7 r0, m7 r1, m7 r2, m7 r3)<br>P1 (m7 r5, m7 r6, m7 r7, m7 r8)<br>P2 (m7 r4)<br>FS3 F2 (m7 r9) | P8 (cap r0, cap r1)<br>P7 (cap r2, cap r4)<br>P6 (cap r3, cap r5)<br>P5 (cap r6, cap r7) |
+| PA switches | P6<br>P5 (CAP-1)<br>P1 (CAP-3)<br>P4 P1 (CAP-4)<br>APD p24–26 PS6 (101 k); p27, p29 PS1 (1 k) | P9 P7 P2 (r0 6 nF (RC), r1 60 nF (RC))<br>P6 P5 (r3 6 uF (RC), r6 6 mF (ramp))<br>P6 (r2 600 nF (RC))<br>P5 P1 (r4 60 uF (RC))<br>P7 P6 (r5 600 uF (ramp))<br>P6 P5 P4 (r7 60 mF (ramp))<br>P7 P6 P5 P4 (discharge (row 8)) | P7 P2 (10.00nF, 100.0nF, 100.0nF (PF8 low))<br>P4 P2 (10.00uF, 100.0uF, 100.0uF (PF8 low))<br>P5 P2 (1.000uF)<br>P4 (10.00mF) | — | P0<br>P7 P2 (CV0, CC0)<br>P6 P2 (CV1, CC1)<br>P5 P2 (CV2, CC2)<br>P4 P2 (CV3, CC3)<br>P2 (60nF~600nF ->0)<br>P1 (600nF~60uF ->1) | P4 P1<br>P6 (CAP 50E-9) | P3 (m7 r0, m7 r1, m7 r2, m7 r3)<br>P1 (m7 r5, m7 r6, m7 r7, m7 r8)<br>P2 (m7 r4)<br>FS3 F2 (m7 r9) | P8 (cap r0, cap r1)<br>P7 (cap r2, cap r4)<br>P6 (cap r3, cap r5)<br>P5 (cap r6, cap r7) |
 | R2F ENVS, SMODE | ENVS=1 SMODE=0x0e: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN (CAP-1, CAP-4)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (CAP-2, CAP-3)<br>ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU) (CAP-0)<br>APD p24 CV 1010 (SVDD/SVSS by CMPO) + SMODE4; p25 CC 1110; p26–27 0110 charge; p29 1110 discharge | ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU)<br>ENVS=1 SMODE=0x0e: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | ENVS=1 SMODE=0x0e: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN<br>ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU) (10.00mF) | — | ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU)<br>ENVS=1 SMODE=0x0f: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN (CC0, CC1, CC2, CC3)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (Charge ADC get)<br>ENVS=1 SMODE=0x0e: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN (disCharge) | ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU) (CAP 50E-9)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (CAP 5E-3)<br>ENVS=1 SMODE=0x0f: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN (CAP 50E-3) | ENVS=1 SMODE=0x0e: bus CMPO 0/1: SVDD+SVSO2+SCP / SVSS+SVSO2+SCN | ENVS=1 SMODE=0x1a: bus CMPO 0/1: SVDD / SVSS, SMODE4 (RLU) (cap r0, cap r1, cap r2, cap r3)<br>ENVS=1 SMODE=0x06: bus SVDD+SVSO2+SCP (cap r4, cap r5, cap r6, cap r7) |
 | OP3 VREF (SFUVR) | SFUVR=2: VDS15 / VDS3 (CMPO 0/1) (CAP-1, CAP-4)<br>SFUVR=1: VDS16 (CAP-2, CAP-3)<br>SFUVR=7: AGNDP0 / PB7 (CMPO 0/1) (CAP-0)<br>APD p25 VDS16 / VDS2; p26–27 VDS16; p29 VDS3 | SFUVR=7: AGNDP0 / PB7 (CMPO 0/1)<br>SFUVR=2: VDS15 / VDS3 (CMPO 0/1) (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp), discharge (row 8)) | SFUVR=2: VDS15 / VDS3 (CMPO 0/1) | — | SFUVR=2: VDS15 / VDS3 (CMPO 0/1)<br>SFUVR=1: VDS16 / VDS2 (CMPO 0/1) (CV0, CV1, CV2, CV3)<br>SFUVR=7: AGNDP0 / PB7 (CMPO 0/1) (60nF~600nF ->0, 600nF~60uF ->1, 60uF~600uF ->2)<br>SFUVR=1: VDS16 (Charge ADC get) | SFUVR=7: AGNDP0 / PB7 (CMPO 0/1) (CAP 50E-9)<br>SFUVR=1: VDS16 (CAP 5E-3)<br>SFUVR=10: VDS15 / VDS3 (CMPO 0/1) (CAP 50E-3) | SFUVR=2: VDS15 / VDS3 (CMPO 0/1) | SFUVR=7: AGNDP0 / PB7 (CMPO 0/1)<br>SFUVR=15: PB7 (cap r4, cap r5)<br>SFUVR=2: VDS15 (cap r6, cap r7) |
 | SDIO (PB0–PB8) | 0 | 0 | 0 | — | 0 | 0 | 0 | 0 |
@@ -523,13 +539,17 @@ Three methods appear:
 | R29 LPF / RMS / peak | off | off | off | — | off | inert, AD2 off (R29=0xf8) | off | off |
 | AD3, SVXI, SDO23 (R34, R35) | off (0x00)<br>not written (CAP-1) | off (0x00) | not written | — | not written | off (0x00) | not written | off (0x00) |
 | SPHACAL (R36) | 0x00<br>not written (CAP-1) | not written | not written | — | not written | 0x00 | not written | 0x00 |
-| Comparator (R20, R21) | on, SCMPI=PB0; H=AGNDP1 L=AGNDP0<br>on, SCMPI=PB0; H=VDSC11 L=VDSC5 (CAP-0)<br>on, SCMPI=PB0; H=VDSC9 L=VDSC7 (CAP-1)<br>APD p24–25 PB0, H=VDSC11 L=VDSC5; p29 PB0, AGNDP0 / AGNDP0; p26–27 off | on, SCMPI=PB0; H=VDSC11 L=VDSC5<br>on, SCMPI=OP1O; H=AGNDP3 L=AGNDN3 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp))<br>on, SCMPI=PB0; H=VDSC11 L=VDSC7 (r4 60 uF (RC))<br>on, SCMPI=OP1O; H=AGNDP1 L=AGNDN1 (discharge (row 8)) | on, SCMPI=PB0; H=VDSC11 L=VDSC5<br>on, SCMPI=OP1O; H=VDSC11 L=VDSC5 (10.00mF) | — | on, SCMPI=PB0; H=VDSC13 L=VDSC5 (CV0, CV1, CV2, CV3)<br>on, SCMPI=PB0; H=VDSC13 L=VDSC11 (CC0, CC1, CC2, CC3)<br>on, SCMPI=PB0; H=VDSC11 L=VDSC5 (60nF~600nF ->0, 600nF~60uF ->1, 60uF~600uF ->2)<br>off (Charge ADC get)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (disCharge) | on, SCMPI=PB0; H=VDSC11 L=VDSC5 (CAP 50E-9)<br>off (CAP 5E-3)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (CAP 50E-3) | on, SCMPI=OP1O; H=VDSC11 L=VDSC7 | on, SCMPI=OP1O; H=VDSC10 L=VDSC8<br>off (cap r4, cap r5, cap r6)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (cap r7) |
+| Comparator (R20, R21) | on, SCMPI=PB0; H=AGNDP1 L=AGNDP0<br>on, SCMPI=PB0; H=VDSC11 L=VDSC5 (CAP-0)<br>on, SCMPI=PB0; H=VDSC9 L=VDSC7 (CAP-1)<br>APD p24–25 PB0, H=VDSC11 L=VDSC5; p29 PB0, AGNDP0 / AGNDP0; p26–27 off | on, SCMPI=PB0; H=VDSC11 L=VDSC5<br>on, SCMPI=OP1O; H=AGNDP3 L=AGNDN3 (r5 600 uF (ramp), r6 6 mF (ramp), r7 60 mF (ramp))<br>on, SCMPI=PB0; H=VDSC11 L=VDSC7 (r4 60 uF (RC))<br>on, SCMPI=OP1O; H=AGNDP1 L=AGNDN1 (discharge (row 8)) | on, SCMPI=PB0; H=VDSC11 L=VDSC5<br>on, SCMPI=OP1O; H=VDSC11 L=VDSC5 (10.00mF)<br>on, SCMPI=PB0; H=VDSC9 L=VDSC8 (100.0nF (PF8 low))<br>on, SCMPI=PB0; H=VDSC10 L=VDSC8 (100.0uF (PF8 low)) | — | on, SCMPI=PB0; H=VDSC13 L=VDSC5 (CV0, CV1, CV2, CV3)<br>on, SCMPI=PB0; H=VDSC13 L=VDSC11 (CC0, CC1, CC2, CC3)<br>on, SCMPI=PB0; H=VDSC11 L=VDSC5 (60nF~600nF ->0, 600nF~60uF ->1, 60uF~600uF ->2)<br>off (Charge ADC get)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (disCharge) | on, SCMPI=PB0; H=VDSC11 L=VDSC5 (CAP 50E-9)<br>off (CAP 5E-3)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (CAP 50E-3) | on, SCMPI=OP1O; H=VDSC11 L=VDSC7 | on, SCMPI=OP1O; H=VDSC10 L=VDSC8<br>off (cap r4, cap r5, cap r6)<br>on, SCMPI=PB0; H=AGNDP1 L=AGNDP0 (cap r7) |
 | Counter, CNT, CMP pin | ENCTR=1 ENCNTI=0 ENPCMPO=0 | ENCTR=1 ENCNTI=0 ENPCMPO=0 | ENCTR=1 ENCNTI=0 ENPCMPO=1<br>ENCTR=1 ENCNTI=0 ENPCMPO=0 (10.00mF) | — | ENCTR=1 ENCNTI=0 ENPCMPO=1<br>ENCTR=1 ENCNTI=0 ENPCMPO=0 (60nF~600nF ->0, 600nF~60uF ->1, 60uF~600uF ->2)<br>ENCTR=0 ENCNTI=0 ENPCMPO=0 (Charge ADC get, disCharge) | ENCTR=0 ENCNTI=0 ENPCMPO=0<br>ENCTR=1 ENCNTI=0 ENPCMPO=0 (CAP 50E-9) | ENCTR=0 ENCNTI=0 ENPCMPO=1 | ENCTR=1 ENCNTI=0 ENPCMPO=1 (cap r0, cap r1, cap r2, cap r3)<br>ENCTR=1 ENCNTI=0 ENPCMPO=0 (cap r4, cap r5, cap r6, cap r7) |
 
 - DM40: RC relaxation on r0..r4 (6 nF .. 60 µF), AD1 ramp on r5..r7 (600 µF ..
   60 mF) with a discharge row (PA4..PA7 on the bus) before each ramp. 121GW and
   Keysight use the constant-current method for the small ranges, OWON and
   Hycon CAP-0 the RC method.
+- 121GW takes every range from the counter (C ∝ CTC / CTB); AD1 is configured
+  on 10 / 100 µF but not read for the value. A board strap (PF8 low at boot)
+  selects a second table with other comparator thresholds on 100 nF and
+  100 µF; with no counter result before a timeout it jumps to 1 µF or 10 mF.
 - The AD1 ramp rows: DM40 AD1 on OP2O with reference PB6, IG 0.9, RG 1,
   chopped; Hycon / Temco / OWON read PB0 − PB3 against VDDA − VSSA with RG 1/3,
   unchopped (Hycon and Temco with DCOS −0.25).
@@ -622,7 +642,9 @@ HY3131 has a die sensor read by AD1 with SAD1I = 10 (TS1P / TS2N) and 11
   unknown.
 - OWON runs the thermocouple as DC V 500 mV (PB0 − PB3, OSR 4096), reads the
   die sensor only at boot (R33 0xAA / 0xAB, SAD1I 2 / 3), and runs the RTD as
-  ohm 500. 121GW uses its DC mV 50 mV row. Temco's two rows are the die sensor
+  ohm 500. 121GW uses its DC mV 50 mV row (K type, −200..1350 °C) with the
+  cold junction from an NTC read by the MCU ADC (*inferred*), and feeds the input from VDD
+  through 20 MΩ in this mode (open-lead detection, *inferred*). Temco's two rows are the die sensor
   only. Keysight row 6: OP1 on PB1, OP1O − AGND (*inferred* mapping).
 - Metrix reuses rows by sensor: Ω r0 (Pt100), Ω r1 (Pt1000), V DC r0 (J / K);
   no row selects the die sensor.
@@ -641,18 +663,19 @@ HY3131 has a die sensor read by AD1 with SAD1I = 10 (TS1P / TS2N) and 11
 
 | | DM40 stock V2.6 | 121GW | Digilent | Temco | OWON XDM2041 | Keysight | Metrix MTX3293 |
 |---|---|---|---|---|---|---|---|
-| mode change | R26, R34, R36 = 0; relays; R20..R35 (22 bytes); INTE = 0; poll INTF | 20 bytes from R20; INTE per mode (AD1IE; + CTIE in AC; RMSIE + CTIE in 1 ms peak; CTIE in cap / Hz) | R37 = 0x60 (reset) every scale change, then INTE + R20..R36 (24 bytes), read back and compared with a mask | 20 bytes from R20, then INTF = 0x02 and INTE (ESP32 driver) | R20 ENCMP off at once, then all 56 bytes R00..R37 in one burst; 74HC595 relay byte before every reading | buffer of 20 bytes from the table, per-range overlays, 22 bytes sent (R20..R34; R34 unset) | relays, then one 25-byte burst R1E..R36 (INTF = 0, INTE from the row); R37 = 0x60 only when the driver opens; no read-back |
-| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | unknown | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | unknown | 12-bit MCU DAC loaded from a calibration record on every V / A range change (offset trim, *inferred*); OP1 and AD1 chopping in the rows |
-| speed / OSR | R22 0x15 (8192) while the reading moves, 0x17 (32768) when steady (DC V 0x206 codes, DC mV 3618 / 1218, DC A 0x168); ohm 0x13 on overload, 0x17 in range; continuity 0x14 / 0x17 | unknown | fixed R22 0x17 (OSR 32768) | unknown | speed key: R22 OSR {4096, 2048, 2048} by a single R22 write | a flag sets R22 = 0x11 (OSR 512) and changes LPFBW | R22 only from the rows (AD1 period 100 ms; 200 ms in mode 10); no other R22 write |
-| autorange first conversion | settle deadlines after each range write (ohm 150 ms, DC V 250 ms, AC V 450 ms, …) | unknown | — | unknown | after a range change OSR 1024 (Ω, DC A) / LPFBW 5 (AC A) for the first conversion | unknown | unknown |
-| AC trim (ACC) | none, R30 = 0x80 | table values | 127 fixed | table values | per-unit calibration byte into R30 on 5 V / 50 V | calibrated value on mode 1 range 0 | 16-bit calibration word per range: ACC (R30), P0..P2 (the power-bus switches of PA0..PA2) and three MCU GPIOs; 0 in V DC |
-| AC+DC | alternates the AC and DC rows of the same quantity (~3 readings each) | unknown | — (no such mode) | unknown | — (no such mode in the captures) | unknown | coupling 2 sends the AC rows; how the DC part is added is unknown |
-| capacitance | counter restart per reading (R20 0x50, CTA 0xFC0000, R20 0x52); r5..r7: discharge row until \|V\| < 30 mV, then the ramp row; R21 rewritten to 0xDC / 0xCC / 0xBB by slope class; comparator state (R14 bit 6) splits batches | unknown | — | counter preset CTA by frequency class; R33 0xA0 / 0xA8 switches SFT1 100 k / 0 for counting | counter restart R20 0x70 / CTA 0xBF0000 / R20 0x72; 5 / 50 mF: open R2A / R2C, read AD1, alternate two bulk rows (phases A / B) | — | ioctl 2 restarts the counter: ENCTR off, R1C..R1D = 00 F1, INTF read, ENCTR on |
-| temperature | R33 0xAF → 0xAE → 0xAC: die sensor 11, 10, then the thermocouple; 700 / 800 / 700 ms | DC mV 50 mV row | — | rows with SAD1I 3 / 2 | die sensor at boot (R33 0xAA, 0xAB, ~2 s each) | unknown | Pt100 / Pt1000 on Ω r0 / r1, J / K on V DC r0 with relays; die sensor unused |
-| other | diode beeper by R20 0xB4 / 0xB0 (ENPCMPO); frequency source alternates ENCMP (0xF0) / CNT (0x08) | software AC frequency-response correction tables; 50 MΩ offset correction | — | — | ENCTR set in most rows; Phoenix clears it and manages the counter itself, hard-codes ACC E9 / FF, and has a 50 Ω range and its own 500 µF..10 mF rows | idle set: R26 0x19, R33 0x0C (*inferred*) | AD2 / RMS unused; Modbus 0xE016 / 0xE017 select and read / write any register R00..R37 |
+| mode change | R26, R34, R36 = 0; relays; R20..R35 (22 bytes); INTE = 0; poll INTF | 20 bytes R20..R33 from the row table; R1E..R1F = 00, INTE (AD1IE; + CTIE in AC; RMSIE + CTIE in 1 ms peak; CTIE in cap / Hz); counter restart (ENCTR off, R1B..R1D = 00 + CTA preset, read back, ENCTR on); calibration; then the AC-path muxes and relays (GPIO); no read-back | R37 = 0x60 (reset) every scale change, then INTE + R20..R36 (24 bytes), read back and compared with a mask | 20 bytes from R20, then INTF = 0x02 and INTE (ESP32 driver) | R20 ENCMP off at once, then all 56 bytes R00..R37 in one burst; 74HC595 relay byte before every reading | buffer of 20 bytes from the table, per-range overlays, 22 bytes sent (R20..R34; R34 unset) | relays, then one 25-byte burst R1E..R36 (INTF = 0, INTE from the row); R37 = 0x60 only when the driver opens; no read-back |
+| zero / offset | none in software; AD1CHOP = 10 and OP1 chopping | none in hardware; calibrated offset subtracted, plus a stored zero on range 0 of each current mode | none (software averaging) | `Get_Volt6V_Zero`: the "6V ZERO" row (OP1+ on RLU) averaged 50 times at DC V entry, subtracted | none; AD1CHOP / OP1CHOP; calibration in software | unknown | 12-bit MCU DAC loaded from a calibration record on every V / A range change (offset trim, *inferred*); OP1 and AD1 chopping in the rows |
+| speed / OSR | R22 0x15 (8192) while the reading moves, 0x17 (32768) when steady (DC V 0x206 codes, DC mV 3618 / 1218, DC A 0x168); ohm 0x13 on overload, 0x17 in range; continuity 0x14 / 0x17 | R22 only from the rows; no other R22 write. Software moving average instead: N 2..20 readings, restarted when a reading leaves a ±W window (DC V 2 / 2, DC mV 10 / 5, AC 10 / 20, Ω 5..20 / 10..100) | fixed R22 0x17 (OSR 32768) | unknown | speed key: R22 OSR {4096, 2048, 2048} by a single R22 write | a flag sets R22 = 0x11 (OSR 512) and changes LPFBW | R22 only from the rows (AD1 period 100 ms; 200 ms in mode 10); no other R22 write |
+| autorange first conversion | settle deadlines after each range write (ohm 150 ms, DC V 250 ms, AC V 450 ms, …) | autorange held for N readings after a change (DC V 2, AC V 3, AC mV 4, DC mV 1, Ω 1..2, cap 1, Low-Z DC 5, 1 ms peak 5, else 3); up > 110 % of full scale, down < 10 %; Ω down-range blocked for 100 timer ticks after an up-range | — | unknown | after a range change OSR 1024 (Ω, DC A) / LPFBW 5 (AC A) for the first conversion | unknown | unknown |
+| AC trim (ACC) | none, R30 = 0x80 | table values only: 0, except 25 / 48 in the 1 ms peak 5 V / 50 V rows; frequency response corrected in software (per-range tables × two calibrated coefficients) | 127 fixed | table values | per-unit calibration byte into R30 on 5 V / 50 V | calibrated value on mode 1 range 0 | 16-bit calibration word per range: ACC (R30), P0..P2 (the power-bus switches of PA0..PA2) and three MCU GPIOs; 0 in V DC |
+| AC+DC | alternates the AC and DC rows of the same quantity (~3 readings each) | 5 readings on the AC V row, 3 on the DC V row of the same range, row and calibration reloaded at each switch; √(AC² + DC²) | — (no such mode) | unknown | — (no such mode in the captures) | unknown | coupling 2 sends the AC rows; how the DC part is added is unknown |
+| capacitance | counter restart per reading (R20 0x50, CTA 0xFC0000, R20 0x52); r5..r7: discharge row until \|V\| < 30 mV, then the ramp row; R21 rewritten to 0xDC / 0xCC / 0xBB by slope class; comparator state (R14 bit 6) splits batches | all ranges from the counter: C ∝ CTC / CTB; no reading before a timeout → 1 µF or 10 mF range; second table for boards with PF8 low | — | counter preset CTA by frequency class; R33 0xA0 / 0xA8 switches SFT1 100 k / 0 for counting | counter restart R20 0x70 / CTA 0xBF0000 / R20 0x72; 5 / 50 mF: open R2A / R2C, read AD1, alternate two bulk rows (phases A / B) | — | ioctl 2 restarts the counter: ENCTR off, R1C..R1D = 00 F1, INTF read, ENCTR on |
+| temperature | R33 0xAF → 0xAE → 0xAC: die sensor 11, 10, then the thermocouple; 700 / 800 / 700 ms | DC mV 50 mV row, K type table in flash; cold junction from the MCU side (*inferred*: NTC); 20 MΩ pull-up on the input in this mode | — | rows with SAD1I 3 / 2 | die sensor at boot (R33 0xAA, 0xAB, ~2 s each) | unknown | Pt100 / Pt1000 on Ω r0 / r1, J / K on V DC r0 with relays; die sensor unused |
+| other | diode beeper by R20 0xB4 / 0xB0 (ENPCMPO); frequency source alternates ENCMP (0xF0) / CNT (0x08) | AC value from an external AD8436 on PB7; HY3131 RMS result unused; 1 ms peak: R29 ENPKH pulsed after every RMS interrupt; CTA preset alternates 0x8000 / 0xE000 every 100 ticks in AC (row re-sent); 5 / 50 MΩ corrections and the 50 MΩ PA0 switch depend on an EEPROM marker | — | — | ENCTR set in most rows; Phoenix clears it and manages the counter itself, hard-codes ACC E9 / FF, and has a 50 Ω range and its own 500 µF..10 mF rows | idle set: R26 0x19, R33 0x0C (*inferred*) | AD2 / RMS unused; Modbus 0xE016 / 0xE017 select and read / write any register R00..R37 |
 
 Sources: DM40 — stock V2.6 disassembly, mirrored in [`src/dmm.rs`](../src/dmm.rs);
-121GW — the comments of `hy_regtbl.h` and the routines in `121gw-re/routines`;
+121GW — the v2.05 image and the circuit diagram
+([notes](data/hy3131-comparison/eevblog-121gw.md));
 Digilent — `dmm.cpp` `DMM_SetScale`; Temco — `DMM_DCV.c`, `main/hy3131_sw.c`
 (not built in the STM32 project); OWON — captures and the stock image;
 Keysight — the decoded image; Metrix — the v1.02 image
@@ -660,23 +683,25 @@ Keysight — the decoded image; Metrix — the v1.02 image
 
 ## Not determined
 
-- Board wiring of PB / PA pins for the 121GW, Digilent, Temco, OWON and
-  Keysight beyond what the row decode shows.
+- Board wiring of PB / PA pins for the Digilent, Temco, OWON and Keysight
+  beyond what the row decode shows; for the 121GW beyond the nets in its
+  [notes](data/hy3131-comparison/eevblog-121gw.md#board-wiring-circuit-diagram).
 - Keysight: the mode-to-function mapping and R34..R36.
 - Temco: which rows a built firmware writes.
 - Metrix: the range values behind each index, the circuit on PB1 (AC) and
   PB8 (A), autorange thresholds and settle times, mode 10, and which
   calibration register holds which record.
-- 121GW: run-time R22 / R29 changes, and the circuit on PB7 that its normal AC
-  rows read with AD1.
+- 121GW: what the PF8 board strap marks, why the 50 MΩ row and the Ω
+  corrections depend on EEPROM byte 0x26, and the timer tick period.
 
 ## Appendix: raw rows
 
 Every row in hex from R20 upwards (22 bytes R20..R35 for the DM40, 20 bytes
 R20..R33 for the 121GW, Temco and Keysight, R20..R36 for Digilent and OWON,
 R1E..R36 for Metrix, as present in the file for the Hycon tool), with the mode key used above and the
-source location. 121GW rows give the v1.02 file offset of the first match and
-the release images that contain the row. Keysight "composed" rows are base row
+source location. 121GW rows are the v2.05 tables (flash address, and whether
+v1.02 has the same row); the two rows marked "modified at run time" are the
+table row as the firmware edits it before sending. Keysight "composed" rows are base row
 + overlay as read from the decoded code. Metrix origins are flash addresses.
 
 ### Hycon ENOB tool (HY313x ENOB V1.4, Config/*/HYCONFIG-n.txt)
@@ -787,50 +812,57 @@ the release images that contain the row. Keysight "composed" rows are base row
 | cap | r7 60 mF (ramp) | `52 BB 14 83 43 40 00 5D 31 00 00 00 88 08 00 8E 80 C2 CC A8 00 54` | firmware/src/dmm.rs:158 (CFG_F13_R7; stock flash 0x08049ff2) |
 | cap | discharge (row 8) | `52 DD 13 83 43 40 00 5D 31 00 00 00 88 88 00 8E 80 C2 CC A8 00 54` | firmware/src/dmm.rs:162 (CFG_F13_DISCHARGE; stock flash 0x0804a008) |
 
-### EEVblog 121GW (121gw-re, v1.02 IDA tables)
+### EEVblog 121GW v2.05
 
 | mode | label | R20 … | origin |
 |---|---|---|---|
-| dcv | DCV 5.0000V, DC power 5.0000V, Burden Voltage | `00 00 13 8A 05 40 00 4D 31 01 22 00 00 90 28 A0 80 C7 00 20` | 121gw-re/tables/hy_regtbl.h:16 (hy_regtbl_dcv); v1.02 file offset (first match) 0x1c17c; in all 9 images v1.00..v2.05 |
-| dcv | DCV 50.000V, DC power 50.000V | `00 00 13 8A 05 40 00 4D 31 01 22 00 00 09 28 A0 80 C7 08 2C` | 121gw-re/tables/hy_regtbl.h:19 (hy_regtbl_dcv); v1.02 file offset (first match) 0x1c190; in all 9 images v1.00..v2.05 |
-| dcv | DCV 500.00V | `00 00 13 8A 05 40 00 4D 31 01 22 00 90 00 28 A0 80 C7 08 2C` | 121gw-re/tables/hy_regtbl.h:22 (hy_regtbl_dcv); v1.02 file offset (first match) 0x1c1a4; in all 9 images v1.00..v2.05 |
-| dcv | DCV 1000.0V (600.0V), LowZ in DC | `00 00 13 8A 05 40 00 4D 31 01 22 00 09 00 28 A0 80 C7 08 2C` | 121gw-re/tables/hy_regtbl.h:25 (hy_regtbl_dcv); v1.02 file offset (first match) 0x1c1b8; in all 9 images v1.00..v2.05 |
-| dcmv | DCmV 50.000mV, Temperature | `60 00 1C 8B 3B 51 00 6D 31 01 00 00 00 00 08 81 80 C0 0C 60` | 121gw-re/tables/hy_regtbl.h:35 (hy_regtbl_dcmv); v1.02 file offset (first match) 0x1c648; in all 9 images v1.00..v2.05 |
-| dcmv | DCmV 500.00mV | `60 00 10 8A 35 40 00 6D 31 01 00 00 00 00 08 81 80 C0 0C 2C` | 121gw-re/tables/hy_regtbl.h:38 (hy_regtbl_dcmv); v1.02 file offset (first match) 0x1c65c; in all 9 images v1.00..v2.05 |
-| dca | DCA 500.00mA, DCmA 5.0000mA, DCuA 50.000uA / DCVA 500.00mA, DCmVA 5.0000mA, DCuVA 50.000uA | `00 00 12 9B 93 31 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | 121gw-re/tables/hy_regtbl.h:47 (hy_regtbl_dc_amps); v1.02 file offset (first match) 0x1c4c0; in all 9 images v1.00..v2.05 |
-| dca | DCA 5.0000A, DCmA 50.000mA, DCuA 500.00uA / DCmVA 50.000mA, DCuVA 500.00uA | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | 121gw-re/tables/hy_regtbl.h:51 (hy_regtbl_dc_amps); v1.02 file offset (first match) 0x1c4d4; in all 9 images v1.00..v2.05 |
-| dca | DCA 10.000A, DCVA 10.000A | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | 121gw-re/tables/hy_regtbl.h:54 (hy_regtbl_dc_amps); v1.02 file offset (first match) 0x1c4d4; in all 9 images v1.00..v2.05 |
-| acv | ACV 5.0000V, AC power 5.0000V, Burden Voltage | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 00 09 88 B0 80 C0 08 2C` | 121gw-re/tables/hy_regtbl.h:65 (hy_regtbl_acv); v1.02 file offset (first match) 0x1c244; only in v1_00, v1_02, v1_04, v1_05, v1_07, v1_10 |
-| acv | ACV 50.000V, AC power 50.000V | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 90 00 88 B0 80 C0 38 2C` | 121gw-re/tables/hy_regtbl.h:68 (hy_regtbl_acv); v1.02 file offset (first match) 0x1c258; in all 9 images v1.00..v2.05 |
-| acv | ACV 500.00V | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 09 00 88 B0 80 C0 38 2C` | 121gw-re/tables/hy_regtbl.h:71 (hy_regtbl_acv); v1.02 file offset (first match) 0x1c26c; in all 9 images v1.00..v2.05 |
-| acv | ACV 1000.0V (600.0V), LowZ in AC | `F6 DD 00 83 F5 41 02 4D 31 01 00 00 09 00 88 B0 80 C0 38 2C` | 121gw-re/tables/hy_regtbl.h:74 (hy_regtbl_acv); v1.02 file offset (first match) 0x1c280; in all 9 images v1.00..v2.05 |
-| acv | ACV 5.0000V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 C4 00 00 00 90 88 A0 99 C7 38 20` | 121gw-re/tables/hy_regtbl.h:81 (hy_regtbl_acv_1ms_peak); v1.02 file offset (first match) 0x1c1e0; in all 9 images v1.00..v2.05 |
-| acv | ACV 50.000V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 00 09 88 A0 B0 C7 38 20` | 121gw-re/tables/hy_regtbl.h:84 (hy_regtbl_acv_1ms_peak); v1.02 file offset (first match) 0x1c1f4; in all 9 images v1.00..v2.05 |
-| acv | ACV 500.00V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 90 00 88 A0 80 C7 38 20` | 121gw-re/tables/hy_regtbl.h:87 (hy_regtbl_acv_1ms_peak); v1.02 file offset (first match) 0x1c208; in all 9 images v1.00..v2.05 |
-| acv | ACV 1000.0V (600.0V) (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 09 00 88 A0 80 C7 38 20` | 121gw-re/tables/hy_regtbl.h:90 (hy_regtbl_acv_1ms_peak); v1.02 file offset (first match) 0x1c21c; in all 9 images v1.00..v2.05 |
-| acmv | ACmV 50.000mV | `F6 DD 13 8A F5 43 06 6D 31 01 00 00 00 00 08 91 80 C0 3A 2C` | 121gw-re/tables/hy_regtbl.h:100 (hy_regtbl_acmv); v1.02 file offset (first match) 0x1c670; in all 9 images v1.00..v2.05 |
-| acmv | ACmV 500.00mV | `F6 DD 13 8A F5 40 00 6D 31 01 00 00 00 00 08 91 80 C0 3A 2C` | 121gw-re/tables/hy_regtbl.h:103 (hy_regtbl_acmv); v1.02 file offset (first match) 0x1c684; in all 9 images v1.00..v2.05 |
-| acmv | ACmV 50.000mV (1ms peak) [1 ms peak table] | `F6 DD 07 03 00 13 81 25 11 EC 00 00 00 00 00 90 80 C7 3A 28` | 121gw-re/tables/hy_regtbl.h:110 (hy_regtbl_acmv_1ms_peak); v1.02 file offset (first match) 0x1c698; in all 9 images v1.00..v2.05 |
-| acmv | ACmV 500.00mV (1ms peak) [1 ms peak table] | `F6 DD 07 03 52 10 81 25 11 EC 00 00 00 00 00 90 80 C7 3A 28` | 121gw-re/tables/hy_regtbl.h:113 (hy_regtbl_acmv_1ms_peak); v1.02 file offset (first match) 0x1c6ac; in all 9 images v1.00..v2.05 |
-| aca | ACA 500.00mA, ACmA 5.0000mA, ACuA 50.000uA / ACVA 500.00mA, ACmVA 5.0000mA, ACuVA 50.000uA | `F6 DD 12 8B F3 11 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | 121gw-re/tables/hy_regtbl.h:122 (hy_regtbl_ac_amps); v1.02 file offset (first match) 0x1c484; in all 9 images v1.00..v2.05 |
-| aca | ACA 5.0000A, ACmA 50.000mA, ACuA 500.00uA / ACmVA 50.000mA, ACuVA 500.00uA | `F6 DD 12 8B F3 11 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | 121gw-re/tables/hy_regtbl.h:126 (hy_regtbl_ac_amps); v1.02 file offset (first match) 0x1c484; in all 9 images v1.00..v2.05 |
-| aca | ACA 10.000A, ACVA 10.000A | `F6 DD 12 8B F3 10 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | 121gw-re/tables/hy_regtbl.h:129 (hy_regtbl_ac_amps); v1.02 file offset (first match) 0x1c4ac; in all 9 images v1.00..v2.05 |
-| freq | freq | `FE DD 00 00 00 01 00 00 00 00 22 00 00 90 28 A0 00 C0 08 2C` | 121gw-re/tables/hy_regtbl.h:139 (hy_regtbl_freq); v1.02 file offset (first match) 0x1c6e8; in all 9 images v1.00..v2.05 |
-| ohm | 50.000Ω | `74 CF 15 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | 121gw-re/tables/hy_regtbl.h:146 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c010; only in v1_00, v1_02, v1_04 |
-| ohm | 500.00Ω | `74 CF 15 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | 121gw-re/tables/hy_regtbl.h:149 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c010; only in v1_00, v1_02, v1_04 |
-| ohm | 5.0000kΩ | `00 00 13 83 85 00 00 00 00 00 00 40 60 00 00 94 80 D3 0C 2C` | 121gw-re/tables/hy_regtbl.h:152 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c038; only in v1_00, v1_02, v1_04 |
-| ohm | 50.000kΩ | `00 00 14 83 85 00 00 00 00 00 00 40 00 06 00 94 80 D3 0C 2C` | 121gw-re/tables/hy_regtbl.h:155 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c04c; only in v1_00, v1_02, v1_04 |
-| ohm | 500.00kΩ | `00 00 14 83 85 00 00 00 00 00 00 40 00 60 00 94 80 D2 0C 20` | 121gw-re/tables/hy_regtbl.h:158 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c060; only in v1_00, v1_02, v1_04 |
-| ohm | 5.0000MΩ | `00 00 14 93 85 00 00 00 55 00 00 08 00 80 80 86 80 D1 00 AC` | 121gw-re/tables/hy_regtbl.h:161 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c074; only in v1_00, v1_02, v1_04 |
-| ohm | 50.000MΩ | `00 00 15 93 85 00 00 00 55 00 08 08 00 00 00 86 80 D1 00 AC` | 121gw-re/tables/hy_regtbl.h:164 (hy_regtbl_ohms); v1.02 file offset (first match) 0x1c088; only in v1_00, v1_02, v1_04, v1_05 |
-| cont | continuity | `74 CF 10 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | 121gw-re/tables/hy_regtbl.h:170 (hy_regtbl_continuity); v1.02 file offset (first match) 0x1c85c; in all 9 images v1.00..v2.05 |
-| diode | diode | `00 00 12 83 8D 00 00 00 11 00 00 00 08 00 40 92 80 E1 03 AC` | 121gw-re/tables/hy_regtbl.h:176 (hy_regtbl_diode); v1.02 file offset (first match) 0x1c6c0; in all 9 images v1.00..v2.05 |
-| cap | 10.00nF | `76 21 07 00 00 00 00 00 00 00 00 08 00 80 00 8E 00 C2 0E 20` | 121gw-re/tables/hy_regtbl.h:183 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c09c; in all 9 images v1.00..v2.05 |
-| cap | 100.0nF | `76 21 07 00 00 00 00 00 00 00 00 08 00 80 00 8E 00 C2 0E 20` | 121gw-re/tables/hy_regtbl.h:186 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c09c; in all 9 images v1.00..v2.05 |
-| cap | 1.000uF | `76 21 07 00 00 00 00 00 00 00 00 08 80 00 00 8E 00 C2 0E 20` | 121gw-re/tables/hy_regtbl.h:189 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c0c4; in all 9 images v1.00..v2.05 |
-| cap | 10.00uF | `76 21 04 8A A5 00 00 00 55 00 00 08 08 00 00 8E 00 C2 0E 20` | 121gw-re/tables/hy_regtbl.h:192 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c0d8; in all 9 images v1.00..v2.05 |
-| cap | 100.0uF | `76 21 04 8A A5 00 00 00 55 00 00 08 08 00 00 8E 00 C2 0E 20` | 121gw-re/tables/hy_regtbl.h:195 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c0d8; in all 9 images v1.00..v2.05 |
-| cap | 10.00mF | `52 21 00 00 00 11 00 50 11 00 00 00 08 00 00 9A 00 C2 3C 20` | 121gw-re/tables/hy_regtbl.h:198 (hy_regtbl_cap); v1.02 file offset (first match) 0x1c100; in all 9 images v1.00..v2.05 |
+| dcv | DCV 5.0000V, DC power 5.0000V, Burden Voltage | `00 00 13 8A 05 40 00 4D 31 01 22 00 00 90 28 A0 80 C7 00 20` | v2.05 flash 0x080288a0 (table dcv); same row in v1.02 |
+| dcv | DCV 50.000V, DC power 50.000V | `00 00 13 8A 05 40 00 4D 31 01 22 00 00 09 28 A0 80 C7 08 2C` | v2.05 flash 0x080288b4 (table dcv); same row in v1.02 |
+| dcv | DCV 500.00V | `00 00 13 8A 05 40 00 4D 31 01 22 00 90 00 28 A0 80 C7 08 2C` | v2.05 flash 0x080288c8 (table dcv); same row in v1.02 |
+| dcv | DCV 1000.0V (600.0V), LowZ in DC | `00 00 13 8A 05 40 00 4D 31 01 22 00 09 00 28 A0 80 C7 08 2C` | v2.05 flash 0x080288dc (table dcv); same row in v1.02 |
+| dcmv | DCmV 50.000mV, Temperature | `60 00 1C 8B 3B 51 00 6D 31 01 00 00 00 00 08 81 80 C0 0C 60` | v2.05 flash 0x08028f1c (table dcmv); same row in v1.02 |
+| dcmv | DCmV 500.00mV | `60 00 10 8A 35 40 00 6D 31 01 00 00 00 00 08 81 80 C0 0C 2C` | v2.05 flash 0x08028f30 (table dcmv); same row in v1.02 |
+| dca | DCA 500.00mA, DCmA 5.0000mA, DCuA 50.000uA | `00 00 12 9B 93 31 00 55 31 00 00 00 00 00 00 80 80 C7 33 20` | v2.05 flash 0x08028d94 (table dc_amps); not in v1.02 |
+| dca | DCA 5.0000A, DCmA 50.000mA, DCuA 500.00uA | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 20` | v2.05 flash 0x08028da8 (table dc_amps); not in v1.02 |
+| dca | DCA 10.000A | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 20` | v2.05 flash 0x08028dbc (table dc_amps); not in v1.02 |
+| dca | DC power 500.00mA, 5.0000mA, 50.000uA | `00 00 12 9B 93 31 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | v2.05 flash 0x08028d58 (table dc_amps_power); same row in v1.02 |
+| dca | DC power 5.0000A, 50.000mA, 500.00uA | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | v2.05 flash 0x08028d6c (table dc_amps_power); same row in v1.02 |
+| dca | DC power 10.000A | `00 00 12 8B 93 11 00 55 31 00 00 00 00 00 00 80 80 C7 33 2C` | v2.05 flash 0x08028d80 (table dc_amps_power); same row in v1.02 |
+| acv | ACV 5.0000V, AC power 5.0000V, Burden Voltage | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 00 09 88 B0 80 C0 38 2C` | v2.05 flash 0x080289c8 (table acv); not in v1.02 |
+| acv | ACV 50.000V, AC power 50.000V | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 90 00 88 B0 80 C0 38 2C` | v2.05 flash 0x080289dc (table acv); same row in v1.02 |
+| acv | ACV 500.00V | `F6 DD 02 83 F5 41 02 4D 31 01 00 00 09 00 88 B0 80 C0 38 2C` | v2.05 flash 0x080289f0 (table acv); same row in v1.02 |
+| acv | ACV 1000.0V (600.0V) | `F6 DD 00 83 F5 41 02 4D 31 01 00 00 09 00 88 B0 80 C0 38 2C` | v2.05 flash 0x08028a04 (table acv); same row in v1.02 |
+| acv | LowZ AC (edited 1000.0V row) | `F6 DD 00 83 F5 41 02 4D 31 01 20 00 09 00 28 B0 80 C0 38 2C` | v2.05 flash 0x08028a04 (table acv), modified at run time: R2A OR 0x20, R2E AND 0x7F OR 0x20 |
+| acv | ACV 5.0000V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 C4 00 00 00 90 88 A0 99 C7 38 20` | v2.05 flash 0x08028904 (table acv_1ms_peak); same row in v1.02 |
+| acv | ACV 50.000V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 00 09 88 A0 B0 C7 38 20` | v2.05 flash 0x08028918 (table acv_1ms_peak); same row in v1.02 |
+| acv | ACV 500.00V (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 90 00 88 A0 80 C7 38 20` | v2.05 flash 0x0802892c (table acv_1ms_peak); same row in v1.02 |
+| acv | ACV 1000.0V (600.0V) (1ms peak) [1 ms peak table] | `F6 DD 04 03 52 10 87 25 31 EC 00 00 09 00 88 A0 80 C7 38 20` | v2.05 flash 0x08028940 (table acv_1ms_peak); same row in v1.02 |
+| acmv | ACmV 50.000mV | `F6 DD 13 8A F5 43 06 6D 31 01 00 00 00 00 08 91 80 C0 3A 2C` | v2.05 flash 0x08028f44 (table acmv); same row in v1.02 |
+| acmv | ACmV 500.00mV | `F6 DD 13 8A F5 40 00 6D 31 01 00 00 00 00 08 91 80 C0 3A 2C` | v2.05 flash 0x08028f58 (table acmv); same row in v1.02 |
+| acmv | ACmV 50.000mV (1ms peak) [1 ms peak table] | `F6 DD 07 03 00 13 81 25 11 EC 00 00 00 00 00 90 80 C7 3A 28` | v2.05 flash 0x08028f6c (table acmv_1ms_peak); same row in v1.02 |
+| acmv | ACmV 500.00mV (1ms peak) [1 ms peak table] | `F6 DD 07 03 52 10 81 25 11 EC 00 00 00 00 00 90 80 C7 3A 28` | v2.05 flash 0x08028f80 (table acmv_1ms_peak); same row in v1.02 |
+| aca | ACA 500.00mA, ACmA 5.0000mA, ACuA 50.000uA / AC power 500.00mA, 5.0000mA, 50.000uA | `F6 DD 12 8B F3 11 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | v2.05 flash 0x08028d1c (table ac_amps); same row in v1.02 |
+| aca | ACA 5.0000A, ACmA 50.000mA, ACuA 500.00uA / AC power 50.000mA, 500.00uA | `F6 DD 12 8B F3 11 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | v2.05 flash 0x08028d30 (table ac_amps); same row in v1.02 |
+| aca | ACA 10.000A, AC power 10.000A | `F6 DD 12 8B F3 10 00 55 31 00 00 00 00 00 00 80 80 C7 3D 2C` | v2.05 flash 0x08028d44 (table ac_amps); same row in v1.02 |
+| freq | freq | `FE DD 00 00 00 01 00 00 00 00 22 00 00 90 28 A0 00 C0 08 2C` | v2.05 flash 0x08028fbc (table freq); same row in v1.02 |
+| ohm | 50.000Ω | `74 CF 13 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | v2.05 flash 0x080285bc (table ohms); not in v1.02 |
+| ohm | 500.00Ω | `74 CF 13 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | v2.05 flash 0x080285d0 (table ohms); not in v1.02 |
+| ohm | 5.0000kΩ | `00 00 11 83 85 00 00 00 00 00 00 40 60 00 00 94 80 D3 0C 2C` | v2.05 flash 0x080285e4 (table ohms); not in v1.02 |
+| ohm | 50.000kΩ | `00 00 12 83 85 00 00 00 00 00 00 40 00 06 00 94 80 D3 0C 2C` | v2.05 flash 0x080285f8 (table ohms); not in v1.02 |
+| ohm | 500.00kΩ | `00 00 12 83 85 00 00 00 00 00 00 40 00 60 00 94 80 D2 0C 20` | v2.05 flash 0x0802860c (table ohms); not in v1.02 |
+| ohm | 5.0000MΩ | `00 00 17 93 85 00 00 00 55 00 00 08 00 80 00 86 80 D1 00 AC` | v2.05 flash 0x08028620 (table ohms); not in v1.02 |
+| ohm | 50.000MΩ | `00 00 14 93 85 00 00 00 55 00 08 08 00 00 00 86 80 D1 00 AC` | v2.05 flash 0x08028634 (table ohms); not in v1.02 |
+| ohm | 50.000MΩ (PA0 P open) | `00 00 14 93 85 00 00 00 55 00 00 08 00 00 00 86 80 D1 00 AC` | v2.05 flash 0x08028634 (table ohms), modified at run time: R2A AND 0xF7 while EEPROM byte 0x26 ≠ 0xA5 |
+| cont | continuity | `74 CF 10 8F 85 00 00 00 00 00 00 40 06 00 04 94 80 D2 0C 2C` | v2.05 flash 0x08029150 (table continuity); same row in v1.02 |
+| diode | diode | `00 00 12 83 8D 00 00 00 11 00 00 00 08 00 40 92 80 E1 03 AC` | v2.05 flash 0x08028f94 (table diode); same row in v1.02 |
+| cap | 10.00nF | `76 21 07 00 00 00 00 00 00 00 00 08 00 80 00 8E 00 C2 0E 20` | v2.05 flash 0x08028748 (table cap); same row in v1.02 |
+| cap | 100.0nF | `76 21 07 00 00 00 00 00 00 00 00 08 00 80 00 8E 00 C2 0E 20` | v2.05 flash 0x0802875c (table cap); same row in v1.02 |
+| cap | 1.000uF | `76 21 07 00 00 00 00 00 00 00 00 08 80 00 00 8E 00 C2 0E 20` | v2.05 flash 0x08028770 (table cap); same row in v1.02 |
+| cap | 10.00uF | `76 21 04 8A A5 00 00 00 55 00 00 08 08 00 00 8E 00 C2 0E 20` | v2.05 flash 0x08028784 (table cap); same row in v1.02 |
+| cap | 100.0uF | `76 21 04 8A A5 00 00 00 55 00 00 08 08 00 00 8E 00 C2 0E 20` | v2.05 flash 0x08028798 (table cap); same row in v1.02 |
+| cap | 10.00mF | `52 21 00 00 00 11 00 50 11 00 00 00 08 00 00 9A 00 C2 3C 20` | v2.05 flash 0x080287ac (table cap); same row in v1.02 |
+| cap | 100.0nF (PF8 low) | `76 43 07 00 00 00 00 00 00 00 00 08 00 80 00 8E 00 C2 0E 20` | v2.05 flash 0x080286e4 (table cap_pf8); not in v1.02 |
+| cap | 100.0uF (PF8 low) | `76 33 04 8A A5 00 00 00 55 00 00 08 08 00 00 8E 00 C2 0E 20` | v2.05 flash 0x08028720 (table cap_pf8); not in v1.02 |
 
 ### Digilent DMM Shield (dmm.cpp)
 
