@@ -45,6 +45,9 @@ SCEN = [
     # dV in the poll after a turn): the class widens, a final value comes.
     ('1mF-narrow', 'c:1000e-6;capcmpw:0.25;capvavg:0.2', 18, 1e-3, 10),
     ('1mF-narrow-da', 'c:1000e-6;capcmpw:0.25;capvavg:0.2;capda:0.6;capdatau:1', 18, 1e-3, 10),
+    # Every class's window x 0.6 (device 4c31e6da, ~1 mF on 6 mF: class 2 swung ~35 mV, 3 polls
+    # per half ramp, too short for a direction pair; the final came with class 3 at 11 .. 13 s).
+    ('1mF-short', 'c:1000e-6;capcmpw:0.6;capvavg:0.2', 18, 1e-3, 7),
     # Absorption on a capacitor inside 600 uF: its early slope reads it over the range (the
     # chip options stay set: capcmpw / capvavg back to their defaults).
     ('470uF-da', 'c:470e-6;capcmpw:1;capvavg:0;capda:0.6;capdatau:1', 18, 470e-6, 9),

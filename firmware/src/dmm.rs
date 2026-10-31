@@ -212,6 +212,11 @@ pub const CAP_CLASS_AUTO: u8 = 2;
 /// agreeing final values.
 pub const CAP_CLASS_FAST: u8 = 1;
 const CAP_AGREE_N: u8 = 4;
+/// Ramp ranges: a full ring (CAP_RING polls, both directions) whose middle
+/// four are within this share of its median is final without the
+/// directions' ratio (one poll each side may be off: device, ~1 mF on 6 mF,
+/// dV 10.27 .. 10.76 mV per poll).
+const CAP_RING_AGREE: f32 = 0.02;
 /// Ramp ranges: a poll whose dV is under this share of the full-poll dV
 /// (`cap_dv_ref`) holds a comparator turn (a part of the poll each way;
 /// device 19b6e3b7, ~1 mF on 6 mF: 1 .. 5 mV among 10.5, often in the poll
@@ -6527,6 +6532,11 @@ impl Dmm {
             // I: DBG:CAP:IDIS (INFERRED, one capacitor).
             let a = v_mv.abs();
             if a >= CAP_DIS_HI_MV {
+                // At the clamp: the slope's anchor from below it again (device
+                // 4c31e6da, ~1 mF charged: one ~0.2 V sample right after the
+                // DC V read, then 5 s at the clamp, read 22.9 mF and took
+                // the range to 60 mF).
+                self.cap_dis_pv = 0.0;
                 self.cap_dis_chg = true;
                 if cap_dismode() != 0 && !self.cap_pre_done {
                     // Charged: its voltage first, on the DC V 60 V row
@@ -6842,20 +6852,12 @@ impl Dmm {
             self.cap_vext = [v_mv, v_mv, e[0], e[1]];
             self.cap_vext_n = 2;
             if widen {
-                // The ring, the pairs and the ratio from the new class's polls;
-                // the value shown stays.
+                // The next poll writes the class. The polls' own slopes do
+                // not depend on it (the turns' partial polls are left out):
+                // the ring, the pairs and the ratio stay (a restart cost
+                // ~2 s per step on the device, 4b79378d).
                 self.cap_cls_min = self.ramp.class + 1;
                 self.cap_vext_n = 0;
-                self.cap_agree = 0;
-                self.cap_pair = [None; 2];
-                self.cap_ring_n = 0;
-                self.cap_half_n = 0;
-                self.cap_half_prev = 0;
-                self.cap_ratio = [1.0; 2];
-                self.cap_ratio_ok = false;
-                self.cap_first_v = 0.0;
-                self.ramp.n = 0;
-                return Some(if self.ramp.first { self.cap_dash() } else { self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov) });
             }
         }
         if fresh {
@@ -6952,7 +6954,15 @@ impl Dmm {
             if self.ramp.first && self.cap_first_v > 0.0 && !self.cap_dis_chg {
                 v = self.cap_first_v;
             }
-            let ready = self.cap_ratio_ok || self.cap_ring_n as usize >= CAP_NORATIO_N;
+            // Or a full ring of polls both ways within CAP_RING_AGREE (half
+            // ramps too short for a direction pair, > 4 polls each: device
+            // 4c31e6da, ~1 mF on 6 mF, class 2 swung ~35 mV, 3 polls per half
+            // ramp, polls 976 .. 992 uF, the final only with class 3 at 11 ..
+            // 13 s); the two directions differ by ~1 % per poll.
+            let full = ((1u16 << CAP_RING) - 1) as u8;
+            let ups = self.cap_ring_up & full;
+            let agree = n == CAP_RING && ups != 0 && ups != full && b[n - 2] - b[1] <= CAP_RING_AGREE * v_ring;
+            let ready = self.cap_ratio_ok || agree || self.cap_ring_n as usize >= CAP_NORATIO_N;
             // After a charged capacitor's discharge: the first final value
             // once two results in a row agree (CAP_CHG_AGREE).
             let wait = ready && self.ramp.first && self.cap_dis_chg && {
