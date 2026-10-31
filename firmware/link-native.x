@@ -336,10 +336,10 @@ SECTIONS
         /* DBG:GENTRIG:LAG / STAT? and DBG:CH2:LAG (the GEN / CH2 channels'
          * tuning replies, App::dbg_gen). */
         *(.text.*8opendm403app*3App7dbg_gen*);
-        /* Start-up only (App::new): the scope's SHOWN / STRIP_SHOWN reset
-         * (scope_ui::init_shown) and the backup-SRAM record set-up
-         * (persist::init, also splash / setfile::boot). */
-        *(.text.*8opendm408scope_ui10init_shown*);
+        /* Start-up only: the backup-SRAM record set-up (persist::init,
+         * also splash / setfile::boot). Not scope_ui::init_set (the scope
+         * graph's page-pool set-up): it runs on a scope page entry, also
+         * while a host LOG:STATe ON stream runs. */
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);

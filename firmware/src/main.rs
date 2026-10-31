@@ -42,6 +42,7 @@ unsafe impl critical_section::Impl for NoMask {
 mod meter;
 mod mmio;
 mod persist;
+mod pool;
 mod power;
 mod prof;
 mod scope;
@@ -916,6 +917,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                     #[cfg(not(feature = "dbg-diag"))]
                     scpi::Dbg::Diag => false,
+                    #[cfg(feature = "dbg-pool")]
+                    scpi::Dbg::Pool => {
+                        let n = pool::PAGE.text(port.rsp_buf());
+                        port.respond_len(n);
+                        false
+                    }
+                    #[cfg(not(feature = "dbg-pool"))]
+                    scpi::Dbg::Pool => false,
                     scpi::Dbg::Flash => {
                         scpi.len = 0;
                         let mut t = [0u8; 16];
@@ -1871,7 +1880,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
-            | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
+            | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::Pool | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
 }

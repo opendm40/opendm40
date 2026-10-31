@@ -170,6 +170,25 @@ Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 484 B: the
 generator preview's trace rows, worked out once per wave and square duty
 instead of per strip) and `scope_ui::COLC` (400 B, flash).
 
+## The page pool (`pool::PAGE`, 17 KB)
+
+[src/pool.rs](../src/pool.rs); design and audit:
+[ram-pools-audit.md](ram-pools-audit.md). One SRAM area for page state
+that one view at a time needs and that is rebuilt on its next use:
+
+| tenant | B | view | on its next use after an eviction |
+|---|---|---|---|
+| `ScopeGraph` (scope_ui.rs `GraphSet`: the graph rows and their on-screen copies, SHOWN, the flush row classes) | 17 044 | Scope, combined view, wave view | empty and invalid: the page repaints; `App::show` asks the scope to render a stopped record again |
+| `Gallery` (gallery.rs) | 672 | Gallery | `Gallery::new()`; the view starts with `open` anyway |
+| `GenPreview` (ui.rs `GenSp`) | 484 | Gen (strip passes) | key "none": the rows are worked out again |
+
+Writers outside these views (a CH2 switch over SCPI, the wave view's
+clear, `sp_leave`) use `scope_ui::graph_held` and never evict another
+view's tenant. `scope_page::CACHE` (persistence) and `scope_ch2::STORE`
+(the stored record's CH2) stay outside: they survive a page change.
+DBG:POOL? (feature `dbg-pool`) lists the holders and their losses;
+tools/pool-test checks the table, emu/pooltest.py the page changes.
+
 ## Every static of 1 KiB or more
 
 Sizes from `llvm-nm -S` of a native release ELF (default features) of
