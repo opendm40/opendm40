@@ -351,6 +351,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut sec_shown = [0u32; 6];
     // Streamed USBTMC reply: last progress (usbtmc stream_pos) and its time.
     let mut stream_seen = (usize::MAX, 0u64);
+    // A plain reply made no progress for STREAM_STALL_MS: no more polling
+    // for it (until it ends).
+    let mut reply_stalled = false;
     let cyc = || unsafe { mmio::r32(0xE000_1004) };
 
     loop {
@@ -426,24 +429,36 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if msc::HOST_IO.swap(false, core::sync::atomic::Ordering::Relaxed) {
             app.note_host_activity(now);
         }
-        // A streamed USBTMC reply (WAV:DATA? of the scope record,
-        // scope_wav.rs): its packets go out as the host takes them, polled
-        // like a disk READ above, within the same budget per pass. The scope
-        // keeps its record (no RUN) until the last packet left.
-        if tmc.streaming() {
+        // A USBTMC reply going out: its packets go out as the host takes
+        // them, polled like a disk READ above, within the same budget per
+        // pass (one packet per pass otherwise: a 6 KB MMEM:DATA? piece took
+        // ~95 passes, 1.2 .. 7 s on the scope page with CH2 and the decoder,
+        // device #174). A streamed reply (WAV:DATA? of the scope record,
+        // scope_wav.rs) also while it waits for the host's next request; the
+        // scope keeps its record (no RUN) until the last packet left.
+        if !tmc.sending() {
+            reply_stalled = false;
+        }
+        let streaming = tmc.streaming();
+        if streaming || (tmc.sending() && !reply_stalled) {
             let budget = if logger.active() || fastlog::active() { MSC_PUMP_LOG_CYC } else { MSC_PUMP_CYC };
             let t0 = cyc();
-            while tmc.streaming() && cyc().wrapping_sub(t0) < budget {
+            while (tmc.streaming() || tmc.sending()) && cyc().wrapping_sub(t0) < budget {
                 dev.poll(&mut [&mut tmc, &mut msc]);
             }
             // A host that stopped reading and sends nothing more would hold
-            // the scope (and this budget) for good: give the stream up after
-            // STREAM_STALL_MS without progress.
+            // the scope (and this budget) for good: give a stream up, stop
+            // polling for a plain reply after STREAM_STALL_MS without
+            // progress.
             let p = tmc.stream_pos();
             if p != stream_seen.0 {
                 stream_seen = (p, now);
             } else if now >= stream_seen.1 + STREAM_STALL_MS {
-                tmc.cancel_stream();
+                if streaming {
+                    tmc.cancel_stream();
+                } else {
+                    reply_stalled = true;
+                }
             }
         } else {
             stream_seen = (usize::MAX, now);
