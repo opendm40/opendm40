@@ -217,21 +217,24 @@ fn tail() {
         off += sp.len;
     }
     check(n, off == pool::TAIL_BYTES && pool::REC_MAX <= 65_535, format!("tail {off} B, record max {}", pool::REC_MAX));
-    check(n, pool::tail_keep(0) == 43_008 && pool::tail_keep(1) == 47_376 && pool::tail_keep(2) == 55_568 && pool::tail_keep(3) == 59_664 && pool::REC_MAX == 59_664,
+    // Record lengths: CAP, + the CH2 store (4 368), + the slots (8 192), +
+    // the FIFO (4 096 samples).
+    let (k0, k1, k2, k3) = (pool::REC_BASE, pool::REC_BASE + 4368, pool::REC_BASE + 12_560, pool::REC_BASE + 16_656);
+    check(n, pool::tail_keep(0) == k0 && pool::tail_keep(1) == k1 && pool::tail_keep(2) == k2 && pool::tail_keep(3) == k3 && pool::REC_MAX == k3,
         format!("lengths {} {} {} {}", pool::tail_keep(0), pool::tail_keep(1), pool::tail_keep(2), pool::tail_keep(3)));
 
     // Record length per state (the lenders holding their segments).
     idle();
-    check(n, grab(false) == 59_664, "idle: CAP + the whole tail".into());
-    check(n, grab(false) == 59_664 && t.holds(Tenant::ScopeT3), "a second grab keeps it".into());
+    check(n, grab(false) == k3, "idle: CAP + the whole tail".into());
+    check(n, grab(false) == k3 && t.holds(Tenant::ScopeT3), "a second grab keeps it".into());
     idle();
-    check(n, grab(true) == 43_008 && !t.holds(Tenant::ScopeT1), "CH2 on: none (the store is CH2's)".into());
+    check(n, grab(true) == k0 && !t.holds(Tenant::ScopeT1), "CH2 on: none (the store is CH2's)".into());
     let cases: [(&str, &[Tenant], usize); 5] = [
-        ("CH2 stream (store + slots)", &[Tenant::Ch2Store, Tenant::RingSlots], 43_008),
-        ("a stopped record's CH2 (store)", &[Tenant::Ch2Store], 43_008),
-        ("LOG:STATe / wave / inrush (slots)", &[Tenant::RingSlots], 47_376),
-        ("CSV recording (FIFO)", &[Tenant::RowFifo], 55_568),
-        ("fast log (slots + FIFO)", &[Tenant::RingSlots, Tenant::RowFifo], 47_376),
+        ("CH2 stream (store + slots)", &[Tenant::Ch2Store, Tenant::RingSlots], k0),
+        ("a stopped record's CH2 (store)", &[Tenant::Ch2Store], k0),
+        ("LOG:STATe / wave / inrush (slots)", &[Tenant::RingSlots], k1),
+        ("CSV recording (FIFO)", &[Tenant::RowFifo], k2),
+        ("fast log (slots + FIFO)", &[Tenant::RingSlots, Tenant::RowFifo], k1),
     ];
     for (what, hold, want) in cases {
         idle();
@@ -254,7 +257,7 @@ fn tail() {
     idle();
     check(n, t.take::<Cat>().is_some(), "cache taken while idle".into());
     let g = t.gen(Tenant::CatCache);
-    check(n, grab(false) == 59_664 && !t.holds(Tenant::CatCache) && t.gen(Tenant::CatCache) == g + 1, "the scope's grab drops the cache".into());
+    check(n, grab(false) == k3 && !t.holds(Tenant::CatCache) && t.gen(Tenant::CatCache) == g + 1, "the scope's grab drops the cache".into());
     check(n, t.take::<Cat>().is_none(), "no cache while the scope holds the FIFO".into());
     yield_from(2);
     check(n, t.take::<Cat>().is_some() && t.take::<Fifo>().is_some() && !t.holds(Tenant::CatCache), "a recording drops the cache".into());
@@ -298,12 +301,12 @@ fn tail() {
     idle();
 
     // The cut (scope.rs `cut`): the window around the anchor stays.
-    let c = |len, keep, anchor| pool::cut_from(len, keep, anchor);
-    check(n, c(43_000, 47_376, 100) == 0, "a record that fits: not moved".into());
-    check(n, c(59_664, 43_008, 59_663) == 59_664 - 43_008, "roll (anchor = newest): the newest part".into());
-    check(n, c(59_664, 43_008, 10) == 0, "anchor near the start: from 0".into());
-    check(n, c(59_664, 47_376, 30_000) == 30_000 - 47_376 / 2, "anchor in the middle: centred".into());
-    for (len, keep) in [(59_664, 43_008), (59_664, 47_376), (55_568, 43_008), (47_376, 43_008)] {
+    let c = |len: usize, keep: usize, anchor: usize| pool::cut_from(len, keep, anchor);
+    check(n, c(43_000, k1, 100) == 0, "a record that fits: not moved".into());
+    check(n, c(k3, k0, 59_663) == k3 - k0, "roll (anchor = newest): the newest part".into());
+    check(n, c(k3, k0, 10) == 0, "anchor near the start: from 0".into());
+    check(n, c(k3, k1, 30_000) == 30_000 - k1 / 2, "anchor in the middle: centred".into());
+    for (len, keep) in [(k3, k0), (k3, k1), (k2, k0), (k1, k0)] {
         for anchor in [0, 1, 20_000, 30_000, 40_000, len - 1] {
             let f = c(len, keep, anchor);
             check(n, f + keep <= len && anchor >= f && anchor - f < keep, format!("cut {len} -> {keep} at {anchor}: from {f}"));
