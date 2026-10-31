@@ -3944,8 +3944,9 @@ pub struct PinchState {
     pub i: usize,
 }
 
-/// Highest V/div range index (scope::VDIV has 10 entries).
-pub const RANGE_MAX: usize = 9;
+/// Highest V/div step index (`Settings::vidx`, scope::VSTEPS: 12 entries,
+/// the 5 / 2 mV/div digital zoom steps at 1 / 0).
+pub const RANGE_MAX: usize = crate::scope::VIDX_MAX;
 
 /// One pinch report: the stored state (None at the start of a pinch) and the
 /// finger separation `s0` -> `s` along the pair's axis. 1-2-5: one index
@@ -3999,7 +4000,7 @@ pub fn pinch_step_mode(mode: u8, prev: Option<PinchState>, horizontal: bool, s0:
 /// span ratio `r` (fingers apart = zoom in = smaller per-div value), in
 /// lo..=hi. `div` gives the per-div value of a table index.
 pub fn pinch_snap(horizontal: bool, i0: usize, r: f32, lo: usize, hi: usize) -> usize {
-    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VDIV[i] } };
+    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VSTEPS[i] } };
     let want = ln_f(div(i0)) - ln_f(r.max(1e-3));
     let mut best = i0.clamp(lo, hi);
     let mut bd = f32::MAX;

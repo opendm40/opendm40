@@ -203,6 +203,8 @@ fn set_commands() {
     check(matches!(s.handle(b"TIM:SCAL 100US", 1), Out::Instr(Cmd::TimScale(Some(v))) if (v - 1e-4).abs() < 1e-9), "TIM:SCAL 100US");
     check(matches!(s.handle(b"TIM:MAIN:SCAL 1m", 1), Out::Instr(Cmd::TimScale(Some(v))) if (v - 1e-3).abs() < 1e-9), "TIM:MAIN:SCAL 1m");
     check(matches!(s.handle(b"CHAN1:SCAL 0.5", 1), Out::Instr(Cmd::ChScale(Some(v))) if v == 0.5), "CHAN1:SCAL 0.5");
+    check(matches!(s.handle(b"CHAN1:SCAL 2mV", 1), Out::Instr(Cmd::ChScale(Some(v))) if (v - 0.002).abs() < 1e-9), "CHAN1:SCAL 2mV");
+    check(matches!(s.handle(b"CHAN1:SCAL 0.005", 1), Out::Instr(Cmd::ChScale(Some(v))) if (v - 0.005).abs() < 1e-9), "CHAN1:SCAL 0.005");
     check(matches!(s.handle(b"CHAN:COUP AC", 1), Out::Instr(Cmd::ChCoup(Some(true)))), "CHAN:COUP AC");
     check(matches!(s.handle(b"TRIG:SLOP NEG", 1), Out::Instr(Cmd::TrigSlope(Some(false)))), "TRIG:SLOP NEG");
     check(matches!(s.handle(b"TRIG:EDGE:SLOP POS", 1), Out::Instr(Cmd::TrigSlope(Some(true)))), "TRIG:EDGE:SLOP POS");

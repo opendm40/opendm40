@@ -152,6 +152,15 @@ pub const TB_YT_MAX: usize = 24;
 /// V/div of hardware range r (x1 probe), front-end GPIO row {PC13, PB15, PD12,
 /// PD13}, calibration voltage X_r and default gain point.
 pub const VDIV: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+/// The user V/div steps (x1 probe), index = `Settings::vidx`: two digital
+/// zoom steps (5 / 2 mV/div, `Settings::vzoom`) below the hardware ranges.
+/// The front end has no gain above range 0's (4051 code x20, the top of
+/// the stock ladder, `stock/re/analysis/scope_gen_v2_6.h`), so the zoom
+/// steps show range 0's codes (~108 codes per 10 mV) stretched: 54 / 21.6
+/// codes per division.
+pub const VSTEPS: [f32; 12] = [0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
+/// Highest `Settings::vidx`.
+pub const VIDX_MAX: usize = 11;
 const GPIO_ROW: [[u8; 4]; 10] = [
     [1, 1, 1, 0],
     [1, 1, 1, 1],
@@ -210,6 +219,9 @@ pub struct Settings {
     /// Trigger source (TSRC_*): CH1, or the generator's output computed
     /// from its timers (docs/scope-gen-channel.md; edge only, MCX only).
     pub tsrc: u8,
+    /// Digital vertical zoom of range 0: 0 none (10 mV/div), 1 = 5 mV/div,
+    /// 2 = 2 mV/div (`VSTEPS`). Always 0 on the other ranges (`apply`).
+    pub vzoom: u8,
 }
 
 /// `Settings::tsrc` values.
@@ -250,7 +262,24 @@ fn round_f64(x: f64) -> f64 {
 impl Settings {
     /// Stock defaults: 200 us/div, 1 V/div, DC, rising, Auto, level row 105.
     pub const DEFAULT: Settings =
-        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0, hpos: 200, ttype: 0, pcond: 0, pwidth: 1e-3, runt_row: 70, tsrc: TSRC_CH1 };
+        Settings { run: true, tb: 13, range: 6, ac: false, trig_row: 105, pos: 0, rising: true, mode: TrigMode::Auto, probe: 1.0, hpos: 200, ttype: 0, pcond: 0, pwidth: 1e-3, runt_row: 70, tsrc: TSRC_CH1, vzoom: 0 };
+
+    /// User V/div step index into `VSTEPS` (0 = 2 mV .. 11 = 10 V/div).
+    pub fn vidx(&self) -> usize {
+        if self.range == 0 { 2 - self.vzoom.min(2) as usize } else { self.range.min(9) + 2 }
+    }
+
+    /// Set the V/div step (`vidx`): the hardware range and the zoom.
+    pub fn set_vidx(&mut self, i: usize) {
+        let i = i.min(VIDX_MAX);
+        self.range = i.saturating_sub(2);
+        self.vzoom = 2u8.saturating_sub(i as u8);
+    }
+
+    /// V/div at the x1 probe (the zoom applied).
+    pub fn vdiv1(&self) -> f32 {
+        VSTEPS[self.vidx()]
+    }
 }
 
 /// A finished frame: the visible window of the record, or (roll mode, empty
@@ -325,6 +354,9 @@ pub struct Scope {
     /// Hardware range the stored codes were captured with (the code -> volts
     /// gain); the current range only sets the display scale while stopped.
     stored_range: usize,
+    /// V/div (x1 probe) the stored record was shown at: its position rows
+    /// are at this scale (v_centre).
+    stored_vdiv: f32,
     /// Stored record came from roll mode: newest sample at the right edge.
     stored_roll: bool,
     /// Emit one re-render of the stored record on the next poll (set on any
@@ -713,6 +745,7 @@ impl Scope {
             stored_fs: 0,
             stored_tb: 0,
             stored_range: 0,
+            stored_vdiv: 0.01,
             stored_roll: false,
             zoom_pending: false,
             hw: HwTrig::new(),
@@ -832,8 +865,8 @@ impl Scope {
     /// while stopped (a position drag then moves the stored trace, as the
     /// stock STOP re-render).
     fn v_centre(&self) -> f32 {
-        let (r, pos) = if !self.s.run && self.stored_valid { (self.stored_range, self.stored_pos) } else { (self.s.range, self.s.pos) };
-        pos as f32 * 4.0 * VDIV[r] * self.s.probe / 141.0
+        let (vd, pos) = if !self.s.run && self.stored_valid { (self.stored_vdiv, self.stored_pos) } else { (self.s.vdiv1(), self.s.pos) };
+        pos as f32 * 4.0 * vd * self.s.probe / 141.0
     }
 
     /// ADC code -> volts (FUN_080301a0: v_c + (code - g1) X_r P / (g0 - g1)).
@@ -857,7 +890,7 @@ impl Scope {
 
     /// Volts (wave: SI, V or A) per division at the probe tip / the jacks.
     pub fn vdiv(&self) -> f32 {
-        if self.wave { wv().sc.vdiv } else { VDIV[self.s.range] * self.s.probe }
+        if self.wave { wv().sc.vdiv } else { self.s.vdiv1() * self.s.probe }
     }
 
     pub fn row_of_code(&self, code: f32) -> f32 {
@@ -887,7 +920,7 @@ impl Scope {
 
     /// V/div under settings `s` (the live wave scale in the wave view).
     fn vdiv_of(&self, s: &Settings) -> f32 {
-        if self.wave { wv().sc.vdiv } else { VDIV[s.range.min(9)] * s.probe }
+        if self.wave { wv().sc.vdiv } else { s.vdiv1() * s.probe }
     }
 
     /// Keep the levels in volts across the change self.s -> `s` (`apply`,
@@ -969,7 +1002,7 @@ impl Scope {
         }
         let r = self.s.range;
         let (g0, g1) = self.gain(r);
-        let dv = (140.0 - row) * 4.0 * VDIV[r] / 141.0;
+        let dv = (140.0 - row) * 4.0 * self.s.vdiv1() / 141.0;
         let c = g1 + dv * (g0 - g1) / XR[r];
         // Off screen (a level kept across a zoom): beyond the ADC span, no
         // crossing (i32 range kept sane).
@@ -1046,6 +1079,7 @@ impl Scope {
             self.zoom_pending = true;
         }
         s.range = s.range.min(9);
+        s.vzoom = if s.range == 0 { s.vzoom.min(2) } else { 0 };
         s.trig_row = s.trig_row.clamp(-10, 290);
         s.runt_row = s.runt_row.clamp(-10, 290);
         s.ttype = s.ttype.min(2);
@@ -1061,7 +1095,7 @@ impl Scope {
         // the misses. Level / position drags do not resume it (a broken map
         // would cost up to three miss frames per drag step).
         let o = &self.s;
-        if s.range != o.range || s.tb != o.tb || s.ac != o.ac || s.rising != o.rising || s.mode != o.mode || s.ttype != o.ttype {
+        if s.range != o.range || s.vzoom != o.vzoom || s.tb != o.tb || s.ac != o.ac || s.rising != o.rising || s.mode != o.mode || s.ttype != o.ttype {
             self.hw.resume();
         }
         if self.wave {
@@ -1096,7 +1130,7 @@ impl Scope {
         // Offset PWM (FUN_080302d6): ADC code of 0 V at this position.
         let r = s.range;
         let (g0, g1) = self.gain(r);
-        let code_t = g1 - s.pos as f32 * (4.0 * VDIV[r] / XR[r]) * (g0 - g1) / 141.0;
+        let code_t = g1 - s.pos as f32 * (4.0 * s.vdiv1() / XR[r]) * (g0 - g1) / 141.0;
         let (o0, o1) = cal_pair(0xA8, r, (730.0, 280.0));
         let ccr = 8800.0 + (code_t - o1) * (11636.0 - 8800.0) / (o0 - o1);
         let ccr = if ccr.is_finite() && ccr > 0.0 { ccr.min(20000.0) as u32 } else { 0 };
@@ -1203,6 +1237,7 @@ impl Scope {
         self.stored_fs = self.sample_rate();
         self.stored_tb = self.s.tb as u8;
         self.stored_range = self.s.range;
+        self.stored_vdiv = self.s.vdiv1();
         self.stored_pos = self.s.pos;
         self.stored_roll = roll;
         self.stored_anchor = anchor.min(len - 1);
