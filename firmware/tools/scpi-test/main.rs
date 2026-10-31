@@ -79,6 +79,12 @@ mod dmm {
         pub const COUP_AC: u8 = 3;
     }
 }
+// DMM Math (src/math.rs): put_reading applies it; the parser tests do not.
+mod math {
+    pub fn apply(r: &crate::dmm::Reading) -> crate::dmm::Reading {
+        crate::dmm::Reading { main: crate::dmm::Val { ..r.main }, si: r.si }
+    }
+}
 mod logger {
     pub const FMT_ROWS: u8 = 0;
     pub const FMT_PACKED: u8 = 1;
@@ -216,7 +222,21 @@ fn set_commands() {
     check(matches!(s.handle(b"DISP:BURD 1", 1), Out::Instr(Cmd::DispBurden(Some(true)))), "DISP:BURD 1");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
     check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
-    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");
+    // DMM Math (math.rs).
+    check(matches!(s.handle(b"CALC:FUNC DBM", 1), Out::Instr(Cmd::CalcFunc(Some(1)))), "CALC:FUNC DBM");
+    check(matches!(s.handle(b"calc:func scal", 1), Out::Instr(Cmd::CalcFunc(Some(3)))), "calc:func scal");
+    check(matches!(s.handle(b"CALCulate:FUNCtion NONE", 1), Out::Instr(Cmd::CalcFunc(Some(0)))), "CALCulate:FUNCtion NONE");
+    check(matches!(s.handle(b"CALC:FUNC?", 1), Out::Instr(Cmd::CalcFunc(None))), "CALC:FUNC? is the query");
+    check(matches!(s.handle(b"CALC:DBM:REF 600", 1), Out::Instr(Cmd::CalcDbmRef(Some(v))) if v == 600.0), "CALC:DBM:REF 600");
+    check(matches!(s.handle(b"CALC:SCAL:GAIN 1E3", 1), Out::Instr(Cmd::CalcScal(0, Some(v))) if v == 1000.0), "CALC:SCAL:GAIN 1E3");
+    check(matches!(s.handle(b"CALC:SCAL:OFFS -0.5", 1), Out::Instr(Cmd::CalcScal(1, Some(v))) if v == -0.5), "CALC:SCAL:OFFS -0.5");
+    check(matches!(s.handle(b"CALC:SCAL:UNIT \"mA\"", 1), Out::Instr(Cmd::CalcScalUnit(Some(u))) if u == u32::from_le_bytes(*b"mA\0\0")), "CALC:SCAL:UNIT \"mA\" keeps its case");
+    check(matches!(s.handle(b"CALC:SCAL:UNIT 'rpm'", 1), Out::Instr(Cmd::CalcScalUnit(Some(u))) if u == u32::from_le_bytes(*b"rpm\0")), "CALC:SCAL:UNIT 'rpm'");
+    check(matches!(s.handle(b"CALC:SCAL:UNIT \"\"", 1), Out::Instr(Cmd::CalcScalUnit(Some(0)))), "CALC:SCAL:UNIT \"\" = none");
+    check(matches!(s.handle(b"CALC:SCAL:UNIT \"kg/m2\"", 1), Out::Text | Out::None), "CALC:SCAL:UNIT of 5 bytes refused");
+    check(err(&mut s).starts_with("-224,"), "CALC:SCAL:UNIT of 5 bytes: -224");
+    check(matches!(s.handle(b"CALC:SCAL:UNIT?", 1), Out::Instr(Cmd::CalcScalUnit(None))), "CALC:SCAL:UNIT? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");

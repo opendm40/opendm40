@@ -31,8 +31,8 @@ limitations](#known-limitations).
    the main menu, the status bar, touch lock, battery and sleep.
 2. [What's new compared with the stock firmware](#whats-new-compared-with-the-stock-firmware)
 3. [Multimeter](#multimeter): every function, ranges, rate and resolution,
-   HOLD, AutoHold, REL, MIN/MAX/AVG, limits, the bargraph and the trend
-   chart, burden voltage.
+   HOLD, AutoHold, REL, MIN/MAX/AVG, limits, math (dBm, dBV, mX+b), the
+   bargraph and the trend chart, burden voltage.
 4. [Safety and alerts](#safety-and-alerts): wrong-connection alerts, the
    danger alarm, the fuse check.
 5. [Oscilloscope](#oscilloscope): timebase, V/div, triggers, cursors,
@@ -733,6 +733,7 @@ Limits](#limits-and-autohold)).
   [**Inrush**](#inrush-current).
 - Voltage and current pages: **Wave** opens the oscilloscope on the
   multimeter inputs ([Wave view](#wave-view-the-scope-on-the-multimeter-inputs)).
+- Voltage, current and Ω pages: **Math** opens the [Math page](#math-dbm-dbv-mxb).
 
 Choosing a range turns REL off.
 
@@ -971,6 +972,28 @@ Limits: DC V**.
 - Next to the reading: **OK** in green, **HI** or **LO** in red.
 - The fail beep sounds when the reading crosses out of the limits, at most
   once per second.
+
+### Math: dBm, dBV, mX+b
+
+To open: **MF**, then **Math** (V, A and Ω). The result is the main
+reading, the measured value is above it.
+
+| ![The Math page: dBm, 600 Ω](img/math.png) | ![2.24 V shown as 9.22 dBm](img/dmm-math.png) |
+|---|---|
+| The Math page: dBm, 600 Ω | 2.24 V shown as 9.22 dBm |
+
+| Row | What it does |
+|---|---|
+| **Function** | **Off**, **dBm**, **dBV** (V only) or **mX+b**. |
+| **dBm ref** | The dBm reference: 50, 75 or 600 Ω. |
+| **Scale m**, **Offset b** | mX+b: X in V, A or Ω; type with the keypad. Example: a 1 mV/A clamp is m = 1000, unit A. |
+| **Unit** | The mX+b unit; any text up to 4 characters with SCPI `CALC:SCAL:UNIT`. |
+
+- The statistics, limits, bargraph, history row, trend chart and recording
+  keep the measured value. mX+b shows up to ±9999.9, above that **0L**
+  (SCPI returns the value).
+- Kept after switching off. SCPI: `CALCulate:FUNCtion`
+  ([reference](scpi-reference.md#calculate-math-db-mxb)).
 
 ### Burden voltage
 
@@ -2846,7 +2869,7 @@ measurement as it was.
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep, the Math settings | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 

@@ -923,6 +923,14 @@ pub enum Cmd {
     CalcLimClear,
     CalcLimState(Option<bool>),
     CalcLimFail,
+    /// DMM Math (math.rs): CALC:FUNC NONE / DBM / DBV / SCALe (math::OFF ..
+    /// SCAL), CALC:DBM:REF 50 / 75 / 600, CALC:SCAL:GAIN (0) / OFFSet (1),
+    /// CALC:SCAL:UNIT (up to 4 bytes, little-endian, 0-padded: Cmd stays
+    /// 8 bytes); None = query.
+    CalcFunc(Option<u8>),
+    CalcDbmRef(Option<f32>),
+    CalcScal(u8, Option<f32>),
+    CalcScalUnit(Option<u32>),
     /// FR-05: [SENSe:]RATE (0 SLOW, 1 MED, 2 FAST; None = query),
     /// RATE:PERiod?, CALC:SMOothing[:STATe], CALC:SMOothing:RESPonse
     /// (1 LOW = FAST / MED, 2 HIGH = SLOW).
@@ -1935,6 +1943,8 @@ impl Scpi {
             for (d, s) in up.iter_mut().zip(&cmd[..n]) {
                 *d = s.to_ascii_uppercase();
             }
+            // As sent (CALC:SCAL:UNIT keeps the case of its text).
+            let raw = cmd;
             let cmd = &up[..n];
             let (head, arg) = match cmd.iter().position(|&b| b == b' ' || b == b'\t') {
                 Some(i) => (&cmd[..i], trim(&cmd[i + 1..])),
@@ -2962,7 +2972,8 @@ impl Scpi {
                             _ => None,
                         }
                     } else {
-                        None
+                        // CALC:FUNC / CALC:DBM / CALC:SCAL (DMM Math).
+                        calc_math(sub, leaf, a, query, raw, &up)
                     };
                     match c {
                         Some(c) => out = Out::Instr(c),
@@ -3085,14 +3096,74 @@ impl Scpi {
     }
 
     /// Format a reading as SCPI NR3 (+1.234567E+00), or the overload value.
+    /// A DMM reading (READ? / FETCh? / MEASure?), with the DMM Math
+    /// function applied (math.rs); an mX+b result past the readout's
+    /// +-9999.9 is sent as it is (only a raw overload is +9.9E37).
+    #[inline(never)]
     pub fn put_reading(&mut self, r: &Reading) {
+        let mut o = crate::math::apply(r);
+        o.main.ol = r.main.ol;
+        self.put_shown(&o);
+    }
+
+    /// A reading as it is (already `math::apply`ed: DBG:READout?).
+    pub fn put_shown(&mut self, r: &Reading) {
         if r.main.ol {
             self.put(b"+9.90000000E+37");
+            return;
+        }
+        if r.si.is_nan() {
+            // DMM Math: dB of 0 V (math.rs).
+            self.put(NAN);
             return;
         }
         let mut b = [0u8; 20];
         let n = nr3(&mut b, r.si);
         self.put(&b[..n]);
+    }
+}
+
+/// DMM Math (math.rs) under CALCulate: FUNCtion, DBM:REFerence,
+/// SCALe:GAIN / OFFSet / UNIT (`raw`: the message as sent, `up` its
+/// upper-case copy that `a` is in: the unit keeps its case). .cold
+/// (link-native.x): set-up commands, not polled while a stream runs.
+#[inline(never)]
+fn calc_math(sub: &[u8], leaf: Option<&[u8]>, a: &[u8], query: bool, raw: &[u8], up: &[u8]) -> Option<Cmd> {
+    if kw(sub, "FUNCtion") && leaf.is_none() {
+        if query {
+            Some(Cmd::CalcFunc(None))
+        } else {
+            ["NONE", "DBM", "DBV", "SCALe"].iter().position(|n| kw(a, n)).map(|f| Cmd::CalcFunc(Some(f as u8)))
+        }
+    } else if kw(sub, "DBM") && leaf.is_some_and(|l| kw(l, "REFerence")) {
+        if query { Some(Cmd::CalcDbmRef(None)) } else { parse_num(a).map(|v| Cmd::CalcDbmRef(Some(v))) }
+    } else if kw(sub, "SCALe") {
+        match leaf {
+            Some(l) if kw(l, "GAIN") || kw(l, "OFFSet") => {
+                let k = kw(l, "OFFSet") as u8;
+                if query { Some(Cmd::CalcScal(k, None)) } else { parse_num(a).map(|v| Cmd::CalcScal(k, Some(v))) }
+            }
+            Some(l) if kw(l, "UNIT") => {
+                // A quoted string ("A", 'degC'), up to 4 bytes.
+                let off = a.as_ptr() as usize - up.as_ptr() as usize;
+                let u = match &raw[off..off + a.len()] {
+                    [q @ (b'"' | b'\''), m @ .., e] if q == e => m,
+                    t => t,
+                };
+                if query {
+                    Some(Cmd::CalcScalUnit(None))
+                } else if u.len() <= 4 {
+                    let mut b = [0u8; 4];
+                    b[..u.len()].copy_from_slice(u);
+                    Some(Cmd::CalcScalUnit(Some(u32::from_le_bytes(b))))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
     }
 }
 

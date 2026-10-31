@@ -17,7 +17,7 @@ impl App {
     #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
         if self.pressed.is_some()
-            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range)
+            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range | View::Math)
                 && !crate::hy3131::streaming())
         {
             self.press_track(g);
@@ -55,7 +55,7 @@ impl App {
                 3 if self.gen.s.wave != Wave::Square => None,
                 k => r(k, 0),
             },
-            View::Settings | View::Limits | View::Record if ui::title_back_hit(y) => None,
+            View::Settings | View::Limits | View::Record | View::Math if ui::title_back_hit(y) => None,
             View::Settings => {
                 let k = ui::settings_hit(self.set_page, y)?;
                 r(k, if self.set_page == 0 && ui::SET_STEP_ROWS.contains(&k) { ui::settings_step(x) } else { 0 })
@@ -78,6 +78,10 @@ impl App {
                     }
                 }
             }
+            View::Math => match ui::list_hit(y, ui::MATH_ROWS.len())? {
+                k if ui::MATH_STEP_ROWS.contains(&k) => r(k, ui::record_step(x)),
+                k => r(k, 0),
+            },
             View::Record => match ui::list_hit(y, ui::RECORD_ROWS.len())? {
                 k if ui::REC_STEP_ROWS.contains(&k) => r(k, ui::record_step(x)),
                 ui::REC_START_ROW => r(ui::REC_START_ROW, 0),

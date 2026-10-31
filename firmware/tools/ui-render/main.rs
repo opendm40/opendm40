@@ -69,6 +69,8 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+#[path = "../../src/math.rs"]
+mod math;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -594,6 +596,23 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
     }
 }
 
+/// `r` as the DMM Math function `f` shows it (math::apply; reference
+/// index `rref`, m, b, unit for mX+b). The unit is copied out of math.rs's
+/// one buffer (the next case changes it).
+fn mathed(f: u8, rref: usize, m: f32, b: f32, unit: &str, r: Reading) -> Reading {
+    math::set_func(f);
+    math::set_ref_idx(rref);
+    math::set_m(m);
+    math::set_b(b);
+    math::set_unit(unit.as_bytes());
+    let mut o = math::apply(&r);
+    if f == math::SCAL {
+        o.main.unit = Box::leak(unit.to_string().into_boxed_str());
+    }
+    math::set_func(math::OFF);
+    o
+}
+
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
     Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
@@ -704,6 +723,23 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         // An ohm conversion before the vet (dmm.rs OHM_VET_*: the range hunt).
         ("pv_ohm", prov(rd(10, val(219.40, 2, "\u{3a9}"), None, None, false)), None),
         ("pv_ohm_m", prov(rd(10, val(8.7800, 4, "M\u{3a9}"), None, None, false)), None),
+        // DMM Math (math.rs): dBm / dBV (negative, the widest, OL, 0 V),
+        // mX+b with 1- to 4-byte units, its largest value and overflow; the
+        // raw reading in aux1 (AC: the duty stays in aux2; AC+DC: the parts).
+        ("math_dbm", mathed(math::DBM, 2, 1.0, 0.0, "", rd(1, val(2.2400, 4, "V"), None, None, false)), None),
+        ("math_dbm_neg", mathed(math::DBM, 0, 1.0, 0.0, "", rd(2, val(1.23, 2, "mV"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false)), None),
+        ("math_dbv_min", mathed(math::DBV, 0, 1.0, 0.0, "", rd(3, val(-0.01, 2, "mV"), None, None, false)), None),
+        ("math_dbv_1000", mathed(math::DBV, 0, 1.0, 0.0, "", rd(0, val(1000.0, 1, "V"), Some(val(99.999, 3, "kHz")), Some(val(100.0, 1, "%")), false)), None),
+        ("math_dbm_ol", mathed(math::DBM, 1, 1.0, 0.0, "", rd(1, ol(4, "V"), None, None, false)), None),
+        ("math_dbv_zero", mathed(math::DBV, 0, 1.0, 0.0, "", rd(1, val(0.0, 4, "V"), None, None, false)), None),
+        ("math_dbm_acdc", mathed(math::DBM, 2, 1.0, 0.0, "", rd(1, val(-6.6666, 4, "V"), Some(val(4.4444, 4, "V")), Some(val(-4.4444, 4, "V")), true)), None),
+        ("math_scal_a", mathed(math::SCAL, 0, 1000.0, 0.0, "A", rd(3, val(-444.44, 2, "mV"), None, None, false)), None),
+        ("math_scal_degc", mathed(math::SCAL, 0, 100.0, -50.0, "\u{b0}C", rd(1, val(0.2500, 4, "V"), None, None, false)), None),
+        ("math_scal_rpm", mathed(math::SCAL, 0, 1000.0, 0.0, "rpm", rd(1, val(-9.9999, 4, "V"), None, None, false)), None),
+        ("math_scal_mbar", mathed(math::SCAL, 0, 62500.0, -250.0, "mbar", rd(8, val(24.444, 3, "mA"), None, Some(val(125.0, 1, "%")), false)), None),
+        ("math_scal_pct", mathed(math::SCAL, 0, 0.1, 0.0, "%", rd(10, val(444.44, 2, "k\u{3a9}"), None, None, false)), None),
+        ("math_scal_big", mathed(math::SCAL, 0, 1e4, 0.0, "Pa", rd(1, val(4.4444, 4, "V"), None, None, false)), None),
+        ("math_scal_none", mathed(math::SCAL, 0, -1.0, 0.0, "", rd(9, val(-4444.4, 1, "\u{b5}A"), Some(val(-999.9, 1, "mV")), None, false)), None),
     ];
     // AUTO+ / MANU variants of a few.
     let mut extra = vec![];
@@ -2033,6 +2069,13 @@ fn main() {
                   for alt in [false, true] {
                     let rc = chips[k];
                     let mut r = *r;
+                    // DMM Math (math.rs): no extra digit, no accuracy label;
+                    // the history / bargraph / chart / statistics stay on the
+                    // raw reading (aux1; AC+DC: its own main) as in the app.
+                    let math = name.starts_with("math_");
+                    if math && ext {
+                        continue;
+                    }
                     r.main.ext = ext && !r.main.ol;
                     // Every alert badge in the status slot, against every hold state.
                     r.alert = ALERTS[(k + hold as usize) % ALERTS.len()];
@@ -2050,18 +2093,25 @@ fn main() {
                     dv.bar_on = k % 2 == 0;
                     // The accuracy label on every model (DM40A / B: the x10
                     // digit), and off.
-                    dv.acc = (k != 2).then_some(ui::Acc { model: (k % 3) as u8, tc: true });
+                    dv.acc = (k != 2 && !math).then_some(ui::Acc { model: (k % 3) as u8, tc: true });
                     dv.hv_red = hv_of(&r) >= 1;
                     ui::set_cpl_auto(r.cpl_auto);
                     dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, r.mode == 10);
                     ui::set_cpl_auto(false);
                     // History / chart / statistics: the case's own value (an
                     // OL case: 1.0 in its unit and resolution).
-                    let v = if r.main.ol || r.main.v.is_nan() { 1.0 } else { r.main.v };
-                    let dec = r.main.dec;
-                    let hist = [(v, dec, r.main.unit); 5];
+                    let mut raw = r;
+                    match (math, r.parts()) {
+                        // AC+DC: its DC part stands in for the raw total.
+                        (true, true) => raw.main = r.aux2.unwrap_or(r.main),
+                        (true, false) => raw.main = r.aux1.unwrap_or(r.main),
+                        _ => {}
+                    }
+                    let v = if raw.main.ol || raw.main.v.is_nan() { 1.0 } else { raw.main.v };
+                    let dec = raw.main.dec;
+                    let hist = [(v, dec, raw.main.unit); 5];
                     if dv.bar_on {
-                        dv.bar_update(&r);
+                        dv.bar_update(&raw);
                     } else {
                         ui::history(&hist, 5, 4);
                     }
@@ -2071,7 +2121,7 @@ fn main() {
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
-                    ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
+                    ui::chart(&mut cc, &pts, dec, rate, Some(&side), raw.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
                   }
                 }
@@ -2097,22 +2147,25 @@ fn main() {
                 // then RUN or another badge.
                 a.alert = if xb { sentinel::Alert::VJack } else { sentinel::Alert::AJack };
                 b.alert = if xa && xb { sentinel::Alert::Live } else { sentinel::Alert::None };
-                let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8)]| {
+                // DMM Math cases: no accuracy label (App::acc_ctx).
+                let (ma, mb) = (na.starts_with("math_"), nb.starts_with("math_"));
+                let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8, bool)]| {
                     host::reset(0);
                     dv.label = steps[0].1;
                     dv.draw_static(Button::Volt, steps[0].0.mode, steps[0].0.acdc, false);
-                    for (r, l, lim) in steps {
+                    for (r, l, lim, m) in steps {
                         dv.label = *l;
+                        dv.acc = (!m).then_some(ui::Acc { model: 2, tc: true });
                         dv.reading(r, 0, *lim);
                     }
                 };
                 let mut dv = ui::DmmView::new();
-                page(&mut dv, &[(a, *la, meter::V_HI), (b, *lb, meter::V_NONE)]);
+                page(&mut dv, &[(a, *la, meter::V_HI, ma), (b, *lb, meter::V_NONE, mb)]);
                 let got = emu().fb.clone();
                 let key = (ib, xa, xb);
                 if verify || !fresh_b.contains_key(&key) {
                     let mut dv = ui::DmmView::new();
-                    page(&mut dv, &[(b, *lb, meter::V_NONE)]);
+                    page(&mut dv, &[(b, *lb, meter::V_NONE, mb)]);
                     let f = emu().fb[..W * 152].to_vec();
                     match fresh_b.get(&key) {
                         Some(k) => fresh_diff += (*k != f) as usize,
@@ -2579,6 +2632,67 @@ fn main() {
         if k < 2 {
             save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
         }
+    }
+    // Math page (View::Math): each function's formula / note lines, the
+    // widest m / b texts, a 4-byte unit; the stepper values fit.
+    for (k, (f, m, b, u, note)) in [
+        ("dBm", "1000", "-0.5", "A", "Stats, limits, recording: raw value"),
+        ("Off", "1", "0", "none", "Stats, limits, recording: raw value"),
+        ("dBV", "-0.00125", "-1234.5", "mbar", "dBm / dBV: V functions only"),
+        ("mX+b", "0.000001", "99999", "rpm", "Stats, limits, recording: raw value"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host::reset(0);
+        let formula = match f {
+            "dBm" => "dBm = 10 log(V^2 / R / 1 mW)",
+            "dBV" => "dBV = 20 log(V / 1 V)",
+            "mX+b" => "m x X + b, X in V, A or ohm",
+            _ => "dB of a voltage or m x X + b",
+        };
+        ui::math_page([f, "600\u{3a9}", m, b, u], [formula, note]);
+        ck.check_opts(&format!("math/{f}/{m}/{b}/{u}"), &page_regions, false);
+        if k == 0 {
+            save(&out, "m13-math-page");
+        }
+    }
+    for t in math::NAMES.iter().chain(["50\u{3a9}", "75\u{3a9}", "600\u{3a9}", "none", "mbar"].iter()) {
+        ck.cases += 1;
+        let w = stockfont::text_width(stockfont::TEXT22, t, 0);
+        let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
+        if w > vw {
+            ck.fail("math/stepper", format!("too wide: {t:?} {w} > {vw}"));
+        }
+    }
+    // The range pages' Math button: off, an active function (V), mX+b on
+    // the ohm page beside the 600 Mohm item, pressed.
+    for (k, (b, f, sel, sub, pressed)) in [
+        (Button::Volt, math::DBM, Some(7), 0u8, false),
+        (Button::Amp, math::SCAL, Some(7), 1, false),
+        (Button::Ohm, math::DBV, Some(8), 0, false),
+        (Button::Volt, math::OFF, Some(7), 0, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        host::reset(0);
+        math::set_func(f);
+        ui::range_page(b, sel, sub, (b == Button::Volt).then_some(("AUTO+ recommended: never steps to mV", false)));
+        if b != Button::Ohm {
+            ui::wave_button();
+        }
+        if b == Button::Amp {
+            ui::inrush_button();
+        }
+        if pressed {
+            ui::math_button(b, true);
+        }
+        ck.check_opts(&format!("range-math/{k}"), &page_regions, false);
+        if k == 0 {
+            save(&out, "m03j-range-v-math");
+        }
+        math::set_func(math::OFF);
     }
     for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
         ck.cases += 1;
@@ -3577,6 +3691,26 @@ fn main() {
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
+    }
+
+    // DMM Math on the DMM page: the result in its unit, the raw reading in
+    // aux1; the bargraph and the trend stay on the raw reading (App).
+    for (case, file, b) in [("math_dbm", "d27-dmm-math-dbm", Button::Volt), ("math_scal_degc", "d28-dmm-math-scal", Button::Volt), ("math_dbm_neg", "d29-dmm-math-dbm-ac", Button::Volt), ("math_scal_mbar", "d30-dmm-math-mbar", Button::Amp), ("math_dbm_ol", "d31-dmm-math-ol", Button::Volt)] {
+        host::reset(0);
+        let (r, _) = find(case);
+        let mut raw = r;
+        if let (Some(a), false) = (r.aux1, r.parts()) {
+            raw.main = a;
+        }
+        let mut dv = ui::DmmView::new();
+        dv.acc = None;
+        dv.draw_static(b, r.mode, r.acdc, false);
+        dv.bar_update(&raw);
+        dv.reading(&r, 0, 0);
+        ui::status_right(&status(0));
+        let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+        ui::chart(&mut ui::ChartCache::new(), &[], raw.main.dec, 1, Some(&side), raw.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
+        save(&out, file);
     }
 
     // Beeper indicator (continuity / diode, App::beep_ind): every style

@@ -477,6 +477,24 @@ power meter).
   setting it turns smoothing on.
   Stored.
 
+## CALCulate: math (dB, mX+b)
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `CALCulate:FUNCtion[?]` | `NONE`, `DBM`, `DBV` or `SCALe` | `NONE`, `DBM`, `DBV` or `SCAL` | both |
+| `CALCulate:DBM:REFerence[?]` | `50`, `75` or `600` (ohm) | `+6.000000E+02` | both |
+| `CALCulate:SCALe:GAIN[?]` | m, not 0 | `+1.000000E+03` | both |
+| `CALCulate:SCALe:OFFSet[?]` | b | `-5.000000E-01` | both |
+| `CALCulate:SCALe:UNIT[?]` | `"<text>"`, up to 4 bytes | `"A"` | both |
+
+- With a function on, `READ?`, `MEASure?` and `FETCh?` return its result:
+  dBV = 20 log10(|V| / 1 V), dBm = 10 log10(V² / R / 1 mW) (V and mV
+  functions), SCALe = m × X + b with X in V, A or Ω (V, mV, A, Ω). 0 V in dB
+  answers `+9.91E37`, an overload `+9.9E37`; a SCALe result beyond the
+  display's ±9999.9 is returned as it is. The `AVERage` and `LIMit` commands, the CSV log and
+  `LOG` keep the raw reading.
+- Stored.
+
 ## Power meter
 
 The power meter measures voltage (V/COM) and current (A jacks) at the same

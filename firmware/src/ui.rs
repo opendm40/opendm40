@@ -112,6 +112,8 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// DMM Math (MF page -> Math; math.rs, app_math.rs).
+    Math,
 }
 
 impl View {
@@ -1551,6 +1553,9 @@ pub fn range_page(b: Button, sel: Option<usize>, sub: u8, note: Option<(&str, bo
         }
     }
     ok_and_limits_buttons();
+    if math_label(b).is_some() {
+        math_button(b, false);
+    }
     if b == Button::Amp && note.is_none() {
         // Fuse check (doc 4.3): the A page has no note line, so the button
         // sits there, the middle column (the bottom middle slot is the wave
@@ -1687,6 +1692,35 @@ pub fn wave_hit(x: u16, y: u16) -> bool {
     bottom_col(x, y) == Some(2)
 }
 
+/// "Math" on the V / A / ohm range pages (opens View::Math): under the
+/// bottom row's first two columns; "Math: dBm" .. on the selected colour
+/// while a function applies to the page's function.
+pub const MATH_BTN: sf::Rect = rect(8, 284, 229, 32);
+const MATH_BTN_TXT: [&str; 4] = ["Math", "Math: dBm", "Math: dBV", "Math: mX+b"];
+
+/// The Math button's text on range page `b` and whether a function is on;
+/// None: no Math there (capacitance).
+pub fn math_label(b: Button) -> Option<(&'static str, bool)> {
+    let mode = match b {
+        Button::Volt => 1,
+        Button::Amp => 7,
+        Button::Ohm => 10,
+        _ => return None,
+    };
+    let f = crate::math::func();
+    let on = crate::math::applies(f, mode);
+    Some((MATH_BTN_TXT[if on { f as usize } else { 0 }], on))
+}
+
+/// The Math button of range page `b` (`pressed`: the pressed colour).
+#[inline(never)] // .cold (link-native.x): the MF page
+pub fn math_button(b: Button, pressed: bool) {
+    let Some((t, on)) = math_label(b) else { return };
+    let c = if pressed { K_SEL } else if on { SEL } else { 0x2966 };
+    sf::rbox(MATH_BTN, 6, c, BG);
+    sf::glyphs(sf::TEXT22, MATH_BTN, t, STATUS_FG, c, 8, 0);
+}
+
 /// Ohm variant buttons of the Resistor Settings page (Dmm::ohm_var 0 / 1).
 /// Labelled with the variant's short-circuit test current on the 600 ohm
 /// range (dmm::OHM_ISC r1, measured); "ON" = the button's stock tag.
@@ -1721,6 +1755,7 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
             (2, _) => (bottom_rect(3), "OK", false),
             (4, _) => (bottom_rect(0), "Limits", false),
             (7, _) => return record_button(bottom_rect(1), on),
+            (8, _) => return math_button(b, on),
             (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
             _ => return,
         },
@@ -1732,7 +1767,7 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
 }
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
-/// Limits, 7 Record, 5 Fuse check (A only)); ohm: Err(0 / 1) = the OHM_VARS
+/// Limits, 7 Record, 5 Fuse check (A only), 8 Math (V, A, ohm)); ohm: Err(0 / 1) = the OHM_VARS
 /// buttons, while `ohm_vars_shown(sel)`.
 pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result<usize, u8>> {
     let (x, y) = (x as i16, y as i16);
@@ -1751,6 +1786,9 @@ pub fn range_hit(b: Button, sel: Option<usize>, x: u16, y: u16) -> Option<Result
         // 6 (Err 2 is OK), the 5 px gaps split between the buttons.
         let i = ((x.max(8) - 8 + 2) / 117).min(3);
         return Some(Err([0, 1, 3, 6][i as usize]));
+    }
+    if y >= 281 && x < 240 && math_label(b).is_some() {
+        return Some(Err(8));
     }
     match bottom_col(x as u16, y as u16) {
         Some(0) => return Some(Err(4)),
@@ -3241,6 +3279,28 @@ pub fn record_page(vals: [&str; 2], free: &str, recording: bool) {
     sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
 }
 
+/// Math page rows (View::Math): function, dBm reference, m, b, unit;
+/// the function, reference and unit with -/+ steppers (as the Record
+/// page), m and b open the keypad.
+pub const MATH_ROWS: [&str; 5] = ["Function", "dBm ref", "Scale m", "Offset b", "Unit"];
+pub const MATH_STEP_ROWS: [usize; 3] = [0, 1, 4];
+
+/// The Math page: `vals` = the rows' values, `hint` two lines under them
+/// (the formula, what follows the raw value).
+#[inline(never)] // .cold (link-native.x): a page draw
+pub fn math_page(vals: [&str; 5], hint: [&str; 2]) {
+    list_page("Math", &MATH_ROWS, &["", "", vals[2], vals[3], ""]);
+    for i in MATH_STEP_ROWS {
+        set_stepper(i, vals[i], REC_STEP_MINUS_X);
+    }
+    if row_only().is_none() {
+        for (k, t) in hint.iter().enumerate() {
+            let r = set_row(5 + k);
+            sf::glyphs(sf::TEXT22, rect(r.x + 12, r.y, r.w - 12, r.h), t, DIM, M_BG, 1, 0);
+        }
+    }
+}
+
 pub fn view_name(v: View) -> &'static str {
     match v {
         View::Dmm => "Multimeter",
@@ -3258,6 +3318,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::TouchTest => "Touch test",
+        View::Math => "Math",
     }
 }
 
