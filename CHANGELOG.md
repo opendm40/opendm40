@@ -9,6 +9,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Math: dBm, dBV and mX+b** (MF > **Math**): dBm with a 50, 75 or 600 Ω
+  reference and dBV in V; m × X + b with a unit of up to 4 characters in V,
+  A and Ω (a current clamp, a sensor). The measured value stays above the
+  result ([manual](docs/manual/README.md#math-dbm-dbv-mxb)). SCPI
+  `CALCulate:FUNCtion`, `CALCulate:DBM:REFerence`, `CALCulate:SCALe:*`.
+
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.

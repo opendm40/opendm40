@@ -208,6 +208,31 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/limits", &page, false);
     save1(out, "limits");
 
+    // DMM Math: the Math page (dBm, 600 ohm) and the DMM page with 2.24 V
+    // shown as 9.22 dBm (bargraph and trend on the raw volts, no accuracy
+    // label: App::acc_ctx).
+    host::reset(0);
+    ui::math_page(["dBm", "600\u{3a9}", "1", "0", "none"], ["dBm = 10 log(V^2 / R / 1 mW)", "Stats, limits, recording: raw value"]);
+    ck.check_opts("manual/math", &page, false);
+    save1(out, "math");
+    {
+        let raw = rd(1, val(2.2400, 4, "V"), None, None, false);
+        let r = mathed(math::DBM, 2, 1.0, 0.0, "", raw);
+        host::reset(0);
+        let mut dv = ui::DmmView::new();
+        dv.acc = None;
+        dv.draw_static(Button::Volt, r.mode, false, false);
+        dv.bar_update(&raw);
+        dv.reading(&r, 0, meter::V_NONE);
+        ui::status_right(&status_real());
+        let pts: Vec<f32> = (0..321).map(|i| 2.24 + (((i / 37) % 3) as f32 - 1.0) * 1e-4).collect();
+        let side = ui::Side { max: Some(2.2403), avg: Some(2.24), min: Some(2.2398), rel: None, secs: Some(12 * 60 + 30), rec: false };
+        let rc = ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, 1), applies: true };
+        ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", rc);
+        ck.check("manual/dmm-math", &DMM_REGIONS);
+        save1(out, "dmm-math");
+    }
+
     // Record page: every reading, until stopped; and while it records.
     host::reset(0);
     ui::record_page(["Every reading", "Until stopped"], "about 240 h left", false);

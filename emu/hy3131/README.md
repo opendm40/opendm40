@@ -22,6 +22,7 @@ emu/hy3131/autowaittest.py opendm40 READ? / MEAS? / FETCh? and HOLD while AUTO c
 emu/hy3131/ad2streamtest.py opendm40 AD2 stream ISR (feature ad2-isr: TIM7 -> IRQ 55 -> SPI2 reads) end to end (firmware/docs/dmm-input-scope-feasibility.md 9)
 emu/hy3131/wavetest.py    opendm40 DMM wave view (scope page, source DMM; feature ad2-isr) driven by DBG:KEY / TAP, checked over SCPI, --case current, --shots DIR (feasibility 10)
 emu/hy3131/burdentest.py  opendm40 burden voltage readout: FETC:BURD? = READ? x R_path per shunt / AC / POW:BURD, DISP:BURD, screenshots (firmware/docs/power-meter-and-misconnect.md 3.15)
+emu/hy3131/mathtest.py    opendm40 DMM Math: CALC:FUNC DBM / DBV / SCAL / NONE on a DC source, READ? and the readout's unit, screenshots (src/math.rs)
 emu/hy3131/inrushtest.py  opendm40 inrush current (A jack, 10 A AC row on the AD2 stream): timed isrc steps (DC lamp-like, AC load), MF -> Inrush, INR:* SCPI, the saved FAST CSV; private disk copy + log per process, --shots DIR (firmware/docs/inrush-current.md)
 emu/hy3131/btwaketest.py  opendm40 DMM rail (PE2) wake: BT link on the Scope page, link cycles, a chip POR (device check 2026-10-21 Bluetooth 1g / 1h)
 emu/hy3131/runemu.py      emu/run.py with a separate merged compile unit (the same files since the peripherals/ symlinks)

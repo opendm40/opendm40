@@ -151,6 +151,17 @@ SECTIONS
          * tt_poll only without a session). */
         *(.text.*8opendm403app13app_touchtest*);
         *(.text.*8opendm402ui9touchtest*);
+        /* DMM Math (src/app_math.rs, the Math page and button in ui.rs,
+         * math.rs's setters): the page, its keypad targets, CALC:FUNC /
+         * CALC:DBM / CALC:SCAL and the settings restore. math::apply (per
+         * reading) stays in B. scpi::calc_math parses the CALC math
+         * commands (set-up, not polled while a stream runs). */
+        *(.text.*8opendm403app8app_math*);
+        *(.text.*8opendm402ui9math_page*);
+        *(.text.*8opendm402ui11math_button*);
+        *(.text.*8opendm404math?set_*);
+        *(.text.*8opendm404math??set_*);
+        *(.text.*8opendm404scpi9calc_math*);
         /* The touch calibration's fit and checks (src/touchcal.rs): the
          * touch test page, DBG:TOUCH:CAL and the settings restore at boot
          * (the per-frame apply is touch.rs `screen`, region B). */

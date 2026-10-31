@@ -39,6 +39,7 @@ unsafe impl critical_section::Impl for NoMask {
         core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     }
 }
+mod math;
 mod meter;
 mod mmio;
 mod persist;

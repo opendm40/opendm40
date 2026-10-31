@@ -13,8 +13,8 @@
 //! either copy. `seq` (two words below the boot shim's) is the file
 //! sequence number the backup SRAM copy continues: at boot a file slot with
 //! a higher one is newer than the backup SRAM. The boot shim's words at the
-//! end of the 4 KiB (boot.rs, 0x40024FF0..) are outside the record (v11:
-//! 0x40024000..0x40024123).
+//! end of the 4 KiB (boot.rs, 0x40024FF0..) are outside the record (v12:
+//! 0x40024000..0x40024133).
 
 #[cfg_attr(not(target_os = "none"), allow(unused_imports))]
 use crate::mmio::{modify32, r32, w32};
@@ -46,8 +46,13 @@ const MAGIC: u32 = 0x4446_5753; // "SWFD"
 /// v11: 70 words; p[64..70] W_TOUCH_CAL, the touch calibration
 /// (touchcal.rs Cal: Q16 deltas from the identity; 0 = none, so v10 loads
 /// zero-extended as the identity).
-pub const VERSION: u32 = 11;
-pub const WORDS: usize = 70;
+/// v12: 74 words; p[70..74] W_MATH, the DMM Math settings (math.rs `words`:
+/// 0 = off, m = 1, b = 0, no unit, so v11 loads zero-extended).
+pub const VERSION: u32 = 12;
+pub const WORDS: usize = 74;
+const V11_WORDS: usize = 70;
+/// The DMM Math settings (math::words, 4 words; a preference).
+pub const W_MATH: usize = 70;
 const V10_WORDS: usize = 64;
 /// The touch calibration (6 words, touchcal::Cal; a preference).
 pub const W_TOUCH_CAL: usize = 64;
@@ -91,6 +96,7 @@ const V2_WORDS: usize = 16;
 pub fn words_of(version: u32) -> Option<usize> {
     Some(match version {
         VERSION => WORDS,
+        11 => V11_WORDS,
         10 => V10_WORDS,
         9 => V9_WORDS,
         8 => V8_WORDS,

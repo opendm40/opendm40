@@ -233,6 +233,7 @@ recorded.
 | [`pwrangingtest.py`](pwrangingtest.py) | power meter before its first reading: no DMM column beside "I ranging..." (#96) | | free |
 | [`stripwaittest.py`](stripwaittest.py) | combined view: the meter strip names the power meter before its first reading (#108) | ~2 min | free |
 | [`burdentest.py`](hy3131/burdentest.py) | burden voltage readout | | 3378 |
+| [`mathtest.py`](hy3131/mathtest.py) | DMM Math: dBm, dBV, mX+b over SCPI | | 3391 |
 | [`inrushtest.py`](hy3131/inrushtest.py) | inrush current capture | | 3597 |
 | [`pwdialogtest.py`](pwdialogtest.py) | power meter dialogs (wiring, Reset energy?) and the fuse check dialog close on a SCPI function change (#104, #143) | | free |
 | [`btwaketest.py`](hy3131/btwaketest.py) | DMM rail (PE2) wake with a Bluetooth link | | 4833 |

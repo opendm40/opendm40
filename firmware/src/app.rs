@@ -46,6 +46,9 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+#[path = "app_math.rs"]
+mod app_math;
+use app_math::{KP_MATH_B, KP_MATH_M};
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -145,7 +148,7 @@ fn next_rate(r: dmm::Rate) -> dmm::Rate {
 fn is_page(v: View) -> bool {
     matches!(
         v,
-        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest | View::Math
     )
 }
 
@@ -868,6 +871,8 @@ impl App {
             View::Keypad => {
                 if matches!(self.kp_target, 3 | 4) {
                     self.limits_page();
+                } else if matches!(self.kp_target, KP_MATH_M | KP_MATH_B) {
+                    self.math_page();
                 } else if self.kp_dmm() {
                     self.with_temp_page(None);
                 } else {
@@ -880,6 +885,7 @@ impl App {
             }
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
+            View::Math => self.math_page(),
             View::Inrush => self.inrush_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
@@ -1046,10 +1052,11 @@ impl App {
     }
 
     /// The accuracy label's context (doc dmm-accuracy.md): None with
-    /// Settings 3/3 "Accuracy" OFF or REL in force (the manual specifies a
-    /// reading, not a difference of two).
+    /// Settings 3/3 "Accuracy" OFF, REL in force (the manual specifies a
+    /// reading, not a difference of two) or a Math function (math.rs).
     pub(crate) fn acc_ctx(&self) -> Option<ui::Acc> {
-        (self.dmm_view.acc_on && !self.meter.rel_active()).then(|| ui::Acc { model: self.dmm.model(), tc: self.dmm.t_sensor() == 0 })
+        let math = crate::math::applies(crate::math::func(), self.dmm.func_shown());
+        (self.dmm_view.acc_on && !self.meter.rel_active() && !math).then(|| ui::Acc { model: self.dmm.model(), tc: self.dmm.t_sensor() == 0 })
     }
 
     /// Repaint the shown DMM reading in the DMM page / the combined view's
@@ -1468,7 +1475,7 @@ impl App {
     /// The keypad edits a DMM setting (limits, temperature page): DMM
     /// rails, no generator status, back to that page.
     fn kp_dmm(&self) -> bool {
-        matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA)
+        matches!(self.kp_target, 3 | 4 | KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA | KP_MATH_M | KP_MATH_B)
     }
 
     /// The function has a range page (MF opens it; its Limits button
@@ -1498,6 +1505,7 @@ impl App {
         match self.kp_target {
             3 | 4 => View::Limits,
             KP_T_OFFS | KP_NTC_R25 | KP_NTC_BETA => View::Range,
+            KP_MATH_M | KP_MATH_B => View::Math,
             _ => View::Gen,
         }
     }
@@ -1980,17 +1988,19 @@ impl App {
     /// provisional value is not REL-corrected). A HOLD armed before the
     /// first settled reading (Meter::set_hold) shows `prov` with the HOLD
     /// label until that reading comes.
+    #[inline(never)] // its Reading temporaries stay out of main.rs `run`'s frame
     pub(crate) fn shown_reading(&self) -> Option<Reading> {
         let hs = self.meter.hold_state();
         let free = matches!(hs, 0 | 2) || (hs == 1 && self.meter.shown().is_none());
         if let Some(p) = self.prov.filter(|_| free && !self.meter.rel_active()) {
-            return Some(p);
+            return Some(crate::math::apply(&p));
         }
         let mut r = self.meter.shown().copied()?;
         if self.meter.hold_state() != 0 {
             r.alert = self.live_alert();
         }
-        Some(r)
+        // DMM Math (math.rs): the shown value only; the meter keeps the raw.
+        Some(crate::math::apply(&r))
     }
 
     /// Make sure the DMM side is powered (SCPI / BT measurement requests).
@@ -2046,6 +2056,8 @@ impl App {
             KP_T_OFFS => crate::dmm::format(&mut t, self.dmm.t_offs(self.dmm.t_sensor()), 1),
             KP_NTC_R25 => trim_zeros(crate::dmm::format(&mut t, self.dmm.ntc_user().0 / 1000.0, 3)),
             KP_NTC_BETA => crate::dmm::format(&mut t, self.dmm.ntc_user().1, 0),
+            KP_MATH_M => app_math::math_num(&mut t, crate::math::m()),
+            KP_MATH_B => app_math::math_num(&mut t, crate::math::b()),
             _ => "",
         };
         let n = pre.len().min(self.kp_buf.len() - 1);
@@ -2069,6 +2081,8 @@ impl App {
             KP_T_OFFS => ("Offset", "C"),
             KP_NTC_R25 => ("R25", "k"),
             KP_NTC_BETA => ("Beta", "K"),
+            KP_MATH_M => ("Scale m", ""),
+            KP_MATH_B => ("Offset b", kp_unit_text(crate::math::unit())),
             3 => ("Upper", kp_unit_text(self.kp_unit)),
             _ => ("Lower", kp_unit_text(self.kp_unit)),
         }
@@ -2089,6 +2103,7 @@ impl App {
                 self.dmm.set_t_offs(k, v);
                 return;
             }
+            KP_MATH_M | KP_MATH_B => return self.math_kp_apply(v),
             KP_NTC_R25 | KP_NTC_BETA => {
                 // Limits: dmm.rs set_ntc_user (R25 100 ohm..10 Mohm, Beta
                 // 1000..10000 K). Re-enter the sensor so the NTC entry range
@@ -2237,6 +2252,8 @@ impl App {
         for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
             *w = c as u32;
         }
+        // v12: the DMM Math settings (math.rs; 0 = off).
+        p[crate::persist::W_MATH..crate::persist::W_MATH + 4].copy_from_slice(&crate::math::words());
         p
     }
 
@@ -2282,6 +2299,7 @@ impl App {
         self.start_page = (p[0] >> 8 & 3) as usize;
         self.bt_on = p[0] >> 12 & 1 != 0;
         crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
+        crate::math::set_words(&p[crate::persist::W_MATH..crate::persist::W_MATH + 4]);
         self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
         self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
         crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
@@ -3486,6 +3504,7 @@ impl App {
                     View::Settings => View::Menu,
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
+                    View::Math => View::Range,
                     View::Limits => self.limits_back(),
                     View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
                     _ => View::Menu,
@@ -3537,7 +3556,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits | View::Record | View::Inrush => {
+                View::Range | View::Limits | View::Record | View::Inrush | View::Math => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -3694,7 +3713,7 @@ impl App {
                             0 => self.kp_n < 7,
                             1 | 2 | 5 | KP_NTC_BETA => self.kp_n < 5,
                             KP_T_OFFS => self.kp_n < 5,
-                            KP_NTC_R25 => self.kp_n < 7,
+                            KP_NTC_R25 | KP_MATH_M | KP_MATH_B => self.kp_n < 7,
                             _ => c == b'.' || digits < 5,
                         };
                         if ok && self.kp_n < self.kp_buf.len() - 1 && !(c == b'.' && self.kp_buf[..self.kp_n].contains(&b'.')) {
@@ -3788,6 +3807,7 @@ impl App {
                     }
                     Some(Err(4)) => self.show(View::Limits, clk),
                     Some(Err(7)) => self.record_open(clk),
+                    Some(Err(8)) => self.show(View::Math, clk),
                     Some(Err(5)) if b == Button::Amp => self.fuse_dialog(now, 0),
                     Some(Err(k @ 0..=1)) if b == Button::Ohm => {
                         if k != self.dmm.ohm_var() {
@@ -3886,6 +3906,7 @@ impl App {
                 }
                 None => {}
             },
+            View::Math => self.math_tap(x, y, clk),
             View::Limits => {
                 if ui::title_back_hit(y) {
                     let v = self.limits_back();
@@ -4829,6 +4850,7 @@ impl App {
                 out.put_bytes(if self.limit_state() { b"1" } else { b"0" });
                 true
             }
+            C::CalcFunc(_) | C::CalcDbmRef(_) | C::CalcScal(..) | C::CalcScalUnit(_) => self.math_scpi(cmd, out),
             C::CalcLimFail => {
                 out.put_bytes(if self.limit_fail() { b"1" } else { b"0" });
                 true
@@ -4914,7 +4936,7 @@ impl App {
                         if r.main.v.is_nan() && !r.main.ol {
                             out.put_bytes(b"NAN");
                         } else {
-                            out.put_reading(&r);
+                            out.put_shown(&r);
                         }
                     }
                     None => out.put_bytes(b"N,,NAN"),

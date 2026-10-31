@@ -714,7 +714,7 @@ pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
 }
 
 /// Natural log (no libm): exponent * ln2 + atanh series of the mantissa.
-fn ln(x: f32) -> f32 {
+pub(crate) fn ln(x: f32) -> f32 {
     let b = x.to_bits();
     let mut e = ((b >> 23) & 0xFF) as i32 - 127;
     let mut m = f32::from_bits((b & 0x007F_FFFF) | 0x3F80_0000);
