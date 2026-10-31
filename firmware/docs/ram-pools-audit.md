@@ -30,6 +30,13 @@ checks and earlier moves:
 | **C. Page pool**: scope graph state with the gallery, the generator preview and the touch test | static, droppable / rebuildable tenants | 484 / 672 / 168 | +242 samples | +242 | low |
 | **D. Job pool**: the working parts of the fast-log, CSV and scope-CSV jobs | static | ~1 000 (mixed SRAM / TCM, *estimated*) | +~250 | +~250 | medium: job results are read after the job (LOG:CSV?) |
 
+Implemented (2026-10-31):
+
+| candidate | PR | result |
+|---|---|---|
+| A | [#200](https://github.com/opendm40/opendm40/pull/200) | CAP 43 008 (42 K), not 44 K: the recovery-usb build has 4 096 B less SRAM free and keeps 8 596 B at 42 K (floor 8 192) |
+| C | [#201](https://github.com/opendm40/opendm40/pull/201) | SRAM +480 B, TCM (stack headroom) +632 B, region B -744 B; `src/pool.rs`, DBG:POOL? (`dbg-pool`), tools/pool-test, emu/pooltest.py |
+
 Ranking: A, then B (needs the owner: section 6 Q1), then C (small; its value
 is the pool framework and the checked compatibility table, which B needs
 anyway), then D. The owner's premise "many buffers are never live
