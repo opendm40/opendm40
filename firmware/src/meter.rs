@@ -940,10 +940,10 @@ impl Meter {
     }
 }
 
-/// Continuity / diode with the reading over its ceiling: open leads, "0L"
-/// captioned "OPEN" (owner 2026-10-30), not "Overflow".
+/// Continuity over range at once (`dmm::ol_open`): open leads, "0L"
+/// captioned "OPEN", not "Overflow" (owner 2026-10-31).
 pub fn open(r: &Reading) -> bool {
-    r.main.ol && matches!(r.mode, 11 | 12)
+    r.main.ol && r.open
 }
 
 /// Display text for a value ("0L" when over range, "--" for no value:
@@ -986,7 +986,39 @@ mod tests {
             alert: crate::sentinel::Alert::None,
             power: None,
             prov: false,
+            open: false,
         }
+    }
+
+    /// Continuity "0L": OPEN when the over range came at once, Overflow
+    /// when the readings climbed to it (`dmm::ol_open`).
+    #[test]
+    fn ol_open_vs_overflow() {
+        use crate::dmm::ol_open;
+        // Continuity, limit 1000 ohm, half = 500; None = over range.
+        let run = |seq: &[Option<f32>]| {
+            let mut near = false;
+            seq.iter().map(|x| ol_open(&mut near, x.is_none(), x.map_or(false, |v| v >= 500.0))).collect::<Vec<_>>()
+        };
+        // Entering the function over range: OPEN for the whole run.
+        assert_eq!(run(&[None, None, None]), [true; 3]);
+        // A charging capacitor: 100, 600, 900 ohm, then over range:
+        // Overflow, kept through repeated OL.
+        assert_eq!(run(&[Some(100.0), Some(600.0), Some(900.0), None, None]), [false; 5]);
+        // Leads lifted off a short: OPEN.
+        assert_eq!(run(&[Some(0.1), Some(0.1), None, None]), [false, false, true, true]);
+        // Back in range below half, then over range again: OPEN again.
+        assert_eq!(run(&[Some(900.0), None, Some(10.0), None]), [false, false, false, true]);
+        // An in-range reading never says OPEN.
+        assert_eq!(run(&[Some(0.0), Some(999.0)]), [false, false]);
+        // meter::open follows the reading's flag, only with "0L".
+        let mut r = rd(11, 0.0, 2, "\u{3a9}", 1.0);
+        r.main.ol = true;
+        assert!(!open(&r));
+        r.open = true;
+        assert!(open(&r));
+        r.main.ol = false;
+        assert!(!open(&r));
     }
 
     /// Feed `vals` 110 ms apart (about the 100 ms moving / FAST DC rate); the
