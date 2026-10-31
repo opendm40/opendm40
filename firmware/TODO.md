@@ -3386,6 +3386,9 @@ Emulator (emu/):
       **Device 8e5ca2d full set + 9f36bbe confirmation (§10.15): PASS**: 6 V 0 V -0.34..+0.09 mV in 9 of 9
       e8s, gsrc 1 throughout on 6 V, 60 V gsrc 3 every session; e8up, e8, e5, e11, e10, e9 pass. C meets the
       decision rule; A stays the default (owner, next item).
+- [ ] AC+DC: decide the final method (owner, 2026-10-31). Release builds run only the stock method A;
+      B and C are behind the `acdc-meth` build feature (#196). Either make C the default (item below) and drop
+      A's alternation and B, or drop B and C.
 - [ ] Make method C the AC+DC default, after a device check of C on the A / mA / µA ranges with real current
       (owner, 2026-10-23). Plan: acdc-approaches.md §10.16 (i8 / i8up e8-style levels per range, imix DC + 50 Hz
       AC, iauto CURR:COUP AUTO, ie5 drift; bench supply + load, a second meter in series as the reference; an
