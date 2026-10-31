@@ -5134,11 +5134,15 @@ impl App {
                     }
                     5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
+                    // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
+                    // feature `acdc-trace`).
+                    #[cfg(feature = "acdc-trace")]
                     8 => {
                         let mut b = [0u8; 500];
                         let n = self.dmm.tr.text(k as usize, &mut b, 500);
                         out.put_bytes(&b[..n]);
                     }
+                    #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
                     _ => out.put_u32(self.dmm.am.r0 as u32),
                 }

@@ -245,7 +245,7 @@ recorded.
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
-| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
+| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples (`--ch2`: the scope page with CH2 (DMM) on) | | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
 | [`sratetest.py`](sratetest.py) | the timebase list's per-entry sample rates = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll and the Wave view; picks in the open list (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`rollmeastest.py`](rollmeastest.py) | roll mode: no measurements while rolling (not the last frame's), a stopped roll record measured | | free |
@@ -292,6 +292,7 @@ recorded.
 | [`limitsbacktest.py`](limitsbacktest.py) | MENU / Back on Hold & Limits and Record: one page up (the range page or the multimeter); the range pages' Record button, Start / Stop | ~2 min | free |
 | [`chartunittest.py`](chartunittest.py) | DMM trend chart after a range change to another unit that reads OL (#93) | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
+| [`xramtest.py`](xramtest.py) | the extra RAM areas (backup SRAM after the settings record, USBHS FIFO RAM) start zeroed over stale bytes; the settings record survives DBG:RESET while their buffers are in use | ~4 min | 64600-64699 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
 | [`tempinfotest.py`](tempinfotest.py) | the temperature page's cold junction line follows an offset step (#142) | | free |
 | [`monkeytest.py`](monkeytest.py) | seeded random taps, keys, drags, swipes and SCPI (edge values) on every page: no restart, no hang, MENU always reaches the main menu, the deepest stack use; optional soak (`--seed`, `--minutes`) | about real time (`--fast`) | free |

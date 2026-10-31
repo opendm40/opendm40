@@ -18,7 +18,8 @@
 
 use crate::scope::WaveScale;
 
-/// Samples kept: 53 ms at 76.8 kS/s (1 ms/div: a 10 ms screen), 1.7 s at
+/// Samples kept: 107 ms at 38.4 kS/s (`app_ch2::CH2_MAX_FS`, 2 ms/div and
+/// faster: a 20 ms screen at most), 1.7 s at
 /// 2400 S/s (100 ms/div: 1 s), 3.4 s at 1200 S/s (roll from 200 ms/div:
 /// a 2 s screen; slower roll screens show their newest 3.4 s).
 pub const CAP: usize = 4096;
