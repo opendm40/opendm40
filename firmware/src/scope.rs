@@ -51,15 +51,15 @@ pub const COLS: usize = 400;
 /// around the comparator estimate (hwtrig path only).
 const WIN: usize = 800;
 /// Highest sample rate searched continuously in software (stream_poll): the
-/// ring (CAP samples = 34 ms at 1.25 MS/s) must outlast the main-loop gap
+/// ring (CAP samples = 36 ms at 1.25 MS/s) must outlast the main-loop gap
 /// between two polls with the pre-trigger part still in it.
 const STREAM_FS: u32 = 1_250_000;
 /// Longest busy-wait inside a poll for the post-trigger samples (us).
 const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0: the raw u16 ring every acquisition
-/// mode writes (86 KB, the SRAM budget: docs/native-boot.md "Memory
+/// mode writes (88 KB, the SRAM budget: docs/native-boot.md "Memory
 /// budget").
-pub const CAP: usize = 42 * 1024;
+pub const CAP: usize = 44 * 1024;
 /// The part of BUF lent to the inrush capture (its ring length, as before
 /// the record grew).
 pub const INRUSH_LEN: usize = 26 * 1024;
