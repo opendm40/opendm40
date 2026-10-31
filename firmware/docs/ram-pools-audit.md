@@ -36,7 +36,7 @@ Implemented (2026-10-31):
 |---|---|---|
 | A | [#200](https://github.com/opendm40/opendm40/pull/200) | CAP 43 008 (42 K), not 44 K: the recovery-usb build has 4 096 B less SRAM free and keeps 8 596 B at 42 K (floor 8 192) |
 | C | [#201](https://github.com/opendm40/opendm40/pull/201) | SRAM +480 B, TCM (stack headroom) +632 B, region B -744 B; `src/pool.rs`, DBG:POOL? (`dbg-pool`), tools/pool-test, emu/pooltest.py |
-| B | (this branch, feat/scope-tail, on #201 + #200) | record up to CAP + 16 656 samples (61 712 at CAP 44 K); pool `TAIL` ([ram-budget.md](ram-budget.md#the-scope-record-tail-pool-tail)); SRAM -16 B, stack headroom -112 B, region B -1 980 B, region C -520 B; emu/tailtest.py |
+| B | (this branch, feat/scope-tail, on #201 + #200) | record up to CAP + 16 656 samples (61 712 at CAP 44 K); pool `TAIL` ([ram-budget.md](ram-budget.md#the-scope-record-tail-pool-tail)); SRAM -16 B, stack headroom -112 B, region B -1 988 B, region C -428 B; emu/tailtest.py |
 
 Ranking: A, then B (needs the owner: section 6 Q1), then C (small; its value
 is the pool framework and the checked compatibility table, which B needs
