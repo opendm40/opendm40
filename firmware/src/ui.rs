@@ -2146,7 +2146,7 @@ fn num_unit<'a>(b: &'a mut [u8; 32], v: f32, dec: u8, unit: &str) -> &'a str {
 pub struct ChartCache {
     scale: Option<(u32, u32, u8, &'static str)>,
     side: Option<(u8, &'static str)>,
-    rows: [i64; 4],
+    rows: [i64; 5],
     time: Option<(u32, bool)>,
     rate: u8,
     rchip: Option<(u8, u32, bool)>,
@@ -2259,14 +2259,16 @@ pub fn rate_toast(buf: &mut [u8; 40], rate: u8, period_ms: u32, n: usize, ext: b
     core::str::from_utf8(&buf[..k]).unwrap_or("")
 }
 
-/// Right column of the DMM chart (FR-02): MAX / AVG above the REL box, MIN
-/// and the time since the statistics started below it (display units).
+/// Right column of the DMM chart (FR-02): MAX / AVG above the REL box, MIN,
+/// SD (standard deviation) and the time since the statistics started below
+/// it (display units).
 /// `rec`: a recording session is on (no idle shutdown): "REC" in orange.
 #[derive(Clone, Copy)]
 pub struct Side {
     pub max: Option<f32>,
     pub avg: Option<f32>,
     pub min: Option<f32>,
+    pub sd: Option<f32>,
     pub rel: Option<f32>,
     pub secs: Option<u32>,
     pub rec: bool,
@@ -2274,9 +2276,14 @@ pub struct Side {
 
 /// Right column: text x range and the line tops of MAX, AVG, MIN, time
 /// (F14 caps 2 px below: rows 178, 190, 247, 261); REL box (405,205,71,38).
+/// The power meter's side column (ui_power.rs) keeps these rows.
 const SIDE_X: i16 = 405;
 const SIDE_R: i16 = 476;
 const SIDE_Y: [i16; 4] = [176, 188, 245, 259];
+/// The DMM column's line tops: MAX, AVG, MIN, SD, time (caps 2 px below,
+/// 9 rows of ink, 3 px apart); the REL box 2 px shorter (405,205,71,36) to
+/// make room for SD, the time row 3 px above the function buttons' region.
+const STAT_Y: [i16; 5] = [176, 188, 242, 254, 266];
 /// Line tops of the chart's left axis labels (caps on rows 178, 221, 264).
 const AXIS_Y: [i16; 3] = [176, 219, 262];
 
@@ -2285,7 +2292,7 @@ impl ChartCache {
         ChartCache {
             scale: None,
             side: None,
-            rows: [i64::MIN; 4],
+            rows: [i64::MIN; 5],
             time: None,
             rate: 0,
             rchip: None,
@@ -2437,20 +2444,19 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     }
     rate_chip(c, rc);
     let Some(side) = side else { return };
-    // Right column (x 405..475, the stock REL box rows 205..242 kept as the
-    // tap target): MAX and AVG above the REL box, MIN and the session time
-    // below; one F14 row each, label left (dim), value right-aligned
+    // Right column (x 405..475, the REL box rows 205..240 the tap target):
+    // MAX and AVG above the REL box, MIN, SD and the session time below; one F14 row each, label left (dim), value right-aligned
     // without the unit, which is shown once, in the REL box header
     // ("REL" .. "mV"). The stock version crammed "4.8170V" into 54 px with
     // touching glyphs.
     if c.side != Some((dec, unit)) {
         c.side = Some((dec, unit));
-        c.rows = [i64::MIN; 4];
+        c.rows = [i64::MIN; 5];
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
-        lcd::fill_rect(402, 243, 78, 36, BG);
-        for (i, t) in ["MAX", "AVG", "MIN"].iter().enumerate() {
-            sf::label(sf::F14, rect(SIDE_X, SIDE_Y[i], 22, 14), t, DIM, BG, 0, 1);
+        lcd::fill_rect(402, 241, 78, 38, BG);
+        for (i, t) in ["MAX", "AVG", "MIN", "SD"].iter().enumerate() {
+            sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], 22, 14), t, DIM, BG, 0, 1);
         }
     }
     let q = |v: Option<f32>| -> i64 {
@@ -2467,7 +2473,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         }
     };
     let mut t = [0u8; 16];
-    for (i, v) in [side.max, side.avg, side.min].iter().enumerate() {
+    for (i, v) in [side.max, side.avg, side.min, side.sd].iter().enumerate() {
         let k = q(*v);
         if c.rows[i] != k {
             c.rows[i] = k;
@@ -2479,13 +2485,13 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
                 d -= 1;
             }
             let s = v.map(|v| crate::dmm::format(&mut t, v, d)).unwrap_or("");
-            sf::label(sf::F14, rect(SIDE_X + 25, SIDE_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
+            sf::label(sf::F14, rect(SIDE_X + 25, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
     let k = q(side.rel.or(Some(0.0)));
-    if c.rows[3] != k {
-        c.rows[3] = k;
-        let r = rect(405, 205, 71, 38);
+    if c.rows[4] != k {
+        c.rows[4] = k;
+        let r = rect(405, 205, 71, 36);
         sf::rbox(r, 6, BTN, BG);
         sf::glyphs(sf::F14, rect(409, 209, 30, 14), "REL", STATUS_FG, BTN, 0, 1);
         let mut u = [0u8; 16];
@@ -2515,7 +2521,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             txt
         };
         let fg = if side.rec { 0xFC40 } else { DIM };
-        sf::label(sf::F14, rect(SIDE_X, SIDE_Y[3], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
+        sf::label(sf::F14, rect(SIDE_X, STAT_Y[4], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
     }
 }
 
@@ -2791,7 +2797,7 @@ fn gen_box(g: &gen::Gen, k: usize, bg: Color) {
             let dec = if f < 1e3 { 3 } else if f < 1e5 { 2 } else if f < 1e6 { 1 } else { 0 };
             gen_box_value(0, crate::dmm::format(&mut t, f, dec), true, "Hz", if clamped { G_DIM } else { STATUS_FG }, bg);
             let note = s.wave.max_note();
-            gen_box_note(0, if clamped { note.find(':').map_or(note, |i| note[i + 1..].trim_start_matches(' ')) } else { "" }, VALUE, bg);
+            gen_box_note(0, if clamped { note } else { "" }, VALUE, bg);
         }
         1 | 2 => {
             match (k, s.offset_v) {
@@ -3248,28 +3254,32 @@ pub const LIMIT_ROWS: [&str; 9] = [
     "Fail beep", "Record",
 ];
 
-/// Record page rows (decision 2026-10-22 #1): interval and duration with
-/// -/+ steppers (as Settings 1), the free-time estimate, Start / Stop.
-pub const RECORD_ROWS: [&str; 4] = ["Interval", "Duration", "Free", ""];
+/// Record page rows (decision 2026-10-22 #1): interval, On change
+/// threshold and duration with -/+ steppers (as Settings 1), the free-time
+/// estimate, Start / Stop.
+pub const RECORD_ROWS: [&str; 5] = ["Interval", "Change", "Duration", "Free", ""];
 /// Rows with a stepper on the Record page.
-pub const REC_STEP_ROWS: [usize; 2] = [0, 1];
+pub const REC_STEP_ROWS: [usize; 3] = [0, 1, 2];
 /// Value texts of csvlog::INTERVALS_S / DURATIONS_S; the last interval,
 /// "Fast", is the fast logger (fastlog.rs: raw AD1 / AD2 samples to
 /// LOGS/FASTnnn.DLG at the LOG:OSR / LOG:SRATe rate; App::rec_fast).
-pub const REC_INTERVALS: [&str; 5] = ["Every reading", "1 s", "10 s", "1 min", "Fast"];
+/// "On change" is csvlog::ON_CHANGE.
+pub const REC_INTERVALS: [&str; 6] = ["Every reading", "1 s", "10 s", "1 min", "On change", "Fast"];
 /// Index of "Fast" in REC_INTERVALS.
-pub const REC_FAST: usize = 4;
+pub const REC_FAST: usize = 5;
+/// Texts of csvlog::CHANGES (the On change threshold, % of full scale).
+pub const REC_CHANGES: [&str; 3] = ["0.1 %", "1 %", "5 %"];
 pub const REC_DURATIONS: [&str; 5] = ["Until stopped", "10 min", "1 h", "8 h", "24 h"];
 /// Record page row of the Start / Stop button.
-pub const REC_START_ROW: usize = 3;
+pub const REC_START_ROW: usize = 4;
 
 /// The Record page: title bar, interval / duration steppers, the estimate
 /// (`free`: "about N h left" at the interval, or why there is none), Start / Stop
 /// (a filled row: accent Start, red Stop while recording). `vals` =
-/// interval, duration texts.
-pub fn record_page(vals: [&str; 2], free: &str, recording: bool) {
+/// interval, threshold, duration texts.
+pub fn record_page(vals: [&str; 3], free: &str, recording: bool) {
     let names = RECORD_ROWS;
-    list_page("Record", &names[..3], &["", "", free]);
+    list_page("Record", &names[..4], &["", "", "", free]);
     for (i, v) in REC_STEP_ROWS.iter().zip(vals) {
         set_stepper(*i, v, REC_STEP_MINUS_X);
     }

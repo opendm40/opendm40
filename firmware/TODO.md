@@ -95,7 +95,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
   check (2 min" (PR fix/smooth-redraw); the [strip rendering](#strip-rendering-owner-2026-10-30-branch-featstrip-render)
   "Device check (3 min" and `DBG:TE?`.
-- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
+- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-buffer and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
   offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
@@ -1062,7 +1062,7 @@ the scope full record.
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
       shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
-- [ ] Device: the disk-scratch and preparation cases of docs/ram-budget.md that no run has covered.
+- [ ] Device: the disk-buffer and preparation cases of docs/ram-budget.md that no run has covered.
       1. Power off (hold the key) and DBG:RESET while the preparation erases (DBG:FLASH? prep state 1, right
          after a shot): the off / reset waits for the erase (`prep_finish`, <= 0.4 s); the next boot lists
          every file, prep reaches 2, the next shot Saved.
@@ -4462,8 +4462,8 @@ Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoot
 
 ### Strip rendering (owner 2026-10-30, branch feat/strip-render)
 
-A full page repaint is drawn in 12-row strips into `calbackup::SCRATCH` and each strip sent once
-([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-scratch-arena-calbackupscratch-12-kib)):
+A full page repaint is drawn in 12-row strips into `diskbuf::ARENA` (then `calbackup::SCRATCH`) and each strip sent once
+([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)):
 menu, settings, range page (not power / temperature), help, generator, scope page.
 - [ ] Device check (3 min, `--features mute`): menu > each tile and back, Settings pages, MF range page, the scope
       page entry. Expected: each page appears top to bottom in one pass, no widget half drawn. `DBG:PROF?` after a

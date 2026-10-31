@@ -674,41 +674,19 @@ pub fn mark_healthy(now_ms: u64) {
     }
 }
 
-fn hex(s: &mut crate::scpi::Scpi, v: u32) {
-    let mut t = [0u8; 10];
-    t[0] = b'0';
-    t[1] = b'x';
-    for i in 0..8 {
-        t[2 + i] = b"0123456789ABCDEF"[(v >> (28 - 4 * i) & 0xF) as usize];
-    }
-    s.put_bytes(&t);
-}
-
-fn dec(s: &mut crate::scpi::Scpi, mut v: u32) {
-    let mut t = [0u8; 10];
-    let mut i = t.len();
-    loop {
-        i -= 1;
-        t[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        if v == 0 {
-            break;
-        }
-    }
-    s.put_bytes(&t[i..]);
-}
-
-/// DBG:BOOT? reply (reason: NONE WDT_AFTER_RECOVERY WDT_STALE WDT_RETRY
-/// KEY_HOLD_ABORTED REQUESTED CLOCK_FAIL; clock: HXTAL IRC16M FAILED):
-/// `rstsck,rstsck_after,mode,reason,clock,last,bcr1,btr1,bwtr1,lcd_id,
-/// fatren_status,found,renamed_8.3_name(11 chars),old_backup,old_deleted,
-/// freed_clusters,others,rcvr_deleted,last_trigger` (others > 0: more
-/// dm40*.bin left untouched = warning; rcvr_deleted: a leftover DM40RCVR.BIN
-/// was removed; last_trigger: see below), marker_w0,w1,w2,VALID|INVALID,
-/// crash_word (0x435200nn), HEALTHY|-, fmc_last (0 = clean),
-/// PD6,moder,pupd,idr (power key pin read live: MODER[13:12] 0 = input,
-/// PUPD[13:12] 2 = pull-down, IDR bit 6 1 = pressed), then
-/// native::put_extra: STAGED,n,CALBK,status,written,conflict,differs,STACK,used,size,CALMS,ms,SPICLK,...
+/// DBG:BOOT? reply: `B2,` then the words below in hex (no prefix, no
+/// leading zeros), then `,` and fatren's renamed 8.3 name (11 characters,
+/// blanks if none). One formatter for every field: names, enum orders and
+/// meanings in docs/manual/scpi-reference.md ("DBG:BOOT?") and
+/// tools/dm40dbg.py `BOOT_FIELDS` (`dm40dbg.py boot` decodes it).
+///   0 mode (0 normal, 1 recovery)  1 reason (`Reason` order)  2 clock
+///   (`ClockState` order)  3 rstsck  4 rstsck_after  5 last  6 last_trigger
+///   (BKP_TRIG)  7..9 loader marker words  10 marker valid (1 / 0)
+///   11 crash word  12 healthy (1 / 0)  13 fmc_last  14..17 FSMC BCR1 /
+///   BTR1 / BWTR1 and the panel ID as found  18 fatren status
+///   (`fatren::Status` order)  19 found  20 old_backup  21 old_deleted
+///   22 freed_clusters  23 others  24 rcvr_deleted  25 staged
+///   26.. native::boot_words.
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
 pub fn put_info(s: &mut crate::scpi::Scpi) {
     s.len = 0;
@@ -716,71 +694,56 @@ pub fn put_info(s: &mut crate::scpi::Scpi) {
         s.put_bytes(b"NONE");
         return;
     };
-    hex(s, i.rstsck);
-    s.put_bytes(b",");
-    hex(s, i.rstsck_after);
-    s.put_bytes(if i.mode == Mode::Normal { b",NORMAL," } else { b",RECOVERY," });
-    s.put_bytes(match i.reason {
-        Reason::None => b"NONE" as &[u8],
-        Reason::WdtAfterRecovery => b"WDT_AFTER_RECOVERY",
-        Reason::WdtStale => b"WDT_STALE",
-        Reason::WdtRetry => b"WDT_RETRY",
-        Reason::KeyHoldAborted => b"KEY_HOLD_ABORTED",
-        Reason::Requested => b"REQUESTED",
-        Reason::ClockFail => b"CLOCK_FAIL",
-    });
-    s.put_bytes(match i.clock {
-        ClockState::Hxtal => b",HXTAL," as &[u8],
-        ClockState::Irc16m => b",IRC16M,",
-        ClockState::Failed => b",FAILED,",
-    });
-    hex(s, i.last);
     let b = unsafe { BOARD }.unwrap_or_default();
-    for v in [b.bcr1, b.btr1, b.bwtr1, b.lcd_id] {
-        s.put_bytes(b",");
-        hex(s, v);
-    }
     let r = crate::fatren::result();
-    s.put_bytes(match r.status {
-        crate::fatren::Status::NotRun => b",NOTRUN," as &[u8],
-        crate::fatren::Status::NoMedium => b",NOMEDIUM,",
-        crate::fatren::Status::BadBpb => b",BADBPB,",
-        crate::fatren::Status::Clean => b",CLEAN,",
-        crate::fatren::Status::DryRun => b",DRYRUN,",
-        crate::fatren::Status::Renamed => b",RENAMED,",
-        crate::fatren::Status::Error => b",ERROR,",
-    });
-    dec(s, r.found as u32);
+    let m = marker();
+    let head = [
+        i.mode as u32,
+        i.reason as u32,
+        i.clock as u32,
+        i.rstsck,
+        i.rstsck_after,
+        i.last,
+        // Last loader entry: 0x54520010 marker zeroed, 0x54520011 zeroing
+        // failed, 0x54520012 PA2 entry, 0x54520013 PA2 entry, lock not
+        // confirmed; recovery-file: 0x5452000n (0 / other = none recorded).
+        unsafe { r32(BKP_TRIG) },
+        m[0],
+        m[1],
+        m[2],
+        marker_valid() as u32,
+        unsafe { r32(BKP_CRASH) },
+        unsafe { HEALTHY } as u32,
+        fmc_last(),
+        b.bcr1,
+        b.btr1,
+        b.bwtr1,
+        b.lcd_id,
+        r.status as u32,
+        r.found as u32,
+        r.old_backup as u32,
+        r.old_deleted as u32,
+        r.freed_clusters,
+        r.others as u32,
+        r.fake_deleted as u32,
+        r.staged as u32,
+    ];
+    s.put_bytes(b"B2");
+    for v in head.iter().chain(crate::native::boot_words().iter()) {
+        s.put_bytes(b",");
+        let mut t = [0u8; 8];
+        let mut n = t.len();
+        let mut v = *v;
+        loop {
+            n -= 1;
+            t[n] = b"0123456789ABCDEF"[(v & 15) as usize];
+            v >>= 4;
+            if v == 0 {
+                break;
+            }
+        }
+        s.put_bytes(&t[n..]);
+    }
     s.put_bytes(b",");
     s.put_bytes(&r.renamed);
-    s.put_bytes(if r.old_backup { b",1," } else { b",0," });
-    s.put_bytes(if r.old_deleted { b"1," } else { b"0," });
-    dec(s, r.freed_clusters);
-    s.put_bytes(b",");
-    dec(s, r.others as u32);
-    s.put_bytes(if r.fake_deleted { b",1," } else { b",0," });
-    // Last loader entry: 0x54520010 marker zeroed, 0x54520011 zeroing failed,
-    // 0x54520012 PA2 entry, 0x54520013 PA2 entry, lock not confirmed;
-    // recovery-file: 0x5452000n, n = 0 Created, 1 AlreadyThere, 2 NoMedium,
-    // 3 BadBpb, 4 NoSpace, 5 Error (0 / other = none recorded).
-    hex(s, unsafe { r32(BKP_TRIG) });
-    for w in marker() {
-        s.put_bytes(b",");
-        hex(s, w);
-    }
-    s.put_bytes(if marker_valid() { b",VALID," } else { b",INVALID," });
-    // Crash counter word, healthy flag, last zero_marker FMC status.
-    hex(s, unsafe { r32(BKP_CRASH) });
-    s.put_bytes(if unsafe { HEALTHY } { b",HEALTHY," } else { b",-," });
-    hex(s, fmc_last());
-    // PD6 (power key) pin config read live: MODER[13:12] (0 = input),
-    // PUPD[13:12] (2 = pull-down, review B2), IDR bit 6 (1 = pressed).
-    let (moder, pupd, idr) = unsafe { (r32(GPIOD), r32(GPIOD + 0x0C), r32(GPIOD + 0x10)) };
-    s.put_bytes(b",PD6,");
-    dec(s, moder >> 12 & 3);
-    s.put_bytes(b",");
-    dec(s, pupd >> 12 & 3);
-    s.put_bytes(b",");
-    dec(s, idr >> 6 & 1);
-    crate::native::put_extra(s);
 }

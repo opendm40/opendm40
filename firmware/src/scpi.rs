@@ -234,6 +234,8 @@
 //!   CALCulate:AVERage[:AVERage]?  CALCulate:AVERage:MINimum? / MAXimum?
 //!     no sample yet: +9.9E37 and "Data stale" in SYST:ERR?
 //!   CALCulate:AVERage:COUNt?              samples in the statistics
+//!   CALCulate:AVERage:SDEViation?         sample standard deviation (N - 1;
+//!     0 after one sample)
 //!   CALCulate:AVERage:CLEar               restart the statistics
 //!   CALCulate:AVERage:STATe ON|OFF / ?    recording session (no idle
 //!     power-off; ON restarts the statistics)
@@ -499,10 +501,12 @@ pub enum Log {
     /// LOG:FORMat: Some(logger::FMT_*) to set, None = query.
     Format(Option<u8>),
     Csv(Option<bool>),
-    /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
-    /// DURATIONS_S) to set, None = query.
+    /// LOG:CSV:INTerval / DURation / CHANge: Some(index into
+    /// csvlog::INTERVALS_S (csvlog::ON_CHANGE: CHANge) / DURATIONS_S /
+    /// CHANGES) to set, None = query.
     CsvInt(Option<u8>),
     CsvDur(Option<u8>),
+    CsvChg(Option<u8>),
     CsvFree,
     /// LOG:DEST DISK (true) | HOST (false) | ? (None).
     Dest(Option<bool>),
@@ -590,7 +594,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           first (device 40728b8: 24 V on V-COM was seen in DC
 ///                           A only after TEMP; d2aff22: 100 ms is enough)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
-///                           the stock alternation; a change restarts AC+DC)
+///                           the stock alternation; a change restarts AC+DC).
+///                           METH / STAT / ZERO / R0: feature acdc-meth, else
+///                           undefined header
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
 ///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
 ///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
@@ -607,10 +613,11 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           unit*2+range; B zero, C A offset) / measure again;
 ///                           ? = valid,fixed;c0..c9
 ///   DBG:ACDC:R0 1|2 / ?     B 6 V: (i) AD1 SENSE - PB5 / (ii) OP1O - RLU
-///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs): off / on / on with
+///   DBG:ACDC:TRACE 0|1|2    AC+DC event trace (acdctr.rs; feature acdc-trace, else
+///                           undefined header): off / on / on with
 ///                           the row read back per DC conversion; re-arms
 ///   DBG:ACDC:TRACE? [from]  n,held,trig,on then ";" + 56 hex digits per entry
-///                           (oldest = 0, from `from`); frozen 48 events after
+///                           (oldest = 0, from `from`); frozen 32 events after
 ///                           an accepted DC part > 20 % off the one before
 ///   DBG:ACDC:RANG <item>|AUTO  the MF range item (V 0 = 600 mV, 1..4 = 6 ..
 ///                           1000 V; A 0..5 = 600 uA .. 10 A; manual) / AUTO+
@@ -697,6 +704,7 @@ pub enum Dbg {
     /// x0, y0, x1, y1, ms, hold ms, jitter px.
     Drag([u16; 7]),
     Lcd(u16, u16, u16, u16, u32),
+    #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
     Diag,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log
     /// (feature `dbg-touch`).
@@ -762,6 +770,7 @@ pub enum Dbg {
     /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
     /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
     /// (dmm::Ohm600, Dmm::ohm600_dbg).
+    #[cfg_attr(not(feature = "dbg-ohm6"), allow(dead_code))]
     Ohm6(Option<[f32; 5]>),
 }
 
@@ -839,6 +848,36 @@ fn tcal_arg(a: &[u8]) -> bool {
         n += 1;
     }
     n == 6 && crate::touchcal::scpi_put(&v)
+}
+
+/// LOG:CSV:INTerval / DURation / CHANge [?], LOG:CSV:FREE? (the Record
+/// page's settings): the command, or the error. Values: exactly one of
+/// csvlog::INTERVALS_S (or CHANge) / DURATIONS_S (s) / CHANGES (%); another
+/// number is -222, anything else -224.
+#[inline(never)] // .cold (link-native.x)
+fn csv_arg(s2: &[u8], a: &[u8], query: bool) -> Result<Log, &'static str> {
+    use crate::csvlog::{CHANGES, DURATIONS_S, INTERVALS_S, ON_CHANGE};
+    const BAD: &str = "Illegal parameter value";
+    if kw(s2, "FREE") && query {
+        return Ok(Log::CsvFree);
+    }
+    let n = parse_num(a);
+    let pick = |i: Option<usize>| match (query, i) {
+        (true, _) => Ok(None),
+        (false, Some(i)) => Ok(Some(i as u8)),
+        (false, None) => Err(if n.is_some() { RANGE } else { BAD }),
+    };
+    let secs = |set: &[u32]| n.and_then(|v| set.iter().position(|&x| x as f32 == v));
+    if kw(s2, "INTerval") {
+        let i = if kw(a, "CHANge") { Some(ON_CHANGE as usize) } else { secs(&INTERVALS_S) };
+        Ok(Log::CsvInt(pick(i)?))
+    } else if kw(s2, "DURation") {
+        Ok(Log::CsvDur(pick(secs(&DURATIONS_S))?))
+    } else if kw(s2, "CHANge") {
+        Ok(Log::CsvChg(pick(n.and_then(|v| CHANGES.iter().position(|c| parse_num(c.as_bytes()) == Some(v))))?))
+    } else {
+        Err("Undefined header")
+    }
 }
 
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
@@ -938,7 +977,7 @@ pub enum Cmd {
     SysRailState,
     /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
     CalcAhold(Option<bool>),
-    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt.
+    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt, 4 SDEViation.
     CalcAver(u8),
     CalcAverClear,
     CalcAverState(Option<bool>),
@@ -974,7 +1013,7 @@ pub enum Cmd {
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
-    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
+    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs; feature `acdc-meth`): op 0 METH <m>, 1 METH?,
     /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
     /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
     DbgAm(u8, u8, f32),
@@ -995,6 +1034,7 @@ pub enum Cmd {
     /// DBG:ALARm?: the danger alarm's state.
     DbgAlarm,
     /// DBG:SENTinel?: sentinel raw state (Sentinel::diag_text).
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
@@ -1002,9 +1042,11 @@ pub enum Cmd {
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     DbgSentReg,
     /// DBG:SRC <vref>,<path>[,<sense>][,FORCE] | OFF (Some) / DBG:SRC? (None):
     /// the ohm-source map row (src/dbgsrc.rs).
+    #[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
     DbgSrc(Option<crate::dbgsrc::Req>),
     /// DBG:SENTinel:PRECond <ms> / ?: the DC A precondition experiment
     /// (Dmm::precond_ms, RAM only, 0 = off).
@@ -2283,19 +2325,33 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.len() == 2 && kw(parts[1], "READout") => out = Out::Instr(Cmd::DbgReadout),
+                // Without the feature `acdc-trace`: no such header (Cargo.toml).
+                #[cfg(not(feature = "acdc-trace"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
+                // Without the feature `acdc-meth`: no method headers (Cargo.toml).
+                #[cfg(not(feature = "acdc-meth"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && matches!(&parts[2][..], b"METH" | b"STAT" | b"ZERO" | b"R0") => {
+                    self.err_arg(no_arg, "Undefined header")
+                }
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
                     let a0 = trim(it.next().unwrap_or(&[]));
+                    #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
                     let a1 = it.next().map(trim);
                     let c = match (&parts[2][..], query) {
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", false) => match a0 {
                             b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", false) => match (parse_num(a0), a1) {
                             (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
                                 Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
@@ -2307,12 +2363,16 @@ impl Scpi {
                             Some(v) if (0.0..=5.0).contains(&v) => Some(Cmd::DbgAm(7, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-trace")]
                         (b"TRACE", true) => Some(Cmd::DbgAm(8, parse_num(a0).unwrap_or(0.0).clamp(0.0, 255.0) as u8, 0.0)),
+                        #[cfg(feature = "acdc-trace")]
                         (b"TRACE", false) => match parse_num(a0) {
                             Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", false) => match a0 {
                             b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
                             _ => None,
@@ -2336,7 +2396,9 @@ impl Scpi {
                     }
                 }
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "LOG")) => out = Out::Instr(Cmd::DbgSentLog),
+                #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "REG")) => out = Out::Instr(Cmd::DbgSentReg),
+                #[cfg(feature = "dbg-src")]
                 _ if p0 == b"DBG" && parts.len() == 2 && parts[1] == b"SRC" => {
                     if query {
                         out = Out::Instr(Cmd::DbgSrc(None));
@@ -2354,6 +2416,8 @@ impl Scpi {
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
+                // DBG:SENTinel? / :REG? only with the feature `dbg-sent`.
+                #[cfg(feature = "dbg-sent")]
                 _ if p0 == b"DBG" && query && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) => out = Out::Instr(Cmd::DbgSent),
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"CH2"[..]) && parts.get(2) == Some(&&b"LAG"[..]) => {
                     match parse_num(arg) {
@@ -2464,6 +2528,8 @@ impl Scpi {
                             let v = nums::<5>(a);
                             Dbg::Lcd(v[0] as u16, v[1] as u16, v[2].max(1) as u16, v[3].max(1) as u16, v[4])
                         }
+                        // Without the feature: no such header (Cargo.toml).
+                        #[cfg(feature = "dbg-diag")]
                         b"DIAG" => Dbg::Diag,
                         // Without the feature: no such header (Cargo.toml).
                         #[cfg(feature = "dbg-touch")]
@@ -2524,6 +2590,7 @@ impl Scpi {
                             continue;
                         }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
+                        #[cfg(feature = "dbg-ohm6")]
                         b"OHM6" => Dbg::Ohm6((!query).then(|| {
                             let mut v = [f32::NAN; 5];
                             for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {
@@ -2601,7 +2668,7 @@ impl Scpi {
                         // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), crate::dlog::CSV_OPENS.load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
                         b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
                         b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
                         _ => {
@@ -2727,28 +2794,12 @@ impl Scpi {
                             }
                         }
                     } else if kw(sub, "CSV") && parts.len() > 2 {
-                        let s2 = parts[2];
-                        // Seconds -> index of the allowed value (exact).
-                        let idx = |set: &[u32]| parse_num(a).and_then(|v| set.iter().position(|&x| x as f32 == v)).map(|i| i as u8);
-                        if kw(s2, "INTerval") || kw(s2, "DURation") {
-                            let int = kw(s2, "INTerval");
-                            let set: &[u32] = if int { &crate::csvlog::INTERVALS_S } else { &crate::csvlog::DURATIONS_S };
-                            let v = if query { None } else {
-                                match idx(set) {
-                                    Some(i) => Some(i),
-                                    None => {
-                                        // A number not in the set: -222.
-                                        self.err_arg(no_arg, if parse_num(a).is_some() { RANGE } else { BAD });
-                                        continue;
-                                    }
-                                }
-                            };
-                            Out::Log(if int { Log::CsvInt(v) } else { Log::CsvDur(v) })
-                        } else if kw(s2, "FREE") && query {
-                            Out::Log(Log::CsvFree)
-                        } else {
-                            self.err_arg(no_arg, "Undefined header");
-                            continue;
+                        match csv_arg(parts[2], a, query) {
+                            Ok(l) => Out::Log(l),
+                            Err(e) => {
+                                self.err_arg(no_arg, e);
+                                continue;
+                            }
                         }
                     } else if kw(sub, "CSV") {
                         match state {
@@ -2982,6 +3033,7 @@ impl Scpi {
                             Some(l) if query && kw(l, "MAXimum") => Some(Cmd::CalcAver(1)),
                             Some(l) if query && kw(l, "AVERage") => Some(Cmd::CalcAver(2)),
                             Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
+                            Some(l) if query && kw(l, "SDEViation") => Some(Cmd::CalcAver(4)),
                             Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
                             Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
                             _ => None,

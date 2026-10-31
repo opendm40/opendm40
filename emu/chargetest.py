@@ -102,7 +102,16 @@ try:
         return [(bs[3 * i] & 0xF8) << 8 | (bs[3 * i + 1] & 0xFC) << 3 | bs[3 * i + 2] >> 3 for i in range(w * h)]
 
     def diag61():
-        return block(q('DBG:DIAG?', raw=True))[61]
+        # DBG:DIAG? needs --features dbg-diag (refused: an empty reply, the
+        # check is skipped).
+        r = q('DBG:DIAG?', raw=True)
+        return block(r)[61] if r.strip() else None
+
+    def check61(d, want, what):
+        if d is None:
+            print('  skip %s (DBG:DIAG? not in this build: --features dbg-diag)' % what, flush=True)
+        else:
+            check(d & 7 == want, '%s: DIAG byte 61 = %#x' % (what, d))
 
     def green(px):
         # 0x04A9-ish: G well above R and B.
@@ -113,8 +122,7 @@ try:
 
     print('*IDN?', q('*IDN?', timeout=30), flush=True)
     wait_until(4000)
-    d = diag61()
-    check(d & 7 == 7, 'charging: DIAG byte 61 = %#x (PB10, PB11, USB configured all 1)' % d)
+    check61(diag61(), 7, 'charging (PB10, PB11, USB configured all 1)')
     usb = lcd(412, 4, 14, 24)
     check(white(usb) >= 20, 'USB symbol shown while the host is attached (%d white px)' % white(usb))
     # A DBG:LCD? holds the drawing for 300 ms (main.rs draw_hold_until):
@@ -129,8 +137,7 @@ try:
     check(min(g) >= 40, 'battery green while charging (green px per frame %d..%d)' % (min(g), max(g)))
     check(len(frames) >= 2, 'battery level blinks while charging (%d different frames of 5, 1.3 s apart)' % len(frames))
     wait_until(int(A.t_full * 1000) + 2500)
-    d = diag61()
-    check(d & 7 == 5, 'charged: DIAG byte 61 = %#x (PB10 1, PB11 0, USB 1)' % d)
+    check61(diag61(), 5, 'charged (PB10 1, PB11 0, USB 1)')
     frames = set()
     g = []
     for _ in range(3):
@@ -140,8 +147,7 @@ try:
         frames.add(tuple(px))
     check(min(g) >= 40 and len(frames) == 1, 'charged: battery green and steady (green %d..%d px, %d frames)' % (min(g), max(g), len(frames)))
     wait_until(int(A.t_off * 1000) + 2500)
-    d = diag61()
-    check(d & 7 == 6, 'not charging: DIAG byte 61 = %#x (PB10 0, PB11 1, USB 1)' % d)
+    check61(diag61(), 6, 'not charging (PB10 0, PB11 1, USB 1)')
     px = lcd(435, 9, 40, 16)
     check(green(px) == 0 and white(px) >= 40, 'battery white after PB10 low (green %d, white %d px)' % (green(px), white(px)))
 except Exception as e:

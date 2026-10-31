@@ -2565,6 +2565,7 @@ impl Scope {
 }
 
 /// Debug: latch word, record DMA count left, first sample, GPIOB IDR.
+#[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
 pub fn debug() -> [u32; 4] {
     unsafe {
         [

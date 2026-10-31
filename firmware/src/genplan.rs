@@ -109,10 +109,8 @@ impl Wave {
     /// Note for the UI when the set frequency is above `max_hz` (UF-14).
     pub fn max_note(self) -> &'static str {
         match self {
-            Wave::Sine => "Sine: max 50 kHz",
-            Wave::Square => "Square: max 10 MHz",
-            Wave::Triangle => "Triangle: max 50 kHz",
-            Wave::Ramp => "Ramp: max 50 kHz",
+            Wave::Square => "max 10 MHz",
+            _ => "max 50 kHz",
         }
     }
 }

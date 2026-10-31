@@ -28,13 +28,48 @@ pub mod pw;
 #[path = "acdctr.rs"]
 pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
+/// AC+DC methods B / C (DBG:ACDC:METH): only with the feature `acdc-meth`
+/// (Cargo.toml); without it method A (the stock alternation) is all there
+/// is and the hooks below are empty.
+#[cfg(feature = "acdc-meth")]
 #[path = "acdcm.rs"]
 pub mod am;
-#[cfg(target_os = "none")]
+#[cfg(not(feature = "acdc-meth"))]
+mod am {
+    use super::*;
+    impl Dmm {
+        #[inline(always)]
+        pub(super) fn am_on(&self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_enter(&mut self) {}
+        #[inline(always)]
+        pub(super) fn am_mode(&mut self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_row(&mut self, cfg: &[u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
+            *cfg
+        }
+        #[inline(always)]
+        pub(super) fn am_ref(&mut self, _: &mut Clock, _: f32, _: f32, _: u8, _: &'static str, _: f32, _: (u8, i8)) -> Option<Reading> {
+            None
+        }
+        #[inline(always)]
+        pub(super) fn poll_am(&mut self, _: &mut Clock, _: u64) -> Option<Reading> {
+            None
+        }
+    }
+}
+#[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
-/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
-#[cfg(not(target_os = "none"))]
+/// DBG:SRC is firmware only (the host tests that include dmm.rs get it
+/// off) and needs the feature `dbg-src` (not default on
+/// test/scope-chain-0.4, Cargo.toml): without it DBG:SRC is an unknown
+/// header.
+#[cfg(not(all(target_os = "none", feature = "dbg-src")))]
 mod src {
     pub fn active() -> bool {
         false
@@ -1952,7 +1987,8 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
-    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only).
+    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only; feature `acdc-meth`).
+    #[cfg(feature = "acdc-meth")]
     pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
@@ -2584,6 +2620,7 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
+            #[cfg(feature = "acdc-meth")]
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
@@ -2968,7 +3005,7 @@ impl Dmm {
         }
         self.r29 = row[9];
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             let h = tr::hash16(&row);
             self.tr_ev(clk.now_ms(), tr::K_ROW, h as i32, self.dc_val, 0);
         }
@@ -4373,6 +4410,7 @@ impl Dmm {
     /// relay PA state (0 V/A, 1 the ohm network, 255 unknown), the mode,
     /// the range and `a_blind`.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     pub fn reg_text(&self, buf: &mut [u8; 72]) -> usize {
         let mut b = [0u8; 24];
         hy::read(0x20, &mut b);
@@ -4922,7 +4960,7 @@ impl Dmm {
     /// Trace a DC conversion (acdctr.rs); the trigger is an accepted DC
     /// part more than TR_JUMP off the DC part before it.
     fn tr_dc(&mut self, now: u64, ad1: i32, x: f32, lim: f32, vet: bool, hold: bool) {
-        if self.tr.on == 0 {
+        if !tr::ON || self.tr.on == 0 {
             return;
         }
         let d = self.dc_val;
@@ -5107,7 +5145,10 @@ impl Dmm {
             (self.dc_val, dm)
         };
         self.auto_total_si = t * si_k;
-        self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        #[cfg(feature = "acdc-meth")]
+        {
+            self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        }
         let ol = v.abs() / lim > self.over();
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         rd.mode = mode;
@@ -5332,7 +5373,7 @@ impl Dmm {
         }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
         }
         let seed = (acdc && was && !settling) || first;
@@ -5707,6 +5748,7 @@ impl Dmm {
     /// Firmware only (the host tests that include dmm.rs have no scpi).
     #[cfg(target_os = "none")]
     #[inline(never)] // .cold (link-native.x): one SCPI command
+    #[cfg_attr(not(feature = "dbg-ohm6"), allow(dead_code))]
     pub fn ohm600_dbg(&mut self, set: Option<[f32; 5]>, out: &mut crate::scpi::Scpi) {
         let o = &mut self.o6;
         if let Some(v) = set {
