@@ -589,7 +589,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           first (device 40728b8: 24 V on V-COM was seen in DC
 ///                           A only after TEMP; d2aff22: 100 ms is enough)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
-///                           the stock alternation; a change restarts AC+DC)
+///                           the stock alternation; a change restarts AC+DC).
+///                           METH / STAT / ZERO / R0: feature acdc-meth, else
+///                           undefined header
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
 ///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
 ///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
@@ -953,7 +955,7 @@ pub enum Cmd {
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
-    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
+    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs; feature `acdc-meth`): op 0 METH <m>, 1 METH?,
     /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
     /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
     DbgAm(u8, u8, f32),
@@ -2261,19 +2263,30 @@ impl Scpi {
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
+                // Without the feature `acdc-meth`: no method headers (Cargo.toml).
+                #[cfg(not(feature = "acdc-meth"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && matches!(&parts[2][..], b"METH" | b"STAT" | b"ZERO" | b"R0") => {
+                    self.err_arg(no_arg, "Undefined header")
+                }
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
                     let a0 = trim(it.next().unwrap_or(&[]));
+                    #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
                     let a1 = it.next().map(trim);
                     let c = match (&parts[2][..], query) {
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", false) => match a0 {
                             b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", false) => match (parse_num(a0), a1) {
                             (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
                                 Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
@@ -2292,7 +2305,9 @@ impl Scpi {
                             Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", false) => match a0 {
                             b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
                             _ => None,

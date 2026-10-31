@@ -75,6 +75,12 @@ dbg-ohm6 = []
 dbg-sent = []
 # DBG:SRC, the ohm-source map row (src/dbgsrc.rs, tools/srcmap.py).
 dbg-src = []
+# DBG:ACDC:METH / STAT / ZERO / R0, the AC+DC prototype methods B and C
+# (src/acdcm.rs; docs/acdc-approaches.md; ~6.6 KB of region B, 2.7 KB of
+# region C, 480 B of RAM). Off by default: AC+DC is method A (the stock
+# alternation, dmm.rs) only and the four commands are refused (undefined
+# header).
+acdc-meth = []
 # DBG:ACDC:TRACE, the AC+DC event trace (src/acdctr.rs; a 64-entry ring,
 # 1.8 KB of RAM). Off by default: the trace never records and the command is
 # refused (undefined header).
