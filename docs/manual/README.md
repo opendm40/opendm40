@@ -940,6 +940,8 @@ The chart plots the reading over time, 321 points wide.
 - It stops during HOLD and keeps running during AutoHold.
 - It restarts when you change the function or switch to a range with
   another unit (6 V to 600 mV).
+- REL on or off does not restart it: the points from before stay, as in
+  the stock firmware.
 
 ![The trend chart](img/trend-chart.png)
 
