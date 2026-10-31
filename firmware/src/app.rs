@@ -1942,6 +1942,7 @@ impl App {
                 max: st.map(|s| s.1),
                 avg: st.map(|s| s.2),
                 min: st.map(|s| s.0),
+                sd: st.map(|s| s.3),
                 rel: self.meter.rel_value(),
                 secs: self.meter.stats.secs(now),
                 rec: self.meter.stats.rec,
@@ -3596,8 +3597,8 @@ impl App {
             return;
         }
         match self.view {
-            // REL button (stock (402,205,76,38)).
-            View::Dmm if x >= 402 && (205..243).contains(&y) => self.rel_toggle(now),
+            // REL button (stock (402,205,76,38); 36 high since SD, ui::chart).
+            View::Dmm if x >= 402 && (205..241).contains(&y) => self.rel_toggle(now),
             View::Dmm if x >= 402 && (175..279).contains(&y) => {
                 // MIN/MAX/AVG column outside the REL box: start / stop a
                 // recording session. Starting clears the statistics; while it
@@ -4473,10 +4474,12 @@ impl App {
         self.meter.ahold
     }
 
-    /// CALC:AVER:MIN? / MAX? / AVER? / COUNt?: (min, max, avg) in SI of
-    /// the current function and the sample count; None before a sample.
-    pub fn stats(&self) -> (Option<(f32, f32, f32)>, u32) {
-        (self.meter.stats.si(), self.meter.stats.n)
+    /// CALC:AVER:MIN? / MAX? / AVER? / SDEV? / COUNt?: (min, max, avg, sd)
+    /// in SI of the current function and the sample count; None before a
+    /// sample.
+    pub fn stats(&self) -> (Option<(f32, f32, f32, f32)>, u32) {
+        let s = &self.meter.stats;
+        (s.si().map(|(a, b, c)| (a, b, c, s.sd().unwrap_or(0.0))), s.n)
     }
 
     /// CALC:AVER:CLEar (keeps a running recording session).
@@ -4785,7 +4788,7 @@ impl App {
                 let (v, n) = self.stats();
                 match (k, v) {
                     (3, _) => crate::put_u32(out, n),
-                    (_, Some((min, max, avg))) => out.put_f32([min, max, avg][k.min(2) as usize]),
+                    (_, Some((min, max, avg, sd))) => out.put_f32([min, max, avg, sd, sd][k.min(4) as usize]),
                     (_, None) => {
                         out.set_err("Data stale");
                         out.put_bytes(b"+9.90000000E+37");

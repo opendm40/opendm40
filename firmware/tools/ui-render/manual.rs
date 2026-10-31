@@ -85,7 +85,7 @@ fn dmm_page(p: &Dp) {
     let v = if r.main.ol { 0.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
-    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
+    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), sd: Some(1.5 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }

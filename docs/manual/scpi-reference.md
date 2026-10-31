@@ -456,6 +456,7 @@ power meter).
 | `CALCulate:AVERage:MINimum?` | | Minimum | both |
 | `CALCulate:AVERage:MAXimum?` | | Maximum | both |
 | `CALCulate:AVERage:COUNt?` | | Number of samples: `120` | both |
+| `CALCulate:AVERage:SDEViation?` | | Sample standard deviation (N − 1); `0` after one sample | both |
 | `CALCulate:AVERage:CLEar` | | Restarts the statistics. | both |
 | `CALCulate:AVERage:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
 | `CALCulate:LIMit:LOWer[?]` | `<value>` | `+1.000000E+00`, or `+9.9E37` when not set | both |

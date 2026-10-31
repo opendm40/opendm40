@@ -888,8 +888,9 @@ the box shows the REL value. Tap again to turn it off.
 
 ### MIN, MAX, AVG
 
-The column on the right of the chart shows **MAX**, **AVG** and **MIN**
-since they were last reset, and a timer **T hh:mm:ss**.
+The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
+**SD** (sample standard deviation) since they were last reset, and a timer
+**T hh:mm:ss**.
 
 - **Tap the column** (outside the REL box): start a session. The
   statistics are cleared, the timer turns orange, and
