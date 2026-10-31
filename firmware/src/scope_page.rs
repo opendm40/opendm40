@@ -2962,7 +2962,9 @@ const AS_P2_MAX: u8 = 3;
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
 /// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
 /// the result), timebase, range, min /
-/// max code, rising crossings, period (phase 4: Cycl) in us.
+/// max code, rising crossings, period (phase 4: Cycl) in us. SRAM, not the
+/// TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
 

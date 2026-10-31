@@ -67,6 +67,25 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Capacitance AUTO: a small capacitor measured after a large one (600 µF and
+  up) gets its own range again instead of a wrong µF value; open leads or a
+  short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
+  screen.
+- Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
+- Capacitance ranges on the meter: MF chooses 60 nF .. 60000 µF or AUTO; the
+  AUTO key steps and resets them as in V / A / Ω. The 6 nF and 60 nF ranges
+  are one (below 6 nF with 3 decimals).
+- Capacitance: 1 .. 47 mF show their first value in about 1.5 to 5 s (was
+  9 to 20 s; 47 mF did not settle); AUTO starts on the last value's range;
+  the value stays grey until the slope settles (electrolytics); another
+  capacitor on 6 / 60 mF starts the range choice again.
+- Capacitance on 600 µF and up: a value every 0.25 s (the median of the
+  last polls, corrected for the ramp's two directions), grey until the ramp
+  has run both ways; "Discharging" with a rough grey value while the meter
+  discharges, orange "Charged cap: discharge first" above ~1.2 V; a charged
+  capacitor (up to 5 V) discharges about twice as fast.
+- Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
+  ten times it.
 - Power meter: **Vb 0.000** no longer in the warning colour with open leads.
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
 - Generator: the square wave's preview follows the duty cycle; it always showed 50 %
