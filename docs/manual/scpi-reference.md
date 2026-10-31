@@ -456,6 +456,7 @@ power meter).
 | `CALCulate:AVERage:MINimum?` | | Minimum | both |
 | `CALCulate:AVERage:MAXimum?` | | Maximum | both |
 | `CALCulate:AVERage:COUNt?` | | Number of samples: `120` | both |
+| `CALCulate:AVERage:SDEViation?` | | Sample standard deviation (N − 1); `0` after one sample | both |
 | `CALCulate:AVERage:CLEar` | | Restarts the statistics. | both |
 | `CALCulate:AVERage:STATe[?]` | `ON` or `OFF` | `1` or `0` | both |
 | `CALCulate:LIMit:LOWer[?]` | `<value>` | `+1.000000E+00`, or `+9.9E37` when not set | both |
@@ -649,7 +650,8 @@ the disk.
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
 | `LOG:CSV[?]` | `ON` or `OFF` | `<state>,<file>,<rows>,<bytes>,<committed>,<dropped>` | both; `ON` USB only |
-| `LOG:CSV:INTerval[?]` | `0` (every reading, default), `1`, `10` or `60` s | `0` | both |
+| `LOG:CSV:INTerval[?]` | `0` (every reading, default), `1`, `10` or `60` s, or `CHANge` (on change) | `0`, or `CHAN` | both |
+| `LOG:CSV:CHANge[?]` | `0.1`, `1` (default) or `5` % of the range's full scale | `1` | both |
 | `LOG:CSV:DURation[?]` | `0` (until stopped, default), `600`, `3600`, `28800` or `86400` s | `0` | both |
 | `LOG:CSV:FREE?` | | Free bytes on the disk | both |
 
@@ -657,7 +659,9 @@ the disk.
   no disk, 6 error; file is -1 until the first save.
 - `INTerval` and `DURation` apply to the next recording (`Settings
   conflict` while one runs). With an interval, each row is the mean of the
-  readings in it.
+  readings in it. With `CHANge`, a row at its reading's time when the
+  value moves by more than `LOG:CSV:CHANge` % of the range's full scale
+  from the last row, when OL / HI / LO changes, or 60 s after the last row.
 - `LOG:CSV ON` fails with `Settings conflict: Wave view`, `Settings
   conflict: inrush page`, or `Settings conflict` (no reading yet, a
   recording already on, the disk not available).
@@ -806,10 +810,10 @@ unless shown otherwise.
 | `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md); `dbg-ohm6` builds) | | USB |
 | `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians; `dbg-ohm6` builds) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic. Only in builds with the `dbg-acdc` feature. | USB |
-| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
-| `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
-| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>` | USB |
-| `DBG:ACDC:R0[?]` | `1` or `2` | `1` | USB |
+| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A`. Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:STAT?` | | AC+DC method state (25 fields). Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>`. Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:R0[?]` | `1` or `2` | `1`. Only in builds with the `acdc-meth` feature. | USB |
 | `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
 | `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...`. Only in builds with the `acdc-trace` feature. | USB |
 | `DBG:HWTRIG?` | | Comparator trigger state | USB |

@@ -233,6 +233,8 @@
 //!   CALCulate:AVERage[:AVERage]?  CALCulate:AVERage:MINimum? / MAXimum?
 //!     no sample yet: +9.9E37 and "Data stale" in SYST:ERR?
 //!   CALCulate:AVERage:COUNt?              samples in the statistics
+//!   CALCulate:AVERage:SDEViation?         sample standard deviation (N - 1;
+//!     0 after one sample)
 //!   CALCulate:AVERage:CLEar               restart the statistics
 //!   CALCulate:AVERage:STATe ON|OFF / ?    recording session (no idle
 //!     power-off; ON restarts the statistics)
@@ -498,10 +500,12 @@ pub enum Log {
     /// LOG:FORMat: Some(logger::FMT_*) to set, None = query.
     Format(Option<u8>),
     Csv(Option<bool>),
-    /// LOG:CSV:INTerval / DURation: Some(index into csvlog::INTERVALS_S /
-    /// DURATIONS_S) to set, None = query.
+    /// LOG:CSV:INTerval / DURation / CHANge: Some(index into
+    /// csvlog::INTERVALS_S (csvlog::ON_CHANGE: CHANge) / DURATIONS_S /
+    /// CHANGES) to set, None = query.
     CsvInt(Option<u8>),
     CsvDur(Option<u8>),
+    CsvChg(Option<u8>),
     CsvFree,
     /// LOG:DEST DISK (true) | HOST (false) | ? (None).
     Dest(Option<bool>),
@@ -589,7 +593,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           first (device 40728b8: 24 V on V-COM was seen in DC
 ///                           A only after TEMP; d2aff22: 100 ms is enough)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
-///                           the stock alternation; a change restarts AC+DC)
+///                           the stock alternation; a change restarts AC+DC).
+///                           METH / STAT / ZERO / R0: feature acdc-meth, else
+///                           undefined header
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
 ///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
 ///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
@@ -820,6 +826,36 @@ fn tcal_arg(a: &[u8]) -> bool {
     n == 6 && crate::touchcal::scpi_put(&v)
 }
 
+/// LOG:CSV:INTerval / DURation / CHANge [?], LOG:CSV:FREE? (the Record
+/// page's settings): the command, or the error. Values: exactly one of
+/// csvlog::INTERVALS_S (or CHANge) / DURATIONS_S (s) / CHANGES (%); another
+/// number is -222, anything else -224.
+#[inline(never)] // .cold (link-native.x)
+fn csv_arg(s2: &[u8], a: &[u8], query: bool) -> Result<Log, &'static str> {
+    use crate::csvlog::{CHANGES, DURATIONS_S, INTERVALS_S, ON_CHANGE};
+    const BAD: &str = "Illegal parameter value";
+    if kw(s2, "FREE") && query {
+        return Ok(Log::CsvFree);
+    }
+    let n = parse_num(a);
+    let pick = |i: Option<usize>| match (query, i) {
+        (true, _) => Ok(None),
+        (false, Some(i)) => Ok(Some(i as u8)),
+        (false, None) => Err(if n.is_some() { RANGE } else { BAD }),
+    };
+    let secs = |set: &[u32]| n.and_then(|v| set.iter().position(|&x| x as f32 == v));
+    if kw(s2, "INTerval") {
+        let i = if kw(a, "CHANge") { Some(ON_CHANGE as usize) } else { secs(&INTERVALS_S) };
+        Ok(Log::CsvInt(pick(i)?))
+    } else if kw(s2, "DURation") {
+        Ok(Log::CsvDur(pick(secs(&DURATIONS_S))?))
+    } else if kw(s2, "CHANge") {
+        Ok(Log::CsvChg(pick(n.and_then(|v| CHANGES.iter().position(|c| parse_num(c.as_bytes()) == Some(v))))?))
+    } else {
+        Err("Undefined header")
+    }
+}
+
 fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
     let mut out = [0u32; N];
     for (i, part) in a.split(|&b| b == b',').take(N).enumerate() {
@@ -917,7 +953,7 @@ pub enum Cmd {
     SysRailState,
     /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
     CalcAhold(Option<bool>),
-    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt.
+    /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt, 4 SDEViation.
     CalcAver(u8),
     CalcAverClear,
     CalcAverState(Option<bool>),
@@ -953,7 +989,7 @@ pub enum Cmd {
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
-    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
+    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs; feature `acdc-meth`): op 0 METH <m>, 1 METH?,
     /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
     /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
     DbgAm(u8, u8, f32),
@@ -2261,19 +2297,30 @@ impl Scpi {
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
+                // Without the feature `acdc-meth`: no method headers (Cargo.toml).
+                #[cfg(not(feature = "acdc-meth"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && matches!(&parts[2][..], b"METH" | b"STAT" | b"ZERO" | b"R0") => {
+                    self.err_arg(no_arg, "Undefined header")
+                }
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
                     let a0 = trim(it.next().unwrap_or(&[]));
+                    #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
                     let a1 = it.next().map(trim);
                     let c = match (&parts[2][..], query) {
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", false) => match a0 {
                             b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", false) => match (parse_num(a0), a1) {
                             (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
                                 Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
@@ -2292,7 +2339,9 @@ impl Scpi {
                             Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", false) => match a0 {
                             b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
                             _ => None,
@@ -2692,28 +2741,12 @@ impl Scpi {
                             }
                         }
                     } else if kw(sub, "CSV") && parts.len() > 2 {
-                        let s2 = parts[2];
-                        // Seconds -> index of the allowed value (exact).
-                        let idx = |set: &[u32]| parse_num(a).and_then(|v| set.iter().position(|&x| x as f32 == v)).map(|i| i as u8);
-                        if kw(s2, "INTerval") || kw(s2, "DURation") {
-                            let int = kw(s2, "INTerval");
-                            let set: &[u32] = if int { &crate::csvlog::INTERVALS_S } else { &crate::csvlog::DURATIONS_S };
-                            let v = if query { None } else {
-                                match idx(set) {
-                                    Some(i) => Some(i),
-                                    None => {
-                                        // A number not in the set: -222.
-                                        self.err_arg(no_arg, if parse_num(a).is_some() { RANGE } else { BAD });
-                                        continue;
-                                    }
-                                }
-                            };
-                            Out::Log(if int { Log::CsvInt(v) } else { Log::CsvDur(v) })
-                        } else if kw(s2, "FREE") && query {
-                            Out::Log(Log::CsvFree)
-                        } else {
-                            self.err_arg(no_arg, "Undefined header");
-                            continue;
+                        match csv_arg(parts[2], a, query) {
+                            Ok(l) => Out::Log(l),
+                            Err(e) => {
+                                self.err_arg(no_arg, e);
+                                continue;
+                            }
                         }
                     } else if kw(sub, "CSV") {
                         match state {
@@ -2947,6 +2980,7 @@ impl Scpi {
                             Some(l) if query && kw(l, "MAXimum") => Some(Cmd::CalcAver(1)),
                             Some(l) if query && kw(l, "AVERage") => Some(Cmd::CalcAver(2)),
                             Some(l) if query && kw(l, "COUNt") => Some(Cmd::CalcAver(3)),
+                            Some(l) if query && kw(l, "SDEViation") => Some(Cmd::CalcAver(4)),
                             Some(l) if !query && kw(l, "CLEar") => Some(Cmd::CalcAverClear),
                             Some(l) if kw(l, "STATe") => state.map(Cmd::CalcAverState),
                             _ => None,

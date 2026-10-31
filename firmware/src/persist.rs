@@ -59,7 +59,10 @@ const V8_WORDS: usize = 59;
 pub const W_POWER_ZD: usize = 59;
 const V7_WORDS: usize = 58;
 /// Record page (decision 2026-10-22 #1): bits 0..3 the row interval
-/// (csvlog::INTERVALS_S index), bits 4..7 the duration (DURATIONS_S index).
+/// (csvlog::INTERVALS_S index; csvlog::ON_CHANGE = On change), bits 4..7
+/// the duration (DURATIONS_S index), bits 8..9 the On change threshold
+/// (0 = 1 %, the default, 1 = 0.1 %, 2 = 5 %; app.rs swap01). Older
+/// records read 0 there = the defaults: no version change.
 pub const W_REC: usize = 58;
 const V6_WORDS: usize = 52;
 /// First word of the power-meter block (app_power::PW_WORDS words).

@@ -100,6 +100,7 @@ class Link:
 
 
 def settings(l):
+    """The settings fields of DBG:BOOT? as a list (bootinfo.py)."""
     return bootinfo.settings(l.q('DBG:BOOT?'))
 
 

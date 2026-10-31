@@ -286,7 +286,7 @@ file's header there), and only the low 512 KiB of the flash are zero-wait
             end of image below 0x080A0000 (FS-loader above)
 RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
      SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the disk
-          scratch arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
+          buffer arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
 ```
 
 ### Memory budget (2026-10-22 rework)
@@ -322,8 +322,8 @@ the FFT / screenshot sharing below):
   worst case. stackdepth.py follows the dyn calls (its `INDIRECT` list).
 - **FFT work buffer** (superseded the same day, [ram-budget.md](ram-budget.md): the
   screenshot capture buffer CAP is gone, the screenshot streams from the
-  panel, and the FFT work buffer lives in the disk scratch arena
-  `calbackup::SCRATCH` with an ownership check; SRAM free 10.9 -> 60.7 KB.
+  panel, and the FFT work buffer lives in the disk buffer arena
+  `diskbuf::ARENA` (then `calbackup::SCRATCH`) with an ownership check; SRAM free 10.9 -> 60.7 KB.
   As it was before that:) (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
   arena with an explicit owner, the last 8 KiB of the screenshot capture
   buffer (`screenshot::CAP`, 48 KiB). The FFT renews a lease every time it
@@ -1024,7 +1024,7 @@ Pairs checked and not overlaid (each can be live with the other):
 | `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
 | `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
 | `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
-| `calbackup::SCRATCH` with `csvlog::TAIL` | a commit uses SCRATCH [0] / [1] and TAIL together |
+| `diskbuf::ARENA` with `csvlog::TAIL` | a commit uses ARENA [0] / [1] and TAIL together |
 | `fastlog::JOB` with `csvlog::JOB` | the sessions exclude each other, but each job keeps its result for LOG:CSV? / the fast logger's status after it ends |
 | `bt::TX` with the USBTMC reply buffer | both transports answer at the same time |
 | `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
@@ -1059,6 +1059,24 @@ as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
 | SRAM free | 34 628 B | 39 980 B |
 
 `--features acdc-trace`: SRAM 38 212 B, B 12 888 B, C 13 508 B.
+
+### AC+DC methods behind a feature (2026-10-31, feat/acdc-meth)
+
+The AC+DC prototype methods B and C ([acdcm.rs](../src/acdcm.rs),
+[acdc-approaches.md](acdc-approaches.md) section 10) are debug code: the
+cargo feature `acdc-meth` (off by default) builds them. Without it
+`dmm.rs` has an empty `am` module (`am_on()` constant false, so method A's
+code is as before and the hooks are dropped), no `AM` static, and
+DBG:ACDC:METH / STAT? / ZERO / R0 are an undefined header. DBG:ACDC:RANG
+stays.
+
+| | before (fe59a782) | after |
+|---|---|---|
+| region B free | 25 032 B | 31 536 B |
+| region C free | 21 216 B | 24 316 B |
+| SRAM free | 45 460 B | 45 940 B |
+
+`--features acdc-meth`: SRAM 45 460 B, B 24 840 B, C 21 216 B.
 
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
