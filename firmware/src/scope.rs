@@ -131,7 +131,8 @@ const TB: [(u32, u32, u32, u32); 30] = [
     (50_000_000, 25, 1, 1),
     (50_000_000, 125, 2, 1),
     // From 100 us/div: fs halved, 2500 samples/div (stock Normal table), so
-    // a screen + trigger window fits the 26 K record.
+    // a screen + trigger window fits the shortest linear record (26 K,
+    // `lin_len`).
     (25_000_000, 125, 2, 1),
     (12_500_000, 125, 2, 1),
     (5_000_000, 125, 2, 1),
