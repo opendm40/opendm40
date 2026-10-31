@@ -58,10 +58,11 @@ const STREAM_FS: u32 = 1_250_000;
 const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0: the raw u16 ring every acquisition
 /// mode writes (88 KB, the SRAM budget: docs/native-boot.md "Memory
-/// budget"). Debug builds with RAM-hungry features (dbg-touch 1.9 KB,
-/// acdc-trace 1.8 KB) give up 1 K samples each to stay above the 8 KiB
-/// SRAM floor.
-pub const CAP: usize = (44 - cfg!(feature = "dbg-touch") as usize - cfg!(feature = "acdc-trace") as usize) * 1024;
+/// budget"), and the tail after it while its lenders are idle (pool.rs
+/// TAIL, "record tail" below). Debug builds with RAM-hungry features
+/// (dbg-touch 1.9 KB, acdc-trace 1.8 KB) give up 1 K samples each to stay
+/// above the 8 KiB SRAM floor (`pool::REC_BASE`).
+pub const CAP: usize = crate::pool::REC_BASE;
 /// The part of BUF lent to the inrush capture (its ring length, as before
 /// the record grew).
 pub const INRUSH_LEN: usize = 26 * 1024;
@@ -69,12 +70,25 @@ pub const INRUSH_LEN: usize = 26 * 1024;
 /// in time than max(26 K samples, 0.1 s), so a slow timebase's pulse / runt
 /// frame (one complete linear record each) does not wait longer than
 /// before the record grew.
-fn lin_len(fs: u32) -> usize {
-    (fs as usize / 10).clamp(INRUSH_LEN, CAP)
+fn lin_len(fs: u32, cap: usize) -> usize {
+    (fs as usize / 10).clamp(INRUSH_LEN, cap)
 }
 
-#[link_section = ".dmabuf"]
-static mut BUF: [u16; CAP] = [0; CAP];
+/// The record ring (`pool::REC`: BUF, the CAP fixed samples, and the tail
+/// the scope holds after it), samples [0, n). `n` <= `Scope::cap` for the
+/// MCX acquisition / stored record, CAP for the wave view and inrush.
+#[inline(always)]
+fn ring(n: usize) -> &'static [u16] {
+    // SAFETY: main loop only; inside REC (n <= pool::REC_MAX); the tail
+    // part only while the scope holds it (`grab_tail`).
+    unsafe { core::slice::from_raw_parts(crate::pool::rec_base(), n) }
+}
+
+#[inline(always)]
+fn ring_mut(n: usize) -> &'static mut [u16] {
+    // SAFETY: as `ring`; no other reference to the ring is live.
+    unsafe { core::slice::from_raw_parts_mut(crate::pool::rec_base(), n) }
+}
 #[link_section = ".dmabuf"]
 static mut LATCH: [u32; 2] = [0; 2];
 
@@ -417,6 +431,10 @@ pub struct Scope {
     t_s0: Option<u32>,
     t_step: f32,
     stored_t0: Option<u32>,
+    /// Ring length (samples) of the MCX acquisition in flight and of the
+    /// stored record's memory: CAP plus the tail segments the scope holds
+    /// (`grab_tail`, pool TAIL); CAP in the wave view and while lent.
+    cap: usize,
 }
 
 /// The DMM-input source of the scope page (docs/dmm-input-scope-
@@ -758,6 +776,7 @@ impl Scope {
             t_s0: None,
             t_step: 1.0,
             stored_t0: None,
+            cap: CAP,
         };
         // WAVE is not loaded on the device (.dmabuf): set up in place.
         unsafe { core::ptr::addr_of_mut!(WAVE).write(Wave::NEW) };
@@ -1122,7 +1141,7 @@ impl Scope {
         // positions that keep a full screen around it (finish), CAP - screen
         // of them instead of the 800-sample refinement window, and Single keeps
         // the full record for the stored-record zoom (stock Single = 65520).
-        self.rec = lin_len(TB[s.tb].0);
+        self.rec = lin_len(TB[s.tb].0, self.cap);
         self.deadline = 0;
     }
 
@@ -1181,13 +1200,13 @@ impl Scope {
             return true;
         } else if was_stream {
             let wr = self.stream_wr();
-            self.rec_base = wr - wr.min(CAP as u64);
-            if wr > CAP as u64 {
-                unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+            self.rec_base = wr - wr.min(self.cap as u64);
+            if wr > self.cap as u64 {
+                ring_mut(self.cap).rotate_left((wr % self.cap as u64) as usize);
             }
-            wr.min(CAP as u64) as usize
+            wr.min(self.cap as u64) as usize
         } else if was_hw {
-            let wr = CAP - ndtr.min(CAP);
+            let wr = self.cap - ndtr.min(self.cap);
             // HISR TCIF4: the ring has wrapped at least once.
             let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
             self.hw_linearise(wr, wrapped)
@@ -1210,7 +1229,7 @@ impl Scope {
             self.stored_valid = false;
             return;
         }
-        let buf = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..len] };
+        let buf = ring_mut(len);
         for v in buf.iter_mut() {
             *v &= 0x3FF;
         }
@@ -1250,7 +1269,7 @@ impl Scope {
         let win = n - self.screen;
         // Mask once here (snapshot_mark), then search in the masked record.
         self.snapshot_mark(n, 0, None, false);
-        let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
+        let data: &[u16] = ring(n);
         let trig = if self.gen_src() {
             self.gen_next(pre as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
         } else if self.s.ttype != 0 {
@@ -1280,15 +1299,15 @@ impl Scope {
     /// was watching). Matches the stock 65520-sample roll record (§3), capped at
     /// CAP.
     fn snapshot_roll(&mut self) {
-        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        let wr = (self.cap - unsafe { r32(S4 + 0x04) } as usize % (self.cap + 1)) % self.cap;
+        let d = (wr + self.cap - self.roll_last_wr) % self.cap;
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
-        let len = if self.roll_written >= CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
-            CAP
+        let len = if self.roll_written >= self.cap as u64 {
+            ring_mut(self.cap).rotate_left(wr);
+            self.cap
         } else {
-            wr.min(CAP)
+            wr.min(self.cap)
         };
         self.rec_base = self.roll_written - len as u64;
         self.snapshot_mark(len, len.saturating_sub(1), None, true);
@@ -1296,8 +1315,11 @@ impl Scope {
 
     fn start(&mut self) {
         let fs = TB[self.s.tb].0;
+        // The free tail after BUF: this acquisition's ring length.
+        self.grab_tail();
+        self.rec = lin_len(fs, self.cap);
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
-        let buf = core::ptr::addr_of!(BUF) as u32;
+        let buf = crate::pool::rec_base() as u32;
         unsafe {
             w32(LIFCR, 0x3D << 22);
             w32(HIFCR, 0x3D);
@@ -1349,7 +1371,7 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
-            let (len, circ) = if self.rolling || hw || stream { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
+            let (len, circ) = if self.rolling || hw || stream { (self.cap as u32, 1 << 8) } else { (self.rec as u32, 0) };
             self.roll_written = 0;
             self.roll_last_wr = 0;
             self.stream = stream;
@@ -1508,8 +1530,8 @@ impl Scope {
     /// newest; otherwise samples 0..wr are the record. Returns its length.
     fn hw_linearise(&mut self, wr: usize, wrapped: bool) -> usize {
         if wrapped {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
-            CAP
+            ring_mut(self.cap).rotate_left(wr);
+            self.cap
         } else {
             wr
         }
@@ -1518,7 +1540,7 @@ impl Scope {
     /// Hardware-trigger acquisition in flight: arm after the pre-trigger part,
     /// then wait for TIM2 to gate TIM1 off (Done) or for the Auto timeout.
     fn hw_poll(&mut self, now: u64) -> Option<Frame<'static>> {
-        let wr = CAP - (unsafe { r32(S4 + 0x04) } as usize).min(CAP);
+        let wr = self.cap - (unsafe { r32(S4 + 0x04) } as usize).min(self.cap);
         // HISR TCIF4: the ring has wrapped at least once.
         let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
         let st = self.hw.status();
@@ -1552,7 +1574,7 @@ impl Scope {
                 }
                 self.halt();
                 // Re-read after the stop: the DMA was still running above.
-                let wr = CAP - (unsafe { r32(S4 + 0x04) } as usize).min(CAP);
+                let wr = self.cap - (unsafe { r32(S4 + 0x04) } as usize).min(self.cap);
                 let wrapped = unsafe { r32(DMA1 + 0x04) } & (1 << 5) != 0;
                 let len = self.hw_linearise(wr, wrapped);
                 if len < self.screen {
@@ -1560,7 +1582,7 @@ impl Scope {
                     return None;
                 }
                 self.snapshot_mark(len, len - self.screen / 2, None, false);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
+                let data: &[u16] = ring(len);
                 let found = if len - post > pre { self.find_trigger(&data[pre..len - post]).map(|i| i + pre) } else { None };
                 if found.is_some() {
                     self.hw.note_miss();
@@ -1581,7 +1603,7 @@ impl Scope {
                 if found.is_some() && self.s.mode == TrigMode::Single {
                     self.s.run = false;
                 }
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+                let data: &'static [u16] = &ring(start + self.screen)[start..];
                 self.seq = self.seq.wrapping_add(1);
                 Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
             }
@@ -1601,7 +1623,7 @@ impl Scope {
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
                 self.snapshot_mark(len, th, None, false);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
+                let data: &[u16] = ring(len);
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
                 // period early (device: delta -250 samples at 100 ms/div).
@@ -1630,7 +1652,7 @@ impl Scope {
                     self.s.run = false;
                 }
                 let start = t - pre;
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+                let data: &'static [u16] = &ring(start + self.screen)[start..];
                 self.seq = self.seq.wrapping_add(1);
                 Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
             }
@@ -1698,7 +1720,7 @@ impl Scope {
         if !self.stored_valid || self.stored_len < 2 {
             return &[];
         }
-        unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
+        ring(self.stored_len)
     }
 
     /// Stopped: centre the stored record on its trigger point (UF-09
@@ -1879,7 +1901,7 @@ impl Scope {
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
+        let data: &'static [u16] = ring(self.rec);
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
@@ -1887,8 +1909,8 @@ impl Scope {
     /// Absolute number of samples written since start() into the circular
     /// record (as roll_poll: the ring position advanced since the last call).
     fn stream_wr(&mut self) -> u64 {
-        let wr = (CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1)) % CAP;
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        let wr = (self.cap - unsafe { r32(S4 + 0x04) } as usize % (self.cap + 1)) % self.cap;
+        let d = (wr + self.cap - self.roll_last_wr) % self.cap;
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         self.roll_written
@@ -1906,23 +1928,23 @@ impl Scope {
         // A gap between two polls longer than the ring: the modulo count in
         // stream_wr cannot see it, and the samples are gone anyway. Restart
         // the search at the write position.
-        let lost = now.saturating_sub(self.st_poll) * fs / 1000 + 64 >= CAP as u64;
+        let lost = now.saturating_sub(self.st_poll) * fs / 1000 + 64 >= self.cap as u64;
         self.st_poll = now;
         let wr = self.stream_wr();
         if lost {
             self.st_found = None;
             self.st_armed = false;
             self.st_scan = wr;
-            self.st_idx = (wr % CAP as u64) as usize;
+            self.st_idx = (wr % self.cap as u64) as usize;
         }
         let (pre, post) = self.hw_split();
         if self.st_found.is_none() {
             // Oldest crossing whose pre-trigger part survives until the stop
             // (64 samples of margin for the stop itself).
-            let floor = (wr + pre as u64 + 64).saturating_sub(CAP as u64).max(pre as u64);
+            let floor = (wr + pre as u64 + 64).saturating_sub(self.cap as u64).max(pre as u64);
             if self.st_scan < floor {
                 self.st_scan = floor;
-                self.st_idx = (floor % CAP as u64) as usize;
+                self.st_idx = (floor % self.cap as u64) as usize;
                 self.st_armed = false;
             }
             if self.gen_src() {
@@ -1938,7 +1960,7 @@ impl Scope {
             }
             let l = self.trig_code();
             let rising = self.s.rising;
-            let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+            let buf = ring(self.cap);
             let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, if self.gen_src() { wr } else { self.st_scan });
             while n < wr {
                 let v = (buf[i] & 0x3FF) as i32;
@@ -1960,7 +1982,7 @@ impl Scope {
                 }
                 n += 1;
                 i += 1;
-                if i == CAP {
+                if i == self.cap {
                     i = 0;
                 }
                 if hit {
@@ -1998,13 +2020,13 @@ impl Scope {
     fn stream_emit(&mut self, t: Option<u64>) -> Option<Frame<'static>> {
         self.halt();
         let wr = self.stream_wr();
-        let len = wr.min(CAP as u64) as usize;
+        let len = wr.min(self.cap as u64) as usize;
         if len < self.screen {
             self.stored_valid = false;
             return None;
         }
-        if wr > CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+        if wr > self.cap as u64 {
+            ring_mut(self.cap).rotate_left((wr % self.cap as u64) as usize);
         }
         let base = wr - len as u64;
         self.rec_base = base;
@@ -2024,7 +2046,7 @@ impl Scope {
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        let data: &'static [u16] = &ring(start + self.screen)[start..];
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data, cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
@@ -2035,13 +2057,13 @@ impl Scope {
             return None;
         }
         self.roll_next = now + 100;
-        let wr = CAP - unsafe { r32(S4 + 0x04) } as usize % (CAP + 1);
-        let wr = wr % CAP;
-        let d = (wr + CAP - self.roll_last_wr) % CAP;
+        let wr = self.cap - unsafe { r32(S4 + 0x04) } as usize % (self.cap + 1);
+        let wr = wr % self.cap;
+        let d = (wr + self.cap - self.roll_last_wr) % self.cap;
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         let per = (self.screen / COLS).max(1);
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let buf = ring(self.cap);
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for i in 0..COLS {
             // Column i ends (COLS - 1 - i) columns before the write position.
@@ -2050,10 +2072,10 @@ impl Scope {
                 cols[i] = (u16::MAX, u16::MAX);
                 continue;
             }
-            let start = (wr + CAP - back) % CAP;
+            let start = (wr + self.cap - back) % self.cap;
             let (mut lo, mut hi) = (u16::MAX, 0u16);
             for k in 0..per {
-                let v = buf[(start + k) % CAP] & 0x3FF;
+                let v = buf[(start + k) % self.cap] & 0x3FF;
                 lo = lo.min(v);
                 hi = hi.max(v);
             }
@@ -2092,7 +2114,7 @@ impl Scope {
             } else {
                 self.stored_anchor.saturating_sub(want / 2).min(len - want)
             };
-            let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + want] };
+            let data: &'static [u16] = &ring(start + want)[start..];
             let trig = self.stored_trig.and_then(|t| t.checked_sub(start).filter(|_| t < start + want));
             return Some(Frame { data, cols: None, trig, fs: self.stored_fs, seq: self.seq });
         }
@@ -2103,7 +2125,7 @@ impl Scope {
         // spans >= 40 K samples (> the whole record), so rounding is invisible.
         let step = want as f32 / COLS as f32;
         let w0 = if self.stored_roll { len as f32 - want as f32 } else { self.stored_anchor as f32 - (want / 2) as f32 };
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let buf = ring(len);
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for (i, c) in cols.iter_mut().enumerate() {
             let af = w0 + i as f32 * step;
@@ -2164,6 +2186,129 @@ impl Scope {
     }
 }
 
+// ------------------------------------------------------- record tail
+//
+// docs/ram-pools-audit.md candidate B: pool TAIL (pool.rs) follows BUF in
+// one static, its segments the CH2 store, the logger ring's slots and the
+// CSV row FIFO. An MCX acquisition takes the free prefix at its start
+// (`grab_tail`; its ring is CAP + that, `cap`); a lender starting gives
+// it back first (`yield_tail`, main.rs / app.rs `App::tail_lend`): a
+// running acquisition stops and restarts shorter at the next poll, a
+// stopped record is cut to what is left. The wave view and the inrush
+// page run on BUF alone (their stream holds the ring's slots anyway).
+
+/// The scope's tail segments as TAIL tenants (any bytes are valid codes).
+macro_rules! seg {
+    ($name:ident, $t:ident) => {
+        pub struct $name(#[allow(dead_code)] [u16; crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::$t).len / 2]);
+        // SAFETY: plain u16s; size and alignment asserted below.
+        unsafe impl crate::pool::Tenancy for $name {
+            const T: crate::pool::Tenant = crate::pool::Tenant::$t;
+            const OFF: usize = crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::$t).off;
+            fn init(_: *mut Self) {}
+        }
+        const _: () = assert!(crate::pool::fits::<$name>(crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::$t).len));
+    };
+}
+seg!(Seg1, ScopeT1);
+seg!(Seg2, ScopeT2);
+seg!(Seg3, ScopeT3);
+
+const SEG_T: [crate::pool::Tenant; 3] = [crate::pool::Tenant::ScopeT1, crate::pool::Tenant::ScopeT2, crate::pool::Tenant::ScopeT3];
+
+use crate::pool::{cut_from, tail_keep};
+
+impl Scope {
+    /// Take the free tail segments after BUF in order, up to the first a
+    /// lender holds (TAIL refuses it then); not the CH2 store while CH2 is
+    /// on (its stream is about to take it). Sets `cap`.
+    #[inline(never)]
+    fn grab_tail(&mut self) {
+        use crate::pool::TAIL;
+        let mut k = 0;
+        if !self.ch2_on {
+            k = if TAIL.take::<Seg1>().is_none() {
+                0
+            } else if TAIL.take::<Seg2>().is_none() {
+                1
+            } else if TAIL.take::<Seg3>().is_none() {
+                2
+            } else {
+                3
+            };
+        }
+        for &t in &SEG_T[k..] {
+            TAIL.give(t);
+        }
+        self.cap = tail_keep(k);
+    }
+
+    /// Every tail segment back (no acquisition, no stored record left
+    /// in it: the wave view, the inrush page).
+    fn drop_tail(&mut self) {
+        for &t in &SEG_T {
+            crate::pool::TAIL.give(t);
+        }
+        self.cap = CAP;
+    }
+
+    /// A lender of tail segment `k` (0 the CH2 store, 1 the ring's slots,
+    /// 2 the row FIFO) is starting: give segments k.. back, strictly
+    /// before it touches them. A running acquisition that uses them stops
+    /// (the next poll restarts it shorter), a stopped record is cut to
+    /// the rest (`cut_from`). False while a stored record that reaches
+    /// into them is being read (WAV:DATA?, a scope CSV save: `held`): the
+    /// lender waits for the end of the transfer (owner, ram-pools-audit.md
+    /// Q2). In .cold (link-native.x): once per lender start, before its
+    /// stream ISR runs.
+    #[inline(never)]
+    pub fn yield_tail(&mut self, k: usize) -> bool {
+        let keep = tail_keep(k);
+        if !SEG_T[k..].iter().any(|&t| crate::pool::TAIL.holds(t)) {
+            return true;
+        }
+        if self.tail_busy(k) {
+            return false;
+        }
+        if self.busy && !self.wave && !self.lent && self.cap > keep {
+            self.halt();
+        }
+        if self.stored_valid && self.stored_len > keep {
+            self.cut(keep);
+        }
+        for &t in &SEG_T[k..] {
+            crate::pool::TAIL.give(t);
+        }
+        self.cap = self.cap.min(keep);
+        true
+    }
+
+    /// `yield_tail(k)` would wait: a stored record that reaches into
+    /// segment `k` is being read.
+    pub fn tail_busy(&self, k: usize) -> bool {
+        self.held() && self.stored_valid && self.stored_len > tail_keep(k)
+    }
+
+    /// Cut the stored record to `keep` samples around what is shown: its
+    /// window moves to BUF[0], the anchor / trigger / time-zero follow.
+    #[inline(never)] // .cold (link-native.x), as yield_tail
+    fn cut(&mut self, keep: usize) {
+        let len = self.stored_len;
+        let from = cut_from(len, keep, self.stored_anchor);
+        if from > 0 {
+            ring_mut(len).copy_within(from..from + keep, 0);
+            if let Some(g) = self.stored_gen.as_mut() {
+                g.t0 = crate::gen::wrap(g.t0 + from as f64 * g.s, g.q);
+            }
+            self.stored_t0 = self.stored_t0.map(|t| t.wrapping_add((from as f64 * self.t_step as f64) as u64 as u32));
+        }
+        self.stored_len = keep;
+        self.stored_anchor = self.stored_anchor.saturating_sub(from).min(keep - 1);
+        self.stored_trig = self.stored_trig.and_then(|t| t.checked_sub(from)).filter(|&t| t < keep);
+        self.zoom_pending = true;
+    }
+}
+
 // ------------------------------------------------------- source DMM (wave)
 //
 // The wave view (docs/dmm-input-scope-feasibility.md 5.2, TODO (A)): the
@@ -2186,6 +2331,7 @@ impl Scope {
             return;
         }
         self.halt();
+        self.drop_tail();
         self.levels_reset(); // the wave view's own rows, at its scale
         let ws = wv().s;
         *wv() = Wave::NEW;
@@ -2227,6 +2373,7 @@ impl Scope {
     pub fn lend_buf(&mut self) {
         self.halt();
         self.stored_valid = false;
+        self.drop_tail();
         self.lent = true;
     }
 
@@ -2235,7 +2382,7 @@ impl Scope {
     pub fn lent_buf(&self) -> Option<&'static mut [u16]> {
         // SAFETY: main loop only; while lent nothing else in scope.rs
         // touches BUF (poll_frame returns at once, no DMA runs).
-        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..INRUSH_LEN] })
+        self.lent.then(|| ring_mut(INRUSH_LEN))
     }
 
     /// BUF back to the scope: the next poll starts an acquisition.
@@ -2388,7 +2535,7 @@ impl Scope {
 
     /// Ring -> BUF (and the roll columns).
     fn wave_drain(&mut self, src: &mut dyn WaveSource) {
-        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        let buf = ring_mut(CAP);
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         let w = wv();
         let (slot0, mut tot) = (w.slot0, w.tot);
@@ -2422,7 +2569,7 @@ impl Scope {
         let oldest = self.wave_oldest();
         let r = (oldest.wrapping_sub(wv().slot0) % CAP as u64) as usize;
         if r != 0 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(r) };
+            ring_mut(CAP).rotate_left(r);
         }
         wv().slot0 = oldest;
         (wv().tot - oldest) as usize
@@ -2454,7 +2601,7 @@ impl Scope {
                 wv().stale = true;
             }
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        let data: &'static [u16] = &ring(start + self.screen)[start..];
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data, cols: None, trig, fs: wave_real_fs(wv().fs), seq: self.seq })
     }
@@ -2586,7 +2733,7 @@ pub fn debug() -> [u32; 4] {
         [
             core::ptr::read_volatile(core::ptr::addr_of!(LATCH[0])),
             r32(S4 + 0x04),
-            core::ptr::read_volatile(core::ptr::addr_of!(BUF[0])) as u32,
+            core::ptr::read_volatile(crate::pool::rec_base()) as u32,
             r32(GPIOB_IDR),
         ]
     }

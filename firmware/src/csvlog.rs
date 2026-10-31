@@ -156,8 +156,34 @@ const _: () = assert!(FIFO.is_power_of_two());
 /// Clusters a single commit may add (FIFO / block + the block in TAIL).
 const MAXNEW: usize = FIFO / BLK + 2;
 
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut FIFO_BUF: [u8; FIFO] = [0; FIFO];
+/// The FIFO's bytes: pool TAIL segment `RowFifo` (the scope record's tail
+/// while no recording / fast-log session holds it; pool.rs).
+pub struct Fifo(#[allow(dead_code)] [u8; FIFO]);
+
+// SAFETY: bytes; size and alignment asserted below.
+unsafe impl crate::pool::Tenancy for Fifo {
+    const T: crate::pool::Tenant = crate::pool::Tenant::RowFifo;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::RowFifo).off;
+    fn init(_: *mut Self) {}
+}
+const _: () = assert!(core::mem::size_of::<Fifo>() == crate::pool::SEG_FIFO);
+
+/// The MMEM:CAT? cache's bytes (`Cat`): the FIFO's head, TAIL `CatCache`.
+pub struct CatBuf(#[allow(dead_code)] [u8; CAT_MAX]);
+
+// SAFETY: bytes; size asserted below.
+unsafe impl crate::pool::Tenancy for CatBuf {
+    const T: crate::pool::Tenant = crate::pool::Tenant::CatCache;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::CatCache).off;
+    fn init(_: *mut Self) {}
+}
+const _: () = assert!(core::mem::size_of::<CatBuf>() == crate::pool::CAT_BYTES);
+
+#[inline(always)]
+fn fifo_ptr() -> *mut u8 {
+    // SAFETY: inside REC's tail (pool-test).
+    unsafe { (crate::pool::REC.tail.0.get() as *mut u8).add(<Fifo as crate::pool::Tenancy>::OFF) }
+}
 crate::wordram::usbhs_static! {
     /// The block being filled. In the USBHS FIFO RAM, which takes whole
     /// words only (wordram.rs; CPU only: the SPI flash takes it by CPU
@@ -167,10 +193,35 @@ crate::wordram::usbhs_static! {
 }
 
 /// The row FIFO of a recording. Its third tenant, the MMEM:CAT? cache
-/// (`Cat`), is dropped here: a recording's bytes overwrite it.
+/// (`Cat`), is dropped here: a recording's bytes overwrite it. Held
+/// (TAIL `RowFifo`) from `start` / `fastlog::begin` (`fifo_take`) until
+/// the FIFO is idle again (`fifo_release`), so the scope's tail is not
+/// there.
 fn fifo() -> &'static mut [u8; FIFO] {
     cat().ok = false;
-    unsafe { &mut *core::ptr::addr_of_mut!(FIFO_BUF) }
+    debug_assert!(crate::pool::TAIL.holds(crate::pool::Tenant::RowFifo));
+    // SAFETY: main loop only; held (above), so no other tenant's bytes.
+    unsafe { &mut *(fifo_ptr() as *mut [u8; FIFO]) }
+}
+
+/// Take the FIFO for a recording / a fast-log session (the scope gave
+/// its record tail back first: `App::tail_lend`). False: the scope still
+/// holds it.
+pub(crate) fn fifo_take() -> bool {
+    let ok = crate::pool::TAIL.take::<Fifo>().is_some();
+    if ok {
+        cat().ok = false;
+    }
+    ok
+}
+
+/// The FIFO back to the pool once neither a recording nor a fast-log
+/// session has bytes in it (main.rs, every pass: the scope's tail may
+/// take it at its next start).
+pub fn fifo_release() {
+    if fifo_idle() {
+        crate::pool::TAIL.give(crate::pool::Tenant::RowFifo);
+    }
 }
 
 /// The row FIFO lent to the fast logger (fastlog.rs: its coded bytes on
@@ -185,7 +236,7 @@ pub(crate) fn lend_fifo() -> &'static mut [u8; FIFO] {
 
 /// The FIFO holds no bytes of a recording or a fast-log session: the
 /// MMEM:CAT? cache may be written into it (`Cat`).
-fn fifo_idle() -> bool {
+pub(crate) fn fifo_idle() -> bool {
     !active() && !crate::fastlog::active()
 }
 
@@ -454,7 +505,7 @@ fn set_flags(session: bool, flushing: bool) {
 pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     let j = job();
     // The fast logger holds the disk and this FIFO (fastlog.rs).
-    if active() || crate::fastlog::holds_disk() {
+    if active() || crate::fastlog::holds_disk() || !fifo_take() {
         return false;
     }
     *j = JOB0;
@@ -1466,8 +1517,9 @@ pub fn catalog_scpi_on(disk: &mut dyn BlockDevice, out: &mut [u8]) -> Result<usi
 /// pauses the Wave view's stream and the restart warms it again).
 ///
 /// The reply itself is kept in the first CAT_MAX bytes of the row FIFO
-/// (`FIFO_BUF`; docs/native-boot.md "SRAM audit"), written only while
-/// `fifo_idle`. `fifo` / `lend_fifo` clear `ok` before a recording or a
+/// (TAIL `CatCache`; docs/native-boot.md "SRAM audit"), written only while
+/// `fifo_idle` and the pool gives the bytes (not while the scope's record
+/// tail holds them); read only while still held. `fifo` / `lend_fifo` clear `ok` before a recording or a
 /// fast-log session writes there. A fast-log session holds the disk
 /// (`gallery_free`: MMEM:CAT? is Busy); during a recording every query
 /// reads the disk, but no stream the cache is for runs then: the Wave view
@@ -1490,11 +1542,17 @@ fn cat() -> &'static mut Cat {
     unsafe { &mut *core::ptr::addr_of_mut!(CAT) }
 }
 
-/// The cached reply's bytes (the FIFO's head; see `Cat`). Read only while
-/// `cat().ok`, written only while `fifo_idle()`.
+/// The cached reply's bytes (the FIFO's head; see `Cat`) while TAIL gives
+/// them (`take`: None while the FIFO or the scope's tail holds them).
 #[inline(always)]
-fn cat_buf() -> &'static mut [u8] {
-    unsafe { &mut (&mut *core::ptr::addr_of_mut!(FIFO_BUF))[..CAT_MAX] }
+fn cat_buf() -> Option<&'static mut [u8]> {
+    crate::pool::TAIL.take::<CatBuf>().map(|b| &mut b.0[..])
+}
+
+/// The cache is valid and its bytes still its own.
+#[inline(always)]
+fn cat_valid(c: &Cat, w: u32) -> bool {
+    c.ok && c.stamp == w && crate::pool::TAIL.holds(crate::pool::Tenant::CatCache)
 }
 
 fn flash_writes() -> u32 {
@@ -1512,14 +1570,18 @@ pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
     }
     let c = cat();
     let w = flash_writes();
-    if c.ok && c.stamp == w && c.len <= out.len() {
-        out[..c.len].copy_from_slice(&cat_buf()[..c.len]);
-        return Ok(c.len);
+    if cat_valid(c, w) && c.len <= out.len() {
+        if let Some(b) = cat_buf() {
+            out[..c.len].copy_from_slice(&b[..c.len]);
+            return Ok(c.len);
+        }
     }
     let n = catalog_scpi_on(disk(), out)?;
     if n <= CAT_MAX && flash_writes() == w && fifo_idle() {
-        cat_buf()[..n].copy_from_slice(&out[..n]);
-        (c.ok, c.stamp, c.len) = (true, w, n);
+        if let Some(b) = cat_buf() {
+            b[..n].copy_from_slice(&out[..n]);
+            (c.ok, c.stamp, c.len) = (true, w, n);
+        }
     }
     Ok(n)
 }
@@ -1531,11 +1593,12 @@ pub fn catalog_scpi(out: &mut [u8]) -> Result<usize, GErr> {
 pub fn catalog_warm() {
     let c = cat();
     let w = flash_writes();
-    if (c.ok && c.stamp == w) || !gallery_free() || !fifo_idle() {
+    if cat_valid(c, w) || !gallery_free() || !fifo_idle() {
         return;
     }
     c.ok = false;
-    if let Ok(n) = catalog_scpi_on(disk(), cat_buf()) {
+    let Some(b) = cat_buf() else { return };
+    if let Ok(n) = catalog_scpi_on(disk(), b) {
         if flash_writes() == w {
             (c.ok, c.stamp, c.len) = (true, w, n);
         }

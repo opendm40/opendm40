@@ -236,6 +236,9 @@ mod lcd {
     }
 }
 
+#[allow(dead_code)]
+#[path = "../../src/pool.rs"]
+mod pool;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/screenshot.rs"]

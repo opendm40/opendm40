@@ -375,6 +375,11 @@ SECTIONS
         *(.text.*8opendm40*8src_text*);
         *(.text.*6acdctr*5Trace4text*);
         *(.text.*8opendm405scope*5Scope12hw_calibrate*);
+        /* The scope record tail's hand-over (scope.rs yield_tail / cut):
+         * once per lender start (CH2, LOG:STATe ON, the wave view, inrush,
+         * a recording, a fast-log session), before its stream starts. */
+        *(.text.*8opendm405scope*5Scope10yield_tail*);
+        *(.text.*8opendm405scope*5Scope3cut*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
         *(.text.*8opendm405touch*5Touch3new*);
         *(.text.*8opendm402bt*2Bt3new*);

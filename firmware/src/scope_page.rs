@@ -3010,7 +3010,7 @@ fn tb_for(period: f32) -> usize {
     scope::SDIV.iter().position(|&d| period / 4.0 < d).unwrap_or(scope::TB_MAX).clamp(scope::TB_MIN, scope::TB_YT_MAX)
 }
 
-const _: () = assert!(scope::CAP <= crate::scope_csv::REC_MAX, "scope CSV sized for the record");
+const _: () = assert!(crate::pool::REC_MAX <= crate::scope_csv::REC_MAX, "scope CSV sized for the longest record (CAP + the tail)");
 
 /// The pinch value bubble: centred in the graph.
 const BUBBLE: Rect = rect(153, 140, 120, 40);

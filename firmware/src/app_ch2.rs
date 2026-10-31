@@ -112,6 +112,11 @@ impl App {
         }
         let sc = WaveScale::of(a.per_code, a.offset, self.ch2.vdiv, a.amps, a.ac);
         let real = (real_mhz / 1000).max(1);
+        // The samples' bytes (pool TAIL): main.rs had the scope give its
+        // record tail back (`tail_lend`) before the stream started.
+        if crate::pool::TAIL.take::<scope_ch2::Data>().is_none() {
+            return;
+        }
         scope_ch2::store().reset(c0, real, sc, crate::logger::wave::dropped());
         self.ch2.live = true;
         self.ch2.frozen = false;
@@ -120,6 +125,14 @@ impl App {
 
     fn scope_ch2_amps(&self) -> bool {
         scope_ch2::store().scale().amps
+    }
+
+    /// The CH2 store's samples are needed: the stream runs, or a stopped
+    /// record's CH2 is kept with CH2 on (also after leaving the view:
+    /// owner, ram-pools-audit.md Q4). Else main.rs gives them back to the
+    /// scope's record tail (`tail_reclaim`).
+    pub fn ch2_holds(&self) -> bool {
+        self.ch2.live || (self.ch2.on && !self.scope.s.run)
     }
 
     /// main.rs: CH2's stream stopped (CH2 off, the view left) or lost (a
@@ -222,7 +235,7 @@ impl App {
     /// before the store) stay empty.
     pub(super) fn ch2_rows(&self, f: &scope::Frame, out: &mut [(i16, i16); 400]) {
         *out = [crate::scope_ui::EMPTY; 400];
-        if !self.ch2.on || self.ch2.vdiv <= 0.0 || self.scope.wave_on() {
+        if !self.ch2.on || self.ch2.vdiv <= 0.0 || self.scope.wave_on() || !crate::pool::TAIL.holds(crate::pool::Tenant::Ch2Store) {
             return;
         }
         let st = scope_ch2::store();

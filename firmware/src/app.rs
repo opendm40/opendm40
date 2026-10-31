@@ -37,6 +37,9 @@ mod app_press;
 /// The DMM as CH2 of the MCX scope page (the AD2 stream alongside).
 #[path = "app_ch2.rs"]
 mod app_ch2;
+/// The scope record's tail: its lenders' hand-over (pool TAIL).
+#[path = "app_tail.rs"]
+pub mod app_tail;
 /// Inrush current: open / arm / close / results / save (region C) and the
 /// part that runs while the AD2 stream does (region B).
 #[path = "app_inrush.rs"]
@@ -3401,6 +3404,11 @@ impl App {
         let Some(r) = self.meter.live().copied() else { return false };
         let func = crate::meter::func_of(&r);
         let range = if r.auto { "AUTO" } else { "MANUAL" };
+        // The row FIFO: the scope's record tail gives it back first (refused
+        // while a long stored record is being read).
+        if crate::csvlog::active() || !self.tail_lend(app_tail::SEG_FIFO) {
+            return false;
+        }
         if !crate::csvlog::start(crate::csvlog::func_label(func), crate::meter::base_unit(r.main.unit), range, now) {
             return false;
         }

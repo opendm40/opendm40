@@ -131,10 +131,11 @@ try:
         """DBG:POOL? -> {tenant: (held, gen)}."""
         r = q('DBG:POOL?')
         out = {}
-        for part in r.split(';')[1:]:
-            name, rest = part.split(':', 1)
-            f = rest.split(',')
-            out[name] = (f[2] == 'held', int(f[3]))
+        for pl in r.split('|'):  # PAGE|TAIL
+            for part in pl.split(';')[1:]:
+                name, rest = part.split(':', 1)
+                f = rest.split(',')
+                out[name] = (f[2] == 'held', int(f[3]))
         return out
 
     def same(a, b, what, tol=40):

@@ -24,6 +24,11 @@
 //!   is rebuilt on its next use (all `Drop`): the scope graph (scope_ui.rs
 //!   `GraphSet`: GRAPH, SHOWN, ROWS), the gallery (gallery.rs), the
 //!   generator preview's trace rows (ui.rs `GenSp`).
+//! - `TAIL` (SRAM, right after the scope record ring `REC.buf`): the
+//!   buffers that lend their bytes to the scope record while idle (the CH2
+//!   store, the logger ring's slots, the CSV row FIFO and its MMEM:CAT?
+//!   cache); the scope takes the free prefix as the record's tail
+//!   (`ScopeT1..3`, `Evict::Yield`: `Scope::yield_tail`).
 
 use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
@@ -34,9 +39,22 @@ pub enum Tenant {
     ScopeGraph = 0,
     Gallery = 1,
     GenPreview = 2,
+    /// TAIL: the stored CH2 samples (scope_ch2.rs `Data`).
+    Ch2Store = 3,
+    /// TAIL: the logger ring's slots (logger.rs `Slots`).
+    RingSlots = 4,
+    /// TAIL: the CSV recording's / a fast-log session's row FIFO (csvlog.rs).
+    RowFifo = 5,
+    /// TAIL: the MMEM:CAT? reply cache in the FIFO's head (csvlog.rs `Cat`).
+    CatCache = 6,
+    /// TAIL: the scope record's tail over the CH2 store / the ring's slots
+    /// / the FIFO (scope.rs `Seg`).
+    ScopeT1 = 7,
+    ScopeT2 = 8,
+    ScopeT3 = 9,
 }
 
-pub const TENANTS: usize = 3;
+pub const TENANTS: usize = 10;
 
 /// What happens to a holder when an overlapping tenant takes the bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -49,6 +67,12 @@ pub enum Evict {
     /// A job that starts over when its `gen` moved.
     #[allow(dead_code)]
     Restart,
+    /// Restartable, but it gives its bytes up itself (`give`) before an
+    /// overlapping tenant takes them: it has DMA to stop or data to move
+    /// first (the scope record's tail, `Scope::yield_tail`). The pool
+    /// refuses an overlapping `take` while it holds them, as for `Never`.
+    #[allow(dead_code)]
+    Yield,
 }
 
 /// A tenant's range in its pool.
@@ -142,7 +166,7 @@ impl Pool {
     }
 
     /// `take` for a pool whose tenants overlapping `T` are all `Drop` /
-    /// `Restart` (tools/pool-test checks PAGE), where it cannot fail; a raw
+    /// `Restart` (tools/pool-test checks PAGE; not TAIL), where it cannot fail; a raw
     /// pointer (no reference to the whole tenant is made), so that the
     /// callers project disjoint fields (`addr_of_mut!((*p).f)`) as they did
     /// from separate statics.
@@ -189,7 +213,7 @@ impl Pool {
         let mut lose = 0u32;
         for o in self.specs {
             if own & (1 << o.t as u32) != 0 && o.t != s.t && overlap(o, s) {
-                if o.evict == Evict::Never {
+                if matches!(o.evict, Evict::Never | Evict::Yield) {
                     return core::ptr::null_mut();
                 }
                 lose |= 1 << o.t as u32;
@@ -257,6 +281,7 @@ impl Pool {
                 Evict::Never => b",never",
                 Evict::Drop => b",drop",
                 Evict::Restart => b",restart",
+                Evict::Yield => b",yield",
             });
             put(if self.holds(s.t) { b",held," } else { b",free," });
             put(dec(&mut t, self.gen(s.t)));
@@ -291,7 +316,7 @@ pub const PAGE_BYTES: usize = 32 * 1024;
 
 /// One view at a time: every tenant starts at 0 and is rebuilt on its next
 /// use.
-pub const PAGE_SPECS: [Spec; TENANTS] = [
+pub const PAGE_SPECS: [Spec; 3] = [
     Spec { t: Tenant::ScopeGraph, name: "ScopeGraph", off: 0, len: PAGE_BYTES, evict: Evict::Drop },
     Spec { t: Tenant::Gallery, name: "Gallery", off: 0, len: 1024, evict: Evict::Drop },
     Spec { t: Tenant::GenPreview, name: "GenPreview", off: 0, len: 512, evict: Evict::Drop },
@@ -311,3 +336,125 @@ pub const PAGE_COEXIST: &[(Tenant, Tenant)] = &[];
 static PAGE_MEM: Mem<{ PAGE_BYTES.div_ceil(8) }> = Mem::new();
 
 pub static PAGE: Pool = Pool::new("PAGE", &PAGE_SPECS, PAGE_BYTES, PAGE_MEM.0.get() as *mut u8);
+
+// ------------------------------------------------------------------ TAIL
+
+/// The scope record ring's fixed part (samples; `scope::CAP`): 44 K, 1 K
+/// less per RAM-hungry debug feature (dbg-touch, acdc-trace).
+pub const REC_BASE: usize = (44 - cfg!(feature = "dbg-touch") as usize - cfg!(feature = "acdc-trace") as usize) * 1024;
+/// TAIL segments in address order (bytes): the CH2 store (scope_ch2.rs
+/// `Data`: 4096 codes + the anchors), the logger ring's slots (logger.rs
+/// `Slots`: 2048 x 8 B), the row FIFO (csvlog.rs, 8 KiB). The tenants'
+/// impls assert their sizes.
+pub const SEG_CH2: usize = 8736;
+pub const SEG_RING: usize = 16_384;
+pub const SEG_FIFO: usize = 8192;
+pub const SEGS: [usize; 3] = [SEG_CH2, SEG_RING, SEG_FIFO];
+pub const TAIL_BYTES: usize = SEG_CH2 + SEG_RING + SEG_FIFO;
+/// Longest record (samples): DMA1 S4's NDTR is 16 bit.
+pub const REC_MAX: usize = REC_BASE + TAIL_BYTES / 2;
+const _: () = assert!(REC_MAX <= 65_535 && SEG_CH2 % 8 == 0 && SEG_RING % 8 == 0 && SEG_FIFO % 8 == 0);
+/// Scope ring length (samples) with the tail up to, not including,
+/// segment `k` (0..=3): CAP, + the CH2 store, + the ring's slots, + the FIFO.
+pub const fn tail_keep(k: usize) -> usize {
+    let mut n = REC_BASE;
+    let mut j = 0;
+    while j < k && j < 3 {
+        n += SEGS[j] / 2;
+        j += 1;
+    }
+    n
+}
+
+/// A stored record of `len` samples cut to `keep` (scope.rs `cut`): the
+/// first sample kept, so the window around the screen centre `anchor`
+/// stays (a roll record's anchor is its newest sample: its newest `keep`).
+pub fn cut_from(len: usize, keep: usize, anchor: usize) -> usize {
+    if len <= keep { 0 } else { anchor.saturating_sub(keep / 2).min(len - keep) }
+}
+
+/// The MMEM:CAT? cache: the FIFO's head (csvlog.rs `CAT_MAX`).
+pub const CAT_BYTES: usize = 6144;
+
+/// The tail's tenants. Each lender holds its segment while it has data
+/// there (CH2 on or a stopped record's CH2; a stream or unread host
+/// records; a recording or a fast-log session); the scope takes the free
+/// prefix as `ScopeT1..3` (`Yield`: it stops its DMA / cuts its stored
+/// record before giving them, main.rs `App::tail_lend` before each
+/// lender's start). The cache is dropped by the FIFO's other tenants.
+pub const TAIL_SPECS: [Spec; 7] = [
+    Spec { t: Tenant::Ch2Store, name: "Ch2Store", off: 0, len: SEG_CH2, evict: Evict::Never },
+    Spec { t: Tenant::RingSlots, name: "RingSlots", off: SEG_CH2, len: SEG_RING, evict: Evict::Never },
+    Spec { t: Tenant::RowFifo, name: "RowFifo", off: SEG_CH2 + SEG_RING, len: SEG_FIFO, evict: Evict::Never },
+    Spec { t: Tenant::CatCache, name: "CatCache", off: SEG_CH2 + SEG_RING, len: CAT_BYTES, evict: Evict::Drop },
+    Spec { t: Tenant::ScopeT1, name: "ScopeT1", off: 0, len: SEG_CH2, evict: Evict::Yield },
+    Spec { t: Tenant::ScopeT2, name: "ScopeT2", off: SEG_CH2, len: SEG_RING, evict: Evict::Yield },
+    Spec { t: Tenant::ScopeT3, name: "ScopeT3", off: SEG_CH2 + SEG_RING, len: SEG_FIFO, evict: Evict::Yield },
+];
+
+/// Tenant pairs of TAIL the code lets be live at the same time: the
+/// lenders with each other (CH2 needs the store and the ring; a fast-log
+/// session the ring and the FIFO; the cache is warmed before a stream
+/// starts), and each scope segment with the lenders of the other
+/// segments.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const TAIL_COEXIST: &[(Tenant, Tenant)] = &[
+    (Tenant::Ch2Store, Tenant::RingSlots),
+    (Tenant::Ch2Store, Tenant::RowFifo),
+    (Tenant::Ch2Store, Tenant::CatCache),
+    (Tenant::RingSlots, Tenant::RowFifo),
+    (Tenant::RingSlots, Tenant::CatCache),
+    (Tenant::ScopeT1, Tenant::ScopeT2),
+    (Tenant::ScopeT1, Tenant::ScopeT3),
+    (Tenant::ScopeT2, Tenant::ScopeT3),
+    (Tenant::ScopeT1, Tenant::RingSlots),
+    (Tenant::ScopeT1, Tenant::RowFifo),
+    (Tenant::ScopeT1, Tenant::CatCache),
+    (Tenant::ScopeT2, Tenant::Ch2Store),
+    (Tenant::ScopeT2, Tenant::RowFifo),
+    (Tenant::ScopeT2, Tenant::CatCache),
+    (Tenant::ScopeT3, Tenant::Ch2Store),
+];
+
+/// Overlaps of TAIL in which a `take` can be refused (a `Never` / `Yield`
+/// side), each with the code that hands the bytes over: a lender's start
+/// calls `App::tail_lend` (the scope's `yield_tail`) first; the scope
+/// takes a segment only while its lender is idle (`App::tail_reclaim`
+/// gives an idle lender's segment back; `Scope::grab_tail` stops at the
+/// first refused one); the cache (`Drop`) is built only when the pool
+/// gives its bytes (csvlog.rs `cat_buf`: None = no cache).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const TAIL_HANDOFF: &[(Tenant, Tenant)] = &[
+    (Tenant::Ch2Store, Tenant::ScopeT1),
+    (Tenant::RingSlots, Tenant::ScopeT2),
+    (Tenant::RowFifo, Tenant::ScopeT3),
+    (Tenant::RowFifo, Tenant::CatCache),
+    (Tenant::ScopeT3, Tenant::CatCache),
+];
+
+/// The scope record ring (`buf`, the DMA's) and right after it the tail's
+/// bytes: one `repr(C)` static, so the ring may run on into the tail.
+#[repr(C, align(8))]
+pub struct RecMem {
+    pub buf: core::cell::UnsafeCell<[u16; REC_BASE]>,
+    pub tail: Mem<{ TAIL_BYTES / 8 }>,
+}
+
+// SAFETY: main loop only (module doc); the DMA writes `buf` and the tail
+// segments the scope holds, the stream ISR the ring's slots while the
+// logger holds them.
+unsafe impl Sync for RecMem {}
+
+const _: () = assert!(core::mem::size_of::<RecMem>() == REC_MAX * 2 && REC_BASE * 2 % 8 == 0);
+
+/// SRAM .dmabuf (NOLOAD): every tenant sets its bytes up (`Tenancy::init`).
+#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
+pub static REC: RecMem = RecMem { buf: core::cell::UnsafeCell::new([0; REC_BASE]), tail: Mem::new() };
+
+/// The record ring's first sample (`REC_MAX` samples run on from it).
+#[inline(always)]
+pub fn rec_base() -> *mut u16 {
+    REC.buf.get() as *mut u16
+}
+
+pub static TAIL: Pool = Pool::new("TAIL", &TAIL_SPECS, TAIL_BYTES, REC.tail.0.get() as *mut u8);

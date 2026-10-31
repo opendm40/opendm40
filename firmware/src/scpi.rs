@@ -662,7 +662,7 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///                           (feature dbg-prof, else undefined header)
 ///   DBG:POOL?               the RAM pools' tenants: holder, rule, losses
-///                           (src/pool.rs `Pool::text`; feature dbg-pool, else
+///                           (src/pool.rs `Pool::text`, PAGE then "|" TAIL; feature dbg-pool, else
 ///                           undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
