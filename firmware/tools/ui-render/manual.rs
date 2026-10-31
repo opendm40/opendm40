@@ -342,6 +342,7 @@ pub fn run(out: &str) -> usize {
         // Capacitance: the discharge before 600 uF and up, and its warning
         // (the second only for the layout check).
         ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         // Continuity: a short, the beeper indicator on.
         ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),

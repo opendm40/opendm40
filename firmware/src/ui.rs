@@ -1184,24 +1184,30 @@ const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
 /// The capacitance discharge line: the aux1 slot, to the aux2 tag (231).
 const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
 
-/// Capacitance, before a ramp range: "Discharging 0.42 V" (DIM), or
-/// "Charged cap: discharge first" (VALUE, orange) when the discharge takes
-/// long (`warn`). `full`: clear the box first (the other line was there).
+/// Capacitance, before a ramp range: "Discharging... 0.42 V", or
+/// "Discharging... >1.2 V" while the node sits at the AD1 clamp (`clamp`;
+/// owner 2026-10-31: the orange "Charged cap: discharge first" read as an
+/// order to the user). DIM. `full`: the whole line (the other line was
+/// there), else only the value part.
 #[inline(never)] // .cold (link-native.x): during a discharge only
-pub fn cap_discharge_label(v: f32, warn: bool, full: bool) {
+pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
+    const PRE: &str = "Discharging...";
     let b = CAP_DIS_RECT;
+    // (The value from a word space after the prefix.)
+    let w = sf::text_width(sf::F14, PRE, 1) + 6;
     if full {
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
-    }
-    if warn {
-        sf::label(sf::F14, b, "Charged cap: discharge first", VALUE, BG, 1, 1);
-        return;
+        sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
     }
     let mut t = [0u8; 16];
-    let mut s = crate::scope_ui::Txt::new("Discharging ");
-    s.push(crate::dmm::format(&mut t, v, 2));
+    let mut s = crate::scope_ui::Txt::new("");
+    if clamp {
+        s.push(">1.2");
+    } else {
+        s.push(crate::dmm::format(&mut t, v, 2));
+    }
     s.push(" V");
-    sf::label(sf::F14, b, s.as_str(), DIM, BG, 1, 1);
+    sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
@@ -1453,7 +1459,7 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         // ranges in uF as the readout (cap_val).
         Button::Cap => &[
             ("60nF", Some(1)), ("600nF", Some(2)), ("6uF", Some(3)), ("60uF", Some(4)),
-            ("600uF", Some(5)), ("6000uF", Some(6)), ("60000uF", Some(7)), ("AUTO", None),
+            ("600uF", Some(5)), ("6000uF", Some(6)), ("60 000uF", Some(7)), ("AUTO", None),
         ],
         _ => &[("AUTO", None)],
     }

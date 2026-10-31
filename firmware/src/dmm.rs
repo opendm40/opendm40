@@ -405,8 +405,6 @@ const CAP_DIS_LO_MV: f32 = 60.0;
 /// The discharge's aux units (ui.rs draws them as a line, not a value).
 pub const CAP_DIS_UNIT: &str = "Vdis";
 pub const CAP_CHG_UNIT: &str = "Vchg";
-/// A discharge longer than this: a charged capacitor (the warning).
-const CAP_CHARGED_MS: u64 = 5000;
 /// Ramp ranges: polls of one ramp direction that make a result.
 const CAP_LONG_N: usize = 16;
 /// 6 / 60 mF: a ramp result this far (share) from the shown value starts
@@ -4205,11 +4203,18 @@ impl Dmm {
                     self.set(clk, 10, OHM_AUTO_TOP, 150);
                 }
             }
-            (Button::Cap, None) => self.manual = false,
+            (Button::Cap, None) => {
+                self.manual = false;
+                self.cap_disp = None;
+            }
             (Button::Cap, Some(i)) if i <= 7 => {
                 let i = (i as i8).max(CAP_R_MIN);
                 self.manual = true;
-                if self.mode == 13 && self.range != i {
+                // A manual range measured on a lower row (`cap_disp`): the
+                // new choice is the range shown (owner 2026-10-31: the MF
+                // page kept "6000uF" highlighted after another choice).
+                let sub = self.cap_disp.take().is_some();
+                if self.mode == 13 && (self.range != i || sub) {
                     self.cap_set_range(clk, i);
                 }
             }
@@ -4752,7 +4757,9 @@ impl Dmm {
     fn reading(&self, main: Val, si: f32) -> Reading {
         Reading {
             mode: self.mode,
-            range: self.range,
+            // (A manual capacitance range measured on a lower row: the
+            // range chosen, for the status bar and the MF page.)
+            range: self.cap_disp.unwrap_or(self.range),
             main,
             aux1: None,
             aux2: None,
@@ -6402,8 +6409,7 @@ impl Dmm {
     }
 
     /// The discharge before a ramp range: dashes, and the node voltage in
-    /// the aux row (`CAP_DIS_UNIT`; `CAP_CHG_UNIT` once it takes longer than
-    /// CAP_CHARGED_MS: a charged capacitor). The node's scale is the ramp
+    /// the aux row (`CAP_DIS_UNIT`; `CAP_CHG_UNIT` at the AD1 clamp). The node's scale is the ramp
     /// row's (INFERRED: the discharge row's AD1 input is not traced).
     fn cap_discharge_val(&self, v_mv: f32, now: u64) -> Reading {
         let mut rd = if self.cap_dis_fin {
@@ -6413,10 +6419,10 @@ impl Dmm {
             rd.prov = true;
             rd
         };
-        // Charged: at the AD1 clamp (the node above ~1.2 V, device
-        // 1bc12c03: 4.7 s from 3 V), or a discharge longer than
-        // CAP_CHARGED_MS.
-        let chg = v_mv.abs() >= CAP_DIS_HI_MV || now.saturating_sub(self.cap_dis_t) > CAP_CHARGED_MS;
+        // At the AD1 clamp (the node above ~1.2 V, device 1bc12c03: 4.7 s
+        // from 3 V): ">1.2 V" (`ui::cap_discharge_label`).
+        let _ = now;
+        let chg = v_mv.abs() >= CAP_DIS_HI_MV;
         let unit = if chg { CAP_CHG_UNIT } else { CAP_DIS_UNIT };
         rd.aux2 = Some(Val::new(v_mv * 1e-3, 2, unit));
         rd
