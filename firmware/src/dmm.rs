@@ -208,10 +208,42 @@ const CAP_NORATIO_N: usize = 24;
 /// (CAP_CLASS_FAST, then this), 1..3 fixed, 4 the stock's choice from the slope. RAM only.
 pub const CAP_CLASS_AUTO: u8 = 2;
 /// Adaptive (DBG:CAP:CLASS 0): every new range / capacitor starts with
-/// class 1 (the fastest first value), CAP_CLASS_AUTO after CAP_AGREE_N
-/// agreeing final values.
-pub const CAP_CLASS_FAST: u8 = 1;
+/// this class (was 1 for a fast first value; the 50 ms fits want half
+/// ramps of 5 samples and more: class 1 swung 11 .. 15 mV on the device).
+pub const CAP_CLASS_FAST: u8 = 2;
 const CAP_AGREE_N: u8 = 4;
+/// Ramp ranges: the AD1 samples of one half ramp (every 50 ms; the ramp
+/// rows convert every 50 ms) for a line fit (`CapSeg`).
+const CAP_SEG_MAX: usize = 48;
+/// The samples after a turn left out of the next fit (device a3aabc98,
+/// ~1 mF on 6 mF: the slope ~4 % steeper in the first poll after a turn,
+/// the half ramps' fits read 955 .. 981 uF where the polls read ~990).
+const CAP_SEG_SKIP: u8 = 3;
+/// The ramp's poll period: under the 50 ms conversion, so each sample is
+/// read as it comes (`ad1` waits for it), its time the read's (at 50 ms
+/// the read drifted against the conversions, the fits read ~1.5 % low on
+/// the device, a3aabc98).
+const CAP_SEG_MS: u64 = 35;
+/// The samples at a ramp's start left out (device, 1 mF after the
+/// discharge: the first half ramp read 1026 uF, the next ones ~981; the
+/// absorption's recovery, INFERRED).
+const CAP_SEG_SKIP0: u8 = 8;
+/// The fewest samples for a fit.
+const CAP_SEG_MIN: usize = 5;
+/// A turn: the ramp back from its last extreme by this much.
+const CAP_SEG_HYST_MV: f32 = 1.0;
+/// Final: two pair values in a row within CAP_SEG_AGREE, or the last up
+/// and down half ramps within CAP_SEG_DU.
+const CAP_SEG_AGREE: f32 = 0.01;
+const CAP_SEG_DU: f32 = 0.05;
+/// The 255 ms poll's rules run when this long has passed since the last.
+const CAP_POLL_MS: u64 = 230;
+/// The discharge's line fit is final from CAP_DIS_FIN_MS on, once it moved
+/// less than CAP_DIS_FIN_AGREE in CAP_DIS_FIN_STEP_MS (device, ~1 mF from
+/// 3 V: 1069 uF at 0.4 s, 1031 .. 1020 from 0.6 s).
+const CAP_DIS_FIN_MS: u64 = 400;
+const CAP_DIS_FIN_STEP_MS: u64 = 200;
+const CAP_DIS_FIN_AGREE: f32 = 0.015;
 /// Ramp ranges: a full ring (CAP_RING polls, both directions) whose middle
 /// four are within this share of its median is final without the
 /// directions' ratio (one poll each side may be off: device, ~1 mF on 6 mF,
@@ -304,8 +336,11 @@ const CAP_STALL_MS: u64 = 1000;
 const CAP_DIS_MAX_MS: u64 = 300_000;
 /// Mode 1's discharge current (uA) per DISREF 2..6, from the slope on ~1 mF
 /// (device 138d145f, one unit, from 3.19 V: 0.38 / 0.72 / 0.88 / 0.95 /
-/// ~1.05 mA; not in the order of the datasheet's AGNDP levels).
-const CAP_IDIS_REF: [f32; 5] = [380.0, 720.0, 880.0, 950.0, 1050.0];
+/// ~1.05 mA; not in the order of the datasheet's AGNDP levels). DISREF 3
+/// set to 0.685 mA (device 4c31e6da+, the owner's capacitor from 3.07 V:
+/// the discharge's fit read 1028 .. 1048 uF at 0.72 for 982 from the
+/// ramp; INFERRED, one unit, one capacitor).
+const CAP_IDIS_REF: [f32; 5] = [380.0, 685.0, 880.0, 950.0, 1050.0];
 /// The slope estimate: its first sample at or above CAP_DIS_ANCHOR_MV, and
 /// at least CAP_DIS_SPAN_MV below it (device 138d145f: 912 uF for ~1 mF
 /// from a few tens of mV after DC V).
@@ -1749,6 +1784,21 @@ pub struct Dmm {
     /// NaN = none), the last node sample (mV), the times it fell back to 0.
     cap_pre: bool,
     cap_pre_n: u8,
+    /// The last DC V read before the discharge (two must agree).
+    cap_pre_v: f32,
+    /// The 50 ms ramp samples' fit (`CapSeg`).
+    cap_seg: &'static mut CapSeg,
+    /// The discharge's estimate is the final value (until the ramp's), its
+    /// estimate over CAP_DIS_FIN_MS.
+    cap_dis_fin: bool,
+    /// The discharge samples' line fit from the anchor: n, sum t, sum V,
+    /// sum t^2, sum t V (t in ms from the anchor).
+    cap_dis_ls: [f32; 5],
+    /// A final value from the 50 ms fits on this range: the poll's ring no
+    /// longer sets the value.
+    cap_seg_ok: bool,
+    cap_dis_e1: f32,
+    cap_dis_et: u64,
     cap_dis_on: u8,
     cap_dis_v0: f32,
     cap_dis_last: f32,
@@ -2434,6 +2484,13 @@ impl Dmm {
             cap_row_new: false,
             cap_pre: false,
             cap_pre_n: 0,
+            cap_pre_v: 0.0,
+            cap_seg: cap_seg_static(),
+            cap_dis_fin: false,
+            cap_dis_ls: [0.0; 5],
+            cap_seg_ok: false,
+            cap_dis_e1: 0.0,
+            cap_dis_et: 0,
             cap_dis_on: 0,
             cap_dis_v0: f32::NAN,
             cap_dis_last: 0.0,
@@ -6281,8 +6338,13 @@ impl Dmm {
     /// CAP_CHARGED_MS: a charged capacitor). The node's scale is the ramp
     /// row's (INFERRED: the discharge row's AD1 input is not traced).
     fn cap_discharge_val(&self, v_mv: f32, now: u64) -> Reading {
-        let mut rd = if self.cap_cand > 0.0 { self.cap_ramp_val(self.cap_cand, false) } else { self.cap_dash() };
-        rd.prov = true;
+        let mut rd = if self.cap_dis_fin {
+            self.cap_ramp_val(self.cap_c, false)
+        } else {
+            let mut rd = if self.cap_cand > 0.0 { self.cap_ramp_val(self.cap_cand, false) } else { self.cap_dash() };
+            rd.prov = true;
+            rd
+        };
         // Charged: at the AD1 clamp (the node above ~1.2 V, device
         // 1bc12c03: 4.7 s from 3 V), or a discharge longer than
         // CAP_CHARGED_MS.
@@ -6299,6 +6361,38 @@ impl Dmm {
         let mut b = self.cap_dvh;
         sort_f32(&mut b[..n]);
         b[n.saturating_sub(2)]
+    }
+
+    /// A value from the 50 ms fit (`CapSeg`): final ones set the value (not
+    /// over the range, not far off a final one: the poll's rules step the
+    /// range or start again); before the first final the running ones are
+    /// the grey value (near the discharge's estimate, `CAP_DIS_AGREE`).
+    fn cap_seg_use(&mut self, c: f32, fin: bool, lim: f32, ov: f32) -> Option<Reading> {
+        if fin {
+            let off = !self.ramp.first && !self.cap_dis_fin && (c - self.cap_c).abs() > CAP_SWAP * self.cap_c;
+            if c / lim > ov || off {
+                return None;
+            }
+            self.cap_c = c;
+            self.cap_hops = 0;
+            self.cap_dis_fin = false;
+            self.cap_seg_ok = true;
+            if self.ramp.first {
+                self.ramp.first = false;
+                self.cap_last = self.range;
+                self.cap_dis_c = 0.0;
+                self.cap_dis_chg = false;
+            }
+            return Some(self.cap_ramp_val(c, false));
+        }
+        if !self.ramp.first || c / lim > ov {
+            return None;
+        }
+        if self.cap_dis_c > 0.0 && (c - self.cap_dis_c).abs() > CAP_DIS_AGREE * self.cap_dis_c {
+            return None;
+        }
+        self.cap_cand = c;
+        Some(self.cap_ramp_val(c, false))
     }
 
     /// No value yet: dashes, provisional.
@@ -6350,7 +6444,7 @@ impl Dmm {
             self.ramp.cmp = None;
             self.ramp.first = true;
             self.cap_row_new = true;
-            self.deadline = now + 255;
+            self.deadline = now + CAP_SEG_MS;
         } else if r >= 5 {
             // Discharge first, then start the ramp when |V| < 30 mV.
             self.cap_dis_v0 = f32::NAN;
@@ -6415,6 +6509,10 @@ impl Dmm {
         self.cap_cls2 = false;
         self.cap_cls_min = 0;
         self.cap_dvh_n = 0;
+        *self.cap_seg = CapSeg::new();
+        self.cap_dis_fin = false;
+        self.cap_seg_ok = false;
+        self.cap_dis_e1 = 0.0;
         self.cap_vext_n = 0;
         self.cap_idle_flips = 0;
         self.cap_res_ms = 0.0;
@@ -6482,7 +6580,10 @@ impl Dmm {
                     // range's): no oscillation in the gate at all (a large C
                     // on a small range) goes to 60 uF, the oscillator's top.
                     let est = if f > 0.0 { cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * f) - cal(0x190, 0.0) } else { f32::INFINITY };
-                    let t = if est.is_finite() { fit(est) } else { 4 };
+                    // None at all on 60 uF: 6 mF (a 600 uF step on the way
+                    // cost ~0.5 s for ~1 mF; a smaller one steps down from
+                    // there).
+                    let t = if est.is_finite() { fit(est) } else if r == 4 { 6 } else { 4 };
                     self.cap_set_range(clk, t.max(r as i8 + 1));
                     return Some(self.cap_dash());
                 }
@@ -6500,11 +6601,17 @@ impl Dmm {
             // switch).
             let code = self.ad1()?;
             self.cap_pre_n += 1;
-            if self.cap_pre_n < 2 {
+            let v0 = code as f32 * K_ACV[1] * (1.25 / 0.9) / AD1_DIV;
+            // Two conversions in a row that agree, the first left out (it may
+            // span the switch); at most 8 (device 4c31e6da: -37.1 V read for
+            // a ~1.2 V capacitor, the slow discharge chosen; INFERRED: the
+            // row not settled).
+            let same = (v0 - self.cap_pre_v).abs() <= 0.05 * v0.abs() + 0.05;
+            self.cap_pre_v = v0;
+            if self.cap_pre_n < 3 || (!same && self.cap_pre_n < 8) {
                 return None;
             }
             self.cap_pre = false;
-            let v0 = code as f32 * K_ACV[1] * (1.25 / 0.9) / AD1_DIV;
             self.cap_dis_v0 = v0;
             hy::quiesce();
             relay_pa(clk, 1);
@@ -6569,6 +6676,8 @@ impl Dmm {
                     if a >= CAP_DIS_ANCHOR_MV {
                         self.cap_dis_pv = a;
                         self.cap_dis_pt = now;
+                        self.cap_dis_ls = [1.0, 0.0, a, 0.0, 0.0];
+                        self.cap_dis_e1 = 0.0;
                     }
                 } else if self.cap_dis_pv - a >= CAP_DIS_SPAN_MV && now > self.cap_dis_pt {
                     let slope = (self.cap_dis_pv - a) / (now - self.cap_dis_pt) as f32; // mV / ms = V / s
@@ -6576,8 +6685,53 @@ impl Dmm {
                     let cest = i / slope; // uA / (V / s) = uF
                     if cest.is_finite() && cest > 0.0 {
                         self.cap_cand = cest;
-                        if now - self.cap_dis_pt >= CAP_DIS_BASE_MS {
+                        let b = now - self.cap_dis_pt;
+                        if b >= CAP_DIS_BASE_MS {
                             self.cap_dis_c = cest;
+                        }
+                        // Final from the discharge (audit 2026-10-31: device
+                        // r2-ch, ~1 mF from 2.9 V, 1017 .. 1064 uF here, the
+                        // ramp after it +22 % from absorption): the estimates
+                        // over CAP_DIS_FIN_MS and twice that agree. The ramp's
+                        // own final replaces it (`cap_seg`).
+                        // The fit's C (the two-point one above read +-3 % per
+                        // sample on the device).
+                        let tb = b as f32;
+                        let l = &mut self.cap_dis_ls;
+                        l[0] += 1.0;
+                        l[1] += tb;
+                        l[2] += a;
+                        l[3] += tb * tb;
+                        l[4] += tb * a;
+                        let den = l[0] * l[3] - l[1] * l[1];
+                        let sl = if den > 0.0 { (l[1] * l[2] - l[0] * l[4]) / den } else { 0.0 };
+                        let cfit = if sl > 0.0 { i / sl } else { 0.0 };
+                        if self.ramp.first && !self.cap_dis_fin && cfit > 0.0 {
+                            let cest = cfit;
+                            let step = b >= CAP_DIS_FIN_MS && (self.cap_dis_e1 == 0.0 || now >= self.cap_dis_et + CAP_DIS_FIN_STEP_MS);
+                            let agree = self.cap_dis_e1 > 0.0 && (cest - self.cap_dis_e1).abs() <= CAP_DIS_FIN_AGREE * cest;
+                            if step && !agree {
+                                self.cap_dis_e1 = cest;
+                                self.cap_dis_et = now;
+                            } else if step {
+                                if !self.manual {
+                                    let mut t = 5;
+                                    while t < 7 && cest > 0.9 * f_dec * CAP_DEC[t] {
+                                        t += 1;
+                                    }
+                                    if t as i8 > self.range {
+                                        self.range = t as i8;
+                                    }
+                                }
+                                let lim_t = f_dec * CAP_DEC[self.range.max(0) as usize];
+                                if cest / lim_t <= ov {
+                                    self.cap_c = cest;
+                                    self.cap_dis_fin = true;
+                                    self.ramp.first = false;
+                                    self.cap_last = self.range;
+                                    self.cap_hops = 0;
+                                }
+                            }
                         }
                     }
                 }
@@ -6620,16 +6774,37 @@ impl Dmm {
                 }
                 self.ramp.prev_t = now;
                 self.ramp.prev_v = v_mv;
+                *self.cap_seg = CapSeg::new();
             }
-            self.deadline = now + if self.ramp.discharging { cap_dis_ms() as u64 } else { 255 };
+            self.deadline = now + if self.ramp.discharging { cap_dis_ms() as u64 } else { CAP_SEG_MS };
             return Some(self.cap_discharge_val(v_mv, now));
+        }
+        // Every 50 ms sample to the half ramps' fit; the poll's rules below
+        // every CAP_POLL_MS.
+        let seg = {
+            let k = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r];
+            let ev = self.cap_seg.add(now, v_mv, k);
+            self.cap_dbg[5] = self.cap_seg.last;
+            self.cap_dbg[0] = v_mv;
+            ev.and_then(|(c, fin)| self.cap_seg_use(c, fin, lim, ov))
+        };
+        // On 6 mF (the oscillator's 60 uF went straight there) a half ramp
+        // under 600 uF: down to it at once, the ramp going on (emulator:
+        // 470 uF waited ~8 s for the poll's rule).
+        if r == 6 && self.cap_seg.done && self.ramp.first && !self.manual && self.cap_seg.last.abs() < 0.9 * f_dec * CAP_DEC[5] {
+            self.cap_set_range(clk, 5);
+            return Some(self.cap_dash());
+        }
+        if now.saturating_sub(self.ramp.prev_t) < CAP_POLL_MS {
+            self.deadline = now + CAP_SEG_MS;
+            return seg;
         }
         let _ = self.read_counters(0x50);
         let dv = (self.ramp.prev_v - v_mv).abs();
         let dt = now.saturating_sub(self.ramp.prev_t) as f32;
         self.ramp.prev_v = v_mv;
         self.ramp.prev_t = now;
-        self.deadline = now + 255;
+        self.deadline = now + CAP_SEG_MS;
         self.cap_dbg[0] = v_mv;
         self.cap_dbg[1] = dv;
         self.cap_dbg[2] = dt;
@@ -6870,7 +7045,7 @@ impl Dmm {
             } else {
                 c
             };
-            if !self.ramp.first && !early && !self.manual && r > 5 && (mean - self.cap_c).abs() > CAP_SWAP * self.cap_c {
+            if !self.ramp.first && !early && !self.manual && !self.cap_dis_fin && r > 5 && (mean - self.cap_c).abs() > CAP_SWAP * self.cap_c {
                 // Another capacitor on the leads: a ramp too fast for this
                 // range's current aliases into a plausible value (emulator:
                 // 470 uF after 47 mF read 23 mF on 60 mF for good). From
@@ -6970,7 +7145,7 @@ impl Dmm {
                 self.cap_chg_prev = v_ring;
                 !ok
             };
-            if ready && !wait {
+            if ready && !wait && !self.cap_dis_fin {
                 // Adaptive class (owner 2026-10-30): class 1 for a fast first
                 // value; once CAP_AGREE_N final values in a row agree within
                 // 2 % (the same capacitor), class 2 for accuracy. The value
@@ -6999,7 +7174,9 @@ impl Dmm {
                     self.cap_ratio = [1.0; 2];
                     return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
                 }
-                self.cap_c = v;
+                if !self.cap_seg_ok {
+                    self.cap_c = v;
+                }
                 self.cap_hops = 0;
                 if self.ramp.first {
                     self.ramp.first = false;
@@ -7250,6 +7427,175 @@ fn ring_inc(n: u8) -> u8 {
     if n >= 239 { n - 119 } else { n + 1 }
 }
 
+/// The ramp sampled every 50 ms (audit 2026-10-31: every full 255 ms poll
+/// already read 1 mF within 2 %, the final waited for gates). The samples
+/// since the last turn are fitted with a line; each half ramp gives a C
+/// (k / slope), the last up and down ones a pair value 2 k / (|s_up| +
+/// |s_down|) (an absorption current shifts the two slopes oppositely, INFERRED
+/// to cancel to first order). Turns from the samples themselves, not the
+/// comparator bit (device 19b6e3b7: the bit and the AD1 value disagreed by
+/// up to a poll).
+#[derive(Clone, Copy)]
+struct CapSeg {
+    t0: u64,
+    t: [u16; CAP_SEG_MAX],
+    v: [f32; CAP_SEG_MAX],
+    n: u8,
+    /// Leading samples left out of the fit (the turn's, a new row's).
+    skip: u8,
+    dir: i8,
+    ext: f32,
+    ext_k: u8,
+    /// The last half ramps' C, down and up; the last pair value.
+    c: [f32; 2],
+    pair: f32,
+    /// The last half ramp's C, negative for a falling one (DBG:CAP? field
+    /// 11 on the ramp ranges).
+    last: f32,
+    /// This sample ended a half ramp (its value, not the running fit's).
+    done: bool,
+}
+
+impl CapSeg {
+    const fn new() -> Self {
+        CapSeg { t0: 0, t: [0; CAP_SEG_MAX], v: [0.0; CAP_SEG_MAX], n: 0, skip: CAP_SEG_SKIP0, dir: 0, ext: 0.0, ext_k: 0, c: [0.0; 2], pair: 0.0, last: 0.0, done: false }
+    }
+
+    /// Least-squares slope (mV / ms) of samples lo..hi.
+    fn slope(&self, lo: usize, hi: usize) -> Option<f32> {
+        if hi < lo + CAP_SEG_MIN {
+            return None;
+        }
+        let m = (hi - lo) as f32;
+        let (mut st, mut sv) = (0.0f32, 0.0f32);
+        for i in lo..hi {
+            st += self.t[i] as f32;
+            sv += self.v[i];
+        }
+        let (tm, vm) = (st / m, sv / m);
+        let (mut sxy, mut sxx) = (0.0f32, 0.0f32);
+        for i in lo..hi {
+            let dt = self.t[i] as f32 - tm;
+            sxy += dt * (self.v[i] - vm);
+            sxx += dt * dt;
+        }
+        if sxx <= 0.0 {
+            return None;
+        }
+        Some(sxy / sxx)
+    }
+
+    /// Samples from `k` on become the buffer (times from the first of them).
+    fn shift(&mut self, k: usize) {
+        let n = self.n as usize;
+        let k = k.min(n);
+        let base = if k < n { self.t[k] } else { 0 };
+        for i in k..n {
+            self.t[i - k] = self.t[i] - base;
+            self.v[i - k] = self.v[i];
+        }
+        self.t0 += base as u64;
+        self.n = (n - k) as u8;
+    }
+
+    /// The half ramp lo..hi done: its C, and the pair value once both
+    /// directions have one (`Some((c, final))`).
+    fn finish(&mut self, lo: usize, hi: usize, k: f32) -> Option<(f32, bool)> {
+        let sl = self.slope(lo, hi)?;
+        if sl * self.dir as f32 <= 0.0 {
+            return None;
+        }
+        let c = k / sl.abs();
+        if !c.is_finite() {
+            return None;
+        }
+        self.done = true;
+        self.c[(self.dir > 0) as usize] = c;
+        self.last = c * self.dir as f32;
+        let [d, u] = self.c;
+        if d > 0.0 && u > 0.0 {
+            let p = 2.0 / (1.0 / d + 1.0 / u);
+            // The two directions within CAP_SEG_DU (their mean cancels the
+            // absorption's recovery: device, 1 mF after the discharge, the
+            // first half ramps 1009 / 973 uF, pair 991, then 982 .. 987),
+            // or two pair values in a row within CAP_SEG_AGREE.
+            let fin = (d - u).abs() <= CAP_SEG_DU * p || (self.pair > 0.0 && (p - self.pair).abs() <= CAP_SEG_AGREE * p);
+            self.pair = p;
+            return Some((p, fin));
+        }
+        Some((c, false))
+    }
+
+    /// One sample (ms, mV); k: C (uF) x slope (mV / ms). A value when one
+    /// comes: a half ramp's or pair's (final or not), or the running fit's.
+    fn add(&mut self, now: u64, v: f32, k: f32) -> Option<(f32, bool)> {
+        self.done = false;
+        if self.n == 0 {
+            self.t0 = now;
+        }
+        let dt = now.saturating_sub(self.t0);
+        if dt > 60_000 {
+            *self = Self::new();
+            self.t0 = now;
+        }
+        let i = self.n as usize;
+        self.t[i] = now.saturating_sub(self.t0) as u16;
+        self.v[i] = v;
+        self.n += 1;
+        let lo = (self.skip as usize).min(i);
+        if self.dir == 0 {
+            let d = v - self.v[lo];
+            if d.abs() > CAP_SEG_HYST_MV {
+                self.dir = if d > 0.0 { 1 } else { -1 };
+                self.ext = v;
+                self.ext_k = i as u8;
+            }
+        } else if (v - self.ext) * self.dir as f32 > 0.0 {
+            self.ext = v;
+            self.ext_k = i as u8;
+        } else if (self.ext - v) * self.dir as f32 > CAP_SEG_HYST_MV {
+            // A turn at the extreme: the fit up to the sample before it,
+            // the samples after it the next half ramp (its first left out).
+            let e = self.ext_k as usize;
+            let out = self.finish(lo, e, k);
+            self.shift(e + 1);
+            self.skip = CAP_SEG_SKIP;
+            self.dir = -self.dir;
+            self.ext = v;
+            self.ext_k = self.n - 1;
+            return out;
+        }
+        if self.n as usize == CAP_SEG_MAX {
+            // A long half ramp: a result from these, the last sample kept.
+            let out = self.finish(lo, CAP_SEG_MAX, k);
+            self.shift(CAP_SEG_MAX - 1);
+            self.skip = 0;
+            self.ext = v;
+            self.ext_k = 0;
+            return out;
+        }
+        if self.dir != 0 {
+            let sl = self.slope(lo, self.n as usize)?;
+            if sl * self.dir as f32 > 0.0 {
+                return Some((k / sl.abs(), false));
+            }
+        }
+        None
+    }
+}
+
+// In SRAM: the TCM .bss is the stack's (headroom).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut CAP_SEG: core::mem::MaybeUninit<CapSeg> = core::mem::MaybeUninit::uninit();
+
+/// The one `CapSeg` (call once: `Dmm::new`).
+fn cap_seg_static() -> &'static mut CapSeg {
+    unsafe {
+        (*core::ptr::addr_of_mut!(CAP_SEG)).write(CapSeg::new());
+        (*core::ptr::addr_of_mut!(CAP_SEG)).assume_init_mut()
+    }
+}
+
 fn sort_f32(v: &mut [f32]) {
     for i in 1..v.len() {
         let x = v[i];
@@ -7266,6 +7612,29 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A triangle ramp (2 mV / 50 ms, 30 mV swing, up 1 % steeper) with
+    /// noise: the pair value is final within 1 % in under 2 s.
+    #[test]
+    fn cap_seg_triangle() {
+        let mut g = CapSeg::new();
+        let k = 1000.0 * 0.04; // C 1000 uF at 0.04 mV / ms
+        let (mut v, mut up, mut fin_t) = (0.0f32, false, None);
+        for i in 0..200u64 {
+            let s = if up { 2.02 } else { 2.0 };
+            v += if up { s } else { -s };
+            if v <= -30.0 { up = true }
+            if v >= 0.0 { up = false }
+            let noise = (((i * 7919) % 13) as f32 - 6.0) * 0.03;
+            if let Some((c, fin)) = g.add(i * 50, v + noise, k) {
+                if fin {
+                    assert!((c - 995.0).abs() < 10.0, "{c} at {i}");
+                    fin_t.get_or_insert(i * 50);
+                }
+            }
+        }
+        assert!(fin_t.is_some_and(|t| t < 2000), "{fin_t:?}");
+    }
 
     #[test]
     fn ring_inc_keeps_turning() {
