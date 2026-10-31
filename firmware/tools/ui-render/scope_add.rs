@@ -422,6 +422,37 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
+    // The MCX V/div zoom steps below 10 mV/div (scope::VSTEPS: 5 / 2 mV,
+    // with the x0.1 probe 500 / 200 uV): the badge text from the value fits
+    // its 44 px text box, the page as the replica; the pinch bubble's "<v>/div zoom" fits the
+    // bubble (scope_page BUBBLE, 120 px, SC_F16, centred) with the stock 3 px
+    // margin.
+    for (vd, probe, tag) in [(0.005f32, 3u8, "5mv"), (0.002, 3, "2mv"), (0.0005, 0, "500uv"), (0.0002, 0, "200uv")] {
+        let mut m = base.m;
+        m.src = scope_ui::SRC_MCX;
+        m.status = scope_ui::ST_TD;
+        m.wvdiv = vd;
+        m.probe = probe;
+        let sc = stock::Scene { name: "zoom", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        stock::draw(&sc);
+        let name = format!("mcx/vzoom/{tag}");
+        ck.check_replica(&name);
+        if tag == "2mv" {
+            save(out, "s07-mcx-2mv");
+        }
+        let mut b = scope_ui::Buf::new();
+        scope_ui::fmt_div(&mut b, vd, "V");
+        ck.cases += 2;
+        let bw = stockfont::text_width(stockfont::SC_F12, b.as_str(), 0);
+        if bw > 44 - 2 {
+            ck.fail(&name, format!("V/div badge text {:?} {bw} px > 42", b.as_str()));
+        }
+        b.push("/div zoom");
+        let w = stockfont::text_width(stockfont::SC_F16, b.as_str(), 0);
+        if w > 120 - 6 {
+            ck.fail(&name, format!("pinch bubble {:?} {w} px > 114", b.as_str()));
+        }
+    }
     // The texts the wave view changes are no wider than what the stock
     // page already shows in the same box (cells: "Vp-p:" vs "Ip-p:", "mV"
     // vs "mA"; the V/div badge text box 44 px; the CH1 label in 60 px; the

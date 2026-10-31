@@ -25,7 +25,9 @@ part); DBG:GEST?'s "|POS hpos,trig_row,pos" is read before and after.
 
 Last: TRIG:LEV 0.8 then CHAN1:SCAL 1 / 0.5 / 2 / 0.05 / 1: TRIG:LEV? keeps
 its volts, the marker row moves (at the top edge, row -10, while the level
-is off screen at 50 mV/div).
+is off screen at 50 mV/div). Then TRIG:LEV 0.003 and CHAN1:SCAL 0.01 /
+0.005 / 0.002 / 0.01 (the 5 / 2 mV/div digital zoom steps): SCAL? echoes,
+the level keeps its volts, its row moves 2x / 5x, WAV:PRE? yinc stays.
 
 Exit status 0 = all passed.
 """
@@ -187,6 +189,30 @@ try:
     rows = [r for _, _, r in lv]
     check(rows[1] != rows[0] and rows[2] != rows[0] and rows[3] == -10 and rows[4] == rows[0],
           'the marker row follows the scale, at the edge while off screen, back after (%s)' % rows)
+
+    # The 5 / 2 mV/div steps (a digital zoom of 10 mV/div): CHAN1:SCAL?
+    # echoes them, TRIG:LEV 3 mV keeps its volts, its row moves out 2x /
+    # 5x from the zero marker (10 mV/div: 0.3 div), WAV:PRE?'s volts per code
+    # stays 10 mV/div's (the same codes, only the screen scale changes).
+    q('TRIG:LEV 0.003')
+    q('CHAN1:SCAL 0.01')
+    wait_ms(500)
+    zl = []
+    for vd in ['0.01', '0.005', '0.002', '0.01']:
+        q('CHAN1:SCAL %s' % vd)
+        wait_ms(500)
+        pre = q('WAV:PRE?').split(',')
+        _, row, zp = pos()
+        # The level's rows above the zero marker (row 140 + pos).
+        zl.append((vd, float(q('CHAN1:SCAL?')), float(q('TRIG:LEV?')), 140 + zp - row, float(pre[7])))
+    print('  V/div, SCAL?, TRIG:LEV?, rows above zero, WAV:PRE yinc: %s' % zl, flush=True)
+    check(all(abs(sv - float(vd)) <= 1e-6 for vd, sv, _, _, _ in zl), 'CHAN1:SCAL? answers 10 / 5 / 2 / 10 mV')
+    check(all(abs(v - 0.003) <= 2e-5 for _, _, v, _, _ in zl), 'the 5 / 2 mV/div steps keep the trigger level in volts')
+    zr = [r for _, _, _, r, _ in zl]
+    check(zr[0] > 0 and abs(zr[1] - 2 * zr[0]) <= 2 and abs(zr[2] - 5 * zr[0]) <= 3 and zr[3] == zr[0],
+          'the level row moves 2x / 5x from the zero marker at 5 / 2 mV/div (%s)' % zr)
+    yi = [y for _, _, _, _, y in zl]
+    check(all(abs(y - yi[0]) <= 1e-6 * abs(yi[0]) + 1e-12 for y in yi), 'WAV:PRE? volts per code unchanged by the zoom (%s)' % yi)
 finally:
     try:
         os.killpg(emu.pid, 15)
