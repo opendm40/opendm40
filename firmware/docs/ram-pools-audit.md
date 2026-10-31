@@ -36,6 +36,7 @@ Implemented (2026-10-31):
 |---|---|---|
 | A | [#200](https://github.com/opendm40/opendm40/pull/200) | CAP 43 008 (42 K), not 44 K: the recovery-usb build has 4 096 B less SRAM free and keeps 8 596 B at 42 K (floor 8 192) |
 | C | [#201](https://github.com/opendm40/opendm40/pull/201) | SRAM +480 B, TCM (stack headroom) +632 B, region B -744 B; `src/pool.rs`, DBG:POOL? (`dbg-pool`), tools/pool-test, emu/pooltest.py |
+| B | (this branch, feat/scope-tail, on #201 + #200) | record up to CAP + 16 656 samples (61 712 at CAP 44 K); pool `TAIL` ([ram-budget.md](ram-budget.md#the-scope-record-tail-pool-tail)); SRAM -16 B, stack headroom -112 B, region B -2 036 B, region C -436 B; emu/tailtest.py |
 
 Ranking: A, then B (needs the owner: section 6 Q1), then C (small; its value
 is the pool framework and the checked compatibility table, which B needs
@@ -326,9 +327,9 @@ One const table per pool: the specs (offset, length, rule) and
 
 | # | question | for |
 |---|---|---|
-| Q1 | B: may the record length depend on what else runs (shorter while CH2, a stream, a recording)? A stopped record would be cut when one of them starts. | owner |
-| Q2 | B: a WAV:DATA? stream or a scope CSV save of a long record when LOG:STATe ON arrives: refuse the logger ("Settings conflict") or cut the transfer? | owner |
-| Q3 | Must infinite persistence (`CACHE.ps_a/ps_b`) survive a page change? Today it does (by omission in `sp_leave`, *inferred* unintentional or not). | owner |
-| Q4 | Does the stored record's CH2 have to survive leaving the Scope view? Today it does (*inferred*). | owner |
+| Q1 | B: may the record length depend on what else runs (shorter while CH2, a stream, a recording)? A stopped record would be cut when one of them starts. | owner: yes; the screen and WAV:PRE? show the actual point count |
+| Q2 | B: a WAV:DATA? stream or a scope CSV save of a long record when LOG:STATe ON arrives: refuse the logger ("Settings conflict") or cut the transfer? | owner: the logger waits for the end of the transfer (no error, no cut transfer) |
+| Q3 | Must infinite persistence (`CACHE.ps_a/ps_b`) survive a page change? Today it does (by omission in `sp_leave`, *inferred* unintentional or not). | owner: yes, as today (B does not touch CACHE) |
+| Q4 | Does the stored record's CH2 have to survive leaving the Scope view? Today it does (*inferred*). | owner: yes, as today (the tail does not take the store while it holds that record's CH2) |
 | Q5 | CAP 44 K: rotation of a stopped 88 KB ring and the larger WAV:DATA? MAX transfer on the device (time per STOP, USB throughput) | device test |
 | Q6 | C: a Scope -> Gen -> Scope swipe and Gallery -> back repaint the graph completely (no stale `d_*` diff) | emulator + device |

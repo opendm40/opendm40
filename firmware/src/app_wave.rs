@@ -218,7 +218,9 @@ impl App {
         self.meter.rel_off();
         self.scope.wave_enter(scale_of(a, full_vdiv(&a)), now);
         crate::scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
-        crate::scope_ui::graph().clear();
+        if let Some(g) = crate::scope_ui::graph_held() {
+            g.clear();
+        }
         self.wave_req = None; // the scope's restart flag asks for the start
         if self.view != View::Scope {
             self.show(View::Scope, clk);
@@ -244,7 +246,9 @@ impl App {
         let now = clk.now_ms();
         self.scope.wave_exit(now);
         crate::scope_ui::set_tb_lo(scope::TB_MIN);
-        crate::scope_ui::graph().clear();
+        if let Some(g) = crate::scope_ui::graph_held() {
+            g.clear();
+        }
         self.wave_req = Some(WaveReq::Stop);
         if let Some(v) = self.wave_auto.take() {
             self.dmm.set_range(clk, if v == 1 { Some(255) } else { None });

@@ -486,6 +486,11 @@ pub fn begin(bytes: u32, dur_s: u32) -> Result<(), &'static str> {
     if crate::csvlog::active() || crate::screenshot::busy() || crate::upload::busy() {
         return Err("Mass storage busy");
     }
+    // The row FIFO (csvlog::lend_fifo) for the session: the scope gave its
+    // record tail back first (main.rs `App::tail_lend`).
+    if !crate::csvlog::fifo_take() {
+        return Err("Settings conflict");
+    }
     let j = job();
     *j = JOB0;
     // LOG:DISK? tpp: this session's probe, 0 / 0 = none (`set_probe`), not

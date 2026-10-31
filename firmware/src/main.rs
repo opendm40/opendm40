@@ -42,6 +42,7 @@ unsafe impl critical_section::Impl for NoMask {
 mod meter;
 mod mmio;
 mod persist;
+mod pool;
 mod power;
 mod prof;
 mod scope;
@@ -74,6 +75,7 @@ use cortex_m as _;
 use usb_device::prelude::*;
 
 use clock::Clock;
+use app::app_tail::{SEG_CH2, SEG_FIFO, SEG_RING};
 
 /// System control block: application interrupt and reset control.
 const SCB_AIRCR: u32 = 0xE000_ED0C;
@@ -164,9 +166,9 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0xD040);
 static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-/// 512 bytes in TCM; the 4 KiB of the builds whose disk is the SPI flash
-/// (recovery-usb, no `vdisk`) go to SRAM (the TCM stack keeps its 42 KiB).
-#[cfg_attr(all(target_os = "none", any(feature = "recovery-usb", not(feature = "vdisk"))), link_section = ".sram_bss")]
+/// 512 bytes in TCM; the 4 KiB of the builds without `vdisk` (the SPI flash
+/// is the disk) go to SRAM (the TCM stack keeps its 42 KiB).
+#[cfg_attr(all(target_os = "none", not(feature = "vdisk")), link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -302,6 +304,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // ohm hunt extension below (waits longer than that) leaves it alone.
     // Per transport ([USB], [BT]); a BT line is taken only while [BT] is None.
     let mut scpi_wait: [Option<(u32, bool, u64, u64)>; 2] = [None, None];
+    // LOG:STATe ON waits for the scope's record tail (`msgs[..].again`).
+    let mut tail_again = false;
     // Who made the DMM's last function change, for the READ? cap: func_key =
     // (function as FUNCtion? names it, temperature sensor) as last seen
     // (`scpi_func_key`: an autorange step V <-> mV or between the A shunts
@@ -472,6 +476,18 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             stream_seen = (usize::MAX, now);
         }
         app.scope.host_read = tmc.streaming() && scope_wav::reads_record();
+        // The scope record's tail (app_tail.rs): idle lenders give their
+        // segment back for the next acquisition; a LOG:STATe ON that waited
+        // for a long stored record's transfer runs now.
+        app.tail_reclaim();
+        if !fastlog::active() {
+            logger.slots_release();
+        }
+        if !app.scope.tail_busy(SEG_RING) {
+            for m in msgs.iter_mut() {
+                m.go();
+            }
+        }
         // Constant-interval HY3131 sampling, paced by the DWT / AD1F flag and run
         // every iteration (cheap when inactive). Kept independent of the GUI loop.
         let was_wave = logger.wave();
@@ -513,6 +529,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 }
                 let (conflict, go) = fast_events(app, &mut clk, logger, ev, fa, fast_prev, now);
                 if go {
+                    app.tail_lend(SEG_RING);
                     logger.start(app.dmm.mode(), app.dmm.range());
                 }
                 if conflict {
@@ -565,7 +582,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         };
         if let Some(s) = resume {
             src = s;
-        } else if let Some(cmd) = tmc.take_command() {
+        } else if let Some(cmd) = (!msgs[USB].waits()).then(|| tmc.take_command()).flatten() {
+            // (A message waiting for the scope's record tail, `again`, keeps
+            // the next one in the USBTMC buffer: `start` would drop it.)
             // H1: a host session counts as activity for idle dim / power-off.
             app.note_host_activity(now);
             msg_n = cmd.len().min(256);
@@ -931,6 +950,21 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                     #[cfg(not(feature = "dbg-diag"))]
                     scpi::Dbg::Diag => false,
+                    #[cfg(feature = "dbg-pool")]
+                    scpi::Dbg::Pool => {
+                        // PAGE, then TAIL after a '|'.
+                        let b = port.rsp_buf();
+                        let mut n = pool::PAGE.text(b);
+                        if n < b.len() {
+                            b[n] = b'|';
+                            n += 1;
+                            n += pool::TAIL.text(&mut b[n..]);
+                        }
+                        port.respond_len(n);
+                        false
+                    }
+                    #[cfg(not(feature = "dbg-pool"))]
+                    scpi::Dbg::Pool => false,
                     scpi::Dbg::Flash => {
                         scpi.len = 0;
                         let mut t = [0u8; 16];
@@ -1210,6 +1244,14 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     },
+                    // A long stored scope record being read (WAV:DATA?, a scope
+                    // CSV save) holds the ring's slots and the FIFO in its
+                    // tail: LOG:STATe ON waits for the end of the transfer
+                    // (owner, docs/ram-pools-audit.md Q2), the message with it.
+                    scpi::Log::State(Some(true)) if app.scope.tail_busy(SEG_RING) => {
+                        tail_again = true;
+                        false
+                    }
                     scpi::Log::State(Some(on)) => {
                         if let Some(e) = on.then(|| log_on_check(app, logger, log_disk, log_dur_s, port.trusted())).flatten() {
                             // Refused, or a disk session began (Err("")).
@@ -1230,6 +1272,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                                 // Guarantee the full row is applied before the
                                 // logger overrides R22 (AD1OSR) / R26 (AD2).
                                 app.dmm.start(&mut clk);
+                                app.tail_lend(SEG_RING);
                                 logger.start(m, app.dmm.range());
                             } else {
                                 scpi.set_err("Settings conflict");
@@ -1396,6 +1439,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             if scpi_wait[src].is_some() {
                 msgs[src].pause();
             }
+            if core::mem::take(&mut tail_again) {
+                msgs[src].again();
+            }
             let key = scpi_func_key(&app.dmm);
             if key != func_key {
                 func_key = key;
@@ -1437,7 +1483,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 app.ch2_lost(now); // a DMM change, or taken over
             }
             match want {
-                Some(fs) if (!mine || app.ch2_fs() != fs) && (mine || !logger.active()) => {
+                // A long stored record being read holds the CH2 store's
+                // bytes: the start waits for the end of the transfer.
+                Some(fs) if (!mine || app.ch2_fs() != fs) && (mine || !logger.active()) && !app.scope.tail_busy(SEG_CH2) => {
                     let fresh = !logger.active();
                     if mine {
                         logger.stop();
@@ -1447,6 +1495,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dmm.start(&mut clk);
                     }
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        app.tail_lend(SEG_CH2);
                         csvlog::catalog_warm(); // MMEM:CAT? while CH2 streams: from the cache
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), fs);
                         app.ch2_started(fs, logger.nominal_mhz(), logger.begin_cyc());
@@ -1482,6 +1531,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             } else if wave_paused && !screenshot::busy() {
                 wave_paused = false;
                 if !logger.active() && app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                    app.tail_lend(SEG_RING);
                     csvlog::catalog_warm(); // the job changed the disk: MMEM:CAT? from a cache while streaming
                     logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
                     app.wave_live();
@@ -1520,6 +1570,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         // MMEM:CAT? while the view streams: from the cache
                         // (device c92b605: a scan in one pass at 76800
                         // dropped ~90 ms of the view's ring).
+                        app.tail_lend(SEG_RING);
                         csvlog::catalog_warm();
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), app.scope.wave_fs());
                         if hy3131::ad2_rate_mhz(logger.r26()) / 1000 != app.scope.wave_fs() {
@@ -1558,6 +1609,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dmm.start(&mut clk);
                     }
                     if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        app.tail_lend(SEG_RING);
                         csvlog::catalog_warm(); // MMEM:CAT? while armed: from the cache
                         logger.start_wave(app.dmm.mode(), app.dmm.range(), inrush::RATE_HZ);
                         app.inrush_live(logger.nominal_mhz());
@@ -1886,7 +1938,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
-            | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
+            | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::Pool | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
 }
@@ -2138,7 +2190,7 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
     match r {
         app::FastReq::Stop => fastlog::request_stop(),
         app::FastReq::Inrush => {
-            let ok = !logger.active() && fastlog::begin(app::App::inrush_save_bytes(), 0).is_ok();
+            let ok = !logger.active() && app.tail_lend(SEG_FIFO) && fastlog::begin(app::App::inrush_save_bytes(), 0).is_ok();
             app.inrush_save_begun(ok, now);
         }
         app::FastReq::Start(dur) => {
@@ -2153,9 +2205,12 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
             logger.set_ad2(ad2);
             let hz = fast_next_hz(logger, ad2);
             let b = fastlog::plan_bytes(dur, hz, ad2);
-            if fastlog::begin(b, dur).is_err() {
+            // Refused while a long stored scope record is being read (its
+            // tail holds the ring's slots and the FIFO).
+            if !app.tail_lend(SEG_RING) || fastlog::begin(b, dur).is_err() {
                 app.fast_ended(now, fastlog::State::Error, None);
             } else {
+                logger.reserve_slots();
                 fast_probe_if(ad2, hz);
             }
         }
@@ -2186,8 +2241,11 @@ fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur
     if logger.active() || !logger::Logger::mode_ok(logger.ad2(), app.dmm.mode()) || matches!(app.dmm.func(), 16 | 17 | dmm::FUNC_V_AUTO | dmm::FUNC_A_AUTO) {
         return Some("Settings conflict");
     }
+    // The caller waited for the scope's tail (`tail_busy`): given back now.
+    app.tail_lend(SEG_RING);
     Some(match fastlog::begin(fastlog::plan_bytes(dur_s, hz, logger.ad2()), dur_s) {
         Ok(()) => {
+            logger.reserve_slots();
             fast_probe_if(logger.ad2(), hz);
             ""
         }
@@ -2481,5 +2539,4 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-mod recovery;
 mod shim;

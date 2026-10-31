@@ -36,8 +36,12 @@ pub struct Msg {
     msg: [u8; MSG_MAX],
     n: usize,
     pos: usize,
+    /// Where the command `next` gave last starts (`again`).
+    last: usize,
     active: bool,
     paused: bool,
+    /// Paused by `again` (not by a reading wait).
+    again: bool,
     queries: u16,
     /// A query was answered (possibly with an empty reply) or a reply was
     /// sent from the transport's buffer.
@@ -70,8 +74,10 @@ impl Msg {
             msg: [0; MSG_MAX],
             n: 0,
             pos: 0,
+            last: 0,
             active: false,
             paused: false,
+            again: false,
             queries: 0,
             answered: false,
             raw: false,
@@ -88,6 +94,7 @@ impl Msg {
         self.pos = 0;
         self.active = true;
         self.paused = false;
+        self.again = false;
         self.answered = false;
         self.raw = false;
         self.len = 0;
@@ -98,6 +105,7 @@ impl Msg {
     pub fn reset(&mut self) {
         self.active = false;
         self.paused = false;
+        self.again = false;
     }
 
     /// A message is in progress (commands left, waiting, or its reply not
@@ -133,6 +141,7 @@ impl Msg {
             if trim(p).is_empty() {
                 continue;
             }
+            self.last = s;
             let k = p.len().min(out.len());
             out[..k].copy_from_slice(&p[..k]);
             return Some(k);
@@ -145,6 +154,31 @@ impl Msg {
     pub fn pause(&mut self) {
         if self.active {
             self.paused = true;
+        }
+    }
+
+    /// The command just run must run again later (it waits for something
+    /// other than a reading: main.rs, LOG:STATe ON during a long scope
+    /// record transfer): paused, and `go` resumes the message at it.
+    pub fn again(&mut self) {
+        if self.active {
+            self.pos = self.last;
+            self.paused = true;
+            self.again = true;
+        }
+    }
+
+    /// Paused by `again` (main.rs takes no new USB message meanwhile: it
+    /// would replace this one).
+    pub fn waits(&self) -> bool {
+        self.active && self.again
+    }
+
+    /// Resume after `again` (nothing for a reading wait).
+    pub fn go(&mut self) {
+        if self.again {
+            self.again = false;
+            self.paused = false;
         }
     }
 

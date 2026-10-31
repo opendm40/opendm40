@@ -43,6 +43,9 @@ mod trigsoft;
 // The inrush capture's detector / results (src/inrush.rs, pure).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+#[allow(dead_code)]
+#[path = "../../src/pool.rs"]
+mod pool;
 #[path = "../../src/ad2pll.rs"]
 mod ad2pll;
 // Scope / wave view measurements (src/scope_meas.rs; `compute` needs the

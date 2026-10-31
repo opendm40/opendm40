@@ -1334,23 +1334,27 @@ pub struct Gallery {
     job: Job,
 }
 
-/// Zero-initialised (.bss), set to `Gallery::new()` on the first `get`: as a
-/// const initialiser it was 672 B of the .data load image in region C
-/// (sentinels such as NONE are not zero; region C audit #1).
-static mut G: core::mem::MaybeUninit<Gallery> = core::mem::MaybeUninit::uninit();
-static mut G_INIT: bool = false;
+/// The gallery's state is a tenant of the page pool (pool.rs `PAGE`, SRAM),
+/// set to `Gallery::new()` whenever it takes the bytes (the first `get`,
+/// or after the scope graph / generator preview had them): the Gallery
+/// view starts with `open` anyway, which resets it all.
+// SAFETY: `init` writes a whole Gallery.
+unsafe impl crate::pool::Tenancy for Gallery {
+    const T: crate::pool::Tenant = crate::pool::Tenant::Gallery;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::Gallery).off;
+    fn init(p: *mut Self) {
+        // SAFETY: the pool's Gallery range (asserted to fit below).
+        unsafe { p.write(Gallery::new()) };
+    }
+}
 
-/// The gallery state (one, static: no room on the main stack).
+const _: () = assert!(crate::pool::fits::<Gallery>(crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::Gallery).len));
+
+/// The gallery state (one, in the page pool: no room on the main stack).
 #[inline(never)] // .cold (link-native.x): the callers are the gallery's own paths
 pub fn get() -> &'static mut Gallery {
-    unsafe {
-        let g = &mut *core::ptr::addr_of_mut!(G);
-        if !G_INIT {
-            G_INIT = true;
-            g.write(Gallery::new());
-        }
-        g.assume_init_mut()
-    }
+    // SAFETY: the pool's Gallery, set up by `take_ptr` (main loop only).
+    unsafe { &mut *crate::pool::PAGE.take_ptr::<Gallery>() }
 }
 
 impl Gallery {

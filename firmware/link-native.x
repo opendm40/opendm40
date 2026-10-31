@@ -122,11 +122,6 @@ SECTIONS
         *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
-        /* recovery::run only: the rest of recovery.rs (the recovery-usb /
-         * recovery-file variants' own code, ~1 KB) goes to region B, which
-         * those variants have room in, and keeps their region C above its
-         * 4 KiB floor; the default image has only `run`. */
-        *(.text.*8opendm408recovery3run*);
         *(.text.*8opendm407gallery*);
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);
@@ -341,10 +336,10 @@ SECTIONS
         /* DBG:GENTRIG:LAG / STAT? and DBG:CH2:LAG (the GEN / CH2 channels'
          * tuning replies, App::dbg_gen). */
         *(.text.*8opendm403app*3App7dbg_gen*);
-        /* Start-up only (App::new): the scope's SHOWN / STRIP_SHOWN reset
-         * (scope_ui::init_shown) and the backup-SRAM record set-up
-         * (persist::init, also splash / setfile::boot). */
-        *(.text.*8opendm408scope_ui10init_shown*);
+        /* Start-up only: the backup-SRAM record set-up (persist::init,
+         * also splash / setfile::boot). Not scope_ui::init_set (the scope
+         * graph's page-pool set-up): it runs on a scope page entry, also
+         * while a host LOG:STATe ON stream runs. */
         *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
@@ -380,6 +375,11 @@ SECTIONS
         *(.text.*8opendm40*8src_text*);
         *(.text.*6acdctr*5Trace4text*);
         *(.text.*8opendm405scope*5Scope12hw_calibrate*);
+        /* The scope record tail's hand-over (scope.rs yield_tail / cut):
+         * once per lender start (CH2, LOG:STATe ON, the wave view, inrush,
+         * a recording, a fast-log session), before its stream starts. */
+        *(.text.*8opendm405scope*5Scope10yield_tail*);
+        *(.text.*8opendm405scope*5Scope3cut*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
         *(.text.*8opendm405touch*5Touch3new*);
         *(.text.*8opendm402bt*2Bt3new*);

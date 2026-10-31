@@ -170,6 +170,47 @@ Two small statics serve the strip passes: `ui::GEN_SP` (SRAM, 484 B: the
 generator preview's trace rows, worked out once per wave and square duty
 instead of per strip) and `scope_ui::COLC` (400 B, flash).
 
+## The page pool (`pool::PAGE`, 17 KB)
+
+[src/pool.rs](../src/pool.rs); design and audit:
+[ram-pools-audit.md](ram-pools-audit.md). One SRAM area for page state
+that one view at a time needs and that is rebuilt on its next use:
+
+| tenant | B | view | on its next use after an eviction |
+|---|---|---|---|
+| `ScopeGraph` (scope_ui.rs `GraphSet`: the graph rows and their on-screen copies, SHOWN, the flush row classes) | 17 044 | Scope, combined view, wave view | empty and invalid: the page repaints; `App::show` asks the scope to render a stopped record again |
+| `Gallery` (gallery.rs) | 672 | Gallery | `Gallery::new()`; the view starts with `open` anyway |
+| `GenPreview` (ui.rs `GenSp`) | 484 | Gen (strip passes) | key "none": the rows are worked out again |
+
+Writers outside these views (a CH2 switch over SCPI, the wave view's
+clear, `sp_leave`) use `scope_ui::graph_held` and never evict another
+view's tenant. `scope_page::CACHE` (persistence) and `scope_ch2::STORE`
+(the stored record's CH2) stay outside: they survive a page change.
+DBG:POOL? (feature `dbg-pool`) lists the holders and their losses;
+tools/pool-test checks the table, emu/pooltest.py the page changes.
+
+### The scope record tail (pool `TAIL`)
+
+`pool::REC` holds `scope::BUF` (CAP samples) and right after it 33 312 B
+lent by the buffers below while idle ([ram-pools-audit.md](ram-pools-audit.md),
+candidate B). An MCX acquisition takes the free prefix at its start
+(scope.rs `grab_tail`); a lender's start takes it back first
+(`App::tail_lend` -> `Scope::yield_tail`: a running acquisition restarts
+shorter, a stopped record is cut around the shown window).
+
+| segment (in order) | B | lender holds it while | record length without it |
+|---|---|---|---|
+| `Ch2Store` (`scope_ch2::Data`: codes + anchors; the store's header stays outside) | 8 736 | CH2 streams, or CH2 on with a stopped record (its CH2) | CAP (45 056) |
+| `RingSlots` (`logger::Slots`; the ring's counters stay outside) | 16 384 | a stream (LOG:STATe, wave view, CH2, inrush, fast log); after a host session until LOG:DATA? drained it | CAP + 4 368 |
+| `RowFifo` (`csvlog::Fifo`) / `CatCache` (MMEM:CAT? cache, dropped) | 8 192 | a CSV recording or a fast-log session | CAP + 12 560 |
+
+Nothing held: CAP + 16 656 = 61 712 samples. The wave view and the inrush
+page run on BUF alone. A lender that would cut a stored record being read
+(WAV:DATA?, a scope CSV save) waits (LOG:STATe ON, CH2) or is refused (a
+CSV recording, a fast-log session) until the transfer ends. Space freed
+by a lender is taken at the next acquisition start (linear records: the
+next frame; roll / stream / comparator records: the next RUN).
+
 ## Every static of 1 KiB or more
 
 Sizes from `llvm-nm -S` of a native release ELF (default features) of
@@ -178,11 +219,11 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 
 | static | size (B) | live when | live at the same time | overlay / shrink? |
 |---|---|---|---|---|
-| scope::BUF (SRAM) | 53 248 | always: the scope acquires in the background in every view (measurements, SCPI); the stored record while stopped | everything | Lent to inrush (`Scope::lend_buf`) while the inrush page is open. Keep. |
-| logger::RING (SRAM) | 16 540 | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and `fastlog::begin`, but not by an SCPI LOG:STAT ON session | Idle in plain DMM / scope use. An overlay with the csvlog buffers would need csvlog and LOG:STAT ON to refuse each other, plus an owner token. Not done. |
+| scope::BUF (SRAM) | 90 112 (CAP 44 K since 2026-10-31) | always: the scope acquires in the background in every view (measurements, SCPI); the stored record while stopped | everything | Lent to inrush (`Scope::lend_buf`) while the inrush page is open. Keep. |
+| logger::RING (SRAM) | 16 540 | LOG:STAT ON sessions (AD1 / AD2 stream), the Wave view, inrush, fast-log sessions | csvlog is refused by the Wave view, inrush and `fastlog::begin`, but not by an SCPI LOG:STAT ON session | Its slots (16 384) are the scope record tail's `RingSlots` while idle (above). |
 | diskbuf::ARENA (SRAM) | 12 288 | any disk job (table above) + the FFT | see above | Already shared with the FFT. |
 | scope_ui::GRAPH (SRAM) | 9 956 | the scope pages (Scope, combined view, Wave view): trace / persistence / math rows and their on-screen diff copies | the scope record, the FFT | The combined view rules out an overlay with anything scope-side. The math rows (`ma`, `d_ma`) could go when math is off. Not done. |
-| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together); otherwise its head holds the MMEM:CAT? cache | DMM, scope, BT, USB | Shared with the catalog cache ([native-boot.md, SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays)). See logger::RING. |
+| csvlog::FIFO_BUF (SRAM) | 8 192 | a CSV recording; lent to fastlog (`csvlog::lend_fifo`, never together); otherwise its head holds the MMEM:CAT? cache | DMM, scope, BT, USB | Shared with the catalog cache ([native-boot.md, SRAM audit](native-boot.md#sram-audit-2026-10-30-featsram-overlays)); the scope record tail's `RowFifo` while idle (above). |
 | bt::TX (SRAM) | 6 656 | while BT is connected: the largest reply (`usbtmc::RSP_MAX` block + LF) plus stock frames, queued for DMA | everything | Shrunk from 8 192 (SRAM audit); not below one whole reply. |
 | APP (TCM) | 6 672 | always (the App) | | Keep. |
 | vdisk::TAB (SRAM) | 6 420 | while USB exports the generated volume (the table regenerates on sector reads) | everything | Keep. |
@@ -201,4 +242,5 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 
 Never live together, so worth an owner token if RAM gets tight again:
 logger::RING with the csvlog buffers (12 KiB). Everything else over 4 KiB is
-always live or live with the scope.
+always live or live with the scope (the CH2 store, the ring's slots and the
+row FIFO lend their bytes to the scope record instead: pool `TAIL` above).

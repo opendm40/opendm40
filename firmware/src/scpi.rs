@@ -661,6 +661,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           "Data out of range")
 ///   DBG:PROF?, DBG:PROF:RESET main-loop profile table (src/prof.rs) / clear it
 ///                           (feature dbg-prof, else undefined header)
+///   DBG:POOL?               the RAM pools' tenants: holder, rule, losses
+///                           (src/pool.rs `Pool::text`, PAGE then "|" TAIL; feature dbg-pool, else
+///                           undefined header)
 ///   DBG:HYSPI:SELF? n[,div[,cpha]]  HY3131 bus self-test (src/hyspi.rs; cpha 1 =
 ///                           the data phase sampled with CKPH = 1)
 ///   DBG:HYSPI:WR? mode[,div] SPI2 write experiment (src/hyspi.rs write_test):
@@ -705,6 +708,9 @@ pub enum Dbg {
     Lcd(u16, u16, u16, u16, u32),
     #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
     Diag,
+    /// DBG:POOL? (feature `dbg-pool`).
+    #[cfg_attr(not(feature = "dbg-pool"), allow(dead_code))]
+    Pool,
     /// DBG:TOUCH? (false) / DBG:TOUCH 0 (true = clear): touch log
     /// (feature `dbg-touch`).
     #[cfg_attr(not(feature = "dbg-touch"), allow(dead_code))]
@@ -2501,6 +2507,9 @@ impl Scpi {
                         #[cfg(feature = "dbg-diag")]
                         b"DIAG" => Dbg::Diag,
                         // Without the feature: no such header (Cargo.toml).
+                        #[cfg(feature = "dbg-pool")]
+                        b"POOL" if query => Dbg::Pool,
+                        // Without the feature: no such header (Cargo.toml).
                         #[cfg(feature = "dbg-touch")]
                         b"TOUCH" => Dbg::Touch(!query),
                         _ if kw(sub, "UPLoad") => {
@@ -2574,7 +2583,7 @@ impl Scpi {
                         b"FAST" if query => Dbg::Fast,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
-                        // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
+                        // DBG:UPDATE: zero the 12-byte loader
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.

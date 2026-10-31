@@ -175,6 +175,9 @@ mod fastenc;
 #[path = "../../src/fastlog.rs"]
 #[allow(dead_code)]
 mod fastlog;
+#[path = "../../src/pool.rs"]
+#[allow(dead_code)]
+mod pool;
 #[path = "../../src/gallery.rs"]
 mod gallery;
 

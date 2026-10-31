@@ -1715,28 +1715,33 @@ fn cycles() -> u32 {
     unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) }
 }
 
-// In SRAM (.dmabuf, NOLOAD) on the device: 9.7 KB that TCM .data / the
-// stack margin need more (pre-flash review 7389e8a); `init` sets it up.
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut GRAPH: Graph = Graph {
-    tr: [EMPTY; 399],
-    ps: [EMPTY; 399],
-    ma: [EMPTY; 399],
-    gn: [EMPTY; 399],
-    c2: [EMPTY; 399],
-    d_tr: [EMPTY; 399],
-    d_ps: [EMPTY; 399],
-    d_ma: [EMPTY; 399],
-    d_gn: [EMPTY; 399],
-    d_c2: [EMPTY; 399],
-    deco: Deco::NONE,
-    d_deco: Deco::NONE,
-    valid: false,
-    holes: [None; NH],
-    d_holes: [None; NH],
-    px: 0,
-    next: 0,
-};
+/// The scope graph's page state: a tenant of the page pool (pool.rs
+/// `PAGE`, SRAM). Another view's tenant (the gallery, the generator
+/// preview) takes the bytes; the next use sets it up again (`init_set`:
+/// empty, invalid, so the page repaints in full; `App::show` asks the
+/// scope to render a stopped record again, app.rs).
+pub struct GraphSet {
+    g: Graph,
+    shown: Shown,
+    /// `Graph::flush`'s row classes (`row_classes`).
+    rows: [u8; 320],
+}
+
+const _: () = assert!(crate::pool::fits::<GraphSet>(crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::ScopeGraph).len));
+
+// SAFETY: `init` writes every field.
+unsafe impl crate::pool::Tenancy for GraphSet {
+    const T: crate::pool::Tenant = crate::pool::Tenant::ScopeGraph;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::PAGE_SPECS, crate::pool::Tenant::ScopeGraph).off;
+    fn init(p: *mut Self) {
+        init_set(p);
+    }
+}
+
+#[inline(never)] // one call per use, not the pool check inlined at each
+fn set() -> *mut GraphSet {
+    crate::pool::PAGE.take_ptr::<GraphSet>()
+}
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
 /// tabs, the FFT label and boxes, the cursor tab, an open popup's box, the
@@ -1757,47 +1762,73 @@ pub const H_SPARE: usize = 10;
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
 pub fn init() {
-    let g = unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) };
-    for i in 0..399 {
-        g.tr[i] = EMPTY;
-        g.ps[i] = EMPTY;
-        g.ma[i] = EMPTY;
-        g.d_tr[i] = EMPTY;
-        g.d_ps[i] = EMPTY;
-        g.d_ma[i] = EMPTY;
-        g.gn[i] = EMPTY;
-        g.c2[i] = EMPTY;
-        g.d_gn[i] = EMPTY;
-        g.d_c2[i] = EMPTY;
-    }
-    g.deco = Deco::NONE;
-    g.d_deco = Deco::NONE;
-    g.valid = false;
-    g.holes = [None; NH];
-    g.d_holes = [None; NH];
-    g.px = 0;
-    g.next = 0;
-    init_shown();
+    init_set(set());
 }
 
-/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: start-up only, in
-/// region C (link-native.x) apart from `new_app`.
-#[inline(never)]
-fn init_shown() {
+/// Every field of a `GraphSet` from arbitrary bytes (the pool's previous
+/// tenant): the graph empty and invalid, nothing shown.
+#[inline(never)] // region B: a scope page entry, also during a host stream
+fn init_set(p: *mut GraphSet) {
+    // SAFETY: `p` is the pool's GraphSet range (8-byte aligned, asserted
+    // to fit). Raw writes only, field by field and in place (no 16 KB
+    // temporary on the stack), set every field before any read.
     unsafe {
-        core::ptr::addr_of_mut!(SHOWN).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] });
+        let g = core::ptr::addr_of_mut!((*p).g);
+        for a in [
+            core::ptr::addr_of_mut!((*g).tr),
+            core::ptr::addr_of_mut!((*g).ps),
+            core::ptr::addr_of_mut!((*g).ma),
+            core::ptr::addr_of_mut!((*g).gn),
+            core::ptr::addr_of_mut!((*g).c2),
+            core::ptr::addr_of_mut!((*g).d_tr),
+            core::ptr::addr_of_mut!((*g).d_ps),
+            core::ptr::addr_of_mut!((*g).d_ma),
+            core::ptr::addr_of_mut!((*g).d_gn),
+            core::ptr::addr_of_mut!((*g).d_c2),
+        ] {
+            let a = a as *mut (i16, i16);
+            for i in 0..399 {
+                a.add(i).write(EMPTY);
+            }
+        }
+        core::ptr::addr_of_mut!((*g).deco).write(Deco::NONE);
+        core::ptr::addr_of_mut!((*g).d_deco).write(Deco::NONE);
+        core::ptr::addr_of_mut!((*g).valid).write(false);
+        core::ptr::addr_of_mut!((*g).holes).write([None; NH]);
+        core::ptr::addr_of_mut!((*g).d_holes).write([None; NH]);
+        core::ptr::addr_of_mut!((*g).px).write(0);
+        core::ptr::addr_of_mut!((*g).next).write(0);
+        core::ptr::addr_of_mut!((*p).shown).write(Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] });
+        (core::ptr::addr_of_mut!((*p).rows) as *mut u8).write_bytes(0, 320);
         core::ptr::addr_of_mut!(STRIP_SHOWN).write(None);
     }
 }
 
 /// The graph state, read only (overlays reading its background).
 fn graph_ref() -> &'static Graph {
-    unsafe { &*core::ptr::addr_of!(GRAPH) }
+    // SAFETY: the pool's GraphSet, set up by `take_ptr` (main loop only).
+    unsafe { &*core::ptr::addr_of!((*set()).g) }
 }
 
 /// The graph state (single-threaded firmware).
 pub fn graph() -> &'static mut Graph {
-    unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) }
+    // SAFETY: as `graph_ref`; a field of its own (SHOWN / ROWS are others).
+    unsafe { &mut *core::ptr::addr_of_mut!((*set()).g) }
+}
+
+/// The graph only while the scope page's state holds the pool (no
+/// eviction of another view's tenant): writers outside the scope views
+/// (a CH2 switch over SCPI, the wave view's exit, `sp_leave`). A fresh
+/// set is empty anyway.
+pub fn graph_held() -> Option<&'static mut Graph> {
+    // SAFETY: as `graph`, only while held.
+    graph_kept().then(|| unsafe { &mut *core::ptr::addr_of_mut!((*set()).g) })
+}
+
+/// The scope graph's state holds the page pool (a stopped record needs
+/// rendering again when not, `App::show`).
+pub fn graph_kept() -> bool {
+    crate::pool::PAGE.holds(crate::pool::Tenant::ScopeGraph)
 }
 
 /// Row classes of the grid rule (`grid_on`), one byte per frame row
@@ -1811,17 +1842,15 @@ const R_LINE: u8 = 16;
 /// Every row (the centre column fx = 200).
 const R_ALL: u8 = 0x80;
 
-/// `Graph::flush`'s row classes of the frame being painted: the per-row
-/// part of the grid rule, worked out once per flush. Per pixel, its
-/// divisions made the most of a full graph repaint's time (device
-/// DBG:PROF?, 2026-10-26: the scope page's full repaint 262 ms). In SRAM:
-/// the TCM's .bss is taken from the stack.
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut ROWS: [u8; 320] = [0; 320];
+// `Graph::flush`'s row classes of the frame being painted (`GraphSet::rows`):
+// the per-row part of the grid rule, worked out once per flush. Per pixel,
+// its divisions made the most of a full graph repaint's time (device
+// DBG:PROF?, 2026-10-26: the scope page's full repaint 262 ms).
 
 /// Fill `ROWS` for a frame of `h` rows and its horizontal lines.
 fn row_classes(h: i16, hl: &[Option<HLine>; NL]) -> &'static [u8; 320] {
-    let rows = unsafe { &mut *core::ptr::addr_of_mut!(ROWS) };
+    // SAFETY: the GraphSet's own field (`graph` is another).
+    let rows = unsafe { &mut *core::ptr::addr_of_mut!((*set()).rows) };
     let (cy, dh) = ((h - 1) / 2, (h - 1) / 8);
     for fy in 0..h.clamp(0, 320) {
         rows[fy as usize] = row_class(fy, cy, dh);
@@ -2354,13 +2383,10 @@ struct Shown {
     cells_n: [u8; 4],
 }
 
-// On the device in SRAM (.dmabuf, NOLOAD, as GRAPH; region B audit #6:
-// no .data load image in region B); `init` sets it up.
-#[cfg_attr(target_os = "none", link_section = ".dmabuf")]
-static mut SHOWN: Shown = Shown { m: None, strip: [Mark::NONE; NSTRIP], cells: [[0; 16]; 4], cells_n: [0; 4] };
-
+// In the page pool with the graph (`GraphSet::shown`).
 fn shown() -> &'static mut Shown {
-    unsafe { &mut *core::ptr::addr_of_mut!(SHOWN) }
+    // SAFETY: the GraphSet's own field.
+    unsafe { &mut *core::ptr::addr_of_mut!((*set()).shown) }
 }
 
 /// A popup over the graph closed: the next `update` repaints the graph

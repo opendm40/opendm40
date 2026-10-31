@@ -24,6 +24,9 @@ mod clock {
 }
 
 #[allow(dead_code)]
+#[path = "../../src/pool.rs"]
+mod pool;
+#[allow(dead_code)]
 #[path = "../../src/scope_ch2.rs"]
 mod scope_ch2;
 

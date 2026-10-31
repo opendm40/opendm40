@@ -122,9 +122,8 @@ use crate::hy3131 as hy;
 use crate::mmio::r32;
 #[cfg_attr(not(feature = "ad2-isr"), allow(unused_imports))]
 use crate::trigsoft::{Stream, StreamCfg};
-use core::cell::UnsafeCell;
 use core::sync::atomic::{
-    AtomicU32,
+    AtomicPtr, AtomicU32,
     Ordering::{Acquire, Relaxed, Release},
 };
 
@@ -173,7 +172,7 @@ pub const AD2_BURST_US: u64 = 500;
 /// session is seq k + 1, and the ring holds consecutive ones (a full ring
 /// drops the NEWEST sample, so nothing ever leaves except by `drain`).
 #[derive(Clone, Copy)]
-struct Rec {
+pub struct Rec {
     ts_us: u32,
     raw: i32,
 }
@@ -218,7 +217,11 @@ pub const GAP_BUCKETS: usize = 5;
 /// producer, `tail` the consumer; Release on `head` / Acquire on the other
 /// side order the record slots. All-zero = empty (`new`, `reset`).
 pub struct Ring {
-    buf: UnsafeCell<[Rec; CAP]>,
+    /// The CAP slots: on the device the TAIL segment `RingSlots` (pool.rs;
+    /// the scope's record tail while no stream holds it), taken by
+    /// `Logger::start`; outside it, so the counters below stay readable
+    /// after a session (LOG:COUNt?, DBG:ISR?). Set by `attach`.
+    buf: AtomicPtr<Rec>,
     /// Records pushed this session (slot = head % CAP).
     head: AtomicU32,
     /// Records drained this session.
@@ -265,12 +268,24 @@ const TRG_EV: usize = 8;
 // only by the consumer below `head` (Acquire); every other field is atomic.
 unsafe impl Sync for Ring {}
 
+/// The ring's slots as a TAIL tenant (any bytes are valid records: only
+/// slots below `head` are read, and `reset` empties the ring).
+pub struct Slots(#[allow(dead_code)] [Rec; CAP]);
+
+// SAFETY: plain records; size and alignment asserted below.
+unsafe impl crate::pool::Tenancy for Slots {
+    const T: crate::pool::Tenant = crate::pool::Tenant::RingSlots;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::RingSlots).off;
+    fn init(_: *mut Self) {}
+}
+const _: () = assert!(crate::pool::fits::<Slots>(crate::pool::SEG_RING) && core::mem::size_of::<Slots>() == crate::pool::SEG_RING);
+
 const Z: AtomicU32 = AtomicU32::new(0);
 
 impl Ring {
     pub const fn new() -> Self {
         Ring {
-            buf: UnsafeCell::new([Rec { ts_us: 0, raw: 0 }; CAP]),
+            buf: AtomicPtr::new(core::ptr::null_mut()),
             head: Z,
             tail: Z,
             captured: Z,
@@ -295,6 +310,17 @@ impl Ring {
             trg_first_at: Z,
             trg_first_gen: Z,
         }
+    }
+
+    /// The slots (CAP records) this ring uses from now on (main loop, no
+    /// producer running).
+    pub fn attach(&self, slots: *mut Rec) {
+        self.buf.store(slots, Relaxed);
+    }
+
+    #[inline(always)]
+    fn slots(&self) -> *mut Rec {
+        self.buf.load(Relaxed)
     }
 
     /// New session (main loop, no producer running).
@@ -335,7 +361,7 @@ impl Ring {
         }
         // SAFETY: slot h is outside [tail, head): the consumer does not read
         // it until the Release store below publishes it.
-        unsafe { (self.buf.get() as *mut Rec).add(h as usize & (CAP - 1)).write_volatile(Rec { ts_us, raw }) };
+        unsafe { self.slots().add(h as usize & (CAP - 1)).write_volatile(Rec { ts_us, raw }) };
         self.head.store(h.wrapping_add(1), Release);
         true
     }
@@ -348,9 +374,15 @@ fn inc(a: &AtomicU32) {
 }
 
 /// The ring of the firmware (SRAM .dmabuf, NOLOAD: `Logger::init_in_place`
-/// resets it; the slots' contents do not matter).
+/// resets it and attaches its slots, pool TAIL `RingSlots`).
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 pub static RING: Ring = Ring::new();
+
+/// The firmware ring's slots: TAIL segment `RingSlots`.
+pub fn tail_slots() -> *mut Rec {
+    // SAFETY: inside REC's tail (pool-test: the spec ends inside the pool).
+    unsafe { (crate::pool::REC.tail.0.get() as *mut u8).add(<Slots as crate::pool::Tenancy>::OFF) as *mut Rec }
+}
 
 /// The producer side's clock and per-sample statistics: the main loop's in
 /// `Logger` (AD1, main-loop AD2), the stream ISR's own copy in `isr::PROD`
@@ -515,6 +547,8 @@ pub struct Logger {
     isr: bool,
     /// The running / last session's producer was the stream ISR (`lost`).
     isr_sess: bool,
+    /// The last session was a view's (`start_wave`), not a host's.
+    view_sess: bool,
     /// `plan` ran for the next session (`r26` holds its rung).
     planned: bool,
     /// The session's nominal rate, mHz (`nominal_mhz`), set by `plan`.
@@ -570,6 +604,7 @@ impl Logger {
             core::ptr::write_bytes(this, 0, 1);
             (*this).ring = ring;
         }
+        ring.attach(tail_slots());
         ring.reset();
     }
 
@@ -584,6 +619,7 @@ impl Logger {
             ad2: false,
             isr: false,
             isr_sess: false,
+            view_sess: false,
             planned: false,
             nom_mhz: 0,
             isr_rate: 0,
@@ -828,6 +864,13 @@ impl Logger {
     pub fn start(&mut self, mode: u8, range: i8) {
         let keep = core::mem::take(&mut self.dc_keep) && (mode, range) == (self.mode, self.range);
         self.stop();
+        // The slots: the scope gave its record tail back first (main.rs
+        // `App::tail_lend` before every start); refused otherwise, and no
+        // session starts (the scope's DMA may still write there).
+        if crate::pool::TAIL.take::<Slots>().is_none() {
+            return;
+        }
+        self.view_sess = false;
         let period_ns = self.plan(mode, range);
         let on_isr = self.ad2 || self.ad1_on_isr();
         #[cfg(feature = "ad2-isr")]
@@ -891,7 +934,41 @@ impl Logger {
         self.ad2 = true;
         self.req_hz = hz;
         self.start(mode, range);
+        if !self.active {
+            (self.ad2, self.req_hz) = (self.saved_ad2, self.saved_hz);
+            return;
+        }
         self.wave = true;
+        self.view_sess = true;
+    }
+
+    /// The ring's slots hold nothing anyone reads (pool TAIL `RingSlots`
+    /// may go back to the scope's record tail): no session runs, and the
+    /// last one was a view's (wave, CH2, inrush) or its host drained every
+    /// record (LOG:DATA? still reads them after LOG:STATe OFF).
+    pub fn slots_idle(&self) -> bool {
+        !self.active && (self.view_sess || self.ring().len() == 0)
+    }
+
+    /// Hold the slots from a fast-log session's begin (fastlog::begin; the
+    /// logger starts after its Prep slices): the scope's next acquisition
+    /// does not take them meanwhile (main.rs gave them back first,
+    /// `tail_lend`); `slots_release` keeps them while the session runs.
+    pub fn reserve_slots(&self) {
+        let _ = crate::pool::TAIL.take::<Slots>();
+    }
+
+    /// The slots back to pool TAIL when idle (main.rs, every pass, without
+    /// a fast-log session: its Stop slices drain after the logger stopped).
+    /// A view session's leftover records are dropped first: nothing reads
+    /// the slots' bytes after this.
+    #[inline(never)]
+    pub fn slots_release(&self) {
+        if self.slots_idle() && crate::pool::TAIL.holds(crate::pool::Tenant::RingSlots) {
+            let r = self.ring();
+            r.tail.store(r.head.load(Acquire), Release);
+            crate::pool::TAIL.give(crate::pool::Tenant::RingSlots);
+        }
     }
 
     fn end_wave(&mut self) {
@@ -1113,7 +1190,7 @@ impl Logger {
         let ring = self.ring();
         let t = ring.tail.load(Relaxed);
         let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len() / REC_BYTES);
-        let base = ring.buf.get() as *const Rec;
+        let base = ring.slots() as *const Rec;
         let mut last = 0u32;
         for i in 0..n {
             let k = t.wrapping_add(i as u32);
@@ -1146,7 +1223,7 @@ impl Logger {
         let ring = self.ring();
         let t = ring.tail.load(Relaxed);
         let n = (ring.head.load(Acquire).wrapping_sub(t) as usize).min(out.len());
-        let base = ring.buf.get() as *const Rec;
+        let base = ring.slots() as *const Rec;
         for (i, o) in out[..n].iter_mut().enumerate() {
             // SAFETY: as `drain`.
             let r = unsafe { base.add(t.wrapping_add(i as u32) as usize & (CAP - 1)).read_volatile() };
@@ -1212,7 +1289,7 @@ impl Logger {
     #[inline(always)]
     fn rec(&self, k: u32) -> Rec {
         // SAFETY: as `drain`.
-        unsafe { (self.ring().buf.get() as *const Rec).add(k as usize & (CAP - 1)).read_volatile() }
+        unsafe { (self.ring().slots() as *const Rec).add(k as usize & (CAP - 1)).read_volatile() }
     }
 
     /// The reply of LOG:DATA? in the current LOG:FORMat into `out` (the
@@ -1914,7 +1991,9 @@ mod tests {
     use super::*;
 
     fn session(ad2: bool, period_ns: u32) -> std::boxed::Box<Logger> {
+        let slots = std::boxed::Box::leak(std::boxed::Box::new([Rec { ts_us: 0, raw: 0 }; CAP]));
         let ring: &'static Ring = std::boxed::Box::leak(std::boxed::Box::new(Ring::new()));
+        ring.attach(slots.as_mut_ptr());
         let mut l = std::boxed::Box::new(Logger::new());
         l.ring = ring;
         l.ad2 = ad2;
@@ -2543,7 +2622,7 @@ pub mod wave {
         let ring = &RING;
         let t = ring.tail.load(Relaxed);
         let n = ring.head.load(Acquire).wrapping_sub(t);
-        let base = ring.buf.get() as *const Rec;
+        let base = ring.slots() as *const Rec;
         for i in 0..n {
             // SAFETY: below the Acquire-loaded head (Logger::drain).
             let r = unsafe { base.add(t.wrapping_add(i) as usize & (CAP - 1)).read_volatile() };
@@ -2558,7 +2637,7 @@ pub mod wave {
         let ring = &RING;
         let t = ring.tail.load(Relaxed);
         let n = ring.head.load(Acquire).wrapping_sub(t);
-        let base = ring.buf.get() as *const Rec;
+        let base = ring.slots() as *const Rec;
         for i in 0..n {
             // SAFETY: below the Acquire-loaded head (Logger::drain).
             let r = unsafe { base.add(t.wrapping_add(i) as usize & (CAP - 1)).read_volatile() };

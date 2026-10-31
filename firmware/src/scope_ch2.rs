@@ -40,11 +40,27 @@ pub fn set_lag_us(us: i32) {
     LAG_US.store(us.clamp(-100_000, 100_000), core::sync::atomic::Ordering::Relaxed);
 }
 
-pub struct Store {
+/// The samples and anchors: pool TAIL segment `Ch2Store` (pool.rs; the
+/// scope record's tail while CH2 holds nothing: `App::tail_reclaim`).
+/// Read only below `Store::tot` / `nanc`, so any bytes are valid.
+pub struct Data {
     codes: [i16; CAP],
+    anc: [(u64, u32); NANCH],
+}
+
+// SAFETY: plain integers; size and alignment asserted below.
+unsafe impl crate::pool::Tenancy for Data {
+    const T: crate::pool::Tenant = crate::pool::Tenant::Ch2Store;
+    const OFF: usize = crate::pool::spec_of(&crate::pool::TAIL_SPECS, crate::pool::Tenant::Ch2Store).off;
+    fn init(_: *mut Self) {}
+}
+const _: () = assert!(core::mem::size_of::<Data>() == crate::pool::SEG_CH2 && crate::pool::fits::<Data>(crate::pool::SEG_CH2));
+
+pub struct Store {
+    /// The samples (`Data`; set by `init`).
+    d: *mut Data,
     /// Samples pushed since the reset (the next sample's index).
     tot: u64,
-    anc: [(u64, u32); NANCH],
     /// Anchors written (the newest is `(nanc - 1) % NANCH`).
     nanc: usize,
     /// DWT of the stream session's begin (the stamps' zero).
@@ -69,9 +85,10 @@ pub fn store() -> &'static mut Store {
 
 /// Set the store up in place (its static is not loaded on the device).
 pub fn init() {
-    // Field by field: `write(Store::NEW)` put an 8.7 KB image of it in
-    // flash. The codes need no init (only indices below `tot` are read).
+    // The codes need no init (only indices below `tot` are read).
     let st = store();
+    // SAFETY: inside REC's tail (pool-test).
+    st.d = unsafe { (crate::pool::REC.tail.0.get() as *mut u8).add(<Data as crate::pool::Tenancy>::OFF) } as *mut Data;
     st.tot = 0;
     st.nanc = 0;
     st.c0 = 0;
@@ -82,9 +99,8 @@ pub fn init() {
 
 impl Store {
     const NEW: Store = Store {
-        codes: [0; CAP],
+        d: core::ptr::null_mut(),
         tot: 0,
-        anc: [(0, 0); NANCH],
         nanc: 0,
         c0: 0,
         period: 1.0,
@@ -101,6 +117,25 @@ impl Store {
         self.period = crate::clock::HCLK_HZ as f32 / fs.max(1) as f32;
         self.sc = sc;
         self.dropped = dropped;
+    }
+
+    /// The samples / anchors (main loop only; read below `tot` / `nanc`).
+    #[inline(always)]
+    fn dat(&self) -> &Data {
+        // SAFETY: set by `init`; main loop only.
+        unsafe { &*self.d }
+    }
+
+    #[inline(always)]
+    fn dat_mut(&mut self) -> &mut Data {
+        // SAFETY: as `dat`.
+        unsafe { &mut *self.d }
+    }
+
+    /// Empty (the samples' bytes went back to the pool: `App::tail_reclaim`).
+    pub fn clear(&mut self) {
+        self.tot = 0;
+        self.nanc = 0;
     }
 
     /// Restart after a hole (the scale and the session stay).
@@ -127,10 +162,11 @@ impl Store {
     #[inline(always)]
     pub fn push(&mut self, ts_us: u32, raw: i32) {
         let n = self.tot;
-        self.codes[(n % CAP as u64) as usize] = (raw >> 3) as i16;
+        self.dat_mut().codes[(n % CAP as u64) as usize] = (raw >> 3) as i16;
         if n % EVERY == 0 {
             let t = self.c0.wrapping_add(ts_us.wrapping_mul(200)).wrapping_sub((lag_us() * 200) as u32);
-            self.anc[self.nanc % NANCH] = (n, t);
+            let k = self.nanc % NANCH;
+            self.dat_mut().anc[k] = (n, t);
             self.nanc += 1;
         }
         self.tot = n + 1;
@@ -152,12 +188,12 @@ impl Store {
         let oldest = self.tot.saturating_sub(CAP as u64);
         let newest = (self.nanc - 1) % NANCH;
         // Walk back from the newest anchor to the segment holding `t`.
-        let (mut hi_i, mut hi_t) = self.anc[newest];
+        let (mut hi_i, mut hi_t) = self.dat().anc[newest];
         let rel = t.wrapping_sub(hi_t) as i32;
         if rel >= 0 {
             // After the newest anchor: its segment's slope (or nominal).
             let slope = if n >= 2 {
-                let (pi, pt) = self.anc[(newest + NANCH - 1) % NANCH];
+                let (pi, pt) = self.dat().anc[(newest + NANCH - 1) % NANCH];
                 let dt = hi_t.wrapping_sub(pt) as i32;
                 if dt > 0 { (hi_i - pi) as f64 / dt as f64 } else { 1.0 / self.period as f64 }
             } else {
@@ -166,7 +202,7 @@ impl Store {
             return Some(hi_i as f64 + rel as f64 * slope);
         }
         for k in 1..n {
-            let (lo_i, lo_t) = self.anc[(newest + NANCH - k) % NANCH];
+            let (lo_i, lo_t) = self.dat().anc[(newest + NANCH - k) % NANCH];
             if lo_i < oldest {
                 return None;
             }
@@ -206,8 +242,9 @@ impl Store {
 
     fn min_max(&self, ia: u64, ib: u64) -> (f32, f32) {
         let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+        let codes = &self.dat().codes;
         for n in ia..ib {
-            let c = self.codes[(n % CAP as u64) as usize];
+            let c = codes[(n % CAP as u64) as usize];
             lo = lo.min(c);
             hi = hi.max(c);
         }
@@ -216,7 +253,7 @@ impl Store {
 
     /// The anchor with age `k` (0 = the newest).
     fn anc_k(&self, k: usize) -> (u64, u32) {
-        self.anc[((self.nanc - 1) % NANCH + NANCH - k) % NANCH]
+        self.dat().anc[((self.nanc - 1) % NANCH + NANCH - k) % NANCH]
     }
 
     /// A run of `span_run` lookups at rising start times (a frame's
