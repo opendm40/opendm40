@@ -768,7 +768,7 @@ unless shown otherwise.
 | `DIAG?` | | `<min V>,<max V>,<mid crossings>,<window s>` of the generator's DAC output | USB |
 | `DIAG:PWM?` | | `<PWM edges per s>,PB12=0\|1` | USB |
 | `DBG:PING?` | `[<ms>]` | `<uptime ms>,<flags>,<keepalive left ms>`; `4294967295` = no limit (the default after boot) | USB |
-| `DBG:BOOT?` | | Boot and reset information | USB |
+| `DBG:BOOT?` | | `NONE`, or `B2,<57 words>,<renamed>`: boot and reset information ([below](#dbgboot)) | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
 | `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>,<trend chart ms/div>` | USB |
@@ -779,7 +779,7 @@ unless shown otherwise.
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
-| `DBG:DIAG?` | | block of diagnostic bytes | USB |
+| `DBG:DIAG?` | | block of diagnostic bytes. Only in builds with the `dbg-diag` feature. | USB |
 | `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
 | `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
 | `DBG:CHG:LOG?` | | `<changes>,<ms>:<pins>,…`: the last 8 changes of the charger pins since the start, oldest first; pins bit 0 PB10, bit 1 PB11, bit 2 USB configured | USB |
@@ -788,7 +788,7 @@ unless shown otherwise.
 | `DBG:TOUCH:TEST[?]` | `ON`, `OFF` | `1` while the [touch test page](README.md#touch-test) is shown. `ON` is refused while a recording session runs. | USB |
 | `DBG:TOUCH:CAL[?]` | `RESET`, or `a,b,c,d,e,f` | The [touch calibration](README.md#touch-calibration) x' = a x + b y + c, y' = d x + e y + f; the query returns the six numbers (`1,0,0,0,1,0` without a calibration). `RESET` removes it. A set outside the page's limits (a, e within 0.85..1.15, b, d within ±0.15, at most 40 px of shift at the targets) is refused with -222. Kept in the settings, as the page's **Save**. | USB |
 | `DBG:PROF[?]` | | Main loop timing table. Only in builds with the `dbg-prof` feature. | USB |
-| `DBG:PROF:RESET` | | Clears the timing table (`dbg-prof` builds). | USB |
+| `DBG:PROF:RESET` | | Clears the timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
 | `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
@@ -796,15 +796,15 @@ unless shown otherwise.
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
 | `DBG:GEST?` | | `<n>;<target>,<axis>,<delta>,<ms>;...\|POS <hpos>,<trig row>,<pos>\|AUTO...`: the last scope drags, the positions now | USB |
 | `DBG:ALARm?` | | `<sounding>,<silenced>,<events>,<setting>` | USB |
-| `DBG:SENTinel?` | | Wrong-connection detector state | USB |
+| `DBG:SENTinel?` | | Wrong-connection detector state. Only in builds with the `dbg-sent` feature. | USB |
 | `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
-| `DBG:SENTinel:REG?` | | Measurement chip registers and relay state | USB |
+| `DBG:SENTinel:REG?` | | Measurement chip registers and relay state. Only in builds with the `dbg-sent` feature. | USB |
 | `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
-| `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter) | | USB |
-| `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>` | USB |
-| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md)) | | USB |
-| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians) | USB |
+| `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter; `dbg-src` builds) | | USB |
+| `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>`. Only in builds with the `dbg-src` feature. | USB |
+| `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md); `dbg-ohm6` builds) | | USB |
+| `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians; `dbg-ohm6` builds) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic. Only in builds with the `dbg-acdc` feature. | USB |
 | `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
 | `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
@@ -860,3 +860,40 @@ unless shown otherwise.
   copied there.
 - `DBG:LOADER`: a staged file is installed; switching the meter off and on
   leaves the loader and starts opendm40.
+
+### DBG:BOOT?
+
+`B2`, then 57 numbers in hex (no `0x`, no leading zeros), then the 8.3
+name fatren gave the installed `dm40*.bin` (11 characters, blanks if none).
+[`firmware/tools/dm40dbg.py boot`](../../firmware/tools/dm40dbg.py) prints it decoded.
+
+| # | Field |
+|---|---|
+| 0 | mode: 0 normal, 1 recovery |
+| 1 | reset reason: 0 none, 1 watchdog after recovery, 2 watchdog (stale), 3 watchdog (retry), 4 key hold aborted, 5 requested, 6 clock failed |
+| 2 | clock: 0 HXTAL, 1 IRC16M, 2 failed |
+| 3, 4 | reset flags (RCU_RSTSCK) at reset / after the shim |
+| 5 | the previous boot's last word |
+| 6 | the last loader trigger (`5452001x`: marker zeroed, failed, PA2 entry; `5452000x`: recovery file) |
+| 7..9 | loader marker words |
+| 10 | marker valid: 1 / 0 |
+| 11 | crash word (`435200nn`: nn watchdog resets in a row) |
+| 12 | healthy (60 s of uptime): 1 / 0 |
+| 13 | last flash status of the marker zeroing (0 = clean) |
+| 14..17 | FSMC BCR1, BTR1, BWTR1 and the panel ID as found at boot |
+| 18 | fatren: 0 not run, 1 no medium, 2 bad BPB, 3 clean, 4 dry run, 5 renamed, 6 error |
+| 19..25 | fatren: found, old backup, old deleted, freed clusters, others left, recovery file deleted, staged |
+| 26 | calibration safety copy: 0 not run, 1 no medium, 2 bad BPB, 3 present, 4 written, 5 no space, 6 error |
+| 27..29 | its written / conflict / differs masks (bit 0 CALIB, 1 BOOTDATA, 2 UID) |
+| 30 | its time, ms |
+| 31, 32 | stack used / stack size, bytes |
+| 33, 34 | SPI flash clock divider (4 / 16) and its check: 0 not run, 1 OK, 2 forced, 3 no chip, 4 no signature, 5 / 6 differed (1st / 2nd read) |
+| 35..37 | disk folders: ok, created, failed (bit masks) |
+| 38 | calibration record CRC: 1 OK, 0 bad |
+| 39 | settings from: 0 not run, 1 backup SRAM, 2 file, 3 defaults |
+| 40, 41 | the file slot and sequence number used |
+| 42 | the settings file at boot: 0 not run, 1 present, 2 created, 3 no file, 4 error |
+| 43 | the last settings save: 0 none, 1 OK, 2 deferred, 3 bad record, 4 error, 5 no file |
+| 44, 45 | saves this boot, the newest slot's sequence number |
+| 46..53 | boot phases, ms: board + splash, fatren, safety copy, folders, settings, mirror, USB disk, refresh |
+| 54..56 | main's clock at App::new's end, the first frame, the touch reset, ms |

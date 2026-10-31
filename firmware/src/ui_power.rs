@@ -836,15 +836,15 @@ pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
     let res = if p.job != 0 { pw::JR_RUN } else { p.job_res };
     let warn = match (p.job_last, res) {
         (pw::JOB_ZERO, pw::JR_RUN) => {
-            t.push("Zeroing: leads open, nothing in A (12 s)");
+            t.push("Zero: leads open (12 s)");
             false
         }
         (pw::JOB_VCAL, pw::JR_RUN) => {
-            t.push("V cal ").push(rn).push(": keep the voltage steady (8 s)");
+            t.push("V cal ").push(rn).push(": hold V steady (8 s)");
             false
         }
         (_, pw::JR_METHOD) => {
-            t.push("Zero / V cal need the P + PF method");
+            t.push("Needs the P + PF method");
             true
         }
         (pw::JOB_ZERO, pw::JR_OK) => {
@@ -852,7 +852,7 @@ pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
             false
         }
         (pw::JOB_ZERO, pw::JR_SIGNAL) => {
-            t.push("Zero refused: a signal on V or in A");
+            t.push("Zero: signal present");
             true
         }
         (pw::JOB_VCAL, pw::JR_OK) => {
@@ -860,19 +860,19 @@ pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
             false
         }
         (pw::JOB_VCAL, pw::JR_SMALL) => {
-            t.push("V cal refused: below 10 % of ").push(rn);
+            t.push("V cal: < 10 % of ").push(rn);
             true
         }
         (pw::JOB_VCAL, pw::JR_BIG) => {
-            t.push("V cal refused: too high for ").push(rn);
+            t.push("V cal: too high for ").push(rn);
             true
         }
         (pw::JOB_VCAL, pw::JR_UNSTABLE) => {
-            t.push("V cal refused: the voltage is not steady");
+            t.push("V cal: V not steady");
             true
         }
         (pw::JOB_VCAL, pw::JR_RANGE) => {
-            t.push("V cal refused: off by more than 10 %");
+            t.push("V cal: off > 10 %");
             true
         }
         (_, pw::JR_ABORT) => {
@@ -898,8 +898,8 @@ pub fn settings_status(p: &pw::Pw, key: u32, help: u8) -> u32 {
     let hl = match help {
         // When to turn it on (doc 3.16): V leads at the source, the meter in
         // series, so the load gets V - I R_path; ON marks V / P "@load".
-        HELP_LOAD if p.comp => "At load ON: V at source, so load sees V - I*R",
-        HELP_LOAD => "OFF: V, P at the jacks. ON if V leads at source",
+        HELP_LOAD if p.comp => "ON: the load sees V - I*R",
+        HELP_LOAD => "OFF: V, P at the jacks",
         _ => coup_help(p.coup),
     };
     let mut k = T::new();

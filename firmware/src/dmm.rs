@@ -30,11 +30,14 @@ pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
 #[path = "acdcm.rs"]
 pub mod am;
-#[cfg(target_os = "none")]
+#[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
-/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
-#[cfg(not(target_os = "none"))]
+/// DBG:SRC is firmware only (the host tests that include dmm.rs get it
+/// off) and needs the feature `dbg-src` (not default on
+/// test/scope-chain-0.4, Cargo.toml): without it DBG:SRC is an unknown
+/// header.
+#[cfg(not(all(target_os = "none", feature = "dbg-src")))]
 mod src {
     pub fn active() -> bool {
         false
@@ -3926,6 +3929,7 @@ impl Dmm {
     /// relay PA state (0 V/A, 1 the ohm network, 255 unknown), the mode,
     /// the range and `a_blind`.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     pub fn reg_text(&self, buf: &mut [u8; 72]) -> usize {
         let mut b = [0u8; 24];
         hy::read(0x20, &mut b);
@@ -5260,6 +5264,7 @@ impl Dmm {
     /// Firmware only (the host tests that include dmm.rs have no scpi).
     #[cfg(target_os = "none")]
     #[inline(never)] // .cold (link-native.x): one SCPI command
+    #[cfg_attr(not(feature = "dbg-ohm6"), allow(dead_code))]
     pub fn ohm600_dbg(&mut self, set: Option<[f32; 5]>, out: &mut crate::scpi::Scpi) {
         let o = &mut self.o6;
         if let Some(v) = set {

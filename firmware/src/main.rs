@@ -55,6 +55,7 @@ mod trigsoft;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
+#[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
 mod dbgsrc;
 mod stockfont;
 mod touch;
@@ -174,6 +175,7 @@ static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 static mut LOGGER: logger::Logger = logger::Logger::new();
 
 /// DIAG block size (DBG:DIAG?).
+#[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
 const DIAG_LEN: usize = 212;
 
 /// Bring-up failures as red squares at the top left, one slot per stage.
@@ -344,11 +346,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // screenshot preparation's sector erases wait ~0.5 s after it.
     #[cfg(feature = "vdisk")]
     let mut host_io_t = 0u64;
+    #[cfg(feature = "dbg-diag")]
     let mut loop_max_shown = 0u32;
     let mut loop_win = 0u64;
     // Section profile (debug): max us per section in the last second:
     // 0 usb+scpi, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
     let mut sec = [0u32; 6];
+    #[cfg(feature = "dbg-diag")]
     let mut sec_shown = [0u32; 6];
     // Streamed USBTMC reply: last progress (usbtmc stream_pos) and its time.
     let mut stream_seen = (usize::MAX, 0u64);
@@ -364,9 +368,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         loop_t0 = t;
         if now >= loop_win {
             loop_win = now + 1000;
-            loop_max_shown = loop_max;
+            #[cfg(feature = "dbg-diag")]
+            {
+                loop_max_shown = loop_max;
+                sec_shown = sec;
+            }
             loop_max = 0;
-            sec_shown = sec;
             sec = [0; 6];
         }
         let mut ts = cyc();
@@ -587,7 +594,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // One command of the message per pass of this loop (scpi_msg.rs);
         // a READ? / MEAS? / FETC? that waits pauses it until its reading.
         while let Some(msg_n) = msgs[src].next(&mut msg) {
+            #[cfg(feature = "dbg-diag")]
             let dbg_ctl = tmc.dbg_ctl;
+            #[cfg(feature = "dbg-diag")]
             let bt_tx = (bt.tx_dma_ok, bt.tx_dropped);
             let (mut scpi, port): (&mut scpi::Scpi, &mut dyn bt::ScpiPort) =
                 if src == BT { (&mut scpis[BT], &mut bt) } else { (&mut scpis[USB], &mut tmc) };
@@ -788,10 +797,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dbg_idle(set, now, scpi);
                         set.is_none()
                     }
+                    #[cfg(feature = "dbg-ohm6")]
                     scpi::Dbg::Ohm6(set) => {
                         app.dmm.ohm600_dbg(set, scpi);
                         set.is_none()
                     }
+                    #[cfg(not(feature = "dbg-ohm6"))]
+                    scpi::Dbg::Ohm6(_) => false,
                     scpi::Dbg::Ping(ms) => {
                         if ms > 0 {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
@@ -890,6 +902,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         false
                     }
+                    #[cfg(feature = "dbg-diag")]
                     scpi::Dbg::Diag => {
                         let mut d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
                         // 61: charge pins (bit 0 PB10, 1 PB11), bit 2 USB configured.
@@ -901,6 +914,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.put_bytes(&d);
                         true
                     }
+                    #[cfg(not(feature = "dbg-diag"))]
+                    scpi::Dbg::Diag => false,
                     scpi::Dbg::Flash => {
                         scpi.len = 0;
                         let mut t = [0u8; 16];
@@ -2321,9 +2336,7 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         w.s(", osr ");
         w.u(l.osr() as u64);
     }
-    w.s("\r\n# t_s = device clock, s; raw = ");
-    w.s(if ad2 { "AD2 code (+-262143 = +-1.25 V at the AD2 input); value = the DMM's AD2 calibration" } else { "AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)" });
-    w.s("; lost_before = conversions missing before the row\r\n");
+    w.s(if ad2 { "\r\n# raw: AD2 code, 262143 = 1.25 V\r\n" } else { "\r\n# raw: AD1 counts, uncalibrated\r\n" });
     w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
     if sc.is_some() {
         w.bytes(unit);
@@ -2348,6 +2361,7 @@ fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
 }
 
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
+#[cfg(feature = "dbg-diag")]
 fn touch_diag(
     tp: &Option<touch::Touch>,
     events: u32,
