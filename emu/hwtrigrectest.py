@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Comparator-trigger record length and content (src/hwtrig.rs, scope.rs
 hw_poll) in the emulator: DIGitize and SINGle at 1 us .. 200 ms/div with
-the comparator on (the default).
+the comparator on (the default), Normal sweep; other trigger positions
+(hpos): firmware/tools/trig-test.
 
   cd firmware && ./build.sh
   emu/hwtrigrectest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
@@ -11,11 +12,10 @@ Two emulator runs (one input sine each: 20 kHz for 1 us .. 1 ms/div,
 MAX, WORD) must be
   * the software linear record's length: lin_len = clamp(fs / 10, 26 K,
     CAP) (45 056 from 5 ms/div down, 26 624 at 10 ms/div and slower);
-  * from the comparator path (DBG:HWTRIG:STAT? hits or misses grow) at
-    the edge position of the stock layout: pre_for = screen * hpos / 400 +
-    416 samples from the record start, refined within the 800-sample window
-    (here pre + 16 .. pre + 816), or later when the comparator timed out
-    and the software search found the edge (a full screen around it);
+  * triggered by the comparator (DBG:HWTRIG:STAT? hits grow, misses rare)
+    at the edge position of the stock layout: pre_for = screen * hpos / 400
+    + 416 samples from the record start, refined within the 800-sample
+    window (here pre + 16 .. pre + 816);
   * the input: frequency, Vpp; the trigger sample on the level (0 V) with a
     rising slope.
 --sw runs the same steps with the software trigger (DBG:HWTRIG:ENABLE 0)
@@ -156,20 +156,17 @@ def step(t, hz, tb, mode):
         return n
     exp = min(max(int(sr) // 10, 26 * 1024), A.cap)
     check(n == exp == len(v), '%s: %d points (expected lin_len %d), %d samples read' % (tag, n, exp, len(v)))
-    # Misses are not failures here: in the emulator the comparator often
-    # misses at 25..50 MS/s (the base commit too; wavtest.py docstring).
-    # Normal mode drops a missed frame instead of showing it untriggered.
-    # A comparator timeout with a software-found crossing counts as a miss.
-    check(s1[0] + s1[1] > s0[0] + s0[1], '%s: comparator path (hits %d -> %d, misses %d -> %d)'
-          % (tag, s0[0], s1[0], s0[1], s1[1]))
+    # The counts cover the running frames before DIG / SING too: at 50 MS/s
+    # an occasional miss there (1..2 per ~100 hits, emulator) is not this
+    # record's; the record's own trigger is checked against the window.
+    check(s1[0] > s0[0] and s1[1] - s0[1] <= max(2, (s1[0] - s0[0]) // 20),
+          '%s: comparator hits %d -> %d, misses %d -> %d' % (tag, s0[0], s1[0], s0[1], s1[1]))
     screen = round(10 * tb * sr)
     pre = screen * 200 // 400
-    # A comparator stop puts the edge at pre_for, refined within 800 samples
-    # (pre + 16 .. pre + 816); a frame the comparator missed (emulator, see
-    # above) is searched in software from pre on (hw_poll's timeout path).
-    win = pre + 16 <= ti < pre + 816
-    check(pre <= ti <= n - (screen - pre), '%s: trigger at %d, %s (pre_for %d)'
-          % (tag, ti, 'in the comparator window' if win else 'software search after a comparator timeout', pre + 416))
+    # The comparator stop puts the edge at pre_for, refined within the
+    # 800-sample window from pre + 16 on (hw_poll Done).
+    check(pre + 16 <= ti < pre + 816, '%s: trigger at %d, window %d .. %d (pre_for %d)'
+          % (tag, ti, pre + 16, pre + 816, pre + 416))
     f, vpp = fit(v, xinc)
     check(abs(f - hz) < hz * 0.03 and abs(vpp - A.vpp) < A.vpp * 0.2, '%s: %.1f Hz, %.3f Vpp' % (tag, f, vpp))
     if 0 < ti < len(v) - 1:
