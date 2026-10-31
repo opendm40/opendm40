@@ -820,7 +820,7 @@ fn hit_tests(ck: &mut Ck) {
         let n = ui::range_items(b).len();
         ui::range_page(b, Some(0), 0, None);
         let hit = move |x, y| {
-            ui::range_hit(b, x, y).map(|r| match r {
+            ui::range_hit(b, None, x, y).map(|r| match r {
                 Ok(i) => i as u32,
                 Err(k) => 100 + k as u32,
             })
@@ -835,6 +835,21 @@ fn hit_tests(ck: &mut Ck) {
         }
         page(ck, &format!("range {n} items"), &hit, &|b| b.y0 >= 40, &want);
     }
+    // Resistor page with 600 Mohm chosen: no test-current buttons (their
+    // line is text), nothing to hit there.
+    host::reset(0);
+    let n = ui::range_items(dmm::Button::Ohm).len();
+    ui::range_page(dmm::Button::Ohm, Some(n - 1), 0, None);
+    let hit = move |x, y| {
+        ui::range_hit(dmm::Button::Ohm, Some(n - 1), x, y).map(|r| match r {
+            Ok(i) => i as u32,
+            Err(k) => 100 + k as u32,
+        })
+    };
+    let mut want: Vec<u32> = (0..n as u32).collect();
+    want.extend([102, 104]);
+    page(ck, "range ohm 600M", &hit, &|b| b.y0 >= 40, &want);
+    ck.t("range ohm 600M: the test-current row is dead", (12..470).step_by(20).all(|x| hit(x, 200).is_none()));
     host::reset(0);
     // Temperature page: every key of both layouts (NTC user adds R25 / Beta).
     for k in [0u8, 6] {

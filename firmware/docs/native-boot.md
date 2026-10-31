@@ -21,9 +21,15 @@ In short:
   shows its update screen with a USB disk.
 - **Update file:** a 12-byte header (the marker) plus the body flashed at
   `0x08004000` ("Update file format" below).
-- **opendm40's shim** at the image's reset vector picks a normal boot or
-  recovery; recovery zeroes the marker and resets into the FS-loader
-  ("Shim (reset path)", "Recovery mode" below).
+- **opendm40's shim** at the image's reset vector starts the watchdog and
+  the clock and boots opendm40; a hang reboots it. Two ways into the
+  FS-loader from opendm40:
+  - **PA2 entry** (`DBG:LOADER` / `DBG:RECOVER`, the power-key hold at
+    power-on): PA2 driven low and locked, jump to the ROM; the marker stays
+    valid, a power cycle boots opendm40 ("PA2 entry" below);
+  - **marker zeroing** (`DBG:UPDATE`, the on-meter install of a copied
+    image): the loader stays until a good install ("Recovery mode" below).
+  No hang count leads to the loader (removed in 0.4.0).
 
 Stock flash layout (`stock/re/ANALYSIS.md` §1):
 
@@ -56,8 +62,10 @@ read-locked. The boot gate and install in detail, with addresses:
 - **The marker is the switch.** As soon as the loader finds a `dm40*.bin` it
   zeroes the marker; a bad file therefore leaves the application unbootable
   and the unit in the loader until a good install. opendm40 uses the same
-  switch from software: zeroing the marker and resetting reaches the update
-  screen from any reset ("Recovery mode" below).
+  switch from software where a staged image must be installed: zeroing the
+  marker and resetting reaches the install state from any reset, also after
+  a power loss on the way ("Recovery mode" below). To only open the update
+  screen it uses PA2 ("PA2 entry" below).
 - Neither the ROM nor the loader reads the reset cause.
 - The stock application never deletes or renames the file; on leaving USB
   Connect with a `dm40*.bin` present it zeroes the marker and resets.
@@ -67,6 +75,90 @@ outside the application area, and a failed install always ends on the
 loader's update screen with its disk. The user procedure is in
 [the manual, Backup, recovery and back to stock](../../docs/manual/README.md#backup-recovery-and-back-to-stock); the hardware entry (TX-GND
 short) in [hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery).
+
+### PA2 entry (`boot::loader_pa2`)
+
+The way into the loader that keeps the marker: opendm40 does in software what
+the TX-GND short does at power-on. `DBG:LOADER` / `DBG:RECOVER` and the
+power-key hold use it.
+
+How the ROM and the loader read PA2 (disassembly of the 2026-10-13 dump):
+- ROM `0x080005f4`: GPIOA clock on (`0x08001308`, `RCU_AHB1EN` bit 0), then
+  `gpio_mode_set(GPIOA, input, pull-up, pin 2)` (`0x08000fa6`: MODER and
+  PUPDR rewritten for the pin), one 20000-iteration delay (`0x080005dc`),
+  then up to 1000 reads of IDR bit 2 (`0x08000612`, `0x08000f96`), each
+  followed by the same delay. One read of 1 launches a valid application.
+- FS-loader: begin `0x080a1bd8` first sets PA2 to AF7 (USART1 TX) with
+  pull-up (`0x080a4b14` → `0x080a5158` → `0x080a9a58`), then the same input +
+  pull-up set-up and 1000 reads (`0x080a1c0e`..`0x080a1c48`, delay
+  `0x080a1bc2`).
+- Timing in the emulator (instruction-count time, not cycle-exact): the ROM's
+  poll takes ~0.5 s, the loader's about the same.
+- Neither writes `RCU_AHB1RST` (GPIOA is never reset) or `GPIOA_LCKR`, and
+  neither writes PA2's output bit (their GPIO output writes are PE2, PC4 and
+  PA11 / PA12).
+
+So a plain output-low does not survive: the ROM's mode write turns PA2 back
+into an input with pull-up, and the first read is high. What survives is a
+**locked** pin. `loader_pa2`:
+1. PA2 = 0 (BOP), push-pull, no pull, output; then the GPIOx_LOCK key
+   sequence (offset `0x1C`: LKK + pin, pin, LKK + pin, read, read). MODER,
+   OTYPER, OSPEEDR, PUPDR and AFR of PA2 then ignore writes until the next
+   system reset; the output register is not locked.
+2. `BKP_TRIG` = `0x54520012` (lock read back) or `0x54520013` (not: the ROM's
+   pull-up wins, opendm40 boots again).
+3. SysTick off, NVIC disabled and cleared, `VTOR = 0x08000000`, MSP from
+   `0x08000000`, CONTROL = 0, `cpsie i`, jump to the ROM's reset handler
+   (`0x080001c1`).
+
+The ROM then sets its clock and FWDGT up again, reads PA2 low 1000 times and
+starts the loader, which reads it low 1000 times and enters its install state:
+a `dm40*.bin` in the SPI-flash root is installed, otherwise the update screen
+with its USB disk. Ways out, each a reset that clears the lock (PA2 reads
+high, the valid marker boots opendm40):
+- an install: the loader resets itself;
+- the power key held on the update screen (a 3 s hold in the emulator; a
+  0.2 s press did nothing): the loader's tick `0x080a1cf4` returns exit code
+  1, `0x080a5134` drops PE2 / PC4 (power off on battery), and its main
+  returns into the stack the ROM left. In the emulator the CPU then jumps to
+  a garbage address (the emulation aborts). Inferred for the device on USB
+  power: a fault, nothing feeds the FWDGT any more, reset within ~20 s;
+- switching the meter off and on.
+
+The loader has no timeout (its event loop feeds the FWDGT), and a USB VBUS
+cycle does not reset the meter while the battery holds it up (inferred).
+
+It runs as the first step of the shim, after a SYSRESETREQ with
+`BKP_REQ` = `0x4C324150` ("PA2L"): the CPU is then in the state the ROM
+leaves when it launches the application (its PLL at 200 MHz, its FWDGT, no
+interrupt enabled), the same state the loader sees after the ROM on every
+cold boot. A jump straight from the running firmware would have to undo
+opendm40's USB, DMA, timers and clock first. The key hold therefore also
+sets the word and resets.
+
+Device, 2026-10-29: with the running image staged as `DM40FW.BIN`,
+`DBG:LOADER` ended in the loader's install and its reset (`last_trigger`
+`0x54520012`, reset flag SW, the file deleted, marker = the image header).
+Not yet tried there: the update screen without a file, the key hold. If the
+lock did not hold, the result would be a normal reboot with `last_trigger`
+`0x54520013` in `DBG:BOOT?`.
+
+**PA2 low across a reset instead (not used).** Drive PA2 low, then
+SYSRESETREQ, and rely on the pin's capacitance: the reset returns GPIOA to
+its reset state (PA2 a floating input), the ROM enables the pull-up
+(~40 kΩ typical) and waits one delay loop before the first of 1000 reads
+spread over ~0.5 s. A pad and a short trace (inferred: tens of pF) charge
+through the pull-up in microseconds, and any single high read launches the
+application, so this cannot work, not just unreliably. The emulator's GPIO
+model has no capacitance (a reset clears the pin), so it says nothing here.
+
+Emulator: [`emu/peripherals/GD32_GPIO.cs`](../../emu/peripherals/GD32_GPIO.cs)
+models the lock (key sequence, locked fields ignored, cleared on a machine
+reset); `machine Reset` stands for a power cycle.
+[`emu/recoverytest.py`](../../emu/recoverytest.py) cases `loader`,
+`key-hold`, `usb-loader` (DBG:LOADER over USB/IP): ROM → FS-loader update
+screen with PA2 low and locked, marker valid; after a power cycle opendm40
+boots.
 
 ## Update file format
 
@@ -118,8 +210,8 @@ any body byte):
 | Update file with a bad header | the loader zeroes the marker, keeps the application bytes and the file, shows "update error" and its disk | header checked before any erase; delete the file, copy a good one, press "update" |
 | Header OK, body bad / short / hazardous last block | application erased, "update error" / "app crc error", disk up | same: install a good file from the loader's disk |
 | Power loss while the loader flashes | marker zeroed, application partly written | the next boot enters the install state again and re-installs the file (deleted only after success) |
-| opendm40 hangs before or after the shim decision | FWDGT reset (~20 s); the first one reboots normally, a second within 60 s of main loop takes recovery | "Shim (reset path)" below; the shim itself only reads and programs the 12 marker bytes |
-| opendm40 too broken for any software path | – | TX (PA2) to GND at power-on enters the install state ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)) |
+| opendm40 hangs | FWDGT reset (~20 s), opendm40 boots again, every time | once its USB is up: `DBG:LOADER`, `DBG:UPDATE` or the on-meter update |
+| opendm40 hangs before its USB is up (every boot) | a reboot every ~20 s | the power-key hold at power-on (the shim runs before the hang) or TX (PA2) to GND at power-on ([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)); neither works if the shim itself hangs |
 | SPI-flash FAT unreadable | the loader fast-formats it on `FR_NO_FILESYSTEM` (`stock/re/docs/fsloader-install-trigger.md`, "Install state, call order") | an empty FAT on the loader's disk takes a new file |
 | Wrong-model update file | installs; the model comes from the calibration record (`0x080C0000` +0x168, [model-variants.md](model-variants.md)) | labels / ranges only |
 
@@ -147,15 +239,15 @@ is exposed.
 | [`link-native.x`](../link-native.x) | the image layout (below), the only linker script |
 | [`build.sh`](../build.sh) | builds and packs the image, checks the budgets (`native` accepted as a no-op argument) |
 | [`src/shim.rs`](../src/shim.rs) | vector table, `reset` (asm), `shim_main`; all in region A |
-| [`src/boot.rs`](../src/boot.rs) | shim decision `shim()`, reset flags, power key, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
+| [`src/boot.rs`](../src/boot.rs) | shim decision `shim()`, key-hold gesture, PA2 entry `loader_pa2()`, reset flags, power-key pin, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
 | [`src/native.rs`](../src/native.rs) | after the decision: `.data`/`.bss` init, then recovery, or `pre_main` + `main` |
 | [`src/board.rs`](../src/board.rs) | board bring-up (everything the stock firmware used to do before opendm40 ran) |
-| [`src/recovery.rs`](../src/recovery.rs) | recovery: zero the loader marker + SYSRESETREQ; features `recovery-file` (`DM40RCVR.BIN` + power off) and `recovery-usb` (own USB-MSC) keep the earlier variants for tests |
+| [`src/recovery.rs`](../src/recovery.rs) | recovery (only on the request word, set by nobody now): zero the loader marker + SYSRESETREQ; features `recovery-file` (`DM40RCVR.BIN` + power off) and `recovery-usb` (own USB-MSC) keep the earlier variants for tests |
 | [`src/fatren.rs`](../src/fatren.rs) | FAT16 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN`; with `recovery-file`, create `DM40RCVR.BIN` |
 | [`src/clock.rs`](../src/clock.rs) | `init_core(Src)`: measured stock values, bounded waits, IRC16M fallback, no FLASH_ACR write |
 | [`src/wdt.rs`](../src/wdt.rs) | `start::fwdgt()` (shim); `powered_off()` (end of the app's power-off) |
 | [`src/msc.rs`](../src/msc.rs) | `STOP_UNIT` flag on SCSI START STOP UNIT |
-| [`src/scpi.rs`](../src/scpi.rs) | `DBG:BOOT?`; `DBG:UPDATE` = `DBG:RECOVER`: zero the marker + reset |
+| [`src/scpi.rs`](../src/scpi.rs) | `DBG:BOOT?`; `DBG:UPDATE`: zero the marker + reset; `DBG:LOADER` = `DBG:RECOVER`: PA2 entry |
 | [`tools/fatren-test/run.sh`](../tools/fatren-test/run.sh) | host tests of fatren, calbackup, fatdir, upload, vdisk and vwrite on mkfs.fat images (fsck.fat + mtools) |
 
 Cargo features ([`Cargo.toml`](../Cargo.toml); the stock fonts are always
@@ -771,9 +863,11 @@ The letter-number tags (B2, H2, ...) are items of the safety review
 4. FPU on (CPACR).
 5. `SP = 0x10010000`.
 6. `VTOR = 0x08004000`.
-7. Call `shim_main` → `boot::shim(false)`. This uses only the stack, no
+7. Call `shim_main` → `boot::shim()`. This uses only the stack, no
    `.data`/`.bss`:
 
+0. **PA2 entry:** backup SRAM on; if `BKP_REQ` = `0x4C324150`,
+   `loader_pa2()` ("PA2 entry" above); it does not return.
 1. **Watchdog:** `wdt::start::fwdgt()` writes `0xCCCC`, `0x5555`, waits
    (bounded) for PUD/RUD, sets PSC = 6 (/256) and RLD = 2500 (~16–20 s), then
    `0xAAAA`. From here on any hang resets into the shim. Every wait below
@@ -786,8 +880,7 @@ The letter-number tags (B2, H2, ...) are items of the safety review
        so one of them holds the power (which one is unknown:
        [hw/README.md, Power and battery](../../hw/README.md#power-and-battery)).
    - **Light:** the backlight goes full on right away, as plain GPIO PA6 high
-     (H2). A normal power-on press therefore lights the screen within
-     milliseconds and the user lets go.
+     (H2): the power-on press lights the screen within milliseconds.
    - `board::init` later hands PA6 to TIM13 with the duty at 0, until
      `App::new` sets the level.
 3. **Reset flags:** read `RCU_RSTSCK` (`0x40023874`), write RSTFC (bit 24),
@@ -799,7 +892,8 @@ The letter-number tags (B2, H2, ...) are items of the safety review
    (`FUN_0800b7e0` in `stock/re/analysis/app_decompile.c`:
    input, PUPD = 2). Then about 10 µs for the pull to settle.
    - The ROM and loader leave PD6 floating, so without this a floating 1
-     would read as a held key.
+     would read as a held key (the `recovery-usb` variant reads the key
+     without `board::init`).
    - Pressed = 1 is confirmed in the stock code.
 5. **Clock:** try `init_core(Hxtal)`, then `init_core(Irc16m)`. If both fail,
    SYSCLK stays on the 16 MHz RC (`clock` = FAILED).
@@ -817,36 +911,15 @@ The letter-number tags (B2, H2, ...) are items of the safety review
    - Every wait is a bounded poll.
    - The ROM and the loader spin forever on a dead HXTAL. So a failure here
      can only be transient (M4).
-6. **DWT cycle counter on.**
-7. **Backup SRAM:** enable access, then:
-   - read and **consume** the request word;
-   - read the previous-mode word;
-   - read the crash counter.
-8. **Key gesture** (H2). It applies only if PD6 reads pressed:
-   - Wait while the key stays pressed for up to **4 s** (`HOLD_MS`). A release
-     counts after 30 ms (bounce). A cycle-counter-independent iteration cap
-     also bounds the wait (L1).
-   - **The cap fails safe** (review N1): reaching it means the cycle counter
-     does not advance, so it is treated as a **release**, never as "held". It
-     is checked before the time limit. A stopped counter therefore cannot
-     confirm the gesture or zero the marker: the first window ends in a normal
-     boot reported as `KEY_HOLD_ABORTED` with `hold_ms` = 4000 and no cue (an
-     abort with no beep heard means a stuck DWT counter); in the confirm
-     window it is an abort. The cap is `(limit + 100) × cyc_per_ms / 8` passes;
-     a pass is about 20 cycles, so with a running counter
-     the time limit always comes first. With a stopped counter the first
-     window ends after about 10 s of holding (watchdog fed).
-   - The cue's per-half-period pass cap is `half / 2`, so even a counter that
-     stops during the cue ends it after about 1 s. The cue decides nothing.
-   - Released earlier → normal boot.
-   - At 4 s comes the **cue**: the backlight goes off, a ~0.3 s beep sounds
-     (buzzer PA7 toggled as GPIO at ~2.7 kHz), then the backlight comes back.
-   - The key must then **still be held for 0.5 s** (`CONFIRM_MS`):
-     - still held → recovery;
-     - released in that window → **aborted** → normal boot (`KEY_HOLD_ABORTED`).
-   - **Final gesture:** hold the power key from power-on until the beep, about
-     4 s, and keep holding at least 0.5 s after it.
-9. **Decide.** The first matching row wins.
+6. **Backup SRAM:** read and **consume** the request word; read the
+   previous-mode word and the crash counter.
+   **Key hold** (`key_gesture`, DWT cycle counter): key held 4 s after the
+   shim started → cue (backlight off, ~0.3 s beep on PA7 as plain GPIO,
+   backlight on); still held 0.5 s more → `BKP_REQ` = `0x4C324150`,
+   SYSRESETREQ → step 0 on the next pass. Released in the 0.5 s →
+   `KEY_HOLD_ABORTED`, normal boot. Every wait has a pass cap that counts as
+   a release (N1).
+7. **Decide.** The first matching row wins.
 
    A watchdog reset is **genuine** (one of our own hangs) when FWDGTRSTF is set,
    neither SWRSTF nor PORRSTF is set, and `BKP_LAST` = NRML (H3). The shim
@@ -856,41 +929,33 @@ The letter-number tags (B2, H2, ...) are items of the safety review
 
 | Condition | Mode | `reason` |
 |---|---|---|
-| `BKP_REQ` = `0x52454356` (consumed) | recovery | `REQUESTED` |
-| key gesture confirmed | recovery | `KEY_HOLD` |
-| key held to the cue, released within 0.5 s | normal | `KEY_HOLD_ABORTED` |
-| clock failed or genuine watchdog, crash counter +1 reaches `CRASH_MAX` (2) | recovery | `CLOCK_FAIL` / `WATCHDOG` |
-| clock failed, counter below 2 | **SYSRESETREQ**, retry the boot | (`CLOCK_FAIL`) |
-| genuine watchdog, counter below 2 | **normal** | `WDT_RETRY` |
+| `BKP_REQ` = `0x52454356` (consumed; set by nobody now) | recovery | `REQUESTED` |
+| key held to the cue, released in the 0.5 s | normal | `KEY_HOLD_ABORTED` |
+| clock failed, crash counter +1 below `CLOCK_RETRIES` (2) | **SYSRESETREQ**, retry the boot | (`CLOCK_FAIL`) |
+| clock failed, counter +1 at 2 or more | normal, on the clock it has | `CLOCK_FAIL` |
+| genuine watchdog (crash counter +1) | **normal** | `WDT_RETRY` |
 | FWDGTRSTF, previous mode = recovery | normal | `WDT_AFTER_RECOVERY` |
 | FWDGTRSTF otherwise (stale / with SW or POR / unknown previous mode) | normal | `WDT_STALE` |
 | otherwise | normal | `NONE` |
 
-10. **Hand over:** the previous-mode word and the crash counter are updated
-    as follows:
-    - Write the chosen mode to `BKP_LAST`.
-    - On recovery, clear the crash counter: a fresh start after the
-      reinstall.
-    - Call `native::start`.
+8. **Hand over:** the previous-mode word and the crash counter are updated
+   as follows:
+   - Write the chosen mode to `BKP_LAST`.
+   - On recovery, clear the crash counter: a fresh start after the
+     reinstall.
+   - Call `native::start`.
 
-**Crash counter** (M1, M4):
-- **Single hang or panic:** the first genuine watchdog reset only reboots
-  normally (`WDT_RETRY`). The counter shows in `DBG:BOOT?`. A panic stops
-  feeding, so it ends in the same watchdog reset.
-- **Second crash:** a second one without 60 s of healthy main loop in between
-  takes recovery.
-- **Healthy clear:** `boot::mark_healthy(now_ms)` clears the counter once after
-  60 s of main loop (called at the top of the main loop in
-  [`src/main.rs`](../src/main.rs)). `now` counts from the start of `main` (after `pre_main`), so the
-  window is **60 s of running main loop since the last boot**, not 60 s
-  between two resets: a watchdog reset comes ~20 s after the hang, so two
-  resets up to ~80 s apart (minus the boot time) still take recovery, and
-  with DBG:RELEASE (the loop keeps running, unfed) the clear can also land
-  inside the 20 s. Emulator test: [`emu/recoverytest.py`](../../emu/recoverytest.py)
-  (wdt-two, wdt-two-70, wdt-healthy).
-- **Clock failure:** handled the same way. The first one retries the boot with
-  a SYSRESETREQ, which redoes the ROM/loader clock set-up. Only a repeat takes
-  recovery.
+**Crash counter** (M1, M4): a diagnostic only (`DBG:BOOT?` `crash_word`).
+- Every genuine watchdog reset adds 1 and reboots normally (`WDT_RETRY`);
+  no count leads to the loader (removed in 0.4.0, owner 2026-10-29). A
+  panic stops feeding, so it ends in the same watchdog reset.
+- `boot::mark_healthy(now_ms)` clears it once after 60 s of running main
+  loop since the boot ([`src/main.rs`](../src/main.rs)), so it shows the
+  hangs in a row. Emulator test: [`emu/recoverytest.py`](../../emu/recoverytest.py)
+  (wdt-one, wdt-two, wdt-three, wdt-healthy, release).
+- **Clock failure** counts too: while the count is below 2 it retries the
+  boot with a SYSRESETREQ, which redoes the ROM/loader clock set-up; after
+  that opendm40 runs on the clock it has (`CLOCK_FAIL`).
 
 **Backup-SRAM words** (4 KiB at `0x40024000`; [`src/persist.rs`](../src/persist.rs)
 keeps the settings record from `0x40024000` and two sequence words at
@@ -899,17 +964,17 @@ keeps the settings record from `0x40024000` and two sequence words at
 | Address | Use |
 |---|---|
 | `0x40024FF0` `BKP_CRASH` | crash counter `0x435200nn` |
-| `0x40024FF4` `BKP_TRIG` | last recovery result: `0x54520010` marker zeroed, `0x54520011` failed |
-| `0x40024FF8` `BKP_REQ` | recovery request word (`0x52454356`), consumed by the shim; currently set by nobody |
-| `0x40024FFC` `BKP_LAST` | mode of the previous boot: `0x4C4D524E` normal / `0x52564352` recovery; **cleared by `DBG:UPDATE`/`DBG:RECOVER`** (H3) |
+| `0x40024FF4` `BKP_TRIG` | last loader entry: `0x54520010` marker zeroed, `0x54520011` failed, `0x54520012` PA2 entry, `0x54520013` PA2 entry without the lock read back |
+| `0x40024FF8` `BKP_REQ` | request word, consumed by the shim: `0x4C324150` PA2 entry (`DBG:LOADER`, key hold); `0x52454356` recovery (set by nobody now) |
+| `0x40024FFC` `BKP_LAST` | mode of the previous boot: `0x4C4D524E` normal / `0x52564352` recovery or PA2 entry; **cleared by `DBG:UPDATE`** (H3) |
 
-**No reset loop takes control away from the user:**
-- **A broken recovery does not repeat itself.** A hang in recovery
-  (previous mode = recovery) is followed by a normal boot.
-- **Hangs in normal mode retry first.** They reboot normally once, then
-  recovery takes over.
-- **Recovery itself is three flash word writes plus a reset.** After it, the
-  vendor loader owns the unit until a valid install.
+**A hang that repeats on every boot** (opendm40 dies before its USB is
+up) is a reboot every ~20 s. The key hold at power-on still reaches the
+loader, because the shim reads the key before `native::start`; if the shim
+itself hangs, only the TX-GND short is left
+([hw/README.md, Hardware recovery](../../hw/README.md#hardware-recovery)).
+A broken recovery (request word) does not repeat itself: a hang in recovery
+(previous mode = recovery) is followed by a normal boot.
 
 **First boot after an install:**
 - After a loader install (SW reset) or a power-on, FWDGT is never "genuine",
@@ -977,7 +1042,7 @@ but nothing can make that installed copy bootable again except a vendor install
 [the manual, Install a file from the update loader](../../docs/manual/README.md#install-a-file-from-the-update-loader).
 
 **Other entries** to the same state from a running native opendm40:
-- `DBG:UPDATE`, or its alias `DBG:RECOVER`:
+- `DBG:UPDATE`:
   - Clear `BKP_LAST` (H3), zero the marker, then the deferred SYSRESETREQ.
   - "Flash error" with no reset only if the marker did not read back as zero.
   - **Sync and eject** a just-copied file first (L5).
@@ -1058,23 +1123,20 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
 **Watchdog policy:**
 - **Main loop feeds while it runs:** `INITIAL_HOLD_MS` = `u64::MAX/4`, so the
   loop feeds the FWDGT for as long as it runs.
-- **Hang or panic → retry, then recovery:** a panic shows the magenta bar and
-  stops feeding; a hang stops feeding too.
-  - The first FWDGT reset reboots normally (`WDT_RETRY`, crash counter 1).
-  - A second one without 60 s of healthy main loop in between goes to recovery.
+- **Hang or panic → reboot:** a panic shows the magenta bar and stops
+  feeding; a hang stops feeding too. Every FWDGT reset reboots normally
+  (`WDT_RETRY`, crash counter +1).
 - **`DBG:RELEASE`:** stop feeding, so a WDT reset follows after about 20 s.
-  - It counts as a crash, the same as a hang.
-  - Twice in a row it zeroes the marker.
+  It counts as a crash, the same as a hang.
 - **`DBG:RESET`:** SYSRESETREQ → normal boot.
 - **`DBG:UPDATE` / `DBG:RECOVER`:** `boot::enter_loader_update`: clear the
   previous-mode word `BKP_LAST` (H3) **and reset the crash counter**
-  `BKP_CRASH` to `0x43520000` (N2: a count of 1 left from this session must not
-  survive the stock interlude and turn the first hang after the reinstall into
-  recovery), zero the loader marker, then SYSRESETREQ → the vendor update
+  `BKP_CRASH` to `0x43520000` (N2: the count starts at 0 after the
+  reinstall), zero the loader marker, then SYSRESETREQ → the vendor update
   screen with its USB disk (see Recovery).
 - **`DBG:BOOT?`** returns, in order:
   - `rstsck`, `rstsck_after`, `NORMAL|RECOVERY`, `reason`,
-    `HXTAL|IRC16M|FAILED`, `last`, `hold_ms`;
+    `HXTAL|IRC16M|FAILED`, `last` (builds before 0.4.0: then `hold_ms`);
   - `bcr1`, `btr1`, `bwtr1`, `lcd_id`: the FSMC values found before
     `board::init` rewrote them;
   - `fatren_status`, `found`, `renamed_8.3`, `old_backup`, `old_deleted`,
@@ -1104,7 +1166,7 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
 - **Power-off** (key held 1.5 s, or idle timeout): if the unit stays
   powered (USB), `wdt::powered_off()` turns the backlight off and keeps
   feeding. The next key press after a release reboots normally. Without this,
-  a charging meter would land in recovery 20 s after the idle shutdown.
+  a charging meter would reboot 20 s after the idle shutdown.
 
 ## fatren (`src/fatren.rs`)
 
@@ -1987,64 +2049,47 @@ read differed), `NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED`
 - **Review L4** (power loss during a fatren root-block rewrite) is described
   in the review.
 - **Zeroing the marker is irreversible** without a vendor install. It is used
-  only on purpose: the recovery decision, or `DBG:UPDATE` / `DBG:RECOVER`.
-- **Recovery triggers on the device:** the key gesture and the watchdog path
-  are tested in the emulator only (next section).
+  only where a staged image must be installed: `DBG:UPDATE`, the on-meter
+  update, or the request word (set by nobody now). `DBG:LOADER` and the key
+  hold use the PA2 entry instead.
+- **The PA2 entry depends on the GPIO lock** (device: the staged-file
+  install through it, "PA2 entry"); without it the meter reboots into
+  opendm40 (`last_trigger` `0x54520013`).
+- **A hang inside the shim on every boot** has no software way out: the
+  TX-GND short (case open) is the only one.
 
-## T3 recovery triggers: owner steps (2026-10-24)
+## Boot and watchdog: owner steps (2026-10-29)
 
-What the shim does, checked in the emulator with the real ROM and FS-loader
-([`emu/recoverytest.py`](../../emu/recoverytest.py), all PASS on image sha256 `1372e957…`, built from
-37d3252):
+What the shim does since 0.4.0, checked in the emulator with the real ROM
+and FS-loader ([`emu/recoverytest.py`](../../emu/recoverytest.py)): a power
+key held 4.5 s at power-on opens the loader through PA2 (marker kept);
+every hang (or `DBG:RELEASE`) is a reboot ~20 s later (`WDT_RETRY`, the crash word counts
+up, cleared after 60 s of main loop). The crash count, last trigger and
+previous mode are in backup SRAM (`0x40024FF0`, `FF4`, `FFC`); they survive
+resets, not necessarily a power-off without battery.
 
-- **Key:** opendm40 is entered ~0.7 s after power-on (emulator; ROM + loader).
-  The shim lights the backlight at once, waits up to 4 s with the key held,
-  then blinks the backlight + beeps (~0.3 s), then needs 0.5 s more. Full
-  gesture ≈ 5.5 s from power-on. Released earlier, or within the 0.5 s after
-  the beep: normal boot.
-- **Watchdog:** one hang (or DBG:RELEASE) = a reboot ~20 s later
-  (`WDT_RETRY`, crash word `0x43520001`). A second one before opendm40 has run
-  60 s (main loop) since that reboot = recovery. After 60 s of running the
-  count is cleared (`HEALTHY`, `0x43520000`), so a later hang only reboots.
-- **Recovery** = the 12 marker bytes at `0x08008000` zeroed, then a SW reset:
-  the loader's "open file error / Update" screen with its USB disk (the SPI
-  disk), on every power-on until a good file is installed.
-- Stored in backup SRAM (`0x40024FF0` crash count, `FF4` last trigger, `FFC`
-  previous mode). It survives resets, not necessarily a power-off without
-  battery.
+Before: opendm40 running, USB connected; on the PC a copy of the installed
+image (`firmware/opendm40.bin` of the installed build, or
+`INFO/FIRMWARE.BIN` from the opendm40 USB drive).
 
-Before: opendm40 running, USB connected; on the PC a copy of the installed image
-(`firmware/opendm40.bin` of the installed build, or `INFO/FIRMWARE.BIN`
-from the opendm40 USB drive) to reinstall after each recovery. Reinstall: copy
-it onto the loader's USB disk under any `dm40*.bin` name ([the only `dm40*.bin`](../../docs/manual/README.md#install-a-file-from-the-update-loader)),
-`sync`, eject, press "Update".
-
-1. **Short press (normal start).** Power off. Press the power key ~0.5 s.
-   Expect the backlight at once, opendm40 normally.
-   `tools/dm40dbg.py boot`: `NORMAL`, reason `NONE`, `hold_ms` < 1000.
-2. **Abort.** Power off. Hold the key; ~4.7 s after power-on the backlight blinks and it
-   beeps; let go right at the beep (within 0.5 s). Expect opendm40 normally;
-   `boot`: `KEY_HOLD_ABORTED`, `hold_ms` 4000..4500.
-3. **Key recovery.** Power off. Hold the key through the beep and keep
-   holding until the loader's "open file error / Update" screen appears
-   (emulator: ~5.5 s after power-on; on the device the shim's 4 s start only
-   after the ROM / loader hand-off, so it may be later). Holding longer is
-   harmless: once the 0.5 s after the beep have passed, recovery runs whether
-   the key is still down or not. Expect that screen and its USB disk. Reinstall opendm40. `boot`: `last` = `0x52564352` (RCVR),
-   `last_trigger` `0x54520010`, marker `VALID`.
-4. **One hang.** `tools/dm40dbg.py release`. ~20 s later opendm40 reboots.
-   `boot`: `WDT_RETRY`, crash word `0x43520001`, `-` (not yet healthy).
-5. **Healthy clear.** Wait 70 s, then `boot`: `HEALTHY`, `0x43520000`.
-   `release` again: reboot, `WDT_RETRY`, `0x43520001` (no recovery).
-6. **Two hangs.** Right after step 5's reboot (within ~30 s of it),
-   `release` once more. ~20 s later: the loader's update screen. The budget:
-   uptime at the `release` + 20 s must stay under 60 s; sent later,
-   `mark_healthy` clears the count during the unfed 20 s and the result is a
-   plain `WDT_RETRY` reboot, which is correct behaviour, not a failure. Reinstall.
-   `boot`: `last` = RCVR, `last_trigger` `0x54520010`, crash `0x43520000`.
-7. Note anything that differs, especially the time from power-on to the
-   beep in step 2/3 (emulator ≈ 4.7 s) and whether the loader screen in step
-   3 comes up while the key is still held.
+1. **Short press.** Power off, press the power key ~0.5 s. Expect the
+   backlight at once, opendm40 normally; `tools/dm40dbg.py boot`: `NORMAL`,
+   reason `NONE`.
+2. **Long press.** Power off, hold the key ~7 s from power-on. Expect a
+   beep at ~4 s, then the loader's update screen and its USB disk
+   (28e9:028f). Power-cycle (the loader's key switches off): opendm40;
+   `boot`: marker `VALID`, `last_trigger` `0x54520012`. Letting go right
+   after the beep instead: opendm40, reason `KEY_HOLD_ABORTED`.
+3. **Hangs in a row.** `tools/dm40dbg.py release`; ~20 s later opendm40
+   reboots: `boot` `WDT_RETRY`, crash word `0x43520001`. Right away
+   `release` again: another reboot, `WDT_RETRY`, `0x43520002`, no loader.
+4. **Healthy clear.** Wait 70 s, then `boot`: `HEALTHY`, `0x43520000`.
+5. **Loader, marker kept.** `tools/dm40dbg.py loader`: the update screen;
+   power-cycle: opendm40, marker `VALID`.
+6. **Loader on request.** `tools/dm40dbg.py update` with no file staged:
+   the loader's "open file error / Update" screen and its USB disk.
+   Reinstall the image (copy it as the only `dm40*.bin`, `sync`, eject,
+   press "Update"); `boot`: marker `VALID`, crash `0x43520000`.
 
 ## Developer workflow
 

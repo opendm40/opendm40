@@ -361,7 +361,7 @@ pub const MODE: Font = Font(0x0805_9D00); // 0x04 DC .. 0x08 diode, 32 px
 pub const BTN_GLYPH: Font = Font(0x0805_A9FC); // 04..08, 0x10 Hz, 0x11 cap, ohm, C
 pub const BATTERY: Font = Font(0x0804_FA4C); // 0x22..0x27
 pub const LOCK: Font = Font(0x0806_BF24); // 0x20 closed, 0x21 open
-pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth
+pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth, 0x22 USB (ours)
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
 pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
@@ -400,6 +400,8 @@ pub fn has_all(font: Font, s: &str) -> bool {
 
 // Glyphs of our own for the stock DMM fonts without them (tools/mkwglyph.py).
 include!("stockfont_w.rs");
+// The USB symbol for the status bar (tools/mkusbglyph.py).
+include!("stockfont_usb.rs");
 
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
 /// UNIT / LETTERS / SC_DIGITS / HIST (power meter, dmm::pw), no k in LETTERS
@@ -410,7 +412,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,

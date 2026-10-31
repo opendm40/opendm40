@@ -55,11 +55,13 @@ pub fn full_scale(dec: u8, unit: &str) -> f32 {
 /// Full scale of DMM `mode`: continuity (11) and diode (12) read up to
 /// their OL ceilings (dmm.rs poll_cont: > 1000 ohm; poll_diode: > 3.12 V,
 /// the 3 V scale), not the 60000-count scale of their format (600 ohm /
-/// 6 V); else `full_scale`.
-pub fn mode_full_scale(mode: u8, dec: u8, unit: &str) -> f32 {
+/// 6 V); the experimental 600 Mohm (ohm r7, dmm::OHM600) its range, whatever
+/// its decimals; else `full_scale`.
+pub fn mode_full_scale(mode: u8, range: i8, dec: u8, unit: &str) -> f32 {
     match mode {
         11 => 1000.0,
         12 => 3.0,
+        10 if range == 7 => 600.0,
         _ => full_scale(dec, unit),
     }
 }

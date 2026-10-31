@@ -134,10 +134,10 @@ def save(im, name):
 
 def status_bar():
     sc = 2
-    bar = render('status-all', scale=sc, crop=(0, 0, 480, 34))
+    bar = render('status-usb', scale=sc, crop=(0, 0, 480, 34))
     im, d = canvas(bar.size[0] + 40, bar.size[1] + 110)
     paste(im, d, bar, 20, 20)
-    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (435, 474)]
+    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (412, 425), (435, 474)]
     for k, (a, b) in enumerate(spans):
         x = 20 + (a + b) / 2 * sc
         d.line((x, 20 + bar.size[1] + 2, x, 20 + bar.size[1] + 38), fill=BLUE, width=2)
@@ -426,6 +426,26 @@ def scope_drag():
     tag(d, 'trigger position:\nT on the top edge', None, *g(262, 34), f)
     tag(d, 'the trace', None, *g(124, trace_y('scope-run', 100) + 26), f)
     save(im, 'scope-drag')
+
+
+def dmm_row_toggle():
+    # The row under the reading in both states; a double tap swaps them.
+    sc = 1.5
+    bar = shot('dmm-bar', sc, (0, 147, 480, 175))
+    hist = shot('dmm-history', sc, (0, 147, 480, 175))
+    w, h = bar.size
+    gap = 70
+    im, d = canvas(w + 220, 2 * h + gap + 40)
+    x0, y0 = 20, 20
+    paste(im, d, bar, x0, y0)
+    paste(im, d, hist, x0, y0 + h + gap)
+    f = font(14)
+    for k, t in enumerate(['Bargraph', 'History']):
+        d.text((x0 + w + 16, y0 + k * (h + gap) + h / 2 - 9), t, font=f, fill=DARK)
+    ax = x0 + w // 2
+    arrow2(d, (ax, y0 + h + 8), (ax, y0 + h + gap - 8), w=4, head=12)
+    d.text((ax + 16, y0 + h + gap / 2 - 9), 'double tap the row', font=f, fill=BLUE)
+    save(im, 'dmm-row-toggle')
 
 
 def meter_strip():
@@ -1036,6 +1056,7 @@ def main():
     scope_page()
     scope_drag()
     meter_strip()
+    dmm_row_toggle()
     analog_power()
     gen_offset()
     dmm_acc()

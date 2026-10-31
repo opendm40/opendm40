@@ -509,6 +509,11 @@ pub enum Log {
 
 /// Debug commands over USBTMC (development aids, not SCPI standard):
 ///   DBG:PING? [ms]          uptime_ms,flags,keepalive_left_ms (extends keepalive)
+///   DBG:OHM6 g,off,skip,keep,leak | DBG:OHM6?  600 Mohm range tuning (RAM
+///                           only, dmm::Ohm600): Rref gain, offset uV subtracted
+///                           from Vfb - Vx, conversions dropped / kept per phase,
+///                           the learned leak nS | g,off,skip,keep,leak,Vx,Vfb
+///                           (V, the last phase medians)
 ///   DBG:IDLE <ms> | DBG:IDLE?  the idle shutdown after <ms> instead of the
 ///                           Shutdown setting (0 = the setting; RAM only, for
 ///                           tests) | ms since the last touch / key, ms since
@@ -621,7 +626,11 @@ pub enum Log {
 ///                           (samples, refined crossing - hardware estimate)
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
-///   DBG:DIAG?               diagnostic block (#3)
+///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
+///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
+///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
+///   DBG:DIAG?               diagnostic block (#3); byte 61: bit 0 PB10, bit 1
+///                           PB11 (charge status pins), bit 2 USB configured
 ///   DBG:TOUCH? | DBG:TOUCH 0  touch log (frames, events, gestures; touch.rs log_text) / clear
 ///   DBG:TOUCH:TEST ON|OFF / ?  the touch test page (app_touchtest.rs) / 1 while shown
 ///   DBG:TOUCH:CAL? | RESET | a,b,c,d,e,f  the touch calibration x' = a x +
@@ -654,13 +663,15 @@ pub enum Log {
 ///                           waiting, 1 working, 2 ready, 3 off),
 ///                           clusters_ready,erases_since_boot
 ///   DBG:RELEASE             stop feeding the watchdog: the WDT reset (~20 s) counts
-///                           as a crash (1st: opendm40 reboots; 2nd without 60 s
-///                           healthy: recovery = marker zeroed, DESTRUCTIVE)
+///                           as a crash (DBG:BOOT? crash word); opendm40 reboots
 ///   DBG:RESET               reboot opendm40 (SW reset)
-///   DBG:RECOVER, DBG:UPDATE DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
+///   DBG:UPDATE              DESTRUCTIVE: clear the previous-mode word, zero the 12-byte loader
 ///                           marker, reset -> vendor update screen + its USB disk until
 ///                           a dm40*.bin is installed. "Flash error" = marker did not
 ///                           read back as zero (no reset). Sync + eject a copied file first.
+///   DBG:LOADER, DBG:RECOVER reset into the vendor update screen through PA2 (boot.rs
+///                           loader_pa2): marker untouched; a staged dm40*.bin is
+///                           installed; a power cycle boots opendm40 again
 ///   DBG:BOOT?               boot info (src/boot.rs put_info)
 #[derive(Clone, Copy)]
 pub enum Dbg {
@@ -703,6 +714,10 @@ pub enum Dbg {
     /// DBG:IDLE <ms> (Some: the idle shutdown time for a test, 0 = the
     /// setting) / DBG:IDLE? (None: idle times, App::dbg_idle).
     Idle(Option<u32>),
+    /// DBG:OHM6 gain,off_uV,skip,keep,leak_nS (Some; a missing field = NaN, kept) /
+    /// DBG:OHM6? (None): the 600 Mohm range's RAM-only tuning
+    /// (dmm::Ohm600, Dmm::ohm600_dbg).
+    Ohm6(Option<[f32; 5]>),
 }
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
@@ -1049,12 +1064,13 @@ pub fn pow10f(e: i32) -> f32 {
 
 /// The settable ranges, ascending (the MF page's items, Dmm::set_range
 /// through `range_item_code`): V 60 mV .. 1000 V, A 600 uA .. 10 A, ohm
-/// 60 ohm .. 60 Mohm.
+/// 60 ohm .. 60 Mohm and the experimental 600 Mohm.
 pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
-        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6],
+        // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
+        10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
     }
 }
@@ -2369,7 +2385,50 @@ impl Scpi {
                                 continue;
                             }
                         }
+                        // DBG:CHG? / DBG:CHG:PIN n,<mode> / DBG:CHG:OUT <mode> (PB10):
+                        // the charger status pins (power.rs dbg_state / dbg_pin).
+                        b"CHG" => {
+                            self.len = 0;
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            if kw(op, "LOG") && query {
+                                // n, then the last <= 8 changes oldest first:
+                                // ms:pins (bit 0 PB10, 1 PB11, 2 USB).
+                                let l = unsafe { &*core::ptr::addr_of!(crate::power::CHG_LOG) };
+                                self.put_u32(l.n);
+                                for k in l.n.saturating_sub(8)..l.n {
+                                    let e = l.ev[k as usize % 8];
+                                    self.put(b",");
+                                    self.put_u32(e >> 4);
+                                    self.put(b":");
+                                    self.put_u32(e & 15);
+                                }
+                            } else if op.is_empty() && query {
+                                for (i, v) in crate::power::dbg_state().iter().enumerate() {
+                                    if i > 0 {
+                                        self.put(b",");
+                                    }
+                                    self.put_u32(*v);
+                                }
+                            } else {
+                                let mut it = a.split(|&b| b == b',');
+                                let pin = if kw(op, "OUT") { Some(10) } else if kw(op, "PIN") { core::str::from_utf8(trim(it.next().unwrap_or(b""))).ok().and_then(|t| t.parse().ok()) } else { None };
+                                let m = trim(it.next().unwrap_or(b""));
+                                let mode = [&b"IN"[..], b"UP", b"DOWN", b"LOW", b"HIGH", b"OD", b"DEF"].iter().position(|k| m.eq_ignore_ascii_case(k));
+                                match (pin, mode) {
+                                    (Some(p), Some(md)) if crate::power::dbg_pin(p, md as u32) => {}
+                                    _ => self.err_arg(no_arg, "Illegal parameter value"),
+                                }
+                            }
+                            continue;
+                        }
                         b"IDLE" => Dbg::Idle(if query { None } else { Some(nums::<1>(a)[0]) }),
+                        b"OHM6" => Dbg::Ohm6((!query).then(|| {
+                            let mut v = [f32::NAN; 5];
+                            for (x, f) in v.iter_mut().zip(a.split(|&b| b == b',')) {
+                                *x = parse_num(trim(f)).unwrap_or(f32::NAN);
+                            }
+                            v
+                        })),
                         b"PROF" => Dbg::Prof(parts.get(2) == Some(&&b"RESET"[..])),
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
@@ -2397,7 +2456,8 @@ impl Scpi {
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
                         b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
-                        b"RECOVER" | b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
+                        b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
+                        b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
                         _ => {
                             self.err_arg(no_arg, "Undefined header");
                             continue;

@@ -85,6 +85,12 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// Two taps on the DMM bargraph / history row within this time and this
+/// distance (each axis): a double tap. Short and near, so two separate taps
+/// (storing history values) do not switch the row (owner, device, 2026-10-30:
+/// 400 ms and any x switched by accident).
+const ROW_DOUBLE_MS: u64 = 250;
+const ROW_DOUBLE_PX: u16 = 30;
 /// Combined view: the scope band paints at most one frame per this many ms
 /// (25 fps; `App::sp_throttled`).
 const COMBO_FRAME_MS: u64 = 40;
@@ -253,6 +259,9 @@ pub struct App {
     /// the DMM rail stays on whatever view is shown (fastlogtest --ui-nav:
     /// the Oscilloscope tile during a disk session dropped it, 0 rows).
     pub logger_busy: bool,
+    /// A USB host has the meter configured (main.rs, every pass): "USB" in
+    /// the status bar.
+    pub usb_host: bool,
     host_scope: bool,
     /// Anti-drop: re-assert the latching V/A relay periodically (stock
     /// setting; the relay can flip on a mechanical shock).
@@ -279,6 +288,11 @@ pub struct App {
     hist: [(f32, u8, &'static str); 5],
     hist_n: usize,
     hist_new: usize,
+    /// Last tap on the bargraph / history row: (time, x, y) (double tap:
+    /// ROW_DOUBLE_MS, ROW_DOUBLE_PX) and the history before the value that
+    /// tap stored.
+    row_tap: Option<(u64, u16, u16)>,
+    row_undo: Option<([(f32, u8, &'static str); 5], usize, usize)>,
     hv_shown: bool,
     /// HOLD state (Meter::hold_state) | limit verdict << 8 as last painted
     /// to the DMM status label / limit badge; a mismatch means the label (and
@@ -589,6 +603,7 @@ impl App {
             cur: ui::Cursors { x_on: false, y_on: false, x: [100, 300], y: [70, 210] },
             rails_both: false,
             host_dmm: false,
+            usb_host: false,
             logger_busy: false,
             host_scope: false,
             anti_drop: true,
@@ -606,6 +621,8 @@ impl App {
             hist: [(0.0, 0, ""); 5],
             hist_n: 0,
             hist_new: 0,
+            row_tap: None,
+            row_undo: None,
             hv_shown: false,
             hold_shown: 0,
             now: 0,
@@ -1030,8 +1047,9 @@ impl App {
         ui::Status {
             uptime_s: (now / 1000) as u32,
             bt: self.bt_on && self.power.bt_connected(),
-            bars: self.power.bars,
-            charging: self.power.charging(),
+            usb: self.usb_host,
+            bars: self.power.shown_bars(self.strip_alt),
+            charging: self.power.on_charger(),
             locked: self.locked,
             rec: self.meter.stats.rec,
             csv: crate::csvlog::active(),
@@ -1479,6 +1497,9 @@ impl App {
     #[inline(never)] // its draw frames stay out of the callers' frames (run's)
     fn repaint(&mut self, now: u64) {
         self.redraw = false;
+        // The page's background fills wait for the widgets (lcd.rs
+        // "deferred fills"); main.rs flushes after the tick.
+        crate::lcd::defer_start();
         // The full repaint drew any pressed item released.
         self.pressed = None;
         self.scope_invalidate();
@@ -2817,6 +2838,10 @@ impl App {
             Gesture::Tap(p) => {
                 self.beep(now, 30);
                 self.tap(clk, p.x, p.y);
+                // Pressed feedback kept through the tap (app_press.rs).
+                if self.pressed.is_some() {
+                    self.press_after_tap();
+                }
             }
             // Long press on the A button: the power meter's wiring dialog.
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
@@ -2829,9 +2854,11 @@ impl App {
                 captured = true;
                 self.pw_long_side(now);
             }
-            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && (153..172).contains(&p.y) => captured = true,
-            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && (153..172).contains(&p.y) => {
+            Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && ui::ROW_HIT.contains(&p.y) => captured = true,
+            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && ui::ROW_HIT.contains(&p.y) => {
                 captured = true;
+                self.row_tap = None;
+                self.row_undo = None;
                 self.hist_n = 0;
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
@@ -3309,8 +3336,10 @@ impl App {
             let manual = |i: usize| items.get(i).and_then(|it| it.1).filter(|&c| c != 255);
             let n = (0..items.len()).take_while(|&i| manual(i).is_some()).count();
             let cur = self.range_sel_manual();
+            // The items before AUTO, in a ring; from one after it (ohm
+            // 600 Mohm, experimental) back to the first.
             let i = match cur {
-                Some(i) if !self.dmm.is_auto() => (i + 1) % n.max(1),
+                Some(i) if !self.dmm.is_auto() => if i + 1 < n { i + 1 } else { 0 },
                 Some(i) => i,
                 None => 0,
             };
@@ -3346,12 +3375,35 @@ impl App {
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
             }
-            View::Dmm if !self.dmm_view.bar_on && (153..172).contains(&y) => {
+            View::Dmm if !self.dmm.pw.on && ui::ROW_HIT.contains(&y)
+                && self.row_tap.is_some_and(|(t, tx, ty)| now < t + ROW_DOUBLE_MS && x.abs_diff(tx) <= ROW_DOUBLE_PX && y.abs_diff(ty) <= ROW_DOUBLE_PX) => {
+                // Double tap on the row: Bargraph <-> History (Settings 2/2
+                // "DMM row" without the trip to Settings). A value the first
+                // tap stored is taken back.
+                self.row_tap = None;
+                if let Some((h, n, k)) = self.row_undo.take() {
+                    (self.hist, self.hist_n, self.hist_new) = (h, n, k);
+                }
+                let acdc = self.dmm.sub() == 2 || self.dmm.pw.on;
+                self.dmm_view.row_toggle(self.dmm.shown_mode(), acdc);
+                if !self.dmm_view.bar_on {
+                    ui::history(&self.hist, self.hist_n, self.hist_new);
+                }
+                self.beep(now, 100);
+            }
+            View::Dmm if self.dmm_view.bar_on && ui::ROW_HIT.contains(&y) => {
+                self.row_tap = Some((now, x, y));
+                self.row_undo = None;
+            }
+            View::Dmm if !self.dmm_view.bar_on && ui::ROW_HIT.contains(&y) => {
                 // History row: record the shown value (not OL). While HOLD
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).
+                self.row_tap = Some((now, x, y));
+                self.row_undo = None;
                 if let Some(r) = self.meter.shown().copied() {
                     if !r.main.ol {
+                        self.row_undo = Some((self.hist, self.hist_n, self.hist_new));
                         let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
                         self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
                         self.hist_n = (self.hist_n + 1).min(5);
@@ -3506,7 +3558,7 @@ impl App {
                     let _ = self.inrush_open(clk);
                     return;
                 }
-                match ui::range_hit(b, x, y) {
+                match ui::range_hit(b, self.range_sel(), x, y) {
                     Some(Ok(i)) => {
                         let item = ui::range_items(b)[i].1;
                         let was = self.dmm.is_auto();
@@ -4099,6 +4151,9 @@ impl App {
         match op {
             Rng::Query => out.put_f32(v),
             Rng::AutoQuery => out.put_bytes(if self.dmm.is_auto() { b"1" } else { b"0" }),
+            // 600 Mohm: its 6000-count step on the range (0.1 Mohm); the
+            // reading's decimals follow the value (dmm.rs Ohm600::decimals).
+            Rng::ResQuery if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => out.put_f32(1e5),
             Rng::ResQuery => out.put_f32(s::pow10f(s::step_exp(v, cap) - fine as i32)),
             Rng::Auto if self.dmm.is_auto() => {}
             _ if self.scope.wave_on() => out.set_err("Settings conflict"),
@@ -4111,7 +4166,10 @@ impl App {
             Rng::Value(x) => {
                 // MAX: the top item; else the smallest that holds x.
                 let items = s::range_items(cur);
-                let i = if x.is_infinite() { items.len().checked_sub(1) } else { items.iter().position(|&it| it >= x * 0.9999) };
+                // Ohm MAX: 60 Mohm; 600 Mohm (experimental) only by a value
+                // above it.
+                let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
+                let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
                     _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
                     Some(i) => {
@@ -4121,6 +4179,9 @@ impl App {
                     None => out.set_err("Data out of range"),
                 }
             }
+            // 600 Mohm: its digits follow the value and its conversions are
+            // fixed (dmm.rs Ohm600): a resolution sets nothing.
+            Rng::Res(_) if dmm::is_ohm600(self.dmm.hy_mode(), self.dmm.range()) => {}
             Rng::Res(x) => {
                 // MAX (inf) or at least the 60000-count step: FAST; MIN, DEF
                 // (NaN) or finer: the +1 digit rate.

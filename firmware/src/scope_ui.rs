@@ -162,9 +162,12 @@ pub struct Model {
     /// X cursor columns (1..399) / Y cursor rows (1..279) when shown.
     pub xcur: Option<[i16; 2]>,
     pub ycur: Option<[i16; 2]>,
-    /// Battery level 0..5, charging.
+    /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
+    /// A USB host has the meter configured: the small USB symbol between
+    /// the trigger badge and the battery (`usb_icon`).
+    pub usb: bool,
     /// Roll mode (record bar "ROLL").
     pub roll: bool,
     /// Record bar window (start, end) as fractions of the record.
@@ -273,6 +276,7 @@ impl Model {
         ycur: None,
         battery: 4,
         charging: false,
+        usb: false,
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
@@ -662,6 +666,19 @@ pub fn battery(m: &Model) {
     });
 }
 
+/// The USB host symbol (SC_BATT 0x30, 9 x 12 1 bpp, tools/mkusbglyph.py) in
+/// the gap between the trigger badge (..413) and the battery (435..).
+pub const USB_ICON: Rect = rect(417, 1, 13, 17);
+
+pub fn usb_icon(m: &Model) {
+    let r = USB_ICON;
+    let u = if m.usb { Ink::icon(sf::SC_BATT, r, 0x30, 8) } else { Ink::none() };
+    paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
+        Some(g) => (C_WHITE, tag(1, g)),
+        None => (C_BAR, 0),
+    });
+}
+
 /// Right-panel button k (0..6) as the stock draws it (sec. 5).
 pub fn panel_button(m: &Model, k: usize) {
     let r = B_RECT[k];
@@ -768,6 +785,7 @@ pub fn top_bar(m: &Model) {
     vdiv_badge(m);
     trig_badge(m);
     battery(m);
+    usb_icon(m);
 }
 
 pub fn panel(m: &Model) {
@@ -1492,8 +1510,9 @@ static mut GRAPH: Graph = Graph {
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
-/// tabs, the FFT label and boxes, the cursor tab.
-const NH: usize = 9;
+/// tabs, the FFT label and boxes, the cursor tab, an open popup's box, the
+/// rows `regraph_rows` leaves alone.
+const NH: usize = 10;
 pub const H_BUBBLE: usize = 0;
 pub const H_TAB_L: usize = 1;
 pub const H_TAB_R: usize = 2;
@@ -1502,7 +1521,8 @@ pub const H_FFT_Y: usize = 4;
 pub const H_FFT_X: usize = 5;
 pub const H_FFT_PK: usize = 6;
 pub const H_CUR: usize = 7;
-pub const H_SPARE: usize = 8;
+pub const H_POPUP: usize = 8;
+const H_REST: usize = 9;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
@@ -2002,6 +2022,27 @@ pub fn uncover(m: &Model, ch1: bool, math: bool) {
     frame(m);
 }
 
+/// Rows y0..y1 (screen, exclusive) of the graph and its side frame lines
+/// again, the rest of the graph left alone: what a shrinking popup box
+/// (`keep`: the new box, drawn) uncovers. Only the graph lies there (the
+/// overlays sit at the graph's top rows and its bottom row).
+pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
+    if y1 <= y0 {
+        return;
+    }
+    lcd::fill_rect(13, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(413, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    let g = graph();
+    g.holes[H_POPUP] = Some(keep);
+    g.holes[H_REST] = Some(rect(13, y1, 401, 320 - y1));
+    g.invalidate();
+    g.flush(m);
+    // The rows under the hole still show the graph as it is (nothing
+    // renders while the popup covers the page): not repainted later.
+    g.holes[H_REST] = None;
+    g.d_holes[H_REST] = None;
+}
+
 /// Forget everything drawn (the next `update` draws the whole page).
 pub fn invalidate() {
     let s = shown();
@@ -2047,6 +2088,9 @@ pub fn update(m: &Model) {
     }
     if d(ol.battery != m.battery || ol.charging != m.charging) {
         battery(m);
+    }
+    if d(ol.usb != m.usb) {
+        usb_icon(m);
     }
     for k in 0..7 {
         let was = |mm: &Model| mm.pressed as usize == k + 1;
@@ -2651,6 +2695,17 @@ pub fn slider_value(x: i16) -> f32 {
 const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
 
 /// MF settings popup (FUN_08037574), tab 0..3.
+/// The box a popup paints whole: a graph hole while it is open (a full
+/// repaint under an open popup does not draw the graph there first).
+/// None: no hole (the timebase list).
+pub fn popup_box(p: Popup) -> Option<Rect> {
+    match p {
+        Popup::Mf(t) => Some(rect(13, 20, 401, 40 + MF_PAGE_H[t.min(3) as usize])),
+        Popup::Ch1(_) | Popup::Math(_) => Some(rect(214, 20, 200, 281)),
+        _ => None,
+    }
+}
+
 pub fn draw_mf(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
     let page_h = MF_PAGE_H[tab as usize];
@@ -3357,7 +3412,7 @@ pub fn meter_strip(d: &StripData) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
     if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
-        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { crate::ui::VALUE }, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to
@@ -3370,7 +3425,7 @@ pub fn meter_strip(d: &StripData) {
         if o.is_some() {
             lcd::fill_rect(ST_UNIT_X as u16, ST_UNIT_Y as u16, (ST_SUB_END + 1 - ST_UNIT_X) as u16, (ST_GEN_T.y + ST_GEN_T.h - ST_UNIT_Y) as u16, C_FILL);
         }
-        st_text(ur, uf, d.unit.as_str(), C_YELLOW, ua, 1);
+        st_text(ur, uf, d.unit.as_str(), crate::ui::VALUE, ua, 1);
     }
     if changed(ol.gen == d.gen) || moved {
         st_badge(ST_GEN, if gen_on { "GEN" } else { "" }, C_GEN);

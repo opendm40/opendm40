@@ -214,6 +214,7 @@ recorded.
 | [`ohmhunt.py`](hy3131/ohmhunt.py) | ohm range hunt: no unvetted value shown as final | | 58610 |
 | [`ohmsinktest.py`](hy3131/ohmsinktest.py) | RES AUTO on an input the 6 Mohm and 600 kohm ranges disagree on | | 64810 |
 | [`ohmnegtest.py`](hy3131/ohmnegtest.py) | ohm readings below 0 (RES:NEG ON / OFF) on shorted leads; AUTO stays on 60 ohm | | 64751 |
+| [`ohm600mtest.py`](hy3131/ohm600mtest.py) | the experimental 600 Mohm range: manual only (explicit, MAX, AUTO, the AUTO key), READ? / MEAS? answer in time | | 64761 |
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
@@ -269,7 +270,8 @@ recorded.
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
 | [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
-| [`recoverytest.py`](recoverytest.py) | recovery triggers through the whole boot chain: power-key hold, watchdog crash counter, DBG:RELEASE | ~6 min (8 cases, `--jobs 8`) | free |
+| [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
+| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
 
@@ -278,6 +280,7 @@ recorded.
 | [`btchattertest.py`](btchattertest.py) | the module's start-up text is not taken as SCPI; a host's first command is answered | ~4 min | BT 4834 |
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
+| [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
 | [`flowtest.py`](flowtest.py) | the live window's signal-flow diagram does not move; no emulator | | - |
 
 ### Helpers
@@ -286,6 +289,7 @@ recorded.
 |---|---|
 | [`emusync.py`](emusync.py) | reads the [input markers](#input-markers) from the Renode log |
 | [`regionc.py`](regionc.py) | Renode hooks: which region C functions run while the AD2 stream ISR owns the bus |
+| [`lcdtrace.py`](lcdtrace.py) | replays an LCD write trace (`sysbus.lcd Trace PATH`) at the panel's refresh rate: redraw time, transient pixels, filmstrips |
 | [`infovol.py`](infovol.py) | reads the USB volume's INFO/ files during an AD2 stream |
 | [`hy3131/runemu.py`](hy3131/runemu.py) | `run.py` with a separate HY3131 compile unit |
 | [`usbip_client.py`](usbip_client.py), [`usbip_proxy.py`](usbip_proxy.py) | USB/IP client and logging proxy ([USB over USB/IP](#usb-over-usbip)) |
@@ -321,7 +325,7 @@ Models are C# files compiled by Renode at start-up; the platform is
 | Flash, SRAM, TCM, backup SRAM, OTP / UID | memory | |
 | FMC flash controller | Renode `STM32F4_FlashController` | erase and program as plain writes; BUSY never set |
 | RCC, PWR | Renode STM32F4 models | ready bits follow the enables; every timer clock is 200 MHz |
-| LCD (FSMC bank 1) | [`ILI9488.cs`](peripherals/ILI9488.cs) | RGB666 read-back as the panel; `Screenshot`, `AutoShot` |
+| LCD (FSMC bank 1) | [`ILI9488.cs`](peripherals/ILI9488.cs) | RGB666 read-back as the panel; `Screenshot`, `AutoShot`, `Trace` (every RAM write burst with its time) |
 | GPIO | [`GD32_GPIO.cs`](peripherals/GD32_GPIO.cs) | pull-ups give the level of undriven inputs |
 | TIM1, 2, 5, 7, 8 | [`GD32_Timer.cs`](peripherals/GD32_Timer.cs) | slave modes, one-pulse, capture, PWM, TRGO; events at their exact virtual time. TIM7 is opendm40's AD2 stream tick |
 | TIM3, 6, 12-14 | [`PwmTimer.cs`](peripherals/PwmTimer.cs) | registers and counter only, no events |
@@ -353,8 +357,8 @@ Models are C# files compiled by Renode at start-up; the platform is
 - **HY3131.** The front end's per-row scale factors are the stock's nominal
   constants (the netlist is unknown); see the open points in
   [emu/hy3131/README.md](hy3131/README.md#open-points).
-- **Boot timing.** The ROM's and FS-loader's power-key (PA2) timing is set
-  empirically: a release at 0.55 s gives the three-stage chain.
+- **Boot timing.** The ROM's and FS-loader's PA2 (debug header TX) poll
+  timing is set empirically: a release at 0.55 s gives the three-stage chain.
 - **Scope trigger.** opendm40's comparator path sometimes never completes a
   frame after a restart; [`wavtest.py`](wavtest.py) turns it off.
 - **Gestures.** Horizontal swipes from the touch model were not recognised

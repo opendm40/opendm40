@@ -98,8 +98,9 @@ python3 tools/dm40dbg.py recover             # DESTRUCTIVE: into the vendor upda
 
 **Watchdog.** The main loop feeds it while it runs. A hang, a panic (magenta
 bar at the bottom) or `DBG:RELEASE` resets the meter after ~20 s and opendm40
-reboots once; a second one within 60 s enters recovery (the loader update
-screen). Details: [native-boot.md, Normal native mode](docs/native-boot.md#normal-native-mode).
+reboots, every time (no automatic entry into the loader; the crash count is in
+`DBG:BOOT?`). `dm40dbg.py loader` (`DBG:LOADER`) opens the vendor loader with
+the marker kept: a power cycle boots opendm40 again. Details: [native-boot.md, Normal native mode](docs/native-boot.md#normal-native-mode).
 
 **Bring-up failures** show as red squares at the top left (`fail` in
 [`src/main.rs`](src/main.rs)): slot 0 = PLLSAI (the 48 MHz USB clock) not
@@ -216,7 +217,7 @@ feature, in the same commit.
 | Path | What |
 |---|---|
 | [`src/`](src) | The firmware (crate `opendm40`) |
-| [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), font and table generators) and the host test suites (`tools/*/run.sh`) |
+| [`tools/`](tools) | Host tools ([`dm40dbg.py`](tools/dm40dbg.py) USB debug link, [`dm40scpi.py`](tools/dm40scpi.py) SCPI client, [`dm40bt_scpi.py`](tools/dm40bt_scpi.py), [`reload.sh`](tools/reload.sh), [`dlog.py`](tools/dlog.py), [`c2meter.py`](tools/c2meter.py) (Alientek C2 USB tester over BLE), font and table generators) and the host test suites (`tools/*/run.sh`) |
 | [`docs/`](docs) | Firmware docs, see [Documentation](#documentation) |
 | [`ref/`](ref) | Reference screenshot of the stock firmware |
 | [`vendor/usbd-storage/`](vendor/usbd-storage) | usbd-storage 3.0.0 with the DM40 patches ([`Cargo.toml`](Cargo.toml)) |
