@@ -358,10 +358,7 @@ CALBK_STATUS = {'SAFECOPY_PRESENT': 'safety copy on the SPI disk, nothing writte
                 'NOMEDIUM': 'no SPI flash', 'ERROR': 'SPI disk read/write/verify failed',
                 'NOTRUN': 'not run'}
 TRIGGERS = {0x54520010: 'marker zeroed by recovery/update', 0x54520011: 'marker zeroing FAILED',
-            0x54520012: 'PA2 entry into the loader', 0x54520013: 'PA2 entry, GPIO lock NOT confirmed',
-            0x54520000: 'rcvr file created', 0x54520001: 'rcvr file already there',
-            0x54520002: 'rcvr: no medium', 0x54520003: 'rcvr: bad BPB',
-            0x54520004: 'rcvr: no space', 0x54520005: 'rcvr: error'}
+            0x54520012: 'PA2 entry into the loader', 0x54520013: 'PA2 entry, GPIO lock NOT confirmed'}
 
 
 def parse_boot(text):

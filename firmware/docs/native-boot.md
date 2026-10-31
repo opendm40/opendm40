@@ -242,11 +242,10 @@ is exposed.
 | [`src/boot.rs`](../src/boot.rs) | shim decision `shim()`, key-hold gesture, PA2 entry `loader_pa2()`, reset flags, power-key pin, power hold on/off, backup-SRAM words, loader marker check + `zero_marker()` (FMC), `DBG:BOOT?` text |
 | [`src/native.rs`](../src/native.rs) | after the decision: `.data`/`.bss` init, then recovery, or `pre_main` + `main` |
 | [`src/board.rs`](../src/board.rs) | board bring-up (everything the stock firmware used to do before opendm40 ran) |
-| [`src/recovery.rs`](../src/recovery.rs) | recovery (only on the request word, set by nobody now): zero the loader marker + SYSRESETREQ; features `recovery-file` (`DM40RCVR.BIN` + power off) and `recovery-usb` (own USB-MSC) keep the earlier variants for tests |
-| [`src/fatren.rs`](../src/fatren.rs) | FAT16 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN`; with `recovery-file`, create `DM40RCVR.BIN` |
+| [`src/recovery.rs`](../src/recovery.rs) | recovery (only on the request word, set by nobody now): zero the loader marker + SYSRESETREQ |
+| [`src/fatren.rs`](../src/fatren.rs) | FAT16 root-directory edits: rename the installed image, remove a leftover `DM40RCVR.BIN` (the trigger file of an earlier build) |
 | [`src/clock.rs`](../src/clock.rs) | `init_core(Src)`: measured stock values, bounded waits, IRC16M fallback, no FLASH_ACR write |
 | [`src/wdt.rs`](../src/wdt.rs) | `start::fwdgt()` (shim); `powered_off()` (end of the app's power-off) |
-| [`src/msc.rs`](../src/msc.rs) | `STOP_UNIT` flag on SCSI START STOP UNIT |
 | [`src/scpi.rs`](../src/scpi.rs) | `DBG:BOOT?`; `DBG:UPDATE`: zero the marker + reset; `DBG:LOADER` = `DBG:RECOVER`: PA2 entry |
 | [`tools/fatren-test/run.sh`](../tools/fatren-test/run.sh) | host tests of fatren, calbackup, fatdir, upload, vdisk and vwrite on mkfs.fat images (fsck.fat + mtools) |
 
@@ -259,7 +258,6 @@ never over `opendm40.bin`):
 - `ad2-isr` (default: the AD2 stream timer ISR;
   [dmm-input-scope-feasibility.md](dmm-input-scope-feasibility.md) 11);
 - `fatren-dry-run`;
-- `recovery-file`, `recovery-usb`;
 - `keep-screen`.
 
 The RAM-loaded build (image in flash sector 8, copied to SRAM, loaded over
@@ -700,7 +698,7 @@ The 60 Ω range (feat/ohm60, 0.3.0) costs ~180 B of B; the LOCK font blob
 ### Region B audit #6 (2026-10-27, chore/region-b-audit-6)
 
 On 0.3.0 (cae46446) region B had 16 388 B free, A2 1 128 B, C 4 736 B
-(recovery-file 4 212 B, 116 B above the link floor). C had no room for a
+(the smallest variant 4 212 B, 116 B above the link floor). C had no room for a
 move out of B, so this audit only cuts: code that core / libm functions
 pulled into B for one or two callers, one inlined helper, and part of the
 `.data` load image; then (owner's decision, 2026-10-27) panic sites without
@@ -789,8 +787,6 @@ The variants (tools/build-variants/run.sh), B / C free and stack headroom
 
 | variant | before | after |
 |---|---|---|
-| recovery-usb | 15 044 / 4 800 / 21 012 B | 49 940 / 7 984 / 21 708 B |
-| recovery-file | 16 084 / 4 212 / 20 500 B | 50 748 / 7 452 / 21 196 B |
 | no-ad2-isr | 26 264 / 5 816 / 20 968 B | 60 384 / 9 016 / 21 640 B |
 | spi-disk | 37 064 / 14 904 / 22 012 B | 68 692 / 17 924 / 22 692 B |
 | fatren-dry-run | 16 452 / 5 152 / 20 500 B | 50 876 / 8 380 / 21 196 B |
@@ -825,8 +821,6 @@ stack headroom (each gains the same ~5.6 KB of C):
 
 | variant | after |
 |---|---|
-| recovery-usb | 44 284 / 13 544 / 21 708 B |
-| recovery-file | 45 092 / 13 004 / 21 196 B |
 | no-ad2-isr | 54 736 / 14 568 / 21 640 B |
 | spi-disk | 63 028 / 23 480 / 22 692 B |
 | fatren-dry-run | 45 228 / 13 932 / 21 196 B |
@@ -1301,8 +1295,7 @@ The letter-number tags (B2, H2, ...) are items of the safety review
    (`FUN_0800b7e0` in `stock/re/analysis/app_decompile.c`:
    input, PUPD = 2). Then about 10 µs for the pull to settle.
    - The ROM and loader leave PD6 floating, so without this a floating 1
-     would read as a held key (the `recovery-usb` variant reads the key
-     without `board::init`).
+     would read as a held key.
    - Pressed = 1 is confirmed in the stock code.
 5. **Clock:** try `init_core(Hxtal)`, then `init_core(Irc16m)`. If both fail,
    SYSCLK stays on the 16 MHz RC (`clock` = FAILED).
@@ -1397,9 +1390,9 @@ Recovery uses the loader's own update screen and disk, reached by zeroing the
 marker ("Boot chain" above; `stock/re/docs/fsloader-install-trigger.md`,
 "Update-loader install & error paths").
 
-**Why the `DM40RCVR.BIN` + power-off variant is fragile.** If the user releases
-the power key quickly at the next power-on, PA2 reads high and the ROM launches
-our (possibly hung) app directly. The loader never sees the file.
+A `dm40*.bin` trigger file on the SPI disk + power off would not do: unless
+PA2 is held low at the next power-on, the ROM launches the (possibly hung) app
+directly and the loader never sees the file.
 
 **Recovery action (default):**
 1. Keep the power hold (PE2) and feed the FWDGT.
@@ -1462,16 +1455,6 @@ but nothing can make that installed copy bootable again except a vendor install
 - The shim still honours the backup-SRAM request word (`BKP_REQ`), but nothing
   sets it now. It is kept for a later in-app "enter recovery".
 
-**Non-default variants (tests only):**
-- **`recovery-file`:** writes one 0-byte `DM40RCVR.BIN` root entry on the SPI
-  FAT, only the root block, FAT untouched (`fatren::make_trigger`), then powers
-  off (PE2 = PC4 = 0).
-  - The update screen appears only with PA2 held low (debug-header TX shorted to GND).
-- **`recovery-usb`:** our own minimal USB-MSC disk on the W25Q128 (msc.rs path,
-  no USBTMC; serial = the chip UID as in normal mode, `REC1` until 2026-10-23).
-  - Any SCSI START STOP UNIT, or a key hold of 2 s or more, powers off
-    (an eject also makes the disk report no medium for that last second).
-  - A short key press reboots.
 
 ## Normal native mode
 
@@ -1554,8 +1537,7 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
   start-up phase times (`native::boot_words`).
 
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
-  failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
-  2 NoMedium, 3 BadBpb, 4 NoSpace, 5 Error.
+  failed.
 - **`DBG:PING?`:** its `keepalive_left` field saturates at `4294967295`
   (`u32::MAX`): the boot hold (`u64::MAX/4`) reads as no limit.
 - **Power-off** (key held 1.5 s, or idle timeout): if the unit stays
@@ -1619,8 +1601,8 @@ never two live entries with the same name or a live entry on freed clusters.
    - A file's LFN entries are the checksum-matching run just before its 8.3
      entry.
    - `DM40RCVR.BIN` is handled separately.
-2. **Leftover `DM40RCVR.BIN`:** mark it 0xE5. Its cluster chain is freed if it
-   has one; the 0-byte trigger has none.
+2. **Leftover `DM40RCVR.BIN`** (the 0-byte recovery trigger an earlier
+   build wrote): mark it 0xE5. Its cluster chain is freed if it has one.
 3. **Old backup:** if `_DM40PRV.BIN` exists, mark its 8.3 + LFN entries 0xE5
    and free its cluster chain to 0x0000 in **every** FAT copy. Only one backup
    is kept.
@@ -1659,13 +1641,8 @@ the DM40 geometry: 4096 B sectors, 2 FATs, 512 root entries, 4087 clusters.
   - H1 scenario: a staged stock file with opendm40 installed is not renamed and
     the backup survives; once the marker is that file's header it is renamed;
   - a long name with leading spaces is handled.
-- **Recovery trigger:**
-  - it reuses a 0xE5 slot;
-  - only root block 5 is written, and the FAT is byte-identical;
-  - the file is 0 bytes, and fsck.fat is clean;
-  - a second call returns `AlreadyThere`;
-  - nothing is written when a `dm40*.bin` is already staged;
-  - a following normal run removes `DM40RCVR.BIN` and renames the image.
+- **Leftover recovery trigger:** a normal run removes a 0-byte
+  `DM40RCVR.BIN` and renames the image.
 - **Not exercised:** a long name that matches while its 8.3 name does not.
   mtools derives the 8.3 name from the long one, so this case cannot be built.
 
@@ -1725,7 +1702,7 @@ both in its `LOGS/` / `SHOTS/` / `SCOPE/`.
 ### The USB volume (`src/vdisk.rs`)
 
 One LUN (`Msc::new(.., 1)`, feature `vdisk`, default; builds
-without it still export the writable SPI disk; recovery-usb keeps its own).
+without it still export the writable SPI disk).
 INQUIRY product `DM40 files`. **Read-only by default** ("Files live",
 [decisions-2026-10-22](../../docs/history/decisions-2026-10-22.md) #6): the WP bit set, every WRITE fails DATA PROTECT
 07/27/00, a change goes out as a UNIT ATTENTION at once. Settings 3/3
@@ -1853,8 +1830,7 @@ sd around a suspend, `udisksctl power-off` before it removes the USB
 device) and a power-condition request change nothing. Pending media-change
 UNIT ATTENTIONs are kept while ejected. The CDB byte is read from the CBW
 in the transport buffer as for PREVENT (usbd-storage hides it); a CBW not
-found exactly once is ignored. Any 0x1B still sets `STOP_UNIT` (recovery-usb
-powers off on it). "PC can edit": the session ends at the Allow (Linux sends
+found exactly once is ignored. "PC can edit": the session ends at the Allow (Linux sends
 it before the eject) or after the quiet time (Windows); the firmware file
 is committed by `vwrite::poll` once its data has settled, whether the
 medium is ejected or not, and an Allow that comes before that check (`cp`
@@ -1877,7 +1853,7 @@ could act on the other unit. Since 2026-10-23 the serial is the GD32's
 in memory order (word 0 low byte first): the digits of `xxd -p -u
 INFO/UID.BIN`. The same string is:
 
-- the USB iSerial (normal mode and `recovery-usb`);
+- the USB iSerial;
 - the SCSI unit serial number, INQUIRY VPD page 0x80 (msc.rs);
 - the third field of `*IDN?`: `Alientek,DM40A,<serial>,opendm40 0.1.0`.
   libsigrok's scpi-dmm DM40 profile (`sr_scpi_get_hw_id`: four

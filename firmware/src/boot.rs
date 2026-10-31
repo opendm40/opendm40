@@ -64,8 +64,6 @@ const RCU_AHB1EN: u32 = 0x4002_3830;
 const RCU_APB1EN: u32 = 0x4002_3840;
 const PMU_CTL: u32 = 0x4000_7000;
 const PMU_CS: u32 = 0x4000_7004;
-#[cfg_attr(not(any(feature = "recovery-file", feature = "recovery-usb")), allow(dead_code))]
-const GPIOC: u32 = 0x4002_0800;
 const GPIOA: u32 = 0x4002_0000;
 const GPIOD: u32 = 0x4002_0C00;
 const GPIOE: u32 = 0x4002_1000;
@@ -101,8 +99,7 @@ pub const HEALTHY_MS: u64 = 60_000;
 pub const BKP_CRASH: u32 = 0x4002_4FF0;
 const CRASH_TAG: u32 = 0x4352_0000; // "CR"
 /// Last loader entry (0x54520010 marker zeroed, 0x54520011 failed, 0x54520012
-/// PA2 entry, 0x54520013 PA2 entry without the GPIO lock;
-/// recovery-file: `0x5452_0000 | fatren::Trigger`).
+/// PA2 entry, 0x54520013 PA2 entry without the GPIO lock).
 pub const BKP_TRIG: u32 = 0x4002_4FF4;
 pub const BKP_REQ: u32 = 0x4002_4FF8;
 pub const BKP_LAST: u32 = 0x4002_4FFC;
@@ -165,8 +162,7 @@ pub fn pd6_pressed() -> bool {
 /// PD6 input WITH pull-down, as the stock key init does
 /// (app_decompile.c:6482, gpio_mode_set(GPIOD, input, PUPD 2, 0x40)). After a
 /// reset the ROM/loader leave PD6 floating (PUPD 00); without the pull a
-/// floating 1 would read as a held key (recovery-usb reads the key without
-/// board::init). Then let the pull settle.
+/// floating 1 would read as a held key. Then let the pull settle.
 fn pd6_input() {
     unsafe {
         modify32(RCU_AHB1EN, 0, 1 << 3); // GPIOD
@@ -232,18 +228,6 @@ pub fn latch_on() {
         modify32(GPIOE + 0x08, 0, 3 << 4);
         modify32(GPIOE + 0x0C, 3 << 4, 0);
         modify32(GPIOE, 3 << 4, 1 << 4);
-    }
-}
-
-/// Power off exactly as app.rs power_off(): PE2 = 0, PC4 = 0. On battery the
-/// unit switches off once the power key is released; on USB power it may stay
-/// up (then nothing else happens; the caller keeps running).
-#[cfg_attr(not(any(feature = "recovery-file", feature = "recovery-usb")), allow(dead_code))]
-pub fn latch_off() {
-    unsafe {
-        modify32(RCU_AHB1EN, 0, (1 << 2) | (1 << 4));
-        w32(GPIOE + 0x18, 1 << (2 + 16));
-        w32(GPIOC + 0x18, 1 << (4 + 16));
     }
 }
 
@@ -384,7 +368,7 @@ pub fn enter_loader_update() -> bool {
     zero_marker()
 }
 
-/// Recovery: remember what fatren::make_trigger did (shown by DBG:BOOT?).
+/// Recovery: record the outcome of the marker zeroing (BKP_TRIG, shown by DBG:BOOT?).
 pub fn record_trigger(code: u32) {
     bkp_enable();
     unsafe { w32(BKP_TRIG, 0x5452_0000 | code) };
@@ -706,7 +690,7 @@ pub fn put_info(s: &mut crate::scpi::Scpi) {
         i.last,
         // Last loader entry: 0x54520010 marker zeroed, 0x54520011 zeroing
         // failed, 0x54520012 PA2 entry, 0x54520013 PA2 entry, lock not
-        // confirmed; recovery-file: 0x5452000n (0 / other = none recorded).
+        // confirmed (0 / other = none recorded).
         unsafe { r32(BKP_TRIG) },
         m[0],
         m[1],

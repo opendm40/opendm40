@@ -2,7 +2,7 @@
 //! 12 bytes) as 24 uppercase hex digits, bytes in memory order (word 0 low
 //! byte first): the same digits as `xxd -p -u INFO/UID.BIN` on the USB volume.
 //!
-//! Used for the USB iSerial (normal and recovery-usb), the SCSI unit serial
+//! Used for the USB iSerial, the SCSI unit serial
 //! number (INQUIRY VPD page 0x80, msc.rs) and the serial field of *IDN?
 //! (scpi.rs; not in the SYST:IDN:EMUL 34401A identity). Before 2026-10-23
 //! every unit said "0001" (USB) / "0" (*IDN?): udisks merges disks with the
