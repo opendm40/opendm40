@@ -134,7 +134,8 @@ impl Ann {
     }
 }
 
-/// The band's rect (the graph hole) for `dec` (1 UART, 2 Modbus).
+/// The band's rect (the graph hole) for `dec` (1 UART, 2 Modbus, 3 DALI:
+/// one row of frame boxes).
 pub fn band_rect(dec: u8) -> Rect {
     if dc::MODBUS && dec == 2 { rect(14, FRAME_Y, 399, BYTE_Y + ROW_H - FRAME_Y) } else { rect(14, BYTE_Y, 399, ROW_H) }
 }
@@ -253,6 +254,28 @@ pub fn band(dec: u8, blank: bool) {
         let (edge, fg) = if fl != 0 { (C_ERR, C_ERR) } else { (C_BOX, C_WHITE) };
         draw_box(BYTE_Y, x0, x1, edge, t, fg);
     }
+    if dc::DALI && dec == 3 {
+        for k in 0..a.nf as usize {
+            let f = a.f[k];
+            let (x0, x1) = (a.x_of(f.s0), a.x_of(f.s1));
+            if x1 < 14 || x0 > 412 {
+                continue;
+            }
+            let w = (x1.min(412) - x0.max(14) + 1) as i16;
+            let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
+            let mut lb = [0u8; 24];
+            let mut l = dc::W { b: &mut lb, n: 0 };
+            dc::dali_text(&mut l, &fr, false);
+            let mut sb = [0u8; 12];
+            let mut s = dc::W { b: &mut sb, n: 0 };
+            dc::dali_text(&mut s, &fr, true);
+            let (ln, sn) = (l.n, s.n);
+            let t = pick(&[txt(&lb[..ln]), txt(&sb[..sn]), ".."], w);
+            let (edge, fg) = if fr.flags != 0 { (C_ERR, C_ERR) } else { (C_FBOX, C_YELLOW) };
+            draw_box(BYTE_Y, x0, x1, edge, t, fg);
+        }
+        return;
+    }
     if dec != 2 {
         return;
     }
@@ -328,6 +351,27 @@ impl SetupVals {
     pub const DEFAULT: SetupVals = SetupVals { proto: 0, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: f32::NAN };
 }
 
+/// The protocols offered, in the Protocol row's order: values, names
+/// (Modbus last: with four items it gets the widest box).
+const PROTO_V: &[u8] = &[
+    dc::P_OFF,
+    dc::P_UART,
+    #[cfg(any(feature = "dec-dali", not(target_os = "none")))]
+    dc::P_DALI,
+    #[cfg(any(feature = "dec-modbus", not(target_os = "none")))]
+    dc::P_MODBUS,
+];
+const PROTO_N: &[&str] = &[
+    "Off",
+    "UART",
+    #[cfg(any(feature = "dec-dali", not(target_os = "none")))]
+    "DALI",
+    #[cfg(any(feature = "dec-modbus", not(target_os = "none")))]
+    "Modbus",
+];
+/// The Protocol row's item width (the last item takes the rest).
+const PROTO_W: i16 = if PROTO_V.len() > 3 { 40 } else { 60 };
+
 /// The tab's page height (MF_PAGE_H).
 pub const PAGE_H: i16 = 162;
 /// The frame log (Mode Log) is built in (firmware: feature `dec-log`; the
@@ -367,8 +411,7 @@ pub fn page(v: &SetupVals, pc: Rect) {
             None => (C_POP_BG, 0),
         });
     }
-    let protos: &[&str] = if dc::MODBUS { &["Off", "UART", "Modbus"] } else { &["Off", "UART"] };
-    option_list(SU_PROTO, pc, protos, 60, v.proto.min(protos.len() as u8 - 1) as usize);
+    option_list(SU_PROTO, pc, PROTO_N, PROTO_W, if dc::DALI { PROTO_V.iter().position(|&p| p == v.proto).unwrap_or(0) } else { v.proto.min(PROTO_V.len() as u8 - 1) as usize });
     let modes: &[&str] = if LOG { &["Band", "Log"] } else { &["Band"] };
     option_list(SU_MODE, pc, modes, 60, v.mode.min(modes.len() as u8 - 1) as usize);
     option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
@@ -408,8 +451,9 @@ pub enum SetupHit {
 /// What a touch on the Decode tab's page hits.
 pub fn page_hit(x: i16, y: i16) -> SetupHit {
     let near = |r: Rect| rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y);
-    if let Some(i) = option_hit(SU_PROTO, if dc::MODBUS { 3 } else { 2 }, 60, x, y) {
-        SetupHit::Proto(i)
+    if let Some(i) = option_hit(SU_PROTO, PROTO_V.len(), PROTO_W, x, y) {
+        // Without DALI the value is the index.
+        SetupHit::Proto(if dc::DALI { PROTO_V[i as usize] } else { i })
     } else if let Some(i) = option_hit(SU_MODE, if LOG { 2 } else { 1 }, 60, x, y) {
         SetupHit::Mode(i)
     } else if let Some(i) = option_hit(SU_FMT, 4, 44, x, y) {

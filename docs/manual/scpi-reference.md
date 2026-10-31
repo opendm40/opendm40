@@ -602,11 +602,11 @@ and `MEASure:POWer?` then give the real power P in W.
 
 ## Protocol decoder
 
-UART and Modbus RTU on the scope page ([the decoder](README.md#protocol-decoder)).
+UART, Modbus RTU and DALI on the scope page ([the decoder](README.md#protocol-decoder)).
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `DECode:PROTocol[?]` | `OFF` (default), `UART` or `MODBus` | `OFF`, `UART` or `MODB` | both |
+| `DECode:PROTocol[?]` | `OFF` (default), `UART`, `MODBus` or `DALI` | `OFF`, `UART`, `MODB` or `DALI` | both |
 | `DECode:BAUD[?]` | bit rate, 300 .. 115200, or `AUTO` (default) | `AUTO` or `9600` | both |
 | `DECode:RATE?` | | the bit rate of the decoded record: `9600` (`0`: none) | both |
 | `DECode:FORMat[?]` | `8N1` (default), `8E1`, `8O1` or `7E1` | `8N1` | both |
@@ -633,6 +633,16 @@ UART and Modbus RTU on the scope page ([the decoder](README.md#protocol-decoder)
   @0000 n=10`, `RSP 01 03 20B req=12` (the request's `seq`), `EXC 01 83
   E02`; `?` without fields. UART frames: bytes with less than 2 character
   times between them, at most 16.
+- DALI (`DECode:PROTocol DALI`, a build with it): 1200 bit/s fixed
+  (`DECode:RATE?` `1200`; `BAUD` and `FORMat` are not used), `POLarity
+  INVerted` for a probe on the opto-coupler side. `proto` `DALI`, `status`
+  `OK` or `ERR` (bad bi-phase or timing), `info` `A:FE D:80 BC DAPC`
+  (forward frame: address, data, the target `S<n>` short address, `G<n>`
+  group, `BC` broadcast, `BCU` broadcast unaddressed, `SPC` special
+  command, `?` reserved; `DAPC` arc power or `CMD` by the selector bit),
+  `B:FF` (backward frame), `F24:A1B2C3` (24-bit frame) or `ERR`. `COUNt?`:
+  frames, data bytes, `ERR` frames in `framing`. Mode Log has no DALI
+  (`Settings conflict`).
 - Log (`DECode:MODE LOG`, the scope page's input): `DECode:FRAMes?` gives
   the frames not read yet, oldest first, and moves past them (a FIFO; poll
   it to follow the bus). `time_s` counts from the log's start; `seq`
