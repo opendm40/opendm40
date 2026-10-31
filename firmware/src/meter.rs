@@ -940,10 +940,10 @@ impl Meter {
     }
 }
 
-/// Continuity / diode with the reading over its ceiling: open leads, "0L"
-/// captioned "OPEN" (owner 2026-10-30), not "Overflow".
+/// Continuity / diode over range at once (`dmm::ol_open`): open leads, "0L"
+/// captioned "OPEN", not "Overflow" (owner 2026-10-31).
 pub fn open(r: &Reading) -> bool {
-    r.main.ol && matches!(r.mode, 11 | 12)
+    r.main.ol && r.open
 }
 
 /// Display text for a value ("0L" when over range, "--" for no value:
@@ -986,7 +986,40 @@ mod tests {
             alert: crate::sentinel::Alert::None,
             power: None,
             prov: false,
+            open: false,
         }
+    }
+
+    /// Continuity / diode "0L": OPEN when the over range came at once,
+    /// Overflow when the readings climbed to it (`dmm::ol_open`).
+    #[test]
+    fn ol_open_vs_overflow() {
+        use crate::dmm::ol_open;
+        // Diode, limit 3.12 V, half = 1.56 V; None = over range.
+        let run = |seq: &[Option<f32>]| {
+            let mut near = false;
+            seq.iter().map(|x| ol_open(&mut near, x.is_none(), x.map_or(false, |v| v >= 1.56))).collect::<Vec<_>>()
+        };
+        // Entering the function over range (open leads, a charged
+        // capacitor): OPEN for the whole run.
+        assert_eq!(run(&[None, None, None]), [true; 3]);
+        // A charging capacitor: 0.4, 2.2, 3.0 V, then over range: Overflow,
+        // kept through repeated OL.
+        assert_eq!(run(&[Some(0.4), Some(2.2), Some(3.0), None, None]), [false, false, false, false, false]);
+        // Leads lifted off a silicon diode (0.6 V): OPEN.
+        assert_eq!(run(&[Some(0.6), Some(0.6), None, None]), [false, false, true, true]);
+        // Back in range below half, then over range again: OPEN again.
+        assert_eq!(run(&[Some(2.9), None, Some(0.6), None]), [false, false, false, true]);
+        // An in-range reading never says OPEN.
+        assert_eq!(run(&[Some(0.0), Some(3.1)]), [false, false]);
+        // meter::open follows the reading's flag, only with "0L".
+        let mut r = rd(12, 0.0, 4, "V", 1.0);
+        r.main.ol = true;
+        assert!(!open(&r));
+        r.open = true;
+        assert!(open(&r));
+        r.main.ol = false;
+        assert!(!open(&r));
     }
 
     /// Feed `vals` 110 ms apart (about the 100 ms moving / FAST DC rate); the

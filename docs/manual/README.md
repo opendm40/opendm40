@@ -603,7 +603,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Continuity
 
-- Shows the resistance with two decimals; **0L** with **OPEN** above 1000 Ω.
+- Shows the resistance with two decimals; **0L** above 1000 Ω ([OPEN or Overflow](#overflow)).
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
@@ -630,8 +630,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Diode
 
-- Shows the forward voltage with four decimals; **0L** with **OPEN** above
-  3.12 V (open leads or a reversed diode).
+- Shows the forward voltage with four decimals; **0L** above 3.12 V (open
+  leads or a reversed diode; [OPEN or Overflow](#overflow)).
 - Top left, small: the test current, **I 0.76 mA** (the short-circuit
   current, measured on one unit; the open-circuit voltage is 3.2 V).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
@@ -759,8 +759,10 @@ to a high voltage applied while the meter sat on the mV range.
   is above the range (or the function's limit). The bargraph turns red with
   an **OL** mark. On the scope page's meter strip, **Overflow** is in the
   small text right of the reading.
-- Continuity and diode say **OPEN** instead of **Overflow** (also the
-  bargraph mark).
+- Continuity and diode say **OPEN** instead (also the bargraph mark) when
+  they start over range or jump there from below half the limit (open
+  leads); readings that climb past the limit (a charging capacitor) say
+  **Overflow**.
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.

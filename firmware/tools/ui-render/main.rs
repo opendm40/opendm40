@@ -596,7 +596,7 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
+    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false, open: main.ol && matches!(mode, 11 | 12) }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
