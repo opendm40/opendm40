@@ -15,6 +15,9 @@ Scope page, a 1 kHz sine, 5 ms/div, STOP; the graph read back (A). Then:
      A again;
   4. RUN, Gen page, back: the running scope draws a trace (not the empty
      graph of fresh bytes).
+  5. Gallery / Gen page open, scope commands over SCPI (TIM:SCAL,
+     CHAN1:SCAL, TRIG:LEV, STOP / RUN, CALC:STAT): the view's tenant keeps
+     the pool.
 A CSV recording runs through all of it (rows keep coming, none dropped);
 WAV:DATA? reads the stored record on the Gen page.
 
@@ -232,6 +235,21 @@ try:
     b = graph()
     shot('pool-5-run')
     check(ink(b) > 300, 'running after the Gen page: a trace is drawn (%d pixels)' % ink(b))
+    # 5. Scope commands over SCPI while another view holds the pool: the
+    # holder keeps it (the scope state changes, the graph is not taken).
+    for view, tap, tenant in (('Gallery', '240,27', 'Gallery'), ('Signal', '141,219', 'GenPreview')):
+        q('DBG:KEY 0')
+        wait_ms(800)
+        q('DBG:TAP %s' % tap)
+        wait_ms(3000)
+        before = pool()
+        for c in ('TIM:SCAL 1e-3', 'CHAN1:SCAL 2', 'TRIG:LEV 0.1', 'STOP', 'TIM:SCAL 2e-3', 'RUN', 'CALC:STAT ON', 'CALC:STAT OFF'):
+            q(c)
+            wait_ms(300)
+        wait_ms(1500)
+        p = pool()
+        check(q('DBG:VIEW?').startswith(view) and p[tenant][0] and p[tenant][1] == before[tenant][1] and not p['ScopeGraph'][0],
+              '%s: SCPI scope commands leave %s holding the pool (%s)' % (view, tenant, p))
     st = q('LOG:CSV?').split(',')
     check(st[0] != '0' and int(st[2]) >= 20 and st[5] == '0', 'CSV recording ran through the page changes: %s' % ','.join(st))
     q('LOG:CSV OFF')

@@ -134,49 +134,51 @@ impl Pool {
     }
 
     /// Tenant `T`'s bytes, taken (and set up) when it does not hold them.
+    #[allow(dead_code)] // the firmware's tenants use `take_ptr` (tools/pool-test this)
     #[inline(always)]
     pub fn take<T: Tenancy>(&self) -> Option<&'static mut T> {
-        if self.owner.load(Relaxed) & (1 << T::T as u32) != 0 {
-            // SAFETY: held; the range was checked by `acquire`.
-            return Some(unsafe { &mut *(self.base.add(T::OFF) as *mut T) });
-        }
-        self.acquire::<T>()
+        // SAFETY: set up and held (`take_raw`).
+        self.take_raw::<T>().map(|p| unsafe { &mut *p })
     }
 
     /// `take` for a pool whose tenants overlapping `T` are all `Drop` /
     /// `Restart` (tools/pool-test checks PAGE), where it cannot fail; a raw
-    /// pointer, so that the callers project disjoint fields
-    /// (`addr_of_mut!((*p).f)`) as they did from separate statics.
+    /// pointer (no reference to the whole tenant is made), so that the
+    /// callers project disjoint fields (`addr_of_mut!((*p).f)`) as they did
+    /// from separate statics.
     #[inline(always)]
     pub fn take_ptr<T: Tenancy>(&self) -> *mut T {
-        match self.take::<T>() {
-            Some(t) => t as *mut T,
+        match self.take_raw::<T>() {
+            Some(p) => p,
             // SAFETY: no `Never` tenant overlaps and the size is asserted
-            // at compile time (`fits`), so `acquire` returns Some.
+            // at compile time (`fits`), so `acquire_raw` returns non-null.
             None => unsafe { core::hint::unreachable_unchecked() },
         }
     }
 
     /// Tenant `T`'s bytes only while it holds them (no eviction).
+    #[allow(dead_code)]
     #[inline(always)]
     pub fn held<T: Tenancy>(&self) -> Option<&'static mut T> {
-        // SAFETY: as `take`.
+        // SAFETY: held, so set up.
         (self.owner.load(Relaxed) & (1 << T::T as u32) != 0).then(|| unsafe { &mut *(self.base.add(T::OFF) as *mut T) })
     }
 
-
     #[inline(always)]
-    fn acquire<T: Tenancy>(&self) -> Option<&'static mut T> {
+    fn take_raw<T: Tenancy>(&self) -> Option<*mut T> {
+        if self.owner.load(Relaxed) & (1 << T::T as u32) != 0 {
+            // SAFETY: held; inside the pool (pool-test).
+            return Some(unsafe { self.base.add(T::OFF) } as *mut T);
+        }
         fn init<T: Tenancy>(p: *mut u8) {
             T::init(p as *mut T);
         }
         let p = self.acquire_raw(T::T, core::mem::size_of::<T>(), T::OFF, init::<T>) as *mut T;
-        // SAFETY: set up by `init`; held now.
-        (!p.is_null()).then(|| unsafe { &mut *p })
+        (!p.is_null()).then_some(p)
     }
 
-    /// `acquire`'s body, once for every tenant type: evict the overlapping
-    /// holders, take, set up; null when it cannot.
+    /// `take_raw`'s slow path, once for every tenant type: evict the
+    /// overlapping holders, take, set up; null when it cannot.
     #[inline(never)]
     fn acquire_raw(&self, t: Tenant, size: usize, off: usize, init: fn(*mut u8)) -> *mut u8 {
         let Some(s) = self.spec(t) else { return core::ptr::null_mut() };

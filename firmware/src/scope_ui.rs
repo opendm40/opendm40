@@ -1821,7 +1821,8 @@ pub fn graph() -> &'static mut Graph {
 /// (a CH2 switch over SCPI, the wave view's exit, `sp_leave`). A fresh
 /// set is empty anyway.
 pub fn graph_held() -> Option<&'static mut Graph> {
-    crate::pool::PAGE.held::<GraphSet>().map(|s| &mut s.g)
+    // SAFETY: as `graph`, only while held.
+    graph_kept().then(|| unsafe { &mut *core::ptr::addr_of_mut!((*set()).g) })
 }
 
 /// The scope graph's state holds the page pool (a stopped record needs
