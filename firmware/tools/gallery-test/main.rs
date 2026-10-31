@@ -155,6 +155,8 @@ mod upload;
 mod fatren;
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+#[path = "../../src/diskbuf.rs"]
+mod diskbuf;
 #[path = "../../src/screenshot.rs"]
 mod screenshot;
 #[path = "../../src/scope_csv.rs"]

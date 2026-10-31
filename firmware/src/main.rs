@@ -2437,6 +2437,7 @@ mod board;
 mod boot;
 mod fatren;
 mod calbackup;
+mod diskbuf;
 #[cfg(feature = "vdisk")]
 mod vdisk;
 #[cfg(feature = "vdisk")]
