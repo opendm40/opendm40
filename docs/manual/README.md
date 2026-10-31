@@ -1584,8 +1584,8 @@ RTU, DALI and **Mode Log** are left out (flash).
   |---|---|
   | The frame log | A frame tapped: its waveform |
 
-- **DALI** (lighting bus, 1200 bit/s): a box per frame, `A:FE D:80` forward
-  (address, data), `B:FF` backward, `F24:…` 24-bit, **ERR** in red.
+- **DALI** (lighting bus, 1200 bit/s, no Format / Baud): a box per frame,
+  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…` 24-bit, **ERR** in red.
 - Settings: protocol (**Off**, **UART**, **DALI**, **Modbus**), baud (**Auto** or 300
 
   to 115200), format, polarity (**Inverted** for RS-232 levels), threshold

@@ -524,7 +524,7 @@ fn main() {
     // ---- DALI: forward 16, backward 8, 24-bit; timing; glitches ----
     {
         let te = 1.0 / 2400.0;
-        let want = ["A:FE D:80 BC DAPC", "B:FF", "A:A3 D:12 SPC", "F24:C1A2B3", "A:05 D:00 S2 CMD", "A:9B D:21 G13 CMD", "A:FD D:05 BCU CMD"];
+        let want = ["FF16:FE 80 BC DAPC", "BF8:FF", "FF16:A3 12 SPC", "FF24:C1 A2 B3", "FF16:05 00 S2 CMD", "FF16:9B 21 G13 CMD", "FF16:FD 05 BCU CMD"];
         let frames = |s: &mut Sig, k: f64| {
             s.idle(10.0 * te).dali(te * k, 0xFE80, 16, None).idle(10.0 * te);
             s.dali(te * k, 0xFF, 8, None).idle(30.0 * te);
@@ -606,7 +606,7 @@ fn main() {
                 t("DALI glitch case: a high half found", first);
             }
             let got = dtexts(&dali(&c, 0, c.len(), 50_000, false, 300));
-            t(&format!("DALI error case {case}: {got:?}"), got == ["ERR", "B:FF"]);
+            t(&format!("DALI error case {case}: {got:?}"), got == ["ERR", "BF8:FF"]);
         }
         // A glitch on the idle line (a 60 us low spike): ignored; a long
         // idle gap between frames; a frame cut by the window's end is not
@@ -622,11 +622,11 @@ fn main() {
                 *x = 100;
             }
             let got = dtexts(&dali(&c, 0, c.len(), 50_000, false, 4096));
-            t(&format!("DALI idle glitch, 0.5 s gap: {got:?}"), got == ["A:FE D:80 BC DAPC", "A:01 D:21 S0 CMD", "A:FF D:00 BC CMD"]);
+            t(&format!("DALI idle glitch, 0.5 s gap: {got:?}"), got == ["FF16:FE 80 BC DAPC", "FF16:01 21 S0 CMD", "FF16:FF 00 BC CMD"]);
             // The window from the first frame's middle to the last one's.
             let (a, b) = (((10.0 + 15.0) * te * fs) as usize, c.len() - (20.0 * te * fs) as usize);
             let got = dtexts(&dali(&c, a, b, 50_000, false, 4096));
-            t(&format!("DALI window cut: {got:?}"), got == ["A:01 D:21 S0 CMD"]);
+            t(&format!("DALI window cut: {got:?}"), got == ["FF16:01 21 S0 CMD"]);
         }
         // The line stuck low inside a frame: ERR once it goes high again.
         {
@@ -634,7 +634,7 @@ fn main() {
             s.idle(10.0 * te).dali(te, 0xFE, 8, None).space(20.0 * te).idle(12.0 * te).dali(te, 0x42, 8, None).idle(12.0 * te);
             let c = s.codes(50_000.0, 100.0, 800.0, false, 2.0, 0.0, 0, 0, &mut rng);
             let got = dtexts(&dali(&c, 0, c.len(), 50_000, false, 4096));
-            t(&format!("DALI stuck low: {got:?}"), got == ["ERR", "B:42"]);
+            t(&format!("DALI stuck low: {got:?}"), got == ["ERR", "BF8:42"]);
         }
         // Too few samples per half bit (5 kS/s: 2): nothing.
         {
@@ -646,7 +646,7 @@ fn main() {
         let mut b = [0u8; 40];
         let mut w = W { b: &mut b, n: 0 };
         dali_text(&mut w, &Fr { start: 0, end: 0, len: 2, head: [0xFE, 0x80, 0, 0, 0, 0, 0, 0], flags: 0, kind: K_DALI }, true);
-        t(&format!("DALI short text {:?}", w.as_str()), w.as_str() == "A:FE D:80");
+        t(&format!("DALI short text {:?}", w.as_str()), w.as_str() == "FF16:FE 80");
     }
 
     t("crc16 of 01 03 00 00 00 0A = 0xCDC5", crc16(&[1, 3, 0, 0, 0, 0x0A]) == 0xCDC5);

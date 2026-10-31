@@ -636,11 +636,12 @@ UART, Modbus RTU and DALI on the scope page ([the decoder](README.md#protocol-de
 - DALI (`DECode:PROTocol DALI`, a build with it): 1200 bit/s fixed
   (`DECode:RATE?` `1200`; `BAUD` and `FORMat` are not used), `POLarity
   INVerted` for a probe on the opto-coupler side. `proto` `DALI`, `status`
-  `OK` or `ERR` (bad bi-phase or timing), `info` `A:FE D:80 BC DAPC`
-  (forward frame: address, data, the target `S<n>` short address, `G<n>`
-  group, `BC` broadcast, `BCU` broadcast unaddressed, `SPC` special
-  command, `?` reserved; `DAPC` arc power or `CMD` by the selector bit),
-  `B:FF` (backward frame), `F24:A1B2C3` (24-bit frame) or `ERR`. `COUNt?`:
+  `OK` or `ERR` (bad bi-phase or timing), `info` `FF16:FE 80 BC DAPC`
+  (16-bit forward frame: address and data bytes, the target `S<n>` short
+  address, `G<n>` group, `BC` broadcast, `BCU` broadcast unaddressed,
+  `SPC` special command, `?` reserved; `DAPC` arc power or `CMD` by the
+  selector bit), `BF8:FF` (backward frame), `FF24:A1 B2 C3` (24-bit
+  forward frame) or `ERR`. `COUNt?`:
   frames, data bytes, `ERR` frames in `framing`. Mode Log has no DALI
   (`Settings conflict`).
 - Log (`DECode:MODE LOG`, the scope page's input): `DECode:FRAMes?` gives

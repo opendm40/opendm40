@@ -391,6 +391,17 @@ pub const SU_TPLUS: Rect = rect(362, 197, 36, 20);
 /// The page's labels.
 pub const SU_LABELS: [Rect; 6] = [rect(24, 61, 180, 20), rect(214, 61, 189, 20), rect(24, 105, 180, 20), rect(214, 105, 189, 20), rect(24, 149, 180, 20), rect(214, 149, 189, 20)];
 const SU_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Format:", "Polarity:", "Baud:", "Threshold:"];
+/// DALI's page: no Format / Baud (UART only); the fixed bit rate in
+/// Format's place, Threshold on the third row (Auto / Manual left, its
+/// stepper right).
+pub const DL_RATE: Rect = rect(24, 125, 176, 24);
+const DL_TEXTS: [&str; 6] = ["Protocol:", "Mode:", "Bit rate:", "Polarity:", "Threshold:", ""];
+const DL_THR: [Rect; 4] = [rect(24, 169, 120, 24), rect(214, 169, 36, 24), rect(254, 169, 104, 24), rect(362, 169, 36, 24)];
+
+/// The Threshold row's rects: Auto / Manual, -, the value, +.
+pub fn thr_rects(dali: bool) -> [Rect; 4] {
+    if dali { DL_THR } else { [SU_TAUTO, SU_TMINUS, SU_TVAL, SU_TPLUS] }
+}
 
 fn volts_text(w: &mut dc::W, v: f32) {
     let mut t = [0u8; 16];
@@ -404,7 +415,8 @@ fn volts_text(w: &mut dc::W, v: f32) {
 /// The Decode tab's page (in `pc`, the MF popup's page area).
 pub fn page(v: &SetupVals, pc: Rect) {
     fill_c(pc, pc, C_POP_BG);
-    for (r, t) in SU_LABELS.iter().zip(SU_TEXTS) {
+    let dali = dc::is_dali(v.proto);
+    for (r, t) in SU_LABELS.iter().zip(if dali { DL_TEXTS } else { SU_TEXTS }) {
         let k = Ink::new(sf::SC_F16, *r, t, 1, 0);
         paint(isect(isect(k.bx, *r), pc), &[(K_TEXT, C_POP_BG)], |x, y| match k.at(x, y) {
             Some(g) => (C_FILL, tag(1, g)),
@@ -414,25 +426,32 @@ pub fn page(v: &SetupVals, pc: Rect) {
     option_list(SU_PROTO, pc, PROTO_N, PROTO_W, if dc::DALI { PROTO_V.iter().position(|&p| p == v.proto).unwrap_or(0) } else { v.proto.min(PROTO_V.len() as u8 - 1) as usize });
     let modes: &[&str] = if LOG { &["Band", "Log"] } else { &["Band"] };
     option_list(SU_MODE, pc, modes, 60, v.mode.min(modes.len() as u8 - 1) as usize);
-    option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
     option_list(SU_POL, pc, &["Normal", "Inverted"], 88, v.inv as usize);
-    option_list(SU_TAUTO, pc, &["Auto", "Manual"], 60, v.thr.is_finite() as usize);
-    let mut bb = [0u8; 12];
-    let mut b = dc::W { b: &mut bb, n: 0 };
-    if v.baud == 0 {
-        b.s("Auto");
-    } else {
-        b.u(v.baud);
-    }
-    let bn = b.n;
+    let [ta, tm, tv, tp] = thr_rects(dali);
+    option_list(ta, pc, &["Auto", "Manual"], 60, v.thr.is_finite() as usize);
     let mut hb = [0u8; 16];
     let mut h = dc::W { b: &mut hb, n: 0 };
     volts_text(&mut h, if v.thr.is_finite() { v.thr } else { v.level });
     let hn = h.n;
-    for (m, val, p, txt) in [(SU_BMINUS, SU_BVAL, SU_BPLUS, txt(&bb[..bn])), (SU_TMINUS, SU_TVAL, SU_TPLUS, txt(&hb[..hn]))] {
-        rbox_text(m, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
-        rbox_text(p, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
-        fill_text(val, pc, C_POP_BG, sf::SC_F16, val, txt, C_FILL, 8, 0);
+    let mut steppers = [(tm, tv, tp, txt(&hb[..hn])), (SU_BMINUS, SU_BVAL, SU_BPLUS, "")];
+    let mut bb = [0u8; 12];
+    if dali {
+        fill_text(DL_RATE, pc, C_POP_BG, sf::SC_F16, DL_RATE, "1200 bit/s", C_FILL, 1, 0);
+    } else {
+        option_list(SU_FMT, pc, &dc::FMT_NAMES, 44, v.fmt as usize % 4);
+        let mut b = dc::W { b: &mut bb, n: 0 };
+        if v.baud == 0 {
+            b.s("Auto");
+        } else {
+            b.u(v.baud);
+        }
+        let bn = b.n;
+        steppers[1].3 = txt(&bb[..bn]);
+    }
+    for (m, val, p, txt) in &steppers[..if dali { 1 } else { 2 }] {
+        rbox_text(*m, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
+        rbox_text(*p, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
+        fill_text(*val, pc, C_POP_BG, sf::SC_F16, *val, txt, C_FILL, 8, 0);
     }
 }
 
@@ -448,28 +467,33 @@ pub enum SetupHit {
     Inside,
 }
 
-/// What a touch on the Decode tab's page hits.
-pub fn page_hit(x: i16, y: i16) -> SetupHit {
+/// What a touch on the Decode tab's page hits (`dali`: DALI's page).
+pub fn page_hit(dali: bool, x: i16, y: i16) -> SetupHit {
+    let dali = dc::DALI && dali;
+    let [ta, tm, _, tp] = thr_rects(dali);
     let near = |r: Rect| rect(r.x - 2, r.y - 3, r.w + 4, r.h + 6).has(x, y);
     if let Some(i) = option_hit(SU_PROTO, PROTO_V.len(), PROTO_W, x, y) {
         // Without DALI the value is the index.
         SetupHit::Proto(if dc::DALI { PROTO_V[i as usize] } else { i })
     } else if let Some(i) = option_hit(SU_MODE, if LOG { 2 } else { 1 }, 60, x, y) {
         SetupHit::Mode(i)
-    } else if let Some(i) = option_hit(SU_FMT, 4, 44, x, y) {
-        SetupHit::Fmt(i)
     } else if let Some(i) = option_hit(SU_POL, 2, 88, x, y) {
         SetupHit::Inv(i == 1)
-    } else if let Some(i) = option_hit(SU_TAUTO, 2, 60, x, y) {
+    } else if let Some(i) = option_hit(ta, 2, 60, x, y) {
         SetupHit::ThrAuto(i == 0)
+    } else if near(tm) {
+        SetupHit::Thr(false)
+    } else if near(tp) {
+        SetupHit::Thr(true)
+    } else if dali {
+        // No Format / Baud on DALI's page.
+        SetupHit::Inside
+    } else if let Some(i) = option_hit(SU_FMT, 4, 44, x, y) {
+        SetupHit::Fmt(i)
     } else if near(SU_BMINUS) {
         SetupHit::Baud(false)
     } else if near(SU_BPLUS) {
         SetupHit::Baud(true)
-    } else if near(SU_TMINUS) {
-        SetupHit::Thr(false)
-    } else if near(SU_TPLUS) {
-        SetupHit::Thr(true)
     } else {
         SetupHit::Inside
     }

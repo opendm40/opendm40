@@ -550,7 +550,7 @@ try:
             cyc = (gap + dali_bits(0xFE80, 16) + '1' * 14 + dali_bits(0xFF, 8) + gap + dali_bits(0xC1A2B3, 24) + gap
                    + dali_bits(0x9B21, 16, bad=9) + gap + dali_bits(0x0521, 16) + gap)
             put(BITS, cyc, 2400, 0.0, 3.3, 0.01)
-            want_t = {'A:FE D:80 BC DAPC', 'B:FF', 'F24:C1A2B3', 'ERR', 'A:05 D:21 S2 CMD'}
+            want_t = {'FF16:FE 80 BC DAPC', 'BF8:FF', 'FF24:C1 A2 B3', 'ERR', 'FF16:05 21 S2 CMD'}
             q('CHAN1:SCAL 1;CHAN1:COUP DC;TRIG:SWE AUTO;TRIG:SLOP NEG;TRIG:LEV 1.6;TIM:SCAL 10E-3')
             run()
             check(stop(), 'DALI: STOP at 10 ms/div')

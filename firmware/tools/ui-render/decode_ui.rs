@@ -403,6 +403,7 @@ pub fn run(ck: &mut Checker, out: &str) {
         ud::SetupVals { proto: 0, mode: 0, fmt: 3, inv: false, baud: 300, thr: f32::NAN, level: f32::NAN },
         ud::SetupVals { proto: 2, mode: 1, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
         ud::SetupVals { proto: 3, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 8.0 },
+        ud::SetupVals { proto: 3, mode: 0, fmt: 2, inv: true, baud: 9600, thr: -12.34, level: f32::NAN },
     ]
     .iter()
     .enumerate()
@@ -416,9 +417,18 @@ pub fn run(ck: &mut Checker, out: &str) {
             let name = format!("decode/setup/{k}/{}", combined as u8);
             ck.check_replica(&name);
             let page = Bx::new(14, 61, 399, ud::PAGE_H as i32 - 1);
-            let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
-            for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
-                add.push(rb(r));
+            let dali = v.proto == dc::P_DALI;
+            let mut add: Vec<Bx> = ud::SU_LABELS[..if dali { 5 } else { 6 }].iter().map(|r| rb(*r)).collect();
+            let thr = ud::thr_rects(dali);
+            for r in thr[1..].iter() {
+                add.push(rb(*r));
+            }
+            if dali {
+                add.push(rb(ud::DL_RATE));
+            } else {
+                for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS] {
+                    add.push(rb(r));
+                }
             }
             ck.check_add(&name, &[("page", page)], &add, Bx::new(13, 20, 401, 40 + ud::PAGE_H as i32));
             if k == 0 && !combined {

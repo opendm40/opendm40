@@ -537,56 +537,58 @@ pub fn dali_step(s: &dyn Src, b: usize, lim: usize, l: &Line, d: &mut Dali, f: &
     d.done = true;
 }
 
-/// A DALI frame's text: "A:FE D:80 BC DAPC" (forward: the address byte's
-/// target S<n> / G<n> / BC / BCU / SPC (special command) / ?, the selector
-/// bit: arc power or a command; `short`: the bytes only), "B:FF"
-/// (backward), "F24:A1B2C3", "ERR".
+/// A DALI frame's text: "FF16:FE 80 BC DAPC" (forward: the address and
+/// data bytes, the address byte's target S<n> / G<n> / BC / BCU / SPC
+/// (special command) / ?, the selector bit: arc power or a command;
+/// `short`: the bytes only), "BF8:FF" (backward), "FF24:A1 B2 C3", "ERR".
 pub fn dali_text(w: &mut W, f: &Fr, short: bool) {
     if !DALI {
         return;
     }
-    let (a, d) = (f.head[0], f.head[1]);
-    match f.len {
-        1 => {
-            w.s("B:").hex(a);
-        }
-        2 => {
-            w.s("A:").hex(a).s(" D:").hex(d);
-            if short {
-                return;
-            }
-            w.c(b' ');
-            match a {
-                0..=0x7F => {
-                    w.c(b'S').u(a as u32 >> 1);
-                }
-                0x80..=0x9F => {
-                    w.c(b'G').u(a as u32 >> 1 & 15);
-                }
-                0xA0..=0xCB => {
-                    w.s("SPC");
-                    return;
-                }
-                0xFC | 0xFD => {
-                    w.s("BCU");
-                }
-                0xFE | 0xFF => {
-                    w.s("BC");
-                }
-                _ => {
-                    w.c(b'?');
-                    return;
-                }
-            }
-            w.s(if a & 1 == 0 { " DAPC" } else { " CMD" });
-        }
-        3 => {
-            w.s("F24:").hex(a).hex(d).hex(f.head[2]);
-        }
+    let n = f.len as usize;
+    w.s(match n {
+        1 => "BF8:",
+        2 => "FF16:",
+        3 => "FF24:",
         _ => {
             w.s("ERR");
+            return;
+        }
+    });
+    for (k, &v) in f.head[..n].iter().enumerate() {
+        if k > 0 {
+            w.c(b' ');
+        }
+        w.hex(v);
+    }
+    if n != 2 || short {
+        return;
+    }
+    let a = f.head[0];
+    w.c(b' ');
+    match a {
+        0..=0x7F => {
+            w.c(b'S').u(a as u32 >> 1);
+        }
+        0x80..=0x9F => {
+            w.c(b'G').u(a as u32 >> 1 & 15);
+        }
+        0xA0..=0xCB => {
+            w.s("SPC");
+            return;
+        }
+        0xFC | 0xFD => {
+            w.s("BCU");
+        }
+        0xFE | 0xFF => {
+            w.s("BC");
+        }
+        _ => {
+            w.c(b'?');
+            return;
         }
     }
+    w.s(if a & 1 == 0 { " DAPC" } else { " CMD" });
 }
 
 /// Modbus CRC-16 (poly 0xA001, init 0xFFFF), one byte.
