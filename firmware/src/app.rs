@@ -5122,10 +5122,16 @@ impl App {
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
             C::DbgAm(op, k, v) => {
                 match op {
+                    // METH / STAT / ZERO / R0 (the parser makes no 0..6
+                    // without the feature `acdc-meth`).
+                    #[cfg(feature = "acdc-meth")]
                     0 => self.dmm.am_set_meth(clk, k),
+                    #[cfg(feature = "acdc-meth")]
                     1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
+                    #[cfg(feature = "acdc-meth")]
                     2 => {
                         for (i, x) in self.dmm.am_stat().iter().enumerate() {
                             if i > 0 {
@@ -5138,7 +5144,9 @@ impl App {
                             }
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     3 => self.dmm.am_set_zero(k, v),
+                    #[cfg(feature = "acdc-meth")]
                     4 => {
                         let (ok, fixed, c) = self.dmm.am_zero();
                         out.put_u32(ok as u32);
@@ -5149,6 +5157,7 @@ impl App {
                             out.put_f32(*x);
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
                     // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
@@ -5161,7 +5170,9 @@ impl App {
                     }
                     #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
-                    _ => out.put_u32(self.dmm.am.r0 as u32),
+                    #[cfg(feature = "acdc-meth")]
+                    6 => out.put_u32(self.dmm.am.r0 as u32),
+                    _ => {}
                 }
                 matches!(op, 1 | 2 | 4 | 6 | 8)
             }

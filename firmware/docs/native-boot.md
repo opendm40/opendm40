@@ -1060,6 +1060,24 @@ as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
 
 `--features acdc-trace`: SRAM 38 212 B, B 12 888 B, C 13 508 B.
 
+### AC+DC methods behind a feature (2026-10-31, feat/acdc-meth)
+
+The AC+DC prototype methods B and C ([acdcm.rs](../src/acdcm.rs),
+[acdc-approaches.md](acdc-approaches.md) section 10) are debug code: the
+cargo feature `acdc-meth` (off by default) builds them. Without it
+`dmm.rs` has an empty `am` module (`am_on()` constant false, so method A's
+code is as before and the hooks are dropped), no `AM` static, and
+DBG:ACDC:METH / STAT? / ZERO / R0 are an undefined header. DBG:ACDC:RANG
+stays.
+
+| | before (fe59a782) | after |
+|---|---|---|
+| region B free | 25 032 B | 31 536 B |
+| region C free | 21 216 B | 24 316 B |
+| SRAM free | 45 460 B | 45 940 B |
+
+`--features acdc-meth`: SRAM 45 460 B, B 24 840 B, C 21 216 B.
+
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
 The device probe of [PR #183](https://github.com/opendm40/opendm40/pull/183)

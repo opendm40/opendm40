@@ -810,10 +810,10 @@ unless shown otherwise.
 | `DBG:OHM6` | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>` (an empty field keeps its value; a leak value stops the learning on open leads, a negative one restarts it): the experimental 600 MΩ range's tuning, RAM only ([ohm-600m.md](../../firmware/docs/ohm-600m.md); `dbg-ohm6` builds) | | USB |
 | `DBG:OHM6?` | | `<gain>,<offset uV>,<skip>,<keep>,<leak nS>,<Vx>,<Vfb>` (the leak learned on open leads; V, the last phase medians; `dbg-ohm6` builds) | USB |
 | `DBG:ACDC?` | | AC+DC phase diagnostic. Only in builds with the `dbg-acdc` feature. | USB |
-| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A` | USB |
-| `DBG:ACDC:STAT?` | | AC+DC method state (21 fields) | USB |
-| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>` | USB |
-| `DBG:ACDC:R0[?]` | `1` or `2` | `1` | USB |
+| `DBG:ACDC:METH[?]` | `A`, `B` or `C` | `A`. Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:STAT?` | | AC+DC method state (25 fields). Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:ZERO[?]` | `<slot 0..9>,<value>\|AUTO` | `<valid>,<fixed>;<c0>,...,<c9>`. Only in builds with the `acdc-meth` feature. | USB |
+| `DBG:ACDC:R0[?]` | `1` or `2` | `1`. Only in builds with the `acdc-meth` feature. | USB |
 | `DBG:ACDC:RANG` | `<item 0..5>` or `AUTO` | Sets the range item. | USB |
 | `DBG:ACDC:TRACE[?]` | `0`, `1` or `2`; query `[<from>]` | `<n>,<held>,<trig>,<on>;<hex>...`. Only in builds with the `acdc-trace` feature. | USB |
 | `DBG:HWTRIG?` | | Comparator trigger state | USB |

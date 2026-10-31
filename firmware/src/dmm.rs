@@ -28,8 +28,40 @@ pub mod pw;
 #[path = "acdctr.rs"]
 pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
+/// AC+DC methods B / C (DBG:ACDC:METH): only with the feature `acdc-meth`
+/// (Cargo.toml); without it method A (the stock alternation) is all there
+/// is and the hooks below are empty.
+#[cfg(feature = "acdc-meth")]
 #[path = "acdcm.rs"]
 pub mod am;
+#[cfg(not(feature = "acdc-meth"))]
+mod am {
+    use super::*;
+    impl Dmm {
+        #[inline(always)]
+        pub(super) fn am_on(&self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_enter(&mut self) {}
+        #[inline(always)]
+        pub(super) fn am_mode(&mut self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_row(&mut self, cfg: &[u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
+            *cfg
+        }
+        #[inline(always)]
+        pub(super) fn am_ref(&mut self, _: &mut Clock, _: f32, _: f32, _: u8, _: &'static str, _: f32, _: (u8, i8)) -> Option<Reading> {
+            None
+        }
+        #[inline(always)]
+        pub(super) fn poll_am(&mut self, _: &mut Clock, _: u64) -> Option<Reading> {
+            None
+        }
+    }
+}
 #[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
@@ -1609,7 +1641,8 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
-    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only).
+    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only; feature `acdc-meth`).
+    #[cfg(feature = "acdc-meth")]
     pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
@@ -2182,6 +2215,7 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
+            #[cfg(feature = "acdc-meth")]
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
@@ -4664,7 +4698,10 @@ impl Dmm {
             (self.dc_val, dm)
         };
         self.auto_total_si = t * si_k;
-        self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        #[cfg(feature = "acdc-meth")]
+        {
+            self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        }
         let ol = v.abs() / lim > self.over();
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         rd.mode = mode;
