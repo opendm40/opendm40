@@ -25,7 +25,7 @@ checks and earlier moves:
 
 | candidate | kind | bytes freed (SRAM / TCM / backup) | scope CAP gain (release) | chain gain | risk |
 |---|---|---|---|---|---|
-| **A. CAP into today's free SRAM** (no pool) | static | uses 36 864 B SRAM | 26 K -> **44 K** samples, always | +1 K (its SRAM is spent) | low: the chain has run 42 K |
+| **A. CAP into today's free SRAM** (no pool) | static | uses 32 768 B SRAM | 26 K -> **42 K** samples, always (44 K fits the default build, not recovery-usb) | +1 K (its SRAM is spent) | low: the chain has run 42 K |
 | **B. Record tail** over `scope_ch2::STORE` + `logger::RING` (+ `csvlog::FIFO_BUF`) | dynamic, scope acquisition = restartable tenant | 0 static; the record grows while those tenants are idle | +12.6 K (STORE + RING) / +16.7 K (+ FIFO) samples while CH2, every AD2 stream (and recording / fast log / MMEM:CAT? cache) are off | the same | high: DMA ring vs stream ISR, a stored record that shrinks, WAV:DATA? stream |
 | **C. Page pool**: scope graph state with the gallery, the generator preview and the touch test | static, droppable / rebuildable tenants | 484 / 672 / 168 | +242 samples | +242 | low |
 | **D. Job pool**: the working parts of the fast-log, CSV and scope-CSV jobs | static | ~1 000 (mixed SRAM / TCM, *estimated*) | +~250 | +~250 | medium: job results are read after the job (LOG:CSV?) |
@@ -179,8 +179,9 @@ CH2 streams rely on (`catalog_warm` before `start_wave`).
 
 ### A. CAP into today's free SRAM (not a pool)
 
-45 460 - 8 192 = 37 268 B -> CAP 44 K (45 056 samples, +36 864 B, SRAM
-free 8 596 B). Take the CAP / `INRUSH_LEN` / `lin_len` part of the chain's
+45 460 - 8 192 = 37 268 B would allow CAP 44 K (45 056 samples) in the
+default build, but the recovery-usb variant has 4 096 B less SRAM free:
+CAP 42 K (43 008 samples, +32 768 B; recovery-usb keeps 8 596 B). Take the CAP / `INRUSH_LEN` / `lin_len` part of the chain's
 aada110b (inrush keeps a 26 K ring; a linear record is no longer in time
 than max(26 K samples, 0.1 s); `scope_csv::REC_MAX` 65 536 covers it).
 The chain is at 10 660 B free: +1 K samples.
