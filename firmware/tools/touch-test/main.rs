@@ -63,6 +63,9 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+#[path = "../../src/pool.rs"]
+#[allow(dead_code)]
+mod pool;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 #[path = "../../src/stockfont.rs"]

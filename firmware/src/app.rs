@@ -776,6 +776,12 @@ impl App {
                 self.inrush_close(clk);
             }
             if matches!(v, View::Scope | View::DmmScope) {
+                // The graph's page-pool bytes went to another view (the
+                // gallery, the Gen page's preview): a stopped record is
+                // rendered again (a running scope sends its next frame).
+                if !crate::scope_ui::graph_kept() {
+                    self.scope.refresh();
+                }
                 self.sp_enter(clk.now_ms());
             }
         }
