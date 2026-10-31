@@ -21,11 +21,15 @@ lengths are relative to the first one (CAP + the whole tail: CAP + 16 656):
      session); LOG:STATe OFF with records
      unread: DIG still CAP + 4 368 (they stay readable); drained: DIG
      CAP + 16 656 again;
-  4. LOG:CSV ON with a long stopped record: CAP + 12 560 points, a window
-     of the record before; DIG while recording: CAP + 12 560; LOG:CSV OFF:
+  4. LOG:CSV ON with a long stopped record panned towards its end: CAP +
+     12 560 points, a later window of the record before (its time zero
+     still the trigger's rising crossing); DIG while recording: CAP + 12 560; LOG:CSV OFF:
      DIG CAP + 16 656;
   5. CH2 on (MF > Display) with a long stopped record: CAP points, a window
      of the record before; DIG with CH2: CAP; CH2 off: DIG CAP + 16 656.
+  6. MF > Settings > Save CSV of a long record, LOG:STATe ON over USB, then
+     LOG:STATe? as the next USB message: the session starts after the save
+     (Bluetooth LOG:STATe? 0 during it), the USB reply 1, no error.
 Every cut record and every new one is checked against the sine.
 Exit status 0 = all passed.
 """
@@ -165,6 +169,18 @@ try:
         while i >= 0 and i % 2:
             i = full.find(cut, i + 1)
         check(i >= 0, '%s: the cut record (%d points) is samples %d.. of the one before' % (what, len(cut) // 2, i // 2))
+        return i // 2
+
+    def trig_ok(words, what):
+        """The preamble's time zero (the trigger) is a rising level crossing."""
+        f = q('WAV:PRE?').split(',')
+        xinc, xorig, xref, yinc, yorig, yref = (float(x) for x in f[4:10])
+        c = struct.unpack('<%dH' % (len(words) // 2), words)
+        v = [(x - yref) * yinc + yorig for x in c]
+        i0 = round(-xorig / xinc + xref)
+        ok = 2 <= i0 < len(v) - 2 and abs(v[i0]) < 0.08 and v[i0 + 2] > v[i0 - 2]
+        check(ok, '%s: time zero at sample %d: %s V, rising' % (what, i0, '%.3f' % v[i0] if 0 <= i0 < len(v) else '-'))
+        return i0
 
     print('*IDN?', q('*IDN?'), flush=True)
     q('CONF:VOLT:DC')
@@ -276,7 +292,12 @@ try:
     rb = record()
     sine_ok(rb, PRE['xinc'], '3. the long record again')
 
-    # 4. A CSV recording.
+    # 4. A CSV recording, the stopped record panned towards its end first
+    # (the window around the screen centre is what a cut keeps).
+    tb = trig_ok(rb, '3. the long record')
+    for _ in range(2):
+        q('DBG:DRAG 380,150,40,150,400')
+        wait_dev(1.5)
     q('LOG:CSV ON')
     e = q('SYST:ERR?')
     check(e.startswith('0,'), '4. LOG:CSV ON accepted (%s)' % e)
@@ -285,6 +306,11 @@ try:
     r2 = record()
     window(r2, rb, '4.')
     sine_ok(r2, PRE['xinc'], '4. the cut record')
+    # The input is periodic, so the window's offset is the time zero's
+    # shift (the trigger moved with the samples), not the first match.
+    d = tb - trig_ok(r2, '4. the cut record')
+    check(d > 0 and rb[2 * d:2 * d + len(r2)] == r2,
+          '4. panned: the cut kept samples %d.. (the trigger shifted by as much)' % d)
     q('RUN')
     wait_dev(1)
     n = dig()
@@ -328,6 +354,26 @@ try:
     wait_dev(1)
     n = dig()
     check(n == full[0], '5. CH2 off: DIG %d (want %d)' % (n, full[0]))
+
+    # 6. Save CSV of the long record (MF > Settings > Save CSV: the record
+    # is held while the file is written) and LOG:STATe ON over USB, then
+    # LOG:STATe? as a message of its own: the ON waits for the end of the
+    # save and is not lost to the next message.
+    for c in ('DBG:KEY 3', 'DBG:TAP 367,40', 'DBG:TAP 154,93'):
+        q(c)
+    q('LOG:STAT ON')
+    during = bt_line('LOG:STAT?')
+    t0 = time.time()
+    st = q('LOG:STAT?', timeout=300)
+    check(st == '1', '6. LOG:STATe ON over USB during Save CSV: Bluetooth sees %s meanwhile, then LOG:STATe? %s (%.1f s wall)'
+          % (during, st, time.time() - t0))
+    check(during == '0', '6. the session waited for the save (Bluetooth LOG:STATe? %s during it)' % during)
+    e = q('SYST:ERR?')
+    check(e.startswith('0,'), '6. no error (%s)' % e)
+    n = points()
+    check(n == full[1], '6. after the save the record is cut: %d (want %d)' % (n, full[1]))
+    q('LOG:STAT OFF')
+    q('DBG:KEY 3')
     e = q('SYST:ERR?')
     check(e.startswith('0,'), 'no error at the end (%s)' % e)
     # A --features dbg-pool image: the holders at the end (else -113).

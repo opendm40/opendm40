@@ -168,6 +168,12 @@ impl Msg {
         }
     }
 
+    /// Paused by `again` (main.rs takes no new USB message meanwhile: it
+    /// would replace this one).
+    pub fn waits(&self) -> bool {
+        self.active && self.again
+    }
+
     /// Resume after `again` (nothing for a reading wait).
     pub fn go(&mut self) {
         if self.again {

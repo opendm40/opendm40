@@ -582,7 +582,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         };
         if let Some(s) = resume {
             src = s;
-        } else if let Some(cmd) = tmc.take_command() {
+        } else if let Some(cmd) = (!msgs[USB].waits()).then(|| tmc.take_command()).flatten() {
+            // (A message waiting for the scope's record tail, `again`, keeps
+            // the next one in the USBTMC buffer: `start` would drop it.)
             // H1: a host session counts as activity for idle dim / power-off.
             app.note_host_activity(now);
             msg_n = cmd.len().min(256);
@@ -2208,6 +2210,7 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
             if !app.tail_lend(SEG_RING) || fastlog::begin(b, dur).is_err() {
                 app.fast_ended(now, fastlog::State::Error, None);
             } else {
+                logger.reserve_slots();
                 fast_probe_if(ad2, hz);
             }
         }
@@ -2242,6 +2245,7 @@ fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur
     app.tail_lend(SEG_RING);
     Some(match fastlog::begin(fastlog::plan_bytes(dur_s, hz, logger.ad2()), dur_s) {
         Ok(()) => {
+            logger.reserve_slots();
             fast_probe_if(logger.ad2(), hz);
             ""
         }

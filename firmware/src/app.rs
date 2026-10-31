@@ -3406,7 +3406,7 @@ impl App {
         let range = if r.auto { "AUTO" } else { "MANUAL" };
         // The row FIFO: the scope's record tail gives it back first (refused
         // while a long stored record is being read).
-        if crate::csvlog::active() || !self.tail_lend(app_tail::SEG_FIFO) {
+        if crate::csvlog::active() || crate::fastlog::holds_disk() || !self.tail_lend(app_tail::SEG_FIFO) {
             return false;
         }
         if !crate::csvlog::start(crate::csvlog::func_label(func), crate::meter::base_unit(r.main.unit), range, now) {

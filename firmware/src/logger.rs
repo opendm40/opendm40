@@ -950,6 +950,14 @@ impl Logger {
         !self.active && (self.view_sess || self.ring().len() == 0)
     }
 
+    /// Hold the slots from a fast-log session's begin (fastlog::begin; the
+    /// logger starts after its Prep slices): the scope's next acquisition
+    /// does not take them meanwhile (main.rs gave them back first,
+    /// `tail_lend`); `slots_release` keeps them while the session runs.
+    pub fn reserve_slots(&self) {
+        let _ = crate::pool::TAIL.take::<Slots>();
+    }
+
     /// The slots back to pool TAIL when idle (main.rs, every pass, without
     /// a fast-log session: its Stop slices drain after the logger stopped).
     /// A view session's leftover records are dropped first: nothing reads
