@@ -60,7 +60,7 @@
 //!   * No host writes this disk in the native build (USB exports the
 //!     generated volume, vdisk.rs); csvlog::delete_on refuses while busy or
 //!     for the file being recorded.
-//!   * calbackup::scratch() (3 x 4 KiB) is the block buffer: [0] data,
+//!   * diskbuf::blocks() (3 x 4 KiB) is the block buffer: [0] data,
 //!     [1] FAT 1. Only used inside one `poll` while the disk is free, never
 //!     kept across passes (screenshot.rs, csvlog commits and the SCPI
 //!     catalog use it between our passes).
@@ -69,8 +69,8 @@
 
 use core::sync::atomic::Ordering::Relaxed;
 
-use crate::calbackup;
 use crate::csvlog::{self, GErr, Kind};
+use crate::diskbuf;
 use crate::dlog::{self, Src as _};
 use crate::fatren::{le16, le32, parse_bpb, Vol};
 use crate::gesture::Gesture;
@@ -182,7 +182,7 @@ fn disk() -> &'static mut crate::spiflash::SpiFlash {
     d.get_or_insert_with(crate::spiflash::SpiFlash::new)
 }
 
-/// Block I/O of one poll: scratch[0] = data block, scratch[1] = FAT 1 block,
+/// Block I/O of one poll: blocks()[0] = data block, blocks()[1] = FAT 1 block,
 /// tags valid for this poll only.
 struct Io<'a> {
     disk: &'a mut dyn BlockDevice,
@@ -195,7 +195,7 @@ struct Io<'a> {
 
 impl<'a> Io<'a> {
     fn new(disk: &'a mut dyn BlockDevice, v: Vol) -> Self {
-        let [data, fat, _] = calbackup::scratch();
+        let [data, fat, _] = diskbuf::blocks();
         Io { disk, v, data, fat, dtag: NONE, ftag: NONE }
     }
 
@@ -1645,7 +1645,7 @@ impl Gallery {
         let r = csvlog::list_on(disk, &mut []);
         let st = match r {
             Ok(c) => {
-                let buf = &mut calbackup::scratch()[0];
+                let buf = &mut diskbuf::blocks()[0];
                 self.v = if disk.read_block(0, &mut buf[..]) { parse_bpb(&buf[..], disk.block_count()) } else { None };
                 // The count of what the gallery shows (S*.BMP, LOG*.DLG: the
                 // directories `scan` reads): csvlog's catalog also counts

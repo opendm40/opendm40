@@ -48,6 +48,7 @@ if A.port is None:
 print('USB/IP port %d' % A.port, flush=True)
 os.environ['USBIP_PORT'] = str(A.port)
 import usbip_client as uc  # noqa: E402
+import bootinfo  # noqa: E402
 
 SERIAL = run.emu_uid(A.port).hex().upper()
 TAG = 'xram-%d-%d' % (A.port, os.getpid())
@@ -99,8 +100,8 @@ class Link:
 
 
 def settings(l):
-    b = l.q('DBG:BOOT?')
-    return b[b.find('SETTINGS'):].split(',')
+    """The settings fields of DBG:BOOT? as a list (bootinfo.py)."""
+    return bootinfo.settings(l.q('DBG:BOOT?'))
 
 
 def wait(l, what, cond, tries=60, dt=1.0):

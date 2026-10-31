@@ -267,6 +267,7 @@ recorded.
 | [`logfmttest.py`](logfmttest.py) | LOG:DATA? in each LOG:FORMat is lossless | | 63610 |
 | [`fastlogtest.py`](fastlogtest.py) | fast logger to the SPI disk: the sustainable rate with the flash busy timing | | 4817, BT 4818 |
 | [`fastendtest.py`](fastendtest.py) | end of a disk session while a host reads the USB volume | | 4827 |
+| [`csvsharetest.py`](csvsharetest.py) | LOG / FAST CSVs read over MMEM:DATA? and the USB volume in turn equal dlog.py (shared generators) | ~4 min | free |
 
 ### USB, disk, settings and boot
 
