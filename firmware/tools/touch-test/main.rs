@@ -826,11 +826,11 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());
-    // Record page (decision 2026-10-22 #1): four rows (the stepper keys
+    // Record page (decision 2026-10-22 #1): five rows (the stepper keys
     // nest in their rows), its steppers' "-" key at x 150..203.
     host::reset(0);
-    ui::record_page(["Every reading", "Until stopped"], "about 62 h left", false);
-    page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3]);
+    ui::record_page(["On change", "1 %", "Until stopped"], "about 62 h left", false);
+    page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3, 4]);
     ck.t("record stepper: '-' key and label step down", ui::record_step(177) == -1 && ui::record_step(20) == -1);
     ck.t("record stepper: '+' key steps up", ui::record_step(437) == 1 && ui::record_step(463) == 1);
     // Range pages and the temperature page. V / A with the ad2-isr builds'
@@ -921,13 +921,13 @@ fn hit_tests(ck: &mut Ck) {
     let mut dv = ui::DmmView::new();
     dv.draw_static(dmm::Button::Volt, 1, false, true);
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
-    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
+    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), sd: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
     ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
         if ui::value_hit(x, y) {
             Some(105) // main value: resolution / rate
-        } else if x >= 402 && (205..243).contains(&y) {
+        } else if x >= 402 && (205..241).contains(&y) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column

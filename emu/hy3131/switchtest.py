@@ -259,6 +259,12 @@ def run(name):
     def up():
         return int(q('DBG:PING?').split(',')[0]) / 1000.0
 
+    # DBG:SENTinel? needs --features dbg-sent (refused: an empty reply); it
+    # is only recorded here.
+    HAS_SENT = tm is not None and bool(q('DBG:SENT?'))
+    if tm is not None and not HAS_SENT:
+        tm.write('*CLS')
+
     def log():
         s = q('DBG:SENT:LOG?').split(';')
         return int(s[0]), [(a, k, int(t) / 1000.0) for a, k, t in (e.split(',') for e in s[1:])]
@@ -322,7 +328,7 @@ def run(name):
                     until = max([until] + [x + 1.0 for x in pend])
                 while p.poll() is None:
                     t = up()
-                    rec.append((t, q('SYST:ALER?'), q('DBG:SENT?')))
+                    rec.append((t, q('SYST:ALER?'), q('DBG:SENT?') if HAS_SENT else ''))
                     if t >= until:
                         break
                 n, ents = log()

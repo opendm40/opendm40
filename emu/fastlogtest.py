@@ -62,7 +62,8 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=4817, help='USB/IP port (default 4817)')
 ap.add_argument('--bt-port', type=int, default=4818, help='BT passthrough port (default 4818)')
-ap.add_argument('--dur', type=int, default=2, help='LOG:DURation per session, s (device time)')
+ap.add_argument('--dur', type=int, default=None, help='LOG:DURation per session, s (device time; default 2, '
+                'with --ui-nav 4: a NAV round is 10 steps of >= 300 ms)')
 ap.add_argument('--profiles', default='typ,max')
 ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:38400')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (opendm40 region C audit)')
@@ -110,6 +111,8 @@ ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each 
 ap.add_argument('--ui-nav-steps', type=int, default=None, help='with --ui-nav: at most this many NAV steps per session '
                 '(0: only start the session on the scope page)')
 A = ap.parse_args()
+if A.dur is None:
+    A.dur = 4 if A.ui_nav and A.ui_nav_steps is None else 2
 RC = None
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)

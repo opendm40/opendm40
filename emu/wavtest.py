@@ -131,8 +131,12 @@ def sine_fit(v, xinc):
 
 
 def loop_max(t):
-    """Main-loop pass maximum (us) of the last full 1 s window (DBG:DIAG?)."""
-    d = block(t.qraw('DBG:DIAG?'))
+    """Main-loop pass maximum (us) of the last full 1 s window (DBG:DIAG?;
+    None in a build without --features dbg-diag: refused, an empty reply)."""
+    r = t.qraw('DBG:DIAG?')
+    if not r.strip():
+        return None
+    d = block(r)
     return d[97] | d[98] << 8
 
 
@@ -520,7 +524,8 @@ try:
     t.w('WAV:POIN MAX')
     t.w('TIM:SCAL %s' % tb0)
     check(t.q('TRIG:STAT?') == 'STOP', 'the zoom keeps the scope stopped')
-    lm0 = max(loop_max(t) for _ in range(2) if time.sleep(1.1) is None)
+    lms = [loop_max(t) for _ in range(2) if time.sleep(1.1) is None]
+    lm0 = None if None in lms else max(lms)
     rounds = []
     t0 = time.time()
     raw = t.qraw('WAV:DATA?', maxlen=4096, rounds=rounds)
@@ -529,7 +534,11 @@ try:
     words = block(raw)
     check(len(words) == 2 * n, 'WORD record: %d bytes in %d transfers of <= 4096 (%.2f s wall)' % (len(words), len(rounds), dt))
     check(len(rounds) > 1 and all(r <= 4096 for r in rounds), 'streamed over %d REQUEST rounds' % len(rounds))
-    check(lm1 < lm0 + 4000, 'main loop kept running: pass max %d us during the read (%d us before)' % (lm1, lm0))
+    if lm0 is None or lm1 is None:
+        print('  skip the main-loop check (DBG:DIAG? not in this build: --features dbg-diag)', flush=True)
+        t.w('*CLS')
+    else:
+        check(lm1 < lm0 + 4000, 'main loop kept running: pass max %d us during the read (%d us before)' % (lm1, lm0))
     raw2 = t.qraw('WAV:DATA?', maxlen=65536)
     check(raw2 == raw, 'one 64 KiB round: the same bytes (frozen record)')
     v, codes = volts(p, words)

@@ -890,8 +890,9 @@ the box shows the REL value. Tap again to turn it off.
 
 ### MIN, MAX, AVG
 
-The column on the right of the chart shows **MAX**, **AVG** and **MIN**
-since they were last reset, and a timer **T hh:mm:ss**.
+The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
+**SD** (sample standard deviation) since they were last reset, and a timer
+**T hh:mm:ss**.
 
 - **Tap the column** (outside the REL box): start a session. The
   statistics are cleared, the timer turns orange, and
@@ -941,6 +942,8 @@ The chart plots the reading over time, 321 points wide.
 - It stops during HOLD and keeps running during AutoHold.
 - It restarts when you change the function or switch to a range with
   another unit (6 V to 600 mV).
+- REL on or off does not restart it: the points from before stay, as in
+  the stock firmware.
 
 ![The trend chart](img/trend-chart.png)
 
@@ -1525,7 +1528,7 @@ AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
-CH2 has at most 76.8 k samples/s: below 1 ms/div it shows steps. While it
+CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps. While it
 is on, the edge trigger does not use the trigger hardware.
 
 
@@ -2085,7 +2088,8 @@ frequency: **MF**, then **Record** at the bottom of Hold & Limits.
 
 | Row | What it does |
 |---|---|
-| **Interval** | **Every reading**: one row per reading. **1 s**, **10 s**, **1 min**: one row per interval with the mean of the readings in it. **Fast**: the [fast recorder](#fast-recording). Tap **-** / **+** to change. |
+| **Interval** | **Every reading**: one row per reading. **1 s**, **10 s**, **1 min**: one row per interval with the mean of the readings in it. **On change**: a row when the reading changes, see **Change**. **Fast**: the [fast recorder](#fast-recording). Tap **-** / **+** to change. |
+| **Change** | For **On change**: a row when the reading moves by more than **0.1 %**, **1 %** or **5 %** of the range, when OL / HI / LO changes, and at least once a minute. |
 | **Duration** | **Until stopped**, **10 min**, **1 h**, **8 h** or **24 h**. A recording with a duration stops by itself. |
 | **Free** | How long the free disk space lasts at this interval, for example **about 120 h left**. |
 | **Start recording** / **Stop recording** | Starts the recording and goes back to the multimeter page, or stops a running one. |

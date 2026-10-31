@@ -808,6 +808,7 @@ pub struct Frame {
 pub struct Touch {
     /// Detected controller; `poll()` dispatches on it.
     ctrl: Ctrl,
+    #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
     pub chip: [u8; 4],
     /// Raw first 7 bytes of the last frame (for debugging).
     pub raw: [u8; 7],
@@ -1234,6 +1235,7 @@ impl Touch {
     ///  us u16, 8 max frame us u16, 10 last frame points, 11 probe mode,
     ///  12 edge reads, 16 level-fallback reads, 20 Goodix timer reads,
     ///  24 frames ok, 28 frames bad (0xAB), 32 NAKs, 36 HW faults (u32 each).
+    #[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
     pub fn diag(&self) -> [u8; 40] {
         let s = &self.bus.stats;
         let mut d = [0u8; 40];

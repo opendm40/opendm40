@@ -2090,7 +2090,7 @@ fn main() {
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
-                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
+                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
@@ -2266,7 +2266,7 @@ fn main() {
                     pts.remove(0);
                 }
                 pts.push(v);
-                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false };
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v.abs()), rel: None, secs: Some(i as u32), rec: false };
                 if i == 0 {
                     host::reset(0);
                 }
@@ -2580,28 +2580,30 @@ fn main() {
     }
     // Record page: every interval x duration value in the steppers (they
     // fit the 134 px between the keys), the estimate texts, Start / Stop.
-    for (k, (iv, du, free, on)) in [
-        ("Every reading", "Until stopped", "about 1193 h (limit)", false),
-        ("1 min", "24 h", "about 62 h left", true),
-        ("10 s", "10 min", "-- (disk busy)", false),
-        ("1 s", "8 h", "< 1 h left", true),
-        ("Every reading", "1 h", "-- (no disk)", false),
+    for (k, (iv, ch, du, free, on)) in [
+        ("Every reading", "1 %", "Until stopped", "about 1193 h (limit)", false),
+        ("1 min", "1 %", "24 h", "about 62 h left", true),
+        ("On change", "0.1 %", "Until stopped", "about 62 h left", false),
+        ("On change", "5 %", "24 h", "< 1 h left", true),
+        ("10 s", "1 %", "10 min", "-- (disk busy)", false),
+        ("1 s", "5 %", "8 h", "< 1 h left", true),
+        ("Every reading", "0.1 %", "1 h", "-- (no disk)", false),
         // the fast logger (fastlog.rs): its estimate texts
-        ("Fast", "Until stopped", "-- (DC/AC V or A only)", false),
-        ("Fast", "10 min", "38400/s, 119 min left", true),
-        ("Fast", "24 h", "640/s, 1234 h left", false),
+        ("Fast", "1 %", "Until stopped", "-- (DC/AC V or A only)", false),
+        ("Fast", "1 %", "10 min", "38400/s, 119 min left", true),
+        ("Fast", "1 %", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()
     {
         host::reset(0);
-        ui::record_page([iv, du], free, on);
-        ck.check_opts(&format!("record/{iv}/{du}/{free}/{on}"), &page_regions, false);
-        if k < 2 {
-            save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
+        ui::record_page([iv, ch, du], free, on);
+        ck.check_opts(&format!("record/{iv}/{ch}/{du}/{free}/{on}"), &page_regions, false);
+        if k < 3 {
+            save(&out, &format!("m12-record-{}", ["start", "stop", "change"][k]));
         }
     }
-    for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
+    for t in ui::REC_INTERVALS.iter().chain(ui::REC_CHANGES.iter()).chain(ui::REC_DURATIONS.iter()) {
         ck.cases += 1;
         let w = stockfont::text_width(stockfont::TEXT22, t, 0);
         let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
@@ -3122,7 +3124,7 @@ fn main() {
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
-        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
+        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), sd: Some(0.0001), rel: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
         // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
@@ -3234,7 +3236,7 @@ fn main() {
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
-        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), sd: Some(9.38), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         // AUTO coupling: the DC part (DC glyph on the V button and above
@@ -3348,8 +3350,8 @@ fn main() {
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
             let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
-            let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
-            let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
+            let d_rec = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", false);
+            let d_recon = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", true);
             let g = &w.gen;
             let d_gen = || ui::gen_static(g);
             // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,
@@ -3594,7 +3596,7 @@ fn main() {
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
-            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+            let side = ui::Side { max: None, avg: None, min: None, sd: None, rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
@@ -3627,7 +3629,7 @@ fn main() {
             dv.reading(r, 0, lim);
             dv.short_sync();
             ui::status_right(&status(0));
-            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), sd: Some(r.main.v), rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             dv
         };

@@ -177,6 +177,15 @@ const KP_NTC_R25: u8 = 7;
 const KP_NTC_BETA: u8 = 8;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
+// The Record page's interval list: csvlog's indices, then "Fast".
+const _: () = assert!(crate::csvlog::ON_CHANGE as usize == 4 && ui::REC_FAST == 5 && ui::REC_CHANGES.len() == crate::csvlog::CHANGES.len());
+
+/// persist W_REC bits 8..9 <-> csvlog::CHANGES index: 0 (an older record)
+/// stands for the default 1 % (index 1), 1 for 0.1 %, 2 for 5 %.
+fn swap01(c: u8) -> u8 {
+    if c < 2 { c ^ 1 } else { c }
+}
+
 fn trim_zeros(s: &str) -> &str {
     if !s.as_bytes().contains(&b'.') {
         return s;
@@ -1315,7 +1324,8 @@ impl App {
         if self.rec_fast {
             return self.record_page_fast(di);
         }
-        let row_ms = match crate::csvlog::INTERVALS_S[ii as usize] {
+        // On change: at most a row per reading, as every reading.
+        let row_ms = match crate::csvlog::INTERVALS_S.get(ii as usize).copied().unwrap_or(0) {
             0 => match self.dmm.reading_period_ms() {
                 0 => 100,
                 p => p,
@@ -1357,7 +1367,8 @@ impl App {
             Err(crate::csvlog::GErr::Busy) => "-- (disk busy)",
             Err(_) => "-- (no disk)",
         };
-        ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
+        let ci = crate::csvlog::change() as usize;
+        ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_CHANGES[ci], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
     }
 
     /// The Record page's interval index (REC_FAST for the fast logger).
@@ -1413,7 +1424,7 @@ impl App {
                 core::str::from_utf8(&b[..n]).unwrap_or("")
             }
         };
-        ui::record_page([ui::REC_INTERVALS[ui::REC_FAST], ui::REC_DURATIONS[di as usize]], txt, crate::fastlog::active());
+        ui::record_page([ui::REC_INTERVALS[ui::REC_FAST], ui::REC_CHANGES[crate::csvlog::change() as usize], ui::REC_DURATIONS[di as usize]], txt, crate::fastlog::active());
     }
 
     /// The fast logger's (rate S/s, AD2) for the current function: AD2 in
@@ -1608,7 +1619,7 @@ impl App {
     /// the pages whose drawing is the same on every pass (a full-screen
     /// fill first, then widgets from the app state; their caches are reset
     /// by the draw itself); false: not such a page, or the buffer is busy
-    /// (a disk job holds calbackup::SCRATCH): the caller draws directly.
+    /// (a disk job holds diskbuf::ARENA): the caller draws directly.
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
@@ -1627,7 +1638,7 @@ impl App {
             self.sp.uncover = 0;
             self.sp_prepare();
         }
-        let Some(buf) = crate::calbackup::strip_take() else {
+        let Some(buf) = crate::diskbuf::strip_take() else {
             if scope {
                 crate::lcd::defer_start();
                 crate::scope_ui::invalidate();
@@ -1644,7 +1655,7 @@ impl App {
                 self.draw_static();
             }
         });
-        if !crate::calbackup::strip_give() {
+        if !crate::diskbuf::strip_give() {
             // A disk user took the buffer meanwhile: draw it again.
             crate::lcd::defer_start();
             self.draw_static();
@@ -1978,6 +1989,7 @@ impl App {
                 max: st.map(|s| s.1),
                 avg: st.map(|s| s.2),
                 min: st.map(|s| s.0),
+                sd: st.map(|s| s.3),
                 rel: self.meter.rel_value(),
                 secs: self.meter.stats.secs(now),
                 rec: self.meter.stats.rec,
@@ -2268,7 +2280,7 @@ impl App {
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
-        p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
+        p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4 | (swap01(crate::csvlog::change()) as u32) << 8;
         // v11: the touch calibration (touchcal.rs; 0 = none).
         for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
             *w = c as u32;
@@ -2380,6 +2392,7 @@ impl App {
             // v8: Record page interval / duration (0 = the defaults; csvlog
             // maps an unknown index to the default).
             crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
+            crate::csvlog::set_change(swap01((p[crate::persist::W_REC] >> 8 & 3) as u8));
         }
         let mode = if cont { restore_func(rec.version, p[2] as u8) } else { 1 };
         // Entering the power meter starts in DC (as V / A); a restart in it
@@ -2596,7 +2609,9 @@ impl App {
                     crate::meter::V_LO => f |= F_LO,
                     _ => {}
                 }
-                crate::csvlog::push(now, l.si, f);
+                // The range's full scale in SI (on-change mode's threshold).
+                let fs = crate::bargraph::mode_full_scale(l.mode, l.range, l.main.dec, l.main.unit) * crate::meter::unit_scale(l.main.unit);
+                crate::csvlog::push(now, l.si, f, fs);
             }
         }
         let dmm_view = can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope);
@@ -3646,8 +3661,8 @@ impl App {
             return;
         }
         match self.view {
-            // REL button (stock (402,205,76,38)).
-            View::Dmm if x >= 402 && (205..243).contains(&y) => self.rel_toggle(now),
+            // REL button (stock (402,205,76,38); 36 high since SD, ui::chart).
+            View::Dmm if x >= 402 && (205..241).contains(&y) => self.rel_toggle(now),
             View::Dmm if x >= 402 && (175..279).contains(&y) => {
                 // MIN/MAX/AVG column outside the REL box: start / stop a
                 // recording session. Starting clears the statistics; while it
@@ -4009,10 +4024,10 @@ impl App {
                         let mut ii = self.rec_ival() as u8;
                         let d = ui::record_step(x) as i16;
                         let step = |v: u8, n: usize| (v as i16 + d).clamp(0, n as i16 - 1) as u8;
-                        if k == 0 {
-                            ii = step(ii, ui::REC_INTERVALS.len());
-                        } else {
-                            di = step(di, ui::REC_DURATIONS.len());
+                        match k {
+                            0 => ii = step(ii, ui::REC_INTERVALS.len()),
+                            1 => crate::csvlog::set_change(step(crate::csvlog::change(), ui::REC_CHANGES.len())),
+                            _ => di = step(di, ui::REC_DURATIONS.len()),
                         }
                         self.rec_fast = ii as usize == ui::REC_FAST;
                         let ii = if self.rec_fast { crate::csvlog::next().0 } else { ii };
@@ -4525,10 +4540,12 @@ impl App {
         self.meter.ahold
     }
 
-    /// CALC:AVER:MIN? / MAX? / AVER? / COUNt?: (min, max, avg) in SI of
-    /// the current function and the sample count; None before a sample.
-    pub fn stats(&self) -> (Option<(f32, f32, f32)>, u32) {
-        (self.meter.stats.si(), self.meter.stats.n)
+    /// CALC:AVER:MIN? / MAX? / AVER? / SDEV? / COUNt?: (min, max, avg, sd)
+    /// in SI of the current function and the sample count; None before a
+    /// sample.
+    pub fn stats(&self) -> (Option<(f32, f32, f32, f32)>, u32) {
+        let s = &self.meter.stats;
+        (s.si().map(|(a, b, c)| (a, b, c, s.sd().unwrap_or(0.0))), s.n)
     }
 
     /// CALC:AVER:CLEar (keeps a running recording session).
@@ -4837,7 +4854,7 @@ impl App {
                 let (v, n) = self.stats();
                 match (k, v) {
                     (3, _) => crate::put_u32(out, n),
-                    (_, Some((min, max, avg))) => out.put_f32([min, max, avg][k.min(2) as usize]),
+                    (_, Some((min, max, avg, sd))) => out.put_f32([min, max, avg, sd, sd][k.min(4) as usize]),
                     (_, None) => {
                         out.set_err("Data stale");
                         out.put_bytes(b"+9.90000000E+37");
@@ -5121,6 +5138,7 @@ impl App {
             }
             #[cfg(not(feature = "dbg-src"))]
             C::DbgSrc(_) => false,
+            #[cfg(feature = "dbg-sent")]
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);
@@ -5149,16 +5167,23 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-sent")]
             C::DbgSent => {
                 let mut b = [0u8; 96];
                 let n = self.dmm.sent.diag_text(&mut b);
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
             C::DbgAm(op, k, v) => {
                 match op {
+                    // METH / STAT / ZERO / R0 (the parser makes no 0..6
+                    // without the feature `acdc-meth`).
+                    #[cfg(feature = "acdc-meth")]
                     0 => self.dmm.am_set_meth(clk, k),
+                    #[cfg(feature = "acdc-meth")]
                     1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
+                    #[cfg(feature = "acdc-meth")]
                     2 => {
                         for (i, x) in self.dmm.am_stat().iter().enumerate() {
                             if i > 0 {
@@ -5171,7 +5196,9 @@ impl App {
                             }
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     3 => self.dmm.am_set_zero(k, v),
+                    #[cfg(feature = "acdc-meth")]
                     4 => {
                         let (ok, fixed, c) = self.dmm.am_zero();
                         out.put_u32(ok as u32);
@@ -5182,6 +5209,7 @@ impl App {
                             out.put_f32(*x);
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
                     // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
@@ -5194,7 +5222,9 @@ impl App {
                     }
                     #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
-                    _ => out.put_u32(self.dmm.am.r0 as u32),
+                    #[cfg(feature = "acdc-meth")]
+                    6 => out.put_u32(self.dmm.am.r0 as u32),
+                    _ => {}
                 }
                 matches!(op, 1 | 2 | 4 | 6 | 8)
             }

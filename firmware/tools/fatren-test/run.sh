@@ -1070,6 +1070,32 @@ E1=$(( F / 2 / 3600 > 1193 ? 1193 : F / 2 / 3600 ))
 [ "$F" = "$FS" ] && grep -qE "est_1s=$E1 est_every=$(( F / 2 / 36000 )) cap=1193" $W/i3 && echo "ok: free bytes == fsck's free clusters x 4096 ($F); estimate 2 B/row, capped at 1193 h" || { echo "FAIL at line $LINENO"; exit 1; }
 "$W/t" $IMGI csv ival 0 0 200 | grep -q "ival=Done file=Some(1) rows=190 " && echo "ok: every-reading mode (index 0): one row per reading" || { echo "FAIL at line $LINENO"; exit 1; }
 
+# On change mode (Record page): a row per event, each at its reading's own
+# time: the first reading, a change > N % of full scale, an OL / HI / LO
+# change (not REL), a heartbeat 60 s after the last row.
+for CI in 0 1 2; do
+    cp $W/csvbase.img $IMGI
+    "$W/t" $IMGI csv chg $CI | tee $W/e$CI
+    grep -q "chg=Done file=Some(0) " $W/e$CI || { echo "FAIL at line $LINENO"; exit 1; }
+    fsckok $IMGI
+    mcopy -n -i $IMGI ::LOGS/LOG000.DLG $W/e.dlg && python3 -I ../dlog.py $W/e.dlg -o $W/e.csv || { echo "FAIL at line $LINENO"; exit 1; }
+    python3 -I - $W/e.csv $CI <<'PY' || { echo "FAIL at line $LINENO: on-change CSV ($CI)"; exit 1; }
+import sys
+raw = open(sys.argv[1], 'rb').read().decode()
+ci = int(sys.argv[2])
+lines = raw.split('\r\n')
+n = ['0.1', '1', '5'][ci]
+assert lines[2] == "# event: change > %s %% of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading" % n, lines[2]
+assert lines[3] == 'time_s,value,unit,flags', lines[3]
+rows = [l for l in lines[4:] if l]
+want = ['0.000,1.00000,V,', '2.000,2.00000,V,', '3.000,,V,OL', '3.500,2.00000,V,', '4.000,2.00000,V,HI',
+        '4.500,2.00000,V,', '64.500,2.00000,V,', '124.500,2.00000,V,'] + (['130.000,2.05000,V,'] if ci == 0 else []) + ['130.100,2.40000,V,']
+assert rows == want, rows
+print('on-change csv ok (%s %%): %d rows' % (n, len(rows)))
+PY
+done
+echo "ok: On change 0.1 / 1 / 5 %: rows only at steps, flag changes and 60 s heartbeats, each at its reading's time"
+
 cp $IMGC $W/logs.img                                 # for the USB volume section
 mcopy -i $W/logs.img $W/keep.bin ::LOGS/LOG002.DLG     # not a DLG file: left out there
 

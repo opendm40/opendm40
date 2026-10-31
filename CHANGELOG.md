@@ -9,6 +9,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
+  since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
@@ -101,6 +103,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
   longer lose the last reply; input lost to a full receive buffer is reported
   (-363) instead of running cut commands.
+- **USB SCPI:** long replies such as `MMEM:DATA?` go out at full USB speed
+  while the scope page draws (with CH2 on they were several times slower).
 - **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
   value), not `+0.000000E-03`.
 - **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented

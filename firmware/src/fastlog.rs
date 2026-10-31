@@ -62,7 +62,7 @@
 //! vdisk refresh waits. The FIFO is csvlog's 8 KiB row FIFO, lent while no
 //! CSV recording runs (`csvlog::lend_fifo`; the two never run together:
 //! `begin` refuses during a recording, csvlog::start during a session).
-//! The block buffers of Prep / Stop are calbackup::scratch() (held disk).
+//! The block buffers of Prep / Stop are diskbuf::blocks() (held disk).
 
 #![cfg_attr(not(target_os = "none"), allow(dead_code))]
 
@@ -242,7 +242,7 @@ pub struct Job {
     next: usize,
     ncl: u32,
     alloc_c: u32,
-    /// FAT 1 block cached in scratch[1].
+    /// FAT 1 block cached in blocks()[1].
     cur: u32,
     // erase
     ei: u32,
@@ -431,7 +431,7 @@ pub fn mirror_level(waiting: u32, cap: u32) -> u8 {
     }
 }
 
-/// The session holds the SPI disk (and calbackup::scratch, csvlog's FIFO):
+/// The session holds the SPI disk (and diskbuf::blocks, csvlog's FIFO):
 /// other on-device writers refuse or wait.
 #[inline(always)]
 pub fn holds_disk() -> bool {
@@ -906,7 +906,8 @@ impl Nor for Dry<'_> {
 /// session, Stop after it).
 mod prep {
     use super::*;
-    use crate::calbackup::{numbered_name, scratch};
+    use crate::calbackup::numbered_name;
+    use crate::diskbuf::blocks;
     use crate::fatren::{le16, le32, parse_bpb, sfn_is, verify};
 
     /// The session ends with `s`.
@@ -1025,12 +1026,12 @@ mod prep {
         if !d.present() || d.block_size() as usize != BLK {
             return Err(State::NoDisk);
         }
-        let buf = &mut scratch()[0];
+        let buf = &mut blocks()[0];
         if !d.read_block(0, buf) {
             return Err(State::Error);
         }
         let v = parse_bpb(&buf[..], d.block_count()).ok_or(State::NoDisk)?;
-        let v = match crate::fatdir::ensure(d, &v, &crate::fatdir::LOGS, scratch()) {
+        let v = match crate::fatdir::ensure(d, &v, &crate::fatdir::LOGS, blocks()) {
             Ok(v) => v,
             Err(crate::fatdir::Err::Io) => return Err(State::Error),
             Err(_) => return Err(State::Full),
@@ -1049,7 +1050,7 @@ mod prep {
     fn scan(j: &mut Job, d: &mut dyn BlockDevice) -> Result<(), State> {
         let v = vol(j);
         let (lba, sub, base, lim) = crate::fatdir::seq(&v, j.i);
-        let buf = &mut scratch()[0];
+        let buf = &mut blocks()[0];
         if !d.read_block(lba, buf) {
             return Err(State::Error);
         }
@@ -1096,10 +1097,10 @@ mod prep {
         Ok(())
     }
 
-    /// FAT 1 entry `c` through the one-block cache in scratch[1].
+    /// FAT 1 entry `c` through the one-block cache in blocks()[1].
     fn fat_get(j: &mut Job, d: &mut dyn BlockDevice, c: u32) -> Option<u32> {
         let v = vol(j);
-        let fat = &mut scratch()[1];
+        let fat = &mut blocks()[1];
         let fb = c / FPER;
         if fb >= v.fat_blocks {
             return None;
@@ -1263,7 +1264,7 @@ mod prep {
             // Blank check of one cluster (a 4 KiB read).
             let c = cl_of(j, j.ei + j.i);
             let a = base + (c - 2) * cb;
-            let buf = &mut scratch()[2];
+            let buf = &mut blocks()[2];
             if !d.nor().read(a, &mut buf[..]) {
                 return Err(State::Error);
             }
@@ -1315,7 +1316,7 @@ mod prep {
         }
         let fb = j.fat_fb;
         let lba = v.fat_start + j.fat_k * v.fat_blocks + fb;
-        let [buf, _, tmp] = scratch();
+        let [buf, _, tmp] = blocks();
         if !d.read_block(lba, buf) {
             return Err(State::Error);
         }
@@ -1370,7 +1371,7 @@ mod prep {
     fn entry(j: &mut Job, d: &mut dyn BlockDevice) -> Result<(), State> {
         let v = vol(j);
         let lba = v.dlba(j.slot / PER);
-        let [buf, _, tmp] = scratch();
+        let [buf, _, tmp] = blocks();
         if !d.read_block(lba, buf) {
             return Err(State::Error);
         }
@@ -1428,7 +1429,7 @@ mod prep {
     fn size(j: &mut Job, d: &mut dyn BlockDevice) -> Result<(), State> {
         let v = vol(j);
         let lba = v.dlba(j.slot / PER);
-        let [buf, _, tmp] = scratch();
+        let [buf, _, tmp] = blocks();
         if !d.read_block(lba, buf) {
             return Err(State::Error);
         }
@@ -1458,7 +1459,7 @@ mod prep {
         let v = vol(j);
         let bd = d.bd();
         let lba = v.dlba(j.slot / PER);
-        let [buf, fat1, tmp] = scratch();
+        let [buf, fat1, tmp] = blocks();
         if !bd.read_block(lba, buf) {
             return Err(State::Error);
         }

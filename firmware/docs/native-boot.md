@@ -286,7 +286,7 @@ file's header there), and only the low 512 KiB of the flash are zero-wait
             end of image below 0x080A0000 (FS-loader above)
 RAM: TCM  0x10000000 .data/.bss, then the stack down from 0x10010000;
      SRAM 0x20000000 .dmabuf (DMA buffers, the scope record, the disk
-          scratch arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
+          buffer arena, the logger ring, ...), then .sram_bss (CPU-only, zeroed)
 ```
 
 ### Memory budget (2026-10-22 rework)
@@ -322,8 +322,8 @@ the FFT / screenshot sharing below):
   worst case. stackdepth.py follows the dyn calls (its `INDIRECT` list).
 - **FFT work buffer** (superseded the same day, [ram-budget.md](ram-budget.md): the
   screenshot capture buffer CAP is gone, the screenshot streams from the
-  panel, and the FFT work buffer lives in the disk scratch arena
-  `calbackup::SCRATCH` with an ownership check; SRAM free 10.9 -> 60.7 KB.
+  panel, and the FFT work buffer lives in the disk buffer arena
+  `diskbuf::ARENA` (then `calbackup::SCRATCH`) with an ownership check; SRAM free 10.9 -> 60.7 KB.
   As it was before that:) (8 KiB of the 12 KB `scope_page::FFT` in TCM): an
   arena with an explicit owner, the last 8 KiB of the screenshot capture
   buffer (`screenshot::CAP`, 48 KiB). The FFT renews a lease every time it
@@ -1123,6 +1123,33 @@ per decision):
   `cring::min_max`, the gallery's `dlog` decoder copies, ...) and the
   named `c-only` rodata, function by function under the region C hooks.
 
+### Region C audit #4 (2026-10-30, feat/dbg-shrink)
+
+The owner's decisions after region B audit #9: the remaining debug replies
+behind features, a smaller DBG:BOOT?, shorter texts.
+
+| change | region B | region C |
+|---|---|---|
+| `dbg-diag`: DBG:DIAG? (`touch_diag`, `Touch::diag`, `scope::debug`) | +520 | +652 |
+| `dbg-ohm6`: DBG:OHM6 (`Dmm::ohm600_dbg`) | +536 | +504 |
+| `dbg-sent`: DBG:SENTinel? / :REG? (`Sentinel::diag_text`, `Dmm::reg_text`) | -56 | +824 |
+| `dbg-src`: DBG:SRC (`dbgsrc_dmm`, `Dmm::src_text`; the same lines as test/scope-chain-0.4's feature) | +2 768 | +704 |
+| the four together | +3 528 | +2 688 |
+| DBG:BOOT? as `B2` + 57 hex words, one formatter loop, no PD6 fields | +624 | +1 128 |
+| power meter status lines, the generator's limit note, the fast log's header comment | +392 | +156 |
+
+Each feature's row: the build with that feature alone against the build
+with none (LTO places code differently per build, so the rows do not add
+up exactly). Without its feature a command is an undefined header; the emu
+tests that read one probe it and skip those checks. DBG:ACDC:TRACE is
+`acdc-trace` (feat/sram-extra-areas).
+
+| | release/0.4.0 (4cce2a4b) | this branch |
+|---|---|---|
+| region A2 free | 2 208 B | 2 208 B |
+| region B free | 17 592 B | 22 136 B |
+| region C free | 16 608 B | 20 580 B |
+
 ### SRAM audit (2026-10-30, feat/sram-overlays)
 
 Goal: room for the long scope record (`scope::CAP` 42 K u16) next to
@@ -1188,7 +1215,7 @@ Pairs checked and not overlaid (each can be live with the other):
 | `logger::RING` with `csvlog::FIFO_BUF` | a fast-log session drains the ring into the FIFO (`fastlog` `Job::run`) |
 | `logger::RING` with `csvlog::TAIL` | LOG:STATe ON does not refuse a recording, nor LOG:CSV ON a host session or CH2 (`App::rec_conflict` covers the Wave view and the inrush page only) |
 | `scope_ch2::STORE` with `csvlog::TAIL` / `FIFO_BUF` | a recording can start while CH2 streams (as above); the FIFO head is the MMEM:CAT? cache that CH2 streams use |
-| `calbackup::SCRATCH` with `csvlog::TAIL` | a commit uses SCRATCH [0] / [1] and TAIL together |
+| `diskbuf::ARENA` with `csvlog::TAIL` | a commit uses ARENA [0] / [1] and TAIL together |
 | `fastlog::JOB` with `csvlog::JOB` | the sessions exclude each other, but each job keeps its result for LOG:CSV? / the fast logger's status after it ends |
 | `bt::TX` with the USBTMC reply buffer | both transports answer at the same time |
 | `scope_ui::GRAPH`, `scope_page::CACHE` with the inrush page | no inrush-only buffer to put there (the inrush record is `scope::BUF`, lent) |
@@ -1257,6 +1284,24 @@ as on `test/scope-chain-0.4`, commit 33dd4cb9) builds it:
 | SRAM free | 34 628 B | 39 980 B |
 
 `--features acdc-trace`: SRAM 38 212 B, B 12 888 B, C 13 508 B.
+
+### AC+DC methods behind a feature (2026-10-31, feat/acdc-meth)
+
+The AC+DC prototype methods B and C ([acdcm.rs](../src/acdcm.rs),
+[acdc-approaches.md](acdc-approaches.md) section 10) are debug code: the
+cargo feature `acdc-meth` (off by default) builds them. Without it
+`dmm.rs` has an empty `am` module (`am_on()` constant false, so method A's
+code is as before and the hooks are dropped), no `AM` static, and
+DBG:ACDC:METH / STAT? / ZERO / R0 are an undefined header. DBG:ACDC:RANG
+stays.
+
+| | before (fe59a782) | after |
+|---|---|---|
+| region B free | 25 032 B | 31 536 B |
+| region C free | 21 216 B | 24 316 B |
+| SRAM free | 45 460 B | 45 940 B |
+
+`--features acdc-meth`: SRAM 45 460 B, B 24 840 B, C 21 216 B.
 
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
@@ -1723,30 +1768,16 @@ pins: [hw/README.md, Pin table](../../hw/README.md#pin-table)):
   `BKP_CRASH` to `0x43520000` (N2: the count starts at 0 after the
   reinstall), zero the loader marker, then SYSRESETREQ → the vendor update
   screen with its USB disk (see Recovery).
-- **`DBG:BOOT?`** returns, in order:
-  - `rstsck`, `rstsck_after`, `NORMAL|RECOVERY`, `reason`,
-    `HXTAL|IRC16M|FAILED`, `last` (builds before 0.4.0: then `hold_ms`);
-  - `bcr1`, `btr1`, `bwtr1`, `lcd_id`: the FSMC values found before
-    `board::init` rewrote them;
-  - `fatren_status`, `found`, `renamed_8.3`, `old_backup`, `old_deleted`,
-    `freed_clusters`, `others`, `rcvr_deleted`, `last_trigger`;
-  - `marker_w0`, `marker_w1`, `marker_w2`, `VALID|INVALID`;
-  - `crash_word` (`0x435200nn`), `HEALTHY|-`, `fmc_last` (0 = clean);
-  - `PD6`, `moder`, `pupd`, `idr`: the power-key pin, read live at query time:
-    `MODER[13:12]` (0 = input), `PUPD[13:12]` (**2 = pull-down**, B2),
-    `IDR` bit 6 (1 = pressed); the pull-down is the shim's `pd6_input`.
-    Expected `PD6,0,2,0` with the key released;
-  - then `native::put_extra`: `STAGED,<n>`, `CALBK,<status>,<written>,<conflict>,<differs>`,
-    `STACK,<used>,<size>`, `CALMS,<ms>`, `SPICLK,<div>,<check>`,
-    `FATDIR,<ok>,<created>,<failed>`, `CALREC,<OK|BADCRC>` (the calibration
-    record's CRC at start-up, dmm.rs `load_record`), `SETTINGS,...` ("Stack depth" and "Unit
-    data" below), then the start-up phase times in ms (`native::put_times`):
-    `BOOTMS,<board>,<fatren>,<calbk>,<fatdir>,<setfile>,<mirror>,<vdisk>,<refresh>`
-    (each phase's own time; `board` includes the splash; `vdisk` and
-    `refresh` run after the first frame, before USB attaches) and
-    `MAINMS,<app>,<frame>,<touch>` (main's clock after App::new, the first
-    frame and the touch reset). [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it.
-  
+- **`DBG:BOOT?`** returns `B2`, 57 hex words and fatren's renamed 8.3 name
+  (field list: [SCPI reference, DBG:BOOT?](../../docs/manual/scpi-reference.md#dbgboot);
+  [`tools/dm40dbg.py`](../tools/dm40dbg.py) `boot` decodes it): mode,
+  reason, clock, reset flags, `last`, `last_trigger`, the marker words and
+  their validity, `crash_word` (`435200nn`), healthy, `fmc_last`, the FSMC
+  values found before `board::init` rewrote them, fatren's result, the
+  calibration safety copy, the stack high-water mark, the SPI-flash clock,
+  fatdir, the calibration record's CRC, the settings fields and the
+  start-up phase times (`native::boot_words`).
+
   `last_trigger` codes: `0x54520010` = marker zeroed, `0x54520011` = zeroing
   failed. With `recovery-file`, `0x5452000n`, n = 0 Created, 1 AlreadyThere,
   2 NoMedium, 3 BadBpb, 4 NoSpace, 5 Error.
@@ -1904,8 +1935,8 @@ create = clusters zeroed (`.` / `..` in the first block) → chain in every
 FAT copy → root entry (attribute 0x10, size 0); grow = new clusters zeroed →
 their chain → the old last cluster linked. A power cut anywhere = at worst
 lost clusters (host-tested with a cut before every block write).
-`DBG:BOOT?` appends `FATDIR,<ok>,<created>,<failed>` (bit i = LOGS, SHOTS,
-SCOPE).
+`DBG:BOOT?` reports fatdir's ok / created / failed masks (bit i = LOGS,
+SHOTS, SCOPE).
 
 **Files of ours from earlier builds stay in the root** (no boot-time move:
 a move is two directory writes with a window in which either two live
@@ -2516,10 +2547,9 @@ accepts it; a name taken by a directory or volume label is skipped
 (`conflict`); not enough free clusters / root slots → `NOSPACE`, nothing
 written.
 
-**Status** (`calbackup::result()`), appended to `DBG:BOOT?` by
-`native::put_extra`: `CALBK,<status>,<written>,<conflict>,<differs>`, status
-`NOTRUN|NOMEDIUM|BADBPB|SAFECOPY_PRESENT|SAFECOPY_WRITTEN|NOSPACE|ERROR`;
-written / conflict / differs = decimal bit masks (bit 0 CALIB, 1 BOOTDATA,
+**Status** (`calbackup::result()`), in `DBG:BOOT?` (`native::boot_words`):
+status `NOTRUN|NOMEDIUM|BADBPB|SAFECOPY_PRESENT|SAFECOPY_WRITTEN|NOSPACE|ERROR`
+(as numbers 0..6); written / conflict / differs = bit masks (bit 0 CALIB, 1 BOOTDATA,
 2 UID); `differs` = a kept copy no longer equals the flash. Then
 `CALMS,<ms>` = `calbackup::boot` duration. `tools/dm40dbg.py boot` decodes it
 (and recognises the old `UNCHANGED` / `WRITTEN` / `_NOFW` statuses of earlier
@@ -2538,8 +2568,9 @@ newest slot's sequence is higher than `persist::seq`; without a valid
 backup SRAM record the newest valid slot; else the defaults. Saves: 5 s
 after the last change (main loop, `setfile::poll`), deferred while another
 disk writer, an AD1 logger session or the AD2 stream runs; at every
-power-off (`power_off`, after `finish_disk_writes`). `DBG:BOOT?` appends
-`SETTINGS,<BKP|FILE|DEFAULTS>,<slot|->,<seq>,SETFILE,<state>,SAVE,<status>,<saves>,<seq>`.
+power-off (`power_off`, after `finish_disk_writes`). `DBG:BOOT?` reports
+where the settings came from, the slot and sequence, the file's state, the
+last save, the saves this boot and the newest sequence.
 Host test: fatren-test "setfile"; emulator: [`emu/settingstest.py`](../../emu/settingstest.py).
 
 ### Host tests (`tools/fatren-test/run.sh`, every check fatal)
@@ -2614,17 +2645,17 @@ setfile, vdisk) are popped before `main()`'s frame is pushed (review B1).
 **Run-time check:** `native::init_ram` paints the free stack
 (`__bss_end` .. SP − 256) with `0x53544B21`; `native::stack_use()` returns the
 high-water mark (first non-paint word from `__bss_end` up) and the stack size,
-reported in `DBG:BOOT?` as `STACK,<used>,<size>` (`used == size` means it
-reached `.bss`).
+reported in `DBG:BOOT?` as `stack_used`, `stack_size` (`used == size` means
+it reached `.bss`).
 
-The other `native::put_extra` fields of `DBG:BOOT?`: `STAGED` = fatren's
-count of `dm40*.bin` left because their header is not the marker; `CALMS` =
-`calbackup::boot`'s time in ms; `SPICLK` = the SPI-flash divider in use (4 or
-16) and the boot self-check verdict of [`src/spiflash.rs`](../src/spiflash.rs):
+The other `native::boot_words` fields of `DBG:BOOT?`: `staged` = fatren's
+count of `dm40*.bin` left because their header is not the marker; `calbk_ms`
+= `calbackup::boot`'s time in ms; `spiclk_div` / `spiclk_check` = the
+SPI-flash divider in use (4 or 16) and the boot self-check verdict of [`src/spiflash.rs`](../src/spiflash.rs):
 `OK` = block 0 and the first FAT block read identically at /16 and twice at
 /4 with 0x55AA, else /16 for this boot because of `DIFF1` / `DIFF2` (a /4
 read differed), `NOSIG` (no 0x55AA at /16), `NOCHIP` or `FORCED`
-(`spiflash::FORCE_SLOW`); `FATDIR` and `SETTINGS`: "The SPI disk" and
+(`spiflash::FORCE_SLOW`); fatdir and the settings: "The SPI disk" and
 "Settings copy" above.
 
 ## Risks / open items
