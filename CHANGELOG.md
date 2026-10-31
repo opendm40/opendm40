@@ -83,6 +83,8 @@ section named after the tag as the release notes; how to cut a release:
 - **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
   longer lose the last reply; input lost to a full receive buffer is reported
   (-363) instead of running cut commands.
+- **USB SCPI:** long replies such as `MMEM:DATA?` go out at full USB speed
+  while the scope page draws (with CH2 on they were several times slower).
 - **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
   value), not `+0.000000E-03`.
 - **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
