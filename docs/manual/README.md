@@ -134,7 +134,7 @@ The DM40 has four touch keys left of the screen and one power key on the left ed
 |---|---|
 | **MENU** | Opens the main menu. On a settings page: goes one page back. In the main menu: back to the instrument you came from. |
 | **RUN** | Multimeter: HOLD on / off. Hold it for 1 s: AutoHold on / off. Scope: run / stop. Generator: output on / off. |
-| **AUTO** | Multimeter, voltage, current and resistance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current and resistance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
+| **AUTO** | Multimeter, voltage, current, resistance and capacitance: in autorange, fixes the present range; each further press steps to the next higher range, from the highest back to the lowest (60 mV and 60 Ω included). Hold it for 1 s: back to the default autorange (AUTO+ on volts, AUTO on current, resistance and capacitance). Both clear HOLD and REL; AutoHold stays as it is. The other multimeter functions: back to autorange. Scope: auto-set. |
 | **MF** | Multimeter: the range page of the function. Scope: the scope menu. |
 | **Power** | Press: switches the meter on, or wakes a dimmed screen. Hold 1.5 s: the screen goes dark and the meter beeps; it switches off when you let go. Press twice quickly: touch lock on / off. |
 
@@ -232,8 +232,9 @@ the combined view switches to the next sub-mode of the current function
 - **Dim screen** (Settings, default 5 min): without a touch or a key press
   for this long, the backlight dims. Any touch or key brings it back; that
   first touch only wakes the screen and does nothing else.
-- **Shutdown** (Settings, default 30 min): without input for this long, the
-  meter switches off. 30 s before, it beeps and shows **Auto power-off in
+- **Shutdown** (Settings, default 30 min): on battery, without input for
+  this long, the meter switches off; with USB power (a computer or a charger)
+  it never does, and the time counts afresh from the unplug. 30 s before, it beeps and shows **Auto power-off in
   30 s** (then 20, 10); touch the screen or press a key to keep it on.
 - A connected computer or phone also keeps the meter on: any SCPI command
   over USB or Bluetooth, a phone-app request, and the computer reading or
@@ -242,8 +243,8 @@ the combined view switches to the next sub-mode of the current function
   do not count for **Dim screen**: during a long remote session the screen
   still dims, and they do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
-  MIN/MAX/AVG session runs, or while the power meter counts energy with a
-  current flowing. The screen still dims.
+  MIN/MAX/AVG session runs, while the power meter counts energy with a
+  current flowing, or while the inrush page is armed. The screen still dims.
 - To switch off: hold the power key 1.5 s, or swipe down with two fingers
   and tap **Yes**.
 - The battery charges from the USB port.
@@ -291,7 +292,7 @@ scope.
 | Smoothing | — | Optional [smoothing](#smoothing) of the display |
 | AutoHold | — | [AutoHold](#autohold): holds a stable reading by itself |
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
-| AVG | — | The [mean](#min-max-avg) next to MAX and MIN |
+| AVG | — | The [mean](#min-max-avg) and SD next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
@@ -603,7 +604,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Continuity
 
-- Shows the resistance with two decimals; **0L** with **OPEN** above 1000 Ω.
+- Shows the resistance with two decimals; **0L** above 1000 Ω ([Overflow](#overflow)).
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
@@ -630,8 +631,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Diode
 
-- Shows the forward voltage with four decimals; **0L** with **OPEN** above
-  3.12 V (open leads or a reversed diode).
+- Shows the forward voltage with four decimals; **0L** with **Overflow**
+  above 3.12 V (open leads, a reversed diode or a charged capacitor).
 - Top left, small: the test current, **I 0.76 mA** (the short-circuit
   current, measured on one unit; the open-circuit voltage is 3.2 V).
 - Beeps by forward voltage, as on the stock firmware: a continuous tone
@@ -648,14 +649,19 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Capacitance
 
-- Ranges: 6 nF to 60 mF, autorange only.
-- Large capacitors take longer: from the 600 µF range up the meter first
-  discharges, then measures.
+- Ranges: 60 nF to 60 000 µF; **MF** chooses one or AUTO. Below 6 nF the value
+  has 3 decimals; from 6 mF it is in µF (4700 µF).
+- From 600 µF the meter first discharges the capacitor (**Discharging... 0.85 V**
+  with the voltage on it, **>1.2 V** above that), then updates
+  every 0.25 s; the value is grey until the ramp has run both ways.
+
+  ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
+- Open leads end on the 60 nF range; a short shows **0L**.
 
 
-![A 100 nF capacitor](img/dmm-cap.png)
-
-*A 100 nF capacitor.*
+| ![A 100 nF capacitor](img/dmm-cap.png) | ![The capacitance range page](img/range-cap.png) |
+|---|---|
+| A 100 nF capacitor | The capacitance range page, 600 µF chosen |
 
 #### Frequency and duty cycle
 
@@ -759,16 +765,14 @@ to a high voltage applied while the meter sat on the mV range.
   is above the range (or the function's limit). The bargraph turns red with
   an **OL** mark. On the scope page's meter strip, **Overflow** is in the
   small text right of the reading.
-- Continuity and diode say **OPEN** instead of **Overflow** (also the
-  bargraph mark).
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
 
 
-| ![Over range: 0L, Overflow](img/dmm-ol.png) | ![Continuity, open leads: 0L, OPEN](img/dmm-open.png) |
-|---|---|
-| Over range: 0L, Overflow | Continuity, open leads: 0L, OPEN |
+| ![Over range: 0L, Overflow](img/dmm-ol.png) |
+|---|
+| Over range: 0L, Overflow |
 
 ### Counts, rate and the extra digit
 
@@ -2066,7 +2070,7 @@ ended**).
 Each row holds the reading as the multimeter measured it, with REL applied
 but without the display smoothing. In the interval modes, a row holds the
 mean of the readings of that interval; an interval with an overflow reading
-(0L, OPEN) becomes an overflow row.
+(0L) becomes an overflow row.
 
 The meter has no real-time clock. Times count in seconds from the start of
 the recording; the header says how long after power-on it started.
@@ -2086,9 +2090,10 @@ time_s,value,unit,flags
 | `time_s` | Seconds since the start. In interval mode: the end of the interval, also for the last one when the recording stops inside it. |
 | `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overflow. |
 | `unit` | The unit. |
-| `flags` | Any of `OL` (overflow: 0L or OPEN), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
+| `flags` | Any of `OL` (overflow: 0L), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
 
-Interval files have one more header line that names the interval.
+Interval files have one more header line that names the interval; **On
+change** files one that names the change (`# event: change > 1 % ...`).
 
 The meter stores the recording in a compact form (`LOGS/LOG007.DLG` on the
 internal disk). The USB disk shows it as `LOGS/LOG007.CSV`. The CSV is
@@ -2302,7 +2307,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | Row | Values | Default | What it does |
 |---|---|---|---|
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
-| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | Switches the meter off after this time without input. |
+| **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
 | **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
 | **Key/alert volume** | 0 % to 100 %, steps of 10 | 50 % | Loudness of key beeps and alerts. 0 % also silences the continuity / diode beeper; above 0 % it has one fixed loudness (the measuring chip drives it, *inferred*). The auto power-off warning always sounds at least at 50 %; the danger alarm has its own row. |
 | **Bluetooth** | ON, OFF | ON | The [Bluetooth](#bluetooth) module. |

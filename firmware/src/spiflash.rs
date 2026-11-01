@@ -284,6 +284,25 @@ pub fn chip_busy() -> bool {
     SpiFlash::busy()
 }
 
+/// Before a reset (main.rs `reset_at`): wait, bounded by `max_ms`, until the
+/// chip has finished an erase / page program a writer left running, so the
+/// next owner of the bus (the vendor loader after DBG:UPDATE) finds it idle.
+/// Returns the ms waited (`max_ms` = still busy).
+pub fn wait_idle(max_ms: u32) -> u32 {
+    let per_ms = crate::clock::HCLK_HZ / 1000;
+    let t0 = cyc();
+    loop {
+        let ms = cyc().wrapping_sub(t0) / per_ms;
+        if !SpiFlash::busy() {
+            return ms;
+        }
+        if ms >= max_ms {
+            return max_ms;
+        }
+        crate::wdt::kick_if_feeding();
+    }
+}
+
 impl SpiFlash {
     /// Raw bytes at flash address `addr` (any length; dlog.rs reads the
     /// binary logs for the CSV export without a 4 KiB block buffer). Waits
