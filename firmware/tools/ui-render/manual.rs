@@ -234,7 +234,7 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/temp", &page, false);
     save1(out, "temp");
 
-    // Device page (no serial number on it).
+    // Device page; the serial number is an example, not a real unit's.
     host::reset(0);
     let mut fwb = [0u8; 48];
     let ver = ui::device_software(&mut fwb);
@@ -242,6 +242,7 @@ pub fn run(out: &str) -> usize {
         ("Vendor", "Alientek"),
         ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
+        ("SN", "12345678"),
         ("Bootloader", "V4.0"),
         ("Software", ver),
         ("Hardware", "V1.1"),
