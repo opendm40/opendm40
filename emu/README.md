@@ -220,6 +220,8 @@ recorded.
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
+| [`capdowntest.py`](hy3131/capdowntest.py) | capacitance AUTO: a small capacitor after a large one, open leads and a short (also the device's no-ramp case, AD1 forced) end on their own range; large capacitors keep theirs | | 47750 |
+| [`captimetest.py`](hy3131/captimetest.py) | capacitance AUTO timing from DC V: time to the first grey and the first final value (1 nF .. 1 mF, absorption, open leads, a resistor) | | 47760 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
 | [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
@@ -245,12 +247,14 @@ recorded.
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
-| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples | | free |
+| [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples (`--ch2`: the scope page with CH2 (DMM) on) | | free |
 | [`trigdragtest.py`](trigdragtest.py) | marker drags with a wobbling finger: one item, one axis per gesture | | free |
 | [`sratetest.py`](sratetest.py) | the timebase list's per-entry sample rates = the ui-render `s07-srate-*` renders and ACQ:SRAT? across timebases, roll and the Wave view; picks in the open list (`--refs` = a `tools/ui-render/run.sh` output directory) | | free |
 | [`rollmeastest.py`](rollmeastest.py) | roll mode: no measurements while rolling (not the last frame's), a stopped roll record measured | | free |
+| [`gentrigtest.py`](gentrigtest.py) | trigger source GEN: DAC-path phase readings (`DBG:GENTRIG:STAT?`) and a stream-timebase trigger, the PWM path triggering, `TRIG:SOUR CHAN1`, the generator off. The DAC phase itself stands still here (no DMA from TIM6) | | free |
 | [`draglat.py`](draglat.py) | level-marker drag latency on the screen | | free |
 | [`popupbeep.py`](popupbeep.py) | CH1 popup open / close: redraw length as the tap beep length (buzzer register log), the CH1 label after it | ~2 min | free |
+| [`popupscpitest.py`](popupscpitest.py) | scope: SCPI timebase / V/div changes while the CH1 popup is open show in the top bar at once (#82) | ~2 min | free |
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
 | [`triglevtest.py`](triglevtest.py) | `TRIG:LEV` keeps the level as given (V/div steps, off screen); Normal triggers on it | ~2 min | free |
 | [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |
@@ -264,6 +268,7 @@ recorded.
 | [`logfmttest.py`](logfmttest.py) | LOG:DATA? in each LOG:FORMat is lossless | | 63610 |
 | [`fastlogtest.py`](fastlogtest.py) | fast logger to the SPI disk: the sustainable rate with the flash busy timing | | 4817, BT 4818 |
 | [`fastendtest.py`](fastendtest.py) | end of a disk session while a host reads the USB volume | | 4827 |
+| [`csvsharetest.py`](csvsharetest.py) | LOG / FAST CSVs read over MMEM:DATA? and the USB volume in turn equal dlog.py (shared generators) | ~4 min | free |
 
 ### USB, disk, settings and boot
 
@@ -277,8 +282,9 @@ recorded.
 | [`gallerytest.py`](gallerytest.py) | the gallery: grid, viewer, Delete | ~8 min | 19310 |
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
-| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
+| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
+| [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |
 | [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
@@ -289,7 +295,9 @@ recorded.
 | [`autokeytest.py`](autokeytest.py) | the AUTO key in the DMM | | free |
 | [`limitsbacktest.py`](limitsbacktest.py) | MENU / Back on Hold & Limits and Record: one page up (the range page or the multimeter); the range pages' Record button, Start / Stop | ~2 min | free |
 | [`chartunittest.py`](chartunittest.py) | DMM trend chart after a range change to another unit that reads OL (#93) | | free |
+| [`chartreltest.py`](chartreltest.py) | DMM trend chart keeps its points on REL on / off, as the stock (#98) | | free |
 | [`touchpagetest.py`](touchpagetest.py) | the touch test page and touch calibration | | 65200-65300 |
+| [`xramtest.py`](xramtest.py) | the extra RAM areas (backup SRAM after the settings record, USBHS FIFO RAM) start zeroed over stale bytes; the settings record survives DBG:RESET while their buffers are in use | ~4 min | 64600-64699 |
 | [`smoothtest.py`](smoothtest.py) | page, popup and DMM function changes: no refresh shows a large part of the screen neither old nor new (a cleared background, a popup closed and reopened); prints each redraw's time | ~2 min | - |
 | [`tempinfotest.py`](tempinfotest.py) | the temperature page's cold junction line follows an offset step (#142) | | free |
 | [`monkeytest.py`](monkeytest.py) | seeded random taps, keys, drags, swipes and SCPI (edge values) on every page: no restart, no hang, MENU always reaches the main menu, the deepest stack use; optional soak (`--seed`, `--minutes`) | about real time (`--fast`) | free |

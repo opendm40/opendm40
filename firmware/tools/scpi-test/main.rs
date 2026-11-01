@@ -42,6 +42,8 @@ mod power {
 mod csvlog {
     pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
     pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
+    pub const ON_CHANGE: u8 = 4;
+    pub const CHANGES: [&str; 3] = ["0.1", "1", "5"];
     pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
         // "WRONG/..." stands for a prefix of another directory.
         if s.is_empty() { None } else { Some(([b' '; 11], !s.starts_with(b"\"WRONG/"))) }
@@ -206,6 +208,10 @@ fn set_commands() {
     check(matches!(s.handle(b"TRIG:EDGE:SLOP POS", 1), Out::Instr(Cmd::TrigSlope(Some(true)))), "TRIG:EDGE:SLOP POS");
     check(matches!(s.handle(b"TRIG:EDGE:LEV 1.5", 1), Out::Instr(Cmd::TrigLevel(Some(v))) if v == 1.5), "TRIG:EDGE:LEV 1.5");
     check(matches!(s.handle(b"TRIG:SWE NORM", 1), Out::Instr(Cmd::TrigSweep(Some(1)))), "TRIG:SWE NORM");
+    check(matches!(s.handle(b"TRIG:SOUR CHAN1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR CHAN1 (short form with its suffix)");
+    check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
+    check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
+    check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
     check(matches!(s.handle(b"RES:NEG ON", 1), Out::Instr(Cmd::ResNeg(Some(true)))), "RES:NEG ON");
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");
@@ -265,6 +271,8 @@ fn set_commands() {
         ("CHAN1:DISP ON", "-113"),
         ("TRIG:SLOP UP", "-224"),
         ("TRIG:SWE NEVER", "-224"),
+        ("TRIG:SOUR CHAN2", "-224"),
+        ("TRIG:SOUR CHANNEL", "-224"),
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),
         ("LOG:STAT MAYBE", "-224"),
@@ -277,6 +285,9 @@ fn set_commands() {
         ("LOG:CSV:INT 5", "-222"),
         ("LOG:CSV:INT x", "-224"),
         ("LOG:CSV:DUR 7", "-222"),
+        ("LOG:CSV:CHAN 2", "-222"),
+        ("LOG:CSV:CHAN x", "-224"),
+        ("LOG:CSV:INT CHANNEL", "-224"),
         ("LOG:SOUR AD3", "-224"),
         ("SYST:BEEP:VOL 101", "-222"),
         ("SYST:BEEP:VOL -1", "-222"),
@@ -310,6 +321,15 @@ fn set_commands() {
     let o = s.handle(b"SOUR:FREQ x;SOUR:FREQ?", 1);
     check(matches!(o, Out::Instr(Cmd::GenFreq(None))) && err(&mut s).starts_with("-224,"), "SOUR:FREQ x;SOUR:FREQ?: the query runs, -224 queued");
     check(matches!(s.handle(b"LOG:STAT ON", 1), Out::Log(Log::State(Some(true)))), "LOG:STAT ON");
+    // Record page On change (csvlog.rs on-change mode).
+    check(matches!(s.handle(b"LOG:CSV:INT CHAN", 1), Out::Log(Log::CsvInt(Some(4)))), "LOG:CSV:INT CHAN: On change");
+    check(matches!(s.handle(b"log:csv:interval change", 1), Out::Log(Log::CsvInt(Some(4)))), "log:csv:interval change");
+    check(matches!(s.handle(b"LOG:CSV:INT 10", 1), Out::Log(Log::CsvInt(Some(2)))), "LOG:CSV:INT 10");
+    check(matches!(s.handle(b"LOG:CSV:DUR 3600", 1), Out::Log(Log::CsvDur(Some(2)))), "LOG:CSV:DUR 3600");
+    check(matches!(s.handle(b"LOG:CSV:CHAN 0.1", 1), Out::Log(Log::CsvChg(Some(0)))), "LOG:CSV:CHAN 0.1");
+    check(matches!(s.handle(b"LOG:CSV:CHANge 5", 1), Out::Log(Log::CsvChg(Some(2)))), "LOG:CSV:CHANge 5");
+    check(matches!(s.handle(b"LOG:CSV:CHAN?", 1), Out::Log(Log::CsvChg(None))), "LOG:CSV:CHAN? is the query");
+    check(matches!(s.handle(b"LOG:CSV:FREE?", 1), Out::Log(Log::CsvFree)), "LOG:CSV:FREE?");
     check(matches!(s.handle(b"LOG:SOUR ad2", 1), Out::Log(Log::Source(Some(true)))), "LOG:SOUR ad2: parameters are not case-sensitive");
     check(matches!(s.handle(b"log:sour Ad1", 1), Out::Log(Log::Source(Some(false)))), "log:sour Ad1");
 }

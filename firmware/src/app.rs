@@ -34,6 +34,9 @@ mod app_power;
 mod app_wave;
 #[path = "app_press.rs"]
 mod app_press;
+/// The DMM as CH2 of the MCX scope page (the AD2 stream alongside).
+#[path = "app_ch2.rs"]
+mod app_ch2;
 /// Inrush current: open / arm / close / results / save (region C) and the
 /// part that runs while the AD2 stream does (region B).
 #[path = "app_inrush.rs"]
@@ -157,6 +160,15 @@ const KP_NTC_R25: u8 = 7;
 const KP_NTC_BETA: u8 = 8;
 
 /// "10.000" -> "10", "4.700" -> "4.7" (keypad prefill).
+// The Record page's interval list: csvlog's indices, then "Fast".
+const _: () = assert!(crate::csvlog::ON_CHANGE as usize == 4 && ui::REC_FAST == 5 && ui::REC_CHANGES.len() == crate::csvlog::CHANGES.len());
+
+/// persist W_REC bits 8..9 <-> csvlog::CHANGES index: 0 (an older record)
+/// stands for the default 1 % (index 1), 1 for 0.1 %, 2 for 5 %.
+fn swap01(c: u8) -> u8 {
+    if c < 2 { c ^ 1 } else { c }
+}
+
 fn trim_zeros(s: &str) -> &str {
     if !s.as_bytes().contains(&b'.') {
         return s;
@@ -285,6 +297,8 @@ pub struct App {
     /// A view change out of the live wave view, held until main.rs has
     /// stopped the stream (`show`, app_wave.rs `wave_exit_done`).
     wave_exit_to: Option<View>,
+    /// The DMM CH2 on the MCX scope page (app_ch2.rs).
+    ch2: app_ch2::Ch2,
     pub locked: bool,
     /// PD6 click timer (stock DMM key widget timer +0x48, 500 ms one-shot):
     /// a second release before it expires toggles the lock; on expiry the
@@ -367,6 +381,10 @@ pub struct App {
     toast_later: [u8; TOAST_LATER_MAX],
     toast_later_n: u8,
     toast_later_ok: bool,
+    /// A scope popup's tap is being handled: its toast waits for the popup
+    /// repaint that ends the tap (`toast_later`), else the popup is drawn
+    /// over it.
+    toast_hold: bool,
     /// 3-finger swipe seen: take the screenshot in tick() once the view is
     /// drawn.
     shot_req: bool,
@@ -629,6 +647,7 @@ impl App {
             wave_req: None,
             wave_auto: None,
             wave_exit_to: None,
+            ch2: app_ch2::Ch2::NEW,
             locked: false,
             pd6_click: None,
             hist: [(0.0, 0, ""); 5],
@@ -681,6 +700,7 @@ impl App {
             toast_later: [0; TOAST_LATER_MAX],
             toast_later_n: 0,
             toast_later_ok: false,
+            toast_hold: false,
             shot_req: false,
             repaint_at: 0,
             band_until: 0,
@@ -708,7 +728,8 @@ impl App {
         // file on the SPI disk (setfile.rs; after a power-off the backup
         // SRAM holds none). A power-off starts a new measurement (owner
         // 2026-10-25): DC V and the measurement settings at their defaults;
-        // only a reset (the backup SRAM) continues them.
+        // only a reset (the backup SRAM) continues them, or Mode Remember ON
+        // (restore).
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
             a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
@@ -807,6 +828,8 @@ impl App {
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
         // So does the power meter (energy, the shunt state): every view.
         d |= self.host_dmm || self.logger_busy || (self.bt_on && self.power.bt_connected()) || crate::csvlog::active() || self.dmm.pw.on;
+        // The DMM CH2 on the scope page streams from the DMM side.
+        d |= self.ch2_want().is_some();
         s |= self.host_scope || self.gen.s.on;
         if self.rails_both {
             (d, s) = (true, true);
@@ -1281,7 +1304,8 @@ impl App {
         if self.rec_fast {
             return self.record_page_fast(di);
         }
-        let row_ms = match crate::csvlog::INTERVALS_S[ii as usize] {
+        // On change: at most a row per reading, as every reading.
+        let row_ms = match crate::csvlog::INTERVALS_S.get(ii as usize).copied().unwrap_or(0) {
             0 => match self.dmm.reading_period_ms() {
                 0 => 100,
                 p => p,
@@ -1323,7 +1347,8 @@ impl App {
             Err(crate::csvlog::GErr::Busy) => "-- (disk busy)",
             Err(_) => "-- (no disk)",
         };
-        ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
+        let ci = crate::csvlog::change() as usize;
+        ui::record_page([ui::REC_INTERVALS[ii as usize], ui::REC_CHANGES[ci], ui::REC_DURATIONS[di as usize]], free, crate::csvlog::active());
     }
 
     /// The Record page's interval index (REC_FAST for the fast logger).
@@ -1379,7 +1404,7 @@ impl App {
                 core::str::from_utf8(&b[..n]).unwrap_or("")
             }
         };
-        ui::record_page([ui::REC_INTERVALS[ui::REC_FAST], ui::REC_DURATIONS[di as usize]], txt, crate::fastlog::active());
+        ui::record_page([ui::REC_INTERVALS[ui::REC_FAST], ui::REC_CHANGES[crate::csvlog::change() as usize], ui::REC_DURATIONS[di as usize]], txt, crate::fastlog::active());
     }
 
     /// The fast logger's (rate S/s, AD2) for the current function: AD2 in
@@ -1574,7 +1599,7 @@ impl App {
     /// the pages whose drawing is the same on every pass (a full-screen
     /// fill first, then widgets from the app state; their caches are reset
     /// by the draw itself); false: not such a page, or the buffer is busy
-    /// (a disk job holds calbackup::SCRATCH): the caller draws directly.
+    /// (a disk job holds diskbuf::ARENA): the caller draws directly.
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
@@ -1593,7 +1618,7 @@ impl App {
             self.sp.uncover = 0;
             self.sp_prepare();
         }
-        let Some(buf) = crate::calbackup::strip_take() else {
+        let Some(buf) = crate::diskbuf::strip_take() else {
             if scope {
                 crate::lcd::defer_start();
                 crate::scope_ui::invalidate();
@@ -1610,7 +1635,7 @@ impl App {
                 self.draw_static();
             }
         });
-        if !crate::calbackup::strip_give() {
+        if !crate::diskbuf::strip_give() {
             // A disk user took the buffer meanwhile: draw it again.
             crate::lcd::defer_start();
             self.draw_static();
@@ -1661,7 +1686,12 @@ impl App {
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
-        // shutdown host activity too (`note_host_activity`).
+        // shutdown host activity too (`note_host_activity`). On USB power
+        // (PB10, `Power::on_charger`) the shutdown timer does not run, in any
+        // view: it counts afresh from the unplug (owner, 2026-10-30).
+        if self.power.on_charger() {
+            self.note_host_activity(now);
+        }
         let dim_idle = now.saturating_sub(self.last_input);
         let idle = now.saturating_sub(self.last_input.max(self.last_host));
         self.pw_tick(now);
@@ -1669,12 +1699,7 @@ impl App {
             self.dimmed = true;
             backlight(5);
         }
-        // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
-        // started explicitly, see Stats::rec). Dimming still applies.
-        // Nor while the power meter integrates energy with a current flowing.
-        // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1).
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        if !self.off_held() && idle > self.off_ms() {
             self.persist_now();
             power_off();
         }
@@ -1943,6 +1968,7 @@ impl App {
                 max: st.map(|s| s.1),
                 avg: st.map(|s| s.2),
                 min: st.map(|s| s.0),
+                sd: st.map(|s| s.3),
                 rel: self.meter.rel_value(),
                 secs: self.meter.stats.secs(now),
                 rec: self.meter.stats.rec,
@@ -2233,7 +2259,7 @@ impl App {
             | ui::trend_code(self.chart_rate) << crate::meter::EXT_TREND_SHIFT
             | self.fixed_range_item().map_or(0, |i| i as u32 + 1) << crate::meter::EXT_RANGE_SHIFT;
         let (ri, rd) = crate::csvlog::next();
-        p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4;
+        p[crate::persist::W_REC] = ri as u32 | (rd as u32) << 4 | (swap01(crate::csvlog::change()) as u32) << 8;
         // v11: the touch calibration (touchcal.rs; 0 = none).
         for (w, c) in p[crate::persist::W_TOUCH_CAL..crate::persist::W_TOUCH_CAL + 6].iter_mut().zip(crate::touch::cal()) {
             *w = c as u32;
@@ -2345,6 +2371,7 @@ impl App {
             // v8: Record page interval / duration (0 = the defaults; csvlog
             // maps an unknown index to the default).
             crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
+            crate::csvlog::set_change(swap01((p[crate::persist::W_REC] >> 8 & 3) as u8));
         }
         let mode = if cont { restore_func(rec.version, p[2] as u8) } else { 1 };
         // Entering the power meter starts in DC (as V / A); a restart in it
@@ -2561,7 +2588,9 @@ impl App {
                     crate::meter::V_LO => f |= F_LO,
                     _ => {}
                 }
-                crate::csvlog::push(now, l.si, f);
+                // The range's full scale in SI (on-change mode's threshold).
+                let fs = crate::bargraph::mode_full_scale(l.mode, l.range, l.main.dec, l.main.unit) * crate::meter::unit_scale(l.main.unit);
+                crate::csvlog::push(now, l.si, f, fs);
             }
         }
         let dmm_view = can_draw && !self.redraw && matches!(self.view, View::Dmm | View::DmmScope);
@@ -2638,6 +2667,8 @@ impl App {
         let page = self.sp_on() && can_draw && !self.redraw && self.overlay.is_none();
         let covered = self.sp.covered();
         crate::scope_ui::set_flush_short(self.view == View::DmmScope);
+        // The DMM CH2's stream into its store (also during a drag).
+        self.ch2_drain();
         if self.sp.frozen_or_pinch() {
             if page {
                 // The drag redraw (DBG:PROF? "s.frame"; touch->frame latency
@@ -3168,9 +3199,24 @@ impl App {
     /// UF-28: before the idle power-off, "Auto power-off in 30 s" (20, 10)
     /// with a beep that ignores a 0 % volume. Not an input: the countdown
     /// goes on unless the user touches the screen or a key.
+    /// No idle shutdown (nor its countdown): Shutdown Never, or during a
+    /// MIN/MAX/AVG recording session (FR-02; started explicitly, see
+    /// Stats::rec), while the power meter integrates energy with a current
+    /// flowing, during a CSV recording (Record page: a 24 h log on battery;
+    /// decisions-2026-10-22.md #1), or while the inrush page is armed or
+    /// capturing (its stream runs: #144, a load that starts on its own).
+    /// Dimming still applies. USB power holds it off through `idle` (`tick`).
+    fn off_held(&self) -> bool {
+        self.off_ms() == 0
+            || self.meter.stats.rec
+            || self.dmm.pw.integrating()
+            || crate::csvlog::active()
+            || crate::inrush::ses().streaming
+    }
+
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = self.off_ms();
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
+        if self.off_held() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }
@@ -3336,9 +3382,10 @@ impl App {
         self.toast_draw(now, txt, ok);
     }
 
-    /// Keep `txt` for after the confirm that is up; false = none is up.
+    /// Keep `txt` for after the confirm that is up (or the scope popup's
+    /// repaint, `toast_hold`); false = none is up.
     fn toast_defer(&mut self, txt: &str, ok: bool) -> bool {
-        if !self.overlay.is_some_and(|o| o.modal()) {
+        if !self.toast_hold && !self.overlay.is_some_and(|o| o.modal()) {
             return false;
         }
         let mut n = txt.len().min(TOAST_LATER_MAX);
@@ -3521,7 +3568,7 @@ impl App {
             2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
             // V / A / ohm: the range step on release, the autorange when held
             // (auto_key_end).
-            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm) => {
+            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
                 self.run_down = Some(now);
                 self.run_key = 2;
             }
@@ -3548,7 +3595,7 @@ impl App {
         }
     }
 
-    /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
+    /// AUTO in V / A / ohm / capacitance, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
     /// 60 ohm included), the highest wrapping to the lowest. Long: the
@@ -3559,7 +3606,7 @@ impl App {
         let now = clk.now_ms();
         let b = self.dmm.button();
         // The function changed while the key was held: nothing.
-        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm) {
+        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm | Button::Cap) {
             return;
         }
         self.meter.rel_off();
@@ -3598,8 +3645,8 @@ impl App {
             return;
         }
         match self.view {
-            // REL button (stock (402,205,76,38)).
-            View::Dmm if x >= 402 && (205..243).contains(&y) => self.rel_toggle(now),
+            // REL button (stock (402,205,76,38); 36 high since SD, ui::chart).
+            View::Dmm if x >= 402 && (205..241).contains(&y) => self.rel_toggle(now),
             View::Dmm if x >= 402 && (175..279).contains(&y) => {
                 // MIN/MAX/AVG column outside the REL box: start / stop a
                 // recording session. Starting clears the statistics; while it
@@ -3960,10 +4007,10 @@ impl App {
                         let mut ii = self.rec_ival() as u8;
                         let d = ui::record_step(x) as i16;
                         let step = |v: u8, n: usize| (v as i16 + d).clamp(0, n as i16 - 1) as u8;
-                        if k == 0 {
-                            ii = step(ii, ui::REC_INTERVALS.len());
-                        } else {
-                            di = step(di, ui::REC_DURATIONS.len());
+                        match k {
+                            0 => ii = step(ii, ui::REC_INTERVALS.len()),
+                            1 => crate::csvlog::set_change(step(crate::csvlog::change(), ui::REC_CHANGES.len())),
+                            _ => di = step(di, ui::REC_DURATIONS.len()),
                         }
                         self.rec_fast = ii as usize == ui::REC_FAST;
                         let ii = if self.rec_fast { crate::csvlog::next().0 } else { ii };
@@ -4102,10 +4149,10 @@ impl App {
                 match ui::settings_hit(0, y) {
                     Some(0) => self.dim_idx = (self.dim_idx + 1) % 4,
                     Some(1) => self.off_idx = (self.off_idx + 1) % 4,
-                    // -/+ steppers (ui-review #12): 10 % steps, clamped.
+                    // -/+ steppers (ui-review #12): Backlight on the
+                    // 10, 15 ... 95, 100 grid, volume 10 % steps, clamped.
                     Some(2) => {
-                        let d = ui::settings_step(x) as i16 * 10;
-                        self.backlight = (self.backlight as i16 + d).clamp(10, 100) as u8;
+                        self.backlight = ui::backlight_step(self.backlight, ui::settings_step(x));
                         backlight(self.backlight);
                     }
                     Some(3) => {
@@ -4247,6 +4294,7 @@ impl App {
 
     /// The temperature page's info line into `b` (its length): the sensor
     /// current of a resistive sensor, else the cold junction.
+    #[inline(never)] // .cold (link-native.x): temperature page only
     fn temp_info_text(&self, b: &mut [u8; 64]) -> usize {
         let mut n = 0;
         let mut put = |t: &[u8]| {
@@ -4273,6 +4321,7 @@ impl App {
     /// changed (the cold junction follows each thermocouple reading and an
     /// offset step; it stayed as drawn when the page opened). `drawn`: the
     /// whole page was just drawn, only note its text.
+    #[inline(never)] // .cold (link-native.x): temperature page, once a second
     fn temp_info_tick(&mut self, drawn: bool) {
         let mut b = [0u8; 64];
         let n = self.temp_info_text(&mut b);
@@ -4428,7 +4477,7 @@ impl App {
                 let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
                 let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
-                    _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
+                    _ if cur == 14 => out.set_err("Illegal parameter value"),
                     Some(i) => {
                         self.dmm.set_range(clk, Some(s::range_item_code(cur, i)));
                         self.meter.rel_off();
@@ -4474,10 +4523,12 @@ impl App {
         self.meter.ahold
     }
 
-    /// CALC:AVER:MIN? / MAX? / AVER? / COUNt?: (min, max, avg) in SI of
-    /// the current function and the sample count; None before a sample.
-    pub fn stats(&self) -> (Option<(f32, f32, f32)>, u32) {
-        (self.meter.stats.si(), self.meter.stats.n)
+    /// CALC:AVER:MIN? / MAX? / AVER? / SDEV? / COUNt?: (min, max, avg, sd)
+    /// in SI of the current function and the sample count; None before a
+    /// sample.
+    pub fn stats(&self) -> (Option<(f32, f32, f32, f32)>, u32) {
+        let s = &self.meter.stats;
+        (s.si().map(|(a, b, c)| (a, b, c, s.sd().unwrap_or(0.0))), s.n)
     }
 
     /// CALC:AVER:CLEar (keeps a running recording session).
@@ -4591,6 +4642,45 @@ impl App {
                 }
                 true
             }
+        }
+    }
+
+    /// DBG:GENTRIG:LAG / DBG:GENTRIG:STAT? / DBG:CH2:LAG (the GEN and CH2
+    /// channels' tuning replies): region C (link-native.x), out of
+    /// `scpi_dmm`'s frame.
+    #[inline(never)]
+    fn dbg_gen(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
+        use crate::scpi::Cmd as C;
+        match cmd {
+            C::DbgGenLag(Some(ns)) => {
+                // ns -> ticks of the 200 MHz timer clock (5 ns).
+                crate::scope::set_gen_lag((ns / 5.0) as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgGenStat => {
+                for (i, v) in crate::gen::stats().iter().enumerate() {
+                    if i > 0 {
+                        out.put_bytes(b",");
+                    }
+                    out.put_u32(*v);
+                }
+                true
+            }
+            C::DbgGenLag(None) => {
+                out.put_f32(crate::scope::gen_lag() as f32 * 5.0);
+                true
+            }
+            C::DbgCh2Lag(Some(us)) => {
+                crate::scope_ch2::set_lag_us(us as i32);
+                self.scope.refresh();
+                false
+            }
+            C::DbgCh2Lag(None) => {
+                out.put_f32(crate::scope_ch2::lag_us() as f32);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -4747,7 +4837,7 @@ impl App {
                 let (v, n) = self.stats();
                 match (k, v) {
                     (3, _) => crate::put_u32(out, n),
-                    (_, Some((min, max, avg))) => out.put_f32([min, max, avg][k.min(2) as usize]),
+                    (_, Some((min, max, avg, sd))) => out.put_f32([min, max, avg, sd, sd][k.min(4) as usize]),
                     (_, None) => {
                         out.set_err("Data stale");
                         out.put_bytes(b"+9.90000000E+37");
@@ -5016,6 +5106,7 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-src")]
             C::DbgSrc(Some(r)) => {
                 match self.dmm.src_req(clk, r) {
                     Ok(()) => self.host_func_changed(),
@@ -5023,10 +5114,14 @@ impl App {
                 }
                 false
             }
+            #[cfg(feature = "dbg-src")]
             C::DbgSrc(None) => {
                 self.dmm.src_text(out);
                 true
             }
+            #[cfg(not(feature = "dbg-src"))]
+            C::DbgSrc(_) => false,
+            #[cfg(feature = "dbg-sent")]
             C::DbgSentReg => {
                 let mut b = [0u8; 72];
                 let n = self.dmm.reg_text(&mut b);
@@ -5041,6 +5136,7 @@ impl App {
                 out.put_u32(self.dmm.precond_ms as u32);
                 true
             }
+            c @ (C::DbgGenLag(_) | C::DbgGenStat | C::DbgCh2Lag(_)) => self.dbg_gen(c, out),
             C::DbgSentLog => {
                 let s = &self.dmm.sent;
                 out.put_u32(s.log_n);
@@ -5054,16 +5150,23 @@ impl App {
                 }
                 true
             }
+            #[cfg(feature = "dbg-sent")]
             C::DbgSent => {
                 let mut b = [0u8; 96];
                 let n = self.dmm.sent.diag_text(&mut b);
                 out.put_bytes(&b[..n]);
                 true
             }
+            #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
             C::DbgAm(op, k, v) => {
                 match op {
+                    // METH / STAT / ZERO / R0 (the parser makes no 0..6
+                    // without the feature `acdc-meth`).
+                    #[cfg(feature = "acdc-meth")]
                     0 => self.dmm.am_set_meth(clk, k),
+                    #[cfg(feature = "acdc-meth")]
                     1 => out.put_bytes(&[b'A' + self.dmm.am.meth]),
+                    #[cfg(feature = "acdc-meth")]
                     2 => {
                         for (i, x) in self.dmm.am_stat().iter().enumerate() {
                             if i > 0 {
@@ -5076,7 +5179,9 @@ impl App {
                             }
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     3 => self.dmm.am_set_zero(k, v),
+                    #[cfg(feature = "acdc-meth")]
                     4 => {
                         let (ok, fixed, c) = self.dmm.am_zero();
                         out.put_u32(ok as u32);
@@ -5087,18 +5192,26 @@ impl App {
                             out.put_f32(*x);
                         }
                     }
+                    #[cfg(feature = "acdc-meth")]
                     5 => self.dmm.am.r0 = k,
                     7 => self.dmm.set_range(clk, Some(k)),
+                    // DBG:ACDC:TRACE (the parser makes no 8 / 9 without the
+                    // feature `acdc-trace`).
+                    #[cfg(feature = "acdc-trace")]
                     8 => {
                         let mut b = [0u8; 500];
                         let n = self.dmm.tr.text(k as usize, &mut b, 500);
                         out.put_bytes(&b[..n]);
                     }
+                    #[cfg(feature = "acdc-trace")]
                     9 => self.dmm.tr.arm(k),
-                    _ => out.put_u32(self.dmm.am.r0 as u32),
+                    #[cfg(feature = "acdc-meth")]
+                    6 => out.put_u32(self.dmm.am.r0 as u32),
+                    _ => {}
                 }
                 matches!(op, 1 | 2 | 4 | 6 | 8)
             }
+            #[cfg(feature = "dbg-acdc")]
             C::DbgAcdc => {
                 let mut b = [0u8; 400];
                 let n = self.dmm.acdc_diag_text(&mut b);
@@ -5139,6 +5252,7 @@ impl App {
             self.host_scope = true;
             self.update_rails(clk);
         }
+        let sc0 = sc;
         let reply = match cmd {
             C::GenFunc(Some(w)) => {
                 g.wave = Wave::ALL[w as usize % 4];
@@ -5257,6 +5371,14 @@ impl App {
                     scope::TrigMode::Normal => b"NORM",
                     scope::TrigMode::Single => b"SING",
                 });
+                Some(())
+            }
+            C::TrigSource(Some(t)) => {
+                sc.tsrc = t.min(scope::TSRC_GEN);
+                None
+            }
+            C::TrigSource(None) => {
+                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
                 Some(())
             }
             C::Run => {
@@ -5434,6 +5556,13 @@ impl App {
             && reply.is_none()
         {
             self.scope_set(sc, now);
+            if self.sp_on() && self.sp.popup != crate::scope_ui::Popup::None && self.scope.s != sc0 {
+                // A popup is open (#82): the page again with it (the graph
+                // around its box, then the popup), so the top bar, the panel
+                // and the popup's own values show the host's change now,
+                // not when the popup closes.
+                self.redraw = true;
+            }
             if matches!(cmd, C::Digitize) {
                 // After apply (a run change clears it): the acquisition it
                 // restarted is the one that ends the run.

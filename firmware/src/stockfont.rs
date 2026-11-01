@@ -3,7 +3,7 @@
 //! tools/mkstockfont.py), so no stock app in flash is needed.
 //! Stock format and placement rules: stock/re/analysis/gui_v2_6.h sec. 5;
 //! our storage (docs/fonts.md): CJK glyphs dropped, 4 bpp glyphs as
-//! row-major nibble runs (RLE4), 1 bpp glyphs cropped to their ink rows;
+//! Huffman-coded row tokens (HUF), 1 bpp glyphs cropped to their ink rows;
 //! the drawn pixels are the stock ones (tools/font-matrix).
 //!
 //! Placement: glyph top = line_top + line_h - descent - h - yoff;
@@ -28,19 +28,31 @@ mod data {
     /// Glyph bitmap formats. BIT1: 1 bpp, column-major MSB-first, only the
     /// glyph's ink rows t .. t + ih stored (ih per column). RAW4: 4 bpp
     /// column-major, high nibble first (our own glyphs, stockfont_w.rs).
-    /// RLE4: 4 bpp row-major nibble runs (tools/mkstockfont.py rle_glyph):
-    /// 1..14 = one pixel; 0|15, n: n + 1 pixels of 0|15 (n <= 13), n = 14:
-    /// 15 + the next two nibbles; 0, 15, k at a row start: the last literal
-    /// row k + 1 more times. No run crosses a row end. docs/fonts.md.
+    /// HUF: 4 bpp row tokens, Huffman coded (tools/mkstockfont.py; docs/fonts.md):
+    /// per row L(v) one pixel of coverage 1..14, F0(n) / F15(n) n pixels of
+    /// 0 / 15, C(E) as a row's first token: the row above again; n = a
+    /// length class (CLS_LO, CLS_EB extra bits) or EOL (to the row end).
+    /// Each token is a canonical Huffman code of its context (the previous
+    /// token's kind in the row, HUF_CNT / HUF_SYM), then its extra bits, MSB
+    /// first. No token crosses a row end; a glyph starts at a byte boundary.
     pub const BIT1: u8 = 0;
     pub const RAW4: u8 = 1;
-    pub const RLE4: u8 = 2;
+    pub const HUF: u8 = 2;
+
+    /// Token kinds (symbol >> 4).
+    const K_L: u8 = 0;
+    const K_F15: u8 = 2;
+    /// Run length classes: first length and extra bits; class EOL = to the
+    /// end of the row.
+    const CLS_LO: [u8; 12] = [1, 2, 3, 4, 5, 6, 7, 9, 13, 21, 37, 0];
+    const CLS_EB: [u8; 12] = [0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 0];
+    const EOL: u8 = 11;
 
     /// Widest glyph (F78 'O' = 64; the generator asserts it): row buffer size.
     pub const MAXW: usize = 64;
 
     /// 10 bytes per glyph: code, byte offset into the font's blob, box w x h,
-    /// advance, yoff, first ink row t and ink rows ih (BIT1; RLE4: 0, h).
+    /// advance, yoff, first ink row t and ink rows ih (BIT1; HUF: 0, h).
     #[derive(Clone, Copy)]
     pub struct Entry {
         pub code: u16,
@@ -87,16 +99,74 @@ mod data {
         ih: u8,
     }
 
-    /// Row cursor of one RLE4 glyph: rows are decoded in order (a label
+    /// Row cursor of one HUF glyph: rows are decoded in order (a label
     /// draws top to bottom), so no per-row index is stored. `next` = the row
-    /// the next token starts, `src` = nibble index of the last literal row,
-    /// `rep` = repeats of it still pending.
+    /// the next token starts, `pos` = bit index of the next token, `src` =
+    /// bit index of the last literal row (a copied row is decoded from there).
     #[derive(Clone, Copy, Default)]
     pub struct Cur {
         pos: u16,
         src: u16,
-        rep: u8,
         next: u8,
+    }
+
+    /// Bits of the first-level decode table: 95 % of the tokens have a
+    /// code this short (tools/mkstockfont.py prints the share).
+    const LUTK: u32 = 6;
+
+    /// Per context, per LUTK-bit prefix: len << 8 | symbol of the code it
+    /// starts with, 0 = a longer code. Built from HUF_CNT / HUF_SYM at the
+    /// first glyph lookup (lut_init); 512 bytes in SRAM (TCM is the stack).
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut LUT: [[u16; 1 << LUTK]; HUF_CNT.len()] = [[0; 1 << LUTK]; HUF_CNT.len()];
+    #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+    static mut LUT_OK: bool = false;
+
+    fn lut_init() {
+        // Single-threaded, never from the ISR.
+        let lut = unsafe { &mut *core::ptr::addr_of_mut!(LUT) };
+        for (ctx, t) in lut.iter_mut().enumerate() {
+            let (mut code, mut idx) = (0usize, HUF_SOFF[ctx] as usize);
+            for (l, &n) in HUF_CNT[ctx].iter().enumerate() {
+                let l = l + 1;
+                for _ in 0..n {
+                    if l <= LUTK as usize {
+                        let sh = LUTK as usize - l;
+                        let e = (l as u16) << 8 | HUF_SYM.get(idx).copied().unwrap_or(0) as u16;
+                        for v in t.iter_mut().skip(code << sh).take(1 << sh) {
+                            *v = e;
+                        }
+                    }
+                    code += 1;
+                    idx += 1;
+                }
+                code <<= 1;
+            }
+        }
+        unsafe { *core::ptr::addr_of_mut!(LUT_OK) = true };
+    }
+
+    /// Canonical decode bit by bit from the per-length counts: (symbol,
+    /// code length) of the code at the top of `win`; a code that is not in
+    /// the table reads as symbol 0 (one pixel of coverage 0).
+    #[inline(never)]
+    fn slow(mut win: u32, ctx: usize) -> (u8, u32) {
+        let (mut code, mut first, mut idx) = (0u32, 0u32, 0u32);
+        let mut l = 0u32;
+        for &c in HUF_CNT[ctx].iter() {
+            code |= win >> 31;
+            win <<= 1;
+            l += 1;
+            let c = c as u32;
+            let d = code.wrapping_sub(first);
+            if d < c {
+                return (HUF_SYM.get(HUF_SOFF[ctx] as usize + (idx + d) as usize).copied().unwrap_or(0), l);
+            }
+            idx += c;
+            first = (first + c) << 1;
+            code <<= 1;
+        }
+        (0, l)
     }
 
     impl Glyph {
@@ -108,7 +178,7 @@ mod data {
         }
 
         /// Coverage 0..15 of pixel (x, y) inside the glyph box, random access
-        /// (Ink::at, the scope markers: 1 bpp fonts). An RLE4 glyph decodes
+        /// (Ink::at, the scope markers: 1 bpp fonts). A HUF glyph decodes
         /// its rows up to y (slow; the drawing paths use `row`).
         pub fn alpha(&self, x: u32, y: u32) -> u8 {
             match self.fmt {
@@ -137,7 +207,7 @@ mod data {
         }
 
         /// Column walk of row `y` for the formats with random access (not
-        /// RLE4): Some((index of column 0, step per column)) for `at`, None
+        /// HUF): Some((index of column 0, step per column)) for `at`, None
         /// when the row has no ink (BIT1 rows outside t .. t + ih).
         #[inline(always)]
         pub fn col_walk(&self, y: u32) -> Option<Option<(u32, u32)>> {
@@ -170,7 +240,7 @@ mod data {
             if p & 1 == 0 { b >> 4 } else { b & 0xF }
         }
 
-        /// Coverage of row `y` (0..h) into buf[..w]. RLE4 walks forward from
+        /// Coverage of row `y` (0..h) into buf[..w]. HUF walks forward from
         /// `c` (asking the same row again or any later row is cheap, an
         /// earlier one restarts from the top); the other formats ignore it.
         pub fn row(&self, c: &mut Cur, y: u32, buf: &mut [u8; MAXW]) {
@@ -209,7 +279,7 @@ mod data {
             }
         }
 
-        /// RLE4 only: hand the coverage of columns x0 .. x1 of row `y` to
+        /// HUF only: hand the coverage of columns x0 .. x1 of row `y` to
         /// `f` as runs, f(coverage, count), decoded straight from the runs
         /// (no row buffer). Same cursor rules as `row`.
         #[inline(always)]
@@ -217,8 +287,10 @@ mod data {
             let w = (self.w as usize).min(MAXW);
             let (mut p, lit) = self.seek(c, y, w);
             let mut x = 0usize;
+            let mut ctx = 0usize;
             while x < w {
-                let (v, l) = self.token(&mut p);
+                let (k, v, l) = self.token(&mut p, ctx, x, w);
+                ctx = (1 + k as usize) & 3;
                 let e = (x + l).min(w);
                 let (a, b) = (x.max(x0), e.min(x1));
                 if a < b {
@@ -231,7 +303,7 @@ mod data {
             }
         }
 
-        /// Move the cursor to row `y`: (nibble index where row y's runs
+        /// Move the cursor to row `y`: (bit index where row y's tokens
         /// start, true if that is a new literal row whose end the caller
         /// stores in c.pos). Same row again: its start; a later row: skips
         /// the rows between; an earlier row: from the top.
@@ -252,51 +324,73 @@ mod data {
             self.begin(c)
         }
 
-        /// Start the next row: a pending or new repeat of the last literal
-        /// row (its start, false), else a literal row at c.pos (true).
+        /// Start the next row: a copy of the last literal row (C(E): its
+        /// start, false), else a literal row at c.pos (true).
         fn begin(&self, c: &mut Cur) -> (u32, bool) {
             c.next = c.next.wrapping_add(1);
-            if c.rep > 0 {
-                c.rep -= 1;
-                return (c.src as u32, false);
-            }
             let p = c.pos as u32;
-            if self.nib(p) == 0 && self.nib(p + 1) == 15 {
-                c.rep = self.nib(p + 2);
-                c.pos += 3;
+            if HUF_COPY_LEN > 0 && self.peek(p) >> (32 - HUF_COPY_LEN) == HUF_COPY_CODE {
+                c.pos += HUF_COPY_LEN as u16;
                 return (c.src as u32, false);
             }
             c.src = c.pos;
             (p, true)
         }
 
-        /// One run token at nibble `p` (advanced past it): (coverage, pixels).
+        /// 32 bits of the blob from bit `p` on, MSB first (zeros past the end).
         #[inline(always)]
-        fn token(&self, p: &mut u32) -> (u8, usize) {
-            let v = self.nib(*p);
-            *p += 1;
-            if v != 0 && v != 15 {
-                return (v, 1);
-            }
-            let n = self.nib(*p) as usize;
-            *p += 1;
-            if n == 14 {
-                let l = 15 + ((self.nib(*p) as usize) << 4 | self.nib(*p + 1) as usize);
-                *p += 2;
-                (v, l)
-            } else {
-                (v, n + 1)
-            }
+        fn peek(&self, p: u32) -> u32 {
+            let i = (p >> 3) as usize;
+            let v = match self.blob.get(i..i + 4) {
+                Some(s) => u32::from_be_bytes([s[0], s[1], s[2], s[3]]),
+                None => {
+                    let mut v = 0u32;
+                    for k in 0..4 {
+                        v = v << 8 | self.blob.get(i + k).copied().unwrap_or(0) as u32;
+                    }
+                    v
+                }
+            };
+            v << (p & 7)
         }
 
-        /// One row of runs from nibble `p` into o[..w] (if PUT); returns the
-        /// nibble index after the row.
+        /// One token at bit `p` (advanced past it) in context `ctx`, at
+        /// column x of a w-pixel row: (kind, coverage, pixels). A code that
+        /// is not in the table reads as one pixel of coverage 0.
+        #[inline(always)]
+        fn token(&self, p: &mut u32, ctx: usize, x: usize, w: usize) -> (u8, u8, usize) {
+            let ctx = ctx % HUF_CNT.len();
+            let w0 = self.peek(*p);
+            // Codes of up to LUTK bits from the table (lut_init), longer
+            // ones bit by bit from the per-length counts.
+            let e = unsafe { (*core::ptr::addr_of!(LUT))[ctx][(w0 >> (32 - LUTK)) as usize] };
+            let (s, l) = if e != 0 { (e as u8, (e >> 8) as u32) } else { slow(w0, ctx) };
+            let win = w0 << l;
+            *p += l;
+            let kind = s >> 4;
+            if kind == K_L {
+                return (kind, s & 15, 1);
+            }
+            let c = (s & 15).min(EOL) as usize;
+            let n = if c == EOL as usize {
+                w.saturating_sub(x)
+            } else {
+                let e = CLS_EB[c] as u32;
+                *p += e;
+                CLS_LO[c] as usize + if e > 0 { (win >> (32 - e)) as usize } else { 0 }
+            };
+            (kind, if kind == K_F15 { 15 } else { 0 }, n)
+        }
+
+        /// One literal row of tokens from bit `p` into o[..w] (if PUT);
+        /// returns the bit index after the row.
         #[inline(always)]
         fn runs<const PUT: bool>(&self, mut p: u32, w: usize, o: &mut [u8; MAXW]) -> u32 {
             let w = w.min(MAXW);
             let mut x = 0usize;
+            let mut ctx = 0usize;
             while x < w {
-                let (v, l) = self.token(&mut p);
+                let (k, v, l) = self.token(&mut p, ctx, x, w);
                 let e = (x + l).min(w);
                 if PUT {
                     for d in &mut o[x..e] {
@@ -304,6 +398,7 @@ mod data {
                     }
                 }
                 x = e;
+                ctx = (1 + k as usize) & 3;
             }
             p
         }
@@ -320,6 +415,9 @@ mod data {
 
         pub fn glyph(&self, code: u32) -> Option<Glyph> {
             let fd = font_data(self.0)?;
+            if fd.fmt == HUF && !unsafe { *core::ptr::addr_of!(LUT_OK) } {
+                lut_init();
+            }
             let code = u16::try_from(code).ok()?;
             let e = fd.entries;
             let (mut lo, mut hi) = (0usize, e.len());
@@ -390,7 +488,7 @@ struct Placed {
     /// Synthesised glyph (`glyph_or_twin`): the bitmap drawn a second time
     /// `twin` px to the right (max coverage of the two); 0 = plain.
     twin: i16,
-    /// Row cursor (RLE4 glyphs decode their rows in order).
+    /// Row cursor (HUF glyphs decode their rows in order).
     cur: Cur,
 }
 
@@ -635,7 +733,7 @@ pub fn label(font: Font, r: Rect, text: &str, fg: Color, bg: Color, align: u8, s
                     }
                     None => out.run(lut[0], (e - x) as u16),
                 },
-                // RLE4: the glyph's row y straight from its runs; a twin W
+                // HUF: the glyph's row y straight from its runs; a twin W
                 // through the row buffer.
                 Some(p) if p.twin == 0 => {
                     let gx = (x - p.x) as usize;

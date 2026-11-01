@@ -70,7 +70,10 @@ fn dmm_page(p: &Dp) {
         let items = [(v - 3.0 * q, r.main.dec, r.main.unit), (v - q, r.main.dec, r.main.unit), (v + 2.0 * q, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit)];
         ui::history(&items, 4, 3);
     } else {
-        dv.bar_update(r);
+        // (The meter feeds the bargraph final readings only: none for dashes.)
+        if !r.main.v.is_nan() {
+            dv.bar_update(r);
+        }
     }
     dv.short = p.short;
     dv.reading(r, p.hold, p.lim);
@@ -82,10 +85,11 @@ fn dmm_page(p: &Dp) {
         ui::hv_warning(true);
     }
     let q = 10f32.powi(-(r.main.dec as i32));
-    let v = if r.main.ol { 0.0 } else { r.main.v };
+    // (A reading with no value yet, NaN: a chart of the capacitor before, 4700.)
+    let v = if r.main.ol { 0.0 } else if r.main.v.is_nan() { 4700.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
-    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
+    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), sd: Some(1.5 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
     ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
@@ -202,19 +206,25 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm-600m", &page, false);
     save1(out, "range-ohm-600m");
 
+    // Capacitance range page: 600 uF fixed.
+    host::reset(0);
+    ui::range_page(Button::Cap, Some(4), 0, None);
+    ck.check_opts("manual/range-cap", &page, false);
+    save1(out, "range-cap");
+
     // Hold & Limits of DC V: limits 4.8 .. 5.2 V on.
     host::reset(0);
     ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &["OFF", "ON", "5.2000 V", "4.8000 V", "", "", "", "ON", "Every reading"]);
     ck.check_opts("manual/limits", &page, false);
     save1(out, "limits");
 
-    // Record page: every reading, until stopped; and while it records.
+    // Record page: on change, until stopped; and the fast recorder.
     host::reset(0);
-    ui::record_page(["Every reading", "Until stopped"], "about 240 h left", false);
+    ui::record_page(["On change", "1 %", "Until stopped"], "about 240 h left", false);
     ck.check_opts("manual/record", &page, false);
     save1(out, "record");
     host::reset(0);
-    ui::record_page(["Fast", "1 h"], "4800/s, 25 min left", false);
+    ui::record_page(["Fast", "1 %", "1 h"], "4800/s, 25 min left", false);
     ck.check_opts("manual/record-fast", &page, false);
     save1(out, "record-fast");
 
@@ -350,12 +360,17 @@ pub fn run(out: &str) -> usize {
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
         // The experimental 600 Mohm range (manual only): 412.3 Mohm.
         ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
+        // Capacitance: the discharge before 600 uF and up, and its warning
+        // (the second only for the layout check).
+        ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
         // Continuity: a short, the beeper indicator on.
         ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.
-        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.73, 2, "nF"), None, None, false)) }),
+        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.7, 1, "nF"), None, None, false)) }),
         // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).
         ("dmm-hz", Dp { rate: false, ..dp(rd(14, Val { ext: true, ..val(1.00000, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false)) }),
         // Temperature: thermocouple K.
@@ -377,8 +392,10 @@ pub fn run(out: &str) -> usize {
         ("dmm-limit-hi", Dp { lim: meter::V_HI, ..dp(rd(1, val(5.2871, 4, "V"), None, None, false)) }),
         // The history row.
         ("dmm-history", Dp { hist: true, ..dp(dcv) }),
-        // Overload.
+        // Over range.
         ("dmm-ol", dp(rd(1, ol(4, "V"), None, None, false))),
+        // Continuity with open leads.
+        ("dmm-open", Dp { rate: false, ..dp(rd(11, ol(2, ohm), None, None, false)) }),
         // A recording running (REC in the status bar).
         ("dmm-rec", Dp { csv: true, ..dp(dcv) }),
     ];

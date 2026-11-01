@@ -494,8 +494,11 @@ try:
         if tb in (0.005, 0.05):
             shot('w03-wave-%s' % name)
 
+    # DBG:PROF? only in a build with the feature dbg-prof (else -113).
+    q('DBG:PROF?')
+    has_prof = not q('SYST:ERR?').startswith('-113')
     POLL = ['ACQ:SRAT?', 'SCOP:MEAS:FREQ?', 'SCOP:MEAS:VPP?', 'TRIG:STAT?', 'WAV:POIN?', 'WAV:FORM?',
-            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?',
+            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?'] + ['DBG:PROF?'] * has_prof + [
             # fast_scpi (device c92b605: region C, late 1 at 76800), and the
             # model / identity (calibration record 0x080C0168, slow bank:
             # cached at boot).
@@ -785,7 +788,7 @@ try:
     ib = ints(q('DBG:ISR?'))
     v = q('DBG:VIEW?')
     print('  badge exit at 2 ms/div: DBG:VIEW? %s, DBG:ISR? %s' % (v, ib[:14]))
-    check(ib[1] == 0 and v.startswith('Oscilloscope') and v.endswith(',0'), 'source badge DMM -> MCX: the Wave view closed (%s)' % v)
+    check(ib[1] == 0 and v.startswith('Oscilloscope') and v.split(',')[2:3] == ['0'], 'source badge DMM -> MCX: the Wave view closed (%s)' % v)
     check(ib[13] == ia[13] and ib[4] == ia[4] and ib[9] == ia[9] and ib[8] == ia[8],
           'badge exit at 38400: no forced stop, late entry, overrun or frame timeout (forced %d -> %d, late %d -> %d)'
           % (ia[13], ib[13], ia[4], ib[4]))

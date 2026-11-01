@@ -590,7 +590,6 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
         10 => 1,
         13 => match unit {
             "nF" => 3 - dec.min(3) as i8,
-            "mF" => 9 - dec as i8,
             _ => 6 - dec as i8,
         },
         _ => 0,
@@ -599,7 +598,7 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
+    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false, open: main.ol && mode == 11 }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -661,11 +660,13 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
         ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
+        // Open leads: "0L" with "OPEN" (continuity).
+        ("cont_ol", rd(11, ol(2, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
-        // A reading with an OL aux value only ("Overload" before its 0L).
+        // A reading with an OL aux value only ("Overflow" before its 0L).
         ("diode_aux_ol", rd(12, val(1.2034, 4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
-        ("cap_mf", rd(13, val(44.444, 3, "mF"), None, None, false), None),
+        ("cap_uf", rd(13, val(4700.0, 0, "\u{b5}F"), None, None, false), None),
         ("cap_nf", rd(13, val(4.444, 3, "nF"), None, None, false), None),
         ("cap_uf", rd(13, val(444.4, 1, "\u{b5}F"), None, None, false), None),
         ("hz_mhz", rd(14, val(9.9999, 4, "MHz"), None, Some(val(100.0, 1, "%")), false), None),
@@ -1135,6 +1136,24 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
         ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
     }
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
+/// The generator page's square preview (ui::gen_preview: x 4..243, high
+/// level at row 143, low at 258) is high in `duty` of its columns.
+fn gen_duty_check(ck: &mut Checker, duty: u16) {
+    const TRACE: u16 = 0x04A9;
+    let fb = &host::emu().fb;
+    let at = |x: usize, y: usize| fb[y * W + x] == TRACE;
+    let (mut hi, mut lo) = (0, 0);
+    for x in 5..242 {
+        hi += at(x, 143) as usize;
+        lo += at(x, 258) as usize;
+    }
+    let share = hi as f32 / (hi + lo).max(1) as f32;
+    ck.cases += 1;
+    if (share - duty as f32 / 10000.0).abs() > 0.03 {
+        ck.fail(&format!("gen-square/{duty}"), format!("preview high in {hi} of {} columns ({:.0} %), duty {} %", hi + lo, share * 100.0, duty / 100));
+    }
 }
 
 /// The bargraph's full-scale label ends with the unit as the readout and
@@ -1713,6 +1732,36 @@ fn main() {
         let mut c = m;
         c.combined = true;
         v.push(("usb-combined", c));
+        // The Bluetooth rune (#167): alone, with USB (the battery 3 px
+        // right), with USB on the charger, roll + long texts, combined.
+        let mut b = base;
+        b.bt = true;
+        v.push(("bt", b));
+        let mut bu = m;
+        bu.bt = true;
+        bu.charging = false;
+        bu.battery = 4;
+        v.push(("bt-usb", bu));
+        let mut buc = bu;
+        buc.charging = true;
+        buc.battery = 5;
+        v.push(("bt-usb-charged", buc));
+        let mut bur = r;
+        bur.bt = true;
+        v.push(("bt-usb-roll-long", bur));
+        let mut buk = bu;
+        buk.combined = true;
+        v.push(("bt-usb-combined", buk));
+        // Both link icons beside the GEN trigger badge (cyan, long level
+        // text) and the generator's frequency (#64).
+        let mut bug = bu;
+        bug.tsrc = scope::TSRC_GEN;
+        bug.trig_v = -444.4e-3;
+        bug.gen_hz = 10.0e6;
+        v.push(("bt-usb-gen", bug));
+        let mut bugc = bug;
+        bugc.combined = true;
+        v.push(("bt-usb-gen-combined", bugc));
         for (name, m) in v {
             host::reset(0);
             scope_ui::invalidate();
@@ -1723,7 +1772,38 @@ fn main() {
             // battery's top row, a free row above and below; y 20 is the
             // graph frame / meter strip) and centred in the gap 414..434
             // between the trigger badge and the battery.
-            if m.usb {
+            // The link icons' and the battery's ink columns from x 414 (#167):
+            // each alone centred in 414..434; both 2 px apart, the battery
+            // 3 px right.
+            if m.bt || m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let mut runs: Vec<(usize, usize)> = Vec::new();
+                for x in 414..480 {
+                    if (0..20).any(|y| fb[y * 480 + x] != bar) {
+                        match runs.last_mut() {
+                            Some(r) if r.1 + 1 == x => r.1 = x,
+                            _ => runs.push((x, x)),
+                        }
+                    }
+                }
+                let rows = |x0: usize, x1: usize| {
+                    let ys: Vec<usize> = (0..20).filter(|&y| (x0..=x1).any(|x| fb[y * 480 + x] != bar)).collect();
+                    (ys[0], ys[ys.len() - 1])
+                };
+                let want: &[(usize, usize)] = match (m.bt, m.usb) {
+                    (true, true) => &[(416, 422), (425, 435)],
+                    (true, false) => &[(421, 427)],
+                    _ => &[(419, 429)],
+                };
+                let bat = if m.bt && m.usb { 438 } else { 435 };
+                let ok = runs.len() > want.len() && runs[..want.len()] == *want && runs[want.len()].0 == bat
+                    && (!m.bt || rows(want[0].0, want[0].1) == (3, 15));
+                if !ok {
+                    ck.fail(&format!("scopebar/{name}/icons"), format!("ink columns from 414: {runs:?}, want {want:?} then the battery at {bat}"));
+                }
+            }
+            if m.usb && !m.bt {
                 let fb = &host::emu().fb;
                 let bar = fb[0];
                 let ink = |x0: usize, x1: usize| {
@@ -1991,7 +2071,7 @@ fn main() {
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
-                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
+                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
@@ -2167,7 +2247,7 @@ fn main() {
                     pts.remove(0);
                 }
                 pts.push(v);
-                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false };
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v.abs()), rel: None, secs: Some(i as u32), rec: false };
                 if i == 0 {
                     host::reset(0);
                 }
@@ -2481,28 +2561,30 @@ fn main() {
     }
     // Record page: every interval x duration value in the steppers (they
     // fit the 134 px between the keys), the estimate texts, Start / Stop.
-    for (k, (iv, du, free, on)) in [
-        ("Every reading", "Until stopped", "about 1193 h (limit)", false),
-        ("1 min", "24 h", "about 62 h left", true),
-        ("10 s", "10 min", "-- (disk busy)", false),
-        ("1 s", "8 h", "< 1 h left", true),
-        ("Every reading", "1 h", "-- (no disk)", false),
+    for (k, (iv, ch, du, free, on)) in [
+        ("Every reading", "1 %", "Until stopped", "about 1193 h (limit)", false),
+        ("1 min", "1 %", "24 h", "about 62 h left", true),
+        ("On change", "0.1 %", "Until stopped", "about 62 h left", false),
+        ("On change", "5 %", "24 h", "< 1 h left", true),
+        ("10 s", "1 %", "10 min", "-- (disk busy)", false),
+        ("1 s", "5 %", "8 h", "< 1 h left", true),
+        ("Every reading", "0.1 %", "1 h", "-- (no disk)", false),
         // the fast logger (fastlog.rs): its estimate texts
-        ("Fast", "Until stopped", "-- (DC/AC V or A only)", false),
-        ("Fast", "10 min", "38400/s, 119 min left", true),
-        ("Fast", "24 h", "640/s, 1234 h left", false),
+        ("Fast", "1 %", "Until stopped", "-- (DC/AC V or A only)", false),
+        ("Fast", "1 %", "10 min", "38400/s, 119 min left", true),
+        ("Fast", "1 %", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()
     {
         host::reset(0);
-        ui::record_page([iv, du], free, on);
-        ck.check_opts(&format!("record/{iv}/{du}/{free}/{on}"), &page_regions, false);
-        if k < 2 {
-            save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
+        ui::record_page([iv, ch, du], free, on);
+        ck.check_opts(&format!("record/{iv}/{ch}/{du}/{free}/{on}"), &page_regions, false);
+        if k < 3 {
+            save(&out, &format!("m12-record-{}", ["start", "stop", "change"][k]));
         }
     }
-    for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
+    for t in ui::REC_INTERVALS.iter().chain(ui::REC_CHANGES.iter()).chain(ui::REC_DURATIONS.iter()) {
         ck.cases += 1;
         let w = stockfont::text_width(stockfont::TEXT22, t, 0);
         let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
@@ -2669,6 +2751,13 @@ fn main() {
         unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
         w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
         strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    // The square preview follows the duty (#81): high for that share of
+    // each period (direct and strip draw; the strip cache keyed by it).
+    for duty in [5000u16, 2500, 10000] {
+        w.gen.apply(gen::Settings { wave: gen::Wave::Square, duty, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-square/{duty}"), || ui::gen_static(&w.gen));
+        gen_duty_check(&mut ck, duty);
     }
     w.gen.apply(gen::Settings::DEFAULT);
     strip_check(&mut ck, "strip/dmm", || {
@@ -2974,7 +3063,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 19] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -2992,6 +3081,8 @@ fn main() {
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
         ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
+        ("c24-strip-open-cont", "cont_ol", 0, 0, false, false),
+        ("c25-strip-open-diode", "diode_ol", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -3014,7 +3105,7 @@ fn main() {
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
-        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
+        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), sd: Some(0.0001), rel: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
         // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
@@ -3031,7 +3122,7 @@ fn main() {
             ("a04-acc-acv", "acv_230", 2), ("a05-acc-acmv", "acmv", 2), ("a06-acc-dca", "dca", 2),
             ("a07-acc-dcma", "dcma_420mid", 2), ("a08-acc-aca", "aca", 2), ("a09-acc-ohm", "ohm_k", 2),
             ("a10-acc-ohm-60m", "ohm_mohm", 2), ("a11-acc-cont", "cont", 2), ("a12-acc-diode", "diode", 2),
-            ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-mf", "cap_mf", 2), ("a15-acc-hz", "hz_khz", 2),
+            ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-uf", "cap_uf", 2), ("a15-acc-hz", "hz_khz", 2),
             ("a16-acc-hz-mhz", "hz_mhz", 2), ("a17-acc-temp-tc", "temp_tc", 2), ("a18-acc-temp-tc-f", "temp_tc_f", 2),
             ("a19-acc-temp-ntc-none", "temp_ntc", 2), ("a20-acc-acdc-none", "acdc_v", 2), ("a21-acc-auto-dc", "auto_dcv", 2),
             // Settings 3/3 "Negative ohm" ON, shorted leads.
@@ -3126,7 +3217,7 @@ fn main() {
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
-        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), sd: Some(9.38), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         // AUTO coupling: the DC part (DC glyph on the V button and above
@@ -3240,8 +3331,8 @@ fn main() {
             let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
             let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
-            let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
-            let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
+            let d_rec = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", false);
+            let d_recon = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", true);
             let g = &w.gen;
             let d_gen = || ui::gen_static(g);
             // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,
@@ -3478,7 +3569,7 @@ fn main() {
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm)] {
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm), ("cont_ol", "d26-dmm-open-cont", Button::ContDiode)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();
@@ -3486,7 +3577,7 @@ fn main() {
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
-            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+            let side = ui::Side { max: None, avg: None, min: None, sd: None, rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
@@ -3519,7 +3610,7 @@ fn main() {
             dv.reading(r, 0, lim);
             dv.short_sync();
             ui::status_right(&status(0));
-            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), sd: Some(r.main.v), rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             dv
         };

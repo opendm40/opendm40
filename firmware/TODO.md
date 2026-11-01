@@ -68,6 +68,15 @@ Additional requirements:
       FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ gives LIVE, as
       every ohm range does (the A-jack item above).
 
+- [ ] Scope extra channels (owner 2026-10-27: "dmm (wave) as a second channel of the scope, optional; the generator
+      as a channel too, as a trigger source, computed, not captured"): built on branch claude/friendly-gauss-8m2e3g,
+      design and device checks in [docs/scope-gen-channel.md](docs/scope-gen-channel.md).
+      - GEN: MF > Trigger > Source GEN (computed from TIM6 / DMA or TIM12 against TIM1), MF > Display > GEN trace,
+        `TRIG:SOUR GEN`. Device check 1.5 (the generator looped back to CH1); `DBG:GENTRIG:LAG` to measure.
+      - CH2: MF > Display > CH2 (DMM), the AD2 stream time-aligned by its DWT stamps; the DMM reading pauses.
+        Device check 2.4; `DBG:CH2:LAG` to measure. Not yet: a CH2 position (0 is the centre row), CH2 in roll
+        beyond 3.4 s of screen, CH2 in the CSV / WAV:DATA?, CH2 measurements, CH2 as a trigger source.
+
 ## Open, by kind (2026-10-27)
 
 One line per group of open items; quoted words are the start of an item. Open PRs (#35, #41, #44, #55, #56, #57,
@@ -86,7 +95,7 @@ One line per group of open items; quoted words are the start of an item. Open PR
 - Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
   check (2 min" (PR fix/smooth-redraw); the [strip rendering](#strip-rendering-owner-2026-10-30-branch-featstrip-render)
   "Device check (3 min" and `DBG:TE?`.
-- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
+- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-buffer and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
   offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
@@ -388,6 +397,21 @@ the scope full record.
       locations), A2 above 2 KiB ([docs/native-boot.md](docs/native-boot.md) "Region B audit #6").
 
 ## Remaining work
+
+- [ ] Capacitance gain per range (device 2026-10-30, #90, UT61E+ reference): 4.911 µF film reads 4.8208 µF
+      on 6 µF (−1.8 %) and 4.9046 µF on 60 µF (−0.1 %); 330 µF electrolytic 346.4–347.1 µF on 600 µF (UT61E+
+      351.6, OWON 358.9); 1.0462 mF electrolytic 999.5 µF on 6 mF (−4.5 %). Electrolytics alone do not set a
+      gain (dielectric absorption and the test frequency move their value), so CAP_K / the ramp constants stay.
+      Procedure (owner, `tools/capdiag.py`, one film capacitor per pair of ranges, its value from a reference
+      meter): (1) a film capacitor at ~50 % of the lower range, `capdiag.py OUT --range <lower> --secs 60`, then
+      `--range <upper>` (the ranges are fixed over SCPI, CONF:CAP <F>); (2) per range: gain = reference /
+      median; (3) the ramp ranges from the 60 µF reading of the same capacitor: e.g. a 47 µF film on 60 µF,
+      then forced 600 µF (`--range 6e-4`), the 600 µF gain = the 60 µF reading / the 600 µF median; 6 mF from a
+      ~470 µF film on 600 µF and forced 6 mF. Apply as CAP_K changes (per range), not the cal record. Open:
+      run it.
+- [x] Capacitance 6 nF and 60 nF ranges merged into one 60 nF range (owner 2026-10-30, #90): the stock rows are
+      byte-identical; r1's constants (CAP_K 1003 kΩ); 3 decimals below 6 nF. That r1's K suits < 6 nF is
+      INFERRED (r0's 1020 reads 1.7 % higher).
 
 - [x] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" was
       wrong while the trigger-level marker T was on the left edge; the marker moved to the graph's
@@ -1038,7 +1062,7 @@ the scope full record.
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
       shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
-- [ ] Device: the disk-scratch and preparation cases of docs/ram-budget.md that no run has covered.
+- [ ] Device: the disk-buffer and preparation cases of docs/ram-budget.md that no run has covered.
       1. Power off (hold the key) and DBG:RESET while the preparation erases (DBG:FLASH? prep state 1, right
          after a shot): the off / reset waits for the erase (`prep_finish`, <= 0.4 s); the next boot lists
          every file, prep reaches 2, the next shot Saved.
@@ -4438,8 +4462,8 @@ Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoot
 
 ### Strip rendering (owner 2026-10-30, branch feat/strip-render)
 
-A full page repaint is drawn in 12-row strips into `calbackup::SCRATCH` and each strip sent once
-([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-scratch-arena-calbackupscratch-12-kib)):
+A full page repaint is drawn in 12-row strips into `diskbuf::ARENA` (then `calbackup::SCRATCH`) and each strip sent once
+([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)):
 menu, settings, range page (not power / temperature), help, generator, scope page.
 - [ ] Device check (3 min, `--features mute`): menu > each tile and back, Settings pages, MF range page, the scope
       page entry. Expected: each page appears top to bottom in one pass, no widget half drawn. `DBG:PROF?` after a
