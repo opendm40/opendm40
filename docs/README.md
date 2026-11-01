@@ -7,7 +7,7 @@ All documentation of opendm40, by reader. Start at the
 
 - [User manual](manual/README.md): install and update, every feature, safety
   and alerts, connecting from a computer, backup, recovery and back to stock,
-  known limitations.
+  known limitations. In Russian: [manual/README.ru.md](manual/README.ru.md).
 - [SCPI reference](manual/scpi-reference.md): every SCPI command, over USB
   and Bluetooth.
 - [CHANGELOG.md](../CHANGELOG.md): the changes per release.
@@ -32,6 +32,8 @@ All documentation of opendm40, by reader. Start at the
   number.
 - [ram-budget.md](../firmware/docs/ram-budget.md): the RAM users and when each
   is live.
+- [ram-pools-audit.md](../firmware/docs/ram-pools-audit.md): the statics of
+  200 B and more, which can share bytes, and a static pool design.
 - [compact-log-format.md](../firmware/docs/compact-log-format.md): the DLG log
   format on the disk, CSV on read.
 - [bt-scpi.md](../firmware/docs/bt-scpi.md): SCPI over Bluetooth next to the
@@ -71,6 +73,8 @@ All documentation of opendm40, by reader. Start at the
   multimeter and scope combined view.
 - [scope-scale-ux.md](../firmware/docs/scope-scale-ux.md): the scope timebase
   and V/div by touch.
+- [scope-gen-channel.md](../firmware/docs/scope-gen-channel.md): the
+  generator as a computed scope channel (trigger source, trace) and the DMM as CH2.
 
 ### Planning
 

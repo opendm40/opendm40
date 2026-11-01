@@ -28,13 +28,48 @@ pub mod pw;
 #[path = "acdctr.rs"]
 pub mod acdctr;
 use acdctr::{self as tr, TrEnt};
+/// AC+DC methods B / C (DBG:ACDC:METH): only with the feature `acdc-meth`
+/// (Cargo.toml); without it method A (the stock alternation) is all there
+/// is and the hooks below are empty.
+#[cfg(feature = "acdc-meth")]
 #[path = "acdcm.rs"]
 pub mod am;
-#[cfg(target_os = "none")]
+#[cfg(not(feature = "acdc-meth"))]
+mod am {
+    use super::*;
+    impl Dmm {
+        #[inline(always)]
+        pub(super) fn am_on(&self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_enter(&mut self) {}
+        #[inline(always)]
+        pub(super) fn am_mode(&mut self) -> bool {
+            false
+        }
+        #[inline(always)]
+        pub(super) fn am_row(&mut self, cfg: &[u8; hy::CFG_LEN]) -> [u8; hy::CFG_LEN] {
+            *cfg
+        }
+        #[inline(always)]
+        pub(super) fn am_ref(&mut self, _: &mut Clock, _: f32, _: f32, _: u8, _: &'static str, _: f32, _: (u8, i8)) -> Option<Reading> {
+            None
+        }
+        #[inline(always)]
+        pub(super) fn poll_am(&mut self, _: &mut Clock, _: u64) -> Option<Reading> {
+            None
+        }
+    }
+}
+#[cfg(all(target_os = "none", feature = "dbg-src"))]
 #[path = "dbgsrc_dmm.rs"]
 pub mod src;
-/// DBG:SRC is firmware only: the host tests that include dmm.rs get it off.
-#[cfg(not(target_os = "none"))]
+/// DBG:SRC is firmware only (the host tests that include dmm.rs get it
+/// off) and needs the feature `dbg-src` (not default on
+/// test/scope-chain-0.4, Cargo.toml): without it DBG:SRC is an unknown
+/// header.
+#[cfg(not(all(target_os = "none", feature = "dbg-src")))]
 mod src {
     pub fn active() -> bool {
         false
@@ -67,8 +102,8 @@ const CAL: u32 = SETTINGS + 0x168;
 /// offset pairs, hwtrig's map: emu/regionc.py data watch, 2026-10-23).
 /// opendm40 never writes the record. Before the copy (and in the host tests)
 /// the flash is read.
+/// TCM .bss (CPU only; was .sram_bss until the SRAM audit, docs/native-boot.md).
 const REC_LEN: usize = 0x400;
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static REC_COPY: [core::sync::atomic::AtomicU32; REC_LEN / 4] = [const { core::sync::atomic::AtomicU32::new(0) }; REC_LEN / 4];
 static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
@@ -146,6 +181,241 @@ const CAP_DEC: [f32; 8] = [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 const CAP_WIN: [f32; 8] = [0.0008, 0.0002, 0.0001, 0.0001, 0.0001, 3.0, 30.0, 200.0];
 const CAP_K: [f32; 8] = [1020.0, 1003.0, 102.7, 10.68, 1.5, 4.06, 41.0, 400.0];
 const CAP_R21: [u8; 3] = [0xDC, 0xCC, 0xBB];
+/// Capacitance's lowest range (owner 2026-10-30): the stock's 6 nF (r0)
+/// and 60 nF (r1) rows are byte-identical (CFG, the same RC oscillator);
+/// they differ only in CAP_K (1020 / 1003 kohm), CAP_WIN and the per-range
+/// cal gain (0x170 / 0x174, equal on the dumped unit: 1.0183). One "60 nF"
+/// range on r1's constants, with 3 decimals below 6 nF (`cap_val`) as r0
+/// had. That r1's K is the better one for small C is INFERRED (r0's is 1.7 %
+/// higher, so a < 6 nF reading is 1.7 % lower than the stock's r0 value).
+const CAP_R_MIN: i8 = 1;
+/// Ramp ranges: a poll's |dV| below this (mV) is no ramp (poll_cap, #74).
+const CAP_DV_MIN: f32 = 0.05;
+/// Polls without a ramp (255 ms each) before poll_cap decides open / short.
+const CAP_IDLE_N: u8 = 5;
+/// No ramp with the node below this (mV, after the discharge): a short.
+const CAP_SHORT_MV: f32 = 30.0;
+/// Ramp ranges: slope samples over the range in a row before one range up
+/// (`poll_cap`).
+const CAP_EARLY_N: usize = 2;
+/// A slope sample counts towards a step up only within this share of the
+/// one before (the absorption's falling early slope does not).
+const CAP_STEADY: f32 = 0.02;
+/// Polls over the range (running median) after which one step up comes
+/// regardless of the slope's steadiness (~2 s).
+const CAP_OVER_MAX: u8 = 8;
+/// Ramp ranges: one poll's own slope over this share of the range steps up
+/// at once, steady or not (owner 2026-10-30: the absorption kept the
+/// slope unsteady, ~1 mF waited CAP_OVER_MAX polls on 600 uF).
+const CAP_JUMP: f32 = 1.5;
+/// Only on 600 uF (device 6f3f0b79, ~1 mF charged: one noisy 6 mF poll
+/// read > 9 mF and hopped to 60 mF and back, the first final 10 s later),
+/// and from its `cap_jumpn`-th ramp poll on (default 0: from the first;
+/// the no-final-value runs a wait of 4 was for came from the narrow
+/// comparator swing, `CAP_WIDEN`, device 19b6e3b7).
+/// DBG:CAP:JUMPN sets it (RAM only).
+static CAP_JUMPN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+pub fn cap_jumpn() -> u32 {
+    CAP_JUMPN.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_jumpn(n: u32) {
+    CAP_JUMPN.store(n.min(255), core::sync::atomic::Ordering::Relaxed);
+}
+/// The step's target: the smallest range whose 0.9 x full scale holds the
+/// slope's C over this (the absorption reads an electrolytic high right
+/// after the discharge: device 832f89a4, ~1 mF read 1.5 mF and more;
+/// the emulator's capda 0.6 model up to 2.5x), at least one range up.
+const CAP_JUMP_DA: f32 = 2.5;
+/// Ramp range steps without a value after which AUTO goes to 60 nF.
+const CAP_HOPS_MAX: u8 = 4;
+/// Ramp ranges: the most polls kept for the first value (two half ramps).
+const CAP_HALF_MAX: usize = 32;
+/// Ramp ranges: the polls whose median is the value (`poll_cap`).
+const CAP_RING: usize = 6;
+/// Ramp ranges: polls of one long ramp after which the value is final
+/// without the directions' ratio.
+const CAP_NORATIO_N: usize = 24;
+/// The ramp comparator class (R21 threshold) for accuracy: 2. Device
+/// cc1728f4, ~1 mF, 25 s each: class 1 (the smallest swing) 992.5 uF sigma
+/// 0.38 %, class 2 998.0 / 0.36 %, class 3 999.9 / 0.32 %, the stock's
+/// choice 994.0 / 0.58 %; class 2 turns more often than 3 (the stock
+/// picks 3 for ~1 mF on 6 mF: a turn every 3 s). DBG:CAP:CLASS: 0 adaptive
+/// (CAP_CLASS_FAST, then this), 1..3 fixed, 4 the stock's choice from the slope. RAM only.
+pub const CAP_CLASS_AUTO: u8 = 2;
+/// Adaptive (DBG:CAP:CLASS 0): every new range / capacitor starts with
+/// this class (was 1 for a fast first value; the 50 ms fits want half
+/// ramps of 5 samples and more: class 1 swung 11 .. 15 mV on the device).
+pub const CAP_CLASS_FAST: u8 = 2;
+const CAP_AGREE_N: u8 = 4;
+/// Ramp ranges: the AD1 samples of one half ramp (every 50 ms; the ramp
+/// rows convert every 50 ms) for a line fit (`CapSeg`).
+const CAP_SEG_MAX: usize = 48;
+/// The samples after a turn left out of the next fit (device a3aabc98,
+/// ~1 mF on 6 mF: the slope ~4 % steeper in the first poll after a turn,
+/// the half ramps' fits read 955 .. 981 uF where the polls read ~990).
+const CAP_SEG_SKIP: u8 = 3;
+/// The ramp's poll period: under the 50 ms conversion, so each sample is
+/// read as it comes (`ad1` waits for it), its time the read's (at 50 ms
+/// the read drifted against the conversions, the fits read ~1.5 % low on
+/// the device, a3aabc98).
+const CAP_SEG_MS: u64 = 35;
+/// The samples at a ramp's start left out (device, 1 mF after the
+/// discharge: the first half ramp read 1026 uF, the next ones ~981; the
+/// absorption's recovery, INFERRED).
+const CAP_SEG_SKIP0: u8 = 8;
+/// The fewest samples for a fit.
+const CAP_SEG_MIN: usize = 5;
+/// A turn: the ramp back from its last extreme by this much.
+const CAP_SEG_HYST_MV: f32 = 1.0;
+/// Final: two pair values in a row within CAP_SEG_AGREE, or the last up
+/// and down half ramps within CAP_SEG_DU.
+const CAP_SEG_AGREE: f32 = 0.01;
+const CAP_SEG_DU: f32 = 0.05;
+/// Ramp ranges: a comparator frequency (kHz) over this is a half ramp of
+/// under ~6 samples (device, class 2: 1 mF on 6 mF 0.5 Hz, 5 uF 50 Hz).
+const CAP_FAST_KHZ: f32 = 0.0015;
+/// The 255 ms poll's rules run when this long has passed since the last.
+const CAP_POLL_MS: u64 = 230;
+/// The discharge's line fit is final from CAP_DIS_FIN_MS on, once it moved
+/// less than CAP_DIS_FIN_AGREE in CAP_DIS_FIN_STEP_MS (device, ~1 mF from
+/// 3 V: 1069 uF at 0.4 s, 1031 .. 1020 from 0.6 s).
+const CAP_DIS_FIN_MS: u64 = 400;
+const CAP_DIS_FIN_STEP_MS: u64 = 200;
+const CAP_DIS_FIN_AGREE: f32 = 0.015;
+/// Ramp ranges: a full ring (CAP_RING polls, both directions) whose middle
+/// four are within this share of its median is final without the
+/// directions' ratio (one poll each side may be off: device, ~1 mF on 6 mF,
+/// dV 10.27 .. 10.76 mV per poll).
+const CAP_RING_AGREE: f32 = 0.02;
+/// Ramp ranges: a poll whose dV is under this share of the full-poll dV
+/// (`cap_dv_ref`) holds a comparator turn (a part of the poll each way;
+/// device 19b6e3b7, ~1 mF on 6 mF: 1 .. 5 mV among 10.5, often in the poll
+/// after the one where the comparator bit turned): left out of the value,
+/// the slope median and the range steps.
+const CAP_PART: f32 = 0.7;
+/// Adaptive class: a full-poll dV of this share of the ramp's swing (V
+/// between the last two turns) or more: the next wider class at once (the
+/// same device run: class 1 turned between -20 and -35 mV, every 1 .. 2
+/// polls, no final value in 14 s; ~60 mV wide on a clean start).
+const CAP_WIDEN: f32 = 0.5;
+/// The polls whose dV `cap_dv_ref` looks at.
+const CAP_DVH: usize = 6;
+/// The direction ratios stay within 1 +- this.
+const CAP_RATIO_MAX: f32 = 0.03;
+pub const CAP_CLASS_STOCK: u8 = 4;
+static CAP_CLASS: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+pub fn cap_class() -> u8 {
+    CAP_CLASS.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_class(k: u8) {
+    CAP_CLASS.store(k.min(4), core::sync::atomic::Ordering::Relaxed);
+}
+/// The discharge current (uA) for the estimate from the discharge slope:
+/// INFERRED from one capacitor (device c4aea8d0 / 1cba8507, ~0.996 mF:
+/// 0.376 V/s over 240 points at 25 ms, 0.381 .. 0.386 at 255 ms);
+/// DBG:CAP:IDIS sets it (RAM only).
+static CAP_IDIS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(375);
+pub fn cap_idis() -> u32 {
+    CAP_IDIS.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_idis(ua: u32) {
+    CAP_IDIS.store(ua.clamp(1, 100_000), core::sync::atomic::Ordering::Relaxed);
+}
+/// The discharge's poll period (ms; the row's AD1 converts every 25 ms,
+/// R22 0x13; 50 for an earlier grey value than 255) and the node voltage
+/// that ends it (mV): DBG:CAP:DISMS / DBG:CAP:DISEND (RAM only).
+static CAP_DIS_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(50);
+static CAP_DIS_END: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(30);
+pub fn cap_dis_ms() -> u32 {
+    CAP_DIS_MS.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_dis_ms(ms: u32) {
+    CAP_DIS_MS.store(ms.clamp(25, 1000), core::sync::atomic::Ordering::Relaxed);
+}
+pub fn cap_dis_end() -> u32 {
+    CAP_DIS_END.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_dis_end(mv: u32) {
+    CAP_DIS_END.store(mv.clamp(1, 1300), core::sync::atomic::Ordering::Relaxed);
+}
+/// The discharge (owner 2026-10-30: discharge faster): DBG:CAP:DISMODE 0
+/// the stock row (constant current, OP3 servo, SMODE 1110, SFUVR 2 = VDS15
+/// / VDS3), 1 (default) the same row with OP3's reference SFUVR =
+/// DBG:CAP:DISREF (3..6: AGNDP9..6 / AGNDN9..6 per the datasheet table;
+/// the current per step in CAP_IDIS_REF). Mode 1 only for a charged
+/// capacitor (the node at the AD1 clamp) whose voltage, read on the DC V
+/// 60 V row, is within CAP_DIS_SAFE_V; back to 0 when the node rises or
+/// after CAP_DIS_EXP_MS. (SMODE 0001, SGND, did not discharge: device
+/// 138d145f, 1.2016 -> 1.1977 V in 5 s.) RAM only.
+static CAP_DISMODE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
+static CAP_DISREF: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(3);
+pub fn cap_dismode() -> u32 {
+    CAP_DISMODE.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_dismode(m: u32) {
+    CAP_DISMODE.store(m.min(1), core::sync::atomic::Ordering::Relaxed);
+}
+pub fn cap_disref() -> u32 {
+    CAP_DISREF.load(core::sync::atomic::Ordering::Relaxed)
+}
+pub fn set_cap_disref(k: u32) {
+    CAP_DISREF.store(k.clamp(2, 6), core::sync::atomic::Ordering::Relaxed);
+}
+const CAP_DIS_SAFE_V: f32 = 5.0;
+const CAP_DIS_EXP_MS: u64 = 60_000;
+/// The discharge also ends when the node, below CAP_STALL_MV, falls less
+/// than CAP_STALL_DV_MV in CAP_STALL_MS (device 138d145f: flat at 33.6 ..
+/// 34.0 mV for many seconds, above the 30 mV end; the discharge servo's
+/// comparator window edge, INFERRED; 60 mF falls ~6 mV/s at 0.38 mA), or
+/// after CAP_DIS_MAX_MS in all.
+const CAP_STALL_MV: f32 = 150.0;
+const CAP_STALL_DV_MV: f32 = 2.0;
+const CAP_STALL_MS: u64 = 1000;
+const CAP_DIS_MAX_MS: u64 = 300_000;
+/// Mode 1's discharge current (uA) per DISREF 2..6, from the slope on ~1 mF
+/// (device 138d145f, one unit, from 3.19 V: 0.38 / 0.72 / 0.88 / 0.95 /
+/// ~1.05 mA; not in the order of the datasheet's AGNDP levels). DISREF 3
+/// set to 0.685 mA (device 4c31e6da+, the owner's capacitor from 3.07 V:
+/// the discharge's fit read 1028 .. 1048 uF at 0.72 for 982 from the
+/// ramp; INFERRED, one unit, one capacitor).
+const CAP_IDIS_REF: [f32; 5] = [380.0, 685.0, 880.0, 950.0, 1050.0];
+/// The slope estimate: its first sample at or above CAP_DIS_ANCHOR_MV, and
+/// at least CAP_DIS_SPAN_MV below it (device 138d145f: 912 uF for ~1 mF
+/// from a few tens of mV after DC V).
+const CAP_DIS_ANCHOR_MV: f32 = 200.0;
+const CAP_DIS_SPAN_MV: f32 = 100.0;
+/// After a charged capacitor's discharge the first final value waits for
+/// two ramp results in a row within this fraction (device 138d145f, ~1 mF
+/// from 3 V: finals 1191 / 942 / 1054 / 935 uF over 4 s; dielectric
+/// absorption, INFERRED).
+const CAP_CHG_AGREE: f32 = 0.03;
+/// The discharge samples used for the slope: below the AD1 clamp (1.2 V at
+/// the node) and above the end of the discharge.
+const CAP_DIS_HI_MV: f32 = 1150.0;
+/// The discharge's estimate counts for the range and the grey value from
+/// this baseline on (device 1bc12c03, ~1 mF: 1131 / 1042 uF over the first
+/// 0.1 / 0.2 s, then 987 .. 1019).
+const CAP_DIS_BASE_MS: u64 = 200;
+/// Before the first final value the ramp's grey value replaces the
+/// discharge's only within this fraction of it (device 1bc12c03, ~1 mF
+/// from 3 V: discharge 987 .. 1019 uF, then the ramp's first halves 1219 ..
+/// 931 uF).
+const CAP_DIS_AGREE: f32 = 0.1;
+const CAP_DIS_LO_MV: f32 = 60.0;
+/// The discharge's aux units (ui.rs draws them as a line, not a value).
+pub const CAP_DIS_UNIT: &str = "Vdis";
+pub const CAP_CHG_UNIT: &str = "Vchg";
+/// Ramp ranges: polls of one ramp direction that make a result.
+const CAP_LONG_N: usize = 16;
+/// 6 / 60 mF: a ramp result this far (share) from the shown value starts
+/// the range choice again from 600 uF (another capacitor on the leads).
+const CAP_SWAP: f32 = 0.3;
+/// r5 (600 uF) steps down to r4 below this share of its range.
+const CAP_R5_DOWN: f32 = 0.07;
+/// The oscillator ranges step down below this share of their range (to
+/// the range whose 0.9 x full scale holds the value: then above 0.09, no
+/// step back).
+const CAP_OSC_DOWN: f32 = 0.08;
 const FREQ_DEC: [f32; 7] = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0];
 const ACV_WIN: [f32; 4] = [0.002, 0.01, 0.1, 1.0];
 const ACMV_WIN: [f32; 2] = [0.01, 0.1];
@@ -685,6 +955,11 @@ pub const OHM_ISC: [[Option<f32>; 2]; 7] = [
 /// through RLD, not an Rref; 0.756 mA measured on one unit (VDS15 tap, the
 /// MR9270S+ mA input into the jacks; device-check "RLD current-source path").
 pub const DIODE_I: f32 = 0.756e-3;
+/// Continuity test current (A), signed against diode's: -0.260 mA measured
+/// on one unit (MR9271S mA input into V/ohm - COM, 2026-10-30; diode read
+/// +0.753 mA, ohm 600 +0.868 mA the same way): its source drives the other
+/// way.
+pub const CONT_I: f32 = -0.260e-3;
 
 /// Ohm test current (A) of range `r` and variant `var` (Dmm::ohm_var):
 /// OHM_ISC, the most the range drives through the probes (with R between
@@ -697,12 +972,12 @@ pub fn ohm_test_current(r: i8, var: u8) -> Option<f32> {
 }
 
 /// Test current (A) the DMM page shows for `mode` (10 ohm: per range and
-/// variant, `ohm_test_current`; 12 diode: DIODE_I), None elsewhere.
-/// Continuity (11) has none: its row's source tap (R31 0xcd) is neither
-/// ohm variant's and no current for it is known.
+/// variant, `ohm_test_current`; 11 continuity: CONT_I; 12 diode: DIODE_I),
+/// None elsewhere.
 pub fn test_current(mode: u8, r: i8, var: u8) -> Option<f32> {
     match mode {
         10 => ohm_test_current(r, var),
+        11 => Some(CONT_I),
         12 => Some(DIODE_I),
         _ => None,
     }
@@ -1289,6 +1564,40 @@ pub(crate) fn ctr_valid(ctb: u32, cta: u32) -> bool {
 
 /// Restart the HY3131 counter on source `src` (R20 without ENCTR): ENCTR
 /// off, the gate preset CTA = 0xfc0000 (0x40000 SYSCLK = 53.3 ms), ENCTR on.
+/// The ramp rows' counter from CTA 0: a 3.4 s gate (`ctr_restart`'s
+/// 0xFC0000 stops it after 262 144 ticks, 53 ms; device bc205357+).
+/// The ramp comparator's rate (`Dmm::cap_ctr`): `acc` the periods (CTB) and
+/// 4.9 MHz ticks (CTA) of the earlier counter windows on this row and class,
+/// `ctb` / `cta` the running window's. Returns the sums to keep when the
+/// window ends (CTA over 8e6, ~1.6 s: the caller restarts the counter), that
+/// end, the rate (kHz) and the periods. Sums over 2^30 ticks (~218 s) are
+/// halved first: a steady capacitor's sums kept growing and the tick sum
+/// wrapped after ~874 s, which read as a ramp too fast for the range.
+fn cap_ctr_rate(acc: (u32, u32), ctb: u32, cta: u32) -> ((u32, u32), bool, f32, u32) {
+    let (mut ab, mut an) = acc;
+    let tb = ab + ctb;
+    let khz = match an as u64 + cta as u64 {
+        0 => 0.0,
+        tn => tb as f32 / tn as f32 * 4915.28,
+    };
+    let restart = cta > 8_000_000;
+    if restart {
+        if an > 1 << 30 {
+            ab /= 2;
+            an /= 2;
+        }
+        ab += ctb;
+        an += cta;
+    }
+    ((ab, an), restart, khz, tb)
+}
+
+fn cap_ctr_restart() {
+    hy::write(0x20, &[0x50]);
+    hy::write(0x1B, &[0x00, 0x00, 0x00]);
+    hy::write(0x20, &[0x52]);
+}
+
 fn ctr_restart(src: u8) {
     hy::write(0x20, &[src & !2]);
     hy::write(0x1B, &[0x00, 0x00, 0xFC]);
@@ -1482,11 +1791,128 @@ pub struct Dmm {
     cap_cnt_up: u8,
     cap_cnt_dn: u8,
     cap_cnt_small: u8,
+    /// Ramp ranges: polls in a row without a ramp (`CAP_DV_MIN`).
+    cap_idle: u8,
+    /// Ramp ranges, before a range's first value: slope samples over the
+    /// range in a row, and the last candidate value (uF; `poll_cap`).
+    cap_over: u8,
+    cap_cand: f32,
+    cap_prev_raw: f32,
+    cap_over_n: u8,
+    cap_under: u8,
+    /// The last 3 polls' own slope C (uF) and the polls of this range.
+    cap_inst: [f32; 3],
+    cap_inst_n: u8,
+    /// The last ramp result of this range per direction (down, up).
+    cap_pair: [Option<f32>; 2],
+    /// The last CAP_RING polls' own slope C (uF), their directions (bit i
+    /// = up), the polls so far; the direction ratios (down, up) and
+    /// whether a pair set them; the discharge's start (ms).
+    cap_ring: [f32; CAP_RING],
+    cap_ring_up: u8,
+    cap_ring_n: u8,
+    cap_ratio: [f32; 2],
+    cap_ratio_ok: bool,
+    cap_dis_t: u64,
+    /// Ramp range steps before a value (`CAP_HOPS_MAX`).
+    cap_hops: u8,
+    /// Final values in a row within 2 %, and the switch to class 2 done.
+    cap_agree: u8,
+    cap_cls2: bool,
+    /// Adaptive class: the narrowest one allowed (`CAP_WIDEN`; 0 any).
+    cap_cls_min: u8,
+    /// The last CAP_DVH polls' dV on this row (`cap_dv_ref`).
+    cap_dvh: [f32; CAP_DVH],
+    cap_dvh_n: u8,
+    /// The ramp V's highest / lowest in this half ramp and the one before
+    /// (from the comparator turns), the half ramps seen (0 .. 2).
+    cap_vext: [f32; 4],
+    cap_vext_n: u8,
+    /// Comparator turns seen during the polls without a ramp.
+    cap_idle_flips: u8,
+    /// The polls (own slope C) of the last two half ramps, their
+    /// directions (bit i = up), how many, how many of them the earlier
+    /// half's; the first value from them (`poll_cap`, 0 = none yet).
+    cap_half: [f32; CAP_HALF_MAX],
+    cap_half_up: u32,
+    cap_half_n: u8,
+    cap_half_prev: u8,
+    cap_first_v: f32,
+    /// Same-range restarts for another capacitor (DBG:CAP? field 17).
+    cap_swaps: u8,
+    /// The discharge's first sample in the slope window (mV, 0 = none) and
+    /// its time (ms).
+    cap_dis_pv: f32,
+    cap_dis_pt: u64,
+    /// The discharge's estimate (uF, 0 = none) over >= CAP_DIS_BASE_MS:
+    /// the range at the discharge's end and the grey value until the
+    /// ramp's own agrees (`poll_cap_in`); cleared at the first final value.
+    cap_dis_c: f32,
+    /// The last grey value shown (uF, 0 = none), shown instead of dashes
+    /// until a final value (`poll_cap`).
+    cap_grey: f32,
+    /// The next ramp poll is the first after a row write (its dV spans
+    /// the switch): no slope sample from it.
+    cap_row_new: bool,
+    /// Discharge experiment: the node voltage read in progress (DC V row,
+    /// conversions seen), the mode in force, the node voltage read (V,
+    /// NaN = none), the last node sample (mV), the times it fell back to 0.
+    cap_pre: bool,
+    cap_pre_n: u8,
+    /// The last DC V read before the discharge (two must agree).
+    cap_pre_v: f32,
+    /// The 50 ms ramp samples' fit (`CapSeg`).
+    cap_seg: &'static mut CapSeg,
+    /// The discharge's estimate is the final value (until the ramp's), its
+    /// estimate over CAP_DIS_FIN_MS.
+    cap_dis_fin: bool,
+    /// The discharge samples' line fit from the anchor: n, sum t, sum V,
+    /// sum t^2, sum t V (t in ms from the anchor).
+    cap_dis_ls: [f32; 5],
+    /// A final value from the 50 ms fits on this range: the poll's ring no
+    /// longer sets the value.
+    cap_seg_ok: bool,
+    /// The ramp's comparator periods (CTB) and SYSCLK ticks (CTA) summed
+    /// over the counter's restarts on this row and class.
+    cap_ct_b: u32,
+    cap_ct_n: u32,
+    /// A manual ramp range measured on a lower row (the ramp too fast for
+    /// its 50 ms samples): the range shown (`range`, `cap_val`).
+    cap_disp: Option<i8>,
+    cap_dis_e1: f32,
+    cap_dis_et: u64,
+    cap_dis_on: u8,
+    cap_dis_v0: f32,
+    cap_dis_last: f32,
+    cap_dis_abort: u8,
+    /// This discharge: the voltage read done, samples in a row below
+    /// cap_dis_end, the node seen at the clamp (charged), the last ramp
+    /// result while waiting for two to agree (`CAP_CHG_AGREE`).
+    cap_pre_done: bool,
+    cap_dis_low: u8,
+    cap_dis_chg: bool,
+    cap_chg_prev: f32,
+    /// The stall check's reference sample (mV) and its time (ms, 0 = none).
+    cap_stall_v: f32,
+    cap_stall_t: u64,
+    /// The discharge ended on a flat node (`CAP_STALL_MV`): a resistive
+    /// load; no ramp then counts as a short (`poll_cap_in`).
+    cap_dis_res: bool,
+    /// The range of the last capacitance value: AUTO starts there when it
+    /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
+    /// steps before 600 uF).
+    cap_last: i8,
+    /// DBG:CAP? (`cap_info`): the last poll's V (mV), dV (mV), dt (ms),
+    /// median dV, per-poll C (uF), oscillator C (uF).
+    cap_dbg: [f32; 6],
     ramp: CapRamp,
     beep_class: u8,
     beep_e: u8,
     beep_next: u64,
     beep_n: u8,
+    /// The beeper's condition (`beeping`): continuity, CTSTA ACPO as last
+    /// read; diode, the pattern's last on / off (`diode_beep`).
+    beep_on: bool,
     t_phase: u8,
     t_code_a: i32,
     t_cj: f32,
@@ -1606,7 +2032,8 @@ pub struct Dmm {
     fuse_res: sentinel::FuseRes,
     /// Power meter state and settings (powermeter.rs).
     pub pw: &'static mut Pw,
-    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only).
+    /// AC+DC method (acdcm.rs; DBG:ACDC:METH, RAM only; feature `acdc-meth`).
+    #[cfg(feature = "acdc-meth")]
     pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
@@ -2106,6 +2533,66 @@ impl Dmm {
             cap_cnt_up: 0,
             cap_cnt_dn: 0,
             cap_cnt_small: 0,
+            cap_idle: 0,
+            cap_over: 0,
+            cap_cand: 0.0,
+            cap_prev_raw: 0.0,
+            cap_over_n: 0,
+            cap_under: 0,
+            cap_inst: [0.0; 3],
+            cap_inst_n: 0,
+            cap_pair: [None; 2],
+            cap_ring: [0.0; CAP_RING],
+            cap_ring_up: 0,
+            cap_ring_n: 0,
+            cap_ratio: [1.0; 2],
+            cap_ratio_ok: false,
+            cap_dis_t: 0,
+            cap_hops: 0,
+            cap_agree: 0,
+            cap_cls2: false,
+            cap_cls_min: 0,
+            cap_dvh: [0.0; CAP_DVH],
+            cap_dvh_n: 0,
+            cap_vext: [0.0; 4],
+            cap_vext_n: 0,
+            cap_idle_flips: 0,
+            cap_swaps: 0,
+            cap_dis_pv: 0.0,
+            cap_dis_pt: 0,
+            cap_dis_c: 0.0,
+            cap_grey: 0.0,
+            cap_row_new: false,
+            cap_pre: false,
+            cap_pre_n: 0,
+            cap_pre_v: 0.0,
+            cap_seg: cap_seg_static(),
+            cap_dis_fin: false,
+            cap_dis_ls: [0.0; 5],
+            cap_seg_ok: false,
+            cap_ct_b: 0,
+            cap_ct_n: 0,
+            cap_disp: None,
+            cap_dis_e1: 0.0,
+            cap_dis_et: 0,
+            cap_dis_on: 0,
+            cap_dis_v0: f32::NAN,
+            cap_dis_last: 0.0,
+            cap_dis_abort: 0,
+            cap_pre_done: false,
+            cap_dis_low: 0,
+            cap_dis_chg: false,
+            cap_chg_prev: 0.0,
+            cap_stall_v: 0.0,
+            cap_stall_t: 0,
+            cap_dis_res: false,
+            cap_half: [0.0; CAP_HALF_MAX],
+            cap_half_up: 0,
+            cap_half_n: 0,
+            cap_half_prev: 0,
+            cap_first_v: 0.0,
+            cap_last: CAP_R_MIN,
+            cap_dbg: [0.0; 6],
             ramp: CapRamp {
                 discharging: false,
                 prev_v: 0.0,
@@ -2122,6 +2609,7 @@ impl Dmm {
             beep_e: 0,
             beep_next: 0,
             beep_n: 0,
+            beep_on: false,
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
@@ -2179,6 +2667,7 @@ impl Dmm {
             fuse_job: None,
             fuse_res: sentinel::FuseRes::Idle,
             pw: pw::pw_static(),
+            #[cfg(feature = "acdc-meth")]
             am: am::am_static(),
             tr: tr::tr_static(),
             burden_show: false,
@@ -2207,7 +2696,7 @@ impl Dmm {
         self.mode
     }
     pub fn range(&self) -> i8 {
-        self.range
+        self.cap_disp.unwrap_or(self.range)
     }
     /// The frequency counter's range (60 Hz .. 60 MHz, `freq_range_for`).
     pub fn counter_range(&self) -> u8 {
@@ -2315,6 +2804,8 @@ impl Dmm {
     /// intervals across a function / range / rate change or a dropped
     /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
+        // Capacitance ramp ranges: a new value every poll (cc1728f4), so
+        // the measured interval is the rate.
         self.period_ms as u32
     }
 
@@ -2388,6 +2879,27 @@ impl Dmm {
     /// FAST's offset refreshes this session: (used, rejected, VOS in codes
     /// on the current path, AD1 conversion period in ms: EMA over every
     /// conversion, dropped ones included) (DBG:FAST?).
+    /// DBG:CAP?: range, manual, phase (0 oscillator, 1 discharge, 2 ramp),
+    /// oscillator frequency (EMA), shown C (uF), the last poll's V, dV, dt,
+    /// median dV, per-poll C, oscillator C (`cap_dbg`), ramp class, samples,
+    /// comparator, polls without a ramp, up count, no final value yet (1),
+    /// same-range restarts (`cap_swaps`), the discharge experiment's mode
+    /// in force, its node voltage read (V), the discharge's estimate (uF),
+    /// the experiment's fall-backs to mode 0.
+    #[cfg_attr(target_os = "none", link_section = ".cold")]
+    pub fn cap_info(&self) -> [f32; 22] {
+        let r = &self.ramp;
+        let ph = if self.range < 5 { 0.0 } else if r.discharging { 1.0 } else { 2.0 };
+        let d = &self.cap_dbg;
+        [
+            self.range as f32, self.manual as u8 as f32, ph, self.f_cap, self.cap_c,
+            d[0], d[1], d[2], d[3], d[4], d[5],
+            r.class as f32, r.n as f32, r.cmp.map_or(-1.0, |c| c as u8 as f32), self.cap_idle as f32,
+            self.cap_cnt_up as f32, if self.ramp.first { 1.0 } else { 0.0 }, self.cap_swaps as f32,
+            self.cap_dis_on as f32, if self.cap_dis_v0.is_nan() { 9.91e37 } else { self.cap_dis_v0 }, self.cap_dis_c, self.cap_dis_abort as f32,
+        ]
+    }
+
     pub fn fast_info(&self) -> (u32, u32, f32, f32) {
         (self.fast.used, self.fast.rejected, self.fast.vos(), self.conv_ms)
     }
@@ -2545,7 +3057,7 @@ impl Dmm {
         self.r29 = row[9];
         self.r21 = (row[1], cfg[1]);
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             let h = tr::hash16(&row);
             self.tr_ev(clk.now_ms(), tr::K_ROW, h as i32, self.dc_val, 0);
         }
@@ -2635,6 +3147,7 @@ impl Dmm {
     /// AC+DC diagnostic: the last AC phases (oldest first) and the number of
     /// AC phases started so far. The entry for the running phase may hold
     /// fewer than its 4 (V) / 3 (mV, A) results.
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag(&self) -> (u32, [AcPhaseDiag; ACDC_DIAG_N]) {
         let mut d = [AcPhaseDiag::EMPTY; ACDC_DIAG_N];
         let n = (self.diag_k as usize).min(ACDC_DIAG_N);
@@ -2652,6 +3165,7 @@ impl Dmm {
     /// logs every 4 results as one entry. Returns the length used; the
     /// oldest phases are left out when `buf` is too small.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-acdc"), allow(dead_code))]
     pub fn acdc_diag_text(&self, buf: &mut [u8]) -> usize {
         fn put(buf: &mut [u8], at: &mut usize, b: &[u8]) -> bool {
             let ok = *at + b.len() <= buf.len();
@@ -2699,6 +3213,7 @@ impl Dmm {
     }
 
     fn set(&mut self, clk: &mut Clock, mode: u8, range: i8, settle: u64) {
+        self.cap_disp = None;
         let changed_mode = mode != self.mode || self.pw.on;
         let old = (self.mode, self.range);
         // The R22 (AD1 OSR) the chip runs now (R22_DROP).
@@ -2973,6 +3488,7 @@ impl Dmm {
         self.cap_c = 0.0;
         self.ohm_settled = false;
         self.beep_class = 4;
+        self.beep_on = false;
         self.t_phase = 0;
         self.t_votes = 0;
         // No value before a counter result past the settle: NaN, drawn "--"
@@ -3064,7 +3580,7 @@ impl Dmm {
             13 => match r {
                 0..=2 => (3 - r, "nF"),
                 3..=5 => ((6 - r).min(3), "\u{b5}F"),
-                _ => ((9 - r.min(7)).min(3), "mF"),
+                _ => (0, "\u{b5}F"),
             },
             14 => {
                 let v = freq_val(0.0, self.freq.range, false);
@@ -3177,12 +3693,22 @@ impl Dmm {
             10 => (6, OHM_ENTRY_MS),
             11 => (0, 200),
             12 => (0, 100),
-            13 => (0, 200),
+            13 => (if self.cap_last >= 5 { self.cap_last } else { CAP_R_MIN }, 200),
             14 => (0, 1000),
             15 => (self.t_range0(), 500),
             _ => (0, ENTRY_MS),
         };
         self.set(clk, mode.min(15), r, settle);
+        self.cap_hops = 0;
+        // No grey value or discharge estimate from an earlier visit.
+        self.cap_grey = 0.0;
+        self.cap_dis_c = 0.0;
+        if mode == 13 && r >= 5 {
+            // Back to the last value's ramp range: discharge first, as a
+            // step up from 60 uF does.
+            self.ramp.discharging = true;
+            self.cap_set_range(clk, r);
+        }
     }
 
     // ------------------------------------------------------ temperature API
@@ -3722,6 +4248,21 @@ impl Dmm {
                     self.set(clk, 10, OHM_AUTO_TOP, 150);
                 }
             }
+            (Button::Cap, None) => {
+                self.manual = false;
+                self.cap_disp = None;
+            }
+            (Button::Cap, Some(i)) if i <= 7 => {
+                let i = (i as i8).max(CAP_R_MIN);
+                self.manual = true;
+                // A manual range measured on a lower row (`cap_disp`): the
+                // new choice is the range shown (owner 2026-10-31: the MF
+                // page kept "6000uF" highlighted after another choice).
+                let sub = self.cap_disp.take().is_some();
+                if self.mode == 13 && (self.range != i || sub) {
+                    self.cap_set_range(clk, i);
+                }
+            }
             // 7: the experimental 600 Mohm (`OHM600`), only by this choice.
             (Button::Ohm, Some(i)) if i <= OHM600 as u8 => {
                 self.manual = true;
@@ -3941,6 +4482,7 @@ impl Dmm {
     /// relay PA state (0 V/A, 1 the ohm network, 255 unknown), the mode,
     /// the range and `a_blind`.
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     pub fn reg_text(&self, buf: &mut [u8; 72]) -> usize {
         let mut b = [0u8; 24];
         hy::read(0x20, &mut b);
@@ -4060,6 +4602,7 @@ impl Dmm {
         if self.suspended || self.watchdog(clk, now) {
             return None;
         }
+        hy::beeper_sync(); // a volume change while in continuity
         self.diode_beep(now);
         // AC+DC: the stock runs the frequency counter at the top of the ACV /
         // DCV / DCmV / DCA cases, before its settle check (ACDC_FREQ_RESTART;
@@ -4078,6 +4621,15 @@ impl Dmm {
         // temperature phases), so the probe windows keep their 100 ms.
         if !self.pw.on && (self.probe || self.sent.kind == Kind::CmpA) {
             self.aprot_poll(clk, now);
+        }
+        if self.mode == 11 && self.jwin == 0 && !self.pw.on && !hy::streaming() && !self.sent.blanked(now) {
+            // The continuity beeper's comparator: CTSTA bit 6 (ACPO) is
+            // the latch whose buffered copy CMPO drives the CMP pin
+            // (datasheet, comparator section), also while ENPCMPO is off
+            // (volume 0 %, `mute`). Every poll (5 ms), also through the
+            // entry settle (the beeper sounds from the row write on; not
+            // in the relay pulse's blank): `beeping`.
+            self.beep_on = hy::read1(0x14) & 0x40 != 0;
         }
         if now < self.deadline {
             // AC+DC: the comparator watches through the phase settles too
@@ -4265,7 +4817,9 @@ impl Dmm {
     fn reading(&self, main: Val, si: f32) -> Reading {
         Reading {
             mode: self.mode,
-            range: self.range,
+            // (A manual capacitance range measured on a lower row: the
+            // range chosen, for the status bar and the MF page.)
+            range: self.cap_disp.unwrap_or(self.range),
             main,
             aux1: None,
             aux2: None,
@@ -4508,7 +5062,7 @@ impl Dmm {
     /// Trace a DC conversion (acdctr.rs); the trigger is an accepted DC
     /// part more than TR_JUMP off the DC part before it.
     fn tr_dc(&mut self, now: u64, ad1: i32, x: f32, lim: f32, vet: bool, hold: bool) {
-        if self.tr.on == 0 {
+        if !tr::ON || self.tr.on == 0 {
             return;
         }
         let d = self.dc_val;
@@ -4693,7 +5247,10 @@ impl Dmm {
             (self.dc_val, dm)
         };
         self.auto_total_si = t * si_k;
-        self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        #[cfg(feature = "acdc-meth")]
+        {
+            self.am.n_rd = self.am.n_rd.wrapping_add(1);
+        }
         let ol = v.abs() / lim > self.over();
         let mut rd = self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, v * si_k);
         rd.mode = mode;
@@ -4920,7 +5477,7 @@ impl Dmm {
         }
         let was = self.acs_t0 != 0;
         let settling = acdc && self.ac_settle_step(now, ac, lim);
-        if self.tr.on != 0 {
+        if tr::ON && self.tr.on != 0 {
             self.tr_ev(now, tr::K_AC, sq as i32, ac, settling as u8 * tr::F_SETTLING);
         }
         let seed = (acdc && was && !settling) || first;
@@ -5295,6 +5852,7 @@ impl Dmm {
     /// Firmware only (the host tests that include dmm.rs have no scpi).
     #[cfg(target_os = "none")]
     #[inline(never)] // .cold (link-native.x): one SCPI command
+    #[cfg_attr(not(feature = "dbg-ohm6"), allow(dead_code))]
     pub fn ohm600_dbg(&mut self, set: Option<[f32; 5]>, out: &mut crate::scpi::Scpi) {
         let o = &mut self.o6;
         if let Some(v) = set {
@@ -5392,6 +5950,23 @@ impl Dmm {
         Some(rd)
     }
 
+    /// The continuity / diode beeper sounds now (or would, at volume 0 % /
+    /// `mute`): 1 = a short (continuity's comparator, diode's continuous
+    /// tone below 22 mV), 2 = a diode pattern's on phase, 0 = silent (and
+    /// in every other function, while the source (DBG:SRC) or the power
+    /// meter has the row).
+    pub fn beeping(&self) -> u8 {
+        if !self.beep_on || self.pw.on || src::active() || self.suspended {
+            return 0;
+        }
+        match self.mode {
+            11 => 1,
+            12 if self.beep_class == 0 => 1,
+            12 => 2,
+            _ => 0,
+        }
+    }
+
     /// Diode beep patterns through the HY3131 CMP pin buffer (R20 0xb4 / 0xb0).
     fn diode_beep(&mut self, now: u64) {
         if self.mode != 12 || now < self.beep_next || src::active() {
@@ -5405,6 +5980,7 @@ impl Dmm {
             _ => (false, 100, 0),
         };
         hy::write(0x20, &[if on { 0xB4 } else { 0xB0 }]);
+        self.beep_on = on;
         if self.beep_e < max_e {
             self.beep_e += 1;
         }
@@ -5938,21 +6514,176 @@ impl Dmm {
     }
 
     fn cap_val(&self, c_uf: f32, ol: bool) -> Reading {
-        let r = self.range as usize;
+        let r = self.cap_disp.unwrap_or(self.range) as usize;
         let (v, dec, unit) = match r {
+            // The 60 nF range (CAP_R_MIN): 3 decimals below 6 nF, as r0.
+            1 if c_uf < 0.006 && !ol => (c_uf * 1000.0, 3, "nF"),
             0..=2 => (c_uf * 1000.0, 3 - r as u8, "nF"),
+            // 6 / 60 mF in uF too (owner 2026-10-30: "1000 uF", not
+            // "1 mF"): 4700 uF on 6 mF, 47000 uF on 60 mF (10 uF steps).
             3..=5 => (c_uf, 6 - r as u8, "\u{b5}F"),
-            _ => (c_uf * 1e-3, 9 - r as u8, "mF"),
+            _ => (c_uf, 0, "\u{b5}F"),
         };
         let dec = dec.min(3);
         self.reading(if ol { Val::ol(dec, unit) } else { Val::new(v, dec, unit) }, c_uf * 1e-6)
     }
 
+    /// A ramp range's reading: provisional (grey, no statistics) until the
+    /// range's first ramp result; before it `cap_c` is the last range's
+    /// (or 0: MIN 0.0 after every step onto 600 uF, emulator).
+    /// Write the ramp comparator's threshold class (1..3, R21).
+    fn cap_class_write(&mut self, class: u8) {
+        self.ramp.class = class;
+        // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
+        // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
+        let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
+        hy::write(0x21, &[v]);
+        // The comparator period from this class on (`cap_ctr`).
+        self.cap_ct_b = 0;
+        self.cap_ct_n = 0;
+        cap_ctr_restart();
+    }
+
+    /// The discharge before a ramp range: dashes, and the node voltage in
+    /// the aux row (`CAP_DIS_UNIT`; `CAP_CHG_UNIT` at the AD1 clamp). The node's scale is the ramp
+    /// row's (INFERRED: the discharge row's AD1 input is not traced).
+    fn cap_discharge_val(&self, v_mv: f32, now: u64) -> Reading {
+        let mut rd = if self.cap_dis_fin {
+            self.cap_ramp_val(self.cap_c, false)
+        } else {
+            let mut rd = if self.cap_cand > 0.0 { self.cap_ramp_val(self.cap_cand, false) } else { self.cap_dash() };
+            rd.prov = true;
+            rd
+        };
+        // At the AD1 clamp (the node above ~1.2 V, device 1bc12c03: 4.7 s
+        // from 3 V): ">1.2 V" (`ui::cap_discharge_label`).
+        let _ = now;
+        let chg = v_mv.abs() >= CAP_DIS_HI_MV;
+        let unit = if chg { CAP_CHG_UNIT } else { CAP_DIS_UNIT };
+        rd.aux2 = Some(Val::new(v_mv * 1e-3, 2, unit));
+        rd
+    }
+
+    /// The full-poll dV: the second largest of the last CAP_DVH polls' (a
+    /// turn only makes a poll's dV smaller; one noisy poll is not it).
+    fn cap_dv_ref(&self) -> f32 {
+        let n = (self.cap_dvh_n as usize).min(CAP_DVH);
+        let mut b = self.cap_dvh;
+        sort_f32(&mut b[..n]);
+        b[n.saturating_sub(2)]
+    }
+
+    /// A value from the 50 ms fit (`CapSeg`): final ones set the value (not
+    /// over the range, not far off a final one: the poll's rules step the
+    /// range or start again); before the first final the running ones are
+    /// the grey value (near the discharge's estimate, `CAP_DIS_AGREE`).
+    fn cap_seg_use(&mut self, c: f32, fin: bool, lim: f32, ov: f32) -> Option<Reading> {
+        if fin {
+            let off = !self.ramp.first && !self.cap_dis_fin && (c - self.cap_c).abs() > CAP_SWAP * self.cap_c;
+            if c / lim > ov || off {
+                return None;
+            }
+            self.cap_c = c;
+            self.cap_hops = 0;
+            self.cap_dis_fin = false;
+            self.cap_seg_ok = true;
+            if self.ramp.first {
+                self.ramp.first = false;
+                self.cap_last = self.range;
+                self.cap_dis_c = 0.0;
+                self.cap_dis_chg = false;
+            }
+            return Some(self.cap_ramp_val(c, false));
+        }
+        if !self.ramp.first || c / lim > ov {
+            return None;
+        }
+        if self.cap_dis_c > 0.0 && (c - self.cap_dis_c).abs() > CAP_DIS_AGREE * self.cap_dis_c {
+            return None;
+        }
+        self.cap_cand = c;
+        Some(self.cap_ramp_val(c, false))
+    }
+
+    /// The ramp's comparator frequency (kHz) from the counter, summed since
+    /// the row / class began (ENCTR is on in the ramp rows: CTB counts the
+    /// comparator periods, CTA the gate's 4.9 MHz ticks), restarted before
+    /// CTA wraps.
+    fn cap_ctr(&mut self) -> (f32, u32) {
+        let mut b = [0u8; 9];
+        hy::read(0x15, &mut b);
+        let (ctb, cta) = (u24(&b[3..6]), u24(&b[6..9]));
+        let (acc, restart, khz, tb) = cap_ctr_rate((self.cap_ct_b, self.cap_ct_n), ctb, cta);
+        if restart {
+            (self.cap_ct_b, self.cap_ct_n) = acc;
+            cap_ctr_restart();
+            self.diag_ctr = self.diag_ctr.saturating_add(1);
+        }
+        (khz, tb)
+    }
+
+    /// No value yet: dashes, provisional.
+    fn cap_dash(&self) -> Reading {
+        let mut rd = self.cap_val(f32::NAN, false);
+        rd.prov = true;
+        rd
+    }
+
+    fn cap_ramp_val(&self, c_uf: f32, ol: bool) -> Reading {
+        // An over-range in AUTO below 60 mF is a range step on its way
+        // (device 37304252: a final "OL" after the grey 505 uF on 600 uF):
+        // dashes; a final OL only on 60 mF or a manual range.
+        if ol && !self.manual && self.range < 7 {
+            return self.cap_dash();
+        }
+        let mut rd = self.cap_val(c_uf, ol);
+        rd.prov = self.ramp.first && !ol;
+        rd
+    }
+
+    /// The discharge's mode `m` on the discharge row (R31, index 0x11 of
+    /// CFG_F13_DISCHARGE).
+    fn cap_dis_set(&mut self, m: u8) {
+        let r31 = CFG_F13_DISCHARGE[0x11];
+        hy::write(0x31, &[if m == 1 { (r31 & 0xF0) | cap_disref() as u8 } else { r31 }]);
+        self.cap_dis_on = m;
+        // The slope estimate (mode 0 only) from a new anchor.
+        self.cap_dis_pv = 0.0;
+    }
+
     fn cap_set_range(&mut self, clk: &mut Clock, r: i8) {
         let now = clk.now_ms();
+        let ramp_on = self.range >= 5 && !self.ramp.discharging && self.cap_dbg[0].abs() < CAP_SHORT_MV;
         self.range = r;
-        if r >= 5 {
+        self.cap_pre = false;
+        self.cap_dis_on = 0;
+        if r >= 5 && ramp_on {
+            // From one ramp range to another with the node still near 0 V
+            // (~1 s of ramp on 600 uF leaves 4 mV on 1 mF): the ramp goes
+            // on at the new current, no second discharge (device: 0.5 s
+            // per step).
+            self.write_config(clk);
+            // The comparator counter from this row on (`cap_ctr`; the class
+            // write that restarts it comes with the next poll).
+            cap_ctr_restart();
+            self.ramp.prev_t = now;
+            self.ramp.prev_v = self.cap_dbg[0];
+            self.ramp.n = 0;
+            self.ramp.med_i = 0;
+            self.ramp.class = 0;
+            self.ramp.cmp = None;
+            self.ramp.first = true;
+            self.cap_row_new = true;
+            self.deadline = now + CAP_SEG_MS;
+        } else if r >= 5 {
             // Discharge first, then start the ramp when |V| < 30 mV.
+            self.cap_dis_v0 = f32::NAN;
+            self.cap_dis_last = 0.0;
+            self.cap_pre_done = false;
+            self.cap_dis_low = 0;
+            self.cap_dis_chg = false;
+            self.cap_stall_t = 0;
+            self.cap_dis_res = false;
             hy::quiesce();
             hy::configure(&CFG_F13_DISCHARGE);
             self.ramp.discharging = true;
@@ -5961,6 +6692,9 @@ impl Dmm {
             self.ramp.class = 0;
             self.ramp.cmp = None;
             self.ramp.first = true;
+            // The first sample 255 ms after the row write, then every
+            // `cap_dis_ms` (a first sample at 50 ms ended the discharge at
+            // once: 1 mF with absorption hunted 600 uF <-> 6 mF, emulator).
             self.deadline = now + 255;
         } else {
             self.write_config(clk);
@@ -5969,125 +6703,790 @@ impl Dmm {
         self.cap_cnt_up = 0;
         self.cap_cnt_dn = 0;
         self.cap_cnt_small = 0;
+        self.cap_idle = 0;
+        self.cap_over = 0;
+        self.cap_cand = 0.0;
+        self.cap_prev_raw = 0.0;
+        self.cap_over_n = 0;
+        self.cap_under = 0;
+        self.cap_inst_n = 0;
+        self.cap_pair = [None; 2];
+        self.cap_ring_n = 0;
+        self.cap_half_n = 0;
+        self.cap_half_prev = 0;
+        self.cap_first_v = 0.0;
+        self.cap_ratio = [1.0; 2];
+        self.cap_ratio_ok = false;
+        self.cap_dis_t = now;
+        self.cap_dis_pv = 0.0;
+        self.cap_cand = 0.0;
+        if r >= 5 && ramp_on {
+            // A ramp range step: the discharge's estimate stays the grey
+            // value.
+            self.cap_cand = self.cap_dis_c;
+        } else {
+            self.cap_dis_c = 0.0;
+        }
+        if r < 5 {
+            // The oscillator: from the start (open leads, another
+            // capacitor), no grey value kept.
+            self.cap_grey = 0.0;
+            self.cap_dis_chg = false;
+            self.cap_dis_res = false;
+        }
+        self.cap_chg_prev = 0.0;
+        self.cap_agree = 0;
+        self.cap_cls2 = false;
+        self.cap_cls_min = 0;
+        self.cap_dvh_n = 0;
+        *self.cap_seg = CapSeg::new();
+        self.cap_dis_fin = false;
+        self.cap_seg_ok = false;
+        self.cap_ct_b = 0;
+        self.cap_ct_n = 0;
+        self.cap_dis_e1 = 0.0;
+        self.cap_vext_n = 0;
+        self.cap_idle_flips = 0;
     }
 
+    /// `poll_cap_in`, and once a grey value was shown, that value instead
+    /// of dashes until a final one (owner 2026-10-30, device 1bc12c03:
+    /// "~900, then --, then ~900 again, then orange": a range step / the
+    /// discharge-to-ramp hand-over blanked it).
     fn poll_cap(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
+        let mut rd = self.poll_cap_in(clk, now)?;
+        if !rd.prov {
+            self.cap_grey = 0.0;
+        } else if rd.si.is_finite() && rd.si > 0.0 && !rd.main.ol {
+            self.cap_grey = rd.si * 1e6;
+        } else if self.cap_grey > 0.0 {
+            let aux2 = rd.aux2;
+            rd = self.cap_val(self.cap_grey, false);
+            rd.prov = true;
+            rd.aux2 = aux2;
+        }
+        Some(rd)
+    }
+
+    fn poll_cap_in(&mut self, clk: &mut Clock, now: u64) -> Option<Reading> {
         let r = self.range.max(0) as usize;
         let (f_dec, ov) = (self.factor(), self.over());
         let lim = f_dec * CAP_DEC[r];
         if r < 5 {
             let (f, _) = self.read_counters(0x50);
             self.deadline = now + 420;
-            ema(CAP_WIN[r], 0.05, f, &mut self.f_cap);
+            if r == 4 {
+                // 60 uF: its 0.1 Hz window let every gate through (~5 uF:
+                // 4.77 .. 4.97 uF, device bc205357): a quarter of each gate
+                // within 3 %, a jump at once.
+                ema((0.03 * self.f_cap).max(CAP_WIN[r]), 0.25, f, &mut self.f_cap);
+            } else {
+                ema(CAP_WIN[r], 0.05, f, &mut self.f_cap);
+            }
+            self.cap_over = self.cap_over.saturating_add(1);
             let fk = self.f_cap.max(1e-9);
             // Negative results are clamped to 0 as in the stock (m+0x18 == 0).
             let c = (cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * fk) - cal(0x190, 0.0)).clamp(0.0, 1.06 * lim);
+            self.cap_dbg[5] = c;
             let ol = c / lim > ov;
+            if self.manual && self.cap_disp.is_some_and(|d| d > r as i8) && ol {
+                // A manual ramp range measured here: back up a row.
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_dash());
+            }
             if !self.manual {
-                if r >= 1 && self.f_cap > 2.0 {
+                // Straight to the range that fits (owner 2026-10-30: a rough
+                // value fast, the range from it, then refine), not one range
+                // per poll: the smallest oscillator range whose 0.9 x full
+                // scale holds the estimate, the ramp from 600 uF.
+                let fit = |cu: f32| {
+                    let mut t = CAP_R_MIN as usize;
+                    while t < 5 && cu > 0.9 * f_dec * CAP_DEC[t] {
+                        t += 1;
+                    }
+                    t as i8
+                };
+                if r as i8 > CAP_R_MIN && c < CAP_OSC_DOWN * lim {
+                    // Under the range for 2 polls: down to the fitting one
+                    // (was: back to 60 nF only above 2 kHz, then up range
+                    // by range).
                     self.cap_cnt_small += 1;
-                    if r < 4 || self.cap_cnt_small >= 4 {
-                        self.cap_set_range(clk, 0);
+                    if self.cap_cnt_small >= 2 {
+                        self.cap_set_range(clk, fit(c).min(r as i8 - 1));
                         return None;
                     }
                 } else {
                     self.cap_cnt_small = 0;
                 }
+                // (Below 60 uF not on the first gate with no count: it spans
+                // the switch; ~5 uF hunted 60 uF -> 6 uF -> 60 uF on it.)
+                if c > ov * lim && (r == 4 || f > 0.0 || self.cap_over >= 2) {
+                    // This poll's own count (the average is the last
+                    // range's): no oscillation in the gate at all (a large C
+                    // on a small range) goes to 60 uF, the oscillator's top.
+                    let est = if f > 0.0 { cal(0x170 + 4 * r as u32, 1.0) * 0.72135 / (CAP_K[r] * f) - cal(0x190, 0.0) } else { f32::INFINITY };
+                    // None at all on 60 uF: 6 mF (a 600 uF step on the way
+                    // cost ~0.5 s for ~1 mF; a smaller one steps down from
+                    // there).
+                    let t = if est.is_finite() { fit(est) } else if r == 4 { 6 } else { 4 };
+                    self.cap_set_range(clk, t.max(r as i8 + 1));
+                    return Some(self.cap_dash());
+                }
                 if c > ov * lim {
-                    self.cap_set_range(clk, r as i8 + 1);
-                    return Some(self.cap_val(0.0, true));
+                    // (Over, the step waits a gate: dashes, not a final OL.)
+                    return Some(self.cap_dash());
                 }
             }
             if !ol {
                 self.cap_c = c;
+                self.cap_last = r as i8;
             }
             return Some(self.cap_val(self.cap_c, ol));
         }
 
         // r5..r7: constant-current ramp on AD1.
+        if self.cap_pre {
+            // The second conversion of the DC V row (the first may span the
+            // switch).
+            let code = self.ad1()?;
+            self.cap_pre_n += 1;
+            let v0 = code as f32 * K_ACV[1] * (1.25 / 0.9) / AD1_DIV;
+            // Two conversions in a row that agree, the first left out (it may
+            // span the switch); at most 8 (device 4c31e6da: -37.1 V read for
+            // a ~1.2 V capacitor, the slow discharge chosen; INFERRED: the
+            // row not settled).
+            let same = (v0 - self.cap_pre_v).abs() <= 0.05 * v0.abs() + 0.05;
+            self.cap_pre_v = v0;
+            if self.cap_pre_n < 3 || (!same && self.cap_pre_n < 8) {
+                return None;
+            }
+            self.cap_pre = false;
+            self.cap_dis_v0 = v0;
+            hy::quiesce();
+            relay_pa(clk, 1);
+            self.pa_now = Some(1);
+            hy::configure(&CFG_F13_DISCHARGE);
+            let m = if v0.abs() <= CAP_DIS_SAFE_V { cap_dismode() as u8 } else { 0 };
+            self.cap_dis_set(m);
+            self.cap_dis_last = 0.0;
+            self.cap_dis_low = 0;
+            // The row settles before its first sample.
+            self.deadline = now + 255;
+            return Some(self.cap_discharge_val(v0 * 1000.0, now));
+        }
         let ad1 = self.ad1()?;
         let v_mv = ad1 as f32 * 1000.0 * 1.25 / 0.9 / AD1_DIV;
         if self.ramp.discharging {
-            if v_mv.abs() < 30.0 {
+            self.cap_dbg[0] = v_mv;
+            // A rough C from the discharge (owner 2026-10-30): it runs at a
+            // constant current (device c4aea8d0, ~0.996 mF pre-charged:
+            // -98.4 mV per 255 ms poll from 1185 to 42 mV, a straight line;
+            // an RC fit read it 2 .. 5x off; c4aea8d0 from ~3 V: 0.381 V/s,
+            // the clamped part at the same rate), so C = I / (dV / dt) from
+            // the first sample below the AD1 clamp to this one (a longer
+            // baseline with each sample), above CAP_DIS_LO_MV; grey only.
+            // I: DBG:CAP:IDIS (INFERRED, one capacitor).
+            let a = v_mv.abs();
+            if a >= CAP_DIS_HI_MV {
+                // At the clamp: the slope's anchor from below it again (device
+                // 4c31e6da, ~1 mF charged: one ~0.2 V sample right after the
+                // DC V read, then 5 s at the clamp, read 22.9 mF and took
+                // the range to 60 mF).
+                self.cap_dis_pv = 0.0;
+                self.cap_dis_chg = true;
+                if cap_dismode() != 0 && !self.cap_pre_done {
+                    // Charged: its voltage first, on the DC V 60 V row
+                    // through the 10 M divider (relay to DC V and back),
+                    // then the faster discharge if it is within
+                    // CAP_DIS_SAFE_V.
+                    self.cap_pre_done = true;
+                    hy::quiesce();
+                    relay_pa(clk, 0);
+                    self.pa_now = Some(0);
+                    hy::configure(&CFG_F1[1]);
+                    self.cap_pre = true;
+                    self.cap_pre_n = 0;
+                    self.deadline = now + 120;
+                    return Some(self.cap_discharge_val(v_mv, now));
+                }
+            }
+            if self.cap_dis_on != 0 {
+                // Back to the stock row when the node rises (below the
+                // clamp) or after CAP_DIS_EXP_MS.
+                let rising = a < CAP_DIS_HI_MV && self.cap_dis_last > 0.0 && a > self.cap_dis_last + 20.0;
+                if rising || now.saturating_sub(self.cap_dis_t) > CAP_DIS_EXP_MS {
+                    self.cap_dis_abort = self.cap_dis_abort.wrapping_add(1);
+                    self.cap_dis_set(0);
+                }
+            }
+            self.cap_dis_last = a;
+            if a > CAP_DIS_LO_MV && a < CAP_DIS_HI_MV {
+                if self.cap_dis_pv == 0.0 {
+                    if a >= CAP_DIS_ANCHOR_MV {
+                        self.cap_dis_pv = a;
+                        self.cap_dis_pt = now;
+                        self.cap_dis_ls = [1.0, 0.0, a, 0.0, 0.0];
+                        self.cap_dis_e1 = 0.0;
+                    }
+                } else if self.cap_dis_pv - a >= CAP_DIS_SPAN_MV && now > self.cap_dis_pt {
+                    let slope = (self.cap_dis_pv - a) / (now - self.cap_dis_pt) as f32; // mV / ms = V / s
+                    let i = if self.cap_dis_on == 1 { CAP_IDIS_REF[cap_disref() as usize - 2] } else { cap_idis() as f32 };
+                    let cest = i / slope; // uA / (V / s) = uF
+                    if cest.is_finite() && cest > 0.0 {
+                        self.cap_cand = cest;
+                        let b = now - self.cap_dis_pt;
+                        if b >= CAP_DIS_BASE_MS {
+                            self.cap_dis_c = cest;
+                        }
+                        // Final from the discharge (audit 2026-10-31: device
+                        // r2-ch, ~1 mF from 2.9 V, 1017 .. 1064 uF here, the
+                        // ramp after it +22 % from absorption): the estimates
+                        // over CAP_DIS_FIN_MS and twice that agree. The ramp's
+                        // own final replaces it (`cap_seg`).
+                        // The fit's C (the two-point one above read +-3 % per
+                        // sample on the device).
+                        let tb = b as f32;
+                        let l = &mut self.cap_dis_ls;
+                        l[0] += 1.0;
+                        l[1] += tb;
+                        l[2] += a;
+                        l[3] += tb * tb;
+                        l[4] += tb * a;
+                        let den = l[0] * l[3] - l[1] * l[1];
+                        let sl = if den > 0.0 { (l[1] * l[2] - l[0] * l[4]) / den } else { 0.0 };
+                        let cfit = if sl > 0.0 { i / sl } else { 0.0 };
+                        if self.ramp.first && !self.cap_dis_fin && cfit > 0.0 {
+                            let cest = cfit;
+                            let step = b >= CAP_DIS_FIN_MS && (self.cap_dis_e1 == 0.0 || now >= self.cap_dis_et + CAP_DIS_FIN_STEP_MS);
+                            let agree = self.cap_dis_e1 > 0.0 && (cest - self.cap_dis_e1).abs() <= CAP_DIS_FIN_AGREE * cest;
+                            if step && !agree {
+                                self.cap_dis_e1 = cest;
+                                self.cap_dis_et = now;
+                            } else if step {
+                                if !self.manual {
+                                    let mut t = 5;
+                                    while t < 7 && cest > 0.9 * f_dec * CAP_DEC[t] {
+                                        t += 1;
+                                    }
+                                    if t as i8 > self.range {
+                                        self.range = t as i8;
+                                    }
+                                }
+                                let lim_t = f_dec * CAP_DEC[self.range.max(0) as usize];
+                                if cest / lim_t <= ov {
+                                    self.cap_c = cest;
+                                    self.cap_dis_fin = true;
+                                    self.ramp.first = false;
+                                    self.cap_last = self.range;
+                                    self.cap_hops = 0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // The end: two samples in a row below cap_dis_end (one may be
+            // the last row's).
+            self.cap_dis_low = if a < cap_dis_end() as f32 { self.cap_dis_low.saturating_add(1) } else { 0 };
+            let mut stalled = false;
+            if a < CAP_STALL_MV {
+                if self.cap_stall_t == 0 || self.cap_stall_v - a >= CAP_STALL_DV_MV {
+                    self.cap_stall_v = a;
+                    self.cap_stall_t = now;
+                } else if now - self.cap_stall_t >= CAP_STALL_MS {
+                    stalled = true;
+                }
+            } else {
+                self.cap_stall_t = 0;
+            }
+            if self.cap_dis_low >= 2 || stalled || now.saturating_sub(self.cap_dis_t) > CAP_DIS_MAX_MS {
+                self.cap_dis_res = stalled && self.cap_dis_low == 0;
                 self.ramp.discharging = false;
+                self.cap_dis_on = 0;
+                if !self.manual && self.cap_dis_c > 0.0 {
+                    // The ramp range from the discharge's estimate (the
+                    // smallest whose 0.9 x full scale holds it), up only:
+                    // down is the ramp's own rule.
+                    let mut t = 5;
+                    while t < 7 && self.cap_dis_c > 0.9 * f_dec * CAP_DEC[t] {
+                        t += 1;
+                    }
+                    if t as i8 > self.range {
+                        self.range = t as i8;
+                    }
+                }
                 self.write_config(clk);
+                self.cap_row_new = true;
+                if cap_class() != CAP_CLASS_STOCK {
+                    let k = if cap_class() == 0 { CAP_CLASS_FAST } else { cap_class() };
+                    self.cap_class_write(k);
+                }
                 self.ramp.prev_t = now;
                 self.ramp.prev_v = v_mv;
+                *self.cap_seg = CapSeg::new();
             }
-            self.deadline = now + 255;
-            return None;
+            self.deadline = now + if self.ramp.discharging { cap_dis_ms() as u64 } else { CAP_SEG_MS };
+            return Some(self.cap_discharge_val(v_mv, now));
         }
-        let _ = self.read_counters(0x50);
+        // Every 50 ms sample to the half ramps' fit; the poll's rules below
+        // every CAP_POLL_MS.
+        // A ramp too fast for the 50 ms samples (the comparator's counter:
+        // ~5 uF on 6 mF turned 50 times a second and its samples aliased
+        // into 1.2 .. 5.4 mF, on 600 uF 7 times a second into 190 .. 240
+        // uF; device bc205357): the row below, in AUTO as the range, on a
+        // manual range for the value only (shown in that range's units).
+        let (cf, cn) = self.cap_ctr();
+        if cn >= 3 && cf > CAP_FAST_KHZ {
+            if self.manual && self.cap_disp.is_none() {
+                self.cap_disp = Some(self.range);
+            }
+            self.cap_set_range(clk, r as i8 - 1);
+            return Some(self.cap_dash());
+        }
+        let seg = {
+            let k = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r];
+            let ev = self.cap_seg.add(now, v_mv, k);
+            self.cap_dbg[5] = self.cap_seg.last;
+            self.cap_dbg[0] = v_mv;
+            ev.and_then(|(c, fin)| self.cap_seg_use(c, fin, lim, ov))
+        };
+        // On 6 mF (the oscillator's 60 uF went straight there) a half ramp
+        // under 600 uF: down to it at once, the ramp going on (emulator:
+        // 470 uF waited ~8 s for the poll's rule).
+        if r == 6 && self.cap_seg.done && self.ramp.first && !self.manual && self.cap_seg.last.abs() < 0.9 * f_dec * CAP_DEC[5] {
+            self.cap_set_range(clk, 5);
+            return Some(self.cap_dash());
+        }
+        if now.saturating_sub(self.ramp.prev_t) < CAP_POLL_MS {
+            self.deadline = now + CAP_SEG_MS;
+            return seg;
+        }
         let dv = (self.ramp.prev_v - v_mv).abs();
         let dt = now.saturating_sub(self.ramp.prev_t) as f32;
         self.ramp.prev_v = v_mv;
         self.ramp.prev_t = now;
-        self.deadline = now + 255;
-        if dv == 0.0 {
-            return None;
+        self.deadline = now + CAP_SEG_MS;
+        self.cap_dbg[0] = v_mv;
+        self.cap_dbg[1] = dv;
+        self.cap_dbg[2] = dt;
+        // No ramp (#74): open leads hold the node at its clamp, a short at
+        // 0 V, so dV is 0 (emulator) or noise (device: "0L mF" / "0.0 mF"
+        // stayed for good, as nothing below ran). A capacitor in range
+        // moves >= ~1.7 mV per poll (full scale: I / C x 255 ms); 0.05 mV
+        // is a capacitor ~30x over the range.
+        if dv < CAP_DV_MIN {
+            self.cap_idle = self.cap_idle.saturating_add(1);
+            // The comparator across these polls: a short never reaches its
+            // threshold (no turn); a capacitor far too small for this
+            // range's current turns many times a poll, sampled at random
+            // (100 nF after 1 mF on 60 mF stayed "a short", OL, emulator;
+            // INFERRED to be the same on the device).
+            let cmp = hy::read1(0x14) & 0x40 != 0;
+            if self.ramp.cmp.is_some_and(|p| p != cmp) {
+                self.cap_idle_flips = self.cap_idle_flips.saturating_add(1);
+            }
+            self.ramp.cmp = Some(cmp);
+            if self.cap_idle < CAP_IDLE_N || self.manual {
+                // (No value yet: dashes, not a grey 0.)
+                if self.cap_c <= 0.0 && self.ramp.first {
+                    return Some(self.cap_dash());
+                }
+                return Some(self.cap_ramp_val(self.cap_c, self.cap_idle >= CAP_IDLE_N));
+            }
+            self.cap_c = 0.0;
+            // A resistor on the leads (device 138d145f: 50 ohm held the
+            // node at ~34 mV, the discharge stalled there, then the ramp
+            // range cycled 600 uF -> 60 uF -> 60 nF -> 600 uF): a short too.
+            if self.cap_dis_res || (v_mv.abs() < CAP_SHORT_MV && self.cap_idle_flips < 2) {
+                // Near 0 V: a capacitor too large for this range's current
+                // (47 mF on 600 uF moves 0.02 mV per poll) or a short: the
+                // next range up; on 60 mF a short, OL, looked at again
+                // every poll (open leads or a capacitor in its place go on
+                // from there).
+                if r < 7 {
+                    self.cap_set_range(clk, r as i8 + 1);
+                }
+                return Some(if r < 7 { self.cap_dash() } else { self.cap_val(0.0, true) });
+            }
+            // Open leads, or a capacitor far below the range (the
+            // comparator turning): the oscillator's smallest range, which
+            // steps up by itself.
+            self.cap_set_range(clk, CAP_R_MIN);
+            return Some(self.cap_dash());
         }
-        if self.ramp.med_i == 0 {
-            self.ramp.med = [dv; 5];
-        } else {
-            self.ramp.med[self.ramp.med_i % 5] = dv;
+        self.cap_idle = 0;
+        self.cap_idle_flips = 0;
+        // A part of a poll's dV (a comparator turn in it, `CAP_PART`): not
+        // a slope sample. Its reference, the full-poll dV, from every poll
+        // (rejected ones too: a larger capacitor's smaller dV takes over
+        // within CAP_DVH polls); the row's first poll is the last row's.
+        let part = !self.cap_row_new && self.cap_dvh_n >= 3 && dv < CAP_PART * self.cap_dv_ref();
+        if !self.cap_row_new {
+            self.cap_dvh[self.cap_dvh_n as usize % CAP_DVH] = dv;
+            self.cap_dvh_n = ring_inc(self.cap_dvh_n);
+            // The ramp's V extremes in this half ramp.
+            let e = &mut self.cap_vext;
+            if self.cap_vext_n == 0 {
+                e[0] = v_mv;
+                e[1] = v_mv;
+                self.cap_vext_n = 1;
+            }
+            e[0] = e[0].max(v_mv);
+            e[1] = e[1].min(v_mv);
         }
-        self.ramp.med_i += 1;
+        if !part || self.ramp.med_i == 0 {
+            if self.ramp.med_i == 0 {
+                self.ramp.med = [dv; 5];
+            } else {
+                self.ramp.med[self.ramp.med_i % 5] = dv;
+            }
+            self.ramp.med_i += 1;
+        }
         let mut s = self.ramp.med;
         sort_f32(&mut s);
         let dvm = s[2];
-        let class = if dvm < 2.5 {
+        let stock = if dvm < 2.5 {
             1
         } else if dvm < 9.0 {
             2
         } else {
             3
         };
+        let class = match cap_class() {
+            CAP_CLASS_STOCK => stock,
+            0 => (if self.cap_cls2 { CAP_CLASS_AUTO } else { CAP_CLASS_FAST }).max(self.cap_cls_min),
+            k => k,
+        };
         if class != self.ramp.class {
-            self.ramp.class = class;
-            self.ramp.med_i = 0;
-            // Comparator threshold by the REAL model byte (dmm_v2_6.h:164,326):
-            // an HY3131 analog setting, not a counts limit, so not COUNTS_MODEL.
-            let v = CAP_R21[class as usize - 1] - if self.model == 2 { 0 } else { 1 };
-            hy::write(0x21, &[v]);
-            self.deadline = now + 255;
-            return Some(self.cap_val(0.0, true));
+            self.cap_class_write(class);
+            if cap_class() == CAP_CLASS_STOCK {
+                // The stock's choice from the slope: this poll is no slope
+                // sample (kept, it showed a grey 558 uF for ~1 mF on the
+                // device, 40c25e2b).
+                self.ramp.med_i = 0;
+                self.deadline = now + 255;
+                return Some(self.cap_dash());
+            }
         }
-        let c = (cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm).clamp(0.0, 1.06 * lim);
-        if self.ramp.n < 35 {
+        let craw = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dvm;
+        let c = craw.clamp(0.0, 1.06 * lim);
+        self.cap_dbg[3] = dvm;
+        self.cap_dbg[4] = c;
+        if self.ramp.n < 35 && !part {
             self.ramp.buf[self.ramp.n] = c;
             self.ramp.n += 1;
         }
+        // This poll's own slope (not the running median of 5 dV, which
+        // repeats the range's first sample for its first polls: a falling
+        // slope looked steady, and an odd first sample after a range change
+        // gave 3 "agreeing" first values 8 % high, emulator).
+        let craw_i = cal(0x170 + 4 * r as u32, 1.0) * CAP_K[r] * dt / dv;
+        let cinst = craw_i.clamp(0.0, 1.06 * lim);
+        let row_new = core::mem::take(&mut self.cap_row_new);
+        if !row_new {
+            self.cap_inst[self.cap_inst_n as usize % 3] = cinst;
+            self.cap_inst_n = ring_inc(self.cap_inst_n);
+        }
+        // The range from the slope (device: 1 mF took 7.5 s on 600 uF,
+        // waiting for 5 over-range results of the full ramp): one poll
+        // clearly over (CAP_JUMP), or CAP_EARLY_N steady slope samples in a
+        // row over the range: up. Right after the discharge an
+        // electrolytic's slope reads it high (dielectric absorption; device
+        // 832f89a4: ~1 mF went to 60 mF and read 1.52 mF there): the jump's
+        // target allows for it (CAP_JUMP_DA), the next range's current
+        // re-checks.
+        // The comparator through this poll (a turn: the poll's dV is part
+        // up, part down).
         let cmp = hy::read1(0x14) & 0x40 != 0;
         let flip = self.ramp.cmp.map(|p| p != cmp).unwrap_or(false);
         self.ramp.cmp = Some(cmp);
-        if flip || self.ramp.n == 35 {
+        if self.ramp.first && !self.manual && !part {
+            // Clearly over the range in this poll's own slope (not the
+            // range's first sample, not across a turn; 600 uF only, from
+            // its CAP_JUMPN-th poll): up at once, by as
+            // many ranges as the slope says (CAP_JUMP_DA: not past the
+            // range an absorption's high reading would pick).
+            if r == 5 && !row_new && !flip && self.cap_inst_n as u32 >= cap_jumpn() && craw_i > CAP_JUMP * lim {
+                let est = craw_i / CAP_JUMP_DA;
+                let mut t = r + 1;
+                while t < 7 && est > 0.9 * f_dec * CAP_DEC[t] {
+                    t += 1;
+                }
+                self.cap_hops += 1;
+                self.cap_set_range(clk, t as i8);
+                return Some(self.cap_dash());
+            }
+            // Counted only while the slope holds still (CAP_STEADY from the
+            // poll before): the absorption's early slope falls for ~1 s.
+            // Falling (the absorption) blocks; noise up or down by less
+            // does not. Over the range for CAP_OVER_MAX polls steps anyway.
+            let steady = self.cap_prev_raw > 0.0 && craw_i >= (1.0 - CAP_STEADY) * self.cap_prev_raw;
+            self.cap_prev_raw = craw_i;
+            self.cap_over = if craw_i > ov * lim && craw > ov * lim && steady { self.cap_over.saturating_add(1) } else { 0 };
+            self.cap_over_n = if craw > ov * lim { self.cap_over_n.saturating_add(1) } else { 0 };
+            // Up and down between two ramp ranges without a value (the
+            // emulator's open leads after a short: 6 <-> 60 mF every ~2 s):
+            // nothing measurable, the oscillator's smallest range.
+            // On 60 mF over the range for CAP_OVER_MAX polls without a value:
+            // above 60 mF, or a ramp far too fast for 400 uA (100 nF after
+            // 1 mF stayed OL on 60 mF, emulator): from 60 nF again.
+            if self.cap_hops >= CAP_HOPS_MAX || (r == 7 && self.cap_over_n >= CAP_OVER_MAX) {
+                self.cap_hops = 0;
+                self.cap_set_range(clk, CAP_R_MIN);
+                return Some(self.cap_dash());
+            }
+            if r < 7 && (self.cap_over as usize >= CAP_EARLY_N || self.cap_over_n >= CAP_OVER_MAX) {
+                self.cap_hops += 1;
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_dash());
+            }
+            // Under the range (AUTO started on the last value's range, a
+            // smaller capacitor now: 470 uF after 47 mF stayed grey on 60
+            // mF): one range down. The absorption reads high, not low.
+            let dn = if r == 5 { CAP_R5_DOWN * lim } else { 0.1 * lim / ov };
+            self.cap_under = if craw < dn { self.cap_under.saturating_add(1) } else { 0 };
+            if self.cap_under as usize >= CAP_EARLY_N {
+                self.cap_hops += 1;
+                self.cap_set_range(clk, r as i8 - 1);
+                return Some(self.cap_dash());
+            }
+        }
+        // Before the first value: the grey candidate, the median of the
+        // last 3 polls' own slopes (the range's first sample left out: a
+        // range change's step), shown from CAP_FIRST_N samples on.
+        let early = false;
+        // Every poll's own slope C with its direction (the comparator state
+        // through the poll); not across a turn (a part of the poll each way:
+        // 6.07 mV of 10.5 on the device).
+        if !flip && !row_new && !part {
+            let i = self.cap_ring_n as usize % CAP_RING;
+            self.cap_ring[i] = cinst;
+            if cmp { self.cap_ring_up |= 1 << i } else { self.cap_ring_up &= !(1 << i) }
+            self.cap_ring_n = ring_inc(self.cap_ring_n);
+            // The last two half ramps' polls, for the first value.
+            let k = self.cap_half_n as usize;
+            if k < CAP_HALF_MAX {
+                self.cap_half[k] = cinst;
+                if cmp { self.cap_half_up |= 1 << k } else { self.cap_half_up &= !(1 << k) }
+                self.cap_half_n += 1;
+            }
+        }
+        // A result per half ramp (a comparator flip), or after CAP_LONG_N
+        // polls of one long ramp (was 35, a single sample: 4.7 mF on 6 mF
+        // gave one value per 9 s).
+        let fresh = flip || self.ramp.n >= CAP_LONG_N;
+        if flip && !row_new {
+            // Adaptive class: the full-poll dV against the ramp's swing over
+            // the last two half ramps (the V samples miss the turns by up to
+            // a poll's dV each side: a clean class-1 1 mF on 6 mF read 40 ..
+            // 60 mV of swing for 10.5 mV per poll).
+            let e = self.cap_vext;
+            let widen = self.cap_vext_n >= 2 && cap_class() == 0 && self.ramp.class < 3 && self.cap_dvh_n >= 3 && {
+                let span = e[0].max(e[2]) - e[1].min(e[3]);
+                self.cap_dv_ref() >= CAP_WIDEN * span
+            };
+            self.cap_vext = [v_mv, v_mv, e[0], e[1]];
+            self.cap_vext_n = 2;
+            if widen {
+                // The next poll writes the class. The polls' own slopes do
+                // not depend on it (the turns' partial polls are left out):
+                // the ring, the pairs and the ratio stay (a restart cost
+                // ~2 s per step on the device, 4b79378d).
+                self.cap_cls_min = self.ramp.class + 1;
+                self.cap_vext_n = 0;
+            }
+        }
+        if fresh {
             let n = self.ramp.n;
-            let mean = if n == 35 {
-                self.ramp.buf[33]
-            } else if n > 4 {
+            let mean = if n > 4 {
                 let mut b = self.ramp.buf;
                 sort_f32(&mut b[..n]);
                 b[2..n - 2].iter().sum::<f32>() / (n - 4) as f32
             } else {
                 c
             };
-            if self.ramp.first {
-                self.cap_c = c;
-                self.ramp.first = false;
-            } else {
-                ema(CAP_WIN[r], 0.25, mean, &mut self.cap_c);
+            if !self.ramp.first && !early && !self.manual && !self.cap_dis_fin && r > 5 && (mean - self.cap_c).abs() > CAP_SWAP * self.cap_c {
+                // Another capacitor on the leads: a ramp too fast for this
+                // range's current aliases into a plausible value (emulator:
+                // 470 uF after 47 mF read 23 mF on 60 mF for good). From
+                // 600 uF again: the slope picks the range (`CAP_EARLY_N`).
+                self.cap_set_range(clk, 5);
+                return Some(self.cap_dash());
             }
+            // The ramp runs up and down between the comparator thresholds,
+            // and the two directions read differently (device 40c25e2b, ~1
+            // mF: 1227 / 974 / 1044 / 982 uF in turn): every value is the
+            // mean of the last up and the last down result (the comparator
+            // state through the half ramp tells which; a long ramp's
+            // CAP_LONG_N results are one direction, two of them averaged
+            // kept the bias: 1.158 mF spikes in the emulator). The first
+            // value waits for both.
+            let up = if flip { !cmp } else { cmp };
+            // Only a result of more than 4 polls (a trimmed mean): a short
+            // rest after a long ramp's CAP_LONG_N result moved the ratio by
+            // 3 % for one half ramp (emulator).
+            if n > 4 {
+                self.cap_pair[up as usize] = Some(mean);
+            }
+            let pair = match self.cap_pair {
+                [Some(a), Some(b)] => Some(0.5 * (a + b)),
+                _ => None,
+            };
+            if let (Some(p), [Some(d), Some(u)]) = (pair, self.cap_pair) {
+                // The two directions' share of their mean: the per-poll
+                // values below are corrected with it (device 2b46e895, ~1
+                // mF: up 1008 .. 1016, down 991 .. 1007 uF per poll).
+                if d > 0.0 && u > 0.0 {
+                    // Within CAP_RATIO_MAX: the device's two directions differ by ~1 %;
+                    // a pair across a drift (an electrolytic's absorption, emulator:
+                    // 5.31 then 4.36 mF for 4.7 mF) is not that.
+                    self.cap_ratio = [(p / d).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX), (p / u).clamp(1.0 - CAP_RATIO_MAX, 1.0 + CAP_RATIO_MAX)];
+                    if !self.cap_ratio_ok && self.ramp.first {
+                        // The first value: the median of every poll of the
+                        // two half ramps just finished (one up, one down),
+                        // each corrected for its direction, not the last 6
+                        // (device 37304252: first values 1007.5 / 966.3 uF
+                        // for ~1 mF in two runs).
+                        let n = self.cap_half_n as usize;
+                        let mut b = [0.0f32; CAP_HALF_MAX];
+                        for i in 0..n {
+                            b[i] = self.cap_half[i] * self.cap_ratio[(self.cap_half_up >> i & 1) as usize];
+                        }
+                        if n >= 3 {
+                            sort_f32(&mut b[..n]);
+                            self.cap_first_v = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+                        }
+                    }
+                    self.cap_ratio_ok = true;
+                }
+            }
+            // Keep only the half ramp just finished.
+            let n = self.cap_half_n as usize;
+            let keep = n.saturating_sub(self.cap_half_prev as usize);
+            for i in 0..keep {
+                self.cap_half[i] = self.cap_half[n - keep + i];
+            }
+            self.cap_half_up >>= n - keep;
+            self.cap_half_n = keep as u8;
+            self.cap_half_prev = keep as u8;
             self.ramp.n = 0;
+        }
+        // The value every poll (owner 2026-10-30: a new value per ramp
+        // result was every ~3 s): the median of the last CAP_RING polls'
+        // own slopes, each corrected for its direction. Final once the
+        // directions' ratio is known (a result each way), or after
+        // CAP_NORATIO_N polls of one long ramp; grey before.
+        let n = (self.cap_ring_n as usize).min(CAP_RING);
+        if n >= 3 && !part {
+            let mut b = [0.0f32; CAP_RING];
+            for i in 0..n {
+                let k = if self.cap_ratio_ok { self.cap_ratio[(self.cap_ring_up >> i & 1) as usize] } else { 1.0 };
+                b[i] = self.cap_ring[i] * k;
+            }
+            sort_f32(&mut b[..n]);
+            let v_ring = if n % 2 == 1 { b[n / 2] } else { 0.5 * (b[n / 2 - 1] + b[n / 2]) };
+            let mut v = v_ring;
+            if self.ramp.first && self.cap_first_v > 0.0 && !self.cap_dis_chg {
+                v = self.cap_first_v;
+            }
+            // Or a full ring of polls both ways within CAP_RING_AGREE (half
+            // ramps too short for a direction pair, > 4 polls each: device
+            // 4c31e6da, ~1 mF on 6 mF, class 2 swung ~35 mV, 3 polls per half
+            // ramp, polls 976 .. 992 uF, the final only with class 3 at 11 ..
+            // 13 s); the two directions differ by ~1 % per poll.
+            let full = ((1u16 << CAP_RING) - 1) as u8;
+            let ups = self.cap_ring_up & full;
+            let agree = n == CAP_RING && ups != 0 && ups != full && b[n - 2] - b[1] <= CAP_RING_AGREE * v_ring;
+            let ready = self.cap_ratio_ok || agree || self.cap_ring_n as usize >= CAP_NORATIO_N;
+            // After a charged capacitor's discharge: the first final value
+            // once two results in a row agree (CAP_CHG_AGREE).
+            let wait = ready && self.ramp.first && self.cap_dis_chg && {
+                let ok = self.cap_chg_prev > 0.0 && (v_ring - self.cap_chg_prev).abs() <= CAP_CHG_AGREE * v_ring;
+                self.cap_chg_prev = v_ring;
+                !ok
+            };
+            if ready && !wait && !self.cap_dis_fin {
+                // Adaptive class (owner 2026-10-30): CAP_CLASS_FAST for a fast
+                // first value; once CAP_AGREE_N final values in a row agree
+                // within 2 % (the same capacitor), CAP_CLASS_AUTO. The value
+                // stays final; the directions' ratio is learned again.
+                if !self.ramp.first && !self.manual && (v - self.cap_c).abs() > CAP_SWAP * self.cap_c {
+                    // Another capacitor on the same range (a 470 uF after a
+                    // 100 uF on 600 uF showed 290 .. 480 uF as final values,
+                    // emulator): the range again from the start, class 1.
+                    self.cap_swaps = self.cap_swaps.wrapping_add(1);
+                    self.cap_set_range(clk, r as i8);
+                    return Some(self.cap_dash());
+                }
+                if !self.ramp.first && (v - self.cap_c).abs() <= 0.02 * v {
+                    self.cap_agree = self.cap_agree.saturating_add(1);
+                } else {
+                    self.cap_agree = 0;
+                }
+                if cap_class() == 0 && !self.cap_cls2 && self.cap_agree >= CAP_AGREE_N {
+                    // The new threshold makes the polls around it partial
+                    // ones: the ring starts over (the value stays as it is
+                    // until 3 class-2 polls are in), the ratio is learned
+                    // again (1 meanwhile: one class's ratio is not another's).
+                    // Nothing to do when the class stays (CAP_CLASS_FAST ==
+                    // CAP_CLASS_AUTO, or widened to it already).
+                    self.cap_cls2 = true;
+                    if CAP_CLASS_AUTO.max(self.cap_cls_min) != self.ramp.class {
+                        self.cap_pair = [None; 2];
+                        self.cap_ring_n = 0;
+                        self.cap_ratio = [1.0; 2];
+                        return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
+                    }
+                }
+                if !self.cap_seg_ok {
+                    self.cap_c = v;
+                }
+                self.cap_hops = 0;
+                if self.ramp.first {
+                    self.ramp.first = false;
+                    self.cap_last = r as i8;
+                    self.cap_dis_c = 0.0;
+                    self.cap_dis_chg = false;
+                }
+            } else if self.cap_dis_c <= 0.0 || (v - self.cap_dis_c).abs() <= CAP_DIS_AGREE * self.cap_dis_c {
+                self.cap_cand = v;
+            }
         }
         let cc = self.cap_c;
         let ol = cc / lim > ov;
-        if !self.manual {
-            if cc > ov * lim && r < 7 {
+        if self.manual && self.cap_disp.is_some_and(|d| d > r as i8) {
+            // A manual range measured on this lower row: back up a row when
+            // over it.
+            self.cap_cnt_up = if craw > ov * lim { self.cap_cnt_up + 1 } else { 0 };
+            if self.cap_cnt_up >= 3 {
+                self.cap_set_range(clk, r as i8 + 1);
+                return Some(self.cap_dash());
+            }
+        }
+        // The steps below look at this range's own values only (before its
+        // first one the slope's jump above decides).
+        if !self.manual && !self.ramp.first {
+            if cc > ov * lim {
+                // On 60 mF: above 60 mF, or another, small capacitor whose
+                // ramp is far too fast for 400 uA (100 nF after 10 mF stayed
+                // OL there, emulator): from 60 nF again after CAP_OVER_MAX.
                 self.cap_cnt_up += 1;
-                if self.cap_cnt_up >= 5 {
+                if r < 7 && self.cap_cnt_up >= 5 {
                     self.cap_set_range(clk, r as i8 + 1);
+                } else if r == 7 && self.cap_cnt_up >= CAP_OVER_MAX {
+                    self.cap_set_range(clk, CAP_R_MIN);
                 }
-            } else if cc < 0.1 * lim / ov && r >= 6 {
+            } else if r >= 5 && cc < if r == 5 { CAP_R5_DOWN * lim } else { 0.1 * lim / ov } {
+                // r5 steps down too, to the oscillator's 60 uF range (r4,
+                // which falls to r0 on a small C): without it a small
+                // capacitor after a large one stayed on 600 uF, read from
+                // the ramp (emulator: 100 nF read 3 .. 44 uF, final).
+                // r5 below 42 uF (`CAP_R5_DOWN`), not 58 uF: r4 steps up
+                // above 61.8 uF, so a 50 .. 60 uF capacitor's noise would
+                // hunt between the two.
+                // Only from this range's first value on (the `ramp.first`
+                // gate above): before it `cap_c` is the last range's (1 mF
+                // hunted 600 uF <-> 6 mF on it after the slope's jump).
                 self.cap_cnt_dn += 1;
                 if self.cap_cnt_dn >= 3 {
                     self.cap_set_range(clk, r as i8 - 1);
@@ -6097,7 +7496,16 @@ impl Dmm {
                 self.cap_cnt_dn = 0;
             }
         }
-        Some(self.cap_val(cc, ol))
+        // Before the range's first value: the slope's candidate, grey;
+        // dashes until there is one.
+        if self.ramp.first {
+            if self.cap_cand <= 0.0 {
+                return Some(self.cap_dash());
+            }
+            let g = self.cap_cand;
+            return Some(self.cap_ramp_val(g, g / lim > ov));
+        }
+        Some(self.cap_ramp_val(cc, ol))
     }
 
     /// Time (ms) before which `poll` gives no reading: the settle after a
@@ -6116,14 +7524,19 @@ impl Dmm {
     }
 }
 
-/// Format `v` with `dec` decimals into `buf`; returns the text.
+/// Format `v` with `dec` decimals into `buf`; returns the text. A value too
+/// long for the 16 bytes (sign, 14 digits and the point; e.g. a limit of
+/// 1E20 set over SCPI, or infinity) shows as all nines instead of running
+/// past the buffer (a panic). A value that rounds to zero has no sign (no
+/// "-0.0000", #113).
 pub fn format(buf: &mut [u8; 16], v: f32, dec: u8) -> &str {
     let mut scale = 1.0f32;
     for _ in 0..dec {
         scale *= 10.0;
     }
-    let neg = v < 0.0;
-    let mut n = ((if neg { -v } else { v }) * scale + 0.5) as u64;
+    let max = 10u64.pow(15 - (dec > 0) as u32) - 1;
+    let mut n = ((v.abs() * scale + 0.5) as u64).min(max);
+    let neg = v < 0.0 && n != 0;
     let mut tmp = [0u8; 16];
     let mut i = 0;
     loop {
@@ -6280,6 +7693,182 @@ impl Dmm {
 /// order as `sort_unstable_by(partial_cmp)` for numbers (NaN compares as
 /// equal, so its place is not defined, as there). ~0.1 KB instead of the
 /// ~3.3 KB core quicksort instantiation (region B).
+/// A ring's poll count: +1, from 240 back to 120 (both multiples of the
+/// ring lengths 3 and 6, so the slot `n % len` keeps turning; saturating at
+/// 255 wrote slot 3 for good, the other slots frozen).
+fn ring_inc(n: u8) -> u8 {
+    if n >= 239 { n - 119 } else { n + 1 }
+}
+
+/// The ramp sampled every 50 ms (audit 2026-10-31: every full 255 ms poll
+/// already read 1 mF within 2 %, the final waited for gates). The samples
+/// since the last turn are fitted with a line; each half ramp gives a C
+/// (k / slope), the last up and down ones a pair value 2 k / (|s_up| +
+/// |s_down|) (an absorption current shifts the two slopes oppositely, INFERRED
+/// to cancel to first order). Turns from the samples themselves, not the
+/// comparator bit (device 19b6e3b7: the bit and the AD1 value disagreed by
+/// up to a poll).
+#[derive(Clone, Copy)]
+struct CapSeg {
+    t0: u64,
+    t: [u16; CAP_SEG_MAX],
+    v: [f32; CAP_SEG_MAX],
+    n: u8,
+    /// Leading samples left out of the fit (the turn's, a new row's).
+    skip: u8,
+    dir: i8,
+    ext: f32,
+    ext_k: u8,
+    /// The last half ramps' C, down and up; the last pair value.
+    c: [f32; 2],
+    pair: f32,
+    /// The last half ramp's C, negative for a falling one (DBG:CAP? field
+    /// 11 on the ramp ranges).
+    last: f32,
+    /// This sample ended a half ramp (its value, not the running fit's).
+    done: bool,
+}
+
+impl CapSeg {
+    const fn new() -> Self {
+        CapSeg { t0: 0, t: [0; CAP_SEG_MAX], v: [0.0; CAP_SEG_MAX], n: 0, skip: CAP_SEG_SKIP0, dir: 0, ext: 0.0, ext_k: 0, c: [0.0; 2], pair: 0.0, last: 0.0, done: false }
+    }
+
+    /// Least-squares slope (mV / ms) of samples lo..hi.
+    fn slope(&self, lo: usize, hi: usize) -> Option<f32> {
+        if hi < lo + CAP_SEG_MIN {
+            return None;
+        }
+        let m = (hi - lo) as f32;
+        let (mut st, mut sv) = (0.0f32, 0.0f32);
+        for i in lo..hi {
+            st += self.t[i] as f32;
+            sv += self.v[i];
+        }
+        let (tm, vm) = (st / m, sv / m);
+        let (mut sxy, mut sxx) = (0.0f32, 0.0f32);
+        for i in lo..hi {
+            let dt = self.t[i] as f32 - tm;
+            sxy += dt * (self.v[i] - vm);
+            sxx += dt * dt;
+        }
+        if sxx <= 0.0 {
+            return None;
+        }
+        Some(sxy / sxx)
+    }
+
+    /// Samples from `k` on become the buffer (times from the first of them).
+    fn shift(&mut self, k: usize) {
+        let n = self.n as usize;
+        let k = k.min(n);
+        let base = if k < n { self.t[k] } else { 0 };
+        for i in k..n {
+            self.t[i - k] = self.t[i] - base;
+            self.v[i - k] = self.v[i];
+        }
+        self.t0 += base as u64;
+        self.n = (n - k) as u8;
+    }
+
+    /// The half ramp lo..hi done: its C, and the pair value once both
+    /// directions have one (`Some((c, final))`).
+    fn finish(&mut self, lo: usize, hi: usize, k: f32) -> Option<(f32, bool)> {
+        let sl = self.slope(lo, hi)?;
+        if sl * self.dir as f32 <= 0.0 {
+            return None;
+        }
+        let c = k / sl.abs();
+        if !c.is_finite() {
+            return None;
+        }
+        self.done = true;
+        self.c[(self.dir > 0) as usize] = c;
+        self.last = c * self.dir as f32;
+        let [d, u] = self.c;
+        if d > 0.0 && u > 0.0 {
+            let p = 2.0 / (1.0 / d + 1.0 / u);
+            // The two directions within CAP_SEG_DU (their mean cancels the
+            // absorption's recovery: device, 1 mF after the discharge, the
+            // first half ramps 1009 / 973 uF, pair 991, then 982 .. 987),
+            // or two pair values in a row within CAP_SEG_AGREE.
+            let fin = (d - u).abs() <= CAP_SEG_DU * p || (self.pair > 0.0 && (p - self.pair).abs() <= CAP_SEG_AGREE * p);
+            self.pair = p;
+            return Some((p, fin));
+        }
+        Some((c, false))
+    }
+
+    /// One sample (ms, mV); k: C (uF) x slope (mV / ms). A value when one
+    /// comes: a half ramp's or pair's (final or not), or the running fit's.
+    fn add(&mut self, now: u64, v: f32, k: f32) -> Option<(f32, bool)> {
+        self.done = false;
+        if self.n == 0 {
+            self.t0 = now;
+        }
+        let dt = now.saturating_sub(self.t0);
+        if dt > 60_000 {
+            *self = Self::new();
+            self.t0 = now;
+        }
+        let i = self.n as usize;
+        self.t[i] = now.saturating_sub(self.t0) as u16;
+        self.v[i] = v;
+        self.n += 1;
+        let lo = (self.skip as usize).min(i);
+        if self.dir == 0 {
+            let d = v - self.v[lo];
+            if d.abs() > CAP_SEG_HYST_MV {
+                self.dir = if d > 0.0 { 1 } else { -1 };
+                self.ext = v;
+                self.ext_k = i as u8;
+            }
+        } else if (v - self.ext) * self.dir as f32 > 0.0 {
+            self.ext = v;
+            self.ext_k = i as u8;
+        } else if (self.ext - v) * self.dir as f32 > CAP_SEG_HYST_MV {
+            // A turn at the extreme: the fit up to the sample before it,
+            // the samples after it the next half ramp (its first left out).
+            let e = self.ext_k as usize;
+            let out = self.finish(lo, e, k);
+            self.shift(e + 1);
+            self.skip = CAP_SEG_SKIP;
+            self.dir = -self.dir;
+            self.ext = v;
+            self.ext_k = self.n - 1;
+            return out;
+        }
+        if self.n as usize == CAP_SEG_MAX {
+            // A long half ramp: a result from these, the last sample kept.
+            let out = self.finish(lo, CAP_SEG_MAX, k);
+            self.shift(CAP_SEG_MAX - 1);
+            self.skip = 0;
+            self.ext = v;
+            self.ext_k = 0;
+            return out;
+        }
+        if self.dir != 0 {
+            let sl = self.slope(lo, self.n as usize)?;
+            if sl * self.dir as f32 > 0.0 {
+                return Some((k / sl.abs(), false));
+            }
+        }
+        None
+    }
+}
+
+// In SRAM: the TCM .bss is the stack's (headroom).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut CAP_SEG: core::mem::MaybeUninit<CapSeg> = core::mem::MaybeUninit::uninit();
+
+/// The one `CapSeg` (call once: `Dmm::new`).
+fn cap_seg_static() -> &'static mut CapSeg {
+    unsafe {
+        (*core::ptr::addr_of_mut!(CAP_SEG)).write(CapSeg::new());
+        (*core::ptr::addr_of_mut!(CAP_SEG)).assume_init_mut()
+    }
+}
+
 fn sort_f32(v: &mut [f32]) {
     for i in 1..v.len() {
         let x = v[i];
@@ -6296,6 +7885,102 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A steady ramp at 7 Hz (5 uF on 600 uF) for 1 h of 1.6 s counter
+    /// windows: the rate stays 7 Hz past the old u32 tick sum's wrap
+    /// (~874 s) and the sums stay bounded.
+    #[test]
+    fn cap_ctr_rate_steady_past_wrap() {
+        let tick = 4_915_280.0f64; // CTA, per s
+        let (hz, win) = (7.0f64, 8_000_100u32);
+        let ctb = (hz * win as f64 / tick).round() as u32;
+        let want = ctb as f32 / win as f32 * 4915.28;
+        let mut acc = (0u32, 0u32);
+        for i in 0..(3600.0 * tick / win as f64) as u32 {
+            // Mid-window (half the ticks), then the window's end.
+            let (_, rs, k, _) = cap_ctr_rate(acc, ctb / 2, win / 2);
+            assert!(!rs);
+            // (11 periods a window: the half window counts 5 of them.)
+            assert!((k - want).abs() < 0.1 * want, "mid {i}: {k}");
+            let (a, rs, k, n) = cap_ctr_rate(acc, ctb, win);
+            assert!(rs && n >= 3);
+            assert!((k - want).abs() < 1e-3 * want, "end {i}: {k}");
+            acc = a;
+            assert!(acc.1 <= (1 << 30) + win, "{acc:?}");
+        }
+        assert!(want < CAP_FAST_KHZ * 10.0 && want > CAP_FAST_KHZ);
+        // A slow ramp (0.5 Hz: ~1 mF on 6 mF) stays under CAP_FAST_KHZ.
+        let ctb = (0.5 * win as f64 / tick).round() as u32;
+        let mut acc = (0u32, 0u32);
+        for _ in 0..3000 {
+            let (a, _, k, _) = cap_ctr_rate(acc, ctb, win);
+            assert!(k < CAP_FAST_KHZ, "{k}");
+            acc = a;
+        }
+    }
+
+    /// A triangle ramp (2 mV / 50 ms, 30 mV swing, up 1 % steeper) with
+    /// noise: the pair value is final within 1 % in under 2 s.
+    #[test]
+    fn cap_seg_triangle() {
+        let mut g = CapSeg::new();
+        let k = 1000.0 * 0.04; // C 1000 uF at 0.04 mV / ms
+        let (mut v, mut up, mut fin_t) = (0.0f32, false, None);
+        for i in 0..200u64 {
+            let s = if up { 2.02 } else { 2.0 };
+            v += if up { s } else { -s };
+            if v <= -30.0 { up = true }
+            if v >= 0.0 { up = false }
+            let noise = (((i * 7919) % 13) as f32 - 6.0) * 0.03;
+            if let Some((c, fin)) = g.add(i * 50, v + noise, k) {
+                if fin {
+                    assert!((c - 995.0).abs() < 10.0, "{c} at {i}");
+                    fin_t.get_or_insert(i * 50);
+                }
+            }
+        }
+        assert!(fin_t.is_some_and(|t| t < 2000), "{fin_t:?}");
+    }
+
+    #[test]
+    fn ring_inc_keeps_turning() {
+        let mut n = 0u8;
+        for i in 1..2000u32 {
+            let p = n;
+            n = ring_inc(n);
+            assert_eq!((p as usize + 1) % CAP_RING, n as usize % CAP_RING, "poll {i}");
+            assert_eq!((p as usize + 1) % 3, n as usize % 3);
+            assert!(i < 24 || n as usize >= CAP_NORATIO_N);
+        }
+    }
+
+    #[test]
+    fn format_never_overruns() {
+        let mut b = [0u8; 16];
+        assert_eq!(format(&mut b, 1.5, 3), "1.500");
+        assert_eq!(format(&mut b, -0.25, 2), "-0.25");
+        assert_eq!(format(&mut b, 12345.0, 0), "12345");
+        // Too long for 16 bytes (a limit of 1E20 set over SCPI): all nines.
+        assert_eq!(format(&mut b, 1e20, 3), "99999999999.999");
+        assert_eq!(format(&mut b, -1e20, 3), "-99999999999.999");
+        assert_eq!(format(&mut b, 9.9e37, 0), "999999999999999");
+        assert_eq!(format(&mut b, f32::INFINITY, 1), "9999999999999.9");
+        assert_eq!(format(&mut b, f32::NEG_INFINITY, 0), "-999999999999999");
+        assert_eq!(format(&mut b, f32::NAN, 2), "0.00");
+    }
+
+    #[test]
+    fn format_no_negative_zero() {
+        let mut b = [0u8; 16];
+        // #113: open DC V leads, a few uV below 0 at 4 decimals.
+        assert_eq!(format(&mut b, -0.000_04, 4), "0.0000");
+        assert_eq!(format(&mut b, -0.000_06, 4), "-0.0001");
+        // The extra digit (dec + 1): -10 uV keeps its sign.
+        assert_eq!(format(&mut b, -0.000_01, 5), "-0.00001");
+        assert_eq!(format(&mut b, -0.4, 0), "0");
+        assert_eq!(format(&mut b, -1.25, 1), "-1.3");
+        assert_eq!(format(&mut b, 0.0, 3), "0.000");
+    }
 
     #[test]
     fn ohm_r0_gain_from_r1() {

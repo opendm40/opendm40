@@ -70,6 +70,7 @@ ROOT = os.path.dirname(HERE)
 OUT = os.path.join(HERE, 'out')
 sys.path.insert(0, HERE)
 import run  # noqa: E402
+import bootinfo  # noqa: E402
 
 CASES = ['normal', 'key-short', 'key-abort', 'key-hold', 'loader', 'wdt-one', 'wdt-two', 'wdt-three', 'wdt-healthy',
          'request']
@@ -491,7 +492,8 @@ def case_release():
                 d.close()
                 time.sleep(2)
                 continue
-            if 'WDT_RETRY' in b and crash in b.split(','):
+            f = bootinfo.fields(b)
+            if f.get('reason') == 'WDT_RETRY' and f.get('crash_word') == int(crash, 16):
                 res[key] = b
                 return d, t
             d.close()
@@ -522,12 +524,15 @@ def case_release():
     th.join(5)
     if 'err' in res:
         c.fail('USB host: %s' % res['err'])
-    b1, b2, b3 = res.get('boot1', ''), res.get('boot2', ''), res.get('boot3', '')
-    c.check(',NORMAL,NONE,' in b1, 'first boot NORMAL, NONE (%s)' % b1[:60])
-    c.check(',NORMAL,WDT_RETRY,' in b2 and '0x43520001' in b2.split(','),
-            'after DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520001 (%s)' % b2[:60])
-    c.check(',NORMAL,WDT_RETRY,' in b3 and '0x43520002' in b3.split(','),
-            'after the 2nd DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520002 (%s)' % b3[:60])
+    b1, b2, b3 = (bootinfo.fields(res.get(k, '')) for k in ('boot1', 'boot2', 'boot3'))
+
+    def mrc(f):
+        return '%s %s 0x%08X' % (f.get('mode'), f.get('reason'), f.get('crash_word', 0))
+    c.check(b1.get('mode') == 'NORMAL' and b1.get('reason') == 'NONE', 'first boot NORMAL, NONE (%s)' % mrc(b1))
+    c.check(b2.get('mode') == 'NORMAL' and b2.get('reason') == 'WDT_RETRY' and b2.get('crash_word') == 0x43520001,
+            'after DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520001 (%s)' % mrc(b2))
+    c.check(b3.get('mode') == 'NORMAL' and b3.get('reason') == 'WDT_RETRY' and b3.get('crash_word') == 0x43520002,
+            'after the 2nd DBG:RELEASE: NORMAL, WDT_RETRY, crash word 0x43520002 (%s)' % mrc(b3))
     # The end read comes > 60 s after the last reboot: mark_healthy has
     # cleared the count (the 0x43520002 is checked in DBG:BOOT? above).
     c.expect_normal(3, (CRASH0,))
