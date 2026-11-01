@@ -89,6 +89,7 @@ mod decode;
 mod decode_ui;
 mod readme;
 mod manual;
+mod strip4;
 mod stock;
 #[path = "../../src/stockfont.rs"]
 mod stockfont;
@@ -1272,6 +1273,10 @@ fn main() {
     // `main <out> --readme`: only the README screens (readme.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--readme") {
         std::process::exit(if readme::run(&out) == 0 { 0 } else { 1 });
+    }
+    // `main <out> --strip4`: the four-block strip mockup (strip4.rs), 1x.
+    if std::env::args().nth(2).as_deref() == Some("--strip4") {
+        std::process::exit(if strip4::run(&out) == 0 { 0 } else { 1 });
     }
     // `main <out> --manual`: the user manual's screens (manual.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--manual") {
