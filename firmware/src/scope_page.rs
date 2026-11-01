@@ -2898,8 +2898,9 @@ impl App {
         p[2] = m.ctr.to_bits();
         // [3] trigger type / pulse condition / runt row - default; [4] the
         // pulse width (f32 bits, 0 = default 1 ms).
-        // The MCX settings (the wave view's trigger is not persisted).
-        let s = &self.scope.mcx_settings();
+        // The MCX settings (the wave view's trigger is not persisted; a Bode
+        // sweep's neither: app_bode.rs).
+        let s = &self.persisted_gen_scope().1;
         let dr = scope::Settings::DEFAULT.runt_row;
         // Bits 4 / 5: the trigger source GEN, the GEN trace shown.
         p[3] = (s.ttype as u32 & 3)

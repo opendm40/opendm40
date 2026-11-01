@@ -2166,9 +2166,11 @@ impl App {
 
     /// Settings -> backup SRAM words.
     fn persist_words(&self) -> [u32; crate::persist::WORDS] {
-        let g = &self.gen.s;
-        // The MCX settings (the wave view's are not persisted).
-        let sc = &self.scope.mcx_settings();
+        // The MCX settings (the wave view's are not persisted). During a
+        // Bode sweep the user's settings from before it, not the sweep's
+        // (a power loss mid-sweep keeps them).
+        let (g, sc) = self.persisted_gen_scope();
+        let (g, sc) = (&g, &sc);
         let mut p = [0u32; crate::persist::WORDS];
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
@@ -3215,6 +3217,7 @@ impl App {
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
+            || app_bode::ses().running()
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {

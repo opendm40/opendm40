@@ -94,6 +94,19 @@ static mut SES: Ses = Ses {
     prev: None,
 };
 
+impl Ses {
+    /// A sweep runs (App::off_held: no auto power-off mid-sweep).
+    pub fn running(&self) -> bool {
+        self.run.is_some()
+    }
+
+    /// The user's generator and MCX scope settings while a sweep has
+    /// replaced them (App::persist_words saves these instead).
+    pub fn user_settings(&self) -> Option<(gen::Settings, scope::Settings)> {
+        self.prev
+    }
+}
+
 pub fn ses() -> &'static mut Ses {
     // SAFETY: main loop only.
     unsafe { &mut *core::ptr::addr_of_mut!(SES) }
@@ -196,6 +209,13 @@ fn hz_text(b: &mut [u8; 16], f: f32) -> (&str, &'static str) {
 }
 
 impl App {
+    /// The generator and MCX scope settings to persist: during a sweep the
+    /// user's from before it, not the sweep's (a power loss or a preset
+    /// save mid-sweep keeps the user's).
+    pub(super) fn persisted_gen_scope(&self) -> (gen::Settings, scope::Settings) {
+        ses().user_settings().unwrap_or((self.gen.s, self.scope.mcx_settings()))
+    }
+
     /// Open the page (scope MF > Settings > Bode, BODE:RUN / BODE:THRU).
     #[inline(never)]
     pub(super) fn bode_open(&mut self, clk: &mut Clock) -> Result<(), &'static str> {
