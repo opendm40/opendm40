@@ -2416,6 +2416,7 @@ step to its next value; rows with **-** / **+** change in steps.
 |---|---|
 | Vendor, Web | Alientek, www.alientek.com |
 | Model | DM40A, DM40B or DM40C (from the meter's calibration data) |
+| SN | The factory serial number, as on the stock Device page |
 | Bootloader | The version of the Alientek bootloader |
 | Software | The opendm40 version |
 | Hardware | The hardware version |

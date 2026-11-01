@@ -2474,6 +2474,7 @@ Windows и macOS: не проверялось.
 |---|---|
 | Vendor, Web | Alientek, www.alientek.com |
 | Model | DM40A, DM40B или DM40C (из калибровочных данных прибора) |
+| SN | Заводской серийный номер, как на странице Device стока |
 | Bootloader | Версия загрузчика Alientek |
 | Software | Версия opendm40 |
 | Hardware | Версия аппаратуры |
