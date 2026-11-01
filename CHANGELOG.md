@@ -188,6 +188,11 @@ section named after the tag as the release notes; how to cut a release:
   and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
   hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
   (~0.45 s).
+- Multimeter: a current flowing from COM into the A jack now shows A-JACK
+  in DC V, DC mV and Ω too (from ~4 mA; DC V ~9 mA; no A-PROT for it, nor for
+  an AC current in DC V).
+  DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
+  it now and then.
 
 ## v0.3.0 (2026-10-27)
 

@@ -507,6 +507,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// 0x70. That a current in A reads 0x70 is INFERRED from those. Default on; "pb1cmp70:0" =
         /// CMPHO alone (the model before).
         public bool Pb1Cmp70 = true;
+        /// PB1 below the comparator's window reads CTSTA 0x00, as an idle PB1 (opt-in, "pb1lo0:1";
+        /// device 2026-10-30: a reversed current in A, DC mA -20.6 / -4.7 mA, raised no A-JACK in
+        /// DC V 6 V / ohm, where the same current A -> COM did; hw/README: 0x00 = below, INFERRED).
+        /// Off: CMPLO there (the model before). Opt-in because the AC currents' negative halves then
+        /// read 0x00 too, and the AC+DC mV AC-current cases (acdcmv-*) lose their DC-phase hits:
+        /// whether the device does the same is not measured.
+        public bool Pb1Lo0;
         /// The frequency row's standing level on PB1 - PB3 (opt-in, "hzpb1:mV"; PR #55, SAD1I 00:
         /// +2.5 mV with V-COM open, -140 mV at 10 V DC; device d8e249d's ~54 mV came with SAD1I 11).
         public double HzPb1Mv;
@@ -899,6 +906,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hfboth": HfBoth = o.Value; break;
                 case "contbump": ContBumpMv = o.Value; break;
                 case "pb1cmp70": Pb1Cmp70 = o.Value != 0; break;
+                case "pb1lo0": Pb1Lo0 = o.Value != 0; break;
                 case "hzpb1": HzPb1Mv = o.Value; break;
                 case "ailift": AiLiftK = o.Value; break;
                 case "ainz": AiNzMv = o.Value; break;
@@ -1565,7 +1573,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// The opendm40 AD2 sentinel configuration: ENOP2 with SOP2P = PB1, SAD2IP = OP2O,
         /// SAD2IN = PB3, in a role whose own measurement leaves AD2 / OP2 unused.
         private bool Ad2OnPb1Sentinel =>
-            (role == Role.Cont || role == Role.Diode || role == Role.CapOsc)
+            (role == Role.Cont || role == Role.Diode || role == Role.CapOsc
+             || role == Role.DcV || role == Role.DcMv || role == Role.Ohm)
             && (regs[0x32] & 0xF0) == 0xD0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
         /// The opendm40 A-jack protection probe (sentinel.rs `probe_row`): ENOP2 with SOP2P = PB2,
@@ -2231,6 +2240,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 cmpHigh = node > CmpHighThreshold;
                 cmpLow = node < CmpLowThreshold;
                 if(Pb1Cmp70 && scmpiPb1 && cmpHigh) cmpLow = true;
+                // ... and (Pb1Lo0) PB1 below the window reads nothing, as an idle PB1
+                if(Pb1Lo0 && scmpiPb1 && !cmpHigh) cmpLow = false;
                 if(role == Role.Ohm && OhmBothV > 0 && scmpiPb1)
                 {
                     // a source on V-COM overdrives the comparator (OhmBothV, device 1a11eda)
@@ -2338,13 +2349,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     return true;
                 }
                 if(scmpi != 4) return false;
+                // (the V jack's pickup in ohm / temperature: Pb1Volts, Pb1VjackMv)
                 v = Pb1Volts(t);
-                if(Pb1VjackMv != 0 && (role == Role.Ohm || role == Role.Temp || role == Role.None))
-                {
-                    double dc, ac, hz, duty; string shape;
-                    Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
-                    v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
-                }
                 return true;
             case Role.DcA:
                 if(scmpi != 0) return false;
@@ -2361,10 +2367,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
             var v = Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
-            if(Pb1VjackMv != 0 && role == Role.Cont)
+            if(Pb1VjackMv != 0 && (role == Role.Cont || role == Role.Ohm || role == Role.Temp || role == Role.None))
             {
-                // the V jack on PB1 in the continuity row as in ohm (SentinelNode; device 40728b8 /
-                // d2aff22: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
+                // the V jack on PB1 in the ohm / temperature rows (the comparator, and AD2 on PB1:
+                // opendm40's negative leg) and in the continuity row (device 40728b8 / d2aff22:
+                // the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
             }

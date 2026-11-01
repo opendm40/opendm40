@@ -60,6 +60,8 @@ Additional requirements:
       - Left (owner): the rows with A shorted to COM; continuity / diode; a real current in A
         (20 mA and ~1 mA) per row. Tool: branch `exp/pb1-meas` (`DBG:SENT:PB1? [n]`, `DBG:SENT:R21 <v>`;
         build with `--features mute`; not for merging, region B -1.5 KB).
+      - DC V 6 V's window goes to +417 mV (R21 0x8B, CMPHO reads only) with fix/ajack-polarity (the 66 kHz false A-JACK);
+        a reversed current (COM -> A) gets A-JACK but no A-PROT there (the probe needs a comparator run).
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
