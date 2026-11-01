@@ -163,6 +163,8 @@ jobs:
           fetch-depth: 0 # the tags and the history since the last one
       - name: tools/version-check.sh
         run: firmware/tools/version-check.sh
+      # A PR into release/** keeps the release's version: the release PR
+      # into main raises it once.
       - name: tools/pr-version-check.sh (a PR that changes the firmware raises the version)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !startsWith(github.base_ref, 'release/')
         run: firmware/tools/pr-version-check.sh ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
