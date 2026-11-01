@@ -12,7 +12,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Device page:** the factory serial number, the SN line of the stock page.
 - **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
-- **Mode Remember** (Settings > More > More, as the stock's; default OFF):
+- **Mode Remember** (Settings > Power; default OFF, as the stock's):
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
 - **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
@@ -65,6 +65,14 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Settings in tabs:** the sections (Display, Alerts, Power, Multimeter,
+  Scope, Other) are tabs on the left, rows are taller, and only the value
+  side of a row reacts to a tap ([manual](docs/manual/README.md#settings)).
+- **Tap feedback:** a pressed button or row is drawn in one pass, timed to
+  the panel's refresh scan.
+- **Texts as on the stock firmware:** lowercase k in units (kΩ, kHz, kW),
+  **6mA**, ℃ / ℉ shown as symbols, and several renamed titles and rows
+  ([#136](https://github.com/opendm40/opendm40/issues/136)).
 - **Long press on the A button** opens the
   [inrush page](docs/manual/README.md#inrush-current) (it opened the power
   meter's wiring picture; that one stays under **MF > Wiring**).
@@ -202,7 +210,7 @@ section named after the tag as the release notes; how to cut a release:
 - Power meter: no multimeter MAX / AVG / REL / MIN column while the page
   shows "I ranging...".
 - **Key/alert volume 0 %** also silences the continuity and diode beeper
-  ([manual](docs/manual/README.md#settings-page-1)).
+  ([manual](docs/manual/README.md#alerts-tab)).
 - Combined view: the meter strip shows **POWER**, the range and dashes while
   the power meter ranges, not an empty strip.
 - **Inrush:** the automatic power-off no longer switches the meter off while

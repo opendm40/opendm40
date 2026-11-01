@@ -59,7 +59,7 @@
 //! them until the unmount).
 //!
 //! Host writes (vwrite.rs): read-only by default ("Files live": the WP bit,
-//! the UNIT ATTENTION above at once). Settings 3/3 "USB disk" = "PC can
+//! the UNIT ATTENTION above at once). Settings > Other "USB disk" = "PC can
 //! edit" (DBG:VDISK:RO 0) makes it writable from the next bus reset (a
 //! re-plug; volatile, read-only again at boot). Writable, a write is only
 //! accepted as a delete of a LOGS / SCOPE /

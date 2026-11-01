@@ -153,7 +153,7 @@
 //!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950
 //!     | NTCUSER (dmm.rs T_NAMES; also TC / K for TCK); without it the current
 //!     sensor is kept. Reading in the UNIT:TEMP unit (OL = +9.9E37).
-//!   UNIT:TEMPerature C | F / ?   global temperature unit (also Settings 2/2):
+//!   UNIT:TEMPerature C | F / ?   global temperature unit (also Settings > Multimeter):
 //!     readings, MEAS:TEMP:CJ? and SYST:TEMP? follow it; offsets stay in C
 //!   [SENSe:]TEMPerature:TRANsducer <sensor> / ?   select / query the sensor
 //!   [SENSe:]TEMPerature:OFFSet <C> / ?   offset of the CURRENT sensor, -20..20
@@ -178,13 +178,13 @@
 //!     continuity / diode) | DC (hint: DC on V/ohm in AC V) | AC (hint: AC in
 //!     DC V 6 V) | FUSE (hint: an A function at zero for 60 s)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
-//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings 3/3 "Jack
+//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings > Alerts "Jack
 //!     alerts"); default 7 = ON, persisted; bit 3 (the removed "Leads in
 //!     A?" reminder) is accepted and ignored;
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
 //!   SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?   the danger alarm (doc
-//!     4.10, Settings 3/3 "Danger alarm"): A-JACK, A-PROT while its current
+//!     4.10, Settings > Alerts "Danger alarm"): A-JACK, A-PROT while its current
 //!     flows and a current above the 10 A rating sound a two-tone pattern at
 //!     full duty (LOUD, default), at the key / alert volume (VOLUME) or not
 //!     at all (OFF); persisted. `?` -> LOUD | VOLUME | OFF
@@ -203,12 +203,12 @@
 //!     stale"; over range: +9.9E37 (doc 3.15). Works with the readout off.
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
-//!     Settings 3/3 "Burden voltage", persisted, default OFF
+//!     Settings > Multimeter "Burden voltage", persisted, default OFF
 //!   [SENSe:]RESistance:NEGative ON|OFF / ?   ohm readings below 0 shown
 //!     (shorted leads: the internal offset, a few tens of mohm) instead of
-//!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
+//!     clamped at 0 as the stock; Settings > Multimeter "Negative ohm", persisted,
 //!     default OFF
-//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings 3/3 "Mode Remember"
+//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings > Power "Mode Remember"
 //!     (the stock's switch; the header is the Keysight 34461A's "recall the
 //!     power-down state at power-on"): ON = a power-on continues the
 //!     multimeter as it was (app.rs `restore`); persisted, default OFF
@@ -685,6 +685,8 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
+///   DBG:SCANLINE?           panel Get Scanline + press sync state (scanline.rs)
+///   DBG:SCANLINE:DIR n | :SYNC 0|1   scan axis 0..3 / press sync off, on
 ///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
 ///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
 ///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
@@ -1097,12 +1099,12 @@ pub enum Cmd {
     Pow(Pow),
     /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
     FetchBurden,
-    /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
+    /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings > Multimeter).
     DispBurden(Option<bool>),
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
-    /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
+    /// (Settings > Multimeter "Negative ohm", Dmm::ohm_neg).
     ResNeg(Option<bool>),
-    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings 3/3 "Mode Remember".
+    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings > Power "Mode Remember".
     ModeRemember(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
@@ -2681,6 +2683,26 @@ impl Scpi {
                         // ~0.3 s): per phase (TE off; on, mode 0; on, mode
                         // 1), ";" between: <samples>, then per pin PA3,
                         // PB13, PC1, PC15 <level changes>,<samples high>.
+                        // DBG:SCANLINE? = the panel's Get Scanline (0x45) and
+                        // the press feedback's sync (scanline.rs `query`);
+                        // DBG:SCANLINE:DIR 0..3 = the screen axis of the scan,
+                        // DBG:SCANLINE:SYNC 0|1 = the wait before a pressed box.
+                        #[cfg(target_os = "none")]
+                        b"SCANLINE" => {
+                            self.len = 0;
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            let v = core::str::from_utf8(trim(a)).ok().and_then(|t| t.parse::<u8>().ok());
+                            if op.is_empty() && query {
+                                crate::scanline::query(self);
+                            } else if kw(op, "DIR") && !query && v.is_some_and(|d| d < 4) {
+                                crate::scanline::set(v, None);
+                            } else if kw(op, "SYNC") && !query && v.is_some_and(|d| d < 2) {
+                                crate::scanline::set(None, v.map(|d| d == 1));
+                            } else {
+                                self.err_arg(no_arg, "Illegal parameter value");
+                            }
+                            continue;
+                        }
                         #[cfg(target_os = "none")]
                         b"TE" if query => {
                             self.len = 0;
