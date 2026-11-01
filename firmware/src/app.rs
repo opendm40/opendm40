@@ -2229,10 +2229,13 @@ impl App {
             | (self.off_idx as u32) << 4
             | (self.start_page as u32) << 8
             | (self.bt_on as u32) << 12
-            | (crate::scpi::idn_emul() as u32 & 1) << 14;
+            | (crate::scpi::idn_emul() as u32 & 1) << 14
+            | (self.dmm.sub_mem() as u32) << 16;
         // (p[0] bit 13 was the old "both rails" flag, default 1: retired so
         // units upgraded from it start in the new Auto default.) Bit 14: SCPI
         // *IDN? emulation (SYST:IDN:EMUL 34401A; never used before, 0 = OFF).
+        // Bits 16..21: each function button's last sub-mode (dmm::submem;
+        // never used before, 0 = the stock's entries).
         p[1] = self.backlight as u32 | (self.volume as u32) << 8 | (self.roll as u32) << 16;
         // The DMM function as restore_func starts it: AUTO's own steps
         // between V and mV (modes 2 / 3 <-> 0 / 1) are no settings change
@@ -2343,13 +2346,14 @@ impl App {
     /// the limits, rate and smoothing, the scope's acquisition, trigger,
     /// math and measurements, the power meter and the Record page. Otherwise
     /// only the preferences are restored (display, sound, power, BT, alerts,
-    /// units, sensor, scope look and touch, the touch calibration, the
+    /// units, sensor, each function button's last sub-mode and the ohm test
+    /// current, scope look and touch, the touch calibration, the
     /// generator's setup) and the rest keeps its defaults, as the stock
     /// after a power-on. Mode Remember ON (the stock's Other Settings
     /// switch; its record: function, coupling, autorange flags, ohm variant,
     /// chart rate) continues the multimeter after a power-off too: the
-    /// function and coupling, the AUTO / AUTO+ choices and the ohm test
-    /// current, a fixed V / A / ohm range, rate and smoothing, the trend
+    /// function and coupling, the AUTO / AUTO+ choices, a fixed V / A / ohm
+    /// range, rate and smoothing, the trend
     /// timebase. Not AutoHold, the limits, REL or HOLD (as the stock: they
     /// change what the readout shows, unnoticed after a power-on), nor the
     /// scope, the power meter's settings or the Record page.
@@ -2434,6 +2438,10 @@ impl App {
         if self.dmm.pw.on {
             self.dmm.pw_set_coupling(clk, coup);
         }
+        // The buttons' last sub-modes and the ohm test current, a
+        // preference (Mode Remember or not); after `select`, which notes its
+        // own function.
+        self.dmm.set_sub_mem((p[0] >> 16 & 0x3F) as u8, (p[2] >> 24) as u8);
         // Mode Remember: the fixed range of that function (a reset without
         // it starts in autorange, as before).
         let item = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_RANGE_SHIFT & 0xF) as u8;

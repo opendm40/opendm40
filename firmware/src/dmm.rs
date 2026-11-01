@@ -1136,6 +1136,40 @@ impl Reading {
     }
 }
 
+/// The sub-mode each function button last used, one byte (`Dmm::sub_mem`,
+/// persisted by app.rs in p[0] bits 16..21): bits 0..1 the V coupling and
+/// bits 2..3 the A coupling (`Dmm::sub`: DC / AC / AC+DC / AUTO), bit 4 the
+/// continuity / diode button on continuity (mode 11), bit 5 the Hz /
+/// temperature button on temperature (mode 15). 0 = the stock's entries (DC,
+/// DC, diode, Hz), what an older record reads. The ohm button's test current
+/// is `ohm_var` (p[2]).
+pub mod submem {
+    /// `mem` with the sub-mode of stock mode `mode` (coupling `sub`) noted;
+    /// the modes without one leave it as it is.
+    pub fn note(mem: u8, mode: u8, sub: u8) -> u8 {
+        let (shift, mask, v) = match mode {
+            0..=3 => (0, 3, sub & 3),
+            4..=9 => (2, 3, sub & 3),
+            11 | 12 => (4, 1, (mode == 11) as u8),
+            14 | 15 => (5, 1, (mode == 15) as u8),
+            _ => return mem,
+        };
+        mem & !(mask << shift) | v << shift
+    }
+    /// The V (`amp` false) or A coupling to enter with.
+    pub fn coupling(mem: u8, amp: bool) -> u8 {
+        mem >> if amp { 2 } else { 0 } & 3
+    }
+    /// The continuity / diode button's mode to enter: 11 or 12.
+    pub fn cont_diode(mem: u8) -> u8 {
+        if mem & 0x10 != 0 { 11 } else { 12 }
+    }
+    /// The Hz / temperature button's mode to enter: 14 or 15.
+    pub fn hz_temp(mem: u8) -> u8 {
+        if mem & 0x20 != 0 { 15 } else { 14 }
+    }
+}
+
 pub fn button_of(mode: u8) -> Button {
     match mode {
         0..=3 => Button::Volt,
@@ -1727,6 +1761,8 @@ pub struct Dmm {
     a_auto: u8,
     /// m+8: ohm variant (selects f10_p8set when 1).
     ohm_var: u8,
+    /// The last sub-mode of each function button (`submem`).
+    sub_mem: u8,
     /// S+0x40: no reading accepted before this time.
     deadline: u64,
     /// Time of the last function change (`set`): ohm steps down one range
@@ -2507,6 +2543,7 @@ impl Dmm {
             v_auto: 1,
             a_auto: 3,
             ohm_var: 0,
+            sub_mem: 0,
             deadline: 0,
             entry: 0,
             mv_clip: 0.0,
@@ -2734,6 +2771,26 @@ impl Dmm {
 
     pub fn ohm_var(&self) -> u8 {
         self.ohm_var
+    }
+
+    /// The buttons' last sub-modes (`submem`), for the settings record.
+    pub fn sub_mem(&self) -> u8 {
+        self.sub_mem
+    }
+    /// Restore the buttons' last sub-modes (`submem`; the function in
+    /// force is not changed) and the ohm test current (0 / 1).
+    pub fn set_sub_mem(&mut self, mem: u8, ohm: u8) {
+        self.sub_mem = mem & 0x3F;
+        if ohm <= 1 {
+            self.ohm_var = ohm;
+        }
+    }
+    /// Note the function in force as its button's last sub-mode (a button,
+    /// SCPI, Bluetooth or the range page chose it). Not in the power meter.
+    fn note_sub(&mut self) {
+        if !self.pw.on {
+            self.sub_mem = submem::note(self.sub_mem, self.mode, self.sub());
+        }
     }
 
     /// The lowest range of the ohm autorange: r0 (60 ohm) with the default
@@ -3662,6 +3719,7 @@ impl Dmm {
         // A coupling change starts the function afresh (`entry_ms`: the
         // AUTO coupling's SCPI wait counts from it) even on the same mode.
         self.entry = clk.now_ms();
+        self.note_sub();
     }
 
     /// Enter a stock mode directly (SCPI, BT command 06). Auto range.
@@ -3704,6 +3762,7 @@ impl Dmm {
             _ => (0, ENTRY_MS),
         };
         self.set(clk, mode.min(15), r, settle);
+        self.note_sub();
         self.cap_hops = 0;
         // No grey value or discharge estimate from an earlier visit.
         self.cap_grey = 0.0;
@@ -4093,18 +4152,31 @@ impl Dmm {
             self.acdc = false;
             self.cpl_auto = false;
         }
+        // From another function: the button's last sub-mode (`submem`;
+        // the ohm button its test current, `ohm_var`).
+        let mem = self.sub_mem;
         match b {
             Button::Volt => {
                 self.manual = false;
                 self.set(clk, 1, 0, ENTRY_MS);
+                let c = submem::coupling(mem, false);
+                if c != 0 {
+                    self.set_sub(clk, c);
+                }
             }
             Button::Amp => {
                 self.manual = false;
                 match from_pw {
+                    // From the power meter: its range's DC A (a load current
+                    // may still flow), whatever A used last.
                     Some((iu, ir)) => self.set(clk, 7 + iu, ir as i8, 650),
                     None => {
                         let r = self.range.max(0) % 2;
                         self.set(clk, 8, r, ENTRY_MS);
+                        let c = submem::coupling(mem, true);
+                        if c != 0 {
+                            self.set_sub(clk, c);
+                        }
                     }
                 }
             }
@@ -4126,12 +4198,20 @@ impl Dmm {
             }
             Button::ContDiode => {
                 self.manual = false;
-                let to = if same && m == 12 { 11 } else { 12 };
+                let to = match (same, m) {
+                    (true, 12) => 11,
+                    (true, _) => 12,
+                    _ => submem::cont_diode(mem),
+                };
                 self.set(clk, to, 0, if to == 11 { 200 } else { 100 });
             }
             Button::HzTemp => {
                 self.manual = false;
-                let to = if same && m == 14 { 15 } else { 14 };
+                let to = match (same, m) {
+                    (true, 14) => 15,
+                    (true, _) => 14,
+                    _ => submem::hz_temp(mem),
+                };
                 let r = if to == 15 { self.t_range0() } else { 0 };
                 self.set(clk, to, r, if to == 14 { 1000 } else { 500 });
             }
@@ -4147,6 +4227,7 @@ impl Dmm {
                 }
             }
         }
+        self.note_sub();
     }
 
     /// AUTO key (FUN_0803ddf4, app_decompile.c:59745-59777): back to auto
@@ -4439,6 +4520,7 @@ impl Dmm {
             5 => self.select(clk, if s == 1 { 15 } else { 14 }),
             _ => {}
         }
+        self.note_sub();
         before != (self.button(), self.mode_byte() & 0xC0)
     }
 
@@ -7906,6 +7988,32 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The buttons' last sub-modes: each button keeps its own, the default
+    /// (0, an older record) is the stock's entries.
+    #[test]
+    fn submem_per_button() {
+        assert_eq!((submem::coupling(0, false), submem::coupling(0, true)), (0, 0));
+        assert_eq!((submem::cont_diode(0), submem::hz_temp(0)), (12, 14));
+        // VAC, then continuity: both kept.
+        let m = submem::note(0, 0, 1);
+        let m = submem::note(m, 11, 0);
+        assert_eq!((submem::coupling(m, false), submem::cont_diode(m)), (1, 11));
+        // mV AC+DC (mode 3, sub 2), A AUTO, temperature.
+        let m = submem::note(m, 3, 2);
+        let m = submem::note(m, 8, 3);
+        let m = submem::note(m, 15, 0);
+        assert_eq!((submem::coupling(m, false), submem::coupling(m, true), submem::hz_temp(m)), (2, 3, 15));
+        assert_eq!(submem::cont_diode(m), 11);
+        // Ohm, capacitance, the power meter code: nothing changes.
+        for f in [10, 13, pw::FUNC] {
+            assert_eq!(submem::note(m, f, 1), m);
+        }
+        // Back to diode / Hz / DC.
+        let m = submem::note(submem::note(submem::note(m, 12, 0), 14, 0), 1, 0);
+        assert_eq!((submem::coupling(m, false), submem::cont_diode(m), submem::hz_temp(m)), (0, 12, 14));
+        assert!(m <= 0x3F);
+    }
 
     /// A steady ramp at 7 Hz (5 uF on 600 uF) for 1 h of 1.6 s counter
     /// windows: the rate stays 7 Hz past the old u32 tick sum's wrap

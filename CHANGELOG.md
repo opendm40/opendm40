@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Each function button remembers its sub-mode:** V and A their coupling,
+  diode / continuity, Hz / °C, Ω its test current; kept after a power-off
+  ([manual](docs/manual/README.md#choose-a-function)).
 - **Device page:** the factory serial number, the SN line of the stock page.
 - **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.

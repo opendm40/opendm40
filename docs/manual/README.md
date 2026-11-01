@@ -478,8 +478,9 @@ sub-mode:
 
 *The function buttons and their sub-modes.*
 
-A function always starts in autorange; V and A start in DC, the diode
-button starts on diode, the Hz / °C button on frequency. The coupling can
+A function always starts in autorange. Each button returns to the sub-mode
+it was last in, also after a power-off (new meter: DC, diode, frequency,
+0.90 mA); SCPI `CONF` sets it too. The coupling can
 also be chosen on the [range page](#ranges-the-range-page-mf).
 
 Right after a change, the new unit appears at once and the value shows grey

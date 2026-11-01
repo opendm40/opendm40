@@ -464,6 +464,9 @@ pub struct Session {
     pub prev_sub: u8,
     pub prev_auto: Option<u8>,
     pub prev_item: Option<u8>,
+    /// The buttons' last sub-modes (dmm::submem) before the page set AC A:
+    /// restored with `prev_func` when it was not A.
+    pub prev_mem: u8,
     /// The stream's nominal rate, mHz (the file header).
     pub rate_mhz: u32,
     /// Live redraw: what the state line / buttons last showed, next time.
@@ -490,6 +493,7 @@ impl Session {
         stop: Stop::None,
         prev_func: 8,
         prev_sub: 0,
+        prev_mem: 0,
         prev_auto: None,
         prev_item: None,
         rate_mhz: RATE_HZ * 1000,
