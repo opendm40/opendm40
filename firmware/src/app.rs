@@ -549,6 +549,24 @@ pub fn finish_disk_writes(now: u64) {
     crate::screenshot::prep_finish();
 }
 
+impl App {
+    /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
+    /// install from the disk): backlight, generator output and scope
+    /// acquisition off, then 20 ms for the supply to settle. A reset releases
+    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
+    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
+    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
+    /// loader never ran; why the load matters is inferred).
+    pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
+        backlight(0);
+        let mut g = self.gen.s;
+        g.on = false;
+        self.gen.apply(g);
+        self.scope.stop_hw();
+        clk.delay_ms(20);
+    }
+}
+
 /// Power off as the stock: both analog rails / power hold low. The callers
 /// save the settings to the backup SRAM first (App::persist_now); the copy
 /// in the settings file is brought up to date here (setfile.rs), after the
