@@ -1557,6 +1557,26 @@ sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
 
+### Bode plot
+
+**MF > Settings > Bode**: the generator sweeps a sine from 10 Hz to 50 kHz
+(2 Vpp around 1.5 V) and the page plots the gain (dB) and phase (degrees)
+of CH1 against it.
+
+![An RC low-pass, 1 kΩ / 100 nF](img/bode.png)
+
+*An RC low-pass, 1 kΩ / 100 nF.*
+
+1. Probe on the generator's **OUT**, **Thru**: the reference (kept until
+   power-off, per points-per-decade setting).
+2. Generator into the circuit, probe on its output, **Run** (or **RUN**).
+
+Tap the chart for the cursor; the -3 dB frequency is at the right.
+**Save** writes `SCOPE/BODE000.CSV` (`freq_hz,gain_db,phase_deg`; up to
+BODE023). **10/dec** switches 5 / 10 / 20 points per decade. Without a
+Thru the gain is against the generator's amplitude and the phase includes
+the meter's own delay. SCPI: [Bode plot](scpi-reference.md#bode-plot).
+
 ### Wave view: the scope on the multimeter inputs
 
 The Wave view shows the signal on the multimeter's **V** or **A** jacks as

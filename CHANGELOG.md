@@ -9,6 +9,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Bode plot** (scope **MF > Settings > Bode**): the generator sweeps
+  10 Hz .. 50 kHz, the page plots CH1's gain and phase against it, with a
+  Thru reference, a cursor and the -3 dB frequency; Save as
+  `SCOPE/BODE000.CSV`; SCPI `BODE:RUN`, `BODE:DATA?`
+  ([manual](docs/manual/README.md#bode-plot)).
 - **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
