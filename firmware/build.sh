@@ -71,8 +71,13 @@ done
 # rust-src with this profile (opt-level z, LTO) and these RUSTFLAGS instead
 # of the prebuilt rust-std ones (~4.6 KB of regions B + C; PR description).
 # alloc is not built: nothing uses it. The same RUSTC_BOOTSTRAP covers it.
+# -Cpanic=immediate-abort (unstable; overrides the profile's panic=abort,
+# the later -C wins): a panic is a `udf` -> HardFault -> the shim's
+# default_handler loop -> FWDGT reset, counted by DBG:BOOT? as before; no
+# panic handler and no panic formatting code (~19 KB of regions B + C). The
+# magenta bar of main.rs `panic` is not drawn in this build.
 RUSTC_BOOTSTRAP=1 \
-RUSTFLAGS="-Zlocation-detail=none -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
+RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
     cargo build --release -Zbuild-std=core "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
