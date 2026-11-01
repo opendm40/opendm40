@@ -2079,9 +2079,10 @@ There are two recorders:
 ### Start and stop a recording
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
-meter beeps and shows **Recording CSV**; a blinking red dot and **REC** appear in the
-status bar (on the scope pages a red dot and **DMM** in the top bar). Swipe down again to stop. When the last rows are on the disk,
-the meter shows **Saved LOG007.DLG** (with the file's number).
+meter beeps and shows **Recording CSV**; a blinking red dot and **REC**
+appear in the status bar (on the scope pages a red dot and **DMM** in the
+top bar). Swipe down again to stop. When the last rows are on the disk, the
+meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.
 If the interval there is **Fast**, the swipe still starts a normal recording
@@ -2259,22 +2260,15 @@ the trash before; the trash itself is not kept on the meter.
 #### Copying DEBUG/SPIFLASH.BIN on Linux
 
 `DEBUG/SPIFLASH.BIN` changes inside while its name, size and place on the
-drive stay the same. Linux keeps the parts of the file it has read before
-and does not read them again when the meter announces the change, so a
-plain `cp` while the drive stays mounted can return an old copy, or a mix
-of old and new parts (device check
-[2f56ff9](../history/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
-files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
-each new or changed file its own new entry. The meter cannot make Linux drop
-the old parts: Linux re-reads the folders, but keeps what it already knows
-about a file it has seen (its entry and its data) while the drive is mounted
-(inferred from the kernel sources: `fs/fat`, `block/disk-events.c`; not
-tested with a changed date or entry).
+drive stay the same. While the drive is mounted, Linux keeps the parts of
+the file it has already read (*inferred*), so a plain `cp` can return an old
+copy, or a mix of old and new parts. New files in `LOGS/`, `SCOPE/` and
+`SHOTS/` are not affected.
 
 To get a current copy, do one of these first:
 
-- drop the cached parts of that file: `python3 -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED)' /media/$USER/DM40/DEBUG/SPIFLASH.BIN`
-  (used in the device check), then `cp`;
+- drop the cached parts of that file: `python3 -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED)' /media/$USER/DM40/DEBUG/SPIFLASH.BIN`,
+  then `cp`;
 - or drop all cached files: `sync; echo 1 | sudo tee /proc/sys/vm/drop_caches`;
 - or unmount and mount the drive again (`udisksctl unmount -b /dev/sdX`,
   then `udisksctl mount -b /dev/sdX`);
@@ -2352,8 +2346,9 @@ The gallery also shows the screenshots made by the stock firmware.
 
 To open: main menu, **Settings**. The tabs on the left are the sections;
 tap one to show its rows. Tap a value to step to the next one (the name
-does nothing); rows with **-** / **+** change in steps, a row with **>** opens a page from anywhere on it. **< Back** in
-the title bar or **MENU** goes back to the main menu.
+does nothing); rows with **-** / **+** change in steps, a row with **>**
+opens a page from anywhere on it. **< Back** in the title bar or **MENU**
+goes back to the main menu.
 
 ### Display tab
 
@@ -2363,7 +2358,7 @@ the title bar or **MENU** goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
+| **Backlight** | 10, 15, 25 ... 95, 100 % | 55 % | Screen brightness. |
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
 | **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
