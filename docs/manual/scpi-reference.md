@@ -653,7 +653,6 @@ UART, Modbus RTU and DALI on the scope page ([the decoder](README.md#protocol-de
   or while a DMM logger session streams (`LOG:STATe ON`): `Settings
   conflict`; so is `LOG:STATe ON` while the frame log is open.
 - With too few samples per bit (fewer than 4: a slow timebase, the Wave
-
   view above 4800 baud) nothing is decoded; `DECode:RATE?` gives `0` with
   `AUTO`.
 

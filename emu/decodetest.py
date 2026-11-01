@@ -566,7 +566,11 @@ try:
             wait_ms(1500)
             img = shot('m09-dali-2ms')
             fe = edges(img, BYTE_Y + 8, C_FEDGE)
-            check(len(fe) + red(img, BYTE_Y + 8) >= 2, 'DALI, 2 ms/div: frame boxes in the band (%d edge runs)' % len(fe))
+            # A frame running past the graph's edge shows one side only: its
+            # top border then counts.
+            top = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y), C_FEDGE))
+            check(len(fe) + red(img, BYTE_Y + 8) >= 2 or (len(fe) >= 1 and top >= 40),
+                  'DALI, 2 ms/div: frame boxes in the band (%d edge runs, top border %d px)' % (len(fe), top))
             check({f[5] for f in frames()} == got, 'DALI: FRAMes? does not depend on the zoom')
         q('DEC:PROT OFF')
 
