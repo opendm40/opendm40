@@ -214,6 +214,44 @@ impl Store {
         (self.si(lo), self.si(hi))
     }
 
+    /// Each stored sample of indices [ia, ib): its DWT time (from the
+    /// anchors around it; past the newest one, the nominal period) and SI
+    /// value, oldest first (the X-Y display, scope_xy.rs).
+    #[inline(always)]
+    pub fn each<F: FnMut(u32, f32)>(&self, ia: u64, ib: u64, f: &mut F) {
+        let n = self.nanc.min(NANCH);
+        if n == 0 {
+            return;
+        }
+        // An anchor whose codes were overwritten still times its segment.
+        let mut k = n - 1;
+        let (a, b) = (ia.max(self.tot.saturating_sub(CAP as u64)), ib.min(self.tot));
+        let mut m = a;
+        while m < b {
+            while k > 0 && self.anc_k(k - 1).0 <= m {
+                k -= 1;
+            }
+            let (i0, t0) = self.anc_k(k);
+            let slope = if k > 0 {
+                let (i1, t1) = self.anc_k(k - 1);
+                t1.wrapping_sub(t0) as i32 as f32 / (i1 - i0) as u32 as f32
+            } else {
+                self.period
+            };
+            let d = m.wrapping_sub(i0) as u32 as i32 as f32;
+            f(t0.wrapping_add((d * slope) as i32 as u32), self.si(self.codes[(m % CAP as u64) as usize]));
+            m += 1;
+        }
+    }
+
+    /// The SI value of the sample nearest DWT time `t` (None: not in the
+    /// store), for a run of rising times (`range_run`; a step back costs
+    /// one full search): the X-Y CSV's CH2 column (scope_csv.rs).
+    pub fn value_run(&self, r: &mut Run, t: u32) -> Option<f32> {
+        let (ia, _) = self.range_run(r, t.wrapping_add((self.period * 0.5) as u32), 1.0)?;
+        Some(self.si(self.codes[(ia % CAP as u64) as usize]))
+    }
+
     /// The anchor with age `k` (0 = the newest).
     fn anc_k(&self, k: usize) -> (u64, u32) {
         self.anc[((self.nanc - 1) % NANCH + NANCH - k) % NANCH]
@@ -296,10 +334,16 @@ impl Store {
 }
 
 /// The state of a `Store::span_run` sequence.
+#[derive(Clone, Copy)]
 pub struct Run {
     /// The age of the anchor the last column's segment starts at.
     k: usize,
     kmax: usize,
     inv_period: f32,
+}
+
+impl Run {
+    /// All zero (a static's initial value; `Store::run` makes a real one).
+    pub const ZERO: Run = Run { k: 0, kmax: 0, inv_period: 0.0 };
 }
 

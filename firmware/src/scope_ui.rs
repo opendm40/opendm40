@@ -262,6 +262,11 @@ pub struct Model {
     /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
     /// none (`CH2_LABEL`, a graph hole).
     pub ch2_txt: Txt,
+    /// X-Y display (scope::XY_*): the graph shows the X-Y bitmap
+    /// (scope_xy.rs) instead of the traces, no trigger markers, "X-Y" in
+    /// the trigger badge; `ch2_txt` is then the X axis label (in the X
+    /// source's colour).
+    pub xy: u8,
 }
 
 /// `Model::src` values.
@@ -344,6 +349,7 @@ impl Model {
         rec_unit: "V",
         tsrc: 0,
         ch2_txt: Txt::EMPTY,
+        xy: 0,
     };
 
     pub fn pal(&self) -> Color {
@@ -825,6 +831,13 @@ pub fn vdiv_badge(m: &Model) {
 
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
+    if m.xy != 0 {
+        // X-Y: free run, no trigger.
+        let t = Ink::new(sf::SC_F12, rect(352, 1, 62, 17), "X-Y", 8, 0);
+        let c = if m.xy == crate::scope::XY_GEN { C_GEN_TR } else { C_CH2 };
+        badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&t, c)]);
+        return;
+    }
     let mut b = Buf::new();
     fmt_v(&mut b, m.trig_v, m.unit());
     // The wave view's "-1.23mA" is wider than the stock box: a decimal
@@ -1177,13 +1190,16 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let mut n = 0;
     out[n] = (0, level(off_row(m.pos), FAM_A, m.sel_v == 0, pal));
     n += 1;
-    out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
-    n += 1;
+    // X-Y: free run, no trigger level.
+    if m.xy == 0 {
+        out[n] = (TRIG_LEVEL, right(if m.trig_row > 280 { 281 } else { m.trig_row }, FAM_T, m.sel_v == 1, pal));
+        n += 1;
+    }
     if m.math_on {
         out[n] = (2, level(off_row(m.math_off), FAM_M, m.sel_v == 2, m.math_pal()));
         n += 1;
     }
-    if let Some(r) = m.runt_row {
+    if let Some(r) = m.runt_row.filter(|_| m.xy == 0) {
         out[n] = (5, level(if r > 280 { 281 } else { r }, FAM_T, m.sel_v == 5, C_ORANGE));
         n += 1;
     }
@@ -1255,7 +1271,9 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
 fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     let top = m.top();
     *out = [Mark::NONE; NGRAPH];
-    out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    if m.xy == 0 {
+        out[0] = top_mark(top, m.trig_px, FAM_T, m.sel_h == 0, m.pal());
+    }
     if let Some(xc) = m.xcur {
         out[1] = top_mark(top, xc[0], FAM_1, m.sel_h == 2, C_WHITE);
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
@@ -1599,10 +1617,12 @@ struct Deco {
     math: Color,
     top: i16,
     fh: i16,
+    /// The X-Y bitmap instead of the traces.
+    xy: bool,
 }
 
 impl Deco {
-    const NONE: Deco = Deco { h: [None; NL], v: [None; NL], marks: [Mark::NONE; NGRAPH], grid: 0, trace: 0, half: 0, math: 0, top: 0, fh: 0 };
+    const NONE: Deco = Deco { h: [None; NL], v: [None; NL], marks: [Mark::NONE; NGRAPH], grid: 0, trace: 0, half: 0, math: 0, top: 0, fh: 0, xy: false };
 
     fn of(m: &Model) -> Deco {
         let h = m.frame_h();
@@ -1616,6 +1636,7 @@ impl Deco {
             math: m.math_pal(),
             top: m.top(),
             fh: h,
+            xy: m.xy != 0,
         };
         graph_marks(m, &mut d.marks);
         let ctr = d.trace;
@@ -1935,9 +1956,12 @@ impl Spans {
 /// line or vertical line, into the strip's pixels `sp` (`Graph::flush` in
 /// a strip pass): the column loop's inline rule.
 #[inline(never)]
-fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, i16)], cg: (&[(i16, i16)], &[(i16, i16)]), cols: &[u8], r: i16, rc: u8, d: &Deco) {
-    for (p, (((((tr, ps), ma), c2), gn), &cc)) in sp.iter_mut().zip(tr.iter().zip(ps).zip(ma).zip(cg.0).zip(cg.1).zip(cols)) {
-        *p = if r >= ma.0 && r <= ma.1 {
+fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, i16)], cg: (&[(i16, i16)], &[(i16, i16)]), cols: &[u8], r: i16, rc: u8, d: &Deco, i0: usize) {
+    let xy = crate::scope_xy::bits();
+    for (k, (p, (((((tr, ps), ma), c2), gn), &cc))) in sp.iter_mut().zip(tr.iter().zip(ps).zip(ma).zip(cg.0).zip(cg.1).zip(cols)).enumerate() {
+        *p = if d.xy && xy.bit(i0 + k, r) {
+            d.trace
+        } else if r >= ma.0 && r <= ma.1 {
             d.math
         } else if r >= tr.0 && r <= tr.1 {
             d.trace
@@ -1988,11 +2012,12 @@ impl Graph {
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 {
+        let xy = crate::scope_xy::bits();
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 && !(d.xy && crate::scope_xy::dirty()) {
             self.px = 0;
             return;
         }
-        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh;
+        let full = !self.valid || d.grid != o.grid || d.trace != o.trace || d.half != o.half || d.math != o.math || d.top != o.top || d.fh != o.fh || d.xy != o.xy;
         let h = d.fh;
         let mut minks = [MarkInk::NONE; NGRAPH];
         for (i, mk) in d.marks.iter().enumerate() {
@@ -2031,6 +2056,9 @@ impl Graph {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
                     return c;
                 }
+            }
+            if d.xy && xy.bit((fx - 1) as usize, fy) {
+                return d.trace;
             }
             if fy >= ma.0 && fy <= ma.1 {
                 return d.math;
@@ -2089,9 +2117,13 @@ impl Graph {
             let fx = i as i16 + 1;
             let sx = 13 + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
+            // X-Y: the rows whose bits changed (taken in every pass over
+            // the column: a full repaint paints them too).
+            let xr = if d.xy { crate::scope_xy::take_rep(i) } else { EMPTY };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
+                sp.add(xr);
                 for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i]), (self.gn[i], self.d_gn[i]), (self.c2[i], self.d_c2[i])] {
                     if a != b {
                         sp.add(a);
@@ -2183,6 +2215,8 @@ impl Graph {
                     let rc = rows[fy as usize];
                     lcd::data_panel(if nm > 0 || rc & R_LINE != 0 {
                         pix(fx, fy, (tr, ps, ma, c2, gn), vcol, &mcol[..nm], cm)
+                    } else if d.xy && xy.bit(i, fy) {
+                        d.trace
                     } else if fy >= ma.0 && fy <= ma.1 {
                         d.math
                     } else if fy >= tr.0 && fy <= tr.1 {
@@ -2260,7 +2294,7 @@ impl Graph {
                     if !line && !vrow && (13 + e < mlo || 13 + fx > mhi) {
                         // No marker, line or vertical line in the run: the
                         // inline rule over the columns, no index checks.
-                        band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d);
+                        band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d, (fx - 1) as usize);
                         fx = e + 1;
                         continue;
                     }
@@ -2273,7 +2307,9 @@ impl Graph {
                     let sx = 13 + x;
                     let c = if !line && (sx < mlo || sx > mhi || !mrow[..nmr].iter().any(|&k| sx >= d.marks[k].x && sx < d.marks[k].x + 12)) {
                         let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
-                        if r >= ma.0 && r <= ma.1 {
+                        if d.xy && xy.bit(i, r) {
+                            d.trace
+                        } else if r >= ma.0 && r <= ma.1 {
                             d.math
                         } else if r >= tr.0 && r <= tr.1 {
                             d.trace
@@ -2310,6 +2346,10 @@ impl Graph {
             }
         }
         self.next = 0;
+        if d.xy && band.is_none() {
+            // Every column's X-Y rows were taken above.
+            crate::scope_xy::clean();
+        }
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_ma = self.ma;
@@ -2510,7 +2550,7 @@ pub fn update(m: &Model) {
     // The trigger badge after the graph: a level drag step repaints both
     // (the badge ~3.3 ms on the device model, emu --mips 110), the marker
     // under the finger first.
-    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps) {
+    if d(pal || ol.trig_v != m.trig_v || ol.rising != m.rising || ol.amps != m.amps || ol.xy != m.xy || ol.tsrc != m.tsrc) {
         trig_badge(m);
     }
     // A repainted graph (a popup closed: `uncover`) leaves its holes as
@@ -2529,8 +2569,8 @@ pub fn update(m: &Model) {
     if fft_on && (bg_changed || d(!was_fft || ol.fft_hz != m.fft_hz || ol.math_colour != m.math_colour)) {
         fft_label(m);
     }
-    if ch2 && (bg_changed || d(ol.ch2_txt != m.ch2_txt)) {
-        fft_box(ch2_label_rect(m), m.ch2_txt.as_str(), C_CH2);
+    if ch2 && (bg_changed || d(ol.ch2_txt != m.ch2_txt || ol.xy != m.xy)) {
+        fft_box(ch2_label_rect(m), m.ch2_txt.as_str(), if m.xy == crate::scope::XY_GEN { C_GEN_TR } else { C_CH2 });
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
@@ -2911,6 +2951,8 @@ pub struct PopVals {
     /// first start).
     pub ch2_on: bool,
     pub ch2_vdiv: Txt,
+    /// X-Y display (scope::XY_*).
+    pub xy: u8,
 }
 
 /// Which popup is open (tab).
@@ -3127,6 +3169,9 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             fill_c(rect(14, 161, 399, 50), pc, C_POP_BG);
             fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
             option_list(GT_LIST, pc, &["On", "Off"], 44, if v.gen_trace { 0 } else { 1 });
+            // opendm40: X-Y, CH1 against the generator or CH2.
+            fill_text(XY_LABEL, pc, C_POP_BG, sf::SC_F16, XY_LABEL, "X-Y:", C_FILL, 1, 0);
+            option_list(XY_LIST, pc, &crate::scope::XY_NAMES, 44, v.xy.min(2) as usize);
             // opendm40: the DMM as CH2 and its V/div.
             fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
             fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
@@ -3198,14 +3243,17 @@ pub const TS_LIST: Rect = rect(24, 208, 120, 24);
 pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
 pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
 pub const GT_LIST: Rect = rect(24, 183, 88, 24);
+pub const XY_LABEL: Rect = rect(214, 163, 180, 20);
+pub const XY_LIST: Rect = rect(214, 183, 132, 24);
 pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
 pub const C2_LIST: Rect = rect(24, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
-/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box).
+/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box);
+/// X-Y: the X axis label there, wider ("X GEN 500mV"; no FFT then).
 pub fn ch2_label_rect(m: &Model) -> Rect {
-    rect(18, m.top() + 34, 92, 17)
+    rect(18, m.top() + 34, if m.xy != 0 { 112 } else { 92 }, 17)
 }
 
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
@@ -3256,6 +3304,8 @@ pub enum MfHit {
     /// Trigger source, GEN trace on (opendm40).
     TSrc(u8),
     GenTrace(bool),
+    /// X-Y display (scope::XY_*).
+    Xy(u8),
     /// The DMM CH2 on, its V/div step (true = up).
     Ch2(bool),
     Ch2Step(bool),
@@ -3307,6 +3357,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Grid
             } else if let Some(i) = option_hit(GT_LIST, 2, 44, x, y) {
                 MfHit::GenTrace(i == 0)
+            } else if let Some(i) = option_hit(XY_LIST, 3, 44, x, y) {
+                MfHit::Xy(i)
             } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
                 MfHit::Ch2(i == 0)
             } else if v.ch2_on && near(C2_MINUS) {

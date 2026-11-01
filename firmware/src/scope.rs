@@ -58,6 +58,12 @@ const STREAM_FS: u32 = 1_250_000;
 const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0.
 pub const CAP: usize = 26 * 1024;
+/// Stale samples at the front of a linear record (dlog::scope_hold_head;
+/// device 2026-11-01 at 12.5 MS/s): the software-trigger path (also X-Y)
+/// and the comparator path (also after the ring wrapped; why there,
+/// unknown). The stream path (fs <= STREAM_FS) showed none.
+const HEAD_SW: usize = 1;
+const HEAD_HW: usize = 2;
 
 #[link_section = ".dmabuf"]
 static mut BUF: [u16; CAP] = [0; CAP];
@@ -216,6 +222,12 @@ pub struct Settings {
 pub const TSRC_CH1: u8 = 0;
 pub const TSRC_GEN: u8 = 1;
 pub const TSRC_NAMES: [&str; 2] = ["CH1", "GEN"];
+/// X-Y display (docs/scope-gen-channel.md section 3): off, CH1 against the
+/// generator (computed), CH1 against the DMM CH2.
+pub const XY_OFF: u8 = 0;
+pub const XY_GEN: u8 = 1;
+pub const XY_CH2: u8 = 2;
+pub const XY_NAMES: [&str; 3] = ["Off", "GEN", "CH2"];
 
 /// Ticks of the 200 MHz timer clock the generator's output reaches the
 /// MCX samples later than its timers say (DAC settling, the output and
@@ -396,6 +408,9 @@ pub struct Scope {
     /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
     /// record needs its time (`rec_time`), the comparator is off.
     pub ch2_on: bool,
+    /// X-Y display (XY_*): free run (no trigger search, no roll, no
+    /// comparator); XY_GEN needs every record's generator phase.
+    pub xy: u8,
     /// The acquisition in flight: DWT count of its sample 0 (None: a
     /// comparator record, the wave view) and DWT cycles per sample; the
     /// stored record's (BUF[0]).
@@ -740,6 +755,7 @@ impl Scope {
             stored_gen: None,
             gen_trace: false,
             ch2_on: false,
+            xy: XY_OFF,
             t_s0: None,
             t_step: 1.0,
             stored_t0: None,
@@ -1161,6 +1177,7 @@ impl Scope {
         // Read after the stop: the DMA was still running before it.
         let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
+        let head = if was_stream { 0 } else if was_hw { HEAD_HW } else { HEAD_SW };
         let len = if was_rolling {
             self.snapshot_roll();
             return true;
@@ -1184,13 +1201,15 @@ impl Scope {
         } else {
             self.rec - ndtr.min(self.rec)
         };
-        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false);
+        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false, head);
         false
     }
 
     /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
-    /// with the current settings (fs, range).
-    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+    /// with the current settings (fs, range). `head`: its first samples are
+    /// the acquisition's first conversions, stale (HEAD_SW / HEAD_HW;
+    /// dlog::scope_hold_head), 0: none (stream, roll, wave view).
+    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool, head: usize) {
         if len < 2 {
             self.stored_valid = false;
             return;
@@ -1199,6 +1218,7 @@ impl Scope {
         for v in buf.iter_mut() {
             *v &= 0x3FF;
         }
+        crate::dlog::scope_hold_head(buf, head);
         self.stored_len = len;
         self.stored_fs = self.sample_rate();
         self.stored_tb = self.s.tb as u8;
@@ -1234,9 +1254,12 @@ impl Scope {
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let win = n - self.screen;
         // Mask once here (snapshot_mark), then search in the masked record.
-        self.snapshot_mark(n, 0, None, false);
+        self.snapshot_mark(n, 0, None, false, HEAD_SW);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let trig = if self.gen_src() {
+        // X-Y: free run, every record is shown (untriggered).
+        let trig = if self.xy != XY_OFF {
+            None
+        } else if self.gen_src() {
             self.gen_next(pre as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
         } else if self.s.ttype != 0 {
             self.find_soft(data, pre, pre + win)
@@ -1245,6 +1268,7 @@ impl Scope {
         };
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
+            _ if self.xy != XY_OFF => true,
             (None, TrigMode::Auto) => now >= self.deadline,
             (None, _) => false,
         };
@@ -1276,7 +1300,7 @@ impl Scope {
             wr.min(CAP)
         };
         self.rec_base = self.roll_written - len as u64;
-        self.snapshot_mark(len, len.saturating_sub(1), None, true);
+        self.snapshot_mark(len, len.saturating_sub(1), None, true, 0);
     }
 
     fn start(&mut self) {
@@ -1328,9 +1352,9 @@ impl Scope {
             // record per frame.
             // GEN: the trigger is computed (edge only); the GEN trace needs
             // every record's phase, which a comparator stop does not give.
-            let gen = self.gen_src() || self.gen_trace;
+            let gen = self.gen_src() || self.gen_trace || self.xy == XY_GEN;
             let soft = self.s.ttype != 0 && !self.gen_src();
-            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
+            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on && self.xy == XY_OFF;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
@@ -1448,7 +1472,7 @@ impl Scope {
     /// generator, a level outside its swing: start at once (untriggered).
     fn gen_ready(&mut self, now: u64) -> bool {
         let fs = TB[self.s.tb].0;
-        if !self.gen_src() || fs <= STREAM_FS || self.roll_ok() {
+        if !self.gen_src() || fs <= STREAM_FS || self.roll_ok() || self.xy != XY_OFF {
             return true;
         }
         if self.deadline == 0 {
@@ -1544,7 +1568,7 @@ impl Scope {
                     self.stored_valid = false;
                     return None;
                 }
-                self.snapshot_mark(len, len - self.screen / 2, None, false);
+                self.snapshot_mark(len, len - self.screen / 2, None, false, HEAD_HW);
                 let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
                 let found = if len - post > pre { self.find_trigger(&data[pre..len - post]).map(|i| i + pre) } else { None };
                 if found.is_some() {
@@ -1585,7 +1609,7 @@ impl Scope {
                 let th = len - post_n;
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
-                self.snapshot_mark(len, th, None, false);
+                self.snapshot_mark(len, th, None, false, HEAD_HW);
                 let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
@@ -1735,7 +1759,7 @@ impl Scope {
     /// and no single record wanted (Single sweep, DIGitize), which captures
     /// a full linear record like the stock Single mode.
     fn roll_ok(&self) -> bool {
-        self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot
+        self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot && self.xy == XY_OFF
     }
 
     /// Roll display active (running, timebase in the roll range).
@@ -1861,7 +1885,7 @@ impl Scope {
         // remembered so a later zoom stays on this feature).
         let (start, trig) = self.finish(now)?;
         self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
+        if (trig.is_some() || self.xy != XY_OFF) && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
@@ -1899,6 +1923,10 @@ impl Scope {
             self.st_armed = false;
             self.st_scan = wr;
             self.st_idx = (wr % CAP as u64) as usize;
+        }
+        // X-Y: free run, the newest screen once it is written.
+        if self.xy != XY_OFF {
+            return if wr >= self.screen as u64 { self.stream_emit(None) } else { None };
         }
         let (pre, post) = self.hw_split();
         if self.st_found.is_none() {
@@ -2004,9 +2032,9 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false, 0);
         self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
+        if (trig.is_some() || self.xy != XY_OFF) && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
@@ -2427,7 +2455,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false, 0);
         wv().shown = Some((base + (start + self.screen / 2) as u64, t));
         wv().last_emit = now;
         self.deadline = now + self.auto_timeout();
@@ -2550,15 +2578,15 @@ impl Scope {
         let len = self.wave_linear();
         let base = wv().slot0;
         if was_rolling {
-            self.snapshot_mark(len, len.saturating_sub(1), None, true);
+            self.snapshot_mark(len, len.saturating_sub(1), None, true, 0);
             return true;
         }
         match wv().shown {
             Some((c, t)) if c >= base && c < base + len as u64 => {
                 let trig = t.filter(|&t| t >= base && t < base + len as u64).map(|t| (t - base) as usize);
-                self.snapshot_mark(len, (c - base) as usize, trig, false);
+                self.snapshot_mark(len, (c - base) as usize, trig, false, 0);
             }
-            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false),
+            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false, 0),
         }
         true
     }

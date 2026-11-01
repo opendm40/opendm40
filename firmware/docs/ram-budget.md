@@ -187,6 +187,7 @@ re-run to refresh). TCM = 0x1000xxxx (shared with the stack), SRAM = 0x200xxxxx.
 | APP (TCM) | 6 672 | always (the App) | | Keep. |
 | vdisk::TAB (SRAM) | 6 420 | while USB exports the generated volume (the table regenerates on sector reads) | everything | Keep. |
 | csvlog::CAT | 12 | the cached file catalog (`MMEM:CAT?` reply, `CAT_MAX` = `RSP_MAX`), warmed before a stream starts | everything | The reply is in `csvlog::FIFO_BUF` (SRAM audit). |
+| scope_xy::PLOT + REP (SRAM) | 14 380 + 1 600 | the X-Y display: its bitmap and the rows to repaint ([scope-gen-channel.md section 3](scope-gen-channel.md#3-x-y-display)); idle otherwise | GRAPH (its trace rows are empty in X-Y), CACHE | An overlay with GRAPH's trace rows and diff copies (unused in X-Y), or the page pool of #201. Not done. |
 | scope_page::CACHE (SRAM) | 4 824 | the scope page (persistence a/b, overlays) | GRAPH | Same as GRAPH. |
 | scope_page::FFT (TCM) | 4 128 | the last spectrum | | Must survive a dropped job. Keep. |
 | csvlog::TAIL (USBHS RAM) | 4 096 | a CSV recording | FIFO_BUF | In the USBHS FIFO RAM ([native-boot.md, Extra RAM areas](native-boot.md#extra-ram-areas-2026-10-30-featsram-extra-areas)). |

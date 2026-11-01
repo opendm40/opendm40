@@ -899,6 +899,8 @@ fn nums<const N: usize>(a: &[u8]) -> [u32; N] {
 ///   TRIGger[:EDGE]:LEVel <V>   TRIGger[:EDGE]:SLOPe POS|NEG   TRIGger:SWEep AUTO|NORM|SING
 ///   TRIGger[:EDGE]:SOURce CHANnel1|GENerator (GEN: the generator's output
 ///   computed from its timers, docs/scope-gen-channel.md)
+///   DISPlay:XY OFF|GENerator|CH2 (X-Y: CH1 against the generator or the
+///   DMM CH2, free run; CH2 turns CH2 on)
 ///   CHANnel1:OFFSet <V> (the vertical position as a voltage added to the
 ///   signal: positive moves the trace up)   ACQuire:SRATe? (S/s; stopped:
 ///   the stored record's rate)
@@ -937,6 +939,8 @@ pub enum Cmd {
     TrigSweep(Option<u8>),
     /// TRIG:SOURce: Some(scope::TSRC_*); None = ?
     TrigSource(Option<u8>),
+    /// DISPlay:XY OFF|GEN|CH2: Some(scope::XY_*); None = ?
+    DispXy(Option<u8>),
     /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
     DbgGenLag(Option<f32>),
     /// DBG:GENTRIG:STAT?: the generator phase readings (gen::stats).
@@ -2891,6 +2895,23 @@ impl Scpi {
                 },
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
+                }
+                // DISPlay:XY OFF|GENerator|CH2 (the scope's X-Y display).
+                _ if kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "XY") => {
+                    let a = trim(arg);
+                    let v = if query {
+                        None
+                    } else if kw(a, "OFF") || a == b"0" {
+                        Some(0) // scope::XY_OFF
+                    } else if kw(a, "GENerator") {
+                        Some(1) // scope::XY_GEN
+                    } else if kw(a, "CH2") {
+                        Some(2) // scope::XY_CH2
+                    } else {
+                        self.err_arg(no_arg, "Illegal parameter value");
+                        continue;
+                    };
+                    out = Out::Instr(Cmd::DispXy(v));
                 }
                 // DISPlay:BURDen, [SENSe:]RESistance:NEGative,
                 // MEMory:STATe:RECall:AUTO: ON|OFF / ?.

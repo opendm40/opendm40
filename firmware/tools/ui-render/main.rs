@@ -69,6 +69,9 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// scope.rs: dlog::scope_hold_head.
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -77,6 +80,10 @@ mod scope_meas;
 mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+#[path = "../../src/scope_xy.rs"]
+mod scope_xy;
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 mod scope_add;
 mod readme;
 mod manual;

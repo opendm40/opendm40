@@ -9,6 +9,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Scope X-Y:** MF > Display > **X-Y** draws CH1 against the generator
+  (computed, no wire) or against CH2 (DMM): Lissajous figures, phase, V-I
+  curves; Save CSV adds the x column. SCPI `DISPlay:XY OFF|GEN|CH2`
+  ([manual](docs/manual/README.md#x-y)).
+
+  ![X-Y against the generator](docs/manual/img/scope-xy.png)
+
 - **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):

@@ -174,6 +174,11 @@ impl App {
         self.scope.ch2_on = on;
         if !on {
             crate::scope_ui::graph().c2 = [crate::scope_ui::EMPTY; 399];
+            // X-Y against CH2 ends with it.
+            if self.scope.xy == scope::XY_CH2 {
+                self.scope.xy = scope::XY_OFF;
+                crate::scope_ui::graph().invalidate();
+            }
         }
         // The comparator on / off: restart the acquisition.
         let st = self.scope.s;

@@ -492,8 +492,182 @@ fn scope_tests(dir: Option<String>) -> u32 {
     fails
 }
 
+/// Kind 5 (the X-Y display's record): CH1 and X codes in turn, coded
+/// through `scope_plan_of` / `SEnc::next_of` as scope_csv.rs does; the CSV
+/// has three columns; random reads; a torn file keeps the whole rows of its
+/// whole blocks.
+fn scope_xy_tests(dir: Option<String>) -> u32 {
+    let mut fails = 0;
+    let text = b"# test X-Y record\r\ntime_s,volts,x_volts\r\n";
+    let (a, b, dt) = (-5.0f32, 10.0 / 1023.0, 1.0 / 1e6);
+    let (ax, bx) = (0.0f32, 3.0 / 1023.0);
+    for (si, n) in [(0usize, 300usize), (1, 9000), (2, 26 * 1024)] {
+        let pi2 = 2.0 * std::f32::consts::PI;
+        let y: Vec<u16> = (0..n).map(|i| (512.0 + 400.0 * (pi2 * 7.0 * i as f32 / n as f32).sin()).round() as u16).collect();
+        let x: Vec<u16> = (0..n).map(|i| (511.5 + 511.5 * (pi2 * 7.0 * i as f32 / n as f32 + 0.6).cos()).round() as u16).collect();
+        let code = |j: usize| if j % 2 == 0 { y[j / 2] } else { x[j / 2] };
+        let nc = 2 * n;
+        let t0 = n as u32 / 2;
+        let mut h = vec![0u8; FHDR + text.len() + SCOPE_PAR_XY + 8 * SBLK_MAX + 4];
+        let k = scope_header_xy(text, a, b, dt, t0, nc as u32, ax, bx, &mut h);
+        let nb = nc.div_ceil(SBLK);
+        let plans: Vec<_> = (0..nb).map(|bk| scope_plan_of((nc - bk * SBLK).min(SBLK), &mut |j| code(bk * SBLK + j))).collect();
+        let lens: Vec<u32> = plans.iter().map(|p| p.1).collect();
+        let crcs: Vec<u32> = plans.iter().map(|p| p.2).collect();
+        let tl = scope_table(&lens, &crcs, &mut h[k..]);
+        h.truncate(k + tl);
+        let mut ends = vec![];
+        for (bk, p) in plans.iter().enumerate() {
+            let n0 = h.len();
+            let mut e = SEnc::new(p.0, 0);
+            while let Some(v) = e.next_of((nc - bk * SBLK).min(SBLK), &mut |j| code(bk * SBLK + j)) {
+                h.push(v);
+            }
+            assert_eq!(h.len() - n0, p.1 as usize, "plan size");
+            ends.push(h.len());
+        }
+        let f = h;
+        let mut csv = text.to_vec();
+        for i in 0..n {
+            let mut r = [0u8; SCOPE_ROW_XY];
+            scope_row_xy(a, b, dt, t0, i, y[i], ax, bx, x[i], &mut r);
+            csv.extend_from_slice(&r);
+        }
+        let name = format!("X-Y {n} samples");
+        match gen_all(&f) {
+            Some((info, out)) if out == csv && info.rows as usize == n && info.kind == KIND_SCOPE_XY => {}
+            _ => {
+                println!("FAIL {name}: CSV differs");
+                fails += 1;
+                continue;
+            }
+        }
+        let mut g = Gen::open(&f[..], f.len() as u32).unwrap();
+        let mut rr = Rng(11 + si as u64);
+        for _ in 0..300 {
+            let off = rr.next() as usize % (csv.len() + 10);
+            let len = 1 + rr.next() as usize % 900;
+            let mut bf = vec![0xAAu8; len];
+            g.read(off as u32, &mut bf);
+            let want: Vec<u8> = (off..off + len).map(|i| csv.get(i).copied().unwrap_or(0)).collect();
+            if bf != want {
+                println!("FAIL {name}: random read at {off}+{len}");
+                fails += 1;
+                break;
+            }
+        }
+        let head = FHDR + text.len() + SCOPE_PAR_XY + 8 * ends.len() + 4;
+        let mut bad = 0;
+        let mut cuts: Vec<usize> = (0..=f.len()).step_by(211).collect();
+        for &e in &ends {
+            cuts.extend([e - 1, e, e + 1]);
+        }
+        for l in cuts.into_iter().filter(|&l| l <= f.len()) {
+            let whole = ends.iter().filter(|&&e| e <= l).count();
+            let rows = (whole * SBLK).min(nc) / 2;
+            let want = &csv[..text.len() + rows * SCOPE_ROW_XY];
+            match gen_all(&f[..l]) {
+                Some((_, o)) if o == want => {}
+                None if l < head => {}
+                _ => bad += 1,
+            }
+        }
+        if bad > 0 {
+            println!("FAIL {name}: {bad} truncations decode wrong");
+            fails += 1;
+        }
+        println!("{:<40} {:>8.3} B/sample  ok", name, (f.len() - head) as f64 / n as f64);
+        if let Some(d) = &dir {
+            std::fs::write(format!("{d}/xy{si}.dlg"), &f).unwrap();
+            std::fs::write(format!("{d}/xy{si}.csv"), &csv).unwrap();
+        }
+    }
+    fails
+}
+
+/// The first rows of an X-Y CSV (device check of #214: row 0 read +1.85 V
+/// where its neighbours read ~0.48 V): a record whose first codes are the
+/// stale conversions from before the sample clock started (1 on the
+/// software path, 2 on the comparator path), held by `scope_hold_head` as
+/// scope.rs does, then written as kind 5 with the generator's x (computed
+/// per index): rows 0..k carry row k's volts, every row's x is the
+/// generator's at that index, and no row-to-row step is larger than the
+/// signal's own.
+fn scope_xy_head_test() -> u32 {
+    let mut fails = 0;
+    let text = b"# test X-Y head\r\ntime_s,volts,x_volts\r\n";
+    // 1 kHz sine at 12.5 MS/s, 2 Vpp around 1.5 V (the device check).
+    let (a, b, dt) = (-2.782881f32, 8.355785e-3f32, 8e-8f32);
+    let (ax, bx) = (0.5f32, 2.0 / 1023.0);
+    let n = 2000;
+    let w = 2.0 * std::f64::consts::PI * 1e3 * dt as f64;
+    let volts = |i: usize| 1.5 + (w * i as f64 - 1.4).sin();
+    let gen_x = |i: usize| ((volts(i) as f32 - ax) / bx + 0.5).clamp(0.0, 1023.0) as u16;
+    for k in [1usize, 2] {
+        let mut y: Vec<u16> = (0..n).map(|i| ((volts(i) as f32 - a) / b + 0.5) as u16).collect();
+        let clean = y.clone();
+        for v in &mut y[..k] {
+            *v = 554; // +1.85 V: the stale code the device CSV had
+        }
+        scope_hold_head(&mut y, k);
+        let code = |j: usize| if j % 2 == 0 { y[j / 2] } else { gen_x(j / 2) };
+        let nc = 2 * n;
+        let mut f = vec![0u8; FHDR + text.len() + SCOPE_PAR_XY + 8 * SBLK_MAX + 4];
+        let h = scope_header_xy(text, a, b, dt, 0, nc as u32, ax, bx, &mut f);
+        let nb = nc.div_ceil(SBLK);
+        let plans: Vec<_> = (0..nb).map(|bk| scope_plan_of((nc - bk * SBLK).min(SBLK), &mut |j| code(bk * SBLK + j))).collect();
+        let lens: Vec<u32> = plans.iter().map(|p| p.1).collect();
+        let crcs: Vec<u32> = plans.iter().map(|p| p.2).collect();
+        let tl = scope_table(&lens, &crcs, &mut f[h..]);
+        f.truncate(h + tl);
+        for (bk, p) in plans.iter().enumerate() {
+            let mut e = SEnc::new(p.0, 0);
+            while let Some(v) = e.next_of((nc - bk * SBLK).min(SBLK), &mut |j| code(bk * SBLK + j)) {
+                f.push(v);
+            }
+        }
+        let Some((_, csv)) = gen_all(&f) else {
+            println!("FAIL X-Y head k={k}: no CSV");
+            fails += 1;
+            continue;
+        };
+        let body = &csv[text.len()..];
+        let rows: Vec<(f32, f32)> = body
+            .split(|&c| c == b'\n')
+            .filter(|l| !l.is_empty())
+            .map(|l| {
+                let c: Vec<f32> = std::str::from_utf8(l).unwrap().trim().split(',').map(|v| v.parse().unwrap()).collect();
+                (c[1], c[2])
+            })
+            .collect();
+        let step = (1..n).map(|i| (rows[i].0 - rows[i - 1].0).abs()).fold(0.0f32, f32::max);
+        let xv = |i: usize| ax + bx * gen_x(i) as f32;
+        let ok = rows.len() == n
+            && (0..k).all(|i| rows[i].0 == rows[k].0)
+            && (rows[0].0 - (a + b * clean[k] as f32)).abs() < 1e-3
+            && (0..n).all(|i| (rows[i].1 - xv(i)).abs() < 1e-3)
+            && step < 4.0 * b;
+        if ok {
+            println!("X-Y head k={k}: rows 0..{k} = row {k} ({:+.4} V), x = GEN, max step {:.4} V  ok", rows[0].0, step);
+        } else {
+            println!("FAIL X-Y head k={k}: first rows {:?}, max step {step}", &rows[..4.min(rows.len())]);
+            fails += 1;
+        }
+    }
+    // A record too short to hold anything stays as it is.
+    let mut r = [7u16, 9];
+    scope_hold_head(&mut r, 2);
+    if r != [7, 9] {
+        println!("FAIL X-Y head: a 2-sample record changed");
+        fails += 1;
+    }
+    fails
+}
+
 fn main() {
     let mut fails = scope_tests(std::env::args().nth(1));
+    fails += scope_xy_tests(std::env::args().nth(1));
+    fails += scope_xy_head_test();
     fails += fast::tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");

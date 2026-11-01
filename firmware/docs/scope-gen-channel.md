@@ -1,4 +1,4 @@
-# Scope extra channels: GEN (computed) and DMM CH2
+# Scope extra channels: GEN (computed) and DMM CH2; X-Y
 
 Owner request 2026-10-27: the generator as a scope channel, mainly as a
 trigger source ("it need not be captured and digitised: compute when the
@@ -201,3 +201,68 @@ meter, the other functions, or while a CSV recording runs.
    back on the scope: CH2 again. Screenshot with CH2 on: CH2 back after.
 6. A host `CONF:VOLT:DC` while CH2 runs: the DMM changes, CH2 back on the
    new row after ~2 s.
+
+## 3. X-Y display
+
+MF > Display **X-Y: Off | GEN | CH2** (SCPI `DISPlay:XY`): CH1 (Y) against
+the generator or the DMM CH2 (X), as the Hantek 2000 and Owon HDS200 X-Y
+modes; persisted in W_SCOPE_EXT word 3 bits 7..8.
+
+### 3.1 Acquisition (scope.rs `Scope::xy`)
+
+Free run: the linear record shows every capture untriggered (`finish`),
+the stream path emits the newest screen once it is written
+(`stream_poll`), no roll (its frames are column min / max, no samples), no
+comparator, Single stops after one capture. GEN needs every record's
+generator phase: `start` reads it as for the GEN trace. The trigger level
+and T markers are hidden, the trigger badge reads "X-Y".
+
+### 3.2 The points ([scope_xy.rs](../src/scope_xy.rs))
+
+* GEN: X = `Shape::volts` at each CH1 sample's phase: one f64 phase per
+  frame (`Sync::phase`), then f32 steps of s k / q per sample. At most
+  4096 points per frame (the frame's samples decimated).
+* CH2: one point per CH2 sample in the frame's time (`Store::each`: its
+  DWT time from the anchors around it), Y = the CH1 sample nearest that
+  time (CH1 samples far faster than CH2's 38.4 kS/s at most).
+* Consecutive points within 64 px are joined by a line.
+* X scale: GEN on CH1's V/div (a loopback lies on the 45 degree line),
+  CH2 on its own V/div; X = 0 at the trigger position's column (200 = the
+  centre; the horizontal drag moves it: in free run it moves nothing else).
+
+### 3.3 Drawing
+
+A 1-bit bitmap of the graph frame (399 columns x 9 words, column-major,
+`.sram_bss`, 14.4 KB) and per column the rows to repaint (1.6 KB): the
+graph's flush paints the bits in the trace colour (above the grid, below
+the markers) and repaints the changed rows only, under the same time
+budget as a trace. Persistence: the bitmap is cleared per frame (OFF),
+every 80 ms (MIN), 1 s (1S) or never (INF), and on any change of the
+mapping (V/div, position, X = 0 column, source, view). One bitmap: no
+dimmer older points.
+
+### 3.4 CSV
+
+Save CSV in X-Y writes a kind 5 DLG ([compact-log-format.md](compact-log-format.md)):
+`time_s,volts,x_volts` (x_amperes for a current CH2). GEN: x computed from
+the stored record's phase; CH2: the store's sample nearest each row's time,
+the file cut to the samples CH2 covers (the time-0 sample kept). X is
+quantised to 10 bits over its span in the record.
+
+### 3.5 Memory (build.sh against release/0.4.0 6f56b87)
+
+Region B 20 084 -> 16 500 bytes free (-3.5 KB: the per-sample loops, the
+flush's bitmap test, CH2's `range_run` out of line, the DLG coder over a
+code function); the setup, the label, the switch and the CSV's x lookups
+are `.cold` (region C 22 888 -> 19 172); SRAM 45 356 -> 29 284 free
+(`.sram_bss`); no TCM .bss; stack headroom 21 516 -> 21 508.
+
+### 3.6 Device check (not done)
+
+1. Generator sine 1 kHz 3 Vpp looped back to CH1 (x1), 1 V/div, 1 ms/div,
+   X-Y GEN: a 45 degree line from X = 0 to 3 V; an RC low-pass at its corner
+   (1 kOhm / 100 nF, 1.59 kHz): an ellipse; Persist INF fills it.
+2. Drag sideways: the line moves, its guide line at X = 0.
+3. CH2: the DMM on AC V with the same signal: X-Y CH2 a line (any lag
+   between the channels opens it into an ellipse: `DBG:CH2:LAG`).
+4. STOP, Save CSV: three columns; x against time matches the generator.

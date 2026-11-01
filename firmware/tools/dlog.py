@@ -308,30 +308,39 @@ def decode(d, errors):
     if kind == 3:
         rows, chunks = fast_decode(d, off, out, errors)
         return ''.join(out), {'rows': rows, 'chunks': chunks}
-    if kind == 2:
+    if kind in (2, 5):
+        # Kind 5 (X-Y display): the CH1 and X codes in turn, ax / bx the X map.
+        xy = kind == 5
+        pl = 32 if xy else 24
         a, b, dt = struct.unpack_from('<fff', d, off)
-        t0, n, crc = struct.unpack_from('<III', d, off + 12)
-        if zlib.crc32(d[off:off + 20]) != crc:
+        t0, n = struct.unpack_from('<II', d, off + 12)
+        ax, bx = struct.unpack_from('<ff', d, off + 20) if xy else (0.0, 0.0)
+        crc = struct.unpack_from('<I', d, off + pl - 4)[0]
+        if zlib.crc32(d[off:off + pl - 4]) != crc:
             raise ValueError('bad scope parameters')
         f = lambda x: struct.unpack('<f', struct.pack('<f', x))[0]
         nb = (n + SBLK - 1) // SBLK
-        p = off + 24
+        p = off + pl
         tl = 8 * nb
         if zlib.crc32(d[p:p + tl]) != struct.unpack_from('<I', d, p + tl)[0]:
             raise ValueError('bad scope block table')
         tab = [struct.unpack_from('<II', d, p + 8 * i) for i in range(nb)]
         p += tl + 4
-        i = 0
+        codes = []
         for bi, (ln, bcrc) in enumerate(tab):
             if p + ln > len(d) or zlib.crc32(d[p:p + ln]) != bcrc:
                 errors.append('scope block %d: %s' % (bi, 'torn' if p + ln > len(d) else 'CRC error'))
                 break
-            for c in scope_block(d, p, p + ln, min(SBLK, n - bi * SBLK)):
-                t = f(f(i - t0) * dt)
-                out.append(sci(t, 5) + ',' + sci(f(a + f(b * c)), 4) + '\r\n')
-                i += 1
+            codes += scope_block(d, p, p + ln, min(SBLK, n - bi * SBLK))
             p += ln
-        n = i
+        n = len(codes) // 2 if xy else len(codes)
+        for i in range(n):
+            t = f(f(i - t0) * dt)
+            c = codes[2 * i] if xy else codes[i]
+            row = sci(t, 5) + ',' + sci(f(a + f(b * c)), 4)
+            if xy:
+                row += ',' + sci(f(ax + f(bx * codes[2 * i + 1])), 4)
+            out.append(row + '\r\n')
         return ''.join(out), {'rows': n, 'chunks': 0}
     rows = chunks = 0
     csv = hl

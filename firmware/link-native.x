@@ -312,6 +312,23 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*8opendm403app*3App14with_temp_page*);
         *(.text.*8opendm403app*3App11sp_save_csv*);
+        /* The scope's X-Y switch (MF Display tap, DISP:XY). */
+        *(.text.*8opendm403app*3App6xy_set*);
+        *(.text.*8opendm403app*3App7xy_scpi*);
+        /* X-Y per frame setup and the model's X label (the per-sample
+         * loops scope_xy::Plot::plot_gen / plot_ch2 stay in B). */
+        *(.text.*8opendm403app*3App11sp_xy_frame*);
+        *(.text.*8opendm403app*3App8xy_label*);
+        /* scope_ch2's full lookup by time (range_run's fallback for a step
+         * back: never in a frame, once per pass of the X-Y CSV's coder) and
+         * CH2 on / off. */
+        *(.text.*8opendm409scope_ch2*5Store8index_at*);
+        /* The X-Y CSV's x column (per code of a Save CSV, as scope_csv's
+         * own fill). */
+        *(.text.*8opendm408scope_xy5csv_x*);
+        *(.text.*8opendm408scope_xy7csv_set*);
+        *(.text.*8opendm409scope_ch2*5Store5range*);
+        *(.text.*8opendm403app*3App7ch2_set*);
         /* Once per scope drag, at its axis decision (scope_ui::drag_target). */
         *(.text.*8opendm408scope_ui11drag_target*);
         /* Region B audit #3 (2026-10-22, 11.9 KB free on 1ad38aa):

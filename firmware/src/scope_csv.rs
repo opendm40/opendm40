@@ -22,6 +22,12 @@
 //! chain first) and any block can be filled on its own (`fill`). The whole
 //! record (up to scope::CAP samples, ~10 s) is written, not only the screen.
 //!
+//! X-Y display: the X column too (`set_x` before `set`): the generator's
+//! volts (computed from the record's phase) or the DMM CH2's value at each
+//! sample's time, as a 10-bit code over its span; the file is kind 5
+//! (dlog.rs `scope_header_xy`: CH1 and X codes in turn), the CSV has
+//! time_s,volts,x_volts (x_amperes).
+//!
 //! The record lives in the scope buffer: while it is written the scope is
 //! held stopped (`Scope::hold`; RUN / AUTO / SCPI RUN do not restart it)
 //! and the code -> volts map is the one taken at `start` (a probe or V/div
@@ -34,9 +40,10 @@ pub const ROW: usize = crate::dlog::SCOPE_ROW;
 const HDR_MAX: usize = 512;
 /// Largest record (scope::CAP, asserted in scope_page.rs) and file.
 pub const REC_MAX: usize = 26 * 1024;
-pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4
-    + REC_MAX.div_ceil(crate::dlog::SBLK) * crate::dlog::SBLK_RAW) as u32;
-const _: () = assert!(REC_MAX <= crate::dlog::SBLK * crate::dlog::SBLK_MAX);
+/// (An X-Y record has two codes per sample: 106 KB raw at most.)
+pub const MAX_LEN: u32 = (crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR_XY + 8 * crate::dlog::SBLK_MAX + 4
+    + (2 * REC_MAX).div_ceil(crate::dlog::SBLK) * crate::dlog::SBLK_RAW) as u32;
+const _: () = assert!(2 * REC_MAX <= crate::dlog::SBLK * crate::dlog::SBLK_MAX);
 
 struct Snap {
     /// None until the first `set` (an Option so SNAP is all zero: .bss, not
@@ -89,6 +96,60 @@ fn snap() -> &'static mut Snap {
     unsafe { &mut *core::ptr::addr_of_mut!(SNAP) }
 }
 
+/// The X value of record sample `i` (an index of the full record; None:
+/// no value there), called at rising `i` within a pass over the codes
+/// (scope_xy.rs `csv_x`).
+pub type XFn = fn(usize) -> Option<f32>;
+
+/// The X column of the next `set` (`f` None: none): its value function,
+/// the record index of the written slice's first sample, x = ax + bx * code.
+struct XCol {
+    f: Option<XFn>,
+    off: usize,
+    ax: f32,
+    bx: f32,
+    /// The X column is amperes (a current CH2).
+    amps: bool,
+}
+
+// SRAM (`.sram_bss`: zeroed at reset, all-zero initial value; no TCM .bss).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut XCOL: XCol = XCol { f: None, off: 0, ax: 0.0, bx: 0.0, amps: false };
+
+fn xcol() -> &'static mut XCol {
+    unsafe { &mut *core::ptr::addr_of_mut!(XCOL) }
+}
+
+/// The X column for the next `set` (None: a plain record): its value
+/// function, the record index of the slice `set` gets, the X span lo..hi.
+/// `amps`: the X column is amperes.
+pub fn set_x(x: Option<(XFn, usize, f32, f32, bool)>) {
+    let c = xcol();
+    c.f = None;
+    if let Some((f, off, lo, hi, amps)) = x {
+        let span = if hi > lo { hi - lo } else { 1e-6 };
+        *c = XCol { f: Some(f), off, ax: lo, bx: span / 1023.0, amps };
+    }
+}
+
+/// Code `j` of the file's code stream: the record's codes, or with an X
+/// column CH1 and X in turn.
+#[inline(always)]
+fn code_at(rec: &[u16], x: &XCol, j: usize) -> u16 {
+    let Some(f) = x.f else { return rec[j] };
+    let i = j / 2;
+    if j % 2 == 0 {
+        return rec[i];
+    }
+    let v = f(x.off + i).unwrap_or(x.ax);
+    ((v - x.ax) / x.bx + 0.5).clamp(0.0, 1023.0) as u16
+}
+
+/// Codes in the file (twice the samples with an X column).
+fn n_codes(rec: &[u16], x: &XCol) -> usize {
+    if x.f.is_some() { 2 * rec.len() } else { rec.len() }
+}
+
 /// Header text writer.
 pub struct Hdr {
     b: [u8; HDR_MAX],
@@ -131,7 +192,13 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amp
         s.hdr[n] = c;
         n += 1;
     }
-    let col: &[u8] = if amps { b"time_s,amperes\r\n" } else { b"time_s,volts\r\n" };
+    let x = xcol();
+    let col: &[u8] = match (x.f.is_some(), amps, x.amps) {
+        (false, true, _) => b"time_s,amperes\r\n",
+        (false, false, _) => b"time_s,volts\r\n",
+        (true, _, true) => b"time_s,volts,x_amperes\r\n",
+        (true, _, false) => b"time_s,volts,x_volts\r\n",
+    };
     for &c in col {
         if n < HDR_MAX {
             s.hdr[n] = c;
@@ -143,15 +210,18 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amp
     // must be known before the writer allocates; `fill` codes them again.
     let p = plan();
     s.cur_ok = false;
-    s.nb = rec.len().div_ceil(crate::dlog::SBLK).min(crate::dlog::SBLK_MAX);
-    for (b, c) in rec.chunks(crate::dlog::SBLK).take(s.nb).enumerate() {
-        (p.mode[b], p.len[b], p.crc[b]) = crate::dlog::scope_plan(c);
+    let nc = n_codes(rec, x);
+    s.nb = nc.div_ceil(crate::dlog::SBLK).min(crate::dlog::SBLK_MAX);
+    for b in 0..s.nb {
+        let o = b * crate::dlog::SBLK;
+        (p.mode[b], p.len[b], p.crc[b]) = crate::dlog::scope_plan_of((nc - o).min(crate::dlog::SBLK), &mut |j| code_at(rec, x, o + j));
     }
 }
 
 /// Bytes before the first coded block: DLG header, parameters, table.
 fn head_len(s: &Snap) -> usize {
-    crate::dlog::FHDR + s.hdr_n + crate::dlog::SCOPE_PAR + 8 * s.nb + 4
+    let par = if xcol().f.is_some() { crate::dlog::SCOPE_PAR_XY } else { crate::dlog::SCOPE_PAR };
+    crate::dlog::FHDR + s.hdr_n + par + 8 * s.nb + 4
 }
 
 /// File length in bytes (the DLG file).
@@ -173,13 +243,20 @@ pub fn fill(off: u32, buf: &mut [u8]) {
     let rec = s.rec.unwrap_or(&[]);
     let mut i = 0;
     if off < head {
-        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR + 8 * crate::dlog::SBLK_MAX + 4];
-        let k = crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, rec.len() as u32, &mut h);
+        let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR_XY + 8 * crate::dlog::SBLK_MAX + 4];
+        let x = xcol();
+        let k = if x.f.is_some() {
+            crate::dlog::scope_header_xy(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, 2 * rec.len() as u32, x.ax, x.bx, &mut h)
+        } else {
+            crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, rec.len() as u32, &mut h)
+        };
         crate::dlog::scope_table(&p.len[..s.nb], &p.crc[..s.nb], &mut h[k..]);
         i = (head - off).min(buf.len());
         buf[..i].copy_from_slice(&h[off..off + i]);
     }
-    let codes = |b: usize| &rec[b * crate::dlog::SBLK..((b + 1) * crate::dlog::SBLK).min(rec.len())];
+    let x = xcol();
+    let nc = n_codes(rec, x);
+    let blen = |b: usize| (nc - b * crate::dlog::SBLK).min(crate::dlog::SBLK);
     while i < buf.len() {
         let at = (off + i) as u32;
         if !s.cur_ok || p.enc.pos != at {
@@ -195,10 +272,12 @@ pub fn fill(off: u32, buf: &mut [u8]) {
             }
             p.cb = b;
             p.enc = crate::dlog::SEnc::new(p.mode[b], o);
-            while p.enc.pos < at && p.enc.next(codes(b)).is_some() {}
+            let base = b * crate::dlog::SBLK;
+            while p.enc.pos < at && p.enc.next_of(blen(b), &mut |j| code_at(rec, x, base + j)).is_some() {}
             s.cur_ok = true;
         }
-        match p.enc.next(codes(p.cb)) {
+        let base = p.cb * crate::dlog::SBLK;
+        match p.enc.next_of(blen(p.cb), &mut |j| code_at(rec, x, base + j)) {
             Some(x) => {
                 buf[i] = x;
                 i += 1;

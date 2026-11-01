@@ -620,6 +620,124 @@ pub fn run(ck: &mut Checker, out: &str) {
     }
     println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes, {nd} trigger-level drag steps");
     gen_channel(ck, out);
+    xy_display(ck, out);
+}
+
+/// X-Y against GEN (the manual's screen too): CH1 at 0.5 V/div, a 3 Vpp
+/// sine 60 degrees ahead of the generator's 0..3 V sine, X = 0 at frame
+/// column `x0`; two periods of 2000 samples through scope_xy::plot_gen.
+pub fn xy_plot_gen(h: i16, x0: i16) {
+    let pi2 = 2.0 * std::f32::consts::PI;
+    let kh = (h - 3) as f32 / 278.0;
+    // CH1: 0.25 model rows per code, code 512 on the centre row.
+    let map = scope_xy::Map { ya: 1.0 + (140.0 + 128.0) * kh, yb: -0.25 * kh, x0: x0 as f32 + 0.5, kx: 80.0, h };
+    let p = scope_xy::plot();
+    p.invalidate();
+    p.begin(1, 0, 0);
+    let shape = gen::Shape { wave: gen::Wave::Sine, lo_v: 0.0, hi_v: 3.0, duty: 0.5 };
+    let g = gen::Sync { t0: 0.0, s: 1.0, q: 2000.0, k: 1.0, shape };
+    let data: Vec<u16> = (0..4000).map(|i| (512.0 + 420.0 * (pi2 * i as f32 / 2000.0 + pi2 / 6.0).sin()).round() as u16).collect();
+    p.plot_gen(&data, 0, &g, map);
+}
+
+/// The X-Y display (docs/scope-gen-channel.md section 3): CH1 against the
+/// generator (a sine 60 degrees ahead: an ellipse) through the real
+/// per-sample path (scope_xy::Plot::plot_gen), and against the DMM CH2 (a
+/// stored CH2 stream at 38.4 kS/s, plot_ch2); the "X-Y" trigger badge, the
+/// X label, no trigger markers; the Display tab's X-Y row; an update equals
+/// a fresh draw.
+fn xy_display(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let pi2 = 2.0 * std::f32::consts::PI;
+    for combined in [false, true] {
+        for xy in [scope::XY_GEN, scope::XY_CH2] {
+            let mut m = base.m;
+            m.combined = combined;
+            m.xy = xy;
+            m.status = scope_ui::ST_AUTO;
+            m.trig_px = if xy == scope::XY_GEN { 80 } else { 200 };
+            if xy == scope::XY_GEN {
+                // 500 mV/div: X (GEN) on CH1's V/div.
+                m.vdiv = 8;
+            }
+            m.ch2_txt = scope_ui::Txt::new(if xy == scope::XY_GEN { "X GEN 500mV" } else { "X CH2 100mA" });
+            let h = m.frame_h();
+            let kh = (h - 3) as f32 / 278.0;
+            // CH1: 0.25 model rows per code, code 512 on the centre row.
+            let map = scope_xy::Map { ya: 1.0 + (140.0 + 128.0) * kh, yb: -0.25 * kh, x0: m.trig_px as f32 + 0.5, kx: 400.0, h };
+            let n = 4000usize;
+            let plot = || {
+                if xy == scope::XY_GEN {
+                    xy_plot_gen(h, m.trig_px);
+                } else {
+                    let p = scope_xy::plot();
+                    p.invalidate();
+                    p.begin(1, 0, 0);
+                    // A diode-like V-I loop: CH2 (A) a 1 kHz sine, CH1 the
+                    // voltage, clipped and lagging; 1 MS/s CH1 (200 cycles
+                    // per sample), 4 ms.
+                    scope_ch2::init();
+                    let st = scope_ch2::store();
+                    st.reset(0, 38400, scope::WaveScale::of(2e-6, 0.0, 0.1, true, true), 0);
+                    for k in 0..200u32 {
+                        let us = (k as f64 * 1e6 / 38400.0).round() as u32;
+                        let i = 0.3 * (pi2 * us as f32 / 1000.0).sin();
+                        st.push(us, (i / 2e-6) as i32);
+                    }
+                    let data: Vec<u16> = (0..n)
+                        .map(|j| {
+                            let v = (pi2 * j as f32 / 1000.0 - 0.4).sin();
+                            (512.0 + 380.0 * v.max(-0.8).min(0.35) / 0.8).round() as u16
+                        })
+                        .collect();
+                    p.plot_ch2(&data, 0, 200.0, st, map);
+                }
+            };
+            let sc = stock::Scene { name: "xy", m, popup: scope_ui::Popup::None, trace: None, persist: None, cols: 399, cells: base.cells.clone() };
+            let mut pv = stock::popvals(&m);
+            pv.xy = xy;
+            pv.gen_trace = false;
+            pv.ch2_on = xy == scope::XY_CH2;
+            pv.ch2_vdiv = scope_ui::Txt::new("100mA");
+            plot();
+            stock::draw_with(&sc, &pv);
+            let tag = if xy == scope::XY_GEN { "gen" } else { "ch2" };
+            ck.check_replica(&format!("xy/{}/{tag}", combined as u8));
+            let want = emu().fb.clone();
+            if !combined {
+                save(out, &format!("s08-xy-{tag}"));
+            }
+            // Empty, then the plot as an update.
+            let p = scope_xy::plot();
+            p.invalidate();
+            p.begin(2, 0, 0);
+            stock::draw_with(&sc, &pv);
+            plot();
+            scope_ui::update(&m);
+            ck.same_as(&format!("xy/{}/{tag}/update", combined as u8), &want);
+            // X-Y off again: the stock page (no bitmap, the T markers back).
+            let mut off = base.m;
+            off.combined = combined;
+            let sco = stock::Scene { name: "xy-off", m: off, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw(&sco);
+            let want_off = emu().fb.clone();
+            stock::draw_with(&sc, &pv);
+            stock::load(&sco);
+            scope_ui::update(&sco.m);
+            scope_ui::cells(&sco.m, &sco.cells);
+            ck.same_as(&format!("xy/{}/{tag}/off", combined as u8), &want_off);
+            if xy == scope::XY_GEN {
+                let sc = stock::Scene { name: "xy", m, popup: scope_ui::Popup::Mf(1), trace: None, persist: None, cols: 399, cells: base.cells.clone() };
+                plot();
+                stock::draw_with(&sc, &pv);
+                let add = vec![rb(scope_ui::GT_LABEL), rb(scope_ui::XY_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)];
+                ck.check_add(&format!("xy/{}/tab1", combined as u8), &[("page", Bx::new(14, 161, 399, 99))], &add, Bx::new(13, 20, 401, 241));
+                if !combined {
+                    save(out, "s08-xy-display");
+                }
+            }
+        }
+    }
 }
 
 /// The GEN channel (docs/scope-gen-channel.md): the computed trace under

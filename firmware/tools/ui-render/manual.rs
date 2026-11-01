@@ -631,6 +631,24 @@ pub fn run(out: &str) -> usize {
             save1(out, name);
         }
     }
+    // X-Y: CH1 against the generator, 60 degrees apart (an ellipse).
+    {
+        let mut s = scope_base();
+        s.trace = None;
+        s.m.xy = scope::XY_GEN;
+        s.m.status = scope_ui::ST_AUTO;
+        s.m.vdiv = 8;
+        s.m.trig_px = 80;
+        s.m.tabs = 0;
+        s.m.cur_tab = 0;
+        s.m.ch2_txt = scope_ui::Txt::new("X GEN 500mV");
+        s.cells = vec!["Freq:1.00kHz", "Vp-p:3.00V", "Cycl:1.00ms", "Vrms:1.06V"];
+        super::scope_add::xy_plot_gen(s.m.frame_h(), 80);
+        let mut p = popvals(&s.m);
+        p.xy = scope::XY_GEN;
+        scope_shot(&mut ck, out, "scope-xy", &s, &p);
+        save1(out, "scope-xy");
+    }
     // Auto-set with no signal: the message over a flat trace.
     {
         let mut s = scope_base();
