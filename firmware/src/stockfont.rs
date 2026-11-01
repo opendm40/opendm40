@@ -502,14 +502,18 @@ include!("stockfont_w.rs");
 // The USB symbol for the status bar (tools/mkusbglyph.py).
 include!("stockfont_usb.rs");
 
-/// Hand-drawn 1 bpp glyphs for SC_F12 (the scope bar's 12 px font has ASCII
-/// only): Ω and ° for the REC mark's function (scope_ui::rec_unit), drawn on
-/// the font's cap rows (2..10) with its 2 px stems; column-major, MSB first.
+/// Hand-drawn 1 bpp glyphs, column-major, MSB first. SC_F12 (the scope bar's
+/// 12 px font has ASCII only): Ω and ° for the REC mark's function
+/// (scope_ui::rec_unit), drawn on the font's cap rows (2..10) with its 2 px
+/// stems. F14: σ for the DMM statistics column (ui.rs), the font's 'o' with
+/// its top bar run out to the right, on the x-height rows.
 ///   Ω  ...###..  ..##.##.  .##...##  .##...##  .##...##  ..##.##.
 ///      ...#.#..  ...#.#..  .###.###        °  ..##.  .#..#  .#..#  ..##.
-static F12_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 2] = [
+///   σ  .######  ##..##.  ##..##.  ##..##.  ##..##.  ##..##.  .####..
+static HAND_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 3] = [
     (0x0804_F24C, '\u{3a9}', false, 8, 9, 8, 1, &[0x00, 0x1c, 0x5f, 0x38, 0xf8, 0x06, 0x3d, 0xf2, 0x71]),
     (0x0804_F24C, '\u{b0}', false, 5, 4, 6, 6, &[0x06, 0x99, 0x60]),
+    (0x0805_B138, '\u{3c3}', false, 7, 7, 7, 0, &[0x7d, 0xfe, 0x0c, 0x1f, 0xff, 0xa0, 0x00]),
 ];
 
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
@@ -521,7 +525,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(F12_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(HAND_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,

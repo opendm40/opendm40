@@ -24,8 +24,9 @@ pub struct Ch2 {
     /// After a lost stream, no new start before this time (ms): a stream
     /// that cannot run must not rewrite the DMM row every pass.
     pub retry_at: u64,
-    /// The store was frozen by a STOP: restart it at the next RUN (the
-    /// samples in between were thrown away).
+    /// The store was frozen by a STOP (after one last drain of the
+    /// stream): restart it at the next RUN (the samples in between were
+    /// thrown away).
     pub frozen: bool,
 }
 
@@ -112,7 +113,7 @@ impl App {
         }
         let sc = WaveScale::of(a.per_code, a.offset, self.ch2.vdiv, a.amps, a.ac);
         let real = (real_mhz / 1000).max(1);
-        scope_ch2::store().reset(c0, real, sc, crate::logger::wave::dropped());
+        scope_ch2::store().reset(c0, real, sc);
         self.ch2.live = true;
         self.ch2.frozen = false;
         self.ch2.fs = fs;
@@ -136,22 +137,31 @@ impl App {
     }
 
     /// The stream into the CH2 store (every scope pass and between its
-    /// slow parts, as the wave view's `wave_keep`). A stopped scope keeps
-    /// the store as it was (the stored record's CH2) and throws the
-    /// stream away.
+    /// slow parts, as the wave view's `wave_keep`); a hole restarts the
+    /// store (`Store::push`). A STOP waiting for its frame still takes it
+    /// (`Scope::acquiring`). A stopped scope (STOP, a Single / DIGitize
+    /// record) takes the stream in once more, since the logger ring holds
+    /// the CH2 of the record's newest part (at 2 ms/div all of it), and
+    /// re-renders the record with it; then it keeps the store as it is
+    /// (the stored record's CH2) and throws the stream away.
     pub(super) fn ch2_drain(&mut self) {
         if !self.ch2.live {
             return;
         }
         let st = scope_ch2::store();
-        if !self.scope.s.run {
-            crate::logger::wave::drain(&mut |_| {});
+        if !self.scope.acquiring() {
+            if self.ch2.frozen {
+                crate::logger::wave::drain(&mut |_| {});
+                return;
+            }
             self.ch2.frozen = true;
+            if crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw)) > 0 {
+                self.scope.refresh_shown();
+            }
             return;
         }
-        let holes = crate::logger::wave::dropped();
-        if holes != st.dropped() || self.ch2.frozen {
-            st.restart(holes);
+        if self.ch2.frozen {
+            st.restart();
             self.ch2.frozen = false;
         }
         crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw));
