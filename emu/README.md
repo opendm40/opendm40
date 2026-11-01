@@ -258,6 +258,7 @@ recorded.
 | [`dragperf.py`](dragperf.py) | trigger-level drag: main-loop period and touch-to-pixel latency (prints figures) | | free |
 | [`triglevtest.py`](triglevtest.py) | `TRIG:LEV` keeps the level as given (V/div steps, off screen); Normal triggers on it | ~2 min | free |
 | [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |
+| [`stoptest.py`](stoptest.py) | RUN / STOP in a loop at 10 us .. 1 ms/div, untriggered and triggered: every STOP leaves a record (`WAV:PRE?` points > 0) and `WAV:DATA?` is the input square | ~15 min | free |
 
 ### Logger and the AD2 stream
 
