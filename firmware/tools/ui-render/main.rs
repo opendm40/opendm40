@@ -95,6 +95,9 @@ mod splash;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+// The Bode page's maths (ui_bode.rs, a ui submodule).
+#[path = "../../src/bode.rs"]
+mod bode;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
@@ -3856,6 +3859,64 @@ fn main() {
             ui::inr::side(vals.idle, vals.file);
             ui::inr::button(vals.btn, vals.btn_bg, vals.enabled);
             ck.same_as(&format!("inrush-live/{name}"), &want);
+        }
+    }
+
+    // 6zb. The Bode page (src/ui_bode.rs): empty (before a Thru), a sweep
+    //      in progress, an RC low-pass against the Thru with the cursor
+    //      at -3 dB, a deep notch (20 dB steps), missing points; the live
+    //      parts drawn over another page equal a fresh page.
+    {
+        use ui::bode::{Curves, Vals, C_OK, C_PLAIN, C_RUN, C_WARN};
+        let rc = |ppd: u8, n: usize| -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+            let fc = 1591.5f64;
+            let (mut f, mut g, mut p) = (vec![], vec![], vec![]);
+            for i in 0..n.min(bode::grid_n(ppd)) {
+                let x = bode::grid_f(ppd, i);
+                let r = x / fc;
+                f.push(x as f32);
+                g.push((-10.0 * (1.0 + r * r).log10()) as f32);
+                p.push((-r.atan().to_degrees()) as f32);
+            }
+            (f, g, p)
+        };
+        let notch = {
+            let (f, _, _) = rc(20, 80);
+            let g: Vec<f32> = f.iter().map(|&x| { let r = (x / 1000.0) as f64; (20.0 * ((1.0 - r * r).abs().max(1e-4) / ((1.0 - r * r).powi(2) + (r / 2.0).powi(2)).sqrt()).log10()) as f32 }).collect();
+            let p: Vec<f32> = f.iter().map(|&x| { let r = (x / 1000.0) as f64; let ph = -((r / 2.0).atan2(1.0 - r * r)).to_degrees() + if r > 1.0 { 180.0 } else { 0.0 }; ph as f32 }).collect();
+            (f, g, p)
+        };
+        let empty: (Vec<f32>, Vec<f32>, Vec<f32>) = (vec![], vec![], vec![]);
+        let full = rc(10, 80);
+        let part = rc(10, 17);
+        let mut gaps = rc(5, 80);
+        gaps.1[7] = f32::NAN;
+        gaps.2[7] = f32::NAN;
+        let v = |state: &'static str, fg: u16, cursor: &'static str, m3db: &'static str, running: bool, ppd: &'static str, thru: bool| Vals { state, state_fg: fg, cursor, m3db, running, ppd, thru };
+        let cases: Vec<(&str, Vals, &(Vec<f32>, Vec<f32>, Vec<f32>), Option<usize>)> = vec![
+            ("b01-bode-empty", v("Probe on OUT: Thru, then Run", C_PLAIN, "", "", false, "10/dec", false), &empty, None),
+            ("b02-bode-running", v("Sweep 17/38", C_RUN, "1.000 kHz  -1.33 dB  -32.1 deg", "", true, "10/dec", true), &part, Some(16)),
+            ("b03-bode-rc", v("Done, against Thru", C_OK, "1.585 kHz  -2.99 dB  -44.9 deg", "-3dB 1.587 kHz", false, "10/dec", true), &full, Some(22)),
+            ("b04-bode-notch", v("Done, against GEN (no Thru)", C_OK, "1.000 kHz  -80.00 dB  -90.0 deg", "-3dB 707.9 Hz", false, "20/dec", false), &notch, Some(60)),
+            ("b05-bode-gaps", v("Done: points missing (no GEN phase)", C_WARN, "63.10 Hz  ---", "-3dB 1.587 kHz", false, "5/dec", true), &gaps, Some(7)),
+        ];
+        for (k, (name, vals, c, cur)) in cases.iter().enumerate() {
+            let curves = Curves { f: &c.0, g: &c.1, p: &c.2, cursor: *cur };
+            host::reset(0);
+            ui::bode::page(vals, &curves);
+            ck.check_opts(&format!("bode/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let (_, o, oc, ocur) = &cases[(k + 1) % cases.len()];
+            ui::bode::page(o, &Curves { f: &oc.0, g: &oc.1, p: &oc.2, cursor: *ocur });
+            ui::bode::parts(vals, &curves);
+            ck.same_as(&format!("bode-live/{name}"), &want);
+        }
+        for (msg, (n, scene)) in &ck.seen {
+            if scene.starts_with("bode") {
+                println!("{n:6} x  {msg}   [first: {scene}]");
+            }
         }
     }
 

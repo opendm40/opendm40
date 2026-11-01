@@ -638,6 +638,24 @@ and `MEASure:POWer?` then give the real power P in W.
 - The trace has 19200 samples at 9600 Hz, the trigger at sample 1920. Read
   it in pieces: `INR:DATA? 0,3000`, `INR:DATA? 3000,3000`, ...
 
+## Bode plot
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `BODE:RUN` | | Opens the Bode page and starts a sweep. | both |
+| `BODE:THRU` | | Opens the Bode page and starts a Thru pass. | both |
+| `BODE:STOP` | | Stops the sweep. | both |
+| `BODE:POINts[?]` | points per decade: `5`, `10` (default) or `20` | `10` | both |
+| `BODE:STATus?` | | `<IDLE, RUN, THRU or DONE>,<points measured>,<points of the sweep>,<Thru stored for this grid: 1 or 0>`: `RUN,12,38,1` | both |
+| `BODE:DATA?` | | `<f Hz>,<gain dB>,<phase deg>` for each point, all in one line: `+1.000000E+01,-1.200000E-02,+1.000000E-01,...` | both |
+
+- A sweep runs 10 Hz .. 50 kHz; the generator output is a 2 Vpp sine around
+  1.5 V. The generator and scope settings come back when it ends.
+- Gain and phase are against the Thru pass of the same points per decade,
+  else against the generator's amplitude (phase not corrected).
+- A point without a result is `9.91E37` in gain and phase.
+- `BODE:POINts` during a sweep is `Settings conflict`.
+
 ## Data logging (LOG)
 
 Two loggers: the **CSV recorder** writes the multimeter's readings to the

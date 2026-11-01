@@ -73,6 +73,8 @@ All documentation of opendm40, by reader. Start at the
   and V/div by touch.
 - [scope-gen-channel.md](../firmware/docs/scope-gen-channel.md): the
   generator as a computed scope channel (trigger source, trace) and the DMM as CH2.
+- [bode.md](../firmware/docs/bode.md): the Bode plot: the generator sweep and
+  the gain / phase measurement against the generator's phase.
 
 ### Planning
 

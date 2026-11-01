@@ -8,6 +8,7 @@
 //!           FASTnnn.DLG  fast logger streams (fastlog.rs)
 //!   SHOTS/  Snnn.BMP     screenshots (screenshot.rs)
 //!   SCOPE/  SCOPnnn.DLG  scope records (screenshot.rs `start_csv`)
+//!           BODEnnn.CSV  Bode sweeps (screenshot.rs `start_bode`)
 //! (`dir_of`: the directory follows from the name). Files of ours that
 //! earlier builds wrote to the root STAY there (no boot-time migration: a
 //! move is two directory writes with a window in which either two live
@@ -70,9 +71,13 @@ pub enum Err {
     Bad,
 }
 
+/// BODEnnn.CSV numbers in use: 0 .. BODE_MAX (vdisk.rs: the USB volume
+/// shows no more of them; screenshot.rs `start_bode`).
+pub const BODE_MAX: u16 = 24;
+
 /// The directory of one of our files, from its 8.3 name: S*.BMP -> SHOTS,
-/// LOG*.DLG / FAST*.DLG -> LOGS, SCOP*.DLG -> SCOPE (case-insensitive).
-/// None: not ours.
+/// LOG*.DLG / FAST*.DLG -> LOGS, SCOP*.DLG / BODE*.CSV -> SCOPE
+/// (case-insensitive). None: not ours.
 #[cfg_attr(target_os = "none", link_section = ".text.fat_rd")]
 pub fn dir_of(n: &[u8]) -> Option<&'static [u8; 11]> {
     let up = |c: u8| c.to_ascii_uppercase();
@@ -81,7 +86,7 @@ pub fn dir_of(n: &[u8]) -> Option<&'static [u8; 11]> {
         Some(&SHOTS)
     } else if &ext == b"DLG" && (n[..3].iter().map(|&c| up(c)).eq(*b"LOG") || n[..4].iter().map(|&c| up(c)).eq(*b"FAST")) {
         Some(&LOGS)
-    } else if &ext == b"DLG" && n[..4].iter().map(|&c| up(c)).eq(*b"SCOP") {
+    } else if (&ext == b"DLG" && n[..4].iter().map(|&c| up(c)).eq(*b"SCOP")) || (&ext == b"CSV" && n[..4].iter().map(|&c| up(c)).eq(*b"BODE")) {
         Some(&SCOPE)
     } else {
         None

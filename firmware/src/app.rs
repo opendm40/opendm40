@@ -46,6 +46,9 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+/// The Bode page: the generator sweep, gain and phase on CH1 (region C).
+#[path = "app_bode.rs"]
+mod app_bode;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -145,7 +148,7 @@ fn next_rate(r: dmm::Rate) -> dmm::Rate {
 fn is_page(v: View) -> bool {
     matches!(
         v,
-        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest | View::Bode
     )
 }
 
@@ -775,6 +778,11 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
+            if self.view == View::Bode {
+                // Leaving the Bode page: a sweep stops, the generator and
+                // the scope get the user's settings back (app_bode.rs).
+                self.bode_close(clk);
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -813,7 +821,7 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
-            View::Scope | View::Gen | View::Keypad => (false, true),
+            View::Scope | View::Gen | View::Keypad | View::Bode => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
         // A CSV recording (csvlog.rs) keeps the DMM measuring in every view.
@@ -890,6 +898,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
+            View::Bode => self.bode_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 self.with_temp_page(None);
@@ -1868,6 +1877,10 @@ impl App {
             self.inrush_tick(now);
             return;
         }
+        if self.view == View::Bode {
+            self.bode_tick();
+            return;
+        }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
         // (meter.update returns None), so repaint the frozen value and the
@@ -2153,9 +2166,11 @@ impl App {
 
     /// Settings -> backup SRAM words.
     fn persist_words(&self) -> [u32; crate::persist::WORDS] {
-        let g = &self.gen.s;
-        // The MCX settings (the wave view's are not persisted).
-        let sc = &self.scope.mcx_settings();
+        // The MCX settings (the wave view's are not persisted). During a
+        // Bode sweep the user's settings from before it, not the sweep's
+        // (a power loss mid-sweep keeps them).
+        let (g, sc) = self.persisted_gen_scope();
+        let (g, sc) = (&g, &sc);
         let mut p = [0u32; crate::persist::WORDS];
         p[0] = self.dim_idx as u32
             | (self.off_idx as u32) << 4
@@ -2644,6 +2659,11 @@ impl App {
     /// Poll the scope; draws the frame in scope views.
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
+        // The Bode page runs its sweep on the scope's records (app_bode.rs).
+        if self.view == View::Bode {
+            self.bode_poll(now);
+            return;
+        }
         // A scope CSV that finished (UF-13): release the record, toast.
         self.sp_csv_poll(now);
         // Drag / pinch on the scope page: no new frames and no acquisition
@@ -3197,6 +3217,7 @@ impl App {
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
+            || app_bode::ses().running()
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
@@ -3517,7 +3538,7 @@ impl App {
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
-                    View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
+                    View::Menu | View::Range | View::Keypad | View::Inrush | View::Bode => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -3525,6 +3546,7 @@ impl App {
             1 => match self.view {
                 // The inrush page: RUN = Arm / Cancel.
                 View::Inrush => self.inrush_button(clk),
+                View::Bode => self.bode_button(now),
                 View::Gen => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
@@ -3567,7 +3589,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits | View::Record | View::Inrush => {
+                View::Range | View::Limits | View::Record | View::Inrush | View::Bode => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -3657,6 +3679,7 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            View::Bode => self.bode_tap(clk, x, y),
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).

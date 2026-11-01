@@ -160,6 +160,13 @@ SECTIONS
          * refuses to open then, closes when one starts; main.rs calls
          * tt_poll only without a session). */
         *(.text.*8opendm403app13app_touchtest*);
+        /* The Bode page (src/app_bode.rs, src/ui_bode.rs, src/bode.rs): no
+         * AD2 stream runs on it; its per-pass hook is the view check in
+         * App::scope_poll, the acquisition Scope::poll (region B). */
+        *(.text.*8opendm403app8app_bode*);
+        *(.text.*8opendm402ui4bode*);
+        *(.text.*8opendm404bode*);
+        *(.text.*8opendm404scpi8bode_arg*);
         *(.text.*8opendm402ui9touchtest*);
         /* The touch calibration's fit and checks (src/touchcal.rs): the
          * touch test page, DBG:TOUCH:CAL and the settings restore at boot

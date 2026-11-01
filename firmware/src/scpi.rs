@@ -318,6 +318,25 @@ pub enum Out {
     Mmem(Mmem),
     /// Inrush current (INRush:...), handled by the main loop with the app.
     Inr(Inr),
+    /// Bode plot (BODE:...), handled by the main loop with the app.
+    Bode(Bode),
+}
+
+/// Bode plot (src/app_bode.rs, firmware/docs/bode.md):
+///   BODE:RUN                     sweep (opens the Bode page)
+///   BODE:THRU                    a Thru pass (the probe on the generator's
+///                                output): the reference of later sweeps
+///   BODE:STOP                    stop the sweep
+///   BODE:POINts <5|10|20> / ?    points per decade of the next sweep
+///   BODE:STATus?                 IDLE|RUN|THRU|DONE,<points>,<of>,<thru 0|1>
+///   BODE:DATA?                   f,gain_dB,phase_deg per point (NR3)
+#[derive(Clone, Copy, PartialEq)]
+pub enum Bode {
+    Run(bool),
+    Stop,
+    Points(Option<u8>),
+    Stat,
+    Data,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -832,6 +851,26 @@ fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static st
 fn n7_arg(a: &[u8]) -> Dbg {
     let w = nums::<3>(a);
     Dbg::Ad2(6, w[1].min(2) as u8, w[2].clamp(1, 40) as u16, w[0].min(4) as u8)
+}
+
+/// BODE:<sub>[?] [arg] (see `Bode`); None: not a BODE command.
+#[inline(never)] // .cold (link-native.x)
+fn bode_arg(sub: &[u8], a: &[u8], query: bool) -> Option<Bode> {
+    if kw(sub, "RUN") && !query {
+        Some(Bode::Run(false))
+    } else if kw(sub, "THRU") && !query {
+        Some(Bode::Run(true))
+    } else if kw(sub, "STOP") && !query {
+        Some(Bode::Stop)
+    } else if kw(sub, "POINts") {
+        if query { Some(Bode::Points(None)) } else { parse_num(a).filter(|v| *v >= 1.0 && *v <= 100.0).map(|v| Bode::Points(Some(v as u8))) }
+    } else if kw(sub, "STATus") && query {
+        Some(Bode::Stat)
+    } else if kw(sub, "DATA") && query {
+        Some(Bode::Data)
+    } else {
+        None
+    }
 }
 
 /// DBG:TOUCH:CAL a,b,c,d,e,f: six numbers into touchcal.rs (false: not
@@ -2681,6 +2720,16 @@ impl Scpi {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     out = Out::Instr(if kw(sub, "PWM") { Cmd::DiagPwm } else { Cmd::DiagDac });
                 }
+                _ if kw(p0, "BODE") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    match bode_arg(sub, trim(arg), query) {
+                        Some(c) => out = Out::Bode(c),
+                        None => {
+                            self.err_arg(no_arg, if kw(sub, "POINts") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
+                }
                 _ if kw(p0, "INRush") => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
@@ -3208,7 +3257,7 @@ fn trim(s: &[u8]) -> &[u8] {
 }
 
 /// SCPI NR3 with 7 significant digits: "+1.234567E-03".
-fn nr3(b: &mut [u8; 20], v: f32) -> usize {
+pub fn nr3(b: &mut [u8; 20], v: f32) -> usize {
     let mut i = 0;
     b[i] = if v < 0.0 { b'-' } else { b'+' };
     i += 1;
