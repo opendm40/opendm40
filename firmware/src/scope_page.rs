@@ -519,7 +519,8 @@ impl App {
             trig_row: s.trig_row as i16,
             trig_v: self.scope.trig_volts(),
             rising: s.rising,
-            trig_px: if xy { -1000 } else { s.hpos as i16 },
+            // X-Y: the column of X = 0 (its guide line while dragged; no T).
+            trig_px: s.hpos as i16,
             pos: s.pos as i16,
             colour: sp.colour,
             bright: sp.bright,
@@ -1083,8 +1084,9 @@ impl App {
     /// X-Y (docs/scope-gen-channel.md section 3): frame `f`'s CH1 samples
     /// against the generator (its phase in the stored record) or the DMM
     /// CH2 (its samples at their time) into the X-Y bitmap. X: the
-    /// generator on CH1's V/div, CH2 on its own V/div, 0 on the centre
-    /// column. Nothing for a column frame (a stopped zoom-out).
+    /// generator on CH1's V/div, CH2 on its own V/div, 0 on the trigger
+    /// position's column (free run: a horizontal drag moves X; 200 = the
+    /// centre). Nothing for a column frame (a stopped zoom-out).
     /// Per frame, the setup only: .cold (link-native.x); the per-sample
     /// loops (scope_xy plot_gen / plot_ch2) and the clear are region B.
     #[inline(never)]
@@ -1094,7 +1096,7 @@ impl App {
         let xy = self.scope.xy;
         let h: i16 = if self.view == View::DmmScope { 301 - su::COMBINED_TOP } else { 281 };
         let xv = if xy == scope::XY_GEN { self.scope.vdiv() } else { self.ch2.vdiv };
-        let key = (s.range as u32 | (s.pos as u32) << 5 | (xy as u32) << 16 | (h as u32) << 18 | (s.ac as u32) << 30) ^ xv.to_bits().rotate_left(7) ^ s.probe.to_bits().rotate_left(13);
+        let key = (s.range as u32 | (s.pos as u32) << 5 | (xy as u32) << 16 | (h as u32) << 18 | (s.ac as u32) << 30) ^ xv.to_bits().rotate_left(7) ^ s.probe.to_bits().rotate_left(13) ^ (s.hpos as u32).rotate_left(21);
         let pm = if s.run { self.sp.persist.min(3) as usize } else { 0 };
         p.begin(key, crate::scope_xy::CLEAR_MS[pm], now);
         if f.cols.is_some() || f.data.len() < 2 || !(xv > 0.0) {
@@ -1103,7 +1105,7 @@ impl App {
         let r0 = self.scope.row_of_code(0.0);
         let slope = (self.scope.row_of_code(1000.0) - r0) / 1000.0;
         let kh = (h - 3) as f32 / 278.0;
-        let m = crate::scope_xy::Map { ya: 1.0 + r0 * kh, yb: slope * kh, kx: 40.0 / xv, h };
+        let m = crate::scope_xy::Map { ya: 1.0 + r0 * kh, yb: slope * kh, x0: s.hpos.clamp(0, 400) as f32 + 0.5, kx: 40.0 / xv, h };
         let rec = self.scope.record();
         let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
         if off + f.data.len() > rec.len() {

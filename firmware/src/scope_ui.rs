@@ -3250,9 +3250,10 @@ pub const C2_LIST: Rect = rect(24, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
-/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box).
+/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box);
+/// X-Y: the X axis label there, wider ("X GEN 500mV"; no FFT then).
 pub fn ch2_label_rect(m: &Model) -> Rect {
-    rect(18, m.top() + 34, 92, 17)
+    rect(18, m.top() + 34, if m.xy != 0 { 112 } else { 92 }, 17)
 }
 
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).

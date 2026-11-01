@@ -555,6 +555,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
 | `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1` or `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) | `CHAN1` or `GEN` | both |
+| `DISPlay:XY[?]` | `OFF`, `GENerator` or `CH2`: X-Y display, CH1 against the generator or the DMM CH2 (turns CH2 on); free run | `OFF`, `GEN` or `CH2` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07`; stopped, the stored record's, also after a zoom (1 / the record preamble's xinc; the screen preamble's xinc follows the shown timebase) | both |
 | `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
 | `SCOPe:MEASure:VAVG?` | | Mean, V | both |

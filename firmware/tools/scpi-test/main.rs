@@ -216,6 +216,12 @@ fn set_commands() {
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");
     check(matches!(s.handle(b"DISP:BURD 1", 1), Out::Instr(Cmd::DispBurden(Some(true)))), "DISP:BURD 1");
+    check(matches!(s.handle(b"DISP:XY GEN", 1), Out::Instr(Cmd::DispXy(Some(1)))), "DISP:XY GEN");
+    check(matches!(s.handle(b"DISPlay:XY generator", 1), Out::Instr(Cmd::DispXy(Some(1)))), "DISPlay:XY generator");
+    check(matches!(s.handle(b"DISP:XY CH2", 1), Out::Instr(Cmd::DispXy(Some(2)))), "DISP:XY CH2");
+    check(matches!(s.handle(b"DISP:XY OFF", 1), Out::Instr(Cmd::DispXy(Some(0)))), "DISP:XY OFF");
+    check(matches!(s.handle(b"DISP:XY?", 1), Out::Instr(Cmd::DispXy(None))), "DISP:XY? is the query");
+    check(!matches!(s.handle(b"DISP:XY CH3", 1), Out::Instr(_)), "DISP:XY CH3 is refused");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
     check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");

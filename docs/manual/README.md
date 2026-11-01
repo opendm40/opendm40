@@ -1511,7 +1511,8 @@ samples) stays in memory:
 ### Display settings
 
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
-**Brightness** and **Grid** intensity; **GEN trace** on / off.
+**Brightness** and **Grid** intensity; **GEN trace** on / off; **X-Y**
+Off, GEN, CH2.
 
 **GEN trace** draws the generator's output in cyan under CH1, on CH1's
 V/div and position: computed from the generator's settings and timers, not
@@ -1535,6 +1536,21 @@ is on, the edge trigger does not use the trigger hardware.
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |
 |---|---|
 | The Display tab | Roll mode at 500 ms/div |
+
+### X-Y
+
+**MF > Display > X-Y**: CH1 up (Y) against the generator (**GEN**, computed
+like the GEN trace, on CH1's V/div) or against **CH2 (DMM)** (on its V/div;
+picking CH2 turns it on). Use it for Lissajous figures, phase and V-I curves.
+The scope runs free (no trigger), the cursors and the T markers are hidden,
+the measurements stay CH1's. The timebase sets how much signal is drawn;
+**Persist** keeps points (OFF: the last capture only). A sideways drag moves
+X = 0 (the generator's 0..3 V starts at the centre otherwise). **Save CSV**
+adds an `x_volts` (`x_amperes`) column. SCPI `DISPlay:XY OFF|GEN|CH2`.
+
+![X-Y: CH1 60° ahead of the generator, an ellipse](img/scope-xy.png)
+
+*X-Y: CH1 60° ahead of the generator, an ellipse.*
 
 ### Save CSV
 

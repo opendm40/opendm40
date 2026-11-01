@@ -94,11 +94,13 @@ impl Bits {
 pub const CLEAR_MS: [u64; 4] = [0, 80, 1000, u64::MAX];
 
 /// Screen mapping of one frame: frame row = ya + yb * code (CH1 code), frame
-/// column = 200 + x * kx (x in the X source's unit), `h` the frame height.
+/// column = x0 + x * kx (x in the X source's unit; x0 = the column of
+/// x = 0, plus 0.5 for the rounding), `h` the frame height.
 #[derive(Clone, Copy)]
 pub struct Map {
     pub ya: f32,
     pub yb: f32,
+    pub x0: f32,
     pub kx: f32,
     pub h: i16,
 }
@@ -198,7 +200,7 @@ impl Plot {
         while j < n {
             let ph = ph0 + j as f32 * dph;
             let x = g.shape.volts(ph - (ph as i32) as f32);
-            let fx = (200.5 + x * m.kx) as i32;
+            let fx = (m.x0 + x * m.kx) as i32;
             let fy = (m.ya + m.yb * (data[j] & 0x3FF) as f32) as i32;
             self.to(&mut last, fx, fy, m.h);
             j += step;
@@ -233,7 +235,7 @@ impl Plot {
             if j >= n {
                 return;
             }
-            let fx = (200.5 + x * m.kx) as i32;
+            let fx = (m.x0 + x * m.kx) as i32;
             let fy = (m.ya + m.yb * (data[j] & 0x3FF) as f32) as i32;
             self.to(&mut last, fx, fy, m.h);
         });
