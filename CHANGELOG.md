@@ -20,6 +20,9 @@ section named after the tag as the release notes; how to cut a release:
   and trend timebase you left, and the scope with its timebase, V/div,
   trigger and measurement settings. SCPI `MEMory:STATe:RECall:AUTO`.
 - **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
+- **Scope: 5 and 2 mV/div**, a digital zoom of 10 mV/div (the front end
+  has no known higher gain): the same resolution, drawn larger. SCPI
+  `CHAN1:SCAL 0.005` / `0.002`.
 - **Russian README and user manual:** [README.ru.md](README.ru.md) and
   [docs/manual/README.ru.md](docs/manual/README.ru.md), with a language
   switch at the top of each.
@@ -70,6 +73,15 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Extra digit at full size:** wherever it can appear, the reading starts
+  further left, so the other digits do not move when it comes or goes
+  ([manual](docs/manual/README.md#counts-rate-and-the-extra-digit)).
+- **Scope drag as on a Rigol DHO800/900:** a drag on a marker moves that
+  marker (large grab zones); anywhere else, sideways moves the trigger
+  position, up / down the selected item (the trace unless you tapped another
+  marker). The Settings row **Drag** (Stock / Axis lock / Hold 300 ms) and
+  `DBG:GRAB` are gone; cursor lines no longer drag, their markers do
+  ([manual](docs/manual/README.md#moving-things-with-a-finger)).
 - **Settings in tabs:** the sections (Display, Alerts, Power, Multimeter,
   Scope, Other) are tabs on the left, rows are taller, and only the value
   side of a row reacts to a tap ([manual](docs/manual/README.md#settings)).

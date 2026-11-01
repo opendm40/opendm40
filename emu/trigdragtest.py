@@ -21,11 +21,16 @@ part); DBG:GEST?'s "|POS hpos,trig_row,pos" is read before and after.
     the trigger position, by 80 px (one item, one axis per gesture; the
     guide lines are not zones);
   * a sideways drag along CH1's guide line right after, and one off the
-    markers, still move the trigger position.
+    markers, still move the trigger position;
+  * a vertical drag mid-plot next to the trigger row moves CH1 (the
+    selected item), not the nearer trigger level; after a tap on the
+    trigger-level marker the same drag moves the trigger level.
 
 Last: TRIG:LEV 0.8 then CHAN1:SCAL 1 / 0.5 / 2 / 0.05 / 1: TRIG:LEV? keeps
 its volts, the marker row moves (at the top edge, row -10, while the level
-is off screen at 50 mV/div).
+is off screen at 50 mV/div). Then TRIG:LEV 0.003 and CHAN1:SCAL 0.01 /
+0.005 / 0.002 / 0.01 (the 5 / 2 mV/div digital zoom steps): SCAL? echoes,
+the level keeps its volts, its row moves 2x / 5x, WAV:PRE? yinc stays.
 
 Exit status 0 = all passed.
 """
@@ -142,7 +147,7 @@ try:
     check(h2 == h1, 'CH1 drag with %d px sideways wobble kept the trigger position (%d -> %d)' % (j, h1, h2))
 
     # Right after (the guide lines show): a sideways drag along CH1's
-    # zero line (a line zone: selects CH1, the drag decides its axis).
+    # zero line (no zone: the trigger position).
     y = top + 140 + p2
     q('DBG:DRAG 150,%d,210,%d,400,0,0' % (y + 4, y + 4))
     wait_ms(300)
@@ -159,8 +164,9 @@ try:
     check(p3 == p2 and r3 == r2, 'a sideways drag off the markers keeps the levels')
 
     # A vertical drag mid-plot, 3 px off the trigger row, with CH1 selected
-    # (the last drag above was CH1's... and two pans): the nearest level
-    # marker moves, the trigger level, not the selection (owner 2026-10-25).
+    # (the CH1 drag above): CH1 moves, never the nearest level marker
+    # (owner 2026-11-01, DHO800-style). Then a tap on the trigger-level
+    # marker selects it, and the same drag moves the trigger level.
     h4, r4, p4 = pos()
     y = top + r4 + 3
     if abs(y - (top + 140 + p4)) > 20:
@@ -168,7 +174,17 @@ try:
         wait_ms(300)
         h5, r5, p5 = pos()
         print('  vertical drag near the trigger row mid-plot: hpos %d, trig_row %d, pos %d' % (h5, r5, p5), flush=True)
-        check(r5 != r4 and p5 == p4 and h5 == h4, 'a vertical drag mid-plot moves the nearest level (the trigger level), not CH1 (%d -> %d)' % (r4, r5))
+        check(p5 != p4 and h5 == h4, 'a vertical drag mid-plot moves the selected item (CH1), not the nearest level (%d -> %d)' % (p4, p5))
+        check(r5 - p5 == r4 - p4, 'the trigger row moves with CH1 (same volts) (%d -> %d)' % (r4, r5))
+        wait_ms(500)
+        # A still touch (DBG:TAP sends only the tap, no press: no selection).
+        q('DBG:DRAG 406,%d,406,%d,100' % (top + r5, top + r5))
+        wait_ms(600)
+        q('DBG:DRAG 200,150,200,180,300,0,0')
+        wait_ms(300)
+        h6, r6, p6 = pos()
+        print('  after a tap on the trigger level, vertical drag mid-plot: hpos %d, trig_row %d, pos %d' % (h6, r6, p6), flush=True)
+        check(r6 != r5 and p6 == p5 and h6 == h5, 'after a tap on its marker, a vertical drag mid-plot moves the trigger level (%d -> %d)' % (r5, r6))
 
     # The trigger level keeps its volts across V/div changes (owner
     # 2026-10-25): TRIG:LEV 0.8, CH1:SCAL 0.5 / 2 / 0.05 (off screen) / 1;
@@ -187,6 +203,30 @@ try:
     rows = [r for _, _, r in lv]
     check(rows[1] != rows[0] and rows[2] != rows[0] and rows[3] == -10 and rows[4] == rows[0],
           'the marker row follows the scale, at the edge while off screen, back after (%s)' % rows)
+
+    # The 5 / 2 mV/div steps (a digital zoom of 10 mV/div): CHAN1:SCAL?
+    # echoes them, TRIG:LEV 3 mV keeps its volts, its row moves out 2x /
+    # 5x from the zero marker (10 mV/div: 0.3 div), WAV:PRE?'s volts per code
+    # stays 10 mV/div's (the same codes, only the screen scale changes).
+    q('TRIG:LEV 0.003')
+    q('CHAN1:SCAL 0.01')
+    wait_ms(500)
+    zl = []
+    for vd in ['0.01', '0.005', '0.002', '0.01']:
+        q('CHAN1:SCAL %s' % vd)
+        wait_ms(500)
+        pre = q('WAV:PRE?').split(',')
+        _, row, zp = pos()
+        # The level's rows above the zero marker (row 140 + pos).
+        zl.append((vd, float(q('CHAN1:SCAL?')), float(q('TRIG:LEV?')), 140 + zp - row, float(pre[7])))
+    print('  V/div, SCAL?, TRIG:LEV?, rows above zero, WAV:PRE yinc: %s' % zl, flush=True)
+    check(all(abs(sv - float(vd)) <= 1e-6 for vd, sv, _, _, _ in zl), 'CHAN1:SCAL? answers 10 / 5 / 2 / 10 mV')
+    check(all(abs(v - 0.003) <= 2e-5 for _, _, v, _, _ in zl), 'the 5 / 2 mV/div steps keep the trigger level in volts')
+    zr = [r for _, _, _, r, _ in zl]
+    check(zr[0] > 0 and abs(zr[1] - 2 * zr[0]) <= 2 and abs(zr[2] - 5 * zr[0]) <= 3 and zr[3] == zr[0],
+          'the level row moves 2x / 5x from the zero marker at 5 / 2 mV/div (%s)' % zr)
+    yi = [y for _, _, _, _, y in zl]
+    check(all(abs(y - yi[0]) <= 1e-6 * abs(yi[0]) + 1e-12 for y in yi), 'WAV:PRE? volts per code unchanged by the zoom (%s)' % yi)
 finally:
     try:
         os.killpg(emu.pid, 15)

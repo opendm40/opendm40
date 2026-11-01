@@ -341,7 +341,7 @@ fn frames_to_gestures(seq: &[(u64, Vec<(u16, u16)>)]) -> Vec<G> {
 /// two lifts (a one-finger touch-down shortly after a multi-finger release
 /// is the remaining finger, not a new touch).
 fn pinch_lift_tests(ck: &mut Ck) {
-    let one_finger = |v: &[G]| v.iter().any(|g| matches!(g, G::Down(_) | G::Tap(_) | G::LongPress(_) | G::Drag(..) | G::Move(..) | G::Grab(_) | G::Up(_) | G::SwipeLeft | G::SwipeRight | G::SwipeUp | G::SwipeDown));
+    let one_finger = |v: &[G]| v.iter().any(|g| matches!(g, G::Down(_) | G::Tap(_) | G::LongPress(_) | G::Drag(..) | G::Move(..) | G::Up(_) | G::SwipeLeft | G::SwipeRight | G::SwipeUp | G::SwipeDown));
     let ends = |v: &[G]| v.iter().filter(|g| matches!(g, G::PinchEnd(_))).count();
     // Horizontal spread 100 -> 200 px (16 ms reports), then one finger lifts
     // and the other moves 60 px down and 40 px right, then lifts.
@@ -504,6 +504,66 @@ fn trig_volts_tests(ck: &mut Ck) {
     s.range = 7;
     sc.apply(s, 0);
     ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
+}
+
+/// The 5 / 2 mV/div steps (scope::VSTEPS, `Settings::vzoom`): a digital
+/// zoom of range 0: the step index round-trips, other ranges drop the
+/// zoom, the same codes land 2x / 5x further from the centre row, the
+/// codes -> volts map is range 0's, the trigger level keeps its volts and
+/// its ADC code, and the position keeps its volts in the offset codes.
+fn vzoom_tests(ck: &mut Ck) {
+    let mut ok = true;
+    for i in 0..=scope::VIDX_MAX {
+        let mut s = scope::Settings::DEFAULT;
+        s.set_vidx(i);
+        ok &= s.vidx() == i && s.vdiv1() == scope::VSTEPS[i] && (s.range == 0 || s.vzoom == 0);
+    }
+    ck.t("vzoom: set_vidx / vidx round trip over the 12 steps", ok);
+    let mut sc = scope::Scope::new();
+    let mut s = scope::Settings::DEFAULT;
+    s.range = 3;
+    s.vzoom = 2;
+    sc.apply(s, 0);
+    ck.t("vzoom: dropped on a range other than 0", sc.s.vzoom == 0 && sc.s.vidx() == 5);
+    let near = |a: f32, b: f32| (a - b).abs() <= 1e-4 * b.abs().max(1e-3);
+    let mut s = scope::Settings::DEFAULT;
+    s.range = 0;
+    s.trig_row = 105;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    let v0 = sc.trig_volts();
+    let (r0, k0) = (sc.row_of_code(512.0), sc.volts(600.0) - sc.volts(500.0));
+    let d10 = sc.row_of_code(600.0) - r0;
+    let mut res = vec![];
+    for (z, k) in [(1u8, 2.0f32), (2, 5.0)] {
+        let mut s = sc.s;
+        s.vzoom = z;
+        sc.apply(s, 0);
+        let d = sc.row_of_code(600.0) - sc.row_of_code(512.0);
+        res.push((z, sc.vdiv(), sc.s.trig_row, d / d10));
+        ok = near(d / d10, k) && near(sc.volts(600.0) - sc.volts(500.0), k0) && near(sc.trig_volts(), v0);
+        ck.t(&format!("vzoom {z}: rows x{k}, volts per code and the level's volts kept ({res:?})"), ok);
+    }
+    ck.t("vzoom: SCAL? 5 mV / 2 mV", near(res[0].1, 0.005) && near(res[1].1, 0.002));
+    // 10 mV/div, level row 105 = 35 rows above the centre ~ 0.99 div:
+    // at 5 mV/div ~ 2 div (row 70), at 2 mV/div ~ 5 div (off screen: -10).
+    ck.t("vzoom: the level row moves with the zoom", res[0].2 == 70 && res[1].2 == -10);
+    // Position: 20 rows at 2 mV/div are 20 rows on screen (the centre row's
+    // volts in rows of the zoomed scale).
+    let mut s = sc.s;
+    s.trig_row = 140;
+    s.pos = 20;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    // The offset codes: 0 V sits pos rows below the centre code g1, at the
+    // zoomed scale (pos 20 at 2 mV/div = 20 x 4 x 2 mV / 141 = 1.13 mV).
+    ck.t("vzoom: 0 V on the zero marker row (140 + pos)", (sc.row_of_volts(0.0) - 160.0).abs() < 1e-3);
+    let vt = sc.trig_volts();
+    ck.t("vzoom: level at the centre row = pos rows of 2 mV/div", near(vt, 20.0 * 4.0 * 0.002 / 141.0));
+    let mut s = sc.s;
+    s.vzoom = 0;
+    sc.apply(s, 0);
+    ck.t("vzoom: back to 10 mV/div, the level's volts kept", near(sc.trig_volts(), vt));
 }
 
 /// Stopped zoom limit (`scope::zoom_floor`): a record of any YT timebase
@@ -832,7 +892,7 @@ fn hit_tests(ck: &mut Ck) {
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
     // Settings: every section (the tabs 100 + i, the rows i), Hold &
     // Limits (list page).
-    let mut vals = vec!["Hold 5000 ms"; ui::SET_N];
+    let mut vals = vec!["Both always"; ui::SET_N];
     vals[ui::S_USB as usize] = ui::usb_disk_name(true, false);
     for t in 0..ui::SET_TABS.len() as u8 {
         host::reset(0);
@@ -1150,7 +1210,7 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("corners: zone edges (23..102 / 333..412, y 228..300)", gp(&d, c, 23, 228) == Press::Step(true) && gp(&d, c, 102, 300) == Press::Step(true) && gp(&d, c, 103, 290) == Press::None && gp(&d, c, 40, 227) == Press::None && gp(&d, c, 333, 300) == Press::Step(false) && gp(&d, c, 412, 228) == Press::Step(false) && gp(&d, c, 332, 290) == Press::None);
     ck.t("corners: a tap elsewhere in the graph does nothing", gp(&d, c, 200, 290) == Press::None && gp(&d, c, 100, 150) == Press::None && gp(&d, c, 300, 60) == Press::None);
     let h = su::TAP_HALVES;
-    ck.t("halves: left half slower, right half faster (stock x <= 207)", gp(&d, h, 100, 150) == Press::Step(true) && gp(&d, h, 207, 60) == Press::Step(true) && gp(&d, h, 208, 60) == Press::Step(false) && gp(&d, h, 400, 290) == Press::Step(false));
+    ck.t("halves: left half slower, right half faster (stock x <= 207)", gp(&d, h, 100, 150) == Press::Step(true) && gp(&d, h, 207, 80) == Press::Step(true) && gp(&d, h, 208, 80) == Press::Step(false) && gp(&d, h, 400, 290) == Press::Step(false));
     ck.t("off: no tap step anywhere", [(40, 290), (400, 290), (100, 150), (300, 150)].iter().all(|&(x, y)| gp(&d, su::TAP_OFF, x, y) == Press::None));
     let mut cm = d;
     cm.combined = true;
@@ -1159,10 +1219,13 @@ fn tap_step_tests(ck: &mut Ck) {
     for mode in [su::TAP_CORNERS, su::TAP_HALVES] {
         let mut m = d;
         m.ycur = Some([270, 100]);
-        ck.t(&format!("mode {mode}: Y1 cursor line across the left corner wins"), gp(&m, mode, 40, 290) == Press::Marker(true, 3));
+        ck.t(&format!("mode {mode}: the Y1 marker's grab zone in the left corner wins"), gp(&m, mode, 40, 290) == Press::Marker(true, 3));
+        let mut t = m;
+        t.tabs = su::TAB_SHOW_L;
+        ck.t(&format!("mode {mode}: a drawn tab wins over a grab zone that reaches it"), gp(&t, mode, 30, 288) == Press::Step(true) && gp(&t, mode, 15, 288) == Press::Marker(true, 3));
         let mut m = d;
         m.xcur = Some([30, 385]);
-        ck.t(&format!("mode {mode}: X cursor lines in both corners win"), gp(&m, mode, 44, 260) == Press::Marker(false, 2) && gp(&m, mode, 399, 260) == Press::Marker(false, 3));
+        ck.t(&format!("mode {mode}: X cursor lines in the corners are not zones (markers only)"), gp(&m, mode, 44, 260) == Press::Step(true) && gp(&m, mode, 399, 260) == Press::Step(false));
         let mut m = d;
         m.pos = 300;
         m.trig_row = 300;
@@ -1176,42 +1239,104 @@ fn tap_step_tests(ck: &mut Ck) {
         m.trig_px = 40;
         ck.t(&format!("mode {mode}: still a step next to the cursor-free corner"), gp(&m, mode, 60, 280) == Press::Step(true));
     }
-    // opendm40 (owner 2026-10-24): a press near a marker grabs it; the
-    // nearest wins, the selected one within NEAR_TIE; guide lines are zones
-    // while shown; a still tap on the selection cycles (graph_cycle).
+    // Grab zones (owner 2026-10-30: only a drag that starts on a marker
+    // moves it, from a zone much larger than the glyph; overlaps go to the
+    // nearest glyph). Default: CH1 glyph x 1..12, y 154..165 (row 140);
+    // trigger level x 401..412, y 119..130 (row 105); T x 208..219, y 21..32.
     let off = su::TAP_OFF;
     let gs = |m: &su::Model, sv: u8, sh: u8, lh: bool, x: i16, y: i16| su::graph_press(m, off, sv, sh, lh, x, y);
-    // T top marker glyph x 208..219, y 21..32 (trig_px 200).
-    ck.t("near grab: 12 px below the T marker glyph grabs it", gp(&d, off, 214, 44) == Press::Marker(false, 0) && gp(&d, off, 214, 46) == Press::None);
+    let ch1 = Press::Marker(true, 0);
+    let lev = Press::Marker(true, 1);
+    let tpos = Press::Marker(false, 0);
+    ck.t("grab zone CH1: x 0..42 (30 px past the glyph), y 136..183 (48 rows)", gp(&d, off, 0, 160) == ch1 && gp(&d, off, 42, 160) == ch1 && gp(&d, off, 43, 160) == Press::None && gp(&d, off, 6, 136) == ch1 && gp(&d, off, 6, 135) == Press::None && gp(&d, off, 6, 183) == ch1 && gp(&d, off, 6, 184) == Press::None);
+    ck.t("grab zone trigger level: x 371..413, y 101..148", gp(&d, off, 371, 125) == lev && gp(&d, off, 370, 125) == Press::None && gp(&d, off, 413, 125) == lev && gp(&d, off, 406, 101) == lev && gp(&d, off, 406, 100) == Press::None && gp(&d, off, 406, 148) == lev && gp(&d, off, 406, 149) == Press::None);
+    ck.t("grab zone T: x 190..237, y 16..62", gp(&d, off, 190, 40) == tpos && gp(&d, off, 189, 40) == Press::None && gp(&d, off, 237, 40) == tpos && gp(&d, off, 238, 40) == Press::None && gp(&d, off, 214, 16) == tpos && gp(&d, off, 214, 62) == tpos && gp(&d, off, 214, 63) == Press::None);
+    ck.t("20 px from a marker's centre grabs it", gp(&d, off, 26, 160) == ch1 && gp(&d, off, 6, 140) == ch1 && gp(&d, off, 6, 180) == ch1 && gp(&d, off, 386, 125) == lev && gp(&d, off, 406, 145) == lev && gp(&d, off, 214, 46) == tpos && gp(&d, off, 194, 26) == tpos);
     let mut m = d;
-    m.xcur = Some([205, 100]); // X1 top marker x 213..224
-    ck.t("near grab: the nearer marker wins (X1 2 px off, T 7 px off)", gs(&m, 0, 0, true, 226, 26) == Press::Marker(false, 2));
-    ck.t("near grab: the selected marker wins within the tie (T 3 px off, X1 on it)", gs(&m, 0, 0, true, 222, 26) == Press::Marker(false, 0));
-    ck.t("near grab: no tie preference for the unselected (X1 selected, 5 px off; T on it)", gs(&m, 0, 2, true, 208, 26) == Press::Marker(false, 0));
-    // Owner 2026-10-25: the guide lines are not zones: a drag on the trace
-    // next to the shown trigger-level / trigger-position / CH1 line pans.
+    m.trig_px = 400; // T glyph x 401..412 (pointing right), the top edge
+    m.trig_row = 200; // the trigger level far below
+    ck.t("T at the last column: a top zone (x 383..430, y 16..62), not the right edge's", gp(&m, off, 390, 50) == tpos && gp(&m, off, 375, 30) == Press::None && gp(&m, off, 406, 30) == tpos);
+    let mut m = d;
+    m.trig_px = 0; // T glyph x 14..25 (pointing left)
+    ck.t("T at column 0: a top zone (x -4..43)", gp(&m, off, 16, 50) == tpos && gp(&m, off, 43, 30) == tpos && gp(&m, off, 44, 30) == Press::None);
+    ck.t("the empty graph is no zone", [(60, 160), (200, 160), (340, 125), (214, 80), (100, 290)].iter().all(|&(x, y)| gp(&d, off, x, y) == Press::None));
+    // Overlaps: the nearest glyph (Chebyshev); a tie: the selection.
+    let mut m = d;
+    m.xcur = Some([230, 100]); // X1 glyph x 238..249
+    ck.t("overlap: the nearer glyph wins (T 7 px / X1 12 px; T 13 px / X1 6 px)", gs(&m, 0, 0, true, 226, 26) == tpos && gs(&m, 0, 0, true, 232, 26) == Press::Marker(false, 2));
+    ck.t("overlap: the nearer glyph wins whatever is selected", gs(&m, 0, 2, true, 226, 26) == tpos && gs(&m, 0, 0, true, 232, 26) == Press::Marker(false, 2));
+    m.xcur = Some([229, 100]); // X1 glyph x 237..248: x 228 is 9 px from both
+    ck.t("overlap: a tie goes to the selection", gs(&m, 0, 0, true, 228, 26) == tpos && gs(&m, 0, 2, true, 228, 26) == Press::Marker(false, 2));
+    // Every point of a grab zone picks a glyph no farther than any other
+    // zone's glyph that also contains it (no overlap is ambiguous).
+    let mut m = d;
+    m.trig_row = 130;
+    m.xcur = Some([5, 392]);
+    m.ycur = Some([120, 160]);
+    m.math_on = true;
+    m.math_off = -10;
+    let mut z = [su::Zone::NONE; su::NZONE];
+    let n = su::zones(&m, &mut z);
+    let mut bad = 0;
+    for y in 15..305i16 {
+        for x in 0..414i16 {
+            if let Some(q) = su::graph_pick(&m, 0, 0, false, x, y) {
+                let d = q.dist(x, y).unwrap();
+                if z[..n].iter().any(|o| o.dist(x, y).is_some_and(|e| e < d)) {
+                    bad += 1;
+                }
+            }
+        }
+    }
+    ck.t(&format!("crowded markers: every press picks the nearest glyph ({bad} bad px)"), bad == 0 && n == 8);
+    // Owner 2026-10-25: the guide lines are not zones; 2026-10-30: nor the
+    // cursor lines.
     let mut m = d;
     m.guide = true;
     m.sel_v = 1;
     m.sel_h = 0;
-    ck.t("no guide line zones: 10 px off the shown trigger-level line, mid-graph, is no marker", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::None && gs(&m, 1, 0, false, 200, 20 + 105) == Press::None);
+    ck.t("no guide line zones: on / 10 px off the shown trigger-level line, mid-graph", gs(&m, 1, 0, false, 200, 20 + 105 + 10) == Press::None && gs(&m, 1, 0, false, 200, 20 + 105) == Press::None);
     ck.t("no guide line zones: next to the trigger-position line, CH1 zero line", gs(&m, 1, 0, false, 224, 200) == Press::None && gs(&m, 0, 0, false, 200, 165) == Press::None);
     let mut m = d;
+    m.xcur = Some([100, 300]);
+    m.ycur = Some([60, 220]);
+    ck.t("no cursor line zones (their markers only)", gs(&m, 0, 0, false, 114, 200) == Press::None && gs(&m, 0, 0, false, 200, 82) == Press::None);
+    let mut m = d;
     m.trig_row = 140; // trigger-level marker x 401..412 and CH1 at row 140
-    m.ycur = Some([140, 220]); // Y1 line on the same row
-    ck.t("near grab: CH1 marker over the Y1 line (equal distance: the marker)", gs(&m, 3, 0, false, 6, 160) == Press::Marker(true, 3) && gs(&m, 4, 0, false, 6, 160) == Press::Marker(true, 0));
+    m.ycur = Some([140, 220]); // Y1 marker on the same row as CH1
+    ck.t("same spot: CH1 and Y1 tie (the selection wins)", gs(&m, 3, 0, false, 6, 160) == Press::Marker(true, 3) && gs(&m, 4, 0, false, 6, 160) == Press::Marker(true, 0));
     ck.t("tap cycling: CH1 selected, a tap on it -> Y1", su::graph_cycle(&m, 0, 0, false, 6, 160) == Some((true, 3)));
-    ck.t("marker glyph zones are not line zones", su::graph_pick(&d, 0, 0, false, 406, 125).is_some_and(|q| !q.line()));
-    // One item, one axis per gesture (owner 2026-10-25): a finger path
-    // through drag_axis / drag_delta as scope_page.rs sp_move applies it.
-    let run = |path: &[(i32, i32)]| -> (i32, i32) {
-        let (mut ax, mut sx, mut sy) = (None, 0, 0);
-        let mut last = (0, 0);
+    // One item, one axis per gesture: the grabbed marker's axis
+    // (drag_delta, as scope_page.rs sp_move applies it).
+    let run = |h: bool, path: &[(i32, i32)]| -> (i32, i32) {
+        let (mut sx, mut sy, mut last) = (0, 0, (0, 0));
+        for &(x, y) in path {
+            let (dx, dy) = su::drag_delta(h, x - last.0, y - last.1);
+            sx += dx;
+            sy += dy;
+            last = (x, y);
+        }
+        (sx, sy)
+    };
+    let pan: Vec<(i32, i32)> = (1..=30).map(|i| (4 * i, [0, 6, 2][i as usize % 3])).collect();
+    ck.t("time marker with vertical wobble: horizontal only", run(true, &pan) == (120, 0));
+    let vert: Vec<(i32, i32)> = (1..=20).map(|i| ([0, 4, 2][i as usize % 3], 3 * i)).collect();
+    ck.t("level marker with sideways jitter: vertical only", run(false, &vert) == (0, 60));
+    ck.t("a sideways drag of a level marker moves nothing", run(false, &pan).1 == 0 && run(false, &[(40, 0)]) == (0, 0));
+    // A drag off the markers (owner 2026-11-01, as a Rigol DHO800/900): the
+    // first AXIS_PX (8) of travel pick the axis (drag_axis), then sideways
+    // moves the trigger position, up / down the selected level item
+    // (drag_item), never the marker nearest to the finger.
+    ck.t("drag_axis: undecided below 8 px, then the larger component (a tie sideways)", su::drag_axis(7, 7).is_none() && su::drag_axis(0, 7).is_none() && su::drag_axis(8, 0) == Some(true) && su::drag_axis(0, 8) == Some(false) && su::drag_axis(8, 8) == Some(true) && su::drag_axis(5, 9) == Some(false) && su::drag_axis(9, 5) == Some(true));
+    // The finger path as sp_move applies it: nothing until the axis is
+    // known, then the whole travel from the press along that axis only.
+    let run_free = |path: &[(i32, i32)]| -> (Option<bool>, i32, i32) {
+        let (mut ax, mut sx, mut sy, mut last) = (None, 0, 0, (0, 0));
         for &(x, y) in path {
             if ax.is_none() {
                 ax = su::drag_axis(x.abs(), y.abs());
                 if ax.is_none() {
-                    continue; // undecided: nothing applied, the delta kept
+                    continue;
                 }
             }
             let (dx, dy) = su::drag_delta(ax.unwrap(), x - last.0, y - last.1);
@@ -1219,39 +1344,49 @@ fn tap_step_tests(ck: &mut Ck) {
             sy += dy;
             last = (x, y);
         }
-        (sx, sy)
+        (ax, sx, sy)
     };
-    // A sideways pan with vertical wobble (every 3rd report mostly
-    // vertical: the stock split moved the selected level item with them).
-    let pan: Vec<(i32, i32)> = (1..=30).map(|i| (4 * i, [0, 6, 2][i as usize % 3])).collect();
-    ck.t("pan off the markers with vertical wobble: horizontal only (no level move)", run(&pan) == (120, 0));
-    let vert: Vec<(i32, i32)> = (1..=20).map(|i| ([0, 4, 2][i as usize % 3], 3 * i)).collect();
-    ck.t("vertical drag with sideways jitter: vertical only", run(&vert) == (0, 60));
+    ck.t("empty graph: a sideways pan with vertical wobble is sideways only, nothing lost", run_free(&pan) == (Some(true), 120, 0));
+    ck.t("empty graph: an up / down drag with sideways jitter is vertical only", run_free(&vert) == (Some(false), 0, 60));
     let diag: Vec<(i32, i32)> = (1..=20).map(|i| (3 * i, 2 * i)).collect();
-    // The item (owner 2026-10-25: never the selection): the nearest
-    // marker of the decided axis to the press point (drag_target).
-    let dt = |m: &su::Model, h: bool, x: i16, y: i16| su::drag_target(m, h, x, y);
-    // Default: CH1 marker centre y 160 (row 140), trigger level y 125
-    // (row 105, right edge), T column 200 (x 214).
+    ck.t("empty graph: a diagonal drag moves one axis (the larger)", run_free(&diag) == (Some(true), 60, 0));
+    let di = |m: &su::Model, h: bool, sv: u8| su::drag_item(m, h, sv);
     let mut m = d;
-    m.sel_v = 0; // CH1 selected: ignored
-    ck.t("drag target V: nearest level row, not the selection (y 130 -> trigger level, y 150 -> CH1)", dt(&m, false, 200, 130) == Some((true, 1)) && dt(&m, false, 30, 150) == Some((true, 0)));
-    ck.t("drag target V: no distance limit (y 290 -> CH1, the nearer)", dt(&m, false, 200, 290) == Some((true, 0)));
-    m.trig_row = 140;
-    ck.t("drag target V: a tie goes to the one drawn later (trigger level over CH1)", dt(&m, false, 200, 160) == Some((true, 1)));
-    let mut m = d;
-    m.ycur = Some([60, 250]);
-    ck.t("drag target V: the Y cursors when shown (y 82 -> Y1)", dt(&m, false, 200, 82) == Some((true, 3)));
-    let mut m = d;
-    m.trig_row = 300; // off screen: the edge marker at the bottom
-    ck.t("drag target V: an off-screen level by its edge marker", dt(&m, false, 200, 292) == Some((true, 1)));
-    let mut m = d;
-    m.sel_h = 2;
     m.xcur = Some([100, 300]);
-    ck.t("drag target H: nearest column (x 120 -> X1, x 250 -> T, x 330 -> X2), not the selection", dt(&m, true, 120, 200) == Some((false, 2)) && dt(&m, true, 250, 200) == Some((false, 0)) && dt(&m, true, 330, 200) == Some((false, 3)));
-    ck.t("drag target H: T alone, anywhere", dt(&d, true, 30, 280) == Some((false, 0)));
-    ck.t("a diagonal drag moves one axis only (the larger one)", { let r = run(&diag); r.1 == 0 && r.0 == 60 });
-    ck.t("drag_axis: undecided below the slop, 3:2 lead past 7 px", su::drag_axis(7, 0).is_none() && su::drag_axis(8, 5) == Some(true) && su::drag_axis(5, 8) == Some(false) && su::drag_axis(20, 20).is_none() && su::drag_axis(31, 30) == Some(true));
+    m.ycur = Some([60, 220]);
+    ck.t("empty graph sideways: the trigger position, whatever is selected", [0u8, 1, 3, 4].iter().all(|&sv| di(&m, true, sv) == (false, 0)) && di(&d, true, 0) == (false, 0));
+    ck.t("empty graph up / down: CH1 by default", di(&d, false, 0) == (true, 0));
+    ck.t("empty graph up / down: the selected level item (trigger level, Y1, Y2)", di(&d, false, 1) == (true, 1) && di(&m, false, 3) == (true, 3) && di(&m, false, 4) == (true, 4));
+    let mut mm = d;
+    mm.math_on = true;
+    ck.t("empty graph up / down: math M when selected and on, else CH1", di(&mm, false, 2) == (true, 2) && di(&d, false, 2) == (true, 0));
+    ck.t("empty graph up / down: a selected Y cursor that is off falls back to CH1", di(&d, false, 3) == (true, 0) && di(&d, false, 4) == (true, 0));
+    let mut rm = d;
+    rm.runt_row = Some(80);
+    ck.t("empty graph up / down: the runt level when selected and shown", di(&rm, false, 5) == (true, 5) && di(&d, false, 5) == (true, 0));
+    // No nearest-marker guessing: a press on the empty graph right next to
+    // the trigger-level row (y 125) or a Y cursor line, CH1 selected, is no
+    // zone, and its up / down drag moves CH1.
+    ck.t("no nearest guess: next to the trigger-level row, CH1 selected -> CH1", gp(&d, off, 200, 125) == Press::None && di(&d, false, 0) == (true, 0));
+    ck.t("no nearest guess: on the Y1 line, CH1 selected -> CH1", gs(&m, 0, 0, false, 200, 82) == Press::None && di(&m, false, 0) == (true, 0));
+    ck.t("no nearest guess: next to the X1 line sideways -> the trigger position", gs(&m, 0, 0, true, 114, 200) == Press::None && di(&m, true, 0) == (false, 0));
+    // A marker's grab zone wins: its own axis from the first move.
+    ck.t("a drag from the right-edge T zone moves the trigger level (level, V)", gp(&d, off, 395, 125) == lev && gp(&d, c, 395, 125) == lev);
+    ck.t("a drag from the top T zone moves the trigger position (time, H)", gp(&d, off, 214, 50) == tpos);
+    ck.t("a drag from the CH1 zone moves CH1 (level, V)", gp(&d, off, 30, 160) == ch1);
+    // A zone drag does not change the selection the empty graph uses
+    // (owner 2026-11-02); a still tap on a marker does.
+    let ch1_sel = (0u8, 0u8, false);
+    let after = |zone_drag: bool| {
+        let now = match gp(&d, off, 395, 125) {
+            Press::Marker(true, id) => (id, 0, false),
+            _ => ch1_sel,
+        };
+        su::sel_after(zone_drag, now, ch1_sel)
+    };
+    ck.t("zone drag of the right-edge T, then an empty-graph up / down drag moves CH1", di(&d, false, after(true).0) == (true, 0));
+    ck.t("a still tap on the right-edge T selects it: the empty-graph up / down drag moves the level", di(&d, false, after(false).0) == (true, 1));
+    ck.t("zone drag keeps a tapped selection (trigger level selected, CH1 dragged)", su::sel_after(true, (0, 0, false), (1, 0, false)) == (1, 0, false));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
     su::invalidate();
@@ -1595,6 +1730,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
+    vzoom_tests(&mut ck);
     zoom_floor_tests(&mut ck); // after hit_tests too (Scope::new)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);

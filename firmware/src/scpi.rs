@@ -586,7 +586,6 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           dashes, +9.9E37 OL; hold Meter::hold_state; range
 ///                           AUTO / AUTO+ / MANU; in manual the status bar
 ///                           shows the range, ui::range_text)
-///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
 ///                           of finger span, 1 one step per 1.25x (default), 2 live
 ///                           stretch, snapped to the nearest step on release
@@ -1038,8 +1037,6 @@ pub enum Cmd {
     Coup(bool),
     CalcSmoState(Option<bool>),
     CalcSmoResp(Option<u8>),
-    /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
-    DbgGrab(Option<u16>),
     /// DBG:PINCH 0|1|2 / ?: scope pinch mode (scope_page::set_pinch_mode).
     DbgPinch(Option<u8>),
     /// DBG:GEST?: log of the last scope drags.
@@ -2334,17 +2331,10 @@ impl Scpi {
                     };
                     out = Out::Instr(Cmd::Meas(k));
                 }
-                // Scope drag A/B aids (App::scpi): DBG:GRAB <ms> (0 = direct
-                // drag) / DBG:GRAB?, DBG:GEST? (last drags).
+                // Scope gesture aids (App::scpi): DBG:PINCH, DBG:GEST? (last
+                // drags).
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"PINCH"[..]) => {
                     out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
-                }
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
-                    match (query, parse_num(arg)) {
-                        (true, _) => out = Out::Instr(Cmd::DbgGrab(None)),
-                        (false, Some(v)) => out = Out::Instr(Cmd::DbgGrab(Some(v.clamp(0.0, 5000.0) as u16))),
-                        _ => self.err_arg(no_arg, BAD),
-                    }
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
