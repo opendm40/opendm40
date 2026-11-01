@@ -1976,11 +1976,17 @@ impl Scope {
         hwtrig::post_rec(self.rec, pre, post, WIN) as usize
     }
 
-    /// Keep the newest `rec` samples of a comparator record's span (first
-    /// slot, count; count > rec: the ring is CAP / the coded ring, a late
-    /// edge wraps it); returns the trimmed span.
+    /// Keep the newest samples of a comparator record's span (first slot,
+    /// count) up to its designed length, `pre_for` + `hw_post` (= `rec`
+    /// while running; a Single / DIGitize / STOP capture whose post part is
+    /// `post_for`'s floor is `rec` + 832); more were written when a late
+    /// edge wrapped the ring. A coded-ring Single / DIGitize keeps all of
+    /// it: its pre part is what the memory keeps (rec_split).
     fn hw_trim(&self, (off, len): (usize, usize)) -> (usize, usize) {
-        let n = self.rec.min(len);
+        if rg().pk && (self.s.mode == TrigMode::Single || self.one_shot) {
+            return (off, len);
+        }
+        let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
         let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % CAP };
         (off, n)
     }
