@@ -36,8 +36,9 @@ limitations](#known-limitations).
 4. [Safety and alerts](#safety-and-alerts): wrong-connection alerts, the
    danger alarm, the fuse check.
 5. [Oscilloscope](#oscilloscope): timebase, V/div, triggers, cursors,
-   measurements, FFT, Save CSV, and the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
-   on the multimeter inputs.
+   measurements, FFT, Save CSV, the [protocol decoder](#protocol-decoder) and
+   the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs) on the
+   multimeter inputs.
 6. [Combined view](#combined-view): the multimeter and the scope on one
    screen; analog power.
 7. [Signal generator](#signal-generator)
@@ -362,7 +363,8 @@ lightning from 100 V). opendm40 adds:
 | Cursors | Through the Measure tab | One tap on **CUR** |
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
-| Capture length | 65 520 samples | up to 45 056 samples |
+| Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 44 032 faster |
+| Serial decoding | — | [UART](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -434,7 +436,7 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The longer scope capture (65 520 samples).
+- The 65 520-sample scope capture (opendm40: 65 520 from 100 ms/div, 44 032 faster).
 
 ## Multimeter
 
@@ -1494,10 +1496,14 @@ over the trace; tap the button again while its popup is open to turn it off.
 
 ### Stop, zoom and pan
 
-Press **RUN** (or tap the run state) to stop. A triggered capture holds
-45 056 samples up to 5 ms/div and 26 624 from 10 ms/div (one triggered in
-software, with CH2 on or the generator as the source, can be shorter). The
-last capture stays in memory:
+Press **RUN** (or tap the run state) to stop. The scope takes one more
+capture (the trigger point at the trigger position, as **Single**; up to
+the screen's time + 1 s), then stops; press again to stop at once. The
+capture stays in memory (from 100 ms/div a **Single** capture, up to
+10 s, or a roll capture: at least 65 520 samples, up to 262 144 for a
+smooth signal). A triggered capture while running holds 44 032 samples up
+to 5 ms/div and 26 624 from 10 ms/div (one triggered in software, with CH2
+on or the generator as the source, can be shorter):
 
 - change the timebase to zoom in or out of the stored capture (zoom in stops
   at **Max zoom**, 16 samples across the screen);
@@ -1542,11 +1548,12 @@ is on, the edge trigger does not use the trigger hardware.
 
 **MF > Settings**:
 
-- **Save CSV**: saves the whole stored capture (up to 45 056 samples, not
+- **Save CSV**: saves the whole stored capture (up to 262 144 samples, not
   only the screen). Stop the scope first (**Please stop sample**
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Decode**: the [protocol decoder](#protocol-decoder).
 
 
 ![The Settings tab](img/scope-settings.png)
@@ -1558,6 +1565,45 @@ sample rate, trigger), then `time_s,volts`. Time 0 is the trigger point
 (the screen centre if the capture did not trigger); the values are volts at
 the probe tip. A capture saved in the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 on the A function has `time_s,amperes`: the current through the A jack.
+
+### Protocol decoder
+
+**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B),
+Modbus RTU or DALI, drawn under the trace: a box per byte, Modbus frames above
+them, errors in red. Each capture is decoded once: running, one that
+triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
+Zoom and pan show the decoded capture. **Mode Log** is left out of this
+build (flash).
+
+![The Decode tab](img/scope-decode-tab.png)
+
+| ![UART: hex and the character in each box](img/scope-decode.png) | ![Modbus RTU stopped: request, reply, a CRC error](img/scope-decode-modbus.png) |
+|---|---|
+| UART: hex and the character in each box | Modbus RTU, stopped: frames and a CRC error |
+
+- **Mode**: **Band** (under the trace) or **Log**: a list of every frame
+  while the input streams, for as long as it runs (up to 115200 baud). Tap
+  a frame: its waveform with its bytes (tap again: the list). The list
+  fills the scope's record memory, the oldest frames go first: about 270
+  Modbus frames with their waveforms. **SCOPE** goes back: the list is
+  gone, the scope starts a new capture.
+
+  | ![The frame log: Modbus RTU](img/scope-decode-log.png) | ![A frame's waveform](img/scope-decode-log-wave.png) |
+  |---|---|
+  | The frame log | A frame tapped: its waveform |
+
+- **DALI** (lighting bus, 1200 bit/s, no Format / Baud): a box per frame,
+  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…` 24-bit, **ERR** in red.
+- Settings: protocol (**Off**, **UART**, **DALI**, **Modbus**), baud (**Auto** or 300
+  to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
+  (**Auto** or a level).
+- Zoomed out, the bytes become a bar. Too few samples per bit: **Rate too
+  low for N baud**: use a faster timebase.
+- In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
+  between A and B on the floating multimeter input, up to 4800 baud (9600
+  at 1 ms/div), e.g. a slow Modbus bus; decoded on STOP.
+
+- Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs
 

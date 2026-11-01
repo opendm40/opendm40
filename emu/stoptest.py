@@ -9,7 +9,8 @@ the software trigger unless --hwtrig). Two passes: the level at 3 V (above
 the square: no record triggers, Auto shows one every 100 ms and the others
 are not shown) and at 1 V (triggered). Per pass and timebase (10 us,
 100 us, 200 us, 1 ms/div) --n rounds of RUN, a wait that differs per
-round, STOP; then WAV:PRE? must give points > 0 and WAV:DATA? that many
+round, STOP, TRIG:STAT? STOP within 1.5 s (the STOP's capture); then
+WAV:PRE? must give points > 0 and WAV:DATA? that many
 words, scaled with the preamble the input square (its two levels; with
 three periods or more in the record, 1 kHz). Before the fix about 1 STOP
 in 8 at 100 us/div on the device gave 0 points: a STOP between a record
@@ -121,7 +122,12 @@ try:
             # A different phase against the acquisition each round.
             wait_ms(300 + 37 * i)
             q('STOP')
-            st = q('TRIG:STAT?')
+            # The STOP ends on one more complete capture (scope.rs
+            # `stop_req`): at most the screen's time + 1 s of device time.
+            t0, st = up(), q('TRIG:STAT?')
+            while st != 'STOP' and up() - t0 < 1500:
+                time.sleep(0.05)
+                st = q('TRIG:STAT?')
             q('WAV:POIN MAX')
             f = q('WAV:PRE?').split(',')
             n = int(f[2])

@@ -29,6 +29,25 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  44 032 at the faster timebases (was 26 624), for the stopped zoom / pan,
+  Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
+  capture (at most 10 s) with the trigger point at the trigger position
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
+  Wave view at 9600 S/s and slower) keep the capture compressed with the
+  DLG scope coder as it comes in: at least 65 520 samples (white noise),
+  more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
+  for up to 10 s; the part after the trigger point is at most 52 156
+  samples, the part before it what the memory keeps
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- **Protocol decoder:** UART (RS-232, RS-485), Modbus RTU and DALI (basic:
+  forward, backward and 24-bit frames, 1200 bit/s) drawn under the trace,
+  each triggered capture and on STOP, also in the Wave view. Scope MF >
+  Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
+  The frame log (Mode Log) is left out of this build (flash).
+
+  ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
 - **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
   the trigger is computed from the generator's timers, no wire needed;
   and a **GEN trace** (MF > Display) showing the generator's output under
@@ -107,8 +126,8 @@ section named after the tag as the release notes; how to cut a release:
 - Scope Save CSV after a change while stopped: V/div, coupling and the trigger in the header are the
   record's too.
 - Scope STOP keeps the triggered trace on screen (it jumped to an untriggered part of the capture). With
-  CH2 (DMM) on, up to 5 ms/div, STOP takes the next triggered frame (it left a short untriggered piece
-  without CH2 and without measurements).
+  CH2 (DMM) on, STOP no longer leaves a short untriggered piece without CH2 and without measurements
+  (STOP ends on one more complete capture, below).
 - Scope CH2 (DMM): drawn up to the right edge of a stopped, Single or DIGitize frame (at 2 ms/div it was
   missing from the whole frame); no wrong segment across a gap in the multimeter's stream.
 - Scope stopped zoom stops at **Max zoom** (16 samples across the screen): faster timebases had a wrong
@@ -199,6 +218,22 @@ section named after the tag as the release notes; how to cut a release:
   and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
   hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
   (~0.45 s).
+- Scope, STOP: the stopped record was the part of the capture in flight
+  up to the STOP (a few ms after the trigger at 5 ms/div), or the whole
+  record with a step where two captures met. STOP now ends on one more
+  complete capture (as **Single** / `DIGitize`: the trigger point at the
+  trigger position), of the full record up to the screen's time + 0.5 s
+  (44 032 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  at most the screen's time + 1 s after the STOP, with what is in when
+  nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
+  2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for
+  `TRIG:STAT?` = `STOP` before `WAV:DATA?`
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope, stopped: a pan, zoom or V/div change made while the screen was held
+  (right after a screenshot over USB, a message box on the scope page) is
+  drawn when the hold ends; before, the screen kept the drag preview with
+  the rest of the record blank. A drag back from either end of the record
+  moves at once.
 - Multimeter: a current flowing from COM into the A jack now shows A-JACK
   in DC V, DC mV and Ω too (from ~4 mA; DC V ~9 mA; no A-PROT for it, nor for
   an AC current in DC V).

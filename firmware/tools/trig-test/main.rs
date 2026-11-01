@@ -3,6 +3,8 @@
 //! layout (src/hwtrig.rs pre_for / post_for / post_rec). Needs no hardware.
 //!   tools/trig-test/run.sh
 #[allow(dead_code)]
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
 use trigsoft::*;
@@ -134,16 +136,17 @@ fn main() {
     t("pulse window LT 0.5 -> ..0", pulse_window(LT, 0.5) == (0, 0));
     t("pulse window EQ 50 -> 48..52", pulse_window(EQ, 50.0) == (48, 52));
     t("pulse window EQ 10 -> 9..11", pulse_window(EQ, 10.0) == (9, 11));
+    packed();
     // Comparator record (scope.rs hw_poll): armed after pre_for, stopped
     // post_rec samples after the edge -> exactly `rec` samples, the edge
     // estimate at pre_for, and every crossing of the refinement window
     // [max(est - win/2, pre), min(est + win/2, rec - post)) has a full
     // screen around it. Screens: every scope.rs TB row (2 .. 25 000), hpos
-    // 0 .. 400 columns; records: lin_len (26 K, CAP 44 K and the debug
-    // builds' 43 K / 42 K).
+    // 0 .. 400 columns; records: lin_len (26 K, CAP 43 K and the debug
+    // builds' 42 K / 41 K).
     let win = 800;
     let mut bad_layout = 0;
-    for rec in [26 * 1024, 42 * 1024, 43 * 1024, 44 * 1024] {
+    for rec in [26 * 1024, 41 * 1024, 42 * 1024, 43 * 1024] {
         for screen in [2usize, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 12_500, 25_000] {
             for hpos in 0..=400usize {
                 let pre = screen * hpos / 400;
@@ -169,4 +172,33 @@ fn main() {
     let (n, bad) = unsafe { (N, BAD) };
     println!("cases {n}, failures {bad}");
     std::process::exit(if bad == 0 { 0 } else { 1 });
+}
+
+/// src/pack10.rs (the scope record's 4-in-5 packing): in-place packing of
+/// a raw ring (bits 10..15 masked), the wrapping view, set, and the
+/// triggers on a packed ring = on the plain codes.
+fn packed() {
+    use pack10::{Codes, Src};
+    let n = 4000;
+    let d = rec(n, 200, &[(1000, 10, 800), (3000, 50, 800)]);
+    let mut raw: Vec<u16> = d.iter().enumerate().map(|(i, &v)| v | ((i as u16 * 7) << 10)).collect();
+    raw.extend_from_slice(&[0, 0]);
+    let p = raw.as_mut_ptr() as *mut u8;
+    pack10::pack_in_place(p, n);
+    t("pack10: every code back after the in-place pack", (0..n).all(|i| pack10::get(p, i) == d[i]));
+    // The ring rotated by 1234: view from slot 2766 wraps to the start.
+    let off = n - 1234;
+    let mut rot = d[off..].to_vec();
+    rot.extend_from_slice(&d[..off]);
+    let c = Codes::new(p, off, n, n);
+    t("pack10: wrapping view = the rotated codes", (0..n).all(|i| c.at(i) == rot[i]));
+    t("pack10: sub view", c.sub(1000, 1300).at(299) == rot[1299] && c.sub(1000, 1300).len() == 300);
+    t("pack10: min / max", c.min_max(0, n) == (200, 800));
+    t("pack10: pulse on the packed ring = on the codes", pulse(&c, 0, n, 500, true, GT, 40.0) == pulse(&rot, 0, n, 500, true, GT, 40.0) && pulse(&c, 0, n, 500, true, GT, 40.0).is_some());
+    t("pack10: runt on the packed ring = on the codes", runt(&c, 0, n, 300, 900, true) == runt(&rot, 0, n, 300, 900, true));
+    t("pack10: offset_of", c.offset_of(&c.sub(77, 500)) == Some(77) && c.sub(10, 20).offset_of(&c) .is_none());
+    for (i, v) in [(5usize, 1023u16), (6, 0), (7, 512), (3999, 1)] {
+        pack10::set(p, i, v);
+    }
+    t("pack10: set keeps the neighbours", pack10::get(p, 4) == d[4] && pack10::get(p, 5) == 1023 && pack10::get(p, 6) == 0 && pack10::get(p, 7) == 512 && pack10::get(p, 8) == d[8] && pack10::get(p, 3999) == 1 && pack10::get(p, 3998) == d[3998]);
 }
