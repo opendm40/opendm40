@@ -844,8 +844,8 @@ unless shown otherwise.
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
 | `DBG:SCANLINE?` | | The panel's Get Scanline (0x45) and the pressed-feedback sync (it waits until the refresh scan has left the box): `<cal>,<lines>,<frame us>,<dir>,<sync>,<last box us>,<ns/px>,<last wait us>,<line at that write>,<window found>,<raw dummy>,<raw hi>,<raw lo>;` then 24 samples 1 ms apart, `<us>:<line>`. `<cal>` 1: the line moves (frame measured), 2: it does not (no sync). Blocks up to ~90 ms. | USB |
-| `DBG:SCANLINE:DIR n` | | The screen axis the scan sweeps (0 x, 1 479 - x, 2 y, 3 319 - y; 1 at boot, inferred). | USB |
-| `DBG:SCANLINE:SYNC n` | | The pressed-feedback sync: 0 off, 1 on. | USB |
+| `DBG:SCANLINE:DIR` | `<n>` | The screen axis the scan sweeps `<n>`: 0 x, 1 479 - x, 2 y, 3 319 - y (1 at boot, inferred). | USB |
+| `DBG:SCANLINE:SYNC` | `0` or `1` | The pressed-feedback sync off or on. | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes. Only in builds with the `dbg-diag` feature. | USB |
 | `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
 | `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |
