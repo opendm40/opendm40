@@ -245,7 +245,7 @@ recorded.
 | Test | What it checks | Runtime | Port |
 |---|---|---|---|
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
-| [`hwtrigrectest.py`](hwtrigrectest.py) | comparator trigger (on, Normal): DIGitize / SINGle records at 1 us .. 200 ms/div are the linear record's length, the edge at the stock position, the input sine; `--sw` prints the software trigger's lengths | | 24170 |
+| [`hwtrigrectest.py`](hwtrigrectest.py) | comparator trigger (on, Normal): DIGitize / SINGle records at 1 us .. 200 ms/div are the whole record (`rec_split`, trimmed to `pre_for` + `post_rec`; from 100 ms/div the coded ring's span), the edge at the estimate, the input sine; `--sw` prints the software trigger's lengths | | 24170 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples (`--ch2`: the scope page with CH2 (DMM) on) | | free |

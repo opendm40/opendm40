@@ -171,8 +171,8 @@ def step(t, hz, tb, mode):
     p = m * 200 // 400
     q = min(m - p, PCAP - 64 - 800 - pre) if pk else m - p
     p, q = max(p, pre), max(q, screen - pre)
-    rec = max(lin, p + q)
-    post_n = max(rec - (p + 416), q + 416)
+    rl = max(lin, p + q)
+    post_n = max(rl - (p + 416), q + 416)
     exp = p + 416 + post_n
     if pk:
         # The coded ring keeps the whole span (its pre part is what the
