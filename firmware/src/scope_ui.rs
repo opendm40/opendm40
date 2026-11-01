@@ -180,7 +180,6 @@ pub const fn panel_rect(k: usize) -> Rect {
 /// Top-bar badges (sec. 2): run status, timebase, CH1 V/div, trigger.
 pub const RUN_BADGE: Rect = rect(13, 1, 62, 17);
 pub const TB_BADGE: Rect = rect(79, 1, 62, 17);
-pub const VDIV_BADGE: Rect = rect(286, 1, 62, 17);
 pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 
 // opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1). The rects are
@@ -361,8 +360,10 @@ pub struct Model {
 /// The REC mark (left part of the record-bar slot while recording) and
 /// the record bar then (opendm40: the stock bar is 145..282).
 pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
-const REC_BAR: Rect = rect(145, 1, 137, 17);
-const REC_BAR_SRC: Rect = rect(212, 1, 70, 17);
+/// (opendm40 2026-11-02: to x 347, the V/div badge's place; the CH1 block
+/// shows the V/div, coupling and probe.)
+const REC_BAR: Rect = rect(145, 1, 203, 17);
+const REC_BAR_SRC: Rect = rect(212, 1, 136, 17);
 
 /// Cursor tab states (`Model::cur_tab`).
 pub const CUR_OFF: u8 = 1;
@@ -882,14 +883,6 @@ pub fn fmt_srate(out: &mut Buf, fs: u32) {
     out.push("S/s");
 }
 
-/// 2.4 CH1 V/div badge.
-pub fn vdiv_badge(m: &Model) {
-    let mut b = Buf::new();
-    m.vdiv_str(&mut b);
-    let p = Ink::icon(sf::SC_PROBE, rect(286, 1, 18, 17), m.probe_glyph(), 4);
-    let t = Ink::new(sf::SC_F12, rect(304, 1, 44, 17), b.as_str(), 8, 0);
-    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, m.pal_ink()), (&t, m.pal_ink())]);
-}
 
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
@@ -971,6 +964,9 @@ pub fn usb_icon(m: &Model) {
 #[derive(Clone, Copy, PartialEq)]
 pub struct Look {
     pub name: Txt,
+    /// CH1: the stock coupling / probe glyph (SC_PROBE, the V/div badge's
+    /// until 2026-11-02) when AC or the probe is not x1, else 0.
+    pub glyph: u32,
     pub scale: Txt,
     pub col: Color,
     pub ink: Color,
@@ -984,16 +980,21 @@ pub fn block_look(m: &Model, b: usize) -> Look {
     m.vdiv_str(&mut v);
     match b {
         BLK_CH1 => Look {
-            name: Txt::new(if m.wave && !m.ch1_txt.is_empty() { m.ch1_txt } else { "CH1" }),
+            // The Wave view: the function's coupling ("AC" of "AC mA"; the
+            // scale has the unit).
+            name: Txt::new(if m.wave && !m.ch1_txt.is_empty() { m.ch1_txt.split(' ').next().unwrap_or("CH1") } else { "CH1" }),
+            // The V/div badge's information (gone 2026-11-02): its
+            // coupling / probe glyph when AC or the probe is not x1.
+            glyph: if !m.wave && (m.ac || m.probe != 3) { m.probe_glyph() } else { 0 },
             scale: Txt::new(v.as_str()),
             col: m.pal(),
             ink: m.pal_ink(),
             on: true,
             open: m.ch1_open,
         },
-        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
-        BLK_DMM => Look { name: Txt::new("DMM"), scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
-        BLK_GEN => Look { name: Txt::new("GEN"), scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
+        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
+        BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
         _ => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
             // math_scale shows the stock defaults.
@@ -1004,7 +1005,7 @@ pub fn block_look(m: &Model, b: usize) -> Look {
             } else {
                 Txt::new(FFT_DB[9])
             };
-            Look { name: Txt::new(if m.math_mode == 6 { "ABS" } else { "FFT" }), scale, col: m.math_pal(), ink: m.math_ink(), on: m.math_on, open: m.math_open }
+            Look { name: Txt::new(if m.math_mode == 6 { "ABS" } else { "FFT" }), glyph: 0, scale, col: m.math_pal(), ink: m.math_ink(), on: m.math_on, open: m.math_open }
         }
     }
 }
@@ -1049,29 +1050,58 @@ pub fn panel_part(m: &Model, k: usize) {
         });
         return;
     }
-    // Title: name and scale in the 16 px face; too wide (3 px inside the
-    // box): the scale in the 12 px face, then its shorter unit.
-    let (name, sc) = (l.name.as_str(), l.scale.as_str());
-    let mut full = Buf::new();
-    full.push(name);
-    if !sc.is_empty() {
-        full.push(" ").push(sc);
-    }
+    // Title, one line, the first that fits 4 px inside the box: [the
+    // coupling / probe glyph,] name and scale in the 16 px face; the scale
+    // in the 12 px face; its shorter unit; without the name (the glyph
+    // and the scale only).
+    let (name, sc, gl) = (l.name.as_str(), l.scale.as_str(), l.glyph);
     let room = r.w - 8;
-    let (t1, t2) = if sf::text_width(sf::SC_F16, full.as_str(), 0) <= room {
-        (Ink::new(sf::SC_F16, r, full.as_str(), 8, 0), Ink::none())
-    } else {
-        let wn = sf::text_width(sf::SC_F16, name, 0);
-        let sc = if wn + 4 + sf::text_width(sf::SC_F12, sc, 0) > room { short_scale(sc) } else { sc };
-        let ws = sf::text_width(sf::SC_F12, sc, 0);
-        let x0 = r.x + (r.w - wn - 4 - ws) / 2;
-        (Ink::new(sf::SC_F16, rect(x0, r.y, wn, r.h), name, 8, 0), Ink::new(sf::SC_F12, rect(x0 + wn + 4, r.y + 1, ws, r.h), sc, 8, 0))
+    let (f16, f12) = (sf::SC_F16, sf::SC_F12);
+    let wg = if gl != 0 { 18 } else { 0 };
+    let short = short_scale(sc);
+    // (name, its face, the scale's face, scale)
+    let cands: [(&str, Font, Font, &str); 7] = [
+        (name, f16, f16, sc),
+        (name, f16, f12, sc),
+        (name, f12, f12, sc),
+        (name, f16, f12, short),
+        (name, f12, f12, short),
+        ("", f16, f16, sc),
+        ("", f16, f12, short),
+    ];
+    let w = |c: &(&str, Font, Font, &str)| {
+        let wn = if c.0.is_empty() { 0 } else { sf::text_width(c.1, c.0, 0) };
+        let ws = sf::text_width(c.2, c.3, 0);
+        let parts = (wn > 0) as i16 + (wg > 0) as i16 + (ws > 0) as i16;
+        // 3 px around the glyph (the layout minimum), 4 between texts.
+        (wn, ws, wn + wg + ws + if wg > 0 { 3 } else { 4 } * (parts - 1).max(0))
     };
-    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill)], |x, y| {
+    let c = *cands.iter().find(|c| (gl != 0 || !c.0.is_empty()) && w(c).2 <= room).unwrap_or(&cands[if gl != 0 { 6 } else { 4 }]);
+    let (wn, ws, total) = w(&c);
+    let mut x = r.x + (r.w - total) / 2;
+    let t1 = if wn > 0 { Ink::new(c.1, rect(x, r.y + (c.1.0 == f12.0) as i16, wn, r.h), c.0, 8, 0) } else { Ink::none() };
+    let sp = if gl != 0 { 3 } else { 4 };
+    x += if wn > 0 { wn + sp } else { 0 };
+    let t2 = if gl != 0 { Ink::icon(sf::SC_PROBE, rect(x, r.y + (r.h - 17) / 2, wg, 17), gl, 4) } else { Ink::none() };
+    x += if gl != 0 { wg + sp } else { 0 };
+    let small = c.2.0 == f12.0;
+    let mut t3 = Ink::new(c.2, rect(x, r.y + small as i16, ws, r.h), c.3, 8, 0);
+    let mut t1 = t1;
+    if gl == 0 && wn > 0 && c.1.0 == c.2.0 {
+        // Name and scale in one face, side by side: one text (one word gap).
+        let mut b = Buf::new();
+        b.push(c.0).push(" ").push(c.3);
+        t1 = Ink::new(c.1, rect(r.x, r.y + small as i16, r.w, r.h), b.as_str(), 8, 0);
+        t3 = Ink::none();
+    }
+    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
         if let Some(g) = t1.at(x, y) {
             return (fg, tag(2, g));
         }
         if let Some(g) = t2.at(x, y) {
+            return (fg, tag(4, g));
+        }
+        if let Some(g) = t3.at(x, y) {
             return (fg, tag(3, g));
         }
         if in_rbox(r, 8, 0x3, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
@@ -1132,7 +1162,6 @@ pub fn top_bar(m: &Model) {
     tb_badge(m);
     src_badge(m);
     record_bar(m);
-    vdiv_badge(m);
     trig_badge(m);
     battery(m);
     usb_icon(m);
@@ -2564,9 +2593,6 @@ pub fn update(m: &Model) {
     if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.rec != m.rec) {
         record_bar(m);
     }
-    if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
-        vdiv_badge(m);
-    }
     if d(ol.battery != m.battery || ol.charging != m.charging || icons_dx(&ol) != icons_dx(m)) {
         battery(m);
     }
@@ -2940,7 +2966,7 @@ pub fn top_badge(x: u16, y: u16) -> Option<u8> {
     }
     let x = x as i16;
     // (The source badge: `src_hit`, the app knows whether it is shown.)
-    [RUN_BADGE, TB_BADGE, VDIV_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
+    [RUN_BADGE, TB_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
 }
 
 

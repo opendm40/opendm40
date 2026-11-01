@@ -137,11 +137,10 @@ fn ink_contrast(ck: &mut Checker, out: &str) {
         if i == 4 {
             save(out, "s08-ink-ch1-blue");
         }
-        // CH1 and MATH block titles, V/div badge.
+        // CH1 and MATH block titles.
         for (what, r, fill, ink) in [
             ("CH1", scope_ui::panel_rect(0), PALETTE[i], CH1_INK[i]),
             ("math", scope_ui::panel_rect(9), PALETTE[i], MATH_INK[i]),
-            ("V/div badge", stockfont::rect(304, 1, 44, 17), PALETTE[i], CH1_INK[i]),
             // Text in the channel colour on the bar: fill = the bar.
             ("trigger badge", stockfont::rect(364, 2, 49, 15), C_BAR, PAL_TEXT[i]),
             ("measurement cell", stockfont::rect(14, 303, 96, 15), C_BAR, PAL_TEXT[i]),
@@ -421,8 +420,7 @@ pub fn run(ck: &mut Checker, out: &str) {
         }
     }
     // The MCX V/div zoom steps below 10 mV/div (scope::VSTEPS: 5 / 2 mV,
-    // with the x0.1 probe 500 / 200 uV): the badge text from the value fits
-    // its 44 px text box, the page as the replica; the pinch bubble's "<v>/div zoom" fits the
+    // with the x0.1 probe 500 / 200 uV): the page as the replica; the pinch bubble's "<v>/div zoom" fits the
     // bubble (scope_page BUBBLE, 120 px, SC_F16, centred) with the stock 3 px
     // margin.
     for (vd, probe, tag) in [(0.005f32, 3u8, "5mv"), (0.002, 3, "2mv"), (0.0005, 0, "500uv"), (0.0002, 0, "200uv")] {
@@ -438,13 +436,10 @@ pub fn run(ck: &mut Checker, out: &str) {
         if tag == "2mv" {
             save(out, "s07-mcx-2mv");
         }
+        // (The V/div shows in the CH1 block's title: strip_blocks.)
         let mut b = scope_ui::Buf::new();
         scope_ui::fmt_div(&mut b, vd, "V");
-        ck.cases += 2;
-        let bw = stockfont::text_width(stockfont::SC_F12, b.as_str(), 0);
-        if bw > 44 - 2 {
-            ck.fail(&name, format!("V/div badge text {:?} {bw} px > 42", b.as_str()));
-        }
+        ck.cases += 1;
         b.push("/div zoom");
         let w = stockfont::text_width(stockfont::SC_F16, b.as_str(), 0);
         if w > 120 - 6 {
@@ -647,6 +642,7 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
+    strip_blocks(ck, out);
     println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes, {nd} trigger-level drag steps");
     gen_channel(ck, out);
 }
@@ -719,4 +715,76 @@ fn gen_channel(ck: &mut Checker, out: &str) {
             }
         }
     }
+}
+
+/// The right panel's channel blocks (scope_ui::panel_part, owner
+/// 2026-11-02) under the full layout rules against the whole screen: every
+/// CH1 V/div with the probes x0.1 / x1 / x10 / x1000 and AC / DC, the DMM,
+/// GEN and math scales (FFT dB/div, ABS V/div), on / off, a popup open, a
+/// part pressed, the Wave view.
+pub fn strip_blocks(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let panel = Bx::new(scope_ui::PANEL.x as i32, scope_ui::PANEL.y as i32, scope_ui::PANEL.w as i32, scope_ui::PANEL.h as i32);
+    let screen = Bx::new(0, 0, 480, 320);
+    let mut n = 0;
+    let mut shot = |ck: &mut Checker, m: scope_ui::Model, name: String, save_as: Option<&str>| {
+        let sc = stock::Scene { name: "strip", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        stock::draw(&sc);
+        ck.check_replica(&name);
+        ck.check_add(&name, &[("panel", panel), ("screen", screen)], &[panel], screen);
+        if let Some(f) = save_as {
+            save(out, f);
+        }
+        n += 1;
+    };
+    let dmm = ["--", "250mA", "1.5V", "2.5A", "200uA", "15mV", "250V"];
+    let gen = ["1mV", "500mV", "10kV", "2V"];
+    // The V/div steps (scope::VSTEPS, 2 mV .. 10 V) times the probe, as the
+    // page sets them (wvdiv: the value, vdiv: its label index).
+    for (vi, &vs) in scope::VSTEPS.iter().enumerate() {
+        for probe in [0u8, 3, 6, 12] {
+            for ac in [false, true] {
+                let mut m = base.m;
+                let vdiv = (vi + probe as usize).saturating_sub(2).min(21) as u8;
+                m.vdiv = vdiv;
+                m.wvdiv = vs * scope::PROBES[probe as usize];
+                m.probe = probe;
+                m.ac = ac;
+                let k = vi + probe as usize;
+                m.ch2_on = k % 2 == 0;
+                m.ch2_txt = scope_ui::Txt::new(dmm[k % dmm.len()]);
+                m.gen_on = k % 3 == 0;
+                m.gen_txt = scope_ui::Txt::new(gen[k % gen.len()]);
+                m.math_on = k % 2 == 1;
+                m.math_mode = if k % 4 < 2 { 5 } else { 6 };
+                let mut ms = scope_ui::Buf::new();
+                ms.push(if m.math_mode == 5 { scope_ui::FFT_DB[k % 13] } else { scope_ui::VDIV_LABELS[k % 22] });
+                if m.math_mode != 5 {
+                    ms.push("V");
+                }
+                m.math_scale = scope_ui::Txt::new(ms.as_str());
+                m.pressed = (k % 13) as u8;
+                m.ch1_open = k % 5 == 0;
+                m.math_open = k % 7 == 0;
+                let save_as = match (vi, probe, ac) {
+                    (11, 12, true) => Some("s09-strip-ac-x1000-10v"),
+                    (7, 6, true) => Some("s09-strip-ac-x10-500mv"),
+                    (0, 0, true) => Some("s09-strip-ac-x0.1-2mv"),
+                    _ => None,
+                };
+                shot(ck, m, format!("strip/blocks/{vi}/{probe}/{ac}"), save_as);
+            }
+        }
+    }
+    // The Wave view: the CH1 block names the function, DMM reads MCX.
+    for (txt, wv) in [("AC V", 250.0f32), ("AC mA", 0.015), ("AC uA", 150e-6), ("DC V", 1.5)] {
+        let mut m = base.m;
+        m.wave = true;
+        m.ch1_txt = txt;
+        m.wvdiv = wv;
+        m.amps = txt.ends_with('A');
+        m.ac = true;
+        shot(ck, m, format!("strip/wave/{txt}"), if txt == "AC uA" { Some("s09-strip-wave") } else { None });
+    }
+    println!("strip blocks: {n} scenes");
 }

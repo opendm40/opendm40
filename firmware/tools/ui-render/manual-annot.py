@@ -364,7 +364,7 @@ def scope_page():
     paste(im, d, s, x0, y0)
     f = font(14)
     g = lambda x, y: (x0 + x * sc, y0 + y * sc)
-    for x, t, row in [(44, 'run state', 0), (110, 'timebase', 1), (213, 'record bar', 0), (316, 'V/div', 1), (383, 'trigger', 0)]:
+    for x, t, row in [(44, 'run state', 0), (110, 'timebase', 1), (246, 'record bar', 0), (383, 'trigger', 1)]:
         up_label(d, t, g(x, 1), y0 - 34 - row * 30, f)
     L, R = x0 - 20, x0 + w + 20
     side_label(d, 'A: the trace zero', g(0, 160), L, f, right=False)
@@ -801,7 +801,7 @@ def scope_topbar():
     x0, y0 = 20, 20
     paste(im, d, s, x0, y0)
     f = font(14)
-    for a, b, t in [(13, 75, 'run / stop'), (80, 140, 'timebase list'), (286, 347, 'channel popup'), (352, 414, 'trigger menu')]:
+    for a, b, t in [(13, 75, 'run / stop'), (80, 140, 'timebase list'), (352, 414, 'trigger menu')]:
         d.rectangle((x0 + a * sc + 1, y0 - 3, x0 + b * sc - 1, y0 + h + 2), outline=BLUE, width=3)
         down_label(d, t, (x0 + (a + b) * sc / 2, y0 + h + 4), y0 + h + 40, f)
     save(im, 'new-scope-topbar')

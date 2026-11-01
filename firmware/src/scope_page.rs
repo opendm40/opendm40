@@ -30,8 +30,7 @@
 //!   on the first 3 page entries after power-on); the timebase badge flashes
 //!   on every timebase change;
 //! * top bar (opendm40, the stock one is not tappable): run badge = RUN/STOP,
-//!   timebase badge = timebase list popup, V/div badge = CH1 popup, trigger
-//!   badge = Trigger tab; the right panel (owner 2026-11-02): four channel
+//!   timebase badge = timebase list popup, trigger badge = Trigger tab; the right panel (owner 2026-11-02): four channel
 //!   blocks CH1 / DMM / GEN / MATH, a title (CH1 popup, DMM / GEN on / off,
 //!   the math popup; DMM held: the Wave view) and zoom in / out magnifiers;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
@@ -1592,9 +1591,8 @@ impl App {
                 }
                 // opendm40 additions (the stock top bar is not tappable): the
                 // status badge = RUN/STOP, the timebase badge = timebase
-                // list, the V/div badge = CH1 popup (as B2), the trigger
-                // badge = Trigger tab; with the stream ISR the source badge
-                // (MCX | DMM: the DMM wave view, app_wave.rs).
+                // list, the trigger badge = Trigger tab (the V/div badge
+                // and the MCX | DMM badge are gone: the CH1 / DMM blocks).
                 match su::top_badge(p.x, p.y) {
                     Some(0) => {
                         self.beep(now, 30);
@@ -1603,14 +1601,6 @@ impl App {
                     Some(1) => {
                         self.beep(now, 30);
                         self.sp_popup_open(su::Popup::Tb(self.scope.s.tb as u8));
-                    }
-                    Some(2) if self.scope.wave_on() => {
-                        self.beep(now, 30);
-                        self.wave_coupling_note(now);
-                    }
-                    Some(2) => {
-                        self.beep(now, 30);
-                        self.sp_popup_open(su::Popup::Ch1(0));
                     }
                     Some(_) => {
                         self.beep(now, 30);

@@ -1403,11 +1403,11 @@ fn tap_step_tests(ck: &mut Ck) {
     host::reset(0);
     su::invalidate();
     su::update(&d);
-    page(ck, "top badges", &|x, y| su::top_badge(x, y).map(|k| k as u32), &|b| b.y1 < 20, &[0, 1, 2, 3]);
+    page(ck, "top badges", &|x, y| su::top_badge(x, y).map(|k| k as u32), &|b| b.y1 < 20, &[0, 1, 2]);
     let tb = |x: u16, y: u16| su::top_badge(x, y);
-    ck.t("badges: run / timebase / V/div / trigger", tb(40, 10) == Some(0) && tb(100, 10) == Some(1) && tb(300, 5) == Some(2) && tb(380, 10) == Some(3));
-    ck.t("badges: rows 15..19 (inside INNER) are the badge, y 20 the graph", tb(100, 15) == Some(1) && tb(100, 19) == Some(1) && tb(100, 20).is_none() && tb(300, 19) == Some(2));
-    ck.t("badges: record bar, gaps and battery are not badges", tb(200, 10).is_none() && tb(77, 10).is_none() && tb(143, 10).is_none() && tb(450, 10).is_none());
+    ck.t("badges: run / timebase / trigger (no V/div badge: the CH1 block)", tb(40, 10) == Some(0) && tb(100, 10) == Some(1) && tb(380, 10) == Some(2));
+    ck.t("badges: rows 15..19 (inside INNER) are the badge, y 20 the graph", tb(100, 15) == Some(1) && tb(100, 19) == Some(1) && tb(100, 20).is_none() && tb(380, 19) == Some(2));
+    ck.t("badges: record bar (to x 347), gaps and battery are not badges", tb(200, 10).is_none() && tb(300, 5).is_none() && tb(77, 10).is_none() && tb(143, 10).is_none() && tb(450, 10).is_none());
     let mut m = d;
     m.trig_px = 90;
     ck.t("badges win over the T zone's top rows (T under the timebase badge)", gp(&m, c, 100, 17) == Press::Marker(false, 0) && tb(100, 17) == Some(1) && gp(&m, c, 100, 25) == Press::Marker(false, 0));

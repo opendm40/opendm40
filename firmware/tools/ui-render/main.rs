@@ -1303,6 +1303,17 @@ fn main() {
     if std::env::args().nth(2).as_deref() == Some("--readme") {
         std::process::exit(if readme::run(&out) == 0 { 0 } else { 1 });
     }
+    // `main <out> --strip`: only the scope page's channel blocks
+    // (scope_add.rs strip_blocks; also in the full matrix).
+    if std::env::args().nth(2).as_deref() == Some("--strip") {
+        let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+        scope_add::strip_blocks(&mut ck, &out);
+        for (msg, (n, scene)) in &ck.seen {
+            println!("{n:6} x  {msg}   [first: {scene}]");
+        }
+        println!("cases {}, violations {}", ck.cases, ck.violations);
+        std::process::exit(if ck.violations == 0 { 0 } else { 1 });
+    }
     // `main <out> --manual`: the user manual's screens (manual.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--manual") {
         std::process::exit(if manual::run(&out) == 0 { 0 } else { 1 });

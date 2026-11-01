@@ -1254,7 +1254,7 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 *The scope page.*
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
-  the record bar, the V/div with the probe and coupling, the trigger (edge
+  the record bar, the trigger (edge
   and level), the Bluetooth symbol while a phone or a computer is connected
   over Bluetooth, the USB symbol while a computer has the meter connected,
   the battery.
@@ -1272,7 +1272,8 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 - **Right panel**: a block per channel, **CH1**, **DMM** (CH2), **GEN**,
   **MATH** (titled **FFT** or **ABS**). Each block has the name and V/div,
   then zoom in (magnifier +, left) and zoom out (magnifier −). A channel that
-  is off is dimmed.
+  is off is dimmed. The **CH1** title also shows the probe and coupling
+  symbol when the probe is not ×1 or the coupling is AC.
   - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
     their trace on / off; **MATH** opens the math popup.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
@@ -1320,7 +1321,7 @@ in the left or right half of the graph steps), **Off**.
   **magnifier −** to zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you
   selected; see [Moving things with a finger](#moving-things-with-a-finger)).
-- Tap the **CH1** title (or the V/div in the top bar) for the channel popup:
+- Tap the **CH1** title for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
@@ -1646,7 +1647,7 @@ To open it:
 - Timebase: 1 ms/div to 50 s/div. Sample rate: 76 800/s at 1 ms/div, down
   to 1200/s from 200 ms/div. Opens at 10 ms/div the first time, then at the
   timebase you last used in it (until you switch the meter off).
-- Coupling: AC V is AC-coupled; tap the V/div in the top bar or the first block's title to
+- Coupling: AC V is AC-coupled; tap the first block's title to
   switch between the DC V and the AC V signal path. AC mV and the current
   paths are DC-coupled. DC A uses the AC A path (DC-coupled).
 - Triggers (edge, pulse, runt), measurements (in amps on the current
