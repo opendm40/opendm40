@@ -1314,6 +1314,19 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("a drag from the right-edge T zone moves the trigger level (level, V)", gp(&d, off, 395, 125) == lev && gp(&d, c, 395, 125) == lev);
     ck.t("a drag from the top T zone moves the trigger position (time, H)", gp(&d, off, 214, 50) == tpos);
     ck.t("a drag from the CH1 zone moves CH1 (level, V)", gp(&d, off, 30, 160) == ch1);
+    // A zone drag does not change the selection the empty graph uses
+    // (owner 2026-11-02); a still tap on a marker does.
+    let ch1_sel = (0u8, 0u8, false);
+    let after = |zone_drag: bool| {
+        let now = match gp(&d, off, 395, 125) {
+            Press::Marker(true, id) => (id, 0, false),
+            _ => ch1_sel,
+        };
+        su::sel_after(zone_drag, now, ch1_sel)
+    };
+    ck.t("zone drag of the right-edge T, then an empty-graph up / down drag moves CH1", di(&d, false, after(true).0) == (true, 0));
+    ck.t("a still tap on the right-edge T selects it: the empty-graph up / down drag moves the level", di(&d, false, after(false).0) == (true, 1));
+    ck.t("zone drag keeps a tapped selection (trigger level selected, CH1 dragged)", su::sel_after(true, (0, 0, false), (1, 0, false)) == (1, 0, false));
     // Top-bar badges: hit map against the drawn badges, then the edges.
     host::reset(0);
     su::invalidate();

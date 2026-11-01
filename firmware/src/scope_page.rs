@@ -17,7 +17,8 @@
 //!   anywhere else picks its axis in the first 8 px (scope_ui::drag_axis):
 //!   sideways moves the trigger position (a stopped record: its pan),
 //!   up / down the selected level item (scope_ui::drag_item: CH1 unless a
-//!   tap selected another). A 4 px tap tolerance before the first move; the
+//!   tap selected another; a drag from a marker zone does not change the
+//!   selection, only a still tap does). A 4 px tap tolerance before the first move; the
 //!   acquisition holds from the first move (no frame paint between the
 //!   finger and the marker);
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
@@ -92,6 +93,10 @@ pub(super) struct Touch {
     axis: Option<Axis>,
     /// The item it moves (time item if `axis` is H, else level item).
     item: u8,
+    /// Selection before the press (sel_v, sel_h, last_h): a drag from a
+    /// marker zone moves that marker but leaves the selection as it was
+    /// (owner 2026-11-02); only a still tap selects.
+    prev: (u8, u8, bool),
     /// Combined view: sub-row remainder of vertical moves.
     acc: i32,
     /// What moved (DBG:GEST? code) and its travel.
@@ -1431,6 +1436,7 @@ impl App {
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
             Gesture::Down(p) if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
+                let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
                 // A marker grab zone: that marker along its own axis.
                 let axis = hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V });
@@ -1450,6 +1456,7 @@ impl App {
                     pan: 0,
                     axis,
                     item,
+                    prev,
                     acc: 0,
                     code: 0,
                     travel: 0,
@@ -1486,6 +1493,9 @@ impl App {
                 // A second finger: undo what the first finger moved (a pinch
                 // must not start with its accidental nudge), drop the touch.
                 if let Some(t) = self.sp.touch.take() {
+                    if t.hit {
+                        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = t.prev;
+                    }
                     self.cur = t.cur;
                     self.cursor_values();
                     if self.sp.frozen {
@@ -1749,6 +1759,12 @@ impl App {
     fn sp_release(&mut self, now: u64) {
         let Some(t) = self.sp.touch.take() else { return };
         self.sp.guide_until = now + GUIDE_MS;
+        // A marker dragged from its zone: the selection as before the press
+        // (the empty graph's up / down keeps moving what was selected).
+        if t.hit && t.moving {
+            self.sp.presel = false;
+        }
+        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = su::sel_after(t.hit && t.moving, (self.sp.sel_v, self.sp.sel_h, self.sp.last_h), t.prev);
         // DBG:GEST? log.
         if t.moving && t.code != 0 {
             let i = if self.gest_n < GEST_N {

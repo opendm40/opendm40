@@ -1403,6 +1403,7 @@ Rigol DHO800/900:
   **Sideways** moves the trigger position; on a stopped scope it pans the
   stored record. **Up or down** moves the selected item: the trace, unless
   you tapped another marker (the trigger level, **M**, a Y cursor).
+  Dragging a marker does not select it; only a tap does.
 
 A tap on a marker selects it; a tap on the selected marker selects the next
 one under the finger.

@@ -1434,6 +1434,14 @@ pub fn drag_item(m: &Model, horizontal: bool, sel_v: u8) -> (bool, u8) {
     (true, if items[..n].iter().any(|&(id, _)| id == sel_v) { sel_v } else { 0 })
 }
 
+/// The selection (sel_v, sel_h, last_h) after a scope touch: a press on a
+/// marker selects it (`now`), but a drag from its zone (`zone_drag`) puts
+/// back the selection from before the press (`prev`; owner 2026-11-02: the
+/// empty graph's up / down keeps moving CH1 or what a tap selected).
+pub fn sel_after(zone_drag: bool, now: (u8, u8, bool), prev: (u8, u8, bool)) -> (u8, u8, bool) {
+    if zone_drag { prev } else { now }
+}
+
 /// The zone a press at (x, y) picks (`pick_near` over `zones`).
 pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<Zone> {
     let mut z = [Zone::NONE; NZONE];
