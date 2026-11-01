@@ -2096,6 +2096,8 @@ fn main() {
         ("history", Bx::new(0, 144, 480, 32)),
         ("axis", Bx::new(0, 174, 80, 106)),
         ("side", Bx::new(402, 174, 78, 106)),
+        // The trend plot: the Wave chip in its top-left corner.
+        ("chart", Bx::new(80, 176, 321, 97)),
         ("buttons", Bx::new(0, 277, 480, 43)),
     ];
     for (name, r, label) in &cases {
@@ -2156,10 +2158,62 @@ fn main() {
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
+                    // The Wave chip where App::wave_avail shows it (V / A,
+                    // DC or AC).
+                    cc.wave = matches!(dmm::button_of(r.mode), Button::Volt | Button::Amp) && !r.acdc && !r.cpl_auto;
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
                   }
                 }
+            }
+        }
+    }
+
+    // 5b'. Wave chip: trend points scrolling under it (incremental column
+    //      updates, the trace through the chip's corner) and the chip
+    //      switched on / off leave the corner as a fresh draw has it.
+    {
+        let chip = ui::WAVE_CHIP;
+        let corner = |fb: &[u16]| -> Vec<u16> {
+            let mut v = Vec::new();
+            for y in (chip.y - 8) as usize..273 {
+                for x in 80..(chip.x + chip.w + 8) as usize {
+                    v.push(fb[y * W + x]);
+                }
+            }
+            v
+        };
+        let rc = ui::RateChip { rate: 1, period_ms: 200, applies: true };
+        let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), sd: Some(0.0), rel: None, secs: Some(9), rec: false };
+        // A ramp from the top of the plot down: its oldest points (the
+        // corner) are the highest.
+        let wav = |i: usize| 1.0 + 0.8 * ((i as f32) / 9.0).sin() * (1.0 - i as f32 / 500.0);
+        let mut pts: Vec<f32> = (0..321).map(wav).collect();
+        for (from, to) in [(true, true), (false, true), (true, false)] {
+            host::reset(0);
+            let mut cc = ui::ChartCache::new();
+            cc.wave = from;
+            ui::chart(&mut cc, &pts, 3, 2, Some(&side), "V", rc);
+            cc.wave = to;
+            for k in 0..40 {
+                pts.rotate_left(1);
+                pts[320] = wav(321 + k);
+                ui::chart(&mut cc, &pts, 3, 2, Some(&side), "V", rc);
+            }
+            let got = corner(&emu().fb);
+            host::reset(0);
+            let mut cf = ui::ChartCache::new();
+            cf.wave = to;
+            ui::chart(&mut cf, &pts, 3, 2, Some(&side), "V", rc);
+            let want = corner(&emu().fb);
+            ck.cases += 1;
+            let n = got.iter().zip(&want).filter(|(a, b)| a != b).count();
+            if n > 0 {
+                ck.fail(&format!("wave chip {from}->{to}"), format!("{n} corner pixels differ from a fresh draw"));
+            }
+            if to {
+                // The contact sheet: the chip over a trace through the corner.
+                host::save_ppm(&format!("{out}/dmm-wave-chip-{}.ppm", from as u8), 2);
             }
         }
     }

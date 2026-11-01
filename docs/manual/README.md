@@ -1610,7 +1610,8 @@ currents, within the meter's ratings.
 
 To open it:
 
-- in the multimeter, function V or A (DC or AC): **MF**, then **Wave**; or
+- in the multimeter, function V or A (DC or AC): tap **Wave** in the trend
+  chart's lower left corner, or **MF**, then **Wave**; or
 - on the scope page, tap the **MCX | DMM** badge.
 
 | ![Mains on the Wave view, 10 ms/div](img/wave.png) | ![The same at 50 ms/div](img/wave-50ms.png) |

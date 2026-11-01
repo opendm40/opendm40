@@ -168,8 +168,14 @@ impl App {
         self.ch2_drain();
     }
 
+    /// The DMM page shows the Wave chip (ui::wave_chip): V or A, DC or AC
+    /// (where `wave_open` opens the view; a recording still refuses it).
+    pub(super) fn wave_avail(&self) -> bool {
+        WAVE_BUILD && matches!(self.dmm.button(), Button::Volt | Button::Amp) && self.dmm.sub() < 2 && !self.dmm.pw.on
+    }
+
     /// Open the wave view on the current DMM function (MF "Wave", the
-    /// source badge). Refused (toast) where there is no AD2 waveform.
+    /// source badge, the DMM page's Wave chip). Refused (toast) where there is no AD2 waveform.
     #[inline(never)] // .cold (link-native.x): on a tap
     pub(super) fn wave_open(&mut self, clk: &mut Clock) {
         let now = clk.now_ms();

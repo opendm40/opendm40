@@ -91,7 +91,10 @@ fn dmm_page(p: &Dp) {
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
     let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), sd: Some(1.5 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
-    ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
+    let mut cc = ui::ChartCache::new();
+    // The Wave chip (App::wave_avail: V / A, DC or AC).
+    cc.wave = matches!(p.b, Button::Volt | Button::Amp) && !r.acdc && !r.cpl_auto;
+    ui::chart(&mut cc, &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
 
 /// The base scope scene: a 1 kHz, 3 Vpp sine at 200 us/div, 1 V/div,

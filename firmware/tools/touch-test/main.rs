@@ -971,14 +971,17 @@ fn hit_tests(ck: &mut Ck) {
     }
     // DMM page: function row (ui::button_hit) and the app.rs View::Dmm tap
     // order for the rest (copied from App::tap: REL box, MIN/MAX column,
-    // history row, rate chip, chart axis column, function row).
+    // history row, rate chip, the Wave chip (DC V here), chart axis column,
+    // function row).
     host::reset(0);
     let mut dv = ui::DmmView::new();
     dv.draw_static(dmm::Button::Volt, 1, false, true);
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
     let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), sd: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
-    ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
+    let mut cc = ui::ChartCache::new();
+    cc.wave = true;
+    ui::chart(&mut cc, &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
         if ui::value_hit(x, y) {
             Some(105) // main value: resolution / rate
@@ -990,6 +993,8 @@ fn hit_tests(ck: &mut Ck) {
             Some(102) // history row (one target for all five boxes)
         } else if ui::rate_chip_hit(x, y) {
             Some(103)
+        } else if ui::wave_chip_hit(x, y) {
+            Some(106) // Wave view
         } else if x < ui::CHART_X && (176..280).contains(&y) {
             Some(104) // chart rate
         } else {
@@ -997,7 +1002,16 @@ fn hit_tests(ck: &mut Ck) {
         }
     };
     page(ck, "dmm function row", &dmm_hit, &|b| b.y0 >= ui::BTN_Y as i32 - 4, &[0, 1, 2, 3, 4, 5, 6]);
-    page(ck, "dmm REL + rate chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103]);
+    page(ck, "dmm REL + rate chip + Wave chip", &dmm_hit, &|b| b.y0 >= 175 && b.y1 < 279, &[100, 103, 106]);
+    // The Wave chip's tap zone: >= 40 rows, the drawn chip inside it, clear
+    // of the timebase / rate chips' left column and the function row.
+    let wc = ui::WAVE_CHIP;
+    let zone: Vec<(u16, u16)> = (0..480u16).flat_map(|x| (0..320u16).map(move |y| (x, y))).filter(|&(x, y)| ui::wave_chip_hit(x, y)).collect();
+    let (zy0, zy1) = (zone.iter().map(|p| p.1).min().unwrap(), zone.iter().map(|p| p.1).max().unwrap());
+    let (zx0, zx1) = (zone.iter().map(|p| p.0).min().unwrap(), zone.iter().map(|p| p.0).max().unwrap());
+    ck.t(&format!("Wave chip zone {zx0}..{zx1} x {zy0}..{zy1}: >= 40 rows"), zy1 - zy0 + 1 >= 40);
+    ck.t("Wave chip drawn inside its zone", zx0 as i16 <= wc.x && zy0 as i16 <= wc.y && zx1 as i16 >= wc.x + wc.w - 1 && zy1 as i16 >= wc.y + wc.h - 1);
+    ck.t("Wave chip zone clear of the left column and the function row", zx0 >= ui::CHART_X && zy1 < ui::BTN_Y);
     // Power meter, AC+DC parts layout (doc 3.17: lower row 170.., chart
     // 192.., side column without VAh): the App::tap order for the power
     // page (pw_tap: energy side box, value, side column / lower row
