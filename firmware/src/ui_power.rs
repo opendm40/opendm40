@@ -20,8 +20,8 @@
 //!               pause, long press = reset with a confirm), average P,
 //!               ranges / the continuous-current countdown
 //!
-//! Entry: the W function button (the wiring dialog until confirmed once),
-//! a long press on the A button. Any other function button leaves. The MF
+//! Entry: the W function button (the wiring dialog until confirmed once).
+//! Any other function button leaves. The MF
 //! key opens the Power Settings page (`settings_page`).
 
 use super::*;
