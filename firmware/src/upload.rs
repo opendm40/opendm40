@@ -327,13 +327,17 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
     let v = parse_bpb(&tmp[..], dev.block_count()).ok_or(E_IO)?;
     // Re-read everything: CRC of what is on the flash; the header.
     let mut c = !0u32;
+    let mut hdr = [0u8; 12];
     for b in 0..u.blocks {
         let lba = v.clba(u.cl[(b / v.spc) as usize] as u32) + b % v.spc;
         if !dev.read_block(lba, buf) {
             return Err(E_IO);
         }
-        if b == 0 && !fatren::header_valid(&fatren::header_of(&buf[..])) {
-            return Err("Not an update file");
+        if b == 0 {
+            hdr = fatren::header_of(&buf[..]);
+            if !fatren::header_valid(&hdr) {
+                return Err("Not an update file");
+            }
         }
         let n = (u.size - b * BLK as u32).min(BLK as u32) as usize;
         c = calbackup::crc32_upd(c, &buf[..n]);
@@ -342,6 +346,8 @@ fn end_inner(dev: &mut dyn BlockDevice) -> R<(u32, u32)> {
         return Err("Verify failed");
     }
     link_and_enter(dev, &v, &u.cl[..u.ncl], u.size, &NAME, 0x20)?;
+    #[cfg(target_os = "none")]
+    crate::boot::note_update(&hdr);
     #[cfg(feature = "vdisk")]
     crate::dlog::set_stale();
     Ok((u.size, u.crc))

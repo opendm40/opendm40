@@ -1198,7 +1198,12 @@ fn check(chain: &[u8], size: u32) -> bool {
             off += len as u32;
         }
     }
-    crate::fatren::header_valid(&h) && le32o(&h, 4) == size - 12 && le32o(&h, 8) & 0xFFFF == crc as u32
+    let ok = crate::fatren::header_valid(&h) && le32o(&h, 4) == size - 12 && le32o(&h, 8) & 0xFFFF == crc as u32;
+    #[cfg(target_os = "none")]
+    if ok {
+        crate::boot::note_update(&h);
+    }
+    ok
 }
 
 /// Check, then link the staged SPI clusters as DM40FW.BIN (upload.rs).

@@ -2391,7 +2391,7 @@ the title bar or **MENU** goes back to the main menu.
 |---|---|---|---|
 | **Shutdown** | 10 min, 30 min, 1 hour, Never | 30 min | On battery: switches the meter off after this time without input. Never with USB power. |
 | **Analog power** | Auto (per view), Both always | Auto (per view) | [Analog power](#analog-power). |
-| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter continues as you left it ([What is kept](#what-is-kept-when-you-switch-off)). |
+| **Mode Remember** | OFF, ON | OFF | ON: after switching off and on, the multimeter and the scope continue as you left them ([What is kept](#what-is-kept-when-you-switch-off)). |
 
 ### Multimeter tab
 
@@ -2940,14 +2940,14 @@ measurement as it was.
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 **Mode Remember** ON (Settings > Power, as the stock's) also keeps after
 switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
-or a fixed V, A or Ω range, the Ω test current, the rate and smoothing and
-the trend timebase. AutoHold and the limits still start afresh.
+or a fixed V, A or Ω range, the Ω test current, the rate and smoothing,
+the trend timebase, and the scope settings above. AutoHold and the limits still start afresh.
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches

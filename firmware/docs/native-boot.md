@@ -1650,7 +1650,7 @@ keeps the settings record from `0x40024000` and two sequence words at
 | `0x40024FF0` `BKP_CRASH` | crash counter `0x435200nn` |
 | `0x40024FF4` `BKP_TRIG` | last loader entry: `0x54520012` PA2 entry, `0x54520013` PA2 entry without the lock read back |
 | `0x40024FF8` `BKP_REQ` | request word, consumed by the shim: `0x4C324150` PA2 entry (`DBG:LOADER`, key hold) |
-| `0x40024FFC` `BKP_LAST` | the previous boot: `0x4C4D524E` normal / `0x52564352` PA2 entry; **cleared by `DBG:UPDATE`** (H3) |
+| `0x40024FFC` `BKP_LAST` | the previous boot: `0x4C4D524E` normal / `0x52564352` PA2 entry; `DBG:UPDATE` writes `0x5544` and the low half of the staged file's header word 0 (0 when no file was checked this session), so the next boot continues the session only if the loader marker is that header (persist.rs `same_session`; H3 still holds: only NRML counts a hang) |
 
 **A hang that repeats on every boot** (opendm40 dies before its USB is
 up) is a reboot every ~20 s. The key hold at power-on still reaches the
@@ -1672,7 +1672,7 @@ marker ("Boot chain" above; `stock/re/docs/fsloader-install-trigger.md`,
 whatever PA2 reads.
 
 **Steps** (`boot::enter_loader_update`):
-1. Clear `BKP_LAST` (H3) and reset the crash counter (N2).
+1. Replace `BKP_LAST` by the update tag (H3) and reset the crash counter (N2).
 2. `boot::zero_marker()` programs three words of `0x00000000` at
    `0x08008000..0x0800800B` with the FMC, exactly like the loader's
    `0x080a2564`/`0x080a7aec`:
