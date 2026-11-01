@@ -63,6 +63,12 @@ const RATE_BADGE: Rect = rect(145, 1, 120, 17);
 const THR_BADGE: Rect = rect(269, 1, 79, 17);
 const INV_BADGE: Rect = rect(352, 1, 62, 17);
 
+/// The logger page keeps the stock scope page's panel (60 x 40 buttons at
+/// x 417, scope_ui before the four channel blocks).
+const PANEL: Rect = rect(414, 20, 66, 300);
+const B_RECT: [Rect; 7] =
+    [rect(417, 20, 60, 40), rect(417, 61, 60, 40), rect(417, 102, 60, 40), rect(417, 150, 60, 40), rect(417, 191, 60, 40), rect(417, 232, 60, 40), rect(417, 280, 60, 40)];
+
 /// Page background: bars, panel, the list frame and an empty list.
 /// `between`: called between the parts (the decoder keeps up with the
 /// stream: a full page is several passes' worth of drawing).

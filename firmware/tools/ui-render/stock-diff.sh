@@ -5,6 +5,12 @@
 # tools/stock-ui/diff.py per scene with the stock regions and prints the
 # per-region scores (graph_inner excluded from the total: the 1 px trace /
 # marker offsets are reproduced, so it is expected to be 0 too).
+# Since the four channel blocks (2026-11-02: scope_ui::GX 0, DIV_W 39, the
+# 89 px panel) the scope page no longer has the stock geometry: only the
+# top bar regions still compare; the graph, the markers, the panel and the
+# measurement cells differ by design. The last commit with the stock
+# geometry and panel is 044a4c1d ("derive the graph ... from one graph
+# rectangle"): check it out for a pixel diff of the replica page.
 #   tools/ui-render/stock-diff.sh [out dir] [scene ...]
 set -e
 cd "$(dirname "$0")"
