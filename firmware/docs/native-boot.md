@@ -1078,6 +1078,37 @@ stays.
 
 `--features acdc-meth`: SRAM 45 460 B, B 24 840 B, C 21 216 B.
 
+### Region B audit #10 (2026-11-01, chore/mem-p1)
+
+Step P1 of the memory plan for the 0.4.0 features still to come: room in
+region B. [`rprof.py`](../tools/region-profile/rprof.py) on release/0.4.0
+(6f56b877): 19.6 KB of B `c-only` (7.8 KB code, 11.8 KB anonymous
+rodata), 25 copies of `stockfont::paint`.
+
+| change | region B | region C |
+|---|---|---|
+| usbd-storage: the state asserts panic without a message (no `Debug` of `State`) | +800 | 0 |
+| `stockfont::paint` through `paint_dyn` (`&mut dyn FnMut`): one loop instead of 25 monomorphs; `paint_mono` keeps the generic form | +4 752 | -8 |
+| `c-only` functions of opendm40 of >= ~40 B: link-native.x patterns | +4 304 | -4 304 |
+| `cold_str!` / `cold_set!` ([`cold.rs`](../src/cold.rs), `.rodata.cold`): the CSV / DLG file headers, the fast logger's and the CSV recorder's job reset values, the touch test page's state | +4 264 | -4 376 |
+
+Left in B as `c-only`: generic core instantiations, `OUTLINED_FUNCTION_*`,
+small shared helpers (a later hot caller of the same instance would run it
+from slow flash), the `.text.vdisk_rd` / `.text.scope_plan` instances, the
+gallery's job reset (a `cold_set!` there costs more region C than it saves
+in B), toast texts (region B code draws them later). After: 3.5 KB code,
+7.6 KB data. `rprof.py --region c` before / after: no function in C newly
+reachable from the main loop without region C code between, and all of
+C's data `c-only`.
+
+| | release/0.4.0 (6f56b877) | this branch |
+|---|---|---|
+| region A2 free | 4 356 B | 4 356 B |
+| region B free | 20 084 B | 34 204 B |
+| region C free | 22 888 B | 14 200 B |
+| stack headroom (static worst path) | 21 516 B | 21 516 B |
+| SRAM free | 45 356 B | 45 356 B |
+
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 
 The device probe of [PR #183](https://github.com/opendm40/opendm40/pull/183)
