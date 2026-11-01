@@ -125,8 +125,8 @@ section named after the tag as the release notes; how to cut a release:
 - Scope Save CSV after a change while stopped: V/div, coupling and the trigger in the header are the
   record's too.
 - Scope STOP keeps the triggered trace on screen (it jumped to an untriggered part of the capture). With
-  CH2 (DMM) on, up to 5 ms/div, STOP takes the next triggered frame (it left a short untriggered piece
-  without CH2 and without measurements).
+  CH2 (DMM) on, STOP no longer leaves a short untriggered piece without CH2 and without measurements
+  (STOP ends on one more complete capture, above).
 - Scope CH2 (DMM): drawn up to the right edge of a stopped, Single or DIGitize frame (at 2 ms/div it was
   missing from the whole frame); no wrong segment across a gap in the multimeter's stream.
 - Scope stopped zoom stops at **Max zoom** (16 samples across the screen): faster timebases had a wrong
