@@ -310,6 +310,9 @@ pub(super) struct Sp {
     pub guide_until: u64,
     pub touch: Option<Touch>,
     pub pinch: Option<Pinch>,
+    /// A trigger-position drag's remainder (graph px x scope::COLS not yet
+    /// a whole engine column; the graph has su::GW px per COLS columns).
+    hpos_rem: i32,
     pub swipes: bool,
     pub press_fx: bool,
     pressed: u8,
@@ -394,6 +397,7 @@ impl Sp {
             guide_until: 0,
             touch: None,
             pinch: None,
+            hpos_rem: 0,
             swipes: false,
             press_fx: true,
             pressed: 0,
@@ -1481,6 +1485,7 @@ impl App {
                 let axis = hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V });
                 let item = if self.sp.last_h { self.sp.sel_h } else { self.sp.sel_v };
                 let s = self.scope.s;
+                self.sp.hpos_rem = 0;
                 self.sp.touch = Some(Touch {
                     p0: p,
                     last: p,
@@ -1751,7 +1756,11 @@ impl App {
                     return;
                 }
                 let mut st = self.scope.s;
-                st.hpos = (st.hpos + su::eng_dx(dx)).clamp(0, scope::COLS as i32);
+                // Engine columns of the px moved, the remainder kept.
+                let n = dx * scope::COLS as i32 + self.sp.hpos_rem;
+                let (e, r) = (n.div_euclid(su::GW as i32), n.rem_euclid(su::GW as i32));
+                self.sp.hpos_rem = r;
+                st.hpos = (st.hpos + e).clamp(0, scope::COLS as i32);
                 self.sp_preview(st);
             }
             1 if self.sp.math.on && self.sp.math.mode == 5 => {
