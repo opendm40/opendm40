@@ -284,6 +284,25 @@ pub fn chip_busy() -> bool {
     SpiFlash::busy()
 }
 
+/// Before a reset (main.rs `reset_at`): wait, bounded by `max_ms`, until the
+/// chip has finished an erase / page program a writer left running, so the
+/// next owner of the bus (the vendor loader after DBG:UPDATE) finds it idle.
+/// Returns the ms waited (`max_ms` = still busy).
+pub fn wait_idle(max_ms: u32) -> u32 {
+    let per_ms = crate::clock::HCLK_HZ / 1000;
+    let t0 = cyc();
+    loop {
+        let ms = cyc().wrapping_sub(t0) / per_ms;
+        if !SpiFlash::busy() {
+            return ms;
+        }
+        if ms >= max_ms {
+            return max_ms;
+        }
+        crate::wdt::kick_if_feeding();
+    }
+}
+
 impl SpiFlash {
     /// Raw bytes at flash address `addr` (any length; dlog.rs reads the
     /// binary logs for the CSV export without a 4 KiB block buffer). Waits
@@ -415,6 +434,19 @@ impl SpiFlash {
         cmd_addr(CMD_PP, addr);
         for &b in data {
             xfer(b);
+        }
+        cs(false);
+    }
+
+    /// `start_program` of one page given as PAGE / 4 little-endian words.
+    fn start_program_words(addr: u32, word: impl Fn(usize) -> u32) {
+        Self::write_enable();
+        cs(true);
+        cmd_addr(CMD_PP, addr);
+        for j in 0..PAGE / 4 {
+            for b in word(j).to_le_bytes() {
+                xfer(b);
+            }
         }
         cs(false);
     }
@@ -554,7 +586,7 @@ impl BlockDevice for SpiFlash {
     /// back (3). Returns None after ~2 ms of CPU time or while the chip is
     /// busy; the erase (45..400 ms) and each page program (0.4..3 ms) run
     /// between calls. Page reads at 12.5 MHz take ~0.17 ms.
-    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+    fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut Step) -> Option<bool> {
         if lba >= self.blocks || buf.len() < SECTOR || self.failed {
             return Some(false);
         }
@@ -564,7 +596,10 @@ impl BlockDevice for SpiFlash {
             st.t0 = t_in;
         }
         let base = lba * SECTOR as u32;
-        let page = |p: u8| &buf[p as usize * PAGE..(p as usize + 1) * PAGE];
+        // `buf` is read word by word (it may be a word-only RAM, wordram.rs).
+        const PW: usize = PAGE / 4;
+        let word = |p: u8, j: usize| buf.word(p as usize * PW + j);
+        let old_w = |old: &[u8; PAGE], j: usize| u32::from_le_bytes([old[4 * j], old[4 * j + 1], old[4 * j + 2], old[4 * j + 3]]);
         let mut old = [0u8; PAGE];
         loop {
             // Our erase / page program, or another instance's, still running.
@@ -580,11 +615,13 @@ impl BlockDevice for SpiFlash {
             }
             match st.phase {
                 0 => {
-                    let new = page(st.page);
                     read(base + st.page as u32 * PAGE as u32, &mut old);
-                    if old[..] != new[..] {
-                        st.dirty |= 1 << st.page;
-                        st.erase |= old.iter().zip(new).any(|(&o, &n)| o & n != n);
+                    for j in 0..PW {
+                        let (o, n) = (old_w(&old, j), word(st.page, j));
+                        if o != n {
+                            st.dirty |= 1 << st.page;
+                            st.erase |= o & n != n;
+                        }
                     }
                     st.page += 1;
                     if st.page as usize == SECTOR / PAGE {
@@ -605,7 +642,7 @@ impl BlockDevice for SpiFlash {
                     // Erased: every page that is not all 0xFF must be programmed.
                     st.dirty = 0;
                     for p in 0..(SECTOR / PAGE) as u8 {
-                        if page(p).iter().any(|&b| b != 0xFF) {
+                        if (0..PW).any(|j| word(p, j) != 0xFFFF_FFFF) {
                             st.dirty |= 1 << p;
                         }
                     }
@@ -619,14 +656,14 @@ impl BlockDevice for SpiFlash {
                         st.page = 0;
                         st.phase = 3;
                     } else {
-                        Self::start_program(base + st.page as u32 * PAGE as u32, page(st.page));
+                        Self::start_program_words(base + st.page as u32 * PAGE as u32, |j| word(st.page, j));
                         st.t0 = cyc();
                         st.page += 1;
                     }
                 }
                 _ => {
                     read(base + st.page as u32 * PAGE as u32, &mut old);
-                    if old[..] != page(st.page)[..] {
+                    if (0..PW).any(|j| old_w(&old, j) != word(st.page, j)) {
                         return Some(false);
                     }
                     st.page += 1;

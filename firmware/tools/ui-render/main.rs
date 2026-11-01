@@ -34,6 +34,12 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
+#[path = "../../src/cring.rs"]
+mod cring;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]
@@ -78,6 +84,9 @@ mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
+#[path = "../../src/decode.rs"]
+mod decode;
+mod decode_ui;
 mod readme;
 mod manual;
 mod stock;
@@ -590,7 +599,6 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
         10 => 1,
         13 => match unit {
             "nF" => 3 - dec.min(3) as i8,
-            "mF" => 9 - dec as i8,
             _ => 6 - dec as i8,
         },
         _ => 0,
@@ -661,11 +669,13 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
         ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
+        // Open leads: "0L" with "Overflow" (continuity).
+        ("cont_ol", rd(11, ol(2, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
-        // A reading with an OL aux value only ("Overload" before its 0L).
+        // A reading with an OL aux value only ("Overflow" before its 0L).
         ("diode_aux_ol", rd(12, val(1.2034, 4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
-        ("cap_mf", rd(13, val(44.444, 3, "mF"), None, None, false), None),
+        ("cap_uf", rd(13, val(4700.0, 0, "\u{b5}F"), None, None, false), None),
         ("cap_nf", rd(13, val(4.444, 3, "nF"), None, None, false), None),
         ("cap_uf", rd(13, val(444.4, 1, "\u{b5}F"), None, None, false), None),
         ("hz_mhz", rd(14, val(9.9999, 4, "MHz"), None, Some(val(100.0, 1, "%")), false), None),
@@ -1089,6 +1099,36 @@ pub fn touchcal_scene(k: u8, long: bool) {
 /// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
 /// in a batch over an arbitrary previous screen ends pixel-identical to the
 /// page drawn directly.
+/// Settings values by id (ui::S_*): those of a new meter, `over` replaced.
+pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
+    let mut v = vec![""; ui::SET_N];
+    for (id, t) in [
+        (ui::S_DIM, "5 min"), (ui::S_SHUTDOWN, "30 min"), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, "ON"),
+        (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_RATE, "MED  5.0/s"),
+        (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
+        (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
+        (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
+        (ui::S_REMEMBER, "OFF"),
+    ] {
+        v[id as usize] = t;
+    }
+    for &(id, t) in over {
+        v[id as usize] = t;
+    }
+    v
+}
+
+/// The widest value of every setting (the fit checks).
+fn set_vals_worst() -> Vec<&'static str> {
+    set_vals(&[
+        (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "1 hour"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
+        (ui::S_START, "DMM + Scope"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
+        (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
+        (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
+        (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
+    ])
+}
+
 fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     unsafe { host::PATTERN = true };
     host::reset(0);
@@ -1135,6 +1175,61 @@ fn strip_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
         ck.fail(name, format!("strips: {writes} pixel writes, not one per pixel"));
     }
     println!("strip {name}: direct {:.2} ms, strips {:.2} ms", td.as_secs_f64() * 1e3, ts.as_secs_f64() * 1e3);
+}
+
+/// The generator page's square preview (ui::gen_preview: x 4..243, high
+/// level at row 143, low at 258) is high in `duty` of its columns.
+fn gen_duty_check(ck: &mut Checker, duty: u16) {
+    const TRACE: u16 = 0x04A9;
+    let fb = &host::emu().fb;
+    let at = |x: usize, y: usize| fb[y * W + x] == TRACE;
+    let (mut hi, mut lo) = (0, 0);
+    for x in 5..242 {
+        hi += at(x, 143) as usize;
+        lo += at(x, 258) as usize;
+    }
+    let share = hi as f32 / (hi + lo).max(1) as f32;
+    ck.cases += 1;
+    if (share - duty as f32 / 10000.0).abs() > 0.03 {
+        ck.fail(&format!("gen-square/{duty}"), format!("preview high in {hi} of {} columns ({:.0} %), duty {} %", hi + lo, share * 100.0, duty / 100));
+    }
+}
+
+/// Pressed feedback in one pass (app_press.rs draw_box, lcd::strips_box):
+/// over the page drawn by `page`, an item drawn pressed / released by
+/// `item` in a strip pass over its box `r` ends as the direct draw does, the
+/// direct draw changes nothing outside that box, and the pass writes each
+/// pixel of the box once and nothing else.
+fn press_check(ck: &mut Checker, name: &str, r: Option<stockfont::Rect>, page: &dyn Fn(), item: &dyn Fn()) {
+    let Some(r) = r else {
+        ck.fail(name, "press: no box".into());
+        return;
+    };
+    let (x0, y0, x1, y1) = (r.x as usize, r.y as usize, (r.x + r.w - 1) as usize, (r.y + r.h - 1) as usize);
+    host::reset(0);
+    page();
+    let a = host::emu().fb.clone();
+    item();
+    let b = host::emu().fb.clone();
+    host::reset(0);
+    page();
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    lcd::strips_box(&mut buf, x0 as u16, y0 as u16, x1 as u16, y1 as u16, &mut || item());
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let inside = |i: usize| (x0..=x1).contains(&(i % W)) && (y0..=y1).contains(&(i / W));
+    let out = a.iter().zip(b.iter()).enumerate().filter(|(i, (p, q))| p != q && !inside(*i)).count();
+    if out != 0 {
+        ck.fail(name, format!("press: the direct draw changes {out} px outside the box {x0},{y0}..{x1},{y1}"));
+    }
+    let n = b.iter().zip(host::emu().fb.iter()).filter(|(p, q)| p != q).count();
+    if n != 0 {
+        ck.fail(name, format!("press: {n} px differ from the direct draw"));
+    }
+    if writes != (r.w as u64) * (r.h as u64) {
+        ck.fail(name, format!("press: {writes} pixel writes for the {}x{} box", r.w, r.h));
+    }
 }
 
 /// The bargraph's full-scale label ends with the unit as the readout and
@@ -1184,6 +1279,16 @@ fn main() {
     // `main <out> --manual`: the user manual's screens (manual.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--manual") {
         std::process::exit(if manual::run(&out) == 0 { 0 } else { 1 });
+    }
+    // `main <out> --decode`: only the decoder view's scenes (decode_ui.rs).
+    if std::env::args().nth(2).as_deref() == Some("--decode") {
+        let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+        decode_ui::run(&mut ck, &out);
+        for (msg, (n, scene)) in &ck.seen {
+            println!("{n:6} x  {msg}   [first: {scene}]");
+        }
+        println!("cases {}, violations {}", ck.cases, ck.violations);
+        std::process::exit(if ck.violations == 0 { 0 } else { 1 });
     }
     if std::env::args().nth(2).as_deref() == Some("--stock") {
         let dir = std::env::args().nth(3).unwrap_or_else(|| out.clone());
@@ -1339,7 +1444,8 @@ fn main() {
         };
         t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
         t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, 406, 125) == Some((true, 1)));
-        t("T marker zone (incl. 10 px of the top bar)", pick(&d, 0, 0, false, 214, 12) == Some((false, 0)));
+        t("T marker zone (from INNER's top, y 16)", pick(&d, 0, 0, false, 214, 16) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 15).is_none());
+        t("grab zones reach 30 px past the glyph into the graph", pick(&d, 0, 0, false, 42, 160) == Some((true, 0)) && pick(&d, 0, 0, false, 44, 160).is_none() && pick(&d, 0, 0, false, 371, 125) == Some((true, 1)) && pick(&d, 0, 0, false, 369, 125).is_none() && pick(&d, 0, 0, false, 214, 62) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 64).is_none());
         t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
         let mut m = d;
         m.trig_row = 140;
@@ -1360,10 +1466,7 @@ fn main() {
         let mut m = d;
         m.xcur = Some([100, 300]);
         m.ycur = Some([60, 220]);
-        let mut lz = [scope_ui::Zone::NONE; 4];
-        let n = scope_ui::line_zones(&m, &mut lz);
-        let lp = |x: i16, y: i16| scope_ui::pick_zone(&lz[..n], 0, 0, false, x, y).map(|k| (lz[k].level, lz[k].id));
-        t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
+        t("cursor lines are not zones (owner 2026-10-30: markers only)", pick(&m, 0, 0, false, 124, 200).is_none() && pick(&m, 0, 0, false, 200, 230).is_none());
     }
 
     // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1): the
@@ -1524,6 +1627,8 @@ fn main() {
 
     // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
+    // 0d. The protocol decoder view (ui_decode.rs).
+    decode_ui::run(&mut ck, &out);
 
     // 0b. Combined view in the stock language (scope_ui meter strip, port
     // plan S7): every strip case x hold x verdict x REL x HV x REC x GEN,
@@ -1713,6 +1818,36 @@ fn main() {
         let mut c = m;
         c.combined = true;
         v.push(("usb-combined", c));
+        // The Bluetooth rune (#167): alone, with USB (the battery 3 px
+        // right), with USB on the charger, roll + long texts, combined.
+        let mut b = base;
+        b.bt = true;
+        v.push(("bt", b));
+        let mut bu = m;
+        bu.bt = true;
+        bu.charging = false;
+        bu.battery = 4;
+        v.push(("bt-usb", bu));
+        let mut buc = bu;
+        buc.charging = true;
+        buc.battery = 5;
+        v.push(("bt-usb-charged", buc));
+        let mut bur = r;
+        bur.bt = true;
+        v.push(("bt-usb-roll-long", bur));
+        let mut buk = bu;
+        buk.combined = true;
+        v.push(("bt-usb-combined", buk));
+        // Both link icons beside the GEN trigger badge (cyan, long level
+        // text) and the generator's frequency (#64).
+        let mut bug = bu;
+        bug.tsrc = scope::TSRC_GEN;
+        bug.trig_v = -444.4e-3;
+        bug.gen_hz = 10.0e6;
+        v.push(("bt-usb-gen", bug));
+        let mut bugc = bug;
+        bugc.combined = true;
+        v.push(("bt-usb-gen-combined", bugc));
         for (name, m) in v {
             host::reset(0);
             scope_ui::invalidate();
@@ -1723,7 +1858,38 @@ fn main() {
             // battery's top row, a free row above and below; y 20 is the
             // graph frame / meter strip) and centred in the gap 414..434
             // between the trigger badge and the battery.
-            if m.usb {
+            // The link icons' and the battery's ink columns from x 414 (#167):
+            // each alone centred in 414..434; both 2 px apart, the battery
+            // 3 px right.
+            if m.bt || m.usb {
+                let fb = &host::emu().fb;
+                let bar = fb[0];
+                let mut runs: Vec<(usize, usize)> = Vec::new();
+                for x in 414..480 {
+                    if (0..20).any(|y| fb[y * 480 + x] != bar) {
+                        match runs.last_mut() {
+                            Some(r) if r.1 + 1 == x => r.1 = x,
+                            _ => runs.push((x, x)),
+                        }
+                    }
+                }
+                let rows = |x0: usize, x1: usize| {
+                    let ys: Vec<usize> = (0..20).filter(|&y| (x0..=x1).any(|x| fb[y * 480 + x] != bar)).collect();
+                    (ys[0], ys[ys.len() - 1])
+                };
+                let want: &[(usize, usize)] = match (m.bt, m.usb) {
+                    (true, true) => &[(416, 422), (425, 435)],
+                    (true, false) => &[(421, 427)],
+                    _ => &[(419, 429)],
+                };
+                let bat = if m.bt && m.usb { 438 } else { 435 };
+                let ok = runs.len() > want.len() && runs[..want.len()] == *want && runs[want.len()].0 == bat
+                    && (!m.bt || rows(want[0].0, want[0].1) == (3, 15));
+                if !ok {
+                    ck.fail(&format!("scopebar/{name}/icons"), format!("ink columns from 414: {runs:?}, want {want:?} then the battery at {bat}"));
+                }
+            }
+            if m.usb && !m.bt {
                 let fb = &host::emu().fb;
                 let bar = fb[0];
                 let ink = |x0: usize, x1: usize| {
@@ -1991,7 +2157,7 @@ fn main() {
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
-                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
+                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
@@ -2167,7 +2333,7 @@ fn main() {
                     pts.remove(0);
                 }
                 pts.push(v);
-                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), rel: None, secs: Some(i as u32), rec: false };
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v.abs()), rel: None, secs: Some(i as u32), rec: false };
                 if i == 0 {
                     host::reset(0);
                 }
@@ -2246,7 +2412,7 @@ fn main() {
         // themselves are the stock keypad geometry (not checked here: its
         // 40 px keys sit 1 px apart and 3 px from the screen edge).
         if k == 0 {
-            ui::keypad_input(true, "1234567", "KHz", false);
+            ui::keypad_input(true, "1234567", "kHz", false);
             ck.check_opts("gen/keypad-freq-input", &gen_regions, false);
             // Prefilled current value, selected (ui-review #10).
             ui::keypad_input(true, "2", "MHz", true);
@@ -2450,24 +2616,24 @@ fn main() {
         }
     }
 
-    // 6b. Settings pages 1 / 2 (worst values), Range pages with the UF-21
+    // 6b. Settings: every section with the widest values and with other
+    //     values (each "USB disk" and "Danger alarm" value: decision
+    //     2026-10-22 #6, danger.rs doc 4.10), Range pages with the UF-21
     //     note: whole page.
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
-    for (page, vals) in [
-        (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
-        // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
-        // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON", "ON"]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)", "ON"]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON", "OFF"]),
-    ] {
-        host::reset(0);
-        ui::settings(page, &vals);
-        ck.check_opts(&format!("settings/{page}/{}", vals[0]), &page_regions, false);
+    let set_cases = [
+        set_vals_worst(),
+        set_vals(&[]),
+        set_vals(&[(ui::S_RATE, "FAST  37/s"), (ui::S_SMOOTH, "LOW"), (ui::S_DMM_ROW, "History"), (ui::S_ALARM, "Volume"), (ui::S_USB, ui::usb_disk_name(false, true))]),
+        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, "Off"), (ui::S_USB, ui::usb_disk_name(false, false))]),
+        set_vals(&[(ui::S_JACK, "OFF"), (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BACKLIGHT, "10%"), (ui::S_VOLUME, "0%")]),
+    ];
+    for (k, vals) in set_cases.iter().enumerate() {
+        for tab in 0..ui::SET_TABS.len() as u8 {
+            host::reset(0);
+            ui::settings(tab, vals);
+            ck.check_opts(&format!("settings/{tab}/{k}"), &page_regions, false);
+        }
     }
     // Hold & Limits with its ninth row "Record" (decision 2026-10-22 #1),
     // the widest limit values.
@@ -2481,28 +2647,30 @@ fn main() {
     }
     // Record page: every interval x duration value in the steppers (they
     // fit the 134 px between the keys), the estimate texts, Start / Stop.
-    for (k, (iv, du, free, on)) in [
-        ("Every reading", "Until stopped", "about 1193 h (limit)", false),
-        ("1 min", "24 h", "about 62 h left", true),
-        ("10 s", "10 min", "-- (disk busy)", false),
-        ("1 s", "8 h", "< 1 h left", true),
-        ("Every reading", "1 h", "-- (no disk)", false),
+    for (k, (iv, ch, du, free, on)) in [
+        ("Every reading", "1 %", "Until stopped", "about 1193 h (limit)", false),
+        ("1 min", "1 %", "24 h", "about 62 h left", true),
+        ("On change", "0.1 %", "Until stopped", "about 62 h left", false),
+        ("On change", "5 %", "24 h", "< 1 h left", true),
+        ("10 s", "1 %", "10 min", "-- (disk busy)", false),
+        ("1 s", "5 %", "8 h", "< 1 h left", true),
+        ("Every reading", "0.1 %", "1 h", "-- (no disk)", false),
         // the fast logger (fastlog.rs): its estimate texts
-        ("Fast", "Until stopped", "-- (DC/AC V or A only)", false),
-        ("Fast", "10 min", "38400/s, 119 min left", true),
-        ("Fast", "24 h", "640/s, 1234 h left", false),
+        ("Fast", "1 %", "Until stopped", "-- (DC/AC V or A only)", false),
+        ("Fast", "1 %", "10 min", "38400/s, 119 min left", true),
+        ("Fast", "1 %", "24 h", "640/s, 1234 h left", false),
     ]
     .into_iter()
     .enumerate()
     {
         host::reset(0);
-        ui::record_page([iv, du], free, on);
-        ck.check_opts(&format!("record/{iv}/{du}/{free}/{on}"), &page_regions, false);
-        if k < 2 {
-            save(&out, &format!("m12-record-{}", if on { "stop" } else { "start" }));
+        ui::record_page([iv, ch, du], free, on);
+        ck.check_opts(&format!("record/{iv}/{ch}/{du}/{free}/{on}"), &page_regions, false);
+        if k < 3 {
+            save(&out, &format!("m12-record-{}", ["start", "stop", "change"][k]));
         }
     }
-    for t in ui::REC_INTERVALS.iter().chain(ui::REC_DURATIONS.iter()) {
+    for t in ui::REC_INTERVALS.iter().chain(ui::REC_CHANGES.iter()).chain(ui::REC_DURATIONS.iter()) {
         ck.cases += 1;
         let w = stockfont::text_width(stockfont::TEXT22, t, 0);
         let vw = ui::step_value_w(ui::REC_STEP_MINUS_X);
@@ -2568,6 +2736,16 @@ fn main() {
         if emu().fb != before {
             ck.fail(&format!("temp/{k}/{offs}"), "pressed / released key differs from a full draw".into());
         }
+        // Each key in one strip pass over its box (app_press.rs draw_box).
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
+            for on in [true, false] {
+                if ui::temp_rect(k, code).is_some() {
+                    press_check(&mut ck, &format!("press/temp{k}/{code}/{on}"), ui::temp_rect(k, code), &|| ui::temp_page(&tp), &|| ui::temp_key(&tp, code, on));
+                }
+            }
+        }
+        host::reset(0);
+        ui::temp_page(&tp);
         if k == 5 {
             save(&out, "m06-temp-offset");
         }
@@ -2637,8 +2815,10 @@ fn main() {
 
     // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
     defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
-    defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "OFF"]));
+    let sv = set_vals_worst();
+    for tab in 0..ui::SET_TABS.len() as u8 {
+        defer_check(&mut ck, &format!("defer/settings{tab}"), || ui::settings(tab, &sv));
+    }
     defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     defer_check(&mut ck, "defer/help", || ui::help_page(0));
     defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
@@ -2656,9 +2836,9 @@ fn main() {
 
     // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
-    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
-    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "OFF"]));
+    for tab in 0..ui::SET_TABS.len() as u8 {
+        strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
+    }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
@@ -2669,6 +2849,13 @@ fn main() {
         unsafe { *core::ptr::addr_of_mut!(ui::GEN_SP) = (0, [(0, 0); 239]) };
         w.gen.apply(gen::Settings { wave, ..gen::Settings::DEFAULT });
         strip_check(&mut ck, &format!("strip/gen-boot/{wave:?}"), || ui::gen_static(&w.gen));
+    }
+    // The square preview follows the duty (#81): high for that share of
+    // each period (direct and strip draw; the strip cache keyed by it).
+    for duty in [5000u16, 2500, 10000] {
+        w.gen.apply(gen::Settings { wave: gen::Wave::Square, duty, ..gen::Settings::DEFAULT });
+        strip_check(&mut ck, &format!("strip/gen-square/{duty}"), || ui::gen_static(&w.gen));
+        gen_duty_check(&mut ck, duty);
     }
     w.gen.apply(gen::Settings::DEFAULT);
     strip_check(&mut ck, "strip/dmm", || {
@@ -2931,7 +3118,7 @@ fn main() {
         }
     }
 
-    // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
+    // 7. Gestures: zone table, axis lock, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).
     {
         use gesture::{Axis, Gesture as G};
@@ -2941,8 +3128,7 @@ fn main() {
                 ck.fail(&format!("gesture/{name}"), "unexpected result".into());
             }
         };
-        let run = |grab: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
-            gesture::set_grab_ms(grab);
+        let run = |_: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
             let mut tr = gesture::Tracker::new();
             let mut v = vec![];
             let pt = |p: (u16, u16)| touch::Point { x: p.0, y: p.1 };
@@ -2950,7 +3136,6 @@ fn main() {
                 v.push(g);
                 matches!(g, G::Down(_) | G::Drag(..))
             });
-            gesture::set_grab_ms(0);
             v
         };
         let drags = |v: &[G], a: Axis| v.iter().filter(|g| matches!(g, G::Drag(_, _, x) if *x == a)).count();
@@ -2959,10 +3144,8 @@ fn main() {
         t("direct: captured touch ends with Up", matches!(v.last(), Some(G::Up(_))));
         let v = run(0, (100, 150), (300, 160), 0);
         t("direct horizontal: H drags only", drags(&v, Axis::H) > 0 && drags(&v, Axis::V) == 0);
-        let v = run(300, (200, 150), (210, 250), 0);
-        t("hold 300, no hold: no drag, no grab", drags(&v, Axis::V) == 0 && !v.iter().any(|g| matches!(g, G::Grab(_))));
-        let v = run(300, (200, 150), (210, 250), 350);
-        t("hold 300, held 350: grab then V drags", v.iter().any(|g| matches!(g, G::Grab(_))) && drags(&v, Axis::V) > 0);
+        let v = run(0, (200, 150), (210, 250), 350);
+        t("held 350 ms first: V drags", drags(&v, Axis::V) > 0);
         let v = run(0, (200, 150), (200, 150), 0);
         t("captured tap: Up, no Tap", matches!(v.last(), Some(G::Up(_))) && !v.iter().any(|g| matches!(g, G::Tap(_))));
     }
@@ -2974,7 +3157,7 @@ fn main() {
     g.freq_hz = 1000;
     w.gen.apply(g);
     let find = |n: &str| cases.iter().find(|c| c.0 == n).map(|c| (c.1, c.2)).unwrap();
-    let scenes: [(&str, &str, u8, u8, bool, bool); 17] = [
+    let scenes: [(&str, &str, u8, u8, bool, bool); 19] = [
         ("c01-dcv", "dcv", 0, 0, false, false),
         ("c02-acdc-hold-rel", "acdc_600mv", 1, 0, true, false),
         ("c03-acdc-worst", "acdc_mv", 3, meter::V_HI, true, true),
@@ -2992,6 +3175,8 @@ fn main() {
         ("c20-auto-aca", "auto_aca", 0, meter::V_HI, false, false),
         ("c21-auto-band", "auto_acv", 0, 0, false, false),
         ("c23-power-wait", "pw_wait_v", 0, 0, false, false),
+        ("c24-strip-open-cont", "cont_ol", 0, 0, false, false),
+        ("c25-strip-open-diode", "diode_ol", 0, 0, false, false),
     ];
     for (file, case, hold, lim, rel, alt) in scenes {
         let (r, l) = find(case);
@@ -3014,7 +3199,7 @@ fn main() {
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
-        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), rel: None, secs: Some(5), rec: false };
+        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), sd: Some(0.0001), rel: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
         // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
@@ -3031,7 +3216,7 @@ fn main() {
             ("a04-acc-acv", "acv_230", 2), ("a05-acc-acmv", "acmv", 2), ("a06-acc-dca", "dca", 2),
             ("a07-acc-dcma", "dcma_420mid", 2), ("a08-acc-aca", "aca", 2), ("a09-acc-ohm", "ohm_k", 2),
             ("a10-acc-ohm-60m", "ohm_mohm", 2), ("a11-acc-cont", "cont", 2), ("a12-acc-diode", "diode", 2),
-            ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-mf", "cap_mf", 2), ("a15-acc-hz", "hz_khz", 2),
+            ("a13-acc-cap-nf", "cap_nf", 2), ("a14-acc-cap-uf", "cap_uf", 2), ("a15-acc-hz", "hz_khz", 2),
             ("a16-acc-hz-mhz", "hz_mhz", 2), ("a17-acc-temp-tc", "temp_tc", 2), ("a18-acc-temp-tc-f", "temp_tc_f", 2),
             ("a19-acc-temp-ntc-none", "temp_ntc", 2), ("a20-acc-acdc-none", "acdc_v", 2), ("a21-acc-auto-dc", "auto_dcv", 2),
             // Settings 3/3 "Negative ohm" ON, shorted leads.
@@ -3126,7 +3311,7 @@ fn main() {
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
-        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), sd: Some(9.38), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         // AUTO coupling: the DC part (DC glyph on the V button and above
@@ -3215,20 +3400,18 @@ fn main() {
         host::reset(0);
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");
-        host::reset(0);
-        ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
-        save(&out, "m01-settings");
-        host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-        save(&out, "m02-settings2");
-        host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "ON"]);
-        save(&out, "m10-settings3");
+        // Settings: every section (widest values).
+        let sv = set_vals_worst();
+        for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+            host::reset(0);
+            ui::settings(tab as u8, &sv);
+            save(&out, &format!("m01-settings-{tab}-{}", name.to_lowercase()));
+        }
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
         {
             let combo = ui::view_name(ui::View::DmmScope);
-            let s0 = ["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""];
+            let sv = set_vals(&[(ui::S_USB, ui::usb_disk_name(false, false))]);
             let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
             let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
                 ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
@@ -3236,12 +3419,31 @@ fn main() {
                 ui::set_row_only(None);
             };
             let d_menu = || ui::main_menu(combo);
-            let d_set = || ui::settings(0, &s0);
-            let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
+            let d_sets: Vec<Box<dyn Fn()>> = (0..ui::SET_TABS.len() as u8).map(|t| {
+                let sv = &sv;
+                Box::new(move || ui::settings(t, sv)) as Box<dyn Fn()>
+            }).collect();
+            // Settings: every row of every section (a stepper: both keys),
+            // every other section's tab (0x80 | tab).
+            let mut set_t: Vec<(u8, u8, i8)> = Vec::new();
+            for (t, (_, rows)) in ui::SET_TABS.iter().enumerate() {
+                for (r, &id) in rows.iter().enumerate() {
+                    if ui::set_is_stepper(id) {
+                        set_t.push((t as u8, r as u8, -1));
+                        set_t.push((t as u8, r as u8, 1));
+                    } else {
+                        set_t.push((t as u8, r as u8, 0));
+                    }
+                }
+                for o in 0..ui::SET_TABS.len() as u8 {
+                    if o != t as u8 {
+                        set_t.push((t as u8, 0x80 | o, 0));
+                    }
+                }
+            }
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
-            let d_rec = || ui::record_page(["1 s", "8 h"], "about 62 h left", false);
-            let d_recon = || ui::record_page(["1 s", "8 h"], "about 62 h left", true);
+            let d_rec = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", false);
+            let d_recon = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", true);
             let g = &w.gen;
             let d_gen = || ui::gen_static(g);
             // MF range pages (V with Wave, A with Wave / Inrush / Fuse check,
@@ -3277,31 +3479,40 @@ fn main() {
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
             let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=33).filter(|&c| c != 21).collect();
-            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
-                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
-                .chain((0..9u8).map(|r| {
-                    let part = if ui::SET_STEP_ROWS.contains(&(r as usize)) { 1 } else { 0 };
-                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
+            let pr = |row: u8, part: i8| ui::RowPress { row, part, on: true };
+            let d_kp = || ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
+            let kp_codes: Vec<u8> = ui::keypad_keys(ui::KP_NUM).iter().map(|k| k.2).filter(|&c| c != 0).collect();
+            type Case<'a> = (String, &'a dyn Fn(), Box<dyn Fn(bool) + 'a>, Option<stockfont::Rect>);
+            let cases: Vec<Case> = (0..6)
+                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Menu, pr(i as u8, 0))))
+                .chain(set_t.iter().map(|&(t, r, part)| {
+                    let d: &dyn Fn() = &*d_sets[t as usize];
+                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Settings, pr(r, part)))
                 }))
-                .chain([(2u8, -1i8), (3, -1)].into_iter().map(|(r, part)| {
-                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
-                }))
-                .chain((0..9u8).map(|r| (format!("settings2-{r}"), &d_set2 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set2)) as Box<dyn Fn(bool)>)))
-                .chain((0..5u8).chain([8]).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
-                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
+                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Limits, pr(r, 0)))))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [
-                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>),
-                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>),
+                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
+                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
                     ]
                 }))
-                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
+                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>, Some(ui::gen_press_rect(k)))))
                 .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
-                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
+                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>, ui::range_press_rect(b, t, sel, sub)))
                 }))
-                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
+                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>, ui::pw::settings_press_rect(&ps_pv, c))))
                 .collect();
-            for (name, draw, press) in cases.iter() {
+            // Keypad keys (their page has its own layout checks).
+            for &c in &kp_codes {
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/keypad{c}/{on}"), ui::keypad_key_rect(ui::KP_NUM, c), &d_kp, &|| ui::keypad_key(ui::KP_NUM, c, on));
+                }
+            }
+            for (name, draw, press, r) in cases.iter() {
+                // Each in one strip pass over its box (app_press.rs draw_box).
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/{name}/{on}"), *r, draw, &|| press(on));
+                }
                 host::reset(0);
                 draw();
                 let want = emu().fb.clone();
@@ -3309,8 +3520,9 @@ fn main() {
                 ck.check_opts(&format!("pressed/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
                 let file = match name.as_str() {
                     "menu1" => "m04b-menu-pressed",
-                    "settings4/0" => "m01b-settings-row-pressed",
-                    "settings2/1" => "m01c-settings-step-pressed",
+                    "settings3-1/0" => "m01b-settings-row-pressed",
+                    "settings0-0/1" => "m01c-settings-step-pressed",
+                    "settings0-131/0" => "m01d-settings-tab-pressed",
                     "record3/0" => "m12b-record-start-pressed",
                     "gen1" => "g01b-gen-box-pressed",
                     "gen4" => "g01c-gen-wave-pressed",
@@ -3478,7 +3690,7 @@ fn main() {
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm)] {
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm), ("cont_ol", "d26-dmm-ol-cont", Button::ContDiode)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();
@@ -3486,7 +3698,7 @@ fn main() {
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
-            let side = ui::Side { max: None, avg: None, min: None, rel: None, secs: None, rec: false };
+            let side = ui::Side { max: None, avg: None, min: None, sd: None, rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
@@ -3519,7 +3731,7 @@ fn main() {
             dv.reading(r, 0, lim);
             dv.short_sync();
             ui::status_right(&status(0));
-            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), rel: None, secs: None, rec: false };
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), sd: Some(r.main.v), rel: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             dv
         };

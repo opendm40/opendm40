@@ -387,7 +387,7 @@ pub fn log_panel_text(i: &LogInfo, row: usize, t: &mut [u8; 32]) -> usize {
                     put(t, &d[..n]);
                 }
             }
-            put(t, b" Sa/s");
+            put(t, b" S/s");
         }
         1 => {
             let n = dec(&mut d, i.n);

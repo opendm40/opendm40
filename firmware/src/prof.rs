@@ -20,6 +20,9 @@
 //!
 //! Times are in us (200 cycles each at 200 MHz); a single interval must stay
 //! under the 21 s CYCCNT wrap.
+//!
+//! Built only with the Cargo feature `dbg-prof`; without it the hooks are
+//! empty and DBG:PROF? is refused (`cyc` stays: other modules time with it).
 
 // The app-level ids and `drawn` / `pixel` are for the optional hooks in
 // app.rs / lcd.rs (DBG:PROF? prints n = 0 for a section never entered).
@@ -28,6 +31,10 @@
 use crate::mmio::r32;
 
 const DWT_CYCCNT: u32 = 0xE000_1004;
+/// The profiler is built (Cargo feature `dbg-prof`, DBG:PROF?). Without it
+/// every hook below returns at once, so `P` is left out of the image (1 KB
+/// of RAM) and only `cyc` is live.
+const ON: bool = cfg!(feature = "dbg-prof");
 const CYC_PER_US: u32 = crate::clock::HCLK_HZ / 1_000_000;
 /// An unserved touch event older than this is dropped, not timed.
 const LAT_DROP_MS: u64 = 3000;
@@ -67,7 +74,8 @@ pub const LABEL: usize = 14;
 /// Scope graph paint in a pass without a new frame (App::sp_tick: the
 /// budgeted trace flush continuing, badges).
 pub const PAINT: usize = 15;
-/// Spare id for ad-hoc experiments.
+/// Spare id for ad-hoc experiments. The protocol decoder (app_decode.rs)
+/// uses it for one pass's slice of a record decode.
 pub const X2: usize = 16;
 // DMM page sections (hooks in app.rs; nested inside DMM / TICK).
 /// DmmView::reading (main digits, +1 digit, aux rows, labels).
@@ -80,11 +88,14 @@ pub const DCHART: usize = 18;
 pub const FFT: usize = 19;
 /// DMM page fast bargraph (UF-30, bargraph.rs update in App::reading).
 pub const DBAR: usize = 20;
-pub const N: usize = 21;
+/// The protocol decoder: one record's whole decode (the sum of its X2
+/// slices, `add`).
+pub const DJOB: usize = 21;
+pub const N: usize = 22;
 
 const NAMES: [&str; N] = [
     "usb", "scpi", "csv", "tick", "touch", "gesture", "scope", "bt", "dmm", "s.acq", "s.frame", "s.meas", "s.mtxt",
-    "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar",
+    "s.status", "s.labels", "s.paint", "x2", "d.read", "d.chart", "s.fft", "d.bar", "dec.job",
 ];
 
 #[derive(Clone, Copy)]
@@ -143,6 +154,11 @@ struct Prof {
     win_ms: u64,
 }
 
+// A `dbg-prof` build only (see ON). In the backup SRAM (.bkp_bss,
+// link-native.x; zeroed at reset, every field's initial value is zero
+// bytes; docs/native-boot.md "Extra RAM areas"): TCM has no 1 KB to spare
+// next to the stack, SRAM none on the scope chain.
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
 static mut P: Prof = Prof {
     t0: [0; N],
     sec: [Stat::ZERO; N],
@@ -181,6 +197,9 @@ fn us(dc: u32) -> u32 {
 /// Top of a main-loop pass: the loop period, the 1 s windows, the latency
 /// timeouts; starts the `lap` chain.
 pub fn pass(now_ms: u64) {
+    if !ON {
+        return;
+    }
     let p = p();
     let t = cyc();
     if p.looped {
@@ -215,21 +234,38 @@ pub fn pass(now_ms: u64) {
 /// Section `id` starts now.
 #[inline(always)]
 pub fn enter(id: usize) {
+    if !ON {
+        return;
+    }
     p().t0[id] = cyc();
 }
 
 /// Section `id` (started by `enter`) ends now.
 #[inline(always)]
 pub fn exit(id: usize) {
+    if !ON {
+        return;
+    }
     let p = p();
     let d = cyc().wrapping_sub(p.t0[id]);
     p.sec[id].add(us(d));
+}
+
+/// A time measured elsewhere (cycles) counted as one call of section `id`.
+pub fn add(id: usize, cycles: u32) {
+    if !ON {
+        return;
+    }
+    p().sec[id].add(us(cycles));
 }
 
 /// Back-to-back sections: section `id` ran from the previous `lap` (or the
 /// top of the pass) until now.
 #[inline(always)]
 pub fn lap(id: usize) {
+    if !ON {
+        return;
+    }
     let p = p();
     let t = cyc();
     p.sec[id].add(us(t.wrapping_sub(p.lap_t)));
@@ -239,12 +275,18 @@ pub fn lap(id: usize) {
 /// Restart the `lap` chain without charging the time to any section.
 #[inline(always)]
 pub fn lap_skip() {
+    if !ON {
+        return;
+    }
     p().lap_t = cyc();
 }
 
 /// A touch event (or a synthetic DBG input) was dispatched; `t` = the cycle
 /// count when its report was read.
 pub fn touch(t: u32) {
+    if !ON {
+        return;
+    }
     let p = p();
     p.events = p.events.wrapping_add(1);
     let ms = p.now_ms;
@@ -259,6 +301,9 @@ pub fn touch(t: u32) {
 /// Something is about to be drawn (an LCD window opened).
 #[inline(always)]
 pub fn pixel() {
+    if !ON {
+        return;
+    }
     let p = p();
     if let Some((t, _)) = p.pend_pix.take() {
         p.lat_pix.add(us(cyc().wrapping_sub(t)));
@@ -267,6 +312,9 @@ pub fn pixel() {
 
 /// A scope frame was drawn (ScopeView::frame or a drag re-plot).
 pub fn drawn() {
+    if !ON {
+        return;
+    }
     let p = p();
     p.frames = p.frames.wrapping_add(1);
     if let Some((t, _)) = p.pend_frm.take() {
@@ -276,6 +324,9 @@ pub fn drawn() {
 
 /// DBG:PROF:RESET.
 pub fn reset() {
+    if !ON {
+        return;
+    }
     let p = p();
     let now = p.now_ms;
     p.sec = [Stat::ZERO; N];
@@ -369,6 +420,7 @@ impl W<'_> {
 
 /// DBG:PROF? text table into `buf` (ends with '\n'); returns its length.
 #[inline(never)] // region B (link-native.x): asked during fast sessions; not inlined into the hot caller
+#[cfg(feature = "dbg-prof")]
 pub fn report(buf: &mut [u8]) -> usize {
     let p = p();
     let mut w = W { b: buf, n: 0 };

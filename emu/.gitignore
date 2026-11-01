@@ -1,5 +1,5 @@
 # portable Renode (fetched by get-renode.sh)
-.renode/
+.renode
 # generated flash/disk images, screenshots, logs, build worktrees
 out/
 *.png

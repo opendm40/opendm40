@@ -60,6 +60,7 @@ ap.add_argument('--tail', type=int, default=25, help='inputs printed before a fa
 A = ap.parse_args()
 sys.path.insert(0, HERE)
 import run  # noqa: E402
+import bootinfo  # noqa: E402
 A.port = A.port or run.free_port()
 os.environ['USBIP_PORT'] = str(A.port)
 import usbip_client as uc  # noqa: E402
@@ -83,7 +84,7 @@ VALUED = [  # SCPI headers that take a number
     'VOLT:RES', 'RES:RES', 'CALC:LIM:LOW', 'CALC:LIM:UPP', 'TEMP:OFFS', 'TEMP:NTC', 'SYST:BEEP:VOL',
     'POW:VOLT:RANG', 'POW:CURR:RANG', 'POW:BURD', 'POW:LIM', 'POW:PHAS', 'TIM:SCAL', 'CHAN1:SCAL', 'CHAN1:OFFS',
     'TRIG:LEV', 'WAV:POIN', 'SOUR:FREQ', 'SOUR:VOLT', 'SOUR:VOLT:OFFS', 'SOUR:FUNC:SQU:DCYC',
-    'SYST:ALER:ENAB', 'DBG:IDLE 86400000;:DBG:PINCH', 'DBG:GRAB']
+    'SYST:ALER:ENAB', 'DBG:IDLE 86400000;:DBG:PINCH']
 PLAIN = [  # SCPI commands and queries without a free number
     'CONF:VOLT:DC', 'CONF:VOLT:AC', 'CONF:VOLT:ACDC', 'CONF:VOLT:AUTO', 'CONF:CURR:DC', 'CONF:CURR:AC',
     'CONF:CURR:AUTO', 'CONF:RES', 'CONF:CONT', 'CONF:DIOD', 'CONF:CAP', 'CONF:FREQ', 'CONF:TEMP', 'CONF:TEMP PT100',
@@ -245,19 +246,19 @@ def fwdgt_count():
 
 # ---- the run ----------------------------------------------------------------
 
-STACK = [0, 0]  # deepest stack use seen (DBG:BOOT? STACK,<used>,<size>), size
+STACK = [0, 0]  # deepest stack use seen (DBG:BOOT? stack_used / stack_size), size
 
 
 def stack_sample():
-    m = re.search(r'STACK,(\d+),(\d+)', L.q('DBG:BOOT?'))
-    if m:
-        STACK[0] = max(STACK[0], int(m.group(1)))
-        STACK[1] = int(m.group(2))
+    f = bootinfo.fields(L.q('DBG:BOOT?'))
+    if 'stack_size' in f:
+        STACK[0] = max(STACK[0], f['stack_used'])
+        STACK[1] = f['stack_size']
 
 
 def stack_report():
     if not STACK[1]:
-        return 'stack: no DBG:BOOT? STACK field'
+        return 'stack: no DBG:BOOT? stack fields'
     return 'stack: deepest use %d of %d bytes, %d never used' % (STACK[0], STACK[1], STACK[1] - STACK[0])
 
 

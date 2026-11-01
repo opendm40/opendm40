@@ -185,7 +185,10 @@ impl App {
         self.pwave_draw(true);
     }
 
+    /// Region B (`.text.pwave_draw`), as `pwave_tick`: with both in region
+    /// C it has 2.4 KiB free, under the link's 4 KiB floor.
     #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.pwave_draw")]
     fn pwave_draw(&mut self, full: bool) {
         let s = pwv();
         let (mut bu, mut bi, mut bp, mut bf, mut du, mut di, mut bt) = ([0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24]);
@@ -220,6 +223,7 @@ impl App {
 
     /// Per pass on the page (App::tick, drawing allowed): a frame when due.
     #[inline(never)]
+    #[cfg_attr(target_os = "none", link_section = ".text.pwave_tick")]
     pub(super) fn pwave_tick(&mut self, clk: &mut Clock) {
         let s = pwv();
         if !s.on {
@@ -315,8 +319,8 @@ impl App {
     /// with its alarm / range change / limit beeps. True = closed.
     /// (A-PROT does not apply: the power meter measures through A on
     /// purpose, `pw_enter` ends it.)
-    /// Region B (`.text.pwave_guard`, not this module's .cold): it keeps
-    /// region C above its 8 KiB warning line.
+    /// Region B (`.text.pwave_guard`, not this module's .cold), as the
+    /// tick and the drawing: region C has no room for them.
     #[inline(never)]
     #[cfg_attr(target_os = "none", link_section = ".text.pwave_guard")]
     fn pwave_guard(&mut self, clk: &mut Clock, i: f32, clip: bool) -> bool {

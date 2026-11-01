@@ -42,7 +42,7 @@ scenario).
   (`logger::wave::drain`, 2048 samples = 213 ms of slack) into the detector
   and into a ring of 16-bit codes `(raw + 4) >> 3` (3.8 mA per code; the AD2
   noise is ~32 raw codes = 4 of these) in the **scope's record buffer**
-  (`scope::BUF`, `CAP` = 26 624 slots). `Scope::lend_buf` stops the MCX
+  (the first `scope::INRUSH_LEN` = 26 624 slots of `scope::BUF` as u16). `Scope::lend_buf` stops the MCX
   acquisition (its DMA writes BUF) and drops the stored scope record while
   the page is open (a scope CSV in progress refuses the page);
   `return_buf` gives it back. The capture needs no SRAM of its own.
@@ -251,7 +251,7 @@ section 5); its time-current behaviour is unknown: keep a motor's start
 | running load | motor running, `INR:ARM`, wait 30 s | stays ARMED; a second load on the same wire triggers |
 | file | `MMEM:DATA? "LOGS/FASTnnn.CSV"` or the USB volume | 19 200 rows, t0 at 0.2 s, values in A; `tools/dlog.py` decodes the DLG |
 | DMM after | Back; DC A / AC A on a steady load | the reading as before; `FUNC?` = the function before the page |
-| fuse | after the motor runs: MF -> Fuse check | FUSE OK |
+| fuse | after the motor runs: MF -> Fuse check | Fuse OK |
 | offset / AC gain | nothing connected: `INR:ARM`, Idle; a 50 / 60 Hz load: Irms 100 ms vs the DMM's AC A | Idle < ~20 mA; Irms within ~1 % of AC A (decides the AD2 gain on AC at x1, section 8) |
 | host polling | `INR:ARM`, then `INR:FETC?` + `INR:DATA? 0,3000` + `DBG:ISR?` every 0.2 s through a lamp capture | lost 0, `DBG:ISR?` late 0 (region C SCPI during a capture) |
 

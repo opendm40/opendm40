@@ -12,6 +12,8 @@
 // Writes the DLG + reference CSV of every set to $1 (if given) for tools/dlog.py.
 #![allow(dead_code)]
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/dlog.rs"]
 mod dlog;
 #[path = "../../src/fastenc.rs"]
@@ -315,7 +317,7 @@ fn set(i: usize, n: usize) -> (&'static str, &'static [u8], Rows) {
     }
 }
 
-const HDR: &[u8] = b"# Alientek DM40A, opendm40 0.0.1, function DC V, range AUTO, started uptime 12.345 s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overload\r\ntime_s,value,unit,flags\r\n";
+const HDR: &[u8] = b"# Alientek DM40A, opendm40 0.0.1, function DC V, range AUTO, started uptime 12.345 s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\ntime_s,value,unit,flags\r\n";
 
 /// Reference CSV (old writer), and the CSV offset after each row.
 fn reference(rows: &Rows, unit: &[u8]) -> (Vec<u8>, Vec<usize>) {
@@ -584,9 +586,101 @@ fn pw_tests(dir: Option<String>) -> u32 {
     fails
 }
 
+/// The volts column of a scope CSV written from `codes` (scope_csv.rs).
+fn scope_csv_volts(codes: &[u16], text: &[u8]) -> Option<Vec<f32>> {
+    let (f, _) = scope_file(codes, text);
+    let (_, csv) = gen_all(&f)?;
+    Some(
+        csv[text.len()..]
+            .split(|&c| c == b'\n')
+            .filter(|l| !l.is_empty())
+            .map(|l| std::str::from_utf8(l).unwrap().trim().split(',').nth(1).unwrap().parse().unwrap())
+            .collect(),
+    )
+}
+
+/// The first rows of a scope CSV (device checks of #214 / #216: row 0 read
+/// +1.85 V, then rows 0..2 1.3-2.9 V off with the software trigger, where
+/// the signal read ~0.48 V). The ADC's first 1..3 outputs after the start
+/// are stale.
+///  * Linear record (software trigger): the DMA runs scope_stale_head(fs)
+///    samples ahead of the record (scope.rs DMA.pre), the record is the
+///    rest: no stale row, the record's sample i is TIM1 period i + k (the
+///    times scope.rs gives the record), and every TB rate drops each
+///    sample read in the first 150 ns (the device's stale span, 0..2 at 50
+///    and 25 MS/s, 0..1 at 12.5 MS/s) with room to spare.
+///  * Comparator ring before its wrap: the first k codes take code k's
+///    value (scope_hold_head): rows 0..k carry row k's volts.
+/// In both: the record's min / max are the signal's, and no row-to-row
+/// step is larger than the signal's own.
+fn scope_head_test() -> u32 {
+    let mut fails = 0;
+    let text = b"# test head\r\ntime_s,volts\r\n";
+    // scope_file's scale; a sine of 500 samples, 0.4 Vpp around 0.48 V.
+    let (a, b) = (-5.0f32, 10.0 / 1023.0);
+    let n = 2000;
+    let w = 2.0 * std::f64::consts::PI / 500.0;
+    let code = |i: usize| ((0.48 + 0.2 * (w * i as f64 - 1.4).sin()) as f32 - a) / b + 0.5;
+    let clean: Vec<u16> = (0..n + 64).map(|i| code(i) as u16).collect();
+    const STALE: u16 = 701; // +1.85 V: the stale level the device CSV had
+    let check = |what: &str, y: &[u16], want: &[u16], held: usize| -> u32 {
+        let Some(rows) = scope_csv_volts(y, text) else {
+            println!("FAIL scope head {what}: no CSV");
+            return 1;
+        };
+        let step = (1..rows.len()).map(|i| (rows[i] - rows[i - 1]).abs()).fold(0.0f32, f32::max);
+        let ok = rows.len() == n
+            && y[held..] == want[held..]
+            && (0..held).all(|i| rows[i] == rows[held] && y[i] == want[held])
+            && !y.contains(&STALE)
+            && y.iter().min() == want[held..].iter().min()
+            && y.iter().max() == want[held..].iter().max()
+            && step < 4.0 * b;
+        if ok {
+            println!("scope head {what}: row 0 {:+.4} V, max step {:.4} V  ok", rows[0], step);
+            0
+        } else {
+            println!("FAIL scope head {what}: first rows {:?}, max step {step}", &rows[..4.min(rows.len())]);
+            1
+        }
+    };
+    let fs_all: Vec<u32> = vec![50_000_000, 25_000_000, 12_500_000, 5_000_000, 2_500_000, 1_250_000, 50_000, 50];
+    for &fs in &fs_all {
+        let k = scope_stale_head(fs);
+        // Read times (j + 0.5) / fs: the device's stale span + 2.5x.
+        let span = (0..).take_while(|&j| (j as f64 + 0.5) / fs as f64 <= 150e-9).count();
+        let late = (k as f64 + 0.5) / fs as f64;
+        if k <= span || late < 375e-9 || k > 24 {
+            println!("FAIL scope head fs {fs}: drops {k}, stale span {span}, first kept read {late:e} s");
+            fails += 1;
+        }
+        for stale in 1..=3usize.min(k) {
+            // DMA order: the stale reads, then TIM1 periods stale.. as the signal.
+            let raw: Vec<u16> = (0..n + k).map(|j| if j < stale { STALE } else { clean[j] }).collect();
+            let rec = &raw[k..k + n];
+            fails += check(&format!("linear fs {fs} stale {stale} (drops {k})"), rec, &clean[k..k + n], 0);
+        }
+    }
+    for stale in 1..=3usize {
+        let mut y: Vec<u16> = clean[..n].to_vec();
+        y[..stale].fill(STALE);
+        scope_hold_head(&mut y, stale);
+        fails += check(&format!("ring hold {stale}"), &y, &clean[..n], stale);
+    }
+    // A record too short to hold anything stays as it is.
+    let mut r = [7u16, 9];
+    scope_hold_head(&mut r, 2);
+    if r != [7, 9] {
+        println!("FAIL scope head: a 2-sample record changed");
+        fails += 1;
+    }
+    fails
+}
+
 fn main() {
     let mut fails = scope_tests(std::env::args().nth(1));
     fails += pw_tests(std::env::args().nth(1));
+    fails += scope_head_test();
     fails += fast::tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");
