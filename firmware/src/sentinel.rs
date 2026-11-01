@@ -457,6 +457,16 @@ pub fn ad1_last(kind: Kind, row: &[u8; CFG_LEN]) -> bool {
 // field 14 reads 2 then. Gaps: on the rows below 6 Mohm, and in the
 // resistive temperature rows, a DC
 // current in A still shows LIVE?; an AC one (0x70 and 0 in turn) everywhere.
+// So does a DC current in A on every row with V-COM truly open (device
+// 2026-11-01, 5 and 20 mA, also on the 0.3.2 build): the reading is OL, so
+// `own` has no in-range reading. A-JACK needs a load on V-COM (the
+// calibrator off, ~110 kohm: A-JACK at 1.7 s). OP1O cannot tell that case
+// from a source either. With the current it sat at 2.449 V (6 / 60 Mohm)
+// or 2.381 V (lower rows); with a source on V-COM and A empty (Ohm AUTO) it
+// read 2.18 V at 4.5 V, 2.14 V at 5 V, 2.02 V at 10 V, 1.97 V at 15 V and
+// 2.493 V from 18 V to 24 V. PB1 (AD2, negative leg) read 0.3-0.7 V for
+// 5-20 mA and 0.4 V to over 0.78 V for 4.5-24 V. The PB2 probe reads under
+// its noise floor at 5 mA.
 
 /// AD2 codes per volt at IG 0.5 (19-bit codes, PB6 / AGND = 1.25 V).
 pub const JACK_CODES_PER_V: f32 = 0.5 / 1.25 * 262_144.0;
