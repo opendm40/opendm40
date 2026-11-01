@@ -175,13 +175,17 @@ pub fn load() -> Option<Record> {
 /// firmware ago (seen: the first native boot came up in AC+DC from an old
 /// session although the user had been measuring DC V on the stock firmware).
 /// The boot shim records every normal opendm40 boot in BKP_LAST
-/// (boot.rs; DBG:UPDATE clears it, the PA2 entry leaves "RCVR"), so
-/// only a previous boot that was a normal opendm40 one continues the mode.
+/// (boot.rs; the PA2 entry leaves "RCVR"), so only a previous boot that was
+/// a normal opendm40 one continues the mode, or a firmware update: DBG:UPDATE
+/// (also the install dialog's Yes) leaves the staged file's header CRC there,
+/// and the loader marker is that header only when the loader installed that
+/// file and nothing else was installed since (boot::updated_to_this). An
+/// update to the stock firmware and back reads as a different header.
 #[cfg(target_os = "none")]
 pub fn same_session() -> bool {
     // boot.rs LAST_NORMAL ("NRML"), as the shim found BKP_LAST.
     const LAST_NORMAL: u32 = 0x4C4D_524E;
-    crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL)
+    crate::boot::info().is_some_and(|i| i.last == LAST_NORMAL || crate::boot::updated_to_this(i.last))
 }
 
 pub fn save(p: &[u32; WORDS]) {
