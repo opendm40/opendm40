@@ -175,7 +175,8 @@ try:
         check(p5 != p4 and h5 == h4, 'a vertical drag mid-plot moves the selected item (CH1), not the nearest level (%d -> %d)' % (p4, p5))
         check(r5 - p5 == r4 - p4, 'the trigger row moves with CH1 (same volts) (%d -> %d)' % (r4, r5))
         wait_ms(500)
-        q('DBG:TAP 406,%d' % (top + r5))
+        # A still touch (DBG:TAP sends only the tap, no press: no selection).
+        q('DBG:DRAG 406,%d,406,%d,100' % (top + r5, top + r5))
         wait_ms(600)
         q('DBG:DRAG 200,150,200,180,300,0,0')
         wait_ms(300)
