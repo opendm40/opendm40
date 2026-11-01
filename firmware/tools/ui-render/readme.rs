@@ -44,7 +44,10 @@ fn dmm_page(r: &Reading, b: Button, hist: bool) {
     let q = 10f32.powi(-(r.main.dec as i32));
     let pts: Vec<f32> = (0..321).map(|i| r.main.v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let side = ui::Side { max: Some(r.main.v + q), avg: Some(r.main.v), min: Some(r.main.v - q), sd: Some(0.6 * q), rel: None, secs: Some(12 * 60 + 30), rec: false };
-    ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true });
+    let mut cc = ui::ChartCache::new();
+    // The Wave chip (App::wave_avail: V / A, DC or AC).
+    cc.wave = matches!(b, Button::Volt | Button::Amp) && !r.acdc && !r.cpl_auto;
+    ui::chart(&mut cc, &pts, r.main.dec, 2, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true });
 }
 
 pub fn run(out: &str) -> usize {
