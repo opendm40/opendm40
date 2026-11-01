@@ -979,6 +979,10 @@ pub enum Cmd {
     TrigSweep(Option<u8>),
     /// TRIG:SOURce: Some(scope::TSRC_*); None = ?
     TrigSource(Option<u8>),
+    /// GENerator:SCALe: the GEN trace's V/div (its own, CH1's until set).
+    GenScale(Option<f32>),
+    /// GENerator:DISPlay: the GEN trace on the scope page.
+    GenDisp(Option<bool>),
     /// DBG:GENTRIG:LAG <ns>: the GEN channel's lag (scope::set_gen_lag).
     DbgGenLag(Option<f32>),
     /// DBG:GENTRIG:STAT?: the generator phase readings (gen::stats).
@@ -1663,6 +1667,21 @@ fn gen_scope_cmd(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Cmd, &'stat
             Err("Undefined header")
         };
     }
+    if kw(p0, "GENerator") {
+        // GENerator:SCALe / :DISPlay: the scope page's GEN trace (the
+        // generator's output itself: SOURce / OUTPut).
+        return if kw(sub, "SCALe") {
+            Ok(Cmd::GenScale(num(b"V", pos)?))
+        } else if kw(sub, "DISPlay") {
+            match (query, on_off(a)) {
+                (true, _) => Ok(Cmd::GenDisp(None)),
+                (false, Some(b)) => Ok(Cmd::GenDisp(Some(b))),
+                _ => Err(BAD),
+            }
+        } else {
+            Err("Undefined header")
+        };
+    }
     if kw(p0, "TRIGger") {
         // TRIGger:EDGE:LEVel / :SLOPe = TRIGger:LEVel / :SLOPe (Rigol's
         // spelling; edge is the trigger type the scope page selects).
@@ -2307,7 +2326,7 @@ impl Scpi {
                 // Generator and scope settings: a set with a value that does
                 // not parse is -224 (-109 without one), one outside the
                 // setting's domain -222; the setting is left as it was.
-                _ if kw(p0, "SOURce") || kw(p0, "OUTPut") || kw(p0, "TIMebase") || kw(p0.strip_suffix(b"1").unwrap_or(p0), "CHANnel") || kw(p0, "TRIGger") => {
+                _ if kw(p0, "SOURce") || kw(p0, "OUTPut") || kw(p0, "TIMebase") || kw(p0.strip_suffix(b"1").unwrap_or(p0), "CHANnel") || kw(p0, "TRIGger") || kw(p0, "GENerator") => {
                     match gen_scope_cmd(parts, arg, query) {
                         Ok(c) => out = Out::Instr(c),
                         Err(e) => self.err_arg(no_arg, e),

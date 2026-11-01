@@ -355,7 +355,7 @@ lightning from 100 V). opendm40 adds:
 | Timebase taps | Tap the left or right half | [Corner zones](#timebase) with labels (or the stock halves) |
 | Timebase list | — | Tap the timebase in the top bar |
 | Pinch | — | Pinch to change the timebase or the V/div |
-| V/div buttons | The top "+" made the trace smaller | Magnifier icons: the top one zooms in |
+| V/div buttons | The top "+" made the trace smaller | A block per channel (CH1, DMM, GEN, MATH) with magnifiers: the left one zooms in |
 | Trigger position | Always the centre | Drag it |
 | Triggers | Edge | Edge, pulse width, runt; the generator as a trigger source |
 | Channels | CH1 | CH1, the multimeter input as CH2, the generator's output (computed) |
@@ -374,9 +374,9 @@ lightning from 100 V). opendm40 adds:
 
 *The timebase corner tabs and the CUR tab.*
 
-![V/div: the magnifiers; the top one zooms in](img/new-scope-vdiv.png)
+![The channel blocks: the left magnifier zooms in](img/new-scope-vdiv.png)
 
-*V/div: the magnifiers; the top one zooms in.*
+*The channel blocks: the left magnifier zooms in.*
 
 ![Corner taps, the trigger position drag, cursors in one tap](img/new-scope.png)
 
@@ -1233,7 +1233,7 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
 
 ## Oscilloscope
 
-The oscilloscope input is the **OSC** jack on the top edge (**CHA** on the
+The oscilloscope input is the **OSC** jack on the top edge (**CH1** on the
 screen). The [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)
 shows the signal on the multimeter inputs instead.
 
@@ -1263,17 +1263,19 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   - Record bar: while stopped, brackets show which part of the stored
     record is on screen; **ROLL** in roll mode; **G 1.00kHz** while the
     [generator](#signal-generator) runs.
-  - **MCX | DMM**: the input source (MCX is the **OSC** jack); tap to
-    switch to the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
-- **Graph**: 10 × 8 divisions. On the left edge, the markers **A** (the
-  trace's zero) and **M** (math / FFT); on the right edge, **T** (trigger
+- **Graph**: 10 × 8 divisions. Inside the left edge, the markers **A** (the
+  trace's zero) and **M** (math / FFT); inside the right edge, **T** (trigger
   level). On the top edge, **T** marks the trigger position.
 - **Timebase tabs** in the bottom corners of the graph, for example
   **<500us** and **100us>**: the next slower and faster timebase.
 - **CUR** tab at the bottom of the graph: cursors.
-- **Right panel**: zoom in (magnifier +), **CHA** with the V/div, zoom out
-  (magnifier −), the math scale +, the math button (**FFT**), math scale −,
-  **TRIG**.
+- **Right panel**: a block per channel, **CH1**, **DMM** (CH2), **GEN**,
+  **MATH** (titled **FFT** or **ABS**). Each block has the name and V/div,
+  then zoom in (magnifier +, left) and zoom out (magnifier −). A channel that
+  is off is dimmed.
+  - Tap a title: **CH1** opens the channel popup; **DMM** and **GEN** switch
+    their trace on / off; **MATH** opens the math popup.
+  - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
 | Key | What it does |
@@ -1310,11 +1312,11 @@ in the left or right half of the graph steps), **Off**.
 
 - V/div: 2 mV to 10 V per division (times the probe factor). 5 and 2 mV/div
   are a digital zoom of 10 mV/div: the same steps of about 0.1 mV, drawn larger.
-- Tap the **magnifier +** to zoom in (smaller V/div), **magnifier −** to
-  zoom out. Or pinch vertically.
+- Tap the **CH1** block's **magnifier +** to zoom in (smaller V/div),
+  **magnifier −** to zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you
   selected; see [Moving things with a finger](#moving-things-with-a-finger)).
-- Tap **CHA** (or the V/div in the top bar) for the channel popup:
+- Tap the **CH1** title (or the V/div in the top bar) for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
     readings, not the hardware.
@@ -1347,7 +1349,7 @@ in the left or right half of the graph steps), **Off**.
 |---|---|
 | Dragging the trigger level: T on the right edge | Dragging the trigger position: T on the top edge |
 
-Open the Trigger tab: tap **TRIG**, or the trigger in the top bar.
+Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger**.
 
 | Item | Choices |
 |---|---|
@@ -1475,12 +1477,12 @@ Y2-1. Drag the **1** / **2** markers.
 
 ### FFT
 
-Tap the math button (**FFT**) on the right panel. The spectrum is drawn
-over the trace; tap the button again while its popup is open to turn it off.
+Tap the **MATH** block's title (**FFT**). The spectrum is drawn over the
+trace; tap the title again while its popup is open to turn it off.
 
 - The boxes show the dB/div, the centre frequency, the Hz/div and the
   strongest peak, for example **1.00kHz -3.0dBV**.
-- **Math scale +** / **−**: dB per division.
+- The **MATH** block's magnifiers: dB per division.
 - Drag the **M** marker up or down to move the spectrum; drag sideways to
   move the centre frequency.
 - The math popup: **Mode** FFT or ABS (the absolute value of the trace),
@@ -1521,8 +1523,9 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 **MF > Display**: **Roll** on / off; **Persist** OFF, MIN, 1S, INF;
 **Brightness** and **Grid** intensity; **GEN trace** on / off.
 
-**GEN trace** draws the generator's output in cyan under CH1, on CH1's
-V/div and position: computed from the generator's settings and timers, not
+**GEN trace** (or a tap on the **GEN** title) draws the generator's output
+in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
+magnifiers; it starts at CH1's): computed from the generator's settings and timers, not
 measured (the trace is the ideal waveform; a probe on the output shows the
 real one). It is not drawn in roll mode, zoomed out past the record, or
 while a drag or pinch is in progress. While it is on, the edge trigger does
@@ -1530,8 +1533,8 @@ not use the trigger hardware.
 
 **CH2 (DMM)** draws the multimeter's input as a second channel (magenta)
 over CH1, on the same time axis: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs)'s
-signal, alongside the scope. **-** / **+** set its V/div (A/div), shown in
-the graph as "CH2 1.5V"; 0 is the centre line. It works in V, mV and
+signal, alongside the scope. Its on / off and V/div (A/div) are also on the
+**DMM** block; 0 is the centre line. It works in V, mV and
 AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
@@ -1613,14 +1616,14 @@ currents, within the meter's ratings.
 To open it:
 
 - in the multimeter, function V or A (DC or AC): **MF**, then **Wave**; or
-- on the scope page, tap the **MCX | DMM** badge.
+- on the scope page, hold the **DMM** block's title. In the Wave view the
+  block reads **MCX**: tap it to go back to the **OSC** input.
 
 | ![Mains on the Wave view, 10 ms/div](img/wave.png) | ![The same at 50 ms/div](img/wave-50ms.png) |
 |---|---|
 | Mains on the Wave view, 10 ms/div | The same at 50 ms/div |
 
-- The badge shows **DMM** highlighted; the channel button names the
-  function, for example **AC V**.
+- The first block names the function, for example **AC V**.
 - V/div: the view opens at the multimeter range's **full-scale step**:
   ± the range fills the 8 divisions (6 V → 1.5 V/div, 60 V → 15 V/div,
   600 mV → 150 mV/div, 10 A → 2.5 A/div, 60 mA → 15 mA/div). Between these
@@ -1639,7 +1642,7 @@ To open it:
 - Timebase: 1 ms/div to 50 s/div. Sample rate: 76 800/s at 1 ms/div, down
   to 1200/s from 200 ms/div. Opens at 10 ms/div the first time, then at the
   timebase you last used in it (until you switch the meter off).
-- Coupling: AC V is AC-coupled; tap the V/div in the top bar or **CHA** to
+- Coupling: AC V is AC-coupled; tap the V/div in the top bar or the first block's title to
   switch between the DC V and the AC V signal path. AC mV and the current
   paths are DC-coupled. DC A uses the AC A path (DC-coupled).
 - Triggers (edge, pulse, runt), measurements (in amps on the current
@@ -1653,7 +1656,7 @@ To open it:
 |---|---|
 | 2 ms/div: one period | A 1.5 A current on the 6 A range, 1.5 A/div |
 
-To leave: tap the badge (back to the CHA input), press **MENU** or change
+To leave: tap the **MCX** block (back to the OSC input), press **MENU** or change
 the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
@@ -1705,7 +1708,7 @@ From 100 V the strip gets a red frame.
 | **AUTO** | As on the multimeter page ([Keys](#keys)): fixes or steps the range; hold 1 s for autorange. |
 | **MF** | The multimeter's range page (or Hold & Limits). |
 | Tap the run state in the top bar | Scope run / stop. |
-| **TRIG** or the trigger in the top bar | The scope menu. |
+| The trigger in the top bar | The scope menu. |
 | Swipe left / right starting on the strip | Change the view. On the graph a drag works as on the scope page. |
 
 The graph, the right panel and the scope menus work as on the
@@ -2073,7 +2076,7 @@ There are two recorders:
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
 meter beeps and shows **Recording CSV**; a blinking red dot and **REC** appear in the
-status bar (on the scope pages a red dot and **DMM** in the top bar, in place of **MCX | DMM**). Swipe down again to stop. When the last rows are on the disk,
+status bar (on the scope pages a red dot and **DMM** in the top bar). Swipe down again to stop. When the last rows are on the disk,
 the meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.

@@ -277,9 +277,9 @@ try:
         return lambda x, y: tuple(px[(y * 480 + x) * 3:(y * 480 + x) * 3 + 3])
 
     def edges(img, y, col):
-        """x of every run of `col` on row y inside the graph (14..412)."""
+        """x of every run of `col` on row y inside the graph (1..389)."""
         xs, prev = [], False
-        for x in range(14, 413):
+        for x in range(1, 390):
             on = near(img(x, y), col)
             if on and not prev:
                 xs.append(x)
@@ -287,7 +287,7 @@ try:
         return xs
 
     def red(img, y):
-        return sum(1 for x in range(14, 413) if near(img(x, y), C_ERR))
+        return sum(1 for x in range(1, 390) if near(img(x, y), C_ERR))
 
     def prof_reset():
         if has_prof:
@@ -455,7 +455,7 @@ try:
         data = b''.join(bytes.fromhex(f[3]) for f in fr)
         check(text in data, 'stopped, 5 ms/div: the whole text in the record (%d frames)' % len(fr))
         img = shot('m05-uart-5ms-bar')
-        bar = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), C_EDGE))
+        bar = sum(1 for x in range(1, 390) if near(img(x, BYTE_Y + 8), C_EDGE))
         check(bar > 60 and len(edges(img, BYTE_Y + 8, C_EDGE)) < 12, '5 ms/div: the bar (%d px, %d runs)' % (bar, len(edges(img, BYTE_Y + 8, C_EDGE))))
         # 100 ms/div (25 kS/s, 2.6 samples per bit; roll: decoded on STOP):
         # the note, no frames.
@@ -465,7 +465,7 @@ try:
         check(stop(), 'STOP at 100 ms/div')
         wait_ms(1500)
         img = shot('m06-uart-100ms-note')
-        grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
+        grey = sum(1 for x in range(1, 390) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
         check(grey > 10, '100 ms/div: the note "Sample rate too low" (%d px)' % grey)
         check(frames() == [], '100 ms/div: no frames (too few samples per bit)')
     if want('cost') and not has_prof:
@@ -544,7 +544,7 @@ try:
                     check(len(fe) >= 2, '2 ms/div: frame boxes in the band (%d edges)' % len(fe))
                 else:
                     # 19200 at 5 ms/div: a character is 4.6 px, the bar.
-                    bar = sum(1 for x in range(14, 413) if near(img(x, FRAME_Y + 8), C_EDGE))
+                    bar = sum(1 for x in range(1, 390) if near(img(x, FRAME_Y + 8), C_EDGE))
                     check(bar > 60, '5 ms/div: the bar (%d px)' % bar)
 
     if want('dali'):
@@ -576,7 +576,7 @@ try:
             fe = edges(img, BYTE_Y + 8, C_FEDGE)
             # A frame running past the graph's edge shows one side only: its
             # top border then counts.
-            top = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y), C_FEDGE))
+            top = sum(1 for x in range(1, 390) if near(img(x, BYTE_Y), C_FEDGE))
             check(len(fe) + red(img, BYTE_Y + 8) >= 2 or (len(fe) >= 1 and top >= 40),
                   'DALI, 2 ms/div: frame boxes in the band (%d edge runs, top border %d px)' % (len(fe), top))
             check({f[5] for f in frames()} == got, 'DALI: FRAMes? does not depend on the zoom')
@@ -631,7 +631,7 @@ try:
             stop()
             wait_ms(1500)
             img = shot('w02-wave-19200-note')
-            grey = sum(1 for x in range(14, 413) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
+            grey = sum(1 for x in range(1, 390) if near(img(x, BYTE_Y + 8), rgb(0x7bef)))
             check(grey > 10, 'Wave view 19200 at 38.4 kS/s: the note (%d px)' % grey)
             c_check('the Wave view with the decoder')
             q('DBG:KEY 0')
@@ -676,7 +676,7 @@ try:
         wait_ms(1500)
         img = shot('l04-log-snippet')
         e = edges(img, BYTE_Y + 8, C_EDGE)
-        yellow = sum(1 for x in range(14, 413) for y in range(60, 230, 4) if near(img(x, y), (255, 255, 0)))
+        yellow = sum(1 for x in range(1, 390) for y in range(60, 230, 4) if near(img(x, y), (255, 255, 0)))
         check(len(e) >= 2 and yellow > 50, 'log: a row tapped shows its waveform (%d px of trace) and its bytes (%d box edges)' % (yellow, len(e)))
         q('DBG:TAP 200,150')
         wait_ms(1500)

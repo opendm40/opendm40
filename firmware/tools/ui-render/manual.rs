@@ -102,7 +102,7 @@ fn scope_base() -> stock::Scene {
     let mut m = base.m;
     m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, m.tb, scope_ui::tb_top(true, false), false, None);
     m.cur_tab = scope_ui::CUR_OFF;
-    m.src = scope_ui::SRC_MCX;
+    m.wave = false;
     let mut sc = stock::Scene { name: "manual-scope", m, popup: scope_ui::Popup::None, trace: None, persist: None, cols: 399, cells: base.cells.clone() };
     sc.trace = Some(trig_sine(&sc.m, 1.5, 2.0));
     sc
@@ -456,7 +456,7 @@ pub fn run(out: &str) -> usize {
     // at 10 ms/div (5 periods), 50 ms/div and 2 ms/div; a 1.5 A current.
     {
         let mut m = scope_base().m;
-        m.src = scope_ui::SRC_DMM;
+        m.wave = true;
         m.wvdiv = 150.0;
         m.ch1_txt = "AC V";
         m.ac = true;
@@ -657,7 +657,7 @@ pub fn run(out: &str) -> usize {
     {
         let mut m = sb.m;
         m.combined = true;
-        m.src = scope_ui::SRC_NONE;
+        m.wave = false;
         let sc = stock::Scene { name: "manual-combined", m, popup: scope_ui::Popup::None, trace: sb.trace.clone(), persist: None, cols: 399, cells: sb.cells.clone() };
         host::reset(0);
         scope_ui::invalidate();

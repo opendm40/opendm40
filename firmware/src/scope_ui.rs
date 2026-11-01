@@ -94,10 +94,12 @@ pub const ST_STOP: u8 = 4;
 // from these. The frame lines are at x GX and GR (GX + 10 divisions), the
 // graph columns fx 1..=NCOL between them at screen x GX + fx; the engine
 // keeps its own scope::COLS columns (`eng_of_fx` / `fx_of_eng`).
-/// Left frame column.
-pub const GX: i16 = 13;
+/// Left frame column. opendm40 (owner 2026-11-02): the frame at the screen
+/// edge, the level markers inside the graph (`LEFT_IN`), 39 px divisions,
+/// the right panel 89 px (four channel blocks).
+pub const GX: i16 = 0;
 /// Division width (px); the graph has 10.
-pub const DIV_W: i16 = 40;
+pub const DIV_W: i16 = 39;
 /// Frame-to-frame width and the right frame column.
 pub const GW: i16 = 10 * DIV_W;
 pub const GR: i16 = GX + GW;
@@ -110,6 +112,9 @@ pub const PANEL_X: i16 = GR + 1;
 /// inside the frame); with the frame at the screen edge, 3 px after the
 /// level markers (x 1..12) instead.
 pub const IN_X: i16 = if GX > 0 { GX + 5 } else { 16 };
+/// The level markers (CH1, math, runt, Y cursors) inside the graph at its
+/// left edge, as the trigger level at the right one (no strip column).
+pub const LEFT_IN: bool = GX == 0;
 
 /// Engine column (scope::COLS per screen) at the left edge of graph column
 /// fx - 1 (0-based display column `j`): identity while GW == COLS.
@@ -139,10 +144,38 @@ pub const COMBINED_TOP: i16 = 76;
 /// The drag / tap rect of the stock overlay (sec. 10.1).
 pub const INNER: Rect = rect(0, 15, PANEL_X, 290);
 
-/// Right-panel buttons (sec. 5), 60 x 40 at x 417.
-pub const B_RECT: [Rect; 7] =
-    [rect(BX, 20, 60, 40), rect(BX, 61, 60, 40), rect(BX, 102, 60, 40), rect(BX, 150, 60, 40), rect(BX, 191, 60, 40), rect(BX, 232, 60, 40), rect(BX, 280, 60, 40)];
-const BX: i16 = PANEL_X + 3;
+/// The right panel (owner 2026-11-02): four channel blocks, CH1, DMM (the
+/// CH2 trace), GEN (the generator trace), MATH, 74 px apart from y 24. A
+/// block: its title (name and scale, 26 px) over two magnifier buttons
+/// side by side, zoom in (smaller V/div) and zoom out (40 px tall).
+pub const NBLK: usize = 4;
+pub const BLK_X: i16 = PANEL_X + 3;
+pub const BLK_W: i16 = 476 - BLK_X;
+const BLK_Y0: i16 = 24;
+const BLK_PITCH: i16 = 74;
+const TITLE_H: i16 = 26;
+const BLK_GAP: i16 = 3;
+const BTN_H: i16 = 40;
+const BTN_W: i16 = (BLK_W - BLK_GAP) / 2;
+/// Panel targets: 3 per block (`PART_*`), k = 3 * block + part.
+pub const NPANEL: usize = 3 * NBLK;
+pub const PART_TITLE: usize = 0;
+pub const PART_IN: usize = 1;
+pub const PART_OUT: usize = 2;
+pub const BLK_CH1: usize = 0;
+pub const BLK_DMM: usize = 1;
+pub const BLK_GEN: usize = 2;
+pub const BLK_MATH: usize = 3;
+
+/// The rect of panel target `k`.
+pub const fn panel_rect(k: usize) -> Rect {
+    let y = BLK_Y0 + BLK_PITCH * (k / 3) as i16;
+    match k % 3 {
+        PART_TITLE => rect(BLK_X, y, BLK_W, TITLE_H),
+        PART_IN => rect(BLK_X, y + TITLE_H + BLK_GAP, BTN_W, BTN_H),
+        _ => rect(BLK_X + BLK_W - BTN_W, y + TITLE_H + BLK_GAP, BTN_W, BTN_H),
+    }
+}
 
 /// Top-bar badges (sec. 2): run status, timebase, CH1 V/div, trigger.
 pub const RUN_BADGE: Rect = rect(13, 1, 62, 17);
@@ -285,20 +318,16 @@ pub struct Model {
     pub runt_row: Option<i16>,
     /// opendm40 cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
     pub cur_tab: u8,
-    /// Source badge (opendm40, the DMM wave view, src/app_wave.rs): SRC_NONE
-    /// (the stock page: no badge, builds without the AD2 stream ISR),
-    /// SRC_MCX or SRC_DMM (the active half filled).
-    pub src: u8,
     /// Source DMM: the unit of the vertical values is A (current rows).
     pub amps: bool,
     /// The V/div value (SI, `fmt_div`: "1.5V", "200uA", "2.5V" with a x5
     /// probe) and, source DMM, the CH1 label ("AC mA"); 0 / "" = the stock
-    /// texts from `vdiv` / "CHA".
+    /// texts from `vdiv` / "CH1".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
     /// A CSV recording runs (csvlog.rs; the Scope page and the combined
     /// view): the REC mark (`rec_mark`) in the source badge's slot, the
-    /// record bar beside it. The Wave view (SRC_DMM) and a recording
+    /// record bar beside it. The Wave view and a recording
     /// exclude each other (App::wave_open, App::rec_conflict).
     pub rec: bool,
     /// The REC mark's blink phase (`rec_blink`): true = its dot hidden. A
@@ -317,14 +346,19 @@ pub struct Model {
     pub tsrc: u8,
     /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
     /// none (`CH2_LABEL`, a graph hole).
+    /// The DMM CH2 trace shown, and its V/div ("1.5V", "--" before its
+    /// first start): the DMM block.
+    pub ch2_on: bool,
     pub ch2_txt: Txt,
+    /// The GEN trace shown and its V/div: the GEN block.
+    pub gen_on: bool,
+    pub gen_txt: Txt,
+    /// The Wave view (the DMM as the scope's source): the CH1 block shows
+    /// its function, the DMM block reads "MCX" (back to the OSC input).
+    pub wave: bool,
 }
 
-/// `Model::src` values.
-pub const SRC_NONE: u8 = 0;
-pub const SRC_MCX: u8 = 1;
-pub const SRC_DMM: u8 = 2;
-/// The source badge or REC (left part of the record-bar slot when shown) and
+/// The REC mark (left part of the record-bar slot while recording) and
 /// the record bar then (opendm40: the stock bar is 145..282).
 pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
 const REC_BAR: Rect = rect(145, 1, 137, 17);
@@ -359,7 +393,7 @@ impl Model {
         trig_row: 105,
         trig_v: 0.993,
         rising: true,
-        trig_px: 200,
+        trig_px: GCX,
         pos: 0,
         colour: 2,
         bright: 100,
@@ -391,7 +425,6 @@ impl Model {
         fft: None,
         runt_row: None,
         cur_tab: 0,
-        src: SRC_NONE,
         amps: false,
         wvdiv: 0.0,
         ch1_txt: "",
@@ -401,7 +434,11 @@ impl Model {
         dec: 0,
         dec_gen: 0,
         tsrc: 0,
+        ch2_on: false,
         ch2_txt: Txt::EMPTY,
+        gen_on: false,
+        gen_txt: Txt::EMPTY,
+        wave: false,
     };
 
     pub fn pal(&self) -> Color {
@@ -626,7 +663,7 @@ pub fn tb_badge(m: &Model) {
 /// generator is on (opendm40 addition, 12 px grey like "ROLL").
 /// The record bar's box (shorter beside the source badge or REC).
 pub fn record_bar_rect(m: &Model) -> Rect {
-    if m.src == SRC_NONE && !m.rec { REC_BAR } else { REC_BAR_SRC }
+    if !m.rec { REC_BAR } else { REC_BAR_SRC }
 }
 
 pub fn record_bar(m: &Model) {
@@ -812,46 +849,13 @@ fn rec_paint(r: Rect, outside: Color, on: bool, dot_only: bool, unit: &'static s
     });
 }
 
-/// Source badge (`Model::src` != SRC_NONE): "MCX | DMM", the active half
-/// in the CH1 colour with dark text, the other dark with grey text. While a
-/// CSV recording runs (`Model::rec`) the slot shows the REC mark instead
-/// (`rec_mark`; the DMM source is refused then).
+/// The REC mark (`rec_mark`) while a CSV recording runs (`Model::rec`), in
+/// the slot the MCX | DMM source badge had until 2026-11-02 (the Wave view
+/// is the DMM block's now; a recording refuses it).
 pub fn src_badge(m: &Model) {
-    let r = SRC_BADGE;
     if m.rec {
-        rec_mark(r, C_BAR, !m.rec_dim, m.rec_unit);
-        return;
+        rec_mark(SRC_BADGE, C_BAR, !m.rec_dim, m.rec_unit);
     }
-    if m.src == SRC_NONE {
-        return;
-    }
-    let half = r.w / 2;
-    let a = Ink::new(sf::SC_F12, rect(r.x, 1, half, 17), "MCX", 8, 0);
-    let b = Ink::new(sf::SC_F12, rect(r.x + half, 1, r.w - half, 17), "DMM", 8, 0);
-    let dmm = m.src == SRC_DMM;
-    let on = m.pal();
-    let (fa, fb) = if dmm { (C_FILL, on) } else { (on, C_FILL) };
-    let (ta, tb) = if dmm { (C_FRAME, m.pal_ink()) } else { (m.pal_ink(), C_FRAME) };
-    paint(r, &[(K_SHAPE, C_BAR), (K_SHAPE, fa), (K_SHAPE, fb), (K_TEXT, fa), (K_TEXT, fb)], |x, y| {
-        let left = x < r.x + half;
-        if let Some(g) = a.at(x, y) {
-            return (ta, tag(4, g));
-        }
-        if let Some(g) = b.at(x, y) {
-            return (tb, tag(5, g));
-        }
-        if in_rbox(r, 5, 0x0f, x, y) {
-            if on_ring(r, 5, 0x0f, x, y) || x == r.x + half {
-                (C_FRAME, tag(1, 0))
-            } else if left {
-                (fa, tag(2, 0))
-            } else {
-                (fb, tag(3, 0))
-            }
-        } else {
-            (C_BAR, 0)
-        }
-    });
 }
 
 /// "1.00kHz" (FUN_08032fa4 style, Hz .. MHz).
@@ -962,72 +966,115 @@ pub fn usb_icon(m: &Model) {
     });
 }
 
-/// Right-panel button k (0..6) as the stock draws it (sec. 5).
-pub fn panel_button(m: &Model, k: usize) {
-    let r = B_RECT[k];
+/// What a block shows: name, scale, colour and ink, on (else dimmed), its
+/// popup open (the title grey).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Look {
+    pub name: Txt,
+    pub scale: Txt,
+    pub col: Color,
+    pub ink: Color,
+    pub on: bool,
+    pub open: bool,
+}
+
+/// Block `b` of model `m`.
+pub fn block_look(m: &Model, b: usize) -> Look {
+    let mut v = Buf::new();
+    m.vdiv_str(&mut v);
+    match b {
+        BLK_CH1 => Look {
+            name: Txt::new(if m.wave && !m.ch1_txt.is_empty() { m.ch1_txt } else { "CH1" }),
+            scale: Txt::new(v.as_str()),
+            col: m.pal(),
+            ink: m.pal_ink(),
+            on: true,
+            open: m.ch1_open,
+        },
+        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
+        BLK_GEN => Look { name: Txt::new("GEN"), scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
+        _ => {
+            // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
+            // math_scale shows the stock defaults.
+            let scale = if !m.math_scale.as_str().is_empty() {
+                m.math_scale
+            } else if m.math_mode == 6 {
+                Txt::new(v.as_str())
+            } else {
+                Txt::new(FFT_DB[9])
+            };
+            Look { name: Txt::new(if m.math_mode == 6 { "ABS" } else { "FFT" }), scale, col: m.math_pal(), ink: m.math_ink(), on: m.math_on, open: m.math_open }
+        }
+    }
+}
+
+/// A shorter unit for a title that does not fit ("100mdB" -> "0.1dB").
+fn short_scale(t: &str) -> &str {
+    match t {
+        "10mdB" => "0.01dB",
+        "20mdB" => "0.02dB",
+        "50mdB" => "0.05dB",
+        "100mdB" => "0.1dB",
+        "200mdB" => "0.2dB",
+        "500mdB" => "0.5dB",
+        _ => t,
+    }
+}
+
+/// Panel target k (`panel_rect`): a block's title or magnifier button.
+/// Pressed (`Model::pressed`): the stock pressed grey.
+pub fn panel_part(m: &Model, k: usize) {
+    let r = panel_rect(k);
     // A strip pass (lcd.rs "strip rendering") without its rows: no layout.
     if !lcd::rows_hit(r.y, r.y + r.h - 1) {
         return;
     }
-    let pal = m.pal();
-    let mc = if m.math_on { m.math_pal() } else { C_FRAME };
-    let (ink, math_ink) = (m.pal_ink(), if m.math_on { m.math_ink() } else { C_WHITE });
-    let mut b = Buf::new();
-    m.vdiv_str(&mut b);
-    let pressed = m.pressed as usize == k + 1;
-    let (fill, radius, mask, fg) = match k {
-        0 => (pal, 8, 0x3, ink),
-        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, if m.ch1_open { C_FILL } else { ink }),
-        2 => (pal, 8, 0xc, ink),
-        3 => (mc, 8, 0x3, math_ink),
-        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, if m.math_open { C_WHITE } else { math_ink }),
-        5 => (mc, 8, 0xc, math_ink),
-        _ => (C_ORANGE, 8, 0xf, C_WHITE),
-    };
-    let fill = if pressed { C_DIS } else { fill };
-    // UF-10: the CH1 V/div buttons as magnifiers (top = zoom in = smaller
-    // V/div, bottom = zoom out), drawn as shapes instead of "+" / "-".
-    let mag = match k {
-        0 => Some(true),
-        2 => Some(false),
-        _ => None,
-    };
-    let (t1, t2) = match k {
-        0 | 2 => (Ink::none(), Ink::none()),
-        3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
-        5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
-        1 => {
-            let (f, t) = if m.ch1_txt.is_empty() { (sf::SC_F20, "CHA") } else { (sf::SC_F16, m.ch1_txt) };
-            (Ink::new(f, rect(BX, 61, 60, 24), t, 8, 0), Ink::new(sf::SC_F12, rect(BX, 85, 60, 16), b.as_str(), 8, 0))
-        }
-        4 => {
-            // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
-            // math_scale shows the stock defaults.
-            const MATH: [&str; 7] = ["--", "+", "-", "*", "/", "FFT", "ABS"];
-            let t2 = if m.math_scale.n > 0 {
-                m.math_scale.as_str()
-            } else if m.math_mode == 5 {
-                FFT_DB[9]
-            } else {
-                b.as_str()
-            };
-            (Ink::new(sf::SC_F20, rect(BX, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(BX, 215, 60, 16), t2, 8, 0))
-        }
-        _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
-    };
-    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
-        if let Some(plus) = mag {
+    let l = block_look(m, k / 3);
+    let (mut fill, mut fg) = if l.on { (l.col, l.ink) } else { (blend565(l.col, C_BAR, 80), C_FRAME) };
+    if k % 3 == PART_TITLE && l.open {
+        (fill, fg) = (C_DIS, if k / 3 == BLK_CH1 { C_FILL } else { C_WHITE });
+    }
+    if m.pressed as usize == k + 1 {
+        fill = C_DIS;
+    }
+    if k % 3 != PART_TITLE {
+        let plus = k % 3 == PART_IN;
+        let mask = if plus { 0x4 } else { 0x8 };
+        paint(r, &[(K_SHAPE, C_BAR), (K_ICON, fill)], |x, y| {
             if magnifier(r, plus, x, y) {
-                return (fg, tag(4, 0));
+                return (fg, tag(2, 0));
             }
-        }
+            if in_rbox(r, 8, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        });
+        return;
+    }
+    // Title: name and scale in the 16 px face; too wide (3 px inside the
+    // box): the scale in the 12 px face, then its shorter unit.
+    let (name, sc) = (l.name.as_str(), l.scale.as_str());
+    let mut full = Buf::new();
+    full.push(name);
+    if !sc.is_empty() {
+        full.push(" ").push(sc);
+    }
+    let room = r.w - 8;
+    let (t1, t2) = if sf::text_width(sf::SC_F16, full.as_str(), 0) <= room {
+        (Ink::new(sf::SC_F16, r, full.as_str(), 8, 0), Ink::none())
+    } else {
+        let wn = sf::text_width(sf::SC_F16, name, 0);
+        let sc = if wn + 4 + sf::text_width(sf::SC_F12, sc, 0) > room { short_scale(sc) } else { sc };
+        let ws = sf::text_width(sf::SC_F12, sc, 0);
+        let x0 = r.x + (r.w - wn - 4 - ws) / 2;
+        (Ink::new(sf::SC_F16, rect(x0, r.y, wn, r.h), name, 8, 0), Ink::new(sf::SC_F12, rect(x0 + wn + 4, r.y + 1, ws, r.h), sc, 8, 0))
+    };
+    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill)], |x, y| {
         if let Some(g) = t1.at(x, y) {
             return (fg, tag(2, g));
         }
         if let Some(g) = t2.at(x, y) {
             return (fg, tag(3, g));
         }
-        if mask == 0 || in_rbox(r, radius, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        if in_rbox(r, 8, 0x3, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
     });
 }
 
@@ -1050,7 +1097,17 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
     let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
-    let t = Ink::new(sf::SC_F12, r, text, 8, 0);
+    // The widest texts ("Freq:444.4kHz", 98 px) do not fit the 94 px cell
+    // of the 39 px divisions: the label's first letter then ("F:444.4kHz").
+    let text = match text.find(':') {
+        Some(k) if k > 1 && sf::text_width(sf::SC_F12, text, 0) > r.w - 2 => {
+            let mut b = Buf::new();
+            b.push(&text[..1]).push(&text[k..]);
+            Txt::new(b.as_str())
+        }
+        _ => Txt::new(text),
+    };
+    let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
     let pal = m.pal_text();
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
@@ -1082,8 +1139,8 @@ pub fn top_bar(m: &Model) {
 }
 
 pub fn panel(m: &Model) {
-    for k in 0..7 {
-        panel_button(m, k);
+    for k in 0..NPANEL {
+        panel_part(m, k);
     }
 }
 
@@ -1219,22 +1276,31 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let top = m.top();
     let h = m.frame_h();
     let pal = m.pal();
+    // Right edge (and the left one, `LEFT_IN`): inside the frame (rows
+    // 1..h-2), below the top markers' row (y top+1..top+12) where one of
+    // them is at that edge.
+    let mut g = [Mark::NONE; NGRAPH];
+    graph_marks_top(m, &mut g);
+    let top_right = g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13);
+    let top_left = g.iter().any(|mk| mk.some() && mk.x < 13 && mk.y < top + 13);
+    let y_min_l = if top_left { top + 13 } else { top + 1 };
     let level = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
         let fy = line_fy(h, row as i32);
-        if fy < 0 {
+        if LEFT_IN {
+            if fy < 0 {
+                Mark::new(1, y_min_l, fam, UP, sel, col)
+            } else if fy > h - 1 {
+                Mark::new(1, top + h - 13, fam, DOWN, sel, col)
+            } else {
+                Mark::new(1, (top + fy - 6).clamp(y_min_l, top + h - 13), fam, RIGHT, sel, col)
+            }
+        } else if fy < 0 {
             Mark::new(1, top, fam, UP, sel, col)
         } else if fy > h - 1 {
             Mark::new(1, top + h - 13, fam, DOWN, sel, col)
         } else {
             Mark::new(1, top + fy - 6, fam, RIGHT, sel, col)
         }
-    };
-    // Right edge: inside the frame (rows 1..h-2), below the top markers'
-    // row (y top+1..top+12) where one of them is at the right edge.
-    let top_right = {
-        let mut g = [Mark::NONE; NGRAPH];
-        graph_marks_top(m, &mut g);
-        g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13)
     };
     let y_min = if top_right { top + 13 } else { top + 1 };
     let right = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
@@ -1275,8 +1341,18 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
 }
 
 /// Left-strip markers in draw order (creation order, the selected level
-/// item last; the trigger level is a graph marker, `graph_marks`).
+/// item last; the trigger level is a graph marker, `graph_marks`). None
+/// with `LEFT_IN` (they are graph markers then).
 pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
+    if LEFT_IN {
+        *out = [Mark::NONE; NSTRIP];
+        return 0;
+    }
+    left_marks(m, out)
+}
+
+/// The left level markers in draw order.
+fn left_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let n = strip_items(m, &mut items);
     let mut k = 0;
@@ -1308,10 +1384,18 @@ fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
 
 /// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak,
 /// trigger level (right edge).
-pub const NGRAPH: usize = 6;
+/// (+ 5 slots: the left level markers with `LEFT_IN`.)
+pub const NGRAPH: usize = 6 + if LEFT_IN { NSTRIP - 1 } else { 0 };
 /// Time-item id of each graph marker slot (255: not a time item; the
-/// trigger level's zone is a level zone, from `strip_items`).
-const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255, 255];
+/// level markers' zones are level zones, from `strip_items`).
+const GRAPH_IDS: [u8; NGRAPH] = {
+    let mut t = [255u8; NGRAPH];
+    t[0] = 0;
+    t[1] = 2;
+    t[2] = 3;
+    t[3] = 1;
+    t
+};
 
 /// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
 /// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (opendm40: a white
@@ -1323,6 +1407,12 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
     let n = strip_items(m, &mut items);
     if let Some(&(_, mk)) = items[..n].iter().find(|i| i.0 == TRIG_LEVEL) {
         out[5] = mk;
+    }
+    if LEFT_IN {
+        // The left level markers inside the graph, in their draw order.
+        let mut l = [Mark::NONE; NSTRIP];
+        let k = left_marks(m, &mut l);
+        out[6..6 + k].copy_from_slice(&l[..k]);
     }
 }
 
@@ -2394,8 +2484,9 @@ fn shown() -> &'static mut Shown {
 
 /// A popup over the graph closed: the next `update` repaints the graph
 /// (its overlays too) and the frame, the rest of the page only where the
-/// model changed; `ch1` / `math`: their panel labels were drawn grey
-/// (panel_button outside `update`), so they are drawn again.
+/// model changed; `ch1` / `math`: their panel titles were drawn grey
+/// (panel_part outside `update`), so they are drawn again. The MF popup
+/// also covers the panel's left edge: the panel is drawn again.
 #[inline(never)] // region C (link-native.x)
 pub fn uncover(m: &Model, ch1: bool, math: bool) {
     if let Some(o) = shown().m.as_mut() {
@@ -2404,6 +2495,7 @@ pub fn uncover(m: &Model, ch1: bool, math: bool) {
     }
     graph().invalidate();
     frame(m);
+    panel(m);
 }
 
 /// Rows y0..y1 (screen, exclusive) of the graph and its side frame lines
@@ -2419,6 +2511,8 @@ pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
     let g = graph();
     g.holes[H_POPUP] = Some(keep);
     g.holes[H_REST] = Some(rect(GX, y1, GW + 1, 320 - y1));
+    // The MF popup reaches into the panel.
+    panel(m);
     g.invalidate();
     g.flush(m);
     // The rows under the hole still show the graph as it is (nothing
@@ -2457,17 +2551,17 @@ pub fn update(m: &Model) {
         tb_badge(m);
     }
     let pal = ol.colour != m.colour;
-    if o.is_some_and(|o| o.src != m.src || o.rec != m.rec) {
+    if o.is_some_and(|o| o.rec != m.rec) {
         // The record bar moves (beside the badge / REC or not): clear the slot.
         lcd::fill_rect(REC_BAR.x as u16, 0, REC_BAR.w as u16, 20, C_BAR);
     }
-    if d(ol.src != m.src || ol.rec != m.rec || ol.rec_unit != m.rec_unit || (m.src != SRC_NONE && pal)) {
+    if d(ol.rec != m.rec || ol.rec_unit != m.rec_unit) {
         src_badge(m);
     } else if m.rec && ol.rec_dim != m.rec_dim {
         // The REC blink: its dot alone.
         rec_mark_blink(SRC_BADGE, C_BAR, !m.rec_dim, m.rec_unit);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src || ol.rec != m.rec) {
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.rec != m.rec) {
         record_bar(m);
     }
     if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
@@ -2479,17 +2573,13 @@ pub fn update(m: &Model) {
     if d(ol.usb != m.usb || ol.bt != m.bt) {
         usb_icon(m);
     }
-    for k in 0..7 {
-        let was = |mm: &Model| mm.pressed as usize == k + 1;
-        let dep = match k {
-            0 | 2 => pal,
-            1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open || ol.wvdiv != m.wvdiv || ol.ch1_txt != m.ch1_txt,
-            3 | 5 => ol.math_on != m.math_on || ol.math_colour != m.math_colour,
-            4 => ol.vdiv != m.vdiv || ol.wvdiv != m.wvdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode || ol.math_on != m.math_on || ol.math_colour != m.math_colour || ol.math_scale != m.math_scale,
-            _ => false,
-        };
-        if d(dep || was(&ol) != was(m)) {
-            panel_button(m, k);
+    for b in 0..NBLK {
+        let changed = block_look(&ol, b) != block_look(m, b);
+        for k in 3 * b..3 * b + 3 {
+            let was = |mm: &Model| mm.pressed as usize == k + 1;
+            if d(changed || was(&ol) != was(m)) {
+                panel_part(m, k);
+            }
         }
     }
     if d(pal) {
@@ -2532,8 +2622,6 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
     g.set_hole_at(H_DEC, (m.dec != 0).then(|| dec::band_rect(m.dec)));
-    let ch2 = !m.ch2_txt.as_str().is_empty();
-    g.set_hole_at(H_SPARE, ch2.then_some(ch2_label_rect(m)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2563,9 +2651,6 @@ pub fn update(m: &Model) {
     let was_fft = ol.math_on && ol.math_mode == 5;
     if fft_on && (bg_changed || d(!was_fft || ol.fft_hz != m.fft_hz || ol.math_colour != m.math_colour)) {
         fft_label(m);
-    }
-    if ch2 && (bg_changed || d(ol.ch2_txt != m.ch2_txt)) {
-        fft_box(ch2_label_rect(m), m.ch2_txt.as_str(), C_CH2);
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
@@ -2858,11 +2943,6 @@ pub fn top_badge(x: u16, y: u16) -> Option<u8> {
     [RUN_BADGE, TB_BADGE, VDIV_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
 }
 
-/// The source badge (when shown) was hit.
-pub fn src_hit(x: u16, y: u16) -> bool {
-    let r = SRC_BADGE;
-    y < 20 && (x as i16) >= r.x && (x as i16) < r.x + r.w
-}
 
 /// Corners hold repeat: the `done`-th repeat (0-based) of a press at `t0`
 /// is due at t0 + REPEAT_FIRST_MS + done * REPEAT_MS.
@@ -3262,11 +3342,6 @@ pub const C2_LIST: Rect = rect(24, 233, 88, 24);
 pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
 pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
-/// The DMM CH2 label in the graph (a hole, below the FFT's V/div box).
-pub fn ch2_label_rect(m: &Model) -> Rect {
-    rect(IN_X, m.top() + 34, 92, 17)
-}
-
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
     let (x, u) = if s >= 0.999 {
@@ -3443,7 +3518,7 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
 
 pub fn draw_ch1(tab: u8, v: &PopVals) {
     let tab = tab.min(2);
-    side_popup("CHA", &["Coupling", "Probe", "Color"], tab);
+    side_popup("CH1", &["Coupling", "Probe", "Color"], tab);
     let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
@@ -3780,17 +3855,22 @@ impl StripData {
 
 pub const STRIP: Rect = rect(GX, 21, GW + 1, 54);
 const ST_INNER: Rect = rect(GX + 1, 22, GW - 1, 52);
-const ST_FUNC: Rect = rect(GX + 6, 25, 62, 17);
-const ST_BADGE: Rect = rect(GX + 6, 46, 62, 17);
+/// The badge column: 62 px from 6 px inside the strip; with the frame at
+/// the screen edge (GX 0) 60 px from x 4 (the widest badge text is 52 px),
+/// for the sub rows' room beside GEN on the 39 px divisions' strip.
+const ST_COL_X: i16 = if GX > 0 { GX + 6 } else { 4 };
+const ST_COL_W: i16 = if GX > 0 { 62 } else { 60 };
+const ST_FUNC: Rect = rect(ST_COL_X, 25, ST_COL_W, 17);
+const ST_BADGE: Rect = rect(ST_COL_X, 46, ST_COL_W, 17);
 /// Reading: right-aligned, ends 4 px before the unit (the widest values,
 /// "-444.44" / "1562.00", are 105 / 107 px of ink in SC_DIGITS); from 3 px
 /// after the badge column.
-const ST_VALUE: Rect = rect(GX + 71, 24, 108, 30);
+const ST_VALUE: Rect = rect(ST_COL_X + ST_COL_W + 3, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
 /// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
 /// buttons' 20 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV";
 /// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
-const ST_UNIT_X: i16 = GX + 183;
+const ST_UNIT_X: i16 = ST_VALUE.x + ST_VALUE.w + 4;
 const ST_UNIT_W: i16 = 59;
 const ST_UNIT_Y: i16 = 24;
 const ST_UNIT_H: i16 = 30;
@@ -3956,7 +4036,14 @@ pub fn meter_strip(d: &StripData) {
             } else {
                 t
             };
-            let sp = if sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
+            // One word (no space, e.g. after the squeeze) may run up to 5 px
+            // before the GEN column (the word-gap rule is for two words);
+            // the row is painted that far for any text (no stale ink).
+            let room = if gen_on && !t.contains(' ') { r.w.max(ST_GEN.x - 5 - r.x) } else { r.w };
+            if gen_on {
+                r.w = r.w.max(ST_GEN.x - 5 - r.x);
+            }
+            let sp = if sf::text_width(sf::SC_F12, t, 1) > room { 0 } else { 1 };
             st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
@@ -3977,17 +4064,20 @@ pub fn pm(x: i16, y: i16, c: Color) {
     lcd::fill_rect(x as u16, (y + 7) as u16, 5, 1, c);
 }
 
-/// Right-panel button under a touch: the stock rects, x from the panel edge
-/// and 4 px of slop up / down (the 1 / 8 px gaps between the pills go to the
-/// nearer button instead of nowhere).
+/// Panel target (`panel_rect`) under a touch: the nearest within 4 px (the
+/// gaps between the parts go to the nearer one; a tie to the title / the
+/// zoom-in button).
 pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
-    if (x as i16) < PANEL_X {
+    let (x, y) = (x as i16, y as i16);
+    if x < PANEL_X {
         return None;
     }
-    let y = y as i16;
     let mut best: Option<(i16, usize)> = None;
-    for (k, r) in B_RECT.iter().enumerate() {
-        let d = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
+    for k in 0..NPANEL {
+        let r = panel_rect(k);
+        let dy = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
+        let dx = if x < r.x { r.x - x } else if x >= r.x + r.w { x - (r.x + r.w - 1) } else { 0 };
+        let d = dx.max(dy);
         if d <= 4 && best.map_or(true, |b| d < b.0) {
             best = Some((d, k));
         }
@@ -3997,7 +4087,7 @@ pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
 
 /// Strip touch areas: the badge column (REL) and the rest (function band).
 pub fn strip_hit(x: u16, y: u16) -> Option<bool> {
-    if (20..76).contains(&y) && (x as i16) < PANEL_X { Some((x as i16) < GX + 73) } else { None }
+    if (20..76).contains(&y) && (x as i16) < PANEL_X { Some((x as i16) < ST_COL_X + ST_COL_W + 5) } else { None }
 }
 
 // ------------------------------------------------------------------ pinch

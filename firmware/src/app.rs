@@ -5425,6 +5425,25 @@ impl App {
                 out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
                 Some(())
             }
+            C::GenScale(Some(v)) => {
+                // The nearest V/div at or above v (as CHAN1:SCAL).
+                let i = crate::scope_ui::VDIV_VAL.iter().position(|&d| d >= v * 0.999).unwrap_or(crate::scope_ui::VDIV_VAL.len() - 1);
+                self.gen_vdiv_set(i as u8);
+                None
+            }
+            C::GenScale(None) => {
+                out.put_f32(crate::scope_ui::VDIV_VAL[self.gen_vdiv_idx() as usize]);
+                Some(())
+            }
+            C::GenDisp(Some(on)) => {
+                self.gen_trace_set(on, now);
+                sc = self.scope.s;
+                None
+            }
+            C::GenDisp(None) => {
+                out.put_bytes(if self.scope.gen_trace { b"1" } else { b"0" });
+                Some(())
+            }
             C::Run => {
                 sc.run = true;
                 self.scope.run_on();

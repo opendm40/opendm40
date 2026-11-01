@@ -31,8 +31,9 @@
 //!   on every timebase change;
 //! * top bar (opendm40, the stock one is not tappable): run badge = RUN/STOP,
 //!   timebase badge = timebase list popup, V/div badge = CH1 popup, trigger
-//!   badge = Trigger tab; the right panel: V/div + / -, CH1 popup, TRIG ->
-//!   Trigger tab;
+//!   badge = Trigger tab; the right panel (owner 2026-11-02): four channel
+//!   blocks CH1 / DMM / GEN / MATH, a title (CH1 popup, DMM / GEN on / off,
+//!   the math popup; DMM held: the Wave view) and zoom in / out magnifiers;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
 //!   on (swipes that start outside the graph area: top bar, panel);
 //! Responsiveness (owner, 2026-10-13: "dragging the trace lags"): while a
@@ -573,13 +574,9 @@ impl App {
             cur_tab: self.sp_cur_state(),
             // The source badge on the Scope page of builds with the stream
             // ISR (none in the combined view, none without: the stock page).
-            src: if !app_wave::WAVE_BUILD || self.view != View::Scope {
-                su::SRC_NONE
-            } else if wave {
-                su::SRC_DMM
-            } else {
-                su::SRC_MCX
-            },
+            // (The MCX | DMM source badge is gone, owner 2026-11-02: the
+            // DMM block switches the Wave view, `sp_panel`.)
+            wave,
             amps,
             // The V/div text from the value (fmt_div) also off the Wave
             // view: `vdiv`'s label is wrong with a x2 / x5 ... probe (#133).
@@ -593,7 +590,10 @@ impl App {
             dec: self.dec_band(),
             dec_gen: self.dec_gen_shown(),
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
-            ch2_txt: self.ch2_label(true),
+            ch2_on: self.ch2.on && !wave,
+            ch2_txt: self.ch2_label(),
+            gen_on: self.scope.gen_trace,
+            gen_txt: self.gen_label(),
         }
     }
 
@@ -890,13 +890,15 @@ impl App {
         let (ky, kx, hpos) = self.sp_view();
         let zr = (140 + s.pos) as f32;
         let d_pos = s.pos - c.pos;
+        let gky = if (self.scope.gen_vdiv as usize) < su::VDIV_VAL.len() { 1.0 } else { ky };
         for j in 0..su::NCOL {
             let fy = |(a, b): (i16, i16)| if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
             g.tr[j] = fy(preview_rows(c, &c.seg, j as i32, d_pos, hpos, ky, kx, zr));
-            // The GEN trace is on CH1's scale; CH2 on its own (only the time
-            // axis moves). Owner 2026-11-01: both vanished while a stopped
-            // record was panned.
-            g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, ky, kx, zr));
+            // The GEN trace keeps CH1's zero row, on CH1's scale until its
+            // own V/div is set; CH2 on its own (only the time axis moves).
+            // Owner 2026-11-01: both vanished while a stopped record was
+            // panned.
+            g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, gky, kx, zr));
             g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
             let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
             let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
@@ -1071,7 +1073,9 @@ impl App {
         let rec = self.scope.record();
         let Some(off) = rec.offset_of(&f.data) else { return };
         let n = f.data.len();
-        let row = |v: f32| self.scope.row_of_volts(v).clamp(-30000.0, 30000.0) as i16;
+        // On its own V/div (`gen_vdiv_idx`), CH1's zero row.
+        let (z, k) = (140.0 + self.scope.s.pos as f32, 141.0 / (4.0 * su::VDIV_VAL[self.gen_vdiv_idx() as usize]));
+        let row = |v: f32| (z - v * k).clamp(-30000.0, 30000.0) as i16;
         for i in 0..scope::COLS {
             let (a, b) = if n >= scope::COLS {
                 ((i * n / scope::COLS) as f64, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f64)
@@ -1471,7 +1475,6 @@ impl App {
             // A top-bar badge (before the graph area: INNER starts at y 15):
             // not captured, its release is the Tap below.
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
-            Gesture::Down(p) if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
                 let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
@@ -1544,6 +1547,22 @@ impl App {
                 }
                 Some(false)
             }
+            // The DMM block's title held: the Wave view (the DMM as the
+            // scope's source; the MCX | DMM badge before 2026-11-02).
+            Gesture::LongPress(p) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_DMM) => {
+                if app_wave::WAVE_BUILD && self.view == View::Scope && !self.scope.wave_on() {
+                    self.beep(now, 30);
+                    if crate::hy3131::streaming() {
+                        // A logger session (or the inrush capture) owns
+                        // the HY3131: no Wave view (wave_open, region C,
+                        // would also step the DMM range under the stream).
+                        self.toast(now, "Wave: data logger running", false);
+                    } else {
+                        self.wave_open(clk);
+                    }
+                }
+                Some(true)
+            }
             Gesture::LongPress(_) => {
                 // opendm40: a still long press on a marker recentres its item:
                 // trigger position -> screen centre, trigger level -> the
@@ -1576,20 +1595,6 @@ impl App {
                 // list, the V/div badge = CH1 popup (as B2), the trigger
                 // badge = Trigger tab; with the stream ISR the source badge
                 // (MCX | DMM: the DMM wave view, app_wave.rs).
-                if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) {
-                    self.beep(now, 30);
-                    if self.scope.wave_on() {
-                        self.wave_badge_close(clk);
-                    } else if crate::hy3131::streaming() {
-                        // A logger session (or the inrush capture) owns
-                        // the HY3131: no Wave view (wave_open, region C,
-                        // would also step the DMM range under the stream).
-                        self.toast(now, "Wave: data logger running", false);
-                    } else {
-                        self.wave_open(clk);
-                    }
-                    return Some(false);
-                }
                 match su::top_badge(p.x, p.y) {
                     Some(0) => {
                         self.beep(now, 30);
@@ -2154,54 +2159,108 @@ impl App {
 
     // ------------------------------------------------------------ panel, keys
 
-    fn sp_panel(&mut self, _clk: &mut Clock, k: usize, now: u64) {
-        let mut st = self.scope.s;
-        if self.scope.wave_on() && k <= 2 {
-            // The wave view: V/div = its step list; CH1 = the coupling note.
-            match k {
-                1 => self.wave_coupling_note(now),
-                _ => self.wave_range_step(k == 0, now),
+    /// A tap on panel target k (scope_ui::panel_rect): a block's title or
+    /// its magnifier (zoom in = the smaller V/div on every block).
+    fn sp_panel(&mut self, clk: &mut Clock, k: usize, now: u64) {
+        let (b, part) = (k / 3, k % 3);
+        let zin = part == su::PART_IN;
+        let wave = self.scope.wave_on();
+        if part == su::PART_TITLE {
+            match b {
+                // The wave view: CH1 = the coupling note.
+                su::BLK_CH1 if wave => self.wave_coupling_note(now),
+                su::BLK_CH1 => self.sp_popup_open(su::Popup::Ch1(0)),
+                // The wave view: back to the OSC (MCX) input.
+                su::BLK_DMM if wave => self.wave_badge_close(clk),
+                su::BLK_DMM => {
+                    let on = !self.ch2.on;
+                    self.ch2_set(clk, on);
+                }
+                su::BLK_GEN => {
+                    let on = !self.scope.gen_trace;
+                    self.gen_trace_set(on, now);
+                }
+                _ => {
+                    // Stock: the math label turns math on and opens the popup
+                    // (a second tap on it, popup open, turns math off).
+                    if !self.sp.math.on {
+                        self.sp.math.on = true;
+                        self.sp_math_changed(true);
+                    }
+                    self.sp_popup_open(su::Popup::Math(0));
+                }
             }
             return;
         }
-        match k {
-            // UF-10: B1 = zoom in (smaller V/div), B3 = zoom out.
-            0 => st.set_vidx(st.vidx().saturating_sub(1)),
-            2 => st.set_vidx(st.vidx() + 1),
-            1 => {
-                self.sp_popup_open(su::Popup::Ch1(0));
-                return;
+        match b {
+            // The wave view: its V/div step list.
+            su::BLK_CH1 if wave => self.wave_range_step(zin, now),
+            su::BLK_CH1 => {
+                // VSTEPS (#202: 2 and 5 mV/div below the 10 mV range).
+                let mut st = self.scope.s;
+                st.set_vidx(if zin { st.vidx().saturating_sub(1) } else { st.vidx() + 1 });
+                self.scope_set(st, now);
             }
-            4 => {
-                // Stock: the math label turns math on and opens the popup
-                // (a second tap on it, popup open, turns math off).
-                if !self.sp.math.on {
-                    self.sp.math.on = true;
-                    self.sp_math_changed(true);
-                }
-                self.sp_popup_open(su::Popup::Math(0));
-                return;
-            }
-            6 => {
-                self.sp_popup_open(su::Popup::Mf(2));
-                return;
-            }
-            3 | 5 => {
-                // Math scale +1 / -1: FFT dB/div, else the math V/div.
+            su::BLK_DMM => self.ch2_step(!zin, now),
+            su::BLK_GEN => self.gen_step(zin, now),
+            _ => {
+                // Math scale: FFT dB/div, else the math V/div.
                 let m = &mut self.sp.math;
-                let up = k == 3;
-                let step = |v: u8, max: u8| if up { (v + 1).min(max) } else { v.saturating_sub(1) };
+                let step = |v: u8, max: u8| if zin { v.saturating_sub(1) } else { (v + 1).min(max) };
                 if m.mode == 5 && !m.vrms {
                     m.db = step(m.db, 12);
                 } else {
                     m.vdiv = step(m.vdiv, 21);
                 }
                 self.sp_math();
-                return;
+                self.sp_settings_changed();
             }
-            _ => return,
         }
+    }
+
+    /// The GEN trace on / off (the GEN block's title, MF > Display, SCPI
+    /// GEN:DISP): first on, its V/div starts at CH1's.
+    pub(super) fn gen_trace_set(&mut self, on: bool, now: u64) {
+        if on && self.scope.gen_vdiv as usize >= su::VDIV_VAL.len() {
+            self.scope.gen_vdiv = vdiv_idx(self.scope.s.vidx(), self.scope.s.probe);
+        }
+        self.scope.gen_trace = on;
+        // The next record is taken without the comparator (or with it
+        // again): restart the acquisition.
+        let st = self.scope.s;
         self.scope_set(st, now);
+        self.scope_invalidate();
+        self.sp_settings_changed();
+    }
+
+    /// The GEN V/div one step (zoom in = smaller).
+    fn gen_step(&mut self, zin: bool, now: u64) {
+        let i = self.gen_vdiv_idx();
+        let j = if zin { i.saturating_sub(1) } else { (i + 1).min(su::VDIV_VAL.len() as u8 - 1) };
+        if j == i {
+            self.toast(now, if zin { "Lowest V/div" } else { "Highest V/div" }, false);
+            return;
+        }
+        self.gen_vdiv_set(j);
+    }
+
+    /// The GEN V/div (VDIV_VAL index): its own, CH1's until set.
+    pub(super) fn gen_vdiv_idx(&self) -> u8 {
+        if (self.scope.gen_vdiv as usize) < su::VDIV_VAL.len() { self.scope.gen_vdiv } else { vdiv_idx(self.scope.s.vidx(), self.scope.s.probe) }
+    }
+
+    pub(super) fn gen_vdiv_set(&mut self, i: u8) {
+        self.scope.gen_vdiv = i.min(su::VDIV_VAL.len() as u8 - 1);
+        self.scope.refresh();
+        self.scope_invalidate();
+        self.sp_settings_changed();
+    }
+
+    /// The GEN block's scale ("1V", "500mV").
+    fn gen_label(&self) -> su::Txt {
+        let mut b = su::Buf::new();
+        su::vdiv_text(&mut b, self.gen_vdiv_idx());
+        su::Txt::new(b.as_str())
     }
 
     fn sp_key(&mut self, clk: &mut Clock, code: u8) {
@@ -2265,7 +2324,7 @@ impl App {
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
-            ch2_vdiv: self.ch2_label(false),
+            ch2_vdiv: self.ch2_label(),
         }
     }
 
@@ -2286,8 +2345,8 @@ impl App {
         if !self.redraw {
             // The CH1 / math pill label shows the open popup (0x7bef).
             let m = self.sp_model(self.now);
-            su::panel_button(&m, 1);
-            su::panel_button(&m, 4);
+            su::panel_part(&m, 3 * su::BLK_CH1);
+            su::panel_part(&m, 3 * su::BLK_MATH);
             self.sp_popup_draw();
         }
     }
@@ -2608,13 +2667,7 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
-            su::MfHit::GenTrace(on) => {
-                self.scope.gen_trace = on;
-                // The next record is taken without the comparator (or
-                // with it again): restart the acquisition.
-                self.scope_set(st, now);
-                self.scope_invalidate();
-            }
+            su::MfHit::GenTrace(on) => self.gen_trace_set(on, now),
             su::MfHit::PCond(c) => {
                 st.pcond = c.min(2);
                 self.scope_set(st, now);
@@ -2955,6 +3008,8 @@ impl App {
             | (s.tsrc as u32 & 1) << 4
             | (self.scope.gen_trace as u32) << 5
             | (self.ch2.on as u32) << 6
+            // Bits 8..12: the GEN V/div index + 1 (0: not set yet).
+            | ((self.scope.gen_vdiv as u32 + 1) & 0x1F) << 8
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
     }
@@ -2982,6 +3037,7 @@ impl App {
         st.pcond = (p[3] >> 2 & 3).min(2) as u8;
         st.tsrc = (p[3] >> 4 & 1) as u8;
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
+        self.scope.gen_vdiv = ((p[3] >> 8 & 0x1F) as u8).wrapping_sub(1);
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.scope.ch2_on = self.ch2.on;
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;

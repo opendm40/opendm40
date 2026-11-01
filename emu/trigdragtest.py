@@ -10,7 +10,7 @@ per 3 points, so every third move report is mostly sideways: the stock
 per-event split sent it to the trigger position and dropped the vertical
 part); DBG:GEST?'s "|POS hpos,trig_row,pos" is read before and after.
 
-  * the trigger-level marker (right edge, x 406), dragged 60 px down with
+  * the trigger-level marker (right edge, x 383), dragged 60 px down with
     the wobble ending where it started: the trigger row moves, the trigger
     position is where it was (the 2-D trigger drag nets the sideways
     wobble to 0; the stock split would have moved it +j px per 3 points);
@@ -114,7 +114,7 @@ try:
     h0, r0, p0 = pos()
     print('  before: hpos %d, trig_row %d, pos %d' % (h0, r0, p0), flush=True)
     y = top + r0
-    q('DBG:DRAG 406,%d,406,%d,600,0,%d' % (y, y + 60, j))
+    q('DBG:DRAG 383,%d,383,%d,600,0,%d' % (y, y + 60, j))
     wait_ms(800)
     h1, r1, p1 = pos()
     print('  trigger-level drag: hpos %d, trig_row %d, pos %d' % (h1, r1, p1), flush=True)
@@ -178,7 +178,7 @@ try:
         check(r5 - p5 == r4 - p4, 'the trigger row moves with CH1 (same volts) (%d -> %d)' % (r4, r5))
         wait_ms(500)
         # A still touch (DBG:TAP sends only the tap, no press: no selection).
-        q('DBG:DRAG 406,%d,406,%d,100' % (top + r5, top + r5))
+        q('DBG:DRAG 383,%d,383,%d,100' % (top + r5, top + r5))
         wait_ms(600)
         q('DBG:DRAG 200,150,200,180,300,0,0')
         wait_ms(300)

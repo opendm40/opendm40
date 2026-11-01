@@ -43,13 +43,9 @@ impl Ch2 {
     pub const NEW: Ch2 = Ch2 { on: false, live: false, fs: 0, vdiv: 0.0, retry_at: 0, frozen: false };
 }
 
-/// The CH2 V/div label ("CH2 1.5V", "CH2 200mA") for the graph; the
-/// bare V/div ("1.5V") for the Display tab.
-fn label(vdiv: f32, amps: bool, prefix: bool) -> crate::scope_ui::Txt {
+/// The CH2 V/div label ("1.5V", "200mA").
+fn label(vdiv: f32, amps: bool) -> crate::scope_ui::Txt {
     let mut b = crate::scope_ui::Buf::new();
-    if prefix {
-        b.push("CH2 ");
-    }
     crate::scope_ui::fmt_div(&mut b, vdiv, if amps { "A" } else { "V" });
     crate::scope_ui::Txt::new(b.as_str())
 }
@@ -211,13 +207,11 @@ impl App {
         }
     }
 
-    /// The graph's CH2 label (empty: none); `prefix` false: the bare
-    /// V/div of the Display tab ("--" before the first start).
-    pub(super) fn ch2_label(&self, prefix: bool) -> crate::scope_ui::Txt {
-        if self.ch2.on && self.ch2.vdiv > 0.0 && !self.scope.wave_on() {
-            label(self.ch2.vdiv, self.scope_ch2_amps(), prefix)
-        } else if prefix {
-            crate::scope_ui::Txt::EMPTY
+    /// The CH2 V/div ("1.5V", "200mA"; the DMM block, the Display tab):
+    /// also while off, "--" before the first start and in the Wave view.
+    pub(super) fn ch2_label(&self) -> crate::scope_ui::Txt {
+        if self.ch2.vdiv > 0.0 && !self.scope.wave_on() {
+            label(self.ch2.vdiv, self.scope_ch2_amps())
         } else {
             crate::scope_ui::Txt::new("--")
         }
