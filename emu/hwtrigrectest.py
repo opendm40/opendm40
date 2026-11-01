@@ -10,11 +10,11 @@ the comparator on (the default), Normal sweep; other trigger positions
 Two emulator runs (one input sine each: 20 kHz for 1 us .. 1 ms/div,
 100 Hz for 10 .. 200 ms/div). Per timebase and mode the record (WAV:POIN
 MAX, WORD) must be
-  * DIG / SING: the whole record (scope.rs rec_split, the chain's long
-    record: up to 10 s, the trigger at the trigger position of all of it),
-    trimmed to pre_for + post_rec (44 032 from 5 ms/div down, 44 000 at 10
-    and 20 ms/div; from 100 ms/div the coded ring's span, at least the post
-    part);
+  * DIG / SING: the whole record (scope.rs rec_split: the raw ring above
+    25 kS/s, lin_len = 26 624 samples from 100 ms/div, at least the screen;
+    the trigger at the trigger position of all of it), trimmed to pre_for +
+    post_rec (44 032 from 5 ms/div down, 44 000 at 10 and 20 ms/div, 27 456
+    at 200 ms/div);
   * triggered by the comparator (DBG:HWTRIG:STAT? hits grow, misses rare)
     at the edge estimate (post_rec samples before the end), refined within
     the 800-sample window around it;
@@ -48,7 +48,7 @@ import usbip_client as uc  # noqa: E402
 
 FAIL = []
 PCAP = 65520
-GROUPS = [('fast', 20000.0, (1e-6, 1e-5, 1e-4, 1e-3)), ('slow', 100.0, (1e-2, 2e-2, 2e-1))]
+GROUPS = [('fast', 20000.0, (1e-6, 1e-5, 1e-4, 1e-3)), ('slow', 100.0, (1e-2, 2e-2, 1e-1, 2e-1))]
 
 
 def check(ok, what):
@@ -157,8 +157,8 @@ def step(t, hz, tb, mode):
     if A.sw:
         print('  %s: %d points, trigger index %d' % (tag, n, ti), flush=True)
         return n
-    # DIG / SING take the whole record (scope.rs rec_split: up to 10 s of
-    # samples, the trigger at the trigger position of all of it); the
+    # DIG / SING take the whole record (scope.rs rec_split: the raw ring,
+    # lin_len from 100 ms/div, the trigger at the trigger position); the
     # comparator's post count is post_rec(rec, p, q), and the record is
     # trimmed to pre_for(p) + that (hw_trim), the edge estimate post_n
     # samples before its end.
@@ -166,20 +166,14 @@ def step(t, hz, tb, mode):
     pre = screen * 200 // 400
     lin = min(max(int(sr) // 10, 26 * 1024), A.cap)
     pk = sr <= 25000
-    top = 62 * 4096 if pk else A.cap - 64 - 800
-    m = max(min(int(sr * 10), top), screen)
+    m = max(min(lin if pk else 1 << 30, A.cap - 64 - 800), screen)
     p = m * 200 // 400
     q = min(m - p, PCAP - 64 - 800 - pre) if pk else m - p
     p, q = max(p, pre), max(q, screen - pre)
     rl = max(lin, p + q)
     post_n = max(rl - (p + 416), q + 416)
     exp = p + 416 + post_n
-    if pk:
-        # The coded ring keeps the whole span (its pre part is what the
-        # memory keeps): at least the post part and the screen's pre part.
-        check(n == len(v) and n >= post_n + pre, '%s: %d points (>= %d), %d samples read' % (tag, n, post_n + pre, len(v)))
-    else:
-        check(n == exp == len(v), '%s: %d points (expected %d), %d samples read' % (tag, n, exp, len(v)))
+    check(n == exp == len(v), '%s: %d points (expected %d), %d samples read' % (tag, n, exp, len(v)))
     th = n - post_n
     # The counts cover the running frames before DIG / SING too: at 50 MS/s
     # an occasional miss there (1..2 per ~100 hits, emulator) is not this

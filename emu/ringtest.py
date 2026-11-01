@@ -13,8 +13,9 @@ On the scope page (comparator trigger off, as emu/wavtest.py):
   * roll at 200 ms/div (12.5 kS/s), STOP after 25 s: the record is all the
     ring keeps (sine: 12.5 samples a period, >= 80 000 samples; noise / mixed >= 65 520, all at
     most cring::NB blocks = 262 144);
-  * DIGitize at 100 ms/div (25 kS/s): a record of 65 520 .. 180 000
-    samples with the trigger point 52 156 + a few samples before its end
+  * DIGitize at 100 ms/div (25 kS/s): a record of 26 624 + a few
+    samples (scope.rs rec_split) with the trigger point 13 312 + a few
+    samples before its end
     (sine, mixed: the point on the sine's level, rising);
   * sine: the record is the input sine (frequency, no step larger than the
     sine's: no seam at the block boundaries);
@@ -196,10 +197,10 @@ try:
     p, codes, v = record()
     n = len(codes)
     i0 = round(-p['xorig'] / p['xinc'])
-    check(65520 <= n <= 180000, 'DIGitize 100 ms/div: %d samples (65 520 .. 180 000)' % n)
+    check(26624 <= n <= 26624 + 2000, 'DIGitize 100 ms/div: %d samples (26 624 .. 28 624)' % n)
     if A.signal != 'noise':
         sstep = step * p['xinc']
-        ok = 2 <= i0 < n - 2 and 52156 <= n - i0 <= 52156 + 2000
+        ok = 2 <= i0 < n - 2 and 13312 <= n - i0 <= 13312 + 2000
         check(ok and abs(v[i0]) < sstep + 0.05 * VPP and v[i0 + 1] > v[i0 - 1],
               'DIGitize: trigger sample %d of %d (%d before the end), %.3f V, rising' % (i0, n, n - i0, v[i0] if 0 <= i0 < n else float('nan')))
     if A.signal == 'sine':

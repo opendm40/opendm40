@@ -236,8 +236,9 @@ at the ring size), so a full circular ring is never rotated. `Codes`
 also implements `pack10::Src`, the read trait those functions take (the
 host tests pass u16 slices).
 
-Single / DIGitize wait for a whole record (at most 10 s, `rec_split`),
-the trigger point at the trigger position of the record. A STOP while
+Single / DIGitize wait for a whole record (`rec_split`: the raw ring
+above 25 kS/s, from 100 ms/div `lin_len`, 26 624 samples, at least the
+screen), the trigger point at the trigger position of the record. A STOP while
 running (`apply`) goes on until such a capture of the screen + 0.5 s is
 in, at most 0.5 s more (the deadline: then what is in, untriggered). A STOP cannot keep
 the frame shown before: the capture after it has already started
@@ -271,10 +272,8 @@ through `Codes`), a measurement of a 25 000-sample screen 3.1 -> 6.9 ms.
 
 The bound of a record is also the scope DLG format's: 64 blocks of 4096
 samples (`dlog::SBLK_MAX`), 262 144. Single / DIGitize on the coded ring
-(edge trigger) want 10 s, the trigger at the trigger position; the part
-after the trigger point is at most PCAP less the margins and the
-screen's pre part (39 036 at the centre), so it fits the ring whatever
-the signal, the part before it is what the ring keeps.
+keep `lin_len` (26 624 samples, 1.1 s at 100 ms/div), the trigger at
+the trigger position; roll keeps what the ring holds.
 
 Not done: the fast timebases at 65 520 samples. That needs 131 040 B of
 raw ring in one piece: BUF plus ~45 KB of buffers lent for the capture
