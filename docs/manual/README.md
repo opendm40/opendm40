@@ -1497,7 +1497,8 @@ over the trace; tap the button again while its popup is open to turn it off.
 Press **RUN** (or tap the run state) to stop. The last capture (26 624
 samples) stays in memory:
 
-- change the timebase to zoom in or out of the stored capture;
+- change the timebase to zoom in or out of the stored capture (zoom in stops
+  at **Max zoom**, 16 samples across the screen);
 - change the V/div to scale it;
 - drag sideways to pan through it;
 - double tap to centre it on the trigger point.
