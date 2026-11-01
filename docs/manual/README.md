@@ -68,7 +68,7 @@ Before you start:
 To install opendm40 on a meter that runs the stock firmware:
 
 1. Download the update file `dm40_opendm40_v<version>.bin`, for example
-   `dm40_opendm40_v0.2.0.bin`, from the latest
+   `dm40_opendm40_v0.4.0.bin`, from the latest
    [release](https://github.com/opendm40/opendm40/releases/latest). You can
    also build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
@@ -98,7 +98,7 @@ To try a change before its release: open [pull
 requests](https://github.com/opendm40/opendm40/pulls) have a **Test build**
 comment with the update file (all of them: [PR test
 builds](https://github.com/opendm40/opendm40/releases/tag/pr-builds)); its
-version reads like `0.3.2-pr148.1a2b3c4`. These builds are not tested on a
+version reads like `0.4.0-pr148.1a2b3c4`. These builds are not tested on a
 meter.
 
 ### Update
@@ -212,7 +212,8 @@ The top line of the multimeter page shows, from left to right:
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
 7. the USB symbol while a computer has the meter connected (not with a charger);
-8. the battery level; green on the charger: the top bar blinks while the battery charges and stays when it is full.
+8. the battery level; green on the charger: the top segment blinks while
+   the battery charges and stays when it is full.
 
 ### Touch lock
 
@@ -230,19 +231,19 @@ the combined view switches to the next sub-mode of the current function
 
 ### Power, battery and sleep
 
-- **Dim screen** (Settings, default 5 min): without a touch or a key press
+- **Dim screen** (**Settings > Display**, default 5 min): without a touch
+  or a key press
   for this long, the backlight dims. Any touch or key brings it back; that
   first touch only wakes the screen and does nothing else.
-- **Shutdown** (Settings, default 30 min): on battery, without input for
-  this long, the meter switches off; with USB power (a computer or a charger)
-  it never does, and the time counts afresh from the unplug. 30 s before, it beeps and shows **Auto power-off in
-  30 s** (then 20, 10); touch the screen or press a key to keep it on.
-- A connected computer or phone also keeps the meter on: any SCPI command
-  over USB or Bluetooth, a phone-app request, and the computer reading or
-  writing the USB disk count as use for **Shutdown**, so the meter does not
-  switch off in the middle of a remote session or a firmware update. They
-  do not count for **Dim screen**: during a long remote session the screen
-  still dims, and they do not light it up again.
+- **Shutdown** (**Settings > Power**, default 30 min): on battery, without
+  input for this long, the meter switches off; with USB power (a computer
+  or a charger) it never does, and the time counts afresh from the unplug.
+  30 s before, it beeps and shows **Auto power-off in 30 s** (then 20, 10);
+  touch the screen or press a key to keep it on.
+- A connected computer or phone also keeps the meter on (SCPI over USB or
+  Bluetooth, phone-app requests, reading or writing the USB disk), so it
+  does not switch off during a remote session or a firmware update. The
+  screen still dims, and these requests do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
   MIN/MAX/AVG session runs, while the power meter counts energy with a
   current flowing, or while the inrush page is armed. The screen still dims.
@@ -351,7 +352,7 @@ lightning from 100 V). opendm40 adds:
 
 | | Stock | opendm40 |
 |---|---|---|
-| Top bar | Not touchable | Tap the run state, timebase, V/div, trigger |
+| Top bar | Not touchable | Tap the run state, timebase, trigger |
 | Timebase taps | Tap the left or right half | [Corner zones](#timebase) with labels (or the stock halves) |
 | Timebase list | — | Tap the timebase in the top bar |
 | Pinch | — | Pinch to change the timebase or the V/div |
@@ -364,7 +365,7 @@ lightning from 100 V). opendm40 adds:
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
 | Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 44 032 faster |
-| Serial decoding | — | [UART](#protocol-decoder) under the trace |
+| Serial decoding | — | [UART and DALI](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -436,7 +437,8 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The 65 520-sample scope capture (opendm40: 65 520 from 100 ms/div, 44 032 faster).
+- The 65 520-sample scope capture at timebases faster than 100 ms/div
+  (opendm40: 44 032 there).
 
 ## Multimeter
 
@@ -591,9 +593,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
   | 0.28 mA ON | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
-  Short-circuit currents measured on one unit with `DBG:SRC`, jacks
-  shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
-  The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
+  Short-circuit currents, measured on one unit with the jacks shorted. The
+  open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
@@ -766,8 +767,8 @@ to a high voltage applied while the meter sat on the mV range.
 
 - **0L** in the reading with the word **Overflow** next to it: the value
   is above the range (or the function's limit). The bargraph turns red with
-  an **OL** mark. On the scope page's meter strip, **Overflow** is in the
-  small text right of the reading.
+  an **OL** mark. In the [combined view](#combined-view)'s meter strip,
+  **Overflow** is in the small text right of the reading.
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
