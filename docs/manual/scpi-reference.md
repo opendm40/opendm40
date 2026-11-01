@@ -331,7 +331,7 @@ Functions:
 - **AUTO coupling** (`VOLTage:AUTO`, `CURRent:AUTO`): the reading is the DC
   or the AC part, whichever the meter shows. `[SENSe:]VOLTage:COUPling?`
   says which.
-- **Overload** reads `+9.9E37`.
+- Over range (**0L**) reads `+9.9E37`.
 
 **When the reply comes.** `READ?` and `MEASure?` return a fresh reading:
 
@@ -657,7 +657,7 @@ the disk.
 
 - `LOG:CSV?` state: 0 idle, 1 recording, 2 stopping, 3 done, 4 disk full, 5
   no disk, 6 error; file is -1 until the first save.
-- `INTerval` and `DURation` apply to the next recording (`Settings
+- `INTerval`, `DURation` and `CHANge` apply to the next recording (`Settings
   conflict` while one runs). With an interval, each row is the mean of the
   readings in it. With `CHANge`, a row at its reading's time when the
   value moves by more than `LOG:CSV:CHANge` % of the range's full scale

@@ -36,7 +36,12 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope: the multimeter as CH2** (MF > Display > CH2 (DMM)): the
   multimeter's input drawn over CH1 on the same time axis, in V, mV and
   AC A ([manual](docs/manual/README.md#display-settings)). The multimeter
-  reading pauses while it is on.
+  reading pauses while it is on; CH2 samples at most 38.4 kS/s, and the
+  alerts and Bluetooth pause too.
+- **Record On change:** a row when the reading moves 0.1 / 1 / 5 % of the
+  range, on OL / HI / LO, and at least once a minute; SCPI
+  `LOG:CSV:INTerval CHANge`, `LOG:CSV:CHANge`.
+- Continuity shows its test current, **I -0.26 mA**.
 
 ### Changed
 
@@ -62,9 +67,12 @@ section named after the tag as the release notes; how to cut a release:
   when the reading climbed there, e.g. a charging capacitor); diode and the
   other functions say "Overflow" where "Overload" was
   ([manual](docs/manual/README.md#overflow)).
-- `DBG:TOUCH?`, `DBG:PROF?` and `DBG:ACDC:TRACE` (debug) are only in
-  builds with the `dbg-touch` / `dbg-prof` / `acdc-trace` features
+- `DBG:TOUCH?`, `DBG:PROF?`, `DBG:ACDC:TRACE`, `DBG:HYSPI`, `DBG:ACDC?`,
+  `DBG:DIAG?`, `DBG:OHM6`, `DBG:SENTinel?` and `DBG:SRC` (debug) are only in
+  builds with their features (`dbg-touch`, `dbg-prof`, `acdc-trace`,
+  `dbg-hyspi`, `dbg-acdc`, `dbg-diag`, `dbg-ohm6`, `dbg-sent`, `dbg-src`)
   ([SCPI reference](docs/manual/scpi-reference.md#debug-commands)).
+- On-screen help: two pages (gestures, side keys).
 - **Auto power-off on battery only:** with USB power (a computer or a
   charger) the meter never switches itself off; after the unplug the
   **Shutdown** time counts afresh
@@ -77,17 +85,16 @@ section named after the tag as the release notes; how to cut a release:
   short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
   screen.
 - Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
-- Capacitance ranges on the meter: MF chooses 60 nF .. 60000 µF or AUTO; the
+- Capacitance ranges on the meter: MF chooses 60 nF .. 60 000 µF or AUTO; the
   AUTO key steps and resets them as in V / A / Ω. The 6 nF and 60 nF ranges
   are one (below 6 nF with 3 decimals).
 - Capacitance: 1 .. 47 mF show their first value in about 1.5 to 5 s (was
   9 to 20 s; 47 mF did not settle); AUTO starts on the last value's range;
   the value stays grey until the slope settles (electrolytics); another
   capacitor on 6 / 60 mF starts the range choice again.
-- Capacitance on 600 µF and up: a value every 0.25 s (the median of the
-  last polls, corrected for the ramp's two directions), grey until the ramp
-  has run both ways; "Discharging" with a rough grey value while the meter
-  discharges, orange "Charged cap: discharge first" above ~1.2 V; a charged
+- Capacitance on 600 µF and up: a value every 0.25 s (a line fit per
+  half ramp), grey until the ramp has run both ways; grey **Discharging...
+  0.85 V** while the meter discharges (**>1.2 V** above that); a charged
   capacitor (up to 5 V) discharges about twice as fast.
 - Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
   ten times it.
@@ -169,6 +176,7 @@ section named after the tag as the release notes; how to cut a release:
 - **Inrush:** the automatic power-off no longer switches the meter off while
   the page is armed and waits for a load to start
   ([#144](https://github.com/opendm40/opendm40/issues/144)).
+- Trend chart keeps its points on REL on / off, as the stock.
 - Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
   after an end (10 + gave 20 %, and 55 % was out of reach)
   ([#91](https://github.com/opendm40/opendm40/issues/91)).
