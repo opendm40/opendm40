@@ -277,6 +277,9 @@ SECTIONS
         /* The ohm / diode test-current label: drawn on a function / range /
          * variant change only (no AD2 stream runs in ohm / diode). */
         *(.text.*8opendm402ui18test_current_label*);
+        /* The Hz page's pulse widths (per Hz reading; no AD2 stream runs
+         * in the Hz function). */
+        *(.text.*8opendm402ui17pulse_width_label*);
         *(.text.*8opendm402ui10range_page*);
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);

@@ -190,6 +190,14 @@ fn suffixes() {
 fn set_commands() {
     let mut s = Scpi::new();
     // Good values.
+    check(matches!(s.handle(b"CALC:REL:FORM PERC", 1), Out::Instr(Cmd::CalcRelForm(Some(true)))), "CALC:REL:FORM PERC");
+    check(matches!(s.handle(b"calc:rel:format difference", 1), Out::Instr(Cmd::CalcRelForm(Some(false)))), "calc:rel:format difference");
+    check(matches!(s.handle(b"CALC:REL:FORM?", 1), Out::Instr(Cmd::CalcRelForm(None))), "CALC:REL:FORM?");
+    check(matches!(s.handle(b"CALC:AHOL:PROB ON", 1), Out::Instr(Cmd::CalcProbe(Some(true)))), "CALC:AHOL:PROB ON");
+    check(matches!(s.handle(b"CALC:AHOL:PROB?", 1), Out::Instr(Cmd::CalcProbe(None))), "CALC:AHOL:PROB?");
+    check(matches!(s.handle(b"CALC:AHOL ON", 1), Out::Instr(Cmd::CalcAhold(Some(true)))), "CALC:AHOL ON still AutoHold");
+    check(matches!(s.handle(b"FETC:PWID?", 1), Out::Instr(Cmd::FetchWidth(false))), "FETC:PWID?");
+    check(matches!(s.handle(b"FETCh:NWIDth?", 1), Out::Instr(Cmd::FetchWidth(true))), "FETCh:NWIDth?");
     check(matches!(s.handle(b"SOUR:FREQ 1KHZ", 1), Out::Instr(Cmd::GenFreq(Some(v))) if v == 1000.0), "SOUR:FREQ 1KHZ");
     check(matches!(s.handle(b"sour:freq 2.5mhz", 1), Out::Instr(Cmd::GenFreq(Some(v))) if v == 2.5e6), "sour:freq 2.5mhz = 2.5 MHz");
     check(matches!(s.handle(b"SOUR:FREQ 1M", 1), Out::Instr(Cmd::GenFreq(Some(v))) if (v - 1e-3).abs() < 1e-9), "SOUR:FREQ 1M = 1 mHz");

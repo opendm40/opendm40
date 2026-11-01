@@ -1135,6 +1135,21 @@ impl App {
         self.draw_reading();
     }
 
+    /// REL format %: the shown value's deviation from the reference
+    /// (meter::rel_pct); None in the difference format or without REL.
+    fn rel_pct(&self) -> Option<crate::dmm::Val> {
+        let r = self.meter.rel_value().filter(|_| self.meter.rel_pct)?;
+        let s = self.meter.shown()?;
+        Some(crate::meter::rel_pct(&s.main, r, s.mode))
+    }
+
+    /// REL box long press: the REL format (difference / %), REL on only.
+    fn rel_form_toggle(&mut self, now: u64) {
+        self.meter.rel_pct = !self.meter.rel_pct;
+        self.beep(now, 200);
+        self.chart_dirty = true;
+    }
+
     /// DMM page rate chip tap: the next FR-05 conversion rate, in the same
     /// order as a tap on the value (`next_rate`: FAST -> MED -> SLOW ->
     /// FAST). Where the rate changes nothing (AC, Hz, capacitance, ...) a
@@ -1265,7 +1280,11 @@ impl App {
         let ln = fmt(&mut lb, l.lo);
         let onoff = |b: bool| if b { "ON" } else { "OFF" };
         let vals: [&str; 9] = [
-            onoff(self.meter.ahold),
+            match (self.meter.ahold, self.meter.probe) {
+                (false, _) => "OFF",
+                (true, false) => "ON",
+                (true, true) => "ON + History",
+            },
             onoff(l.on),
             core::str::from_utf8(&hb[..hn]).unwrap_or(""),
             core::str::from_utf8(&lb[..ln]).unwrap_or(""),
@@ -1955,6 +1974,7 @@ impl App {
                 min: st.map(|s| s.0),
                 sd: st.map(|s| s.3),
                 rel: self.meter.rel_value(),
+                rel_pct: self.rel_pct(),
                 secs: self.meter.stats.secs(now),
                 rec: self.meter.stats.rec,
             };
@@ -2200,7 +2220,8 @@ impl App {
         p[16] = r25.to_bits();
         p[17] = b.to_bits();
         // v4 words (0 = default everywhere): p[18] bit 0 AutoHold on, bit 1
-        // limit fail beep OFF, bits 8..16 limits checked per slot
+        // limit fail beep OFF, bit 2 Probe Hold, bit 3 REL format %, bits
+        // 8..16 limits checked per slot
         // (meter::lim_slot); p[19] bits 0..8 lower limit set, bits 16..24
         // upper limit set; p[20 + 2 i] / p[21 + 2 i] lower / upper limit of
         // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39]
@@ -2208,7 +2229,7 @@ impl App {
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
         // records); p[11] bits 16..31: scope drag hold-to-grab ms (0 = direct).
         let m = &self.meter;
-        p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
+        p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1 | (m.probe as u32) << 2 | (m.rel_pct as u32) << 3;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
         // other slots': p[18] bit 17, p[19] bits 9 / 25).
         for (i, l) in m.lim.iter().enumerate() {
@@ -2316,6 +2337,8 @@ impl App {
         // v4: AutoHold, limits (all zero in older records = off / unset).
         let m = &mut self.meter;
         m.lim_beep = p[18] & 2 == 0;
+        m.probe = p[18] & 4 != 0;
+        m.rel_pct = p[18] & 8 != 0;
         if same_session {
             m.ahold = p[18] & 1 != 0;
             for (i, l) in m.lim.iter_mut().enumerate() {
@@ -2633,6 +2656,10 @@ impl App {
         let fail = matches!(self.meter.verdict(), crate::meter::V_HI | crate::meter::V_LO);
         let fail_beep = fail && self.meter.lim_beep;
         if u.captured {
+            // Probe Hold: the captured value into the history row too.
+            if let Some(s) = u.show.filter(|_| self.meter.probe) {
+                self.hist_push(&s);
+            }
             self.beep(now, if fail_beep { 400 } else { 80 });
         } else if u.fail_edge && fail_beep && now >= self.fail_beep_at + 1000 {
             self.fail_beep_at = now;
@@ -3114,6 +3141,11 @@ impl App {
                 self.hist_n = 0;
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
+            }
+            // REL box, REL on: difference <-> % (the box shows which).
+            Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm.pw.on && self.meter.rel_active() && p.x >= 402 && (205..241).contains(&p.y) => {
+                captured = true;
+                self.rel_form_toggle(now);
             }
             Gesture::LongPress(p) if self.view == View::Dmm && p.x >= 402 && (175..279).contains(&p.y) => {
                 captured = true;
@@ -3619,6 +3651,21 @@ impl App {
         self.redraw |= matches!(self.view, View::Range | View::Limits);
     }
 
+    /// History row: append `r` (not OL), the oldest of five dropped; drawn
+    /// when the row is on screen (else with the page).
+    fn hist_push(&mut self, r: &Reading) {
+        if r.main.ol {
+            return;
+        }
+        let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
+        self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
+        self.hist_n = (self.hist_n + 1).min(5);
+        self.hist_new = i;
+        if self.view == View::Dmm && !self.dmm_view.bar_on && !self.dmm.pw.on {
+            ui::history(&self.hist, self.hist_n, self.hist_new);
+        }
+    }
+
     #[inline(never)] // .cold (link-native.x): on a tap
     fn tap(&mut self, clk: &mut Clock, x: u16, y: u16) {
         let now = clk.now_ms();
@@ -3644,13 +3691,7 @@ impl App {
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).
                 if let Some(r) = self.meter.shown().copied() {
-                    if !r.main.ol {
-                        let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
-                        self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
-                        self.hist_n = (self.hist_n + 1).min(5);
-                        self.hist_new = i;
-                        ui::history(&self.hist, self.hist_n, self.hist_new);
-                    }
+                    self.hist_push(&r);
                 }
             }
             View::Gallery => {} // gestures go to gallery::touch (App::gesture)
@@ -3927,8 +3968,16 @@ impl App {
                 let l = &mut self.meter.lim[slot];
                 match ui::list_hit(y, ui::LIMIT_ROWS.len()) {
                     Some(0) => {
-                        let on = !self.meter.ahold;
-                        self.meter.set_ahold(on);
+                        // OFF -> ON -> ON + History (Probe Hold) -> OFF.
+                        let (on, probe) = match (self.meter.ahold, self.meter.probe) {
+                            (false, _) => (true, false),
+                            (true, false) => (true, true),
+                            (true, true) => (false, false),
+                        };
+                        self.meter.probe = probe;
+                        if on != self.meter.ahold {
+                            self.meter.set_ahold(on);
+                        }
                     }
                     Some(1) => l.on = !l.on,
                     Some(k @ (2 | 3)) => {
@@ -4608,6 +4657,20 @@ impl App {
                 out.put_bytes(if self.mode_remember { b"1" } else { b"0" });
                 true
             }
+            C::FetchWidth(neg) => {
+                // The latest Hz reading (pre-REL: the widths are not REL'd).
+                match self.last_raw.as_ref().filter(|r| r.mode == 14) {
+                    Some(r) => match crate::meter::reading_widths(r) {
+                        Some(w) => out.put_f32(if neg { w.1 } else { w.0 }),
+                        None => out.put_bytes(b"+9.90000000E+37"),
+                    },
+                    None => {
+                        out.set_err("Data stale");
+                        out.put_bytes(b"+9.90000000E+37");
+                    }
+                }
+                true
+            }
             _ => {
                 // The latest pre-REL reading of a current function.
                 match self.last_raw.as_ref().filter(|r| crate::sentinel::shunt_of(r.mode).is_some() && r.power.is_none()) {
@@ -4811,6 +4874,24 @@ impl App {
             }
             C::CalcAhold(None) => {
                 out.put_bytes(if self.ahold() { b"1" } else { b"0" });
+                true
+            }
+            C::CalcProbe(Some(on)) => {
+                self.meter.probe = on;
+                self.redraw |= self.view == View::Limits;
+                false
+            }
+            C::CalcProbe(None) => {
+                out.put_bytes(if self.meter.probe { b"1" } else { b"0" });
+                true
+            }
+            C::CalcRelForm(Some(p)) => {
+                self.meter.rel_pct = p;
+                self.chart_dirty = true;
+                false
+            }
+            C::CalcRelForm(None) => {
+                out.put_bytes(if self.meter.rel_pct { b"PERC" } else { b"DIFF" });
                 true
             }
             C::CalcAver(k) => {
@@ -5210,7 +5291,7 @@ impl App {
     #[inline(never)]
     pub fn scpi(&mut self, clk: &mut Clock, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
         use crate::scpi::Cmd as C;
-        if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
+        if matches!(cmd, C::FetchBurden | C::FetchWidth(_) | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
             return self.burden_scpi(cmd, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {

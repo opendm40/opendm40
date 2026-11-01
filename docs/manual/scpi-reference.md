@@ -444,6 +444,17 @@ Functions:
 - `DISPlay:BURDen` shows the burden voltage on the DMM page (DC A and AC A).
   Stored.
 
+## Pulse width
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `FETCh:PWIDth?` | | Positive pulse width of the latest frequency reading, s: `+2.500000E-04` | both |
+| `FETCh:NWIDth?` | | Negative pulse width, s | both |
+
+- Computed from the frequency and the duty cycle. `+9.9E37` with no signal,
+  at 0 % or 100 % duty or over range; outside the frequency function
+  `+9.9E37` with `Data stale`.
+
 ## CALCulate: hold, statistics, limits, smoothing
 
 These act on the present DMM function; values are in its SI unit (W in the
@@ -452,6 +463,8 @@ power meter).
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
 | `CALCulate:AHOLd[?]` | `ON` or `OFF` | `1` or `0` | both |
+| `CALCulate:AHOLd:PROBe[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
+| `CALCulate:REL:FORMat[?]` | `DIFFerence` (default) or `PERCent` | `DIFF` or `PERC` | both |
 | `CALCulate:AVERage[:AVERage]?` | | Mean: `+1.234567E+00` | both |
 | `CALCulate:AVERage:MINimum?` | | Minimum | both |
 | `CALCulate:AVERage:MAXimum?` | | Maximum | both |
@@ -468,6 +481,11 @@ power meter).
 | `CALCulate:SMOothing:RESPonse[?]` | `SLOW`, `MEDium` or `FAST` | `SLOW` or `FAST` | both |
 
 - `AHOLd`: AutoHold, as a long press on RUN.
+- `AHOLd:PROBe`: Probe Hold, each AutoHold capture is also added to the
+  history row. Stored.
+- `REL:FORMat PERCent`: the REL box shows the deviation from the reference
+  in % (ppm below 0.1 % in DC V and Ω) instead of the reference. Readings
+  stay the difference in the function's unit. Stored.
 - `AVERage...?` before the first sample answer `+9.9E37` with `Data stale`.
 - `AVERage:STATe ON` starts a recording session: the statistics restart and
   the meter does not power off when idle.

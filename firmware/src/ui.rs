@@ -296,9 +296,12 @@ pub struct DmmView {
     /// The "ON" ohm variant is selected (`draw_static`'s `ohm_on`).
     ohm_on: bool,
     /// Test current label as last drawn: ohm range | variant << 3, 0x10
-    /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
+    /// diode, 0x2x capacitance discharge, 0x30 Hz pulse widths, 255 = none
+    /// drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
+    /// The pulse widths' key as drawn (`pulse_width_label`).
+    pw_text: u32,
     /// The caption next to the main readout's "0L" as drawn: 0 none,
     /// 1 "Overflow", 2 "OPEN" (`ol_word`).
     ol_word: u8,
@@ -607,6 +610,7 @@ impl DmmView {
             pwc: pw::PwCache::new(),
             ohm_on: false,
             last_iohm: 254,
+            pw_text: 0,
             ol_word: 0,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
@@ -969,10 +973,18 @@ impl DmmView {
                 None => 255,
             },
             11 if aux[0].is_none() && !self.power => 0x11,
+            // Hz: the pulse widths (`pulse_width_label`).
+            14 if aux[0].is_none() && !self.power => 0x30,
             _ => 255,
         };
-        if (ik == 255 || (ik & 0xF0 == 0x20) != (self.last_iohm & 0xF0 == 0x20)) && self.last_iohm != 255 {
-            let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
+        // The box class of a label code: test current / discharge / widths.
+        let cls = |k: u8| match k & 0xF0 {
+            0x20 => 1,
+            0x30 => 2,
+            _ => 0,
+        };
+        if (ik == 255 || cls(ik) != cls(self.last_iohm)) && self.last_iohm != 255 {
+            let b = [OHM_I_RECT, CAP_DIS_RECT, PW_RECT][cls(self.last_iohm)];
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
         }
@@ -1105,7 +1117,11 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik & 0xF0 == 0x20 {
+        if ik == 0x30 {
+            // Every reading (the label skips an unchanged text).
+            self.pw_text = pulse_width_label(r, vcol, self.pw_text, self.last_iohm != ik);
+            self.last_iohm = ik;
+        } else if ik & 0xF0 == 0x20 {
             // Every reading: the node voltage moves.
             cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
             self.last_iohm = ik;
@@ -1208,6 +1224,43 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     }
     s.push(" V");
     sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
+}
+
+/// The Hz page's pulse widths: the aux1 slot to the aux2 value box.
+const PW_RECT: sf::Rect = rect(8, 36, 223, 30);
+
+/// "+W 12.34 ms" / "-W 7.660 ms" (meter::reading_widths) in two F14 lines
+/// of PW_RECT; dashes without a clean value. `last`: the key of the texts
+/// drawn (the f32 bits of +w, 0 for the dashes); `full` repaints the box.
+/// Returns the new key.
+#[inline(never)] // .cold (link-native.x): the Hz function only (no AD2 stream there)
+fn pulse_width_label(r: &Reading, c: Color, last: u32, full: bool) -> u32 {
+    let w = meter::reading_widths(r);
+    let key = w.map_or(0, |w| w.0.to_bits() | 1);
+    if key == last && !full {
+        return key;
+    }
+    let b = PW_RECT;
+    if full {
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+    }
+    for (i, cap) in ["+W", "-W"].iter().enumerate() {
+        let y = b.y + 1 + 14 * i as i16;
+        sf::label(sf::F14, rect(b.x, y, 24, 14), cap, DIM, BG, 1, 1);
+        let mut t = [0u8; 16];
+        let mut s = crate::scope_ui::Txt::new("");
+        match w {
+            Some(w) => {
+                let v = meter::width_val(if i == 0 { w.0 } else { w.1 });
+                s.push(crate::dmm::format(&mut t, v.v, v.dec));
+                s.push(" ");
+                s.push(v.unit);
+            }
+            None => s.push("--"),
+        }
+        sf::label(sf::F14, rect(b.x + 26, y, b.w - 26, 14), s.as_str(), c, BG, 1, 1);
+    }
+    key
 }
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
@@ -2276,6 +2329,9 @@ pub struct Side {
     pub min: Option<f32>,
     pub sd: Option<f32>,
     pub rel: Option<f32>,
+    /// REL format %: the deviation from the reference (meter::rel_pct),
+    /// shown instead of the reference.
+    pub rel_pct: Option<crate::dmm::Val>,
     pub secs: Option<u32>,
     pub rec: bool,
 }
@@ -2494,16 +2550,23 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
             sf::label(sf::F14, rect(SIDE_X + 25, STAT_Y[i], bw, 14), s, STATUS_FG, BG, 3, 1);
         }
     }
-    let k = q(side.rel.or(Some(0.0)));
+    // REL %: the value at its own decimals, its unit ("%" / "ppm") and
+    // OL in the key (bit 62 apart from any reference key).
+    let k = match side.rel_pct {
+        Some(p) if p.ol => i64::MIN + 1,
+        Some(p) => {
+            let mut s = 1.0f32;
+            for _ in 0..p.dec {
+                s *= 10.0;
+            }
+            let v = p.v * s;
+            ((if v < 0.0 { v - 0.5 } else { v + 0.5 }) as i64) << 4 | (p.dec as i64) << 1 | (p.unit.len() > 1) as i64 | 1 << 62
+        }
+        None => q(side.rel.or(Some(0.0))),
+    };
     if c.rows[4] != k {
         c.rows[4] = k;
-        let r = rect(405, 205, 71, 36);
-        sf::rbox(r, 6, BTN, BG);
-        sf::glyphs(sf::F14, rect(409, 209, 30, 14), "REL", STATUS_FG, BTN, 0, 1);
-        let mut u = [0u8; 16];
-        sf::glyphs(sf::F14, rect(430, 209, 42, 14), sf::unit_text(unit, &mut u), DIM, BTN, 3, 1);
-        let rv = crate::dmm::format(&mut t, side.rel.unwrap_or(0.0), dec);
-        sf::glyphs(sf::F14, rect(409, 225, 63, 14), rv, STATUS_FG, BTN, 3, 1);
+        rel_box(side.rel_pct, side.rel, unit, dec);
     }
     let tk = side.secs.map(|t| (t, side.rec));
     if c.time != tk {
@@ -2529,6 +2592,32 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         let fg = if side.rec { 0xFC40 } else { DIM };
         sf::label(sf::F14, rect(SIDE_X, STAT_Y[4], SIDE_R - SIDE_X, 14), txt, fg, BG, 3, 1);
     }
+}
+
+/// The REL box (405,205,71,36): "REL", the unit, the reference; with REL
+/// format % the deviation ("+1.234" under "%", "-120" under "ppm", "0L").
+fn rel_box(pct: Option<crate::dmm::Val>, rel: Option<f32>, unit: &'static str, dec: u8) {
+    let r = rect(405, 205, 71, 36);
+    sf::rbox(r, 6, BTN, BG);
+    sf::glyphs(sf::F14, rect(409, 209, 30, 14), "REL", STATUS_FG, BTN, 0, 1);
+    let mut u = [0u8; 16];
+    let mut t = [0u8; 16];
+    let mut s = crate::scope_ui::Txt::new("");
+    let ut = match pct {
+        Some(p) => {
+            if !p.ol && p.v > 0.0 {
+                s.push("+");
+            }
+            s.push(meter::text(&mut t, &p));
+            p.unit
+        }
+        None => {
+            s.push(crate::dmm::format(&mut t, rel.unwrap_or(0.0), dec));
+            sf::unit_text(unit, &mut u)
+        }
+    };
+    sf::glyphs(sf::F14, rect(430, 209, 42, 14), ut, DIM, BTN, 3, 1);
+    sf::glyphs(sf::F14, rect(409, 225, 63, 14), s.as_str(), STATUS_FG, BTN, 3, 1);
 }
 
 // ---------------------------------------------------------------- scope

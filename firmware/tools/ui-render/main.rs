@@ -669,6 +669,8 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("hz_mhz", rd(14, val(9.9999, 4, "MHz"), None, Some(val(100.0, 1, "%")), false), None),
         ("hz_khz", rd(14, val(99.999, 3, "kHz"), None, Some(val(44.4, 1, "%")), false), None),
         ("hz_ol", rd(14, ol(4, "MHz"), None, Some(ol(1, "%")), false), None),
+        // The pulse widths' widest texts: "+W 999.9 us" / "-W 999.0 ms".
+        ("hz_pw_wide", rd(14, val(1.0001, 3, "Hz"), None, Some(val(0.1, 1, "%")), false), None),
         // The small extra digit (dmm.rs `freq_ext`): 2 Hz, 1 kHz, 61.8 Hz.
         ("hz_ext_2", rd(14, Val { ext: true, ..val(2.00003, 3, "Hz") }, None, Some(val(50.0, 1, "%")), false), None),
         ("hz_ext_khz", rd(14, Val { ext: true, ..val(1.00005, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false), None),
@@ -2068,7 +2070,9 @@ fn main() {
                     ui::status_right(&status(0));
                     ui::hv_warning(hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
-                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
+                    // REL format %: the widest texts, every other chip variant.
+                    let pct = [None, Some(val(-99999.0, 0, "%")), Some(val(-999.0, 0, "ppm")), Some(ol(0, "%")), Some(val(-9.999, 3, "%"))][k];
+                    let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), rel_pct: pct, secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
                     ui::chart(&mut cc, &pts, dec, rate, Some(&side), r.main.unit, rc);
                     ck.check(&format!("dmm/{name}/x{}/h{hold}/l{lim}/r{rate}/c{k}/a{}/p{}", ext as u8, r.alert.name(), alt as u8), &dmm_page_regions);
@@ -2244,7 +2248,7 @@ fn main() {
                     pts.remove(0);
                 }
                 pts.push(v);
-                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v.abs()), rel: None, secs: Some(i as u32), rec: false };
+                let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v.abs()), rel: None, rel_pct: None, secs: Some(i as u32), rec: false };
                 if i == 0 {
                     host::reset(0);
                 }
@@ -2550,7 +2554,7 @@ fn main() {
     // the widest limit values.
     for rec in ui::REC_INTERVALS {
         host::reset(0);
-        ui::list_page("Hold & Limits: Diode", &ui::LIMIT_ROWS, &["OFF", "OFF", "-99999.9 mA", "-99999.9 mA", "", "", "", "OFF", rec]);
+        ui::list_page("Hold & Limits: Diode", &ui::LIMIT_ROWS, &["ON + History", "OFF", "-99999.9 mA", "-99999.9 mA", "", "", "", "OFF", rec]);
         ck.check_opts(&format!("limits/{rec}"), &page_regions, false);
         if rec == "Every reading" {
             save(&out, "m11-hold-limits");
@@ -3102,9 +3106,27 @@ fn main() {
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
-        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), sd: Some(0.0001), rel: None, secs: Some(5), rec: false };
+        let side = ui::Side { max: Some(4.8172), avg: Some(4.8171), min: Some(4.8169), sd: Some(0.0001), rel: None, rel_pct: None, secs: Some(5), rec: false };
         ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
         save(&out, "d01-dmm");
+        // REL format %: the deviation in the REL box (% and ppm).
+        for (file, p) in [("d01d-dmm-rel-pct", val(1.234, 3, "%")), ("d01e-dmm-rel-ppm", val(-120.0, 0, "ppm"))] {
+            let side = ui::Side { rel: Some(4.8170), rel_pct: Some(p), ..side };
+            ui::chart(&mut ui::ChartCache::new(), &pts, 4, 2, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
+            save(&out, file);
+        }
+        // Hz: the pulse widths in the aux1 slot.
+        {
+            host::reset(0);
+            let (r, _) = find("hz_khz");
+            let mut dv = ui::DmmView::new();
+            dv.bar_on = false;
+            dv.draw_static(Button::HzTemp, r.mode, false, false);
+            ui::history(&[(99.999, 3, "kHz"); 5], 3, 2);
+            dv.reading(&r, 0, meter::V_NONE);
+            ui::status_right(&status(0));
+            save(&out, "d01f-dmm-hz-widths");
+        }
         // The slow trend timebases (1.28 / 2.56 s/div): the chip's label.
         for (file, rate) in [("d01b-dmm-trend-1s28", 8u8), ("d01c-dmm-trend-2s56", 16)] {
             ui::chart(&mut ui::ChartCache::new(), &pts, 4, rate, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 200, applies: true });
@@ -3214,7 +3236,7 @@ fn main() {
         dv.reading(&r, 1, meter::V_HI);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| -600.0 + (i % 64) as f32 * 0.5).collect();
-        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), sd: Some(9.38), rel: Some(-501.67), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+        let side = ui::Side { max: Some(-568.50), avg: Some(-584.25), min: Some(-600.00), sd: Some(9.38), rel: Some(-501.67), rel_pct: None, secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
         ui::chart(&mut ui::ChartCache::new(), &pts, 2, 4, Some(&side), "mV", ui::RateChip { rate: 0, period_ms: 430, applies: false });
         save(&out, "d02-dmm-acdc");
         // AUTO coupling: the DC part (DC glyph on the V button and above
@@ -3574,7 +3596,7 @@ fn main() {
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
             ui::status_right(&status(0));
-            let side = ui::Side { max: None, avg: None, min: None, sd: None, rel: None, secs: None, rec: false };
+            let side = ui::Side { max: None, avg: None, min: None, sd: None, rel: None, rel_pct: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             save(&out, file);
         }
@@ -3607,7 +3629,7 @@ fn main() {
             dv.reading(r, 0, lim);
             dv.short_sync();
             ui::status_right(&status(0));
-            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), sd: Some(r.main.v), rel: None, secs: None, rec: false };
+            let side = ui::Side { max: Some(r.main.v), avg: Some(r.main.v), min: Some(r.main.v), sd: Some(r.main.v), rel: None, rel_pct: None, secs: None, rec: false };
             ui::chart(&mut ui::ChartCache::new(), &[], r.main.dec, 1, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: 100, applies: true });
             dv
         };
