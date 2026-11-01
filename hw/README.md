@@ -211,6 +211,12 @@ updates.
   ([`lcd.rs`](../firmware/src/lcd.rs)). The ID register 0xD3 reads `00 94 88` on this unit.
 - Backlight: PA6 AF9 = TIM13_CH1, 20 kHz PWM ([`board.rs`](../firmware/src/board.rs)).
 - Panel: 3.5" IPS 480 x 320 (review). The panel's FPC pinout is unknown.
+- Other hardware version: the FS-loader records the hardware version at
+  `0x080A4010`, `04` on this unit. A loader image from a unit with `03` reads
+  the LCD ID and supports ILI9341, ST7796, ILI9488, ST7789, NT35310, NT35510
+  and SSD1963 on the same FSMC addresses. This unit's loader, the stock V2.6
+  application and opendm40 initialise only ILI9488. The panel fitted to `03`
+  units is *unknown*.
 
 ## Touch panel and touch keys
 
@@ -748,3 +754,4 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 16. RTC power while off: the feature request (2026-10-13) assumed the RTC is
     always powered from the main battery; nothing in this repo traces VBAT or
     the LSE crystal, and it depends on which rail holds the power (item 2).
+17. The LCD controller on units with hardware version `03` ([LCD](#lcd)).
