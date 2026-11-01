@@ -69,6 +69,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Extra digit at full size:** wherever it can appear, the reading starts
+  further left, so the other digits do not move when it comes or goes
+  ([manual](docs/manual/README.md#counts-rate-and-the-extra-digit)).
 - **Settings in tabs:** the sections (Display, Alerts, Power, Multimeter,
   Scope, Other) are tabs on the left, rows are taller, and only the value
   side of a row reacts to a tap ([manual](docs/manual/README.md#settings)).
