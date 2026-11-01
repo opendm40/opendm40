@@ -3077,46 +3077,45 @@ pub const S_VOLUME: u8 = 3;
 pub const S_BT: u8 = 4;
 pub const S_START: u8 = 5;
 pub const S_RAILS: u8 = 6;
-pub const S_DRAG: u8 = 7;
 /// FR-05: the DMM rate / smoothing; UF-30: the DMM page's bargraph /
 /// history row.
-pub const S_RATE: u8 = 8;
-pub const S_SMOOTH: u8 = 9;
-pub const S_DMM_ROW: u8 = 10;
-pub const S_TEMP_UNIT: u8 = 11;
-pub const S_SWIPE: u8 = 12;
-pub const S_PRESS: u8 = 13;
-pub const S_TAP_STEP: u8 = 14;
+pub const S_RATE: u8 = 7;
+pub const S_SMOOTH: u8 = 8;
+pub const S_DMM_ROW: u8 = 9;
+pub const S_TEMP_UNIT: u8 = 10;
+pub const S_SWIPE: u8 = 11;
+pub const S_PRESS: u8 = 12;
+pub const S_TAP_STEP: u8 = 13;
 /// Opens the help pages (UF-29).
-pub const S_HELP: u8 = 15;
+pub const S_HELP: u8 = 14;
 /// The wrong-connection alerts (sentinel.rs; ON = all, A-JACK only, OFF).
-pub const S_JACK: u8 = 16;
+pub const S_JACK: u8 = 15;
 /// The danger alarm (danger.rs, doc 4.10: Loud / Volume / Off).
-pub const S_ALARM: u8 = 17;
+pub const S_ALARM: u8 = 16;
 /// The USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
 /// applies at the next USB plug).
-pub const S_USB: u8 = 18;
+pub const S_USB: u8 = 17;
 /// The burden voltage readout of the A functions (doc 3.15; default OFF =
 /// the stock aux row).
-pub const S_BURDEN: u8 = 19;
+pub const S_BURDEN: u8 = 18;
 /// Opens the Device / About page (the stock section 6).
-pub const S_DEVICE: u8 = 20;
+pub const S_DEVICE: u8 = 19;
 /// Opens the touch test page (app_touchtest.rs).
-pub const S_TOUCH: u8 = 21;
+pub const S_TOUCH: u8 = 20;
 /// The accuracy label (../docs/dmm-accuracy.md; default ON).
-pub const S_ACC: u8 = 22;
+pub const S_ACC: u8 = 21;
 /// Ohm readings below 0 (Dmm::ohm_neg; default OFF).
-pub const S_OHM_NEG: u8 = 23;
+pub const S_OHM_NEG: u8 = 22;
 /// "Mode Remember" (the stock's name, Other Settings; default OFF as the
 /// stock): ON restarts the multimeter after a power-off as it was (app.rs
 /// `restore`).
-pub const S_REMEMBER: u8 = 24;
+pub const S_REMEMBER: u8 = 23;
 /// Number of settings (the value array's length).
-pub const SET_N: usize = 25;
+pub const SET_N: usize = 24;
 
 /// Row labels by id. In the Scope section without the "Scope" prefix.
 pub const SET_NAMES: [&str; SET_N] = [
-    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power", "Drag",
+    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
     "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
     "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
     "Mode Remember",
@@ -3130,7 +3129,7 @@ pub const SET_TABS: [(&str, &[u8]); 6] = [
     ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
     ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
     ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
-    ("Scope", &[S_DRAG, S_SWIPE, S_PRESS, S_TAP_STEP]),
+    ("Scope", &[S_SWIPE, S_PRESS, S_TAP_STEP]),
     ("Other", &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP]),
 ];
 /// The section of the USB disk row (its value follows the bus), the
@@ -3605,7 +3604,9 @@ pub const HELP: [(&str, &[(&str, &str)]); 2] = [
             ("Swipe down (DMM)", "Record on / off"),
             ("3 fingers down", "Screenshot"),
             ("2 fingers down", "Power off"),
-            ("Scope: drag", "Move the trace"),
+            ("Scope: drag marker", "Move that marker"),
+            ("Scope: side drag", "Trigger position"),
+            ("Scope: drag up/down", "Selected item"),
         ],
     ),
     (

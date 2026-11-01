@@ -335,8 +335,7 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*8opendm403app*3App14with_temp_page*);
         *(.text.*8opendm403app*3App11sp_save_csv*);
-        /* scope_ui::drag_target (once per scope drag) and
-         * Scope::hw_calibrate are back in region B (2026-10-26, the long
+        /* Scope::hw_calibrate is back in region B (2026-10-26, the long
          * scope record: region C had < 8 KiB, B had room after
          * stockfont::paint stopped being one copy per closure). */
         /* Region B audit #3 (2026-10-22, 11.9 KB free on 1ad38aa):
