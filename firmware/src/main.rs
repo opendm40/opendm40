@@ -704,6 +704,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     scpi.set_err("Settings conflict");
                     false
                 }
+                // Presets: no disk write nor a recall while the logger owns
+                // the HY3131 (setfile.rs: a disk write stalls its rows).
+                scpi::Out::Instr(scpi::Cmd::Preset(op, _)) if logger.active() && !matches!(op, scpi::PS_NAME_Q | scpi::PS_VALID_Q) => {
+                    scpi.set_err("Settings conflict");
+                    false
+                }
                 scpi::Out::Instr(scpi::Cmd::Range(_, op)) if logger.active() && !op.is_query() => {
                     scpi.set_err("Settings conflict");
                     false
@@ -2558,6 +2564,7 @@ mod fastlog;
 mod gallery;
 mod fatdir;
 mod setfile;
+mod presets;
 mod upload;
 mod native;
 mod uid;

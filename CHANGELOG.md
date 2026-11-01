@@ -9,6 +9,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Presets:** main menu > **Presets** saves the multimeter, scope and
+  generator setup and the page into one of four named presets and recalls
+  it; the generator output is OFF after a recall
+  ([manual](docs/manual/README.md#presets)). SCPI `*SAV`, `*RCL`,
+  `MEMory:STATe:NAME`.
+- **Main menu:** the top row is now **Gallery** and **Presets**.
+
 - **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):

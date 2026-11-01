@@ -251,10 +251,14 @@ fn pre_main(dry: bool) {
     }
     phase(4);
     // The settings' copy (setfile.rs `_SETTING.BIN`): made on the first
-    // boot (2 blocks), then only its slots are read here.
+    // boot (2 blocks), then only its slots are read here. The presets the
+    // same way.
     {
         let mut disk = crate::spiflash::SpiFlash::new();
         crate::setfile::boot(&mut disk);
+        // The presets file (presets.rs `_PRESETS.BIN`): made on the first
+        // boot (4 blocks), then only its slot headers are read here.
+        crate::presets::boot(&mut disk);
     }
     phase(5);
     // The INFO/ files' slow-bank bytes mirrored on the SPI disk (vdisk.rs

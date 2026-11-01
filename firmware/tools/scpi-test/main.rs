@@ -93,6 +93,15 @@ mod sentinel {
     pub const M_ALL: u8 = 15;
     pub static QUES_EVENT: core::sync::atomic::AtomicU16 = core::sync::atomic::AtomicU16::new(0);
 }
+/// presets.rs's parser side (the MEM:STAT:NAME name).
+mod presets {
+    pub const N: usize = 4;
+    pub const NAME_LEN: usize = 16;
+    pub static mut NAME: Vec<u8> = Vec::new();
+    pub fn set_scpi_name(s: &[u8]) {
+        unsafe { NAME = s.to_vec() };
+    }
+}
 mod uid {
     pub fn bytes() -> &'static [u8; 24] {
         b"000102030405060708090A0B"
@@ -218,7 +227,38 @@ fn set_commands() {
     check(matches!(s.handle(b"DISP:BURD 1", 1), Out::Instr(Cmd::DispBurden(Some(true)))), "DISP:BURD 1");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
     check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
-    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");
+    // Presets (app_presets.rs): *SAV / *RCL n (1..4 -> slot 0..3),
+    // MEM:STAT:NAME / NAME? / VALid? / DELete.
+    check(matches!(s.handle(b"*SAV 1", 1), Out::Instr(Cmd::Preset(scpi::PS_SAV, 0))), "*SAV 1");
+    check(matches!(s.handle(b"*rcl 4", 1), Out::Instr(Cmd::Preset(scpi::PS_RCL, 3))), "*rcl 4");
+    check(matches!(s.handle(b"MEM:STAT:VAL? 2", 1), Out::Instr(Cmd::Preset(scpi::PS_VALID_Q, 1))), "MEM:STAT:VAL? 2");
+    check(matches!(s.handle(b"MEMory:STATe:DELete 3", 1), Out::Instr(Cmd::Preset(scpi::PS_DEL, 2))), "MEMory:STATe:DELete 3");
+    check(matches!(s.handle(b"MEM:STAT:NAME? 1", 1), Out::Instr(Cmd::Preset(scpi::PS_NAME_Q, 0))), "MEM:STAT:NAME? 1");
+    check(matches!(s.handle(b"mem:stat:name 2,\"Bench 5V\"", 1), Out::Instr(Cmd::Preset(scpi::PS_NAME, 1))) && unsafe { presets::NAME == b"Bench 5V" }, "MEM:STAT:NAME 2,\"Bench 5V\": the name keeps its case");
+    check(matches!(s.handle(b"MEM:STAT:NAME 3,'ac mains'", 1), Out::Instr(Cmd::Preset(scpi::PS_NAME, 2))) && unsafe { presets::NAME == b"ac mains" }, "MEM:STAT:NAME 3,'ac mains'");
+    check(matches!(s.handle(b"MEM:STAT:NAME 4, Bare", 1), Out::Instr(Cmd::Preset(scpi::PS_NAME, 3))) && unsafe { presets::NAME == b"BARE" }, "MEM:STAT:NAME 4, Bare: unquoted, upper case");
+    // The other commands of a message still upper-case: only MEMory's quotes keep it.
+    check(matches!(s.handle(b"func \"volt:ac\"", 1), Out::Configure(_)), "FUNC \"volt:ac\" still parses (quotes upper-cased outside MEMory)");
+    for (m, code) in [
+        ("*SAV 0", "-222"),
+        ("*SAV 5", "-222"),
+        ("*RCL 1.5", "-224"),
+        ("*RCL", "-109"),
+        ("*SAV x", "-224"),
+        ("*SAV? 1", "-113"),
+        ("MEM:STAT:NAME 1", "-109"),
+        ("MEM:STAT:NAME 1,\"\"", "-224"),
+        ("MEM:STAT:NAME 1,\"12345678901234567\"", "-223"),
+        ("MEM:STAT:VAL? 1,2", "-108"),
+        ("MEM:STAT:NAME? 9", "-222"),
+        ("MEM:STAT:FOO 1", "-113"),
+    ] {
+        let o = s.handle(m.as_bytes(), 1);
+        let none = matches!(o, Out::None);
+        let e = err(&mut s);
+        check(none && e.starts_with(&format!("{code},\"")), &format!("{m:?}: no Cmd ({none}), SYST:ERR? {e:?} (want {code})"));
+    }    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");

@@ -196,6 +196,8 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 | `*IDN?` | | `Alientek,DM40C,<serial>,opendm40 0.2.0` (see the example above); with `SYSTem:IDN:EMULation 34401A`: `HEWLETT-PACKARD,34401A,0,opendm40 0.2.0` | both |
 | `*RST` | | Accepted; changes nothing (settings, the error queue and the event bits stay). | both |
 | `*CLS` | | Clears the error queue and the questionable event bits. | both |
+| `*SAV` | `1`..`4` | Saves the instrument state into that [preset](README.md#presets). | both |
+| `*RCL` | `1`..`4` | Recalls that preset; the generator output is OFF after it. | both |
 | `*OPC?` | | `1` | both |
 | `*ESR?` | | `0` | both |
 | `*STB?` | | `0` | both |
@@ -223,6 +225,10 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 | `STATus:QUEStionable[:EVENt]?` | | The same bits collected since the last read or `*CLS`; reading clears them | both |
 | `UNIT:TEMPerature[?]` | `C` or `F` | `C` or `F` | both |
 | `MEMory:STATe:RECall:AUTO[?]` | `ON` or `OFF` (default) | `1` or `0` | both |
+| `MEMory:STATe:NAME` | `<n>,"<name>"`: preset `1`..`4`, 1..16 characters | | both |
+| `MEMory:STATe:NAME?` | `<n>` | `"<name>"`, `""` for an empty preset | both |
+| `MEMory:STATe:VALid?` | `<n>` | `1` the preset holds a state, else `0` | both |
+| `MEMory:STATe:DELete` | `<n>` | Clears the preset. | both |
 
 - `SYSTem:IDN:EMULation 34401A` makes `*IDN?` report an HP 34401A, for
   programs that know that meter but not the DM40 (sigrok and SmuView without
@@ -246,6 +252,12 @@ volts = [(c - yref) * yinc + yorig for c in codes]
   Stored.
 - `MEMory:STATe:RECall:AUTO` is Settings 3/3 **Mode Remember**: `ON`
   continues the multimeter after a power-off as it was. Stored.
+- Presets (`*SAV`, `*RCL`, `MEMory:STATe:...`): what a preset holds is in
+  the [manual](README.md#presets). A name keeps its case only in quotes. An
+  empty preset, or a save / recall while the Wave view, the inrush page, a
+  logger session or (recall only) a CSV recording runs, is
+  `Settings conflict`; a busy or failed disk is `Mass storage busy` /
+  `Mass storage error`; a number outside `1`..`4` is `Data out of range`.
 - `SYSTem:FUSE:TEST`: plug one lead from V/ohm into A, nothing else. The
   meter measures 600 ohm for three readings, then returns to the function
   before. `OK` is about 48 ohm; `OPEN` is a blown fuse or lead.

@@ -3,6 +3,27 @@
 //! stock orange. No framebuffer: every element is drawn as complete cells /
 //! columns so redraws do not flicker.
 
+/// A string literal as a named static of the calling function (its
+/// `.rodata.<path>` section: region C with a cold caller's module, see
+/// link-native.x), not an anonymous constant (those go to region B).
+#[macro_export]
+macro_rules! cold_str {
+    ($s:literal) => {{
+        static S: [u8; $s.len()] = {
+            let b = $s.as_bytes();
+            let mut a = [0u8; $s.len()];
+            let mut i = 0;
+            while i < b.len() {
+                a[i] = b[i];
+                i += 1;
+            }
+            a
+        };
+        // A literal's bytes: UTF-8.
+        unsafe { core::str::from_utf8_unchecked(&S) }
+    }};
+}
+
 use crate::dmm::{Button, Reading};
 use crate::gen;
 use crate::lcd::{self, Color};
@@ -17,6 +38,10 @@ pub mod inr;
 /// The touch test page (View::TouchTest, app_touchtest.rs).
 #[path = "ui_touchtest.rs"]
 pub mod touchtest;
+
+/// The Presets page and its rename keyboard (region C).
+#[path = "ui_presets.rs"]
+pub mod presets;
 /// The specified accuracy of a reading (../docs/dmm-accuracy.md).
 #[path = "accuracy.rs"]
 pub mod acc;
@@ -112,6 +137,8 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// Presets (main menu > Presets; app_presets.rs).
+    Presets,
 }
 
 impl View {
@@ -2961,13 +2988,14 @@ const M_PRESSED: Color = 0x4419;
 
 pub fn main_menu(combo: &str) {
     lcd::fill_rect(0, 0, lcd::W, lcd::H, M_BG);
-    for i in 0..6 {
+    for i in 0..7 {
         menu_item(i, combo, false);
     }
 }
 
 /// Menu item `i` (as `main_menu_hit`: tiles 0..3, the combined-view row 4,
-/// the gallery row 5), normal or pressed (ui-review #11: from touch-down).
+/// the Gallery 5 and Presets 6 boxes of the top row), normal or pressed
+/// (ui-review #11: from touch-down).
 pub fn menu_item(i: usize, combo: &str, pressed: bool) {
     let bg = if pressed { M_PRESSED } else { M_TILE };
     if let Some(&(x, y, name, icon)) = TILES.get(i) {
@@ -2976,10 +3004,12 @@ pub fn menu_item(i: usize, combo: &str, pressed: bool) {
         let mut b = [0u8; 4];
         sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, bg, 8, 0);
         sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, bg, 8, 0);
-    } else if i == 5 {
-        // Gallery row above the tiles (FR-16).
-        sf::rbox(rect(46, 10, 388, 34), 8, bg, M_BG);
-        sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, bg, 8, 0);
+    } else if i == 5 || i == 6 {
+        // The top row, over the tile columns: Gallery (FR-16), Presets
+        // (presets.rs).
+        let r = rect(if i == 5 { 46 } else { 244 }, 10, 190, 34);
+        sf::rbox(r, 8, bg, M_BG);
+        sf::glyphs(sf::TEXT22, r, if i == 5 { "Gallery" } else { "Presets" }, STATUS_FG, bg, 8, 0);
     } else {
         sf::rbox(rect(46, 280, 388, 34), 8, bg, M_BG);
         let mut t = [0u8; 48];
@@ -2991,7 +3021,8 @@ pub fn menu_item(i: usize, combo: &str, pressed: bool) {
     }
 }
 
-/// Which tile (0..3) or the combined-view row (4) a touch hits.
+/// Which tile (0..3), the combined-view row (4), Gallery (5) or Presets (6)
+/// a touch hits.
 pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     let (x, y) = (x as i16, y as i16);
     for (i, (tx, ty, _, _)) in TILES.iter().enumerate() {
@@ -3004,7 +3035,7 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
         return Some(4);
     }
     if (42..438).contains(&x) && (6..48).contains(&y) {
-        return Some(5);
+        return Some(if x < 240 { 5 } else { 6 });
     }
     None
 }
@@ -3317,6 +3348,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::TouchTest => "Touch test",
+        View::Presets => "Presets",
     }
 }
 

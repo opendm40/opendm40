@@ -46,6 +46,9 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+/// Presets: save / recall the instrument state (region C).
+#[path = "app_presets.rs"]
+mod app_presets;
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -146,6 +149,7 @@ fn is_page(v: View) -> bool {
     matches!(
         v,
         View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+            | View::Presets
     )
 }
 
@@ -728,7 +732,7 @@ impl App {
         // (restore).
         if let Some(rec) = crate::setfile::pick(crate::persist::load()) {
             let from_bkp = crate::setfile::info().0 == crate::setfile::From::Bkp;
-            a.restore(&rec, from_bkp && crate::persist::same_session(), clk);
+            a.restore(&rec, from_bkp && crate::persist::same_session(), true, clk);
         }
         backlight(a.backlight);
         let g = a.gen.s;
@@ -997,6 +1001,7 @@ impl App {
             View::Gallery => crate::gallery::get().draw(),
             View::Help => ui::help_page(self.help_page),
             View::TouchTest => self.tt_draw(),
+            View::Presets => self.ps_draw(),
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
@@ -2285,35 +2290,26 @@ impl App {
     /// timebase. Not AutoHold, the limits, REL or HOLD (as the stock: they
     /// change what the readout shows, unnoticed after a power-on), nor the
     /// scope, the power meter's settings or the Record page.
-    fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
+    ///
+    /// `prefs` false (a preset recall, app_presets.rs): the measurement
+    /// only, as `same_session` with Mode Remember's fixed range, plus the
+    /// temperature sensor and the generator's setup; the preferences above,
+    /// the power meter's DC zeros and the touch calibration stay as they are.
+    #[inline(never)] // .cold (link-native.x): at start-up and a preset recall
+    fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, prefs: bool, clk: &mut Clock) {
         let p = &rec.words;
-        self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
-        let cont = same_session || self.mode_remember;
-        self.dim_idx = (p[0] & 3) as usize;
-        self.off_idx = (p[0] >> 4 & 3) as usize;
-        self.start_page = (p[0] >> 8 & 3) as usize;
-        self.bt_on = p[0] >> 12 & 1 != 0;
-        crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
-        self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
-        self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
-        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
-        self.roll = p[1] >> 16 & 1 != 0;
-        self.scope.roll = self.roll;
-        self.rails_both = p[11] & 1 != 0;
-        self.sp_restore(p[1], p[11]);
+        if prefs {
+            self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
+        }
+        let cont = same_session || self.mode_remember || !prefs;
+        if prefs {
+            self.restore_prefs(p);
+        }
         if same_session {
             self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
         }
-        gesture::set_grab_ms((p[11] >> 16) as u16);
-        let mut o = [0i16; 7];
-        for (i, v) in o.iter_mut().enumerate() {
-            *v = (p[12 + i / 2] >> (16 * (i % 2))) as u16 as i16;
-        }
-        self.dmm.set_t_offs_raw(o);
-        if p[16] != 0 {
-            self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
-        }
         // v4: AutoHold, limits (all zero in older records = off / unset).
+        // The fail beep goes with the limits (a preference at boot).
         let m = &mut self.meter;
         m.lim_beep = p[18] & 2 == 0;
         if same_session {
@@ -2339,20 +2335,14 @@ impl App {
             let v_auto = if ext.v_auto_valid { (p[2] >> 8) as u8 } else { 1 };
             self.dmm.set_auto_flags(v_auto, (p[2] >> 16) as u8, (p[2] >> 24) as u8);
         }
-        self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
-        self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
-        // Before the first row is written (select below).
-        // (Bit 15, the removed "Leads in A?" reminder's OFF, is ignored.)
-        let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_JACK;
-        self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
-        self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
-        self.dmm_view.acc_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_ACC_OFF == 0;
-        self.dmm.ohm_neg = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_OHM_NEG != 0;
-        // An unknown value (3) reads as Loud.
-        self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
+        if prefs {
+            self.restore_prefs_ext(p);
+        }
         if same_session {
             self.pw_restore(&p[crate::persist::W_POWER..crate::persist::W_POWER + app_power::PW_WORDS]);
-            self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
+            if prefs {
+                self.pw_zd_restore(&p[crate::persist::W_POWER_ZD..crate::persist::W_POWER_ZD + app_power::PW_ZD_WORDS]);
+            }
             // v8: Record page interval / duration (0 = the defaults; csvlog
             // maps an unknown index to the default).
             crate::csvlog::set_next((p[crate::persist::W_REC] & 0xF) as u8, (p[crate::persist::W_REC] >> 4 & 0xF) as u8);
@@ -2369,7 +2359,7 @@ impl App {
         // Mode Remember: the fixed range of that function (a reset without
         // it starts in autorange, as before).
         let item = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_RANGE_SHIFT & 0xF) as u8;
-        if self.mode_remember && item != 0 && !self.dmm.cpl_auto() && !self.dmm.pw.on {
+        if (self.mode_remember || !prefs) && item != 0 && !self.dmm.cpl_auto() && !self.dmm.pw.on {
             let b = self.dmm.button();
             if matches!(b, Button::Volt | Button::Amp | Button::Ohm) && ui::range_items(b).iter().any(|it| it.1 == Some(item - 1)) {
                 self.dmm.set_range(clk, Some(item - 1));
@@ -2384,13 +2374,15 @@ impl App {
         let o = p[crate::persist::W_GEN_OFFS];
         g.offset_v = if o == 0 { None } else { Some(f32::from_bits(o & 0x7FFF_FFFF)) };
         self.gen.s = g.normalised();
-        // v11: the touch calibration, a preference (0 = none; one that
-        // fails the checks reads as none).
-        let mut tc = [0i32; 6];
-        for (c, w) in tc.iter_mut().zip(&p[crate::persist::W_TOUCH_CAL..]) {
-            *c = *w as i32;
+        if prefs {
+            // v11: the touch calibration, a preference (0 = none; one that
+            // fails the checks reads as none).
+            let mut tc = [0i32; 6];
+            for (c, w) in tc.iter_mut().zip(&p[crate::persist::W_TOUCH_CAL..]) {
+                *c = *w as i32;
+            }
+            app_touchtest::tc_restore(tc);
         }
-        app_touchtest::tc_restore(tc);
         if !same_session {
             return;
         }
@@ -2421,6 +2413,50 @@ impl App {
         }
         self.meas_n = k;
         self.cursors_from_selection();
+    }
+
+    /// The preferences of `restore` (display, sound, BT, *IDN? emulation,
+    /// rails, scope look and touch, temperature offsets and the user NTC).
+    #[inline(always)]
+    fn restore_prefs(&mut self, p: &[u32; crate::persist::WORDS]) {
+        self.dim_idx = (p[0] & 3) as usize;
+        self.off_idx = (p[0] >> 4 & 3) as usize;
+        self.start_page = (p[0] >> 8 & 3) as usize;
+        self.bt_on = p[0] >> 12 & 1 != 0;
+        crate::scpi::set_idn_emul((p[0] >> 14 & 1) as u8);
+        self.backlight = (p[1] & 0xFF).clamp(10, 100) as u8;
+        self.volume = (p[1] >> 8 & 0xFF).min(100) as u8;
+        crate::hy3131::set_beeper(self.volume > 0); // before the first DMM row
+        self.roll = p[1] >> 16 & 1 != 0;
+        self.scope.roll = self.roll;
+        self.rails_both = p[11] & 1 != 0;
+        self.sp_restore(p[1], p[11]);
+        gesture::set_grab_ms((p[11] >> 16) as u16);
+        let mut o = [0i16; 7];
+        for (i, v) in o.iter_mut().enumerate() {
+            *v = (p[12 + i / 2] >> (16 * (i % 2))) as u16 as i16;
+        }
+        self.dmm.set_t_offs_raw(o);
+        if p[16] != 0 {
+            self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
+        }
+    }
+
+    /// The preferences in W_DMM_EXT (DMM row, unit, alerts, burden,
+    /// accuracy label, negative ohm, danger alarm).
+    #[inline(always)]
+    fn restore_prefs_ext(&mut self, p: &[u32; crate::persist::WORDS]) {
+        self.dmm_view.bar_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_HISTORY_ROW == 0;
+        self.dmm.set_temp_f(p[crate::persist::W_DMM_EXT] & crate::meter::EXT_TEMP_F != 0);
+        // Before the first row is written (select below).
+        // (Bit 15, the removed "Leads in A?" reminder's OFF, is ignored.)
+        let off = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_ALERT_OFF_SHIFT) as u8 & crate::sentinel::M_JACK;
+        self.dmm.sent.set_mask(!off & crate::sentinel::M_ALL);
+        self.dmm.burden_show = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_BURDEN != 0;
+        self.dmm_view.acc_on = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_ACC_OFF == 0;
+        self.dmm.ohm_neg = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_OHM_NEG != 0;
+        // An unknown value (3) reads as Loud.
+        self.alarm_mode = (p[crate::persist::W_DMM_EXT] >> crate::meter::EXT_DANGER_SHIFT & 3) as u8 % 3;
     }
 
     /// Save the settings now and then (cheap: 64 words of backup SRAM; the
@@ -3491,6 +3527,7 @@ impl App {
         let now = clk.now_ms();
         match code {
             0 if self.band_until != 0 => self.band_close(),
+            0 if self.view == View::Presets && self.ps_key_back() => {}
             0 if self.view == View::Gallery => {
                 if crate::gallery::get().back() == crate::gallery::Out::Exit {
                     self.show(View::Menu, clk);
@@ -3657,6 +3694,7 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            View::Presets => self.ps_tap(clk, x, y),
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
@@ -3910,6 +3948,7 @@ impl App {
                     crate::gallery::get().open();
                     self.show(View::Gallery, clk);
                 }
+                Some(6) => self.ps_open(clk),
                 Some(_) => {
                     let c = self.combo;
                     self.show(c, clk);
@@ -5212,6 +5251,9 @@ impl App {
         use crate::scpi::Cmd as C;
         if matches!(cmd, C::FetchBurden | C::DispBurden(_) | C::ResNeg(_) | C::ModeRemember(_)) {
             return self.burden_scpi(cmd, out);
+        }
+        if let C::Preset(op, k) = cmd {
+            return self.ps_scpi(clk, op, k, out);
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {
             return r;

@@ -134,6 +134,14 @@ SECTIONS
         /* The settings file (boot, load, the writer); its per-pass check
          * setfile::poll is inline(always) into main.rs `run`: region B. */
         *(.text.*8opendm407setfile*);
+        /* Presets (the file, the page, SCPI *SAV / *RCL; src/presets.rs,
+         * app_presets.rs, ui_presets.rs) and the settings restore they share
+         * with start-up (App::restore): a tap or a command, never per pass,
+         * refused while the AD2 stream runs. */
+        *(.text.*8opendm407presets*);
+        *(.text.*8opendm403app11app_presets*);
+        *(.text.*8opendm402ui7presets*);
+        *(.text.*8opendm403app*3App7restore*);
         *(.text.*8opendm405vdisk*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
@@ -170,6 +178,10 @@ SECTIONS
          * CHANge): parse and set / query, rarely sent. */
         *(.text.*8opendm404scpi7csv_arg*);
         *(.text.*8opendm408rec_scpi*);
+        /* *SAV / *RCL / MEMory:STATe:NAME etc.: the presets' SCPI parser. */
+        *(.text.*8opendm404scpi10preset_cmd*);
+        *(.text.*8opendm404scpi11preset_slot*);
+        *(.text.*8opendm404scpi*4Scpi10preset_out*);
         *(.text.*8opendm402ui3inr4page*);
         *(.text.*8opendm402ui3inr5trace*);
         *(.text.*8opendm406inrush*3Cap7results*);
@@ -234,6 +246,9 @@ SECTIONS
         *(.rodata.*8opendm404dlog*);
         *(.rodata.*8opendm406fatdir*);
         *(.rodata.*8opendm407setfile*);
+        *(.rodata.*8opendm407presets*);
+        *(.rodata.*8opendm403app11app_presets*);
+        *(.rodata.*8opendm402ui7presets*);
         *(.rodata.*8opendm405vdisk*);
         *(.rodata.*8opendm406upload*);
         *(.rodata.*8opendm405hyspi*);

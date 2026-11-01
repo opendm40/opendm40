@@ -45,12 +45,13 @@ limitations](#known-limitations).
 9. [Inrush current](#inrush-current)
 10. [Recording](#recording): the Record page and the fast recorder.
 11. [USB disk, screenshots and the gallery](#usb-disk-screenshots-and-the-gallery)
-12. [Settings](#settings): every settings item, the Device page and the touch test.
-13. [Remote control and connecting from a computer](#remote-control-and-connecting-from-a-computer):
+12. [Presets](#presets): save and recall the instrument setup.
+13. [Settings](#settings): every settings item, the Device page and the touch test.
+14. [Remote control and connecting from a computer](#remote-control-and-connecting-from-a-computer):
     the phone app, USB and Bluetooth on Linux, Windows and macOS, sigrok.
-14. [Backup, recovery and back to stock](#backup-recovery-and-back-to-stock)
-15. [What is kept when you switch off](#what-is-kept-when-you-switch-off)
-16. [Known limitations](#known-limitations)
+15. [Backup, recovery and back to stock](#backup-recovery-and-back-to-stock)
+16. [What is kept when you switch off](#what-is-kept-when-you-switch-off)
+17. [Known limitations](#known-limitations)
 
 Every SCPI command is in the separate [SCPI reference](scpi-reference.md).
 
@@ -166,10 +167,11 @@ The oscilloscope has its own drags and taps; see
 
 *The main menu.*
 
-The main menu has six tiles:
+The main menu has seven tiles:
 
-- **Gallery: screenshots and logs**: the screenshots and Record-page
-  recordings stored on the meter ([The gallery](#the-gallery)).
+- **Gallery**: the screenshots and Record-page recordings stored on the
+  meter ([The gallery](#the-gallery)).
+- **Presets**: save and recall the instrument setup ([Presets](#presets)).
 - **Multimeter** ([Multimeter](#multimeter)).
 - **Oscilloscope** ([Oscilloscope](#oscilloscope)).
 - **Signal**: the signal generator ([Signal generator](#signal-generator)).
@@ -426,6 +428,7 @@ lightning from 100 V). opendm40 adds:
 - [On-screen help](#on-screen-help).
 - The [Device page](#the-device-page) shows the opendm40 version and the
   board temperature.
+- Four named [presets](#presets) of the instrument setup (`*SAV` / `*RCL`).
 
 ![The power-off warning, the help, the Device page](img/new-other.png)
 
@@ -2266,7 +2269,7 @@ straight to the computer ([dm40dbg.py](../../firmware/tools/dm40dbg.py)).
 
 ### The gallery
 
-To open it: main menu, **Gallery: screenshots and logs** (the top tile).
+To open it: main menu, **Gallery** (top left).
 
 ![The gallery](img/gallery.png)
 
@@ -2292,6 +2295,23 @@ To open it: main menu, **Gallery: screenshots and logs** (the top tile).
 - **< Back** in the title bar or **MENU** goes back.
 
 The gallery also shows the screenshots made by the stock firmware.
+
+## Presets
+
+![Presets](img/presets.png)
+
+*Presets: preset 1 selected.*
+
+To open: main menu, **Presets**. Each of the four presets keeps the
+multimeter, scope and generator setup and the page it was saved on.
+
+- Tap a preset, then **Save**, **Recall**, **Rename** or **Clear**. Saving
+  over a preset or clearing it asks for a second tap.
+- **Recall** opens the saved page. The generator output is always OFF after
+  a recall.
+- Not in a preset: the [settings](#settings), REL, HOLD and MIN/MAX/AVG.
+
+SCPI: `*SAV`, `*RCL`, `MEMory:STATe:NAME` ([SCPI reference](scpi-reference.md#ieee-4882-common-commands)).
 
 ## Settings
 
@@ -2872,6 +2892,7 @@ The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
 off: by the power key, the two-finger swipe or the **Shutdown** timer. The file has
 two copies, written in turn, so an interrupted save keeps the one before.
+[Presets](#presets) are kept in `_PRESETS.BIN` until you clear them.
 A change made in the last few seconds before the battery is removed, or
 before the meter loses power in another way, can be lost. A restart keeps
 everything, also without the file.

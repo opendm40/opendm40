@@ -2348,6 +2348,21 @@ where the settings came from, the slot and sequence, the file's state, the
 last save, the saves this boot and the newest sequence.
 Host test: fatren-test "setfile"; emulator: [`emu/settingstest.py`](../../emu/settingstest.py).
 
+### Presets (SPI disk root, [`src/presets.rs`](../src/presets.rs))
+
+`_PRESETS.BIN` (16 KiB, root) holds four one-block slots, one per preset:
+magic, slot format, persist version, payload length, page / flags, a
+16-byte name, the settings record as [`src/persist.rs`](../src/persist.rs)
+stores it, CRC-32. `presets::boot` (`pre_main`, after `setfile::boot`)
+makes the file once (all 0xFF) and reads the slot headers into SRAM. A
+save, rename or clear rewrites one slot's block in place; a torn write or a
+newer build's slot reads as unreadable and is never recalled. A recall is
+`App::restore` without the preferences (`prefs` false,
+[`src/app_presets.rs`](../src/app_presets.rs)), then the generator output
+OFF. Region C: the module, the page and its SCPI parser (`scpi::preset_cmd`).
+Host test: fatren-test "presets"; SCPI parser: scpi-test; emulator:
+[`emu/presetstest.py`](../../emu/presetstest.py).
+
 ### Host tests (`tools/fatren-test/run.sh`, every check fatal)
 
 Safety copy: first boot writes exactly the three files (nothing else); second
