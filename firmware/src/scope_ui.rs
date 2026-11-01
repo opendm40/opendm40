@@ -117,10 +117,10 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 pub const TAB_L: Rect = rect(23, 280, 52, 17);
 pub const TAB_R: Rect = rect(338, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
-/// starts after the strip markers' press zones (x <= 22). The right one
-/// reaches the frame; the right-edge trigger-level marker's zone wins over
-/// it where they meet (marker priority), and its tab (`TAB_R`) ends before
-/// that marker's column (x 401..412).
+/// starts after the left-strip glyphs (x <= 12), the right one reaches the
+/// frame. A marker grab zone (`grab_rect`) wins over them where they meet,
+/// except on a drawn tab (`graph_press`); the tabs end before the marker
+/// glyph columns (x 1..12, 401..412).
 pub const ZONE_L: Rect = rect(23, 228, 80, 73);
 pub const ZONE_R: Rect = rect(333, 228, 80, 73);
 /// `Model::tabs` bits.
@@ -1299,11 +1299,10 @@ fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
     }
 }
 
-/// A touch zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
-/// by 10 px, opendm40: by `GROW`) or of a line; `level`: level group (CH1 0,
-/// trigger level 1, Y cursors 3 / 4), else time group (trigger position 0,
-/// X cursors 2 / 3); `o`: the object itself (the glyph, the 1 px line),
-/// for the distance in `pick_near`.
+/// A grab zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
+/// by 10 px, opendm40: `grab_rect`); `level`: level group (CH1 0, trigger
+/// level 1, Y cursors 3 / 4), else time group (trigger position 0, X
+/// cursors 2 / 3); `o`: the glyph, for the distance in `pick_near`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Zone {
     pub level: bool,
@@ -1314,10 +1313,6 @@ pub struct Zone {
 
 impl Zone {
     pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
-    /// A line zone (cursor line), not a marker glyph.
-    pub fn line(&self) -> bool {
-        self.o.w > 12 || self.o.h > 12
-    }
     /// Distance (px, Chebyshev) from (x, y) to the zone's object; None
     /// outside the zone.
     pub fn dist(&self, x: i16, y: i16) -> Option<i16> {
@@ -1332,97 +1327,60 @@ impl Zone {
     }
 }
 
-/// Marker zones: the glyph grown by this much (owner 2026-10-24: a drag
-/// that starts near a marker grabs it; the stock 10 px).
-pub const GROW: i16 = 12;
-/// Line zones: +-this many px around a cursor line.
-pub const LINE_GROW: i16 = 12;
-/// `pick_near`: a selected item this much farther than the nearest still
-/// wins (the marker last selected is preferred among close ones).
-const NEAR_TIE: i16 = 4;
+/// Grab zones (owner 2026-11-01, DHO800-style drag: a drag that starts on a
+/// marker moves that marker, a drag elsewhere the trigger position or the
+/// selected level item): GRAB_H px along the marker's edge, centred on the
+/// glyph, and from the screen edge GRAB_IN px past the glyph into the
+/// graph. Overlaps go to the nearest glyph (`pick_near`).
+pub const GRAB_H: i16 = 48;
+pub const GRAB_IN: i16 = 30;
+
+/// Grab-zone edges (`grab_rect`).
+pub const EDGE_LEFT: u8 = 0;
+pub const EDGE_RIGHT: u8 = 1;
+pub const EDGE_TOP: u8 = 2;
+
+/// Grab zone of a 12 x 12 marker glyph `g` on `edge`: a left-strip marker
+/// from x 0, the right-edge trigger level to the frame (x 413), a top
+/// marker from 5 rows above it (INNER's top; the top-bar badges win there).
+/// By edge, not by x: a top marker at the last columns sits at x 401 too.
+pub fn grab_rect(g: Rect, edge: u8) -> Rect {
+    let along = (GRAB_H - 12) / 2;
+    match edge {
+        EDGE_LEFT => rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H),
+        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, 414 - (g.x - GRAB_IN), GRAB_H),
+        _ => rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN),
+    }
+}
 
 /// Most zones (strip markers + selectable graph markers).
 pub const NZONE: usize = NSTRIP + NGRAPH;
 
-/// The marker zones of the page in creation order (level group first).
+/// The marker grab zones of the page in creation order (level group
+/// first). Cursor lines and guide lines are not zones (markers only).
 pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
-    let grow = |r: Rect| rect(r.x - GROW, r.y - GROW, r.w + 2 * GROW, r.h + 2 * GROW);
     let mut n = 0;
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let k = strip_items(m, &mut items);
     for &(id, mk) in &items[..k] {
-        out[n] = Zone { level: true, id, r: grow(mk.rect()), o: mk.rect() };
+        let edge = if id == TRIG_LEVEL { EDGE_RIGHT } else { EDGE_LEFT };
+        out[n] = Zone { level: true, id, r: grab_rect(mk.rect(), edge), o: mk.rect() };
         n += 1;
     }
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
     for (k, mk) in g.iter().enumerate() {
         if mk.some() && GRAPH_IDS[k] != 255 {
-            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()), o: mk.rect() };
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grab_rect(mk.rect(), EDGE_TOP), o: mk.rect() };
             n += 1;
         }
     }
     n
 }
 
-/// opendm40 addition (port plan sec. 5.2): the cursor lines themselves are
-/// zones too, +-12 px around each line over the graph (the stock zones are
-/// only around the small markers at the graph edge). After `zones`.
-pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
-    let (top, h) = (m.top(), m.frame_h());
-    let mut n = 0;
-    if let Some(xc) = m.xcur {
-        for (k, c) in xc.iter().enumerate() {
-            out[n] = vline_zone(false, 2 + k as u8, *c, top, h);
-            n += 1;
-        }
-    }
-    if let Some(yc) = m.ycur {
-        for (k, r) in yc.iter().enumerate() {
-            out[n] = hline_zone(3 + k as u8, top + trace_fy(h, *r as i32));
-            n += 1;
-        }
-    }
-    n
-}
-
-/// Zone of a vertical line at graph column `c` (x 14 + c), the frame height.
-fn vline_zone(level: bool, id: u8, c: i16, top: i16, h: i16) -> Zone {
-    Zone { level, id, r: rect(14 + c - LINE_GROW, top, 2 * LINE_GROW + 1, h), o: rect(14 + c, top, 1, h) }
-}
-
-/// Zone of a horizontal level line at screen row `y`, the graph width.
-fn hline_zone(id: u8, y: i16) -> Zone {
-    Zone { level: true, id, r: rect(13, y - LINE_GROW, 401, 2 * LINE_GROW + 1), o: rect(13, y, 401, 1) }
-}
-
-/// All press zones: markers (`zones`) and cursor lines (owner 2026-10-25:
-/// the guide lines are not zones; a drag on the trace near a shown guide
-/// line grabbed its item instead of panning).
-pub const NALL: usize = NZONE + 4;
-
-pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
-    let mut z = [Zone::NONE; NZONE];
-    let mut n = 0;
-    let k = zones(m, &mut z);
-    for q in z[..k].iter() {
-        out[n] = *q;
-        n += 1;
-    }
-    let mut l = [Zone::NONE; 4];
-    let k = line_zones(m, &mut l);
-    for q in l[..k].iter() {
-        out[n] = *q;
-        n += 1;
-    }
-    n
-}
-
-/// opendm40 press pick (owner 2026-10-24: "a drag that starts on or near a
-/// marker grabs it"): the zone whose object is nearest to (x, y); the
-/// selected item (of the last used group first, then of the other group)
-/// wins when it is at most NEAR_TIE px farther; equal distances keep the
-/// zone order (markers before lines). Repeated taps still cycle through
+/// opendm40 press pick: the zone whose glyph is nearest to (x, y); on a
+/// tie the selected item (of the last used group first, then of the other
+/// group), else the zone order. Repeated taps still cycle through
 /// overlapping zones: `pick_zone` on a still release (scope_page.rs).
 pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let mut best: Option<(usize, i16)> = None;
@@ -1437,7 +1395,7 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
     for (level, id) in [(!last_h, if last_h { sel_h } else { sel_v }), (last_h, if last_h { sel_v } else { sel_h })] {
         let pref = z.iter().enumerate().filter(|(_, q)| q.level == level && q.id == id).filter_map(|(i, q)| q.dist(x, y).map(|d| (i, d))).min_by_key(|&(_, d)| d);
         if let Some((i, d)) = pref {
-            if d <= bd + NEAR_TIE {
+            if d <= bd {
                 return Some(i);
             }
         }
@@ -1445,71 +1403,41 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
     Some(bi)
 }
 
-/// Drag axis decision: travel (px) that decides it (gesture.rs SLOP).
-const LOCK_SLOP: i32 = 15;
+/// Off a marker: travel (px, Chebyshev) from the press that picks the drag
+/// axis (owner 2026-11-01: "the first ~8 px").
+pub const AXIS_PX: i32 = 8;
 
-/// The axis of a scope drag from its travel since the press (|dx|, |dy|):
-/// Some(true) horizontal, Some(false) vertical, None undecided. Past
-/// LOCK_SLOP / 2 px along an axis that leads 3:2, or past 2 * LOCK_SLOP
-/// along the larger one.
+/// The axis of a drag off the markers from its travel since the press
+/// (|dx|, |dy|): Some(true) sideways, Some(false) up / down, None not yet
+/// (below AXIS_PX); the larger component wins, a tie is sideways.
 pub fn drag_axis(ax: i32, ay: i32) -> Option<bool> {
-    if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
-        Some(true)
-    } else if 2 * ay >= 3 * ax && ay > LOCK_SLOP / 2 {
-        Some(false)
-    } else if ax.max(ay) > 2 * LOCK_SLOP {
-        Some(ax >= ay)
-    } else {
-        None
-    }
+    if ax.max(ay) < AXIS_PX { None } else { Some(ax >= ay) }
 }
 
-/// What a move report (dx, dy) applies once the drag's axis is decided
-/// (`horizontal`): only that axis (owner 2026-10-25: one item, one axis
-/// per gesture).
+/// What a move report (dx, dy) applies once the drag's axis is known
+/// (`horizontal`): only that axis (one item, one axis per gesture).
 pub fn drag_delta(horizontal: bool, dx: i32, dy: i32) -> (i32, i32) {
     if horizontal { (dx, 0) } else { (0, dy) }
 }
 
-/// The item a drag moves (owner 2026-10-25: always the marker nearest to
-/// where the finger went down, never the selection): `horizontal`, the
-/// time marker whose column is nearest to x0 (trigger position T, the X
-/// cursors when shown, the FFT centre in FFT mode), else the level marker
-/// whose drawn row is nearest to y0 (`strip_items`: CH1, trigger level,
-/// math offset when on, runt level when shown, Y cursors when shown; an
-/// off-screen level at its edge marker). No distance limit; a tie goes to
-/// the one drawn later (on top). (level group, item id).
-#[inline(never)] // once per drag (region B: link-native.x)
-pub fn drag_target(m: &Model, horizontal: bool, x0: i16, y0: i16) -> Option<(bool, u8)> {
-    let mut best: Option<(u8, i16)> = None;
-    let mut take = |id: u8, d: i16| {
-        if best.map_or(true, |(_, bd)| d <= bd) {
-            best = Some((id, d));
-        }
-    };
+/// The item a drag off the markers moves (owner 2026-11-01, DHO800-style;
+/// never the marker nearest to the finger): sideways the trigger position
+/// (time item 0; a stopped record: its pan), up / down the selected level
+/// item `sel_v` (CH1 0 by default) if it is shown, else CH1. (level group,
+/// item id).
+pub fn drag_item(m: &Model, horizontal: bool, sel_v: u8) -> (bool, u8) {
     if horizontal {
-        take(0, (14 + m.trig_px - x0).abs());
-        if let Some(xc) = m.xcur {
-            take(2, (14 + xc[0] - x0).abs());
-            take(3, (14 + xc[1] - x0).abs());
-        }
-        if m.math_on && m.math_mode == 5 {
-            take(1, (14 + 200 - x0).abs());
-        }
-    } else {
-        let mut items = [(0u8, Mark::NONE); NSTRIP];
-        let n = strip_items(m, &mut items);
-        for &(id, mk) in &items[..n] {
-            take(id, (mk.y + 6 - y0).abs());
-        }
+        return (false, 0);
     }
-    best.map(|(id, _)| (!horizontal, id))
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let n = strip_items(m, &mut items);
+    (true, if items[..n].iter().any(|&(id, _)| id == sel_v) { sel_v } else { 0 })
 }
 
-/// The zone a press at (x, y) picks (`pick_near` over `all_zones`).
+/// The zone a press at (x, y) picks (`pick_near` over `zones`).
 pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<Zone> {
-    let mut z = [Zone::NONE; NALL];
-    let n = all_zones(m, &mut z);
+    let mut z = [Zone::NONE; NZONE];
+    let n = zones(m, &mut z);
     pick_near(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| z[k])
 }
 
@@ -1517,8 +1445,8 @@ pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
 /// (x, y) in the stock search order (`pick_zone`: repeated taps cycle
 /// through overlapping markers), or None.
 pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<(bool, u8)> {
-    let mut z = [Zone::NONE; NALL];
-    let n = all_zones(m, &mut z);
+    let mut z = [Zone::NONE; NZONE];
+    let n = zones(m, &mut z);
     pick_zone(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| (z[k].level, z[k].id))
 }
 
@@ -1529,11 +1457,11 @@ pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16
 /// other group from its first zone. Index into `z`.
 pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let same_level = !last_h;
-    let of = |level: bool| -> ([usize; NALL], usize) {
-        let mut l = [0usize; NALL];
+    let of = |level: bool| -> ([usize; NZONE], usize) {
+        let mut l = [0usize; NZONE];
         let mut k = 0;
         for (i, q) in z.iter().enumerate() {
-            if q.level == level && k < NALL {
+            if q.level == level && k < NZONE {
                 l[k] = i;
                 k += 1;
             }
@@ -2807,24 +2735,37 @@ pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
 /// What a press in the graph area does.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Press {
-    /// A marker / cursor-line zone: select (level group, item id).
+    /// A marker grab zone: select (level group, item id); a drag moves it.
     Marker(bool, u8),
     /// No marker: the release steps the timebase (true = slower).
     Step(bool),
     /// The cursor tab (UF-08): the release cycles the cursors.
     Cur,
-    /// Nothing (a drag still moves the selected item).
+    /// Nothing (a drag moves the trigger position or the selected level
+    /// item, as off any marker).
     None,
 }
 
-/// The page's press decision at (x, y) inside INNER: the object under the
-/// finger wins: the nearest marker / cursor line
-/// (`pick_near`), and only then the tap-step zone of `mode`.
+/// The page's press decision at (x, y) inside INNER: a drawn tab, then the
+/// grab zone of the nearest marker (`pick_near`), then the tap-step zone of
+/// `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
+    // A drawn tab (tap step, cursor tab) wins over a grab zone that reaches
+    // it (the zones are larger than the glyphs; no glyph is under a tab).
+    if m.tabs & TAB_SHOW_L != 0 && TAB_L.has(x, y) {
+        return Press::Step(true);
+    }
+    if m.tabs & TAB_SHOW_R != 0 && TAB_R.has(x, y) {
+        return Press::Step(false);
+    }
+    let cur = m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y);
+    if cur && CUR_TAB.has(x, y) {
+        return Press::Cur;
+    }
     if let Some(q) = graph_pick(m, sel_v, sel_h, last_h, x, y) {
         return Press::Marker(q.level, q.id);
     }
-    if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
+    if cur {
         return Press::Cur;
     }
     match tap_zone(mode, x, y) {

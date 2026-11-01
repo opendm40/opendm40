@@ -1101,7 +1101,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
     let mut v = vec![""; ui::SET_N];
     for (id, t) in [
         (ui::S_DIM, "5 min"), (ui::S_SHUTDOWN, "30 min"), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, "ON"),
-        (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_DRAG, "Stock"), (ui::S_RATE, "MED  5.0/s"),
+        (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_RATE, "MED  5.0/s"),
         (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
         (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
         (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
@@ -1119,7 +1119,7 @@ pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
 fn set_vals_worst() -> Vec<&'static str> {
     set_vals(&[
         (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "1 hour"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
-        (ui::S_START, "DMM + Scope"), (ui::S_DRAG, "Hold 5000 ms"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
+        (ui::S_START, "DMM + Scope"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
         (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
         (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
         (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
@@ -1441,7 +1441,8 @@ fn main() {
         };
         t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
         t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, 406, 125) == Some((true, 1)));
-        t("T marker zone (incl. 10 px of the top bar)", pick(&d, 0, 0, false, 214, 12) == Some((false, 0)));
+        t("T marker zone (from INNER's top, y 16)", pick(&d, 0, 0, false, 214, 16) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 15).is_none());
+        t("grab zones reach 30 px past the glyph into the graph", pick(&d, 0, 0, false, 42, 160) == Some((true, 0)) && pick(&d, 0, 0, false, 44, 160).is_none() && pick(&d, 0, 0, false, 371, 125) == Some((true, 1)) && pick(&d, 0, 0, false, 369, 125).is_none() && pick(&d, 0, 0, false, 214, 62) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 64).is_none());
         t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
         let mut m = d;
         m.trig_row = 140;
@@ -1462,10 +1463,7 @@ fn main() {
         let mut m = d;
         m.xcur = Some([100, 300]);
         m.ycur = Some([60, 220]);
-        let mut lz = [scope_ui::Zone::NONE; 4];
-        let n = scope_ui::line_zones(&m, &mut lz);
-        let lp = |x: i16, y: i16| scope_ui::pick_zone(&lz[..n], 0, 0, false, x, y).map(|k| (lz[k].level, lz[k].id));
-        t("cursor line zones: X1 line, Y2 line, none between", lp(124, 200) == Some((false, 2)) && lp(200, 230) == Some((true, 4)) && lp(200, 150).is_none());
+        t("cursor lines are not zones (owner 2026-10-30: markers only)", pick(&m, 0, 0, false, 124, 200).is_none() && pick(&m, 0, 0, false, 200, 230).is_none());
     }
 
     // 0a. opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1): the
@@ -2624,7 +2622,7 @@ fn main() {
         set_vals_worst(),
         set_vals(&[]),
         set_vals(&[(ui::S_RATE, "FAST  37/s"), (ui::S_SMOOTH, "LOW"), (ui::S_DMM_ROW, "History"), (ui::S_ALARM, "Volume"), (ui::S_USB, ui::usb_disk_name(false, true))]),
-        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, "Off"), (ui::S_USB, ui::usb_disk_name(false, false)), (ui::S_DRAG, "Axis lock")]),
+        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, "Off"), (ui::S_USB, ui::usb_disk_name(false, false))]),
         set_vals(&[(ui::S_JACK, "OFF"), (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BACKLIGHT, "10%"), (ui::S_VOLUME, "0%")]),
     ];
     for (k, vals) in set_cases.iter().enumerate() {
@@ -3117,7 +3115,7 @@ fn main() {
         }
     }
 
-    // 7. Gestures: zone table, axis lock, hold-to-grab, Up on captured
+    // 7. Gestures: zone table, axis lock, Up on captured
     //    touches (gesture.rs through its DBG:DRAG hook).
     {
         use gesture::{Axis, Gesture as G};
@@ -3127,8 +3125,7 @@ fn main() {
                 ck.fail(&format!("gesture/{name}"), "unexpected result".into());
             }
         };
-        let run = |grab: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
-            gesture::set_grab_ms(grab);
+        let run = |_: u16, p0: (u16, u16), p1: (u16, u16), hold: u16| -> Vec<G> {
             let mut tr = gesture::Tracker::new();
             let mut v = vec![];
             let pt = |p: (u16, u16)| touch::Point { x: p.0, y: p.1 };
@@ -3136,7 +3133,6 @@ fn main() {
                 v.push(g);
                 matches!(g, G::Down(_) | G::Drag(..))
             });
-            gesture::set_grab_ms(0);
             v
         };
         let drags = |v: &[G], a: Axis| v.iter().filter(|g| matches!(g, G::Drag(_, _, x) if *x == a)).count();
@@ -3145,10 +3141,8 @@ fn main() {
         t("direct: captured touch ends with Up", matches!(v.last(), Some(G::Up(_))));
         let v = run(0, (100, 150), (300, 160), 0);
         t("direct horizontal: H drags only", drags(&v, Axis::H) > 0 && drags(&v, Axis::V) == 0);
-        let v = run(300, (200, 150), (210, 250), 0);
-        t("hold 300, no hold: no drag, no grab", drags(&v, Axis::V) == 0 && !v.iter().any(|g| matches!(g, G::Grab(_))));
-        let v = run(300, (200, 150), (210, 250), 350);
-        t("hold 300, held 350: grab then V drags", v.iter().any(|g| matches!(g, G::Grab(_))) && drags(&v, Axis::V) > 0);
+        let v = run(0, (200, 150), (210, 250), 350);
+        t("held 350 ms first: V drags", drags(&v, Axis::V) > 0);
         let v = run(0, (200, 150), (200, 150), 0);
         t("captured tap: Up, no Tap", matches!(v.last(), Some(G::Up(_))) && !v.iter().any(|g| matches!(g, G::Tap(_))));
     }
@@ -3414,7 +3408,7 @@ fn main() {
         // touch-down (one item redrawn), then released = the page as drawn.
         {
             let combo = ui::view_name(ui::View::DmmScope);
-            let sv = set_vals(&[(ui::S_DRAG, "Hold 300 ms"), (ui::S_USB, ui::usb_disk_name(false, false))]);
+            let sv = set_vals(&[(ui::S_USB, ui::usb_disk_name(false, false))]);
             let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
             let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
                 ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
