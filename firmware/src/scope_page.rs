@@ -266,25 +266,25 @@ impl Math {
 }
 
 /// The spectrum job and result: 4 KB, TCM .bss (all-zero `Fft::new`). Its
-/// 8 KiB work buffer is lent by the disk scratch arena (calbackup.rs
+/// 8 KiB work buffer is lent by the disk buffer arena (calbackup.rs
 /// `fft_work`).
 static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
 /// A frame was dropped because a disk job held the work buffer: ask for it
 /// again (a stopped scope re-emits its record) once the buffer is back.
 static mut FFT_RETRY: bool = false;
-const _: () = assert!(crate::calbackup::FFT_WORK == crate::fft::N);
+const _: () = assert!(crate::diskbuf::FFT_WORK == crate::fft::N);
 
 fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
-/// The FFT work buffer (calbackup.rs `fft_work`: the disk scratch arena;
+/// The FFT work buffer (diskbuf.rs `fft_work`: the disk buffer arena;
 /// `fresh` = a new job's load). None while a disk job holds it, or a disk
 /// user wrote it since the load: the job in flight, if any, is dropped (the
 /// last result stays) and the frame is asked again.
 #[inline(always)]
 fn fft_work(fresh: bool) -> Option<&'static mut crate::fft::Work> {
-    let w = crate::calbackup::fft_work(fresh);
+    let w = crate::diskbuf::fft_work(fresh);
     if w.is_none() {
         fft().abort();
         unsafe { FFT_RETRY = true };
@@ -1114,7 +1114,7 @@ impl App {
     /// One slice of the spectrum job (every pass on the page): a finished
     /// spectrum is drawn.
     fn sp_math_step(&mut self) {
-        if unsafe { FFT_RETRY } && crate::calbackup::fft_free() {
+        if unsafe { FFT_RETRY } && crate::diskbuf::fft_free() {
             unsafe { FFT_RETRY = false };
             self.scope_invalidate();
         }
@@ -2962,7 +2962,9 @@ const AS_P2_MAX: u8 = 3;
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
 /// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
 /// the result), timebase, range, min /
-/// max code, rising crossings, period (phase 4: Cycl) in us.
+/// max code, rising crossings, period (phase 4: Cycl) in us. SRAM, not the
+/// TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
 

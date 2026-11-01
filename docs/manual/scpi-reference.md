@@ -270,7 +270,7 @@ reading. `MEASure?` selects the function and returns a reading in one step.
 | `CONFigure:FRESistance` | Same as `CONFigure:RESistance` (2-wire). | | both |
 | `CONFigure:CONTinuity` | none | | both |
 | `CONFigure:DIODe` | none | | both |
-| `CONFigure:CAPacitance` | `[AUTO\|DEF]` | | both |
+| `CONFigure:CAPacitance` | `[<range>\|AUTO\|DEF]` | | both |
 | `CONFigure:FREQuency` | `[AUTO\|DEF]` | | both |
 | `CONFigure:TEMPerature` | `[<sensor>]` | | both |
 | `CONFigure:POWer` | `[<V range>\|AUTO[,<A range>\|AUTO]]` (see [Power meter](#power-meter)) | | both |
@@ -309,7 +309,7 @@ Functions:
 | Resistance | `RESistance` (`FRESistance` = the same) | 60, 600, 6k, 60k, 600k, 6M, 60M ohm |
 | Continuity | `CONTinuity` | none |
 | Diode | `DIODe` | none |
-| Capacitance | `CAPacitance` | autorange only (6 nF .. 60 mF) |
+| Capacitance | `CAPacitance` | 6e-8 .. 6e-2 F (60 nF .. 60 mF; 6e-9 selects 60 nF) |
 | Frequency | `FREQuency` | autorange only (60 Hz .. 60 MHz) |
 | Temperature | `TEMPerature` | none |
 | Power meter | `POWer` | see [Power meter](#power-meter) |
@@ -331,7 +331,7 @@ Functions:
 - **AUTO coupling** (`VOLTage:AUTO`, `CURRent:AUTO`): the reading is the DC
   or the AC part, whichever the meter shows. `[SENSe:]VOLTage:COUPling?`
   says which.
-- **Overload** reads `+9.9E37`.
+- Over range (**0L**) reads `+9.9E37`.
 
 **When the reply comes.** `READ?` and `MEASure?` return a fresh reading:
 
@@ -370,7 +370,7 @@ Functions:
 | `[SENSe:]RESistance:RANGe:AUTO[?]` | as `VOLTage:RANGe:AUTO` | as `VOLTage:RANGe:AUTO?` | both |
 | `[SENSe:]RESistance:RESolution[?]` | as `VOLTage:RESolution` | as `VOLTage:RESolution?` | both |
 | `[SENSe:]RESistance:NEGative[?]` | `ON` or `OFF` (default): resistance readings below 0 shown, not 0 | `1` or `0` | both |
-| `[SENSe:]CAPacitance:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E-06` | both |
+| `[SENSe:]CAPacitance:RANGe[?]` | `<range>`, `AUTO` or `DEF` | the present range: `+6.000000E-06` | both |
 | `[SENSe:]CAPacitance:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
 | `[SENSe:]FREQuency:RANGe[?]` | `AUTO` or `DEF` | the present range: `+6.000000E+03` | both |
 | `[SENSe:]FREQuency:RANGe:AUTO[?]` | `ON`, `OFF` or `ONCE` | `1` or `0` | both |
@@ -657,7 +657,7 @@ the disk.
 
 - `LOG:CSV?` state: 0 idle, 1 recording, 2 stopping, 3 done, 4 disk full, 5
   no disk, 6 error; file is -1 until the first save.
-- `INTerval` and `DURation` apply to the next recording (`Settings
+- `INTerval`, `DURation` and `CHANge` apply to the next recording (`Settings
   conflict` while one runs). With an interval, each row is the mean of the
   readings in it. With `CHANge`, a row at its reading's time when the
   value moves by more than `LOG:CSV:CHANge` % of the range's full scale
@@ -795,6 +795,14 @@ unless shown otherwise.
 | `DBG:PROF:RESET` | | Clears the timing table. Only in builds with the `dbg-prof` feature. | USB |
 | `DBG:FLASH?` | | `<flash id>,<blocks>,<failed>,` then screenshot and preparation counters | USB |
 | `DBG:ISR?` | | Stream interrupt statistics (23 fields) | USB |
+| `DBG:CAP?` | | Capacitance internals, 22 numbers: `<range 0..7>,<manual>,<phase 0 oscillator / 1 discharge / 2 ramp>,<oscillator Hz (average)>,<shown C, uF>,<ramp V, mV>,<dV, mV>,<dt, ms>,<median dV, mV>,<C of this poll, uF>,<oscillator C, uF (600 µF and up: the last half ramp's C, negative falling)>,<ramp class>,<samples>,<comparator>,<polls without a ramp>,<up count>,<1 = no final value on this range yet>,<same-range restarts (another capacitor)>,<discharge experiment mode in force>,<node voltage read before the discharge, V (9.91E+37: none)>,<estimate from the discharge, uF>,<experiment fall-backs to mode 0>` | USB |
+| `DBG:CAP:CLASS[?]` | `0` .. `4` | The capacitance ramp comparator class (R21 swing) on 600 µF and up: `0` adaptive (class 2, the next wider class at once when one poll's ramp step is half the ramp's swing or more), `1` .. `3` fixed, `4` the stock choice from the slope. Not stored. | USB |
+| `DBG:CAP:IDIS[?]` | µA | The capacitor discharge current for the rough value during the discharge (C = I / slope; default 375, inferred from one capacitor). Not stored. | USB |
+| `DBG:CAP:JUMPN[?]` | n | Capacitance AUTO: the 600 µF ramp polls (0.25 s each) before one poll clearly over the range steps up at once (0 .. 255, default 0). Not stored. | USB |
+| `DBG:CAP:DISMS[?]` | ms | The poll period during the capacitor discharge (25 .. 1000, default 50; AD1 converts every 25 ms there). Not stored. | USB |
+| `DBG:CAP:DISMODE[?]` | `0` / `1` | The capacitor discharge: `0` the stock constant current (~0.38 mA), `1` (default) a larger constant current set by `DBG:CAP:DISREF` for a capacitor charged above the 1.2 V clamp whose voltage, read first on the DC V row, is 5 V or less; back to `0` if the node rises or after 60 s. Not stored. | USB |
+| `DBG:CAP:DISREF[?]` | `2` .. `6` | The OP3 reference (SFUVR) of discharge mode 1: `2` the stock row's, `3` .. `6` AGNDP9 .. AGNDP6 / AGNDN9 .. AGNDN6. Measured on one unit (~1 mF from 3.2 V): 0.38 / 0.72 / 0.88 / 0.95 / 1.05 mA (the discharge estimate takes 0.685 for `3`, from a second capacitor; inferred). Default 3. Not stored. | USB |
+| `DBG:CAP:DISEND[?]` | mV | The node voltage that ends the discharge and starts the ramp (1 .. 1300, default 30). Not stored. | USB |
 | `DBG:FAST?` | | `RATE FAST` in DC V / mV / A: `<offset measurements used>,<rejected (input moving)>,<offset of the current range, converter codes>,<conversion period, ms (every conversion, the dropped ones too)>` | USB |
 | `DBG:GRAB[?]` | hold time in ms, 0 .. 5000 | `0` | USB |
 | `DBG:PINCH[?]` | `0` one step per 2.15x of finger span, `1` per 1.25x, `2` live stretch, snapped on release | `1` | USB |
