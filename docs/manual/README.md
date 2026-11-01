@@ -2011,14 +2011,14 @@ in use and whether a zero is stored.
 
 The meter's own drop used by **At load** and **Vb** is the current shunt
 alone (10 mΩ, 0.5 Ω or 47.5 Ω); the fuse and the wiring add a little. It can
-be changed over SCPI (`POW:BURD`).
+be changed over SCPI ([`POW:BURD`](scpi-reference.md#power-meter)).
 
 ### Current limit
 
 Above 6 A the right column shows a countdown (**I>LIM 23s**, amber). After
 30 s it shows **I>LIM!** in red, says **Current too high: reduce it** and
 beeps every 2 s until the current falls below 5.7 A. The limit and the time
-can be changed over SCPI (`POW:LIM`).
+can be changed over SCPI ([`POW:LIM`](scpi-reference.md#power-meter)).
 
 
 ![6.8 A: the countdown in the right column](img/power-limit.png)
@@ -2296,7 +2296,7 @@ unplug and re-plug the cable. The measuring connection (SCPI) keeps working.
 
 - On the meter: in the [gallery](#the-gallery).
 - From the computer: in **PC can edit** mode, or with the SCPI command
-  `MMEM:DEL` in any mode ([SCPI reference](scpi-reference.md)).
+  [`MMEM:DEL`](scpi-reference.md#files-on-the-disk-mmemory) in any mode.
 
 ![Deleting a file in the gallery viewer](img/gallery-delete.png)
 
@@ -2526,7 +2526,7 @@ leave the page; the power key does, without changing the calibration.
 
 The touch keys (MENU, RUN, AUTO, MF) are not affected by the calibration.
 Over USB, `DBG:TOUCH:CAL?` reads the calibration and `DBG:TOUCH:CAL RESET`
-removes it ([SCPI reference](scpi-reference.md)).
+removes it ([SCPI reference](scpi-reference.md#debug-commands)).
 
 The page does not open during a [fast recording](#fast-recording) or while
 the `LOG:` commands stream readings to a computer
@@ -2885,7 +2885,8 @@ gets you there:
   0.5 s more, then let go. Letting go earlier starts the meter normally.
 - **From a computer.** While opendm40 runs and is connected over USB:
   `python3 firmware/tools/dm40dbg.py loader`
-  (the SCPI command `DBG:LOADER`, see [SCPI reference](scpi-reference.md)).
+  (the SCPI command `DBG:LOADER`, see [SCPI
+  reference](scpi-reference.md#debug-commands)).
 - **By itself.** A firmware file that does not pass the loader's check
   leaves the meter in the update loader.
 - **Through the board.** If nothing else works: open the case, connect the
