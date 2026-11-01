@@ -2827,10 +2827,18 @@ impl App {
     }
 
     /// Apply scope settings (hardware + acquisition restart); the page
-    /// model picks the new values up on its next update.
+    /// model picks the new values up on its next update. A STOP press
+    /// re-renders only what `apply` asks for: a STOP mid-acquisition keeps
+    /// the frame on screen (`Scope::freeze`), a re-render here would draw
+    /// the untriggered snapshot instead. Stopped, a zoom in past the
+    /// record's resolution is taken back to `Scope::tb_floor` (the page's
+    /// gestures toast "Max zoom", `sp_tb_floor_toast`).
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
+        let stop = self.scope.s.run && !s.run;
         self.scope.apply(s, now);
-        self.scope_invalidate();
+        if !stop {
+            self.scope_invalidate();
+        }
         self.sp_settings_changed();
     }
 

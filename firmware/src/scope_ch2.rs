@@ -9,8 +9,10 @@
 //! session's begin (`Logger::begin_cyc`) plus 200 x its microsecond stamp
 //! (the stream ISR's read; `LAG_US` earlier for the conversion it holds).
 //! Between anchors the index is linear in time (the stream is regular
-//! between holes); a hole (ring overflow, missed conversions) restarts
-//! the store. The anchors and the record's DWT are compared as wrapping
+//! between holes); a hole (ring overflow, missed conversions: a stamp
+//! more than 1.5 periods after the previous one, the logger's `missed`
+//! rule) restarts the store at the first sample after it, so no anchor
+//! segment spans the gap. The anchors and the record's DWT are compared as wrapping
 //! i32 differences: both lie within seconds of each other, far inside
 //! the counter's 21 s wrap.
 //!
@@ -54,8 +56,10 @@ pub struct Store {
     period: f32,
     /// Raw -> SI (the DMM row the stream runs on).
     sc: WaveScale,
-    /// The stream's hole count seen (`logger::wave::dropped`).
-    dropped: u32,
+    /// The previous sample's stamp (us) and the longest gap (us) that is
+    /// not a hole (1.5 nominal periods, as `logger` counts `missed`).
+    last_ts: u32,
+    gap_us: u32,
 }
 
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
@@ -77,7 +81,8 @@ pub fn init() {
     st.c0 = 0;
     st.period = 1.0;
     st.sc = WaveScale { a: 0.0, b: 1.0, vdiv: 1.0, amps: false, ac: false };
-    st.dropped = 0;
+    st.last_ts = 0;
+    st.gap_us = u32::MAX;
 }
 
 impl Store {
@@ -89,29 +94,27 @@ impl Store {
         c0: 0,
         period: 1.0,
         sc: WaveScale { a: 0.0, b: 1.0, vdiv: 1.0, amps: false, ac: false },
-        dropped: 0,
+        last_ts: 0,
+        gap_us: u32::MAX,
     };
 
     /// Empty, for a stream that began at DWT `c0` with `fs` samples/s on
-    /// the row of scale `sc`; `dropped` = the stream's hole count now.
-    pub fn reset(&mut self, c0: u32, fs: u32, sc: WaveScale, dropped: u32) {
+    /// the row of scale `sc`.
+    pub fn reset(&mut self, c0: u32, fs: u32, sc: WaveScale) {
         self.tot = 0;
         self.nanc = 0;
         self.c0 = c0;
         self.period = crate::clock::HCLK_HZ as f32 / fs.max(1) as f32;
         self.sc = sc;
-        self.dropped = dropped;
+        let nom = ((1_000_000 + fs.max(1) / 2) / fs.max(1)).max(1);
+        self.gap_us = nom * 3 / 2;
     }
 
-    /// Restart after a hole (the scale and the session stay).
-    pub fn restart(&mut self, dropped: u32) {
+    /// Empty again (the scale and the session stay): the samples pushed
+    /// next do not continue the stored ones.
+    pub fn restart(&mut self) {
         self.tot = 0;
         self.nanc = 0;
-        self.dropped = dropped;
-    }
-
-    pub fn dropped(&self) -> u32 {
-        self.dropped
     }
 
     pub fn scale(&self) -> WaveScale {
@@ -123,9 +126,14 @@ impl Store {
     }
 
     /// One sample: its stamp (us since the session's begin) and raw AD2
-    /// code (19-bit signed).
+    /// code (19-bit signed). A stamp more than `gap_us` after the previous
+    /// one (a hole) restarts the store first.
     #[inline(always)]
     pub fn push(&mut self, ts_us: u32, raw: i32) {
+        if self.tot > 0 && ts_us.wrapping_sub(self.last_ts) > self.gap_us {
+            self.restart();
+        }
+        self.last_ts = ts_us;
         let n = self.tot;
         self.codes[(n % CAP as u64) as usize] = (raw >> 3) as i16;
         if n % EVERY == 0 {

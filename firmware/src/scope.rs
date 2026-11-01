@@ -149,6 +149,27 @@ pub const TB_MAX: usize = 29;
 /// Highest index usable in YT (non-roll) mode: 1 s/div (stock `SCOPE_TB_YT_MAX`).
 pub const TB_YT_MAX: usize = 24;
 
+/// Fewest samples of a stopped record a zoomed-in screen may hold
+/// (`Scope::tb_floor`). `zoom_screen` rounds the window down to whole
+/// samples and `sp_frame` stretches them over the 400 columns: a 2.5-sample
+/// window drawn as 2 is 20 % off the s/div label and the X cursors, 12.5
+/// as 12 is 4 %; from 16 the 1-2-5 timebases leave <= 0.8 % (62.5 as 62).
+pub const ZOOM_MIN: u32 = 16;
+
+/// One screen at timebase `tb` spans at least `n` samples of a record taken
+/// at `fs` (exact, in integers; `Scope::zoom_screen` is the rounded window).
+pub fn zoom_holds(tb: usize, fs: u32, n: u32) -> bool {
+    let (fs_tb, num, den, ppp) = TB[tb.min(TB.len() - 1)];
+    let screen = (num * COLS as u32 / den / ppp).max(2) as u64;
+    screen * fs as u64 >= n as u64 * fs_tb.max(1) as u64
+}
+
+/// The fastest timebase from `lo` whose screen holds `ZOOM_MIN` samples of
+/// a record taken at `fs` (the window grows with the timebase index).
+pub fn zoom_floor(lo: usize, fs: u32) -> usize {
+    (lo..TB_MAX).find(|&t| zoom_holds(t, fs, ZOOM_MIN)).unwrap_or(TB_MAX)
+}
+
 /// V/div of hardware range r (x1 probe), front-end GPIO row {PC13, PB15, PD12,
 /// PD13}, calibration voltage X_r and default gain point.
 pub const VDIV: [f32; 10] = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0];
@@ -330,6 +351,18 @@ pub struct Scope {
     /// Emit one re-render of the stored record on the next poll (set on any
     /// settings change while stopped and by `refresh`); no periodic re-render.
     zoom_pending: bool,
+    /// A STOP mid-acquisition left the screen showing a frame that is not
+    /// a window of the stored record (`freeze` returned false): until the
+    /// next re-render (zoom / pan, `zoom_frame`), `refresh_shown` does not
+    /// replace it with the untriggered snapshot.
+    off_record: bool,
+    /// Settings, trigger levels (volts) and the wave view's V/div the stored
+    /// record was captured with: the scope CSV header's (a stopped change
+    /// only re-renders the record).
+    stored_s: Settings,
+    stored_tv: f32,
+    stored_rv: f32,
+    stored_wvd: f32,
     /// Comparator trigger engine (hwtrig.rs): DAC2 level, TIM2 post count
     /// gating TIM1. `hw_mode`: the acquisition in flight uses it (circular
     /// record over CAP); `hw_t0`: its start time (health check).
@@ -715,6 +748,11 @@ impl Scope {
             stored_range: 0,
             stored_roll: false,
             zoom_pending: false,
+            off_record: false,
+            stored_s: Settings::DEFAULT,
+            stored_tv: 0.0,
+            stored_rv: 0.0,
+            stored_wvd: 1.0,
             hw: HwTrig::new(),
             hw_mode: false,
             hw_t0: 0,
@@ -1026,9 +1064,14 @@ impl Scope {
         // A user STOP (run -> stop) freezes what is on screen; any other change
         // just aborts the acquisition in flight (it restarts in poll()).
         let redraw = if self.s.run && !s.run {
-            self.freeze(now)
+            let r = self.freeze(now);
+            self.off_record = !r;
+            r
         } else {
             self.halt();
+            if s.run {
+                self.off_record = false;
+            }
             true
         };
         // Roll on: full 3..29 (22.. rolls). Roll off: YT only, capped at 24
@@ -1037,6 +1080,12 @@ impl Scope {
         // 21..532 s with nothing drawn until it completes.
         let top = if self.roll && s.mode != TrigMode::Single { TB_MAX } else { TB_YT_MAX };
         s.tb = s.tb.clamp(if self.wave { WAVE_TB_MIN } else { TB_MIN }, top);
+        // Stopped: no zoom in past the record's resolution (`tb_floor`; the
+        // page's gestures toast "Max zoom", SCPI TIM:SCAL is clamped
+        // silently); the floor never goes above the timebase shown.
+        if !s.run && !self.s.run {
+            s.tb = s.tb.max(self.tb_floor().min(self.s.tb));
+        }
         // Stop-and-zoom: while stopped any change re-renders the stored record
         // at the new settings. The timebase is never clamped to the captured
         // extent: zooming out past it shows the record at the true scale with
@@ -1204,6 +1253,10 @@ impl Scope {
         self.stored_tb = self.s.tb as u8;
         self.stored_range = self.s.range;
         self.stored_pos = self.s.pos;
+        self.stored_s = self.s;
+        self.stored_tv = self.trig_volts();
+        self.stored_rv = self.runt_volts();
+        self.stored_wvd = wv().sc.vdiv;
         self.stored_roll = roll;
         self.stored_anchor = anchor.min(len - 1);
         self.stored_trig = trig;
@@ -1772,6 +1825,38 @@ impl Scope {
         }
     }
 
+    /// As `refresh`, but only when the screen shows a window of the stored
+    /// record (new CH2 samples for it): not after a STOP mid-acquisition,
+    /// whose frozen frame stays until a zoom / pan.
+    pub fn refresh_shown(&mut self) {
+        if !self.off_record {
+            self.refresh();
+        }
+    }
+
+    /// Settings the stored record was captured with (the scope CSV header).
+    pub fn record_settings(&self) -> Settings {
+        self.stored_s
+    }
+
+    /// The stored record's trigger level and runt level (volts / SI) and
+    /// V/div at the probe tip / the jacks (the current probe, as `volts`).
+    pub fn record_levels(&self) -> (f32, f32, f32) {
+        let vd = if self.wave { self.stored_wvd } else { VDIV[self.stored_range.min(9)] * self.s.probe };
+        (self.stored_tv, self.stored_rv, vd)
+    }
+
+    /// Fastest timebase usable now: stopped with a record, the fastest whose
+    /// window still holds `ZOOM_MIN` samples of it (`zoom_floor`), else the
+    /// range's minimum.
+    pub fn tb_floor(&self) -> usize {
+        let lo = if self.wave { WAVE_TB_MIN } else { TB_MIN };
+        if self.s.run || !self.stored_valid || self.stored_fs == 0 {
+            return lo;
+        }
+        zoom_floor(lo, self.stored_fs)
+    }
+
     /// Poll: start / finish frames. Returns the visible window when ready.
     /// Tracks the run-state chip: a live frame sets T'D / AUTO (RUN in
     /// roll); Normal / Single fall back to WAIT when nothing triggered for a
@@ -2067,6 +2152,7 @@ impl Scope {
         if !self.stored_valid || self.stored_len < 2 || self.stored_fs == 0 {
             return None;
         }
+        self.off_record = false;
         let len = self.stored_len;
         let want = self.zoom_screen(self.s.tb);
         self.seq = self.seq.wrapping_add(1);
