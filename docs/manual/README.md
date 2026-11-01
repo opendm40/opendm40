@@ -292,7 +292,7 @@ scope.
 | Smoothing | — | Optional [smoothing](#smoothing) of the display |
 | AutoHold | — | [AutoHold](#autohold): holds a stable reading by itself |
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
-| AVG | — | The [mean](#min-max-avg) next to MAX and MIN |
+| AVG | — | The [mean](#min-max-avg) and SD next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
@@ -657,8 +657,6 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
 - Open leads end on the 60 nF range; a short shows **0L**.
-- Large capacitors take longer: from the 600 µF range up the meter first
-  discharges, then measures.
 
 
 | ![A 100 nF capacitor](img/dmm-cap.png) | ![The capacitance range page](img/range-cap.png) |
@@ -2095,7 +2093,8 @@ time_s,value,unit,flags
 | `unit` | The unit. |
 | `flags` | Any of `OL` (overflow: 0L or OPEN), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
 
-Interval files have one more header line that names the interval.
+Interval files have one more header line that names the interval; **On
+change** files one that names the change (`# event: change > 1 % ...`).
 
 The meter stores the recording in a compact form (`LOGS/LOG007.DLG` on the
 internal disk). The USB disk shows it as `LOGS/LOG007.CSV`. The CSV is

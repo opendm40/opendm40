@@ -47,7 +47,8 @@ Changes per release: [CHANGELOG.md](CHANGELOG.md).
   every model; AUTO AC/DC; HOLD, AutoHold, REL, MIN/MAX/AVG, limits, trend
   chart; burden voltage.
 - **Oscilloscope:** stock timebases and V/div, Auto / Normal / Single, edge,
-  pulse and runt triggers; a slow isolated Wave view on the multimeter jacks.
+  pulse and runt triggers; the generator as a trigger source; the multimeter
+  as CH2; a slow isolated Wave view on the multimeter jacks.
 - **Generator:** sine, triangle and ramp up to 50 kHz, square up to 10 MHz,
   DC offset.
 - **Power meter and inrush current** on the 10 A range.
