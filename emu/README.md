@@ -285,7 +285,7 @@ recorded.
 | [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
 | [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |
-| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
+| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the removed recovery's request word is ignored; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
 

@@ -373,8 +373,6 @@ pub fn run(out: &str) -> usize {
         ("dmm-history", Dp { hist: true, ..dp(dcv) }),
         // Over range.
         ("dmm-ol", dp(rd(1, ol(4, "V"), None, None, false))),
-        // Continuity with open leads.
-        ("dmm-open", Dp { rate: false, ..dp(rd(11, ol(2, ohm), None, None, false)) }),
         // A recording running (REC in the status bar).
         ("dmm-rec", Dp { csv: true, ..dp(dcv) }),
     ];
