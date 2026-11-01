@@ -201,6 +201,11 @@
 //!     shunt 10 mohm / 0.5 ohm / 47.5 ohm), DC signed, AC and AC+DC the RMS,
 //!     REL ignored; outside the A functions / no reading: +9.9E37 and "Data
 //!     stale"; over range: +9.9E37 (doc 3.15). Works with the readout off.
+//!   FETCh:PWIDth? / FETCh:NWIDth?   positive / negative pulse width (s) of
+//!     the latest Hz-function reading, from its frequency and duty cycle
+//!     (the "+W" / "-W" lines of the Hz page); +9.9E37 without a clean value
+//!     (no signal, 0 % / 100 % duty, over range); outside the Hz function:
+//!     +9.9E37 and "Data stale"
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
 //!     Settings 3/3 "Burden voltage", persisted, default OFF
@@ -231,6 +236,13 @@
 //! Statistics / limits of the CURRENT DMM function (FR-01 / 02 / 06; values
 //! in SI units of the function, as READ?):
 //!   CALCulate:AHOLd ON|OFF / ?            AutoHold (as RUN held 1 s)
+//!   CALCulate:AHOLd:PROBe ON|OFF / ?      Probe Hold: each AutoHold capture
+//!     also goes into the DMM page's history row (persisted, default OFF)
+//!   CALCulate:REL:FORMat DIFFerence|PERCent / ?   the REL box on the DMM
+//!     page shows the reference (DIFF, default) or the deviation of the
+//!     readout from it in % (ppm below 0.1 % in DC V and ohm; persisted).
+//!     The readout, READ? / FETCh? and the statistics stay the difference
+//!     in the function's unit
 //!   CALCulate:AVERage[:AVERage]?  CALCulate:AVERage:MINimum? / MAXimum?
 //!     no sample yet: +9.9E37 and "Data stale" in SYST:ERR?
 //!   CALCulate:AVERage:COUNt?              samples in the statistics
@@ -977,6 +989,11 @@ pub enum Cmd {
     SysRailState,
     /// CALCulate (FR-01 / 02 / 06; App::set_ahold etc.).
     CalcAhold(Option<bool>),
+    /// CALCulate:AHOLd:PROBe ON|OFF / ?: Probe Hold (Meter::probe).
+    CalcProbe(Option<bool>),
+    /// CALCulate:REL:FORMat DIFFerence|PERCent / ?: the REL box format
+    /// (Meter::rel_pct; Some(true) = PERCent).
+    CalcRelForm(Option<bool>),
     /// 0 MIN, 1 MAX, 2 AVER, 3 COUNt, 4 SDEViation.
     CalcAver(u8),
     CalcAverClear,
@@ -1057,6 +1074,9 @@ pub enum Cmd {
     Pow(Pow),
     /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
     FetchBurden,
+    /// FETCh:PWIDth? / FETCh:NWIDth? (true): the Hz function's positive /
+    /// negative pulse width, s (meter::reading_widths).
+    FetchWidth(bool),
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
     DispBurden(Option<bool>),
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
@@ -2892,6 +2912,9 @@ impl Scpi {
                 _ if kw(p0, "FETCh") && query && parts.len() == 2 && kw(parts[1], "BURDen") => {
                     out = Out::Instr(Cmd::FetchBurden)
                 }
+                _ if kw(p0, "FETCh") && query && parts.len() == 2 && (kw(parts[1], "PWIDth") || kw(parts[1], "NWIDth")) => {
+                    out = Out::Instr(Cmd::FetchWidth(kw(parts[1], "NWIDth")))
+                }
                 // DISPlay:BURDen, [SENSe:]RESistance:NEGative,
                 // MEMory:STATe:RECall:AUTO: ON|OFF / ?.
                 _ if (kw(p0, "DISPlay") && parts.len() == 2 && kw(parts[1], "BURDen"))
@@ -3026,6 +3049,18 @@ impl Scpi {
                     let state = if query { Some(None) } else { on_off(a).map(Some) };
                     let c = if kw(sub, "AHOLd") && leaf.is_none() {
                         state.map(Cmd::CalcAhold)
+                    } else if kw(sub, "AHOLd") && leaf.is_some_and(|l| kw(l, "PROBe")) {
+                        state.map(Cmd::CalcProbe)
+                    } else if kw(sub, "REL") && leaf.is_some_and(|l| kw(l, "FORMat")) {
+                        if query {
+                            Some(Cmd::CalcRelForm(None))
+                        } else if kw(a, "PERCent") {
+                            Some(Cmd::CalcRelForm(Some(true)))
+                        } else if kw(a, "DIFFerence") {
+                            Some(Cmd::CalcRelForm(Some(false)))
+                        } else {
+                            None
+                        }
                     } else if kw(sub, "AVERage") {
                         match leaf {
                             None if query => Some(Cmd::CalcAver(2)),

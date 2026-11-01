@@ -611,6 +611,12 @@ pub struct Meter {
     pub stats: Stats,
     /// AutoHold enabled (persisted setting).
     pub ahold: bool,
+    /// Probe Hold (Keysight 34465A): each AutoHold capture also goes into
+    /// the DMM page's history row (App::hist_push; persisted, default off).
+    pub probe: bool,
+    /// REL box format: the deviation in % / ppm of the reference
+    /// (`rel_pct`) instead of the reference (persisted, default off).
+    pub rel_pct: bool,
     /// AutoHold capture (the frozen readout), its raw SI value.
     ah_held: Option<(Reading, f32)>,
     /// Input went idle (OL / below level) since the last capture.
@@ -637,6 +643,8 @@ impl Meter {
             unit: "",
             stats: Stats::new(),
             ahold: false,
+            probe: false,
+            rel_pct: false,
             ah_held: None,
             ah_rearm: false,
             win: Win::EMPTY,
@@ -937,6 +945,71 @@ impl Meter {
         self.win = Win::EMPTY;
         self.verdict = V_NONE;
         self.sm.reset();
+    }
+}
+
+/// REL % (Fluke 289 p. 21): the deviation `d` (the REL-applied value,
+/// display units) in % of the reference `r` (same units); in ppm when below
+/// 0.1 % in DC V / mV and ohm (`mode` 1, 3, 10). "0L" when the reference
+/// is 0, the value is OL or the result is wider than the REL box. The DMM
+/// page's REL box shows it (REL format %, App::rel_pct); the readout, the
+/// statistics, the limits and SCPI READ? stay in the function's units.
+pub fn rel_pct(d: &Val, r: f32, mode: u8) -> Val {
+    let v = |v: f32, dec: u8, unit: &'static str, ol: bool| Val { v, dec, unit, ol, ext: false };
+    let p = d.v / r.abs() * 100.0;
+    if d.ol || r == 0.0 || !p.is_finite() || p.abs() >= 99_999.5 {
+        return v(0.0, 0, "%", true);
+    }
+    let a = p.abs();
+    if matches!(mode, 1 | 3 | 10) && a < 0.1 {
+        return v(p * 1e4, 0, "ppm", false);
+    }
+    let dec = if a < 9.9995 { 3 } else if a < 99.995 { 2 } else if a < 999.95 { 1 } else { 0 };
+    v(p, dec, "%", false)
+}
+
+/// Positive and negative pulse width (s) from the frequency (Hz) and the
+/// duty cycle (% high) the Hz function measures: +w = duty x T, -w = T -
+/// (+w), T = 1 / f. None without a signal, at 0 % / 100 % duty (no edge
+/// of one kind: `dmm::freq_glitch`) or for a value that is not finite.
+/// Accuracy: the counter's duty (0.1 % resolution) and frequency.
+pub fn pulse_widths(f_hz: f32, duty: f32) -> Option<(f32, f32)> {
+    if !(f_hz > 0.0 && f_hz.is_finite() && duty > 0.0 && duty < 100.0) || crate::dmm::freq_glitch(f_hz * 1e-3, duty) {
+        return None;
+    }
+    let t = 1.0 / f_hz;
+    let p = t * duty * 0.01;
+    Some((p, t - p))
+}
+
+/// A pulse width (s) for the readout: 4 significant digits in s / ms / us
+/// / ns ("12.34 ms"; the widest is "999.9 ms": a value that rounds to
+/// 1000.0 shows in the next unit up, "1.000 s").
+pub fn width_val(t: f32) -> Val {
+    const UNITS: [(f32, &str); 4] = [(1e9, "ns"), (1e6, "us"), (1e3, "ms"), (1.0, "s")];
+    let mut i = if t >= 1.0 {
+        3
+    } else if t >= 1e-3 {
+        2
+    } else if t >= 1e-6 {
+        1
+    } else {
+        0
+    };
+    if i < 3 && t * UNITS[i].0 >= 999.95 {
+        i += 1;
+    }
+    let (x, unit) = (t * UNITS[i].0, UNITS[i].1);
+    let dec = if x < 9.9995 { 3 } else if x < 99.995 { 2 } else { 1 };
+    Val { v: x, dec, unit, ol: false, ext: false }
+}
+
+/// The pulse widths of a Hz-function reading (mode 14; main = frequency,
+/// aux2 = duty), None otherwise or when there is no clean value.
+pub fn reading_widths(r: &Reading) -> Option<(f32, f32)> {
+    match r.aux2 {
+        Some(d) if r.mode == 14 && !r.main.ol && !d.ol && !r.prov => pulse_widths(r.si, d.v),
+        _ => None,
     }
 }
 
@@ -1483,5 +1556,80 @@ mod tests {
         assert_eq!(lo.check(&r), V_PASS);
         // AC A keeps its own slot.
         assert_eq!(lim_slot(4), 3);
+    }
+
+    #[test]
+    fn rel_percent_and_ppm() {
+        let d = |v: f32, dec: u8| Val { v, dec, unit: "V", ol: false, ext: false };
+        // 5.000 V reference, +0.050 V = +1.000 %.
+        let p = rel_pct(&d(0.05, 4), 5.0, 1);
+        assert!(!p.ol && p.unit == "%" && p.dec == 3 && (p.v - 1.0).abs() < 1e-4);
+        // +0.5 mV of 5 V = 100 ppm in DC V; % in AC V.
+        let p = rel_pct(&d(0.0005, 4), 5.0, 1);
+        assert!(p.unit == "ppm" && p.dec == 0 && (p.v - 100.0).abs() < 0.01);
+        let p = rel_pct(&d(0.0005, 4), 5.0, 0);
+        assert!(p.unit == "%" && (p.v - 0.01).abs() < 1e-5);
+        // Ohm ppm, negative.
+        let p = rel_pct(&d(-0.2, 1), 1000.0, 10);
+        assert!(p.unit == "ppm" && (p.v + 200.0).abs() < 0.01);
+        // Negative reference: % of |r|, the sign of the deviation.
+        let p = rel_pct(&d(-0.5, 4), -5.0, 1);
+        assert!(p.unit == "%" && (p.v + 10.0).abs() < 1e-3 && p.dec == 2);
+        // Reference 0, OL value, too wide: 0L.
+        assert!(rel_pct(&d(0.1, 4), 0.0, 1).ol);
+        assert!(rel_pct(&Val { ol: true, ..d(0.1, 4) }, 5.0, 1).ol);
+        assert!(rel_pct(&d(1000.0, 1), 0.001, 1).ol);
+        // Decimals step with the magnitude (the REL box holds "+99999").
+        assert_eq!(rel_pct(&d(50.0, 2), 100.0, 0).dec, 2);
+        assert_eq!(rel_pct(&d(500.0, 1), 100.0, 0).dec, 1);
+        assert_eq!(rel_pct(&d(5000.0, 0), 100.0, 0).dec, 0);
+    }
+
+    #[test]
+    fn pulse_width_from_freq_and_duty() {
+        // 1 kHz, 25 %: +250 us, -750 us.
+        let (p, n) = pulse_widths(1000.0, 25.0).unwrap();
+        assert!((p - 250e-6).abs() < 1e-9 && (n - 750e-6).abs() < 1e-9);
+        // 50 Hz square: 10 ms each.
+        let (p, n) = pulse_widths(50.0, 50.0).unwrap();
+        assert!((p - 0.01).abs() < 1e-7 && (n - 0.01).abs() < 1e-7);
+        // No signal, no edge of one kind, NaN.
+        assert!(pulse_widths(0.0, 50.0).is_none());
+        assert!(pulse_widths(1000.0, 0.0).is_none());
+        assert!(pulse_widths(1000.0, 100.0).is_none());
+        assert!(pulse_widths(1000.0, 99.96).is_none());
+        assert!(pulse_widths(f32::NAN, 50.0).is_none());
+        assert!(pulse_widths(1000.0, f32::NAN).is_none());
+        // From a Hz reading (si = Hz, aux2 = duty); other functions: none.
+        let mut r = rd(14, 1.0, 3, "kHz", 1000.0);
+        r.aux2 = Some(Val { v: 40.0, dec: 1, unit: "%", ol: false, ext: false });
+        let (p, _) = reading_widths(&r).unwrap();
+        assert!((p - 400e-6).abs() < 1e-9);
+        r.prov = true;
+        assert!(reading_widths(&r).is_none());
+        r.prov = false;
+        r.mode = 0;
+        assert!(reading_widths(&r).is_none());
+        // Units and digits.
+        let w = width_val(250e-6);
+        assert!(w.unit == "us" && w.dec == 1 && (w.v - 250.0).abs() < 1e-3);
+        let w = width_val(0.01);
+        assert!(w.unit == "ms" && w.dec == 2 && (w.v - 10.0).abs() < 1e-4);
+        let w = width_val(8.3e-9);
+        assert!(w.unit == "ns" && w.dec == 3);
+        assert_eq!(width_val(2.5).unit, "s");
+        // The unit boundaries after rounding: 999.96 ms is "1.000 s", not
+        // "1000.0 ms"; 999.94 ms stays "999.9 ms".
+        let w = width_val(0.99996);
+        assert_eq!((w.unit, w.dec), ("s", 3));
+        assert!((w.v - 0.99996).abs() < 1e-6);
+        let w = width_val(0.99994);
+        assert_eq!((w.unit, w.dec), ("ms", 1));
+        let w = width_val(999.96e-6);
+        assert_eq!((w.unit, w.dec), ("ms", 3));
+        let w = width_val(999.96e-9);
+        assert_eq!((w.unit, w.dec), ("us", 3));
+        let w = width_val(9.9996e-3);
+        assert_eq!((w.unit, w.dec), ("ms", 2));
     }
 }

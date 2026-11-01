@@ -9,6 +9,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **REL in %:** long press the REL box to see the deviation from the zero
+  in % (ppm in DC V and Ω below 0.1 %); SCPI `CALCulate:REL:FORMat`.
+- **Probe Hold:** Auto Hold **ON + History** also adds every captured value
+  to the history row; SCPI `CALCulate:AHOLd:PROBe`.
+- **Pulse width in Hz:** +W / -W from the frequency and the duty cycle;
+  SCPI `FETCh:PWIDth?`, `FETCh:NWIDth?`.
+
 - **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):

@@ -674,6 +674,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - A small last digit where the counter resolves it: 10.0000 Hz, but
   50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
+- **+W** / **-W** at the top left: the positive and negative pulse width,
+  from the frequency and the duty cycle.
 
 
 ![1 kHz, 50 % duty](img/dmm-hz.png)
@@ -875,6 +877,9 @@ while you lift the probes. It captures again after the input went away (open
 leads, OL) or changed by more than about 0.5 %. The statistics and the chart
 keep running on the live value.
 
+**ON + History** in the Auto Hold row (Probe Hold): each captured value is
+also added to the [history row](#the-bargraph-and-the-history-row).
+
 ![AutoHold with a captured value](img/dmm-ahold.png)
 
 *AutoHold with a captured value.*
@@ -889,6 +894,9 @@ the box shows the REL value. Tap again to turn it off.
 - REL ends when you change the function, choose a range, press AUTO, or
   AUTO coupling switches.
 - Turning REL on or off restarts MIN/MAX/AVG.
+- Long press the REL box while REL is on: the box shows the deviation in %
+  of the zero (ppm below 0.1 % in DC V and Ω; **0L** when the zero is 0)
+  instead of the zero. Long press again for the zero. Kept after power-off.
 
 
 ![REL: 4.8176 V is the zero](img/dmm-rel.png)
@@ -905,7 +913,8 @@ The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
   statistics are cleared, the timer turns orange, and
   the meter does not [switch itself off](#power-battery-and-sleep) while the
   session runs. Tap again to stop.
-- **Long press the column**: reset MIN/MAX/AVG.
+- **Long press the column** (with REL on: outside the REL box): reset
+  MIN/MAX/AVG.
 
 
 ![A MIN/MAX/AVG session running for 5 min 12 s](img/dmm-minmax.png)
@@ -968,7 +977,7 @@ Limits: DC V**.
 
 | Row | What it does |
 |---|---|
-| **Auto Hold** | AutoHold on / off. |
+| **Auto Hold** | AutoHold: OFF, ON, or ON + History ([Probe Hold](#autohold)). |
 | **Limits** | Limit check on / off. |
 | **Upper limit**, **Lower limit** | Type a value with the keypad. |
 | **Upper = reading**, **Lower = reading** | Take the current reading as the limit and switch the check on. |
