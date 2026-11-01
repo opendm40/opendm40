@@ -2450,7 +2450,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     rate_chip(c, rc);
     let Some(side) = side else { return };
     // Right column (x 405..475, the REL box rows 205..240 the tap target):
-    // MAX and AVG above the REL box, MIN, SD and the session time below; one F14 row each, label left (dim), value right-aligned
+    // MAX and AVG above the REL box, MIN, σ (standard deviation) and the session time below; one F14 row each, label left (dim), value right-aligned
     // without the unit, which is shown once, in the REL box header
     // ("REL" .. "mV"). The stock version crammed "4.8170V" into 54 px with
     // touching glyphs.
@@ -2460,7 +2460,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
         lcd::fill_rect(402, 241, 78, 38, BG);
-        for (i, t) in ["MAX", "AVG", "MIN", "SD"].iter().enumerate() {
+        for (i, t) in ["MAX", "AVG", "MIN", "\u{3c3}"].iter().enumerate() {
             sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], 22, 14), t, DIM, BG, 0, 1);
         }
     }

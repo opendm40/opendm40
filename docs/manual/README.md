@@ -292,7 +292,7 @@ scope.
 | Smoothing | — | Optional [smoothing](#smoothing) of the display |
 | AutoHold | — | [AutoHold](#autohold): holds a stable reading by itself |
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
-| AVG | — | The [mean](#min-max-avg) and SD next to MAX and MIN |
+| AVG | — | The [mean](#min-max-avg) and σ (standard deviation) next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
@@ -893,7 +893,7 @@ the box shows the REL value. Tap again to turn it off.
 ### MIN, MAX, AVG
 
 The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
-**SD** (sample standard deviation) since they were last reset, and a timer
+**σ** (sample standard deviation) since they were last reset, and a timer
 **T hh:mm:ss**.
 
 - **Tap the column** (outside the REL box): start a session. The

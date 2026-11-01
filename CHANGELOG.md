@@ -9,7 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
+- **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
