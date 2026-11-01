@@ -1576,6 +1576,32 @@ pub(crate) fn ctr_valid(ctb: u32, cta: u32) -> bool {
 /// off, the gate preset CTA = 0xfc0000 (0x40000 SYSCLK = 53.3 ms), ENCTR on.
 /// The ramp rows' counter from CTA 0: a 3.4 s gate (`ctr_restart`'s
 /// 0xFC0000 stops it after 262 144 ticks, 53 ms; device bc205357+).
+/// The ramp comparator's rate (`Dmm::cap_ctr`): `acc` the periods (CTB) and
+/// 4.9 MHz ticks (CTA) of the earlier counter windows on this row and class,
+/// `ctb` / `cta` the running window's. Returns the sums to keep when the
+/// window ends (CTA over 8e6, ~1.6 s: the caller restarts the counter), that
+/// end, the rate (kHz) and the periods. Sums over 2^30 ticks (~218 s) are
+/// halved first: a steady capacitor's sums kept growing and the tick sum
+/// wrapped after ~874 s, which read as a ramp too fast for the range.
+fn cap_ctr_rate(acc: (u32, u32), ctb: u32, cta: u32) -> ((u32, u32), bool, f32, u32) {
+    let (mut ab, mut an) = acc;
+    let tb = ab + ctb;
+    let khz = match an as u64 + cta as u64 {
+        0 => 0.0,
+        tn => tb as f32 / tn as f32 * 4915.28,
+    };
+    let restart = cta > 8_000_000;
+    if restart {
+        if an > 1 << 30 {
+            ab /= 2;
+            an /= 2;
+        }
+        ab += ctb;
+        an += cta;
+    }
+    ((ab, an), restart, khz, tb)
+}
+
 fn cap_ctr_restart() {
     hy::write(0x20, &[0x50]);
     hy::write(0x1B, &[0x00, 0x00, 0x00]);
@@ -1889,11 +1915,6 @@ pub struct Dmm {
     /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
     /// steps before 600 uF).
     cap_last: i8,
-    /// Ramp ranges: the interval between new results (ms, EMA; 0 = none
-    /// yet) and the last one's time: the readings/s there (a poll every
-    /// 255 ms repeats the value; `reading_period_ms`).
-    cap_res_ms: f32,
-    cap_res_t: Option<u64>,
     /// DBG:CAP? (`cap_info`): the last poll's V (mV), dV (mV), dt (ms),
     /// median dV, per-poll C (uF), oscillator C (uF).
     cap_dbg: [f32; 6],
@@ -2582,8 +2603,6 @@ impl Dmm {
             cap_half_prev: 0,
             cap_first_v: 0.0,
             cap_last: CAP_R_MIN,
-            cap_res_ms: 0.0,
-            cap_res_t: None,
             cap_dbg: [0.0; 6],
             ramp: CapRamp {
                 discharging: false,
@@ -2795,9 +2814,8 @@ impl Dmm {
     /// intervals across a function / range / rate change or a dropped
     /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
-        // Capacitance ramp ranges (600 uF up): a new value per ramp result
-        // (device: 347 uF on 600 uF changed every ~4.1 s while the chip
-        // said 3.9/s, the 255 ms poll).
+        // Capacitance ramp ranges: a new value every poll (cc1728f4), so
+        // the measured interval is the rate.
         self.period_ms as u32
     }
 
@@ -6502,15 +6520,13 @@ impl Dmm {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         let (ctb, cta) = (u24(&b[3..6]), u24(&b[6..9]));
-        let n = cta;
-        let (tb, tn) = (self.cap_ct_b + ctb, self.cap_ct_n + n);
-        if n > 8_000_000 {
-            self.cap_ct_b = tb;
-            self.cap_ct_n = tn;
+        let (acc, restart, khz, tb) = cap_ctr_rate((self.cap_ct_b, self.cap_ct_n), ctb, cta);
+        if restart {
+            (self.cap_ct_b, self.cap_ct_n) = acc;
             cap_ctr_restart();
             self.diag_ctr = self.diag_ctr.saturating_add(1);
         }
-        (if tn == 0 { 0.0 } else { tb as f32 / tn as f32 * 4915.28 }, tb)
+        (khz, tb)
     }
 
     /// No value yet: dashes, provisional.
@@ -6554,6 +6570,9 @@ impl Dmm {
             // on at the new current, no second discharge (device: 0.5 s
             // per step).
             self.write_config(clk);
+            // The comparator counter from this row on (`cap_ctr`; the class
+            // write that restarts it comes with the next poll).
+            cap_ctr_restart();
             self.ramp.prev_t = now;
             self.ramp.prev_v = self.cap_dbg[0];
             self.ramp.n = 0;
@@ -6635,8 +6654,6 @@ impl Dmm {
         self.cap_dis_e1 = 0.0;
         self.cap_vext_n = 0;
         self.cap_idle_flips = 0;
-        self.cap_res_ms = 0.0;
-        self.cap_res_t = None;
     }
 
     /// `poll_cap_in`, and once a grey value was shown, that value instead
@@ -7187,7 +7204,6 @@ impl Dmm {
             }
         }
         if fresh {
-            ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
             let n = self.ramp.n;
             let mean = if n > 4 {
                 let mut b = self.ramp.buf;
@@ -7297,9 +7313,9 @@ impl Dmm {
                 !ok
             };
             if ready && !wait && !self.cap_dis_fin {
-                // Adaptive class (owner 2026-10-30): class 1 for a fast first
-                // value; once CAP_AGREE_N final values in a row agree within
-                // 2 % (the same capacitor), class 2 for accuracy. The value
+                // Adaptive class (owner 2026-10-30): CAP_CLASS_FAST for a fast
+                // first value; once CAP_AGREE_N final values in a row agree
+                // within 2 % (the same capacitor), CAP_CLASS_AUTO. The value
                 // stays final; the directions' ratio is learned again.
                 if !self.ramp.first && !self.manual && (v - self.cap_c).abs() > CAP_SWAP * self.cap_c {
                     // Another capacitor on the same range (a 470 uF after a
@@ -7318,12 +7334,16 @@ impl Dmm {
                     // The new threshold makes the polls around it partial
                     // ones: the ring starts over (the value stays as it is
                     // until 3 class-2 polls are in), the ratio is learned
-                    // again (1 meanwhile: the class-1 ratio is not class 2's).
+                    // again (1 meanwhile: one class's ratio is not another's).
+                    // Nothing to do when the class stays (CAP_CLASS_FAST ==
+                    // CAP_CLASS_AUTO, or widened to it already).
                     self.cap_cls2 = true;
-                    self.cap_pair = [None; 2];
-                    self.cap_ring_n = 0;
-                    self.cap_ratio = [1.0; 2];
-                    return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
+                    if CAP_CLASS_AUTO.max(self.cap_cls_min) != self.ramp.class {
+                        self.cap_pair = [None; 2];
+                        self.cap_ring_n = 0;
+                        self.cap_ratio = [1.0; 2];
+                        return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
+                    }
                 }
                 if !self.cap_seg_ok {
                     self.cap_c = v;
@@ -7772,6 +7792,39 @@ fn sort_f32(v: &mut [f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A steady ramp at 7 Hz (5 uF on 600 uF) for 1 h of 1.6 s counter
+    /// windows: the rate stays 7 Hz past the old u32 tick sum's wrap
+    /// (~874 s) and the sums stay bounded.
+    #[test]
+    fn cap_ctr_rate_steady_past_wrap() {
+        let tick = 4_915_280.0f64; // CTA, per s
+        let (hz, win) = (7.0f64, 8_000_100u32);
+        let ctb = (hz * win as f64 / tick).round() as u32;
+        let want = ctb as f32 / win as f32 * 4915.28;
+        let mut acc = (0u32, 0u32);
+        for i in 0..(3600.0 * tick / win as f64) as u32 {
+            // Mid-window (half the ticks), then the window's end.
+            let (_, rs, k, _) = cap_ctr_rate(acc, ctb / 2, win / 2);
+            assert!(!rs);
+            // (11 periods a window: the half window counts 5 of them.)
+            assert!((k - want).abs() < 0.1 * want, "mid {i}: {k}");
+            let (a, rs, k, n) = cap_ctr_rate(acc, ctb, win);
+            assert!(rs && n >= 3);
+            assert!((k - want).abs() < 1e-3 * want, "end {i}: {k}");
+            acc = a;
+            assert!(acc.1 <= (1 << 30) + win, "{acc:?}");
+        }
+        assert!(want < CAP_FAST_KHZ * 10.0 && want > CAP_FAST_KHZ);
+        // A slow ramp (0.5 Hz: ~1 mF on 6 mF) stays under CAP_FAST_KHZ.
+        let ctb = (0.5 * win as f64 / tick).round() as u32;
+        let mut acc = (0u32, 0u32);
+        for _ in 0..3000 {
+            let (a, _, k, _) = cap_ctr_rate(acc, ctb, win);
+            assert!(k < CAP_FAST_KHZ, "{k}");
+            acc = a;
+        }
+    }
 
     /// A triangle ramp (2 mV / 50 ms, 30 mV swing, up 1 % steeper) with
     /// noise: the pair value is final within 1 % in under 2 s.
