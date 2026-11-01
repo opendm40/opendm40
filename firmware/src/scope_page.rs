@@ -2590,6 +2590,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::Bode => {
+                self.sp_popup_close();
+                let _ = self.bode_open(clk);
+                return;
+            }
         }
         let _ = clk;
         self.sp_popup_draw();

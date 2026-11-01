@@ -19,6 +19,7 @@ mod hyspi;
 mod lcd;
 mod logger;
 mod inrush;
+mod bode;
 mod ad2exp;
 mod ad2pll;
 
@@ -1192,6 +1193,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     false
                 }
                 scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
+                scpi::Out::Bode(scpi::Bode::Data) => {
+                    port.respond_with(&mut |b| Some(app.bode_data(b)));
+                    false
+                }
+                scpi::Out::Bode(c) => app.bode_scpi(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1966,6 +1972,7 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
+            | Out::Bode(scpi::Bode::Data)
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )

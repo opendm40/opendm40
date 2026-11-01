@@ -14,6 +14,9 @@ pub mod pw;
 /// The Inrush Current page (View::Inrush, app_inrush.rs).
 #[path = "ui_inrush.rs"]
 pub mod inr;
+/// The Bode page (View::Bode, app_bode.rs).
+#[path = "ui_bode.rs"]
+pub mod bode;
 /// The touch test page (View::TouchTest, app_touchtest.rs).
 #[path = "ui_touchtest.rs"]
 pub mod touchtest;
@@ -112,6 +115,8 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// Bode plot (scope MF > Settings > Bode; app_bode.rs).
+    Bode,
 }
 
 impl View {
@@ -3317,6 +3322,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::TouchTest => "Touch test",
+        View::Bode => "Bode",
     }
 }
 

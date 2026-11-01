@@ -1318,6 +1318,12 @@ fn kind_of(e: &[u8]) -> Option<Kind> {
     kind_of_name(&e[..11])
 }
 
+/// BODEnnn.CSV (app_bode.rs): deleted from the USB volume like the
+/// others; not in the gallery or MMEM:CATalog?.
+fn bode_name(n: &[u8; 11]) -> bool {
+    n[..4].eq_ignore_ascii_case(b"BODE") && n[8..].eq_ignore_ascii_case(b"CSV")
+}
+
 fn kind_of_name(e: &[u8]) -> Option<Kind> {
     let up = |c: u8| c.to_ascii_uppercase();
     let ext = [up(e[8]), up(e[9]), up(e[10])];
@@ -1574,7 +1580,7 @@ fn sfn_checksum(e: &[u8]) -> u8 {
 /// the root: its entry and long-name entries 0xE5 (read back), then its
 /// chain freed in every FAT copy (fatren::free_chain: bits cleared, no erase).
 pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr> {
-    if kind_of_name(name).is_none() {
+    if kind_of_name(name).is_none() && !bode_name(name) {
         return Err(GErr::NotFound);
     }
     let j = job();

@@ -147,6 +147,9 @@ const MAX_NBLK: u32 = {
 /// File kinds: the screenshot, a scope record CSV (UF-13).
 const K_BMP: u8 = 0;
 const K_CSV: u8 = 1;
+/// A Bode sweep's CSV (app_bode.rs: SCOPE/BODE%03u.CSV, the text as it is,
+/// from `start_bode`'s buffer; BODE000..BODE023, fatdir::BODE_MAX).
+const K_BODE: u8 = 2;
 /// Scope record bytes coded per pass (~2500 samples at 0.2 B/sample).
 const CSV_PIECE: usize = 512;
 const _: () = assert!(HDR_LEN % 2 == 0 && BLK % 2 == 0, "block edges fall between pixels");
@@ -279,6 +282,9 @@ static mut JOB: Job = JOB0;
 /// CSV (`take_csv_result`).
 static mut RESULT: Option<Shot> = None;
 static mut CSV_RESULT: Option<Shot> = None;
+static mut BODE_RESULT: Option<Shot> = None;
+/// The Bode CSV's text (`start_bode`).
+static mut BODE_TEXT: &[u8] = &[];
 /// The last screenshot (`stats`, DBG:FLASH?): frozen ms, start .. result
 /// ms, `step` calls while frozen, data blocks that needed an erase.
 static mut STATS: [u32; 4] = [0; 4];
@@ -347,6 +353,38 @@ pub fn start_csv() -> bool {
     true
 }
 
+/// Request a Bode CSV of `text` (at most 4 KiB, one block): the next free
+/// SCOPE/BODE%03u.CSV (BODE000..BODE023), written like a scope record.
+/// Its result comes from `take_bode_result`. False: a disk job is in
+/// flight, or `text` is empty / too long.
+pub fn start_bode(text: &'static [u8]) -> bool {
+    let j = job();
+    if j.phase != Phase::Idle || text.is_empty() || text.len() > BLK {
+        return false;
+    }
+    *j = JOB0;
+    j.kind = K_BODE;
+    j.len = text.len() as u32;
+    j.nblk = 1;
+    // Only the numbers the USB volume can show (vdisk.rs BODE_MAX).
+    for n in crate::fatdir::BODE_MAX..1000 {
+        j.taken[(n / 32) as usize] |= 1 << (n % 32);
+    }
+    unsafe { *core::ptr::addr_of_mut!(BODE_TEXT) = text };
+    j.slot = NONE;
+    j.cur = NONE;
+    j.crc = !0;
+    j.vcrc = !0;
+    j.phase = Phase::Start;
+    j.t0 = cyc();
+    true
+}
+
+/// The result of the last finished Bode CSV, once.
+pub fn take_bode_result() -> Option<Shot> {
+    unsafe { (*core::ptr::addr_of_mut!(BODE_RESULT)).take() }
+}
+
 /// The result of the last finished CSV, once.
 pub fn take_csv_result() -> Option<Shot> {
     unsafe { (*core::ptr::addr_of_mut!(CSV_RESULT)).take() }
@@ -354,7 +392,11 @@ pub fn take_csv_result() -> Option<Shot> {
 
 /// (prefix, extension) of the job's file name.
 fn name_of(kind: u8) -> (&'static [u8], &'static [u8; 3]) {
-    if kind == K_CSV { (b"SCOP", b"DLG") } else { (b"S", b"BMP") }
+    match kind {
+        K_CSV => (b"SCOP", b"DLG"),
+        K_BODE => (b"BODE", b"CSV"),
+        _ => (b"S", b"BMP"),
+    }
 }
 
 /// A screenshot is in flight (host disk writes are refused meanwhile).
@@ -503,6 +545,8 @@ fn finish(j: &mut Job, r: Shot) {
     }
     if j.kind == K_CSV {
         unsafe { *core::ptr::addr_of_mut!(CSV_RESULT) = Some(r) };
+    } else if j.kind == K_BODE {
+        unsafe { *core::ptr::addr_of_mut!(BODE_RESULT) = Some(r) };
     } else {
         unsafe {
             *core::ptr::addr_of_mut!(RESULT) = Some(r);
@@ -537,7 +581,7 @@ impl Job {
         // The file's directory (fatdir.rs; created at boot, here only if it
         // went missing: synchronous, ~1 s once). blocks()[1] (FAT cache) is
         // overwritten: `cur` is NONE until Alloc.
-        let dir = if self.kind == K_CSV { &fatdir::SCOPE } else { &fatdir::SHOTS };
+        let dir = if self.kind == K_BMP { &fatdir::SHOTS } else { &fatdir::SCOPE };
         let v = match fatdir::ensure(disk, &v, dir, diskbuf::blocks()) {
             Ok(d) => d,
             Err(fatdir::Err::Io) => return Some(Shot::Error),
@@ -698,6 +742,10 @@ impl Job {
                     return None;
                 }
                 self.part = 0;
+            } else if self.kind == K_BODE {
+                let t = unsafe { *core::ptr::addr_of!(BODE_TEXT) };
+                let o = off as usize;
+                buf[..len].copy_from_slice(&t[o..o + len]);
             } else {
                 self.fill(off, &mut buf[..len]);
             }

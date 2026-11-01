@@ -76,6 +76,8 @@ mod ui;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+#[path = "../../src/bode.rs"]
+mod bode;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {

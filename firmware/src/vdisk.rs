@@ -398,9 +398,43 @@ fn st_dyn0() -> u32 {
 
 // --- the dynamic files -----------------------------------------------------------
 
+/// BODEnnn.CSV (the Bode page's results, app_bode.rs; SCOPE/ on both
+/// disks): kind 1 (the SCOPE directory) with the numbers BODE_BASE + n,
+/// n < BODE_MAX, the file served as it is (as a BMP). The 10-bit number
+/// field holds no more of them, and the 2-bit kind no fifth kind.
+pub(crate) const BODE_BASE: u16 = 1000;
+pub(crate) use crate::fatdir::BODE_MAX;
+
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn bode_id(id: u16) -> bool {
+    kind(id) == 1 && id & 0x3FF >= BODE_BASE
+}
+
+/// Served as the SPI file's own bytes (BMP, Bode CSV), not a generated CSV.
+#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
+fn raw_id(id: u16) -> bool {
+    kind(id) == 2 || bode_id(id)
+}
+
+/// The number of a BODEnnn.CSV name (n < BODE_MAX), else None.
+pub(crate) fn bode_num(n: &[u8; 11]) -> Option<u16> {
+    if !n[..4].eq_ignore_ascii_case(b"BODE") || !n[8..].eq_ignore_ascii_case(b"CSV") || n[7] != b' ' {
+        return None;
+    }
+    let d = &n[4..7];
+    if !d.iter().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let v = (d[0] - b'0') as u16 * 100 + (d[1] - b'0') as u16 * 10 + (d[2] - b'0') as u16;
+    (v < BODE_MAX).then_some(v)
+}
+
 /// (kind, number) of an SPI file of ours with a numbered name (LOGnnn.DLG,
-/// SCOPnnn.DLG, Snnn.BMP, FASTnnn.DLG), else None.
+/// SCOPnnn.DLG, Snnn.BMP, FASTnnn.DLG, BODEnnn.CSV), else None.
 fn ours(n: &[u8; 11]) -> Option<(usize, u16)> {
+    if let Some(v) = bode_num(n) {
+        return Some((1, BODE_BASE + v));
+    }
     let k = if dlog::dlg_prefix(n) == Some(b"LOG") {
         0
     } else if dlog::dlg_prefix(n) == Some(b"SCOP") {
@@ -422,12 +456,18 @@ fn ours(n: &[u8; 11]) -> Option<(usize, u16)> {
 
 /// 8.3 name of table id `id` on this volume ("LOG007  CSV").
 pub(crate) fn vname(id: u16) -> [u8; 11] {
+    if bode_id(id) {
+        return crate::calbackup::numbered_name(b"BODE", (id & 0x3FF) - BODE_BASE, b"CSV");
+    }
     let (pre, ext) = (VDIRS[kind(id)].1, &VDIRS[kind(id)].2);
     crate::calbackup::numbered_name(pre, id & 0x3FF, ext)
 }
 
 /// 8.3 name of table id `id` on the SPI disk ("LOG007  DLG").
 pub(crate) fn spi_name(id: u16) -> [u8; 11] {
+    if bode_id(id) {
+        return vname(id);
+    }
     let ext: &[u8; 3] = if kind(id) == 2 { b"BMP" } else { b"DLG" };
     crate::calbackup::numbered_name(VDIRS[kind(id)].1, id & 0x3FF, ext)
 }
@@ -475,7 +515,7 @@ pub(crate) fn scan_spi(exclude: Option<[u8; 11]>, f: &mut dyn FnMut(u16, u16, u3
 /// Size on this volume of SPI file `id` (start, size): the generated CSV's
 /// for a DLG (None: not a valid DLG), the file's own for a BMP.
 fn vsize_of(id: u16, src: u16, ssize: u32) -> Option<u32> {
-    if kind(id) == 2 {
+    if raw_id(id) {
         return (ssize > 0).then_some(ssize);
     }
     let mut d = dlog::disk();
@@ -765,7 +805,7 @@ fn geo() -> Option<(FnRaw, Geo)> {
 #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
 fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
     let key = (e.src, e.ssize);
-    if kind(e.id) == 2 {
+    if raw_id(e.id) {
         let cur = unsafe { &mut *core::ptr::addr_of_mut!(BMP_CUR) };
         let k = unsafe { &mut *core::ptr::addr_of_mut!(BMP_KEY) };
         if *k != key || k.1 == 0 {
