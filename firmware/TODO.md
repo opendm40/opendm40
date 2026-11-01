@@ -266,6 +266,8 @@ What waits for the owner; each line links to the material.
 ## Next release (after 0.4.0)
 
 - [ ] Generator: a swipe gesture turns the output off (owner 2026-11-01).
+- [ ] Mode icons: on the combined Diode / Cont-Resist icon (and similar), the sub-icon a tap opens comes first, so
+  it shows which one you get from another mode (user request, owner 2026-11-01).
 
 ## AD1 offset with AD2 / AD3 on: measure, then maybe compensate (owner 2026-11-01)
 
