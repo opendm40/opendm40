@@ -1,4 +1,5 @@
-//! Protocol decoder (TODO "Protocol decoders"): UART, Modbus RTU and DALI decoded
+//! Protocol decoder (TODO "Protocol decoders"): UART (Modbus RTU frames
+//! recognised in it) and DALI decoded
 //! from the scope's record, drawn as a bus band over the graph (scope_ui
 //! `dec`, app_decode.rs) and read with DECode:FRAMes?.
 //!
@@ -18,11 +19,13 @@
 //!    level); start, data LSB first, parity, one stop bit (framing error
 //!    if it is space). A character that runs past the window's end is not
 //!    reported;
-//!  * Modbus RTU frames (`Framer`): characters closer than 3.5 character
-//!    times (1.75 ms above 19200 baud), CRC-16 (computed as the bytes come:
-//!    no frame buffer), request / reply / exception from the function and
-//!    the length; a frame that may have begun before the window or go on
-//!    after it is partial (no CRC);
+//!  * frames (`Framer`): characters closer than 3.5 character times (1.75
+//!    ms above 19200 baud), as Modbus RTU frames them; a frame of 4 bytes or
+//!    more whose CRC-16 (computed as the bytes come: no frame buffer)
+//!    matches its last two bytes is Modbus (feature `dec-modbus`): request /
+//!    reply / exception from the function and the length. Any other frame
+//!    is plain UART bytes, partial when it may have begun before the window
+//!    or go on after it;
 //!  * DALI (`dali_step`, feature `dec-dali`): bi-phase at a fixed 1200
 //!    bit/s (a half bit Te = 416.67 us, the rate +-10 %), idle high. On the
 //!    bus a 1 is low for the first half bit and high for the second (a
@@ -52,15 +55,15 @@ pub const MIN_BAUD: u32 = 300;
 /// Protocols (Cfg::proto).
 pub const P_OFF: u8 = 0;
 pub const P_UART: u8 = 1;
-pub const P_MODBUS: u8 = 2;
+/// 2 was Modbus RTU (now recognised in UART).
 pub const P_DALI: u8 = 3;
-/// Modbus RTU is built in (firmware: feature `dec-modbus`; the host tests
-/// always); without it only UART.
+/// UART recognises Modbus RTU frames (firmware: feature `dec-modbus`; the
+/// host tests always); without it UART bytes only.
 pub const MODBUS: bool = cfg!(any(feature = "dec-modbus", not(target_os = "none")));
-/// `proto` is Modbus RTU (always false without `dec-modbus`).
+/// A frame kind that is Modbus (`K_REQ` .. `K_MB`).
 #[inline(always)]
-pub fn is_mb(proto: u8) -> bool {
-    MODBUS && proto == P_MODBUS
+pub fn is_mb_kind(kind: u8) -> bool {
+    MODBUS && matches!(kind, K_REQ..=K_MB)
 }
 
 /// DALI is built in (firmware: feature `dec-dali`; the host tests always).
@@ -92,7 +95,6 @@ pub const MIN_SPB: u32 = 4;
 /// Character / frame flags.
 pub const F_FE: u8 = 1;
 pub const F_PE: u8 = 2;
-pub const F_CRC: u8 = 4;
 /// Frame: its start or end may lie outside the window (no CRC check).
 pub const F_PART: u8 = 8;
 /// Frame kinds.
@@ -100,7 +102,7 @@ pub const K_UART: u8 = 0;
 pub const K_REQ: u8 = 1;
 pub const K_RSP: u8 = 2;
 pub const K_EXC: u8 = 3;
-/// Modbus frame that is no request / reply (bad CRC, partial, too short).
+/// A Modbus frame (CRC right) that is no request / reply shape.
 pub const K_MB: u8 = 4;
 /// A DALI frame (`len` bytes: 1 backward, 2 forward, 3 a 24-bit forward
 /// frame; F_FE with len 0: bad Manchester or timing).
@@ -635,13 +637,11 @@ fn shape(d: &[u8; 8], n: usize) -> (bool, bool) {
     }
 }
 
-/// Groups characters into frames: Modbus RTU on the 3.5-character gap, or
-/// UART lines (`max` bytes, a gap of 2 characters). Small: the CRC runs
-/// two bytes behind the input, no frame buffer.
+/// Groups characters into frames on Modbus RTU's 3.5-character gap (at
+/// most 256 bytes); a frame with its CRC right is Modbus. Small: the CRC
+/// runs two bytes behind the input, no frame buffer.
 pub struct Framer {
-    modbus: bool,
     gap: u32,
-    max: u16,
     /// Window start / end (samples): frames near them are partial.
     lo: u32,
     hi: u32,
@@ -658,21 +658,14 @@ pub struct Framer {
 
 impl Framer {
     /// `cs`: the character time, samples; `fs` the sample rate.
-    pub fn new(modbus: bool, cs: u32, fs: u32, baud: u32, lo: u32, hi: u32) -> Framer {
-        let modbus = MODBUS && modbus;
-        let gap = if !modbus {
-            cs * 2
-        } else if baud > 19200 {
-            (fs as u64 * 1750 / 1_000_000) as u32
-        } else {
-            cs * 7 / 2
-        };
+    pub fn new(cs: u32, fs: u32, baud: u32, lo: u32, hi: u32) -> Framer {
+        let gap = if baud > 19200 { (fs as u64 * 1750 / 1_000_000) as u32 } else { cs * 7 / 2 };
         let cur = Fr { start: 0, end: 0, len: 0, head: [0; 8], flags: 0, kind: K_UART };
-        Framer { modbus, gap, max: if modbus { 256 } else { 16 }, lo, hi, cur, crc: 0xFFFF, last2: [0; 2], prev_end: lo, seen_gap: false, pend: None, nframes: 0 }
+        Framer { gap, lo, hi, cur, crc: 0xFFFF, last2: [0; 2], prev_end: lo, seen_gap: false, pend: None, nframes: 0 }
     }
 
     pub fn push(&mut self, c: Ch, out: &mut dyn FnMut(&Fr, u32)) {
-        if self.cur.len > 0 && (c.start.saturating_sub(self.cur.end) > self.gap || self.cur.len >= self.max) {
+        if self.cur.len > 0 && (c.start.saturating_sub(self.cur.end) > self.gap || self.cur.len >= 256) {
             self.end(out, false);
         }
         if self.cur.len == 0 {
@@ -731,32 +724,23 @@ impl Framer {
         let mut f = self.cur;
         self.cur.len = 0;
         self.prev_end = f.end;
-        if MODBUS && self.modbus {
-            let n = f.len as usize;
-            let part = open || (!self.seen_gap && f.start.saturating_sub(self.lo) <= self.gap);
-            if part {
-                f.flags |= F_PART;
-                f.kind = K_MB;
-            } else if n < 4 || self.crc != (self.last2[0] as u16 | (self.last2[1] as u16) << 8) {
-                f.flags |= F_CRC;
-                f.kind = K_MB;
+        let n = f.len as usize;
+        if MODBUS && n >= 4 && self.crc == (self.last2[0] as u16 | (self.last2[1] as u16) << 8) {
+            let (rq, rs) = shape(&f.head, n);
+            let (a, fc) = (f.head[0], f.head[1]);
+            let matches = self.pend.is_some_and(|(_, pa, pf)| pa == a && pf == fc & 0x7F);
+            f.kind = if fc & 0x80 != 0 && rs {
+                K_EXC
             } else {
-                let (rq, rs) = shape(&f.head, n);
-                let (a, fc) = (f.head[0], f.head[1]);
-                let matches = self.pend.is_some_and(|(_, pa, pf)| pa == a && pf == fc & 0x7F);
-                f.kind = if fc & 0x80 != 0 && rs {
-                    K_EXC
-                } else {
-                    match (rq, rs) {
-                        (true, false) => K_REQ,
-                        (false, true) => K_RSP,
-                        (true, true) if matches => K_RSP,
-                        (true, true) => K_REQ,
-                        _ if matches => K_RSP,
-                        _ => K_MB,
-                    }
-                };
-            }
+                match (rq, rs) {
+                    (true, false) => K_REQ,
+                    (false, true) => K_RSP,
+                    (true, true) if matches => K_RSP,
+                    (true, true) => K_REQ,
+                    _ if matches => K_RSP,
+                    _ => K_MB,
+                }
+            };
             let req = match f.kind {
                 K_RSP | K_EXC => self.pend.take().map_or(u32::MAX, |p| p.0),
                 _ => u32::MAX,
@@ -768,7 +752,8 @@ impl Framer {
             }
             out(&f, req);
         } else {
-            if open {
+            // Plain UART bytes.
+            if open || (!self.seen_gap && f.start.saturating_sub(self.lo) <= self.gap) {
                 f.flags |= F_PART;
             }
             out(&f, u32::MAX);
@@ -874,14 +859,12 @@ impl W<'_> {
     }
 }
 
-/// Status word of a frame: OK, FE, PE, CRC or PART (the worst first).
+/// Status word of a frame: OK, FE, PE or PART (the worst first).
 pub fn status(flags: u8) -> &'static str {
     if flags & F_FE != 0 {
         "FE"
     } else if flags & F_PE != 0 {
         "PE"
-    } else if flags & F_CRC != 0 {
-        "CRC"
     } else if flags & F_PART != 0 {
         "PART"
     } else {

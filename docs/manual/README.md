@@ -1568,18 +1568,18 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
 
-**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B),
-Modbus RTU or DALI, drawn under the trace: a box per byte, Modbus frames above
-them, errors in red. Each capture is decoded once: running, one that
+**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
+or DALI, drawn under the trace: a box per byte, errors in red. UART
+recognises Modbus RTU frames by their CRC and shows them above the bytes. Each capture is decoded once: running, one that
 triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
 Zoom and pan show the decoded capture. **Mode Log** is left out of this
 build (flash).
 
 ![The Decode tab](img/scope-decode-tab.png)
 
-| ![UART: hex and the character in each box](img/scope-decode.png) | ![Modbus RTU stopped: request, reply, a CRC error](img/scope-decode-modbus.png) |
+| ![UART: hex and the character in each box](img/scope-decode.png) | ![UART with Modbus RTU frames, stopped: request, reply](img/scope-decode-modbus.png) |
 |---|---|
-| UART: hex and the character in each box | Modbus RTU, stopped: frames and a CRC error |
+| UART: hex and the character in each box | UART with Modbus RTU frames, stopped |
 
 - **Mode**: **Band** (under the trace) or **Log**: a list of every frame
   while the input streams, for as long as it runs (up to 115200 baud). Tap
@@ -1594,7 +1594,7 @@ build (flash).
 
 - **DALI** (lighting bus, 1200 bit/s, no Format / Baud): a box per frame,
   `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…` 24-bit, **ERR** in red.
-- Settings: protocol (**Off**, **UART**, **DALI**, **Modbus**), baud (**Auto** or 300
+- Settings: protocol (**Off**, **UART**, **DALI**), baud (**Auto** or 300
   to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
   (**Auto** or a level).
 - Zoomed out, the bytes become a bar. Too few samples per bit: **Rate too

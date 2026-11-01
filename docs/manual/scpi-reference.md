@@ -602,11 +602,11 @@ and `MEASure:POWer?` then give the real power P in W.
 
 ## Protocol decoder
 
-UART, Modbus RTU and DALI on the scope page ([the decoder](README.md#protocol-decoder)).
+UART (Modbus RTU frames recognised in it) and DALI on the scope page ([the decoder](README.md#protocol-decoder)).
 
 | Command | Parameters | Reply | Link |
 |---|---|---|---|
-| `DECode:PROTocol[?]` | `OFF` (default), `UART`, `MODBus` or `DALI` | `OFF`, `UART`, `MODB` or `DALI` | both |
+| `DECode:PROTocol[?]` | `OFF` (default), `UART` or `DALI`; `MODBus` selects `UART` | `OFF`, `UART` or `DALI` | both |
 | `DECode:BAUD[?]` | bit rate, 300 .. 115200, or `AUTO` (default) | `AUTO` or `9600` | both |
 | `DECode:RATE?` | | the bit rate of the decoded record: `9600` (`0`: none) | both |
 | `DECode:FORMat[?]` | `8N1` (default), `8E1`, `8O1` or `7E1` | `8N1` | both |
@@ -628,11 +628,14 @@ UART, Modbus RTU and DALI on the scope page ([the decoder](README.md#protocol-de
 
   `time_s` is the frame start in seconds from the trigger point (as Save
   CSV), `proto` `UART` or `MB`, `hex` the bytes, `status` `OK`, `FE`
-  (framing error), `PE` (parity), `CRC` or `PART` (the frame runs past the
-  record or the screen). Modbus `info`: the fields, for example `REQ 01 03
+  (framing error), `PE` (parity) or `PART` (the frame runs past the record
+  or the screen). Frames: bytes with less than 3.5 character times (1.75
+  ms above 19200 baud) between them, at most 256, as Modbus RTU; a frame of
+  4 bytes or more whose last two bytes are its Modbus CRC-16 is `MB`, any
+  other `UART` (so a Modbus frame with a bad CRC is `UART`, and `crc` in
+  `COUNt?` is 0). Modbus `info`: the fields, for example `REQ 01 03
   @0000 n=10`, `RSP 01 03 20B req=12` (the request's `seq`), `EXC 01 83
-  E02`; `?` without fields. UART frames: bytes with less than 2 character
-  times between them, at most 16.
+  E02`; `?` without fields.
 - DALI (`DECode:PROTocol DALI`, a build with it): 1200 bit/s fixed
   (`DECode:RATE?` `1200`; `BAUD` and `FORMat` are not used), `POLarity
   INVerted` for a probe on the opto-coupler side. `proto` `DALI`, `status`

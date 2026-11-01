@@ -4,12 +4,13 @@
 //!
 //! The band is a graph hole at the bottom of the graph, above the timebase
 //! tabs (both views: the frame's bottom edge is y 300): one row of byte
-//! boxes (UART and Modbus), and for Modbus a row of frame boxes above it.
+//! boxes (UART), and when the decode found Modbus RTU frames a row of
+//! frame boxes above it.
 //! A byte box spans the character's time (start edge to the stop bit's
 //! end) with its hex and, when there is room, the character; a frame box
 //! the frame with its fields (decode::mb_text, shortened to fit) and, for
 //! a reply whose request is on the screen, the reply time. Errors
-//! (framing, parity, CRC) in red. Zoomed out (a character narrower than
+//! (framing, parity) in red. Zoomed out (a character narrower than
 //! `MIN_BOX` px) the row is a bar over the columns where the line toggles.
 //!
 //! What the band shows: `ANN`, the decode of the whole stored record (the
@@ -134,8 +135,8 @@ impl Ann {
     }
 }
 
-/// The band's rect (the graph hole) for `dec` (1 UART, 2 Modbus, 3 DALI:
-/// one row of frame boxes).
+/// The band's rect (the graph hole) for `dec` (1 UART, 2 UART with Modbus
+/// frames, 3 DALI: one row of frame boxes).
 pub fn band_rect(dec: u8) -> Rect {
     if dc::MODBUS && dec == 2 { rect(14, FRAME_Y, 399, BYTE_Y + ROW_H - FRAME_Y) } else { rect(14, BYTE_Y, 399, ROW_H) }
 }
@@ -292,13 +293,10 @@ pub fn band(dec: u8, blank: bool) {
         let mut l = dc::W { b: &mut lb, n: 0 };
         let mut sb = [0u8; 12];
         let mut s = dc::W { b: &mut sb, n: 0 };
-        let (edge, fg) = if fl & (dc::F_CRC | dc::F_FE | dc::F_PE) != 0 {
-            l.s("CRC ").hex(head[0]).c(b' ').hex(head[1]);
-            s.s("CRC");
+        let (edge, fg) = if fl & (dc::F_FE | dc::F_PE) != 0 {
+            l.s(dc::status(fl)).c(b' ').hex(head[0]).c(b' ').hex(head[1]);
+            s.s(dc::status(fl));
             (C_ERR, C_ERR)
-        } else if fl & dc::F_PART != 0 {
-            l.s("..");
-            (C_BOX, C_DIS)
         } else {
             dc::mb_text(&mut l, &fr);
             // A reply whose request is on the screen: the reply time.
@@ -352,25 +350,21 @@ impl SetupVals {
 }
 
 /// The protocols offered, in the Protocol row's order: values, names
-/// (Modbus last: with four items it gets the widest box).
+/// (UART recognises Modbus RTU frames).
 const PROTO_V: &[u8] = &[
     dc::P_OFF,
     dc::P_UART,
     #[cfg(any(feature = "dec-dali", not(target_os = "none")))]
     dc::P_DALI,
-    #[cfg(any(feature = "dec-modbus", not(target_os = "none")))]
-    dc::P_MODBUS,
 ];
 const PROTO_N: &[&str] = &[
     "Off",
     "UART",
     #[cfg(any(feature = "dec-dali", not(target_os = "none")))]
     "DALI",
-    #[cfg(any(feature = "dec-modbus", not(target_os = "none")))]
-    "Modbus",
 ];
 /// The Protocol row's item width (the last item takes the rest).
-const PROTO_W: i16 = if PROTO_V.len() > 3 { 40 } else { 60 };
+const PROTO_W: i16 = 60;
 
 /// The tab's page height (MF_PAGE_H).
 pub const PAGE_H: i16 = 162;

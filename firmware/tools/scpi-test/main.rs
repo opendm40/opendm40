@@ -550,7 +550,7 @@ fn decode_cmds() {
     use scpi::Dcd as D;
     let mut s = Scpi::new();
     let ok: &[(&str, D)] = &[
-        ("DEC:PROT MODB", D::Proto(Some(2))),
+        ("DEC:PROT MODB", D::Proto(Some(1))), // the old Modbus protocol: UART
         ("DECODE:PROTOCOL UART", D::Proto(Some(1))),
         ("DEC:PROT OFF", D::Proto(Some(0))),
         ("DEC:PROT?", D::Proto(None)),

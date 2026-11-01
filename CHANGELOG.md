@@ -41,8 +41,10 @@ section named after the tag as the release notes; how to cut a release:
   for up to 10 s; the part after the trigger point is at most 52 156
   samples, the part before it what the memory keeps
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
-- **Protocol decoder:** UART (RS-232, RS-485), Modbus RTU and DALI (basic:
-  forward, backward and 24-bit frames, 1200 bit/s) drawn under the trace,
+- **Protocol decoder:** UART (RS-232, RS-485; Modbus RTU frames recognised
+  in it by their CRC, no separate Modbus protocol: `DECode:PROTocol MODBus`
+  selects UART) and DALI (basic: forward, backward and 24-bit frames, 1200
+  bit/s) drawn under the trace,
   each triggered capture and on STOP, also in the Wave view. Scope MF >
   Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
   The frame log (Mode Log) is left out of this build (flash).

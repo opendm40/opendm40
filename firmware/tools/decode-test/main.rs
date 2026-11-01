@@ -1,5 +1,5 @@
-//! Host test of src/decode.rs (UART / Modbus RTU decoded from a scope
-//! record window) on synthetic sample streams: bit timing from 4 to 40
+//! Host test of src/decode.rs (UART with Modbus RTU frames recognised,
+//! DALI, decoded from a scope record window) on synthetic sample streams: bit timing from 4 to 40
 //! samples per bit and several phases, filtered edges (the Wave view's AD2
 //! stream: a sinc^3-like smoothing over 3 samples, INFERRED shape),
 //! auto-baud (standard and odd rates, too few samples per bit = TooFast),
@@ -177,7 +177,7 @@ fn decode(c: &[u16], a: usize, b: usize, fs: u32, cfg: Cfg, manual: Option<u16>)
     let l = Line { lo, mid, hi, inv: cfg.inverted, spb: (fs as u64 * 256 / bd as u64) as u32, bits, parity };
     let mut chars = vec![];
     let mut frames = vec![];
-    let mut fr = Framer::new(cfg.proto == P_MODBUS, l.char_samples(), fs, bd, a as u32, b as u32);
+    let mut fr = Framer::new(l.char_samples(), fs, bd, a as u32, b as u32);
     decode::chars(&c, a, b, &l, &mut |ch| {
         chars.push(ch);
         fr.push(ch, &mut |f, r| frames.push((*f, r)));
@@ -461,7 +461,7 @@ fn main() {
     let mut bad = req.clone();
     bad[7] ^= 0x55;
     for &(baud, fmt, fs, filt) in &[(9600u32, 1u8, 250_000u32, 0usize), (19200, 0, 500_000, 0), (115_200, 1, 2_500_000, 0), (4800, 1, 38_400, 3), (2400, 0, 38_400, 3)] {
-        let cfg = Cfg { proto: P_MODBUS, baud: 0, fmt, inverted: false };
+        let cfg = Cfg { proto: P_UART, baud: 0, fmt, inverted: false };
         let cht = (if fmt == 0 { 10.0 } else { 11.0 }) / baud as f64;
         let t35 = if baud > 19200 { 1.75e-3 } else { 3.5 * cht };
         let seq = [&req, &rsp, &w6, &w6, &w16, &w16r, &exr, &exc, &bad];
@@ -474,14 +474,14 @@ fn main() {
         let c = s.codes(fs as f64, 250.0, 750.0, false, 5.0, 0.1, 0, filt, &mut rng);
         let r = decode(&c, 0, c.len(), fs, cfg, None);
         let kinds: Vec<u8> = r.frames.iter().map(|f| f.0.kind).collect();
-        let want = vec![K_REQ, K_RSP, K_REQ, K_RSP, K_REQ, K_RSP, K_REQ, K_EXC, K_MB];
+        let want = vec![K_REQ, K_RSP, K_REQ, K_RSP, K_REQ, K_RSP, K_REQ, K_EXC, K_UART];
         t(&format!("Modbus {baud} {} (filt {filt}): rate {:?}, kinds {kinds:?}", FMT_NAMES[fmt as usize], r.baud), kinds == want);
         if kinds != want {
             continue;
         }
         let f = &r.frames;
         t("Modbus: lengths", f[0].0.len == 8 && f[1].0.len as usize == rsp.len() && f[4].0.len as usize == w16.len());
-        t("Modbus: CRC bad on the last only", f.iter().enumerate().all(|(i, x)| (x.0.flags & F_CRC != 0) == (i == 8)));
+        t("Modbus: the bad CRC frame is plain UART bytes, no flags", f[8].0.flags == 0 && f[8].0.len == 8 && f.iter().all(|x| x.0.flags == 0));
         t("Modbus: replies point at their requests", f[1].1 == 0 && f[3].1 == 2 && f[5].1 == 4 && f[7].1 == 6 && f[0].1 == u32::MAX);
         let mut b = [0u8; 64];
         let mut w = W { b: &mut b, n: 0 };
@@ -502,7 +502,7 @@ fn main() {
         let r2 = decode(&c, a, bb, fs, Cfg { baud: r.baud.unwrap(), ..cfg }, None);
         let k2: Vec<u8> = r2.frames.iter().map(|f| f.0.kind).collect();
         let part = |x: &(Fr, u32)| x.0.flags & F_PART != 0;
-        t(&format!("Modbus window cut: first / last partial, the middle decoded ({k2:?})"), r2.frames.len() >= 3 && part(&r2.frames[0]) && part(r2.frames.last().unwrap()) && k2[1] == K_REQ && k2[2] == K_RSP);
+        t(&format!("Modbus window cut: first / last partial UART, the middle decoded ({k2:?})"), r2.frames.len() >= 3 && part(&r2.frames[0]) && part(r2.frames.last().unwrap()) && k2[0] == K_UART && *k2.last().unwrap() == K_UART && k2[1] == K_REQ && k2[2] == K_RSP);
     }
     {
         // A 1-character gap inside a frame does not split it; 4 do.
@@ -511,15 +511,60 @@ fn main() {
         let mut s = Sig::new();
         s.idle(cht * 5.0).bytes(baud as f64, &req[..4], 0).idle(cht).bytes(baud as f64, &req[4..], 0).idle(cht * 4.0).bytes(baud as f64, &rsp, 0).idle(cht * 5.0);
         let c = s.codes(fs as f64, 250.0, 750.0, false, 2.0, 0.0, 0, 0, &mut rng);
-        let r = decode(&c, 0, c.len(), fs, Cfg { proto: P_MODBUS, baud, fmt: 0, inverted: false }, None);
+        let r = decode(&c, 0, c.len(), fs, uart(baud), None);
         t(&format!("Modbus: 1-char gap kept, 4 split ({} frames)", r.frames.len()), r.frames.len() == 2 && r.frames[0].0.kind == K_REQ && r.frames[1].0.kind == K_RSP);
-        // UART lines: split on 2 characters' gap, 16 bytes at most.
+        // UART frames: split on 3.5 characters' gap, 256 bytes at most.
         let mut s = Sig::new();
-        s.idle(cht * 3.0).bytes(baud as f64, b"abc", 0).idle(cht * 0.5).bytes(baud as f64, b"def", 0).idle(cht * 3.0).bytes(baud as f64, &[b'x'; 40], 0).idle(cht * 4.0);
+        s.idle(cht * 5.0).bytes(baud as f64, b"abc", 0).idle(cht * 3.0).bytes(baud as f64, b"def", 0).idle(cht * 4.0).bytes(baud as f64, &[b'x'; 300], 0).idle(cht * 5.0);
         let c = s.codes(fs as f64, 250.0, 750.0, false, 2.0, 0.0, 0, 0, &mut rng);
         let r = decode(&c, 0, c.len(), fs, uart(baud), None);
         let lens: Vec<u16> = r.frames.iter().map(|f| f.0.len).collect();
-        t(&format!("UART lines: abcdef | 16 + 16 + 8 ({lens:?})"), lens == vec![6, 16, 16, 8]);
+        t(&format!("UART frames: abcdef | 256 + 44 ({lens:?})"), lens == vec![6, 256, 44] && r.frames.iter().all(|f| f.0.kind == K_UART));
+    }
+    // ---- UART with Modbus recognised: text, mixed, gaps at 9600 / 19200 / 115200 ----
+    for &(baud, fmt, fs) in &[(9600u32, 0u8, 125_000u32), (19200, 1, 250_000), (115_200, 0, 1_250_000), (115_200, 1, 2_500_000)] {
+        let bits = if fmt == 0 { 10.0 } else { 11.0 };
+        let cht = bits / baud as f64;
+        let t35 = if baud > 19200 { 1.75e-3 } else { 3.5 * cht };
+        let name = format!("{baud} {}", FMT_NAMES[fmt as usize]);
+        let cfg = Cfg { proto: P_UART, baud: 0, fmt, inverted: false };
+        // Text only: every frame plain UART, the bytes all there.
+        let mut s = Sig::new();
+        s.idle(t35 * 2.0);
+        for _ in 0..3 {
+            s.bytes(baud as f64, text, fmt).idle(t35 * 2.0);
+        }
+        let c = s.codes(fs as f64, 250.0, 750.0, false, 4.0, 0.2, 0, 0, &mut rng);
+        let r = decode(&c, 0, c.len(), fs, cfg, None);
+        let ok = r.frames.len() == 3 && r.frames.iter().all(|f| f.0.kind == K_UART && f.0.flags == 0 && f.0.len as usize == text.len());
+        t(&format!("UART {name}: text, 3 plain frames ({} frames, rate {:?})", r.frames.len(), r.baud), ok);
+        // Mixed: text, a request, text, the reply, a bad-CRC frame.
+        let mut bad = req.clone();
+        bad[2] ^= 1;
+        let seq: [&[u8]; 5] = [b"AT+X?\r\n", &req, b"OK\r\n", &rsp, &bad];
+        let mut s = Sig::new();
+        s.idle(t35 * 2.0);
+        for fr in seq {
+            s.bytes(baud as f64, fr, fmt).idle(t35 * 1.4);
+        }
+        let c = s.codes(fs as f64, 250.0, 750.0, false, 4.0, 0.6, 0, 0, &mut rng);
+        let r = decode(&c, 0, c.len(), fs, cfg, None);
+        let kinds: Vec<u8> = r.frames.iter().map(|f| f.0.kind).collect();
+        t(&format!("UART {name}: mixed text / Modbus ({kinds:?})"), kinds == vec![K_UART, K_REQ, K_UART, K_RSP, K_UART]);
+        if kinds.len() == 5 {
+            // The text between them does not break the request / reply pair.
+            t(&format!("UART {name}: reply -> request across text"), r.frames[3].1 == 1);
+        }
+        // A gap just under 3.5 characters (1.75 ms) inside a frame keeps it
+        // one Modbus frame; just over splits it into two UART frames.
+        for (k, want) in [(0.8, vec![K_REQ]), (1.25, vec![K_UART, K_UART])] {
+            let mut s = Sig::new();
+            s.idle(t35 * 2.0).bytes(baud as f64, &req[..3], fmt).idle(t35 * k).bytes(baud as f64, &req[3..], fmt).idle(t35 * 2.0);
+            let c = s.codes(fs as f64, 250.0, 750.0, false, 2.0, 0.0, 0, 0, &mut rng);
+            let r = decode(&c, 0, c.len(), fs, Cfg { baud, ..cfg }, None);
+            let kinds: Vec<u8> = r.frames.iter().map(|f| f.0.kind).collect();
+            t(&format!("UART {name}: a {:.2} t3.5 gap in a frame -> {kinds:?}", k), kinds == want);
+        }
     }
     // ---- DALI: forward 16, backward 8, 24-bit; timing; glitches ----
     {
