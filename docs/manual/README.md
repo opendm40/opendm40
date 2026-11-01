@@ -672,7 +672,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - A new value every 0.35 s; below about 7 Hz, one per one or two periods
   (about 1 s at 2 Hz).
 - **--** until the first result; **0.000 Hz** when the signal stops.
-- A small last digit where the counter resolves it: 10.0000 Hz, but
+- An extra last digit where the counter resolves it: 10.0000 Hz, but
   50.000 Hz.
 - MF opens the Hold & Limits page (there are no range choices).
 
@@ -829,9 +829,10 @@ so a change shows at once.
 
 *A tap on the reading steps the rate.*
 
-The extra digit appears smaller, after the main digits, on these ranges:
+The extra digit appears after the main digits on these ranges:
 DC 600 mV, 6 V, 60 V, 600 V and Ω 600 Ω, 6 kΩ, 60 kΩ, about 1.6 s (MED in
-DC) or 3.2 s (SLOW, and in Ω) after the input settles.
+DC) or 3.2 s (SLOW, and in Ω) after the input settles. Wherever it can
+appear, the reading starts further left, so the other digits never move.
 
 #### Smoothing
 
@@ -1307,7 +1308,8 @@ in the left or right half of the graph steps), **Off**.
 
 ### Vertical: V/div, position, coupling, probe
 
-- V/div: 10 mV to 10 V per division (times the probe factor).
+- V/div: 2 mV to 10 V per division (times the probe factor). 5 and 2 mV/div
+  are a digital zoom of 10 mV/div: the same steps of about 0.1 mV, drawn larger.
 - Tap the **magnifier +** to zoom in (smaller V/div), **magnifier −** to
   zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you

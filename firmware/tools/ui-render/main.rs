@@ -742,6 +742,26 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
     v
 }
 
+/// The extra digit can appear in `r`'s function / range at MED (the app:
+/// `Dmm::ext_possible`; `range_of` keeps DC V at r0, so its decimals give
+/// the range here: 1000 V has none), or `r` has it.
+fn slot_of(r: &Reading) -> bool {
+    let can = match r.mode {
+        _ if r.power.is_some() || r.cpl_auto => false,
+        1 => !r.acdc && r.main.dec >= 2,
+        _ => dmm::ext_possible(dmm::Rate::Medium, r.acdc, r.mode, r.range),
+    };
+    can || r.main.ext
+}
+
+/// The HV lightning of `r` over a page drawn by `dv` (ui::hv_warning: the
+/// stock one, or the small one in the extra-digit layout).
+fn hv_draw(dv: &ui::DmmView, on: bool) {
+    if on {
+        ui::hv_warning(0, if dv.slot() { 2 } else { 1 }, dv.slot());
+    }
+}
+
 fn hv_of(r: &Reading) -> u8 {
     let v = if r.mode <= 3 && !r.main.ol { r.si.abs() } else { 0.0 };
     if v >= 100.0 { 2 } else if v >= 30.0 { 1 } else { 0 }
@@ -2133,6 +2153,10 @@ fn main() {
                     let mut dv = ui::DmmView::new();
                     dv.alt = alt;
                     dv.label = *label;
+                    // The extra-digit layout with and without the digit; the
+                    // other cases without it in every other chip variant
+                    // (every function and unit in both layouts).
+                    dv.ext_slot = ext || k % 2 == 1;
                     // UF-30: every other chip variant with the bargraph
                     // instead of the history row.
                     dv.bar_on = k % 2 == 0;
@@ -2155,7 +2179,7 @@ fn main() {
                     }
                     dv.reading(&r, hold, lim);
                     ui::status_right(&status(0));
-                    ui::hv_warning(hv_of(&r) >= 2);
+                    hv_draw(&dv, hv_of(&r) >= 2);
                     let pts: Vec<f32> = (0..321).map(|i| v + (i % 50) as f32 * v.abs() * 1e-3).collect();
                     let side = ui::Side { max: Some(v), avg: Some(v), min: Some(v), sd: Some(v), rel: Some(v), secs: Some(99 * 3600 + 59 * 60 + 59), rec };
                     let mut cc = ui::ChartCache::new();
@@ -2173,11 +2197,14 @@ fn main() {
     // (B, xa, xb) and kept (UIR_VERIFY=1: drawn for every pair, as before,
     // and checked equal to the kept one).
     let verify = std::env::var_os("UIR_VERIFY").is_some();
-    let mut fresh_b: std::collections::HashMap<(usize, bool, bool), Vec<u16>> = Default::default();
+    let mut fresh_b: std::collections::HashMap<(usize, u8, u8), Vec<u16>> = Default::default();
     let mut fresh_diff = 0usize;
     for (na, a, la) in &cases {
         for (ib, (nb, b, lb)) in cases.iter().enumerate() {
-            for (xa, xb) in [(false, true), (true, false), (true, true)] {
+            // 0: stock layout, 1: extra-digit layout without the digit, 2:
+            // with it.
+            for (sa, sb) in [(0u8, 2u8), (2, 0), (2, 2), (1, 2), (2, 1), (0, 1), (1, 0)] {
+                let (xa, xb) = (sa == 2, sb == 2);
                 let (mut a, mut b) = (*a, *b);
                 a.main.ext = xa && !a.main.ol;
                 b.main.ext = xb && !b.main.ol;
@@ -2185,22 +2212,23 @@ fn main() {
                 // then RUN or another badge.
                 a.alert = if xb { sentinel::Alert::VJack } else { sentinel::Alert::AJack };
                 b.alert = if xa && xb { sentinel::Alert::Live } else { sentinel::Alert::None };
-                let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8)]| {
+                let page = |dv: &mut ui::DmmView, steps: &[(Reading, Option<&'static str>, u8, bool)]| {
                     host::reset(0);
                     dv.label = steps[0].1;
                     dv.draw_static(Button::Volt, steps[0].0.mode, steps[0].0.acdc, false);
-                    for (r, l, lim) in steps {
+                    for (r, l, lim, slot) in steps {
                         dv.label = *l;
+                        dv.ext_slot = *slot;
                         dv.reading(r, 0, *lim);
                     }
                 };
                 let mut dv = ui::DmmView::new();
-                page(&mut dv, &[(a, *la, meter::V_HI), (b, *lb, meter::V_NONE)]);
+                page(&mut dv, &[(a, *la, meter::V_HI, sa > 0), (b, *lb, meter::V_NONE, sb > 0)]);
                 let got = emu().fb.clone();
-                let key = (ib, xa, xb);
+                let key = (ib, sa, sb);
                 if verify || !fresh_b.contains_key(&key) {
                     let mut dv = ui::DmmView::new();
-                    page(&mut dv, &[(b, *lb, meter::V_NONE)]);
+                    page(&mut dv, &[(b, *lb, meter::V_NONE, sb > 0)]);
                     let f = emu().fb[..W * 152].to_vec();
                     match fresh_b.get(&key) {
                         Some(k) => fresh_diff += (*k != f) as usize,
@@ -2208,7 +2236,7 @@ fn main() {
                     }
                 }
                 let want = &fresh_b[&key];
-                ck.hash_buf(&format!("dmm-update/{na}->{nb}/{}{}", xa as u8, xb as u8), &got);
+                ck.hash_buf(&format!("dmm-update/{na}->{nb}/{sa}{sb}"), &got);
                 ck.cases += 1;
                 let diff: Vec<usize> = (0..W * 152).filter(|&i| got[i] != want[i]).collect();
                 if !diff.is_empty() {
@@ -2216,7 +2244,7 @@ fn main() {
                     for &i in &diff {
                         bx.add((i % W) as i32, (i / W) as i32);
                     }
-                    ck.fail(&format!("dmm update {na} -> {nb} ext {xa}->{xb}"), format!("{} stale pixels at {:?}", diff.len(), bx));
+                    ck.fail(&format!("dmm update {na} -> {nb} layout {sa}->{sb}"), format!("{} stale pixels at {:?}", diff.len(), bx));
                 }
             }
         }
@@ -3196,6 +3224,7 @@ fn main() {
         dv.bar_on = false;
         dv.draw_static(Button::Volt, 1, false, false);
         ui::history(&[(4.8170, 4, "V"); 5], 3, 2);
+        dv.ext_slot = true;
         dv.reading(&Reading { main: Val { ext: true, ..r.main }, ..r }, 3, meter::V_PASS);
         ui::status_right(&status(0));
         let pts: Vec<f32> = (0..321).map(|i| 4.8170 + ((i / 40) % 3) as f32 * 1e-4).collect();
@@ -3227,6 +3256,7 @@ fn main() {
             let mut dv = ui::DmmView::new();
             dv.label = l;
             dv.acc = Some(ui::Acc { model, tc: l == Some("TC K") });
+            dv.ext_slot = slot_of(&r);
             ui::set_cpl_auto(r.cpl_auto);
             dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
             ui::set_cpl_auto(false);
@@ -3270,6 +3300,7 @@ fn main() {
             let mut dv = ui::DmmView::new();
             dv.acc = acc.then_some(ui::Acc { model: 2, tc: true });
             dv.hv_red = hv;
+            dv.ext_slot = slot_of(&r);
             dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
             dv.bar_update(&r);
             dv.reading(&r, 0, 0);
@@ -3298,6 +3329,75 @@ fn main() {
             dv.bar_update(&b);
             dv.reading(&b, 0, 0);
             save(&out, "ag16-grey-full");
+        }
+        // The full-size extra digit (owner 2026-11-02): wherever it can
+        // appear the readout keeps its layout (8 cells from x 8), so the
+        // digit appearing / going changes only its own cell. Per unit with
+        // an extra digit, the widest negative value: the page with the
+        // digit (xNN-...-ext) and without (xNN-...-noext), HOLD + the limit
+        // badge + the side panel (MAX / AVG / REL / MIN); the two must be
+        // equal outside the digit's cell (check below). HV: 600 V range at
+        // -444 V (the lightning small in the aux row).
+        {
+            let o = "\u{3a9}";
+            let ko = "k\u{3a9}";
+            let mo = "M\u{3a9}";
+            for (i, (tag, mode, v, dec, unit, hold, lim)) in [
+                ("dcv-6v", 1u8, -6.6497f32, 4u8, "V", 0u8, meter::V_NONE),
+                ("dcv-60v", 1, -44.444, 3, "V", 1, meter::V_PASS),
+                ("dcv-600v-hv", 1, -444.44, 2, "V", 0, meter::V_HI),
+                ("dcv-600v-pos", 1, 444.44, 2, "V", 3, meter::V_LO),
+                ("dcmv", 3, -444.44, 2, "mV", 1, meter::V_NONE),
+                ("ohm", 10, 444.44, 2, o, 0, meter::V_PASS),
+                ("ohm-neg", 10, -0.28, 2, o, 0, meter::V_NONE),
+                ("kohm", 10, 44.444, 3, ko, 2, meter::V_NONE),
+                ("mohm-600m", 10, 444.4, 1, mo, 0, meter::V_NONE),
+                ("hz", 14, 44.444, 3, "Hz", 0, meter::V_NONE),
+                ("khz", 14, 9.9999, 4, "kHz", 1, meter::V_PASS),
+                ("mhz", 14, 4.4444, 4, "MHz", 0, meter::V_NONE),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let ulp = 10f32.powi(-(dec as i32));
+                // The extra digit 3 (rounds away: the same 7 cells without it).
+                let vx = v + 0.3 * ulp * v.signum();
+                let mut bufs = vec![];
+                for ext in [true, false] {
+                    host::reset(0);
+                    let r = rd(mode, Val { ext, ..val(vx, dec, unit) }, None, if mode == 14 { Some(val(50.0, 1, "%")) } else { None }, false);
+                    let mut dv = ui::DmmView::new();
+                    dv.acc = Some(ui::Acc { model: 2, tc: true });
+                    dv.hv_red = hv_of(&r) >= 1;
+                    dv.ext_slot = slot_of(&r);
+                    dv.draw_static(dmm::button_of(r.mode), r.mode, r.acdc, false);
+                    dv.bar_update(&r);
+                    dv.reading(&r, hold, lim);
+                    ui::status_right(&ui::Status { rec: true, ..status(0) });
+                    hv_draw(&dv, hv_of(&r) >= 2);
+                    let pts: Vec<f32> = (0..321).map(|i| vx + ((i / 40) % 3) as f32 * ulp).collect();
+                    let side = ui::Side { max: Some(vx + 2.0 * ulp), avg: Some(vx), min: Some(vx - ulp), sd: Some(ulp), rel: Some(vx), secs: Some(99 * 3600 + 59 * 60 + 59), rec: true };
+                    ui::chart(&mut ui::ChartCache::new(), &pts, dec, 2, Some(&side), unit, ui::RateChip { rate: 1, period_ms: 200, applies: true });
+                    ck.check(&format!("xdigit/{tag}/{}", if ext { "ext" } else { "noext" }), &dmm_page_regions);
+                    save(&out, &format!("x{:02}-{tag}-{}", i + 1, if ext { "ext" } else { "noext" }));
+                    bufs.push(emu().fb.clone());
+                }
+                // Nothing but the extra digit's cell (341..398 + the box's
+                // end to 400, rows 68..147) differs.
+                ck.cases += 1;
+                let mut bx = EMPTY;
+                let mut n = 0;
+                for i in 0..W * 320 {
+                    let (x, y) = (i % W, i / W);
+                    if bufs[0][i] != bufs[1][i] && !((341..400).contains(&x) && (68..148).contains(&y)) {
+                        bx.add(x as i32, y as i32);
+                        n += 1;
+                    }
+                }
+                if n > 0 {
+                    ck.fail(&format!("xdigit/{tag}"), format!("{n} px outside the extra digit's cell differ with / without it at {bx:?}"));
+                }
+            }
         }
         for (file, r) in [("ag20-grey-strip-acv", xv(0, 1.2345, 4, "V", false)), ("ag21-grey-strip-cap", xv(13, 47.3, 2, "\u{b5}F", false)), ("ag22-grey-strip-ohm", xv(10, 444.44, 2, "k\u{3a9}", false))] {
             combined(&r, None, 0, 0, false, false, false, "");
@@ -3627,7 +3727,7 @@ fn main() {
         dv.bar_update(&r);
         dv.reading(&r, 0, 0);
         ui::status_right(&status(0));
-        ui::hv_warning(true);
+        hv_draw(&dv, true);
         save(&out, "d11-dmm-hv-red");
         // Wrong-connection alerts in the status slot (sentinel.rs): A-JACK in
         // DC V (red), V-JACK? in DC mA, LIVE? in ohm; the combined strip badge.
