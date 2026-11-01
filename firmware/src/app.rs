@@ -98,6 +98,12 @@ const BUZZER_ARR_LO: u32 = 14000;
 const RUN_LONG_MS: u64 = 1000;
 /// The combined view's function band closes this long after the last tap.
 const BAND_MS: u64 = 4000;
+/// Two taps on the DMM bargraph / history row within this time and this
+/// distance (each axis): a double tap. Short and near, so two separate taps
+/// (storing history values) do not switch the row (owner, device, 2026-10-30:
+/// 400 ms and any x switched by accident).
+const ROW_DOUBLE_MS: u64 = 250;
+const ROW_DOUBLE_PX: u16 = 30;
 /// The beeper indicator stays this long after the beeper's condition last
 /// held (`App::beep_ind`): its shortest on-time, and a contact that
 /// chatters faster reads as one indication.
@@ -329,6 +335,11 @@ pub struct App {
     hist: [(f32, u8, &'static str); 5],
     hist_n: usize,
     hist_new: usize,
+    /// Last tap on the bargraph / history row: (time, x, y) (double tap:
+    /// ROW_DOUBLE_MS, ROW_DOUBLE_PX) and the history before the value that
+    /// tap stored.
+    row_tap: Option<(u64, u16, u16)>,
+    row_undo: Option<([(f32, u8, &'static str); 5], usize, usize)>,
     hv_shown: bool,
     /// The beeper indicator (`beep_ind`): the last time the beeper's
     /// condition held, and the indicator as last drawn on the readout.
@@ -709,6 +720,8 @@ impl App {
             hist: [(0.0, 0, ""); 5],
             hist_n: 0,
             hist_new: 0,
+            row_tap: None,
+            row_undo: None,
             hv_shown: false,
             beep_seen: 0,
             beep_drawn: 0,
@@ -3193,6 +3206,8 @@ impl App {
             Gesture::LongPress(p) if self.view == View::Dmm && self.dmm.pw.on && ui::HIST_HIT.contains(&p.y) => captured = true,
             Gesture::LongPress(p) if self.view == View::Dmm && !self.dmm_view.bar_on && ui::HIST_HIT.contains(&p.y) => {
                 captured = true;
+                self.row_tap = None;
+                self.row_undo = None;
                 self.hist_n = 0;
                 self.beep(now, 300);
                 ui::history(&self.hist, 0, 0);
@@ -3720,12 +3735,35 @@ impl App {
                 self.meter.stats.rec = on;
                 self.chart_dirty = true;
             }
+            View::Dmm if !self.dmm.pw.on && ui::HIST_HIT.contains(&y)
+                && self.row_tap.is_some_and(|(t, tx, ty)| now < t + ROW_DOUBLE_MS && x.abs_diff(tx) <= ROW_DOUBLE_PX && y.abs_diff(ty) <= ROW_DOUBLE_PX) => {
+                // Double tap on the row: Bargraph <-> History (Settings >
+                // Display "DMM row" without the trip to Settings). A value the first
+                // tap stored is taken back.
+                self.row_tap = None;
+                if let Some((h, n, k)) = self.row_undo.take() {
+                    (self.hist, self.hist_n, self.hist_new) = (h, n, k);
+                }
+                let acdc = self.dmm.sub() == 2 || self.dmm.pw.on;
+                self.dmm_view.row_toggle(self.dmm.shown_mode(), acdc);
+                if !self.dmm_view.bar_on {
+                    ui::history(&self.hist, self.hist_n, self.hist_new);
+                }
+                self.beep(now, 100);
+            }
+            View::Dmm if self.dmm_view.bar_on && ui::HIST_HIT.contains(&y) => {
+                self.row_tap = Some((now, x, y));
+                self.row_undo = None;
+            }
             View::Dmm if !self.dmm_view.bar_on && ui::HIST_HIT.contains(&y) => {
                 // History row: record the shown value (not OL). While HOLD
                 // (or an AutoHold capture) that is the frozen value (UF-27:
                 // owners hold a reading, then store it).
+                self.row_tap = Some((now, x, y));
+                self.row_undo = None;
                 if let Some(r) = self.meter.shown().copied() {
                     if !r.main.ol {
+                        self.row_undo = Some((self.hist, self.hist_n, self.hist_new));
                         let i = if self.hist_n < 5 { self.hist_n } else { (self.hist_new + 1) % 5 };
                         self.hist[i] = (r.main.v, r.main.dec, r.main.unit);
                         self.hist_n = (self.hist_n + 1).min(5);

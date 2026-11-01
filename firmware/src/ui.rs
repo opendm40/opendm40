@@ -341,6 +341,9 @@ pub struct DmmView {
 ///             (bipolar: -FS / 0 / +FS), the full scale with its unit
 ///   OL marker 418..472 x 147..160 (red "OL" on overload)
 pub const BAR_RECT: (u16, u16, u16, u16) = (12, 150, 400, 9);
+/// The whole row (bargraph, its labels and OL marker / the history boxes),
+/// down to the chart frame. Its touch rows: `HIST_HIT`.
+pub const ROW_Y: core::ops::Range<u16> = 147..175;
 const BAR_LBL_Y: i16 = 161;
 const BAR_LBL_H: i16 = 12;
 const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
@@ -782,17 +785,7 @@ impl DmmView {
     pub fn draw_static(&mut self, button: Button, mode: u8, acdc: bool, ohm_on: bool) {
         lcd::fill_rect(0, BAR_H, lcd::W, lcd::H - BAR_H, BG);
         lcd::fill_rect(0, 0, lcd::W, BAR_H, BAR);
-            if self.bar_on && !self.power {
-            self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
-            self.bar.draw_static(BG);
-            self.bar_scale = None;
-            self.bar_ol = None;
-        } else if !self.power {
-            // (The power meter draws its own boxes: ui::pw power_row.)
-            for i in 0..5i16 {
-                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
-            }
-        }
+        self.row_static(mode, acdc);
         self.ohm_on = ohm_on;
         let sel = button_index(button);
         let mode = if button == Button::Power { 255 } else { mode };
@@ -801,6 +794,30 @@ impl DmmView {
             dmm_button(i, btn_x(i), BTN_Y as i16, 36, BG, i == sel, mode, acdc, ohm_on);
         }
         self.invalidate();
+    }
+
+    /// The bargraph / history row's static part (as `bar_on`; nothing
+    /// with the power meter, which draws its own boxes: ui::pw power_row).
+    fn row_static(&mut self, mode: u8, acdc: bool) {
+        if self.bar_on && !self.power {
+            self.bar.bipolar = matches!(mode, 1 | 3 | 7..=9) && !acdc;
+            self.bar.draw_static(BG);
+            self.bar_scale = None;
+            self.bar_ol = None;
+            self.acc_drawn = false;
+        } else if !self.power {
+            for i in 0..5i16 {
+                sf::rbox(rect(5 + 95 * i, 153, 88, 19), 3, BAR, BG);
+            }
+        }
+    }
+
+    /// Double tap on the row: Bargraph <-> History in place (the row is
+    /// cleared and drawn again; the bar fills from the next reading).
+    pub fn row_toggle(&mut self, mode: u8, acdc: bool) {
+        self.bar_on = !self.bar_on;
+        lcd::fill_rect(0, ROW_Y.start, lcd::W, ROW_Y.end - ROW_Y.start, BG);
+        self.row_static(mode, acdc);
     }
 
     pub fn invalidate(&mut self) {
@@ -1990,9 +2007,10 @@ pub fn temp_hit(sensor: u8, x: u16, y: u16) -> Option<u8> {
     None
 }
 
-/// Touch rows of the history boxes (drawn 153..171): the dead rows between
-/// the value's target (..150) and the MIN/MAX column (175..) join them
-/// (issue #136: 19 px was the smallest DMM target).
+/// Touch rows of the bargraph / history row (the boxes are drawn 153..171;
+/// tap: store / double tap: Bargraph <-> History / hold: clear): the dead
+/// rows between the value's target (..150) and the MIN/MAX column (175..)
+/// join them (issue #136: 19 px was the smallest DMM target).
 pub const HIST_HIT: core::ops::Range<u16> = 151..175;
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
@@ -3602,6 +3620,7 @@ pub const HELP: [(&str, &[(&str, &str)]); 2] = [
         &[
             ("Swipe left / right", "Change view"),
             ("Swipe down (DMM)", "Record on / off"),
+            ("Double-tap DMM row", "Bargraph / history"),
             ("3 fingers down", "Screenshot"),
             ("2 fingers down", "Power off"),
             ("Scope: drag marker", "Move that marker"),

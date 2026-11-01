@@ -120,6 +120,17 @@ section named after the tag as the release notes; how to cut a release:
   **Shutdown** time counts afresh
   ([manual](docs/manual/README.md#power-battery-and-sleep)).
 
+- **Bargraph / history row:** a double tap on the row switches between the
+  bargraph and the history boxes (before: Settings > Display > DMM row only;
+  [manual](docs/manual/README.md#the-bargraph-and-the-history-row)).
+
+  ![A double tap on the row: bargraph or history](docs/changelog/v0.4.0/dmm-row-toggle.png)
+
+- **Combined view:** the meter strip's reading is in the multimeter's orange
+  instead of yellow.
+
+  ![Before and after: the meter strip](docs/changelog/v0.4.0/meter-strip.png)
+
 ### Fixed
 
 - Capacitance AUTO: a small capacitor measured after a large one (600 µF and
