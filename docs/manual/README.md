@@ -1032,7 +1032,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -1151,8 +1151,8 @@ circuit:
 
 - **A-JACK** in the functions where a current really flows through the A
   jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In Ω, continuity,
-  diode, capacitance and the resistive temperature sensors, A-JACK shows
-  silently.)
+  diode, capacitance, frequency and the resistive temperature sensors, A-JACK
+  shows silently.)
 - **A-PROT** while the current still flows.
 - **A current above 10 A** for 1 s on the 10 A range (also in the power
   meter).
@@ -1214,13 +1214,16 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   alternating voltage there, or (Ω) about 3-5 V and more.
 - A current in the A jack while a voltage is also on the V/Ω jack: Ω and
   continuity show LIVE?, AC mV shows nothing (the reading is over range).
-  A-JACK shows only with the V/Ω jack free.
+  A-JACK shows only with the V/Ω jack free. Manual Ω ranges below 6 MΩ may
+  show LIVE? for a current in A even with V/Ω free. The same with a signal above
+  the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
 *Two cases no alert can see.*
 - No A-JACK in DC V above the 6 V range (60 V, 600 V, 1000 V), in AC+DC V
-  above 6 V, in frequency, and in the higher capacitance ranges. The power
+  above 6 V, in frequency below about 3 mA or for an AC current, and in
+  the higher capacitance ranges. The power
   meter has no jack alerts.
 
 ## Oscilloscope
