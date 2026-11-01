@@ -2548,6 +2548,9 @@ impl Scpi {
                         None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
+                // Memory probes (feature memprobe, src/memprobe.rs).
+                #[cfg(feature = "memprobe")]
+                _ if p0 == b"DBG" && parts.len() == 2 && crate::memprobe::scpi(self, parts[1], query, arg) => {}
                 _ if p0 == b"DBG" => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);

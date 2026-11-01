@@ -139,6 +139,9 @@ SECTIONS
          * from region C audit #1 (133f81e) and in C from region B audit #4
          * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
+         * loop and asm are `.text.a2.*` (zero-wait region A2). */
+        *(.text.*8opendm408memprobe*);
         /* The decoder's frame log: a frame's waveform, drawn on a tap, the
          * top bar / counters, the page draw, the setup popup and the
          * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel

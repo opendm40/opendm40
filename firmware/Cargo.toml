@@ -104,6 +104,10 @@ acdc-trace = []
 # beeper's CMP pin buffer, HY3131 R20 bit 2, off; the boot key-hold cue
 # silent). Not for releases.
 mute = []
+# Debug-only memory probes (src/memprobe.rs: DBG:PEEK? / POKE / MTEST? /
+# MVER? / MTIME? / MCLK, docs/hidden-memory.md); the HardFault vector catches
+# a fault of a probe access. Not for releases.
+memprobe = []
 
 [dependencies]
 cortex-m = "0.7.7"
