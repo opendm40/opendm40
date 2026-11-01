@@ -949,7 +949,7 @@ fn hit_tests(ck: &mut Ck) {
         pv.ip = [2.0, 0.0];
         pv.pp = [24.0, 0.0];
         let (main, v, i, si) = dmm::pw::reading_vals(&pv);
-        let r = dmm::Reading { mode: 4, range: 0, main, aux1: Some(v), aux2: Some(i), si, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: Some(pv), prov: false, open: false };
+        let r = dmm::Reading { mode: 4, range: 0, main, aux1: Some(v), aux2: Some(i), si, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: Some(pv), prov: false };
         dv.reading(&r, 0, 0);
         let mut pc = ui::pw::PwCache::new();
         ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, None, "W", ui::RateChip { rate: 1, period_ms: 100, applies: true });
