@@ -282,6 +282,7 @@ recorded.
 | [`gallerytest.py`](gallerytest.py) | the gallery: grid, viewer, Delete | ~8 min | 19310 |
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
+| [`presetstest.py`](presetstest.py) | presets: `*SAV` / `*RCL`, names, the Presets page, after a power-off | | 63900-63999 |
 | [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
 | [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |

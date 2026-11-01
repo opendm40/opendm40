@@ -212,6 +212,15 @@
 //!     (the stock's switch; the header is the Keysight 34461A's "recall the
 //!     power-down state at power-on"): ON = a power-on continues the
 //!     multimeter as it was (app.rs `restore`); persisted, default OFF
+//!   *SAV <n>  *RCL <n>   (IEEE 488.2) save the instrument state into
+//!     preset n (1..4) / recall it (app_presets.rs, presets.rs); a recall
+//!     turns the generator output OFF; -222 for n outside 1..4, -221 for
+//!     an empty preset or while a stream, a logger session or (recall) a
+//!     CSV recording runs, -250 when the disk is busy or fails
+//!   MEMory:STATe:NAME <n>,"<name>" / MEMory:STATe:NAME? <n>   a preset's
+//!     name (1..16 printable ASCII characters; -223 longer; "" = empty)
+//!   MEMory:STATe:VALid? <n>   1 = preset n holds a state
+//!   MEMory:STATe:DELete <n>   clear preset n
 //!   POWer:BURDen <ohm>|DEFault / ?   (power meter section, 3.9) the R_path
 //!     used by both: in a DMM A function that function's shunt, else the
 //!     power meter's current range's
@@ -1064,6 +1073,9 @@ pub enum Cmd {
     ResNeg(Option<bool>),
     /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings 3/3 "Mode Remember".
     ModeRemember(Option<bool>),
+    /// Presets (app_presets.rs): PS_* operation, slot 0..presets::N-1
+    /// (MEM:STAT:NAME's name: presets::scpi_name).
+    Preset(u8, u8),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
     /// (App::scpi_range).
@@ -1785,6 +1797,73 @@ pub const ERRQ: usize = 8;
 const BAD: &str = "Illegal parameter value";
 const RANGE: &str = "Data out of range";
 const MISSING: &str = "Missing parameter";
+
+/// Cmd::Preset operations: *SAV, *RCL, MEM:STAT:NAME, NAME?, VALid?,
+/// DELete.
+pub const PS_SAV: u8 = 0;
+pub const PS_RCL: u8 = 1;
+pub const PS_NAME: u8 = 2;
+pub const PS_NAME_Q: u8 = 3;
+pub const PS_VALID_Q: u8 = 4;
+pub const PS_DEL: u8 = 5;
+
+/// A preset number 1..presets::N -> its slot 0..N-1.
+fn preset_slot(a: &[u8]) -> Result<u8, &'static str> {
+    match parse_num(trim(a)) {
+        _ if trim(a).is_empty() => Err(MISSING),
+        Some(v) if v == (v as i32) as f32 && (1.0..=crate::presets::N as f32).contains(&v) => Ok(v as u8 - 1),
+        Some(v) if v == (v as i32) as f32 => Err(RANGE),
+        _ => Err(BAD),
+    }
+}
+
+/// `p0` *SAV / *RCL <n>, or MEMory:STATe:NAME, NAME?, VALid?, DELete
+/// (`parts`) with `arg` (upper case but a quoted name: `handle`).
+#[inline(never)] // .cold (link-native.x): rarely sent
+fn preset_cmd(p0: &[u8], parts: &[&[u8]], query: bool, arg: &[u8]) -> Result<Cmd, &'static str> {
+    if p0[0] == b'*' {
+        if query {
+            return Err("Undefined header");
+        }
+        return Ok(Cmd::Preset(if p0 == b"*SAV" { PS_SAV } else { PS_RCL }, preset_slot(arg)?));
+    }
+    let sub = parts.get(1).copied().unwrap_or(&[]);
+    let leaf = parts.get(2).copied().unwrap_or(&[]);
+    if !kw(p0, "MEMory") || !kw(sub, "STATe") {
+        return Err("Undefined header");
+    }
+    let (a, name) = match arg.iter().position(|&b| b == b',') {
+        Some(i) => (trim(&arg[..i]), Some(trim(&arg[i + 1..]))),
+        None => (arg, None),
+    };
+    let op = match (kw(leaf, "NAME"), kw(leaf, "VALid"), kw(leaf, "DELete"), query) {
+        (true, _, _, true) => PS_NAME_Q,
+        (true, _, _, false) => PS_NAME,
+        (_, true, _, true) => PS_VALID_Q,
+        (_, _, true, false) => PS_DEL,
+        _ => return Err("Undefined header"),
+    };
+    let k = preset_slot(a)?;
+    if op == PS_NAME {
+        // Quoted ("..." or '...': its case kept, see `handle`) or bare.
+        let n = match name {
+            Some([q @ (b'"' | b'\''), m @ .., e]) if e == q => m,
+            Some(n) => n,
+            None => return Err(MISSING),
+        };
+        if n.len() > crate::presets::NAME_LEN {
+            return Err("Too much data");
+        }
+        if trim(n).is_empty() {
+            return Err(BAD);
+        }
+        crate::presets::set_scpi_name(n);
+    } else if name.is_some() {
+        return Err(NOT_ALLOWED);
+    }
+    Ok(Cmd::Preset(op, k))
+}
+
 const NOT_FOUND: &str = "File name not found";
 const NOT_ALLOWED: &str = "Parameter not allowed";
 const SYNTAX: &str = "Syntax error";
@@ -2005,8 +2084,13 @@ impl Scpi {
                 continue;
             }
             let n = cmd.len();
+            // A MEMory command's quoted string keeps its case (the preset
+            // name of MEM:STAT:NAME).
+            let mem = cmd.len() > 3 && cmd[..3].eq_ignore_ascii_case(b"MEM");
+            let mut quoted = false;
             for (d, s) in up.iter_mut().zip(&cmd[..n]) {
-                *d = s.to_ascii_uppercase();
+                quoted |= mem && matches!(*s, b'"' | b'\'');
+                *d = if quoted { *s } else { s.to_ascii_uppercase() };
             }
             let cmd = &up[..n];
             let (head, arg) = match cmd.iter().position(|&b| b == b' ' || b == b'\t') {
@@ -2035,7 +2119,7 @@ impl Scpi {
             let Some(&p0) = parts.first() else { continue };
             // Commands without parameters given one (-108).
             if !arg.is_empty()
-                && (p0.first() == Some(&b'*')
+                && ((p0.first() == Some(&b'*') && p0 != b"*SAV" && p0 != b"*RCL")
                     || (parts.len() == 1 && ["READ", "FETCh", "RUN", "STOP", "SINGle", "DIGitize", "INITiate", "ABORt"].iter().any(|m| kw(p0, m)))
                     || (parts.len() >= 2 && kw(p0, "SYSTem") && kw(parts[1], "ERRor")))
             {
@@ -3075,12 +3159,32 @@ impl Scpi {
                         None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
+                // Presets (app_presets.rs): *SAV / *RCL <n>, MEMory:STATe:
+                // NAME / NAME? / VALid? / DELete <n>.
+                // (A cheap test here, region B; preset_cmd checks the rest:
+                // no other 3-part header starts with MEM.)
+                _ if p0 == b"*SAV" || p0 == b"*RCL" || (parts.len() == 3 && p0.starts_with(b"MEM")) => {
+                    out = self.preset_out(p0, parts, query, arg);
+                }
                 _ => self.err_arg(no_arg, "Undefined header"),
             }
         }
         match out {
             Out::None if self.len > 0 => Out::Text,
             o => o,
+        }
+    }
+
+    /// `preset_cmd` as the parser's result: its command, or the error
+    /// queued and Out::None.
+    #[inline(never)] // .cold (link-native.x): rarely sent
+    fn preset_out(&mut self, p0: &[u8], parts: &[&[u8]], query: bool, arg: &[u8]) -> Out {
+        match preset_cmd(p0, parts, query, arg) {
+            Ok(c) => Out::Instr(c),
+            Err(e) => {
+                self.set_err(e);
+                Out::None
+            }
         }
     }
 

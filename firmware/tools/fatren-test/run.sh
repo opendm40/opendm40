@@ -4,6 +4,7 @@
 # count as the device, 4087). Update files are real packed images
 # (stock/dm40fw.py pack); the "marker" is the decoded 12-byte header of the
 # installed one (what the loader writes to 0x08008000).
+# presets: _PRESETS.BIN next to _SETTING.BIN (presets.rs; "presets" below).
 # fatren (review 2026-10-13 H1: only the file equal to the marker is renamed):
 #   1. old _DM40PRV.BIN + dm40_v_2_6.bin (LFN, installed) + DM40FW.BIN (staged)
 #      + others: dry run, then live -> the installed file renamed, old backup
@@ -1473,6 +1474,21 @@ grep -q FAIL $W/sfr && { echo "FAIL: setfile wrongsize"; exit 1; }
 fsck.fat -n $W/sf2.img >/dev/null || { echo "FAIL: setfile wrongsize: fsck"; exit 1; }
 mdir -i $W/sf2.img :: | grep -qE "^_SETTING BIN +8192" || { echo "FAIL: setfile wrongsize: size"; exit 1; }
 echo "ok: setfile"
+
+echo "=== presets: _PRESETS.BIN (presets.rs)"
+# Next to the settings file and the stock's CONFIG.BIN: made once (16 KiB,
+# 4 one-block clusters), then saves / renames / clears rewrite one slot
+# block each; torn / CRC-failed / v9 / unknown-version slots (main.rs
+# presets_cmd). fsck clean, CONFIG.BIN and _SETTING.BIN untouched.
+cp $W/sf.img $W/pr.img
+mcopy -n -i $W/pr.img ::_SETTING.BIN $W/sfbefore.bin
+"$W/t" $W/pr.img presets | tee $W/prr
+grep -q FAIL $W/prr && { echo "FAIL: presets"; exit 1; }
+fsck.fat -n $W/pr.img >/dev/null || { echo "FAIL: presets: fsck"; exit 1; }
+mdir -i $W/pr.img :: | grep -qE "^_PRESETS BIN +16384" || { echo "FAIL: presets: _PRESETS.BIN not 16384 bytes"; mdir -i $W/pr.img ::; exit 1; }
+mcopy -n -i $W/pr.img ::CONFIG.BIN $W/o && cmp -s $W/o $W/keep.bin || { echo "FAIL: presets: CONFIG.BIN changed"; exit 1; }
+mcopy -n -i $W/pr.img ::_SETTING.BIN $W/o && cmp -s $W/o $W/sfbefore.bin || { echo "FAIL: presets: _SETTING.BIN changed"; exit 1; }
+echo "ok: presets"
 
 echo "=== vwrite: host writes on the USB volume (delete from the PC, drag-and-drop firmware update)"
 # vwrite_test.py: mtools-made sector diffs written through vserve (main.rs)

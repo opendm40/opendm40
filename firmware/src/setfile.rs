@@ -377,18 +377,18 @@ pub fn pick(bkp: Option<Record>) -> Option<Record> {
 // --- Saves ---------------------------------------------------------------------
 
 #[cfg(target_os = "none")]
-fn new_dev() -> crate::spiflash::SpiFlash {
+pub(crate) fn new_dev() -> crate::spiflash::SpiFlash {
     crate::spiflash::SpiFlash::new()
 }
 
 #[cfg(not(target_os = "none"))]
-fn new_dev() -> HostDev {
+pub(crate) fn new_dev() -> HostDev {
     HostDev
 }
 
 /// Host test: forwards to `HOST_DEV`.
 #[cfg(not(target_os = "none"))]
-struct HostDev;
+pub(crate) struct HostDev;
 #[cfg(not(target_os = "none"))]
 impl HostDev {
     fn d(&self) -> &'static mut dyn BlockDevice {
@@ -476,7 +476,7 @@ fn save_now() {
 /// The disk is held by another writer (the diskbuf arena included).
 #[cfg(target_os = "none")]
 #[inline(always)]
-fn disk_busy() -> bool {
+pub(crate) fn disk_busy() -> bool {
     crate::screenshot::busy()
         || crate::csvlog::writing()
         || crate::fastlog::holds_disk()
@@ -485,7 +485,7 @@ fn disk_busy() -> bool {
 }
 
 #[cfg(not(target_os = "none"))]
-fn disk_busy() -> bool {
+pub(crate) fn disk_busy() -> bool {
     HOST_BUSY.load(core::sync::atomic::Ordering::Relaxed)
 }
 

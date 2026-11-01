@@ -2682,6 +2682,87 @@ fn main() {
         ck.check_opts(&format!("touchtest/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
         save(&out, name);
     }
+    // 6h. The Presets page and its rename keyboard (ui_presets.rs): used /
+    // empty / unreadable slots, the widest names (16 x W) and messages, the
+    // pending Replace / Clear, every row, button and key pressed and
+    // released (the release must give the page back pixel for pixel), the
+    // touch map (each target's own pixels hit it).
+    {
+        use ui::presets as up;
+        const W16: &str = "WWWWWWWWWWWWWWWW";
+        let r = |state: u8, name: &'static str| up::Row { state, name };
+        let on = |l: &'static str| (l, true, false);
+        let off = |l: &'static str| (l, false, false);
+        let full = [on("Save"), on("Recall"), on("Rename"), on("Clear")];
+        let scenes: Vec<(&str, [up::Row; 4], usize, [(&str, bool, bool); 4], &str, bool)> = vec![
+            ("r01-presets", [r(1, "DC V"), r(1, "Scope 1ms"), r(0, ""), r(2, "")], 0, full, "Opens Multimeter; output OFF", false),
+            ("r02-presets-widest", [r(1, W16), r(1, W16), r(1, W16), r(1, W16)], 3, [("Replace?", true, true), on("Recall"), on("Rename"), on("Clear")], "Not now: a stream, log or recording runs", true),
+            ("r03-presets-empty", [r(0, ""), r(0, ""), r(0, ""), r(0, "")], 2, [on("Save"), off("Recall"), off("Rename"), off("Clear")], "Empty: Save stores the state now", false),
+            ("r04-presets-clear", [r(1, "AC+DC V + Scope"), r(1, "Signal 100 kHz"), r(1, "Temperature"), r(2, "")], 3, [on("Save"), off("Recall"), off("Rename"), ("Clear?", true, true)], "Tap Clear? to clear preset 4", true),
+            ("r05-presets-msg", [r(1, "Bench 5V"), r(0, ""), r(0, ""), r(0, "")], 0, full, "No presets file on the disk", true),
+        ];
+        for (name, rows, sel, b, st, warn) in &scenes {
+            host::reset(0);
+            up::page("Presets", rows, *sel, b, st, *warn);
+            ck.check_opts(&format!("presets/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+            save(&out, name);
+        }
+        // Pressed / released: rows and buttons of the widest scene.
+        let (_, rows, sel, b, st, warn) = scenes[1];
+        for item in 0..8usize {
+            host::reset(0);
+            up::page("Presets", &rows, sel, &b, st, warn);
+            let want = emu().fb.clone();
+            let press = |p: bool| {
+                if item < 4 {
+                    up::row(item, rows[item], item == sel, p)
+                } else {
+                    up::button(item - 4, b[item - 4].0, b[item - 4].1, b[item - 4].2, p)
+                }
+            };
+            press(true);
+            ck.check_opts(&format!("presets/pressed{item}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+            if item == 1 {
+                save(&out, "r06-presets-row-pressed");
+            }
+            press(false);
+            ck.same_as(&format!("presets/released{item}"), &want);
+        }
+        for (lower, t, name) in [(false, W16, "r07-presets-keyboard"), (true, "", "r08-presets-keyboard-lower"), (false, "Bench 5V", "r09-presets-keyboard-name")] {
+            host::reset(0);
+            up::keyboard(3, t, lower);
+            ck.check_opts(&format!("presets/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            for k in 0..44u8 {
+                up::key(k, lower, true);
+                ck.check_opts(&format!("presets/{name}/key{k}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
+                up::key(k, lower, false);
+                ck.same_as(&format!("presets/{name}/key{k}-released"), &want);
+            }
+        }
+        // Touch map: the centre and the corners of every target hit it.
+        ck.cases += 1;
+        for i in 0..4u16 {
+            for (x, y) in [(10, 46 + 44 * i), (240, 66 + 44 * i), (471, 85 + 44 * i)] {
+                if up::hit(x, y) != Some(up::Hit::Row(i as u8)) {
+                    ck.fail("presets/hit", format!("({x},{y}) is not row {i}: {:?}", up::hit(x, y)));
+                }
+            }
+            let bx = 8 + 118 * i;
+            for (x, y) in [(bx, 256), (bx + 55, 284), (bx + 109, 311)] {
+                if up::hit(x, y) != Some(up::Hit::Button(i as u8)) {
+                    ck.fail("presets/hit", format!("({x},{y}) is not button {i}: {:?}", up::hit(x, y)));
+                }
+            }
+        }
+        for k in 0..44u8 {
+            let (x, y) = if k < 40 { (11 + 46 * (k % 10) as u16 + 21, 92 + 44 * (k / 10) as u16 + 20) } else { ([55, 194, 331, 424][(k - 40) as usize], 288) };
+            if up::key_hit(x, y) != Some(k) {
+                ck.fail("presets/key-hit", format!("({x},{y}) is not key {k}: {:?}", up::key_hit(x, y)));
+            }
+        }
+    }
     // The calibration (app_touchtest.rs, touchcal.rs): the walk, a good fit,
     // a refused fit, the page after Save; and their widest texts. The dots
     // are data (not layout items).
@@ -3365,7 +3446,7 @@ fn main() {
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
             let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
-            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
+            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..7)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
                     let part = if ui::SET_STEP_ROWS.contains(&(r as usize)) { 1 } else { 0 };

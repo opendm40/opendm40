@@ -17,7 +17,7 @@ impl App {
     #[inline(always)]
     pub(super) fn press_gesture(&mut self, g: &Gesture) {
         if self.pressed.is_some()
-            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range)
+            || (matches!(self.view, View::Menu | View::Gen | View::Settings | View::Limits | View::Record | View::Range | View::Presets)
                 && !crate::hy3131::streaming())
         {
             self.press_track(g);
@@ -61,6 +61,7 @@ impl App {
                 r(k, if self.set_page == 0 && ui::SET_STEP_ROWS.contains(&k) { ui::settings_step(x) } else { 0 })
             }
             View::Limits => r(ui::list_hit(y, ui::LIMIT_ROWS.len())?, 0),
+            View::Presets => r(self.ps_press_hit(x, y)? as usize, 0),
             // The temperature page has its own (`tp_pressed`).
             View::Range if self.dmm.hy_mode() == 15 => None,
             View::Range if self.dmm.pw.on => r(ui::pw::settings_hit(x, y)? as usize, 0),
@@ -93,6 +94,7 @@ impl App {
         match self.view {
             View::Menu => ui::menu_item(t.row as usize, ui::view_name(self.combo), t.on),
             View::Gen => ui::gen_press(&self.gen, t.row as usize, t.on),
+            View::Presets => self.ps_press_draw(t.row, t.on),
             View::Range if self.dmm.pw.on => ui::pw::settings_press(&self.dmm.pw_state(), t.row, t.on),
             View::Range => {
                 let b = self.dmm.button();

@@ -39,6 +39,7 @@
 //!   main <image> csv list | del <NAME> | busydel
 //!                                       gallery list / delete; busydel = delete the
 //!                                       file being recorded (must be refused).
+//!   main <image> presets                presets.rs (`_PRESETS.BIN`; presets_cmd)
 //! Live runs rewrite the image.
 use std::{env, fs};
 
@@ -280,6 +281,8 @@ mod diskbuf;
 mod persist;
 #[path = "../../src/setfile.rs"]
 mod setfile;
+#[path = "../../src/presets.rs"]
+mod presets;
 
 #[path = "../../src/vdisk.rs"]
 mod vdisk;
@@ -1284,6 +1287,10 @@ fn main() {
         setfile_cmd(&a, img);
         return;
     }
+    if a[2] == "presets" {
+        presets_cmd(&a, img);
+        return;
+    }
     if a[2] == "fatdir" {
         fatdir_cmd(&a, &mut img);
         save(&a[1], &img.d);
@@ -2203,6 +2210,123 @@ fn setfile_cmd(a: &[String], img: Img) {
     save(&a[1], &im().d);
     if fails != 0 {
         println!("setfile: {fails} FAIL");
+        std::process::exit(1);
+    }
+}
+
+/// `main <img> presets`: presets.rs on the image: the file made at the
+/// first boot (4 one-block clusters), save / load / rename / clear round
+/// trips that write only their slot's block, the slot cache after a boot,
+/// a torn slot, a CRC failure, an older persist version (v9: zero-extended),
+/// an unknown persist version and slot format (Bad, not recalled), names.
+fn presets_cmd(a: &[String], mut img: Img) {
+    use presets::{PErr, Slot};
+    let mut fails = 0;
+    let mut check = |ok: bool, what: &str| {
+        println!("{}: presets {what}", if ok { "ok" } else { "FAIL" });
+        if !ok {
+            fails += 1;
+        }
+    };
+    let words = |tag: u32| -> [u32; persist::WORDS] {
+        let mut w = [0u32; persist::WORDS];
+        for (i, x) in w.iter_mut().enumerate() {
+            *x = tag.wrapping_mul(0x9E37_79B9) ^ (i as u32) << 3;
+        }
+        w
+    };
+    let name = |s: &str| presets::clean_name(s.as_bytes());
+    // Names.
+    check(presets::name_str(&name("  DC V 6V  ")) == "DC V 6V", "name: leading / trailing spaces dropped");
+    check(presets::name_str(&name("0123456789abcdefXYZ")) == "0123456789abcdef", "name: cut to 16 bytes");
+    check(presets::name_str(&presets::clean_name(b"a\x01b\xC3")) == "a?b?", "name: non-printable bytes are '?'");
+    // First boot: the file is made, all slots empty.
+    let w0 = img.writes.len();
+    presets::boot(&mut img);
+    check(presets::file_state() == presets::FileState::Created, &format!("first boot: {:?}", presets::file_state()));
+    println!("  create: {} block writes", img.writes.len() - w0);
+    let mut cl = [0u16; presets::N];
+    let (data, spc, size, n) = calbackup::chain_of(&mut img, &presets::NAME, &mut cl).unwrap();
+    check(size == presets::SIZE && spc == 1 && n == presets::N, "file 16 KiB, 4 clusters of one block");
+    let lba: Vec<u32> = cl.iter().map(|&c| data + c as u32 - 2).collect();
+    check((0..presets::N).all(|k| presets::slot(k).0 == Slot::Empty), "all slots empty");
+    check(matches!(presets::load(&mut img, 0), Err(PErr::Empty)), "load of an empty slot: Empty");
+    // Save / load round trip.
+    let ws = img.writes.len();
+    let info = 2 | presets::INFO_GEN_ON;
+    check(presets::save(&mut img, 1, &words(1), info, &name("Scope 1ms")).is_ok(), "save into slot 2");
+    check(img.writes[ws..] == [lba[1]], &format!("save wrote only slot 2's block ({:?})", &img.writes[ws..]));
+    let (st, inf, nm) = presets::slot(1);
+    check(st == Slot::Used && inf == info && nm == "Scope 1ms", &format!("cache after the save: {st:?} {inf:#x} {nm:?}"));
+    let p = presets::load(&mut img, 1).ok();
+    check(
+        p.as_ref().is_some_and(|p| p.rec.version == persist::VERSION && p.rec.words == words(1) && p.info == info && presets::name_str(&p.name) == "Scope 1ms"),
+        "load: the same version, words, info, name",
+    );
+    check(presets::save(&mut img, 3, &words(4), 0, &name("DC V")).is_ok() && presets::slot(3).2 == "DC V", "save into slot 4");
+    check(presets::save(&mut img, 4, &words(4), 0, &name("x")) == Err(PErr::NoFile), "slot 5 does not exist");
+    // A reboot reads the headers back.
+    presets::boot(&mut img);
+    check(presets::file_state() == presets::FileState::Present, "second boot: Present");
+    check(presets::slot(1).2 == "Scope 1ms" && presets::slot(3).2 == "DC V" && presets::slot(0).0 == Slot::Empty, "second boot: the slot cache from the disk");
+    // Rename: the name and INFO_NAMED change, nothing else.
+    let ws = img.writes.len();
+    check(presets::rename(&mut img, 1, &name("Bench 5 V")).is_ok(), "rename slot 2");
+    let p = presets::load(&mut img, 1).ok();
+    check(
+        p.as_ref().is_some_and(|p| p.rec.words == words(1) && p.info == info | presets::INFO_NAMED && presets::name_str(&p.name) == "Bench 5 V"),
+        "rename: name and INFO_NAMED, words / page unchanged",
+    );
+    check(img.writes[ws..] == [lba[1]], "rename wrote only its block");
+    check(presets::rename(&mut img, 0, &name("x")) == Err(PErr::Empty), "rename of an empty slot: Empty");
+    // Overwrite.
+    check(presets::save(&mut img, 1, &words(2), 0, &name("Other")).is_ok() && presets::load(&mut img, 1).is_ok_and(|p| p.rec.words == words(2)), "save over slot 2");
+    // Clear.
+    check(presets::clear(&mut img, 3).is_ok() && presets::slot(3).0 == Slot::Empty, "clear slot 4");
+    presets::boot(&mut img);
+    check(presets::slot(3).0 == Slot::Empty && presets::slot(1).2 == "Other", "after a boot: slot 4 empty, slot 2 kept");
+    // A torn save (erase + the first page programmed): Bad, the others kept.
+    let mut b = vec![0u8; 4096];
+    presets::encode(&mut b, persist::VERSION, persist::WORDS, 0, &name("Torn"), |i| words(7)[i]);
+    let o = lba[2] as usize * 4096;
+    img.d[o..o + 4096].fill(0xFF);
+    img.d[o..o + 256].copy_from_slice(&b[..256]);
+    presets::boot(&mut img);
+    check(presets::slot(2).0 == Slot::Bad && matches!(presets::load(&mut img, 2), Err(PErr::Empty)), "torn slot 3: Bad, not recalled");
+    check(presets::slot(1).0 == Slot::Used, "torn slot 3: slot 2 unaffected");
+    check(presets::save(&mut img, 2, &words(8), 0, &name("Again")).is_ok() && presets::slot(2).0 == Slot::Used, "a save over the torn slot");
+    // CRC failure.
+    img.d[lba[1] as usize * 4096 + 60] ^= 0x04;
+    presets::boot(&mut img);
+    check(presets::slot(1).0 == Slot::Bad, "flipped bit in slot 2: Bad");
+    check(presets::clear(&mut img, 1).is_ok() && presets::slot(1).0 == Slot::Empty, "a Bad slot clears");
+    // An older persist version (v9, 62 words): recalled zero-extended.
+    let v9 = persist::words_of(9).unwrap();
+    presets::encode(&mut b, 9, v9, 1, &name("Old v9"), |i| words(9)[i]);
+    let o0 = lba[0] as usize * 4096;
+    img.d[o0..o0 + 4096].copy_from_slice(&b);
+    presets::boot(&mut img);
+    let p = presets::load(&mut img, 0).ok();
+    let ok = p.as_ref().is_some_and(|p| p.rec.version == 9 && p.rec.words[..v9] == words(9)[..v9] && p.rec.words[v9..].iter().all(|&w| w == 0));
+    check(ok && presets::slot(0).2 == "Old v9", "v9 slot: version 9, zero-extended to the current words");
+    // A newer build's slot: an unknown persist version, an unknown format.
+    presets::encode(&mut b, 99, 70, 0, &name("Future"), |i| i as u32);
+    img.d[o0..o0 + 4096].copy_from_slice(&b);
+    presets::boot(&mut img);
+    check(presets::slot(0).0 == Slot::Bad, "unknown persist version 99: Bad");
+    presets::encode(&mut b, persist::VERSION, persist::WORDS, 0, &name("Fmt2"), |i| words(3)[i]);
+    b[4] = 2; // the slot format word
+    img.d[o0..o0 + 4096].copy_from_slice(&b);
+    presets::boot(&mut img);
+    check(presets::slot(0).0 == Slot::Bad && presets::slot(2).2 == "Again", "unknown slot format 2: Bad, others kept");
+    // Payload layout: header words 0..9, the record from word 9 (a format
+    // change must keep this; tools that read the file rely on it).
+    presets::encode(&mut b, persist::VERSION, persist::WORDS, 0x103, &name("ABCD"), |i| 0x1000 + i as u32);
+    let w = |i: usize| u32::from_le_bytes(b[4 * i..4 * i + 4].try_into().unwrap());
+    check(w(0) == 0x4552_5044 && w(1) == 1 && w(2) == persist::VERSION && w(3) == persist::WORDS as u32 && w(4) == 0x103 && &b[20..24] == b"ABCD" && w(9) == 0x1000, "slot layout: magic, format, version, n, info, name, payload at word 9");
+    save(&a[1], &img.d);
+    if fails != 0 {
+        println!("presets: {fails} FAIL");
         std::process::exit(1);
     }
 }

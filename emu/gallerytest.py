@@ -186,7 +186,7 @@ try:
     q('DBG:KEY 0')
     wait_ms(800)
     shot('g00-menu')
-    q('DBG:TAP 240,27')
+    q('DBG:TAP 140,27')  # the top row's left half (Presets is the right one)
     s = wait_settled()
     shot('g01-grid-p1', s)
     check(is565(s[20][300], BAR), 'grid: title bar colour')

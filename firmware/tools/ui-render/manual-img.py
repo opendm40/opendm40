@@ -32,6 +32,7 @@ ANNOT_ONLY = {'contact-sheet', 'status-all', 'status-usb', 'status-locked', 'set
 SRC = {os.path.basename(p)[:-4]: p for p in glob.glob(f'{man}/*.png') if os.path.basename(p)[:-4] not in ANNOT_ONLY}
 SRC.update({n: f'{readme}/{n}.png' for n in ['dmm', 'auto-acdc', 'burden', 'ajack', 'combined', 'generator', 'power', 'scope']})
 SRC['main-menu'] = f'{matrix}/m04-main-menu.png'
+SRC['presets'] = f'{matrix}/r01-presets.png'
 SRC['inrush'] = f'{matrix}/i02-inrush-dc.png'
 SRC['gallery'] = f'{gallery}/g01-grid-p1.png'
 SRC['gallery-view'] = f'{gallery}/g05-overlay.png'

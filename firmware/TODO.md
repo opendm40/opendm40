@@ -754,7 +754,7 @@ the scope full record.
 - [x] FR-06 Hi/Lo limits (P1): pass/fail thresholds with a beep.  (8f98171; verify on device)
 - [x] FR-16 screenshot + log gallery (P1): save screenshots/CSV to the SPI disk and browse them.  (f02ce6e, 18ae461; verify on device)
       Backend + SCPI (csvlog list/delete, MMEM:CAT? / MMEM:DEL, USB only for DEL); on-screen gallery
-      src/gallery.rs, opened from the main menu's top row "Gallery: screenshots and logs".
+      src/gallery.rs, opened from the main menu's top row "Gallery" (left of "Presets").
 - [x] FR-28 generator DC offset (P1): adjustable offset (note: real bipolar offset is HW-4).  (ae3e655, 38d9983; verify on device)
       Offset box on the generator page (keypad; OK on an empty field = auto), SOUR:VOLT:OFFS <V>|AUTO, persisted p[39].
 - [x] FR-35 CSV export from DMM (P1): = the CSV-to-disk item above, with timestamps.  (verify on device)
