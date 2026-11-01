@@ -502,6 +502,7 @@ try:
 
     if want('modbus'):
         # ---- framing errors (every stop bit low), drawn red ----
+        q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1;DEC:POL NORM;DEC:THR AUTO')  # also without mcx
         put(BITS, '1' * 40 + uart_bits(text, err='all') + '1' * 40, 9600, 0.0, 3.3, 0.004)
         q('TIM:SCAL 1E-3')
         run()
