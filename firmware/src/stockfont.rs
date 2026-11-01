@@ -463,7 +463,7 @@ pub const LOCK: Font = Font(0x0806_BF24); // 0x20 closed, 0x21 open
 pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth, 0x22 USB (ours)
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
-pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
+pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp (+ our ℃ / ℉)
 
 /// Stock alignment 0..8: 0 left/top, 1 left/vcenter, 2 left/bottom, 3 right/top,
 /// 4 right/vcenter, 5 right/bottom, 6 hcenter/top, 7 hcenter/bottom, 8 center.
@@ -978,19 +978,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
     last as i16
 }
 
-/// Map our unit text to the stock font's code points (no 'k' / 'µ' glyphs:
-/// the stock writes "K" and "u", e.g. "KΩ"). The energy units keep 'k'
-/// ("kWh", "kVAh": our LETTERS k, stockfont_w.rs; F14 / TEXT22 have one).
+/// Map our unit text to the stock font's code points: no 'µ' glyph (the
+/// stock writes "u"), "°C" as the one glyph ℃. 'k' stays lowercase (owner,
+/// issue #136: "kW", "kΩ"; the stock wrote "K"): the unit fonts without one
+/// take ours (stockfont_w.rs).
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
-    let energy = u.ends_with("Wh") || u.ends_with("VAh");
     // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
     // core's two-way string searcher (~1 KB) into region B.
     let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
-            'k' if energy => 'k',
-            'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
             'C' if deg => '\u{2103}',

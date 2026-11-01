@@ -35,7 +35,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: thumbv7em-none-eabihf
-          components: llvm-tools
+          components: llvm-tools, rust-src
       # No cache: the release image is built from a clean target dir.
       - name: build.sh --locked
         run: firmware/build.sh --locked

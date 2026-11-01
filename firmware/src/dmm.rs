@@ -2026,6 +2026,9 @@ pub struct Dmm {
     /// The probe's row was just written: the AD2 peak hold is cleared once
     /// it settled (sentinel::PROBE_SETTLE_MS) before its first window counts.
     probe_settle: bool,
+    /// The probe's out-of-family windows (sentinel::probe_glitch): 1 = the
+    /// last window was one, 2 = ... and the one after it is skipped too.
+    probe_glitch: u8,
     aprot: Option<AProt>,
     /// Fuse check in progress (`fuse_start`) and the last result.
     fuse_job: Option<FuseJob>,
@@ -2037,11 +2040,11 @@ pub struct Dmm {
     pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
-    /// Burden voltage readout in the A functions (Settings 3/3 "Burden
+    /// Burden voltage readout in the A functions (Settings > Multimeter "Burden
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
     pub burden_show: bool,
-    /// Ohm readings below 0 shown (Settings 3/3 "Negative ohm", SCPI
+    /// Ohm readings below 0 shown (Settings > Multimeter "Negative ohm", SCPI
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
@@ -2662,6 +2665,7 @@ impl Dmm {
             ovl: None,
             probe: false,
             probe_settle: false,
+            probe_glitch: 0,
             aprot: None,
             ovl_rel_t: None,
             fuse_job: None,
@@ -3070,6 +3074,7 @@ impl Dmm {
         self.pkh_due = 0;
         self.sent_arm = true;
         self.probe_settle = self.probe;
+        self.probe_glitch = 0;
         self.sent.configured(kind, clk.now_ms(), fresh);
         self.sent.neg = neg;
         self.sent.neg_vok = true;
@@ -3754,7 +3759,7 @@ impl Dmm {
         }
     }
 
-    /// Global temperature unit (Settings 2/2 "Temp unit", SCPI UNIT:TEMP):
+    /// Global temperature unit (Settings > Multimeter "Temp unit", SCPI UNIT:TEMP):
     /// deg F instead of deg C for the main reading and the cold junction.
     /// Offsets stay in C (0.1 C steps, a calibration trim).
     pub fn temp_f(&self) -> bool {
@@ -6163,6 +6168,11 @@ impl Dmm {
         }
         let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
         self.sent.probe_a = amps;
+        let (skip, g) = sentinel::probe_glitch(self.probe_glitch, amps);
+        self.probe_glitch = g;
+        if skip {
+            return;
+        }
         match &mut self.aprot {
             Some(a) => {
                 if amps >= sentinel::APROT_GONE_A {

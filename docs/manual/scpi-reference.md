@@ -248,7 +248,7 @@ volts = [(c - yref) * yinc + yorig for c in codes]
 - `SYSTem:ALERt:ALARm`: the two-tone alarm for AJACK, APROT and a current
   above 10 A, at full volume (`LOUD`), at the key volume (`VOLume`) or off.
   Stored.
-- `MEMory:STATe:RECall:AUTO` is Settings 3/3 **Mode Remember**: `ON`
+- `MEMory:STATe:RECall:AUTO` is Settings > Power **Mode Remember**: `ON`
   continues the multimeter after a power-off as it was. Stored.
 - `SYSTem:FUSE:TEST`: plug one lead from V/ohm into A, nothing else. The
   meter measures 600 ohm for three readings, then returns to the function
@@ -413,7 +413,7 @@ Functions:
   conversions (0.2 s) give no new reading then (`DBG:FAST?`). It applies to
   DC voltage, DC current and resistance; other functions keep their own
   timing. Stored.
-- `RESistance:NEGative` is Settings 3/3 **Negative ohm**. Stored.
+- `RESistance:NEGative` is Settings > Multimeter **Negative ohm**. Stored.
 
 ## Temperature
 
@@ -835,7 +835,7 @@ unless shown otherwise.
 | `DBG:BOOT?` | | `NONE`, or `B2,<57 words>,<renamed>`: boot and reset information ([below](#dbgboot)) | USB |
 | `DBG:IDLE` | `<ms>` (`0` = the **Shutdown** setting) | Sets the automatic power-off time until the next restart, for tests. | USB |
 | `DBG:IDLE?` | | `<ms since the last touch or key>,<ms since the last touch, key or host activity>,<power-off ms, 0 = never>` | USB |
-| `DBG:VIEW?` | | `<page>,<settings page>,<wave view 1/0>,<trend chart ms/div>` | USB |
+| `DBG:VIEW?` | | `<page>,<Settings tab 1..6>,<wave view 1/0>,<trend chart ms/div>` | USB |
 | `DBG:READout?` | | `<kind F\|G\|P\|N>,<unit>,<value>,<hold>`: the DMM value as drawn | USB |
 | `DBG:TAP` | `<x>,<y>` | Taps the screen. | USB |
 | `DBG:SWIPE` | `L`, `R`, or `D,<fingers>` | Swipes (D,3 saves a screenshot, D,2 powers off). | USB |
@@ -843,6 +843,8 @@ unless shown otherwise.
 | `DBG:KEY` | `<key 0..3>[,<hold ms>]` | Presses a side key: 0 MENU, 1 RUN, 2 AUTO, 3 MF. | USB |
 | `DBG:LCD?` | `<x>,<y>,<w>,<h>,<n>` | block: n raw display memory words | USB |
 | `DBG:TE?` | | Per phase (TE off; TE on, mode 0; TE on, mode 1; `;` between): `<samples>`, then `<level changes>,<samples high>` for PA3, PB13, PC1, PC15. Blocks ~0.3 s. ([LCD, TE](../../hw/README.md#lcd)) | USB |
+| `DBG:SCANLINE?` | | The panel's Get Scanline (0x45) and the pressed-feedback sync (it waits until the refresh scan has left the box): `<cal>,<lines>,<frame us>,<dir>,<sync>,<last box us>,<ns/px>,<last wait us>,<line at that write>,<window found>,<raw dummy>,<raw hi>,<raw lo>;` then 24 samples 1 ms apart, `<us>:<line>`. `<cal>` 1: the line moves (frame measured), 2: it does not (no sync). Blocks up to ~90 ms. | USB |
+| `DBG:SCANLINE:DIR n` / `DBG:SCANLINE:SYNC 0\|1` | | The screen axis the scan sweeps (0 x, 1 479 - x, 2 y, 3 319 - y; 1 at boot, inferred) / the sync off, on. | USB |
 | `DBG:DIAG?` | | block of diagnostic bytes. Only in builds with the `dbg-diag` feature. | USB |
 | `DBG:CHG?` | | `<PB10>,<PB11>,<mode>,<pull>,<open drain>,<output>,<USB configured>,<battery ADC>`: the charger status pins' levels; GPIOB mode / pull / output-type / output bits of PB10..PB11 (bits 20..23, 20..23, 10..11, 10..11, shifted down); 1 while a USB host has the meter configured; the sum of 16 battery conversions (V = sum / 16 × 3 / 4096 × 2) | USB |
 | `DBG:CHG:PIN` | `10\|11,IN\|UP\|DOWN\|LOW\|HIGH\|OD\|DEF` | Sets PB10 or PB11 for a charger experiment: input without pull, with pull-up or pull-down, driven low or high, open drain released, or back to the default. Until the next restart. | USB |

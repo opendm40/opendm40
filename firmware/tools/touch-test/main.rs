@@ -830,19 +830,45 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::main_menu("DMM + Scope");
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
-    // Settings 1/3, 2/3 and 3/3, Hold & Limits (list pages).
-    let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
-    for p in 0..3u8 {
+    // Settings: every section (the tabs 100 + i, the rows i), Hold &
+    // Limits (list page).
+    let mut vals = vec!["Hold 5000 ms"; ui::SET_N];
+    vals[ui::S_USB as usize] = ui::usb_disk_name(true, false);
+    for t in 0..ui::SET_TABS.len() as u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize]]);
-        let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
-        let want: Vec<u32> = (0..n as u32).collect();
-        page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
+        ui::settings(t, &vals);
+        let n = ui::SET_TABS[t as usize].1.len() as u32;
+        let hit = |x: u16, y: u16| match ui::settings_hit(t, x, y) {
+            Some(ui::SetHit::Tab(i)) => Some(100 + i as u32),
+            Some(ui::SetHit::Row(r)) => Some(r as u32),
+            None => None,
+        };
+        // The tabs as drawn; a row is a target only on its value side (the
+        // name is not): checked below.
+        let tab_only = |b: &Bx| b.y0 >= 40 && b.x1 < 127;
+        let want_t: Vec<u32> = (100..100 + ui::SET_TABS.len() as u32).collect();
+        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &tab_only, &want_t);
+        for r in 0..n as usize {
+            let id = ui::settings_id(t, r).unwrap();
+            let (x0, y0) = (ui::set_value_x(id), 44 + 45 * r as i16);
+            let name = ui::SET_NAMES[id as usize];
+            let mut ok = true;
+            for y in y0..y0 + 42 {
+                // The name (from x 138 to its end + 5) is not a target, the
+                // value side to the row's end (476) is, all of it; a ">" row
+                // is a target all over.
+                for x in 131..476i16 {
+                    let want = (x >= x0).then_some(r as u32);
+                    ok &= hit(x as u16, y as u16) == want;
+                }
+            }
+            ck.t(&format!("settings {} row {r} \"{name}\": name not a target, value x {x0}..476 is", ui::SET_TABS[t as usize].0), ok && 476 - x0 >= 60);
+        }
     }
-    // Backlight / volume steppers (ui-review #12): the "-" key (x 210..263)
-    // steps down, the "+" key (410..463) up; the label side is "-".
-    ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
+    // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
+    // steps down, the "+" key (426..465) up.
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
     // Backlight walks the manual's grid both ways and stays on it at the ends (#91).
     let mut up = vec![55u8];
     for _ in 0..6 { up.push(ui::backlight_step(*up.last().unwrap(), 1)); }
@@ -960,7 +986,7 @@ fn hit_tests(ck: &mut Ck) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column
-        } else if (153..172).contains(&y) {
+        } else if ui::HIST_HIT.contains(&y) {
             Some(102) // history row (one target for all five boxes)
         } else if ui::rate_chip_hit(x, y) {
             Some(103)

@@ -1096,6 +1096,36 @@ pub fn touchcal_scene(k: u8, long: bool) {
 /// lcd.rs deferred fills (a batch, as App::repaint opens): the page drawn
 /// in a batch over an arbitrary previous screen ends pixel-identical to the
 /// page drawn directly.
+/// Settings values by id (ui::S_*): those of a new meter, `over` replaced.
+pub fn set_vals(over: &[(u8, &'static str)]) -> Vec<&'static str> {
+    let mut v = vec![""; ui::SET_N];
+    for (id, t) in [
+        (ui::S_DIM, "5 min"), (ui::S_SHUTDOWN, "30 min"), (ui::S_BACKLIGHT, "55%"), (ui::S_VOLUME, "50%"), (ui::S_BT, "ON"),
+        (ui::S_START, "Multimeter"), (ui::S_RAILS, "Auto (per view)"), (ui::S_DRAG, "Stock"), (ui::S_RATE, "MED  5.0/s"),
+        (ui::S_SMOOTH, "OFF"), (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2103} (Celsius)"), (ui::S_SWIPE, "Off (stock)"),
+        (ui::S_PRESS, "ON"), (ui::S_TAP_STEP, "Corners"), (ui::S_JACK, "ON"), (ui::S_ALARM, "Loud"),
+        (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BURDEN, "OFF (stock)"), (ui::S_ACC, "ON"), (ui::S_OHM_NEG, "OFF (stock)"),
+        (ui::S_REMEMBER, "OFF"),
+    ] {
+        v[id as usize] = t;
+    }
+    for &(id, t) in over {
+        v[id as usize] = t;
+    }
+    v
+}
+
+/// The widest value of every setting (the fit checks).
+fn set_vals_worst() -> Vec<&'static str> {
+    set_vals(&[
+        (ui::S_DIM, "10 min"), (ui::S_SHUTDOWN, "1 hour"), (ui::S_BACKLIGHT, "100%"), (ui::S_VOLUME, "100%"), (ui::S_BT, "OFF"),
+        (ui::S_START, "DMM + Scope"), (ui::S_DRAG, "Hold 5000 ms"), (ui::S_RATE, "SLOW (n/a here)"), (ui::S_SMOOTH, "HIGH"),
+        (ui::S_DMM_ROW, "Bargraph"), (ui::S_TEMP_UNIT, "\u{2109} (Fahrenheit)"), (ui::S_PRESS, "OFF (stock)"),
+        (ui::S_TAP_STEP, "Halves (stock)"), (ui::S_JACK, "A-JACK only"), (ui::S_ALARM, "Volume"),
+        (ui::S_USB, ui::usb_disk_name(true, false)), (ui::S_BURDEN, "ON (A, mA, uA)"), (ui::S_OHM_NEG, "OFF (stock)"),
+    ])
+}
+
 fn defer_check(ck: &mut Checker, name: &str, mut draw: impl FnMut()) {
     unsafe { host::PATTERN = true };
     host::reset(0);
@@ -1159,6 +1189,43 @@ fn gen_duty_check(ck: &mut Checker, duty: u16) {
     ck.cases += 1;
     if (share - duty as f32 / 10000.0).abs() > 0.03 {
         ck.fail(&format!("gen-square/{duty}"), format!("preview high in {hi} of {} columns ({:.0} %), duty {} %", hi + lo, share * 100.0, duty / 100));
+    }
+}
+
+/// Pressed feedback in one pass (app_press.rs draw_box, lcd::strips_box):
+/// over the page drawn by `page`, an item drawn pressed / released by
+/// `item` in a strip pass over its box `r` ends as the direct draw does, the
+/// direct draw changes nothing outside that box, and the pass writes each
+/// pixel of the box once and nothing else.
+fn press_check(ck: &mut Checker, name: &str, r: Option<stockfont::Rect>, page: &dyn Fn(), item: &dyn Fn()) {
+    let Some(r) = r else {
+        ck.fail(name, "press: no box".into());
+        return;
+    };
+    let (x0, y0, x1, y1) = (r.x as usize, r.y as usize, (r.x + r.w - 1) as usize, (r.y + r.h - 1) as usize);
+    host::reset(0);
+    page();
+    let a = host::emu().fb.clone();
+    item();
+    let b = host::emu().fb.clone();
+    host::reset(0);
+    page();
+    let w0 = host::emu().writes;
+    let mut buf = vec![0u16; 6144];
+    lcd::strips_box(&mut buf, x0 as u16, y0 as u16, x1 as u16, y1 as u16, &mut || item());
+    let writes = host::emu().writes - w0;
+    ck.cases += 1;
+    let inside = |i: usize| (x0..=x1).contains(&(i % W)) && (y0..=y1).contains(&(i / W));
+    let out = a.iter().zip(b.iter()).enumerate().filter(|(i, (p, q))| p != q && !inside(*i)).count();
+    if out != 0 {
+        ck.fail(name, format!("press: the direct draw changes {out} px outside the box {x0},{y0}..{x1},{y1}"));
+    }
+    let n = b.iter().zip(host::emu().fb.iter()).filter(|(p, q)| p != q).count();
+    if n != 0 {
+        ck.fail(name, format!("press: {n} px differ from the direct draw"));
+    }
+    if writes != (r.w as u64) * (r.h as u64) {
+        ck.fail(name, format!("press: {writes} pixel writes for the {}x{} box", r.w, r.h));
     }
 }
 
@@ -2344,7 +2411,7 @@ fn main() {
         // themselves are the stock keypad geometry (not checked here: its
         // 40 px keys sit 1 px apart and 3 px from the screen edge).
         if k == 0 {
-            ui::keypad_input(true, "1234567", "KHz", false);
+            ui::keypad_input(true, "1234567", "kHz", false);
             ck.check_opts("gen/keypad-freq-input", &gen_regions, false);
             // Prefilled current value, selected (ui-review #10).
             ui::keypad_input(true, "2", "MHz", true);
@@ -2548,24 +2615,24 @@ fn main() {
         }
     }
 
-    // 6b. Settings pages 1 / 2 (worst values), Range pages with the UF-21
+    // 6b. Settings: every section with the widest values and with other
+    //     values (each "USB disk" and "Danger alarm" value: decision
+    //     2026-10-22 #6, danger.rs doc 4.10), Range pages with the UF-21
     //     note: whole page.
     let page_regions = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
-    for (page, vals) in [
-        (0u8, vec!["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto (per view)", "Hold 5000 ms", ""]),
-        (1, vec!["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]),
-        (1, vec!["FAST  37/s", "LOW", "History", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]),
-        (1, vec!["MED  --/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Off", "", ""]),
-        // Page 3 with each "USB disk" value (decision 2026-10-22 #6) and
-        // each "Danger alarm" value (danger.rs, doc 4.10).
-        (2, vec!["A-JACK only", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)", "OFF"]),
-        (2, vec!["ON", "Volume", ui::usb_disk_name(false, true), "ON (A, mA, uA)", "", "", "OFF", "ON", "ON"]),
-        (2, vec!["Mask 5", "Off", ui::usb_disk_name(false, false), "ON (A, mA, uA)", "", "", "ON", "OFF (stock)", "ON"]),
-        (2, vec!["OFF", "Volume", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "ON", "OFF"]),
-    ] {
-        host::reset(0);
-        ui::settings(page, &vals);
-        ck.check_opts(&format!("settings/{page}/{}", vals[0]), &page_regions, false);
+    let set_cases = [
+        set_vals_worst(),
+        set_vals(&[]),
+        set_vals(&[(ui::S_RATE, "FAST  37/s"), (ui::S_SMOOTH, "LOW"), (ui::S_DMM_ROW, "History"), (ui::S_ALARM, "Volume"), (ui::S_USB, ui::usb_disk_name(false, true))]),
+        set_vals(&[(ui::S_RATE, "MED  --/s"), (ui::S_JACK, "Mask 5"), (ui::S_ALARM, "Off"), (ui::S_USB, ui::usb_disk_name(false, false)), (ui::S_DRAG, "Axis lock")]),
+        set_vals(&[(ui::S_JACK, "OFF"), (ui::S_USB, ui::usb_disk_name(true, true)), (ui::S_BACKLIGHT, "10%"), (ui::S_VOLUME, "0%")]),
+    ];
+    for (k, vals) in set_cases.iter().enumerate() {
+        for tab in 0..ui::SET_TABS.len() as u8 {
+            host::reset(0);
+            ui::settings(tab, vals);
+            ck.check_opts(&format!("settings/{tab}/{k}"), &page_regions, false);
+        }
     }
     // Hold & Limits with its ninth row "Record" (decision 2026-10-22 #1),
     // the widest limit values.
@@ -2668,6 +2735,16 @@ fn main() {
         if emu().fb != before {
             ck.fail(&format!("temp/{k}/{offs}"), "pressed / released key differs from a full draw".into());
         }
+        // Each key in one strip pass over its box (app_press.rs draw_box).
+        for code in [0u8, 6, ui::TK_UNIT, ui::TK_MINUS, ui::TK_OFFS, ui::TK_PLUS, ui::TK_R25, ui::TK_BETA, ui::TK_LIMITS, ui::TK_RECORD, ui::TK_OK] {
+            for on in [true, false] {
+                if ui::temp_rect(k, code).is_some() {
+                    press_check(&mut ck, &format!("press/temp{k}/{code}/{on}"), ui::temp_rect(k, code), &|| ui::temp_page(&tp), &|| ui::temp_key(&tp, code, on));
+                }
+            }
+        }
+        host::reset(0);
+        ui::temp_page(&tp);
         if k == 5 {
             save(&out, "m06-temp-offset");
         }
@@ -2737,8 +2814,10 @@ fn main() {
 
     // Deferred fills (lcd.rs): pages and popups in a batch = drawn directly.
     defer_check(&mut ck, "defer/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    defer_check(&mut ck, "defer/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
-    defer_check(&mut ck, "defer/settings2", || ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "OFF"]));
+    let sv = set_vals_worst();
+    for tab in 0..ui::SET_TABS.len() as u8 {
+        defer_check(&mut ck, &format!("defer/settings{tab}"), || ui::settings(tab, &sv));
+    }
     defer_check(&mut ck, "defer/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     defer_check(&mut ck, "defer/help", || ui::help_page(0));
     defer_check(&mut ck, "defer/gen", || ui::gen_static(&w.gen));
@@ -2756,9 +2835,9 @@ fn main() {
 
     // Strip rendering (lcd.rs): the pages App::repaint draws in strips.
     strip_check(&mut ck, "strip/menu", || ui::main_menu(ui::view_name(ui::View::DmmScope)));
-    strip_check(&mut ck, "strip/settings0", || ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]));
-    strip_check(&mut ck, "strip/settings1", || ui::settings(1, &["Fast  10.2 rdg/s", "Medium", "History", "C (Celsius)", "Top bar", "ON", "1 div", "", ""]));
-    strip_check(&mut ck, "strip/settings2",|| ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "OFF"]));
+    for tab in 0..ui::SET_TABS.len() as u8 {
+        strip_check(&mut ck, &format!("strip/settings{tab}"), || ui::settings(tab, &sv));
+    }
     strip_check(&mut ck, "strip/range", || ui::range_page(Button::Volt, Some(6), 0, Some(("AUTO+ recommended: never steps to mV", false))));
     strip_check(&mut ck, "strip/help", || ui::help_page(0));
     strip_check(&mut ck, "strip/gen", || ui::gen_static(&w.gen));
@@ -3324,20 +3403,18 @@ fn main() {
         host::reset(0);
         ui::gen_static(&w.gen);
         save(&out, "g01-gen");
-        host::reset(0);
-        ui::settings(0, &["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""]);
-        save(&out, "m01-settings");
-        host::reset(0);
-        ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-        save(&out, "m02-settings2");
-        host::reset(0);
-        ui::settings(2, &["A-JACK only", "Loud", ui::usb_disk_name(true, false), "ON (A, mA, uA)", "", "", "ON", "ON", "ON"]);
-        save(&out, "m10-settings3");
+        // Settings: every section (widest values).
+        let sv = set_vals_worst();
+        for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+            host::reset(0);
+            ui::settings(tab as u8, &sv);
+            save(&out, &format!("m01-settings-{tab}-{}", name.to_lowercase()));
+        }
         // Pressed feedback (ui-review #11): the item drawn pressed from
         // touch-down (one item redrawn), then released = the page as drawn.
         {
             let combo = ui::view_name(ui::View::DmmScope);
-            let s0 = ["5 min", "30 min", "50%", "50%", "ON", "Multimeter", "Auto (per view)", "Hold 300 ms", ""];
+            let sv = set_vals(&[(ui::S_DRAG, "Hold 300 ms"), (ui::S_USB, ui::usb_disk_name(false, false))]);
             let lim = ["ON", "ON", "1.000 V", "--", "", "", "", "OFF", "1 s"];
             let row = |r: u8, part: i8, on: bool, f: &dyn Fn()| {
                 ui::set_row_only(Some(ui::RowPress { row: r, part, on }));
@@ -3345,9 +3422,28 @@ fn main() {
                 ui::set_row_only(None);
             };
             let d_menu = || ui::main_menu(combo);
-            let d_set = || ui::settings(0, &s0);
-            let d_set2 = || ui::settings(1, &["SLOW (n/a here)", "HIGH", "Bargraph", "F (Fahrenheit)", "Top bar", "OFF (stock)", "Halves (stock)", "", ""]);
-            let d_set3 = || ui::settings(2, &["A-JACK only", "Volume", ui::usb_disk_name(false, false), "OFF (stock)", "", "", "OFF", "ON", "OFF"]);
+            let d_sets: Vec<Box<dyn Fn()>> = (0..ui::SET_TABS.len() as u8).map(|t| {
+                let sv = &sv;
+                Box::new(move || ui::settings(t, sv)) as Box<dyn Fn()>
+            }).collect();
+            // Settings: every row of every section (a stepper: both keys),
+            // every other section's tab (0x80 | tab).
+            let mut set_t: Vec<(u8, u8, i8)> = Vec::new();
+            for (t, (_, rows)) in ui::SET_TABS.iter().enumerate() {
+                for (r, &id) in rows.iter().enumerate() {
+                    if ui::set_is_stepper(id) {
+                        set_t.push((t as u8, r as u8, -1));
+                        set_t.push((t as u8, r as u8, 1));
+                    } else {
+                        set_t.push((t as u8, r as u8, 0));
+                    }
+                }
+                for o in 0..ui::SET_TABS.len() as u8 {
+                    if o != t as u8 {
+                        set_t.push((t as u8, 0x80 | o, 0));
+                    }
+                }
+            }
             let d_lim = || ui::list_page("Hold & Limits: Voltage", &ui::LIMIT_ROWS, &lim);
             let d_rec = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", false);
             let d_recon = || ui::record_page(["1 s", "1 %", "8 h"], "about 62 h left", true);
@@ -3386,31 +3482,40 @@ fn main() {
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
             let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
-            let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
-                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
-                .chain((0..9u8).map(|r| {
-                    let part = if ui::SET_STEP_ROWS.contains(&(r as usize)) { 1 } else { 0 };
-                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
+            let pr = |row: u8, part: i8| ui::RowPress { row, part, on: true };
+            let d_kp = || ui::keypad(ui::KP_NUM, "Vpp", "3.00", "V", true);
+            let kp_codes: Vec<u8> = ui::keypad_keys(ui::KP_NUM).iter().map(|k| k.2).filter(|&c| c != 0).collect();
+            type Case<'a> = (String, &'a dyn Fn(), Box<dyn Fn(bool) + 'a>, Option<stockfont::Rect>);
+            let cases: Vec<Case> = (0..6)
+                .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Menu, pr(i as u8, 0))))
+                .chain(set_t.iter().map(|&(t, r, part)| {
+                    let d: &dyn Fn() = &*d_sets[t as usize];
+                    (format!("settings{t}-{r}/{part}"), d, Box::new(move |on| row(r, part, on, d)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Settings, pr(r, part)))
                 }))
-                .chain([(2u8, -1i8), (3, -1)].into_iter().map(|(r, part)| {
-                    (format!("settings{r}/{part}"), &d_set as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_set)) as Box<dyn Fn(bool)>)
-                }))
-                .chain((0..9u8).map(|r| (format!("settings2-{r}"), &d_set2 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set2)) as Box<dyn Fn(bool)>)))
-                .chain((0..5u8).chain([8]).map(|r| (format!("settings3-{r}"), &d_set3 as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_set3)) as Box<dyn Fn(bool)>)))
-                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>)))
+                .chain((0..9u8).map(|r| (format!("limits{r}"), &d_lim as &dyn Fn(), Box::new(move |on| row(r, 0, on, &d_lim)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Limits, pr(r, 0)))))
                 .chain([(0u8, -1i8), (0, 1), (1, -1), (1, 1), (3, 0)].into_iter().flat_map(|(r, part)| {
                     [
-                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>),
-                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>),
+                        (format!("record{r}/{part}"), &d_rec as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_rec)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
+                        (format!("record-on{r}/{part}"), &d_recon as &dyn Fn(), Box::new(move |on| row(r, part, on, &d_recon)) as Box<dyn Fn(bool)>, ui::press_rect(ui::View::Record, pr(r, part))),
                     ]
                 }))
-                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>)))
+                .chain((0..5).map(|k| (format!("gen{k}"), &d_gen as &dyn Fn(), Box::new(move |on| ui::gen_press(g, k, on)) as Box<dyn Fn(bool)>, Some(ui::gen_press_rect(k)))))
                 .chain([(Button::Volt, &d_rv as &dyn Fn(), Some(5usize), 3u8), (Button::Amp, &d_ra, Some(7), 1), (Button::Ohm, &d_ro, Some(7), 1), (Button::Cap, &d_rc, Some(0), 0)].into_iter().flat_map(|(b, d, sel, sub)| {
-                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>))
+                    range_t(b).into_iter().map(move |t| (format!("range{}-{t}", b as u8), d, Box::new(move |on| ui::range_press(b, t, sel, sub, on)) as Box<dyn Fn(bool)>, ui::range_press_rect(b, t, sel, sub)))
                 }))
-                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>)))
+                .chain(ps_codes.iter().map(|&c| (format!("pwset{c}"), &d_ps as &dyn Fn(), Box::new(move |on| ui::pw::settings_press(&ps_pv, c, on)) as Box<dyn Fn(bool)>, ui::pw::settings_press_rect(&ps_pv, c))))
                 .collect();
-            for (name, draw, press) in cases.iter() {
+            // Keypad keys (their page has its own layout checks).
+            for &c in &kp_codes {
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/keypad{c}/{on}"), ui::keypad_key_rect(ui::KP_NUM, c), &d_kp, &|| ui::keypad_key(ui::KP_NUM, c, on));
+                }
+            }
+            for (name, draw, press, r) in cases.iter() {
+                // Each in one strip pass over its box (app_press.rs draw_box).
+                for on in [true, false] {
+                    press_check(&mut ck, &format!("press/{name}/{on}"), *r, draw, &|| press(on));
+                }
                 host::reset(0);
                 draw();
                 let want = emu().fb.clone();
@@ -3418,8 +3523,9 @@ fn main() {
                 ck.check_opts(&format!("pressed/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], false);
                 let file = match name.as_str() {
                     "menu1" => "m04b-menu-pressed",
-                    "settings4/0" => "m01b-settings-row-pressed",
-                    "settings2/1" => "m01c-settings-step-pressed",
+                    "settings3-1/0" => "m01b-settings-row-pressed",
+                    "settings0-0/1" => "m01c-settings-step-pressed",
+                    "settings0-131/0" => "m01d-settings-tab-pressed",
                     "record3/0" => "m12b-record-start-pressed",
                     "gen1" => "g01b-gen-box-pressed",
                     "gen4" => "g01c-gen-wave-pressed",

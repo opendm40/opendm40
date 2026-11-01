@@ -116,7 +116,9 @@ def word(path, off):
 
 
 SYMS = nm(A.app)
-HANG = SYMS['opendm40::wait_for_watchdog']
+# build.sh images panic into the shim's default_handler loop (-Cpanic=immediate-abort):
+# no wait_for_watchdog then; both are a loop that does not feed the watchdog.
+HANG = SYMS.get('opendm40::wait_for_watchdog') or SYMS['default_handler']
 START = SYMS['opendm40::native::start']  # after the shim's decision
 HELD_FOR = SYMS['opendm40::boot::held_for']  # the shim's key-hold windows (4 s, then 0.5 s)
 PA2 = SYMS['opendm40::boot::loader_pa2']
@@ -590,7 +592,7 @@ def main():
     for n in names:
         if n not in FUNCS:
             sys.exit('unknown case %s' % n)
-    print('app %s: entry 0x%08X, wait_for_watchdog 0x%08X; ROM 0x%08X, FS-loader 0x%08X'
+    print('app %s: entry 0x%08X, hang 0x%08X; ROM 0x%08X, FS-loader 0x%08X'
           % (os.path.relpath(A.app), ELF_ENTRY, HANG, ROM_RESET, LOADER_RESET), flush=True)
     with ThreadPoolExecutor(max_workers=max(1, A.jobs)) as ex:
         res = list(ex.map(one, names))

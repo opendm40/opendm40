@@ -251,7 +251,7 @@ section 5); its time-current behaviour is unknown: keep a motor's start
 | running load | motor running, `INR:ARM`, wait 30 s | stays ARMED; a second load on the same wire triggers |
 | file | `MMEM:DATA? "LOGS/FASTnnn.CSV"` or the USB volume | 19 200 rows, t0 at 0.2 s, values in A; `tools/dlog.py` decodes the DLG |
 | DMM after | Back; DC A / AC A on a steady load | the reading as before; `FUNC?` = the function before the page |
-| fuse | after the motor runs: MF -> Fuse check | FUSE OK |
+| fuse | after the motor runs: MF -> Fuse check | Fuse OK |
 | offset / AC gain | nothing connected: `INR:ARM`, Idle; a 50 / 60 Hz load: Irms 100 ms vs the DMM's AC A | Idle < ~20 mA; Irms within ~1 % of AC A (decides the AD2 gain on AC at x1, section 8) |
 | host polling | `INR:ARM`, then `INR:FETC?` + `INR:DATA? 0,3000` + `DBG:ISR?` every 0.2 s through a lamp capture | lost 0, `DBG:ISR?` late 0 (region C SCPI during a capture) |
 

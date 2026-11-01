@@ -78,7 +78,7 @@ pub const BAR_H: u16 = 34;
 const BAR_X: i16 = 4;
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
-/// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
+/// (from 406); 28 px = the widest half-size F78 digit ("4", 56 / 2).
 const XT_X: u16 = 375;
 const XT_W: u16 = 28;
 const VALUE_BASE: u16 = 146;
@@ -106,11 +106,11 @@ pub enum View {
     Record,
     /// Screenshot + log gallery (FR-16, gallery.rs).
     Gallery,
-    /// On-device help (UF-29), Settings 2/3 -> Help: HELP pages.
+    /// On-device help (UF-29), Settings > Other -> Help: HELP pages.
     Help,
     /// Inrush current capture (Current Settings -> Inrush; app_inrush.rs).
     Inrush,
-    /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
+    /// Touch test (Settings > Other -> Touch test; app_touchtest.rs).
     TouchTest,
     /// The protocol decoder's frame log (scope MF > Decode, Mode Log;
     /// app_log.rs).
@@ -170,9 +170,19 @@ const AUX_VX: [i16; 2] = [38, 260];
 /// UF-26: caption of the 4-20 mA loop percentage (DC mA, aux2 "%").
 const LOOP_CAP: &str = "4-20mA";
 
-/// Caption of the burden voltage readout (A functions, Settings 3/3
+/// Caption of the burden voltage readout (A functions, Settings > Multimeter
 /// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
 const BURDEN_CAP: &str = "Burden";
+/// An aux row's F14 caption and LETTERS value in the boxes cx..te, te..end
+/// (they tile cx..end): the value right-aligned, the caption right-aligned
+/// 6 px before the value's ink, so it hugs a short value as a long one
+/// (te no further left than the caption's own width allows).
+fn caption_value(cx: i16, end: i16, cap: &str, txt: &str, vcol: Color) {
+    let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 6).max(cx + sf::text_width(sf::F14, cap, 1) + 1);
+    sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+    sf::label(sf::F14, rect(cx, 36, te - cx, 30), cap, VALUE, BG, 4, 1);
+}
+
 /// Power meter, "At load" on (doc 3.16): the mark after the compensated V's
 /// unit (aux1) and at the main readout's top left (P / its energy; ui::pw
 /// `coupling`).
@@ -278,7 +288,7 @@ pub struct DmmView {
     /// leaves a part unchanged does not repaint it.
     aux_val: [Option<([u8; 16], u8)>; 2],
     aux_unit: [Option<(&'static str, u8)>; 2],
-    /// UF-30: the fast bargraph in the history row's place (Settings 2/2
+    /// UF-30: the fast bargraph in the history row's place (Settings > Display
     /// "DMM row": Bargraph, the default / History). Set by the app before
     /// `draw_static`.
     pub bar_on: bool,
@@ -307,10 +317,10 @@ pub struct DmmView {
     ol_word: bool,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
-    /// history row (Settings 2/3 "DMM row": History) and the power meter
+    /// history row (Settings > Display "DMM row": History) and the power meter
     /// have none.
     pub acc: Option<Acc>,
-    /// Settings 3/3 "Accuracy" (persisted, default ON; the app turns it
+    /// Settings > Multimeter "Accuracy" (persisted, default ON; the app turns it
     /// into `acc`).
     pub acc_on: bool,
     /// The label as last drawn (`acc_ulps`, the decimals, the unit; None =
@@ -340,7 +350,7 @@ const BAR_OL: sf::Rect = rect(418, 147, 54, 14);
 const ACC_RECT: sf::Rect = rect(415, BAR_LBL_Y, 61, BAR_LBL_H);
 
 /// What the accuracy label needs besides the reading (set by the app; None
-/// = no label: Settings 3/3 "Accuracy" OFF, or REL in force).
+/// = no label: Settings > Multimeter "Accuracy" OFF, or REL in force).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Acc {
     /// Dmm::model: 0 DM40A, 1 DM40B, 2 DM40C (the stock digit, acc::err_ulps).
@@ -898,7 +908,8 @@ impl DmmView {
             // The aux row layout follows the mode (AC+DC tags, loop caption).
             self.aux_val = [None; 2];
             self.aux_unit = [None; 2];
-            // From x 404: clear of the +1 digit cell (375..402).
+            // From x 406: 4 px clear of the +1 digit cell (375..402; it
+            // touched the unit at 404, issue #136).
             // Power meter fallback "VA": its V and A touch at the stock -1.
             // The UNIT face has no 'h' (power meter energy: Wh / VAh):
             // LETTERS, 1 px apart when that fits the box (W and h touch).
@@ -907,22 +918,23 @@ impl DmmView {
                 1
             } else if uf.0 != sf::UNIT.0 {
                 // V / A of the stock overhang by 1: 2 px spacing for "VAh".
-                if sf::text_width(uf, unit, 2) <= 72 { 2 } else { 0 }
+                if sf::text_width(uf, unit, 2) <= 70 { 2 } else { 0 }
             } else {
                 -1
             };
-            // Wider than the 72 px box ("MHz", "mW" in UNIT, "mWh"): the
+            // Wider than the 70 px box ("MHz", "mW" in UNIT, "mWh"): the
             // narrower LETTERS, else TEXT22 (device check 92fb8fa: no unit
             // is cut).
             for (f, s) in [(sf::LETTERS, 0), (sf::TEXT22, 1)] {
-                if sf::text_width(uf, unit, sp) <= 72 {
+                if sf::text_width(uf, unit, sp) <= 70 {
                     break;
                 }
                 if sf::has_all(f, unit) {
                     (uf, sp) = (f, s);
                 }
             }
-            sf::label(uf, rect(404, 114 + md, 72, 32), unit, VALUE, BG, 4, sp);
+            lcd::fill_rect(403, (114 + md) as u16, 3, 32, BG);
+            sf::label(uf, rect(406, 114 + md, 70, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
@@ -1029,18 +1041,19 @@ impl DmmView {
                         // the loop percentage's (aux2: 256..396; aux1:
                         // 8..175, the value's box ending where the plain
                         // one does), so no older text stays behind.
+                        // The caption hugs the value (6 px before its
+                        // ink, as the AC+DC tags; issue #136).
                         let (cx, vx0, vw) = if i == 0 { (8, 68, 107) } else { (256, 316, 81) };
-                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(cx, 36, 60, 30), BURDEN_CAP, VALUE, BG, 4, 1);
+                        caption_value(cx, vx0 + vw, BURDEN_CAP, txt, vcol);
                     } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
                         // right-aligned in 316..396, the F14 caption
-                        // right-aligned in 256..315 (ink from ~272: clear of
-                        // aux1's unit box, which ends at 254; the None
-                        // branch below clears it). The two boxes tile
-                        // 256..396, so an older text leaves nothing behind.
-                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
+                        // right-aligned before it (ink from ~272 at the
+                        // widest: clear of aux1's unit box, which ends at
+                        // 254; the None branch below clears it). The two
+                        // boxes tile 256..396, so an older text leaves
+                        // nothing behind.
+                        caption_value(256, 397, LOOP_CAP, txt, vcol);
                     } else if r.parts() {
                         // AC+DC / AUTO: the part's tag (AC for aux1, DC for aux2)
                         // right before its value, which stays right-aligned
@@ -1242,14 +1255,12 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
-/// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
-/// glyphs): ohm -> "Ohm", micro -> "u", "deg C" -> "C".
+/// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
+/// F12_GLYPHS): micro -> "u" as the stock.
 fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
     for c in u.chars() {
         match c {
-            '\u{3a9}' => out.push("Ohm"),
             '\u{b5}' => out.push("u"),
-            '\u{b0}' => {}
             c => {
                 let mut b = [0u8; 4];
                 out.push(c.encode_utf8(&mut b));
@@ -1444,7 +1455,7 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600V", Some(3)), ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Amp => &[
-            ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
+            ("600uA", Some(0)), ("6mA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
@@ -1452,8 +1463,8 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         // 600 Mohm (dmm::OHM600): after AUTO, so the AUTO key's range steps
         // (the items before AUTO) never reach it; its own row on the page.
         Button::Ohm => &[
-            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
-            ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6k\u{3a9}", Some(2)), ("60k\u{3a9}", Some(3)),
+            ("600k\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
         ],
         // Capacitance (owner 2026-10-30): dmm.rs ranges r1..r7 (one 60 nF
@@ -1483,7 +1494,7 @@ pub fn range_code(mode: u8, range: u8) -> u8 {
 /// The status bar's label of a manual range, as the stock writes it there
 /// ("%d" + unit of the range's full scale, FUN_0803d0xx; checked on stock
 /// V2.6 in the emulator): the MF page's item text, "6V", "600mV",
-/// "6000uA", "6K\u{3a9}" .. None: a function with no range list
+/// "6mA", "6k\u{3a9}" .. None: a function with no range list
 /// (continuity, diode, capacitance, frequency, temperature), where the
 /// stock always shows "AUTO".
 pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
@@ -1499,7 +1510,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
 }
 
 /// Status-bar range text (stock): "AUTO" / "AUTO+" in auto, the range
-/// ("6V", "600mV", "60K\u{3a9}" ..) in manual. The power meter (two
+/// ("6V", "600mV", "60k\u{3a9}" ..) in manual. The power meter (two
 /// channels, their ranges in its side column) and a range held in a
 /// function with no range list (REL in frequency, SCPI RANG:AUTO OFF) keep
 /// "MANU": "600KHz" does not fit the slot.
@@ -1637,7 +1648,7 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
             let mut t = [0u8; 16];
             let v = crate::dmm::format(&mut t, r, if r < 100.0 { 2 } else { 1 });
             let mut n = 0;
-            for part in [v, " ohm, expect ~48"] {
+            for part in [v, " \u{3a9}, expect ~48"] {
                 let k = part.len().min(buf.len() - n);
                 buf[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
                 n += k;
@@ -1648,9 +1659,9 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
     };
     match (stage, res) {
         (0, _) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
-        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 ohm", Some("Cancel"), None),
-        (_, F::Ok(_)) => crate::dialog::fuse_check("FUSE OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
-        (_, F::Open) => crate::dialog::fuse_check("FUSE OPEN", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
+        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 \u{3a9}", Some("Cancel"), None),
+        (_, F::Ok(_)) => crate::dialog::fuse_check("Fuse OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
+        (_, F::Open) => crate::dialog::fuse_check("Fuse open", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
         (_, F::Odd(_)) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
         (_, F::NoReading) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
     }
@@ -1754,6 +1765,21 @@ pub const RP_INRUSH: u8 = 121;
 /// colour) or as `range_page` draws it (`sel` / `sub` as there).
 #[inline(never)] // .cold (link-native.x): per touch on the MF page
 pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
+    let Some((r, item)) = range_press_item(b, t, sel, sub) else { return };
+    let Some((name, selected)) = item else { return record_button(r, on) };
+    let c = if on { K_SEL } else if selected { SEL } else { 0x2966 };
+    sf::rbox(r, 6, c, BG);
+    sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+}
+
+/// The box `range_press` draws for `t` (the press feedback's strip box).
+pub fn range_press_rect(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<sf::Rect> {
+    range_press_item(b, t, sel, sub).map(|i| i.0)
+}
+
+/// Range page item `t` (`range_press`): its box and (name, selected), or
+/// None for the Record button.
+fn range_press_item(b: Button, t: u8, sel: Option<usize>, sub: u8) -> Option<(sf::Rect, Option<(&'static str, bool)>)> {
     let items = range_items(b);
     let (r, name, selected) = match t {
         RP_WAVE => (WAVE_BTN, "Wave", false),
@@ -1771,15 +1797,13 @@ pub fn range_press(b: Button, t: u8, sel: Option<usize>, sub: u8, on: bool) {
             }
             (2, _) => (bottom_rect(3), "OK", false),
             (4, _) => (bottom_rect(0), "Limits", false),
-            (7, _) => return record_button(bottom_rect(1), on),
+            (7, _) => return Some((bottom_rect(1), None)),
             (5, Button::Amp) => (FUSE_BTN, "Fuse check", false),
-            _ => return,
+            _ => return None,
         },
-        _ => return,
+        _ => return None,
     };
-    let c = if on { K_SEL } else if selected { SEL } else { 0x2966 };
-    sf::rbox(r, 6, c, BG);
-    sf::glyphs(sf::TEXT22, r, name, STATUS_FG, c, 8, 0);
+    Some((r, Some((name, selected))))
 }
 
 /// Range page touch: Ok(item index) / Err(0 DC, 1 AC, 3 AC+DC, 2 OK, 4
@@ -1825,7 +1849,7 @@ const T_KEYS: [&str; 7] = ["TC K", "PT100", "PT1000", "10k 3950", "10k 3435", "1
 /// "NTC user" unexplained, the buttons "fuzzy" = hit boxes exactly the drawn
 /// boxes, so a touch in the 5..6 px gaps did nothing):
 ///   rows 50 / 96   sensors (range-page grid), slot 7 = the global deg C /
-///                  deg F unit (the Settings 2/2 row; a shortcut here)
+///                  deg F unit (the Settings > Multimeter row; a shortcut here)
 ///   row 144..180   "Offset"  [ - ]  value  [ + ]  (settings-stepper look;
 ///                  0.1 C steps; a tap on the value opens the signed keypad)
 ///   row 186..222   NTC user only: R25 and Beta fields (tap = keypad)
@@ -1860,7 +1884,7 @@ const T_NTC_Y: i16 = 186;
 const T_ROW_H: i16 = 36;
 
 /// Button rectangle of a temperature-page code (None: not on this page).
-fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
+pub fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
     Some(match code {
         0..=7 => range_rect(code as usize),
         TK_MINUS => rect(132, T_ROW_Y, 72, T_ROW_H),
@@ -1877,11 +1901,11 @@ fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
 
 const T_CODES: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_RECORD, TK_OK];
 
-/// Offset text "+7.3 C" (TEXT22 has no degree sign).
+/// Offset text "+7.3 ℃".
 fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
     let mut t = [0u8; 16];
     let v = crate::dmm::format(&mut t, offs, 1);
-    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " C"])
+    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " \u{2103}"])
 }
 
 /// One temperature-page button, normal or pressed (stock pressed colour,
@@ -1897,14 +1921,14 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
     let mut t = [0u8; 16];
     let txt: &str = match code {
         0..=6 => T_KEYS[code as usize],
-        TK_UNIT => if p.unit_f { "Unit: F" } else { "Unit: C" },
+        TK_UNIT => if p.unit_f { "Unit: \u{2109}" } else { "Unit: \u{2103}" },
         TK_MINUS => "-",
         TK_PLUS => "+",
         TK_OFFS => temp_offs_text(&mut b, p.offs),
         TK_R25 => {
             let k = p.r25 / 1000.0;
             let v = crate::dmm::format(&mut t, k, if k < 10.0 { 2 } else if k < 100.0 { 1 } else { 0 });
-            join(&mut b, &["R25  ", v, " kohm"])
+            join(&mut b, &["R25  ", v, " k\u{3a9}"])
         }
         TK_BETA => {
             let v = crate::dmm::format(&mut t, p.beta, 0);
@@ -1965,6 +1989,11 @@ pub fn temp_hit(sensor: u8, x: u16, y: u16) -> Option<u8> {
     }
     None
 }
+
+/// Touch rows of the history boxes (drawn 153..171): the dead rows between
+/// the value's target (..150) and the MIN/MAX column (175..) join them
+/// (issue #136: 19 px was the smallest DMM target).
+pub const HIST_HIT: core::ops::Range<u16> = 151..175;
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
 pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
@@ -2616,6 +2645,11 @@ pub fn gen_press(g: &gen::Gen, k: usize, pressed: bool) {
     gen_box(g, k, bg);
 }
 
+/// The box `gen_press` draws for `k` (the press feedback's strip box).
+pub fn gen_press_rect(k: usize) -> sf::Rect {
+    if k >= 4 { rect(4, 40, 239, 42) } else { rect(246, GEN_BOX_Y[k.min(3)], 230, GEN_BOX_H) }
+}
+
 /// Box `k`'s fill and name.
 fn gen_box_frame(k: usize, bg: Color) {
     let y = GEN_BOX_Y[k];
@@ -2843,7 +2877,8 @@ pub const KP_FREQ: u8 = 0;
 pub const KP_NUM: u8 = 1;
 pub const KP_SIGNED: u8 = 2;
 
-/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
+/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M' (the K key
+/// labelled "k", issue #136), '<' backspace,
 /// '-' sign toggle, '=' OK. Constant tables (cheaper in the RAM image than
 /// building them).
 pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
@@ -2853,7 +2888,7 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
     const FREQ: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
-            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "K", b'K'), (r(228, 234, 60, 40), "7", b'7'),
+            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "k", b'K'), (r(228, 234, 60, 40), "7", b'7'),
             (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
         ];
@@ -2899,6 +2934,11 @@ pub fn keypad(kind: u8, title: &str, input: &str, unit: &str, sel: bool) {
 
 /// Keypad key `code` normal or pressed (stock pressed colour 0x04FC;
 /// ui-review #11: feedback at touch-down).
+/// The box of keypad key `code` (`keypad_key`).
+pub fn keypad_key_rect(kind: u8, code: u8) -> Option<sf::Rect> {
+    keypad_keys(kind).iter().find(|k| k.2 == code && code != 0).map(|k| k.0)
+}
+
 pub fn keypad_key(kind: u8, code: u8, pressed: bool) {
     if let Some(&(r, l, c)) = keypad_keys(kind).iter().find(|k| k.2 == code && code != 0) {
         let bg = if pressed { K_SEL } else { K_KEY };
@@ -2975,24 +3015,32 @@ pub fn main_menu(combo: &str) {
 /// the gallery row 5), normal or pressed (ui-review #11: from touch-down).
 pub fn menu_item(i: usize, combo: &str, pressed: bool) {
     let bg = if pressed { M_PRESSED } else { M_TILE };
+    sf::rbox(menu_item_rect(i), 8, bg, M_BG);
     if let Some(&(x, y, name, icon)) = TILES.get(i) {
-        sf::rbox(rect(x, y, 190, 106), 8, bg, M_BG);
         let g = char::from_u32(icon).unwrap_or(' ');
         let mut b = [0u8; 4];
         sf::glyphs(ICONS, rect(x + 79, y + 25, 30, 30), g.encode_utf8(&mut b), STATUS_FG, bg, 8, 0);
         sf::glyphs(sf::TEXT22, rect(x, y + 58, 190, 27), name, STATUS_FG, bg, 8, 0);
     } else if i == 5 {
         // Gallery row above the tiles (FR-16).
-        sf::rbox(rect(46, 10, 388, 34), 8, bg, M_BG);
         sf::glyphs(sf::TEXT22, rect(46, 10, 388, 34), "Gallery: screenshots and logs", STATUS_FG, bg, 8, 0);
     } else {
-        sf::rbox(rect(46, 280, 388, 34), 8, bg, M_BG);
         let mut t = [0u8; 48];
         let pre = b"Combined view: ";
         t[..pre.len()].copy_from_slice(pre);
         let k = combo.len().min(48 - pre.len());
         t[pre.len()..pre.len() + k].copy_from_slice(&combo.as_bytes()[..k]);
         sf::glyphs(sf::TEXT22, rect(46, 280, 388, 34), core::str::from_utf8(&t[..pre.len() + k]).unwrap_or(""), STATUS_FG, bg, 8, 0);
+    }
+}
+
+/// Box of main-menu item `i` (`menu_item`): a tile, 5 the Gallery row,
+/// else the combined-view row.
+fn menu_item_rect(i: usize) -> sf::Rect {
+    match TILES.get(i) {
+        Some(&(x, y, _, _)) => rect(x, y, 190, 106),
+        None if i == 5 => rect(46, 10, 388, 34),
+        None => rect(46, 280, 388, 34),
     }
 }
 
@@ -3014,43 +3062,99 @@ pub fn main_menu_hit(x: u16, y: u16) -> Option<usize> {
     None
 }
 
-/// System settings (subset of the stock sections that this firmware has),
-/// three pages of at most SET_ROWS rows. Page 1: the last row "More" opens
-/// page 2 (SETTINGS2): the DMM rate / smoothing (FR-05), the DMM page's
-/// bargraph / history row (UF-30), Help; its "More" opens page 3
-/// (SETTINGS3): the wrong-connection alerts, "Device" (the stock §6
-/// Device/About page) and "Touch test". "Back" is the tappable title bar (stock settings have
-/// a title-bar back, not a list row), handled by `title_back_hit` (page 3 ->
-/// page 2 -> page 1 -> menu), so the lists hold only settings.
-pub const SETTINGS: [&str; 9] = [
-    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power",
-    "Scope drag", "More",
-];
-pub const SETTINGS2: [&str; 9] = ["DMM rate", "Smoothing", "DMM row", "Temp unit", "Scope swipe", "Scope press", "Scope tap step", "Help", "More"];
-/// Page 3: the wrong-connection alerts (sentinel.rs; ON = all, A-JACK only,
-/// OFF), the danger alarm (danger.rs, doc
-/// 4.10: Loud / Volume / Off, persisted), the USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
-/// applies at the next USB plug), the burden voltage readout of the A
-/// functions (doc 3.15; persisted, default OFF = the stock aux row), the
-/// Device / About page, the touch test page (app_touchtest.rs) and the
-/// accuracy label (../docs/dmm-accuracy.md; persisted, default ON) and
-/// ohm readings below 0 (Dmm::ohm_neg; persisted, default OFF); appended,
-/// so the rows above keep their places.
-/// Row 9, "Mode Remember" (the stock's name and place, Other Settings;
-/// default OFF as the stock): ON restarts the multimeter after a power-off
-/// as it was (app.rs `restore`).
-pub const SETTINGS3: [&str; 9] = [
-    "Jack alerts", "Danger alarm", "USB disk", "Burden voltage", "Device", "Touch test", "Accuracy", "Negative ohm", "Mode Remember",
+/// System settings, grouped as the stock's (owner 2026-10-30): a column of
+/// section tabs on the left, the selected section's rows on the right, 45 px
+/// per tab and row (the stock's Settings screen, user manual 4.1, has 40). "Back"
+/// is the tappable title bar (`title_back_hit`), straight to the menu.
+///
+/// Every setting has an id (`S_*`, the index into `SET_NAMES` and into the
+/// value array `settings` takes); `SET_TABS` lists each section's rows.
+pub const S_DIM: u8 = 0;
+pub const S_SHUTDOWN: u8 = 1;
+/// -/+ stepper rows (ui-review #12): 10 % steps, no wrap-around.
+pub const S_BACKLIGHT: u8 = 2;
+pub const S_VOLUME: u8 = 3;
+pub const S_BT: u8 = 4;
+pub const S_START: u8 = 5;
+pub const S_RAILS: u8 = 6;
+pub const S_DRAG: u8 = 7;
+/// FR-05: the DMM rate / smoothing; UF-30: the DMM page's bargraph /
+/// history row.
+pub const S_RATE: u8 = 8;
+pub const S_SMOOTH: u8 = 9;
+pub const S_DMM_ROW: u8 = 10;
+pub const S_TEMP_UNIT: u8 = 11;
+pub const S_SWIPE: u8 = 12;
+pub const S_PRESS: u8 = 13;
+pub const S_TAP_STEP: u8 = 14;
+/// Opens the help pages (UF-29).
+pub const S_HELP: u8 = 15;
+/// The wrong-connection alerts (sentinel.rs; ON = all, A-JACK only, OFF).
+pub const S_JACK: u8 = 16;
+/// The danger alarm (danger.rs, doc 4.10: Loud / Volume / Off).
+pub const S_ALARM: u8 = 17;
+/// The USB disk mode (decisions-2026-10-22 #6: vwrite.rs, volatile,
+/// applies at the next USB plug).
+pub const S_USB: u8 = 18;
+/// The burden voltage readout of the A functions (doc 3.15; default OFF =
+/// the stock aux row).
+pub const S_BURDEN: u8 = 19;
+/// Opens the Device / About page (the stock section 6).
+pub const S_DEVICE: u8 = 20;
+/// Opens the touch test page (app_touchtest.rs).
+pub const S_TOUCH: u8 = 21;
+/// The accuracy label (../docs/dmm-accuracy.md; default ON).
+pub const S_ACC: u8 = 22;
+/// Ohm readings below 0 (Dmm::ohm_neg; default OFF).
+pub const S_OHM_NEG: u8 = 23;
+/// "Mode Remember" (the stock's name, Other Settings; default OFF as the
+/// stock): ON restarts the multimeter after a power-off as it was (app.rs
+/// `restore`).
+pub const S_REMEMBER: u8 = 24;
+/// Number of settings (the value array's length).
+pub const SET_N: usize = 25;
+
+/// Row labels by id. In the Scope section without the "Scope" prefix.
+pub const SET_NAMES: [&str; SET_N] = [
+    "Dim screen", "Shutdown", "Backlight", "Key/alert volume", "Bluetooth", "Start page", "Analog power", "Drag",
+    "DMM rate", "Smoothing", "DMM row", "Temp unit", "Swipe", "Press effect", "Tap step", "Help", "Jack alerts",
+    "Danger alarm", "USB disk", "Burden voltage", "Device info", "Touch test", "Accuracy", "Negative ohm",
+    "Mode Remember",
 ];
 
-/// Settings 3/3 "USB disk" value: the mode asked for, "(re-plug)" while the
+/// The sections: tab name, rows (ids, top to bottom; at most SET_ROWS_MAX).
+/// "Other" as the stock's Other Settings (USB, Bluetooth, Mode Remember
+/// there) with its Device section and our help / touch test pages.
+pub const SET_TABS: [(&str, &[u8]); 6] = [
+    ("Display", &[S_BACKLIGHT, S_DIM, S_START, S_DMM_ROW]),
+    ("Alerts", &[S_VOLUME, S_ALARM, S_JACK]),
+    ("Power", &[S_SHUTDOWN, S_RAILS, S_REMEMBER]),
+    ("Multimeter", &[S_RATE, S_SMOOTH, S_TEMP_UNIT, S_BURDEN, S_ACC, S_OHM_NEG]),
+    ("Scope", &[S_DRAG, S_SWIPE, S_PRESS, S_TAP_STEP]),
+    ("Other", &[S_BT, S_USB, S_DEVICE, S_TOUCH, S_HELP]),
+];
+/// The section of the USB disk row (its value follows the bus), the
+/// Device / touch test / help rows (their pages return to it).
+pub const TAB_OTHER: u8 = 5;
+
+/// Rows that open a page (a ">" instead of a value).
+pub fn set_opens(id: u8) -> bool {
+    matches!(id, S_HELP | S_DEVICE | S_TOUCH)
+}
+
+/// Rows with a -/+ stepper.
+pub fn set_is_stepper(id: u8) -> bool {
+    matches!(id, S_BACKLIGHT | S_VOLUME)
+}
+
+/// The "USB disk" setting's value: the mode asked for, "(replug)" while the
 /// one in force differs (a host reads the WP bit when it mounts).
 pub fn usb_disk_name(ro_now: bool, ro_want: bool) -> &'static str {
     match (ro_want, ro_now == ro_want) {
         (true, true) => "Files live",
         (false, true) => "PC can edit",
-        (true, false) => "Files live (re-plug)",
-        (false, false) => "PC can edit (re-plug)",
+        (true, false) => "Files live (replug)",
+        (false, false) => "PC can edit (replug)",
     }
 }
 
@@ -3077,6 +3181,24 @@ pub fn set_row_only(p: Option<RowPress>) {
 fn row_only() -> Option<RowPress> {
     let v = ROW_ONLY.load(core::sync::atomic::Ordering::Relaxed);
     (v != 0).then(|| RowPress { row: v as u8, part: ((v >> 8) & 0xFF) as i8 - 1, on: v & (1 << 17) != 0 })
+}
+
+/// The box pressed item `t` of `view` covers (app_press.rs draws it pressed
+/// / released in one strip pass, nothing outside it); None: the view's
+/// items are drawn directly.
+pub fn press_rect(view: View, t: RowPress) -> Option<sf::Rect> {
+    let row = t.row as usize;
+    let key = |r: sf::Rect, minus: i16, plus: i16, w: i16, m: i16| rect(if t.part < 0 { minus } else { plus }, r.y + m, w, r.h - 2 * m);
+    Some(match view {
+        View::Menu => menu_item_rect(row),
+        View::Settings if t.row & 0x80 != 0 => st_tab(row & 0x7F),
+        View::Settings if t.part == 0 => st_row(row),
+        View::Settings => key(st_row(row), ST_MINUS_X, ST_PLUS_X, ST_KEY_W, 4),
+        View::Limits => set_row(row),
+        View::Record if t.part == 0 => set_row(row),
+        View::Record => key(set_row(row), REC_STEP_MINUS_X, STEP_PLUS_X, STEP_KEY_W, 3),
+        _ => return None,
+    })
 }
 
 /// Pressed stepper key / Start button (already the accent colour): the
@@ -3119,32 +3241,178 @@ pub fn title_back_hit(y: u16) -> bool {
     (y as i16) < PAGE_BAR_H
 }
 
-/// Settings page 1 rows with -/+ steppers (Backlight, Key/alert volume;
-/// ui-review #12): no more wrap-around +10 % per tap.
-pub const SET_STEP_ROWS: [usize; 2] = [2, 3];
-/// Stepper keys of a settings row (x of "-", "+"), value between them.
-const STEP_MINUS_X: i16 = 210;
+/// Stepper keys of a list-page row (x of "-", "+"), value between them
+/// (the Record page).
 const STEP_PLUS_X: i16 = 410;
 const STEP_KEY_W: i16 = 54;
 
-/// Settings page `page` (0 / 1 / 2) with its row values.
-pub fn settings(page: u8, vals: &[&str]) {
-    if page == 0 {
-        let mut v = [""; 9];
-        for (i, s) in vals.iter().enumerate().take(9) {
-            v[i] = if SET_STEP_ROWS.contains(&i) { "" } else { s };
-        }
-        list_page("Settings", &SETTINGS, &v[..vals.len().min(9)]);
-        for i in SET_STEP_ROWS {
-            if let Some(t) = vals.get(i) {
-                set_stepper(i, t, STEP_MINUS_X);
-            }
-        }
-    } else if page == 1 {
-        list_page("Settings 2/3", &SETTINGS2, vals);
-    } else {
-        list_page("Settings 3/3", &SETTINGS3, vals);
+/// Settings geometry: tabs x 4..124, rows x 130..476, both 42 px tall at a
+/// 45 px pitch from y 44 (6 of them end at 311; the touch target is the
+/// whole 45 px: the stock rows are 40).
+const ST_Y0: i16 = 44;
+const ST_PITCH: i16 = 45;
+const ST_H: i16 = 42;
+const ST_TAB_X: i16 = 4;
+const ST_TAB_W: i16 = 120;
+/// Tab label's left padding.
+const ST_TAB_PAD: i16 = 5;
+/// Touch split between the tab column and the rows.
+const ST_SPLIT: u16 = 127;
+const ST_ROW_X: i16 = 130;
+const ST_ROW_W: i16 = 346;
+/// The rows' text: label from x 138, value right-aligned to 470 (the stock
+/// TEXT22's 11 px cells: "Burden voltage  ON (A, mA, uA)" needs the room).
+const ST_TXT_X: i16 = ST_ROW_X + 8;
+const ST_TXT_END: i16 = ST_ROW_X + ST_ROW_W - 6;
+/// A stepper row's keys ("-" at ST_MINUS_X, "+" at ST_PLUS_X) and value
+/// between them.
+const ST_KEY_W: i16 = 40;
+const ST_PLUS_X: i16 = ST_TXT_END - ST_KEY_W;
+const ST_MINUS_X: i16 = ST_PLUS_X - 4 - 56 - 4 - ST_KEY_W;
+/// Most rows a section can have (and most sections).
+pub const SET_ROWS_MAX: usize = 6;
+const _: () = {
+    let mut i = 0;
+    while i < SET_TABS.len() {
+        assert!(SET_TABS[i].1.len() <= SET_ROWS_MAX);
+        i += 1;
     }
+    assert!(SET_TABS.len() <= SET_ROWS_MAX);
+};
+
+/// Tab `i` / row `i` boxes. Shared by `settings()` and `settings_hit()` so
+/// the render and the touch map cannot drift.
+fn st_tab(i: usize) -> sf::Rect {
+    rect(ST_TAB_X, ST_Y0 + i as i16 * ST_PITCH, ST_TAB_W, ST_H)
+}
+
+fn st_row(i: usize) -> sf::Rect {
+    rect(ST_ROW_X, ST_Y0 + i as i16 * ST_PITCH, ST_ROW_W, ST_H)
+}
+
+/// The Settings screen with section `tab` selected; `vals` = the value
+/// text of every setting, by id (SET_N). In `set_row_only` mode only the
+/// pressed / released tab (row 0x80 | tab), row or stepper key.
+pub fn settings(tab: u8, vals: &[&str]) {
+    if cfg!(not(target_os = "none")) {
+        assert_eq!(vals.len(), SET_N, "settings: one value per setting");
+    }
+    let tab = (tab as usize).min(SET_TABS.len() - 1);
+    let only = row_only();
+    if only.is_none() {
+        page_title("Settings");
+        lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
+    }
+    for (i, (name, _)) in SET_TABS.iter().enumerate() {
+        let pressed = match only {
+            None => false,
+            Some(p) if p.row == 0x80 | i as u8 => p.on,
+            Some(_) => continue,
+        };
+        let bg = if pressed { K_SEL } else if i == tab { SEL } else { M_TILE };
+        let r = st_tab(i);
+        sf::rbox(r, 6, bg, M_BG);
+        // Left-aligned, 5 px in: "Multimeter" (110 px in the stock
+        // TEXT22) keeps 1.5 word spaces to the row labels.
+        sf::glyphs(sf::TEXT22, rect(r.x + ST_TAB_PAD, r.y, r.w - ST_TAB_PAD - 2, r.h), name, STATUS_FG, bg, 1, 0);
+    }
+    for (i, &id) in SET_TABS[tab].1.iter().enumerate() {
+        let v = vals.get(id as usize).copied().unwrap_or("");
+        let r = st_row(i);
+        if set_is_stepper(id) {
+            st_stepper(i, id, v, only);
+            continue;
+        }
+        let (bg, vfg) = match only {
+            None => (M_TILE, M_ACCENT),
+            Some(p) if p.row as usize == i && p.part == 0 => if p.on { (K_SEL, STATUS_FG) } else { (M_TILE, M_ACCENT) },
+            Some(_) => continue,
+        };
+        sf::rbox(r, 6, bg, M_BG);
+        let name = SET_NAMES[id as usize];
+        let lw = sf::text_width(sf::TEXT22, name, 0);
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, lw + 2, r.h), name, STATUS_FG, bg, 1, 0);
+        // The value right-aligned (the stock's ON / OFF at the right end);
+        // a row that opens a page: ">".
+        let vx = ST_TXT_X + lw + 12;
+        let v = if set_opens(id) { ">" } else { v };
+        sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_TXT_END - vx, r.h), v, if set_opens(id) { STATUS_FG } else { vfg }, bg, 4, 0);
+    }
+}
+
+/// Stepper row `i` (setting `id`): label, "-" key, value, "+" key.
+fn st_stepper(i: usize, id: u8, val: &str, only: Option<RowPress>) {
+    if only.is_some_and(|p| p.row as usize != i) {
+        return;
+    }
+    let r = st_row(i);
+    if only.is_none() {
+        sf::rbox(r, 6, M_TILE, M_BG);
+        let name = SET_NAMES[id as usize];
+        sf::glyphs(sf::TEXT22, rect(ST_TXT_X, r.y, ST_MINUS_X - 4 - ST_TXT_X, r.h), name, STATUS_FG, M_TILE, 1, 0);
+        let vx = ST_MINUS_X + ST_KEY_W + 4;
+        sf::glyphs(sf::TEXT22, rect(vx, r.y, ST_PLUS_X - 4 - vx, r.h), val, M_ACCENT, M_TILE, 8, 0);
+    }
+    for (d, x, t) in [(-1, ST_MINUS_X, "-"), (1, ST_PLUS_X, "+")] {
+        let bg = match only {
+            None => M_ACCENT,
+            Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
+            Some(_) => continue,
+        };
+        let k = rect(x, r.y + 4, ST_KEY_W, r.h - 8);
+        sf::rbox(k, 4, bg, M_TILE);
+        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, bg, 8, 0);
+    }
+}
+
+/// What a touch on the Settings screen hits.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SetHit {
+    /// Section tab `i`.
+    Tab(u8),
+    /// Row `i` of the shown section (`SET_TABS[tab].1[i]`).
+    Row(usize),
+}
+
+/// The tab or row under a touch at (x, y) below the title bar, `tab`
+/// shown. Each target owns the 2 px gap below it: 40 px tall.
+pub fn settings_hit(tab: u8, x: u16, y: u16) -> Option<SetHit> {
+    let y = y as i16 - (ST_Y0 - (ST_PITCH - ST_H) / 2);
+    if y < 0 {
+        return None;
+    }
+    let i = (y / ST_PITCH) as usize;
+    if x < ST_SPLIT {
+        (i < SET_TABS.len()).then_some(SetHit::Tab(i as u8))
+    } else {
+        let id = settings_id(tab.min(SET_TABS.len() as u8 - 1), i)?;
+        ((x as i16) >= set_value_x(id)).then_some(SetHit::Row(i))
+    }
+}
+
+/// Left edge of a row's touch target (owner 2026-10-30: the setting's name
+/// is not a target): the value from half the 12 px gap after the label to
+/// the row's right end; on a stepper row the "-" key's left edge less 6 px;
+/// a row that opens a page (">") is a target all over (owner 2026-11-01).
+pub fn set_value_x(id: u8) -> i16 {
+    if set_opens(id) {
+        ST_SPLIT as i16
+    } else if set_is_stepper(id) {
+        ST_MINUS_X - 6
+    } else {
+        ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6
+    }
+}
+
+/// The setting id of row `row` in section `tab`.
+pub fn settings_id(tab: u8, row: usize) -> Option<u8> {
+    SET_TABS.get(tab as usize)?.1.get(row).copied()
+}
+
+/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
+/// "-" key) or +1.
+pub fn settings_step(x: u16) -> i8 {
+    if (x as i16) < (ST_MINUS_X + ST_KEY_W + ST_PLUS_X) / 2 { -1 } else { 1 }
 }
 
 /// A settings-style page: title bar with "< Back", up to SET_ROWS rows of
@@ -3184,7 +3452,7 @@ fn set_stepper(i: usize, val: &str, minus_x: i16) {
         return;
     }
     let r = set_row(i);
-    for (d, x, t) in [(-1, minus_x, "-"), (1, STEP_PLUS_X, "+")] {
+    for (d, x) in [(-1, minus_x), (1, STEP_PLUS_X)] {
         let bg = match only {
             None => M_ACCENT,
             Some(p) if p.part == d => if p.on { KEY_PRESSED } else { M_ACCENT },
@@ -3192,7 +3460,13 @@ fn set_stepper(i: usize, val: &str, minus_x: i16) {
         };
         let k = rect(x, r.y + 3, STEP_KEY_W, r.h - 6);
         sf::rbox(k, 4, bg, M_TILE);
-        sf::glyphs(sf::TEXT22, k, t, STATUS_FG, bg, 8, 0);
+        // TEXT22's "-" / "+" (9 x 1, 9 x 11 px) drawn as bars: its 22 px
+        // cell centred in the 21 px key wrote a row above it.
+        let (cx, cy) = ((k.x + k.w / 2) as u16, (k.y + k.h / 2) as u16);
+        lcd::fill_rect(cx - 5, cy, 9, 1, STATUS_FG);
+        if d > 0 {
+            lcd::fill_rect(cx - 1, cy - 5, 1, 11, STATUS_FG);
+        }
     }
     if only.is_some() {
         return;
@@ -3211,12 +3485,6 @@ pub const fn step_value_w(minus_x: i16) -> i16 {
 /// 134 px value box.
 pub const REC_STEP_MINUS_X: i16 = 150;
 
-/// A tap at `x` on a stepper row: -1 (left of the value's centre: the
-/// label and the "-" key) or +1.
-pub fn settings_step(x: u16) -> i8 {
-    step_dir(x, STEP_MINUS_X)
-}
-
 /// Settings' Backlight stepper: the next value on the 10, 15, 25 ... 95, 100
 /// grid above (`dir` > 0) or below the current one, so 10 + goes to 15 and
 /// 100 - to 95 (the manual's list); an off-grid value (an old settings file)
@@ -3230,7 +3498,8 @@ pub fn backlight_step(cur: u8, dir: i8) -> u8 {
     }
 }
 
-/// `settings_step` on the Record page.
+/// A tap at `x` on a Record page stepper row: -1 (left of the value's
+/// centre: the label and the "-" key) or +1.
 pub fn record_step(x: u16) -> i8 {
     step_dir(x, REC_STEP_MINUS_X)
 }
@@ -3238,10 +3507,6 @@ pub fn record_step(x: u16) -> i8 {
 fn step_dir(x: u16, minus_x: i16) -> i8 {
     let mid = (minus_x + STEP_KEY_W + STEP_PLUS_X) / 2;
     if (x as i16) < mid { -1 } else { 1 }
-}
-
-pub fn settings_hit(page: u8, y: u16) -> Option<usize> {
-    list_hit(y, [SETTINGS.len(), SETTINGS2.len(), SETTINGS3.len()][page.min(2) as usize])
 }
 
 /// Row of a `list_page` with `n` rows under a touch at `y`.
