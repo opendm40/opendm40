@@ -272,6 +272,8 @@ mod fatren;
 
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+#[path = "../../src/diskbuf.rs"]
+mod diskbuf;
 #[path = "../../src/persist.rs"]
 #[allow(dead_code)]
 mod persist;
@@ -1399,7 +1401,7 @@ fn fatdir_cmd(a: &[String], img: &mut Img) {
     if a.get(k).is_some_and(|x| x == "cut") {
         img.cut = Some(a[k + 1].parse().unwrap());
     }
-    let s = calbackup::scratch();
+    let s = diskbuf::blocks();
     let mut v = || {
         let mut b = [0u8; 4096];
         msc::BlockDevice::read_block(img, 0, &mut b);

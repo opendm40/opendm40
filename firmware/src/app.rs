@@ -549,6 +549,24 @@ pub fn finish_disk_writes(now: u64) {
     crate::screenshot::prep_finish();
 }
 
+impl App {
+    /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
+    /// install from the disk): backlight, generator output and scope
+    /// acquisition off, then 20 ms for the supply to settle. A reset releases
+    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
+    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
+    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
+    /// loader never ran; why the load matters is inferred).
+    pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
+        backlight(0);
+        let mut g = self.gen.s;
+        g.on = false;
+        self.gen.apply(g);
+        self.scope.stop_hw();
+        clk.delay_ms(20);
+    }
+}
+
 /// Power off as the stock: both analog rails / power hold low. The callers
 /// save the settings to the backup SRAM first (App::persist_now); the copy
 /// in the settings file is brought up to date here (setfile.rs), after the
@@ -1589,7 +1607,7 @@ impl App {
     /// the pages whose drawing is the same on every pass (a full-screen
     /// fill first, then widgets from the app state; their caches are reset
     /// by the draw itself); false: not such a page, or the buffer is busy
-    /// (a disk job holds calbackup::SCRATCH): the caller draws directly.
+    /// (a disk job holds diskbuf::ARENA): the caller draws directly.
     #[inline(never)]
     fn repaint_strips(&mut self) -> bool {
         let ok = match self.view {
@@ -1608,7 +1626,7 @@ impl App {
             self.sp.uncover = 0;
             self.sp_prepare();
         }
-        let Some(buf) = crate::calbackup::strip_take() else {
+        let Some(buf) = crate::diskbuf::strip_take() else {
             if scope {
                 crate::lcd::defer_start();
                 crate::scope_ui::invalidate();
@@ -1625,7 +1643,7 @@ impl App {
                 self.draw_static();
             }
         });
-        if !crate::calbackup::strip_give() {
+        if !crate::diskbuf::strip_give() {
             // A disk user took the buffer meanwhile: draw it again.
             crate::lcd::defer_start();
             self.draw_static();
@@ -1676,7 +1694,12 @@ impl App {
         }
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
-        // shutdown host activity too (`note_host_activity`).
+        // shutdown host activity too (`note_host_activity`). On USB power
+        // (PB10, `Power::on_charger`) the shutdown timer does not run, in any
+        // view: it counts afresh from the unplug (owner, 2026-10-30).
+        if self.power.on_charger() {
+            self.note_host_activity(now);
+        }
         let dim_idle = now.saturating_sub(self.last_input);
         let idle = now.saturating_sub(self.last_input.max(self.last_host));
         self.pw_tick(now);
@@ -1684,12 +1707,7 @@ impl App {
             self.dimmed = true;
             backlight(5);
         }
-        // No idle shutdown during a MIN/MAX/AVG recording session (FR-02;
-        // started explicitly, see Stats::rec). Dimming still applies.
-        // Nor while the power meter integrates energy with a current flowing.
-        // Nor during a CSV recording (Record page: a 24 h log on battery;
-        // decisions-2026-10-22.md #1).
-        if self.off_ms() != 0 && idle > self.off_ms() && !self.meter.stats.rec && !self.dmm.pw.integrating() && !crate::csvlog::active() {
+        if !self.off_held() && idle > self.off_ms() {
             self.persist_now();
             power_off();
         }
@@ -3184,9 +3202,24 @@ impl App {
     /// UF-28: before the idle power-off, "Auto power-off in 30 s" (20, 10)
     /// with a beep that ignores a 0 % volume. Not an input: the countdown
     /// goes on unless the user touches the screen or a key.
+    /// No idle shutdown (nor its countdown): Shutdown Never, or during a
+    /// MIN/MAX/AVG recording session (FR-02; started explicitly, see
+    /// Stats::rec), while the power meter integrates energy with a current
+    /// flowing, during a CSV recording (Record page: a 24 h log on battery;
+    /// decisions-2026-10-22.md #1), or while the inrush page is armed or
+    /// capturing (its stream runs: #144, a load that starts on its own).
+    /// Dimming still applies. USB power holds it off through `idle` (`tick`).
+    fn off_held(&self) -> bool {
+        self.off_ms() == 0
+            || self.meter.stats.rec
+            || self.dmm.pw.integrating()
+            || crate::csvlog::active()
+            || crate::inrush::ses().streaming
+    }
+
     fn off_warn(&mut self, now: u64, idle: u64) {
         let off = self.off_ms();
-        if off == 0 || self.meter.stats.rec || self.dmm.pw.integrating() || crate::csvlog::active() || idle + OFF_WARN_MS <= off {
+        if self.off_held() || idle + OFF_WARN_MS <= off {
             self.off_warned = 0;
             return;
         }
@@ -3534,7 +3567,7 @@ impl App {
             2 if self.view == View::Gen || (self.view == View::Keypad && !self.kp_dmm()) => {}
             // V / A / ohm: the range step on release, the autorange when held
             // (auto_key_end).
-            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm) => {
+            2 if !self.dmm.pw.on && matches!(self.dmm.button(), Button::Volt | Button::Amp | Button::Ohm | Button::Cap) => {
                 self.run_down = Some(now);
                 self.run_key = 2;
             }
@@ -3561,7 +3594,7 @@ impl App {
         }
     }
 
-    /// AUTO in V / A / ohm, released (`long` false) or held RUN_LONG_MS.
+    /// AUTO in V / A / ohm / capacitance, released (`long` false) or held RUN_LONG_MS.
     /// Short: in autorange the current range becomes the manual one; in a
     /// manual range the next higher one (the MF page's order, 60 mV and
     /// 60 ohm included), the highest wrapping to the lowest. Long: the
@@ -3572,7 +3605,7 @@ impl App {
         let now = clk.now_ms();
         let b = self.dmm.button();
         // The function changed while the key was held: nothing.
-        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm) {
+        if self.dmm.pw.on || !matches!(b, Button::Volt | Button::Amp | Button::Ohm | Button::Cap) {
             return;
         }
         self.meter.rel_off();
@@ -4442,7 +4475,7 @@ impl App {
                 let top = items.len().checked_sub(if cur == 10 { 2 } else { 1 });
                 let i = if x.is_infinite() { top } else { items.iter().position(|&it| it >= x * 0.9999) };
                 match i {
-                    _ if matches!(cur, 13 | 14) => out.set_err("Illegal parameter value"),
+                    _ if cur == 14 => out.set_err("Illegal parameter value"),
                     Some(i) => {
                         self.dmm.set_range(clk, Some(s::range_item_code(cur, i)));
                         self.meter.rel_off();

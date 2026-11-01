@@ -220,6 +220,8 @@ recorded.
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
+| [`capdowntest.py`](hy3131/capdowntest.py) | capacitance AUTO: a small capacitor after a large one, open leads and a short (also the device's no-ramp case, AD1 forced) end on their own range; large capacitors keep theirs | | 47750 |
+| [`captimetest.py`](hy3131/captimetest.py) | capacitance AUTO timing from DC V: time to the first grey and the first final value (1 nF .. 1 mF, absorption, open leads, a resistor) | | 47760 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
 | [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
@@ -267,6 +269,7 @@ recorded.
 | [`logfmttest.py`](logfmttest.py) | LOG:DATA? in each LOG:FORMat is lossless | | 63610 |
 | [`fastlogtest.py`](fastlogtest.py) | fast logger to the SPI disk: the sustainable rate with the flash busy timing | | 4817, BT 4818 |
 | [`fastendtest.py`](fastendtest.py) | end of a disk session while a host reads the USB volume | | 4827 |
+| [`csvsharetest.py`](csvsharetest.py) | LOG / FAST CSVs read over MMEM:DATA? and the USB volume in turn equal dlog.py (shared generators) | ~4 min | free |
 
 ### USB, disk, settings and boot
 
@@ -280,8 +283,9 @@ recorded.
 | [`gallerytest.py`](gallerytest.py) | the gallery: grid, viewer, Delete | ~8 min | 19310 |
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
-| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
+| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
+| [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |
 | [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the removed recovery's request word is ignored; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
