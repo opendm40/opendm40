@@ -32,6 +32,21 @@ macro_rules! irq55 {
     };
 }
 
+// Feature memprobe: HardFault = src/memprobe.rs `probe_fault` (catches a
+// fault of a DBG:PEEK / POKE access; any other fault still hangs).
+#[cfg(feature = "memprobe")]
+macro_rules! hardfault {
+    () => {
+        "probe_fault"
+    };
+}
+#[cfg(not(feature = "memprobe"))]
+macro_rules! hardfault {
+    () => {
+        "default_handler"
+    };
+}
+
 global_asm!(concat!(
     r#"
     .section .vectors, "a", %progbits
@@ -41,7 +56,9 @@ __VECTORS:
     .word _loader_sp
     .word reset
     .word default_handler      /* NMI */
-    .word default_handler      /* HardFault */
+    .word "#,
+    hardfault!(),
+    r#"      /* HardFault */
     .word default_handler      /* MemManage */
     .word default_handler      /* BusFault */
     .word default_handler      /* UsageFault */
