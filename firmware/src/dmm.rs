@@ -2026,6 +2026,9 @@ pub struct Dmm {
     /// The probe's row was just written: the AD2 peak hold is cleared once
     /// it settled (sentinel::PROBE_SETTLE_MS) before its first window counts.
     probe_settle: bool,
+    /// The probe's out-of-family windows (sentinel::probe_glitch): 1 = the
+    /// last window was one, 2 = ... and the one after it is skipped too.
+    probe_glitch: u8,
     aprot: Option<AProt>,
     /// Fuse check in progress (`fuse_start`) and the last result.
     fuse_job: Option<FuseJob>,
@@ -2662,6 +2665,7 @@ impl Dmm {
             ovl: None,
             probe: false,
             probe_settle: false,
+            probe_glitch: 0,
             aprot: None,
             ovl_rel_t: None,
             fuse_job: None,
@@ -3070,6 +3074,7 @@ impl Dmm {
         self.pkh_due = 0;
         self.sent_arm = true;
         self.probe_settle = self.probe;
+        self.probe_glitch = 0;
         self.sent.configured(kind, clk.now_ms(), fresh);
         self.sent.neg = neg;
         self.sent.neg_vok = true;
@@ -6163,6 +6168,11 @@ impl Dmm {
         }
         let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
         self.sent.probe_a = amps;
+        let (skip, g) = sentinel::probe_glitch(self.probe_glitch, amps);
+        self.probe_glitch = g;
+        if skip {
+            return;
+        }
         match &mut self.aprot {
             Some(a) => {
                 if amps >= sentinel::APROT_GONE_A {

@@ -845,6 +845,26 @@ pub const APROT_GONE_MS: u64 = 1000;
 
 /// The protection rule: `amps` from the probe, `hot_ms` since the first
 /// hit window of the current run (the comparator saw the current start).
+/// The probe's out-of-family window (A): a single 100 ms window at ~55 A
+/// (near AD2's full scale), the next at ~0.4 A, then the current again
+/// (~14 mA): device 2026-11-01, 20 mA forward in DC V 6 V, 2..5 of 20 runs
+/// of 10 s, with and without the AC? alternation; cause not known. Above
+/// this a current needs two windows in a row; the window after a lone one
+/// is skipped too (its ~0.4 A tail). A real current that high (950 V on
+/// 47.5 ohm; the 10 A fuse) trips one window later than before.
+pub const PROBE_GLITCH_A: f32 = 20.0;
+
+/// `(skip, state)` for one probe window (`dmm.rs` aprot_poll): state 0 =
+/// nothing pending, 1 = the last window was over PROBE_GLITCH_A.
+pub fn probe_glitch(state: u8, amps: f32) -> (bool, u8) {
+    match (state, amps >= PROBE_GLITCH_A) {
+        (0, true) => (true, 1),
+        (_, true) => (false, 1),
+        (1, false) => (true, 0),
+        _ => (false, 0),
+    }
+}
+
 pub fn aprot_trips(amps: f32, hot_ms: u64) -> bool {
     amps >= APROT_NOW_A || (amps >= APROT_HOT_A && hot_ms >= APROT_HOT_MS)
 }
@@ -2263,6 +2283,14 @@ mod tests {
             assert_eq!(p[6], R26_AD2_256);
             assert_eq!(p[9] & 0x07, R29_ENPKH);
         }
+        // A lone out-of-family window and its tail are skipped; two in a row count.
+        let run = |w: &[f32]| {
+            let mut g = 0;
+            w.iter().map(|&a| { let (sk, n) = probe_glitch(g, a); g = n; !sk && aprot_trips(a, 0) }).collect::<Vec<_>>()
+        };
+        assert_eq!(run(&[0.014, 55.18, 0.44, 0.012]), [false; 4]);
+        assert_eq!(run(&[55.0, 55.0, 55.0]), [false, true, true]);
+        assert_eq!(run(&[0.014, 0.35]), [false, true]);
         // 4 194 codes per A; either sign; an empty hold reads 0.
         assert!((probe_amps(-10, 1049) - 0.25).abs() < 0.001);
         assert!((probe_amps(-2097, 5) - 0.5).abs() < 0.001);
