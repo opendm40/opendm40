@@ -661,7 +661,7 @@ UART (Modbus RTU frames recognised in it) and DALI on the scope page ([the decod
   numbers every frame; a gap in `seq` means frames the list dropped
   (oldest first when full) before they were read. `lost`: times the
   decoder fell behind the input (samples skipped). `LOG` in the Wave view
-  or while a DMM logger session streams (`LOG:STATe ON`): `Settings
+  or the Power Wave page, or while a DMM logger session streams (`LOG:STATe ON`): `Settings
   conflict`; so is `LOG:STATe ON` while the frame log is open.
 - With too few samples per bit (fewer than 4: a slow timebase, the Wave
   view above 4800 baud) nothing is decoded; `DECode:RATE?` gives `0` with

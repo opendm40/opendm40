@@ -849,7 +849,9 @@ change from SCPI closes it).
 (as for a logger session): no power readings, no BT serve, no energy;
 leaving it rewrites the power row (`Dmm::start` -> `pw_restart`) and the
 open time is not integrated (`Dmm::pw_wave_gap`). Refused with
-`POW:METH ALT`, during Zero / V cal, a recording or a logger session.
+`POW:METH ALT`, during Zero / V cal, a recording, a logger session or the
+decoder's frame log (it has the scope buffer; `DECode:MODE LOG` is refused
+with the page open for the same reason).
 
 **Current check.** The meter's own current rules do not run while the
 page holds the chip, so the page applies them to its I (RMS with the DC
