@@ -69,6 +69,12 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Scope drag as on a Rigol DHO800/900:** a drag on a marker moves that
+  marker (large grab zones); anywhere else, sideways moves the trigger
+  position, up / down the selected item (the trace unless you tapped another
+  marker). The Settings row **Drag** (Stock / Axis lock / Hold 300 ms) and
+  `DBG:GRAB` are gone; cursor lines no longer drag, their markers do
+  ([manual](docs/manual/README.md#moving-things-with-a-finger)).
 - **Settings in tabs:** the sections (Display, Alerts, Power, Multimeter,
   Scope, Other) are tabs on the left, rows are taller, and only the value
   side of a row reacts to a tap ([manual](docs/manual/README.md#settings)).

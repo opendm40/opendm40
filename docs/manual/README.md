@@ -1310,7 +1310,8 @@ in the left or right half of the graph steps), **Off**.
 - V/div: 10 mV to 10 V per division (times the probe factor).
 - Tap the **magnifier +** to zoom in (smaller V/div), **magnifier −** to
   zoom out. Or pinch vertically.
-- **Drag up or down** in the graph to move the trace.
+- **Drag up or down** in the graph to move the trace (or the item you
+  selected; see [Moving things with a finger](#moving-things-with-a-finger)).
 - Tap **CHA** (or the V/div in the top bar) for the channel popup:
   - **Coupling**: DC or AC.
   - **Probe**: ×0.1 to ×1000 (13 steps). It only changes the labels and
@@ -1326,12 +1327,13 @@ in the left or right half of the graph steps), **Off**.
 ### Trigger
 
 - **Drag** the **T** marker on the right edge up or down to set the
-  trigger level.
+  trigger level. Or tap it, then drag up or down anywhere in the graph.
 - The trigger level is kept in volts: changing the V/div, the probe or the
   position moves its marker, not the level. A level off screen shows its
   marker on the edge.
-- **Drag sideways** to move the trigger position (the **T** on the top
-  edge).
+- **Drag sideways** anywhere in the graph to move the trigger position (the
+  **T** on the top edge). In Single, while waiting, this sets where the
+  coming capture is triggered.
 - **Long press** a marker to centre it: the trigger level goes to the middle
   of the signal, the trigger position to the centre, the trace to 0 V in the
   centre.
@@ -1384,32 +1386,27 @@ generator off, nothing triggers (Auto still shows frames). SCPI
 
 ### Moving things with a finger
 
-![Drags: the trigger level, the trigger position, the trace](img/scope-drag.png)
+![Drags: a marker from its shaded zone; elsewhere sideways the trigger position, up or down the selected item](img/scope-drag.png)
 
-*Drags: the trigger level, the trigger position, the trace.*
+*Drags: a marker from its shaded zone; elsewhere sideways the trigger
+position, up or down the selected item.*
 
-A drag moves one thing along one axis until you lift the finger. The first
-movement (about 8 pixels) decides the axis, and the axis decides what moves:
+A drag moves one thing along one axis until you lift the finger, as on a
+Rigol DHO800/900:
 
-- **Up or down**: the level marker nearest to where the finger went down
-  (the trace, the trigger level, the runt level, a Y cursor, the math / FFT
-  offset), however far it is. A level off screen counts at its marker on the
-  edge.
-- **Sideways**: the time marker nearest to where the finger went down (the
-  trigger position, an X cursor, the FFT centre). On a stopped scope, moving
-  the trigger position pans the stored record.
-- What is selected does not matter; the moved marker becomes the selection.
-  When two markers are equally near, the one drawn on top moves.
+- **On a marker** (a zone about 8 mm around it, reaching into the graph):
+  that marker, along its own axis. Up or down: the trace (**A**), the
+  trigger level (**T** on the right), the runt level, a Y cursor, **M**.
+  Sideways: the trigger position (**T** on top), an X cursor, the FFT
+  centre.
+- **Anywhere else**: the first movement (about 8 pixels) picks the axis.
+  **Sideways** moves the trigger position; on a stopped scope it pans the
+  stored record. **Up or down** moves the selected item: the trace, unless
+  you tapped another marker (the trigger level, **M**, a Y cursor).
+  Dragging a marker does not select it; only a tap does.
 
 A tap on a marker selects it; a tap on the selected marker selects the next
 one under the finger.
-
-**Settings > Scope drag** sets how a drag starts:
-
-- **Stock** (default) and **Axis lock**: the drag moves as soon as the
-  finger moves.
-- **Hold 300 ms**: hold the finger still first; the meter beeps, then the
-  drag moves.
 
 A second finger during a drag undoes it.
 
@@ -1467,7 +1464,7 @@ record zoomed out beyond its length, they show **--**.
 
 Tap **CUR** at the bottom of the graph: **CUR X** (two time cursors), **CUR
 Y** (two voltage cursors), off. The measurement row shows X2-1 and Xf, or
-Y2-1. Drag the **1** / **2** markers or the cursor lines.
+Y2-1. Drag the **1** / **2** markers.
 
 
 | ![X cursors: 800 µs apart](img/scope-cur-x.png) | ![Y cursors: 3.01 V apart](img/scope-cur-y.png) |
@@ -2409,7 +2406,6 @@ the title bar or **MENU** goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Drag** | Stock, Axis lock, Hold 300 ms | Stock | How a drag on the scope graph starts ([Moving things with a finger](#moving-things-with-a-finger)). |
 | **Swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
 | **Press effect** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
 | **Tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
@@ -2935,7 +2931,7 @@ measurement as it was.
 |---|---|---|
 | All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
 | Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
-| Scope: the display and touch settings (colours, brightness, grid, persistence, drag and tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
+| Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 **Mode Remember** ON (Settings > Power, as the stock's) also keeps after
@@ -2968,7 +2964,7 @@ Untested on a real meter:
   resistance calibrator only).
 - Alerts: [A-PROT and OVLD](#the-alerts) with a current through the A jack.
 - Oscilloscope: pulse and runt triggers, cursors, pinch, double tap,
-  long-press centring, holding a corner to repeat, Axis lock and Hold drag,
+  long-press centring, holding a corner to repeat,
   the persistence modes, auto-set keeping AC coupling.
 - Combined view: the long press on the strip.
 - Generator: the amplitude and the output impedance at the OUT jack, the

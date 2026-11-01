@@ -3,26 +3,24 @@
 //! the responsive drag path, drawing through src/scope_ui.rs.
 //!
 //! Interaction (stock mode):
-//! * selection on press: 32x32 zones around the markers (glyph rect grown by
-//!   10 px), the stock search order (other group after its current index,
-//!   then the same group cycling, then the other group from 0), so repeated
-//!   taps on overlapping zones cycle through them; the selected marker turns
-//!   filled, the guide lines of the selection show from the press until 2 s
-//!   after the last event;
-//! * drag (opendm40, owner 2026-10-25: "drag only ONE thing, along ONE
-//!   axis, until the finger is lifted"; the stock split every move report:
-//!   |dx| <= |dy| moved the selected level item, else the selected time
-//!   item, so a sideways pan with vertical wobble also moved the trigger
-//!   level): one item along one axis per gesture, until the release. The
-//!   first motion decides the axis (scope_ui::drag_axis); the item is the
-//!   marker of that axis nearest to the press, whatever is selected
-//!   (scope_ui::drag_target: vertical, the level marker whose row is
-//!   nearest to the press y: CH1, trigger level, runt level, math offset,
-//!   Y cursors; horizontal, the time marker whose column is nearest to the
-//!   press x: trigger position (a stopped record: its pan), X cursors, the
-//!   FFT centre); it becomes the selection. A 4 px tap tolerance before
-//!   the first move; the acquisition holds from the first move (no frame
-//!   paint between the finger and the marker);
+//! * selection on press: the marker grab zones (scope_ui::grab_rect: 48 px
+//!   along the edge, from the screen edge 30 px past the glyph into the
+//!   graph; the nearest glyph wins where they meet); a still tap on the
+//!   selected marker cycles through the zones under the finger (the stock
+//!   search order); the selected marker turns filled, the guide lines of the
+//!   selection show from the press until 2 s after the last event;
+//! * drag (owner 2026-11-01, as a Rigol DHO800/900; one item along one axis
+//!   until the release): a drag that starts in a grab zone moves that
+//!   marker along its own axis from the first move (level markers up /
+//!   down: CH1, trigger level, runt level, math offset, Y cursors; time
+//!   markers sideways: trigger position, X cursors, the FFT centre). A drag
+//!   anywhere else picks its axis in the first 8 px (scope_ui::drag_axis):
+//!   sideways moves the trigger position (a stopped record: its pan),
+//!   up / down the selected level item (scope_ui::drag_item: CH1 unless a
+//!   tap selected another; a drag from a marker zone does not change the
+//!   selection, only a still tap does). A 4 px tap tolerance before the first move; the
+//!   acquisition holds from the first move (no frame paint between the
+//!   finger and the marker);
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 1): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -36,10 +34,7 @@
 //!   badge = Trigger tab; the right panel: V/div + / -, CH1 popup, TRIG ->
 //!   Trigger tab;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
-//!   on (swipes that start outside the drag area: top bar, panel);
-//! * alternatives (Settings "Scope drag"): Hold 300 ms (moves count after a
-//!   still hold; the beep marks the grab). "Stock" and "Axis lock" both lock
-//!   the axis now (above).
+//!   on (swipes that start outside the graph area: top bar, panel);
 //! Responsiveness (owner, 2026-10-13: "dragging the trace lags"): while a
 //! drag is active the acquisition is not polled (no new frames, no restart
 //! per event); each event re-renders the frame already shown from its
@@ -69,13 +64,6 @@ const PRESS_MS: u64 = 120;
 const FLASH_MS: u64 = 150;
 /// Halves: the tabs show on this many page entries after power-on.
 const INTRO_ENTRIES: u8 = 3;
-/// Drag modes (Settings "Scope drag").
-pub const DRAG_STOCK: u8 = 0;
-pub const DRAG_AXIS: u8 = 1;
-/// Names of the drag modes without hold-to-grab (Settings "Scope drag";
-/// Hold is gesture::grab_ms != 0 with the Stock model, shown as "Hold
-/// <ms> ms"; review 7389e8a L4: a stored mode 2 showed as "Axis lock").
-pub const DRAG_NAMES: [&str; 2] = ["Stock", "Axis lock"];
 /// Persistence (Display tab: OFF, MIN, 1S, INF): layer period (ms).
 const PERSIST_MS: [u64; 4] = [0, 40, 500, u64::MAX];
 
@@ -88,7 +76,8 @@ pub(super) struct Touch {
     applied: Point,
     far: i32,
     moving: bool,
-    /// The press selected a marker zone (no timebase step on release).
+    /// The press selected a marker zone (no timebase step on release; the
+    /// drag moves that marker).
     hit: bool,
     t0: u64,
     /// Settings / cursors at the press (undo for a second finger); the
@@ -99,10 +88,15 @@ pub(super) struct Touch {
     /// pan so far (px).
     anchor: Option<usize>,
     pan: i32,
-    /// The axis the first motion decided (kept until the release).
+    /// The drag's axis (kept until the release): a grabbed marker's own
+    /// axis from the press, else decided by the first AXIS_PX of travel.
     axis: Option<Axis>,
-    /// Hold mode: grabbed.
-    grabbed: bool,
+    /// The item it moves (time item if `axis` is H, else level item).
+    item: u8,
+    /// Selection before the press (sel_v, sel_h, last_h): a drag from a
+    /// marker zone moves that marker but leaves the selection as it was
+    /// (owner 2026-11-02); only a still tap selects.
+    prev: (u8, u8, bool),
     /// Combined view: sub-row remainder of vertical moves.
     acc: i32,
     /// What moved (DBG:GEST? code) and its travel.
@@ -315,7 +309,6 @@ pub(super) struct Sp {
     pub guide_until: u64,
     pub touch: Option<Touch>,
     pub pinch: Option<Pinch>,
-    pub drag_mode: u8,
     pub swipes: bool,
     pub press_fx: bool,
     pressed: u8,
@@ -400,7 +393,6 @@ impl Sp {
             guide_until: 0,
             touch: None,
             pinch: None,
-            drag_mode: DRAG_STOCK,
             swipes: false,
             press_fx: true,
             pressed: 0,
@@ -1444,7 +1436,11 @@ impl App {
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
             Gesture::Down(p) if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
+                let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
+                // A marker grab zone: that marker along its own axis.
+                let axis = hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V });
+                let item = if self.sp.last_h { self.sp.sel_h } else { self.sp.sel_v };
                 let s = self.scope.s;
                 self.sp.touch = Some(Touch {
                     p0: p,
@@ -1458,8 +1454,9 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: None,
-                    grabbed: gesture::grab_ms() == 0,
+                    axis,
+                    item,
+                    prev,
                     acc: 0,
                     code: 0,
                     travel: 0,
@@ -1479,14 +1476,6 @@ impl App {
                 }
                 Some(false)
             }
-            Gesture::Grab(_) => {
-                if let Some(t) = self.sp.touch.as_mut() {
-                    t.grabbed = true;
-                    t.applied = t.last;
-                    self.beep(now, 20);
-                }
-                Some(true)
-            }
             Gesture::Move(_, p) => {
                 self.sp_move(p, now);
                 Some(true)
@@ -1504,6 +1493,9 @@ impl App {
                 // A second finger: undo what the first finger moved (a pinch
                 // must not start with its accidental nudge), drop the touch.
                 if let Some(t) = self.sp.touch.take() {
+                    if t.hit {
+                        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = t.prev;
+                    }
                     self.cur = t.cur;
                     self.cursor_values();
                     if self.sp.frozen {
@@ -1603,44 +1595,32 @@ impl App {
         let d0 = (p.x as i32 - t.p0.x as i32).abs().max((p.y as i32 - t.p0.y as i32).abs());
         t.far = t.far.max(d0);
         if !t.moving {
-            if t.far <= TAP_TOL || !t.grabbed {
+            if t.far <= TAP_TOL {
                 self.sp.touch = Some(t);
                 return;
             }
+            // Off the markers (owner 2026-11-01, DHO800-style): the first
+            // AXIS_PX of travel pick the axis; sideways moves the trigger
+            // position, up / down the selected level item (scope_ui::
+            // drag_item; never the marker nearest to the finger). The
+            // travel so far is applied at once (`applied` is still p0).
+            if t.axis.is_none() {
+                let Some(h) = su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) else {
+                    self.sp.touch = Some(t);
+                    return;
+                };
+                let m = self.sp_model(now);
+                t.item = su::drag_item(&m, h, self.sp.sel_v).1;
+                t.axis = Some(if h { Axis::H } else { Axis::V });
+            }
             t.moving = true;
             // Hold the acquisition from the first move: no frame (paint,
-            // measurements) between the finger and the marker while the
-            // axis is still being decided (owner 2026-10-25: the level drag
-            // lagged). The release applies / refreshes as for any drag.
+            // measurements) between the finger and the marker (owner
+            // 2026-10-25: the level drag lagged). The release applies /
+            // refreshes as for any drag.
             self.sp.frozen = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
-        // One axis per gesture, decided by the first motion (every drag
-        // mode; the stock per-event split is gone): scope_ui::drag_axis /
-        // drag_delta.
-        if t.axis.is_none() {
-            match su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) {
-                Some(h) => {
-                    t.axis = Some(if h { Axis::H } else { Axis::V });
-                    // The item: the nearest marker of that axis to the press
-                    // (owner 2026-10-25: drags ignore the selection); it is
-                    // the selection from now on (filled, its guide line).
-                    let m = self.sp_model(now);
-                    if let Some((level, id)) = su::drag_target(&m, h, t.p0.x as i16, t.p0.y as i16) {
-                        if level {
-                            self.sp.sel_v = id;
-                        } else {
-                            self.sp.sel_h = id;
-                        }
-                        self.sp.last_h = !level;
-                    }
-                }
-                None => {
-                    self.sp.touch = Some(t);
-                    return;
-                }
-            }
-        }
         (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
@@ -1649,14 +1629,14 @@ impl App {
         }
         self.sp.guide_until = now + GUIDE_MS;
         if dy != 0 {
-            self.sp_move_v(dy, now);
+            self.sp_move_v(dy, t.item);
         } else {
-            self.sp_move_h(dx, now);
+            self.sp_move_h(dx, t.item);
         }
     }
 
-    /// Vertical move of the selected level item by `dy` px.
-    fn sp_move_v(&mut self, dy: i32, _now: u64) {
+    /// Vertical move of level item `id` by `dy` px.
+    fn sp_move_v(&mut self, dy: i32, id: u8) {
         let Some(mut t) = self.sp.touch else { return };
         // Pixels -> rows (combined view: the graph is shorter than 280 rows).
         let rows = if self.view == View::DmmScope {
@@ -1674,7 +1654,7 @@ impl App {
             return;
         }
         let mut st = self.scope.s;
-        match self.sp.sel_v {
+        match id {
             0 => {
                 // CH1 position; the trigger row moves with it (same voltage).
                 let p = (st.pos + rows).clamp(-392, 392);
@@ -1715,12 +1695,12 @@ impl App {
         self.sp_preview(st);
     }
 
-    /// Horizontal move of the selected time item by `dx` px.
-    fn sp_move_h(&mut self, dx: i32, _now: u64) {
+    /// Horizontal move of time item `id` by `dx` px.
+    fn sp_move_h(&mut self, dx: i32, id: u8) {
         let Some(mut t) = self.sp.touch else { return };
         t.travel += dx;
         self.sp.touch = Some(t);
-        match self.sp.sel_h {
+        match id {
             0 => {
                 if self.scope.rolling() {
                     return; // roll: the trigger items are not draggable
@@ -1779,6 +1759,12 @@ impl App {
     fn sp_release(&mut self, now: u64) {
         let Some(t) = self.sp.touch.take() else { return };
         self.sp.guide_until = now + GUIDE_MS;
+        // A marker dragged from its zone: the selection as before the press
+        // (the empty graph's up / down keeps moving what was selected).
+        if t.hit && t.moving {
+            self.sp.presel = false;
+        }
+        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = su::sel_after(t.hit && t.moving, (self.sp.sel_v, self.sp.sel_h, self.sp.last_h), t.prev);
         // DBG:GEST? log.
         if t.moving && t.code != 0 {
             let i = if self.gest_n < GEST_N {
@@ -2888,14 +2874,16 @@ impl App {
 
     // ------------------------------------------------------------ persist
 
-    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 1..6,
+    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 3..6,
+    /// 12..15; p[11] bits 1..2, the removed "Scope drag" mode, stay 0 and
+    /// are ignored on load).
     /// 12..15). p[1] bits 28..29: tap-step mode XOR TAP_DEFAULT (older
     /// records: 0 = the default).
     pub(super) fn sp_persist(&self, p1: &mut u32, p11: &mut u32) {
         let s = &self.sp;
         *p1 |= ((s.colour as u32 ^ 2) & 0xF) << 17 | ((100 - s.bright.min(100)) as u32 & 0x7F) << 21;
         *p1 |= su::tap_code(s.tap_mode) << 28;
-        *p11 |= (s.drag_mode as u32 & 3) << 1 | (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
+        *p11 |= (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
     }
 
@@ -2964,7 +2952,6 @@ impl App {
         let s = &mut self.sp;
         s.colour = ((p1 >> 17 & 0xF) ^ 2).min(8) as u8;
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
-        s.drag_mode = (p11 >> 1 & 3).min(1) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;
         s.press_fx = p11 >> 6 & 1 == 0;
