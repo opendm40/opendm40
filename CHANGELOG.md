@@ -72,6 +72,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Extra digit at full size:** wherever it can appear, the reading starts
+  further left, so the other digits do not move when it comes or goes
+  ([manual](docs/manual/README.md#counts-rate-and-the-extra-digit)).
 - **Scope drag as on a Rigol DHO800/900:** a drag on a marker moves that
   marker (large grab zones); anywhere else, sideways moves the trigger
   position, up / down the selected item (the trace unless you tapped another
