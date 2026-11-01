@@ -1035,7 +1035,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; flowing from COM into A in DC V, DC mV and Ω: about 4 mA, DC V 9 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV and Ω) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
