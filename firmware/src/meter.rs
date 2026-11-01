@@ -983,17 +983,23 @@ pub fn pulse_widths(f_hz: f32, duty: f32) -> Option<(f32, f32)> {
 }
 
 /// A pulse width (s) for the readout: 4 significant digits in s / ms / us
-/// / ns ("12.34 ms"; the widest is "999.9 ms").
+/// / ns ("12.34 ms"; the widest is "999.9 ms": a value that rounds to
+/// 1000.0 shows in the next unit up, "1.000 s").
 pub fn width_val(t: f32) -> Val {
-    let (x, unit) = if t >= 1.0 {
-        (t, "s")
+    const UNITS: [(f32, &str); 4] = [(1e9, "ns"), (1e6, "us"), (1e3, "ms"), (1.0, "s")];
+    let mut i = if t >= 1.0 {
+        3
     } else if t >= 1e-3 {
-        (t * 1e3, "ms")
+        2
     } else if t >= 1e-6 {
-        (t * 1e6, "us")
+        1
     } else {
-        (t * 1e9, "ns")
+        0
     };
+    if i < 3 && t * UNITS[i].0 >= 999.95 {
+        i += 1;
+    }
+    let (x, unit) = (t * UNITS[i].0, UNITS[i].1);
     let dec = if x < 9.9995 { 3 } else if x < 99.995 { 2 } else { 1 };
     Val { v: x, dec, unit, ol: false, ext: false }
 }
@@ -1612,5 +1618,18 @@ mod tests {
         let w = width_val(8.3e-9);
         assert!(w.unit == "ns" && w.dec == 3);
         assert_eq!(width_val(2.5).unit, "s");
+        // The unit boundaries after rounding: 999.96 ms is "1.000 s", not
+        // "1000.0 ms"; 999.94 ms stays "999.9 ms".
+        let w = width_val(0.99996);
+        assert_eq!((w.unit, w.dec), ("s", 3));
+        assert!((w.v - 0.99996).abs() < 1e-6);
+        let w = width_val(0.99994);
+        assert_eq!((w.unit, w.dec), ("ms", 1));
+        let w = width_val(999.96e-6);
+        assert_eq!((w.unit, w.dec), ("ms", 3));
+        let w = width_val(999.96e-9);
+        assert_eq!((w.unit, w.dec), ("us", 3));
+        let w = width_val(9.9996e-3);
+        assert_eq!((w.unit, w.dec), ("ms", 2));
     }
 }

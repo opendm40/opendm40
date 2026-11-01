@@ -2334,11 +2334,13 @@ impl App {
         if p[16] != 0 {
             self.dmm.set_ntc_user(f32::from_bits(p[16]), f32::from_bits(p[17]));
         }
+        // The probe-hold choice and the REL format: preferences, with the
+        // display ones above (a preset recall keeps them).
+        self.meter.probe = p[18] & 4 != 0;
+        self.meter.rel_pct = p[18] & 8 != 0;
         // v4: AutoHold, limits (all zero in older records = off / unset).
         let m = &mut self.meter;
         m.lim_beep = p[18] & 2 == 0;
-        m.probe = p[18] & 4 != 0;
-        m.rel_pct = p[18] & 8 != 0;
         if same_session {
             m.ahold = p[18] & 1 != 0;
             for (i, l) in m.lim.iter_mut().enumerate() {
