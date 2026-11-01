@@ -32,6 +32,9 @@ Cases (default all):
          meter ranges up to 10 A and reads 8 A.
   limit  12 V DC, 0.7 A (the 6 A range), then 2 A at 45 s with POW:LIM 1,10 (1 A for 10 s),
          page running: still open 2 s after the step, closed 12 s after.
+  declog  the decoder's frame log shares the scope buffer: with the page open
+         DECode:MODE LOG is refused and the page stays; with the log open
+         POW:WAVE ON is refused and the log stays.
   (The model's 45 s is ~2.7 s earlier than the firmware's uptime, which
   the test's times use: the checks before the step leave 4 s.)
 The model latches R03..R05 at each conversion from the converter SDO23
@@ -69,6 +72,7 @@ CASES = {
     'mains': 'open;pow:230@50,i=1,pf=0.5',
     'dc': 'open;vsrc:12;isrc:2',
     'alt': 'open;pow:230@50,i=1,pf=1',
+    'declog': 'open;vsrc:12;isrc:2',
     # The device's AD2 X zero (powz:1: 888 codes with OP1 x10) and no
     # POW:ZERO, the power meter in DC coupling (AD1, factory DC A): the
     # page takes I's zero from the meter's current (device 468ea813: I
@@ -215,6 +219,28 @@ def run_case(name):
             wait_ms(500)
             e = q('SYST:ERR?')
             check('Settings conflict' in e and not wave()['on'], 'POW:METH ALT: POW:WAVE ON refused (%s)' % e)
+            return not fails
+        if name == 'declog':
+            q('*CLS')
+            q('POW:WAVE ON')
+            wait_ms(800)
+            check(wave()['on'], 'POW:WAVE ON: the page opens')
+            q('DECode:MODE LOG')
+            wait_ms(500)
+            e = q('SYST:ERR?')
+            check('Settings conflict' in e and wave()['on'], 'page open: DECode:MODE LOG refused (%s)' % e)
+            q('POW:WAVE OFF')
+            wait_ms(500)
+            q('*CLS')
+            q('DECode:MODE LOG')
+            wait_ms(800)
+            v = view()
+            check(v.startswith('Decode log'), 'page closed: DECode:MODE LOG opens the log (%s)' % v)
+            q('POW:WAVE ON')
+            wait_ms(500)
+            e = q('SYST:ERR?')
+            v = view()
+            check('Settings conflict' in e and not wave()['on'] and v.startswith('Decode log'), 'log open: POW:WAVE ON refused (%s, %s)' % (e, v))
             return not fails
         # MF -> Power Settings -> Wave.
         q('DBG:KEY 3')

@@ -124,6 +124,9 @@ impl App {
             Some("Wave: recording runs")
         } else if self.scope.held() {
             Some("Wave: scope record in use")
+        } else if self.scope.log_on() {
+            // The decoder's frame log has BUF; closing it returns BUF.
+            Some("Wave: decode log runs")
         } else {
             None
         };
