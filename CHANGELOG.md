@@ -9,6 +9,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Wave button on the multimeter page:** in V and A (DC or AC), a
+  **Wave** chip in the trend chart's lower left corner opens the
+  [Wave view](docs/manual/README.md#wave-view-the-scope-on-the-multimeter-inputs).
 - **Each function button remembers its sub-mode:** V and A their coupling,
   diode / continuity, Hz / °C, Ω its test current; kept after a power-off
   ([manual](docs/manual/README.md#choose-a-function)).

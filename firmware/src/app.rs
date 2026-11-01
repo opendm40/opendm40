@@ -2019,6 +2019,7 @@ impl App {
             let pv = self.meter.live().and_then(|r| r.power).filter(|_| self.dmm.pw.on);
             // The power meter never shows the DMM column (MAX / AVG / REL /
             // MIN), also not before its first reading ("I ranging...", #96).
+            self.chart_cache.wave = self.wave_avail();
             ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if self.dmm.pw.on { None } else { Some(&side) }, self.chart_unit, rc);
             if let Some(pv) = pv {
                 ui::pw::side(&mut self.dmm_view.pwc, &pv);
@@ -3941,6 +3942,8 @@ impl App {
                     self.resolution_cycle(now);
                 } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);
+                } else if self.wave_avail() && ui::wave_chip_hit(x, y) {
+                    self.wave_open(clk);
                 } else if x < ui::CHART_X && ui::chart_rows().contains(&y) {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;

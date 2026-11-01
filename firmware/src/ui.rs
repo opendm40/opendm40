@@ -2226,6 +2226,9 @@ pub struct ChartCache {
     /// rows of the old and the new span (one window per column).
     cols: [(u8, u8); CHART_W as usize],
     drawn: bool,
+    /// Show the Wave chip (App: V / A, DC or AC) / it is drawn.
+    pub wave: bool,
+    wave_on: bool,
 }
 
 /// Column without trace (first > last).
@@ -2368,6 +2371,8 @@ impl ChartCache {
             rchip: None,
             cols: [NO_SPAN; CHART_W as usize],
             drawn: false,
+            wave: false,
+            wave_on: false,
         }
     }
     pub fn invalidate(&mut self) {
@@ -2393,6 +2398,41 @@ pub fn rate_chip(c: &mut ChartCache, rc: RateChip) {
     let r = rect(4, chart_geom().rate, 73, RATE_CHIP_H);
     sf::rbox(r, 4, BTN, BG);
     sf::glyphs(sf::F14, rect(r.x, r.y + 1, r.w, r.h), txt, if rc.applies { STATUS_FG } else { DIM }, BTN, 8, 1);
+}
+
+/// The Wave chip in the trend chart's bottom-left corner (owner request
+/// 2026-11-02: the way into the Wave view, app_wave.rs, seen from the DMM
+/// page; below the toasts, which end at row 187). The chart keeps a clear
+/// box around it (chart columns 1..=WAVE_CLR_W, the WAVE_CLR_H rows above
+/// the bottom frame row): the trace's oldest points there are not drawn.
+pub const WAVE_CHIP: sf::Rect = rect(CHART_X as i16 + 4, (CHART_Y + CHART_H) as i16 - 24, 66, 20);
+const WAVE_CLR_W: u16 = 73;
+const WAVE_CLR_H: u16 = 27;
+/// One period of the chip's sine icon: row per column (0 = top, 9 rows).
+const WAVE_ICON: [u8; 15] = [4, 2, 1, 0, 0, 1, 2, 4, 6, 7, 8, 8, 7, 6, 4];
+
+/// Draw the Wave chip: a tiny sine (the trace colour) and "Wave".
+pub fn wave_chip() {
+    let r = WAVE_CHIP;
+    sf::rbox(r, 4, BTN, BG);
+    let (x0, y0) = (r.x as u16 + 6, r.y as u16 + 6);
+    #[cfg(test)]
+    crate::probe::begin(crate::probe::ICON, BTN);
+    let mut prev = WAVE_ICON[0];
+    for (i, &y) in WAVE_ICON.iter().enumerate() {
+        let (a, b) = (prev.min(y), prev.max(y));
+        lcd::fill_rect(x0 + i as u16, y0 + a as u16, 1, (b - a) as u16 + 1, 0xFC40);
+        prev = y;
+    }
+    #[cfg(test)]
+    crate::probe::end();
+    sf::glyphs(sf::F14, rect(r.x + 26, r.y + 1, r.w - 28, r.h), "Wave", STATUS_FG, BTN, 1, 1);
+}
+
+/// A tap on the Wave chip: the chart's corner x 80..159, y 226..272, larger
+/// than the drawn chip (47 rows; the plot has no other tap).
+pub fn wave_chip_hit(x: u16, y: u16) -> bool {
+    (CHART_X..CHART_X + 80).contains(&x) && (CHART_Y + CHART_H - 47..CHART_Y + CHART_H).contains(&y)
 }
 
 /// `side` None: the right column is not touched (the power meter draws its
@@ -2448,6 +2488,11 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     let n = pts.len();
     let first = CHART_W as usize - n.min(CHART_W as usize);
     let mut prev: Option<u16> = None;
+    if c.wave != c.wave_on {
+        c.wave_on = c.wave;
+        c.drawn = false;
+    }
+    let wave = c.wave;
     let full = !c.drawn;
     c.drawn = true;
     for x in 0..CHART_W {
@@ -2467,7 +2512,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         let old = core::mem::replace(&mut c.cols[x as usize], span);
         // Rows to rewrite: the whole column on a full draw, else the union
         // of the old and the new trace span (the rest is unchanged).
-        let (y0, y1) = if full {
+        let (y0, mut y1) = if full {
             (0, ch - 1)
         } else if old == span {
             continue;
@@ -2478,6 +2523,13 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         } else {
             (old.0.min(span.0) as u16, old.1.max(span.1) as u16)
         };
+        // The Wave chip's clear box (drawn below, after the columns).
+        if wave && x >= 1 && x <= WAVE_CLR_W {
+            y1 = y1.min(ch - 2 - WAVE_CLR_H);
+            if y0 > y1 {
+                continue;
+            }
+        }
         let k = if x == 0 || x == CHART_W - 1 { 3 } else if x % 16 == 0 { 2 } else if x % 4 == 0 { 1 } else { 0 };
         let t = &tpl[k];
         // (Never in a strip pass: the DMM page is drawn directly.)
@@ -2495,6 +2547,11 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         for y in (b2 + 1).max(y0).max(a_end)..=y1 {
             lcd::data_panel(t[y as usize]);
         }
+    }
+    if full && wave {
+        lcd::fill_rect(CHART_X + 1, cy + ch - 1, WAVE_CLR_W, 1, DIM);
+        lcd::fill_rect(CHART_X + 1, cy + ch - 1 - WAVE_CLR_H, WAVE_CLR_W, WAVE_CLR_H, BG);
+        wave_chip();
     }
     if c.rate != rate {
         c.rate = rate;
