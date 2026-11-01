@@ -17,7 +17,8 @@ section named after the tag as the release notes; how to cut a release:
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > Power; default OFF, as the stock's):
   ON restarts the multimeter after a power-off in the function, range, rate
-  and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
+  and trend timebase you left, and the scope with its timebase, V/div,
+  trigger and measurement settings. SCPI `MEMory:STATe:RECall:AUTO`.
 - **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
 - **Scope: 5 and 2 mV/div**, a digital zoom of 10 mV/div (the front end
   has no known higher gain): the same resolution, drawn larger. SCPI
@@ -136,6 +137,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- A firmware update keeps the multimeter function and the scope settings,
+  as a restart does; they went back to the defaults after every update.
 - Capacitance AUTO: a small capacitor measured after a large one (600 µF and
   up) gets its own range again instead of a wrong µF value; open leads or a
   short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
