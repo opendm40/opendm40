@@ -95,6 +95,9 @@ mod splash;
 // The inrush page's trace geometry (ui_inrush.rs, a ui submodule).
 #[path = "../../src/inrush.rs"]
 mod inrush;
+// Power Wave: the capture's pure part and the page's plot geometry.
+#[path = "../../src/pwave.rs"]
+mod pwave;
 
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
@@ -3364,7 +3367,7 @@ fn main() {
             };
             let ps_pv = dmm::pw::PowerVals { v_auto: false, i_auto: true, ..pw_cases()[0].1 };
             let d_ps = || ui::pw::settings_page(&ps_pv);
-            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=32).filter(|&c| c != 21).collect();
+            let ps_codes: Vec<u8> = (0..=4).chain(8..=14).chain(22..=33).filter(|&c| c != 21).collect();
             let cases: Vec<(String, &dyn Fn(), Box<dyn Fn(bool) + '_>)> = (0..6)
                 .map(|i| (format!("menu{i}"), &d_menu as &dyn Fn(), Box::new(move |on| ui::menu_item(i, combo, on)) as Box<dyn Fn(bool)>))
                 .chain((0..9u8).map(|r| {
@@ -3798,6 +3801,8 @@ fn main() {
     for (msg, (n, scene)) in &ck.seen {
         println!("{n:6} x  {msg}   [first: {scene}]");
     }
+    // The pages checked below print theirs at the end.
+    let printed: std::collections::BTreeSet<String> = ck.seen.keys().cloned().collect();
     // 6z. The Inrush Current page (src/ui_inrush.rs): armed (empty grid),
     //     a captured DC inrush (lamp-like decay), an AC motor start, a
     //     sample at the AD2 rail (OL) with the longest texts, the stopped /
@@ -3859,6 +3864,108 @@ fn main() {
         }
     }
 
+    // 6z2. The Power Wave page (src/ui_pwave.rs): mains (U and I with a
+    //      phase lag), DC with ripple, both channels at the rail (OL) with
+    //      the longest texts, the empty grid (before the first frame,
+    //      stopped); the live parts drawn over another page equal a fresh
+    //      page with those texts.
+    {
+        use pwave::{Cap, Scale, BUF_MIN, COL_AT, PW, T_AT, T_UNIT_US};
+        use ui::pwv::Vals;
+        let sc = Scale { su: 8.0 * 1.25 / 262_144.0 * 1000.0, ou: 3.0, si: 8.0 * 1.25 / 262_144.0 / 0.01, oi: -2.0 };
+        let mk = |u: &dyn Fn(f32) -> f32, i: &dyn Fn(f32) -> f32, du: f32, di: f32, span_us: u32| -> Vec<u16> {
+            let mut b = vec![0u16; BUF_MIN];
+            let n = 1000;
+            for k in 0..n {
+                let t_us = k as u32 * 100;
+                let t = t_us as f32 * 1e-6;
+                let c = if k % 2 == 0 { u(t) / sc.su + sc.ou } else { i(t) / sc.si + sc.oi };
+                b[k] = (c.round().clamp(-32768.0, 32767.0) as i16) as u16;
+                b[T_AT + k] = (t_us / T_UNIT_US) as u16;
+            }
+            pwave::columns(&mut b, &Cap { n, y_first: true, ..Cap::default() }, &sc, du, di, span_us);
+            b
+        };
+        let w = 2.0 * std::f32::consts::PI * 50.0;
+        let mains = mk(&|t| 325.0 * (w * t).sin(), &|t| 1.414 * (w * t - 1.047).sin(), 100.0, 0.5, 100_000);
+        let dc = mk(&|t| 12.0 + 0.3 * (w * 2.0 * t).sin(), &|t| 2.0 + 0.4 * (w * 2.0 * t).sin(), 5.0, 1.0, 50_000);
+        let ol = mk(&|t| 900.0 * (w * t).sin(), &|t| -14.0 * (w * t).sin(), 200.0, 5.0, 200_000);
+        let v = |u: &'static str, i: &'static str, p: &'static str, f: &'static str, u_div: &'static str, i_div: &'static str, tb: &'static str, run: bool, u_ol: bool, i_ol: bool| Vals { u, i, p, f, u_div, i_div, tb, run, u_ol, i_ol };
+        let cases: Vec<(&str, Vals, Option<&Vec<u16>>)> = vec![
+            ("w01-pwave-mains", v("U 230.0V", "I 999.8mA", "P 115.0W", "f 50.00Hz", "100V", "500mA", "10ms/div", true, false, false), Some(&mains)),
+            ("w02-pwave-dc", v("U 12.00V", "I 2.010A", "P 24.13W", "f --Hz", "5V", "1A", "5ms/div", true, false, false), Some(&dc)),
+            ("w03-pwave-ol", v("U OL", "I OL", "P -8888W", "f 99.99Hz", "200V", "5A", "20ms/div", false, true, true), Some(&ol)),
+            ("w04-pwave-empty", v("U --V", "I --A", "P --W", "f --Hz", "", "", "2ms/div", false, false, false), None),
+            ("w05-pwave-wide", v("U 999.9mV", "I 999.9uA", "P -999.9mW", "f 999.9Hz", "500mV", "500uA", "20ms/div", true, false, false), Some(&mains)),
+        ];
+        for (name, vals, b) in cases.iter() {
+            host::reset(0);
+            ui::pwv::page(vals);
+            ui::pwv::plot(b.map(|b| &b[COL_AT..COL_AT + 2 * PW]));
+            ck.check_opts(&format!("pwave/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let (_, o, _) = &cases[(cases.iter().position(|c| c.0 == *name).unwrap() + 1) % cases.len()];
+            ui::pwv::page(o);
+            ui::pwv::plot(b.map(|b| &b[COL_AT..COL_AT + 2 * PW]));
+            ui::pwv::live(vals);
+            ck.same_as(&format!("pwave-live/{name}"), &want);
+        }
+        // Power Settings with the Wave button pressed.
+        host::reset(0);
+        ui::pw::settings_page(&pw_cases()[0].1);
+        ui::pw::settings_press(&pw_cases()[0].1, ui::pw::PS_WAVE, true);
+        save(&out, "w06-power-settings-wave");
+    }
+
+    // 6z3. The LCR page (src/ui_lcr.rs): a capacitor, the widest texts of
+    //      every field, parallel R, OL, the empty page (before the first
+    //      frame, stopped); the live parts drawn over another page equal a
+    //      fresh page with those texts. Power Settings with LCR pressed.
+    {
+        use ui::lcr::Vals;
+        let v = |title: &'static str, name: &'static str, val: &'static str, unit: &'static str, cells: [&'static str; 6], info: &'static str, fi: u8, model: u8, run: bool| Vals {
+            title,
+            name,
+            val,
+            unit,
+            cells,
+            info,
+            info_fg: ui::lcr::C_PLAIN,
+            fi,
+            model,
+            run,
+        };
+        let cases: Vec<(&str, Vals)> = vec![
+            ("l01-lcr-cap", v("1kHz  I 60mA", "Cs", "4.700", "uF", ["ESR 123.4m\u{3a9}", "D 0.0123", "Q 81.30", "|Z| 33.86\u{3a9}", "Phase -89.30", "I 21.30mA"], "Short stored", 1, 0, true)),
+            ("l02-lcr-wide", v("100Hz  I 600uA", "Lp", "-999.9", "mH", ["Rp 999.9k\u{3a9}", "D 0.0001", "Q >999", "|Z| 999.9k\u{3a9}", "Phase -180.0", "I 999.9uA"], "R cal failed: not a resistor", 0, 2, true)),
+            ("l03-lcr-res", v("100Hz  I 6mA", "Rs", "1.000", "k\u{3a9}", ["ESR 1.000k\u{3a9}", "D >999", "Q 0.0012", "|Z| 1.000k\u{3a9}", "Phase 0.07", "I 707.1uA"], "Open failed: remove the DUT", 0, 1, true)),
+            ("l04-lcr-ol", v("1kHz  I 600uA", "Cp", "OL", "", ["Rp --", "D --", "Q --", "|Z| --", "Phase --", "I 1.234uA"], "Short: clips joined...", 1, 0, false)),
+            ("l05-lcr-empty", v("1kHz  I 60mA", "", "", "", ["ESR --", "D --", "Q --", "|Z| --", "Phase --", "I --"], "GEN-DUT-A, GEN gnd-COM, V at GEN", 1, 0, false)),
+            ("l06-lcr-pf", v("1kHz  I 600uA", "Cp", "999.9", "pF", ["Rp 99.99M\u{3a9}", "D 0.0010", "Q 999.0", "|Z| 159.2k\u{3a9}", "Phase -89.94", "I 6.664uA"], "Open stored", 1, 2, true)),
+        ];
+        for (name, vals) in cases.iter() {
+            host::reset(0);
+            ui::lcr::page(vals);
+            ck.check_opts(&format!("lcr/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let (_, o) = &cases[(cases.iter().position(|c| c.0 == *name).unwrap() + 1) % cases.len()];
+            ui::lcr::page(o);
+            ui::lcr::live(vals);
+            ck.same_as(&format!("lcr-live/{name}"), &want);
+        }
+        host::reset(0);
+        ui::pw::settings_page(&pw_cases()[0].1);
+        ui::pw::settings_press(&pw_cases()[0].1, ui::pw::PS_LCR, true);
+        save(&out, "l07-power-settings-lcr");
+    }
+
+    for (msg, (n, scene)) in ck.seen.iter().filter(|(m, _)| !printed.contains(*m)) {
+        println!("{n:6} x  {msg}   [first: {scene}]");
+    }
     // Clipped texts of draws after the last check (saved scenes only).
     for m in unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) } {
         ck.violations += 1;

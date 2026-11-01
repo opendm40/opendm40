@@ -296,6 +296,43 @@ pub fn run(out: &str) -> usize {
         ui::pw::settings_page(&dmm::pw::PowerVals { v_auto: true, i_auto: true, comp: false, ..pcs[0].1 });
         ui::pw::settings_status(&p, 0, ui::pw::HELP_COUP);
         save1(out, "power-settings");
+        // Power Wave: 230 V 50 Hz, 1 A at PF 0.5, 10 ms/div.
+        {
+            use crate::pwave::{Cap, Scale, BUF_MIN, COL_AT, PW, T_AT, T_UNIT_US};
+            let sc = Scale { su: 8.0 * 1.25 / 262_144.0 * 1000.0, ou: 0.0, si: 8.0 * 1.25 / 262_144.0 / 0.01, oi: 0.0 };
+            let mut b = vec![0u16; BUF_MIN];
+            let w = 2.0 * std::f32::consts::PI * 50.0;
+            let n = 1000;
+            for k in 0..n {
+                let t_us = k as u32 * 100 + 3000;
+                let t = t_us as f32 * 1e-6;
+                let c = if k % 2 == 0 { 325.27 * (w * t).sin() / sc.su } else { 1.4142 * (w * t - 1.0472).sin() / sc.si };
+                b[k] = (c.round() as i16) as u16;
+                b[T_AT + k] = ((t_us - 3000) / T_UNIT_US) as u16;
+            }
+            crate::pwave::columns(&mut b, &Cap { n, y_first: true, ..Cap::default() }, &sc, 100.0, 0.5, 100_000);
+            host::reset(0);
+            ui::pwv::page(&ui::pwv::Vals { u: "U 230.0V", i: "I 1.000A", p: "P 115.0W", f: "f 50.00Hz", u_div: "100V", i_div: "500mA", tb: "10ms/div", run: true, u_ol: false, i_ol: false });
+            ui::pwv::plot(Some(&b[COL_AT..COL_AT + 2 * PW]));
+            ck.check_opts("manual/power-wave", &page, false);
+            save1(out, "power-wave");
+        }
+        // LCR: a 4.7 uF film capacitor at 1 kHz, the short stored.
+        host::reset(0);
+        ui::lcr::page(&ui::lcr::Vals {
+            title: "1kHz  I 60mA",
+            name: "Cs",
+            val: "4.702",
+            unit: "uF",
+            cells: ["ESR 41.20m\u{3a9}", "D 0.0012", "Q 820.9", "|Z| 33.85\u{3a9}", "Phase -89.93", "I 17.45mA"],
+            info: "Short stored",
+            info_fg: ui::lcr::C_OK,
+            fi: 1,
+            model: 0,
+            run: true,
+        });
+        ck.check_opts("manual/lcr", &page, false);
+        save1(out, "lcr");
 
         // DC: a 12 V supply into a 2 A load, energy counting; the main
         // value stepped to Wh; the current-limit countdown.

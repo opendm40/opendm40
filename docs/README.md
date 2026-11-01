@@ -53,6 +53,8 @@ All documentation of opendm40, by reader. Start at the
   the power meter and the wrong-connection alerts.
 - [inrush-current.md](../firmware/docs/inrush-current.md): inrush current
   capture.
+- [lcr.md](../firmware/docs/lcr.md): the LCR meter (generator drive, U / I
+  fit on the power meter's path).
 - [dmm-input-scope-feasibility.md](../firmware/docs/dmm-input-scope-feasibility.md):
   the HY3131 AD2 stream: the Wave view and the fast logger.
 - [acdc-approaches.md](../firmware/docs/acdc-approaches.md): AC+DC in other

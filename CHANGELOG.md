@@ -9,6 +9,13 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **LCR meter:** L, C or R with ESR, D, Q, |Z| and the phase at 100 Hz or
+  1 kHz, driven by the generator, U and I on the power meter's path
+  (Power Settings > LCR, SCPI `LCR`;
+  [manual](docs/manual/README.md#lcr-meter)).
+- **Power Wave:** the power meter's voltage and current as two waveforms
+  with their own scales, U, I, P and f of the picture (Power Settings >
+  Wave, SCPI `POW:WAVE`; [manual](docs/manual/README.md#power-wave)).
 - **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):

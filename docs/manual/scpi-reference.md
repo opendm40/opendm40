@@ -505,6 +505,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `[SENSe:]POWer:PHASe[?]` | `-127` .. `127` | `0` | both |
 | `[SENSe:]POWer:PHASe:CALibrate[?]` | `[REACtive]` | `NONE`, `RUN`, `OK`, `FLAT`, `NOTREACTIVE` or `RANGE`, then the phase setting: `OK,-3` | both |
 | `[SENSe:]POWer:CYCle?` | | `<discarded>,<P period ms>,<full cycle ms>`: `2,642,1284` | both |
+| `[SENSe:]POWer:WAVE[:STATe][?]` | `ON` or `OFF` | `<open 1/0>,<frames>,<Urms>,<Irms>,<P>,<F>,<points per channel>,<repeated reads>,<unreadable points>,<I zero A>,<I gain>,<checked I A>,<on the rail 1/0>,<closed by: 0 -, 1 above 10 A, 2 over range, 3 current limit>` | both |
 | `[SENSe:]POWer:ZERO[?]` | none (start) or `CLEar` | `<result>,SET\|NONE,<V zero>,<6 current zeros>,<6 DC zeros>` | both |
 | `[SENSe:]POWer:VOLTage:CALibrate[?]` | none (start) or `DEFault` | `<result>,<V range>,<gain>,SELF\|FACT` | both |
 | `[SENSe:]POWer:VOLTage:GAIN?` | | the four V range gains | both |
@@ -533,6 +534,13 @@ and `MEASure:POWer?` then give the real power P in W.
 - `ZERO` (leads open, nothing in A, about 12 s) measures the zero offsets;
   `ZERO CLEar` removes them. Results: `RUN`, `OK`, `SIGNAL`, `SMALL`, `BIG`,
   `UNSTABLE`, `RANGE`, `ABORT`, `METHOD`, `NONE`.
+- `WAVE ON` opens the [Power Wave](README.md#power-wave) page (`OFF`
+  closes it); refused with `METHod ALTernate` or during `ZERO` /
+  `VOLTage:CALibrate`. The query gives the last picture's values (RMS over
+  its whole cycles; `+9.91E37` when none), the read counters and what was taken from the DC coupling's current
+  reading: a zero in A (0: none; without `POW:ZERO`) or a gain (1: none;
+  with it), then the page's last current check and why it closed the page.
+  While the page is open the power meter does not measure.
 - `VOLTage:CALibrate` (a steady AC or DC voltage of 10 .. 70 % of the range
   on V/COM) matches the V channel's gain on the present range to the meter's
   voltmeter; `DEFault` returns to the factory-derived gain.
@@ -637,6 +645,31 @@ and `MEASure:POWer?` then give the real power P in W.
   fields with `Data stale`; a peak beyond the range is `+9.9E37`.
 - The trace has 19200 samples at 9600 Hz, the trigger at sample 1920. Read
   it in pieces: `INR:DATA? 0,3000`, `INR:DATA? 3000,3000`, ...
+
+## LCR meter
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `LCR[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
+| `LCR:FREQuency[?]` | `100` or `1000` (Hz) | `1000` | both |
+| `LCR:MODel[?]` | `AUTO`, `SERies` or `PARallel` | `AUTO`, `SER` or `PAR` | both |
+| `LCR:FETCh?` | | `<frames>,<f Hz>,<\|Z\|>,<phase deg>,<R>,<X>,<L H>,<C F>,<D>,<Q>,L\|C\|R\|NONE,SER\|PAR,<I range A>,<corrections>` | both |
+| `LCR:CORRection:SHORt` | | Stores the short (clips joined, 4 frames). | both |
+| `LCR:CORRection:OPEN` | | Stores the open (no component, 4 frames). | both |
+| `LCR:CORRection:PHASe` | | Stores the delay of the current range (a resistor, 4 frames). | both |
+| `LCR:CORRection:CLEar` | | Removes all corrections. | both |
+| `LCR:CORRection[?]` | | `<short R>,<short X>,<open G>,<open B>,<delay 600uA us>,<delay 6mA us>,<delay 60mA us>,<job running 1/0>` at the frequency in force | both |
+
+- `LCR ON` opens the LCR page from the power meter (`CONFigure:POWer`
+  first) and starts the generator; `OFF` closes it and restores the
+  generator and the power meter's ranges. Wiring and method:
+  [firmware/docs/lcr.md](../../firmware/docs/lcr.md).
+- R, X, L and C follow the model (series: ESR, Ls, Cs; parallel: Rp, Lp,
+  Cp). A value with none is `+9.91E37`. `<corrections>` bits: 1 short
+  (100 Hz), 2 open (100 Hz), 16 short (1 kHz), 32 open (1 kHz), 256 << k
+  the delay of range k.
+- The result of a correction is on the page's state line; the corrections
+  are lost at power-off.
 
 ## Data logging (LOG)
 

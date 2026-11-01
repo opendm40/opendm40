@@ -686,6 +686,10 @@ pub const PS_VCAL: u8 = 27;
 pub const PS_LIMITS: u8 = 31;
 /// The Record page (View::Record), beside Limits as on the DMM range pages.
 pub const PS_RECORD: u8 = 32;
+/// Power Wave (View::PWave), the coupling row's fourth column.
+pub const PS_WAVE: u8 = 33;
+/// The LCR meter (View::Lcr), the coupling row's fifth column.
+pub const PS_LCR: u8 = 34;
 /// The bottom row, left to right: Reset Wh, Wiring, Limits, Record, OK
 /// (8..472, 6 px gaps; Reset Wh, 87 px of text, the widest button).
 const PS_ROW5: [(u8, &str); 5] =
@@ -701,7 +705,13 @@ fn ps_cell(row: i16, col: i16) -> sf::Rect {
     rect(44 + 87 * col, 46 + 44 * row, 83, 38)
 }
 
-const PS_ROW4: [i16; 3] = [8, 162, 319];
+/// The coupling row DC / AC / AC+DC, Wave (Power Wave, app_pwave.rs) and
+/// LCR (app_lcr.rs): five 88 px columns, 6 px gaps (8..472).
+const PS_ROW4: [i16; 5] = [8, 102, 196, 290, 384];
+
+fn ps_row4(i: usize) -> sf::Rect {
+    rect(PS_ROW4[i], 182, 88, 38)
+}
 
 fn ps_button(r: sf::Rect, t: &str, sel: bool) {
     let c = if sel { SEL } else { 0x2966 };
@@ -736,8 +746,10 @@ pub fn settings_page(pv: &PowerVals) {
     ps_button(ps_cell(2, 3), "Zero", false);
     ps_button(ps_cell(2, 4), "V cal", false);
     for (i, c) in PS_COUPS.iter().enumerate() {
-        ps_button(rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(*c), pv.coup == *c);
+        ps_button(ps_row4(i), pw::coup_name(*c), pv.coup == *c);
     }
+    ps_button(ps_row4(3), "Wave", false);
+    ps_button(ps_row4(4), "LCR", false);
     for (i, &(c, t)) in PS_ROW5.iter().enumerate() {
         if c == PS_RECORD {
             super::record_button(ps_row5(i), false);
@@ -765,8 +777,10 @@ pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
         PS_VCAL => (ps_cell(2, 4), "V cal", false),
         PS_COUP..=30 => {
             let i = (c - PS_COUP) as usize;
-            (rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
+            (ps_row4(i), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
         }
+        PS_WAVE => (ps_row4(3), "Wave", false),
+        PS_LCR => (ps_row4(4), "LCR", false),
         PS_RECORD => return super::record_button(ps_row5(3), on),
         _ => match PS_ROW5.iter().position(|&(k, _)| k == c) {
             Some(i) => (ps_row5(i), PS_ROW5[i].1, false),
@@ -808,9 +822,15 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
             }
         }
     }
-    for (i, &bx) in PS_ROW4.iter().enumerate() {
-        if hit(rect(bx, 182, 150, 38), x, y) {
-            return Some(PS_COUP + i as u8);
+    for i in 0..PS_ROW4.len() {
+        let r = ps_row4(i);
+        // Touch boxes up to the 6 px gaps' middle.
+        if hit(rect(r.x - 3, r.y, r.w + 6, r.h), x, y) {
+            return Some(match i {
+                3 => PS_WAVE,
+                4 => PS_LCR,
+                _ => PS_COUP + i as u8,
+            });
         }
     }
     for (i, (c, _)) in PS_ROW5.iter().enumerate() {

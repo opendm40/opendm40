@@ -134,6 +134,14 @@ impl App {
                         self.record_open(clk);
                         return true;
                     }
+                    Some(ui::pw::PS_WAVE) => {
+                        let _ = self.pwave_open(clk);
+                        return true;
+                    }
+                    Some(ui::pw::PS_LCR) => {
+                        let _ = self.lcr_open(clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
@@ -474,6 +482,23 @@ impl App {
                 out.put_bytes(pw::CAL_NAMES[self.dmm.pw.cal_res.min(5) as usize].as_bytes());
                 out.put_bytes(b",");
                 put_i(out, &mut t, self.dmm.pw.sph as i64);
+                true
+            }
+            Pow::Wave(Some(true)) => {
+                if self.pwave_open(clk).is_err() {
+                    out.set_err("Settings conflict");
+                }
+                false
+            }
+            Pow::Wave(Some(false)) => {
+                if self.view == View::PWave {
+                    let v = self.back_view;
+                    self.show(v, clk);
+                }
+                false
+            }
+            Pow::Wave(None) => {
+                self.pwave_query(out);
                 true
             }
             Pow::Cycle => {

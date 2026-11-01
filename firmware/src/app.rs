@@ -43,6 +43,14 @@ mod app_ch2;
 mod app_inrush;
 #[path = "app_inrush_live.rs"]
 mod app_inrush_live;
+/// Power Wave: the power meter's U and I waveforms (View::PWave).
+#[path = "app_pwave.rs"]
+mod app_pwave;
+pub use app_pwave::pwave_on;
+/// The LCR meter (View::Lcr; region C).
+#[path = "app_lcr.rs"]
+mod app_lcr;
+pub use app_lcr::lcr_on;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
@@ -145,7 +153,7 @@ fn next_rate(r: dmm::Rate) -> dmm::Rate {
 fn is_page(v: View) -> bool {
     matches!(
         v,
-        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::PWave | View::Lcr | View::TouchTest
     )
 }
 
@@ -775,6 +783,14 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
+            if self.view == View::PWave {
+                // Leaving Power Wave: the power row comes back (main.rs).
+                self.pwave_close();
+            }
+            if self.view == View::Lcr {
+                // Leaving LCR: the ranges and the generator as they were.
+                self.lcr_close(clk);
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -813,6 +829,9 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
+            View::PWave => (true, false),
+            // LCR: the DMM side and the generator's.
+            View::Lcr => (true, true),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -890,6 +909,8 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
+            View::PWave => self.pwave_page(),
+            View::Lcr => self.lcr_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 self.with_temp_page(None);
@@ -1868,6 +1889,16 @@ impl App {
             self.inrush_tick(now);
             return;
         }
+        // Power Wave: a frame when due (app_pwave.rs).
+        if self.view == View::PWave {
+            self.pwave_tick(clk);
+            return;
+        }
+        // LCR: a frame when due (app_lcr.rs).
+        if self.view == View::Lcr {
+            self.lcr_tick(clk);
+            return;
+        }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
         // not drive here)? The reading loop skips drawing while held
         // (meter.update returns None), so repaint the frozen value and the
@@ -2153,7 +2184,8 @@ impl App {
 
     /// Settings -> backup SRAM words.
     fn persist_words(&self) -> [u32; crate::persist::WORDS] {
-        let g = &self.gen.s;
+        // While the LCR page is open: the user's generator, not its drive.
+        let g = &self.persisted_gen();
         // The MCX settings (the wave view's are not persisted).
         let sc = &self.scope.mcx_settings();
         let mut p = [0u32; crate::persist::WORDS];
@@ -3197,6 +3229,7 @@ impl App {
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
+            || app_lcr::lcr().measuring()
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
@@ -3427,6 +3460,10 @@ impl App {
             Some("Settings conflict: Wave view")
         } else if self.view == View::Inrush {
             Some("Settings conflict: inrush page")
+        } else if self.view == View::PWave {
+            Some("Settings conflict: Power Wave")
+        } else if self.view == View::Lcr {
+            Some("Settings conflict: LCR")
         } else {
             None
         }
@@ -3517,7 +3554,7 @@ impl App {
                     View::Keypad if self.kp_dmm() => self.kp_back(),
                     View::Record => self.rec_back,
                     View::Limits => self.limits_back(),
-                    View::Menu | View::Range | View::Keypad | View::Inrush => self.back_view,
+                    View::Menu | View::Range | View::Keypad | View::Inrush | View::PWave | View::Lcr => self.back_view,
                     _ => View::Menu,
                 };
                 self.show(v, clk);
@@ -3525,6 +3562,9 @@ impl App {
             1 => match self.view {
                 // The inrush page: RUN = Arm / Cancel.
                 View::Inrush => self.inrush_button(clk),
+                // Power Wave: RUN = RUN / STOP.
+                View::PWave => self.pwave_run(now),
+                View::Lcr => self.lcr_run(now),
                 View::Gen => {
                     let mut st = self.gen.s;
                     st.on = !st.on;
@@ -3542,7 +3582,7 @@ impl App {
                 }
             },
             // The inrush page holds the 10 A range: no autorange.
-            2 if self.view == View::Inrush => self.beep(now, 300),
+            2 if matches!(self.view, View::Inrush | View::PWave | View::Lcr) => self.beep(now, 300),
             // The generator's Signal page (and its keypad) has no AUTO
             // function: the key does nothing there (it used to set the
             // DMM's autorange).
@@ -3567,7 +3607,7 @@ impl App {
                 // No range page (continuity / diode, frequency): the Hold &
                 // Limits page.
                 View::Dmm | View::DmmScope => self.show(View::Limits, clk),
-                View::Range | View::Limits | View::Record | View::Inrush => {
+                View::Range | View::Limits | View::Record | View::Inrush | View::PWave | View::Lcr => {
                     let v = self.back_view;
                     self.show(v, clk)
                 }
@@ -3657,6 +3697,8 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            View::PWave => self.pwave_tap(clk, x, y),
+            View::Lcr => self.lcr_tap(clk, x, y),
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
@@ -4787,6 +4829,7 @@ impl App {
                 false
             }
             C::Pow(c) => self.pw_scpi(clk, c, out),
+            C::Lcr(c) => self.lcr_scpi(clk, c, out),
             C::SysRail(Some(b)) => {
                 self.set_rails_both(b, clk);
                 self.redraw |= self.view == View::Settings;

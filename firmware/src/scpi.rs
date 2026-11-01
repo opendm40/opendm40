@@ -1055,6 +1055,8 @@ pub enum Cmd {
     DbgHwTrig(u8, bool),
     /// Power meter (dmm::pw): CONF:POW, FETC:POW:ALL?, [SENS:]POW:..., DBG:POW:...
     Pow(Pow),
+    /// LCR meter (app_lcr.rs): LCR:...
+    Lcr(Lcr),
     /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
     FetchBurden,
     /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
@@ -1339,11 +1341,78 @@ pub enum Pow {
     /// :VOLTage:CALibrate DEFault (1: the factory-derived gain again),
     /// :VOLTage:CALibrate? (2). :VOLTage:GAIN? (3): the 4 gains in force.
     VCal(u8),
+    /// :WAVE[:STATe] ON|OFF / ? (Power Wave, app_pwave.rs).
+    Wave(Option<bool>),
     DbgRow,
     DbgPoke(u8, u8),
     DbgStat(u8),
     DbgRaw,
     DbgDisc(Option<u8>),
+}
+
+/// LCR meter commands (`parse_lcr`, docs/lcr.md).
+#[derive(Clone, Copy)]
+pub enum Lcr {
+    /// LCR[:STATe] ON|OFF / ?: the page.
+    State(Option<bool>),
+    /// LCR:FREQuency 100|1000 / ? (Hz).
+    Freq(Option<u32>),
+    /// LCR:MODel AUTO|SERies|PARallel / ? (0, 1, 2).
+    Model(Option<u8>),
+    /// LCR:FETCh?
+    Fetch,
+    /// LCR:CORRection:SHORt (0) / OPEN (1) / PHASe (2): start the job.
+    Corr(u8),
+    /// LCR:CORRection:CLEar
+    CorrClear,
+    /// LCR:CORRection?
+    CorrQuery,
+}
+
+/// Parse an LCR command (header LCR; region C: only for that header).
+#[inline(never)]
+fn parse_lcr(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Lcr, &'static str> {
+    const BAD: &str = "Illegal parameter value";
+    const HDR: &str = "Undefined header";
+    let a = trim(arg);
+    let state = |q: bool| if q { Ok(None) } else { on_off(a).map(Some).ok_or(BAD) };
+    match parts.get(1) {
+        None => state(query).map(Lcr::State),
+        Some(p) if kw(p, "STATe") => state(query).map(Lcr::State),
+        Some(p) if kw(p, "FREQuency") => {
+            if query {
+                return Ok(Lcr::Freq(None));
+            }
+            match parse_num_u(a, b"HZ") {
+                Some(f) if (f - 100.0).abs() < 0.5 => Ok(Lcr::Freq(Some(100))),
+                Some(f) if (f - 1000.0).abs() < 0.5 => Ok(Lcr::Freq(Some(1000))),
+                _ => Err(BAD),
+            }
+        }
+        Some(p) if kw(p, "MODel") => {
+            if query {
+                Ok(Lcr::Model(None))
+            } else if kw(a, "AUTO") {
+                Ok(Lcr::Model(Some(0)))
+            } else if kw(a, "SERies") {
+                Ok(Lcr::Model(Some(1)))
+            } else if kw(a, "PARallel") {
+                Ok(Lcr::Model(Some(2)))
+            } else {
+                Err(BAD)
+            }
+        }
+        Some(p) if kw(p, "FETCh") && query => Ok(Lcr::Fetch),
+        Some(p) if kw(p, "CORRection") => match parts.get(2) {
+            None if query => Ok(Lcr::CorrQuery),
+            Some(leaf) if !query && kw(leaf, "SHORt") => Ok(Lcr::Corr(0)),
+            Some(leaf) if !query && kw(leaf, "OPEN") => Ok(Lcr::Corr(1)),
+            Some(leaf) if !query && kw(leaf, "PHASe") => Ok(Lcr::Corr(2)),
+            Some(leaf) if !query && kw(leaf, "CLEar") => Ok(Lcr::CorrClear),
+            _ => Err(HDR),
+        },
+        _ => Err(HDR),
+    }
 }
 
 /// The message is a power-meter command (`parse_pow`).
@@ -1535,6 +1604,9 @@ fn parse_pow(parts: &[&[u8]], arg: &[u8], query: bool) -> Result<Pow, &'static s
     }
     if kw(l0, "CYCle") && query {
         return Ok(Pow::Cycle);
+    }
+    if kw(l0, "WAVE") && l1.map_or(true, |p| kw(p, "STATe")) {
+        return state(query).map(Pow::Wave);
     }
     if kw(l0, "METHod") {
         return if query {
@@ -2228,6 +2300,10 @@ impl Scpi {
                         None => self.put(b"0,\"No error\""),
                     }
                 }
+                _ if kw(p0, "LCR") => match parse_lcr(parts, arg, query) {
+                    Ok(c) => out = Out::Instr(Cmd::Lcr(c)),
+                    Err(e) => self.err_arg(no_arg, e),
+                },
                 _ if is_pow(parts, query) => match parse_pow(parts, arg, query) {
                     Ok(c) => out = Out::Instr(Cmd::Pow(c)),
                     Err(e) => self.err_arg(no_arg, e),

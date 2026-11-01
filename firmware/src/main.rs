@@ -19,6 +19,8 @@ mod hyspi;
 mod lcd;
 mod logger;
 mod inrush;
+mod pwave;
+mod lcr;
 mod ad2exp;
 mod ad2pll;
 
@@ -1668,7 +1670,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // `busy`: the logger owns the HY3131 (a host session or the wave
         // view: no DMM poll, no BT serve); `logging`: a host session, which
         // also freezes the GUI (the wave view is a live scope page).
-        let busy = logger.active();
+        // Power Wave (app_pwave.rs) samples the HY3131 itself on its page.
+        let busy = logger.active() || app::pwave_on() || app::lcr_on();
         // A disk session (fastlog.rs) freezes the GUI from its Prep to its
         // last FAT write; tap to stop (below).
         // (Not the inrush save: no logger runs, the page stays live.)
@@ -1685,7 +1688,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             app.invalidate();
         }
         logging_prev = busy;
-        app.logger_busy = busy;
+        app.logger_busy = logger.active();
 
         // No drawing right after a GRAM read-back, so a multi-request
         // screenshot does not tear (the first frame was drawn before USB
