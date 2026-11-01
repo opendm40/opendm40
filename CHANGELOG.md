@@ -19,6 +19,9 @@ section named after the tag as the release notes; how to cut a release:
   ON restarts the multimeter after a power-off in the function, range, rate
   and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
 - **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
+- **Scope: 5 and 2 mV/div**, a digital zoom of 10 mV/div (the front end
+  has no known higher gain): the same resolution, drawn larger. SCPI
+  `CHAN1:SCAL 0.005` / `0.002`.
 - **Russian README and user manual:** [README.ru.md](README.ru.md) and
   [docs/manual/README.ru.md](docs/manual/README.ru.md), with a language
   switch at the top of each.

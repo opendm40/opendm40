@@ -2261,8 +2261,9 @@ impl App {
         // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39]
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
-        // records); p[11] bits 16..31: the removed scope drag hold-to-grab
-        // ms (written 0, ignored on load).
+        // records); bits 28..29: the V/div zoom of range 0 (Settings::vzoom,
+        // 0 in older records: 10 mV/div); p[11] bits 16..31: the removed scope
+        // drag hold-to-grab ms (written 0, ignored on load).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2274,7 +2275,7 @@ impl App {
             p[w] = l.lo.unwrap_or(0.0).to_bits();
             p[w + 1] = l.hi.unwrap_or(0.0).to_bits();
         }
-        p[6] |= (sc.hpos as u32 + 1) << 18;
+        p[6] |= (sc.hpos as u32 + 1) << 18 | (sc.vzoom.min(2) as u32) << 28;
         // Scope page: colour, brightness, tap-step mode (p[1] bits 17..29),
         // drag mode, swipes, persistence, pressed feedback, grid intensity
         // (p[11] bits 1..6, 12..15); 0 = default everywhere.
@@ -2465,6 +2466,7 @@ impl App {
         sc.probe = if scope::PROBES.contains(&pr) { pr } else { 1.0 };
         let h = (p[6] >> 18 & 0x3FF) as i32;
         sc.hpos = if h == 0 { 200 } else { h - 1 };
+        sc.vzoom = (p[6] >> 28 & 3) as u8; // apply: 0 unless range 0
         // The saved level row is at the saved scale: its volts from there.
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
@@ -5360,7 +5362,8 @@ impl App {
             }
             C::ChScale(Some(v)) => {
                 // V/div at the probe tip (as the screen label), like TRIG:LEV.
-                sc.range = scope::VDIV.iter().position(|&d| d * sc.probe >= v * 0.999).unwrap_or(9);
+                // 5 / 2 mV/div: range 0's digital zoom (scope::VSTEPS).
+                sc.set_vidx(scope::VSTEPS.iter().position(|&d| d * sc.probe >= v * 0.999).unwrap_or(scope::VIDX_MAX));
                 None
             }
             C::ChScale(None) => {
