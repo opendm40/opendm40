@@ -59,9 +59,13 @@ const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0: the raw u16 ring every acquisition
 /// mode writes (88 KB, the SRAM budget: docs/native-boot.md "Memory
 /// budget"). Debug builds with RAM-hungry features (dbg-touch 1.9 KB,
-/// acdc-trace 1.8 KB) give up 1 K samples each to stay above the 8 KiB
-/// SRAM floor.
-pub const CAP: usize = (44 - cfg!(feature = "dbg-touch") as usize - cfg!(feature = "acdc-trace") as usize) * 1024;
+/// acdc-trace 1.8 KB, acdc-meth 0.5 KB) give up 1 K samples each to stay
+/// above the 8 KiB SRAM floor.
+pub const CAP: usize = (44
+    - cfg!(feature = "dbg-touch") as usize
+    - cfg!(feature = "acdc-trace") as usize
+    - cfg!(feature = "acdc-meth") as usize)
+    * 1024;
 /// The part of BUF lent to the inrush capture (its ring length, as before
 /// the record grew).
 pub const INRUSH_LEN: usize = 26 * 1024;
