@@ -645,12 +645,18 @@ pub const PK2_NEG_THR_DCV: i32 = 167_800;
 /// pickup on PB1 stays below it: not measured.
 pub const R21_DCV_PB1: u8 = 0x8B;
 
-/// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): DC V
-/// 6 V (1 r0), DC mV (3), ohm (10; not 600 Mohm: the caller), plain (not
-/// AC+DC), the comparator sentinel on, and not dropped by
-/// DBG:SENTinel:VARiant bit 7 (VAR_NEG_OFF, an A/B of the readings).
+/// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): none.
+/// AD2 never runs in a row whose AD1 reading is shown (datasheet 13.1 note
+/// 7; docs/acdc-approaches.md "AD1 offset with AD2/AD3 on"): with the leg's
+/// OP2 / AD2 on, DC V 6 V read 0.32 mV low at +4.0 V (device 2026-11-01,
+/// alternating blocks against VAR_NEG_OFF, R21 at the stock 0xDD in both;
+/// a user's -4 V read 0.7 mV low against 0.3.0), ~0.7 mV low with AD2's
+/// reference on REFO instead of PB6. It was DC V 6 V, DC mV and ohm
+/// (PR #179); DC mV / ohm: not measured. A reversed current in A is then
+/// not seen in those rows (the comparator sees one polarity, NEGATIVE LEG).
 pub fn neg_leg(mode: u8, range: u8, acdc: bool, kind: Kind, var: u8) -> bool {
-    kind == Kind::CmpA && !acdc && var & VAR_NEG_OFF == 0 && matches!((mode, range), (1, 0) | (3, _) | (10, _))
+    let _ = (mode, range, acdc, kind, var);
+    false
 }
 
 /// The negative leg's row: OP2 (x1) on PB1, AD2 = OP2O - PB3 at IG 2.0,
@@ -2975,9 +2981,13 @@ mod tests {
             assert_eq!(s.alert == Alert::AJack, aj, "{lo} {hi}");
         }
         // the rows
-        assert!(neg_leg(1, 0, false, Kind::CmpA, 0) && neg_leg(3, 1, false, Kind::CmpA, 0) && neg_leg(10, 6, false, Kind::CmpA, 0));
-        assert!(!neg_leg(1, 0, true, Kind::CmpA, 0) && !neg_leg(15, 0, false, Kind::CmpA, 0));
-        assert!(!neg_leg(1, 0, false, Kind::CmpA, VAR_NEG_OFF) && !neg_leg(1, 0, false, Kind::Off, 0));
+        // AD2 stays off in the rows whose AD1 reading is shown (see neg_leg)
+        for (m, r) in [(1u8, 0u8), (3, 0), (3, 1), (10, 0), (10, 6)] {
+            assert!(!neg_leg(m, r, false, Kind::CmpA, 0), "{m} {r}");
+        }
+        for r in [CFG_F1[0], CFG_F3[0], CFG_F3[1]] {
+            assert_eq!(r[6] & 0x80, 0, "stock row: AD2 off");
+        }
     }
 
     #[test]
