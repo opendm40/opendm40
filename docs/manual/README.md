@@ -1256,10 +1256,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 *The scope page.*
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
-  the record bar, the trigger (edge
-  and level), the Bluetooth symbol while a phone or a computer is connected
-  over Bluetooth, the USB symbol while a computer has the meter connected,
-  the battery.
+  the record bar, the trigger (edge and level), the Bluetooth symbol while a
+  phone or a computer is connected over Bluetooth, the USB symbol while a
+  computer has the meter connected, the battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored
@@ -1317,8 +1316,9 @@ in the left or right half of the graph steps), **Off**.
 
 ### Vertical: V/div, position, coupling, probe
 
-- V/div: 2 mV to 10 V per division (times the probe factor). 5 and 2 mV/div
-  are a digital zoom of 10 mV/div: the same steps of about 0.1 mV, drawn larger.
+- V/div: 2 mV to 10 V per division (times the probe factor). 5 and
+  2 mV/div are a digital zoom of 10 mV/div: the same steps of about 0.1 mV,
+  drawn larger.
 - Tap the **CH1** block's **magnifier +** to zoom in (smaller V/div),
   **magnifier −** to zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you
@@ -1532,9 +1532,9 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
-magnifiers; it starts at CH1's): computed from the generator's settings and timers, not
-measured (the trace is the ideal waveform; a probe on the output shows the
-real one). It is not drawn in roll mode, zoomed out past the record, or
+magnifiers; it starts at CH1's): computed from the generator's settings and
+timers, not measured (the trace is the ideal waveform; a probe on the output
+shows the real one). It is not drawn in roll mode, zoomed out past the record, or
 while a drag or pinch is in progress. While it is on, the edge trigger does
 not use the trigger hardware.
 
@@ -1546,8 +1546,8 @@ AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
-CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps. While it
-is on, the edge trigger does not use the trigger hardware.
+CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps.
+While it is on, the edge trigger does not use the trigger hardware.
 
 
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |
@@ -1580,9 +1580,10 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 **MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
 or DALI, drawn under the trace: a box per byte, errors in red. UART
-recognises Modbus RTU frames by their CRC and shows them above the bytes. Each capture is decoded once: running, one that
-triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
-Zoom and pan show the decoded capture.
+recognises Modbus RTU frames by their CRC and shows them above the bytes.
+Each capture is decoded once: running, one that triggered (not the Auto
+sweep's untriggered ones, not roll); and on STOP. Zoom and pan show the
+decoded capture.
 
 ![The Decode tab](img/scope-decode-tab.png)
 
@@ -1602,7 +1603,8 @@ Zoom and pan show the decoded capture.
   | The frame log | A frame tapped: its waveform |
 
 - **DALI** (lighting bus, 1200 bit/s, no Format / Baud): a box per frame,
-  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…` 24-bit, **ERR** in red.
+  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…`
+  24-bit, **ERR** in red.
 - Settings: protocol (**Off**, **UART**, **DALI**), baud (**Auto** or 300
   to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
   (**Auto** or a level).
@@ -1611,7 +1613,6 @@ Zoom and pan show the decoded capture.
 - In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
   between A and B on the floating multimeter input, up to 4800 baud (9600
   at 1 ms/div), e.g. a slow Modbus bus; decoded on STOP.
-
 - Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs
@@ -1663,8 +1664,8 @@ To open it:
 |---|---|
 | 2 ms/div: one period | A 1.5 A current on the 6 A range, 1.5 A/div |
 
-To leave: tap the **MCX** block (back to the OSC input), press **MENU** or change
-the view.
+To leave: tap the **MCX** block (back to the OSC input), press **MENU** or
+change the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
 meter, nor while a recording runs; the meter says why.
@@ -1695,7 +1696,8 @@ From the left:
 - one state badge, the most important of: **HOLD** / **A-HOLD**, an
   [alert](#the-alerts), **HV** (30 V and more), **REL**, the
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
-  **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
+  **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD
+  every second;
 - the reading and its unit;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,
