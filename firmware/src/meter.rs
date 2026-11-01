@@ -940,12 +940,6 @@ impl Meter {
     }
 }
 
-/// Continuity / diode with the reading over its ceiling: open leads, "0L"
-/// captioned "OPEN" (owner 2026-10-30), not "Overflow".
-pub fn open(r: &Reading) -> bool {
-    r.main.ol && matches!(r.mode, 11 | 12)
-}
-
 /// Display text for a value ("0L" when over range, "--" for no value:
 /// NaN, the power meter's pending reading).
 pub fn text<'a>(buf: &'a mut [u8; 16], v: &Val) -> &'a str {

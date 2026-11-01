@@ -226,8 +226,11 @@ impl App {
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
         let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        // Columns left to right (rising times): one anchor search per frame
+        // and f32 maths per column (`Store::span_run`).
+        let mut run = st.run();
         let mut put = |i: usize, t0: u32, len: f32| {
-            if let Some((lo, hi)) = st.span(t0, len) {
+            if let Some((lo, hi)) = st.span_run(&mut run, t0, len) {
                 let (a, b) = (row(hi), row(lo));
                 out[i] = (a.min(b), a.max(b));
             }
@@ -237,7 +240,7 @@ impl App {
             for i in 0..scope::COLS {
                 // Beyond ~10 s back: older than the store anyway (and the
                 // DWT wrap).
-                let back = (scope::COLS - i) as f64 * per_col as f64;
+                let back = (scope::COLS - i) as f32 * per_col;
                 if back < 2e9 {
                     put(i, end.wrapping_sub(back as u32), per_col);
                 }
@@ -251,15 +254,17 @@ impl App {
         if n < 2 || off + n > rec.len() {
             return;
         }
+        // The frame's first sample; the columns' offsets from it in f32
+        // (a frame spans < 2^31 cycles: ~1 us error at most).
+        let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
+        let kn = (n - 1) as f32 / (scope::COLS - 1) as f32;
         for i in 0..scope::COLS {
             let (a, b) = if n >= scope::COLS {
-                ((i * n / scope::COLS) as f64, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f64)
+                ((i * n / scope::COLS) as f32, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f32)
             } else {
-                let k = (n - 1) as f64 / (scope::COLS - 1) as f64;
-                (i as f64 * k, (i as f64 + 1.0) * k)
+                (i as f32 * kn, (i as f32 + 1.0) * kn)
             };
-            let s = (off as f64 + a) * step as f64;
-            put(i, t0.wrapping_add(s as u64 as u32), ((b - a) * step as f64).max(1.0) as f32);
+            put(i, t0.wrapping_add((a * step) as u32), ((b - a) * step).max(1.0));
         }
     }
 }

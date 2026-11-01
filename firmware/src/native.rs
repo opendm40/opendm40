@@ -208,7 +208,7 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 }
 
 /// Everything before main(), in its own never-inlined frame so the SPI-disk
-/// block buffers (fatren ~9 KiB, calbackup ~2 KiB + scratch, each in its own
+/// block buffers (fatren ~9 KiB, calbackup ~2 KiB + the diskbuf arena, each in its own
 /// never-inlined function too) are popped before main()'s 26 KiB frame is
 /// pushed (review 2026-10-13 B1).
 #[inline(never)]

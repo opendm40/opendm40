@@ -739,10 +739,6 @@ fn at_cluster(t: &Tab, c: u32) -> Option<&VF> {
 
 // --- read cursors ------------------------------------------------------------
 
-/// The CSV generator of the last DLG read (key: SPI start, size), ~0.7 KiB
-/// of .bss; a BMP's chain cursor likewise.
-static mut CSV_CUR: dlog::Slot<(u16, u32)> = dlog::Slot::new();
-
 #[inline(always)]
 fn rd_cyc() -> u32 {
     #[cfg(target_os = "none")]
@@ -751,16 +747,10 @@ fn rd_cyc() -> u32 {
     return 0;
 }
 
-/// The second CSV cursor (`file_read`; TCM .bss like CSV_CUR since the SRAM
-/// audit, docs/native-boot.md; all zero = empty) and the least recently
-/// used one; a cursor at most this far before a read goes on from there.
-static mut CSV_CUR2: dlog::Slot<(u16, u32)> = dlog::Slot::new();
-static mut CSV_LRU: u8 = 0;
-const CUR_NEAR: u32 = 1 << 20;
-
 /// Read-path statistics (DBG:VDISK:RD?): read_block calls, their cycles
-/// (total / 1024, max), CSV generator opens.
-pub static RD: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+/// (total / 1024, max). A BMP's chain cursor (the CSV generators: dlog.rs
+/// `csv_gen`).
+pub static RD: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
 static mut BMP_KEY: (u16, u32) = (0, 0);
 static mut BMP_CUR: core::mem::MaybeUninit<FatFile<FnRaw>> = core::mem::MaybeUninit::uninit();
 
@@ -769,19 +759,6 @@ fn geo() -> Option<(FnRaw, Geo)> {
     let mut d = dlog::disk();
     let g = dlog::geometry(&mut d)?;
     Some((d, g))
-}
-
-/// How far cursor `c` is behind `off` when it holds file `key` (within
-/// CUR_NEAR). A fn, not a closure in `file_read`: a closure's section name
-/// carries this module's path, so the .cold rule put it in region C (device
-/// d8e249d: DBG:ISR? lat_pc = `file_read::{closure#0}`, max_lat 9 us while a
-/// host read the volume during an AD2 19200 stream).
-#[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
-fn near(c: &dlog::Slot<(u16, u32)>, key: (u16, u32), off: u32) -> Option<u32> {
-    match c.peek() {
-        Some((k, p)) if k == key && p <= off && off - p < CUR_NEAR => Some(off - p),
-        _ => None,
-    }
 }
 
 /// Bytes `off..` of table file `e` into `buf` (zeros on a read error).
@@ -802,27 +779,8 @@ fn file_read(e: &VF, off: u32, buf: &mut [u8]) {
         }
         return;
     }
-    // Two cursors: a host that reads two places in turn (an indexer at a
-    // file's head while a copy runs further on) keeps one each. The one
-    // just behind `off` (within CUR_NEAR) of this file, else the one used
-    // least recently (reopened for another file).
-    let slots = unsafe { [&mut *core::ptr::addr_of_mut!(CSV_CUR), &mut *core::ptr::addr_of_mut!(CSV_CUR2)] };
-    let lru = unsafe { &mut *core::ptr::addr_of_mut!(CSV_LRU) };
-    let i = match (near(slots[0], key, off), near(slots[1], key, off)) {
-        (Some(a), Some(b)) => (b < a) as usize,
-        (Some(_), None) => 0,
-        (None, Some(_)) => 1,
-        (None, None) => *lru as usize,
-    };
-    *lru = (i == 0) as u8; // the other one is now the least recent
-    let [c0, c1] = slots;
-    let cur = if i == 0 { c0 } else { c1 };
-    let open = || {
-        RD[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        let (d, g) = geo()?;
-        Gen::open(FatFile::new(d, g, e.src as u32, e.ssize), e.ssize)
-    };
-    if let Some(g) = cur.get(key, open) {
+    // The CSV generators are shared with MMEM:DATA? (dlog.rs `csv_gen`).
+    if let Some(g) = dlog::csv_gen(key, off) {
         g.read(off, buf);
     }
 }

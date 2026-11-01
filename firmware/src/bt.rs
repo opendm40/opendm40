@@ -868,7 +868,9 @@ impl Bt {
                 // the app would show it in the function's unit (mA, A).
                 let bd = shown.and_then(|r| r.burden()).map(|b| b.0);
                 let a1 = shown.and_then(|r| r.aux1).filter(|_| bd != Some(0)).map(unol).filter(|v| mode != 15 || v.unit == "\u{b0}C");
-                let a2 = shown.and_then(|r| r.aux2).filter(|_| bd != Some(1)).map(unol);
+                // Capacitance: aux2 is the discharge node's voltage (Vdis / Vchg),
+                // shown in the aux row only (ui.rs), not a capacitance.
+                let a2 = shown.and_then(|r| r.aux2).filter(|_| bd != Some(1) && mode != 13).map(unol);
                 // No value yet (NaN: the frequency line before its first
                 // counter result): not sent, as an absent one.
                 let (a1, a2) = (a1.filter(|v| !v.v.is_nan()), a2.filter(|v| !v.v.is_nan()));
