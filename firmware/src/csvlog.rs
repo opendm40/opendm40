@@ -445,16 +445,6 @@ fn set_flags(session: bool, flushing: bool) {
 
 // ------------------------------------------------------------- recording API
 
-/// `JOB0` as a region C template (`.rodata.cold_tpl`, link-native.x):
-/// its readers (`start`, from App::rec_start) are region C code; a const copied there was an
-/// anonymous Job image in region B.
-#[repr(transparent)]
-struct JobTpl(Job);
-// SAFETY: read-only plain data.
-unsafe impl Sync for JobTpl {}
-#[cfg_attr(target_os = "none", link_section = ".rodata.cold_tpl")]
-static JOB0_C: JobTpl = JobTpl(JOB0);
-
 /// Start a recording: `func` / `range` go into the header (e.g. "DC V",
 /// "AUTO"), `unit` into every row (e.g. "V"; non-ASCII is transliterated:
 /// "\u{3a9}" -> "Ohm", "\u{b0}" -> "deg", "\u{b5}" -> "u"). `now_ms` = uptime,
@@ -467,8 +457,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     if active() || crate::fastlog::holds_disk() {
         return false;
     }
-    // SAFETY: plain data, no Drop.
-    unsafe { core::ptr::copy_nonoverlapping(&JOB0_C.0, j, 1) };
+    crate::cold_set!(j, Job, JOB0);
     j.state = State::Recording;
     j.t0_ms = now_ms;
     j.last_commit = now_ms;
@@ -477,35 +466,35 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     j.ulen = ascii(unit, &mut j.unit);
     let mut h = [0u8; 384];
     let mut w = W { b: &mut h, n: 0 };
-    w.s("# Alientek ");
+    w.s(crate::cold_str!("# Alientek "));
     w.s(crate::ident::model_name());
-    w.s(", opendm40 ");
+    w.s(crate::cold_str!(", opendm40 "));
     w.s(FW);
-    w.s(", function ");
+    w.s(crate::cold_str!(", function "));
     w.a(func);
-    w.s(", range ");
+    w.s(crate::cold_str!(", range "));
     w.a(range);
-    w.s(", started uptime ");
+    w.s(crate::cold_str!(", started uptime "));
     w.ms(now_ms);
-    w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n");
+    w.s(crate::cold_str!(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n"));
     let (ii, di) = next();
     j.ival = INTERVALS_S.get(ii as usize).map_or(0, |s| s * 1000);
     j.dur = DURATIONS_S[di as usize] * 1000;
     if ii == ON_CHANGE {
         let c = change() as usize;
         j.chg = CHANGE_FR[c];
-        w.s("# event: change > ");
+        w.s(crate::cold_str!("# event: change > "));
         w.s(CHANGES[c]);
-        w.s(" % of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading\r\n");
+        w.s(crate::cold_str!(" % of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading\r\n"));
     }
     if j.ival > 0 {
         // Interval mode (Record page): one more comment line; every
         // reading mode keeps the header byte for byte.
-        w.s("# interval ");
+        w.s(crate::cold_str!("# interval "));
         w.u(j.ival as u64 / 1000);
-        w.s(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overflow in it\r\n");
+        w.s(crate::cold_str!(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overflow in it\r\n"));
     }
-    w.s("time_s,value,unit,flags\r\n");
+    w.s(crate::cold_str!("time_s,value,unit,flags\r\n"));
     let n = w.n;
     let mut f = [0u8; dlog::FHDR + 384];
     let u = j.unit;

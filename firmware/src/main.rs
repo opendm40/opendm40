@@ -6,6 +6,8 @@ mod autooff;
 mod bargraph;
 mod bt;
 mod clock;
+/// cold_str! / cold_set!: read-only data of region C code in region C.
+mod cold;
 mod danger;
 mod dmm;
 mod fastvos;
@@ -2416,38 +2418,38 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         None => b"cts",
     };
     let mut w = dlog::Txt { b: &mut out[..], n: 0 };
-    w.s("# Alientek ");
+    w.s(crate::cold_str!("# Alientek "));
     w.s(ident::model_name());
-    w.s(", opendm40 ");
+    w.s(crate::cold_str!(", opendm40 "));
     w.s(ident::VERSION);
-    w.s(", fast log, source ");
+    w.s(crate::cold_str!(", fast log, source "));
     w.s(if ad2 { "AD2" } else { "AD1" });
-    w.s(", mode ");
+    w.s(crate::cold_str!(", mode "));
     w.u(l.mode() as u64);
-    w.s(", range ");
+    w.s(crate::cold_str!(", range "));
     w.u(l.range().max(0) as u64);
-    w.s(", nominal ");
+    w.s(crate::cold_str!(", nominal "));
     w.u(l.nominal_mhz() as u64 / 1000);
     w.c(b'.');
     let f = l.nominal_mhz() % 1000;
     w.c(b'0' + (f / 100) as u8);
     w.c(b'0' + (f / 10 % 10) as u8);
     w.c(b'0' + (f % 10) as u8);
-    w.s(" S/s, chop ");
+    w.s(crate::cold_str!(" S/s, chop "));
     w.u(l.chop() as u64);
     if ad2 {
-        w.s(", r26 ");
+        w.s(crate::cold_str!(", r26 "));
         w.u(l.r26() as u64);
-        w.s(if l.mode() == 0 { ", AC-coupled" } else { ", DC-coupled" });
+        w.s(if l.mode() == 0 { crate::cold_str!(", AC-coupled") } else { crate::cold_str!(", DC-coupled") });
     } else {
-        w.s(", osr ");
+        w.s(crate::cold_str!(", osr "));
         w.u(l.osr() as u64);
     }
-    w.s(if ad2 { "\r\n# raw: AD2 code, 262143 = 1.25 V\r\n" } else { "\r\n# raw: AD1 counts, uncalibrated\r\n" });
-    w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
+    w.s(if ad2 { crate::cold_str!("\r\n# raw: AD2 code, 262143 = 1.25 V\r\n") } else { crate::cold_str!("\r\n# raw: AD1 counts, uncalibrated\r\n") });
+    w.s(if sc.is_some() { crate::cold_str!("t_s,raw,value_") } else { crate::cold_str!("t_s,raw,lost_before\r\n") });
     if sc.is_some() {
         w.bytes(unit);
-        w.s(",lost_before\r\n");
+        w.s(crate::cold_str!(",lost_before\r\n"));
     }
     (w.n, par, unit)
 }
