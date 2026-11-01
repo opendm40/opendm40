@@ -866,14 +866,25 @@ impl SDec {
 /// The generated CSV row: "+d.ddddde+xx,+d.dddde+xx\r\n".
 pub const SCOPE_ROW: usize = 26;
 
-/// The front of a scope record that starts with the acquisition's first
-/// conversion: its first `k` codes are stale (the ADC's output from before
-/// the sample clock started, inferred; device 2026-11-01 at 12.5 MS/s: 1
-/// code on the software-trigger path, 2 on the comparator path, read up to
+/// Leading samples a linear scope record discards at sample rate `fs`: the
+/// conversions read before the ADC's output is valid. The 3PA1030's clock
+/// (TIM8) stops between records and restarts with the sample clock (TIM1),
+/// and its output is the stale pipeline for 4 clocks + tOD 25 ns (~105 ns,
+/// datasheet), longer below 50 MS/s through the TIM8 latch (device
+/// 2026-11-01, software trigger: samples 0..2 stale at 50 and 25 MS/s,
+/// 0..1 at 12.5 MS/s). Sample n is read (n + 0.5) / fs after the start: every
+/// sample read in the first 400 ns, plus one, is dropped. The DMA writes
+/// them in front of the record (scope.rs PRE), so sample 0 of the record is
+/// TIM1 period `scope_stale_head(fs)` and the record keeps its length.
+pub const fn scope_stale_head(fs: u32) -> usize {
+    1 + ((fs as u64 * 4 + 9_999_999) / 10_000_000) as usize
+}
+
+/// The front of a ring record (comparator path) before its first wrap: its
+/// first `k` codes are stale (device 2026-11-01 at 12.5 MS/s: 2, read up to
 /// 100 codes off their neighbours). They take code `k`'s value, so row 0 of
 /// a CSV / WAV:DATA? does not show a level the signal never had (and an
-/// edge search from sample 0 does not see one). Indices stay as they were
-/// (the generator phase, the CH2 time and the trigger refer to them).
+/// edge search from sample 0 does not see one). Indices stay as they were.
 #[inline]
 pub fn scope_hold_head(rec: &mut [u16], k: usize) {
     if rec.len() > k {

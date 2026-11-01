@@ -58,15 +58,26 @@ const STREAM_FS: u32 = 1_250_000;
 const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0.
 pub const CAP: usize = 26 * 1024;
-/// Stale samples at the front of a linear record (dlog::scope_hold_head;
-/// device 2026-11-01 at 12.5 MS/s): the software-trigger path (also X-Y)
-/// and the comparator path (also after the ring wrapped; why there,
-/// unknown). The stream path (fs <= STREAM_FS) showed none.
-const HEAD_SW: usize = 1;
+/// Stale samples held at the front of a comparator ring record
+/// (dlog::scope_hold_head; device 2026-11-01 at 12.5 MS/s, also after the
+/// ring wrapped: why there, unknown). The linear records discard theirs
+/// instead (PRE); the stream path (fs <= STREAM_FS: sample 0 read 400 ns
+/// or more after the start) showed none.
 const HEAD_HW: usize = 2;
+/// Slots in front of the record for the samples a linear record discards
+/// (dlog::scope_stale_head, at most 21 at 50 MS/s): the DMA starts at
+/// pre[PRE - k], so the record's sample 0 lands at buf[0].
+const PRE: usize = 24;
+const _: () = assert!(crate::dlog::scope_stale_head(50_000_000) <= PRE);
+
+#[repr(C)]
+struct DmaBuf {
+    pre: [u16; PRE],
+    buf: [u16; CAP],
+}
 
 #[link_section = ".dmabuf"]
-static mut BUF: [u16; CAP] = [0; CAP];
+static mut DMA: DmaBuf = DmaBuf { pre: [0; PRE], buf: [0; CAP] };
 #[link_section = ".dmabuf"]
 static mut LATCH: [u32; 2] = [0; 2];
 
@@ -395,6 +406,9 @@ pub struct Scope {
     /// stored record's BUF[0].
     gsync: Option<(crate::gen::Sync, u32)>,
     rec_base: u64,
+    /// Leading samples the linear record in flight discards (written to
+    /// DMA.pre, dlog::scope_stale_head); 0 for the ring paths.
+    lin_pre: usize,
     stored_gen: Option<crate::gen::Sync>,
     /// The GEN trace is shown: every MCX record needs the generator's
     /// phase, so the comparator (whose stop time is not known) is off.
@@ -743,6 +757,7 @@ impl Scope {
             stored_ab: (0.0, 1.0),
             gsync: None,
             rec_base: 0,
+            lin_pre: 0,
             stored_gen: None,
             gen_trace: false,
             ch2_on: false,
@@ -1172,7 +1187,7 @@ impl Scope {
         // Read after the stop: the DMA was still running before it.
         let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
-        let head = if was_stream { 0 } else if was_hw { HEAD_HW } else { HEAD_SW };
+        let head = if was_hw { HEAD_HW } else { 0 };
         let len = if was_rolling {
             self.snapshot_roll();
             return true;
@@ -1180,7 +1195,7 @@ impl Scope {
             let wr = self.stream_wr();
             self.rec_base = wr - wr.min(CAP as u64);
             if wr > CAP as u64 {
-                unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+                unsafe { (&mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..]).rotate_left((wr % CAP as u64) as usize) };
             }
             wr.min(CAP as u64) as usize
         } else if was_hw {
@@ -1194,7 +1209,9 @@ impl Scope {
             }
             self.rec
         } else {
-            self.rec - ndtr.min(self.rec)
+            // Samples written so far, less the discarded front (DMA.pre).
+            let n = self.rec + self.lin_pre;
+            (n - ndtr.min(n)).saturating_sub(self.lin_pre)
         };
         self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false, head);
         false
@@ -1202,14 +1219,15 @@ impl Scope {
 
     /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
     /// with the current settings (fs, range). `head`: its first samples are
-    /// the acquisition's first conversions, stale (HEAD_SW / HEAD_HW;
-    /// dlog::scope_hold_head), 0: none (stream, roll, wave view).
+    /// the acquisition's first conversions, stale (HEAD_HW, the comparator
+    /// ring; dlog::scope_hold_head), 0: none (a linear record dropped its
+    /// stale samples in DMA.pre; stream, roll, wave view).
     fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool, head: usize) {
         if len < 2 {
             self.stored_valid = false;
             return;
         }
-        let buf = unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..len] };
+        let buf = unsafe { &mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..len] };
         for v in buf.iter_mut() {
             *v &= 0x3FF;
         }
@@ -1249,8 +1267,8 @@ impl Scope {
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let win = n - self.screen;
         // Mask once here (snapshot_mark), then search in the masked record.
-        self.snapshot_mark(n, 0, None, false, HEAD_SW);
-        let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
+        self.snapshot_mark(n, 0, None, false, 0);
+        let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..n] };
         let trig = if self.gen_src() {
             self.gen_next(pre as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
         } else if self.s.ttype != 0 {
@@ -1285,7 +1303,7 @@ impl Scope {
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         let len = if self.roll_written >= CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..]).rotate_left(wr) };
             CAP
         } else {
             wr.min(CAP)
@@ -1297,7 +1315,8 @@ impl Scope {
     fn start(&mut self) {
         let fs = TB[self.s.tb].0;
         let (_, psc, arr, ccr4) = *HW.iter().find(|h| h.0 == fs).unwrap_or(&HW[0]);
-        let buf = core::ptr::addr_of!(BUF) as u32;
+        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32;
+        let k_lin = crate::dlog::scope_stale_head(fs);
         unsafe {
             w32(LIFCR, 0x3D << 22);
             w32(HIFCR, 0x3D);
@@ -1330,7 +1349,6 @@ impl Scope {
                 core::ptr::addr_of!(LATCH) as u32
             };
             w32(S4 + 0x08, src);
-            w32(S4 + 0x0C, buf);
             // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
             // which captures a full linear record like the stock Single mode.
             self.rolling = self.roll_ok();
@@ -1349,7 +1367,13 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
-            let (len, circ) = if self.rolling || hw || stream { (CAP as u32, 1 << 8) } else { (self.rec as u32, 0) };
+            // A linear record starts k_lin samples early in DMA.pre: the
+            // ADC's stale output (dlog::scope_stale_head) is not recorded,
+            // the record's sample 0 is TIM1 period k_lin.
+            let ring = self.rolling || hw || stream;
+            self.lin_pre = if ring { 0 } else { k_lin };
+            let (len, circ) = if ring { (CAP as u32, 1 << 8) } else { ((self.rec + self.lin_pre) as u32, 0) };
+            w32(S4 + 0x0C, buf - 2 * self.lin_pre as u32);
             self.roll_written = 0;
             self.roll_last_wr = 0;
             self.stream = stream;
@@ -1368,20 +1392,21 @@ impl Scope {
             self.rec_base = 0;
             w32(TIM8, 1);
             // The generator's time at the TIM1 start: sample n is taken at
-            // CC4 of TIM1 period n, (ccr4 + n (arr + 1)) (psc + 1) ticks
-            // later (both timers on the 200 MHz clock). An interrupt
+            // CC4 of TIM1 period n + lin_pre, (ccr4 + (n + lin_pre) (arr + 1))
+            // (psc + 1) ticks later (both timers on the 200 MHz clock). An interrupt
             // between the reading and the start: no phase for this record.
             let g = if gen && !self.wave { crate::gen::now() } else { None };
             w32(TIM1, 1);
             let d_en = r32(DWT_CYCCNT);
             self.t_step = ((psc + 1) * (arr + 1)) as f32;
-            self.t_s0 = (!hw).then(|| d_en.wrapping_add(ccr4 * (psc + 1)));
+            let c0 = ccr4 + self.lin_pre as u32 * (arr + 1);
+            self.t_s0 = (!hw).then(|| d_en.wrapping_add(c0 * (psc + 1)));
             self.gsync = g.and_then(|(gt, d)| {
                 let dt = d_en.wrapping_sub(d);
                 let (t, shape) = crate::gen::running()?;
                 let (q, k) = crate::gen::loop_ticks(&t);
                 let ps = psc as f64 + 1.0;
-                let t0 = gt as f64 + dt as f64 + ccr4 as f64 * ps - gen_lag() as f64;
+                let t0 = gt as f64 + dt as f64 + c0 as f64 * ps - gen_lag() as f64;
                 let sy = crate::gen::Sync { t0: crate::gen::wrap(t0, q as f64), s: ps * (arr as f64 + 1.0), q: q as f64, k: k as f64, shape };
                 (dt < 400).then_some((sy, crate::gen::epoch()))
             });
@@ -1508,7 +1533,7 @@ impl Scope {
     /// newest; otherwise samples 0..wr are the record. Returns its length.
     fn hw_linearise(&mut self, wr: usize, wrapped: bool) -> usize {
         if wrapped {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(wr) };
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..]).rotate_left(wr) };
             CAP
         } else {
             wr
@@ -1560,7 +1585,7 @@ impl Scope {
                     return None;
                 }
                 self.snapshot_mark(len, len - self.screen / 2, None, false, HEAD_HW);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
+                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..len] };
                 let found = if len - post > pre { self.find_trigger(&data[pre..len - post]).map(|i| i + pre) } else { None };
                 if found.is_some() {
                     self.hw.note_miss();
@@ -1581,7 +1606,7 @@ impl Scope {
                 if found.is_some() && self.s.mode == TrigMode::Single {
                     self.s.run = false;
                 }
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[start..start + self.screen] };
                 self.seq = self.seq.wrapping_add(1);
                 Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
             }
@@ -1601,7 +1626,7 @@ impl Scope {
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
                 self.snapshot_mark(len, th, None, false, HEAD_HW);
-                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
+                let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..len] };
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
                 // period early (device: delta -250 samples at 100 ms/div).
@@ -1630,7 +1655,7 @@ impl Scope {
                     self.s.run = false;
                 }
                 let start = t - pre;
-                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+                let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[start..start + self.screen] };
                 self.seq = self.seq.wrapping_add(1);
                 Some(Frame { data, cols: None, trig: found, fs: self.sample_rate(), seq: self.seq })
             }
@@ -1698,7 +1723,7 @@ impl Scope {
         if !self.stored_valid || self.stored_len < 2 {
             return &[];
         }
-        unsafe { &(&*core::ptr::addr_of!(BUF))[..self.stored_len] }
+        unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..self.stored_len] }
     }
 
     /// Stopped: centre the stored record on its trigger point (UF-09
@@ -1879,7 +1904,7 @@ impl Scope {
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..self.rec] };
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data: &data[start..start + self.screen], cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
@@ -1938,7 +1963,7 @@ impl Scope {
             }
             let l = self.trig_code();
             let rising = self.s.rising;
-            let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+            let buf = unsafe { &*core::ptr::addr_of!(DMA.buf) };
             let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, if self.gen_src() { wr } else { self.st_scan });
             while n < wr {
                 let v = (buf[i] & 0x3FF) as i32;
@@ -2004,7 +2029,7 @@ impl Scope {
             return None;
         }
         if wr > CAP as u64 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left((wr % CAP as u64) as usize) };
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..]).rotate_left((wr % CAP as u64) as usize) };
         }
         let base = wr - len as u64;
         self.rec_base = base;
@@ -2024,7 +2049,7 @@ impl Scope {
         if trig.is_some() && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[start..start + self.screen] };
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data, cols: None, trig, fs: self.sample_rate(), seq: self.seq })
     }
@@ -2041,7 +2066,7 @@ impl Scope {
         self.roll_written += d as u64;
         self.roll_last_wr = wr;
         let per = (self.screen / COLS).max(1);
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let buf = unsafe { &*core::ptr::addr_of!(DMA.buf) };
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for i in 0..COLS {
             // Column i ends (COLS - 1 - i) columns before the write position.
@@ -2092,7 +2117,7 @@ impl Scope {
             } else {
                 self.stored_anchor.saturating_sub(want / 2).min(len - want)
             };
-            let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + want] };
+            let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[start..start + want] };
             let trig = self.stored_trig.and_then(|t| t.checked_sub(start).filter(|_| t < start + want));
             return Some(Frame { data, cols: None, trig, fs: self.stored_fs, seq: self.seq });
         }
@@ -2103,7 +2128,7 @@ impl Scope {
         // spans >= 40 K samples (> the whole record), so rounding is invisible.
         let step = want as f32 / COLS as f32;
         let w0 = if self.stored_roll { len as f32 - want as f32 } else { self.stored_anchor as f32 - (want / 2) as f32 };
-        let buf = unsafe { &*core::ptr::addr_of!(BUF) };
+        let buf = unsafe { &*core::ptr::addr_of!(DMA.buf) };
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         for (i, c) in cols.iter_mut().enumerate() {
             let af = w0 + i as f32 * step;
@@ -2235,7 +2260,7 @@ impl Scope {
     pub fn lent_buf(&self) -> Option<&'static mut [u16]> {
         // SAFETY: main loop only; while lent nothing else in scope.rs
         // touches BUF (poll_frame returns at once, no DMA runs).
-        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..] })
+        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..] })
     }
 
     /// BUF back to the scope: the next poll starts an acquisition.
@@ -2388,7 +2413,7 @@ impl Scope {
 
     /// Ring -> BUF (and the roll columns).
     fn wave_drain(&mut self, src: &mut dyn WaveSource) {
-        let buf = unsafe { &mut *core::ptr::addr_of_mut!(BUF) };
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(DMA.buf) };
         let cols = unsafe { &mut *core::ptr::addr_of_mut!(ROLL_COLS) };
         let w = wv();
         let (slot0, mut tot) = (w.slot0, w.tot);
@@ -2422,7 +2447,7 @@ impl Scope {
         let oldest = self.wave_oldest();
         let r = (oldest.wrapping_sub(wv().slot0) % CAP as u64) as usize;
         if r != 0 {
-            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(BUF))[..]).rotate_left(r) };
+            unsafe { (&mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..]).rotate_left(r) };
         }
         wv().slot0 = oldest;
         (wv().tot - oldest) as usize
@@ -2454,7 +2479,7 @@ impl Scope {
                 wv().stale = true;
             }
         }
-        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };
+        let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[start..start + self.screen] };
         self.seq = self.seq.wrapping_add(1);
         Some(Frame { data, cols: None, trig, fs: wave_real_fs(wv().fs), seq: self.seq })
     }
@@ -2586,7 +2611,7 @@ pub fn debug() -> [u32; 4] {
         [
             core::ptr::read_volatile(core::ptr::addr_of!(LATCH[0])),
             r32(S4 + 0x04),
-            core::ptr::read_volatile(core::ptr::addr_of!(BUF[0])) as u32,
+            core::ptr::read_volatile(core::ptr::addr_of!(DMA.buf[0])) as u32,
             r32(GPIOB_IDR),
         ]
     }
