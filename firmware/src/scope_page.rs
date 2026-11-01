@@ -455,7 +455,9 @@ fn vdiv_idx(range: usize, probe: f32) -> u8 {
 /// Rows of the frame (13 + 280-row model) a pinch / pan preview maps: target
 /// column j of the graph from the cached columns, with a vertical scale `ky`
 /// around the zero row and a time scale `kx` around the trigger column.
-fn preview_rows(c: &Cache, j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
+/// `seg`: CH1's, the GEN trace's or CH2's cached rows (CH2 with `d_pos` 0,
+/// `ky` 1: its scale is not CH1's).
+fn preview_rows(c: &Cache, seg: &[(i16, i16); 400], j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
     // Source columns covering target column j.
     let (s0, s1) = if kx == 1.0 {
         let s = j - (hpos - c.hpos);
@@ -469,7 +471,7 @@ fn preview_rows(c: &Cache, j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: 
     };
     let (mut lo, mut hi) = (i32::MAX, i32::MIN);
     for s in s0.max(0)..s1.min(400) {
-        let (a, b) = c.seg[s as usize];
+        let (a, b) = seg[s as usize];
         if a > b {
             continue;
         }
@@ -872,6 +874,36 @@ impl App {
             return;
         }
         let s = &self.scope.s;
+        let (ky, kx, hpos) = self.sp_view();
+        let zr = (140 + s.pos) as f32;
+        let d_pos = s.pos - c.pos;
+        for j in 0..399 {
+            let fy = |(a, b): (i16, i16)| if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
+            g.tr[j] = fy(preview_rows(c, &c.seg, j as i32, d_pos, hpos, ky, kx, zr));
+            // The GEN trace is on CH1's scale; CH2 on its own (only the time
+            // axis moves). Owner 2026-11-01: both vanished while a stopped
+            // record was panned.
+            g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, ky, kx, zr));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
+            let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
+            g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
+                su::EMPTY
+            } else {
+                (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
+            };
+        }
+        // ABS math follows CH1's columns (the FFT keeps its spectrum).
+        if self.sp.math.on && self.sp.math.mode != 5 {
+            self.sp_math();
+        }
+    }
+
+    /// The preview's (vertical scale, time scale, trigger column) of the
+    /// cached frame: identity for a fresh frame.
+    fn sp_view(&self) -> (f32, f32, i32) {
+        let c = cache();
+        let s = &self.scope.s;
         let (ky, kx) = match self.sp.pinch {
             // PINCH_LIVE: the shown frame stretched with the fingers.
             Some(p) if pinch_mode() == su::PINCH_LIVE => {
@@ -887,25 +919,7 @@ impl App {
         };
         // A stopped pan moves the record under the trigger column.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
-        let hpos = if s.run { s.hpos } else { c.hpos + pan };
-        let zr = (140 + s.pos) as f32;
-        let d_pos = s.pos - c.pos;
-        for j in 0..399 {
-            let (a, b) = preview_rows(c, j as i32, d_pos, hpos, ky, kx, zr);
-            g.tr[j] = if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
-            // The GEN / CH2 traces only as captured (no preview mapping).
-            let still = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
-            let fy = |(a, b): (i16, i16)| if a > b || !still { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
-            g.gn[j] = fy(c.gseg[j]);
-            g.c2[j] = fy(c.c2seg[j]);
-            let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
-            let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
-            g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
-                su::EMPTY
-            } else {
-                (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
-            };
-        }
+        (ky, kx, if s.run { s.hpos } else { c.hpos + pan })
     }
 
     // ------------------------------------------------------------ CSV
@@ -1179,9 +1193,11 @@ impl App {
             let c = cache();
             let mv = su::VDIV_VAL[m.vdiv.min(21) as usize];
             let vr = if self.scope.wave_on() { 4.0 * self.scope.vdiv() / 141.0 } else { 4.0 * scope::VDIV[c.range.min(9)] * self.scope.s.probe / 141.0 };
-            // (The CH1 columns are already widened: the bars touch.)
+            // (The CH1 columns are already widened: the bars touch.) The
+            // drag / pinch preview's time axis; the volts stay.
+            let (_, kx, hpos) = self.sp_view();
             for j in 0..399 {
-                let (lo, hi) = c.seg[j];
+                let (lo, hi) = preview_rows(c, &c.seg, j as i32, 0, hpos, 1.0, kx, 0.0);
                 if !c.valid || lo > hi {
                     g.ma[j] = su::EMPTY;
                     continue;
