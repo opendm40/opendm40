@@ -559,6 +559,8 @@ and `MEASure:POWer?` then give the real power P in W.
 | `TRIGger[:EDGE]:SLOPe[?]` | `POSitive` or `NEGative` | `POS` or `NEG` | both |
 | `TRIGger:SWEep[?]` | `AUTO`, `NORMal` or `SINGle` | `AUTO`, `NORM` or `SING` | both |
 | `TRIGger[:EDGE]:SOURce[?]` | `CHANnel1` or `GENerator` (the generator's output, computed from its timers: edge only, no wire needed) | `CHAN1` or `GEN` | both |
+| `GENerator:DISPlay[?]` | `ON` or `OFF` (`1` / `0`): the GEN trace (the generator's output) on the scope page | `1` or `0` | both |
+| `GENerator:SCALe[?]` | V/div of the GEN trace, 0.001 .. 10000 (1-2-5 steps); CHANnel1's V/div until it is set | `+1.000000E+00` | both |
 | `ACQuire:SRATe?` | | Sample rate, S/s: `+5.000000E+07`; stopped, the stored record's, also after a zoom (1 / the record preamble's xinc; the screen preamble's xinc follows the shown timebase) | both |
 | `SCOPe:MEASure:VPP?` | | Peak-to-peak, V | both |
 | `SCOPe:MEASure:VAVG?` | | Mean, V | both |
@@ -581,7 +583,7 @@ and `MEASure:POWer?` then give the real power P in W.
 - Setting `CHANnel1:SCALe` or `CHANnel1:COUPling` closes the Wave view (the
   multimeter-input scope); timebase, trigger, the queries and the waveform
   commands work on it.
-- `WAVeform:POINts`: `SCReen` the 400 screen columns (mean of each; in
+- `WAVeform:POINts`: `SCReen` 400 points across the screen's 10 divisions (mean of each; in
   roll mode the middle of each column's min and max, 0 before data),
   `MAXimum` the whole acquisition record, `<n>` the record thinned to at
   most n points.

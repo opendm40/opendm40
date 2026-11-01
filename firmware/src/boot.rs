@@ -109,6 +109,13 @@ pub const TRIG_PA2_NOLOCK: u32 = 0x5452_0013;
 const LAST_NORMAL: u32 = 0x4C4D_524E; // "NRML"
 /// BKP_LAST after the PA2 entry into the loader.
 const LAST_LOADER: u32 = 0x5256_4352; // "RCVR"
+/// BKP_LAST after DBG:UPDATE of a checked update file: this tag in the high
+/// half, the low half of the file's header word 0 (its header CRC-16, over
+/// the length and the body CRC) in the low half. The next boot continues
+/// the session (persist::same_session) only when the loader marker is that
+/// header: the file was installed and nothing else ran in between. Neither
+/// NRML nor RCVR has this high half.
+const LAST_UPDATE_TAG: u32 = 0x5544_0000; // "UD"
 
 /// DBG:BOOT? field 1; the numbers are the reply's (5 was the removed
 /// "recovery requested").
@@ -345,18 +352,39 @@ pub fn fmc_last() -> u32 {
     unsafe { FMC_LAST }
 }
 
-/// DBG:UPDATE (native): forget the previous-mode word (so a
+/// DBG:UPDATE (native): replace the previous-mode word (by the update tag
+/// and the staged file's header CRC, LAST_UPDATE_TAG, or 0; so a
 /// later stale watchdog flag cannot count as our crash, review H3) and reset
 /// the crash counter (so a count left from this session cannot survive the
 /// stock interlude and count as a crash after the reinstall, review N2), then zero the marker. The caller resets (deferred SYSRESETREQ)
 /// into the loader's update screen. Returns the read-back result.
 pub fn enter_loader_update() -> bool {
     bkp_enable();
+    let h = unsafe { PENDING_HDR };
     unsafe {
-        w32(BKP_LAST, 0);
+        w32(BKP_LAST, if h != 0 { LAST_UPDATE_TAG | h & 0xFFFF } else { 0 });
         w32(BKP_CRASH, CRASH_TAG);
     }
     zero_marker()
+}
+
+/// Word 0 of the update file just checked on the SPI disk (upload.rs,
+/// vwrite.rs; 0 = none this session), for `enter_loader_update`. Backup
+/// SRAM (.bkp_bss: CPU only, zeroed at reset), not main RAM.
+#[cfg_attr(target_os = "none", link_section = ".bkp_bss")]
+static mut PENDING_HDR: u32 = 0;
+
+/// An update file with this valid 12-byte header is staged in the SPI
+/// disk's root (the one the loader installs next).
+pub fn note_update(h: &[u8; 12]) {
+    unsafe { PENDING_HDR = u32::from_le_bytes([h[0], h[1], h[2], h[3]]) };
+}
+
+/// Whether the previous boot's mode word (`last`, BootInfo) is the
+/// DBG:UPDATE of exactly the image now installed (the loader marker at
+/// 0x08008000 is its header).
+pub fn updated_to_this(last: u32) -> bool {
+    last & 0xFFFF_0000 == LAST_UPDATE_TAG && marker_valid() && marker()[0] & 0xFFFF == last & 0xFFFF
 }
 
 /// DBG:LOADER / DBG:RECOVER: ask the next shim pass for the PA2 entry

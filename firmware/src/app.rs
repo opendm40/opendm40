@@ -2070,7 +2070,7 @@ impl App {
     /// X2-1 (s), Xf (Hz), Y2-1 (V) from the cursor positions (stock formulas).
     fn cursor_values(&mut self) {
         let sc = &self.scope.s;
-        let t_px = scope::SDIV[sc.tb] / 40.0;
+        let t_px = scope::SDIV[sc.tb] / crate::scope_ui::DIV_W as f32;
         let dx = (self.cur.x[1] as f32 - self.cur.x[0] as f32) * t_px;
         self.meas_res.v[7] = if self.cur.x_on { dx.abs() } else { f32::NAN };
         self.meas_res.v[8] = if self.cur.x_on && dx.abs() > 0.0 { 1.0 / dx.abs() } else { f32::NAN };
@@ -2344,9 +2344,10 @@ impl App {
     /// chart rate) continues the multimeter after a power-off too: the
     /// function and coupling, the AUTO / AUTO+ choices, a fixed V / A / ohm
     /// range, rate and smoothing, the trend
-    /// timebase. Not AutoHold, the limits, REL or HOLD (as the stock: they
-    /// change what the readout shows, unnoticed after a power-on), nor the
-    /// scope, the power meter's settings or the Record page.
+    /// timebase, and the scope's acquisition, trigger, math and
+    /// measurements (owner 2026-11-02). Not AutoHold, the limits, REL or
+    /// HOLD (as the stock: they change what the readout shows, unnoticed
+    /// after a power-on), nor the power meter's settings or the Record page.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
@@ -2363,7 +2364,7 @@ impl App {
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
         self.sp_restore(p[1], p[11]);
-        if same_session {
+        if cont {
             self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
         }
         let mut o = [0i16; 7];
@@ -2456,7 +2457,9 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
-        if !same_session {
+        // The scope's acquisition, trigger, math and measurements: as the
+        // multimeter, kept after a power-off with Mode Remember ON.
+        if !cont {
             return;
         }
         let mut sc = self.scope.s;
@@ -5426,6 +5429,25 @@ impl App {
             }
             C::TrigSource(None) => {
                 out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                Some(())
+            }
+            C::GenScale(Some(v)) => {
+                // The nearest V/div at or above v (as CHAN1:SCAL).
+                let i = crate::scope_ui::VDIV_VAL.iter().position(|&d| d >= v * 0.999).unwrap_or(crate::scope_ui::VDIV_VAL.len() - 1);
+                self.gen_vdiv_set(i as u8);
+                None
+            }
+            C::GenScale(None) => {
+                out.put_f32(crate::scope_ui::VDIV_VAL[self.gen_vdiv_idx() as usize]);
+                Some(())
+            }
+            C::GenDisp(Some(on)) => {
+                self.gen_trace_set(on, now);
+                sc = self.scope.s;
+                None
+            }
+            C::GenDisp(None) => {
+                out.put_bytes(if self.scope.gen_trace { b"1" } else { b"0" });
                 Some(())
             }
             C::Run => {

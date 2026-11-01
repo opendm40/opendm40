@@ -221,6 +221,13 @@ fn set_commands() {
     check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
     check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
     check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
+    // The GEN trace on the scope page: its V/div and on / off.
+    check(matches!(s.handle(b"GEN:SCAL 0.5", 1), Out::Instr(Cmd::GenScale(Some(v))) if v == 0.5), "GEN:SCAL 0.5");
+    check(matches!(s.handle(b"GENerator:SCALe 200mV", 1), Out::Instr(Cmd::GenScale(Some(v))) if (v - 0.2).abs() < 1e-6), "GENerator:SCALe 200mV");
+    check(matches!(s.handle(b"GEN:SCAL?", 1), Out::Instr(Cmd::GenScale(None))), "GEN:SCAL?");
+    check(matches!(s.handle(b"GEN:DISP ON", 1), Out::Instr(Cmd::GenDisp(Some(true)))), "GEN:DISP ON");
+    check(matches!(s.handle(b"GEN:DISP 0", 1), Out::Instr(Cmd::GenDisp(Some(false)))), "GEN:DISP 0");
+    check(matches!(s.handle(b"GEN:DISP?", 1), Out::Instr(Cmd::GenDisp(None))), "GEN:DISP?");
     check(matches!(s.handle(b"RES:NEG ON", 1), Out::Instr(Cmd::ResNeg(Some(true)))), "RES:NEG ON");
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");

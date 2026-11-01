@@ -8,7 +8,7 @@ redraw").
       [--port N] [--mips 110] [--cycles 2] [--max-ms 80]
 
 The scope page, the key / tap volume at 50 %. Real touch-controller taps
-(emu/peripherals/CST_Touch.cs) on the CH1 panel button (447, 80): open,
+(emu/peripherals/CST_Touch.cs) on the CH1 block's title (434, 37): open,
 close, --cycles times, 1 s apart. The TIM14 log (run.py --buzzer-log) gives
 each tap beep's on -> off time. A tap beep (30 ms) is switched off by the
 main loop (App::tick), so it lasts until the pass that drew the tap's
@@ -58,7 +58,7 @@ work = os.path.join(OUT, tag)
 os.makedirs(work, exist_ok=True)
 script = os.path.join(work, 'script')
 blog = os.path.join(work, 'buzzer.log')
-X, Y = 447, 80
+X, Y = 434, 37
 taps = [A.t0 + k for k in range(2 * A.cycles)]
 t_end = taps[-1] + 0.9
 with open(script, 'w') as f:
@@ -142,15 +142,15 @@ for ln in lines:
 
 
 def popup_open(path):
-    """The popup's grey page area (293..412, 50..299) is up, and the CH1
-    panel label is grey (its fill differs from the V/div button's below),
+    """The popup's grey page area (270..389, 50..299) is up, and the CH1
+    block's title is grey (its fill differs from the zoom-in button's below),
     as (popup, label) or None."""
     try:
         px = Image.open(path).convert('RGB').load()
     except Exception:
         return None
-    grey = sum(1 for x in range(300, 410, 10) for y in range(120, 290, 10) if min(px[x, y]) > 150)
-    return grey > 100, px[420, 70] != px[420, 110]
+    grey = sum(1 for x in range(275, 385, 10) for y in range(120, 290, 10) if min(px[x, y]) > 150)
+    return grey > 100, px[400, 30] != px[400, 60]
 
 
 for k, tt in enumerate(taps):

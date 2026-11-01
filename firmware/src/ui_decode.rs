@@ -127,7 +127,7 @@ impl Ann {
     }
     /// Graph x of a record sample (may lie off the graph).
     pub fn x_of(&self, s: u32) -> i32 {
-        14 + ((s as i64 - self.off as i64) * 399 / self.n.max(1) as i64).clamp(-100_000, 100_000) as i32
+        (GX + 1) as i32 + ((s as i64 - self.off as i64) * NCOL as i64 / self.n.max(1) as i64).clamp(-100_000, 100_000) as i32
     }
     /// The window `off .. off + n` lies in the decoded samples.
     pub fn covers(&self, off: u32, n: u32) -> bool {
@@ -138,7 +138,7 @@ impl Ann {
 /// The band's rect (the graph hole) for `dec` (1 UART, 2 UART with Modbus
 /// frames, 3 DALI: one row of frame boxes).
 pub fn band_rect(dec: u8) -> Rect {
-    if dc::MODBUS && dec == 2 { rect(14, FRAME_Y, 399, BYTE_Y + ROW_H - FRAME_Y) } else { rect(14, BYTE_Y, 399, ROW_H) }
+    if dc::MODBUS && dec == 2 { rect(GX + 1, FRAME_Y, NCOL as i16, BYTE_Y + ROW_H - FRAME_Y) } else { rect(GX + 1, BYTE_Y, NCOL as i16, ROW_H) }
 }
 
 const C_ERR: Color = 0xf800;
@@ -167,7 +167,7 @@ fn pick<'a>(cands: &[&'a str], w: i16) -> &'a str {
 /// One box on a row: fill, outline (the sides only where the box ends on
 /// the graph), a text.
 fn draw_box(y: i16, x0: i32, x1: i32, edge: Color, t: &str, fg: Color) {
-    let (a, b) = (x0.max(14), x1.min(412));
+    let (a, b) = (x0.max(GX as i32 + 1), x1.min(GR as i32 - 1));
     if b - a < 2 {
         return;
     }
@@ -176,10 +176,10 @@ fn draw_box(y: i16, x0: i32, x1: i32, edge: Color, t: &str, fg: Color) {
     lcd::fill_rect(a, y as u16, w, 1, edge);
     lcd::fill_rect(a, (y + ROW_H - 1) as u16, w, 1, edge);
     lcd::fill_rect(a, y as u16 + 1, w, ROW_H as u16 - 2, C_BG);
-    if x0 >= 14 {
+    if x0 >= GX as i32 + 1 {
         lcd::fill_rect(a, y as u16, 1, ROW_H as u16, edge);
     }
-    if x1 <= 412 {
+    if x1 <= GR as i32 - 1 {
         lcd::fill_rect(b, y as u16, 1, ROW_H as u16, edge);
     }
     if !t.is_empty() {
@@ -191,16 +191,16 @@ fn draw_box(y: i16, x0: i32, x1: i32, edge: Color, t: &str, fg: Color) {
 fn draw_bar(y: i16) {
     let a = ann();
     let mut i = 0;
-    while i < 399 {
+    while i < NCOL {
         if a.bar[i / 8] >> (i % 8) & 1 == 0 {
             i += 1;
             continue;
         }
         let s = i;
-        while i < 399 && a.bar[i / 8] >> (i % 8) & 1 != 0 {
+        while i < NCOL && a.bar[i / 8] >> (i % 8) & 1 != 0 {
             i += 1;
         }
-        lcd::fill_rect(14 + s as u16, (y + 5) as u16, (i - s) as u16, 7, C_BOX);
+        lcd::fill_rect((GX + 1) as u16 + s as u16, (y + 5) as u16, (i - s) as u16, 7, C_BOX);
     }
 }
 
@@ -223,7 +223,7 @@ pub fn band(dec: u8, blank: bool) {
         }
         let n = w.n;
         // `label`: up to 48 glyphs (an Ink holds 24).
-        sf::label(sf::SC_F12, rect(14, BYTE_Y, 399, ROW_H), txt(&nb[..n]), C_DIS, C_FILL, 8, 0);
+        sf::label(sf::SC_F12, rect(GX + 1, BYTE_Y, NCOL as i16, ROW_H), txt(&nb[..n]), C_DIS, C_FILL, 8, 0);
         return;
     }
     if a.mode == M_BAR {
@@ -237,10 +237,10 @@ pub fn band(dec: u8, blank: bool) {
     for k in 0..a.nb as usize {
         let b = a.b[k];
         let (x0, x1) = (a.x_of(b.s0), a.x_of(b.s1));
-        if x1 < 14 || x0 > 412 {
+        if x1 < GX as i32 + 1 || x0 > GR as i32 - 1 {
             continue;
         }
-        let w = (x1.min(412) - x0.max(14) + 1) as i16;
+        let w = (x1.min(GR as i32 - 1) - x0.max(GX as i32 + 1) + 1) as i16;
         let (v, fl) = (b.v, b.fl);
         let mut h = dc::W { b: &mut tb, n: 0 };
         h.hex(v);
@@ -259,10 +259,10 @@ pub fn band(dec: u8, blank: bool) {
         for k in 0..a.nf as usize {
             let f = a.f[k];
             let (x0, x1) = (a.x_of(f.s0), a.x_of(f.s1));
-            if x1 < 14 || x0 > 412 {
+            if x1 < GX as i32 + 1 || x0 > GR as i32 - 1 {
                 continue;
             }
-            let w = (x1.min(412) - x0.max(14) + 1) as i16;
+            let w = (x1.min(GR as i32 - 1) - x0.max(GX as i32 + 1) + 1) as i16;
             let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
             let mut lb = [0u8; 24];
             let mut l = dc::W { b: &mut lb, n: 0 };
@@ -283,10 +283,10 @@ pub fn band(dec: u8, blank: bool) {
     for k in 0..a.nf as usize {
         let f = a.f[k];
         let (x0, x1) = (a.x_of(f.s0), a.x_of(f.s1));
-        if x1 < 14 || x0 > 412 {
+        if x1 < GX as i32 + 1 || x0 > GR as i32 - 1 {
             continue;
         }
-        let w = (x1.min(412) - x0.max(14) + 1) as i16;
+        let w = (x1.min(GR as i32 - 1) - x0.max(GX as i32 + 1) + 1) as i16;
         let (kind, fl, req, head, len) = (f.kind, f.fl, f.req, f.head, f.len);
         let fr = dc::Fr { start: 0, end: 0, len, head, flags: fl, kind };
         let mut lb = [0u8; 40];
@@ -303,7 +303,7 @@ pub fn band(dec: u8, blank: bool) {
             if req != 0xFF && (req as usize) < a.nf as usize {
                 let q = a.f[req as usize];
                 let (qs1, fs0) = (q.s1, f.s0);
-                if a.x_of(qs1) >= 14 {
+                if a.x_of(qs1) >= GX as i32 + 1 {
                     let us = fs0.saturating_sub(qs1) as u64 * 1_000_000 / a.fs.max(1) as u64;
                     l.c(b' ').u((us / 1000) as u32).c(b'.').u((us / 100 % 10) as u32).s("ms");
                 }

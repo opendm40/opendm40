@@ -20,7 +20,8 @@ section named after the tag as the release notes; how to cut a release:
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > Power; default OFF, as the stock's):
   ON restarts the multimeter after a power-off in the function, range, rate
-  and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
+  and trend timebase you left, and the scope with its timebase, V/div,
+  trigger and measurement settings. SCPI `MEMory:STATe:RECall:AUTO`.
 - **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
 - **Scope: 5 and 2 mV/div**, a digital zoom of 10 mV/div (the front end
   has no known higher gain): the same resolution, drawn larger. SCPI
@@ -75,6 +76,17 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Scope: a block per channel on the right panel** (CH1, DMM, GEN,
+  MATH): the name and V/div, a magnifier to zoom in and one to zoom out;
+  a tap on the title opens the CH1 / math popup or switches DMM / GEN on
+  and off. The left magnifier zooms in on every block. The graph reaches
+  the screen's left edge, its markers inside it; 39 px divisions. The
+  TRIG button, the V/div badge and the MCX | DMM badge are gone: the
+  trigger badge and MF > Trigger open the trigger settings, the CH1 title
+  shows the probe and AC coupling, a long press on the DMM title opens
+  the Wave view ([manual](docs/manual/README.md#the-scope-page)).
+- **Scope: the GEN trace on its own V/div** (the GEN block's magnifiers;
+  it starts at CH1's). SCPI `GENerator:SCALe`, `GENerator:DISPlay`.
 - **Extra digit at full size:** wherever it can appear, the reading starts
   further left, so the other digits do not move when it comes or goes
   ([manual](docs/manual/README.md#counts-rate-and-the-extra-digit)).
@@ -128,6 +140,8 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- A firmware update keeps the multimeter function and the scope settings,
+  as a restart does; they went back to the defaults after every update.
 - Capacitance AUTO: a small capacitor measured after a large one (600 µF and
   up) gets its own range again instead of a wrong µF value; open leads or a
   short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the

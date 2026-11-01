@@ -105,6 +105,13 @@ mod splash;
 #[path = "../../src/inrush.rs"]
 mod inrush;
 
+/// The scope page's input source in the scenes (the MCX | DMM badge until
+/// 2026-11-02; now `Model::wave`): MCX (and none) = the OSC input, DMM = the
+/// Wave view.
+pub const SRC_NONE: u8 = 0;
+pub const SRC_MCX: u8 = 1;
+pub const SRC_DMM: u8 = 2;
+
 /// Probe hooks called by the drawing code under cfg(test).
 pub mod probe {
     pub fn open(kind: u8, bg: u16) -> u32 {
@@ -350,7 +357,10 @@ impl Checker {
                 }
             }
             parent[a] = best.map(|x| x.0);
-            if screen.margin(&ia.b) < 4 {
+            // A box as wide as the graph frame (the combined view's meter
+            // strip): at the screen edge with the frame (GX 0).
+            let frame_wide = ia.kind == probe::SHAPE && ia.b.x0 == scope_ui::GX as i32 && ia.b.x1 == scope_ui::GR as i32;
+            if screen.margin(&ia.b) < 4 && !frame_wide {
                 self.fail(scene, format!("{} only {} px from the screen edge", desc(ia), screen.margin(&ia.b)));
             }
             match parent[a] {
@@ -365,7 +375,7 @@ impl Checker {
                     match r {
                         Some((name, r)) => {
                             let m = r.margin(&ia.b);
-                            if m < 3 {
+                            if m < 3 && !frame_wide {
                                 self.fail(scene, format!("{} only {} px inside region {} {:?}", desc(ia), m, name, r));
                             }
                         }
@@ -1293,6 +1303,17 @@ fn main() {
     if std::env::args().nth(2).as_deref() == Some("--readme") {
         std::process::exit(if readme::run(&out) == 0 { 0 } else { 1 });
     }
+    // `main <out> --strip`: only the scope page's channel blocks
+    // (scope_add.rs strip_blocks; also in the full matrix).
+    if std::env::args().nth(2).as_deref() == Some("--strip") {
+        let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+        scope_add::strip_blocks(&mut ck, &out);
+        for (msg, (n, scene)) in &ck.seen {
+            println!("{n:6} x  {msg}   [first: {scene}]");
+        }
+        println!("cases {}, violations {}", ck.cases, ck.violations);
+        std::process::exit(if ck.violations == 0 { 0 } else { 1 });
+    }
     // `main <out> --manual`: the user manual's screens (manual.rs), 1x.
     if std::env::args().nth(2).as_deref() == Some("--manual") {
         std::process::exit(if manual::run(&out) == 0 { 0 } else { 1 });
@@ -1460,25 +1481,25 @@ fn main() {
             }
         };
         t("CH1 marker zone (x 20, 10 px into the graph)", pick(&d, 0, 0, false, 20, 160) == Some((true, 0)));
-        t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, 406, 125) == Some((true, 1)));
-        t("T marker zone (from INNER's top, y 16)", pick(&d, 0, 0, false, 214, 16) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 15).is_none());
-        t("grab zones reach 30 px past the glyph into the graph", pick(&d, 0, 0, false, 42, 160) == Some((true, 0)) && pick(&d, 0, 0, false, 44, 160).is_none() && pick(&d, 0, 0, false, 371, 125) == Some((true, 1)) && pick(&d, 0, 0, false, 369, 125).is_none() && pick(&d, 0, 0, false, 214, 62) == Some((false, 0)) && pick(&d, 0, 0, false, 214, 64).is_none());
+        t("trigger level marker zone (right edge)", pick(&d, 0, 0, false, scope_ui::GR - 7, 125) == Some((true, 1)));
+        t("T marker zone (from INNER's top, y 16)", pick(&d, 0, 0, false, scope_ui::GX + scope_ui::GCX + 1, 16) == Some((false, 0)) && pick(&d, 0, 0, false, scope_ui::GX + scope_ui::GCX + 1, 15).is_none());
+        t("grab zones reach 30 px past the glyph into the graph", pick(&d, 0, 0, false, 42, 160) == Some((true, 0)) && pick(&d, 0, 0, false, 44, 160).is_none() && pick(&d, 0, 0, false, scope_ui::GR - 42, 125) == Some((true, 1)) && pick(&d, 0, 0, false, scope_ui::GR - 44, 125).is_none() && pick(&d, 0, 0, false, scope_ui::GX + scope_ui::GCX + 1, 62) == Some((false, 0)) && pick(&d, 0, 0, false, scope_ui::GX + scope_ui::GCX + 1, 64).is_none());
         t("graph middle: no zone (timebase tap)", pick(&d, 0, 0, false, 120, 220).is_none());
         let mut m = d;
         m.trig_row = 140;
         let a = pick(&m, 0, 0, false, 6, 160);
         let b = pick(&m, 1, 0, false, 6, 160);
-        let c = pick(&m, 0, 0, false, 406, 160);
+        let c = pick(&m, 0, 0, false, scope_ui::GR - 7, 160);
         t("CH1 and trigger level on one row: separate zones (left / right edge)", a == Some((true, 0)) && b == Some((true, 0)) && c == Some((true, 1)));
         m.ycur = Some([140, 220]);
         let a = pick(&m, 0, 0, false, 6, 160);
         let b = pick(&m, 3, 0, false, 6, 160);
         t("overlapping zones cycle: CH1 -> Y1 -> CH1", a == Some((true, 3)) && b == Some((true, 0)));
         let mut m = d;
-        m.xcur = Some([200, 205]);
-        let a = pick(&m, 0, 0, true, 214, 25);
-        let b = pick(&m, 0, 2, true, 214, 25);
-        let c = pick(&m, 0, 3, true, 214, 25);
+        m.xcur = Some([scope_ui::GCX, scope_ui::GCX + 5]);
+        let a = pick(&m, 0, 0, true, scope_ui::GX + scope_ui::GCX + 1, 25);
+        let b = pick(&m, 0, 2, true, scope_ui::GX + scope_ui::GCX + 1, 25);
+        let c = pick(&m, 0, 3, true, scope_ui::GX + scope_ui::GCX + 1, 25);
         t("T + 2 X cursors at one spot cycle", a == Some((false, 2)) && b == Some((false, 3)) && c == Some((false, 0)));
         let mut m = d;
         m.xcur = Some([100, 300]);
@@ -1497,7 +1518,7 @@ fn main() {
         let rb = |r: stockfont::Rect| Bx::new(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         let tabs_add = [rb(scope_ui::TAB_L), rb(scope_ui::TAB_R)];
         let screen = Bx::new(0, 0, 480, 320);
-        let graph_region = |m: &scope_ui::Model| [("graph", Bx::new(14, m.top() as i32 + 1, 399, m.frame_h() as i32 - 2))];
+        let graph_region = |m: &scope_ui::Model| [("graph", Bx::new(scope_ui::GX as i32 + 1, m.top() as i32 + 1, scope_ui::NCOL as i32, m.frame_h() as i32 - 2))];
         let (_, res) = meas_worst();
         let mut wb = [[0u8; 24]; 4];
         let worst: Vec<String> = [10u8, 11, 0, 9].iter().enumerate().map(|(k, id)| scope_meas::format(&mut wb[k], *id, res.v[*id as usize]).to_string()).collect();
@@ -1654,7 +1675,7 @@ fn main() {
     {
         let mut m = scope_ui::Model::DEFAULT;
         m.combined = true;
-        let strip_area = Bx::new(13, 20, 401, 56);
+        let strip_area = Bx::new(scope_ui::GX as i32, 20, scope_ui::GW as i32 + 1, 56);
         let strip_regions = [("screen", Bx::new(0, 0, 480, 320))];
         let full_page = |m: &scope_ui::Model| {
             host::reset(0);
@@ -3960,7 +3981,7 @@ fn main() {
             };
             combined(r, None, 0, meter::V_NONE, false, false, false, "");
             strip(true);
-            ck.check_area(&format!("short/strip/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
+            ck.check_area(&format!("short/strip/{name}"), &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(scope_ui::GX as i32, 20, scope_ui::GW as i32 + 1, 56)));
             if i == 0 || k == 2 {
                 save(&out, &format!("b{:02}-short-combined-{name}", n + 1 + i));
             }

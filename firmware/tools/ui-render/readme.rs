@@ -107,7 +107,7 @@ pub fn run(out: &str) -> usize {
         let mut d = ui::strip_data(&acv, 0, 0, false, 0, false, None);
         d.gen = scope_ui::Txt::new("1.00kHz");
         scope_ui::meter_strip(&d);
-        ck.check_area("readme/combined", &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
+        ck.check_area("readme/combined", &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(scope_ui::GX as i32, 20, scope_ui::GW as i32 + 1, 56)));
         save1(out, "combined");
     }
 
@@ -150,7 +150,7 @@ pub fn run(out: &str) -> usize {
         let h = sc.m.frame_h();
         let g = scope_ui::graph();
         let spec = stock::Trace { a, b };
-        for (i, (x, y)) in spec.columns(399).iter().enumerate().take(399) {
+        for (i, (x, y)) in stock::fit(&spec.columns(400)).iter().enumerate().take(scope_ui::NCOL) {
             g.ma[i] = (scope_ui::trace_fy(h, *x), scope_ui::trace_fy(h, *y));
         }
         scope_ui::update(&sc.m);
