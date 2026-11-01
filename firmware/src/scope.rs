@@ -1670,7 +1670,7 @@ impl Scope {
     fn hw_trim(&mut self, len: usize) -> usize {
         let n = self.rec.min(len);
         if len > n {
-            unsafe { (&mut *core::ptr::addr_of_mut!(BUF)).copy_within(len - n..len, 0) };
+            unsafe { (&mut *core::ptr::addr_of_mut!(DMA.buf)).copy_within(len - n..len, 0) };
         }
         n
     }
