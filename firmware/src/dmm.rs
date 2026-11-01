@@ -6110,10 +6110,18 @@ impl Dmm {
     /// APROT_GONE_MS. Without hits and without the latch the probe leaves.
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
+        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe holds AD1
+        // off, so it goes in only once the gate has a verdict of this run
+        // (DC mV's A-PROT trip needs one anyway), and that verdict stands
+        // while the probe runs.
+        let mv = self.mode == 3;
+        if self.probe && mv {
+            self.sent.v_side_hold(now);
+        }
         if !self.probe {
             // (on a run the comparator saw: one of the negative leg alone
             // keeps AD2 on PB1, sentinel `cmp_run`)
-            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
+            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() && (!mv || self.sent.v_free()) {
                 self.probe = true;
                 self.probe_rewrite(clk, 120);
             }
