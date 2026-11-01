@@ -366,13 +366,18 @@ SECTIONS
          * continuity / the resistive temperature sensors (a fault), never
          * with the bus handed to a stream (it talks to the HY3131 itself). */
         *(.text.*8opendm408sentinel*8Sentinel11jack_result*);
+        *(.text.*8opendm408sentinel*8Sentinel6v_both*);
         *(.text.*8opendm403dmm*3Dmm9cont_jack*);
         /* V_GATE of ohm / continuity / diode, once per reading (no HY3131
          * access; region B at 16 KiB). */
         *(.text.*8opendm403dmm*3Dmm10v_side_ohm*);
+        /* AC mV's V_GATE, once per AC mV result (no HY3131 access). */
+        *(.text.*8opendm403dmm*3Dmm8mv_vside*);
         /* DBG:SRC? and DBG:ACDC:TRACE? reply text (SCPI only; room in region B
          * for the jack check above). */
         *(.text.*8opendm40*8src_text*);
+        /* DBG:SRC's parser (region B at 16 KiB, 2026-10-26). */
+        *(.text.*8opendm406dbgsrc5index*);
         *(.text.*6acdctr*5Trace4text*);
         *(.text.*8opendm405scope*5Scope12hw_calibrate*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);

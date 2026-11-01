@@ -292,7 +292,7 @@ scope.
 | Smoothing | — | Optional [smoothing](#smoothing) of the display |
 | AutoHold | — | [AutoHold](#autohold): holds a stable reading by itself |
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
-| AVG | — | The [mean](#min-max-avg) and SD next to MAX and MIN |
+| AVG | — | The [mean](#min-max-avg) and σ (standard deviation) next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
@@ -893,7 +893,7 @@ the box shows the REL value. Tap again to turn it off.
 ### MIN, MAX, AVG
 
 The column on the right of the chart shows **MAX**, **AVG**, **MIN** and
-**SD** (sample standard deviation) since they were last reset, and a timer
+**σ** (sample standard deviation) since they were last reset, and a timer
 **T hh:mm:ss**.
 
 - **Tap the column** (outside the REL box): start a session. The
@@ -1032,7 +1032,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; flowing from COM into A in DC V, DC mV and Ω: about 4 mA, DC V 9 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -1151,8 +1151,8 @@ circuit:
 
 - **A-JACK** in the functions where a current really flows through the A
   jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In Ω, continuity,
-  diode, capacitance and the resistive temperature sensors, A-JACK shows
-  silently.)
+  diode, capacitance, frequency and the resistive temperature sensors, A-JACK
+  shows silently.)
 - **A-PROT** while the current still flows.
 - **A current above 10 A** for 1 s on the 10 A range (also in the power
   meter).
@@ -1214,13 +1214,17 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
   alternating voltage there, or (Ω) about 3-5 V and more.
 - A current in the A jack while a voltage is also on the V/Ω jack: Ω and
   continuity show LIVE?, AC mV shows nothing (the reading is over range).
-  A-JACK shows only with the V/Ω jack free.
+  A-JACK shows only with the V/Ω jack free. Manual Ω ranges below 6 MΩ may
+  show LIVE? for a current in A even with V/Ω free. The same with a signal above
+  the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
+- No A-PROT for a current flowing from COM into the A jack, or for an AC current in DC V: A-JACK only.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
 *Two cases no alert can see.*
 - No A-JACK in DC V above the 6 V range (60 V, 600 V, 1000 V), in AC+DC V
-  above 6 V, in frequency, and in the higher capacitance ranges. The power
+  above 6 V, in frequency below about 4 mA (6 mA from COM into A) or for an AC current, and in
+  the higher capacitance ranges. The power
   meter has no jack alerts.
 
 ## Oscilloscope
@@ -1493,7 +1497,8 @@ over the trace; tap the button again while its popup is open to turn it off.
 Press **RUN** (or tap the run state) to stop. The last capture (up to
 45 056 samples) stays in memory:
 
-- change the timebase to zoom in or out of the stored capture;
+- change the timebase to zoom in or out of the stored capture (zoom in stops
+  at **Max zoom**, 16 samples across the screen);
 - change the V/div to scale it;
 - drag sideways to pan through it;
 - double tap to centre it on the trigger point.
