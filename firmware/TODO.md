@@ -263,6 +263,19 @@ What waits for the owner; each line links to the material.
 - [ ] **Docs, owner decision:** the AI-contribution policy for CONTRIBUTING.md (whether AI-written
       contributions are accepted, and how they are marked and reviewed).
 
+## AD1 offset with AD2 / AD3 on: measure, then maybe compensate (owner 2026-11-01)
+
+AD2 / AD3 converting next to AD1 shifts AD1 (DS 13.1 note 7; [acdc-approaches](docs/acdc-approaches.md)
+"AD1 offset with AD2/AD3 on"). #179's AD2 on PB1 in DC V moved a user's -4 V reading by ~0.7 mV; the rule is
+now: no AD2 / AD3 in a row whose AD1 value is shown. Owner: measure the effect, it may be compensable.
+- [ ] Device, calibrator on V-COM: per DC V / DC mV / ohm range, AD1 with AD2 (and AD3, RMS, peak hold) off vs
+  on, in alternating blocks (calibrator drift); levels 0, +-10 %, +-50 %, +-90 % of the range, both polarities.
+  A/B switch: `DBG:SENT:VAR 128` while #179's rows exist, else a DBG row variant.
+- [ ] Is the shift an offset, a gain, or level / polarity dependent? Does it repeat over power cycles, warm-up,
+  units (only one meter here: say so), and AD2's input node (PB1 vs OP1O vs AGND)?
+- [ ] If stable: a per-range correction (offset / gain) applied only while AD2 / AD3 run, measured at first entry
+  (as method C's zero) or fixed per range; then re-allow the A-jack negative leg and similar AD2 uses.
+
 ## Next up (groomed 2026-10-14)
 
 Replaced by [Open, by kind](#open-by-kind-2026-10-27) (2026-10-27). Its entries are items of their own below:
