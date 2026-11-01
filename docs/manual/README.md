@@ -1573,8 +1573,7 @@ on the A function has `time_s,amperes`: the current through the A jack.
 or DALI, drawn under the trace: a box per byte, errors in red. UART
 recognises Modbus RTU frames by their CRC and shows them above the bytes. Each capture is decoded once: running, one that
 triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
-Zoom and pan show the decoded capture. **Mode Log** is left out of this
-build (flash).
+Zoom and pan show the decoded capture.
 
 ![The Decode tab](img/scope-decode-tab.png)
 

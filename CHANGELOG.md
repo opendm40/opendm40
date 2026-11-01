@@ -50,7 +50,7 @@ section named after the tag as the release notes; how to cut a release:
   bit/s) drawn under the trace,
   each triggered capture and on STOP, also in the Wave view. Scope MF >
   Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
-  The frame log (Mode Log) is left out of this build (flash).
+  **Mode Log** lists every frame of a running stream.
 
   ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
 - **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
