@@ -10,7 +10,8 @@
 //! only the chunk being written and the CSV export can seek without decoding.
 //!
 //!   file header (24 + hl bytes): "DLG1", kind (1 DMM, 2 scope record, 3 fast
-//!       logger stream: section "fast log" below), unit
+//!       logger stream: section "fast log" below, 4 scope record with an X
+//!       column: `scope_header_xy`), unit
 //!       length, u16 hl, u32 CRC-32 of bytes 12.., unit[12], the CSV header text
 //!   chunk (28 + pl bytes): "DC", u16 pl, u32 CRC-32 of bytes 8.., u32 first
 //!       row, u32 CSV offset, u32 CSV bytes, u32 t0 ms, u16 rows, u8 flags at
@@ -40,6 +41,8 @@
 pub const MAGIC: [u8; 4] = *b"DLG1";
 pub const KIND_DMM: u8 = 1;
 pub const KIND_SCOPE: u8 = 2;
+/// Kind 4: a scope record of the X-Y display (`scope_header_xy`).
+pub const KIND_SCOPE_XY: u8 = 4;
 /// File header bytes before the header text.
 pub const FHDR: usize = 24;
 /// Chunk header bytes.
@@ -661,10 +664,16 @@ fn s_pred(order: u32, j: usize, h: &[i32; 3]) -> i32 {
 /// The fixed order (0..3) with the least sum of |residual| over `codes`.
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn scope_order(codes: &[u16]) -> u32 {
+    scope_order_of(codes.len(), &mut |j| codes[j])
+}
+
+/// `scope_order` of the `n` codes `code(0..n)`.
+#[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
+pub fn scope_order_of<C: FnMut(usize) -> u16>(n: usize, code: &mut C) -> u32 {
     let mut sum = [0u64; 4];
     let mut h = [0i32; 3];
-    for (j, &c) in codes.iter().enumerate() {
-        let x = (c & 0x3FF) as i32;
+    for j in 0..n {
+        let x = (code(j) & 0x3FF) as i32;
         for (o, s) in sum.iter_mut().enumerate() {
             *s += (x - s_pred(o as u32, j, &h)).unsigned_abs() as u64;
         }
@@ -716,6 +725,12 @@ impl SEnc {
     /// The next byte of the block coding `codes`; None at its end.
     #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
     pub fn next(&mut self, codes: &[u16]) -> Option<u8> {
+        self.next_of(codes.len(), &mut |j| codes[j])
+    }
+
+    /// `next` over the `n` codes `code(0..n)` (called in order, each once).
+    #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
+    pub fn next_of<C: FnMut(usize) -> u16>(&mut self, n: usize, code: &mut C) -> Option<u8> {
         loop {
             if self.qh != self.qt {
                 let b = self.q[(self.qh & 15) as usize];
@@ -723,8 +738,8 @@ impl SEnc {
                 self.pos += 1;
                 return Some(b);
             }
-            if self.j < codes.len() {
-                let x = (codes[self.j] & 0x3FF) as i32;
+            if self.j < n {
+                let x = (code(self.j) & 0x3FF) as i32;
                 if self.mode == S_RAW {
                     self.put(x as u32, 10);
                 } else {
@@ -783,16 +798,30 @@ pub fn scope_block<F: FnMut(u8)>(codes: &[u16], mode: u32, sink: &mut F) -> usiz
 /// The fixed order with the least |residual|, or raw when that is smaller.
 #[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
 pub fn scope_plan(codes: &[u16]) -> (u32, u32, u32) {
-    let o = scope_order(codes);
+    scope_plan_of(codes.len(), &mut |j| codes[j])
+}
+
+/// `scope_plan` of the `n` codes `code(0..n)` (each index read several
+/// times, in order per pass).
+#[cfg_attr(target_os = "none", link_section = ".text.scope_plan")]
+pub fn scope_plan_of<C: FnMut(usize) -> u16>(n: usize, code: &mut C) -> (u32, u32, u32) {
+    let o = scope_order_of(n, code);
     let mut crc = !0u32;
-    let n = scope_block(codes, o, &mut |b| crc = crc32_upd(crc, &[b]));
-    let raw = (3 + codes.len() * 10).div_ceil(8);
-    if n > raw {
-        let mut crc = !0u32;
-        let n = scope_block(codes, S_RAW, &mut |b| crc = crc32_upd(crc, &[b]));
-        return (S_RAW, n as u32, !crc);
+    let mut e = SEnc::new(o, 0);
+    while let Some(b) = e.next_of(n, code) {
+        crc = crc32_upd(crc, &[b]);
     }
-    (o, n as u32, !crc)
+    let nb = e.pos as usize;
+    let raw = (3 + n * 10).div_ceil(8);
+    if nb > raw {
+        let mut crc = !0u32;
+        let mut e = SEnc::new(S_RAW, 0);
+        while let Some(b) = e.next_of(n, code) {
+            crc = crc32_upd(crc, &[b]);
+        }
+        return (S_RAW, e.pos, !crc);
+    }
+    (o, nb as u32, !crc)
 }
 
 /// The block table (`lens[i]`, `crcs[i]` per block, then the table CRC)
@@ -879,6 +908,45 @@ pub fn scope_header(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, out: 
     let c = !crc32_upd(!0, &p[..20]);
     p[20..24].copy_from_slice(&c.to_le_bytes());
     k + SCOPE_PAR
+}
+
+/// Kind 4 (scope record of the X-Y display): kind 2's layout with
+/// SCOPE_PAR_XY bytes of parameters (kind 2's first 20, then f32 ax, f32
+/// bx: x = ax + bx * code; u32 CRC-32 of these 28) and n = 2 x rows codes,
+/// the CH1 code and the X code of each sample in turn (y0, x0, y1, x1, ...).
+/// CSV rows: time_s, the value, x (`scope_row_xy`).
+pub const SCOPE_PAR_XY: usize = 32;
+/// The generated X-Y CSV row: "+d.ddddde+xx,+d.dddde+xx,+d.dddde+xx\r\n".
+pub const SCOPE_ROW_XY: usize = 38;
+
+/// The kind-4 file header (`scope_header` with the X map ax, bx; `n` =
+/// codes, twice the samples); `unit` the value column's (V / A).
+#[allow(clippy::too_many_arguments)]
+pub fn scope_header_xy(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, ax: f32, bx: f32, out: &mut [u8]) -> usize {
+    let k = file_header(KIND_SCOPE_XY, b"V", text, out);
+    let p = &mut out[k..k + SCOPE_PAR_XY];
+    p[0..4].copy_from_slice(&a.to_le_bytes());
+    p[4..8].copy_from_slice(&b.to_le_bytes());
+    p[8..12].copy_from_slice(&dt.to_le_bytes());
+    p[12..16].copy_from_slice(&t0.to_le_bytes());
+    p[16..20].copy_from_slice(&n.to_le_bytes());
+    p[20..24].copy_from_slice(&ax.to_le_bytes());
+    p[24..28].copy_from_slice(&bx.to_le_bytes());
+    let c = !crc32_upd(!0, &p[..28]);
+    p[28..32].copy_from_slice(&c.to_le_bytes());
+    k + SCOPE_PAR_XY
+}
+
+/// CSV row `i` of a kind-4 record: `scope_row` and ",x".
+#[allow(clippy::too_many_arguments)]
+pub fn scope_row_xy(a: f32, b: f32, dt: f32, t0: u32, i: usize, code: u16, ax: f32, bx: f32, xcode: u16, out: &mut [u8; SCOPE_ROW_XY]) {
+    let mut r = [0u8; SCOPE_ROW];
+    scope_row(a, b, dt, t0, i, code, &mut r);
+    out[..24].copy_from_slice(&r[..24]);
+    out[24] = b',';
+    sci(&mut out[25..36], ax + bx * (xcode & 0x3FF) as f32, 4);
+    out[36] = b'\r';
+    out[37] = b'\n';
 }
 
 /// "+d.dd..de+xx" with `dig` decimals into `out` (2 + dig + 4 bytes).
@@ -1253,6 +1321,8 @@ pub struct Gen<S: Src> {
     /// starts at the nearest one: a host that reads two places of a file in
     /// turn, e.g. an indexer at its head while a copy runs, no longer walks
     /// the chunk headers from the start, ~1300 of them, for each sector).
+    /// Kind 4: ck[0] holds the X map (ax, bx as f32 bits) instead (no
+    /// field of its own: the generators are in TCM).
     ck: [(u32, u32); FCK],
     nck: u8,
     ck_step: u32,
@@ -1271,7 +1341,7 @@ impl<S: Src> Gen<S> {
     #[cfg_attr(target_os = "none", link_section = ".text.vdisk_rd")]
     pub fn open(mut s: S, size: u32) -> Option<Gen<S>> {
         let (kind, hl, ul, unit) = parse_file(&mut s, size)?;
-        if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST {
+        if kind != KIND_DMM && kind != KIND_SCOPE && kind != KIND_FAST && kind != KIND_SCOPE_XY {
             return None;
         }
         let mut g = Gen {
@@ -1301,10 +1371,12 @@ impl<S: Src> Gen<S> {
             row: [0; ROW_MAX],
             rlen: 0,
         };
-        if kind == KIND_SCOPE {
-            let mut p = [0u8; SCOPE_PAR];
+        if kind == KIND_SCOPE || kind == KIND_SCOPE_XY {
+            let xy = kind == KIND_SCOPE_XY;
+            let pl = if xy { SCOPE_PAR_XY } else { SCOPE_PAR };
+            let mut p = [0u8; SCOPE_PAR_XY];
             let at = FHDR as u32 + hl;
-            if !g.s.read(at, &mut p) || !crc32_upd(!0, &p[..20]) != le32(&p, 20) {
+            if !g.s.read(at, &mut p[..pl]) || !crc32_upd(!0, &p[..pl - 4]) != le32(&p, pl - 4) {
                 return None;
             }
             let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
@@ -1313,13 +1385,16 @@ impl<S: Src> Gen<S> {
             if nb > SBLK_MAX {
                 return None;
             }
-            let t0 = at + SCOPE_PAR as u32;
+            let t0 = at + pl as u32;
             let mut t = [0u8; 8 * SBLK_MAX + 4];
             let tl = 8 * nb + 4;
             if !g.s.read(t0, &mut t[..tl]) || !crc32_upd(!0, &t[..tl - 4]) != le32(&t, tl - 4) {
                 return None;
             }
             g.sc = (f(0), f(4), f(8), le32(&p, 12));
+            if xy {
+                g.ck[0] = (le32(&p, 20), le32(&p, 24));
+            }
             // The whole, CRC-correct blocks (a torn file: the ones before).
             let mut o = t0 + tl as u32;
             let mut rows = 0u32;
@@ -1343,9 +1418,11 @@ impl<S: Src> Gen<S> {
                 o = e;
                 rows = ((b + 1) * SBLK).min(n as usize) as u32;
             }
+            // Kind 4: two codes per row (a torn odd one is dropped).
+            let (rows, wd) = if xy { (rows / 2, SCOPE_ROW_XY) } else { (rows, SCOPE_ROW) };
             g.info.rows = rows;
             g.info.chunks = rows.div_ceil(SBLK as u32);
-            g.info.csv = hl + rows * SCOPE_ROW as u32;
+            g.info.csv = hl + rows * wd as u32;
             g.info.valid = o;
             g.size = g.info.valid;
             return Some(g);
@@ -1645,6 +1722,21 @@ impl<S: Src> Gen<S> {
                 scope_row(a, b, dt, t0, k as usize, code, &mut r);
                 let o = ((off - self.info.hl) % SCOPE_ROW as u32) as usize;
                 let n = (SCOPE_ROW - o).min(buf.len() - i);
+                buf[i..i + n].copy_from_slice(&r[o..o + n]);
+                i += n;
+                off += n as u32;
+                continue;
+            }
+            if self.info.kind == KIND_SCOPE_XY {
+                let k = (off - self.info.hl) / SCOPE_ROW_XY as u32;
+                let Some(code) = self.scope_code(2 * k) else { return };
+                let Some(xc) = self.scope_code(2 * k + 1) else { return };
+                let mut r = [0u8; SCOPE_ROW_XY];
+                let (a, b, dt, t0) = self.sc;
+                let (ax, bx) = (f32::from_bits(self.ck[0].0), f32::from_bits(self.ck[0].1));
+                scope_row_xy(a, b, dt, t0, k as usize, code, ax, bx, xc, &mut r);
+                let o = ((off - self.info.hl) % SCOPE_ROW_XY as u32) as usize;
+                let n = (SCOPE_ROW_XY - o).min(buf.len() - i);
                 buf[i..i + n].copy_from_slice(&r[o..o + n]);
                 i += n;
                 off += n as u32;

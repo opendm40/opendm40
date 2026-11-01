@@ -77,6 +77,10 @@ mod scope_meas;
 mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
+#[path = "../../src/scope_xy.rs"]
+mod scope_xy;
+#[path = "../../src/scope_ch2.rs"]
+mod scope_ch2;
 mod scope_add;
 mod readme;
 mod manual;

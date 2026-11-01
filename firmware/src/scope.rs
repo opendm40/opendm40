@@ -216,6 +216,12 @@ pub struct Settings {
 pub const TSRC_CH1: u8 = 0;
 pub const TSRC_GEN: u8 = 1;
 pub const TSRC_NAMES: [&str; 2] = ["CH1", "GEN"];
+/// X-Y display (docs/scope-gen-channel.md section 3): off, CH1 against the
+/// generator (computed), CH1 against the DMM CH2.
+pub const XY_OFF: u8 = 0;
+pub const XY_GEN: u8 = 1;
+pub const XY_CH2: u8 = 2;
+pub const XY_NAMES: [&str; 3] = ["Off", "GEN", "CH2"];
 
 /// Ticks of the 200 MHz timer clock the generator's output reaches the
 /// MCX samples later than its timers say (DAC settling, the output and
@@ -396,6 +402,9 @@ pub struct Scope {
     /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
     /// record needs its time (`rec_time`), the comparator is off.
     pub ch2_on: bool,
+    /// X-Y display (XY_*): free run (no trigger search, no roll, no
+    /// comparator); XY_GEN needs every record's generator phase.
+    pub xy: u8,
     /// The acquisition in flight: DWT count of its sample 0 (None: a
     /// comparator record, the wave view) and DWT cycles per sample; the
     /// stored record's (BUF[0]).
@@ -740,6 +749,7 @@ impl Scope {
             stored_gen: None,
             gen_trace: false,
             ch2_on: false,
+            xy: XY_OFF,
             t_s0: None,
             t_step: 1.0,
             stored_t0: None,
@@ -1236,7 +1246,10 @@ impl Scope {
         // Mask once here (snapshot_mark), then search in the masked record.
         self.snapshot_mark(n, 0, None, false);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
-        let trig = if self.gen_src() {
+        // X-Y: free run, every record is shown (untriggered).
+        let trig = if self.xy != XY_OFF {
+            None
+        } else if self.gen_src() {
             self.gen_next(pre as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
         } else if self.s.ttype != 0 {
             self.find_soft(data, pre, pre + win)
@@ -1245,6 +1258,7 @@ impl Scope {
         };
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
+            _ if self.xy != XY_OFF => true,
             (None, TrigMode::Auto) => now >= self.deadline,
             (None, _) => false,
         };
@@ -1328,9 +1342,9 @@ impl Scope {
             // record per frame.
             // GEN: the trigger is computed (edge only); the GEN trace needs
             // every record's phase, which a comparator stop does not give.
-            let gen = self.gen_src() || self.gen_trace;
+            let gen = self.gen_src() || self.gen_trace || self.xy == XY_GEN;
             let soft = self.s.ttype != 0 && !self.gen_src();
-            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
+            let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on && self.xy == XY_OFF;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
@@ -1448,7 +1462,7 @@ impl Scope {
     /// generator, a level outside its swing: start at once (untriggered).
     fn gen_ready(&mut self, now: u64) -> bool {
         let fs = TB[self.s.tb].0;
-        if !self.gen_src() || fs <= STREAM_FS || self.roll_ok() {
+        if !self.gen_src() || fs <= STREAM_FS || self.roll_ok() || self.xy != XY_OFF {
             return true;
         }
         if self.deadline == 0 {
@@ -1735,7 +1749,7 @@ impl Scope {
     /// and no single record wanted (Single sweep, DIGitize), which captures
     /// a full linear record like the stock Single mode.
     fn roll_ok(&self) -> bool {
-        self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot
+        self.roll && self.s.tb >= TB_ROLL && self.s.mode != TrigMode::Single && !self.one_shot && self.xy == XY_OFF
     }
 
     /// Roll display active (running, timebase in the roll range).
@@ -1861,7 +1875,7 @@ impl Scope {
         // remembered so a later zoom stays on this feature).
         let (start, trig) = self.finish(now)?;
         self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
+        if (trig.is_some() || self.xy != XY_OFF) && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..self.rec] };
@@ -1899,6 +1913,10 @@ impl Scope {
             self.st_armed = false;
             self.st_scan = wr;
             self.st_idx = (wr % CAP as u64) as usize;
+        }
+        // X-Y: free run, the newest screen once it is written.
+        if self.xy != XY_OFF {
+            return if wr >= self.screen as u64 { self.stream_emit(None) } else { None };
         }
         let (pre, post) = self.hw_split();
         if self.st_found.is_none() {
@@ -2006,7 +2024,7 @@ impl Scope {
         let trig = t.map(|_| start + pre);
         self.snapshot_mark(len, start + self.screen / 2, trig, false);
         self.deadline = 0;
-        if trig.is_some() && self.s.mode == TrigMode::Single {
+        if (trig.is_some() || self.xy != XY_OFF) && self.s.mode == TrigMode::Single {
             self.s.run = false;
         }
         let data: &'static [u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[start..start + self.screen] };

@@ -214,6 +214,47 @@ impl Store {
         (self.si(lo), self.si(hi))
     }
 
+    /// Each stored sample of indices [ia, ib): its DWT time (from the
+    /// anchors around it; past the newest one, the nominal period) and SI
+    /// value, oldest first (the X-Y display, scope_xy.rs).
+    #[inline(always)]
+    pub fn each<F: FnMut(u32, f32)>(&self, ia: u64, ib: u64, f: &mut F) {
+        let n = self.nanc.min(NANCH);
+        if n == 0 {
+            return;
+        }
+        // An anchor whose codes were overwritten still times its segment.
+        let mut k = n - 1;
+        let (a, b) = (ia.max(self.tot.saturating_sub(CAP as u64)), ib.min(self.tot));
+        let mut m = a;
+        while m < b {
+            while k > 0 && self.anc_k(k - 1).0 <= m {
+                k -= 1;
+            }
+            let (i0, t0) = self.anc_k(k);
+            let slope = if k > 0 {
+                let (i1, t1) = self.anc_k(k - 1);
+                t1.wrapping_sub(t0) as i32 as f32 / (i1 - i0) as u32 as f32
+            } else {
+                self.period
+            };
+            let d = m.wrapping_sub(i0) as u32 as i32 as f32;
+            f(t0.wrapping_add((d * slope) as i32 as u32), self.si(self.codes[(m % CAP as u64) as usize]));
+            m += 1;
+        }
+    }
+
+    /// The SI value of the sample nearest DWT time `t` (None: not in the
+    /// store): the X-Y CSV's CH2 column (scope_csv.rs).
+    pub fn value_at(&self, t: u32) -> Option<f32> {
+        let a = self.index_at(t)? + 0.5;
+        let oldest = self.tot.saturating_sub(CAP as u64) as f64;
+        if a < oldest || a >= self.tot as f64 {
+            return None;
+        }
+        Some(self.si(self.codes[(a as u64 % CAP as u64) as usize]))
+    }
+
     /// The anchor with age `k` (0 = the newest).
     fn anc_k(&self, k: usize) -> (u64, u32) {
         self.anc[((self.nanc - 1) % NANCH + NANCH - k) % NANCH]

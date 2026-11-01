@@ -49,6 +49,7 @@ mod hwtrig;
 mod scope_meas;
 mod scope_ui;
 mod scope_ch2;
+mod scope_xy;
 mod fft;
 mod sinc;
 mod trigsoft;

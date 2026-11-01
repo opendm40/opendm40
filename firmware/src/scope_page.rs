@@ -509,6 +509,7 @@ impl App {
             tabs &= !(su::TAB_SHOW_R | su::TAB_PRESS_R); // no faster wave timebase
         }
         let amps = wave && self.scope.wave_scale_now().amps;
+        let xy = self.xy_on();
         Model {
             status,
             tb: s.tb as u8,
@@ -518,7 +519,7 @@ impl App {
             trig_row: s.trig_row as i16,
             trig_v: self.scope.trig_volts(),
             rising: s.rising,
-            trig_px: s.hpos as i16,
+            trig_px: if xy { -1000 } else { s.hpos as i16 },
             pos: s.pos as i16,
             colour: sp.colour,
             bright: sp.bright,
@@ -526,8 +527,9 @@ impl App {
             sel_v: sp.sel_v,
             sel_h: sp.sel_h,
             guide: now < sp.guide_until || sp.touch.is_some_and(|t| t.hit || t.moving),
-            xcur: if self.cur.x_on { Some([self.cur.x[0] as i16, self.cur.x[1] as i16]) } else { None },
-            ycur: if self.cur.y_on { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
+            // X-Y: no time / level cursors (the measurements stay: CH1's).
+            xcur: if self.cur.x_on && !xy { Some([self.cur.x[0] as i16, self.cur.x[1] as i16]) } else { None },
+            ycur: if self.cur.y_on && !xy { Some([self.cur.y[0] as i16, self.cur.y[1] as i16]) } else { None },
             battery: self.power.shown_bars(now / 1000 & 1 == 1),
             charging: self.power.on_charger(),
             usb: self.usb_host,
@@ -542,7 +544,7 @@ impl App {
             combined: self.view == View::DmmScope,
             tabs,
             tb_flash: now < sp.flash_until,
-            math_on: sp.math.on,
+            math_on: sp.math.on && !xy,
             math_mode: sp.math.mode,
             math_colour: sp.math.colour,
             math_off: sp.math.off().clamp(-400, 400) as i16,
@@ -550,7 +552,7 @@ impl App {
             fft_hz: sp.fft_hz,
             fft: sp.fft_view,
             runt_row: (s.ttype == crate::trigsoft::RUNT).then_some(s.runt_row as i16),
-            cur_tab: self.sp_cur_state(),
+            cur_tab: if xy { 0 } else { self.sp_cur_state() },
             // The source badge on the Scope page of builds with the stream
             // ISR (none in the combined view, none without: the stock page).
             src: if !app_wave::WAVE_BUILD || self.view != View::Scope {
@@ -571,7 +573,8 @@ impl App {
             rec_dim: su::rec_blink(now),
             rec_unit: su::rec_unit(self.rec_func),
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
-            ch2_txt: self.ch2_label(true),
+            ch2_txt: if xy { self.xy_label() } else { self.ch2_label(true) },
+            xy: if xy { self.scope.xy } else { scope::XY_OFF },
         }
     }
 
@@ -772,6 +775,14 @@ impl App {
     pub(super) fn sp_frame(&mut self, f: &scope::Frame, now: u64) {
         let c = cache();
         let s = self.scope.s;
+        if self.xy_on() {
+            c.valid = false;
+            c.ps_a = [su::EMPTY; 399];
+            c.ps_b = [su::EMPTY; 399];
+            self.sp_xy_frame(f, now);
+            self.sp_render();
+            return;
+        }
         // Persistence: the previous frame joins the current layer (stock
         // 4.3); layers swap every period; off in roll and STOP.
         let pm = if self.scope.rolling() || !s.run { 0 } else { self.sp.persist as usize };
@@ -862,7 +873,8 @@ impl App {
         let c = cache();
         let g = su::graph();
         let h = if self.view == View::DmmScope { 301 - su::COMBINED_TOP } else { 281 };
-        if !c.valid {
+        // X-Y: the bitmap (scope_xy.rs), no traces.
+        if !c.valid || self.xy_on() {
             g.clear();
             return;
         }
@@ -965,6 +977,10 @@ impl App {
         } else {
             "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
         });
+        // X-Y: the X column too (kind 4).
+        let (mut rec, mut t0) = (rec, t0);
+        let x = if self.xy_on() { self.sp_xy_csv(&mut h, &mut rec, &mut t0) } else { None };
+        crate::scope_csv::set_x(x);
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
@@ -972,6 +988,49 @@ impl App {
         }
         self.scope.hold = true;
         self.toast(now, "Saving CSV...", true);
+    }
+
+    /// The X-Y CSV's X column (`scope_csv::set_x`) and its header line:
+    /// the generator against the stored record, or the DMM CH2 (the
+    /// record cut to the samples CH2 has, the time-0 sample kept). None:
+    /// no X for this record (a header line says why).
+    fn sp_xy_csv(&self, h: &mut crate::scope_csv::Hdr, rec: &mut &'static [u16], t0: &mut usize) -> Option<(crate::scope_csv::XSrc, usize, f32, f32)> {
+        use crate::scope_csv::{x_value, XSrc};
+        if self.scope.xy == scope::XY_GEN {
+            let Some(g) = self.scope.gen_sync() else {
+                h.s("# X-Y GEN: no generator phase for this record, no x column\r\n");
+                return None;
+            };
+            h.s("# x = the generator output, computed from its timers (volts)\r\n");
+            return Some((XSrc::Gen(g), 0, g.shape.lo_v, g.shape.hi_v));
+        }
+        let Some((d0, step)) = self.scope.rec_time() else {
+            h.s("# X-Y CH2: no CH2 time for this record, no x column\r\n");
+            return None;
+        };
+        let src = XSrc::Ch2 { t0: d0, step };
+        let (mut i0, mut i1) = (usize::MAX, 0);
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for i in 0..rec.len() {
+            if let Some(v) = x_value(&src, i) {
+                i0 = i0.min(i);
+                i1 = i;
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+        }
+        if i0 > i1 {
+            h.s("# X-Y CH2: no CH2 samples in this record, no x column\r\n");
+            return None;
+        }
+        // Time 0 stays in the file (its rows before CH2's first sample
+        // carry the lowest x).
+        let i0 = i0.min(*t0);
+        let i1 = i1.max(*t0);
+        h.s("# x = the DMM CH2, its sample nearest each row's time\r\n");
+        *rec = &rec[i0..=i1];
+        *t0 -= i0;
+        Some((src, i0, lo, hi))
     }
 
     /// Trigger type text of the CSV header.
@@ -1021,6 +1080,98 @@ impl App {
     /// record around the frame (now, while its samples are still in the
     /// record; `step` finishes it over the next passes), ABS maps the shown
     /// columns.
+    /// X-Y (docs/scope-gen-channel.md section 3): frame `f`'s CH1 samples
+    /// against the generator (its phase in the stored record) or the DMM
+    /// CH2 (its samples at their time) into the X-Y bitmap. X: the
+    /// generator on CH1's V/div, CH2 on its own V/div, 0 on the centre
+    /// column. Nothing for a column frame (a stopped zoom-out).
+    /// Per frame, the setup only: .cold (link-native.x); the per-sample
+    /// loops (scope_xy plot_gen / plot_ch2) and the clear are region B.
+    #[inline(never)]
+    fn sp_xy_frame(&mut self, f: &scope::Frame, now: u64) {
+        let p = crate::scope_xy::plot();
+        let s = &self.scope.s;
+        let xy = self.scope.xy;
+        let h: i16 = if self.view == View::DmmScope { 301 - su::COMBINED_TOP } else { 281 };
+        let xv = if xy == scope::XY_GEN { self.scope.vdiv() } else { self.ch2.vdiv };
+        let key = (s.range as u32 | (s.pos as u32) << 5 | (xy as u32) << 16 | (h as u32) << 18 | (s.ac as u32) << 30) ^ xv.to_bits().rotate_left(7) ^ s.probe.to_bits().rotate_left(13);
+        let pm = if s.run { self.sp.persist.min(3) as usize } else { 0 };
+        p.begin(key, crate::scope_xy::CLEAR_MS[pm], now);
+        if f.cols.is_some() || f.data.len() < 2 || !(xv > 0.0) {
+            return;
+        }
+        let r0 = self.scope.row_of_code(0.0);
+        let slope = (self.scope.row_of_code(1000.0) - r0) / 1000.0;
+        let kh = (h - 3) as f32 / 278.0;
+        let m = crate::scope_xy::Map { ya: 1.0 + r0 * kh, yb: slope * kh, kx: 40.0 / xv, h };
+        let rec = self.scope.record();
+        let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
+        if off + f.data.len() > rec.len() {
+            return;
+        }
+        if xy == scope::XY_GEN {
+            if let Some(g) = self.scope.gen_sync() {
+                p.plot_gen(f.data, off, &g, m);
+            }
+        } else if let Some((t0, step)) = self.scope.rec_time() {
+            let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
+            p.plot_ch2(f.data, t0, step, crate::scope_ch2::store(), m);
+        }
+    }
+
+    /// The X-Y display is shown (on, and not the Wave view).
+    pub(super) fn xy_on(&self) -> bool {
+        self.scope.xy != scope::XY_OFF && !self.scope.wave_on()
+    }
+
+    /// The X axis label of X-Y ("X GEN 1V", "X CH2 200mA"; empty: X-Y off).
+    #[inline(never)] // .cold (link-native.x): the model in X-Y only
+    pub(super) fn xy_label(&self) -> su::Txt {
+        let mut b = su::Buf::new();
+        match self.scope.xy {
+            scope::XY_GEN => {
+                b.push("X GEN ");
+                su::fmt_div(&mut b, self.scope.vdiv(), "V");
+            }
+            scope::XY_CH2 if self.ch2.vdiv > 0.0 => {
+                b.push("X CH2 ");
+                su::fmt_div(&mut b, self.ch2.vdiv, if crate::scope_ch2::store().scale().amps { "A" } else { "V" });
+            }
+            scope::XY_CH2 => {
+                b.push("X CH2 --");
+            }
+            _ => return su::Txt::EMPTY,
+        }
+        su::Txt::new(b.as_str())
+    }
+
+    /// MF > Display "X-Y" Off / GEN / CH2 (and DISP:XY): CH2 turns the
+    /// DMM CH2 on first (its refusals as toasts: X-Y stays). False: refused.
+    #[inline(never)] // .cold (link-native.x): a tap / SCPI
+    pub(super) fn xy_set(&mut self, clk: &mut Clock, v: u8, now: u64) -> bool {
+        let v = v.min(scope::XY_CH2);
+        if v != scope::XY_OFF && self.scope.wave_on() {
+            self.toast(now, "X-Y: not in the Wave view", false);
+            return false;
+        }
+        if v == scope::XY_CH2 && !self.ch2.on {
+            self.ch2_set(clk, true);
+            if !self.ch2.on {
+                return false;
+            }
+        }
+        if v == scope::XY_GEN && !self.gen.s.on {
+            self.toast(now, "Generator is off", false);
+        }
+        self.scope.xy = v;
+        crate::scope_xy::plot().invalidate();
+        // Free run / the comparator off (or back): restart the acquisition.
+        let st = self.scope.s;
+        self.scope_set(st, now);
+        su::graph().invalidate();
+        true
+    }
+
     /// The GEN trace of frame `f` (`Cache::gseg`): the generator's volts
     /// over each column's samples, from the stored record's generator
     /// phase (scope `gen_sync`), on CH1's scale. Nothing for a roll /
@@ -1271,6 +1422,7 @@ impl App {
         let c = cache();
         c.ps_a = [su::EMPTY; 399];
         c.ps_b = [su::EMPTY; 399];
+        crate::scope_xy::plot().invalidate();
     }
 
     /// Per main-loop pass on the scope page (from scope_poll): timers, the
@@ -2219,6 +2371,7 @@ impl App {
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
             ch2_vdiv: self.ch2_label(false),
+            xy: self.scope.xy,
         }
     }
 
@@ -2559,6 +2712,9 @@ impl App {
             su::MfHit::Ch2Step(up) => {
                 self.ch2_step(up, now);
             }
+            su::MfHit::Xy(v) => {
+                self.xy_set(clk, v, now);
+            }
             su::MfHit::GenTrace(on) => {
                 self.scope.gen_trace = on;
                 // The next record is taken without the comparator (or
@@ -2896,12 +3052,14 @@ impl App {
         // The MCX settings (the wave view's trigger is not persisted).
         let s = &self.scope.mcx_settings();
         let dr = scope::Settings::DEFAULT.runt_row;
-        // Bits 4 / 5: the trigger source GEN, the GEN trace shown.
+        // Bits 4 / 5 / 6: the trigger source GEN, the GEN trace, CH2 shown;
+        // 7..8: X-Y (scope::XY_*).
         p[3] = (s.ttype as u32 & 3)
             | (s.pcond as u32 & 3) << 2
             | (s.tsrc as u32 & 1) << 4
             | (self.scope.gen_trace as u32) << 5
             | (self.ch2.on as u32) << 6
+            | (self.scope.xy as u32 & 3) << 7
             | ((s.runt_row - dr) as i16 as u16 as u32) << 16;
         p[4] = if s.pwidth == scope::Settings::DEFAULT.pwidth { 0 } else { s.pwidth.to_bits() };
     }
@@ -2931,6 +3089,10 @@ impl App {
         self.scope.gen_trace = p[3] >> 5 & 1 != 0;
         self.ch2.on = p[3] >> 6 & 1 != 0;
         self.scope.ch2_on = self.ch2.on;
+        self.scope.xy = ((p[3] >> 7 & 3) as u8).min(scope::XY_CH2);
+        if self.scope.xy == scope::XY_CH2 && !self.ch2.on {
+            self.scope.xy = scope::XY_OFF;
+        }
         st.runt_row = dd.runt_row + (p[3] >> 16) as u16 as i16 as i32;
         st.pwidth = if p[4] == 0 { dd.pwidth } else { f32::from_bits(p[4]) };
         self.scope.apply(st, 0);

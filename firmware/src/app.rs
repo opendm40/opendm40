@@ -4576,6 +4576,26 @@ impl App {
     /// Cmd::Temp* / Sys* / Calc*); None for the scope / generator commands
     /// (every DMM-side variant needs an arm here: the scope path would power
     /// the scope rail for it).
+    /// DISP:XY (the scope's X-Y display); true = a reply was written.
+    #[inline(never)] // .cold (link-native.x): SCPI only
+    fn xy_scpi(&mut self, clk: &mut Clock, v: Option<u8>, out: &mut crate::scpi::Scpi) -> bool {
+        match v {
+            Some(v) => {
+                let now = clk.now_ms();
+                self.xy_set(clk, v, now);
+                false
+            }
+            None => {
+                out.put_bytes(match self.scope.xy {
+                    scope::XY_GEN => b"GEN",
+                    scope::XY_CH2 => b"CH2",
+                    _ => b"OFF",
+                });
+                true
+            }
+        }
+    }
+
     /// FETC:BURD? / DISP:BURD (doc 3.15), RES:NEG; true = a reply was written.
     #[inline(never)] // .cold (link-native.x): SCPI only
     fn burden_scpi(&mut self, cmd: crate::scpi::Cmd, out: &mut crate::scpi::Scpi) -> bool {
@@ -5215,6 +5235,9 @@ impl App {
         }
         if let Some(r) = self.scpi_dmm(clk, cmd, out) {
             return r;
+        }
+        if let C::DispXy(v) = cmd {
+            return self.xy_scpi(clk, v, out);
         }
         let now = clk.now_ms();
         let mut g = self.gen.s;
