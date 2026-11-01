@@ -1703,6 +1703,18 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// V_GATE while the A-PROT probe holds AD1 off (DC mV: no result, so no
+    /// verdict of the row's own): the last verdict stands, dated now. The
+    /// probe goes in only after a verdict of the hit run (`dmm.rs`
+    /// aprot_poll); without both, A-JACK never came in DC mV once the probe
+    /// held AD1 off (device 2026-11-01, 20 mA forward: no alert, no reading).
+    #[inline(never)]
+    pub fn v_side_hold(&mut self, now: u64) {
+        if self.vside_t.is_some() {
+            self.v_side(now, self.vdrv);
+        }
+    }
+
     /// V_GATE: the row's V side said "free" since the hit run began (+
     /// `vlag`), or the row has no gate. A-JACK's assertion and (DC mV) the
     /// A-PROT trip need it.
@@ -2808,6 +2820,20 @@ mod tests {
         // ... and it drops when V-COM turns out driven.
         s.v_side(3500, true);
         assert_eq!(s.alert, Alert::None);
+        // The probe's AD1 pause (DC mV, `v_side_hold`): no verdict yet, none
+        // made up; a free one of the run stands through the pause.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        hits(&mut s, 0, 400);
+        s.v_side_hold(400);
+        assert_eq!(s.alert, Alert::None);
+        s.v_side(400, false);
+        for t in (400..3000).step_by(100) {
+            hits(&mut s, t, t + 100);
+            s.v_side_hold(t + 100);
+        }
+        assert_eq!(s.alert, Alert::AJack);
         // A V-side result from before the run does not count.
         let mut s = Sentinel::new();
         s.configured(Kind::CmpA, 0, true);
