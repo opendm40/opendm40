@@ -64,6 +64,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Long press on the A button** opens the
+  [inrush page](docs/manual/README.md#inrush-current) (it opened the power
+  meter's wiring picture; that one stays under **MF > Wiring**).
 - **Test builds of pull requests:** each pull request gets a comment with
   its update file to try (version `0.4.0-pr<N>.<commit>`)
   ([manual](docs/manual/README.md#install)).

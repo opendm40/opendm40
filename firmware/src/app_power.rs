@@ -34,7 +34,7 @@ fn gain_of(n: u32) -> f32 {
 
 impl App {
     /// Open the wiring dialog (the W function button until it was confirmed
-    /// once, a long press on A, Power Settings > Wiring). Auto-cancel after
+    /// once, Power Settings > Wiring). Auto-cancel after
     /// a minute.
     pub(super) fn pw_open_entry(&mut self, now: u64) {
         self.overlay = Some(crate::dialog::Overlay::PowerEntry { until: now + 60_000 });

@@ -3171,10 +3171,10 @@ impl App {
                     self.press_after_tap();
                 }
             }
-            // Long press on the A button: the power meter's wiring dialog.
+            // Long press on the A button: the inrush page (app_inrush.rs).
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
                 captured = true;
-                self.pw_open_entry(now);
+                self.inrush_long_a(clk);
             }
             // Power meter: a long press on the energy readout (aux2) or the
             // side column asks to reset the energy.

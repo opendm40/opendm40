@@ -45,16 +45,10 @@ fn inr_zero(s: &mut inr::Session) -> f32 {
 }
 
 impl App {
-    /// Open the page (MF "Inrush", INR:STAT ON / INR:ARM): refused (toast,
-    /// or the SCPI error `Err`) where it cannot run.
-    #[inline(never)]
-    pub(super) fn inrush_open(&mut self, clk: &mut Clock) -> Result<(), &'static str> {
-        let now = clk.now_ms();
+    /// Why the inrush page cannot open now (its toast), or None.
+    pub(super) fn inrush_refusal(&self) -> Option<&'static str> {
         let s = inr::ses();
-        if s.on {
-            return Ok(());
-        }
-        let why = if !app_wave::WAVE_BUILD {
+        if !app_wave::WAVE_BUILD {
             Some("Inrush: no stream in this build")
         } else if self.dmm.pw.on {
             Some("Inrush: not in the power meter")
@@ -66,8 +60,37 @@ impl App {
             Some("Inrush: still saving")
         } else {
             None
-        };
-        if let Some(t) = why {
+        }
+    }
+
+    /// Long press on the A button (DMM page): the A function (as its tap,
+    /// when not in it yet), then the inrush page; refused as `inrush_open`
+    /// (its toast, no function change).
+    #[inline(never)]
+    pub(super) fn inrush_long_a(&mut self, clk: &mut Clock) {
+        if inr::ses().on {
+            return;
+        }
+        if let Some(t) = self.inrush_refusal() {
+            self.toast(clk.now_ms(), t, false);
+            return;
+        }
+        if self.dmm.button() != Button::Amp {
+            self.press_func(clk, 1);
+        }
+        let _ = self.inrush_open(clk);
+    }
+
+    /// Open the page (MF "Inrush", INR:STAT ON / INR:ARM): refused (toast,
+    /// or the SCPI error `Err`) where it cannot run.
+    #[inline(never)]
+    pub(super) fn inrush_open(&mut self, clk: &mut Clock) -> Result<(), &'static str> {
+        let now = clk.now_ms();
+        let s = inr::ses();
+        if s.on {
+            return Ok(());
+        }
+        if let Some(t) = self.inrush_refusal() {
             self.toast(now, t, false);
             return Err("Settings conflict");
         }
