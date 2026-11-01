@@ -392,38 +392,38 @@ impl App {
         };
         let mut w = crate::dlog::Txt { b: &mut out[..], n: 0 };
         let mut t = [0u8; 16];
-        w.s("# Alientek ");
+        w.s(crate::cold_str!("# Alientek "));
         w.s(crate::ident::model_name());
-        w.s(", opendm40 ");
+        w.s(crate::cold_str!(", opendm40 "));
         w.s(crate::ident::VERSION);
-        w.s(", inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal ");
+        w.s(crate::cold_str!(", inrush capture, AD2, AC A row 10 A (10 mohm, OP1 x1, DC-coupled), nominal "));
         w.u(s.rate_mhz as u64 / 1000);
         w.c(b'.');
         let f = s.rate_mhz % 1000;
         w.c(b'0' + (f / 100) as u8);
         w.c(b'0' + (f / 10 % 10) as u8);
         w.c(b'0' + (f % 10) as u8);
-        w.s(" S/s\r\n# trigger: 1 ms mean |I| above the idle peak + ");
+        w.s(crate::cold_str!(" S/s\r\n# trigger: 1 ms mean |I| above the idle peak + "));
         w.s(crate::dmm::format(&mut t, s.thr, 3));
-        w.s(" A; t0 at t_s ");
+        w.s(crate::cold_str!(" A; t0 at t_s "));
         w.s(crate::dmm::format(&mut t, inr::PRE as f32 / inr::RATE_HZ as f32, 6));
         if let Some(r) = s.res {
-            w.s("; Irms(100 ms) ");
+            w.s(crate::cold_str!("; Irms(100 ms) "));
             w.s(crate::dmm::format(&mut t, r.rms100, 4));
-            w.s(" A, peak ");
+            w.s(crate::cold_str!(" A, peak "));
             if r.ol {
                 w.s("OL");
             } else {
                 w.s(crate::dmm::format(&mut t, r.peak, 3));
                 w.s(" A");
             }
-            w.s(", idle ");
+            w.s(crate::cold_str!(", idle "));
             w.s(crate::dmm::format(&mut t, r.idle, 4));
-            w.s(" A rms, lost ");
+            w.s(crate::cold_str!(" A rms, lost "));
             w.u(r.lost as u64);
         }
-        w.s("\r\n# t_s from the first sample (nominal rate); raw = AD2 code / 8; value = the DMM's AD2 calibration; lost_before = conversions missing before the row\r\n");
-        w.s("t_s,raw,value_A,lost_before\r\n");
+        w.s(crate::cold_str!("\r\n# t_s from the first sample (nominal rate); raw = AD2 code / 8; value = the DMM's AD2 calibration; lost_before = conversions missing before the row\r\n"));
+        w.s(crate::cold_str!("t_s,raw,value_A,lost_before\r\n"));
         (w.n, par)
     }
 

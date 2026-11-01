@@ -132,6 +132,8 @@ mod spiflash {
     }
 }
 
+#[path = "../../src/cold.rs"]
+mod cold;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/clock.rs"]

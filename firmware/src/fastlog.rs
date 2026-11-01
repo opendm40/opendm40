@@ -487,7 +487,7 @@ pub fn begin(bytes: u32, dur_s: u32) -> Result<(), &'static str> {
         return Err("Mass storage busy");
     }
     let j = job();
-    *j = JOB0;
+    crate::cold_set!(j, Job, JOB0);
     // LOG:DISK? tpp: this session's probe, 0 / 0 = none (`set_probe`), not
     // a previous session's.
     TPP.store(0, core::sync::atomic::Ordering::Relaxed);

@@ -925,7 +925,7 @@ impl App {
         let b = self.scope.volts(1.0) - a;
         let mut h = crate::scope_csv::Hdr::new();
         let mut t = [0u8; 16];
-        h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", scope record (no real-time clock)\r\n");
+        h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
@@ -936,34 +936,34 @@ impl App {
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[self.scope.record_tb().min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        h.s(crate::cold_str!("# timebase ")).s(su::TB_LABELS[self.scope.record_tb().min(29)]).s(crate::cold_str!("/div, ")).s(v.as_str()).s(crate::cold_str!("/div, "));
         if wave {
             // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
-            h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");
+            h.s(crate::cold_str!("source DMM ")).s(self.wave_func_label()).s(crate::cold_str!(" (AD2, isolated jacks)"));
         } else {
-            h.s("probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+            h.s(crate::cold_str!("probe ")).s(scope::PROBE_NAMES[probe_idx(s.probe)]);
         }
-        h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
-        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
+        h.s(crate::cold_str!(", coupling ")).s(if s.ac { "AC" } else { "DC" }).s(crate::cold_str!(", sample rate ")).s(sr.strip_suffix("Hz").unwrap_or(sr)).s(crate::cold_str!("S/s, samples "));
+        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s(crate::cold_str!("\r\n"));
         let mut tv = su::Buf::new();
         su::fmt_v(&mut tv, self.scope.trig_volts(), unit);
-        h.s("# trigger ");
+        h.s(crate::cold_str!("# trigger "));
         self.sp_trig_desc(&mut h);
-        h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
-        h.s(", mode ").s(match s.mode {
-            scope::TrigMode::Auto => "Auto",
-            scope::TrigMode::Normal => "Normal",
-            scope::TrigMode::Single => "Single",
+        h.s(" ").s(if s.rising { crate::cold_str!("rising") } else { crate::cold_str!("falling") }).s(" ").s(tv.as_str());
+        h.s(crate::cold_str!(", mode ")).s(match s.mode {
+            scope::TrigMode::Auto => crate::cold_str!("Auto"),
+            scope::TrigMode::Normal => crate::cold_str!("Normal"),
+            scope::TrigMode::Single => crate::cold_str!("Single"),
         });
-        h.s(if trig { ", triggered\r\n" } else { ", untriggered\r\n" });
+        h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
         h.s(if wave {
             if amps {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
             } else {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
             }
         } else {
-            "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
+            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
@@ -981,16 +981,16 @@ impl App {
             crate::trigsoft::PULSE => {
                 let mut b = su::Buf::new();
                 su::fmt_s125(&mut b, s.pwidth);
-                h.s("Pulse width ").s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(" (software),");
+                h.s(crate::cold_str!("Pulse width ")).s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
                 su::fmt_v(&mut b, self.scope.runt_volts(), unit);
-                h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
+                h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
-                h.s("Edge");
+                h.s(crate::cold_str!("Edge"));
             }
         }
     }

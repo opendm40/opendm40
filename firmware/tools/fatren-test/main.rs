@@ -237,6 +237,8 @@ mod lcd {
     }
 }
 
+#[path = "../../src/cold.rs"]
+mod cold;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/screenshot.rs"]

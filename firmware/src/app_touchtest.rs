@@ -174,7 +174,9 @@ impl App {
             self.toast(clk.now_ms(), t, false);
             return false;
         }
-        *st() = Tt { cur: touch::log_count(), ..TT0 };
+        // TT0's bytes from region C (`cold_set!`), then the log position.
+        crate::cold_set!(st(), Tt, TT0);
+        st().cur = touch::log_count();
         self.show(View::TouchTest, clk);
         true
     }

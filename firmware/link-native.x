@@ -473,6 +473,10 @@ SECTIONS
         *(.text.*8opendm408spiflash6af_pin*);
         *(.text.*8opendm405touch7rise_ns*);
         *(.text.*8opendm405touch6od_pin*);
+        /* ... and the read-only data only region C code reads: ui.rs
+         * cold_str! (strings) and cold_set! (a constant's bytes copied at
+         * run time, e.g. a job record's reset value). */
+        *(.rodata.cold .rodata.cold.*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
