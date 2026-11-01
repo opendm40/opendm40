@@ -1031,11 +1031,11 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV, Ω and temperature) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 4 mA). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV and temperature, the last *inferred*) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 4 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
-| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω a voltage on the V/Ω jack that would otherwise look like a current in the A jack (from about 3-5 V). | Ω, continuity, diode. |
+| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω a voltage on the V/Ω jack (from about 3-5 V) or a current through the A jack. | Ω, continuity, diode. |
 | **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V; the power meter in AC+DC ([Coupling](#coupling-dc-ac-acdc)). |
 | **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V; the power meter in DC. |
 | **FUSE?** | 0 A for 60 s: check the fuse? | A current function read zero for a minute. The fuse may be blown. | A functions. |
@@ -1149,9 +1149,9 @@ A loud two-tone alarm for connections that can damage the meter or the
 circuit:
 
 - **A-JACK** in the functions where a current really flows through the A
-  jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In Ω,
-  capacitance, frequency and the resistive temperature sensors, A-JACK shows
-  silently.)
+  jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In
+  capacitance, frequency and the resistive temperature sensors, A-JACK
+  shows silently.)
 - **A-PROT** while the current still flows.
 - **A current above 10 A** for 1 s on the 10 A range (also in the power
   meter).
@@ -1211,13 +1211,14 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
 - A positive voltage below about 3 V on a circuit in Ω, or any positive
   voltage in diode: it looks like an open circuit. LIVE? needs a negative or
   alternating voltage there, or (Ω) about 3-5 V and more.
-- A current in the A jack while a voltage is also on the V/Ω jack: Ω shows
-  LIVE?, AC mV shows nothing (the reading is over range). A-JACK shows only
-  with the V/Ω jack free. Manual Ω ranges below 6 MΩ may show LIVE? for a
-  current in A even with V/Ω free. In AC mV and DC mV a signal above the
-  meter's AC bandwidth (tens of kHz) on V/Ω counts as a voltage there too.
-- A current flowing from COM into the A jack in DC V, DC mV, Ω and
-  temperature: no A-JACK, no A-PROT.
+- A current in the A jack in Ω: LIVE?, not A-JACK, also with the V/Ω jack
+  free.
+- A current in the A jack while a voltage is also on the V/Ω jack: AC mV
+  shows nothing (the reading is over range); A-JACK shows only with the V/Ω
+  jack free. In AC mV and DC mV a signal above the meter's AC bandwidth
+  (tens of kHz) on V/Ω counts as a voltage there too.
+- A current flowing from COM into the A jack in DC V, DC mV and temperature
+  (temperature *inferred*): no A-JACK, no A-PROT.
 - No A-PROT for an AC current in DC V: A-JACK only.
 - No A-JACK in continuity and diode, in DC V above the 6 V range (60 V,
   600 V, 1000 V), in AC+DC V above 6 V, in frequency below about 4 mA (6 mA
@@ -2991,7 +2992,5 @@ Known problems:
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
 - The usable frequency range of the power meter is *unknown*.
-- On the manual Ω ranges below 6 MΩ, a current through the A jack can show
-  LIVE? instead of [A-JACK](#the-alerts).
-- In DC mV, a current of about 20 mA through the A jack already trips
-  A-PROT.
+- In Ω, a current through the A jack shows LIVE? instead of
+  [A-JACK](#the-alerts).
