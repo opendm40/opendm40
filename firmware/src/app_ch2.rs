@@ -138,7 +138,8 @@ impl App {
 
     /// The stream into the CH2 store (every scope pass and between its
     /// slow parts, as the wave view's `wave_keep`); a hole restarts the
-    /// store (`Store::push`). A stopped scope (STOP, a Single / DIGitize
+    /// store (`Store::push`). A STOP waiting for its frame still takes it
+    /// (`Scope::acquiring`). A stopped scope (STOP, a Single / DIGitize
     /// record) takes the stream in once more, since the logger ring holds
     /// the CH2 of the record's newest part (at 2 ms/div all of it), and
     /// re-renders the record with it; then it keeps the store as it is
@@ -148,7 +149,7 @@ impl App {
             return;
         }
         let st = scope_ch2::store();
-        if !self.scope.s.run {
+        if !self.scope.acquiring() {
             if self.ch2.frozen {
                 crate::logger::wave::drain(&mut |_| {});
                 return;

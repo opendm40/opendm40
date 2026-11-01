@@ -10,8 +10,7 @@
 //! (the stream ISR's read; `LAG_US` earlier for the conversion it holds).
 //! Between anchors the index is linear in time (the stream is regular
 //! between holes); a hole (ring overflow, missed conversions: a stamp
-//! more than 1.5 periods after the previous one, the logger's `missed`
-//! rule) restarts the store at the first sample after it, so no anchor
+//! at least 2 periods after the previous one) restarts the store at the first sample after it, so no anchor
 //! segment spans the gap. The anchors and the record's DWT are compared as wrapping
 //! i32 differences: both lie within seconds of each other, far inside
 //! the counter's 21 s wrap.
@@ -57,7 +56,9 @@ pub struct Store {
     /// Raw -> SI (the DMM row the stream runs on).
     sc: WaveScale,
     /// The previous sample's stamp (us) and the longest gap (us) that is
-    /// not a hole (1.5 nominal periods, as `logger` counts `missed`).
+    /// not a hole (just under 2 periods). The logger counts a
+    /// `missed` sample from 1.5; a stamp the ISR took late by more than
+    /// half a period (interrupt latency) must not empty the store.
     last_ts: u32,
     gap_us: u32,
 }
@@ -106,8 +107,8 @@ impl Store {
         self.c0 = c0;
         self.period = crate::clock::HCLK_HZ as f32 / fs.max(1) as f32;
         self.sc = sc;
-        let nom = ((1_000_000 + fs.max(1) / 2) / fs.max(1)).max(1);
-        self.gap_us = nom * 3 / 2;
+        // Two periods less 1 us of stamp rounding (whole us).
+        self.gap_us = (2_000_000 / fs.max(1)).saturating_sub(2);
     }
 
     /// Empty again (the scale and the session stay): the samples pushed

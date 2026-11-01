@@ -373,6 +373,10 @@ pub struct Scope {
     /// next re-render (zoom / pan, `zoom_frame`), `refresh_shown` does not
     /// replace it with the untriggered snapshot.
     off_record: bool,
+    /// A STOP that lets the acquisition in flight end (`defer_stop`): the
+    /// scope is stopped (`s.run` false) but polls it until its frame, at
+    /// most until this time (ms); then `freeze` as an immediate STOP. 0: none.
+    stop_by: u64,
     /// Settings, trigger levels (volts) and the wave view's V/div the stored
     /// record was captured with: the scope CSV header's (a stopped change
     /// only re-renders the record).
@@ -769,6 +773,7 @@ impl Scope {
             stored_roll: false,
             zoom_pending: false,
             off_record: false,
+            stop_by: 0,
             stored_s: Settings::DEFAULT,
             stored_tv: 0.0,
             stored_rv: 0.0,
@@ -1082,9 +1087,25 @@ impl Scope {
         if s.mode != self.s.mode || (s.run && !self.s.run) || (self.status == 3 && !rolls(&s)) {
             self.set_status(0);
         }
-        // A user STOP (run -> stop) freezes what is on screen; any other change
+        // A STOP still waiting for its frame: a repeated STOP waits on, any
+        // other change ends it now (a RUN just aborts it).
+        if self.stop_by != 0 {
+            if s == self.s {
+                return;
+            }
+            self.stop_by = 0;
+            if !s.run {
+                self.off_record = !self.freeze(now);
+            }
+        }
+        // A user STOP (run -> stop) freezes what is on screen, or lets a
+        // short acquisition in flight end (`defer_stop`); any other change
         // just aborts the acquisition in flight (it restarts in poll()).
         let redraw = if self.s.run && !s.run {
+            if s == (Settings { run: false, ..self.s }) && self.defer_stop(now) {
+                self.s.run = false;
+                return;
+            }
             let r = self.freeze(now);
             self.off_record = !r;
             r
@@ -1183,7 +1204,35 @@ impl Scope {
 
     /// Before a reset (App::quiesce_for_reset): the acquisition hardware off.
     pub fn stop_hw(&mut self) {
+        self.stop_by = 0;
         self.halt();
+    }
+
+    /// STOP mid-acquisition without the comparator (a stream or linear
+    /// record: CH2 on, a pulse / runt / GEN trigger): the samples written
+    /// so far have already replaced the shown frame in BUF and are often
+    /// less than a screen (the stream restarts after every frame), so a
+    /// snapshot of them is a short untriggered fragment, which every later
+    /// re-render (a repaint, a toast, Save CSV) put on screen (device,
+    /// PR #219). Up to 5 ms/div (one screen <= 50 ms) the acquisition runs
+    /// on to its next frame instead, which becomes the stored record as on
+    /// a Single trigger; without one by `stop_by`, `freeze` as before.
+    fn defer_stop(&mut self, now: u64) -> bool {
+        if self.wave || !self.busy || self.rolling || self.hw_mode || !self.powered {
+            return false;
+        }
+        let screen_ms = self.screen as u64 * 1000 / self.sample_rate().max(1) as u64;
+        if screen_ms > 50 {
+            return false;
+        }
+        self.stop_by = now + 2 * screen_ms + 60;
+        true
+    }
+
+    /// The acquisition still runs: RUN, or a STOP waiting for its frame
+    /// (`defer_stop`; the DMM CH2 keeps its stream for that frame).
+    pub fn acquiring(&self) -> bool {
+        self.s.run || self.stop_by != 0
     }
 
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
@@ -1939,6 +1988,9 @@ impl Scope {
         if self.lent {
             return None;
         }
+        if !self.s.run && self.stop_by != 0 {
+            return self.stop_poll(now);
+        }
         if !self.s.run {
             // Stopped: re-render the stored record (stock STOP "keeps redrawing
             // the stored record", §4) once per change (zoom_pending: a settings
@@ -1953,6 +2005,34 @@ impl Scope {
         if self.wave {
             return src.and_then(|s| self.wave_frame(now, s));
         }
+        self.acquire(now)
+    }
+
+    /// A deferred STOP (`defer_stop`): the acquisition's next frame ends it
+    /// (the frame is the stored record, as a Single trigger's); at
+    /// `stop_by` without one, the immediate STOP (`freeze`).
+    fn stop_poll(&mut self, now: u64) -> Option<Frame<'static>> {
+        if now >= self.stop_by {
+            self.stop_by = 0;
+            let r = self.freeze(now);
+            self.off_record = !r;
+            if r && self.stored_valid {
+                return self.zoom_frame();
+            }
+            return None;
+        }
+        let f = self.acquire(now);
+        if f.as_ref().is_some_and(|fr| fr.cols.is_none() && !fr.data.is_empty()) {
+            self.stop_by = 0;
+            self.halt();
+            self.off_record = false;
+        }
+        f
+    }
+
+    /// The MCX acquisition (running, or a deferred STOP): start / finish
+    /// records, the visible window when one is ready.
+    fn acquire(&mut self, now: u64) -> Option<Frame<'static>> {
         if !self.powered || now < self.relay_until {
             return None;
         }
@@ -2296,6 +2376,7 @@ impl Scope {
             self.wave_scale(sc);
             return;
         }
+        self.stop_by = 0;
         self.halt();
         self.levels_reset(); // the wave view's own rows, at its scale
         let ws = wv().s;

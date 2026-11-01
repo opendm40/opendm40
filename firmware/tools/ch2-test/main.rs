@@ -4,9 +4,10 @@
 //! stores short of one anchor and wrapped many times, late reads (a stamp
 //! up to 0.4 periods late), a lag, the DWT wrap; frames before the oldest
 //! sample, across the store, after the newest one. A run of columns out of
-//! order must give span's results too. Then holes: a stamp more than 1.5
-//! periods on restarts the store (nothing from before it is found, the
-//! samples after it are where their stamps say).
+//! order must give span's results too. Then holes: a stamp 2 periods or
+//! more on restarts the store (nothing from before it is found, the
+//! samples after it are where their stamps say); one stamp up to 0.9
+//! periods late (interrupt latency) does not.
 //!   tools/ch2-test/run.sh
 #![allow(static_mut_refs)]
 
@@ -115,7 +116,7 @@ fn main() {
     println!("PASS");
 }
 
-/// A hole (a stamp 2..40 periods on) restarts the store: no column before
+/// A hole (a stamp 2..41 periods on: 1..40 samples missed) restarts the store: no column before
 /// it finds a sample, columns after it find the post-hole ones at their own
 /// time (an anchor segment across the gap would put the pre-hole samples
 /// there, or shift the post-hole ones). The failures.
@@ -130,7 +131,7 @@ fn holes(r: &mut Rng) -> u64 {
         st.reset(c0, fs, sc);
         let per_us = 1e6 / fs as f64;
         let (n1, n2) = (1 + r.below(3000) as u64, 1 + r.below(600) as u64);
-        let skip = 2 + r.below(39) as u64;
+        let skip = 1 + r.below(40) as u64;
         // Codes: pre-hole -1000 (raw), post-hole +1000.
         let raw = |pre: bool| if pre { -1000 * 8 } else { 1000 * 8 };
         for k in 0..n1 {
@@ -153,5 +154,40 @@ fn holes(r: &mut Rng) -> u64 {
         }
     }
     println!("ch2-test: 300 holes, {fails} failed");
+    fails + late(r)
+}
+
+/// One stamp read late by up to 0.9 periods (the stream ISR held off by
+/// another interrupt; the gap before it is up to 1.9 periods, the one
+/// after it short): not a hole, the store keeps the samples before it.
+/// The failures.
+fn late(r: &mut Rng) -> u64 {
+    let mut fails = 0;
+    for case in 0..300 {
+        let fs = [1200u32, 2400, 4800, 9600, 38_400][r.below(5) as usize];
+        let c0 = r.next();
+        scope_ch2::set_lag_us(0);
+        let st = scope_ch2::store();
+        let sc = WaveScale { a: 0.0, b: 1.0, vdiv: 1.0, amps: false, ac: false };
+        st.reset(c0, fs, sc);
+        let per_us = 1e6 / fs as f64;
+        let n = 200 + r.below(2000) as u64;
+        let k_late = 1 + r.below(n as u32 - 2) as u64;
+        let d = per_us * (0.5 + 0.4 * r.below(1001) as f64 / 1000.0);
+        for k in 0..n {
+            let ts = k as f64 * per_us + if k == k_late { d } else { 0.0 };
+            st.push(ts as u32, if k < k_late { -1000 * 8 } else { 1000 * 8 });
+        }
+        let cyc = |k: f64| c0.wrapping_add((k * per_us * 200.0) as u32);
+        let first = st.span(cyc(0.1), 200.0 * per_us as f32 * 0.5);
+        // SI of the raw codes: about 496 before the late stamp, 527 after.
+        if !first.is_some_and(|(_, hi)| hi < 511.0) {
+            fails += 1;
+            if fails <= 10 {
+                println!("FAIL late case {case}: fs {fs} n {n} late {k_late} by {d:.1} us: first {first:?}");
+            }
+        }
+    }
+    println!("ch2-test: 300 late stamps, {fails} failed");
     fails
 }
