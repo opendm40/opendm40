@@ -10,7 +10,7 @@
 //! only the chunk being written and the CSV export can seek without decoding.
 //!
 //!   file header (24 + hl bytes): "DLG1", kind (1 DMM, 2 scope record, 3 fast
-//!       logger stream: section "fast log" below, 4 scope record with an X
+//!       logger stream: section "fast log" below, 5 scope record with an X
 //!       column: `scope_header_xy`), unit
 //!       length, u16 hl, u32 CRC-32 of bytes 12.., unit[12], the CSV header text
 //!   chunk (28 + pl bytes): "DC", u16 pl, u32 CRC-32 of bytes 8.., u32 first
@@ -41,8 +41,8 @@
 pub const MAGIC: [u8; 4] = *b"DLG1";
 pub const KIND_DMM: u8 = 1;
 pub const KIND_SCOPE: u8 = 2;
-/// Kind 4: a scope record of the X-Y display (`scope_header_xy`).
-pub const KIND_SCOPE_XY: u8 = 4;
+/// Kind 5: a scope record of the X-Y display (`scope_header_xy`).
+pub const KIND_SCOPE_XY: u8 = 5;
 /// File header bytes before the header text.
 pub const FHDR: usize = 24;
 /// Chunk header bytes.
@@ -910,7 +910,7 @@ pub fn scope_header(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, out: 
     k + SCOPE_PAR
 }
 
-/// Kind 4 (scope record of the X-Y display): kind 2's layout with
+/// Kind 5 (scope record of the X-Y display): kind 2's layout with
 /// SCOPE_PAR_XY bytes of parameters (kind 2's first 20, then f32 ax, f32
 /// bx: x = ax + bx * code; u32 CRC-32 of these 28) and n = 2 x rows codes,
 /// the CH1 code and the X code of each sample in turn (y0, x0, y1, x1, ...).
@@ -919,7 +919,7 @@ pub const SCOPE_PAR_XY: usize = 32;
 /// The generated X-Y CSV row: "+d.ddddde+xx,+d.dddde+xx,+d.dddde+xx\r\n".
 pub const SCOPE_ROW_XY: usize = 38;
 
-/// The kind-4 file header (`scope_header` with the X map ax, bx; `n` =
+/// The kind-5 file header (`scope_header` with the X map ax, bx; `n` =
 /// codes, twice the samples); `unit` the value column's (V / A).
 #[allow(clippy::too_many_arguments)]
 pub fn scope_header_xy(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, ax: f32, bx: f32, out: &mut [u8]) -> usize {
@@ -937,7 +937,7 @@ pub fn scope_header_xy(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, ax
     k + SCOPE_PAR_XY
 }
 
-/// CSV row `i` of a kind-4 record: `scope_row` and ",x".
+/// CSV row `i` of a kind-5 record: `scope_row` and ",x".
 #[allow(clippy::too_many_arguments)]
 pub fn scope_row_xy(a: f32, b: f32, dt: f32, t0: u32, i: usize, code: u16, ax: f32, bx: f32, xcode: u16, out: &mut [u8; SCOPE_ROW_XY]) {
     let mut r = [0u8; SCOPE_ROW];
@@ -1321,7 +1321,7 @@ pub struct Gen<S: Src> {
     /// starts at the nearest one: a host that reads two places of a file in
     /// turn, e.g. an indexer at its head while a copy runs, no longer walks
     /// the chunk headers from the start, ~1300 of them, for each sector).
-    /// Kind 4: ck[0] holds the X map (ax, bx as f32 bits) instead (no
+    /// Kind 5: ck[0] holds the X map (ax, bx as f32 bits) instead (no
     /// field of its own: the generators are in TCM).
     ck: [(u32, u32); FCK],
     nck: u8,
@@ -1418,7 +1418,7 @@ impl<S: Src> Gen<S> {
                 o = e;
                 rows = ((b + 1) * SBLK).min(n as usize) as u32;
             }
-            // Kind 4: two codes per row (a torn odd one is dropped).
+            // Kind 5: two codes per row (a torn odd one is dropped).
             let (rows, wd) = if xy { (rows / 2, SCOPE_ROW_XY) } else { (rows, SCOPE_ROW) };
             g.info.rows = rows;
             g.info.chunks = rows.div_ceil(SBLK as u32);

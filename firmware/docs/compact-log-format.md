@@ -56,7 +56,7 @@ first row number and the CSV byte offset of its first row, so:
 | off | size | field |
 |---|---|---|
 | 0 | 4 | magic `DLG1` |
-| 4 | 1 | kind: 1 DMM readings, 2 scope record, 3 fast logger stream |
+| 4 | 1 | kind: 1 DMM readings, 2 scope record, 3 fast logger stream, 5 X-Y scope record |
 | 5 | 1 | unit length `ul` (<= 12) |
 | 6 | 2 | header text length `hl` |
 | 8 | 4 | CRC-32 (zlib) of bytes 12 .. 12 + 12 + hl |
@@ -160,7 +160,7 @@ bytes for 26624 samples (0.16 B/sample; the model has no ADC noise; u16
 would be 53624), decoded by dlog.py to the 692552-byte CSV. The generated CSV is byte
 for byte the old SCOPnnn.CSV (fatren-test md5, dlog-test vs scope_row).
 
-### Scope record with an X column (kind 4: the X-Y display)
+### Scope record with an X column (kind 5: the X-Y display)
 
 As kind 2, with 32 bytes of parameters (kind 2's first 20, then f32 ax,
 f32 bx: x = ax + bx * code; u32 CRC-32 of these 28) and n = 2 x rows codes:

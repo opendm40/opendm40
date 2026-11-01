@@ -26,7 +26,7 @@ if [ -f ../dlog.py ]; then
         python3 -I ../dlog.py "$B/xy$i.dlg" -o "$B/py.csv"
         cmp "$B/py.csv" "$B/xy$i.csv" || { echo "FAIL: dlog.py X-Y record $i"; exit 1; }
     done
-    echo "ok: tools/dlog.py X-Y records (kind 4) == reference CSV (3 records)"
+    echo "ok: tools/dlog.py X-Y records (kind 5) == reference CSV (3 records)"
     for i in 0 1 2 3 4 5; do
         python3 -I ../dlog.py "$B/f$i.dlg" -o "$B/py.csv"
         cmp "$B/py.csv" "$B/f$i.csv" || { echo "FAIL: dlog.py fast log $i"; exit 1; }

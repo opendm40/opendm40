@@ -24,7 +24,7 @@
 //!
 //! X-Y display: the X column too (`set_x` before `set`): the generator's
 //! volts (computed from the record's phase) or the DMM CH2's value at each
-//! sample's time, as a 10-bit code over its span; the file is kind 4
+//! sample's time, as a 10-bit code over its span; the file is kind 5
 //! (dlog.rs `scope_header_xy`: CH1 and X codes in turn), the CSV has
 //! time_s,volts,x_volts (x_amperes).
 //!

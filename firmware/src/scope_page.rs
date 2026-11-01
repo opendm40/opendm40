@@ -978,7 +978,7 @@ impl App {
         } else {
             "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
         });
-        // X-Y: the X column too (kind 4).
+        // X-Y: the X column too (kind 5).
         let (mut rec, mut t0) = (rec, t0);
         let x = if self.xy_on() { self.sp_xy_csv(&mut h, &mut rec, &mut t0) } else { None };
         crate::scope_csv::set_x(x);

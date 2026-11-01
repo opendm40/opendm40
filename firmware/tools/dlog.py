@@ -308,9 +308,9 @@ def decode(d, errors):
     if kind == 3:
         rows, chunks = fast_decode(d, off, out, errors)
         return ''.join(out), {'rows': rows, 'chunks': chunks}
-    if kind in (2, 4):
-        # Kind 4 (X-Y display): the CH1 and X codes in turn, ax / bx the X map.
-        xy = kind == 4
+    if kind in (2, 5):
+        # Kind 5 (X-Y display): the CH1 and X codes in turn, ax / bx the X map.
+        xy = kind == 5
         pl = 32 if xy else 24
         a, b, dt = struct.unpack_from('<fff', d, off)
         t0, n = struct.unpack_from('<II', d, off + 12)

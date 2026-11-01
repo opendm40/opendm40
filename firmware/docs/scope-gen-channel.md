@@ -243,7 +243,7 @@ dimmer older points.
 
 ### 3.4 CSV
 
-Save CSV in X-Y writes a kind 4 DLG ([compact-log-format.md](compact-log-format.md)):
+Save CSV in X-Y writes a kind 5 DLG ([compact-log-format.md](compact-log-format.md)):
 `time_s,volts,x_volts` (x_amperes for a current CH2). GEN: x computed from
 the stored record's phase; CH2: the store's sample nearest each row's time,
 the file cut to the samples CH2 covers (the time-0 sample kept). X is

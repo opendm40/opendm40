@@ -492,7 +492,7 @@ fn scope_tests(dir: Option<String>) -> u32 {
     fails
 }
 
-/// Kind 4 (the X-Y display's record): CH1 and X codes in turn, coded
+/// Kind 5 (the X-Y display's record): CH1 and X codes in turn, coded
 /// through `scope_plan_of` / `SEnc::next_of` as scope_csv.rs does; the CSV
 /// has three columns; random reads; a torn file keeps the whole rows of its
 /// whole blocks.
