@@ -442,7 +442,7 @@ pub fn run(out: &str) -> usize {
             ("gen-triangle", g(true, gen::Wave::Triangle, 100, 2.0, 5000, Some(1.5)), None),
             ("gen-ramp", g(true, gen::Wave::Ramp, 10_000, 3.0, 5000, None), None),
             ("gen-clamped", g(true, gen::Wave::Sine, 75_000, 2.0, 5000, None), None),
-            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, "Frequency", "1", "KHz"))),
+            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, "Frequency", "1", "kHz"))),
             ("gen-keypad-vpp", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_NUM, "Vpp", "2.00", "V"))),
         ] {
             gen_page(s, kp);

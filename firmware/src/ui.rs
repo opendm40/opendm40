@@ -78,7 +78,7 @@ pub const BAR_H: u16 = 34;
 const BAR_X: i16 = 4;
 /// Extra-digit cell of the main readout (x, width); see DmmView::reading.
 /// 375..402, before the limit badge (403..433, y 72..88) and the unit box
-/// (from 404); 28 px = the widest half-size F78 digit ("4", 56 / 2).
+/// (from 406); 28 px = the widest half-size F78 digit ("4", 56 / 2).
 const XT_X: u16 = 375;
 const XT_W: u16 = 28;
 const VALUE_BASE: u16 = 146;
@@ -173,6 +173,16 @@ const LOOP_CAP: &str = "4-20mA";
 /// Caption of the burden voltage readout (A functions, Settings 3/3
 /// "Burden voltage"; doc 3.15): DC A aux1, AC A aux2.
 const BURDEN_CAP: &str = "Burden";
+/// An aux row's F14 caption and LETTERS value in the boxes cx..te, te..end
+/// (they tile cx..end): the value right-aligned, the caption right-aligned
+/// 6 px before the value's ink, so it hugs a short value as a long one
+/// (te no further left than the caption's own width allows).
+fn caption_value(cx: i16, end: i16, cap: &str, txt: &str, vcol: Color) {
+    let te = (end - sf::text_width(sf::LETTERS, txt, 0) - 6).max(cx + sf::text_width(sf::F14, cap, 1) + 1);
+    sf::label(sf::LETTERS, rect(te, 36, end - te, 30), txt, vcol, BG, 4, 0);
+    sf::label(sf::F14, rect(cx, 36, te - cx, 30), cap, VALUE, BG, 4, 1);
+}
+
 /// Power meter, "At load" on (doc 3.16): the mark after the compensated V's
 /// unit (aux1) and at the main readout's top left (P / its energy; ui::pw
 /// `coupling`).
@@ -898,7 +908,8 @@ impl DmmView {
             // The aux row layout follows the mode (AC+DC tags, loop caption).
             self.aux_val = [None; 2];
             self.aux_unit = [None; 2];
-            // From x 404: clear of the +1 digit cell (375..402).
+            // From x 406: 4 px clear of the +1 digit cell (375..402; it
+            // touched the unit at 404, issue #136).
             // Power meter fallback "VA": its V and A touch at the stock -1.
             // The UNIT face has no 'h' (power meter energy: Wh / VAh):
             // LETTERS, 1 px apart when that fits the box (W and h touch).
@@ -907,22 +918,23 @@ impl DmmView {
                 1
             } else if uf.0 != sf::UNIT.0 {
                 // V / A of the stock overhang by 1: 2 px spacing for "VAh".
-                if sf::text_width(uf, unit, 2) <= 72 { 2 } else { 0 }
+                if sf::text_width(uf, unit, 2) <= 70 { 2 } else { 0 }
             } else {
                 -1
             };
-            // Wider than the 72 px box ("MHz", "mW" in UNIT, "mWh"): the
+            // Wider than the 70 px box ("MHz", "mW" in UNIT, "mWh"): the
             // narrower LETTERS, else TEXT22 (device check 92fb8fa: no unit
             // is cut).
             for (f, s) in [(sf::LETTERS, 0), (sf::TEXT22, 1)] {
-                if sf::text_width(uf, unit, sp) <= 72 {
+                if sf::text_width(uf, unit, sp) <= 70 {
                     break;
                 }
                 if sf::has_all(f, unit) {
                     (uf, sp) = (f, s);
                 }
             }
-            sf::label(uf, rect(404, 114 + md, 72, 32), unit, VALUE, BG, 4, sp);
+            lcd::fill_rect(403, (114 + md) as u16, 3, 32, BG);
+            sf::label(uf, rect(406, 114 + md, 70, 32), unit, VALUE, BG, 4, sp);
             // Stock box (437,76,32,32) align 7, widened 3 px right so the
             // 35 px AC glyph is not clipped (ends at 471, 3 px after the
             // limit badge 403..433).
@@ -1029,18 +1041,19 @@ impl DmmView {
                         // the loop percentage's (aux2: 256..396; aux1:
                         // 8..175, the value's box ending where the plain
                         // one does), so no older text stays behind.
+                        // The caption hugs the value (6 px before its
+                        // ink, as the AC+DC tags; issue #136).
                         let (cx, vx0, vw) = if i == 0 { (8, 68, 107) } else { (256, 316, 81) };
-                        sf::label(sf::LETTERS, rect(vx0, 36, vw, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(cx, 36, 60, 30), BURDEN_CAP, VALUE, BG, 4, 1);
+                        caption_value(cx, vx0 + vw, BURDEN_CAP, txt, vcol);
                     } else if i == 1 && lp {
                         // UF-26: "-25.0".."125.0" (<= 78 px: ink from 319)
                         // right-aligned in 316..396, the F14 caption
-                        // right-aligned in 256..315 (ink from ~272: clear of
-                        // aux1's unit box, which ends at 254; the None
-                        // branch below clears it). The two boxes tile
-                        // 256..396, so an older text leaves nothing behind.
-                        sf::label(sf::LETTERS, rect(316, 36, 81, 30), txt, vcol, BG, 4, 0);
-                        sf::label(sf::F14, rect(256, 36, 60, 30), LOOP_CAP, VALUE, BG, 4, 1);
+                        // right-aligned before it (ink from ~272 at the
+                        // widest: clear of aux1's unit box, which ends at
+                        // 254; the None branch below clears it). The two
+                        // boxes tile 256..396, so an older text leaves
+                        // nothing behind.
+                        caption_value(256, 397, LOOP_CAP, txt, vcol);
                     } else if r.parts() {
                         // AC+DC / AUTO: the part's tag (AC for aux1, DC for aux2)
                         // right before its value, which stays right-aligned
@@ -1242,14 +1255,12 @@ fn test_current_label(mode: u8, range: i8, on: bool) {
     sf::label(sf::F14, OHM_I_RECT, t.as_str(), if exp { VALUE } else { DIM }, BG, 1, 1);
 }
 
-/// ASCII form of a unit for the 12 px stock font (no ohm / micro / degree
-/// glyphs): ohm -> "Ohm", micro -> "u", "deg C" -> "C".
+/// A unit for the 12 px stock font (ASCII, plus our Ω and °: stockfont.rs
+/// F12_GLYPHS): micro -> "u" as the stock.
 fn ascii_unit(u: &str, out: &mut crate::scope_ui::Txt) {
     for c in u.chars() {
         match c {
-            '\u{3a9}' => out.push("Ohm"),
             '\u{b5}' => out.push("u"),
-            '\u{b0}' => {}
             c => {
                 let mut b = [0u8; 4];
                 out.push(c.encode_utf8(&mut b));
@@ -1444,7 +1455,7 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600V", Some(3)), ("1000V", Some(4)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         Button::Amp => &[
-            ("600uA", Some(0)), ("6000uA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
+            ("600uA", Some(0)), ("6mA", Some(1)), ("60mA", Some(2)), ("600mA", Some(3)),
             ("6A", Some(4)), ("10A", Some(5)), ("AUTO+", Some(255)), ("AUTO", None),
         ],
         // 60 ohm: the stock-table r0 row (OP1 x10, mohm resolution; dmm.rs
@@ -1452,8 +1463,8 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
         // 600 Mohm (dmm::OHM600): after AUTO, so the AUTO key's range steps
         // (the items before AUTO) never reach it; its own row on the page.
         Button::Ohm => &[
-            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6K\u{3a9}", Some(2)), ("60K\u{3a9}", Some(3)),
-            ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
+            ("60\u{3a9}", Some(0)), ("600\u{3a9}", Some(1)), ("6k\u{3a9}", Some(2)), ("60k\u{3a9}", Some(3)),
+            ("600k\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
         ],
         // Capacitance (owner 2026-10-30): dmm.rs ranges r1..r7 (one 60 nF
@@ -1483,7 +1494,7 @@ pub fn range_code(mode: u8, range: u8) -> u8 {
 /// The status bar's label of a manual range, as the stock writes it there
 /// ("%d" + unit of the range's full scale, FUN_0803d0xx; checked on stock
 /// V2.6 in the emulator): the MF page's item text, "6V", "600mV",
-/// "6000uA", "6K\u{3a9}" .. None: a function with no range list
+/// "6mA", "6k\u{3a9}" .. None: a function with no range list
 /// (continuity, diode, capacitance, frequency, temperature), where the
 /// stock always shows "AUTO".
 pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
@@ -1499,7 +1510,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
 }
 
 /// Status-bar range text (stock): "AUTO" / "AUTO+" in auto, the range
-/// ("6V", "600mV", "60K\u{3a9}" ..) in manual. The power meter (two
+/// ("6V", "600mV", "60k\u{3a9}" ..) in manual. The power meter (two
 /// channels, their ranges in its side column) and a range held in a
 /// function with no range list (REL in frequency, SCPI RANG:AUTO OFF) keep
 /// "MANU": "600KHz" does not fit the slot.
@@ -1637,7 +1648,7 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
             let mut t = [0u8; 16];
             let v = crate::dmm::format(&mut t, r, if r < 100.0 { 2 } else { 1 });
             let mut n = 0;
-            for part in [v, " ohm, expect ~48"] {
+            for part in [v, " \u{3a9}, expect ~48"] {
                 let k = part.len().min(buf.len() - n);
                 buf[n..n + k].copy_from_slice(&part.as_bytes()[..k]);
                 n += k;
@@ -1648,9 +1659,9 @@ pub fn fuse_screen(stage: u8, res: crate::sentinel::FuseRes, buf: &mut [u8; 32])
     };
     match (stage, res) {
         (0, _) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Lead from V/ohm jack to A", "nothing else connected", Some("Cancel"), Some("Start")),
-        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 ohm", Some("Cancel"), None),
-        (_, F::Ok(_)) => crate::dialog::fuse_check("FUSE OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
-        (_, F::Open) => crate::dialog::fuse_check("FUSE OPEN", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
+        (1, _) | (_, F::Busy | F::Idle) => crate::dialog::fuse_check("Fuse check", crate::dialog::TITLE_BG, "Measuring ...", "expect ~48 \u{3a9}", Some("Cancel"), None),
+        (_, F::Ok(_)) => crate::dialog::fuse_check("Fuse OK", crate::dialog::FUSE_OK_BG, ohm, "A input path intact", Some("Again"), Some("OK")),
+        (_, F::Open) => crate::dialog::fuse_check("Fuse open", crate::dialog::FUSE_BAD_BG, "OL: no path from V to A", "Replace: 10 A ceramic fuse", Some("Again"), Some("OK")),
         (_, F::Odd(_)) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, ohm, "One lead V/ohm to A only", Some("Again"), Some("OK")),
         (_, F::NoReading) => crate::dialog::fuse_check("Check leads", crate::dialog::FUSE_ODD_BG, "No ohm reading", "One lead V/ohm to A only", Some("Again"), Some("OK")),
     }
@@ -1877,11 +1888,11 @@ fn temp_rect(sensor: u8, code: u8) -> Option<sf::Rect> {
 
 const T_CODES: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, TK_UNIT, TK_MINUS, TK_OFFS, TK_PLUS, TK_R25, TK_BETA, TK_LIMITS, TK_RECORD, TK_OK];
 
-/// Offset text "+7.3 C" (TEXT22 has no degree sign).
+/// Offset text "+7.3 ℃".
 fn temp_offs_text<'a>(b: &'a mut [u8; 24], offs: f32) -> &'a str {
     let mut t = [0u8; 16];
     let v = crate::dmm::format(&mut t, offs, 1);
-    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " C"])
+    join(b, &[if offs > 0.0 { "+" } else { "" }, v, " \u{2103}"])
 }
 
 /// One temperature-page button, normal or pressed (stock pressed colour,
@@ -1897,14 +1908,14 @@ pub fn temp_key(p: &TempPage, code: u8, pressed: bool) {
     let mut t = [0u8; 16];
     let txt: &str = match code {
         0..=6 => T_KEYS[code as usize],
-        TK_UNIT => if p.unit_f { "Unit: F" } else { "Unit: C" },
+        TK_UNIT => if p.unit_f { "Unit: \u{2109}" } else { "Unit: \u{2103}" },
         TK_MINUS => "-",
         TK_PLUS => "+",
         TK_OFFS => temp_offs_text(&mut b, p.offs),
         TK_R25 => {
             let k = p.r25 / 1000.0;
             let v = crate::dmm::format(&mut t, k, if k < 10.0 { 2 } else if k < 100.0 { 1 } else { 0 });
-            join(&mut b, &["R25  ", v, " kohm"])
+            join(&mut b, &["R25  ", v, " k\u{3a9}"])
         }
         TK_BETA => {
             let v = crate::dmm::format(&mut t, p.beta, 0);
@@ -1965,6 +1976,11 @@ pub fn temp_hit(sensor: u8, x: u16, y: u16) -> Option<u8> {
     }
     None
 }
+
+/// Touch rows of the history boxes (drawn 153..171): the dead rows between
+/// the value's target (..150) and the MIN/MAX column (175..) join them
+/// (issue #136: 19 px was the smallest DMM target).
+pub const HIST_HIT: core::ops::Range<u16> = 151..175;
 
 /// History boxes (stock (5+95i,153,88,19)): values with units, newest orange.
 pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
@@ -2843,7 +2859,8 @@ pub const KP_FREQ: u8 = 0;
 pub const KP_NUM: u8 = 1;
 pub const KP_SIGNED: u8 = 2;
 
-/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M', '<' backspace,
+/// Keys: (rect, label, code). Codes: digits, '.', 'H'/'K'/'M' (the K key
+/// labelled "k", issue #136), '<' backspace,
 /// '-' sign toggle, '=' OK. Constant tables (cheaper in the RAM image than
 /// building them).
 pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
@@ -2853,7 +2870,7 @@ pub fn keypad_keys(kind: u8) -> &'static [Key; 15] {
     const FREQ: [Key; 15] = [
             (r(228, 146, 60, 40), "1", b'1'), (r(292, 146, 60, 40), "2", b'2'), (r(356, 146, 60, 40), "3", b'3'),
             (r(420, 146, 56, 40), "H", b'H'), (r(228, 190, 60, 40), "4", b'4'), (r(292, 190, 60, 40), "5", b'5'),
-            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "K", b'K'), (r(228, 234, 60, 40), "7", b'7'),
+            (r(356, 190, 60, 40), "6", b'6'), (r(420, 190, 56, 40), "k", b'K'), (r(228, 234, 60, 40), "7", b'7'),
             (r(292, 234, 60, 40), "8", b'8'), (r(356, 234, 60, 40), "9", b'9'), (r(420, 234, 56, 40), "M", b'M'),
             (r(228, 277, 60, 40), "0", b'0'), (r(291, 277, 123, 40), "<", b'<'), (r(417, 277, 59, 40), "OK", b'='),
         ];

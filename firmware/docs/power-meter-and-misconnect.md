@@ -984,7 +984,7 @@ sentinel off (the check drives the ohm current through the A shunt on
 purpose), PE = 2 as every ohm row: V/ohm -> lead -> A -> fuse -> 10 mohm +
 0.5 + 47 ohm -> COM. The first final reading of the 600 ohm row whose ohm
 vet saw two conversions agree (dmm.rs `OHM_VET_*`) decides: 44..54 ohm FUSE
-OK (`FUSE_OHM`), OL FUSE OPEN ("Replace: 10 A ceramic fuse"), anything else
+OK (`FUSE_OHM`), OL "Fuse open" ("Replace: 10 A ceramic fuse"), anything else
 "Check leads" (a short V-COM, the lead in COM); no reading in 8 s: "No ohm
 reading". Then the function before comes back (a manual range too; from
 the power meter the energy restarts); Cancel / a key aborts and restores;

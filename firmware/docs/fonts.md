@@ -45,6 +45,13 @@ What can be dropped or packed without changing a pixel:
 * **Duplicates** across fonts: 5 glyphs, ~0.4 KB after compression, not
   worth an indirection per glyph.
 
+## 2a. Glyphs of our own
+
+The unit fonts without a lowercase k (UNIT, LETTERS, F21, K_FONT, HIST) take
+ours ([`tools/mkwglyph.py`](../tools/mkwglyph.py), `stockfont_w.rs`): "kW",
+"kΩ", "kHz" instead of the stock "KW"; ASCII26 (the dialogs) an Ω; TEXT22
+(the menu text) ℃ and ℉: its own C / F after a 4 x 4 ring, 1 bpp.
+
 ## 3. Storage
 
 `mkstockfont.py` emits:

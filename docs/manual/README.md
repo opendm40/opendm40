@@ -202,7 +202,7 @@ The top line of the multimeter page shows, from left to right:
 *The status bar.*
 
 1. the range: **AUTO** or **AUTO+** while the meter picks the range, or
-   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6KΩ**
+   the fixed range itself, e.g. **6V**, **600mV**, **60mA**, **6kΩ**
    (as the stock firmware shows it);
 2. **RUN**, **HOLD** or **A-HOLD**, or in that place a wrong-connection
    [alert](#safety-and-alerts);
@@ -555,7 +555,7 @@ above it. Both parts are always shown above the reading.
 All current ranges use the **A** jack and **COM**. The meter switches the
 shunt inside.
 
-- Ranges: 600 µA, 6000 µA, 60 mA, 600 mA, 6 A, 10 A.
+- Ranges: 600 µA, 6 mA, 60 mA, 600 mA, 6 A, 10 A.
 - DC A: the signed current. In the mA ranges the value above it shows the
   **4-20 mA** loop percentage: 4 mA = 0 %, 20 mA = 100 %. It is hidden below
   3.6 mA and above 125 %.
@@ -709,7 +709,7 @@ Tap **Hz / °C** twice. Press **MF** to open the temperature page.
 - **Offset**: -20 to +20 °C in 0.1 °C steps, one per sensor. Tap **-** /
   **+**, or tap the value to type it. For TC K the offset corrects the cold
   junction.
-- **Unit: C** / **Unit: F** switches between °C and °F for the whole meter
+- **Unit: ℃** / **Unit: ℉** switches between °C and °F for the whole meter
   (also **Settings > More > Temp unit**).
 - The 2-wire leads add their resistance: about 0.4 °C per 0.1 Ω on a PT100.
   Correct it with the offset or with REL.
@@ -994,7 +994,7 @@ More > More > Burden voltage: ON (A, mA, uA)**. Default OFF.
 - It is computed from the shunt resistance alone (10 mΩ for A, 0.5 Ω for
   mA, 47.5 Ω for µA); the fuse and the wiring add a little more.
 - At full scale: 100 mV (10 A), 60 mV (6 A), 300 mV (600 mA), 30 mV
-  (60 mA), 285 mV (6000 µA), 28.5 mV (600 µA).
+  (60 mA), 285 mV (6 mA), 28.5 mV (600 µA).
 
 ![123.45 µA; the burden voltage, 5.9 mV, above it](img/burden.png)
 
@@ -1194,8 +1194,8 @@ Checks the fuse and the current path inside the meter without opening it.
 
 | Result | Meaning |
 |---|---|
-| **FUSE OK** (about 48 Ω) | The fuse and the A input path are intact. |
-| **FUSE OPEN** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
+| **Fuse OK** (about 48 Ω) | The fuse and the A input path are intact. |
+| **Fuse open** (OL) | No path from V to A: replace the fuse (10 A ceramic). |
 | **Check leads** | A reading far from 48 Ω or none: one lead from V/Ω to A only. |
 
 **Again** repeats, **OK** returns to the function you were in. Cancel or
@@ -1549,7 +1549,7 @@ is on, the edge trigger does not use the trigger hardware.
 **MF > Settings**:
 
 - **Save CSV**: saves the whole stored capture (up to 262 144 samples, not
-  only the screen). Stop the scope first (**Please stop sample**
+  only the screen). Stop the scope first (**Stop the scope first**
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
@@ -2378,7 +2378,7 @@ step to its next value; rows with **-** / **+** change in steps.
 | **DMM rate** | SLOW, MED, FAST | MED | [Rate](#rate-fast-med-slow); shows the readings per second, or **(n/a here)** where the current function has a fixed rate. |
 | **Smoothing** | OFF, LOW, HIGH | OFF | [Smoothing](#smoothing). |
 | **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
-| **Temp unit** | C (Celsius), F (Fahrenheit) | C | Temperature unit everywhere. |
+| **Temp unit** | ℃ (Celsius), ℉ (Fahrenheit) | ℃ | Temperature unit everywhere. |
 | **Scope swipe** | Off (stock), Top bar | Off | Top bar: a swipe that starts on the scope page's top bar or side panel changes the view. |
 | **Scope press** | ON, OFF (stock) | ON | The scope's side buttons light up briefly when pressed. |
 | **Scope tap step** | Corners, Halves (stock), Off | Corners | Which taps on the scope graph change the [timebase](#timebase). |
