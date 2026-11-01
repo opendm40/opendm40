@@ -42,14 +42,17 @@ stable 1.99), from the repo root:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
 RUSTUP_HOME=$PWD/toolchain/rustup CARGO_HOME=$PWD/toolchain/cargo \
     sh /tmp/rustup-init.sh -y --no-modify-path --profile minimal \
-    --default-toolchain stable --target thumbv7em-none-eabihf --component llvm-tools
+    --default-toolchain stable --target thumbv7em-none-eabihf --component llvm-tools,rust-src
 ```
+
+An existing `toolchain/` needs `rust-src` added once:
+`RUSTUP_HOME=$PWD/toolchain/rustup toolchain/cargo/bin/rustup component add rust-src`.
 
 The host tests also need `mtools` ([`tools/fatren-test`](tools/fatren-test)).
 
 Without `../toolchain` (CI, another checkout) `build.sh` takes the rustup
 install that `RUSTUP_HOME` / `CARGO_HOME` name (default `~/.rustup`,
-`~/.cargo`), with the same target and `llvm-tools`. The image bytes depend
+`~/.cargo`), with the same target, `llvm-tools` and `rust-src`. The image bytes depend
 only on the commit and the rustc version: `build.sh` remaps every absolute
 path (checkout, rustup, cargo registry) and nothing in the image is
 time-stamped, so rustc 1.99.0 gives the same `opendm40.bin` in any
@@ -59,7 +62,9 @@ matches a local build is inferred (compare the artifact's `SHA256SUMS`).
 `build.sh` compiles with `-Zlocation-detail=none` (panic sites without
 file / line; ~31 KB of zero-wait flash) and sets `RUSTC_BOOTSTRAP=1` for
 that one `cargo build`, so the stable toolchain takes the nightly flag
-([docs/native-boot.md](docs/native-boot.md), "Region B audit #6"). A plain
+([docs/native-boot.md](docs/native-boot.md), "Region B audit #6"). The
+same build compiles `core` and `compiler_builtins` from `rust-src` with the
+firmware's size profile (`-Zbuild-std=core`). A plain
 `cargo build` and the host tests do not use it. `RUSTC_BOOTSTRAP` also puts
 the dependencies' build scripts on their nightly paths (proc-macro2): recheck
 the build after a toolchain or dependency update.

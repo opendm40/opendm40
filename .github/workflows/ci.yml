@@ -63,7 +63,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: thumbv7em-none-eabihf
-          components: llvm-tools
+          components: llvm-tools, rust-src
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: firmware -> target
@@ -123,7 +123,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: thumbv7em-none-eabihf
-          components: llvm-tools
+          components: llvm-tools, rust-src
       - name: Packages (Pillow for the renders, mtools + dosfstools for the FAT tests)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil mtools dosfstools
       # The suites take ../../../toolchain: point it at the rustup install.
