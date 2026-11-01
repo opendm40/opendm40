@@ -5,12 +5,12 @@ record, in the emulator.
   cd firmware && ./build.sh
   emu/pantest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port N]
 
-A 1.6 Hz 2-12 V square on the MCX (period 250 px at 100 ms/div; the low
-level off the CH1 zero line), 5 V/div, EDGE 7 V, NORM, DIGitize at 100 ms/div. The
-stopped record's length, sample rate and trigger point come from WAV:PRE?
-(RAW): 65 520 samples (2.62 s, the trigger mid-record) from the packed
-ring, more from the coded ring (src/cring.rs); the drags to the record's
-ends and the true-scale zoom are sized from them. The graph is read back over
+An 8 Hz 2-12 V square on the MCX (the low level off the CH1 zero line),
+5 V/div, EDGE 7 V, NORM, DIGitize at 100 ms/div, then zoomed in to 20 ms/div
+(period 250 px) for the pan. The stopped record's length, sample rate and
+trigger point come from WAV:PRE? (RAW): 26 624 samples (1.06 s, the
+trigger mid-record; scope.rs rec_split); the drags to the record's ends and
+the true-scale zoom are sized from them. The graph is read back over
 DBG:LCD? and each column classed as high / low (yellow at the square's top /
 bottom row, learnt from the first screen).
 
@@ -27,14 +27,14 @@ beyond the old screen blank).
   * a drag back restores the first screen;
   * drags past the record's start stop there (the screen is unchanged by
     the next one), and the first drag back moves at once;
-  * zoom while stopped: 200 ms/div (2 s, inside the record) shows the
-    square across the graph; 500 ms/div, or 1 / 2 s/div for a longer
+  * zoom while stopped: 50 ms/div (0.5 s, inside the record) shows the
+    square across the graph; 200 ms/div, or 500 ms / 1 s/div for a longer
     record (a window longer than the record, centred where the pan to the
-    end left it), the record at its true scale (2.62 s at 500 ms/div:
+    end left it), the record at its true scale (1.06 s at 200 ms/div:
     about 210 columns), nothing beyond;
   * V/div while stopped: 10 V/div shows the trace across the graph, 5 V/div
     the square again;
-  * WAV:PRE? (RAW) points at least 65 520, the same throughout.
+  * WAV:PRE? (RAW) points at least 26 624, the same throughout.
 
 Exit status 0 = all passed.
 """
@@ -75,7 +75,7 @@ tag = 'pantest-%d-%d' % (A.port, os.getpid())
 log = os.path.join(OUT, '%s.log' % tag)
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--mips', A.mips, '--app', A.app,
        '--usbip', '0.01', '--usbip-port', str(A.port), '--run-for', '3000', '--name', tag, '--log', log,
-       '--scope', 'square,1.6,10,7']
+       '--scope', 'square,8,10,7']
 emu = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, start_new_session=True)
 
 # Graph columns x0 .. x0 + 398, rows y0 .. y1 (scope page).
@@ -197,12 +197,16 @@ try:
     T = N * XINC  # the record's length (s)
     PRE_S = -XORG  # its part before the trigger (s)
     print('  record: %d samples, %.0f S/s, %.2f s (%.2f s before the trigger)' % (N, 1 / XINC, T, PRE_S), flush=True)
-    check(N >= 65520 and 0.5 < PRE_S < T - 0.5, 'the stored record: >= 65 520 samples, the trigger inside')
-    # The screen is 1 s (100 ms/div) centred on the trigger, a drag of 200 px
-    # moves it 0.5 s: half-screen drags until its left edge passes the
-    # record's start, and from there (after one drag back) to its end.
-    to_start = max(2, math.ceil((PRE_S - 0.5) / 0.5))
-    to_end = math.ceil((T - 1.5) / 0.5) + 1
+    check(N >= 26624 and 0.5 < PRE_S < T - 0.5, 'the stored record: >= 26 624 samples, the trigger inside')
+    # The pan at 20 ms/div: the screen is S = 0.2 s centred on the trigger,
+    # a drag of 200 px moves it S / 2: half-screen drags until its left edge
+    # passes the record's start, and from there (after one drag back) to its
+    # end.
+    S = 0.2
+    q('TIM:SCAL %g' % (S / 10))
+    wait_ms(1000)
+    to_start = max(2, math.ceil((PRE_S - S / 2) / (S / 2)))
+    to_end = math.ceil((T - 1.5 * S) / (S / 2)) + 1
     wait_ms(500)
     ys = screen('pan0')
     # The square's top / bottom rows: the most common highest / lowest
@@ -246,17 +250,17 @@ try:
 
     # Zoom while stopped (the drawing hold again before each change).
     q('DBG:LCD? 0,0,4,1,7', raw=True)
-    q('TIM:SCAL 0.2')
+    q('TIM:SCAL 0.05')
     wait_ms(1000)
-    z1 = classify(screen('zoom200ms'))
-    full(z1, '200 ms/div (2 s of the %.2f s record)' % T)
-    # A window longer than the record: 500 ms/div, 1 or 2 s/div for longer
+    z1 = classify(screen('zoom50ms'))
+    full(z1, '50 ms/div (0.5 s of the %.2f s record)' % T)
+    # A window longer than the record: 200 ms/div, 0.5 or 1 s/div for longer
     # ones. The screen stays centred on the anchor the pan left (Scope::
-    # pan_from: half a screen before the record end, c = T - 0.5 s), not
+    # pan_from: half a screen before the record end, c = T - S / 2), not
     # clamped once the window is longer (zoom_frame): the record is drawn
     # where the window overlaps it, nothing beyond.
-    tb = next(x for x in (0.5, 1.0, 2.0) if 10 * x > T + 0.5)
-    c = T - 0.5
+    tb = next(x for x in (0.2, 0.5, 1.0) if 10 * x > T + S / 2)
+    c = T - S / 2
     want = round((min(T, c + 5 * tb) - max(0.0, c - 5 * tb)) / (10 * tb) * 400)
     q('DBG:LCD? 0,0,4,1,7', raw=True)
     q('TIM:SCAL %g' % tb)
@@ -265,10 +269,10 @@ try:
     n = sum(c != '.' for c in z2)
     check(abs(n - want) <= 15, '%g s/div: the record at its true scale (%d columns, %d expected)' % (tb, n, want))
     q('DBG:LCD? 0,0,4,1,7', raw=True)
-    q('TIM:SCAL 0.1')
+    q('TIM:SCAL %g' % (S / 10))
     wait_ms(1000)
-    z3 = classify(screen('zoom100ms'))
-    full(z3, 'back at 100 ms/div')
+    z3 = classify(screen('zoom20ms'))
+    full(z3, 'back at 20 ms/div')
     # V/div while stopped: the trace across the graph at 10 V/div, the
     # square again at 5 V/div.
     q('DBG:LCD? 0,0,4,1,7', raw=True)

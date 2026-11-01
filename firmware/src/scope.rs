@@ -1823,8 +1823,11 @@ impl Scope {
     }
 
     /// Samples before / after the trigger point an acquisition waits for:
-    /// the screen's (hw_split), or in Single / DIGitize the record's: the
-    /// ring (at most 10 s) split at the trigger position.
+    /// the screen's (hw_split), or in Single / DIGitize the record's, split
+    /// at the trigger position: the whole raw ring above PK_FS; from
+    /// 100 ms/div (packed / coded ring) `lin_len` (26 624 samples), at least
+    /// the screen, so a Single takes as long as a running frame (1.1 s at
+    /// 100 ms/div), as before the record grew.
     fn rec_split(&self) -> (usize, usize) {
         let (pre, post) = self.hw_split();
         if self.s.mode != TrigMode::Single && !self.one_shot {
@@ -1834,12 +1837,19 @@ impl Scope {
         // The coded ring (edge trigger: a circular record) holds up to
         // cring::NB blocks of a compressible signal, PCAP samples of any:
         // the post part fits in PCAP with the screen's pre part, so the
-        // trigger point stays in; the pre part is what the ring keeps.
+        // trigger point stays in.
         let ring = rg().pk && self.s.ttype == 0;
         let top = if ring { (crate::cring::NB - 2) * crate::cring::BLK as usize } else { self.cap() - 64 - WIN };
         // A STOP's capture (stop_req): the screen + 0.5 s (its deadline
         // gives 0.5 s more to the trigger: poll_frame).
-        let n = (fs * 10).min(top).min(if self.stop_req { self.screen + fs / 2 } else { usize::MAX }).max(self.screen);
+        let lim = if self.stop_req {
+            self.screen + fs / 2
+        } else if fs <= PK_FS as usize {
+            lin_len(fs as u32)
+        } else {
+            usize::MAX
+        };
+        let n = top.min(lim).max(self.screen);
         let p = n * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let q = if ring { (n - p).min(PCAP - 64 - WIN - pre) } else { n - p };
         (p.max(pre), q.max(post))
@@ -1980,10 +1990,9 @@ impl Scope {
     /// count) up to its designed length, `pre_for` + `hw_post` (= `rec`
     /// while running; a Single / DIGitize / STOP capture whose post part is
     /// `post_for`'s floor is `rec` + 832); more were written when a late
-    /// edge wrapped the ring. A coded-ring Single / DIGitize keeps all of
-    /// it: its pre part is what the memory keeps (rec_split).
+    /// edge wrapped the ring. A coded-ring STOP capture keeps all of it.
     fn hw_trim(&self, (off, len): (usize, usize)) -> (usize, usize) {
-        if rg().pk && (self.s.mode == TrigMode::Single || self.one_shot) {
+        if rg().pk && self.stop_req {
             return (off, len);
         }
         let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
@@ -2374,7 +2383,7 @@ impl Scope {
                 // it ends with what is in (hw_poll / stream_poll): at most
                 // the screen's time + 1 s after the STOP.
                 // Single / DIGitize: the timeout counts from the end of
-                // the pre-trigger part (up to 5 s at 100 ms/div).
+                // the pre-trigger part (0.5 s at 100 ms/div).
                 let (p, q) = self.rec_split();
                 let ms = |n: usize| (n as u32 * 1000 / self.sample_rate().max(1)) as u64;
                 self.deadline = now
@@ -2546,7 +2555,15 @@ impl Scope {
         self.halt();
         let Some(wr) = self.stream_wr(now) else { return None };
         let cap = self.cap();
-        let (off, len) = self.span(wr >= cap as u64, self.roll_last_wr);
+        let (mut off, mut len) = self.span(wr >= cap as u64, self.roll_last_wr);
+        // Coded ring, Single / DIGitize: the record is rec_split's pre part
+        // before the trigger (the ring keeps more after a long wait), as
+        // hw_trim; a STOP's capture keeps all.
+        if let (Some(t), true) = (t, rg().pk && !self.stop_req && (self.s.mode == TrigMode::Single || self.one_shot)) {
+            let d = (len as u64).saturating_sub(wr.saturating_sub(t) + self.rec_split().0 as u64) as usize;
+            off += d;
+            len -= d;
+        }
         if len < self.screen {
             self.stored_valid = false;
             return None;

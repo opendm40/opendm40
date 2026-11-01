@@ -1499,11 +1499,11 @@ over the trace; tap the button again while its popup is open to turn it off.
 Press **RUN** (or tap the run state) to stop. The scope takes one more
 capture (the trigger point at the trigger position, as **Single**; up to
 the screen's time + 1 s), then stops; press again to stop at once. The
-capture stays in memory (from 100 ms/div a **Single** capture, up to
-10 s, or a roll capture: at least 65 520 samples, up to 262 144 for a
-smooth signal). A triggered capture while running holds 44 032 samples up
-to 5 ms/div and 26 624 from 10 ms/div (one triggered in software, with CH2
-on or the generator as the source, can be shorter):
+capture stays in memory (from 100 ms/div a roll capture: at least 65 520
+samples, up to 262 144 for a smooth signal). A triggered capture while
+running holds 44 032 samples up to 5 ms/div and 26 624 from 10 ms/div (one
+triggered in software, with CH2 on or the generator as the source, can be
+shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 - change the timebase to zoom in or out of the stored capture (zoom in stops
   at **Max zoom**, 16 samples across the screen);
