@@ -3,7 +3,6 @@
 //! sectors, 2 FATs, 512 root entries, 16 MiB).
 //!   main <image> dry|live [marker-hex]  fatren::run (marker = the 12-byte
 //!                                       record at 0x08008000; none = invalid)
-//!   main <image> trigger                fatren::make_trigger
 //!   main <image> backup <dir>           calbackup::safe_copy (write-once safety copy)
 //!                                       of calbackup::FILES[..SAFE] read from
 //!                                       <dir>/CALIB.BIN, BOOTDATA.BIN, UID.BIN
@@ -107,10 +106,14 @@ mod msc {
             let _ = (lba, n);
             false
         }
-        fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+        fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut Step) -> Option<bool> {
             let _ = st;
-            Some(self.write_block(lba, buf))
+            Some(self.write_block(lba, &src_bytes(buf)))
         }
+    }
+    /// The bytes of a `write_step` source (src/wordram.rs `BlockSrc`).
+    pub fn src_bytes(buf: &dyn crate::wordram::BlockSrc) -> Vec<u8> {
+        (0..buf.len() / 4).flat_map(|i| buf.word(i).to_le_bytes()).collect()
     }
     #[derive(Clone, Copy, Default)]
     pub struct Step {
@@ -233,6 +236,10 @@ mod lcd {
     }
 }
 
+#[path = "../../src/cold.rs"]
+mod cold;
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/screenshot.rs"]
@@ -245,6 +252,9 @@ mod scope_csv;
 #[path = "../../src/dlog.rs"]
 mod dlog;
 
+#[path = "../../src/wordram.rs"]
+#[allow(dead_code)]
+mod wordram;
 #[path = "../../src/csvlog.rs"]
 #[allow(dead_code)]
 mod csvlog;
@@ -266,6 +276,8 @@ mod fatren;
 
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+#[path = "../../src/diskbuf.rs"]
+mod diskbuf;
 #[path = "../../src/persist.rs"]
 #[allow(dead_code)]
 mod persist;
@@ -779,7 +791,9 @@ impl msc::BlockDevice for Img {
         self.d[o..o + 4096].copy_from_slice(&buf[..4096]);
         true
     }
-    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut msc::Step) -> Option<bool> {
+    fn write_step(&mut self, lba: u32, buf: &dyn wordram::BlockSrc, st: &mut msc::Step) -> Option<bool> {
+        let v = msc::src_bytes(buf);
+        let buf = &v[..];
         if !self.nor_step {
             return Some(self.write_block(lba, buf));
         }
@@ -1278,12 +1292,6 @@ fn main() {
         save(&a[1], &img.d);
         return;
     }
-    if a[2] == "trigger" {
-        let t = fatren::make_trigger(&mut img);
-        println!("trigger={:?}\n  changed blocks: {:?}", t, img.writes);
-        save(&a[1], &img.d);
-        return;
-    }
     if a[2] == "backup" {
         let data: Vec<Vec<u8>> = calbackup::FILES[..calbackup::SAFE]
             .iter()
@@ -1329,10 +1337,14 @@ fn main() {
         // A function): its column is "amperes".
         let n: usize = a.get(3).map_or(26 * 1024, |v| v.parse().unwrap());
         let amps = a.get(4).is_some_and(|v| v == "amps");
-        let rec: &'static mut [u16] = Box::leak(vec![0u16; n].into_boxed_slice());
-        for (i, c) in rec.iter_mut().enumerate() {
+        // Packed as the scope keeps it (pack10.rs; + 2 words of read slack).
+        let raw: &'static mut [u16] = Box::leak(vec![0u16; n + 4].into_boxed_slice());
+        for (i, c) in raw[..n].iter_mut().enumerate() {
             *c = (512.0 + 400.0 * (i as f32 * 0.01).sin()) as u16;
         }
+        let p = raw.as_mut_ptr() as *mut u8;
+        pack10::pack_in_place(p, (n + 3) & !3);
+        let rec = pack10::Codes::new(p, 0, n, n);
         let mut h = scope_csv::Hdr::new();
         h.s("# test record\r\n");
         scope_csv::set(rec, -5.0, 10.0 / 1023.0, 1.0e6, n / 2, &h, amps);
@@ -1397,7 +1409,7 @@ fn fatdir_cmd(a: &[String], img: &mut Img) {
     if a.get(k).is_some_and(|x| x == "cut") {
         img.cut = Some(a[k + 1].parse().unwrap());
     }
-    let s = calbackup::scratch();
+    let s = diskbuf::blocks();
     let mut v = || {
         let mut b = [0u8; 4096];
         msc::BlockDevice::read_block(img, 0, &mut b);
@@ -1600,7 +1612,7 @@ fn csv(a: &[String], img: &mut Img) {
                     45 => csvlog::F_LO,
                     _ => 0,
                 };
-                csvlog::push(now, i as f32, f);
+                csvlog::push(now, i as f32, f, 6.0);
                 csvlog::poll_on(img, now);
                 if csvlog::status().state != csvlog::State::Recording {
                     println!("  ended by its duration at reading {i}");
@@ -1622,6 +1634,44 @@ fn csv(a: &[String], img: &mut Img) {
                 Ok(f) => println!("free={f} est_1s={} est_every={} cap={}", csvlog::est_hours(f, 1000), csvlog::est_hours(f, 100), csvlog::EST_CAP_H),
                 Err(e) => println!("free={e:?}"),
             }
+            return;
+        }
+        "chg" => {
+            // chg <threshold idx>: On change mode (Record page), full scale
+            // 6 V, a reading every 100 ms: 1 V (0..9), 1.003 V (10..19),
+            // 2 V (20..29), OL (30..34), 2 V (35..39), 2 V HI (40..44),
+            // 2 V (45), 2 V REL (46), 2 V (47..1299), 2.05 V (1300),
+            // 2.4 V (1301..1309); then stop.
+            let ci: u8 = a[4].parse().unwrap();
+            csvlog::set_next(csvlog::ON_CHANGE, 0);
+            csvlog::set_change(ci);
+            assert_eq!((csvlog::next().0, csvlog::change()), (csvlog::ON_CHANGE, ci));
+            assert!(csvlog::start("DC V", "V", "AUTO", T0));
+            let mut now = T0;
+            for i in 0..1310u32 {
+                now = T0 + 100 * i as u64;
+                let (v, f) = match i {
+                    0..=9 => (1.0, 0),
+                    10..=19 => (1.003, 0),
+                    30..=34 => (0.0, csvlog::F_OL),
+                    40..=44 => (2.0, csvlog::F_HI),
+                    46 => (2.0, csvlog::F_REL),
+                    1300 => (2.05, 0),
+                    1301.. => (2.4, 0),
+                    _ => (2.0, 0),
+                };
+                csvlog::push(now, v, f, 6.0);
+                csvlog::poll_on(img, now);
+            }
+            csvlog::stop();
+            let mut k = 0u64;
+            while csvlog::active() && k < 100_000_000 {
+                now += 10;
+                csvlog::poll_on(img, now);
+                k += 1;
+            }
+            let st = csvlog::status();
+            println!("chg={:?} file={:?} rows={} dropped={}", st.state, st.file, st.rows, st.dropped);
             return;
         }
         "busydel" => {
@@ -1722,7 +1772,7 @@ fn csv(a: &[String], img: &mut Img) {
                 }
             }
             let (v, f) = row(i);
-            csvlog::push(now, v, f);
+            csvlog::push(now, v, f, 6.0);
             let w0 = img.writes.len();
             for _ in 0..POLLS_PER_ROW {
                 // One writer at a time: a commit never starts while a

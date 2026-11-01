@@ -28,7 +28,7 @@
  *                                      calibration backup, fatren, the
  *                                      gallery, screenshots, the DLG writer,
  *                                      FAT / vdisk generation, uploads, the
- *                                      bus self-tests / AD2 experiments (DBG),
+ *                                      bus self-tests (DBG),
  *                                      scope CSV, boot / DBG:BOOT?). Must
  *                                      end below 0x080A0000 (FS-loader, UID
  *                                      data, calibration above). The .data
@@ -52,6 +52,13 @@
  *   TCM     0x10000000  64 KiB  .data, .bss, stack (top 0x10010000)
  *   SRAM    0x20000000 192 KiB  .dmabuf (DMA buffers, scope record),
  *                               .sram_bss
+ *   BKPSRAM 0x40024000          backup SRAM after the settings record
+ *                               (.bkp_record, persist.rs) up to its
+ *                               sequence words at 0x40024FE8: .bkp_bss
+ *   USBHSRAM 0x40060000  4 KiB  the unused USBHS core's FIFO RAM: .usbhs_bss
+ *   Both: CPU only (no DMA), ~5 cycles a load, never touched by the AD2
+ *   stream ISR, zeroed at reset by native.rs extra_ram_init (docs/
+ *   native-boot.md "Extra RAM areas").
  */
 MEMORY
 {
@@ -60,6 +67,9 @@ MEMORY
     FLASH_C (rx) : ORIGIN = 0x08080000, LENGTH = 0x080A0000 - 0x08080000
     TCM (rw)     : ORIGIN = 0x10000000, LENGTH = 64K
     SRAM (rw)    : ORIGIN = 0x20000000, LENGTH = 192K
+    /* Ends at persist.rs BKP_SEQ (the sequence + boot words above). */
+    BKPSRAM (rw) : ORIGIN = 0x40024000, LENGTH = 0x40024FE8 - 0x40024000
+    USBHSRAM (rw) : ORIGIN = 0x40060000, LENGTH = 4K
 }
 
 ENTRY(reset);
@@ -112,11 +122,6 @@ SECTIONS
         *(.text.*8opendm403dmm10rec_crc_ok*);
         *(.text.*8opendm406native*);
         *(.text.*8opendm403uid4init*);
-        /* recovery::run only: the rest of recovery.rs (the recovery-usb /
-         * recovery-file variants' own code, ~1 KB) goes to region B, which
-         * those variants have room in, and keeps their region C above its
-         * 4 KiB floor; the default image has only `run`. */
-        *(.text.*8opendm408recovery3run*);
         *(.text.*8opendm407gallery*);
         *(.text.*8opendm4010screenshot*);
         *(.text.*8opendm404dlog*);
@@ -127,14 +132,33 @@ SECTIONS
         *(.text.*8opendm405vdisk*);
         *(.text.*8opendm406upload*);
         *(.text.*8opendm405hyspi*);
-        /* ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter and
-         * dcv_row) and main.rs dbg_dcv (below): back in C since region B
-         * audit #4 (2026-10-25, B at 15 KB free; they were in B from region
-         * C audit #1, 133f81e, while B had ~80 KB free). DBG replies, and
-         * dc_enter runs in Logger::start before the stream ISR takes the
-         * bus (wavetest / dcvtest's region C hooks and data watch). */
-        *(.text.*8opendm406ad2exp*);
+        /* NOT ad2exp (DBG:AD2:TORN? / NOISE? / DCV? / N7?, E7's dc_enter
+         * and dcv_row) nor main.rs dbg_dcv / dbg_n7 and scpi::dcv_arg /
+         * n7_arg: region B again since region C audit #3 (2026-10-29, C at
+         * 7.7 KB free, B at 50 KB; docs/native-boot.md). They were in B
+         * from region C audit #1 (133f81e) and in C from region B audit #4
+         * (2026-10-25, B at 15 KB). */
         *(.text.*8opendm409scope_csv*);
+        /* Feature memprobe (DBG:PEEK? etc., debug builds only); its timing
+         * loop and asm are `.text.a2.*` (zero-wait region A2). */
+        *(.text.*8opendm408memprobe*);
+        /* The decoder's frame log: a frame's waveform, drawn on a tap, the
+         * top bar / counters, the page draw, the setup popup and the
+         * view's touches (app_log.rs `.text.log_cold`; ui_log.rs's panel
+         * buttons below). The log streams by DMA (the decode catches up
+         * from its ring, log_poll / log_tick / log_row stay in B). It
+         * never runs with the AD2 stream: `log_open` refuses while one
+         * runs, LOG:STAT ON is refused while the log is open (main.rs
+         * log_on_check), and every other stream start (Wave view, inrush,
+         * the fast logger's page) leaves View::Decode first. */
+        *(.text.log_cold*);
+        *(.text.*8opendm408scope_ui3log12panel_button*);
+        *(.text.*8opendm408scope_ui3log9panel_hit*);
+        /* The keypad's digit font: read only by ui::keypad_key (above, in
+         * C: the Keypad page / popup, no stream). */
+        *(.rodata.fonts.K_FONT_E);
+        *(.rodata.fonts.K_FONT_B);
+
         /* NOT the scope WAVeform:* / ACQ:SRAT? / TRIG:STAT? / CHAN1:OFFS?
          * replies (src/scope_wav.rs) nor their parser scpi::wav_cmd: a host
          * polls them while the Wave view's stream runs (device c830e09:
@@ -142,6 +166,8 @@ SECTIONS
          * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*8opendm404boot*);
         *(.text.*8opendm403app9app_press*);
+        /* The press feedback's scan-line sync and DBG:SCANLINE? (src/scanline.rs). */
+        *(.text.*8opendm408scanline*);
         /* Inrush current: open / arm / close / results / save glue and the
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
@@ -157,6 +183,10 @@ SECTIONS
          * (the per-frame apply is touch.rs `screen`, region B). */
         *(.text.*8opendm408touchcal*);
         *(.text.*8opendm404scpi8tcal_arg*);
+        /* The Record page's SCPI settings (LOG:CSV:INTerval / DURation /
+         * CHANge): parse and set / query, rarely sent. */
+        *(.text.*8opendm404scpi7csv_arg*);
+        *(.text.*8opendm408rec_scpi*);
         *(.text.*8opendm402ui3inr4page*);
         *(.text.*8opendm402ui3inr5trace*);
         *(.text.*8opendm406inrush*3Cap7results*);
@@ -224,7 +254,6 @@ SECTIONS
         *(.rodata.*8opendm405vdisk*);
         *(.rodata.*8opendm406upload*);
         *(.rodata.*8opendm405hyspi*);
-        *(.rodata.*8opendm406ad2exp*);
         *(.rodata.*8opendm409scope_csv*);
         *(.rodata.*8opendm404boot*);
         *(.rodata.*8opendm403app9app_press*);
@@ -251,12 +280,15 @@ SECTIONS
         /* The power page after a coupling change (once per change). */
         *(.text.*8opendm403app9app_power*3App15pw_coup_changed*);
         *(.text.*8opendm403app9app_power*3App15pw_pending_draw*);
-        *(.text.*8opendm403dmm2pw*3Dmm10pw_pending);
         *(.text.*8opendm402ui8settings*);
         *(.text.*8opendm402ui9temp_page*);
+        /* Its info line, once a second while the temperature page is open
+         * (no AD2 stream in temperature). Region B audit 2026-10-30, ~0.45 KB:
+         * room for ui::ol_word's "OPEN" / "Overflow" in B. */
+        *(.text.*8opendm403app*3App14temp_info_text*);
+        *(.text.*8opendm403app*3App14temp_info_tick*);
         *(.text.*8opendm402ui8temp_key*);
         *(.text.*8opendm402ui10gen_values*);
-        *(.text.*8opendm402ui11gen_preview*);
         *(.text.*8opendm402ui10gen_static*);
         *(.text.*8opendm402ui14auto_cpl_label*);
         /* The ohm / diode test-current label: drawn on a function / range /
@@ -266,6 +298,12 @@ SECTIONS
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
         *(.text.*8opendm402ui2pw14settings_press*);
+        /* Their boxes for the press feedback, and the strip-box pass
+         * (app_press.rs draw_box: per press). */
+        *(.text.*8opendm402ui16range_press_item*);
+        *(.text.*8opendm402ui2pw10press_item*);
+        *(.text.*8opendm402ui9temp_rect*);
+        *(.text.*8opendm403lcd10strips_box*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?).
@@ -279,7 +317,6 @@ SECTIONS
          * (main.rs log_scale: a host scales the session's data with it;
          * fastlogtest --poll, 2026-10-23: region C code and its literal
          * loads while streaming). */
-        *(.text.*8opendm404scpi7dcv_arg*);
         /* NOT the SCPI range / resolution commands (scpi::range_cmd,
          * conf_cmd, range_arg, res_arg, step_exp, pow10f, App::scpi_range;
          * ~2 KB): back in region B since region C audit #2 (2026-10-25,
@@ -287,9 +324,6 @@ SECTIONS
          * with them and returned here with the DMM accuracy label (0.6.0,
          * the same section): drawn on the Help pages only, where no stream
          * runs (the list below). */
-        *(.text.*8opendm404scpi6n7_arg*);
-        *(.text.*8opendm406dbg_n7*);
-        *(.text.*8opendm407dbg_dcv*);
         *(.text.*8opendm405touch8log_text*);
         *(.text.*8opendm4010touch_diag*);
         *(.text.*8opendm406csvlog6delete*);
@@ -301,8 +335,9 @@ SECTIONS
          * (App::sp_save_csv, with scope_csv::set and the DLG block plan). */
         *(.text.*8opendm403app*3App14with_temp_page*);
         *(.text.*8opendm403app*3App11sp_save_csv*);
-        /* Once per scope drag, at its axis decision (scope_ui::drag_target). */
-        *(.text.*8opendm408scope_ui11drag_target*);
+        /* Scope::hw_calibrate is back in region B (2026-10-26, the long
+         * scope record: region C had < 8 KiB, B had room after
+         * stockfont::paint stopped being one copy per closure). */
         /* Region B audit #3 (2026-10-22, 11.9 KB free on 1ad38aa):
          * `#[inline(never)]` event / start-up code that sat inlined in hot
          * callers. App::wave_open runs at event rate. (App::tap with
@@ -321,13 +356,20 @@ SECTIONS
          * Bt::new (not init_module: polled every pass), SpiFlash::new,
          * usb::init_hw. */
         *(.text.*8opendm403app*3App9wave_open*);
-        /* A popup closed on the scope page (event rate): the page under it
-         * is marked for repaint (the repaint itself is in region B). */
-        *(.text.*8opendm403app*3App14sp_popup_close*);
-        *(.text.*8opendm403app*3App10sp_uncover*);
-        *(.text.*8opendm408scope_ui7uncover*);
+        /* NOT App::sp_popup_close / sp_uncover, scope_ui::uncover (~0.3 KB,
+         * region B since 2026-10-30): an MF popup open in the Wave view is
+         * closed by MENU while the AD2 stream runs (hy3131/wavetest.py
+         * "exit (MENU)"). */
         /* DBG:IDLE? (emu/idletest.py; no stream runs in its tests). */
         *(.text.*8opendm403app*3App8dbg_idle*);
+        /* DBG:GENTRIG:LAG / STAT? and DBG:CH2:LAG (the GEN / CH2 channels'
+         * tuning replies, App::dbg_gen). */
+        *(.text.*8opendm403app*3App7dbg_gen*);
+        /* Start-up only (App::new): the scope's SHOWN / STRIP_SHOWN reset
+         * (scope_ui::init_shown) and the backup-SRAM record set-up
+         * (persist::init, also splash / setfile::boot). */
+        *(.text.*8opendm408scope_ui10init_shown*);
+        *(.text.*8opendm407persist4init*);
         /* DBG:OHM6 (the 600 Mohm range's tuning, dmm.rs Ohm600). */
         *(.text.*8opendm403dmm*3Dmm10ohm600_dbg*);
         *(.text.*8opendm403app*3App9rec_start*);
@@ -353,15 +395,19 @@ SECTIONS
          * continuity / the resistive temperature sensors (a fault), never
          * with the bus handed to a stream (it talks to the HY3131 itself). */
         *(.text.*8opendm408sentinel*8Sentinel11jack_result*);
+        *(.text.*8opendm408sentinel*8Sentinel6v_both*);
         *(.text.*8opendm403dmm*3Dmm9cont_jack*);
         /* V_GATE of ohm / continuity / diode, once per reading (no HY3131
          * access; region B at 16 KiB). */
         *(.text.*8opendm403dmm*3Dmm10v_side_ohm*);
+        /* AC mV's V_GATE, once per AC mV result (no HY3131 access). */
+        *(.text.*8opendm403dmm*3Dmm8mv_vside*);
         /* DBG:SRC? and DBG:ACDC:TRACE? reply text (SCPI only; room in region B
          * for the jack check above). */
         *(.text.*8opendm40*8src_text*);
+        /* DBG:SRC's parser (region B at 16 KiB, 2026-10-26). */
+        *(.text.*8opendm406dbgsrc5index*);
         *(.text.*6acdctr*5Trace4text*);
-        *(.text.*8opendm405scope*5Scope12hw_calibrate*);
         *(.text.*8opendm406hwtrig*6HwTrig9calibrate*);
         *(.text.*8opendm405touch*5Touch3new*);
         *(.text.*8opendm402bt*2Bt3new*);
@@ -409,6 +455,56 @@ SECTIONS
         *(.text.*8opendm406vwrite5check*);
         *(.text.*8opendm406vwrite8finalize*);
         *(.text.*8opendm406vwrite6commit*);
+        /* Region B audit #10 (memory plan P1, 2026-11-01): functions that
+         * tools/region-profile/rprof.py classes `c-only` (reached only
+         * through region C code or start-up), >= ~40 B. Their callers:
+         * the generator page (gen_values: gen_preview, gen_box_value), a
+         * host write on the volume (VDisk::write: vwrite stage /
+         * ours_live / dates_only / host_cluster), the recording start
+         * (App::rec_start: csvlog ascii / W::a, the catalog's list_on
+         * closure), the range / limits / keypad / settings / power entry /
+         * inrush pages (ok_and_limits_buttons, kp_unit_text,
+         * record_button, row_only, pw jack / outline / ps_button,
+         * inr::thr), the fast logger's start and prep (fast_probe_if,
+         * FastEnc::finish), HwTrig::calibrate (sweep), and start-up
+         * (main, native pre_main: board::pins, Clock::new, App::new's
+         * gain_of / out_pin, SpiFlash::new's block_crc / af_pin,
+         * Touch::new's rise_ns / od_pin). Generic core instantiations and
+         * small shared helpers stay in B (a future hot caller of the
+         * same instance would land in slow flash). */
+        *(.text.*8opendm402ui11gen_preview*);
+        *(.text.*8opendm402ui13gen_box_value*);
+        *(.text.*8opendm406vwrite5stage*);
+        *(.text.*8opendm406vwrite9ours_live*);
+        *(.text.*8opendm406vwrite10dates_only*);
+        *(.text.*8opendm406vwrite12host_cluster*);
+        *(.text.*8opendm406csvlog5ascii*);
+        *(.text.*8opendm406csvlog*1W1a);
+        *(.text.*8opendm406csvlog7list_on0*);
+        *(.text.*8opendm402ui21ok_and_limits_buttons*);
+        *(.text.*8opendm403app12kp_unit_text*);
+        *(.text.*8opendm402ui13record_button*);
+        *(.text.*8opendm402ui8row_only*);
+        *(.text.*8opendm402ui2pw4jack*);
+        *(.text.*8opendm402ui2pw7outline*);
+        *(.text.*8opendm402ui2pw9ps_button*);
+        *(.text.*8opendm402ui3inr3thr*);
+        *(.text.*8opendm4013fast_probe_if*);
+        *(.text.*8opendm407fastenc*7FastEnc6finish*);
+        *(.text.*8opendm406hwtrig*6HwTrig5sweep*);
+        *(.text._RNvCs*_8opendm404main);
+        *(.text.*8opendm405board4pins*);
+        *(.text.*8opendm405clock*5Clock3new*);
+        *(.text.*8opendm403app9app_power7gain_of*);
+        *(.text.*8opendm406hy31317out_pin*);
+        *(.text.*8opendm408spiflash9block_crc*);
+        *(.text.*8opendm408spiflash6af_pin*);
+        *(.text.*8opendm405touch7rise_ns*);
+        *(.text.*8opendm405touch6od_pin*);
+        /* ... and the read-only data only region C code reads: ui.rs
+         * cold_str! (strings) and cold_set! (a constant's bytes copied at
+         * run time, e.g. a job record's reset value). */
+        *(.rodata.cold .rodata.cold.*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C
@@ -462,6 +558,33 @@ SECTIONS
         __sram_bss_end = .;
     } > SRAM
 
+    /* The settings record's place (persist.rs RECORD_SPACE), then the
+     * CPU-only buffers (`#[link_section = ".bkp_bss"]`). */
+    .bkp_record (NOLOAD) :
+    {
+        __bkp_record_start = .;
+        KEEP(*(.bkp_record));
+        __bkp_record_end = .;
+    } > BKPSRAM
+
+    .bkp_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __bkp_bss_start = .;
+        *(.bkp_bss .bkp_bss.*);
+        . = ALIGN(4);
+        __bkp_bss_end = .;
+    } > BKPSRAM
+
+    .usbhs_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        __usbhs_bss_start = .;
+        *(.usbhs_bss .usbhs_bss.*);
+        . = ALIGN(4);
+        __usbhs_bss_end = .;
+    } > USBHSRAM
+
     __image_end = __cold_end;
 
     /DISCARD/ :
@@ -509,6 +632,12 @@ ASSERT(0x080A0000 - __image_end >= 4K, "less than 4 KiB of region C (.cold) free
  *   the marker, build.sh warns below 2 KiB), App::tap / key / show and
  *   vdisk::describe back in B: B 30 572 / 37 836, C 17 840 / 19 880 B
  *   (docs/native-boot.md "Region A2"). */
+/* Extra RAM areas: never over the settings record or its sequence words. */
+ASSERT(__bkp_record_start == 0x40024000, "persist.rs RECORD_SPACE is not at the start of the backup SRAM");
+ASSERT(__bkp_record_end > __bkp_record_start, "persist.rs RECORD_SPACE missing: .bkp_bss would overlay the settings record");
+ASSERT(__bkp_bss_start >= __bkp_record_end, ".bkp_bss starts inside the settings record");
+ASSERT(__bkp_bss_end <= 0x40024FE8, ".bkp_bss reaches the settings sequence words at 0x40024FE8: move a buffer out");
+ASSERT(__usbhs_bss_start >= 0x40060000 && __usbhs_bss_end <= 0x40061000, ".usbhs_bss outside the 4 KiB USBHS FIFO RAM");
 ASSERT(_stack_top - __bss_end >= 42K, "TCM stack below 42 KiB (worst path ~21.5 KiB + 20 KiB headroom): move CPU-only statics to .sram_bss");
 ASSERT(ORIGIN(SRAM) + LENGTH(SRAM) - __sram_bss_end >= 8K, "less than 8 KiB of SRAM free: overlay or shrink a buffer (docs/native-boot.md memory map)");
 ASSERT(0x08080000 - __b_end >= 8K, "less than 8 KiB of zero-wait flash (region B) free: move rarely run code to .cold");

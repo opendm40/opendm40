@@ -1,0 +1,3 @@
+# Keep both sides when parallel PRs add entries at the same place.
+CHANGELOG.md merge=union
+firmware/TODO.md merge=union

@@ -21,23 +21,26 @@ graph (14,21,399,279), `INNER` (0,15,414,290).
 
 ### 1.1 Tap-step modes
 
-Settings page 2 "Scope tap step" cycles Corners -> Halves (stock) -> Off.
+Settings > Scope "Tap step" cycles Corners -> Halves (stock) -> Off.
 **Corners is the default** (`scope_ui::TAP_DEFAULT`). The mode is persisted
 in p[1] bits 28..29 as the mode XOR the default, so a record written before
 the setting existed restores the default.
 
 | Mode | What a tap off a marker does |
 |---|---|
-| **Corners** (default) | Only the two bottom-corner zones step: `ZONE_L` (23,228,80,73) slower, `ZONE_R` (333,228,80,73) faster (80 x 73 px, about 13.6 x 12.4 mm). `ZONE_L` starts after the strip markers' press zones (x <= 22). A still hold in a zone repeats: the first repeat 500 ms after the press (`REPEAT_FIRST_MS`), then every 200 ms (`REPEAT_MS`). A tap steps on release; a hold that repeated does not step again on release. A tap elsewhere in the graph does nothing. |
+| **Corners** (default) | Only the two bottom-corner zones step: `ZONE_L` (23,228,80,73) slower, `ZONE_R` (333,228,80,73) faster (80 x 73 px, about 13.6 x 12.4 mm). `ZONE_L` starts after the strip marker glyphs (x <= 12). A still hold in a zone repeats: the first repeat 500 ms after the press (`REPEAT_FIRST_MS`), then every 200 ms (`REPEAT_MS`). A tap steps on release; a hold that repeated does not step again on release. A tap elsewhere in the graph does nothing. |
 | **Halves** (stock) | A tap (<= 4 px, `TAP_TOL`, one finger) anywhere in `INNER`: x <= 207 slower, else faster. |
 | **Off** | No tap step. The timebase changes by the list popup, pinch or AUTO. |
 
-Precedence (`scope_ui::graph_press`): the object under the finger wins. A
-marker, cursor line or shown guide line zone is picked first, then the cursor
-tab (UF-08), and only then the tap-step zone. The right-edge trigger-level
-marker's zone wins over `ZONE_R` where they meet. A drag that starts in a zone
-is a normal drag of the selected item; pinch and the 2/3-finger gestures are
-unchanged.
+Precedence (`scope_ui::graph_press`): a drawn tab (the tap-step tabs, the
+cursor tab, UF-08) first, then the marker grab zones (`scope_ui::grab_rect`:
+48 px along the edge, from the screen edge 30 px past the glyph; where zones
+meet the nearest glyph wins), then the cursor tab's margin, and only then the
+tap-step zone. A marker zone wins over `ZONE_L` / `ZONE_R` where they meet,
+except on a tab. A drag from a grab zone moves that marker along its axis; a
+drag from anywhere else (a tap-step zone too) moves the trigger position
+sideways or the selected level item up / down; pinch and the 2/3-finger
+gestures are unchanged.
 
 Each step beeps 30 ms. At a limit nothing happens and that side's tab is
 hidden. Where a tap does nothing (the graph middle in Corners, anywhere with

@@ -58,7 +58,9 @@ fn sqrt(x: f32) -> f32 {
     y
 }
 
-pub fn compute(d: &[u16], fs: f32, sc: &Scope) -> Results {
+use crate::pack10::Src;
+
+pub fn compute<S: Src + ?Sized>(d: &S, fs: f32, sc: &Scope) -> Results {
     // Volts are linear in the code: precompute instead of calling the
     // calibrated map per sample (that made a 50k-sample frame take ~100 ms).
     let v_0 = sc.volts(0.0);
@@ -81,7 +83,7 @@ fn sum_sq(n: u32, s1: u64, s2: u64, v_0: f32, v_k: f32) -> f64 {
 /// thresholds, then whole-cycle duty and the integer moments of Vcrm. The
 /// sums are exact (integer moments, combined in f64), so the values match
 /// the old f32 running sums to their rounding.
-pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
+pub fn compute_codes<S: Src + ?Sized>(d: &S, fs: f32, v_0: f32, v_k: f32) -> Results {
     let mut r = Results { v: [f32::NAN; 20] };
     let n = d.len();
     if n < 4 {
@@ -89,8 +91,8 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     }
     let volts = |c: f32| v_0 + v_k * c;
     let mut hist = [0u16; 1024];
-    for &c in d {
-        let c = c.min(1023) as usize;
+    for i in 0..n {
+        let c = d.at(i).min(1023) as usize;
         hist[c] = hist[c].saturating_add(1);
     }
     let (mut lo, mut hi) = (1023u16, 0u16);
@@ -110,21 +112,31 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
     r.v[11] = sqrt((sum_sq(n as u32, s1, s2, v_0, v_k) / n as f64) as f32);
     let clipped = lo == 0 || hi >= 1023;
     r.v[10] = if clipped { f32::NAN } else { vmax - vmin };
-    // Top / base: most populated bin in the upper / lower 30 % band.
+    // Top / base: most populated bin in the upper / lower 30 % band, when
+    // it is a plateau: the band's best three-bin window holds at least 4x
+    // the band's mean for three bins (a wide band), or at least half of the
+    // band's samples (a narrow band: a small square, where 4x the mean is
+    // more than the whole band). Else (a triangle or ramp fills the band
+    // evenly, so its "mode" is any bin of the band) the extreme, Vmax /
+    // Vmin (#129).
     let pp_c = (hi - lo) as f32;
     let top_from = (hi as f32 - 0.3 * pp_c) as usize;
     let base_to = (lo as f32 + 0.3 * pp_c) as usize;
-    let mode_in = |a: usize, b: usize| -> usize {
-        let mut best = a;
-        for i in a..=b.min(1023) {
+    let mode_in = |a: usize, b: usize, ext: usize| -> usize {
+        let b = b.min(1023);
+        let (mut best, mut sum, mut win) = (a, 0usize, 0usize);
+        for i in a..=b {
+            sum += hist[i] as usize;
             if hist[i] > hist[best] {
                 best = i;
             }
+            let w: usize = hist[i.saturating_sub(1).max(a)..=(i + 1).min(b)].iter().map(|&h| h as usize).sum();
+            win = win.max(w);
         }
-        best
+        if win * (b + 1 - a) >= 12 * sum || 2 * win >= sum { best } else { ext }
     };
-    let tb = mode_in(top_from, hi as usize);
-    let bb = mode_in(lo as usize, base_to);
+    let tb = mode_in(top_from, hi as usize, hi as usize);
+    let bb = mode_in(lo as usize, base_to, lo as usize);
     let (vtop, vbas) = (volts(tb as f32), volts(bb as f32));
     r.v[14] = vtop;
     r.v[15] = vbas;
@@ -153,9 +165,10 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
         let mut falls = [0usize; 2];
         let mut nfall = 0u32;
         let (mut hp, mut lp) = (0u32, 0u32);
-        let mut prev_hi = d[0] >= h50;
+        let mut prev_hi = d.at(0) >= h50;
         let mut cross50: Option<usize> = None;
-        for (i, &c) in d.iter().enumerate() {
+        for i in 0..n {
+            let c = d.at(i);
             let now_hi = c >= h50;
             if now_hi != prev_hi {
                 cross50 = Some(i);
@@ -209,13 +222,13 @@ pub fn compute_codes(d: &[u16], fs: f32, v_0: f32, v_k: f32) -> Results {
             // Duty / widths over whole cycles.
             let mut hn = 0u32;
             let (mut c1, mut c2) = (0u64, 0u64);
-            let w = &d[e[0]..e[1]];
-            for &c in w {
+            for i in e[0]..e[1] {
+                let c = d.at(i);
                 hn += (c >= h50) as u32;
                 c1 += c as u64;
                 c2 += (c as u32 * c as u32) as u64;
             }
-            let cnt = w.len() as u32;
+            let cnt = (e[1] - e[0]) as u32;
             let ln = cnt - hn;
             let tot = (hn + ln).max(1) as f32;
             r.v[1] = hn as f32 * 100.0 / tot;

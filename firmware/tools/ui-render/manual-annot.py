@@ -137,7 +137,7 @@ def status_bar():
     bar = render('status-usb', scale=sc, crop=(0, 0, 480, 34))
     im, d = canvas(bar.size[0] + 40, bar.size[1] + 110)
     paste(im, d, bar, 20, 20)
-    spans = [(5, 75), (129, 179), (205, 305), (335, 358), (364, 383), (390, 405), (412, 425), (435, 474)]
+    spans = [(5, 75), (129, 179), (205, 305), (327, 350), (354, 383), (390, 405), (412, 425), (435, 474)]
     for k, (a, b) in enumerate(spans):
         x = 20 + (a + b) / 2 * sc
         d.line((x, 20 + bar.size[1] + 2, x, 20 + bar.size[1] + 38), fill=BLUE, width=2)
@@ -402,7 +402,16 @@ def dmm_acc():
     save(im, 'dmm-acc-anno')
 
 
+# Marker grab zones of the default scope page (scope_ui::grab_rect, GRAB_H
+# 48, GRAB_IN 30) on scope-run: CH1 glyph x 1..12 y 154..165, trigger level
+# x 401..412 y 119..130, T x 208..219 y 21..32. (x, y, w, h).
+GRAB_ZONES = {'ch1': (0, 136, 43, 48), 'level': (371, 101, 43, 48), 'tpos': (190, 16, 48, 47)}
+
+
 def scope_drag():
+    """The marker grab zones (shaded): a drag from one moves that marker
+    along its own axis. Anywhere else: sideways the trigger position, up /
+    down the selected item (CH1 by default)."""
     sc = 1.25
     s = shot('scope-run', sc)
     w, h = s.size
@@ -410,21 +419,29 @@ def scope_drag():
     x0, y0 = 20, 20
     im.paste(s, (x0, y0))
     g = lambda x, y: (x0 + x * sc, y0 + y * sc)
-    tl = g(398, 125)
-    tp = g(213, 40)
-    tr = g(100, trace_y('scope-run', 100))
-    for (x, y), vert in [(tl, True), (tp, False), (tr, True)]:
-        if vert:
-            arrow2(d, (x, y - 60), (x, y + 60), w=5, head=14)
-        else:
-            arrow2(d, (x - 70, y), (x + 70, y), w=5, head=14)
+    o = Image.new('RGBA', im.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(o)
+    for x, y, zw, zh in GRAB_ZONES.values():
+        od.rectangle((*g(x, y), *g(x + zw, y + zh)), fill=(10, 123, 214, 90), outline=(255, 255, 255, 255), width=2)
+    im.paste(Image.alpha_composite(im.convert('RGBA'), o).convert('RGB'))
+    d = ImageDraw.Draw(im)
+    # A finger in each zone with its marker's own axis (the top T sideways
+    # only), and one on the empty graph with both axes.
+    ch1, lev, tp, free = g(26, 160), g(386, 125), g(214, 46), g(150, 232)
+    for (x, y), v, hz in [(ch1, True, False), (lev, True, False), (tp, False, True), (free, True, True)]:
+        if v:
+            arrow2(d, (x, y - 55), (x, y + 55), w=5, head=14)
+        if hz:
+            arrow2(d, (x - 65, y), (x + 65, y), w=5, head=14)
         finger(im, x, y)
         d = ImageDraw.Draw(im)
     d.rectangle((x0 - 1, y0 - 1, x0 + w, y0 + h), outline=GREY)
     f = font(15)
-    tag(d, 'trigger level:\nT on the right edge', None, *g(262, 150), f)
-    tag(d, 'trigger position:\nT on the top edge', None, *g(262, 34), f)
-    tag(d, 'the trace', None, *g(124, trace_y('scope-run', 100) + 26), f)
+    tag(d, 'trigger position', g(238, 40), *g(262, 34), f)
+    tag(d, 'trigger level', g(371, 120), *g(262, 92), f)
+    tag(d, 'CH1', g(30, 140), *g(52, 104), f)
+    tag(d, 'sideways: trigger position', None, *g(212, 248), f)
+    tag(d, 'up / down: the selected item', None, *g(170, 176), f)
     save(im, 'scope-drag')
 
 
@@ -548,7 +565,7 @@ def usb_disk():
 
 def usb_row():
     sc = 2
-    s = render('settings3-edit', scale=sc, crop=(0, 102, 480, 135))
+    s = render('settings-usb-edit', scale=sc, crop=(128, 86, 480, 134))
     im, d = canvas(s.size[0] + 40, s.size[1] + 70)
     paste(im, d, s, 20, 20)
     text_c(d, im.size[0] / 2, s.size[1] + 34, 'PC can edit, waiting for the re-plug', font(14), MID)
@@ -982,7 +999,7 @@ def tap_pair(name, a, tap, ca, b, cb, scale=0.5):
 def usb_steps():
     sd = os.path.join(HERE, 'stock-shots')
     tap_pair('install-stock-usb', (sd, 'stock-usb-menu'), (445, 60), 'Stock: Settings > 5. Other Settings', (sd, 'stock-usb-screen'), 'USB Connect: the USB disk is on')
-    tap_pair('update-steps', (RENDERS, 'settings3-edit'), (445, 119), 'USB disk: PC can edit (re-plug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
+    tap_pair('update-steps', (RENDERS, 'settings-usb-edit'), (400, 110), 'USB disk: PC can edit (replug)', (RENDERS, 'confirm-install'), 'After the copy: the question')
 
 
 def shunt_chain():

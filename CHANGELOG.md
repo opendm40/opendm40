@@ -9,15 +9,91 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Each function button remembers its sub-mode:** V and A their coupling,
+  diode / continuity, Hz / °C, Ω its test current; kept after a power-off
+  ([manual](docs/manual/README.md#choose-a-function)).
+- **Device page:** the factory serial number, the SN line of the stock page.
+- **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
+  since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
+- **Mode Remember** (Settings > Power; default OFF, as the stock's):
+  ON restarts the multimeter after a power-off in the function, range, rate
+  and trend timebase you left. SCPI `MEMory:STATe:RECall:AUTO`.
+- **Trend chart:** two slower timebases, 1.28 and 2.56 s/div.
+- **Russian README and user manual:** [README.ru.md](README.ru.md) and
+  [docs/manual/README.ru.md](docs/manual/README.ru.md), with a language
+  switch at the top of each.
 - **600 MΩ range, experimental:** on the range page or SCPI
   `RES:RANG 600E6` only, never in AUTO; accuracy not specified. Leave the
   leads open once: it learns the meter's own leakage
   ([manual](docs/manual/README.md#resistance)).
 
   ![The 600 MΩ range page and reading](docs/changelog/v0.4.0/ohm-600m.png)
+- **Continuity and diode: a green SHORT band** above the reading and green
+  digits while the beeper sounds, also at volume 0 %; **BEEP** for a diode
+  pattern ([manual](docs/manual/README.md#continuity)).
+
+  ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  44 032 at the faster timebases (was 26 624), for the stopped zoom / pan,
+  Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
+  capture with the trigger point at the trigger position; from 100 ms/div
+  they keep 26 624 samples, as before
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope: from 100 ms/div, roll (also in the Wave view at 9600 S/s and
+  slower) keeps the capture compressed with the DLG scope coder as it
+  comes in: at least 65 520 samples (white noise), more for a smooth
+  signal, up to 262 144
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- **Protocol decoder:** UART (RS-232, RS-485; Modbus RTU frames recognised
+  in it by their CRC, no separate Modbus protocol: `DECode:PROTocol MODBus`
+  selects UART) and DALI (basic: forward, backward and 24-bit frames, 1200
+  bit/s) drawn under the trace,
+  each triggered capture and on STOP, also in the Wave view. Scope MF >
+  Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
+  **Mode Log** lists every frame of a running stream.
+
+  ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
+- **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
+  the trigger is computed from the generator's timers, no wire needed;
+  and a **GEN trace** (MF > Display) showing the generator's output under
+  CH1 ([manual](docs/manual/README.md#trigger)). SCPI `TRIGger:SOURce`.
+- **Scope: the multimeter as CH2** (MF > Display > CH2 (DMM)): the
+  multimeter's input drawn over CH1 on the same time axis, in V, mV and
+  AC A ([manual](docs/manual/README.md#display-settings)). The multimeter
+  reading pauses while it is on; CH2 samples at most 38.4 kS/s, and the
+  alerts and Bluetooth pause too.
+- **Record On change:** a row when the reading moves 0.1 / 1 / 5 % of the
+  range, on OL / HI / LO, and at least once a minute; SCPI
+  `LOG:CSV:INTerval CHANge`, `LOG:CSV:CHANge`.
+- Continuity shows its test current, **I -0.26 mA**.
 
 ### Changed
 
+- **Scope drag as on a Rigol DHO800/900:** a drag on a marker moves that
+  marker (large grab zones); anywhere else, sideways moves the trigger
+  position, up / down the selected item (the trace unless you tapped another
+  marker). The Settings row **Drag** (Stock / Axis lock / Hold 300 ms) and
+  `DBG:GRAB` are gone; cursor lines no longer drag, their markers do
+  ([manual](docs/manual/README.md#moving-things-with-a-finger)).
+- **Settings in tabs:** the sections (Display, Alerts, Power, Multimeter,
+  Scope, Other) are tabs on the left, rows are taller, and only the value
+  side of a row reacts to a tap ([manual](docs/manual/README.md#settings)).
+- **Tap feedback:** a pressed button or row is drawn in one pass, timed to
+  the panel's refresh scan.
+- **Texts as on the stock firmware:** lowercase k in units (kΩ, kHz, kW),
+  **6mA**, ℃ / ℉ shown as symbols, and several renamed titles and rows
+  ([#136](https://github.com/opendm40/opendm40/issues/136)).
+- **Long press on the A button** opens the
+  [inrush page](docs/manual/README.md#inrush-current) (it opened the power
+  meter's wiring picture; that one stays under **MF > Wiring**).
+- **Test builds of pull requests:** each pull request gets a comment with
+  its update file to try (version `0.4.0-pr<N>.<commit>`)
+  ([manual](docs/manual/README.md#install)).
+- **Record button on the range pages:** MF, then **Record** opens the Record
+  page (red while recording); **Hold/Limits** is now **Limits**
+  ([manual](docs/manual/README.md#the-record-page)).
+
+  ![Before and after: the current range page](docs/changelog/v0.4.0/record-button.png)
 - **The update loader no longer opens by itself** after repeated hangs (a
   hang restarts the meter).
 - **Leaving the update loader:** opened with the power-key hold or
@@ -26,9 +102,23 @@ section named after the tag as the release notes; how to cut a release:
   [How to reach it](docs/manual/README.md#reach-the-update-loader).
 - Smoother screen changes: pages, popups and DMM functions draw over the old
   screen, not over a blank one; an MF menu tab redraws only the menu.
+- The menu, settings, range, help, generator and oscilloscope pages appear
+  top to bottom in one pass, with no half-drawn widgets.
+- The small caption next to the big `0L` says **Overflow** (was Overload)
+  in every function ([manual](docs/manual/README.md#overflow)).
+- `DBG:TOUCH?`, `DBG:PROF?`, `DBG:ACDC:TRACE`, `DBG:HYSPI`, `DBG:ACDC?`,
+  `DBG:DIAG?`, `DBG:OHM6`, `DBG:SENTinel?` and `DBG:SRC` (debug) are only in
+  builds with their features (`dbg-touch`, `dbg-prof`, `acdc-trace`,
+  `dbg-hyspi`, `dbg-acdc`, `dbg-diag`, `dbg-ohm6`, `dbg-sent`, `dbg-src`)
+  ([SCPI reference](docs/manual/scpi-reference.md#debug-commands)).
+- On-screen help: two pages (gestures, side keys).
+- **Auto power-off on battery only:** with USB power (a computer or a
+  charger) the meter never switches itself off; after the unplug the
+  **Shutdown** time counts afresh
+  ([manual](docs/manual/README.md#power-battery-and-sleep)).
 
 - **Bargraph / history row:** a double tap on the row switches between the
-  bargraph and the history boxes (before: Settings > More > DMM row only;
+  bargraph and the history boxes (before: Settings > Display > DMM row only;
   [manual](docs/manual/README.md#the-bargraph-and-the-history-row)).
 
   ![A double tap on the row: bargraph or history](docs/changelog/v0.4.0/dmm-row-toggle.png)
@@ -40,9 +130,150 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Fixed
 
+- Capacitance AUTO: a small capacitor measured after a large one (600 µF and
+  up) gets its own range again instead of a wrong µF value; open leads or a
+  short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
+  screen.
+- Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
+- Capacitance ranges on the meter: MF chooses 60 nF .. 60 000 µF or AUTO; the
+  AUTO key steps and resets them as in V / A / Ω. The 6 nF and 60 nF ranges
+  are one (below 6 nF with 3 decimals).
+- Capacitance: 1 .. 47 mF show their first value in about 1.5 to 5 s (was
+  9 to 20 s; 47 mF did not settle); AUTO starts on the last value's range;
+  the value stays grey until the slope settles (electrolytics); another
+  capacitor on 6 / 60 mF starts the range choice again.
+- Capacitance on 600 µF and up: a value every 0.25 s (a line fit per
+  half ramp), grey until the ramp has run both ways; grey **Discharging...
+  0.85 V** while the meter discharges (**>1.2 V** above that); a charged
+  capacitor (up to 5 V) discharges about twice as fast.
+- Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
+  ten times it.
+- Power meter: **Vb 0.000** no longer in the warning colour with open leads.
+- Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
+- Generator: the square wave's preview follows the duty cycle; it always showed 50 %
+  ([#81](https://github.com/opendm40/opendm40/issues/81)).
+- Scope: STOP at fast timebases (100 us/div and faster) sometimes kept no record (`WAV:PRE?` 0 points,
+  an empty `WAV:DATA?`, Save CSV wrote nothing); it now keeps the last complete record.
+- Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
+  taken at, not the one shown.
+- Scope Save CSV after a change while stopped: V/div, coupling and the trigger in the header are the
+  record's too.
+- Scope STOP keeps the triggered trace on screen (it jumped to an untriggered part of the capture). With
+  CH2 (DMM) on, STOP no longer leaves a short untriggered piece without CH2 and without measurements
+  (STOP ends on one more complete capture, below).
+- Scope CH2 (DMM): drawn up to the right edge of a stopped, Single or DIGitize frame (at 2 ms/div it was
+  missing from the whole frame); no wrong segment across a gap in the multimeter's stream.
+- Scope stopped zoom stops at **Max zoom** (16 samples across the screen): faster timebases had a wrong
+  time scale and cursor readouts. SCPI `TIM:SCAL` while stopped is clamped the same way.
+- Scope: a setting changed over SCPI while a popup is open shows at once in the top bar, the right
+  panel and the trace beside the popup, not only after it closes ([#82](https://github.com/opendm40/opendm40/issues/82)).
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
   and stays when full; a USB symbol (also on the scope page) while a computer has the meter connected
   ([manual](docs/manual/README.md#the-status-bar)).
+- Scope page and combined view: the top bar shows the **Bluetooth symbol** while a phone or a computer is
+  connected over Bluetooth, beside the USB symbol when both are connected ([#167](https://github.com/opendm40/opendm40/issues/167)).
+- **Bluetooth SCPI:** a host that disconnects during a query no longer leaves
+  that reply for the next host to connect.
+- **Bluetooth SCPI:** pipelined block queries (`WAV:DATA?`, `LOG:DATA?`) no
+  longer lose the last reply; input lost to a full receive buffer is reported
+  (-363) instead of running cut commands.
+- **USB SCPI:** long replies such as `MMEM:DATA?` go out at full USB speed
+  while the scope page draws (with CH2 on they were several times slower).
+- **SCPI:** `SCOPe:MEASure:...?` without a value answers `+9.91E37` (no
+  value), not `+0.000000E-03`.
+- **SCPI:** a number outside a setting's range queues `-222 Data out of range`, as documented
+  (`SYST:BEEP:VOL`, `SYST:ALER:ENAB`, `LOG:OSR`, `LOG:DUR`, `LOG:SRAT`, `LOG:CSV:INT` / `DUR`);
+  `LOG:SOUR` takes `ad1` / `ad2` in any case; `MMEM:DATA?` without a name queues `-109`.
+- SCPI: `ACQ:SRAT?` of a stopped scope after a zoom answers the stored record's sample rate, as
+  the record preamble (`WAV:POIN MAX`) and Save CSV use, not the shown timebase's ([#158](https://github.com/opendm40/opendm40/issues/158)).
+- SCPI: `INRush:THReshold` and `POWer:PHASe` with a number out of range queue
+  `-222 Data out of range`, not `-224 Illegal parameter value`.
+- `DBG:PING?`: the keepalive field reads `4294967295` (no limit) after boot
+  instead of a wrapped number ([#97](https://github.com/opendm40/opendm40/issues/97)).
+- **Limits:** a huge limit set over SCPI (`CALC:LIM:UPP 1E20`) no longer restarts
+  the meter when the Hold/Limits page opens.
+- Multimeter: a value that rounds to zero shows no minus sign (open DC V
+  leads showed "-0.0000").
+- **SCPI:** `TRIGger:LEVel` keeps the level as given; it was up to one screen
+  row lower (0.1 V became 0.113 V at 500 mV/div).
+- SCPI: `WAVeform:DATA?` in BYTE format is no longer 1.5 codes low on
+  average (the preamble's `yorig` is the middle of a byte's four codes).
+- Scope: the V/div label is right with x2, x5 and the other non-decade
+  probes (x5 at 2.5 V/div showed 2V).
+- Recording: a red dot blinking every second and **REC** in the status bar;
+  on the scope page and the combined view a red dot and **DMM** in the top
+  bar, in place of MCX | DMM
+  ([#101](https://github.com/opendm40/opendm40/issues/101)).
+- **Gallery:** the recording in progress reads **Recording** instead of **No data**, and its
+  **Delete** says **Stop the recording** instead of **Disk busy, try again**.
+- A function change over USB / Bluetooth closes the power meter's wiring
+  and "Reset energy?" dialogs and the fuse check dialog (they stayed over a
+  page no longer updated).
+- Hold & Limits: MENU and Back return to the range page (Power Settings)
+  it was opened from, not to the multimeter page.
+- Temperature page: the cold junction line follows the readings and the
+  offset while the page is open.
+- Inrush: the Trigger - / + no longer step the wrong way from a threshold
+  set over SCPI below 0.2 A or above 10 A.
+- Bargraph scale: the unit spelled as the reading beside it (600 KΩ, not
+  600 kOhm).
+- **Scope, stopped:** a zoom, or a Single capture that ended, right after a
+  screenshot kept the old trace on the screen.
+- Scope: Duty, Wid, Vtop, Vbas and Vamp are right on triangle and ramp
+  signals (they jumped, e.g. 65 % duty on a triangle).
+- Scope roll mode: the measurements show -- instead of the values from
+  before roll started; `WAV:DATA?` follows the rolling trace.
+- Scope: text stays readable in every channel colour (dark on a yellow, gold
+  or pink math panel; white on a blue or purple CH1; a lighter blue, purple or
+  brown for the trigger level, measurements and FFT labels).
+- DMM trend chart: a range change to another unit that reads OL (6 V to
+  600 mV on 3.3 V) starts the chart over in the new unit.
+- Power meter: no multimeter MAX / AVG / REL / MIN column while the page
+  shows "I ranging...".
+- **Key/alert volume 0 %** also silences the continuity and diode beeper
+  ([manual](docs/manual/README.md#alerts-tab)).
+- Combined view: the meter strip shows **POWER**, the range and dashes while
+  the power meter ranges, not an empty strip.
+- **Inrush:** the automatic power-off no longer switches the meter off while
+  the page is armed and waits for a load to start
+  ([#144](https://github.com/opendm40/opendm40/issues/144)).
+- Trend chart keeps its points on REL on / off, as the stock.
+- Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
+  after an end (10 + gave 20 %, and 55 % was out of reach)
+  ([#91](https://github.com/opendm40/opendm40/issues/91)).
+- Multimeter: a current in the A jack (the leads in A / COM while measuring
+  something else) now shows A-JACK in AC mV and Hz too (a DC current from
+  ~4 mA, in Hz ~6 mA negative; there the badge only), and in Ω AUTO
+  A-JACK instead of LIVE?.
+  Manual Ω ranges below 6 MΩ may still show LIVE? for it.
+- Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
+  generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
+  and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
+  hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
+  (~0.45 s).
+- Scope, STOP: the stopped record was the part of the capture in flight
+  up to the STOP (a few ms after the trigger at 5 ms/div), or the whole
+  record with a step where two captures met. STOP now ends on one more
+  complete capture (as **Single** / `DIGitize`: the trigger point at the
+  trigger position), of the full record up to the screen's time + 0.5 s
+  (44 032 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  at most the screen's time + 1 s after the STOP, with what is in when
+  nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
+  2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for
+  `TRIG:STAT?` = `STOP` before `WAV:DATA?`
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope, stopped: a pan, zoom or V/div change made while the screen was held
+  (right after a screenshot over USB, a message box on the scope page) is
+  drawn when the hold ends; before, the screen kept the drag preview with
+  the rest of the record blank. A drag back from either end of the record
+  moves at once.
+- Multimeter: a current flowing from COM into the A jack now shows A-JACK
+  in DC V, DC mV and Ω too (from ~4 mA; DC V ~9 mA; no A-PROT for it, nor for
+  an AC current in DC V).
+  DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
+  it now and then.
+- **Device page:** the bootloader and hardware versions were swapped. They now
+  match the stock page, for example Bootloader V4.0 and Hardware V1.1.
 
 ## v0.3.0 (2026-10-27)
 

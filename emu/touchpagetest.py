@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """opendm40 touch test page (firmware/src/app_touchtest.rs, ui_touchtest.rs):
-it opens from Settings 3/3, draws dots for touches of the touch controller
+it opens from Settings > Other, draws dots for touches of the touch controller
 model (emu/peripherals/CST_Touch.cs), lights the touch-key boxes, ignores
 the touch keys, clears, and exits with a 2 s hold and with the power key.
 
@@ -8,14 +8,14 @@ the touch keys, clears, and exits with a 2 s hold and with the power key.
   emu/touchpagetest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40 [--port P] [--keep DIR]
 
 Everything is scripted in emulator time (run.py --script): MENU, the
-Settings tile, More, More, the "Touch test" row; then taps at targets, one
+Settings tile, the Scope and Other tabs, the "Touch test" row; then taps at targets, one
 of them off by +11,+18 px (the scale error the page is for), a drag, MENU
 held, Clear, a 2 s hold (exit), the row again, the power key (exit).
 Screenshots at fixed times are checked for the dots (raw orange 5 x 5,
 debounced green 3 x 3), the touch-down cross (red), the MENU box lit and
 the dots gone after Clear. Over USB/IP, DBG:VIEW? is polled throughout: the
 page must be shown from the row tap until the hold exit, the MENU key must
-not leave it, and both exits must land on Settings 3/3.
+not leave it, and both exits must land on Settings > Other.
 
 Case `cal` (the Calibrate walk, app_touchtest.rs / touchcal.rs): the page
 opened as above, Calibrate, one tap far from the first target (refused),
@@ -53,6 +53,7 @@ ap.add_argument('--cases', default='page,cal')
 A = ap.parse_args()
 sys.path.insert(0, HERE)
 import run  # noqa: E402
+import bootinfo  # noqa: E402
 if A.port is None:
     A.port = run.free_port(65200, 65300)
 print('USB/IP port %d' % A.port, flush=True)
@@ -100,7 +101,8 @@ def count(im, x0, y0, x1, y1, c):
 
 # Settings list rows (ui.rs SET_Y0 44, pitch 30, height 27): row centre.
 def row_y(i):
-    return 44 + 30 * i + 13
+    """Centre of Settings tab / row i (ui.rs ST_Y0 44, pitch 45, 42 tall)."""
+    return 44 + 45 * i + 21
 
 
 def case_page():
@@ -108,9 +110,9 @@ def case_page():
     EV = [
         (6.0, 'key menu'),                                       # DMM -> main menu
         (7.0, 'tap 339 219'),                                    # Settings tile
-        (8.0, 'tap 240 %d' % row_y(8)),                          # More -> 2/3
-        (9.0, 'tap 240 %d' % row_y(8)),                          # More -> 3/3
-        (T_OPEN, 'tap 240 %d' % row_y(5)),                       # Touch test
+        (8.0, 'tap 60 %d' % row_y(4)),                           # the Scope tab
+        (9.0, 'tap 60 %d' % row_y(5)),                           # the Other tab
+        (T_OPEN, 'tap 300 %d' % row_y(3)),                       # Touch test
         (12.0, 'tap 240 160'),                                   # the centre target, exact
         (12.4, 'tap 470 317'),                                   # (459,299) at +11,+18
         (12.8, 'tap 25 24'),                                     # (20,20) at +5,+4
@@ -127,7 +129,7 @@ def case_page():
         (18.0, 'shot %s' % os.path.join(SHOTS, 'd-holding.png')),
         (20.5, 'monitor sysbus.i2c3.touch Release'),
         (21.0, 'shot %s' % os.path.join(SHOTS, 'e-after-hold.png')),
-        (22.0, 'tap 240 %d' % row_y(5)),                         # Touch test again
+        (22.0, 'tap 300 %d' % row_y(3)),                         # Touch test again
         (23.0, 'shot %s' % os.path.join(SHOTS, 'f-reopened.png')),
         (24.0, 'key power'),                                     # exit
         (25.0, 'shot %s' % os.path.join(SHOTS, 'g-after-power.png')),
@@ -181,18 +183,18 @@ def case_page():
         emu.wait()
 
     names = [v.split(',')[0] for _, v in views]
-    # The page: opened from Settings 3/3, closed to Settings 3/3 (hold), opened
-    # again, closed to Settings 3/3 (power key); MENU held in between never left it.
+    # The page: opened from Settings > Other, closed to it (hold), opened
+    # again, closed to it (power key); MENU held in between never left it.
     seq = []
     for v in (v for _, v in views):
-        k = 'T' if v.startswith('Touch test') else ('S3' if v.startswith('Settings,3') else v.split(',')[0])
+        k = 'T' if v.startswith('Touch test') else ('S3' if v.startswith('Settings,6') else v.split(',')[0])
         if not seq or seq[-1] != k:
             seq.append(k)
     print('  views: %s' % ' -> '.join(seq), flush=True)
     i = seq.index('T') if 'T' in seq else -1
-    check(i > 0 and seq[i - 1] == 'S3', 'the page opens from Settings 3/3 (the "Touch test" row)')
+    check(i > 0 and seq[i - 1] == 'S3', 'the page opens from Settings > Other (the "Touch test" row)')
     check(seq[i:i + 4] == ['T', 'S3', 'T', 'S3'] if i >= 0 else False,
-          'hold 2 s -> Settings 3/3, the row again -> the page, power key -> Settings 3/3 (%s)' % seq[i:])
+          'hold 2 s -> Settings > Other, the row again -> the page, power key -> Settings > Other (%s)' % seq[i:])
     check('Main menu' not in seq[i:] if i >= 0 else False, 'MENU on the page does not leave it')
 
 
@@ -308,9 +310,9 @@ def case_cal():
     ev = [
         (6.0, 'key menu'),
         (7.0, 'tap 339 219'),
-        (8.0, 'tap 240 %d' % row_y(8)),
-        (9.0, 'tap 240 %d' % row_y(8)),
-        (10.0, 'tap 240 %d' % row_y(5)),                      # Touch test
+        (8.0, 'tap 60 %d' % row_y(4)),                       # the Scope tab
+        (9.0, 'tap 60 %d' % row_y(5)),                        # the Other tab
+        (10.0, 'tap 300 %d' % row_y(3)),                      # Touch test
         (11.0, 'tap %d %d' % calib),                          # Calibrate
         (12.0, 'shot %s' % os.path.join(SHOTS, 'cal-a-walk.png')),
         (12.5, 'tap 300 100'),                                # far from (20,20): refused
@@ -374,7 +376,7 @@ def case_cal():
         # The settings file: saved within ~7 s of the change (2 s + 5 s).
         ln.wait_up(int((t_save + 10.0) * 1000))
         b = ln.q('DBG:BOOT?')
-        print('  boot 1: %s' % b[b.find('SETTINGS'):], flush=True)
+        print('  boot 1: %s' % ','.join(bootinfo.settings(b)), flush=True)
         ln.w('DBG:RESET')
         ln.close()
         time.sleep(3)
@@ -386,7 +388,7 @@ def case_cal():
             except Exception:
                 ln.close()
                 time.sleep(2)
-        s = b[b.find('SETTINGS'):].split(',')
+        s = bootinfo.settings(b)
         print('  after DBG:RESET: %s' % ','.join(s), flush=True)
         check(len(s) > 1 and s[1] == 'BKP', 'after DBG:RESET: the settings from the backup SRAM')
         cal_near(cal_of(ln.q('DBG:TOUCH:CAL?')), want, 'after DBG:RESET')
@@ -422,7 +424,7 @@ def case_cal():
     try:
         ln = Link()
         b = ln.q('DBG:BOOT?')
-        s = b[b.find('SETTINGS'):].split(',')
+        s = bootinfo.settings(b)
         print('  boot 2: %s' % ','.join(s), flush=True)
         check(len(s) > 1 and s[1] == 'FILE', 'after the power-off: the settings from the file')
         cal_near(cal_of(ln.q('DBG:TOUCH:CAL?')), want, 'after the power-off')

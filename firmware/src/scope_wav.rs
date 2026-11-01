@@ -12,7 +12,7 @@
 //!     yorig.
 //!
 //! The record lives in the scope buffer (scope::BUF, up to scope::CAP
-//! samples = 53 KB as words) and is only consistent while the scope is
+//! samples = 88 KB as words) and is only consistent while the scope is
 //! stopped: STOP, a Single sweep after its trigger, or DIGitize. Reading
 //! it while running is refused ("Settings conflict", an empty block). A
 //! reply longer than the transport's in-place buffer is streamed over
@@ -36,7 +36,7 @@ use crate::scpi::{Cmd, Scpi};
 /// so it is copied at once, never streamed); `n` points. All zero at reset
 /// (SRAM .sram_bss, not the TCM: the stack's headroom).
 struct Src {
-    rec: Option<&'static [u16]>,
+    rec: crate::pack10::Codes,
     stride: usize,
     n: usize,
     word: bool,
@@ -44,7 +44,7 @@ struct Src {
 }
 
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut SRC: Src = Src { rec: None, stride: 0, n: 0, word: false, screen: false };
+static mut SRC: Src = Src { rec: crate::pack10::Codes::EMPTY, stride: 0, n: 0, word: false, screen: false };
 
 /// The last frame's 400 screen columns, mean 10-bit codes (App::scope_poll).
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
@@ -78,7 +78,8 @@ fn fill(off: usize, out: &mut [u8]) {
         let c = if s.screen {
             screen()[k]
         } else {
-            s.rec.and_then(|r| r.get(k * s.stride.max(1))).copied().unwrap_or(0)
+            let i = k * s.stride.max(1);
+            if i < s.rec.len() { s.rec.at(i) } else { 0 }
         } & 0x3FF;
         *o = if !s.word {
             (c >> 2) as u8
@@ -102,8 +103,8 @@ fn decimate(len: usize, pts: u32) -> (usize, usize) {
 }
 
 /// The record readable now: stopped with a stored record.
-fn record(app: &App) -> &'static [u16] {
-    if app.scope.s.run { &[] } else { app.scope.record() }
+fn record(app: &App) -> crate::pack10::Codes {
+    if app.scope.s.run { crate::pack10::Codes::EMPTY } else { app.scope.record() }
 }
 
 /// Points the next WAV:DATA? holds.
@@ -141,7 +142,10 @@ pub fn query(app: &App, cmd: Cmd, out: &mut Scpi) {
                 _ => b"WAIT",
             }
         }),
-        Cmd::AcqSrate => out.put_f32(sc.sample_rate() as f32),
+        // Stopped with a stored record: its rate (what WAV:PRE? x increment,
+        // the screen and Save CSV use), not the timebase shown after a zoom
+        // (#158).
+        Cmd::AcqSrate => out.put_f32(if record(app).is_empty() { sc.sample_rate() } else { sc.record_info().0 } as f32),
         _ => out.put_f32(-(sc.s.pos as f32) * 4.0 * sc.vdiv() / 141.0),
     }
 }
@@ -164,8 +168,11 @@ pub fn preamble(app: &App, out: &mut Scpi) {
     };
     // Volts per code over 1000 codes (f32: a one-code difference near
     // yorig would lose ~5 digits of the slope).
-    let y0 = sc.volts(0.0);
-    let k = (sc.volts(1000.0) - y0) / 1000.0 * if word { 1.0 } else { 4.0 };
+    // BYTE: a byte stands for codes 4b .. 4b + 3; yorig is the middle of
+    // them (code 1.5), not code 0 (1.5 codes low on average, #130).
+    let c0 = sc.volts(0.0);
+    let k1 = (sc.volts(1000.0) - c0) / 1000.0;
+    let (k, y0) = if word { (k1, c0) } else { (4.0 * k1, c0 + 1.5 * k1) };
     out.put_bytes(if word { b"1,".as_slice() } else { b"0,".as_slice() });
     out.put_u32(ty);
     out.put_bytes(b",");
@@ -213,7 +220,7 @@ pub fn data(app: &mut App, port: &mut dyn crate::bt::ScpiPort, scpi: &mut Scpi) 
         }
         let (stride, n) = decimate(rec.len(), app.wav_points);
         s.screen = false;
-        s.rec = Some(rec);
+        s.rec = rec;
         s.stride = stride;
         s.n = n;
     }

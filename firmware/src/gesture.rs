@@ -9,11 +9,6 @@
 //!   vertical if |dy| >= 1.5 |dx|; a diagonal start waits until LOCK_MAX and
 //!   then takes the larger component. The axis is kept until release; no
 //!   `Drag` is sent before it is known. Consumers move only along it.
-//! * Hold-to-grab (runtime: `set_grab_ms`, Settings "Scope drag", DBG:GRAB;
-//!   0 = direct drag, the default): a drag must first be held within
-//!   GRAB_SLOP for the grab time (`Grab` is sent then, the app beeps); a
-//!   finger that moves earlier never drags (it can still swipe). The long
-//!   press then needs LONG_HOLD_MS.
 //! * A captured touch ends with `Up` (its release is never a tap / swipe),
 //!   so the app can close a drag (gesture log, DBG:GEST?).
 //!   A swipe needs >= SWIPE_MIN px within SWIPE_MAX_MS and a dominant axis
@@ -55,7 +50,7 @@
 //! The controller only reports points; the stock firmware has no one-finger
 //! gestures.
 
-use core::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::touch::{Event, Point, MAX_POINTS};
 
@@ -82,24 +77,6 @@ const TAP_SLOP: i32 = LOCK_MAX;
 /// it acts on (else those would also tap): it does (history clear, statistics
 /// reset, strip -> DMM).
 const TAP_AFTER_LONG: bool = true;
-/// Press-and-hold-then-drag (owner A/B experiment, docs/combined-view-design.md
-/// §6.2): hold time before a drag is accepted, ms; 0 = direct drag (default).
-static GRAB_MS: AtomicU16 = AtomicU16::new(0);
-/// Grab time the Settings toggle switches to.
-pub const GRAB_DEFAULT_MS: u16 = 300;
-/// Hold-to-grab: the finger must stay within this many px until the grab.
-const GRAB_SLOP: i32 = 8;
-/// Long press while hold-to-grab is on (after any grab), ms.
-const LONG_HOLD_MS: u64 = 1200;
-
-/// Hold-to-grab time in ms, 0 = direct drag.
-pub fn grab_ms() -> u16 {
-    GRAB_MS.load(Ordering::Relaxed)
-}
-
-pub fn set_grab_ms(ms: u16) {
-    GRAB_MS.store(ms.min(5000), Ordering::Relaxed);
-}
 /// The next `capture` makes the touch a raw-move touch (`raw_next`).
 static RAW_NEXT: AtomicBool = AtomicBool::new(false);
 
@@ -143,9 +120,6 @@ pub enum Gesture {
     /// Finger moved while down (start, current, locked axis). Move only
     /// along the axis.
     Drag(Point, Point, Axis),
-    /// Hold-to-grab only: the finger was held still for the grab time, a drag
-    /// may follow.
-    Grab(Point),
     /// Release of a captured touch (the app owned it: no tap / swipe).
     Up(Point),
     SwipeLeft,
@@ -207,12 +181,6 @@ pub struct Tracker {
     long_sent: bool,
     /// Drag axis, decided once past SLOP.
     axis: Option<Axis>,
-    /// Hold-to-grab: held still long enough, drags are allowed.
-    grabbed: bool,
-    /// Captured with `capture_direct`: no hold-to-grab for this touch.
-    direct: bool,
-    /// Hold-to-grab: moved past GRAB_SLOP before the grab (never drags).
-    early: bool,
     /// The app owns this touch (no swipe / tap on release).
     captured: bool,
     /// Set once the touch had two or more fingers.
@@ -246,9 +214,6 @@ impl Tracker {
             far: 0,
             long_sent: false,
             axis: None,
-            grabbed: false,
-            direct: false,
-            early: false,
             captured: false,
             multi: None,
             pair: None,
@@ -271,13 +236,11 @@ impl Tracker {
         }
     }
 
-    /// As `capture`, and this touch drags at once even with hold-to-grab on
-    /// (a slider, not the scope: the grab setting is the scope's).
+    /// As `capture`, never a raw-move touch (a slider: it wants `Drag`).
     pub fn capture_direct(&mut self) {
         RAW_NEXT.store(false, Ordering::Relaxed);
         if self.active {
             self.captured = true;
-            self.direct = true;
         }
     }
 
@@ -411,9 +374,6 @@ impl Tracker {
                 self.far = 0;
                 self.long_sent = false;
                 self.axis = None;
-                self.grabbed = false;
-                self.direct = false;
-                self.early = false;
                 self.captured = false;
                 self.raw = false;
                 self.pair = None;
@@ -426,21 +386,11 @@ impl Tracker {
                 if dist(p0, p) > SLOP {
                     self.moved = true;
                 }
-                let hold = if self.direct { 0 } else { grab_ms() };
-                if hold != 0 && !self.grabbed && dist(p0, p) > GRAB_SLOP {
-                    self.early = true;
-                }
-                // The controller reports jitter as moves, so tick() may not run
-                // while the finger rests: check the hold here too.
-                if let Some(g) = self.grab(now) {
-                    return Some(g);
-                }
                 // Raw-move touch: every report that moved, from the first.
                 if self.raw {
                     return if p != prev { Some(Gesture::Move(prev, p)) } else { None };
                 }
-                // Hold-to-grab: moving before the grab never drags.
-                if !self.moved || (hold != 0 && !self.grabbed) {
+                if !self.moved {
                     return None;
                 }
                 if self.axis.is_none() {
@@ -532,25 +482,9 @@ impl Tracker {
             return Some(g);
         }
         let (p0, t0) = self.down?;
-        if let Some(g) = self.grab(now) {
-            return Some(g);
-        }
-        let long = if grab_ms() != 0 { LONG_HOLD_MS } else { LONG_MS };
-        if !self.moved && !self.long_sent && now.saturating_sub(t0) >= long {
+        if !self.moved && !self.long_sent && now.saturating_sub(t0) >= LONG_MS {
             self.long_sent = true;
             return Some(Gesture::LongPress(p0));
-        }
-        None
-    }
-
-    /// Hold-to-grab: `Grab` once the finger stayed within GRAB_SLOP for the
-    /// grab time.
-    fn grab(&mut self, now: u64) -> Option<Gesture> {
-        let (p0, t0) = self.down?;
-        let hold = if self.direct { 0 } else { grab_ms() as u64 };
-        if hold != 0 && !self.early && !self.grabbed && now.saturating_sub(t0) >= hold {
-            self.grabbed = true;
-            return Some(Gesture::Grab(p0));
         }
         None
     }
@@ -622,7 +556,7 @@ impl Tracker {
 
 /// DBG:TOUCH? gesture line: code, argument, point. Codes: D down, T tap,
 /// L long press, M first drag of a touch (argument 0 H / 1 V; x,y = the
-/// current point), G grab, U up (captured release), < > ^ v swipes left /
+/// current point), U up (captured release), < > ^ v swipes left /
 /// right / up / down, C cancel, W n-finger swipe down (argument n), K / k side
 /// key down / up (argument code), c the app captured the touch (logged by
 /// `capture`, time 0), N release that is nothing (see `release`).
@@ -634,7 +568,6 @@ fn log_gesture(g: Option<Gesture>, now: u64) {
         Some(Gesture::Tap(p)) => (b'T', 0, p),
         Some(Gesture::LongPress(p)) => (b'L', 0, p),
         Some(Gesture::Drag(_, p, ax)) => (b'M', (ax == Axis::V) as u8, p),
-        Some(Gesture::Grab(p)) => (b'G', 0, p),
         Some(Gesture::Up(p)) => (b'U', 0, p),
         Some(Gesture::SwipeLeft) => (b'<', 0, z),
         Some(Gesture::SwipeRight) => (b'>', 0, z),

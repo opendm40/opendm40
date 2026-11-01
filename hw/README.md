@@ -211,6 +211,30 @@ updates.
   ([`lcd.rs`](../firmware/src/lcd.rs)). The ID register 0xD3 reads `00 94 88` on this unit.
 - Backlight: PA6 AF9 = TIM13_CH1, 20 kHz PWM ([`board.rs`](../firmware/src/board.rs)).
 - Panel: 3.5" IPS 480 x 320 (review). The panel's FPC pinout is unknown.
+- Tearing-effect output (TE): whether it reaches an MCU pin is unknown;
+  *inferred* not wired. The stock init sequence has no TEON (0x35) and the
+  stock drawing has no tearing control (`stock/re/analysis/lcd_buzzer_v2_6.h`,
+  `gui_render_v2_6.h`); neither firmware configures a pin for it. The only
+  candidates are the pins no code is known to use: PA3, PB13, PC1, PC15
+  ([Pin table](#pin-table)). `DBG:TE?` ([`lcd.rs`](../firmware/src/lcd.rs)
+  `te_probe`) counts the level changes of those four pins for 100 ms each
+  with TE off, on in mode 0 (V-blank) and on in mode 1 (V- and H-blank),
+  then sends TEOFF; it only reads the pins. A pin that changes only while
+  TE is on (~60 Hz in mode 0, much faster in mode 1) is TE; floating pins
+  can change in all three phases. Not run on a device yet.
+- If TE is wired: with opendm40's MADCTL (MV = 1) the panel scans along
+  our x axis (*inferred*; the scan direction is not checked), so writes
+  synced to TE would have to go in vertical bands (columns of the
+  landscape screen), not in the full-width strips of
+  [`lcd.rs`](../firmware/src/lcd.rs) "strip rendering". Those strips
+  write every pixel once in its final colour, so without TE a refresh
+  during a page change shows the new page above a seam and the
+  old page below it.
+- Loader versions: the bootloader version is at `0x080A4010`, V4.0 on this
+  unit. A V3.0 loader image from a Hardware V1.1 unit reads the LCD ID and
+  supports ILI9341, ST7796, ILI9488, ST7789, NT35310, NT35510 and SSD1963 on
+  the same FSMC addresses. The V4.0 loader, the stock V2.6 application and
+  opendm40 initialise only ILI9488.
 
 ## Touch panel and touch keys
 
@@ -506,7 +530,12 @@ section 4 (sentinels) and 3 (power meter).
   CMPLO. *Inferred* reading: CMPHO = node above VRH, CMPLO = node above VRL,
   ACPO (bit 6) a latch set above VRH and reset below VRL; 0x70 = above the
   window, 0x50 = inside coming from above, 0x10 = inside coming from below,
-  0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70).
+  0x00 = below. It fits DC V's V-tap window (+1 V: 0x10, +5 V: 0x70). It
+  does not fit PB1 (2026-10-27): with PB1 at ~2 mV (AD1, below) the PB1
+  comparator reads 0x00 in the ±20.8 / 41.7 / 62.5 mV windows (R21 0xdd /
+  0xcc / 0xbb), and 0x10 with nothing connected whenever the low threshold
+  is AGNDN4..6 (0xaa, 0x99, 0x88, 0xba); AGNDP4..6 over AGNDN3 (0xab, 0x9b,
+  0x8b) read 0x00. What the bits mean is *unknown*.
 - **Both bits in one read (0x70)** also mark an overdriven comparator: on
   PB1 in the ohm rows with 5 V or 10 V DC or the 0 / 9.5 V square on V-COM
   (1 V and 3 V: no hit), on DC V's V tap with a steady 5 V, and on SENSE in
@@ -525,11 +554,39 @@ section 4 (sentinels) and 3 (power meter).
   - frequency: the AD1 peak on PB1 - PB3 (the AC rows' settings) stands at
     ~+41 100 codes (~54 mV) with 0..2 V or nothing on V-COM, ~3 100 at 5 V,
     -850 at 10 V (d8e249d); the row leaves the input divider open (R2C / R2D
-    0);
+    0). That row also keeps R33 SAD1I = 11 (AD1 on the temperature sensor
+    inputs), so these codes are *inferred* not to be PB1: with SAD1I = 00
+    PB1 - PB3 reads 2.5 mV at rest and -59 / -89 mV at 3 / 3.7 V (table
+    below);
   - DC V 60 / 600 / 1000 V: the comparator on PB1 tripped for as long as
     10 V was on V-COM, never on 6 V at 1 V (f80524f). Those rows drive the
     power bus from OP3 (R2F SMODE 0100, PS6 + PS8 closed); the 6 V row leaves
-    it off.
+    it off. With that comparator row back (`DBG:SENT:VAR 4`) CTSTA reads 0x50
+    at every R21 from ±20.8 to ±417 mV, also with V-COM open, while AD1 reads
+    PB1 at 2.1 mV up to 3.7 V (2026-10-27): the trip is not PB1 pickup.
+- **PB1 with AD1** (2026-10-27, A jack open, manual ranges; AD1 on PB1 -
+  PB3, then PB1 - AGND, IG 0.9, REFO / AGND, SAD1I = 00, in the row the
+  function runs; branch `exp/pb1-meas`, `DBG:SENT:PB1?`). mV, PB1 - PB3 /
+  PB1 - AGND, by the V-COM DC level (>1389 = AD1 at its limit):
+
+  | row | V-COM off | 1 V | 3 V | 3.7 V | 5 V | 10 V |
+  |---|---|---|---|---|---|---|
+  | DC V 6 V | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 | 2.2 / 2.2 |
+  | DC V 60 / 600 / 1000 V | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 | 2.1 / 2.1 |
+  | DC mV 600 / 60 mV | 2.2 / 2.2 | 2.2 / 2.2 | 4.1 / 11.7 | 67 / 240 | 350 / 652 | 1015 / >1389 |
+  | AC V 6 / 60 V | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..3.0 | 1.4..2.7 | 1.4..1.5 |
+  | AC mV 600 mV | 1.5 / 1.7 | 1.4 / 2.6 | -48 / 109 | -74 / 170 | -94 / 235 | -112 / 358 |
+  | ohm 600 Ω | 2.2 / 2.2 | 2.2 / 2.2 | 2.5 / 2.4 | 4.1 / 4.0 | 238 / 353 | 961 / 1289 |
+  | ohm 6 kΩ | 2.2 / 2.2 | 2.2 / 2.2 | 2.3 / 2.8 | -23 / 155 | 191 / 538 | 818 / 1332 |
+  | ohm 60 MΩ | 2.2 / 2.2 | 2.2 / 2.2 | 4.6 / 12.7 | 62 / 264 | 357 / 698 | 1000 / >1389 |
+  | temperature (TC) | 2.2 / 2.2 | 2.2 / 2.2 | -0.7 / 6.2 | 48 / 174 | 319 / 550 | 999 / 1340 |
+  | Hz | 2.5 / 1.8 | 1.8 / 1.8 | -59 / 64 | -89 / 108 | -116 / 164 | -140 / 291 |
+  | capacitance (AUTO) | 2.1 / 2.0 | 2.1 / 2.0 | -42 / 5.0 | 3.8 / 4.5 | -148 / 11 | -242 / 22 |
+
+  The difference of the two is PB3 - AGND: it follows the input too (Hz at
+  10 V: +431 mV, DC mV at 5 V: +302 mV). The ohm, DC mV and temperature
+  rows read 0x70 on the PB1 comparator at 5 and 10 V with R21 0xdd, 0xcc,
+  0xbb and 0x8b alike; DC V 6 V reads 0x00 at 10 V.
 - **OP1's chopper** (OP1CHOP = 10, 2 kHz in the stock AC V row, with AD1 off)
   starts when AD1 is turned on in that row: a 2 kHz square of OP1's offset
   (x10 in 6 V) at OP1O -> PB4 put a constant ~37 mV RMS floor on AC V 6 V
@@ -758,7 +815,7 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 10. The regulators and the power path parts in [charger-tp4056-and-power.jpg](photos/charger-tp4056-and-power.jpg).
 11. The debug headers' VCC pads: ~3.1 V while on, not the MCU supply
     directly; what sits between them is not traced.
-12. LCD panel FPC pinout; touch panel vendor beyond the controller ID.
+12. LCD panel FPC pinout (whether the ILI9488 TE output reaches an MCU pin: [LCD](#lcd)); touch panel vendor beyond the controller ID.
 13. Exact HY3131 wiring (ohm reference resistors, divider taps, shunt nodes):
     inferred from the stock scaling only ([`emu/hy3131/RESEARCH.md`](../emu/hy3131/RESEARCH.md) 8.5).
 14. [MAX6190](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX6190-MAX6198.pdf) placement: the BOM post says the reference sits outside the
@@ -776,3 +833,5 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 16. RTC power while off: the feature request (2026-10-13) assumed the RTC is
     always powered from the main battery; nothing in this repo traces VBAT or
     the LSE crystal, and it depends on which rail holds the power (item 2).
+17. What differs on Hardware V1.2: one unit reports it with the same V4.0
+    loader code; this unit reports V1.1 (`0x080A4011`, `0x080A4012`).

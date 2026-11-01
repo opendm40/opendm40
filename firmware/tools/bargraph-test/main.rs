@@ -45,6 +45,13 @@ fn main() {
     check("fs continuity 1000 ohm", mode_full_scale(11, 0, 2, "\u{3a9}") == 1000.0, String::new());
     check("fs diode 3 V", mode_full_scale(12, 0, 4, "V") == 3.0, String::new());
     check("fs DC V by mode", mode_full_scale(1, 0, 4, "V") == 6.0, String::new());
+    // Capacitance: 6000 counts (dmm.rs cap_val): 100.0 nF on 600 nF,
+    // 6.000 nF, 60.00 mF.
+    check("fs cap 600 nF", (mode_full_scale(13, 2, 1, "nF") - 600.0).abs() < 1e-3, String::new());
+    check("fs cap 6 nF", (mode_full_scale(13, 0, 3, "nF") - 6.0).abs() < 1e-5, String::new());
+    check("fs cap 6 uF", (mode_full_scale(13, 3, 3, "\u{b5}F") - 6.0).abs() < 1e-5, String::new());
+    check("fs cap 6000 uF", (mode_full_scale(13, 6, 0, "\u{b5}F") - 6000.0).abs() < 1e-2, String::new());
+    check("fs cap 60000 uF", (mode_full_scale(13, 7, 0, "\u{b5}F") - 60000.0).abs() < 1e-1, String::new());
     // The experimental 600 Mohm: its range at any decimals.
     for d in 1..=3 {
         check("fs 600 Mohm", mode_full_scale(10, 7, d, "M\u{3a9}") == 600.0, String::new());
