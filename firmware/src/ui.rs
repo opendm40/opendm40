@@ -76,11 +76,14 @@ fn short_style() -> u8 {
 pub const BAR_H: u16 = 34;
 /// Left edge of the DMM status-bar items (the stock's range label box).
 const BAR_X: i16 = 4;
-/// Extra-digit cell of the main readout (x, width); see DmmView::reading.
-/// 375..402, before the limit badge (403..433, y 72..88) and the unit box
-/// (from 406); 28 px = the widest half-size F78 digit ("4", 56 / 2).
-const XT_X: u16 = 375;
-const XT_W: u16 = 28;
+/// Left edge of the main readout's cells in the extra-digit layout
+/// (`CELLS_X`, 8..398): 390 px do not fit in the stock 40..400, so the
+/// whole number starts further left, over the stock HV lightning's box
+/// (`hv_warning` draws it small in the aux row then).
+const XT_X: i16 = 8;
+/// The aux-row box of the small HV lightning (extra-digit layout): the
+/// stock lightning at half size, its baseline just below the box.
+const HV_SMALL: sf::Rect = rect(8, 37, 20, 29);
 const VALUE_BASE: u16 = 146;
 pub const BTN_Y: u16 = 280;
 
@@ -149,16 +152,18 @@ const CELLS: [[u8; 7]; 6] = [
     [40, 52, 52, 52, 60, 60, 40],
     [40, 20, 60, 60, 60, 60, 60],
 ];
-/// Main-readout cells with the extra digit (formats 0..3 only, never OL):
-/// sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78 digits
-/// are <= 56 px wide): centred, every glyph keeps >= 1 px to its neighbours
-/// = 333 px: 40..372, then the half-size digit cell XT_X..XT_X + XT_W
-/// (375..402, >= 3 px after the last digit).
-const CELLS_X: [[u8; 7]; 4] = [
-    [30, 57, 18, 57, 57, 57, 57],
-    [30, 57, 57, 18, 57, 57, 57],
-    [30, 57, 57, 57, 18, 57, 57],
-    [30, 57, 57, 57, 57, 18, 57],
+/// Main-readout cells of the extra-digit layout (formats 0..3 only, never
+/// OL): the 7 cells of the reading and the extra digit's cell, all full
+/// size. Sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78
+/// digits are <= 56 px wide): centred, every glyph keeps >= 1 px to its
+/// neighbours = 390 px: XT_X..398, >= 5 px before the limit badge (403).
+/// The layout holds whenever the extra digit can appear (`DmmView::ext_slot`),
+/// with or without it, so the digit only fills or empties the last cell.
+const CELLS_X: [[u8; 8]; 4] = [
+    [30, 57, 18, 57, 57, 57, 57, 57],
+    [30, 57, 57, 18, 57, 57, 57, 57],
+    [30, 57, 57, 57, 18, 57, 57, 57],
+    [30, 57, 57, 57, 57, 18, 57, 57],
 ];
 /// AC+DC aux rows: aux1 = AC part, aux2 = DC part (AUX_TAG 0x05 AC / 0x04 DC).
 const AUX_TAGS: [&str; 2] = ["\u{5}", "\u{4}"];
@@ -260,12 +265,17 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
 
 pub struct DmmView {
     /// Main readout as last drawn (text, cell format) for redrawing only the
-    /// digits that changed; [7]: the first grey cell as last drawn
-    /// (`acc::grey_from`; 7 = the extra digit only, 8 = none).
-    last_txt: [u8; 8],
+    /// digits that changed: the 7 cells and the extra digit's (' ' = none);
+    /// [8]: the first grey cell as last drawn (`acc::grey_from`; 7 = the
+    /// extra digit only, 8 = none).
+    last_txt: [u8; 9],
     last_fmt: usize,
-    /// Extra (small) digit as last drawn, 0 = none.
-    last_ext: u8,
+    /// The extra-digit layout (`CELLS_X`) as last drawn.
+    last_slot: bool,
+    /// The extra digit can appear in the current function / range / rate
+    /// (`Dmm::ext_possible`; set by the app before `reading`): the main
+    /// readout keeps the extra-digit layout with or without the digit.
+    pub ext_slot: bool,
     last_unit: &'static str,
     last_mode: u8,
     last_top: Option<(u8, u8, bool, crate::sentinel::Alert, bool)>,
@@ -596,9 +606,10 @@ fn join<'a>(buf: &'a mut [u8; 24], parts: &[&str]) -> &'a str {
 impl DmmView {
     pub const fn new() -> Self {
         DmmView {
-            last_txt: [0, 0, 0, 0, 0, 0, 0, 8],
+            last_txt: [0, 0, 0, 0, 0, 0, 0, 0, 8],
             last_fmt: 255,
-            last_ext: 0,
+            last_slot: false,
+            ext_slot: false,
             last_unit: "",
             last_mode: 255,
             last_top: None,
@@ -803,6 +814,11 @@ impl DmmView {
         self.invalidate();
     }
 
+    /// The main readout has the extra-digit layout as last drawn.
+    pub fn slot(&self) -> bool {
+        self.last_slot
+    }
+
     pub fn invalidate(&mut self) {
         self.last_label = Some("");
         self.last_fmt = 255;
@@ -847,17 +863,28 @@ impl DmmView {
         // grey from cell `grey` on (7: the extra digit only, 8: none).
         let ulps = if self.power { None } else { self.acc.and_then(|a| acc_ulps(r, a)) };
         let grey = if ulps.is_some() { acc::grey_from(s.as_bytes(), ulps).min(7) as u8 } else { 8 };
-        let last_grey = self.last_txt[7];
-        self.last_txt[7] = grey;
+        let last_grey = self.last_txt[8];
+        self.last_txt[8] = grey;
+        // The extra-digit layout: whenever the digit can appear (never for
+        // OL / "--" (format 4), nor in the power meter); a value whose 7
+        // cells need the sign cell for a digit (out of the format's range)
+        // falls back to the stock cells.
+        let slot = (self.ext_slot && !self.power && f < 4 && matches!(s.as_bytes()[0], b' ' | b'-')) || ext.is_some();
+        // The 8 cells of that layout: the reading and the extra digit.
+        let mut tb = [b' '; 8];
+        tb[..7].copy_from_slice(&s.as_bytes()[..7]);
+        if let Some(e) = ext {
+            tb[7] = e;
+        }
+        let n = if slot { 8 } else { 7 };
+        let t = core::str::from_utf8(&tb[..n]).unwrap_or("");
         // Only the changed digits are redrawn (cell layout unchanged).
-        let same_layout = self.last_fmt == f && (self.last_ext != 0) == ext.is_some() && !recolor;
+        let same_layout = self.last_fmt == f && self.last_slot == slot && !recolor;
         let prev_txt = self.last_txt;
-        let prev = if same_layout { core::str::from_utf8(&prev_txt[..7]).unwrap_or("") } else { "" };
-        let n = s.len().min(7);
-        self.last_txt[..n].copy_from_slice(&s.as_bytes()[..n]);
+        let prev = if same_layout { core::str::from_utf8(&prev_txt[..n]).unwrap_or("") } else { "" };
+        self.last_txt[..8].copy_from_slice(&tb);
         self.last_fmt = f;
-        let last_ext = self.last_ext;
-        self.last_ext = ext.unwrap_or(0);
+        let last_slot = core::mem::replace(&mut self.last_slot, slot);
         // Bit 4: AUTO coupling (the mode is the part shown), bits 5..6: the
         // power coupling (1 DC, 2 AC, 3 AC+DC), 7: AC+DC.
         let pk = |c: u8| match c {
@@ -866,20 +893,17 @@ impl DmmView {
             _ => 3,
         };
         let mkey = r.mode | (r.cpl_auto as u8) << 4 | (r.acdc as u8) << 7 | r.power.map_or(0, |p| pk(p.coup) << 5);
-        // Extra digit: the main cells narrow to CELLS_X (40..372) and the
-        // digit is the F78 glyph at half size (~38 px vs ~76) in
-        // XT_X..XT_X + XT_W (375..402), on the F78 baseline (VALUE_BASE),
-        // left of the limit badge / unit box (x >= 403). The full-draw
-        // tail fill of the main cells clears the 373..374 gap, the digit
-        // paints its whole 80 px high cell, and without the digit the main
-        // cells span 40..400 again, so no stale pixels remain. x < 40
-        // stays free for the HV warning glyph.
-        let (w, cells) = match ext {
-            Some(_) => (XT_X - 40, &CELLS_X[f & 3]),
-            None => (360, &CELLS[f]),
-        };
+        // Extra-digit layout: CELLS_X from XT_X (8..398), the digit in the
+        // last cell at full size; its box runs to 400 so a full draw clears
+        // the stock cells' end (40..400). Leaving it, the stock cells start
+        // at 40: the strip 8..40 is cleared (the HV lightning's box, which
+        // the app redraws with the layout change, `hv_warning`).
+        let (x0, w, cells): (i16, i16, &[u8]) = if slot { (XT_X, 400 - XT_X, &CELLS_X[f & 3]) } else { (40, 360, &CELLS[f]) };
         // The power meter's parts layout: PARTS_DY lower (0 elsewhere).
         let md = main_dy();
+        if last_slot && !slot {
+            lcd::fill_rect(XT_X as u16, (68 + md) as u16, (40 - XT_X) as u16, 80, BG);
+        }
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
@@ -888,19 +912,10 @@ impl DmmView {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
             self.ol_word = false;
         }
-        sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
+        sf::cells_diff(sf::F78, rect(x0, 68 + md, w, 80), t, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
         if ok && (!same_layout || !self.ol_word) {
             ol_word(ow, color);
             self.ol_word = true;
-        }
-        if let Some(e) = ext {
-            if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
-                let r = rect(XT_X as i16, 68 + md, XT_W as i16, 80);
-                sf::label_half(sf::F78, r, e as char, VALUE_BASE as i16 + md, if grey < 8 { VALUE_LOW } else { color }, BG);
-            }
-        } else if last_ext != 0 {
-            // The full cells end at 400: the rest of the +1 digit cell.
-            lcd::fill_rect(400, (68 + md) as u16, XT_X + XT_W - 400, 80, BG);
         }
         if self.last_unit != r.main.unit || self.last_mode != mkey {
             self.last_unit = r.main.unit;
@@ -908,8 +923,8 @@ impl DmmView {
             // The aux row layout follows the mode (AC+DC tags, loop caption).
             self.aux_val = [None; 2];
             self.aux_unit = [None; 2];
-            // From x 406: 4 px clear of the +1 digit cell (375..402; it
-            // touched the unit at 404, issue #136).
+            // From x 406: 3 px clear of the main cells (..402; the old
+            // half-size +1 digit touched the unit at 404, issue #136).
             // Power meter fallback "VA": its V and A touch at the stock -1.
             // The UNIT face has no 'h' (power meter energy: Wh / VAh):
             // LETTERS, 1 px apart when that fits the box (W and h touch).
@@ -2009,9 +2024,27 @@ pub fn history(items: &[(f32, u8, &'static str); 5], n: usize, newest: usize) {
     }
 }
 
-/// High-voltage lightning (stock (0,80,40,64), >= 100 V in V modes).
-pub fn hv_warning(on: bool) {
-    sf::label(sf::LIGHTNING, rect(0, 80, 40, 64), if on { " " } else { "" }, 0xC9A0, BG, 8, 0);
+/// High-voltage lightning (>= 100 V in V modes), from state `old` to
+/// `new`: 0 none, 1 the stock one (0,80,40,64), 2 half size in the aux
+/// row (HV_SMALL: the extra-digit layout's cells cover the stock box from
+/// x 8). `slot`: the main readout has that layout now (the stock box's
+/// right part is its sign cell then, not cleared here).
+pub fn hv_warning(old: u8, new: u8, slot: bool) {
+    const C: Color = 0xC9A0;
+    if old == 2 && new != 2 {
+        let r = HV_SMALL;
+        lcd::fill_rect(r.x as u16, r.y as u16, r.w as u16, r.h as u16, BG);
+    }
+    if old == 1 && new != 1 && slot {
+        lcd::fill_rect(0, 80, XT_X as u16, 64, BG);
+    } else if new == 1 || old == 1 {
+        sf::label(sf::LIGHTNING, rect(0, 80, 40, 64), if new == 1 { " " } else { "" }, C, BG, 8, 0);
+    }
+    if new == 2 {
+        let r = HV_SMALL;
+        // Ink rows 37..65: 3 px inside the aux row, 3 px above the digits (69).
+        sf::label_half(sf::LIGHTNING, r, ' ', r.y + r.h, C, BG);
+    }
 }
 
 /// What the status block at the right of every instrument bar shows.
@@ -2236,11 +2269,11 @@ pub fn rate_chip_hit(x: u16, y: u16) -> bool {
 }
 
 /// A tap on the DMM page's main value (the F78 cells 40..400 x 68..148,
-/// the +1 digit cell, 4 px around): resolution / rate step (App). The
-/// power meter's parts layout: down to its P sub-line (..168).
+/// in the extra-digit layout 8..398; 4 px around): resolution / rate step
+/// (App). The power meter's parts layout: down to its P sub-line (..168).
 pub fn value_hit(x: u16, y: u16) -> bool {
     let y1 = if pw_parts() { 168 } else { 151 };
-    (36..402).contains(&x) && (64..y1).contains(&y)
+    (4..402).contains(&x) && (64..y1).contains(&y)
 }
 
 /// Readings per second from a reading period: "9.4/s", "37/s", "--/s"

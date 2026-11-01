@@ -552,7 +552,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
 | `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |
 | `TIMebase[:MAIN]:SCALe[?]` | s/div, 100E-9 .. 50; stopped, no faster than the stored record's zoom limit (16 samples on screen): a faster value is clamped to it (query to read it back) | `+1.000000E-03` | both |
-| `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.01 .. 10 (times the probe factor) | `+1.000000E+00` | both |
+| `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.002 .. 10 (times the probe factor; 0.005 / 0.002 are a digital zoom of 0.01) | `+1.000000E+00` | both |
 | `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
 | `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
 | `TRIGger[:EDGE]:LEVel[?]` | V at the probe tip | `+5.000000E-01` | both |

@@ -156,6 +156,7 @@ struct Cache {
     valid: bool,
     pos: i32,
     hpos: i32,
+    /// V/div step (`Settings::vidx`, `scope::VSTEPS`) of the cached rows.
     range: usize,
     tb: usize,
     /// Persistence layers (model rows per graph column) and the swap time.
@@ -174,7 +175,7 @@ static mut CACHE: Cache = Cache {
     valid: false,
     pos: 0,
     hpos: 200,
-    range: 6,
+    range: 8,
     tb: 13,
     ps_a: [su::EMPTY; 399],
     ps_b: [su::EMPTY; 399],
@@ -206,7 +207,7 @@ pub(super) fn sp_init() {
     c.valid = false;
     c.pos = 0;
     c.hpos = 200;
-    c.range = 6;
+    c.range = 8;
     c.tb = 13;
     c.ps_t = 0;
     su::init();
@@ -439,9 +440,10 @@ fn probe_idx(p: f32) -> usize {
     scope::PROBES.iter().position(|&x| x == p).unwrap_or(3)
 }
 
-/// V/div label index (scope_ui::VDIV_LABELS) of a hardware range and probe.
-fn vdiv_idx(range: usize, probe: f32) -> u8 {
-    (range + probe_idx(probe)).min(21) as u8
+/// V/div label index (scope_ui::VDIV_LABELS) of a V/div step
+/// (`Settings::vidx`) and probe (below 1 mV/div: the 1 mV label).
+fn vdiv_idx(vidx: usize, probe: f32) -> u8 {
+    (vidx + probe_idx(probe)).saturating_sub(2).min(21) as u8
 }
 
 /// Rows of the frame (13 + 280-row model) a pinch / pan preview maps: target
@@ -511,7 +513,7 @@ impl App {
         Model {
             status,
             tb: s.tb as u8,
-            vdiv: vdiv_idx(s.range, s.probe),
+            vdiv: vdiv_idx(s.vidx(), s.probe),
             probe: probe_idx(s.probe) as u8,
             ac: s.ac,
             trig_row: s.trig_row as i16,
@@ -845,7 +847,7 @@ impl App {
         c.valid = true;
         c.pos = s.pos;
         c.hpos = s.hpos;
-        c.range = s.range;
+        c.range = s.vidx();
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
@@ -899,15 +901,15 @@ impl App {
         let (ky, kx) = match self.sp.pinch {
             // PINCH_LIVE: the shown frame stretched with the fingers.
             Some(p) if pinch_mode() == su::PINCH_LIVE => {
-                let (ky, kx) = (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]);
+                let (ky, kx) = (scope::VSTEPS[c.range] / s.vdiv1(), scope::SDIV[c.tb] / scope::SDIV[s.tb]);
                 if p.axis == Axis::V { (ky * p.r, kx) } else { (ky, kx * p.r) }
             }
             // (Indices clamped again: a safety net, pinch_step keeps them in
             // their tables.)
             Some(p) if p.axis == Axis::V && self.scope.wave_on() => (self.scope.vdiv() / self.wave_step_vdiv(p.i), 1.0),
-            Some(p) if p.axis == Axis::V => (scope::VDIV[c.range.min(9)] / scope::VDIV[p.i.min(9)], 1.0),
+            Some(p) if p.axis == Axis::V => (scope::VSTEPS[c.range.min(scope::VIDX_MAX)] / scope::VSTEPS[p.i.min(scope::VIDX_MAX)], 1.0),
             Some(p) => (1.0, scope::SDIV[c.tb.min(29)] / scope::SDIV[p.i.min(29)]),
-            None => (scope::VDIV[c.range] / scope::VDIV[s.range], scope::SDIV[c.tb] / scope::SDIV[s.tb]),
+            None => (scope::VSTEPS[c.range] / s.vdiv1(), scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
         // A stopped pan moves the record under the trigger column.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
@@ -1184,7 +1186,7 @@ impl App {
             // the settings they were drawn with).
             let c = cache();
             let mv = su::VDIV_VAL[m.vdiv.min(21) as usize];
-            let vr = if self.scope.wave_on() { 4.0 * self.scope.vdiv() / 141.0 } else { 4.0 * scope::VDIV[c.range.min(9)] * self.scope.s.probe / 141.0 };
+            let vr = if self.scope.wave_on() { 4.0 * self.scope.vdiv() / 141.0 } else { 4.0 * scope::VSTEPS[c.range.min(scope::VIDX_MAX)] * self.scope.s.probe / 141.0 };
             // (The CH1 columns are already widened: the bars touch.) The
             // drag / pinch preview's time axis; the volts stay.
             let (_, kx, hpos) = self.sp_view();
@@ -2065,7 +2067,7 @@ impl App {
             let i0 = prev.filter(|p| !p.horizontal).map_or(self.wave_step_now(), |p| p.i0);
             su::PinchState { horizontal: false, i0, i: self.wave_pinch_step(i0, r) }
         } else {
-            su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.range, tb_min, tb_max)
+            su::pinch_step_mode(mode, prev, h, s0, s, st.tb, st.vidx(), tb_min, tb_max)
         };
         let p = Pinch { axis, i0: n.i0, i: n.i, r };
         let live_moved = mode == su::PINCH_LIVE && self.sp.pinch.map_or(true, |q| q.r != r);
@@ -2094,7 +2096,7 @@ impl App {
             if p.axis == Axis::H {
                 st.tb = p.i;
             } else {
-                st.range = p.i;
+                st.set_vidx(p.i);
             }
             self.scope_set(st, now);
             if p.axis == Axis::H {
@@ -2115,8 +2117,11 @@ impl App {
             su::fmt_div(&mut b, self.wave_step_vdiv(p.i), if self.scope.wave_scale_now().amps { "A" } else { "V" });
             b.push("/div");
         } else {
-            su::fmt_div(&mut b, scope::VDIV[p.i.min(9)] * self.scope.s.probe, "V");
+            su::fmt_div(&mut b, scope::VSTEPS[p.i.min(scope::VIDX_MAX)] * self.scope.s.probe, "V");
             b.push("/div");
+            if p.i < 2 {
+                b.push(" zoom"); // digital: range 0's codes stretched
+            }
         }
         let t = sf::Ink::new(sf::SC_F16, BUBBLE, b.as_str(), 8, 0);
         let bg = su::C_FILL;
@@ -2142,8 +2147,8 @@ impl App {
         }
         match k {
             // UF-10: B1 = zoom in (smaller V/div), B3 = zoom out.
-            0 => st.range = st.range.saturating_sub(1),
-            2 => st.range = (st.range + 1).min(9),
+            0 => st.set_vidx(st.vidx().saturating_sub(1)),
+            2 => st.set_vidx(st.vidx() + 1),
             1 => {
                 self.sp_popup_open(su::Popup::Ch1(0));
                 return;
@@ -2715,6 +2720,7 @@ impl App {
         let mut st = saved;
         st.tb = 8;
         st.range = AS_CAND[0];
+        st.vzoom = 0;
         st.pos = 0;
         st.mode = scope::TrigMode::Auto;
         st.run = true;

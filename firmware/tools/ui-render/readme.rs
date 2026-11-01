@@ -39,6 +39,7 @@ fn dmm_page(r: &Reading, b: Button, hist: bool) {
     } else {
         dv.bar_update(r);
     }
+    dv.ext_slot = crate::slot_of(r);
     dv.reading(r, 0, meter::V_NONE);
     ui::status_right(&status_real());
     let q = 10f32.powi(-(r.main.dec as i32));

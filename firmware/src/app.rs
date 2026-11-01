@@ -329,7 +329,8 @@ pub struct App {
     hist: [(f32, u8, &'static str); 5],
     hist_n: usize,
     hist_new: usize,
-    hv_shown: bool,
+    /// The HV lightning as drawn (ui::hv_warning: 0 none, 1 stock, 2 small).
+    hv_shown: u8,
     /// The beeper indicator (`beep_ind`): the last time the beeper's
     /// condition held, and the indicator as last drawn on the readout.
     beep_seen: u64,
@@ -709,7 +710,7 @@ impl App {
             hist: [(0.0, 0, ""); 5],
             hist_n: 0,
             hist_new: 0,
-            hv_shown: false,
+            hv_shown: 0,
             beep_seen: 0,
             beep_drawn: 0,
             hold_shown: 0,
@@ -931,13 +932,13 @@ impl App {
                 } else if !self.dmm_view.bar_on {
                     ui::history(&self.hist, self.hist_n, self.hist_new);
                 }
-                self.hv_shown = false;
+                self.hv_shown = 0;
             }
             View::DmmScope => {
                 // The stock scope page with the meter strip (scope_page.rs).
                 self.dmm_view.invalidate();
                 self.sp_draw_static();
-                self.hv_shown = false;
+                self.hv_shown = 0;
             }
             View::Scope => self.sp_draw_static(),
             View::Gen => ui::gen_static(&self.gen),
@@ -1113,6 +1114,7 @@ impl App {
                 crate::prof::enter(crate::prof::DREAD);
                 self.dmm_view.alt = self.strip_alt;
                 self.dmm_view.acc = self.acc_ctx();
+                self.dmm_view.ext_slot = self.dmm.ext_possible();
                 self.dmm_view.reading(&r, hold, lim);
                 crate::prof::exit(crate::prof::DREAD);
             }
@@ -1220,6 +1222,7 @@ impl App {
             // capture keeps its value as it is.
             if let Some(mut rd) = self.shown_reading().filter(|_| matches!(self.meter.hold_state(), 0 | 2)) {
                 rd.main.ext = false;
+                self.dmm_view.ext_slot = self.dmm.ext_possible();
                 self.dmm_view.reading(&rd, self.meter.hold_state(), self.meter.verdict());
             }
             ui::rate_chip(&mut self.chart_cache, ui::RateChip { rate: r as u8, period_ms: 0, applies: true });
@@ -2262,8 +2265,9 @@ impl App {
         // slot i (f32 bits, SI). p[38] persist::W_DMM_EXT, p[39]
         // persist::W_GEN_OFFS.
         // p[6] bits 18..27: scope trigger position + 1 (0 = centre, older
-        // records); p[11] bits 16..31: the removed scope drag hold-to-grab
-        // ms (written 0, ignored on load).
+        // records); bits 28..29: the V/div zoom of range 0 (Settings::vzoom,
+        // 0 in older records: 10 mV/div); p[11] bits 16..31: the removed scope
+        // drag hold-to-grab ms (written 0, ignored on load).
         let m = &self.meter;
         p[18] = m.ahold as u32 | (!m.lim_beep as u32) << 1;
         // v10: the power slot's values at persist::W_LIM_W (its bits as the
@@ -2275,7 +2279,7 @@ impl App {
             p[w] = l.lo.unwrap_or(0.0).to_bits();
             p[w + 1] = l.hi.unwrap_or(0.0).to_bits();
         }
-        p[6] |= (sc.hpos as u32 + 1) << 18;
+        p[6] |= (sc.hpos as u32 + 1) << 18 | (sc.vzoom.min(2) as u32) << 28;
         // Scope page: colour, brightness, tap-step mode (p[1] bits 17..29),
         // drag mode, swipes, persistence, pressed feedback, grid intensity
         // (p[11] bits 1..6, 12..15); 0 = default everywhere.
@@ -2466,6 +2470,7 @@ impl App {
         sc.probe = if scope::PROBES.contains(&pr) { pr } else { 1.0 };
         let h = (p[6] >> 18 & 0x3FF) as i32;
         sc.hpos = if h == 0 { 200 } else { h - 1 };
+        sc.vzoom = (p[6] >> 28 & 3) as u8; // apply: 0 unless range 0
         // The saved level row is at the saved scale: its volts from there.
         self.scope.levels_reset();
         self.scope.apply(sc, 0);
@@ -2678,9 +2683,13 @@ impl App {
         }
         if dmm_view {
             let hv = self.view == View::Dmm && l.mode <= 1 && !l.main.ol && l.si.abs() >= 100.0;
+            // In the extra-digit layout (its cells from x 8) half size in
+            // the aux row (ui::hv_warning).
+            let slot = self.dmm_view.slot();
+            let hv = if !hv { 0 } else if slot { 2 } else { 1 };
             if hv != self.hv_shown {
+                ui::hv_warning(self.hv_shown, hv, slot);
                 self.hv_shown = hv;
-                ui::hv_warning(hv);
                 // Its box (0, 80, 40, 64) may hold the power meter's
                 // "@load" mark in the parts layout: redrawn with the next
                 // reading.
@@ -5363,7 +5372,8 @@ impl App {
             }
             C::ChScale(Some(v)) => {
                 // V/div at the probe tip (as the screen label), like TRIG:LEV.
-                sc.range = scope::VDIV.iter().position(|&d| d * sc.probe >= v * 0.999).unwrap_or(9);
+                // 5 / 2 mV/div: range 0's digital zoom (scope::VSTEPS).
+                sc.set_vidx(scope::VSTEPS.iter().position(|&d| d * sc.probe >= v * 0.999).unwrap_or(scope::VIDX_MAX));
                 None
             }
             C::ChScale(None) => {

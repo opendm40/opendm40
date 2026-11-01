@@ -76,13 +76,14 @@ fn dmm_page(p: &Dp) {
         }
     }
     dv.short = p.short;
+    dv.ext_slot = crate::slot_of(r);
     dv.reading(r, p.hold, p.lim);
     dv.short_sync();
     let mut st = status_real();
     st.csv = p.csv;
     ui::status_right(&st);
     if volts && r.si.abs() >= 100.0 {
-        ui::hv_warning(true);
+        crate::hv_draw(&dv, true);
     }
     let q = 10f32.powi(-(r.main.dec as i32));
     // (A reading with no value yet, NaN: a chart of the capacitor before, 4700.)

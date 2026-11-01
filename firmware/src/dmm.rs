@@ -593,6 +593,16 @@ pub fn rate_window(rate: Rate, acdc: bool, mode: u8, range: i8) -> (usize, bool)
     avg_cfg(rate, acdc, mode, range).map_or((1, false), |(n, _, ext)| (n, ext))
 }
 
+/// The extra digit can appear in HY3131 `mode` / `range` at `rate`: the
+/// averaged ranges of the +1 digit table (`avg_cfg`; never in FAST nor in
+/// AC+DC), the experimental 600 Mohm (`Ohm600::ext`) and the frequency
+/// counter (`freq_ext`: at the low end of every range). The DMM page keeps
+/// the extra-digit layout while this holds (ui::DmmView::ext_slot), so the
+/// digit appearing or going does not move the others.
+pub fn ext_possible(rate: Rate, acdc: bool, mode: u8, range: i8) -> bool {
+    !acdc && (mode == 14 || is_ohm600(mode, range) || rate_window(rate, acdc, mode, range).1)
+}
+
 /// AD1 conversion period of `rate` in function `mode`, ms: one reading per
 /// conversion (FR-05 table: DC V / mV / A FAST 100, MED 200, SLOW 400; ohm
 /// FAST 200, MED and SLOW 400).
@@ -2846,6 +2856,12 @@ impl Dmm {
     /// +1 digit tables (`rate_window`).
     pub fn rate_info(&self, rate: Rate) -> (usize, bool) {
         rate_window(rate, self.acdc, self.mode, self.range)
+    }
+
+    /// The extra digit can appear now (`ext_possible`; not in the power
+    /// meter).
+    pub fn ext_possible(&self) -> bool {
+        !self.pw.on && !self.cpl_auto && ext_possible(self.rate, self.acdc, self.mode, self.range)
     }
 
     /// AD1 conversion period of `rate` in the current function, ms
@@ -8593,6 +8609,27 @@ mod tests {
         assert!(ext_ok(true, AVG_FULL));
         assert!(ext_ok(true, 32));
         assert!(!ext_ok(false, 32));
+    }
+
+    #[test]
+    fn extra_digit_layout_where_the_digit_can_appear() {
+        // Every averaged range with the +1 digit, 600 Mohm and Hz keep the
+        // layout; FAST, AC+DC and the ranges without the digit do not.
+        for rate in Rate::ALL {
+            for mode in 0..16u8 {
+                for range in 0..8i8 {
+                    let can = rate_window(rate, false, mode, range).1 || is_ohm600(mode, range) || mode == 14;
+                    assert_eq!(ext_possible(rate, false, mode, range), can);
+                    assert!(!ext_possible(rate, true, mode, range));
+                }
+            }
+        }
+        assert!(ext_possible(Rate::Medium, false, 1, 2));
+        assert!(!ext_possible(Rate::Fast, false, 1, 0));
+        assert!(!ext_possible(Rate::Slow, false, 1, 3));
+        assert!(!ext_possible(Rate::Slow, false, 3, 0));
+        assert!(ext_possible(Rate::Slow, false, 10, 3));
+        assert!(!ext_possible(Rate::Slow, false, 10, 4));
     }
 
     #[test]
