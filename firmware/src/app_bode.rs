@@ -323,7 +323,7 @@ impl App {
                     s.run = Some(r);
                 }
             }
-            Stage::Wait if polled => {
+            Stage::Wait if polled && now < r.at => {
                 let rec = self.scope.record();
                 let Some(sy) = self.scope.gen_sync() else { return };
                 let Some(l) = bd::lockin(rec, sy.t0, sy.s, sy.q, sy.k) else { return };
