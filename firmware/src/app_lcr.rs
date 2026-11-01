@@ -303,7 +303,9 @@ impl App {
             self.toast(now, if cap.clip_u { "LCR: external voltage" } else { "LCR: external current" }, false);
             return;
         }
-        let k = lc::next_range(s.k, fit.map_or(0, |f| f.ipk_raw), cap.clip_i);
+        // (No fit: up on a rail hit, else stay.)
+        let pk = fit.map_or(if cap.clip_i { i32::MAX } else { lc::DOWN_RAW }, |f| f.ipk_raw);
+        let k = lc::next_range(s.k, pk, cap.clip_i);
         if k != s.k {
             // A range change: this frame is not used (and a job restarts).
             s.k = k;
