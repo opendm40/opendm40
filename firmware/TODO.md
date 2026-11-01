@@ -29,15 +29,37 @@ Additional requirements:
       = 0.44 mA on 47.5 Ω; A-PROT needs only a trigger for the probe (125 mA = 5.9 V at PB1). The taps allow
       ±62.5 / 104 / 208 / 417 mV (AGNDP3..6 / AGNDN3..6, REFO 1.25 V: 1.3 / 2.2 / 4.4 / 8.8 mA); the AD1 / AD2
       peak thresholds (`PK_THR`, `PK2_THR`, 0.5 mA) are in software.
-      - First measure PB1 in mV (AD1 PB1 − PB3) where it picks up the V input, V–COM 1 / 5 / 10 V, A open:
-        DC V manual 60 V (and 6 V at 5 V), ohm, continuity (now ~±230 mV at 5 V), Hz (~54 mV); then the same
-        with A shorted to COM (pickup on the node, not a shunt current).
-      - Pick the window above the largest pickup; see whether DC V 60 V+ and Hz can get their sentinel back
-        (no sentinel now: [power-meter-and-misconnect.md](docs/power-meter-and-misconnect.md) 4.2). If the
-        pickup grows with the input, 600 / 1000 V can exceed any window.
-      - Why PB1 follows the input in the rows that drive the power bus from OP3 is not known (10 V / 10 MΩ
-        = 1 µA = 50 µV on 47.5 Ω, far below the window); [hw/README.md](../hw/README.md#measured-node-behaviour).
-      Open PR #55 (docs only): PB1 measured, R21 stays 0xdd.
+      - [x] PB1 measured (device, 2026-10-27, 0.3.0 + the tools of branch `exp/pb1-meas`, A open, manual
+        ranges, V–COM from the calibrator). `DBG:SENT:PB1?` writes the running row with AD1 on PB1 − PB3, then
+        on PB1 − AGND (IG 0.9, REFO / AGND, SAD1I = 00), and writes the row back. Table:
+        [hw/README.md, Measured node behaviour](../hw/README.md#measured-node-behaviour) ("PB1 with AD1").
+        Up to 3 V the comparator rows (DC V, DC mV, ohm, temperature) keep PB1 within 13 mV of AGND; DC mV,
+        ohm and temperature reach 155..264 mV at 3.7 V, 353..698 mV at 5 V and 1.29..>1.39 V at 10 V. DC V
+        (every range) stays at 2.2 mV up to 10 V. Not measured: continuity and diode (their comparator drives
+        the buzzer at any volume), A shorted to COM.
+      - [x] Comparator window per R21 (`DBG:SENT:R21`; 10 CTSTA reads per point; DC V 6 V, DC mV, ohm 600 Ω /
+        60 MΩ, temperature, DC V 60 / 600 V with variant 4):
+        - 0xdd, 0xcc, 0xbb and AGNDP4..6 over AGNDN3 (0xab, 0x9b, 0x8b): CTSTA 0 from V–COM off to 3 V; DC V
+          6 V (0xdd .. 0x8b) also at 5 / 10 V.
+        - AGNDN4..6 as the low threshold (0xaa, 0x99, 0x88, 0xba): CTSTA 0x10 with nothing connected, A-JACK in
+          every row. These windows cannot be used.
+        - 3.7 V: ohm 60 MΩ, DC mV and temperature trip at every window (0x70; 0x50 at 0x9b / 0x8b), ohm 600 Ω
+          at none. 5 / 10 V: ohm 600 Ω / 60 MΩ, DC mV and temperature trip at 0xdd, 0xcc, 0xbb and 0x8b.
+        - DC V 60 / 600 V: CTSTA 0x50 and A-JACK at every R21, also with V–COM off, while AD1 reads PB1 at
+          ~2 mV. That is no pickup: in these rows the comparator does not compare PB1 with the AGND taps
+          (cause *unknown*). No window brings that sentinel back.
+      - Result: no window change. No measured pickup lies between ±20.8 mV and the usable maximum (+417 /
+        -62.5 mV): up to 3 V every row stays inside 0xdd, and from 3.7 V every row that trips also trips at
+        0xbb / 0x8b (at 5 V PB1 − AGND is 353..698 mV there, at 10 V 1.29 V or more). The pickup rows
+        keep their V gates (ohm / temperature: V_GATE and the jack check; DC mV: #35). The firmware keeps
+        0xdd (0.44 mA). Owner decision: keep it, or 0xbb (1.3 mA; nothing measured gets fixed).
+      - Hz: the standing ~54 mV (device d8e249d) came with the row's R33 SAD1I = 11, the AD1 temperature
+        sensor inputs (*inferred*). With SAD1I = 00, PB1 is 2.5 mV at rest and follows the input from 3 V on.
+        An AD1 sentinel in Hz (#44) needs SAD1I = 00; PB1 − PB3 there reaches -116 / -140 mV at 5 / 10 V
+        (#44's `PK_DC_THR` is ~180 mV, one-sided). PB3 moves too (Hz 10 V: PB3 − AGND +431 mV).
+      - Left (owner): the rows with A shorted to COM; continuity / diode; a real current in A
+        (20 mA and ~1 mA) per row. Tool: branch `exp/pb1-meas` (`DBG:SENT:PB1? [n]`, `DBG:SENT:R21 <v>`;
+        build with `--features mute`; not for merging, region B -1.5 KB).
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
@@ -45,6 +67,15 @@ Additional requirements:
       resistor across the jacks or depends otherwise on the jack voltage; the jack check (AD2 = OP1O) reads
       FB in phase B, so A-JACK there leans on V_GATE (`live`, every ~2 s): a current in A on 600 MΩ gives LIVE, as
       every ohm range does (the A-jack item above).
+
+- [ ] Scope extra channels (owner 2026-10-27: "dmm (wave) as a second channel of the scope, optional; the generator
+      as a channel too, as a trigger source, computed, not captured"): built on branch claude/friendly-gauss-8m2e3g,
+      design and device checks in [docs/scope-gen-channel.md](docs/scope-gen-channel.md).
+      - GEN: MF > Trigger > Source GEN (computed from TIM6 / DMA or TIM12 against TIM1), MF > Display > GEN trace,
+        `TRIG:SOUR GEN`. Device check 1.5 (the generator looped back to CH1); `DBG:GENTRIG:LAG` to measure.
+      - CH2: MF > Display > CH2 (DMM), the AD2 stream time-aligned by its DWT stamps; the DMM reading pauses.
+        Device check 2.4; `DBG:CH2:LAG` to measure. Not yet: a CH2 position (0 is the centre row), CH2 in roll
+        beyond 3.4 s of screen, CH2 in the CSV / WAV:DATA?, CH2 measurements, CH2 as a trigger source.
 
 ## Open, by kind (2026-10-27)
 
@@ -62,8 +93,9 @@ One line per group of open items; quoted words are the start of an item. Open PR
   [trigger-level drag](#scope-trigger-level-drag-lag-owner-2026-10-25-branch-fixscope-drag-lag) checks, "T3 remaining
   on the device", the "UI/UX review punch-list" remainder, UF-01 (beeper latency).
 - Screen changes: the [jerky screen changes](#jerky-screen-changes-owner-2026-10-29-branch-fixsmooth-redraw) "Device
-  check (2 min" (PR fix/smooth-redraw).
-- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-scratch and preparation cases".
+  check (2 min" (PR fix/smooth-redraw); the [strip rendering](#strip-rendering-owner-2026-10-30-branch-featstrip-render)
+  "Device check (3 min" and `DBG:TE?`.
+- Power cycles, a cold meter: "Device: VOS over a warm-up" (~1 h), "Device: the disk-buffer and preparation cases".
 - Leads shorted and a known R: the ohm VOS that "Unchopped FAST in ohm" needs first; "Ohm gain with a DC
   offset"; "Ohm OL above 60 000 counts" (calibrator); "Experimental 600 MΩ" (100 MΩ .. 1 GΩ resistors).
 - Calibrator or source set by hand: the [Hz below 7 Hz](#hz-below-7-hz-owner-2026-10-25-v020-with-the-mmb30-2-hz-and-5-hz-gave-no-reading-branch-fixlow-freq-merged-43-v030)
@@ -170,6 +202,26 @@ What waits for the owner; each line links to the material.
       on: SETTINGS,FILE, DC V, AUTO, AutoHold 0, limits off, 200 us/div, the alarm LOUD kept. The same set, then
       `DBG:RESET`: SETTINGS,BKP, AC V, AutoHold 1, limit on, 10 ms/div; the fixed range came back as AUTO (as the
       manual says: a fixed range is never kept).
+- [ ] Mode Remember (user report 2026-10-28: "ohm on the low range, trend 640 ms/div; off / on -> DC V and
+      320"; asked for a user choice and slower trend steps). The stock has the switch: Settings > Other
+      Settings > Mode Remember, default OFF (config.bin 0x1ab; its record: function, V / A coupling, V / A
+      autorange flags, ohm variant, chart rate; no fixed range). Done (branch fix/power-on-state, 0.4.0):
+      Settings 3/3 row 9 "Mode Remember" OFF / ON, SCPI `MEMory:STATe:RECall:AUTO`; ON restores after a
+      power-off the function + coupling, AUTO / AUTO+, the ohm test current, a fixed V / A / ohm range (not
+      under REL / in AUTO coupling), rate + smoothing, the trend timebase (app.rs `restore`, W_DMM_EXT bits
+      20..27, no record version change; 0 = the old behaviour). Not AutoHold, limits, REL, HOLD, the scope,
+      the power meter's settings, the Record page. The trend timebase is now persisted (a reset kept it
+      neither before) and has 1.28 / 2.56 s/div (ui::TREND_RATES; the 321-point ring is unchanged).
+      emu/settingstest.py cases `remember` / `default` PASS.
+      Device check (3 min, any input, the mute build is fine):
+      1. Settings > More > More: the last row reads **Mode Remember OFF**; tap: ON.
+      2. Multimeter: Ω, range page 600 Ω; rate chip to FAST; tap the trend's timebase label through 640 ms,
+         1.28 s, 2.56 s, 160 ms, 320 ms and 640 ms to 1.28 s/div (the label fits its chip, the chart runs).
+      3. Wait 10 s, power off with the key, power on: Ω, **600Ω** (not AUTO) in the status bar, FAST,
+         1.28 s/div. `MEM:STAT:REC:AUTO?` 1.
+      4. Mode Remember OFF, wait 10 s, power off / on: DC V, AUTO+, MED, 320 ms/div.
+      5. `DBG:RESET` with Mode Remember OFF in Ω 600 Ω: Ω in AUTO (a reset continues the function, a
+         fixed range only with Mode Remember ON), the timebase kept.
 - [x] RES AUTO: include the 60 Ω range or not. Owner 2026-10-25: yes. Done in 1f264d3e (dmm.rs `poll_ohm`,
       `ohm_auto_floor`). The stock autorange never selects r0 (its clamp is r1..r6,
       `stock/re/analysis/dmm_v2_6.h` (in the private analysis repo) section 2), so the step uses the stock rule of the other ohm steps:
@@ -345,6 +397,21 @@ the scope full record.
       locations), A2 above 2 KiB ([docs/native-boot.md](docs/native-boot.md) "Region B audit #6").
 
 ## Remaining work
+
+- [ ] Capacitance gain per range (device 2026-10-30, #90, UT61E+ reference): 4.911 µF film reads 4.8208 µF
+      on 6 µF (−1.8 %) and 4.9046 µF on 60 µF (−0.1 %); 330 µF electrolytic 346.4–347.1 µF on 600 µF (UT61E+
+      351.6, OWON 358.9); 1.0462 mF electrolytic 999.5 µF on 6 mF (−4.5 %). Electrolytics alone do not set a
+      gain (dielectric absorption and the test frequency move their value), so CAP_K / the ramp constants stay.
+      Procedure (owner, `tools/capdiag.py`, one film capacitor per pair of ranges, its value from a reference
+      meter): (1) a film capacitor at ~50 % of the lower range, `capdiag.py OUT --range <lower> --secs 60`, then
+      `--range <upper>` (the ranges are fixed over SCPI, CONF:CAP <F>); (2) per range: gain = reference /
+      median; (3) the ramp ranges from the 60 µF reading of the same capacitor: e.g. a 47 µF film on 60 µF,
+      then forced 600 µF (`--range 6e-4`), the 600 µF gain = the 60 µF reading / the 600 µF median; 6 mF from a
+      ~470 µF film on 600 µF and forced 6 mF. Apply as CAP_K changes (per range), not the cal record. Open:
+      run it.
+- [x] Capacitance 6 nF and 60 nF ranges merged into one 60 nF range (owner 2026-10-30, #90): the stock rows are
+      byte-identical; r1's constants (CAP_K 1003 kΩ); 3 decimals below 6 nF. That r1's K suits < 6 nF is
+      INFERRED (r0's 1020 reads 1.7 % higher).
 
 - [x] On-device help, Gestures page (ui.rs help table): "Scope: right edge / Drag trigger level" was
       wrong while the trigger-level marker T was on the left edge; the marker moved to the graph's
@@ -700,6 +767,21 @@ the scope full record.
 
 ## From user community feedback (docs/user-feedback.md)
 - [ ] UF-01 (P0) Verify continuity CMPO beeper + diode beep classes on device, latency <10 ms (most-praised stock feature). §5.2
+- [x] UF-28 (P2) Continuity / diode beeper off at Key/alert volume 0 % (owner 2026-10-27: it beeped at volume 0).
+      hy::write clears R20 bit 2 (ENPCMPO) while the volume is 0; Dmm::poll rewrites R20 on a change in
+      continuity. Volume 1..100 cannot scale it (CMP pin, not TIM14; hw/README.md "Buzzer"). Emulator:
+      emu/hy3131/beeptest.py. (PR #56; verify on device)
+      Device check (2 min, shorted probes): Key/alert volume 0 -> CONT and DIOD silent; 50 -> both beep;
+      in CONT switch 50 -> 0 -> 50 (silent / beeps at once); power off and on into CONT at 0 -> silent.
+      DBG:SENT:REG? first byte: 52 / B0 at 0 %, 56 / B4 at 50 %.
+- [x] UF-28b Visual beeper indicator (owner 2026-10-30, testing #56: "a visual indicator of a short").
+      Green SHORT / BEEP band over the aux row + green digits (strip: badge + value) while the beeper's
+      condition holds, held 150 ms (App::beep_ind); continuity reads CTSTA bit 6 (ACPO, the CMP pin's
+      source per the datasheet) every 5 ms DMM poll (also in the entry settle), diode follows
+      `diode_beep`. Emulator: emu/hy3131/contvistest.py (CONT: on 1-3 ms after the input, CPU time only).
+      Device check: shorted probes in CONT at volume 0 and 50 -> band + green digits at once, off
+      ~0.15 s after release; CONT entered with the probes together -> at once; DIOD short -> SHORT, a
+      silicon diode -> BEEP briefly. If CONT never shows it: CTSTA bit 6 does not follow CMPO there.
 - [x] UF-04 (P1) Scope AUTO keeps the user's AC/DC coupling (app.rs autoset_start forces DC = stock bug, 4 users). §6.1  (81e02a7; verify on device)
       AC search first; nothing in AC -> the same search in DC, kept with the toast "AUTO: DC (no AC signal)".
 - [x] UF-14 (P1) Generator: clamp to the wave's limit + visible note instead of a silent 0 Hz (revert the parity snap; owners call it a bug). §7  (ae3e655; verify on device)
@@ -756,8 +838,7 @@ the scope full record.
       outside -25..125 % (OL); 11c4f9b hides it below 3.6 mA (device 92fb8fa: DC mA 60 mA range, A jack open,
       0.001 mA: no %, PASS; the % above 3.6 mA needs current through A). UF-27: a history tap stores the held value while HOLD / AutoHold. UF-28: row
       renamed "Key/alert volume"; idle power-off announced 30/20/10 s before (toast + beep at >= 50 % even at
-      volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): volume does not apply (check).
-      Open PR #56: the beeper off at volume 0 % (R20 bit 2); its device check is listed there.
+      volume 0). The continuity / diode beeper is the HY3131 CMPO pin (not TIM14): off at volume 0 (UF-28 above, PR #56).
       UF-35: long-press on the MIN/MAX/AVG column = statistics reset, distinct from the history-row clear (existed).
 - [x] UF-29 (P2) On-device Help page (gestures, resets, input limits). §9  (7b58f84; verify on device)
       Settings 2/2 -> Help: 4 list pages (gestures, side keys, multimeter taps, limits; ui::HELP); tap = next page,
@@ -981,7 +1062,7 @@ the scope full record.
       1324 / 1314 AC+DC, 0 erased, BMP = the panel 0 px x3, prep 2 / 76 again 9 s after the job); 2 PASS (second
       shot 4.9 s after the first, prep at 12 ready: frozen 5328 ms, 63 erased, saved; above the 3-5 s estimate); 4 PASS (free 0: 2 / 0 ready,
       "Disk full", no BMP); 5 CSV commits and fast-log PASS; 6 PASS (state 1 max 15.1 ms = idle 15.1).
-- [ ] Device: the disk-scratch and preparation cases of docs/ram-budget.md that no run has covered.
+- [ ] Device: the disk-buffer and preparation cases of docs/ram-budget.md that no run has covered.
       1. Power off (hold the key) and DBG:RESET while the preparation erases (DBG:FLASH? prep state 1, right
          after a shot): the off / reset waits for the erase (`prep_finish`, <= 0.4 s); the next boot lists
          every file, prep reaches 2, the next shot Saved.
@@ -1690,6 +1771,9 @@ Firmware:
 - [x] Region C audit #2 2026-10-25 ([docs/native-boot.md](docs/native-boot.md) "Region C audit #2"): on 058a1d36
       region C 6 016 -> 8 632 B free (the build.sh warning gone), B 18 820 -> 17 444 B, A2 4 188 -> 2 948 B. The
       SC_PROBE font blob B -> A2; the SCPI range / resolution commands and ui::help_page C -> B. No code changed.
+- [x] Region C audit #3 2026-10-29 ([docs/native-boot.md](docs/native-boot.md#region-c-audit-3-2026-10-29-choreregion-c-headroom)): on 3b142426
+      (mute) region C 7 720 -> 13 352 B free, B 50 572 -> 44 924 B: ad2exp, dbg_dcv / dbg_n7 and
+      scpi::dcv_arg / n7_arg (DBG:AD2:*, E7's dc_enter) C -> B. No code changed.
 - [x] Device check of region C audit #2 (2 min): the scope page's probe labels (SC_PROBE, now in A2) drawn as
       before; `CONF:VOLT:DC 60`, `VOLT:RANG 6`, `RANG?`, `RES:RANG:AUTO ON` answer as before; Settings -> Help
       pages open.
@@ -1745,7 +1829,10 @@ Firmware:
             (`App::wave_exit_done`, before the DMM row is restored). wavetest: MENU exit at 38400, no region C
             call, late / overruns / timeouts unchanged. Device c92b605: PASS (2 ms/div x3: 300 ns, late 0, overruns 0;
             1 ms/div: late / overruns unchanged; the menu, then the DMM).
-      - [ ] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header (not reproduced).
+      - [x] SCOP006.CSV once saved the previous 4800 S/s record under a 2 ms/div header. Reproduced in the emulator:
+            STOP at 20 ms/div, 2 ms/div while stopped (the stopped zoom), Save CSV: the stored record (4800 S/s, its
+            rate right) under the timebase shown. Fixed: the header's timebase is the record's (scope.rs
+            `record_tb`); emu/hy3131/wavetest.py `--case csvtb`.
 - [x] 76.8 kS/s (emulator; device check below): hybrid frames (feasibility 11.12, decision 2026-10-22 #9): the CPU
       sends the command byte (mode 0, /8) and switches CKPH = 1 after the read-period pulse, DMA reads R03..R05;
       probe frames 2-byte DMA at /8 mode 0 (a marginal bit only blurs a probe), every 16th period; the probe
@@ -2253,11 +2340,17 @@ Firmware:
       Device retest: as d330877 1d (MCX page, AD2 38400 disk session, DBG:TAP 177,10): the toast reads in the
       panel's body under "DATA LOGGING" for 1.5 s, then the panel's rows come back; no red left outside it.
       **Device c785807: PASS** (doc "c785807" T1: toast in the panel body, panel back at 1.9 s, nothing outside).
-- [ ] Not exercised: a stream starting inside a multi-block READ(10) (msc.rs fails it at the next slow block
-      with the residue, sense 02/04/01; the host retries the whole command).
+- [x] A stream starting inside a multi-block READ(10) (fails at the next slow block with the residue,
+      sense 02/04/01; the host retries the whole command).
       Device 2f56ff9 (docs/device-check-2026-10-21.md "2f56ff9: screenshot preparation, the 76.8 kS/s nominal" item 4): not provoked. `read_busy` refuses only while
       the slow-bank mirror is off (MIR_OK false after a failed SPI read); `DBG:VDISK:MIR?` 1 (OK), so a healthy
-      meter cannot reach the path from the host. It needs a debug switch that turns the mirror off (none exists).
+      meter cannot reach the path from the host; the device has no switch that turns the mirror off.
+      Emulator (a blank SPI disk: no mirror): emu/mirrortest.py `--fallback-only` boot 6, a READ(10) of 128
+      sectors across FIRMWARE.BIN's slow-bank start, the AD2 stream started after 32: CSW status 1, residue =
+      the 64 slow sectors, sense 02/04/01, the 64 sectors before them correct; the retry during the stream fails
+      before its data; after the stream it reads the same bytes. With msc.rs's mid-transfer check removed the
+      result is the same (vdisk `fw_body` -> `mir_read` fails the slow sector without a mirror while the stream
+      runs; msc.rs takes the sense from `read_busy`), so msc.rs's own mid-transfer check is not exercised.
       Known and left: region C DBG commands (DBG:GENUINE? reads the loader data at 0x080A4000 in region C
       code, DBG:BOOT?, the AD2 experiments) still stall the ISR when sent during a stream (debug only).
 - [x] `fast_scpi` (LOG:DEST / LOG:DURation) in region C (device c92b605: LOG:DEST? / DUR? in the Wave view,
@@ -4390,5 +4483,27 @@ Cause and fix: [lcd.rs](src/lcd.rs) "deferred fills"; before / after: [emu/smoot
 - [ ] Device check (2 min, the `--features mute` build): menu > each tile and back, DMM V -> Ω -> A, MF range page
       open / close, scope MF menu open, its tabs, close. Expected: no blank screen between pages; the old page
       stays until the new one covers it.
-- [ ] Scope page entry: the full graph takes ~126 ms in the emulator (`--mips 110`), now a left-to-right wipe;
-      its speed is not changed. The device time is unknown.
+- [x] Scope page entry: a top-to-bottom wipe in strips since branch feat/strip-render (below); ~130 ms in the
+      emulator, as before; the device time is unknown.
+
+### Strip rendering (owner 2026-10-30, branch feat/strip-render)
+
+A full page repaint is drawn in 12-row strips into `diskbuf::ARENA` (then `calbackup::SCRATCH`) and each strip sent once
+([lcd.rs](src/lcd.rs) "strip rendering", [ram-budget.md](docs/ram-budget.md#the-disk-buffer-arena-diskbufarena-12-kib)):
+menu, settings, range page (not power / temperature), help, generator, scope page.
+- [ ] Device check (3 min, `--features mute`): menu > each tile and back, Settings pages, MF range page, the scope
+      page entry. Expected: each page appears top to bottom in one pass, no widget half drawn. `DBG:PROF?` after a
+      few Settings / Generator / Scope entries: their draw code in region C runs once per strip (27 times), the
+      emulator has no flash wait states.
+- [ ] `DBG:TE?` once ([hw/README.md, LCD](../hw/README.md#lcd)): a pin that changes only with TE on is the TE line.
+      If there is one: strips in the panel's scan direction synced to TE.
+- [ ] Still drawn directly (deferred fills): the DMM page (its chart, reading and status are drawn after the page,
+      outside `draw_static`), the combined view, popups (open / uncover), keypad, limits, record, inrush,
+      gallery, touch test, device page, the power pages.
+- [ ] The scope page in strips takes as long as before (~130 ms emulator): the side buttons' `paint` closures
+      (~300 instructions per pixel) and the graph (~20 per pixel) are the CPU cost; the strip passes add ~4 ms.
+- [ ] Push a strip by DMA (DMA1 memory-to-memory to 0x60020000) while the next one is drawn: two half-size
+      strips, at most the bus time (~20 ns per pixel, ~3 ms per screen; inferred from BWTR1) saved per repaint.
+      The emulator completes a memory-to-memory DMA at once: measure on the device.
+- [ ] 32-bit stores to the data register in `push` (two bus writes each, RS stays high; to be checked on the
+      GD32).

@@ -5,18 +5,22 @@ updates when switching modes, opening menus").
 
   cd firmware && ./build.sh --features mute
   emu/smoothtest.py --app firmware/target/native/thumbv7em-none-eabihf/release/opendm40
-      [--mips 110] [--max-transient 10] [--out DIR]
+      [--mips 110] [--max-transient 2] [--out DIR]
 
 One emulator run (no USB/IP or Bluetooth port) with the LCD write trace
 (`sysbus.lcd Trace`, emu/peripherals/ILI9488.cs) through the transitions
 below; emu/lcdtrace.py replays the trace at the panel's refresh rate
 (60 Hz, inferred) and measures each transition's redraw. Fails (exit 1)
 when a transition has no redraw, or when at some moment more than
---max-transient % (default 5) of the screen shows neither the old nor the
+--max-transient % (default 2) of the screen shows neither the old nor the
 new picture for half a refresh or longer (a background cleared before its
 widgets, a popup closed and opened again). Before the fix of 2026-10-29:
-up to 44 % (the main menu: a cleared screen, then the tiles); after: 2.8 %.
-About 2 min of wall time. Times are emulator times (--mips 110: the device's CPU
+up to 44 % (the main menu: a cleared screen, then the tiles); after: 2.8 %;
+with the strip rendering (firmware/src/lcd.rs): 0.6 %. The pages drawn in
+strips (STRIPS) also fail when any pixel shows a third picture at all
+(peak) or when the redraw writes more than one screen of pixels (each pixel
+once: 153 600, 1 % slack; the generator page 5 %: its values are drawn
+again after the page). About 2 min of wall time. Times are emulator times (--mips 110: the device's CPU
 speed, inferred; the FSMC bus time is not modelled) and are printed, not
 checked. --out DIR: a filmstrip per transition and a contact sheet.
 """
@@ -54,10 +58,23 @@ STEPS = [
     (32.5, 'tap 141 105', 'dmm'),
 ]
 
+# Pages App::repaint draws in strips: (max peak %, max pixels written in
+# screens).
+STRIPS = {
+    'range-page': (0.0, 1.01),
+    'menu': (0.0, 1.01),
+    'scope': (0.0, 1.01),
+    'menu-2': (0.0, 1.01),
+    'gen': (0.5, 1.05),
+    'menu-3': (0.0, 1.01),
+    'settings': (0.0, 1.01),
+    'menu-4': (0.0, 1.01),
+}
+
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument('--app', required=True)
 ap.add_argument('--mips', default='110', help='CPU MIPS (110: the device model)')
-ap.add_argument('--max-transient', type=float, default=5.0, metavar='PCT')
+ap.add_argument('--max-transient', type=float, default=2.0, metavar='PCT')
 ap.add_argument('--out', help='filmstrips into DIR')
 ap.add_argument('--keep', action='store_true', help='keep the trace and the emulator log')
 A = ap.parse_args()
@@ -81,9 +98,22 @@ if rc != 0 or not os.path.exists(trace):
     print('FAIL: emulator run (exit %d), see %s' % (rc, work))
     sys.exit(1)
 res = lcdtrace.analyse(lcdtrace.load(trace), [(t, n) for t, _, n in STEPS], out=A.out)
-bad = [r for r in res if not r['burst'] or r['transient'] > A.max_transient]
-for r in bad:
-    print('FAIL: %s: %s' % (r['name'], 'no redraw' if not r['burst'] else 'transient %.1f %% > %.1f %%' % (r['transient'], A.max_transient)))
+bad = []
+for r in res:
+    why = None
+    if not r['burst']:
+        why = 'no redraw'
+    elif r['transient'] > A.max_transient:
+        why = 'transient %.1f %% > %.1f %%' % (r['transient'], A.max_transient)
+    elif r['name'] in STRIPS:
+        peak, slack = STRIPS[r['name']]
+        if r['peak'] > peak:
+            why = 'strips: peak %.1f %% > %.1f %%' % (r['peak'], peak)
+        elif r['written'] > slack * lcdtrace.W * lcdtrace.H:
+            why = 'strips: %d pixels written > %.2f screens' % (r['written'], slack)
+    if why:
+        bad.append(r)
+        print('FAIL: %s: %s' % (r['name'], why))
 if not A.keep:
     shutil.rmtree(work)
     for p in os.listdir(OUT):

@@ -1697,6 +1697,7 @@ impl Sentinel {
     /// a switch between ohm-network rows left 0 / 2150 mV on an open
     /// input, device c6a3ac3 note 3).
     #[inline(never)] // .cold (link-native.x): DBG reply
+    #[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
     pub fn diag_text(&self, buf: &mut [u8]) -> usize {
         let mut n = 0;
         let mut put = |s: &[u8]| {
@@ -1736,6 +1737,7 @@ impl Sentinel {
     }
 }
 
+#[cfg_attr(not(feature = "dbg-sent"), allow(dead_code))]
 fn itoa(b: &mut [u8; 12], v: i32) -> &[u8] {
     let mut i = b.len();
     let neg = v < 0;
