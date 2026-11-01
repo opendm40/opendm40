@@ -186,7 +186,8 @@ The four instrument views follow each other in this order:
 On the multimeter, the generator and the combined view (start on the meter
 strip there), swipe left for the next view and right for the previous one.
 On the oscilloscope page a drag moves the trace, so a swipe does not change
-the view: leave it with **MENU**, or switch on **Settings > Scope > Swipe**, which lets a swipe that starts on the top bar or the side panel
+the view: leave it with **MENU**, or switch on **Settings > Scope >
+Swipe**, which lets a swipe that starts on the top bar or the side panel
 change the view.
 
 ![A swipe changes the view; from the oscilloscope only with MENU or Scope swipe](img/swipe.png)
@@ -609,20 +610,16 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Continuity
 
 - Shows the resistance with two decimals; **0L** above 1000 Ω ([Overflow](#overflow)).
-- The beeper is driven by the measuring chip itself: its comparator watches
-  the probe voltage and switches the beeper directly, with no firmware in
-  between (the same chip setting as the stock firmware). It sounds while the
-  resistance is below about 67 Ω (*inferred* from the chip setting). Silent
-  at [Key/alert volume](#alerts-tab) 0 %.
+- The beeper sounds while the resistance is below about 67 Ω (*inferred*
+  from the measuring chip's setting, the same as on the stock firmware). The
+  chip switches it itself: the beep starts and stops with the contact.
+  Silent at [Key/alert volume](#alerts-tab) 0 %.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - Top left, small: the test current, **I -0.26 mA** (the short-circuit
   current; negative: it flows the other way than in the diode test).
-- The firmware adds no latch and no minimum beep length: the beep starts and
-  stops with the contact.
-- The comparator itself is fast (a bandwidth of a few MHz in the chip's data
-  sheet). The time from a contact to the sound, and how short a contact is
-  still heard, are untested on the meter.
+- How fast it reacts and how short a contact is still heard are untested
+  on the meter.
 - The reading updates every 50 ms while it changes, every 0.4 s once it is
   steady.
 - A negative result means an external voltage on the circuit: the meter
@@ -800,20 +797,16 @@ Every rate rejects 50 Hz and 60 Hz mains hum on a DC reading: each
 conversion integrates the input over 100 ms (FAST, MED) or 200 ms (SLOW),
 a whole number of periods of both.
 
-In DC V, DC mV and DC A, FAST runs the converter without its built-in
-offset cancellation (the chopper), which is what makes it twice as fast as
-MED. The meter measures and subtracts that offset itself: 2 s after a
-function or range change and then every 30 s, it reads the input once with
-the opposite polarity. Each time two readings are skipped (a 0.2 s pause).
-It takes the measurement only while the input is steady, and tries again
-5 s later otherwise. Until the first measurement on a range, FAST uses the
-last offset it measured on another range, so a reading in those first 2 s
-can be a little off. A FAST reading is a little noisier than a MED one
-(more low-frequency noise); for the extra digit use MED or SLOW.
+In DC V, DC mV and DC A, FAST skips the converter's built-in offset
+cancellation, which makes it twice as fast as MED; the meter measures that
+offset itself 2 s after a function or range change and then every 30 s,
+while the input is steady (each time a 0.2 s pause in the readings). A
+reading in the first 2 s on a range can be a little off. FAST is a little
+noisier than MED; for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
-12.8 s; no extra digit on 60 Ω). After a step of the input or a range change the average restarts,
-so a change shows at once.
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW 12.8 s;
+no extra digit on 60 Ω). After a step of the input or a range change the
+average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
   measured readings per second (**--/s** just after a change). Tap it:
