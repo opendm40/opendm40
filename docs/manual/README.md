@@ -147,6 +147,7 @@ Every key press also silences the [danger alarm](#the-danger-alarm).
 |---|---|---|
 | Swipe left / right | Multimeter, combined view (start on the meter strip), generator | Next / previous view |
 | Swipe down with one finger | Multimeter | Start / stop a [recording](#recording) |
+| Long press the **A** button | Multimeter | [Inrush current](#inrush-current) page |
 | Swipe down with three fingers | Anywhere, while the touch lock is off | [Screenshot](#screenshots) to the disk |
 | Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
@@ -1879,7 +1880,7 @@ limit](#current-limit)).
 
 Tap **W** (the seventh function button). The first time, the wiring
 picture opens: tap **OK** to start. Later, W starts at once; to see the
-picture again, long press the **A** button, or **MF > Wiring**.
+picture again: **MF > Wiring**.
 
 On entry both inputs autorange: V starts on 600 V, I on 10 A and steps
 down. Until the current range is found, the page shows the voltage and **I
@@ -2026,7 +2027,7 @@ Above 10 A for 1 s the [danger alarm](#the-danger-alarm) sounds.
 Captures the current of a load that is switched on: motors, lamps,
 capacitive power supplies.
 
-To open: **A** function, **MF**, **Inrush**.
+To open: long press the **A** button, or **A** function, **MF**, **Inrush**.
 
 | ![Armed](img/inrush-armed.png) | ![A captured inrush: 7.9 A RMS, 11.8 A peak](img/inrush.png) |
 |---|---|

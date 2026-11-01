@@ -964,8 +964,11 @@ vwrite's `stage` / `ours_live` (`VDisk::write_block`), `HwTrig::sweep`
 `spiflash::block_crc`: B +2 992 B. The struct templates copied by region
 C code only (`fastlog::JOB0` 1 864 B for `fastlog::begin`, `csvlog::JOB0`
 512 B for `start` from `App::rec_start`, `app_touchtest::TT0` for
-`tt_open`) are statics in `.rodata.cold_tpl` (C): B +2 552 B. A `const`
-copied by `*j = JOB0` is an anonymous image in region B whoever reads it.
+`tt_open`) are statics in region C (since audit #10: `cold_set!`,
+`.rodata.cold`): B +2 552 B. A `const` copied by `*j = JOB0` is an
+anonymous image in region B whoever reads it. The patterns for dlog's
+`SEnc` and the gallery's `GSrc` decoder instances matched nothing: those
+are `.text.scope_plan` / `.text.dlog_row` / `.text.vdisk_rd` (dlog.rs), in B.
 
 Still off: `ad2-exp`, `acdc-trace`, `dbg-src` (audit #7).
 
@@ -1303,6 +1306,57 @@ stays.
 | SRAM free | 45 460 B | 45 940 B |
 
 `--features acdc-meth`: SRAM 45 460 B, B 24 840 B, C 21 216 B.
+
+### Region B audit #10 (2026-11-01, chore/mem-p1)
+
+Step P1 of the memory plan for the 0.4.0 features still to come: room in
+region B. [`rprof.py`](../tools/region-profile/rprof.py) on release/0.4.0
+(6f56b877): 19.6 KB of B `c-only` (7.8 KB code, 11.8 KB anonymous
+rodata), 25 copies of `stockfont::paint`.
+
+| change | region B | region C |
+|---|---|---|
+| usbd-storage: the state asserts panic without a message (no `Debug` of `State`) | +800 | 0 |
+| `stockfont::paint` through `paint_dyn` (`&mut dyn FnMut`): one loop instead of 25 monomorphs (release/0.4.0 has the same since the scope chain, #174) | +4 752 | -8 |
+| `c-only` functions of opendm40 of >= ~40 B: link-native.x patterns | +4 304 | -4 304 |
+| `cold_str!` / `cold_set!` ([`cold.rs`](../src/cold.rs), `.rodata.cold`): the CSV / DLG file headers, the fast logger's and the CSV recorder's job reset values, the touch test page's state | +4 264 | -4 376 |
+
+Left in B as `c-only`: generic core instantiations, `OUTLINED_FUNCTION_*`,
+small shared helpers (a later hot caller of the same instance would run it
+from slow flash), the `.text.vdisk_rd` / `.text.scope_plan` instances, the
+gallery's job reset (a `cold_set!` there costs more region C than it saves
+in B), toast texts (region B code draws them later). After: 3.5 KB code,
+7.6 KB data. `rprof.py --region c` before / after: no function in C newly
+reachable from the main loop without region C code between, and all of
+C's data `c-only`.
+
+| | release/0.4.0 (6f56b877) | this branch |
+|---|---|---|
+| region A2 free | 4 356 B | 4 356 B |
+| region B free | 20 084 B | 34 204 B |
+| region C free | 22 888 B | 14 200 B |
+| stack headroom (static worst path) | 21 516 B | 21 516 B |
+| SRAM free | 45 356 B | 45 356 B |
+
+Merged with release/0.4.0 at e9267fc7 (the scope chain #174, decoders,
+pack10 slow records: its audit #8 already had `paint_dyn` and some of the
+moves above). `rprof.py` on the merged ELF: no new `c-only` function of
+>= ~40 B that can move (the decoder band, `App::dec_*`, `cring` and
+`scope_ch2` are on the per-frame path or SCPI; `cring::min_max` is
+`c-only` only because `new_app` takes its address for the render). Direct
+calls from the vector table and from the scope / CH2 / decoder per-frame
+and DMM per-reading functions reach the same 12 region C functions as on
+release (rare branches: `Dmm::wd_slow`, `Sentinel::jack_result`,
+`fatdir::ensure`, ...), none from the ISRs; no function in C is reached
+only through an address.
+
+| | release/0.4.0 (e9267fc7) | merged |
+|---|---|---|
+| region A2 free | 2 304 B | 2 304 B |
+| region B free | 10 820 B | 14 596 B |
+| region C free | 15 368 B | 12 216 B |
+| stack headroom (static worst path) | 20 872 B | 20 872 B |
+| SRAM free | 8 948 B | 8 948 B |
 
 ### Extra RAM areas (2026-10-30, feat/sram-extra-areas)
 

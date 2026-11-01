@@ -686,6 +686,11 @@ fn gesture_tests(ck: &mut Ck) {
     let v = touch(&[(100, 100), (100, 100)], true, 800);
     ck.t("held 800 ms captured: no tap", !tap(&v));
     ck.t("held 600 ms: tap", tap(&touch(&[(100, 100), (100, 100)], false, 600)));
+    // DMM page: a long press on the A button (the second function button)
+    // opens the inrush page (app.rs: LongPress, y >= BTN_Y, button_hit 1).
+    let a = ((ui::btn_x(1) + ui::BTN_W / 2) as u16, ui::BTN_Y + 20);
+    let v = touch(&[a, a], true, 800);
+    ck.t("held 800 ms on A: LongPress hits button 1", v.iter().any(|g| matches!(g, G::LongPress(p) if p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1))) && !tap(&v));
     let v = touch(&[(100, 100), (100, 100)], false, 0);
     ck.t("one Down, one Tap per touch", v.iter().filter(|g| matches!(g, G::Down(_))).count() == 1 && v.iter().filter(|g| matches!(g, G::Tap(_))).count() == 1);
 }
