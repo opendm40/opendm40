@@ -3,13 +3,23 @@
 use crate::buffer::Buffer;
 use crate::fmt::{debug, trace, warning};
 use crate::transport::{CommandStatus, Transport, TransportError};
-use core::assert_matches;
 use core::borrow::BorrowMut;
 use core::cmp::min;
 use usb_device::UsbError;
 use usb_device::bus::{UsbBus, UsbBusAllocator};
 use usb_device::class::ControlIn;
 use usb_device::class_prelude::DescriptorWriter;
+
+/// dm40 patch: core's `assert_matches!` without its message: that one
+/// formats `State` with Debug (the variant names, the pattern text and
+/// core::fmt's Debug glue in flash); the panic handler never reads it.
+macro_rules! assert_matches {
+    ($e:expr, $p:pat $(,)?) => {
+        if !matches!($e, $p) {
+            panic!()
+        }
+    };
+}
 use usb_device::control::{Recipient, RequestType};
 use usb_device::endpoint::{Endpoint, In, Out};
 
@@ -377,7 +387,8 @@ where
     fn enter_state_status_transfer(&mut self) {
         let Some(csw_bytes) = self.build_csw() else {
             debug!("usb: bbb: UNEXPECTED no CSW");
-            panic!("usb: bbb: UNEXPECTED no CSW");
+            // dm40 patch: no message (see assert_matches above).
+            panic!();
         };
 
         // this state's invariant

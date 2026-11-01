@@ -3,26 +3,24 @@
 //! the responsive drag path, drawing through src/scope_ui.rs.
 //!
 //! Interaction (stock mode):
-//! * selection on press: 32x32 zones around the markers (glyph rect grown by
-//!   10 px), the stock search order (other group after its current index,
-//!   then the same group cycling, then the other group from 0), so repeated
-//!   taps on overlapping zones cycle through them; the selected marker turns
-//!   filled, the guide lines of the selection show from the press until 2 s
-//!   after the last event;
-//! * drag (opendm40, owner 2026-10-25: "drag only ONE thing, along ONE
-//!   axis, until the finger is lifted"; the stock split every move report:
-//!   |dx| <= |dy| moved the selected level item, else the selected time
-//!   item, so a sideways pan with vertical wobble also moved the trigger
-//!   level): one item along one axis per gesture, until the release. The
-//!   first motion decides the axis (scope_ui::drag_axis); the item is the
-//!   marker of that axis nearest to the press, whatever is selected
-//!   (scope_ui::drag_target: vertical, the level marker whose row is
-//!   nearest to the press y: CH1, trigger level, runt level, math offset,
-//!   Y cursors; horizontal, the time marker whose column is nearest to the
-//!   press x: trigger position (a stopped record: its pan), X cursors, the
-//!   FFT centre); it becomes the selection. A 4 px tap tolerance before
-//!   the first move; the acquisition holds from the first move (no frame
-//!   paint between the finger and the marker);
+//! * selection on press: the marker grab zones (scope_ui::grab_rect: 48 px
+//!   along the edge, from the screen edge 30 px past the glyph into the
+//!   graph; the nearest glyph wins where they meet); a still tap on the
+//!   selected marker cycles through the zones under the finger (the stock
+//!   search order); the selected marker turns filled, the guide lines of the
+//!   selection show from the press until 2 s after the last event;
+//! * drag (owner 2026-11-01, as a Rigol DHO800/900; one item along one axis
+//!   until the release): a drag that starts in a grab zone moves that
+//!   marker along its own axis from the first move (level markers up /
+//!   down: CH1, trigger level, runt level, math offset, Y cursors; time
+//!   markers sideways: trigger position, X cursors, the FFT centre). A drag
+//!   anywhere else picks its axis in the first 8 px (scope_ui::drag_axis):
+//!   sideways moves the trigger position (a stopped record: its pan),
+//!   up / down the selected level item (scope_ui::drag_item: CH1 unless a
+//!   tap selected another; a drag from a marker zone does not change the
+//!   selection, only a still tap does). A 4 px tap tolerance before the first move; the
+//!   acquisition holds from the first move (no frame paint between the
+//!   finger and the marker);
 //! * timebase tap step (Settings "Scope tap step", docs/scope-scale-ux.md
 //!   sec. 1): Halves (stock: a tap off the zones, left half slower, right
 //!   half faster), Corners (default: only the two bottom corner zones step,
@@ -36,10 +34,7 @@
 //!   badge = Trigger tab; the right panel: V/div + / -, CH1 popup, TRIG ->
 //!   Trigger tab;
 //! * no page swipe (MENU leaves the page) unless Settings "Scope swipes" is
-//!   on (swipes that start outside the drag area: top bar, panel);
-//! * alternatives (Settings "Scope drag"): Hold 300 ms (moves count after a
-//!   still hold; the beep marks the grab). "Stock" and "Axis lock" both lock
-//!   the axis now (above).
+//!   on (swipes that start outside the graph area: top bar, panel);
 //! Responsiveness (owner, 2026-10-13: "dragging the trace lags"): while a
 //! drag is active the acquisition is not polled (no new frames, no restart
 //! per event); each event re-renders the frame already shown from its
@@ -69,13 +64,6 @@ const PRESS_MS: u64 = 120;
 const FLASH_MS: u64 = 150;
 /// Halves: the tabs show on this many page entries after power-on.
 const INTRO_ENTRIES: u8 = 3;
-/// Drag modes (Settings "Scope drag").
-pub const DRAG_STOCK: u8 = 0;
-pub const DRAG_AXIS: u8 = 1;
-/// Names of the drag modes without hold-to-grab (Settings "Scope drag";
-/// Hold is gesture::grab_ms != 0 with the Stock model, shown as "Hold
-/// <ms> ms"; review 7389e8a L4: a stored mode 2 showed as "Axis lock").
-pub const DRAG_NAMES: [&str; 2] = ["Stock", "Axis lock"];
 /// Persistence (Display tab: OFF, MIN, 1S, INF): layer period (ms).
 const PERSIST_MS: [u64; 4] = [0, 40, 500, u64::MAX];
 
@@ -88,7 +76,8 @@ pub(super) struct Touch {
     applied: Point,
     far: i32,
     moving: bool,
-    /// The press selected a marker zone (no timebase step on release).
+    /// The press selected a marker zone (no timebase step on release; the
+    /// drag moves that marker).
     hit: bool,
     t0: u64,
     /// Settings / cursors at the press (undo for a second finger); the
@@ -99,10 +88,15 @@ pub(super) struct Touch {
     /// pan so far (px).
     anchor: Option<usize>,
     pan: i32,
-    /// The axis the first motion decided (kept until the release).
+    /// The drag's axis (kept until the release): a grabbed marker's own
+    /// axis from the press, else decided by the first AXIS_PX of travel.
     axis: Option<Axis>,
-    /// Hold mode: grabbed.
-    grabbed: bool,
+    /// The item it moves (time item if `axis` is H, else level item).
+    item: u8,
+    /// Selection before the press (sel_v, sel_h, last_h): a drag from a
+    /// marker zone moves that marker but leaves the selection as it was
+    /// (owner 2026-11-02); only a still tap selects.
+    prev: (u8, u8, bool),
     /// Combined view: sub-row remainder of vertical moves.
     acc: i32,
     /// What moved (DBG:GEST? code) and its travel.
@@ -188,6 +182,11 @@ static mut CACHE: Cache = Cache {
     ps_t: 0,
 };
 
+/// The shown frame's column rows (the decoder's bar, app_decode.rs).
+pub(super) fn cache_seg() -> &'static [(i16, i16); 400] {
+    &cache().seg
+}
+
 fn cache() -> &'static mut Cache {
     unsafe { &mut *core::ptr::addr_of_mut!(CACHE) }
 }
@@ -267,25 +266,25 @@ impl Math {
 }
 
 /// The spectrum job and result: 4 KB, TCM .bss (all-zero `Fft::new`). Its
-/// 8 KiB work buffer is lent by the disk scratch arena (calbackup.rs
+/// 8 KiB work buffer is lent by the disk buffer arena (calbackup.rs
 /// `fft_work`).
 static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
 /// A frame was dropped because a disk job held the work buffer: ask for it
 /// again (a stopped scope re-emits its record) once the buffer is back.
 static mut FFT_RETRY: bool = false;
-const _: () = assert!(crate::calbackup::FFT_WORK == crate::fft::N);
+const _: () = assert!(crate::diskbuf::FFT_WORK == crate::fft::N);
 
 fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
-/// The FFT work buffer (calbackup.rs `fft_work`: the disk scratch arena;
+/// The FFT work buffer (diskbuf.rs `fft_work`: the disk buffer arena;
 /// `fresh` = a new job's load). None while a disk job holds it, or a disk
 /// user wrote it since the load: the job in flight, if any, is dropped (the
 /// last result stays) and the frame is asked again.
 #[inline(always)]
 fn fft_work(fresh: bool) -> Option<&'static mut crate::fft::Work> {
-    let w = crate::calbackup::fft_work(fresh);
+    let w = crate::diskbuf::fft_work(fresh);
     if w.is_none() {
         fft().abort();
         unsafe { FFT_RETRY = true };
@@ -311,7 +310,6 @@ pub(super) struct Sp {
     pub guide_until: u64,
     pub touch: Option<Touch>,
     pub pinch: Option<Pinch>,
-    pub drag_mode: u8,
     pub swipes: bool,
     pub press_fx: bool,
     pressed: u8,
@@ -396,7 +394,6 @@ impl Sp {
             guide_until: 0,
             touch: None,
             pinch: None,
-            drag_mode: DRAG_STOCK,
             swipes: false,
             press_fx: true,
             pressed: 0,
@@ -452,7 +449,9 @@ fn vdiv_idx(vidx: usize, probe: f32) -> u8 {
 /// Rows of the frame (13 + 280-row model) a pinch / pan preview maps: target
 /// column j of the graph from the cached columns, with a vertical scale `ky`
 /// around the zero row and a time scale `kx` around the trigger column.
-fn preview_rows(c: &Cache, j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
+/// `seg`: CH1's, the GEN trace's or CH2's cached rows (CH2 with `d_pos` 0,
+/// `ky` 1: its scale is not CH1's).
+fn preview_rows(c: &Cache, seg: &[(i16, i16); 400], j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
     // Source columns covering target column j.
     let (s0, s1) = if kx == 1.0 {
         let s = j - (hpos - c.hpos);
@@ -466,7 +465,7 @@ fn preview_rows(c: &Cache, j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: 
     };
     let (mut lo, mut hi) = (i32::MAX, i32::MIN);
     for s in s0.max(0)..s1.min(400) {
-        let (a, b) = c.seg[s as usize];
+        let (a, b) = seg[s as usize];
         if a > b {
             continue;
         }
@@ -572,6 +571,8 @@ impl App {
             rec: crate::csvlog::active(),
             rec_dim: su::rec_blink(now),
             rec_unit: su::rec_unit(self.rec_func),
+            dec: self.dec_band(),
+            dec_gen: self.dec_gen_shown(),
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_txt: self.ch2_label(true),
         }
@@ -817,11 +818,7 @@ impl App {
             } else if n >= scope::COLS {
                 let a = i * n / scope::COLS;
                 let b = ((i + 1) * n / scope::COLS).max(a + 1).min(n);
-                let (mut cl, mut ch) = (u16::MAX, 0u16);
-                for &v in &f.data[a..b] {
-                    cl = cl.min(v);
-                    ch = ch.max(v);
-                }
+                let (cl, ch) = f.data.min_max(a, b);
                 let (r1, r2) = (row(cl), row(ch));
                 lo = r1.min(r2);
                 hi = r1.max(r2);
@@ -831,7 +828,7 @@ impl App {
                 // interpolation (UF-41, src/sinc.rs Lanczos-3) instead of
                 // straight lines between the samples.
                 let p = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
-                let r = (r0 + slope * crate::sinc::at(f.data, p)) as i32;
+                let r = (r0 + slope * crate::sinc::at(&f.data, p)) as i32;
                 lo = r;
                 hi = r;
             } else {
@@ -854,6 +851,8 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        // The protocol decoder's band (app_decode.rs).
+        self.dec_frame(f);
         self.sp_math_frame(f);
         self.sp_render();
     }
@@ -868,6 +867,36 @@ impl App {
             g.clear();
             return;
         }
+        let s = &self.scope.s;
+        let (ky, kx, hpos) = self.sp_view();
+        let zr = (140 + s.pos) as f32;
+        let d_pos = s.pos - c.pos;
+        for j in 0..399 {
+            let fy = |(a, b): (i16, i16)| if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
+            g.tr[j] = fy(preview_rows(c, &c.seg, j as i32, d_pos, hpos, ky, kx, zr));
+            // The GEN trace is on CH1's scale; CH2 on its own (only the time
+            // axis moves). Owner 2026-11-01: both vanished while a stopped
+            // record was panned.
+            g.gn[j] = fy(preview_rows(c, &c.gseg, j as i32, d_pos, hpos, ky, kx, zr));
+            g.c2[j] = fy(preview_rows(c, &c.c2seg, j as i32, 0, hpos, 1.0, kx, 0.0));
+            let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
+            let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
+            g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
+                su::EMPTY
+            } else {
+                (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
+            };
+        }
+        // ABS math follows CH1's columns (the FFT keeps its spectrum).
+        if self.sp.math.on && self.sp.math.mode != 5 {
+            self.sp_math();
+        }
+    }
+
+    /// The preview's (vertical scale, time scale, trigger column) of the
+    /// cached frame: identity for a fresh frame.
+    fn sp_view(&self) -> (f32, f32, i32) {
+        let c = cache();
         let s = &self.scope.s;
         let (ky, kx) = match self.sp.pinch {
             // PINCH_LIVE: the shown frame stretched with the fingers.
@@ -884,92 +913,78 @@ impl App {
         };
         // A stopped pan moves the record under the trigger column.
         let pan = self.sp.touch.map_or(0, |t| t.pan);
-        let hpos = if s.run { s.hpos } else { c.hpos + pan };
-        let zr = (140 + s.pos) as f32;
-        let d_pos = s.pos - c.pos;
-        for j in 0..399 {
-            let (a, b) = preview_rows(c, j as i32, d_pos, hpos, ky, kx, zr);
-            g.tr[j] = if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
-            // The GEN / CH2 traces only as captured (no preview mapping).
-            let still = d_pos == 0 && hpos == c.hpos && ky == 1.0 && kx == 1.0;
-            let fy = |(a, b): (i16, i16)| if a > b || !still { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
-            g.gn[j] = fy(c.gseg[j]);
-            g.c2[j] = fy(c.c2seg[j]);
-            let (pa, pb) = (c.ps_a[j], c.ps_b[j]);
-            let (lo, hi) = (pa.0.min(pb.0), pa.1.max(pb.1));
-            g.ps[j] = if lo > hi || d_pos != 0 || hpos != c.hpos || ky != 1.0 || kx != 1.0 {
-                su::EMPTY
-            } else {
-                (su::trace_fy(h, lo as i32), su::trace_fy(h, hi as i32))
-            };
-        }
+        (ky, kx, if s.run { s.hpos } else { c.hpos + pan })
     }
 
     // ------------------------------------------------------------ CSV
 
     /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
     /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
-    /// Stock rule: refused while sampling ("Please stop sample").
+    /// Stock rule: refused while sampling ("Stop the scope first").
     #[inline(never)] // .cold (link-native.x): a tap (MF Settings Save CSV)
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
-            self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
+            self.toast(now, if self.scope.s.run { "Stop the scope first" } else { "No record to save" }, false);
             return;
         }
         if crate::screenshot::busy() || crate::csvlog::writing() {
             self.toast(now, "Disk busy, try again", false);
             return;
         }
-        let s = self.scope.s;
+        // The record's own settings (a stopped change only re-renders it);
+        // the probe is the current one, as the values (`Scope::volts`).
+        let mut s = self.scope.record_settings();
+        s.probe = self.scope.s.probe;
+        let (trig_v, runt_v, vd) = self.scope.record_levels();
         let (fs, t0, trig) = self.scope.record_info();
         let a = self.scope.volts(0.0);
         let b = self.scope.volts(1.0) - a;
         let mut h = crate::scope_csv::Hdr::new();
         let mut t = [0u8; 16];
-        h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", scope record (no real-time clock)\r\n");
+        h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
         // a x2 / x5 ... probe (#133).
-        su::fmt_div(&mut v, self.scope.vdiv(), unit);
+        su::fmt_div(&mut v, vd, unit);
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[self.scope.record_tb().min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        h.s(crate::cold_str!("# timebase ")).s(su::TB_LABELS[self.scope.record_tb().min(29)]).s(crate::cold_str!("/div, ")).s(v.as_str()).s(crate::cold_str!("/div, "));
         if wave {
             // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
-            h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");
+            h.s(crate::cold_str!("source DMM ")).s(self.wave_func_label()).s(crate::cold_str!(" (AD2, isolated jacks)"));
         } else {
-            h.s("probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+            h.s(crate::cold_str!("probe ")).s(scope::PROBE_NAMES[probe_idx(s.probe)]);
         }
-        h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
-        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
+        h.s(crate::cold_str!(", coupling ")).s(if s.ac { "AC" } else { "DC" }).s(crate::cold_str!(", sample rate ")).s(sr.strip_suffix("Hz").unwrap_or(sr)).s(crate::cold_str!("S/s, samples "));
+        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s(crate::cold_str!("\r\n"));
         let mut tv = su::Buf::new();
-        su::fmt_v(&mut tv, self.scope.trig_volts(), unit);
-        h.s("# trigger ");
-        self.sp_trig_desc(&mut h);
-        h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
-        h.s(", mode ").s(match s.mode {
-            scope::TrigMode::Auto => "Auto",
-            scope::TrigMode::Normal => "Normal",
-            scope::TrigMode::Single => "Single",
+        su::fmt_v(&mut tv, trig_v, unit);
+        h.s(crate::cold_str!("# trigger "));
+        self.sp_trig_desc(&mut h, &s, runt_v);
+        h.s(" ").s(if s.rising { crate::cold_str!("rising") } else { crate::cold_str!("falling") }).s(" ").s(tv.as_str());
+        h.s(crate::cold_str!(", mode ")).s(match s.mode {
+            scope::TrigMode::Auto => crate::cold_str!("Auto"),
+            scope::TrigMode::Normal => crate::cold_str!("Normal"),
+            scope::TrigMode::Single => crate::cold_str!("Single"),
         });
-        h.s(if trig { ", triggered\r\n" } else { ", untriggered\r\n" });
+        h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
         h.s(if wave {
             if amps {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
             } else {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
             }
         } else {
-            "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
+            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
-            self.toast(now, "Save CSV Error", false);
+            self.toast(now, "CSV save failed", false);
             return;
         }
         self.scope.hold = true;
@@ -977,22 +992,21 @@ impl App {
     }
 
     /// Trigger type text of the CSV header.
-    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr) {
-        let s = &self.scope.s;
+    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr, s: &scope::Settings, runt_v: f32) {
         match s.ttype {
             crate::trigsoft::PULSE => {
                 let mut b = su::Buf::new();
                 su::fmt_s125(&mut b, s.pwidth);
-                h.s("Pulse width ").s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(" (software),");
+                h.s(crate::cold_str!("Pulse width ")).s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, self.scope.runt_volts(), unit);
-                h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
+                su::fmt_v(&mut b, runt_v, unit);
+                h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
-                h.s("Edge");
+                h.s(crate::cold_str!("Edge"));
             }
         }
     }
@@ -1011,7 +1025,7 @@ impl App {
             }
             crate::screenshot::Shot::NoDisk => ("No disk", false),
             crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("Save CSV Error", false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("CSV save failed", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -1036,10 +1050,7 @@ impl App {
         }
         let Some(g) = self.scope.gen_sync() else { return };
         let rec = self.scope.record();
-        let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-        if off + f.data.len() > rec.len() {
-            return;
-        }
+        let Some(off) = rec.offset_of(&f.data) else { return };
         let n = f.data.len();
         let row = |v: f32| self.scope.row_of_volts(v).clamp(-30000.0, 30000.0) as i16;
         for i in 0..scope::COLS {
@@ -1084,10 +1095,9 @@ impl App {
         let (off, n) = if f.data.is_empty() {
             (0, rec.len())
         } else {
-            let o = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-            if o + f.data.len() > rec.len() {
+            let Some(o) = rec.offset_of(&f.data) else {
                 return;
-            }
+            };
             (o, f.data.len())
         };
         // N points: the window decimated by k (mean of k samples) when it
@@ -1109,14 +1119,14 @@ impl App {
             return;
         };
         crate::prof::enter(crate::prof::FFT);
-        fft().load(w, &rec[start..], k, len, a, b, f.fs as f32, m.win);
+        fft().load(w, &rec.sub(start, rec.len()), k, len, a, b, f.fs as f32, m.win);
         crate::prof::exit(crate::prof::FFT);
     }
 
     /// One slice of the spectrum job (every pass on the page): a finished
     /// spectrum is drawn.
     fn sp_math_step(&mut self) {
-        if unsafe { FFT_RETRY } && crate::calbackup::fft_free() {
+        if unsafe { FFT_RETRY } && crate::diskbuf::fft_free() {
             unsafe { FFT_RETRY = false };
             self.scope_invalidate();
         }
@@ -1177,9 +1187,11 @@ impl App {
             let c = cache();
             let mv = su::VDIV_VAL[m.vdiv.min(21) as usize];
             let vr = if self.scope.wave_on() { 4.0 * self.scope.vdiv() / 141.0 } else { 4.0 * scope::VSTEPS[c.range.min(scope::VIDX_MAX)] * self.scope.s.probe / 141.0 };
-            // (The CH1 columns are already widened: the bars touch.)
+            // (The CH1 columns are already widened: the bars touch.) The
+            // drag / pinch preview's time axis; the volts stay.
+            let (_, kx, hpos) = self.sp_view();
             for j in 0..399 {
-                let (lo, hi) = c.seg[j];
+                let (lo, hi) = preview_rows(c, &c.seg, j as i32, 0, hpos, 1.0, kx, 0.0);
                 if !c.valid || lo > hi {
                     g.ma[j] = su::EMPTY;
                     continue;
@@ -1442,7 +1454,11 @@ impl App {
             Gesture::Down(p) if su::top_badge(p.x, p.y).is_some() => Some(false),
             Gesture::Down(p) if app_wave::WAVE_BUILD && self.view == View::Scope && su::src_hit(p.x, p.y) => Some(false),
             Gesture::Down(p) if su::INNER.has(p.x as i16, p.y as i16) => {
+                let prev = (self.sp.sel_v, self.sp.sel_h, self.sp.last_h);
                 let (hit, side) = self.sp_select(p);
+                // A marker grab zone: that marker along its own axis.
+                let axis = hit.then_some(if self.sp.last_h { Axis::H } else { Axis::V });
+                let item = if self.sp.last_h { self.sp.sel_h } else { self.sp.sel_v };
                 let s = self.scope.s;
                 self.sp.touch = Some(Touch {
                     p0: p,
@@ -1456,8 +1472,9 @@ impl App {
                     cur: self.cur,
                     anchor: self.scope.anchor(),
                     pan: 0,
-                    axis: None,
-                    grabbed: gesture::grab_ms() == 0,
+                    axis,
+                    item,
+                    prev,
                     acc: 0,
                     code: 0,
                     travel: 0,
@@ -1477,14 +1494,6 @@ impl App {
                 }
                 Some(false)
             }
-            Gesture::Grab(_) => {
-                if let Some(t) = self.sp.touch.as_mut() {
-                    t.grabbed = true;
-                    t.applied = t.last;
-                    self.beep(now, 20);
-                }
-                Some(true)
-            }
             Gesture::Move(_, p) => {
                 self.sp_move(p, now);
                 Some(true)
@@ -1502,6 +1511,9 @@ impl App {
                 // A second finger: undo what the first finger moved (a pinch
                 // must not start with its accidental nudge), drop the touch.
                 if let Some(t) = self.sp.touch.take() {
+                    if t.hit {
+                        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = t.prev;
+                    }
                     self.cur = t.cur;
                     self.cursor_values();
                     if self.sp.frozen {
@@ -1601,44 +1613,32 @@ impl App {
         let d0 = (p.x as i32 - t.p0.x as i32).abs().max((p.y as i32 - t.p0.y as i32).abs());
         t.far = t.far.max(d0);
         if !t.moving {
-            if t.far <= TAP_TOL || !t.grabbed {
+            if t.far <= TAP_TOL {
                 self.sp.touch = Some(t);
                 return;
             }
+            // Off the markers (owner 2026-11-01, DHO800-style): the first
+            // AXIS_PX of travel pick the axis; sideways moves the trigger
+            // position, up / down the selected level item (scope_ui::
+            // drag_item; never the marker nearest to the finger). The
+            // travel so far is applied at once (`applied` is still p0).
+            if t.axis.is_none() {
+                let Some(h) = su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) else {
+                    self.sp.touch = Some(t);
+                    return;
+                };
+                let m = self.sp_model(now);
+                t.item = su::drag_item(&m, h, self.sp.sel_v).1;
+                t.axis = Some(if h { Axis::H } else { Axis::V });
+            }
             t.moving = true;
             // Hold the acquisition from the first move: no frame (paint,
-            // measurements) between the finger and the marker while the
-            // axis is still being decided (owner 2026-10-25: the level drag
-            // lagged). The release applies / refreshes as for any drag.
+            // measurements) between the finger and the marker (owner
+            // 2026-10-25: the level drag lagged). The release applies /
+            // refreshes as for any drag.
             self.sp.frozen = true;
         }
         let (mut dx, mut dy) = (p.x as i32 - t.applied.x as i32, p.y as i32 - t.applied.y as i32);
-        // One axis per gesture, decided by the first motion (every drag
-        // mode; the stock per-event split is gone): scope_ui::drag_axis /
-        // drag_delta.
-        if t.axis.is_none() {
-            match su::drag_axis((p.x as i32 - t.p0.x as i32).abs(), (p.y as i32 - t.p0.y as i32).abs()) {
-                Some(h) => {
-                    t.axis = Some(if h { Axis::H } else { Axis::V });
-                    // The item: the nearest marker of that axis to the press
-                    // (owner 2026-10-25: drags ignore the selection); it is
-                    // the selection from now on (filled, its guide line).
-                    let m = self.sp_model(now);
-                    if let Some((level, id)) = su::drag_target(&m, h, t.p0.x as i16, t.p0.y as i16) {
-                        if level {
-                            self.sp.sel_v = id;
-                        } else {
-                            self.sp.sel_h = id;
-                        }
-                        self.sp.last_h = !level;
-                    }
-                }
-                None => {
-                    self.sp.touch = Some(t);
-                    return;
-                }
-            }
-        }
         (dx, dy) = su::drag_delta(t.axis == Some(Axis::H), dx, dy);
         t.applied = p;
         self.sp.touch = Some(t);
@@ -1647,14 +1647,14 @@ impl App {
         }
         self.sp.guide_until = now + GUIDE_MS;
         if dy != 0 {
-            self.sp_move_v(dy, now);
+            self.sp_move_v(dy, t.item);
         } else {
-            self.sp_move_h(dx, now);
+            self.sp_move_h(dx, t.item);
         }
     }
 
-    /// Vertical move of the selected level item by `dy` px.
-    fn sp_move_v(&mut self, dy: i32, _now: u64) {
+    /// Vertical move of level item `id` by `dy` px.
+    fn sp_move_v(&mut self, dy: i32, id: u8) {
         let Some(mut t) = self.sp.touch else { return };
         // Pixels -> rows (combined view: the graph is shorter than 280 rows).
         let rows = if self.view == View::DmmScope {
@@ -1672,7 +1672,7 @@ impl App {
             return;
         }
         let mut st = self.scope.s;
-        match self.sp.sel_v {
+        match id {
             0 => {
                 // CH1 position; the trigger row moves with it (same voltage).
                 let p = (st.pos + rows).clamp(-392, 392);
@@ -1713,12 +1713,12 @@ impl App {
         self.sp_preview(st);
     }
 
-    /// Horizontal move of the selected time item by `dx` px.
-    fn sp_move_h(&mut self, dx: i32, _now: u64) {
+    /// Horizontal move of time item `id` by `dx` px.
+    fn sp_move_h(&mut self, dx: i32, id: u8) {
         let Some(mut t) = self.sp.touch else { return };
         t.travel += dx;
         self.sp.touch = Some(t);
-        match self.sp.sel_h {
+        match id {
             0 => {
                 if self.scope.rolling() {
                     return; // roll: the trigger items are not draggable
@@ -1777,6 +1777,12 @@ impl App {
     fn sp_release(&mut self, now: u64) {
         let Some(t) = self.sp.touch.take() else { return };
         self.sp.guide_until = now + GUIDE_MS;
+        // A marker dragged from its zone: the selection as before the press
+        // (the empty graph's up / down keeps moving what was selected).
+        if t.hit && t.moving {
+            self.sp.presel = false;
+        }
+        (self.sp.sel_v, self.sp.sel_h, self.sp.last_h) = su::sel_after(t.hit && t.moving, (self.sp.sel_v, self.sp.sel_h, self.sp.last_h), t.prev);
         // DBG:GEST? log.
         if t.moving && t.code != 0 {
             let i = if self.gest_n < GEST_N {
@@ -1984,12 +1990,25 @@ impl App {
     /// Tap-step of the timebase (true = slower): applied with a 30 ms beep
     /// and the stepped tab's pressed style; Halves: the tabs stay 2 s (the
     /// guide-line time). Nothing at the limit (its tab is hidden).
+    /// "Max zoom" when the scope took a slower timebase than `want`: stopped,
+    /// at the stored record's resolution (`Scope::tb_floor`; SCPI clamps
+    /// without it).
+    fn sp_tb_floor_toast(&mut self, want: usize, now: u64) {
+        if !self.scope.s.run && self.scope.s.tb > want && self.scope.s.tb == self.scope.tb_floor() {
+            self.toast(now, "Max zoom", false);
+        }
+    }
+
     fn sp_tb_step(&mut self, slower: bool, now: u64) -> bool {
         let mut st = self.scope.s;
         let top = self.tb_top() as usize;
-        let lo = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let lo = self.scope.tb_floor().min(st.tb);
         let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(lo) };
         if tb == st.tb {
+            // Stopped at the record's resolution (the faster tab is still shown).
+            if !slower && !st.run && lo > if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN } {
+                self.toast(now, "Max zoom", false);
+            }
             return false;
         }
         st.tb = tb;
@@ -2040,7 +2059,7 @@ impl App {
         let h = axis == Axis::H;
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
-        let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let tb_min = self.scope.tb_floor().min(st.tb);
         let mode = pinch_mode();
         let r = s.max(1) as f32 / s0.max(1) as f32;
         let n = if axis == Axis::V && self.scope.wave_on() {
@@ -2080,6 +2099,9 @@ impl App {
                 st.set_vidx(p.i);
             }
             self.scope_set(st, now);
+            if p.axis == Axis::H {
+                self.sp_tb_floor_toast(p.i, now);
+            }
         } else {
             self.sp_render();
         }
@@ -2220,6 +2242,7 @@ impl App {
             pcond: s.pcond,
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
+            dec: self.dec_setup_vals(),
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
@@ -2227,7 +2250,7 @@ impl App {
         }
     }
 
-    fn sp_popup_draw(&mut self) {
+    pub(super) fn sp_popup_draw(&mut self) {
         // The box's fills wait for its widgets (lcd.rs "deferred fills").
         crate::lcd::defer_start();
         let v = self.sp_popvals();
@@ -2254,7 +2277,7 @@ impl App {
     /// only that (`sp_uncover`, the next tick); the combined view, whose
     /// popups also cover the meter strip, repaints the whole page.
     #[inline(never)] // region C (link-native.x)
-    fn sp_popup_close(&mut self) {
+    pub(super) fn sp_popup_close(&mut self) {
         let grey = match self.sp.popup {
             su::Popup::Ch1(_) => 1,
             su::Popup::Math(_) => 2,
@@ -2383,6 +2406,7 @@ impl App {
                         su::TbHit::Row(r) => self.sp_tb_pick(r, now),
                         su::TbHit::Inside => {}
                     },
+
                     su::Popup::None => {}
                 }
                 if had_press && self.sp.popup != su::Popup::None && !self.redraw {
@@ -2449,6 +2473,7 @@ impl App {
         if i as usize != st.tb || roll_on {
             st.tb = i as usize;
             self.scope_set(st, now);
+            self.sp_tb_floor_toast(i as usize, now);
         }
         let tb = self.scope.s.tb as u8;
         self.sp.popup = su::Popup::Tb(tb);
@@ -2595,6 +2620,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::Dec(h) => {
+                self.dec_setup_tap(clk, h, now);
+                return;
+            }
+
         }
         let _ = clk;
         self.sp_popup_draw();
@@ -2706,11 +2736,7 @@ impl App {
             return;
         }
         let mut st = self.scope.s;
-        let (mut lo, mut hi) = (1023u16, 0u16);
-        for &v in f.data {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
+        let (lo, hi) = f.data.min_max(0, f.data.len());
         let pp = (hi - lo) as f32;
         let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
         let swing = l70 - l30 > 19.0;
@@ -2718,8 +2744,8 @@ impl App {
         // Period from rising crossings of the 30 % / 70 % levels.
         let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
         if swing {
-            for (i, &v) in f.data.iter().enumerate() {
-                let v = v as f32;
+            for i in 0..f.data.len() {
+                let v = f.data.at(i) as f32;
                 if v < l30 {
                     armed = true;
                 } else if armed && v > l70 {
@@ -2841,7 +2867,7 @@ impl App {
         st.range = r;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
-        let res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+        let res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
         let cyc = res.v[9];
         if period > 0.0 {
             let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
@@ -2870,14 +2896,16 @@ impl App {
 
     // ------------------------------------------------------------ persist
 
-    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 1..6,
+    /// Page settings -> persist words (p[1] bits 17..29, p[11] bits 3..6,
+    /// 12..15; p[11] bits 1..2, the removed "Scope drag" mode, stay 0 and
+    /// are ignored on load).
     /// 12..15). p[1] bits 28..29: tap-step mode XOR TAP_DEFAULT (older
     /// records: 0 = the default).
     pub(super) fn sp_persist(&self, p1: &mut u32, p11: &mut u32) {
         let s = &self.sp;
         *p1 |= ((s.colour as u32 ^ 2) & 0xF) << 17 | ((100 - s.bright.min(100)) as u32 & 0x7F) << 21;
         *p1 |= su::tap_code(s.tap_mode) << 28;
-        *p11 |= (s.drag_mode as u32 & 3) << 1 | (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
+        *p11 |= (s.swipes as u32) << 3 | (s.persist as u32 & 3) << 4 | (!s.press_fx as u32) << 6;
         *p11 |= ((s.grid.min(100) as u32 / 10) ^ 5) << 12;
     }
 
@@ -2946,7 +2974,6 @@ impl App {
         let s = &mut self.sp;
         s.colour = ((p1 >> 17 & 0xF) ^ 2).min(8) as u8;
         s.bright = 100 - (p1 >> 21 & 0x7F).min(100) as u8;
-        s.drag_mode = (p11 >> 1 & 3).min(1) as u8;
         s.swipes = p11 >> 3 & 1 != 0;
         s.persist = (p11 >> 4 & 3) as u8;
         s.press_fx = p11 >> 6 & 1 == 0;
@@ -2968,7 +2995,9 @@ const AS_P2_MAX: u8 = 3;
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
 /// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
 /// the result), timebase, range, min /
-/// max code, rising crossings, period (phase 4: Cycl) in us.
+/// max code, rising crossings, period (phase 4: Cycl) in us. SRAM, not the
+/// TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
 

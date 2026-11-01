@@ -463,7 +463,7 @@ pub const LOCK: Font = Font(0x0806_BF24); // 0x20 closed, 0x21 open
 pub const SAVE_BT: Font = Font(0x0805_B2E8); // 0x21 Bluetooth, 0x22 USB (ours)
 pub const ON_TAG: Font = Font(0x0806_C724);
 pub const LIGHTNING: Font = Font(0x0805_A0E0);
-pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp
+pub const TEXT22: Font = Font(0x0806_B13C); // menu text, class B, 1 bpp (+ our ℃ / ℉)
 
 /// Stock alignment 0..8: 0 left/top, 1 left/vcenter, 2 left/bottom, 3 right/top,
 /// 4 right/vcenter, 5 right/bottom, 6 hcenter/top, 7 hcenter/bottom, 8 center.
@@ -502,14 +502,18 @@ include!("stockfont_w.rs");
 // The USB symbol for the status bar (tools/mkusbglyph.py).
 include!("stockfont_usb.rs");
 
-/// Hand-drawn 1 bpp glyphs for SC_F12 (the scope bar's 12 px font has ASCII
-/// only): Ω and ° for the REC mark's function (scope_ui::rec_unit), drawn on
-/// the font's cap rows (2..10) with its 2 px stems; column-major, MSB first.
+/// Hand-drawn 1 bpp glyphs, column-major, MSB first. SC_F12 (the scope bar's
+/// 12 px font has ASCII only): Ω and ° for the REC mark's function
+/// (scope_ui::rec_unit), drawn on the font's cap rows (2..10) with its 2 px
+/// stems. F14: σ for the DMM statistics column (ui.rs), the font's 'o' with
+/// its top bar run out to the right, on the x-height rows.
 ///   Ω  ...###..  ..##.##.  .##...##  .##...##  .##...##  ..##.##.
 ///      ...#.#..  ...#.#..  .###.###        °  ..##.  .#..#  .#..#  ..##.
-static F12_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 2] = [
+///   σ  .######  ##..##.  ##..##.  ##..##.  ##..##.  ##..##.  .####..
+static HAND_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 3] = [
     (0x0804_F24C, '\u{3a9}', false, 8, 9, 8, 1, &[0x00, 0x1c, 0x5f, 0x38, 0xf8, 0x06, 0x3d, 0xf2, 0x71]),
     (0x0804_F24C, '\u{b0}', false, 5, 4, 6, 6, &[0x06, 0x99, 0x60]),
+    (0x0805_B138, '\u{3c3}', false, 7, 7, 7, 0, &[0x7d, 0xfe, 0x0c, 0x1f, 0xff, 0xa0, 0x00]),
 ];
 
 /// Glyph of `ch`. The stock DMM fonts have only the units they need: no W in
@@ -521,7 +525,7 @@ fn glyph_or_twin(font: Font, ch: char) -> Option<(Glyph, i16)> {
     if let Some(g) = font.glyph(ch as u32) {
         return Some((g, 0));
     }
-    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(F12_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
+    match OWN_GLYPHS.iter().chain(USB_GLYPHS.iter()).chain(HAND_GLYPHS.iter()).find(|o| o.0 == font.0 && o.1 == ch) {
         Some(&(_, _, four, w, h, adv, yoff, b)) => Some((Glyph::own(b, four, w, h, adv, yoff), 0)),
         None if ch == 'W' => font.glyph('V' as u32).map(|g| (g, (g.w as i16 * 9 + 8) / 16)),
         None => None,
@@ -974,19 +978,17 @@ pub fn text_width(font: Font, text: &str, spacing: i8) -> i16 {
     last as i16
 }
 
-/// Map our unit text to the stock font's code points (no 'k' / 'µ' glyphs:
-/// the stock writes "K" and "u", e.g. "KΩ"). The energy units keep 'k'
-/// ("kWh", "kVAh": our LETTERS k, stockfont_w.rs; F14 / TEXT22 have one).
+/// Map our unit text to the stock font's code points: no 'µ' glyph (the
+/// stock writes "u"), "°C" as the one glyph ℃. 'k' stays lowercase (owner,
+/// issue #136: "kW", "kΩ"; the stock wrote "K"): the unit fonts without one
+/// take ours (stockfont_w.rs).
 pub fn unit_text<'a>(u: &str, buf: &'a mut [u8; 16]) -> &'a str {
     let mut n = 0;
-    let energy = u.ends_with("Wh") || u.ends_with("VAh");
     // '\u{b0}' in u, as bytes: a str search for a non-ASCII char pulls
     // core's two-way string searcher (~1 KB) into region B.
     let deg = u.as_bytes().windows(2).any(|w| w == [0xC2, 0xB0]);
     for c in u.chars() {
         let c = match c {
-            'k' if energy => 'k',
-            'k' => 'K',
             '\u{b5}' => 'u',
             '\u{b0}' => continue,
             'C' if deg => '\u{2103}',
@@ -1234,8 +1236,13 @@ impl Ink {
 /// (cfg(test)): 0 = background, else `layer << 8 | glyph`, layer 1.. indexing
 /// `layers` = (probe kind, background colour) of each drawn element, so one
 /// composite window still reports its shapes, texts and icons separately.
-#[inline(never)]
+#[inline(always)]
 pub fn paint(r: Rect, layers: &[(u8, Color)], mut f: impl FnMut(i16, i16) -> (Color, u16)) {
+    paint_dyn(r, layers, &mut f)
+}
+
+#[inline(never)]
+fn paint_dyn(r: Rect, layers: &[(u8, Color)], f: &mut dyn FnMut(i16, i16) -> (Color, u16)) {
     let x0 = r.x.max(0);
     let y0 = r.y.max(0);
     let x1 = (r.x + r.w - 1).min(lcd::W as i16 - 1);

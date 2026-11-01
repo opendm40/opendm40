@@ -28,10 +28,15 @@ All documentation of opendm40, by reader. Start at the
 ### Reference
 
 - [native-boot.md](../firmware/docs/native-boot.md): the boot chain, the
-  update format, the flash map, the shim, recovery, the USB disk, the serial
+  update format, the flash map, the shim, the loader entries, the USB disk, the serial
   number.
 - [ram-budget.md](../firmware/docs/ram-budget.md): the RAM users and when each
   is live.
+- [hidden-memory.md](../firmware/docs/hidden-memory.md): memory beyond the
+  datasheet (ADDSRAM, flash above 1 MiB, peripheral RAMs) probed on the
+  device; the memprobe debug commands.
+- [ram-pools-audit.md](../firmware/docs/ram-pools-audit.md): the statics of
+  200 B and more, which can share bytes, and a static pool design.
 - [compact-log-format.md](../firmware/docs/compact-log-format.md): the DLG log
   format on the disk, CSV on read.
 - [bt-scpi.md](../firmware/docs/bt-scpi.md): SCPI over Bluetooth next to the

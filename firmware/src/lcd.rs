@@ -201,7 +201,9 @@ struct Defer {
     layer: [(u16, u16, u16, u16, Color); DEFER_N],
 }
 
-// TCM .bss (CPU only; was .sram_bss until the SRAM audit, docs/native-boot.md).
+// .sram_bss on test/scope-chain-0.4: the decoder's stack paths leave no TCM
+// for it (release/0.4.0 has it in TCM .bss; docs/native-boot.md "SRAM audit").
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut DEFER: Defer = Defer { on: false, n: 0, rows: 0, pend: [0; CH], drawn: [0; CH], layer: [(0, 0, 0, 0, 0); DEFER_N] };
 
 #[inline(always)]
@@ -643,6 +645,34 @@ pub fn strips(buf: &mut [Color], mut draw: impl FnMut()) {
         window_raw(0, y, W - 1, y1, CMD_RAMWR);
         push(&buf[..px]);
         y = y1 + 1;
+    }
+}
+
+/// As `strips`, for the box x0..=x1, y0..=y1 only (a pressed item:
+/// app_press.rs): `draw` runs once per strip of the box's rows and only the
+/// box's pixels are sent, each once in its final colour; what `draw` puts
+/// outside the box is dropped. `draw` must cover the whole box.
+#[inline(never)]
+pub fn strips_box(buf: &mut [Color], x0: u16, y0: u16, x1: u16, y1: u16, draw: &mut dyn FnMut()) {
+    let n = (buf.len() / W as usize).min(H as usize) as u16;
+    let (x1, y1) = (x1.min(W - 1), y1.min(H - 1));
+    if n == 0 || x0 > x1 || y0 > y1 {
+        draw();
+        return;
+    }
+    defer_flush();
+    let mut y = y0;
+    while y <= y1 {
+        let ye = (y + n - 1).min(y1);
+        *strip() = Strip { on: true, y0: y, y1: ye, buf: buf.as_mut_ptr(), wx0: 0, wx1: W - 1, wy0: y, wy1: ye, cy: ye, n: 0, p: core::ptr::null_mut() };
+        draw();
+        strip().on = false;
+        window_raw(x0, y, x1, ye, CMD_RAMWR);
+        for r in 0..=(ye - y) as usize {
+            let o = r * W as usize;
+            push(&buf[o + x0 as usize..=o + x1 as usize]);
+        }
+        y = ye + 1;
     }
 }
 

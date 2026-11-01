@@ -1,9 +1,9 @@
-//! Entry after the boot decision: RAM init, then recovery or the normal opendm40
+//! Entry after the boot decision: RAM init, then the normal opendm40
 //! main with the board bring-up the stock firmware used to do.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::boot::{self, BootInfo, Mode};
+use crate::boot::{self, BootInfo};
 use crate::mmio;
 
 #[path = "splash.rs"]
@@ -208,7 +208,7 @@ fn normal(_info: &BootInfo, dry: bool) -> ! {
 }
 
 /// Everything before main(), in its own never-inlined frame so the SPI-disk
-/// block buffers (fatren ~9 KiB, calbackup ~2 KiB + scratch, each in its own
+/// block buffers (fatren ~9 KiB, calbackup ~2 KiB + the diskbuf arena, each in its own
 /// never-inlined function too) are popped before main()'s 26 KiB frame is
 /// pushed (review 2026-10-13 B1).
 #[inline(never)]
@@ -292,11 +292,8 @@ pub fn before_usb() {
 pub unsafe fn start(info: BootInfo) -> ! {
     init_ram();
     extra_ram_init();
-    // The serial number (USB iSerial, SCSI VPD 0x80, *IDN?) for both modes.
+    // The serial number (USB iSerial, SCSI VPD 0x80, *IDN?).
     crate::uid::init();
     boot::set_info(info);
-    match info.mode {
-        Mode::Recovery => crate::recovery::run(),
-        Mode::Normal => normal(&info, cfg!(feature = "fatren-dry-run")),
-    }
+    normal(&info, cfg!(feature = "fatren-dry-run"))
 }

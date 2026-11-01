@@ -2,9 +2,12 @@
 #![no_main]
 
 mod app;
+mod autooff;
 mod bargraph;
 mod bt;
 mod clock;
+/// cold_str! / cold_set!: read-only data of region C code in region C.
+mod cold;
 mod danger;
 mod dmm;
 mod fastvos;
@@ -40,11 +43,16 @@ unsafe impl critical_section::Impl for NoMask {
     }
 }
 mod meter;
+#[cfg(feature = "memprobe")]
+mod memprobe;
 mod mmio;
 mod persist;
 mod power;
 mod prof;
+mod pack10;
+mod cring;
 mod scope;
+mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
@@ -52,6 +60,7 @@ mod scope_ch2;
 mod fft;
 mod sinc;
 mod trigsoft;
+mod scanline;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
@@ -164,9 +173,9 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0xD040);
 static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-/// 512 bytes in TCM; the 4 KiB of the builds whose disk is the SPI flash
-/// (recovery-usb, no `vdisk`) go to SRAM (the TCM stack keeps its 42 KiB).
-#[cfg_attr(all(target_os = "none", any(feature = "recovery-usb", not(feature = "vdisk"))), link_section = ".sram_bss")]
+/// 512 bytes in TCM; the 4 KiB of the builds without `vdisk` (the SPI flash
+/// is the disk) go to SRAM (the TCM stack keeps its 42 KiB).
+#[cfg_attr(all(target_os = "none", not(feature = "vdisk")), link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -356,6 +365,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     let mut sec_shown = [0u32; 6];
     // Streamed USBTMC reply: last progress (usbtmc stream_pos) and its time.
     let mut stream_seen = (usize::MAX, 0u64);
+    // A plain reply made no progress for STREAM_STALL_MS: no more polling
+    // for it (until it ends).
+    let mut reply_stalled = false;
     let cyc = || unsafe { mmio::r32(0xE000_1004) };
 
     loop {
@@ -389,6 +401,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
             app::finish_disk_writes(now); // never cut a FAT / dir write
+            // Hand over quietly (DBG:UPDATE: the loader runs next; a reset
+            // drops the power-hold pins until the ROM drives them again):
+            // the big loads off, the SPI flash idle.
+            app.quiesce_for_reset(&mut clk);
+            let _ = spiflash::wait_idle(3000);
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
@@ -434,24 +451,36 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if msc::HOST_IO.swap(false, core::sync::atomic::Ordering::Relaxed) {
             app.note_host_activity(now);
         }
-        // A streamed USBTMC reply (WAV:DATA? of the scope record,
-        // scope_wav.rs): its packets go out as the host takes them, polled
-        // like a disk READ above, within the same budget per pass. The scope
-        // keeps its record (no RUN) until the last packet left.
-        if tmc.streaming() {
+        // A USBTMC reply going out: its packets go out as the host takes
+        // them, polled like a disk READ above, within the same budget per
+        // pass (one packet per pass otherwise: a 6 KB MMEM:DATA? piece took
+        // ~95 passes, 1.2 .. 7 s on the scope page with CH2 and the decoder,
+        // device #174). A streamed reply (WAV:DATA? of the scope record,
+        // scope_wav.rs) also while it waits for the host's next request; the
+        // scope keeps its record (no RUN) until the last packet left.
+        if !tmc.sending() {
+            reply_stalled = false;
+        }
+        let streaming = tmc.streaming();
+        if streaming || (tmc.sending() && !reply_stalled) {
             let budget = if logger.active() || fastlog::active() { MSC_PUMP_LOG_CYC } else { MSC_PUMP_CYC };
             let t0 = cyc();
-            while tmc.streaming() && cyc().wrapping_sub(t0) < budget {
+            while (tmc.streaming() || tmc.sending()) && cyc().wrapping_sub(t0) < budget {
                 dev.poll(&mut [&mut tmc, &mut msc]);
             }
             // A host that stopped reading and sends nothing more would hold
-            // the scope (and this budget) for good: give the stream up after
-            // STREAM_STALL_MS without progress.
+            // the scope (and this budget) for good: give a stream up, stop
+            // polling for a plain reply after STREAM_STALL_MS without
+            // progress.
             let p = tmc.stream_pos();
             if p != stream_seen.0 {
                 stream_seen = (p, now);
             } else if now >= stream_seen.1 + STREAM_STALL_MS {
-                tmc.cancel_stream();
+                if streaming {
+                    tmc.cancel_stream();
+                } else {
+                    reply_stalled = true;
+                }
             }
         } else {
             stream_seen = (usize::MAX, now);
@@ -778,6 +807,86 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
+                    scpi::Dbg::CapDisMs(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_ms(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_ms());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapJumpN(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_jumpn(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_jumpn());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisEnd(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_end(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_end());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisMode(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dismode(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dismode());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisRef(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_disref(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_disref());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapIdis(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_idis(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_idis());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapClass(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_class(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_class() as u32);
+                            true
+                        }
+                    }
+                    scpi::Dbg::Cap => {
+                        scpi.len = 0;
+                        for (i, v) in app.dmm.cap_info().iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            scpi.put_f32(*v);
+                        }
+                        true
+                    }
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;
@@ -1062,14 +1171,21 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(6, state, n, item) => {
                         dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(5, r26, nr, flags) => {
                         dbg_dcv(app, &mut clk, logger, &mut scpi, port, r26, nr, flags);
                         false
                     }
+                    // Without the feature the parser makes no TORN / NOISE /
+                    // DCV / N7 request.
+                    #[cfg(not(feature = "ad2-exp"))]
+                    scpi::Dbg::Ad2(..) => false,
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(kind, r26, n, b) => {
                         // Synchronous AD2 experiment in the current stock AC
                         // row; the row is rewritten afterwards.
@@ -1097,6 +1213,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     false
                 }
                 scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
+                scpi::Out::Dcd(scpi::Dcd::Frames(n)) => {
+                    port.respond_with(&mut |b| Some(app.dec_frames(n, b)));
+                    false
+                }
+                scpi::Out::Dcd(c) => app.dec_scpi(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1643,7 +1764,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 && !upload::busy()
                 && !logger.disk_writes_blocked()
                 && !hy3131::streaming()
+                // The decoder's frame log streams (its 13 ms ring at
+                // 1.25 MS/s outlasts no erase).
+                && !scope::LOG_LIVE.load(core::sync::atomic::Ordering::Relaxed)
                 && now.saturating_sub(host_io_t) >= 500,
+
         );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
         // changed (a recording ended, a screenshot / scope record, a delete),
@@ -1871,11 +1996,13 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
+            | Out::Dcd(scpi::Dcd::Frames(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:DCV? range,r26,n[,flags] (device test 6.5, src/ad2exp.rs
 /// `dcv_test`): in plain DC V, not while logging; sets the manual DC V
 /// range, runs the test, appends the AD1 means in uV (the DC V calibration
@@ -1923,6 +2050,7 @@ fn dbg_dcv(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &
     app.last_raw = None;
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:N7? item,state,n (datasheet note 7 in the stock DC rows,
 /// src/ad2exp.rs `n7_test`): in DC V / DC mV, not while logging; sets the
 /// MF range item (0 = 600 mV DC, 1..4 = 6 .. 1000 V; it stays manual), runs
@@ -2152,8 +2280,10 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
 #[inline(never)] // .cold (link-native.x): once per session
 fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur_s: u32, trusted: bool) -> Option<&'static str> {
     let hz = fast_next_hz(logger, logger.ad2());
-    if (logger.wave() && logger.active()) || fastlog::active() {
-        // The DMM wave view owns the AD2 stream / a disk session runs.
+    if (logger.wave() && logger.active()) || fastlog::active() || app.scope.log_on() {
+        // The DMM wave view owns the AD2 stream / a disk session runs / the
+        // decoder's frame log is open (its view code is in region C, which
+        // must not run under the stream ISR: app_log.rs log_open).
         return Some("Settings conflict");
     }
     if disk && !trusted {
@@ -2291,38 +2421,38 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         None => b"cts",
     };
     let mut w = dlog::Txt { b: &mut out[..], n: 0 };
-    w.s("# Alientek ");
+    w.s(crate::cold_str!("# Alientek "));
     w.s(ident::model_name());
-    w.s(", opendm40 ");
+    w.s(crate::cold_str!(", opendm40 "));
     w.s(ident::VERSION);
-    w.s(", fast log, source ");
+    w.s(crate::cold_str!(", fast log, source "));
     w.s(if ad2 { "AD2" } else { "AD1" });
-    w.s(", mode ");
+    w.s(crate::cold_str!(", mode "));
     w.u(l.mode() as u64);
-    w.s(", range ");
+    w.s(crate::cold_str!(", range "));
     w.u(l.range().max(0) as u64);
-    w.s(", nominal ");
+    w.s(crate::cold_str!(", nominal "));
     w.u(l.nominal_mhz() as u64 / 1000);
     w.c(b'.');
     let f = l.nominal_mhz() % 1000;
     w.c(b'0' + (f / 100) as u8);
     w.c(b'0' + (f / 10 % 10) as u8);
     w.c(b'0' + (f % 10) as u8);
-    w.s(" S/s, chop ");
+    w.s(crate::cold_str!(" S/s, chop "));
     w.u(l.chop() as u64);
     if ad2 {
-        w.s(", r26 ");
+        w.s(crate::cold_str!(", r26 "));
         w.u(l.r26() as u64);
-        w.s(if l.mode() == 0 { ", AC-coupled" } else { ", DC-coupled" });
+        w.s(if l.mode() == 0 { crate::cold_str!(", AC-coupled") } else { crate::cold_str!(", DC-coupled") });
     } else {
-        w.s(", osr ");
+        w.s(crate::cold_str!(", osr "));
         w.u(l.osr() as u64);
     }
-    w.s(if ad2 { "\r\n# raw: AD2 code, 262143 = 1.25 V\r\n" } else { "\r\n# raw: AD1 counts, uncalibrated\r\n" });
-    w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
+    w.s(if ad2 { crate::cold_str!("\r\n# raw: AD2 code, 262143 = 1.25 V\r\n") } else { crate::cold_str!("\r\n# raw: AD1 counts, uncalibrated\r\n") });
+    w.s(if sc.is_some() { crate::cold_str!("t_s,raw,value_") } else { crate::cold_str!("t_s,raw,lost_before\r\n") });
     if sc.is_some() {
         w.bytes(unit);
-        w.s(",lost_before\r\n");
+        w.s(crate::cold_str!(",lost_before\r\n"));
     }
     (w.n, par, unit)
 }
@@ -2421,6 +2551,8 @@ fn wait_for_watchdog() -> ! {
     }
 }
 
+// Unused in the build.sh image (-Cpanic=immediate-abort: a panic is a HardFault,
+// the shim's default_handler loop); a plain `cargo build` still calls it.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
@@ -2447,6 +2579,7 @@ mod board;
 mod boot;
 mod fatren;
 mod calbackup;
+mod diskbuf;
 #[cfg(feature = "vdisk")]
 mod vdisk;
 #[cfg(feature = "vdisk")]
@@ -2465,5 +2598,4 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-mod recovery;
 mod shim;

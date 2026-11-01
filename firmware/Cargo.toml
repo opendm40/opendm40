@@ -20,7 +20,7 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr"]
+default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali", "dec-log"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
@@ -40,13 +40,27 @@ vdisk = []
 # SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs) only
 # reports what it would do.
 fatren-dry-run = []
-# Recovery alternatives for tests (default recovery = zero the 12-byte loader
-# marker at 0x08008000 + reset -> vendor loader update screen + USB disk):
-#   recovery-file: 0-byte DM40RCVR.BIN on the SPI FAT + power off (needs a cold
-#     boot with the key held long enough to reach the loader);
-#   recovery-usb: our own minimal USB mass-storage disk (no LCD).
-recovery-file = []
-recovery-usb = []
+# The AD2 device experiments DBG:AD2:TORN? / NOISE? / DCV? / N7? (src/ad2exp.rs;
+# tools/dm40scpi.py `ad2 torn` / `ad2 noise`, tools/experiments/ad2dcv.py).
+# Not default on test/scope-chain-0.4: region B had no room for them next to
+# the protocol decoder (docs/native-boot.md "Region B audit #7"). Build with
+# --features ad2-exp for an experiment session.
+ad2-exp = []
+# DBG:SRC, the ohm-source map row (src/dbgsrc.rs, tools/srcmap.py). Not
+# default on test/scope-chain-0.4 for the same reason.
+dbg-src = []
+# The decoder's frame log (Mode Log, DECode:MODE LOG, View::Decode;
+# src/app_log.rs). Default (owner, 2026-11-01); without it Mode Log is
+# refused and the band decode is unchanged.
+dec-log = []
+# UART decoding recognises Modbus RTU frames (src/decode.rs `MODBUS`; region
+# B 1 016 B). Default (owner, 2026-11-01); without it UART frames are plain
+# bytes (DECode:PROTocol MODBus still selects UART).
+dec-modbus = []
+# DALI (IEC 62386, 1200 bit/s bi-phase) in the protocol decoder (src/decode.rs
+# `DALI`, `dali_step`). Default (0.4.0): region B 2.9 KB; without it
+# DECode:PROTocol DALI is refused.
+dec-dali = []
 # DBG:HYSPI:SELF? / WR?, the HY3131 bus self-test and write experiment
 # (src/hyspi.rs; emu/hy3131/ad2streamtest.py). Off by default: ~2.3 KB of
 # region C (docs/native-boot.md "Region B audit #9"); without it the two
@@ -73,8 +87,13 @@ dbg-diag = []
 dbg-ohm6 = []
 # DBG:SENTinel? / DBG:SENTinel:REG? (Sentinel::diag_text, Dmm::reg_text).
 dbg-sent = []
-# DBG:SRC, the ohm-source map row (src/dbgsrc.rs, tools/srcmap.py).
-dbg-src = []
+# DBG:SRC: dbg-src above.
+# DBG:ACDC:METH / STAT / ZERO / R0, the AC+DC prototype methods B and C
+# (src/acdcm.rs; docs/acdc-approaches.md; ~6.6 KB of region B, 2.7 KB of
+# region C, 480 B of RAM). Off by default: AC+DC is method A (the stock
+# alternation, dmm.rs) only and the four commands are refused (undefined
+# header).
+acdc-meth = []
 # DBG:ACDC:TRACE, the AC+DC event trace (src/acdctr.rs; a 64-entry ring,
 # 1.8 KB of RAM). Off by default: the trace never records and the command is
 # refused (undefined header).
@@ -84,6 +103,10 @@ acdc-trace = []
 # beeper's CMP pin buffer, HY3131 R20 bit 2, off; the boot key-hold cue
 # silent). Not for releases.
 mute = []
+# Debug-only memory probes (src/memprobe.rs: DBG:PEEK? / POKE / MTEST? /
+# MVER? / MTIME? / MCLK, docs/hidden-memory.md); the HardFault vector catches
+# a fault of a probe access. Not for releases.
+memprobe = []
 
 [dependencies]
 cortex-m = "0.7.7"
@@ -100,6 +123,8 @@ usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
 # previous command's pass / fail panicked in `set_status`), the IO buffer
 # cleared at every reset, Bulk-Only Mass Storage Reset handled (a control
 # OUT; the crate looked for it in control IN), never more IN data than the
-# host asked for, `Scsi::sending` (msc.rs pumps the fill / CSW).
+# host asked for, `Scsi::sending` (msc.rs pumps the fill / CSW). And its
+# state asserts panic without a message (no Debug text of the states in
+# region B, ~0.8 KB).
 [patch.crates-io]
 usbd-storage = { path = "vendor/usbd-storage" }

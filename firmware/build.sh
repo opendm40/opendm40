@@ -10,7 +10,7 @@
 # staged on the device). tools/reload.sh passes its arguments here.
 # DM40_TDIR / DM40_OUT (environment) build elsewhere than target/native /
 # opendm40.bin, with every check (tools/build-variants/run.sh builds
-# the recovery-usb / recovery-file / no-ad2-isr variants this way, so a test
+# the non-default feature sets this way, so a test
 # build never replaces the image reload.sh installs).
 set -e
 cd "$(dirname "$0")"
@@ -29,6 +29,9 @@ LLVMBIN=$(echo "$(rustc --print sysroot)"/lib/rustlib/*/bin)
 OBJCOPY=$LLVMBIN/llvm-objcopy
 [ -x "$OBJCOPY" ] || { echo "build.sh: no llvm-objcopy in $LLVMBIN (rustup component add llvm-tools)" >&2; exit 1; }
 export DM40_LLVMBIN="$LLVMBIN"
+# -Zbuild-std below compiles core from the toolchain's sources (component rust-src).
+[ -d "$(rustc --print sysroot)/lib/rustlib/src/rust/library/core" ] ||
+    { echo "build.sh: no core sources in $(rustc --print sysroot) (rustup component add rust-src)" >&2; exit 1; }
 
 if [ "$1" = native ]; then shift; fi
 SCRIPT=link-native.x; TDIR=${DM40_TDIR:-target/native}; OUT=${DM40_OUT:-opendm40.bin}
@@ -64,9 +67,18 @@ done
 # docs/native-boot.md "Region B audit #6"). A nightly flag: RUSTC_BOOTSTRAP=1
 # lets the pinned stable rustc take it, for this firmware build only (the
 # host test builds do not use build.sh and keep their panic locations).
+# -Zbuild-std=core: core and compiler_builtins compiled from the toolchain's
+# rust-src with this profile (opt-level z, LTO) and these RUSTFLAGS instead
+# of the prebuilt rust-std ones (~4.6 KB of regions B + C; PR description).
+# alloc is not built: nothing uses it. The same RUSTC_BOOTSTRAP covers it.
+# -Cpanic=immediate-abort (unstable; overrides the profile's panic=abort,
+# the later -C wins): a panic is a `udf` -> HardFault -> the shim's
+# default_handler loop -> FWDGT reset, counted by DBG:BOOT? as before; no
+# panic handler and no panic formatting code (~19 KB of regions B + C). The
+# magenta bar of main.rs `panic` is not drawn in this build.
 RUSTC_BOOTSTRAP=1 \
-RUSTFLAGS="-Zlocation-detail=none -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
-    cargo build --release "$@"
+RUSTFLAGS="-Zlocation-detail=none -Zunstable-options -Cpanic=immediate-abort -C link-arg=-T$SCRIPT -C target-cpu=cortex-m4$REMAP" CARGO_TARGET_DIR=$TDIR \
+    cargo build --release -Zbuild-std=core "$@"
 ELF=$TDIR/thumbv7em-none-eabihf/release/opendm40
 
 # Static worst-case stack path vs the TCM stack (>= 20 KiB headroom; the

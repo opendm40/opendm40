@@ -24,8 +24,9 @@ pub struct Ch2 {
     /// After a lost stream, no new start before this time (ms): a stream
     /// that cannot run must not rewrite the DMM row every pass.
     pub retry_at: u64,
-    /// The store was frozen by a STOP: restart it at the next RUN (the
-    /// samples in between were thrown away).
+    /// The store was frozen by a STOP (after one last drain of the
+    /// stream): restart it at the next RUN (the samples in between were
+    /// thrown away).
     pub frozen: bool,
 }
 
@@ -112,7 +113,7 @@ impl App {
         }
         let sc = WaveScale::of(a.per_code, a.offset, self.ch2.vdiv, a.amps, a.ac);
         let real = (real_mhz / 1000).max(1);
-        scope_ch2::store().reset(c0, real, sc, crate::logger::wave::dropped());
+        scope_ch2::store().reset(c0, real, sc);
         self.ch2.live = true;
         self.ch2.frozen = false;
         self.ch2.fs = fs;
@@ -136,22 +137,31 @@ impl App {
     }
 
     /// The stream into the CH2 store (every scope pass and between its
-    /// slow parts, as the wave view's `wave_keep`). A stopped scope keeps
-    /// the store as it was (the stored record's CH2) and throws the
-    /// stream away.
+    /// slow parts, as the wave view's `wave_keep`); a hole restarts the
+    /// store (`Store::push`). A STOP waiting for its frame still takes it
+    /// (`Scope::acquiring`). A stopped scope (STOP, a Single / DIGitize
+    /// record) takes the stream in once more, since the logger ring holds
+    /// the CH2 of the record's newest part (at 2 ms/div all of it), and
+    /// re-renders the record with it; then it keeps the store as it is
+    /// (the stored record's CH2) and throws the stream away.
     pub(super) fn ch2_drain(&mut self) {
         if !self.ch2.live {
             return;
         }
         let st = scope_ch2::store();
-        if !self.scope.s.run {
-            crate::logger::wave::drain(&mut |_| {});
+        if !self.scope.acquiring() {
+            if self.ch2.frozen {
+                crate::logger::wave::drain(&mut |_| {});
+                return;
+            }
             self.ch2.frozen = true;
+            if crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw)) > 0 {
+                self.scope.refresh_shown();
+            }
             return;
         }
-        let holes = crate::logger::wave::dropped();
-        if holes != st.dropped() || self.ch2.frozen {
-            st.restart(holes);
+        if self.ch2.frozen {
+            st.restart();
             self.ch2.frozen = false;
         }
         crate::logger::wave::drain_ts(&mut |ts, raw| st.push(ts, raw));
@@ -226,8 +236,11 @@ impl App {
         let st = scope_ch2::store();
         let k = 141.0 / (4.0 * self.ch2.vdiv);
         let row = |v: f32| (140.0 - v * k).clamp(-30000.0, 30000.0) as i16;
+        // Columns left to right (rising times): one anchor search per frame
+        // and f32 maths per column (`Store::span_run`).
+        let mut run = st.run();
         let mut put = |i: usize, t0: u32, len: f32| {
-            if let Some((lo, hi)) = st.span(t0, len) {
+            if let Some((lo, hi)) = st.span_run(&mut run, t0, len) {
                 let (a, b) = (row(hi), row(lo));
                 out[i] = (a.min(b), a.max(b));
             }
@@ -237,7 +250,7 @@ impl App {
             for i in 0..scope::COLS {
                 // Beyond ~10 s back: older than the store anyway (and the
                 // DWT wrap).
-                let back = (scope::COLS - i) as f64 * per_col as f64;
+                let back = (scope::COLS - i) as f32 * per_col;
                 if back < 2e9 {
                     put(i, end.wrapping_sub(back as u32), per_col);
                 }
@@ -247,19 +260,21 @@ impl App {
         let n = f.data.len();
         let Some((t0, step)) = self.scope.rec_time() else { return };
         let rec = self.scope.record();
-        let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-        if n < 2 || off + n > rec.len() {
+        let Some(off) = rec.offset_of(&f.data) else { return };
+        if n < 2 {
             return;
         }
+        // The frame's first sample; the columns' offsets from it in f32
+        // (a frame spans < 2^31 cycles: ~1 us error at most).
+        let t0 = t0.wrapping_add((off as f64 * step as f64) as u64 as u32);
+        let kn = (n - 1) as f32 / (scope::COLS - 1) as f32;
         for i in 0..scope::COLS {
             let (a, b) = if n >= scope::COLS {
-                ((i * n / scope::COLS) as f64, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f64)
+                ((i * n / scope::COLS) as f32, ((i + 1) * n / scope::COLS).max(i * n / scope::COLS + 1) as f32)
             } else {
-                let k = (n - 1) as f64 / (scope::COLS - 1) as f64;
-                (i as f64 * k, (i as f64 + 1.0) * k)
+                (i as f32 * kn, (i as f32 + 1.0) * kn)
             };
-            let s = (off as f64 + a) * step as f64;
-            put(i, t0.wrapping_add(s as u64 as u32), ((b - a) * step as f64).max(1.0) as f32);
+            put(i, t0.wrapping_add((a * step) as u32), ((b - a) * step).max(1.0));
         }
     }
 }

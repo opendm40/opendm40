@@ -132,6 +132,10 @@ mod spiflash {
     }
 }
 
+#[path = "../../src/cold.rs"]
+mod cold;
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/clock.rs"]
@@ -155,6 +159,8 @@ mod upload;
 mod fatren;
 #[path = "../../src/calbackup.rs"]
 mod calbackup;
+#[path = "../../src/diskbuf.rs"]
+mod diskbuf;
 #[path = "../../src/screenshot.rs"]
 mod screenshot;
 #[path = "../../src/scope_csv.rs"]

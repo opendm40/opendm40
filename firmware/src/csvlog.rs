@@ -114,7 +114,7 @@
 //!     and a commit does not start while one is in progress (`HOST_WRITING`).
 //!   * Screenshot: a commit never starts while `screenshot::busy()`; the
 //!     screenshot waits before its FAT scan while a commit runs
-//!     (msc.rs `LOG_FLUSHING`). Both use calbackup::scratch() only while they
+//!     (msc.rs `LOG_FLUSHING`). Both use diskbuf::blocks() only while they
 //!     hold the disk. Rows keep going into FIFO meanwhile (~27 s at 10 rows/s
 //!     before rows are dropped and the next row is flagged GAP).
 //!   * Before every link the old last cluster must still be end-of-chain in
@@ -133,6 +133,7 @@
 use core::sync::atomic::Ordering;
 
 use crate::calbackup;
+use crate::diskbuf;
 use crate::dlog;
 use crate::fatdir;
 use crate::fatren::{le16, le32, parse_bpb, Vol};
@@ -271,7 +272,7 @@ struct Job {
     filled: bool,
     lba: u32,
     st: Step,
-    /// FAT 1 block cached in scratch[1].
+    /// FAT 1 block cached in blocks()[1].
     cur: u32,
     fat_k: u32,
     fbs: [u32; MAXNEW + 1],
@@ -456,7 +457,7 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     if active() || crate::fastlog::holds_disk() {
         return false;
     }
-    *j = JOB0;
+    crate::cold_set!(j, Job, JOB0);
     j.state = State::Recording;
     j.t0_ms = now_ms;
     j.last_commit = now_ms;
@@ -465,35 +466,35 @@ pub fn start(func: &str, unit: &str, range: &str, now_ms: u64) -> bool {
     j.ulen = ascii(unit, &mut j.unit);
     let mut h = [0u8; 384];
     let mut w = W { b: &mut h, n: 0 };
-    w.s("# Alientek ");
+    w.s(crate::cold_str!("# Alientek "));
     w.s(crate::ident::model_name());
-    w.s(", opendm40 ");
+    w.s(crate::cold_str!(", opendm40 "));
     w.s(FW);
-    w.s(", function ");
+    w.s(crate::cold_str!(", function "));
     w.a(func);
-    w.s(", range ");
+    w.s(crate::cold_str!(", range "));
     w.a(range);
-    w.s(", started uptime ");
+    w.s(crate::cold_str!(", started uptime "));
     w.ms(now_ms);
-    w.s(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n");
+    w.s(crate::cold_str!(" s\r\n# time_s = seconds since the start of this recording (no real-time clock); empty value = overflow\r\n"));
     let (ii, di) = next();
     j.ival = INTERVALS_S.get(ii as usize).map_or(0, |s| s * 1000);
     j.dur = DURATIONS_S[di as usize] * 1000;
     if ii == ON_CHANGE {
         let c = change() as usize;
         j.chg = CHANGE_FR[c];
-        w.s("# event: change > ");
+        w.s(crate::cold_str!("# event: change > "));
         w.s(CHANGES[c]);
-        w.s(" % of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading\r\n");
+        w.s(crate::cold_str!(" % of the range's full scale, an OL / HI / LO change, or 60 s since the last row; time_s = time of the reading\r\n"));
     }
     if j.ival > 0 {
         // Interval mode (Record page): one more comment line; every
         // reading mode keeps the header byte for byte.
-        w.s("# interval ");
+        w.s(crate::cold_str!("# interval "));
         w.u(j.ival as u64 / 1000);
-        w.s(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overflow in it\r\n");
+        w.s(crate::cold_str!(" s: one row per interval with readings, value = mean of its readings, time_s = end of the interval; OL = an overflow in it\r\n"));
     }
-    w.s("time_s,value,unit,flags\r\n");
+    w.s(crate::cold_str!("time_s,value,unit,flags\r\n"));
     let n = w.n;
     let mut f = [0u8; dlog::FHDR + 384];
     let u = j.unit;
@@ -644,7 +645,7 @@ pub fn poll_on(disk: &mut dyn BlockDevice, now_ms: u64) {
         }
         j.close_chunk();
         j.tx_left = j.fh.wrapping_sub(j.ft);
-        j.cur = NONE; // scratch[1] was free for others since the last commit
+        j.cur = NONE; // blocks()[1] was free for others since the last commit
         j.phase = if j.v.is_none() { Phase::Bpb } else { Phase::Data };
         set_flags(true, true);
     }
@@ -826,7 +827,7 @@ impl Job {
     }
 
     fn bpb(&mut self, disk: &mut dyn BlockDevice) -> Option<State> {
-        let buf = &mut calbackup::scratch()[0];
+        let buf = &mut diskbuf::blocks()[0];
         if !disk.read_block(0, buf) {
             return Some(State::Error);
         }
@@ -834,8 +835,8 @@ impl Job {
             return Some(State::NoDisk);
         };
         // LOGS/ (fatdir.rs; created at boot, here only if it went missing:
-        // synchronous, ~1 s once). scratch[1] (FAT cache) is overwritten.
-        let v = match fatdir::ensure(disk, &v, &fatdir::LOGS, calbackup::scratch()) {
+        // synchronous, ~1 s once). blocks()[1] (FAT cache) is overwritten.
+        let v = match fatdir::ensure(disk, &v, &fatdir::LOGS, diskbuf::blocks()) {
             Ok(d) => d,
             Err(fatdir::Err::Io) => return Some(State::Error),
             Err(_) => return Some(State::Full),
@@ -852,7 +853,7 @@ impl Job {
     fn root(&mut self, disk: &mut dyn BlockDevice) -> Option<State> {
         let v = self.vol();
         let (lba, sub, base, lim) = fatdir::seq(&v, self.i);
-        let buf = &mut calbackup::scratch()[0];
+        let buf = &mut diskbuf::blocks()[0];
         if !disk.read_block(lba, buf) {
             return Some(State::Error);
         }
@@ -901,10 +902,10 @@ impl Job {
         None
     }
 
-    /// FAT 1 entry `c` through the one-block cache in scratch[1].
+    /// FAT 1 entry `c` through the one-block cache in blocks()[1].
     fn fat_get(&mut self, disk: &mut dyn BlockDevice, c: u32) -> Option<u32> {
         let v = self.vol();
-        let fat = &mut calbackup::scratch()[1];
+        let fat = &mut diskbuf::blocks()[1];
         let fb = c / FPER;
         if fb >= v.fat_blocks {
             return None;
@@ -1045,7 +1046,7 @@ impl Job {
         if !self.filled {
             let fb = self.fbs[self.fbi];
             self.lba = v.fat_start + self.fat_k * v.fat_blocks + fb;
-            let buf = &mut calbackup::scratch()[0];
+            let buf = &mut diskbuf::blocks()[0];
             if !disk.read_block(self.lba, buf) {
                 return Some(State::Error);
             }
@@ -1075,7 +1076,7 @@ impl Job {
             return None; // the write from the next pass
         }
         // Whole block in one call (H1: never left erased across a pass).
-        let buf = &calbackup::scratch()[0];
+        let buf = &diskbuf::blocks()[0];
         match disk.write_block(self.lba, &buf[..]) {
             false => Some(State::Error),
             true => {
@@ -1108,7 +1109,7 @@ impl Job {
                 return self.committed(); // nothing new (disk full at once)
             }
             self.lba = v.dlba(self.slot / PER);
-            let buf = &mut calbackup::scratch()[0];
+            let buf = &mut diskbuf::blocks()[0];
             if !disk.read_block(self.lba, buf) {
                 return Some(State::Error);
             }
@@ -1139,7 +1140,7 @@ impl Job {
             return None;
         }
         // Whole block in one call (H1: never left erased across a pass).
-        let buf = &calbackup::scratch()[0];
+        let buf = &diskbuf::blocks()[0];
         match disk.write_block(self.lba, &buf[..]) {
             false => Some(State::Error),
             true => {
@@ -1303,7 +1304,7 @@ fn gallery_vol(disk: &mut dyn BlockDevice) -> Result<Vol, GErr> {
     if !disk.present() || disk.block_size() as usize != BLK {
         return Err(GErr::NoDisk);
     }
-    let buf = &mut calbackup::scratch()[0];
+    let buf = &mut diskbuf::blocks()[0];
     if !disk.read_block(0, buf) {
         return Err(GErr::Error);
     }
@@ -1355,7 +1356,7 @@ pub fn list_on(disk: &mut dyn BlockDevice, out: &mut [FileInfo]) -> Result<Catal
 fn for_each_file(disk: &mut dyn BlockDevice, f: &mut dyn FnMut(&FileInfo)) -> Result<Catalog, GErr> {
     let v = gallery_vol(disk)?;
     let mut cat = Catalog { n: 0, total: 0, free_bytes: 0, disk_bytes: v.clusters * v.spc * BLK as u32 };
-    let buf = &mut calbackup::scratch()[0];
+    let buf = &mut diskbuf::blocks()[0];
     fatdir::for_each(disk, &v, &[&fatdir::LOGS, &fatdir::SHOTS, &fatdir::SCOPE], buf, &mut |d, _, e| {
         if let Some(kind) = kind_of(e) {
             let mut name = [0u8; 11];
@@ -1393,7 +1394,7 @@ fn free_in(disk: &mut dyn BlockDevice, v: &Vol, buf: &mut [u8; BLK]) -> Result<u
 /// screenshot, a commit, an upload or a host write holds the disk.
 pub fn free_bytes_on(disk: &mut dyn BlockDevice) -> Result<u32, GErr> {
     let v = gallery_vol(disk)?;
-    free_in(disk, &v, &mut calbackup::scratch()[0])
+    free_in(disk, &v, &mut diskbuf::blocks()[0])
 }
 
 pub fn free_bytes() -> Result<u32, GErr> {
@@ -1581,7 +1582,7 @@ pub fn delete_on(disk: &mut dyn BlockDevice, name: &[u8; 11]) -> Result<(), GErr
         return Err(GErr::Busy);
     }
     let root = gallery_vol(disk)?;
-    let [buf, fat1, tmp] = calbackup::scratch();
+    let [buf, fat1, tmp] = diskbuf::blocks();
     let sub = match fatdir::dir_of(name).map(|d| fatdir::open(disk, &root, d, buf)) {
         Some(Ok(d)) => d,
         Some(Err(fatdir::Err::Io)) => return Err(GErr::Error),
@@ -1665,6 +1666,7 @@ fn delete_in(disk: &mut dyn BlockDevice, v: &Vol, name: &[u8; 11], buf: &mut [u8
         }
     }
     crate::screenshot::MEDIUM_CHANGED.store(true, Ordering::Relaxed);
+    dlog::csv_forget();
     #[cfg(feature = "vdisk")]
     {
         dlog::set_stale();

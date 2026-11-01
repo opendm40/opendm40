@@ -1,5 +1,5 @@
 //! The touch test page (View::TouchTest; the drawing is ui_touchtest.rs):
-//! Settings 3/3 > Touch test, or DBG:TOUCH:TEST ON. Shows what the touch
+//! Settings > Other > Touch test, or DBG:TOUCH:TEST ON. Shows what the touch
 //! controller reports, before and after the debounce (touch.rs), so the
 //! calibration, the jitter and the touch-key strip can be judged by eye.
 //!
@@ -174,15 +174,17 @@ impl App {
             self.toast(clk.now_ms(), t, false);
             return false;
         }
-        *st() = Tt { cur: touch::log_count(), ..TT0 };
+        // TT0's bytes from region C (`cold_set!`), then the log position.
+        crate::cold_set!(st(), Tt, TT0);
+        st().cur = touch::log_count();
         self.show(View::TouchTest, clk);
         true
     }
 
-    /// Leave the page for its parent, Settings 3/3.
+    /// Leave the page for its parent, Settings > Other.
     #[inline(never)]
     pub(super) fn tt_close(&mut self, clk: &mut Clock) {
-        self.set_page = 2;
+        self.set_tab = ui::TAB_OTHER;
         self.show(View::Settings, clk);
     }
 

@@ -58,9 +58,9 @@ mk = tempfile.mkdtemp(prefix='btchat-')
 TAG = 'btchat-%d-%d' % (A.port, os.getpid())
 B_OFF, B_ON = 40.0, 44.0
 script = ['0 dmm dcv:2.1569', '10.0 shot %s/A.png' % mk,
-          # B: MENU -> Settings, the Bluetooth row OFF, then ON.
-          '%.1f key menu' % (B_OFF - 2), '%.1f tap 339 219' % (B_OFF - 1), '%.1f tap 240 178' % B_OFF,
-          '%.1f shot %s/B.png' % (B_OFF + 0.5, mk), '%.1f tap 240 178' % B_ON]
+          # B: MENU -> Settings > Other, the Bluetooth row OFF, then ON.
+          '%.1f key menu' % (B_OFF - 2), '%.1f tap 339 219' % (B_OFF - 1), '%.1f tap 60 291' % (B_OFF - 0.5),
+          '%.1f tap 300 65' % B_OFF, '%.1f shot %s/B.png' % (B_OFF + 0.5, mk), '%.1f tap 300 65' % B_ON]
 sp = os.path.join(mk, 'script.txt')
 open(sp, 'w').write('\n'.join(script) + '\n')
 cmd = [sys.executable, os.path.join(HERE, 'run.py'), 'fwrs', '--app', A.app, '--script', sp, '--run-for', '120',

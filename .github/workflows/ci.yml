@@ -3,9 +3,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'release/**']
   workflow_call: # release.yml runs the same jobs before it publishes
 
 permissions:
@@ -63,7 +63,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: thumbv7em-none-eabihf
-          components: llvm-tools
+          components: llvm-tools, rust-src
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: firmware -> target
@@ -123,7 +123,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: thumbv7em-none-eabihf
-          components: llvm-tools
+          components: llvm-tools, rust-src
       - name: Packages (Pillow for the renders, mtools + dosfstools for the FAT tests)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-pil mtools dosfstools
       # The suites take ../../../toolchain: point it at the rustup install.
@@ -163,6 +163,8 @@ jobs:
           fetch-depth: 0 # the tags and the history since the last one
       - name: tools/version-check.sh
         run: firmware/tools/version-check.sh
+      # A PR into release/** keeps the release's version: the release PR
+      # into main raises it once.
       - name: tools/pr-version-check.sh (a PR that changes the firmware raises the version)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && !startsWith(github.base_ref, 'release/')
         run: firmware/tools/pr-version-check.sh ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}

@@ -98,13 +98,14 @@
 //!   CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]   select
 //!     the function, then the range (none / AUTO / DEF = autorange, also on
 //!     the function already selected), then the resolution if given
-//!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
+//!     (CONT / DIOD: no argument; FREQ: AUTO / DEF only; CAP: a range,
+//!     60 nF .. 60 mF; 6 nF = the 60 nF range)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
 //!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
 //!     items; above the top one: "Data out of range"). The query gives the
-//!     present range also while autoranging (CAP 6 nF .. 60 mF, FREQ 60 Hz
-//!     .. 60 MHz, not settable)
+//!     present range also while autoranging (CAP 6 nF .. 60 mF, settable;
+//!     FREQ 60 Hz .. 60 MHz, not settable)
 //!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
 //!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
 //!     SCPI does not change that choice); OFF / ONCE keep the present range
@@ -152,7 +153,7 @@
 //!     <sensor> = TCK | PT100 | PT1000 | NTC10K3950 | NTC10K3435 | NTC100K3950
 //!     | NTCUSER (dmm.rs T_NAMES; also TC / K for TCK); without it the current
 //!     sensor is kept. Reading in the UNIT:TEMP unit (OL = +9.9E37).
-//!   UNIT:TEMPerature C | F / ?   global temperature unit (also Settings 2/2):
+//!   UNIT:TEMPerature C | F / ?   global temperature unit (also Settings > Multimeter):
 //!     readings, MEAS:TEMP:CJ? and SYST:TEMP? follow it; offsets stay in C
 //!   [SENSe:]TEMPerature:TRANsducer <sensor> / ?   select / query the sensor
 //!   [SENSe:]TEMPerature:OFFSet <C> / ?   offset of the CURRENT sensor, -20..20
@@ -177,13 +178,13 @@
 //!     continuity / diode) | DC (hint: DC on V/ohm in AC V) | AC (hint: AC in
 //!     DC V 6 V) | FUSE (hint: an A function at zero for 60 s)
 //!   SYSTem:ALERt:ENABle <mask> | ON | OFF / ?   alerts enabled, bit 0 AJACK,
-//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings 3/3 "Jack
+//!     1 VJACK and the DC / AC / FUSE hints, 2 LIVE (Settings > Alerts "Jack
 //!     alerts"); default 7 = ON, persisted; bit 3 (the removed "Leads in
 //!     A?" reminder) is accepted and ignored;
 //!     OVERLOAD (the uA / mA shunt over range: the meter moved to the 10 A
 //!     shunt, latched; doc 4.7) is not maskable
 //!   SYSTem:ALERt:ALARm LOUD | VOLume | OFF / ?   the danger alarm (doc
-//!     4.10, Settings 3/3 "Danger alarm"): A-JACK, A-PROT while its current
+//!     4.10, Settings > Alerts "Danger alarm"): A-JACK, A-PROT while its current
 //!     flows and a current above the 10 A rating sound a two-tone pattern at
 //!     full duty (LOUD, default), at the key / alert volume (VOLUME) or not
 //!     at all (OFF); persisted. `?` -> LOUD | VOLUME | OFF
@@ -202,12 +203,12 @@
 //!     stale"; over range: +9.9E37 (doc 3.15). Works with the readout off.
 //!   DISPlay:BURDen ON|OFF / ?   the burden voltage readout on the DMM page
 //!     (DC A aux1, AC A aux2 instead of the duty cycle; not in AC+DC);
-//!     Settings 3/3 "Burden voltage", persisted, default OFF
+//!     Settings > Multimeter "Burden voltage", persisted, default OFF
 //!   [SENSe:]RESistance:NEGative ON|OFF / ?   ohm readings below 0 shown
 //!     (shorted leads: the internal offset, a few tens of mohm) instead of
-//!     clamped at 0 as the stock; Settings 3/3 "Negative ohm", persisted,
+//!     clamped at 0 as the stock; Settings > Multimeter "Negative ohm", persisted,
 //!     default OFF
-//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings 3/3 "Mode Remember"
+//!   MEMory:STATe:RECall:AUTO ON|OFF / ?   Settings > Power "Mode Remember"
 //!     (the stock's switch; the header is the Keysight 34461A's "recall the
 //!     power-down state at power-on"): ON = a power-on continues the
 //!     multimeter as it was (app.rs `restore`); persisted, default OFF
@@ -317,6 +318,44 @@ pub enum Out {
     Mmem(Mmem),
     /// Inrush current (INRush:...), handled by the main loop with the app.
     Inr(Inr),
+    /// Protocol decoder (DECode:...), handled by the main loop with the app.
+    Dcd(Dcd),
+}
+
+/// Protocol decoder on the scope page (src/decode.rs, src/app_decode.rs);
+/// `None` = query:
+///   DECode:PROTocol OFF|UART|DALI / ?  OFF / UART / DALI (MODBus: UART,
+///                                    which recognises Modbus RTU frames)
+///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
+///   DECode:RATE?                     the bit rate of the last decode (0: none)
+///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
+///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
+///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
+///   DECode:LEVel?                    the level of the last decode, V
+///   DECode:MODE BAND|LOG / ?         the band on the scope page, or the
+///                                    frame log (View::Decode, app_log.rs)
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc,lost
+///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines. Band: from
+///                                    frame `n` of the decoded record; Log:
+///                                    the unread frames (at most n; 0 all)
+///   DECode:CLEar                     Log: the list and counters start again
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dcd {
+    /// decode::P_OFF / P_UART / P_DALI.
+    Proto(Option<u8>),
+    /// Some(0) = AUTO.
+    Baud(Option<u32>),
+    Rate,
+    Fmt(Option<u8>),
+    Inv(Option<bool>),
+    /// Some(NaN) = AUTO.
+    Thr(Option<f32>),
+    Level,
+    /// ui_decode MODE_BAND / MODE_LOG.
+    Mode(Option<u8>),
+    Count,
+    Frames(u32),
+    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -547,7 +586,6 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           dashes, +9.9E37 OL; hold Meter::hold_state; range
 ///                           AUTO / AUTO+ / MANU; in manual the status bar
 ///                           shows the range, ui::range_text)
-///   DBG:GRAB <ms> | ?       scope drag hold-to-grab time (0 = direct drag, default)
 ///   DBG:PINCH 0|1|2 | ?     scope pinch mode (RAM only): 0 one step per 2.15x
 ///                           of finger span, 1 one step per 1.25x (default), 2 live
 ///                           stretch, snapped to the nearest step on release
@@ -570,7 +608,7 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)
-///   DBG:SENTinel:VARiant <0..127> / ?
+///   DBG:SENTinel:VARiant <0..255> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (f80524f row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
@@ -593,7 +631,9 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///                           first (device 40728b8: 24 V on V-COM was seen in DC
 ///                           A only after TEMP; d2aff22: 100 ms is enough)
 ///   DBG:ACDC:METH A|B|C / ? AC+DC method (acdcm.rs; RAM only, default A =
-///                           the stock alternation; a change restarts AC+DC)
+///                           the stock alternation; a change restarts AC+DC).
+///                           METH / STAT / ZERO / R0: feature acdc-meth, else
+///                           undefined header
 ///   DBG:ACDC:STAT?          meth,step,mode,range,ac,dc,n_ac,n_dc,n_rd,hz,corr,
 ///                           c_per_code,c_offset,lpf_codes,sqrt_rms_codes,
 ///                           pk_pp_codes,ac_src,gain_span_codes,gain_src,
@@ -645,6 +685,8 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:HWTRIG:STAT:RESET   clear the statistics
 ///   DBG:LCD? x,y,w,h,n      n raw GRAM words after RAMRD (#4 block)
 ///   DBG:TE?                 panel TE probe (lcd.rs te_probe, ~0.3 s)
+///   DBG:SCANLINE?           panel Get Scanline + press sync state (scanline.rs)
+///   DBG:SCANLINE:DIR n | :SYNC 0|1   scan axis 0..3 / press sync off, on
 ///   DBG:CHG?                charger pins: PB10,PB11,mode,pud,omode,octl,usb,adc16
 ///   DBG:CHG:PIN 10|11,<m>   m IN UP DOWN LOW HIGH OD DEF; DBG:CHG:OUT <m> = PB10
 ///   DBG:CHG:LOG?            n,ms:pins,... the last 8 charge pin changes
@@ -721,6 +763,7 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level), 5 DCV? range,r26,n[,flags] (the
     /// DC-coupled V row, device test 6.5: n | range << 8, flags).
+    #[cfg_attr(not(feature = "ad2-exp"), allow(dead_code))]
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
@@ -735,6 +778,29 @@ pub enum Dbg {
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
     Fast,
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    Cap,
+    /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
+    /// (dmm::set_cap_class; RAM only).
+    CapClass(Option<u8>),
+    /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
+    /// the discharge slope (dmm::set_cap_idis; RAM only).
+    CapIdis(Option<u32>),
+    /// DBG:CAP:DISMODE <0..1> / ?: the discharge's mode
+    /// (dmm::set_cap_dismode; RAM only).
+    CapDisMode(Option<u32>),
+    /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
+    /// (dmm::set_cap_disref; RAM only).
+    CapDisRef(Option<u32>),
+    /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
+    /// (dmm::set_cap_dis_ms; RAM only).
+    CapDisMs(Option<u32>),
+    /// DBG:CAP:JUMPN <n> / ?: 600 uF ramp polls before the one-poll step
+    /// up (dmm::set_cap_jumpn; RAM only).
+    CapJumpN(Option<u32>),
+    /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
+    /// (dmm::set_cap_dis_end; RAM only).
+    CapDisEnd(Option<u32>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -750,6 +816,7 @@ pub enum Dbg {
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
 /// flags) (main.rs `dbg_dcv`).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn dcv_arg(a: &[u8]) -> Dbg {
     let w = nums::<4>(a);
@@ -802,6 +869,7 @@ fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static st
 }
 
 /// DBG:AD2:N7? item,state,n -> Dbg::Ad2(6, state, n, item) (main.rs).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn n7_arg(a: &[u8]) -> Dbg {
     let w = nums::<3>(a);
@@ -969,8 +1037,6 @@ pub enum Cmd {
     Coup(bool),
     CalcSmoState(Option<bool>),
     CalcSmoResp(Option<u8>),
-    /// DBG:GRAB <ms> / ?: hold-to-grab time of scope drags (0 = direct).
-    DbgGrab(Option<u16>),
     /// DBG:PINCH 0|1|2 / ?: scope pinch mode (scope_page::set_pinch_mode).
     DbgPinch(Option<u8>),
     /// DBG:GEST?: log of the last scope drags.
@@ -987,7 +1053,7 @@ pub enum Cmd {
     DbgReadout,
     /// DBG:ACDC?: AC+DC phase diagnostic (Dmm::acdc_diag_text).
     DbgAcdc,
-    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs): op 0 METH <m>, 1 METH?,
+    /// DBG:ACDC:METH / STAT / ZERO / R0 (acdcm.rs; feature `acdc-meth`): op 0 METH <m>, 1 METH?,
     /// 2 STAT?, 3 ZERO <slot>,<v> (NaN: measure again), 4 ZERO?, 5 R0 <1|2>,
     /// 6 R0?, 7 RANG <item> (255 = AUTO+), 8 TRACE? <from>, 9 TRACE <0|1|2>.
     DbgAm(u8, u8, f32),
@@ -1012,7 +1078,7 @@ pub enum Cmd {
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
-    /// DBG:SENTinel:VARiant <0..127> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..255> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
@@ -1031,12 +1097,12 @@ pub enum Cmd {
     Pow(Pow),
     /// FETCh:BURDen?: burden voltage of the latest A-function reading (doc 3.15).
     FetchBurden,
-    /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings 3/3).
+    /// DISPlay:BURDen ON|OFF / ?: the burden voltage readout (Settings > Multimeter).
     DispBurden(Option<bool>),
     /// [SENSe:]RESistance:NEGative ON|OFF / ?: ohm readings below 0
-    /// (Settings 3/3 "Negative ohm", Dmm::ohm_neg).
+    /// (Settings > Multimeter "Negative ohm", Dmm::ohm_neg).
     ResNeg(Option<bool>),
-    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings 3/3 "Mode Remember".
+    /// MEMory:STATe:RECall:AUTO ON|OFF / ?: Settings > Power "Mode Remember".
     ModeRemember(Option<bool>),
     /// [SENSe:]<f>:RANGe[:AUTO] / <f>:RESolution (`range_cmd`): the
     /// function the header names (`parse_func`) and the operation
@@ -1143,6 +1209,10 @@ pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
+        // Capacitance: CONF:CAP <F>, CAP:RANG, the MF page (ui::range_items),
+        // for comparing a fixed range with AUTO (#74).
+        // 6 nF is the 60 nF range (dmm::CAP_R_MIN): CONF:CAP 6E-9 picks it.
+        13 => &[6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3, 6e-2],
         // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
@@ -1154,6 +1224,9 @@ pub fn range_items(func: u8) -> &'static [f32] {
 pub fn range_item_code(func: u8, i: usize) -> u8 {
     if quantity(func & !ANY_CPL) == 1 {
         if i == 0 { 5 } else { i as u8 - 1 }
+    } else if func == 13 {
+        // Capacitance: the list starts at the 60 nF range, dmm r1.
+        i as u8 + 1
     } else {
         i as u8
     }
@@ -1265,7 +1338,7 @@ fn conf_cmd(f: u8, arg: &[u8]) -> Result<Cmd, &'static str> {
         Some(s) => Some(res_arg(s, unit_of(f)).ok_or(BAD)?),
         None => None,
     };
-    if matches!(f, 13 | 14) && (rng != Rng::Auto || res.is_some_and(|v| !v.is_nan())) {
+    if (f == 14 && rng != Rng::Auto) || (matches!(f, 13 | 14) && res.is_some_and(|v| !v.is_nan())) {
         return Err(BAD);
     }
     Ok(Cmd::Conf(f, rng, res))
@@ -2258,17 +2331,10 @@ impl Scpi {
                     };
                     out = Out::Instr(Cmd::Meas(k));
                 }
-                // Scope drag A/B aids (App::scpi): DBG:GRAB <ms> (0 = direct
-                // drag) / DBG:GRAB?, DBG:GEST? (last drags).
+                // Scope gesture aids (App::scpi): DBG:PINCH, DBG:GEST? (last
+                // drags).
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"PINCH"[..]) => {
                     out = Out::Instr(Cmd::DbgPinch(if query { None } else { parse_num(arg).map(|v| v.clamp(0.0, 2.0) as u8) }))
-                }
-                _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GRAB"[..]) => {
-                    match (query, parse_num(arg)) {
-                        (true, _) => out = Out::Instr(Cmd::DbgGrab(None)),
-                        (false, Some(v)) => out = Out::Instr(Cmd::DbgGrab(Some(v.clamp(0.0, 5000.0) as u16))),
-                        _ => self.err_arg(no_arg, BAD),
-                    }
                 }
                 _ if p0 == b"DBG" && parts.get(1) == Some(&&b"GEST"[..]) => out = Out::Instr(Cmd::DbgGest),
                 _ if p0 == b"DBG" && query && parts.get(1) == Some(&&b"VIEW"[..]) => out = Out::Instr(Cmd::DbgView),
@@ -2295,19 +2361,30 @@ impl Scpi {
                 // Without the feature `acdc-trace`: no such header (Cargo.toml).
                 #[cfg(not(feature = "acdc-trace"))]
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && parts[2] == b"TRACE" => self.err_arg(no_arg, "Undefined header"),
+                // Without the feature `acdc-meth`: no method headers (Cargo.toml).
+                #[cfg(not(feature = "acdc-meth"))]
+                _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" && matches!(&parts[2][..], b"METH" | b"STAT" | b"ZERO" | b"R0") => {
+                    self.err_arg(no_arg, "Undefined header")
+                }
                 _ if p0 == b"DBG" && parts.len() == 3 && parts[1] == b"ACDC" => {
                     let a = trim(arg);
                     let mut it = a.split(|&c| c == b',');
                     let a0 = trim(it.next().unwrap_or(&[]));
+                    #[cfg_attr(not(feature = "acdc-meth"), allow(unused_variables))]
                     let a1 = it.next().map(trim);
                     let c = match (&parts[2][..], query) {
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", true) => Some(Cmd::DbgAm(1, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"METH", false) => match a0 {
                             b"A" | b"B" | b"C" => Some(Cmd::DbgAm(0, a0[0] - b'A', 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"STAT", true) => Some(Cmd::DbgAm(2, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", true) => Some(Cmd::DbgAm(4, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"ZERO", false) => match (parse_num(a0), a1) {
                             (Some(k), Some(v)) if (0.0..10.0).contains(&k) => {
                                 Some(Cmd::DbgAm(3, k as u8, if kw(v, "AUTO") { f32::NAN } else { parse_num(v).unwrap_or(f32::NAN) }))
@@ -2326,7 +2403,9 @@ impl Scpi {
                             Some(v) if (0.0..=2.0).contains(&v) => Some(Cmd::DbgAm(9, v as u8, 0.0)),
                             _ => None,
                         },
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", true) => Some(Cmd::DbgAm(6, 0, 0.0)),
+                        #[cfg(feature = "acdc-meth")]
                         (b"R0", false) => match a0 {
                             b"1" | b"2" => Some(Cmd::DbgAm(5, a0[0] - b'0', 0.0)),
                             _ => None,
@@ -2345,7 +2424,7 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=127.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=255.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
@@ -2434,8 +2513,12 @@ impl Scpi {
                     let third = a.split(|&b| b == b',').nth(2).map(trim);
                     let n = v[1].clamp(1, 2000) as u16; // ad2exp::N_MAX
                     let r26 = (v[0] & 0x3F) as u8;
+                    #[cfg(not(feature = "ad2-exp"))]
+                    let _ = (third, n, r26);
                     let d = match (parts.get(2).copied(), query) {
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"TORN"), true) => Some(Dbg::Ad2(0, r26, n, third.is_some_and(|t| kw(t, "SYNChronous")) as u8)),
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"NOISE"), true) => {
                             Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
                         }
@@ -2444,8 +2527,10 @@ impl Scpi {
                         (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
                         (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
                         // DCV? range,r26,n[,flags]: (5, r26, n | range << 8, flags).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"DCV"), true) => Some(dcv_arg(a)),
                         // N7? item,state,n: (6, state, n, item).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"N7"), true) => Some(n7_arg(a)),
                         _ => None,
                     };
@@ -2454,6 +2539,9 @@ impl Scpi {
                         None => self.err_arg(no_arg, "Undefined header"),
                     }
                 }
+                // Memory probes (feature memprobe, src/memprobe.rs).
+                #[cfg(feature = "memprobe")]
+                _ if p0 == b"DBG" && parts.len() == 2 && crate::memprobe::scpi(self, parts[1], query, arg) => {}
                 _ if p0 == b"DBG" => {
                     let sub = parts.get(1).copied().unwrap_or(&[]);
                     let a = trim(arg);
@@ -2557,9 +2645,31 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
                         b"FAST" if query => Dbg::Fast,
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
+                            Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "JUMPN")) => {
+                            Dbg::CapJumpN(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
+                            Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMODE")) => {
+                            Dbg::CapDisMode(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISREF")) => {
+                            Dbg::CapDisRef(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
+                            Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
+                            Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })
+                        }
+                        b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
-                        // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
+                        // DBG:UPDATE: zero the 12-byte loader
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
@@ -2567,6 +2677,26 @@ impl Scpi {
                         // ~0.3 s): per phase (TE off; on, mode 0; on, mode
                         // 1), ";" between: <samples>, then per pin PA3,
                         // PB13, PC1, PC15 <level changes>,<samples high>.
+                        // DBG:SCANLINE? = the panel's Get Scanline (0x45) and
+                        // the press feedback's sync (scanline.rs `query`);
+                        // DBG:SCANLINE:DIR 0..3 = the screen axis of the scan,
+                        // DBG:SCANLINE:SYNC 0|1 = the wait before a pressed box.
+                        #[cfg(target_os = "none")]
+                        b"SCANLINE" => {
+                            self.len = 0;
+                            let op = parts.get(2).copied().unwrap_or(b"");
+                            let v = core::str::from_utf8(trim(a)).ok().and_then(|t| t.parse::<u8>().ok());
+                            if op.is_empty() && query {
+                                crate::scanline::query(self);
+                            } else if kw(op, "DIR") && !query && v.is_some_and(|d| d < 4) {
+                                crate::scanline::set(v, None);
+                            } else if kw(op, "SYNC") && !query && v.is_some_and(|d| d < 2) {
+                                crate::scanline::set(None, v.map(|d| d == 1));
+                            } else {
+                                self.err_arg(no_arg, "Illegal parameter value");
+                            }
+                            continue;
+                        }
                         #[cfg(target_os = "none")]
                         b"TE" if query => {
                             self.len = 0;
@@ -2600,7 +2730,7 @@ impl Scpi {
                         // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), crate::dlog::CSV_OPENS.load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
                         b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
                         b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
                         _ => {
@@ -2645,6 +2775,85 @@ impl Scpi {
                         Some(c) => out = Out::Inr(c),
                         None => {
                             self.err_arg(no_arg, if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
+                }
+                _ if kw(p0, "DECode") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    let auto = kw(a, "AUTO");
+                    let c = if kw(sub, "PROTocol") {
+                        if query {
+                            Some(Dcd::Proto(None))
+                        } else if kw(a, "OFF") {
+                            Some(Dcd::Proto(Some(crate::decode::P_OFF)))
+                        } else if kw(a, "UART") || kw(a, "MODBus") {
+                            // MODBus (the old Modbus protocol): UART, which
+                            // recognises Modbus RTU frames.
+                            Some(Dcd::Proto(Some(crate::decode::P_UART)))
+                        } else if crate::decode::DALI && kw(a, "DALI") {
+                            Some(Dcd::Proto(Some(crate::decode::P_DALI)))
+                        } else {
+                            None
+                        }
+                    } else if sub == b"BAUD" {
+                        if query {
+                            Some(Dcd::Baud(None))
+                        } else if auto {
+                            Some(Dcd::Baud(Some(0)))
+                        } else {
+                            parse_num(a).filter(|v| (crate::decode::MIN_BAUD as f32..=crate::decode::MAX_BAUD as f32).contains(v)).map(|v| Dcd::Baud(Some(v as u32)))
+                        }
+                    } else if kw(sub, "RATE") && query {
+                        Some(Dcd::Rate)
+                    } else if kw(sub, "FORMat") {
+                        if query { Some(Dcd::Fmt(None)) } else { crate::decode::FMT_NAMES.iter().position(|n| a.eq_ignore_ascii_case(n.as_bytes())).map(|i| Dcd::Fmt(Some(i as u8))) }
+                    } else if kw(sub, "POLarity") {
+                        if query {
+                            Some(Dcd::Inv(None))
+                        } else if kw(a, "NORMal") {
+                            Some(Dcd::Inv(Some(false)))
+                        } else if kw(a, "INVerted") {
+                            Some(Dcd::Inv(Some(true)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "THReshold") {
+                        if query {
+                            Some(Dcd::Thr(None))
+                        } else if auto {
+                            Some(Dcd::Thr(Some(f32::NAN)))
+                        } else {
+                            parse_num_u(a, b"V").filter(|v| v.abs() <= 100.0).map(|v| Dcd::Thr(Some(v)))
+                        }
+                    } else if kw(sub, "LEVel") && query {
+                        Some(Dcd::Level)
+                    } else if kw(sub, "MODE") {
+                        if query {
+                            Some(Dcd::Mode(None))
+                        } else if kw(a, "BAND") {
+                            Some(Dcd::Mode(Some(0)))
+                        } else if kw(a, "LOG") {
+                            Some(Dcd::Mode(Some(1)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "CLEar") && !query {
+                        Some(Dcd::Clear)
+                    } else if kw(sub, "COUNt") && query {
+                        Some(Dcd::Count)
+                    } else if kw(sub, "FRAMes") && query {
+                        if a.is_empty() { Some(Dcd::Frames(0)) } else { parse_num(a).filter(|v| *v >= 0.0).map(|v| Dcd::Frames(v as u32)) }
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Dcd(c),
+                        None => {
+                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes", "MODE"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+
+                            self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }
                     }
