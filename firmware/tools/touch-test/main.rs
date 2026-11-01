@@ -1114,7 +1114,16 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     scope_ui::invalidate();
     scope_ui::update(&scope_ui::Model::DEFAULT);
-    page(ck, "replica panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= 414, &[0, 1, 2, 3, 4, 5, 6]);
+    // The four channel blocks: titles and magnifiers, 4 px of slop.
+    page(ck, "scope panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= scope_ui::PANEL_X as i32, &(0..scope_ui::NPANEL as u32).collect::<Vec<_>>());
+    {
+        use scope_ui::{panel_hit as ph, panel_rect as pr};
+        let mid = |k: usize| { let r = pr(k); ((r.x + r.w / 2) as u16, (r.y + r.h / 2) as u16) };
+        let at = |k: usize| { let (x, y) = mid(k); ph(x, y) };
+        ck.t("scope panel: CH1, DMM, GEN, MATH from the top; title, then zoom in (left) and zoom out (right)", (0..scope_ui::NPANEL).all(|k| at(k) == Some(k)) && pr(3 * scope_ui::BLK_MATH).y > pr(3 * scope_ui::BLK_GEN).y && pr(scope_ui::PART_IN).x < pr(scope_ui::PART_OUT).x);
+        ck.t("scope panel: magnifiers >= 39 x 40 px, titles 26 px", (0..scope_ui::NPANEL).all(|k| { let r = pr(k); if k % 3 == 0 { r.h == 26 } else { r.w >= 39 && r.h >= 40 } }));
+        ck.t("scope panel: the graph side (x < PANEL_X) is no panel target", ph(scope_ui::PANEL_X as u16 - 1, 60).is_none() && ph(scope_ui::PANEL_X as u16, 60).is_some());
+    }
     let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, dec: scope_ui::dec::SetupVals::DEFAULT };
     for tab in 0..5u8 {
         host::reset(0);
@@ -1154,7 +1163,7 @@ fn hit_tests(ck: &mut Ck) {
             scope_ui::SideHit::Coupling(c) => Some(c as u32),
             _ => None,
         };
-        page(ck, &format!("replica CH1 tab {tab}"), &hit, &|b| b.x0 >= 215 && b.y0 >= 50, &[1000, 1001, 1002]);
+        page(ck, &format!("replica CH1 tab {tab}"), &hit, &|b| b.x0 >= scope_ui::PANEL_X as i32 - 199 && b.y0 >= 50, &[1000, 1001, 1002]);
     }
     // Generator page: value boxes (ui::gen_box_hit) + the wave box (app.rs
     // View::Gen: x < 243, y 40..82).
@@ -1181,6 +1190,9 @@ fn tap_step_tests(ck: &mut Ck) {
     // (The flash map is set up by hit_tests.)
     let d = su::Model::DEFAULT;
     let gp = |m: &su::Model, mode: u8, x: i16, y: i16| su::graph_press(m, mode, 0, 0, false, x, y);
+    // The graph's right frame, the T marker's centre column (trigger at the
+    // centre) and the corner zones' left / right edges.
+    let (gr, tc, zl, zr) = (su::GR, su::GX + su::GCX + 1, su::ZONE_L.x, su::ZONE_R.x);
     let step = |p: Press| match p {
         Press::Step(true) => Some(1u32),
         Press::Step(false) => Some(2),
@@ -1198,23 +1210,23 @@ fn tap_step_tests(ck: &mut Ck) {
             su::graph().clear();
             su::update(&m);
             let hit = move |x: u16, y: u16| if su::INNER.has(x as i16, y as i16) { step(su::graph_press(&m, mode, 0, 0, false, x as i16, y as i16)) } else { None };
-            page(ck, &format!("tabs mode {mode} combined {combined}"), &hit, &|b| b.y0 >= 228 && b.y1 <= 300 && b.x1 < 414, &[1, 2]);
+            page(ck, &format!("tabs mode {mode} combined {combined}"), &hit, &|b| b.y0 >= 228 && b.y1 <= 300 && b.x1 < su::PANEL_X as i32, &[1, 2]);
         }
     }
     let inside = |a: stockfont::Rect, b: stockfont::Rect| a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h;
     ck.t("tabs inside their corner zones", inside(su::TAB_L, su::ZONE_L) && inside(su::TAB_R, su::ZONE_R));
-    ck.t("corner zones inside the graph area, left after the strip zones (x > 22)", su::ZONE_L.x > 22 && su::ZONE_R.x + su::ZONE_R.w <= 414 && su::ZONE_L.y + su::ZONE_L.h <= 301);
+    ck.t("corner zones inside the graph area, left 3 px after the left markers (x 1..12)", su::ZONE_L.x >= 16 && su::ZONE_R.x + su::ZONE_R.w <= su::PANEL_X && su::ZONE_L.y + su::ZONE_L.h <= 301);
     // Zones per mode.
     let c = su::TAP_CORNERS;
-    ck.t("corners: bottom-left slower, bottom-right faster", gp(&d, c, 40, 290) == Press::Step(true) && gp(&d, c, 400, 290) == Press::Step(false));
-    ck.t("corners: zone edges (23..102 / 333..412, y 228..300)", gp(&d, c, 23, 228) == Press::Step(true) && gp(&d, c, 102, 300) == Press::Step(true) && gp(&d, c, 103, 290) == Press::None && gp(&d, c, 40, 227) == Press::None && gp(&d, c, 333, 300) == Press::Step(false) && gp(&d, c, 412, 228) == Press::Step(false) && gp(&d, c, 332, 290) == Press::None);
+    ck.t("corners: bottom-left slower, bottom-right faster", gp(&d, c, 40, 290) == Press::Step(true) && gp(&d, c, gr - 13, 290) == Press::Step(false));
+    ck.t("corners: zone edges (80 px each, y 228..300)", gp(&d, c, zl, 228) == Press::Step(true) && gp(&d, c, zl + 79, 300) == Press::Step(true) && gp(&d, c, zl + 80, 290) == Press::None && gp(&d, c, 40, 227) == Press::None && gp(&d, c, zr, 300) == Press::Step(false) && gp(&d, c, zr + 79, 228) == Press::Step(false) && gp(&d, c, zr - 1, 290) == Press::None);
     ck.t("corners: a tap elsewhere in the graph does nothing", gp(&d, c, 200, 290) == Press::None && gp(&d, c, 100, 150) == Press::None && gp(&d, c, 300, 60) == Press::None);
     let h = su::TAP_HALVES;
-    ck.t("halves: left half slower, right half faster (stock x <= 207)", gp(&d, h, 100, 150) == Press::Step(true) && gp(&d, h, 207, 80) == Press::Step(true) && gp(&d, h, 208, 80) == Press::Step(false) && gp(&d, h, 400, 290) == Press::Step(false));
+    ck.t("halves: left half slower, right half faster (stock x <= 207 of 413)", gp(&d, h, 100, 150) == Press::Step(true) && gp(&d, h, tc - 7, 80) == Press::Step(true) && gp(&d, h, tc - 6, 80) == Press::Step(false) && gp(&d, h, gr - 13, 290) == Press::Step(false));
     ck.t("off: no tap step anywhere", [(40, 290), (400, 290), (100, 150), (300, 150)].iter().all(|&(x, y)| gp(&d, su::TAP_OFF, x, y) == Press::None));
     let mut cm = d;
     cm.combined = true;
-    ck.t("corners in the combined view (same bottom edge)", gp(&cm, c, 40, 290) == Press::Step(true) && gp(&cm, c, 400, 290) == Press::Step(false));
+    ck.t("corners in the combined view (same bottom edge)", gp(&cm, c, 40, 290) == Press::Step(true) && gp(&cm, c, gr - 13, 290) == Press::Step(false));
     // Marker priority: the object under the finger wins over the zones.
     for mode in [su::TAP_CORNERS, su::TAP_HALVES] {
         let mut m = d;
@@ -1224,17 +1236,17 @@ fn tap_step_tests(ck: &mut Ck) {
         t.tabs = su::TAB_SHOW_L;
         ck.t(&format!("mode {mode}: a drawn tab wins over a grab zone that reaches it"), gp(&t, mode, 30, 288) == Press::Step(true) && gp(&t, mode, 15, 288) == Press::Marker(true, 3));
         let mut m = d;
-        m.xcur = Some([30, 385]);
-        ck.t(&format!("mode {mode}: X cursor lines in the corners are not zones (markers only)"), gp(&m, mode, 44, 260) == Press::Step(true) && gp(&m, mode, 399, 260) == Press::Step(false));
+        m.xcur = Some([30, su::NCOL as i16 - 14]);
+        ck.t(&format!("mode {mode}: X cursor lines in the corners are not zones (markers only)"), gp(&m, mode, 44, 260) == Press::Step(true) && gp(&m, mode, gr - 14, 260) == Press::Step(false));
         let mut m = d;
         m.pos = 300;
         m.trig_row = 300;
         ck.t(&format!("mode {mode}: CH1 / level markers clamped at the bottom keep their zone (x <= 22)"), matches!(gp(&m, mode, 15, 292), Press::Marker(true, _)));
-        ck.t(&format!("mode {mode}: trigger level marker zone (right edge)"), gp(&d, mode, 406, 125) == Press::Marker(true, 1) && gp(&d, mode, 6, 125) != Press::Marker(true, 1));
+        ck.t(&format!("mode {mode}: trigger level marker zone (right edge)"), gp(&d, mode, gr - 7, 125) == Press::Marker(true, 1) && gp(&d, mode, 6, 125) != Press::Marker(true, 1));
         let mut m = d;
         m.trig_row = 300;
-        ck.t(&format!("mode {mode}: trigger level clamped at the bottom wins over the right corner"), gp(&m, mode, 405, 292) == Press::Marker(true, 1));
-        ck.t(&format!("mode {mode}: T marker zone"), gp(&d, mode, 214, 30) == Press::Marker(false, 0));
+        ck.t(&format!("mode {mode}: trigger level clamped at the bottom wins over the right corner"), gp(&m, mode, gr - 8, 292) == Press::Marker(true, 1));
+        ck.t(&format!("mode {mode}: T marker zone"), gp(&d, mode, tc, 30) == Press::Marker(false, 0));
         let mut m = d;
         m.trig_px = 40;
         ck.t(&format!("mode {mode}: still a step next to the cursor-free corner"), gp(&m, mode, 60, 280) == Press::Step(true));
@@ -1249,24 +1261,24 @@ fn tap_step_tests(ck: &mut Ck) {
     let lev = Press::Marker(true, 1);
     let tpos = Press::Marker(false, 0);
     ck.t("grab zone CH1: x 0..42 (30 px past the glyph), y 136..183 (48 rows)", gp(&d, off, 0, 160) == ch1 && gp(&d, off, 42, 160) == ch1 && gp(&d, off, 43, 160) == Press::None && gp(&d, off, 6, 136) == ch1 && gp(&d, off, 6, 135) == Press::None && gp(&d, off, 6, 183) == ch1 && gp(&d, off, 6, 184) == Press::None);
-    ck.t("grab zone trigger level: x 371..413, y 101..148", gp(&d, off, 371, 125) == lev && gp(&d, off, 370, 125) == Press::None && gp(&d, off, 413, 125) == lev && gp(&d, off, 406, 101) == lev && gp(&d, off, 406, 100) == Press::None && gp(&d, off, 406, 148) == lev && gp(&d, off, 406, 149) == Press::None);
-    ck.t("grab zone T: x 190..237, y 16..62", gp(&d, off, 190, 40) == tpos && gp(&d, off, 189, 40) == Press::None && gp(&d, off, 237, 40) == tpos && gp(&d, off, 238, 40) == Press::None && gp(&d, off, 214, 16) == tpos && gp(&d, off, 214, 62) == tpos && gp(&d, off, 214, 63) == Press::None);
-    ck.t("20 px from a marker's centre grabs it", gp(&d, off, 26, 160) == ch1 && gp(&d, off, 6, 140) == ch1 && gp(&d, off, 6, 180) == ch1 && gp(&d, off, 386, 125) == lev && gp(&d, off, 406, 145) == lev && gp(&d, off, 214, 46) == tpos && gp(&d, off, 194, 26) == tpos);
+    ck.t("grab zone trigger level: from 30 px past the glyph to the frame, y 101..148", gp(&d, off, gr - 42, 125) == lev && gp(&d, off, gr - 43, 125) == Press::None && gp(&d, off, gr, 125) == lev && gp(&d, off, gr - 7, 101) == lev && gp(&d, off, gr - 7, 100) == Press::None && gp(&d, off, gr - 7, 148) == lev && gp(&d, off, gr - 7, 149) == Press::None);
+    ck.t("grab zone T: 48 px wide around the glyph, y 16..62", gp(&d, off, tc - 24, 40) == tpos && gp(&d, off, tc - 25, 40) == Press::None && gp(&d, off, tc + 23, 40) == tpos && gp(&d, off, tc + 24, 40) == Press::None && gp(&d, off, tc, 16) == tpos && gp(&d, off, tc, 62) == tpos && gp(&d, off, tc, 63) == Press::None);
+    ck.t("20 px from a marker's centre grabs it", gp(&d, off, 26, 160) == ch1 && gp(&d, off, 6, 140) == ch1 && gp(&d, off, 6, 180) == ch1 && gp(&d, off, gr - 27, 125) == lev && gp(&d, off, gr - 7, 145) == lev && gp(&d, off, tc, 46) == tpos && gp(&d, off, tc - 20, 26) == tpos);
     let mut m = d;
-    m.trig_px = 400; // T glyph x 401..412 (pointing right), the top edge
+    m.trig_px = su::GW; // T glyph at the last columns (pointing right), the top edge
     m.trig_row = 200; // the trigger level far below
-    ck.t("T at the last column: a top zone (x 383..430, y 16..62), not the right edge's", gp(&m, off, 390, 50) == tpos && gp(&m, off, 375, 30) == Press::None && gp(&m, off, 406, 30) == tpos);
+    ck.t("T at the last column: a top zone (y 16..62), not the right edge's", gp(&m, off, gr - 23, 50) == tpos && gp(&m, off, gr - 38, 30) == Press::None && gp(&m, off, gr - 7, 30) == tpos);
     let mut m = d;
-    m.trig_px = 0; // T glyph x 14..25 (pointing left)
-    ck.t("T at column 0: a top zone (x -4..43)", gp(&m, off, 16, 50) == tpos && gp(&m, off, 43, 30) == tpos && gp(&m, off, 44, 30) == Press::None);
+    m.trig_px = 0; // T glyph from x GX + 1 (pointing left)
+    ck.t("T at column 0: a top zone (to 30 px past the glyph)", gp(&m, off, su::GX + 3, 50) == tpos && gp(&m, off, su::GX + 30, 30) == tpos && gp(&m, off, su::GX + 31, 30) == Press::None);
     ck.t("the empty graph is no zone", [(60, 160), (200, 160), (340, 125), (214, 80), (100, 290)].iter().all(|&(x, y)| gp(&d, off, x, y) == Press::None));
     // Overlaps: the nearest glyph (Chebyshev); a tie: the selection.
     let mut m = d;
-    m.xcur = Some([230, 100]); // X1 glyph x 238..249
-    ck.t("overlap: the nearer glyph wins (T 7 px / X1 12 px; T 13 px / X1 6 px)", gs(&m, 0, 0, true, 226, 26) == tpos && gs(&m, 0, 0, true, 232, 26) == Press::Marker(false, 2));
-    ck.t("overlap: the nearer glyph wins whatever is selected", gs(&m, 0, 2, true, 226, 26) == tpos && gs(&m, 0, 0, true, 232, 26) == Press::Marker(false, 2));
-    m.xcur = Some([229, 100]); // X1 glyph x 237..248: x 228 is 9 px from both
-    ck.t("overlap: a tie goes to the selection", gs(&m, 0, 0, true, 228, 26) == tpos && gs(&m, 0, 2, true, 228, 26) == Press::Marker(false, 2));
+    m.xcur = Some([su::GCX + 30, 100]); // X1 glyph 24..35 px right of T's centre
+    ck.t("overlap: the nearer glyph wins (T 7 px / X1 12 px; T 13 px / X1 6 px)", gs(&m, 0, 0, true, tc + 12, 26) == tpos && gs(&m, 0, 0, true, tc + 18, 26) == Press::Marker(false, 2));
+    ck.t("overlap: the nearer glyph wins whatever is selected", gs(&m, 0, 2, true, tc + 12, 26) == tpos && gs(&m, 0, 0, true, tc + 18, 26) == Press::Marker(false, 2));
+    m.xcur = Some([su::GCX + 29, 100]); // x tc + 14 is 9 px from both glyphs
+    ck.t("overlap: a tie goes to the selection", gs(&m, 0, 0, true, tc + 14, 26) == tpos && gs(&m, 0, 2, true, tc + 14, 26) == Press::Marker(false, 2));
     // Every point of a grab zone picks a glyph no farther than any other
     // zone's glyph that also contains it (no overlap is ambiguous).
     let mut m = d;
@@ -1279,7 +1291,7 @@ fn tap_step_tests(ck: &mut Ck) {
     let n = su::zones(&m, &mut z);
     let mut bad = 0;
     for y in 15..305i16 {
-        for x in 0..414i16 {
+        for x in 0..su::PANEL_X {
             if let Some(q) = su::graph_pick(&m, 0, 0, false, x, y) {
                 let d = q.dist(x, y).unwrap();
                 if z[..n].iter().any(|o| o.dist(x, y).is_some_and(|e| e < d)) {
@@ -1371,14 +1383,14 @@ fn tap_step_tests(ck: &mut Ck) {
     ck.t("no nearest guess: on the Y1 line, CH1 selected -> CH1", gs(&m, 0, 0, false, 200, 82) == Press::None && di(&m, false, 0) == (true, 0));
     ck.t("no nearest guess: next to the X1 line sideways -> the trigger position", gs(&m, 0, 0, true, 114, 200) == Press::None && di(&m, true, 0) == (false, 0));
     // A marker's grab zone wins: its own axis from the first move.
-    ck.t("a drag from the right-edge T zone moves the trigger level (level, V)", gp(&d, off, 395, 125) == lev && gp(&d, c, 395, 125) == lev);
+    ck.t("a drag from the right-edge T zone moves the trigger level (level, V)", gp(&d, off, gr - 18, 125) == lev && gp(&d, c, gr - 18, 125) == lev);
     ck.t("a drag from the top T zone moves the trigger position (time, H)", gp(&d, off, 214, 50) == tpos);
     ck.t("a drag from the CH1 zone moves CH1 (level, V)", gp(&d, off, 30, 160) == ch1);
     // A zone drag does not change the selection the empty graph uses
     // (owner 2026-11-02); a still tap on a marker does.
     let ch1_sel = (0u8, 0u8, false);
     let after = |zone_drag: bool| {
-        let now = match gp(&d, off, 395, 125) {
+        let now = match gp(&d, off, gr - 18, 125) {
             Press::Marker(true, id) => (id, 0, false),
             _ => ch1_sel,
         };
@@ -1391,11 +1403,11 @@ fn tap_step_tests(ck: &mut Ck) {
     host::reset(0);
     su::invalidate();
     su::update(&d);
-    page(ck, "top badges", &|x, y| su::top_badge(x, y).map(|k| k as u32), &|b| b.y1 < 20, &[0, 1, 2, 3]);
+    page(ck, "top badges", &|x, y| su::top_badge(x, y).map(|k| k as u32), &|b| b.y1 < 20, &[0, 1, 2]);
     let tb = |x: u16, y: u16| su::top_badge(x, y);
-    ck.t("badges: run / timebase / V/div / trigger", tb(40, 10) == Some(0) && tb(100, 10) == Some(1) && tb(300, 5) == Some(2) && tb(380, 10) == Some(3));
-    ck.t("badges: rows 15..19 (inside INNER) are the badge, y 20 the graph", tb(100, 15) == Some(1) && tb(100, 19) == Some(1) && tb(100, 20).is_none() && tb(300, 19) == Some(2));
-    ck.t("badges: record bar, gaps and battery are not badges", tb(200, 10).is_none() && tb(77, 10).is_none() && tb(143, 10).is_none() && tb(450, 10).is_none());
+    ck.t("badges: run / timebase / trigger (no V/div badge: the CH1 block)", tb(40, 10) == Some(0) && tb(100, 10) == Some(1) && tb(380, 10) == Some(2));
+    ck.t("badges: rows 15..19 (inside INNER) are the badge, y 20 the graph", tb(100, 15) == Some(1) && tb(100, 19) == Some(1) && tb(100, 20).is_none() && tb(380, 19) == Some(2));
+    ck.t("badges: record bar (to x 347), gaps and battery are not badges", tb(200, 10).is_none() && tb(300, 5).is_none() && tb(77, 10).is_none() && tb(143, 10).is_none() && tb(450, 10).is_none());
     let mut m = d;
     m.trig_px = 90;
     ck.t("badges win over the T zone's top rows (T under the timebase badge)", gp(&m, c, 100, 17) == Press::Marker(false, 0) && tb(100, 17) == Some(1) && gp(&m, c, 100, 25) == Press::Marker(false, 0));

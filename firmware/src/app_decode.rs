@@ -216,7 +216,8 @@ impl App {
         }
         let need = ((hi as i32 - lo as i32) / 2).max(3);
         let mut last: Option<usize> = None;
-        for (i, &(p, q)) in seg.iter().enumerate().take(399) {
+        for i in 0..crate::scope_ui::NCOL {
+            let (p, q) = scope_page::col_rows(seg, i);
             if p <= q && (q as i32 - p as i32) >= need {
                 let from = match last {
                     Some(l) if i - l <= gap.max(3) => l + 1,
@@ -307,8 +308,8 @@ impl App {
             // A character narrower than MIN_BOX px: the bar (also while the
             // decode runs, from the rate found last).
             let cs = (a.fs.max(1) as u64 * ds().cfg.char_bits() as u64 / a.baud.max(1) as u64) as i64;
-            if a.baud != 0 && cs * 399 / (a.n.max(1) as i64) < ud::MIN_BOX as i64 {
-                self.dec_bar((cs * 399 / a.n.max(1) as i64 + 1) as usize);
+            if a.baud != 0 && cs * crate::scope_ui::NCOL as i64 / (a.n.max(1) as i64) < ud::MIN_BOX as i64 {
+                self.dec_bar((cs * crate::scope_ui::NCOL as i64 / a.n.max(1) as i64 + 1) as usize);
             } else if !fresh {
                 a.mode = ud::M_NONE;
             }

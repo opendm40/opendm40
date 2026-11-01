@@ -94,7 +94,10 @@ fn trig_v(m: &Model) -> f32 {
 
 pub fn scenes() -> Vec<Scene> {
     let mut v = vec![];
-    let d = Model::DEFAULT;
+    let mut d = Model::DEFAULT;
+    // The channel blocks' scales as the page shows them after a start.
+    d.ch2_txt = su::Txt::new("2V");
+    d.gen_txt = su::Txt::new("1V");
     let cells = vec!["Freq:1.00kHz", "Vp-p:3.00V", "Cycl:1.00ms", "Vrms:1.06V"];
     let mut add = |name: &'static str, m: Model, trace: Option<Trace>, persist: Option<Trace>, cols: usize, c: Vec<&'static str>| {
         let mut m = m;
@@ -316,23 +319,39 @@ pub fn popvals(m: &Model) -> su::PopVals {
     }
 }
 
+/// Engine columns (`cols`, up to scope::COLS) -> the graph's NCOL columns:
+/// each graph column the min / max of the engine columns it covers
+/// (scope_page::col_rows; one each while the graph has COLS columns).
+pub fn fit(c: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    let mut out = vec![];
+    for j in 0..su::NCOL {
+        let (a, b) = (su::eng_of_col(j as i32) as usize, su::eng_of_col(j as i32 + 1) as usize);
+        if a >= c.len() {
+            break;
+        }
+        let s = &c[a..b.max(a + 1).min(c.len())];
+        out.push((s.iter().map(|p| p.0).min().unwrap(), s.iter().map(|p| p.1).max().unwrap()));
+    }
+    out
+}
+
 /// Load a scene's traces into the graph (frame rows).
 pub fn load(sc: &Scene) {
     let g = su::graph();
     g.clear();
     let h = sc.m.frame_h();
     if let Some(t) = &sc.trace {
-        for (i, (a, b)) in t.columns(sc.cols).iter().enumerate().take(399) {
+        for (i, (a, b)) in fit(&t.columns(if sc.cols >= 399 { 400 } else { sc.cols })).iter().enumerate().take(su::NCOL) {
             g.tr[i] = (su::trace_fy(h, *a), su::trace_fy(h, *b));
         }
     }
     if let Some(t) = &sc.persist {
-        for (i, (a, b)) in t.columns(399).iter().enumerate().take(399) {
+        for (i, (a, b)) in fit(&t.columns(400)).iter().enumerate().take(su::NCOL) {
             g.ps[i] = (su::trace_fy(h, *a), su::trace_fy(h, *b));
         }
     }
     if let Some(t) = math_trace(sc) {
-        for (i, (a, b)) in t.columns(399).iter().enumerate().take(399) {
+        for (i, (a, b)) in fit(&t.columns(400)).iter().enumerate().take(su::NCOL) {
             g.ma[i] = (su::trace_fy(h, *a), su::trace_fy(h, *b));
         }
     }

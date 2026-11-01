@@ -72,6 +72,17 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Scope: a block per channel on the right panel** (CH1, DMM, GEN,
+  MATH): the name and V/div, a magnifier to zoom in and one to zoom out;
+  a tap on the title opens the CH1 / math popup or switches DMM / GEN on
+  and off. The left magnifier zooms in on every block. The graph reaches
+  the screen's left edge, its markers inside it; 39 px divisions. The
+  TRIG button, the V/div badge and the MCX | DMM badge are gone: the
+  trigger badge and MF > Trigger open the trigger settings, the CH1 title
+  shows the probe and AC coupling, a long press on the DMM title opens
+  the Wave view ([manual](docs/manual/README.md#the-scope-page)).
+- **Scope: the GEN trace on its own V/div** (the GEN block's magnifiers;
+  it starts at CH1's). SCPI `GENerator:SCALe`, `GENerator:DISPlay`.
 - **Extra digit at full size:** wherever it can appear, the reading starts
   further left, so the other digits do not move when it comes or goes
   ([manual](docs/manual/README.md#counts-rate-and-the-extra-digit)).

@@ -556,11 +556,11 @@ pub const FUNC_Y: u16 = 258;
 
 pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
     lcd::fill_rect(0, FUNC_Y, lcd::W, MEAS_Y - FUNC_Y, S_BAR);
-    // The scope panel's last two keys (V/div "-" at 232..271, TRIG at
-    // 280..319) straddle the band: in the panel column the band runs from
-    // the "-" key's top to the screen bottom, so no half key shows while
-    // the band is open (band_close repaints the page).
-    let py = crate::scope_ui::B_RECT[5].y as u16;
+    // The scope panel's last block (MATH, from y 246) straddles the band:
+    // in the panel column the band runs from the block's top to the screen
+    // bottom, so no half block shows while the band is open (band_close
+    // repaints the page).
+    let py = crate::scope_ui::panel_rect(3 * crate::scope_ui::BLK_MATH).y as u16;
     lcd::fill_rect(BAND_PANEL_X, py, lcd::W - BAND_PANEL_X, lcd::H - py, S_BAR);
     lcd::fill_rect(BAND_PANEL_X, py, lcd::W - BAND_PANEL_X, 1, S_FRAME);
     lcd::fill_rect(0, FUNC_Y, lcd::W, 1, S_FRAME);
@@ -574,7 +574,7 @@ pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
 
 /// Left edge of the scope page's right panel (scope_ui::PANEL), whose last
 /// key ends below the measurement bar.
-const BAND_PANEL_X: u16 = 414;
+const BAND_PANEL_X: u16 = crate::scope_ui::PANEL_X as u16;
 
 /// Function button (0..6) of the band under a tap, None outside the band.
 pub fn func_band_hit(x: u16, y: u16) -> Option<usize> {

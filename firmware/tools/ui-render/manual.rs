@@ -102,7 +102,7 @@ fn scope_base() -> stock::Scene {
     let mut m = base.m;
     m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, m.tb, scope_ui::tb_top(true, false), false, None);
     m.cur_tab = scope_ui::CUR_OFF;
-    m.src = scope_ui::SRC_MCX;
+    m.wave = false;
     let mut sc = stock::Scene { name: "manual-scope", m, popup: scope_ui::Popup::None, trace: None, persist: None, cols: 399, cells: base.cells.clone() };
     sc.trace = Some(trig_sine(&sc.m, 1.5, 2.0));
     sc
@@ -456,7 +456,7 @@ pub fn run(out: &str) -> usize {
     // at 10 ms/div (5 periods), 50 ms/div and 2 ms/div; a 1.5 A current.
     {
         let mut m = scope_base().m;
-        m.src = scope_ui::SRC_DMM;
+        m.wave = true;
         m.wvdiv = 150.0;
         m.ch1_txt = "AC V";
         m.ac = true;
@@ -492,6 +492,43 @@ pub fn run(out: &str) -> usize {
     // The run view.
     scope_shot(&mut ck, out, "scope-run", &sb, &pv);
     save1(out, "scope-run");
+    // Every channel on: the DMM (CH2) at 2 V/div, the GEN trace (a 0..2 V
+    // square at 2 V/div), ABS math at 1 V/div, its zero 1.5 div down.
+    {
+        let mut sc = scope_base();
+        sc.m.ch2_on = true;
+        sc.m.gen_on = true;
+        sc.m.gen_txt = scope_ui::Txt::new("2V");
+        sc.m.math_on = true;
+        sc.m.math_mode = 6;
+        sc.m.math_off = 52;
+        sc.m.math_scale = scope_ui::Txt::new("1V");
+        let mut p = popvals(&sc.m);
+        p.gen_trace = true;
+        p.ch2_on = true;
+        host::reset(0);
+        stock::draw_with(&sc, &p);
+        let h = sc.m.frame_h();
+        let g = scope_ui::graph();
+        let shape = gen::Shape { wave: gen::Wave::Square, lo_v: 0.0, hi_v: 2.0, duty: 0.5 };
+        let n = scope_ui::NCOL;
+        let tau = core::f32::consts::TAU;
+        for i in 0..n {
+            let (lo, hi) = shape.span(i as f32 * 4.0 / n as f32, 4.0 / n as f32);
+            let r = |v: f32| (140.0 - 141.0 * v / 8.0) as i32;
+            g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+            let v = 1.2 + 0.4 * (i as f32 / n as f32 * tau).sin();
+            let c = (140.0 - 141.0 * v / 8.0) as i32;
+            g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
+            // |CH1| (the 1.5 div sine, 1 V/div) at 1 V/div from row 192.
+            let a = |i: usize| (192.0 - 35.0 * (1.5 * (i as f32 / n as f32 * 2.0 * tau + 0.3).sin()).abs()) as i32;
+            let (x, y) = (a(i), a(i + 1));
+            g.ma[i] = (scope_ui::trace_fy(h, x.min(y)), scope_ui::trace_fy(h, x.max(y) + 1));
+        }
+        scope_ui::update(&sc.m);
+        ck.check_replica("manual/scope-channels");
+        save1(out, "scope-channels");
+    }
     // Every scope state below: (name, model change, popup, popup values
     // change, trace, cells).
     {
@@ -657,7 +694,7 @@ pub fn run(out: &str) -> usize {
     {
         let mut m = sb.m;
         m.combined = true;
-        m.src = scope_ui::SRC_NONE;
+        m.wave = false;
         let sc = stock::Scene { name: "manual-combined", m, popup: scope_ui::Popup::None, trace: sb.trace.clone(), persist: None, cols: 399, cells: sb.cells.clone() };
         host::reset(0);
         scope_ui::invalidate();

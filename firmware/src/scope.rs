@@ -601,6 +601,9 @@ pub struct Scope {
     /// The GEN trace is shown: every MCX record needs the generator's
     /// phase, so the comparator (whose stop time is not known) is off.
     pub gen_trace: bool,
+    /// The GEN trace's V/div: a scope_ui::VDIV_VAL index; 255 = not set
+    /// yet (CH1's; set to CH1's when the trace is turned on).
+    pub gen_vdiv: u8,
     /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
     /// record needs its time (`rec_time`), the comparator is off.
     pub ch2_on: bool,
@@ -968,6 +971,7 @@ impl Scope {
             lin_pre: 0,
             stored_gen: None,
             gen_trace: false,
+            gen_vdiv: 255,
             ch2_on: false,
             t_s0: None,
             t_step: 1.0,

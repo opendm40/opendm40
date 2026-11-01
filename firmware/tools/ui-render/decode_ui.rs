@@ -101,16 +101,16 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
         a.note_baud = baud;
         return;
     }
-    if (cs as i64 * 399 / n as i64) < ud::MIN_BOX as i64 {
+    if (cs as i64 * scope_ui::NCOL as i64 / n as i64) < ud::MIN_BOX as i64 {
         a.mode = ud::M_BAR;
         let (mut glo, mut ghi) = (i32::MAX, i32::MIN);
-        for i in 0..399 {
+        for i in 0..scope_ui::NCOL {
             glo = glo.min(tr.a[i]);
             ghi = ghi.max(tr.b[i]);
         }
-        let gap = (cs as i64 * 399 / n as i64 + 1) as usize;
+        let gap = (cs as i64 * scope_ui::NCOL as i64 / n as i64 + 1) as usize;
         let mut last: Option<usize> = None;
-        for i in 0..399 {
+        for i in 0..scope_ui::NCOL {
             if tr.b[i] - tr.a[i] >= ((ghi - glo) / 2).max(3) {
                 let from = match last {
                     Some(l) if i - l <= gap.max(3) => l + 1,
@@ -222,7 +222,7 @@ fn scene(ck: &mut Checker, name: &str, b: &[bool], spb: f64, cfg: dc::Cfg, chars
         m.record = (pos as f32 * 0.8, pos as f32 * 0.8 + 0.2);
     }
     if wave {
-        m.src = scope_ui::SRC_DMM;
+        m.wave = true;
         m.wvdiv = 2.0;
         m.ch1_txt = "DC V";
     }
@@ -280,14 +280,14 @@ fn dali_fill(c: &[u16], off: usize, n: usize, fs: u32, tr: &stock::Trace) {
     a.mid = mid;
     let l = dc::Line { lo, mid, hi, inv: false, spb: (fs as u64 * 256 / dc::DALI_BAUD as u64) as u32, bits: 8, parity: 0 };
     let cs = (fs as u64 * 10 / dc::DALI_BAUD as u64) as i64;
-    if cs * 399 / (n as i64) < ud::MIN_BOX as i64 {
+    if cs * scope_ui::NCOL as i64 / (n as i64) < ud::MIN_BOX as i64 {
         a.mode = ud::M_BAR;
         let (mut glo, mut ghi) = (i32::MAX, i32::MIN);
-        for i in 0..399 {
+        for i in 0..scope_ui::NCOL {
             glo = glo.min(tr.a[i]);
             ghi = ghi.max(tr.b[i]);
         }
-        for i in 0..399 {
+        for i in 0..scope_ui::NCOL {
             if tr.b[i] - tr.a[i] >= ((ghi - glo) / 2).max(3) {
                 a.bar[i / 8] |= 1 << (i % 8);
             }

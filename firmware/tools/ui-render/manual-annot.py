@@ -272,7 +272,7 @@ def together():
     g = lambda x, y: (x0 + x * sc, y0 + y * sc)
     tag(d, 'multimeter (V / A jacks)', g(150, 56), *g(40, 72), f)
     tag(d, 'generator running', g(404, 48), *g(250, 72), f)
-    tag(d, 'oscilloscope (CHA)', None, *g(150, 236), f)
+    tag(d, 'oscilloscope (CH1)', None, *g(150, 236), f)
     save(im, 'new-together')
 
 
@@ -328,7 +328,7 @@ def jacks():
     a = G(sx + pd.MCX_R, sy)
     d.line((a[0], a[1], R - 6, a[1]), fill=BLUE, width=2)
     d.ellipse((a[0] - 4, a[1] - 4, a[0] + 4, a[1] + 4), fill=BLUE)
-    d.text((R, a[1] - 10), 'oscilloscope input (CHA on the screen)', font=f, fill=DARK)
+    d.text((R, a[1] - 10), 'oscilloscope input (CH1 on the screen)', font=f, fill=DARK)
     b = G(gx, gy + pd.MCX_R)
     yb = G(0, gy + pd.MCX_R + 2.0)[1]
     d.line((b[0], b[1], b[0], yb, R - 6, yb), fill=BLUE, width=2)
@@ -364,19 +364,20 @@ def scope_page():
     paste(im, d, s, x0, y0)
     f = font(14)
     g = lambda x, y: (x0 + x * sc, y0 + y * sc)
-    for x, t, row in [(44, 'run state', 0), (110, 'timebase', 1), (176, 'MCX | DMM', 0), (246, 'record bar', 1), (316, 'V/div', 0), (383, 'trigger', 1)]:
+    for x, t, row in [(44, 'run state', 0), (110, 'timebase', 1), (246, 'record bar', 0), (383, 'trigger', 1)]:
         up_label(d, t, g(x, 1), y0 - 34 - row * 30, f)
     L, R = x0 - 20, x0 + w + 20
     side_label(d, 'A: the trace zero', g(0, 160), L, f, right=False)
     side_label(d, 'slower timebase', g(25, 288), L, f, right=False)
     side_label(d, 'measurements', g(0, 311), L, f, right=False)
-    side_label(d, 'zoom in, CHA, zoom out', g(480, 80), R, f)
-    side_label(d, 'math scale, math (FFT)', g(480, 210), R, f)
-    side_label(d, 'TRIG: trigger menu', g(480, 300), R, f)
-    tag(d, 'T: trigger position', g(216, 26), *g(236, 32), f)
-    tag(d, 'T: trigger level', g(405, 125), *g(290, 70), f)
-    tag(d, 'CUR: cursors', g(135, 281), *g(96, 246), f)
-    tag(d, 'faster timebase', g(365, 281), *g(270, 246), f)
+    side_label(d, 'CH1: popup, zoom in / out', g(480, 60), R, f)
+    side_label(d, 'DMM (CH2): on / off, V/div', g(480, 134), R, f)
+    side_label(d, 'GEN trace: on / off, V/div', g(480, 208), R, f)
+    side_label(d, 'MATH (FFT): popup, scale', g(480, 282), R, f)
+    tag(d, 'T: trigger position', g(198, 26), *g(218, 32), f)
+    tag(d, 'T: trigger level', g(383, 125), *g(270, 70), f)
+    tag(d, 'CUR: cursors', g(132, 281), *g(96, 246), f)
+    tag(d, 'faster timebase', g(340, 281), *g(250, 246), f)
     save(im, 'scope-page')
 
 
@@ -800,34 +801,37 @@ def scope_topbar():
     x0, y0 = 20, 20
     paste(im, d, s, x0, y0)
     f = font(14)
-    for a, b, t in [(13, 75, 'run / stop'), (80, 140, 'timebase list'), (145, 208, 'Wave view'), (286, 347, 'channel popup'), (352, 414, 'trigger menu')]:
+    for a, b, t in [(13, 75, 'run / stop'), (80, 140, 'timebase list'), (352, 414, 'trigger menu')]:
         d.rectangle((x0 + a * sc + 1, y0 - 3, x0 + b * sc - 1, y0 + h + 2), outline=BLUE, width=3)
         down_label(d, t, (x0 + (a + b) * sc / 2, y0 + h + 4), y0 + h + 40, f)
     save(im, 'new-scope-topbar')
 
 
-def pair(name, a, ca, b, cb, crop=None, scale=0.5):
+def pair(name, a, ca, b, cb, crop=None, scale=0.5, crop_b=None):
+    """Stock `a` beside opendm40 `b`; `crop_b`: b's own crop (another
+    geometry), else `crop` for both."""
     if crop:
-        sa = src_shot(a, 1).crop(crop)
-        sb = src_shot(b, 1).crop(crop)
-        sa = sa.resize((round(sa.size[0] * scale), round(sa.size[1] * scale)), Image.NEAREST if float(scale).is_integer() else Image.LANCZOS)
-        sb = sb.resize(sa.size, Image.NEAREST if float(scale).is_integer() else Image.LANCZOS)
+        rs = lambda im: im.resize((round(im.size[0] * scale), round(im.size[1] * scale)), Image.NEAREST if float(scale).is_integer() else Image.LANCZOS)
+        sa = rs(src_shot(a, 1).crop(crop))
+        sb = rs(src_shot(b, 1).crop(crop_b or crop))
     else:
         sa, sb = src_shot(a, scale), src_shot(b, scale)
-    w, h = sa.size
-    im, d = canvas(2 * w + 100, h + 60)
-    paste(im, d, sa, 20, 40)
-    paste(im, d, sb, w + 80, 40)
+    (w, h), (wb, hb) = sa.size, sb.size
+    H = max(h, hb)
+    im, d = canvas(w + wb + 100, H + 60)
+    paste(im, d, sa, 20, 40 + (H - h) // 2)
+    paste(im, d, sb, w + 80, 40 + (H - hb) // 2)
     fb = font(15, bold=True)
     text_c(d, 20 + w / 2, 12, ca, fb, MID)
-    text_c(d, w + 80 + w / 2, 12, cb, fb, BLUE)
-    arrow(d, (w + 32, 40 + h / 2), (w + 70, 40 + h / 2), w=3, head=10)
+    text_c(d, w + 80 + wb / 2, 12, cb, fb, BLUE)
+    arrow(d, (w + 32, 40 + H / 2), (w + 70, 40 + H / 2), w=3, head=10)
     save(im, name)
 
 
 def stock_pairs():
     st = STOCK
-    pair('new-scope-vdiv', (st, 'st01-default-td'), 'Stock', 'scope-run', 'opendm40', crop=(414, 20, 480, 142), scale=2)
+    # The stock V/div keys beside the four channel blocks.
+    pair('new-scope-vdiv', (st, 'st01-default-td'), 'Stock', 'scope-run', 'opendm40', crop=(414, 20, 480, 142), scale=2, crop_b=(391, 20, 480, 320))
     pair('new-scope-tabs', (st, 'st01-default-td'), 'Stock', 'scope-run', 'opendm40', crop=(0, 230, 414, 320), scale=1)
     pair('new-scope-trig', (st, 'st22-settings-trigger'), 'Stock', 'scope-trig-pulse', 'opendm40')
     pair('new-scope-fft', (st, 'st11-fft'), 'Stock', 'scope', 'opendm40')
