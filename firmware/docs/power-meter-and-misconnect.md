@@ -44,7 +44,8 @@ in each section.
   chip's X*Y RMS statistic. Couplings DC / AC / AC+DC, energy (Wh, VAh),
   per-channel autorange, burden compensation ("At load", off by default),
   a continuous-current limit, phase calibration, V gain and zero jobs, W
-  limits, Bluetooth. The U and I waveforms (Power Wave, 3.18). Code: [`src/powermeter.rs`](../src/powermeter.rs),
+  limits, Bluetooth. The U and I waveforms (Power Wave, 3.18), and the LCR
+  meter on the same frames ([lcr.md](lcr.md)). Code: [`src/powermeter.rs`](../src/powermeter.rs),
   [`src/app_power.rs`](../src/app_power.rs),
   [`src/ui_power.rs`](../src/ui_power.rs). Sections 3.1..3.18.
 * **Burden voltage readout** in the DMM A functions (3.15).

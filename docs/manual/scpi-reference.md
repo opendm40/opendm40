@@ -646,6 +646,31 @@ and `MEASure:POWer?` then give the real power P in W.
 - The trace has 19200 samples at 9600 Hz, the trigger at sample 1920. Read
   it in pieces: `INR:DATA? 0,3000`, `INR:DATA? 3000,3000`, ...
 
+## LCR meter
+
+| Command | Parameters | Reply | Link |
+|---|---|---|---|
+| `LCR[:STATe][?]` | `ON` or `OFF` | `1` or `0` | both |
+| `LCR:FREQuency[?]` | `100` or `1000` (Hz) | `1000` | both |
+| `LCR:MODel[?]` | `AUTO`, `SERies` or `PARallel` | `AUTO`, `SER` or `PAR` | both |
+| `LCR:FETCh?` | | `<frames>,<f Hz>,<\|Z\|>,<phase deg>,<R>,<X>,<L H>,<C F>,<D>,<Q>,L\|C\|R\|NONE,SER\|PAR,<I range A>,<corrections>` | both |
+| `LCR:CORRection:SHORt` | | Stores the short (clips joined, 4 frames). | both |
+| `LCR:CORRection:OPEN` | | Stores the open (no component, 4 frames). | both |
+| `LCR:CORRection:PHASe` | | Stores the delay of the current range (a resistor, 4 frames). | both |
+| `LCR:CORRection:CLEar` | | Removes all corrections. | both |
+| `LCR:CORRection[?]` | | `<short R>,<short X>,<open G>,<open B>,<delay 600uA us>,<delay 6mA us>,<delay 60mA us>,<job running 1/0>` at the frequency in force | both |
+
+- `LCR ON` opens the LCR page from the power meter (`CONFigure:POWer`
+  first) and starts the generator; `OFF` closes it and restores the
+  generator and the power meter's ranges. Wiring and method:
+  [firmware/docs/lcr.md](../../firmware/docs/lcr.md).
+- R, X, L and C follow the model (series: ESR, Ls, Cs; parallel: Rp, Lp,
+  Cp). A value with none is `+9.91E37`. `<corrections>` bits: 1 short
+  (100 Hz), 2 open (100 Hz), 16 short (1 kHz), 32 open (1 kHz), 256 << k
+  the delay of range k.
+- The result of a correction is on the page's state line; the corrections
+  are lost at power-off.
+
 ## Data logging (LOG)
 
 Two loggers: the **CSV recorder** writes the multimeter's readings to the

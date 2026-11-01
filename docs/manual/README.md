@@ -1948,6 +1948,7 @@ voltage: small voltages read on the 6 V range.
 | **V cal** | Calibrates the power meter's voltage against the multimeter's own DC V or AC V on the current range: apply a steady voltage of 10 % to 70 % of the range (DC: up to 100 %); takes about 8 s. |
 | **DC / AC / AC+DC** | The coupling; the help line explains the chosen one. |
 | **Wave** | Opens [Power Wave](#power-wave): the voltage and current waveforms. |
+| **LCR** | Opens the [LCR meter](#lcr-meter). |
 | **Reset Wh** | Resets Wh, VAh and the time at once. |
 | **Wiring** | Shows the wiring picture. |
 | **Limits** | Hold & Limits for the power: AutoHold, upper and lower limits in W, fail beep. |
@@ -1984,6 +1985,26 @@ with its own scale; above them U and I (RMS), P and f of the picture.
 - The page still watches the current: above 10 A, above the range, or at
   the end of the [current limit](#current-limit) it returns to the power
   meter, which then sounds its alarm or changes the range.
+
+### LCR meter
+
+![LCR: a 4.7 µF capacitor at 1 kHz](img/lcr.png)
+
+*LCR: a 4.7 µF capacitor at 1 kHz.*
+
+Power Settings > **LCR** measures a component with the generator: L or C
+(R when it is mostly resistive), ESR (Rp for Parallel), D, Q, |Z|, the
+phase and the test current.
+
+- Wiring: GEN centre to one end and to **V/Ω**, the other end to **A**, the
+  GEN shield to **COM**. Connect nothing else to the component; discharge
+  capacitors first, an electrolytic's + to the GEN side.
+- **100Hz** / **1kHz**: the test frequency. **Auto** / **Series** /
+  **Parallel**: the equivalent circuit (Auto: Series below 1 kΩ).
+- **Short** (clips joined), **Open** (no component) and **R cal** (a
+  resistor, on each current range) store corrections until power-off.
+- About 1 Ω to 300 kΩ (*estimated*). **Back** restores the generator and
+  the power meter's ranges.
 
 ### Current limit
 

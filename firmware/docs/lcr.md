@@ -44,15 +44,19 @@ flowchart LR
   only over whole test cycles. The times carry the U / I alternation (56°
   at 1 kHz), so it cancels exactly; a lag common to both channels cancels
   in U / I. Z = U / I (complex).
-- **Corrections** (RAM only, lost at power-off, per I range and frequency;
-  `LCR:CORR`):
-  1. Short (DUT clips joined): Z_s. Default: the bare shunt (0.5 / 47.5 Ω).
-     Z' = Z − Z_s.
+- **Corrections** (RAM only, lost at power-off; `LCR:CORR`), 4 frames
+  averaged each:
+  1. Short (DUT clips joined), per frequency: taken on the 60 mA range (a
+     short draws ~30 mA), stored as the excess over the 0.5 Ω shunt (fuse,
+     MOSFET, leads) and added to each range's shunt: Z_s = R_shunt + excess
+     (`POW:BURD` sets R_shunt; the excess on the 47.5 Ω ranges is
+     *inferred* to be the same). Default: the bare shunt. Z' = Z − Z_s.
   2. Delay τ per I range, from a resistor (`LCR:CORR:PHAS`): τ = arg(Z')
      / ω; Z' ·= e^(−jωτ). Default 0. Sources: the AD2 / AD3 grid skew
      (~10 µs, *inferred*, doc 3.18) and OP1 x10 (~0.3° at 1 kHz, *inferred*
      from its 2 MHz GBW). The power meter's SPHACAL (`POW:PHAS`) applies.
-  3. Open (DUT removed): Y_o = 1 / Z'_open; Z_DUT = 1 / (1 / Z' − Y_o).
+  3. Open (DUT removed), per frequency, on the 600 µA range: Y_o = 1 /
+     Z'_open; Z_DUT = 1 / (1 / Z' − Y_o).
 - **Results**: R = Re Z, X = Im Z, θ = atan2(X, R). Series: Ls = X / ω,
   Cs = −1 / (ωX), ESR = R. Parallel: Rp = |Z|² / R, Xp = |Z|² / X. D = R /
   |X|, Q = 1 / D. L when θ > 0, C when θ < 0; R as the main reading when
@@ -60,7 +64,11 @@ flowchart LR
 - **I range**: 600 µA (47.5 Ω x10), 6 mA (47.5 Ω x1), 60 mA (0.5 Ω x10),
   chosen on the frame's peak (DC + AC): up above 0.6 V at the converter
   (OP1 output swing, *inferred* from the 0.7 V of doc 3.2), down below
-  0.05 V. Starts on 60 mA (a short draws ~30 mA peak).
+  0.05 V. Starts on 60 mA (a short draws ~30 mA peak). A range change
+  drops that frame.
+- **Guard**: a U or I sample on a converter rail on the 60 mA range (12 V,
+  ~245 mA: more than the generator can drive) closes the page into the
+  power meter.
 
 ## Ranges (*inferred*: noise from doc 3.5, not yet measured with a DUT)
 

@@ -317,6 +317,22 @@ pub fn run(out: &str) -> usize {
             ck.check_opts("manual/power-wave", &page, false);
             save1(out, "power-wave");
         }
+        // LCR: a 4.7 uF film capacitor at 1 kHz, the short stored.
+        host::reset(0);
+        ui::lcr::page(&ui::lcr::Vals {
+            title: "1kHz  I 60mA",
+            name: "Cs",
+            val: "4.702",
+            unit: "uF",
+            cells: ["ESR 41.20m\u{3a9}", "D 0.0012", "Q 820.9", "|Z| 33.85\u{3a9}", "Phase -89.93", "I 17.45mA"],
+            info: "Short stored",
+            info_fg: ui::lcr::C_OK,
+            fi: 1,
+            model: 0,
+            run: true,
+        });
+        ck.check_opts("manual/lcr", &page, false);
+        save1(out, "lcr");
 
         // DC: a 12 V supply into a 2 A load, energy counting; the main
         // value stepped to Wh; the current-limit countdown.
