@@ -20,8 +20,8 @@ mod cring;
 
 use pack10::Src;
 
-/// scope.rs: RB = ((CAP - STG) * 2 - 4) / 5 * 5 with CAP = 42 KiB, STG = 2048.
-const RB: usize = ((42 * 1024 - 2048) * 2 - 4) / 5 * 5;
+/// scope.rs: RB = ((CAP - STG) * 2 - 4) / 5 * 5 with CAP = 43 KiB, STG = 2048.
+const RB: usize = ((43 * 1024 - 2048) * 2 - 4) / 5 * 5;
 const PCAP: u32 = 65_520;
 
 struct Rng(u64);
@@ -178,7 +178,7 @@ fn main() {
         cring::push(c);
     }
     let (f, e) = (cring::first(), cring::end());
-    t((f..e).all(|n| cring::at(n) == refv[n as usize]) && e - f >= PCAP && e - f < 66_000, &format!("no coding: {} live samples read back", e - f));
+    t((f..e).all(|n| cring::at(n) == refv[n as usize]) && e - f >= PCAP && e - f <= (RB * 8 / 10) as u32, &format!("no coding: {} live samples read back", e - f));
     if fails > 0 {
         println!("FAIL: {fails}");
         std::process::exit(1);

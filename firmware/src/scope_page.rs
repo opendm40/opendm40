@@ -924,7 +924,11 @@ impl App {
             self.toast(now, "Disk busy, try again", false);
             return;
         }
-        let s = self.scope.s;
+        // The record's own settings (a stopped change only re-renders it);
+        // the probe is the current one, as the values (`Scope::volts`).
+        let mut s = self.scope.record_settings();
+        s.probe = self.scope.s.probe;
+        let (trig_v, runt_v, vd) = self.scope.record_levels();
         let (fs, t0, trig) = self.scope.record_info();
         let a = self.scope.volts(0.0);
         let b = self.scope.volts(1.0) - a;
@@ -937,7 +941,7 @@ impl App {
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
         // a x2 / x5 ... probe (#133).
-        su::fmt_div(&mut v, self.scope.vdiv(), unit);
+        su::fmt_div(&mut v, vd, unit);
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
@@ -951,9 +955,9 @@ impl App {
         h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
         h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
         let mut tv = su::Buf::new();
-        su::fmt_v(&mut tv, self.scope.trig_volts(), unit);
+        su::fmt_v(&mut tv, trig_v, unit);
         h.s("# trigger ");
-        self.sp_trig_desc(&mut h);
+        self.sp_trig_desc(&mut h, &s, runt_v);
         h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
         h.s(", mode ").s(match s.mode {
             scope::TrigMode::Auto => "Auto",
@@ -980,8 +984,7 @@ impl App {
     }
 
     /// Trigger type text of the CSV header.
-    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr) {
-        let s = &self.scope.s;
+    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr, s: &scope::Settings, runt_v: f32) {
         match s.ttype {
             crate::trigsoft::PULSE => {
                 let mut b = su::Buf::new();
@@ -991,7 +994,7 @@ impl App {
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, self.scope.runt_volts(), unit);
+                su::fmt_v(&mut b, runt_v, unit);
                 h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
             }
             _ => {
@@ -1983,12 +1986,25 @@ impl App {
     /// Tap-step of the timebase (true = slower): applied with a 30 ms beep
     /// and the stepped tab's pressed style; Halves: the tabs stay 2 s (the
     /// guide-line time). Nothing at the limit (its tab is hidden).
+    /// "Max zoom" when the scope took a slower timebase than `want`: stopped,
+    /// at the stored record's resolution (`Scope::tb_floor`; SCPI clamps
+    /// without it).
+    fn sp_tb_floor_toast(&mut self, want: usize, now: u64) {
+        if !self.scope.s.run && self.scope.s.tb > want && self.scope.s.tb == self.scope.tb_floor() {
+            self.toast(now, "Max zoom", false);
+        }
+    }
+
     fn sp_tb_step(&mut self, slower: bool, now: u64) -> bool {
         let mut st = self.scope.s;
         let top = self.tb_top() as usize;
-        let lo = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let lo = self.scope.tb_floor().min(st.tb);
         let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(lo) };
         if tb == st.tb {
+            // Stopped at the record's resolution (the faster tab is still shown).
+            if !slower && !st.run && lo > if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN } {
+                self.toast(now, "Max zoom", false);
+            }
             return false;
         }
         st.tb = tb;
@@ -2039,7 +2055,7 @@ impl App {
         let h = axis == Axis::H;
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
-        let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let tb_min = self.scope.tb_floor().min(st.tb);
         let mode = pinch_mode();
         let r = s.max(1) as f32 / s0.max(1) as f32;
         let n = if axis == Axis::V && self.scope.wave_on() {
@@ -2079,6 +2095,9 @@ impl App {
                 st.range = p.i;
             }
             self.scope_set(st, now);
+            if p.axis == Axis::H {
+                self.sp_tb_floor_toast(p.i, now);
+            }
         } else {
             self.sp_render();
         }
@@ -2447,6 +2466,7 @@ impl App {
         if i as usize != st.tb || roll_on {
             st.tb = i as usize;
             self.scope_set(st, now);
+            self.sp_tb_floor_toast(i as usize, now);
         }
         let tb = self.scope.s.tb as u8;
         self.sp.popup = su::Popup::Tb(tb);
@@ -2966,7 +2986,9 @@ const AS_P2_MAX: u8 = 3;
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
 /// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
 /// the result), timebase, range, min /
-/// max code, rising crossings, period (phase 4: Cycl) in us.
+/// max code, rising crossings, period (phase 4: Cycl) in us. SRAM, not the
+/// TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
 

@@ -3,9 +3,9 @@
 //! stream search only know edges). Pure, host-tested by tools/trig-test.
 //!
 //! Limits (by construction, stated in the Trigger tab notes and the TODO):
-//!  * not a hardware trigger: each record (scope.rs `lin_len`: 26624 samples
-//!    or up to 0.1 s, at most scope::CAP) is
-//!    searched after it is complete, so an event in the dead time between
+//!  * not a hardware trigger: each record (scope.rs `lin_len`: 26624
+//!    samples or up to 0.1 s, at most scope::CAP) is searched after it is
+//!    complete, so an event in the dead time between
 //!    two records (search + drawing + restart) is missed; a rare glitch is
 //!    caught with probability ~ record time / (record time + dead time);
 //!  * only events that lie wholly inside one record and leave a full screen

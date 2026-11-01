@@ -138,13 +138,16 @@ fn button_index(b: Button) -> usize {
 use crate::stockfont::{self as sf, rect};
 
 const STATUS_FG: Color = 0xF7BE;
-/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ").
-const CELLS: [[u8; 7]; 5] = [
+/// Main-readout cell widths per format (%7.4f .. %7.1f, "   0L  ",
+/// %7.0f: capacitance 6000 / 60000 uF, at most 5 digits, so cell 1 is
+/// always blank).
+const CELLS: [[u8; 7]; 6] = [
     [40, 60, 20, 60, 60, 60, 60],
     [40, 60, 60, 20, 60, 60, 60],
     [40, 60, 60, 60, 20, 60, 60],
     [40, 60, 60, 60, 60, 20, 60],
     [40, 52, 52, 52, 60, 60, 40],
+    [40, 20, 60, 60, 60, 60, 60],
 ];
 /// Main-readout cells with the extra digit (formats 0..3 only, never OL):
 /// sign 30, point 18 (F78 '-' / '.' are 29 / 17 px), digits 57 (F78 digits
@@ -187,7 +190,8 @@ const LOOP_MIN_PCT: f32 = -2.5;
 /// drawn with BURDEN_CAP).
 fn aux_shown(r: &Reading) -> ([Option<crate::dmm::Val>; 2], bool, Option<usize>) {
     let lp = r.mode == 8 && !r.parts() && r.aux2.is_some_and(|v| v.unit == "%");
-    let a2 = r.aux2.filter(|v| !lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v)));
+    // Capacitance: aux2 is the discharge line (`cap_discharge_label`).
+    let a2 = r.aux2.filter(|v| r.mode != 13 && (!lp || (!v.ol && (LOOP_MIN_PCT..=125.0).contains(&v.v))));
     ([r.aux1, a2], lp && a2.is_some(), r.burden().map(|b| b.0))
 }
 
@@ -238,7 +242,8 @@ fn fmt7<'a>(buf: &'a mut [u8; 16], v: &crate::dmm::Val, ext: bool) -> (&'a str, 
         4.. => 0,
         3 => 1,
         2 => 2,
-        _ => 3,
+        1 => 3,
+        _ => 5,
     };
     (core::str::from_utf8(&buf[..7]).unwrap_or(""), f, x)
 }
@@ -281,7 +286,7 @@ pub struct DmmView {
     /// Bargraph scale as last labelled: (full scale bits, unit, bipolar),
     /// None = labels to draw; and the overload marker as last drawn.
     bar_scale: Option<(u32, &'static str, bool)>,
-    bar_ol: Option<u8>,
+    bar_ol: Option<bool>,
     /// ui-review #13: draw the value in the stock >= 30 V red (set by the
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
@@ -297,9 +302,9 @@ pub struct DmmView {
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
-    /// The caption next to the main readout's "0L" as drawn: 0 none,
-    /// 1 "Overflow", 2 "OPEN" (`ol_word`).
-    ol_word: u8,
+    /// The "Overflow" caption next to the main readout's "0L" is drawn
+    /// (`ol_word`).
+    ol_word: bool,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings 2/3 "DMM row": History) and the power meter
@@ -605,7 +610,7 @@ impl DmmView {
             pwc: pw::PwCache::new(),
             ohm_on: false,
             last_iohm: 254,
-            ol_word: 0,
+            ol_word: false,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -754,11 +759,11 @@ impl DmmView {
             self.bar_labels(fs, key.1);
         }
         let f = if temp { Some(0.0) } else { crate::bargraph::frac(r.main.v, fs, r.main.ol) };
-        // The overflow mark: "OL", "OPEN" in continuity / diode.
-        let ol = if f.is_some() { 0 } else if meter::open(r) { 2 } else { 1 };
+        // The overflow mark: "OL".
+        let ol = f.is_none();
         if self.bar_ol != Some(ol) {
             self.bar_ol = Some(ol);
-            sf::label(sf::F14, BAR_OL, ["", "OL", "OPEN"][ol as usize], 0xF800, BG, 1, 1);
+            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
         }
         self.bar.update(f);
     }
@@ -868,15 +873,15 @@ impl DmmView {
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
-        let ok = if !r.main.ol { 0 } else if meter::open(r) { 2 } else { 1 };
-        if ok != self.ol_word && self.ol_word != 0 {
+        let ok = r.main.ol;
+        if !ok && self.ol_word {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
-            self.ol_word = 0;
+            self.ol_word = false;
         }
         sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if ok != 0 && (!same_layout || self.ol_word != ok) {
-            ol_word(ow, color, ok == 2);
-            self.ol_word = ok;
+        if ok && (!same_layout || !self.ol_word) {
+            ol_word(ow, color);
+            self.ol_word = true;
         }
         if let Some(e) = ext {
             if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
@@ -961,11 +966,16 @@ impl DmmView {
             _ if band => 255,
             10 if aux[0].is_none() && !self.power => r.range.clamp(0, 7) as u8 | (self.ohm_on as u8) << 3,
             12 if aux[0].is_none() && !self.power => 0x10,
+            13 if !self.power => match r.aux2 {
+                Some(v) if v.unit == crate::dmm::CAP_CHG_UNIT => 0x21,
+                Some(_) => 0x20,
+                None => 255,
+            },
             11 if aux[0].is_none() && !self.power => 0x11,
             _ => 255,
         };
-        if ik == 255 && self.last_iohm != 255 {
-            let b = OHM_I_RECT;
+        if (ik == 255 || (ik & 0xF0 == 0x20) != (self.last_iohm & 0xF0 == 0x20)) && self.last_iohm != 255 {
+            let b = if self.last_iohm & 0xF0 == 0x20 { CAP_DIS_RECT } else { OHM_I_RECT };
             lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
             self.last_iohm = 255;
         }
@@ -1098,7 +1108,11 @@ impl DmmView {
                 None => {}
             }
         }
-        if ik != 255 && self.last_iohm != ik {
+        if ik & 0xF0 == 0x20 {
+            // Every reading: the node voltage moves.
+            cap_discharge_label(r.aux2.map_or(0.0, |v| v.v), ik == 0x21, self.last_iohm != ik);
+            self.last_iohm = ik;
+        } else if ik != 255 && self.last_iohm != ik {
             test_current_label(r.mode, r.range, self.ohm_on);
             self.last_iohm = ik;
         }
@@ -1157,19 +1171,46 @@ impl DmmView {
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
 const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
 
-/// What "0L" means in `r`, in the readout's colour and F14 (the old
-/// "Overload" caption's font): "OPEN" (continuity / diode, open leads:
-/// meter::open) or "Overflow" (owner 2026-10-30). Region B (F14: blob in
+/// What "0L" means, in the readout's colour and F14 (the old "Overload"
+/// caption's font): "Overflow" in every function (owner 2026-11-01). Region B (F14: blob in
 /// A2, index in B), not .cold: an OL can start while the fast logger's AD2
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color, open: bool) {
-    sf::label(sf::F14, r, if open { "OPEN" } else { "Overflow" }, c, BG, 2, 1);
+fn ol_word(r: sf::Rect, c: Color) {
+    sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
 }
 
 /// The test current label's box: the aux1 slot's left part (the burden
 /// caption's place in the A functions).
 const OHM_I_RECT: sf::Rect = rect(8, 36, 120, 30);
+/// The capacitance discharge line: the aux1 slot, to the aux2 tag (231).
+const CAP_DIS_RECT: sf::Rect = rect(8, 36, 223, 30);
+
+/// Capacitance, before a ramp range: "Discharging... 0.42 V", or
+/// "Discharging... >1.2 V" while the node sits at the AD1 clamp (`clamp`;
+/// owner 2026-10-31: the orange "Charged cap: discharge first" read as an
+/// order to the user). DIM. `full`: the whole line (the other line was
+/// there), else only the value part.
+#[inline(never)] // .cold (link-native.x): during a discharge only
+pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
+    const PRE: &str = "Discharging...";
+    let b = CAP_DIS_RECT;
+    // (The value from a word space after the prefix.)
+    let w = sf::text_width(sf::F14, PRE, 1) + 10;
+    if full {
+        lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
+        sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
+    }
+    let mut t = [0u8; 16];
+    let mut s = crate::scope_ui::Txt::new("");
+    if clamp {
+        s.push(">1.2");
+    } else {
+        s.push(crate::dmm::format(&mut t, v, 2));
+    }
+    s.push(" V");
+    sf::label(sf::F14, rect(b.x + w, b.y, b.w - w, b.h), s.as_str(), DIM, BG, 1, 1);
+}
 
 /// "I 0.90 mA": the test current of `mode` (dmm::test_current): ohm, the
 /// measured short-circuit current of range `range` in the variant `on`
@@ -1285,7 +1326,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     // "0L": what it means, in the first free sub row (else the second:
     // the reading matters more than its sub values then).
     if r.main.ol {
-        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new(if meter::open(r) { "OPEN" } else { "Overflow" });
+        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new("Overflow");
     }
     let verdict = match lim {
         meter::V_PASS => Some(("PASS", 0x0400)),
@@ -1415,6 +1456,13 @@ pub fn range_items(b: Button) -> &'static [(&'static str, Option<u8>)] {
             ("600K\u{3a9}", Some(4)), ("6M\u{3a9}", Some(5)), ("60M\u{3a9}", Some(6)), ("AUTO", None),
             (OHM600_ITEM, Some(7)),
         ],
+        // Capacitance (owner 2026-10-30): dmm.rs ranges r1..r7 (one 60 nF
+        // range for the stock's 6 / 60 nF rows: dmm::CAP_R_MIN), the mF
+        // ranges in uF as the readout (cap_val).
+        Button::Cap => &[
+            ("60nF", Some(1)), ("600nF", Some(2)), ("6uF", Some(3)), ("60uF", Some(4)),
+            ("600uF", Some(5)), ("6000uF", Some(6)), ("60 000uF", Some(7)), ("AUTO", None),
+        ],
         _ => &[("AUTO", None)],
     }
 }
@@ -1442,7 +1490,7 @@ pub fn range_label(mode: u8, range: i8) -> Option<&'static str> {
     let r = range.max(0) as u8;
     match mode {
         10 if range == crate::dmm::OHM600 => Some("600M\u{3a9}"),
-        0..=10 => {
+        0..=10 | 13 => {
             let code = Some(range_code(mode, r));
             range_items(crate::dmm::button_of(mode)).iter().find(|it| it.1 == code).map(|it| it.0)
         }
@@ -1476,8 +1524,8 @@ fn range_status(s: &str) {
 
 fn range_rect(i: usize) -> sf::Rect {
     if i >= 8 {
-        // The Ohm page's 600 Mohm item: the note row (141..177, free on that
-        // page), two columns wide for its label.
+        // The Ohm page's 600 Mohm item: the note row (141..177, free on
+        // that page), two columns wide.
         return rect(8, 141, 228, 36);
     }
     rect(8 + (i % 4) as i16 * 117, 50 + (i / 4) as i16 * 46, 112, 40)
@@ -2405,7 +2453,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     rate_chip(c, rc);
     let Some(side) = side else { return };
     // Right column (x 405..475, the REL box rows 205..240 the tap target):
-    // MAX and AVG above the REL box, MIN, SD and the session time below; one F14 row each, label left (dim), value right-aligned
+    // MAX and AVG above the REL box, MIN, σ (standard deviation) and the session time below; one F14 row each, label left (dim), value right-aligned
     // without the unit, which is shown once, in the REL box header
     // ("REL" .. "mV"). The stock version crammed "4.8170V" into 54 px with
     // touching glyphs.
@@ -2415,7 +2463,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
         lcd::fill_rect(402, 241, 78, 38, BG);
-        for (i, t) in ["MAX", "AVG", "MIN", "SD"].iter().enumerate() {
+        for (i, t) in ["MAX", "AVG", "MIN", "\u{3c3}"].iter().enumerate() {
             sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], 22, 14), t, DIM, BG, 0, 1);
         }
     }

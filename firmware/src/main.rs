@@ -2,6 +2,7 @@
 #![no_main]
 
 mod app;
+mod autooff;
 mod bargraph;
 mod bt;
 mod clock;
@@ -167,9 +168,9 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0xD040);
 static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-/// 512 bytes in TCM; the 4 KiB of the builds whose disk is the SPI flash
-/// (recovery-usb, no `vdisk`) go to SRAM (the TCM stack keeps its 42 KiB).
-#[cfg_attr(all(target_os = "none", any(feature = "recovery-usb", not(feature = "vdisk"))), link_section = ".sram_bss")]
+/// 512 bytes in TCM; the 4 KiB of the builds without `vdisk` (the SPI flash
+/// is the disk) go to SRAM (the TCM stack keeps its 42 KiB).
+#[cfg_attr(all(target_os = "none", not(feature = "vdisk")), link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -395,6 +396,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
             app::finish_disk_writes(now); // never cut a FAT / dir write
+            // Hand over quietly (DBG:UPDATE: the loader runs next; a reset
+            // drops the power-hold pins until the ROM drives them again):
+            // the big loads off, the SPI flash idle.
+            app.quiesce_for_reset(&mut clk);
+            let _ = spiflash::wait_idle(3000);
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
@@ -795,6 +801,86 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                                 false
                             }
                         }
+                    }
+                    scpi::Dbg::CapDisMs(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_ms(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_ms());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapJumpN(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_jumpn(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_jumpn());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisEnd(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_end(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_end());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisMode(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dismode(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dismode());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisRef(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_disref(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_disref());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapIdis(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_idis(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_idis());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapClass(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_class(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_class() as u32);
+                            true
+                        }
+                    }
+                    scpi::Dbg::Cap => {
+                        scpi.len = 0;
+                        for (i, v) in app.dmm.cap_info().iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            scpi.put_f32(*v);
+                        }
+                        true
                     }
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
@@ -2505,5 +2591,4 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-mod recovery;
 mod shim;

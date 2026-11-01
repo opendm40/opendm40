@@ -98,13 +98,14 @@
 //!   CONFigure:<f> [<range>|AUTO|MIN|MAX|DEF[,<res>|MIN|MAX|DEF]]   select
 //!     the function, then the range (none / AUTO / DEF = autorange, also on
 //!     the function already selected), then the resolution if given
-//!     (CONT / DIOD: no argument; CAP / FREQ: AUTO / DEF only)
+//!     (CONT / DIOD: no argument; FREQ: AUTO / DEF only; CAP: a range,
+//!     60 nF .. 60 mF; 6 nF = the 60 nF range)
 //!   [SENSe:]<f>:RANGe <v>|AUTO|MIN|MAX|DEF / ?   the smallest range that
 //!     holds <v>: V 60 mV, 600 mV, 6, 60, 600, 1000 V; A 600 uA, 6000 uA, 60 mA,
 //!     600 mA, 6 A, 10 A; ohm 60 ohm .. 60 Mohm (the MF range page's
 //!     items; above the top one: "Data out of range"). The query gives the
-//!     present range also while autoranging (CAP 6 nF .. 60 mF, FREQ 60 Hz
-//!     .. 60 MHz, not settable)
+//!     present range also while autoranging (CAP 6 nF .. 60 mF, settable;
+//!     FREQ 60 Hz .. 60 MHz, not settable)
 //!   [SENSe:]<f>:RANGe:AUTO ON|OFF|ONCE / ?   ON = the AUTO key: back to
 //!     the autorange chosen on the meter (AUTO+ or the mV- / uA-first AUTO;
 //!     SCPI does not change that choice); OFF / ONCE keep the present range
@@ -607,7 +608,7 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)
-///   DBG:SENTinel:VARiant <0..127> / ?
+///   DBG:SENTinel:VARiant <0..255> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (f80524f row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
@@ -775,6 +776,29 @@ pub enum Dbg {
     /// (AD1 codes) of the current path and the AD1 conversion period in ms
     /// (dmm.rs `fast_info`).
     Fast,
+    /// DBG:CAP?: capacitance internals (dmm.rs `cap_info`), 22 numbers.
+    Cap,
+    /// DBG:CAP:CLASS 0..4 / ?: the capacitance ramp comparator class
+    /// (dmm::set_cap_class; RAM only).
+    CapClass(Option<u8>),
+    /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
+    /// the discharge slope (dmm::set_cap_idis; RAM only).
+    CapIdis(Option<u32>),
+    /// DBG:CAP:DISMODE <0..1> / ?: the discharge's mode
+    /// (dmm::set_cap_dismode; RAM only).
+    CapDisMode(Option<u32>),
+    /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
+    /// (dmm::set_cap_disref; RAM only).
+    CapDisRef(Option<u32>),
+    /// DBG:CAP:DISMS <ms> / ?: the discharge's poll period
+    /// (dmm::set_cap_dis_ms; RAM only).
+    CapDisMs(Option<u32>),
+    /// DBG:CAP:JUMPN <n> / ?: 600 uF ramp polls before the one-poll step
+    /// up (dmm::set_cap_jumpn; RAM only).
+    CapJumpN(Option<u32>),
+    /// DBG:CAP:DISEND <mV> / ?: the node voltage that ends the discharge
+    /// (dmm::set_cap_dis_end; RAM only).
+    CapDisEnd(Option<u32>),
     /// Firmware update file upload (upload.rs): 0 BEGin size,crc32 | 1
     /// END? | 2 ABORt | 3 DBG:UPLoad? (DATA bypasses the parser, main.rs).
     Upload(u8, u32, u32),
@@ -1054,7 +1078,7 @@ pub enum Cmd {
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
-    /// DBG:SENTinel:VARiant <0..127> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..255> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
@@ -1185,6 +1209,10 @@ pub fn range_items(func: u8) -> &'static [f32] {
     match func {
         0..=3 | 16 | crate::dmm::FUNC_V_AUTO => &[0.06, 0.6, 6.0, 60.0, 600.0, 1000.0],
         4..=9 | 17 | crate::dmm::FUNC_A_AUTO => &[6e-4, 6e-3, 0.06, 0.6, 6.0, 10.0],
+        // Capacitance: CONF:CAP <F>, CAP:RANG, the MF page (ui::range_items),
+        // for comparing a fixed range with AUTO (#74).
+        // 6 nF is the 60 nF range (dmm::CAP_R_MIN): CONF:CAP 6E-9 picks it.
+        13 => &[6e-8, 6e-7, 6e-6, 6e-5, 6e-4, 6e-3, 6e-2],
         // 600 Mohm: the experimental r7 (dmm::OHM600); MAX stays 60 Mohm.
         10 => &[60.0, 600.0, 6e3, 60e3, 600e3, 6e6, 60e6, 600e6],
         _ => &[],
@@ -1196,6 +1224,9 @@ pub fn range_items(func: u8) -> &'static [f32] {
 pub fn range_item_code(func: u8, i: usize) -> u8 {
     if quantity(func & !ANY_CPL) == 1 {
         if i == 0 { 5 } else { i as u8 - 1 }
+    } else if func == 13 {
+        // Capacitance: the list starts at the 60 nF range, dmm r1.
+        i as u8 + 1
     } else {
         i as u8
     }
@@ -1307,7 +1338,7 @@ fn conf_cmd(f: u8, arg: &[u8]) -> Result<Cmd, &'static str> {
         Some(s) => Some(res_arg(s, unit_of(f)).ok_or(BAD)?),
         None => None,
     };
-    if matches!(f, 13 | 14) && (rng != Rng::Auto || res.is_some_and(|v| !v.is_nan())) {
+    if (f == 14 && rng != Rng::Auto) || (matches!(f, 13 | 14) && res.is_some_and(|v| !v.is_nan())) {
         return Err(BAD);
     }
     Ok(Cmd::Conf(f, rng, res))
@@ -2400,7 +2431,7 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=127.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=255.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
@@ -2618,9 +2649,31 @@ impl Scpi {
                         b"FLASH" => Dbg::Flash,
                         b"ISR" => Dbg::Isr,
                         b"FAST" if query => Dbg::Fast,
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMS")) => {
+                            Dbg::CapDisMs(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "JUMPN")) => {
+                            Dbg::CapJumpN(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISEND")) => {
+                            Dbg::CapDisEnd(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISMODE")) => {
+                            Dbg::CapDisMode(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "DISREF")) => {
+                            Dbg::CapDisRef(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "IDIS")) => {
+                            Dbg::CapIdis(if query { None } else { Some(nums::<1>(a)[0]) })
+                        }
+                        b"CAP" if parts.get(2).is_some_and(|p| kw(p, "CLASS")) => {
+                            Dbg::CapClass(if query { None } else { Some(nums::<1>(a)[0].min(4) as u8) })
+                        }
+                        b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
-                        // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
+                        // DBG:UPDATE: zero the 12-byte loader
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
@@ -2661,7 +2714,7 @@ impl Scpi {
                         // records>,<FAT pairs>,<staged clusters>,<frozen>,<staging>,
                         // <firmware state 0 none 1 ask 2 asked 3 declined 4 install 5 bad>.
                         #[cfg(feature = "vdisk")]
-                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), r[3].load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
+                        b"VDISK" => { self.len = 0; let v = nums::<1>(a); match parts.get(2).copied().unwrap_or(b"") { b"EJECT" => { use core::sync::atomic::Ordering::Relaxed; if query { self.put_u32(crate::msc::ejected(0) as u32); self.put(b","); self.put_u32(crate::msc::SSU_COUNT.load(Relaxed)); self.put(b","); self.put_u32(crate::msc::SSU_LAST.load(Relaxed)) } else { crate::msc::DBG_EJECT.store(v[0].clamp(1, 1000) as u32, Relaxed); self.put(b"OK") } } b"RD" => { use core::sync::atomic::Ordering::Relaxed; let r = &crate::vdisk::RD; let f = &crate::dlog::FR; for (i, x) in [r[0].load(Relaxed), (r[1].load(Relaxed) as u64 * 1024 / (crate::clock::HCLK_HZ as u64 / 1000)) as u32, r[2].load(Relaxed) / (crate::clock::HCLK_HZ / 1_000_000), crate::dlog::CSV_OPENS.load(Relaxed), f[0].load(Relaxed), f[1].load(Relaxed), f[2].load(Relaxed), f[3].load(Relaxed), f[4].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"STAT" => { let (n, hw, out) = crate::vdisk::stats(); for (i, x) in [n as u32, hw, out as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"RO" => { if query { self.put_u32(crate::vwrite::read_only() as u32); self.put(b","); self.put_u32(crate::vwrite::read_only_pending() as u32) } else { crate::vwrite::set_read_only(v[0] != 0); self.put(b"OK") } } b"MIR" => { let (ok, st, wr, ms) = crate::vdisk::mirror_info(); let pc = &crate::vdisk::MIR_PACE; use core::sync::atomic::Ordering::Relaxed; for (i, x) in [ok as u32, st as u32, wr as u32, ms, pc[0].load(Relaxed), pc[1].load(Relaxed), pc[2].load(Relaxed)].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } b"WR" => { let n = crate::vwrite::stats(); let (rec, pairs, st, fz, stg, fw) = crate::vwrite::state(); for (i, x) in [n.ok, n.refused, n.busy, n.last_refused, n.deleted as u32, n.fw_ok as u32, n.fw_bad as u32, rec as u32, pairs as u32, st as u32, fz as u32, stg as u32, fw as u32].iter().enumerate() { if i > 0 { self.put(b","); } self.put_u32(*x); } } _ => self.err_arg(no_arg, "Undefined header") } continue; }
                         b"UPDATE" => { if !crate::boot::enter_loader_update() { self.err_arg(no_arg, "Flash error"); continue; } Dbg::Reset }
                         b"LOADER" | b"RECOVER" => { crate::boot::request_loader(); Dbg::Reset }
                         _ => {

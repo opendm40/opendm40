@@ -220,6 +220,8 @@ recorded.
 | [`couptest.py`](hy3131/couptest.py) | AUTO coupling (AC/DC) of V and A | | 3391 |
 | [`autowaittest.py`](hy3131/autowaittest.py) | READ? / MEASure? while AUTO coupling decides | | 47600 |
 | [`acdcmethtest.py`](hy3131/acdcmethtest.py) | AC+DC methods A / B / C | | 18110 |
+| [`capdowntest.py`](hy3131/capdowntest.py) | capacitance AUTO: a small capacitor after a large one, open leads and a short (also the device's no-ramp case, AD1 forced) end on their own range; large capacitors keep theirs | | 47750 |
+| [`captimetest.py`](hy3131/captimetest.py) | capacitance AUTO timing from DC V: time to the first grey and the first final value (1 nF .. 1 mF, absorption, open leads, a resistor) | | 47760 |
 | [`freqtest.py`](hy3131/freqtest.py) | frequency: the first readings after entering the function | | 55100 |
 | [`freqsteptest.py`](hy3131/freqsteptest.py) | frequency: steps of the input frequency while Hz reads (no wrong final value) | | 48110 |
 | [`firstrdtest.py`](hy3131/firstrdtest.py) | the first readings after a function / range change | | 47700 |
@@ -243,6 +245,7 @@ recorded.
 | Test | What it checks | Runtime | Port |
 |---|---|---|---|
 | [`wavtest.py`](wavtest.py) | waveform readout (WAV:DATA?, DIGitize, preamble) against the input sine, over USBTMC and Bluetooth | ~5 min | 24140, BT 24141 |
+| [`hwtrigrectest.py`](hwtrigrectest.py) | comparator trigger (on, Normal): DIGitize / SINGle records at 1 us .. 200 ms/div are the linear record's length, the edge at the stock position, the input sine; `--sw` prints the software trigger's lengths | | 24170 |
 | [`hy3131/wavetest.py`](hy3131/wavetest.py) | the DMM Wave view (scope page, source DMM); build with `--features ad2-isr` | | 3591 |
 | [`railstest.py`](railstest.py) | analog rails (PE2 / PC4, `run.py --rail-log`) after a boot with Both always and a switch to Auto on the Scope page: the scope rail comes on, never both rails off | | free (50000-50999) |
 | [`wavedroptest.py`](wavedroptest.py) | the Wave view's ring drops no samples (`--ch2`: the scope page with CH2 (DMM) on) | | free |
@@ -258,6 +261,7 @@ recorded.
 | [`triglevtest.py`](triglevtest.py) | `TRIG:LEV` keeps the level as given (V/div steps, off screen); Normal triggers on it | ~2 min | free |
 | [`stopzoomtest.py`](stopzoomtest.py) | stopped scope: each timebase change re-renders the stored record, also right after a screen read-back | ~2 min | free |
 | [`decodetest.py`](decodetest.py) | the protocol decoder's band: UART and Modbus RTU bit patterns on the scope input and (Wave view) on V-COM, DECode:FRAMes? running and stopped at several timebases, the band in screenshots (a box per byte / frame, red errors, the bar, the note), the decode's cost (DBG:PROF?), region C hooks while the AD2 stream runs | ~20 min | free |
+| [`stoptest.py`](stoptest.py) | RUN / STOP in a loop at 10 us .. 1 ms/div, untriggered and triggered: every STOP leaves a record (`WAV:PRE?` points > 0) and `WAV:DATA?` is the input square | ~15 min | free |
 
 ### Logger and the AD2 stream
 
@@ -268,6 +272,7 @@ recorded.
 | [`logfmttest.py`](logfmttest.py) | LOG:DATA? in each LOG:FORMat is lossless | | 63610 |
 | [`fastlogtest.py`](fastlogtest.py) | fast logger to the SPI disk: the sustainable rate with the flash busy timing | | 4817, BT 4818 |
 | [`fastendtest.py`](fastendtest.py) | end of a disk session while a host reads the USB volume | | 4827 |
+| [`csvsharetest.py`](csvsharetest.py) | LOG / FAST CSVs read over MMEM:DATA? and the USB volume in turn equal dlog.py (shared generators) | ~4 min | free |
 
 ### USB, disk, settings and boot
 
@@ -281,9 +286,10 @@ recorded.
 | [`gallerytest.py`](gallerytest.py) | the gallery: grid, viewer, Delete | ~8 min | 19310 |
 | [`shottest.py`](shottest.py) | the on-device screenshot BMP equals the screen | | 17310 |
 | [`settingstest.py`](settingstest.py) | settings survive a power-off | | 63900-63999 |
-| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic hold off the automatic power-off | | free, BT free |
+| [`idletest.py`](idletest.py) | USB, Bluetooth and disk traffic and an armed inrush page hold off the automatic power-off | | free, BT free |
 | [`chargetest.py`](chargetest.py) | the battery blinks green while PB10 / PB11 read "charging" (driven from the monitor), "USB" while a host is attached | | free |
-| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the recovery request word zeroes the marker; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
+| [`usbofftest.py`](usbofftest.py) | no automatic power-off on USB power (PB10 driven from the monitor); after the unplug the time counts afresh | ~7 min | free |
+| [`recoverytest.py`](recoverytest.py) | boot decisions through the whole boot chain: repeated hangs boot opendm40 again; the power-key hold and the PA2 request word open the loader with PA2 low and locked (the GPIO model enforces GPIOx_LOCK until a reset), a power cycle then boots opendm40; the removed recovery's request word is ignored; `release` (DBG:RELEASE) and `usb-loader` (DBG:LOADER) on request | ~8 min (10 cases, `--jobs 8`) | free |
 
 ### Bluetooth, keys, touch and UI
 
@@ -377,10 +383,14 @@ Models are C# files compiled by Renode at start-up; the platform is
   [emu/hy3131/README.md](hy3131/README.md#open-points).
 - **Boot timing.** The ROM's and FS-loader's PA2 (debug header TX) poll
   timing is set empirically: a release at 0.55 s gives the three-stage chain.
-- **Scope trigger.** opendm40's comparator path sometimes never completes a
-  frame after a restart; [`wavtest.py`](wavtest.py) turns it off. Its
-  STOP checks with `--hwtrig` end in `WAIT` for that reason; the device
-  check of the comparator path is
+- **Scope trigger.** [`wavtest.py`](wavtest.py) turns the comparator path
+  off: it sometimes never completed a frame after a restart (its STOP
+  checks with `--hwtrig` ended in `WAIT`). One cause, fixed
+  in `GD32_Timer.EventsBetween`: a CCR compare was flagged before the counter
+  reached it, so TIM2 reported the post-trigger count done right after the
+  edge and the too-short record was dropped (in Normal at 1 ms/div and
+  slower nearly every frame). Whether that was the only cause is unknown.
+  The device check of the comparator path is
   [`firmware/tools/scope-stop-check.py`](../firmware/tools/scope-stop-check.py).
 - **Gestures.** Horizontal swipes from the touch model were not recognised
   by opendm40's gesture engine; not investigated. The tests swipe with
