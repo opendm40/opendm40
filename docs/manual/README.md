@@ -1568,12 +1568,12 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 ### Protocol decoder
 
-**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
-or Modbus RTU, drawn under the trace: a box per byte, Modbus frames above
+**MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B),
+Modbus RTU or DALI, drawn under the trace: a box per byte, Modbus frames above
 them, errors in red. Each capture is decoded once: running, one that
 triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
-Zoom and pan show the decoded capture. This build has UART and DALI:
-Modbus RTU and **Mode Log** are left out (flash).
+Zoom and pan show the decoded capture. **Mode Log** is left out of this
+build (flash).
 
 ![The Decode tab](img/scope-decode-tab.png)
 

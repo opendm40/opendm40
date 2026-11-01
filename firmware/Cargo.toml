@@ -20,7 +20,7 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr", "dec-dali"]
+default = ["vdisk", "ad2-isr", "dec-modbus", "dec-dali"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
@@ -54,9 +54,9 @@ dbg-src = []
 # for it next to 0.4.0's GEN / CH2 channels; without it Mode Log is refused
 # and the band decode is unchanged.
 dec-log = []
-# Modbus RTU in the protocol decoder (src/decode.rs `MODBUS`). Not default on
-# test/scope-chain-0.4 for the same reason; without it the decoder is UART
-# only (DECode:PROTocol MODBus is refused).
+# Modbus RTU in the protocol decoder (src/decode.rs `MODBUS`; region B
+# 1 176 B). Default (owner, 2026-11-01); without it the decoder is UART only
+# (DECode:PROTocol MODBus is refused).
 dec-modbus = []
 # DALI (IEC 62386, 1200 bit/s bi-phase) in the protocol decoder (src/decode.rs
 # `DALI`, `dali_step`). Default (0.4.0): region B 2.9 KB; without it
