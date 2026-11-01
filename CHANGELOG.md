@@ -63,10 +63,8 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
-- **Continuity says OPEN** next to the big `0L` with open leads (Overflow
-  when the reading climbed there, e.g. a charging capacitor); diode and the
-  other functions say "Overflow" where "Overload" was
-  ([manual](docs/manual/README.md#overflow)).
+- The small caption next to the big `0L` says **Overflow** (was Overload)
+  in every function ([manual](docs/manual/README.md#overflow)).
 - `DBG:TOUCH?`, `DBG:PROF?`, `DBG:ACDC:TRACE`, `DBG:HYSPI`, `DBG:ACDC?`,
   `DBG:DIAG?`, `DBG:OHM6`, `DBG:SENTinel?` and `DBG:SRC` (debug) are only in
   builds with their features (`dbg-touch`, `dbg-prof`, `acdc-trace`,
