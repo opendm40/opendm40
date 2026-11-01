@@ -7,6 +7,11 @@ section named after the tag as the release notes; how to cut a release:
 
 ## Unreleased
 
+### Fixed
+
+- **Device page:** the bootloader and hardware versions were swapped. They now
+  match the stock page, for example Bootloader V4.0 and Hardware V1.1.
+
 ## v0.3.0 (2026-10-27)
 
 ### New

@@ -937,27 +937,25 @@ impl App {
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
-                // shown; stock's SN ("%s:%.8X") and "Bluetooth Name:%s" are
-                // omitted (no traced derivation / no public getter).
+                // shown; stock's SN ("%s:%.8X", boot-data word +0x0C) and
+                // "Bluetooth Name:%s" are omitted.
                 let model_name = match self.dmm.model() {
                     0 => "DM40A",
                     1 => "DM40B",
                     2 => "DM40C",
                     _ => "DM40?",
                 };
-                // Hardware / bootloader versions from the stock boot-data block
+                // Bootloader / hardware versions from the stock boot-data block
                 // in internal flash (same source as the BT cmd-02 version reply,
-                // bt.rs): +0x10 HW major, +0x11/+0x12 bootloader major/minor.
-                // The byte->field mapping is inferred from bt.rs + README, not a
-                // traced read of the stock Device page. The copy made at
+                // bt.rs): +0x10 bootloader major (minor 0), +0x11/+0x12 hardware
+                // major/minor, as the stock Device page shows them. The copy made at
                 // start-up (bt::boot_ver): 0x080A4000 is in the slow flash
                 // bank, and a fast-log session may stream meanwhile.
                 let bd = crate::bt::boot_ver();
-                let mut hwb = [0u8; 16];
-                // The boot data has only a HW major: no invented ".0" minor.
-                let hw = fmt_ver(&mut hwb, bd[0], None);
                 let mut blb = [0u8; 16];
-                let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
+                let bl = fmt_ver(&mut blb, bd[0], Some(0));
+                let mut hwb = [0u8; 16];
+                let hw = fmt_ver(&mut hwb, bd[1], Some(bd[2]));
                 // opendm40 firmware version (NOT the stock "Software V2.6").
                 let mut fwb = [0u8; 32];
                 let pre = b"opendm40 ";

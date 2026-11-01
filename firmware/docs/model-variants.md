@@ -32,7 +32,7 @@ Not involved:
 * **Option bytes**: no model use found (the RE headers trace none; the model
   byte alone explains the observed A / B / C behaviour, section 5).
 * **UID-bound loader block** `0x080A4000` (`stock/re/docs/genuine-check.md`, in the private analysis repo): the genuine
-  check, a serial-like word, HW version 4 and bootloader version 1.1. No model.
+  check, the serial number, bootloader version 4.0 and hardware version 1.1. No model.
 * **FS-loader** string `"ATK-DM-40"` and the update file: one image for all
   three models. The loader does not check a model.
 * **BT name**: an output, not an input (section 2).
