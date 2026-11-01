@@ -57,6 +57,9 @@ mod hy3131_tables;
 mod lcd;
 #[path = "../../src/meter.rs"]
 mod meter;
+// scope.rs: dlog::scope_hold_head.
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/scope.rs"]
 mod scope;
 #[path = "../../src/scope_meas.rs"]
@@ -494,6 +497,30 @@ fn trig_volts_tests(ck: &mut Ck) {
     s.range = 7;
     sc.apply(s, 0);
     ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
+}
+
+/// Stopped zoom limit (`scope::zoom_floor`): a record of any YT timebase
+/// may be zoomed in until a screen holds `ZOOM_MIN` samples of it, no
+/// further; never below its own timebase's window. A 1 s/div record
+/// (2500 S/s) stops at 1 ms/div (25 samples; 500 us/div would be 12.5,
+/// drawn as 12).
+fn zoom_floor_tests(ck: &mut Ck) {
+    let mut sc = scope::Scope::new();
+    let mut ok = true;
+    for t in scope::TB_MIN..=scope::TB_YT_MAX {
+        let mut s = scope::Settings::DEFAULT;
+        s.tb = t;
+        sc.apply(s, 0);
+        let fs = sc.sample_rate();
+        let f = scope::zoom_floor(scope::TB_MIN, fs);
+        let n = scope::ZOOM_MIN;
+        ok &= f <= t && scope::zoom_holds(f, fs, n) && (f == scope::TB_MIN || !scope::zoom_holds(f - 1, fs, n));
+    }
+    ck.t("zoom floor: holds ZOOM_MIN samples, the next faster does not, never above the record's timebase", ok);
+    let mut s = scope::Settings::DEFAULT;
+    s.tb = 24;
+    sc.apply(s, 0);
+    ck.t("zoom floor: a 1 s/div record stops at 1 ms/div", scope::zoom_floor(scope::TB_MIN, sc.sample_rate()) == 15);
 }
 
 fn pinch_state_tests(ck: &mut Ck) {
@@ -1521,6 +1548,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
+    zoom_floor_tests(&mut ck); // after hit_tests too (Scope::new)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     wave_step_tests(&mut ck);

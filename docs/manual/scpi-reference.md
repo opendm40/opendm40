@@ -547,7 +547,7 @@ and `MEASure:POWer?` then give the real power P in W.
 | `SINGle` | | Sets the sweep to Single and starts. | both |
 | `DIGitize` | | One acquisition with the present sweep, then STOP. | both |
 | `TRIGger:STATus?` | | `STOP`, `WAIT`, `AUTO` (untriggered), `TD` (triggered) or `RUN` (roll) | both |
-| `TIMebase[:MAIN]:SCALe[?]` | s/div, 100E-9 .. 50 | `+1.000000E-03` | both |
+| `TIMebase[:MAIN]:SCALe[?]` | s/div, 100E-9 .. 50; stopped, no faster than the stored record's zoom limit (16 samples on screen): a faster value is clamped to it (query to read it back) | `+1.000000E-03` | both |
 | `CHANnel1:SCALe[?]` | V/div at the probe tip, 0.01 .. 10 (times the probe factor) | `+1.000000E+00` | both |
 | `CHANnel1:COUPling[?]` | `AC` or `DC` | `AC` or `DC` | both |
 | `CHANnel1:OFFSet[?]` | V added to the signal (positive moves the trace up) | `+0.000000E+00` | both |
@@ -811,7 +811,7 @@ unless shown otherwise.
 | `DBG:SENTinel?` | | Wrong-connection detector state. Only in builds with the `dbg-sent` feature. | USB |
 | `DBG:SENTinel:LOG?` | | `<n>;<ALERT>,<KIND>,<ms>;...`: the last 8 alerts | USB |
 | `DBG:SENTinel:REG?` | | Measurement chip registers and relay state. Only in builds with the `dbg-sent` feature. | USB |
-| `DBG:SENTinel:VARiant[?]` | `0` .. `127` | `0` | USB |
+| `DBG:SENTinel:VARiant[?]` | `0` .. `255` | `0` | USB |
 | `DBG:SENTinel:PRECond[?]` | ms, 0 .. 2000 | `100` | USB |
 | `DBG:SRC` | `<vref>,<path>[,<sense>][,FORCE]` or `OFF`: OP3's reference tap on a stock ohm / diode row, for [`srcmap.py`](../../firmware/tools/srcmap.py) (experimental; refused in the A functions and the power meter; `dbg-src` builds) | | USB |
 | `DBG:SRC?` | | `0`, or `1,<cycles>,<vref>,<path>,<sense>,<V_in>,<V_far>,<I>,<V_vref>,<V_drop>,<V_com>,<VDDA-AGND>,<AGND-VSS>;<10 AD1 codes>;<registers hex>`. Only in builds with the `dbg-src` feature. | USB |

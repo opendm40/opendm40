@@ -9,7 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
+- **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
@@ -102,6 +102,15 @@ section named after the tag as the release notes; how to cut a release:
   ([#81](https://github.com/opendm40/opendm40/issues/81)).
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.
+- Scope Save CSV after a change while stopped: V/div, coupling and the trigger in the header are the
+  record's too.
+- Scope STOP keeps the triggered trace on screen (it jumped to an untriggered part of the capture). With
+  CH2 (DMM) on, up to 5 ms/div, STOP takes the next triggered frame (it left a short untriggered piece
+  without CH2 and without measurements).
+- Scope CH2 (DMM): drawn up to the right edge of a stopped, Single or DIGitize frame (at 2 ms/div it was
+  missing from the whole frame); no wrong segment across a gap in the multimeter's stream.
+- Scope stopped zoom stops at **Max zoom** (16 samples across the screen): faster timebases had a wrong
+  time scale and cursor readouts. SCPI `TIM:SCAL` while stopped is clamped the same way.
 - Scope: a setting changed over SCPI while a popup is open shows at once in the top bar, the right
   panel and the trace beside the popup, not only after it closes ([#82](https://github.com/opendm40/opendm40/issues/82)).
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
@@ -178,6 +187,21 @@ section named after the tag as the release notes; how to cut a release:
 - Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
   after an end (10 + gave 20 %, and 55 % was out of reach)
   ([#91](https://github.com/opendm40/opendm40/issues/91)).
+- Multimeter: a current in the A jack (the leads in A / COM while measuring
+  something else) now shows A-JACK in AC mV and Hz too (a DC current from
+  ~4 mA, in Hz ~6 mA negative; there the badge only), and in Ω AUTO
+  A-JACK instead of LIVE?.
+  Manual Ω ranges below 6 MΩ may still show LIVE? for it.
+- Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
+  generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
+  and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
+  hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
+  (~0.45 s).
+- Multimeter: a current flowing from COM into the A jack now shows A-JACK
+  in DC V, DC mV and Ω too (from ~4 mA; DC V ~9 mA; no A-PROT for it, nor for
+  an AC current in DC V).
+  DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
+  it now and then.
 
 ## v0.3.0 (2026-10-27)
 

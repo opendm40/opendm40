@@ -60,6 +60,8 @@ Additional requirements:
       - Left (owner): the rows with A shorted to COM; continuity / diode; a real current in A
         (20 mA and ~1 mA) per row. Tool: branch `exp/pb1-meas` (`DBG:SENT:PB1? [n]`, `DBG:SENT:R21 <v>`;
         build with `--features mute`; not for merging, region B -1.5 KB).
+      - DC V 6 V's window goes to +417 mV (R21 0x8B, CMPHO reads only) with fix/ajack-polarity (the 66 kHz false A-JACK);
+        a reversed current (COM -> A) gets A-JACK but no A-PROT there (the probe needs a comparator run).
 - [ ] Experimental 600 MΩ (ohm r7, [ohm-600m.md](docs/ohm-600m.md)): check it against a resistor of
       100 MΩ .. 1 GΩ known from another meter; the open-jack zero (Vfb − Vx, `DBG:OHM6?`) and its drift;
       the settling after a resistor is connected; then `DBG:OHM6` gain / offset as constants. Checked so
@@ -4053,6 +4055,32 @@ Emulator (emu/):
       LIVE_CLEAR_MS old asserts no more (sentinel test live_does_not_flap_after_the_source). Device: doc
       4.13 check list item 5. **Device c6a3ac3: PASS**, DBG:SENT:LOG? +0 after the off in 5 of 5 (5 V x 3,
       10 V, the square); LIVE? clears 1.0-1.25 s after the off and stays off.
+- [ ] False A-JACK / A-PROT from a 66 kHz signal on V-COM (owner 2026-10-26, 0.2.0, A jack empty, modes through
+      AUTO): AC mV 600 mV `AJACK,AD1PK_PB1` (26.57 mV), DC mV 600 mV OL with `CMP_PB1` A-JACK then A-PROT, AC mV
+      60 mV A-PROT (the latch from DC mV), AC V 6 V a DC? hint (1.162 mV). Cause: the RMS block misses a signal
+      above the ~20 kHz AC bandwidth, so AC mV's V_GATE said "free"; plain DC mV had no V gate and its A-PROT probe
+      on PB2 read the pickup; DC? compared the V tap's DC with an AC reading that misses the AC part. Fix (branch
+      fix/hf-false-ajack, 0.2.1, [doc 4.13](docs/power-meter-and-misconnect.md#413-a-voltage-on-v-com-the-jack-check-the-ac-mv-gate-2026-10-24)):
+      the counter above `V_HF_KHZ` (10 kHz) = driven in plain AC mV and no DC? in AC V; DC mV OL = driven, also for
+      the A-PROT trip. That the counter sees the signal in those rows is INFERRED (AC mV: not, below). Emulator: senttest acmv-hf600 /
+      acmv-hf60 / dcmv-hf600 / dcmv-hf600-slow / acv-hf / acv-auto-hf, loudtest ajack-acmv-hf / ajack-dcmv-hf FAIL
+      on 8a0f59d1, pass; aprot-dcmv-24 latency 137 -> 444 ms. The two AC mV ranges disagree on the same input
+      (26.57 mV on 600 mV, 2.16 mV on 60 mV, ~12x), so neither reading is the input's RMS (cause unknown).
+      **Device 0.2.4 (the MR9270's 66 kHz 0 / 9.5 V square, 2026-10-26): FAIL in AC mV 600 mV** (AJACK on all
+      polls, field 12 = 0: the counter did not say driven), AC mV 60 mV / DC mV / AC V pass, DC V AUTO logged
+      one `AJACK,CMP_PB1` (CTSTA 0x70 / 0). Second fix (doc 4.13): AC mV |LPF| > 300 mV = driven
+      (`MV_DC_DRV_MV`; the clipped square's LPF 0.509 V on the device); DC V / DC mV windows of 0x70 mixed with empty
+      reads are no hit (MIXED in `sample_cmp`). Emulator acmv-sq66k-600 / dcv-auto-sq66k / dcmv-sq66k: FAIL on
+      0.2.4, pass. **Device 0.2.5 (2026-10-26): PASS** for steps 1-5 below (no alert, no log entry in any; AC mV
+      field 12 = 1; AC+DC 600 mV AC-phase LPF 0.509 V). Step 6 (a current in A) not run: the A jack is not wired.
+      Device check (alarm OFF, the MR9270 at 66 kHz on V-COM, A jack empty; `SYST:ALER?`, `DBG:SENT?`,
+      `DBG:SENT:LOG?`, `READ?` ~20 polls per step; script: hfdev4.py pattern):
+      1. AC mV 600 mV, then 60 mV (manual): no AJACK, no new log entry; `DBG:SENT?` field 12 = 1.
+      2. DC mV 600 mV: OL, no AJACK / APROT; DC V AUTO: no new log entry (field 8, hits, may stay near 0).
+      3. AC V 6 V and AC V AUTO: no DC, no AJACK.
+      4. AC+DC 600 mV: `DBG:ACDC?` dcp of the AC phase (the LPF the fix keys on; expect ~0.6 V).
+      5. 5 V DC from the calibrator: DC mV and DC V AUTO, no AJACK.
+      6. If the A jack can be wired: a current in A with V-COM open in AC mV, DC mV, DC V: AJACK within ~1 s.
 - [x] False A-JACK from a large AC signal on V-COM in AC mV (device 2f56ff9 new bug 1: AJACK,AD1PK_PB1 and
       the danger alarm with the A jack empty, the 0 / 9.5 V square, AC V AUTO on 60 mV). The square drives
       the mV input into its clamp; the clamp current shows on PB1, where the AD1 peak hold watches the A-jack
