@@ -101,6 +101,7 @@ impl App {
         let amp = self.dmm.button() == Button::Amp;
         s.prev_func = self.dmm.func();
         s.prev_sub = if amp { self.dmm.sub() } else { 255 };
+        s.prev_mem = self.dmm.sub_mem();
         s.prev_auto = (amp && self.dmm.is_auto()).then(|| self.dmm.a_auto());
         s.prev_item = if amp && !self.dmm.is_auto() { a_item(self.dmm.hy_mode(), self.dmm.range()) } else { None };
         self.meter.rel_off();
@@ -273,6 +274,9 @@ impl App {
         let ours = self.dmm.hy_mode() == 4 && self.dmm.range() == 1 && !self.dmm.is_auto() && !self.dmm.pw.on && self.dmm.sub() == 1;
         if ours && s.prev_sub == 255 {
             self.select_func(clk, s.prev_func);
+            // The page's AC A is not the user's last A.
+            let o = self.dmm.ohm_var();
+            self.dmm.set_sub_mem(s.prev_mem, o);
         } else if ours {
             if self.dmm.sub() != s.prev_sub {
                 self.dmm.set_sub(clk, s.prev_sub);
