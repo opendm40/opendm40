@@ -230,6 +230,11 @@ updates.
   write every pixel once in its final colour, so without TE a refresh
   during a page change shows the new page above a seam and the
   old page below it.
+- Loader versions: the bootloader version is at `0x080A4010`, V4.0 on this
+  unit. A V3.0 loader image from a Hardware V1.1 unit reads the LCD ID and
+  supports ILI9341, ST7796, ILI9488, ST7789, NT35310, NT35510 and SSD1963 on
+  the same FSMC addresses. The V4.0 loader, the stock V2.6 application and
+  opendm40 initialise only ILI9488.
 
 ## Touch panel and touch keys
 
@@ -828,3 +833,5 @@ header's RX pad), PB13, PC1, PC15. Whether they are connected is unknown.
 16. RTC power while off: the feature request (2026-10-13) assumed the RTC is
     always powered from the main battery; nothing in this repo traces VBAT or
     the LSE crystal, and it depends on which rail holds the power (item 2).
+17. What differs on Hardware V1.2: one unit reports it with the same V4.0
+    loader code; this unit reports V1.1 (`0x080A4011`, `0x080A4012`).
