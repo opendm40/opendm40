@@ -238,7 +238,7 @@ releases) adds debug commands:
 | `DBG:MVER? addr,words[,seed]` | verify the pattern MTEST left |
 | `DBG:MTIME? addr,n[,stride]` | DWT cycles per load: `<first>,<min>,<max>,<total>` |
 | `DBG:MASK? addr` | write all ones, then 0, write the original back; reply `<original>,<after ones>,<after 0>` |
-| `DBG:MCLK[?] IPA\|USBHS\|TLI\|ENET\|CAN0\|CAN1,0\|1` | that clock-enable bit only; reply the RCU register |
+| `DBG:MCLK[?] IPA\|USBHS\|TLI\|ENET\|CAN0\|CAN1,0\|1` | that clock-enable bit only; reply the RCU register; `USBHS,0` is refused (`.usbhs_bss`) |
 
 - A fault does not hang the meter: with the feature the HardFault vector is
   `probe_fault`, which, while a probe access is armed, records CFSR / BFAR,

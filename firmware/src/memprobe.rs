@@ -46,6 +46,8 @@
 //!                             23 / 29 / 25, TLI: RCU_APB2EN bit 26, CAN0 /
 //!                             CAN1: RCU_APB1EN bit 25 / 26); replies the register
 //!                             after the write. Nothing else in the RCU.
+//!                             USBHS,0 is refused (ERR busy): `.usbhs_bss`
+//!                             lives in its FIFO RAM.
 
 use core::arch::global_asm;
 use core::ptr::{read_volatile, write_volatile};
@@ -499,6 +501,12 @@ pub fn scpi(s: &mut crate::scpi::Scpi, sub: &[u8], query: bool, arg: &[u8]) -> b
                 }
             };
             let Some(on) = on else { s.put_bytes(b"ERR"); return true };
+            // `.usbhs_bss` (csvlog) lives in the USBHS FIFO RAM: its clock
+            // stays on.
+            if name == b"USBHS" && !on {
+                s.put_bytes(b"ERR busy");
+                return true;
+            }
             unsafe {
                 if on {
                     crate::mmio::modify32(reg, 0, 1 << bit);
