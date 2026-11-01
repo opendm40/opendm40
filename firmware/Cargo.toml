@@ -20,7 +20,7 @@ opt-level = "z"
 panic = "abort"
 
 [features]
-default = ["vdisk", "ad2-isr"]
+default = ["vdisk", "ad2-isr", "dec-dali"]
 # Leave the panel contents alone at start (no clear, status squares only on
 # failure) so a screenshot captures what the previous firmware last drew.
 keep-screen = []
@@ -40,13 +40,6 @@ vdisk = []
 # SPI FAT to _DM40PRV.BIN; its exact condition is owned by fatren.rs) only
 # reports what it would do.
 fatren-dry-run = []
-# Recovery alternatives for tests (default recovery = zero the 12-byte loader
-# marker at 0x08008000 + reset -> vendor loader update screen + USB disk):
-#   recovery-file: 0-byte DM40RCVR.BIN on the SPI FAT + power off (needs a cold
-#     boot with the key held long enough to reach the loader);
-#   recovery-usb: our own minimal USB mass-storage disk (no LCD).
-recovery-file = []
-recovery-usb = []
 # The AD2 device experiments DBG:AD2:TORN? / NOISE? / DCV? / N7? (src/ad2exp.rs;
 # tools/dm40scpi.py `ad2 torn` / `ad2 noise`, tools/experiments/ad2dcv.py).
 # Not default on test/scope-chain-0.4: region B had no room for them next to
@@ -66,8 +59,7 @@ dec-log = []
 # only (DECode:PROTocol MODBus is refused).
 dec-modbus = []
 # DALI (IEC 62386, 1200 bit/s bi-phase) in the protocol decoder (src/decode.rs
-# `DALI`, `dali_step`). Not default on test/scope-chain-0.4 (the next
-# release's optional protocol, like dec-modbus); without it
+# `DALI`, `dali_step`). Default (0.4.0): region B 2.9 KB; without it
 # DECode:PROTocol DALI is refused.
 dec-dali = []
 # DBG:HYSPI:SELF? / WR?, the HY3131 bus self-test and write experiment

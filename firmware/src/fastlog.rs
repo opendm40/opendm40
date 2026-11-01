@@ -1470,6 +1470,7 @@ mod prep {
                 return Err(State::Error);
             }
             j.wrote = true;
+            crate::dlog::csv_forget();
             let (ok, _) = crate::fatren::free_chain(bd, &v, j.ext[0].0, fat1, buf, tmp);
             if !ok {
                 return Err(State::Error);

@@ -507,6 +507,13 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// 0x70. That a current in A reads 0x70 is INFERRED from those. Default on; "pb1cmp70:0" =
         /// CMPHO alone (the model before).
         public bool Pb1Cmp70 = true;
+        /// PB1 below the comparator's window reads CTSTA 0x00, as an idle PB1 (opt-in, "pb1lo0:1";
+        /// device 2026-10-30: a reversed current in A, DC mA -20.6 / -4.7 mA, raised no A-JACK in
+        /// DC V 6 V / ohm, where the same current A -> COM did; hw/README: 0x00 = below, INFERRED).
+        /// Off: CMPLO there (the model before). Opt-in because the AC currents' negative halves then
+        /// read 0x00 too, and the AC+DC mV AC-current cases (acdcmv-*) lose their DC-phase hits:
+        /// whether the device does the same is not measured.
+        public bool Pb1Lo0;
         /// The frequency row's standing level on PB1 - PB3 (opt-in, "hzpb1:mV"; PR #55, SAD1I 00:
         /// +2.5 mV with V-COM open, -140 mV at 10 V DC; device d8e249d's ~54 mV came with SAD1I 11).
         public double HzPb1Mv;
@@ -984,6 +991,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "hfboth": HfBoth = o.Value; break;
                 case "contbump": ContBumpMv = o.Value; break;
                 case "pb1cmp70": Pb1Cmp70 = o.Value != 0; break;
+                case "pb1lo0": Pb1Lo0 = o.Value != 0; break;
                 case "hzpb1": HzPb1Mv = o.Value; break;
                 case "ailift": AiLiftK = o.Value; break;
                 case "ainz": AiNzMv = o.Value; break;
@@ -996,6 +1004,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 case "ohmexitlo": OhmExitLow = o.Value; break;
                 case "ohmexitrst": OhmExitRst = o.Value != 0; break;
                 case "ohmtau": OhmTauMs = o.Value; break;
+                case "capda": CapDaK = o.Value; break;
+                case "capdatau": CapDaTau = o.Value; break;
+                case "capasym": CapAsym = o.Value; break;
+                case "capcmpw": CapCmpW = o.Value; break;
+                case "capvavg": CapVAvg = o.Value; break;
                 case "pb5drift": Pb5DriftV = o.Value; break;
                 case "pb5tau": Pb5DriftTau = o.Value; break;
                 case "senseneg": SenseNegV = o.Value; break;
@@ -1646,7 +1659,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         /// The opendm40 AD2 sentinel configuration: ENOP2 with SOP2P = PB1, SAD2IP = OP2O,
         /// SAD2IN = PB3, in a role whose own measurement leaves AD2 / OP2 unused.
         private bool Ad2OnPb1Sentinel =>
-            (role == Role.Cont || role == Role.Diode || role == Role.CapOsc)
+            (role == Role.Cont || role == Role.Diode || role == Role.CapOsc
+             || role == Role.DcV || role == Role.DcMv || role == Role.Ohm)
             && (regs[0x32] & 0xF0) == 0xD0 && (regs[0x27] >> 6) == 1 && ((regs[0x27] >> 4) & 3) == 2;
 
         /// The opendm40 A-jack protection probe (sentinel.rs `probe_row`): ENOP2 with SOP2P = PB2,
@@ -1983,7 +1997,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             }
             case Role.CapRamp: case Role.CapDischarge:
                 // node volts -> code with the stock scale 1000 * 1.25 / 0.9 / 8388606 mV per code
-                code = rampV / (1.25 / 0.9 / 8388606.0) * (ig / rowIg) / (rg / rowRg);
+                code = (role == Role.CapRamp && CapVAvg > 0 ? RampMean(ad1Last) : rampV) / (1.25 / 0.9 / 8388606.0) * (ig / rowIg) / (rg / rowRg);
                 break;
             case Role.Temp:
             {
@@ -2240,11 +2254,14 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             {
                 rampV *= Math.Exp(-dt / 0.02);
                 rampUp = true;
+                rampHt.Clear(); rampHv.Clear();
                 return;
             }
             if(role != Role.CapRamp) return;
+            if(CapVAvg > 0 && rampHt.Count == 0) RampMark(rampLast - dt);
             var vh = CmpHighThreshold; var vl = CmpLowThreshold;
             if(vh < vl) { var x = vh; vh = vl; vl = x; }
+            if(CapCmpW != 1.0) { var m = 0.5 * (vh + vl); var h = 0.5 * (vh - vl) * CapCmpW; vh = m + h; vl = m - h; }
             var cf = Fe.CapRampC(CapK[roleRange] * 1e-6, vh);
             if(double.IsNaN(cf))
             {
@@ -2255,9 +2272,20 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             var c = cf * 1e6; // uF
             if(c <= 0) c = 1e-4;   // open: ramps instantly to the threshold
             var slope = CalGain(0x170 + 4 * roleRange) * CapK[roleRange] / c; // V/s at the AD1 node
+            // Dielectric absorption (opt-in "capda:k;capdatau:s", CHOSEN, not measured): after
+            // the discharge the slope is (1 - k e^(-t / tau)) of I / C, t from the ramp's start
+            // (device 832f89a4, ~1 mF electrolytic: the early slope read the capacitor 50 % high
+            // and more on 600 uF and 60 mF).
+            if(CapDaK > 0 && CapDaTau > 0)
+                slope *= Math.Max(0.05, 1 - CapDaK * Math.Exp(-(now - capDaT0) / CapDaTau));
+            var slope0 = slope;
             var remaining = dt;
             while(remaining > 0)
             {
+                // Up / down asymmetry (opt-in "capasym:a", CHOSEN, not measured): the up ramp
+                // (1 + a), the down ramp (1 - a) of the slope (device 40c25e2b, ~1 mF: the
+                // results alternated 1227 / 974 / 1044 / 982 uF).
+                slope = slope0 * (rampUp ? 1 + CapAsym : 1 - CapAsym);
                 var target = rampUp ? vh : vl;
                 var dist = Math.Abs(target - rampV);
                 var tt = dist / slope;
@@ -2267,10 +2295,12 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     break;
                 }
                 rampV = target;
+                if(CapVAvg > 0) RampMark(now - remaining + tt);
                 rampUp = !rampUp;
                 acpo = !rampUp; // high after reaching the high threshold
                 remaining -= tt;
             }
+            if(CapVAvg > 0) RampMark(now);
         }
 
         // ------------------------------------------------------------ comparator
@@ -2296,6 +2326,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                 cmpHigh = node > CmpHighThreshold;
                 cmpLow = node < CmpLowThreshold;
                 if(Pb1Cmp70 && scmpiPb1 && cmpHigh) cmpLow = true;
+                // ... and (Pb1Lo0) PB1 below the window reads nothing, as an idle PB1
+                if(Pb1Lo0 && scmpiPb1 && !cmpHigh) cmpLow = false;
                 if(role == Role.Ohm && OhmBothV > 0 && scmpiPb1)
                 {
                     // a source on V-COM overdrives the comparator (OhmBothV, device 1a11eda)
@@ -2403,13 +2435,8 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
                     return true;
                 }
                 if(scmpi != 4) return false;
+                // (the V jack's pickup in ohm / temperature: Pb1Volts, Pb1VjackMv)
                 v = Pb1Volts(t);
-                if(Pb1VjackMv != 0 && (role == Role.Ohm || role == Role.Temp || role == Role.None))
-                {
-                    double dc, ac, hz, duty; string shape;
-                    Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
-                    v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
-                }
                 return true;
             case Role.DcA:
                 if(scmpi != 0) return false;
@@ -2426,10 +2453,11 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             double dc, ac, hz, duty; string shape;
             Fe.ACurrent(out dc, out ac, out hz, out shape, out duty);
             var v = Wave(t, dc, ac, hz, shape, duty) * Fe.ShuntR + SwTr(t);
-            if(Pb1VjackMv != 0 && role == Role.Cont)
+            if(Pb1VjackMv != 0 && (role == Role.Cont || role == Role.Ohm || role == Role.Temp || role == Role.None))
             {
-                // the V jack on PB1 in the continuity row as in ohm (SentinelNode; device 40728b8 /
-                // d2aff22: the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
+                // the V jack on PB1 in the ohm / temperature rows (the comparator, and AD2 on PB1:
+                // opendm40's negative leg) and in the continuity row (device 40728b8 / d2aff22:
+                // the AD2 peak on PB1 read -99 100 / +124 800 at 5 V DC, +-400 at 1 V)
                 Fe.VJack(Fe.RelayPa, out dc, out ac, out hz, out shape, out duty);
                 v += Pb1VjackMv * 1e-3 * Wave(t, dc, ac, hz, shape, duty);
             }
@@ -2807,7 +2835,7 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
             if(newRole == Role.Temp && Sad1I == 1) newRole = Role.None;
             if(newRole != role || newMode != roleMode || newRange != roleRange)
             {
-                if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; }
+                if(newRole == Role.CapRamp && role != Role.CapRamp) { rampUp = true; if(role == Role.CapDischarge || lastRole == Role.CapDischarge) capDaT0 = now; }
                 // (the quiesce writes pass through no-role states: the last real role counts)
                 if(newRole == Role.AcA && lastRole != Role.AcA) acaT0 = now;
                 if(newRole == Role.AcV && lastRole != Role.AcV) acvT0 = now;
@@ -2934,6 +2962,53 @@ namespace Antmicro.Renode.Peripherals.Miscellaneous
         private double ctEnableTime, ctStart, ctStop, ctPhase;
         private int ctInit, ctA, ctB, ctC;
         private double rampV, rampLast;
+        /// Dielectric absorption of the capacitor on the ramp rows ("capda:k;capdatau:s").
+        public double CapDaK, CapDaTau = 1.0, CapAsym;
+        /// The ramp comparator's window (high - low threshold) scaled by this around its middle
+        /// ("capcmpw:k", CHOSEN, not measured): device 19b6e3b7, ~1 mF on 6 mF after a charge, the
+        /// class-1 ramp turned between -20 and -36 mV (~60 mV wide on a clean start).
+        public double CapCmpW = 1.0;
+        /// The AD1 ramp reading as the node's mean over the last this many s ("capvavg:s",
+        /// CHOSEN, not measured; 0: the node at the conversion's end): device 19b6e3b7 read a part
+        /// of a poll's dV in the poll after a comparator turn, with no turn seen in that poll.
+        public double CapVAvg;
+        private readonly List<double> rampHt = new List<double>(), rampHv = new List<double>();
+        private void RampMark(double t)
+        {
+            var k = rampHt.Count;
+            if(k > 0 && t < rampHt[k - 1]) { rampHt.Clear(); rampHv.Clear(); k = 0; }
+            // (open leads turn the ramp ~10^5 times a second: at most one point per 0.1 ms)
+            if(k > 1 && t - rampHt[k - 2] < 1e-4) { rampHt[k - 1] = t; rampHv[k - 1] = rampV; return; }
+            rampHt.Add(t); rampHv.Add(rampV);
+            var old = 0;
+            while(old < rampHt.Count - 2 && rampHt[old + 1] < t - CapVAvg - 1) old++;
+            if(old > 0) { rampHt.RemoveRange(0, old); rampHv.RemoveRange(0, old); }
+        }
+        /// The node's mean over [t - CapVAvg, t] from the marked breakpoints (piecewise linear).
+        private double RampMean(double t)
+        {
+            var n = rampHt.Count;
+            if(n < 2) return rampV;
+            Func<double, double> at = x =>
+            {
+                if(x <= rampHt[0]) return rampHv[0];
+                for(var i = 1; i < n; i++)
+                    if(x <= rampHt[i]) return rampHv[i - 1] + (rampHv[i] - rampHv[i - 1]) * (x - rampHt[i - 1]) / Math.Max(1e-12, rampHt[i] - rampHt[i - 1]);
+                return rampHv[n - 1];
+            };
+            var a = t - CapVAvg;
+            double sum = 0, x0 = a, v0 = at(a);
+            for(var i = 0; i < n && rampHt[i] < t; i++)
+            {
+                if(rampHt[i] <= a) continue;
+                sum += 0.5 * (v0 + rampHv[i]) * (rampHt[i] - x0);
+                x0 = rampHt[i]; v0 = rampHv[i];
+            }
+            var vt = at(t);
+            sum += 0.5 * (v0 + vt) * (t - x0);
+            return sum / CapVAvg;
+        }
+        private double capDaT0;
         private bool rampUp;
         private double vc, vcLast;
         private Role role;

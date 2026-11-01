@@ -19,7 +19,7 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     point (t = 0) on the level with the right slope, x increment = 1 /
     ACQ:SRAT?; reading it twice gives the same bytes;
   * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
-    43 008 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
+    44 032 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
     the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
     trigger 52 156 samples before the end (the coded ring: long_checks);
     a roll record (200 ms/div) all it took;
@@ -308,7 +308,7 @@ def stop_checks(t):
     in flight), and Normal with the level above the sine (no trigger). STOP
     ends on a complete capture (TRIG:STAT? STOP once it is in, at most the
     screen's time + 1 s and a margin later, device time): the DIGitize
-    length capped at the screen + 0.5 s (43 008 less the margins at 5 / 2
+    length capped at the screen + 0.5 s (44 032 less the margins at 5 / 2
     ms/div, 37 500 at 100 ms/div; untriggered at the deadline, what is
     in), the input sine everywhere (every code inside its range, no
     step larger than the sine's: no seam), in Auto the trigger point inside
@@ -317,7 +317,7 @@ def stop_checks(t):
     stop's own TCIF4 read as a wrap, the full ring with a seam."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
-    for tb, nmin, waits in ((5e-3, 42144, (0.6, 0.9, 1.3)), (2e-3, 42144, (0.5, 0.8)), (0.1, 37000, (2.5, 4.0))):
+    for tb, nmin, waits in ((5e-3, 43168, (0.6, 0.9, 1.3)), (2e-3, 43168, (0.5, 0.8)), (0.1, 37000, (2.5, 4.0))):
         for mode, lev, wait in [('AUTO', 0, w) for w in waits] + [('NORM', 2 * A.vpp, 1.0)]:
             for c in ('TIM:SCAL %g' % tb, 'TRIG:SWE %s' % mode, 'TRIG:LEV %g' % lev, 'RUN'):
                 t.w(c)

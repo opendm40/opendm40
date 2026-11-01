@@ -52,7 +52,7 @@ pub const COLS: usize = 400;
 /// around the comparator estimate (hwtrig path only).
 const WIN: usize = 800;
 /// Highest sample rate searched continuously in software (stream_poll): the
-/// ring (CAP samples = 34 ms at 1.25 MS/s) must outlast the main-loop gap
+/// ring (CAP samples = 35 ms at 1.25 MS/s) must outlast the main-loop gap
 /// between two polls with the pre-trigger part still in it.
 const STREAM_FS: u32 = 1_250_000;
 /// Longest busy-wait inside a poll for the post-trigger samples (us).
@@ -61,13 +61,18 @@ const STREAM_SPIN_US: u64 = 1000;
 /// "Memory budget"), as CAP u16: the raw ring of the fast acquisitions
 /// (fs > PK_FS), packed in place (pack10.rs) when it stops. Slow ones
 /// (fs <= PK_FS) and the wave view keep a packed ring of PCAP samples in
-/// its first 81 900 bytes, filled each poll from a DMA staging ring of STG
+/// its first RB bytes, filled each poll from a DMA staging ring of STG
 /// raw samples at its top (`pk_drain`). Every stored record is packed.
-/// 42 K (65 520 packed samples, the stock's) next to 0.4.0's GEN / CH2
-/// channels: room from the SRAM audit and the extra RAM areas
-/// (docs/native-boot.md).
-#[cfg(not(feature = "recovery-usb"))]
-pub const CAP: usize = 42 * 1024;
+/// 43 K next to 0.4.0's GEN / CH2 channels and the coded ring (release/0.4.0
+/// alone has 44 K, PR #200): the largest 1 K step that leaves the 8 KiB
+/// SRAM floor (docs/native-boot.md "SRAM audit"). Debug builds with RAM-hungry features (dbg-touch
+/// 1.9 KB, acdc-trace 1.8 KB, acdc-meth 0.5 KB) give up 1 K samples each
+/// to stay above the 8 KiB SRAM floor.
+pub const CAP: usize = (43
+    - cfg!(feature = "dbg-touch") as usize
+    - cfg!(feature = "acdc-trace") as usize
+    - cfg!(feature = "acdc-meth") as usize)
+    * 1024;
 /// The decoder's frame log (app_log.rs): its raw ring (16 K samples: 13 ms
 /// at LOG_FS_MAX) at the start of BUF, the rest the log's memory.
 pub const LOG_RING: usize = 16 * 1024;
@@ -80,15 +85,9 @@ pub const LOG_FS_MAX: u32 = 1_250_000;
 #[used]
 pub static LOG_LIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// The `recovery-usb` variant (no LCD, no scope use) needs its own MSC
-/// buffers: a smaller ring keeps its SRAM above the 8 KiB link floor.
-#[cfg(feature = "recovery-usb")]
-pub const CAP: usize = 36 * 1024;
-/// Packed ring (samples): the stock's 65 520-sample record.
-#[cfg(not(feature = "recovery-usb"))]
-pub const PCAP: usize = 65_520;
-#[cfg(feature = "recovery-usb")]
-pub const PCAP: usize = 55_000;
+/// Packed ring (samples): what RB holds packed, less 15 bytes, at most
+/// the stock's 65 520-sample record (65 520 from CAP 42 K up).
+pub const PCAP: usize = if (RB - 15) * 8 / 10 > 65_520 { 65_520 } else { (RB - 15) * 8 / 10 };
 /// Staging ring (raw samples, the top of BUF): 82 ms at PK_FS, the longest
 /// main-loop gap it covers; a longer one restarts the acquisition.
 const STG: usize = 2048;
@@ -101,18 +100,42 @@ const PK_FS: u32 = 25_000;
 /// PCAP.
 const RB: usize = (STG0 * 2 - 4) / 5 * 5;
 const _: () = assert!(PCAP * 10 / 8 <= RB && CAP % 4 == 0);
+/// The part of BUF lent to the inrush capture (its ring length, as before
+/// the record grew).
+pub const INRUSH_LEN: usize = 26 * 1024;
+const _: () = assert!(INRUSH_LEN <= CAP);
 /// Linear record length at sample rate `fs`: the whole CAP, but no longer
 /// in time than max(26 K samples, 0.1 s), so a slow timebase's pulse / runt
 /// frame (one complete linear record each) does not wait longer than
 /// before the record grew.
 fn lin_len(fs: u32) -> usize {
-    (fs as usize / 10).clamp(26 * 1024, CAP)
+    (fs as usize / 10).clamp(INRUSH_LEN, CAP)
+}
+/// Stale samples held at the front of a comparator ring record
+/// (dlog::scope_hold_head; device 2026-11-01 at 12.5 MS/s, also after the
+/// ring wrapped: why there, unknown). The linear records discard theirs
+/// instead (PRE); the stream path (fs <= STREAM_FS: sample 0 read 400 ns
+/// or more after the start) showed none.
+const HEAD_HW: usize = 2;
+/// Slots in front of the record for the samples a linear record discards
+/// (dlog::scope_stale_head, at most 21 at 50 MS/s): the DMA starts at
+/// pre[PRE - k], so the record's sample 0 lands at buf[0].
+const PRE: usize = 24;
+const _: () = assert!(crate::dlog::scope_stale_head(50_000_000) <= PRE);
+
+/// BUF (`DMA.buf`) with the linear records' discard slots in front;
+/// word-aligned (PRE * 2 = 48 bytes: `buf` too) for pack10 / cring word
+/// access through `base()`.
+#[repr(C, align(4))]
+struct DmaBuf {
+    pre: [u16; PRE],
+    buf: [u16; CAP],
 }
 
 #[link_section = ".dmabuf"]
-static mut BUF: [u16; CAP] = [0; CAP];
+static mut DMA: DmaBuf = DmaBuf { pre: [0; PRE], buf: [0; CAP] };
 fn base() -> *mut u8 {
-    core::ptr::addr_of_mut!(BUF) as *mut u8
+    unsafe { core::ptr::addr_of_mut!(DMA.buf) as *mut u8 }
 }
 
 /// Ring state (SRAM, not the TCM `Scope`: the stack is at its budget).
@@ -144,7 +167,7 @@ fn rg() -> &'static mut Ring {
 /// record in flight.
 #[inline(always)]
 fn ring_at(i: usize, n: u64) -> u16 {
-    if rg().raw { unsafe { (*core::ptr::addr_of!(BUF))[i] & 0x3FF } } else { crate::cring::at(n as u32) }
+    if rg().raw { unsafe { (*core::ptr::addr_of!(DMA.buf))[i] & 0x3FF } } else { crate::cring::at(n as u32) }
 }
 
 #[link_section = ".dmabuf"]
@@ -205,7 +228,8 @@ const TB: [(u32, u32, u32, u32); 30] = [
     (50_000_000, 25, 1, 1),
     (50_000_000, 125, 2, 1),
     // From 100 us/div: fs halved, 2500 samples/div (stock Normal table), so
-    // a screen + trigger window fits the 26 K record.
+    // a screen + trigger window fits the shortest linear record (26 K,
+    // `lin_len`).
     (25_000_000, 125, 2, 1),
     (12_500_000, 125, 2, 1),
     (5_000_000, 125, 2, 1),
@@ -234,6 +258,27 @@ pub const TB_MIN: usize = 3;
 pub const TB_MAX: usize = 29;
 /// Highest index usable in YT (non-roll) mode: 1 s/div (stock `SCOPE_TB_YT_MAX`).
 pub const TB_YT_MAX: usize = 24;
+
+/// Fewest samples of a stopped record a zoomed-in screen may hold
+/// (`Scope::tb_floor`). `zoom_screen` rounds the window down to whole
+/// samples and `sp_frame` stretches them over the 400 columns: a 2.5-sample
+/// window drawn as 2 is 20 % off the s/div label and the X cursors, 12.5
+/// as 12 is 4 %; from 16 the 1-2-5 timebases leave <= 0.8 % (62.5 as 62).
+pub const ZOOM_MIN: u32 = 16;
+
+/// One screen at timebase `tb` spans at least `n` samples of a record taken
+/// at `fs` (exact, in integers; `Scope::zoom_screen` is the rounded window).
+pub fn zoom_holds(tb: usize, fs: u32, n: u32) -> bool {
+    let (fs_tb, num, den, ppp) = TB[tb.min(TB.len() - 1)];
+    let screen = (num * COLS as u32 / den / ppp).max(2) as u64;
+    screen * fs as u64 >= n as u64 * fs_tb.max(1) as u64
+}
+
+/// The fastest timebase from `lo` whose screen holds `ZOOM_MIN` samples of
+/// a record taken at `fs` (the window grows with the timebase index).
+pub fn zoom_floor(lo: usize, fs: u32) -> usize {
+    (lo..TB_MAX).find(|&t| zoom_holds(t, fs, ZOOM_MIN)).unwrap_or(TB_MAX)
+}
 
 /// V/div of hardware range r (x1 probe), front-end GPIO row {PC13, PB15, PD12,
 /// PD13}, calibration voltage X_r and default gain point.
@@ -434,9 +479,25 @@ pub struct Scope {
     stored_range: usize,
     /// Stored record came from roll mode: newest sample at the right edge.
     stored_roll: bool,
+    /// The stored record is the frame on screen; false: a complete linear
+    /// record poll() did not show (no trigger in it), kept for a STOP
+    /// before the next acquisition starts (`finish`, `freeze`).
+    stored_drawn: bool,
     /// Emit one re-render of the stored record on the next poll (set on any
     /// settings change while stopped and by `refresh`); no periodic re-render.
     zoom_pending: bool,
+    /// A STOP mid-acquisition left the screen showing a frame that is not
+    /// a window of the stored record (`freeze` returned false): until the
+    /// next re-render (zoom / pan, `zoom_frame`), `refresh_shown` does not
+    /// replace it with the untriggered snapshot.
+    off_record: bool,
+    /// Settings, trigger levels (volts) and the wave view's V/div the stored
+    /// record was captured with: the scope CSV header's (a stopped change
+    /// only re-renders the record).
+    stored_s: Settings,
+    stored_tv: f32,
+    stored_rv: f32,
+    stored_wvd: f32,
     /// Comparator trigger engine (hwtrig.rs): DAC2 level, TIM2 post count
     /// gating TIM1. `hw_mode`: the acquisition in flight uses it (circular
     /// record over CAP); `hw_t0`: its start time (health check).
@@ -501,6 +562,9 @@ pub struct Scope {
     /// stored record's BUF[0].
     gsync: Option<(crate::gen::Sync, u32)>,
     rec_base: u64,
+    /// Leading samples the linear record in flight discards (written to
+    /// DMA.pre, dlog::scope_stale_head); 0 for the ring paths.
+    lin_pre: usize,
     stored_gen: Option<crate::gen::Sync>,
     /// The GEN trace is shown: every MCX record needs the generator's
     /// phase, so the comparator (whose stop time is not known) is off.
@@ -838,7 +902,13 @@ impl Scope {
             stored_tb: 0,
             stored_range: 0,
             stored_roll: false,
+            stored_drawn: false,
             zoom_pending: false,
+            off_record: false,
+            stored_s: Settings::DEFAULT,
+            stored_tv: 0.0,
+            stored_rv: 0.0,
+            stored_wvd: 1.0,
             hw: HwTrig::new(),
             hw_mode: false,
             hw_t0: 0,
@@ -862,6 +932,7 @@ impl Scope {
             stored_ab: (0.0, 1.0),
             gsync: None,
             rec_base: 0,
+            lin_pre: 0,
             stored_gen: None,
             gen_trace: false,
             ch2_on: false,
@@ -1186,12 +1257,20 @@ impl Scope {
         if s.mode != self.s.mode || (s.run && !self.s.run) || (self.status == 3 && !rolls(&s)) {
             self.set_status(0);
         }
-        // A user STOP (run -> stop) freezes what is on screen; any other change
-        // just aborts the acquisition in flight (it restarts in poll()).
+        // A STOP that reaches here (roll, the wave view, a second STOP while
+        // the capture of the first is pending) freezes what is on screen;
+        // any other change just aborts the acquisition in flight (it
+        // restarts in poll()). The first STOP's capture (`stop_req` above)
+        // is what release/0.4.0's deferred STOP (PR #219) does there.
         let redraw = if self.s.run && !s.run {
-            self.freeze(now)
+            let r = self.freeze(now);
+            self.off_record = !r;
+            r
         } else {
             self.halt();
+            if s.run {
+                self.off_record = false;
+            }
             true
         };
         // Roll on: full 3..29 (22.. rolls). Roll off: YT only, capped at 24
@@ -1200,6 +1279,12 @@ impl Scope {
         // 21..532 s with nothing drawn until it completes.
         let top = if self.roll && s.mode != TrigMode::Single { TB_MAX } else { TB_YT_MAX };
         s.tb = s.tb.clamp(if self.wave { WAVE_TB_MIN } else { TB_MIN }, top);
+        // Stopped: no zoom in past the record's resolution (`tb_floor`; the
+        // page's gestures toast "Max zoom", SCPI TIM:SCAL is clamped
+        // silently); the floor never goes above the timebase shown.
+        if !s.run && !self.s.run {
+            s.tb = s.tb.max(self.tb_floor().min(self.s.tb));
+        }
         // Stop-and-zoom: while stopped any change re-renders the stored record
         // at the new settings. The timebase is never clamped to the captured
         // extent: zooming out past it shows the record at the true scale with
@@ -1278,6 +1363,18 @@ impl Scope {
         }
     }
 
+    /// Before a reset (App::quiesce_for_reset): the acquisition hardware off.
+    pub fn stop_hw(&mut self) {
+        self.halt();
+    }
+
+    /// The acquisition still runs: RUN, or a STOP waiting for its capture
+    /// (`stop_req`: `s.run` stays on until it is in; the DMM CH2 keeps its
+    /// stream for that frame).
+    pub fn acquiring(&self) -> bool {
+        self.s.run
+    }
+
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
     /// record state alone.
     fn halt(&mut self) {
@@ -1314,8 +1411,12 @@ impl Scope {
     /// looking at, and always leave a stored record for Save CSV / the
     /// stopped zoom when samples exist.
     ///  * Roll: the roll display is the newest data in BUF, so linearise it.
-    ///  * Nothing in flight: the stored record is the last frame poll() showed
-    ///    (or nothing, if poll() discarded the last record).
+    ///  * Nothing in flight: the stored record is the last frame poll() showed,
+    ///    or the complete record it did not show (`finish`: no trigger in it;
+    ///    the screen stays frozen as drawn, as below). Before this, a STOP
+    ///    between such a record and the next start left no record (device,
+    ///    100 us/div, a 1 kHz square: the 0.8 ms trigger window misses the
+    ///    edge in about 1 record of 5; WAV:PRE? 0 points about 1 STOP in 8).
     ///  * A complete linear record in flight: treated exactly as poll() would
     ///    (trigger search and the Auto/Normal/Single show rule); a frame
     ///    poll() would have shown becomes the stored record and is drawn.
@@ -1339,43 +1440,57 @@ impl Scope {
         let was_stream = self.stream;
         self.halt();
         if !was_busy {
-            return true;
+            return self.stored_drawn;
         }
         // Read after the stop: the DMA was still running before it.
         let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
+        let head = if was_hw { HEAD_HW } else { 0 };
         let pk = rg().pk;
         let Some((wr, wrapped)) = self.pos(now) else { return true };
         let (off, len) = if was_rolling || was_stream || was_hw {
             self.span(wrapped, wr)
         } else if if pk { self.roll_written >= self.rec as u64 } else { ndtr == 0 } {
-            if self.finish(now).is_some() {
-                return true;
-            }
-            (0, self.rec)
+            // Shown: drawn now; else kept untriggered (`finish`).
+            return self.finish(now).is_some();
         } else if pk {
             self.span(wrapped, wr)
         } else {
-            (0, self.rec - ndtr.min(self.rec))
+            // Samples written so far, less the discarded front (DMA.pre).
+            let n = self.rec + self.lin_pre;
+            (0, (n - ndtr.min(n)).saturating_sub(self.lin_pre))
         };
         if was_stream && !pk {
             // GEN / CH2: the raw ring's first stored sample, absolute.
             self.rec_base = self.stream_wr(now).unwrap_or(0).saturating_sub(len as u64);
         }
         if was_rolling {
-            self.snapshot_mark(off, len, len.saturating_sub(1), None, true);
+            self.snapshot_mark(off, len, len.saturating_sub(1), None, true, 0);
             return true;
         }
-        self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false);
+        self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false, head);
         false
     }
 
     /// Pack a raw record (once), then mark ring slots off .. off + len as
     /// the stored record, captured with the current settings (fs, range).
-    fn snapshot_mark(&mut self, off: usize, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+    /// `head`: the record's first samples are the acquisition's first
+    /// conversions, stale (HEAD_HW, the comparator ring; held at the next
+    /// one's code before packing, as dlog::scope_hold_head), 0: none (a
+    /// linear record dropped its stale samples in DMA.pre; stream, roll,
+    /// the coded ring at <= PK_FS, wave view).
+    fn snapshot_mark(&mut self, off: usize, len: usize, anchor: usize, trig: Option<usize>, roll: bool, head: usize) {
         let r = rg();
         if r.raw {
             r.raw = false;
+            if head > 0 && len > head {
+                // SAFETY: main loop, the DMA is stopped (raw ring of CAP).
+                let b = unsafe { &mut *core::ptr::addr_of_mut!(DMA.buf) };
+                let v = b[(off + head) % CAP] & 0x3FF;
+                for i in 0..head {
+                    b[(off + i) % CAP] = v;
+                }
+            }
             pack10::pack_in_place(base(), ((off + len).min(CAP) + 3) & !3);
         }
         r.off = off;
@@ -1390,7 +1505,12 @@ impl Scope {
         self.stored_tb = self.s.tb as u8;
         self.stored_range = self.s.range;
         self.stored_pos = self.s.pos;
+        self.stored_s = self.s;
+        self.stored_tv = self.trig_volts();
+        self.stored_rv = self.runt_volts();
+        self.stored_wvd = wv().sc.vdiv;
         self.stored_roll = roll;
+        self.stored_drawn = true;
         self.stored_anchor = anchor.min(len - 1);
         self.stored_trig = trig;
         self.stored_ab = (wv().sc.a, wv().sc.b);
@@ -1433,7 +1553,7 @@ impl Scope {
         // ms * S/s in u32 (fs <= PK_FS): samples in the gap, x 1000.
         let lost = (now.saturating_sub(r.t).min(100_000) as u32) * self.sample_rate() + 64_000 >= STG as u32 * 1000;
         r.t = now;
-        let stg = unsafe { &(&*core::ptr::addr_of!(BUF))[STG0..] };
+        let stg = unsafe { &(&*core::ptr::addr_of!(DMA.buf))[STG0..] };
         let (mut rd, mut n) = (r.rd, self.roll_written);
         // Roll: the columns' min / max as the samples come (as wave_drain;
         // roll_poll draws them without reading the ring).
@@ -1531,9 +1651,12 @@ impl Scope {
     /// A complete linear record (NDTR = 0, hardware halted): trigger search and
     /// the stock show rule. Returns the start of the visible window and the
     /// trigger when the frame is to be shown, and makes it the stored record
-    /// (anchored on the on-screen centre); a discarded record (Normal / Single
-    /// without trigger, Auto before its timeout) invalidates the stored record,
-    /// since its samples have replaced the frame that was shown before.
+    /// (anchored on the on-screen centre). A record not shown (Normal / Single
+    /// without trigger, Auto before its timeout) has replaced the frame shown
+    /// before in BUF: it stays the stored record, untriggered and anchored on
+    /// its newest screen as a partial one in `freeze`, but not drawn
+    /// (`stored_drawn`), so a STOP before the next start keeps it; the next
+    /// start drops it.
     fn finish(&mut self, now: u64) -> Option<(usize, Option<usize>)> {
         let n = self.rec;
         // Pre-trigger samples: the trigger point lands on column hpos. Every
@@ -1547,7 +1670,7 @@ impl Scope {
         // the whole record (rec_split), not of its first screen.
         let lo = self.rec_split().0.min(pre + win);
         // Pack once here (snapshot_mark), then search in the packed record.
-        self.snapshot_mark(0, n, 0, None, false);
+        self.snapshot_mark(0, n, 0, None, false, 0);
         let data = self.rec_view();
         let trig = if self.gen_src() {
             self.gen_next(lo as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
@@ -1559,7 +1682,8 @@ impl Scope {
             (None, _) => self.stop_req,
         };
         if !show {
-            self.stored_valid = false;
+            self.stored_anchor = n - self.screen / 2;
+            self.stored_drawn = false;
             return None;
         }
         let start = trig.map(|t| t - pre).unwrap_or(win / 2);
@@ -1585,7 +1709,8 @@ impl Scope {
         // Linear: Single / DIGitize take the record rec_split waits for.
         let (p, q) = self.rec_split();
         self.rec = lin_len(fs).max(p + q);
-        let buf = core::ptr::addr_of!(BUF) as u32 + if pk { 2 * STG0 as u32 } else { 0 };
+        let buf = unsafe { core::ptr::addr_of!(DMA.buf) } as u32 + if pk { 2 * STG0 as u32 } else { 0 };
+        let k_lin = crate::dlog::scope_stale_head(fs);
         unsafe {
             w32(LIFCR, 0x3D << 22);
             w32(HIFCR, 0x3D);
@@ -1618,7 +1743,6 @@ impl Scope {
                 core::ptr::addr_of!(LATCH) as u32
             };
             w32(S4 + 0x08, src);
-            w32(S4 + 0x0C, buf);
             // Roll from 200 ms/div (TB_ROLL) when Roll is on, except in Single,
             // which captures a full linear record like the stock Single mode.
             self.rolling = self.roll_ok();
@@ -1632,7 +1756,8 @@ impl Scope {
             // until this acquisition completes (or is snapshotted in stop()).
             self.stored_valid = false;
             // Comparator trigger: circular record over CAP, frozen in hardware
-            // `post` samples after the edge (hwtrig.rs). Roll never triggers.
+            // `hw_post` samples after the edge (hwtrig.rs), trimmed to `rec`.
+            // Roll never triggers.
             // Pulse / runt (software, trigsoft.rs): one complete linear
             // record per frame.
             // GEN: the trigger is computed (edge only); the GEN trace needs
@@ -1643,13 +1768,21 @@ impl Scope {
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
             let stream = !self.rolling && !hw && !soft && fs <= STREAM_FS;
+            // A raw linear record starts k_lin samples early in DMA.pre: the
+            // ADC's stale output (dlog::scope_stale_head) is not recorded,
+            // the record's sample 0 is TIM1 period k_lin. The rings (and the
+            // staging ring at <= PK_FS, sample 0 read >= 40 us after the
+            // start) keep every sample.
+            let ring = pk || self.rolling || hw || stream;
+            self.lin_pre = if ring { 0 } else { k_lin };
             let (len, circ) = if pk {
                 (STG as u32, 1 << 8)
-            } else if self.rolling || hw || stream {
+            } else if ring {
                 (CAP as u32, 1 << 8)
             } else {
-                (self.rec as u32, 0)
+                ((self.rec + self.lin_pre) as u32, 0)
             };
+            w32(S4 + 0x0C, buf - 2 * self.lin_pre as u32);
             self.roll_written = 0;
             self.roll_last_wr = 0;
             self.stream = stream;
@@ -1660,28 +1793,28 @@ impl Scope {
             w32(S4 + 0x04, len);
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | circ | 1);
             if hw {
-                let (_, post) = self.rec_split();
                 let code = self.trig_code() as f32;
-                self.hw.prepare(psc, arr, hwtrig::post_for(post, WIN), code, self.s.rising);
+                self.hw.prepare(psc, arr, self.hw_post() as u32, code, self.s.rising);
             }
             self.hw_mode = hw;
             self.rec_base = 0;
             w32(TIM8, 1);
             // The generator's time at the TIM1 start: sample n is taken at
-            // CC4 of TIM1 period n, (ccr4 + n (arr + 1)) (psc + 1) ticks
-            // later (both timers on the 200 MHz clock). An interrupt
+            // CC4 of TIM1 period n + lin_pre, (ccr4 + (n + lin_pre) (arr + 1))
+            // (psc + 1) ticks later (both timers on the 200 MHz clock). An interrupt
             // between the reading and the start: no phase for this record.
             let g = if gen && !self.wave { crate::gen::now() } else { None };
             w32(TIM1, 1);
             let d_en = r32(DWT_CYCCNT);
             self.t_step = ((psc + 1) * (arr + 1)) as f32;
-            self.t_s0 = (!hw).then(|| d_en.wrapping_add(ccr4 * (psc + 1)));
+            let c0 = ccr4 + self.lin_pre as u32 * (arr + 1);
+            self.t_s0 = (!hw).then(|| d_en.wrapping_add(c0 * (psc + 1)));
             self.gsync = g.and_then(|(gt, d)| {
                 let dt = d_en.wrapping_sub(d);
                 let (t, shape) = crate::gen::running()?;
                 let (q, k) = crate::gen::loop_ticks(&t);
                 let ps = psc as f64 + 1.0;
-                let t0 = gt as f64 + dt as f64 + ccr4 as f64 * ps - gen_lag() as f64;
+                let t0 = gt as f64 + dt as f64 + c0 as f64 * ps - gen_lag() as f64;
                 let sy = crate::gen::Sync { t0: crate::gen::wrap(t0, q as f64), s: ps * (arr as f64 + 1.0), q: q as f64, k: k as f64, shape };
                 (dt < 400).then_some((sy, crate::gen::epoch()))
             });
@@ -1826,6 +1959,38 @@ impl Scope {
         (pre, self.screen - pre)
     }
 
+    /// Comparator record: post-trigger samples, counted in hardware from the
+    /// PA15 edge (TIM2 CCR2). As the stock (post = len - pre - trig_delay,
+    /// `scope_gen_ui_v2_6.h` "Pre-trigger part"): arming waits for the
+    /// pre-trigger part (`pre_for` of rec_split's pre part), so a post count
+    /// of `rec - pre_for` makes every triggered record `rec` samples long
+    /// (the software linear record's length, `lin_len`, or a Single /
+    /// DIGitize's rec_split record) with the edge `pre_for` samples from its
+    /// start; never less than `post_for` of rec_split's post part. Before,
+    /// the post count was only the screen part right of the trigger plus
+    /// the search slack (`post_for`), and the record was what had been
+    /// written by the stop: 25.8 K at slow rates, 26..37 K at 1 ms/div
+    /// (device 2026-10-31).
+    fn hw_post(&self) -> usize {
+        let (pre, post) = self.rec_split();
+        hwtrig::post_rec(self.rec, pre, post, WIN) as usize
+    }
+
+    /// Keep the newest samples of a comparator record's span (first slot,
+    /// count) up to its designed length, `pre_for` + `hw_post` (= `rec`
+    /// while running; a Single / DIGitize / STOP capture whose post part is
+    /// `post_for`'s floor is `rec` + 832); more were written when a late
+    /// edge wrapped the ring. A coded-ring Single / DIGitize keeps all of
+    /// it: its pre part is what the memory keeps (rec_split).
+    fn hw_trim(&self, (off, len): (usize, usize)) -> (usize, usize) {
+        if rg().pk && (self.s.mode == TrigMode::Single || self.one_shot) {
+            return (off, len);
+        }
+        let n = (hwtrig::pre_for(self.rec_split().0, WIN) + self.hw_post()).min(len);
+        let off = if rg().pk { off + (len - n) } else { (off + (len - n)) % CAP };
+        (off, n)
+    }
+
     /// Hardware-trigger acquisition in flight: arm after the pre-trigger part,
     /// then wait for TIM2 to gate TIM1 off (Done) or for the Auto timeout.
     fn hw_poll(&mut self, now: u64) -> Option<Frame<'static>> {
@@ -1861,17 +2026,20 @@ impl Scope {
                 // scope back to the software trigger (hwtrig::note_miss).
                 // A STOP's capture (stop_req) at its deadline: also with the
                 // post part still running (Fired), the trigger kept if a
-                // screen around it is in.
-                if (st != Status::Armed && !self.stop_req) || now < self.deadline || !(wrapped || wr >= self.screen) {
+                // screen around it is in. Else the timeout waits for a whole
+                // record (`rec` samples, as a triggered one).
+                let need = if self.stop_req { self.screen } else { self.rec };
+                if (st != Status::Armed && !self.stop_req) || now < self.deadline || !(wrapped || wr >= need) {
                     return None;
                 }
                 // Re-read after the stop: the DMA was still running above.
-                let (off, len) = self.halt_span(now);
+                let span = self.halt_span(now);
+                let (off, len) = self.hw_trim(span);
                 if len < self.screen {
                     self.stored_valid = false;
                     return None;
                 }
-                self.snapshot_mark(off, len, len - self.screen / 2, None, false);
+                self.snapshot_mark(off, len, len - self.screen / 2, None, false, HEAD_HW);
                 let data = self.rec_view();
                 let found = if len - post > pre { self.find_trigger(data.sub(pre, len - post)).map(|i| i + pre) } else { None };
                 if found.is_some() && st == Status::Armed {
@@ -1892,8 +2060,9 @@ impl Scope {
                 self.emit(start, found)
             }
             Status::Done => {
-                let (off, len) = self.halt_span(now);
-                let post_n = hwtrig::post_for(self.rec_split().1, WIN) as usize;
+                let span = self.halt_span(now);
+                let (off, len) = self.hw_trim(span);
+                let post_n = self.hw_post();
                 if len < self.screen + WIN || len < post_n + pre {
                     // Cannot happen after `arm` (pre + post samples written),
                     // kept as a guard against a stale TCIF (and a packed
@@ -1906,7 +2075,7 @@ impl Scope {
                 let th = len - post_n;
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
-                self.snapshot_mark(off, len, th, None, false);
+                self.snapshot_mark(off, len, th, None, false, HEAD_HW);
                 let data = self.rec_view();
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
@@ -2090,6 +2259,38 @@ impl Scope {
         }
     }
 
+    /// As `refresh`, but only when the screen shows a window of the stored
+    /// record (new CH2 samples for it): not after a STOP mid-acquisition,
+    /// whose frozen frame stays until a zoom / pan.
+    pub fn refresh_shown(&mut self) {
+        if !self.off_record {
+            self.refresh();
+        }
+    }
+
+    /// Settings the stored record was captured with (the scope CSV header).
+    pub fn record_settings(&self) -> Settings {
+        self.stored_s
+    }
+
+    /// The stored record's trigger level and runt level (volts / SI) and
+    /// V/div at the probe tip / the jacks (the current probe, as `volts`).
+    pub fn record_levels(&self) -> (f32, f32, f32) {
+        let vd = if self.wave { self.stored_wvd } else { VDIV[self.stored_range.min(9)] * self.s.probe };
+        (self.stored_tv, self.stored_rv, vd)
+    }
+
+    /// Fastest timebase usable now: stopped with a record, the fastest whose
+    /// window still holds `ZOOM_MIN` samples of it (`zoom_floor`), else the
+    /// range's minimum.
+    pub fn tb_floor(&self) -> usize {
+        let lo = if self.wave { WAVE_TB_MIN } else { TB_MIN };
+        if self.s.run || !self.stored_valid || self.stored_fs == 0 {
+            return lo;
+        }
+        zoom_floor(lo, self.stored_fs)
+    }
+
     /// Poll: start / finish frames. Returns the visible window when ready.
     /// Tracks the run-state chip: a live frame sets T'D / AUTO (RUN in
     /// roll); Normal / Single fall back to WAIT when nothing triggered for a
@@ -2147,6 +2348,12 @@ impl Scope {
         if self.wave {
             return src.and_then(|s| self.wave_frame(now, s));
         }
+        self.acquire(now)
+    }
+
+    /// The MCX acquisition (running, or a STOP's capture): start / finish
+    /// records, the visible window when one is ready.
+    fn acquire(&mut self, now: u64) -> Option<Frame<'static>> {
         if !self.powered || now < self.relay_until {
             return None;
         }
@@ -2357,7 +2564,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(off, len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(off, len, start + self.screen / 2, trig, false, 0);
         self.emit(start, trig)
     }
 
@@ -2395,6 +2602,7 @@ impl Scope {
         if !self.stored_valid || self.stored_len < 2 || self.stored_fs == 0 {
             return None;
         }
+        self.off_record = false;
         let len = self.stored_len;
         let want = self.zoom_screen(self.s.tb);
         if want <= len as u64 {
@@ -2577,7 +2785,7 @@ impl Scope {
             w32(S3 + 0x04, 2);
             w32(S3, (7 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 8) | 1);
             w32(S4 + 0x08, core::ptr::addr_of!(LATCH) as u32);
-            w32(S4 + 0x0C, core::ptr::addr_of!(BUF) as u32);
+            w32(S4 + 0x0C, core::ptr::addr_of!(DMA.buf) as u32);
             w32(S4 + 0x04, LOG_RING as u32);
             w32(S4, (6 << 25) | (3 << 16) | (1 << 13) | (1 << 11) | (1 << 10) | (1 << 8) | 1);
             w32(TIM8, 1);
@@ -2676,13 +2884,13 @@ impl Scope {
     pub fn log_ring(&self) -> (&'static [u16], u32) {
         // SAFETY: main loop only; the DMA writes the ring, readers take
         // samples well behind its position (app_log.rs).
-        (unsafe { &(&*core::ptr::addr_of!(BUF))[..LOG_RING] }, self.log_fs)
+        (unsafe { &(&*core::ptr::addr_of!(DMA.buf))[..LOG_RING] }, self.log_fs)
     }
 
     /// The log's memory: BUF above the ring (bytes).
     #[cfg_attr(not(feature = "dec-log"), allow(dead_code))]
     pub fn log_mem(&self) -> (*mut u8, usize) {
-        (unsafe { (core::ptr::addr_of_mut!(BUF) as *mut u8).add(LOG_RING * 2) }, (CAP - LOG_RING) * 2)
+        (unsafe { (core::ptr::addr_of_mut!(DMA.buf) as *mut u8).add(LOG_RING * 2) }, (CAP - LOG_RING) * 2)
     }
 
     /// Lend BUF to the inrush capture (src/app_inrush.rs): the MCX
@@ -2701,7 +2909,7 @@ impl Scope {
     pub fn lent_buf(&self) -> Option<&'static mut [u16]> {
         // SAFETY: main loop only; while lent nothing else in scope.rs
         // touches BUF (poll_frame returns at once, no DMA runs).
-        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(BUF))[..] })
+        self.lent.then(|| unsafe { &mut (&mut *core::ptr::addr_of_mut!(DMA.buf))[..INRUSH_LEN] })
     }
 
     /// BUF back to the scope: the next poll starts an acquisition.
@@ -2908,7 +3116,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(off, len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(off, len, start + self.screen / 2, trig, false, 0);
         wv().shown = Some((base + (start + self.screen / 2) as u64, t));
         wv().last_emit = now;
         self.deadline = now + self.auto_timeout();
@@ -3027,15 +3235,15 @@ impl Scope {
         }
         let (off, len, base) = self.wave_linear();
         if was_rolling {
-            self.snapshot_mark(off, len, len.saturating_sub(1), None, true);
+            self.snapshot_mark(off, len, len.saturating_sub(1), None, true, 0);
             return true;
         }
         match wv().shown {
             Some((c, t)) if c >= base && c < base + len as u64 => {
                 let trig = t.filter(|&t| t >= base && t < base + len as u64).map(|t| (t - base) as usize);
-                self.snapshot_mark(off, len, (c - base) as usize, trig, false);
+                self.snapshot_mark(off, len, (c - base) as usize, trig, false, 0);
             }
-            _ => self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false),
+            _ => self.snapshot_mark(off, len, len.saturating_sub(self.screen / 2), None, false, 0),
         }
         true
     }
@@ -3048,7 +3256,7 @@ pub fn debug() -> [u32; 4] {
         [
             core::ptr::read_volatile(core::ptr::addr_of!(LATCH[0])),
             r32(S4 + 0x04),
-            core::ptr::read_volatile(core::ptr::addr_of!(BUF[0])) as u32,
+            core::ptr::read_volatile(core::ptr::addr_of!(DMA.buf[0])) as u32,
             r32(GPIOB_IDR),
         ]
     }
