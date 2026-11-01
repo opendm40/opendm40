@@ -17,6 +17,9 @@ pub mod inr;
 /// The Power Wave page (View::PWave, app_pwave.rs).
 #[path = "ui_pwave.rs"]
 pub mod pwv;
+/// The LCR page (View::Lcr, app_lcr.rs).
+#[path = "ui_lcr.rs"]
+pub mod lcr;
 /// The touch test page (View::TouchTest, app_touchtest.rs).
 #[path = "ui_touchtest.rs"]
 pub mod touchtest;
@@ -116,6 +119,9 @@ pub enum View {
     /// Power Wave: U and I waveforms of the power meter (Power Settings ->
     /// Wave; app_pwave.rs).
     PWave,
+    /// LCR meter: the generator on a DUT, U and I of the power meter
+    /// (Power Settings -> LCR; app_lcr.rs).
+    Lcr,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
 }
@@ -3323,6 +3329,7 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::PWave => "Power Wave",
+        View::Lcr => "LCR",
         View::TouchTest => "Touch test",
     }
 }

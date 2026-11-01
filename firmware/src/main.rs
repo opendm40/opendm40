@@ -20,6 +20,7 @@ mod lcd;
 mod logger;
 mod inrush;
 mod pwave;
+mod lcr;
 mod ad2exp;
 mod ad2pll;
 
@@ -1670,7 +1671,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // view: no DMM poll, no BT serve); `logging`: a host session, which
         // also freezes the GUI (the wave view is a live scope page).
         // Power Wave (app_pwave.rs) samples the HY3131 itself on its page.
-        let busy = logger.active() || app::pwave_on();
+        let busy = logger.active() || app::pwave_on() || app::lcr_on();
         // A disk session (fastlog.rs) freezes the GUI from its Prep to its
         // last FAT write; tap to stop (below).
         // (Not the inrush save: no logger runs, the page stays live.)

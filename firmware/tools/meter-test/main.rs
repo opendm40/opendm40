@@ -46,6 +46,8 @@ mod inrush;
 // Power Wave: the capture's pure part and the page's plot geometry.
 #[path = "../../src/pwave.rs"]
 mod pwave;
+#[path = "../../src/lcr.rs"]
+mod lcr;
 #[path = "../../src/ad2pll.rs"]
 mod ad2pll;
 // Scope / wave view measurements (src/scope_meas.rs; `compute` needs the

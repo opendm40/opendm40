@@ -688,6 +688,8 @@ pub const PS_LIMITS: u8 = 31;
 pub const PS_RECORD: u8 = 32;
 /// Power Wave (View::PWave), the coupling row's fourth column.
 pub const PS_WAVE: u8 = 33;
+/// The LCR meter (View::Lcr), the coupling row's fifth column.
+pub const PS_LCR: u8 = 34;
 /// The bottom row, left to right: Reset Wh, Wiring, Limits, Record, OK
 /// (8..472, 6 px gaps; Reset Wh, 87 px of text, the widest button).
 const PS_ROW5: [(u8, &str); 5] =
@@ -703,12 +705,12 @@ fn ps_cell(row: i16, col: i16) -> sf::Rect {
     rect(44 + 87 * col, 46 + 44 * row, 83, 38)
 }
 
-/// The coupling row DC / AC / AC+DC and Wave (Power Wave, app_pwave.rs):
-/// the Voltage Settings page's 4-column grid.
-const PS_ROW4: [i16; 4] = [8, 124, 240, 356];
+/// The coupling row DC / AC / AC+DC, Wave (Power Wave, app_pwave.rs) and
+/// LCR (app_lcr.rs): five 88 px columns, 6 px gaps (8..472).
+const PS_ROW4: [i16; 5] = [8, 102, 196, 290, 384];
 
 fn ps_row4(i: usize) -> sf::Rect {
-    rect(PS_ROW4[i], 182, if i == 3 { 116 } else { 112 }, 38)
+    rect(PS_ROW4[i], 182, 88, 38)
 }
 
 fn ps_button(r: sf::Rect, t: &str, sel: bool) {
@@ -747,6 +749,7 @@ pub fn settings_page(pv: &PowerVals) {
         ps_button(ps_row4(i), pw::coup_name(*c), pv.coup == *c);
     }
     ps_button(ps_row4(3), "Wave", false);
+    ps_button(ps_row4(4), "LCR", false);
     for (i, &(c, t)) in PS_ROW5.iter().enumerate() {
         if c == PS_RECORD {
             super::record_button(ps_row5(i), false);
@@ -777,6 +780,7 @@ pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
             (ps_row4(i), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
         }
         PS_WAVE => (ps_row4(3), "Wave", false),
+        PS_LCR => (ps_row4(4), "LCR", false),
         PS_RECORD => return super::record_button(ps_row5(3), on),
         _ => match PS_ROW5.iter().position(|&(k, _)| k == c) {
             Some(i) => (ps_row5(i), PS_ROW5[i].1, false),
@@ -820,9 +824,13 @@ pub fn settings_hit(x: u16, y: u16) -> Option<u8> {
     }
     for i in 0..PS_ROW4.len() {
         let r = ps_row4(i);
-        // Touch boxes up to the 4 px gaps' middle.
-        if hit(rect(r.x - 2, r.y, r.w + 4, r.h), x, y) {
-            return Some(if i == 3 { PS_WAVE } else { PS_COUP + i as u8 });
+        // Touch boxes up to the 6 px gaps' middle.
+        if hit(rect(r.x - 3, r.y, r.w + 6, r.h), x, y) {
+            return Some(match i {
+                3 => PS_WAVE,
+                4 => PS_LCR,
+                _ => PS_COUP + i as u8,
+            });
         }
     }
     for (i, (c, _)) in PS_ROW5.iter().enumerate() {

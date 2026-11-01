@@ -3801,6 +3801,8 @@ fn main() {
     for (msg, (n, scene)) in &ck.seen {
         println!("{n:6} x  {msg}   [first: {scene}]");
     }
+    // The pages checked below print theirs at the end.
+    let printed: std::collections::BTreeSet<String> = ck.seen.keys().cloned().collect();
     // 6z. The Inrush Current page (src/ui_inrush.rs): armed (empty grid),
     //     a captured DC inrush (lamp-like decay), an AC motor start, a
     //     sample at the AD2 rail (OL) with the longest texts, the stopped /
@@ -3917,6 +3919,53 @@ fn main() {
         save(&out, "w06-power-settings-wave");
     }
 
+    // 6z3. The LCR page (src/ui_lcr.rs): a capacitor, the widest texts of
+    //      every field, parallel R, OL, the empty page (before the first
+    //      frame, stopped); the live parts drawn over another page equal a
+    //      fresh page with those texts. Power Settings with LCR pressed.
+    {
+        use ui::lcr::Vals;
+        let v = |title: &'static str, name: &'static str, val: &'static str, unit: &'static str, cells: [&'static str; 6], info: &'static str, fi: u8, model: u8, run: bool| Vals {
+            title,
+            name,
+            val,
+            unit,
+            cells,
+            info,
+            info_fg: ui::lcr::C_PLAIN,
+            fi,
+            model,
+            run,
+        };
+        let cases: Vec<(&str, Vals)> = vec![
+            ("l01-lcr-cap", v("1kHz  I 60mA", "Cs", "4.700", "uF", ["ESR 123.4m\u{3a9}", "D 0.0123", "Q 81.30", "|Z| 33.86\u{3a9}", "Phase -89.30", "I 21.30mA"], "Short stored", 1, 0, true)),
+            ("l02-lcr-wide", v("100Hz  I 600uA", "Lp", "-999.9", "mH", ["Rp 999.9k\u{3a9}", "D 0.0001", "Q >999", "|Z| 999.9k\u{3a9}", "Phase -180.0", "I 999.9uA"], "R cal failed: not a resistor", 0, 2, true)),
+            ("l03-lcr-res", v("100Hz  I 6mA", "Rs", "1.000", "k\u{3a9}", ["ESR 1.000k\u{3a9}", "D >999", "Q 0.0012", "|Z| 1.000k\u{3a9}", "Phase 0.07", "I 707.1uA"], "Open failed: remove the DUT", 0, 1, true)),
+            ("l04-lcr-ol", v("1kHz  I 600uA", "Cp", "OL", "", ["Rp --", "D --", "Q --", "|Z| --", "Phase --", "I 1.234uA"], "Short: clips joined...", 1, 0, false)),
+            ("l05-lcr-empty", v("1kHz  I 60mA", "", "", "", ["ESR --", "D --", "Q --", "|Z| --", "Phase --", "I --"], "GEN-DUT-A, GEN gnd-COM, V at GEN", 1, 0, false)),
+            ("l06-lcr-pf", v("1kHz  I 600uA", "Cp", "999.9", "pF", ["Rp 99.99M\u{3a9}", "D 0.0010", "Q 999.0", "|Z| 159.2k\u{3a9}", "Phase -89.94", "I 6.664uA"], "Open stored", 1, 2, true)),
+        ];
+        for (name, vals) in cases.iter() {
+            host::reset(0);
+            ui::lcr::page(vals);
+            ck.check_opts(&format!("lcr/{name}"), &page_regions, false);
+            save(&out, name);
+            let want = emu().fb.clone();
+            host::reset(0);
+            let (_, o) = &cases[(cases.iter().position(|c| c.0 == *name).unwrap() + 1) % cases.len()];
+            ui::lcr::page(o);
+            ui::lcr::live(vals);
+            ck.same_as(&format!("lcr-live/{name}"), &want);
+        }
+        host::reset(0);
+        ui::pw::settings_page(&pw_cases()[0].1);
+        ui::pw::settings_press(&pw_cases()[0].1, ui::pw::PS_LCR, true);
+        save(&out, "l07-power-settings-lcr");
+    }
+
+    for (msg, (n, scene)) in ck.seen.iter().filter(|(m, _)| !printed.contains(*m)) {
+        println!("{n:6} x  {msg}   [first: {scene}]");
+    }
     // Clipped texts of draws after the last check (saved scenes only).
     for m in unsafe { core::mem::take(&mut *core::ptr::addr_of_mut!(CLIPS)) } {
         ck.violations += 1;

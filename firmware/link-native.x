@@ -160,6 +160,14 @@ SECTIONS
          * the readouts and the plot columns (src/pwave.rs) stay in region B. */
         *(.text.*8opendm403app9app_pwave*);
         *(.text.*8opendm402ui3pwv*);
+        /* The LCR meter: the page, its glue, the fit and the impedance
+         * math (src/app_lcr.rs, src/ui_lcr.rs, src/lcr.rs) and its SCPI
+         * parser (main loop only, once per frame; no stream runs while
+         * the page is open, docs/lcr.md). The capture is pwave's (B). */
+        *(.text.*8opendm403app7app_lcr*);
+        *(.text.*8opendm402ui3lcr*);
+        *(.text.*8opendm403lcr*);
+        *(.text.*8opendm404scpi9parse_lcr*);
         /* The touch test page (src/app_touchtest.rs, src/ui_touchtest.rs):
          * never open while the AD2 stream or a logger session runs (the page
          * refuses to open then, closes when one starts; main.rs calls

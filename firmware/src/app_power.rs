@@ -138,6 +138,10 @@ impl App {
                         let _ = self.pwave_open(clk);
                         return true;
                     }
+                    Some(ui::pw::PS_LCR) => {
+                        let _ = self.lcr_open(clk);
+                        return true;
+                    }
                     Some(ui::pw::PS_OK) => {
                         let v = self.back_view;
                         self.show(v, clk);
