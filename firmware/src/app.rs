@@ -476,6 +476,19 @@ fn backlight(pct: u8) {
     unsafe { w32(TIM13_CCR1, pct.min(100) as u32) };
 }
 
+/// Eight upper-case hex digits into `buf` (stock's "%.8X"), or "--" when the
+/// boot-data word is erased flash.
+fn fmt_sn(buf: &mut [u8; 8], sn: u32) -> &str {
+    if sn == u32::MAX {
+        return "--";
+    }
+    for (i, b) in buf.iter_mut().enumerate() {
+        let d = (sn >> (28 - 4 * i)) as u8 & 0xF;
+        *b = if d < 10 { b'0' + d } else { b'A' + d - 10 };
+    }
+    core::str::from_utf8(buf).unwrap_or("--")
+}
+
 /// "V<maj>.<min>" ("V<maj>" without a minor) into `buf`, or "--" when the
 /// boot-data byte is erased flash (0xFF) so the Device page never shows a bogus
 /// V255.x.
@@ -1041,20 +1054,22 @@ impl App {
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
-                // shown; stock's SN ("%s:%.8X", boot-data word +0x0C) and
-                // "Bluetooth Name:%s" are omitted.
+                // shown; stock's "Bluetooth Name:%s" is omitted.
                 let model_name = match self.dmm.model() {
                     0 => "DM40A",
                     1 => "DM40B",
                     2 => "DM40C",
                     _ => "DM40?",
                 };
-                // Bootloader / hardware versions from the stock boot-data block
-                // in internal flash (same source as the BT cmd-02 version reply,
-                // bt.rs): +0x10 bootloader major (minor 0), +0x11/+0x12 hardware
+                // Serial number and bootloader / hardware versions from the stock
+                // boot-data block in internal flash (the versions are the BT cmd-02
+                // reply's source, bt.rs): +0x0C serial number, +0x10 bootloader
+                // major (minor 0), +0x11/+0x12 hardware
                 // major/minor, as the stock Device page shows them. The copy made at
                 // start-up (bt::boot_ver): 0x080A4000 is in the slow flash
                 // bank, and a fast-log session may stream meanwhile.
+                let mut snb = [0u8; 8];
+                let sn = fmt_sn(&mut snb, crate::bt::boot_sn());
                 let bd = crate::bt::boot_ver();
                 let mut blb = [0u8; 16];
                 let bl = fmt_ver(&mut blb, bd[0], Some(0));
@@ -1064,7 +1079,7 @@ impl App {
                 let mut fwb = [0u8; 48];
                 let fw = ui::device_software(&mut fwb);
                 // Order and labels follow the stock §6 line order
-                // (gui_v2_6.h:99: Bootloader / Software / Hardware); "Software"
+                // (gui_v2_6.h:99: SN / Bootloader / Software / Hardware); "Software"
                 // carries the opendm40 version instead of the stock "V2.6".
                 // MCU die temperature (power.rs, typical constants).
                 let mut tb = [0u8; 24];
@@ -1082,6 +1097,7 @@ impl App {
                     ("Vendor", "Alientek"),
                     ("Web", "www.alientek.com"),
                     ("Model", model_name),
+                    ("SN", sn),
                     ("Bootloader", bl),
                     ("Software", fw),
                     ("Hardware", hw),

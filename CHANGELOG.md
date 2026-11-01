@@ -9,6 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Device page:** the factory serial number, the SN line of the stock page.
 - **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > Power; default OFF, as the stock's):

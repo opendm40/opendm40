@@ -2549,6 +2549,8 @@ fn wait_for_watchdog() -> ! {
     }
 }
 
+// Unused in the build.sh image (-Cpanic=immediate-abort: a panic is a HardFault,
+// the shim's default_handler loop); a plain `cargo build` still calls it.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and

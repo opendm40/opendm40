@@ -785,10 +785,10 @@ where it is idle: it needs no converter, so no note-7 exposure.
 
 | function (mode) | sentinel (`Kind`) | row override | threshold |
 |---|---|---|---|
-| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP); DC V 6 V R21 0x8B, CMPHO reads only; DC V 6 V / DC mV / ohm: the negative leg's AD2 (4.14) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm; DC V 6 V +416.7 mV = ~8.8 mA (4.14) |
+| DC V 6 V (1 r0), DC mV (3), ohm (10), temperature (15, TC and resistive sensors) | A-JACK: comparator on PB1 (`CmpA`); CTSTA on every poll, ORed into 100 ms windows | R20 = 0x90 (SCMPI PB1, ENCMP); DC V 6 V R21 0x8B, CMPHO reads only; no AD2 (the negative leg is off, 4.14) | the rows' R21 0xdd window: +-20.8 mV = 0.44 mA on 47.5 ohm; DC V 6 V +416.7 mV = ~8.8 mA (4.14) |
 | DC V 60 / 600 / 1000 V (1 r1..3) | none (the PB1 comparator trips in these rows: A-JACK at 10 V with the A jack open, device f80524f; CTSTA 0x50 at every R21 window also with V-COM open, while AD1 reads PB1 at ~2 mV, 2026-10-27; [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | stock row | - |
 | AC V (0), AC mV (2) | A-JACK: AD1 peak hold on PB1 - PB3 (`PeakA`); AD1 off in the stock rows | R22 0x00 (OSR 256 unchopped), R23 \|= ENAD1, R24 0x95, R25 AD1IG 3.6, R29 ENPKH + PKHSEL 01, R33 OP1CHOP 00 (with AD1 on, OP1's chopper puts a ~37 mV RMS floor on AC V 6 V: [hw/README.md, Measured node behaviour](../../hw/README.md#measured-node-behaviour)) | `PK_THR` 17 900 codes = 0.5 mA |
-| continuity (11), diode (12), capacitance r0..4 (13, RC oscillator) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1; the row goes out with AD1 off and ENAD1 last (note 7) | `PK2_THR` 9 900 codes = 0.5 mA |
+| capacitance r0..4 (13, RC oscillator; AD1 off); continuity (11) / diode (12): none (AD1 shown, the comparator drives the beeper) | A-JACK: AD2 peak hold on OP2 x1 <- PB1, AD2 = OP2O - PB3 (`Ad2A`) | R25 AD2IG 2.0 + OPS2 0, R26 0x83, R27 0x6D, R29 ENPKH, R32 0xD0 \| OP1 | `PK2_THR` 9 900 codes = 0.5 mA |
 | DC A / mA / uA (7..9) | V-JACK?: comparator on SENSE via the /1000 tap (`CmpV`; SS5 only: the A rows run the power bus as SGND, PS5 would ground the tap) | R20 0x10, R2C \|= 0x10 | ~21 V on V/ohm |
 | AC A / mA / uA (4..6) | V-JACK?: AD1 peak hold on SENSE - AGND via the /1000 tap (`PeakV`) | R22 00, R23 \|= ENAD1, R24 0x03, R25 \|= 0x30, R29 PKH AD1, R2C \|= 0x10, R33 OP1CHOP 00 | the swing rule of 4.11 / 4.12: 2 V rms AC on V |
 | AC+DC V / A | the DC and AC phases' own sentinels; the DC phase's R20 goes through `acdc_src` because `freq_secondary` rewrites R20 every 350 ms (AC+DC shows no frequency) | as the plain functions | as the plain functions; V-JACK?'s "no current" = < 5 % of the range |
@@ -1585,8 +1585,17 @@ designed), DC V 6 V and ohm AUTO never. *Inferred*: CTSTA reads 0x00 for PB1
 below the comparator's window, as for an idle PB1 (hw/README, Measured node
 behaviour), so the comparator rows see one polarity only.
 
-* **Negative leg** (`sentinel.rs` NEGATIVE LEG): DC V 6 V, DC mV and ohm
-  (not 600 Mohm, not temperature, not AC+DC) carry OP2 (x1) on PB1 -> AD2 with
+* **Never enable AD2 / AD3 in a row whose AD1 reading is shown** (datasheet
+  13.1 note 7). The negative leg below did, and DC V 6 V read 0.32 mV low at
+  +4 V (device 2026-11-01, alternating A/B against `DBG:SENT:VAR 128`); it
+  is off in every row since (`neg_leg`), so DC V / DC mV / ohm do not see a
+  reversed current in A. Continuity / diode carry no sentinel; the A-PROT
+  probe and the ohm / temperature jack check switch AD1 off while they run
+  (no reading then; not on 600 Mohm). Host test
+  `no_ad2_next_to_a_shown_ad1`; exceptions: the power meter, the AC rows'
+  AD1 peak hold (PeakA / PeakV) and the stock Hz row.
+* **Negative leg** (`sentinel.rs` NEGATIVE LEG, off): DC V 6 V, DC mV and ohm
+  (not 600 Mohm, not temperature, not AC+DC) carried OP2 (x1) on PB1 -> AD2 with
   the peak hold, as continuity's `Ad2A` row. The hold is read every 100 ms;
   wholly below `PK2_NEG_THR` (~-180 mV, ~3.8 mA) or, in DC V,
   `PK2_NEG_THR_DCV` (~-400 mV, ~8.4 mA) it makes the next comparator window
