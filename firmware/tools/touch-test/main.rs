@@ -506,6 +506,66 @@ fn trig_volts_tests(ck: &mut Ck) {
     ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
 }
 
+/// The 5 / 2 mV/div steps (scope::VSTEPS, `Settings::vzoom`): a digital
+/// zoom of range 0: the step index round-trips, other ranges drop the
+/// zoom, the same codes land 2x / 5x further from the centre row, the
+/// codes -> volts map is range 0's, the trigger level keeps its volts and
+/// its ADC code, and the position keeps its volts in the offset codes.
+fn vzoom_tests(ck: &mut Ck) {
+    let mut ok = true;
+    for i in 0..=scope::VIDX_MAX {
+        let mut s = scope::Settings::DEFAULT;
+        s.set_vidx(i);
+        ok &= s.vidx() == i && s.vdiv1() == scope::VSTEPS[i] && (s.range == 0 || s.vzoom == 0);
+    }
+    ck.t("vzoom: set_vidx / vidx round trip over the 12 steps", ok);
+    let mut sc = scope::Scope::new();
+    let mut s = scope::Settings::DEFAULT;
+    s.range = 3;
+    s.vzoom = 2;
+    sc.apply(s, 0);
+    ck.t("vzoom: dropped on a range other than 0", sc.s.vzoom == 0 && sc.s.vidx() == 5);
+    let near = |a: f32, b: f32| (a - b).abs() <= 1e-4 * b.abs().max(1e-3);
+    let mut s = scope::Settings::DEFAULT;
+    s.range = 0;
+    s.trig_row = 105;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    let v0 = sc.trig_volts();
+    let (r0, k0) = (sc.row_of_code(512.0), sc.volts(600.0) - sc.volts(500.0));
+    let d10 = sc.row_of_code(600.0) - r0;
+    let mut res = vec![];
+    for (z, k) in [(1u8, 2.0f32), (2, 5.0)] {
+        let mut s = sc.s;
+        s.vzoom = z;
+        sc.apply(s, 0);
+        let d = sc.row_of_code(600.0) - sc.row_of_code(512.0);
+        res.push((z, sc.vdiv(), sc.s.trig_row, d / d10));
+        ok = near(d / d10, k) && near(sc.volts(600.0) - sc.volts(500.0), k0) && near(sc.trig_volts(), v0);
+        ck.t(&format!("vzoom {z}: rows x{k}, volts per code and the level's volts kept ({res:?})"), ok);
+    }
+    ck.t("vzoom: SCAL? 5 mV / 2 mV", near(res[0].1, 0.005) && near(res[1].1, 0.002));
+    // 10 mV/div, level row 105 = 35 rows above the centre ~ 0.99 div:
+    // at 5 mV/div ~ 2 div (row 70), at 2 mV/div ~ 5 div (off screen: -10).
+    ck.t("vzoom: the level row moves with the zoom", res[0].2 == 70 && res[1].2 == -10);
+    // Position: 20 rows at 2 mV/div are 20 rows on screen (the centre row's
+    // volts in rows of the zoomed scale).
+    let mut s = sc.s;
+    s.trig_row = 140;
+    s.pos = 20;
+    sc.levels_reset();
+    sc.apply(s, 0);
+    // The offset codes: 0 V sits pos rows below the centre code g1, at the
+    // zoomed scale (pos 20 at 2 mV/div = 20 x 4 x 2 mV / 141 = 1.13 mV).
+    ck.t("vzoom: 0 V on the zero marker row (140 + pos)", (sc.row_of_volts(0.0) - 160.0).abs() < 1e-3);
+    let vt = sc.trig_volts();
+    ck.t("vzoom: level at the centre row = pos rows of 2 mV/div", near(vt, 20.0 * 4.0 * 0.002 / 141.0));
+    let mut s = sc.s;
+    s.vzoom = 0;
+    sc.apply(s, 0);
+    ck.t("vzoom: back to 10 mV/div, the level's volts kept", near(sc.trig_volts(), vt));
+}
+
 /// Stopped zoom limit (`scope::zoom_floor`): a record of any YT timebase
 /// may be zoomed in until a screen holds `ZOOM_MIN` samples of it, no
 /// further; never below its own timebase's window. A 1 s/div record
@@ -1670,6 +1730,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
+    vzoom_tests(&mut ck);
     zoom_floor_tests(&mut ck); // after hit_tests too (Scope::new)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);

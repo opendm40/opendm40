@@ -1314,7 +1314,8 @@ in the left or right half of the graph steps), **Off**.
 
 ### Vertical: V/div, position, coupling, probe
 
-- V/div: 10 mV to 10 V per division (times the probe factor).
+- V/div: 2 mV to 10 V per division (times the probe factor). 5 and 2 mV/div
+  are a digital zoom of 10 mV/div: the same steps of about 0.1 mV, drawn larger.
 - Tap the **magnifier +** to zoom in (smaller V/div), **magnifier −** to
   zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you
