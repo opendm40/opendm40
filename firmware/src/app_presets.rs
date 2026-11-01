@@ -183,6 +183,13 @@ impl App {
             Err(PErr::Empty) => return Err("Settings conflict"),
             Err(_) => return Err("Mass storage error"),
         };
+        // A page that took over instrument settings (the generator, the
+        // scope, the power meter's ranges) gives them back as it closes
+        // (`show`): leave it first, so that does not overwrite the recall
+        // (*RCL with such a page open).
+        if is_page(self.view) && self.view != View::Presets {
+            self.show(self.back_view, clk);
+        }
         self.restore(&p.rec, true, false, clk);
         // As a function change: REL, HOLD, the statistics and the chart go.
         self.func_changed();
