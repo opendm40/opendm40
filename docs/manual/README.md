@@ -1545,6 +1545,7 @@ is on, the edge trigger does not use the trigger hardware.
   otherwise). The meter shows **Saved SCOP004.DLG**; the USB disk shows it
   as `SCOPE/SCOP004.CSV`.
 - **PriScr**: a [screenshot](#screenshots).
+- **Bode**: the [Bode plot](#bode-plot).
 
 
 ![The Settings tab](img/scope-settings.png)

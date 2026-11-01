@@ -1592,6 +1592,7 @@ CH1, на той же оси времени: сигнал [Wave view](#wave-view
   sample**). Прибор показывает **Saved SCOP004.DLG**; на USB-диске это
   `SCOPE/SCOP004.CSV`.
 - **PriScr**: [снимок экрана](#снимки-экрана).
+- **Bode**: [диаграмма Боде](#диаграмма-боде).
 
 
 ![Вкладка Settings](img/scope-settings.png)
