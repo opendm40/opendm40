@@ -263,6 +263,10 @@ What waits for the owner; each line links to the material.
 - [ ] **Docs, owner decision:** the AI-contribution policy for CONTRIBUTING.md (whether AI-written
       contributions are accepted, and how they are marked and reviewed).
 
+## Next release (after 0.4.0)
+
+- [ ] Generator: a swipe gesture turns the output off (owner 2026-11-01).
+
 ## AD1 offset with AD2 / AD3 on: measure, then maybe compensate (owner 2026-11-01)
 
 AD2 / AD3 converting next to AD1 shifts AD1 (DS 13.1 note 7; [acdc-approaches](docs/acdc-approaches.md)
