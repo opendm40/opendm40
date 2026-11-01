@@ -746,7 +746,7 @@ pub enum Dbg {
     /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
     /// the discharge slope (dmm::set_cap_idis; RAM only).
     CapIdis(Option<u32>),
-    /// DBG:CAP:DISMODE <0..3> / ?: the discharge experiment's mode
+    /// DBG:CAP:DISMODE <0..1> / ?: the discharge's mode
     /// (dmm::set_cap_dismode; RAM only).
     CapDisMode(Option<u32>),
     /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
