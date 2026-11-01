@@ -1109,9 +1109,6 @@ pub struct Reading {
     /// sentinel, BT or SCPI (`Dmm::poll` returns it without clearing
     /// `reading_pending` or counting `seq`).
     pub prov: bool,
-    /// Continuity over range from below half the limit or from the
-    /// function's entry (`ol_open`): "OPEN", not "Overflow".
-    pub open: bool,
 }
 
 impl Reading {
@@ -1161,18 +1158,6 @@ fn cal(off: u32, dflt: f32) -> f32 {
 }
 
 /// FUN_080160c6: EMA that jumps (0.99) when the step exceeds `thr`.
-/// Continuity over range: open leads ("OPEN") or a value that climbed
-/// past the limit ("Overflow": a charging capacitor, a large resistor).
-/// Diode never says "OPEN". `near`: the last in-range reading was at least half the limit
-/// (`half`), false at the function's entry; only in-range readings change
-/// it, so a whole over-range run keeps one word. True = "OPEN".
-pub fn ol_open(near: &mut bool, ol: bool, half: bool) -> bool {
-    if !ol {
-        *near = half;
-    }
-    ol && !*near
-}
-
 fn ema(thr: f32, a: f32, x: f32, y: &mut f32) {
     let d = x - *y;
     let k = if d.abs() < thr { a } else { 0.99 };
@@ -1320,6 +1305,11 @@ struct Freq {
     conf: [bool; 2],
     /// The pick of the latest `take` is provisional (`Reading::prov`).
     prov: bool,
+    /// The counter shows no input above its latest result (`f_khz`; NaN:
+    /// none yet) up to `hf_t` (ms, low 32 bits): AC mV's V_GATE
+    /// (`mv_vside`). False until the first check of a row's gate.
+    hf_ok: bool,
+    hf_t: u32,
 }
 
 /// Two clean gates in a row agree within this (relative): `Freq::take`.
@@ -1576,6 +1566,32 @@ pub(crate) fn ctr_valid(ctb: u32, cta: u32) -> bool {
 /// off, the gate preset CTA = 0xfc0000 (0x40000 SYSCLK = 53.3 ms), ENCTR on.
 /// The ramp rows' counter from CTA 0: a 3.4 s gate (`ctr_restart`'s
 /// 0xFC0000 stops it after 262 144 ticks, 53 ms; device bc205357+).
+/// The ramp comparator's rate (`Dmm::cap_ctr`): `acc` the periods (CTB) and
+/// 4.9 MHz ticks (CTA) of the earlier counter windows on this row and class,
+/// `ctb` / `cta` the running window's. Returns the sums to keep when the
+/// window ends (CTA over 8e6, ~1.6 s: the caller restarts the counter), that
+/// end, the rate (kHz) and the periods. Sums over 2^30 ticks (~218 s) are
+/// halved first: a steady capacitor's sums kept growing and the tick sum
+/// wrapped after ~874 s, which read as a ramp too fast for the range.
+fn cap_ctr_rate(acc: (u32, u32), ctb: u32, cta: u32) -> ((u32, u32), bool, f32, u32) {
+    let (mut ab, mut an) = acc;
+    let tb = ab + ctb;
+    let khz = match an as u64 + cta as u64 {
+        0 => 0.0,
+        tn => tb as f32 / tn as f32 * 4915.28,
+    };
+    let restart = cta > 8_000_000;
+    if restart {
+        if an > 1 << 30 {
+            ab /= 2;
+            an /= 2;
+        }
+        ab += ctb;
+        an += cta;
+    }
+    ((ab, an), restart, khz, tb)
+}
+
 fn cap_ctr_restart() {
     hy::write(0x20, &[0x50]);
     hy::write(0x1B, &[0x00, 0x00, 0x00]);
@@ -1764,15 +1780,12 @@ pub struct Dmm {
     /// node); 1 = the next result, whose window began before that read.
     ac_lead: u8,
     /// AC+DC mV: the last DC phase result's magnitude was over the range
-    /// (`mv_vside`).
+    /// (`mv_vside`); plain DC mV: the last result was (its V_GATE).
     mv_dc_drv: bool,
     f_ac: f32,
     f_lpf: f32,
     f_dc: f32,
     f_diode: f32,
-    /// Continuity: the last in-range reading was at least half the limit
-    /// (`ol_open`).
-    ol_near: bool,
     f_cap: f32,
     cap_c: f32,
     cap_cnt_up: u8,
@@ -1889,11 +1902,6 @@ pub struct Dmm {
     /// is a ramp range (`select`), not from 60 nF (0.9 s of oscillator
     /// steps before 600 uF).
     cap_last: i8,
-    /// Ramp ranges: the interval between new results (ms, EMA; 0 = none
-    /// yet) and the last one's time: the readings/s there (a poll every
-    /// 255 ms repeats the value; `reading_period_ms`).
-    cap_res_ms: f32,
-    cap_res_t: Option<u64>,
     /// DBG:CAP? (`cap_info`): the last poll's V (mV), dV (mV), dt (ms),
     /// median dV, per-poll C (uF), oscillator C (uF).
     cap_dbg: [f32; 6],
@@ -1973,6 +1981,9 @@ pub struct Dmm {
     pub sent: Sentinel,
     sent_mode: u8,
     r29: u8,
+    /// DC V 6 V's AC? alternation: R21 for the PB1 window (the row's) and
+    /// for the V-tap window (the stock row's, sentinel R21_DCV_PB1).
+    r21: (u8, u8),
     /// Last peak-hold harvest in `poll` (frequency, AD2 kinds), ms.
     pk_t: u64,
     /// AC V with the DC? alternation: ENPKH back on at this time (ms; 0 =
@@ -2517,7 +2528,6 @@ impl Dmm {
             f_lpf: 0.0,
             f_dc: 0.0,
             f_diode: 0.0,
-            ol_near: false,
             f_cap: 0.0,
             cap_c: 0.0,
             cap_cnt_up: 0,
@@ -2582,8 +2592,6 @@ impl Dmm {
             cap_half_prev: 0,
             cap_first_v: 0.0,
             cap_last: CAP_R_MIN,
-            cap_res_ms: 0.0,
-            cap_res_t: None,
             cap_dbg: [0.0; 6],
             ramp: CapRamp {
                 discharging: false,
@@ -2605,7 +2613,7 @@ impl Dmm {
             t_phase: 0,
             t_code_a: 0,
             t_cj: 0.0,
-            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false },
+            freq: Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [0.0; 2], f_khz: 0.0, duty: 0.0, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false, hf_ok: false, hf_t: 0 },
             seq: 0,
             pa_now: None,
             suspended: false,
@@ -2642,6 +2650,7 @@ impl Dmm {
             sent: Sentinel::new(),
             sent_mode: 255,
             r29: 0,
+            r21: (0, 0),
             pk_t: 0,
             pkh_due: 0,
             sent_arm: false,
@@ -2795,9 +2804,8 @@ impl Dmm {
     /// intervals across a function / range / rate change or a dropped
     /// conversion are not counted). 0 until two readings were seen. Use for "x readings/s" in the UI and SCPI.
     pub fn reading_period_ms(&self) -> u32 {
-        // Capacitance ramp ranges (600 uF up): a new value per ramp result
-        // (device: 347 uF on 600 uF changed every ~4.1 s while the chip
-        // said 3.9/s, the 255 ms poll).
+        // Capacitance ramp ranges: a new value every poll (cc1728f4), so
+        // the measured interval is the rate.
         self.period_ms as u32
     }
 
@@ -2991,6 +2999,10 @@ impl Dmm {
         // pointed at the A-jack shunt (or the V tap in DC A), sentinel.rs.
         let mask = if self.fuse_job.is_some() || src_row.is_some() { 0 } else { self.sent.mask };
         let (row, kind) = if am { (self.am_row(cfg), Kind::Off) } else { sentinel::sentinel_row(m, r as u8, self.acdc, mask, cfg) };
+        // The comparator rows' negative leg (sentinel NEGATIVE LEG): AD2 on
+        // PB1 (not ohm 600 Mohm: its phases write R32 whole).
+        let neg = !am && !is_ohm600(m, self.range) && sentinel::neg_leg(m, r as u8, self.acdc, kind, sentinel::variant());
+        let row = if neg { sentinel::neg_row(&row) } else { row };
         // The probe (PB2) over the comparator rows after a hit, and while
         // latched in every DC V / mV / ohm / temperature row (OP2 / AD2 are
         // unused there; DC V 60 V+ has no comparator but the probe fits).
@@ -3037,11 +3049,13 @@ impl Dmm {
             ctr_restart(row[0]);
         }
         self.freq.fresh = ctr;
+        self.freq.hf_ok = false;
         self.r22 = row[2];
         if let (true, Some(k)) = (self.r22 == fastvos::R22_FAST && self.dc_rated(), Fast::path(m, self.range)) {
             self.fast.start(k, clk.now_ms());
         }
         self.r29 = row[9];
+        self.r21 = (row[1], cfg[1]);
         self.chk.copy_from_slice(&row[CHK_AT..CHK_AT + 8]);
         if tr::ON && self.tr.on != 0 {
             let h = tr::hash16(&row);
@@ -3057,6 +3071,10 @@ impl Dmm {
         self.sent_arm = true;
         self.probe_settle = self.probe;
         self.sent.configured(kind, clk.now_ms(), fresh);
+        self.sent.neg = neg;
+        self.sent.neg_vok = true;
+        self.sent.neg_thr = if m == 1 { sentinel::PK2_NEG_THR_DCV } else { sentinel::PK2_NEG_THR };
+        self.sent.hi_only = kind == Kind::CmpA && row[1] == sentinel::R21_DCV_PB1 && cfg[1] != row[1];
         self.sent.blank(clk.now_ms(), sentinel::BLANK_ROW_MS);
         // Leaving the ohm network into a V-JACK? comparator row (sentinel::OHM_EXIT_*).
         // Every row within OHM_EXIT_MAX_MS of it (DC A, its range steps, the
@@ -3067,13 +3085,18 @@ impl Dmm {
         // AC mV: its own result says how far beyond the range the input is
         // (sentinel MV_DRV_K), a block late (MV_VGATE_LAG_MS). AC+DC mV: the
         // AC phase is that row and its sentinel; both phases share the run
-        // and the AC phase's verdict (doc 4.13).
+        // and the AC phase's verdict (doc 4.13). Plain DC mV: its own result
+        // over the range (the readout's OL) = driven, also for A-PROT
+        // (sentinel V_HF_KHZ: a 66 kHz signal on V-COM).
         let mv = self.mode == 2 || (self.acdc && self.mode == 3);
+        let dcmv = self.mode == 3 && !self.acdc;
         // Continuity / diode: V_GATE on OL (`CLOSED_HOLD_MS`).
-        self.sent.vgate = matches!(self.mode, 10 | 11 | 12 | 15) || mv;
+        self.sent.vgate = matches!(self.mode, 10 | 11 | 12 | 15) || mv || dcmv;
         self.closed_t = 0;
         self.sent.vlag = if mv {
             sentinel::MV_VGATE_LAG_MS
+        } else if dcmv {
+            sentinel::DCMV_VGATE_LAG_MS
         } else if matches!(self.mode, 11 | 12) {
             CLOSED_VGATE_LAG_MS
         } else {
@@ -3085,8 +3108,11 @@ impl Dmm {
         self.sent.bridge = self.acdc;
         // A-JACK evidence a driven V-COM can fake (sentinel `soft`): the
         // ohm-network rows (ohm, continuity, diode, capacitance, the
-        // resistive temperature sensors' ohm rows).
-        self.sent.soft = matches!(self.mode, 10..=13) || (self.mode == 15 && self.t_sensor != 0);
+        // resistive temperature sensors' ohm rows); frequency (its PB1
+        // follows the input path; its thresholds sit 1.3-2 x over the V-side
+        // levels measured, PK_DC_THR / PK_DC_NEG_THR).
+        self.sent.soft = matches!(self.mode, 10..=14) || (self.mode == 15 && self.t_sensor != 0);
+        self.sent.pk_dc = self.mode == 14;
         // DC? / AC? hints (doc 4.4): AC V alternates AD1 between PB1 - PB3
         // and the V tap, DC V 6 V alternates the comparator between PB1 and
         // SENSE, one 100 ms window each (`poll`, `poll_ac`).
@@ -3458,7 +3484,6 @@ impl Dmm {
         self.ac_lead = if self.acdc || self.mode > 2 { 0 } else { 2 };
         self.f_dc = 0.0;
         self.f_diode = 0.0;
-        self.ol_near = false;
         self.f_cap = 0.0;
         self.cap_c = 0.0;
         self.ohm_settled = false;
@@ -4633,6 +4658,9 @@ impl Dmm {
                 // AC? alternation: the next window's node; the first CTSTA
                 // after the switch is dropped (a bit of the other node).
                 hy::write(0x20, &[if self.sent.alt_v { sentinel::R20_SENSE } else { sentinel::R20_PB1 }]);
+                if self.r21.0 != self.r21.1 {
+                    hy::write(0x21, &[if self.sent.alt_v { self.r21.1 } else { self.r21.0 }]);
+                }
                 let _ = hy::read1(0x14);
             }
         }
@@ -4644,6 +4672,16 @@ impl Dmm {
             && self.sent.kind == Kind::Ad2A
             && (self.jwin != 0 || self.sent.jack_due(now))
             && self.cont_jack(now);
+        if self.sent.neg && !self.probe && !self.pw.on && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
+            // The negative leg (sentinel NEGATIVE LEG): the AD2 hold on PB1
+            // every window, restarted as the AD2 kinds' is.
+            self.pk_t = now;
+            let mut b = [0u8; 6];
+            hy::read(0x0E, &mut b);
+            self.sent.neg_peak(now, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
+            hy::write(0x29, &[self.r29]);
+        }
         if !jw && self.peak_in_poll() && now.saturating_sub(self.pk_t) >= sentinel::WIN_MS {
             // Frequency / the AD2 kinds: no AC result to bring PKHMIN /
             // PKHMAX along; read them (6 bytes) every window and restart
@@ -4764,6 +4802,8 @@ impl Dmm {
     #[inline(never)]
     fn v_side_ohm(&mut self, now: u64, ol: bool) {
         let drv = if self.mode == 10 {
+            // (the jack check's BOTH: sentinel `own`)
+            self.sent.vin_t = if ol { 0 } else { now.max(1) };
             self.live
         } else {
             if !ol {
@@ -4793,7 +4833,6 @@ impl Dmm {
             alert: Alert::None,
             power: None,
             prov: false,
-            open: false,
         }
     }
 
@@ -4963,9 +5002,22 @@ impl Dmm {
         // wait), never down.
         let mag = if self.acdc { hypot(self.ac_raw, x) } else { x.abs() };
         let now = clk.now_ms();
+        if m == 1 {
+            // (the negative leg counts only with an open-looking V jack)
+            self.sent.neg_vok = x > -sentinel::NEG_DCV_MAX_V;
+        }
         if m == 3 && acdc {
             // (AC+DC mV's V_GATE, `mv_vside`: the magnitude over the range)
             self.mv_dc_drv = mag > ov * lim;
+        } else if m == 3 {
+            // plain DC mV's V_GATE: over the range (OL) = a source on V-COM;
+            // "free" needs two results in range in a row (`mv_dc_drv` = the
+            // last one was over): one stray conversion (a row rewrite of the
+            // A-PROT probe) read in range among OL ones in the emulator and
+            // let A-PROT trip (loudtest ajack-dcmv-hf, 1 of 3 runs)
+            let ol = mag > ov * lim;
+            self.sent.v_side(now, ol || self.mv_dc_drv);
+            self.mv_dc_drv = ol;
         }
         let hold = vet && self.acs_dc_step(now, x, lim);
         self.tr_dc(now, ad1, x, lim, vet, hold);
@@ -5321,9 +5373,6 @@ impl Dmm {
         let rms = (b[9] as u64) | (b[10] as u64) << 8 | (b[11] as u64) << 16 | (b[12] as u64) << 24
             | ((b[13] & 0x1F) as u64) << 32;
         let sq = sqrt(rms as f32);
-        if sq > 262_144.0 {
-            return None;
-        }
         let lpf = (((b[6] as u32) << 13 | (b[7] as u32) << 21 | (b[8] as u32) << 29) as i32 >> 13) as f32;
         let r = self.range as usize;
         let (f, ov) = (self.factor(), self.over());
@@ -5338,8 +5387,13 @@ impl Dmm {
         let ci = ci as u32;
         let mut ac = sq * s * cal(g_rms + 4 * ci, 1.0) - cal(o_rms + 4 * ci, 0.0);
         let dcp = lpf * s * cal(g_lpf + 4 * ci, 1.0) - cal(o_lpf + 4 * ci, 0.0);
+        let over = sq > 262_144.0;
         if m == 2 && self.sent.vgate {
-            self.mv_vside(now, dcp.abs() + core::f32::consts::SQRT_2 * sq * s);
+            // (over the converter range: NaN, no verdict but the PB1 one)
+            self.mv_vside(now, dcp.abs(), if over { f32::NAN } else { core::f32::consts::SQRT_2 * sq * s });
+        }
+        if over {
+            return None;
         }
         if self.diag_on {
             if !self.acdc && self.diag[self.diag_k as usize % ACDC_DIAG_N].n >= 4 {
@@ -5856,9 +5910,7 @@ impl Dmm {
         self.live = ohm < -LIVE_CONT_OHM;
         let ohm = ohm.max(0.0);
         let ol = ohm > 1000.0;
-        let mut rd = self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm);
-        rd.open = ol_open(&mut self.ol_near, ol, ohm >= 500.0);
-        Some(rd)
+        Some(self.reading(if ol { Val::ol(2, "\u{3a9}") } else { Val::new(ohm, 2, "\u{3a9}") }, ohm))
     }
 
     fn poll_diode(&mut self, now: u64) -> Option<Reading> {
@@ -5892,8 +5944,6 @@ impl Dmm {
             self.beep_n = self.beep_n.saturating_add(1);
         }
         let mut rd = self.reading(if ol { Val::ol(4, "V") } else { Val::new(v, 4, "V") }, v);
-        // Over range is always "Overflow" here: a charged capacitor and
-        // open leads read the same (owner 2026-10-31).
         // Aux "ohm" readout (stock m+0xdc = V*gain/0.765, shown only below 1.04).
         let k = v * g / 0.765;
         rd.aux2 = Some(if k < 1.04 { Val::new(k * 1000.0, 1, "\u{3a9}") } else { Val::ol(1, "\u{3a9}") });
@@ -5951,6 +6001,12 @@ impl Dmm {
     /// FREQ_CHECK_MS after the restart: None while the gate runs; at its end
     /// or timeout the counts (f kHz, duty %, its SYSCLK ticks, the check:
     /// `Gate::Done` = a whole gate) and a restart with `src`.
+    ///
+    /// `hf_t`: a gate still open at a check had no input edges since its
+    /// first 53.3 ms (any edge after the CTA overflow ends it), so nothing
+    /// above the AC bandwidth up to the check; a gate given up the same up
+    /// to its end. A whole gate's result holds from the gate's start only
+    /// (it may have ended long before the check).
     #[inline(never)]
     fn freq_gate(&mut self, now: u64, src: u8) -> Option<(f32, f32, u32, Gate)> {
         if now < self.freq.next {
@@ -5965,10 +6021,13 @@ impl Dmm {
         hy::read(0x1B, &mut a);
         let el = (now as u32).wrapping_sub(self.freq.t0);
         let g = gate_check(ctc, ctb, cta, u24(&a), el, self.freq.f_khz);
+        self.freq.hf_ok = true;
         if g == Gate::Wait {
+            self.freq.hf_t = now as u32;
             self.freq.next = now + FREQ_RECHECK_MS;
             return None;
         }
+        self.freq.hf_t = if g == Gate::Done { self.freq.t0 } else { now as u32 };
         self.diag_ctr = self.diag_ctr.saturating_add(1);
         ctr_restart(src);
         self.freq.t0 = now as u32;
@@ -6008,7 +6067,11 @@ impl Dmm {
             let k = K_ACV[r.max(1)];
             let vdc = (mn as f32 + mx as f32) * 0.5 * 32.0 * 1.25 / (3.6 * AD1_DIV) * k;
             let fs = (self.factor() * DEC4[r]).min(1000.0);
-            let on = vdc.abs() > sentinel::DC_HINT_V.max(0.02 * fs) && self.f_ac < sentinel::DC_HINT_AC * vdc.abs();
+            // (not with a counter frequency above the AC bandwidth: the AC
+            // reading then misses the AC part, sentinel V_HF_KHZ)
+            let on = vdc.abs() > sentinel::DC_HINT_V.max(0.02 * fs)
+                && self.f_ac < sentinel::DC_HINT_AC * vdc.abs()
+                && !(self.freq.f_khz > sentinel::V_HF_KHZ);
             self.sent.dc_hint(now, on);
         }
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
@@ -6029,7 +6092,7 @@ impl Dmm {
         if !self.acdc {
             self.sent.rearm(now);
         }
-        if matches!(self.sent.kind, Kind::PeakA | Kind::PeakV | Kind::Ad2A) && !self.pw.on {
+        if (matches!(self.sent.kind, Kind::PeakA | Kind::PeakV | Kind::Ad2A) || self.sent.neg) && !self.pw.on {
             self.pkh_due = 0;
             self.pk_t = now;
             hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
@@ -6047,7 +6110,9 @@ impl Dmm {
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
         if !self.probe {
-            if run.is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
+            // (on a run the comparator saw: one of the negative leg alone
+            // keeps AD2 on PB1, sentinel `cmp_run`)
+            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
                 self.probe = true;
                 self.probe_rewrite(clk, 120);
             }
@@ -6081,8 +6146,10 @@ impl Dmm {
         hy::write(0x29, &[self.r29 & !sentinel::R29_ENPKH]);
         hy::write(0x29, &[self.r29]);
         if self.jack_mode() {
-            // the jack check's row (ohm / resistive temperature): no A-PROT
-            self.sent.jack_result(now, true, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+            // the jack check's row (ohm / resistive temperature): no A-PROT;
+            // the 6 / 60 Mohm rows' line (sentinel JACK_OWN_V)
+            let line = if self.mode == 10 && self.range >= 5 { sentinel::JACK_OWN_V } else { f32::NEG_INFINITY };
+            self.sent.jack_result(now, true, hy::s24(&b[0..3]), hy::s24(&b[3..6]), line);
             return;
         }
         let amps = sentinel::probe_amps(hy::s24(&b[0..3]), hy::s24(&b[3..6]));
@@ -6101,9 +6168,12 @@ impl Dmm {
             // Only while the comparator still sees the current: a real one
             // through the 47.5 ohm chain is far above its window (5 mA =
             // 0.24 V at PB1), so a probe reading without hits is not one.
+            // DC mV: not while its own V side says driven or has not said
+            // free since the run began (V_GATE: a 66 kHz signal on V-COM put
+            // the probe on PB2 over APROT_NOW_A with the A jack empty).
             None if run.is_some() => {
                 let hot = run.map_or(0, |t| now.saturating_sub(t));
-                if sentinel::aprot_trips(amps, hot) {
+                if sentinel::aprot_trips(amps, hot) && self.sent.v_free() {
                     relay_pe(0);
                     self.aprot = Some(AProt { ack: false, low_since: None });
                     self.sent.aprot_ms = hot.min(u32::MAX as u64) as u32;
@@ -6138,17 +6208,58 @@ impl Dmm {
         (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none()
     }
 
-    /// V_GATE (AC mV), per result: `pk` = the node's peak estimate (mV,
-    /// |LPF| + sqrt(2) x RMS) far beyond the range = a source on V-COM, not
-    /// the open V jack of an A-jack current (sentinel MV_DRV_K).
-    /// AC+DC mV: also driven while its DC phase's last result was over the
-    /// range (`mv_dc_drv`; device 185c066: after a source went off the open
-    /// input read OL and the AC phase's results "free" while PB1 hit, a
-    /// false A-JACK).
-    #[inline(never)]
-    fn mv_vside(&mut self, now: u64, pk: f32) {
+    /// V_GATE (AC mV), per result: `dc` = |LPF|, `ac` = sqrt(2) x RMS (mV).
+    /// Driven (a source on V-COM, not the open V jack of an A-jack current):
+    /// - the node's peak estimate dc + ac far beyond the range (MV_DRV_K);
+    /// - a DC level on the node above MV_DC_DRV_MV (the row is DC-coupled;
+    ///   the 0 / 9.5 V square at 66 kHz, clipped by the mV input: 0.51 V,
+    ///   under 1.5 x 600 mV, with an RMS of ~30 mV; device 2026-10-26);
+    /// - plain AC mV: the frequency counter above sentinel::V_HF_KHZ; a
+    ///   "free" verdict is dated where the counter's evidence ends
+    ///   (`Freq::hf_t`: a whole gate's start, or the last check that found
+    ///   the gate open; none yet in this row: no verdict), so a signal that
+    ///   starts within a run is judged by counts taken after it (emulator
+    ///   acmv-hf60). Since the reciprocal gate (#43) an open input's gate
+    ///   runs 2.2 s; its result alone put A-JACK at ~2.8 s after DC V ->
+    ///   AC mV (switchtest real-ajack-pickup);
+    /// - AC+DC mV: its DC phase's last result over the range (`mv_dc_drv`;
+    ///   device 185c066: after a source went off the open input read OL and
+    ///   the AC phase's results "free" while PB1 hit, a false A-JACK).
+    ///
+    /// A one-sided level on PB1 above sentinel::PK_DC_THR and above the
+    /// node's |LPF| (the AD1 hold of this result) = the level sits on PB1,
+    /// not on the V input: a current in A, "free" whatever the above say
+    /// (device 2026-10-26, 20 mA in A, V open: the readout OL, ~50 kHz on
+    /// the open input, no A-JACK; DC mV read +139 mV there). The V-COM
+    /// cases measured put less there (66 kHz: ~28 mV against an LPF of
+    /// 0.51 V; ~5-15 V DC: -89 mV, the node clamped). An A-JACK on this
+    /// verdict is badge only (`soft`). `ac` NaN: a result over the
+    /// converter range, which gives only that verdict.
+    #[inline(never)] // .cold (link-native.x): per AC mV result
+    fn mv_vside(&mut self, now: u64, dc: f32, ac: f32) {
+        let pb1 = sentinel::pk_level(self.sent.pk.0, self.sent.pk.1);
+        let ovr = pb1 > sentinel::PK_DC_THR && pb1 as f32 > dc * sentinel::PK_CODES_PER_MV;
+        // (an A-JACK on this evidence: badge only, no danger alarm: `soft`)
+        self.sent.soft = ovr;
+        if ovr {
+            self.sent.v_side(now, false);
+            return;
+        }
+        if ac.is_nan() {
+            return;
+        }
         let lim = self.factor() * if self.range > 0 { 100.0 } else { 10.0 };
-        self.sent.v_side(now, pk > sentinel::MV_DRV_K * lim || (self.acdc && self.mv_dc_drv));
+        let drv = dc + ac > sentinel::MV_DRV_K * lim
+            || dc > sentinel::MV_DC_DRV_MV
+            || (self.acdc && self.mv_dc_drv)
+            || (!self.acdc && self.freq.f_khz > sentinel::V_HF_KHZ);
+        if drv || self.acdc {
+            self.sent.v_side(now, drv);
+        } else if self.freq.hf_ok {
+            // (dated where the counter's evidence ends: `Freq::hf_t`)
+            let t = now.saturating_sub((now as u32).wrapping_sub(self.freq.hf_t) as u64);
+            self.sent.v_side_at(now, t, false);
+        }
     }
 
     /// The probe's row is the jack check's (sentinel `jack_row`): ohm and
@@ -6186,7 +6297,7 @@ impl Dmm {
                 hy::read(0x0E, &mut b);
                 hy::write(0x25, &[self.r25]);
                 hy::write(0x27, &[sentinel::R27_OP2O_PB3]);
-                self.sent.jack_result(now, false, hy::s24(&b[0..3]), hy::s24(&b[3..6]));
+                self.sent.jack_result(now, false, hy::s24(&b[0..3]), hy::s24(&b[3..6]), f32::NEG_INFINITY);
                 self.pk_t = now;
                 self.jwin = 3;
             }
@@ -6502,15 +6613,13 @@ impl Dmm {
         let mut b = [0u8; 9];
         hy::read(0x15, &mut b);
         let (ctb, cta) = (u24(&b[3..6]), u24(&b[6..9]));
-        let n = cta;
-        let (tb, tn) = (self.cap_ct_b + ctb, self.cap_ct_n + n);
-        if n > 8_000_000 {
-            self.cap_ct_b = tb;
-            self.cap_ct_n = tn;
+        let (acc, restart, khz, tb) = cap_ctr_rate((self.cap_ct_b, self.cap_ct_n), ctb, cta);
+        if restart {
+            (self.cap_ct_b, self.cap_ct_n) = acc;
             cap_ctr_restart();
             self.diag_ctr = self.diag_ctr.saturating_add(1);
         }
-        (if tn == 0 { 0.0 } else { tb as f32 / tn as f32 * 4915.28 }, tb)
+        (khz, tb)
     }
 
     /// No value yet: dashes, provisional.
@@ -6554,6 +6663,9 @@ impl Dmm {
             // on at the new current, no second discharge (device: 0.5 s
             // per step).
             self.write_config(clk);
+            // The comparator counter from this row on (`cap_ctr`; the class
+            // write that restarts it comes with the next poll).
+            cap_ctr_restart();
             self.ramp.prev_t = now;
             self.ramp.prev_v = self.cap_dbg[0];
             self.ramp.n = 0;
@@ -6635,8 +6747,6 @@ impl Dmm {
         self.cap_dis_e1 = 0.0;
         self.cap_vext_n = 0;
         self.cap_idle_flips = 0;
-        self.cap_res_ms = 0.0;
-        self.cap_res_t = None;
     }
 
     /// `poll_cap_in`, and once a grey value was shown, that value instead
@@ -7187,7 +7297,6 @@ impl Dmm {
             }
         }
         if fresh {
-            ema_ms(&mut self.cap_res_ms, &mut self.cap_res_t, now);
             let n = self.ramp.n;
             let mean = if n > 4 {
                 let mut b = self.ramp.buf;
@@ -7297,9 +7406,9 @@ impl Dmm {
                 !ok
             };
             if ready && !wait && !self.cap_dis_fin {
-                // Adaptive class (owner 2026-10-30): class 1 for a fast first
-                // value; once CAP_AGREE_N final values in a row agree within
-                // 2 % (the same capacitor), class 2 for accuracy. The value
+                // Adaptive class (owner 2026-10-30): CAP_CLASS_FAST for a fast
+                // first value; once CAP_AGREE_N final values in a row agree
+                // within 2 % (the same capacitor), CAP_CLASS_AUTO. The value
                 // stays final; the directions' ratio is learned again.
                 if !self.ramp.first && !self.manual && (v - self.cap_c).abs() > CAP_SWAP * self.cap_c {
                     // Another capacitor on the same range (a 470 uF after a
@@ -7318,12 +7427,16 @@ impl Dmm {
                     // The new threshold makes the polls around it partial
                     // ones: the ring starts over (the value stays as it is
                     // until 3 class-2 polls are in), the ratio is learned
-                    // again (1 meanwhile: the class-1 ratio is not class 2's).
+                    // again (1 meanwhile: one class's ratio is not another's).
+                    // Nothing to do when the class stays (CAP_CLASS_FAST ==
+                    // CAP_CLASS_AUTO, or widened to it already).
                     self.cap_cls2 = true;
-                    self.cap_pair = [None; 2];
-                    self.cap_ring_n = 0;
-                    self.cap_ratio = [1.0; 2];
-                    return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
+                    if CAP_CLASS_AUTO.max(self.cap_cls_min) != self.ramp.class {
+                        self.cap_pair = [None; 2];
+                        self.cap_ring_n = 0;
+                        self.cap_ratio = [1.0; 2];
+                        return Some(self.cap_ramp_val(self.cap_c, self.cap_c / lim > ov));
+                    }
                 }
                 if !self.cap_seg_ok {
                     self.cap_c = v;
@@ -7773,6 +7886,39 @@ fn sort_f32(v: &mut [f32]) {
 mod tests {
     use super::*;
 
+    /// A steady ramp at 7 Hz (5 uF on 600 uF) for 1 h of 1.6 s counter
+    /// windows: the rate stays 7 Hz past the old u32 tick sum's wrap
+    /// (~874 s) and the sums stay bounded.
+    #[test]
+    fn cap_ctr_rate_steady_past_wrap() {
+        let tick = 4_915_280.0f64; // CTA, per s
+        let (hz, win) = (7.0f64, 8_000_100u32);
+        let ctb = (hz * win as f64 / tick).round() as u32;
+        let want = ctb as f32 / win as f32 * 4915.28;
+        let mut acc = (0u32, 0u32);
+        for i in 0..(3600.0 * tick / win as f64) as u32 {
+            // Mid-window (half the ticks), then the window's end.
+            let (_, rs, k, _) = cap_ctr_rate(acc, ctb / 2, win / 2);
+            assert!(!rs);
+            // (11 periods a window: the half window counts 5 of them.)
+            assert!((k - want).abs() < 0.1 * want, "mid {i}: {k}");
+            let (a, rs, k, n) = cap_ctr_rate(acc, ctb, win);
+            assert!(rs && n >= 3);
+            assert!((k - want).abs() < 1e-3 * want, "end {i}: {k}");
+            acc = a;
+            assert!(acc.1 <= (1 << 30) + win, "{acc:?}");
+        }
+        assert!(want < CAP_FAST_KHZ * 10.0 && want > CAP_FAST_KHZ);
+        // A slow ramp (0.5 Hz: ~1 mF on 6 mF) stays under CAP_FAST_KHZ.
+        let ctb = (0.5 * win as f64 / tick).round() as u32;
+        let mut acc = (0u32, 0u32);
+        for _ in 0..3000 {
+            let (a, _, k, _) = cap_ctr_rate(acc, ctb, win);
+            assert!(k < CAP_FAST_KHZ, "{k}");
+            acc = a;
+        }
+    }
+
     /// A triangle ramp (2 mV / 50 ms, 30 mV swing, up 1 % steeper) with
     /// noise: the pair value is final within 1 % in under 2 s.
     #[test]
@@ -8059,7 +8205,7 @@ mod tests {
     const L: Gate = Gate::Late;
 
     fn freq0() -> Freq {
-        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false }
+        Freq { next: 0, src_alt: false, fresh: false, seen: [false; 2], zc: [0; 2], shown: false, last: [0.0; 2], lastd: [0.0; 2], change: [1e6; 2], f_khz: f32::NAN, duty: f32::NAN, range: 0, t0: 0, lastn: [0; 2], n: 0, prev: f32::NAN, conf: [false; 2], prov: false, hf_ok: false, hf_t: 0 }
     }
 
     #[test]

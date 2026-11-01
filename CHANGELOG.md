@@ -9,7 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
-- **SD in the MIN/MAX/AVG column:** the standard deviation of the readings
+- **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
   ON restarts the multimeter after a power-off in the function, range, rate
@@ -29,6 +29,25 @@ section named after the tag as the release notes; how to cut a release:
   pattern ([manual](docs/manual/README.md#continuity)).
 
   ![Continuity before and with a short](docs/changelog/v0.4.0/cont-short.png)
+- Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
+  44 032 at the faster timebases (was 26 624), for the stopped zoom / pan,
+  Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
+  capture (at most 10 s) with the trigger point at the trigger position
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
+  Wave view at 9600 S/s and slower) keep the capture compressed with the
+  DLG scope coder as it comes in: at least 65 520 samples (white noise),
+  more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
+  for up to 10 s; the part after the trigger point is at most 52 156
+  samples, the part before it what the memory keeps
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- **Protocol decoder:** UART (RS-232, RS-485), Modbus RTU and DALI (basic:
+  forward, backward and 24-bit frames, 1200 bit/s) drawn under the trace,
+  each triggered capture and on STOP, also in the Wave view. Scope MF >
+  Decode; SCPI `DECode` ([manual](docs/manual/README.md#protocol-decoder)).
+  The frame log (Mode Log) is left out of this build (flash).
+
+  ![The decoder band: UART and Modbus RTU](docs/changelog/v0.4.0/decoder.png)
 - **Scope: the generator as a trigger source** (MF > Trigger > Source GEN):
   the trigger is computed from the generator's timers, no wire needed;
   and a **GEN trace** (MF > Display) showing the generator's output under
@@ -36,7 +55,12 @@ section named after the tag as the release notes; how to cut a release:
 - **Scope: the multimeter as CH2** (MF > Display > CH2 (DMM)): the
   multimeter's input drawn over CH1 on the same time axis, in V, mV and
   AC A ([manual](docs/manual/README.md#display-settings)). The multimeter
-  reading pauses while it is on.
+  reading pauses while it is on; CH2 samples at most 38.4 kS/s, and the
+  alerts and Bluetooth pause too.
+- **Record On change:** a row when the reading moves 0.1 / 1 / 5 % of the
+  range, on OL / HI / LO, and at least once a minute; SCPI
+  `LOG:CSV:INTerval CHANge`, `LOG:CSV:CHANge`.
+- Continuity shows its test current, **I -0.26 mA**.
 
 ### Changed
 
@@ -58,13 +82,14 @@ section named after the tag as the release notes; how to cut a release:
   screen, not over a blank one; an MF menu tab redraws only the menu.
 - The menu, settings, range, help, generator and oscilloscope pages appear
   top to bottom in one pass, with no half-drawn widgets.
-- **Continuity says OPEN** next to the big `0L` with open leads (Overflow
-  when the reading climbed there, e.g. a charging capacitor); diode and the
-  other functions say "Overflow" where "Overload" was
-  ([manual](docs/manual/README.md#overflow)).
-- `DBG:TOUCH?`, `DBG:PROF?` and `DBG:ACDC:TRACE` (debug) are only in
-  builds with the `dbg-touch` / `dbg-prof` / `acdc-trace` features
+- The small caption next to the big `0L` says **Overflow** (was Overload)
+  in every function ([manual](docs/manual/README.md#overflow)).
+- `DBG:TOUCH?`, `DBG:PROF?`, `DBG:ACDC:TRACE`, `DBG:HYSPI`, `DBG:ACDC?`,
+  `DBG:DIAG?`, `DBG:OHM6`, `DBG:SENTinel?` and `DBG:SRC` (debug) are only in
+  builds with their features (`dbg-touch`, `dbg-prof`, `acdc-trace`,
+  `dbg-hyspi`, `dbg-acdc`, `dbg-diag`, `dbg-ohm6`, `dbg-sent`, `dbg-src`)
   ([SCPI reference](docs/manual/scpi-reference.md#debug-commands)).
+- On-screen help: two pages (gestures, side keys).
 - **Auto power-off on battery only:** with USB power (a computer or a
   charger) the meter never switches itself off; after the unplug the
   **Shutdown** time counts afresh
@@ -77,17 +102,16 @@ section named after the tag as the release notes; how to cut a release:
   short after a large capacitor no longer leave **0L mF** / **0.0 mF** on the
   screen.
 - Capacitance: 6 mF and up read in µF (4700 µF, not 4.700 mF).
-- Capacitance ranges on the meter: MF chooses 60 nF .. 60000 µF or AUTO; the
+- Capacitance ranges on the meter: MF chooses 60 nF .. 60 000 µF or AUTO; the
   AUTO key steps and resets them as in V / A / Ω. The 6 nF and 60 nF ranges
   are one (below 6 nF with 3 decimals).
 - Capacitance: 1 .. 47 mF show their first value in about 1.5 to 5 s (was
   9 to 20 s; 47 mF did not settle); AUTO starts on the last value's range;
   the value stays grey until the slope settles (electrolytics); another
   capacitor on 6 / 60 mF starts the range choice again.
-- Capacitance on 600 µF and up: a value every 0.25 s (the median of the
-  last polls, corrected for the ramp's two directions), grey until the ramp
-  has run both ways; "Discharging" with a rough grey value while the meter
-  discharges, orange "Charged cap: discharge first" above ~1.2 V; a charged
+- Capacitance on 600 µF and up: a value every 0.25 s (a line fit per
+  half ramp), grey until the ramp has run both ways; grey **Discharging...
+  0.85 V** while the meter discharges (**>1.2 V** above that); a charged
   capacitor (up to 5 V) discharges about twice as fast.
 - Capacitance: the bargraph spans the range (600 nF on the 600 nF range), not
   ten times it.
@@ -95,8 +119,19 @@ section named after the tag as the release notes; how to cut a release:
 - Power meter AC+DC: with no current PF reads "--" (SCPI `+9.91E37`), not 0.
 - Generator: the square wave's preview follows the duty cycle; it always showed 50 %
   ([#81](https://github.com/opendm40/opendm40/issues/81)).
+- Scope: STOP at fast timebases (100 us/div and faster) sometimes kept no record (`WAV:PRE?` 0 points,
+  an empty `WAV:DATA?`, Save CSV wrote nothing); it now keeps the last complete record.
 - Scope Save CSV after a timebase change while stopped: the file header names the timebase the record was
   taken at, not the one shown.
+- Scope Save CSV after a change while stopped: V/div, coupling and the trigger in the header are the
+  record's too.
+- Scope STOP keeps the triggered trace on screen (it jumped to an untriggered part of the capture). With
+  CH2 (DMM) on, STOP no longer leaves a short untriggered piece without CH2 and without measurements
+  (STOP ends on one more complete capture, below).
+- Scope CH2 (DMM): drawn up to the right edge of a stopped, Single or DIGitize frame (at 2 ms/div it was
+  missing from the whole frame); no wrong segment across a gap in the multimeter's stream.
+- Scope stopped zoom stops at **Max zoom** (16 samples across the screen): faster timebases had a wrong
+  time scale and cursor readouts. SCPI `TIM:SCAL` while stopped is clamped the same way.
 - Scope: a setting changed over SCPI while a popup is open shows at once in the top bar, the right
   panel and the trace beside the popup, not only after it closes ([#82](https://github.com/opendm40/opendm40/issues/82)).
 - **Battery charging** is shown: on the charger the battery is green, its top bar blinks while it charges
@@ -169,9 +204,43 @@ section named after the tag as the release notes; how to cut a release:
 - **Inrush:** the automatic power-off no longer switches the meter off while
   the page is armed and waits for a load to start
   ([#144](https://github.com/opendm40/opendm40/issues/144)).
+- Trend chart keeps its points on REL on / off, as the stock.
 - Settings: **Backlight** - / + keep to the 10, 15, 25 ... 95, 100 % steps
   after an end (10 + gave 20 %, and 55 % was out of reach)
   ([#91](https://github.com/opendm40/opendm40/issues/91)).
+- Multimeter: a current in the A jack (the leads in A / COM while measuring
+  something else) now shows A-JACK in AC mV and Hz too (a DC current from
+  ~4 mA, in Hz ~6 mA negative; there the badge only), and in Ω AUTO
+  A-JACK instead of LIVE?.
+  Manual Ω ranges below 6 MΩ may still show LIVE? for it.
+- Multimeter: a signal above the AC bandwidth on V-COM (e.g. 66 kHz from a
+  generator) no longer raises the A-jack alarms (A-JACK, A-PROT) in AC mV
+  and DC mV, nor a short A-JACK in DC V, with the A jack empty, nor the "DC?"
+  hint in AC V. A-PROT in DC mV now comes after the next DC mV reading
+  (~0.45 s).
+- Scope, STOP: the stopped record was the part of the capture in flight
+  up to the STOP (a few ms after the trigger at 5 ms/div), or the whole
+  record with a step where two captures met. STOP now ends on one more
+  complete capture (as **Single** / `DIGitize`: the trigger point at the
+  trigger position), of the full record up to the screen's time + 0.5 s
+  (44 032 samples at the faster timebases, 37 500 at 100 ms/div). It ends
+  at most the screen's time + 1 s after the STOP, with what is in when
+  nothing triggered by then (no seam): about 0.1 s at 5 ms/div, 1.5 to
+  2 s at 100 ms/div. A second STOP meanwhile stops at once. Over SCPI wait for
+  `TRIG:STAT?` = `STOP` before `WAV:DATA?`
+  ([manual](docs/manual/README.md#stop-zoom-and-pan)).
+- Scope, stopped: a pan, zoom or V/div change made while the screen was held
+  (right after a screenshot over USB, a message box on the scope page) is
+  drawn when the hold ends; before, the screen kept the drag preview with
+  the rest of the record blank. A drag back from either end of the record
+  moves at once.
+- Multimeter: a current flowing from COM into the A jack now shows A-JACK
+  in DC V, DC mV and Ω too (from ~4 mA; DC V ~9 mA; no A-PROT for it, nor for
+  an AC current in DC V).
+  DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
+  it now and then.
+- **Device page:** the bootloader and hardware versions were swapped. They now
+  match the stock page, for example Bootloader V4.0 and Hardware V1.1.
 
 ## v0.3.0 (2026-10-27)
 

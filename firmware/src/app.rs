@@ -46,6 +46,16 @@ mod app_inrush_live;
 /// The touch test page (region C).
 #[path = "app_touchtest.rs"]
 mod app_touchtest;
+/// The protocol decoder view (region B: it runs while the scope streams).
+#[path = "app_decode.rs"]
+mod app_decode;
+#[cfg(feature = "dec-log")]
+#[path = "app_log.rs"]
+mod app_log;
+#[cfg(not(feature = "dec-log"))]
+#[path = "app_log_off.rs"]
+mod app_log;
+
 pub use app_wave::WaveReq;
 
 const TIM13_CCR1: u32 = 0x4000_1C34;
@@ -145,7 +155,18 @@ fn next_rate(r: dmm::Rate) -> dmm::Rate {
 fn is_page(v: View) -> bool {
     matches!(
         v,
-        View::Menu | View::Settings | View::Range | View::Keypad | View::Device | View::Limits | View::Record | View::Gallery | View::Help | View::Inrush | View::TouchTest
+        View::Menu
+            | View::Settings
+            | View::Range
+            | View::Keypad
+            | View::Device
+            | View::Limits
+            | View::Record
+            | View::Gallery
+            | View::Help
+            | View::Inrush
+            | View::TouchTest
+            | View::Decode
     )
 }
 
@@ -549,6 +570,24 @@ pub fn finish_disk_writes(now: u64) {
     crate::screenshot::prep_finish();
 }
 
+impl App {
+    /// Before a reset (main.rs `reset_at`: DBG:RESET, DBG:UPDATE, an
+    /// install from the disk): backlight, generator output and scope
+    /// acquisition off, then 20 ms for the supply to settle. A reset releases
+    /// the power-hold pins (PE2 / PC4) until the ROM drives them again; a
+    /// DBG:UPDATE right after a scope Save CSV sometimes ended in a power
+    /// loss there (device 2026-11-01: POR + BOR at the next power-on, the
+    /// loader never ran; why the load matters is inferred).
+    pub fn quiesce_for_reset(&mut self, clk: &mut Clock) {
+        backlight(0);
+        let mut g = self.gen.s;
+        g.on = false;
+        self.gen.apply(g);
+        self.scope.stop_hw();
+        clk.delay_ms(20);
+    }
+}
+
 /// Power off as the stock: both analog rails / power hold low. The callers
 /// save the settings to the backup SRAM first (App::persist_now); the copy
 /// in the settings file is brought up to date here (setfile.rs), after the
@@ -588,6 +627,7 @@ fn restore_func(version: u32, code: u8) -> u8 {
 impl App {
     pub fn new(clk: &mut Clock) -> Self {
         scope_page::sp_init();
+        app_decode::init();
         let mut dmm = Dmm::new();
         crate::ident::set_model(dmm.model(), Dmm::model_raw());
         dmm.select(clk, 1);
@@ -775,6 +815,11 @@ impl App {
                 // function's settings come back (app_inrush.rs).
                 self.inrush_close(clk);
             }
+            if self.view == View::Decode {
+                // Leaving the decoder's frame log: it ends, the scope gets
+                // its record buffer back (app_log.rs).
+                self.log_close();
+            }
             if matches!(v, View::Scope | View::DmmScope) {
                 self.sp_enter(clk.now_ms());
             }
@@ -813,6 +858,8 @@ impl App {
             View::Scope if self.scope.wave_on() => (true, false),
             // The inrush page: the DMM side (the AD2 stream, then the DMM).
             View::Inrush => (true, false),
+            // The decoder's frame log: the scope input; the DMM as it was.
+            View::Decode => (self.scope.dmm_rail(), true),
             View::Scope | View::Gen | View::Keypad => (false, true),
             _ => (self.scope.dmm_rail(), self.scope.powered()),
         };
@@ -890,6 +937,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
+            View::Decode => self.log_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {
                 self.with_temp_page(None);
@@ -1000,27 +1048,25 @@ impl App {
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
-                // shown; stock's SN ("%s:%.8X") and "Bluetooth Name:%s" are
-                // omitted (no traced derivation / no public getter).
+                // shown; stock's SN ("%s:%.8X", boot-data word +0x0C) and
+                // "Bluetooth Name:%s" are omitted.
                 let model_name = match self.dmm.model() {
                     0 => "DM40A",
                     1 => "DM40B",
                     2 => "DM40C",
                     _ => "DM40?",
                 };
-                // Hardware / bootloader versions from the stock boot-data block
+                // Bootloader / hardware versions from the stock boot-data block
                 // in internal flash (same source as the BT cmd-02 version reply,
-                // bt.rs): +0x10 HW major, +0x11/+0x12 bootloader major/minor.
-                // The byte->field mapping is inferred from bt.rs + README, not a
-                // traced read of the stock Device page. The copy made at
+                // bt.rs): +0x10 bootloader major (minor 0), +0x11/+0x12 hardware
+                // major/minor, as the stock Device page shows them. The copy made at
                 // start-up (bt::boot_ver): 0x080A4000 is in the slow flash
                 // bank, and a fast-log session may stream meanwhile.
                 let bd = crate::bt::boot_ver();
-                let mut hwb = [0u8; 16];
-                // The boot data has only a HW major: no invented ".0" minor.
-                let hw = fmt_ver(&mut hwb, bd[0], None);
                 let mut blb = [0u8; 16];
-                let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
+                let bl = fmt_ver(&mut blb, bd[0], Some(0));
+                let mut hwb = [0u8; 16];
+                let hw = fmt_ver(&mut hwb, bd[1], Some(bd[2]));
                 // opendm40 firmware version (NOT the stock "Software V2.6").
                 let mut fwb = [0u8; 48];
                 let fw = ui::device_software(&mut fwb);
@@ -1677,19 +1723,20 @@ impl App {
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
         // shutdown host activity too (`note_host_activity`). On USB power
-        // (PB10, `Power::on_charger`) the shutdown timer does not run, in any
-        // view: it counts afresh from the unplug (owner, 2026-10-30).
-        if self.power.on_charger() {
+        // (PB10 or a configured host, autooff.rs) the shutdown timer does not
+        // run, in any view: it counts afresh from the unplug (owner,
+        // 2026-10-30).
+        if crate::autooff::usb_power(self.power.pins(), self.usb_host) {
             self.note_host_activity(now);
         }
         let dim_idle = now.saturating_sub(self.last_input);
-        let idle = now.saturating_sub(self.last_input.max(self.last_host));
+        let idle = crate::autooff::idle_ms(now, self.last_input, self.last_host);
         self.pw_tick(now);
         if DIM_MS[self.dim_idx] != 0 && dim_idle > DIM_MS[self.dim_idx] && !self.dimmed {
             self.dimmed = true;
             backlight(5);
         }
-        if !self.off_held() && idle > self.off_ms() {
+        if crate::autooff::off_due(idle, self.off_ms(), self.off_held()) {
             self.persist_now();
             power_off();
         }
@@ -1866,6 +1913,11 @@ impl App {
         // The inrush page: its state line / button (app_inrush_live.rs).
         if self.view == View::Inrush {
             self.inrush_tick(now);
+            return;
+        }
+        // The decoder's frame log: changed rows and counters (app_log.rs).
+        if self.view == View::Decode {
+            self.log_tick(now);
             return;
         }
         // HOLD toggled (side key, or a BT HOLD command in bt::serve which we do
@@ -2645,7 +2697,14 @@ impl App {
     pub fn scope_poll(&mut self, now: u64, can_draw: bool) {
         let cyc = || unsafe { core::ptr::read_volatile(0xE000_1004 as *const u32) };
         // A scope CSV that finished (UF-13): release the record, toast.
+        // The decoder's frame log owns the input (app_log.rs): no frames.
+        if self.scope.log_on() {
+            self.log_poll(now);
+            return;
+        }
         self.sp_csv_poll(now);
+        // The protocol decoder: a slice of a record decode (app_decode.rs).
+        self.dec_step();
         // Drag / pinch on the scope page: no new frames and no acquisition
         // restart while the finger moves the shown frame (scope_page.rs);
         // only the page diff repaint.
@@ -2669,11 +2728,12 @@ impl App {
         }
         // A stopped scope renders its stored record once per change (a zoom,
         // a pan, a V/div step). While nothing may be drawn (a GRAM read-back
-        // or an on-device screenshot holds the panel, a host log stream)
-        // leave that render pending: polled now, the frame would be dropped
-        // below and the screen would keep the old trace until the next
-        // change.
-        if !can_draw && !self.scope.s.run {
+        // or an on-device screenshot holds the panel, a host log stream, a
+        // pending view redraw, an overlay on the scope page) leave that
+        // render pending: polled now, the frame would be dropped and the
+        // screen would keep the old trace or the drag preview (device
+        // 2026-10-26).
+        if !self.scope.acquiring() && (!can_draw || self.redraw || (self.sp_on() && self.overlay.is_some())) {
             return;
         }
         let t0 = cyc();
@@ -2689,7 +2749,7 @@ impl App {
             for (i, w) in crate::scope_wav::screen().iter_mut().enumerate().take(if n > 0 { 400 } else { 0 }) {
                 let a = i * n / 400;
                 let b = ((i + 1) * n / 400).max(a + 1).min(n);
-                let sum: u32 = f.data[a..b].iter().map(|&v| v as u32).sum();
+                let sum: u32 = (a..b).map(|i| f.data.at(i) as u32).sum();
                 *w = (sum / (b - a) as u32) as u16;
             }
             if let (0, Some(cols)) = (n, f.cols) {
@@ -2716,7 +2776,7 @@ impl App {
                 self.meas_next = now + 300;
                 let t1 = cyc();
                 crate::prof::enter(crate::prof::MEAS);
-                self.meas_res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+                self.meas_res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
                 self.cursor_values();
                 crate::prof::exit(crate::prof::MEAS);
                 self.prof[1] = self.prof[1].max(cyc().wrapping_sub(t1) / 200);
@@ -2827,10 +2887,19 @@ impl App {
     }
 
     /// Apply scope settings (hardware + acquisition restart); the page
-    /// model picks the new values up on its next update.
+    /// model picks the new values up on its next update. A STOP press
+    /// re-renders only what `apply` asks for: a STOP mid-acquisition lets
+    /// the capture run on to a full record (`Scope::apply`, `stop_req`) or keeps the frame on
+    /// screen (`Scope::freeze`); a re-render here would draw the
+    /// untriggered snapshot instead. Stopped, a zoom in past the
+    /// record's resolution is taken back to `Scope::tb_floor` (the page's
+    /// gestures toast "Max zoom", `sp_tb_floor_toast`).
     fn scope_set(&mut self, s: scope::Settings, now: u64) {
+        let stop = self.scope.s.run && !s.run;
         self.scope.apply(s, now);
-        self.scope_invalidate();
+        if !stop {
+            self.scope_invalidate();
+        }
         self.sp_settings_changed();
     }
 
@@ -3000,6 +3069,11 @@ impl App {
         // them (app_touchtest.rs).
         if self.view == View::TouchTest {
             return self.tt_gesture(g);
+        }
+        if self.view == View::Decode {
+            if let Some(c) = self.log_gesture(clk, g) {
+                return c;
+            }
         }
         // The stock-replica scope page owns its touches and keys.
         if self.sp_on() {
@@ -3189,14 +3263,17 @@ impl App {
     /// Stats::rec), while the power meter integrates energy with a current
     /// flowing, during a CSV recording (Record page: a 24 h log on battery;
     /// decisions-2026-10-22.md #1), or while the inrush page is armed or
-    /// capturing (its stream runs: #144, a load that starts on its own).
-    /// Dimming still applies. USB power holds it off through `idle` (`tick`).
+    /// capturing (its stream runs: #144, a load that starts on its own), or
+    /// while the decoder's frame log runs (app_log.rs: a session left to
+    /// watch a bus). Dimming still applies. USB power holds it off through `idle` (`tick`,
+    /// autooff.rs).
     fn off_held(&self) -> bool {
         self.off_ms() == 0
             || self.meter.stats.rec
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
+            || self.scope.log_on()
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
@@ -3657,6 +3734,8 @@ impl App {
             // Gestures go to app_touchtest.rs (App::gesture).
             View::TouchTest => {}
             View::Inrush => self.inrush_tap(clk, x, y),
+            // (The frame log handles its own taps: app_log.rs.)
+            View::Decode => {}
             View::Device => {
                 // Any tap dismisses back to Settings (its parent; MENU goes
                 // on to the main menu, see key()).
@@ -5363,6 +5442,7 @@ impl App {
             }
             C::Run => {
                 sc.run = true;
+                self.scope.run_on();
                 None
             }
             C::Stop => {

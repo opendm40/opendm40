@@ -632,7 +632,7 @@ impl Bt {
 /// Bootloader data block in internal flash (read only): version bytes.
 const BOOT_DATA: u32 = 0x080A_4000;
 
-/// Its version bytes +0x10..+0x12 (HW major, loader major / minor), copied
+/// Its version bytes +0x10..+0x12 (loader major, HW major / minor), copied
 /// once by `Bt::new` at start-up: BT command 02 and the Device page read
 /// the copy. 0x080A4000 is in the slow flash bank (not zero-wait): a load
 /// there stalls the AD2 stream ISR ~21.8 us (device c92b605), and either
@@ -768,8 +768,8 @@ impl Bt {
             0x00 => self.reply(0, &[0x05, 0x03, b'A' + dmm.model()], true),
             0x01 => self.reply(1, &[st], false),
             0x02 => {
-                let [hw, bl_major, bl_minor] = boot_ver();
-                self.reply(2, &[hw.wrapping_mul(10), 26, bl_major.wrapping_mul(10).wrapping_add(bl_minor)], false);
+                let [bl, hw_major, hw_minor] = boot_ver();
+                self.reply(2, &[bl.wrapping_mul(10), 26, hw_major.wrapping_mul(10).wrapping_add(hw_minor)], false);
             }
             0x03..=0x06 => {
                 self.reply(f.cmd, &[st], false);
@@ -868,7 +868,9 @@ impl Bt {
                 // the app would show it in the function's unit (mA, A).
                 let bd = shown.and_then(|r| r.burden()).map(|b| b.0);
                 let a1 = shown.and_then(|r| r.aux1).filter(|_| bd != Some(0)).map(unol).filter(|v| mode != 15 || v.unit == "\u{b0}C");
-                let a2 = shown.and_then(|r| r.aux2).filter(|_| bd != Some(1)).map(unol);
+                // Capacitance: aux2 is the discharge node's voltage (Vdis / Vchg),
+                // shown in the aux row only (ui.rs), not a capacitance.
+                let a2 = shown.and_then(|r| r.aux2).filter(|_| bd != Some(1) && mode != 13).map(unol);
                 // No value yet (NaN: the frequency line before its first
                 // counter result): not sent, as an absent one.
                 let (a1, a2) = (a1.filter(|v| !v.v.is_nan()), a2.filter(|v| !v.v.is_nan()));

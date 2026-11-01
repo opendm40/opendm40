@@ -112,6 +112,9 @@ pub enum View {
     Inrush,
     /// Touch test (Settings 3/3 -> Touch test; app_touchtest.rs).
     TouchTest,
+    /// The protocol decoder's frame log (scope MF > Decode, Mode Log;
+    /// app_log.rs).
+    Decode,
 }
 
 impl View {
@@ -283,7 +286,7 @@ pub struct DmmView {
     /// Bargraph scale as last labelled: (full scale bits, unit, bipolar),
     /// None = labels to draw; and the overload marker as last drawn.
     bar_scale: Option<(u32, &'static str, bool)>,
-    bar_ol: Option<u8>,
+    bar_ol: Option<bool>,
     /// ui-review #13: draw the value in the stock >= 30 V red (set by the
     /// app before `reading`); as last drawn.
     pub hv_red: bool,
@@ -299,9 +302,9 @@ pub struct DmmView {
     /// diode, 255 = none drawn, 254 = to redraw / clear (after `invalidate`, or partly
     /// cleared).
     last_iohm: u8,
-    /// The caption next to the main readout's "0L" as drawn: 0 none,
-    /// 1 "Overflow", 2 "OPEN" (`ol_word`).
-    ol_word: u8,
+    /// The "Overflow" caption next to the main readout's "0L" is drawn
+    /// (`ol_word`).
+    ol_word: bool,
     /// The accuracy label's context (set by the app before `reading`; None
     /// = no label). The label is in the bargraph's label row, so the
     /// history row (Settings 2/3 "DMM row": History) and the power meter
@@ -607,7 +610,7 @@ impl DmmView {
             pwc: pw::PwCache::new(),
             ohm_on: false,
             last_iohm: 254,
-            ol_word: 0,
+            ol_word: false,
             acc: Some(Acc { model: 2, tc: true }),
             acc_on: true,
             acc_k: None,
@@ -756,11 +759,11 @@ impl DmmView {
             self.bar_labels(fs, key.1);
         }
         let f = if temp { Some(0.0) } else { crate::bargraph::frac(r.main.v, fs, r.main.ol) };
-        // The overflow mark: "OL", "OPEN" in continuity / diode.
-        let ol = if f.is_some() { 0 } else if meter::open(r) { 2 } else { 1 };
+        // The overflow mark: "OL".
+        let ol = f.is_none();
         if self.bar_ol != Some(ol) {
             self.bar_ol = Some(ol);
-            sf::label(sf::F14, BAR_OL, ["", "OL", "OPEN"][ol as usize], 0xF800, BG, 1, 1);
+            sf::label(sf::F14, BAR_OL, if ol { "OL" } else { "" }, 0xF800, BG, 1, 1);
         }
         self.bar.update(f);
     }
@@ -870,15 +873,15 @@ impl DmmView {
         // The caption after the "0L" (`ol_word`): cleared before the cells
         // (a value's digits reach into its box), drawn after them.
         let ow = rect(OL_WORD.x, OL_WORD.y + md, OL_WORD.w, OL_WORD.h);
-        let ok = if !r.main.ol { 0 } else if meter::open(r) { 2 } else { 1 };
-        if ok != self.ol_word && self.ol_word != 0 {
+        let ok = r.main.ol;
+        if !ok && self.ol_word {
             lcd::fill_rect(ow.x as u16, ow.y as u16, ow.w as u16, ow.h as u16, BG);
-            self.ol_word = 0;
+            self.ol_word = false;
         }
         sf::cells_diff(sf::F78, rect(40, 68 + md, w as i16, 80), s, prev, cells, color, BG, (VALUE_LOW, grey, last_grey));
-        if ok != 0 && (!same_layout || self.ol_word != ok) {
-            ol_word(ow, color, ok == 2);
-            self.ol_word = ok;
+        if ok && (!same_layout || !self.ol_word) {
+            ol_word(ow, color);
+            self.ol_word = true;
         }
         if let Some(e) = ext {
             if !same_layout || last_ext != e || (grey < 8) != (last_grey < 8) {
@@ -1168,14 +1171,13 @@ impl DmmView {
 /// on the digits' baseline; left of the limit badge / unit box (x >= 403).
 const OL_WORD: sf::Rect = rect(312, VALUE_BASE as i16 - 22, 86, 22);
 
-/// What "0L" means in `r`, in the readout's colour and F14 (the old
-/// "Overload" caption's font): "OPEN" (continuity / diode, open leads:
-/// meter::open) or "Overflow" (owner 2026-10-30). Region B (F14: blob in
+/// What "0L" means, in the readout's colour and F14 (the old "Overload"
+/// caption's font): "Overflow" in every function (owner 2026-11-01). Region B (F14: blob in
 /// A2, index in B), not .cold: an OL can start while the fast logger's AD2
 /// stream runs (V / A functions).
 #[inline(never)] // drawn on entering OL only
-fn ol_word(r: sf::Rect, c: Color, open: bool) {
-    sf::label(sf::F14, r, if open { "OPEN" } else { "Overflow" }, c, BG, 2, 1);
+fn ol_word(r: sf::Rect, c: Color) {
+    sf::label(sf::F14, r, "Overflow", c, BG, 2, 1);
 }
 
 /// The test current label's box: the aux1 slot's left part (the burden
@@ -1194,7 +1196,7 @@ pub fn cap_discharge_label(v: f32, clamp: bool, full: bool) {
     const PRE: &str = "Discharging...";
     let b = CAP_DIS_RECT;
     // (The value from a word space after the prefix.)
-    let w = sf::text_width(sf::F14, PRE, 1) + 6;
+    let w = sf::text_width(sf::F14, PRE, 1) + 10;
     if full {
         lcd::fill_rect(b.x as u16, b.y as u16, b.w as u16, b.h as u16, BG);
         sf::label(sf::F14, rect(b.x, b.y, w, b.h), PRE, DIM, BG, 1, 1);
@@ -1324,7 +1326,7 @@ pub fn strip_data(r: &Reading, hold: u8, lim: u8, rel: bool, hv: u8, alt: bool, 
     // "0L": what it means, in the first free sub row (else the second:
     // the reading matters more than its sub values then).
     if r.main.ol {
-        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new(if meter::open(r) { "OPEN" } else { "Overflow" });
+        d.sub[if d.sub[0].as_str().is_empty() { 0 } else { 1 }] = Txt::new("Overflow");
     }
     let verdict = match lim {
         meter::V_PASS => Some(("PASS", 0x0400)),
@@ -2451,7 +2453,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
     rate_chip(c, rc);
     let Some(side) = side else { return };
     // Right column (x 405..475, the REL box rows 205..240 the tap target):
-    // MAX and AVG above the REL box, MIN, SD and the session time below; one F14 row each, label left (dim), value right-aligned
+    // MAX and AVG above the REL box, MIN, σ (standard deviation) and the session time below; one F14 row each, label left (dim), value right-aligned
     // without the unit, which is shown once, in the REL box header
     // ("REL" .. "mV"). The stock version crammed "4.8170V" into 54 px with
     // touching glyphs.
@@ -2461,7 +2463,7 @@ pub fn chart(c: &mut ChartCache, pts: &[f32], dec: u8, rate: u8, side: Option<&S
         c.time = None;
         lcd::fill_rect(402, 174, 78, 31, BG);
         lcd::fill_rect(402, 241, 78, 38, BG);
-        for (i, t) in ["MAX", "AVG", "MIN", "SD"].iter().enumerate() {
+        for (i, t) in ["MAX", "AVG", "MIN", "\u{3c3}"].iter().enumerate() {
             sf::label(sf::F14, rect(SIDE_X, STAT_Y[i], 22, 14), t, DIM, BG, 0, 1);
         }
     }
@@ -2662,11 +2664,14 @@ pub fn gen_status(st: &Status) {
 
 /// `gen_preview` in strips: the wave the table holds (its `sel` + 1, the
 /// square's duty above bit 8; 0 = none) and each column's trace rows (from
-/// the preview's top). All zero
-/// at boot: `.sram_bss` is zeroed by the startup code, whatever the
-/// initialiser says (#153: a 255 "none" read back 0 = Sine with an empty
-/// table, so the boot-time Sine drew no trace).
-#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+/// the preview's top). All zero at boot, whatever the initialiser says
+/// (#153: a 255 "none" read back 0 = Sine with an empty table, so the
+/// boot-time Sine drew no trace): on test/scope-chain-0.4 it is in the
+/// backup SRAM (.bkp_bss, link-native.x; CPU only, zeroed by
+/// native::extra_ram_init; docs/native-boot.md "Extra RAM areas"), which
+/// leaves TCM to the stack and SRAM to the scope record. A dbg-prof build
+/// keeps it in TCM .bss (prof::P takes that room).
+#[cfg_attr(all(target_os = "none", not(feature = "dbg-prof")), link_section = ".bkp_bss")]
 pub(crate) static mut GEN_SP: (u32, [(u8, u8); 239]) = (0, [(0, 0); 239]);
 
 // Region B (not inlined into the region C callers): drawn per strip.
@@ -3317,7 +3322,9 @@ pub fn view_name(v: View) -> &'static str {
         View::Help => "Help",
         View::Inrush => "Inrush",
         View::TouchTest => "Touch test",
+        View::Decode => "Decode log",
     }
+
 }
 
 /// On-device help (UF-29: owners have no manual; gestures, resets and limits

@@ -3,7 +3,6 @@
 //! sectors, 2 FATs, 512 root entries, 16 MiB).
 //!   main <image> dry|live [marker-hex]  fatren::run (marker = the 12-byte
 //!                                       record at 0x08008000; none = invalid)
-//!   main <image> trigger                fatren::make_trigger
 //!   main <image> backup <dir>           calbackup::safe_copy (write-once safety copy)
 //!                                       of calbackup::FILES[..SAFE] read from
 //!                                       <dir>/CALIB.BIN, BOOTDATA.BIN, UID.BIN
@@ -239,6 +238,8 @@ mod lcd {
 
 #[path = "../../src/cold.rs"]
 mod cold;
+#[path = "../../src/pack10.rs"]
+mod pack10;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/screenshot.rs"]
@@ -1291,12 +1292,6 @@ fn main() {
         save(&a[1], &img.d);
         return;
     }
-    if a[2] == "trigger" {
-        let t = fatren::make_trigger(&mut img);
-        println!("trigger={:?}\n  changed blocks: {:?}", t, img.writes);
-        save(&a[1], &img.d);
-        return;
-    }
     if a[2] == "backup" {
         let data: Vec<Vec<u8>> = calbackup::FILES[..calbackup::SAFE]
             .iter()
@@ -1342,10 +1337,14 @@ fn main() {
         // A function): its column is "amperes".
         let n: usize = a.get(3).map_or(26 * 1024, |v| v.parse().unwrap());
         let amps = a.get(4).is_some_and(|v| v == "amps");
-        let rec: &'static mut [u16] = Box::leak(vec![0u16; n].into_boxed_slice());
-        for (i, c) in rec.iter_mut().enumerate() {
+        // Packed as the scope keeps it (pack10.rs; + 2 words of read slack).
+        let raw: &'static mut [u16] = Box::leak(vec![0u16; n + 4].into_boxed_slice());
+        for (i, c) in raw[..n].iter_mut().enumerate() {
             *c = (512.0 + 400.0 * (i as f32 * 0.01).sin()) as u16;
         }
+        let p = raw.as_mut_ptr() as *mut u8;
+        pack10::pack_in_place(p, (n + 3) & !3);
+        let rec = pack10::Codes::new(p, 0, n, n);
         let mut h = scope_csv::Hdr::new();
         h.s("# test record\r\n");
         scope_csv::set(rec, -5.0, 10.0 / 1023.0, 1.0e6, n / 2, &h, amps);

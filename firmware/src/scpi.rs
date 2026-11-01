@@ -318,6 +318,43 @@ pub enum Out {
     Mmem(Mmem),
     /// Inrush current (INRush:...), handled by the main loop with the app.
     Inr(Inr),
+    /// Protocol decoder (DECode:...), handled by the main loop with the app.
+    Dcd(Dcd),
+}
+
+/// Protocol decoder on the scope page (src/decode.rs, src/app_decode.rs);
+/// `None` = query:
+///   DECode:PROTocol OFF|UART|MODBus / ?  OFF / UART / MODB (the band)
+///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
+///   DECode:RATE?                     the bit rate of the last decode (0: none)
+///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
+///   DECode:POLarity NORMal|INVerted / ?   NORM / INV (RS-232: inverted)
+///   DECode:THReshold <V>|AUTO / ?    the level set (AUTO or V)
+///   DECode:LEVel?                    the level of the last decode, V
+///   DECode:MODE BAND|LOG / ?         the band on the scope page, or the
+///                                    frame log (View::Decode, app_log.rs)
+///   DECode:COUNt?                    frames,bytes,framing,parity,crc,lost
+///   DECode:FRAMes? [<n>]             #4nnnn block of frame lines. Band: from
+///                                    frame `n` of the decoded record; Log:
+///                                    the unread frames (at most n; 0 all)
+///   DECode:CLEar                     Log: the list and counters start again
+#[derive(Clone, Copy, PartialEq)]
+pub enum Dcd {
+    /// decode::P_OFF / P_UART / P_MODBUS / P_DALI.
+    Proto(Option<u8>),
+    /// Some(0) = AUTO.
+    Baud(Option<u32>),
+    Rate,
+    Fmt(Option<u8>),
+    Inv(Option<bool>),
+    /// Some(NaN) = AUTO.
+    Thr(Option<f32>),
+    Level,
+    /// ui_decode MODE_BAND / MODE_LOG.
+    Mode(Option<u8>),
+    Count,
+    Frames(u32),
+    Clear,
 }
 
 /// Inrush current (src/inrush.rs, src/app_inrush.rs; docs/inrush-current.md):
@@ -571,7 +608,7 @@ pub fn keepalive_left(deadline: u64, now: u64) -> u32 {
 ///   DBG:SENTinel:LOG?       the last 8 alert assertions since power-on:
 ///                           n then per one ";ALERT,KIND,ms" (oldest first;
 ///                           n counts all, emu/hy3131/switchtest.py)
-///   DBG:SENTinel:VARiant <0..127> / ?
+///   DBG:SENTinel:VARiant <0..255> / ?
 ///                           device-check row variants, RAM only (sentinel.rs
 ///                           VAR_*): +1 AC V keeps OP1's chopper (f80524f row),
 ///                           +2 no AC V sentinel, +4 comparator on DC V 60 V+,
@@ -724,6 +761,7 @@ pub enum Dbg {
     /// (src/ad2exp.rs): 0 torn (a = n, b = sync), 1 noise (b = op1chop, 255
     /// = the row's), 2 draw (r26 = level), 5 DCV? range,r26,n[,flags] (the
     /// DC-coupled V row, device test 6.5: n | range << 8, flags).
+    #[cfg_attr(not(feature = "ad2-exp"), allow(dead_code))]
     Ad2(u8, u8, u16, u8),
     /// DBG:HYSPI:SELF? n[,div[,cpha]] (src/hyspi.rs): (n, div | cpha << 7;
     /// div 0 = hy3131::DIV).
@@ -746,7 +784,7 @@ pub enum Dbg {
     /// DBG:CAP:IDIS <uA> / ?: the discharge current for the estimate from
     /// the discharge slope (dmm::set_cap_idis; RAM only).
     CapIdis(Option<u32>),
-    /// DBG:CAP:DISMODE <0..3> / ?: the discharge experiment's mode
+    /// DBG:CAP:DISMODE <0..1> / ?: the discharge's mode
     /// (dmm::set_cap_dismode; RAM only).
     CapDisMode(Option<u32>),
     /// DBG:CAP:DISREF <2..6> / ?: SFUVR of the discharge experiment's mode 1
@@ -776,6 +814,7 @@ pub enum Dbg {
 
 /// DBG:AD2:DCV? range,r26,n[,flags] -> Dbg::Ad2(5, r26, n | range << 8,
 /// flags) (main.rs `dbg_dcv`).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn dcv_arg(a: &[u8]) -> Dbg {
     let w = nums::<4>(a);
@@ -828,6 +867,7 @@ fn wav_cmd(sub: &[u8], a: &[u8], query: bool) -> Result<Option<Cmd>, &'static st
 }
 
 /// DBG:AD2:N7? item,state,n -> Dbg::Ad2(6, state, n, item) (main.rs).
+#[cfg(feature = "ad2-exp")]
 #[inline(never)] // .cold (link-native.x)
 fn n7_arg(a: &[u8]) -> Dbg {
     let w = nums::<3>(a);
@@ -1038,7 +1078,7 @@ pub enum Cmd {
     DbgSent,
     /// DBG:SENTinel:LOG?: the alert assertions (Sentinel::log).
     DbgSentLog,
-    /// DBG:SENTinel:VARiant <0..127> / ?: device-check row variants
+    /// DBG:SENTinel:VARiant <0..255> / ?: device-check row variants
     /// (sentinel::VAR_*, RAM only).
     DbgSentVar(Option<u8>),
     /// DBG:SENTinel:REG?: R20..R37 read back + relay / mode (Dmm::reg_text).
@@ -2391,7 +2431,7 @@ impl Scpi {
                 _ if p0 == b"DBG" && parts.get(1).is_some_and(|p| kw(p, "SENTinel")) && parts.get(2).is_some_and(|p| kw(p, "VARiant")) => {
                     match parse_num(arg) {
                         _ if query => out = Out::Instr(Cmd::DbgSentVar(None)),
-                        Some(v) if (0.0..=127.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
+                        Some(v) if (0.0..=255.0).contains(&v) && v == (v as u8) as f32 => out = Out::Instr(Cmd::DbgSentVar(Some(v as u8))),
                         _ => self.err_arg(no_arg, "Illegal parameter value"),
                     }
                 }
@@ -2480,8 +2520,12 @@ impl Scpi {
                     let third = a.split(|&b| b == b',').nth(2).map(trim);
                     let n = v[1].clamp(1, 2000) as u16; // ad2exp::N_MAX
                     let r26 = (v[0] & 0x3F) as u8;
+                    #[cfg(not(feature = "ad2-exp"))]
+                    let _ = (third, n, r26);
                     let d = match (parts.get(2).copied(), query) {
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"TORN"), true) => Some(Dbg::Ad2(0, r26, n, third.is_some_and(|t| kw(t, "SYNChronous")) as u8)),
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"NOISE"), true) => {
                             Some(Dbg::Ad2(1, r26, n, third.and_then(parse_num).map_or(255, |c| (c as u8).min(3))))
                         }
@@ -2490,8 +2534,10 @@ impl Scpi {
                         (Some(b"DMA"), false) => Some(Dbg::Ad2(4, (v[0].min(1)) as u8, 0, 0)),
                         (Some(b"DMA"), true) => Some(Dbg::Ad2(4, 255, 0, 0)),
                         // DCV? range,r26,n[,flags]: (5, r26, n | range << 8, flags).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"DCV"), true) => Some(dcv_arg(a)),
                         // N7? item,state,n: (6, state, n, item).
+                        #[cfg(feature = "ad2-exp")]
                         (Some(b"N7"), true) => Some(n7_arg(a)),
                         _ => None,
                     };
@@ -2627,7 +2673,7 @@ impl Scpi {
                         b"CAP" if query => Dbg::Cap,
                         b"RELEASE" => Dbg::Release,
                         b"RESET" => Dbg::Reset,
-                        // DBG:UPDATE = DBG:RECOVER: zero the 12-byte loader
+                        // DBG:UPDATE: zero the 12-byte loader
                         // marker at 0x08008000, then the deferred SYSRESETREQ ->
                         // vendor update screen + its USB disk (docs/native-boot.md).
                         // DBG:BOOT? = boot info.
@@ -2713,6 +2759,85 @@ impl Scpi {
                         Some(c) => out = Out::Inr(c),
                         None => {
                             self.err_arg(no_arg, if sub.is_empty() || kw(sub, "STATe") || kw(sub, "THReshold") { "Illegal parameter value" } else { "Undefined header" });
+                            continue;
+                        }
+                    }
+                }
+                _ if kw(p0, "DECode") => {
+                    let sub = parts.get(1).copied().unwrap_or(&[]);
+                    let a = trim(arg);
+                    let auto = kw(a, "AUTO");
+                    let c = if kw(sub, "PROTocol") {
+                        if query {
+                            Some(Dcd::Proto(None))
+                        } else if kw(a, "OFF") {
+                            Some(Dcd::Proto(Some(crate::decode::P_OFF)))
+                        } else if kw(a, "UART") {
+                            Some(Dcd::Proto(Some(crate::decode::P_UART)))
+                        } else if kw(a, "MODBus") {
+                            Some(Dcd::Proto(Some(crate::decode::P_MODBUS)))
+                        } else if crate::decode::DALI && kw(a, "DALI") {
+                            Some(Dcd::Proto(Some(crate::decode::P_DALI)))
+                        } else {
+                            None
+                        }
+                    } else if sub == b"BAUD" {
+                        if query {
+                            Some(Dcd::Baud(None))
+                        } else if auto {
+                            Some(Dcd::Baud(Some(0)))
+                        } else {
+                            parse_num(a).filter(|v| (crate::decode::MIN_BAUD as f32..=crate::decode::MAX_BAUD as f32).contains(v)).map(|v| Dcd::Baud(Some(v as u32)))
+                        }
+                    } else if kw(sub, "RATE") && query {
+                        Some(Dcd::Rate)
+                    } else if kw(sub, "FORMat") {
+                        if query { Some(Dcd::Fmt(None)) } else { crate::decode::FMT_NAMES.iter().position(|n| a.eq_ignore_ascii_case(n.as_bytes())).map(|i| Dcd::Fmt(Some(i as u8))) }
+                    } else if kw(sub, "POLarity") {
+                        if query {
+                            Some(Dcd::Inv(None))
+                        } else if kw(a, "NORMal") {
+                            Some(Dcd::Inv(Some(false)))
+                        } else if kw(a, "INVerted") {
+                            Some(Dcd::Inv(Some(true)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "THReshold") {
+                        if query {
+                            Some(Dcd::Thr(None))
+                        } else if auto {
+                            Some(Dcd::Thr(Some(f32::NAN)))
+                        } else {
+                            parse_num_u(a, b"V").filter(|v| v.abs() <= 100.0).map(|v| Dcd::Thr(Some(v)))
+                        }
+                    } else if kw(sub, "LEVel") && query {
+                        Some(Dcd::Level)
+                    } else if kw(sub, "MODE") {
+                        if query {
+                            Some(Dcd::Mode(None))
+                        } else if kw(a, "BAND") {
+                            Some(Dcd::Mode(Some(0)))
+                        } else if kw(a, "LOG") {
+                            Some(Dcd::Mode(Some(1)))
+                        } else {
+                            None
+                        }
+                    } else if kw(sub, "CLEar") && !query {
+                        Some(Dcd::Clear)
+                    } else if kw(sub, "COUNt") && query {
+                        Some(Dcd::Count)
+                    } else if kw(sub, "FRAMes") && query {
+                        if a.is_empty() { Some(Dcd::Frames(0)) } else { parse_num(a).filter(|v| *v >= 0.0).map(|v| Dcd::Frames(v as u32)) }
+                    } else {
+                        None
+                    };
+                    match c {
+                        Some(c) => out = Out::Dcd(c),
+                        None => {
+                            let known = ["PROTocol", "FORMat", "POLarity", "THReshold", "FRAMes", "MODE"].iter().any(|m| kw(sub, m)) || sub == b"BAUD";
+
+                            self.err_arg(no_arg, if known { "Illegal parameter value" } else { "Undefined header" });
                             continue;
                         }
                     }

@@ -242,9 +242,9 @@ pub fn run(out: &str) -> usize {
         ("Vendor", "Alientek"),
         ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
-        ("Bootloader", "V1.1"),
+        ("Bootloader", "V4.0"),
         ("Software", ver),
-        ("Hardware", "V4"),
+        ("Hardware", "V1.1"),
         ("Board temp", "31.5 C (MCU)"),
     ]);
     ck.check_opts("manual/device", &page, false);
@@ -373,8 +373,6 @@ pub fn run(out: &str) -> usize {
         ("dmm-history", Dp { hist: true, ..dp(dcv) }),
         // Over range.
         ("dmm-ol", dp(rd(1, ol(4, "V"), None, None, false))),
-        // Continuity with open leads.
-        ("dmm-open", Dp { rate: false, ..dp(rd(11, ol(2, ohm), None, None, false)) }),
         // A recording running (REC in the status bar).
         ("dmm-rec", Dp { csv: true, ..dp(dcv) }),
     ];
@@ -581,6 +579,12 @@ pub fn run(out: &str) -> usize {
         add("scope-measure", &|s, _| s.popup = scope_ui::Popup::Mf(0));
         add("scope-display", &|s, _| s.popup = scope_ui::Popup::Mf(1));
         add("scope-settings", &|s, _| s.popup = scope_ui::Popup::Mf(3));
+        add("scope-decode-tab", &|s, p| {
+            s.popup = scope_ui::Popup::Mf(4);
+            p.dec.proto = 1;
+            p.dec.level = 1.65;
+        });
+
         // Math popup over the FFT: Other (window, unit).
         add("scope-math", &|s, p| {
             s.m.math_open = true;
@@ -648,6 +652,9 @@ pub fn run(out: &str) -> usize {
         ck.check_replica("manual/screenshot");
         save1(out, "screenshot");
     }
+
+    // The protocol decoder's band: UART, Modbus RTU (stopped, a CRC error).
+    decode_ui::manual(&mut ck, out, &save1);
 
     // Combined view with the function band open (AC V on the mains).
     {

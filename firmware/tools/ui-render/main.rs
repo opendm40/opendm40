@@ -34,6 +34,12 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
+#[path = "../../src/cring.rs"]
+mod cring;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]
@@ -78,6 +84,9 @@ mod trigsoft;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 mod scope_add;
+#[path = "../../src/decode.rs"]
+mod decode;
+mod decode_ui;
 mod readme;
 mod manual;
 mod stock;
@@ -595,7 +604,7 @@ fn range_of(mode: u8, dec: u8, unit: &str) -> i8 {
 
 fn rd(mode: u8, main: Val, a1: Option<Val>, a2: Option<Val>, acdc: bool) -> Reading {
     let si = main.v * meter::unit_scale(main.unit);
-    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false, open: main.ol && mode == 11 }
+    Reading { mode, range: range_of(mode, main.dec, main.unit), main, aux1: a1, aux2: a2, si, auto: true, auto_plus: false, acdc, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: None, prov: false }
 }
 
 /// Meter-strip worst cases: (name, reading, temperature label).
@@ -657,7 +666,7 @@ fn strip_cases() -> Vec<(&'static str, Reading, Option<&'static str>)> {
         ("ohm_neg", rd(10, val(-0.028, 3, "\u{3a9}"), None, None, false), None),
         ("ohm_neg_ext", rd(10, Val { ext: true, ..val(-0.0281, 3, "\u{3a9}") }, None, None, false), None),
         ("cont", rd(11, val(444.4, 1, "\u{3a9}"), None, None, false), None),
-        // Open leads: "0L" with "OPEN" (continuity).
+        // Open leads: "0L" with "Overflow" (continuity).
         ("cont_ol", rd(11, ol(2, "\u{3a9}"), None, None, false), None),
         ("diode", rd(12, val(4.4444, 4, "V"), None, Some(val(1040.0, 1, "\u{3a9}")), false), None),
         ("diode_ol", rd(12, ol(4, "V"), None, Some(ol(1, "\u{3a9}")), false), None),
@@ -1201,6 +1210,16 @@ fn main() {
     if std::env::args().nth(2).as_deref() == Some("--manual") {
         std::process::exit(if manual::run(&out) == 0 { 0 } else { 1 });
     }
+    // `main <out> --decode`: only the decoder view's scenes (decode_ui.rs).
+    if std::env::args().nth(2).as_deref() == Some("--decode") {
+        let mut ck = Checker { cases: 0, violations: 0, seen: Default::default() };
+        decode_ui::run(&mut ck, &out);
+        for (msg, (n, scene)) in &ck.seen {
+            println!("{n:6} x  {msg}   [first: {scene}]");
+        }
+        println!("cases {}, violations {}", ck.cases, ck.violations);
+        std::process::exit(if ck.violations == 0 { 0 } else { 1 });
+    }
     if std::env::args().nth(2).as_deref() == Some("--stock") {
         let dir = std::env::args().nth(3).unwrap_or_else(|| out.clone());
         std::fs::create_dir_all(&dir).unwrap();
@@ -1540,6 +1559,8 @@ fn main() {
 
     // 0c. opendm40 additions on the replica page (FFT boxes / peak, ...).
     scope_add::run(&mut ck, &out);
+    // 0d. The protocol decoder view (ui_decode.rs).
+    decode_ui::run(&mut ck, &out);
 
     // 0b. Combined view in the stock language (scope_ui meter strip, port
     // plan S7): every strip case x hold x verdict x REL x HV x REC x GEN,
@@ -3566,7 +3587,7 @@ fn main() {
         }
         // UF-30 bargraph: bipolar DC V (negative), unipolar ohm, overload.
         // Continuity / diode: their OL ceilings as full scale (1000 ohm, 3 V).
-        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm), ("cont_ol", "d26-dmm-open-cont", Button::ContDiode)] {
+        for (case, file, b) in [("dcv_neg6", "d07-dmm-bar-dcv", Button::Volt), ("ohm_k", "d08-dmm-bar-ohm", Button::Ohm), ("dcv_ol", "d09-dmm-bar-ol", Button::Volt), ("cont", "d18-dmm-bar-cont", Button::ContDiode), ("diode", "d19-dmm-bar-diode", Button::ContDiode), ("diode_ol", "d20-dmm-ol-diode", Button::ContDiode), ("diode_aux_ol", "d21-dmm-aux-ol-diode", Button::ContDiode), ("temp_ntcu", "d22-dmm-aux-ol-temp", Button::HzTemp), ("ohm_ol", "d23-dmm-ol-ohm", Button::Ohm), ("cont_ol", "d26-dmm-ol-cont", Button::ContDiode)] {
             host::reset(0);
             let (r, _) = find(case);
             let mut dv = ui::DmmView::new();

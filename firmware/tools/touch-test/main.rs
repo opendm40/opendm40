@@ -22,6 +22,12 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
+#[path = "../../src/cring.rs"]
+mod cring;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]
@@ -63,6 +69,10 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+// scope_ui.rs draws the decoder view (ui_decode.rs) with decode.rs.
+#[allow(dead_code)]
+#[path = "../../src/decode.rs"]
+mod decode;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 #[path = "../../src/stockfont.rs"]
@@ -494,6 +504,30 @@ fn trig_volts_tests(ck: &mut Ck) {
     s.range = 7;
     sc.apply(s, 0);
     ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
+}
+
+/// Stopped zoom limit (`scope::zoom_floor`): a record of any YT timebase
+/// may be zoomed in until a screen holds `ZOOM_MIN` samples of it, no
+/// further; never below its own timebase's window. A 1 s/div record
+/// (2500 S/s) stops at 1 ms/div (25 samples; 500 us/div would be 12.5,
+/// drawn as 12).
+fn zoom_floor_tests(ck: &mut Ck) {
+    let mut sc = scope::Scope::new();
+    let mut ok = true;
+    for t in scope::TB_MIN..=scope::TB_YT_MAX {
+        let mut s = scope::Settings::DEFAULT;
+        s.tb = t;
+        sc.apply(s, 0);
+        let fs = sc.sample_rate();
+        let f = scope::zoom_floor(scope::TB_MIN, fs);
+        let n = scope::ZOOM_MIN;
+        ok &= f <= t && scope::zoom_holds(f, fs, n) && (f == scope::TB_MIN || !scope::zoom_holds(f - 1, fs, n));
+    }
+    ck.t("zoom floor: holds ZOOM_MIN samples, the next faster does not, never above the record's timebase", ok);
+    let mut s = scope::Settings::DEFAULT;
+    s.tb = 24;
+    sc.apply(s, 0);
+    ck.t("zoom floor: a 1 s/div record stops at 1 ms/div", scope::zoom_floor(scope::TB_MIN, sc.sample_rate()) == 15);
 }
 
 fn pinch_state_tests(ck: &mut Ck) {
@@ -949,7 +983,7 @@ fn hit_tests(ck: &mut Ck) {
         pv.ip = [2.0, 0.0];
         pv.pp = [24.0, 0.0];
         let (main, v, i, si) = dmm::pw::reading_vals(&pv);
-        let r = dmm::Reading { mode: 4, range: 0, main, aux1: Some(v), aux2: Some(i), si, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: Some(pv), prov: false, open: false };
+        let r = dmm::Reading { mode: 4, range: 0, main, aux1: Some(v), aux2: Some(i), si, auto: true, auto_plus: false, acdc: false, cpl_auto: false, seq: 0, avg_n: 0, alert: sentinel::Alert::None, power: Some(pv), prov: false };
         dv.reading(&r, 0, 0);
         let mut pc = ui::pw::PwCache::new();
         ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, None, "W", ui::RateChip { rate: 1, period_ms: 100, applies: true });
@@ -990,10 +1024,11 @@ fn hit_tests(ck: &mut Ck) {
     scope_ui::invalidate();
     scope_ui::update(&scope_ui::Model::DEFAULT);
     page(ck, "replica panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= 414, &[0, 1, 2, 3, 4, 5, 6]);
-    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY };
-    for tab in 0..4u8 {
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, dec: scope_ui::dec::SetupVals::DEFAULT };
+    for tab in 0..5u8 {
         host::reset(0);
         scope_ui::draw_mf(tab, &pv);
+        use scope_ui::dec::SetupHit as D;
         let hit = move |x: u16, y: u16| match scope_ui::mf_hit(tab, &pv, x as i16, y as i16) {
             scope_ui::MfHit::Tab(t) => Some(1000 + t as u32),
             scope_ui::MfHit::Cell(i) => Some(i as u32),
@@ -1008,7 +1043,15 @@ fn hit_tests(ck: &mut Ck) {
             scope_ui::MfHit::Mode(m) => Some(340 + m as u32),
             scope_ui::MfHit::PriScr => Some(350),
             scope_ui::MfHit::SaveCsv => Some(351),
+            scope_ui::MfHit::Dec(D::Proto(i)) => Some(400 + i as u32),
+            scope_ui::MfHit::Dec(D::Mode(i)) => Some(410 + i as u32),
+            scope_ui::MfHit::Dec(D::Fmt(i)) => Some(420 + i as u32),
+            scope_ui::MfHit::Dec(D::Inv(i)) => Some(430 + i as u32),
+            scope_ui::MfHit::Dec(D::ThrAuto(a)) => Some(440 + a as u32),
+            scope_ui::MfHit::Dec(D::Baud(up)) => Some(450 + up as u32),
+            scope_ui::MfHit::Dec(D::Thr(up)) => Some(460 + up as u32),
             _ => None,
+
         };
         page(ck, &format!("replica MF tab {tab}"), &hit, &|b| b.y0 >= 21, &[]);
     }
@@ -1521,6 +1564,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
+    zoom_floor_tests(&mut ck); // after hit_tests too (Scope::new)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     wave_step_tests(&mut ck);
