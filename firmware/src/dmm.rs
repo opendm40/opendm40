@@ -4561,7 +4561,8 @@ impl Dmm {
         if self.wake_at != 0 {
             return self.wd_slow(clk, now, 0);
         }
-        if now.saturating_sub(self.wd_poll) > 500 {
+        // (the probe / jack check's row has AD1 off: no reading, no stall)
+        if now.saturating_sub(self.wd_poll) > 500 || self.probe {
             self.wd_t = now;
         }
         self.wd_poll = now;
@@ -6205,7 +6206,9 @@ impl Dmm {
     /// Also the ohm / resistive temperature rows, which carry the jack
     /// check's row in its place (`jack_mode`; never A-PROT there).
     fn probe_ok(&self) -> bool {
-        (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none()
+        // (not 600 Mohm: its phases toggle ENAD1, and AD1 stays off with
+        // the probe's / jack check's AD2 on, sentinel `ad2_with_ad1`)
+        (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none() && !is_ohm600(self.mode, self.range)
     }
 
     /// V_GATE (AC mV), per result: `dc` = |LPF|, `ac` = sqrt(2) x RMS (mV).
