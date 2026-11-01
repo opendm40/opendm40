@@ -3422,7 +3422,7 @@ pub fn device_software(buf: &mut [u8; 48]) -> &str {
     }
 }
 
-/// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model /
+/// Device / About page (stock gui_v2_6.h section 6: Vendor / Web / Model / SN /
 /// versions, panel 0x08074a10 as left-aligned "label:value" lines). Rendered
 /// in the opendm40 settings style (title bar + rows) so it matches the other
 /// menu pages. `lines` are (label, value) pairs built by the caller.
@@ -3431,9 +3431,10 @@ pub fn device_page(lines: &[(&str, &str)]) {
     page_title("Device");
     lcd::fill_rect(0, PAGE_BAR_H as u16, lcd::W, lcd::H - PAGE_BAR_H as u16, M_BG);
     for (i, (label, value)) in lines.iter().enumerate() {
-        let y = 48 + i as i16 * 36;
-        sf::rbox(rect(8, y, 464, 33), 6, M_TILE, M_BG);
-        sf::glyphs(sf::TEXT22, rect(20, y, 180, 33), label, STATUS_FG, M_TILE, 1, 0);
-        sf::glyphs(sf::TEXT22, rect(200, y, DEVICE_VALUE_W, 33), value, M_ACCENT, M_TILE, 1, 0);
+        // Eight rows end 4 px above the screen edge.
+        let y = 48 + i as i16 * 34;
+        sf::rbox(rect(8, y, 464, 30), 6, M_TILE, M_BG);
+        sf::glyphs(sf::TEXT22, rect(20, y, 180, 30), label, STATUS_FG, M_TILE, 1, 0);
+        sf::glyphs(sf::TEXT22, rect(200, y, DEVICE_VALUE_W, 30), value, M_ACCENT, M_TILE, 1, 0);
     }
 }

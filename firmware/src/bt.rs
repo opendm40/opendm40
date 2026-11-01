@@ -328,6 +328,7 @@ impl Bt {
         for (i, b) in BOOT_VER.iter().enumerate() {
             b.store(unsafe { core::ptr::read_volatile((BOOT_DATA + 0x10 + i as u32) as *const u8) }, Ordering::Relaxed);
         }
+        BOOT_SN.store(unsafe { core::ptr::read_volatile((BOOT_DATA + 0x0C) as *const u32) }, Ordering::Relaxed);
         unsafe {
             modify32(RCU_APB1EN, 0, 1 << 19); // UART4
             // PA0 / PA1: AF8.
@@ -629,19 +630,29 @@ impl Bt {
     }
 }
 
-/// Bootloader data block in internal flash (read only): version bytes.
+/// Bootloader data block in internal flash (read only): serial number and
+/// version bytes.
 const BOOT_DATA: u32 = 0x080A_4000;
 
-/// Its version bytes +0x10..+0x12 (HW major, loader major / minor), copied
+/// Its version bytes +0x10..+0x12 (loader major, HW major / minor), copied
 /// once by `Bt::new` at start-up: BT command 02 and the Device page read
 /// the copy. 0x080A4000 is in the slow flash bank (not zero-wait): a load
 /// there stalls the AD2 stream ISR ~21.8 us (device c92b605), and either
 /// may be used while a stream runs.
 static BOOT_VER: [core::sync::atomic::AtomicU8; 3] = [const { core::sync::atomic::AtomicU8::new(0) }; 3];
 
+/// The factory serial number, boot data word +0x0C, copied with BOOT_VER for
+/// the same reason.
+static BOOT_SN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 /// The boot data's version bytes (see BOOT_VER).
 pub fn boot_ver() -> [u8; 3] {
     BOOT_VER.each_ref().map(|b| b.load(Ordering::Relaxed))
+}
+
+/// The boot data's serial number (see BOOT_SN).
+pub fn boot_sn() -> u32 {
+    BOOT_SN.load(Ordering::Relaxed)
 }
 
 /// Unit prefix step (x1000) relative to the base unit of the mode group
@@ -768,8 +779,8 @@ impl Bt {
             0x00 => self.reply(0, &[0x05, 0x03, b'A' + dmm.model()], true),
             0x01 => self.reply(1, &[st], false),
             0x02 => {
-                let [hw, bl_major, bl_minor] = boot_ver();
-                self.reply(2, &[hw.wrapping_mul(10), 26, bl_major.wrapping_mul(10).wrapping_add(bl_minor)], false);
+                let [bl, hw_major, hw_minor] = boot_ver();
+                self.reply(2, &[bl.wrapping_mul(10), 26, hw_major.wrapping_mul(10).wrapping_add(hw_minor)], false);
             }
             0x03..=0x06 => {
                 self.reply(f.cmd, &[st], false);

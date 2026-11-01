@@ -366,11 +366,11 @@ pub fn row_for(mode: u8, range: u8, acdc: bool, mask: u8, var: u8, row: &[u8; CF
             c[19] &= !R33_OP1CHOP;
             Kind::PeakV
         }
-        // Continuity, diode, capacitance r0..4: AD2 and OP2 are free. OP2
+        // Capacitance r0..4 (AD1 off there): AD2 and OP2 are free. OP2
         // (x1, OPS2 = 0) on PB1, AD2 = OP2O - PB3 (refs PB6 / AGND) at IG
-        // 2.0, OSR 256, the peak hold on AD2 (PKHSEL 00). AD1 (on in
-        // continuity / diode) is written last (`ad1_last`, note 7).
-        11 | 12 if mask & M_AJACK != 0 => ad2_sentinel(&mut c),
+        // 2.0, OSR 256, the peak hold on AD2 (PKHSEL 00). Continuity and
+        // diode show AD1 and their comparator drives the beeper: no
+        // sentinel (no AD2 next to a shown AD1, `ad2_with_ad1`).
         13 if range <= 4 && mask & M_AJACK != 0 => ad2_sentinel(&mut c),
         _ => Kind::Off,
     };
@@ -515,14 +515,26 @@ pub fn jack_driven(ohm: bool, pkmin: i32, pkmax: i32) -> Option<bool> {
 
 /// The jack check's row (ohm / resistive temperature, over `row_for`'s
 /// comparator row): AD2 = OP1O - PB3 at IG 0.5, OSR 256, the peak hold on
-/// AD2; OP2 untouched (off). AD1 written last (`ad1_last`'s rule).
+/// AD2; OP2 untouched (off). AD1 off for the check's time.
 pub fn jack_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
     let mut c = *row;
     ad2_sentinel(&mut c);
     c[5] &= JACK_R25_MASK;
     c[7] = R27_OP1O_PB3;
     c[18] = row[18];
+    // AD1 off while AD2 runs: the row's reading pauses (`ad2_with_ad1`)
+    c[3] &= !0x80;
     c
+}
+
+/// A row with AD1 converting next to AD2 or AD3 (R23 ENAD1 with R26 ENAD2
+/// / R34 ENAD3). AD2 / AD3 running moves AD1 (datasheet 13.1 note 7; DC V
+/// 6 V read 0.32 mV low at +4 V with the negative leg's AD2, device
+/// 2026-11-01), so no DMM row whose AD1 reading is shown has both; the
+/// power meter and the AC rows' AD1 peak hold (AD1 not shown) do.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn ad2_with_ad1(c: &[u8; CFG_LEN]) -> bool {
+    c[3] & 0x80 != 0 && (c[6] & 0x80 != 0 || c[20] & 0x80 != 0)
 }
 
 /// AC mV (V_GATE): the result's node peak estimate |LPF| + sqrt(2) x RMS
@@ -645,12 +657,18 @@ pub const PK2_NEG_THR_DCV: i32 = 167_800;
 /// pickup on PB1 stays below it: not measured.
 pub const R21_DCV_PB1: u8 = 0x8B;
 
-/// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): DC V
-/// 6 V (1 r0), DC mV (3), ohm (10; not 600 Mohm: the caller), plain (not
-/// AC+DC), the comparator sentinel on, and not dropped by
-/// DBG:SENTinel:VARiant bit 7 (VAR_NEG_OFF, an A/B of the readings).
+/// The rows that carry the negative leg (`dmm.rs`, with `neg_row`): none.
+/// AD2 never runs in a row whose AD1 reading is shown (datasheet 13.1 note
+/// 7; docs/acdc-approaches.md "AD1 offset with AD2/AD3 on"): with the leg's
+/// OP2 / AD2 on, DC V 6 V read 0.32 mV low at +4.0 V (device 2026-11-01,
+/// alternating blocks against VAR_NEG_OFF, R21 at the stock 0xDD in both;
+/// a user's -4 V read 0.7 mV low against 0.3.0), ~0.7 mV low with AD2's
+/// reference on REFO instead of PB6. It was DC V 6 V, DC mV and ohm
+/// (PR #179); DC mV / ohm: not measured. A reversed current in A is then
+/// not seen in those rows (the comparator sees one polarity, NEGATIVE LEG).
 pub fn neg_leg(mode: u8, range: u8, acdc: bool, kind: Kind, var: u8) -> bool {
-    kind == Kind::CmpA && !acdc && var & VAR_NEG_OFF == 0 && matches!((mode, range), (1, 0) | (3, _) | (10, _))
+    let _ = (mode, range, acdc, kind, var);
+    false
 }
 
 /// The negative leg's row: OP2 (x1) on PB1, AD2 = OP2O - PB3 at IG 2.0,
@@ -782,11 +800,13 @@ pub const LIVE_CLEAR_MS: u64 = 1000;
 /// The probe: OP2 (x1) on PB2, AD2 = OP2O - PB3 at IG 2.0, OSR 256, the
 /// peak hold on AD2 (PKHSEL 00), over a comparator row (`row_for`'s CmpA
 /// rows: DC V 6 V, DC mV, ohm, temperature: OP2 and AD2 unused there). AD1
-/// stays on: the caller writes it last (`ad1_last`'s rule, note 7).
+/// is off for the probe's time: no reading then (`ad2_with_ad1`).
 pub fn probe_row(row: &[u8; CFG_LEN]) -> [u8; CFG_LEN] {
     let mut c = *row;
     ad2_sentinel(&mut c);
     c[18] = R32_OP2_PB2 | (c[18] & 0x0F);
+    // AD1 off while AD2 runs: the row's reading pauses (`ad2_with_ad1`)
+    c[3] &= !0x80;
     c
 }
 
@@ -1683,6 +1703,18 @@ impl Sentinel {
         self.decide(now);
     }
 
+    /// V_GATE while the A-PROT probe holds AD1 off (DC mV: no result, so no
+    /// verdict of the row's own): the last verdict stands, dated now. The
+    /// probe goes in only after a verdict of the hit run (`dmm.rs`
+    /// aprot_poll); without both, A-JACK never came in DC mV once the probe
+    /// held AD1 off (device 2026-11-01, 20 mA forward: no alert, no reading).
+    #[inline(never)]
+    pub fn v_side_hold(&mut self, now: u64) {
+        if self.vside_t.is_some() {
+            self.v_side(now, self.vdrv);
+        }
+    }
+
     /// V_GATE: the row's V side said "free" since the hit run began (+
     /// `vlag`), or the row has no gate. A-JACK's assertion and (DC mV) the
     /// A-PROT trip need it.
@@ -2219,14 +2251,14 @@ mod tests {
 
     #[test]
     fn aprot_probe_and_rule() {
-        // The probe: only AD2IG, R26, R27, R29 ENPKH and OP2 (on PB2) differ
-        // from the comparator row; OP1's nibble kept.
+        // The probe: only ENAD1 (off), AD2IG, R26, R27, R29 ENPKH and OP2 (on
+        // PB2) differ from the comparator row; OP1's nibble kept.
         for (m, r, row) in [(1u8, 0u8, &CFG_F1[0]), (1, 2, &CFG_F1[2]), (3, 0, &CFG_F3[0]), (10, 3, &CFG_F10_P8CLR[3]), (15, 0, &CFG_F15[0])] {
             let (c, _) = row_for(m, r, false, M_ALL, 0, row);
             let p = probe_row(&c);
             let d: Vec<usize> = diff(&c, &p).iter().map(|x| x.0).collect();
-            assert!(d.iter().all(|i| [5, 6, 7, 9, 18].contains(i)), "mode {m} r{r}: {d:?}");
-            assert_eq!(p[18] >> 4, R32_OP2_PB2 >> 4);
+            assert!(d.iter().all(|i| [3, 5, 6, 7, 9, 18].contains(i)), "mode {m} r{r}: {d:?}");
+            assert_eq!((p[3], p[18] >> 4), (c[3] & 0x7F, R32_OP2_PB2 >> 4), "AD1 off");
             assert_eq!(p[18] & 0x0F, c[18] & 0x0F);
             assert_eq!(p[6], R26_AD2_256);
             assert_eq!(p[9] & 0x07, R29_ENPKH);
@@ -2385,8 +2417,11 @@ mod tests {
 
     #[test]
     fn ad2_rows_cont_diode_cap() {
-        let mut rows: Vec<(u8, u8, &[u8; CFG_LEN])> = vec![(11, 0, &CFG_F11[0]), (12, 0, &CFG_F12[0])];
-        rows.extend(CFG_F13[..5].iter().enumerate().map(|(i, r)| (13u8, i as u8, r)));
+        // continuity / diode: no sentinel (AD1 shown, the comparator on the beeper)
+        for (m, r) in [(11u8, &CFG_F11[0]), (12, &CFG_F12[0])] {
+            assert_eq!(row_for(m, 0, false, M_ALL, 0, r), (*r, Kind::Off), "mode {m}");
+        }
+        let rows: Vec<(u8, u8, &[u8; CFG_LEN])> = CFG_F13[..5].iter().enumerate().map(|(i, r)| (13u8, i as u8, r)).collect();
         for (m, i, r) in rows {
             let (c, k) = row_for(m, i, false, M_ALL, 0, r);
             assert_eq!(k, Kind::Ad2A, "mode {m} r{i}");
@@ -2405,6 +2440,38 @@ mod tests {
         }
         assert_eq!(CFG_F13[0][3] & 0x80, 0);
         assert!(ad1_last(Kind::Ad2A, &CFG_F12[0]));
+    }
+
+    #[test]
+    fn no_ad2_next_to_a_shown_ad1() {
+        // Every DMM row (the power meter's are its own, powermeter.rs) with the
+        // sentinel overrides and the probe / jack check / negative-leg rows over
+        // them: AD1 never converts next to AD2 / AD3 (`ad2_with_ad1`), except the
+        // AC rows' AD1 peak hold (PeakA / PeakV: AD1 not shown) and stock rows.
+        let t: [(u8, &[[u8; CFG_LEN]]); 17] = [
+            (0, &CFG_F0), (1, &CFG_F1), (2, &CFG_F2), (3, &CFG_F3), (4, &CFG_F4), (5, &CFG_F5_6), (6, &CFG_F5_6),
+            (7, &CFG_F7), (8, &CFG_F8_9), (9, &CFG_F8_9), (10, &CFG_F10_P8SET), (10, &CFG_F10_P8CLR),
+            (11, &CFG_F11), (12, &CFG_F12), (13, &CFG_F13), (14, &CFG_F14), (15, &CFG_F15),
+        ];
+        let mut n = 0;
+        for (m, rows) in t {
+            for (i, r) in rows.iter().enumerate() {
+                for acdc in [false, true] {
+                    let (c, k) = row_for(m, i as u8, acdc, M_ALL, 0, r);
+                    if matches!(k, Kind::PeakA | Kind::PeakV) || (c == *r && ad2_with_ad1(r)) {
+                        continue;
+                    }
+                    assert!(!ad2_with_ad1(&c), "mode {m} r{i} acdc {acdc}");
+                    assert!(!neg_leg(m, i as u8, acdc, k, 0), "mode {m} r{i}");
+                    for (what, p) in [("probe", probe_row(&c)), ("jack", jack_row(&c))] {
+                        assert!(!ad2_with_ad1(&p), "{what} mode {m} r{i}");
+                    }
+                    n += 1;
+                }
+            }
+        }
+        assert!(n > 60);
+        assert!(ad2_with_ad1(&neg_row(&CFG_F1[0])), "the leg's row (unused) has both");
         assert!(!ad1_last(Kind::PeakA, &CFG_F12[0]));
     }
 
@@ -2753,6 +2820,20 @@ mod tests {
         // ... and it drops when V-COM turns out driven.
         s.v_side(3500, true);
         assert_eq!(s.alert, Alert::None);
+        // The probe's AD1 pause (DC mV, `v_side_hold`): no verdict yet, none
+        // made up; a free one of the run stands through the pause.
+        let mut s = Sentinel::new();
+        s.configured(Kind::CmpA, 0, true);
+        s.vgate = true;
+        hits(&mut s, 0, 400);
+        s.v_side_hold(400);
+        assert_eq!(s.alert, Alert::None);
+        s.v_side(400, false);
+        for t in (400..3000).step_by(100) {
+            hits(&mut s, t, t + 100);
+            s.v_side_hold(t + 100);
+        }
+        assert_eq!(s.alert, Alert::AJack);
         // A V-side result from before the run does not count.
         let mut s = Sentinel::new();
         s.configured(Kind::CmpA, 0, true);
@@ -2975,9 +3056,13 @@ mod tests {
             assert_eq!(s.alert == Alert::AJack, aj, "{lo} {hi}");
         }
         // the rows
-        assert!(neg_leg(1, 0, false, Kind::CmpA, 0) && neg_leg(3, 1, false, Kind::CmpA, 0) && neg_leg(10, 6, false, Kind::CmpA, 0));
-        assert!(!neg_leg(1, 0, true, Kind::CmpA, 0) && !neg_leg(15, 0, false, Kind::CmpA, 0));
-        assert!(!neg_leg(1, 0, false, Kind::CmpA, VAR_NEG_OFF) && !neg_leg(1, 0, false, Kind::Off, 0));
+        // AD2 stays off in the rows whose AD1 reading is shown (see neg_leg)
+        for (m, r) in [(1u8, 0u8), (3, 0), (3, 1), (10, 0), (10, 6)] {
+            assert!(!neg_leg(m, r, false, Kind::CmpA, 0), "{m} {r}");
+        }
+        for r in [CFG_F1[0], CFG_F3[0], CFG_F3[1]] {
+            assert_eq!(r[6] & 0x80, 0, "stock row: AD2 off");
+        }
     }
 
     #[test]

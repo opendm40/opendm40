@@ -471,6 +471,19 @@ fn backlight(pct: u8) {
     unsafe { w32(TIM13_CCR1, pct.min(100) as u32) };
 }
 
+/// Eight upper-case hex digits into `buf` (stock's "%.8X"), or "--" when the
+/// boot-data word is erased flash.
+fn fmt_sn(buf: &mut [u8; 8], sn: u32) -> &str {
+    if sn == u32::MAX {
+        return "--";
+    }
+    for (i, b) in buf.iter_mut().enumerate() {
+        let d = (sn >> (28 - 4 * i)) as u8 & 0xF;
+        *b = if d < 10 { b'0' + d } else { b'A' + d - 10 };
+    }
+    core::str::from_utf8(buf).unwrap_or("--")
+}
+
 /// "V<maj>.<min>" ("V<maj>" without a minor) into `buf`, or "--" when the
 /// boot-data byte is erased flash (0xFF) so the Device page never shows a bogus
 /// V255.x.
@@ -1048,32 +1061,32 @@ impl App {
             View::Device => {
                 // Stock Device/About page (gui_v2_6.h §6): Vendor / Web / Model
                 // / version lines. Only the fields opendm40 can actually source are
-                // shown; stock's SN ("%s:%.8X") and "Bluetooth Name:%s" are
-                // omitted (no traced derivation / no public getter).
+                // shown; stock's "Bluetooth Name:%s" is omitted.
                 let model_name = match self.dmm.model() {
                     0 => "DM40A",
                     1 => "DM40B",
                     2 => "DM40C",
                     _ => "DM40?",
                 };
-                // Hardware / bootloader versions from the stock boot-data block
-                // in internal flash (same source as the BT cmd-02 version reply,
-                // bt.rs): +0x10 HW major, +0x11/+0x12 bootloader major/minor.
-                // The byte->field mapping is inferred from bt.rs + README, not a
-                // traced read of the stock Device page. The copy made at
+                // Serial number and bootloader / hardware versions from the stock
+                // boot-data block in internal flash (the versions are the BT cmd-02
+                // reply's source, bt.rs): +0x0C serial number, +0x10 bootloader
+                // major (minor 0), +0x11/+0x12 hardware
+                // major/minor, as the stock Device page shows them. The copy made at
                 // start-up (bt::boot_ver): 0x080A4000 is in the slow flash
                 // bank, and a fast-log session may stream meanwhile.
+                let mut snb = [0u8; 8];
+                let sn = fmt_sn(&mut snb, crate::bt::boot_sn());
                 let bd = crate::bt::boot_ver();
-                let mut hwb = [0u8; 16];
-                // The boot data has only a HW major: no invented ".0" minor.
-                let hw = fmt_ver(&mut hwb, bd[0], None);
                 let mut blb = [0u8; 16];
-                let bl = fmt_ver(&mut blb, bd[1], Some(bd[2]));
+                let bl = fmt_ver(&mut blb, bd[0], Some(0));
+                let mut hwb = [0u8; 16];
+                let hw = fmt_ver(&mut hwb, bd[1], Some(bd[2]));
                 // opendm40 firmware version (NOT the stock "Software V2.6").
                 let mut fwb = [0u8; 48];
                 let fw = ui::device_software(&mut fwb);
                 // Order and labels follow the stock §6 line order
-                // (gui_v2_6.h:99: Bootloader / Software / Hardware); "Software"
+                // (gui_v2_6.h:99: SN / Bootloader / Software / Hardware); "Software"
                 // carries the opendm40 version instead of the stock "V2.6".
                 // MCU die temperature (power.rs, typical constants).
                 let mut tb = [0u8; 24];
@@ -1091,6 +1104,7 @@ impl App {
                     ("Vendor", "Alientek"),
                     ("Web", "www.alientek.com"),
                     ("Model", model_name),
+                    ("SN", sn),
                     ("Bootloader", bl),
                     ("Software", fw),
                     ("Hardware", hw),
@@ -3173,10 +3187,10 @@ impl App {
                     self.press_after_tap();
                 }
             }
-            // Long press on the A button: the power meter's wiring dialog.
+            // Long press on the A button: the inrush page (app_inrush.rs).
             Gesture::LongPress(p) if self.view == View::Dmm && p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1) => {
                 captured = true;
-                self.pw_open_entry(now);
+                self.inrush_long_a(clk);
             }
             // Power meter: a long press on the energy readout (aux2) or the
             // side column asks to reset the energy.

@@ -9,6 +9,7 @@ section named after the tag as the release notes; how to cut a release:
 
 ### New
 
+- **Device page:** the factory serial number, the SN line of the stock page.
 - **σ in the MIN/MAX/AVG column:** the standard deviation of the readings
   since the statistics started; SCPI `CALCulate:AVERage:SDEViation?`.
 - **Mode Remember** (Settings > More > More, as the stock's; default OFF):
@@ -63,6 +64,9 @@ section named after the tag as the release notes; how to cut a release:
 
 ### Changed
 
+- **Long press on the A button** opens the
+  [inrush page](docs/manual/README.md#inrush-current) (it opened the power
+  meter's wiring picture; that one stays under **MF > Wiring**).
 - **Test builds of pull requests:** each pull request gets a comment with
   its update file to try (version `0.4.0-pr<N>.<commit>`)
   ([manual](docs/manual/README.md#install)).
@@ -238,6 +242,8 @@ section named after the tag as the release notes; how to cut a release:
   an AC current in DC V).
   DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
   it now and then.
+- **Device page:** the bootloader and hardware versions were swapped. They now
+  match the stock page, for example Bootloader V4.0 and Hardware V1.1.
 
 ## v0.3.0 (2026-10-27)
 

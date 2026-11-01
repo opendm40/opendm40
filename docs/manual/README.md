@@ -147,6 +147,7 @@ Every key press also silences the [danger alarm](#the-danger-alarm).
 |---|---|---|
 | Swipe left / right | Multimeter, combined view (start on the meter strip), generator | Next / previous view |
 | Swipe down with one finger | Multimeter | Start / stop a [recording](#recording) |
+| Long press the **A** button | Multimeter | [Inrush current](#inrush-current) page |
 | Swipe down with three fingers | Anywhere, while the touch lock is off | [Screenshot](#screenshots) to the disk |
 | Swipe down with two fingers | Anywhere, while the touch lock is off | Asks **Power off?** Tap **Yes** to switch off. The question goes away by itself after 3 s. |
 
@@ -1034,7 +1035,7 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; flowing from COM into A in DC V, DC mV and Ω: about 4 mA, DC V 9 mA) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, continuity and diode (while they read 0L), temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV and Ω) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
@@ -1880,7 +1881,7 @@ limit](#current-limit)).
 
 Tap **W** (the seventh function button). The first time, the wiring
 picture opens: tap **OK** to start. Later, W starts at once; to see the
-picture again, long press the **A** button, or **MF > Wiring**.
+picture again: **MF > Wiring**.
 
 On entry both inputs autorange: V starts on 600 V, I on 10 A and steps
 down. Until the current range is found, the page shows the voltage and **I
@@ -2027,7 +2028,7 @@ Above 10 A for 1 s the [danger alarm](#the-danger-alarm) sounds.
 Captures the current of a load that is switched on: motors, lamps,
 capacitive power supplies.
 
-To open: **A** function, **MF**, **Inrush**.
+To open: long press the **A** button, or **A** function, **MF**, **Inrush**.
 
 | ![Armed](img/inrush-armed.png) | ![A captured inrush: 7.9 A RMS, 11.8 A peak](img/inrush.png) |
 |---|---|
@@ -2415,6 +2416,7 @@ step to its next value; rows with **-** / **+** change in steps.
 |---|---|
 | Vendor, Web | Alientek, www.alientek.com |
 | Model | DM40A, DM40B or DM40C (from the meter's calibration data) |
+| SN | The factory serial number, as on the stock Device page |
 | Bootloader | The version of the Alientek bootloader |
 | Software | The opendm40 version |
 | Hardware | The hardware version |

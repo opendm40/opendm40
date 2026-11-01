@@ -445,30 +445,56 @@ SECTIONS
         *(.text.*8opendm406vwrite5check*);
         *(.text.*8opendm406vwrite8finalize*);
         *(.text.*8opendm406vwrite6commit*);
-        /* Region B audit #8 (2026-10-30, test/scope-chain-0.4 on 0.4.0 with
-         * GEN / CH2): functions whose every caller is region C code (a call
-         * graph from the ELF, every address-taken function counted as hot):
-         * the generator page's wave preview (ui::gen_values), vwrite's
-         * staging of a host write (VDisk::write_block), the scope CSV's DLG
-         * sample coder (App::sp_save_csv), the gallery's DLG decoders,
-         * HwTrig::calibrate's sweep, the limits / keypad / record page
-         * helpers. */
+        /* Region B audit #10 (memory plan P1, 2026-11-01): functions that
+         * tools/region-profile/rprof.py classes `c-only` (reached only
+         * through region C code or start-up), >= ~40 B. Their callers:
+         * the generator page (gen_values: gen_preview, gen_box_value), a
+         * host write on the volume (VDisk::write: vwrite stage /
+         * ours_live / dates_only / host_cluster), the recording start
+         * (App::rec_start: csvlog ascii / W::a, the catalog's list_on
+         * closure), the range / limits / keypad / settings / power entry /
+         * inrush pages (ok_and_limits_buttons, kp_unit_text,
+         * record_button, row_only, pw jack / outline / ps_button,
+         * inr::thr), the fast logger's start and prep (fast_probe_if,
+         * FastEnc::finish), HwTrig::calibrate (sweep), and start-up
+         * (main, native pre_main: board::pins, Clock::new, App::new's
+         * gain_of / out_pin, SpiFlash::new's block_crc / af_pin,
+         * Touch::new's rise_ns / od_pin). Generic core instantiations and
+         * small shared helpers stay in B (a future hot caller of the
+         * same instance would land in slow flash). */
         *(.text.*8opendm402ui11gen_preview*);
+        *(.text.*8opendm402ui13gen_box_value*);
         *(.text.*8opendm406vwrite5stage*);
         *(.text.*8opendm406vwrite9ours_live*);
-        *(.text.*4dlog*4SEnc4next*6pack105Codes*);
-        *(.text.*4dlog*4SEnc3put*);
-        *(.text.*7gallery4GSrcE*);
+        *(.text.*8opendm406vwrite10dates_only*);
+        *(.text.*8opendm406vwrite12host_cluster*);
         *(.text.*8opendm406csvlog5ascii*);
+        *(.text.*8opendm406csvlog*1W1a);
+        *(.text.*8opendm406csvlog7list_on0*);
         *(.text.*8opendm402ui21ok_and_limits_buttons*);
-        *(.text.*8opendm406hwtrig*6HwTrig5sweep*);
-        *(.text.*8opendm402ui2pw7outline*);
-        *(.text.*8opendm402ui13record_button*);
         *(.text.*8opendm403app12kp_unit_text*);
+        *(.text.*8opendm402ui13record_button*);
+        *(.text.*8opendm402ui8row_only*);
+        *(.text.*8opendm402ui2pw4jack*);
+        *(.text.*8opendm402ui2pw7outline*);
+        *(.text.*8opendm402ui2pw9ps_button*);
+        *(.text.*8opendm402ui3inr3thr*);
+        *(.text.*8opendm4013fast_probe_if*);
+        *(.text.*8opendm407fastenc*7FastEnc6finish*);
+        *(.text.*8opendm406hwtrig*6HwTrig5sweep*);
+        *(.text._RNvCs*_8opendm404main);
+        *(.text.*8opendm405board4pins*);
+        *(.text.*8opendm405clock*5Clock3new*);
+        *(.text.*8opendm403app9app_power7gain_of*);
+        *(.text.*8opendm406hy31317out_pin*);
         *(.text.*8opendm408spiflash9block_crc*);
-        /* Struct templates copied only by region C code (fastlog::begin,
-         * csvlog::start from App::rec_start, App::tt_open). */
-        *(.rodata.cold_tpl*);
+        *(.text.*8opendm408spiflash6af_pin*);
+        *(.text.*8opendm405touch7rise_ns*);
+        *(.text.*8opendm405touch6od_pin*);
+        /* ... and the read-only data only region C code reads: ui.rs
+         * cold_str! (strings) and cold_set! (a constant's bytes copied at
+         * run time, e.g. a job record's reset value). */
+        *(.rodata.cold .rodata.cold.*);
         . = ALIGN(4);
         __cold_end = .;
     } > FLASH_C

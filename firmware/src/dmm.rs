@@ -4561,7 +4561,8 @@ impl Dmm {
         if self.wake_at != 0 {
             return self.wd_slow(clk, now, 0);
         }
-        if now.saturating_sub(self.wd_poll) > 500 {
+        // (the probe / jack check's row has AD1 off: no reading, no stall)
+        if now.saturating_sub(self.wd_poll) > 500 || self.probe {
             self.wd_t = now;
         }
         self.wd_poll = now;
@@ -6109,10 +6110,18 @@ impl Dmm {
     /// APROT_GONE_MS. Without hits and without the latch the probe leaves.
     fn aprot_poll(&mut self, clk: &mut Clock, now: u64) {
         let run = self.sent.run_since();
+        // DC mV's V_GATE (`v_side`, from its AD1 results): the probe holds AD1
+        // off, so it goes in only once the gate has a verdict of this run
+        // (DC mV's A-PROT trip needs one anyway), and that verdict stands
+        // while the probe runs.
+        let mv = self.mode == 3;
+        if self.probe && mv {
+            self.sent.v_side_hold(now);
+        }
         if !self.probe {
             // (on a run the comparator saw: one of the negative leg alone
             // keeps AD2 on PB1, sentinel `cmp_run`)
-            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() {
+            if self.sent.cmp_run().is_some() && self.sent.kind == Kind::CmpA && self.probe_ok() && (!mv || self.sent.v_free()) {
                 self.probe = true;
                 self.probe_rewrite(clk, 120);
             }
@@ -6205,7 +6214,9 @@ impl Dmm {
     /// Also the ohm / resistive temperature rows, which carry the jack
     /// check's row in its place (`jack_mode`; never A-PROT there).
     fn probe_ok(&self) -> bool {
-        (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none()
+        // (not 600 Mohm: its phases toggle ENAD1, and AD1 stays off with
+        // the probe's / jack check's AD2 on, sentinel `ad2_with_ad1`)
+        (matches!(self.mode, 1 | 3) || self.jack_mode()) && !self.acdc && self.fuse_job.is_none() && !is_ohm600(self.mode, self.range)
     }
 
     /// V_GATE (AC mV), per result: `dc` = |LPF|, `ac` = sqrt(2) x RMS (mV).
