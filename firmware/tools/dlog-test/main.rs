@@ -492,8 +492,67 @@ fn scope_tests(dir: Option<String>) -> u32 {
     fails
 }
 
+/// The first rows of a scope CSV (device check of #214: row 0 read +1.85 V
+/// where its neighbours read ~0.48 V): a record whose first codes are the
+/// stale conversions from before the sample clock started (1 on the
+/// software path, 2 on the comparator path), held by `scope_hold_head` as
+/// scope.rs does, then written as scope_csv.rs writes it: rows 0..k carry
+/// row k's volts, the record's min / max are the signal's, and no
+/// row-to-row step is larger than the signal's own.
+fn scope_head_test() -> u32 {
+    let mut fails = 0;
+    let text = b"# test head\r\ntime_s,volts\r\n";
+    // scope_file's scale; 1 kHz sine at 12.5 MS/s, 0.4 Vpp around 0.48 V.
+    let (a, b, dt) = (-5.0f32, 10.0 / 1023.0, 1.0 / 12.5e6);
+    let n = 2000;
+    let w = 2.0 * std::f64::consts::PI * 1e3 * dt as f64;
+    let volts = |i: usize| 0.48 + 0.2 * (w * i as f64 - 1.4).sin();
+    for k in [1usize, 2] {
+        let clean: Vec<u16> = (0..n).map(|i| ((volts(i) as f32 - a) / b + 0.5) as u16).collect();
+        let mut y = clean.clone();
+        for v in &mut y[..k] {
+            *v = 701; // +1.85 V: the stale level the device CSV had
+        }
+        scope_hold_head(&mut y, k);
+        let (f, _) = scope_file(&y, text);
+        let Some((_, csv)) = gen_all(&f) else {
+            println!("FAIL scope head k={k}: no CSV");
+            fails += 1;
+            continue;
+        };
+        let rows: Vec<f32> = csv[text.len()..]
+            .split(|&c| c == b'\n')
+            .filter(|l| !l.is_empty())
+            .map(|l| std::str::from_utf8(l).unwrap().trim().split(',').nth(1).unwrap().parse().unwrap())
+            .collect();
+        let step = (1..rows.len()).map(|i| (rows[i] - rows[i - 1]).abs()).fold(0.0f32, f32::max);
+        let (mn, mx) = (y.iter().min(), y.iter().max());
+        let ok = rows.len() == n
+            && (0..k).all(|i| rows[i] == rows[k] && y[i] == clean[k])
+            && y[k..] == clean[k..]
+            && mn == clean[k..].iter().min()
+            && mx == clean[k..].iter().max()
+            && step < 4.0 * b;
+        if ok {
+            println!("scope head k={k}: rows 0..{k} = row {k} ({:+.4} V), max step {:.4} V  ok", rows[0], step);
+        } else {
+            println!("FAIL scope head k={k}: first rows {:?}, max step {step}", &rows[..4.min(rows.len())]);
+            fails += 1;
+        }
+    }
+    // A record too short to hold anything stays as it is.
+    let mut r = [7u16, 9];
+    scope_hold_head(&mut r, 2);
+    if r != [7, 9] {
+        println!("FAIL scope head: a 2-sample record changed");
+        fails += 1;
+    }
+    fails
+}
+
 fn main() {
     let mut fails = scope_tests(std::env::args().nth(1));
+    fails += scope_head_test();
     fails += fast::tests(std::env::args().nth(1));
     let n = 6000;
     println!("{:<30} {:>6} {:>8} {:>8} {:>7}", "set", "rows", "CSV B/r", "DLG B/r", "ratio");
