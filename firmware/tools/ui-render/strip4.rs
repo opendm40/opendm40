@@ -18,30 +18,58 @@ use super::*;
 use crate::scope_ui::{self as su, Model};
 use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Ink, Rect};
 
-/// Division width of the narrowed graph (px).
-pub const D: i32 = 37;
+/// The left-strip markers of the last `narrow` (boxes).
+static mut LEFT_MARKS: Vec<Bx> = Vec::new();
+
+/// Division width of the narrowed graph (px): 38 (strip 86 px) or 37
+/// (strip 96 px), set per run.
+static mut DIV: i32 = 38;
+/// Left frame column: 13 (today's left marker column kept) or 0 (the
+/// markers inside the graph at its left edge, as the trigger level on the
+/// right).
+static mut LEFT: i32 = 13;
+fn d() -> i32 {
+    unsafe { DIV }
+}
+fn l() -> i32 {
+    unsafe { LEFT }
+}
 /// Right frame column (old 413) and the strip's first column.
-pub const FR: i32 = 13 + 10 * D;
-pub const PX: i32 = FR + 1;
+fn fr() -> i32 {
+    l() + 10 * d()
+}
+fn px() -> i32 {
+    fr() + 1
+}
 const OLD_FR: i32 = 413;
-/// Strip blocks: x 387..475 (3 px inside the strip, 4 px from the screen
-/// edge), title 26 px, 3 px gap, buttons 43 x 40 with a 3 px gap; blocks
-/// 74 px apart from y 24 (5 px between blocks).
-pub const BX: i16 = PX as i16 + 3;
-pub const BW: i16 = 89;
+/// Strip blocks: x px+3..475 (3 px inside the strip, 4 px from the screen
+/// edge), title 26 px, 3 px gap, the two buttons 40 px tall with a 3 px gap
+/// between them; blocks 74 px apart from y 24 (5 px between blocks).
+fn bx() -> i16 {
+    px() as i16 + 3
+}
+fn bw() -> i16 {
+    476 - bx()
+}
+fn btn_w() -> i16 {
+    (bw() - GAP) / 2
+}
 pub const TITLE_H: i16 = 26;
-pub const BTN_W: i16 = 43;
 pub const BTN_H: i16 = 40;
 pub const GAP: i16 = 3;
 pub const PITCH: i16 = 74;
 pub const Y0: i16 = 24;
+/// Old-division offsets dropped (never a grid / tick column, a multiple of 8).
+fn drops() -> &'static [i32] {
+    if d() == 37 { &[4, 20, 36] } else { &[12, 28] }
+}
 
 /// Old graph column of new column `nx` (14..FR-1).
 fn src_col(nx: i32) -> i32 {
-    let f = nx - 13;
-    let (div, k) = (f / D, f % D);
+    let f = nx - l();
+    let (div, k) = (f / d(), f % d());
     let mut o = k;
-    for drop in [4, 20, 36] {
+    for &drop in drops() {
         if o >= drop {
             o += 1;
         }
@@ -51,12 +79,13 @@ fn src_col(nx: i32) -> i32 {
 
 /// New column of old column `x` (graph interior).
 fn fwd(x: i32) -> i32 {
-    13 + ((x - 13) * D + 20) / 40
+    l() + ((x - 13) * d() + 20) / 40
 }
 
 /// Narrow the graph of the screen just drawn (frame top `top`), clear the
 /// old strip and measurement bar.
 fn narrow(top: i32) {
+    let (FR, PX) = (fr(), px());
     let e = emu();
     let (fb0, own0) = (e.fb.clone(), e.owner.clone());
     let w = host::W;
@@ -74,8 +103,8 @@ fn narrow(top: i32) {
         }
     }
     for y in top..=300 {
-        for nx in 14..=FR {
-            let sx = if nx == FR { OLD_FR } else { src_col(nx) };
+        for nx in l()..=FR {
+            let sx = if nx == FR { OLD_FR } else if nx == l() { 13 } else { src_col(nx) };
             let (s, d) = (y as usize * w + sx as usize, y as usize * w + nx as usize);
             if own0[s] != 0 && interior(sx, y) {
                 e.fb[d] = su::C_FILL;
@@ -98,21 +127,47 @@ fn narrow(top: i32) {
             e.owner[y * w + x] = 0;
         }
     }
+    // Left edge 0: the left-strip markers (x 1..12) now lie inside the
+    // graph; put them back over it.
+    // The strip markers are drawn unprobed: by colour (not the strip's).
+    let lm = unsafe { &mut *core::ptr::addr_of_mut!(LEFT_MARKS) };
+    lm.clear();
+    for y in top..=300 {
+        let mut ink = false;
+        for x in 1..13 {
+            let s = y as usize * w + x;
+            if fb0[s] != su::C_BAR {
+                ink = true;
+                if l() == 0 {
+                    e.fb[s] = fb0[s];
+                    e.owner[s] = 0;
+                }
+            }
+        }
+        // Rows with marker ink, as boxes x 1..12 (a run of rows each).
+        match lm.last_mut() {
+            Some(b) if ink && b.y1 == y - 1 => b.y1 = y,
+            _ if ink => lm.push(Bx { x0: 1, y0: y, x1: 12, y1: y }),
+            _ => {}
+        }
+    }
     // Move the overlay items whole, in draw order.
     for (&id, &(x0, x1)) in &boxes {
         let dx = if x1 >= 398 {
             FR - OLD_FR
         } else if x0 <= 16 {
-            0
+            l() - 13
         } else {
             let c = (x0 + x1) / 2;
-            fwd(c) - c
+            // Left edge 0: the bottom-left tab stays 3 px clear of the
+            // left markers (x 1..12).
+            if l() == 0 { (fwd(c) - c).max(16 - x0) } else { fwd(c) - c }
         };
         for y in top..=300 {
             for x in 14..OLD_FR {
                 let s = y as usize * w + x as usize;
                 if own0[s] >> 8 == id {
-                    let nx = (x + dx).clamp(14, FR - 1) as usize;
+                    let nx = (x + dx).clamp(l() + 1, FR - 1) as usize;
                     e.fb[y as usize * w + nx] = fb0[s];
                     e.owner[y as usize * w + nx] = own0[s];
                 }
@@ -121,9 +176,12 @@ fn narrow(top: i32) {
     }
 }
 
-/// Measurement cell i of the narrowed bar: 4 cells of 90 px, 2 px apart.
+/// Measurement cell i of the narrowed bar: 4 cells (37 px divisions: 90
+/// px, 38: 93 px), 2 px apart.
 fn meas_cell(m: &Model, i: usize, text: &str) {
-    let r = rect(13 + 92 * i as i16, 302, 90, 17);
+    let xs = l().max(4);
+    let cw = ((fr() - xs - 7) / 4) as i16;
+    let r = rect(xs as i16 + (cw + 2) * i as i16, 302, cw, 17);
     let t = Ink::new(sf::SC_F12, r, text, 8, 0);
     let pal = m.pal_text();
     paint(r, &[(1, su::C_BAR), (0, su::C_BAR)], |x, y| {
@@ -158,18 +216,75 @@ fn button(r: Rect, mask: u8, fill: u16, fg: u16, font: sf::Font, text: &str) {
     });
 }
 
-/// Block k (0..3): the title (rounded top) over "+" (bottom-left) and "-"
-/// (bottom-right). An off channel: its colour at 30 % over the strip, grey
-/// text.
+/// The stock magnifier (scope_ui::magnifier, UF-10) centred in `r`: a 2 px
+/// ring of radius 8, "+" or "-" inside, a 3 px handle to the bottom right.
+fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
+    let (cx, cy) = (r.x + r.w / 2 - 3, r.y + r.h / 2 - 3);
+    let (dx, dy) = ((x - cx) as i32, (y - cy) as i32);
+    let d2 = dx * dx + dy * dy;
+    if (49..=90).contains(&d2) {
+        return true;
+    }
+    if dx.abs() <= 3 && dy.abs() <= 1 || (plus && dy.abs() <= 3 && dx.abs() <= 1) {
+        return d2 < 49;
+    }
+    (dx - dy).abs() <= 2 && dx >= 7 && dx <= 14 && dy >= 7 && dy <= 14
+}
+
+/// A rounded button with the magnifier icon (zoom in = smaller V/div).
+fn mag_button(r: Rect, mask: u8, fill: u16, fg: u16, plus: bool) {
+    paint(r, &[(1, su::C_BAR), (2, fill)], |x, y| {
+        if magnifier(r, plus, x, y) {
+            return (fg, 2 << 8);
+        }
+        if in_rbox(r, 8, mask, x, y) { (fill, 1 << 8) } else { (su::C_BAR, 0) }
+    });
+}
+
+/// The title: name and scale in the 16 px font, centred; when that does
+/// not fit (3 px inside), the scale in the 12 px font.
+fn title(r: Rect, fill: u16, fg: u16, name: &str, scale: &str) {
+    let full = format!("{name} {scale}");
+    let (n, sc);
+    if sf::text_width(sf::SC_F16, &full, 0) <= r.w - 8 {
+        n = Ink::new(sf::SC_F16, r, &full, 8, 0);
+        sc = Ink::none();
+    } else {
+        // Still too wide: the shorter unit ("100mdB" -> "0.1dB").
+        let short;
+        let scale = if sf::text_width(sf::SC_F16, name, 0) + 4 + sf::text_width(sf::SC_F12, scale, 0) > r.w - 8 && scale.ends_with("mdB") {
+            let n: f32 = scale.trim_end_matches("mdB").parse().unwrap_or(0.0);
+            short = format!("{}dB", n / 1000.0);
+            short.as_str()
+        } else {
+            scale
+        };
+        let (wn, ws) = (sf::text_width(sf::SC_F16, name, 0), sf::text_width(sf::SC_F12, scale, 0));
+        let x0 = r.x + (r.w - wn - 4 - ws) / 2;
+        n = Ink::new(sf::SC_F16, rect(x0, r.y, wn, r.h), name, 8, 0);
+        sc = Ink::new(sf::SC_F12, rect(x0 + wn + 4, r.y + 1, ws, r.h), scale, 8, 0);
+    }
+    paint(r, &[(1, su::C_BAR), (0, fill), (0, fill)], |x, y| {
+        if let Some(g) = n.at(x, y) {
+            return (fg, 2 << 8 | g as u16);
+        }
+        if let Some(g) = sc.at(x, y) {
+            return (fg, 3 << 8 | g as u16);
+        }
+        if in_rbox(r, 8, 0x3, x, y) { (fill, 1 << 8) } else { (su::C_BAR, 0) }
+    });
+}
+
+/// Block k (0..3): the title (rounded top) over magnifier + (zoom in,
+/// bottom-left) and magnifier - (bottom-right). An off channel: its colour
+/// at 30 % over the strip, grey ink.
 pub fn block(k: usize, b: &Blk) {
     let y = Y0 + PITCH * k as i16;
     let (fill, fg) = if b.on { (b.col, b.ink) } else { (dim(b.col), su::C_FRAME) };
-    let title = format!("{} {}", b.name, b.scale);
-    let font = if sf::text_width(sf::SC_F16, &title, 0) <= BW - 8 { sf::SC_F16 } else { sf::SC_F12 };
-    button(rect(BX, y, BW, TITLE_H), 0x3, fill, fg, font, &title);
+    title(rect(bx(), y, bw(), TITLE_H), fill, fg, b.name, &b.scale);
     let by = y + TITLE_H + GAP;
-    button(rect(BX, by, BTN_W, BTN_H), 0x4, fill, fg, sf::SC_F20, "+");
-    button(rect(BX + BW - BTN_W, by, BTN_W, BTN_H), 0x8, fill, fg, sf::SC_F20, "-");
+    mag_button(rect(bx(), by, btn_w(), BTN_H), 0x4, fill, fg, true);
+    mag_button(rect(bx() + bw() - btn_w(), by, btn_w(), BTN_H), 0x8, fill, fg, false);
 }
 
 /// The mock's channels.
@@ -184,13 +299,15 @@ fn blocks(m: &Model, c: Chans) -> [Blk; 4] {
     let mut v = su::Buf::new();
     m.vdiv_str(&mut v);
     let ch1 = v.as_str().to_string();
-    let math_scale = if !m.math_scale.as_str().is_empty() { m.math_scale.as_str().to_string() } else { ch1.clone() };
-    let (math_name, mc, mi) = if m.math_mode == 5 { ("FFT", m.math_pal(), m.math_ink()) } else { ("MATH", m.math_pal(), m.math_ink()) };
+    let ms = m.math_scale.as_str();
+    let math_scale = if !ms.is_empty() { ms.to_string() } else if m.math_mode == 6 { ch1.clone() } else { su::FFT_DB[9].to_string() };
+    // The real math operations: FFT (mode 5) and ABS (6, |CH1|).
+    let (math_name, mc, mi) = if m.math_mode == 6 { ("ABS", m.math_pal(), m.math_ink()) } else { ("FFT", m.math_pal(), m.math_ink()) };
     [
         Blk { name: "CH1", scale: ch1.clone(), col: m.pal(), ink: m.pal_ink(), on: true },
         Blk { name: "DMM", scale: "2V".into(), col: su::C_CH2, ink: su::C_WHITE, on: c.dmm },
-        // GEN has no scale of its own today: CH1's.
-        Blk { name: "GEN", scale: ch1, col: su::C_GEN_TR, ink: su::C_FILL, on: c.gen },
+        // GEN on its own V/div (proposed; the mock: 2 V/div).
+        Blk { name: "GEN", scale: "2V".into(), col: su::C_GEN_TR, ink: su::C_FILL, on: c.gen },
         Blk { name: math_name, scale: math_scale, col: mc, ink: mi, on: c.math },
     ]
 }
@@ -228,7 +345,8 @@ fn draw(sc: &stock::Scene, c: Chans) {
     for i in 0..399 {
         if c.gen {
             let (lo, hi) = shape.span(i as f32 * 4.0 / 399.0, 4.0 / 399.0);
-            let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
+            // GEN on its own 2 V/div.
+            let r = |v: f32| (140.0 - 141.0 * v / 8.0) as i32;
             g.gn[i] = (su::trace_fy(h, r(hi)), su::trace_fy(h, r(lo)));
         }
         if c.dmm {
@@ -238,11 +356,11 @@ fn draw(sc: &stock::Scene, c: Chans) {
             g.c2[i] = (su::trace_fy(h, r), su::trace_fy(h, r + 1));
         }
         if c.math && sc.m.math_mode != 5 {
-            // CH1 - GEN at 2 V/div, 1.5 div down (its offset marker); a
-            // column spans its value and the next one (steps drawn).
+            // ABS = |CH1| at 1 V/div, 1.5 div down (its offset marker); a
+            // column spans its value and the next one.
             let v = |i: usize| {
                 let t = (i as f32 / 400.0) * 2.0 * core::f32::consts::TAU;
-                1.5 * t.sin() - if c.gen { shape.span(i as f32 * 4.0 / 399.0, 0.0).0 } else { 0.0 }
+                2.0 * (1.5 * t.sin()).abs()
             };
             let r = |v: f32| (140.0 + 52.0 - 141.0 * v / 8.0) as i32;
             let (a, b) = (r(v(i)), r(v(i + 1)));
@@ -264,9 +382,9 @@ pub fn run(out: &str) -> usize {
     let none = Chans { dmm: false, gen: false, math: false };
     let mut s = base();
     s.m.math_on = true;
-    s.m.math_mode = 2;
+    s.m.math_mode = 6;
     s.m.math_off = -52;
-    s.m.math_scale = su::Txt::new("2V");
+    s.m.math_scale = su::Txt::new("1V");
     states.push(("1-all-on", s, all));
     states.push(("2-ch1-only", base(), none));
     let mut s = base();
@@ -300,12 +418,33 @@ pub fn run(out: &str) -> usize {
     s.trace = Some(sine(&s.m, 1.5, 2.0));
     states.push(("6-trig-level", s, Chans { dmm: false, gen: true, math: false }));
 
-    let strip = Bx::new(PX, 20, 480 - PX, 300);
-    let meas = Bx::new(0, 301, PX, 19);
+    // CH1 low (its marker next to the bottom-left tab), Y cursors and the
+    // runt level on the left edge.
+    let mut s = base();
+    s.m.pos = 120;
+    s.m.trig_row = 250;
+    s.m.ycur = Some([200, 262]);
+    s.m.runt_row = Some(230);
+    s.m.sel_v = 0;
+    s.trace = Some(stock::Trace::sine(1.0, 2.0, 0.0).shifted(120));
+    s.cells = vec!["Y2-1:1.76V", "Vp-p:2.00V", "Cycl:1.00ms", "Vrms:707mV"];
+    states.push(("7-left-markers", s, none));
+
     for (name, sc, c) in &states {
         draw(sc, *c);
         ck.check_replica(&format!("strip4/{name}/current"));
         save1(out, &format!("{name}-a-current"));
+    }
+    for (tag, left, div) in [("c-d38", 13, 38), ("d-d37", 13, 37), ("e-left0-d39", 0, 39), ("f-left0-d38", 0, 38)] {
+    unsafe {
+        LEFT = left;
+        DIV = div;
+    }
+    let (PX, FR) = (px(), fr());
+    println!("{tag}: frame x {left}..{FR}, {div} px/div, strip {} px, title {} x {TITLE_H}, buttons {} x {BTN_H}", 480 - PX, bw(), btn_w());
+    let strip = Bx::new(PX, 20, 480 - PX, 300);
+    let meas = Bx::new(0, 301, PX, 19);
+    for (name, sc, c) in &states {
         draw(sc, *c);
         narrow(sc.m.top() as i32);
         for (i, t) in sc.cells.iter().enumerate().take(4) {
@@ -318,16 +457,46 @@ pub fn run(out: &str) -> usize {
         // The full rules for the new strip and cells, against the whole
         // screen (edge markers, tabs, FFT boxes included).
         ck.check_add(&format!("strip4/{name}/new"), &[("strip", strip), ("meas", meas), ("screen", Bx::new(0, 0, 480, 320))], &[strip], Bx::new(0, 0, 480, 320));
-        save1(out, &format!("{name}-b-new"));
+        left_markers(&mut ck, &format!("strip4/{name}/{tag}"));
+        save1(out, &format!("{name}-{tag}"));
     }
-    // Worst-case titles: which font each gets in the 89 px title.
-    for t in ["CH1 500mV", "CH1 10kV", "DMM 250mA", "DMM 1.5V", "DMM 200mV", "GEN 500mV", "MATH 500mV", "MATH 10kV", "FFT 100mdB", "FFT 20dB"] {
-        let w16 = sf::text_width(sf::SC_F16, t, 0);
-        println!("title {t:12} F16 {w16} px -> {}", if w16 <= BW - 8 { "F16" } else { "F12" });
+    // The widest titles (the 12 px scale where the 16 px one does not fit).
+    let sc = &states[1].1;
+    draw(sc, none);
+    narrow(sc.m.top() as i32);
+    for (i, t) in sc.cells.iter().enumerate().take(4) {
+        meas_cell(&sc.m, i, t);
+    }
+    let w = [("CH1", "500mV", 0xffe0, su::C_FILL), ("DMM", "250mA", su::C_CH2, su::C_WHITE), ("ABS", "500mV", 0xfd20, su::C_WHITE), ("FFT", "100mdB", 0xfd20, su::C_WHITE)];
+    for (k, (n, v, col, ink)) in w.iter().enumerate() {
+        block(k, &Blk { name: n, scale: v.to_string(), col: *col, ink: *ink, on: true });
+    }
+    ck.check_replica(&format!("strip4/8-worst-titles/{tag}"));
+    ck.check_add(&format!("strip4/8-worst-titles/{tag}"), &[("strip", strip), ("meas", meas), ("screen", Bx::new(0, 0, 480, 320))], &[strip], Bx::new(0, 0, 480, 320));
+    save1(out, &format!("8-worst-titles-{tag}"));
+    }
+    // Worst-case titles: F16 widths (the title box is bw() px, text <= bw-8).
+    for t in ["CH1 500mV", "CH1 10kV", "DMM 250mA", "DMM 1.5V", "GEN 500mV", "ABS 500mV", "ABS 10kV", "FFT 100mdB", "FFT 20dB", "FFT 2.5Vrms"] {
+        println!("title {t:12} F16 {} px", sf::text_width(sf::SC_F16, t, 0));
     }
     for (msg, (n, scene)) in &ck.seen {
         println!("{n:6} x  {msg}   [first: {scene}]");
     }
     println!("cases {}, violations {}", ck.cases, ck.violations);
     ck.violations
+}
+
+/// The left-edge markers (x <= 13) vs every other item in the graph: >= 3
+/// px apart (the bottom-left tab, the CUR tab, the top markers).
+fn left_markers(ck: &mut Checker, scene: &str) {
+    let its = items();
+    let lm = unsafe { &*core::ptr::addr_of!(LEFT_MARKS) };
+    for a in lm.iter() {
+        for b in its.iter().filter(|i| i.b.x0 > 13 && i.b.y0 >= 20 && i.b.y1 <= 300) {
+            let g = a.gap(&b.b);
+            if g < 3 {
+                ck.fail(scene, format!("left marker {:?} and #{} {:?} {} px apart", a, b.id, b.b, g));
+            }
+        }
+    }
 }

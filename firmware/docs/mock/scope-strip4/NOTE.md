@@ -1,93 +1,139 @@
 # Mockup: four channel blocks in the scope strip (not for merge)
 
-Owner request 2026-11-02. Renders: `*-a-current.png` (today's page) and
-`*-b-new.png` (the mockup), side by side in
-[strip4-contact-sheet.png](strip4-contact-sheet.png). Made by
+Owner requests of 2026-11-02, revision 2. The renders are in [v2/](v2/).
+Contact sheets:
+
+- [today / previous / new](v2/strip4-sheet-today-prev-new.png)
+- [every variant](v2/strip4-sheet-all-variants.png)
+
 `firmware/tools/ui-render/run.sh OUT --strip4`
-([strip4.rs](../../../tools/ui-render/strip4.rs)): 18 cases, 0 layout
-violations (replica rule on the whole page, the full rules on the new strip
-against everything on the screen).
+([strip4.rs](../../../tools/ui-render/strip4.rs)) draws 8 states × 4
+variants, 71 cases, 0 layout violations. The rules: the replica rule on the
+whole page, the full rules on the strip against every item on the screen,
+and a 3 px gap between each left-edge marker and every graph item. The
+first mockup's renders are kept beside this note (`*-b-new.png`).
 
-How the mockup is drawn: the page is the firmware's own `scope_ui` draw; the
-narrower graph is then simulated on the host (3 of every 40 columns
-dropped, never a grid or tick column; markers, tabs and FFT boxes moved
-whole). The blocks and the measurement cells are drawn with the firmware's
-primitives (stockfont `paint`, `Ink`, `in_rbox`, the stock fonts and
-colours).
+How the mockup is drawn: the page comes from the firmware's `scope_ui`
+(release/0.4.0 with #243 and #244). The narrower graph is simulated on the
+host: columns are dropped (never a grid or tick column), and markers, tabs
+and FFT boxes are moved whole. The blocks use the firmware's primitives and
+the stock magnifier shape (`scope_ui::magnifier`, UF-10).
 
-## Geometry
+## Variants
 
-| | today | mockup |
-|---|---|---|
-| graph frame | x 13..413, 10 x 40 px | x 13..383, 10 x 37 px |
-| strip | x 414..479, 66 px, buttons 60 px | x 384..479, 96 px (+45 %), blocks 89 px (+48 %) |
-| block | - | title 89 x 26, then + and − 43 x 40 each, 3 px apart; blocks 74 px apart from y 24 |
-| measurement cells | 4 x 98 px | 4 x 90 px |
+| variant | graph frame | division | strip | title | magnifier buttons |
+|---|---|---|---|---|---|
+| today | x 13..413 | 40 px | 66 px | - | 60 × 40 |
+| c: 38 px | x 13..393 | 38 px | 86 px | 79 × 26 | **38 × 40** (under 40) |
+| d: 37 px | x 13..383 | 37 px | 96 px | 89 × 26 | 43 × 40 |
+| **e: left edge 0, 39 px** | x 0..390 | 39 px | 89 px | 82 × 26 | **39 × 40** (1 px under 40) |
+| f: left edge 0, 38 px | x 0..380 | 38 px | 99 px | 92 × 26 | 44 × 40 |
 
-Why 37 px/div: the division width must stay an integer and the strip must
-grow 30–50 %. 38 px gives a 86 px strip (+30 %) and + / − buttons of 39 px
-(under 40). 37 px gives 96 px and 43 x 40 buttons. 36 px would be +61 %.
-The 5 minor ticks per division (every 8 px today) become 7–8 px apart
-(37 / 5 is not an integer).
+Left edge 0 with 40 px divisions would leave a 79 px strip and 34 px
+buttons.
 
-The title uses the 16 px font. The widest titles ("MATH 500mV",
-"FFT 100mdB") are 80 px wide in an 89 px box.
+**Recommended: e.** With the left marker column gone, the graph keeps 39
+of today's 40 px per division (390 of 400 px). That is wider than either
+38 or 37 with the column kept. The strip grows 35 % and the buttons are 39
+px, 1 px under the target. If 40 px buttons are a must, f gives 44 px with
+38 px divisions. Of the two variants that keep the column, c (38 px) gives
+a wider graph but 38 px buttons, and d gives 43 px buttons but a 370 px
+graph.
 
-## What moves where
+## Block
 
-- Magnifier + / CHA / magnifier −: these become the CH1 block (title "CH1 1V").
-  Tapping the title opens the CH1 popup, as CHA does today. The V/div badge
-  in the top bar still opens it too.
-- Grey + / operator+scale / − (math): this becomes the MATH block. The title
-  is "MATH 2V", or "FFT 20dB" in FFT mode. The operator (+, −, ×, ÷, ABS)
-  only shows in the Math popup now. Tapping the title works like the math
-  label today: it turns math on and opens the Math popup. Off: dimmed.
-- DMM block (new): its + / − button does the MF > Display "CH2 V/div − / +" step
-  (`ch2_step`, exists). Suggested title tap: on / off (today only in MF >
-  Display).
-- GEN block (new): the GEN trace is drawn on CH1's scale today
-  (`sp_gen_frame`, `row_of_volts`). The mockup title shows CH1's V/div. For
-  its + / − to work, GEN needs a V/div of its own (new state plus a persisted
-  setting). Suggested title tap: on / off (today: MF > Display "GEN trace").
-- TRIG button: removed. The Trigger tab is still reachable by tapping the
-  trigger badge in the top bar (`top_badge`, the `Some(_)` arm) and through
-  MF > Trigger.
-- An off channel: its colour at 30 % over the strip, with grey text. CH1
-  has no off state.
-- Wave view (DMM source): today the V/div buttons step the wave range and
-  CHA shows the coupling note (`sp_panel`, k <= 2). The CH1 block must keep
-  that branch.
-- The graph's "CH2 2V" label repeats the DMM block. It could go.
+- The title shows the name and the scale in the 16 px font. When that does
+  not fit, the scale is in the 12 px font. When that still does not fit,
+  mdB values switch to the shorter unit ("FFT 100mdB" becomes "FFT 0.1dB").
+  State 8 renders the widest titles in every variant.
+- Below the title: the stock magnifier + (zoom in = smaller V/div) on the
+  left and the magnifier − (zoom out) on the right. This applies to all
+  four blocks.
+- An off channel is drawn in its colour at 30 %, with grey ink.
+- **MATH:** the firmware has two operations, FFT (mode 5) and ABS (mode 6,
+  |CH1|). The operator table also holds "+", "-", "*" and "/", but no menu
+  reaches them. With only one analog channel there is no A+B. Titles:
+  "ABS 1V", "FFT 20dB", "FFT 0.1dB".
+- **+ = zoom in everywhere.** Today, math "+" and DMM "+" make the V/div
+  larger (`sp_panel` k 3, `ch2_step(up)`). Both flip to match CH1.
 
-What is lost: the TRIG shortcut (it now takes one tap on the badge), the
-operator on the math button, about 7.5 % of the graph width, and the
-pixel-exact stock layout of the scope page. The
-stock-diff replica check (`tools/ui-render/stock-diff.sh`) would no longer
-match on the scope scenes.
+## GEN V/div (proposal)
 
-## The graph width and the time axis
+- **New state:** `gen_vdiv`, an index into the scope's V/div list.
+  `sp_gen_frame` maps volts with its own `k = 141 / (4 × V/div)` instead of
+  CH1's `row_of_volts`, as `ch2_rows` already does for the DMM. GEN keeps 0
+  V on the centre row and has no offset marker, so it has no separate
+  offset either.
+- **Default:** CH1's V/div when the GEN trace is first turned on (or after
+  a reset), so the trace looks as it does today. After that it is
+  independent.
+- **Stored:** yes, with the other scope settings (the persist word next to
+  the `gen_trace` bit, scope_page.rs ~2927/2955). It needs one byte.
+- **SCPI (proposal):** `GENerator:SCALe <V/div>[?]` and
+  `GENerator:DISPlay ON|OFF[?]`. GENerator is already the trigger source's
+  keyword. `SOURce` stays for the generator output.
 
-Time per division and the timebase list do not change: there are still 10
-divisions. Each division drops from 40 to 37 px. The engine's `scope::COLS`
-(400) sets the record length per screen (`scope.rs:273`). One option is
-COLS = 370, which gives 37 points per division instead of 40, 7.5 % fewer
-samples per screen and an unchanged sample rate. The other is to keep 400
-and map 400 points onto 369 columns (min/max per column). A cursor step
-becomes tb / 37 per pixel. The trigger position centre moves from x 213 to
-x 198. The left-strip markers are unchanged. The trigger-level marker sits
-at x 371..382, inside the frame and clear of the strip (checked).
+## The left marker column moves into the graph (variants e, f)
 
-## Size and effort (estimate)
+- The frame starts at x 0. The level markers (A for CH1, M for math, the Y
+  cursors 1 and 2, the runt T) stay at x 1..12, now inside the graph and
+  pointing right. This is the same style as the trigger-level T inside the
+  right edge. They cover 12 px of the trace at the very left, as the T does
+  at the right.
+- The bottom-left timebase tab moves from x 23 to x 16, which leaves 3 px
+  to the markers. State 7 renders CH1 at the bottom next to the tab, with
+  the Y cursors and the runt level (checked).
+- **Drag zones (#244):**
+  - `grab_rect(EDGE_LEFT)` keeps its absolute rect: x 0 to the glyph + 30
+    px, 48 px tall. It now lies inside the graph, so a press there within
+    x 0..42 next to a marker grabs the marker. Today that is the strip plus
+    29 px of graph.
+  - `EDGE_RIGHT` ends at the new right frame instead of x 414.
+  - `ZONE_L` (Corners) starts at x 16 instead of 23. `INNER` already
+    starts at x 0.
+  - The touch tests that use the left zones' x need the new numbers.
 
-- Graph width: about 130 hard-coded geometry values (87 in scope_ui.rs,
-  28 in scope_page.rs, 13 in scope.rs), the 399/400-column arrays and the
-  grid's `col_classes` (40 → 37, a tick table). Code size stays about the
-  same. SRAM: about 30 columns × 5 trace arrays × 4 B, roughly 0.6 KiB less.
-- Strip: the 7-arm `panel_button` and `panel_hit` become 4 blocks with 3
-  rects each. `sp_panel` gets 12 targets. About +0.5–1 KiB.
-- GEN V/div: about +0.5 KiB. DMM on/off from the title: about +0.2 KiB.
-- Total: about +1.5–2.5 KiB of flash. The panel code is hot (region B, link-native.x
-  keeps `panel_button` / `panel_hit` there). This fits region B (~20 KiB
-  free). Region C (~7.7 KiB free, floor 4 KiB) is not needed.
-- Effort: about 1.5–2 days, including the ui-render matrix, the regenerated manual
-  scope screenshots, the emulator, and a device check.
+## What moves where (unchanged from the first mockup)
+
+- **CH1 block:** replaces the magnifiers and the CHA tile. Tapping the
+  title opens the CH1 popup.
+- **MATH block:** replaces the grey group. Tapping the title turns math on
+  and opens the Math popup.
+- **DMM block:** + / − step the CH2 V/div. Tapping the title switches DMM
+  on or off.
+- **GEN block:** + / − step the new GEN V/div. Tapping the title switches
+  the GEN trace on or off.
+- **TRIG:** removed. The trigger settings stay one tap away on the trigger
+  badge in the top bar, and in MF > Trigger.
+- **Wave view:** the CH1 block keeps today's branch (`sp_panel`, k <= 2).
+- **Lost:** the TRIG shortcut, 2.5 % of the graph width (e), the stock
+  pixel-exact scope layout, and the stock-diff replica scenes of the scope
+  page.
+
+## The time axis
+
+There are still 10 divisions, and the timebase list does not change. With
+`scope::COLS` set to 10 × division (390 for e), each division gets 39
+samples and a screen 2.5 % fewer, at the same rate. A cursor step is tb /
+39.
+
+## Implementation plan (after approval, branch from fresh release/0.4.0)
+
+- **One graph rectangle.** `scope_ui::GRAPH`: frame x0, division width and
+  divisions. Everything else becomes `const` derived from it: the frame,
+  the right edge (`RIGHT_X`), `COLS`, the column arrays, `col_classes`
+  (division and the 5 ticks from a table), `PANEL`, `MEAS_BAR` and its
+  cells, `TAB_L/R`, `ZONE_L/R`, `CUR_TAB`, the FFT boxes, `grab_rect`'s
+  edges and `INNER`. That covers about 130 sites in scope_ui.rs,
+  scope_page.rs and scope.rs, plus app_wave, scope_ch2 and app_ch2 where
+  they use 399 / 400.
+- **First step:** introduce the rectangle with today's numbers. The output
+  must be byte-identical, checked with UIR_HASH and the stock-diff check.
+  The second step changes the numbers.
+- **Strip:** `B_RECT` and `panel_button` become the blocks. `panel_hit`
+  returns (channel, title / + / −). `sp_panel` dispatches by channel.
+- **Size (estimate):** about +2–3 KiB of flash in region B (~20 KiB free).
+  Region C is not needed. SRAM is about 0.2 KiB less (shorter column
+  arrays).
+- **Effort:** about 2 days, including the touch tests (#244 zones), the
+  ui-render matrix, the manual screenshots, and an emulator and meter check.
