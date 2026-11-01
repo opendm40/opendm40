@@ -2,8 +2,10 @@
 """Generate src/stockfont_w.rs: a real 'W' for the stock DMM fonts that lack
 one (UNIT, LETTERS, SC_DIGITS = K_FONT, HIST), used by stockfont.rs
 glyph_or_twin instead of the two overlapped V of before (owner 2026-10-22),
-and a lowercase 'k' for LETTERS (the energy units "kWh" / "kVAh" of the
-power page; stockfont.rs unit_text keeps 'k' there, "KΩ" stays as stock).
+a lowercase 'k' for the unit fonts (UNIT, LETTERS, F21, K_FONT, HIST; owner
+issue #136: "kW", "kΩ", not the stock "K"), an Ω for ASCII26 (the
+dialogs) and ℃ / ℉ for the menu text font TEXT22 (pixel art: the stock
+C / F of the font after a 4 x 4 ring).
 
 The stock faces are a Helvetica-style bold (of the installed faces FreeSans
 Bold fits their A H K M N V best: mean |alpha| error 0.77..0.98 of 15). The
@@ -11,10 +13,11 @@ W is rasterised from that face the way the stock V of the same font maps
 onto it: the W outline scaled by the font's V ink box / FreeSans V ink box
 (x and y), area-averaged from a 400 px rendering, quantised to the 4 bpp
 alpha (0..15); its box height, yoff and the advance-minus-width of the
-font's V. The k likewise from the font's h (same ascender and stem: scale
-by the h ink box, h's yoff), adv = w + 1 as the W (the font's h / K
-advance-minus-width, 4 / 2, left a wider k-W gap than W-h in "kWh"). HIST (1 bpp pixel font, 2 px strokes) gets its M mirrored top to
-bottom, the pixel-font W of the same family.
+font's V. HIST (1 bpp pixel font, 2 px strokes) gets its M mirrored top to
+bottom, the pixel-font W of the same family. Every k is the face's k
+scaled by the font's K (k_from_cap: no taller than the caps, so a "kHz"
+keeps the line's height); HIST's k is pixel art
+(k_hist). ASCII26 (a regular weight) gets FreeSans' Ω scaled by its O.
 
     /usr/bin/python3 tools/mkwglyph.py      (from firmware/; needs PIL + the face)
 """
@@ -28,45 +31,46 @@ from PIL import Image, ImageDraw, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, '..', 'src')
 FACE = '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf'
+FACE_REG = '/usr/share/fonts/truetype/freefont/FreeSans.ttf'
 SS = 400
-ENT = re.compile(r'Entry\{code:0x([0-9A-F]+),off:(\d+),w:(\d+),h:(\d+),adv:(\d+),yoff:(-?\d+)\}')
+ENT = re.compile(r'E\((0x[0-9A-F]+),(\d+),(\d+),(\d+),(\d+),(-?\d+),(\d+),(\d+)\)')
+sys.path.insert(0, HERE)
+from mkstockfont import unrle_glyph, uncrop_glyph  # noqa: E402
 
 
 def load(path):
+    """The fonts of src/stockfont_data.rs (mkstockfont.py's storage: E()
+    entries, RLE4 / cropped 1 bpp blobs), each glyph decoded back to its
+    full column-major box."""
     s = open(path).read()
     fonts = {}
     for m in re.finditer(r'pub static (\w+)_E: \[Entry; \d+\] = \[(.*?)\];', s, re.S):
         name = m.group(1)
-        ents = [dict(code=int(a, 16), off=int(b), w=int(c), h=int(d), adv=int(e), yoff=int(f)) for a, b, c, d, e, f in ENT.findall(m.group(2))]
-        key = 'pub static %s_B: &[u8] = b"' % name
-        i = start = s.index(key) + len(key)
-        while s[i] != '"':
-            i += 2 if s[i] == '\\' else 1
-        blob = ast.literal_eval('b"' + s[start:i] + '"')
-        fd = re.search(r'pub static %s_FD: FontData = FontData\{line_h:(\d+),descent:(-?\d+),four:(\w+)' % name, s)
-        fonts[name] = dict(ents=ents, blob=blob, four=fd.group(3) == 'true')
+        b = re.search(r'pub static %s_B: \[u8; \d+\] = \*b"(.*?)"\s*;' % name, s, re.S)
+        blob = ast.literal_eval('b"' + b.group(1).replace('\\\n', '') + '"')
+        fd = re.search(r'pub static %s_FD: FontData = FontData\{line_h:(\d+),descent:(-?\d+),fmt:(\w+)' % name, s)
+        four = fd.group(3) == 'RLE4'
+        ents = []
+        for c, off, w, h, adv, yoff, t, ih in ENT.findall(m.group(2)):
+            off, w, h, t, ih = int(off), int(w), int(h), int(t), int(ih)
+            if four:
+                px = unrle_glyph(blob[off:], w, h) if w and h else []
+            else:
+                px = uncrop_glyph(blob[off:], w, h, t, ih)
+            ents.append(dict(code=int(c, 16), w=w, h=h, adv=int(adv), yoff=int(yoff), px=px))
+        fonts[name] = dict(ents=ents, four=four)
     return fonts
 
 
 def glyph(f, code):
     for e in f['ents']:
         if e['code'] == code:
-            px = [[0] * e['w'] for _ in range(e['h'])]
-            for x in range(e['w']):
-                for y in range(e['h']):
-                    p = x * e['h'] + y
-                    if f['four']:
-                        b = f['blob'][e['off'] + p // 2]
-                        px[y][x] = (b >> 4) if p % 2 == 0 else (b & 15)
-                    else:
-                        b = f['blob'][e['off'] + p // 8]
-                        px[y][x] = 15 if b & (0x80 >> (p & 7)) else 0
-            return e, px
+            return e, [[e['px'][x * e['h'] + y] for x in range(e['w'])] for y in range(e['h'])]
     raise KeyError(code)
 
 
-def nat(ch):
-    f = ImageFont.truetype(FACE, SS)
+def nat(ch, face=None):
+    f = ImageFont.truetype(face or FACE, SS)
     im = Image.new('L', (SS * 2, SS * 2), 0)
     ImageDraw.Draw(im).text((SS // 2, SS // 2), ch, font=f, fill=255)
     return im.crop(im.getbbox())
@@ -91,8 +95,89 @@ def w_from_face(f):
     return from_face(f, 'W', 'V')
 
 
-def k_from_face(f):
-    return from_face(f, 'k', 'h')
+def k_from_cap(f, face=FACE):
+    """'k' (owner #136: kW, not KW): the face's k scaled uniformly by the font's K ink height /
+    the face's K ink height, standing on K's baseline, adv = w + 2 (its
+    arm runs to the box edge: 1 px of air before the next glyph). HIST (1 bpp)
+    font is drawn by hand instead (k_hist)."""
+    e, _ = glyph(f, ord('K'))
+    r0, g = nat('K', face), nat('k', face)
+    s = e['h'] / r0.size[1]
+    width, height = max(1, round(g.size[0] * s)), max(1, round(g.size[1] * s))
+    r = g.resize((width, height), Image.BOX)
+    px = [[min(15, (r.getpixel((x, y)) + 8) // 17) for x in range(width)] for y in range(height)]
+    return dict(w=width, h=height, adv=width + 2, yoff=e['yoff'] + e['h'] - height, px=px)
+
+
+# HIST (1 bpp pixel font, 2 px stems): its k drawn by hand on the K's 9 x 15
+# box, the stem and diagonals of its K and n.
+HIST_K = """
+.........
+##.......
+##.......
+##.......
+##.......
+##...##..
+##..##...
+##.##....
+####.....
+#####....
+##.##....
+##..##...
+##...##..
+##....##.
+.........
+"""
+
+
+def k_hist(f):
+    e, _ = glyph(f, ord('K'))
+    rows = HIST_K.split()
+    px = [[15 if c == '#' else 0 for c in r] for r in rows]
+    return dict(w=len(rows[0]), h=len(rows), adv=e['adv'], yoff=e['yoff'], px=px)
+
+
+def ohm_from_o(f):
+    """Ω for ASCII26 (the dialogs; owner #136: "kΩ", not "ohm"): FreeSans
+    (regular, the dialog font's weight) scaled by the font's O ink box,
+    on O's baseline."""
+    e, _ = glyph(f, ord('O'))
+    r0, g = nat('O', FACE_REG), nat('\u03a9', FACE_REG)
+    sx, sy = e['w'] / r0.size[0], e['h'] / r0.size[1]
+    width, height = max(1, round(g.size[0] * sx)), max(1, round(g.size[1] * sy))
+    r = g.resize((width, height), Image.BOX)
+    px = [[min(15, (r.getpixel((x, y)) + 8) // 17) for x in range(width)] for y in range(height)]
+    return dict(w=width, h=height, adv=e['adv'], yoff=e['yoff'] + e['h'] - height, px=px)
+
+
+# The degree ring of TEXT22's ℃ / ℉ (1 bpp), on the caps' top row.
+DEG_RING = """
+.##.
+#..#
+#..#
+.##.
+"""
+
+
+def deg_text22(base):
+    """℃ / ℉ for TEXT22 (1 bpp, 22 px line, the stock's 11 px cells): the
+    ring at x 0..3 on the caps' rows 4..7, then the font's own `base` glyph
+    from x 5 (C ink from x 6, F from x 5); 16 px box and advance."""
+    def make(f):
+        e, px = glyph(f, ord(base))
+        ring = DEG_RING.split()
+        w = 16
+        out = [[0] * w for _ in range(e['h'])]
+        for y, r in enumerate(ring):
+            for x, c in enumerate(r):
+                if c == '#':
+                    out[4 + y][x] = 15
+        for y in range(e['h']):
+            for x in range(e['w']):
+                if px[y][x] and 5 + x < w:
+                    out[y][5 + x] = 15
+        return dict(w=w, h=e['h'], adv=w, yoff=e['yoff'], px=out)
+    return make
 
 
 def w_from_m(f):
@@ -151,15 +236,22 @@ def pack(g, four):
     return bytes(out)
 
 
+OWN = [('UNIT', 0x0805ECB8, 'W', w_from_face), ('LETTERS', 0x0805DAB4, 'W', w_from_face),
+       ('K_FONT', 0x0805C5DC, 'W', w_from_face), ('HIST', 0x0806C3E8, 'W', w_from_m),
+       ('LETTERS', 0x0805DAB4, 'k', k_from_cap), ('BTN_GLYPH', 0x0805A9FC, '\x09', acdc_from_btn),
+       ('UNIT', 0x0805ECB8, 'k', k_from_cap), ('F21', 0x080667F8, 'k', k_from_cap),
+       ('K_FONT', 0x0805C5DC, 'k', k_from_cap), ('HIST', 0x0806C3E8, 'k', k_hist),
+       ('ASCII26', 0x080592F0, '\u03a9', ohm_from_o),
+       ('TEXT22', 0x0806B13C, '\u2103', deg_text22('C')), ('TEXT22', 0x0806B13C, '\u2109', deg_text22('F'))]
+
+
 def main():
     fonts = load(os.path.join(SRC, 'stockfont_data.rs'))
     lines = ['// @generated by tools/mkwglyph.py - do not edit by hand.',
              '// Glyphs of our own for the stock DMM fonts without them (stockfont.rs glyph_or_twin):',
              '// (font object address, char, 4 bpp, w, h, adv, yoff, column-major bitmap).', '',
-             'pub static OWN_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); 6] = [']
-    for name, addr, ch, how in [('UNIT', 0x0805ECB8, 'W', w_from_face), ('LETTERS', 0x0805DAB4, 'W', w_from_face),
-                                ('K_FONT', 0x0805C5DC, 'W', w_from_face), ('HIST', 0x0806C3E8, 'W', w_from_m),
-                                ('LETTERS', 0x0805DAB4, 'k', k_from_face), ('BTN_GLYPH', 0x0805A9FC, '\x09', acdc_from_btn)]:
+             'pub static OWN_GLYPHS: [(u32, char, bool, u8, u8, u8, i8, &[u8]); %d] = [' % len(OWN)]
+    for name, addr, ch, how in OWN:
         f = fonts[name]
         g = how(f)
         b = pack(g, f['four'])

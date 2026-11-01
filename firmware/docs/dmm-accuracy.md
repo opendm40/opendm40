@@ -78,14 +78,14 @@ resolution: it does not change d.
 - **Rounding:** the significant-digit step rounds to nearest, so the
   label is not a strict bound (0.201 V reads ±0.2 V); the grey digits
   (section 5) follow the rounded value.
-- **None:** with the History row instead of the bargraph (Settings 2/3 "DMM
+- **None:** with the History row instead of the bargraph (Settings > Display "DMM
   row"), in the power meter, for OL, dashes and provisional (grey) values,
   under REL (the manual specifies a reading, not the difference of two), and
   where the manual has no row: AC+DC, the 60 mV ranges, 60 Ω, temperature with
   PT100 / PT1000 / NTC sensors (the manual's row is for the K thermocouple
   probe). The AUTO coupling's shown part takes the row of its DC or AC
   function.
-- **Setting:** Settings 3/3 "Accuracy" ON (default) / OFF, persisted (p[38]
+- **Setting:** Settings > Multimeter "Accuracy" ON (default) / OFF, persisted (p[38]
   bit 18 = OFF, so every older record reads ON).
 - **Model:** `Dmm::model()`, the calibration record's byte.
 

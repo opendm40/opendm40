@@ -125,7 +125,7 @@ Stock: `gui_v2_6.h`, `gui_render_v2_6.h`, `lcd_buzzer_v2_6.h`. opendm40: [`ui.rs
 | Main menu tiles | DEVIATION | Stock: 4 tiles + the "正点原子" logo. opendm40: `ui::main_menu` without the Alientek logo (requirement), plus the combined-view tile. |
 | Settings: dim, shutdown, backlight, volume, BT, start page | MATCH | `View::Settings`; dim indices 5/10/30/never, shutdown 10/30/60/never. |
 | Language selection (zh-CN/zh-TW/en) | MISSING (by design) | English only; the stock has 3 languages (`CFG_LANGUAGE`). |
-| Device / About page (Vendor/Web/Model/version) | MATCH | Settings > More > More > Device (`View::Device`): vendor, web, model, bootloader, software and hardware versions, plus the board temperature. |
+| Device / About page (Vendor/Web/Model/version) | MATCH | Settings > Other > Device info (`View::Device`): vendor, web, model, bootloader, software and hardware versions, plus the board temperature. |
 | Per-function DMM settings pages (MF) | MATCH, extended | MF opens the per-function page (`View::Range`, titled "Voltage Settings" / "Current Settings" / ... as the stock): ranges, coupling, plus opendm40 extras (fuse check, inrush). A function without a range page opens Hold & Limits (`View::Limits`). Option-by-option comparison with the stock not done. |
 | "Other Settings" toggles (Anti-drop, Mode Remember, BT) | MATCH | Anti-drop = `Dmm::reassert_relay`; mode remember and the toggles in backup SRAM instead of config.bin. |
 | Idle dim + auto power-off | MATCH | `App::tick`: dims the backlight, power-off dialog/action. |
@@ -166,7 +166,7 @@ mass-storage LUN.
 | Item | Status | Notes |
 |---|---|---|
 | Mass storage | CHANGED | Not the raw SPI FAT16: a FAT16 volume generated on the fly (`vdisk.rs`): `LOGS/*.CSV` and `SCOPE/*.CSV` made from the DLG files, `SHOTS/*.BMP`, `INFO/` (calibration, boot data, UID, option bytes, OTP, loader images, `FIRMWARE.BIN`, `BACKUP.TXT`), `DEBUG/SPIFLASH.BIN` (the raw 16 MiB), `README.TXT`. |
-| Writes from the PC | CHANGED | "Files live" (default): read-only. "PC can edit" (Settings 3/3, at the next plug): deletes in LOGS / SCOPE / SHOTS and a copied `dm40*.bin` (checked, then "Install it now?") are taken (`vwrite.rs`); other files are not kept. The stock disk keeps whatever the PC writes. |
+| Writes from the PC | CHANGED | "Files live" (default): read-only. "PC can edit" (Settings > Other, at the next plug): deletes in LOGS / SCOPE / SHOTS and a copied `dm40*.bin` (checked, then "Install it now?") are taken (`vwrite.rs`); other files are not kept. The stock disk keeps whatever the PC writes. |
 | Firmware update from the disk | MATCH | Any `dm40*.bin` (stock app or the vendor loader's disk); opendm40 also stages one copied to its own disk, or sent with `DBG:UPLOAD` ([`tools/reload.sh`](../tools/reload.sh)). |
 | USBTMC/USB488 + SCPI | NEW | DMM, power meter, inrush, alerts, scope, generator, files and the logger; `DBG:*` debug commands (refused over Bluetooth). Command list: [docs/manual/scpi-reference.md](../../docs/manual/scpi-reference.md). |
 | HP 34401A identity | NEW | `SYST:IDN:EMUL 34401A`: libsigrok / SmuView's 34401A profile drives the meter. |
