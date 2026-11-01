@@ -2458,7 +2458,7 @@ impl App {
                         self.sp_side_tap(false, t, su::side_hit(false, t, &v, x, y), now);
                         self.sp_toast_release(now);
                     }
-                    su::Popup::Math(_) if su::panel_hit(p.x, p.y) == Some(4) => {
+                    su::Popup::Math(_) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_MATH) => {
                         // Stock: the math label with its popup open = math off.
                         self.sp.math.on = false;
                         self.sp_math_changed(false);

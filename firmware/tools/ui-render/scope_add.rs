@@ -681,8 +681,11 @@ fn gen_channel(ck: &mut Checker, out: &str) {
         pv.gen_trace = true;
         pv.ch2_on = true;
         pv.ch2_vdiv = scope_ui::Txt::new("250mA");
-        // The DMM CH2 too: its label (a graph hole) and a trace.
-        m.ch2_txt = scope_ui::Txt::new("CH2 250mA");
+        // The DMM CH2 too: its block (on, 250mA) and a trace.
+        m.ch2_txt = scope_ui::Txt::new("250mA");
+        m.ch2_on = true;
+        m.gen_on = true;
+        m.gen_txt = scope_ui::Txt::new("1V");
         draw(&m, scope_ui::Popup::None, &pv, true);
         ck.check_replica(&format!("gen/{}/trace", combined as u8));
         let want = emu().fb.clone();
