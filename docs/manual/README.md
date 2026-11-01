@@ -292,7 +292,7 @@ scope.
 | Smoothing | — | Optional [smoothing](#smoothing) of the display |
 | AutoHold | — | [AutoHold](#autohold): holds a stable reading by itself |
 | Limits | — | [Limits](#limits-and-autohold): **OK**, **HI** or **LO** next to the reading, a fail beep |
-| AVG | — | The [mean](#min-max-avg) next to MAX and MIN |
+| AVG | — | The [mean](#min-max-avg) and SD next to MAX and MIN |
 | Statistics session | — | A [MIN/MAX/AVG session](#min-max-avg) with a timer; no automatic power-off while it runs |
 | Bargraph | — | A 50-segment [bargraph](#the-bargraph-and-the-history-row), by default |
 | Temperature sensors | K thermocouple | Also [PT100, PT1000, three NTCs and a user NTC](#temperature) |
@@ -604,7 +604,7 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
 #### Continuity
 
-- Shows the resistance with two decimals; **0L** above 1000 Ω ([OPEN or Overflow](#overflow)).
+- Shows the resistance with two decimals; **0L** above 1000 Ω ([Overflow](#overflow)).
 - The beeper is driven by the measuring chip itself: its comparator watches
   the probe voltage and switches the beeper directly, with no firmware in
   between (the same chip setting as the stock firmware). It sounds while the
@@ -657,8 +657,6 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 
   ![Discharging before 600 µF and up](img/dmm-cap-dis.png)
 - Open leads end on the 60 nF range; a short shows **0L**.
-- Large capacitors take longer: from the 600 µF range up the meter first
-  discharges, then measures.
 
 
 | ![A 100 nF capacitor](img/dmm-cap.png) | ![The capacitance range page](img/range-cap.png) |
@@ -767,17 +765,14 @@ to a high voltage applied while the meter sat on the mV range.
   is above the range (or the function's limit). The bargraph turns red with
   an **OL** mark. On the scope page's meter strip, **Overflow** is in the
   small text right of the reading.
-- Continuity says **OPEN** instead (also the bargraph mark) when it starts
-  over range or jumps there from below 500 Ω (open leads); readings that
-  climb past the limit (a charging capacitor) say **Overflow**.
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
 
 
-| ![Over range: 0L, Overflow](img/dmm-ol.png) | ![Continuity, open leads: 0L, OPEN](img/dmm-open.png) |
-|---|---|
-| Over range: 0L, Overflow | Continuity, open leads: 0L, OPEN |
+| ![Over range: 0L, Overflow](img/dmm-ol.png) |
+|---|
+| Over range: 0L, Overflow |
 
 ### Counts, rate and the extra digit
 
@@ -2073,7 +2068,7 @@ ended**).
 Each row holds the reading as the multimeter measured it, with REL applied
 but without the display smoothing. In the interval modes, a row holds the
 mean of the readings of that interval; an interval with an overflow reading
-(0L, OPEN) becomes an overflow row.
+(0L) becomes an overflow row.
 
 The meter has no real-time clock. Times count in seconds from the start of
 the recording; the header says how long after power-on it started.
@@ -2093,9 +2088,10 @@ time_s,value,unit,flags
 | `time_s` | Seconds since the start. In interval mode: the end of the interval, also for the last one when the recording stops inside it. |
 | `value` | The reading in base units (V, A, Ohm, F, Hz, ...). Empty on overflow. |
 | `unit` | The unit. |
-| `flags` | Any of `OL` (overflow: 0L or OPEN), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
+| `flags` | Any of `OL` (overflow: 0L), `REL`, `HOLD`, `HI` / `LO` (outside the limits), and `GAP` on the first row after rows were lost. |
 
-Interval files have one more header line that names the interval.
+Interval files have one more header line that names the interval; **On
+change** files one that names the change (`# event: change > 1 % ...`).
 
 The meter stores the recording in a compact form (`LOGS/LOG007.DLG` on the
 internal disk). The USB disk shows it as `LOGS/LOG007.CSV`. The CSV is

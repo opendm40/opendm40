@@ -1117,6 +1117,11 @@ impl Scope {
         self.deadline = 0;
     }
 
+    /// Before a reset (App::quiesce_for_reset): the acquisition hardware off.
+    pub fn stop_hw(&mut self) {
+        self.halt();
+    }
+
     /// Stop the acquisition hardware (timers + DMA). Leaves BUF and the stored
     /// record state alone.
     fn halt(&mut self) {
