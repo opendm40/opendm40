@@ -68,7 +68,7 @@ Before you start:
 To install opendm40 on a meter that runs the stock firmware:
 
 1. Download the update file `dm40_opendm40_v<version>.bin`, for example
-   `dm40_opendm40_v0.2.0.bin`, from the latest
+   `dm40_opendm40_v0.4.0.bin`, from the latest
    [release](https://github.com/opendm40/opendm40/releases/latest). You can
    also build it from the source
    ([firmware/README.md, Build](../../firmware/README.md#build)).
@@ -98,7 +98,7 @@ To try a change before its release: open [pull
 requests](https://github.com/opendm40/opendm40/pulls) have a **Test build**
 comment with the update file (all of them: [PR test
 builds](https://github.com/opendm40/opendm40/releases/tag/pr-builds)); its
-version reads like `0.3.2-pr148.1a2b3c4`. These builds are not tested on a
+version reads like `0.4.0-pr148.1a2b3c4`. These builds are not tested on a
 meter.
 
 ### Update
@@ -113,7 +113,8 @@ opendm40:
    (`dm40_opendm40_v<version>.bin`; any `dm40*.bin` name works).
 4. The meter checks the file and asks **Firmware received. Install it
    now?** Tap **Yes**. The meter restarts into the update loader, installs
-   the file and starts the new firmware.
+   the file and starts the new firmware. The settings, the multimeter
+   function and the scope settings are kept, as after a restart.
 
 If you do not answer within 60 seconds, the answer is No and the file is
 deleted. A file that is not a DM40 update file is refused with **Not a DM40
@@ -186,7 +187,8 @@ The four instrument views follow each other in this order:
 On the multimeter, the generator and the combined view (start on the meter
 strip there), swipe left for the next view and right for the previous one.
 On the oscilloscope page a drag moves the trace, so a swipe does not change
-the view: leave it with **MENU**, or switch on **Settings > Scope > Swipe**, which lets a swipe that starts on the top bar or the side panel
+the view: leave it with **MENU**, or switch on **Settings > Scope >
+Swipe**, which lets a swipe that starts on the top bar or the side panel
 change the view.
 
 ![A swipe changes the view; from the oscilloscope only with MENU or Scope swipe](img/swipe.png)
@@ -212,7 +214,8 @@ The top line of the multimeter page shows, from left to right:
 6. the Bluetooth symbol while a phone or a computer is connected over
    Bluetooth;
 7. the USB symbol while a computer has the meter connected (not with a charger);
-8. the battery level; green on the charger: the top bar blinks while the battery charges and stays when it is full.
+8. the battery level; green on the charger: the top segment blinks while
+   the battery charges and stays when it is full.
 
 ### Touch lock
 
@@ -230,19 +233,19 @@ the combined view switches to the next sub-mode of the current function
 
 ### Power, battery and sleep
 
-- **Dim screen** (Settings, default 5 min): without a touch or a key press
+- **Dim screen** (**Settings > Display**, default 5 min): without a touch
+  or a key press
   for this long, the backlight dims. Any touch or key brings it back; that
   first touch only wakes the screen and does nothing else.
-- **Shutdown** (Settings, default 30 min): on battery, without input for
-  this long, the meter switches off; with USB power (a computer or a charger)
-  it never does, and the time counts afresh from the unplug. 30 s before, it beeps and shows **Auto power-off in
-  30 s** (then 20, 10); touch the screen or press a key to keep it on.
-- A connected computer or phone also keeps the meter on: any SCPI command
-  over USB or Bluetooth, a phone-app request, and the computer reading or
-  writing the USB disk count as use for **Shutdown**, so the meter does not
-  switch off in the middle of a remote session or a firmware update. They
-  do not count for **Dim screen**: during a long remote session the screen
-  still dims, and they do not light it up again.
+- **Shutdown** (**Settings > Power**, default 30 min): on battery, without
+  input for this long, the meter switches off; with USB power (a computer
+  or a charger) it never does, and the time counts afresh from the unplug.
+  30 s before, it beeps and shows **Auto power-off in 30 s** (then 20, 10);
+  touch the screen or press a key to keep it on.
+- A connected computer or phone also keeps the meter on (SCPI over USB or
+  Bluetooth, phone-app requests, reading or writing the USB disk), so it
+  does not switch off during a remote session or a firmware update. The
+  screen still dims, and these requests do not light it up again.
 - The meter does not switch itself off while a recording runs, while a
   MIN/MAX/AVG session runs, while the power meter counts energy with a
   current flowing, or while the inrush page is armed. The screen still dims.
@@ -351,7 +354,7 @@ lightning from 100 V). opendm40 adds:
 
 | | Stock | opendm40 |
 |---|---|---|
-| Top bar | Not touchable | Tap the run state, timebase, V/div, trigger |
+| Top bar | Not touchable | Tap the run state, timebase, trigger |
 | Timebase taps | Tap the left or right half | [Corner zones](#timebase) with labels (or the stock halves) |
 | Timebase list | — | Tap the timebase in the top bar |
 | Pinch | — | Pinch to change the timebase or the V/div |
@@ -364,7 +367,7 @@ lightning from 100 V). opendm40 adds:
 | FFT readouts | No scale | [Scale, centre frequency and peak readout](#fft) |
 | FFT windows | — | Also Flat-top |
 | Capture length | 65 520 samples | From 100 ms/div 65 520 or more, up to 262 144 (what the signal allows); 44 032 faster |
-| Serial decoding | — | [UART](#protocol-decoder) under the trace |
+| Serial decoding | — | [UART and DALI](#protocol-decoder) under the trace |
 
 ![The touchable top bar](img/new-scope-topbar.png)
 
@@ -436,7 +439,8 @@ lightning from 100 V). opendm40 adds:
 #### What the stock firmware has and opendm40 does not
 
 - Chinese menus: opendm40 is English only.
-- The 65 520-sample scope capture (opendm40: 65 520 from 100 ms/div, 44 032 faster).
+- The 65 520-sample scope capture at timebases faster than 100 ms/div
+  (opendm40: 44 032 there).
 
 ## Multimeter
 
@@ -591,9 +595,8 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
   | 0.90 mA | 0.90 mA | 197 µA | 20 µA | 2.2 µA | 0.22 µA | — |
   | 0.28 mA ON | 0.28 mA | 58 µA | 6.6 µA | 0.66 µA | 86 nA | — |
 
-  Short-circuit currents measured on one unit with `DBG:SRC`, jacks
-  shorted ([device check](../history/device-check-2026-10-21.md#ohm-test-current-map-dbgsrc)).
-  The open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
+  Short-circuit currents, measured on one unit with the jacks shorted. The
+  open-circuit voltage on 600 Ω is about 2.1 V (0.67 V with ON).
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
@@ -608,20 +611,16 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 #### Continuity
 
 - Shows the resistance with two decimals; **0L** above 1000 Ω ([Overflow](#overflow)).
-- The beeper is driven by the measuring chip itself: its comparator watches
-  the probe voltage and switches the beeper directly, with no firmware in
-  between (the same chip setting as the stock firmware). It sounds while the
-  resistance is below about 67 Ω (*inferred* from the chip setting). Silent
-  at [Key/alert volume](#alerts-tab) 0 %.
+- The beeper sounds while the resistance is below about 67 Ω (*inferred*
+  from the measuring chip's setting, the same as on the stock firmware). The
+  chip switches it itself: the beep starts and stops with the contact.
+  Silent at [Key/alert volume](#alerts-tab) 0 %.
 - While it sounds (also at volume 0 %) a green **SHORT** band shows above the
   reading and the digits turn green, for at least 0.15 s.
 - Top left, small: the test current, **I -0.26 mA** (the short-circuit
   current; negative: it flows the other way than in the diode test).
-- The firmware adds no latch and no minimum beep length: the beep starts and
-  stops with the contact.
-- The comparator itself is fast (a bandwidth of a few MHz in the chip's data
-  sheet). The time from a contact to the sound, and how short a contact is
-  still heard, are untested on the meter.
+- How fast it reacts and how short a contact is still heard are untested
+  on the meter.
 - The reading updates every 50 ms while it changes, every 0.4 s once it is
   steady.
 - A negative result means an external voltage on the circuit: the meter
@@ -766,8 +765,8 @@ to a high voltage applied while the meter sat on the mV range.
 
 - **0L** in the reading with the word **Overflow** next to it: the value
   is above the range (or the function's limit). The bargraph turns red with
-  an **OL** mark. On the scope page's meter strip, **Overflow** is in the
-  small text right of the reading.
+  an **OL** mark. In the [combined view](#combined-view)'s meter strip,
+  **Overflow** is in the small text right of the reading.
 - A small value (for example the diode's Ω value) that is over its limit
   shows **0L** with a small **Overflow** before it.
 - An overflow is never stored in MIN/MAX/AVG, the chart or the history.
@@ -799,20 +798,16 @@ Every rate rejects 50 Hz and 60 Hz mains hum on a DC reading: each
 conversion integrates the input over 100 ms (FAST, MED) or 200 ms (SLOW),
 a whole number of periods of both.
 
-In DC V, DC mV and DC A, FAST runs the converter without its built-in
-offset cancellation (the chopper), which is what makes it twice as fast as
-MED. The meter measures and subtracts that offset itself: 2 s after a
-function or range change and then every 30 s, it reads the input once with
-the opposite polarity. Each time two readings are skipped (a 0.2 s pause).
-It takes the measurement only while the input is steady, and tries again
-5 s later otherwise. Until the first measurement on a range, FAST uses the
-last offset it measured on another range, so a reading in those first 2 s
-can be a little off. A FAST reading is a little noisier than a MED one
-(more low-frequency noise); for the extra digit use MED or SLOW.
+In DC V, DC mV and DC A, FAST skips the converter's built-in offset
+cancellation, which makes it twice as fast as MED; the meter measures that
+offset itself 2 s after a function or range change and then every 30 s,
+while the input is steady (each time a 0.2 s pause in the readings). A
+reading in the first 2 s on a range can be a little off. FAST is a little
+noisier than MED; for the extra digit use MED or SLOW.
 
-In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW
-12.8 s; no extra digit on 60 Ω). After a step of the input or a range change the average restarts,
-so a change shows at once.
+In Ω from 60 Ω to 60 kΩ the averages are longer (MED 6.4 s, SLOW 12.8 s;
+no extra digit on 60 Ω). After a step of the input or a range change the
+average restarts, so a change shows at once.
 
 - The **rate chip** on the left of the chart shows the rate and the
   measured readings per second (**--/s** just after a change). Tap it:
@@ -1036,11 +1031,11 @@ detected](#what-cannot-be-detected)).
 
 | Badge | Message | When | Where |
 |---|---|---|---|
-| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV and Ω) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, Ω, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 3 mA). |
+| **A-JACK** | Current in A jack: check leads | A current (from about 0.5 mA; DC V: about 9 mA; from A into COM only in DC V, DC mV and temperature, the last *inferred*) flows through the A jack while you measure something else, for example the leads are still in A and COM while measuring volts. | DC V (6 V range), DC mV, AC V, AC mV, temperature, capacitance 6 nF to 60 µF, AC+DC V (600 mV and 6 V), frequency (DC from about 4 mA). |
 | **A-PROT** | A jack current: 10 A shunt on | The current through the A jack would overheat the small current shunt (300 mA at once, or 125 mA for 0.4 s). The meter switches the A jack to the 10 A shunt to protect it. | DC V, DC mV. |
 | **OVLD**, then **10A** | Overload: 10 A shunt selected | On a fixed µA or mA range the current is too large: the meter moves to the 10 A shunt ([Overload](#overload-the-10-a-shunt)). | A functions and the power meter, fixed range. |
 | **V-JACK?** | Voltage on V jack, no current | In a current function: no current, but a voltage on the V jack (DC above about 21 V, or AC from about 2 V). The leads may be in the wrong jacks. | Current functions (DC, AC, AC+DC, AUTO). |
-| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω and continuity a voltage on the V/Ω jack that would otherwise look like a current in the A jack (Ω: from about 3-5 V). | Ω, continuity, diode. |
+| **LIVE?** | Voltage on circuit - power off | A reading only an external voltage can cause (a negative resistance), or in Ω a voltage on the V/Ω jack (from about 3-5 V) or a current through the A jack. | Ω, continuity, diode. |
 | **DC?** | DC voltage here: use DC V? | AC V sees a DC voltage and almost no AC. | AC V; the power meter in AC+DC ([Coupling](#coupling-dc-ac-acdc)). |
 | **AC?** | AC voltage here: use AC V? | DC V (6 V range) sees a voltage swinging both ways. | DC V; the power meter in DC. |
 | **FUSE?** | 0 A for 60 s: check the fuse? | A current function read zero for a minute. The fuse may be blown. | A functions. |
@@ -1154,8 +1149,8 @@ A loud two-tone alarm for connections that can damage the meter or the
 circuit:
 
 - **A-JACK** in the functions where a current really flows through the A
-  jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In Ω, continuity,
-  diode, capacitance, frequency and the resistive temperature sensors, A-JACK
+  jack: DC V, DC mV, AC V, AC mV, thermocouple, AC+DC V. (In
+  capacitance, frequency and the resistive temperature sensors, A-JACK
   shows silently.)
 - **A-PROT** while the current still flows.
 - **A current above 10 A** for 1 s on the 10 A range (also in the power
@@ -1216,20 +1211,23 @@ It cannot tell whether the 10 A shunt is intact: its 10 mΩ is lost in the
 - A positive voltage below about 3 V on a circuit in Ω, or any positive
   voltage in diode: it looks like an open circuit. LIVE? needs a negative or
   alternating voltage there, or (Ω) about 3-5 V and more.
-- A current in the A jack while a voltage is also on the V/Ω jack: Ω and
-  continuity show LIVE?, AC mV shows nothing (the reading is over range).
-  A-JACK shows only with the V/Ω jack free. Manual Ω ranges below 6 MΩ may
-  show LIVE? for a current in A even with V/Ω free. The same with a signal above
-  the meter's AC bandwidth (tens of kHz) on V/Ω in AC mV and DC mV.
-- No A-PROT for a current flowing from COM into the A jack, or for an AC current in DC V: A-JACK only.
+- A current in the A jack in Ω: LIVE?, not A-JACK, also with the V/Ω jack
+  free.
+- A current in the A jack while a voltage is also on the V/Ω jack: AC mV
+  shows nothing (the reading is over range); A-JACK shows only with the V/Ω
+  jack free. In AC mV and DC mV a signal above the meter's AC bandwidth
+  (tens of kHz) on V/Ω counts as a voltage there too.
+- A current flowing from COM into the A jack in DC V, DC mV and temperature
+  (temperature *inferred*): no A-JACK, no A-PROT.
+- No A-PROT for an AC current in DC V: A-JACK only.
+- No A-JACK in continuity and diode, in DC V above the 6 V range (60 V,
+  600 V, 1000 V), in AC+DC V above 6 V, in frequency below about 4 mA (6 mA
+  from COM into A) or for an AC current, and in the higher capacitance
+  ranges. The power meter has no jack alerts.
 
 ![Two cases no alert can see](img/cannot-detect.png)
 
 *Two cases no alert can see.*
-- No A-JACK in DC V above the 6 V range (60 V, 600 V, 1000 V), in AC+DC V
-  above 6 V, in frequency below about 4 mA (6 mA from COM into A) or for an AC current, and in
-  the higher capacitance ranges. The power
-  meter has no jack alerts.
 
 ## Oscilloscope
 
@@ -1254,10 +1252,9 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
 *The scope page.*
 
 - **Top bar**, from the left: the run state, the timebase (**H 200us**),
-  the record bar, the trigger (edge
-  and level), the Bluetooth symbol while a phone or a computer is connected
-  over Bluetooth, the USB symbol while a computer has the meter connected,
-  the battery.
+  the record bar, the trigger (edge and level), the Bluetooth symbol while a
+  phone or a computer is connected over Bluetooth, the USB symbol while a
+  computer has the meter connected, the battery.
   - Run state: **WAIT** (waiting for a trigger), **AUTO** (no trigger, frame
     shown anyway), **T'D** (triggered), **RUN** (roll), **STOP**.
   - Record bar: while stopped, brackets show which part of the stored
@@ -1315,8 +1312,9 @@ in the left or right half of the graph steps), **Off**.
 
 ### Vertical: V/div, position, coupling, probe
 
-- V/div: 2 mV to 10 V per division (times the probe factor). 5 and 2 mV/div
-  are a digital zoom of 10 mV/div: the same steps of about 0.1 mV, drawn larger.
+- V/div: 2 mV to 10 V per division (times the probe factor). 5 and
+  2 mV/div are a digital zoom of 10 mV/div: the same steps of about 0.1 mV,
+  drawn larger.
 - Tap the **CH1** block's **magnifier +** to zoom in (smaller V/div),
   **magnifier −** to zoom out. Or pinch vertically.
 - **Drag up or down** in the graph to move the trace (or the item you
@@ -1530,9 +1528,9 @@ shorter); a **Single** capture 44 032, from 100 ms/div 26 624:
 
 **GEN trace** (or a tap on the **GEN** title) draws the generator's output
 in cyan under CH1, on CH1's position and its own V/div (the **GEN** block's
-magnifiers; it starts at CH1's): computed from the generator's settings and timers, not
-measured (the trace is the ideal waveform; a probe on the output shows the
-real one). It is not drawn in roll mode, zoomed out past the record, or
+magnifiers; it starts at CH1's): computed from the generator's settings and
+timers, not measured (the trace is the ideal waveform; a probe on the output
+shows the real one). It is not drawn in roll mode, zoomed out past the record, or
 while a drag or pinch is in progress. While it is on, the edge trigger does
 not use the trigger hardware.
 
@@ -1544,8 +1542,8 @@ AC A / mA / µA (DC-coupled); in DC A switch the multimeter to AC A. The
 multimeter's reading pauses while CH2 is on (the multimeter chip streams
 the waveform instead), and with it the misconnection alerts and the
 Bluetooth link; they return when CH2 is off or you leave the page.
-CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps. While it
-is on, the edge trigger does not use the trigger hardware.
+CH2 has at most 38.4 k samples/s: faster than 2 ms/div it shows steps.
+While it is on, the edge trigger does not use the trigger hardware.
 
 
 | ![The Display tab](img/scope-display.png) | ![Roll mode at 500 ms/div](img/scope-roll.png) |
@@ -1578,9 +1576,10 @@ on the A function has `time_s,amperes`: the current through the A jack.
 
 **MF > Decode**: UART (also RS-232, and RS-485 with the probe across A-B)
 or DALI, drawn under the trace: a box per byte, errors in red. UART
-recognises Modbus RTU frames by their CRC and shows them above the bytes. Each capture is decoded once: running, one that
-triggered (not the Auto sweep's untriggered ones, not roll); and on STOP.
-Zoom and pan show the decoded capture.
+recognises Modbus RTU frames by their CRC and shows them above the bytes.
+Each capture is decoded once: running, one that triggered (not the Auto
+sweep's untriggered ones, not roll); and on STOP. Zoom and pan show the
+decoded capture.
 
 ![The Decode tab](img/scope-decode-tab.png)
 
@@ -1600,7 +1599,8 @@ Zoom and pan show the decoded capture.
   | The frame log | A frame tapped: its waveform |
 
 - **DALI** (lighting bus, 1200 bit/s, no Format / Baud): a box per frame,
-  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…` 24-bit, **ERR** in red.
+  `FF16:FE 80` forward (address, data), `BF8:FF` backward, `FF24:…`
+  24-bit, **ERR** in red.
 - Settings: protocol (**Off**, **UART**, **DALI**), baud (**Auto** or 300
   to 115200), format, polarity (**Inverted** for RS-232 levels), threshold
   (**Auto** or a level).
@@ -1609,7 +1609,6 @@ Zoom and pan show the decoded capture.
 - In the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs): RS-485
   between A and B on the floating multimeter input, up to 4800 baud (9600
   at 1 ms/div), e.g. a slow Modbus bus; decoded on STOP.
-
 - Over USB or Bluetooth: the [`DECode` commands](scpi-reference.md#protocol-decoder).
 
 ### Wave view: the scope on the multimeter inputs
@@ -1662,8 +1661,8 @@ To open it:
 |---|---|
 | 2 ms/div: one period | A 1.5 A current on the 6 A range, 1.5 A/div |
 
-To leave: tap the **MCX** block (back to the OSC input), press **MENU** or change
-the view.
+To leave: tap the **MCX** block (back to the OSC input), press **MENU** or
+change the view.
 
 The Wave view is not available in AC+DC, AUTO coupling and the power
 meter, nor while a recording runs; the meter says why.
@@ -1694,7 +1693,8 @@ From the left:
 - one state badge, the most important of: **HOLD** / **A-HOLD**, an
   [alert](#the-alerts), **HV** (30 V and more), **REL**, the
   limit verdict (**PASS**, **HI**, **LO**), the range (**AUTO+**,
-  **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD every second;
+  **AUTO**, or the fixed range, e.g. **6V**). An alert alternates with HOLD
+  every second;
 - the reading and its unit;
 - up to two small values: the AC and DC parts, frequency and duty cycle,
   the burden voltage (**Bd**), the 4-20 mA percentage, the cold junction,
@@ -1714,7 +1714,7 @@ From 100 V the strip gets a red frame.
 | **AUTO** | As on the multimeter page ([Keys](#keys)): fixes or steps the range; hold 1 s for autorange. |
 | **MF** | The multimeter's range page (or Hold & Limits). |
 | Tap the run state in the top bar | Scope run / stop. |
-| The trigger in the top bar | The scope menu. |
+| The trigger in the top bar | The scope menu, Trigger tab. |
 | Swipe left / right starting on the strip | Change the view. On the graph a drag works as on the scope page. |
 
 The graph, the right panel and the scope menus work as on the
@@ -1729,7 +1729,7 @@ AUTO belongs to the multimeter.
 ### Analog power
 
 The DM40 has separate supplies for the multimeter and the scope /
-generator. **Settings > Analog power**:
+generator. **Settings > Power > Analog power**:
 
 - **Auto (per view)** (default): the multimeter page powers the
   multimeter side, the scope and generator pages the scope side, the
@@ -1924,8 +1924,8 @@ P (`DC x W + AC y W`). The parts add up to the totals.
 
 ### Coupling: DC, AC, AC+DC
 
-Tap **W** again to step **DC → AC → AC+DC**, or choose it on the settings
-page. Entering the power meter always starts in DC.
+Tap **W** again to step **DC → AC → AC+DC**, or choose it in [Power
+Settings](#power-settings-mf). Entering the power meter always starts in DC.
 
 | Coupling | Power | Use for |
 |---|---|---|
@@ -2014,14 +2014,14 @@ in use and whether a zero is stored.
 
 The meter's own drop used by **At load** and **Vb** is the current shunt
 alone (10 mΩ, 0.5 Ω or 47.5 Ω); the fuse and the wiring add a little. It can
-be changed over SCPI (`POW:BURD`).
+be changed over SCPI ([`POW:BURD`](scpi-reference.md#power-meter)).
 
 ### Current limit
 
 Above 6 A the right column shows a countdown (**I>LIM 23s**, amber). After
 30 s it shows **I>LIM!** in red, says **Current too high: reduce it** and
 beeps every 2 s until the current falls below 5.7 A. The limit and the time
-can be changed over SCPI (`POW:LIM`).
+can be changed over SCPI ([`POW:LIM`](scpi-reference.md#power-meter)).
 
 
 ![6.8 A: the countdown in the right column](img/power-limit.png)
@@ -2057,9 +2057,9 @@ To open: long press the **A** button, or **A** function, **MF**, **Inrush**.
 **RUN** arms again or cancels. **Back**, **MENU** or **MF** close the page
 and restore the A function.
 
-- The trigger is a rise of the current by the step within about 100 ms, in
-  either direction. With a load already running, only a step of that size
-  triggers. A slow rise does not trigger.
+- The trigger is a rise of the current (of either polarity) by the step
+  within about 100 ms. With a load already running, only a step of that
+  size triggers. A slow rise does not trigger.
 - Works for AC and DC loads. 9600 samples/s: very short spikes read lower
   than they are.
 - The meter's rating is 10 A; the capture shows **OL** when the current goes
@@ -2074,16 +2074,18 @@ files, or view them on the meter in the [gallery](#the-gallery).
 There are two recorders:
 
 - **Recording** (the Record page): readings as the multimeter shows them,
-  or one mean value per 1 s, 10 s or 1 min. For hours or days.
+  one mean value per 1 s, 10 s or 1 min, or a row when the reading changes.
+  For hours or days.
 - **Fast recording**: raw samples of the measuring chip, up to thousands
   per second, for seconds to hours. DC and AC volts and amps only.
 
 ### Start and stop a recording
 
 The quick way: on the multimeter page, **swipe down with one finger**. The
-meter beeps and shows **Recording CSV**; a blinking red dot and **REC** appear in the
-status bar (on the scope pages a red dot and **DMM** in the top bar). Swipe down again to stop. When the last rows are on the disk,
-the meter shows **Saved LOG007.DLG** (with the file's number).
+meter beeps and shows **Recording CSV**; a blinking red dot and **REC**
+appear in the status bar (on the scope pages a red dot and **DMM** in the
+top bar). Swipe down again to stop. When the last rows are on the disk, the
+meter shows **Saved LOG007.DLG** (with the file's number).
 
 The quick way uses the interval and duration last set on the Record page.
 If the interval there is **Fast**, the swipe still starts a normal recording
@@ -2261,22 +2263,15 @@ the trash before; the trash itself is not kept on the meter.
 #### Copying DEBUG/SPIFLASH.BIN on Linux
 
 `DEBUG/SPIFLASH.BIN` changes inside while its name, size and place on the
-drive stay the same. Linux keeps the parts of the file it has read before
-and does not read them again when the meter announces the change, so a
-plain `cp` while the drive stays mounted can return an old copy, or a mix
-of old and new parts (device check
-[2f56ff9](../history/device-check-2026-10-21.md#2f56ff9-screenshot-preparation-the-768-kss-nominal-69abac4-the-files-live-volume-on-linux-2026-10-24-2145---2214), note 2). New
-files in `LOGS/`, `SCOPE/` and `SHOTS/` are not affected: the meter gives
-each new or changed file its own new entry. The meter cannot make Linux drop
-the old parts: Linux re-reads the folders, but keeps what it already knows
-about a file it has seen (its entry and its data) while the drive is mounted
-(inferred from the kernel sources: `fs/fat`, `block/disk-events.c`; not
-tested with a changed date or entry).
+drive stay the same. While the drive is mounted, Linux keeps the parts of
+the file it has already read (*inferred*), so a plain `cp` can return an old
+copy, or a mix of old and new parts. New files in `LOGS/`, `SCOPE/` and
+`SHOTS/` are not affected.
 
 To get a current copy, do one of these first:
 
-- drop the cached parts of that file: `python3 -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED)' /media/$USER/DM40/DEBUG/SPIFLASH.BIN`
-  (used in the device check), then `cp`;
+- drop the cached parts of that file: `python3 -c 'import os,sys; fd=os.open(sys.argv[1],os.O_RDONLY); os.posix_fadvise(fd,0,0,os.POSIX_FADV_DONTNEED)' /media/$USER/DM40/DEBUG/SPIFLASH.BIN`,
+  then `cp`;
 - or drop all cached files: `sync; echo 1 | sudo tee /proc/sys/vm/drop_caches`;
 - or unmount and mount the drive again (`udisksctl unmount -b /dev/sdX`,
   then `udisksctl mount -b /dev/sdX`);
@@ -2298,7 +2293,7 @@ unplug and re-plug the cable. The measuring connection (SCPI) keeps working.
 
 - On the meter: in the [gallery](#the-gallery).
 - From the computer: in **PC can edit** mode, or with the SCPI command
-  `MMEM:DEL` in any mode ([SCPI reference](scpi-reference.md)).
+  [`MMEM:DEL`](scpi-reference.md#files-on-the-disk-mmemory) in any mode.
 
 ![Deleting a file in the gallery viewer](img/gallery-delete.png)
 
@@ -2354,8 +2349,9 @@ The gallery also shows the screenshots made by the stock firmware.
 
 To open: main menu, **Settings**. The tabs on the left are the sections;
 tap one to show its rows. Tap a value to step to the next one (the name
-does nothing); rows with **-** / **+** change in steps, a row with **>** opens a page from anywhere on it. **< Back** in
-the title bar or **MENU** goes back to the main menu.
+does nothing); rows with **-** / **+** change in steps, a row with **>**
+opens a page from anywhere on it. **< Back** in the title bar or **MENU**
+goes back to the main menu.
 
 ### Display tab
 
@@ -2365,7 +2361,7 @@ the title bar or **MENU** goes back to the main menu.
 
 | Row | Values | Default | What it does |
 |---|---|---|---|
-| **Backlight** | 10 % to 100 %, steps of 10 from the default (15, 25 ... 95, and 10 and 100 at the ends) | 55 % | Screen brightness. |
+| **Backlight** | 10, 15, 25 ... 95, 100 % | 55 % | Screen brightness. |
 | **Dim screen** | 5 min, 10 min, 30 min, Never | 5 min | Dims the backlight after this time without input ([Power, battery and sleep](#power-battery-and-sleep)). |
 | **Start page** | Multimeter, Oscilloscope, Signal, Main menu | Multimeter | The view after power-on. |
 | **DMM row** | Bargraph, History | Bargraph | [The bargraph and the history row](#the-bargraph-and-the-history-row). |
@@ -2528,7 +2524,7 @@ leave the page; the power key does, without changing the calibration.
 
 The touch keys (MENU, RUN, AUTO, MF) are not affected by the calibration.
 Over USB, `DBG:TOUCH:CAL?` reads the calibration and `DBG:TOUCH:CAL RESET`
-removes it ([SCPI reference](scpi-reference.md)).
+removes it ([SCPI reference](scpi-reference.md#debug-commands)).
 
 The page does not open during a [fast recording](#fast-recording) or while
 the `LOG:` commands stream readings to a computer
@@ -2548,7 +2544,8 @@ reference](scpi-reference.md).
 
 ### Bluetooth
 
-Bluetooth is on by default; switch it off in **Settings > Bluetooth**. While
+Bluetooth is on by default; switch it off in **Settings > Other >
+Bluetooth**. While
 a phone or a computer is connected, the Bluetooth symbol shows in the status
 bar.
 
@@ -2886,7 +2883,8 @@ gets you there:
   0.5 s more, then let go. Letting go earlier starts the meter normally.
 - **From a computer.** While opendm40 runs and is connected over USB:
   `python3 firmware/tools/dm40dbg.py loader`
-  (the SCPI command `DBG:LOADER`, see [SCPI reference](scpi-reference.md)).
+  (the SCPI command `DBG:LOADER`, see [SCPI
+  reference](scpi-reference.md#debug-commands)).
 - **By itself.** A firmware file that does not pass the loader's check
   leaves the meter in the update loader.
 - **Through the board.** If nothing else works: open the case, connect the
@@ -2940,15 +2938,15 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
+| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings (kept with **Mode Remember** ON) | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 **Mode Remember** ON (Settings > Power, as the stock's) also keeps after
 switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
-or a fixed V, A or Ω range, the Ω test current, the rate and smoothing,
-the trend timebase, and the scope settings above. AutoHold and the limits still start afresh.
+or a fixed V, A or Ω range, the rate and smoothing, the trend timebase and
+the scope settings above. AutoHold and the limits still start afresh.
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
@@ -2994,9 +2992,5 @@ Known problems:
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
 - The usable frequency range of the power meter is *unknown*.
-- A current through the A jack gives no [A-JACK](#the-alerts) in AC mV; in
-  Ω it shows LIVE? instead.
-- In DC mV, a current of about 20 mA through the A jack already trips
-  A-PROT.
-- A signal above about 20 kHz on V/Ω–COM can raise a false A-JACK or A-PROT
-  on the mV ranges.
+- In Ω, a current through the A jack shows LIVE? instead of
+  [A-JACK](#the-alerts).
