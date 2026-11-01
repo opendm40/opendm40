@@ -96,49 +96,39 @@ fn snap() -> &'static mut Snap {
     unsafe { &mut *core::ptr::addr_of_mut!(SNAP) }
 }
 
-/// The X column's source: the generator against the record (its BUF[0]),
-/// or the DMM CH2 store with the DWT time of BUF[0] and cycles per sample.
-#[derive(Clone, Copy)]
-pub enum XSrc {
-    Gen(crate::gen::Sync),
-    Ch2 { t0: u32, step: f32 },
-}
+/// The X value of record sample `i` (an index of the full record; None:
+/// no value there), called at rising `i` within a pass over the codes
+/// (scope_xy.rs `csv_x`).
+pub type XFn = fn(usize) -> Option<f32>;
 
-/// The X column of the next `set` (`on` false: none): its source, the
-/// record index of the written slice's first sample, x = ax + bx * code.
+/// The X column of the next `set` (`f` None: none): its value function,
+/// the record index of the written slice's first sample, x = ax + bx * code.
 struct XCol {
-    on: bool,
-    src: XSrc,
+    f: Option<XFn>,
     off: usize,
     ax: f32,
     bx: f32,
+    /// The X column is amperes (a current CH2).
+    amps: bool,
 }
 
-// SRAM (zeroed at reset, `on` false; no TCM .bss).
+// SRAM (`.sram_bss`: zeroed at reset, all-zero initial value; no TCM .bss).
 #[cfg_attr(target_os = "none", link_section = ".sram_bss")]
-static mut XCOL: XCol = XCol { on: false, src: XSrc::Ch2 { t0: 0, step: 0.0 }, off: 0, ax: 0.0, bx: 0.0 };
+static mut XCOL: XCol = XCol { f: None, off: 0, ax: 0.0, bx: 0.0, amps: false };
 
 fn xcol() -> &'static mut XCol {
     unsafe { &mut *core::ptr::addr_of_mut!(XCOL) }
 }
 
-/// The X value of record sample `i` (an index of the full record); None:
-/// CH2 has no sample there.
-pub fn x_value(src: &XSrc, i: usize) -> Option<f32> {
-    match src {
-        XSrc::Gen(g) => Some(g.shape.volts(g.phase(i as f64))),
-        XSrc::Ch2 { t0, step } => crate::scope_ch2::store().value_at(t0.wrapping_add((i as f64 * *step as f64) as u64 as u32)),
-    }
-}
-
-/// The X column for the next `set` (None: a plain record): the source,
-/// the record index of the slice `set` gets, the X span lo..hi.
-pub fn set_x(x: Option<(XSrc, usize, f32, f32)>) {
+/// The X column for the next `set` (None: a plain record): its value
+/// function, the record index of the slice `set` gets, the X span lo..hi.
+/// `amps`: the X column is amperes.
+pub fn set_x(x: Option<(XFn, usize, f32, f32, bool)>) {
     let c = xcol();
-    c.on = false;
-    if let Some((src, off, lo, hi)) = x {
+    c.f = None;
+    if let Some((f, off, lo, hi, amps)) = x {
         let span = if hi > lo { hi - lo } else { 1e-6 };
-        *c = XCol { on: true, src, off, ax: lo, bx: span / 1023.0 };
+        *c = XCol { f: Some(f), off, ax: lo, bx: span / 1023.0, amps };
     }
 }
 
@@ -146,20 +136,18 @@ pub fn set_x(x: Option<(XSrc, usize, f32, f32)>) {
 /// column CH1 and X in turn.
 #[inline(always)]
 fn code_at(rec: &[u16], x: &XCol, j: usize) -> u16 {
-    if !x.on {
-        return rec[j];
-    }
+    let Some(f) = x.f else { return rec[j] };
     let i = j / 2;
     if j % 2 == 0 {
         return rec[i];
     }
-    let v = x_value(&x.src, x.off + i).unwrap_or(x.ax);
+    let v = f(x.off + i).unwrap_or(x.ax);
     ((v - x.ax) / x.bx + 0.5).clamp(0.0, 1023.0) as u16
 }
 
 /// Codes in the file (twice the samples with an X column).
 fn n_codes(rec: &[u16], x: &XCol) -> usize {
-    if x.on { 2 * rec.len() } else { rec.len() }
+    if x.f.is_some() { 2 * rec.len() } else { rec.len() }
 }
 
 /// Header text writer.
@@ -205,7 +193,7 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amp
         n += 1;
     }
     let x = xcol();
-    let col: &[u8] = match (x.on, amps, matches!(x.src, XSrc::Ch2 { .. }) && crate::scope_ch2::store().scale().amps) {
+    let col: &[u8] = match (x.f.is_some(), amps, x.amps) {
         (false, true, _) => b"time_s,amperes\r\n",
         (false, false, _) => b"time_s,volts\r\n",
         (true, _, true) => b"time_s,volts,x_amperes\r\n",
@@ -232,7 +220,7 @@ pub fn set(rec: &'static [u16], a: f32, b: f32, fs: f32, t0: usize, h: &Hdr, amp
 
 /// Bytes before the first coded block: DLG header, parameters, table.
 fn head_len(s: &Snap) -> usize {
-    let par = if xcol().on { crate::dlog::SCOPE_PAR_XY } else { crate::dlog::SCOPE_PAR };
+    let par = if xcol().f.is_some() { crate::dlog::SCOPE_PAR_XY } else { crate::dlog::SCOPE_PAR };
     crate::dlog::FHDR + s.hdr_n + par + 8 * s.nb + 4
 }
 
@@ -257,7 +245,7 @@ pub fn fill(off: u32, buf: &mut [u8]) {
     if off < head {
         let mut h = [0u8; crate::dlog::FHDR + HDR_MAX + crate::dlog::SCOPE_PAR_XY + 8 * crate::dlog::SBLK_MAX + 4];
         let x = xcol();
-        let k = if x.on {
+        let k = if x.f.is_some() {
             crate::dlog::scope_header_xy(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, 2 * rec.len() as u32, x.ax, x.bx, &mut h)
         } else {
             crate::dlog::scope_header(&s.hdr[..s.hdr_n], s.a, s.b, s.dt, s.t0 as u32, rec.len() as u32, &mut h)

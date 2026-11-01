@@ -2902,11 +2902,11 @@ impl Scpi {
                     let v = if query {
                         None
                     } else if kw(a, "OFF") || a == b"0" {
-                        Some(crate::scope::XY_OFF)
+                        Some(0) // scope::XY_OFF
                     } else if kw(a, "GENerator") {
-                        Some(crate::scope::XY_GEN)
+                        Some(1) // scope::XY_GEN
                     } else if kw(a, "CH2") {
-                        Some(crate::scope::XY_CH2)
+                        Some(2) // scope::XY_CH2
                     } else {
                         self.err_arg(no_arg, "Illegal parameter value");
                         continue;

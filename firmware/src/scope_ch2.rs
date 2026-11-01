@@ -245,14 +245,11 @@ impl Store {
     }
 
     /// The SI value of the sample nearest DWT time `t` (None: not in the
-    /// store): the X-Y CSV's CH2 column (scope_csv.rs).
-    pub fn value_at(&self, t: u32) -> Option<f32> {
-        let a = self.index_at(t)? + 0.5;
-        let oldest = self.tot.saturating_sub(CAP as u64) as f64;
-        if a < oldest || a >= self.tot as f64 {
-            return None;
-        }
-        Some(self.si(self.codes[(a as u64 % CAP as u64) as usize]))
+    /// store), for a run of rising times (`range_run`; a step back costs
+    /// one full search): the X-Y CSV's CH2 column (scope_csv.rs).
+    pub fn value_run(&self, r: &mut Run, t: u32) -> Option<f32> {
+        let (ia, _) = self.range_run(r, t.wrapping_add((self.period * 0.5) as u32), 1.0)?;
+        Some(self.si(self.codes[(ia % CAP as u64) as usize]))
     }
 
     /// The anchor with age `k` (0 = the newest).
@@ -337,10 +334,16 @@ impl Store {
 }
 
 /// The state of a `Store::span_run` sequence.
+#[derive(Clone, Copy)]
 pub struct Run {
     /// The age of the anchor the last column's segment starts at.
     k: usize,
     kmax: usize,
     inv_period: f32,
+}
+
+impl Run {
+    /// All zero (a static's initial value; `Store::run` makes a real one).
+    pub const ZERO: Run = Run { k: 0, kmax: 0, inv_period: 0.0 };
 }
 

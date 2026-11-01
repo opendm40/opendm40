@@ -995,25 +995,26 @@ impl App {
     /// the generator against the stored record, or the DMM CH2 (the
     /// record cut to the samples CH2 has, the time-0 sample kept). None:
     /// no X for this record (a header line says why).
-    fn sp_xy_csv(&self, h: &mut crate::scope_csv::Hdr, rec: &mut &'static [u16], t0: &mut usize) -> Option<(crate::scope_csv::XSrc, usize, f32, f32)> {
-        use crate::scope_csv::{x_value, XSrc};
+    fn sp_xy_csv(&self, h: &mut crate::scope_csv::Hdr, rec: &mut &'static [u16], t0: &mut usize) -> Option<(crate::scope_csv::XFn, usize, f32, f32, bool)> {
+        use crate::scope_xy::{csv_set, csv_x, XSrc};
         if self.scope.xy == scope::XY_GEN {
             let Some(g) = self.scope.gen_sync() else {
                 h.s("# X-Y GEN: no generator phase for this record, no x column\r\n");
                 return None;
             };
             h.s("# x = the generator output, computed from its timers (volts)\r\n");
-            return Some((XSrc::Gen(g), 0, g.shape.lo_v, g.shape.hi_v));
+            csv_set(XSrc::Gen(g));
+            return Some((csv_x, 0, g.shape.lo_v, g.shape.hi_v, false));
         }
         let Some((d0, step)) = self.scope.rec_time() else {
             h.s("# X-Y CH2: no CH2 time for this record, no x column\r\n");
             return None;
         };
-        let src = XSrc::Ch2 { t0: d0, step };
+        csv_set(XSrc::Ch2 { t0: d0, step });
         let (mut i0, mut i1) = (usize::MAX, 0);
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);
         for i in 0..rec.len() {
-            if let Some(v) = x_value(&src, i) {
+            if let Some(v) = csv_x(i) {
                 i0 = i0.min(i);
                 i1 = i;
                 lo = lo.min(v);
@@ -1031,7 +1032,7 @@ impl App {
         h.s("# x = the DMM CH2, its sample nearest each row's time\r\n");
         *rec = &rec[i0..=i1];
         *t0 -= i0;
-        Some((src, i0, lo, hi))
+        Some((csv_x, i0, lo, hi, crate::scope_ch2::store().scale().amps))
     }
 
     /// Trigger type text of the CSV header.

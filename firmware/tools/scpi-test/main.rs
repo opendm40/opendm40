@@ -221,7 +221,7 @@ fn set_commands() {
     check(matches!(s.handle(b"DISP:XY CH2", 1), Out::Instr(Cmd::DispXy(Some(2)))), "DISP:XY CH2");
     check(matches!(s.handle(b"DISP:XY OFF", 1), Out::Instr(Cmd::DispXy(Some(0)))), "DISP:XY OFF");
     check(matches!(s.handle(b"DISP:XY?", 1), Out::Instr(Cmd::DispXy(None))), "DISP:XY? is the query");
-    check(!matches!(s.handle(b"DISP:XY CH3", 1), Out::Instr(_)), "DISP:XY CH3 is refused");
+    check(!matches!(s.handle(b"DISP:XY CH3", 1), Out::Instr(_)) && err(&mut s).starts_with("-224,"), "DISP:XY CH3 is refused (-224)");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
     check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
     check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");

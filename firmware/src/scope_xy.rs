@@ -89,6 +89,45 @@ impl Bits {
     }
 }
 
+/// The X column of an X-Y CSV (scope_csv.rs `set_x`): the generator
+/// against the stored record (its BUF[0]), or the DMM CH2 store with the
+/// DWT time of BUF[0] and cycles per sample.
+#[derive(Clone, Copy)]
+pub enum XSrc {
+    Gen(crate::gen::Sync),
+    Ch2 { t0: u32, step: f32 },
+}
+
+struct CsvX {
+    src: XSrc,
+    run: crate::scope_ch2::Run,
+}
+
+// SRAM (`.sram_bss`, an all-zero initial value).
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
+static mut CSVX: CsvX = CsvX {
+    src: XSrc::Gen(crate::gen::Sync { t0: 0.0, s: 0.0, q: 0.0, k: 0.0, shape: crate::gen::Shape { wave: crate::gen::Wave::Sine, lo_v: 0.0, hi_v: 0.0, duty: 0.0 } }),
+    run: crate::scope_ch2::Run::ZERO,
+};
+
+/// Use `src` for `csv_x` from now on.
+pub fn csv_set(src: XSrc) {
+    let c = unsafe { &mut *core::ptr::addr_of_mut!(CSVX) };
+    c.src = src;
+    c.run = crate::scope_ch2::store().run();
+}
+
+/// The X value of record sample `i` (scope_csv::XFn): the generator's
+/// volts at its phase, or the CH2 sample nearest its time (rising `i`: an
+/// incremental lookup; a step back costs one full search).
+pub fn csv_x(i: usize) -> Option<f32> {
+    let c = unsafe { &mut *core::ptr::addr_of_mut!(CSVX) };
+    match c.src {
+        XSrc::Gen(g) => Some(g.shape.volts(g.phase(i as f64))),
+        XSrc::Ch2 { t0, step } => crate::scope_ch2::store().value_run(&mut c.run, t0.wrapping_add((i as f64 * step as f64) as u64 as u32)),
+    }
+}
+
 /// Persistence clear interval per Persist setting (OFF, MIN, 1S, INF; OFF
 /// clears every frame).
 pub const CLEAR_MS: [u64; 4] = [0, 80, 1000, u64::MAX];

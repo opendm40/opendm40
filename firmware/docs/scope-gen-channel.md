@@ -251,9 +251,11 @@ quantised to 10 bits over its span in the record.
 
 ### 3.5 Memory (build.sh against release/0.4.0 6f56b87)
 
-Region B -3.2 KB (the per-sample loops, the flush's bitmap test, the DLG
-coder over a code function); the setup, the label, the switch and the CSV
-lookups are `.cold`; SRAM -16 KB (`.sram_bss`); no TCM .bss.
+Region B 20 084 -> 16 500 bytes free (-3.5 KB: the per-sample loops, the
+flush's bitmap test, CH2's `range_run` out of line, the DLG coder over a
+code function); the setup, the label, the switch and the CSV's x lookups
+are `.cold` (region C 22 888 -> 19 172); SRAM 45 356 -> 29 284 free
+(`.sram_bss`); no TCM .bss; stack headroom 21 516 -> 21 508.
 
 ### 3.6 Device check (not done)
 
