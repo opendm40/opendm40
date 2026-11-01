@@ -1278,6 +1278,10 @@ To open it: main menu, **Oscilloscope**, or swipe from the combined view.
   - Hold the **DMM** title: the [Wave view](#wave-view-the-scope-on-the-multimeter-inputs).
 - **Measurement row** at the bottom: up to four measurements.
 
+![All four channels on: CH1, DMM, GEN, ABS math](img/scope-channels.png)
+
+*All four channels on: CH1, DMM, GEN, ABS math.*
+
 | Key | What it does |
 |---|---|
 | **RUN** | Run / stop. Also: tap the run state in the top bar. |
