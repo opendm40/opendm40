@@ -58,6 +58,12 @@ const STREAM_FS: u32 = 1_250_000;
 const STREAM_SPIN_US: u64 = 1000;
 /// Record buffer (samples) in SRAM0.
 pub const CAP: usize = 26 * 1024;
+/// Stale samples at the front of a linear record (dlog::scope_hold_head;
+/// device 2026-11-01 at 12.5 MS/s): the software-trigger path (also X-Y)
+/// and the comparator path (also after the ring wrapped; why there,
+/// unknown). The stream path (fs <= STREAM_FS) showed none.
+const HEAD_SW: usize = 1;
+const HEAD_HW: usize = 2;
 
 #[link_section = ".dmabuf"]
 static mut BUF: [u16; CAP] = [0; CAP];
@@ -1171,6 +1177,7 @@ impl Scope {
         // Read after the stop: the DMA was still running before it.
         let ndtr = unsafe { r32(S4 + 0x04) } as usize;
         self.stored_valid = false;
+        let head = if was_stream { 0 } else if was_hw { HEAD_HW } else { HEAD_SW };
         let len = if was_rolling {
             self.snapshot_roll();
             return true;
@@ -1194,13 +1201,15 @@ impl Scope {
         } else {
             self.rec - ndtr.min(self.rec)
         };
-        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false);
+        self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false, head);
         false
     }
 
     /// Mask BUF[0..len] to 10 bits and mark it as the stored record, captured
-    /// with the current settings (fs, range).
-    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool) {
+    /// with the current settings (fs, range). `head`: its first samples are
+    /// the acquisition's first conversions, stale (HEAD_SW / HEAD_HW;
+    /// dlog::scope_hold_head), 0: none (stream, roll, wave view).
+    fn snapshot_mark(&mut self, len: usize, anchor: usize, trig: Option<usize>, roll: bool, head: usize) {
         if len < 2 {
             self.stored_valid = false;
             return;
@@ -1209,6 +1218,7 @@ impl Scope {
         for v in buf.iter_mut() {
             *v &= 0x3FF;
         }
+        crate::dlog::scope_hold_head(buf, head);
         self.stored_len = len;
         self.stored_fs = self.sample_rate();
         self.stored_tb = self.s.tb as u8;
@@ -1244,7 +1254,7 @@ impl Scope {
         let pre = self.screen * self.s.hpos.clamp(0, COLS as i32) as usize / COLS;
         let win = n - self.screen;
         // Mask once here (snapshot_mark), then search in the masked record.
-        self.snapshot_mark(n, 0, None, false);
+        self.snapshot_mark(n, 0, None, false, HEAD_SW);
         let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..n] };
         // X-Y: free run, every record is shown (untriggered).
         let trig = if self.xy != XY_OFF {
@@ -1290,7 +1300,7 @@ impl Scope {
             wr.min(CAP)
         };
         self.rec_base = self.roll_written - len as u64;
-        self.snapshot_mark(len, len.saturating_sub(1), None, true);
+        self.snapshot_mark(len, len.saturating_sub(1), None, true, 0);
     }
 
     fn start(&mut self) {
@@ -1558,7 +1568,7 @@ impl Scope {
                     self.stored_valid = false;
                     return None;
                 }
-                self.snapshot_mark(len, len - self.screen / 2, None, false);
+                self.snapshot_mark(len, len - self.screen / 2, None, false, HEAD_HW);
                 let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
                 let found = if len - post > pre { self.find_trigger(&data[pre..len - post]).map(|i| i + pre) } else { None };
                 if found.is_some() {
@@ -1599,7 +1609,7 @@ impl Scope {
                 let th = len - post_n;
                 let lo = th.saturating_sub(WIN / 2).max(pre);
                 let hi = (th + WIN / 2).min(len - post);
-                self.snapshot_mark(len, th, None, false);
+                self.snapshot_mark(len, th, None, false, HEAD_HW);
                 let data: &[u16] = unsafe { &(&*core::ptr::addr_of!(BUF))[..len] };
                 // The crossing nearest the estimate: at slow rates the window
                 // spans several periods, and the first crossing in it was a
@@ -2022,7 +2032,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false, 0);
         self.deadline = 0;
         if (trig.is_some() || self.xy != XY_OFF) && self.s.mode == TrigMode::Single {
             self.s.run = false;
@@ -2445,7 +2455,7 @@ impl Scope {
             None => len - self.screen,
         };
         let trig = t.map(|_| start + pre);
-        self.snapshot_mark(len, start + self.screen / 2, trig, false);
+        self.snapshot_mark(len, start + self.screen / 2, trig, false, 0);
         wv().shown = Some((base + (start + self.screen / 2) as u64, t));
         wv().last_emit = now;
         self.deadline = now + self.auto_timeout();
@@ -2568,15 +2578,15 @@ impl Scope {
         let len = self.wave_linear();
         let base = wv().slot0;
         if was_rolling {
-            self.snapshot_mark(len, len.saturating_sub(1), None, true);
+            self.snapshot_mark(len, len.saturating_sub(1), None, true, 0);
             return true;
         }
         match wv().shown {
             Some((c, t)) if c >= base && c < base + len as u64 => {
                 let trig = t.filter(|&t| t >= base && t < base + len as u64).map(|t| (t - base) as usize);
-                self.snapshot_mark(len, (c - base) as usize, trig, false);
+                self.snapshot_mark(len, (c - base) as usize, trig, false, 0);
             }
-            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false),
+            _ => self.snapshot_mark(len, len.saturating_sub(self.screen / 2), None, false, 0),
         }
         true
     }

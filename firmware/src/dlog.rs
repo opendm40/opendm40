@@ -895,6 +895,22 @@ impl SDec {
 /// The generated CSV row: "+d.ddddde+xx,+d.dddde+xx\r\n".
 pub const SCOPE_ROW: usize = 26;
 
+/// The front of a scope record that starts with the acquisition's first
+/// conversion: its first `k` codes are stale (the ADC's output from before
+/// the sample clock started, inferred; device 2026-11-01 at 12.5 MS/s: 1
+/// code on the software-trigger path, 2 on the comparator path, read up to
+/// 100 codes off their neighbours). They take code `k`'s value, so row 0 of
+/// a CSV / WAV:DATA? does not show a level the signal never had (and an
+/// edge search from sample 0 does not see one). Indices stay as they were
+/// (the generator phase, the CH2 time and the trigger refer to them).
+#[inline]
+pub fn scope_hold_head(rec: &mut [u16], k: usize) {
+    if rec.len() > k {
+        let v = rec[k];
+        rec[..k].fill(v);
+    }
+}
+
 /// The scope record file header (header text = the CSV's, column line
 /// included) into `out`; returns its length (FHDR + text + SCOPE_PAR).
 pub fn scope_header(text: &[u8], a: f32, b: f32, dt: f32, t0: u32, n: u32, out: &mut [u8]) -> usize {
