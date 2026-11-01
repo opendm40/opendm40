@@ -242,9 +242,9 @@ pub fn run(out: &str) -> usize {
         ("Vendor", "Alientek"),
         ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
-        ("Bootloader", "V1.1"),
+        ("Bootloader", "V4.0"),
         ("Software", ver),
-        ("Hardware", "V4"),
+        ("Hardware", "V1.1"),
         ("Board temp", "31.5 C (MCU)"),
     ]);
     ck.check_opts("manual/device", &page, false);

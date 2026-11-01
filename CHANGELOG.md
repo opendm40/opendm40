@@ -239,6 +239,8 @@ section named after the tag as the release notes; how to cut a release:
   an AC current in DC V).
   DC V's A-JACK needs ~9 mA either way now: the 66 kHz signal above raised
   it now and then.
+- **Device page:** the bootloader and hardware versions were swapped. They now
+  match the stock page, for example Bootloader V4.0 and Hardware V1.1.
 
 ## v0.3.0 (2026-10-27)
 
