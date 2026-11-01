@@ -14,8 +14,8 @@ meter.
 | Space after the TCM | `0x10010000..0x1FFEFFFF` | - | reads `0xFFFFFFFF`, no fault, 5 cycles; not RAM (*inferred*; no write tried) |
 | Flash above 1 MiB | `0x08100000..0x0FFFFFFF` | - | reads `0xFFFFFFFF`, no fault, 5 cycles at every offset: no flash array behind it (*inferred* from the speed, see below) |
 | Zero-wait flash | `0x08000000..0x0807FFFF` | 512 KiB | ends exactly at `0x08080000`; no register sets the size |
-| Backup SRAM, free part | `0x40024124..0x40024FE7` | 3 780 B | **usable**: read / write OK, 5 cycles; kept over a reset, lost at power-off |
-| USBHS FIFO RAM | `0x40060000..0x40060FFF` | 4 KiB | **usable** with `USBHSEN` on, **32-bit stores only** (a byte store fills the whole word with that byte); reads of any size; 5 cycles; kept while the clock is gated off |
+| Backup SRAM, free part | `0x40024124..0x40024FE7` | 3 780 B | **usable**: read / write OK, 5 cycles; kept over a reset, lost at power-off; 0.4.0 puts `.bkp_bss` here |
+| USBHS FIFO RAM | `0x40060000..0x40060FFF` | 4 KiB | **usable** with `USBHSEN` on, **32-bit stores only** (a byte store fills the whole word with that byte); reads of any size; 5 cycles; kept while the clock is gated off; 0.4.0 puts `.usbhs_bss` here |
 | USBFS FIFO RAM, unallocated tail | FIFO words `0x70..0x13F` | 832 B | not probed: the USB stack owns the FIFO |
 | IPA (2D engine) | `0x4002B000` | - | **absent**: clock bit sets, registers read 0 and ignore writes |
 | TLI (LCD controller) | `0x40016800` | - | **absent**: clock bit sets, `TLI_CTL` reads its reset value `0x2220`, writes ignored |
@@ -102,7 +102,12 @@ Nothing was erased or programmed.
 
 Free: `0x40024124..0x40024FE7` (3 780 B). Before the test it held random
 power-up data. `DBG:MTEST?` over `0x40024200..0x40024EFF` (832 words):
-pattern, inverse, pattern all OK; `DBG:MVER?` 4 minutes later OK. It keeps
+pattern, inverse, pattern all OK; `DBG:MVER?` 4 minutes later OK.
+That slice is no longer free: later firmware puts `.bkp_bss` right after
+the record (`0x40024128..0x40024810` in the 0.4.0 release: screenshot /
+upload jobs, the USB volume state, the CSV plan). A write probe there while
+the firmware runs corrupts that state, so POKE / MTEST now refuse the whole
+backup SRAM. It keeps
 its content over a reset and an update, but not over a power-off
 ([persist.rs](../src/persist.rs) header). Needs `BKPSRAMEN` and `PMU_CTL`
 BKPWEN, which [persist.rs](../src/persist.rs) already sets.
@@ -123,6 +128,9 @@ With `USBHSEN` (RCU_AHB1EN bit 29) on:
 - load time 5 cycles;
 - with the clock gated off and on again ~4 minutes later, `DBG:MVER?`: all
   1024 words intact.
+
+The 0.4.0 firmware uses this RAM (`.usbhs_bss`: csvlog's block tail), so a
+write probe here breaks a running CSV recording; POKE / MTEST now refuse it.
 
 With the clock off, or above `0x40060FFF`, reads return the last value the
 bus carried (no fault). So the RAM is 4 KiB.
@@ -236,8 +244,7 @@ releases) adds debug commands:
   `probe_fault`, which, while a probe access is armed, records CFSR / BFAR,
   clears them and resumes after the access. PRIMASK is set, so a BusFault
   escalates to HardFault. Any other fault still hangs as before (watchdog).
-- POKE / MTEST write only inside a fixed list: ADDSRAM, the free backup
-  SRAM slice `0x40024200..0x40024EFF`, the USBHS FIFO window, the first
+- POKE / MTEST write only inside a fixed list: ADDSRAM, the first
   0x40 bytes of the IPA and TLI registers, the ENET and CAN0 data
   registers above. Never the FMC, option bytes, RCU or GPIO. Every clock
   bit a test set was cleared after it; the RCU enable registers read their

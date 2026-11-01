@@ -160,11 +160,11 @@ fn poke(addr: u32, v: u32) -> Result<u32, (u32, u32)> {
 }
 
 /// The only ranges POKE / MTEST may write ([start, end)). Reasoned in
-/// docs/hidden-memory.md; none is used by opendm40.
-const WRITABLE: [(u32, u32); 14] = [
+/// docs/hidden-memory.md; none is used by opendm40. Never the backup SRAM
+/// (the settings record, `.bkp_bss`, the boot words) or the USBHS FIFO RAM
+/// (`.usbhs_bss`): the running firmware keeps live state in both.
+const WRITABLE: [(u32, u32); 12] = [
     (0x2003_0000, 0x200B_0000), // ADDSRAM (UM: 512 KB on "some" GD32F4xx)
-    (0x4002_4200, 0x4002_4F00), // backup SRAM between the settings record and the top words
-    (0x4006_0000, 0x4006_1000), // USBHS FIFO RAM, DWC2 direct-access window (unused block)
     (0x4002_B000, 0x4002_B040), // IPA registers (presence check)
     (0x4001_6800, 0x4001_6840), // TLI registers (presence check)
     // ENET (unused, no PHY): data-only registers, never MAC_CFG / DMA_CTL.
