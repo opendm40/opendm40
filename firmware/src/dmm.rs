@@ -2037,11 +2037,11 @@ pub struct Dmm {
     pub am: &'static mut am::Am,
     /// AC+DC event trace (acdctr.rs; DBG:ACDC:TRACE, RAM only, off at boot).
     pub tr: &'static mut tr::Trace,
-    /// Burden voltage readout in the A functions (Settings 3/3 "Burden
+    /// Burden voltage readout in the A functions (Settings > Multimeter "Burden
     /// voltage", SCPI DISP:BURD; `burden_val`): I x the shunt's R_path in
     /// aux1 (DC) / aux2 (AC, instead of the duty cycle).
     pub burden_show: bool,
-    /// Ohm readings below 0 shown (Settings 3/3 "Negative ohm", SCPI
+    /// Ohm readings below 0 shown (Settings > Multimeter "Negative ohm", SCPI
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
@@ -3754,7 +3754,7 @@ impl Dmm {
         }
     }
 
-    /// Global temperature unit (Settings 2/2 "Temp unit", SCPI UNIT:TEMP):
+    /// Global temperature unit (Settings > Multimeter "Temp unit", SCPI UNIT:TEMP):
     /// deg F instead of deg C for the main reading and the cold junction.
     /// Offsets stay in C (0.1 C steps, a calibration trim).
     pub fn temp_f(&self) -> bool {

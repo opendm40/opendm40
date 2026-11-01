@@ -19,7 +19,7 @@
 //!   until the event ends or is silenced (an A-PROT latch outside DC V / mV
 //!   holds the condition until the user acts).
 
-/// Settings 3/3 "Danger alarm" (persisted, meter::EXT_DANGER_SHIFT; 0 =
+/// Settings > Alerts "Danger alarm" (persisted, meter::EXT_DANGER_SHIFT; 0 =
 /// Loud, the default of every older record).
 pub const LOUD: u8 = 0;
 pub const VOLUME: u8 = 1;

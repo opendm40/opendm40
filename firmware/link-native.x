@@ -163,6 +163,8 @@ SECTIONS
          * polls them under the region C hooks). Region B, ~2 KB. */
         *(.text.*8opendm404boot*);
         *(.text.*8opendm403app9app_press*);
+        /* The press feedback's scan-line sync and DBG:SCANLINE? (src/scanline.rs). */
+        *(.text.*8opendm408scanline*);
         /* Inrush current: open / arm / close / results / save glue and the
          * full page (src/app_inrush.rs; app_inrush_live.rs and the page's
          * live parts stay in region B: they run while the AD2 stream does). */
@@ -293,6 +295,12 @@ SECTIONS
         /* Pressed feedback of the MF range / Power Settings pages (per touch). */
         *(.text.*8opendm402ui11range_press*);
         *(.text.*8opendm402ui2pw14settings_press*);
+        /* Their boxes for the press feedback, and the strip-box pass
+         * (app_press.rs draw_box: per press). */
+        *(.text.*8opendm402ui16range_press_item*);
+        *(.text.*8opendm402ui2pw10press_item*);
+        *(.text.*8opendm402ui9temp_rect*);
+        *(.text.*8opendm403lcd10strips_box*);
         /* Debug / file replies, `#[inline(never)]` so they do not land in
          * main.rs `run` (hot): DBG:TOUCH?, DBG:DIAG?, MMEM:DEL (and the
          * modules above: DBG:HYSPI, DBG:UPLOAD, MMEM:DATA?).

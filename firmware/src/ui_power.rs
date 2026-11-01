@@ -752,6 +752,21 @@ pub fn settings_page(pv: &PowerVals) {
 /// colour) or as `settings_page` draws it.
 #[inline(never)] // .cold (link-native.x): per touch on the page
 pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
+    let Some((r, item)) = press_item(pv, c) else { return };
+    let Some((t, sel)) = item else { return super::record_button(r, on) };
+    let bg = if on { super::K_SEL } else if sel { SEL } else { 0x2966 };
+    sf::rbox(r, 6, bg, BG);
+    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+}
+
+/// The box `settings_press` draws for `c` (the press feedback's strip box).
+pub fn settings_press_rect(pv: &PowerVals, c: u8) -> Option<sf::Rect> {
+    press_item(pv, c).map(|i| i.0)
+}
+
+/// Button `c` (`settings_press`): its box and (text, selected), or None
+/// for the Record button.
+fn press_item(pv: &PowerVals, c: u8) -> Option<(sf::Rect, Option<(&'static str, bool)>)> {
     let (r, t, sel) = match c {
         0..=3 => (ps_cell(0, c as i16), pw::V_NAMES[c as usize], !pv.v_auto && pv.vr == c),
         4 => (ps_cell(0, 4), "AUTO", pv.v_auto),
@@ -767,15 +782,13 @@ pub fn settings_press(pv: &PowerVals, c: u8, on: bool) {
             let i = (c - PS_COUP) as usize;
             (rect(PS_ROW4[i], 182, 150, 38), pw::coup_name(PS_COUPS[i]), pv.coup == PS_COUPS[i])
         }
-        PS_RECORD => return super::record_button(ps_row5(3), on),
+        PS_RECORD => return Some((ps_row5(3), None)),
         _ => match PS_ROW5.iter().position(|&(k, _)| k == c) {
             Some(i) => (ps_row5(i), PS_ROW5[i].1, false),
-            None => return,
+            None => return None,
         },
     };
-    let bg = if on { super::K_SEL } else if sel { SEL } else { 0x2966 };
-    sf::rbox(r, 6, bg, BG);
-    sf::glyphs(sf::TEXT22, r, t, STATUS_FG, bg, 8, 0);
+    Some((r, Some((t, sel))))
 }
 
 /// The Zero... / V cal... dialog (dialog.rs fuse-check box, Cancel / Start;

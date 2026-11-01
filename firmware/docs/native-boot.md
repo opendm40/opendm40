@@ -1907,7 +1907,7 @@ One LUN (`Msc::new(.., 1)`, feature `vdisk`, default; builds
 without it still export the writable SPI disk).
 INQUIRY product `DM40 files`. **Read-only by default** ("Files live",
 [decisions-2026-10-22](../../docs/history/decisions-2026-10-22.md) #6): the WP bit set, every WRITE fails DATA PROTECT
-07/27/00, a change goes out as a UNIT ATTENTION at once. Settings 3/3
+07/27/00, a change goes out as a UNIT ATTENTION at once. Settings > Other
 "USB disk" = "PC can edit" (or `DBG:VDISK:RO 0`) asks for the writable
 volume: volatile (read-only again at every boot) and in force from the next
 USB bus reset (a re-plug; a host reads the WP bit when it mounts, so the
