@@ -1921,8 +1921,8 @@ P (`DC x W + AC y W`). The parts add up to the totals.
 
 ### Coupling: DC, AC, AC+DC
 
-Tap **W** again to step **DC → AC → AC+DC**, or choose it on the settings
-page. Entering the power meter always starts in DC.
+Tap **W** again to step **DC → AC → AC+DC**, or choose it in [Power
+Settings](#power-settings-mf). Entering the power meter always starts in DC.
 
 | Coupling | Power | Use for |
 |---|---|---|
@@ -2054,9 +2054,9 @@ To open: long press the **A** button, or **A** function, **MF**, **Inrush**.
 **RUN** arms again or cancels. **Back**, **MENU** or **MF** close the page
 and restore the A function.
 
-- The trigger is a rise of the current by the step within about 100 ms, in
-  either direction. With a load already running, only a step of that size
-  triggers. A slow rise does not trigger.
+- The trigger is a rise of the current (of either polarity) by the step
+  within about 100 ms. With a load already running, only a step of that
+  size triggers. A slow rise does not trigger.
 - Works for AC and DC loads. 9600 samples/s: very short spikes read lower
   than they are.
 - The meter's rating is 10 A; the capture shows **OL** when the current goes
@@ -2071,7 +2071,8 @@ files, or view them on the meter in the [gallery](#the-gallery).
 There are two recorders:
 
 - **Recording** (the Record page): readings as the multimeter shows them,
-  or one mean value per 1 s, 10 s or 1 min. For hours or days.
+  one mean value per 1 s, 10 s or 1 min, or a row when the reading changes.
+  For hours or days.
 - **Fast recording**: raw samples of the measuring chip, up to thousands
   per second, for seconds to hours. DC and AC volts and amps only.
 
@@ -2545,7 +2546,8 @@ reference](scpi-reference.md).
 
 ### Bluetooth
 
-Bluetooth is on by default; switch it off in **Settings > Bluetooth**. While
+Bluetooth is on by default; switch it off in **Settings > Other >
+Bluetooth**. While
 a phone or a computer is connected, the Bluetooth symbol shows in the status
 bar.
 
@@ -2937,15 +2939,15 @@ measurement as it was.
 
 | Kept after switching off (preferences) | Back to the defaults after switching off (kept after a restart) | Never kept |
 |---|---|---|
-| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the Ω test current, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
-| Multimeter: the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
+| All [settings](#settings) except **USB disk**; the danger alarm, the alert choices, the key volume, the brightness, the power-off timer, the start page, Bluetooth | The multimeter function (DC V), the autorange choices, the rate and smoothing, the trend timebase, AutoHold, the limits | **USB disk** (back to Files live); HOLD, REL, MIN/MAX/AVG, the history, a fixed range (the meter starts in autorange; kept with **Mode Remember** ON) |
+| Multimeter: each function button's sub-mode (V and A coupling, diode / continuity, Hz / °C) and the Ω test current, the DMM row, the temperature sensor and unit, the thermocouple offsets and the NTC values, the limits' fail beep | Scope: the timebase, V/div, coupling, probe, trigger settings, positions, measurements and the FFT settings | Scope: the trigger mode (the scope starts running, in trigger mode Auto) |
 | Scope: the display and touch settings (colours, brightness, grid, persistence, tap modes) | The power meter's settings and its zero; the Record page's interval and duration | Generator: the output (off after power-on) |
 | Generator: the waveform, frequency, amplitude, offset and duty | | |
 
 **Mode Remember** ON (Settings > Power, as the stock's) also keeps after
 switching off: the multimeter function and coupling, the AUTO / AUTO+ choice
-or a fixed V, A or Ω range, the Ω test current, the rate and smoothing and
-the trend timebase. AutoHold and the limits still start afresh.
+or a fixed V, A or Ω range, the rate and smoothing and the trend timebase.
+AutoHold and the limits still start afresh.
 
 The meter saves the settings to its internal disk, in the file
 `_SETTING.BIN`, about 5 s after the last change and again when it switches
@@ -2991,9 +2993,7 @@ Known problems:
 - While a fast data stream runs, the meter does not answer the phone-app
   protocol.
 - The usable frequency range of the power meter is *unknown*.
-- A current through the A jack gives no [A-JACK](#the-alerts) in AC mV; in
-  Ω it shows LIVE? instead.
+- On the manual Ω ranges below 6 MΩ, a current through the A jack can show
+  LIVE? instead of [A-JACK](#the-alerts).
 - In DC mV, a current of about 20 mA through the A jack already trips
   A-PROT.
-- A signal above about 20 kHz on V/Ω–COM can raise a false A-JACK or A-PROT
-  on the mV ranges.
