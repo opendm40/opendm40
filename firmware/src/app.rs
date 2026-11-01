@@ -1095,7 +1095,6 @@ impl App {
                 let mcu = if tn > 0 { core::str::from_utf8(&tb[..tn]).unwrap_or("--") } else { "--" };
                 let lines = [
                     ("Vendor", "Alientek"),
-                    ("Web", "www.alientek.com"),
                     ("Model", model_name),
                     ("SN", sn),
                     ("Bootloader", bl),

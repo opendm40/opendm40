@@ -3391,11 +3391,13 @@ pub fn settings_hit(tab: u8, x: u16, y: u16) -> Option<SetHit> {
 }
 
 /// Left edge of a row's touch target (owner 2026-10-30: the setting's name
-/// is not a target): the value (and ">") from half the 12 px gap after the
-/// label to the row's right end; on a stepper row the "-" key's left edge
-/// less 6 px.
+/// is not a target): the value from half the 12 px gap after the label to
+/// the row's right end; on a stepper row the "-" key's left edge less 6 px;
+/// a row that opens a page (">") is a target all over (owner 2026-11-01).
 pub fn set_value_x(id: u8) -> i16 {
-    if set_is_stepper(id) {
+    if set_opens(id) {
+        ST_SPLIT as i16
+    } else if set_is_stepper(id) {
         ST_MINUS_X - 6
     } else {
         ST_TXT_X + sf::text_width(sf::TEXT22, SET_NAMES[id as usize], 0) + 6

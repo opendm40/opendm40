@@ -2346,7 +2346,7 @@ The gallery also shows the screenshots made by the stock firmware.
 
 To open: main menu, **Settings**. The tabs on the left are the sections;
 tap one to show its rows. Tap a value to step to the next one (the name
-does nothing); rows with **-** / **+** change in steps, a **>** opens a page. **< Back** in
+does nothing); rows with **-** / **+** change in steps, a row with **>** opens a page from anywhere on it. **< Back** in
 the title bar or **MENU** goes back to the main menu.
 
 ### Display tab
@@ -2438,7 +2438,7 @@ the title bar or **MENU** goes back to the main menu.
 
 | Line | Content |
 |---|---|
-| Vendor, Web | Alientek, www.alientek.com |
+| Vendor | Alientek |
 | Model | DM40A, DM40B or DM40C (from the meter's calibration data) |
 | SN | The factory serial number, as on the stock Device page |
 | Bootloader | The version of the Alientek bootloader |

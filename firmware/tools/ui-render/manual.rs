@@ -236,7 +236,6 @@ pub fn run(out: &str) -> usize {
     let ver = ui::device_software(&mut fwb);
     ui::device_page(&[
         ("Vendor", "Alientek"),
-        ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
         ("SN", "12345678"),
         ("Bootloader", "V4.0"),

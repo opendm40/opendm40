@@ -855,7 +855,8 @@ fn hit_tests(ck: &mut Ck) {
             let mut ok = true;
             for y in y0..y0 + 42 {
                 // The name (from x 138 to its end + 5) is not a target, the
-                // value side to the row's end (476) is, all of it.
+                // value side to the row's end (476) is, all of it; a ">" row
+                // is a target all over.
                 for x in 131..476i16 {
                     let want = (x >= x0).then_some(r as u32);
                     ok &= hit(x as u16, y as u16) == want;
