@@ -106,6 +106,8 @@ usbd-storage = { version = "3.0.0", features = ["bbb", "scsi"] }
 # previous command's pass / fail panicked in `set_status`), the IO buffer
 # cleared at every reset, Bulk-Only Mass Storage Reset handled (a control
 # OUT; the crate looked for it in control IN), never more IN data than the
-# host asked for, `Scsi::sending` (msc.rs pumps the fill / CSW).
+# host asked for, `Scsi::sending` (msc.rs pumps the fill / CSW). And its
+# state asserts panic without a message (no Debug text of the states in
+# region B, ~0.8 KB).
 [patch.crates-io]
 usbd-storage = { path = "vendor/usbd-storage" }
