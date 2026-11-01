@@ -148,11 +148,11 @@ pub fn set_pinch_mode(m: u8) {
 /// Column rows (280-row model) of the frame shown, per engine column, and
 /// what the frame was captured with: the base of every preview.
 struct Cache {
-    seg: [(i16, i16); 400],
+    seg: [(i16, i16); scope::COLS],
     /// The GEN trace's and the DMM CH2's rows per engine column
     /// (docs/scope-gen-channel.md).
-    gseg: [(i16, i16); 400],
-    c2seg: [(i16, i16); 400],
+    gseg: [(i16, i16); scope::COLS],
+    c2seg: [(i16, i16); scope::COLS],
     valid: bool,
     pos: i32,
     hpos: i32,
@@ -160,8 +160,8 @@ struct Cache {
     range: usize,
     tb: usize,
     /// Persistence layers (model rows per graph column) and the swap time.
-    ps_a: [(i16, i16); 399],
-    ps_b: [(i16, i16); 399],
+    ps_a: [(i16, i16); su::NCOL],
+    ps_b: [(i16, i16); su::NCOL],
     ps_t: u64,
 }
 
@@ -169,21 +169,21 @@ struct Cache {
 // `sp_init`.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut CACHE: Cache = Cache {
-    seg: [su::EMPTY; 400],
-    gseg: [su::EMPTY; 400],
-    c2seg: [su::EMPTY; 400],
+    seg: [su::EMPTY; scope::COLS],
+    gseg: [su::EMPTY; scope::COLS],
+    c2seg: [su::EMPTY; scope::COLS],
     valid: false,
     pos: 0,
     hpos: 200,
     range: 8,
     tb: 13,
-    ps_a: [su::EMPTY; 399],
-    ps_b: [su::EMPTY; 399],
+    ps_a: [su::EMPTY; su::NCOL],
+    ps_b: [su::EMPTY; su::NCOL],
     ps_t: 0,
 };
 
 /// The shown frame's column rows (the decoder's bar, app_decode.rs).
-pub(super) fn cache_seg() -> &'static [(i16, i16); 400] {
+pub(super) fn cache_seg() -> &'static [(i16, i16); scope::COLS] {
     &cache().seg
 }
 
@@ -195,12 +195,12 @@ fn cache() -> &'static mut Cache {
 /// device): the frame cache here, the graph in scope_ui.
 pub(super) fn sp_init() {
     let c = cache();
-    for i in 0..400 {
+    for i in 0..scope::COLS {
         c.seg[i] = su::EMPTY;
         c.gseg[i] = su::EMPTY;
         c.c2seg[i] = su::EMPTY;
     }
-    for i in 0..399 {
+    for i in 0..su::NCOL {
         c.ps_a[i] = su::EMPTY;
         c.ps_b[i] = su::EMPTY;
     }
@@ -446,25 +446,44 @@ fn vdiv_idx(vidx: usize, probe: f32) -> u8 {
     (vidx + probe_idx(probe)).saturating_sub(2).min(21) as u8
 }
 
+/// Rows (min, max) of graph column `j`: the engine columns it covers (one
+/// while the graph has scope::COLS columns).
+pub(super) fn col_rows(seg: &[(i16, i16); scope::COLS], j: usize) -> (i16, i16) {
+    let (a, b) = (su::eng_of_col(j as i32) as usize, (su::eng_of_col(j as i32 + 1) as usize).min(scope::COLS));
+    if b <= a + 1 {
+        return seg[a];
+    }
+    let (mut lo, mut hi) = (i16::MAX, i16::MIN);
+    for &(p, q) in &seg[a..b] {
+        if p <= q {
+            lo = lo.min(p);
+            hi = hi.max(q);
+        }
+    }
+    if lo > hi { su::EMPTY } else { (lo, hi) }
+}
+
 /// Rows of the frame (13 + 280-row model) a pinch / pan preview maps: target
 /// column j of the graph from the cached columns, with a vertical scale `ky`
 /// around the zero row and a time scale `kx` around the trigger column.
 /// `seg`: CH1's, the GEN trace's or CH2's cached rows (CH2 with `d_pos` 0,
 /// `ky` 1: its scale is not CH1's).
-fn preview_rows(c: &Cache, seg: &[(i16, i16); 400], j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
+fn preview_rows(c: &Cache, seg: &[(i16, i16); scope::COLS], j: i32, d_pos: i32, hpos: i32, ky: f32, kx: f32, zr: f32) -> (i16, i16) {
     // Source columns covering target column j.
-    let (s0, s1) = if kx == 1.0 {
+    // (Graph column j shows the engine columns from j * ENG_PER_COL.)
+    let (s0, s1) = if kx == 1.0 && su::GW as usize == scope::COLS {
         let s = j - (hpos - c.hpos);
         (s, s + 1)
     } else {
-        let a = c.hpos as f32 + (j - hpos) as f32 / kx;
-        let b = c.hpos as f32 + (j + 1 - hpos) as f32 / kx;
+        let (ja, jb) = if su::GW as usize == scope::COLS { (j as f32, (j + 1) as f32) } else { (j as f32 * su::ENG_PER_COL, (j + 1) as f32 * su::ENG_PER_COL) };
+        let a = c.hpos as f32 + (ja - hpos as f32) / kx;
+        let b = c.hpos as f32 + (jb - hpos as f32) / kx;
         let fl = |v: f32| if v >= 0.0 || v == (v as i32) as f32 { v as i32 } else { v as i32 - 1 };
         let (a, b) = (fl(a), (-fl(-b)).max(fl(a) + 1));
         (a, b)
     };
     let (mut lo, mut hi) = (i32::MAX, i32::MIN);
-    for s in s0.max(0)..s1.min(400) {
+    for s in s0.max(0)..s1.min(scope::COLS as i32) {
         let (a, b) = seg[s as usize];
         if a > b {
             continue;
@@ -519,7 +538,7 @@ impl App {
             trig_row: s.trig_row as i16,
             trig_v: self.scope.trig_volts(),
             rising: s.rising,
-            trig_px: s.hpos as i16,
+            trig_px: su::col_of_eng(s.hpos) as i16,
             pos: s.pos as i16,
             colour: sp.colour,
             bright: sp.bright,
@@ -779,12 +798,12 @@ impl App {
         // 4.3); layers swap every period; off in roll and STOP.
         let pm = if self.scope.rolling() || !s.run { 0 } else { self.sp.persist as usize };
         if pm == 0 {
-            c.ps_a = [su::EMPTY; 399];
-            c.ps_b = [su::EMPTY; 399];
+            c.ps_a = [su::EMPTY; su::NCOL];
+            c.ps_b = [su::EMPTY; su::NCOL];
         } else {
             if c.valid {
-                for i in 0..399 {
-                    let (a, b) = c.seg[i];
+                for i in 0..su::NCOL {
+                    let (a, b) = col_rows(&c.seg, i);
                     if a <= b {
                         let p = &mut c.ps_a[i];
                         *p = (p.0.min(a), p.1.max(b));
@@ -794,7 +813,7 @@ impl App {
             if PERSIST_MS[pm] != u64::MAX && now >= c.ps_t {
                 c.ps_t = now + PERSIST_MS[pm];
                 c.ps_b = c.ps_a;
-                c.ps_a = [su::EMPTY; 399];
+                c.ps_a = [su::EMPTY; su::NCOL];
             }
         }
         // Code -> row is affine: rows of the code min / max per column.
@@ -871,7 +890,7 @@ impl App {
         let (ky, kx, hpos) = self.sp_view();
         let zr = (140 + s.pos) as f32;
         let d_pos = s.pos - c.pos;
-        for j in 0..399 {
+        for j in 0..su::NCOL {
             let fy = |(a, b): (i16, i16)| if a > b { su::EMPTY } else { (su::trace_fy(h, a as i32), su::trace_fy(h, b as i32)) };
             g.tr[j] = fy(preview_rows(c, &c.seg, j as i32, d_pos, hpos, ky, kx, zr));
             // The GEN trace is on CH1's scale; CH2 on its own (only the time
@@ -912,7 +931,7 @@ impl App {
             None => (scope::VSTEPS[c.range] / s.vdiv1(), scope::SDIV[c.tb] / scope::SDIV[s.tb]),
         };
         // A stopped pan moves the record under the trigger column.
-        let pan = self.sp.touch.map_or(0, |t| t.pan);
+        let pan = su::eng_dx(self.sp.touch.map_or(0, |t| t.pan));
         (ky, kx, if s.run { s.hpos } else { c.hpos + pan })
     }
 
@@ -1044,7 +1063,7 @@ impl App {
     /// phase.
     fn sp_gen_frame(&mut self, f: &scope::Frame) {
         let c = cache();
-        c.gseg = [su::EMPTY; 400];
+        c.gseg = [su::EMPTY; scope::COLS];
         if !self.scope.gen_trace || f.data.len() < 2 {
             return;
         }
@@ -1165,7 +1184,7 @@ impl App {
         let m = self.sp.math;
         self.sp.fft_view = None;
         self.sp.fft_hz = su::Txt::EMPTY;
-        g.ma = [su::EMPTY; 399];
+        g.ma = [su::EMPTY; su::NCOL];
         if !m.on {
             crate::prof::exit(crate::prof::FFT);
             return;
@@ -1190,7 +1209,7 @@ impl App {
             // (The CH1 columns are already widened: the bars touch.) The
             // drag / pinch preview's time axis; the volts stay.
             let (_, kx, hpos) = self.sp_view();
-            for j in 0..399 {
+            for j in 0..su::NCOL {
                 let (lo, hi) = preview_rows(c, &c.seg, j as i32, 0, hpos, 1.0, kx, 0.0);
                 if !c.valid || lo > hi {
                     g.ma[j] = su::EMPTY;
@@ -1221,7 +1240,7 @@ impl App {
         let ctr = m.ctr.clamp(half, half.max(10.0 * full - half));
         self.sp.math.ctr = ctr;
         let f0 = ctr - half;
-        let px = hzd / 40.0;
+        let px = hzd / su::DIV_W as f32;
         let ydiv_db = su::FFT_DB_VAL[m.db.min(12) as usize];
         let ydiv_v = su::VDIV_VAL[m.vdiv.min(21) as usize];
         let row = |db: f32| -> i32 {
@@ -1229,7 +1248,7 @@ impl App {
             r.clamp(-30000.0, 30000.0) as i32
         };
         let mut prev = None;
-        for j in 0..399 {
+        for j in 0..su::NCOL {
             let fa = f0 + j as f32 * px;
             let r = f.col_max(fa, fa + px).map(row);
             widen(g, j, r, &mut prev);
@@ -1283,8 +1302,8 @@ impl App {
     /// Settings changed outside a drag: forget the persistence.
     pub(super) fn sp_settings_changed(&mut self) {
         let c = cache();
-        c.ps_a = [su::EMPTY; 399];
-        c.ps_b = [su::EMPTY; 399];
+        c.ps_a = [su::EMPTY; su::NCOL];
+        c.ps_b = [su::EMPTY; su::NCOL];
     }
 
     /// Per main-loop pass on the scope page (from scope_poll): timers, the
@@ -1737,20 +1756,20 @@ impl App {
                     return;
                 }
                 let mut st = self.scope.s;
-                st.hpos = (st.hpos + dx).clamp(0, scope::COLS as i32);
+                st.hpos = (st.hpos + su::eng_dx(dx)).clamp(0, scope::COLS as i32);
                 self.sp_preview(st);
             }
             1 if self.sp.math.on && self.sp.math.mode == 5 => {
                 // FFT centre (stock: centre -= dx, the spectrum follows the
                 // finger); the last spectrum is re-drawn, no new one.
                 let o = self.fft_hz_opts()[self.sp.math.hz.min(3) as usize];
-                self.sp.math.ctr -= dx as f32 * o / 40.0;
+                self.sp.math.ctr -= dx as f32 * o / su::DIV_W as f32;
                 self.sp_math();
                 self.sp_code(7);
             }
             k @ (2 | 3) => {
                 let i = (k - 2) as usize;
-                self.cur.x[i] = (self.cur.x[i] as i32 + dx).clamp(1, 399) as u16;
+                self.cur.x[i] = (self.cur.x[i] as i32 + dx).clamp(1, su::NCOL as i32) as u16;
                 self.cursor_values();
                 self.sp_code(4 + 10 * i as u8);
             }
@@ -1800,7 +1819,7 @@ impl App {
             let s = self.scope.s;
             if !s.run && t.pan != 0 {
                 if let Some(a) = t.anchor {
-                    self.scope.pan_from(a, t.pan);
+                    self.scope.pan_from(a, su::eng_dx(t.pan));
                 }
             }
             if s.pos != t.snap.pos || s.trig_row != t.snap.trig_row || s.hpos != t.snap.hpos || s.runt_row != t.snap.runt_row {
@@ -2037,7 +2056,7 @@ impl App {
                 let s = self.scope.s;
                 if !s.run && t.pan != 0 {
                     if let Some(a) = t.anchor {
-                        self.scope.pan_from(a, t.pan);
+                        self.scope.pan_from(a, su::eng_dx(t.pan));
                     }
                 }
                 self.scope.apply(s, now);

@@ -90,17 +90,59 @@ pub const ST_RUN: u8 = 3;
 pub const ST_STOP: u8 = 4;
 
 // ---- geometry ----
+// The graph rectangle: every graph, strip and panel position below derives
+// from these. The frame lines are at x GX and GR (GX + 10 divisions), the
+// graph columns fx 1..=NCOL between them at screen x GX + fx; the engine
+// keeps its own scope::COLS columns (`eng_of_fx` / `fx_of_eng`).
+/// Left frame column.
+pub const GX: i16 = 13;
+/// Division width (px); the graph has 10.
+pub const DIV_W: i16 = 40;
+/// Frame-to-frame width and the right frame column.
+pub const GW: i16 = 10 * DIV_W;
+pub const GR: i16 = GX + GW;
+/// Graph columns (fx 1..=NCOL) and the centre column.
+pub const NCOL: usize = (GW - 1) as usize;
+pub const GCX: i16 = GW / 2;
+/// The right panel's first column.
+pub const PANEL_X: i16 = GR + 1;
+/// Left edge of the graph's left-side items (FFT dB box, CH2 label: 5 px
+/// inside the frame); with the frame at the screen edge, 3 px after the
+/// level markers (x 1..12) instead.
+pub const IN_X: i16 = if GX > 0 { GX + 5 } else { 16 };
+
+/// Engine column (scope::COLS per screen) at the left edge of graph column
+/// fx - 1 (0-based display column `j`): identity while GW == COLS.
+pub const fn eng_of_col(j: i32) -> i32 {
+    (j * crate::scope::COLS as i32) / GW as i32
+}
+/// Graph column (0-based) of engine column `e` (rounded).
+pub const fn col_of_eng(e: i32) -> i32 {
+    let n = e * GW as i32;
+    let d = crate::scope::COLS as i32;
+    (if n >= 0 { n + d / 2 } else { n - d / 2 }) / d
+}
+/// Engine columns of a move of `dx` graph columns (rounded).
+pub const fn eng_dx(dx: i32) -> i32 {
+    let n = dx * crate::scope::COLS as i32;
+    let d = GW as i32;
+    (if n >= 0 { n + d / 2 } else { n - d / 2 }) / d
+}
+/// Engine columns per graph column.
+pub const ENG_PER_COL: f32 = crate::scope::COLS as f32 / GW as f32;
+
 pub const TOP_BAR: Rect = rect(0, 0, 480, 20);
-pub const PANEL: Rect = rect(414, 20, 66, 300);
-pub const MEAS_BAR: Rect = rect(0, 301, 414, 19);
+pub const PANEL: Rect = rect(PANEL_X, 20, 480 - PANEL_X, 300);
+pub const MEAS_BAR: Rect = rect(0, 301, PANEL_X, 19);
 /// Combined view: graph frame top (under the 56 px meter strip at y 20).
 pub const COMBINED_TOP: i16 = 76;
 /// The drag / tap rect of the stock overlay (sec. 10.1).
-pub const INNER: Rect = rect(0, 15, 414, 290);
+pub const INNER: Rect = rect(0, 15, PANEL_X, 290);
 
 /// Right-panel buttons (sec. 5), 60 x 40 at x 417.
 pub const B_RECT: [Rect; 7] =
-    [rect(417, 20, 60, 40), rect(417, 61, 60, 40), rect(417, 102, 60, 40), rect(417, 150, 60, 40), rect(417, 191, 60, 40), rect(417, 232, 60, 40), rect(417, 280, 60, 40)];
+    [rect(BX, 20, 60, 40), rect(BX, 61, 60, 40), rect(BX, 102, 60, 40), rect(BX, 150, 60, 40), rect(BX, 191, 60, 40), rect(BX, 232, 60, 40), rect(BX, 280, 60, 40)];
+const BX: i16 = PANEL_X + 3;
 
 /// Top-bar badges (sec. 2): run status, timebase, CH1 V/div, trigger.
 pub const RUN_BADGE: Rect = rect(13, 1, 62, 17);
@@ -114,15 +156,15 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 /// Value-preview tabs (left: the next slower timebase, right: the next
 /// faster one), in the bottom graph corners. 52 px wide (the doc's 50 px
 /// left 2 px beside the widest labels, "<500ms" is 45 px in the 12 px font).
-pub const TAB_L: Rect = rect(23, 280, 52, 17);
-pub const TAB_R: Rect = rect(338, 280, 52, 17);
+pub const TAB_L: Rect = rect(IN_X + 5, 280, 52, 17);
+pub const TAB_R: Rect = rect(GR - 75, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
 /// starts after the left-strip glyphs (x <= 12), the right one reaches the
 /// frame. A marker grab zone (`grab_rect`) wins over them where they meet,
 /// except on a drawn tab (`graph_press`); the tabs end before the marker
 /// glyph columns (x 1..12, 401..412).
-pub const ZONE_L: Rect = rect(23, 228, 80, 73);
-pub const ZONE_R: Rect = rect(333, 228, 80, 73);
+pub const ZONE_L: Rect = rect(IN_X + 5, 228, 80, 73);
+pub const ZONE_R: Rect = rect(GR - 80, 228, 80, 73);
 /// `Model::tabs` bits.
 pub const TAB_SHOW_L: u8 = 1;
 pub const TAB_SHOW_R: u8 = 2;
@@ -294,7 +336,7 @@ pub const CUR_X: u8 = 2;
 pub const CUR_Y: u8 = 3;
 /// The cursor tab: bottom row of the graph, between the left Corners tap
 /// zone (x <= 102) and the FFT scale box (x >= 168).
-pub const CUR_TAB: Rect = rect(108, 280, 54, 17);
+pub const CUR_TAB: Rect = rect(ZONE_L.x + ZONE_L.w + 5, 280, 54, 17);
 
 /// opendm40 FFT additions (UF-11): the vertical scale ("10dB/div"), the
 /// horizontal scale ("50kHz/div"), the automatic peak readout and the peak
@@ -956,7 +998,7 @@ pub fn panel_button(m: &Model, k: usize) {
         5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
         1 => {
             let (f, t) = if m.ch1_txt.is_empty() { (sf::SC_F20, "CHA") } else { (sf::SC_F16, m.ch1_txt) };
-            (Ink::new(f, rect(417, 61, 60, 24), t, 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0))
+            (Ink::new(f, rect(BX, 61, 60, 24), t, 8, 0), Ink::new(sf::SC_F12, rect(BX, 85, 60, 16), b.as_str(), 8, 0))
         }
         4 => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
@@ -969,7 +1011,7 @@ pub fn panel_button(m: &Model, k: usize) {
             } else {
                 b.as_str()
             };
-            (Ink::new(sf::SC_F20, rect(417, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(417, 215, 60, 16), t2, 8, 0))
+            (Ink::new(sf::SC_F20, rect(BX, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(BX, 215, 60, 16), t2, 8, 0))
         }
         _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
     };
@@ -1007,7 +1049,7 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
-    let r = rect(13 + 100 * i as i16, 302, 98, 17);
+    let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
     let t = Ink::new(sf::SC_F12, r, text, 8, 0);
     let pal = m.pal_text();
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
@@ -1021,6 +1063,11 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
         }
     });
 }
+
+/// The measurement cells: 4 from MEAS_X (the frame's column, >= 4 px from
+/// the screen edge) to the right frame, 2 px apart.
+const MEAS_X: i16 = if GX < 4 { 4 } else { GX };
+const MEAS_STEP: i16 = (GR - MEAS_X) / 4;
 
 /// Every top-bar element.
 pub fn top_bar(m: &Model) {
@@ -1044,9 +1091,11 @@ pub fn panel(m: &Model) {
 /// combined view keeps y 20..`top` for the meter strip (drawn by ui.rs).
 pub fn chrome(m: &Model) {
     lcd::fill_rect(0, 0, 480, 20, C_BAR);
-    lcd::fill_rect(414, 20, 66, 300, C_BAR);
-    lcd::fill_rect(0, 301, 414, 19, C_BAR);
-    lcd::fill_rect(0, 20, 13, 281, C_BAR);
+    lcd::fill_rect(PANEL_X as u16, 20, (480 - PANEL_X) as u16, 300, C_BAR);
+    lcd::fill_rect(0, 301, PANEL_X as u16, 19, C_BAR);
+    if GX > 0 {
+        lcd::fill_rect(0, 20, GX as u16, 281, C_BAR);
+    }
     frame(m);
 }
 
@@ -1054,10 +1103,10 @@ pub fn chrome(m: &Model) {
 fn frame(m: &Model) {
     let top = m.top() as u16;
     let h = m.frame_h() as u16;
-    lcd::fill_rect(13, top, 401, 1, C_FRAME);
-    lcd::fill_rect(13, top + h - 1, 401, 1, C_FRAME);
-    lcd::fill_rect(13, top, 1, h, C_FRAME);
-    lcd::fill_rect(413, top, 1, h, C_FRAME);
+    lcd::fill_rect(GX as u16, top, GW as u16 + 1, 1, C_FRAME);
+    lcd::fill_rect(GX as u16, top + h - 1, GW as u16 + 1, 1, C_FRAME);
+    lcd::fill_rect(GX as u16, top, 1, h, C_FRAME);
+    lcd::fill_rect(GR as u16, top, 1, h, C_FRAME);
 }
 
 // ------------------------------------------------------------------ markers
@@ -1158,7 +1207,7 @@ pub const NSTRIP: usize = 6;
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
 /// 401..412, frame at 413).
-const RIGHT_X: i16 = 401;
+const RIGHT_X: i16 = GR - 12;
 
 /// Level markers in creation order with their level-item ids (CH1 zero 0,
 /// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
@@ -1249,11 +1298,11 @@ pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
 fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     let y = top + 1;
     if col < 12 {
-        Mark::new(14 + col.max(0), y, fam, LEFT, sel, colour)
-    } else if col + 12 <= 399 {
-        Mark::new(14 + col - 6, y, fam, DOWN, sel, colour)
+        Mark::new(GX + 1 + col.max(0), y, fam, LEFT, sel, colour)
+    } else if col + 12 <= NCOL as i16 {
+        Mark::new(GX + 1 + col - 6, y, fam, DOWN, sel, colour)
     } else {
-        Mark::new(14 + if col > 399 { 387 } else { col - 13 }, y, fam, RIGHT, sel, colour)
+        Mark::new(GX + 1 + if col > NCOL as i16 { NCOL as i16 - 12 } else { col - 13 }, y, fam, RIGHT, sel, colour)
     }
 }
 
@@ -1287,13 +1336,13 @@ fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
     }
     if m.math_on && m.math_mode == 5 {
-        out[3] = top_mark(top, 200, FAM_M, m.sel_h == 1, m.math_pal());
+        out[3] = top_mark(top, GCX, FAM_M, m.sel_h == 1, m.math_pal());
         if let Some((col, row)) = m.fft.and_then(|f| f.peak_at) {
             // Tip (glyph row 11) one row above the peak's frame row; kept
             // below the top marker row.
             let fy = trace_fy(m.frame_h(), row as i32);
-            if (0..399).contains(&col) && fy >= 25 {
-                out[4] = Mark::new(14 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
+            if (0..NCOL as i16).contains(&col) && fy >= 25 {
+                out[4] = Mark::new(GX + 1 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
             }
         }
     }
@@ -1348,7 +1397,7 @@ pub fn grab_rect(g: Rect, edge: u8) -> Rect {
     let along = (GRAB_H - 12) / 2;
     match edge {
         EDGE_LEFT => rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H),
-        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, 414 - (g.x - GRAB_IN), GRAB_H),
+        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, GR + 1 - (g.x - GRAB_IN), GRAB_H),
         _ => rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN),
     }
 }
@@ -1584,10 +1633,10 @@ impl Deco {
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=399).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
-                1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: 200, col: d.math }),
+                1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
                 _ => {}
             }
             match m.sel_v {
@@ -1621,17 +1670,17 @@ pub const EMPTY: (i16, i16) = (i16::MAX, i16::MIN);
 pub struct Graph {
     /// Trace / persistence / math trace frame rows per graph column (EMPTY
     /// = none).
-    pub tr: [(i16, i16); 399],
-    pub ps: [(i16, i16); 399],
-    pub ma: [(i16, i16); 399],
+    pub tr: [(i16, i16); NCOL],
+    pub ps: [(i16, i16); NCOL],
+    pub ma: [(i16, i16); NCOL],
     /// The GEN trace (C_GEN) and the CH2 trace (C_CH2), under CH1.
-    pub gn: [(i16, i16); 399],
-    pub c2: [(i16, i16); 399],
-    d_tr: [(i16, i16); 399],
-    d_ps: [(i16, i16); 399],
-    d_ma: [(i16, i16); 399],
-    d_gn: [(i16, i16); 399],
-    d_c2: [(i16, i16); 399],
+    pub gn: [(i16, i16); NCOL],
+    pub c2: [(i16, i16); NCOL],
+    d_tr: [(i16, i16); NCOL],
+    d_ps: [(i16, i16); NCOL],
+    d_ma: [(i16, i16); NCOL],
+    d_gn: [(i16, i16); NCOL],
+    d_c2: [(i16, i16); NCOL],
     deco: Deco,
     d_deco: Deco,
     valid: bool,
@@ -1681,16 +1730,16 @@ fn cycles() -> u32 {
 // stack margin need more (pre-flash review 7389e8a); `init` sets it up.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut GRAPH: Graph = Graph {
-    tr: [EMPTY; 399],
-    ps: [EMPTY; 399],
-    ma: [EMPTY; 399],
-    gn: [EMPTY; 399],
-    c2: [EMPTY; 399],
-    d_tr: [EMPTY; 399],
-    d_ps: [EMPTY; 399],
-    d_ma: [EMPTY; 399],
-    d_gn: [EMPTY; 399],
-    d_c2: [EMPTY; 399],
+    tr: [EMPTY; NCOL],
+    ps: [EMPTY; NCOL],
+    ma: [EMPTY; NCOL],
+    gn: [EMPTY; NCOL],
+    c2: [EMPTY; NCOL],
+    d_tr: [EMPTY; NCOL],
+    d_ps: [EMPTY; NCOL],
+    d_ma: [EMPTY; NCOL],
+    d_gn: [EMPTY; NCOL],
+    d_c2: [EMPTY; NCOL],
     deco: Deco::NONE,
     d_deco: Deco::NONE,
     valid: false,
@@ -1724,7 +1773,7 @@ pub const H_SPARE: usize = 11;
 /// device). Call once before any other scope_ui function.
 pub fn init() {
     let g = unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) };
-    for i in 0..399 {
+    for i in 0..NCOL {
         g.tr[i] = EMPTY;
         g.ps[i] = EMPTY;
         g.ma[i] = EMPTY;
@@ -1823,10 +1872,10 @@ fn row_class(fy: i16, cy: i16, dh: i16) -> u8 {
 /// are grid; R_ALL: all of them).
 /// `col_classes` of fx = 0..=399 (flash): the row loop of a full graph in
 /// strips looks them up per pixel.
-static COLC: [u8; 400] = {
-    let mut t = [0u8; 400];
+static COLC: [u8; GW as usize] = {
+    let mut t = [0u8; GW as usize];
     let mut fx = 0;
-    while fx < 400 {
+    while fx < GW as usize {
         t[fx] = col_classes(fx as i16);
         fx += 1;
     }
@@ -1834,17 +1883,31 @@ static COLC: [u8; 400] = {
 };
 
 const fn col_classes(fx: i16) -> u8 {
-    if fx == 200 {
+    if fx == GCX {
         return R_ALL;
     }
     let mut c = R_CY;
-    if fx % 40 == 0 || (fx - 200).abs() <= 2 {
+    if fx % DIV_W == 0 || (fx - GCX).abs() <= 2 {
         c |= R_7;
     }
-    if fx % 8 == 0 {
+    if is_tick(fx) {
         c |= R_DH | R_NEAR;
     }
     c
+}
+
+/// A tick column: 5 per division, at the nearest columns to the fifths
+/// (every 8th column at 40 px).
+const fn is_tick(fx: i16) -> bool {
+    let o = fx % DIV_W;
+    let mut k = 0;
+    while k < 5 {
+        if o == (2 * k * DIV_W + 5) / 10 {
+            return true;
+        }
+        k += 1;
+    }
+    false
 }
 
 /// Grid rule of the frame (sec. 4.1) at frame (fx, fy), 1 <= fx <= 399,
@@ -1940,11 +2003,11 @@ impl Graph {
 
     /// Clear the trace and persistence (an empty graph).
     pub fn clear(&mut self) {
-        self.tr = [EMPTY; 399];
-        self.ps = [EMPTY; 399];
-        self.ma = [EMPTY; 399];
-        self.gn = [EMPTY; 399];
-        self.c2 = [EMPTY; 399];
+        self.tr = [EMPTY; NCOL];
+        self.ps = [EMPTY; NCOL];
+        self.ma = [EMPTY; NCOL];
+        self.gn = [EMPTY; NCOL];
+        self.c2 = [EMPTY; NCOL];
     }
 
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
@@ -1992,7 +2055,7 @@ impl Graph {
         // the column (`vcol`), horizontal lines, grid (`cm`: col_classes).
         type Rows = ((i16, i16), (i16, i16), (i16, i16), (i16, i16), (i16, i16));
         let pix = |fx: i16, fy: i16, (tr, ps, ma, c2, gn): Rows, vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
-            let (sx, sy) = (13 + fx, d.top + fy);
+            let (sx, sy) = (GX + fx, d.top + fy);
             for &mi in mcol.iter().rev() {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
                     return c;
@@ -2032,7 +2095,7 @@ impl Graph {
         // Trace-only: per-column bookkeeping, from the resume column, under
         // the device's time budget (`FLUSH_BUDGET`).
         let trace_only = !full && d == o && self.holes == self.d_holes;
-        let start = if trace_only { self.next as usize % 399 } else { 0 };
+        let start = if trace_only { self.next as usize % NCOL } else { 0 };
         #[cfg(target_os = "none")]
         let t0 = cycles();
         #[cfg(target_os = "none")]
@@ -2045,15 +2108,15 @@ impl Graph {
         } else {
             None
         };
-        for j in 0..if band.is_some() { 0 } else { 399usize } {
-            let i = (start + j) % 399;
+        for j in 0..if band.is_some() { 0 } else { NCOL } {
+            let i = (start + j) % NCOL;
             #[cfg(target_os = "none")]
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
                 return;
             }
             let fx = i as i16 + 1;
-            let sx = 13 + fx;
+            let sx = GX + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
@@ -2182,7 +2245,7 @@ impl Graph {
             let mut cuts = [(0i16, 0i16); NH];
             let mut ncut = 0;
             for o in self.holes.iter().flatten().filter(|o| sy >= o.y && sy < o.y + o.h) {
-                cuts[ncut] = (o.x - 13, o.x + o.w - 14);
+                cuts[ncut] = (o.x - GX, o.x + o.w - GX - 1);
                 ncut += 1;
             }
             let mut mrow = [0usize; NGRAPH];
@@ -2206,13 +2269,13 @@ impl Graph {
             }
             let vrow = r & 1 == 1 && r <= h - 4 && d.v.iter().any(|l| l.is_some());
             let mut fx = 1i16;
-            while fx <= 399 {
+            while fx <= NCOL as i16 {
                 if in_hole(fx) {
                     fx += 1;
                     continue;
                 }
                 // The run up to the next hole.
-                let mut e = 399;
+                let mut e = NCOL as i16;
                 for &(a, _) in &cuts[..ncut] {
                     if a > fx && a - 1 < e {
                         e = a - 1;
@@ -2220,10 +2283,10 @@ impl Graph {
                 }
                 self.px += (e - fx + 1) as u32;
                 // A strip pass: straight into the strip's row.
-                let mut span = lcd::strip_span(sy, 13 + fx, 13 + e);
+                let mut span = lcd::strip_span(sy, GX + fx, GX + e);
                 let mut out = lcd::Out::panel();
                 if let Some(sp) = span.as_deref_mut() {
-                    if !line && !vrow && (13 + e < mlo || 13 + fx > mhi) {
+                    if !line && !vrow && (GX + e < mlo || GX + fx > mhi) {
                         // No marker, line or vertical line in the run: the
                         // inline rule over the columns, no index checks.
                         band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d);
@@ -2232,11 +2295,11 @@ impl Graph {
                     }
                 }
                 if span.is_none() {
-                    lcd::set_window((13 + fx) as u16, sy as u16, (13 + e) as u16, sy as u16);
+                    lcd::set_window((GX + fx) as u16, sy as u16, (GX + e) as u16, sy as u16);
                 }
                 for x in fx..=e {
                     let i = (x - 1) as usize;
-                    let sx = 13 + x;
+                    let sx = GX + x;
                     let c = if !line && (sx < mlo || sx > mhi || !mrow[..nmr].iter().any(|&k| sx >= d.marks[k].x && sx < d.marks[k].x + 12)) {
                         let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
                         if r >= ma.0 && r <= ma.1 {
@@ -2291,9 +2354,9 @@ impl Graph {
     /// as the stock FFT label). Uses the last flushed decoration.
     pub fn bg_at(&self, x: i16, y: i16) -> Color {
         let d = self.d_deco;
-        let (fx, fy) = (x - 13, y - d.top);
+        let (fx, fy) = (x - GX, y - d.top);
         let h = d.fh;
-        if fx < 1 || fx > 399 || fy < 1 || fy > h - 2 {
+        if fx < 1 || fx > NCOL as i16 || fy < 1 || fy > h - 2 {
             return C_FILL;
         }
         if let Some(c) = d.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col) {
@@ -2351,11 +2414,11 @@ pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
     if y1 <= y0 {
         return;
     }
-    lcd::fill_rect(13, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
-    lcd::fill_rect(413, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(GX as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(GR as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
     let g = graph();
     g.holes[H_POPUP] = Some(keep);
-    g.holes[H_REST] = Some(rect(13, y1, 401, 320 - y1));
+    g.holes[H_REST] = Some(rect(GX, y1, GW + 1, 320 - y1));
     g.invalidate();
     g.flush(m);
     // The rows under the hole still show the graph as it is (nothing
@@ -2528,19 +2591,19 @@ pub fn update(m: &Model) {
 
 /// Stock FFT label: graph (200,12,60,17).
 pub fn fft_label_rect(m: &Model) -> Rect {
-    rect(214, m.top() + 13, 60, 17)
+    rect(GX + GCX + 1, m.top() + 13, 60, 17)
 }
 pub fn fft_ydiv_rect(m: &Model) -> Rect {
-    rect(18, m.top() + 13, 92, 17)
+    rect(IN_X, m.top() + 13, 92, 17)
 }
 /// Peak readout: right, under the label row (the label leaves too little
 /// room beside it for "12.5MHz -99.9dBV").
 pub fn fft_peak_rect(m: &Model) -> Rect {
-    rect(266, m.top() + 34, 144, 17)
+    rect(GR - 147, m.top() + 34, 144, 17)
 }
 /// Horizontal scale box: bottom row (both views share the frame bottom),
 /// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
-pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
+pub const FFT_XDIV: Rect = rect(CUR_TAB.x + CUR_TAB.w + 6, 280, 92, 17);
 
 /// The stock FFT label: no fill (the graph background shows through), 1 px
 /// ring r5 with the top-left corner square (mask 0x0e), centred 12 px text,
@@ -2733,7 +2796,7 @@ pub fn tabs_of(mode: u8, tb: u8, tb_max: u8, transient: bool, pressed: Option<bo
 /// Some(true) = slower, Some(false) = faster, None = no step there.
 pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
     match mode {
-        TAP_HALVES if INNER.has(x, y) => Some(x <= 207),
+        TAP_HALVES if INNER.has(x, y) => Some(x <= GX + GCX - 6),
         TAP_CORNERS if ZONE_L.has(x, y) => Some(true),
         TAP_CORNERS if ZONE_R.has(x, y) => Some(false),
         _ => None,
@@ -3062,7 +3125,7 @@ const MF_PAGE_H: [i16; 5] = [150, 200, 175, 55, dec::PAGE_H];
 pub fn popup_box(p: Popup) -> Option<Rect> {
     match p {
         Popup::Mf(t) => Some(rect(13, 20, 401, 40 + MF_PAGE_H[t.min(4) as usize])),
-        Popup::Ch1(_) | Popup::Math(_) => Some(rect(214, 20, 200, 281)),
+        Popup::Ch1(_) | Popup::Math(_) => Some(rect(SX, 20, 200, 281)),
         _ => None,
     }
 }
@@ -3201,7 +3264,7 @@ pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
 pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
 /// The DMM CH2 label in the graph (a hole, below the FFT's V/div box).
 pub fn ch2_label_rect(m: &Model) -> Rect {
-    rect(18, m.top() + 34, 92, 17)
+    rect(IN_X, m.top() + 34, 92, 17)
 }
 
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
@@ -3351,20 +3414,23 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
     }
 }
 
+/// The CH1 / Math popup's left edge: 200 px wide, against the panel.
+const SX: i16 = PANEL_X - 200;
+
 /// CH1 / Math popup frame: box, header, vertical tabs, page area.
 fn side_popup(title: &str, tabs: &[&str], tab: u8) {
     let screen = rect(0, 0, 480, 320);
-    fill_c(rect(214, 20, 200, 281), screen, C_FRAME);
-    let h = rect(215, 21, 198, 29);
+    fill_c(rect(SX, 20, 200, 281), screen, C_FRAME);
+    let h = rect(SX + 1, 21, 198, 29);
     fill_text(h, screen, C_POP_TAB, sf::SC_F16, h, title, C_YELLOW, 8, 0);
-    fill_c(rect(215, 50, 198, 250), screen, C_FRAME);
+    fill_c(rect(SX + 1, 50, 198, 250), screen, C_FRAME);
     for (i, t) in tabs.iter().enumerate() {
         let y = 50 + 41 * i as i16;
-        let r = rect(215, y, 78, 40);
+        let r = rect(SX + 1, y, 78, 40);
         let sel = i == tab as usize;
         let ink = Ink::new(sf::SC_F16, r, t, 8, 1);
         let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
-        let ind = rect(291, y, 2, 40);
+        let ind = rect(SX + 77, y, 2, 40);
         paint(r, &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = ink.at(x, y) {
                 return (fg, tag(1, g));
@@ -3372,24 +3438,24 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
             (if sel && ind.has(x, y) { C_BAR } else { bg }, tag(2, 0))
         });
     }
-    fill_c(rect(293, 50, 120, 250), screen, C_POP_BG);
+    fill_c(rect(SX + 79, 50, 120, 250), screen, C_POP_BG);
 }
 
 pub fn draw_ch1(tab: u8, v: &PopVals) {
     let tab = tab.min(2);
     side_popup("CHA", &["Coupling", "Probe", "Color"], tab);
-    let pc = rect(293, 50, 120, 250);
+    let pc = rect(SX + 79, 50, 120, 250);
     match tab {
-        0 => option_list(rect(308, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
+        0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
         1 => {
-            let r = rect(293, 50, 120, 20);
+            let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
             // Stock also shows "Type Vol / Cur" here; it changes nothing
             // (opendm40 reads the Wave view's current from the DMM), so it
             // is left out.
-            spinner(rect(298, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
         }
-        _ => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
+        _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
 }
 
@@ -3398,22 +3464,22 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
 pub fn draw_math(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
     side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
-    let pc = rect(293, 50, 120, 250);
+    let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         // Stock: FFT selected unless the mode is ABS (also while math is off).
-        0 => option_list(rect(308, 71, 90, 24), pc, &["FFT", "ABS"], 44, (v.math_mode == 6) as usize),
-        1 => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
+        0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["FFT", "ABS"], 44, (v.math_mode == 6) as usize),
+        1 => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
         2 => {
             let o = [v.hz_opts[0].as_str(), v.hz_opts[1].as_str(), v.hz_opts[2].as_str(), v.hz_opts[3].as_str()];
-            spinner(rect(298, 70, 110, 150), pc, &o, v.fft_hz.min(3) as usize, false)
+            spinner(rect(SX + 84, 70, 110, 150), pc, &o, v.fft_hz.min(3) as usize, false)
         }
         _ => {
-            let r = rect(293, 50, 120, 20);
+            let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
-            spinner(rect(298, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
-            let r = rect(293, 224, 120, 24);
+            spinner(rect(SX + 84, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
+            let r = rect(SX + 79, 224, 120, 24);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
-            option_list(rect(308, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
         }
     }
 }
@@ -3439,32 +3505,32 @@ pub enum SideHit {
 }
 
 pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
-    if !rect(214, 20, 200, 281).has(x, y) {
+    if !rect(SX, 20, 200, 281).has(x, y) {
         return SideHit::Close;
     }
     let ntabs = if math { 4 } else { 3 };
-    if x < 293 && y >= 50 {
+    if x < SX + 79 && y >= 50 {
         let i = (y - 50) / 41;
         return if i < ntabs { SideHit::Tab(i as u8) } else { SideHit::Inside };
     }
     if math {
         return match tab {
-            0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
-            1 => spinner_hit(rect(298, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
-            2 => spinner_hit(rect(298, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
+            0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
+            1 => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
+            2 => spinner_hit(rect(SX + 84, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
             _ => {
-                if let Some(i) = spinner_hit(rect(298, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
+                if let Some(i) = spinner_hit(rect(SX + 84, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
                     SideHit::Window(i)
                 } else {
-                    option_hit(rect(308, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Unit)
+                    option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Unit)
                 }
             }
         };
     }
     match tab {
-        0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(298, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
-        _ => spinner_hit(rect(298, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
+        0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
+        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        _ => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
 
@@ -3712,19 +3778,19 @@ impl StripData {
     };
 }
 
-pub const STRIP: Rect = rect(13, 21, 401, 54);
-const ST_INNER: Rect = rect(14, 22, 399, 52);
-const ST_FUNC: Rect = rect(19, 25, 62, 17);
-const ST_BADGE: Rect = rect(19, 46, 62, 17);
+pub const STRIP: Rect = rect(GX, 21, GW + 1, 54);
+const ST_INNER: Rect = rect(GX + 1, 22, GW - 1, 52);
+const ST_FUNC: Rect = rect(GX + 6, 25, 62, 17);
+const ST_BADGE: Rect = rect(GX + 6, 46, 62, 17);
 /// Reading: right-aligned, ends 4 px before the unit (the widest values,
 /// "-444.44" / "1562.00", are 105 / 107 px of ink in SC_DIGITS); from 3 px
 /// after the badge column.
-const ST_VALUE: Rect = rect(84, 24, 108, 30);
+const ST_VALUE: Rect = rect(GX + 71, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
 /// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
 /// buttons' 20 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV";
 /// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
-const ST_UNIT_X: i16 = 196;
+const ST_UNIT_X: i16 = GX + 183;
 const ST_UNIT_W: i16 = 59;
 const ST_UNIT_Y: i16 = 24;
 const ST_UNIT_H: i16 = 30;
@@ -3732,10 +3798,10 @@ const ST_UNIT_H: i16 = 30;
 /// the GEN column while it shows, else to 4 px inside the strip (`st_sub`).
 pub const ST_SUB_Y: [i16; 2] = [25, 43];
 const ST_SUB_H: i16 = 14;
-const ST_SUB_END: i16 = 409;
+const ST_SUB_END: i16 = GR - 4;
 /// GEN column: 64 px, the widest frequency ("10.00MHz", "999.9kHz").
-const ST_GEN: Rect = rect(344, 25, 64, 17);
-const ST_GEN_T: Rect = rect(344, 46, 64, 17);
+const ST_GEN: Rect = rect(GR - 69, 25, 64, 17);
+const ST_GEN_T: Rect = rect(GR - 69, 46, 64, 17);
 const C_HV: Color = 0xc9a0;
 const C_GEN: Color = 0x0400;
 
@@ -3814,8 +3880,8 @@ pub fn meter_strip(d: &StripData) {
         _ => {
             // Ring (0xad55, red at >= 100 V) and the dark box, one shape.
             let ring = if d.hv { C_HV } else { C_FRAME };
-            lcd::fill_rect(13, 20, 401, 1, C_BAR);
-            lcd::fill_rect(13, 75, 401, 1, C_BAR);
+            lcd::fill_rect(GX as u16, 20, GW as u16 + 1, 1, C_BAR);
+            lcd::fill_rect(GX as u16, 75, GW as u16 + 1, 1, C_BAR);
             paint(STRIP, &[(K_SHAPE, C_BAR)], |x, y| {
                 if in_rbox(ST_INNER, 5, 0x0f, x, y) {
                     (C_FILL, tag(1, 0))
@@ -3915,7 +3981,7 @@ pub fn pm(x: i16, y: i16, c: Color) {
 /// and 4 px of slop up / down (the 1 / 8 px gaps between the pills go to the
 /// nearer button instead of nowhere).
 pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
-    if x < 414 {
+    if (x as i16) < PANEL_X {
         return None;
     }
     let y = y as i16;
@@ -3931,7 +3997,7 @@ pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
 
 /// Strip touch areas: the badge column (REL) and the rest (function band).
 pub fn strip_hit(x: u16, y: u16) -> Option<bool> {
-    if (20..76).contains(&y) && x < 414 { Some(x < 86) } else { None }
+    if (20..76).contains(&y) && (x as i16) < PANEL_X { Some((x as i16) < GX + 73) } else { None }
 }
 
 // ------------------------------------------------------------------ pinch

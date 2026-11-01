@@ -574,7 +574,7 @@ pub fn func_band(button: Button, mode: u8, acdc: bool, ohm_on: bool) {
 
 /// Left edge of the scope page's right panel (scope_ui::PANEL), whose last
 /// key ends below the measurement bar.
-const BAND_PANEL_X: u16 = 414;
+const BAND_PANEL_X: u16 = crate::scope_ui::PANEL_X as u16;
 
 /// Function button (0..6) of the band under a tap, None outside the band.
 pub fn func_band_hit(x: u16, y: u16) -> Option<usize> {
