@@ -324,7 +324,8 @@ pub enum Out {
 
 /// Protocol decoder on the scope page (src/decode.rs, src/app_decode.rs);
 /// `None` = query:
-///   DECode:PROTocol OFF|UART|MODBus / ?  OFF / UART / MODB (the band)
+///   DECode:PROTocol OFF|UART|DALI / ?  OFF / UART / DALI (MODBus: UART,
+///                                    which recognises Modbus RTU frames)
 ///   DECode:BAUD <n>|AUTO / ?         the bit rate set, 300 .. 115200 or AUTO
 ///   DECode:RATE?                     the bit rate of the last decode (0: none)
 ///   DECode:FORMat 8N1|8E1|8O1|7E1 / ?
@@ -340,7 +341,7 @@ pub enum Out {
 ///   DECode:CLEar                     Log: the list and counters start again
 #[derive(Clone, Copy, PartialEq)]
 pub enum Dcd {
-    /// decode::P_OFF / P_UART / P_MODBUS / P_DALI.
+    /// decode::P_OFF / P_UART / P_DALI.
     Proto(Option<u8>),
     /// Some(0) = AUTO.
     Baud(Option<u32>),
@@ -2794,10 +2795,10 @@ impl Scpi {
                             Some(Dcd::Proto(None))
                         } else if kw(a, "OFF") {
                             Some(Dcd::Proto(Some(crate::decode::P_OFF)))
-                        } else if kw(a, "UART") {
+                        } else if kw(a, "UART") || kw(a, "MODBus") {
+                            // MODBus (the old Modbus protocol): UART, which
+                            // recognises Modbus RTU frames.
                             Some(Dcd::Proto(Some(crate::decode::P_UART)))
-                        } else if kw(a, "MODBus") {
-                            Some(Dcd::Proto(Some(crate::decode::P_MODBUS)))
                         } else if crate::decode::DALI && kw(a, "DALI") {
                             Some(Dcd::Proto(Some(crate::decode::P_DALI)))
                         } else {

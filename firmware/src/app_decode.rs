@@ -45,6 +45,8 @@ pub(super) struct DecState {
     pub mode: u8,
     /// Records left that take the rate found last without measuring.
     reuse: u8,
+    /// UART: the last decode held Modbus frames (the band's frame row).
+    mb: bool,
 
     /// Changes with what the band shows (Model::dec_gen; 0 = blank).
     gen: u16,
@@ -155,11 +157,11 @@ fn dali_line(o: &mut Out, seq: u32, ns: i64, f: &dc::Fr, cnt: &mut [u32; 5]) {
 }
 
 impl App {
-    /// The band shown: 0 none, 1 UART, 2 Modbus, 3 DALI.
+    /// The band shown: 0 none, 1 UART, 2 UART with Modbus frames (the
+    /// last decode found some), 3 DALI.
     pub(super) fn dec_band(&self) -> u8 {
         match ds().cfg.proto {
-            dc::P_UART => 1,
-            dc::P_MODBUS if dc::MODBUS => 2,
+            dc::P_UART => 1 + ds().mb as u8,
             dc::P_DALI if dc::DALI => 3,
             _ => 0,
         }
@@ -356,7 +358,7 @@ impl App {
             auto0: 0,
             line,
             cur: dc::Cursor::at(0),
-            fr: dc::Framer::new(false, 1, fs, 9600, 0, 1),
+            fr: dc::Framer::new(1, fs, 9600, 0, 1),
             fno: [u32::MAX; ud::NF],
             windowed: again,
             passes: 0,
@@ -386,12 +388,11 @@ impl App {
     }
 
     /// `x` moved out by the margin a window decode needs (a frame's gap,
-    /// Modbus, or two characters, plus two bits).
+    /// plus two bits).
     fn dec_margin(&self, x: usize, up: bool, baud: u32, fs: u32) -> usize {
         let cb = ds().cfg.char_bits() as u64;
         let cs = (fs as u64 * cb / baud.max(1) as u64) as usize;
-        let p = ds().cfg.proto;
-        let m = cs * if dc::is_mb(p) || dc::is_dali(p) { 6 } else { 2 } + (fs as u64 * 2 / baud.max(1) as u64) as usize;
+        let m = cs * 6 + (fs as u64 * 2 / baud.max(1) as u64) as usize;
         if up { x.saturating_add(m) } else { x.saturating_sub(m) }
     }
 
@@ -414,7 +415,7 @@ impl App {
             return;
         }
         let cs = j.line.char_samples();
-        j.fr = dc::Framer::new(s.cfg.proto == dc::P_MODBUS && dc::MODBUS, cs, a.fs, baud, j.a as u32, j.b as u32);
+        j.fr = dc::Framer::new(cs, a.fs, baud, j.a as u32, j.b as u32);
         j.cur = dc::Cursor::at(j.a);
         if dali {
             *dl() = dc::Dali::at(j.a);
@@ -427,6 +428,9 @@ impl App {
         if let Some(j) = job().take() {
             if state == ud::C_DONE {
                 a.c1 = if a.full { j.cur.n as u32 } else { j.b as u32 };
+                if ds().cfg.proto == dc::P_UART {
+                    ds().mb = a.nf > 0;
+                }
             }
         }
         a.state = state;
@@ -531,13 +535,16 @@ impl App {
             }
             return;
         }
-        let modbus = ds().cfg.proto == dc::P_MODBUS && dc::MODBUS;
         let lim = j.cur.n.saturating_add(n);
         let (b, line) = (j.b, j.line);
         let fr = &mut j.fr;
         let fno = &mut j.fno;
+        // DALI frames, and UART's Modbus ones (plain UART: the bytes only).
         let mut keep_frame = |f: &dc::Fr, req: u32, nframes: u32| {
             let a = ud::ann();
+            if f.kind == dc::K_UART {
+                return;
+            }
             if a.nf as usize >= ud::NF {
                 a.full = true;
                 return;
@@ -569,17 +576,15 @@ impl App {
             if c.err & dc::F_FE != 0 {
                 ds().reuse = 0;
             }
-            if modbus {
-                let nf = fr.nframes;
-                fr.push(c, &mut |f, req| keep_frame(f, req, nf));
-            }
+            let nf = fr.nframes;
+            fr.push(c, &mut |f, req| keep_frame(f, req, nf));
             true
         });
         }
         if !j.cur.done {
             return;
         }
-        if modbus && !a.full {
+        if !dc::is_dali(ds().cfg.proto) && !a.full {
             let nf = j.fr.nframes;
             j.fr.finish(&mut |f, req| keep_frame(f, req, nf));
         }
@@ -680,6 +685,7 @@ impl App {
         let s = ds();
         if s.cfg.baud != old.baud || s.cfg.proto != old.proto {
             a.baud = 0;
+            s.mb = false;
         }
         a.reset(0, ud::C_NONE);
         a.mode = ud::M_NONE;
@@ -700,7 +706,6 @@ impl App {
         match c {
             D::Proto(None) => out.put_bytes(match s.cfg.proto {
                 dc::P_UART => b"UART",
-                dc::P_MODBUS if dc::MODBUS => b"MODB",
                 dc::P_DALI if dc::DALI => b"DALI",
                 _ => b"OFF",
             }),
@@ -708,7 +713,7 @@ impl App {
                 out.set_err("Settings conflict");
                 return false;
             }
-            D::Proto(Some(p)) if (p != dc::P_MODBUS || dc::MODBUS) && (p != dc::P_DALI || dc::DALI) => s.cfg.proto = p,
+            D::Proto(Some(p)) if p != dc::P_DALI || dc::DALI => s.cfg.proto = p,
             D::Proto(Some(_)) => {
                 out.set_err("Parameter not allowed");
                 return false;
@@ -831,7 +836,7 @@ impl App {
 
     /// `dec_lines` of the whole stored record, decoded again with the kept
     /// levels and rate (the lists hold only a part of it).
-    fn dec_lines_record(&mut self, o: &mut Out, cnt: &mut [u32; 5], modbus: bool) {
+    fn dec_lines_record(&mut self, o: &mut Out, cnt: &mut [u32; 5]) {
         let a = ud::ann();
         let s = ds();
         let rec = self.scope.record();
@@ -849,61 +854,14 @@ impl App {
             });
             return;
         }
-        let mut fr = dc::Framer::new(modbus, l.char_samples(), a.fs, a.baud, 0, len as u32);
-        // The line being written starts here (None: none / skipped).
-        let mut open: Option<usize> = None;
-        fn close(o: &mut Out, open: &mut Option<usize>, f: &dc::Fr, req: u32, cnt: &mut [u32; 5], modbus: bool) {
-            cnt[0] += 1;
-            cnt[4] += (f.flags & dc::F_CRC != 0) as u32;
-            let Some(n0) = open.take() else { return };
-            let ok = o.w(|w| {
-                w.c(b',').s(dc::status(f.flags)).c(b',');
-                if modbus {
-                    dc::mb_text(w, f);
-                    if req != u32::MAX {
-                        w.s(" req=").u(req);
-                    }
-                }
-                w.c(b'\n');
-            });
-            if !ok {
-                o.n = n0;
-            }
-        }
-        dc::chars(&rec, 0, len, &l, &mut |c| {
-            cnt[1] += 1;
-            cnt[2] += (c.err & dc::F_FE != 0) as u32;
-            cnt[3] += (c.err & dc::F_PE != 0) as u32;
-            fr.push(c, &mut |f, req| close(o, &mut open, f, req, cnt, modbus));
-            if fr.open_len() == 1 && !o.full && fr.nframes >= o.first {
-                // A new frame: its line.
-                let n0 = o.n;
-                let ns = (c.start as i64 - t0) * 1_000_000_000 / fs;
-                let seq = fr.nframes;
-                if o.w(|w| {
-                    w.u(seq).c(b',').secs_ns(ns).s(if modbus { ",MB," } else { ",UART," });
-                }) {
-                    open = Some(n0);
-                }
-            }
-            if let Some(n0) = open {
-                let v = c.v as u8;
-                if !o.w(|w| {
-                    w.hex(v);
-                }) {
-                    o.n = n0;
-                    open = None;
-                }
-            }
-        });
-        fr.finish(&mut |f, req| close(o, &mut open, f, req, cnt, modbus));
+        let mut fr = dc::Framer::new(l.char_samples(), a.fs, a.baud, 0, len as u32);
+        frame_lines(o, cnt, &mut fr, t0, fs, &mut |f| dc::chars(&rec, 0, len, &l, f));
     }
 
-    /// The kept frames as lines "seq,time_s,proto,hex,status,info\n" from
+    /// The kept decode as lines "seq,time_s,proto,hex,status,info\n" from
     /// frame `first` on, as many as fit `b` (its length used); `cnt` counts
-    /// all of them (frames, bytes, FE, PE, CRC). Modbus: the frames with
-    /// their kept bytes; UART: the bytes grouped by a gap of two characters
-    /// (at most 16 a line).
+    /// all of them (frames, bytes, FE, PE, CRC). UART: the kept bytes
+    /// framed again (the 3.5-character gap; Modbus when the CRC is right).
     fn dec_lines(&mut self, first: u32, b: &mut [u8], cnt: &mut [u32; 5]) -> usize {
         let s = ds();
         if s.cfg.proto == dc::P_OFF {
@@ -917,55 +875,14 @@ impl App {
         if a.state != ud::C_DONE || (!self.scope.s.run && a.gen != self.dec_rec()) {
             return 0;
         }
-
-        let modbus = s.cfg.proto == dc::P_MODBUS && dc::MODBUS;
         if !self.scope.s.run && (a.c0 > 0 || (a.c1 as usize) < self.scope.record().len()) {
             // Stopped, more than the lists hold: the whole record again,
             // straight into the reply.
-            self.dec_lines_record(&mut o, cnt, modbus);
+            self.dec_lines_record(&mut o, cnt);
             return o.n;
         }
         let fs = a.fs.max(1) as i64;
-        let cs = (a.fs as u64 * s.cfg.char_bits() as u64 / a.baud.max(1) as u64) as u32;
         let t0 = a.t0 as i64;
-        let line = |o: &mut Out, seq: u32, s0: u32, s1: u32, fl: u8, f: Option<&ud::FAnn>, cnt: &mut [u32; 5]| {
-            cnt[0] += 1;
-            if seq < o.first || o.full {
-                return;
-            }
-            let n0 = o.n;
-            let ns = (s0 as i64 - t0) * 1_000_000_000 / fs;
-            let mut ok = o.w(|w| {
-                w.u(seq).c(b',').secs_ns(ns).s(if modbus { ",MB," } else { ",UART," });
-            });
-            for b in a.b[..a.nb as usize].iter().filter(|b| b.s0 >= s0 && b.s1 <= s1) {
-                let v = b.v;
-                ok = ok && o.w(|w| {
-                    w.hex(v);
-                });
-            }
-            ok = ok && o.w(|w| {
-                w.c(b',').s(dc::status(fl)).c(b',');
-                if let Some(f) = f {
-                    let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
-                    dc::mb_text(w, &fr);
-                    if f.req != 0xFF {
-                        w.s(" req=").u(f.req as u32);
-                    }
-                }
-                w.c(b'\n');
-            });
-            if !ok {
-                // The line does not fit: the reply ends before it.
-                o.n = n0;
-                o.full = true;
-            }
-        };
-        for b in &a.b[..a.nb as usize] {
-            cnt[1] += 1;
-            cnt[2] += (b.fl & dc::F_FE != 0) as u32;
-            cnt[3] += (b.fl & dc::F_PE != 0) as u32;
-        }
         if dc::is_dali(s.cfg.proto) {
             for (k, f) in a.f[..a.nf as usize].iter().enumerate() {
                 let fr = dc::Fr { start: 0, end: 0, len: f.len, head: f.head, flags: f.fl, kind: f.kind };
@@ -973,27 +890,76 @@ impl App {
             }
             return o.n;
         }
-        if modbus {
-            for (k, f) in a.f[..a.nf as usize].iter().enumerate() {
-                cnt[4] += (f.fl & dc::F_CRC != 0) as u32;
-                line(&mut o, k as u32, f.s0, f.s1, f.fl, Some(f), cnt);
+        let cs = (a.fs as u64 * s.cfg.char_bits() as u64 / a.baud.max(1) as u64) as u32;
+        let mut fr = dc::Framer::new(cs, a.fs, a.baud, a.c0, a.c1);
+        frame_lines(&mut o, cnt, &mut fr, t0, fs, &mut |f| {
+            for b in &a.b[..a.nb as usize] {
+                f(dc::Ch { start: b.s0, end: b.s1, v: b.v as u16, err: b.fl });
             }
-            return o.n;
-        }
-        let mut k = 0;
-        let mut seq = 0;
-        while k < a.nb as usize {
-            let (s0, mut s1, mut fl) = (a.b[k].s0, a.b[k].s1, a.b[k].fl);
-            let mut j = k + 1;
-            while j < a.nb as usize && j - k < 16 && a.b[j].s0.saturating_sub(s1) <= 2 * cs {
-                s1 = a.b[j].s1;
-                fl |= a.b[j].fl;
-                j += 1;
-            }
-            line(&mut o, seq, s0, s1, fl, None, cnt);
-            seq += 1;
-            k = j;
-        }
+        });
         o.n
     }
+}
+
+/// The frames of the characters `feed` gives, as `dec_lines` lines
+/// (`fr` frames them; `t0`, `fs`: the trigger sample and the rate).
+fn frame_lines(o: &mut Out, cnt: &mut [u32; 5], fr: &mut dc::Framer, t0: i64, fs: i64, feed: &mut dyn FnMut(&mut dyn FnMut(dc::Ch))) {
+    // The line being written: its start and its proto field (None: none /
+    // skipped).
+    let mut open: Option<(usize, usize)> = None;
+    fn close(o: &mut Out, open: &mut Option<(usize, usize)>, f: &dc::Fr, req: u32, cnt: &mut [u32; 5]) {
+        cnt[0] += 1;
+        let Some((n0, p)) = open.take() else { return };
+        let mb = dc::is_mb_kind(f.kind);
+        if mb {
+            // "UART," -> "MB," (the bytes move down 2).
+            o.b.copy_within(p + 5..o.n, p + 3);
+            o.b[p..p + 3].copy_from_slice(b"MB,");
+            o.n -= 2;
+        }
+        let ok = o.w(|w| {
+            w.c(b',').s(dc::status(f.flags)).c(b',');
+            if mb {
+                dc::mb_text(w, f);
+                if req != u32::MAX {
+                    w.s(" req=").u(req);
+                }
+            }
+            w.c(b'\n');
+        });
+        if !ok {
+            o.n = n0;
+        }
+    }
+    feed(&mut |c| {
+        cnt[1] += 1;
+        cnt[2] += (c.err & dc::F_FE != 0) as u32;
+        cnt[3] += (c.err & dc::F_PE != 0) as u32;
+        fr.push(c, &mut |f, req| close(o, &mut open, f, req, cnt));
+        if fr.open_len() == 1 && !o.full && fr.nframes >= o.first {
+            // A new frame: its line.
+            let n0 = o.n;
+            let ns = (c.start as i64 - t0) * 1_000_000_000 / fs;
+            let seq = fr.nframes;
+            if o.w(|w| {
+                w.u(seq).c(b',').secs_ns(ns).c(b',');
+            }) && o.w(|w| {
+                w.s("UART,");
+            }) {
+                open = Some((n0, o.n - 5));
+            } else {
+                o.n = n0;
+            }
+        }
+        if let Some((n0, _)) = open {
+            let v = c.v as u8;
+            if !o.w(|w| {
+                w.hex(v);
+            }) {
+                o.n = n0;
+                open = None;
+            }
+        }
+    });
+    fr.finish(&mut |f, req| close(o, &mut open, f, req, cnt));
 }

@@ -18,13 +18,15 @@ each starts, red boxes for errors):
     stopped, 200 us/div (two characters on the screen), 5 ms/div (the
     bar), 100 ms/div (roll; STOP: the sample rate too low, the note);
   * a framing error (a byte with a low stop bit) drawn red;
-  * MCX Modbus RTU 19200 8E1: request / reply / exception / bad CRC, the
-    pairing, at 2 and 5 ms/div, stopped;
+  * MCX Modbus RTU 19200 8E1 in UART (the decoder recognises the frames by
+    their CRC; DECode:PROTocol MODBus is UART): request / reply /
+    exception, the pairing, a bad-CRC frame as plain UART, at 2 and 5
+    ms/div, stopped;
   * MCX DALI (DECode:PROTocol DALI, feature dec-dali; skipped without
     it): forward, backward, 24-bit and a bad-Manchester frame at 10 ms/div,
     stopped; FRAMes? texts, DECode:RATE? 1200, the band's boxes at 2 ms/div;
   * the Wave view (DC V, 5 V TTL on V-COM): UART at 2400 and 4800 baud,
-    Modbus at 2400 8E1, at 2 ms/div (38.4 kS/s), decoded on STOP;
+    Modbus in UART at 2400 8E1, at 2 ms/div (38.4 kS/s), decoded on STOP;
     19200 baud there: the note;
   * cost: DBG:PROF? (dec.job = one record's decode, x2 = its slices,
     s.frame = the frame) at 1, 10 and 100 ms/div with 9600 and 115200 baud
@@ -53,6 +55,7 @@ ap.add_argument('--mips', default='110')
 ap.add_argument('--shots', help='save screenshots here')
 ap.add_argument('--no-region-c', action='store_true', help='without the region C hooks')
 ap.add_argument('--no-wave', action='store_true', help='skip the Wave view cases')
+ap.add_argument('--no-modbus', action='store_true', help='a build without dec-modbus (UART does not recognise Modbus RTU): skip the Modbus cases')
 ap.add_argument('--only', default='mcx,cost,modbus,dali,wave,log', help='the sections to run (default: all)')
 A = ap.parse_args()
 if not A.port:
@@ -336,11 +339,14 @@ try:
     wait_ms(600)
     q('DBG:TAP 339,105')  # Oscilloscope
     wait_ms(1500)
-    # A build without Modbus RTU / the frame log (cargo features dec-modbus /
-    # dec-log off) refuses them: those cases are skipped, and said so.
+    # DEC:PROT MODB (the old Modbus protocol) selects UART. A build without
+    # the frame log (cargo feature dec-log off) refuses it, one without
+    # dec-modbus (--no-modbus) recognises no Modbus: those cases are
+    # skipped, and said so.
     q('*CLS')
     q('DEC:PROT MODB')
-    has_mb = q('SYST:ERR?').split(',')[0].strip() in ('0', '+0')
+    check(q('SYST:ERR?').split(',')[0].strip() in ('0', '+0') and q('DEC:PROT?') == 'UART', 'DEC:PROT MODB: accepted, DEC:PROT? UART')
+    has_mb = not A.no_modbus
     q('DEC:PROT OFF')
     q('*CLS')
     q('DEC:MODE LOG')
@@ -496,6 +502,7 @@ try:
 
     if want('modbus'):
         # ---- framing errors (every stop bit low), drawn red ----
+        q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8N1;DEC:POL NORM;DEC:THR AUTO')  # also without mcx
         put(BITS, '1' * 40 + uart_bits(text, err='all') + '1' * 40, 9600, 0.0, 3.3, 0.004)
         q('TIM:SCAL 1E-3')
         run()
@@ -511,7 +518,7 @@ try:
             gap = '1' * 60
             bits = '1' * 80 + ''.join(uart_bits(f, '8E1') + gap for f in seq)
             put(BITS, bits, baud, 0.0, 3.3, 0.003)
-            q('DEC:PROT MODB;DEC:BAUD AUTO;DEC:FORM 8E1')
+            q('DEC:PROT UART;DEC:BAUD AUTO;DEC:FORM 8E1')
             for sc in ('2E-3', '5E-3'):
                 q('TIM:SCAL ' + sc)
                 run()
@@ -529,7 +536,8 @@ try:
 
                     # The 86 ms record holds a whole cycle.
                     check(any(f[5].startswith('EXC 01 84 E02 req=') for f in fr), '5 ms/div: the exception, paired')
-                    check(any(f[4] == 'CRC' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad CRC')
+                    check(any(f[2] == 'UART' and f[4] == 'OK' and f[3] == bytes(bad).hex().upper() for f in fr), '5 ms/div: the bad-CRC frame as plain UART')
+                    check(all(f[2] == 'MB' for f in fr if f[5]), '5 ms/div: the Modbus frames are MB')
                 img = shot('m08-modbus-%s' % sc)
                 if sc == '2E-3':
                     fe = edges(img, FRAME_Y + 8, C_FEDGE)
@@ -592,13 +600,13 @@ try:
             wait_ms(2000)
             if RC:
                 RC.reset()
-            for baud, fmt, proto in ((2400, '8N1', 'UART'), (4800, '8N1', 'UART')) + (((2400, '8E1', 'MODB'),) if has_mb else ()):
-                if proto == 'MODB':
+            for baud, fmt, proto in ((2400, '8N1', 'UART'), (4800, '8N1', 'UART')) + (((2400, '8E1', 'MB'),) if has_mb else ()):
+                if proto == 'MB':
                     bits = '1' * 60 + ''.join(uart_bits(f, fmt) + '1' * 60 for f in seq)
                     put(DBITS, bits, baud, 0.0, 5.0, 0.01)
                 else:
                     put(DBITS, '1' * 40 + uart_bits(text, fmt) + '1' * 40, baud, 0.0, 5.0, 0.01)
-                q('DEC:PROT %s;DEC:FORM %s' % (proto, fmt))
+                q('DEC:PROT UART;DEC:FORM %s' % fmt)
                 run()
                 wait_ms(7000)  # the stored record reaches back seconds (coded ring)
                 # The Wave view decodes on STOP (its record changes while running).
@@ -610,11 +618,11 @@ try:
                 fr = frames()
                 data = b''.join(bytes.fromhex(f[3]) for f in fr)
                 if proto == 'UART':
-                    bad = [f for f in fr[1:] if f[4] not in ('OK', 'PART')]
-                    check(has_text(data) and not bad, 'Wave view UART %d: the text from the record (%d frames, %s)' % (baud, len(fr), bad[:2]))
+                    errs = [f for f in fr[1:] if f[4] not in ('OK', 'PART')]
+                    check(has_text(data) and not errs, 'Wave view UART %d: the text from the record (%d frames, %s)' % (baud, len(fr), errs[:2]))
                 else:
                     kinds = [f[5].split()[0] for f in fr if f[5]]
-                    check('REQ' in kinds and 'RSP' in kinds and 'CRC' in [f[4] for f in fr], 'Wave view Modbus %d: REQ, RSP, a CRC error (%s)' % (baud, kinds[:8]))
+                    check('REQ' in kinds and 'RSP' in kinds and bytes(bad).hex().upper() in [f[3] for f in fr if f[2] == 'UART'], 'Wave view Modbus %d: REQ, RSP, the bad-CRC frame as UART (%s)' % (baud, kinds[:8]))
             # 19200 at 38.4 kS/s: the note.
             put(DBITS, '1' * 40 + uart_bits(text) + '1' * 40, 19200, 0.0, 5.0, 0.01)
             q('DEC:PROT UART;DEC:BAUD AUTO')
@@ -692,8 +700,9 @@ try:
         check(int(c[5]) == lost0, 'log 115200: the decode keeps up for 3 s (lost %d before, %s after)' % (lost0, c[5]))
 
         shot('l02-log-uart-115200')
-        # Modbus RTU 19200 8E1: request / reply pairs, the exception, a bad CRC.
-        q('DEC:PROT MODB;DEC:FORM 8E1')
+        # Modbus RTU 19200 8E1 in UART: request / reply pairs, the
+        # exception, the bad-CRC frame as UART.
+        q('DEC:PROT UART;DEC:FORM 8E1')
         put(BITS, '1' * 80 + ''.join(uart_bits(f, '8E1') + '1' * 60 for f in seq), 19200, 0.0, 3.3, 0.003)
         wait_ms(2000)
         fifo()
@@ -703,7 +712,7 @@ try:
             print('    ' + ','.join(f), flush=True)
         by = {f[0]: f for f in fr}
         pairs = [f for f in fr if f[5].startswith('RSP 01 03 4B req=') and by.get(f[5].split('req=')[1], [''] * 6)[5] == 'REQ 01 03 @0000 n=2']
-        check(len(pairs) >= 1 and any(f[4] == 'CRC' for f in fr) and any(f[5].startswith('EXC') for f in fr), 'log Modbus: a 03 pair, the exception, a bad CRC (%d frames)' % len(fr))
+        check(len(pairs) >= 1 and any(f[2] == 'UART' for f in fr) and any(f[5].startswith('EXC') for f in fr), 'log Modbus: a 03 pair, the exception, the bad-CRC frame as UART (%d frames)' % len(fr))
         shot('l03-log-modbus')
         c_check_log()
         # Capacity: from a CLEar until the store is full, then STOP: the

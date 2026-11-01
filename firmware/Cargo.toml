@@ -54,9 +54,9 @@ dbg-src = []
 # for it next to 0.4.0's GEN / CH2 channels; without it Mode Log is refused
 # and the band decode is unchanged.
 dec-log = []
-# Modbus RTU in the protocol decoder (src/decode.rs `MODBUS`; region B
-# 1 176 B). Default (owner, 2026-11-01); without it the decoder is UART only
-# (DECode:PROTocol MODBus is refused).
+# UART decoding recognises Modbus RTU frames (src/decode.rs `MODBUS`; region
+# B 1 016 B). Default (owner, 2026-11-01); without it UART frames are plain
+# bytes (DECode:PROTocol MODBus still selects UART).
 dec-modbus = []
 # DALI (IEC 62386, 1200 bit/s bi-phase) in the protocol decoder (src/decode.rs
 # `DALI`, `dali_step`). Default (0.4.0): region B 2.9 KB; without it

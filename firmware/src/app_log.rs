@@ -309,7 +309,6 @@ fn store_frame(f: &dc::Fr, req: u32) {
     }
     l.next += 1;
     l.cnt[0] += 1;
-    l.cnt[4] += (f.flags & dc::F_CRC != 0) as u32;
     l.fbn = 0;
 }
 
@@ -514,7 +513,7 @@ impl App {
             l.fs = fs;
             l.start_ms = now;
             l.cur = dc::Cursor::at(0);
-            l.fr = dc::Framer::new(false, 1, fs, 9600, 0, u32::MAX);
+            l.fr = dc::Framer::new(1, fs, 9600, 0, u32::MAX);
             self.log_reset_decode();
         }
         if self.view != View::Decode {
@@ -715,7 +714,7 @@ impl App {
         l.line = dc::Line { lo, mid, hi, inv: s.cfg.inverted, spb: (l.fs as u64 * 256 / l.rate.max(1) as u64) as u32, bits, parity };
         l.cur = dc::Cursor::at(p);
         let cs = l.line.char_samples();
-        l.fr = dc::Framer::new(s.cfg.proto == dc::P_MODBUS, cs, l.fs, l.rate, p as u32, u32::MAX);
+        l.fr = dc::Framer::new(cs, l.fs, l.rate, p as u32, u32::MAX);
         l.fseq0 = l.next;
         l.fbn = 0;
         if l.line.spb < dc::MIN_SPB << 8 {
@@ -950,7 +949,6 @@ impl App {
 
         let l = lg();
         let s = ds();
-        let mb = s.cfg.proto == dc::P_MODBUS;
         let state = if l.paused {
             2
         } else if l.lvl.is_none() || l.rate == 0 {
@@ -972,7 +970,7 @@ impl App {
         let hn = self.log_thr_text(&mut hb);
         let t = ul::Top {
             state,
-            proto: if mb { "MODBUS" } else { "UART" },
+            proto: "UART",
             rate: ul::txt(&rb[..rn]),
             thr: ul::txt(&hb[..hn]),
             inv: s.cfg.inverted,
@@ -989,7 +987,7 @@ impl App {
             }
         }
         let c = l.cnt;
-        let v = [c[0], c[2], c[3], c[4], c[5], mb as u32];
+        let v = [c[0], c[2], c[3], c[4], c[5], 0];
         for i in 0..4 {
             let key = ul::cell_key(i, &v);
             if l.cshown[i] != key {
@@ -1076,18 +1074,16 @@ impl App {
                 a.nb += 1;
             }
         });
-        if st.cfg.proto == dc::P_MODBUS {
-            // The frame box: the frame as the log decoded it (the snippet
-            // alone shows no gap before it).
-            let l = lg();
-            if let Some((f, _, _, dur, _)) = l.get(seq, &mut []) {
-                let s1 = first + (dur as u64 * fs as u64 / 1_000_000) as u32;
-                let a = ud::ann();
-                a.f[0] = ud::FAnn { s0: first, s1, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: 0xFF };
-                a.nf = 1;
-            }
+        // A Modbus frame's box: the frame as the log decoded it (the
+        // snippet alone shows no gap before it).
+        let l = lg();
+        if let Some((f, _, _, dur, _)) = l.get(seq, &mut []).filter(|g| dc::is_mb_kind(g.0.kind)) {
+            let s1 = first + (dur as u64 * fs as u64 / 1_000_000) as u32;
+            let a = ud::ann();
+            a.f[0] = ud::FAnn { s0: first, s1, kind: f.kind, fl: f.flags, len: f.len, head: f.head, req: 0xFF };
+            a.nf = 1;
         }
-        ud::band(self.dec_band(), false);
+        ud::band(1 + (ud::ann().nf > 0) as u8, false);
 
         // Not a scope record's: the band's cache is for no record.
         ud::ann().gen = 0;
@@ -1321,7 +1317,6 @@ impl App {
         if !self.scope.log_on() {
             return 0;
         }
-        let modbus = ds().cfg.proto == dc::P_MODBUS;
         let mut w = dc::W { b, n: 0 };
         let mut k = 0;
         let l = lg();
@@ -1339,6 +1334,7 @@ impl App {
                 fr %= dd;
                 dd /= 10;
             }
+            let modbus = dc::is_mb_kind(f.kind);
             w.s(if modbus { ",MB," } else { ",UART," });
             for &x in &d[..n] {
                 w.hex(x);

@@ -125,15 +125,14 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
         return;
     }
     a.mode = ud::M_BOXES;
-    let modbus = cfg.proto == dc::P_MODBUS;
-    let margin = cs * if modbus { 6 } else { 2 } + (l.spb >> 8) as usize * 2;
+    let margin = cs * 6 + (l.spb >> 8) as usize * 2;
     let (lo_s, hi_s) = (off.saturating_sub(margin), (off + n + margin).min(c.len()));
-    let mut fr = dc::Framer::new(modbus, cs as u32, fs, baud, lo_s as u32, hi_s as u32);
+    let mut fr = dc::Framer::new(cs as u32, fs, baud, lo_s as u32, hi_s as u32);
     let mut fno = [u32::MAX; ud::NF];
     let (v0, v1) = (off as i64, (off + n) as i64);
     let mut on_frame = |f: &dc::Fr, req: u32, nf: u32| {
         let a = ud::ann();
-        if (f.end as i64) < v0 || f.start as i64 >= v1 || a.nf as usize >= ud::NF {
+        if f.kind == dc::K_UART || (f.end as i64) < v0 || f.start as i64 >= v1 || a.nf as usize >= ud::NF {
             return;
         }
         let k = a.nf as usize;
@@ -153,15 +152,11 @@ fn fill(c: &[u16], off: usize, n: usize, fs: u32, cfg: dc::Cfg, tr: &stock::Trac
             }
 
         }
-        if modbus {
-            let nf = fr.nframes;
-            fr.push(ch, &mut |f, r| on_frame(f, r, nf));
-        }
-    });
-    if modbus {
         let nf = fr.nframes;
-        fr.finish(&mut |f, r| on_frame(f, r, nf));
-    }
+        fr.push(ch, &mut |f, r| on_frame(f, r, nf));
+    });
+    let nf = fr.nframes;
+    fr.finish(&mut |f, r| on_frame(f, r, nf));
 }
 
 fn crc(d: &[u8]) -> Vec<u8> {
@@ -215,7 +210,9 @@ fn scene(ck: &mut Checker, name: &str, b: &[bool], spb: f64, cfg: dc::Cfg, chars
     let base = &stock::scenes()[0];
     let mut m = base.m;
     m.combined = combined;
-    m.dec = if cfg.proto == dc::P_MODBUS { 2 } else { 1 };
+    // The frame row when Modbus frames were found (zoomed out, the bar:
+    // the Modbus scenes, as the firmware keeps it from the last decode).
+    m.dec = if ud::ann().nf > 0 || name.contains("modbus") { 2 } else { 1 };
     m.dec_gen = 1;
     m.pos = 0;
     m.trig_row = 110;
@@ -340,7 +337,7 @@ pub fn run(ck: &mut Checker, out: &str) {
     let ub = bits(&uart_frames(), 0, 3, None);
     let mb = bits(&modbus_frames(true), 1, 50, None);
     let uart = dc::Cfg { proto: dc::P_UART, baud: 115_200, fmt: 0, inverted: false };
-    let modbus = dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false };
+    let modbus = dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 1, inverted: false };
     // The matrix: 24 zoom levels x 3 pan offsets x both views.
     for (proto, b, cfg) in [("uart", &ub, uart), ("modbus", &mb, modbus)] {
         for z in 0..24 {
@@ -399,9 +396,9 @@ pub fn run(ck: &mut Checker, out: &str) {
     let base = &stock::scenes()[0];
     for (k, v) in [
         ud::SetupVals { proto: 1, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 1.65 },
-        ud::SetupVals { proto: 2, mode: 1, fmt: 1, inv: true, baud: 115_200, thr: -99.99, level: f32::NAN },
+        ud::SetupVals { proto: 1, mode: 1, fmt: 1, inv: true, baud: 115_200, thr: -99.99, level: f32::NAN },
         ud::SetupVals { proto: 0, mode: 0, fmt: 3, inv: false, baud: 300, thr: f32::NAN, level: f32::NAN },
-        ud::SetupVals { proto: 2, mode: 1, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
+        ud::SetupVals { proto: 1, mode: 1, fmt: 2, inv: true, baud: 76_800, thr: 12.34, level: 1.0 },
         ud::SetupVals { proto: 3, mode: 0, fmt: 0, inv: false, baud: 0, thr: f32::NAN, level: 8.0 },
         ud::SetupVals { proto: 3, mode: 0, fmt: 2, inv: true, baud: 9600, thr: -12.34, level: f32::NAN },
     ]
@@ -468,7 +465,7 @@ pub fn log_view(ck: &mut Checker, out: &str) {
     // The setup popup (SETUP): the Decode tab's page under a header.
     host::reset(0);
     ul::chrome(&mut || {});
-    let v = ud::SetupVals { proto: 2, mode: 1, fmt: 1, inv: false, baud: 19200, thr: f32::NAN, level: 1.65 };
+    let v = ud::SetupVals { proto: 1, mode: 1, fmt: 1, inv: false, baud: 19200, thr: f32::NAN, level: 1.65 };
     ul::setup(&v);
     let mut add: Vec<Bx> = ud::SU_LABELS.iter().map(|r| rb(*r)).collect();
     for r in [ud::SU_BMINUS, ud::SU_BVAL, ud::SU_BPLUS, ud::SU_TMINUS, ud::SU_TVAL, ud::SU_TPLUS] {
@@ -488,7 +485,7 @@ pub fn log_view(ck: &mut Checker, out: &str) {
 fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
     use scope_ui::log as ul;
     let (frame, cfg, fmt): (Vec<u8>, dc::Cfg, u8) = if modbus {
-        (modbus_frames(false)[1].clone(), dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false }, 1)
+        (modbus_frames(false)[1].clone(), dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 1, inverted: false }, 1)
     } else {
         (b"Hello, opendm40!".to_vec(), dc::Cfg { proto: dc::P_UART, baud: 9600, fmt: 0, inverted: false }, 0)
     };
@@ -500,7 +497,7 @@ fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
     host::reset(0);
     ul::chrome(&mut || {});
     ul::panel(false, true, &mut || {});
-    let t = ul::Top { state: 2, proto: if modbus { "MODBUS" } else { "UART" }, rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+    let t = ul::Top { state: 2, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 9600 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
     for k in 0..ul::TOP_ITEMS {
         ul::top_item(k, &t);
     }
@@ -524,7 +521,7 @@ fn log_snippet(ck: &mut Checker, name: &str, modbus: bool) {
     }
 
     ud::band(if modbus { 2 } else { 1 }, false);
-    let v = [123, 0, 0, 0, 0, modbus as u32];
+    let v = [123, 0, 0, 0, 0, 0];
     for i in 0..4 {
         ul::cell_draw(i, &v);
     }
@@ -543,7 +540,7 @@ fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
         host::reset(0);
         ul::chrome(&mut || {});
         ul::panel(true, false, &mut || {});
-        let t = ul::Top { state: 1, proto: if modbus { "MODBUS" } else { "UART" }, rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
+        let t = ul::Top { state: 1, proto: "UART", rate: if modbus { "Auto 19200 8E1" } else { "Auto 115200 8N1" }, thr: "A 1.65V", inv: false, battery: 4, charging: false };
         for k in 0..ul::TOP_ITEMS {
             ul::top_item(k, &t);
         }
@@ -553,7 +550,7 @@ fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
                 ("0.0121".into(), fit("RSP 01 03 20B 3.2ms 1234 5678 9ABC DEF0 0011 2233 4455 6677 8899 AABB", false), String::new(), "OK", scope_ui::C_WHITE),
                 ("0.0503".into(), fit("REQ 11 06 @0005 =ABCD", false), String::new(), "OK", scope_ui::C_WHITE),
                 ("0.0611".into(), fit("EXC 01 84 E02 2.9ms", false), String::new(), "OK", scope_ui::C_ORANGE),
-                ("0.0712".into(), fit("01 03 00 00 00 02 3B 0B", false), String::new(), "CRC", scope_ui::C_WHITE),
+                ("0.0712".into(), fit("01 03 00 00 00 02 3B 0B", true), "......;.".into(), "OK", scope_ui::C_WHITE),
             ]
         } else {
             vec![
@@ -569,7 +566,7 @@ fn log_screen(ck: &mut Checker, name: &str, modbus: bool) {
             let n = ul::fit_ascii(&r.2, &mut a);
             ul::row(i, Some(&ul::Row { time: &r.0, text: &r.1, ascii: ul::txt(&a[..n]), status: r.3, fg: r.4 }));
         }
-        let v = [123_456, 2, 1, 3, 0, modbus as u32];
+        let v = [123_456, 2, 1, 3, 0, 0];
         for i in 0..4 {
             ul::cell_draw(i, &v);
         }
@@ -586,7 +583,7 @@ pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
     let ub = bits(&uart_frames(), 0, 3, None);
     let mb = bits(&modbus_frames(true), 1, 50, None);
     let uart = dc::Cfg { proto: dc::P_UART, baud: 115_200, fmt: 0, inverted: false };
-    let modbus = dc::Cfg { proto: dc::P_MODBUS, baud: 19200, fmt: 1, inverted: false };
+    let modbus = dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 1, inverted: false };
     scene(ck, "manual/scope-decode", &ub, 20.0, uart, 6.0, 0.30, false, false, false);
     save1(out, "scope-decode");
     scene(ck, "manual/scope-decode-modbus", &mb, 20.0, modbus, 30.0, 0.17, false, true, false);

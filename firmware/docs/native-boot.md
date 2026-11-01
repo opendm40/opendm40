@@ -936,9 +936,10 @@ Left out (cargo features, not default here):
 - `dec-log`: the decoder's frame log (Mode Log, DECode:MODE LOG, the
   FRAMes? FIFO of the log; src/app_log.rs, a stub app_log_off.rs refuses
   it): B ~9 KB, C ~5 KB. The Decode tab's Mode row shows Band only.
-- `dec-modbus`: Modbus RTU in the decoder (decode.rs `MODBUS`; without
-  it UART only, DECode:PROTocol MODBus refused): B 1 176 B. Default since
-  2026-11-01 (owner). The host tests build it always.
+- `dec-modbus`: UART recognises Modbus RTU frames (decode.rs `MODBUS`;
+  without it UART frames are plain bytes): B 1 016 B (1 176 B as a
+  separate protocol before 2026-11-01). Default since 2026-11-01 (owner).
+  The host tests build it always.
 
 Default since 0.4.0 (with the chain): `dec-dali`, DALI in the decoder
 (decode.rs `DALI`, `dali_step`; DECode:PROTocol DALI refused without
@@ -946,7 +947,8 @@ it): B 2 912 B (`dali_step` 692, the frame text, the FRAMes? line, the
 band, the Decode tab's DALI layout), stack headroom -24 B
 (`app_decode::DL`), all of it region B as the rest of the decoder. With
 it (and `dec-modbus`): A2 2 304 B, B 10 804 B, C 15 368 B, SRAM 8 948 B,
-headroom 20 872 B.
+headroom 20 872 B. Modbus folded into UART (2026-11-01): B 11 788 B,
+headroom 20 772 B.
 
 SRAM: `scope::CAP` 42 K -> 34 K u16 (-16 384 B): the raw ring of the fast
 timebases 43 008 -> 34 816 samples, the packed ring (`PCAP`, white

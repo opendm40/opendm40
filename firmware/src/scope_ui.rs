@@ -265,7 +265,8 @@ pub struct Model {
     /// The recorded function's unit (`rec_unit`) for RecStyle::RecFunc.
     pub rec_unit: &'static str,
     /// Protocol decoder band (ui_decode.rs): 0 none, 1 UART (the byte
-    /// row), 2 Modbus (frame and byte rows); `dec_gen` changes with what
+    /// row), 2 UART with Modbus frames (frame and byte rows), 3 DALI;
+    /// `dec_gen` changes with what
     /// it shows (`dec::ann`), 0 = blank (a drag moves the trace).
     pub dec: u8,
     pub dec_gen: u16,
