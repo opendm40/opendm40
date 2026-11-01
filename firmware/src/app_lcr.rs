@@ -92,6 +92,13 @@ static mut LCR: Lcr = Lcr {
     info_fg: 0,
 };
 
+impl Lcr {
+    /// The page is open and measuring (App::off_held: no auto power-off).
+    pub fn measuring(&self) -> bool {
+        self.on && self.run
+    }
+}
+
 pub(super) fn lcr() -> &'static mut Lcr {
     // SAFETY: main loop only.
     unsafe { &mut *core::ptr::addr_of_mut!(LCR) }
@@ -131,6 +138,18 @@ impl App {
         // (Not gen_set: the Signal page is not open; no page draw on the
         // stack of `show`, the static worst path.)
         self.gen.apply(g.normalised());
+    }
+
+    /// The generator settings to persist: while the page is open the
+    /// user's from before it, not the measurement drive (a power loss or
+    /// an auto power-off there keeps the user's).
+    pub(super) fn persisted_gen(&self) -> gen::Settings {
+        let s = lcr();
+        if s.on {
+            s.gen
+        } else {
+            self.gen.s
+        }
     }
 
     /// Open the page (Power Settings "LCR", LCR:STATe ON); Err = why not

@@ -2184,7 +2184,8 @@ impl App {
 
     /// Settings -> backup SRAM words.
     fn persist_words(&self) -> [u32; crate::persist::WORDS] {
-        let g = &self.gen.s;
+        // While the LCR page is open: the user's generator, not its drive.
+        let g = &self.persisted_gen();
         // The MCX settings (the wave view's are not persisted).
         let sc = &self.scope.mcx_settings();
         let mut p = [0u32; crate::persist::WORDS];
@@ -3228,6 +3229,7 @@ impl App {
             || self.dmm.pw.integrating()
             || crate::csvlog::active()
             || crate::inrush::ses().streaming
+            || app_lcr::lcr().measuring()
     }
 
     fn off_warn(&mut self, now: u64, idle: u64) {
