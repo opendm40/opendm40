@@ -1620,7 +1620,8 @@ currents, within the meter's ratings.
 
 To open it:
 
-- in the multimeter, function V or A (DC or AC): **MF**, then **Wave**; or
+- in the multimeter, function V or A (DC or AC): tap **Wave** in the trend
+  chart's lower left corner, or **MF**, then **Wave**; or
 - on the scope page, hold the **DMM** block's title. In the Wave view the
   block reads **MCX**: tap it to go back to the **OSC** input.
 
