@@ -2,7 +2,7 @@
 //!
 //! `VERSION` is the one version string, Cargo.toml's package version as it
 //! is (0.1.0, 0.1.0-pre2, 0.1.2): *IDN? (also in the 34401A emulation),
-//! Settings > Device, README.TXT / BACKUP.TXT, the CSV / log headers.
+//! Settings > Other > Device info, README.TXT / BACKUP.TXT, the CSV / log headers.
 //! A pull request build in CI appends `-pr<N>.<commit>` (build.rs,
 //! DM40_VERSION_SUFFIX). build.sh names the install file
 //! `dm40_opendm40_v<VERSION>.bin`. Host tests built without Cargo (no

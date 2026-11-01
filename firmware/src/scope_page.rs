@@ -187,6 +187,11 @@ static mut CACHE: Cache = Cache {
     ps_t: 0,
 };
 
+/// The shown frame's column rows (the decoder's bar, app_decode.rs).
+pub(super) fn cache_seg() -> &'static [(i16, i16); 400] {
+    &cache().seg
+}
+
 fn cache() -> &'static mut Cache {
     unsafe { &mut *core::ptr::addr_of_mut!(CACHE) }
 }
@@ -266,25 +271,25 @@ impl Math {
 }
 
 /// The spectrum job and result: 4 KB, TCM .bss (all-zero `Fft::new`). Its
-/// 8 KiB work buffer is lent by the disk scratch arena (calbackup.rs
+/// 8 KiB work buffer is lent by the disk buffer arena (calbackup.rs
 /// `fft_work`).
 static mut FFT: crate::fft::Fft = crate::fft::Fft::new();
 /// A frame was dropped because a disk job held the work buffer: ask for it
 /// again (a stopped scope re-emits its record) once the buffer is back.
 static mut FFT_RETRY: bool = false;
-const _: () = assert!(crate::calbackup::FFT_WORK == crate::fft::N);
+const _: () = assert!(crate::diskbuf::FFT_WORK == crate::fft::N);
 
 fn fft() -> &'static mut crate::fft::Fft {
     unsafe { &mut *core::ptr::addr_of_mut!(FFT) }
 }
 
-/// The FFT work buffer (calbackup.rs `fft_work`: the disk scratch arena;
+/// The FFT work buffer (diskbuf.rs `fft_work`: the disk buffer arena;
 /// `fresh` = a new job's load). None while a disk job holds it, or a disk
 /// user wrote it since the load: the job in flight, if any, is dropped (the
 /// last result stays) and the frame is asked again.
 #[inline(always)]
 fn fft_work(fresh: bool) -> Option<&'static mut crate::fft::Work> {
-    let w = crate::calbackup::fft_work(fresh);
+    let w = crate::diskbuf::fft_work(fresh);
     if w.is_none() {
         fft().abort();
         unsafe { FFT_RETRY = true };
@@ -570,6 +575,8 @@ impl App {
             rec: crate::csvlog::active(),
             rec_dim: su::rec_blink(now),
             rec_unit: su::rec_unit(self.rec_func),
+            dec: self.dec_band(),
+            dec_gen: self.dec_gen_shown(),
             tsrc: if wave { scope::TSRC_CH1 } else { s.tsrc },
             ch2_txt: self.ch2_label(true),
         }
@@ -815,11 +822,7 @@ impl App {
             } else if n >= scope::COLS {
                 let a = i * n / scope::COLS;
                 let b = ((i + 1) * n / scope::COLS).max(a + 1).min(n);
-                let (mut cl, mut ch) = (u16::MAX, 0u16);
-                for &v in &f.data[a..b] {
-                    cl = cl.min(v);
-                    ch = ch.max(v);
-                }
+                let (cl, ch) = f.data.min_max(a, b);
                 let (r1, r2) = (row(cl), row(ch));
                 lo = r1.min(r2);
                 hi = r1.max(r2);
@@ -829,7 +832,7 @@ impl App {
                 // interpolation (UF-41, src/sinc.rs Lanczos-3) instead of
                 // straight lines between the samples.
                 let p = i as f32 * (n - 1) as f32 / (scope::COLS - 1) as f32;
-                let r = (r0 + slope * crate::sinc::at(f.data, p)) as i32;
+                let r = (r0 + slope * crate::sinc::at(&f.data, p)) as i32;
                 lo = r;
                 hi = r;
             } else {
@@ -852,6 +855,8 @@ impl App {
         c.tb = s.tb;
         self.sp_gen_frame(f);
         self.ch2_rows(f, &mut c.c2seg);
+        // The protocol decoder's band (app_decode.rs).
+        self.dec_frame(f);
         self.sp_math_frame(f);
         self.sp_render();
     }
@@ -907,67 +912,71 @@ impl App {
 
     /// MF Settings "Save CSV" (UF-13): the stored record of the stopped
     /// scope as SCOP%03u.CSV (scope_csv.rs, written by the screenshot job).
-    /// Stock rule: refused while sampling ("Please stop sample").
+    /// Stock rule: refused while sampling ("Stop the scope first").
     #[inline(never)] // .cold (link-native.x): a tap (MF Settings Save CSV)
     pub(super) fn sp_save_csv(&mut self, now: u64) {
         let rec = self.scope.record();
         if self.scope.s.run || rec.is_empty() {
-            self.toast(now, if self.scope.s.run { "Please stop sample" } else { "No record to save" }, false);
+            self.toast(now, if self.scope.s.run { "Stop the scope first" } else { "No record to save" }, false);
             return;
         }
         if crate::screenshot::busy() || crate::csvlog::writing() {
             self.toast(now, "Disk busy, try again", false);
             return;
         }
-        let s = self.scope.s;
+        // The record's own settings (a stopped change only re-renders it);
+        // the probe is the current one, as the values (`Scope::volts`).
+        let mut s = self.scope.record_settings();
+        s.probe = self.scope.s.probe;
+        let (trig_v, runt_v, vd) = self.scope.record_levels();
         let (fs, t0, trig) = self.scope.record_info();
         let a = self.scope.volts(0.0);
         let b = self.scope.volts(1.0) - a;
         let mut h = crate::scope_csv::Hdr::new();
         let mut t = [0u8; 16];
-        h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", scope record (no real-time clock)\r\n");
+        h.s(crate::cold_str!("# Alientek ")).s(crate::ident::model_name()).s(crate::cold_str!(", opendm40 ")).s(crate::ident::VERSION).s(crate::cold_str!(", scope record (no real-time clock)\r\n"));
         let wave = self.scope.wave_on();
         let amps = wave && self.scope.wave_scale_now().amps;
         let unit = if amps { "A" } else { "V" };
         let mut v = su::Buf::new();
         // From the value: the label table index (vdiv_idx) is wrong with
         // a x2 / x5 ... probe (#133).
-        su::fmt_div(&mut v, self.scope.vdiv(), unit);
+        su::fmt_div(&mut v, vd, unit);
         let mut sr = su::Buf::new();
         su::fmt_hz(&mut sr, fs as f32);
         let sr = sr.as_str();
-        h.s("# timebase ").s(su::TB_LABELS[self.scope.record_tb().min(29)]).s("/div, ").s(v.as_str()).s("/div, ");
+        h.s(crate::cold_str!("# timebase ")).s(su::TB_LABELS[self.scope.record_tb().min(29)]).s(crate::cold_str!("/div, ")).s(v.as_str()).s(crate::cold_str!("/div, "));
         if wave {
             // Source DMM: the HY3131 AD2 stream of the DMM row (app_wave.rs).
-            h.s("source DMM ").s(self.wave_func_label()).s(" (AD2, isolated jacks)");
+            h.s(crate::cold_str!("source DMM ")).s(self.wave_func_label()).s(crate::cold_str!(" (AD2, isolated jacks)"));
         } else {
-            h.s("probe ").s(scope::PROBE_NAMES[probe_idx(s.probe)]);
+            h.s(crate::cold_str!("probe ")).s(scope::PROBE_NAMES[probe_idx(s.probe)]);
         }
-        h.s(", coupling ").s(if s.ac { "AC" } else { "DC" }).s(", sample rate ").s(sr.strip_suffix("Hz").unwrap_or(sr)).s("S/s, samples ");
-        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s("\r\n");
+        h.s(crate::cold_str!(", coupling ")).s(if s.ac { "AC" } else { "DC" }).s(crate::cold_str!(", sample rate ")).s(sr.strip_suffix("Hz").unwrap_or(sr)).s(crate::cold_str!("S/s, samples "));
+        h.s(crate::dmm::format(&mut t, rec.len() as f32, 0)).s(crate::cold_str!("\r\n"));
         let mut tv = su::Buf::new();
-        su::fmt_v(&mut tv, self.scope.trig_volts(), unit);
-        h.s("# trigger ");
-        self.sp_trig_desc(&mut h);
-        h.s(" ").s(if s.rising { "rising" } else { "falling" }).s(" ").s(tv.as_str());
-        h.s(", mode ").s(match s.mode {
-            scope::TrigMode::Auto => "Auto",
-            scope::TrigMode::Normal => "Normal",
-            scope::TrigMode::Single => "Single",
+        su::fmt_v(&mut tv, trig_v, unit);
+        h.s(crate::cold_str!("# trigger "));
+        self.sp_trig_desc(&mut h, &s, runt_v);
+        h.s(" ").s(if s.rising { crate::cold_str!("rising") } else { crate::cold_str!("falling") }).s(" ").s(tv.as_str());
+        h.s(crate::cold_str!(", mode ")).s(match s.mode {
+            scope::TrigMode::Auto => crate::cold_str!("Auto"),
+            scope::TrigMode::Normal => crate::cold_str!("Normal"),
+            scope::TrigMode::Single => crate::cold_str!("Single"),
         });
-        h.s(if trig { ", triggered\r\n" } else { ", untriggered\r\n" });
+        h.s(if trig { crate::cold_str!(", triggered\r\n") } else { crate::cold_str!(", untriggered\r\n") });
         h.s(if wave {
             if amps {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is amperes through the DMM A jack (DMM calibration applied)\r\n")
             } else {
-                "# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n"
+                crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); the value column is volts at the DMM jacks (DMM calibration applied)\r\n")
             }
         } else {
-            "# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n"
+            crate::cold_str!("# time_s = seconds from the trigger point (untriggered: from the screen centre); volts at the probe tip\r\n")
         });
         crate::scope_csv::set(rec, a, b, fs as f32, t0, &h, amps);
         if !crate::screenshot::start_csv() {
-            self.toast(now, "Save CSV Error", false);
+            self.toast(now, "CSV save failed", false);
             return;
         }
         self.scope.hold = true;
@@ -975,22 +984,21 @@ impl App {
     }
 
     /// Trigger type text of the CSV header.
-    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr) {
-        let s = &self.scope.s;
+    fn sp_trig_desc(&self, h: &mut crate::scope_csv::Hdr, s: &scope::Settings, runt_v: f32) {
         match s.ttype {
             crate::trigsoft::PULSE => {
                 let mut b = su::Buf::new();
                 su::fmt_s125(&mut b, s.pwidth);
-                h.s("Pulse width ").s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(" (software),");
+                h.s(crate::cold_str!("Pulse width ")).s(crate::trigsoft::COND_NAMES[s.pcond.min(2) as usize]).s(" ").s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             crate::trigsoft::RUNT => {
                 let mut b = su::Buf::new();
                 let unit = if self.scope.wave_on() && self.scope.wave_scale_now().amps { "A" } else { "V" };
-                su::fmt_v(&mut b, self.scope.runt_volts(), unit);
-                h.s("Runt, 2nd level ").s(b.as_str()).s(" (software),");
+                su::fmt_v(&mut b, runt_v, unit);
+                h.s(crate::cold_str!("Runt, 2nd level ")).s(b.as_str()).s(crate::cold_str!(" (software),"));
             }
             _ => {
-                h.s("Edge");
+                h.s(crate::cold_str!("Edge"));
             }
         }
     }
@@ -1009,7 +1017,7 @@ impl App {
             }
             crate::screenshot::Shot::NoDisk => ("No disk", false),
             crate::screenshot::Shot::Full => ("Disk full", false),
-            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("Save CSV Error", false),
+            crate::screenshot::Shot::Error | crate::screenshot::Shot::Busy => ("CSV save failed", false),
         };
         self.toast(now, txt, ok);
         self.beep(now, if ok { 100 } else { 500 });
@@ -1034,10 +1042,7 @@ impl App {
         }
         let Some(g) = self.scope.gen_sync() else { return };
         let rec = self.scope.record();
-        let off = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-        if off + f.data.len() > rec.len() {
-            return;
-        }
+        let Some(off) = rec.offset_of(&f.data) else { return };
         let n = f.data.len();
         let row = |v: f32| self.scope.row_of_volts(v).clamp(-30000.0, 30000.0) as i16;
         for i in 0..scope::COLS {
@@ -1082,10 +1087,9 @@ impl App {
         let (off, n) = if f.data.is_empty() {
             (0, rec.len())
         } else {
-            let o = (f.data.as_ptr() as usize).wrapping_sub(rec.as_ptr() as usize) / 2;
-            if o + f.data.len() > rec.len() {
+            let Some(o) = rec.offset_of(&f.data) else {
                 return;
-            }
+            };
             (o, f.data.len())
         };
         // N points: the window decimated by k (mean of k samples) when it
@@ -1107,14 +1111,14 @@ impl App {
             return;
         };
         crate::prof::enter(crate::prof::FFT);
-        fft().load(w, &rec[start..], k, len, a, b, f.fs as f32, m.win);
+        fft().load(w, &rec.sub(start, rec.len()), k, len, a, b, f.fs as f32, m.win);
         crate::prof::exit(crate::prof::FFT);
     }
 
     /// One slice of the spectrum job (every pass on the page): a finished
     /// spectrum is drawn.
     fn sp_math_step(&mut self) {
-        if unsafe { FFT_RETRY } && crate::calbackup::fft_free() {
+        if unsafe { FFT_RETRY } && crate::diskbuf::fft_free() {
             unsafe { FFT_RETRY = false };
             self.scope_invalidate();
         }
@@ -1982,12 +1986,25 @@ impl App {
     /// Tap-step of the timebase (true = slower): applied with a 30 ms beep
     /// and the stepped tab's pressed style; Halves: the tabs stay 2 s (the
     /// guide-line time). Nothing at the limit (its tab is hidden).
+    /// "Max zoom" when the scope took a slower timebase than `want`: stopped,
+    /// at the stored record's resolution (`Scope::tb_floor`; SCPI clamps
+    /// without it).
+    fn sp_tb_floor_toast(&mut self, want: usize, now: u64) {
+        if !self.scope.s.run && self.scope.s.tb > want && self.scope.s.tb == self.scope.tb_floor() {
+            self.toast(now, "Max zoom", false);
+        }
+    }
+
     fn sp_tb_step(&mut self, slower: bool, now: u64) -> bool {
         let mut st = self.scope.s;
         let top = self.tb_top() as usize;
-        let lo = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let lo = self.scope.tb_floor().min(st.tb);
         let tb = if slower { (st.tb + 1).min(top) } else { st.tb.saturating_sub(1).max(lo) };
         if tb == st.tb {
+            // Stopped at the record's resolution (the faster tab is still shown).
+            if !slower && !st.run && lo > if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN } {
+                self.toast(now, "Max zoom", false);
+            }
             return false;
         }
         st.tb = tb;
@@ -2038,7 +2055,7 @@ impl App {
         let h = axis == Axis::H;
         let prev = self.sp.pinch.map(|p| su::PinchState { horizontal: p.axis == Axis::H, i0: p.i0, i: p.i });
         let tb_max = if self.scope.roll { scope::TB_MAX } else { scope::TB_YT_MAX };
-        let tb_min = if self.scope.wave_on() { scope::WAVE_TB_MIN } else { scope::TB_MIN };
+        let tb_min = self.scope.tb_floor().min(st.tb);
         let mode = pinch_mode();
         let r = s.max(1) as f32 / s0.max(1) as f32;
         let n = if axis == Axis::V && self.scope.wave_on() {
@@ -2078,6 +2095,9 @@ impl App {
                 st.range = p.i;
             }
             self.scope_set(st, now);
+            if p.axis == Axis::H {
+                self.sp_tb_floor_toast(p.i, now);
+            }
         } else {
             self.sp_render();
         }
@@ -2215,6 +2235,7 @@ impl App {
             pcond: s.pcond,
             pwidth: s.pwidth,
             runt_v: self.scope.runt_volts(),
+            dec: self.dec_setup_vals(),
             tsrc: s.tsrc,
             gen_trace: self.scope.gen_trace,
             ch2_on: self.ch2.on,
@@ -2222,7 +2243,7 @@ impl App {
         }
     }
 
-    fn sp_popup_draw(&mut self) {
+    pub(super) fn sp_popup_draw(&mut self) {
         // The box's fills wait for its widgets (lcd.rs "deferred fills").
         crate::lcd::defer_start();
         let v = self.sp_popvals();
@@ -2249,7 +2270,7 @@ impl App {
     /// only that (`sp_uncover`, the next tick); the combined view, whose
     /// popups also cover the meter strip, repaints the whole page.
     #[inline(never)] // region C (link-native.x)
-    fn sp_popup_close(&mut self) {
+    pub(super) fn sp_popup_close(&mut self) {
         let grey = match self.sp.popup {
             su::Popup::Ch1(_) => 1,
             su::Popup::Math(_) => 2,
@@ -2378,6 +2399,7 @@ impl App {
                         su::TbHit::Row(r) => self.sp_tb_pick(r, now),
                         su::TbHit::Inside => {}
                     },
+
                     su::Popup::None => {}
                 }
                 if had_press && self.sp.popup != su::Popup::None && !self.redraw {
@@ -2444,6 +2466,7 @@ impl App {
         if i as usize != st.tb || roll_on {
             st.tb = i as usize;
             self.scope_set(st, now);
+            self.sp_tb_floor_toast(i as usize, now);
         }
         let tb = self.scope.s.tb as u8;
         self.sp.popup = su::Popup::Tb(tb);
@@ -2590,6 +2613,11 @@ impl App {
                 self.sp_save_csv(now);
                 return;
             }
+            su::MfHit::Dec(h) => {
+                self.dec_setup_tap(clk, h, now);
+                return;
+            }
+
         }
         let _ = clk;
         self.sp_popup_draw();
@@ -2700,11 +2728,7 @@ impl App {
             return;
         }
         let mut st = self.scope.s;
-        let (mut lo, mut hi) = (1023u16, 0u16);
-        for &v in f.data {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
+        let (lo, hi) = f.data.min_max(0, f.data.len());
         let pp = (hi - lo) as f32;
         let (l30, l70) = (lo as f32 + 0.3 * pp, lo as f32 + 0.7 * pp);
         let swing = l70 - l30 > 19.0;
@@ -2712,8 +2736,8 @@ impl App {
         // Period from rising crossings of the 30 % / 70 % levels.
         let (mut armed, mut first, mut last, mut n) = (false, 0usize, 0usize, 0u32);
         if swing {
-            for (i, &v) in f.data.iter().enumerate() {
-                let v = v as f32;
+            for i in 0..f.data.len() {
+                let v = f.data.at(i) as f32;
                 if v < l30 {
                     armed = true;
                 } else if armed && v > l70 {
@@ -2835,7 +2859,7 @@ impl App {
         st.range = r;
         st.pos = ((141.0 * mid / (4.0 * scope::VDIV[r] * probe)) as i32).clamp(-392, 392);
         st.trig_row = 140;
-        let res = crate::scope_meas::compute(f.data, f.fs as f32, &self.scope);
+        let res = crate::scope_meas::compute(&f.data, f.fs as f32, &self.scope);
         let cyc = res.v[9];
         if period > 0.0 {
             let ok = cyc.is_finite() && cyc > 0.0 && cyc < 2.0 * period && cyc > 0.5 * period;
@@ -2962,7 +2986,9 @@ const AS_P2_MAX: u8 = 3;
 /// AUTO-set decision log (DBG:GEST? after "|AUTO"): per record phase (1
 /// amplitude, 3 period, 2 final; 5 = re-measure at the result range, 4 =
 /// the result), timebase, range, min /
-/// max code, rising crossings, period (phase 4: Cycl) in us.
+/// max code, rising crossings, period (phase 4: Cycl) in us. SRAM, not the
+/// TCM: the stack's headroom.
+#[cfg_attr(target_os = "none", link_section = ".sram_bss")]
 static mut AS_LOG: [(u8, u8, u8, u16, u16, u16, f32); 16] = [(0, 0, 0, 0, 0, 0, 0.0); 16];
 static mut AS_LOG_N: usize = 0;
 

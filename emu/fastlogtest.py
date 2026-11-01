@@ -24,7 +24,7 @@ sectors answer NOT READY 02/04/01 (and only those, from FIRMWARE.BIN's
 sector 0x7C000), and after the session every file reads whole with the same
 bytes.
 --ui-nav: UI navigation by DBG:KEY / DBG:TAP while each session streams
-(the main menu, Settings 1..3, Device, MENU, the Oscilloscope tile, its
+(the main menu, Settings > Scope / Other, Device, MENU, the Oscilloscope tile, its
 source badge, MENU, the Multimeter tile; each landing checked with
 DBG:VIEW?), each session started on the MCX scope page; before the sessions
 the page tree with no stream (MENU on the Device page = the main menu). Real
@@ -62,7 +62,8 @@ ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDe
 ap.add_argument('--app', required=True, help='opendm40 native ELF / image')
 ap.add_argument('--port', type=int, default=4817, help='USB/IP port (default 4817)')
 ap.add_argument('--bt-port', type=int, default=4818, help='BT passthrough port (default 4818)')
-ap.add_argument('--dur', type=int, default=2, help='LOG:DURation per session, s (device time)')
+ap.add_argument('--dur', type=int, default=None, help='LOG:DURation per session, s (device time; default 2, '
+                'with --ui-nav 4: a NAV round is 10 steps of >= 300 ms)')
 ap.add_argument('--profiles', default='typ,max')
 ap.add_argument('--sessions', default='ad1:640,ad2:4800,ad2:9600,ad2:19200,ad2:38400')
 ap.add_argument('--extra-script', metavar='FILE', help='event-script lines (run.py --script) appended to the generated one, e.g. Renode hooks (opendm40 region C audit)')
@@ -102,7 +103,7 @@ ap.add_argument('--host-only', action='store_true', help='with --host-read: no S
 ap.add_argument('--poll', default='', help='with --host-read: more queries sent at each step, ";"-separated (e.g. '
                 '"SCOP:MEAS:VPP?;DBG:HWTRIG?": scope commands read the calibration record, slow bank)')
 ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each session streams (DBG:KEY / DBG:TAP, '
-                'each landing checked with DBG:VIEW?): MENU, the Settings tile, More, More, Device, MENU (the main menu), '
+                'each landing checked with DBG:VIEW?): MENU, the Settings tile, the Scope and Other tabs, Device info, MENU (the main menu), '
                 'the Oscilloscope tile (the MCX scope page), its source badge (the Wave view: refused while a session '
                 'streams), MENU, the Multimeter tile; the next session starts on the scope page. Before the sessions, the '
                 'same page tree with no stream (MENU on the Device page = the main menu). With --region-c: no region C '
@@ -110,6 +111,8 @@ ap.add_argument('--ui-nav', action='store_true', help='UI navigation while each 
 ap.add_argument('--ui-nav-steps', type=int, default=None, help='with --ui-nav: at most this many NAV steps per session '
                 '(0: only start the session on the scope page)')
 A = ap.parse_args()
+if A.dur is None:
+    A.dur = 4 if A.ui_nav and A.ui_nav_steps is None else 2
 RC = None
 PROF = {'typ': (400, 45_000, 120_000, 150_000), 'max': (3000, 400_000, 1_600_000, 2_000_000)}
 os.environ['USBIP_PORT'] = str(A.port)
@@ -272,6 +275,7 @@ class HostRead:
         self.off = 0
         self.bytes = 0
         self.profs = 0
+        self.has_prof = None
         self.seen = set()
         self.refused = {}   # name: NOT READY count
         self.first = {}     # name: file offset of its first refused sector
@@ -323,7 +327,12 @@ class HostRead:
         if A.host_only:
             self.profs += 1
             return
-        if 'PROF' in self.q('DBG:PROF?'):
+        # DBG:PROF? only in a build with the feature dbg-prof: without it
+        # the poll counts without the query.
+        if self.has_prof is None:
+            self.q('DBG:PROF?')
+            self.has_prof = not self.q('SYST:ERR?').startswith('-113')
+        if not self.has_prof or 'PROF' in self.q('DBG:PROF?'):
             self.profs += 1
         self.q('LOG:DEST?')
         self.q('LOG:DURation?')
@@ -368,12 +377,12 @@ class HostRead:
 
 
 # UI navigation (--ui-nav): (command, the DBG:VIEW? page it must land on).
-# Coordinates: ui.rs TILES (main menu), the settings rows (SET_Y0 44, pitch
-# 30: row 8 "More" y 297, Settings 3/3 row 4 "Device" y 177, row 3 "Burden voltage" y 147, since the "A-lead
-# reminder" row went), scope_ui.rs
-# SRC_BADGE (the source badge, top bar).
-NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 240,297', 'Settings,2'),
-       ('DBG:TAP 240,297', 'Settings,3'), ('DBG:TAP 240,177', 'Device'), ('DBG:KEY 0', 'Main menu'),
+# Coordinates: ui.rs TILES (main menu), the Settings tabs and rows (ST_Y0 44,
+# pitch 45: tab 4 "Scope" y 246, tab 5 "Other" y 291 at x 60; Other's row 2
+# "Device info" y 156 at x 300), scope_ui.rs SRC_BADGE (the source badge, top
+# bar).
+NAV = [('DBG:KEY 0', 'Main menu'), ('DBG:TAP 341,221', 'Settings,1'), ('DBG:TAP 60,246', 'Settings,5'),
+       ('DBG:TAP 60,291', 'Settings,6'), ('DBG:TAP 300,156', 'Device'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 341,107', 'Oscilloscope'), ('DBG:TAP 177,10', 'Oscilloscope'), ('DBG:KEY 0', 'Main menu'),
        ('DBG:TAP 140,107', 'Multimeter')]
 
@@ -399,11 +408,11 @@ def nav_to(q, steps, what):
 
 def nav_tree(q):
     """No stream: the page tree; MENU on the Device page = the main menu
-    (device check 519fb8a: it returned to Settings 3/3), a tap on Device =
-    Settings 3/3, MENU from the menu = back to the instrument (DMM)."""
+    (device check 519fb8a), a tap on Device = Settings > Other, MENU there =
+    the main menu, MENU from the menu = back to the instrument (DMM)."""
     nav_to(q, NAV[:6], 'page tree, MENU on Device -> the main menu')
-    nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,3'), ('DBG:KEY 0', 'Settings,2'), ('DBG:KEY 0', 'Settings,1'),
-                          ('DBG:KEY 0', 'Main menu'), ('DBG:KEY 0', 'Multimeter')], 'a tap on Device -> Settings 3/3, MENU back up')
+    nav_to(q, NAV[1:5] + [('DBG:TAP 240,177', 'Settings,6'), ('DBG:KEY 0', 'Main menu'), ('DBG:KEY 0', 'Multimeter')],
+           'a tap on Device -> Settings > Other, MENU back up')
 
 
 class UiNav:
@@ -423,6 +432,8 @@ class UiNav:
         v = self.q('DBG:VIEW?')
         # The source badge in a session: the Wave view is refused (no
         # stream of its own while the logger owns the HY3131).
+        # DBG:VIEW? field 3: the Wave view on (a fourth field, the trend
+        # chart's ms/div, follows it).
         if not v.startswith(want) or (c == 'DBG:TAP 177,10' and v.split(',')[2:3] != ['0']):
             self.bad.append('%s -> %s (want %s)' % (c, v, want))
         self.k = (self.k + 1) % len(NAV)

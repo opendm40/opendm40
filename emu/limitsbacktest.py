@@ -99,7 +99,7 @@ try:
     RECORD = 'DBG:TAP 100,298'      # Hold & Limits: Record (the ninth row)
     REC_RANGE = 'DBG:TAP 181,259'   # range / temperature page: Record
     REC_POWER = 'DBG:TAP 338,259'   # Power Settings: Record
-    START = 'DBG:TAP 240,148'       # Record page: Start / Stop recording
+    START = 'DBG:TAP 240,178'       # Record page: Start / Stop recording (row 4)
 
     def path(conf, steps, what):
         q(conf + ';*OPC?')

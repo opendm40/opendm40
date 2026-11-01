@@ -22,6 +22,12 @@
 mod host;
 pub use host::mmio;
 
+#[path = "../../src/pack10.rs"]
+mod pack10;
+#[path = "../../src/cring.rs"]
+mod cring;
+#[path = "../../src/dlog.rs"]
+mod dlog;
 #[path = "../../src/ident.rs"]
 mod ident;
 #[path = "../../src/bargraph.rs"]
@@ -63,6 +69,10 @@ mod scope;
 mod scope_meas;
 #[path = "../../src/trigsoft.rs"]
 mod trigsoft;
+// scope_ui.rs draws the decoder view (ui_decode.rs) with decode.rs.
+#[allow(dead_code)]
+#[path = "../../src/decode.rs"]
+mod decode;
 #[path = "../../src/scope_ui.rs"]
 mod scope_ui;
 #[path = "../../src/stockfont.rs"]
@@ -496,6 +506,30 @@ fn trig_volts_tests(ck: &mut Ck) {
     ck.t("runt level: V/div change keeps its volts", near(sc.runt_volts(), rv) && sc.s.runt_row != 70);
 }
 
+/// Stopped zoom limit (`scope::zoom_floor`): a record of any YT timebase
+/// may be zoomed in until a screen holds `ZOOM_MIN` samples of it, no
+/// further; never below its own timebase's window. A 1 s/div record
+/// (2500 S/s) stops at 1 ms/div (25 samples; 500 us/div would be 12.5,
+/// drawn as 12).
+fn zoom_floor_tests(ck: &mut Ck) {
+    let mut sc = scope::Scope::new();
+    let mut ok = true;
+    for t in scope::TB_MIN..=scope::TB_YT_MAX {
+        let mut s = scope::Settings::DEFAULT;
+        s.tb = t;
+        sc.apply(s, 0);
+        let fs = sc.sample_rate();
+        let f = scope::zoom_floor(scope::TB_MIN, fs);
+        let n = scope::ZOOM_MIN;
+        ok &= f <= t && scope::zoom_holds(f, fs, n) && (f == scope::TB_MIN || !scope::zoom_holds(f - 1, fs, n));
+    }
+    ck.t("zoom floor: holds ZOOM_MIN samples, the next faster does not, never above the record's timebase", ok);
+    let mut s = scope::Settings::DEFAULT;
+    s.tb = 24;
+    sc.apply(s, 0);
+    ck.t("zoom floor: a 1 s/div record stops at 1 ms/div", scope::zoom_floor(scope::TB_MIN, sc.sample_rate()) == 15);
+}
+
 fn pinch_state_tests(ck: &mut Ck) {
     use scope_ui::{pinch_step, PinchState};
     let (tb, range, tb_min, tb_max) = (13usize, 9usize, 3usize, 24usize);
@@ -652,6 +686,11 @@ fn gesture_tests(ck: &mut Ck) {
     let v = touch(&[(100, 100), (100, 100)], true, 800);
     ck.t("held 800 ms captured: no tap", !tap(&v));
     ck.t("held 600 ms: tap", tap(&touch(&[(100, 100), (100, 100)], false, 600)));
+    // DMM page: a long press on the A button (the second function button)
+    // opens the inrush page (app.rs: LongPress, y >= BTN_Y, button_hit 1).
+    let a = ((ui::btn_x(1) + ui::BTN_W / 2) as u16, ui::BTN_Y + 20);
+    let v = touch(&[a, a], true, 800);
+    ck.t("held 800 ms on A: LongPress hits button 1", v.iter().any(|g| matches!(g, G::LongPress(p) if p.y >= ui::BTN_Y && ui::button_hit(p.x, p.y) == Some(1))) && !tap(&v));
     let v = touch(&[(100, 100), (100, 100)], false, 0);
     ck.t("one Down, one Tap per touch", v.iter().filter(|g| matches!(g, G::Down(_))).count() == 1 && v.iter().filter(|g| matches!(g, G::Tap(_))).count() == 1);
 }
@@ -791,19 +830,45 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::main_menu("DMM + Scope");
     page(ck, "menu", &|x, y| o(ui::main_menu_hit(x, y)), &all, &[0, 1, 2, 3, 4, 5]);
-    // Settings 1/3, 2/3 and 3/3, Hold & Limits (list pages).
-    let vals = ["10 min", "1 hour", "100%", "100%", "OFF", "DMM + Scope", "Auto", "Hold 300 ms", "", "", ""];
-    for p in 0..3u8 {
+    // Settings: every section (the tabs 100 + i, the rows i), Hold &
+    // Limits (list page).
+    let mut vals = vec!["Hold 5000 ms"; ui::SET_N];
+    vals[ui::S_USB as usize] = ui::usb_disk_name(true, false);
+    for t in 0..ui::SET_TABS.len() as u8 {
         host::reset(0);
-        ui::settings(p, &vals[..[ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize]]);
-        let n = [ui::SETTINGS.len(), ui::SETTINGS2.len(), ui::SETTINGS3.len()][p as usize];
-        let want: Vec<u32> = (0..n as u32).collect();
-        page(ck, &format!("settings {}", p + 1), &|_, y| o(ui::settings_hit(p, y)), &|b| b.y0 >= 40, &want);
+        ui::settings(t, &vals);
+        let n = ui::SET_TABS[t as usize].1.len() as u32;
+        let hit = |x: u16, y: u16| match ui::settings_hit(t, x, y) {
+            Some(ui::SetHit::Tab(i)) => Some(100 + i as u32),
+            Some(ui::SetHit::Row(r)) => Some(r as u32),
+            None => None,
+        };
+        // The tabs as drawn; a row is a target only on its value side (the
+        // name is not): checked below.
+        let tab_only = |b: &Bx| b.y0 >= 40 && b.x1 < 127;
+        let want_t: Vec<u32> = (100..100 + ui::SET_TABS.len() as u32).collect();
+        page(ck, &format!("settings {}", ui::SET_TABS[t as usize].0), &hit, &tab_only, &want_t);
+        for r in 0..n as usize {
+            let id = ui::settings_id(t, r).unwrap();
+            let (x0, y0) = (ui::set_value_x(id), 44 + 45 * r as i16);
+            let name = ui::SET_NAMES[id as usize];
+            let mut ok = true;
+            for y in y0..y0 + 42 {
+                // The name (from x 138 to its end + 5) is not a target, the
+                // value side to the row's end (476) is, all of it; a ">" row
+                // is a target all over.
+                for x in 131..476i16 {
+                    let want = (x >= x0).then_some(r as u32);
+                    ok &= hit(x as u16, y as u16) == want;
+                }
+            }
+            ck.t(&format!("settings {} row {r} \"{name}\": name not a target, value x {x0}..476 is", ui::SET_TABS[t as usize].0), ok && 476 - x0 >= 60);
+        }
     }
-    // Backlight / volume steppers (ui-review #12): the "-" key (x 210..263)
-    // steps down, the "+" key (410..463) up; the label side is "-".
-    ck.t("settings stepper: '-' key and label step down", ui::settings_step(237) == -1 && ui::settings_step(20) == -1);
-    ck.t("settings stepper: '+' key steps up", ui::settings_step(437) == 1 && ui::settings_step(463) == 1);
+    // Backlight / volume steppers (ui-review #12): the "-" key (x 322..361)
+    // steps down, the "+" key (426..465) up.
+    ck.t("settings stepper: '-' key steps down", ui::settings_step(340) == -1);
+    ck.t("settings stepper: '+' key steps up", ui::settings_step(430) == 1 && ui::settings_step(465) == 1);
     // Backlight walks the manual's grid both ways and stays on it at the ends (#91).
     let mut up = vec![55u8];
     for _ in 0..6 { up.push(ui::backlight_step(*up.last().unwrap(), 1)); }
@@ -816,11 +881,11 @@ fn hit_tests(ck: &mut Ck) {
     host::reset(0);
     ui::list_page("Hold & Limits", &ui::LIMIT_ROWS, &["ON"; 9]);
     page(ck, "limits", &|_, y| o(ui::list_hit(y, ui::LIMIT_ROWS.len())), &|b| b.y0 >= 40, &(0..9).collect::<Vec<u32>>());
-    // Record page (decision 2026-10-22 #1): four rows (the stepper keys
+    // Record page (decision 2026-10-22 #1): five rows (the stepper keys
     // nest in their rows), its steppers' "-" key at x 150..203.
     host::reset(0);
-    ui::record_page(["Every reading", "Until stopped"], "about 62 h left", false);
-    page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3]);
+    ui::record_page(["On change", "1 %", "Until stopped"], "about 62 h left", false);
+    page(ck, "record", &|_, y| o(ui::list_hit(y, ui::RECORD_ROWS.len())), &|b| b.y0 >= 40, &[0, 1, 2, 3, 4]);
     ck.t("record stepper: '-' key and label step down", ui::record_step(177) == -1 && ui::record_step(20) == -1);
     ck.t("record stepper: '+' key steps up", ui::record_step(437) == 1 && ui::record_step(463) == 1);
     // Range pages and the temperature page. V / A with the ad2-isr builds'
@@ -911,17 +976,17 @@ fn hit_tests(ck: &mut Ck) {
     let mut dv = ui::DmmView::new();
     dv.draw_static(dmm::Button::Volt, 1, false, true);
     ui::history(&[(1.0, 3, "V"); 5], 5, 4);
-    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
+    let side = ui::Side { max: Some(1.0), avg: Some(1.0), min: Some(1.0), sd: Some(1.0), rel: Some(1.0), secs: Some(5), rec: false };
     let pts: Vec<f32> = (0..321).map(|i| i as f32).collect();
     ui::chart(&mut ui::ChartCache::new(), &pts, 3, 1, Some(&side), "V", ui::RateChip { rate: 1, period_ms: 100, applies: true });
     let dmm_hit = |x: u16, y: u16| -> Option<u32> {
         if ui::value_hit(x, y) {
             Some(105) // main value: resolution / rate
-        } else if x >= 402 && (205..243).contains(&y) {
+        } else if x >= 402 && (205..241).contains(&y) {
             Some(100) // REL
         } else if x >= 402 && (175..279).contains(&y) {
             Some(101) // MIN/MAX column
-        } else if (153..172).contains(&y) {
+        } else if ui::HIST_HIT.contains(&y) {
             Some(102) // history row (one target for all five boxes)
         } else if ui::rate_chip_hit(x, y) {
             Some(103)
@@ -990,10 +1055,11 @@ fn hit_tests(ck: &mut Ck) {
     scope_ui::invalidate();
     scope_ui::update(&scope_ui::Model::DEFAULT);
     page(ck, "replica panel", &|x, y| scope_ui::panel_hit(x, y).map(|k| k as u32), &|b| b.x0 >= 414, &[0, 1, 2, 3, 4, 5, 6]);
-    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY };
-    for tab in 0..4u8 {
+    let pv = scope_ui::PopVals { meas: [0, 10, 9, 11], meas_n: 4, roll: false, persist: 0, bright: 100, grid: 50, rising: true, mode: 0, ac: false, probe: 3, colour: 2, math_colour: 1, pressed_cell: None, math_mode: 5, fft_hz: 3, hz_opts: [scope_ui::Txt::EMPTY; 4], fft_win: 2, fft_vrms: false, ttype: 0, pcond: 0, pwidth: 1e-3, runt_v: 0.0, tsrc: 0, gen_trace: false, ch2_on: false, ch2_vdiv: scope_ui::Txt::EMPTY, dec: scope_ui::dec::SetupVals::DEFAULT };
+    for tab in 0..5u8 {
         host::reset(0);
         scope_ui::draw_mf(tab, &pv);
+        use scope_ui::dec::SetupHit as D;
         let hit = move |x: u16, y: u16| match scope_ui::mf_hit(tab, &pv, x as i16, y as i16) {
             scope_ui::MfHit::Tab(t) => Some(1000 + t as u32),
             scope_ui::MfHit::Cell(i) => Some(i as u32),
@@ -1008,7 +1074,15 @@ fn hit_tests(ck: &mut Ck) {
             scope_ui::MfHit::Mode(m) => Some(340 + m as u32),
             scope_ui::MfHit::PriScr => Some(350),
             scope_ui::MfHit::SaveCsv => Some(351),
+            scope_ui::MfHit::Dec(D::Proto(i)) => Some(400 + i as u32),
+            scope_ui::MfHit::Dec(D::Mode(i)) => Some(410 + i as u32),
+            scope_ui::MfHit::Dec(D::Fmt(i)) => Some(420 + i as u32),
+            scope_ui::MfHit::Dec(D::Inv(i)) => Some(430 + i as u32),
+            scope_ui::MfHit::Dec(D::ThrAuto(a)) => Some(440 + a as u32),
+            scope_ui::MfHit::Dec(D::Baud(up)) => Some(450 + up as u32),
+            scope_ui::MfHit::Dec(D::Thr(up)) => Some(460 + up as u32),
             _ => None,
+
         };
         page(ck, &format!("replica MF tab {tab}"), &hit, &|b| b.y0 >= 21, &[]);
     }
@@ -1521,6 +1595,7 @@ fn main() {
     log_tests(&mut ck);
     hit_tests(&mut ck);
     trig_volts_tests(&mut ck); // after hit_tests: flash mapped (calibration reads)
+    zoom_floor_tests(&mut ck); // after hit_tests too (Scope::new)
     tap_step_tests(&mut ck);
     hwtrig_tests(&mut ck);
     wave_step_tests(&mut ck);

@@ -161,6 +161,15 @@ impl Limit {
 /// mV <-> V keeps them, shown converted to the current unit). AVG is a
 /// compensated (Kahan) f32 sum: no f64 in this build, and the error then does
 /// not grow with the sample count.
+///
+/// SD (the sample standard deviation, N - 1) is Welford's online update of
+/// a mean and the sum of squared deviations `m2`, not sum(x^2): in f32 (24
+/// bits) sum(x^2) / N - mean^2 cancels everything at 6 digits (10 V +- 100 uV:
+/// both terms ~100, their difference 1e-8 of them, below the f32 step). The
+/// update runs on x - x0 (x0 the first sample: the subtraction is exact near
+/// x0), so the mean stays small and keeps moving; a mean of x itself near
+/// 10 V stops moving after ~200 samples (delta / N under half its step) and a
+/// slow drift then inflates SD. Constant input gives exactly 0.
 #[derive(Clone, Copy)]
 pub struct Stats {
     pub n: u32,
@@ -168,6 +177,10 @@ pub struct Stats {
     max: f32,
     sum: f32,
     comp: f32,
+    /// Welford (SD): origin, mean of x - x0, sum of squared deviations.
+    x0: f32,
+    mean: f32,
+    m2: f32,
     /// Time of the first sample (ms).
     t0: u64,
     /// A deliberately started recording session (tap on the MIN/MAX column,
@@ -178,7 +191,7 @@ pub struct Stats {
 
 impl Stats {
     const fn new() -> Self {
-        Stats { n: 0, min: 0.0, max: 0.0, sum: 0.0, comp: 0.0, t0: 0, rec: false }
+        Stats { n: 0, min: 0.0, max: 0.0, sum: 0.0, comp: 0.0, x0: 0.0, mean: 0.0, m2: 0.0, t0: 0, rec: false }
     }
 
     /// Forget the samples (keeps `rec`).
@@ -193,6 +206,7 @@ impl Stats {
         if self.n == 0 {
             self.min = x;
             self.max = x;
+            self.x0 = x;
             self.t0 = now;
         } else {
             self.min = self.min.min(x);
@@ -203,11 +217,21 @@ impl Stats {
         self.comp = (t - self.sum) - y;
         self.sum = t;
         self.n = self.n.saturating_add(1);
+        let y = x - self.x0;
+        let d = y - self.mean;
+        self.mean += d / self.n as f32;
+        self.m2 += d * (y - self.mean);
     }
 
     /// (min, max, avg) in SI, None before the first sample.
     pub fn si(&self) -> Option<(f32, f32, f32)> {
         (self.n > 0).then(|| (self.min, self.max, self.sum / self.n as f32))
+    }
+
+    /// Sample standard deviation (N - 1) in SI: 0 for one sample, None
+    /// before the first.
+    pub fn sd(&self) -> Option<f32> {
+        (self.n > 0).then(|| if self.n < 2 { 0.0 } else { crate::inrush::sqrtf(self.m2 / (self.n - 1) as f32) })
     }
 
     /// Seconds since the first sample.
@@ -706,10 +730,11 @@ impl Meter {
         };
     }
 
-    /// MIN / MAX / AVG in the current display unit.
-    pub fn stats_disp(&self) -> Option<(f32, f32, f32)> {
+    /// MIN / MAX / AVG / SD in the current display unit.
+    pub fn stats_disp(&self) -> Option<(f32, f32, f32, f32)> {
         let k = unit_scale(self.unit);
-        self.stats.si().map(|(a, b, c)| (a / k, b / k, c / k))
+        let sd = self.stats.sd().unwrap_or(0.0);
+        self.stats.si().map(|(a, b, c)| (a / k, b / k, c / k, sd / k))
     }
 
     /// Feed a new reading.
@@ -915,12 +940,6 @@ impl Meter {
     }
 }
 
-/// Continuity / diode with the reading over its ceiling: open leads, "0L"
-/// captioned "OPEN" (owner 2026-10-30), not "Overflow".
-pub fn open(r: &Reading) -> bool {
-    r.main.ol && matches!(r.mode, 11 | 12)
-}
-
 /// Display text for a value ("0L" when over range, "--" for no value:
 /// NaN, the power meter's pending reading).
 pub fn text<'a>(buf: &'a mut [u8; 16], v: &Val) -> &'a str {
@@ -1012,6 +1031,58 @@ mod tests {
         t += 500;
         m.update(&auto(3, 1.0, 2, "mV", 1e-3), t);
         assert!(m.hold);
+    }
+
+    /// f64 two-pass sample SD of the same f32 inputs (the reference).
+    fn sd_ref(x: &[f32]) -> f64 {
+        let n = x.len() as f64;
+        let m = x.iter().map(|&v| v as f64).sum::<f64>() / n;
+        (x.iter().map(|&v| (v as f64 - m).powi(2)).sum::<f64>() / (n - 1.0)).sqrt()
+    }
+
+    fn stats_of(x: &[f32]) -> Stats {
+        let mut s = Stats::new();
+        for (i, &v) in x.iter().enumerate() {
+            s.add(v, i as u64);
+        }
+        s
+    }
+
+    /// SD (Welford on x - x0): a textbook sample, constant input, one
+    /// sample, and 6 digits on a large offset with and without drift.
+    #[test]
+    fn stats_sd() {
+        assert_eq!(Stats::new().sd(), None);
+        assert_eq!(stats_of(&[4.8171]).sd(), Some(0.0));
+        // 2 4 4 4 5 5 7 9: mean 5, sum of squares 32, sample SD sqrt(32/7).
+        let sd = stats_of(&[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]).sd().unwrap();
+        assert!((sd as f64 - (32.0f64 / 7.0).sqrt()).abs() < 1e-6, "{sd}");
+        // Constant input: exactly 0 at any value and count.
+        for v in [4.8171f32, -600.0, 1.0e-7, 59.999e6] {
+            assert_eq!(stats_of(&vec![v; 10_000]).sd(), Some(0.0), "{v}");
+        }
+        // 10 V +- 100 uV (an LCG, uniform: SD 100 uV / sqrt(3) x 2 / 2),
+        // stationary and with a 1 mV ramp over the session; 1e5 samples.
+        // sum(x^2) in f32 would give noise or 0 here.
+        let mut r = 12345u32;
+        let mut noise = || {
+            r = r.wrapping_mul(1664525).wrapping_add(1013904223);
+            (r >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        };
+        let n = 100_000;
+        for drift in [0.0f32, 1e-3] {
+            let x: Vec<f32> = (0..n).map(|i| 10.0 + 1e-4 * noise() + drift * i as f32 / n as f32).collect();
+            let (got, want) = (stats_of(&x).sd().unwrap() as f64, sd_ref(&x));
+            assert!((got / want - 1.0).abs() < 2e-3, "drift {drift}: {got} vs {want}");
+        }
+        // The display unit: 1.0001 V ... in mV keeps SD / 1e-3.
+        let mut m = Meter::new();
+        m.set_smoothing(Smooth::Off);
+        for (i, v) in [1.0f32, 1.0002, 1.0004].iter().enumerate() {
+            m.update(&dcv(*v), 500 * (i as u64 + 1));
+        }
+        let (_, _, _, sd) = m.stats_disp().unwrap();
+        assert!((sd - 2e-4).abs() < 2e-7, "{sd}");
     }
 
     /// HOLD pressed before the function's first settled reading (device

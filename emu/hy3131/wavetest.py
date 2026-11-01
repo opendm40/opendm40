@@ -420,7 +420,7 @@ try:
         before = set(cat_names())
         q('DBG:KEY 3')  # MF
         wait_ms(800)
-        q('DBG:TAP 367,40')  # Settings
+        q('DBG:TAP 294,40')  # Settings (the 4th of five 80 px MF tabs)
         wait_ms(800)
         q('DBG:TAP 154,93')  # Save CSV
         new = []
@@ -494,8 +494,11 @@ try:
         if tb in (0.005, 0.05):
             shot('w03-wave-%s' % name)
 
+    # DBG:PROF? only in a build with the feature dbg-prof (else -113).
+    q('DBG:PROF?')
+    has_prof = not q('SYST:ERR?').startswith('-113')
     POLL = ['ACQ:SRAT?', 'SCOP:MEAS:FREQ?', 'SCOP:MEAS:VPP?', 'TRIG:STAT?', 'WAV:POIN?', 'WAV:FORM?',
-            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?', 'DBG:PROF?',
+            'CHAN1:OFFS?', 'CHAN1:SCAL?', 'TIM:SCAL?', 'WAV:PRE?', 'WAV:DATA?'] + ['DBG:PROF?'] * has_prof + [
             # fast_scpi (device c92b605: region C, late 1 at 76800), and the
             # model / identity (calibration record 0x080C0168, slow bank:
             # cached at boot).
@@ -678,7 +681,7 @@ try:
     c_reset()
     q('DBG:KEY 3')  # MF
     wait_ms(800)
-    q('DBG:TAP 367,40')  # Settings
+    q('DBG:TAP 294,40')  # Settings (the 4th of five 80 px MF tabs)
     wait_ms(800)
     shot('w08b-mf-settings')
     q('DBG:TAP 154,93')  # Save CSV
