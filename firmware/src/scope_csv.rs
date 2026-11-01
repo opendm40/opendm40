@@ -65,12 +65,11 @@ struct Snap {
     tcrc: u32,
     /// A Power Wave frame (`set_pwave`) instead of a scope record: `pw_rec`
     /// is the page's buffer (codes at 0.., times at pwave::T_AT..), `pw_n`
-    /// samples, their times from `pw_t_at`, scales, time unit, sample 0 is
+    /// samples, scales, time unit, sample 0 is
     /// U, the samples' CRC-32.
     pw: bool,
     pw_rec: Option<&'static [u16]>,
     pw_n: usize,
-    pw_t_at: usize,
     pw_sc: [f32; 4],
     pw_tu: f32,
     pw_y: bool,
@@ -91,7 +90,6 @@ static mut SNAP: Snap = Snap {
     pw: false,
     pw_rec: None,
     pw_n: 0,
-    pw_t_at: 0,
     pw_sc: [0.0; 4],
     pw_tu: 0.0,
     pw_y: false,
@@ -196,17 +194,18 @@ pub fn set(rec: crate::pack10::Codes, a: f32, b: f32, fs: f32, t0: usize, h: &Hd
     s.tcrc = !tc;
 }
 
+use crate::pwave::T_AT;
+
 /// Take a Power Wave frame for writing (app_pwave.rs, the page stopped
 /// and the scope buffer held until the writer's result): `buf` = the
-/// page's buffer, `n` samples (codes at 0.., times at `t_at`..), `sc` =
+/// page's buffer, `n` samples (codes at 0.., times at pwave::T_AT..), `sc` =
 /// su, ou, si, oi (pwave::Scale), `tu`
 /// seconds per time unit, `y_first` = sample 0 is U, the header lines
 /// (without the column line).
-pub fn set_pwave(buf: &'static [u16], n: usize, t_at: usize, sc: [f32; 4], tu: f32, y_first: bool, h: &Hdr) {
+pub fn set_pwave(buf: &'static [u16], n: usize, sc: [f32; 4], tu: f32, y_first: bool, h: &Hdr) {
     let s = snap();
-    let n = n.min(t_at).min(buf.len().saturating_sub(t_at));
+    let n = n.min(T_AT);
     s.pw = true;
-    s.pw_t_at = t_at;
     s.pw_rec = Some(buf);
     s.pw_n = n;
     s.pw_sc = sc;
@@ -225,14 +224,14 @@ pub fn set_pwave(buf: &'static [u16], n: usize, t_at: usize, sc: [f32; 4], tu: f
     s.hdr_n = k;
     let mut c = !0u32;
     for i in 0..n {
-        c = crate::dlog::crc32_upd(c, &pw_sample(buf, t_at, i));
+        c = crate::dlog::crc32_upd(c, &pw_sample(buf, i));
     }
     s.pw_crc = !c;
 }
 
 /// The 4 file bytes of Power Wave sample `i`: u16 time, i16 code.
-fn pw_sample(buf: &[u16], t_at: usize, i: usize) -> [u8; 4] {
-    let (t, c) = (buf[t_at + i], buf[i]);
+fn pw_sample(buf: &[u16], i: usize) -> [u8; 4] {
+    let (t, c) = (buf[T_AT + i], buf[i]);
     [t as u8, (t >> 8) as u8, c as u8, (c >> 8) as u8]
 }
 
@@ -345,7 +344,7 @@ fn pw_fill(s: &Snap, off: usize, buf: &mut [u8]) {
         *b = if at < head {
             h[at]
         } else if at < end {
-            pw_sample(rec, s.pw_t_at, (at - head) / 4)[(at - head) % 4]
+            pw_sample(rec, (at - head) / 4)[(at - head) % 4]
         } else if at < end + 4 {
             s.pw_crc.to_le_bytes()[at - end]
         } else {

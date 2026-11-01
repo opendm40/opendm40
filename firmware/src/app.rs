@@ -968,7 +968,7 @@ impl App {
             View::Limits => self.limits_page(),
             View::Record => self.record_page(),
             View::Inrush => self.inrush_page(),
-            View::PWave => self.pwave_page(),
+            View::PWave => self.pwave_draw(true),
             View::Decode => self.log_page(),
             View::Menu => ui::main_menu(ui::view_name(self.combo)),
             View::Range if self.dmm.hy_mode() == 15 => {

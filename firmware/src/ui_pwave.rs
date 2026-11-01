@@ -91,17 +91,16 @@ pub fn plot(cols: Option<&[u16]>) {
         let span = |ch: usize| cols.map_or(0xFFFF, |c| c[ch * PW + x]);
         let (i, u) = (span(0), span(1));
         let vline = x % crate::pwave::DIV_PX_X == 0 || x == PW - 1;
-        let cx = x == PW / 2;
         lcd::set_window(PX + x as u16, PY, PX + x as u16, PY + PH as u16 - 1);
         for y in 0..PH as u16 {
-            let hit = |s: u16| s != 0xFFFF && y >= (s & 0xFF) && y <= (s >> 8);
+            // (0xFFFF: lo 255 is above every row.)
+            let hit = |s: u16| y >= (s & 0xFF) && y <= (s >> 8);
             let hline = y % crate::pwave::DIV_PX_Y as u16 == 0 || y == PH as u16 - 1;
-            let cy = y == PH as u16 / 2;
             lcd::data(if hit(u) {
                 C_U
             } else if hit(i) {
                 C_I
-            } else if cx || cy {
+            } else if x == PW / 2 || y == PH as u16 / 2 {
                 AXIS
             } else if (vline && y % 5 == 0) || (hline && x % 5 == 0) {
                 GRID
@@ -112,28 +111,24 @@ pub fn plot(cols: Option<&[u16]>) {
     }
 }
 
-fn hit(r: sf::Rect, x: u16, y: u16) -> bool {
-    let (x, y) = (x as i16, y as i16);
-    x >= r.x - 2 && x < r.x + r.w + 2 && y >= r.y - 2 && y < r.y + r.h + 2
-}
-
 /// Page touch: 0 Back, 1 "-ms/div" (shorter timebase), 2 "+ms/div",
 /// 3 RUN / STOP, 4 CSV.
 pub fn page_hit(x: u16, y: u16) -> Option<u8> {
-    BTN_R.iter().position(|&r| hit(r, x, y)).map(|i| i as u8)
+    BTN_R.iter().position(|&r| inr::hit(r, x, y)).map(|i| i as u8)
 }
 
-/// `v` with 4 significant digits and an SI prefix (k, -, m, u) on `unit`,
-/// after `name` ("U 230.1V"); "--" for NaN.
-pub fn fmt<'a>(b: &'a mut [u8; 24], name: &str, v: f32, unit: &str) -> &'a str {
+/// Readout `k` (0 U, 1 I, 2 P, 3 f): `v` with 4 significant digits and an
+/// SI prefix (k, -, m, u) on the unit, after the name ("U 230.1V"); "--"
+/// for NaN.
+pub fn fmt(b: &mut [u8; 24], k: usize, v: f32) -> &str {
+    let (name, unit) = [("U", "V"), ("I", "A"), ("P", "W"), ("f", "Hz")][k & 3];
     let mut nb = [0u8; 16];
-    if !v.is_finite() {
-        return join(b, &[name, " --", unit]);
-    }
     let a = v.abs();
-    let (s, pfx) = if a >= 9999.5 {
+    let (s, pfx) = if !v.is_finite() || a == 0.0 {
+        (1.0, "")
+    } else if a >= 9999.5 {
         (1e-3, "k")
-    } else if a >= 0.99995 || a == 0.0 {
+    } else if a >= 0.99995 {
         (1.0, "")
     } else if a >= 0.00099995 {
         (1e3, "m")
@@ -143,14 +138,13 @@ pub fn fmt<'a>(b: &'a mut [u8; 24], name: &str, v: f32, unit: &str) -> &'a str {
     let x = v * s;
     let ax = x.abs();
     let dec = if ax < 9.9995 { 3 } else if ax < 99.995 { 2 } else if ax < 999.95 { 1 } else { 0 };
-    let n = crate::dmm::format(&mut nb, x, dec);
+    let n = if v.is_finite() { crate::dmm::format(&mut nb, x, dec) } else { "--" };
     join(b, &[name, " ", n, pfx, unit])
 }
 
-/// A per-division step ("100V", "500mA", "20uA").
-pub fn fmt_div<'a>(b: &'a mut [u8; 24], v: f32, unit: &str) -> &'a str {
-    let (x, pfx) = if v >= 0.99995 { (v, "") } else if v >= 0.00099995 { (v * 1e3, "m") } else { (v * 1e6, "u") };
+/// The timebase ("10ms/div").
+pub fn fmt_tb(b: &mut [u8; 24], ms: u16) -> &str {
     let mut nb = [0u8; 16];
-    let n = crate::dmm::format(&mut nb, x, 0);
-    join(b, &[n, pfx, unit])
+    let n = crate::dmm::format(&mut nb, ms as f32, 0);
+    join(b, &[n, "ms/div"])
 }

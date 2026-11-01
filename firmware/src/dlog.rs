@@ -986,7 +986,7 @@ pub const PW_ROW: usize = 27;
 pub fn pw_header(text: &[u8], sc: [f32; 4], tu: f32, n: u32, y_first: bool, out: &mut [u8]) -> usize {
     let k = file_header(KIND_PWAVE, b"V,A", text, out);
     let p = &mut out[k..k + PW_PAR];
-    for (i, v) in sc.iter().chain([tu].iter()).enumerate() {
+    for (i, v) in [sc[0], sc[1], sc[2], sc[3], tu].into_iter().enumerate() {
         p[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
     }
     p[20..24].copy_from_slice(&n.to_le_bytes());
@@ -1391,7 +1391,7 @@ impl<S: Src> Gen<S> {
             if !g.s.read(at, &mut p) || !crc32_upd(!0, &p[..20]) != le32(&p, 20) {
                 return None;
             }
-            let f = |o: usize| f32::from_le_bytes([p[o], p[o + 1], p[o + 2], p[o + 3]]);
+            let f = |o: usize| f32::from_bits(le32(&p, o));
             let n = le32(&p, 16);
             let nb = (n as usize).div_ceil(SBLK);
             if nb > SBLK_MAX {

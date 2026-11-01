@@ -129,7 +129,7 @@ pub fn button(t: &str, bg: Color, enabled: bool) {
     sf::glyphs(sf::TEXT22, ARM_BTN, t, if enabled { STATUS_FG } else { DIM }, bg, 8, 0);
 }
 
-fn hit(r: sf::Rect, x: u16, y: u16) -> bool {
+pub(super) fn hit(r: sf::Rect, x: u16, y: u16) -> bool {
     let (x, y) = (x as i16, y as i16);
     // 2 px of slop (the gaps between neighbours split between them).
     x >= r.x - 2 && x < r.x + r.w + 2 && y >= r.y - 2 && y < r.y + r.h + 2

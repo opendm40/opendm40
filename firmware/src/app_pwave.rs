@@ -13,6 +13,7 @@
 
 use super::*;
 use crate::pwave::{self as pv, Cap, Scale, Stats};
+use crate::scope_ui::{fmt_div, Buf};
 
 /// Least time between two frames (ms): touch, USB and the keys get passes.
 const FRAME_MS: u64 = 250;
@@ -91,6 +92,14 @@ static mut PWV: Pwv = Pwv {
     chk_why: 0,
 };
 
+impl Pwv {
+    /// The timebase in force (ms/div).
+    #[inline(never)]
+    fn tb_ms(&self) -> u16 {
+        pv::TB_MS[self.tb1 as usize - 1]
+    }
+}
+
 pub(super) fn pwv() -> &'static mut Pwv {
     // SAFETY: main loop only.
     unsafe { &mut *core::ptr::addr_of_mut!(PWV) }
@@ -139,32 +148,26 @@ impl App {
         }
         let (_, _, sc, fu, fi) = self.dmm.pw_wave_setup();
         self.scope.lend_buf();
-        *s = Pwv {
-            on: true,
-            run: true,
-            tb1: if s.tb1 == 0 { pv::TB_DEFAULT + 1 } else { s.tb1 },
-            next: now,
-            frames: 0,
-            cap: Cap::default(),
-            st: Stats::NONE,
-            sc,
-            du: 0.0,
-            di: 0.0,
-            fu: pv::floor_for(fu),
-            fi: pv::floor_for(fi),
-            vr: self.dmm.pw.vr,
-            ik: self.dmm.pw.ik,
-            retries: 0,
-            bad: 0,
-            iref: self.dmm.pw_wave_iref().map_or(f32::NAN, |r| r.0),
-            oi_fix: f32::NAN,
-            zero_ok: self.dmm.pw_wave_iref().is_some_and(|r| r.1),
-            gi_fix: f32::NAN,
-            check: now,
-            chk_i: f32::NAN,
-            chk_clip: false,
-            chk_why: 0,
-        };
+        let tb1 = if s.tb1 == 0 { pv::TB_DEFAULT + 1 } else { s.tb1 };
+        let iref = self.dmm.pw_wave_iref();
+        // SAFETY: all zero is a valid Pwv (its reset state); the rest below.
+        unsafe { core::ptr::write_bytes(s as *mut Pwv, 0, 1) };
+        s.on = true;
+        s.run = true;
+        s.tb1 = tb1;
+        s.next = now;
+        s.check = now;
+        s.st = Stats::NONE;
+        s.sc = sc;
+        s.fu = pv::floor_for(fu);
+        s.fi = pv::floor_for(fi);
+        s.vr = self.dmm.pw.vr;
+        s.ik = self.dmm.pw.ik;
+        s.iref = iref.map_or(f32::NAN, |r| r.0);
+        s.oi_fix = f32::NAN;
+        s.zero_ok = iref.is_some_and(|r| r.1);
+        s.gi_fix = f32::NAN;
+        s.chk_i = f32::NAN;
         self.show(View::PWave, clk);
         Ok(())
     }
@@ -182,35 +185,29 @@ impl App {
         self.dmm.pw_wave_gap();
     }
 
-    /// The whole page (draw_static): the texts and the last frame.
+    /// The page: `full` the whole of it (draw_static), else its live parts,
+    /// with the last frame.
     #[inline(never)]
-    pub(super) fn pwave_page(&mut self) {
-        self.pwave_draw(true);
-    }
-
-    /// Region B (`.text.pwave_draw`), as `pwave_tick`: with both in region
-    /// C it has 2.4 KiB free, under the link's 4 KiB floor.
-    #[inline(never)]
-    #[cfg_attr(target_os = "none", link_section = ".text.pwave_draw")]
-    fn pwave_draw(&mut self, full: bool) {
+    pub(super) fn pwave_draw(&mut self, full: bool) {
         let s = pwv();
-        let (mut bu, mut bi, mut bp, mut bf, mut du, mut di, mut bt) = ([0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24], [0u8; 24]);
+        let mut b = [[0u8; 24]; 5];
+        let [bu, bi, bp, bf, bt] = &mut b;
+        let (mut du, mut di) = (Buf::new(), Buf::new());
+        if s.du > 0.0 {
+            fmt_div(&mut du, s.du, "V");
+        }
+        if s.di > 0.0 {
+            fmt_div(&mut di, s.di, "A");
+        }
         let st = &s.st;
         let v = ui::pwv::Vals {
-            u: if s.cap.clip_u { "U OL" } else { ui::pwv::fmt(&mut bu, "U", st.urms, "V") },
-            i: if s.cap.clip_i { "I OL" } else { ui::pwv::fmt(&mut bi, "I", st.irms, "A") },
-            p: ui::pwv::fmt(&mut bp, "P", st.p, "W"),
-            f: ui::pwv::fmt(&mut bf, "f", st.f, "Hz"),
-            u_div: if s.du > 0.0 { ui::pwv::fmt_div(&mut du, s.du, "V") } else { "" },
-            i_div: if s.di > 0.0 { ui::pwv::fmt_div(&mut di, s.di, "A") } else { "" },
-            tb: {
-                let mut nb = [0u8; 16];
-                let n = crate::dmm::format(&mut nb, pv::TB_MS[s.tb1 as usize - 1] as f32, 0);
-                let l = n.len();
-                bt[..l].copy_from_slice(n.as_bytes());
-                bt[l..l + 6].copy_from_slice(b"ms/div");
-                core::str::from_utf8(&bt[..l + 6]).unwrap_or("")
-            },
+            u: if s.cap.clip_u { "U OL" } else { ui::pwv::fmt(bu, 0, st.urms) },
+            i: if s.cap.clip_i { "I OL" } else { ui::pwv::fmt(bi, 1, st.irms) },
+            p: ui::pwv::fmt(bp, 2, st.p),
+            f: ui::pwv::fmt(bf, 3, st.f),
+            u_div: du.as_str(),
+            i_div: di.as_str(),
+            tb: ui::pwv::fmt_tb(bt, s.tb_ms()),
             run: s.run,
             u_ol: s.cap.clip_u,
             i_ol: s.cap.clip_i,
@@ -226,7 +223,6 @@ impl App {
 
     /// Per pass on the page (App::tick, drawing allowed): a frame when due.
     #[inline(never)]
-    #[cfg_attr(target_os = "none", link_section = ".text.pwave_tick")]
     pub(super) fn pwave_tick(&mut self, clk: &mut Clock) {
         let s = pwv();
         if !s.on {
@@ -265,7 +261,7 @@ impl App {
         let Some(buf) = self.scope.lent_buf() else {
             return;
         };
-        let span_us = pv::TB_MS[s.tb1 as usize - 1] as u32 * pv::DIVS_X * 1000;
+        let span_us = s.tb_ms() as u32 * pv::DIVS_X * 1000;
         // The trigger: from the last frame (U, else I), else free run.
         let trig = if s.frames > 0 { pv::next_trig(buf, &s.cap, (s.fu / sc.su / 2.0) as i32, (s.fi / sc.si / 2.0) as i32) } else { None };
         pv::arm(&row, r36);
@@ -322,10 +318,7 @@ impl App {
     /// with its alarm / range change / limit beeps. True = closed.
     /// (A-PROT does not apply: the power meter measures through A on
     /// purpose, `pw_enter` ends it.)
-    /// Region B (`.text.pwave_guard`, not this module's .cold), as the
-    /// tick and the drawing: region C has no room for them.
     #[inline(never)]
-    #[cfg_attr(target_os = "none", link_section = ".text.pwave_guard")]
     fn pwave_guard(&mut self, clk: &mut Clock, i: f32, clip: bool) -> bool {
         let now = clk.now_ms();
         let ik = self.dmm.pw.ik;
@@ -338,14 +331,14 @@ impl App {
         let r = self.dmm.pw_wave_current(now, i, clip);
         let s = pwv();
         (s.chk_i, s.chk_clip) = (i, clip);
-        let why = match r {
-            _ if i10 => Some("Wave: current above 10 A"),
-            1 => Some("Wave: current over range"),
+        let (w, why) = match r {
+            _ if i10 => (1, Some("Wave: current above 10 A")),
+            1 => (2, Some("Wave: current over range")),
             // The meter's own toast and beeps follow (`pw_over_expired`).
-            2 => None,
+            2 => (3, None),
             _ => return false,
         };
-        s.chk_why = if i10 { 1 } else if r == 1 { 2 } else { 3 };
+        s.chk_why = w;
         // Into a view with the power meter's readout (the DMM rail on: the
         // alarm sounds only with it), whatever the page was opened from.
         let v = if matches!(self.back_view, View::Dmm | View::DmmScope) { self.back_view } else { View::Dmm };
@@ -365,10 +358,7 @@ impl App {
                 let v = self.back_view;
                 self.show(v, clk);
             }
-            Some(k @ (1 | 2)) if self.scope.hold => {
-                let _ = k;
-                self.toast(now, "Saving CSV...", true);
-            }
+            Some(1 | 2) if self.scope.hold => self.pwave_run(now),
             Some(k @ (1 | 2)) => {
                 let tb = s.tb1 - 1;
                 let t = if k == 1 { tb.checked_sub(1) } else { (tb as usize + 1 < pv::TB_MS.len()).then_some(tb + 1) };
@@ -416,15 +406,20 @@ impl App {
         let mut b = [0u8; 24];
         let mut nb = [0u8; 16];
         h.s("# Alientek ").s(crate::ident::model_name()).s(", opendm40 ").s(crate::ident::VERSION).s(", power wave frame (no real-time clock)\r\n");
-        h.s("# timebase ").s(crate::dmm::format(&mut nb, pv::TB_MS[s.tb1 as usize - 1] as f32, 0)).s("ms/div, U ");
-        h.s(ui::pwv::fmt_div(&mut b, s.du, "V")).s("/div, I ").s(ui::pwv::fmt_div(&mut b, s.di, "A")).s("/div, samples ");
+        h.s("# timebase ").s(ui::pwv::fmt_tb(&mut b, s.tb_ms())).s(", U ");
+        let (mut du, mut di) = (Buf::new(), Buf::new());
+        fmt_div(&mut du, s.du, "V");
+        fmt_div(&mut di, s.di, "A");
+        h.s(du.as_str()).s("/div, I ").s(di.as_str()).s("/div, samples ");
         h.s(crate::dmm::format(&mut nb, s.cap.n as f32, 0)).s(" (U and I in turn), ").s(if s.cap.trig { "triggered\r\n" } else { "untriggered\r\n" });
         let st = s.st;
-        h.s("# ").s(ui::pwv::fmt(&mut b, "U", st.urms, "V")).s(", ").s(ui::pwv::fmt(&mut b, "I", st.irms, "A")).s(", ");
-        h.s(ui::pwv::fmt(&mut b, "P", st.p, "W")).s(", ").s(ui::pwv::fmt(&mut b, "f", st.f, "Hz")).s(" (over the frame's whole cycles)\r\n");
+        h.s("# ");
+        for (k, v) in [st.urms, st.irms, st.p, st.f].into_iter().enumerate() {
+            h.s(ui::pwv::fmt(&mut b, k, v)).s(if k < 3 { ", " } else { " (over the frame's whole cycles)\r\n" });
+        }
         h.s("# time_s = seconds from the first sample; each row is one sample: U in volts or I in amperes, the other column empty\r\n");
         let sc = s.sc;
-        crate::scope_csv::set_pwave(buf, s.cap.n, pv::T_AT, [sc.su, sc.ou, sc.si, sc.oi], pv::T_UNIT_US as f32 * 1e-6, s.cap.y_first, &h);
+        crate::scope_csv::set_pwave(buf, s.cap.n, [sc.su, sc.ou, sc.si, sc.oi], pv::T_UNIT_US as f32 * 1e-6, s.cap.y_first, &h);
         if !crate::screenshot::start_csv() {
             self.toast(now, "Save CSV Error", false);
             return;
@@ -463,12 +458,10 @@ impl App {
             out.put_bytes(b",");
             out.put_bytes(crate::dmm::pw::i64_text(&mut t, v));
         }
-        out.put_bytes(b",");
-        out.put_f32(if s.oi_fix.is_finite() { s.oi_fix * s.sc.si } else { 0.0 });
-        out.put_bytes(b",");
-        out.put_f32(if s.gi_fix.is_finite() { s.gi_fix } else { 1.0 });
-        out.put_bytes(b",");
-        out.put_f32(if s.chk_i.is_finite() { s.chk_i } else { 9.91e37 });
+        for (v, none) in [(s.oi_fix * s.sc.si, 0.0), (s.gi_fix, 1.0), (s.chk_i, 9.91e37)] {
+            out.put_bytes(b",");
+            out.put_f32(if v.is_finite() { v } else { none });
+        }
         out.put_bytes(if s.chk_clip { b",1," } else { b",0," });
         out.put_bytes(&[b'0' + s.chk_why]);
     }

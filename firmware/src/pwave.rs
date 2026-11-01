@@ -143,16 +143,15 @@ pub struct Trig {
 #[inline(never)]
 pub fn next_trig(buf: &[u16], c: &Cap, min_pp_u: i32, min_pp_i: i32) -> Option<Trig> {
     let (mut lo, mut hi) = ([i32::MAX; 2], [i32::MIN; 2]);
-    for k in 0..c.n {
+    for (k, &v) in buf[..c.n].iter().enumerate() {
         let ch = c.is_u(k) as usize;
-        let v = buf[k] as i16 as i32;
+        let v = v as i16 as i32;
         lo[ch] = lo[ch].min(v);
         hi[ch] = hi[ch].max(v);
     }
     for (ch, min) in [(1usize, min_pp_u), (0, min_pp_i)] {
         if hi[ch] > lo[ch] && hi[ch] - lo[ch] >= min {
-            let pp = (hi[ch] - lo[ch]) * 8;
-            return Some(Trig { y: ch == 1, level: (hi[ch] + lo[ch]) * 4, hyst: (pp / 8).max(16) });
+            return Some(Trig { y: ch == 1, level: (hi[ch] + lo[ch]) * 4, hyst: (hi[ch] - lo[ch]).max(16) });
         }
     }
     None
@@ -196,10 +195,6 @@ impl Stats {
     pub const NONE: Stats = Stats { urms: f32::NAN, irms: f32::NAN, p: f32::NAN, f: f32::NAN, upk: 0.0, ipk: 0.0 };
 }
 
-fn t_us(buf: &[u16], k: usize) -> f32 {
-    (buf[T_AT + k] as u32 * T_UNIT_US) as f32
-}
-
 /// `Stats` of frame `c` (`y`: the channel the cycles are counted on; no
 /// cycles when its peak-peak is below `min_pp`, volts / amperes: noise on
 /// a DC level is not a frequency).
@@ -209,9 +204,11 @@ pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool, min_pp: f32) -> Stats {
     if n < 4 {
         return Stats::NONE;
     }
+    let (buf, times) = (&buf[..n], &buf[T_AT..T_AT + n]);
+    let t_us = |k: usize| (times[k] as u32 * T_UNIT_US) as f32;
     // Level and hysteresis of the cycle channel.
     let (mut lo, mut hi) = (f32::MAX, f32::MIN);
-    let (mut upk, mut ipk) = (0.0f32, 0.0f32);
+    let mut pk = [0.0f32; 2];
     for k in 0..n {
         let u = c.is_u(k);
         let v = sc.val(u, buf[k] as i16);
@@ -219,22 +216,17 @@ pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool, min_pp: f32) -> Stats {
             lo = lo.min(v);
             hi = hi.max(v);
         }
-        if u {
-            upk = upk.max(v.abs());
-        } else {
-            ipk = ipk.max(v.abs());
-        }
+        pk[u as usize] = pk[u as usize].max(v.abs());
     }
     let (lvl, h) = ((lo + hi) / 2.0, (hi - lo) / 8.0);
     // Rising crossings (the time interpolated between the two samples).
     let (mut first, mut last, mut cycles) = (f32::NAN, f32::NAN, 0u32);
     let mut armed = false;
     let mut prev: Option<(f32, f32)> = None;
-    for k in 0..n {
-        if c.is_u(k) != y {
-            continue;
-        }
-        let (t, v) = (t_us(buf, k), sc.val(y, buf[k] as i16));
+    // Every second sample, from the channel's first.
+    let mut k = !c.is_u(0) as usize ^ !y as usize;
+    while k < n {
+        let (t, v) = (t_us(k), sc.val(y, buf[k] as i16));
         if v < lvl - h {
             armed = true;
         } else if armed && v >= lvl {
@@ -251,41 +243,37 @@ pub fn stats(buf: &[u16], c: &Cap, sc: &Scale, y: bool, min_pp: f32) -> Stats {
             last = tc;
         }
         prev = Some((t, v));
+        k += 2;
     }
     let whole = cycles >= 1 && hi - lo >= min_pp && hi - lo > 0.0;
     let (ta, tb) = if whole { (first, last) } else { (f32::MIN, f32::MAX) };
-    let (mut su, mut nu, mut si, mut ni, mut sp, mut np) = (0.0f32, 0u32, 0.0f32, 0u32, 0.0f32, 0u32);
+    let (mut sq, mut ns, mut sp, mut np) = ([0.0f32; 2], [0u32; 2], 0.0f32, 0u32);
     for k in 0..n {
-        let t = t_us(buf, k);
+        let t = t_us(k);
         if t < ta || t >= tb {
             continue;
         }
         let u = c.is_u(k);
         let v = sc.val(u, buf[k] as i16);
-        if u {
-            su += v * v;
-            nu += 1;
-        } else {
-            si += v * v;
-            ni += 1;
-        }
+        sq[u as usize] += v * v;
+        ns[u as usize] += 1;
         // The other channel at t: its neighbours k - 1 and k + 1.
         if k >= 1 && k + 1 < n {
-            let (t0, t1) = (t_us(buf, k - 1), t_us(buf, k + 1));
+            let (t0, t1) = (t_us(k - 1), t_us(k + 1));
             let (a, b) = (sc.val(!u, buf[k - 1] as i16), sc.val(!u, buf[k + 1] as i16));
             let o = if t1 > t0 { a + (b - a) * (t - t0) / (t1 - t0) } else { a };
             sp += v * o;
             np += 1;
         }
     }
-    let rms = |s: f32, n: u32| if n > 0 { sqrtf(s / n as f32) } else { f32::NAN };
+    let rms = |c: usize| if ns[c] > 0 { sqrtf(sq[c] / ns[c] as f32) } else { f32::NAN };
     Stats {
-        urms: rms(su, nu),
-        irms: rms(si, ni),
+        urms: rms(1),
+        irms: rms(0),
         p: if np > 0 { sp / np as f32 } else { f32::NAN },
         f: if whole && last > first { cycles as f32 * 1e6 / (last - first) } else { f32::NAN },
-        upk,
-        ipk,
+        upk: pk[1],
+        ipk: pk[0],
     }
 }
 
@@ -301,18 +289,22 @@ pub const ANCHOR_MAX_RAW: f32 = 2000.0;
 /// fewer than 8 I samples or the shift exceeds ANCHOR_MAX_RAW. Add it to
 /// `Scale::oi`.
 pub fn anchor(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
+    let m = mean_i(buf, c, sc, i_ref)?;
+    let d = m - (i_ref / sc.si + sc.oi);
+    (d.abs() * 8.0 <= ANCHOR_MAX_RAW).then_some(d)
+}
+
+/// Frame `c`'s mean I code; None with fewer than 8 I samples or no usable
+/// scale / reference.
+fn mean_i(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
     let (mut s, mut n) = (0.0f32, 0u32);
-    for k in 0..c.n {
+    for (k, &v) in buf[..c.n].iter().enumerate() {
         if !c.is_u(k) {
-            s += buf[k] as i16 as f32;
+            s += v as i16 as f32;
             n += 1;
         }
     }
-    if n < 8 || !(sc.si > 0.0) || !i_ref.is_finite() {
-        return None;
-    }
-    let d = s / n as f32 - (i_ref / sc.si + sc.oi);
-    (d.abs() * 8.0 <= ANCHOR_MAX_RAW).then_some(d)
+    (n >= 8 && sc.si > 0.0 && i_ref.is_finite()).then(|| s / n as f32)
 }
 
 /// Gain anchor (`POW:ZERO`'s X zero stored, so AD2's zero is known): the
@@ -322,55 +314,45 @@ pub fn anchor(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
 pub const ANCHOR_GAIN_MIN_RAW: f32 = 2000.0;
 
 pub fn anchor_gain(buf: &[u16], c: &Cap, sc: &Scale, i_ref: f32) -> Option<f32> {
-    let (mut s, mut n) = (0.0f32, 0u32);
-    for k in 0..c.n {
-        if !c.is_u(k) {
-            s += buf[k] as i16 as f32;
-            n += 1;
-        }
-    }
-    let m = if n >= 8 { s / n as f32 - sc.oi } else { 0.0 };
-    if (m * 8.0).abs() < ANCHOR_GAIN_MIN_RAW || !(sc.si > 0.0) || !i_ref.is_finite() {
+    let m = mean_i(buf, c, sc, i_ref)? - sc.oi;
+    if (m * 8.0).abs() < ANCHOR_GAIN_MIN_RAW {
         return None;
     }
     let g = i_ref / (m * sc.si);
     (0.9..=1.1).contains(&g).then_some(g)
 }
 
-/// 1-2-5 steps (per division) from 1 uV / 1 uA up.
-pub fn step(i: i32) -> f32 {
-    let m = [1.0f32, 2.0, 5.0][i.rem_euclid(3) as usize];
-    let mut p = 1e-6f32;
-    for _ in 0..i.div_euclid(3) {
-        p *= 10.0;
-    }
-    m * p
-}
-
-/// The step index of the smallest step >= `x`.
-fn step_at_least(x: f32) -> i32 {
-    let mut i = 0;
-    while i < 40 && step(i) < x * 0.9999 {
+/// The smallest step of the 1-2-5 grid (per division, from 1 uV / 1 uA up)
+/// >= `x`.
+fn nice(x: f32) -> f32 {
+    let (mut p, mut i) = (1e-6f32, 0usize);
+    loop {
+        let s = [1.0f32, 2.0, 5.0][i % 3] * p;
+        if i >= 40 || s >= x * 0.9999 {
+            return s;
+        }
         i += 1;
+        if i % 3 == 0 {
+            p *= 10.0;
+        }
     }
-    i
 }
 
 /// Per-division step for peak `pk`: kept while the peak stays within 1 ..
 /// 3.9 divisions of it (no jumping between frames), else the smallest
-/// step that shows the peak within 3.5 divisions, never below `floor`.
+/// step that shows the peak within 3.5 divisions, never below `floor`
+/// (`floor_for`).
 pub fn div_for(pk: f32, cur: f32, floor: f32) -> f32 {
-    let f = step(step_at_least(floor));
-    if cur > 0.0 && pk <= 3.9 * cur && (pk >= cur || cur <= f) {
-        return cur.max(f);
+    if cur > 0.0 && pk <= 3.9 * cur && (pk >= cur || cur <= floor) {
+        return cur.max(floor);
     }
-    step(step_at_least(pk / 3.5)).max(f)
+    nice(pk / 3.5).max(floor)
 }
 
 /// The floor of the per-division step for a range of full scale `fs`:
 /// fs / 100 on the 1-2-5 grid (6 V -> 0.1 V/div, 10 A -> 0.1 A/div).
 pub fn floor_for(fs: f32) -> f32 {
-    step(step_at_least(fs / 100.0))
+    nice(fs / 100.0)
 }
 
 /// The plot columns of frame `c`: per channel (I at cols[0..PW], U at
@@ -380,6 +362,7 @@ pub fn floor_for(fs: f32) -> f32 {
 pub fn columns(buf: &mut [u16], c: &Cap, sc: &Scale, du: f32, di: f32, span_us: u32) {
     let (data, cols) = buf.split_at_mut(COL_AT);
     let cols = &mut cols[..2 * PW];
+    let (codes, times) = (&data[..c.n], &data[T_AT..T_AT + c.n]);
     cols.fill(0xFFFF);
     let mid = (PH / 2) as f32;
     for ch in 0..2usize {
@@ -387,12 +370,11 @@ pub fn columns(buf: &mut [u16], c: &Cap, sc: &Scale, du: f32, di: f32, span_us: 
         let div = if y { du } else { di };
         let col = &mut cols[ch * PW..(ch + 1) * PW];
         let mut prev: Option<(f32, f32)> = None;
-        for k in 0..c.n {
-            if c.is_u(k) != y {
-                continue;
-            }
-            let x = (data[T_AT + k] as u32 * T_UNIT_US) as f32 * PW as f32 / span_us as f32;
-            let v = sc.val(y, data[k] as i16);
+        // Every second sample, from the channel's first.
+        let mut k = !c.is_u(0) as usize ^ !y as usize;
+        while k < c.n {
+            let x = (times[k] as u32 * T_UNIT_US) as f32 * PW as f32 / span_us as f32;
+            let v = sc.val(y, codes[k] as i16);
             let r = (mid - v / div * DIV_PX_Y).clamp(0.0, (PH - 1) as f32);
             let (xa, ya) = prev.unwrap_or((x, r));
             prev = Some((x, r));
@@ -409,6 +391,7 @@ pub fn columns(buf: &mut [u16], c: &Cap, sc: &Scale, du: f32, di: f32, span_us: 
                 let e = col[cx];
                 col[cx] = if e == 0xFFFF { a | b << 8 } else { (a.min(e & 0xFF)) | (b.max(e >> 8)) << 8 };
             }
+            k += 2;
         }
     }
 }
@@ -465,6 +448,7 @@ fn sel(r34: u8, y: bool) {
 #[inline(never)]
 pub fn capture(buf: &mut [u16], span_us: u32, trig: Option<Trig>, r34: u8) -> Cap {
     let mut c = Cap::default();
+    let (codes, times) = buf[..2 * NMAX].split_at_mut(T_AT);
     let mut y = trig.is_some_and(|t| t.y);
     sel(r34, y);
     let guard = GUARD_US * CYC_US;
@@ -510,8 +494,8 @@ pub fn capture(buf: &mut [u16], span_us: u32, trig: Option<Trig>, r34: u8) -> Ca
                 c.clip_i = true;
             }
         }
-        buf[k] = code_of(v) as u16;
-        buf[T_AT + k] = dt as u16;
+        codes[k] = code_of(v) as u16;
+        times[k] = dt as u16;
         k += 1;
         y = !y;
         sel(r34, y);
@@ -674,8 +658,8 @@ mod tests {
 
     #[test]
     fn steps() {
-        assert_eq!(step(0), 1e-6);
-        assert!((step(24) - 100.0).abs() < 1e-3 && (step(20) - 5.0).abs() < 1e-5);
+        assert_eq!(nice(0.0), 1e-6);
+        assert!((nice(99.0) - 100.0).abs() < 1e-3 && (nice(4.0) - 5.0).abs() < 1e-5);
         assert!((div_for(325.0, 0.0, 0.1) - 100.0).abs() < 1e-3);
         // Kept while within 1 .. 3.9 divisions.
         assert!((div_for(200.0, 100.0, 0.1) - 100.0).abs() < 1e-3);
