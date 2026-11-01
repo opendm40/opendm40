@@ -1695,19 +1695,20 @@ impl App {
         // Idle dim / shutdown (stock defaults 5 min / 30 min) and the power
         // key PD6 (hold 1.5 s -> off). The dim counts touches and keys, the
         // shutdown host activity too (`note_host_activity`). On USB power
-        // (PB10, `Power::on_charger`) the shutdown timer does not run, in any
-        // view: it counts afresh from the unplug (owner, 2026-10-30).
-        if self.power.on_charger() {
+        // (PB10 or a configured host, autooff.rs) the shutdown timer does not
+        // run, in any view: it counts afresh from the unplug (owner,
+        // 2026-10-30).
+        if crate::autooff::usb_power(self.power.pins(), self.usb_host) {
             self.note_host_activity(now);
         }
         let dim_idle = now.saturating_sub(self.last_input);
-        let idle = now.saturating_sub(self.last_input.max(self.last_host));
+        let idle = crate::autooff::idle_ms(now, self.last_input, self.last_host);
         self.pw_tick(now);
         if DIM_MS[self.dim_idx] != 0 && dim_idle > DIM_MS[self.dim_idx] && !self.dimmed {
             self.dimmed = true;
             backlight(5);
         }
-        if !self.off_held() && idle > self.off_ms() {
+        if crate::autooff::off_due(idle, self.off_ms(), self.off_held()) {
             self.persist_now();
             power_off();
         }
@@ -3208,7 +3209,8 @@ impl App {
     /// flowing, during a CSV recording (Record page: a 24 h log on battery;
     /// decisions-2026-10-22.md #1), or while the inrush page is armed or
     /// capturing (its stream runs: #144, a load that starts on its own).
-    /// Dimming still applies. USB power holds it off through `idle` (`tick`).
+    /// Dimming still applies. USB power holds it off through `idle` (`tick`,
+    /// autooff.rs).
     fn off_held(&self) -> bool {
         self.off_ms() == 0
             || self.meter.stats.rec
