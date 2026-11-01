@@ -20,8 +20,8 @@ Checks (USBTMC over USB/IP, Bluetooth over --bt-port):
     ACQ:SRAT?; reading it twice gives the same bytes;
   * the long record: DIGitize at 1 ms/div (2.5 MS/s, the raw ring) gives
     44 032 samples with the trigger at the centre; at 100 ms/div (25 kS/s,
-    the packed ring) 64 600 .. 65 520 samples, the sine without a seam, the
-    trigger 52 156 samples before the end (the coded ring: long_checks);
+    the coded ring) 26 624 and a few samples, the sine without a seam, the
+    trigger 13 312 and a few samples before the end (long_checks);
     a roll record (200 ms/div) all it took;
   * STOP while running (5 / 2 ms/div the raw ring, 100 ms/div the packed
     one; Auto at several moments, Normal without a trigger) ends on one
@@ -241,11 +241,9 @@ def csv_check(t, p, codes):
 
 def long_checks(t):
     """Slow timebases: the coded ring (cring.rs). DIGitize at 100 ms/div
-    (25 kS/s): 10 s wanted, the trigger at the centre; the post part is
-    what any signal leaves room for (65 520 less the margins and the
-    screen's pre part: 52 156), the pre part what the ring keeps (up to
-    125 000; the model's 25-sample sine: ~96 000), so the record is
-    100 000 .. 177 000 samples, the input sine in it, no seam; a roll record (200
+    (25 kS/s): the running frame's length (scope.rs rec_split, lin_len:
+    26 624 samples), the trigger at the centre (13 312 + a few samples
+    before the end), the input sine in it, no seam; a roll record (200
     ms/div, STOP after 6.5 s) all 81 000 samples; back to 1 ms/div after."""
     t.w('WAV:FORM WORD')
     t.w('WAV:POIN MAX')
@@ -257,14 +255,14 @@ def long_checks(t):
     w = block(t.qraw('WAV:DATA?', maxlen=1 << 20, timeout=120))
     v, codes = volts(p, w)
     n = len(codes)
-    check(sr == 25000 and 100000 <= n <= 180000 and p['n'] == n, '100 ms/div record: %d samples at %g S/s' % (n, sr))
+    check(sr == 25000 and 26624 <= n <= 26624 + 2000 and p['n'] == n, '100 ms/div record: %d samples at %g S/s' % (n, sr))
     f, vpp, _ = sine_fit(v, p['xinc'])
     check(abs(f - A.hz) < A.hz * 0.02 and abs(vpp - A.vpp) < A.vpp * 0.2, '100 ms/div record: %.2f Hz, %.3f Vpp' % (f, vpp))
     i0 = round(-p['xorig'] / p['xinc'])
     ok = 2 <= i0 < n - 2
     # On the level within one sample's step (25 samples per period).
     step = 2 * math.pi * A.hz * p['xinc'] * A.vpp / 2
-    check(ok and 52156 <= n - i0 <= 52156 + 2000 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
+    check(ok and 13312 <= n - i0 <= 13312 + 2000 and abs(v[i0]) < step + 0.05 * A.vpp and v[i0 + 1] > v[i0 - 1],
           '100 ms/div record: trigger sample %d of %d, %.3f V, rising' % (i0, n, v[i0] if ok else float('nan')))
     # A smooth sine end to end: no seam from the ring / staging (25 samples
     # per period: neighbours differ by at most ~0.13 Vpp).

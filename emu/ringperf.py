@@ -114,7 +114,7 @@ try:
     q('DBG:PROF:RESET')
     wait(10000)
     prof('roll, 200 ms/div, %s' % A.scope)
-    # DIGitize at 100 ms/div: a long coded record, redrawn stopped.
+    # DIGitize at 100 ms/div: a coded record, redrawn stopped.
     q('TIM:SCAL 0.1')
     q('DIG')
     while q('TRIG:STAT?') != 'STOP':

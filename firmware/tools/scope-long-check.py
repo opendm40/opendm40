@@ -4,10 +4,10 @@ the built-in generator into CH1 (a BNC lead from the generator output to
 CH1), per generator waveform and timebase DIGitize, read the whole record
 (WAV:POIN MAX, WORD) and check it:
 
-  * length: at least 65 520 samples where the record is longer than that
-    (100 / 200 ms/div), the 10 s record at 1 s/div (25 000);
+  * length: the running frame's 26 624 samples (rec_split, lin_len), a
+    few more from the stop;
   * the trigger point (WAV:PRE? x origin) where rec_split puts it: the
-    part after it min(n / 2, 52 156) samples (the trigger at the centre);
+    part after it 13 312 samples and a few (the trigger at the centre);
   * no seam: the record folded on its period (the generator's frequency),
     each sample against the median of its phase bin (max residual < 15 %
     of the amplitude) and no step larger than the waveform's own (square:
@@ -115,9 +115,9 @@ def check(y, pre, fs, f_gen, func):
     n = len(y)
     xinc, xorig = float(pre[4]), float(pre[5])
     i0 = round(-xorig / xinc) if xinc else -1
-    want_min = min(65520, int(fs * 10) - 2000)
+    want_min = 26624
     post = n - i0
-    post_ok = abs(post - min(fs * 10 / 2, 52156)) < 0.02 * post + 2000 if fs * 10 > 65520 else 0 < i0 < n
+    post_ok = 13312 <= post < 13312 + 2000
     per = fs / f_gen
     t = np.arange(n)
     ph = ((t / per) % 1.0 * 512).astype(int)

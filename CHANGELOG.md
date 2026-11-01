@@ -32,14 +32,13 @@ section named after the tag as the release notes; how to cut a release:
 - Scope: a longer capture: 65 520 samples (the stock's) from 100 ms/div,
   44 032 at the faster timebases (was 26 624), for the stopped zoom / pan,
   Save CSV and `WAV:DATA?`. **Single** and `DIGitize` fill the whole
-  capture (at most 10 s) with the trigger point at the trigger position
+  capture with the trigger point at the trigger position; from 100 ms/div
+  they keep 26 624 samples, as before
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
-- Scope: from 100 ms/div, **Single**, `DIGitize` and roll (also in the
-  Wave view at 9600 S/s and slower) keep the capture compressed with the
-  DLG scope coder as it comes in: at least 65 520 samples (white noise),
-  more for a smooth signal, up to 262 144. Single / `DIGitize` there wait
-  for up to 10 s; the part after the trigger point is at most 52 156
-  samples, the part before it what the memory keeps
+- Scope: from 100 ms/div, roll (also in the Wave view at 9600 S/s and
+  slower) keeps the capture compressed with the DLG scope coder as it
+  comes in: at least 65 520 samples (white noise), more for a smooth
+  signal, up to 262 144
   ([manual](docs/manual/README.md#stop-zoom-and-pan)).
 - **Protocol decoder:** UART (RS-232, RS-485), Modbus RTU and DALI (basic:
   forward, backward and 24-bit frames, 1200 bit/s) drawn under the trace,
