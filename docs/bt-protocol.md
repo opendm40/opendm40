@@ -55,7 +55,7 @@ Response:  DF 05 03 [CMD] [LEN] [DATA...] [CRC]
 |-----|--------------|---------------|-------------|
 | 00  | -            | 3 bytes       | Discovery: `05 03` + model letter `'A'`/`'B'`/`'C'`. Response id is `FF FF` |
 | 01  | -            | 1 byte        | No-op, returns status only |
-| 02  | -            | 3 bytes       | Versions, each byte is `major * 10 + minor`. The middle byte is the firmware version (26 = V2.6); the other two come from bootloader data (hardware / bootloader version) |
+| 02  | -            | 3 bytes       | Versions, each byte is `major * 10 + minor`. The bytes are the bootloader version, the firmware version (26 = V2.6) and the hardware version; the first and last come from bootloader data |
 | 03  | 1 byte (ignored) | 1 byte    | Reset: clears REL and HOLD |
 | 04  | 1 byte       | 1 byte        | HOLD: non-zero = on, 0 = off |
 | 05  | 1 byte       | 1 byte        | REL: non-zero = on, 0 = off (ignored while HOLD is active) |

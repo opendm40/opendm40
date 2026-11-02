@@ -11,7 +11,7 @@ fn save1(out: &str, name: &str) {
 
 /// An ordinary status bar: 00:12:34 since power-on, no REC, no BT host.
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 const DMM_REGIONS: [(&str, Bx); 7] = [
@@ -41,10 +41,12 @@ struct Dp {
     ohm_on: bool,
     /// The rate applies (DC V / A / ohm), else the chip reads n/a.
     rate: bool,
+    /// The beeper indicator (DmmView::short): 1 SHORT, 2 BEEP.
+    short: u8,
 }
 
 fn dp(r: Reading) -> Dp {
-    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true }
+    Dp { r, b: dmm::button_of(r.mode), hist: false, hold: 0, lim: meter::V_NONE, rel: None, rec: false, csv: false, label: None, ohm_on: false, rate: true, short: 0 }
 }
 
 /// The multimeter page: the reading, the bargraph or the history row, the
@@ -68,22 +70,32 @@ fn dmm_page(p: &Dp) {
         let items = [(v - 3.0 * q, r.main.dec, r.main.unit), (v - q, r.main.dec, r.main.unit), (v + 2.0 * q, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit), (v, r.main.dec, r.main.unit)];
         ui::history(&items, 4, 3);
     } else {
-        dv.bar_update(r);
+        // (The meter feeds the bargraph final readings only: none for dashes.)
+        if !r.main.v.is_nan() {
+            dv.bar_update(r);
+        }
     }
+    dv.short = p.short;
+    dv.ext_slot = crate::slot_of(r);
     dv.reading(r, p.hold, p.lim);
+    dv.short_sync();
     let mut st = status_real();
     st.csv = p.csv;
     ui::status_right(&st);
     if volts && r.si.abs() >= 100.0 {
-        ui::hv_warning(true);
+        crate::hv_draw(&dv, true);
     }
     let q = 10f32.powi(-(r.main.dec as i32));
-    let v = if r.main.ol { 0.0 } else { r.main.v };
+    // (A reading with no value yet, NaN: a chart of the capacitor before, 4700.)
+    let v = if r.main.ol { 0.0 } else if r.main.v.is_nan() { 4700.0 } else { r.main.v };
     let pts: Vec<f32> = (0..321).map(|i| v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
     let secs = if p.rec { 5 * 60 + 12 } else { 12 * 60 + 30 };
-    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
+    let side = ui::Side { max: Some(v + 3.0 * q), avg: Some(v), min: Some(v - 2.0 * q), sd: Some(1.5 * q), rel: p.rel, secs: Some(secs), rec: p.rec };
     let rc = if p.rate { ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true } } else { ui::RateChip { rate: 1, period_ms: 430, applies: false } };
-    ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
+    let mut cc = ui::ChartCache::new();
+    // The Wave chip (App::wave_avail: V / A, DC or AC).
+    cc.wave = matches!(p.b, Button::Volt | Button::Amp) && !r.acdc && !r.cpl_auto;
+    ui::chart(&mut cc, &pts, r.main.dec, 2, Some(&side), r.main.unit, rc);
 }
 
 /// The base scope scene: a 1 kHz, 3 Vpp sine at 200 us/div, 1 V/div,
@@ -93,7 +105,7 @@ fn scope_base() -> stock::Scene {
     let mut m = base.m;
     m.tabs = scope_ui::tabs_of(scope_ui::TAP_CORNERS, m.tb, scope_ui::tb_top(true, false), false, None);
     m.cur_tab = scope_ui::CUR_OFF;
-    m.src = scope_ui::SRC_MCX;
+    m.wave = false;
     let mut sc = stock::Scene { name: "manual-scope", m, popup: scope_ui::Popup::None, trace: None, persist: None, cols: 399, cells: base.cells.clone() };
     sc.trace = Some(trig_sine(&sc.m, 1.5, 2.0));
     sc
@@ -157,19 +169,15 @@ pub fn run(out: &str) -> usize {
     let page = vec![("screen", Bx::new(0, 0, 480, 320)), ("bar", Bx::new(0, 0, 480, 40))];
     let screen = vec![("screen", Bx::new(0, 0, 480, 320))];
 
-    // Settings pages with the defaults of a new meter.
-    host::reset(0);
-    ui::settings(0, &["5 min", "30 min", "55%", "50%", "ON", "Multimeter", "Auto (per view)", "Stock", ""]);
-    ck.check_opts("manual/settings1", &page, false);
-    save1(out, "settings1");
-    host::reset(0);
-    ui::settings(1, &["MED  5.0/s", "OFF", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
-    ck.check_opts("manual/settings2", &page, false);
-    save1(out, "settings2");
-    host::reset(0);
-    ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, true), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
-    ck.check_opts("manual/settings3", &page, false);
-    save1(out, "settings3");
+    // Settings, every section, with the defaults of a new meter.
+    let sv = set_vals(&[]);
+    for (tab, (name, _)) in ui::SET_TABS.iter().enumerate() {
+        host::reset(0);
+        ui::settings(tab as u8, &sv);
+        let n = format!("settings-{}", name.to_lowercase());
+        ck.check_opts(&format!("manual/{n}"), &page, false);
+        save1(out, &n);
+    }
 
     // Voltage range page: AUTO+ selected, DC, the AUTO+ note, Wave.
     host::reset(0);
@@ -192,19 +200,31 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/range-ohm", &page, false);
     save1(out, "range-ohm");
 
+    // The experimental 600 Mohm chosen on the range page.
+    host::reset(0);
+    ui::range_page(Button::Ohm, Some(8), 0, None);
+    ck.check_opts("manual/range-ohm-600m", &page, false);
+    save1(out, "range-ohm-600m");
+
+    // Capacitance range page: 600 uF fixed.
+    host::reset(0);
+    ui::range_page(Button::Cap, Some(4), 0, None);
+    ck.check_opts("manual/range-cap", &page, false);
+    save1(out, "range-cap");
+
     // Hold & Limits of DC V: limits 4.8 .. 5.2 V on.
     host::reset(0);
     ui::list_page("Hold & Limits: DC V", &ui::LIMIT_ROWS, &["OFF", "ON", "5.2000 V", "4.8000 V", "", "", "", "ON", "Every reading"]);
     ck.check_opts("manual/limits", &page, false);
     save1(out, "limits");
 
-    // Record page: every reading, until stopped; and while it records.
+    // Record page: on change, until stopped; and the fast recorder.
     host::reset(0);
-    ui::record_page(["Every reading", "Until stopped"], "about 240 h left", false);
+    ui::record_page(["On change", "1 %", "Until stopped"], "about 240 h left", false);
     ck.check_opts("manual/record", &page, false);
     save1(out, "record");
     host::reset(0);
-    ui::record_page(["Fast", "1 h"], "4800/s, 25 min left", false);
+    ui::record_page(["Fast", "1 %", "1 h"], "4800/s, 25 min left", false);
     ck.check_opts("manual/record-fast", &page, false);
     save1(out, "record-fast");
 
@@ -214,16 +234,17 @@ pub fn run(out: &str) -> usize {
     ck.check_opts("manual/temp", &page, false);
     save1(out, "temp");
 
-    // Device page (no serial number on it).
+    // Device page; the serial number is an example, not a real unit's.
     host::reset(0);
-    let ver = format!("opendm40 {}", ui::FW_VERSION);
+    let mut fwb = [0u8; 48];
+    let ver = ui::device_software(&mut fwb);
     ui::device_page(&[
         ("Vendor", "Alientek"),
-        ("Web", "www.alientek.com"),
         ("Model", "DM40A"),
-        ("Bootloader", "V1.1"),
-        ("Software", &ver),
-        ("Hardware", "V4"),
+        ("SN", "12345678"),
+        ("Bootloader", "V4.0"),
+        ("Software", ver),
+        ("Hardware", "V1.1"),
         ("Board temp", "31.5 C (MCU)"),
     ]);
     ck.check_opts("manual/device", &page, false);
@@ -316,12 +337,19 @@ pub fn run(out: &str) -> usize {
         ("dmm-ma", dp(rd(8, val(12.000, 3, "mA"), None, Some(val(50.0, 1, "%")), false))),
         // Resistance, 4.7 k (the 6 kohm range: test current 197 uA).
         ("dmm-ohm", dp(Reading { range: 2, ..rd(10, val(4.7012, 4, "k\u{3a9}"), None, None, false) })),
-        // Continuity: a short.
-        ("dmm-cont", Dp { rate: false, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
+        // The experimental 600 Mohm range (manual only): 412.3 Mohm.
+        ("dmm-ohm-600m", Dp { rate: false, ..dp(Reading { range: dmm::OHM600, auto: false, ..rd(10, val(412.3, 1, "M\u{3a9}"), None, None, false) }) }),
+        // Capacitance: the discharge before 600 uF and up, and its warning
+        // (the second only for the layout check).
+        ("dmm-cap-dis", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(0.42, 2, dmm::CAP_DIS_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.2, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        ("dmm-cap-chg", Dp { rate: false, ..dp(Reading { range: 6, prov: true, aux2: Some(val(1.21, 2, dmm::CAP_CHG_UNIT)), ..rd(13, val(f32::NAN, 0, "\u{b5}F"), None, None, false) }) }),
+        // Continuity: a short, the beeper indicator on.
+        ("dmm-cont", Dp { rate: false, short: 1, ..dp(rd(11, val(0.42, 2, ohm), None, None, false)) }),
         // Diode: a silicon diode.
         ("dmm-diode", Dp { rate: false, ..dp(rd(12, val(0.5873, 4, "V"), None, None, false)) }),
         // Capacitance: 100 nF.
-        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.73, 2, "nF"), None, None, false)) }),
+        ("dmm-cap", Dp { rate: false, ..dp(rd(13, val(98.7, 1, "nF"), None, None, false)) }),
         // Frequency: 1 kHz, 50 %, with the small digit (`freq_ext`).
         ("dmm-hz", Dp { rate: false, ..dp(rd(14, Val { ext: true, ..val(1.00000, 4, "kHz") }, None, Some(val(50.0, 1, "%")), false)) }),
         // Temperature: thermocouple K.
@@ -343,7 +371,7 @@ pub fn run(out: &str) -> usize {
         ("dmm-limit-hi", Dp { lim: meter::V_HI, ..dp(rd(1, val(5.2871, 4, "V"), None, None, false)) }),
         // The history row.
         ("dmm-history", Dp { hist: true, ..dp(dcv) }),
-        // Overload.
+        // Over range.
         ("dmm-ol", dp(rd(1, ol(4, "V"), None, None, false))),
         // A recording running (REC in the status bar).
         ("dmm-rec", Dp { csv: true, ..dp(dcv) }),
@@ -414,7 +442,7 @@ pub fn run(out: &str) -> usize {
             ("gen-triangle", g(true, gen::Wave::Triangle, 100, 2.0, 5000, Some(1.5)), None),
             ("gen-ramp", g(true, gen::Wave::Ramp, 10_000, 3.0, 5000, None), None),
             ("gen-clamped", g(true, gen::Wave::Sine, 75_000, 2.0, 5000, None), None),
-            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, "Frequency", "1", "KHz"))),
+            ("gen-keypad", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_FREQ, "Frequency", "1", "kHz"))),
             ("gen-keypad-vpp", g(false, gen::Wave::Sine, 1_000, 2.0, 5000, None), Some((ui::KP_NUM, "Vpp", "2.00", "V"))),
         ] {
             gen_page(s, kp);
@@ -431,7 +459,7 @@ pub fn run(out: &str) -> usize {
     // at 10 ms/div (5 periods), 50 ms/div and 2 ms/div; a 1.5 A current.
     {
         let mut m = scope_base().m;
-        m.src = scope_ui::SRC_DMM;
+        m.wave = true;
         m.wvdiv = 150.0;
         m.ch1_txt = "AC V";
         m.ac = true;
@@ -467,6 +495,43 @@ pub fn run(out: &str) -> usize {
     // The run view.
     scope_shot(&mut ck, out, "scope-run", &sb, &pv);
     save1(out, "scope-run");
+    // Every channel on: the DMM (CH2) at 2 V/div, the GEN trace (a 0..2 V
+    // square at 2 V/div), ABS math at 1 V/div, its zero 1.5 div down.
+    {
+        let mut sc = scope_base();
+        sc.m.ch2_on = true;
+        sc.m.gen_on = true;
+        sc.m.gen_txt = scope_ui::Txt::new("2V");
+        sc.m.math_on = true;
+        sc.m.math_mode = 6;
+        sc.m.math_off = 52;
+        sc.m.math_scale = scope_ui::Txt::new("1V");
+        let mut p = popvals(&sc.m);
+        p.gen_trace = true;
+        p.ch2_on = true;
+        host::reset(0);
+        stock::draw_with(&sc, &p);
+        let h = sc.m.frame_h();
+        let g = scope_ui::graph();
+        let shape = gen::Shape { wave: gen::Wave::Square, lo_v: 0.0, hi_v: 2.0, duty: 0.5 };
+        let n = scope_ui::NCOL;
+        let tau = core::f32::consts::TAU;
+        for i in 0..n {
+            let (lo, hi) = shape.span(i as f32 * 4.0 / n as f32, 4.0 / n as f32);
+            let r = |v: f32| (140.0 - 141.0 * v / 8.0) as i32;
+            g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+            let v = 1.2 + 0.4 * (i as f32 / n as f32 * tau).sin();
+            let c = (140.0 - 141.0 * v / 8.0) as i32;
+            g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
+            // |CH1| (the 1.5 div sine, 1 V/div) at 1 V/div from row 192.
+            let a = |i: usize| (192.0 - 35.0 * (1.5 * (i as f32 / n as f32 * 2.0 * tau + 0.3).sin()).abs()) as i32;
+            let (x, y) = (a(i), a(i + 1));
+            g.ma[i] = (scope_ui::trace_fy(h, x.min(y)), scope_ui::trace_fy(h, x.max(y) + 1));
+        }
+        scope_ui::update(&sc.m);
+        ck.check_replica("manual/scope-channels");
+        save1(out, "scope-channels");
+    }
     // Every scope state below: (name, model change, popup, popup values
     // change, trace, cells).
     {
@@ -551,6 +616,12 @@ pub fn run(out: &str) -> usize {
         add("scope-measure", &|s, _| s.popup = scope_ui::Popup::Mf(0));
         add("scope-display", &|s, _| s.popup = scope_ui::Popup::Mf(1));
         add("scope-settings", &|s, _| s.popup = scope_ui::Popup::Mf(3));
+        add("scope-decode-tab", &|s, p| {
+            s.popup = scope_ui::Popup::Mf(4);
+            p.dec.proto = 1;
+            p.dec.level = 1.65;
+        });
+
         // Math popup over the FFT: Other (window, unit).
         add("scope-math", &|s, p| {
             s.m.math_open = true;
@@ -619,11 +690,14 @@ pub fn run(out: &str) -> usize {
         save1(out, "screenshot");
     }
 
+    // The protocol decoder's band: UART, Modbus RTU (stopped, a CRC error).
+    decode_ui::manual(&mut ck, out, &save1);
+
     // Combined view with the function band open (AC V on the mains).
     {
         let mut m = sb.m;
         m.combined = true;
-        m.src = scope_ui::SRC_NONE;
+        m.wave = false;
         let sc = stock::Scene { name: "manual-combined", m, popup: scope_ui::Popup::None, trace: sb.trace.clone(), persist: None, cols: 399, cells: sb.cells.clone() };
         host::reset(0);
         scope_ui::invalidate();
@@ -632,7 +706,7 @@ pub fn run(out: &str) -> usize {
         scope_ui::update(&sc.m);
         scope_ui::cells(&sc.m, &sc.cells);
         let acv = rd(0, val(230.12, 2, "V"), Some(val(50.000, 3, "Hz")), Some(val(50.0, 1, "%")), false);
-        let d = ui::strip_data(&acv, 0, 0, false, 1, false, None, false);
+        let d = ui::strip_data(&acv, 0, 0, false, 1, false, None);
         scope_ui::meter_strip(&d);
         ui::func_band(Button::Volt, 0, false, false);
         ck.check_area("manual/combined-band", &screen, true, Some(Bx::new(13, 20, 401, 56)));
@@ -647,6 +721,11 @@ pub fn run(out: &str) -> usize {
         ui::status_right(&ui::Status { bt: true, csv: true, ..status_real() });
         ck.check("manual/status-all", &DMM_REGIONS);
         save1(out, "status-all");
+        // The status-bar picture: the same with a USB host attached.
+        dmm_page(&Dp { csv: true, ..dp(dcv) });
+        ui::status_right(&ui::Status { bt: true, csv: true, usb: true, ..status_real() });
+        ck.check("manual/status-usb", &DMM_REGIONS);
+        save1(out, "status-usb");
         dmm_page(&dp(dcv));
         ui::status_right(&ui::Status { locked: true, bt: true, ..status_real() });
         ck.check("manual/status-locked", &DMM_REGIONS);
@@ -671,16 +750,16 @@ pub fn run(out: &str) -> usize {
         ui::wave_button();
         ck.check_opts("manual/range-v-auto", &page, false);
         save1(out, "range-v-auto");
-        // Settings 2 with smoothing LOW; Settings 3 with PC can edit asked
-        // for (re-plug pending).
+        // Settings > Multimeter with smoothing LOW; Settings > Connections
+        // with PC can edit asked for (re-plug pending).
         host::reset(0);
-        ui::settings(1, &["MED  5.0/s", "LOW", "Bargraph", "C (Celsius)", "Off (stock)", "ON", "Corners", "", ""]);
-        ck.check_opts("manual/settings2-smooth", &page, false);
-        save1(out, "settings2-smooth");
+        ui::settings(3, &set_vals(&[(ui::S_SMOOTH, "LOW")]));
+        ck.check_opts("manual/settings-smooth", &page, false);
+        save1(out, "settings-smooth");
         host::reset(0);
-        ui::settings(2, &["ON", "Loud", ui::usb_disk_name(true, false), "OFF (stock)", "", "", "ON", "OFF (stock)"]);
-        ck.check_opts("manual/settings3-edit", &page, false);
-        save1(out, "settings3-edit");
+        ui::settings(ui::TAB_OTHER, &set_vals(&[(ui::S_USB, ui::usb_disk_name(true, false))]));
+        ck.check_opts("manual/settings-usb-edit", &page, false);
+        save1(out, "settings-usb-edit");
     }
 
     // Every alert badge (A-JACK, LIVE?, OVLD are above).

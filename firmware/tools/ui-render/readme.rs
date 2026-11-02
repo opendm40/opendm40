@@ -6,7 +6,7 @@
 use super::*;
 
 fn status_real() -> ui::Status {
-    ui::Status { uptime_s: 12 * 60 + 34, bt: false, bars: 4, charging: false, locked: false, rec: false, csv: false, page: 0 }
+    ui::Status { uptime_s: 12 * 60 + 34, bt: false, usb: false, bars: 4, charging: false, locked: false, rec: false, csv: false, rec_dim: false, page: 0 }
 }
 
 fn save1(out: &str, name: &str) {
@@ -39,12 +39,16 @@ fn dmm_page(r: &Reading, b: Button, hist: bool) {
     } else {
         dv.bar_update(r);
     }
+    dv.ext_slot = crate::slot_of(r);
     dv.reading(r, 0, meter::V_NONE);
     ui::status_right(&status_real());
     let q = 10f32.powi(-(r.main.dec as i32));
     let pts: Vec<f32> = (0..321).map(|i| r.main.v + (((i / 37) % 3) as f32 - 1.0) * q).collect();
-    let side = ui::Side { max: Some(r.main.v + q), avg: Some(r.main.v), min: Some(r.main.v - q), rel: None, secs: Some(12 * 60 + 30), rec: false };
-    ui::chart(&mut ui::ChartCache::new(), &pts, r.main.dec, 2, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true });
+    let side = ui::Side { max: Some(r.main.v + q), avg: Some(r.main.v), min: Some(r.main.v - q), sd: Some(0.6 * q), rel: None, secs: Some(12 * 60 + 30), rec: false };
+    let mut cc = ui::ChartCache::new();
+    // The Wave chip (App::wave_avail: V / A, DC or AC).
+    cc.wave = matches!(b, Button::Volt | Button::Amp) && !r.acdc && !r.cpl_auto;
+    ui::chart(&mut cc, &pts, r.main.dec, 2, Some(&side), r.main.unit, ui::RateChip { rate: 1, period_ms: dmm::rate_period(dmm::Rate::Medium, r.mode), applies: true });
 }
 
 pub fn run(out: &str) -> usize {
@@ -100,10 +104,10 @@ pub fn run(out: &str) -> usize {
         scope_ui::update(&sc.m);
         scope_ui::cells(&sc.m, &sc.cells);
         let acv = rd(0, val(1.0606, 4, "V"), Some(val(1.000, 3, "kHz")), Some(val(50.0, 1, "%")), false);
-        let mut d = ui::strip_data(&acv, 0, 0, false, 0, false, None, false);
+        let mut d = ui::strip_data(&acv, 0, 0, false, 0, false, None);
         d.gen = scope_ui::Txt::new("1.00kHz");
         scope_ui::meter_strip(&d);
-        ck.check_area("readme/combined", &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(13, 20, 401, 56)));
+        ck.check_area("readme/combined", &[("screen", Bx::new(0, 0, 480, 320))], true, Some(Bx::new(scope_ui::GX as i32, 20, scope_ui::GW as i32 + 1, 56)));
         save1(out, "combined");
     }
 
@@ -146,7 +150,7 @@ pub fn run(out: &str) -> usize {
         let h = sc.m.frame_h();
         let g = scope_ui::graph();
         let spec = stock::Trace { a, b };
-        for (i, (x, y)) in spec.columns(399).iter().enumerate().take(399) {
+        for (i, (x, y)) in stock::fit(&spec.columns(400)).iter().enumerate().take(scope_ui::NCOL) {
             g.ma[i] = (scope_ui::trace_fy(h, *x), scope_ui::trace_fy(h, *y));
         }
         scope_ui::update(&sc.m);

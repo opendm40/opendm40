@@ -11,10 +11,10 @@
 //! drains the ring (`logger::wave::drain`) every pass and feeds `push`.
 //! Each sample is kept as a 16-bit code `(raw + 4) >> 3` (3.8 mA per code;
 //! the AD2 noise is ~32 raw codes = 4 of these, so nothing is lost) in the
-//! scope's record buffer (scope::BUF, 26 624 slots, lent while the inrush
-//! page is open: `Scope::lend_buf`), used as a ring until the capture is
-//! complete, then rotated so the trace runs PRE samples before the trigger
-//! to POST samples after it.
+//! scope's record buffer (scope::BUF as u16, its first scope::INRUSH_LEN =
+//! 26 624 slots, lent while the inrush page is open: `Scope::lend_buf`),
+//! used as a ring until the capture is complete, then rotated so the trace
+//! runs PRE samples before the trigger to POST samples after it.
 //!
 //! Trigger rule (`Cap::push`): the mean of |I| over the last SHORT samples
 //! (~1 ms) exceeds the largest such mean of the previous ~100 ms (NBLK
@@ -330,7 +330,10 @@ impl Cap {
         let cap = buf.len() as u64;
         let start = self.trig - PRE as u64;
         let r = (start % cap) as usize;
-        buf.rotate_left(r);
+        // = rotate_left(r), in less code (core's rotate is ~0.2 KB).
+        buf[..r].reverse();
+        buf[r..].reverse();
+        buf.reverse();
         self.rd = 0;
     }
 
@@ -461,6 +464,9 @@ pub struct Session {
     pub prev_sub: u8,
     pub prev_auto: Option<u8>,
     pub prev_item: Option<u8>,
+    /// The buttons' last sub-modes (dmm::submem) before the page set AC A:
+    /// restored with `prev_func` when it was not A.
+    pub prev_mem: u8,
     /// The stream's nominal rate, mHz (the file header).
     pub rate_mhz: u32,
     /// Live redraw: what the state line / buttons last showed, next time.
@@ -487,6 +493,7 @@ impl Session {
         stop: Stop::None,
         prev_func: 8,
         prev_sub: 0,
+        prev_mem: 0,
         prev_auto: None,
         prev_item: None,
         rate_mhz: RATE_HZ * 1000,
@@ -535,18 +542,17 @@ pub fn step_codes(amps: f32, b: f32) -> u32 {
     if k < 1.0 { 1 } else { k as u32 }
 }
 
-/// Next / previous threshold of the stepper from `cur` (`dir` -1 / +1).
+/// Next / previous threshold of the stepper from `cur` (`dir` -1 / +1):
+/// the nearest ladder step below / above it. `cur` stays when there is
+/// none: a value set over SCPI below 0.2 A or above 10 A (a "-" raised
+/// 0.1 A to 0.2 A, a "+" lowered 30 A to 10 A).
 pub fn thr_step(cur: f32, dir: i8) -> f32 {
-    let i = THR_STEPS.iter().position(|&t| t >= cur * 0.999).unwrap_or(THR_STEPS.len() - 1);
-    let exact = (THR_STEPS[i] - cur).abs() <= cur * 0.001;
-    let j = if dir < 0 {
-        i.saturating_sub(1)
-    } else if exact {
-        (i + 1).min(THR_STEPS.len() - 1)
+    let next = if dir < 0 {
+        THR_STEPS.iter().rev().find(|&&t| t < cur * 0.999)
     } else {
-        i
+        THR_STEPS.iter().find(|&&t| t > cur * 1.001)
     };
-    THR_STEPS[j]
+    next.copied().unwrap_or(cur)
 }
 
 #[cfg(test)]
@@ -784,6 +790,12 @@ mod tests {
         assert_eq!(thr_step(10.0, 1), 10.0);
         assert_eq!(thr_step(0.7, 1), 1.0);
         assert_eq!(thr_step(0.7, -1), 0.5);
+        // Off the ladder (INR:THR): never the other way.
+        assert_eq!(thr_step(0.1, -1), 0.1);
+        assert_eq!(thr_step(0.1, 1), 0.2);
+        assert_eq!(thr_step(30.0, 1), 30.0);
+        assert_eq!(thr_step(30.0, -1), 10.0);
+        assert_eq!(thr_step(12.0, -1), 10.0);
         assert_eq!(step_codes(1.0, B), 262);
     }
 }

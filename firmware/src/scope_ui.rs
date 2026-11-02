@@ -20,6 +20,14 @@
 use crate::lcd::{self, Color};
 use crate::stockfont::{self as sf, in_rbox, on_ring, paint, rect, Font, Ink, Rect};
 
+/// The protocol decoder's bus band and its setup popup (app_decode.rs).
+#[path = "ui_decode.rs"]
+pub mod dec;
+/// The protocol decoder's frame log view (app_log.rs).
+#[path = "ui_log.rs"]
+pub mod log;
+
+
 // ---- colours (RGB565, spec sec. 0) ----
 pub const C_BAR: Color = 0x4208; // top bar, strip, panel, measurement bar
 pub const C_FILL: Color = 0x2124; // graph fill, record-bar inner, dark text on yellow
@@ -34,12 +42,31 @@ pub const C_POP_BG: Color = 0xd679; // popup page / selected tab
 pub const C_POP_TAB: Color = 0x5acb; // unselected tab / header
 pub const C_SEL: Color = 0x059e; // list selection, spinner band, slider fill
 pub const C_YELLOW: Color = 0xffe0;
+/// The extra channels' traces (opendm40, docs/scope-gen-channel.md): the
+/// generator (computed) and the DMM's CH2.
+pub const C_GEN_TR: Color = 0x07ff;
+pub const C_CH2: Color = 0xf81f;
 /// The strip value's digits below the accuracy (ui::strip_acc): the DMM
 /// page's VALUE_LOW.
 pub const C_LOW: Color = crate::ui::VALUE_LOW;
 /// Palette 0x0806c730: red orange yellow green blue purple brown pink gold.
 pub const PALETTE: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x001f, 0x8010, 0xa145, 0xfe19, 0xfea0];
 pub const COLOUR_NAMES: [&str; 9] = ["red", "orange", "yellow", "green", "blue", "purple", "brown", "pink", "gold"];
+/// Text on a CH1-coloured fill (zoom buttons, CHA, V/div badge, the source
+/// badge's selected half), per PALETTE entry: the stock dark text, white
+/// where dark reads worse than the stock default math panel (white on
+/// orange, contrast 1.97:1): blue 1.83, purple 1.72.
+pub const CH1_INK: [Color; 9] = [C_FILL, C_FILL, C_FILL, C_FILL, C_WHITE, C_WHITE, C_FILL, C_FILL, C_FILL];
+/// Text on a math-coloured panel button (math on), per PALETTE entry: the
+/// stock white, dark where white reads worse than on the default orange:
+/// yellow 1.07, pink 1.52, gold 1.41.
+pub const MATH_INK: [Color; 9] = [C_WHITE, C_WHITE, C_FILL, C_WHITE, C_WHITE, C_WHITE, C_WHITE, C_FILL, C_FILL];
+/// Text in the channel colour on the dark bar / graph (trigger badge,
+/// measurement strip, FFT labels), per PALETTE entry: the palette colour,
+/// or halfway to white where it reads worse on C_BAR than the stock
+/// default math panel (1.97:1): blue 1.20, purple 1.13, brown 1.43 ->
+/// 3.22, 3.60, 4.08.
+pub const PAL_TEXT: [Color; 9] = [0xf800, 0xfd20, 0xffe0, 0x0400, 0x841f, 0xc418, 0xd492, 0xfe19, 0xfea0];
 
 pub const TB_LABELS: [&str; 30] = [
     "10ns", "20ns", "50ns", "100ns", "200ns", "500ns", "1us", "2us", "5us", "10us", "20us", "50us", "100us", "200us", "500us", "1ms", "2ms",
@@ -63,22 +90,96 @@ pub const ST_RUN: u8 = 3;
 pub const ST_STOP: u8 = 4;
 
 // ---- geometry ----
+// The graph rectangle: every graph, strip and panel position below derives
+// from these. The frame lines are at x GX and GR (GX + 10 divisions), the
+// graph columns fx 1..=NCOL between them at screen x GX + fx; the engine
+// keeps its own scope::COLS columns (`eng_of_fx` / `fx_of_eng`).
+/// Left frame column. opendm40 (owner 2026-11-02): the frame at the screen
+/// edge, the level markers inside the graph (`LEFT_IN`), 39 px divisions,
+/// the right panel 89 px (four channel blocks).
+pub const GX: i16 = 0;
+/// Division width (px); the graph has 10.
+pub const DIV_W: i16 = 39;
+/// Frame-to-frame width and the right frame column.
+pub const GW: i16 = 10 * DIV_W;
+pub const GR: i16 = GX + GW;
+/// Graph columns (fx 1..=NCOL) and the centre column.
+pub const NCOL: usize = (GW - 1) as usize;
+pub const GCX: i16 = GW / 2;
+/// The right panel's first column.
+pub const PANEL_X: i16 = GR + 1;
+/// Left edge of the graph's left-side items (FFT dB box, CH2 label: 5 px
+/// inside the frame); with the frame at the screen edge, 3 px after the
+/// level markers (x 1..12) instead.
+pub const IN_X: i16 = if GX > 0 { GX + 5 } else { 16 };
+/// The level markers (CH1, math, runt, Y cursors) inside the graph at its
+/// left edge, as the trigger level at the right one (no strip column).
+pub const LEFT_IN: bool = GX == 0;
+
+/// Engine column (scope::COLS per screen) at the left edge of graph column
+/// fx - 1 (0-based display column `j`): identity while GW == COLS.
+pub const fn eng_of_col(j: i32) -> i32 {
+    (j * crate::scope::COLS as i32) / GW as i32
+}
+/// Graph column (0-based) of engine column `e` (rounded).
+pub const fn col_of_eng(e: i32) -> i32 {
+    let n = e * GW as i32;
+    let d = crate::scope::COLS as i32;
+    (if n >= 0 { n + d / 2 } else { n - d / 2 }) / d
+}
+/// Engine columns of a move of `dx` graph columns (rounded).
+pub const fn eng_dx(dx: i32) -> i32 {
+    let n = dx * crate::scope::COLS as i32;
+    let d = GW as i32;
+    (if n >= 0 { n + d / 2 } else { n - d / 2 }) / d
+}
+/// Engine columns per graph column.
+pub const ENG_PER_COL: f32 = crate::scope::COLS as f32 / GW as f32;
+
 pub const TOP_BAR: Rect = rect(0, 0, 480, 20);
-pub const PANEL: Rect = rect(414, 20, 66, 300);
-pub const MEAS_BAR: Rect = rect(0, 301, 414, 19);
+pub const PANEL: Rect = rect(PANEL_X, 20, 480 - PANEL_X, 300);
+pub const MEAS_BAR: Rect = rect(0, 301, PANEL_X, 19);
 /// Combined view: graph frame top (under the 56 px meter strip at y 20).
 pub const COMBINED_TOP: i16 = 76;
 /// The drag / tap rect of the stock overlay (sec. 10.1).
-pub const INNER: Rect = rect(0, 15, 414, 290);
+pub const INNER: Rect = rect(0, 15, PANEL_X, 290);
 
-/// Right-panel buttons (sec. 5), 60 x 40 at x 417.
-pub const B_RECT: [Rect; 7] =
-    [rect(417, 20, 60, 40), rect(417, 61, 60, 40), rect(417, 102, 60, 40), rect(417, 150, 60, 40), rect(417, 191, 60, 40), rect(417, 232, 60, 40), rect(417, 280, 60, 40)];
+/// The right panel (owner 2026-11-02): four channel blocks, CH1, DMM (the
+/// CH2 trace), GEN (the generator trace), MATH, 74 px apart from y 24. A
+/// block: its title (name and scale, 26 px) over two magnifier buttons
+/// side by side, zoom in (smaller V/div) and zoom out (40 px tall).
+pub const NBLK: usize = 4;
+pub const BLK_X: i16 = PANEL_X + 3;
+pub const BLK_W: i16 = 476 - BLK_X;
+const BLK_Y0: i16 = 24;
+const BLK_PITCH: i16 = 74;
+const TITLE_H: i16 = 26;
+const BLK_GAP: i16 = 3;
+const BTN_H: i16 = 40;
+const BTN_W: i16 = (BLK_W - BLK_GAP) / 2;
+/// Panel targets: 3 per block (`PART_*`), k = 3 * block + part.
+pub const NPANEL: usize = 3 * NBLK;
+pub const PART_TITLE: usize = 0;
+pub const PART_IN: usize = 1;
+pub const PART_OUT: usize = 2;
+pub const BLK_CH1: usize = 0;
+pub const BLK_DMM: usize = 1;
+pub const BLK_GEN: usize = 2;
+pub const BLK_MATH: usize = 3;
+
+/// The rect of panel target `k`.
+pub const fn panel_rect(k: usize) -> Rect {
+    let y = BLK_Y0 + BLK_PITCH * (k / 3) as i16;
+    match k % 3 {
+        PART_TITLE => rect(BLK_X, y, BLK_W, TITLE_H),
+        PART_IN => rect(BLK_X, y + TITLE_H + BLK_GAP, BTN_W, BTN_H),
+        _ => rect(BLK_X + BLK_W - BTN_W, y + TITLE_H + BLK_GAP, BTN_W, BTN_H),
+    }
+}
 
 /// Top-bar badges (sec. 2): run status, timebase, CH1 V/div, trigger.
 pub const RUN_BADGE: Rect = rect(13, 1, 62, 17);
 pub const TB_BADGE: Rect = rect(79, 1, 62, 17);
-pub const VDIV_BADGE: Rect = rect(286, 1, 62, 17);
 pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 
 // opendm40 timebase tap step (docs/scope-scale-ux.md sec. 1). The rects are
@@ -87,15 +188,15 @@ pub const TRIG_BADGE: Rect = rect(352, 1, 62, 17);
 /// Value-preview tabs (left: the next slower timebase, right: the next
 /// faster one), in the bottom graph corners. 52 px wide (the doc's 50 px
 /// left 2 px beside the widest labels, "<500ms" is 45 px in the 12 px font).
-pub const TAB_L: Rect = rect(23, 280, 52, 17);
-pub const TAB_R: Rect = rect(338, 280, 52, 17);
+pub const TAB_L: Rect = rect(IN_X + 5, 280, 52, 17);
+pub const TAB_R: Rect = rect(GR - 75, 280, 52, 17);
 /// "Corners" tap zones (80 x 73 px, about 13.6 x 12.4 mm); the left one
-/// starts after the strip markers' press zones (x <= 22). The right one
-/// reaches the frame; the right-edge trigger-level marker's zone wins over
-/// it where they meet (marker priority), and its tab (`TAB_R`) ends before
-/// that marker's column (x 401..412).
-pub const ZONE_L: Rect = rect(23, 228, 80, 73);
-pub const ZONE_R: Rect = rect(333, 228, 80, 73);
+/// starts after the left-strip glyphs (x <= 12), the right one reaches the
+/// frame. A marker grab zone (`grab_rect`) wins over them where they meet,
+/// except on a drawn tab (`graph_press`); the tabs end before the marker
+/// glyph columns (x 1..12, 401..412).
+pub const ZONE_L: Rect = rect(IN_X + 5, 228, 80, 73);
+pub const ZONE_R: Rect = rect(GR - 80, 228, 80, 73);
 /// `Model::tabs` bits.
 pub const TAB_SHOW_L: u8 = 1;
 pub const TAB_SHOW_R: u8 = 2;
@@ -162,9 +263,15 @@ pub struct Model {
     /// X cursor columns (1..399) / Y cursor rows (1..279) when shown.
     pub xcur: Option<[i16; 2]>,
     pub ycur: Option<[i16; 2]>,
-    /// Battery level 0..5, charging.
+    /// Battery level 0..5 (blinking while charging), on a charger (green).
     pub battery: u8,
     pub charging: bool,
+    /// A USB host has the meter configured: the small USB symbol between
+    /// the trigger badge and the battery (`usb_icon`).
+    pub usb: bool,
+    /// A Bluetooth host is connected: the Bluetooth rune in the same gap
+    /// (`usb_icon`; with USB too, left of it, the battery 3 px right).
+    pub bt: bool,
     /// Roll mode (record bar "ROLL").
     pub roll: bool,
     /// Record bar window (start, end) as fractions of the record.
@@ -210,27 +317,53 @@ pub struct Model {
     pub runt_row: Option<i16>,
     /// opendm40 cursor tab (UF-08): 0 hidden, else CUR_OFF / CUR_X / CUR_Y.
     pub cur_tab: u8,
-    /// Source badge (opendm40, the DMM wave view, src/app_wave.rs): SRC_NONE
-    /// (the stock page: no badge, builds without the AD2 stream ISR),
-    /// SRC_MCX or SRC_DMM (the active half filled).
-    pub src: u8,
     /// Source DMM: the unit of the vertical values is A (current rows).
     pub amps: bool,
-    /// Source DMM: the V/div value (SI, `fmt_div`: "1.5V", "200uA") and the
-    /// CH1 label ("AC mA"); 0 / "" = the stock texts from `vdiv` / "CHA".
+    /// The V/div value (SI, `fmt_div`: "1.5V", "200uA", "2.5V" with a x5
+    /// probe) and, source DMM, the CH1 label ("AC mA"); 0 / "" = the stock
+    /// texts from `vdiv` / "CH1".
     pub wvdiv: f32,
     pub ch1_txt: &'static str,
+    /// A CSV recording runs (csvlog.rs; the Scope page and the combined
+    /// view): the REC mark (`rec_mark`) in the source badge's slot, the
+    /// record bar beside it. The Wave view and a recording
+    /// exclude each other (App::wave_open, App::rec_conflict).
+    pub rec: bool,
+    /// The REC mark's blink phase (`rec_blink`): true = its dot hidden. A
+    /// change repaints the slot only.
+    pub rec_dim: bool,
+    /// The recorded function's unit (`rec_unit`) for RecStyle::RecFunc.
+    pub rec_unit: &'static str,
+    /// Protocol decoder band (ui_decode.rs): 0 none, 1 UART (the byte
+    /// row), 2 UART with Modbus frames (frame and byte rows), 3 DALI;
+    /// `dec_gen` changes with what
+    /// it shows (`dec::ann`), 0 = blank (a drag moves the trace).
+    pub dec: u8,
+    pub dec_gen: u16,
+    /// Trigger source (scope::TSRC_*): the trigger badge in the GEN
+    /// colour for the generator.
+    pub tsrc: u8,
+    /// The DMM CH2's label in the graph ("CH2 1.5V", magenta); empty =
+    /// none (`CH2_LABEL`, a graph hole).
+    /// The DMM CH2 trace shown, and its V/div ("1.5V", "--" before its
+    /// first start): the DMM block.
+    pub ch2_on: bool,
+    pub ch2_txt: Txt,
+    /// The GEN trace shown and its V/div: the GEN block.
+    pub gen_on: bool,
+    pub gen_txt: Txt,
+    /// The Wave view (the DMM as the scope's source): the CH1 block shows
+    /// its function, the DMM block reads "MCX" (back to the OSC input).
+    pub wave: bool,
 }
 
-/// `Model::src` values.
-pub const SRC_NONE: u8 = 0;
-pub const SRC_MCX: u8 = 1;
-pub const SRC_DMM: u8 = 2;
-/// The source badge (left part of the record-bar slot when shown) and the
-/// record bar then (opendm40: the stock bar is 145..282).
+/// The REC mark (left part of the record-bar slot while recording) and
+/// the record bar then (opendm40: the stock bar is 145..282).
 pub const SRC_BADGE: Rect = rect(145, 1, 64, 17);
-const REC_BAR: Rect = rect(145, 1, 137, 17);
-const REC_BAR_SRC: Rect = rect(212, 1, 70, 17);
+/// (opendm40 2026-11-02: to x 347, the V/div badge's place; the CH1 block
+/// shows the V/div, coupling and probe.)
+const REC_BAR: Rect = rect(145, 1, 203, 17);
+const REC_BAR_SRC: Rect = rect(212, 1, 136, 17);
 
 /// Cursor tab states (`Model::cur_tab`).
 pub const CUR_OFF: u8 = 1;
@@ -238,7 +371,7 @@ pub const CUR_X: u8 = 2;
 pub const CUR_Y: u8 = 3;
 /// The cursor tab: bottom row of the graph, between the left Corners tap
 /// zone (x <= 102) and the FFT scale box (x >= 168).
-pub const CUR_TAB: Rect = rect(108, 280, 54, 17);
+pub const CUR_TAB: Rect = rect(ZONE_L.x + ZONE_L.w + 5, 280, 54, 17);
 
 /// opendm40 FFT additions (UF-11): the vertical scale ("10dB/div"), the
 /// horizontal scale ("50kHz/div"), the automatic peak readout and the peak
@@ -261,7 +394,7 @@ impl Model {
         trig_row: 105,
         trig_v: 0.993,
         rising: true,
-        trig_px: 200,
+        trig_px: GCX,
         pos: 0,
         colour: 2,
         bright: 100,
@@ -273,6 +406,8 @@ impl Model {
         ycur: None,
         battery: 4,
         charging: false,
+        usb: false,
+        bt: false,
         roll: false,
         record: (0.0, 1.0),
         gen_hz: 0.0,
@@ -291,10 +426,20 @@ impl Model {
         fft: None,
         runt_row: None,
         cur_tab: 0,
-        src: SRC_NONE,
         amps: false,
         wvdiv: 0.0,
         ch1_txt: "",
+        rec: false,
+        rec_dim: false,
+        rec_unit: "V",
+        dec: 0,
+        dec_gen: 0,
+        tsrc: 0,
+        ch2_on: false,
+        ch2_txt: Txt::EMPTY,
+        gen_on: false,
+        gen_txt: Txt::EMPTY,
+        wave: false,
     };
 
     pub fn pal(&self) -> Color {
@@ -312,6 +457,22 @@ impl Model {
     /// is off (the pill).
     pub fn math_pal(&self) -> Color {
         PALETTE[self.math_colour as usize % 9]
+    }
+    /// Text colour on `pal()` (CH1_INK).
+    pub fn pal_ink(&self) -> Color {
+        CH1_INK[self.colour as usize % 9]
+    }
+    /// Text colour on `math_pal()` (MATH_INK).
+    pub fn math_ink(&self) -> Color {
+        MATH_INK[self.math_colour as usize % 9]
+    }
+    /// CH1-coloured text on the dark bar / graph (PAL_TEXT).
+    pub fn pal_text(&self) -> Color {
+        PAL_TEXT[self.colour as usize % 9]
+    }
+    /// Math-coloured text on the graph (PAL_TEXT).
+    pub fn math_text(&self) -> Color {
+        PAL_TEXT[self.math_colour as usize % 9]
     }
     pub fn grid_colour(&self) -> Color {
         blend565(0xffff, C_FILL, (self.grid.min(100) as u32 * 255 / 100) as u8)
@@ -380,7 +541,7 @@ impl Buf {
     }
 }
 
-/// FUN_08032bfa (V / A / W): NaN " -- "; |v| < 1e-6 "%1.2fu"; else scaled
+/// FUN_08032bfa (V / A / W): NaN " -- "; 0 "0.00" (ours); |v| < 1e-6 "%1.2fu"; else scaled
 /// into [1, 1000) over u m - k M with "%1.2f" (< 9.995), "%2.1f" (< 99.95)
 /// or "%3.0f".
 pub fn fmt_v(out: &mut Buf, v: f32, unit: &str) {
@@ -394,6 +555,12 @@ fn fmt_v_cut(out: &mut Buf, v: f32, unit: &str, cut: u8) {
         return;
     }
     let mut t = [0u8; 16];
+    if v == 0.0 {
+        // Exactly zero (a trigger level at 0): "0.00V", not the stock's
+        // "0.00uV" (issue #136).
+        out.push("0.00").push(unit);
+        return;
+    }
     if v.abs() < 1e-6 {
         out.push(crate::dmm::format(&mut t, v * 1e6, 2)).push("u").push(unit);
         return;
@@ -495,9 +662,9 @@ pub fn tb_badge(m: &Model) {
 /// 2.3 record-position bar; while running (record = screen) it shows the
 /// generator frequency instead of the constant full-record line when the
 /// generator is on (opendm40 addition, 12 px grey like "ROLL").
-/// The record bar's box (shorter beside the source badge).
+/// The record bar's box (shorter beside the source badge or REC).
 pub fn record_bar_rect(m: &Model) -> Rect {
-    if m.src == SRC_NONE { REC_BAR } else { REC_BAR_SRC }
+    if !m.rec { REC_BAR } else { REC_BAR_SRC }
 }
 
 pub fn record_bar(m: &Model) {
@@ -558,40 +725,138 @@ pub fn record_bar(m: &Model) {
     });
 }
 
-/// Source badge (`Model::src` != SRC_NONE): "MCX | DMM", the active half
-/// in the CH1 colour with dark text, the other dark with grey text.
-pub fn src_badge(m: &Model) {
-    if m.src == SRC_NONE {
-        return;
+/// The REC mark's blink (`now` in ms): true = off; on 1 s, off 1 s (owner
+/// 2026-10-30: 0.5 s was too fast). One phase for every page (the scope
+/// bar, the DMM and generator status bars).
+pub fn rec_blink(now: u64) -> bool {
+    now / 1000 & 1 == 1
+}
+
+/// Texts of the REC mark (owner feedback on #161, 2026-10-30: say that the
+/// recording is the multimeter's): `Rec` "REC", `Dmm` "DMM", `RecDmm`
+/// "REC DMM", `RecFunc` "REC" + the recorded function's unit (`rec_unit`),
+/// `DmmRec` "DMM REC"; always after the blinking red dot. ui-render draws
+/// all of them (`set_rec_style`).
+#[derive(Clone, Copy, PartialEq)]
+pub enum RecStyle {
+    Rec,
+    Dmm,
+    RecDmm,
+    RecFunc,
+    DmmRec,
+}
+
+#[cfg(not(test))]
+fn rec_style() -> RecStyle {
+    RecStyle::Dmm
+}
+#[cfg(test)]
+static mut REC_STYLE: RecStyle = RecStyle::Dmm;
+#[cfg(test)]
+fn rec_style() -> RecStyle {
+    unsafe { REC_STYLE }
+}
+#[cfg(test)]
+pub fn set_rec_style(s: RecStyle) {
+    unsafe { REC_STYLE = s }
+}
+
+/// The unit of a recorded DMM function (meter::func_of codes, csvlog::
+/// func_label) for `RecStyle::RecFunc`: V, A, Ω, F, Hz, W, °C.
+pub fn rec_unit(func: u8) -> &'static str {
+    match func {
+        0..=3 | 12 | 16 => "V",
+        4..=9 | 17 => "A",
+        10 | 11 => "\u{3a9}",
+        13 => "F",
+        14 => "Hz",
+        18 => "W",
+        _ => "\u{b0}C",
     }
-    let r = SRC_BADGE;
-    let half = r.w / 2;
-    let a = Ink::new(sf::SC_F12, rect(r.x, 1, half, 17), "MCX", 8, 0);
-    let b = Ink::new(sf::SC_F12, rect(r.x + half, 1, r.w - half, 17), "DMM", 8, 0);
-    let dmm = m.src == SRC_DMM;
-    let on = m.pal();
-    let (fa, fb) = if dmm { (C_FILL, on) } else { (on, C_FILL) };
-    let (ta, tb) = if dmm { (C_FRAME, C_FILL) } else { (C_FILL, C_FRAME) };
-    paint(r, &[(K_SHAPE, C_BAR), (K_SHAPE, fa), (K_SHAPE, fb), (K_TEXT, fa), (K_TEXT, fb)], |x, y| {
-        let left = x < r.x + half;
-        if let Some(g) = a.at(x, y) {
-            return (ta, tag(4, g));
+}
+
+/// The REC dot's diameter: the 12 px font's cap height, smaller when the
+/// text needs the room (`rec_layout`).
+const REC_DOT: i16 = 9;
+
+/// The REC mark's parts in the slot `r`: the dot's box and the words (one
+/// Ink each: a gap narrower than the font's 6 px space). The largest of
+/// dot 9 / gap 4 / word gap 4 .. dot 5 / gap 2 / word gap 3 that leaves
+/// >= 2 px inside the box's ring; the group centred.
+fn rec_layout(r: Rect, unit: &'static str) -> (Rect, [Ink; 2]) {
+    let words: [&str; 2] = match rec_style() {
+        RecStyle::Rec => ["REC", ""],
+        RecStyle::Dmm => ["DMM", ""],
+        RecStyle::RecDmm => ["REC", "DMM"],
+        RecStyle::RecFunc => ["REC", unit],
+        RecStyle::DmmRec => ["DMM", "REC"],
+    };
+    let w = |t: &str| if t.is_empty() { 0 } else { sf::text_width(sf::SC_F12, t, 0) };
+    let (w0, w1) = (w(words[0]), w(words[1]));
+    let len = |l: (i16, i16, i16)| l.0 + l.1 + w0 + if w1 > 0 { l.2 + w1 } else { 0 };
+    let lay = [(REC_DOT, 4, 4), (7, 3, 4), (7, 2, 3), (5, 2, 3)].into_iter().find(|&l| len(l) <= r.w - 6).unwrap_or((5, 2, 3));
+    let (d, g, wg) = lay;
+    let x0 = r.x + (r.w - len(lay) + 1) / 2;
+    let dot = rect(x0, r.y + 4 + (REC_DOT - d) / 2, d, d);
+    let tx = x0 + d + g;
+    let t0 = Ink::new(sf::SC_F12, rect(tx, r.y, w0, r.h), words[0], 8, 0);
+    let t1 = if w1 > 0 { Ink::new(sf::SC_F12, rect(tx + w0 + wg, r.y, w1, r.h), words[1], 8, 0) } else { Ink::none() };
+    (dot, [t0, t1])
+}
+
+/// The REC mark in the 17 px slot `r` over `outside` (the top bar), boxed
+/// like the neighbouring badges: a red dot and white text (`RecStyle`) on
+/// the rows of the badges' 12 px caps (r.y + 4 ..= r.y + 12). `on` = the
+/// blink's on phase (the dot shows); `unit` = the recorded function's
+/// (`rec_unit`, RecFunc).
+pub fn rec_mark(r: Rect, outside: Color, on: bool, unit: &'static str) {
+    rec_paint(r, outside, on, false, unit);
+}
+
+/// The REC mark's blink step: only the dot's box.
+pub fn rec_mark_blink(r: Rect, outside: Color, on: bool, unit: &'static str) {
+    rec_paint(r, outside, on, true, unit);
+}
+
+/// The REC dot alone in its box `dot` over `bg` (the DMM and generator
+/// status bars, ui::status_rec), hidden when not `on`.
+pub fn rec_dot(dot: Rect, bg: Color, on: bool) {
+    paint(dot, &[(K_ICON, bg)], |x, y| if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) { (crate::ui::REC_CSV, tag(1, 0)) } else { (bg, 0) });
+}
+
+fn rec_paint(r: Rect, outside: Color, on: bool, dot_only: bool, unit: &'static str) {
+    let red = crate::ui::REC_CSV;
+    let (dot, [t0, t1]) = rec_layout(r, unit);
+    let win = if dot_only { dot } else { r };
+    paint(win, &[(K_SHAPE, outside), (K_SHAPE, C_FILL), (K_ICON, C_FILL), (K_TEXT, C_FILL), (K_TEXT, C_FILL)], |x, y| {
+        if let Some(g) = t0.at(x, y) {
+            return (C_WHITE, tag(4, g));
         }
-        if let Some(g) = b.at(x, y) {
-            return (tb, tag(5, g));
+        if let Some(g) = t1.at(x, y) {
+            return (C_WHITE, tag(5, g));
+        }
+        if on && in_rbox(dot, dot.w / 2, 0x0f, x, y) {
+            return (red, tag(3, 0));
         }
         if in_rbox(r, 5, 0x0f, x, y) {
-            if on_ring(r, 5, 0x0f, x, y) || x == r.x + half {
+            if on_ring(r, 5, 0x0f, x, y) {
                 (C_FRAME, tag(1, 0))
-            } else if left {
-                (fa, tag(2, 0))
             } else {
-                (fb, tag(3, 0))
+                (C_FILL, tag(2, 0))
             }
         } else {
-            (C_BAR, 0)
+            (outside, 0)
         }
     });
+}
+
+/// The REC mark (`rec_mark`) while a CSV recording runs (`Model::rec`), in
+/// the slot the MCX | DMM source badge had until 2026-11-02 (the Wave view
+/// is the DMM block's now; a recording refuses it).
+pub fn src_badge(m: &Model) {
+    if m.rec {
+        rec_mark(SRC_BADGE, C_BAR, !m.rec_dim, m.rec_unit);
+    }
 }
 
 /// "1.00kHz" (FUN_08032fa4 style, Hz .. MHz).
@@ -618,14 +883,6 @@ pub fn fmt_srate(out: &mut Buf, fs: u32) {
     out.push("S/s");
 }
 
-/// 2.4 CH1 V/div badge.
-pub fn vdiv_badge(m: &Model) {
-    let mut b = Buf::new();
-    m.vdiv_str(&mut b);
-    let p = Ink::icon(sf::SC_PROBE, rect(286, 1, 18, 17), m.probe_glyph(), 4);
-    let t = Ink::new(sf::SC_F12, rect(304, 1, 44, 17), b.as_str(), 8, 0);
-    badge(rect(286, 1, 62, 17), m.pal(), C_BAR, None, &[(&p, C_FILL), (&t, C_FILL)]);
-}
 
 /// 2.5 trigger badge: edge glyph and level.
 pub fn trig_badge(m: &Model) {
@@ -639,17 +896,30 @@ pub fn trig_badge(m: &Model) {
     }
     let e = Ink::icon(sf::SC_EDGE, rect(352, 1, 12, 17), if m.rising { 0x20 } else { 0x21 }, 4);
     let t = Ink::new(sf::SC_F12, rect(364, 1, 50, 17), b.as_str(), 8, 0);
-    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, m.pal()), (&t, m.pal())]);
+    let c = if m.tsrc == crate::scope::TSRC_GEN { C_GEN_TR } else { m.pal_text() };
+    badge(rect(352, 1, 62, 17), C_FRAME, C_BAR, Some((rect(353, 2, 60, 15), C_BAR)), &[(&e, c), (&t, c)]);
 }
 
-/// 2.6 battery (outline + level clipped to (437,3,33,12)).
+/// The battery's shift to the right (px) while both the Bluetooth rune and
+/// the USB symbol need the gap before it (`usb_icon`).
+fn icons_dx(m: &Model) -> i16 {
+    if m.bt && m.usb { 3 } else { 0 }
+}
+
+/// 2.6 battery (outline + level clipped to (437,3,33,12)); `icons_dx` px
+/// further right with both link icons. Painted over both places.
 pub fn battery(m: &Model) {
-    let r = rect(435, 1, 40, 16);
+    battery_lv(m.battery, m.charging, icons_dx(m));
+}
+
+/// The battery of level 0..5, `dx` px right of its stock place.
+pub fn battery_lv(level: u8, charging: bool, dx: i16) {
+    let r = rect(435 + dx, 1, 40, 16);
     let o = Ink::icon(sf::SC_BATT, r, 0x22, 0);
-    let l = if m.battery > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + m.battery.min(5) as u32, 0) } else { Ink::none() };
-    let clip = rect(437, 3, 33, 12);
-    let lc = if m.charging { C_GREEN } else { C_WHITE };
-    paint(r, &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
+    let l = if level > 0 { Ink::icon(sf::SC_BATT, r, 0x22 + level.min(5) as u32, 0) } else { Ink::none() };
+    let clip = rect(437 + dx, 3, 33, 12);
+    let lc = if charging { C_GREEN } else { C_WHITE };
+    paint(rect(435, 1, 43, 16), &[(K_ICON, C_BAR), (K_ICON, C_BAR)], |x, y| {
         if clip.has(x, y) {
             if let Some(g) = l.at(x, y) {
                 return (lc, tag(2, g));
@@ -662,67 +932,179 @@ pub fn battery(m: &Model) {
     });
 }
 
-/// Right-panel button k (0..6) as the stock draws it (sec. 5).
-pub fn panel_button(m: &Model, k: usize) {
-    let r = B_RECT[k];
-    let pal = m.pal();
-    let mc = if m.math_on { m.math_pal() } else { C_FRAME };
-    let mut b = Buf::new();
-    m.vdiv_str(&mut b);
-    let pressed = m.pressed as usize == k + 1;
-    let (fill, radius, mask, fg) = match k {
-        0 => (pal, 8, 0x3, C_FILL),
-        1 => (if m.ch1_open { C_DIS } else { pal }, 0, 0, C_FILL),
-        2 => (pal, 8, 0xc, C_FILL),
-        3 => (mc, 8, 0x3, C_WHITE),
-        4 => (if m.math_open { C_DIS } else { mc }, 0, 0, C_WHITE),
-        5 => (mc, 8, 0xc, C_WHITE),
-        _ => (C_ORANGE, 8, 0xf, C_WHITE),
+/// The USB host symbol (SC_BATT 0x30, 11 x 18 1 bpp, tools/mkusbglyph.py)
+/// centred in the gap between the trigger badge (..413) and the battery
+/// (435..): ink x 419..429, y 1..18 (the bar is y 0..19; top on the
+/// battery's and the badges' top row). Top-centre alignment: the glyph's
+/// yoff -2 puts its top on the rect's.
+pub const USB_ICON: Rect = rect(414, 1, 21, 18);
+
+/// The link icons in that gap: the USB symbol, the Bluetooth rune (SC_BATT
+/// 0x31, 7 x 13, ink y 3..15), each centred alone; both: the rune at x
+/// 416..422, the symbol at 425..435, the battery moved 3 px right
+/// (`icons_dx`), 2 px between neighbours.
+pub fn usb_icon(m: &Model) {
+    let dx = icons_dx(m);
+    let r = rect(USB_ICON.x, USB_ICON.y, USB_ICON.w + dx, USB_ICON.h);
+    // One Ink (stack: the top bar is on the deepest draw path).
+    let u = match (m.usb, m.bt) {
+        (true, true) => Ink::new(sf::SC_BATT, rect(416, 1, 20, 18), "\u{31}\u{30}", 0, 2),
+        (true, false) => Ink::icon(sf::SC_BATT, r, 0x30, 6),
+        (false, true) => Ink::icon(sf::SC_BATT, r, 0x31, 6),
+        (false, false) => Ink::none(),
     };
-    let fill = if pressed { C_DIS } else { fill };
-    // UF-10: the CH1 V/div buttons as magnifiers (top = zoom in = smaller
-    // V/div, bottom = zoom out), drawn as shapes instead of "+" / "-".
-    let mag = match k {
-        0 => Some(true),
-        2 => Some(false),
-        _ => None,
-    };
-    let (t1, t2) = match k {
-        0 | 2 => (Ink::none(), Ink::none()),
-        3 => (Ink::new(sf::SC_F20, r, "+", 8, 0), Ink::none()),
-        5 => (Ink::new(sf::SC_F20, r, "-", 8, 0), Ink::none()),
-        1 => {
-            let (f, t) = if m.ch1_txt.is_empty() { (sf::SC_F20, "CHA") } else { (sf::SC_F16, m.ch1_txt) };
-            (Ink::new(f, rect(417, 61, 60, 24), t, 8, 0), Ink::new(sf::SC_F12, rect(417, 85, 60, 16), b.as_str(), 8, 0))
-        }
-        4 => {
+    paint(r, &[(K_ICON, C_BAR)], |x, y| match u.at(x, y) {
+        Some(g) => (C_WHITE, tag(1, g)),
+        None => (C_BAR, 0),
+    });
+}
+
+/// What a block shows: name, scale, colour and ink, on (else dimmed), its
+/// popup open (the title grey).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Look {
+    pub name: Txt,
+    /// CH1: the stock coupling / probe glyph (SC_PROBE, the V/div badge's
+    /// until 2026-11-02) when AC or the probe is not x1, else 0.
+    pub glyph: u32,
+    pub scale: Txt,
+    pub col: Color,
+    pub ink: Color,
+    pub on: bool,
+    pub open: bool,
+}
+
+/// Block `b` of model `m`.
+pub fn block_look(m: &Model, b: usize) -> Look {
+    let mut v = Buf::new();
+    m.vdiv_str(&mut v);
+    match b {
+        BLK_CH1 => Look {
+            // The Wave view: the function's coupling ("AC" of "AC mA"; the
+            // scale has the unit).
+            name: Txt::new(if m.wave && !m.ch1_txt.is_empty() { m.ch1_txt.split(' ').next().unwrap_or("CH1") } else { "CH1" }),
+            // The V/div badge's information (gone 2026-11-02): its
+            // coupling / probe glyph when AC or the probe is not x1.
+            glyph: if !m.wave && (m.ac || m.probe != 3) { m.probe_glyph() } else { 0 },
+            scale: Txt::new(v.as_str()),
+            col: m.pal(),
+            ink: m.pal_ink(),
+            on: true,
+            open: m.ch1_open,
+        },
+        BLK_DMM if m.wave => Look { name: Txt::new("MCX"), glyph: 0, scale: Txt::EMPTY, col: C_CH2, ink: C_WHITE, on: false, open: false },
+        BLK_DMM => Look { name: Txt::new("DMM"), glyph: 0, scale: m.ch2_txt, col: C_CH2, ink: C_WHITE, on: m.ch2_on, open: false },
+        BLK_GEN => Look { name: Txt::new("GEN"), glyph: 0, scale: m.gen_txt, col: C_GEN_TR, ink: C_FILL, on: m.gen_on, open: false },
+        _ => {
             // FFT: the dB/div label (FFT_DB), else the math V/div; an empty
             // math_scale shows the stock defaults.
-            const MATH: [&str; 7] = ["--", "+", "-", "*", "/", "FFT", "ABS"];
-            let t2 = if m.math_scale.n > 0 {
-                m.math_scale.as_str()
-            } else if m.math_mode == 5 {
-                FFT_DB[9]
+            let scale = if !m.math_scale.as_str().is_empty() {
+                m.math_scale
+            } else if m.math_mode == 6 {
+                Txt::new(v.as_str())
             } else {
-                b.as_str()
+                Txt::new(FFT_DB[9])
             };
-            (Ink::new(sf::SC_F20, rect(417, 191, 60, 24), MATH[m.math_mode.min(6) as usize], 8, 0), Ink::new(sf::SC_F12, rect(417, 215, 60, 16), t2, 8, 0))
+            Look { name: Txt::new(if m.math_mode == 6 { "ABS" } else { "FFT" }), glyph: 0, scale, col: m.math_pal(), ink: m.math_ink(), on: m.math_on, open: m.math_open }
         }
-        _ => (Ink::new(sf::SC_F20, r, "TRIG", 8, 0), Ink::none()),
-    };
-    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
-        if let Some(plus) = mag {
+    }
+}
+
+/// A shorter unit for a title that does not fit ("100mdB" -> "0.1dB").
+fn short_scale(t: &str) -> &str {
+    match t {
+        "10mdB" => "0.01dB",
+        "20mdB" => "0.02dB",
+        "50mdB" => "0.05dB",
+        "100mdB" => "0.1dB",
+        "200mdB" => "0.2dB",
+        "500mdB" => "0.5dB",
+        _ => t,
+    }
+}
+
+/// Panel target k (`panel_rect`): a block's title or magnifier button.
+/// Pressed (`Model::pressed`): the stock pressed grey.
+pub fn panel_part(m: &Model, k: usize) {
+    let r = panel_rect(k);
+    // A strip pass (lcd.rs "strip rendering") without its rows: no layout.
+    if !lcd::rows_hit(r.y, r.y + r.h - 1) {
+        return;
+    }
+    let l = block_look(m, k / 3);
+    let (mut fill, mut fg) = if l.on { (l.col, l.ink) } else { (blend565(l.col, C_BAR, 80), C_FRAME) };
+    if k % 3 == PART_TITLE && l.open {
+        (fill, fg) = (C_DIS, if k / 3 == BLK_CH1 { C_FILL } else { C_WHITE });
+    }
+    if m.pressed as usize == k + 1 {
+        fill = C_DIS;
+    }
+    if k % 3 != PART_TITLE {
+        let plus = k % 3 == PART_IN;
+        let mask = if plus { 0x4 } else { 0x8 };
+        paint(r, &[(K_SHAPE, C_BAR), (K_ICON, fill)], |x, y| {
             if magnifier(r, plus, x, y) {
-                return (fg, tag(4, 0));
+                return (fg, tag(2, 0));
             }
-        }
+            if in_rbox(r, 8, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        });
+        return;
+    }
+    // Title, one line, the first that fits 4 px inside the box: [the
+    // coupling / probe glyph,] name and scale in the 16 px face; the scale
+    // in the 12 px face; its shorter unit; without the name (the glyph
+    // and the scale only).
+    let (name, sc, gl) = (l.name.as_str(), l.scale.as_str(), l.glyph);
+    let room = r.w - 8;
+    let (f16, f12) = (sf::SC_F16, sf::SC_F12);
+    let wg = if gl != 0 { 18 } else { 0 };
+    let short = short_scale(sc);
+    // (name, its face, the scale's face, scale)
+    let cands: [(&str, Font, Font, &str); 7] = [
+        (name, f16, f16, sc),
+        (name, f16, f12, sc),
+        (name, f12, f12, sc),
+        (name, f16, f12, short),
+        (name, f12, f12, short),
+        ("", f16, f16, sc),
+        ("", f16, f12, short),
+    ];
+    let w = |c: &(&str, Font, Font, &str)| {
+        let wn = if c.0.is_empty() { 0 } else { sf::text_width(c.1, c.0, 0) };
+        let ws = sf::text_width(c.2, c.3, 0);
+        let parts = (wn > 0) as i16 + (wg > 0) as i16 + (ws > 0) as i16;
+        // 3 px around the glyph (the layout minimum), 4 between texts.
+        (wn, ws, wn + wg + ws + if wg > 0 { 3 } else { 4 } * (parts - 1).max(0))
+    };
+    let c = *cands.iter().find(|c| (gl != 0 || !c.0.is_empty()) && w(c).2 <= room).unwrap_or(&cands[if gl != 0 { 6 } else { 4 }]);
+    let (wn, ws, total) = w(&c);
+    let mut x = r.x + (r.w - total) / 2;
+    let t1 = if wn > 0 { Ink::new(c.1, rect(x, r.y + (c.1.0 == f12.0) as i16, wn, r.h), c.0, 8, 0) } else { Ink::none() };
+    let sp = if gl != 0 { 3 } else { 4 };
+    x += if wn > 0 { wn + sp } else { 0 };
+    let t2 = if gl != 0 { Ink::icon(sf::SC_PROBE, rect(x, r.y + (r.h - 17) / 2, wg, 17), gl, 4) } else { Ink::none() };
+    x += if gl != 0 { wg + sp } else { 0 };
+    let small = c.2.0 == f12.0;
+    let mut t3 = Ink::new(c.2, rect(x, r.y + small as i16, ws, r.h), c.3, 8, 0);
+    let mut t1 = t1;
+    if gl == 0 && wn > 0 && c.1.0 == c.2.0 {
+        // Name and scale in one face, side by side: one text (one word gap).
+        let mut b = Buf::new();
+        b.push(c.0).push(" ").push(c.3);
+        t1 = Ink::new(c.1, rect(r.x, r.y + small as i16, r.w, r.h), b.as_str(), 8, 0);
+        t3 = Ink::none();
+    }
+    paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, fill), (K_TEXT, fill), (K_ICON, fill)], |x, y| {
         if let Some(g) = t1.at(x, y) {
             return (fg, tag(2, g));
         }
         if let Some(g) = t2.at(x, y) {
+            return (fg, tag(4, g));
+        }
+        if let Some(g) = t3.at(x, y) {
             return (fg, tag(3, g));
         }
-        if mask == 0 || in_rbox(r, radius, mask, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
+        if in_rbox(r, 8, 0x3, x, y) { (fill, tag(1, 0)) } else { (C_BAR, 0) }
     });
 }
 
@@ -744,9 +1126,19 @@ fn magnifier(r: Rect, plus: bool, x: i16, y: i16) -> bool {
 
 /// Measurement cell i (0..3): ringed box with `text` in the trace colour.
 pub fn meas_cell(m: &Model, i: usize, text: &str) {
-    let r = rect(13 + 100 * i as i16, 302, 98, 17);
-    let t = Ink::new(sf::SC_F12, r, text, 8, 0);
-    let pal = m.pal();
+    let r = rect(MEAS_X + MEAS_STEP * i as i16, 302, MEAS_STEP - 2, 17);
+    // The widest texts ("Freq:444.4kHz", 98 px) do not fit the 94 px cell
+    // of the 39 px divisions: the label's first letter then ("F:444.4kHz").
+    let text = match text.find(':') {
+        Some(k) if k > 1 && sf::text_width(sf::SC_F12, text, 0) > r.w - 2 => {
+            let mut b = Buf::new();
+            b.push(&text[..1]).push(&text[k..]);
+            Txt::new(b.as_str())
+        }
+        _ => Txt::new(text),
+    };
+    let t = Ink::new(sf::SC_F12, r, text.as_str(), 8, 0);
+    let pal = m.pal_text();
     paint(r, &[(K_SHAPE, C_BAR), (K_TEXT, C_BAR)], |x, y| {
         if let Some(g) = t.at(x, y) {
             return (pal, tag(2, g));
@@ -759,20 +1151,25 @@ pub fn meas_cell(m: &Model, i: usize, text: &str) {
     });
 }
 
+/// The measurement cells: 4 from MEAS_X (the frame's column, >= 4 px from
+/// the screen edge) to the right frame, 2 px apart.
+const MEAS_X: i16 = if GX < 4 { 4 } else { GX };
+const MEAS_STEP: i16 = (GR - MEAS_X) / 4;
+
 /// Every top-bar element.
 pub fn top_bar(m: &Model) {
     status_badge(m);
     tb_badge(m);
     src_badge(m);
     record_bar(m);
-    vdiv_badge(m);
     trig_badge(m);
     battery(m);
+    usb_icon(m);
 }
 
 pub fn panel(m: &Model) {
-    for k in 0..7 {
-        panel_button(m, k);
+    for k in 0..NPANEL {
+        panel_part(m, k);
     }
 }
 
@@ -780,9 +1177,11 @@ pub fn panel(m: &Model) {
 /// combined view keeps y 20..`top` for the meter strip (drawn by ui.rs).
 pub fn chrome(m: &Model) {
     lcd::fill_rect(0, 0, 480, 20, C_BAR);
-    lcd::fill_rect(414, 20, 66, 300, C_BAR);
-    lcd::fill_rect(0, 301, 414, 19, C_BAR);
-    lcd::fill_rect(0, 20, 13, 281, C_BAR);
+    lcd::fill_rect(PANEL_X as u16, 20, (480 - PANEL_X) as u16, 300, C_BAR);
+    lcd::fill_rect(0, 301, PANEL_X as u16, 19, C_BAR);
+    if GX > 0 {
+        lcd::fill_rect(0, 20, GX as u16, 281, C_BAR);
+    }
     frame(m);
 }
 
@@ -790,10 +1189,10 @@ pub fn chrome(m: &Model) {
 fn frame(m: &Model) {
     let top = m.top() as u16;
     let h = m.frame_h() as u16;
-    lcd::fill_rect(13, top, 401, 1, C_FRAME);
-    lcd::fill_rect(13, top + h - 1, 401, 1, C_FRAME);
-    lcd::fill_rect(13, top, 1, h, C_FRAME);
-    lcd::fill_rect(413, top, 1, h, C_FRAME);
+    lcd::fill_rect(GX as u16, top, GW as u16 + 1, 1, C_FRAME);
+    lcd::fill_rect(GX as u16, top + h - 1, GW as u16 + 1, 1, C_FRAME);
+    lcd::fill_rect(GX as u16, top, 1, h, C_FRAME);
+    lcd::fill_rect(GR as u16, top, 1, h, C_FRAME);
 }
 
 // ------------------------------------------------------------------ markers
@@ -894,7 +1293,7 @@ pub const NSTRIP: usize = 6;
 const TRIG_LEVEL: u8 = 1;
 /// x of the trigger-level marker: inside the graph at its right edge (x
 /// 401..412, frame at 413).
-const RIGHT_X: i16 = 401;
+const RIGHT_X: i16 = GR - 12;
 
 /// Level markers in creation order with their level-item ids (CH1 zero 0,
 /// trigger level 1, math offset 2 while math is on, Y cursors 3 / 4) (sec.
@@ -906,22 +1305,31 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
     let top = m.top();
     let h = m.frame_h();
     let pal = m.pal();
+    // Right edge (and the left one, `LEFT_IN`): inside the frame (rows
+    // 1..h-2), below the top markers' row (y top+1..top+12) where one of
+    // them is at that edge.
+    let mut g = [Mark::NONE; NGRAPH];
+    graph_marks_top(m, &mut g);
+    let top_right = g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13);
+    let top_left = g.iter().any(|mk| mk.some() && mk.x < 13 && mk.y < top + 13);
+    let y_min_l = if top_left { top + 13 } else { top + 1 };
     let level = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
         let fy = line_fy(h, row as i32);
-        if fy < 0 {
+        if LEFT_IN {
+            if fy < 0 {
+                Mark::new(1, y_min_l, fam, UP, sel, col)
+            } else if fy > h - 1 {
+                Mark::new(1, top + h - 13, fam, DOWN, sel, col)
+            } else {
+                Mark::new(1, (top + fy - 6).clamp(y_min_l, top + h - 13), fam, RIGHT, sel, col)
+            }
+        } else if fy < 0 {
             Mark::new(1, top, fam, UP, sel, col)
         } else if fy > h - 1 {
             Mark::new(1, top + h - 13, fam, DOWN, sel, col)
         } else {
             Mark::new(1, top + fy - 6, fam, RIGHT, sel, col)
         }
-    };
-    // Right edge: inside the frame (rows 1..h-2), below the top markers'
-    // row (y top+1..top+12) where one of them is at the right edge.
-    let top_right = {
-        let mut g = [Mark::NONE; NGRAPH];
-        graph_marks_top(m, &mut g);
-        g.iter().any(|mk| mk.some() && mk.x + 12 > RIGHT_X && mk.y < top + 13)
     };
     let y_min = if top_right { top + 13 } else { top + 1 };
     let right = |row: i16, fam: u32, sel: bool, col: Color| -> Mark {
@@ -962,8 +1370,18 @@ pub fn strip_items(m: &Model, out: &mut [(u8, Mark); NSTRIP]) -> usize {
 }
 
 /// Left-strip markers in draw order (creation order, the selected level
-/// item last; the trigger level is a graph marker, `graph_marks`).
+/// item last; the trigger level is a graph marker, `graph_marks`). None
+/// with `LEFT_IN` (they are graph markers then).
 pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
+    if LEFT_IN {
+        *out = [Mark::NONE; NSTRIP];
+        return 0;
+    }
+    left_marks(m, out)
+}
+
+/// The left level markers in draw order.
+fn left_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let n = strip_items(m, &mut items);
     let mut k = 0;
@@ -985,20 +1403,28 @@ pub fn strip_marks(m: &Model, out: &mut [Mark; NSTRIP]) -> usize {
 fn top_mark(top: i16, col: i16, fam: u32, sel: bool, colour: Color) -> Mark {
     let y = top + 1;
     if col < 12 {
-        Mark::new(14 + col.max(0), y, fam, LEFT, sel, colour)
-    } else if col + 12 <= 399 {
-        Mark::new(14 + col - 6, y, fam, DOWN, sel, colour)
+        Mark::new(GX + 1 + col.max(0), y, fam, LEFT, sel, colour)
+    } else if col + 12 <= NCOL as i16 {
+        Mark::new(GX + 1 + col - 6, y, fam, DOWN, sel, colour)
     } else {
-        Mark::new(14 + if col > 399 { 387 } else { col - 13 }, y, fam, RIGHT, sel, colour)
+        Mark::new(GX + 1 + if col > NCOL as i16 { NCOL as i16 - 12 } else { col - 13 }, y, fam, RIGHT, sel, colour)
     }
 }
 
 /// Graph marker slots: T, X cursor 1, X cursor 2, FFT centre, FFT peak,
 /// trigger level (right edge).
-pub const NGRAPH: usize = 6;
+/// (+ 5 slots: the left level markers with `LEFT_IN`.)
+pub const NGRAPH: usize = 6 + if LEFT_IN { NSTRIP - 1 } else { 0 };
 /// Time-item id of each graph marker slot (255: not a time item; the
-/// trigger level's zone is a level zone, from `strip_items`).
-const GRAPH_IDS: [u8; NGRAPH] = [0, 2, 3, 1, 255, 255];
+/// level markers' zones are level zones, from `strip_items`).
+const GRAPH_IDS: [u8; NGRAPH] = {
+    let mut t = [255u8; NGRAPH];
+    t[0] = 0;
+    t[1] = 2;
+    t[2] = 3;
+    t[3] = 1;
+    t
+};
 
 /// Graph markers in draw order: T, X cursor 1, X cursor 2, the FFT centre
 /// 'M' (stock, fixed at column 200, FFT mode), the FFT peak (opendm40: a white
@@ -1010,6 +1436,12 @@ pub fn graph_marks(m: &Model, out: &mut [Mark; NGRAPH]) {
     let n = strip_items(m, &mut items);
     if let Some(&(_, mk)) = items[..n].iter().find(|i| i.0 == TRIG_LEVEL) {
         out[5] = mk;
+    }
+    if LEFT_IN {
+        // The left level markers inside the graph, in their draw order.
+        let mut l = [Mark::NONE; NSTRIP];
+        let k = left_marks(m, &mut l);
+        out[6..6 + k].copy_from_slice(&l[..k]);
     }
 }
 
@@ -1023,23 +1455,22 @@ fn graph_marks_top(m: &Model, out: &mut [Mark; NGRAPH]) {
         out[2] = top_mark(top, xc[1], FAM_2, m.sel_h == 3, C_WHITE);
     }
     if m.math_on && m.math_mode == 5 {
-        out[3] = top_mark(top, 200, FAM_M, m.sel_h == 1, m.math_pal());
+        out[3] = top_mark(top, GCX, FAM_M, m.sel_h == 1, m.math_pal());
         if let Some((col, row)) = m.fft.and_then(|f| f.peak_at) {
             // Tip (glyph row 11) one row above the peak's frame row; kept
             // below the top marker row.
             let fy = trace_fy(m.frame_h(), row as i32);
-            if (0..399).contains(&col) && fy >= 25 {
-                out[4] = Mark::new(14 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
+            if (0..NCOL as i16).contains(&col) && fy >= 25 {
+                out[4] = Mark::new(GX + 1 + col - 6, top + fy - 12, FAM_M, DOWN, true, C_WHITE);
             }
         }
     }
 }
 
-/// A touch zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
-/// by 10 px, opendm40: by `GROW`) or of a line; `level`: level group (CH1 0,
-/// trigger level 1, Y cursors 3 / 4), else time group (trigger position 0,
-/// X cursors 2 / 3); `o`: the object itself (the glyph, the 1 px line),
-/// for the distance in `pick_near`.
+/// A grab zone of a marker (sec. 10.2; stock: the 12x12 glyph rect grown
+/// by 10 px, opendm40: `grab_rect`); `level`: level group (CH1 0, trigger
+/// level 1, Y cursors 3 / 4), else time group (trigger position 0, X
+/// cursors 2 / 3); `o`: the glyph, for the distance in `pick_near`.
 #[derive(Clone, Copy, PartialEq)]
 pub struct Zone {
     pub level: bool,
@@ -1050,10 +1481,6 @@ pub struct Zone {
 
 impl Zone {
     pub const NONE: Zone = Zone { level: false, id: 0, r: rect(0, 0, 0, 0), o: rect(0, 0, 0, 0) };
-    /// A line zone (cursor line), not a marker glyph.
-    pub fn line(&self) -> bool {
-        self.o.w > 12 || self.o.h > 12
-    }
     /// Distance (px, Chebyshev) from (x, y) to the zone's object; None
     /// outside the zone.
     pub fn dist(&self, x: i16, y: i16) -> Option<i16> {
@@ -1068,97 +1495,60 @@ impl Zone {
     }
 }
 
-/// Marker zones: the glyph grown by this much (owner 2026-10-24: a drag
-/// that starts near a marker grabs it; the stock 10 px).
-pub const GROW: i16 = 12;
-/// Line zones: +-this many px around a cursor line.
-pub const LINE_GROW: i16 = 12;
-/// `pick_near`: a selected item this much farther than the nearest still
-/// wins (the marker last selected is preferred among close ones).
-const NEAR_TIE: i16 = 4;
+/// Grab zones (owner 2026-11-01, DHO800-style drag: a drag that starts on a
+/// marker moves that marker, a drag elsewhere the trigger position or the
+/// selected level item): GRAB_H px along the marker's edge, centred on the
+/// glyph, and from the screen edge GRAB_IN px past the glyph into the
+/// graph. Overlaps go to the nearest glyph (`pick_near`).
+pub const GRAB_H: i16 = 48;
+pub const GRAB_IN: i16 = 30;
+
+/// Grab-zone edges (`grab_rect`).
+pub const EDGE_LEFT: u8 = 0;
+pub const EDGE_RIGHT: u8 = 1;
+pub const EDGE_TOP: u8 = 2;
+
+/// Grab zone of a 12 x 12 marker glyph `g` on `edge`: a left-strip marker
+/// from x 0, the right-edge trigger level to the frame (x 413), a top
+/// marker from 5 rows above it (INNER's top; the top-bar badges win there).
+/// By edge, not by x: a top marker at the last columns sits at x 401 too.
+pub fn grab_rect(g: Rect, edge: u8) -> Rect {
+    let along = (GRAB_H - 12) / 2;
+    match edge {
+        EDGE_LEFT => rect(0, g.y - along, g.x + 12 + GRAB_IN, GRAB_H),
+        EDGE_RIGHT => rect(g.x - GRAB_IN, g.y - along, GR + 1 - (g.x - GRAB_IN), GRAB_H),
+        _ => rect(g.x - along, g.y - 5, GRAB_H, 5 + 12 + GRAB_IN),
+    }
+}
 
 /// Most zones (strip markers + selectable graph markers).
 pub const NZONE: usize = NSTRIP + NGRAPH;
 
-/// The marker zones of the page in creation order (level group first).
+/// The marker grab zones of the page in creation order (level group
+/// first). Cursor lines and guide lines are not zones (markers only).
 pub fn zones(m: &Model, out: &mut [Zone; NZONE]) -> usize {
-    let grow = |r: Rect| rect(r.x - GROW, r.y - GROW, r.w + 2 * GROW, r.h + 2 * GROW);
     let mut n = 0;
     let mut items = [(0u8, Mark::NONE); NSTRIP];
     let k = strip_items(m, &mut items);
     for &(id, mk) in &items[..k] {
-        out[n] = Zone { level: true, id, r: grow(mk.rect()), o: mk.rect() };
+        let edge = if id == TRIG_LEVEL { EDGE_RIGHT } else { EDGE_LEFT };
+        out[n] = Zone { level: true, id, r: grab_rect(mk.rect(), edge), o: mk.rect() };
         n += 1;
     }
     let mut g = [Mark::NONE; NGRAPH];
     graph_marks(m, &mut g);
     for (k, mk) in g.iter().enumerate() {
         if mk.some() && GRAPH_IDS[k] != 255 {
-            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grow(mk.rect()), o: mk.rect() };
+            out[n] = Zone { level: false, id: GRAPH_IDS[k], r: grab_rect(mk.rect(), EDGE_TOP), o: mk.rect() };
             n += 1;
         }
     }
     n
 }
 
-/// opendm40 addition (port plan sec. 5.2): the cursor lines themselves are
-/// zones too, +-12 px around each line over the graph (the stock zones are
-/// only around the small markers at the graph edge). After `zones`.
-pub fn line_zones(m: &Model, out: &mut [Zone; 4]) -> usize {
-    let (top, h) = (m.top(), m.frame_h());
-    let mut n = 0;
-    if let Some(xc) = m.xcur {
-        for (k, c) in xc.iter().enumerate() {
-            out[n] = vline_zone(false, 2 + k as u8, *c, top, h);
-            n += 1;
-        }
-    }
-    if let Some(yc) = m.ycur {
-        for (k, r) in yc.iter().enumerate() {
-            out[n] = hline_zone(3 + k as u8, top + trace_fy(h, *r as i32));
-            n += 1;
-        }
-    }
-    n
-}
-
-/// Zone of a vertical line at graph column `c` (x 14 + c), the frame height.
-fn vline_zone(level: bool, id: u8, c: i16, top: i16, h: i16) -> Zone {
-    Zone { level, id, r: rect(14 + c - LINE_GROW, top, 2 * LINE_GROW + 1, h), o: rect(14 + c, top, 1, h) }
-}
-
-/// Zone of a horizontal level line at screen row `y`, the graph width.
-fn hline_zone(id: u8, y: i16) -> Zone {
-    Zone { level: true, id, r: rect(13, y - LINE_GROW, 401, 2 * LINE_GROW + 1), o: rect(13, y, 401, 1) }
-}
-
-/// All press zones: markers (`zones`) and cursor lines (owner 2026-10-25:
-/// the guide lines are not zones; a drag on the trace near a shown guide
-/// line grabbed its item instead of panning).
-pub const NALL: usize = NZONE + 4;
-
-pub fn all_zones(m: &Model, out: &mut [Zone; NALL]) -> usize {
-    let mut z = [Zone::NONE; NZONE];
-    let mut n = 0;
-    let k = zones(m, &mut z);
-    for q in z[..k].iter() {
-        out[n] = *q;
-        n += 1;
-    }
-    let mut l = [Zone::NONE; 4];
-    let k = line_zones(m, &mut l);
-    for q in l[..k].iter() {
-        out[n] = *q;
-        n += 1;
-    }
-    n
-}
-
-/// opendm40 press pick (owner 2026-10-24: "a drag that starts on or near a
-/// marker grabs it"): the zone whose object is nearest to (x, y); the
-/// selected item (of the last used group first, then of the other group)
-/// wins when it is at most NEAR_TIE px farther; equal distances keep the
-/// zone order (markers before lines). Repeated taps still cycle through
+/// opendm40 press pick: the zone whose glyph is nearest to (x, y); on a
+/// tie the selected item (of the last used group first, then of the other
+/// group), else the zone order. Repeated taps still cycle through
 /// overlapping zones: `pick_zone` on a still release (scope_page.rs).
 pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let mut best: Option<(usize, i16)> = None;
@@ -1173,7 +1563,7 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
     for (level, id) in [(!last_h, if last_h { sel_h } else { sel_v }), (last_h, if last_h { sel_v } else { sel_h })] {
         let pref = z.iter().enumerate().filter(|(_, q)| q.level == level && q.id == id).filter_map(|(i, q)| q.dist(x, y).map(|d| (i, d))).min_by_key(|&(_, d)| d);
         if let Some((i, d)) = pref {
-            if d <= bd + NEAR_TIE {
+            if d <= bd {
                 return Some(i);
             }
         }
@@ -1181,71 +1571,49 @@ pub fn pick_near(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
     Some(bi)
 }
 
-/// Drag axis decision: travel (px) that decides it (gesture.rs SLOP).
-const LOCK_SLOP: i32 = 15;
+/// Off a marker: travel (px, Chebyshev) from the press that picks the drag
+/// axis (owner 2026-11-01: "the first ~8 px").
+pub const AXIS_PX: i32 = 8;
 
-/// The axis of a scope drag from its travel since the press (|dx|, |dy|):
-/// Some(true) horizontal, Some(false) vertical, None undecided. Past
-/// LOCK_SLOP / 2 px along an axis that leads 3:2, or past 2 * LOCK_SLOP
-/// along the larger one.
+/// The axis of a drag off the markers from its travel since the press
+/// (|dx|, |dy|): Some(true) sideways, Some(false) up / down, None not yet
+/// (below AXIS_PX); the larger component wins, a tie is sideways.
 pub fn drag_axis(ax: i32, ay: i32) -> Option<bool> {
-    if 2 * ax >= 3 * ay && ax > LOCK_SLOP / 2 {
-        Some(true)
-    } else if 2 * ay >= 3 * ax && ay > LOCK_SLOP / 2 {
-        Some(false)
-    } else if ax.max(ay) > 2 * LOCK_SLOP {
-        Some(ax >= ay)
-    } else {
-        None
-    }
+    if ax.max(ay) < AXIS_PX { None } else { Some(ax >= ay) }
 }
 
-/// What a move report (dx, dy) applies once the drag's axis is decided
-/// (`horizontal`): only that axis (owner 2026-10-25: one item, one axis
-/// per gesture).
+/// What a move report (dx, dy) applies once the drag's axis is known
+/// (`horizontal`): only that axis (one item, one axis per gesture).
 pub fn drag_delta(horizontal: bool, dx: i32, dy: i32) -> (i32, i32) {
     if horizontal { (dx, 0) } else { (0, dy) }
 }
 
-/// The item a drag moves (owner 2026-10-25: always the marker nearest to
-/// where the finger went down, never the selection): `horizontal`, the
-/// time marker whose column is nearest to x0 (trigger position T, the X
-/// cursors when shown, the FFT centre in FFT mode), else the level marker
-/// whose drawn row is nearest to y0 (`strip_items`: CH1, trigger level,
-/// math offset when on, runt level when shown, Y cursors when shown; an
-/// off-screen level at its edge marker). No distance limit; a tie goes to
-/// the one drawn later (on top). (level group, item id).
-#[inline(never)] // .cold (link-native.x): once per drag
-pub fn drag_target(m: &Model, horizontal: bool, x0: i16, y0: i16) -> Option<(bool, u8)> {
-    let mut best: Option<(u8, i16)> = None;
-    let mut take = |id: u8, d: i16| {
-        if best.map_or(true, |(_, bd)| d <= bd) {
-            best = Some((id, d));
-        }
-    };
+/// The item a drag off the markers moves (owner 2026-11-01, DHO800-style;
+/// never the marker nearest to the finger): sideways the trigger position
+/// (time item 0; a stopped record: its pan), up / down the selected level
+/// item `sel_v` (CH1 0 by default) if it is shown, else CH1. (level group,
+/// item id).
+pub fn drag_item(m: &Model, horizontal: bool, sel_v: u8) -> (bool, u8) {
     if horizontal {
-        take(0, (14 + m.trig_px - x0).abs());
-        if let Some(xc) = m.xcur {
-            take(2, (14 + xc[0] - x0).abs());
-            take(3, (14 + xc[1] - x0).abs());
-        }
-        if m.math_on && m.math_mode == 5 {
-            take(1, (14 + 200 - x0).abs());
-        }
-    } else {
-        let mut items = [(0u8, Mark::NONE); NSTRIP];
-        let n = strip_items(m, &mut items);
-        for &(id, mk) in &items[..n] {
-            take(id, (mk.y + 6 - y0).abs());
-        }
+        return (false, 0);
     }
-    best.map(|(id, _)| (!horizontal, id))
+    let mut items = [(0u8, Mark::NONE); NSTRIP];
+    let n = strip_items(m, &mut items);
+    (true, if items[..n].iter().any(|&(id, _)| id == sel_v) { sel_v } else { 0 })
 }
 
-/// The zone a press at (x, y) picks (`pick_near` over `all_zones`).
+/// The selection (sel_v, sel_h, last_h) after a scope touch: a press on a
+/// marker selects it (`now`), but a drag from its zone (`zone_drag`) puts
+/// back the selection from before the press (`prev`; owner 2026-11-02: the
+/// empty graph's up / down keeps moving CH1 or what a tap selected).
+pub fn sel_after(zone_drag: bool, now: (u8, u8, bool), prev: (u8, u8, bool)) -> (u8, u8, bool) {
+    if zone_drag { prev } else { now }
+}
+
+/// The zone a press at (x, y) picks (`pick_near` over `zones`).
 pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<Zone> {
-    let mut z = [Zone::NONE; NALL];
-    let n = all_zones(m, &mut z);
+    let mut z = [Zone::NONE; NZONE];
+    let n = zones(m, &mut z);
     pick_near(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| z[k])
 }
 
@@ -1253,8 +1621,8 @@ pub fn graph_pick(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16)
 /// (x, y) in the stock search order (`pick_zone`: repeated taps cycle
 /// through overlapping markers), or None.
 pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<(bool, u8)> {
-    let mut z = [Zone::NONE; NALL];
-    let n = all_zones(m, &mut z);
+    let mut z = [Zone::NONE; NZONE];
+    let n = zones(m, &mut z);
     pick_zone(&z[..n], sel_v, sel_h, last_h, x, y).map(|k| (z[k].level, z[k].id))
 }
 
@@ -1265,11 +1633,11 @@ pub fn graph_cycle(m: &Model, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16
 /// other group from its first zone. Index into `z`.
 pub fn pick_zone(z: &[Zone], sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Option<usize> {
     let same_level = !last_h;
-    let of = |level: bool| -> ([usize; NALL], usize) {
-        let mut l = [0usize; NALL];
+    let of = |level: bool| -> ([usize; NZONE], usize) {
+        let mut l = [0usize; NZONE];
         let mut k = 0;
         for (i, q) in z.iter().enumerate() {
-            if q.level == level && k < NALL {
+            if q.level == level && k < NZONE {
                 l[k] = i;
                 k += 1;
             }
@@ -1384,10 +1752,10 @@ impl Deco {
         // 4.4: guide lines of the selected items, then the cursor lines.
         if m.guide {
             match m.sel_h {
-                0 if (1..=399).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
+                0 if (1..=NCOL as i16).contains(&m.trig_px) => d.v[0] = Some(VLine { fx: m.trig_px, col: ctr }),
                 // FFT centre (stock: a line at x 0 that is never positioned;
                 // opendm40: the centre column the 'M' marker stands on).
-                1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: 200, col: d.math }),
+                1 if m.math_on && m.math_mode == 5 => d.v[0] = Some(VLine { fx: GCX, col: d.math }),
                 _ => {}
             }
             match m.sel_v {
@@ -1421,12 +1789,17 @@ pub const EMPTY: (i16, i16) = (i16::MAX, i16::MIN);
 pub struct Graph {
     /// Trace / persistence / math trace frame rows per graph column (EMPTY
     /// = none).
-    pub tr: [(i16, i16); 399],
-    pub ps: [(i16, i16); 399],
-    pub ma: [(i16, i16); 399],
-    d_tr: [(i16, i16); 399],
-    d_ps: [(i16, i16); 399],
-    d_ma: [(i16, i16); 399],
+    pub tr: [(i16, i16); NCOL],
+    pub ps: [(i16, i16); NCOL],
+    pub ma: [(i16, i16); NCOL],
+    /// The GEN trace (C_GEN) and the CH2 trace (C_CH2), under CH1.
+    pub gn: [(i16, i16); NCOL],
+    pub c2: [(i16, i16); NCOL],
+    d_tr: [(i16, i16); NCOL],
+    d_ps: [(i16, i16); NCOL],
+    d_ma: [(i16, i16); NCOL],
+    d_gn: [(i16, i16); NCOL],
+    d_c2: [(i16, i16); NCOL],
     deco: Deco,
     d_deco: Deco,
     valid: bool,
@@ -1476,12 +1849,16 @@ fn cycles() -> u32 {
 // stack margin need more (pre-flash review 7389e8a); `init` sets it up.
 #[cfg_attr(target_os = "none", link_section = ".dmabuf")]
 static mut GRAPH: Graph = Graph {
-    tr: [EMPTY; 399],
-    ps: [EMPTY; 399],
-    ma: [EMPTY; 399],
-    d_tr: [EMPTY; 399],
-    d_ps: [EMPTY; 399],
-    d_ma: [EMPTY; 399],
+    tr: [EMPTY; NCOL],
+    ps: [EMPTY; NCOL],
+    ma: [EMPTY; NCOL],
+    gn: [EMPTY; NCOL],
+    c2: [EMPTY; NCOL],
+    d_tr: [EMPTY; NCOL],
+    d_ps: [EMPTY; NCOL],
+    d_ma: [EMPTY; NCOL],
+    d_gn: [EMPTY; NCOL],
+    d_c2: [EMPTY; NCOL],
     deco: Deco::NONE,
     d_deco: Deco::NONE,
     valid: false,
@@ -1492,8 +1869,10 @@ static mut GRAPH: Graph = Graph {
 };
 
 /// Graph hole slots (`Graph::set_hole_at`): the pinch bubble, the timebase
-/// tabs, the FFT label and boxes, the cursor tab.
-const NH: usize = 9;
+/// tabs, the FFT label and boxes, the cursor tab, an open popup's box, the
+/// rows `regraph_rows` leaves alone, the protocol decoder's band, the
+/// CH2 (DMM) label.
+const NH: usize = 12;
 pub const H_BUBBLE: usize = 0;
 pub const H_TAB_L: usize = 1;
 pub const H_TAB_R: usize = 2;
@@ -1502,19 +1881,28 @@ pub const H_FFT_Y: usize = 4;
 pub const H_FFT_X: usize = 5;
 pub const H_FFT_PK: usize = 6;
 pub const H_CUR: usize = 7;
-pub const H_SPARE: usize = 8;
+pub const H_POPUP: usize = 8;
+const H_REST: usize = 9;
+/// The protocol decoder's band (ui_decode.rs).
+pub const H_DEC: usize = 10;
+/// The DMM CH2's label.
+pub const H_SPARE: usize = 11;
 
 /// Set the graph state up in place (its static is not loaded on the
 /// device). Call once before any other scope_ui function.
 pub fn init() {
     let g = unsafe { &mut *core::ptr::addr_of_mut!(GRAPH) };
-    for i in 0..399 {
+    for i in 0..NCOL {
         g.tr[i] = EMPTY;
         g.ps[i] = EMPTY;
         g.ma[i] = EMPTY;
         g.d_tr[i] = EMPTY;
         g.d_ps[i] = EMPTY;
         g.d_ma[i] = EMPTY;
+        g.gn[i] = EMPTY;
+        g.c2[i] = EMPTY;
+        g.d_gn[i] = EMPTY;
+        g.d_c2[i] = EMPTY;
     }
     g.deco = Deco::NONE;
     g.d_deco = Deco::NONE;
@@ -1526,8 +1914,8 @@ pub fn init() {
     init_shown();
 }
 
-/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: its code stays in
-/// region B with this module instead of growing `new_app` in region C.
+/// `init`'s SHOWN / STRIP_SHOWN part. Not inlined: start-up only, in
+/// region C (link-native.x) apart from `new_app`.
 #[inline(never)]
 fn init_shown() {
     unsafe {
@@ -1601,18 +1989,44 @@ fn row_class(fy: i16, cy: i16, dh: i16) -> u8 {
 
 /// The `grid_on` classes of column `fx` (rows with `ROWS[fy] & mask != 0`
 /// are grid; R_ALL: all of them).
-fn col_classes(fx: i16) -> u8 {
-    if fx == 200 {
+/// `col_classes` of fx = 0..=399 (flash): the row loop of a full graph in
+/// strips looks them up per pixel.
+static COLC: [u8; GW as usize] = {
+    let mut t = [0u8; GW as usize];
+    let mut fx = 0;
+    while fx < GW as usize {
+        t[fx] = col_classes(fx as i16);
+        fx += 1;
+    }
+    t
+};
+
+const fn col_classes(fx: i16) -> u8 {
+    if fx == GCX {
         return R_ALL;
     }
     let mut c = R_CY;
-    if fx % 40 == 0 || (fx - 200).abs() <= 2 {
+    if fx % DIV_W == 0 || (fx - GCX).abs() <= 2 {
         c |= R_7;
     }
-    if fx % 8 == 0 {
+    if is_tick(fx) {
         c |= R_DH | R_NEAR;
     }
     c
+}
+
+/// A tick column: 5 per division, at the nearest columns to the fifths
+/// (every 8th column at 40 px).
+const fn is_tick(fx: i16) -> bool {
+    let o = fx % DIV_W;
+    let mut k = 0;
+    while k < 5 {
+        if o == (2 * k * DIV_W + 5) / 10 {
+            return true;
+        }
+        k += 1;
+    }
+    false
 }
 
 /// Grid rule of the frame (sec. 4.1) at frame (fx, fy), 1 <= fx <= 399,
@@ -1665,6 +2079,30 @@ impl Spans {
     }
 }
 
+/// Graph row `r` (row classes `rc`) over a run of columns without markers,
+/// line or vertical line, into the strip's pixels `sp` (`Graph::flush` in
+/// a strip pass): the column loop's inline rule.
+#[inline(never)]
+fn band_run(sp: &mut [Color], tr: &[(i16, i16)], ps: &[(i16, i16)], ma: &[(i16, i16)], cg: (&[(i16, i16)], &[(i16, i16)]), cols: &[u8], r: i16, rc: u8, d: &Deco) {
+    for (p, (((((tr, ps), ma), c2), gn), &cc)) in sp.iter_mut().zip(tr.iter().zip(ps).zip(ma).zip(cg.0).zip(cg.1).zip(cols)) {
+        *p = if r >= ma.0 && r <= ma.1 {
+            d.math
+        } else if r >= tr.0 && r <= tr.1 {
+            d.trace
+        } else if r >= c2.0 && r <= c2.1 {
+            C_CH2
+        } else if r >= gn.0 && r <= gn.1 {
+            C_GEN_TR
+        } else if r >= ps.0 && r <= ps.1 {
+            d.half
+        } else if (rc | R_ALL) & cc != 0 {
+            d.grid
+        } else {
+            C_FILL
+        };
+    }
+}
+
 impl Graph {
     /// Forget what is on the panel: the next flush repaints the whole graph.
     pub fn invalidate(&mut self) {
@@ -1684,9 +2122,11 @@ impl Graph {
 
     /// Clear the trace and persistence (an empty graph).
     pub fn clear(&mut self) {
-        self.tr = [EMPTY; 399];
-        self.ps = [EMPTY; 399];
-        self.ma = [EMPTY; 399];
+        self.tr = [EMPTY; NCOL];
+        self.ps = [EMPTY; NCOL];
+        self.ma = [EMPTY; NCOL];
+        self.gn = [EMPTY; NCOL];
+        self.c2 = [EMPTY; NCOL];
     }
 
     /// Bring the panel up to date with `tr` / `ps` / `ma` and the model's
@@ -1696,7 +2136,7 @@ impl Graph {
         let d = self.deco;
         let o = self.d_deco;
         // Nothing changed (most main-loop passes): no per-column work.
-        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma {
+        if self.valid && d == o && self.holes == self.d_holes && self.tr == self.d_tr && self.ps == self.d_ps && self.ma == self.d_ma && self.gn == self.d_gn && self.c2 == self.d_c2 {
             self.px = 0;
             return;
         }
@@ -1732,8 +2172,9 @@ impl Graph {
         // Colour of graph pixel (fx, fy): markers over the column (`mcol`,
         // the topmost last), math, trace, persistence, the vertical line of
         // the column (`vcol`), horizontal lines, grid (`cm`: col_classes).
-        let pix = |fx: i16, fy: i16, (tr, ps, ma): ((i16, i16), (i16, i16), (i16, i16)), vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
-            let (sx, sy) = (13 + fx, d.top + fy);
+        type Rows = ((i16, i16), (i16, i16), (i16, i16), (i16, i16), (i16, i16));
+        let pix = |fx: i16, fy: i16, (tr, ps, ma, c2, gn): Rows, vcol: Option<Color>, mcol: &[usize], cm: u8| -> Color {
+            let (sx, sy) = (GX + fx, d.top + fy);
             for &mi in mcol.iter().rev() {
                 if let Some(c) = minks[mi].at(sx, sy, C_FILL) {
                     return c;
@@ -1744,6 +2185,12 @@ impl Graph {
             }
             if fy >= tr.0 && fy <= tr.1 {
                 return d.trace;
+            }
+            if fy >= c2.0 && fy <= c2.1 {
+                return C_CH2;
+            }
+            if fy >= gn.0 && fy <= gn.1 {
+                return C_GEN_TR;
             }
             if fy >= ps.0 && fy <= ps.1 {
                 return d.half;
@@ -1767,25 +2214,33 @@ impl Graph {
         // Trace-only: per-column bookkeeping, from the resume column, under
         // the device's time budget (`FLUSH_BUDGET`).
         let trace_only = !full && d == o && self.holes == self.d_holes;
-        let start = if trace_only { self.next as usize % 399 } else { 0 };
+        let start = if trace_only { self.next as usize % NCOL } else { 0 };
         #[cfg(target_os = "none")]
         let t0 = cycles();
         #[cfg(target_os = "none")]
         let budget = if FLUSH_SHORT.load(core::sync::atomic::Ordering::Relaxed) { FLUSH_BUDGET_SHORT } else { FLUSH_BUDGET };
-        for j in 0..399usize {
-            let i = (start + j) % 399;
+        // A full graph in a strip pass (lcd.rs "strip rendering"): row by
+        // row, the strip's rows only (the row loop below), instead of 399
+        // column windows per strip.
+        let band = if full && lcd::in_strip() {
+            Some(lcd::clip_rows(d.top + 1, d.top + h - 2).map_or((1, 0), |(a, b)| (a - d.top, b - d.top)))
+        } else {
+            None
+        };
+        for j in 0..if band.is_some() { 0 } else { NCOL } {
+            let i = (start + j) % NCOL;
             #[cfg(target_os = "none")]
             if trace_only && self.px > 0 && cycles().wrapping_sub(t0) > budget {
                 self.next = i as u16;
                 return;
             }
             let fx = i as i16 + 1;
-            let sx = 13 + fx;
+            let sx = GX + fx;
             let mut sp = Spans { s: [(0, 0); 12], n: 0 };
             if full || vl(&d, fx) != vl(&o, fx) {
                 sp.add((1, h - 2));
             } else {
-                for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i])] {
+                for (a, b) in [(self.tr[i], self.d_tr[i]), (self.ps[i], self.d_ps[i]), (self.ma[i], self.d_ma[i]), (self.gn[i], self.d_gn[i]), (self.c2[i], self.d_c2[i])] {
                     if a != b {
                         sp.add(a);
                         sp.add(b);
@@ -1811,11 +2266,13 @@ impl Graph {
                 self.d_tr[i] = self.tr[i];
                 self.d_ps[i] = self.ps[i];
                 self.d_ma[i] = self.ma[i];
+                self.d_gn[i] = self.gn[i];
+                self.d_c2[i] = self.c2[i];
             }
             if sp.n == 0 {
                 continue;
             }
-            let (tr, ps, ma) = (self.tr[i], self.ps[i], self.ma[i]);
+            let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
             let vcol = vl(&d, fx);
             // Markers over this column.
             let mut mcol = [0usize; NGRAPH];
@@ -1867,15 +2324,21 @@ impl Graph {
             let vrow = vcol.map_or(0, |_| h - 4);
             for &(a, b) in &cut[..nc] {
                 self.px += (b - a + 1) as u32;
+                // Never in a strip pass (a full graph there goes by rows,
+                // below; this loop has no columns then).
                 lcd::set_window(sx as u16, (d.top + a) as u16, sx as u16, (d.top + b) as u16);
                 for fy in a..=b {
                     let rc = rows[fy as usize];
-                    lcd::data(if nm > 0 || rc & R_LINE != 0 {
-                        pix(fx, fy, (tr, ps, ma), vcol, &mcol[..nm], cm)
+                    lcd::data_panel(if nm > 0 || rc & R_LINE != 0 {
+                        pix(fx, fy, (tr, ps, ma, c2, gn), vcol, &mcol[..nm], cm)
                     } else if fy >= ma.0 && fy <= ma.1 {
                         d.math
                     } else if fy >= tr.0 && fy <= tr.1 {
                         d.trace
+                    } else if fy >= c2.0 && fy <= c2.1 {
+                        C_CH2
+                    } else if fy >= gn.0 && fy <= gn.1 {
+                        C_GEN_TR
                     } else if fy >= ps.0 && fy <= ps.1 {
                         d.half
                     } else if fy & 1 == 1 && fy <= vrow {
@@ -1891,12 +2354,17 @@ impl Graph {
         // The changed line rows (`hrows`), left to right in runs between
         // the holes over that row; per row, only the holes and markers
         // that reach it are checked per pixel.
-        for &r in &hrows[..nh] {
+        let nrows = band.map_or(nh, |(a, b)| (b - a + 1).max(0) as usize);
+        for k in 0..nrows {
+            let r = band.map_or_else(|| hrows[k], |(a, _)| a + k as i16);
             let sy = d.top + r;
+            if !lcd::rows_hit(sy, sy) {
+                continue;
+            }
             let mut cuts = [(0i16, 0i16); NH];
             let mut ncut = 0;
             for o in self.holes.iter().flatten().filter(|o| sy >= o.y && sy < o.y + o.h) {
-                cuts[ncut] = (o.x - 13, o.x + o.w - 14);
+                cuts[ncut] = (o.x - GX, o.x + o.w - GX - 1);
                 ncut += 1;
             }
             let mut mrow = [0usize; NGRAPH];
@@ -1908,30 +2376,83 @@ impl Graph {
                 }
             }
             let in_hole = |fx: i16| cuts[..ncut].iter().any(|&(a, b)| fx >= a && fx <= b);
+            // Pixels without a marker on a row without a horizontal line
+            // (most of a full graph in strips): `pix` inline, as the column
+            // loop. The markers' columns: mlo..=mhi.
+            let rc = rows[r as usize];
+            let line = rc & R_LINE != 0;
+            let (mut mlo, mut mhi) = (i16::MAX, i16::MIN);
+            for &k in &mrow[..nmr] {
+                mlo = mlo.min(d.marks[k].x);
+                mhi = mhi.max(d.marks[k].x + 11);
+            }
+            let vrow = r & 1 == 1 && r <= h - 4 && d.v.iter().any(|l| l.is_some());
             let mut fx = 1i16;
-            while fx <= 399 {
+            while fx <= NCOL as i16 {
                 if in_hole(fx) {
                     fx += 1;
                     continue;
                 }
-                let mut e = fx;
-                while e < 399 && !in_hole(e + 1) {
-                    e += 1;
+                // The run up to the next hole.
+                let mut e = NCOL as i16;
+                for &(a, _) in &cuts[..ncut] {
+                    if a > fx && a - 1 < e {
+                        e = a - 1;
+                    }
                 }
                 self.px += (e - fx + 1) as u32;
-                lcd::set_window((13 + fx) as u16, sy as u16, (13 + e) as u16, sy as u16);
+                // A strip pass: straight into the strip's row.
+                let mut span = lcd::strip_span(sy, GX + fx, GX + e);
+                let mut out = lcd::Out::panel();
+                if let Some(sp) = span.as_deref_mut() {
+                    if !line && !vrow && (GX + e < mlo || GX + fx > mhi) {
+                        // No marker, line or vertical line in the run: the
+                        // inline rule over the columns, no index checks.
+                        band_run(sp, &self.tr[(fx - 1) as usize..e as usize], &self.ps[(fx - 1) as usize..e as usize], &self.ma[(fx - 1) as usize..e as usize], (&self.c2[(fx - 1) as usize..e as usize], &self.gn[(fx - 1) as usize..e as usize]), &COLC[fx as usize..=e as usize], r, rc, &d);
+                        fx = e + 1;
+                        continue;
+                    }
+                }
+                if span.is_none() {
+                    lcd::set_window((GX + fx) as u16, sy as u16, (GX + e) as u16, sy as u16);
+                }
                 for x in fx..=e {
                     let i = (x - 1) as usize;
-                    let sx = 13 + x;
-                    let mut mcol = [0usize; NGRAPH];
-                    let mut nm = 0;
-                    for &k in &mrow[..nmr] {
-                        if sx >= d.marks[k].x && sx < d.marks[k].x + 12 {
-                            mcol[nm] = k;
-                            nm += 1;
+                    let sx = GX + x;
+                    let c = if !line && (sx < mlo || sx > mhi || !mrow[..nmr].iter().any(|&k| sx >= d.marks[k].x && sx < d.marks[k].x + 12)) {
+                        let (tr, ps, ma, c2, gn) = (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]);
+                        if r >= ma.0 && r <= ma.1 {
+                            d.math
+                        } else if r >= tr.0 && r <= tr.1 {
+                            d.trace
+                        } else if r >= c2.0 && r <= c2.1 {
+                            C_CH2
+                        } else if r >= gn.0 && r <= gn.1 {
+                            C_GEN_TR
+                        } else if r >= ps.0 && r <= ps.1 {
+                            d.half
+                        } else if let Some(c) = if vrow { vl(&d, x) } else { None } {
+                            c
+                        } else if (rc | R_ALL) & COLC[x as usize] != 0 {
+                            d.grid
+                        } else {
+                            C_FILL
                         }
+                    } else {
+                        let mut mcol = [0usize; NGRAPH];
+                        let mut nm = 0;
+                        for &k in &mrow[..nmr] {
+                            if sx >= d.marks[k].x && sx < d.marks[k].x + 12 {
+                                mcol[nm] = k;
+                                nm += 1;
+                            }
+                        }
+                        pix(x, r, (self.tr[i], self.ps[i], self.ma[i], self.c2[i], self.gn[i]), vl(&d, x), &mcol[..nm], col_classes(x))
+                    };
+                    match span.as_deref_mut() {
+                        Some(sp) => sp[(x - fx) as usize] = c,
+                        None => out.px(c),
                     }
-                    lcd::data(pix(x, r, (self.tr[i], self.ps[i], self.ma[i]), vl(&d, x), &mcol[..nm], col_classes(x)));
                 }
                 fx = e + 1;
             }
@@ -1940,6 +2461,8 @@ impl Graph {
         self.d_tr = self.tr;
         self.d_ps = self.ps;
         self.d_ma = self.ma;
+        self.d_gn = self.gn;
+        self.d_c2 = self.c2;
         self.d_deco = d;
         self.d_holes = self.holes;
         self.valid = true;
@@ -1950,9 +2473,9 @@ impl Graph {
     /// as the stock FFT label). Uses the last flushed decoration.
     pub fn bg_at(&self, x: i16, y: i16) -> Color {
         let d = self.d_deco;
-        let (fx, fy) = (x - 13, y - d.top);
+        let (fx, fy) = (x - GX, y - d.top);
         let h = d.fh;
-        if fx < 1 || fx > 399 || fy < 1 || fy > h - 2 {
+        if fx < 1 || fx > NCOL as i16 || fy < 1 || fy > h - 2 {
             return C_FILL;
         }
         if let Some(c) = d.v.iter().flatten().find(|l| l.fx == fx).map(|l| l.col) {
@@ -1990,8 +2513,9 @@ fn shown() -> &'static mut Shown {
 
 /// A popup over the graph closed: the next `update` repaints the graph
 /// (its overlays too) and the frame, the rest of the page only where the
-/// model changed; `ch1` / `math`: their panel labels were drawn grey
-/// (panel_button outside `update`), so they are drawn again.
+/// model changed; `ch1` / `math`: their panel titles were drawn grey
+/// (panel_part outside `update`), so they are drawn again. The MF popup
+/// also covers the panel's left edge: the panel is drawn again.
 #[inline(never)] // region C (link-native.x)
 pub fn uncover(m: &Model, ch1: bool, math: bool) {
     if let Some(o) = shown().m.as_mut() {
@@ -2000,6 +2524,30 @@ pub fn uncover(m: &Model, ch1: bool, math: bool) {
     }
     graph().invalidate();
     frame(m);
+    panel(m);
+}
+
+/// Rows y0..y1 (screen, exclusive) of the graph and its side frame lines
+/// again, the rest of the graph left alone: what a shrinking popup box
+/// (`keep`: the new box, drawn) uncovers. Only the graph lies there (the
+/// overlays sit at the graph's top rows and its bottom row).
+pub fn regraph_rows(m: &Model, keep: Rect, y0: i16, y1: i16) {
+    if y1 <= y0 {
+        return;
+    }
+    lcd::fill_rect(GX as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    lcd::fill_rect(GR as u16, y0 as u16, 1, (y1 - y0) as u16, C_FRAME);
+    let g = graph();
+    g.holes[H_POPUP] = Some(keep);
+    g.holes[H_REST] = Some(rect(GX, y1, GW + 1, 320 - y1));
+    // The MF popup reaches into the panel.
+    panel(m);
+    g.invalidate();
+    g.flush(m);
+    // The rows under the hole still show the graph as it is (nothing
+    // renders while the popup covers the page): not repainted later.
+    g.holes[H_REST] = None;
+    g.d_holes[H_REST] = None;
 }
 
 /// Forget everything drawn (the next `update` draws the whole page).
@@ -2032,33 +2580,32 @@ pub fn update(m: &Model) {
         tb_badge(m);
     }
     let pal = ol.colour != m.colour;
-    if o.is_some_and(|o| o.src != m.src) {
-        // The record bar moves (beside the badge or not): clear the slot.
+    if o.is_some_and(|o| o.rec != m.rec) {
+        // The record bar moves (beside the badge / REC or not): clear the slot.
         lcd::fill_rect(REC_BAR.x as u16, 0, REC_BAR.w as u16, 20, C_BAR);
     }
-    if d(ol.src != m.src || (m.src != SRC_NONE && pal)) {
+    if d(ol.rec != m.rec || ol.rec_unit != m.rec_unit) {
         src_badge(m);
+    } else if m.rec && ol.rec_dim != m.rec_dim {
+        // The REC blink: its dot alone.
+        rec_mark_blink(SRC_BADGE, C_BAR, !m.rec_dim, m.rec_unit);
     }
-    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.src != m.src) {
+    if d(ol.roll != m.roll || ol.record != m.record || ol.status != m.status || ol.gen_hz != m.gen_hz || ol.rec != m.rec) {
         record_bar(m);
     }
-    if d(pal || ol.vdiv != m.vdiv || ol.probe != m.probe || ol.ac != m.ac || ol.wvdiv != m.wvdiv) {
-        vdiv_badge(m);
-    }
-    if d(ol.battery != m.battery || ol.charging != m.charging) {
+    if d(ol.battery != m.battery || ol.charging != m.charging || icons_dx(&ol) != icons_dx(m)) {
         battery(m);
     }
-    for k in 0..7 {
-        let was = |mm: &Model| mm.pressed as usize == k + 1;
-        let dep = match k {
-            0 | 2 => pal,
-            1 => pal || ol.vdiv != m.vdiv || ol.ch1_open != m.ch1_open || ol.wvdiv != m.wvdiv || ol.ch1_txt != m.ch1_txt,
-            3 | 5 => ol.math_on != m.math_on || ol.math_colour != m.math_colour,
-            4 => ol.vdiv != m.vdiv || ol.wvdiv != m.wvdiv || ol.math_open != m.math_open || ol.math_mode != m.math_mode || ol.math_on != m.math_on || ol.math_colour != m.math_colour || ol.math_scale != m.math_scale,
-            _ => false,
-        };
-        if d(dep || was(&ol) != was(m)) {
-            panel_button(m, k);
+    if d(ol.usb != m.usb || ol.bt != m.bt) {
+        usb_icon(m);
+    }
+    for b in 0..NBLK {
+        let changed = block_look(&ol, b) != block_look(m, b);
+        for k in 3 * b..3 * b + 3 {
+            let was = |mm: &Model| mm.pressed as usize == k + 1;
+            if d(changed || was(&ol) != was(m)) {
+                panel_part(m, k);
+            }
         }
     }
     if d(pal) {
@@ -2100,6 +2647,7 @@ pub fn update(m: &Model) {
     g.set_hole_at(H_FFT_X, add.map(|_| FFT_XDIV));
     g.set_hole_at(H_FFT_PK, add.map(|_| fft_peak_rect(m)));
     g.set_hole_at(H_CUR, (m.cur_tab != 0).then_some(CUR_TAB));
+    g.set_hole_at(H_DEC, (m.dec != 0).then(|| dec::band_rect(m.dec)));
     let deco0 = g.d_deco;
     let valid0 = g.valid;
     g.flush(m);
@@ -2119,6 +2667,11 @@ pub fn update(m: &Model) {
             tb_tab(m, k == 0);
         }
     }
+    // The decoder band: when what it shows changed, or the graph was
+    // repainted under it.
+    if m.dec != 0 && (!valid0 || d(ol.dec != m.dec || ol.dec_gen != m.dec_gen)) {
+        dec::band(m.dec, m.dec_gen == 0);
+    }
     // The label shows the graph background through it: repainted with it.
     let bg_changed = !valid0 || deco0 != g.d_deco;
     let was_fft = ol.math_on && ol.math_mode == 5;
@@ -2127,7 +2680,7 @@ pub fn update(m: &Model) {
     }
     if let Some(a) = add {
         let old = if was_fft { ol.fft } else { None };
-        let mc = m.math_pal();
+        let mc = m.math_text();
         let col = d(old.is_none() || ol.math_colour != m.math_colour) || bg_changed;
         if col || old.map_or(true, |o| o.ydiv != a.ydiv) {
             fft_box(fft_ydiv_rect(m), a.ydiv.as_str(), mc);
@@ -2149,26 +2702,26 @@ pub fn update(m: &Model) {
 
 /// Stock FFT label: graph (200,12,60,17).
 pub fn fft_label_rect(m: &Model) -> Rect {
-    rect(214, m.top() + 13, 60, 17)
+    rect(GX + GCX + 1, m.top() + 13, 60, 17)
 }
 pub fn fft_ydiv_rect(m: &Model) -> Rect {
-    rect(18, m.top() + 13, 92, 17)
+    rect(IN_X, m.top() + 13, 92, 17)
 }
 /// Peak readout: right, under the label row (the label leaves too little
 /// room beside it for "12.5MHz -99.9dBV").
 pub fn fft_peak_rect(m: &Model) -> Rect {
-    rect(266, m.top() + 34, 144, 17)
+    rect(GR - 147, m.top() + 34, 144, 17)
 }
 /// Horizontal scale box: bottom row (both views share the frame bottom),
 /// outside the Corners tap zones (x 23..102 / 333..412) and the cursor tab.
-pub const FFT_XDIV: Rect = rect(168, 280, 92, 17);
+pub const FFT_XDIV: Rect = rect(CUR_TAB.x + CUR_TAB.w + 6, 280, 92, 17);
 
 /// The stock FFT label: no fill (the graph background shows through), 1 px
 /// ring r5 with the top-left corner square (mask 0x0e), centred 12 px text,
 /// both in the math colour.
 pub fn fft_label(m: &Model) {
     let r = fft_label_rect(m);
-    let mc = m.math_pal();
+    let mc = m.math_text();
     let t = Ink::new(sf::SC_F12, r, m.fft_hz.as_str(), 8, 0);
     let g = graph_ref();
     paint(r, &[(K_SHAPE, C_FILL), (K_TEXT, C_FILL)], |x, y| {
@@ -2354,7 +2907,7 @@ pub fn tabs_of(mode: u8, tb: u8, tb_max: u8, transient: bool, pressed: Option<bo
 /// Some(true) = slower, Some(false) = faster, None = no step there.
 pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
     match mode {
-        TAP_HALVES if INNER.has(x, y) => Some(x <= 207),
+        TAP_HALVES if INNER.has(x, y) => Some(x <= GX + GCX - 6),
         TAP_CORNERS if ZONE_L.has(x, y) => Some(true),
         TAP_CORNERS if ZONE_R.has(x, y) => Some(false),
         _ => None,
@@ -2364,24 +2917,37 @@ pub fn tap_zone(mode: u8, x: i16, y: i16) -> Option<bool> {
 /// What a press in the graph area does.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Press {
-    /// A marker / cursor-line zone: select (level group, item id).
+    /// A marker grab zone: select (level group, item id); a drag moves it.
     Marker(bool, u8),
     /// No marker: the release steps the timebase (true = slower).
     Step(bool),
     /// The cursor tab (UF-08): the release cycles the cursors.
     Cur,
-    /// Nothing (a drag still moves the selected item).
+    /// Nothing (a drag moves the trigger position or the selected level
+    /// item, as off any marker).
     None,
 }
 
-/// The page's press decision at (x, y) inside INNER: the object under the
-/// finger wins: the nearest marker / cursor line
-/// (`pick_near`), and only then the tap-step zone of `mode`.
+/// The page's press decision at (x, y) inside INNER: a drawn tab, then the
+/// grab zone of the nearest marker (`pick_near`), then the tap-step zone of
+/// `mode`.
 pub fn graph_press(m: &Model, mode: u8, sel_v: u8, sel_h: u8, last_h: bool, x: i16, y: i16) -> Press {
+    // A drawn tab (tap step, cursor tab) wins over a grab zone that reaches
+    // it (the zones are larger than the glyphs; no glyph is under a tab).
+    if m.tabs & TAB_SHOW_L != 0 && TAB_L.has(x, y) {
+        return Press::Step(true);
+    }
+    if m.tabs & TAB_SHOW_R != 0 && TAB_R.has(x, y) {
+        return Press::Step(false);
+    }
+    let cur = m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y);
+    if cur && CUR_TAB.has(x, y) {
+        return Press::Cur;
+    }
     if let Some(q) = graph_pick(m, sel_v, sel_h, last_h, x, y) {
         return Press::Marker(q.level, q.id);
     }
-    if m.cur_tab != 0 && rect(CUR_TAB.x - 3, CUR_TAB.y - 6, CUR_TAB.w + 6, CUR_TAB.h + 6).has(x, y) {
+    if cur {
         return Press::Cur;
     }
     match tap_zone(mode, x, y) {
@@ -2400,14 +2966,9 @@ pub fn top_badge(x: u16, y: u16) -> Option<u8> {
     }
     let x = x as i16;
     // (The source badge: `src_hit`, the app knows whether it is shown.)
-    [RUN_BADGE, TB_BADGE, VDIV_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
+    [RUN_BADGE, TB_BADGE, TRIG_BADGE].iter().position(|r| x >= r.x && x < r.x + r.w).map(|k| k as u8)
 }
 
-/// The source badge (when shown) was hit.
-pub fn src_hit(x: u16, y: u16) -> bool {
-    let r = SRC_BADGE;
-    y < 20 && (x as i16) >= r.x && (x as i16) < r.x + r.w
-}
 
 /// Corners hold repeat: the `done`-th repeat (0-based) of a press at `t0`
 /// is due at t0 + REPEAT_FIRST_MS + done * REPEAT_MS.
@@ -2463,7 +3024,10 @@ pub const PROBE_NAMES: [&str; 13] = ["0.1X", "0.2X", "0.5X", "1X", "2X", "5X", "
 /// FFT windows (stock five, "Hanming" spelled Hamming, + flat-top; the same
 /// order as fft::WIN_NAMES).
 pub const WINDOWS: [&str; 6] = ["Rectangular", "Blackman", "Hanning", "Hamming", "Triangular", "Flat-top"];
-pub const MF_TABS: [&str; 4] = ["Measure", "Display", "Trigger", "Settings"];
+/// The MF popup's tabs (stock four, opendm40 Decode).
+pub const MF_TABS: [&str; 5] = ["Measure", "Display", "Trigger", "Settings", "Decode"];
+/// Tab pitch (stock four tabs: 101 px; five: 80).
+const MF_TAB_W: i16 = 80;
 
 /// Values the popups show.
 #[derive(Clone, Copy)]
@@ -2496,6 +3060,16 @@ pub struct PopVals {
     pub pcond: u8,
     pub pwidth: f32,
     pub runt_v: f32,
+    /// The decoder setup popup's values.
+    pub dec: dec::SetupVals,
+    /// Trigger source (scope::TSRC_*) and the GEN trace shown (opendm40,
+    /// docs/scope-gen-channel.md).
+    pub tsrc: u8,
+    pub gen_trace: bool,
+    /// The DMM CH2 shown and its label ("CH2 1.5V"; empty before its
+    /// first start).
+    pub ch2_on: bool,
+    pub ch2_vdiv: Txt,
 }
 
 /// Which popup is open (tab).
@@ -2647,23 +3221,38 @@ pub fn slider_value(x: i16) -> f32 {
 }
 
 /// MF popup page height per tab (box h = 40 + page).
-/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13.)
-const MF_PAGE_H: [i16; 4] = [150, 100, 125, 55];
+/// (Trigger: stock 55; opendm40 125 with the trigger-type rows, UF-13;
+/// Decode: ui_decode.rs.)
+const MF_PAGE_H: [i16; 5] = [150, 200, 175, 55, dec::PAGE_H];
 
-/// MF settings popup (FUN_08037574), tab 0..3.
+/// The box a popup paints whole: a graph hole while it is open (a full
+/// repaint under an open popup does not draw the graph there first).
+/// None: no hole (the timebase list).
+pub fn popup_box(p: Popup) -> Option<Rect> {
+    match p {
+        Popup::Mf(t) => Some(rect(13, 20, 401, 40 + MF_PAGE_H[t.min(4) as usize])),
+        Popup::Ch1(_) | Popup::Math(_) => Some(rect(SX, 20, 200, 281)),
+        _ => None,
+    }
+}
+
+/// MF settings popup (FUN_08037574), tab 0..4.
 pub fn draw_mf(tab: u8, v: &PopVals) {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let page_h = MF_PAGE_H[tab as usize];
     let hh = 40 + page_h;
     let screen = rect(0, 0, 480, 320);
     fill_c(rect(13, 20, 401, hh), screen, C_FRAME);
     let tclip = rect(14, 21, 399, hh - 1);
-    for i in 0..4i16 {
-        let x = 14 + 101 * i;
-        let r = rect(x, 21, 100, 40);
+    // The stock tab font when every label fits the narrower tabs.
+    let font = if MF_TABS.iter().all(|t| sf::text_width(sf::SC_F22, t, 0) + 6 <= MF_TAB_W - 1) { sf::SC_F22 } else { sf::SC_F16 };
+    for i in 0..5i16 {
+        let x = 14 + MF_TAB_W * i;
+        let r = rect(x, 21, MF_TAB_W - 1, 40);
         let sel = i == tab as i16;
-        let ul = rect(x, 59, 100, 2);
-        let t = Ink::new(sf::SC_F22, r, MF_TABS[i as usize], 8, 0);
+        let ul = rect(x, 59, MF_TAB_W - 1, 2);
+        let t = Ink::new(font, r, MF_TABS[i as usize], 8, 0);
+
         let (bg, fg) = if sel { (C_POP_BG, C_FILL) } else { (C_POP_TAB, C_WHITE) };
         paint(isect(r, tclip), &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = t.at(x, y) {
@@ -2697,6 +3286,19 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
             option_list(rect(24, 81, 88, 24), pc, &["On", "Off"], 44, if v.roll { 0 } else { 1 });
             option_list(rect(24, 125, 176, 24), pc, &["OFF", "MIN", "1S", "INF"], 44, v.persist as usize);
             mf_display_values(v);
+            // opendm40: the computed generator trace.
+            fill_c(rect(14, 161, 399, 50), pc, C_POP_BG);
+            fill_text(GT_LABEL, pc, C_POP_BG, sf::SC_F16, GT_LABEL, "GEN trace:", C_FILL, 1, 0);
+            option_list(GT_LIST, pc, &["On", "Off"], 44, if v.gen_trace { 0 } else { 1 });
+            // opendm40: the DMM as CH2 and its V/div.
+            fill_c(rect(14, 211, 399, 49), pc, C_POP_BG);
+            fill_text(C2_LABEL, pc, C_POP_BG, sf::SC_F16, C2_LABEL, "CH2 (DMM):", C_FILL, 1, 0);
+            option_list(C2_LIST, pc, &["On", "Off"], 44, if v.ch2_on { 0 } else { 1 });
+            if v.ch2_on {
+                rbox_text(C2_MINUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "-", C_WHITE);
+                rbox_text(C2_PLUS, pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "+", C_WHITE);
+                fill_text(C2_VALUE, pc, C_POP_BG, sf::SC_F16, C2_VALUE, v.ch2_vdiv.as_str(), C_FILL, 8, 0);
+            }
         }
         2 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
@@ -2727,12 +3329,21 @@ pub fn draw_mf(tab: u8, v: &PopVals) {
                 }
                 _ => {}
             }
+            // opendm40: the trigger source (the generator computed, edge only).
+            fill_c(rect(14, 186, 399, 50), pc, C_POP_BG);
+            fill_text(TS_LABEL, pc, C_POP_BG, sf::SC_F16, TS_LABEL, "Source:", C_FILL, 1, 0);
+            option_list(TS_LIST, pc, &crate::scope::TSRC_NAMES, 60, v.tsrc.min(1) as usize);
+            if v.tsrc == crate::scope::TSRC_GEN {
+                fill_text(TS_NOTE, pc, C_POP_BG, sf::SC_F16, TS_NOTE, "edge, computed", C_FILL, 1, 0);
+            }
         }
-        _ => {
+        3 => {
             fill_c(rect(14, 61, 399, 55), pc, C_POP_BG);
             rbox_text(rect(24, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "PriScr", C_WHITE);
             rbox_text(rect(114, 78, 80, 30), pc, 8, C_BAR, C_POP_BG, sf::SC_F16, "Save CSV", C_WHITE);
         }
+        // opendm40: the protocol decoder (ui_decode.rs).
+        _ => dec::page(&v.dec, pc),
     }
 }
 
@@ -2746,7 +3357,17 @@ pub const TP_MINUS: Rect = rect(214, 164, 36, 18);
 pub const TP_VALUE: Rect = rect(254, 164, 104, 18);
 pub const TP_PLUS: Rect = rect(362, 164, 36, 18);
 pub const TR_HINT: Rect = rect(214, 164, 189, 18);
-
+// Trigger source row, Display tab GEN trace row (opendm40).
+pub const TS_LABEL: Rect = rect(24, 188, 180, 20);
+pub const TS_LIST: Rect = rect(24, 208, 120, 24);
+pub const TS_NOTE: Rect = rect(214, 208, 189, 24);
+pub const GT_LABEL: Rect = rect(24, 163, 180, 20);
+pub const GT_LIST: Rect = rect(24, 183, 88, 24);
+pub const C2_LABEL: Rect = rect(24, 213, 180, 20);
+pub const C2_LIST: Rect = rect(24, 233, 88, 24);
+pub const C2_MINUS: Rect = rect(214, 235, 36, 20);
+pub const C2_VALUE: Rect = rect(254, 235, 104, 20);
+pub const C2_PLUS: Rect = rect(362, 235, 36, 20);
 /// "500ns", "20us", "1ms", "2s": a 1-2-5 time (integer in its unit).
 pub fn fmt_s125(out: &mut Buf, s: f32) {
     let (x, u) = if s >= 0.999 {
@@ -2792,8 +3413,16 @@ pub enum MfHit {
     TType(u8),
     PCond(u8),
     Width(bool),
+    /// Trigger source, GEN trace on (opendm40).
+    TSrc(u8),
+    GenTrace(bool),
+    /// The DMM CH2 on, its V/div step (true = up).
+    Ch2(bool),
+    Ch2Step(bool),
     PriScr,
     SaveCsv,
+    /// The Decode tab's page.
+    Dec(dec::SetupHit),
     /// Inside the box, nothing there.
     Inside,
     /// Below the box: closes (stock: x >= 10).
@@ -2803,13 +3432,13 @@ pub enum MfHit {
 }
 
 pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
-    let tab = tab.min(3);
+    let tab = tab.min(4);
     let hh = 40 + MF_PAGE_H[tab as usize];
     if !rect(13, 20, 401, hh).has(x, y) {
         return if y >= 20 + hh && x >= 10 { MfHit::Close } else { MfHit::Outside };
     }
     if y < 61 {
-        return MfHit::Tab(((x - 14) / 101).clamp(0, 3) as u8);
+        return MfHit::Tab(((x - 14) / MF_TAB_W).clamp(0, 4) as u8);
     }
     let near = |r: Rect| rect(r.x - 1, r.y - 2, r.w + 2, r.h + 4).has(x, y);
     match tab {
@@ -2838,6 +3467,14 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Bright
             } else if rect(204, 119, 210, 36).has(x, y) {
                 MfHit::Grid
+            } else if let Some(i) = option_hit(GT_LIST, 2, 44, x, y) {
+                MfHit::GenTrace(i == 0)
+            } else if let Some(i) = option_hit(C2_LIST, 2, 44, x, y) {
+                MfHit::Ch2(i == 0)
+            } else if v.ch2_on && near(C2_MINUS) {
+                MfHit::Ch2Step(false)
+            } else if v.ch2_on && near(C2_PLUS) {
+                MfHit::Ch2Step(true)
             } else {
                 MfHit::Inside
             }
@@ -2849,6 +3486,8 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Mode(i)
             } else if let Some(i) = option_hit(TT_LIST, 3, 60, x, y) {
                 MfHit::TType(i)
+            } else if let Some(i) = option_hit(TS_LIST, 2, 60, x, y) {
+                MfHit::TSrc(i)
             } else if v.ttype == crate::trigsoft::PULSE {
                 if let Some(i) = option_hit(TP_COND, 3, 30, x, y) {
                     MfHit::PCond(i)
@@ -2863,7 +3502,7 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Inside
             }
         }
-        _ => {
+        3 => {
             if near(rect(24, 78, 80, 30)) {
                 MfHit::PriScr
             } else if near(rect(114, 78, 80, 30)) {
@@ -2872,23 +3511,27 @@ pub fn mf_hit(tab: u8, v: &PopVals, x: i16, y: i16) -> MfHit {
                 MfHit::Inside
             }
         }
+        _ => MfHit::Dec(dec::page_hit(v.dec.proto == crate::decode::P_DALI, x, y)),
     }
 }
+
+/// The CH1 / Math popup's left edge: 200 px wide, against the panel.
+const SX: i16 = PANEL_X - 200;
 
 /// CH1 / Math popup frame: box, header, vertical tabs, page area.
 fn side_popup(title: &str, tabs: &[&str], tab: u8) {
     let screen = rect(0, 0, 480, 320);
-    fill_c(rect(214, 20, 200, 281), screen, C_FRAME);
-    let h = rect(215, 21, 198, 29);
+    fill_c(rect(SX, 20, 200, 281), screen, C_FRAME);
+    let h = rect(SX + 1, 21, 198, 29);
     fill_text(h, screen, C_POP_TAB, sf::SC_F16, h, title, C_YELLOW, 8, 0);
-    fill_c(rect(215, 50, 198, 250), screen, C_FRAME);
+    fill_c(rect(SX + 1, 50, 198, 250), screen, C_FRAME);
     for (i, t) in tabs.iter().enumerate() {
         let y = 50 + 41 * i as i16;
-        let r = rect(215, y, 78, 40);
+        let r = rect(SX + 1, y, 78, 40);
         let sel = i == tab as usize;
         let ink = Ink::new(sf::SC_F16, r, t, 8, 1);
         let (bg, fg) = if sel { (C_POP_BG, C_BAR) } else { (C_BAR, C_WHITE) };
-        let ind = rect(291, y, 2, 40);
+        let ind = rect(SX + 77, y, 2, 40);
         paint(r, &[(K_TEXT, bg), (K_SHAPE, C_FRAME)], |x, y| {
             if let Some(g) = ink.at(x, y) {
                 return (fg, tag(1, g));
@@ -2896,24 +3539,24 @@ fn side_popup(title: &str, tabs: &[&str], tab: u8) {
             (if sel && ind.has(x, y) { C_BAR } else { bg }, tag(2, 0))
         });
     }
-    fill_c(rect(293, 50, 120, 250), screen, C_POP_BG);
+    fill_c(rect(SX + 79, 50, 120, 250), screen, C_POP_BG);
 }
 
 pub fn draw_ch1(tab: u8, v: &PopVals) {
     let tab = tab.min(2);
-    side_popup("CHA", &["Coupling", "Probe", "Color"], tab);
-    let pc = rect(293, 50, 120, 250);
+    side_popup("CH1", &["Coupling", "Probe", "Color"], tab);
+    let pc = rect(SX + 79, 50, 120, 250);
     match tab {
-        0 => option_list(rect(308, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
+        0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["DC", "AC"], 44, v.ac as usize),
         1 => {
-            let r = rect(293, 50, 120, 20);
+            let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Scale", C_BAR, 8, 0);
             // Stock also shows "Type Vol / Cur" here; it changes nothing
             // (opendm40 reads the Wave view's current from the DMM), so it
             // is left out.
-            spinner(rect(298, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
+            spinner(rect(SX + 84, 70, 110, 150), pc, &PROBE_NAMES, v.probe as usize, false);
         }
-        _ => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
+        _ => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.colour as usize, true),
     }
 }
 
@@ -2922,22 +3565,22 @@ pub fn draw_ch1(tab: u8, v: &PopVals) {
 pub fn draw_math(tab: u8, v: &PopVals) {
     let tab = tab.min(3);
     side_popup("MATH", &["Mode", "Color", "Hz/Div", "Other"], tab);
-    let pc = rect(293, 50, 120, 250);
+    let pc = rect(SX + 79, 50, 120, 250);
     match tab {
         // Stock: FFT selected unless the mode is ABS (also while math is off).
-        0 => option_list(rect(308, 71, 90, 24), pc, &["FFT", "ABS"], 44, (v.math_mode == 6) as usize),
-        1 => spinner(rect(298, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
+        0 => option_list(rect(SX + 94, 71, 90, 24), pc, &["FFT", "ABS"], 44, (v.math_mode == 6) as usize),
+        1 => spinner(rect(SX + 84, 70, 110, 150), pc, &COLOUR_NAMES, v.math_colour as usize, true),
         2 => {
             let o = [v.hz_opts[0].as_str(), v.hz_opts[1].as_str(), v.hz_opts[2].as_str(), v.hz_opts[3].as_str()];
-            spinner(rect(298, 70, 110, 150), pc, &o, v.fft_hz.min(3) as usize, false)
+            spinner(rect(SX + 84, 70, 110, 150), pc, &o, v.fft_hz.min(3) as usize, false)
         }
         _ => {
-            let r = rect(293, 50, 120, 20);
+            let r = rect(SX + 79, 50, 120, 20);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "Window", C_BAR, 8, 0);
-            spinner(rect(298, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
-            let r = rect(293, 224, 120, 24);
+            spinner(rect(SX + 84, 70, 110, 150), pc, &WINDOWS, v.fft_win.min(5) as usize, false);
+            let r = rect(SX + 79, 224, 120, 24);
             fill_text(r, pc, C_POP_BG, sf::SC_F16, r, "FFT Unit", C_BAR, 8, 0);
-            option_list(rect(308, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
+            option_list(rect(SX + 94, 250, 90, 24), pc, &["dB", "Vrms"], 44, v.fft_vrms as usize);
         }
     }
 }
@@ -2963,32 +3606,32 @@ pub enum SideHit {
 }
 
 pub fn side_hit(math: bool, tab: u8, v: &PopVals, x: i16, y: i16) -> SideHit {
-    if !rect(214, 20, 200, 281).has(x, y) {
+    if !rect(SX, 20, 200, 281).has(x, y) {
         return SideHit::Close;
     }
     let ntabs = if math { 4 } else { 3 };
-    if x < 293 && y >= 50 {
+    if x < SX + 79 && y >= 50 {
         let i = (y - 50) / 41;
         return if i < ntabs { SideHit::Tab(i as u8) } else { SideHit::Inside };
     }
     if math {
         return match tab {
-            0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
-            1 => spinner_hit(rect(298, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
-            2 => spinner_hit(rect(298, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
+            0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, |i| SideHit::MathMode(5 + i)),
+            1 => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.math_colour as usize, x, y).map_or(SideHit::Inside, SideHit::MathColour),
+            2 => spinner_hit(rect(SX + 84, 70, 110, 150), 4, v.fft_hz.min(3) as usize, x, y).map_or(SideHit::Inside, SideHit::HzDiv),
             _ => {
-                if let Some(i) = spinner_hit(rect(298, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
+                if let Some(i) = spinner_hit(rect(SX + 84, 70, 110, 150), WINDOWS.len(), v.fft_win.min(5) as usize, x, y) {
                     SideHit::Window(i)
                 } else {
-                    option_hit(rect(308, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Unit)
+                    option_hit(rect(SX + 94, 250, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Unit)
                 }
             }
         };
     }
     match tab {
-        0 => option_hit(rect(308, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
-        1 => spinner_hit(rect(298, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
-        _ => spinner_hit(rect(298, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
+        0 => option_hit(rect(SX + 94, 71, 90, 24), 2, 44, x, y).map_or(SideHit::Inside, SideHit::Coupling),
+        1 => spinner_hit(rect(SX + 84, 70, 110, 150), 13, v.probe as usize, x, y).map_or(SideHit::Inside, SideHit::Probe),
+        _ => spinner_hit(rect(SX + 84, 70, 110, 150), 9, v.colour as usize, x, y).map_or(SideHit::Inside, SideHit::Colour),
     }
 }
 
@@ -3000,6 +3643,7 @@ pub fn draw_popup(p: Popup, v: &PopVals) {
         Popup::Ch1(t) => draw_ch1(t, v),
         Popup::Math(t) => draw_math(t, v),
         Popup::Tb(i) => draw_tb(i),
+
     }
 }
 
@@ -3198,7 +3842,7 @@ pub struct StripData {
     pub unit_letters: bool,
     /// Sub readings, 12 px ASCII, right-aligned.
     pub sub: [Txt; 2],
-    /// State badge (HOLD / A-HOLD / HV / REC / REL / PASS / FAIL / range).
+    /// State badge (HOLD / A-HOLD / HV / REL / PASS / FAIL / range).
     pub badge: &'static str,
     pub badge_col: Color,
     /// >= 100 V: the strip ring turns red.
@@ -3207,6 +3851,8 @@ pub struct StripData {
     pub gen: Txt,
     /// A provisional reading (`Reading::prov`): the value in C_DIS grey.
     pub dim: bool,
+    /// The beeper indicator (App::beep_ind): the value in ui::SHORT_FG.
+    pub short: bool,
     /// Sub row 1 + this holds the accuracy (ui::strip_acc: grey, after a
     /// "+-" sign); 0 = none.
     pub acc: u8,
@@ -3227,24 +3873,30 @@ impl StripData {
         hv: false,
         gen: Txt::EMPTY,
         dim: false,
+        short: false,
         acc: 0,
         grey: u8::MAX,
     };
 }
 
-pub const STRIP: Rect = rect(13, 21, 401, 54);
-const ST_INNER: Rect = rect(14, 22, 399, 52);
-const ST_FUNC: Rect = rect(19, 25, 62, 17);
-const ST_BADGE: Rect = rect(19, 46, 62, 17);
+pub const STRIP: Rect = rect(GX, 21, GW + 1, 54);
+const ST_INNER: Rect = rect(GX + 1, 22, GW - 1, 52);
+/// The badge column: 62 px from 6 px inside the strip; with the frame at
+/// the screen edge (GX 0) 60 px from x 4 (the widest badge text is 52 px),
+/// for the sub rows' room beside GEN on the 39 px divisions' strip.
+const ST_COL_X: i16 = if GX > 0 { GX + 6 } else { 4 };
+const ST_COL_W: i16 = if GX > 0 { 62 } else { 60 };
+const ST_FUNC: Rect = rect(ST_COL_X, 25, ST_COL_W, 17);
+const ST_BADGE: Rect = rect(ST_COL_X, 46, ST_COL_W, 17);
 /// Reading: right-aligned, ends 4 px before the unit (the widest values,
 /// "-444.44" / "1562.00", are 105 / 107 px of ink in SC_DIGITS); from 3 px
 /// after the badge column.
-const ST_VALUE: Rect = rect(84, 24, 108, 30);
+const ST_VALUE: Rect = rect(ST_COL_X + ST_COL_W + 3, 24, 108, 30);
 /// Unit: from x 196, as wide as its text (`st_unit`): SC_DIGITS up to
 /// ST_UNIT_W px ("mW", "MHz", "VAh" 54..59), else SC_F20, the panel
 /// buttons' 20 px face (device check 92fb8fa: a 40 px box cut "mW" to "mV";
 /// "mWh" is 76 px in SC_DIGITS, 32 in SC_F20).
-const ST_UNIT_X: i16 = 196;
+const ST_UNIT_X: i16 = ST_VALUE.x + ST_VALUE.w + 4;
 const ST_UNIT_W: i16 = 59;
 const ST_UNIT_Y: i16 = 24;
 const ST_UNIT_H: i16 = 30;
@@ -3252,10 +3904,10 @@ const ST_UNIT_H: i16 = 30;
 /// the GEN column while it shows, else to 4 px inside the strip (`st_sub`).
 pub const ST_SUB_Y: [i16; 2] = [25, 43];
 const ST_SUB_H: i16 = 14;
-const ST_SUB_END: i16 = 409;
+const ST_SUB_END: i16 = GR - 4;
 /// GEN column: 64 px, the widest frequency ("10.00MHz", "999.9kHz").
-const ST_GEN: Rect = rect(344, 25, 64, 17);
-const ST_GEN_T: Rect = rect(344, 46, 64, 17);
+const ST_GEN: Rect = rect(GR - 69, 25, 64, 17);
+const ST_GEN_T: Rect = rect(GR - 69, 46, 64, 17);
 const C_HV: Color = 0xc9a0;
 const C_GEN: Color = 0x0400;
 
@@ -3334,8 +3986,8 @@ pub fn meter_strip(d: &StripData) {
         _ => {
             // Ring (0xad55, red at >= 100 V) and the dark box, one shape.
             let ring = if d.hv { C_HV } else { C_FRAME };
-            lcd::fill_rect(13, 20, 401, 1, C_BAR);
-            lcd::fill_rect(13, 75, 401, 1, C_BAR);
+            lcd::fill_rect(GX as u16, 20, GW as u16 + 1, 1, C_BAR);
+            lcd::fill_rect(GX as u16, 75, GW as u16 + 1, 1, C_BAR);
             paint(STRIP, &[(K_SHAPE, C_BAR)], |x, y| {
                 if in_rbox(ST_INNER, 5, 0x0f, x, y) {
                     (C_FILL, tag(1, 0))
@@ -3356,8 +4008,9 @@ pub fn meter_strip(d: &StripData) {
     if changed(ol.badge == d.badge && ol.badge_col == d.badge_col) {
         st_badge(ST_BADGE, d.badge, d.badge_col);
     }
-    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey) {
-        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), if d.dim { C_DIS } else { C_YELLOW }, 4, 1, d.grey);
+    if changed(ol.value == d.value && ol.dim == d.dim && ol.grey == d.grey && ol.short == d.short) {
+        let c = if d.dim { C_DIS } else if d.short { crate::ui::SHORT_FG } else { C_YELLOW };
+        st_text_grey(ST_VALUE, sf::SC_DIGITS, d.value.as_str(), c, 4, 1, d.grey);
     }
     // The unit's box follows its text and the sub rows follow the unit: on
     // a change of their x (or of the GEN column) clear from the unit to
@@ -3392,10 +4045,11 @@ pub fn meter_strip(d: &StripData) {
                     pm(r.x - PM_W, r.y + 3, C_DIS);
                 }
             }
-            // Narrow (GEN shown): the text without its spaces if it is too
-            // wide, then at the stock spacing 0 (as the scope's cells).
+            // Narrow (GEN shown): the stock spacing 0 (as the scope's cells)
+            // first, then the text without its spaces ("AC444.44mV" read as
+            // one word; issue #136) only if it is still too wide.
             let mut b = [0u8; 24];
-            let wide = sf::text_width(sf::SC_F12, t, 1) > r.w;
+            let wide = sf::text_width(sf::SC_F12, t, 0) > r.w;
             let t = if wide {
                 let mut n = 0;
                 for &c in t.as_bytes().iter().filter(|&&c| c != b' ') {
@@ -3408,7 +4062,14 @@ pub fn meter_strip(d: &StripData) {
             } else {
                 t
             };
-            let sp = if wide && sf::text_width(sf::SC_F12, t, 1) > r.w { 0 } else { 1 };
+            // One word (no space, e.g. after the squeeze) may run up to 5 px
+            // before the GEN column (the word-gap rule is for two words);
+            // the row is painted that far for any text (no stale ink).
+            let room = if gen_on && !t.contains(' ') { r.w.max(ST_GEN.x - 5 - r.x) } else { r.w };
+            if gen_on {
+                r.w = r.w.max(ST_GEN.x - 5 - r.x);
+            }
+            let sp = if sf::text_width(sf::SC_F12, t, 1) > room { 0 } else { 1 };
             st_text(r, sf::SC_F12, t, if d.dim || acc { C_DIS } else { C_WHITE }, 1, sp);
         }
     }
@@ -3429,17 +4090,20 @@ pub fn pm(x: i16, y: i16, c: Color) {
     lcd::fill_rect(x as u16, (y + 7) as u16, 5, 1, c);
 }
 
-/// Right-panel button under a touch: the stock rects, x from the panel edge
-/// and 4 px of slop up / down (the 1 / 8 px gaps between the pills go to the
-/// nearer button instead of nowhere).
+/// Panel target (`panel_rect`) under a touch: the nearest within 4 px (the
+/// gaps between the parts go to the nearer one; a tie to the title / the
+/// zoom-in button).
 pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
-    if x < 414 {
+    let (x, y) = (x as i16, y as i16);
+    if x < PANEL_X {
         return None;
     }
-    let y = y as i16;
     let mut best: Option<(i16, usize)> = None;
-    for (k, r) in B_RECT.iter().enumerate() {
-        let d = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
+    for k in 0..NPANEL {
+        let r = panel_rect(k);
+        let dy = if y < r.y { r.y - y } else if y >= r.y + r.h { y - (r.y + r.h - 1) } else { 0 };
+        let dx = if x < r.x { r.x - x } else if x >= r.x + r.w { x - (r.x + r.w - 1) } else { 0 };
+        let d = dx.max(dy);
         if d <= 4 && best.map_or(true, |b| d < b.0) {
             best = Some((d, k));
         }
@@ -3449,7 +4113,7 @@ pub fn panel_hit(x: u16, y: u16) -> Option<usize> {
 
 /// Strip touch areas: the badge column (REL) and the rest (function band).
 pub fn strip_hit(x: u16, y: u16) -> Option<bool> {
-    if (20..76).contains(&y) && x < 414 { Some(x < 86) } else { None }
+    if (20..76).contains(&y) && (x as i16) < PANEL_X { Some((x as i16) < ST_COL_X + ST_COL_W + 5) } else { None }
 }
 
 // ------------------------------------------------------------------ pinch
@@ -3463,8 +4127,9 @@ pub struct PinchState {
     pub i: usize,
 }
 
-/// Highest V/div range index (scope::VDIV has 10 entries).
-pub const RANGE_MAX: usize = 9;
+/// Highest V/div step index (`Settings::vidx`, scope::VSTEPS: 12 entries,
+/// the 5 / 2 mV/div digital zoom steps at 1 / 0).
+pub const RANGE_MAX: usize = crate::scope::VIDX_MAX;
 
 /// One pinch report: the stored state (None at the start of a pinch) and the
 /// finger separation `s0` -> `s` along the pair's axis. 1-2-5: one index
@@ -3518,7 +4183,7 @@ pub fn pinch_step_mode(mode: u8, prev: Option<PinchState>, horizontal: bool, s0:
 /// span ratio `r` (fingers apart = zoom in = smaller per-div value), in
 /// lo..=hi. `div` gives the per-div value of a table index.
 pub fn pinch_snap(horizontal: bool, i0: usize, r: f32, lo: usize, hi: usize) -> usize {
-    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VDIV[i] } };
+    let div = |i: usize| -> f32 { if horizontal { crate::scope::SDIV[i] } else { crate::scope::VSTEPS[i] } };
     let want = ln_f(div(i0)) - ln_f(r.max(1e-3));
     let mut best = i0.clamp(lo, hi);
     let mut bd = f32::MAX;

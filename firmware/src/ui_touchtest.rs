@@ -1,4 +1,4 @@
-//! The touch test page (View::TouchTest; Settings 3/3 > Touch test, or
+//! The touch test page (View::TouchTest; Settings > Other > Touch test, or
 //! DBG:TOUCH:TEST ON; src/app_touchtest.rs feeds it): the raw controller
 //! frames as dots against crosshair targets, to judge the calibration, the
 //! jitter and the touch-key strip by eye. Region C (`.cold`, link-native.x):

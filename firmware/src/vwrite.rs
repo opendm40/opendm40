@@ -4,7 +4,7 @@
 //! Mode (decisions-2026-10-22 #6): the volume is READ-ONLY by default
 //! ("Files live": the WP bit set, every WRITE fails 07/27/00, a new
 //! recording / screenshot raises the UNIT ATTENTION at once, also while
-//! mounted). Settings 3/3 "USB disk" = "PC can edit" (or DBG:VDISK:RO 0)
+//! mounted). Settings > Other "USB disk" = "PC can edit" (or DBG:VDISK:RO 0)
 //! asks for the writable volume described below. Volatile (read-only again
 //! at every boot) and applied at the next USB bus reset (`on_bus_reset`: a
 //! re-plug), never under a host that has the volume: a host reads the WP bit
@@ -182,7 +182,7 @@ struct W {
     /// live updates while mounted, no delete / update from the PC). Zero =
     /// read-only: W0 lives in .sram_bss, zeroed at start-up.
     rw: bool,
-    /// Asked for (Settings 3/3 "USB disk", DBG:VDISK:RO); copied to `rw` at
+    /// Asked for (Settings > Other "USB disk", DBG:VDISK:RO); copied to `rw` at
     /// the next bus reset.
     want_rw: bool,
     boot: u8,
@@ -298,7 +298,7 @@ pub fn read_only_pending() -> bool {
     !w().want_rw
 }
 
-/// Settings 3/3 "USB disk", DBG:VDISK:RO: ask for the read-only (true) or
+/// Settings > Other "USB disk", DBG:VDISK:RO: ask for the read-only (true) or
 /// the writable volume. A host reads the WP bit when it mounts, so the mode
 /// changes only at the next bus reset (`on_bus_reset`, a re-plug).
 pub fn set_read_only(on: bool) {
@@ -856,7 +856,7 @@ fn stage(c: u32, s: u32, d: &[u8]) -> R {
         return Ok(true);
     }
     let dev = dev().ok_or(E_IO)?;
-    let [buf, fat, tmp] = crate::calbackup::scratch();
+    let [buf, fat, tmp] = crate::diskbuf::blocks();
     if !dev.read_block(0, tmp) {
         return Err(E_IO);
     }
@@ -957,7 +957,7 @@ pub fn poll(now: u64, blocked: bool) {
     }
     // 2. Firmware declined: the loader must not find it.
     if w.fw == Fw::Decline {
-        let [buf, tmp, _] = crate::calbackup::scratch();
+        let [buf, tmp, _] = crate::diskbuf::blocks();
         if crate::fatren::delete_updates(dev, buf, tmp).is_some() {
             dlog::set_stale();
         }
@@ -1036,7 +1036,7 @@ fn park(dev: &mut dyn BlockDevice) -> bool {
 /// then their chains (a power cut: lost clusters at worst).
 #[inline(never)] // .cold (link-native.x): once per session start / purge request
 fn purge_tmp(dev: &mut dyn BlockDevice) -> bool {
-    let [buf, fat1, tmp] = crate::calbackup::scratch();
+    let [buf, fat1, tmp] = crate::diskbuf::blocks();
     if !dev.read_block(0, tmp) {
         return false;
     }
@@ -1198,7 +1198,12 @@ fn check(chain: &[u8], size: u32) -> bool {
             off += len as u32;
         }
     }
-    crate::fatren::header_valid(&h) && le32o(&h, 4) == size - 12 && le32o(&h, 8) & 0xFFFF == crc as u32
+    let ok = crate::fatren::header_valid(&h) && le32o(&h, 4) == size - 12 && le32o(&h, 8) & 0xFFFF == crc as u32;
+    #[cfg(target_os = "none")]
+    if ok {
+        crate::boot::note_update(&h);
+    }
+    ok
 }
 
 /// Check, then link the staged SPI clusters as DM40FW.BIN (upload.rs).
@@ -1234,7 +1239,7 @@ fn commit(dev: &mut dyn BlockDevice, chain: &[u8], size: u32) -> bool {
     if nb > cl.len() {
         return false;
     }
-    let [buf, fat, tmp] = crate::calbackup::scratch();
+    let [buf, fat, tmp] = crate::diskbuf::blocks();
     if !dev.read_block(0, tmp) {
         return false;
     }

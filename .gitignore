@@ -13,7 +13,7 @@ dist/
 stock/patch/build*/
 __pycache__/
 firmware/target/
-toolchain/
+/toolchain
 
 # Personal device data: flash / OTP / option-byte dumps, calibration, chip UID,
 # SPI disk backups (the `*.bin` rule is case-sensitive and misses CONFIG.BIN,
@@ -22,7 +22,7 @@ stock/re/dumps/
 stock/re/history/
 # Everything personal that is not under stock/re/dumps/: SPI disk backups,
 # memrw kit test output (UID, calibration, OTP), checksum brute-force scratch
-private/
+/private
 
 # Ghidra project database (contains the vendor image; rebuilt by Setup.java)
 stock/re/ghidra/gproj/

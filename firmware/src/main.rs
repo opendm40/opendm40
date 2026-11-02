@@ -2,9 +2,12 @@
 #![no_main]
 
 mod app;
+mod autooff;
 mod bargraph;
 mod bt;
 mod clock;
+/// cold_str! / cold_set!: read-only data of region C code in region C.
+mod cold;
 mod danger;
 mod dmm;
 mod fastvos;
@@ -40,20 +43,28 @@ unsafe impl critical_section::Impl for NoMask {
     }
 }
 mod meter;
+#[cfg(feature = "memprobe")]
+mod memprobe;
 mod mmio;
 mod persist;
 mod power;
 mod prof;
+mod pack10;
+mod cring;
 mod scope;
+mod decode;
 mod hwtrig;
 mod scope_meas;
 mod scope_ui;
+mod scope_ch2;
 mod fft;
 mod sinc;
 mod trigsoft;
+mod scanline;
 mod scpi;
 mod scpi_msg;
 mod sentinel;
+#[cfg_attr(not(feature = "dbg-src"), allow(dead_code))]
 mod dbgsrc;
 mod stockfont;
 mod touch;
@@ -62,6 +73,7 @@ mod ui;
 mod usb;
 mod usbtmc;
 mod wdt;
+mod wordram;
 
 use core::panic::PanicInfo;
 
@@ -78,7 +90,8 @@ const SCB_AIRCR: u32 = 0xE000_ED0C;
 /// Watchdog policy (see the end of this file): the main loop feeds the FWDGT
 /// until a deadline, INITIAL_HOLD_MS after start (in effect: for as long as
 /// the loop runs), pushed forward by host requests. After DBG:RELEASE, a panic
-/// or a hang the watchdog (~20 s) resets and the shim counts a crash.
+/// or a hang the watchdog (~20 s) resets, the shim counts a crash and boots
+/// opendm40 again.
 const INITIAL_HOLD_MS: u64 = u64::MAX / 4;
 const KEEPALIVE_MS: u64 = 15_000;
 /// SCPI session / transport index (scpis, scpi_wait).
@@ -160,9 +173,9 @@ const USB_VID_PID: UsbVidPid = UsbVidPid(0x1209, 0xD040);
 static mut EP_MEMORY: [u32; 64] = [0; 64];
 static mut MSC_IO: [u8; 512] = [0; 512];
 /// The MSC block buffer (was a 4 KiB field of `Msc` on the main stack).
-/// 512 bytes in TCM; the 4 KiB of the builds whose disk is the SPI flash
-/// (recovery-usb, no `vdisk`) go to SRAM (the TCM stack keeps its 42 KiB).
-#[cfg_attr(all(target_os = "none", any(feature = "recovery-usb", not(feature = "vdisk"))), link_section = ".sram_bss")]
+/// 512 bytes in TCM; the 4 KiB of the builds without `vdisk` (the SPI flash
+/// is the disk) go to SRAM (the TCM stack keeps its 42 KiB).
+#[cfg_attr(all(target_os = "none", not(feature = "vdisk")), link_section = ".sram_bss")]
 static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 /// Data-logger state (FR-38; its 16 KiB ring is `logger::RING`, shared with
 /// the AD2 stream ISR). In SRAM (.dmabuf, NOLOAD: `Logger::init_in_place` in
@@ -171,6 +184,7 @@ static mut MSC_BLK: [u8; msc::MAX_BLOCK] = [0; msc::MAX_BLOCK];
 static mut LOGGER: logger::Logger = logger::Logger::new();
 
 /// DIAG block size (DBG:DIAG?).
+#[cfg_attr(not(feature = "dbg-diag"), allow(dead_code))]
 const DIAG_LEN: usize = 212;
 
 /// Bring-up failures as red squares at the top left, one slot per stage.
@@ -226,6 +240,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         lcd::fill_rect(0, 0, lcd::W, lcd::H, ui::BG);
     }
     app.tick(&mut clk, true);
+    lcd::defer_flush();
     native::main_phase(1, clk.now_ms());
     // The generated USB volume's tables and files (vdisk.rs, ~0.47 s on the
     // device): after the first frame, before USB attaches.
@@ -340,14 +355,19 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
     // screenshot preparation's sector erases wait ~0.5 s after it.
     #[cfg(feature = "vdisk")]
     let mut host_io_t = 0u64;
+    #[cfg(feature = "dbg-diag")]
     let mut loop_max_shown = 0u32;
     let mut loop_win = 0u64;
     // Section profile (debug): max us per section in the last second:
     // 0 usb+scpi, 1 tick, 2 touch, 3 scope, 4 bt, 5 dmm poll+draw.
     let mut sec = [0u32; 6];
+    #[cfg(feature = "dbg-diag")]
     let mut sec_shown = [0u32; 6];
     // Streamed USBTMC reply: last progress (usbtmc stream_pos) and its time.
     let mut stream_seen = (usize::MAX, 0u64);
+    // A plain reply made no progress for STREAM_STALL_MS: no more polling
+    // for it (until it ends).
+    let mut reply_stalled = false;
     let cyc = || unsafe { mmio::r32(0xE000_1004) };
 
     loop {
@@ -360,9 +380,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         loop_t0 = t;
         if now >= loop_win {
             loop_win = now + 1000;
-            loop_max_shown = loop_max;
+            #[cfg(feature = "dbg-diag")]
+            {
+                loop_max_shown = loop_max;
+                sec_shown = sec;
+            }
             loop_max = 0;
-            sec_shown = sec;
             sec = [0; 6];
         }
         let mut ts = cyc();
@@ -378,6 +401,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         if reset_at.map(|t| now >= t).unwrap_or(false) {
             app::finish_disk_writes(now); // never cut a FAT / dir write
+            // Hand over quietly (DBG:UPDATE: the loader runs next; a reset
+            // drops the power-hold pins until the ROM drives them again):
+            // the big loads off, the SPI flash idle.
+            app.quiesce_for_reset(&mut clk);
+            let _ = spiflash::wait_idle(3000);
             unsafe { mmio::w32(SCB_AIRCR, 0x05FA_0004) };
         }
 
@@ -385,6 +413,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // M4: no host disk writes while the logger needs a constant interval.
         msc.set_write_inhibit(logger.disk_writes_blocked());
         msc.set_usb_state(dev.state());
+        app.usb_host = dev.state() == UsbDeviceState::Configured;
+        power::USB_CONF.store(app.usb_host, core::sync::atomic::Ordering::Relaxed);
         // The INFO/ mirror's sectors while the stream runs: at most one per
         // pass, paced against the fast logger (vdisk.rs `mirror_pass`).
         #[cfg(feature = "vdisk")]
@@ -421,24 +451,36 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if msc::HOST_IO.swap(false, core::sync::atomic::Ordering::Relaxed) {
             app.note_host_activity(now);
         }
-        // A streamed USBTMC reply (WAV:DATA? of the scope record,
-        // scope_wav.rs): its packets go out as the host takes them, polled
-        // like a disk READ above, within the same budget per pass. The scope
-        // keeps its record (no RUN) until the last packet left.
-        if tmc.streaming() {
+        // A USBTMC reply going out: its packets go out as the host takes
+        // them, polled like a disk READ above, within the same budget per
+        // pass (one packet per pass otherwise: a 6 KB MMEM:DATA? piece took
+        // ~95 passes, 1.2 .. 7 s on the scope page with CH2 and the decoder,
+        // device #174). A streamed reply (WAV:DATA? of the scope record,
+        // scope_wav.rs) also while it waits for the host's next request; the
+        // scope keeps its record (no RUN) until the last packet left.
+        if !tmc.sending() {
+            reply_stalled = false;
+        }
+        let streaming = tmc.streaming();
+        if streaming || (tmc.sending() && !reply_stalled) {
             let budget = if logger.active() || fastlog::active() { MSC_PUMP_LOG_CYC } else { MSC_PUMP_CYC };
             let t0 = cyc();
-            while tmc.streaming() && cyc().wrapping_sub(t0) < budget {
+            while (tmc.streaming() || tmc.sending()) && cyc().wrapping_sub(t0) < budget {
                 dev.poll(&mut [&mut tmc, &mut msc]);
             }
             // A host that stopped reading and sends nothing more would hold
-            // the scope (and this budget) for good: give the stream up after
-            // STREAM_STALL_MS without progress.
+            // the scope (and this budget) for good: give a stream up, stop
+            // polling for a plain reply after STREAM_STALL_MS without
+            // progress.
             let p = tmc.stream_pos();
             if p != stream_seen.0 {
                 stream_seen = (p, now);
             } else if now >= stream_seen.1 + STREAM_STALL_MS {
-                tmc.cancel_stream();
+                if streaming {
+                    tmc.cancel_stream();
+                } else {
+                    reply_stalled = true;
+                }
             }
         } else {
             stream_seen = (usize::MAX, now);
@@ -506,6 +548,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             // USBTMC INITIATE_CLEAR / bus reset: no reply to a pending query.
             scpi_wait[USB] = None;
             msgs[USB].reset();
+        }
+        if bt.take_left() {
+            // The Bluetooth host left: its pending query is not answered to
+            // the next host (#122).
+            scpi_wait[BT] = None;
+            msgs[BT].reset();
         }
         if scpi_func_key(&app.dmm) != func_key {
             // Changed on the meter (or by DBG:KEY's deferred key-up): no host
@@ -575,7 +623,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         // One command of the message per pass of this loop (scpi_msg.rs);
         // a READ? / MEAS? / FETC? that waits pauses it until its reading.
         while let Some(msg_n) = msgs[src].next(&mut msg) {
+            #[cfg(feature = "dbg-diag")]
             let dbg_ctl = tmc.dbg_ctl;
+            #[cfg(feature = "dbg-diag")]
             let bt_tx = (bt.tx_dma_ok, bt.tx_dropped);
             let (mut scpi, port): (&mut scpi::Scpi, &mut dyn bt::ScpiPort) =
                 if src == BT { (&mut scpis[BT], &mut bt) } else { (&mut scpis[USB], &mut tmc) };
@@ -757,6 +807,86 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             }
                         }
                     }
+                    scpi::Dbg::CapDisMs(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_ms(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_ms());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapJumpN(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_jumpn(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_jumpn());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisEnd(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dis_end(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dis_end());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisMode(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_dismode(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_dismode());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapDisRef(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_disref(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_disref());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapIdis(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_idis(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_idis());
+                            true
+                        }
+                    }
+                    scpi::Dbg::CapClass(k) => {
+                        if let Some(k) = k {
+                            crate::dmm::set_cap_class(k);
+                            false
+                        } else {
+                            scpi.len = 0;
+                            put_u32(&mut scpi, crate::dmm::cap_class() as u32);
+                            true
+                        }
+                    }
+                    scpi::Dbg::Cap => {
+                        scpi.len = 0;
+                        for (i, v) in app.dmm.cap_info().iter().enumerate() {
+                            if i > 0 {
+                                scpi.put_bytes(b",");
+                            }
+                            scpi.put_f32(*v);
+                        }
+                        true
+                    }
                     scpi::Dbg::Fast => {
                         let (used, rej, vos, conv) = app.dmm.fast_info();
                         scpi.len = 0;
@@ -776,12 +906,19 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         app.dbg_idle(set, now, scpi);
                         set.is_none()
                     }
+                    #[cfg(feature = "dbg-ohm6")]
+                    scpi::Dbg::Ohm6(set) => {
+                        app.dmm.ohm600_dbg(set, scpi);
+                        set.is_none()
+                    }
+                    #[cfg(not(feature = "dbg-ohm6"))]
+                    scpi::Dbg::Ohm6(_) => false,
                     scpi::Dbg::Ping(ms) => {
                         if ms > 0 {
                             deadline = deadline.max(now + (ms as u64).min(KEEPALIVE_MAX_MS));
                         }
                         let flags = hw.pllsai_locked as u32 | (hw.core_idle as u32) << 1;
-                        let left = if feeding { deadline.saturating_sub(now) as u32 } else { 0 };
+                        let left = if feeding { scpi::keepalive_left(deadline, now) } else { 0 };
                         scpi.len = 0;
                         for (i, v) in [now as u32, flags, left].iter().enumerate() {
                             if i > 0 {
@@ -859,6 +996,12 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         draw_hold_until = now + 300;
                         false
                     }
+                    // Never parsed without the features (scpi.rs).
+                    #[cfg(not(feature = "dbg-touch"))]
+                    scpi::Dbg::Touch(_) => false,
+                    #[cfg(not(feature = "dbg-prof"))]
+                    scpi::Dbg::Prof(_) => false,
+                    #[cfg(feature = "dbg-touch")]
                     scpi::Dbg::Touch(clear) => {
                         if clear {
                             touch::log_clear();
@@ -868,8 +1011,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         false
                     }
+                    #[cfg(feature = "dbg-diag")]
                     scpi::Dbg::Diag => {
-                        let d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        let mut d = touch_diag(&tp, touch_events, dbg_ctl, loop_max_shown, app.prof, sec_shown, bt_tx);
+                        // 61: charge pins (bit 0 PB10, 1 PB11), bit 2 USB configured.
+                        d[61] = app.power.pins() | (app.usb_host as u8) << 2;
                         scpi.len = 0;
                         scpi.put_bytes(b"#3");
                         let n = d.len();
@@ -877,6 +1023,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.put_bytes(&d);
                         true
                     }
+                    #[cfg(not(feature = "dbg-diag"))]
+                    scpi::Dbg::Diag => false,
                     scpi::Dbg::Flash => {
                         scpi.len = 0;
                         let mut t = [0u8; 16];
@@ -892,6 +1040,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         }
                         true
                     }
+                    #[cfg(feature = "dbg-prof")]
                     scpi::Dbg::Prof(reset) => {
                         if reset {
                             prof::reset();
@@ -909,6 +1058,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         reset_at = Some(now + 50);
                         false
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpi(n, div) => {
                         // Bus self-test (hyspi.rs): the DMM is paused and its
                         // row rewritten afterwards; the logger owns the chip.
@@ -925,6 +1075,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    #[cfg(feature = "dbg-hyspi")]
                     scpi::Dbg::HySpiWr(mode, div) => {
                         if logger.active() {
                             scpi.set_err("Settings conflict");
@@ -939,6 +1090,9 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                             false
                         }
                     }
+                    // DBG:HYSPI needs --features dbg-hyspi (scpi.rs refuses it).
+                    #[cfg(not(feature = "dbg-hyspi"))]
+                    scpi::Dbg::HySpi(..) | scpi::Dbg::HySpiWr(..) => false,
                     scpi::Dbg::Isr => {
                         let i = logger.isr_stats();
                         let cyc_ns = |c: u32| (c as u64 * 1_000_000_000 / clock::HCLK_HZ as u64) as u32;
@@ -1017,14 +1171,21 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         log_draw = level;
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(6, state, n, item) => {
                         dbg_n7(app, &mut clk, logger, &mut scpi, port, item, state, n);
                         false
                     }
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(5, r26, nr, flags) => {
                         dbg_dcv(app, &mut clk, logger, &mut scpi, port, r26, nr, flags);
                         false
                     }
+                    // Without the feature the parser makes no TORN / NOISE /
+                    // DCV / N7 request.
+                    #[cfg(not(feature = "ad2-exp"))]
+                    scpi::Dbg::Ad2(..) => false,
+                    #[cfg(feature = "ad2-exp")]
                     scpi::Dbg::Ad2(kind, r26, n, b) => {
                         // Synchronous AD2 experiment in the current stock AC
                         // row; the row is rewritten afterwards.
@@ -1052,6 +1213,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     false
                 }
                 scpi::Out::Inr(c) => app.inrush_query(&mut clk, c, &mut scpi),
+                scpi::Out::Dcd(scpi::Dcd::Frames(n)) => {
+                    port.respond_with(&mut |b| Some(app.dec_frames(n, b)));
+                    false
+                }
+                scpi::Out::Dcd(c) => app.dec_scpi(&mut clk, c, &mut scpi),
                 scpi::Out::Mmem(scpi::Mmem::Cat) => {
                     let mut err = None;
                     port.respond_with(&mut |b| csvlog::catalog_scpi(b).map_err(|e| err = Some(e)).ok());
@@ -1131,31 +1297,13 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                         scpi.len = csvlog::status_scpi(&mut scpi.buf);
                         true
                     }
-                    // Record page settings (decision 2026-10-22 #1): for
-                    // the next recording; a running one keeps its own.
-                    scpi::Log::CsvInt(Some(_)) | scpi::Log::CsvDur(Some(_)) if csvlog::active() => {
-                        scpi.set_err("Settings conflict");
-                        false
-                    }
-                    scpi::Log::CsvInt(Some(i)) => {
-                        csvlog::set_next(i, csvlog::next().1);
-                        app.invalidate();
-                        false
-                    }
-                    scpi::Log::CsvDur(Some(d)) => {
-                        csvlog::set_next(csvlog::next().0, d);
-                        app.invalidate();
-                        false
-                    }
-                    scpi::Log::CsvInt(None) => {
-                        scpi.len = 0;
-                        put_u32(&mut scpi, csvlog::INTERVALS_S[csvlog::next().0 as usize]);
-                        true
-                    }
-                    scpi::Log::CsvDur(None) => {
-                        scpi.len = 0;
-                        put_u32(&mut scpi, csvlog::DURATIONS_S[csvlog::next().1 as usize]);
-                        true
+                    // Record page settings (decision 2026-10-22 #1).
+                    l @ (scpi::Log::CsvInt(_) | scpi::Log::CsvDur(_) | scpi::Log::CsvChg(_)) => {
+                        let r = rec_scpi(&mut scpi, l);
+                        if !r {
+                            app.invalidate();
+                        }
+                        r
                     }
                     scpi::Log::CsvFree => match csvlog::free_bytes() {
                         Ok(f) => {
@@ -1381,6 +1529,44 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
             port.respond(r);
         }
 
+        // The DMM CH2 of the MCX scope page (app_ch2.rs): its stream starts,
+        // restarts at a timebase in another rate band and stops here, before
+        // the wave view's / inrush page's requests (their streams take the
+        // logger over: CH2's is stopped first, `ch2_want` is None in their
+        // views). A disk job stops it (region C code every pass, as the
+        // wave view's pause); it starts again after. A stream it did not
+        // start (a host session, the wave view, inrush) is left alone.
+        {
+            let want = app.ch2_want().filter(|_| !screenshot::busy() && !logger.host_active() && !fastlog::active());
+            let mine = app.ch2_live() && logger.active() && logger.wave();
+            if app.ch2_live() && !mine {
+                app.ch2_lost(now); // a DMM change, or taken over
+            }
+            match want {
+                Some(fs) if (!mine || app.ch2_fs() != fs) && (mine || !logger.active()) => {
+                    let fresh = !logger.active();
+                    if mine {
+                        logger.stop();
+                    }
+                    if fresh {
+                        // The full row first, as the wave view's entry.
+                        app.dmm.start(&mut clk);
+                    }
+                    if app.dmm.ad2_scale().is_some() && logger::Logger::mode_ok(true, app.dmm.mode()) {
+                        csvlog::catalog_warm(); // MMEM:CAT? while CH2 streams: from the cache
+                        logger.start_wave(app.dmm.mode(), app.dmm.range(), fs);
+                        app.ch2_started(fs, logger.nominal_mhz(), logger.begin_cyc());
+                    } else {
+                        app.ch2_stopped();
+                    }
+                }
+                None if mine => {
+                    logger.stop();
+                    app.ch2_stopped();
+                }
+                _ => {}
+            }
+        }
         // Any path that reconfigures the DMM (a host CONFigure, a touch/key
         // FUNC/RANGE change, a BT mode-byte) rewrites the 22-byte HY3131 config
         // and R22 behind the logger's back. Detect that and auto-stop so the
@@ -1578,7 +1764,11 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 && !upload::busy()
                 && !logger.disk_writes_blocked()
                 && !hy3131::streaming()
+                // The decoder's frame log streams (its 13 ms ring at
+                // 1.25 MS/s outlasts no erase).
+                && !scope::LOG_LIVE.load(core::sync::atomic::Ordering::Relaxed)
                 && now.saturating_sub(host_io_t) >= 500,
+
         );
         // The generated USB volume (vdisk.rs): rebuilt when the SPI files
         // changed (a recording ended, a screenshot / scope record, a delete),
@@ -1610,6 +1800,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         }
         prof::lap(prof::CSV);
         app.tick(&mut clk, can_draw || force_draw);
+        lcd::defer_flush(); // a repaint's batch (App::repaint)
         // The settings' copy on the SPI disk (setfile.rs): a few seconds
         // after a change, never during an AD1 logger session.
         setfile::poll(now, logger.disk_writes_blocked());
@@ -1712,6 +1903,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                 if app.gesture(&mut clk, g) {
                     if app.slider_active() { gestures.capture_direct() } else { gestures.capture() }
                 }
+                lcd::defer_flush();
                 prof::exit(prof::GEST);
             }
         }
@@ -1719,6 +1911,7 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
         if !logging {
             prof::enter(prof::SCOPE);
             app.scope_poll(now, can_draw);
+            lcd::defer_flush();
             prof::exit(prof::SCOPE);
         }
         mark(3, &mut ts);
@@ -1783,6 +1976,8 @@ fn run(mut clk: Clock, app: &'static mut app::App) -> ! {
                     }
                 }
             }
+            // The beeper indicator follows the comparator read just now.
+            app.beep_ind(now, can_draw, !busy);
             prof::exit(prof::DMM);
             mark(5, &mut ts);
         }
@@ -1801,11 +1996,13 @@ fn block_reply(o: &scpi::Out) -> bool {
         Out::Mmem(Mmem::Cat | Mmem::Data(..))
             | Out::Log(Log::Data)
             | Out::Inr(scpi::Inr::Data(..))
+            | Out::Dcd(scpi::Dcd::Frames(..))
             | Out::Dbg(Dbg::Lcd(..) | Dbg::Touch(false) | Dbg::Prof(false) | Dbg::HySpi(..) | Dbg::HySpiWr(..))
             | Out::Dbg(Dbg::Ad2(0 | 1, ..))
     )
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:DCV? range,r26,n[,flags] (device test 6.5, src/ad2exp.rs
 /// `dcv_test`): in plain DC V, not while logging; sets the manual DC V
 /// range, runs the test, appends the AD1 means in uV (the DC V calibration
@@ -1853,6 +2050,7 @@ fn dbg_dcv(app: &mut app::App, clk: &mut Clock, logger: &logger::Logger, scpi: &
     app.last_raw = None;
 }
 
+#[cfg(feature = "ad2-exp")]
 /// DBG:AD2:N7? item,state,n (datasheet note 7 in the stock DC rows,
 /// src/ad2exp.rs `n7_test`): in DC V / DC mV, not while logging; sets the
 /// MF range item (0 = 600 mV DC, 1..4 = 6 .. 1000 V; it stays manual), runs
@@ -2082,8 +2280,10 @@ fn fast_req(app: &mut app::App, logger: &mut logger::Logger, r: app::FastReq, no
 #[inline(never)] // .cold (link-native.x): once per session
 fn log_on_check(app: &mut app::App, logger: &mut logger::Logger, disk: bool, dur_s: u32, trusted: bool) -> Option<&'static str> {
     let hz = fast_next_hz(logger, logger.ad2());
-    if (logger.wave() && logger.active()) || fastlog::active() {
-        // The DMM wave view owns the AD2 stream / a disk session runs.
+    if (logger.wave() && logger.active()) || fastlog::active() || app.scope.log_on() {
+        // The DMM wave view owns the AD2 stream / a disk session runs / the
+        // decoder's frame log is open (its view code is in region C, which
+        // must not run under the stream ISR: app_log.rs log_open).
         return Some("Settings conflict");
     }
     if disk && !trusted {
@@ -2221,42 +2421,68 @@ fn fast_head(l: &logger::Logger, sc: Option<dmm::Ad2Scale>, out: &mut [u8; 512])
         None => b"cts",
     };
     let mut w = dlog::Txt { b: &mut out[..], n: 0 };
-    w.s("# Alientek ");
+    w.s(crate::cold_str!("# Alientek "));
     w.s(ident::model_name());
-    w.s(", opendm40 ");
+    w.s(crate::cold_str!(", opendm40 "));
     w.s(ident::VERSION);
-    w.s(", fast log, source ");
+    w.s(crate::cold_str!(", fast log, source "));
     w.s(if ad2 { "AD2" } else { "AD1" });
-    w.s(", mode ");
+    w.s(crate::cold_str!(", mode "));
     w.u(l.mode() as u64);
-    w.s(", range ");
+    w.s(crate::cold_str!(", range "));
     w.u(l.range().max(0) as u64);
-    w.s(", nominal ");
+    w.s(crate::cold_str!(", nominal "));
     w.u(l.nominal_mhz() as u64 / 1000);
     w.c(b'.');
     let f = l.nominal_mhz() % 1000;
     w.c(b'0' + (f / 100) as u8);
     w.c(b'0' + (f / 10 % 10) as u8);
     w.c(b'0' + (f % 10) as u8);
-    w.s(" S/s, chop ");
+    w.s(crate::cold_str!(" S/s, chop "));
     w.u(l.chop() as u64);
     if ad2 {
-        w.s(", r26 ");
+        w.s(crate::cold_str!(", r26 "));
         w.u(l.r26() as u64);
-        w.s(if l.mode() == 0 { ", AC-coupled" } else { ", DC-coupled" });
+        w.s(if l.mode() == 0 { crate::cold_str!(", AC-coupled") } else { crate::cold_str!(", DC-coupled") });
     } else {
-        w.s(", osr ");
+        w.s(crate::cold_str!(", osr "));
         w.u(l.osr() as u64);
     }
-    w.s("\r\n# t_s = device clock, s; raw = ");
-    w.s(if ad2 { "AD2 code (+-262143 = +-1.25 V at the AD2 input); value = the DMM's AD2 calibration" } else { "AD1 counts (1.389 V / 8388607 * range decade, uncalibrated)" });
-    w.s("; lost_before = conversions missing before the row\r\n");
-    w.s(if sc.is_some() { "t_s,raw,value_" } else { "t_s,raw,lost_before\r\n" });
+    w.s(if ad2 { crate::cold_str!("\r\n# raw: AD2 code, 262143 = 1.25 V\r\n") } else { crate::cold_str!("\r\n# raw: AD1 counts, uncalibrated\r\n") });
+    w.s(if sc.is_some() { crate::cold_str!("t_s,raw,value_") } else { crate::cold_str!("t_s,raw,lost_before\r\n") });
     if sc.is_some() {
         w.bytes(unit);
-        w.s(",lost_before\r\n");
+        w.s(crate::cold_str!(",lost_before\r\n"));
     }
     (w.n, par, unit)
+}
+
+/// LOG:CSV:INTerval / DURation / CHANge (the Record page's settings, for
+/// the next recording; a running one keeps its own: Settings conflict).
+/// True: a reply in `scpi`; false: set (or refused).
+#[inline(never)] // .cold (link-native.x)
+fn rec_scpi(scpi: &mut scpi::Scpi, l: scpi::Log) -> bool {
+    use scpi::Log::{CsvChg, CsvDur, CsvInt};
+    let (ii, di) = csvlog::next();
+    match l {
+        CsvInt(Some(_)) | CsvDur(Some(_)) | CsvChg(Some(_)) if csvlog::active() => scpi.set_err("Settings conflict"),
+        CsvInt(Some(i)) => csvlog::set_next(i, di),
+        CsvDur(Some(d)) => csvlog::set_next(ii, d),
+        CsvChg(Some(c)) => csvlog::set_change(c),
+        _ => {
+            scpi.len = 0;
+            match l {
+                CsvChg(_) => scpi.put_bytes(csvlog::CHANGES[csvlog::change() as usize].as_bytes()),
+                CsvDur(_) => put_u32(scpi, csvlog::DURATIONS_S[di as usize]),
+                _ => match csvlog::INTERVALS_S.get(ii as usize) {
+                    Some(&s) => put_u32(scpi, s),
+                    None => scpi.put_bytes(b"CHAN"),
+                },
+            }
+            return true;
+        }
+    }
+    false
 }
 
 /// Append a u32 as decimal to a SCPI reply (exact; no f32 rounding).
@@ -2275,6 +2501,7 @@ fn put_u32(scpi: &mut scpi::Scpi, mut v: u32) {
 }
 
 #[inline(never)] // .cold (link-native.x): not inlined into the hot caller
+#[cfg(feature = "dbg-diag")]
 fn touch_diag(
     tp: &Option<touch::Touch>,
     events: u32,
@@ -2317,18 +2544,20 @@ fn touch_diag(
 }
 
 /// Stop feeding the watchdog and wait for the FWDGT reset (the shim counts it
-/// as a crash).
+/// as a crash and boots opendm40 again).
 fn wait_for_watchdog() -> ! {
     loop {
         mmio::spin(1_000_000);
     }
 }
 
+// Unused in the build.sh image (-Cpanic=immediate-abort: a panic is a HardFault,
+// the shim's default_handler loop); a plain `cargo build` still calls it.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     // Mark the panic on screen; do not feed the watchdog: the FWDGT resets and
-    // the shim counts a crash (WDT_RETRY, then recovery).
-    lcd::fill_rect(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
+    // the shim counts a crash and boots opendm40 again (WDT_RETRY).
+    lcd::fill_rect_raw(0, lcd::H - 24, lcd::W, 24, lcd::MAGENTA);
     wait_for_watchdog()
 }
 
@@ -2337,17 +2566,20 @@ fn panic(_info: &PanicInfo) -> ! {
 // (src/boot.rs): INITIAL_HOLD_MS above makes the main loop feed the FWDGT for
 // as long as it runs.
 // DBG:RELEASE, a panic or a hang stop the feeding -> FWDGT reset; the shim
-// counts it as a crash: the 1st reboots opendm40 normally (WDT_RETRY), a 2nd one
-// without 60 s of healthy main loop in between (boot::mark_healthy) enters
-// recovery (marker zeroed -> vendor update screen). DBG:RESET = SYSRESETREQ ->
-// normal reboot of opendm40. DBG:UPDATE / DBG:RECOVER zero the 12-byte loader
-// marker (boot::enter_loader_update) and reset -> the vendor loader's update
-// screen with its own USB disk until a dm40*.bin is installed. (No backup-SRAM
-// request word is set by any command now.)
+// counts it as a crash (DBG:BOOT?; cleared after 60 s of main loop,
+// boot::mark_healthy) and reboots opendm40 normally (WDT_RETRY), every time:
+// no hang count leads to the loader. DBG:RESET = SYSRESETREQ ->
+// normal reboot of opendm40. DBG:UPDATE zeroes the 12-byte loader marker
+// (boot::enter_loader_update) and resets -> the vendor loader's update screen
+// with its own USB disk until a dm40*.bin is installed. DBG:LOADER /
+// DBG:RECOVER set the backup-SRAM request word LOADER_MAGIC and reset; the
+// shim then drives PA2 low and jumps to the ROM (boot::loader_pa2): the same
+// screen, the marker untouched.
 mod board;
 mod boot;
 mod fatren;
 mod calbackup;
+mod diskbuf;
 #[cfg(feature = "vdisk")]
 mod vdisk;
 #[cfg(feature = "vdisk")]
@@ -2366,5 +2598,4 @@ mod setfile;
 mod upload;
 mod native;
 mod uid;
-mod recovery;
 mod shim;

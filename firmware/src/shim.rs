@@ -10,9 +10,9 @@
 //! `reset` (asm, region A at the start of the image, no RAM used):
 //!   cpsid i; CONTROL = 0; TCM clock on; FPU on (CPACR CP10/CP11); MSP = TCM top;
 //!   VTOR = 0x08004000; then the Rust shim (src/boot.rs `shim`), which uses
-//!   stack only, then native::start (.data/.bss init, recovery or main).
+//!   stack only, then native::start (.data/.bss init, main).
 //! Exceptions all go to `default_handler` (`b .`): a fault hangs, the FWDGT
-//! (started by the shim) resets, and the shim chooses recovery. The table runs
+//! (started by the shim) resets, and the shim boots opendm40 again. The table runs
 //! to IRQ 55 (TIMER6 = STM32 TIM7), the AD2 stream ISR of the `ad2-isr`
 //! feature (../docs/history/decisions-2026-10-22.md #3); PRIMASK stays set (`cpsid i`)
 //! except while that stream runs (hy3131.rs `stream`).
@@ -32,6 +32,21 @@ macro_rules! irq55 {
     };
 }
 
+// Feature memprobe: HardFault = src/memprobe.rs `probe_fault` (catches a
+// fault of a DBG:PEEK / POKE access; any other fault still hangs).
+#[cfg(feature = "memprobe")]
+macro_rules! hardfault {
+    () => {
+        "probe_fault"
+    };
+}
+#[cfg(not(feature = "memprobe"))]
+macro_rules! hardfault {
+    () => {
+        "default_handler"
+    };
+}
+
 global_asm!(concat!(
     r#"
     .section .vectors, "a", %progbits
@@ -41,7 +56,9 @@ __VECTORS:
     .word _loader_sp
     .word reset
     .word default_handler      /* NMI */
-    .word default_handler      /* HardFault */
+    .word "#,
+    hardfault!(),
+    r#"      /* HardFault */
     .word default_handler      /* MemManage */
     .word default_handler      /* BusFault */
     .word default_handler      /* UsageFault */

@@ -185,9 +185,9 @@ three are fixed since: UF-04 (81e02a7), UF-14 and UF-16 (ae3e655).
 ### 5.2 Continuity / diode
 | Item | Users | Evidence | opendm40 status / proposal |
 |---|---:|---|---|
-| Instant beeper = the meter's best feature | 7+ | see P1 | **NEW, UF-01, P0, S: check on the device.** The CMPO→buzzer path works under opendm40 init; latency is under 10 ms (scope the buzzer vs a probe short); the 3-level diode classes sound like stock. A regression here would be the most visible one possible. |
+| Instant beeper = the meter's best feature | 7+ | see P1 | **NEW, UF-01, P0, S: check on the device.** The CMPO→buzzer path works under opendm40 init; latency is under 10 ms (scope the buzzer vs a probe short); the 3-level diode classes sound like stock. A regression here would be the most visible one possible. **2026-10-27:** the beeper sounds under opendm40 in continuity and diode (the owner's meter, UF-28); latency and the diode classes are unchecked. |
 | False single beep when a nearby SMPS switches on (fixed by foil shielding); readout dances while shorted. | 3 | [#18016](https://t.me/S2084K/18016), [#19408](https://t.me/S2084K/19408), [#16302](https://t.me/S2084K/16302) | HW (EMI) + **FR-21** latch/anti-vibration, confirmed |
-| "Volume" setting confuses: at 0 % the auto-off warning beep is silent, but the continuity beeper is unaffected (the owner wanted a quiet beeper). | 2 | [#26211](https://t.me/S2084K/26211), [#26228](https://t.me/S2084K/26228) | **NEW, UF-28, P2, S.** (Done in 8d75505: "Key/alert volume", the power-off warning sounds at volume 0.) Rename it to "Key & alert volume". Always sound the auto-off warning (or flash the screen). Investigate whether the TIM14 duty also scales the CMPO beep; if not, say so in help. |
+| "Volume" setting confuses: at 0 % the auto-off warning beep is silent, but the continuity beeper is unaffected (the owner wanted a quiet beeper). | 2 | [#26211](https://t.me/S2084K/26211), [#26228](https://t.me/S2084K/26228) | **NEW, UF-28, P2, S.** (Done in 8d75505: "Key/alert volume", the power-off warning sounds at volume 0.) Rename it to "Key & alert volume". Always sound the auto-off warning (or flash the screen). Investigate whether the TIM14 duty also scales the CMPO beep; if not, say so in help. **2026-10-27 (0.3.1):** it does not: the beeper is the HY3131 CMP pin, not TIM14/PA7 (hw/README.md "Buzzer", *inferred*), so it has no loudness; at volume 0 the firmware turns it off (R20 bit 2), the manual says so. |
 | Diode test current 0.75 mA (< 1 mA) | 2 | [#15847](https://t.me/S2084K/15847), [#18340](https://t.me/S2084K/18340) | HW |
 
 ### 5.3 HOLD / REL / MIN-MAX / history
@@ -262,7 +262,7 @@ connector is unusual ([#15801](https://t.me/S2084K/15801)).
 | Runtime 10–15 h (one test: 30 min scope + DMM → 11.5 h with 2 bars left; 14 h BT logging used ~80 %). Opinions split between "too small" and "lasts long". | 5 | [#16619](https://t.me/S2084K/16619), [#25610](https://t.me/S2084K/25610), [#54285](https://t.me/S2084K/54285), [#61298](https://t.me/S2084K/61298), [#61311](https://t.me/S2084K/61311) | **NEW, UF-19, P1, M.** (Open. Since triage the analog power default is "Auto (per view)": each view powers the side it needs, Settings "Analog power".) At triage opendm40 ran DMM + scope ADC + generator concurrently with both rails on by default. Steps: (1) measure battery current (stock DMM page vs opendm40 DMM view vs opendm40 DMM+Scope) via the fuel gauge or an inline meter; (2) if opendm40 draws much more, power the scope front end/ADC clock only while a scope view, SCPI scope query or trigger is active, with a Settings choice "Scope: always on / on demand"; (3) show the estimated runtime. This conflicts with the "both rails on by default" requirement in `TODO.md`, so the user should decide after measuring. Also affects UF-02. |
 | 2-finger swipe-down power-off (V1.9/V2.0) preferred to the side button (the button barely protrudes from the bumper). | 3 | [#15928](https://t.me/S2084K/15928), [#16743](https://t.me/S2084K/16743), [#44653](https://t.me/S2084K/44653) | **NEW, UF-18, P1, S.** (Done in 67fa077.) The touch controller reports a point count (`touch.rs` status bits 3..0); recognise ≥ 2 points moving down ≥ 80 px → the stock "slide to power off" confirm. |
 | Auto-off countdown with beeps (V2.0), activity-based auto-off | – | [#15892](https://t.me/S2084K/15892) | **FR-10**, confirmed. Make sure the warning sounds at volume 0 (UF-28). |
-| Short-press power-on (V2.1) praised | 2 | [#18842](https://t.me/S2084K/18842) | **UF-37, P1, S (done; untested on the device):** the native-boot shim (power key held 4 s, then 0.5 s more after the cue = recovery) must still latch power on a short press and must not need a long hold for normal boot. |
+| Short-press power-on (V2.1) praised | 2 | [#18842](https://t.me/S2084K/18842) | **UF-37, P1, S (done; untested on the device):** the native-boot shim (power key held 4 s, then 0.5 s more after the cue = the update loader through PA2) must still latch power on a short press and must not need a long hold for normal boot. |
 | Charging: 2 h 35 min, PD trigger OK; 21 V on USB blew the TVS (it saved the unit). | 4 | [#16625](https://t.me/S2084K/16625), [#36290](https://t.me/S2084K/36290) | HW. FR-11 (measure while charging) is not raised by the community. |
 
 ## 9. Touch UI, menus, display, discoverability
@@ -352,7 +352,7 @@ view.
 
 | ID | Item | Prio | Effort | Section | Status ([TODO.md](../TODO.md)) |
 |---|---|---|---|---|---|
-| UF-01 | Check the continuity CMPO beeper + diode beep classes on device (latency < 10 ms) | P0 | S | §5.2 | open |
+| UF-01 | Check the continuity CMPO beeper + diode beep classes on device (latency < 10 ms) | P0 | S | §5.2 | beeper sounds; latency, classes open |
 | UF-02 | Cold-junction self-heating with both rails / concurrent instruments: measure, correct | P1 | M | §3 | device check 40728b8: no CJ self-heating from the scope rail; stock comparison open |
 | UF-03 | AC+DC sub-mode on the DM40A (hardware proven via the app) | P1 | M | §10 | done |
 | UF-04 | Scope AUTO keeps the AC/DC coupling (`autoset_start` forced DC at triage) | P1 | S | §6.1 | done (81e02a7) |
@@ -377,7 +377,7 @@ view.
 | UF-25 | Optional extended-resolution (extra grey digit) display | P2 | S | §4 | decided: the extra digit always on (8d75505) |
 | UF-26 | Label "4-20mA %" and hide it out of range | P2 | S | §5.4 | done (8d75505, 11c4f9b) |
 | UF-27 | Allow storing a history slot while HOLD is active | P2 | S | §5.3 | done (8d75505) |
-| UF-28 | Volume setting semantics; auto-off warning audible at 0 % | P2 | S | §5.2 | done (8d75505) |
+| UF-28 | Volume setting semantics; auto-off warning audible at 0 % | P2 | S | §5.2 | done (8d75505); continuity / diode beeper off at 0 % (0.3.1) |
 | UF-29 | On-device Help page (gestures, resets, input limits) | P2 | S | §9 | done (7b58f84) |
 | UF-30 | Fast bargraph (≥ 40 Hz) from the HY3131 fast channel | P2 | M | §4 | done (b6a4d10; 10/s, the AD1 rate) |
 | UF-31 | Touch sensitivity for stylus (investigate controller threshold) | P2 | S | §9 | no sensitivity register; device check of the debounce open |

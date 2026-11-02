@@ -60,7 +60,7 @@ fn srate(ck: &mut Checker, out: &str) {
     for (name, wave, tb) in shots {
         let mut m = base.m;
         m.tb = tb;
-        m.src = if wave { scope_ui::SRC_DMM } else { scope_ui::SRC_MCX };
+        m.wave = wave;
         if wave {
             m.wvdiv = 250.0;
             m.ch1_txt = "AC V";
@@ -75,7 +75,7 @@ fn srate(ck: &mut Checker, out: &str) {
     }
     // The record bar while running: no rate (the stock full-record line).
     let mut m = base.m;
-    m.src = scope_ui::SRC_MCX;
+    m.wave = false;
     let sc = stock::Scene { name: "srate", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
     stock::draw(&sc);
     ck.check_replica("srate/recbar");
@@ -84,8 +84,92 @@ fn srate(ck: &mut Checker, out: &str) {
     println!("scope sample rate (timebase list): widest rate \"{}\" {} px, widest time {wt} px", widest.1, widest.0);
 }
 
+/// WCAG contrast ratio of two RGB565 colours.
+fn contrast(a: u16, b: u16) -> f32 {
+    let lum = |c: u16| {
+        let ch = |v: u32, max: u32| {
+            let v = (v * 255 / max) as f32 / 255.0;
+            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * ch((c >> 11) as u32 & 31, 31) + 0.7152 * ch((c >> 5) as u32 & 63, 63) + 0.0722 * ch(c as u32 & 31, 31)
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// Panel and badge text on the user's channel colours (CH1_INK, MATH_INK)
+/// and channel-coloured text on the dark bar (PAL_TEXT: trigger badge,
+/// measurement strip, FFT labels): every palette entry reads at least as
+/// well as the stock default math panel (white on orange); the defaults
+/// keep the stock text colours; PAL_TEXT is the palette colour wherever
+/// that already reads so; the drawn CHA / math label buttons, the V/div
+/// badge, the trigger badge and a measurement cell use them.
+fn ink_contrast(ck: &mut Checker, out: &str) {
+    use scope_ui::{CH1_INK, C_BAR, C_FILL, C_WHITE, MATH_INK, PALETTE, PAL_TEXT};
+    let floor = contrast(PALETTE[1], C_WHITE) - 0.01;
+    let base = &stock::scenes()[0];
+    ck.cases += 1;
+    if CH1_INK[base.m.colour as usize] != C_FILL || MATH_INK[base.m.math_colour as usize] != C_WHITE {
+        ck.fail("ink/default", "default CH1 / math text colour differs from the stock".into());
+    }
+    for i in 0..9usize {
+        for (what, ink) in [("CH1", CH1_INK[i]), ("math", MATH_INK[i])] {
+            ck.cases += 1;
+            let c = contrast(PALETTE[i], ink);
+            if c < floor {
+                ck.fail(&format!("ink/{what}/{i}"), format!("{what} text on {} {c:.2}:1 < {floor:.2}:1", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+        ck.cases += 1;
+        let c = contrast(PAL_TEXT[i], C_BAR);
+        let keep = contrast(PALETTE[i], C_BAR) >= floor;
+        if c < floor || (keep && PAL_TEXT[i] != PALETTE[i]) {
+            ck.fail(&format!("ink/text/{i}"), format!("{} text on the bar {c:.2}:1 (floor {floor:.2}:1), palette kept: {keep}", scope_ui::COLOUR_NAMES[i]));
+        }
+        let mut m = base.m;
+        m.colour = i as u8;
+        m.math_colour = i as u8;
+        m.math_on = true;
+        host::reset(0);
+        scope_ui::invalidate();
+        scope_ui::update(&m);
+        scope_ui::meas_cell(&m, 0, "Freq:1.00kHz");
+        if i == 4 {
+            save(out, "s08-ink-ch1-blue");
+        }
+        // CH1 and MATH block titles.
+        for (what, r, fill, ink) in [
+            ("CH1", scope_ui::panel_rect(0), PALETTE[i], CH1_INK[i]),
+            ("math", scope_ui::panel_rect(9), PALETTE[i], MATH_INK[i]),
+            // Text in the channel colour on the bar: fill = the bar.
+            ("trigger badge", stockfont::rect(364, 2, 49, 15), C_BAR, PAL_TEXT[i]),
+            ("measurement cell", stockfont::rect(14, 303, 96, 15), C_BAR, PAL_TEXT[i]),
+        ] {
+            let e = emu();
+            let (mut n_fill, mut n_ink, mut other) = (0, 0, 0);
+            for y in r.y..r.y + r.h {
+                for x in r.x..r.x + r.w {
+                    let c = e.fb[y as usize * W + x as usize];
+                    if c == fill {
+                        n_fill += 1;
+                    } else if c == ink {
+                        n_ink += 1;
+                    } else if c == if fill == C_BAR { if PALETTE[i] != ink { PALETTE[i] } else { 0x0001 } } else if ink == C_FILL { C_WHITE } else { C_FILL } {
+                        other += 1;
+                    }
+                }
+            }
+            ck.cases += 1;
+            if n_fill == 0 || n_ink == 0 || other > 0 {
+                ck.fail(&format!("ink/draw/{what}/{i}"), format!("{what} on {}: fill {n_fill} px, ink {n_ink} px, the other text colour {other} px", scope_ui::COLOUR_NAMES[i]));
+            }
+        }
+    }
+}
+
 pub fn run(ck: &mut Checker, out: &str) {
     srate(ck, out);
+    ink_contrast(ck, out);
     let base = &stock::scenes()[0];
     let screen = Bx::new(0, 0, 480, 320);
     let mut n = 0;
@@ -111,7 +195,7 @@ pub fn run(ck: &mut Checker, out: &str) {
                 let name = format!("fft/{}/{k}/t{tabs}", combined as u8);
                 ck.check_replica(&name);
                 let add = [rb(scope_ui::fft_ydiv_rect(&m)), rb(scope_ui::FFT_XDIV), rb(scope_ui::fft_peak_rect(&m))];
-                let graph = [("graph", Bx::new(14, m.top() as i32 + 1, 399, m.frame_h() as i32 - 2))];
+                let graph = [("graph", Bx::new(scope_ui::GX as i32 + 1, m.top() as i32 + 1, scope_ui::NCOL as i32, m.frame_h() as i32 - 2))];
                 ck.check_add(&name, &graph, &add, screen);
                 n += 1;
                 if k == 0 && tabs == 3 && !combined {
@@ -212,7 +296,7 @@ pub fn run(ck: &mut Checker, out: &str) {
             stock::draw(&sc);
             let name = format!("curtab/{}/{st}", combined as u8);
             ck.check_replica(&name);
-            let graph = [("graph", Bx::new(14, m.top() as i32 + 1, 399, m.frame_h() as i32 - 2))];
+            let graph = [("graph", Bx::new(scope_ui::GX as i32 + 1, m.top() as i32 + 1, scope_ui::NCOL as i32, m.frame_h() as i32 - 2))];
             ck.check_add(&name, &graph, &[rb(scope_ui::CUR_TAB), rb(scope_ui::FFT_XDIV)], screen);
             if st == scope_ui::CUR_X && !combined {
                 save(out, "s04-cur-x-zoom");
@@ -237,12 +321,12 @@ pub fn run(ck: &mut Checker, out: &str) {
     let mut nw = 0;
     let wave_scene = |src: u8, k: usize, status: u8, roll: bool, tabs: u8| {
         let mut m = base.m;
-        m.src = src;
+        m.wave = src == crate::SRC_DMM;
         m.status = status;
         m.roll = roll;
         m.tabs = tabs;
         m.record = if status == scope_ui::ST_STOP { (0.15, 0.85) } else { (0.0, 1.0) };
-        let cells: Vec<&'static str> = if src == scope_ui::SRC_DMM {
+        let cells: Vec<&'static str> = if src == crate::SRC_DMM {
             let (vd, amps, ch1, tv) = [(250.0f32, false, "AC V", -999.0f32), (200e-6, true, "AC uA", -1.23e-3), (0.15, false, "AC mV", 0.444), (2.5, true, "AC A", 9.99)][k % 4];
             m.wvdiv = vd;
             m.amps = amps;
@@ -260,7 +344,7 @@ pub fn run(ck: &mut Checker, out: &str) {
         stock::Scene { name: "wave", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells }
     };
     let top = Bx::new(0, 0, 480, 20);
-    for src in [scope_ui::SRC_MCX, scope_ui::SRC_DMM] {
+    for src in [crate::SRC_MCX, crate::SRC_DMM] {
         for k in 0..4 {
             for (status, roll) in [(scope_ui::ST_TD, false), (scope_ui::ST_STOP, false), (scope_ui::ST_RUN, true)] {
                 let sc = wave_scene(src, k, status, roll, 3);
@@ -271,18 +355,17 @@ pub fn run(ck: &mut Checker, out: &str) {
                 // vertical inset as the stock badges, y 1..17) against the
                 // timebase badge and the shortened record bar (the stock
                 // widget, its insides exempt as the replica's).
-                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
                 nw += 1;
-                if src == scope_ui::SRC_DMM && status == scope_ui::ST_TD && k < 2 {
+                if src == crate::SRC_DMM && status == scope_ui::ST_TD && k < 2 {
                     save(out, &format!("s05-wave-{}", ["v", "ua"][k]));
                 }
-                if src == scope_ui::SRC_DMM && status == scope_ui::ST_STOP && k == 2 {
+                if src == crate::SRC_DMM && status == scope_ui::ST_STOP && k == 2 {
                     save(out, "s05-wave-stopped");
                 }
-                if src == scope_ui::SRC_DMM && roll && k == 3 {
+                if src == crate::SRC_DMM && roll && k == 3 {
                     save(out, "s05-wave-roll-a");
                 }
-                if src == scope_ui::SRC_MCX && status == scope_ui::ST_TD && k == 0 {
+                if src == crate::SRC_MCX && status == scope_ui::ST_TD && k == 0 {
                     save(out, "s05-mcx-badge");
                 }
             }
@@ -305,7 +388,7 @@ pub fn run(ck: &mut Checker, out: &str) {
             for (tag, j) in [("full", Some(i)), ("step", mid)] {
                 let Some(j) = j else { continue };
                 let mut m = base.m;
-                m.src = scope_ui::SRC_DMM;
+                m.wave = true;
                 m.status = scope_ui::ST_TD;
                 m.tabs = 3;
                 m.wvdiv = st[j].0;
@@ -331,10 +414,36 @@ pub fn run(ck: &mut Checker, out: &str) {
                 stock::draw(&sc);
                 let name = format!("wave/step/{}/{}", lbl.as_str(), tag);
                 ck.check_replica(&name);
-                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
                 nw += 1;
                 save(out, &format!("s06-wave-{}-{}", lbl.as_str(), tag));
             }
+        }
+    }
+    // The MCX V/div zoom steps below 10 mV/div (scope::VSTEPS: 5 / 2 mV,
+    // with the x0.1 probe 500 / 200 uV): the page as the replica; the pinch bubble's "<v>/div zoom" fits the
+    // bubble (scope_page BUBBLE, 120 px, SC_F16, centred) with the stock 3 px
+    // margin.
+    for (vd, probe, tag) in [(0.005f32, 3u8, "5mv"), (0.002, 3, "2mv"), (0.0005, 0, "500uv"), (0.0002, 0, "200uv")] {
+        let mut m = base.m;
+        m.wave = false;
+        m.status = scope_ui::ST_TD;
+        m.wvdiv = vd;
+        m.probe = probe;
+        let sc = stock::Scene { name: "zoom", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        stock::draw(&sc);
+        let name = format!("mcx/vzoom/{tag}");
+        ck.check_replica(&name);
+        if tag == "2mv" {
+            save(out, "s07-mcx-2mv");
+        }
+        // (The V/div shows in the CH1 block's title: strip_blocks.)
+        let mut b = scope_ui::Buf::new();
+        scope_ui::fmt_div(&mut b, vd, "V");
+        ck.cases += 1;
+        b.push("/div zoom");
+        let w = stockfont::text_width(stockfont::SC_F16, b.as_str(), 0);
+        if w > 120 - 6 {
+            ck.fail(&name, format!("pinch bubble {:?} {w} px > 114", b.as_str()));
         }
     }
     // The texts the wave view changes are no wider than what the stock
@@ -362,10 +471,10 @@ pub fn run(ck: &mut Checker, out: &str) {
     }
     let states = [
         stock::Scene { name: "wave", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
-        wave_scene(scope_ui::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
-        wave_scene(scope_ui::SRC_DMM, 0, scope_ui::ST_TD, false, 3),
-        wave_scene(scope_ui::SRC_DMM, 1, scope_ui::ST_STOP, false, 0),
-        wave_scene(scope_ui::SRC_DMM, 3, scope_ui::ST_RUN, true, 3),
+        wave_scene(crate::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+        wave_scene(crate::SRC_DMM, 0, scope_ui::ST_TD, false, 3),
+        wave_scene(crate::SRC_DMM, 1, scope_ui::ST_STOP, false, 0),
+        wave_scene(crate::SRC_DMM, 3, scope_ui::ST_RUN, true, 3),
     ];
     for (i, a) in states.iter().enumerate() {
         for (j, b) in states.iter().enumerate() {
@@ -379,6 +488,110 @@ pub fn run(ck: &mut Checker, out: &str) {
             scope_ui::update(&b.m);
             scope_ui::cells(&b.m, &b.cells);
             ck.same_as(&format!("wave/update/{i}->{j}"), &want);
+            nw += 1;
+        }
+    }
+    // A CSV recording (Model::rec, issues #101, #105 feedback): the REC mark
+    // (scope_ui::rec_mark) in the source badge's slot, the record bar beside
+    // it (also on the stock page of builds without the stream ISR,
+    // SRC_NONE, and in the combined view): running, stopped with its
+    // brackets, roll, the generator frequency; both blink phases; each of
+    // the texts (RecStyle; the default Dmm last so the rest of the run
+    // draws it; RecFunc with every unit). Updates between them, to / from
+    // no recording and the blink step (the dot's box alone) equal fresh draws.
+    let rec_scene = |src: u8, status: u8, roll: bool, gen: bool, dim: bool| {
+        let mut sc = wave_scene(src, 0, status, roll, 3);
+        sc.name = "rec";
+        sc.m.rec = true;
+        sc.m.rec_dim = dim;
+        sc.m.gen_hz = if gen { 1000.0 } else { 0.0 };
+        sc
+    };
+    let styles = [(scope_ui::RecStyle::Rec, "rec"), (scope_ui::RecStyle::RecDmm, "b"), (scope_ui::RecStyle::RecFunc, "c"), (scope_ui::RecStyle::DmmRec, "d"), (scope_ui::RecStyle::Dmm, "a")];
+    for (style, sn) in styles {
+        scope_ui::set_rec_style(style);
+        for dim in [false, true] {
+            for src in [crate::SRC_NONE, crate::SRC_MCX] {
+                for (status, roll, gen) in [(scope_ui::ST_TD, false, false), (scope_ui::ST_STOP, false, false), (scope_ui::ST_RUN, true, false), (scope_ui::ST_TD, false, true)] {
+                    let sc = rec_scene(src, status, roll, gen, dim);
+                    stock::draw(&sc);
+                    let name = format!("rec/{sn}/{}/{src}/{status}/{}/{}", dim as u8, roll as u8, gen as u8);
+                    ck.check_replica(&name);
+                    ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                    nw += 1;
+                    if src == crate::SRC_MCX {
+                        let st = match (status, roll, gen) {
+                            (scope_ui::ST_STOP, _, _) => "stop",
+                            (_, true, _) => "roll",
+                            (_, _, true) => "gen",
+                            _ => "run",
+                        };
+                        save(out, &format!("s05-rec-{sn}-{st}-{}", if dim { "off" } else { "on" }));
+                    }
+                }
+            }
+            // The combined view (no source badge; the strip below).
+            let mut sc = rec_scene(crate::SRC_NONE, scope_ui::ST_TD, false, false, dim);
+            sc.m.combined = true;
+            stock::draw(&sc);
+            let name = format!("rec/{sn}/{}/combined", dim as u8);
+            ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+            nw += 1;
+            save(out, &format!("s05-rec-{sn}-combined-{}", if dim { "off" } else { "on" }));
+        }
+        // RecFunc: every recorded function's unit (the widest decides).
+        if style == scope_ui::RecStyle::RecFunc {
+            for (k, f) in [1u8, 7, 10, 13, 14, 18, 15].into_iter().enumerate() {
+                let mut sc = rec_scene(crate::SRC_MCX, scope_ui::ST_STOP, false, false, false);
+                sc.m.rec_unit = scope_ui::rec_unit(f);
+                stock::draw(&sc);
+                let name = format!("rec/{sn}/unit/{f}");
+                ck.check_replica(&name);
+                ck.check_add(&name, &[("badge row", Bx::new(0, -2, 480, 24))], &[rb(scope_ui::SRC_BADGE)], top);
+                nw += 1;
+                save(out, &format!("s05-rec-c-unit{k}"));
+            }
+        }
+        let states = [
+            stock::Scene { name: "rec", m: base.m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() },
+            wave_scene(crate::SRC_MCX, 0, scope_ui::ST_TD, false, 3),
+            rec_scene(crate::SRC_MCX, scope_ui::ST_TD, false, false, false),
+            rec_scene(crate::SRC_MCX, scope_ui::ST_TD, false, false, true),
+            rec_scene(crate::SRC_MCX, scope_ui::ST_STOP, false, false, false),
+            rec_scene(crate::SRC_MCX, scope_ui::ST_STOP, false, false, true),
+            rec_scene(crate::SRC_NONE, scope_ui::ST_TD, false, true, false),
+            rec_scene(crate::SRC_NONE, scope_ui::ST_TD, false, true, true),
+            rec_scene(crate::SRC_NONE, scope_ui::ST_RUN, true, false, true),
+            {
+                let mut s = rec_scene(crate::SRC_MCX, scope_ui::ST_TD, false, false, false);
+                s.m.rec_unit = scope_ui::rec_unit(14);
+                s
+            },
+        ];
+        for (i, a) in states.iter().enumerate() {
+            for (j, b) in states.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                stock::draw(b);
+                let want = emu().fb.clone();
+                stock::draw(a);
+                stock::load(b);
+                scope_ui::update(&b.m);
+                scope_ui::cells(&b.m, &b.cells);
+                ck.same_as(&format!("rec/{sn}/update/{i}->{j}"), &want);
+                nw += 1;
+            }
+        }
+        // The blink step above a popup (App::sp_tick: rec_mark_blink alone).
+        for dim in [false, true] {
+            let mut b = rec_scene(crate::SRC_MCX, scope_ui::ST_TD, false, false, dim);
+            stock::draw(&b);
+            let want = emu().fb.clone();
+            b.m.rec_dim = !dim;
+            stock::draw(&b);
+            scope_ui::rec_mark_blink(scope_ui::SRC_BADGE, scope_ui::C_BAR, !dim, b.m.rec_unit);
+            ck.same_as(&format!("rec/{sn}/blink/{}", dim as u8), &want);
             nw += 1;
         }
     }
@@ -429,5 +642,152 @@ pub fn run(ck: &mut Checker, out: &str) {
             }
         }
     }
+    strip_blocks(ck, out);
     println!("scope additions: {n} FFT scenes, {nt} trigger-tab scenes, {nw} wave-view scenes, {nd} trigger-level drag steps");
+    gen_channel(ck, out);
+}
+
+/// The GEN channel (docs/scope-gen-channel.md): the computed trace under
+/// CH1, the trigger badge in its colour, the Source row of the Trigger
+/// tab and the GEN trace row of the Display tab; an update equals a fresh
+/// draw.
+fn gen_channel(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let shape = gen::Shape { wave: gen::Wave::Sine, lo_v: 0.0, hi_v: 3.0, duty: 0.5 };
+    for combined in [false, true] {
+        let mut m = base.m;
+        m.combined = combined;
+        m.tsrc = scope::TSRC_GEN;
+        let h = m.frame_h();
+        let draw = |m: &scope_ui::Model, popup: scope_ui::Popup, pv: &scope_ui::PopVals, gen_on: bool| {
+            let sc = stock::Scene { name: "gen", m: *m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+            stock::draw_with(&sc, pv);
+            if gen_on {
+                let g = scope_ui::graph();
+                for i in 0..scope_ui::NCOL {
+                    // 2.5 periods on the screen, 1 V/div, 0 V on the centre row.
+                    let (lo, hi) = shape.span(i as f32 * 2.5 / scope_ui::NCOL as f32, 2.5 / scope_ui::NCOL as f32);
+                    let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
+                    g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+                    let c = (200.0 + 60.0 * shape.unit(i as f32 * 1.5 / scope_ui::NCOL as f32 + 0.1)) as i32;
+                    g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
+                }
+                scope_ui::update(m);
+            }
+            scope_ui::draw_popup(popup, pv);
+        };
+        let mut pv = stock::popvals(&m);
+        pv.tsrc = scope::TSRC_GEN;
+        pv.gen_trace = true;
+        pv.ch2_on = true;
+        pv.ch2_vdiv = scope_ui::Txt::new("250mA");
+        // The DMM CH2 too: its block (on, 250mA) and a trace.
+        m.ch2_txt = scope_ui::Txt::new("250mA");
+        m.ch2_on = true;
+        m.gen_on = true;
+        m.gen_txt = scope_ui::Txt::new("1V");
+        draw(&m, scope_ui::Popup::None, &pv, true);
+        ck.check_replica(&format!("gen/{}/trace", combined as u8));
+        let want = emu().fb.clone();
+        if !combined {
+            save(out, "s08-gen-trace");
+        }
+        // Off -> on as an update.
+        draw(&m, scope_ui::Popup::None, &pv, false);
+        let g = scope_ui::graph();
+        for i in 0..scope_ui::NCOL {
+            let (lo, hi) = shape.span(i as f32 * 2.5 / scope_ui::NCOL as f32, 2.5 / scope_ui::NCOL as f32);
+            let r = |v: f32| (140.0 - 141.0 * v / 4.0) as i32;
+            g.gn[i] = (scope_ui::trace_fy(h, r(hi)), scope_ui::trace_fy(h, r(lo)));
+            let c = (200.0 + 60.0 * shape.unit(i as f32 * 1.5 / scope_ui::NCOL as f32 + 0.1)) as i32;
+            g.c2[i] = (scope_ui::trace_fy(h, c), scope_ui::trace_fy(h, c + 1));
+        }
+        scope_ui::update(&m);
+        ck.same_as(&format!("gen/{}/update", combined as u8), &want);
+        for (tab, name) in [(1u8, "s08-gen-display"), (2, "s08-gen-trigger")] {
+            draw(&m, scope_ui::Popup::Mf(tab), &pv, true);
+            let add = if tab == 1 {
+                vec![rb(scope_ui::GT_LABEL), rb(scope_ui::C2_LABEL), rb(scope_ui::C2_MINUS), rb(scope_ui::C2_VALUE), rb(scope_ui::C2_PLUS)]
+            } else {
+                vec![rb(scope_ui::TS_LABEL), rb(scope_ui::TS_NOTE)]
+            };
+            let area = if tab == 1 { Bx::new(14, 161, 399, 99) } else { Bx::new(14, 186, 399, 50) };
+            ck.check_add(&format!("gen/{}/tab{tab}", combined as u8), &[("page", area)], &add, Bx::new(13, 20, 401, if tab == 1 { 241 } else { 216 }));
+            if !combined {
+                save(out, name);
+            }
+        }
+    }
+}
+
+/// The right panel's channel blocks (scope_ui::panel_part, owner
+/// 2026-11-02) under the full layout rules against the whole screen: every
+/// CH1 V/div with the probes x0.1 / x1 / x10 / x1000 and AC / DC, the DMM,
+/// GEN and math scales (FFT dB/div, ABS V/div), on / off, a popup open, a
+/// part pressed, the Wave view.
+pub fn strip_blocks(ck: &mut Checker, out: &str) {
+    let base = &stock::scenes()[0];
+    let panel = Bx::new(scope_ui::PANEL.x as i32, scope_ui::PANEL.y as i32, scope_ui::PANEL.w as i32, scope_ui::PANEL.h as i32);
+    let screen = Bx::new(0, 0, 480, 320);
+    let mut n = 0;
+    let mut shot = |ck: &mut Checker, m: scope_ui::Model, name: String, save_as: Option<&str>| {
+        let sc = stock::Scene { name: "strip", m, popup: scope_ui::Popup::None, trace: base.trace.clone(), persist: None, cols: 399, cells: base.cells.clone() };
+        stock::draw(&sc);
+        ck.check_replica(&name);
+        ck.check_add(&name, &[("panel", panel), ("screen", screen)], &[panel], screen);
+        if let Some(f) = save_as {
+            save(out, f);
+        }
+        n += 1;
+    };
+    let dmm = ["--", "250mA", "1.5V", "2.5A", "200uA", "15mV", "250V"];
+    let gen = ["1mV", "500mV", "10kV", "2V"];
+    // The V/div steps (scope::VSTEPS, 2 mV .. 10 V) times the probe, as the
+    // page sets them (wvdiv: the value, vdiv: its label index).
+    for (vi, &vs) in scope::VSTEPS.iter().enumerate() {
+        for probe in [0u8, 3, 6, 12] {
+            for ac in [false, true] {
+                let mut m = base.m;
+                let vdiv = (vi + probe as usize).saturating_sub(2).min(21) as u8;
+                m.vdiv = vdiv;
+                m.wvdiv = vs * scope::PROBES[probe as usize];
+                m.probe = probe;
+                m.ac = ac;
+                let k = vi + probe as usize;
+                m.ch2_on = k % 2 == 0;
+                m.ch2_txt = scope_ui::Txt::new(dmm[k % dmm.len()]);
+                m.gen_on = k % 3 == 0;
+                m.gen_txt = scope_ui::Txt::new(gen[k % gen.len()]);
+                m.math_on = k % 2 == 1;
+                m.math_mode = if k % 4 < 2 { 5 } else { 6 };
+                let mut ms = scope_ui::Buf::new();
+                ms.push(if m.math_mode == 5 { scope_ui::FFT_DB[k % 13] } else { scope_ui::VDIV_LABELS[k % 22] });
+                if m.math_mode != 5 {
+                    ms.push("V");
+                }
+                m.math_scale = scope_ui::Txt::new(ms.as_str());
+                m.pressed = (k % 13) as u8;
+                m.ch1_open = k % 5 == 0;
+                m.math_open = k % 7 == 0;
+                let save_as = match (vi, probe, ac) {
+                    (11, 12, true) => Some("s09-strip-ac-x1000-10v"),
+                    (7, 6, true) => Some("s09-strip-ac-x10-500mv"),
+                    (0, 0, true) => Some("s09-strip-ac-x0.1-2mv"),
+                    _ => None,
+                };
+                shot(ck, m, format!("strip/blocks/{vi}/{probe}/{ac}"), save_as);
+            }
+        }
+    }
+    // The Wave view: the CH1 block names the function, DMM reads MCX.
+    for (txt, wv) in [("AC V", 250.0f32), ("AC mA", 0.015), ("AC uA", 150e-6), ("DC V", 1.5)] {
+        let mut m = base.m;
+        m.wave = true;
+        m.ch1_txt = txt;
+        m.wvdiv = wv;
+        m.amps = txt.ends_with('A');
+        m.ac = true;
+        shot(ck, m, format!("strip/wave/{txt}"), if txt == "AC uA" { Some("s09-strip-wave") } else { None });
+    }
+    println!("strip blocks: {n} scenes");
 }

@@ -7,7 +7,7 @@
 //!     SCOPE / SHOTS / INFO / DEBUG), writable only for what vwrite.rs
 //!     accepts (deletes, a firmware file; `gates_writes`: it answers every
 //!     block itself); the SPI flash is internal storage only (fatdir.rs);
-//!   without `vdisk`, and recovery-usb: the on-board
+//!   without `vdisk`: the on-board
 //!     W25Q128 (spiflash.rs), the stock FAT16 volume with 4096-byte sectors
 //!     (stock/re/analysis/spiflash_v2_6.h), writable.
 //! INQUIRY gives each device's product name (removable); with EVPD, page
@@ -43,7 +43,7 @@ use usbd_storage::transport::TransportError;
 
 /// Largest block of the devices served: 512 (the generated volume) in the
 /// native build, 4096 (the SPI disk) where that is exported.
-pub const MAX_BLOCK: usize = if cfg!(all(feature = "vdisk", not(feature = "recovery-usb"))) { 512 } else { 4096 };
+pub const MAX_BLOCK: usize = if cfg!(feature = "vdisk") { 512 } else { 4096 };
 
 /// Block storage behind the USB disk.
 pub trait BlockDevice {
@@ -108,12 +108,16 @@ pub trait BlockDevice {
         false
     }
     /// `write_block` spread over several calls, for a caller that must not
-    /// stall the main loop (screenshot.rs). Call again with the same `lba`,
-    /// `buf` and `st` (starting from `Step::default()`) until it returns
-    /// Some(ok). Default: the whole write at once.
-    fn write_step(&mut self, lba: u32, buf: &[u8], st: &mut Step) -> Option<bool> {
+    /// stall the main loop (screenshot.rs, csvlog.rs). Call again with the
+    /// same `lba`, `buf` and `st` (starting from `Step::default()`) until it
+    /// returns Some(ok). `buf` is a byte slice or a word-only RAM (wordram.rs
+    /// `BlockSrc`). Default: the whole write at once, from a byte slice only.
+    fn write_step(&mut self, lba: u32, buf: &dyn crate::wordram::BlockSrc, st: &mut Step) -> Option<bool> {
         let _ = st;
-        Some(self.write_block(lba, buf))
+        match buf.bytes() {
+            Some(b) => Some(self.write_block(lba, b)),
+            None => Some(false),
+        }
     }
 }
 
@@ -711,12 +715,10 @@ fn handle<B: UsbBus>(
             *sense = SENSE_OK;
             cmd.pass(0)
         }
-        // START STOP UNIT. Any of them is noted for recovery.rs (it powers
-        // off). LoEj = 1: eject (Start = 0) / load (Start = 1) the medium
+        // START STOP UNIT. LoEj = 1: eject (Start = 0) / load (Start = 1) the medium
         // (module text); LoEj = 0 (a plain stop / start), a power condition
         // (CB[4] bits 7..4) or a CBW not found exactly once: nothing else.
         ScsiCommand::Unknown { cmd: 0x1B } => {
-            STOP_UNIT.store(true, o);
             let b4 = cdb4(core::borrow::BorrowMut::<[u8]>::borrow_mut(io), lun, 0x1B);
             SSU_COUNT.fetch_add(1, o);
             SSU_LAST.store(b4.map_or(0x100, u32::from), o);
@@ -791,7 +793,3 @@ impl<B: UsbBus> UsbClass<B> for Msc<'_, B> {
     }
 }
 
-/// Set when the host sent SCSI START STOP UNIT (opcode 0x1B: eject, or a
-/// stop / power-off request). usbd-storage hides the CDB bytes (LoEj/Start),
-/// so any 0x1B counts; the native recovery mode powers off on it.
-pub static STOP_UNIT: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);

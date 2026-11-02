@@ -7,7 +7,7 @@ labels: bug
 **Meter**
 
 - Model (DM40A / DM40B / DM40C):
-- opendm40 version (Settings > More > More > Device, or `*IDN?`):
+- opendm40 version (Settings > Other > Device info, or `*IDN?`):
 - Installed from: a release file / an own build (commit):
 
 **What you did**

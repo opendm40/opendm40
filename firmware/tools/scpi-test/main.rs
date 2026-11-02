@@ -4,6 +4,13 @@
 
 #[path = "../../src/ident.rs"]
 mod ident;
+#[allow(dead_code)]
+#[path = "../../src/pack10.rs"]
+#[allow(dead_code)]
+mod pack10;
+#[allow(dead_code)]
+#[path = "../../src/decode.rs"]
+mod decode;
 #[path = "../../src/scpi.rs"]
 mod scpi;
 mod hy3131 {
@@ -21,13 +28,29 @@ mod boot {
     pub fn enter_loader_update() -> bool {
         false
     }
+    pub fn request_loader() {}
 }
 mod clock {
     pub const HCLK_HZ: u32 = 200_000_000;
 }
+mod power {
+    pub struct ChgLog {
+        pub n: u32,
+        pub ev: [u32; 8],
+    }
+    pub static mut CHG_LOG: ChgLog = ChgLog { n: 0, ev: [0; 8] };
+    pub fn dbg_state() -> [u32; 8] {
+        [0; 8]
+    }
+    pub fn dbg_pin(_pin: u32, _mode: u32) -> bool {
+        true
+    }
+}
 mod csvlog {
     pub const INTERVALS_S: [u32; 4] = [0, 1, 10, 60];
     pub const DURATIONS_S: [u32; 5] = [0, 600, 3600, 8 * 3600, 24 * 3600];
+    pub const ON_CHANGE: u8 = 4;
+    pub const CHANGES: [&str; 3] = ["0.1", "1", "5"];
     pub fn parse_path(s: &[u8]) -> Option<([u8; 11], bool)> {
         // "WRONG/..." stands for a prefix of another directory.
         if s.is_empty() { None } else { Some(([b' '; 11], !s.starts_with(b"\"WRONG/"))) }
@@ -187,19 +210,55 @@ fn set_commands() {
     check(matches!(s.handle(b"TIM:SCAL 100US", 1), Out::Instr(Cmd::TimScale(Some(v))) if (v - 1e-4).abs() < 1e-9), "TIM:SCAL 100US");
     check(matches!(s.handle(b"TIM:MAIN:SCAL 1m", 1), Out::Instr(Cmd::TimScale(Some(v))) if (v - 1e-3).abs() < 1e-9), "TIM:MAIN:SCAL 1m");
     check(matches!(s.handle(b"CHAN1:SCAL 0.5", 1), Out::Instr(Cmd::ChScale(Some(v))) if v == 0.5), "CHAN1:SCAL 0.5");
+    check(matches!(s.handle(b"CHAN1:SCAL 2mV", 1), Out::Instr(Cmd::ChScale(Some(v))) if (v - 0.002).abs() < 1e-9), "CHAN1:SCAL 2mV");
+    check(matches!(s.handle(b"CHAN1:SCAL 0.005", 1), Out::Instr(Cmd::ChScale(Some(v))) if (v - 0.005).abs() < 1e-9), "CHAN1:SCAL 0.005");
     check(matches!(s.handle(b"CHAN:COUP AC", 1), Out::Instr(Cmd::ChCoup(Some(true)))), "CHAN:COUP AC");
     check(matches!(s.handle(b"TRIG:SLOP NEG", 1), Out::Instr(Cmd::TrigSlope(Some(false)))), "TRIG:SLOP NEG");
     check(matches!(s.handle(b"TRIG:EDGE:SLOP POS", 1), Out::Instr(Cmd::TrigSlope(Some(true)))), "TRIG:EDGE:SLOP POS");
     check(matches!(s.handle(b"TRIG:EDGE:LEV 1.5", 1), Out::Instr(Cmd::TrigLevel(Some(v))) if v == 1.5), "TRIG:EDGE:LEV 1.5");
     check(matches!(s.handle(b"TRIG:SWE NORM", 1), Out::Instr(Cmd::TrigSweep(Some(1)))), "TRIG:SWE NORM");
+    check(matches!(s.handle(b"TRIG:SOUR CHAN1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR CHAN1 (short form with its suffix)");
+    check(matches!(s.handle(b"TRIG:SOUR chan", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:SOUR chan");
+    check(matches!(s.handle(b"TRIG:EDGE:SOUR CHANnel1", 1), Out::Instr(Cmd::TrigSource(Some(0)))), "TRIG:EDGE:SOUR CHANnel1");
+    check(matches!(s.handle(b"TRIG:SOUR GEN", 1), Out::Instr(Cmd::TrigSource(Some(1)))), "TRIG:SOUR GEN");
+    // The GEN trace on the scope page: its V/div and on / off.
+    check(matches!(s.handle(b"GEN:SCAL 0.5", 1), Out::Instr(Cmd::GenScale(Some(v))) if v == 0.5), "GEN:SCAL 0.5");
+    check(matches!(s.handle(b"GENerator:SCALe 200mV", 1), Out::Instr(Cmd::GenScale(Some(v))) if (v - 0.2).abs() < 1e-6), "GENerator:SCALe 200mV");
+    check(matches!(s.handle(b"GEN:SCAL?", 1), Out::Instr(Cmd::GenScale(None))), "GEN:SCAL?");
+    check(matches!(s.handle(b"GEN:DISP ON", 1), Out::Instr(Cmd::GenDisp(Some(true)))), "GEN:DISP ON");
+    check(matches!(s.handle(b"GEN:DISP 0", 1), Out::Instr(Cmd::GenDisp(Some(false)))), "GEN:DISP 0");
+    check(matches!(s.handle(b"GEN:DISP?", 1), Out::Instr(Cmd::GenDisp(None))), "GEN:DISP?");
     check(matches!(s.handle(b"RES:NEG ON", 1), Out::Instr(Cmd::ResNeg(Some(true)))), "RES:NEG ON");
     check(matches!(s.handle(b"SENS:RESistance:NEGative off", 1), Out::Instr(Cmd::ResNeg(Some(false)))), "SENS:RESistance:NEGative off");
     check(matches!(s.handle(b"RES:NEG?", 1), Out::Instr(Cmd::ResNeg(None))), "RES:NEG? is the query");
     check(matches!(s.handle(b"DISP:BURD 1", 1), Out::Instr(Cmd::DispBurden(Some(true)))), "DISP:BURD 1");
-    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO ON", 1), Out::Instr(Cmd::ModeRemember(Some(true)))), "MEM:STAT:REC:AUTO ON");
+    check(matches!(s.handle(b"MEMory:STATe:RECall:AUTO 0", 1), Out::Instr(Cmd::ModeRemember(Some(false)))), "MEMory:STATe:RECall:AUTO 0");
+    check(matches!(s.handle(b"MEM:STAT:REC:AUTO?", 1), Out::Instr(Cmd::ModeRemember(None))), "MEM:STAT:REC:AUTO? is the query");    check(matches!(s.handle(b"VOLT:RANG 600MV", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 0.6).abs() < 1e-6), "VOLT:RANG 600MV");
     check(matches!(s.handle(b"CURR:RANG 6MA", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if (v - 6e-3).abs() < 1e-9), "CURR:RANG 6MA = 6 mA");
     check(matches!(s.handle(b"RES:RANG 6MOHM", 1), Out::Instr(Cmd::Range(_, Rng::Value(v))) if v == 6e6), "RES:RANG 6MOHM = 6 Mohm");
     check(matches!(s.handle(b"CONF:VOLT:DC 60mV", 1), Out::Instr(Cmd::Conf(_, Rng::Value(v), None)) if (v - 0.06).abs() < 1e-6), "CONF:VOLT:DC 60mV");
+    // The experimental 600 Mohm range (dmm::OHM600, ohm r7): RES:RANG /
+    // CONF:RES above 60 Mohm select it (app.rs scpi_range: the smallest item
+    // that holds the value); MAX is the item before it, 60 Mohm.
+    check(matches!(s.handle(b"RES:RANG 600E6", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v == 600e6), "RES:RANG 600E6");
+    check(matches!(s.handle(b"CONF:RES 600E6", 1), Out::Instr(Cmd::Conf(10, Rng::Value(v), None)) if v == 600e6), "CONF:RES 600E6");
+    check(matches!(s.handle(b"RES:RANG MAX", 1), Out::Instr(Cmd::Range(10, Rng::Value(v))) if v.is_infinite()), "RES:RANG MAX");
+    {
+        let items = scpi::range_items(10);
+        // app.rs scpi_range: MAX = the top item, on ohm the one below 600 Mohm.
+        let pick = |x: f32| if x.is_infinite() { items.len().checked_sub(2) } else { items.iter().position(|&it| it >= x * 0.9999) };
+        let code = |x: f32| pick(x).map(|i| scpi::range_item_code(10, i));
+        check(code(600e6) == Some(7) && code(100e6) == Some(7) && code(60.1e6) == Some(7), "RES:RANG 100E6 .. 600E6: r7 (600 Mohm)");
+        check(code(60e6) == Some(6) && code(f32::INFINITY) == Some(6) && code(0.0) == Some(0), "RES:RANG 60E6 / MAX: 60 Mohm, MIN: 60 ohm");
+        check(code(601e6).is_none(), "RES:RANG 601E6: out of range");
+        check(scpi::range_si(10, 7) == Some(600e6), "RANG? on 600 Mohm");
+    }
+    check(matches!(s.handle(b"DBG:OHM6?", 0), Out::Dbg(scpi::Dbg::Ohm6(None))), "DBG:OHM6?");
+    check(
+        matches!(s.handle(b"DBG:OHM6 1.007,,3", 0), Out::Dbg(scpi::Dbg::Ohm6(Some(v))) if v[0] == 1.007f32 && v[1].is_nan() && v[2] == 3.0 && v[4].is_nan()),
+        "DBG:OHM6 1.007,,3: empty fields NaN",
+    );
     check(err(&mut s) == "0,\"No error\"", "no error after the good values");
 
     // Bad values: no reply, no Cmd (the setting kept), an error.
@@ -213,6 +272,8 @@ fn set_commands() {
         ("SOUR:VOLT -1", "-222"),
         ("SOUR:VOLT:OFFS x", "-224"),
         ("SOUR:FUNC:SQU:DCYC 150", "-222"),
+        ("POW:PHAS 200", "-222"),
+        ("POW:PHAS x", "-224"),
         ("SOUR:FUNC NOISE", "-224"),
         ("SOUR:FUNC", "-109"),
         ("OUTP MAYBE", "-224"),
@@ -226,10 +287,31 @@ fn set_commands() {
         ("CHAN1:DISP ON", "-113"),
         ("TRIG:SLOP UP", "-224"),
         ("TRIG:SWE NEVER", "-224"),
+        ("TRIG:SOUR CHAN2", "-224"),
+        ("TRIG:SOUR CHANNEL", "-224"),
         ("TRIG:LEV x", "-224"),
         ("TRIG:LEV", "-109"),
         ("LOG:STAT MAYBE", "-224"),
-        ("LOG:OSR 9", "-224"),
+        ("LOG:OSR 9", "-222"),
+        ("LOG:OSR 2.5", "-224"),
+        ("LOG:OSR x", "-224"),
+        ("LOG:DUR -5", "-222"),
+        ("LOG:DUR x", "-224"),
+        ("LOG:SRAT 0", "-222"),
+        ("LOG:CSV:INT 5", "-222"),
+        ("LOG:CSV:INT x", "-224"),
+        ("LOG:CSV:DUR 7", "-222"),
+        ("LOG:CSV:CHAN 2", "-222"),
+        ("LOG:CSV:CHAN x", "-224"),
+        ("LOG:CSV:INT CHANNEL", "-224"),
+        ("LOG:SOUR AD3", "-224"),
+        ("SYST:BEEP:VOL 101", "-222"),
+        ("SYST:BEEP:VOL -1", "-222"),
+        ("SYST:BEEP:VOL x", "-224"),
+        ("SYST:BEEP:VOL", "-109"),
+        ("SYST:ALER:ENAB 16", "-222"),
+        ("SYST:ALER:ENAB 2.5", "-224"),
+        ("MMEM:DATA?", "-109"),
         ("LOG:CHOP 2", "-224"),
         ("LOG:CSV x", "-224"),
         ("VOLT:RANG x", "-224"),
@@ -255,6 +337,17 @@ fn set_commands() {
     let o = s.handle(b"SOUR:FREQ x;SOUR:FREQ?", 1);
     check(matches!(o, Out::Instr(Cmd::GenFreq(None))) && err(&mut s).starts_with("-224,"), "SOUR:FREQ x;SOUR:FREQ?: the query runs, -224 queued");
     check(matches!(s.handle(b"LOG:STAT ON", 1), Out::Log(Log::State(Some(true)))), "LOG:STAT ON");
+    // Record page On change (csvlog.rs on-change mode).
+    check(matches!(s.handle(b"LOG:CSV:INT CHAN", 1), Out::Log(Log::CsvInt(Some(4)))), "LOG:CSV:INT CHAN: On change");
+    check(matches!(s.handle(b"log:csv:interval change", 1), Out::Log(Log::CsvInt(Some(4)))), "log:csv:interval change");
+    check(matches!(s.handle(b"LOG:CSV:INT 10", 1), Out::Log(Log::CsvInt(Some(2)))), "LOG:CSV:INT 10");
+    check(matches!(s.handle(b"LOG:CSV:DUR 3600", 1), Out::Log(Log::CsvDur(Some(2)))), "LOG:CSV:DUR 3600");
+    check(matches!(s.handle(b"LOG:CSV:CHAN 0.1", 1), Out::Log(Log::CsvChg(Some(0)))), "LOG:CSV:CHAN 0.1");
+    check(matches!(s.handle(b"LOG:CSV:CHANge 5", 1), Out::Log(Log::CsvChg(Some(2)))), "LOG:CSV:CHANge 5");
+    check(matches!(s.handle(b"LOG:CSV:CHAN?", 1), Out::Log(Log::CsvChg(None))), "LOG:CSV:CHAN? is the query");
+    check(matches!(s.handle(b"LOG:CSV:FREE?", 1), Out::Log(Log::CsvFree)), "LOG:CSV:FREE?");
+    check(matches!(s.handle(b"LOG:SOUR ad2", 1), Out::Log(Log::Source(Some(true)))), "LOG:SOUR ad2: parameters are not case-sensitive");
+    check(matches!(s.handle(b"log:sour Ad1", 1), Out::Log(Log::Source(Some(false)))), "log:sour Ad1");
 }
 
 fn error_queue() {
@@ -345,6 +438,9 @@ fn nr3_exact() {
         let r = nr3(v);
         check(r == want, &format!("nr3 {v} = {r} (want {want})"));
     }
+    // No value (a scope measurement without a result, #79): SCPI NaN.
+    let r = nr3(f32::NAN);
+    check(r == "+9.91000000E+37", &format!("nr3 NaN = {r} (want +9.91000000E+37)"));
     // A sweep against Rust's correctly rounded {:.6E}.
     let mut bad = 0;
     let mut seed: u32 = 12345;
@@ -446,7 +542,71 @@ fn touch_cal() {
     }
 }
 
+/// DBG:PING? field 3 (issue #97): the boot hold reads u32::MAX, not a
+/// wrapped u64; a host keepalive reads the ms left; past the deadline 0.
+fn ping_keepalive() {
+    let hold = u64::MAX / 4; // main.rs INITIAL_HOLD_MS
+    for now in [0u64, 7750, 1 << 40] {
+        let l = scpi::keepalive_left(hold, now);
+        check(l == u32::MAX, &format!("keepalive_left(hold, {now}) = {l}"));
+    }
+    check(scpi::keepalive_left(20_000, 5_000) == 15_000, "keepalive_left 15 s");
+    check(scpi::keepalive_left(5_000, 20_000) == 0, "keepalive_left past the deadline");
+}
+
+/// DECode:... (the protocol decoder): the parse, the refused values.
+fn decode_cmds() {
+    use scpi::Dcd as D;
+    let mut s = Scpi::new();
+    let ok: &[(&str, D)] = &[
+        ("DEC:PROT MODB", D::Proto(Some(1))), // the old Modbus protocol: UART
+        ("DECODE:PROTOCOL UART", D::Proto(Some(1))),
+        ("DEC:PROT OFF", D::Proto(Some(0))),
+        ("DEC:PROT?", D::Proto(None)),
+        ("DEC:BAUD 9600", D::Baud(Some(9600))),
+        ("DEC:BAUD AUTO", D::Baud(Some(0))),
+        ("DEC:BAUD 115.2k", D::Baud(Some(115_200))),
+        ("DEC:BAUD?", D::Baud(None)),
+        ("DEC:RATE?", D::Rate),
+        ("DEC:FORM 7e1", D::Fmt(Some(3))),
+        ("DEC:FORMAT 8O1", D::Fmt(Some(2))),
+        ("DEC:POL INV", D::Inv(Some(true))),
+        ("DEC:POLARITY NORMAL", D::Inv(Some(false))),
+        ("DEC:THR 1.5", D::Thr(Some(1.5))),
+        ("DEC:THR 800MV", D::Thr(Some(0.8))),
+        ("DEC:THR?", D::Thr(None)),
+        ("DEC:LEV?", D::Level),
+        ("DEC:COUN?", D::Count),
+        ("DEC:FRAM?", D::Frames(0)),
+        ("DEC:FRAM? 10", D::Frames(10)),
+        ("DEC:MODE LOG", D::Mode(Some(1))),
+        ("DECODE:MODE BAND", D::Mode(Some(0))),
+        ("DEC:MODE?", D::Mode(None)),
+        ("DEC:CLE", D::Clear),
+        ("DECODE:CLEAR", D::Clear),
+    ];
+    for (cmd, want) in ok {
+        let got = s.handle(cmd.as_bytes(), 1);
+        check(matches!(got, Out::Dcd(c) if c == *want), &format!("{cmd}: parsed"));
+    }
+    match s.handle(b"DEC:THR AUTO", 1) {
+        Out::Dcd(D::Thr(Some(v))) => check(v.is_nan(), "DEC:THR AUTO: NaN"),
+        _ => check(false, "DEC:THR AUTO: parsed"),
+    }
+    check(err(&mut s) == "0,\"No error\"", "DECode: no error");
+    for bad in ["DEC:BAUD 100", "DEC:BAUD 1E6", "DEC:FORM 8N2", "DEC:POL UP", "DEC:PROT CAN", "DEC:THR 1A", "DEC:FRAM? -1", "DEC:MODE LIST"] {
+        check(!matches!(s.handle(bad.as_bytes(), 1), Out::Dcd(_)), &format!("{bad}: refused"));
+        check(err(&mut s).contains("Illegal parameter value"), &format!("{bad}: Illegal parameter value"));
+    }
+    for undef in ["DEC:WHAT?", "DEC ON", "DEC:CLE?"] {
+
+        check(!matches!(s.handle(undef.as_bytes(), 1), Out::Dcd(_)), &format!("{undef}: refused"));
+        check(err(&mut s).contains("Undefined header"), &format!("{undef}: Undefined header"));
+    }
+}
+
 fn main() {
+    decode_cmds();
     suffixes();
     set_commands();
     error_queue();
@@ -455,6 +615,7 @@ fn main() {
     pow10f_exact();
     mmem_dirs();
     touch_cal();
+    ping_keepalive();
     let f = unsafe { FAILS };
     if f > 0 {
         println!("{f} FAILED");

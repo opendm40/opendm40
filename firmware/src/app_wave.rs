@@ -165,10 +165,17 @@ impl App {
         if self.scope.wave_on() {
             self.scope.wave_keep(&mut RingSrc);
         }
+        self.ch2_drain();
+    }
+
+    /// The DMM page shows the Wave chip (ui::wave_chip): V or A, DC or AC
+    /// (where `wave_open` opens the view; a recording still refuses it).
+    pub(super) fn wave_avail(&self) -> bool {
+        WAVE_BUILD && matches!(self.dmm.button(), Button::Volt | Button::Amp) && self.dmm.sub() < 2 && !self.dmm.pw.on
     }
 
     /// Open the wave view on the current DMM function (MF "Wave", the
-    /// source badge). Refused (toast) where there is no AD2 waveform.
+    /// source badge, the DMM page's Wave chip). Refused (toast) where there is no AD2 waveform.
     #[inline(never)] // .cold (link-native.x): on a tap
     pub(super) fn wave_open(&mut self, clk: &mut Clock) {
         let now = clk.now_ms();
@@ -183,6 +190,13 @@ impl App {
             Some("Wave: not in AC+DC/AUTO")
         } else if crate::csvlog::active() {
             Some("Wave: recording runs")
+        } else if crate::hy3131::streaming() && !self.ch2.live {
+            // A logger session (or the inrush capture) owns the HY3131:
+            // no Wave view (the range step below would write the DMM
+            // under the stream). CH2's stream is taken over (main.rs stops
+            // it: `ch2_want` is None in the Wave view; it starts again
+            // when the view closes, CH2 still on).
+            Some("Wave: data logger running")
         } else {
             None
         };
@@ -210,7 +224,10 @@ impl App {
         } else {
             None
         };
-        if self.dmm.is_auto() {
+        // Under CH2's stream the range is set by main.rs once the stream
+        // has stopped (WaveReq::Range: the same range, now fixed).
+        let defer = crate::hy3131::streaming() && self.dmm.is_auto();
+        if self.dmm.is_auto() && !defer {
             self.dmm.set_range(clk, Some(a.item));
         }
         let Some(a) = self.dmm.ad2_scale() else { return };
@@ -218,7 +235,9 @@ impl App {
         self.scope.wave_enter(scale_of(a, full_vdiv(&a)), now);
         crate::scope_ui::set_tb_lo(scope::WAVE_TB_MIN);
         crate::scope_ui::graph().clear();
-        self.wave_req = None; // the scope's restart flag asks for the start
+        // The scope's restart flag asks for the start; a deferred range
+        // step starts it after setting the range.
+        self.wave_req = if defer { Some(WaveReq::Range(a.item)) } else { None };
         if self.view != View::Scope {
             self.show(View::Scope, clk);
         } else {
