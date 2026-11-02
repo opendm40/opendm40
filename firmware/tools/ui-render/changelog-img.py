@@ -101,3 +101,15 @@ elif tag == 'v0.4.0':
                       (now('dmm-ohm-600m'), (0, 0, 480, 172), 'Reading')])
     pair('record-button', at(prev, 'range-a'), now('range-a'), (0, 0, 480, 290))
     pair('cont-short', at(prev, 'dmm-cont'), now('dmm-cont'), BODY)
+    FULL = (0, 0, 480, 320)
+    side('decoder', [(now('scope-decode'), FULL, 'UART'),
+                     (now('scope-decode-modbus'), FULL, 'Modbus RTU, stopped')])
+    pair('scope-panel', at(prev, 'scope'), now('scope'), FULL)
+    single('channels', now('scope-channels'), FULL)
+    single('drag', now('scope-drag'), (0, 0) + now('scope-drag').size)
+    pair('extra-digit', at(prev, 'dmm-extra'), now('dmm-extra'), BODY)
+    single('wave-sigma', now('dmm-extra'), (0, 174, 480, 280))
+    pair('settings', at(prev, 'settings1'), now('settings-display'), FULL)
+    single('mv-div', m2('s07-mcx-2mv'), (0, 0, 480, 300))
+    side('decode-log', [(now('scope-decode-log'), FULL, 'Mode Log'),
+                        (now('scope-decode-log-wave'), FULL, 'A frame')])
