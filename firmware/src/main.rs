@@ -5,6 +5,7 @@ mod app;
 mod autooff;
 mod bargraph;
 mod bt;
+mod caltail;
 mod clock;
 /// cold_str! / cold_set!: read-only data of region C code in region C.
 mod cold;

@@ -351,6 +351,8 @@ pub fn boot() {
     let mut slices: [&[u8]; SAFE] = [&[]; SAFE];
     for (s, &(_, addr, len)) in slices.iter_mut().zip(FILES.iter()) {
         // Read-only views of internal flash / system memory.
+        // The sources may be gone (an application in sectors 9..11): the tail's copies.
+        let (addr, len) = crate::caltail::backup_source(addr, len);
         *s = unsafe { core::slice::from_raw_parts(addr as *const u8, len as usize) };
     }
     static EMPTY: &[u8] = &[];

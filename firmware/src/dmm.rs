@@ -114,8 +114,15 @@ static REC_LOADED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBo
 /// every reader (`cal`, the scope's `cal_pair`, hwtrig) takes its default.
 #[cfg_attr(not(target_os = "none"), allow(dead_code))]
 pub fn load_record() {
+    let base = crate::caltail::rec_base();
     for (i, w) in REC_COPY.iter().enumerate() {
-        w.store(unsafe { read_volatile((SETTINGS + 4 * i as u32) as *const u32) }, core::sync::atomic::Ordering::Relaxed);
+        // The tail holds the 800 CRC-covered bytes only: the rest of the copy reads as erased.
+        let v = if base != SETTINGS && i >= REC_CRC_END / 4 {
+            u32::MAX
+        } else {
+            unsafe { read_volatile((base + 4 * i as u32) as *const u32) }
+        };
+        w.store(v, core::sync::atomic::Ordering::Relaxed);
     }
     let ok = rec_crc_ok(|i| REC_COPY[i].load(core::sync::atomic::Ordering::Relaxed));
     REC_CRC_OK.store(ok, core::sync::atomic::Ordering::Relaxed);
@@ -158,7 +165,7 @@ pub fn rec_crc_ok(word: impl Fn(usize) -> u32) -> bool {
 pub fn rec_u32(off: u32) -> u32 {
     match REC_COPY.get(off as usize / 4) {
         Some(w) if REC_LOADED.load(core::sync::atomic::Ordering::Acquire) => w.load(core::sync::atomic::Ordering::Relaxed),
-        _ => unsafe { read_volatile((SETTINGS + off) as *const u32) },
+        _ => unsafe { read_volatile((crate::caltail::rec_base() + off) as *const u32) },
     }
 }
 

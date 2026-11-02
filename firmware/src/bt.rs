@@ -326,9 +326,9 @@ impl Bt {
     #[inline(never)] // .cold (link-native.x): start-up
     pub fn new() -> Self {
         for (i, b) in BOOT_VER.iter().enumerate() {
-            b.store(unsafe { core::ptr::read_volatile((BOOT_DATA + 0x10 + i as u32) as *const u8) }, Ordering::Relaxed);
+            b.store(unsafe { core::ptr::read_volatile((crate::caltail::blk_base() + 0x10 + i as u32) as *const u8) }, Ordering::Relaxed);
         }
-        BOOT_SN.store(unsafe { core::ptr::read_volatile((BOOT_DATA + 0x0C) as *const u32) }, Ordering::Relaxed);
+        BOOT_SN.store(unsafe { core::ptr::read_volatile((crate::caltail::blk_base() + 0x0C) as *const u32) }, Ordering::Relaxed);
         unsafe {
             modify32(RCU_APB1EN, 0, 1 << 19); // UART4
             // PA0 / PA1: AF8.
@@ -632,7 +632,6 @@ impl Bt {
 
 /// Bootloader data block in internal flash (read only): serial number and
 /// version bytes.
-const BOOT_DATA: u32 = 0x080A_4000;
 
 /// Its version bytes +0x10..+0x12 (loader major, HW major / minor), copied
 /// once by `Bt::new` at start-up: BT command 02 and the Device page read
