@@ -229,7 +229,10 @@ impl App {
     /// CH2's scope measurements over the frame's time window (the CH2
     /// samples taken while CH1's visible samples were): all NaN while CH2
     /// is off, rolling, or holds no sample of that window. The cursor items
-    /// (7 / 8 / 17) are `cursor_values`'.
+    /// (7 / 8 / 17) are `cursor_values`'. Not inlined: its 2 KB
+    /// histogram (`scope_meas::compute_codes`) must not join the frame of
+    /// `run` (main.rs; tools/stack-depth headroom), where CH1's already is.
+    #[inline(never)]
     pub(super) fn ch2_meas(&self, f: &scope::Frame) -> crate::scope_meas::Results {
         let none = crate::scope_meas::Results { v: [f32::NAN; 20] };
         if !self.ch2.on || self.scope.wave_on() || f.cols.is_some() || f.data.len() < 2 {
