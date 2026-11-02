@@ -218,6 +218,70 @@ impl Store {
         crate::clock::HCLK_HZ as f32 / self.period
     }
 
+    /// DWT time of stored sample `j` (its anchor segment, linear between
+    /// anchors; after the newest anchor its segment's slope): None outside
+    /// the store.
+    fn time_of(&self, j: u64) -> Option<u32> {
+        let n = self.nanc.min(NANCH);
+        let oldest = self.tot.saturating_sub(CAP as u64);
+        if n == 0 || j < oldest || j >= self.tot {
+            return None;
+        }
+        let per = |a: (u64, u32), b: (u64, u32)| {
+            let dt = b.1.wrapping_sub(a.1) as i32;
+            if b.0 > a.0 && dt > 0 { dt as f64 / (b.0 - a.0) as f64 } else { self.period as f64 }
+        };
+        let (mut hi_i, mut hi_t) = self.anc_k(0);
+        if j >= hi_i {
+            let p = if n >= 2 { per(self.anc_k(1), (hi_i, hi_t)) } else { self.period as f64 };
+            return Some(hi_t.wrapping_add(((j - hi_i) as f64 * p) as u32));
+        }
+        for k in 1..n {
+            let (lo_i, lo_t) = self.anc_k(k);
+            if lo_i < oldest {
+                return None;
+            }
+            if j >= lo_i {
+                let p = per((lo_i, lo_t), (hi_i, hi_t));
+                return Some(lo_t.wrapping_add(((j - lo_i) as f64 * p) as u32));
+            }
+            (hi_i, hi_t) = (lo_i, lo_t);
+        }
+        None
+    }
+
+    /// Trigger on CH2 (scope.rs `ch2_next`): the first stored sample taken
+    /// in DWT [t0, t1) where the signal crosses `level` (SI) in the edge's
+    /// direction (the sample before it on the other side), and the DWT time
+    /// up to which the store has been searched (the newest sample's when
+    /// it ends before t1: the rest is searched once it is in).
+    pub fn crossing(&self, t0: u32, t1: u32, level: f32, rising: bool) -> (Option<u32>, u32) {
+        if self.tot == 0 || self.nanc == 0 {
+            return (None, t0);
+        }
+        let oldest = self.tot.saturating_sub(CAP as u64);
+        let a = match self.index_at(t0) {
+            Some(a) => (a.max(oldest as f64) as u64).max(oldest),
+            None => oldest,
+        };
+        let b = self.index_at(t1).map_or(self.tot, |b| (b.max(0.0) as u64).min(self.tot));
+        let mut prev: Option<f32> = None;
+        for j in a..b {
+            let v = self.si(self.codes[(j % CAP as u64) as usize]);
+            if let Some(p) = prev {
+                let hit = if rising { p < level && v >= level } else { p > level && v <= level };
+                if hit {
+                    if let Some(t) = self.time_of(j) {
+                        return (Some(t), t);
+                    }
+                }
+            }
+            prev = Some(v);
+        }
+        let end = if b >= self.tot { self.time_of(self.tot - 1).map_or(t0, |t| t) } else { t1 };
+        (None, end)
+    }
+
     /// The samples [ia, ib) as a measurement source (`scope_meas::
     /// compute_codes`): codes re-quantized to 1..=1022 over their min..max
     /// (inside the 10-bit histogram, never "clipped"), with the SI of code

@@ -1368,7 +1368,7 @@ Open the Trigger tab: tap the trigger in the top bar, or **MF**, then **Trigger*
 | **Edge** | Rising, Falling. |
 | **Mode** | **Auto** (shows the signal also without a trigger), **Normal** (waits for a trigger), **Single** (one frame, then STOP). Choosing a mode also starts the scope. |
 | **Type** | **Edge**, **Pulse**, **Runt**. |
-| **Source** | **CH1**, or **GEN**: the generator's own output. |
+| **Source** | **CH1**, **GEN**: the generator's own output, or **DMM**: the multimeter channel (CH2). |
 
 
 | ![The Trigger tab](img/scope-trig-tab.png) | ![Pulse: wider than 400 µs](img/scope-trig-pulse.png) |
@@ -1395,6 +1395,14 @@ the trigger badge turns cyan. Useful when the circuit's response to the
 generator is on CH1 and too noisy or too small to trigger on. With the
 generator off, nothing triggers (Auto still shows frames). SCPI
 `TRIGger:SOURce GENerator`.
+
+**Source DMM** triggers on the multimeter channel ([CH2 (DMM)](#display-settings)):
+the level is read on CH2's scale (the T marker against the magenta trace;
+the badge shows it in CH2's unit and turns magenta), and moving CH2 with
+its **2** marker moves the level with it. It is an edge trigger, searched
+in CH2's samples (at most 38.4 k samples/s), so the trigger point is as
+exact as one CH2 sample. With CH2 off, nothing triggers (Auto still shows
+frames). SCPI `TRIGger:SOURce CHANnel2`.
 
 ![Runt trigger: the second level, the orange T](img/scope-trig-runt.png)
 

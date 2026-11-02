@@ -5515,11 +5515,15 @@ impl App {
                 Some(())
             }
             C::TrigSource(Some(t)) => {
-                sc.tsrc = t.min(scope::TSRC_GEN);
+                sc.tsrc = t.min(scope::TSRC_CH2);
                 None
             }
             C::TrigSource(None) => {
-                out.put_bytes(if sc.tsrc == scope::TSRC_GEN { b"GEN" } else { b"CHAN1" });
+                out.put_bytes(match sc.tsrc {
+                    scope::TSRC_GEN => b"GEN",
+                    scope::TSRC_CH2 => b"CHAN2",
+                    _ => b"CHAN1",
+                });
                 Some(())
             }
             C::GenScale(Some(v)) => {

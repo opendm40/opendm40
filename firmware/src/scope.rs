@@ -358,7 +358,10 @@ pub struct Settings {
 /// `Settings::tsrc` values.
 pub const TSRC_CH1: u8 = 0;
 pub const TSRC_GEN: u8 = 1;
-pub const TSRC_NAMES: [&str; 2] = ["CH1", "GEN"];
+/// The DMM channel (CH2, scope_ch2.rs): its stored samples searched for
+/// the edge, the level on CH2's scale (`ch2_level`).
+pub const TSRC_CH2: u8 = 2;
+pub const TSRC_NAMES: [&str; 3] = ["CH1", "GEN", "DMM"];
 
 /// Ticks of the 200 MHz timer clock the generator's output reaches the
 /// MCX samples later than its timers say (DAC settling, the output and
@@ -607,6 +610,8 @@ pub struct Scope {
     /// The DMM CH2 is shown (docs/scope-gen-channel.md section 2): every
     /// record needs its time (`rec_time`), the comparator is off.
     pub ch2_on: bool,
+    /// CH2's position (app_ch2 `Ch2::pos`): its trigger level's zero row.
+    pub ch2_pos: i16,
     /// The acquisition in flight: DWT count of its sample 0 (None: a
     /// comparator record, the wave view) and DWT cycles per sample; the
     /// stored record's (BUF[0]).
@@ -973,6 +978,7 @@ impl Scope {
             gen_trace: false,
             gen_vdiv: 255,
             ch2_on: false,
+            ch2_pos: 0,
             t_s0: None,
             t_step: 1.0,
             stored_t0: None,
@@ -1713,6 +1719,8 @@ impl Scope {
         let data = self.rec_view();
         let trig = if self.gen_src() {
             self.gen_next(lo as u64).map(|t| t as usize).filter(|&t| t <= pre + win)
+        } else if self.ch2_src() {
+            self.ch2_next(lo as u64, (pre + win + 1) as u64).0.map(|t| t as usize)
         } else if self.s.ttype != 0 { self.find_soft(data, lo, pre + win) } else { self.find_trigger(data.sub(lo, pre + win)).map(|i| i + lo) };
         let show = match (trig, self.s.mode) {
             (Some(_), _) => true,
@@ -1802,7 +1810,7 @@ impl Scope {
             // GEN: the trigger is computed (edge only); the GEN trace needs
             // every record's phase, which a comparator stop does not give.
             let gen = self.gen_src() || self.gen_trace;
-            let soft = self.s.ttype != 0 && !self.gen_src();
+            let soft = self.s.ttype != 0 && !self.gen_src() && !self.ch2_src();
             let hw = self.hw.available() && !self.rolling && !soft && !gen && !self.ch2_on;
             // Software trigger at low rates: circular record searched while
             // it is written (stream_poll).
@@ -1937,6 +1945,33 @@ impl Scope {
     /// The trigger source is the generator (MCX records only).
     fn gen_src(&self) -> bool {
         self.s.tsrc == TSRC_GEN && !self.wave
+    }
+
+    /// The trigger source is the DMM channel (MCX records with CH2 shown).
+    fn ch2_src(&self) -> bool {
+        self.s.tsrc == TSRC_CH2 && !self.wave && self.ch2_on
+    }
+
+    /// The trigger level on CH2's scale (SI): the trigger row read at the
+    /// CH2 V/div and position (the right-edge T marker against the CH2
+    /// trace).
+    pub fn ch2_level(&self) -> f32 {
+        let vd = crate::scope_ch2::store().scale().vdiv;
+        (140 + self.ch2_pos as i32 - self.s.trig_row) as f32 * 4.0 * vd / 141.0
+    }
+
+    /// CH2 trigger: the first sample index (absolute, of the acquisition in
+    /// flight) in [n0, n1) at CH2's crossing of `ch2_level`, and the index
+    /// up to which CH2's samples have been searched (its store lags the
+    /// acquisition by the stream's latency).
+    fn ch2_next(&self, n0: u64, n1: u64) -> (Option<u64>, u64) {
+        let Some(s0) = self.t_s0 else { return (None, n0) };
+        let s = self.t_step as f64;
+        let t = |n: u64| s0.wrapping_add((n as f64 * s) as u64 as u32);
+        let (t0, t1) = (t(n0), t(n1));
+        let (hit, upto) = crate::scope_ch2::store().crossing(t0, t1, self.ch2_level(), self.s.rising);
+        let idx = |d: u32| n0 + ((d.wrapping_sub(t0) as i32).max(0) as f64 / s) as u64;
+        (hit.map(idx).filter(|&n| n < n1), idx(upto).clamp(n0, n1))
     }
 
     /// The generator against the record in flight, when still valid.
@@ -2523,9 +2558,18 @@ impl Scope {
                     self.st_found = Some(t);
                 }
             }
+            if self.ch2_src() {
+                // CH2's samples up to its store's newest one; the rest at
+                // the next poll (no CH1 scan).
+                let (hit, upto) = self.ch2_next(self.st_scan, wr);
+                self.st_found = hit;
+                self.st_scan = hit.unwrap_or(upto).max(self.st_scan);
+                self.st_idx = (self.st_scan % cap as u64) as usize;
+            }
             let l = self.trig_code();
             let rising = self.s.rising;
-            let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, if self.gen_src() { wr } else { self.st_scan });
+            let (mut i, mut armed, mut n) = (self.st_idx, self.st_armed, if self.gen_src() || self.ch2_src() { wr } else { self.st_scan });
+            let keep = self.ch2_src();
             while n < wr {
                 let v = ring_at(i, n) as i32;
                 let hit = if rising {
@@ -2553,7 +2597,9 @@ impl Scope {
                     break;
                 }
             }
-            (self.st_idx, self.st_armed, self.st_scan) = (i, armed, n);
+            if !keep {
+                (self.st_idx, self.st_armed, self.st_scan) = (i, armed, n);
+            }
         }
         let Some(t) = self.st_found else {
             if self.untrig_ok() && now >= self.deadline && wr >= self.screen as u64 {

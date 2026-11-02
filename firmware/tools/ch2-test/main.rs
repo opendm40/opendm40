@@ -108,6 +108,7 @@ fn main() {
     }
     fails += holes(&mut r);
     fails += meas(&mut r);
+    fails += cross(&mut r);
     let rate = edge as f64 / some.max(1) as f64;
     println!("ch2-test: {cols} columns, {some} with samples, {edge} at a rounding edge ({:.4} %), {fails} failed", rate * 100.0);
     if fails > 0 || rate > 0.01 || some < cols / 4 {
@@ -203,6 +204,67 @@ fn meas(r: &mut Rng) -> u64 {
         }
     }
     println!("ch2-test: 300 measurement runs, {fails} failed");
+    fails
+}
+
+/// Store::crossing (the CH2 trigger source): a sine of known period on a
+/// random rate / start / DWT origin; the first crossing found in a window
+/// is the first true one in it, to within a sample (rising and falling);
+/// a level outside the swing finds none, and the search reaches the
+/// window's end (or the newest sample).
+fn cross(r: &mut Rng) -> u64 {
+    let mut fails = 0;
+    for case in 0..300 {
+        let fs = [1200u32, 2400, 4800, 9600, 38_400][r.below(5) as usize];
+        let c0 = r.next();
+        scope_ch2::set_lag_us(0);
+        let st = scope_ch2::store();
+        // SI = raw code (b = 512 per stored code step of 8 raw: si(c) ~ 8c).
+        let sc = WaveScale { a: 0.0, b: 1.0, vdiv: 1.0, amps: false, ac: false };
+        st.reset(c0, fs, sc);
+        let per_us = 1e6 / fs as f64;
+        let n = 500 + r.below(3000) as u64;
+        let period = 20.0 + r.below(200) as f64; // samples
+        let amp = 20_000.0;
+        let ph = r.below(1000) as f64 / 1000.0;
+        let raw_at = |k: f64| (amp * (2.0 * std::f64::consts::PI * (k / period + ph)).sin()) as i32;
+        for k in 0..n {
+            st.push((k as f64 * per_us) as u32, raw_at(k as f64) * 8);
+        }
+        let si = |c: i32| sc.a + sc.b * ((c * 8 + 4) as f32 + 512.0 * 512.0 - 256.0) / 512.0;
+        let rising = case % 2 == 0;
+        let lvl_raw = (r.below(20_000) as i32) - 10_000;
+        let level = si(lvl_raw);
+        let k0 = (n.saturating_sub(4096) + r.below(200) as u64) as f64;
+        let k1 = n as f64 - 1.0 - r.below(100) as f64;
+        let cyc = |k: f64| c0.wrapping_add((k * per_us * 200.0) as u32);
+        let (hit, upto) = st.crossing(cyc(k0), cyc(k1), level, rising);
+        // The first sample j in (k0, k1) with the sample before on the other side.
+        let v = |k: u64| si(raw_at(k as f64));
+        let mut want = None;
+        let mut j = k0.ceil() as u64 + 1;
+        while (j as f64) < k1 {
+            let (p, q) = (v(j - 1), v(j));
+            if if rising { p < level && q >= level } else { p > level && q <= level } {
+                want = Some(j);
+                break;
+            }
+            j += 1;
+        }
+        let got = hit.map(|t| t.wrapping_sub(c0) as f64 / 200.0 / per_us);
+        let ok = match (want, got) {
+            (Some(w), Some(g)) => (g - w as f64).abs() <= 1.01,
+            (None, None) => upto.wrapping_sub(cyc(k1)) as i32 >= -(per_us * 200.0 * 2.0) as i32,
+            _ => false,
+        };
+        if !ok {
+            fails += 1;
+            if fails <= 10 {
+                println!("FAIL cross case {case}: fs {fs} n {n} period {period} rising {rising} level {level} want {want:?} got {got:?}");
+            }
+        }
+    }
+    println!("ch2-test: 300 crossing searches, {fails} failed");
     fails
 }
 
