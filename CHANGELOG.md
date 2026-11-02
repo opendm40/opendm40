@@ -5,7 +5,7 @@ User-facing changes of opendm40 per release. The release workflow
 section named after the tag as the release notes; how to cut a release:
 [firmware/README.md, Releasing](firmware/README.md#releasing).
 
-## Unreleased
+## v0.4.0 (2026-11-02)
 
 ### New
 
