@@ -693,6 +693,10 @@ impl Avg {
 // 0.39 C per 0.1 ohm on a PT100 (0.039 C on a PT1000, negligible for NTCs);
 // trim it with the per-sensor offset (or REL).
 
+/// The largest ohm null (ohm): a lead pair, not a resistor (Resistor
+/// Settings "Null" takes the reading only up to this).
+pub const OHM_NULL_MAX: f32 = 10.0;
+
 /// Short sensor names (SCPI CONF:TEMP <name>, SENS:TEMP:TRAN?).
 pub const T_NAMES: [&str; 7] = ["TCK", "PT100", "PT1000", "NTC10K3950", "NTC10K3435", "NTC100K3950", "NTCUSER"];
 // Test sources shown on the DMM page (`test_current`).
@@ -2094,6 +2098,10 @@ pub struct Dmm {
     /// RES:NEG; `poll_ohm`): the factory offset subtracted without the
     /// stock clamp at 0, so shorted leads read e.g. -0.028 ohm.
     pub ohm_neg: bool,
+    /// Ohm null (Resistor Settings "Null", settings p[11] bits 16..31 in
+    /// mohm; `poll_ohm`): the test leads' resistance in ohm, taken off every
+    /// ohm reading of r0..r6, independent of REL. 0 = off.
+    ohm_null: f32,
     /// The experimental 600 Mohm range (r7, `poll_ohm600`).
     pub o6: Ohm600,
 }
@@ -2723,6 +2731,7 @@ impl Dmm {
             tr: tr::tr_static(),
             burden_show: false,
             ohm_neg: false,
+            ohm_null: 0.0,
             o6: Ohm600::NEW,
         }
     }
@@ -3804,6 +3813,18 @@ impl Dmm {
             self.mode = 255;
             self.select(clk, 15);
         }
+    }
+
+    /// The ohm null in ohm (0 = off; `ohm_null` field).
+    pub fn ohm_null(&self) -> f32 {
+        self.ohm_null
+    }
+
+    /// Set the ohm null (ohm; 0 = off), 0..OHM_NULL_MAX in whole mohm (the
+    /// settings word's unit).
+    pub fn set_ohm_null(&mut self, ohm: f32) {
+        let o = if ohm.is_finite() { ohm.clamp(0.0, OHM_NULL_MAX) } else { 0.0 };
+        self.ohm_null = (o * 1000.0 + 0.5) as u32 as f32 * 1e-3;
     }
 
     /// Offset of sensor `k` in C (TC: applied to the cold junction).
@@ -5896,6 +5917,14 @@ impl Dmm {
             }
         }
         let kohm = if self.ohm_neg { kneg } else { kohm };
+        // Ohm null: the leads' resistance off (after the range logic, which
+        // works on what the jack sees); below 0 only as `ohm_neg` allows.
+        let kohm = if self.ohm_null > 0.0 {
+            let k = kohm - self.ohm_null * 1e-3;
+            if self.ohm_neg { k } else { k.max(0.0) }
+        } else {
+            kohm
+        };
         // Stock formats (r < 2: x1000 ohm, fmt r + 1): r0 60.000 ohm.
         let (v, dec, unit) = match r {
             0 | 1 => (kohm * 1000.0, 3 - r as u8, "\u{3a9}"),

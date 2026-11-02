@@ -600,6 +600,14 @@ or mA range, an overload moves the meter to the 10 A shunt and shows
 - While the meter looks for the range, the values are grey.
 - **600MΩ experimental** (range page only, never AUTO): a reading per ~2 s,
   no accuracy spec. After power-up leave the leads open once: it learns its own leakage.
+- **Null** (range page, beside 600MΩ experimental): the resistance of your
+  test leads, taken off every reading. Short the leads, wait for a steady
+  reading, tap **Null**: the button shows the value (for example **Null
+  0.123 Ω**) and the multimeter page shows **NULL** after the test current.
+  Tap it again to switch it off. Up to 10 Ω; not on 600 MΩ. It is
+  independent of REL (both can be on) and is kept in the settings, also
+  over a power-off, so the same leads need it only once. Below 0 Ω only
+  with **Negative ohm** ON.
 
 
 | ![4.7 kΩ](img/dmm-ohm.png) | ![The range page with 0.28 mA on](img/range-ohm.png) |
