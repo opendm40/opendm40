@@ -36,7 +36,7 @@ frame shows its waveform.
 ![2 mV/div](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/mv-div.png)
 
 **Drag as on a Rigol DHO800/900.** Drag a marker to move it; anywhere else,
-sideways moves the trigger position and up / down the selected trace.
+sideways moves the trigger position and up / down the selected item.
 
 ![Drag zones on the scope page](https://raw.githubusercontent.com/opendm40/opendm40/v0.4.0/docs/changelog/v0.4.0/drag.png)
 
@@ -93,7 +93,12 @@ the README and the manual in Russian.
 Copy `dm40_opendm40_v0.4.0.bin` from the assets below onto the meter's USB
 disk and switch the meter off and on; see
 [Install](https://github.com/opendm40/opendm40/blob/v0.4.0/docs/manual/README.md#install)
-in the manual. Back up `INFO/` from the meter's disk after the first start.
+in the manual. After the first start, copy `INFO/` and `DEBUG/SPIFLASH.BIN`
+from the meter's USB disk to your PC: the calibration and boot data cannot
+be rebuilt
+([Back up your meter](https://github.com/opendm40/opendm40/blob/v0.4.0/docs/manual/README.md#back-up-your-meter)).
+A bad file cannot brick the meter: the update loader takes a good one
+([Backup, recovery and back to stock](https://github.com/opendm40/opendm40/blob/v0.4.0/docs/manual/README.md#backup-recovery-and-back-to-stock)).
 To try a change before the next release, each open pull request has a
 **Test build** comment with its update file.
 
