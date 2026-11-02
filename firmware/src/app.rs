@@ -2035,6 +2035,7 @@ impl App {
             let pv = self.meter.live().and_then(|r| r.power).filter(|_| self.dmm.pw.on);
             // The power meter never shows the DMM column (MAX / AVG / REL /
             // MIN), also not before its first reading ("I ranging...", #96).
+            self.chart_cache.wave = self.wave_avail();
             ui::chart(&mut self.chart_cache, &self.chart[..self.chart_n], self.chart_dec, self.chart_rate, if self.dmm.pw.on { None } else { Some(&side) }, self.chart_unit, rc);
             if let Some(pv) = pv {
                 ui::pw::side(&mut self.dmm_view.pwc, &pv);
@@ -2359,9 +2360,10 @@ impl App {
     /// chart rate) continues the multimeter after a power-off too: the
     /// function and coupling, the AUTO / AUTO+ choices, a fixed V / A / ohm
     /// range, rate and smoothing, the trend
-    /// timebase. Not AutoHold, the limits, REL or HOLD (as the stock: they
-    /// change what the readout shows, unnoticed after a power-on), nor the
-    /// scope, the power meter's settings or the Record page.
+    /// timebase, and the scope's acquisition, trigger, math and
+    /// measurements (owner 2026-11-02). Not AutoHold, the limits, REL or
+    /// HOLD (as the stock: they change what the readout shows, unnoticed
+    /// after a power-on), nor the power meter's settings or the Record page.
     fn restore(&mut self, rec: &crate::persist::Record, same_session: bool, clk: &mut Clock) {
         let p = &rec.words;
         self.mode_remember = p[crate::persist::W_DMM_EXT] & crate::meter::EXT_MODE_REMEMBER != 0;
@@ -2378,7 +2380,7 @@ impl App {
         self.scope.roll = self.roll;
         self.rails_both = p[11] & 1 != 0;
         self.sp_restore(p[1], p[11]);
-        if same_session {
+        if cont {
             self.sp_restore_ext(&p[crate::persist::W_SCOPE_EXT..]);
         }
         let mut o = [0i16; 7];
@@ -2471,7 +2473,9 @@ impl App {
             *c = *w as i32;
         }
         app_touchtest::tc_restore(tc);
-        if !same_session {
+        // The scope's acquisition, trigger, math and measurements: as the
+        // multimeter, kept after a power-off with Mode Remember ON.
+        if !cont {
             return;
         }
         let mut sc = self.scope.s;
@@ -3959,6 +3963,8 @@ impl App {
                     self.resolution_cycle(now);
                 } else if ui::rate_chip_hit(x, y) {
                     self.rate_cycle(now);
+                } else if self.wave_avail() && ui::wave_chip_hit(x, y) {
+                    self.wave_open(clk);
                 } else if x < ui::CHART_X && ui::chart_rows().contains(&y) {
                     self.chart_rate = ui::trend_next(self.chart_rate);
                     self.chart_n = 0;

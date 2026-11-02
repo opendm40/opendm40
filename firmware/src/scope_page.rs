@@ -1556,14 +1556,9 @@ impl App {
             Gesture::LongPress(p) if su::panel_hit(p.x, p.y) == Some(3 * su::BLK_DMM) => {
                 if app_wave::WAVE_BUILD && self.view == View::Scope && !self.scope.wave_on() {
                     self.beep(now, 30);
-                    if crate::hy3131::streaming() {
-                        // A logger session (or the inrush capture) owns
-                        // the HY3131: no Wave view (wave_open, region C,
-                        // would also step the DMM range under the stream).
-                        self.toast(now, "Wave: data logger running", false);
-                    } else {
-                        self.wave_open(clk);
-                    }
+                    // (A logger session or the inrush capture: refused
+                    // there; CH2's stream is taken over.)
+                    self.wave_open(clk);
                 }
                 Some(true)
             }
