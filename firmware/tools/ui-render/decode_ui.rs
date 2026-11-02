@@ -586,7 +586,7 @@ pub fn manual(ck: &mut Checker, out: &str, save1: &dyn Fn(&str, &str)) {
     let modbus = dc::Cfg { proto: dc::P_UART, baud: 19200, fmt: 1, inverted: false };
     scene(ck, "manual/scope-decode", &ub, 20.0, uart, 6.0, 0.30, false, false, false);
     save1(out, "scope-decode");
-    scene(ck, "manual/scope-decode-modbus", &mb, 20.0, modbus, 30.0, 0.17, false, true, false);
+    scene(ck, "manual/scope-decode-modbus", &mb, 20.0, modbus, 13.0, 0.0, false, true, false);
     save1(out, "scope-decode-modbus");
     log_screen(ck, "manual/scope-decode-log", true);
     save1(out, "scope-decode-log");

@@ -1627,9 +1627,9 @@ UART распознаёт кадры Modbus RTU по CRC и показывает
 
 ![Вкладка Decode](img/scope-decode-tab.png)
 
-| ![UART: hex и символ в каждом прямоугольнике](img/scope-decode.png) | ![UART с кадрами Modbus RTU после STOP: запрос, ответ](img/scope-decode-modbus.png) |
+| ![UART: hex и символ в каждом прямоугольнике](img/scope-decode.png) | ![UART с кадром Modbus RTU после STOP: запрос](img/scope-decode-modbus.png) |
 |---|---|
-| UART: hex и символ в каждом прямоугольнике | UART с кадрами Modbus RTU после STOP |
+| UART: hex и символ в каждом прямоугольнике | UART с кадром Modbus RTU после STOP |
 
 - **Mode**: **Band** (под осциллограммой) или **Log**: список всех кадров,
   пока идёт поток с входа (до 115200 бод). Нажатие на кадр — его

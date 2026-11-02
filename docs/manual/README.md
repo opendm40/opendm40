@@ -1583,9 +1583,9 @@ decoded capture.
 
 ![The Decode tab](img/scope-decode-tab.png)
 
-| ![UART: hex and the character in each box](img/scope-decode.png) | ![UART with Modbus RTU frames, stopped: request, reply](img/scope-decode-modbus.png) |
+| ![UART: hex and the character in each box](img/scope-decode.png) | ![UART with a Modbus RTU frame, stopped: a request](img/scope-decode-modbus.png) |
 |---|---|
-| UART: hex and the character in each box | UART with Modbus RTU frames, stopped |
+| UART: hex and the character in each box | UART with a Modbus RTU frame, stopped |
 
 - **Mode**: **Band** (under the trace) or **Log**: a list of every frame
   while the input streams, for as long as it runs (up to 115200 baud). Tap
